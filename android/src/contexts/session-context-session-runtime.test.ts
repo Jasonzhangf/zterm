@@ -215,7 +215,7 @@ describe('scheduleReconnectRuntime', () => {
     vi.useRealTimers();
   });
 
-  it('keeps reconnect enabled for a visible live pane even when it is not the interactive active session', () => {
+  it('keeps retryable reconnect out of terminal error projection for a visible live pane', () => {
     vi.useFakeTimers();
     const reconnectRuntimesRef = {
       current: new Map<string, any>(),
@@ -261,7 +261,7 @@ describe('scheduleReconnectRuntime', () => {
 
     expect(reconnectRuntimesRef.current.has('session-2')).toBe(true);
     expect(updateSessionSync).toHaveBeenCalled();
-    expect(emitSessionStatus).toHaveBeenCalledWith('session-2', 'error', 'visible-pane-stale');
+    expect(emitSessionStatus).not.toHaveBeenCalled();
     expect(startReconnectAttempt).toHaveBeenCalledWith('session-2');
     vi.useRealTimers();
   });

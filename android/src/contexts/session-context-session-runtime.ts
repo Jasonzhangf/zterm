@@ -547,7 +547,6 @@ export function scheduleReconnectRuntime(options: {
     options.sessionId,
     buildSessionReconnectingFailureUpdates(options.message, reconnectRuntime.attempt),
   );
-  options.emitSessionStatus(options.sessionId, 'error', options.message);
   options.startReconnectAttempt(options.sessionId);
 }
 
