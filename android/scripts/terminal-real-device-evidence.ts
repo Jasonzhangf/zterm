@@ -5,6 +5,11 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { extractApkSmokeBridgeDebugTargetFromStorageDump } from '../src/lib/android-apk-smoke-device-bridge-target';
 import { buildApkSmokeLevelDbListArgs, parseApkSmokeLevelDbFileList } from '../src/lib/android-apk-smoke-leveldb-files';
+import {
+  filterApkSmokeRuntimeSnapshot,
+  resolveApkSmokeSnapshotActiveSessionId,
+  selectFreshApkSmokeSnapshotRecord,
+} from '../src/lib/android-apk-smoke-runtime-freshness';
 import { extractApkSmokePrintableAsciiLines } from '../src/lib/android-apk-smoke-printable-dump';
 import { resolveApkSmokeWebViewLevelDbDirFromRunAsListing } from '../src/lib/android-apk-smoke-webview-leveldb-path';
 import { detectRuntimeSequenceAnomalies, parseRuntimeSequenceEntries } from '../src/lib/runtime-debug-sequence';
@@ -35,6 +40,7 @@ function run(command: string, args: string[], cwd = ROOT_DIR, encoding: BufferEn
   return execFileSync(command, args, {
     cwd,
     encoding: encoding === 'buffer' ? undefined : encoding,
+    maxBuffer: 64 * 1024 * 1024,
     stdio: ['ignore', 'pipe', 'pipe'],
   });
 }
@@ -133,26 +139,62 @@ function timestamp() {
 function ensureInteractiveDevice(serial: string) {
   adbText(serial, ['shell', 'input', 'keyevent', 'KEYCODE_WAKEUP']);
   adbText(serial, ['shell', 'wm', 'dismiss-keyguard']);
+  adbText(serial, ['shell', 'cmd', 'statusbar', 'collapse']);
   adbText(serial, ['shell', 'input', 'keyevent', '82']);
+  adbText(serial, ['shell', 'cmd', 'statusbar', 'collapse']);
   adbText(serial, ['shell', 'input', 'swipe', '600', '2200', '600', '800']);
+  adbText(serial, ['shell', 'cmd', 'statusbar', 'collapse']);
   sleep(1000);
 }
 
 function waitForForeground(serial: string, timeoutMs: number) {
   const deadline = Date.now() + timeoutMs;
   let lastDump = '';
+  let lastWindowDump = '';
   while (Date.now() <= deadline) {
+    adbText(serial, ['shell', 'cmd', 'statusbar', 'collapse']);
     lastDump = adbText(serial, ['shell', 'dumpsys', 'activity', 'activities']);
-    if (
+    const activityResumed = (
       /ResumedActivity: .*com\.zterm\.android\/\.MainActivity/m.test(lastDump)
       || /topResumedActivity=.*com\.zterm\.android\/\.MainActivity/m.test(lastDump)
       || /mFocusedApp=.*com\.zterm\.android\/\.MainActivity/m.test(lastDump)
-    ) {
-      return lastDump;
+    );
+    const activityWindowFocused = (
+      /mCurrentFocus=.*com\.zterm\.android\/com\.zterm\.android\.MainActivity/m.test(lastDump)
+      || /mFocusedWindow=.*com\.zterm\.android\/com\.zterm\.android\.MainActivity/m.test(lastDump)
+      || /mFocusedApp=.*com\.zterm\.android\/\.MainActivity/m.test(lastDump)
+    );
+    const windowDump = captureWindowDump(serial);
+    lastWindowDump = windowDump;
+    const notificationShadeFocused = (
+      /mCurrentFocus=.*NotificationShade/m.test(windowDump)
+      || /mCurrentFocus=.*NotificationShade/m.test(lastDump)
+      || /mFocusedWindow=.*NotificationShade/m.test(windowDump)
+      || /mFocusedWindow=.*NotificationShade/m.test(lastDump)
+    );
+    const windowFocused = (
+      activityWindowFocused
+      || /mCurrentFocus=.*com\.zterm\.android\/com\.zterm\.android\.MainActivity/m.test(windowDump)
+      || /mFocusedWindow=.*com\.zterm\.android\/com\.zterm\.android\.MainActivity/m.test(windowDump)
+      || /mFocusedApp=.*com\.zterm\.android\/\.MainActivity/m.test(windowDump)
+      || /ime(?:Layering|Input|Control)Target.*com\.zterm\.android\/com\.zterm\.android\.MainActivity/m.test(windowDump)
+      || (/topApp=.*com\.zterm\.android\/\.MainActivity/m.test(windowDump) && !notificationShadeFocused)
+    );
+    if (activityResumed && windowFocused) {
+      return `${lastDump}\n\n--- window ---\n${windowDump}`;
     }
     sleep(400);
   }
-  fail(`app not foreground within ${timeoutMs}ms\n${lastDump}`);
+  const lockedOrSleeping = (
+    /isSleeping=true/m.test(lastDump)
+    || /KeyguardShowing=true/m.test(lastWindowDump)
+    || /AodShowing=true/m.test(lastWindowDump)
+    || /mCurrentFocus=.*NotificationShade/m.test(lastWindowDump)
+  );
+  if (lockedOrSleeping) {
+    fail(`app not foreground within ${timeoutMs}ms: device is locked/sleeping or NotificationShade owns focus`);
+  }
+  fail(`app not foreground within ${timeoutMs}ms`);
 }
 
 function capturePng(serial: string) {
@@ -237,6 +279,21 @@ async function fetchJson(url: URL) {
   }
 }
 
+function filterRuntimeSnapshotForDevice(snapshot: Record<string, unknown>, deviceModel: string) {
+  const records = Array.isArray(snapshot.clientDebugSnapshots) ? snapshot.clientDebugSnapshots : [];
+  if (!deviceModel.trim()) {
+    return snapshot;
+  }
+  return {
+    ...snapshot,
+    clientDebugSnapshots: records.filter((record) => (
+      typeof record === 'object'
+      && record !== null
+      && JSON.stringify((record as { snapshot?: unknown }).snapshot || {}).includes(deviceModel)
+    )),
+  };
+}
+
 async function collectRuntime(remote: { bridgeHost: string; bridgePort: number; authToken?: string; sessionId?: string | null }) {
   const baseUrl = new URL(`http://${remote.bridgeHost}:${remote.bridgePort}`);
   const healthUrl = new URL('/health', baseUrl);
@@ -300,10 +357,30 @@ function inputMethodVisible(dump: string) {
     || /mIsInputViewShown=true/m.test(dump);
 }
 
+function assertAppSurfaceVisible(uiDump: string, windowDump: string, stage: string) {
+  const keyguardVisible = (
+    /package="com\.android\.systemui"/m.test(uiDump)
+    && /keyguard|kgd_|pinColorNumericKeyboard|设备已锁定|密码栏/u.test(uiDump)
+  ) || /KeyguardShowing=true|AodShowing=true|mCurrentFocus=.*NotificationShade|mFocusedWindow=.*NotificationShade/m.test(windowDump);
+  if (keyguardVisible) {
+    fail(`app surface not visible at ${stage}: device keyguard/SystemUI owns the screen`);
+  }
+  const appVisible = (
+    /package="com\.zterm\.android"/m.test(uiDump)
+    || /com\.zterm\.android\/com\.zterm\.android\.MainActivity/m.test(windowDump)
+    || /ime(?:Layering|Input|Control)Target.*com\.zterm\.android\/com\.zterm\.android\.MainActivity/m.test(windowDump)
+  );
+  if (!appVisible) {
+    fail(`app surface not visible at ${stage}: zterm package not found in UI/window evidence`);
+  }
+}
+
 async function main() {
   const options = parseCli(process.argv.slice(2));
   const serial = resolveSerial(options.serial);
   const apkPath = resolveApkPath(options.apkPath);
+  const smokeStartedAt = new Date().toISOString();
+  const deviceModel = adbText(serial, ['shell', 'getprop', 'ro.product.model']);
   const evidenceDir = resolve(ROOT_DIR, 'evidence', 'real-device', timestamp());
   mkdirSync(evidenceDir, { recursive: true });
 
@@ -323,6 +400,7 @@ async function main() {
   if (/^Error:/m.test(startOutput) || !/Status:\s+ok/m.test(startOutput)) {
     fail(`apk start failed\n${startOutput}`);
   }
+  adbText(serial, ['shell', 'cmd', 'statusbar', 'collapse']);
   const activityDump = waitForForeground(serial, 10_000);
   const center = resolveDisplayCenter(serial);
 
@@ -330,6 +408,7 @@ async function main() {
   const beforeImeUi = captureUiDump(serial);
   const beforeImeInputMethod = captureInputMethodDump(serial);
   const beforeImeWindow = captureWindowDump(serial);
+  assertAppSurfaceVisible(beforeImeUi, beforeImeWindow, 'before-ime');
 
   adbText(serial, ['shell', 'input', 'tap', String(center.centerX), String(center.centerY)]);
   sleep(1200);
@@ -337,6 +416,7 @@ async function main() {
   const afterImeUi = captureUiDump(serial);
   const afterImeInputMethod = captureInputMethodDump(serial);
   const afterImeWindow = captureWindowDump(serial);
+  assertAppSurfaceVisible(afterImeUi, afterImeWindow, 'after-ime');
 
   adbText(serial, ['shell', 'input', 'text', INPUT_SAMPLE]);
   sleep(400);
@@ -349,15 +429,33 @@ async function main() {
   }
 
   const baselineRuntime = await collectRuntime(storageTarget.target);
+  baselineRuntime.snapshot = filterRuntimeSnapshotForDevice(
+    filterApkSmokeRuntimeSnapshot(baselineRuntime.snapshot, smokeStartedAt) as Record<string, unknown>,
+    deviceModel,
+  );
+  const snapshotSessionId = resolveApkSmokeSnapshotActiveSessionId(
+    selectFreshApkSmokeSnapshotRecord(baselineRuntime.snapshot, smokeStartedAt),
+  );
+  const evidenceSessionId = storageTarget.target.sessionId || snapshotSessionId || null;
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   let finalRuntime = baselineRuntime;
-  let finalEvidence = extractInputEvidence(baselineRuntime.logs, storageTarget.target.sessionId || null);
+  let finalActiveSessionId = evidenceSessionId;
+  let finalEvidence = extractInputEvidence(baselineRuntime.logs, evidenceSessionId);
 
   while (Date.now() <= deadline) {
     finalRuntime = await collectRuntime(storageTarget.target);
-    finalEvidence = extractInputEvidence(finalRuntime.logs, storageTarget.target.sessionId || null);
+    finalRuntime.snapshot = filterRuntimeSnapshotForDevice(
+      filterApkSmokeRuntimeSnapshot(finalRuntime.snapshot, smokeStartedAt) as Record<string, unknown>,
+      deviceModel,
+    );
+    const currentSnapshotSessionId = resolveApkSmokeSnapshotActiveSessionId(
+      selectFreshApkSmokeSnapshotRecord(finalRuntime.snapshot, smokeStartedAt),
+    );
+    finalActiveSessionId = storageTarget.target.sessionId || currentSnapshotSessionId || evidenceSessionId;
+    finalEvidence = extractInputEvidence(finalRuntime.logs, finalActiveSessionId);
     if (
-      finalEvidence.checks.clientInputSend
+      finalActiveSessionId
+      && finalEvidence.checks.clientInputSend
       && finalEvidence.checks.bufferApplied
       && finalEvidence.checks.renderCommit
     ) {
@@ -392,14 +490,20 @@ async function main() {
   writeFileSync(resolve(evidenceDir, 'runtime-logs.json'), `${JSON.stringify(finalRuntime.logs, null, 2)}\n`);
   writeFileSync(resolve(evidenceDir, 'timeline.txt'), `${timeline}\n`);
 
+  finalActiveSessionId = storageTarget.target.sessionId || resolveApkSmokeSnapshotActiveSessionId(
+    selectFreshApkSmokeSnapshotRecord(finalRuntime.snapshot, smokeStartedAt),
+  ) || null;
   const summary = {
-    ok: finalEvidence.checks.clientInputSend
+    ok: Boolean(finalActiveSessionId)
+      && finalEvidence.checks.clientInputSend
       && finalEvidence.checks.bufferApplied
       && finalEvidence.checks.renderCommit
       && finalEvidence.checks.noLocalTruthAnomaly,
     serial,
     apkPath,
-    activeSessionId: storageTarget.target.sessionId || null,
+    activeSessionId: finalActiveSessionId,
+    smokeStartedAt,
+    deviceModel,
     bridgeHost: storageTarget.target.bridgeHost,
     bridgePort: storageTarget.target.bridgePort,
     inputSample: INPUT_SAMPLE,
@@ -417,6 +521,9 @@ async function main() {
 
   writeFileSync(resolve(evidenceDir, 'summary.json'), `${JSON.stringify(summary, null, 2)}\n`);
   process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+  if (!summary.ok) {
+    fail(`terminal real-device evidence failed: activeSessionId=${summary.activeSessionId || 'null'} checks=${JSON.stringify(summary.runtimeChecks)}`);
+  }
 }
 
 main().catch((error) => {
