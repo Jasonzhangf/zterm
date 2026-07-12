@@ -30,7 +30,7 @@ describe('terminal live performance scheduler', () => {
     expect(resolveTerminalLiveSyncDelay(input()).delayMs).toBe(16);
   });
 
-  it('keeps idle mirrors on idle cadence even when callers request active cadence', () => {
+  it('keeps subscribed mirrors on active cadence even when live content has not changed recently', () => {
     const result = resolveTerminalLiveSyncDelay(input({
       requestedDelayMs: 33,
       now: 10_000,
@@ -42,9 +42,9 @@ describe('terminal live performance scheduler', () => {
       lastCanonicalizeDurationMs: 4,
     }));
 
-    expect(result.lane).toBe('slow');
-    expect(result.delayMs).toBe(120);
-    expect(result.reason).toBe('idle');
+    expect(result.lane).toBe('fast');
+    expect(result.delayMs).toBe(16);
+    expect(result.reason).toBe('subscribed-good-transport-low-capture-cost');
   });
 
   it('slows down when transport buffered bytes show backpressure', () => {

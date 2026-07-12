@@ -221,7 +221,8 @@ function normalizeRequestedMissingRanges(
       startIndex: Math.max(startIndex, Math.min(endIndex, Math.floor(range?.startIndex || 0))),
       endIndex: Math.max(startIndex, Math.min(endIndex, Math.floor(range?.endIndex || 0))),
     }))
-    .filter((range) => range.endIndex > range.startIndex);
+    .filter((range) => range.endIndex > range.startIndex)
+    .sort((left, right) => left.startIndex - right.startIndex || left.endIndex - right.endIndex);
 }
 
 function buildBufferSyncPayload(
@@ -278,7 +279,8 @@ export function buildChangedRangesBufferSyncPayload(
       startIndex: Math.max(availableStartIndex, Math.min(availableEndIndex, Math.floor(range?.startIndex || 0))),
       endIndex: Math.max(availableStartIndex, Math.min(availableEndIndex, Math.floor(range?.endIndex || 0))),
     }))
-    .filter((range) => range.endIndex > range.startIndex);
+    .filter((range) => range.endIndex > range.startIndex)
+    .sort((left, right) => left.startIndex - right.startIndex || left.endIndex - right.endIndex);
 
   if (normalizedRanges.length === 0) {
     return null;
@@ -286,12 +288,12 @@ export function buildChangedRangesBufferSyncPayload(
 
   const requestStartIndex = normalizedRanges[0]!.startIndex;
   const requestEndIndex = normalizedRanges[normalizedRanges.length - 1]!.endIndex;
-  const indexedLines = normalizedRanges.flatMap((range) => sliceIndexedLines(
+  const indexedLines = sliceIndexedLines(
     mirror.bufferStartIndex,
     mirror.bufferLines,
-    range.startIndex,
-    range.endIndex,
-  ));
+    requestStartIndex,
+    requestEndIndex,
+  );
 
   return buildBufferSyncPayload(mirror, requestStartIndex, requestEndIndex, indexedLines);
 }
@@ -332,15 +334,18 @@ export function buildRequestedRangeBufferPayload(
     requestStartIndex,
     requestEndIndex,
   );
-  const requestedRanges = requestedMissingRanges.length > 0
-    ? requestedMissingRanges
-    : [{ startIndex: requestStartIndex, endIndex: requestEndIndex }];
-  const indexedLines = requestedRanges.flatMap((range) => sliceIndexedLines(
+  const requestedSpan = requestedMissingRanges.length > 0
+    ? {
+        startIndex: requestedMissingRanges[0]!.startIndex,
+        endIndex: requestedMissingRanges[requestedMissingRanges.length - 1]!.endIndex,
+      }
+    : { startIndex: requestStartIndex, endIndex: requestEndIndex };
+  const indexedLines = sliceIndexedLines(
     mirror.bufferStartIndex,
     mirror.bufferLines,
-    range.startIndex,
-    range.endIndex,
-  ));
+    requestedSpan.startIndex,
+    requestedSpan.endIndex,
+  );
 
-  return buildBufferSyncPayload(mirror, requestStartIndex, requestEndIndex, indexedLines);
+  return buildBufferSyncPayload(mirror, requestedSpan.startIndex, requestedSpan.endIndex, indexedLines);
 }

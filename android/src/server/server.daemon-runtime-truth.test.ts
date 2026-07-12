@@ -54,7 +54,8 @@ describe('server daemon runtime truth gates', () => {
 
     expect(source).toContain('export function resolveTmuxBinary()');
     expect(authBlock).toContain("new URL(rawUrl || '/', 'ws://localhost')");
-    expect(heartbeatBlock).toContain("connection.transport.close('heartbeat timeout')");
+    expect(heartbeatBlock).toContain('heartbeat missed pong');
+    expect(heartbeatBlock).not.toContain("connection.transport.close('heartbeat timeout')");
     expect(heartbeatBlock).toContain('connection.transport.ping?.()');
     expect(shutdownBlock).toContain('deps.shutdownTerminalSessions(deps.sessions, reason)');
     expect(shutdownBlock).toContain('deps.destroyMirror(mirror, reason, {');

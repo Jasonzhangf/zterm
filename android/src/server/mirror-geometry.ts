@@ -33,7 +33,7 @@ export function resolveAttachGeometry(input: {
     || { ...DEFAULT_TERMINAL_SESSION_VIEWPORT };
   const requested = normalizeGeometry(input.requestedGeometry);
   return {
-    cols: requested ? Math.min(requested.cols, baseline.cols) : baseline.cols,
+    cols: requested ? requested.cols : baseline.cols,
     rows: baseline.rows,
   };
 }

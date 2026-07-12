@@ -19,7 +19,6 @@ export interface TerminalControlRuntime {
   runTmux: (args: string[]) => { ok: true; stdout: string };
   runTmuxAsync: (args: string[]) => Promise<{ ok: true; stdout: string }>;
   runCommand: (command: string, args: string[]) => ReturnType<typeof spawnSync>;
-  ensureTmuxSessionAlternateScreenDisabled: (sessionName: string) => void;
   writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean) => void;
   ensureTmuxServerRunning: () => void;
   writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean) => boolean;
@@ -195,14 +194,6 @@ export function createTerminalControlRuntime(
         console.warn(`[terminal-control] tmux new-session: ${message}`);
       }
     }
-  }
-
-
-  function ensureTmuxSessionAlternateScreenDisabled(sessionName: string) {
-    if (deps.wezTermBackend) {
-      return;
-    }
-    runTmux(['set-option', '-t', sessionName, 'alternate-screen', 'off']);
   }
 
   function writeToTmuxSession(sessionName: string, payload: string, appendEnter: boolean) {
@@ -477,7 +468,6 @@ export function createTerminalControlRuntime(
     ensureTmuxServerRunning,
     runTmuxAsync,
     runCommand,
-    ensureTmuxSessionAlternateScreenDisabled,
     writeToTmuxSession,
     writeToLiveMirror,
     enqueueLiveMirrorInput,

@@ -1840,3 +1840,11 @@ Need runtime debug to confirm:
 - 根因：session enter / explicit resume 的 `buffer-head` 可能早于 renderer visible range；旧逻辑要么等 visible range，要么把 cache window 当 fetch window，容易造成进入 session 看不到旧 buffer 或拉隐藏历史。另一个边界是 head-only cursor/head metadata 可能触发 body repaint，造成旧 body 闪一下。
 - 修复：active head-before-visible 时由 buffer owner 直接按 daemon head bounds bootstrap 当前 tail body sync；无 visible range 的非 active body pull 只 skip。`buffer-head` 只更新 metadata，不触发正文 render commit。tail/reading repair 均收窄到当前 visible window；sparse tail jump 后按 follow/reading 语义发 visible repair。
 - 验证：`session-sync-helpers.test.ts` + `session-context-buffer-runtime.test.ts` 2 files / 99 tests PASS；shared `terminal-buffer.test.ts` + `buffer-sync-request-planner.test.ts` 2 files / 20 tests PASS；`test:feature-registry` 7 files / 45 tests PASS；`tsc --noEmit` PASS。
+
+## 2026-07-12 daemon backend mirror owner closeout
+
+- 架构映射：本轮属于 daemon/backend/mirror resource slice，涉及 `resource.terminal_backend -> resource.backend_session -> resource.tmux_session/wezterm_pane -> resource.mirror_store`，以及 `resource.daemon_input_queue -> resource.backend_session`。唯一 live mirror 内容/尺寸 owner 是 backend capture/readback。
+- 修复：`terminal-mirror-runtime.ts` 不再在 attach/resize/adaptive lease/debug/startup 路径自写 `mirror.rows/cols/bufferStartIndex/bufferLines/cursor`；`terminal-mirror-capture.ts` 增加稳定 window 判定，允许 `top/vim` 等动态 TUI 在窗口稳定但内容变化时发布最新帧。
+- 修复：删除 daemon session existence check 中的 `ensureTmuxSessionAlternateScreenDisabled()` 副作用；daemon 检查/镜像/debug probe 只读 tmux truth，不改用户 tmux option。
+- 修复：`buffer-sync-contract.ts` 对 missing/changed ranges 排序，并返回连续 authoritative span；`terminal-message-runtime.ts` 对 async connect payload failure 显式返回 `connect_payload_invalid`。
+- 验证：daemon owner gates 7 files / 96 tests PASS；Android `tsc --noEmit` PASS；feature/resource gates 7 files / 45 tests PASS；`daemon:mirror:close-loop` 8 cases PASS，summary `android/evidence/daemon-mirror/2026-07-12/summary.json`；MemPalace mine/search PASS。

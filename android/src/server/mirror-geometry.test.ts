@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_TERMINAL_SESSION_VIEWPORT, resolveAttachGeometry } from './mirror-geometry';
 
 describe('resolveAttachGeometry', () => {
-  it('only lets client request narrow the upstream width and never overwrite tmux rows', () => {
+  it('uses requested adaptive width and never overwrites tmux rows', () => {
     expect(resolveAttachGeometry({
       requestedGeometry: { cols: 120, rows: 36 },
       currentMirrorGeometry: { cols: 132, rows: 40 },
@@ -11,13 +11,13 @@ describe('resolveAttachGeometry', () => {
     })).toEqual({ cols: 120, rows: 40 });
   });
 
-  it('does not let client widen upstream width beyond the authoritative baseline', () => {
+  it('allows requested adaptive width to widen beyond the current baseline', () => {
     expect(resolveAttachGeometry({
       requestedGeometry: { cols: 200, rows: 12 },
       currentMirrorGeometry: { cols: 132, rows: 40 },
       existingTmuxGeometry: { cols: 140, rows: 44 },
       previousSessionGeometry: { cols: 80, rows: 24 },
-    })).toEqual({ cols: 132, rows: 40 });
+    })).toEqual({ cols: 200, rows: 40 });
   });
 
   it('reuses the current connected mirror geometry when the client omits rows/cols', () => {

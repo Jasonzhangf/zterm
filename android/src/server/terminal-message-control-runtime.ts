@@ -46,7 +46,7 @@ export interface TerminalMessageControlRuntimeDeps {
   handleAdaptiveResize?: (
     session: TerminalTransportSubscriber,
     payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' },
-  ) => { ok: true } | { ok: false; code: 'session_not_ready'; message: string };
+  ) => { ok: true } | { ok: false; code: 'session_not_ready' | 'adaptive_width_cols_invalid'; message: string };
   destroyMirror: (
     mirror: SessionMirror,
     reason: string,

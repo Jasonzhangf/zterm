@@ -116,11 +116,8 @@ export function createTerminalDaemonRuntime(
         }
 
         if (!connection.wsAlive) {
-          console.warn(`[${deps.logTimePrefix()}] transport ${connection.id} heartbeat timeout`);
-          connection.transport.close('heartbeat timeout');
-          continue;
+          console.warn(`[${deps.logTimePrefix()}] transport ${connection.id} heartbeat missed pong`);
         }
-
         connection.wsAlive = false;
         try {
           connection.transport.ping?.();

@@ -100,7 +100,7 @@ export interface TerminalRuntime {
   handleAdaptiveResize: (
     subscriber: TerminalTransportSubscriber,
     payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' },
-  ) => { ok: true } | { ok: false; code: 'session_not_ready'; message: string };
+  ) => { ok: true } | { ok: false; code: 'session_not_ready' | 'adaptive_width_cols_invalid'; message: string };
   restorePersistedAdaptiveWidthBaselines: (sessionNames: string[]) => number;
   refreshAdaptiveWidthLeaseHeartbeat: (subscriber: TerminalTransportSubscriber) => void;
   handleInput: (subscriber: TerminalTransportSubscriber, data: string, shouldWrite?: () => boolean) => Promise<boolean>;

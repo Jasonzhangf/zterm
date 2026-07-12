@@ -705,3 +705,11 @@ tmux truth
 
 ## 2026-06-01 iTerm2-style split correction
 - 多 pane / split 需求不得再按 flat horizontal panes 验收；正确真源是 split tree（leaf pane + row/column split node + ratio）。Mac packaged smoke 也必须验证横/竖嵌套 split 可见和分隔线可拖拽，而不是仅看到多个列。
+
+## 2026-07-12 daemon mirror/backend resource closeout rules
+
+- Daemon mirror truth is backend capture/readback only. `mirror.rows`, `mirror.cols`, `mirror.bufferStartIndex`, `mirror.bufferLines`, and `mirror.cursor` may be assigned only by the capture apply owner; attach, resize, adaptive lease, startup, and debug/read paths must not self-write these fields from request geometry or pane metrics.
+- `adaptive-phone` remains tmux reflow, not client layout: client reports measured cols, the daemon adaptive lease owner may request `resize-window -x`, then tmux/WezTerm capture updates mirror truth. The lease owner must not write mirror geometry directly.
+- Daemon existence checks, mirror capture, and debug probes are read-only with respect to user tmux options. Do not write `alternate-screen`, `window-size`, or other tmux options outside the narrow adaptive lease release owner.
+- A `buffer-sync` response is one continuous authoritative span. If a request has multiple `missingRanges` or changed ranges, sort them and return the full span from first start to last end; current client sparse apply must not receive holey payloads.
+- Dynamic TUI capture stabilization should publish when the authoritative window/geometry is stable even if line contents continue changing. Do not require byte-identical consecutive frames for `top`, `vim`, or similar live screens.

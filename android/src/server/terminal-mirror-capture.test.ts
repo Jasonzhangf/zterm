@@ -195,7 +195,6 @@ describe('terminal mirror capture runtime', () => {
     const readSnapshot = vi
       .fn()
       .mockResolvedValueOnce(unstable)
-      .mockResolvedValueOnce(stable)
       .mockResolvedValueOnce(stable);
 
     const result = await resolveStableMirrorCaptureSnapshot({
@@ -203,10 +202,10 @@ describe('terminal mirror capture runtime', () => {
       maxAttempts: 4,
     });
 
-    expect(readSnapshot).toHaveBeenCalledTimes(3);
+    expect(readSnapshot).toHaveBeenCalledTimes(2);
     expect(result.stabilized).toBe(true);
-    expect(result.stabilizedAgainst).toBe('consecutive-capture');
-    expect(result.attempts).toBe(3);
+    expect(result.stabilizedAgainst).toBe('consecutive-window');
+    expect(result.attempts).toBe(2);
     expect(result.snapshot).toEqual(stable);
   });
 
@@ -296,9 +295,39 @@ describe('terminal mirror capture runtime', () => {
     const changed = await runtime.captureMirrorAuthoritativeBufferFromTmux(mirror);
 
     expect(changed).toBe(true);
-    expect(captureIndex).toBe(3);
+    expect(captureIndex).toBe(2);
     expect(mirror.bufferLines.map(rowText)).toEqual(['stable-status', '']);
     expect(mirror.pendingStableCaptureSnapshot).toBeNull();
+  });
+
+  it('publishes the latest dynamic TUI frame when the authoritative window is stable but content keeps changing', async () => {
+    const snapshots = ['cpu 10', 'cpu 20', 'cpu 30'].map((text) => ({
+      rows: 24,
+      cols: 80,
+      cursorKeysApp: false,
+      lastScrollbackCount: 0,
+      bufferStartIndex: 100,
+      bufferLines: [row(text), row('stable-footer')],
+      cursor: null,
+      capturedLineCount: 2,
+      canonicalLineCount: 2,
+      totalAvailableLines: 102,
+      visibleTopIndex: 100,
+    }));
+    const readSnapshot = vi
+      .fn()
+      .mockResolvedValueOnce(snapshots[0])
+      .mockResolvedValueOnce(snapshots[1])
+      .mockResolvedValueOnce(snapshots[2]);
+
+    const result = await resolveStableMirrorCaptureSnapshot({
+      readSnapshot,
+      maxAttempts: 4,
+    });
+
+    expect(readSnapshot).toHaveBeenCalledTimes(2);
+    expect(result.stabilizedAgainst).toBe('consecutive-window');
+    expect(result.snapshot).toEqual(snapshots[1]);
   });
 
   it('keeps the mirror tail anchor monotonic when alternate-screen capture reports only the visible pane', async () => {
@@ -359,26 +388,26 @@ describe('terminal mirror capture runtime', () => {
         cols: 80,
         cursorKeysApp: false,
         lastScrollbackCount: 0,
-        bufferStartIndex: 100,
+        bufferStartIndex: 101,
         bufferLines: [row('b')],
         cursor: null,
         capturedLineCount: 1,
         canonicalLineCount: 1,
-        totalAvailableLines: 101,
-        visibleTopIndex: 100,
+        totalAvailableLines: 102,
+        visibleTopIndex: 101,
       })
       .mockResolvedValueOnce({
         rows: 24,
         cols: 80,
         cursorKeysApp: false,
         lastScrollbackCount: 0,
-        bufferStartIndex: 100,
+        bufferStartIndex: 102,
         bufferLines: [row('c')],
         cursor: null,
         capturedLineCount: 1,
         canonicalLineCount: 1,
-        totalAvailableLines: 101,
-        visibleTopIndex: 100,
+        totalAvailableLines: 103,
+        visibleTopIndex: 102,
       });
 
     await expect(resolveStableMirrorCaptureSnapshot({

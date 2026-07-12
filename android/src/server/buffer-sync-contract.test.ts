@@ -71,7 +71,7 @@ describe('buildRequestedRangeBufferPayload', () => {
     });
   });
 
-  it('builds daemon-owned sparse diff payload from changed mirror ranges only', () => {
+  it('builds daemon-owned changed span payload without leaving holes between ranges', () => {
     const payload = buildChangedRangesBufferSyncPayload(
       createMirror(['row-100', 'row-101', 'row-102', 'row-103']),
       [
@@ -88,7 +88,26 @@ describe('buildRequestedRangeBufferPayload', () => {
       availableEndIndex: 104,
       cursorKeysApp: false,
     });
-    expect(payload?.lines.map((line) => ('i' in line ? line.i : line.index))).toEqual([101, 103]);
+    expect(payload?.lines.map((line) => ('i' in line ? line.i : line.index))).toEqual([101, 102, 103]);
+  });
+
+  it('normalizes unordered changed ranges before building a continuous changed span', () => {
+    const payload = buildChangedRangesBufferSyncPayload(
+      createMirror(['row-100', 'row-101', 'row-102', 'row-103']),
+      [
+        { startIndex: 103, endIndex: 104 },
+        { startIndex: 101, endIndex: 102 },
+      ],
+    );
+
+    expect(payload).toMatchObject({
+      revision: 7,
+      startIndex: 101,
+      endIndex: 104,
+      availableStartIndex: 100,
+      availableEndIndex: 104,
+    });
+    expect(payload?.lines.map((line) => ('i' in line ? line.i : line.index))).toEqual([101, 102, 103]);
   });
 
   it('returns the requested range as buffer-sync payload', () => {
@@ -105,6 +124,52 @@ describe('buildRequestedRangeBufferPayload', () => {
       availableEndIndex: 103,
     });
     expect(payload.lines.map((line) => ('i' in line ? line.i : line.index))).toEqual([100, 101, 102]);
+  });
+
+  it('returns a complete authoritative missing-range span instead of a sparse window with holes', () => {
+    const payload = buildRequestedRangeBufferPayload(
+      createMirror(['row-100', 'row-101', 'row-102', 'row-103', 'row-104', 'row-105']),
+      createRequest({
+        requestStartIndex: 100,
+        requestEndIndex: 106,
+        missingRanges: [
+          { startIndex: 101, endIndex: 102 },
+          { startIndex: 104, endIndex: 105 },
+        ],
+      }),
+    );
+
+    expect(payload).toMatchObject({
+      revision: 7,
+      startIndex: 101,
+      endIndex: 105,
+      availableStartIndex: 100,
+      availableEndIndex: 106,
+    });
+    expect(payload.lines.map((line) => ('i' in line ? line.i : line.index))).toEqual([101, 102, 103, 104]);
+  });
+
+  it('normalizes unordered missing ranges before building the complete authoritative span', () => {
+    const payload = buildRequestedRangeBufferPayload(
+      createMirror(['row-100', 'row-101', 'row-102', 'row-103', 'row-104', 'row-105']),
+      createRequest({
+        requestStartIndex: 100,
+        requestEndIndex: 106,
+        missingRanges: [
+          { startIndex: 104, endIndex: 105 },
+          { startIndex: 101, endIndex: 102 },
+        ],
+      }),
+    );
+
+    expect(payload).toMatchObject({
+      revision: 7,
+      startIndex: 101,
+      endIndex: 105,
+      availableStartIndex: 100,
+      availableEndIndex: 106,
+    });
+    expect(payload.lines.map((line) => ('i' in line ? line.i : line.index))).toEqual([101, 102, 103, 104]);
   });
 
   it('keeps buffer lines raw and sends cursor separately as metadata', () => {

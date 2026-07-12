@@ -119,6 +119,24 @@ function mirrorCaptureSnapshotsEqual(
   return true;
 }
 
+function mirrorCaptureSnapshotWindowEqual(
+  left: ResolvedMirrorCaptureSnapshot,
+  right: ResolvedMirrorCaptureSnapshot,
+) {
+  return (
+    left.rows === right.rows
+    && left.cols === right.cols
+    && left.cursorKeysApp === right.cursorKeysApp
+    && left.lastScrollbackCount === right.lastScrollbackCount
+    && left.bufferStartIndex === right.bufferStartIndex
+    && left.bufferLines.length === right.bufferLines.length
+    && left.capturedLineCount === right.capturedLineCount
+    && left.canonicalLineCount === right.canonicalLineCount
+    && left.totalAvailableLines === right.totalAvailableLines
+    && left.visibleTopIndex === right.visibleTopIndex
+  );
+}
+
 function currentMirrorMatchesSnapshot(
   mirror: SessionMirror,
   snapshot: ResolvedMirrorCaptureSnapshot,
@@ -181,6 +199,14 @@ export async function resolveStableMirrorCaptureSnapshot(options: {
         attempts: attempt,
         stabilized: true,
         stabilizedAgainst: 'consecutive-capture' as const,
+      };
+    }
+    if (mirrorCaptureSnapshotWindowEqual(previousSnapshot, nextSnapshot)) {
+      return {
+        snapshot: nextSnapshot,
+        attempts: attempt,
+        stabilized: true,
+        stabilizedAgainst: 'consecutive-window' as const,
       };
     }
     previousSnapshot = nextSnapshot;

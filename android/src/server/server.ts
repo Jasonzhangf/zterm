@@ -172,7 +172,6 @@ const terminalRuntime = createTerminalRuntime({
       return;
     }
     terminalControlRuntime.runTmux(['has-session', '-t', sessionName]);
-    terminalControlRuntime.ensureTmuxSessionAlternateScreenDisabled(sessionName);
   },
   captureMirrorAuthoritativeBufferFromTmux: terminalMirrorCapture.captureMirrorAuthoritativeBufferFromTmux,
   mirrorBufferChanged: (mirror, previousStartIndex, previousLines) => findChangedIndexedRanges({

@@ -183,7 +183,7 @@ describe('terminal runtime detached transport cleanup', () => {
 
     runtime.detachSubscriberTransportOnly(session, 'websocket closed', connection.transportId);
 
-    expect(runTmux).not.toHaveBeenCalledWith(['set-window-option', '-t', 'demo', 'window-size', 'latest']);
+    expect(runTmux).not.toHaveBeenCalledWith(['set-window-option', '-u', '-t', 'demo', 'window-size']);
     expect(mirror.cols).toBe(56);
     expect(mirror.rows).toBe(24);
     expect(mirror.baselineCols).toBe(56);
@@ -191,7 +191,7 @@ describe('terminal runtime detached transport cleanup', () => {
     expect(mirror).not.toHaveProperty('adaptiveCols');
   });
 
-  it('detaches adaptive subscribers and restores the pre-lease tmux geometry', () => {
+  it('detaches adaptive subscribers by releasing tmux width ownership without self-writing mirror geometry', () => {
     const { runtime, mirrors, runTmux } = createDeps();
     const connection = createTransportConnection('transport-1');
     const session = runtime.createTransportSubscriber(connection);
@@ -231,9 +231,10 @@ describe('terminal runtime detached transport cleanup', () => {
 
     runtime.detachSubscriberTransportOnly(session, 'websocket closed', connection.transportId);
 
-    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '120', '-y', '40']);
-    expect(mirror.cols).toBe(120);
-    expect(mirror.rows).toBe(40);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '120']);
+    expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', 'demo', 'window-size']);
+    expect(mirror.cols).toBe(55);
+    expect(mirror.rows).toBe(24);
     expect(session.adaptiveWidthCols).toBeNull();
   });
 });

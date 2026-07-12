@@ -148,15 +148,27 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(runtimeTypesSource).not.toContain('adaptiveCols:');
     expect(mirrorRuntimeSource).not.toContain('session.widthMode');
     expect(mirrorRuntimeSource).not.toContain('mirror.adaptiveCols');
-    expect(mirrorRuntimeSource).not.toContain("runTmux(['set-window-option', '-t', mirror.sessionName, 'window-size', 'latest']");
     expect(mirrorRuntimeSource).not.toContain('function applyAdaptiveColsToTmuxMirror');
-    expect(mirrorRuntimeSource).toContain('function applyTmuxWindowGeometryToSession');
-    const leaseResizeBlock = extractBlock(mirrorRuntimeSource, 'function applyTmuxWindowGeometryToSession', 900);
-    expect(leaseResizeBlock).toContain("const args = ['resize-window', '-t', sessionName");
-    expect(leaseResizeBlock).toContain('deps.runTmux(args)');
-    const mirrorRuntimeOutsideLeaseOwner = mirrorRuntimeSource.replace(leaseResizeBlock, '');
-    expect(mirrorRuntimeOutsideLeaseOwner).not.toContain("runTmux(['resize-window'");
-    expect(mirrorRuntimeOutsideLeaseOwner).not.toContain("deps.runTmux(['resize-window'");
+    expect(mirrorRuntimeSource).not.toContain('function applyTmuxWindowGeometryToSession');
+    expect(mirrorRuntimeSource).not.toContain('function releaseTmuxWindowSizePolicyToLatest');
+    expect(mirrorRuntimeSource).toContain('function clearAdaptiveWidthLeaseAggregate');
+    expect(mirrorRuntimeSource).toContain('function applyAdaptiveTmuxWidth');
+    expect(mirrorRuntimeSource).toContain('function releaseAdaptiveTmuxWidth');
+    const reconcileLeaseBlock = extractBlock(mirrorRuntimeSource, 'function reconcileAdaptiveWidthLeases', 2200);
+    expect(reconcileLeaseBlock).not.toContain('mirror.cols = targetCols');
+    expect(reconcileLeaseBlock).not.toContain('writeMirrorBaselineGeometry(mirror, {');
+    const applyAdaptiveBlock = extractBlock(mirrorRuntimeSource, 'function applyAdaptiveTmuxWidth', 1800);
+    const releaseAdaptiveBlock = extractBlock(mirrorRuntimeSource, 'function releaseAdaptiveTmuxWidth', 1800);
+    expect(applyAdaptiveBlock).toContain("deps.runTmux(['resize-window'");
+    expect(releaseAdaptiveBlock).toContain("deps.runTmux(['resize-window'");
+    expect(releaseAdaptiveBlock).toContain("'window-size'");
+    const runtimeWithoutAdaptiveOwnerBlocks = mirrorRuntimeSource
+      .replace(applyAdaptiveBlock, '')
+      .replace(releaseAdaptiveBlock, '');
+    expect(runtimeWithoutAdaptiveOwnerBlocks).not.toContain("runTmux(['resize-window'");
+    expect(runtimeWithoutAdaptiveOwnerBlocks).not.toContain("deps.runTmux(['resize-window'");
+    expect(runtimeWithoutAdaptiveOwnerBlocks).not.toContain("'window-size'");
+    expect(mirrorRuntimeSource).not.toContain('@zterm_adaptive_width_');
   });
 
   it('only destroys mirror truth on explicit tmux kill or daemon shutdown', () => {
@@ -258,6 +270,16 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(source).not.toContain('mirror.ptyProcess.resize(');
     expect(controlRuntimeSource).toContain("runTmux(['send-keys'");
     expect(controlRuntimeSource).not.toContain("runTmux(['resize-window'");
+  });
+
+  it('does not mutate tmux alternate-screen while checking or mirroring sessions', () => {
+    const serverSource = readServerSource();
+    const controlSource = readFileSync(join(process.cwd(), 'src', 'server', 'terminal-control-runtime.ts'), 'utf8');
+
+    expect(serverSource).not.toContain('ensureTmuxSessionAlternateScreenDisabled');
+    expect(controlSource).not.toContain('ensureTmuxSessionAlternateScreenDisabled');
+    expect(controlSource).not.toContain("runTmux(['set-option', '-t', sessionName, 'alternate-screen', 'off'])");
+    expect(controlSource).not.toMatch(/set-(?:window-)?option['"][\s\S]*alternate-screen/);
   });
 
   it('never implicitly creates a missing tmux session during attach; explicit creation stays on tmux-create-session only', () => {

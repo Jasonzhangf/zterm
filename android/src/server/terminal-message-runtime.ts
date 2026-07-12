@@ -250,7 +250,15 @@ export function createTerminalMessageRuntime(
         try {
           const serverSession = handleSessionTransportConnect(connection, message.payload);
           if (serverSession) {
-            void deps.controlRuntimeDeps.attachTmux(serverSession, message.payload);
+            void deps.controlRuntimeDeps.attachTmux(serverSession, message.payload).catch((error: unknown) => {
+              deps.sendTransportMessage(connection.transport, {
+                type: 'error',
+                payload: {
+                  message: error instanceof Error ? error.message : 'Invalid connect payload',
+                  code: 'connect_payload_invalid',
+                },
+              });
+            });
           }
         } catch (error) {
           deps.sendTransportMessage(connection.transport, {

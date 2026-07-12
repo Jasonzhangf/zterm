@@ -28,8 +28,6 @@ const FAST_LANE_MIN_DELAY_MS = 8;
 const BACKPRESSURE_BUFFERED_BYTES = 128 * 1024;
 const OVERLOADED_CAPTURE_MS = 120;
 const SLOW_CAPTURE_MS = 64;
-const RECENT_PROGRESS_MS = 1500;
-
 function finiteMs(value: number | undefined, fallback: number) {
   return Number.isFinite(value) ? Math.max(0, Math.floor(value || 0)) : fallback;
 }
@@ -103,18 +101,17 @@ export function resolveTerminalLiveSyncDelay(
     };
   }
 
-  const recentlyActive = input.lastLiveActivityAt > 0 && input.now - input.lastLiveActivityAt <= RECENT_PROGRESS_MS;
-  if (recentlyActive && requestedDelayMs <= activeDelayMs && bufferedBytes === 0) {
+  if (requestedDelayMs <= activeDelayMs && bufferedBytes === 0) {
     return {
       delayMs: Math.min(activeDelayMs, FAST_LANE_DELAY_MS),
       lane: 'fast',
-      reason: 'good-transport-low-capture-cost',
+      reason: 'subscribed-good-transport-low-capture-cost',
     };
   }
 
   return {
-    delayMs: recentlyActive ? Math.min(requestedDelayMs, activeDelayMs) : idleDelayMs,
-    lane: recentlyActive ? 'normal' : 'slow',
-    reason: recentlyActive ? 'normal-active' : 'idle',
+    delayMs: Math.min(requestedDelayMs, activeDelayMs),
+    lane: 'normal',
+    reason: 'subscribed-active',
   };
 }

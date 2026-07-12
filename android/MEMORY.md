@@ -872,3 +872,11 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - `buffer-head` cursor/head metadata may update local metadata truth, but it must not schedule body render commits. Only `buffer-sync apply` is allowed to repaint terminal body rows.
 - Tail refresh and reading repair requests are scoped to the current visible window; hidden cache rows are retention, not fetch target. Sparse tail jumps must request visible tail repair without reinterpreting reading position as follow.
 - Regression gates: `session-context-buffer-runtime.test.ts`, `session-sync-helpers.test.ts`, shared `terminal-buffer.test.ts`, and `buffer-sync-request-planner.test.ts` cover active head-before-visible bootstrap, no head-only body repaint, visible-window tail refresh, stale/lower revision drops, and sparse tail repair.
+
+## 2026-07-12 Daemon mirror truth only comes from backend capture
+
+- Resource boundary: daemon may send real protocol requests to tmux/WezTerm, including input and adaptive `resize-window -x` from the single adaptive lease owner, but daemon must not predict request results into mirror truth.
+- Hard owner rule: `mirror.rows`, `mirror.cols`, `mirror.bufferStartIndex`, `mirror.bufferLines`, and `mirror.cursor` are written only by backend capture/readback owner `terminal-mirror-capture.ts` through `applyMirrorCaptureSnapshot()`. `attachTmux`, resize/adaptive lease reconcile/release, debug probes, and startup paths must not self-write mirror content or geometry.
+- Session existence and mirror/debug reads must not mutate user tmux options. `ensureTmuxSessionAlternateScreenDisabled()` was physically removed from daemon control/server paths; future checks must not write `alternate-screen` or other window/session options.
+- Buffer-sync contract: multi-gap `missingRanges` / changed ranges must be sorted and returned as one continuous authoritative span, or a future typed protocol must emit multiple independent continuous windows. Holey payloads preserve stale rows in client sparse buffer.
+- Verification: daemon owner tests `7 files / 96 tests` passed; `test:feature-registry` `7 files / 45 tests` passed; `tsc --noEmit` passed; `daemon:mirror:close-loop` passed all 8 strict replay cases at `android/evidence/daemon-mirror/2026-07-12/summary.json`; MemPalace search hit this phrase.
