@@ -52,6 +52,8 @@ describe('server transport runtime truth gates', () => {
     expect(wsBlock).toContain('ws.close(1000, reason)');
     expect(sendBlock).toContain("message.type === 'buffer-sync' || message.type === 'connected'");
     expect(sendBlock).toContain("deps.daemonRuntimeDebug('send'");
+    expect(sendBlock).toContain('payloadSummary: deps.summarizePayload(message)');
+    expect(sendBlock).not.toContain('payload: deps.summarizePayload(message)');
     expect(connectionBlock).toContain('transportId: uuidv4()');
     expect(connectionBlock).toContain("role: 'pending'");
   });

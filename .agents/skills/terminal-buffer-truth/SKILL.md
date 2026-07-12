@@ -713,3 +713,8 @@ tmux truth
 - Daemon existence checks, mirror capture, and debug probes are read-only with respect to user tmux options. Do not write `alternate-screen`, `window-size`, or other tmux options outside the narrow adaptive lease release owner.
 - A `buffer-sync` response is one continuous authoritative span. If a request has multiple `missingRanges` or changed ranges, sort them and return the full span from first start to last end; current client sparse apply must not receive holey payloads.
 - Dynamic TUI capture stabilization should publish when the authoritative window/geometry is stable even if line contents continue changing. Do not require byte-identical consecutive frames for `top`, `vim`, or similar live screens.
+
+## 2026-07-12 debug channel observe-only rule
+
+- Runtime debug is metadata observation only. Never pass raw business `payload` into daemon debug storage or logs; use explicit `payloadSummary` built by the owner summarizer.
+- Debug sanitizer must ignore arbitrary `payload` fields, including terminal rows and input text. If a new debug scope needs details, add an allowlisted scalar or summary field and a red test proving raw payload is not stored.

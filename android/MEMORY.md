@@ -880,3 +880,9 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - Session existence and mirror/debug reads must not mutate user tmux options. `ensureTmuxSessionAlternateScreenDisabled()` was physically removed from daemon control/server paths; future checks must not write `alternate-screen` or other window/session options.
 - Buffer-sync contract: multi-gap `missingRanges` / changed ranges must be sorted and returned as one continuous authoritative span, or a future typed protocol must emit multiple independent continuous windows. Holey payloads preserve stale rows in client sparse buffer.
 - Verification: daemon owner tests `7 files / 96 tests` passed; `test:feature-registry` `7 files / 45 tests` passed; `tsc --noEmit` passed; `daemon:mirror:close-loop` passed all 8 strict replay cases at `android/evidence/daemon-mirror/2026-07-12/summary.json`; MemPalace search hit this phrase.
+
+## 2026-07-12 Debug channel only accepts explicit summaries
+
+- `resource.debug_channel` is observe-only. Daemon runtime debug must never copy arbitrary business `payload` into debug metadata, because that turns debug side data into a second request/response truth and can leak terminal rows or user input.
+- `terminal-debug-runtime.ts` now ignores raw `payload` and only records allowlisted scalar metadata plus explicit `payloadSummary`. Transport send logging passes `payloadSummary: summarizePayload(message)` for buffer-sync/connected metadata.
+- Regression gates: `terminal-debug-runtime.test.ts` proves raw terminal row payload is dropped while explicit summary is stored; `server.transport-runtime-truth.test.ts` locks the send callsite to `payloadSummary`, not `payload`.

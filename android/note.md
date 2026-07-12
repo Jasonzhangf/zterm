@@ -1848,3 +1848,10 @@ Need runtime debug to confirm:
 - 修复：删除 daemon session existence check 中的 `ensureTmuxSessionAlternateScreenDisabled()` 副作用；daemon 检查/镜像/debug probe 只读 tmux truth，不改用户 tmux option。
 - 修复：`buffer-sync-contract.ts` 对 missing/changed ranges 排序，并返回连续 authoritative span；`terminal-message-runtime.ts` 对 async connect payload failure 显式返回 `connect_payload_invalid`。
 - 验证：daemon owner gates 7 files / 96 tests PASS；Android `tsc --noEmit` PASS；feature/resource gates 7 files / 45 tests PASS；`daemon:mirror:close-loop` 8 cases PASS，summary `android/evidence/daemon-mirror/2026-07-12/summary.json`；MemPalace mine/search PASS。
+
+## 2026-07-12 debug channel observe-only payload boundary
+
+- 架构映射：本轮属于 CLI/release/debug resource slice 的 `resource.debug_channel`，owner 是 `daemon.cli_node` / `terminal-debug-runtime.ts`。debug 只 observe metadata，不能承载业务 request/response payload truth。
+- 根因：`sanitizeDaemonDebugPayload()` 会把任意 object `payload` 复制成 `payloadSummary`，而 transport send callsite 传的是 `payload: summarizePayload(message)`。虽然当前 summary 已被裁剪，但字段语义仍允许 raw payload 进入 debug channel。
+- 修复：daemon debug sanitizer 只接受显式 `payloadSummary` object；transport send runtime 改为传 `payloadSummary: deps.summarizePayload(message)`。
+- 验证：`terminal-debug-runtime.test.ts`、`terminal-transport-runtime.test.ts`、`server.transport-runtime-truth.test.ts`、`server.debug-truth.test.ts` 共 14 tests PASS；Android `tsc --noEmit` PASS；feature/resource gates 7 files / 45 tests PASS。

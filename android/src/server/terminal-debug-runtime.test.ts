@@ -80,4 +80,35 @@ describe('terminal debug runtime daemon metadata truth', () => {
     expect(JSON.stringify(debugSpy.mock.calls)).not.toContain('pwd');
     debugSpy.mockRestore();
   });
+
+  it('keeps raw debug payload out of daemon metadata and accepts explicit summaries only', () => {
+    const daemonRuntimeDebugStore = createRuntimeDebugStore();
+    const runtime = createTerminalDebugRuntime({
+      daemonRuntimeDebugEnabled: true,
+      maxClientDebugBatchLogEntries: 8,
+      maxClientDebugLogPayloadChars: 900,
+      clientRuntimeDebugStore: createRuntimeDebugStore(),
+      daemonRuntimeDebugStore,
+      sessions: new Map(),
+    });
+
+    runtime.daemonRuntimeDebug('send', {
+      sessionId: 'session-1',
+      sessionName: 'demo',
+      type: 'buffer-sync',
+      payload: {
+        lines: [{ index: 1, text: 'secret-terminal-row' }],
+      },
+      payloadSummary: {
+        revision: 7,
+        lineCount: 1,
+      },
+    });
+
+    const entries = daemonRuntimeDebugStore.listEntries({ scopeIncludes: 'send' });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.payload).toContain('"payloadSummary":{"revision":7,"lineCount":1}');
+    expect(entries[0]?.payload).not.toContain('secret-terminal-row');
+    expect(entries[0]?.payload).not.toContain('"lines"');
+  });
 });

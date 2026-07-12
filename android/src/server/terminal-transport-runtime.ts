@@ -168,7 +168,7 @@ export function createTerminalTransportRuntime(
           sessionId: session.id,
           sessionName: session.sessionName,
           type: message.type,
-          payload: deps.summarizePayload(message),
+          payloadSummary: deps.summarizePayload(message),
         });
       }
       sendTransportMessage(session.transport, message);

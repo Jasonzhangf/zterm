@@ -70,8 +70,8 @@ export function createTerminalDebugRuntime(
         sanitized[key] = source[key];
       }
     }
-    if (source.payload && typeof source.payload === 'object' && !Array.isArray(source.payload)) {
-      sanitized.payloadSummary = source.payload;
+    if (source.payloadSummary && typeof source.payloadSummary === 'object' && !Array.isArray(source.payloadSummary)) {
+      sanitized.payloadSummary = source.payloadSummary;
     }
     return sanitized;
   }
