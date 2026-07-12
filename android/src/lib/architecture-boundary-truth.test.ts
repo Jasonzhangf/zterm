@@ -151,9 +151,16 @@ describe('architecture boundary truth gate', () => {
     expect(transportPlannerSource).not.toContain('forceReplaceTransport');
     expect(transportPlannerSource).not.toContain('shouldReconnectQueuedActiveInput');
     expect(transportPlannerSource).not.toContain('active-resume');
-    expect(transportPlannerSource).not.toContain("'stale-pending-open'");
     expect(transportPlannerSource).not.toContain("'force-replace'");
     expect(transportPlannerSource).toContain("reason: 'pending-open'");
+    expect(transportPlannerSource).toContain("reason: 'stale-pending-open'");
+    expect(transportPlannerSource).toContain('pendingTransportOpen && options.pendingTransportOpenStale');
+    expect(activityRuntimeSource).not.toContain("'stale-pending-open'");
+    expect(inputRuntimeSource).not.toContain("'stale-pending-open'");
+    expect(orchestrationSource).not.toContain("'stale-pending-open'");
+    expect(sessionRuntimeSource).toContain('pendingTransportOpenStale');
+    expect(sessionRuntimeSource).toContain('deletePendingSessionTransportOpenIntent');
+    expect(sessionRuntimeSource).toContain('cleanupControlSocket?.(options.sessionId, true)');
   });
 
   it('keeps traversal sockets from owning a second default reconnect state machine', () => {

@@ -1,6 +1,7 @@
 import {
   applyBufferSyncToSessionBuffer,
   createSessionBufferState,
+  normalizeWireLines,
   sessionBuffersEqual,
 } from '../lib/terminal-buffer';
 import { runtimeDebugPrechecked, shouldCollectRuntimeDebugScope } from '../lib/runtime-debug';
@@ -10,6 +11,7 @@ import type {
   Session,
   SessionBufferState,
   TerminalBufferPayload,
+  TerminalCell,
   TerminalCursorState,
   TerminalVisibleRange,
 } from '../lib/types';
@@ -94,6 +96,68 @@ function isSparsePayloadWindow(payload: TerminalBufferPayload) {
     uniqueLineIndexes.add(index);
   }
   return uniqueLineIndexes.size < windowSize;
+}
+
+function terminalRowsEqual(left: TerminalCell[], right: TerminalCell[]) {
+  if (left.length !== right.length) {
+    return false;
+  }
+  for (let index = 0; index < left.length; index += 1) {
+    const a = left[index];
+    const b = right[index];
+    if (!a || !b) {
+      return false;
+    }
+    if (a.char !== b.char || a.fg !== b.fg || a.bg !== b.bg || a.flags !== b.flags || a.width !== b.width) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function localIndexIsGap(buffer: SessionBufferState, absoluteIndex: number) {
+  for (const range of buffer.gapRanges || []) {
+    if (absoluteIndex >= range.startIndex && absoluteIndex < range.endIndex) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function detectSameRevisionNonGapOverwrite(options: {
+  localBuffer: SessionBufferState;
+  payload: TerminalBufferPayload;
+}) {
+  const startIndex = Math.max(0, Math.floor(options.payload.startIndex || 0));
+  const endIndex = Math.max(startIndex, Math.floor(options.payload.endIndex || startIndex));
+
+  let conflictCount = 0;
+  let firstConflictIndex: number | null = null;
+  for (const line of normalizeWireLines(options.payload.lines || [], options.payload.cols || options.localBuffer.cols || 80)) {
+    if (line.index < options.localBuffer.startIndex || line.index >= options.localBuffer.endIndex) {
+      continue;
+    }
+    if (localIndexIsGap(options.localBuffer, line.index)) {
+      continue;
+    }
+    const localRow = options.localBuffer.lines[line.index - options.localBuffer.startIndex];
+    if (localRow && !terminalRowsEqual(localRow, line.cells)) {
+      conflictCount += 1;
+      if (firstConflictIndex === null) {
+        firstConflictIndex = line.index;
+      }
+    }
+  }
+
+  if (conflictCount === 0) {
+    return null;
+  }
+  return {
+    conflictCount,
+    firstConflictIndex,
+    incomingStartIndex: startIndex,
+    incomingEndIndex: endIndex,
+  };
 }
 
 function resolvePostApplyVisibleRange(options: {
@@ -217,7 +281,6 @@ export function handleBufferHeadRuntime(options: {
     || (localBuffer.cursor?.visible ?? null) !== (normalizedCursor?.visible ?? null)
   );
   const cursorKeysAppChanged = localBuffer.cursorKeysApp !== normalizedCursorKeysApp;
-  let renderCommitNeeded = false;
   if (cursorChanged || cursorKeysAppChanged) {
     const nextBuffer = {
       ...localBuffer,
@@ -226,7 +289,12 @@ export function handleBufferHeadRuntime(options: {
     };
     const changed = options.commitSessionBufferUpdate(options.sessionId, nextBuffer);
     if (changed) {
-      renderCommitNeeded = true;
+      options.runtimeDebug('session.buffer.head.cursor-metadata-applied-no-body-render', {
+        sessionId: options.sessionId,
+        activeSessionId: options.refs.stateRef.current.activeSessionId,
+        latestRevision: options.latestRevision,
+        latestEndIndex: options.latestEndIndex,
+      });
       session = {
         ...session,
         buffer: nextBuffer,
@@ -304,17 +372,57 @@ export function handleBufferHeadRuntime(options: {
       localBufferTailEndIndex: plannerBuffer.bufferTailEndIndex,
     });
   }
-  const visibleRange = options.refs.sessionVisibleRangeRef.current.get(options.sessionId)
-    || buildDefaultSessionVisibleRange(session, undefined, plannerBuffer);
+  const visibleRange = options.refs.sessionVisibleRangeRef.current.get(options.sessionId) || null;
+  if (!visibleRange) {
+    const isActiveSession = options.refs.stateRef.current.activeSessionId === options.sessionId;
+    if (isActiveSession && liveHead) {
+      const viewportRows = Math.max(1, Math.floor(plannerBuffer.rows || session.buffer?.rows || 24));
+      const requestEndIndex = Math.max(0, Math.floor(options.latestEndIndex || liveHead.latestEndIndex || 0));
+      const requestStartIndex = Math.max(
+        Math.max(0, Math.floor(liveHead.availableStartIndex || 0)),
+        requestEndIndex - viewportRows,
+      );
+      options.runtimeDebug('session.buffer.head.no-visible-range-active-tail-bootstrap', {
+        sessionId: options.sessionId,
+        activeSessionId: options.refs.stateRef.current.activeSessionId,
+        latestRevision: options.latestRevision,
+        latestEndIndex: options.latestEndIndex,
+        localRevision,
+        localStartIndex: plannerBuffer.startIndex,
+        localEndIndex: plannerBuffer.endIndex,
+        requestStartIndex,
+        requestEndIndex,
+        viewportRows,
+      });
+      options.requestSessionBufferSync(options.sessionId, {
+        reason: 'buffer-head-no-visible-range-active-bootstrap',
+        purpose: 'tail-refresh',
+        sessionOverride: demandSession,
+        liveHead,
+        requestWindowOverride: {
+          requestStartIndex,
+          requestEndIndex,
+        },
+      });
+      return;
+    }
+    options.runtimeDebug('session.buffer.head.no-visible-range-skip-body-pull', {
+      sessionId: options.sessionId,
+      activeSessionId: options.refs.stateRef.current.activeSessionId,
+      latestRevision: options.latestRevision,
+      latestEndIndex: options.latestEndIndex,
+      localRevision,
+      localStartIndex: plannerBuffer.startIndex,
+      localEndIndex: plannerBuffer.endIndex,
+    });
+    return;
+  }
   const needsTailRefresh = (
     revisionResetDetected
     || localWindowInvalid
     || shouldPullFollowBuffer(demandSession, visibleRange, plannerBuffer)
   );
   if (needsTailRefresh) {
-    if (renderCommitNeeded) {
-      options.scheduleSessionRenderCommit(options.sessionId);
-    }
     options.requestSessionBufferSync(options.sessionId, {
       reason:
         revisionResetDetected ? 'buffer-head-revision-reset'
@@ -330,15 +438,9 @@ export function handleBufferHeadRuntime(options: {
 
   const needsReadingRepair = shouldPullVisibleRangeBuffer(demandSession, visibleRange, liveHead, plannerBuffer);
   if (!needsReadingRepair) {
-    if (renderCommitNeeded) {
-      options.scheduleSessionRenderCommit(options.sessionId);
-    }
     return;
   }
 
-  if (renderCommitNeeded) {
-    options.scheduleSessionRenderCommit(options.sessionId);
-  }
   options.requestSessionBufferSync(options.sessionId, {
     reason: 'buffer-head-visible-range-repair',
     purpose: 'reading-repair',
@@ -409,6 +511,17 @@ export function requestSessionBufferSyncRuntime(options: {
   const visibleRange = options.refs.sessionVisibleRangeRef.current.get(options.sessionId);
   const requestPurpose = options.requestOptions?.purpose || 'tail-refresh';
   const liveHead = options.refs.sessionBufferHeadsRef.current.get(options.sessionId) || null;
+  const explicitWindowOverride = options.requestOptions?.requestWindowOverride || null;
+  const explicitMissingRangesOverride = options.requestOptions?.requestMissingRangesOverride || null;
+  if (!visibleRange && !explicitWindowOverride && !explicitMissingRangesOverride) {
+    options.runtimeDebug('session.buffer.request.no-visible-range-skip', {
+      sessionId: options.sessionId,
+      activeSessionId: options.refs.stateRef.current.activeSessionId,
+      reason: options.requestOptions?.reason || null,
+      purpose: requestPurpose,
+    });
+    return false;
+  }
   const effectiveSession = liveHead
     ? {
         ...session,
@@ -424,17 +537,15 @@ export function requestSessionBufferSyncRuntime(options: {
       sameEndRefreshMode:
         options.refs.pendingConnectTailRefreshRef.current.has(options.sessionId)
         || options.refs.pendingResumeTailRefreshRef.current.has(options.sessionId)
-          ? 'full-cache'
+          ? 'visible-window'
           : options.refs.pendingInputTailRefreshRef.current.has(options.sessionId)
             ? 'visible-window'
             : 'auto',
-      forceSameEndRefresh:
-        options.refs.pendingConnectTailRefreshRef.current.has(options.sessionId)
-        || options.refs.pendingResumeTailRefreshRef.current.has(options.sessionId),
+      forceSameEndRefresh: false,
       liveHead: options.requestOptions?.liveHead || liveHead || null,
       invalidLocalWindow: Boolean(options.requestOptions?.invalidLocalWindow),
-      requestWindowOverride: options.requestOptions?.requestWindowOverride || null,
-      requestMissingRangesOverride: options.requestOptions?.requestMissingRangesOverride || null,
+      requestWindowOverride: explicitWindowOverride,
+      requestMissingRangesOverride: explicitMissingRangesOverride,
       bufferOverride: localBuffer,
     },
   );
@@ -503,10 +614,26 @@ export function requestSessionBufferSyncRuntime(options: {
   const requestLocalStartIndex = Math.max(0, Math.floor(payload.localStartIndex || 0));
   const requestLocalEndIndex = Math.max(0, Math.floor(payload.localEndIndex || 0));
   const repairSignature = buildBufferSyncRepairSignature(payload.missingRanges);
-  const requestTargetStartIndex = Math.max(0, Math.floor(payload.requestStartIndex || 0));
+  const repairRanges = Array.isArray(payload.missingRanges)
+    ? payload.missingRanges
+      .map((range) => ({
+        startIndex: Math.max(0, Math.floor(range?.startIndex ?? 0)),
+        endIndex: Math.max(0, Math.floor(range?.endIndex ?? 0)),
+      }))
+      .filter((range) => range.endIndex > range.startIndex)
+    : [];
+  const repairTargetStartIndex = repairRanges.length > 0
+    ? repairRanges[0]!.startIndex
+    : null;
+  const repairTargetEndIndex = repairRanges.length > 0
+    ? repairRanges[repairRanges.length - 1]!.endIndex
+    : null;
+  const requestTargetStartIndex = requestPurpose === 'reading-repair' && repairTargetStartIndex !== null
+    ? repairTargetStartIndex
+    : Math.max(0, Math.floor(payload.requestStartIndex || 0));
   const requestTargetEndIndex = Math.max(requestTargetStartIndex, Math.floor(
     requestPurpose === 'reading-repair'
-      ? (payload.requestEndIndex || 0)
+      ? (repairTargetEndIndex ?? payload.requestEndIndex ?? 0)
       : (
         effectiveSession.daemonHeadEndIndex
         || payload.requestEndIndex
@@ -749,6 +876,66 @@ export function applyIncomingBufferSyncRuntime(options: {
 
   const incomingRevision = Math.max(0, Math.floor(options.payload.revision || 0));
   const localRevision = Math.max(0, Math.floor(localBuffer.revision || 0));
+  if (
+    !revisionResetExpectation
+    && localRevision > 0
+    && incomingRevision < localRevision
+  ) {
+    const liveHead = options.refs.sessionBufferHeadsRef.current.get(options.sessionId) || {
+      revision: localRevision,
+      latestEndIndex: Math.max(0, Math.floor(localBuffer.bufferTailEndIndex || localBuffer.endIndex || 0)),
+      availableStartIndex: Math.max(0, Math.floor(localBuffer.bufferHeadStartIndex || localBuffer.startIndex || 0)),
+      availableEndIndex: Math.max(0, Math.floor(localBuffer.bufferTailEndIndex || localBuffer.endIndex || 0)),
+      seenAt: Date.now(),
+    };
+    options.refs.lastSyncRequestAtRef?.current.delete(`${options.sessionId}:tail-refresh`);
+    options.runtimeDebug('session.buffer.sync.stale-lower-revision-drop', {
+      sessionId: options.sessionId,
+      activeSessionId: options.refs.stateRef.current.activeSessionId,
+      localRevision,
+      incomingRevision,
+      localStartIndex: localBuffer.startIndex,
+      localEndIndex: localBuffer.endIndex,
+      incoming: options.summarizeBufferPayload(options.payload),
+    });
+    options.requestSessionBufferSync(options.sessionId, {
+      reason: 'buffer-sync-stale-lower-revision-drop',
+      purpose: 'tail-refresh',
+      sessionOverride: {
+        ...session,
+        daemonHeadRevision: liveHead.revision,
+        daemonHeadEndIndex: liveHead.latestEndIndex,
+      },
+      liveHead,
+    });
+    return;
+  }
+  const sameRevisionOverwrite = (
+    !revisionResetExpectation
+    && localRevision > 0
+    && incomingRevision === localRevision
+      ? detectSameRevisionNonGapOverwrite({
+          localBuffer,
+          payload: options.payload,
+        })
+      : null
+  );
+  if (sameRevisionOverwrite) {
+    options.runtimeDebug('session.buffer.sync.stale-same-revision-drop', {
+      sessionId: options.sessionId,
+      activeSessionId: options.refs.stateRef.current.activeSessionId,
+      localRevision,
+      incomingRevision,
+      localStartIndex: localBuffer.startIndex,
+      localEndIndex: localBuffer.endIndex,
+      incomingStartIndex: sameRevisionOverwrite.incomingStartIndex,
+      incomingEndIndex: sameRevisionOverwrite.incomingEndIndex,
+      conflictCount: sameRevisionOverwrite.conflictCount,
+      firstConflictIndex: sameRevisionOverwrite.firstConflictIndex,
+      incoming: options.summarizeBufferPayload(options.payload),
+    });
+    return;
+  }
   if (
     localRevision > 0
     && incomingRevision > localRevision + 1

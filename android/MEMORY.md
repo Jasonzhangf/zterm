@@ -864,3 +864,11 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - Correct behavior: input sends synchronously only when `readSessionTransportResource(sessionId).socket` is currently open, drops explicitly when the transport is missing/backpressured/pending-open, and leaves reconnect/open intent recovery to `terminal.transport_lifecycle`.
 - Deferred input tail refresh must also re-read the current session transport resource in its microtask, so a replaced socket is not reused after tab switch or reconnect.
 - Regression gate: `session-context-input-runtime.test.ts` must prove open-resource send, stale accessor avoidance, no reconnect policy calls, pending-open drop, backpressure drop, and microtask head refresh retargeting.
+
+## 2026-07-12 Buffer bootstrap must pull body from mirror truth
+
+- `terminal.buffer_render` owns `resource.client_sparse_buffer -> resource.renderer_window`; it consumes daemon `resource.mirror_store` only through `buffer-head` metadata and `buffer-sync` body patches.
+- When active `buffer-head` arrives before renderer has declared a visible range, the buffer owner must bootstrap one tail body sync from daemon head bounds. It must not wait for renderer layout or invent client-side terminal layout.
+- `buffer-head` cursor/head metadata may update local metadata truth, but it must not schedule body render commits. Only `buffer-sync apply` is allowed to repaint terminal body rows.
+- Tail refresh and reading repair requests are scoped to the current visible window; hidden cache rows are retention, not fetch target. Sparse tail jumps must request visible tail repair without reinterpreting reading position as follow.
+- Regression gates: `session-context-buffer-runtime.test.ts`, `session-sync-helpers.test.ts`, shared `terminal-buffer.test.ts`, and `buffer-sync-request-planner.test.ts` cover active head-before-visible bootstrap, no head-only body repaint, visible-window tail refresh, stale/lower revision drops, and sparse tail repair.

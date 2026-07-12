@@ -4,7 +4,6 @@ import type {
   SessionBufferState,
   TerminalGapRange,
 } from '../lib/types';
-import { resolveTerminalRequestWindowLines } from '../lib/mobile-config';
 import type { SessionPullPurpose } from './session-pull-state-helpers';
 import { collectIntersectingGapRanges, resolveRequestedBufferWindow as sharedResolveRequestedBufferWindow } from '@zterm/shared/terminal/gap-utils';
 import { resolveHeadAvailableBounds as sharedResolveHeadAvailableBounds, hasImpossibleLocalWindow as sharedHasImpossibleLocalWindow, resolveAuthoritativeAvailableEndIndex as sharedResolveAuthoritativeAvailableEndIndex, hasLocalWindow as sharedHasLocalWindow } from '@zterm/shared/terminal/buffer-head-state';
@@ -61,8 +60,7 @@ function resolveRequestedBufferWindow(
   minStartIndex = 0,
 ) {
   const safeViewportRows = Math.max(1, Math.floor(viewportRows || 1));
-  const cacheLines = resolveTerminalRequestWindowLines(safeViewportRows);
-  return sharedResolveRequestedBufferWindow(endIndex, viewportRows, cacheLines, minStartIndex);
+  return sharedResolveRequestedBufferWindow(endIndex, safeViewportRows, safeViewportRows, minStartIndex);
 }
 
 function resolveAuthoritativeAvailableEndIndex(
@@ -156,7 +154,7 @@ function buildTailRefreshBufferSyncRequestPayload(
           authoritativeAvailableEndIndex,
         )
   );
-  const cacheLines = resolveTerminalRequestWindowLines(viewportRows);
+  const cacheLines = viewportRows;
   const { availableStartIndex } = resolveHeadAvailableBounds(session, options?.liveHead, buffer);
   const authoritativeHeadStartIndex = availableStartIndex;
   const localStartIndex = Math.max(0, Math.floor(buffer.startIndex || 0));
@@ -282,7 +280,7 @@ export function shouldPullFollowBuffer(
   const localStartIndex = Math.max(0, Math.floor(buffer.startIndex || 0));
   const localEndIndex = Math.max(localStartIndex, Math.floor(buffer.endIndex || 0));
   const localHasWindow = localEndIndex > localStartIndex;
-  const cacheLines = resolveTerminalRequestWindowLines(viewportRows);
+  const cacheLines = viewportRows;
   const distanceToHead = Math.max(0, desiredEndIndex - localEndIndex);
   return sharedShouldPullFollowBuffer({
     localHasWindow,
@@ -311,7 +309,7 @@ export function shouldCatchUpFollowTailAfterBufferApply(
   const localStartIndex = Math.max(0, Math.floor(buffer.startIndex || 0));
   const localEndIndex = Math.max(localStartIndex, Math.floor(buffer.endIndex || 0));
   const localHasWindow = localEndIndex > localStartIndex;
-  const cacheLines = resolveTerminalRequestWindowLines(viewportRows);
+  const cacheLines = viewportRows;
   const distanceToHead = Math.max(0, desiredEndIndex - localEndIndex);
   return sharedShouldCatchUpFollowTailAfterBufferApply({
     localHasWindow,

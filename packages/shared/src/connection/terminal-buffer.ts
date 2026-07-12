@@ -489,7 +489,10 @@ function resolveDesiredLocalWindow(options: {
   let desiredStartIndex = current.startIndex;
   let desiredEndIndex = current.endIndex;
 
-  if (options.sparseWindow.endIndex > current.endIndex) {
+  if (options.sparseWindow.endIndex >= safeTail) {
+    desiredEndIndex = options.sparseWindow.endIndex;
+    desiredStartIndex = desiredEndIndex - safeCacheLines;
+  } else if (options.sparseWindow.endIndex > current.endIndex) {
     desiredEndIndex = options.sparseWindow.endIndex;
     desiredStartIndex = desiredEndIndex - safeCacheLines;
   } else if (options.sparseWindow.startIndex < current.startIndex) {
@@ -601,12 +604,32 @@ export function applyBufferSyncToSessionBuffer(
 
   const authoritativeHeadStartIndex = resolveAuthoritativeHeadStartIndex(current, sparseWindow, payload);
   const authoritativeTailEndIndex = resolveAuthoritativeTailEndIndex(current, sparseWindow, payload);
-  const preserveCurrentWindow = Boolean(
+  const currentAnchoredAtTail = Boolean(
     current
-    && revision === current.revision
     && current.endIndex >= authoritativeTailEndIndex
-    && sparseWindow.startIndex < current.startIndex
-    && sparseWindow.endIndex <= current.endIndex
+  );
+  const incomingOverlapsCurrentWindow = Boolean(
+    current
+    && sparseWindow.endIndex > current.startIndex
+    && sparseWindow.startIndex < current.endIndex
+  );
+  const incomingDoesNotReachTail = sparseWindow.endIndex < authoritativeTailEndIndex;
+  const preserveCurrentWindow = Boolean(
+    (
+      current
+      && revision === current.revision
+      && currentAnchoredAtTail
+      && sparseWindow.startIndex < current.startIndex
+      && sparseWindow.endIndex <= current.endIndex
+    )
+    || (
+      current
+      && revision >= current.revision
+      && currentAnchoredAtTail
+      && incomingOverlapsCurrentWindow
+      && incomingDoesNotReachTail
+      && sparseWindow.startIndex < current.startIndex
+    )
   );
   const desiredWindow = resolveDesiredLocalWindow({
     current,

@@ -18,7 +18,7 @@ export interface ResolveTailRefreshWindowParams {
   viewportEndIndex: number;
   /** Number of visible viewport rows. */
   viewportRows: number;
-  /** Pre-computed cache lines = 3x viewportRows. */
+  /** Request-size threshold for body pulls; Android keeps this scoped to visible rows. */
   cacheLines: number;
   /** Whether the local buffer has any cached content. */
   localHasWindow: boolean;
@@ -51,7 +51,7 @@ export interface ResolvedWindow {
  * 2. !localHasWindow || invalidLocalWindow || distanceToHead > cacheLines → full window
  * 3. localEndIndex < viewportEndIndex → incremental from local end
  * 4. sameEndRevisionAdvanced && sameEndWindowHasLocalGaps → visible window with gaps
- * 5. sameEndRevisionAdvanced → full window (revision changed, no gaps visible)
+ * 5. sameEndRevisionAdvanced → visible window; connection/revision change is not a license to prefetch hidden rows
  * 6. (default) → incremental from local end
  */
 export function resolveTailRefreshWindow(
@@ -109,17 +109,18 @@ export function resolveTailRefreshWindow(
   // At this point: localHasWindow && !invalidLocalWindow && distanceToHead === 0
   const normalizedSameEndRefreshMode = sameEndRefreshMode || 'auto';
 
-  // Branch 4: explicit same-end refresh request → full cache window
+  // Branch 4: explicit same-end refresh request → visible window.
   if (
     sameEndRevisionAdvanced
     && (forceSameEndRefresh || normalizedSameEndRefreshMode === 'full-cache')
   ) {
-    return resolveRequestedBufferWindow(
-      viewportEndIndex,
-      viewportRows,
-      cacheLines,
-      authoritativeHeadStartIndex,
-    );
+    return {
+      requestStartIndex: Math.max(
+        authoritativeHeadStartIndex,
+        viewportEndIndex - viewportRows,
+      ),
+      requestEndIndex: viewportEndIndex,
+    };
   }
 
   // Branch 4.5: explicit visible repaint request or same-end gaps in visible window
@@ -143,14 +144,15 @@ export function resolveTailRefreshWindow(
     };
   }
 
-  // Branch 5: same end, revision advanced, no gaps → full window refresh
+  // Branch 5: same end, revision advanced, no gaps → visible window refresh.
   if (sameEndRevisionAdvanced) {
-    return resolveRequestedBufferWindow(
-      viewportEndIndex,
-      viewportRows,
-      cacheLines,
-      authoritativeHeadStartIndex,
-    );
+    return {
+      requestStartIndex: Math.max(
+        authoritativeHeadStartIndex,
+        viewportEndIndex - viewportRows,
+      ),
+      requestEndIndex: viewportEndIndex,
+    };
   }
 
   // Branch 6: default incremental

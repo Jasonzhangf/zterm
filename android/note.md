@@ -1833,3 +1833,10 @@ Need runtime debug to confirm:
 - 根因：旧 `sendInputThroughSessionTransport()` 接收 `shouldReconnectQueuedActiveInput`、`reconnectSession`、`probeOrReconnectStaleSessionTransport`、`isSessionTransportActivityStale`，让 input runtime 既发输入又参与 transport lifecycle 决策，违反 resource owner 分工。
 - 修复：input runtime 改为读取 `readSessionTransportResource(sessionId).socket`；open socket 同步发 input，missing/pending/backpressure 只显式 drop/debug。pending tail head refresh 微任务重新读取 current resource，避免用已替换 socket。
 - 验证：`session-context-input-runtime.test.ts` + `terminal-message-runtime.test.ts` 2 files / 22 tests PASS；`test:feature-registry` 7 files / 45 tests PASS；`tsc --noEmit` PASS。
+
+## 2026-07-12 buffer bootstrap and visible-window truth
+
+- 架构映射：本轮属于 `terminal.buffer_render`，涉及 `resource.mirror_store -> resource.client_sparse_buffer -> resource.renderer_window`。daemon mirror 是正文真源；client sparse buffer 只合并 head/body；renderer 只声明 visible demand 和消费已应用 body。
+- 根因：session enter / explicit resume 的 `buffer-head` 可能早于 renderer visible range；旧逻辑要么等 visible range，要么把 cache window 当 fetch window，容易造成进入 session 看不到旧 buffer 或拉隐藏历史。另一个边界是 head-only cursor/head metadata 可能触发 body repaint，造成旧 body 闪一下。
+- 修复：active head-before-visible 时由 buffer owner 直接按 daemon head bounds bootstrap 当前 tail body sync；无 visible range 的非 active body pull 只 skip。`buffer-head` 只更新 metadata，不触发正文 render commit。tail/reading repair 均收窄到当前 visible window；sparse tail jump 后按 follow/reading 语义发 visible repair。
+- 验证：`session-sync-helpers.test.ts` + `session-context-buffer-runtime.test.ts` 2 files / 99 tests PASS；shared `terminal-buffer.test.ts` + `buffer-sync-request-planner.test.ts` 2 files / 20 tests PASS；`test:feature-registry` 7 files / 45 tests PASS；`tsc --noEmit` PASS。

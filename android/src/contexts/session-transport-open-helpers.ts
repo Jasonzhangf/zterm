@@ -7,7 +7,7 @@ export interface SessionReconnectDecisionOptions {
   reconnectInFlight: boolean;
 }
 
-export type ActiveRefreshSource = 'explicit-resume' | 'active-resume' | 'active-reentry' | 'active-tick';
+export type ActiveRefreshSource = 'explicit-resume' | 'active-reentry' | 'active-tick';
 
 export interface ActiveSessionRefreshPlanOptions {
   hasSession: boolean;
@@ -15,7 +15,6 @@ export interface ActiveSessionRefreshPlanOptions {
   sessionState: string | null;
   wsReadyState: number | null;
   reconnectInFlight: boolean;
-  staleReconnectInFlight?: boolean;
   pendingTransportOpen: boolean;
   pendingTransportOpenStale?: boolean;
   allowReconnectIfUnavailable?: boolean;
@@ -25,9 +24,8 @@ export interface ActiveSessionRefreshPlanOptions {
 
 export type ActiveSessionRefreshPlan =
   | { action: 'skip'; reason: 'inactive-or-missing-session' | 'tick-blocked-by-reconnect' | 'transport-unavailable' | 'transport-open-pending' | 'closed-session-requires-explicit-open' }
-  | { action: 'probe-stale-transport'; probeReason: 'active-tick' | 'active-reentry' | 'explicit-resume' }
   | { action: 'request-head'; resetPullBookkeeping: boolean }
-  | { action: 'reconnect'; forceReplaceTransport?: boolean };
+  | { action: 'reconnect' };
 
 export type SessionTransportOpenDebugScope = 'connect' | 'reconnect';
 export type SessionTransportOpenFailureStage = 'handshake' | 'live';
@@ -40,7 +38,6 @@ export interface SessionTransportReusePlanOptions {
   pendingTransportOpen: boolean;
   pendingTransportOpenStale?: boolean;
   manualClosed?: boolean;
-  forceReplaceTransport?: boolean;
   source: SessionTransportReuseSource;
 }
 
@@ -48,7 +45,7 @@ export type SessionTransportReusePlan =
   | { action: 'reuse-open'; reason: 'open-same-target' }
   | { action: 'wait-existing-open'; reason: 'connecting-same-target' | 'pending-open' }
   | { action: 'skip'; reason: 'manual-closed' }
-  | { action: 'rebuild'; reason: 'missing-target' | 'target-mismatch' | 'stale-pending-open' | 'force-replace' | 'closed' | 'missing-socket' };
+  | { action: 'rebuild'; reason: 'missing-target' | 'target-mismatch' | 'closed' | 'missing-socket' | 'stale-pending-open' };
 
 export interface TransportOpenConnectedEffectPlan {
   debugEvent: 'session.ws.connected' | 'session.ws.reconnect.connected';
@@ -74,8 +71,12 @@ export function buildSessionTransportReusePlan(
     return { action: 'skip', reason: 'manual-closed' };
   }
 
+  if (options.pendingTransportOpen && options.pendingTransportOpenStale) {
+    return { action: 'rebuild', reason: 'stale-pending-open' };
+  }
+
   if (!options.requestedTargetKey || !options.currentTargetKey) {
-    if (options.pendingTransportOpen && !options.pendingTransportOpenStale) {
+    if (options.pendingTransportOpen) {
       return { action: 'wait-existing-open', reason: 'pending-open' };
     }
     return { action: 'rebuild', reason: 'missing-target' };
@@ -85,12 +86,8 @@ export function buildSessionTransportReusePlan(
     return { action: 'rebuild', reason: 'target-mismatch' };
   }
 
-  if (options.pendingTransportOpen && options.pendingTransportOpenStale) {
-    return { action: 'rebuild', reason: 'stale-pending-open' };
-  }
-
-  if (options.forceReplaceTransport) {
-    return { action: 'rebuild', reason: 'force-replace' };
+  if (options.pendingTransportOpen) {
+    return { action: 'wait-existing-open', reason: 'pending-open' };
   }
 
   if (options.wsReadyState === WebSocket.OPEN) {
@@ -451,19 +448,6 @@ export function shouldReconnectActivatedSession(options: SessionReconnectDecisio
   return options.hasSession && transportClosed && !options.reconnectInFlight;
 }
 
-export function shouldReconnectQueuedActiveInput(options: {
-  isActiveTarget: boolean;
-  wsReadyState: number | null;
-  reconnectInFlight: boolean;
-}) {
-  const transportClosed = (
-    options.wsReadyState === null
-    || options.wsReadyState === WebSocket.CLOSING
-    || options.wsReadyState === WebSocket.CLOSED
-  );
-  return options.isActiveTarget && transportClosed && !options.reconnectInFlight;
-}
-
 export function buildActiveSessionRefreshPlan(options: ActiveSessionRefreshPlanOptions): ActiveSessionRefreshPlan {
   const hasBlockingPendingTransportOpen = options.pendingTransportOpen && !options.pendingTransportOpenStale;
   if (!options.hasSession || !options.isRefreshTarget) {
@@ -496,16 +480,6 @@ export function buildActiveSessionRefreshPlan(options: ActiveSessionRefreshPlanO
   }
 
   if (transportOpen && !unavailableState) {
-    if (options.transportStale && !options.reconnectInFlight) {
-      return {
-        action: 'probe-stale-transport',
-        probeReason: options.source === 'active-tick'
-          ? 'active-tick'
-          : options.source === 'explicit-resume'
-            ? 'explicit-resume'
-            : 'active-reentry',
-      };
-    }
     if (options.source === 'active-tick') {
       return {
         action: 'request-head',
@@ -526,21 +500,8 @@ export function buildActiveSessionRefreshPlan(options: ActiveSessionRefreshPlanO
     return { action: 'skip', reason: 'transport-open-pending' };
   }
 
-  if (
-    options.pendingTransportOpen
-    && options.pendingTransportOpenStale
-    && options.source !== 'active-tick'
-    && options.allowReconnectIfUnavailable
-  ) {
-    return { action: 'reconnect', forceReplaceTransport: true };
-  }
-
-  if (
-    options.staleReconnectInFlight
-    && options.source !== 'active-tick'
-    && options.allowReconnectIfUnavailable
-  ) {
-    return { action: 'reconnect' };
+  if (options.wsReadyState === WebSocket.CONNECTING && options.source !== 'active-tick') {
+    return { action: 'skip', reason: 'transport-open-pending' };
   }
 
   if (shouldReconnectActivatedSession({

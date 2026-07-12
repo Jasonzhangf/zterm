@@ -9,7 +9,7 @@ describe('resolveTailRefreshWindow', () => {
     authoritativeHeadStartIndex: 0,
     viewportEndIndex: 100,
     viewportRows: 40,
-    cacheLines: 120, // 3x viewportRows
+    cacheLines: 40,
     localHasWindow: true,
     distanceToHead: 0,
     sameEndRevisionAdvanced: false,
@@ -36,31 +36,30 @@ describe('resolveTailRefreshWindow', () => {
     expect(result.requestEndIndex).toBe(50);
   });
 
-  it('Branch 2: no local window → full cache window', () => {
+  it('Branch 2: no local window → visible window', () => {
     const result = resolveTailRefreshWindow({
       ...base,
       localHasWindow: false,
     });
-    // resolveRequestedBufferWindow(100, 40, 120, 0) → {start: 0, end: 100}
-    expect(result.requestStartIndex).toBe(0);
+    expect(result.requestStartIndex).toBe(60);
     expect(result.requestEndIndex).toBe(100);
   });
 
-  it('Branch 2: invalidLocalWindow → full cache window', () => {
+  it('Branch 2: invalidLocalWindow → visible window', () => {
     const result = resolveTailRefreshWindow({
       ...base,
       invalidLocalWindow: true,
     });
-    expect(result.requestStartIndex).toBe(0);
+    expect(result.requestStartIndex).toBe(60);
     expect(result.requestEndIndex).toBe(100);
   });
 
-  it('Branch 2: distanceToHead > cacheLines → full cache window', () => {
+  it('Branch 2: distanceToHead > cacheLines → visible window', () => {
     const result = resolveTailRefreshWindow({
       ...base,
       distanceToHead: 200,
     });
-    expect(result.requestStartIndex).toBe(0);
+    expect(result.requestStartIndex).toBe(60);
     expect(result.requestEndIndex).toBe(100);
   });
 
@@ -96,7 +95,7 @@ describe('resolveTailRefreshWindow', () => {
     expect(result.requestEndIndex).toBe(100);
   });
 
-  it('Branch 4.5: forceSameEndRefresh widens same-end resume refresh to full cache window', () => {
+  it('Branch 4.5: forceSameEndRefresh still stays inside the visible window', () => {
     const result = resolveTailRefreshWindow({
       ...base,
       authoritativeHeadStartIndex: 8,
@@ -104,25 +103,23 @@ describe('resolveTailRefreshWindow', () => {
       sameEndWindowHasLocalGaps: true,
       forceSameEndRefresh: true,
     });
-    expect(result.requestStartIndex).toBe(8);
+    expect(result.requestStartIndex).toBe(60);
     expect(result.requestEndIndex).toBe(100);
   });
 
-  it('Branch 5: sameEndRevisionAdvanced without gaps → full cache window', () => {
+  it('Branch 5: sameEndRevisionAdvanced without gaps → visible window', () => {
     const result = resolveTailRefreshWindow({
       ...base,
       sameEndRevisionAdvanced: true,
       sameEndWindowHasLocalGaps: false,
     });
-    // resolveRequestedBufferWindow(100, 40, 120, 0) → {start: 0, end: 100}
-    expect(result.requestStartIndex).toBe(0);
+    expect(result.requestStartIndex).toBe(60);
     expect(result.requestEndIndex).toBe(100);
   });
 
   it('Branch 6: default incremental from local end', () => {
     const result = resolveTailRefreshWindow(base);
-    // max(0, 100 - 120) = 0, end = 100
-    expect(result.requestStartIndex).toBe(0);
+    expect(result.requestStartIndex).toBe(60);
     expect(result.requestEndIndex).toBe(100);
   });
 
@@ -131,8 +128,7 @@ describe('resolveTailRefreshWindow', () => {
       ...base,
       authoritativeHeadStartIndex: 50,
     });
-    // max(50, 100 - 120) = 50
-    expect(result.requestStartIndex).toBe(50);
+    expect(result.requestStartIndex).toBe(60);
     expect(result.requestEndIndex).toBe(100);
   });
 });

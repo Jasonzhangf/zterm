@@ -83,7 +83,7 @@ function makeSession(overrides?: Partial<Session>): Session {
 }
 
 describe('session sync helper refresh planner', () => {
-  it('requests head on foreground resume for active open transport', () => {
+  it('requests head on explicit resume for active open transport', () => {
     expect(buildActiveSessionRefreshPlan({
       hasSession: true,
       isRefreshTarget: true,
@@ -93,14 +93,14 @@ describe('session sync helper refresh planner', () => {
       pendingTransportOpen: false,
       allowReconnectIfUnavailable: true,
       transportStale: false,
-      source: 'active-resume',
+      source: 'explicit-resume',
     })).toEqual({
       action: 'request-head',
       resetPullBookkeeping: true,
     });
   });
 
-  it('probes stale active transport before reconnecting', () => {
+  it('keeps an open active transport on active tick even when recent server activity is stale', () => {
     expect(buildActiveSessionRefreshPlan({
       hasSession: true,
       isRefreshTarget: true,
@@ -112,23 +112,43 @@ describe('session sync helper refresh planner', () => {
       transportStale: true,
       source: 'active-tick',
     })).toEqual({
-      action: 'probe-stale-transport',
-      probeReason: 'active-tick',
+      action: 'request-head',
+      resetPullBookkeeping: false,
     });
   });
 
-  it('skips reconnect when active foreground restore finds closed session and requires explicit open', () => {
+  it('does not probe or reconnect an open transport during active reentry even when activity is stale', () => {
     expect(buildActiveSessionRefreshPlan({
       hasSession: true,
       isRefreshTarget: true,
-      sessionState: 'closed',
-      wsReadyState: WebSocket.CLOSED,
+      sessionState: 'connected',
+      wsReadyState: WebSocket.OPEN,
       reconnectInFlight: false,
       pendingTransportOpen: false,
       allowReconnectIfUnavailable: true,
-      transportStale: false,
-      source: 'active-resume',
-    })).toEqual({ action: 'skip', reason: 'closed-session-requires-explicit-open' });
+      transportStale: true,
+      source: 'active-reentry',
+    })).toEqual({
+      action: 'request-head',
+      resetPullBookkeeping: true,
+    });
+  });
+
+  it('does not probe or reconnect an open transport during explicit resume even when activity is stale', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connected',
+      wsReadyState: WebSocket.OPEN,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      allowReconnectIfUnavailable: true,
+      transportStale: true,
+      source: 'explicit-resume',
+    })).toEqual({
+      action: 'request-head',
+      resetPullBookkeeping: true,
+    });
   });
 
   it('allows explicit resume to reconnect a closed session transport', () => {
@@ -228,7 +248,7 @@ describe('session sync helper refresh planner', () => {
     });
   });
 
-  it('does not let a stale pending transport-open intent block reconnect forever', () => {
+  it('lets the transport owner rebuild stale pending transport-open bookkeeping', () => {
     expect(buildActiveSessionRefreshPlan({
       hasSession: true,
       isRefreshTarget: true,
@@ -240,7 +260,7 @@ describe('session sync helper refresh planner', () => {
       allowReconnectIfUnavailable: true,
       transportStale: false,
       source: 'active-reentry',
-    })).toEqual({ action: 'reconnect', forceReplaceTransport: true });
+    })).toEqual({ action: 'reconnect' });
   });
 
   it('keeps active tick from force-replacing a fresh pending transport open', () => {
@@ -258,7 +278,7 @@ describe('session sync helper refresh planner', () => {
     })).toEqual({ action: 'skip', reason: 'tick-blocked-by-reconnect' });
   });
 
-  it('force-replaces an over-budget active-resume pending transport open', () => {
+  it('keeps an over-budget explicit resume pending transport open instead of replacing it', () => {
     expect(buildActiveSessionRefreshPlan({
       hasSession: true,
       isRefreshTarget: true,
@@ -269,11 +289,41 @@ describe('session sync helper refresh planner', () => {
       pendingTransportOpenStale: true,
       allowReconnectIfUnavailable: true,
       transportStale: false,
-      source: 'active-resume',
-    })).toEqual({ action: 'reconnect', forceReplaceTransport: true });
+      source: 'explicit-resume',
+    })).toEqual({ action: 'skip', reason: 'transport-open-pending' });
   });
 
-  it('does not let stale reconnect bookkeeping block explicit foreground resume', () => {
+  it('keeps an over-budget explicit resume connecting transport after its control intent settled', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connecting',
+      wsReadyState: WebSocket.CONNECTING,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      pendingTransportOpenStale: false,
+      allowReconnectIfUnavailable: true,
+      transportStale: false,
+      source: 'explicit-resume',
+    })).toEqual({ action: 'skip', reason: 'transport-open-pending' });
+  });
+
+  it('keeps explicit resume from replacing a fresh connecting transport after its control intent settled', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connecting',
+      wsReadyState: WebSocket.CONNECTING,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      pendingTransportOpenStale: false,
+      allowReconnectIfUnavailable: true,
+      transportStale: false,
+      source: 'explicit-resume',
+    })).toEqual({ action: 'skip', reason: 'transport-open-pending' });
+  });
+
+  it('keeps stale reconnect bookkeeping from creating a second websocket on explicit resume', () => {
     expect(buildActiveSessionRefreshPlan({
       hasSession: true,
       isRefreshTarget: true,
@@ -282,11 +332,10 @@ describe('session sync helper refresh planner', () => {
       reconnectInFlight: true,
       pendingTransportOpen: false,
       pendingTransportOpenStale: false,
-      staleReconnectInFlight: true,
       allowReconnectIfUnavailable: true,
       transportStale: false,
-      source: 'active-resume',
-    })).toEqual({ action: 'reconnect' });
+      source: 'explicit-resume',
+    })).toEqual({ action: 'skip', reason: 'transport-unavailable' });
   });
 });
 
@@ -316,11 +365,11 @@ describe('session transport reuse planner', () => {
       source: 'connect',
     })).toEqual({
       action: 'wait-existing-open',
-      reason: 'connecting-same-target',
+      reason: 'pending-open',
     });
   });
 
-  it('allows rebuild when the pending open is stale', () => {
+  it('routes stale pending open bookkeeping back to the transport owner', () => {
     expect(buildSessionTransportReusePlan({
       currentTargetKey: targetKey,
       requestedTargetKey: targetKey,
@@ -331,20 +380,6 @@ describe('session transport reuse planner', () => {
     })).toEqual({
       action: 'rebuild',
       reason: 'stale-pending-open',
-    });
-  });
-
-  it('allows forced replacement after stale probe even when the same-target socket is still open', () => {
-    expect(buildSessionTransportReusePlan({
-      currentTargetKey: targetKey,
-      requestedTargetKey: targetKey,
-      wsReadyState: WebSocket.OPEN,
-      pendingTransportOpen: false,
-      forceReplaceTransport: true,
-      source: 'reconnect',
-    })).toEqual({
-      action: 'rebuild',
-      reason: 'force-replace',
     });
   });
 
@@ -854,7 +889,7 @@ describe('session sync helper visible-range truth', () => {
     })).toBe(true);
   });
 
-  it('requests visible-range repair when local mirror misses the declared request window history', () => {
+  it('does not request visible-range repair for hidden history outside the declared visible range', () => {
     const session = makeSession({
       daemonHeadEndIndex: 80,
       buffer: {
@@ -867,7 +902,7 @@ describe('session sync helper visible-range truth', () => {
       startIndex: 56,
       endIndex: 80,
       viewportRows: 24,
-    })).toBe(true);
+    })).toBe(false);
   });
 
   it('keeps tail refresh independent from visible-range repair mode', () => {
@@ -888,7 +923,7 @@ describe('session sync helper visible-range truth', () => {
     })).toBe(true);
   });
 
-  it('re-fetches the full follow request window when daemon revision advances without tail growth', () => {
+  it('re-fetches the visible follow window when daemon revision advances without tail growth', () => {
     const session = makeSession({
       daemonHeadRevision: 7,
       daemonHeadEndIndex: 120,
@@ -911,12 +946,12 @@ describe('session sync helper visible-range truth', () => {
       knownRevision: 6,
       localStartIndex: 80,
       localEndIndex: 120,
-      requestStartIndex: 48,
+      requestStartIndex: 96,
       requestEndIndex: 120,
     });
   });
 
-  it('builds reading-repair payload from visible range request window and gaps', () => {
+  it('builds reading-repair payload from the visible range only', () => {
     const session = makeSession({
       daemonHeadEndIndex: 80,
       buffer: {
@@ -935,10 +970,9 @@ describe('session sync helper visible-range truth', () => {
       knownRevision: 5,
       localStartIndex: 56,
       localEndIndex: 80,
-      requestStartIndex: 8,
+      requestStartIndex: 56,
       requestEndIndex: 80,
       missingRanges: [
-        { startIndex: 8, endIndex: 56 },
         { startIndex: 72, endIndex: 76 },
       ],
     });
@@ -969,7 +1003,7 @@ describe('session sync helper visible-range truth', () => {
     });
   });
 
-  it('widens same-end tail refresh to the full cache window when resume requests force a tail re-sync', () => {
+  it('keeps forced same-end tail refresh inside the current visible window', () => {
     const session = makeSession({
       daemonHeadRevision: 6,
       daemonHeadEndIndex: 80,
@@ -989,7 +1023,7 @@ describe('session sync helper visible-range truth', () => {
       knownRevision: 5,
       localStartIndex: 8,
       localEndIndex: 80,
-      requestStartIndex: 8,
+      requestStartIndex: 56,
       requestEndIndex: 80,
     });
   });
@@ -1023,7 +1057,7 @@ describe('session sync helper visible-range truth', () => {
       knownRevision: 13822,
       localStartIndex: 135484,
       localEndIndex: 136484,
-      requestStartIndex: 136394,
+      requestStartIndex: 136454,
       requestEndIndex: 136484,
     });
   });
