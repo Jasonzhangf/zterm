@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { queueSessionTransportOpenIntentRuntime } from './session-context-transport-open-runtime';
+import {
+  handleReconnectHandshakeFailureRuntime,
+  queueSessionTransportOpenIntentRuntime,
+} from './session-context-transport-open-runtime';
 import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
 
 function makeHost() {
@@ -57,5 +60,94 @@ describe('queueSessionTransportOpenIntentRuntime', () => {
     expect(pendingSessionTransportOpenIntentsRef.current.size).toBe(1);
     expect(pendingSessionTransportOpenIntentsRef.current.get('session-1')?.debugScope).toBe('reconnect');
     expect(ensureControlTransportForSessionOpen).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('handleReconnectHandshakeFailureRuntime', () => {
+  it('keeps retryable reconnect handshake failures out of terminal error projection', () => {
+    const reconnectRuntimesRef = {
+      current: new Map([
+        ['session-1', {
+          attempt: 1,
+          timer: null,
+          nextDelayMs: null,
+          connecting: true,
+        }],
+      ]),
+    };
+    const updateSessionSync = vi.fn();
+    const emitSessionStatus = vi.fn();
+    const startReconnectAttempt = vi.fn();
+
+    handleReconnectHandshakeFailureRuntime({
+      sessionId: 'session-1',
+      message: 'control socket closed before attach',
+      retryable: true,
+      reconnectRuntimesRef,
+      clearSupersededSockets: vi.fn(),
+      updateSessionSync,
+      emitSessionStatus,
+      createSessionReconnectRuntime: () => ({
+        attempt: 0,
+        timer: null,
+        nextDelayMs: null,
+        connecting: false,
+      }),
+      startReconnectAttempt,
+    });
+
+    expect(reconnectRuntimesRef.current.get('session-1')).toEqual(expect.objectContaining({
+      attempt: 2,
+      connecting: false,
+    }));
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', {
+      state: 'reconnecting',
+      lastError: 'control socket closed before attach',
+      reconnectAttempt: 2,
+      ws: null,
+    });
+    expect(emitSessionStatus).not.toHaveBeenCalled();
+    expect(startReconnectAttempt).toHaveBeenCalledWith('session-1');
+  });
+
+  it('projects terminal error only for nonretryable reconnect handshake failures', () => {
+    const reconnectRuntimesRef = {
+      current: new Map([
+        ['session-1', {
+          attempt: 1,
+          timer: null,
+          nextDelayMs: null,
+          connecting: true,
+        }],
+      ]),
+    };
+    const updateSessionSync = vi.fn();
+    const emitSessionStatus = vi.fn();
+    const startReconnectAttempt = vi.fn();
+
+    handleReconnectHandshakeFailureRuntime({
+      sessionId: 'session-1',
+      message: 'auth rejected',
+      retryable: false,
+      reconnectRuntimesRef,
+      clearSupersededSockets: vi.fn(),
+      updateSessionSync,
+      emitSessionStatus,
+      createSessionReconnectRuntime: () => ({
+        attempt: 0,
+        timer: null,
+        nextDelayMs: null,
+        connecting: false,
+      }),
+      startReconnectAttempt,
+    });
+
+    expect(reconnectRuntimesRef.current.has('session-1')).toBe(false);
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', {
+      state: 'error',
+      lastError: 'auth rejected',
+    });
+    expect(emitSessionStatus).toHaveBeenCalledWith('session-1', 'error', 'auth rejected');
+    expect(startReconnectAttempt).not.toHaveBeenCalled();
   });
 });

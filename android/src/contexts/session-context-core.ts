@@ -197,7 +197,7 @@ export interface SessionContextValue {
   getSessionDebugMetrics: (sessionId: string) => SessionDebugOverlayMetrics | null;
   createSession: (host: Host, options?: CreateSessionOptions) => string;
   closeSession: (id: string) => void;
-  switchSession: (id: string) => void;
+  switchSession: (id: string, options?: { refreshSource?: 'explicit-resume' | 'active-reentry' }) => void;
   setLiveSessionIds: (ids: string[]) => void;
   moveSession: (id: string, toIndex: number) => void;
   renameSession: (id: string, name: string) => void;

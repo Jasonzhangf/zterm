@@ -137,7 +137,7 @@ describe('useOpenTabRuntime explicit resume gating', () => {
     });
 
     expect(switchSession).toHaveBeenCalledTimes(1);
-    expect(switchSession).toHaveBeenCalledWith('s2');
+    expect(switchSession).toHaveBeenCalledWith('s2', { refreshSource: 'explicit-resume' });
     expect(resumeActiveSessionTransport).not.toHaveBeenCalled();
     expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
   });
@@ -172,7 +172,7 @@ describe('useOpenTabRuntime explicit resume gating', () => {
     });
 
     expect(switchSession).toHaveBeenCalledTimes(1);
-    expect(switchSession).toHaveBeenCalledWith('s2');
+    expect(switchSession).toHaveBeenCalledWith('s2', { refreshSource: 'explicit-resume' });
     expect(resumeActiveSessionTransport).toHaveBeenCalledTimes(1);
     expect(resumeActiveSessionTransport).toHaveBeenCalledWith('s2');
   });

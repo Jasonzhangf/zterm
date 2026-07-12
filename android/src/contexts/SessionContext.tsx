@@ -232,7 +232,9 @@ export function SessionProvider({
     getSessionDebugMetrics: (sessionId: string) => contextRuntimeRef.current.getSessionDebugMetrics(sessionId),
     createSession: (...args: Parameters<typeof createSession>) => contextRuntimeRef.current.createSession(...args),
     closeSession: (id: string) => contextRuntimeRef.current.closeSession(id),
-    switchSession: (id: string) => contextRuntimeRef.current.switchSession(id),
+    switchSession: (id: string, options?: { refreshSource?: 'explicit-resume' | 'active-reentry' }) => (
+      contextRuntimeRef.current.switchSession(id, options)
+    ),
     moveSession: (id: string, toIndex: number) => contextRuntimeRef.current.moveSession(id, toIndex),
     renameSession: (id: string, name: string) => contextRuntimeRef.current.renameSession(id, name),
     reconnectSession: (id: string) => contextRuntimeRef.current.reconnectSession(id),

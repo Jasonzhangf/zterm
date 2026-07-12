@@ -1812,3 +1812,17 @@ Need runtime debug to confirm:
 - 根因：same-socket head probe 超时只证明 head response 没按预算回来，不证明 WebSocket 物理失败。旧逻辑会把 quiet / delayed response 升级成重建 WebSocket，和当前 reuse truth 冲突。
 - 修复：head probe timeout 只记录 debug、清 stale marker，然后继续在同一 `OPEN` socket 上发下一次 `buffer-head-request`。
 - 回归：`session-context-activity-runtime.test.ts` 改为断言过期 probe marker + `WebSocket.OPEN` 时仍调用 `requestSessionBufferHead`，且不调用 `reconnectSession`。
+
+## 2026-07-12 retryable reconnect handshake failure projection
+
+- 架构映射：本轮属于 `terminal.transport_lifecycle`，涉及 `resource.session_transport` / `resource.pending_open_intent` / `resource.ui_projection`。唯一修改点是 `session-context-transport-open-runtime.ts` 的 reconnect handshake failure owner；UI drawer / renderer / daemon 不参与补偿。
+- 红测先行：新增 `handleReconnectHandshakeFailureRuntime` 正反测试。retryable reconnect handshake failure 必须保持 `state='reconnecting'`、递增 reconnect attempt 并继续 `startReconnectAttempt()`，不得 `emitSessionStatus(..., 'error')`；nonretryable failure 才投 terminal error。
+- 修复：移除 retryable reconnect handshake failure 分支里的 `emitSessionStatus('error')`。这避免中间 control/session attach 失败被 drawer/UI 投影成“连接失败”，同时不改变 nonretryable/auth rejected 的终态错误路径。
+- 验证：红测先失败，修复后 `session-context-transport-open-runtime.test.ts` 3 tests PASS；transport owner focused gates 4 files / 35 tests PASS；`test:feature-registry` 7 files / 45 tests PASS；`tsc --noEmit` PASS。
+
+## 2026-07-12 explicit session switch must preserve explicit-resume owner
+
+- 架构映射：本轮仍属于 `terminal.transport_lifecycle`，涉及 `resource.open_tab -> resource.active_session -> resource.session_transport`。`open-tab` 负责显式 tab/session intent，`SessionContext` active switch owner 负责把 refresh source 投给唯一 transport lifecycle。
+- 根因：`useOpenTabRuntime` 已把 drawer/tab switch 标为 `switchRuntime:'explicit-resume'`，但传到 `SessionContext.switchSession(id)` 后，provider facade 固定用 `source:'active-reentry'` 调 `ensureActiveSessionFresh()`。这会把显式用户选择降级成 lifecycle re-entry，造成同一 drawer select 的资源语义被拆成 open-tab explicit intent 与 transport active-reentry 两条。
+- 修复：`switchSession(id, { refreshSource })` 允许 open-tab explicit-resume reason 直接进入 SessionContext active switch owner；默认仍是 `active-reentry`，保护其它内部 active 切换路径。`useOpenTabRuntime` 在 `switchRuntime:'explicit-resume'` 时传 `{ refreshSource:'explicit-resume' }`。
+- 验证：`useOpenTabRuntime.test.tsx` 锁 explicit switch 传入 `refreshSource:'explicit-resume'`；focused gates 6 files / 48 tests PASS；resource/architecture feature registry 7 files / 45 tests PASS；`tsc --noEmit` PASS。

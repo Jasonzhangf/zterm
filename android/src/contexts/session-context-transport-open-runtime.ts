@@ -321,7 +321,6 @@ export function handleReconnectHandshakeFailureRuntime(options: {
     options.sessionId,
     buildSessionReconnectingFailureUpdates(options.message, nextReconnectRuntime.attempt),
   );
-  options.emitSessionStatus(options.sessionId, 'error', options.message);
   options.startReconnectAttempt(options.sessionId);
 }
 

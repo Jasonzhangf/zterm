@@ -844,3 +844,16 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - A same-socket `buffer-head-request` timeout on an `OPEN` WebSocket is not transport failure truth. The activity freshness owner may clear the stale probe marker and send another head request on the same socket, but must not call `reconnectSession()` from the timeout itself.
 - Rebuild remains allowed only for physical close/error, target mismatch, explicit user reconnect/open, or missing/closed socket in explicit open/resume. Quiet time, missed head response, stale activity, or local reconnect bookkeeping are not rebuild reasons.
 - Regression gate: `session-context-activity-runtime.test.ts` must cover expired head probe marker + `WebSocket.OPEN` still calling `requestSessionBufferHead` and not calling `reconnectSession`.
+
+## 2026-07-12 Retryable reconnect handshake failure is not terminal error truth
+
+- `terminal.transport_lifecycle` owns reconnect handshake failure projection. Retryable reconnect handshake failures are intermediate transport facts, not terminal session error truth.
+- Correct behavior: retryable reconnect handshake failure keeps the session in `reconnecting`, updates attempt/error text for observability, and schedules the next reconnect attempt. It must not emit `SESSION_STATUS_EVENT(type='error')` or make the drawer/UI show final “连接失败”.
+- Terminal error projection is allowed only for nonretryable handshake failure or a future explicitly exhausted retry state. UI/drawer must not add a compensating retry/error filter; daemon and renderer are outside this owner.
+- Regression gate: `session-context-transport-open-runtime.test.ts` must keep paired tests proving retryable failure does not call `emitSessionStatus`, while nonretryable failure still does.
+
+## 2026-07-12 Explicit session switch must reach the transport owner as explicit-resume
+
+- Drawer/tab switch is a user explicit resume intent. `useOpenTabRuntime` must not only persist `switchRuntime:'explicit-resume'`; it must pass the same reason into `SessionContext.switchSession(..., { refreshSource:'explicit-resume' })` so the transport lifecycle owner does not downgrade it to `active-reentry`.
+- `active-reentry` remains the default for internal lifecycle changes, but user-visible switch/resume/open-tab selection must enter `ensureActiveSessionFresh()` as `explicit-resume` and request `forceHead + markResumeTail`.
+- Regression gate: `useOpenTabRuntime.test.tsx` must prove explicit switch calls `switchSession(target, { refreshSource:'explicit-resume' })`; lifecycle tests continue to prove ordinary activeSessionId changes use `active-reentry`.

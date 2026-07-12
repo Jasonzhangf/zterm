@@ -138,7 +138,8 @@ export function useSessionProviderFacadeAssemblies(
     probeOrReconnectStaleSessionTransport,
     ensureActiveSessionFresh,
   } = sessionLifecycleRuntime;
-  const switchSession = (id: string) => {
+  const switchSession = (id: string, switchOptions?: { refreshSource?: 'explicit-resume' | 'active-reentry' }) => {
+    const refreshSource = switchOptions?.refreshSource || 'active-reentry';
     const prev = options.stateRef.current.activeSessionId;
     if (prev && prev !== id) {
       core.resetSessionTransportPullBookkeeping(prev, 'tab-switch-out');
@@ -149,7 +150,7 @@ export function useSessionProviderFacadeAssemblies(
     core.resetSessionTransportPullBookkeeping(id, 'tab-switch-in');
     ensureActiveSessionFresh({
       sessionId: id,
-      source: 'active-reentry',
+      source: refreshSource,
       forceHead: true,
       markResumeTail: true,
       allowReconnectIfUnavailable: true,

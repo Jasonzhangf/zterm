@@ -67,7 +67,7 @@ interface UseOpenTabRuntimeOptions {
     },
   ) => string;
   closeSession: (sessionId: string) => void;
-  switchSession: (sessionId: string) => void;
+  switchSession: (sessionId: string, options?: { refreshSource?: 'explicit-resume' | 'active-reentry' }) => void;
   moveSession: (sessionId: string, toIndex: number) => void;
   renameSession: (sessionId: string, name: string) => void;
   reconnectSession: (sessionId: string) => void;
@@ -265,7 +265,9 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
       }
     }
     if (nextActiveSessionId !== runtimeActiveSessionIdRef.current) {
-      switchSession(nextActiveSessionId);
+      switchSession(nextActiveSessionId, {
+        refreshSource: switchReason === 'explicit-resume' ? 'explicit-resume' : 'active-reentry',
+      });
     }
     const shouldResumeUnavailableRuntime = (
       switchReason === 'explicit-resume'
