@@ -152,4 +152,78 @@ describe('resource registry truth gate', () => {
       expect(resourceIds.has(resourceId), resourceId).toBe(true);
     }
   });
+
+  it('keeps daemon release and CLI execution on deterministic runtime artifacts', () => {
+    const devCli = read('../android/scripts/zterm-daemon.sh');
+    const releaseBuilder = read('../android/scripts/prepare-global-daemon-release.sh');
+    const npmPackager = read('../android/scripts/prepare-daemon-npm-package.mjs');
+    const windowsRunner = read('../android/scripts/windows/zterm-daemon.ps1');
+
+    expect(devCli).toContain('STAGED_DAEMON_ENTRY="${DAEMON_RUNTIME_DIR}/server.cjs"');
+    expect(devCli).toContain('"$NODE_BIN" "$STAGED_DAEMON_ENTRY"');
+    expect(devCli).not.toContain('"$NODE_BIN" "$DAEMON_ENTRY"');
+    expect(devCli).not.toContain('tsx src/server/server.ts');
+
+    expect(releaseBuilder).toContain('STAGED_DAEMON_ENTRY="${RUNTIME_DIR}/server.cjs"');
+    expect(releaseBuilder).toContain('--outfile="${RUNTIME_DIR}/server.cjs"');
+    expect(releaseBuilder).toContain('"$NODE_BIN" "$STAGED_DAEMON_ENTRY"');
+    expect(releaseBuilder).not.toContain('"$NODE_BIN" "${ROOT_DIR}/src/server/server.ts"');
+    expect(releaseBuilder).not.toContain('tsx src/server/server.ts');
+
+    expect(npmPackager).toContain("requirePath(resolve(releaseDir, 'runtime/server.cjs')");
+    expect(npmPackager).toContain("cpSync(resolve(releaseDir, 'runtime'), resolve(npmPackageDir, 'runtime')");
+    expect(npmPackager).toContain("const script = resolve(packageRoot, 'support/windows/zterm-daemon.ps1')");
+    expect(npmPackager).not.toContain("resolve(projectRoot, 'src/server/server.ts')");
+
+    expect(windowsRunner).toContain('$RuntimeEntry = Join-Path $PackageRoot "runtime\\server.cjs"');
+    expect(windowsRunner).toContain('throw "missing daemon runtime: $RuntimeEntry"');
+    expect(windowsRunner).toContain('& $NodeExe $RuntimeEntry');
+    expect(windowsRunner).not.toContain('src\\server\\server.ts');
+    expect(windowsRunner).not.toContain('tsx');
+  });
+
+  it('keeps release artifacts from bypassing promoted daemon runtime artifacts', () => {
+    const registry = JSON.parse(read('docs/resource-registry.json')) as ResourceRegistry;
+    const releaseResource = registry.resources.find(
+      (resource) => resource.resource_id === 'resource.release_update_artifact',
+    );
+    const runtimeArtifact = registry.resources.find(
+      (resource) => resource.resource_id === 'resource.daemon_runtime_artifact',
+    );
+
+    expect(releaseResource).toBeTruthy();
+    expect(releaseResource?.direct_relations).toEqual(['resource.daemon_runtime_artifact']);
+    expect(releaseResource?.indirect_relations).toContain('resource.daemon_process');
+    expect(releaseResource?.via_resources).toContain('resource.daemon_runtime_artifact');
+    expect(releaseResource?.forbidden_direct_relations).toContain('resource.daemon_process');
+
+    expect(runtimeArtifact).toBeTruthy();
+    expect(runtimeArtifact?.direct_relations).toContain('resource.daemon_process');
+    expect(runtimeArtifact?.allowed_operations).toContain('execute_artifact');
+  });
+
+  it('keeps debug channels observe-only and out of business truth resources', () => {
+    const registry = JSON.parse(read('docs/resource-registry.json')) as ResourceRegistry;
+    const debugResource = registry.resources.find((resource) => resource.resource_id === 'resource.debug_channel');
+    const transportRuntime = read('../android/src/server/terminal-transport-runtime.ts');
+    const debugRuntime = read('../android/src/server/terminal-debug-runtime.ts');
+
+    expect(debugResource).toBeTruthy();
+    expect(debugResource?.direct_relations).toEqual([]);
+    expect(debugResource?.allowed_operations).toEqual(['observe', 'record_metadata', 'diagnose']);
+    expect(debugResource?.forbidden_direct_relations).toEqual(
+      expect.arrayContaining([
+        'resource.open_tab',
+        'resource.active_session',
+        'resource.mirror_store',
+        'resource.client_sparse_buffer',
+        'resource.ui_projection',
+      ]),
+    );
+
+    expect(transportRuntime).toContain('payloadSummary: deps.summarizePayload(message)');
+    expect(transportRuntime).not.toContain('payload: deps.summarizePayload(message)');
+    expect(debugRuntime).toContain("'payloadSummary'");
+    expect(debugRuntime).not.toContain("copy.payload =");
+  });
 });
