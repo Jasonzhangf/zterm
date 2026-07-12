@@ -332,10 +332,11 @@ export function buildSessionScheduleErrorState(
 
 export function buildSessionReconnectAttemptProgressUpdates(
   reconnectAttempt: number,
-): Pick<Session, 'state' | 'reconnectAttempt'> {
+): Pick<Session, 'state' | 'reconnectAttempt' | 'lastError'> {
   return {
     state: 'reconnecting',
     reconnectAttempt,
+    lastError: undefined,
   };
 }
 

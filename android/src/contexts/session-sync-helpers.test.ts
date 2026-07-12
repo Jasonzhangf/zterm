@@ -574,6 +574,7 @@ describe('session sync helper session connection config truth', () => {
     expect(buildSessionReconnectAttemptProgressUpdates(3)).toEqual({
       state: 'reconnecting',
       reconnectAttempt: 3,
+      lastError: undefined,
     });
   });
 
