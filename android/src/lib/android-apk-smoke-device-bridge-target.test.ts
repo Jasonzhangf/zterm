@@ -116,6 +116,35 @@ describe('android apk smoke device bridge target parser', () => {
     }));
   });
 
+  it('does not resurrect stale fragmented open tabs when current open-tabs truth is empty', () => {
+    const parsed = extractApkSmokeBridgeDebugTargetFromStorageDump([
+      'zterm:active-session',
+      "session-1782952800836-0hoooloi'_http://localhost",
+      '_http://localhost',
+      'zterm:open-tabs7R',
+      '[{"sessionId":',
+      'd-1778544465921-yq0l9dr6","bridgeHost":"100.66.1.82","bridgePort":3333,"authToken":"old-token","sessionName":"old"}',
+      'bridge-settings',
+      ':l{"targetHost":"100.66.1.82",',
+      '$Port":3333',
+      '0AuthToken":"wterm-4123456","xCacheLines":3000}',
+      '_http://localhost',
+      'zterm:open-tabs',
+      'T[]',
+    ].join('\n'));
+
+    expect(parsed.activeSessionId).toBeNull();
+    expect(parsed.target).toEqual(expect.objectContaining({
+      source: 'bridge-settings-target',
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+      authToken: 'wterm-4123456',
+    }));
+    expect(parsed.target).not.toEqual(expect.objectContaining({
+      sessionId: 'session-1778544465921-yq0l9dr6',
+    }));
+  });
+
   it('returns null when no bridge-like payload exists in the dump', () => {
     const parsed = extractApkSmokeBridgeDebugTargetFromStorageDump('hello\nworld\nno json here');
     expect(parsed.activeSessionId).toBeNull();

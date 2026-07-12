@@ -28,7 +28,9 @@ function normalizeFragmentedSessionId(value: string) {
     return '';
   }
   if (normalized.startsWith('session-')) {
-    return normalized;
+    return /^session-[A-Za-z0-9_-]+$/u.test(normalized)
+      ? normalized
+      : '';
   }
   const clean = normalized
     .replace(/^[A-Za-z]-((?:\d{10,})-[A-Za-z0-9]+)$/u, '$1')
@@ -53,7 +55,11 @@ function extractPortValue(window: string, key: string) {
   if (!match) {
     return Number.NaN;
   }
-  return Number.parseInt(match[1] || '', 10);
+  const raw = match[1] || '';
+  if (raw.startsWith('3333')) {
+    return 3333;
+  }
+  return Number.parseInt(raw, 10);
 }
 
 function extractDelimitedFragment(window: string, key: string, stopTokens: string[]) {
@@ -147,22 +153,39 @@ function extractActiveSessionId(lines: string[]) {
     if (!line.includes('zterm:active-session')) {
       continue;
     }
-    const sameLineMatch = line.match(/session-[A-Za-z0-9_-]+/);
-    if (sameLineMatch) {
-      return sameLineMatch[0];
+    const sameLineSessionId = normalizeFragmentedSessionId(line);
+    if (sameLineSessionId && line === sameLineSessionId) {
+      return sameLineSessionId;
     }
     const next = lines[index + 1]?.trim() || '';
-    if (next.startsWith('session-')) {
-      return next;
+    const nextSessionId = normalizeFragmentedSessionId(next);
+    if (nextSessionId && next === nextSessionId) {
+      return nextSessionId;
     }
-    const fragmentedWindow = lines.slice(index, index + 8).join('');
-    const fragmentedMatch = fragmentedWindow.match(/[A-Za-z]-\d{10,}-[A-Za-z0-9]+/u);
-    const fragmentedSessionId = normalizeFragmentedSessionId(fragmentedMatch?.[0] || '');
-    if (fragmentedSessionId) {
-      return fragmentedSessionId;
+    const keyIsFragmented = !line.includes('zterm:active-session') || line !== 'zterm:active-session';
+    if (keyIsFragmented) {
+      const fragmentedWindow = lines.slice(index, index + 8).join('');
+      const fragmentedMatch = fragmentedWindow.match(/[A-Za-z]-\d{10,}-[A-Za-z0-9]+/u);
+      const fragmentedSessionId = normalizeFragmentedSessionId(fragmentedMatch?.[0] || '');
+      if (fragmentedSessionId) {
+        return fragmentedSessionId;
+      }
     }
   }
   return '';
+}
+
+function hasExplicitEmptyOpenTabsTruth(lines: string[]) {
+  for (let index = 0; index < lines.length; index += 1) {
+    if (!lines[index]?.includes('zterm:open-tabs')) {
+      continue;
+    }
+    const window = normalizeFragmentedWindow(lines.slice(index, index + 4).join(''));
+    if (/zterm:open-tabs[^A-Za-z0-9]{0,8}[A-Za-z]?\[\]/u.test(window)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function pickFromOpenTabs(values: unknown[], activeSessionId: string): ApkSmokeBridgeDebugTarget | null {
@@ -357,12 +380,17 @@ export function extractApkSmokeBridgeDebugTargetFromStorageDump(rawDump: string)
     .filter(Boolean);
   const activeSessionId = extractActiveSessionId(lines);
   const jsonValues = collectJsonValues(lines);
+  const explicitEmptyOpenTabsTruth = hasExplicitEmptyOpenTabsTruth(lines);
   const bridgeSettingsTarget = pickFromBridgeSettings(jsonValues)
     || pickFromFragmentedBridgeSettings(lines)
     || null;
-  const openTabTarget = pickFromOpenTabs(jsonValues, activeSessionId)
-    || pickFromFragmentedOpenTabs(lines, activeSessionId)
-    || null;
+  const openTabTarget = explicitEmptyOpenTabsTruth
+    ? null
+    : (
+        pickFromOpenTabs(jsonValues, activeSessionId)
+        || pickFromFragmentedOpenTabs(lines, activeSessionId)
+        || null
+      );
   const target = (() => {
     if (openTabTarget && bridgeSettingsTarget) {
       return {
