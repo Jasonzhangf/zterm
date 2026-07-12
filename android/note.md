@@ -1855,3 +1855,10 @@ Need runtime debug to confirm:
 - 根因：`sanitizeDaemonDebugPayload()` 会把任意 object `payload` 复制成 `payloadSummary`，而 transport send callsite 传的是 `payload: summarizePayload(message)`。虽然当前 summary 已被裁剪，但字段语义仍允许 raw payload 进入 debug channel。
 - 修复：daemon debug sanitizer 只接受显式 `payloadSummary` object；transport send runtime 改为传 `payloadSummary: deps.summarizePayload(message)`。
 - 验证：`terminal-debug-runtime.test.ts`、`terminal-transport-runtime.test.ts`、`server.transport-runtime-truth.test.ts`、`server.debug-truth.test.ts` 共 14 tests PASS；Android `tsc --noEmit` PASS；feature/resource gates 7 files / 45 tests PASS。
+
+## 2026-07-12 CLI/release/debug resource truth gate
+- 架构映射：本轮属于 `daemon.cli_shell` / `daemon.cli_node` / `daemon.support`，涉及 `resource.release_update_artifact -> resource.daemon_runtime_artifact -> resource.daemon_process` 与 `resource.debug_channel` observe-only。
+- 审计结论：mac dev CLI 会先把 `src/server/server.ts` bundle/stage 到 `~/.zterm/daemon-runtime/server.cjs` 再执行；release support script 执行包内 `runtime/server.cjs`；Windows runner 只接受 `$PackageRoot/runtime/server.cjs`；npm 包从 release runtime 拷贝 deterministic artifact。
+- Gate：`resource-registry-truth.test.ts` 新增三组资源门禁：CLI/release/Windows runner 必须执行 staged `server.cjs`、release artifact 不得直连 daemon process、debug channel 只能 `payloadSummary`/observe-only。
+- 验证：focused `resource-registry-truth.test.ts` 8 PASS；`test:feature-registry` 7 files / 48 tests PASS；Android `tsc --noEmit` PASS；`verify-release-assets.mjs` OK；Mac 22 files / 149 tests PASS + type-check PASS；daemon mirror close-loop 8 cases PASS；Windows Tailscale peer `100.75.122.121` 仍因 node key expired/offline 无法做真实 WezTerm remote smoke。
+- 提交：`3e93f96 test: lock CLI resource truth gates` 已推送 origin/main。

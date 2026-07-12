@@ -718,3 +718,10 @@ tmux truth
 
 - Runtime debug is metadata observation only. Never pass raw business `payload` into daemon debug storage or logs; use explicit `payloadSummary` built by the owner summarizer.
 - Debug sanitizer must ignore arbitrary `payload` fields, including terminal rows and input text. If a new debug scope needs details, add an allowlisted scalar or summary field and a red test proving raw payload is not stored.
+
+## CLI/release/debug resource truth
+
+- daemon CLI/release/debug 改动必须先绑定资源链：`resource.release_update_artifact -> resource.daemon_runtime_artifact -> resource.daemon_process`；release/update artifact 禁止直接启动或成为 daemon process truth。
+- runtime 执行入口只能是 deterministic staged/package artifact（mac dev `~/.zterm/daemon-runtime/server.cjs`，release/npm/package `runtime/server.cjs`，Windows `$PackageRoot/runtime/server.cjs`）。authoring source `src/server/server.ts` 只允许在 build/stage owner 内作为 bundler input，不得被 runtime runner 直接执行。
+- debug channel 只能 observe/record metadata/diagnose；transport send logging 必须写 `payloadSummary`，禁止把 raw terminal payload、mirror rows、client sparse buffer 或 UI projection 写成 debug business truth。
+- 必跑 gate：`src/lib/resource-registry-truth.test.ts`、`src/lib/mainline-resource-call-map.test.ts`、`test:feature-registry`、`tsc --noEmit`；release artifact 变化时加跑 `scripts/verify-release-assets.mjs`。
