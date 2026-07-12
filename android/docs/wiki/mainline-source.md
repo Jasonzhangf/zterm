@@ -72,6 +72,31 @@ flowchart TD
   Npm --> WinShell
 ```
 
+## Global Resource Flow
+
+The executable resource graph is declared in `docs/resource-registry.json`; the review surface is `docs/resource-map.md`. Mainline call-map edges in `docs/wiki/mainline-call-map.json` bind each lifecycle edge to `resource_from`, `resource_to`, `via_resources`, and `relation_status`.
+
+```mermaid
+flowchart TD
+  RuntimeHome["resource.runtime_home"] --> DaemonArtifact["resource.daemon_runtime_artifact"]
+  DaemonArtifact --> DaemonProcess["resource.daemon_process"]
+  DaemonProcess --> TerminalBackend["resource.terminal_backend"]
+  TerminalBackend --> BackendSession["resource.backend_session"]
+  BackendSession --> TmuxSession["resource.tmux_session"]
+  BackendSession --> WeztermPane["resource.wezterm_pane"]
+  SessionTransport["resource.session_transport"] --> TransportSubscriber["resource.transport_subscriber"]
+  TransportSubscriber --> MirrorStore["resource.mirror_store"]
+  MirrorStore --> ClientSparseBuffer["resource.client_sparse_buffer"]
+  ClientSparseBuffer --> RendererWindow["resource.renderer_window"]
+  RendererWindow --> UiProjection["resource.ui_projection"]
+  OpenTab["resource.open_tab"] --> ActiveSession["resource.active_session"]
+  ActiveSession --> SessionTransport
+  PlatformInput["resource.platform_input_channel"] --> SessionTransport
+  DaemonInputQueue["resource.daemon_input_queue"] --> BackendSession
+  ReleaseArtifact["resource.release_update_artifact"] --> DaemonArtifact
+  DebugChannel["resource.debug_channel"] -. observe only .-> DaemonProcess
+```
+
 ## Published Source Surfaces
 
 | surface | files |
@@ -87,9 +112,13 @@ flowchart TD
 | Daemon CLI | `scripts/zterm-daemon.sh`, `scripts/windows/zterm-daemon.ps1`, `scripts/install-global-daemon-cli.sh`, `scripts/prepare-global-daemon-release.sh`, `scripts/prepare-daemon-npm-package.mjs` |
 | Release/update | `scripts/build-android-debug.sh`, `scripts/prepare-update-bundle.mjs`, `scripts/verify-release-assets.mjs` |
 | Worker wiki generator | `scripts/build-function-wiki.mjs`, `docs/wiki/daemon.md`, `docs/wiki/cli.md`, `docs/wiki/mainline-source.md` |
+| Global resource truth | `docs/resource-registry.json`, `docs/resource-map.md`, `docs/testing/resource-truth-test-design.md` |
 
 ## Gate
 
 - `src/lib/feature-registry-truth.test.ts`
 - `src/lib/function-wiki-truth.test.ts`
+- `src/lib/resource-registry-truth.test.ts`
+- `src/lib/function-map-resource-truth.test.ts`
+- `src/lib/mainline-resource-call-map.test.ts`
 - `pnpm run test:feature-registry`

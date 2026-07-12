@@ -66,3 +66,36 @@ Rules:
 - One feature has one owner surface. Shared helpers are allowed only when the registry names them as allowed paths.
 - Forbidden paths are hard boundaries. Do not patch behavior there to make a feature pass indirectly.
 - Required gates are the minimum verification stack, not a replacement for broader regression when the change has wider impact.
+
+## Resource Binding Map
+
+`docs/resource-registry.json` is the top-level machine-readable resource truth. `docs/resource-map.md` is the human review surface. This function map binds feature-local owners to declared global resources only; it must not invent resource ids or shortcut edges.
+
+| feature_id | resource_ids | relation notes |
+| --- | --- | --- |
+| `terminal.keyboard_ime` | `resource.platform_input_channel`, `resource.session_transport`, `resource.daemon_input_queue` | Input is captured by platform input owner, then sent through current session transport and daemon input queue. It must not write `resource.backend_session`, `resource.tmux_session`, or `resource.wezterm_pane` directly. |
+| `terminal.schedule` | `resource.schedule_job`, `resource.backend_session` | Scheduled jobs dispatch only through backend session owner. |
+| `terminal.remote_screenshot` | `resource.remote_screenshot`, `resource.backend_session`, `resource.debug_channel` | Screenshot request/result is daemon side state; debug can observe only. |
+| `terminal.open_tabs` | `resource.open_tab`, `resource.active_session` | Open tabs are explicit persisted client truth; transport/runtime facts must not close or merge them. |
+| `terminal.transport_lifecycle` | `resource.active_session`, `resource.session_transport`, `resource.transport_target`, `resource.pending_open_intent`, `resource.transport_subscriber` | Active session owns the current resource identity; session transport owns socket reuse/open/close and single-flight open intent. |
+| `terminal.daemon_input` | `resource.daemon_input_queue`, `resource.backend_session`, `resource.tmux_session` | Daemon input queue is the only write queue into backend sessions and tmux. |
+| `terminal.buffer_render` | `resource.mirror_store`, `resource.client_sparse_buffer`, `resource.renderer_window` | Mirror store is daemon canonical content/geometry truth; client sparse buffer consumes patches; renderer owns visible demand only. |
+| `terminal.session_group_layout` | `resource.platform_terminal_surface`, `resource.ui_projection`, `resource.renderer_window` | Layout projects platform surface and panes; it does not own terminal content layout. |
+| `terminal.session_drawer` | `resource.ui_projection`, `resource.open_tab`, `resource.active_session` | Drawer displays projection and emits intent; it cannot open transport sockets directly. |
+| `terminal.quickbar` | `resource.ui_projection`, `resource.platform_input_channel` | Quickbar is shell/input projection; input still routes through platform input and session transport resources. |
+| `terminal.workspace_panes` | `resource.platform_terminal_surface`, `resource.ui_projection`, `resource.renderer_window` | Pane shell arranges projection and renderer containers; terminal layout remains backend/mirror truth. |
+| `terminal.interaction_runtime` | `resource.ui_projection`, `resource.active_session` | Interaction runtime resolves active pane/session intent, then delegates to active session owner. |
+| `terminal.shell_actions` | `resource.ui_projection`, `resource.active_session`, `resource.session_transport` | Shell actions emit high-level intent and must not bypass session transport owner. |
+| `connections.history_projection` | `resource.ui_projection`, `resource.open_tab` | Connections projection displays saved/history/runtime facts but does not create current tab truth. |
+| `relay.account_directory` | `resource.debug_channel`, `resource.transport_target` | Relay directory facts can inform target resolution but are not open-tab or renderer truth. |
+| `relay.route_selection` | `resource.transport_target`, `resource.session_transport`, `resource.debug_channel` | Route selection produces target diagnostics and selected target facts; transport owner consumes them. |
+| `relay.directory_ui` | `resource.ui_projection`, `resource.transport_target` | Directory UI projects remote machine/session facts and emits explicit open intent only. |
+| `daemon.file_transfer` | `resource.file_transfer`, `resource.backend_session` | File transfer state is daemon-owned and reaches terminal context through backend session owner. |
+| `daemon.runtime_entry` | `resource.runtime_home`, `resource.daemon_process`, `resource.terminal_backend`, `resource.debug_channel` | Daemon process wires runtime modules and health/debug endpoints; it must not own client active/session state. |
+| `daemon.windows_wezterm_backend` | `resource.terminal_backend`, `resource.backend_session`, `resource.wezterm_pane`, `resource.mirror_store` | WezTerm backend owns pane capture/input adapter and feeds mirror store through backend capture. |
+| `daemon.cli_shell` | `resource.daemon_runtime_artifact`, `resource.daemon_process`, `resource.release_update_artifact`, `resource.runtime_home` | CLI promotes deterministic runtime artifacts and starts/stops daemon process. |
+| `daemon.cli_node` | `resource.debug_channel`, `resource.daemon_process`, `resource.mirror_store` | Node CLI helpers observe runtime/debug/mirror facts; they must not become business truth writers. |
+| `daemon.support` | `resource.release_update_artifact`, `resource.daemon_runtime_artifact` | Support scripts verify release/install prerequisites and artifacts before promotion. |
+| `mainline_source.android` | `resource.platform_terminal_surface`, `resource.ui_projection`, `resource.active_session`, `resource.session_transport`, `resource.client_sparse_buffer`, `resource.renderer_window` | Android mainline edges are resource-bound in `docs/wiki/mainline-call-map.json`. |
+| `mainline_source.daemon` | `resource.daemon_process`, `resource.terminal_backend`, `resource.backend_session`, `resource.mirror_store`, `resource.daemon_input_queue`, `resource.transport_subscriber`, `resource.debug_channel` | Daemon mainline edges are resource-bound in `docs/wiki/mainline-call-map.json`. |
+| `mainline_source.cli` | `resource.release_update_artifact`, `resource.daemon_runtime_artifact`, `resource.daemon_process`, `resource.runtime_home` | CLI mainline edges are resource-bound in `docs/wiki/mainline-call-map.json`. |
