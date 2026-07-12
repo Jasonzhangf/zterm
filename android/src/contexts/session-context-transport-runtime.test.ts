@@ -4,6 +4,12 @@ import {
   ensureControlTransportForSessionOpen,
   handleControlTransportMessage,
 } from './session-context-transport-runtime';
+import { sendTerminalResizeRuntime } from './session-context-transport-lifecycle-runtime';
+import {
+  buildSessionConnectPayload,
+  buildSessionOpenPayload,
+  buildSessionResizePayload,
+} from './session-context-transport-wire-runtime';
 import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
 import type { ServerMessage } from '../lib/types';
 
@@ -102,6 +108,85 @@ describe('handleControlTransportMessage', () => {
       true,
     );
     expect(pendingSessionTransportOpenIntentsRef.current.size).toBe(2);
+  });
+});
+
+describe('adaptive width wire guard', () => {
+  it('does not request an adaptive lease in connect/open payloads without finite positive cols', () => {
+    expect(buildSessionConnectPayload({
+      host: makeHost(),
+      resolvedSessionName: 'tmux-1',
+      sessionId: 'session-1',
+      openRequestId: 'open-1',
+      sessionTransportToken: 'token-1',
+      geometry: { widthMode: 'adaptive-phone', cols: undefined },
+    })).toMatchObject({
+      widthMode: 'mirror-fixed',
+      cols: undefined,
+      rows: undefined,
+    });
+
+    expect(buildSessionOpenPayload({
+      host: makeHost(),
+      resolvedSessionName: 'tmux-1',
+      sessionId: 'session-1',
+      openRequestId: 'open-1',
+      geometry: { widthMode: 'adaptive-phone', cols: Number.NaN },
+    })).toMatchObject({
+      widthMode: 'mirror-fixed',
+      cols: undefined,
+      rows: undefined,
+    });
+  });
+
+  it('keeps adaptive resize off the wire until finite positive cols exist', () => {
+    expect(buildSessionResizePayload({
+      widthMode: 'adaptive-phone',
+      cols: undefined,
+    })).toEqual({
+      widthMode: 'mirror-fixed',
+      cols: undefined,
+      rows: undefined,
+    });
+
+    const sendSocketPayload = vi.fn();
+    const writeRequestedTerminalGeometry = vi.fn();
+    const sent = sendTerminalResizeRuntime({
+      sessionId: 'session-1',
+      ws: { readyState: WebSocket.OPEN } as any,
+      sendSocketPayload,
+      writeRequestedTerminalGeometry,
+      widthMode: 'adaptive-phone',
+      cols: undefined,
+    });
+
+    expect(sent).toBe(false);
+    expect(writeRequestedTerminalGeometry).not.toHaveBeenCalled();
+    expect(sendSocketPayload).not.toHaveBeenCalled();
+  });
+
+  it('sends adaptive lease requests when finite positive cols exist', () => {
+    expect(buildSessionConnectPayload({
+      host: makeHost(),
+      resolvedSessionName: 'tmux-1',
+      sessionId: 'session-1',
+      openRequestId: 'open-1',
+      sessionTransportToken: 'token-1',
+      geometry: { widthMode: 'adaptive-phone', cols: 55.8 },
+    })).toMatchObject({
+      widthMode: 'adaptive-phone',
+      cols: 55,
+      rows: undefined,
+    });
+
+    expect(buildSessionResizePayload({
+      widthMode: 'adaptive-phone',
+      cols: 56.9,
+    })).toEqual({
+      widthMode: 'adaptive-phone',
+      cols: 56,
+      rows: undefined,
+    });
   });
 });
 

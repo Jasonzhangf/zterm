@@ -180,9 +180,13 @@ export function sendTerminalResizeRuntime(options: {
   widthMode?: TerminalWidthMode;
 }) {
   const normalizedWidthMode = options.widthMode === 'adaptive-phone' ? 'adaptive-phone' : 'mirror-fixed';
+  const adaptiveCols = Number.isFinite(options.cols) ? Math.max(1, Math.floor(options.cols || 0)) : undefined;
+  if (normalizedWidthMode === 'adaptive-phone' && !adaptiveCols) {
+    return false;
+  }
   const geometry: { cols?: number | null; rows?: number | null; widthMode?: TerminalWidthMode } = normalizedWidthMode === 'adaptive-phone'
     ? {
-        cols: Number.isFinite(options.cols) ? Math.max(1, Math.floor(options.cols || 0)) : undefined,
+        cols: adaptiveCols,
         widthMode: normalizedWidthMode,
       }
     : {

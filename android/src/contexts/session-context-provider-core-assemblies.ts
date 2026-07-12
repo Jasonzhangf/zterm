@@ -213,10 +213,23 @@ export function useSessionProviderCoreAssemblies(
     startSocketHeartbeat,
     setScheduleStateForSession,
     writeSessionRequestedTerminalGeometry,
-    readRequestedTerminalGeometry: (sessionId: string) => (
-      readSessionRequestedTerminalGeometry(sessionId)
-      || { widthMode: options.bridgeSettings.terminalWidthMode }
-    ),
+    readRequestedTerminalGeometry: (sessionId: string) => {
+      const requestedGeometry = readSessionRequestedTerminalGeometry(sessionId);
+      if (
+        options.bridgeSettings.terminalWidthMode === 'adaptive-phone'
+        && requestedGeometry?.widthMode === 'adaptive-phone'
+        && Number.isFinite(requestedGeometry.cols)
+      ) {
+        return requestedGeometry;
+      }
+      if (options.bridgeSettings.terminalWidthMode === 'adaptive-phone') {
+        return {
+          widthMode: 'adaptive-phone',
+          cols: DEFAULT_TERMINAL_SESSION_VIEWPORT.cols,
+        };
+      }
+      return { widthMode: 'mirror-fixed' };
+    },
   }), [
     applyTransportDiagnostics,
     buildTraversalSocketForHost,

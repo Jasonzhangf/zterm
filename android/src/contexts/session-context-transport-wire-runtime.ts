@@ -22,10 +22,14 @@ export function buildSessionResizePayload(options: {
   rows?: number | null;
   widthMode?: 'adaptive-phone' | 'mirror-fixed';
 }) {
+  const adaptiveCols = Number.isFinite(options.cols) ? Math.max(1, Math.floor(options.cols || 0)) : undefined;
+  const widthMode = options.widthMode === 'adaptive-phone' && adaptiveCols
+    ? 'adaptive-phone'
+    : 'mirror-fixed';
   return {
-    cols: Number.isFinite(options.cols) ? Math.max(1, Math.floor(options.cols || 0)) : undefined,
+    cols: widthMode === 'adaptive-phone' ? adaptiveCols : undefined,
     rows: undefined,
-    widthMode: options.widthMode === 'adaptive-phone' ? 'adaptive-phone' : 'mirror-fixed',
+    widthMode,
   };
 }
 
