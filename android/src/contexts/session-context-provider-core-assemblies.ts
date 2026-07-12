@@ -28,7 +28,6 @@ const DEFAULT_TERMINAL_SESSION_VIEWPORT = {
   rows: 24,
 } as const;
 
-
 export function useSessionProviderCoreAssemblies(
   options: SessionProviderAssembliesSharedOptions,
 ): SessionProviderCoreAssembliesResult {
@@ -118,6 +117,7 @@ export function useSessionProviderCoreAssemblies(
     moveSessionSync,
     setSessionTitleSync,
     incrementConnectedSync,
+    readSessionTransportResource,
     readSessionTransportSocket,
     readSessionTransportHost,
     readSessionTransportRuntime,
@@ -371,6 +371,7 @@ export function useSessionProviderCoreAssemblies(
     cleanupSocket,
     queueConnectTransportOpenIntent,
     sendTerminalResize,
+    readSessionTransportResource,
     readSessionTransportSocket,
     readSessionTransportHost,
     readSessionTransportRuntime,
@@ -408,6 +409,7 @@ export function useSessionProviderCoreAssemblies(
     readSessionTargetKey,
     readSessionTargetRuntime,
     readSessionTransportHost,
+    readSessionTransportResource,
     readSessionTransportRuntime,
     readSessionTransportSocket,
     requestSessionBufferHead,

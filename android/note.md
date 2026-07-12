@@ -1826,3 +1826,10 @@ Need runtime debug to confirm:
 - 根因：`useOpenTabRuntime` 已把 drawer/tab switch 标为 `switchRuntime:'explicit-resume'`，但传到 `SessionContext.switchSession(id)` 后，provider facade 固定用 `source:'active-reentry'` 调 `ensureActiveSessionFresh()`。这会把显式用户选择降级成 lifecycle re-entry，造成同一 drawer select 的资源语义被拆成 open-tab explicit intent 与 transport active-reentry 两条。
 - 修复：`switchSession(id, { refreshSource })` 允许 open-tab explicit-resume reason 直接进入 SessionContext active switch owner；默认仍是 `active-reentry`，保护其它内部 active 切换路径。`useOpenTabRuntime` 在 `switchRuntime:'explicit-resume'` 时传 `{ refreshSource:'explicit-resume' }`。
 - 验证：`useOpenTabRuntime.test.tsx` 锁 explicit switch 传入 `refreshSource:'explicit-resume'`；focused gates 6 files / 48 tests PASS；resource/architecture feature registry 7 files / 45 tests PASS；`tsc --noEmit` PASS。
+
+## 2026-07-12 input resource owner removes reconnect shortcut
+
+- 架构映射：本轮属于 `terminal.keyboard_ime + terminal.daemon_input` 的前半段，涉及 `resource.platform_input_channel -> resource.session_transport -> resource.daemon_input_queue`。客户端 input owner 只能消费当前 session transport resource，不能创建 reconnect/open intent。
+- 根因：旧 `sendInputThroughSessionTransport()` 接收 `shouldReconnectQueuedActiveInput`、`reconnectSession`、`probeOrReconnectStaleSessionTransport`、`isSessionTransportActivityStale`，让 input runtime 既发输入又参与 transport lifecycle 决策，违反 resource owner 分工。
+- 修复：input runtime 改为读取 `readSessionTransportResource(sessionId).socket`；open socket 同步发 input，missing/pending/backpressure 只显式 drop/debug。pending tail head refresh 微任务重新读取 current resource，避免用已替换 socket。
+- 验证：`session-context-input-runtime.test.ts` + `terminal-message-runtime.test.ts` 2 files / 22 tests PASS；`test:feature-registry` 7 files / 45 tests PASS；`tsc --noEmit` PASS。

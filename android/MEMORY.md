@@ -857,3 +857,10 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - Drawer/tab switch is a user explicit resume intent. `useOpenTabRuntime` must not only persist `switchRuntime:'explicit-resume'`; it must pass the same reason into `SessionContext.switchSession(..., { refreshSource:'explicit-resume' })` so the transport lifecycle owner does not downgrade it to `active-reentry`.
 - `active-reentry` remains the default for internal lifecycle changes, but user-visible switch/resume/open-tab selection must enter `ensureActiveSessionFresh()` as `explicit-resume` and request `forceHead + markResumeTail`.
 - Regression gate: `useOpenTabRuntime.test.tsx` must prove explicit switch calls `switchSession(target, { refreshSource:'explicit-resume' })`; lifecycle tests continue to prove ordinary activeSessionId changes use `active-reentry`.
+
+## 2026-07-12 Input must not own reconnect or open intent
+
+- `terminal.keyboard_ime` owns `resource.platform_input_channel`, but it only writes through the current `resource.session_transport`. It must not create reconnects, probe stale sockets, or bypass `resource.pending_open_intent`.
+- Correct behavior: input sends synchronously only when `readSessionTransportResource(sessionId).socket` is currently open, drops explicitly when the transport is missing/backpressured/pending-open, and leaves reconnect/open intent recovery to `terminal.transport_lifecycle`.
+- Deferred input tail refresh must also re-read the current session transport resource in its microtask, so a replaced socket is not reused after tab switch or reconnect.
+- Regression gate: `session-context-input-runtime.test.ts` must prove open-resource send, stale accessor avoidance, no reconnect policy calls, pending-open drop, backpressure drop, and microtask head refresh retargeting.

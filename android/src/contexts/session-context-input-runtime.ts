@@ -1,5 +1,6 @@
 import type { Session } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
+import type { SessionTransportResource } from '../lib/session-transport-runtime';
 
 interface MutableRefObject<T> {
   current: T;
@@ -12,17 +13,20 @@ interface RuntimeDebugFn {
 const TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES = 128 * 1024;
 
 const pendingInputHeadRefreshes = new Map<string, {
+  readSessionTransportResource: (sessionId: string) => SessionTransportResource;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
 }>();
 
 function scheduleInputHeadRefresh(options: {
   sessionId: string;
+  readSessionTransportResource: (sessionId: string) => SessionTransportResource;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
 }) {
   const alreadyPending = pendingInputHeadRefreshes.has(options.sessionId);
   pendingInputHeadRefreshes.set(options.sessionId, {
+    readSessionTransportResource: options.readSessionTransportResource,
     readSessionTransportSocket: options.readSessionTransportSocket,
     requestSessionBufferHead: options.requestSessionBufferHead,
   });
@@ -35,7 +39,8 @@ function scheduleInputHeadRefresh(options: {
     if (!pending) {
       return;
     }
-    const currentWs = pending.readSessionTransportSocket(options.sessionId);
+    const currentResource = pending.readSessionTransportResource(options.sessionId);
+    const currentWs = currentResource.socket || pending.readSessionTransportSocket(options.sessionId);
     pending.requestSessionBufferHead(
       options.sessionId,
       currentWs,
@@ -52,22 +57,15 @@ export function sendInputThroughSessionTransport(options: {
     stateRef: { current: { activeSessionId: string | null } };
   };
   runtimeDebug: RuntimeDebugFn;
+  readSessionTransportResource: (sessionId: string) => SessionTransportResource;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  isSessionTransportActivityStale: (sessionId: string) => boolean;
   isReconnectInFlight: (sessionId: string) => boolean;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   markPendingInputTailRefresh: (sessionId: string, localRevision: number) => boolean;
   readSessionBufferSnapshot: (sessionId: string) => { revision: number };
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
-  probeOrReconnectStaleSessionTransport: (sessionId: string, ws: BridgeTransportSocket, reason: 'input' | 'active-tick' | 'active-reentry') => void;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
   isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
-  shouldReconnectQueuedActiveInput: (options: {
-    isActiveTarget: boolean;
-    wsReadyState: number | null;
-    reconnectInFlight: boolean;
-  }) => boolean;
-  reconnectSession: (sessionId: string) => void;
 }) {
   const targetSessionId = options.sessionId.trim();
   if (!targetSessionId) {
@@ -88,8 +86,8 @@ export function sendInputThroughSessionTransport(options: {
     return;
   }
 
-  const ws = options.readSessionTransportSocket(targetSessionId);
-  const transportStale = options.isSessionTransportActivityStale(targetSessionId);
+  const resource = options.readSessionTransportResource(targetSessionId);
+  const ws = resource.socket;
   const runtimeActiveSessionId = options.refs.stateRef.current.activeSessionId;
   const isActiveTarget = runtimeActiveSessionId === targetSessionId;
   const isExplicitInputTarget = true;
@@ -110,9 +108,6 @@ export function sendInputThroughSessionTransport(options: {
       if (ws.readyState < WebSocket.CLOSING) {
         ws.close(4000, 'input backpressure');
       }
-      if (!reconnectInFlight) {
-        options.reconnectSession(targetSessionId);
-      }
       return;
     }
     const localRevision = options.readSessionBufferSnapshot(targetSessionId).revision;
@@ -120,7 +115,8 @@ export function sendInputThroughSessionTransport(options: {
       sessionId: targetSessionId,
       size: options.data.length,
       preview: options.data.slice(0, 32),
-      transportStale,
+      resourceTargetKey: resource.targetKey,
+      resourceSocketState: resource.socketState,
     });
     const isFirstPendingInputTailRefresh = options.markPendingInputTailRefresh(
       targetSessionId,
@@ -134,12 +130,10 @@ export function sendInputThroughSessionTransport(options: {
     if (isFirstPendingInputTailRefresh) {
       scheduleInputHeadRefresh({
         sessionId: targetSessionId,
+        readSessionTransportResource: options.readSessionTransportResource,
         readSessionTransportSocket: options.readSessionTransportSocket,
         requestSessionBufferHead: options.requestSessionBufferHead,
       });
-    }
-    if (transportStale && !reconnectInFlight) {
-      options.probeOrReconnectStaleSessionTransport(targetSessionId, ws, 'input');
     }
     // Input path keeps transport input synchronous and moves head refresh to a
     // coalesced microtask so refresh work cannot block key dispatch.
@@ -148,51 +142,32 @@ export function sendInputThroughSessionTransport(options: {
 
   options.runtimeDebug('session.input.transport-unavailable', {
     sessionId: targetSessionId,
-    why: transportStale ? 'stale-open-transport' : 'transport-unavailable',
+    why: 'transport-unavailable',
     size: options.data.length,
     preview: options.data.slice(0, 32),
     isActiveTarget,
     runtimeActiveSessionId,
     explicitInputTarget: isExplicitInputTarget,
     reconnectInFlight,
+    resourceTargetKey: resource.targetKey,
+    resourceSocketState: resource.socketState,
     wsReadyState: ws?.readyState ?? null,
   });
-  const shouldForceReconnect = transportStale
-    ? isExplicitInputTarget && !reconnectInFlight
-    : options.shouldReconnectQueuedActiveInput({
-        isActiveTarget: isExplicitInputTarget,
-        wsReadyState: ws?.readyState ?? null,
-        reconnectInFlight,
-      });
   const pendingTransportOpen = options.hasPendingSessionTransportOpen(targetSessionId);
   const pendingTransportOpenStale = pendingTransportOpen
     ? options.isPendingSessionTransportOpenStale(targetSessionId)
     : false;
-  const shouldReconnectPastStalePendingOpen =
-    pendingTransportOpenStale && isExplicitInputTarget;
-  const shouldReconnectNow =
-    shouldForceReconnect || shouldReconnectPastStalePendingOpen;
-  if (pendingTransportOpen && !pendingTransportOpenStale && !shouldReconnectNow) {
+  if (pendingTransportOpen) {
     options.runtimeDebug('session.input.drop.pending-transport-open', {
       sessionId: targetSessionId,
       size: options.data.length,
       preview: options.data.slice(0, 32),
       wsReadyState: ws?.readyState ?? null,
       reconnectInFlight,
+      pendingTransportOpenStale,
+      resourceTargetKey: resource.targetKey,
+      resourceSocketState: resource.socketState,
     });
-    return;
-  }
-  if (shouldReconnectNow) {
-    if (pendingTransportOpenStale) {
-      options.runtimeDebug('session.input.reconnect.stale-pending-transport-open', {
-        sessionId: targetSessionId,
-        size: options.data.length,
-        preview: options.data.slice(0, 32),
-        wsReadyState: ws?.readyState ?? null,
-        reconnectInFlight,
-      });
-    }
-    options.reconnectSession(targetSessionId);
   }
 }
 
