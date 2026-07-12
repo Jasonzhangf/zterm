@@ -30,6 +30,7 @@ Current verified gates:
 - Android typecheck: `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` passed.
 - Release asset verification: `pnpm --dir android exec node scripts/verify-release-assets.mjs` passed; APK `0.1.3.2069`, daemon archive sha, daemon npm tgz sha, node-pty/wrtc/support script checks all true.
 - Mac client gates: `pnpm --dir mac test -- --reporter dot` passed, 22 files / 149 tests; `pnpm --dir mac run type-check` passed.
+- Current Android L5 attempt: `adb connect 100.104.163.65:5555` succeeded for `PLZ110` on Android 16, but `pnpm --dir android run test:android:terminal-real-device -- --serial 100.104.163.65:5555 --apk release-dist/zterm-0.1.3.2069.apk` failed before app smoke because secure keyguard/sleeping state kept `NotificationShade` focused.
 - Daemon/tmux close-loop: `pnpm --dir android run daemon:mirror:close-loop` passed all 8 cases: `codex-live`, `top-live`, `vim-live`, `initial-sync`, `local-input-echo`, `external-input-echo`, `daemon-restart-recover`, `schedule-fire`.
 - MemPalace zterm re-mine/search verified CLI/release/debug resource truth is searchable.
 
@@ -48,7 +49,7 @@ Current verified gates:
 | debug channel observe-only | complete for static/runtime debug owner gates | commit `33f7dff`; commit `3e93f96`; debug tests and resource gate | none known |
 | Mac client resource scope | partial | Mac tests/type-check pass; Mac docs and memory exist | no packaged Mac app smoke in this audit |
 | Windows platform/WezTerm resource scope | blocked | `tailscale status` shows `jason-hw-desktop / 100.75.122.121 / windows` offline; `tailscale ping --timeout=10s 100.75.122.121` reports `peer's node key has expired` | bring Windows host online with valid Tailscale node key, then run real WezTerm remote/input smoke |
-| Android UI/app/device behavior | partial | Android owner tests, typecheck, feature gates, daemon close-loop, release asset verify | no online ADB device / L5 real-device smoke in this audit |
+| Android UI/app/device behavior | blocked | Android owner tests, typecheck, feature gates, daemon close-loop, release asset verify; ADB reached `100.104.163.65:5555` (`PLZ110`, Android 16) | device is secure-locked/sleeping with `NotificationShade` focused; unlock device and rerun terminal real-device smoke |
 | skill/MEMORY/note sedimentation | complete for current CLI slice | commit `e63391e`; MemPalace search verified resource truth terms | keep updating for future slices |
 
 ## Blocking Conditions
@@ -62,12 +63,12 @@ Windows real smoke is currently blocked by external host state:
 
 This blocks the requirement that Windows WezTerm backend/resource relations be proven with real remote/input smoke in the current worktree.
 
-Android L5 real-device smoke is also not proven in this audit. Existing evidence verifies release assets and daemon/client logic gates, but does not prove a real installed Android app path.
+Android L5 real-device smoke is also not proven in this audit. Current ADB probe reached `100.104.163.65:5555` (`PLZ110`, Android 16), but `test:android:terminal-real-device` could not foreground the app because the device is secure-locked / sleeping with `NotificationShade` owning focus. Existing evidence verifies release assets and daemon/client logic gates, but does not prove a real installed Android app path.
 
 ## Next Required Work
 
 1. Bring Windows `jason-hw-desktop` online with a valid Tailscale node key.
 2. Run the Windows WezTerm remote/input smoke against the current `origin/main`.
-3. If an Android device is online, install/run the current APK and collect real device evidence for session switch/input/bootstrap.
+3. Unlock the online Android device or provide an already-unlocked ADB device, then run `pnpm --dir android run test:android:terminal-real-device -- --serial <serial> --apk release-dist/zterm-0.1.3.2069.apk` and collect session switch/input/bootstrap evidence.
 4. Re-run `test:feature-registry`, Android typecheck, Mac tests/type-check, release verify, and daemon close-loop after any follow-up patch.
 5. Only after every row above is complete or explicitly out of scope by a new user decision, mark the active goal complete.
