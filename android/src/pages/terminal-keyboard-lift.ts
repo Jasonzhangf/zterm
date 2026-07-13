@@ -96,7 +96,20 @@ export function resolveTerminalHeaderTopInsetPx(isAndroid: boolean) {
     return Math.max(0, Math.round(window.visualViewport?.offsetTop || 0));
   }
 
-  return 16;
+  if (typeof document === "undefined") {
+    return 16;
+  }
+
+  const probe = document.createElement("div");
+  probe.style.position = "fixed";
+  probe.style.visibility = "hidden";
+  probe.style.pointerEvents = "none";
+  probe.style.paddingTop = "env(safe-area-inset-top, 0px)";
+  document.body.appendChild(probe);
+  const computed = window.getComputedStyle(probe).paddingTop;
+  probe.remove();
+  const safeAreaTop = Number.parseFloat(computed);
+  return Math.max(16, Number.isFinite(safeAreaTop) ? Math.round(safeAreaTop) : 0);
 }
 
 export function resolveWindowWidth() {

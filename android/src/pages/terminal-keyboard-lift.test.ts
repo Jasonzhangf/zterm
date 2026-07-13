@@ -164,6 +164,31 @@ describe("terminal-keyboard-lift", () => {
     expect(resolveTerminalHeaderTopInsetPx(true)).toBe(16);
   });
 
+  it("uses Android CSS safe-area top when it is larger than the minimum header inset", () => {
+    const element = {
+      style: {
+        position: "",
+        visibility: "",
+        pointerEvents: "",
+        paddingTop: "",
+      },
+      remove: vi.fn(),
+    };
+    vi.stubGlobal("document", {
+      createElement: vi.fn(() => element),
+      body: {
+        appendChild: vi.fn(),
+      },
+    });
+    vi.stubGlobal("window", {
+      getComputedStyle: vi.fn(() => ({
+        paddingTop: "44px",
+      })),
+    });
+
+    expect(resolveTerminalHeaderTopInsetPx(true)).toBe(44);
+  });
+
   it("does not add bottom chrome lift for normal portrait phone width", () => {
     expect(resolveTerminalBottomChromeLiftPx({
       viewportWidth: 393,

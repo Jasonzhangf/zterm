@@ -144,6 +144,8 @@ public class ImeAnchorPlugin extends Plugin {
         imeEditText.setHintTextColor(0x00000000);
         imeEditText.setCursorVisible(false);
         imeEditText.setIncludeFontPadding(false);
+        imeEditText.setPadding(0, 0, 0, 0);
+        imeEditText.setHighlightColor(0x00000000);
         imeEditText.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         imeEditText.setImeOptions(
             EditorInfo.IME_ACTION_UNSPECIFIED
@@ -158,19 +160,39 @@ public class ImeAnchorPlugin extends Plugin {
         imeEditText.setSingleLine(true);
         imeEditText.setMinLines(1);
         imeEditText.setMaxLines(1);
-        imeEditText.setAlpha(0.01f);
+        imeEditText.setMinHeight(dpToPx(48));
+        imeEditText.setGravity(Gravity.CENTER_VERTICAL);
+        imeEditText.setAlpha(1.0f);
         imeEditText.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
         imeEditText.setFocusable(true);
         imeEditText.setFocusableInTouchMode(true);
         imeEditText.setShowSoftInputOnFocus(true);
-        imeEditText.setOnFocusChangeListener((view, hasFocus) ->
+        imeEditText.setOnFocusChangeListener((view, hasFocus) -> {
             Log.i(
                 TAG,
                 "imeEditText focus=" + hasFocus
                     + " windowFocus=" + view.hasWindowFocus()
                     + " attached=" + view.isAttachedToWindow()
-            )
-        );
+            );
+            if (!hasFocus
+                && pendingShowRequest
+                && view.hasWindowFocus()
+                && view.isAttachedToWindow()
+                && view.isFocusable()) {
+                mainHandler.postDelayed(() -> {
+                    if (imeEditText == null
+                        || !pendingShowRequest
+                        || !imeEditText.isFocusable()
+                        || !imeEditText.isAttachedToWindow()
+                        || !imeEditText.hasWindowFocus()
+                        || imeEditText.hasFocus()) {
+                        return;
+                    }
+                    Log.i(TAG, "imeEditText focus lost while terminal IME active; restoring anchor focus");
+                    requestFocusAndShowKeyboard();
+                }, 32);
+            }
+        });
 
         imeEditText.addTextChangedListener(new TextWatcher() {
             @Override
@@ -186,8 +208,8 @@ public class ImeAnchorPlugin extends Plugin {
         });
 
         FrameLayout.LayoutParams layoutParams = new FrameLayout.LayoutParams(
-            dpToPx(140),
-            dpToPx(36)
+            dpToPx(240),
+            dpToPx(48)
         );
         layoutParams.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
         layoutParams.bottomMargin = dpToPx(12);
@@ -502,6 +524,11 @@ public class ImeAnchorPlugin extends Plugin {
         imeEditText.requestFocusFromTouch();
         boolean focusGranted = imeEditText.requestFocus();
         imeEditText.setSelection(imeEditText.getText() == null ? 0 : imeEditText.getText().length());
+        imeEditText.bringToFront();
+        imeEditText.requestRectangleOnScreen(
+            new Rect(0, 0, Math.max(1, imeEditText.getWidth()), Math.max(1, imeEditText.getHeight())),
+            false
+        );
         Log.i(
             TAG,
             "requestFocusAndShowKeyboard(): focusGranted=" + focusGranted
@@ -510,7 +537,8 @@ public class ImeAnchorPlugin extends Plugin {
                 + " attached=" + imeEditText.isAttachedToWindow()
                 + " token=" + (imeEditText.getWindowToken() != null)
         );
-        imeEditText.post(this::showKeyboardWithInsetsController);
+        imeEditText.postDelayed(() -> showKeyboardWithStableInput("initial"), 48);
+        Log.i(TAG, "requestFocusAndShowKeyboard(): stable toggle show scheduled without repeat guards");
     }
 
     private void hideKeyboard() {
@@ -528,57 +556,67 @@ public class ImeAnchorPlugin extends Plugin {
         }
     }
 
-    private void showKeyboardWithInsetsController() {
+    private void showKeyboardWithStableInput(String reason) {
         if (imeEditText == null || !pendingShowRequest) {
-            Log.i(TAG, "showKeyboardWithInsetsController(): skip pending=" + pendingShowRequest);
+            Log.i(TAG, "showKeyboardWithStableInput(" + reason + "): skip pending=" + pendingShowRequest);
             return;
         }
 
         if (!imeEditText.hasWindowFocus()) {
-            Log.i(TAG, "showKeyboardWithInsetsController(): waiting for window focus");
-            imeEditText.postDelayed(this::showKeyboardWithInsetsController, 32);
+            Log.i(TAG, "showKeyboardWithStableInput(" + reason + "): waiting for window focus");
+            imeEditText.postDelayed(() -> showKeyboardWithStableInput(reason), 32);
             return;
         }
 
-        imeEditText.requestFocus();
+        if (!imeEditText.hasFocus()) {
+            imeEditText.requestFocusFromTouch();
+            imeEditText.requestFocus();
+        }
         imeEditText.setSelection(imeEditText.getText() == null ? 0 : imeEditText.getText().length());
         InputMethodManager imm =
             (InputMethodManager) getContext().getSystemService(Context.INPUT_METHOD_SERVICE);
         if (imm == null) {
-            Log.w(TAG, "showKeyboardWithInsetsController(): InputMethodManager is null");
+            Log.w(TAG, "showKeyboardWithStableInput(" + reason + "): InputMethodManager is null");
             return;
         }
 
-        imm.restartInput(imeEditText);
-        boolean shown = imm.showSoftInput(imeEditText, 0);
         Log.i(
             TAG,
-            "showKeyboardWithInsetsController(): shown=" + shown
+            "showKeyboardWithStableInput(" + reason + "): directShow"
                 + " hasFocus=" + imeEditText.hasFocus()
                 + " windowFocus=" + imeEditText.hasWindowFocus()
                 + " token=" + (imeEditText.getWindowToken() != null)
         );
-
         mainHandler.postDelayed(() -> {
-            if (imeEditText == null || !pendingShowRequest) {
+            if (imeEditText == null || !pendingShowRequest || !imeEditText.hasWindowFocus()) {
                 return;
             }
-            imm.restartInput(imeEditText);
-            boolean retryShown = imm.showSoftInput(imeEditText, 0);
+            if (!imeEditText.hasFocus()) {
+                imeEditText.requestFocusFromTouch();
+                imeEditText.requestFocus();
+            }
+            imeEditText.bringToFront();
+            imeEditText.requestRectangleOnScreen(
+                new Rect(0, 0, Math.max(1, imeEditText.getWidth()), Math.max(1, imeEditText.getHeight())),
+                false
+            );
+            boolean shown = imm.showSoftInput(imeEditText, InputMethodManager.SHOW_IMPLICIT);
             Log.i(
                 TAG,
-                "showKeyboardWithInsetsController(retry): shown=" + retryShown
+                "showKeyboardWithStableInput(" + reason + "): shown=" + shown
                     + " hasFocus=" + imeEditText.hasFocus()
                     + " windowFocus=" + imeEditText.hasWindowFocus()
                     + " token=" + (imeEditText.getWindowToken() != null)
             );
-        }, 96);
+        }, 160);
     }
 
     private JSObject buildState(String source) {
         JSObject state = new JSObject();
         state.put("source", source);
         state.put("pendingShowRequest", pendingShowRequest);
+        state.put("keyboardVisible", lastKeyboardVisible);
+        state.put("keyboardHeight", lastKeyboardHeight);
         state.put("hasAnchor", imeEditText != null);
         state.put("hasFocus", imeEditText != null && imeEditText.hasFocus());
         state.put("hasWindowFocus", imeEditText != null && imeEditText.hasWindowFocus());
@@ -730,7 +768,7 @@ public class ImeAnchorPlugin extends Plugin {
             super.onWindowFocusChanged(hasWindowFocus);
             if (hasWindowFocus && plugin != null && plugin.pendingShowRequest) {
                 Log.i(TAG, "ImeAnchorEditText.onWindowFocusChanged(): scheduling show");
-                post(plugin::showKeyboardWithInsetsController);
+                post(() -> plugin.showKeyboardWithStableInput("window-focus"));
             }
         }
     }

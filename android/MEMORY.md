@@ -8,6 +8,11 @@
 
 ## Key Decisions
 
+- [2026-07-12] Android WeType/OPlus 可能进入全局 IME ghost shown 状态：`mInputShown=true`、`mIsInputViewShown=true`，但 `contentTopInsets` 仍接近导航栏底部（如 2505）且屏幕无键盘；此时 zterm `ImeAnchorEditText` 和系统 Settings 普通 `EditText` 都会失败。必须先用系统普通文本框做对照，不能继续盲改 zterm anchor / renderer / tmux。已验证对 `com.tencent.wetype` 做明确包级 `am force-stop` 后，zterm 键盘真实弹出，`contentTopInsets` 变为真实键盘顶部（如 1509）。这只证明 IME 进程状态被复位，不能当成 zterm 代码修复闭环。
+- [2026-07-12] Android 点击键盘/输入意图必须先把 renderer 从 reading 对齐回 follow/bottom，再 show/focus IME；否则滚到历史区后 native IME 可见状态与 renderer 可见窗口会分裂，表现为键盘按钮无法再次唤出或输入区缺失。owner 是 `TerminalPage` 输入意图与 `TerminalView` renderer follow reset；禁止用 IME 高度、viewport resize、TerminalView layout refresh 或 tmux resize 修复。
+- [2026-07-12] Android IME 显隐真源必须来自 native `ImeAnchor.getState()/keyboardState` 的 `keyboardVisible/keyboardHeight`，不能用本地 `terminalKeyboardRequested` 或 inset 猜测。键盘按钮 show/hide 决策读取 native truth；IME 只允许 UI shell 做裁切/预留：stage reserve = measured quickbar chrome + IME lift，QuickBar shell 使用同一份 IME lift。`TerminalView` 不接收 IME resize token、不触发 upstream `onResize`、不改 tmux rows/cols。
+- [2026-07-12] `mirror-fixed` 横向滑动是 renderer projection 状态：只允许平移 `.term-grid` 显示窗口并按 session 记住 offset；不得注册 adaptive lease、不得改 `buffer-head/cols`、不得请求 tmux/daemon resize。`adaptive-phone` 横向 pan 必须保持关闭，因为它的宽度变化只能走 daemon adaptive width lease -> tmux reflow -> mirror capture/readback。
+- [2026-07-12] Android IME / renderer 真机闭环脚本必须先确认 app surface 可见；如果设备 keyguard/SystemUI 拥有屏幕，脚本应失败而不是冒充通过。当前 `100.104.163.65:5555` 设备锁屏时证据为 `isKeyguardShowing=true`、`mCurrentFocus=NotificationShade`，L5 只能标阻塞。
 - [2026-07-08] daemon mirror capture 的稳定化不能要求动态 TUI 内容逐字连续一致；`top/htop/vim` 这类每次 capture 都会变化，若要求内容完全一致，会在 4 次重采样后显式失败并触发 live sync failure backoff，用户体感就是刷新很慢。正确门禁是“结构稳定才发布”：连续两次 canonical snapshot 的 absolute window / geometry / available line count 稳定，或已与当前 mirror 完整一致，就发布第二次最新内容；tail anchor 和窗口仍单调，内容不要求相同。回归 gate：`terminal-mirror-capture.test.ts` 覆盖 dynamic TUI frame 只采两次、`stabilizedAgainst='consecutive-window'`。
 - [2026-07-08] Android terminal header top inset 不能硬编码 16px。折叠屏/高状态栏设备上系统状态栏会覆盖 terminal header 和首行内容。`resolveTerminalHeaderTopInsetPx(true)` 必须读取 CSS `env(safe-area-inset-top)` 的真实像素值，并以 16px 为最小值；仍禁止使用 `visualViewport.offsetTop` 作为 Android top inset，避免 IME 弹出时 top inset 二次叠加。回归 gate：`terminal-keyboard-lift.test.ts` + `TerminalPage.android-ime.test.tsx` + `TerminalHeader.test.tsx`。
 - [2026-07-08] 慢刷新 + 状态栏遮挡修复发布为 APK `0.1.3.2034`，sha256 `b168e63472326eb716331ee4a8ea5d06da1d88841533196d4bf2593f3a9f3030`。已验证：动态 TUI capture owner gate、Android IME/header gate、`terminal.buffer_render` 相关完整 gate 223 tests、feature registry 31 tests、Android type-check、daemon/tmux close-loop 8 cases replay + strict audit、Mac client 146 tests + type-check、standard debug build/update manifest sha 对齐。缺口：本机无 online ADB 设备，不能宣称 Android L5 真机 UI 已闭环。
@@ -769,17 +774,19 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 
 ## 2026-07-09 Adaptive width daemon process truth
 
+- Superseded by `2026-07-11 Superseding correction: adaptive-phone must reflow tmux via single daemon lease owner`. Keep this entry only as historical process-validation evidence, not current design guidance.
 - `APK latest` and `~/.zterm/daemon-runtime/server.cjs` containing adaptive code do not prove the running Mac daemon process has loaded that code. If daemon `health.uptimeSec` predates the runtime update, the process is still executing old in-memory code.
-- Adaptive width is a two-sided feature: Android must persist/send `BridgeSettings.terminalWidthMode=adaptive-phone`, and the Mac daemon must run a process version that handles `connect/resize widthMode=adaptive-phone cols=N` by applying `tmux resize-window -x N`.
+- Superseded old statement: adaptive width was briefly considered client/in-memory only. Current daemon must apply `tmux resize-window -x N` only inside the single adaptive lease owner.
 - Verified failure mode: before daemon restart, a real WebSocket probe sent `connect cols=47` and `resize cols=53`, but daemon returned `buffer-sync.cols=80` and tmux stayed `80x24`. After service-scoped `zterm-daemon restart`, the same probe returned `buffer-sync.cols=47`, and tmux became `53x24` after resize.
 - Required validation for daemon-side adaptive/mirror/scheduler changes: check `/health` pid/uptime after install, then run a real WebSocket + tmux probe that reads tmux `#{window_width}x#{window_height}`. Do not use APK version, runtime file scan, or source tests as proof that the daemon process is current.
 
 ## 2026-07-09 Superseding correction: daemon must not own client width policy
 
-- Supersedes the prior `Adaptive width daemon process truth`: daemon must not implement phone adaptive width by applying `tmux resize-window -x`. `adaptive-phone` / `mirror-fixed` belongs to client renderer/layout policy; daemon only owns tmux truth, mirror store, physical transport/subscriber facts, and daemon-owned business facts.
+- Superseded by `2026-07-11 Superseding correction: adaptive-phone must reflow tmux via single daemon lease owner`; the broad no-resize conclusion is obsolete.
+- Superseded old statement: daemon must not implement phone adaptive width by applying `tmux resize-window -x`. Current rule is narrower: daemon must not own arbitrary client width policy, but its adaptive lease owner must apply the narrowest active adaptive cols to tmux.
 - Attach/resize wire may still carry `widthMode/cols` for compatibility, but daemon must not store it in `TerminalSession` / `SessionMirror`, must not update `mirror.cols/baselineCols` from it, and must not run `resize-window` from client viewport intent.
 - `tmux resize-window -x` switches tmux into manual window sizing and can freeze height, so using daemon resize to fix phone width is the architecture bug, not the solution. If adaptive/fixed behavior appears identical or height is wrong, first audit daemon/tmux width ownership resurrection before UI compensation.
-- Superseded gate note: this entry's over-broad "daemon must not resize tmux" conclusion is obsolete. Current gate forbids the old `applyAdaptiveColsToTmuxMirror` owner and any `resize-window` outside the adaptive width lease owner; see `2026-07-09 Superseding correction: adaptive width lease owner`.
+- Superseded gate note correction: current gate allows adaptive `resize-window` only inside the adaptive lease owner and forbids it everywhere else.
 - Verified after correction: targeted server/daemon gates 8 files / 72 tests PASS, Android `tsc --noEmit` PASS, and `pnpm --dir android run daemon:mirror:close-loop` PASS for `codex-live`, `top-live`, `vim-live`, `initial-sync`, `local-input-echo`, `external-input-echo`, `daemon-restart-recover`, and `schedule-fire`.
 
 ## 2026-07-09 Superseding correction: foreground resume equals explicit resume
@@ -807,10 +814,11 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 
 ## 2026-07-09 Superseding correction: adaptive width lease owner
 
-- Supersedes `daemon must not own client width policy`: current truth is daemon owns a narrow, explicit `adaptive-phone` width lease state machine, not arbitrary client UI state.
+- Superseded by `2026-07-11 Superseding correction: adaptive-phone must reflow tmux via single daemon lease owner`. Keep only owner-shape history here; current tmux resize/restore guidance is in the later entry.
+- Superseded old statement: daemon briefly owned a narrow, explicit `adaptive-phone` width lease state machine, not arbitrary client UI state.
 - `adaptive-phone` connect/resize registers the physical transport subscriber's `{ cols, heartbeatAt }` lease. Multiple adaptive subscribers on the same tmux mirror are aggregated by narrowest `cols`.
-- If the narrowest holder disappears, daemon recomputes from remaining leases. If the last holder disconnects, switches to `mirror-fixed`, or misses heartbeat past the lease TTL, daemon restores the tmux geometry captured before the first adaptive lease.
-- `mirror-fixed` must not register a lease and must not change tmux width. `resize-window` is allowed only inside the adaptive width lease owner, never scattered in attach/control/UI/renderer code.
+- Current correction: if the narrowest holder disappears, daemon recomputes and applies the next narrowest width. If the last holder disconnects, switches to `mirror-fixed`, or misses heartbeat past the lease TTL, daemon releases this owner’s tmux width lease.
+- Current correction: `mirror-fixed` must not register a lease and must not change tmux width. `resize-window` is allowed for adaptive only in the lease owner.
 - Regression gates: `terminal-mirror-runtime.test.ts` covers narrowest wins, holder disappearance re-sort, last lease TTL restore, and fixed release restore; `terminal-runtime.detached-session.test.ts` covers transport detach restoring baseline only when the subscriber held an adaptive lease.
 
 ## 2026-07-09 Explicit resume head probe truth
@@ -845,13 +853,128 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - Rebuild remains allowed only for physical close/error, target mismatch, explicit user reconnect/open, or missing/closed socket in explicit open/resume. Quiet time, missed head response, stale activity, or local reconnect bookkeeping are not rebuild reasons.
 - Regression gate: `session-context-activity-runtime.test.ts` must cover expired head probe marker + `WebSocket.OPEN` still calling `requestSessionBufferHead` and not calling `reconnectSession`.
 
+## 2026-07-10 Missing ranges must not produce holey buffer-sync windows
+
+- A single `buffer-sync` payload is one continuous authoritative window. If a `buffer-sync-request` carries multiple `missingRanges`, the daemon response must cover the full span from the earliest missing range start to the latest missing range end, including rows between gaps.
+- Returning an outer request window while `lines` contains only non-adjacent gap rows is invalid. The client sparse buffer will preserve existing absolute-index rows in the holes, which can flash stale buffer during fast refresh.
+- Current protocol does not support multiple windows inside one `buffer-sync`. Future multi-gap optimization must emit multiple independent continuous `buffer-sync` messages or introduce a typed protocol version; renderer/UI must not compensate by clearing DOM or delaying repaint.
+- Owner/gates: `buffer-sync-contract.ts` normalizes/sorts missing ranges and returns a continuous authoritative span; `session-context-buffer-runtime.ts` scopes reading-repair in-flight targets to the missing span. Regression gates: `buffer-sync-contract.test.ts`, `session-context-buffer-runtime.test.ts`, render gate/store tests, shared pull-state planner, Android typecheck, feature registry, daemon mirror close-loop, and Mac client transport/runtime gates.
+
+## 2026-07-10 Adaptive attach invalid cols must fail explicitly before geometry normalize
+
+- `adaptive-phone` attach without finite positive `cols` must not reach any generic geometry normalizer that throws. `attachTmux()` must ignore invalid adaptive requested geometry and let the adaptive width lease owner return/send explicit `adaptive_width_cols_invalid`.
+- A test helper that implements `normalizeTerminalCols` as `cols || default` hides the real daemon crash path. Adaptive width invalid-input tests must run with a strict normalizer that throws on missing/NaN/non-positive cols.
+- Verified real failure: service restart loaded a runtime that crashed in `normalizeTerminalCols()` before `updateAdaptiveWidthLease()` could reject the bad lease. Fixed runtime returned `adaptive_width_cols_invalid` to a real WebSocket probe while daemon health stayed OK and pid remained stable.
+
+## 2026-07-10 Oversized buffer-sync must crop to authoritative tail
+
+- If an incoming `buffer-sync` span covers the authoritative tail and is larger than the client retention window, local buffer merge must keep `[tail-cacheLines, tail)`, not `[incomingStart, incomingStart+cacheLines)`. The broken shape is `incoming.endIndex == nextTailEndIndex` while `nextEndIndex << nextTailEndIndex`; that publishes old history first and then snaps back when a later tail patch arrives, causing wrong-buffer flash.
+- This is a client buffer merge truth, owned by shared `packages/shared/src/connection/terminal-buffer.ts`; it must not be fixed by renderer DOM clearing, delayed repaint, daemon fallback, or UI compensation.
+- Regression gate: `packages/shared/src/connection/terminal-buffer.test.ts` reproduces current tail `[16463,17463)` plus incoming `[14763,17463)` with `lineCount=2700` and `cacheLines=1000`; pre-fix result was `next.startIndex=14763`, fixed result is `[16463,17463)`.
+- Verified for APK `0.1.3.2059 / 1032059`, sha256 `f5a447e0602a9484d919b297acfed61e192acb451ee6b2603fa64272a213bd67`: shared buffer/planner/gap gates 51 PASS; Android buffer/render gates 118 PASS; Android typecheck PASS; feature registry 34 PASS; Mac client 147 PASS + type-check PASS; daemon mirror close-loop 8 cases PASS; Android build PASS. No online ADB device was available, so Android L5 real-device visual confirmation remains open.
+
+## 2026-07-10 Android upgrade APK is mandatory for mobile behavior delivery
+
+- Every Android feature fix, bug fix, renderer change, daemon-client protocol change, or UI behavior change that affects real-device behavior must build a user-upgradeable APK before handoff. The default command is `pnpm --dir android run build:android`.
+- Delivery evidence must include `versionName`, `versionCode`, APK path, sha256, and update-channel alignment for `android/update-dist/latest.json`, versioned APK, latest alias, and `~/.zterm/updates/latest.json` / versioned APK.
+- If an online ADB device exists, continue with install/start/real-device smoke. If no online ADB device exists, report the exact L5 gap. Source changes, unit tests, typecheck, and daemon close-loop alone are not a mobile delivery closure.
+
+## 2026-07-11 Near-tail buffer-sync must not re-anchor current tail window upward
+
+- A newer near-tail `buffer-sync` payload that overlaps the current tail window but does not reach `authoritativeTailEndIndex` must not move a local window already anchored at tail. It may patch overlap rows, but `startIndex/endIndex` must remain the current tail window.
+- Broken runtime shape: current local window `[10606,11606)` with tail `11606`, incoming payload `[10592,11601)` / `lineCount=1009` / newer revision. Pre-fix merge re-anchored to `[10592,11592)`, briefly publishing a window ending before tail, then a later tail patch snapped it back. This matches bottom-update old-buffer flash.
+- Owner is shared client buffer merge `packages/shared/src/connection/terminal-buffer.ts`. Do not fix this by renderer DOM clearing, repaint delay, daemon fallback, or UI compensation.
+- Regression gate: `packages/shared/src/connection/terminal-buffer.test.ts` locks the near-tail current-tail preservation and a negative case proving non-tail reading/prepend windows can still move.
+- Verified for APK `0.1.3.2060 / 1032060`, sha256 `0019cb00bf81058df92b41167b5a903289c5ac165de52285ea852559f2babfd0`: shared buffer/planner/gap gates 53 PASS; Android buffer/render gates 118 PASS; Android typecheck PASS; feature registry 34 PASS; Mac client 147 PASS + type-check PASS; daemon mirror close-loop 8 cases PASS; Android build PASS with update manifest and daemon update channel sha aligned. No online ADB device was available, so Android L5 real-device visual confirmation remains open.
+
+## 2026-07-11 Adaptive lease restore must unset tmux window policy override
+
+- Superseded by `2026-07-11 Superseding correction: adaptive-phone must reflow tmux via single daemon lease owner`. This entry remains as evidence for why the release half of the owner must unset tmux `window-size`.
+- `tmux resize-window -x` creates a window-local `window-size` policy override. Restoring only cols/rows is incomplete: iTerm or any attached tmux client can still be prevented from reclaiming layout ownership even when the visible geometry looks restored.
+- Superseded old release sequence correction: daemon must not run startup/orphan cleanup automatically, but the adaptive lease owner must restore/release the baseline for the lease it applied.
+- Required release paths: last adaptive lease disappears, subscriber switches to `mirror-fixed`, invalid adaptive cols release an existing lease, heartbeat expiry clears the final holder, and daemon startup restores persisted/orphaned adaptive baselines.
+- Regression gates: `terminal-mirror-runtime.test.ts`, `terminal-runtime.detached-session.test.ts`, `architecture-boundary-truth.test.ts`, and `server.transport-lifecycle-truth.test.ts` lock that `window-size` policy write is only `set-window-option -u` inside the release owner.
+- Verified real daemon/tmux probe: before adaptive policy was default and size `80x24`; after adaptive connect policy became `manual` and size `55x24`; after release via `mirror-fixed`, policy became `<default>` and size returned to the attached client/default-controlled geometry.
+
+## 2026-07-11 Daemon must not disable tmux alternate-screen while checking sessions
+
+- Root cause for the remaining iTerm2 incomplete display on `rcc4`: width ownership was already released, but previous daemon code had written a window-local `alternate-screen off` through `ensureTmuxSessionAlternateScreenDisabled()` from `assertTmuxSessionExists()`. That made a read/existence check mutate user tmux display semantics.
+- Correct boundary: daemon control/mirror paths may read tmux truth (`has-session`, pane metrics, capture) but must not change user window/session options to simplify capture. `alternate-screen` is tmux/user display policy, not daemon mirror ownership.
+- Fix owner: remove `ensureTmuxSessionAlternateScreenDisabled` from `src/server/terminal-control-runtime.ts` and remove its call from `src/server/server.ts`; add transport lifecycle gate forbidding daemon writes to `alternate-screen`.
+- Field cleanup: unset existing local `alternate-screen` overrides with `tmux set-window-option -u -t <target> alternate-screen`. Verified current sessions, including `rcc4`, report `window-size=<default>` and `alternate-screen=<default>` after daemon restart.
+
+## 2026-07-11 Mirror truth must only come from tmux readback
+
+- Corrected wording: daemon may send user/protocol requests to tmux for real user/session operations such as input `send-keys` and session create/kill/rename; adaptive width may send `resize-window -x` only from the adaptive lease owner. No request authorizes daemon to predict the result into mirror truth.
+- Hard boundary: `mirror.rows`, `mirror.cols`, `mirror.bufferStartIndex`, `mirror.bufferLines`, and `mirror.cursor` must only be written by tmux readback/capture owner `terminal-mirror-capture.ts` via `applyMirrorCaptureSnapshot()`. `attachTmux`, `resize`, adaptive lease reconcile/restore, `startMirror`, and debug probes must not self-write mirror content or geometry from request values or pane metrics.
+- Fix: remove `attachTmux()` pre-writing mirror geometry from `readTmuxPaneMetrics()`; new mirrors keep default idle geometry until `syncMirrorCanonicalBuffer()` invokes capture and capture applies the tmux snapshot.
+- Regression gate: `server.mirror-capture-truth.test.ts` scans runtime code so only capture owner writes live mirror content/geometry; `destroyMirror()` may clear fields only while destroying the mirror. Targeted daemon mirror gates pass 70 tests and Android typecheck passes for this boundary.
+
+## 2026-07-11 Superseded correction: adaptive must not affect tmux session
+
+- Superseded by `2026-07-11 Superseding correction: adaptive-phone must reflow tmux via single daemon lease owner`; keep this as a recorded wrong turn, not current guidance.
+- Supersedes the same-day "daemon may send adaptive resize-window" wording and the earlier adaptive width lease owner entries. New hard boundary: `adaptive-phone` must not affect tmux session original logic at all.
+- Daemon may still accept `widthMode='adaptive-phone'` and finite `cols` for wire compatibility, client observation, and heartbeat expiry, but this remains in daemon memory only: `TerminalTransportSubscriber.adaptiveWidthCols/adaptiveWidthHeartbeatAt` plus in-memory aggregate metadata.
+- Forbidden adaptive side effects: `resize-window`, reading/writing `window-size`, writing `@zterm_adaptive_width_*`, restoring orphaned/baseline geometry, changing `alternate-screen` or any tmux option, closing/killing tmux session, or self-writing mirror geometry/content.
+- Regression gates: `terminal-mirror-runtime.test.ts` proves attach/resize/fixed switch/holder disappearance/heartbeat expiry/daemon start do not mutate tmux; `server.transport-lifecycle-truth.test.ts` and `architecture-boundary-truth.test.ts` forbid `resize-window`, `window-size`, and `@zterm_adaptive_width_*` in daemon mirror runtime.
+
+## 2026-07-11 Superseded correction: Adaptive-phone requires client render projection
+
+- Superseded by `2026-07-11 Superseding correction: adaptive-phone must reflow tmux via single daemon lease owner`; keep this as a recorded wrong turn, not current guidance.
+- `adaptive-phone` has two independent requirements: client wire must send current mode/cols, and client renderer must project rows to measured local viewport cols. Settings showing Adaptive Phone and connect payload containing `adaptive-phone` do not prove the visible terminal is adaptive.
+- After the no-tmux-impact correction, adaptive must never be implemented by tmux resize. The visible width effect must live in TerminalView/shared renderer projection: crop row/cursor/plainText to measured `viewportCols` for `adaptive-phone`; keep full daemon mirror row for `mirror-fixed`.
+- Regression gate: shared renderer pure projection test plus `TerminalView.dynamic-refresh.test.tsx` must prove adaptive on a 320px viewport renders fewer columns while mirror-fixed preserves the full 80-column row.
+
+## 2026-07-11 Superseding correction: adaptive-phone must not use CSS auto-height wrapping
+
+- Supersedes the previous "crop row" and later "CSS wrap row" attempts. Cropping drops content; CSS `white-space: normal` / `height:auto` breaks TerminalView's fixed-row virtual scroll math. The latter caused upward scroll to keep advancing/cycling and made IME bottom alignment miss the last rows.
+- Corrected again: the product requirement for `adaptive-phone` is tmux real reflow by phone width, not client-only projection. Daemon/tmux mirror rows are unchanged only until tmux capture/readback returns the new width; `TerminalView` row DOM height must stay the measured fixed row height and must not use browser auto wrapping.
+- Correct path: client sends measured cols -> daemon adaptive lease owner aggregates the narrowest active adaptive cols -> tmux `resize-window -x` -> mirror capture/readback updates truth -> client renders fixed-height rows.
+- If a future client-only visual wrapping mode is required, implement it as an explicit renderer virtual-row model with fixed-height segments. Do not use CSS wrapping as a shortcut and do not use renderer crop to claim adaptive reflow.
+- Terminal viewport chrome must not add `cardBorder`/bright shell borders around the terminal content area. A 1px outer border on dark terminal content appears as a white vertical bar and is UI shell chrome, not terminal content.
+- Regression gates: `TerminalView.dynamic-refresh.test.tsx` locks adaptive rows remain fixed-height and do not set wrapper width/maxWidth/normal wrapping; `renderer.test.ts` locks row view model fixed height; `TerminalPageStageShell.pane-stage.test.tsx` locks terminal stage/pane/group center border width 0 and style none.
+
+## 2026-07-11 Superseding correction: adaptive-phone must reflow tmux via single daemon lease owner
+
+- Supersedes the same-day "adaptive must not affect tmux session" and "adaptive visible width by client projection" entries. Those rules over-corrected and left Adaptive Phone looking identical to fixed width.
+- `adaptive-phone` owner is `android/src/server/terminal-mirror-runtime.ts` only. It may keep physical subscriber lease metadata `{ adaptiveWidthCols, adaptiveWidthHeartbeatAt }`, aggregate active adaptive holders by narrowest cols, and request `tmux resize-window -x <cols>` from `applyAdaptiveTmuxWidth()`.
+- Release behavior is part of the same owner: switching to `mirror-fixed`, transport detach/close, moving mirrors, invalid cols, or heartbeat expiry must recompute leases; final holder disappearance must restore/release tmux width ownership via owner-local baseline and `set-window-option -u window-size`.
+- Forbidden paths remain strict: no renderer crop/CSS wrap pretending to be adaptive, no daemon startup/orphan heuristic changing old sessions, no `@zterm_adaptive_width_*` persisted tmux option, no `resize-window` outside adaptive lease owner, and no mirror geometry/content self-write after requesting resize. `mirror.rows/cols/bufferStartIndex/bufferLines/cursor` still only come from tmux capture/readback.
+
+## 2026-07-11 Client transport writable does not prove buffer read-chain freshness
+
+- Daemon stable truth is `tmux -> mirror store`; a WebSocket is a client-owned physical transport, not a daemon-owned permanent per-session object. If a client process/background/network path loses its transport, the invariant is not “same WebSocket forever”; the invariant is “reattach/resume reaches the same daemon mirror truth and immediately restarts head/body reads”.
+- A session that can still send input but shows an old buffer means the write path and read path have split. Treat this as client `transport_lifecycle + buffer_render` read-chain recovery, not as a daemon mirror issue and not as a renderer repaint issue.
+- Explicit resume, foreground return, and active session change must force a head request and mark resume-tail even when local buffer is non-empty. Old local buffer is not proof of freshness; it is exactly the state that can produce stale-screen-with-input-working.
+- Stale pending transport-open bookkeeping is not a waitable state. The unique reconnect owner must clear the stale pending intent/control socket and rebuild the same target. Fresh pending open still waits to avoid duplicate physical opens.
+- Regression gates: `session-context-activity-runtime.test.ts` must cover stale pending reconnect vs fresh pending wait and old-buffer active reentry marking resume-tail; `session-context-lifecycle.test.tsx` must cover activeSessionId change passing `markResumeTail: true`; architecture boundary gate must keep `stale-pending-open` inside transport planner/session runtime only.
+## 2026-07-11 Windows WezTerm closeout partial progress
+
+- `daemon.windows_wezterm_backend` closeout now requires local unit/runtime/backend-selection/input tests, mock daemon protocol smoke, typecheck, feature-registry gate, and real Windows remote/input smoke in the current worktree.
+- Runtime cleanup truth: after `wezterm cli --prefer-mux kill-pane`, the backend must run a fresh pane list. If the pane remains listed, cleanup is an explicit `wezterm pane cleanup failed...` error and local session/snapshot state must not be silently deleted.
+- `win/` is only a future Windows desktop shell owner. It must not copy terminal runtime, daemon mirror, buffer protocol, renderer logic, or `../wterm` source. Windows shell starts after backend closeout and owns only window/menu/package/platform integration.
+- Current blocker: `jason-hw-desktop / 100.75.122.121` was offline with Tailscale `peer's node key has expired`; SSH timed out. This prevents real `wezterm-backend-remote-smoke.ts` and `wezterm-backend-input-smoke.ts`, so Windows backend closeout is not complete.
+
+## 2026-07-12 Client must not own terminal layout
+
+- Terminal content layout belongs to tmux/mirror truth. Client code must not reflow terminal content from WebView/container measurement, input count, IME state, active/focus state, or renderer geometry keys.
+- Allowed client work: consume daemon `buffer-head` / `buffer-sync`, maintain local sparse buffer, render fixed-height rows from mirror truth, crop/pan UI shell, send input, and request head/range based on visible demand.
+- Forbidden client fixes: CSS wrapping rows, changing shared row/cell/theme backgrounds to hide stale/empty rows, injecting default cols/rows when tmux head/geometry has not arrived, adding `viewportCols`/`widthMode` to render revision keys, or using UI border/scrollbar/IME changes to force content geometry refresh.
+- If entering a session shows no previous buffer, root cause hunt starts at `attach/resume -> tmux pane metrics/capture -> buffer-head -> buffer-sync -> local apply`; do not patch renderer layout. The expected fix is in transport/buffer resource truth and first head/body bootstrap, not client-side layout.
+- `adaptive-phone` remains tmux reflow via the single daemon adaptive lease owner. Client reports measured cols; daemon requests tmux reflow; only capture/readback updates mirror rows/cols/buffer.
+
+## 2026-07-12 Global resource registry first phase
+
+- Global resource truth now starts from `android/docs/resource-registry.json`, with `android/docs/resource-map.md` as the human review surface and `android/docs/testing/resource-truth-test-design.md` as the gate design. Scope is global: daemon, Android, Mac, Windows, terminal backends, transport, buffer/render, CLI/release, and debug side channels.
+- Function map is feature-local only and must bind to declared resource ids; it cannot invent resource relations. Mainline call map edges must carry `resource_from`, `resource_to`, `via_resources`, and `relation_status`.
+- Resource gates added: `resource-registry-truth.test.ts`, `function-map-resource-truth.test.ts`, and `mainline-resource-call-map.test.ts`. These gates reject undeclared resource ids, missing owner features, unresolved doc/gate references, and forbidden direct resource shortcuts.
+- Verified L0: focused resource gates pass 3 files / 11 tests; `test:feature-registry` passes 7 files / 45 tests after wiring resource gates into the standard registry gate. This proves doc/static resource ownership only; live daemon/client behavior still requires the mapped L2/L3/L4 gates when code changes.
 ## 2026-07-12 Retryable reconnect handshake failure is not terminal error truth
 
 - `terminal.transport_lifecycle` owns reconnect handshake failure projection. Retryable reconnect handshake failures are intermediate transport facts, not terminal session error truth.
 - Correct behavior: retryable reconnect handshake failure keeps the session in `reconnecting`, updates attempt/error text for observability, and schedules the next reconnect attempt. It must not emit `SESSION_STATUS_EVENT(type='error')` or make the drawer/UI show final “连接失败”.
 - Terminal error projection is allowed only for nonretryable handshake failure or a future explicitly exhausted retry state. UI/drawer must not add a compensating retry/error filter; daemon and renderer are outside this owner.
 - Regression gate: `session-context-transport-open-runtime.test.ts` must keep paired tests proving retryable failure does not call `emitSessionStatus`, while nonretryable failure still does.
-
 ## 2026-07-12 Explicit session switch must reach the transport owner as explicit-resume
 
 - Drawer/tab switch is a user explicit resume intent. `useOpenTabRuntime` must not only persist `switchRuntime:'explicit-resume'`; it must pass the same reason into `SessionContext.switchSession(..., { refreshSource:'explicit-resume' })` so the transport lifecycle owner does not downgrade it to `active-reentry`.
@@ -873,17 +996,16 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - Tail refresh and reading repair requests are scoped to the current visible window; hidden cache rows are retention, not fetch target. Sparse tail jumps must request visible tail repair without reinterpreting reading position as follow.
 - Regression gates: `session-context-buffer-runtime.test.ts`, `session-sync-helpers.test.ts`, shared `terminal-buffer.test.ts`, and `buffer-sync-request-planner.test.ts` cover active head-before-visible bootstrap, no head-only body repaint, visible-window tail refresh, stale/lower revision drops, and sparse tail repair.
 
-## 2026-07-12 Daemon mirror truth only comes from backend capture
+## 2026-07-12 Retryable reconnect start is not terminal error truth
 
-- Resource boundary: daemon may send real protocol requests to tmux/WezTerm, including input and adaptive `resize-window -x` from the single adaptive lease owner, but daemon must not predict request results into mirror truth.
-- Hard owner rule: `mirror.rows`, `mirror.cols`, `mirror.bufferStartIndex`, `mirror.bufferLines`, and `mirror.cursor` are written only by backend capture/readback owner `terminal-mirror-capture.ts` through `applyMirrorCaptureSnapshot()`. `attachTmux`, resize/adaptive lease reconcile/release, debug probes, and startup paths must not self-write mirror content or geometry.
-- Session existence and mirror/debug reads must not mutate user tmux options. `ensureTmuxSessionAlternateScreenDisabled()` was physically removed from daemon control/server paths; future checks must not write `alternate-screen` or other window/session options.
-- Buffer-sync contract: multi-gap `missingRanges` / changed ranges must be sorted and returned as one continuous authoritative span, or a future typed protocol must emit multiple independent continuous windows. Holey payloads preserve stale rows in client sparse buffer.
-- Verification: daemon owner tests `7 files / 96 tests` passed; `test:feature-registry` `7 files / 45 tests` passed; `tsc --noEmit` passed; `daemon:mirror:close-loop` passed all 8 strict replay cases at `android/evidence/daemon-mirror/2026-07-12/summary.json`; MemPalace search hit this phrase.
+- A retryable reconnect start is an intermediate `terminal.transport_lifecycle` fact, not terminal session error truth. `scheduleReconnectRuntime()` must update the session to `reconnecting` and start the next attempt without emitting `SESSION_STATUS_EVENT(type='error')`.
+- Evidence from the `zterm`现场: tmux session/pane existed and daemon mirror captured `zterm`; daemon later received input and pushed `buffer-sync`, while the client had already projected `manual reconnect` as `app.session.status type=error`. That made the drawer/UI look like “连接失败” even though the transport was still retrying and later recovered.
+- Terminal error projection remains valid for nonretryable failure, auth rejected, auto reconnect explicitly blocked, or future retry-exhausted state. UI/drawer must not compensate with a local filter; fix belongs to the transport lifecycle owner.
+- Verified gates: `session-context-session-runtime.test.ts` + `session-context-transport-open-runtime.test.ts` + `session-context-activity-runtime.test.ts` passed 31/31; `tsc --noEmit` passed; `test:feature-registry` passed 48/48; Android real-device smoke `android/evidence/real-device/2026-07-12-135023` passed with IME visible, `clientInputSend=true`, `bufferHead=true`, `bufferApplied=true`, `renderCommit=true`, `noLocalTruthAnomaly=true`.
 
-## 2026-07-12 Debug channel only accepts explicit summaries
+## 2026-07-12 Android update old WebView process truth
 
-- `resource.debug_channel` is observe-only. Daemon runtime debug must never copy arbitrary business `payload` into debug metadata, because that turns debug side data into a second request/response truth and can leak terminal rows or user input.
-- `terminal-debug-runtime.ts` now ignores raw `payload` and only records allowlisted scalar metadata plus explicit `payloadSummary`. Transport send logging passes `payloadSummary: summarizePayload(message)` for buffer-sync/connected metadata.
-- Regression gates: `terminal-debug-runtime.test.ts` proves raw terminal row payload is dropped while explicit summary is stored; `server.transport-runtime-truth.test.ts` locks the send callsite to `payloadSummary`, not `payload`.
-- [2026-07-12] CLI/release/debug 资源真源已加 gate：release/update artifact 只能 promote 到 deterministic `resource.daemon_runtime_artifact`，runtime 只能执行 staged/package `server.cjs`，debug channel 只能 observe/summary-only，不得成为 mirror/business truth。验证：resource gate 8 PASS、feature/resource gates 48 PASS、tsc PASS、release asset verify OK、daemon close-loop 8 cases PASS；commit `3e93f96`。
+- Symptom: after installing a new APK, Android could still show old zterm WebView terminal content such as stale `routecodex` rows. This was not proof that `OPEN_TABS` or `TERMINAL_LAYOUT` resurrected state.
+- Evidence: device package showed zterm `versionCode=1032069` updated at `2026-07-12 21:10:08`; `dumpsys window` focus could be zterm while UI dump still contained old terminal text before force-stop. After `adb shell am force-stop com.zterm.android` and cold start, UI dump no longer contained `routecodex`, `Implement`, `Paste`, or quickbar text.
+- Owner: native Android update handoff. `AppUpdatePlugin.installApk()` must terminate the current app process shortly after handing the APK URI to the system installer, so the user cannot remain inside the old WebView/JS process after an update. Do not clear `app_webview`, Local Storage, `OPEN_TABS`, or session state as a workaround.
+- Verification level: direct `adb install -r` + cold start of the rebuilt APK passed and old terminal text disappeared. The App-internal `AppUpdatePlugin.downloadAndInstall()` handoff path still needs a real trigger smoke; WebView DevTools on this device accepted the socket but timed out on `/json`, so DevTools could not be used as plugin-path evidence in this run.

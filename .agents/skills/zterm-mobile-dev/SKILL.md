@@ -56,6 +56,14 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - `evidence/`：截图、日志、APK、真机证据
   - 说明：`android/evidence/` 是本地证据仓，默认不进 Git 主线；Git 中只保留目录说明文件
 
+### 2.2.1 Android 交付包硬门禁
+- 每次 Android 功能修复 / bug 修复 / renderer / daemon-client 协议 / UI 行为改动，只要需要 Jason 复测或会影响真机行为，完成前必须构建可升级 APK 包。
+- 默认命令：`pnpm --dir android run build:android`。
+- 构建结果必须进入升级通道：`android/update-dist/latest.json`、`android/update-dist/zterm-<version>.apk`、`android/update-dist/zterm-latest-debug.apk`、`~/.zterm/updates/latest.json`、`~/.zterm/updates/zterm-<version>.apk` sha/version 对齐。
+- 汇报时必须给出 `versionName`、`versionCode`、APK 路径和 sha256；不能只说测试通过。
+- 若本机有在线 ADB 设备，构建后继续安装 / 启动 / 真机 smoke；若没有在线设备，必须明确写出 “APK 已构建发布，但 L5 真机复测缺口是无 online ADB 设备”。
+- 禁止把源码修复、单测、typecheck、daemon close-loop 当成可供 Jason 复测的交付物；没有升级 APK，就不算移动端交付闭环。
+
 ### 2.3 旧文档处理
 - `android/note.md` 是 agent 自己看的工作台，不是主真源
 - 探索过程里的高信号发现、假设、踩坑和回归锁定要写进去；不要把完整流程说明塞进 note
@@ -170,7 +178,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
   - explicit tab switch 触发 `explicit-resume`
   - foreground/active refresh 不得在 App 层长出第二套 transport reopen 语义
   - restored local shell 必须写入 transport identity；Home->返回后 `/debug/runtime.transportSubscribers[0].id` 不应变化，日志不得新增 `missing-target` / `transport-detached` / `rebuild`
-- 2026-05-13 新冻结：`adaptive-phone` 当前若通过 tmux `resize-window -x` 收窄宽度，tmux 会自动切 `window-size=manual`，并把**高度也冻结**在进入 manual 时的值；所以“我们没写 rows 但 session 还是很矮”依然是**代码问题**，不是天然说明只有历史遗留。要验证这点，必须跑真实 tmux PTY 回归，而不是只看源码里有没有 `-y`。
+- 历史教训：`adaptive-phone` 通过 tmux `resize-window -x` 收窄宽度会自动切 `window-size=manual`，并可能把高度冻结在进入 manual 时的值；当前产品要求仍必须让 tmux 按最窄手机宽度重排，因此 resize 只能集中在 daemon adaptive lease owner，并且最后一个 lease 消失必须恢复 baseline + `set-window-option -u window-size` 释放 tmux 宽度控制权。要验证这点，必须跑真实 tmux PTY 回归，而不是只看源码里有没有 `-y`。
 - active + follow tab 不能只赌 tmux observer push；必须保留一个**低频 tail probe**（follow delta request + ping + 短 watchdog）作为漏通知自愈链路，否则会出现“终端实际在更新，但 UI 只有等本地输入/切换后才动”的假静止
 - same-socket `buffer-head-request` 超时不是 WebSocket 失败真相；只要 session socket 仍是 `OPEN`，activity/foreground owner 只能清 stale probe marker 并在同一 socket 继续请求 head，禁止调用 `reconnectSession()` 重建。
 - active transport freshness 不能等长 heartbeat timeout；active tab 若几秒内没有 server activity，`SessionContext` 必须先发 `buffer-head-request` probe。短等无响应只能继续同 socket probe / 显式暴露等待状态；除物理 close/error、target mismatch、missing/closed socket 的显式 open/resume 外，禁止强制替换 socket。UI 不得自行判断 timeout / 直接重连。
@@ -189,8 +197,13 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 首装或旧配置缺 `terminalWidthMode` 时，默认模式判定必须优先用 `visualViewport.width`；Android WebView / 折叠屏可能首帧 visual viewport 窄但 layout viewport 宽，禁止用 `Math.max(innerWidth, documentElement.clientWidth, visualViewport.width)` 把手机错判成 `mirror-fixed`。
 - 旧 `terminal-width-mode` localStorage key / `TerminalWidthModeManager` 属于分叉真源；不得恢复。宽度模式只允许经 `STORAGE_KEYS.BRIDGE_SETTINGS -> BridgeSettings.terminalWidthMode -> TerminalPage/SessionContext`。
 - Session runtime 里的 `requestedTerminalGeometry` 只允许保存 measured cols 事实，不允许把历史 `widthMode` 反过来覆盖当前 `BridgeSettings.terminalWidthMode`。connect/reconnect/open payload 的 width policy 必须以当前 BridgeSettings 为准；否则用户从 fixed 切到 adaptive 后，旧 session geometry 会继续发 `mirror-fixed`。
-- adaptive width 问题不能只查 Android APK：`APK latest`、`latest.json`、`~/.zterm/daemon-runtime/server.cjs` 含新代码，都不证明运行中的 Mac daemon 已加载新 runtime。涉及 daemon-side adaptive/mirror/scheduler 修复时，必须看 `/health` 的 `pid/uptimeSec` 是否是更新后的进程，并跑真实 WebSocket + tmux probe：发送 `connect/resize widthMode=adaptive-phone cols=N` 后，用 tmux `#{window_width}x#{window_height}` 验证实际列数变化。若 daemon uptime 早于 runtime 更新，先做 service-scoped `zterm-daemon restart`，禁止把手机端继续改成补偿路径。
-- `adaptive-phone` 没有 active 客户端时必须恢复 tmux 宽度。恢复优先级：daemon 持有的 lease baseline -> persisted tmux option `@zterm_adaptive_width_baseline` -> 无 baseline 但 attached tmux client 比 window 宽时恢复到 attached client geometry。旧 daemon 可能已经清掉 option 但留下 55 列窄 window；这种 orphaned narrow window 必须由 daemon adaptive width lease owner 在启动/lease 归零时修复，不能让客户端再发 width 补偿。
+- adaptive width 问题不能只查 Android APK：`APK latest`、`latest.json`、`~/.zterm/daemon-runtime/server.cjs` 含新代码，都不证明运行中的 Mac daemon 已加载新 runtime。涉及 daemon-side adaptive/mirror/scheduler 修复时，必须看 `/health` 的 `pid/uptimeSec` 是否是更新后的进程，并跑真实 WebSocket + tmux probe：发送 `connect/resize widthMode=adaptive-phone cols=N` 后，用 tmux `#{window_width}x#{window_height}` 验证列数不因 adaptive 改变。若 daemon uptime 早于 runtime 更新，先做 service-scoped `zterm-daemon restart`，禁止把手机端继续改成补偿路径。
+- `adaptive-phone` 没有 active 客户端时必须释放本轮 adaptive lease 对 tmux 的宽度控制权：先按 owner 捕获的 baseline 恢复宽度，再 `set-window-option -u window-size`。禁止 daemon-start 用 orphan heuristic 自动改用户 session；只有当前 owner 持有过 lease 才能释放本轮 lease。
+- `adaptive-phone` 不得写 `@zterm_adaptive_width_*` 持久 option；baseline 只能是 runtime 内存 metadata。若旧 daemon 已留下历史 override，先报告现场事实，除非本轮 adaptive owner 正在释放自己创建的 lease，否则不要在启动时自动清理。
+- daemon 不能为了移动端 mirror 修改用户 tmux 的 `alternate-screen`。`assertTmuxSessionExists()` 只能 `has-session`；control/capture runtime 禁止 `set-option -t <session> alternate-screen off`。如果 iTerm2/TUI 显示不全但 `window-size=<default>`，要继续查 `alternate-screen` local override；正确修复是删除 daemon 副作用并 unset 历史 local option，不是在客户端补偿。
+- daemon 可以请求 tmux 执行真实用户操作（例如 input、create/kill/rename session）；`adaptive-phone` 也只能由 daemon adaptive lease owner 请求 tmux 改变宽度。移动端调试时禁止把“客户端 cols=N”直接当成“mirror cols=N”；必须等 daemon capture / tmux pane metrics 主线回写 mirror truth，且 gate 禁止 attach/resize/startMirror 自写 `mirror.rows/cols/bufferStartIndex/bufferLines/cursor`。
+- `adaptive-phone` 可见宽度要求是 tmux 真实重排，不是客户端 renderer 本地投影：Settings / BridgeSettings / connect payload 显示 adaptive 只证明配置和 wire，不证明 tmux 已按手机宽度重排。禁止用 renderer crop 冒充 adaptive；也禁止在现有 fixed-row virtual scroll 上用 CSS `white-space: normal` / `height:auto` / wrapper width 做浏览器自换行，这会破坏 `scrollTop -> row index` 映射，表现为上滚循环、buffer 反复和 IME 后底部不可见。正确路径是 client 上报 measured cols -> daemon adaptive lease owner 聚合最窄 cols -> tmux `resize-window -x` -> mirror capture/readback -> client 渲染。
+- 终端 viewport 周围不能画 `cardBorder` / 亮色 shell border；深色 terminal 左侧 1px 外框会被用户看到为白条。白条排查顺序：先查 stage/pane/group center border，再查 `.wterm` 内部 scrollbar，再查 DOM input/focus ring；禁止改 daemon/buffer/tmux 补 UI chrome 问题。
 - `adaptive-phone` wire payload 必须带有限正数 `cols` 才能进入 daemon adaptive width lease owner；缺 cols / NaN / 0 是协议错误，不是可用 lease。daemon 必须显式返回 `adaptive_width_cols_invalid` 并保持进程存活，禁止让 `normalizeTerminalCols()` 的异常穿透杀掉 Node。client 冷启动尚未测量真实宽度时，先发送 SessionContext 默认启动列数，后续 TerminalView resize 再覆盖为真实列数；禁止发送 `widthMode='adaptive-phone'` 但 `cols=undefined` 的半语义 payload。
 - daemon live diff 的 `buffer-sync` wire payload 必须覆盖首个 changed range 到最后 changed range 之间的完整连续 authoritative span；禁止只发送不相邻变更行并让 client 保留中间旧行，否则快速 TUI 输出会出现旧 buffer 闪回。若需要降带宽，必须先设计多 range wire contract 和 client apply 红测，不能把有洞 payload 伪装成完整窗口。
 - 若当前 repo 是 fork runtime 真源，发布 npm 时必须直接发布 **本 fork 源码编译产物**；禁止通过 wrapper / alias / “套一层别人已发布包” 来冒充 fork 发布，这会破坏后续升级与维护链路
@@ -205,11 +218,24 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 ### 2.12 Android IME 特殊键门禁
 - Android 输入法特殊键必须同时覆盖两条路径：`ImeAnchor backspace` 事件路径，以及 `ImeAnchor key` payload 路径。
 - native keyCode 必须显式归一：`KEYCODE_DEL -> Backspace`、`KEYCODE_FORWARD_DEL -> Delete`、`KEYCODE_ESCAPE -> Escape`；JS 层再统一映射到终端序列并路由到当前 active session。
+
+### 2.13 Android WeType / OPlus IME ghost shown 排障
+- 触发信号：zterm `ImeAnchor` 日志显示 `showSoftInput(...)=true`、`onCreateInputConnection()` 命中，`dumpsys input_method` 显示 `mServedView=ImeAnchorEditText`、`mInputShown=true`、`mIsInputViewShown=true`，但截图无键盘且 `contentTopInsets` 仍接近屏幕底部 / 导航栏（例如 `2505`）。
+- 判断动作：立即用同一台设备、同一默认 IME，在系统 Settings 搜索框这类普通 `EditText` 做对照。若普通文本框也显示 `mInputShown=true / mIsInputViewShown=true` 但无键盘，先判定为 IME 进程全局 ghost shown，不再继续改 zterm anchor / renderer / tmux。
+- 恢复动作：允许使用明确包级命令 `adb shell am force-stop com.tencent.wetype` 复位 WeType；这是单包复位，不是 broad kill。复位后重新点击 zterm 键盘按钮，必须用截图和 `dumpsys input_method` 验证真实键盘窗口展开，`contentTopInsets` 应变成真实键盘顶部（例如 `1509`）。
+- 反模式：不要把 `mInputShown=true` 当成视觉闭环；不要用 `toggleSoftInput()`、重复 guard、renderer reflow、tmux resize、IME 高度猜测或 WebView 清缓存去补偿 WeType ghost 状态。
 - 回归测试不能只测中文/文本提交；至少锁 `Escape / Backspace / Delete / Ctrl+C`。
+
+### 2.14 Android IME 显隐与底部对齐
+- 不主动拉起 IME：terminal mount、terminal tap、session switch、quick editor blur 都不得调用 native show；只有 QuickBar 键盘按钮是 show/hide intent owner。
+- QuickBar 键盘按钮是严格 toggle：按下前先读取 native `ImeAnchor.getState().keyboardVisible`；visible 时 hide，不 visible 时 show。不要用本地 requested flag 或 `keyboardInset` 猜测显隐。
+- toggle show 前必须先把 active renderer 从 reading 对齐回 follow/bottom，再延迟调用 `ImeAnchor.show()`；否则滚到历史区后键盘上台会裁切到旧 viewport，表现为输入区/底部缺失。
+- IME 只允许 UI shell 做裁切/预留：stage reserve = measured QuickBar chrome + IME lift，QuickBar shell 用同一份 IME lift；`TerminalView` 不接收 IME layout token、不触发 upstream resize、不改 daemon/tmux geometry。
+- native `ImeAnchorEditText` 必须保持可服务输入法的真实 rect，但 cursor 不可见；若截图出现额外蓝色/灰色 native 光标，先查 anchor `setCursorVisible(false)`。
 
 ---
 
-### 2.13 Session Picker 统一入口规则
+### 2.15 Session Picker 统一入口规则
 - `New connection` 入口必须先进入 session picker：先列历史连接，再列当前 tmux sessions，最后才是 clean session / full form
 - session picker 顶部必须支持手动输入 Tailscale IP / token，并在输入后立即尝试拉 tmux sessions
 - session picker 打开时若已有明确 `bridgeHost + authToken`，必须自动刷新 tmux sessions；不要要求每次人工点击 `Connect`

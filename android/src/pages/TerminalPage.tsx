@@ -996,7 +996,7 @@ function TerminalPageComponent({
   onToggleScheduleJob,
   onRunScheduleJobNow,
   terminalThemeId,
-  terminalWidthMode = 'mirror-fixed',
+  terminalWidthMode = 'adaptive-phone',
   terminalSessionGroupLayoutMode = 'auto',
   onTerminalWidthModeChange,
   onSendMessage,
@@ -1007,8 +1007,10 @@ function TerminalPageComponent({
 }: TerminalPageProps) {
   const isAndroid = Capacitor.getPlatform() === 'android';
   const [focusNonce, setFocusNonce] = useState(0);
+  const [inputIntentFollowResetEpoch, setInputIntentFollowResetEpoch] = useState(0);
   const terminalFontSize = 10;
-  const [terminalKeyboardRequested, setTerminalKeyboardRequested] = useState(isAndroid);
+  const [terminalKeyboardRequested, setTerminalKeyboardRequested] = useState(false);
+  const [androidImeVisible, setAndroidImeVisible] = useState(false);
   const [networkOnline, setNetworkOnline] = useState(() =>
     typeof navigator === 'undefined' ? true : navigator.onLine,
   );
@@ -1049,6 +1051,7 @@ function TerminalPageComponent({
   const connectionIssueTimerRef = useRef<number | null>(null);
   const activeSessionIdRef = useRef<string | null>(activeSession?.id || null);
   const quickBarEditorFocusedRef = useRef(quickBarEditorFocused);
+  const androidImeVisibleRef = useRef(false);
   const terminalInputHandlerRef = useRef<typeof onTerminalInput>(onTerminalInput);
   const appliedPaneAttachIntentNonceRef = useRef<number | null>(null);
   const pendingAndroidImeFocusTimerRef = useRef<number | null>(null);
@@ -1125,6 +1128,11 @@ function TerminalPageComponent({
 
   const updateTerminalKeyboardRequested = useCallback((next: boolean) => {
     setTerminalKeyboardRequested((current) => (current === next ? current : next));
+  }, []);
+
+  const updateAndroidImeVisible = useCallback((next: boolean) => {
+    androidImeVisibleRef.current = next;
+    setAndroidImeVisible((current) => (current === next ? current : next));
   }, []);
 
   const updateKeyboardInset = useCallback((next: number) => {
@@ -1596,6 +1604,13 @@ function TerminalPageComponent({
     input.setSelectionRange(end, end);
   }, [uiSessionId]);
 
+  const alignActiveTerminalToFollowForInput = useCallback(() => {
+    if (!uiSessionId) {
+      return;
+    }
+    setInputIntentFollowResetEpoch((value) => value + 1);
+  }, [uiSessionId]);
+
   const clearPendingAndroidImeFocus = useCallback(() => {
     if (pendingAndroidImeFocusTimerRef.current === null) {
       return;
@@ -1640,7 +1655,7 @@ function TerminalPageComponent({
     });
   }, [isAndroid]);
 
-  const requestAndroidImeFocus = useCallback((options?: { force?: boolean }) => {
+  const requestAndroidImeFocus = useCallback((options?: { force?: boolean; delayMs?: number }) => {
     if (!isAndroid || quickBarEditorFocusedRef.current) {
       return;
     }
@@ -1651,6 +1666,7 @@ function TerminalPageComponent({
     }
     androidImeFocusRouteKeyRef.current = routeKey;
     clearPendingAndroidImeFocus();
+    const delayMs = Math.max(0, Math.round(options?.delayMs || 0));
     pendingAndroidImeFocusTimerRef.current = window.setTimeout(() => {
       pendingAndroidImeFocusTimerRef.current = null;
       if (quickBarEditorFocusedRef.current) {
@@ -1659,18 +1675,8 @@ function TerminalPageComponent({
       void ImeAnchor.show().catch((error) => {
         console.warn('[TerminalPage] ImeAnchor.show() failed:', error);
       });
-    }, 0);
+    }, delayMs);
   }, [captureStableLayoutViewportHeight, clearPendingAndroidImeFocus, isAndroid, uiSessionId]);
-
-  const restoreAndroidTerminalImeRoute = useCallback(() => {
-    if (!isAndroid || quickBarEditorFocusedRef.current) {
-      return;
-    }
-    if (!(terminalKeyboardRequested || keyboardInset > 0)) {
-      return;
-    }
-    requestAndroidImeFocus({ force: true });
-  }, [isAndroid, keyboardInset, requestAndroidImeFocus, terminalKeyboardRequested]);
 
   const keepTerminalInputFocused = useCallback(() => {
     if (quickBarEditorFocused) {
@@ -1679,12 +1685,11 @@ function TerminalPageComponent({
     }
 
     if (isAndroid) {
-      restoreAndroidTerminalImeRoute();
       return;
     }
 
     scheduleTerminalFocusRetries();
-  }, [clearTerminalFocusRetries, isAndroid, quickBarEditorFocused, restoreAndroidTerminalImeRoute, scheduleTerminalFocusRetries]);
+  }, [clearTerminalFocusRetries, isAndroid, quickBarEditorFocused, scheduleTerminalFocusRetries]);
 
   useEffect(() => {
     keepTerminalInputFocusedRef.current = keepTerminalInputFocused;
@@ -1746,10 +1751,10 @@ function TerminalPageComponent({
 
   const handleQuickBarSendSequence = useCallback((sequence: string) => {
     onQuickActionInput?.(sequence, uiSessionId || undefined);
-    if (terminalKeyboardRequested || keyboardInset > 0) {
+    if (terminalKeyboardRequested) {
       keepTerminalInputFocused();
     }
-  }, [keyboardInset, keepTerminalInputFocused, onQuickActionInput, terminalKeyboardRequested, uiSessionId]);
+  }, [keepTerminalInputFocused, onQuickActionInput, terminalKeyboardRequested, uiSessionId]);
 
   const handleQuickBarSessionDraftChange = useCallback((value: string) => {
     onSessionDraftChange?.(value, uiSessionId || undefined);
@@ -1757,10 +1762,10 @@ function TerminalPageComponent({
 
   const handleQuickBarSessionDraftSend = useCallback((value: string) => {
     onSessionDraftSend?.(value, uiSessionId || undefined);
-    if (terminalKeyboardRequested || keyboardInset > 0) {
+    if (terminalKeyboardRequested) {
       keepTerminalInputFocused();
     }
-  }, [keyboardInset, keepTerminalInputFocused, onSessionDraftSend, terminalKeyboardRequested, uiSessionId]);
+  }, [keepTerminalInputFocused, onSessionDraftSend, terminalKeyboardRequested, uiSessionId]);
 
   const handleQuickBarOpenScheduleComposer = useCallback((text: string) => {
     const targetSessionId = uiSessionId;
@@ -1796,8 +1801,8 @@ function TerminalPageComponent({
   }, [handleRequestRemoteScreenshot]);
 
   const handleActiveTerminalActivateInput = useCallback(() => {
-    restoreAndroidTerminalImeRoute();
-  }, [restoreAndroidTerminalImeRoute]);
+    alignActiveTerminalToFollowForInput();
+  }, [alignActiveTerminalToFollowForInput]);
 
   const handleSwipeTab = useCallback((sessionId: string, direction: 'previous' | 'next') => {
     if (portraitSessionDrawerEnabled && direction === 'previous') {
@@ -1872,7 +1877,23 @@ function TerminalPageComponent({
       }
     }
 
-    if (terminalKeyboardRequested || keyboardInset > 0) {
+    const keyboardVisible = keyboardInset > 0;
+    let androidKeyboardVisible = androidImeVisibleRef.current;
+    if (isAndroid) {
+      try {
+        const state = await ImeAnchor.getState();
+        androidKeyboardVisible = Boolean((state as { keyboardVisible?: unknown }).keyboardVisible);
+        updateAndroidImeVisible(androidKeyboardVisible);
+        const stateKeyboardHeight = Number((state as { keyboardHeight?: unknown }).keyboardHeight || 0);
+        if (Number.isFinite(stateKeyboardHeight)) {
+          updateKeyboardInset(stateKeyboardHeight);
+        }
+      } catch (error) {
+        console.warn('[TerminalPage] ImeAnchor.getState() failed:', error);
+      }
+    }
+    const shouldHideKeyboard = isAndroid ? androidKeyboardVisible : terminalKeyboardRequested || keyboardVisible;
+    if (shouldHideKeyboard) {
       updateTerminalKeyboardRequested(false);
       clearPendingAndroidImeFocus();
       clearTerminalFocusRetries();
@@ -1880,6 +1901,7 @@ function TerminalPageComponent({
       if (isAndroid) {
         try {
           await ImeAnchor.hide();
+          updateAndroidImeVisible(false);
         } catch (error) {
           console.warn('[TerminalPage] ImeAnchor.hide() failed:', error);
         }
@@ -1896,8 +1918,9 @@ function TerminalPageComponent({
     }
 
     updateTerminalKeyboardRequested(true);
+    alignActiveTerminalToFollowForInput();
     if (isAndroid) {
-      requestAndroidImeFocus({ force: true });
+      requestAndroidImeFocus({ force: true, delayMs: 48 });
       return;
     }
 
@@ -1909,7 +1932,7 @@ function TerminalPageComponent({
     }
 
     scheduleTerminalFocusRetries({ delaysMs: [32, 120], includeKeyboardShow: true });
-  }, [clearPendingAndroidImeFocus, clearTerminalFocusRetries, focusTerminalInput, isAndroid, keyboardInset, quickBarEditorFocused, requestAndroidImeFocus, scheduleTerminalFocusRetries, setAndroidEditorActive, terminalKeyboardRequested, uiSessionId]);
+  }, [alignActiveTerminalToFollowForInput, clearPendingAndroidImeFocus, clearTerminalFocusRetries, focusTerminalInput, isAndroid, keyboardInset, quickBarEditorFocused, requestAndroidImeFocus, scheduleTerminalFocusRetries, setAndroidEditorActive, terminalKeyboardRequested, uiSessionId, updateAndroidImeVisible, updateKeyboardInset]);
 
   const handleQuickBarEditorDomFocusChange = useCallback((active: boolean) => {
     quickBarEditorFocusedRef.current = active;
@@ -1923,20 +1946,7 @@ function TerminalPageComponent({
     if (active || !isAndroid) {
       return;
     }
-    if (terminalKeyboardRequested || keyboardInset > 0) {
-      requestAndroidImeFocus({ force: true });
-    }
-  }, [clearTerminalFocusRetries, isAndroid, keyboardInset, requestAndroidImeFocus, terminalKeyboardRequested]);
-
-  useEffect(() => {
-    if (!isAndroid || quickBarEditorFocused || !uiSessionId) {
-      return;
-    }
-    if (!(terminalKeyboardRequested || keyboardInset > 0)) {
-      return;
-    }
-    requestAndroidImeFocus({ force: true });
-  }, [isAndroid, keyboardInset, quickBarEditorFocused, requestAndroidImeFocus, terminalKeyboardRequested, uiSessionId]);
+  }, [clearTerminalFocusRetries, isAndroid, setAndroidEditorActive]);
 
   useEffect(() => {
     const syncOnlineState = () => {
@@ -1984,7 +1994,7 @@ function TerminalPageComponent({
 
 
   useEffect(() => {
-    updateTerminalKeyboardRequested(isAndroid);
+    updateTerminalKeyboardRequested(false);
     setQuickBarEditorFocused(false);
     if (isAndroid) {
       return;
@@ -2132,6 +2142,7 @@ function TerminalPageComponent({
             captureStableLayoutViewportHeight();
           }
           updateKeyboardInset(height);
+          updateAndroidImeVisible(visible);
           if (!quickBarEditorFocusedRef.current) {
             updateTerminalKeyboardRequested(visible);
           }
@@ -2233,6 +2244,9 @@ function TerminalPageComponent({
       if (!disposed) {
         cancelPendingHide();
         updateKeyboardInset(info.keyboardHeight || 0);
+        if (isAndroid) {
+          updateAndroidImeVisible(true);
+        }
         if (isAndroid && !quickBarEditorFocusedRef.current) {
           updateTerminalKeyboardRequested(true);
         }
@@ -2248,6 +2262,7 @@ function TerminalPageComponent({
             hideTimer = null;
             if (!disposed) {
               updateTerminalKeyboardRequested(false);
+              updateAndroidImeVisible(false);
               updateKeyboardInset(0);
             }
           }, 400);
@@ -2272,7 +2287,7 @@ function TerminalPageComponent({
           logAsyncCleanupFailure('keyboardDidHide listener remove', error);
         });
     };
-  }, [isAndroid]);
+  }, [isAndroid, updateAndroidImeVisible, updateKeyboardInset, updateTerminalKeyboardRequested]);
 
   useEffect(() => {
     if (typeof navigator === 'undefined') {
@@ -2308,9 +2323,9 @@ function TerminalPageComponent({
     landscape,
   }), [headerTopInsetPx, landscape, splitVisible]);
   const effectiveKeyboardLiftPx = resolveKeyboardLiftPx(keyboardInset, shellHeight);
-  const terminalImeActive = terminalKeyboardRequested && !quickBarEditorFocused;
-  const terminalImeLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
+  const terminalImeActive = (isAndroid ? androidImeVisible : terminalKeyboardRequested) && !quickBarEditorFocused;
   const quickBarShellKeyboardLiftPx = keyboardInset > 0 ? effectiveKeyboardLiftPx : 0;
+  const terminalImeLiftPx = quickBarShellKeyboardLiftPx;
   const terminalBottomChromeLiftPx = resolveTerminalBottomChromeLiftPx({
     viewportWidth,
     viewportHeight: shellHeight,
@@ -2820,6 +2835,7 @@ function TerminalPageComponent({
           terminalChromeBottomPx={terminalStageBottomPx}
           inputResetEpochBySession={inputResetEpochBySession}
           followResetEpoch={followResetEpoch}
+          inputIntentFollowResetEpoch={inputIntentFollowResetEpoch}
           terminalKeyboardRequested={terminalKeyboardRequested}
           isAndroid={isAndroid}
           onResize={onResize}
@@ -2893,7 +2909,7 @@ function TerminalPageComponent({
         />
         <TerminalQuickBarShell
           bottomPx={
-            terminalImeLiftPx
+            quickBarShellKeyboardLiftPx
             + layoutProfile.quickBar.touchSafeOffsetPx
             + terminalBottomChromeLiftPx
           }
