@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "lifecycle_id": "windows_desktop_shell",
+  "owner_feature": "windows.desktop_shell",
+  "status": "implementation alpha",
+  "entrypoint": "WinElectronMain",
+  "return_path": "WinSharedRenderer -> WinDesktopShell",
+  "canonical_docs": [
+    "win/docs/spec.md",
+    "win/docs/architecture.md",
+    "win/docs/function-map.md",
+    "win/docs/testing/windows-desktop-shell-test-design.md"
+  ],
+  "nodes": [
+    { "id": "WinElectronMain", "semantic": "Windows Electron process entry", "binding": "win/electron/main.ts#createMainWindow" },
+    { "id": "WinPreloadBridge", "semantic": "typed Windows platform bridge", "binding": "win/electron/preload.cts#ztermWindows" },
+    { "id": "WinRendererEntry", "semantic": "Windows React renderer entry", "binding": "win/src/main.tsx" },
+    { "id": "WinDesktopShell", "semantic": "desktop window/workspace composition", "binding": "win/src/WindowsDesktopApp.tsx#WindowsDesktopApp" },
+    { "id": "WinSharedTransport", "semantic": "existing shared daemon protocol transport", "binding": "win/src/windows-terminal-session.ts#createWindowsTerminalSession" },
+    { "id": "WinSharedRenderer", "semantic": "existing shared terminal renderer", "binding": "packages/shared/src/terminal/mac-terminal-view.tsx" }
+  ],
+  "edges": [
+    { "edge_id": "windows_desktop_shell:WinElectronMain->WinPreloadBridge", "from": "WinElectronMain", "to": "WinPreloadBridge", "status": "anchored", "resource_from": "resource.platform_terminal_surface", "resource_to": "resource.ui_projection" },
+    { "edge_id": "windows_desktop_shell:WinPreloadBridge->WinRendererEntry", "from": "WinPreloadBridge", "to": "WinRendererEntry", "status": "anchored", "resource_from": "resource.platform_terminal_surface", "resource_to": "resource.ui_projection" },
+    { "edge_id": "windows_desktop_shell:WinRendererEntry->WinDesktopShell", "from": "WinRendererEntry", "to": "WinDesktopShell", "status": "anchored", "resource_from": "resource.ui_projection", "resource_to": "resource.ui_projection" },
+    { "edge_id": "windows_desktop_shell:WinDesktopShell->WinSharedTransport", "from": "WinDesktopShell", "to": "WinSharedTransport", "status": "anchored", "resource_from": "resource.active_session", "resource_to": "resource.session_transport" },
+    { "edge_id": "windows_desktop_shell:WinSharedTransport->WinSharedRenderer", "from": "WinSharedTransport", "to": "WinSharedRenderer", "status": "anchored", "resource_from": "resource.session_transport", "resource_to": "resource.renderer_window", "via_resources": ["resource.transport_subscriber", "resource.mirror_store", "resource.client_sparse_buffer"] }
+  ],
+  "verification_gates": [
+    "win/docs/testing/windows-desktop-shell-test-design.md",
+    "win/src/windows-architecture-truth.test.ts",
+    "win/src/windows-terminal-session.test.ts",
+    "win/package.json#type-check",
+    "win/package.json#build",
+    "android/src/lib/feature-registry-truth.test.ts",
+    "android/src/lib/resource-registry-truth.test.ts"
+  ]
+}

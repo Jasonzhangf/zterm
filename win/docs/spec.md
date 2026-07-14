@@ -13,5 +13,6 @@ Windows support starts with a production-selectable daemon backend powered by We
 ## Alpha Acceptance
 
 - Windows daemon backend passes local unit tests, mock protocol smoke, real Windows remote smoke, real input smoke, and typecheck.
-- Windows shell documentation names owner surfaces before implementation begins.
+- Windows shell registry, resource binding, function map, lifecycle manifest, and test design name owner surfaces before implementation begins.
+- Packaged Windows app connects through the existing daemon protocol, renders a real mirror frame, sends a unique input marker, and automatically matches that marker in rendered DOM rows.
 - Ctrl+C / Windows console-control limitations are explicit until real console-control behavior is implemented and verified.

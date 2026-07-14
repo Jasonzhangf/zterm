@@ -5,3 +5,16 @@
 - Windows client work must not start by copying terminal runtime, daemon mirror, buffer protocol, or renderer logic into `win/`.
 - The first closeout target is `daemon.windows_wezterm_backend`: WezTerm is an external terminal/mux source, and ZTerm owns mirror snapshots and client-facing protocol.
 - Windows desktop shell is a later owner under `win/` for window/menu/package/platform integration only.
+
+## 2026-07-14 Daemon backend alpha proof before shell work
+
+- Windows daemon backend now has live daemon protocol proof against `ws://100.75.122.121:3333`: daemon-created WezTerm session, ticketed session WebSocket, decoded `buffer-sync` target marker comparison, input echo, and targeted cleanup all passed.
+- Next Windows client work starts at `windows.desktop_shell` architecture/test design. The shell may own Electron window/menu/package/platform integration, but must reuse shared renderer/protocol and must not copy daemon, mirror, buffer, or terminal runtime logic into `win/`.
+
+## 2026-07-14 Windows desktop shell packaged alpha proof
+
+- `windows.desktop_shell` now has an Electron main process, CommonJS sandbox preload, React shell, and a thin Windows session composition over shared `openBridgeConnection`, sparse-buffer application, and `MacTerminalView`; no daemon, mirror, renderer, Mac IPC, or local-tmux implementation was copied into `win/`.
+- Packaged Electron preload must compile from `preload.cts` to `preload.cjs`. An ESM preload compiled as `preload.js` fails in the packaged sandbox with `Cannot use import statement outside a module` even though typecheck/build pass.
+- Visible-range requests must wait until the first daemon `buffer-sync` revision. Sending `buffer-sync-request` immediately after `connected` races mirror readiness and produces `buffer-sync-request requires a ready mirror`, forcing the shell into error.
+- Real Windows packaged L5 passed against daemon `127.0.0.1:3333`: platform bridge present, session connected without error, source input `echo ZTERMWINDOWSLIVE`, rendered DOM matched both command and output rows, and the dedicated gate session/app PIDs/CDP tunnel were precisely cleaned.
+- Deployed alpha archive SHA-256 is `b60b5c5b4f27c73dc2e6b1f2dfc007a644d3c4eadaab4e2ad6dbb32d37655cf0`; package path is `D:/zterm-tools/windows-client-alpha/0.1.0-alpha.1/ZTerm.exe`.

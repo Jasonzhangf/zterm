@@ -10,7 +10,7 @@ Windows is split into two layers:
    - Treats WezTerm CLI output as input material only.
    - Produces ZTerm-owned absolute mirror snapshots and buffer protocol data.
 
-2. Windows desktop shell: pending feature owner
+2. Windows desktop shell: `windows.desktop_shell`
    - Owner surface: `win/`
    - Owns window/menu/package/platform integration only.
    - Reuses shared pane stage, app-layer workspace semantics, and terminal renderer.
@@ -39,3 +39,10 @@ Windows backend completion requires:
 - Typecheck.
 
 Windows desktop shell completion will require separate packaged Windows app smoke after the shell exists.
+
+## Desktop shell initialization
+
+- Test design: `win/docs/testing/windows-desktop-shell-test-design.md`
+- Machine lifecycle: `win/docs/windows-desktop-shell-manifest.json`
+- Electron main, CommonJS preload artifact, renderer, shell, shared transport binding, and shared renderer bindings are anchored in `win/docs/windows-desktop-shell-manifest.json`.
+- First extraction boundary: introduce a platform-neutral desktop bridge/runtime composition contract. Keep Mac local-tmux, filesystem, window-manager, and screenshot-helper IPC behind Mac adapters; Windows receives its own typed platform adapter.

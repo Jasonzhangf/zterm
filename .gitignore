@@ -36,6 +36,12 @@ mac/evidence/**
 !mac/evidence/
 !mac/evidence/README.md
 mac/mac/evidence/**
+win/dist/
+win/dist-electron/
+win/out/
+win/evidence/**
+!win/evidence/
+!win/evidence/README.md
 # source-of-truth trees must never contain generated JS siblings
 android/src/**/*.js
 android/src/**/*.js.map
