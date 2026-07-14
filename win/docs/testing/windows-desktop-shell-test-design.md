@@ -46,6 +46,7 @@ The Windows shell must not own:
 
 - Renderer entry mounts the Windows desktop shell as the only production entrypoint.
 - Shell can open a configured daemon session and render a supplied shared terminal projection.
+- Shell can list, create, select, and close daemon sessions through the existing control protocol, with no Windows-only daemon protocol fork.
 - Visible-range requests are blocked until the first daemon `buffer-sync` has made the mirror ready; connecting state must not emit `buffer-sync-request`.
 - Pane/tab operations preserve shared workspace identity and do not create another runtime per projection.
 - Filesystem/window bridge errors surface explicitly; missing bridge capability is not converted to success.
@@ -62,6 +63,7 @@ The Windows shell must not own:
 ## Positive and negative pairs
 
 - Positive: valid daemon profile connects and renders current buffer. Negative: invalid endpoint/auth produces explicit connection error and no tmux fallback.
+- Positive: session refresh/create/close returns the daemon session list. Negative: daemon control errors remain visible and do not mutate the selected target as success.
 - Positive: declared filesystem operation returns a real Windows path/result. Negative: denied/missing path returns an explicit error and no fake empty success.
 - Positive: app close disposes its transport/listeners. Negative: daemon session and WezTerm pane remain unless the user explicitly closes that session.
 - Positive: packaged app loads the Windows preload bridge. Negative: `window.ztermMac` is absent and cannot satisfy a Windows operation.

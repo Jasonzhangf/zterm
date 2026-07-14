@@ -12,6 +12,7 @@
 | `windows.desktop_shell.electron_main` | `win/electron/main.ts#createMainWindow` | `windows_desktop_shell:WinElectronMain->WinPreloadBridge` | anchored |
 | `windows.desktop_shell.preload_bridge` | `win/electron/preload.cts#ztermWindows` | `windows_desktop_shell:WinPreloadBridge->WinRendererEntry` | anchored |
 | `windows.desktop_shell.renderer_entry` | `win/src/main.tsx`; `win/src/WindowsDesktopApp.tsx#WindowsDesktopApp` | `windows_desktop_shell:WinRendererEntry->WinDesktopShell` | anchored |
+| `windows.desktop_shell.session_control` | `win/src/windows-terminal-session.ts#createWindowsSessionControl` | `windows_desktop_shell:WinDesktopShell->WinSessionControl` | anchored |
 | `windows.desktop_shell.transport_binding` | `win/src/windows-terminal-session.ts#createWindowsTerminalSession` | `windows_desktop_shell:WinDesktopShell->WinSharedTransport` | anchored |
 | `windows.desktop_shell.shared_renderer` | `packages/shared/src/terminal/mac-terminal-view.tsx#MacTerminalView` | `windows_desktop_shell:WinSharedTransport->WinSharedRenderer` | anchored |
 

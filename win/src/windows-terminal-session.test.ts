@@ -1,6 +1,102 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyBufferSyncToSessionBuffer, createSessionBufferState } from '@zterm/shared';
-import { canRequestWindowsVisibleRange, projectWindowsTerminalBuffer, type WindowsTerminalSnapshot } from './windows-terminal-session';
+import {
+  canRequestWindowsVisibleRange,
+  createWindowsSessionControl,
+  projectWindowsTerminalBuffer,
+  type WindowsTerminalSnapshot,
+} from './windows-terminal-session';
+
+class MockWebSocket {
+  static instances: MockWebSocket[] = [];
+  onopen: (() => void) | null = null;
+  onmessage: ((event: { data: string }) => void) | null = null;
+  onerror: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+  sent: string[] = [];
+  closed = false;
+
+  constructor(readonly url: string) {
+    MockWebSocket.instances.push(this);
+  }
+
+  send(value: string) {
+    this.sent.push(value);
+  }
+
+  close() {
+    this.closed = true;
+    this.onclose?.();
+  }
+
+  open() {
+    this.onopen?.();
+  }
+
+  sessions(sessions: string[]) {
+    this.onmessage?.({ data: JSON.stringify({ type: 'sessions', payload: { sessions } }) });
+  }
+
+  error(message: string) {
+    this.onmessage?.({ data: JSON.stringify({ type: 'error', payload: { message } }) });
+  }
+
+  static latest() {
+    const socket = MockWebSocket.instances[MockWebSocket.instances.length - 1];
+    if (!socket) throw new Error('no mock websocket');
+    return socket;
+  }
+}
+
+describe('windows session control owner', () => {
+  beforeEach(() => {
+    MockWebSocket.instances = [];
+    vi.stubGlobal('WebSocket', MockWebSocket);
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('lists, creates, and closes sessions through the daemon control protocol', async () => {
+    const control = createWindowsSessionControl();
+    const target = { bridgeHost: '127.0.0.1', bridgePort: 3333, authToken: 'token-a' };
+
+    const listPromise = control.refresh(target);
+    const listSocket = MockWebSocket.latest();
+    expect(listSocket.url).toBe('ws://127.0.0.1:3333/?token=token-a');
+    listSocket.open();
+    expect(listSocket.sent).toEqual([JSON.stringify({ type: 'list-sessions' })]);
+    listSocket.sessions(['default', 'alpha']);
+    await expect(listPromise).resolves.toEqual(['alpha', 'default']);
+    expect(control.getSnapshot().sessions).toEqual(['alpha', 'default']);
+
+    const createPromise = control.create(target, 'logs');
+    const createSocket = MockWebSocket.latest();
+    createSocket.open();
+    expect(createSocket.sent).toEqual([JSON.stringify({ type: 'tmux-create-session', payload: { sessionName: 'logs' } })]);
+    createSocket.sessions(['logs', 'default']);
+    await expect(createPromise).resolves.toEqual(['default', 'logs']);
+
+    const closePromise = control.close(target, 'logs');
+    const closeSocket = MockWebSocket.latest();
+    closeSocket.open();
+    expect(closeSocket.sent).toEqual([JSON.stringify({ type: 'tmux-kill-session', payload: { sessionName: 'logs' } })]);
+    closeSocket.sessions(['default']);
+    await expect(closePromise).resolves.toEqual(['default']);
+  });
+
+  it('surfaces daemon control errors explicitly', async () => {
+    const control = createWindowsSessionControl();
+    const promise = control.refresh({ bridgeHost: '127.0.0.1', bridgePort: 3333 });
+    const socket = MockWebSocket.latest();
+    socket.open();
+    socket.error('cannot list sessions');
+
+    await expect(promise).rejects.toThrow('cannot list sessions');
+    expect(control.getSnapshot()).toMatchObject({ status: 'error', error: 'cannot list sessions' });
+  });
+});
 
 describe('windows terminal session shared buffer binding', () => {
   it('projects shared sparse-buffer truth without copying renderer semantics', () => {

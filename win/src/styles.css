@@ -15,15 +15,27 @@ button, input { font: inherit; letter-spacing: 0; }
 .terminal-stage { position: relative; min-width: 0; min-height: 0; overflow: hidden; }
 .terminal-stage > [data-terminal-viewport], .terminal-stage > div { width: 100%; height: 100%; }
 .error-banner { position: absolute; z-index: 3; top: 10px; left: 50%; transform: translateX(-50%); width: min(680px, calc(100% - 28px)); height: auto !important; padding: 9px 12px; border: 1px solid #713d3d; background: #3b2325; color: #ffd9d9; font-size: 12px; }
-.connection-panel { position: absolute; z-index: 5; top: 54px; right: 12px; width: min(340px, calc(100% - 24px)); padding: 16px; border: 1px solid #343942; background: #1b1f26; box-shadow: 0 14px 36px rgba(0,0,0,.42); }
+.connection-panel { position: absolute; z-index: 5; top: 54px; right: 12px; width: min(380px, calc(100% - 24px)); max-height: calc(100% - 66px); overflow: auto; padding: 16px; border: 1px solid #343942; background: #1b1f26; box-shadow: 0 14px 36px rgba(0,0,0,.42); }
 .panel-title { margin-bottom: 14px; font-size: 14px; font-weight: 650; }
 .connection-panel label { display: grid; grid-template-columns: 72px 1fr; align-items: center; gap: 8px; margin: 9px 0; color: #aeb4be; font-size: 12px; }
 .connection-panel input { width: 100%; min-width: 0; height: 32px; border: 1px solid #3b414c; background: #12151a; color: #f2f3f5; padding: 0 9px; outline: none; }
 .connection-panel input:focus { border-color: #5e8ed7; }
 .panel-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 15px; }
-.panel-actions button, .connect-empty { height: 32px; border: 1px solid transparent; padding: 0 14px; cursor: pointer; }
+.panel-actions button, .connect-empty, .small { height: 32px; border: 1px solid transparent; padding: 0 14px; cursor: pointer; }
 .primary { background: #3c73c7; color: white; }
 .primary:disabled { opacity: .45; cursor: default; }
 .secondary { background: #252a32; color: #d8dbe0; border-color: #3a404a !important; }
+.small { height: 28px; padding: 0 10px; font-size: 12px; }
+.session-control { margin-top: 14px; padding-top: 13px; border-top: 1px solid #303640; }
+.session-control-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; color: #d8dbe0; font-size: 12px; font-weight: 650; }
+.session-create-row { display: grid; grid-template-columns: 1fr auto; gap: 8px; margin-bottom: 8px; }
+.session-list { display: grid; gap: 5px; max-height: 180px; overflow: auto; }
+.session-row { display: grid; grid-template-columns: 1fr 28px; gap: 6px; align-items: center; }
+.session-name { min-width: 0; height: 30px; padding: 0 9px; border: 1px solid #343a45; background: #151922; color: #e7e9ec; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+.session-name:hover { border-color: #526077; background: #1e2430; }
+.session-close { width: 28px; height: 28px; border: 1px solid #3a404a; background: #252a32; color: #d8dbe0; cursor: pointer; }
+.session-close:hover { border-color: #713d3d; background: #3b2325; color: #ffd9d9; }
+.session-empty, .control-error { padding: 8px 9px; border: 1px solid #333944; color: #9aa0aa; font-size: 12px; }
+.control-error { border-color: #713d3d; background: #3b2325; color: #ffd9d9; }
 .connect-empty { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); background: #252a32; color: #e7e9ec; border-color: #3a404a; }
 @media (max-width: 640px) { .connection-state { max-width: 170px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; } }

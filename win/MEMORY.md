@@ -18,3 +18,9 @@
 - Visible-range requests must wait until the first daemon `buffer-sync` revision. Sending `buffer-sync-request` immediately after `connected` races mirror readiness and produces `buffer-sync-request requires a ready mirror`, forcing the shell into error.
 - Real Windows packaged L5 passed against daemon `127.0.0.1:3333`: platform bridge present, session connected without error, source input `echo ZTERMWINDOWSLIVE`, rendered DOM matched both command and output rows, and the dedicated gate session/app PIDs/CDP tunnel were precisely cleaned.
 - Deployed alpha archive SHA-256 is `b60b5c5b4f27c73dc2e6b1f2dfc007a644d3c4eadaab4e2ad6dbb32d37655cf0`; package path is `D:/zterm-tools/windows-client-alpha/0.1.0-alpha.1/ZTerm.exe`.
+
+## 2026-07-14 Windows session control alpha proof
+
+- Session discovery/create/close UI is owned by `windows.desktop_shell.session_control` and implemented as a thin caller of shared daemon control helpers. Windows UI must not fork the daemon protocol or mutate daemon truth directly.
+- Packaged L5 passed: UI refreshed sessions `default` and `zterm-20260630-115307`, created `ztermwinsessioncontrol`, selected it, connected without error, sent `echo ZTERMSESSIONCONTROL`, matched command and output DOM rows, closed the session from UI, and daemon final list omitted it.
+- Deployed archive SHA-256 is `df59c1f382179cfe9c7a2834105e6271b865a4f712b7854f52482a1db669397a`. Smoke app PIDs `6628,7544,7884,30628` and CDP port 9333 were precisely cleared.

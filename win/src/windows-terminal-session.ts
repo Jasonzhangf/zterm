@@ -1,6 +1,9 @@
 import {
   applyBufferSyncToSessionBuffer,
+  createTmuxSession,
   createSessionBufferState,
+  fetchTmuxSessions,
+  killTmuxSession,
   openBridgeConnection,
   type BridgeServerMessage,
   type SessionBufferState,
@@ -31,6 +34,20 @@ export interface WindowsTerminalSession {
   dispose: () => void;
 }
 
+export interface WindowsSessionControlSnapshot {
+  status: 'idle' | 'loading' | 'error';
+  error: string;
+  sessions: string[];
+}
+
+export interface WindowsSessionControl {
+  getSnapshot: () => WindowsSessionControlSnapshot;
+  subscribe: (listener: () => void) => () => void;
+  refresh: (target: Pick<WindowsTerminalTarget, 'bridgeHost' | 'bridgePort' | 'authToken'>) => Promise<string[]>;
+  create: (target: Pick<WindowsTerminalTarget, 'bridgeHost' | 'bridgePort' | 'authToken'>, sessionName: string) => Promise<string[]>;
+  close: (target: Pick<WindowsTerminalTarget, 'bridgeHost' | 'bridgePort' | 'authToken'>, sessionName: string) => Promise<string[]>;
+}
+
 const CACHE_LINES = 3000;
 
 function emptyBuffer() {
@@ -53,6 +70,63 @@ export function projectWindowsTerminalBuffer(buffer: SessionBufferState): Termin
 
 export function canRequestWindowsVisibleRange(snapshot: WindowsTerminalSnapshot) {
   return snapshot.status === 'connected' && snapshot.buffer.revision > 0;
+}
+
+function sortSessions(sessions: string[]) {
+  return Array.from(new Set(sessions.map((session) => session.trim()).filter(Boolean))).sort((a, b) => a.localeCompare(b));
+}
+
+function normalizeControlTarget(target: Pick<WindowsTerminalTarget, 'bridgeHost' | 'bridgePort' | 'authToken'>) {
+  return {
+    bridgeHost: target.bridgeHost.trim(),
+    bridgePort: target.bridgePort,
+    authToken: target.authToken,
+  };
+}
+
+export function normalizeWindowsNewSessionName(input: string) {
+  return input.trim();
+}
+
+export function createWindowsSessionControl(): WindowsSessionControl {
+  const listeners = new Set<() => void>();
+  let snapshot: WindowsSessionControlSnapshot = { status: 'idle', error: '', sessions: [] };
+  const emit = () => listeners.forEach((listener) => listener());
+  const update = (next: Partial<WindowsSessionControlSnapshot>) => {
+    snapshot = { ...snapshot, ...next };
+    emit();
+  };
+  const run = async (operation: () => Promise<string[]>) => {
+    update({ status: 'loading', error: '' });
+    try {
+      const sessions = sortSessions(await operation());
+      update({ status: 'idle', error: '', sessions });
+      return sessions;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      update({ status: 'error', error: message });
+      throw error;
+    }
+  };
+
+  return {
+    getSnapshot: () => snapshot,
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
+    refresh: (target) => run(() => fetchTmuxSessions(normalizeControlTarget(target))),
+    create: (target, sessionName) => {
+      const normalized = normalizeWindowsNewSessionName(sessionName);
+      if (!normalized) return Promise.reject(new Error('Session name is required'));
+      return run(() => createTmuxSession(normalizeControlTarget(target), normalized));
+    },
+    close: (target, sessionName) => {
+      const normalized = normalizeWindowsNewSessionName(sessionName);
+      if (!normalized) return Promise.reject(new Error('Session name is required'));
+      return run(() => killTmuxSession(normalizeControlTarget(target), normalized));
+    },
+  };
 }
 
 export function createWindowsTerminalSession(): WindowsTerminalSession {
