@@ -1,12 +1,35 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
-import { MacTerminalView } from '@zterm/shared';
+import {
+  MacTerminalView,
+  PaneStage,
+  PaneTabs,
+  resolveActiveTab,
+  resolvePaneProfile,
+  type PaneSlotDefinition,
+  type PaneTabDescriptor,
+  type WorkspacePane,
+} from '@zterm/shared';
 import {
   createWindowsSessionControl,
-  createWindowsTerminalSession,
   normalizeWindowsNewSessionName,
   projectWindowsTerminalBuffer,
+  type WindowsTerminalSession,
   type WindowsTerminalTarget,
 } from './windows-terminal-session';
+import { createWindowsTerminalRegistry } from './windows-terminal-registry';
+import {
+  activateWindowsWorkspacePane,
+  activateWindowsWorkspaceTab,
+  closeWindowsWorkspaceTarget,
+  closeWindowsWorkspaceTab,
+  createWindowsWorkspaceState,
+  listWindowsWorkspaceRuntimeTabs,
+  openWindowsWorkspaceTab,
+  resizeWindowsWorkspacePanes,
+  splitWindowsWorkspace,
+  type WindowsWorkspaceState,
+  type WindowsWorkspaceTab,
+} from './windows-workspace';
 
 const STORAGE_KEY = 'zterm:windows:target.v1';
 const DEFAULT_TARGET: WindowsTerminalTarget = { bridgeHost: '127.0.0.1', bridgePort: 3333, sessionName: 'zterm' };
@@ -21,25 +44,143 @@ function readTarget() {
   }
 }
 
+function WindowsTerminalPane({
+  pane,
+  paneIndex,
+  active,
+  splitVisible,
+  session,
+  onSelectTab,
+  onCloseTab,
+  onActivatePane,
+}: {
+  pane: WorkspacePane<WindowsWorkspaceTab>;
+  paneIndex: number;
+  active: boolean;
+  splitVisible: boolean;
+  session: WindowsTerminalSession | null;
+  onSelectTab: (tabId: string) => void;
+  onCloseTab: (tabId: string) => void;
+  onActivatePane: () => void;
+}) {
+  const profile = resolvePaneProfile({ platform: 'desktop', splitVisible });
+  const snapshot = useSyncExternalStore(
+    session?.subscribe ?? (() => () => undefined),
+    session?.getSnapshot ?? (() => null),
+    session?.getSnapshot ?? (() => null),
+  );
+  const tabs: PaneTabDescriptor[] = pane.tabs.map((tab) => ({
+    id: tab.id,
+    title: tab.title,
+    badge: tab.target ? 'ws' : undefined,
+    isActive: tab.id === pane.activeTabId,
+  }));
+
+  return (
+    <div className="windows-pane" data-pane-id={pane.id}>
+      <PaneTabs
+        platform="desktop"
+        profile={profile}
+        paneId={pane.id}
+        paneIndex={paneIndex}
+        isActivePane={active}
+        tabs={tabs}
+        onSelectTab={onSelectTab}
+        onCloseTab={onCloseTab}
+        onActivatePane={onActivatePane}
+      />
+      <div className="terminal-stage">
+        {snapshot?.error ? <div className="error-banner">{snapshot.error}</div> : null}
+        {snapshot && session ? (
+          <MacTerminalView
+            sessionId={snapshot.sessionId}
+            projection={projectWindowsTerminalBuffer(snapshot.buffer)}
+            active={active && snapshot.status === 'connected'}
+            allowDomFocus
+            onInput={session.sendInput}
+            onViewportChange={(value) => session.requestVisibleRange(value as { startIndex?: number; endIndex?: number })}
+          />
+        ) : (
+          <div className="terminal-empty">Choose a session to open a terminal</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export function WindowsWorkspaceStage({
+  workspace,
+  registry,
+  onChange,
+}: {
+  workspace: WindowsWorkspaceState;
+  registry: ReturnType<typeof createWindowsTerminalRegistry>;
+  onChange: (next: WindowsWorkspaceState) => void;
+}) {
+  const slots: PaneSlotDefinition[] = workspace.panes.map((pane, paneIndex) => {
+    const activeTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0]!;
+    return {
+      id: pane.id,
+      title: `Pane ${paneIndex + 1}`,
+      size: pane.size,
+      isActive: pane.id === workspace.activePaneId,
+      tabIds: pane.tabs.map((tab) => tab.id),
+      activeTabId: pane.activeTabId,
+      render: () => (
+        <WindowsTerminalPane
+          pane={pane}
+          paneIndex={paneIndex}
+          active={pane.id === workspace.activePaneId}
+          splitVisible={workspace.panes.length > 1}
+          session={registry.get(activeTab.id)}
+          onSelectTab={(tabId) => onChange(activateWindowsWorkspaceTab(workspace, pane.id, tabId))}
+          onCloseTab={(tabId) => onChange(closeWindowsWorkspaceTab(workspace, pane.id, tabId))}
+          onActivatePane={() => onChange(activateWindowsWorkspacePane(workspace, pane.id))}
+        />
+      ),
+    };
+  });
+  return (
+    <PaneStage
+      platform="desktop"
+      splitVisible={workspace.panes.length > 1}
+      slots={slots}
+      onActivatePane={(paneId) => onChange(activateWindowsWorkspacePane(workspace, paneId))}
+      onPaneRatioChange={({ sourcePaneId, targetPaneId, ratio }) =>
+        onChange(resizeWindowsWorkspacePanes(workspace, sourcePaneId, targetPaneId, ratio))}
+    />
+  );
+}
+
 export function WindowsDesktopApp() {
-  const terminal = useMemo(() => createWindowsTerminalSession(), []);
+  const registry = useMemo(() => createWindowsTerminalRegistry(), []);
   const sessionControl = useMemo(() => createWindowsSessionControl(), []);
-  const snapshot = useSyncExternalStore(terminal.subscribe, terminal.getSnapshot, terminal.getSnapshot);
   const controlSnapshot = useSyncExternalStore(sessionControl.subscribe, sessionControl.getSnapshot, sessionControl.getSnapshot);
+  const [workspace, setWorkspace] = useState(createWindowsWorkspaceState);
+  const [registryRevision, setRegistryRevision] = useState(0);
   const [target, setTarget] = useState<WindowsTerminalTarget>(readTarget);
   const [newSessionName, setNewSessionName] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(true);
-  useEffect(() => () => terminal.dispose(), [terminal]);
-  const projection = projectWindowsTerminalBuffer(snapshot.buffer);
+
+  useEffect(() => {
+    const tabs = listWindowsWorkspaceRuntimeTabs(workspace);
+    tabs.forEach((tab) => registry.ensure(tab));
+    registry.retain(new Set(tabs.map((tab) => tab.id)));
+    setRegistryRevision((revision) => revision + 1);
+  }, [registry, workspace]);
+  useEffect(() => () => registry.dispose(), [registry]);
+  void registryRevision;
+
+  const activeTab = resolveActiveTab(workspace);
   const controlTarget = { bridgeHost: target.bridgeHost, bridgePort: target.bridgePort, authToken: target.authToken };
-  const connect = () => {
+  const validTarget = Boolean(target.bridgeHost.trim() && target.sessionName.trim() && target.bridgePort > 0);
+  const openTarget = (split: boolean) => {
+    if (!validTarget) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(target));
-    terminal.connect(target);
+    setWorkspace((current) => split ? splitWindowsWorkspace(current, target) : openWindowsWorkspaceTab(current, target));
     setSettingsOpen(false);
   };
-  const refreshSessions = () => {
-    void sessionControl.refresh(controlTarget);
-  };
+  const refreshSessions = () => void sessionControl.refresh(controlTarget);
   const createSession = () => {
     const sessionName = normalizeWindowsNewSessionName(newSessionName);
     if (!sessionName) return;
@@ -50,9 +191,7 @@ export function WindowsDesktopApp() {
   };
   const closeSession = (sessionName: string) => {
     void sessionControl.close(controlTarget, sessionName).then(() => {
-      if (target.sessionName === sessionName && snapshot.status !== 'idle') {
-        terminal.disconnect();
-      }
+      setWorkspace((current) => closeWindowsWorkspaceTarget(current, { ...target, sessionName }));
     });
   };
 
@@ -60,24 +199,13 @@ export function WindowsDesktopApp() {
     <main className="windows-shell" data-platform={window.ztermWindows?.platform || 'browser'}>
       <header className="titlebar">
         <div className="brand">ZTerm</div>
-        <div className={`connection-state connection-state--${snapshot.status}`}>
+        <div className="connection-state">
           <span className="state-dot" />
-          {snapshot.status === 'connected' ? target.sessionName : snapshot.status}
+          {activeTab?.target?.sessionName ?? 'No session'}
         </div>
         <button className="icon-button" title="连接设置" aria-label="连接设置" onClick={() => setSettingsOpen((open) => !open)}>⚙</button>
       </header>
-      <section className="terminal-stage">
-        {snapshot.error ? <div className="error-banner">{snapshot.error}</div> : null}
-        <MacTerminalView
-          sessionId={snapshot.sessionId}
-          projection={projection}
-          active={snapshot.status === 'connected'}
-          allowDomFocus
-          onInput={terminal.sendInput}
-          onViewportChange={(value) => terminal.requestVisibleRange(value as { startIndex?: number; endIndex?: number })}
-        />
-        {snapshot.status === 'idle' && !settingsOpen ? <button className="connect-empty" onClick={() => setSettingsOpen(true)}>连接终端</button> : null}
-      </section>
+      <WindowsWorkspaceStage workspace={workspace} registry={registry} onChange={setWorkspace} />
       {settingsOpen ? (
         <aside className="connection-panel" aria-label="连接设置">
           <div className="panel-title">连接</div>
@@ -86,10 +214,7 @@ export function WindowsDesktopApp() {
           <label>Session<input value={target.sessionName} onChange={(event) => setTarget({ ...target, sessionName: event.target.value })} /></label>
           <label>Token<input type="password" value={target.authToken || ''} onChange={(event) => setTarget({ ...target, authToken: event.target.value || undefined })} /></label>
           <div className="session-control" aria-label="Session 管理">
-            <div className="session-control-header">
-              <span>Sessions</span>
-              <button className="secondary small" disabled={controlSnapshot.status === 'loading'} onClick={refreshSessions}>刷新</button>
-            </div>
+            <div className="session-control-header"><span>Sessions</span><button className="secondary small" disabled={controlSnapshot.status === 'loading'} onClick={refreshSessions}>刷新</button></div>
             {controlSnapshot.error ? <div className="control-error">{controlSnapshot.error}</div> : null}
             <div className="session-create-row">
               <input aria-label="新建 Session" placeholder="new-session" value={newSessionName} onChange={(event) => setNewSessionName(event.target.value)} />
@@ -106,8 +231,8 @@ export function WindowsDesktopApp() {
             </div>
           </div>
           <div className="panel-actions">
-            {snapshot.status !== 'idle' ? <button className="secondary" onClick={terminal.disconnect}>断开</button> : null}
-            <button className="primary" disabled={!target.bridgeHost.trim() || !target.sessionName.trim() || target.bridgePort < 1} onClick={connect}>连接</button>
+            <button className="secondary" disabled={!validTarget} onClick={() => openTarget(true)}>分屏打开</button>
+            <button className="primary" disabled={!validTarget} onClick={() => openTarget(false)}>新 Tab</button>
           </div>
         </aside>
       ) : null}

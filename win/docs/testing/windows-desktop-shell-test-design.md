@@ -3,7 +3,7 @@
 ## Scope
 
 - Feature: `windows.desktop_shell`
-- Status: single-session alpha implemented; packaged Windows L5 marker gate passed on 2026-07-14.
+- Status: multi-session workspace packaged Windows gate passed on 2026-07-14.
 - Resource path: `resource.platform_terminal_surface -> resource.ui_projection`, with terminal data consumed through existing shared `resource.session_transport -> resource.client_sparse_buffer -> resource.renderer_window` owners.
 - Shell owner: `win/` Electron entry, preload/platform bridge, packaging, and Windows-only integration.
 - Shared owner: `packages/shared/` for intentionally cross-platform desktop workspace/render semantics.
@@ -32,6 +32,15 @@ The Windows shell must not own:
 4. Session transport connects to the configured daemon through the existing shared protocol.
 5. Shared sparse-buffer truth feeds the shared terminal renderer inside the active pane.
 6. Window close disposes renderer subscriptions and platform listeners without closing daemon/backend truth.
+
+## Multi-session workspace test design
+
+- Lifecycle: a workspace tab owns terminal identity; a runtime registry owns exactly one live terminal session per tab id; pane/tab selection changes projection only and must not reconnect that runtime.
+- White-box: Windows workspace operations delegate pane add/remove/activate/resize to `@zterm/shared`; Windows code must not copy pane algorithms or import Mac workspace/IPC modules.
+- Module black-box positive: opening two daemon sessions creates two stable tab runtimes, tab switching reuses both instances, split/resize/close updates the shared pane projection, and closing a tab disposes only that tab runtime.
+- Module black-box negative: selecting an unknown pane/tab, splitting beyond the shared pane cap, or closing the last empty tab must not create a runtime or corrupt workspace identity.
+- Project black-box: the packaged Windows app opens two real daemon sessions in separate panes, both receive independent source markers, switching focus does not increase physical client transport count, and closing one tab leaves the sibling updating.
+- Packaged proof requires daemon health counts before/after focus switch and tab close, plus per-pane source markers and a new sibling marker after close.
 
 ## White-box gates
 
@@ -70,4 +79,4 @@ The Windows shell must not own:
 
 ## Completion signal
 
-The single-session alpha is complete when the registry, resource binding, function map, lifecycle manifest, and this test design agree, all real symbols are anchored, and packaged Windows L5 smoke passes. Multi-session workspace, filesystem browser, installer/signing, and Ctrl+C console-control semantics remain separate follow-up features.
+The multi-session workspace slice is complete only when maps and symbols agree, local positive/negative gates pass, and the packaged Windows two-session source-to-DOM/transport-lifecycle gate passes. Filesystem browser, installer/signing, and Ctrl+C console-control semantics remain separate follow-up features.

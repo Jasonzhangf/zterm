@@ -26,6 +26,7 @@ description: zterm Windows Electron 客户端与 WezTerm daemon 开发闭环，�
 - 完成必须在真实 Windows packaged app 上自动证明：bridge 存在、连接无 error、输入唯一 marker、DOM rows 匹配命令和输出。
 - Smoke 使用固定专用 session 或唯一明确 sessionName；结束按 sessionName 清理。App/helper、CDP tunnel、SSH holder 只按明确 PID/session 关闭，禁止 broad kill。
 - Session discovery/create/close UI must call shared daemon control helpers. Do not fork control wire semantics in Windows UI; verify UI list and daemon final list agree after close.
+- Desktop pane/tab composition must use shared `PaneStage`, `PaneTabs`, and workspace-model operations. Keep one stable runtime per tab id; focus switches must not reconnect. Packaged proof records daemon attached/ready counts before and after focus switch, isolated markers in each pane, then closes one tab and proves the sibling still receives a new marker.
 - 生成物 `win/dist/`、`win/dist-electron/`、`win/out/`、evidence 不进 git/MemPalace。
 
 ## 最小验证

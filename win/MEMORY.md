@@ -24,3 +24,12 @@
 - Session discovery/create/close UI is owned by `windows.desktop_shell.session_control` and implemented as a thin caller of shared daemon control helpers. Windows UI must not fork the daemon protocol or mutate daemon truth directly.
 - Packaged L5 passed: UI refreshed sessions `default` and `zterm-20260630-115307`, created `ztermwinsessioncontrol`, selected it, connected without error, sent `echo ZTERMSESSIONCONTROL`, matched command and output DOM rows, closed the session from UI, and daemon final list omitted it.
 - Deployed archive SHA-256 is `df59c1f382179cfe9c7a2834105e6271b865a4f712b7854f52482a1db669397a`. Smoke app PIDs `6628,7544,7884,30628` and CDP port 9333 were precisely cleared.
+
+## 2026-07-14 Windows multi-session workspace packaged proof
+
+- `windows.desktop_shell.workspace` composes shared `PaneStage`, `PaneTabs`, and workspace-model operations. Windows owns only tab target identity and a per-tab runtime registry; it does not copy Mac workspace, `window.ztermMac`, daemon, mirror, sparse-buffer, or renderer semantics.
+- The runtime registry creates one `WindowsTerminalSession` per tab id. Pane/tab focus changes only projection; closing a tab disposes only that tab runtime, while explicitly closing a daemon session removes matching workspace tabs after daemon close succeeds.
+- Local gates passed: typecheck, 4 files / 11 tests, renderer/main build, and x64 directory package.
+- Packaged Windows L5 passed with sessions `ztermwinwsa24906188` and `ztermwinwsb24906188`: both panes independently matched their own source markers and excluded the sibling marker. Daemon health stayed exactly `2 attached / 2 ready` across focus switch, proving no reconnect/recreation on projection change.
+- Closing pane A reduced daemon client sessions to `1 attached / 1 ready`; pane B then rendered new marker `ZTERMWINWSB2_24906188`, proving sibling transport/render continuation. Cleanup returned daemon sessions/subscribers to zero, app process count to zero, and CDP listener count to zero.
+- Deployed package path is `D:/zterm-tools/windows-client-alpha/0.1.0-alpha.workspace2/ZTerm.exe`; archive SHA-256 is `b11741b53d3c4a0a6c983d93ac0d9f90971c071dcf3277548380a4f8a2b082d1`.
