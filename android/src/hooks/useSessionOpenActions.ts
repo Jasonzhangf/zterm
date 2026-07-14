@@ -25,7 +25,6 @@ import { openConnectionPropertiesPage, type AppPageState } from '../lib/page-sta
 import { normalizeRemoteTmuxSessionNames } from '../lib/tmux-session-list';
 import { createTmuxSession, fetchTmuxSessions, killTmuxSession } from '../lib/tmux-sessions';
 import type { Host, PersistedOpenTab, TraversalRelayDeviceSnapshot } from '../lib/types';
-import { loadSavedTabList } from '../lib/saved-tab-loader';
 import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
 
 type PickerMode = 'new-connection' | 'quick-tab' | 'edit-group' | null;
@@ -87,7 +86,6 @@ export interface SessionOpenActionsResult {
   pickerTarget: BridgeTarget | null;
   pickerInitialSessions: string[];
   pickerScopePaneId: string | null;
-  handleLoadSavedTabList: (tabs: PersistedOpenTab[], requestedActiveSessionId?: string, options?: { clearMatchingTombstones?: boolean }) => Promise<void>;
   handleAddNew: () => void;
   handleOpenQuickTabPicker: (paneId?: string, hostKey?: string, createOptions?: QuickTabCreateOptions) => void;
   handleOpenSingleTmuxSession: (target: BridgeTarget, sessionName: string) => void;
@@ -152,15 +150,12 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
 
   const {
     sessionsRef,
-    hostsRef,
     bridgeSettingsRef,
     openTabStateRef,
     closedOpenTabSessionIdsRef,
     closedOpenTabReuseKeysRef,
     pendingMaterializedOpenTabSessionIdsRef,
     terminalActiveSessionIdRef,
-    ensureTerminalPageVisibleRef,
-    renameSessionRef,
   } = runtimeRefs;
 
   const [pickerMode, setPickerMode] = useState<PickerMode>(null);
@@ -443,18 +438,6 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     }
   }, [bridgeSettings.servers, ensureTerminalPageVisible, hosts, onSessionsOpenedInPane, openDraftAsSession, pickerScopePaneId]);
 
-  const handleLoadSavedTabList = useCallback(async (tabs: PersistedOpenTab[], requestedActiveSessionId?: string, options?: { clearMatchingTombstones?: boolean }) => {
-    await loadSavedTabList(tabs, requestedActiveSessionId, {
-      bridgeSettingsRef,
-      hostsRef,
-      closedOpenTabReuseKeysRef,
-      openDraftAsSessionRef,
-      renameSessionRef,
-      applyOpenTabState,
-      setPageState,
-      ensureTerminalPageVisibleRef,
-    }, options);
-  }, [applyOpenTabState, bridgeSettingsRef, ensureTerminalPageVisibleRef, hostsRef, renameSessionRef]);
   const handleRemoteSessionsRefreshed = useCallback((target: BridgeTarget, sessionNames: string[]) => {
     const normalizedSessionNames = normalizeRemoteTmuxSessionNames(sessionNames);
     if (normalizedSessionNames.length > 0) {
@@ -770,7 +753,6 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     pickerTarget,
     pickerInitialSessions,
     pickerScopePaneId,
-    handleLoadSavedTabList,
     handleAddNew,
     handleOpenQuickTabPicker,
     handleOpenSingleTmuxSession,

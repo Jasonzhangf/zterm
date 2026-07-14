@@ -81,6 +81,7 @@
         "src/pages/TerminalPage.android-ime.test.tsx",
         "src/pages/TerminalPage.lifecycle-cleanup.test.tsx",
         "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
+        "scripts/session-preview-source-dom-gate.tsx",
         "src/components/terminal/TerminalQuickBar.tsx",
         "src/components/terminal/TerminalQuickBar.test.tsx",
         "src/plugins/ImeAnchorPlugin.ts"
@@ -165,7 +166,7 @@
     },
     {
       "feature_id": "terminal.open_tabs",
-      "title": "Open tab persistence, restore, and explicit close lifecycle",
+      "title": "Ephemeral open tab projection and explicit close lifecycle",
       "domain": "terminal-session",
       "owners": [
         "src/hooks/useOpenTabRuntime.ts",
@@ -173,27 +174,24 @@
       ],
       "allowed_paths": [
         "src/hooks/useOpenTabRuntime.ts",
-        "src/hooks/useOpenTabRestoreRuntimeSync.ts",
         "src/hooks/useSessionOpenActions.ts",
         "src/lib/open-tab-persistence.ts",
         "src/lib/open-tab-intent.ts",
         "src/lib/open-tab-open-policy.ts",
-        "src/lib/open-tab-restore.ts",
         "src/lib/remote-tab-audit.ts"
       ],
       "forbidden_paths": [
-        "src/server/",
-        "src/lib/connections-server-groups.ts"
+        "src/server/"
       ],
       "required_gates": [
         "src/lib/open-tab-history-truth.test.ts",
         "src/lib/open-tab-persistence.test.ts",
-        "src/lib/open-tab-restore.test.ts",
         "src/lib/open-tab-intent.test.ts"
       ],
       "truth_sources": [
         "docs/architecture.md",
-        ".agents/skills/terminal-buffer-truth/SKILL.md"
+        ".agents/skills/terminal-buffer-truth/SKILL.md",
+        "docs/testing/relay-login-home-and-ephemeral-tabs-test-design.md"
       ]
     },
     {
@@ -214,6 +212,8 @@
         "src/contexts/session-context-session-orchestration-runtime.ts",
         "src/contexts/session-context-session-runtime.ts",
         "src/contexts/session-context-session-runtime.test.ts",
+        "src/contexts/session-context-socket-runtime.ts",
+        "src/contexts/session-context-socket-runtime.test.ts",
         "src/contexts/session-context-transport-open-runtime.ts",
         "src/contexts/session-context-transport-open-runtime.test.ts",
         "src/contexts/session-context-transport-orchestration-runtime.ts",
@@ -230,12 +230,12 @@
         "src/server/terminal-runtime-types.ts"
       ],
       "forbidden_paths": [
-        "src/components/TerminalView.tsx",
-        "src/lib/connections-server-groups.ts"
+        "src/components/TerminalView.tsx"
       ],
       "required_gates": [
         "src/contexts/session-sync-helpers.test.ts",
         "src/contexts/session-context-session-runtime.test.ts",
+        "src/contexts/session-context-socket-runtime.test.ts",
         "src/contexts/session-context-activity-runtime.test.ts",
         "src/contexts/SessionContext.ws-refresh.test.tsx",
         "src/server/server.transport-lifecycle-truth.test.ts",
@@ -360,8 +360,7 @@
         "packages/shared/src/react/pane-profile.test.ts"
       ],
       "forbidden_paths": [
-        "src/server/",
-        "src/lib/connections-server-groups.ts"
+        "src/server/"
       ],
       "required_gates": [
         "src/hooks/useTerminalWorkspace.test.tsx",
@@ -482,18 +481,15 @@
     },
     {
       "feature_id": "connections.history_projection",
-      "title": "Connections page daemon/session history projection",
+      "title": "Legacy connection history storage outside Home",
       "domain": "connections",
       "owners": [
-        "src/lib/connections-server-groups.ts",
         "src/hooks/useSessionHistoryStorage.ts"
       ],
       "allowed_paths": [
-        "src/lib/connections-server-groups.ts",
         "src/hooks/useSessionHistoryStorage.ts",
-        "src/pages/ConnectionsPage.tsx",
         "src/pages/ConnectionPropertiesPage.tsx",
-        "src/lib/connections-server-groups.test.ts"
+        "src/hooks/useSessionHistoryStorage.test.ts"
       ],
       "forbidden_paths": [
         "src/server/",
@@ -501,8 +497,7 @@
       ],
       "required_gates": [
         "src/lib/open-tab-history-truth.test.ts",
-        "src/lib/connections-server-groups.test.ts",
-        "src/pages/ConnectionsPage.test.tsx",
+        "src/hooks/useSessionHistoryStorage.test.ts",
         "src/pages/ConnectionPropertiesPage.test.tsx"
       ],
       "truth_sources": [
@@ -670,22 +665,23 @@
     },
     {
       "feature_id": "relay.directory_ui",
-      "title": "Relay directory projection in Connections and Session Picker",
+      "title": "Fixed relay login home and directory projection",
       "domain": "relay-ui",
       "owners": [
-        "src/lib/connections-server-groups.ts",
-        "src/components/tmux/TmuxSessionPickerSheet.tsx",
-        "src/pages/ConnectionsPage.tsx"
+        "src/pages/ConnectionsPage.tsx",
+        "src/hooks/useTraversalRelayAccount.ts",
+        "src/components/tmux/TmuxSessionPickerSheet.tsx"
       ],
       "allowed_paths": [
-        "src/lib/connections-server-groups.ts",
-        "src/lib/connections-server-groups.test.ts",
+        "src/lib/traversal-relay-client.ts",
+        "src/lib/traversal-relay-client.test.ts",
+        "src/hooks/useTraversalRelayAccount.ts",
+        "src/hooks/useTraversalRelayAccount.test.tsx",
         "src/lib/session-picker.ts",
         "src/lib/session-picker.test.ts",
         "src/components/tmux/TmuxSessionPickerSheet.tsx",
         "src/components/tmux/TmuxSessionPickerSheet.test.tsx",
         "src/components/connection-form/RelayDevicePicker.tsx",
-        "src/components/settings/RelayControlSection.tsx",
         "src/pages/ConnectionsPage.tsx",
         "src/pages/ConnectionsPage.test.tsx",
         "src/pages/ConnectionPropertiesPage.tsx",
@@ -698,7 +694,8 @@
         "src/components/TerminalView.tsx"
       ],
       "required_gates": [
-        "src/lib/connections-server-groups.test.ts",
+        "src/lib/traversal-relay-client.test.ts",
+        "src/hooks/useTraversalRelayAccount.test.tsx",
         "src/lib/session-picker.test.ts",
         "src/components/tmux/TmuxSessionPickerSheet.test.tsx",
         "src/pages/ConnectionsPage.test.tsx",
@@ -707,6 +704,7 @@
       "truth_sources": [
         "docs/goals/relay-account-directory-and-route-plan.md",
         "docs/testing/relay-account-directory-test-design.md",
+        "docs/testing/relay-login-home-and-ephemeral-tabs-test-design.md",
         "docs/ui-slices.md"
       ]
     },
@@ -725,7 +723,6 @@
         "src/server/terminal-file-transfer-runtime.ts"
       ],
       "forbidden_paths": [
-        "src/lib/connections-server-groups.ts",
         "src/components/TerminalView.tsx"
       ],
       "required_gates": [
@@ -785,10 +782,12 @@
         "src/server/terminal-backend-selection.ts",
         "src/server/terminal-control-runtime.ts",
         "scripts/wezterm-daemon-protocol-smoke.ts",
+        "scripts/wezterm-daemon-remote-protocol-smoke.ts",
         "scripts/wezterm-backend-input-smoke.ts",
         "scripts/wezterm-backend-remote-smoke.ts"
       ],
       "allowed_paths": [
+        "src/server/server.ts",
         "src/server/wezterm-backend.ts",
         "src/server/wezterm-backend.test.ts",
         "src/server/wezterm-backend-runtime.test.ts",
@@ -796,7 +795,11 @@
         "src/server/terminal-backend-selection.test.ts",
         "src/server/terminal-control-runtime.ts",
         "src/server/terminal-control-runtime.input-queue.test.ts",
+        "src/server/terminal-message-control-runtime.ts",
+        "src/server/terminal-message-control-runtime.schedule.test.ts",
+        "src/server/terminal-message-runtime.test.ts",
         "scripts/wezterm-daemon-protocol-smoke.ts",
+        "scripts/wezterm-daemon-remote-protocol-smoke.ts",
         "scripts/wezterm-backend-input-smoke.ts",
         "scripts/wezterm-backend-remote-smoke.ts",
         "docs/decisions/2026-06-29-windows-wezterm-backend-contract.md",
@@ -806,6 +809,7 @@
         "docs/wiki/mainline-call-map.json",
         "docs/wiki/mainline-source.md",
         "docs/goals/windows-wezterm-backend-closeout-plan.md",
+        "docs/testing/windows-daemon-live-protocol-test-design.md",
         "../win/README.md",
         "../win/docs/spec.md",
         "../win/docs/architecture.md",
@@ -816,7 +820,6 @@
         "MEMORY.md"
       ],
       "forbidden_paths": [
-        "src/server/server.ts",
         "src/server/terminal-mirror-runtime.ts",
         "src/server/terminal-mirror-capture.ts"
       ],
@@ -825,7 +828,9 @@
         "src/server/wezterm-backend-runtime.test.ts",
         "src/server/terminal-backend-selection.test.ts",
         "src/server/terminal-control-runtime.input-queue.test.ts",
+        "src/server/terminal-message-runtime.test.ts",
         "scripts/wezterm-daemon-protocol-smoke.ts",
+        "scripts/wezterm-daemon-remote-protocol-smoke.ts",
         "scripts/wezterm-backend-remote-smoke.ts",
         "scripts/wezterm-backend-input-smoke.ts",
         "tsconfig.json"
@@ -860,26 +865,31 @@
         "docs/function-map.md"
       ]
     },
-    {
-      "feature_id": "daemon.cli_node",
-      "owners": [
-        "scripts/runtime-debug-remote.ts",
-        "scripts/collect-runtime-audit.ts",
-        "scripts/analyze-runtime-debug.ts"
-      ],
-      "allowed_paths": [
-        "scripts/runtime-debug-remote.ts",
-        "scripts/collect-runtime-audit.ts",
-        "scripts/analyze-runtime-debug.ts",
+  {
+    "feature_id": "daemon.cli_node",
+    "owners": [
+      "scripts/runtime-debug-remote.ts",
+      "scripts/collect-runtime-audit.ts",
+      "scripts/analyze-runtime-debug.ts",
+      "scripts/weak-network-byte-proxy.ts",
+      "scripts/terminal-performance-probe.ts"
+    ],
+    "allowed_paths": [
+      "scripts/runtime-debug-remote.ts",
+      "scripts/collect-runtime-audit.ts",
+      "scripts/analyze-runtime-debug.ts",
         "scripts/terminal-real-device-evidence.ts",
-        "scripts/traversal-relay-local-smoke.ts",
-        "scripts/daemon-mirror-close-loop.ts",
-        "scripts/build-function-wiki.mjs"
-      ],
+      "scripts/traversal-relay-local-smoke.ts",
+      "scripts/daemon-mirror-close-loop.ts",
+      "scripts/weak-network-byte-proxy.ts",
+      "scripts/terminal-performance-probe.ts",
+      "scripts/build-function-wiki.mjs"
+    ],
       "forbidden_paths": [],
-      "required_gates": [
-        "src/lib/function-wiki-truth.test.ts"
-      ],
+    "required_gates": [
+      "src/lib/function-wiki-truth.test.ts",
+      "src/lib/weak-network-byte-proxy.test.ts"
+    ],
       "truth_sources": [
         "docs/wiki/cli.md",
         "docs/function-map.md"
@@ -1058,6 +1068,118 @@
       "truth_sources": [
         "docs/function-map.md",
         "docs/ui-slices.md"
+      ]
+    },
+    {
+      "feature_id": "windows.desktop_shell",
+      "title": "Windows desktop shell architecture and packaging",
+      "domain": "desktop-windows",
+      "owners": [
+        "../win/electron/main.ts",
+        "../win/electron/preload.cts",
+        "../win/src/WindowsDesktopApp.tsx",
+        "../win/src/windows-terminal-session.ts"
+      ],
+      "allowed_paths": [
+        "../win/package.json",
+        "../win/index.html",
+        "../win/vite.config.ts",
+        "../win/tsconfig.json",
+        "../win/tsconfig.node.json",
+        "../win/electron/",
+        "../win/src/",
+        "../win/README.md",
+        "../win/MEMORY.md",
+        "../win/task.md",
+        "../win/docs/spec.md",
+        "../win/docs/architecture.md",
+        "../win/docs/function-map.md",
+        "../win/docs/testing/windows-desktop-shell-test-design.md",
+        "../win/docs/windows-desktop-shell-manifest.json",
+        "packages/shared/src/terminal/mac-terminal-view.tsx",
+        "packages/shared/src/react/pane-stage.tsx",
+        "docs/function-map.md",
+        "docs/feature-registry.json",
+        "docs/resource-map.md",
+        "docs/resource-registry.json"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "../wterm/",
+        "../mac/electron/",
+        "../mac/src/lib/local-tmux-transport.ts"
+      ],
+      "required_gates": [
+        "../win/src/windows-architecture-truth.test.ts",
+        "../win/src/windows-terminal-session.test.ts",
+        "../win/tsconfig.json",
+        "../win/tsconfig.node.json",
+        "../win/docs/testing/windows-desktop-shell-test-design.md",
+        "../win/docs/windows-desktop-shell-manifest.json",
+        "src/lib/feature-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "truth_sources": [
+        "../win/docs/spec.md",
+        "../win/docs/architecture.md",
+        "../win/docs/function-map.md",
+        "../win/docs/testing/windows-desktop-shell-test-design.md"
+      ]
+    },
+    {
+      "feature_id": "terminal.session_preview",
+      "title": "Maximum-six real-time terminal session preview grid",
+      "domain": "terminal-ui",
+      "owners": [
+        "src/lib/session-preview-selection.ts",
+        "src/lib/session-preview-gesture.ts",
+        "src/components/terminal/TerminalPreviewGrid.tsx",
+        "src/pages/TerminalPageStageShell.tsx",
+        "src/pages/TerminalPage.tsx"
+      ],
+      "allowed_paths": [
+        "src/lib/session-preview-selection.ts",
+        "src/lib/session-preview-selection.test.ts",
+        "src/lib/session-preview-gesture.ts",
+        "src/lib/session-preview-gesture.test.ts",
+        "src/components/terminal/TerminalPreviewGrid.tsx",
+        "src/components/terminal/TerminalPreviewGrid.test.tsx",
+        "src/components/terminal/TerminalPreviewGrid.render-truth.test.tsx",
+        "scripts/session-preview-source-dom-gate.tsx",
+        "src/components/terminal/TerminalSessionDrawer.tsx",
+        "src/components/terminal/TerminalSessionDrawer.test.tsx",
+        "src/components/TerminalView.tsx",
+        "src/components/TerminalView.dynamic-refresh.test.tsx",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPageStageShell.tsx",
+        "src/pages/TerminalPage.session-preview.test.tsx",
+        "src/pages/TerminalPage.session-drawer.test.tsx",
+        "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
+        "src/lib/types.ts",
+        "docs/testing/terminal-session-preview-test-design.md",
+        "docs/goals/terminal-session-preview-plan.md"
+      ],
+      "forbidden_paths": [
+        "src/server/",
+        "src/contexts/session-context-transport-runtime.ts",
+        "src/contexts/session-context-buffer-runtime.ts"
+      ],
+      "required_gates": [
+        "src/lib/session-preview-selection.test.ts",
+        "src/lib/session-preview-gesture.test.ts",
+        "src/components/terminal/TerminalPreviewGrid.test.tsx",
+        "src/components/terminal/TerminalPreviewGrid.render-truth.test.tsx",
+        "src/pages/TerminalPage.session-preview.test.tsx",
+        "src/lib/feature-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/function-wiki-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/goals/terminal-session-preview-plan.md",
+        "docs/testing/terminal-session-preview-test-design.md",
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        ".agents/skills/terminal-buffer-truth/SKILL.md"
       ]
     }
   ]

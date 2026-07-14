@@ -6,11 +6,6 @@ import {
   type BridgeSettings,
 } from '../lib/bridge-settings';
 import { type AppUpdateManifest, type AppUpdatePreferences, type AppUpdateRollbackBackup } from '../lib/app-update';
-import { useTraversalRelayAccount } from '../hooks/useTraversalRelayAccount';
-import {
-  isDefaultTraversalRelayBaseUrl,
-  normalizeTraversalRelayBaseUrl,
-} from '../lib/traversal-relay-client';
 import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
 import { isRuntimeDebugEnabled, setRuntimeDebugEnabled } from '../lib/runtime-debug';
 import { mobileTheme } from '../lib/mobile-ui';
@@ -24,7 +19,6 @@ import {
 } from '../lib/terminal-layout-profile';
 import { AppUpdateSection } from '../components/settings/AppUpdateSection';
 import { RememberedServersSection } from '../components/settings/RememberedServersSection';
-import { RelayControlSection } from '../components/settings/RelayControlSection';
 import { SettingsSectionTitle, settingsInputStyle, settingsSectionStyle } from '../components/settings/SettingsSection';
 import { TerminalThemeSection } from '../components/settings/TerminalThemeSection';
 
@@ -72,11 +66,6 @@ function deriveDaemonUpdateManifestUrl(targetHost: string, targetPort: number) {
   }
 }
 
-function normalizeRelayBaseUrlFieldValue(value?: string | null) {
-  const normalized = normalizeTraversalRelayBaseUrl(value || '');
-  return normalized && isDefaultTraversalRelayBaseUrl(normalized) ? '' : normalized;
-}
-
 export function SettingsPage({
   settings,
   currentVersionName,
@@ -105,17 +94,7 @@ export function SettingsPage({
 }: SettingsPageProps) {
   const [draft, setDraft] = useState({ ...settings, servers: sortBridgeServers(settings.servers) });
   const [updateDraft, setUpdateDraft] = useState(updatePreferences);
-  const [relayBaseUrl, setRelayBaseUrl] = useState(() => normalizeRelayBaseUrlFieldValue(settings.traversalRelay?.relayBaseUrl));
-  const [relayUsername, setRelayUsername] = useState('');
-  const [relayPassword, setRelayPassword] = useState('');
   const [runtimeDebugEnabled, setRuntimeDebugEnabledState] = useState(() => isRuntimeDebugEnabled());
-  const {
-    account: relayAccount,
-    relayDevices,
-    relayStatus,
-    relayBusy,
-    syncRelay,
-  } = useTraversalRelayAccount(settings.traversalRelay);
   const defaultServer = useMemo(() => getDefaultBridgeServer(draft), [draft]);
   const suggestedManifestUrl = useMemo(
     () => deriveDaemonUpdateManifestUrl(
@@ -130,41 +109,7 @@ export function SettingsPage({
 
   useEffect(() => {
     setDraft({ ...settings, servers: sortBridgeServers(settings.servers) });
-    setRelayBaseUrl(normalizeRelayBaseUrlFieldValue(settings.traversalRelay?.relayBaseUrl));
   }, [settings]);
-
-  useEffect(() => {
-    if (!relayAccount) {
-      return;
-    }
-    setRelayUsername(relayAccount.username);
-    setRelayPassword(relayAccount.password);
-    setRelayBaseUrl(normalizeRelayBaseUrlFieldValue(relayAccount.relayBaseUrl));
-  }, [relayAccount]);
-
-  const handleRelaySync = async (mode: 'login' | 'register' | 'refresh') => {
-    const relayResult = await syncRelay(
-      mode,
-      {
-        relayBaseUrl,
-        username: relayUsername,
-        password: relayPassword,
-      },
-      draft.traversalRelay,
-    );
-    if (!relayResult) {
-      return;
-    }
-    setDraft((current) => ({
-      ...current,
-      traversalRelay: {
-        ...relayResult.relaySettings,
-        deviceId: relayResult.account.deviceId,
-        deviceName: relayResult.account.deviceName,
-        platform: relayResult.account.platform,
-      },
-    }));
-  };
 
   return (
     <div
@@ -283,7 +228,7 @@ export function SettingsPage({
         <div style={settingsSectionStyle()}>
           <SettingsSectionTitle>Terminal Width Mode</SettingsSectionTitle>
           <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
-            `mirror-fixed` 保持 tmux / daemon 镜像宽度不变，只做本地裁切；`adaptive-phone` 只允许按手机屏宽调整 cols，不再改 rows。
+            `mirror-fixed` 保持 tmux / daemon 镜像宽度不变，只做本地裁切；`adaptive-phone` 会按手机屏宽请求 tmux 重新排版，只调整 cols，不改 rows。
           </div>
           <div style={{ display: 'flex', gap: '10px' }}>
             {TERMINAL_WIDTH_MODE_OPTIONS.map((option) => {
@@ -405,26 +350,6 @@ export function SettingsPage({
             智能排序 {draft.shortcutSmartSort ? '已开启' : '已关闭'}
           </button>
         </div>
-
-        <RelayControlSection
-          transportMode={draft.transportMode}
-          onTransportModeChange={(transportMode) => setDraft((current) => ({ ...current, transportMode }))}
-          traversalPathPriority={draft.traversalPathPriority}
-          onTraversalPathPriorityChange={(traversalPathPriority) => setDraft((current) => ({ ...current, traversalPathPriority }))}
-          relayBaseUrl={relayBaseUrl}
-          onRelayBaseUrlChange={setRelayBaseUrl}
-          relayUsername={relayUsername}
-          onRelayUsernameChange={setRelayUsername}
-          relayPassword={relayPassword}
-          onRelayPasswordChange={setRelayPassword}
-          relayBusy={relayBusy}
-          relayStatus={relayStatus}
-          relaySettings={draft.traversalRelay}
-          relayDevices={relayDevices}
-          onRegister={() => void handleRelaySync('register')}
-          onLogin={() => void handleRelaySync('login')}
-          onRefresh={() => void handleRelaySync('refresh')}
-        />
 
         <TerminalThemeSection
           terminalThemeId={draft.terminalThemeId}

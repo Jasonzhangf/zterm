@@ -39,7 +39,7 @@ import { ConnectionsPage } from './pages/ConnectionsPage';
 import { ConnectionPropertiesPage } from './pages/ConnectionPropertiesPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TerminalPage } from './pages/TerminalPage';
-import type { TraversalRelayDeviceSnapshot } from './lib/types';
+import type { TerminalWidthMode, TraversalRelayDeviceSnapshot } from './lib/types';
 
 const RELAY_DEVICE_STREAM_RECONNECT_BASE_DELAY_MS = 300;
 const RELAY_DEVICE_STREAM_RECONNECT_MAX_DELAY_MS = 5000;
@@ -184,10 +184,8 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     setPageState,
     editingHost,
     editingDraft,
-    handleEdit,
     handleSaveHost,
     handleCancelHostForm,
-    handleDelete,
     handleOpenConnectionsPage,
     handleOpenSettingsPage,
   } = useAppPageState({
@@ -406,7 +404,6 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     handleMoveSession,
     handleRenameSession,
     handleCloseSession,
-    handleResumeSession,
     auditOpenTabsAgainstRemoteSessions,
   } = useOpenTabRuntime({
     bridgeSettings,
@@ -481,7 +478,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     handleTerminalInput,
     handleTerminalViewportChange,
     handleTerminalResize,
-    handleTerminalWidthModeChange,
+    handleTerminalWidthModeChange: sendTerminalWidthModeChange,
     handleQuickActionInput,
     handleSessionDraftChange,
     handleSessionDraftSend,
@@ -502,21 +499,20 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     bridgeSettings,
     shortcutFrequencyStorage,
   });
+  const handleTerminalWidthModeChange = useCallback((sessionId: string, mode: TerminalWidthMode, cols?: number | null) => {
+    setBridgeSettings((current) => updateBridgeSettingsTerminalWidthMode(current, mode));
+    sendTerminalWidthModeChange(sessionId, mode, cols);
+  }, [sendTerminalWidthModeChange, setBridgeSettings]);
   const {
     pickerMode,
     pickerTarget,
     pickerInitialSessions,
-    handleLoadSavedTabList,
-    handleAddNew,
     handleOpenQuickTabPicker,
     handleOpenSingleTmuxSession,
     handleOpenMultipleTmuxSessions,
     handleOpenGroupSession,
     handleCloseGroupSession,
-    handleOpenServerGroups,
-    handleEditServerGroup,
     handleSaveServerGroupSelection,
-    handleDeleteServerGroup,
     handleSelectCleanSession,
     handleRemoteSessionsRefreshed,
     handleRefreshDrawerHostSessions,
@@ -574,23 +570,12 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
       <div style={{ width: '100%', height: '100dvh', overflow: 'hidden' }}>
         {pageState.kind === 'connections' && (
           <ConnectionsPage
-            bridgeSettings={bridgeSettings}
-            hosts={hosts}
-            sessions={terminalSessions}
-            sessionGroups={sessionGroups}
+            relaySettings={bridgeSettings.traversalRelay}
             relayDevices={relayDevices}
-            onResumeSession={handleResumeSession}
-            onCloseSession={handleCloseSession}
-            onOpenGroupSession={handleOpenGroupSession}
-            onOpenServerGroups={handleOpenServerGroups}
-            onEditServerGroup={handleEditServerGroup}
-            onSaveServerGroupSelection={handleSaveServerGroupSelection}
-            onDeleteServerGroup={handleDeleteServerGroup}
-            onEdit={handleEdit}
-            onDelete={handleDelete}
-            onAddNew={handleAddNew}
+            onRelaySettingsChange={(relaySettings) => {
+              setBridgeSettings((current) => applyTraversalRelaySettings(current, relaySettings));
+            }}
             onOpenSettings={handleOpenSettingsPage}
-            onOpenVaults={handleOpenSettingsPage}
           />
         )}
 
@@ -621,13 +606,13 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             hasNewVersion={hasNewVersion}
             hasUpdateIgnorePolicy={hasUpdateIgnorePolicy}
             onSave={(next) => {
-              setBridgeSettings((current) => ({
+              setBridgeSettings(() => ({
                 ...applyTraversalRelaySettings(next, next.traversalRelay),
                 signalUrl: '',
                 turnServerUrl: '',
                 turnUsername: '',
                 turnCredential: '',
-                terminalWidthMode: updateBridgeSettingsTerminalWidthMode(current, next.terminalWidthMode).terminalWidthMode,
+                terminalWidthMode: updateBridgeSettingsTerminalWidthMode(next, next.terminalWidthMode).terminalWidthMode,
               }));
               handleOpenConnectionsPageWithAudit();
             }}
@@ -726,7 +711,6 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             sessionDraft={terminalActiveSession ? (sessionDrafts[terminalActiveSession.id] || '') : ''}
             onSessionDraftChange={handleSessionDraftChange}
             onSessionDraftSend={handleSessionDraftSend}
-            onLoadSavedTabList={handleLoadSavedTabList}
             scheduleState={terminalActiveSession ? scheduleStates[terminalActiveSession.id] || null : null}
             getScheduleState={getSessionScheduleState}
             onRequestScheduleList={requestScheduleList}

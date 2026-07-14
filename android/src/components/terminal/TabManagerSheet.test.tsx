@@ -82,21 +82,17 @@ describe('TabManagerSheet', () => {
           toTabManagerSession(buildSession('s3', 'tab-3')),
         ]}
         activeSessionId="s1"
-        savedTabLists={[]}
         onClose={vi.fn()}
         onSwitchSession={vi.fn()}
         onRenameSession={vi.fn()}
         onCloseSession={vi.fn()}
         onMoveSession={onMoveSession}
         onOpenQuickTabPicker={vi.fn()}
-        onSaveCurrentTabList={vi.fn()}
-        onLoadSavedTabList={vi.fn()}
-        onDeleteSavedTabList={vi.fn()}
-        onExportCurrentTabList={vi.fn(() => '')}
-        onExportSavedTabList={vi.fn(() => '')}
-        onImportSavedTabLists={vi.fn(() => ({ ok: true, message: 'ok' }))}
       />,
     );
+
+    expect(screen.queryByText('Save Current')).toBeNull();
+    expect(screen.queryByText('Saved Tab Lists')).toBeNull();
 
     const rows = Array.from(document.querySelectorAll<HTMLElement>('[data-tab-list-row="true"]'));
     rows.forEach((row, index) => {
@@ -135,19 +131,12 @@ describe('TabManagerSheet', () => {
           toTabManagerSession(buildSession('s2', 'tab-2')),
         ]}
         activeSessionId="s1"
-        savedTabLists={[]}
         onClose={vi.fn()}
         onSwitchSession={vi.fn()}
         onRenameSession={vi.fn()}
         onCloseSession={onCloseSession}
         onMoveSession={vi.fn()}
         onOpenQuickTabPicker={vi.fn()}
-        onSaveCurrentTabList={vi.fn()}
-        onLoadSavedTabList={vi.fn()}
-        onDeleteSavedTabList={vi.fn()}
-        onExportCurrentTabList={vi.fn(() => '')}
-        onExportSavedTabList={vi.fn(() => '')}
-        onImportSavedTabLists={vi.fn(() => ({ ok: true, message: 'ok' }))}
       />,
     );
 

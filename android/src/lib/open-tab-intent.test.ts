@@ -14,7 +14,6 @@ import {
   normalizeOpenTabIntentState,
   renameOpenTabIntentSession,
   resolveRestoredOpenTabIntentState,
-  resolveSavedOpenTabsImportPlan,
   resolveRequestedOpenTabActiveSessionId,
   upsertOpenTabIntentSession,
 } from './open-tab-intent';
@@ -549,34 +548,6 @@ describe('open-tab intent truth', () => {
       ],
       activeSessionId: 's1',
     });
-  });
-
-  it('resolves saved-tab import plan with import-only dedupe plus requested focus in one pure module', () => {
-    const plan = resolveSavedOpenTabsImportPlan([
-      makeTab('saved-a', {
-        bridgeHost: '100.127.23.27',
-        bridgePort: 3333,
-        sessionName: 'alpha',
-        authToken: 'token-a',
-      }),
-      makeTab('saved-b-stale', {
-        bridgeHost: '100.127.23.27',
-        bridgePort: 3333,
-        sessionName: 'beta',
-        authToken: 'token-b',
-      }),
-      makeTab('saved-b-new', {
-        bridgeHost: '100.127.23.27',
-        bridgePort: 3333,
-        sessionName: 'beta',
-        authToken: 'token-b',
-        createdAt: 2,
-        customName: 'Keep Me',
-      }),
-    ], 'saved-b-new');
-
-    expect(plan.tabs.map((tab) => tab.sessionId)).toEqual(['saved-a', 'saved-b-new']);
-    expect(plan.activeSessionId).toBe('saved-b-new');
   });
 
   it('resolves requested focus session id from imported tabs with a single pure rule', () => {

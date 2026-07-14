@@ -195,7 +195,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
     });
   });
 
-  it('persists reopened semantic tab tombstone removal so cold launch no longer keeps it dead', () => {
+  it('clears reopened semantic tab tombstones in memory without saving tab state', () => {
     const target = {
       bridgeHost: '100.127.23.27',
       bridgePort: 3333,
@@ -228,10 +228,10 @@ describe('useSessionOpenActions explicit-open truth', () => {
     });
 
     expect(harness.refs.closedOpenTabReuseKeysRef.current.has(reuseKey)).toBe(false);
-    expect(localStorage.getItem('zterm:closed-tab-reuse-keys')).toBe(JSON.stringify([]));
+    expect(localStorage.getItem('zterm:closed-tab-reuse-keys')).toBeNull();
   });
 
-  it('clears all semantic reuse-key variants when explicitly reopening a daemon-owned tab', () => {
+  it('clears all semantic reuse-key variants without saving tab state', () => {
     const target = {
       bridgeHost: '100.127.23.27',
       bridgePort: 3333,
@@ -264,7 +264,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
     });
 
     expect(Array.from(harness.refs.closedOpenTabReuseKeysRef.current)).toEqual([]);
-    expect(localStorage.getItem('zterm:closed-tab-reuse-keys')).toBe(JSON.stringify([]));
+    expect(localStorage.getItem('zterm:closed-tab-reuse-keys')).toBeNull();
   });
 
   it('uses active runtime session auth truth as the preferred quick-tab picker target', () => {
@@ -636,7 +636,31 @@ describe('useSessionOpenActions explicit-open truth', () => {
 
   it('refreshes drawer host sessions through the same remote catalog owner', async () => {
     const auditOpenTabsAgainstRemoteSessions = vi.fn(async () => undefined);
-    const harness = createOptions();
+    const harness = createOptions({
+      runtimeActiveSessionId: 'active-zterm',
+    });
+    harness.refs.openTabStateRef.current = normalizeOpenTabIntentState([
+      {
+        sessionId: 'active-zterm',
+        hostId: 'host-a',
+        connectionName: 'Daemon A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'zterm',
+        createdAt: 1,
+      },
+      {
+        sessionId: 'stale-routecodex2',
+        hostId: 'host-a',
+        connectionName: 'Daemon A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'routecodex2',
+        createdAt: 2,
+      },
+    ], 'active-zterm');
     fetchTmuxSessionsMock.mockResolvedValueOnce(['beta', 'alpha', 'beta']);
     const { result } = renderHook(() => useSessionOpenActions({
       ...(harness.options as any),
@@ -674,99 +698,18 @@ describe('useSessionOpenActions explicit-open truth', () => {
       ['alpha', 'beta'],
     );
     expect(auditOpenTabsAgainstRemoteSessions).toHaveBeenCalledWith('session-picker-refresh');
+    expect(harness.refs.openTabStateRef.current.activeSessionId).toBe('active-zterm');
+    expect(harness.spies.applyOpenTabState).not.toHaveBeenCalled();
+    expect(harness.spies.createSession).not.toHaveBeenCalled();
+    expect(harness.spies.switchSession).not.toHaveBeenCalled();
   });
 
-  it('loads saved tab list through the unified remote-restorable helper before opening tabs', async () => {
-    const harness = createOptions({
-      hosts: [
-        {
-          id: 'host-a',
-          createdAt: 1,
-          name: 'Conn A',
-          bridgeHost: '100.127.23.27',
-          bridgePort: 3333,
-          daemonHostId: 'daemon-a',
-          relayHostId: 'daemon-a',
-          sessionName: 'alpha',
-          authToken: 'token-a',
-          authType: 'password',
-          tags: [],
-          pinned: false,
-        },
-      ],
-    });
-
-    resolveRemoteRestorableOpenTabStateMock.mockResolvedValueOnce({
-      tabs: [
-        {
-          sessionId: 'saved-a',
-          hostId: 'host-a',
-          connectionName: 'Conn A',
-          bridgeHost: '100.127.23.27',
-          bridgePort: 3333,
-          daemonHostId: 'daemon-a',
-          sessionName: 'alpha',
-          authToken: 'token-a',
-          createdAt: 1,
-        },
-      ],
-      activeSessionId: 'saved-a',
-      droppedTabs: [
-        {
-          sessionId: 'saved-gone',
-          hostId: 'host-gone',
-          connectionName: 'Gone',
-          bridgeHost: '100.127.23.27',
-          bridgePort: 3333,
-          daemonHostId: 'daemon-a',
-          sessionName: 'gone',
-          authToken: 'token-a',
-          createdAt: 2,
-        },
-      ],
-    });
-
+  it('does not expose saved-tab list loading from the session-open owner', () => {
+    const harness = createOptions();
     const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
 
-    await act(async () => {
-      await result.current.handleLoadSavedTabList([
-        {
-          sessionId: 'saved-a',
-          hostId: 'host-a',
-          connectionName: 'Conn A',
-          bridgeHost: '100.127.23.27',
-          bridgePort: 3333,
-          daemonHostId: 'daemon-a',
-          sessionName: 'alpha',
-          authToken: 'token-a',
-          createdAt: 1,
-        },
-        {
-          sessionId: 'saved-gone',
-          hostId: 'host-gone',
-          connectionName: 'Gone',
-          bridgeHost: '100.127.23.27',
-          bridgePort: 3333,
-          daemonHostId: 'daemon-a',
-          sessionName: 'gone',
-          authToken: 'token-a',
-          createdAt: 2,
-        },
-      ], 'saved-gone');
-    });
-
-    expect(resolveRemoteRestorableOpenTabStateMock).toHaveBeenCalledWith({
-      tabs: [
-        expect.objectContaining({ sessionId: 'saved-a' }),
-        expect.objectContaining({ sessionId: 'saved-gone' }),
-      ],
-      activeSessionId: 'saved-gone',
-      bridgeSettings: harness.options.runtimeRefs.bridgeSettingsRef.current,
-      hosts: harness.options.runtimeRefs.hostsRef.current,
-    });
-    expect(harness.spies.createSession).toHaveBeenCalledTimes(1);
-    expect(harness.refs.openTabStateRef.current.tabs.map((tab) => tab.sessionId)).toEqual(['saved-a']);
-    expect(harness.refs.openTabStateRef.current.activeSessionId).toBe('saved-a');
+    expect('handleLoadSavedTabList' in result.current).toBe(false);
+    expect(resolveRemoteRestorableOpenTabStateMock).not.toHaveBeenCalled();
   });
 
   it('rebuilds a force-relay tab inside the session-open owner', () => {
@@ -911,51 +854,15 @@ describe('useSessionOpenActions explicit-open truth', () => {
     expect(harness.spies.ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
   });
 
-  it('skips closed tabs and preserves their reuse tombstones when loading saved tab list', async () => {
+  it('keeps closed-tab tombstones in memory when saved-tab loading is absent', () => {
     const reuseKey = buildPersistedOpenTabReuseKey({
       daemonHostId: 'daemon-a',
       bridgeHost: '100.127.23.27',
       bridgePort: 3333,
       sessionName: 'alpha',
     });
-    localStorage.setItem('zterm:closed-tab-reuse-keys', JSON.stringify([reuseKey]));
-    const harness = createOptions({
-      hosts: [
-        {
-          id: 'host-a',
-          createdAt: 1,
-          name: 'Conn A',
-          bridgeHost: '100.127.23.27',
-          bridgePort: 3333,
-          daemonHostId: 'daemon-a',
-          relayHostId: 'daemon-a',
-          sessionName: 'alpha',
-          authToken: 'token-a',
-          authType: 'password',
-          tags: [],
-          pinned: false,
-        },
-      ],
-    });
+    const harness = createOptions();
     harness.refs.closedOpenTabReuseKeysRef.current = new Set([reuseKey]);
-    resolveRemoteRestorableOpenTabStateMock.mockResolvedValueOnce({
-      tabs: [
-        {
-          sessionId: 'saved-a',
-          hostId: 'host-a',
-          connectionName: 'Conn A',
-          bridgeHost: '100.127.23.27',
-          bridgePort: 3333,
-          daemonHostId: 'daemon-a',
-          sessionName: 'alpha',
-          authToken: 'token-a',
-          createdAt: 1,
-        },
-      ],
-      activeSessionId: 'saved-a',
-      droppedTabs: [],
-    });
-
     const { result } = renderHook(() => useSessionOpenActions({
       ...(harness.options as any),
       runtimeRefs: {
@@ -964,26 +871,8 @@ describe('useSessionOpenActions explicit-open truth', () => {
       },
     }));
 
-    await act(async () => {
-      await result.current.handleLoadSavedTabList([
-        {
-          sessionId: 'saved-a',
-          hostId: 'host-a',
-          connectionName: 'Conn A',
-          bridgeHost: '100.127.23.27',
-          bridgePort: 3333,
-          daemonHostId: 'daemon-a',
-          sessionName: 'alpha',
-          authToken: 'token-a',
-          createdAt: 1,
-        },
-      ], 'saved-a');
-    });
-
-    // Reuse key should remain — the tab was explicitly closed, so it must not be reopened
+    expect('handleLoadSavedTabList' in result.current).toBe(false);
     expect(harness.refs.closedOpenTabReuseKeysRef.current.has(reuseKey)).toBe(true);
-    expect(localStorage.getItem('zterm:closed-tab-reuse-keys')).toBe(JSON.stringify([reuseKey]));
-    // No tabs should have been opened because the only candidate still has an explicit close tombstone.
     expect(harness.refs.openTabStateRef.current.tabs).toEqual([]);
   });
 });

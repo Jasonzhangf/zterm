@@ -54,10 +54,10 @@ daemon tmux truth
 
 ## Module Black-Box Plan
 
-- `src/lib/connections-server-groups.test.ts`
-  - relay directory machine appears in Connections without `BridgeServerPreset`.
-  - sessions from directory are openable.
-  - local preset only overrides display/pin/auth alias and cannot erase directory truth.
+- `src/pages/ConnectionsPage.test.tsx`
+  - fixed relay home logs into the account owner without an editable relay URL.
+  - daemon devices from directory are projected without Session group controls.
+  - Home does not open/close sessions or save tab lists.
 - `src/lib/session-picker.test.ts`
   - relay device resolves from directory endpoints when no preset exists.
   - selected target contains daemon identity and route candidates.
@@ -104,7 +104,6 @@ pnpm --dir android exec vitest run \
   src/lib/traversal/route-health-cache.test.ts \
   src/lib/traversal/config.test.ts \
   src/lib/traversal/socket.test.ts \
-  src/lib/connections-server-groups.test.ts \
   src/lib/session-picker.test.ts \
   src/components/tmux/TmuxSessionPickerSheet.test.tsx \
   src/pages/ConnectionsPage.test.tsx \

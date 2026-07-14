@@ -120,6 +120,7 @@ describe('traversal relay client truth', () => {
   });
 
   it('resolves empty relay base url to the built-in default login server', () => {
+    expect(getDefaultTraversalRelayBaseUrl()).toBe('https://relay.codewhisper.cc/relay/');
     expect(resolveTraversalRelayBaseUrl('')).toBe(getDefaultTraversalRelayBaseUrl());
     expect(resolveTraversalRelayBaseUrl('   ')).toBe(getDefaultTraversalRelayBaseUrl());
     expect(resolveTraversalRelayBaseUrl('https://relay.example.com')).toBe('https://relay.example.com/relay/');
@@ -164,6 +165,8 @@ describe('traversal relay client truth', () => {
 
     expect(account.directory?.devices[0]?.daemon?.hostId).toBe('daemon-host');
     expect(readTraversalRelayAccountState()?.directory?.devices[0]?.daemon?.sessions[0]?.name).toBe('main');
+    expect(account.password).toBe('');
+    expect(readTraversalRelayAccountState()?.password).toBe('');
   });
 
   it('rejects relay login responses that do not include a valid account directory', async () => {

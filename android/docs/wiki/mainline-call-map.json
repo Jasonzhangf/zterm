@@ -6,7 +6,7 @@
       "lifecycle_id": "android_mainline",
       "title": "Android Mainline",
       "entrypoint": "Native",
-      "return_path": "TerminalView -> RenderGate -> TerminalView",
+      "return_path": "SocketMessage -> BufferApply -> RenderGate -> TerminalView",
       "owner_feature": "mainline_source.android",
       "canonical_docs": [
         "docs/wiki/mainline-source.md",
@@ -65,6 +65,18 @@
         {
           "id": "TransportOpen",
           "label": "src/contexts/session-context-transport-open-runtime.ts"
+        },
+        {
+          "id": "SocketMessage",
+          "label": "src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime"
+        },
+        {
+          "id": "BufferApply",
+          "label": "src/contexts/session-context-buffer-runtime.ts#applyIncomingBufferSyncRuntime"
+        },
+        {
+          "id": "PerformanceTrace",
+          "label": "src/lib/terminal-performance-trace.ts"
         },
         {
           "id": "Connections",
@@ -274,19 +286,98 @@
           "relation_status": "direct"
         },
         {
-          "from": "App",
-          "to": "Connections",
-          "owner_feature": "connections.history_projection",
-          "semantic_input": "connections route",
-          "semantic_output": "connections projection",
+          "from": "SessionContext",
+          "to": "SocketMessage",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "physical session transport server frame",
+          "semantic_output": "typed server message dispatch",
           "status": "anchored",
-          "edge_id": "android_mainline:App->Connections",
-          "resource_from": "resource.open_tab",
-          "resource_to": "resource.ui_projection",
+          "edge_id": "android_mainline:SessionContext->SocketMessage",
+          "resource_from": "resource.session_transport",
+          "resource_to": "resource.transport_subscriber",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "SocketMessage",
+          "to": "BufferApply",
+          "owner_feature": "terminal.buffer_render",
+          "semantic_input": "accepted revisioned buffer-sync body",
+          "semantic_output": "absolute sparse buffer update",
+          "status": "anchored",
+          "edge_id": "android_mainline:SocketMessage->BufferApply",
+          "resource_from": "resource.session_transport",
+          "resource_to": "resource.client_sparse_buffer",
           "via_resources": [
-            "resource.active_session"
+            "resource.transport_subscriber",
+            "resource.mirror_store"
           ],
           "relation_status": "via"
+        },
+        {
+          "from": "BufferApply",
+          "to": "RenderGate",
+          "owner_feature": "terminal.buffer_render",
+          "semantic_input": "committed sparse buffer revision",
+          "semantic_output": "next-RAF render commit request",
+          "status": "anchored",
+          "edge_id": "android_mainline:BufferApply->RenderGate",
+          "resource_from": "resource.client_sparse_buffer",
+          "resource_to": "resource.renderer_window",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "SocketMessage",
+          "to": "PerformanceTrace",
+          "owner_feature": "daemon.cli_node",
+          "semantic_input": "client receive metadata",
+          "semantic_output": "bounded metadata-only trace record",
+          "status": "anchored",
+          "edge_id": "android_mainline:SocketMessage->PerformanceTrace",
+          "resource_from": "resource.session_transport",
+          "resource_to": "resource.debug_channel",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "BufferApply",
+          "to": "PerformanceTrace",
+          "owner_feature": "daemon.cli_node",
+          "semantic_input": "buffer apply revision and duration metadata",
+          "semantic_output": "bounded metadata-only trace record",
+          "status": "anchored",
+          "edge_id": "android_mainline:BufferApply->PerformanceTrace",
+          "resource_from": "resource.client_sparse_buffer",
+          "resource_to": "resource.debug_channel",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "RenderGate",
+          "to": "PerformanceTrace",
+          "owner_feature": "daemon.cli_node",
+          "semantic_input": "RAF and render commit metadata",
+          "semantic_output": "bounded metadata-only trace record",
+          "status": "anchored",
+          "edge_id": "android_mainline:RenderGate->PerformanceTrace",
+          "resource_from": "resource.renderer_window",
+          "resource_to": "resource.debug_channel",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "App",
+          "to": "Connections",
+          "owner_feature": "relay.directory_ui",
+          "semantic_input": "home route plus relay account/directory truth",
+          "semantic_output": "fixed relay login and daemon-device projection",
+          "status": "anchored",
+          "edge_id": "android_mainline:App->Connections",
+          "resource_from": "resource.transport_target",
+          "resource_to": "resource.ui_projection",
+          "via_resources": [],
+          "relation_status": "observer"
         },
         {
           "from": "App",
@@ -431,10 +522,336 @@
       ]
     },
     {
+      "lifecycle_id": "android_preview",
+      "title": "Android Session Preview Mainline",
+      "entrypoint": "SessionDrawer",
+      "return_path": "TerminalPreviewTile -> ActiveSessionIntent -> TerminalPage | SystemBackIntent -> PreviewModeOwner -> EntrySessionProjection -> TerminalPage",
+      "owner_feature": "terminal.session_preview",
+      "canonical_docs": [
+        "docs/goals/terminal-session-preview-plan.md",
+        "docs/testing/terminal-session-preview-test-design.md",
+        "docs/function-map.md"
+      ],
+      "verification_gates": [
+        "src/lib/session-preview-selection.test.ts",
+        "src/lib/session-preview-gesture.test.ts",
+        "src/components/terminal/TerminalPreviewGrid.render-truth.test.tsx",
+        "src/pages/TerminalPage.session-preview.test.tsx"
+      ],
+      "nodes": [
+        {
+          "id": "SessionDrawer",
+          "label": "src/components/terminal/TerminalSessionDrawer.tsx#TerminalSessionDrawer"
+        },
+        {
+          "id": "PreviewSelectionOwner",
+          "label": "src/lib/session-preview-selection.ts#toggleSessionPreviewTarget"
+        },
+        {
+          "id": "OpenTabResolver",
+          "label": "src/lib/session-preview-selection.ts#resolveSessionPreviewTargets"
+        },
+        {
+          "id": "TerminalShellGesture",
+          "label": "src/lib/session-preview-gesture.ts#resolveSessionPreviewGesture"
+        },
+        {
+          "id": "PreviewModeOwner",
+          "label": "src/pages/TerminalPage.tsx#sessionPreviewOpen"
+        },
+        {
+          "id": "PreviewLiveSetProjector",
+          "label": "src/lib/session-preview-selection.ts#projectSessionPreviewLiveIds"
+        },
+        {
+          "id": "SessionBodySubscriptionIntent",
+          "label": "src/pages/TerminalPage.tsx#onLiveSessionIdsChange"
+        },
+        {
+          "id": "TerminalPreviewGrid",
+          "label": "src/components/terminal/TerminalPreviewGrid.tsx#TerminalPreviewGrid"
+        },
+        {
+          "id": "TerminalPreviewTile",
+          "label": "src/components/terminal/TerminalPreviewGrid.tsx#preview-tile"
+        },
+        {
+          "id": "TerminalPreviewTileClose",
+          "label": "src/pages/TerminalPage.tsx#handleRemoveSessionFromPreview"
+        },
+        {
+          "id": "PreviewReplacementMenu",
+          "label": "src/components/terminal/TerminalPreviewGrid.tsx#preview-replacement-menu"
+        },
+        {
+          "id": "PreviewAddMenu",
+          "label": "src/components/terminal/TerminalPreviewGrid.tsx#terminal-preview-add-menu"
+        },
+        {
+          "id": "SharedRenderSurface",
+          "label": "src/components/TerminalView.tsx#TerminalView"
+        },
+        {
+          "id": "ActiveSessionIntent",
+          "label": "src/pages/TerminalPage.tsx#handleActivateOpenSessionInViewport"
+        },
+        {
+          "id": "SystemBackIntent",
+          "label": "@capacitor/app#backButton"
+        },
+        {
+          "id": "EntrySessionProjection",
+          "label": "src/pages/TerminalPage.tsx#handleCancelSessionPreview"
+        },
+        {
+          "id": "TerminalPage",
+          "label": "src/pages/TerminalPage.tsx"
+        }
+      ],
+      "edges": [
+        {
+          "from": "SessionDrawer",
+          "to": "PreviewSelectionOwner",
+          "owner_feature": "terminal.session_preview",
+          "semantic_input": "eligible open-session row toggle intent",
+          "semantic_output": "ordered maximum-six preview target selection",
+          "status": "anchored",
+          "edge_id": "android_preview:SessionDrawer->PreviewSelectionOwner",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.session_preview_selection",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "PreviewSelectionOwner",
+          "to": "OpenTabResolver",
+          "owner_feature": "terminal.session_preview",
+          "semantic_input": "persisted ordered preview targets",
+          "semantic_output": "currently open session projections only",
+          "status": "anchored",
+          "edge_id": "android_preview:PreviewSelectionOwner->OpenTabResolver",
+          "resource_from": "resource.session_preview_selection",
+          "resource_to": "resource.open_tab",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "TerminalShellGesture",
+          "to": "PreviewModeOwner",
+          "owner_feature": "terminal.session_preview",
+          "semantic_input": "right-edge leftward axis-locked gesture",
+          "semantic_output": "explicit preview-open intent",
+          "status": "anchored",
+          "edge_id": "android_preview:TerminalShellGesture->PreviewModeOwner",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.session_preview_mode",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "PreviewModeOwner",
+          "to": "PreviewLiveSetProjector",
+          "owner_feature": "terminal.session_preview",
+          "semantic_input": "foreground preview-open state and resolved selected ids",
+          "semantic_output": "deduplicated live session id projection",
+          "status": "anchored",
+          "edge_id": "android_preview:PreviewModeOwner->PreviewLiveSetProjector",
+          "resource_from": "resource.session_preview_mode",
+          "resource_to": "resource.ui_projection",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "PreviewLiveSetProjector",
+          "to": "SessionBodySubscriptionIntent",
+          "owner_feature": "terminal.session_preview",
+          "semantic_input": "normal visible ids union temporary preview ids",
+          "semantic_output": "existing live-session callback intent without transport creation",
+          "status": "anchored",
+          "edge_id": "android_preview:PreviewLiveSetProjector->SessionBodySubscriptionIntent",
+          "resource_from": "resource.session_preview_mode",
+          "resource_to": "resource.ui_projection",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "PreviewModeOwner",
+          "to": "TerminalPreviewGrid",
+          "owner_feature": "terminal.session_preview",
+          "semantic_input": "open preview projection and ordered resolved sessions",
+          "semantic_output": "selection-count-derived preview grid capped at two portrait or three landscape columns",
+          "status": "anchored",
+          "edge_id": "android_preview:PreviewModeOwner->TerminalPreviewGrid",
+          "resource_from": "resource.session_preview_mode",
+          "resource_to": "resource.ui_projection",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "TerminalPreviewGrid",
+          "to": "TerminalPreviewTile",
+          "owner_feature": "terminal.session_preview",
+          "semantic_input": "ordered one-to-six open sessions and current orientation",
+          "semantic_output": "one read-only tile projection per session",
+          "status": "anchored",
+          "edge_id": "android_preview:TerminalPreviewGrid->TerminalPreviewTile",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.ui_projection",
+          "via_resources": [
+            "resource.session_preview_mode"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "TerminalPreviewTileClose",
+          "to": "PreviewSelectionOwner",
+          "owner_feature": "terminal.session_preview",
+          "semantic_input": "explicit remove-this-preview-target command",
+          "semantic_output": "persisted ordered preview selection without the target",
+          "status": "anchored",
+          "edge_id": "android_preview:TerminalPreviewTileClose->PreviewSelectionOwner",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.session_preview_selection",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "TerminalPreviewTile",
+          "to": "SharedRenderSurface",
+          "owner_feature": "terminal.session_preview",
+          "semantic_input": "session id and immutable render-buffer store",
+          "semantic_output": "shared TerminalView DOM projection",
+          "status": "anchored",
+          "edge_id": "android_preview:TerminalPreviewTile->SharedRenderSurface",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.renderer_window",
+          "via_resources": [
+            "resource.client_sparse_buffer"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "TerminalPreviewTile",
+          "to": "PreviewReplacementMenu",
+          "owner_feature": "terminal.session_preview",
+          "semantic_input": "long press on one selected preview tile",
+          "semantic_output": "replacement menu containing only unselected open sessions",
+          "status": "anchored",
+          "edge_id": "android_preview:TerminalPreviewTile->PreviewReplacementMenu",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.ui_projection",
+          "via_resources": [
+            "resource.session_preview_mode"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "PreviewReplacementMenu",
+          "to": "PreviewSelectionOwner",
+          "owner_feature": "terminal.session_preview",
+          "semantic_input": "source tile id and one unselected open-session target",
+          "semantic_output": "ordered preview selection with one in-place replacement",
+          "status": "anchored",
+          "edge_id": "android_preview:PreviewReplacementMenu->PreviewSelectionOwner",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.session_preview_selection",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "PreviewAddMenu",
+          "to": "PreviewSelectionOwner",
+          "owner_feature": "terminal.session_preview",
+          "semantic_input": "one currently open eligible Session absent from the preview",
+          "semantic_output": "ordered preview selection with the unselected target appended",
+          "status": "anchored",
+          "edge_id": "android_preview:PreviewAddMenu->PreviewSelectionOwner",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.session_preview_selection",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "TerminalPreviewTile",
+          "to": "ActiveSessionIntent",
+          "owner_feature": "terminal.session_preview",
+          "semantic_input": "explicit preview tile tap",
+          "semantic_output": "focused viewport projection plus one existing active-session switch intent",
+          "status": "anchored",
+          "edge_id": "android_preview:TerminalPreviewTile->ActiveSessionIntent",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.active_session",
+          "via_resources": [
+            "resource.open_tab"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "ActiveSessionIntent",
+          "to": "TerminalPage",
+          "owner_feature": "terminal.session_preview",
+          "semantic_input": "focused viewport projection and existing session switch completion",
+          "semantic_output": "preview closed with selected session active",
+          "status": "anchored",
+          "edge_id": "android_preview:ActiveSessionIntent->TerminalPage",
+          "resource_from": "resource.active_session",
+          "resource_to": "resource.ui_projection",
+          "via_resources": [
+            "resource.session_preview_mode"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "SystemBackIntent",
+          "to": "PreviewModeOwner",
+          "owner_feature": "terminal.session_preview",
+          "semantic_input": "Android system Back while preview is open",
+          "semantic_output": "preview cancel intent consumed by the preview mode owner",
+          "status": "anchored",
+          "edge_id": "android_preview:SystemBackIntent->PreviewModeOwner",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.session_preview_mode",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "PreviewModeOwner",
+          "to": "EntrySessionProjection",
+          "owner_feature": "terminal.session_preview",
+          "semantic_input": "captured entry active session, slot ids, and focused slot",
+          "semantic_output": "restored entry active/session-group projection with preview closed",
+          "status": "anchored",
+          "edge_id": "android_preview:PreviewModeOwner->EntrySessionProjection",
+          "resource_from": "resource.session_preview_mode",
+          "resource_to": "resource.active_session",
+          "via_resources": [
+            "resource.ui_projection",
+            "resource.open_tab"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "EntrySessionProjection",
+          "to": "TerminalPage",
+          "owner_feature": "terminal.session_preview",
+          "semantic_input": "restored entry projection",
+          "semantic_output": "normal shell rendered on entry session",
+          "status": "anchored",
+          "edge_id": "android_preview:EntrySessionProjection->TerminalPage",
+          "resource_from": "resource.active_session",
+          "resource_to": "resource.ui_projection",
+          "via_resources": [
+            "resource.session_preview_mode"
+          ],
+          "relation_status": "via"
+        }
+      ]
+    },
+    {
       "lifecycle_id": "daemon_mainline",
       "title": "Daemon Mainline",
       "entrypoint": "CLI",
-      "return_path": "Mirror -> Message -> Server -> Transport",
+      "return_path": "Capture -> Mirror -> TransportSend",
       "owner_feature": "mainline_source.daemon",
       "canonical_docs": [
         "docs/wiki/mainline-source.md",
@@ -510,6 +927,14 @@
         {
           "id": "Transport",
           "label": "src/server/terminal-transport-runtime.ts"
+        },
+        {
+          "id": "TransportSend",
+          "label": "src/server/terminal-transport-runtime.ts#sendText"
+        },
+        {
+          "id": "PerformanceTrace",
+          "label": "src/lib/terminal-performance-trace.ts"
         },
         {
           "id": "Relay",
@@ -588,8 +1013,8 @@
           "from": "Message",
           "to": "Mirror",
           "owner_feature": "terminal.buffer_render",
-          "semantic_input": "head/range/live sync request",
-          "semantic_output": "mirror truth read/write",
+          "semantic_input": "body-subscription scheduler intent or explicit head/range read",
+          "semantic_output": "physical live demand update or current mirror truth read",
           "status": "anchored",
           "edge_id": "daemon_mainline:Message->Mirror",
           "resource_from": "resource.transport_subscriber",
@@ -609,6 +1034,58 @@
           "resource_to": "resource.tmux_session",
           "via_resources": [],
           "relation_status": "direct"
+        },
+        {
+          "from": "Mirror",
+          "to": "TransportSend",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "committed mirror revision and authoritative changed span",
+          "semantic_output": "pre-serialized subscriber body frame",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:Mirror->TransportSend",
+          "resource_from": "resource.mirror_store",
+          "resource_to": "resource.transport_subscriber",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "Capture",
+          "to": "PerformanceTrace",
+          "owner_feature": "daemon.cli_node",
+          "semantic_input": "capture and canonicalize metadata",
+          "semantic_output": "bounded metadata-only trace record",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:Capture->PerformanceTrace",
+          "resource_from": "resource.tmux_session",
+          "resource_to": "resource.debug_channel",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "Mirror",
+          "to": "PerformanceTrace",
+          "owner_feature": "daemon.cli_node",
+          "semantic_input": "mirror commit revision and absolute bounds metadata",
+          "semantic_output": "bounded metadata-only trace record",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:Mirror->PerformanceTrace",
+          "resource_from": "resource.mirror_store",
+          "resource_to": "resource.debug_channel",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "TransportSend",
+          "to": "PerformanceTrace",
+          "owner_feature": "daemon.cli_node",
+          "semantic_input": "send bytes duration and buffered amount metadata",
+          "semantic_output": "bounded metadata-only trace record",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:TransportSend->PerformanceTrace",
+          "resource_from": "resource.transport_subscriber",
+          "resource_to": "resource.debug_channel",
+          "via_resources": [],
+          "relation_status": "observer"
         },
         {
           "from": "Message",

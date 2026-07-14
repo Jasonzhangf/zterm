@@ -66,7 +66,7 @@ export interface TraversalRelayAccountState {
 }
 
 const STORAGE_KEY = 'zterm:traversal-relay-account';
-const DEFAULT_TRAVERSAL_RELAY_BASE_URL_PARTS = ['https://', 'claw', '.', 'codewhisper', '.', 'cc', ':', '18443', '/relay/'] as const;
+const DEFAULT_TRAVERSAL_RELAY_BASE_URL_PARTS = ['https://', 'relay', '.', 'codewhisper', '.', 'cc', '/relay/'] as const;
 
 function asString(value: unknown) {
   return typeof value === 'string' ? value : '';
@@ -175,7 +175,7 @@ function normalizeStoredState(input: unknown): TraversalRelayAccountState | null
   const platform = asString(candidate.platform).trim() || resolvePlatform();
   return {
     username: asString(candidate.username).trim(),
-    password: asString(candidate.password),
+    password: '',
     relayBaseUrl,
     accessToken: asString(candidate.accessToken).trim(),
     user: candidate.user && typeof candidate.user === 'object'
@@ -358,7 +358,7 @@ export async function traversalRelayLogin(options: {
   const deviceMeta = resolveTraversalRelayDeviceMeta(current);
   const nextState: TraversalRelayAccountState = {
     username: options.username.trim(),
-    password: options.password,
+    password: '',
     relayBaseUrl: normalizeTraversalRelayBaseUrl(options.relayBaseUrl),
     accessToken: asString(payload.accessToken).trim(),
     user: payload.user || null,

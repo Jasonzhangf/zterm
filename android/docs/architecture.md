@@ -27,7 +27,7 @@
   - `client session` 是客户端稳定业务对象，不是 transport
   - daemon **不关心也不能关心任何客户端逻辑/状态机**
   - daemon 不允许持有 `logical client session / clientSessionId owner / readyTransportId / active tab / foreground / background / viewport / pane`
-  - `adaptive-phone` 只允许进入 daemon 的唯一 adaptive width lease owner：按物理 transport subscriber lease 聚合最窄 cols，lease 断开或心跳过期必须恢复进入 adaptive 前的 tmux geometry
+  - `adaptive-phone` 只允许进入 daemon 的唯一 adaptive width lease owner：按物理 transport subscriber 记录 `{ cols, heartbeatAt }`，聚合 active adaptive subscribers 的最窄 cols，并只在该 owner 内请求 tmux 按宽度重排；不得把 client viewport policy 扩散成 session/mirror/client 状态
   - 除 adaptive width lease owner 外，协议兼容字段只允许作为一次性 attach 入参，不得在 daemon 内部成为长期状态真相
   - active / inactive 只影响客户端取数频率，不影响客户端 session / transport 身份
   - foreground / background / tab switch 不得成为客户端 fresh recreate transport 的理由
@@ -68,14 +68,13 @@
 
 ## UI 信息架构
 
-### Screen 1: Connections
+### Screen 1: Relay Login Home
 
-- 顶部标题区：`Sessions` / `Connections`
-- 工具栏区：关闭、标题、账户动作、更多
-- 列表区：Bookmarks / Sessions / Connections 卡片
-- 卡片区：名称、图标、必要时终端预览、进入箭头或主点击区
-- 新建入口：右下角浮动按钮
-- 底部导航区：可选 `Vaults / Connections / Settings`
+- 首页只承载固定 relay 服务 `relay.codewhisper.cc` 的账号登录与 daemon 设备状态。
+- 用户只输入账号和密码；relay base URL、WS、TURN 与 signal 地址不进入用户配置面。
+- 首页禁止投影或管理 Session group、Session 子列表、tab 列表与 tab 保存。
+- 实时 Session 列表、切换、关闭和预览只属于 Terminal drawer / picker。
+- relay 登录密码只用于当次认证，不持久化明文；持久化真相是 token、account directory 与 relay client settings。
 
 ### Screen 1A: Session Picker
 
@@ -134,34 +133,32 @@ operation -> event -> projection
 - Schedule/Automation 只定义规则、nextFireAt 计算与执行结果，不直接承载 UI 展示
 - Server 负责本地 tmux 真源，以及定时发送的唯一执行真源
 
-## Connections / history / current tabs 真源冻结
+## Home / runtime tabs 真源冻结
 
-### 1. current tabs（当前打开 tabs）
+### 1. current tabs（当前进程打开 tabs）
 
-- 唯一持久化真源：
-  - `STORAGE_KEYS.OPEN_TABS`
-  - `STORAGE_KEYS.ACTIVE_SESSION`
-- 唯一读写 owner：
-  - `src/lib/open-tab-persistence.ts`
+- tabs 与 active Session 只在当前 app 进程内存在，不是持久化配置。
+- 冷启动不得读取或恢复 `STORAGE_KEYS.OPEN_TABS`、`STORAGE_KEYS.ACTIVE_SESSION`、`STORAGE_KEYS.SAVED_TAB_LISTS`。
+- 旧版本遗留的三个 key 在启动时由 migration owner 物理移除。
 - 唯一业务 owner：
   - `src/hooks/useOpenTabRuntime.ts`
   - 其纯规则模块：`src/lib/open-tab-intent.ts`
 
 硬规则：
 
-- `OPEN_TABS` 一旦存在，就是 **explicit client truth**
+- 当前进程的 open-tab state 是 **explicit client truth**
 - runtime sessions 只能：
   - 为同 `sessionId` 的 open tab 提供 runtime transport/state
   - 在 explicit resume/switch 场景同步 runtime active id
 - runtime sessions **不得 append runtime-only tabs 回 OPEN_TABS**
-- runtime sessions / remote audit / semantic reuse key **不得**合并、替换、关闭、prune already-open tabs；`sessionName + daemon/bridge owner` 只能用于 saved-list import 去重和 explicit close tombstone，不是 open-tab 物理身份
-- open-tab 物理身份只能是 `sessionId`；用户显式关闭 tab 必须统一走 open-tab close owner，再由它持久化
+- runtime sessions / remote audit / semantic reuse key **不得**合并、替换、关闭、prune already-open tabs；`sessionName + daemon/bridge owner` 只能用于当前进程内显式 reopen 识别，不是 open-tab 物理身份
+- open-tab 物理身份只能是 `sessionId`；用户显式关闭 tab 必须统一走 open-tab close owner，并且只更新当前进程内 open-tab truth
 - `session-status closed/error/tmux_session_unavailable` 只属于 transport 事实：
   - 可触发 remote tmux audit
   - **不得**直接映射成 open-tab 物理关闭
-- closed semantic tombstone（`closed-tab-reuse-keys`）也属于 open-tab persistence truth：
-  - 显式 reopen / saved-tab import 可以清 tombstone
-  - cold restore 不得偷偷清 tombstone
+- closed semantic tombstone（`closed-tab-reuse-keys`）只属于当前进程内 open-tab runtime truth：
+  - 显式 reopen 可以清 tombstone
+  - legacy storage key 必须被 migration owner 移除，不得重新写入
 - `SessionContext` 不得持久化 current tabs
 - `ConnectionsPage` 不得写 `OPEN_TABS`
 
@@ -181,23 +178,25 @@ operation -> event -> projection
 - `SESSION_GROUPS` 不得反向生成 current tabs
 - 远端 tmux truth 变化时，history 只能被 prune，不得自动 reopen tab
 
-### 3. connections projection（连接页投影）
+### 3. Home relay projection（主页 relay 投影）
 
 - 唯一 projection owner：
-  - `src/lib/connections-server-groups.ts`
+  - `src/pages/ConnectionsPage.tsx`
+  - `src/hooks/useTraversalRelayAccount.ts`
 
 输入只允许来自：
 
-- `hosts`
-- `sessionGroups`
-- `runtime sessions`
+- fixed relay service identity `relay.codewhisper.cc`
+- relay account state
+- relay account directory / daemon devices
 
 硬规则：
 
-- projection 只负责组装 UI server cards
+- projection 只负责固定域名账号登录与 daemon device 投影
 - projection 不得写任何 storage
 - projection 不得创建 / 关闭 session
 - projection 不得决定 current tabs
+- projection 不得显示或管理 Session group / saved tab list；实时 Session 列表属于 terminal drawer / picker
 
 ### 4. SessionContext 与 current tabs 的边界
 
@@ -216,16 +215,16 @@ operation -> event -> projection
 
 ### 5. createSession 调用边界
 
-- cold restore / runtime sync 的唯一 app-layer owner：
+- legacy cold-restore compatibility / runtime sync 的唯一 app-layer owner：
   - `src/hooks/useOpenTabRestoreRuntimeSync.ts`
-- 用户显式打开 session / group / saved tabs 的唯一 app-layer owner：
+- 用户显式打开 session 的唯一 app-layer owner：
   - `src/hooks/useSessionOpenActions.ts`
 
 硬规则：
 
 - `useOpenTabRestoreRuntimeSync.ts` 只允许做：
-  - persisted open-tab truth 的远端审计 / prune
-  - persisted open tabs 对应的 **local runtime shell restore**
+  - 当前进程 open-tab truth 的远端审计 / prune
+  - legacy cold-restore compatibility 对应的 **local runtime shell restore**；默认 cold launch 没有 persisted tabs
   - runtime live session id remap
   - active tab truth 对齐
 - `useOpenTabRestoreRuntimeSync.ts` 允许调用 `createSession`，但**仅限** `connect:false`：
@@ -302,9 +301,10 @@ Android client -> zterm-daemon -> macOS screenshot truth
   - `mirror-fixed`：只读上游宽度真相；renderer 只做 horizontal crop / pan
 - `adaptive-phone` 的上游宽度 owner 只能是 daemon：
   - client 只上报 latest measured cols
-  - daemon 只允许按活跃 `adaptive-phone` 连接集合计算最小 cols
-  - 断开连接后立即重算
+  - daemon 只允许按活跃 `adaptive-phone` 连接集合计算最小 cols，并在唯一 adaptive lease owner 内执行 `resize-window -x <cols>`
+  - 断开连接、切回 `mirror-fixed` 或心跳过期后立即重算；最后一个 holder 消失时恢复/释放 tmux 宽度控制权
   - tmux 高度不在这条链路内，daemon 不得改写 rows
+  - mirror 内容与 `mirror.rows/cols` 仍只能来自 tmux capture/readback，daemon 不得因为刚请求了 resize 就自写 mirror geometry
 - viewport / geometry 变化时不允许：
   - clear terminal
   - replay `outputHistory`
@@ -318,6 +318,7 @@ Android client -> zterm-daemon -> macOS screenshot truth
 - `mirror-fixed` 横向查看属于 renderer window horizontal pan
 - `mirror-fixed` 下若未接入独立 horizontal pan 手势链，左右滑切 tab 仍需保持可用并由 shell interaction owner 独占
 - 一次手势只能命中一个 shell 语义；若未来恢复 horizontal pan，必须与 tab swipe 重新做单一命中门禁，禁止并发共享
+- `mirror-fixed` 当前已有 horizontal pan：只要手势能真实改变 renderer horizontal offset，renderer 必须截断父级 drawer/tab swipe；只有 offset 已到左边界且本次右滑无法继续平移时，左缘热区才可把该手势交给 drawer
 
 ## Terminal canonical buffer ownership
 
@@ -440,6 +441,9 @@ android/
 - `docs/feature-registry.json`
 - `docs/function-map.md`
 - `docs/feature-gates.md`
+- `docs/resource-registry.json` — global resource ownership machine truth for daemon, platform clients, terminal backends, transport, buffer/render, CLI/release, and debug surfaces
+- `docs/resource-map.md` — human review surface for global resource relations, required indirect paths, and forbidden direct paths
+- `docs/testing/resource-truth-test-design.md` — resource truth gate design before resource-owner code refactor
 - `docs/wiki/daemon.md` — daemon runtime entry, tmux/mirror/bridge/schedule/control/ftransfer/screenshot paths
 - `docs/wiki/cli.md` — bash CLI surface (`zterm-daemon.sh`), npm global install, launchd lifecycle
 - `docs/wiki/mainline-source.md` — Android / daemon / CLI mainline source ownership
@@ -454,3 +458,5 @@ android/
 - required gates
 
 如果某个功能没有对应 `feature_id`，不得直接改代码；必须先补 registry 和 truth gate，再进入实现。
+
+资源关系改动必须先查 `docs/resource-registry.json` 和 `docs/resource-map.md`。`function-map.md` 只能绑定 feature-local owner 和真实 symbol，必须服从 resource registry；`mainline-call-map.json` 的每条边必须绑定 `resource_from`、`resource_to`、`via_resources`、`relation_status`。未声明资源关系不得实现，禁止用 UI / renderer / debug / release 路径绕过资源 owner。

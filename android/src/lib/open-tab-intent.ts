@@ -4,7 +4,6 @@ import {
   buildPersistedOpenTabReuseKey,
   buildPersistedOpenTabReuseKeyVariants,
   buildPersistedOpenTabReuseKeyVariantsFromSession,
-  persistedOpenTabsSemanticallyMatch,
 } from './open-tab-persistence';
 
 export interface OpenTabIntentState {
@@ -34,23 +33,6 @@ export function dedupePersistedOpenTabs(tabs: PersistedOpenTab[]) {
   const deduped: PersistedOpenTab[] = [];
   for (const tab of tabs) {
     const existingIndex = deduped.findIndex((item) => item.sessionId === tab.sessionId);
-    const existing = existingIndex >= 0 ? deduped[existingIndex]! : null;
-    if (!existing) {
-      deduped.push(tab);
-      continue;
-    }
-    const preferred =
-      (existing.customName?.trim() ? existing : tab.customName?.trim() ? tab : null)
-      || (existing.createdAt >= tab.createdAt ? existing : tab);
-    deduped[existingIndex] = preferred;
-  }
-  return deduped;
-}
-
-function dedupeSavedOpenTabsImport(tabs: PersistedOpenTab[]) {
-  const deduped: PersistedOpenTab[] = [];
-  for (const tab of tabs) {
-    const existingIndex = deduped.findIndex((item) => persistedOpenTabsSemanticallyMatch(item, tab));
     const existing = existingIndex >= 0 ? deduped[existingIndex]! : null;
     if (!existing) {
       deduped.push(tab);
@@ -466,17 +448,6 @@ export function derivePersistedOpenTabRestorePlan(
     activeSessionId: currentState.activeSessionId && currentState.tabs.some((tab) => tab.sessionId === currentState.activeSessionId)
       ? currentState.activeSessionId
       : currentState.tabs[0]?.sessionId || null,
-  };
-}
-
-export function resolveSavedOpenTabsImportPlan(
-  tabs: PersistedOpenTab[],
-  requestedActiveSessionId?: string,
-) {
-  const dedupedTabs = dedupeSavedOpenTabsImport(tabs);
-  return {
-    tabs: dedupedTabs,
-    activeSessionId: resolveRequestedOpenTabActiveSessionId(dedupedTabs, requestedActiveSessionId),
   };
 }
 

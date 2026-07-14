@@ -10,6 +10,7 @@
 
 - [2026-07-12] Android WeType/OPlus 可能进入全局 IME ghost shown 状态：`mInputShown=true`、`mIsInputViewShown=true`，但 `contentTopInsets` 仍接近导航栏底部（如 2505）且屏幕无键盘；此时 zterm `ImeAnchorEditText` 和系统 Settings 普通 `EditText` 都会失败。必须先用系统普通文本框做对照，不能继续盲改 zterm anchor / renderer / tmux。已验证对 `com.tencent.wetype` 做明确包级 `am force-stop` 后，zterm 键盘真实弹出，`contentTopInsets` 变为真实键盘顶部（如 1509）。这只证明 IME 进程状态被复位，不能当成 zterm 代码修复闭环。
 - [2026-07-12] Android 点击键盘/输入意图必须先把 renderer 从 reading 对齐回 follow/bottom，再 show/focus IME；否则滚到历史区后 native IME 可见状态与 renderer 可见窗口会分裂，表现为键盘按钮无法再次唤出或输入区缺失。owner 是 `TerminalPage` 输入意图与 `TerminalView` renderer follow reset；禁止用 IME 高度、viewport resize、TerminalView layout refresh 或 tmux resize 修复。
+- [2026-07-13] Android 键盘 toggle 的底部对齐需要两段锁定：show 前先 reset follow，native `keyboardState(visible=true)` 到达后如果 `terminalKeyboardRequested` 仍为真，再 reset follow 一次，覆盖 IME 上台导致的 visual viewport 缩高。这个二次 reset 只移动 renderer visible bottom；不得触发 `TerminalView` upstream resize、不得改 daemon/tmux geometry。2088 真机 DevTools 验证 `.wterm deltaBottom=0`。
 - [2026-07-12] Android IME 显隐真源必须来自 native `ImeAnchor.getState()/keyboardState` 的 `keyboardVisible/keyboardHeight`，不能用本地 `terminalKeyboardRequested` 或 inset 猜测。键盘按钮 show/hide 决策读取 native truth；IME 只允许 UI shell 做裁切/预留：stage reserve = measured quickbar chrome + IME lift，QuickBar shell 使用同一份 IME lift。`TerminalView` 不接收 IME resize token、不触发 upstream `onResize`、不改 tmux rows/cols。
 - [2026-07-12] `mirror-fixed` 横向滑动是 renderer projection 状态：只允许平移 `.term-grid` 显示窗口并按 session 记住 offset；不得注册 adaptive lease、不得改 `buffer-head/cols`、不得请求 tmux/daemon resize。`adaptive-phone` 横向 pan 必须保持关闭，因为它的宽度变化只能走 daemon adaptive width lease -> tmux reflow -> mirror capture/readback。
 - [2026-07-12] Android IME / renderer 真机闭环脚本必须先确认 app surface 可见；如果设备 keyguard/SystemUI 拥有屏幕，脚本应失败而不是冒充通过。当前 `100.104.163.65:5555` 设备锁屏时证据为 `isKeyguardShowing=true`、`mCurrentFocus=NotificationShade`，L5 只能标阻塞。
@@ -1009,3 +1010,129 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - Evidence: device package showed zterm `versionCode=1032069` updated at `2026-07-12 21:10:08`; `dumpsys window` focus could be zterm while UI dump still contained old terminal text before force-stop. After `adb shell am force-stop com.zterm.android` and cold start, UI dump no longer contained `routecodex`, `Implement`, `Paste`, or quickbar text.
 - Owner: native Android update handoff. `AppUpdatePlugin.installApk()` must terminate the current app process shortly after handing the APK URI to the system installer, so the user cannot remain inside the old WebView/JS process after an update. Do not clear `app_webview`, Local Storage, `OPEN_TABS`, or session state as a workaround.
 - Verification level: direct `adb install -r` + cold start of the rebuilt APK passed and old terminal text disappeared. The App-internal `AppUpdatePlugin.downloadAndInstall()` handoff path still needs a real trigger smoke; WebView DevTools on this device accepted the socket but timed out on `/json`, so DevTools could not be used as plugin-path evidence in this run.
+
+## 2026-07-13 Stale missing session must not project current UI failure
+
+- `tmux_session_unavailable` for a non-active, non-live session is a transport attach fact for that stale session only. It must not emit `SESSION_STATUS_EVENT(type='error')`, must not show the current terminal's reconnect/error banner, and must not close or rewrite `OPEN_TABS`.
+- Drawer open / session picker refresh / foreground audit may discover stale persisted open tabs such as `routecodex` after tmux truth no longer has that session. The correct owner response is: update session catalog/audit facts, stop auto retry when the session is no longer active/live, and leave the stale tab as an idle local shell until explicit user action.
+- The fix belongs to `terminal.transport_lifecycle`: `scheduleReconnectRuntime()` and reconnect handshake failure handling must re-check active/live eligibility before retry/error projection. UI/drawer must not compensate with a banner filter, and daemon must not synthesize or recreate missing tmux sessions.
+- Verified gates for this rule: `session-context-session-runtime.test.ts`, `session-context-transport-open-runtime.test.ts`, `session-context-socket-message-runtime.test.ts`, `session-context-transport-runtime.test.ts`, `SessionContext.ws-refresh.test.tsx`, `App.dynamic-refresh.test.tsx`, `useSessionOpenActions.test.tsx`, `remote-tab-audit.test.ts`, plus `tsc --noEmit`.
+
+## 2026-07-13 Drawer gesture ownership and mirror-fixed crop pan
+
+- `terminal.session_drawer` shell gestures may open the drawer only from a near-edge hot zone, not from the middle of the page. On Android this hot zone must be wide enough to avoid the system back-gesture strip; 96 CSS px was real-device verified, while 28 CSS px was too narrow for practical use.
+- `adaptive-phone` middle horizontal swipe must be a no-op at the shell layer; adaptive width remains daemon/tmux reflow through the adaptive lease owner.
+- `mirror-fixed` middle horizontal swipe belongs to renderer projection only: pan/crop `.term-grid` with a per-session offset, persist that offset locally, and never change daemon mirror/tmux width.
+- Required regression shape: drawer width/near-edge-open tests in `TerminalSessionDrawer.test.tsx`, `TerminalTabSwipeSurface.test.tsx`, and `TerminalPage.session-drawer.test.tsx`; shell middle-swipe negative tests in `TerminalPage.tab-isolation.test.tsx`; fixed/adaptive pan ownership tests in `TerminalView.dynamic-refresh.test.tsx`; real-device smoke should start around `x=80-90`, not `x=0-10`.
+
+## 2026-07-13 Terminal width mode is a user preference resource
+
+- `terminalWidthMode` must be read from persisted user settings before any viewport default. Reinstall/upgrade must not reset an explicit `mirror-fixed` choice to `adaptive-phone`.
+- Store explicit width-mode choice in `zterm:terminal-width-mode-preference` whenever bridge settings are saved. Full `zterm:bridge-settings.terminalWidthMode` remains the main config field; the preference key is a migration/user-choice resource for old settings missing that field.
+- First-launch viewport detection is allowed only when neither full bridge settings nor explicit width-mode preference exists. Unknown/invalid width mode is not a user preference and normalizes to `adaptive-phone`.
+- Required regression shape: shared `use-bridge-settings-storage.test.tsx` must cover mirror-fixed first render, old settings without `terminalWidthMode` reading the explicit preference, and setting writes updating both bridge settings and preference.
+
+## 2026-07-13 Quickbar horizontal pan belongs to expanded quickbar rows
+
+- Bottom quickbar horizontal crop/pan belongs to `terminal.quickbar` UI projection. It must not be implemented by renderer, daemon, tmux, or page-level drawer/tab swipe.
+- The gesture hit region is only the expanded quickbar rows height (`terminal-quickbar-shell-rows`). Do not add a full-screen or terminal-stage horizontal gesture owner for quickbar movement.
+- Horizontal drag on quickbar rows moves the quickbar scroll tracks together; vertical gestures remain vertical; blank quickbar clicks must still be blocked from bubbling into the terminal layer.
+- Required regression shape: `TerminalQuickBar.test.tsx` must cover horizontal pan, vertical no-pan, and non-interactive shell click blocking in the same suite.
+
+## 2026-07-13 Superseding correction: Quickbar rows pan must not steal native scroll tracks
+
+- Supersedes the same-day "rows move all quickbar scroll tracks" rule where it conflicts with track ownership. `terminal.quickbar` still owns only the expanded quickbar rows hit region, but each `[data-quickbar-scroll-track]` remains its own native horizontal scroll owner.
+- Parent rows-level pan may only start from non-interactive rows whitespace. If a touch starts inside a scroll track, button, input, textarea, select, or label, the parent rows handler must stay inactive and must not call `preventDefault()` or synchronize sibling `scrollLeft`.
+- Regression gates must cover all four boundaries together: rows whitespace horizontal pan works, vertical gestures do not pan, scroll-track touch is left to native scroll, and quickbar action button touch does not start parent pan. Blank shell click blocking remains required.
+- Real Android CDP touch verification on `0.1.3.2094`: a gesture starting on a button inside the first scroll track moved only that native track (`40 -> 132`), left the sibling at `40`, and kept touch events `defaultPrevented=false`; a gesture starting on rows whitespace moved both scrollable tracks together (`40 -> 140`).
+
+## 2026-07-13 Quickbar gesture chain includes collapse and reveal
+
+- QuickBar gesture ownership is one axis-locked state machine inside `TerminalQuickBar`: track/button horizontal gestures remain local; rows whitespace horizontal gestures pan QuickBar content; expanded vertical downward swipe collapses; collapsed bottom trigger vertical upward swipe reveals.
+- Collapse/reveal is available in portrait and landscape. `TerminalPage` must not force `quickBarCollapsed=false` when orientation becomes portrait; it only stores and passes the projection.
+- Threshold is 48 CSS px. Short vertical gestures and touch cancel do not change collapse state. Horizontal track scrolling must not collapse the bar or synchronize sibling tracks.
+- Real Android verification on `0.1.3.2095`: downward swipe inside expanded rows removed `terminal-quickbar-shell-rows` and exposed the bottom `展开快捷栏` trigger; upward swipe on that trigger restored rows. A later horizontal track swipe changed only the first track (`40 -> 122`), kept the sibling at `40`, and did not collapse.
+
+## 2026-07-13 Quickbar collapsed height zero is authoritative
+
+- Expanded QuickBar measured height and collapsed QuickBar height are both valid UI chrome truth. `TerminalPage` must accept `0` from `onMeasuredHeightChange`; it must not preserve the previous positive height with `height > 0 ? height : current`.
+- When collapsed, terminal stage bottom reserve must immediately drop by the full measured QuickBar height. The shell/renderer content is not reflowed; only UI chrome reservation changes.
+- The collapsed reveal gesture owner is a full-width bottom trigger band limited to the collapsed bottom chrome height. An upward swipe from the left or middle must reveal QuickBar; the gesture must not require hitting the small right-side keyboard/floating button.
+- Required paired gates: positive measured height reserves stage bottom; collapsed zero clears the reserve; downward expanded swipe creates the reveal surface; upward swipe on a non-button point of that surface restores rows.
+- Real Android CDP verification on `0.1.3.2097`: stage changed from `bottom=168px,height=586` to `bottom=0px,height=754` after collapse, then a left-side bottom swipe at `x=80` restored `bottom=168px`.
+
+## 2026-07-13 Drawer opening gesture must not become session selection
+
+- Client and daemon logs proved `routecodex2` was not merely a stale banner string: after the drawer was opened, the client promoted its persisted tab to active/live and opened a real transport. The short active sequence `rcc3 -> rcc -> routecodex2` matched Android WebView synthetic click-through after the edge swipe exposed drawer rows under the release coordinate.
+- `terminal.session_drawer` is the intent owner. A pointer click may select a row only when the press began on that same row and remained within the movement threshold. A click with no matching row press, or a press armed for another row, must be rejected. Keyboard/accessibility activation with `detail=0` remains valid.
+- Drawer catalog refresh is observation only: it must not call `applyOpenTabState`, `createSession`, or `switchSession`, and must leave the current `resource.active_session` unchanged even when stale persisted tabs exist.
+- Do not fix this by filtering banner text, ignoring a legitimately active transport in SessionContext, creating the missing tmux session in daemon, or deleting stale open tabs. Those paths hide the invalid UI intent instead of removing it.
+- Verified through L4: focused drawer/open-tab/transport suite passed 80 tests; typecheck and Android build passed; APK `0.1.3.2103` was published and installed. L5 drawer replay remains open because the connected device was owned by `com.android.systemui` keyguard, so no locked-screen evidence is accepted as zterm behavior.
+
+## 2026-07-13 mirror-fixed crop pan owns non-left horizontal drags
+
+- Verified on Android APK `0.1.3.2104`: in `mirror-fixed`, right-side/middle horizontal drags belong to renderer crop pan, not drawer/tab swipe. L5 CDP touch showed `drawerHidden` stayed `true` and fixed offset changed `13 -> 0` for a right-side drag; left-edge right swipe then changed `drawerHidden` to `false`.
+- Durable rule: fixed-width drawer access must be constrained to left-edge + `previous` direction. Do not re-enable both-edge tab swipe just to keep drawer accessible, because it steals renderer crop pan.
+- Gate evidence: focused drawer/fixed-pan tests passed 4 files / 105 tests; `tsc --noEmit` passed; `test:feature-registry` passed 7 files / 48 tests; `build:android` published `0.1.3.2104` sha256 `b40d191a1484b02fe517bdc21472bc40f1400810387f9740fac5fb0d8201e477`.
+
+## 2026-07-13 mirror-fixed drawer edge admission is 64 CSS px
+
+- The previous 96px drawer hot zone was too wide on a roughly 347 CSS px phone viewport: a gesture starting at 88px still looked visually non-edge but was admitted as a drawer swipe.
+- The authoritative Android drawer admission band is now 64 CSS px. A 56px right swipe remains the accepted left-edge path; an 88px right swipe belongs to `mirror-fixed` renderer crop pan and must keep the drawer hidden.
+- Verified exact failure path on Android APK `0.1.3.2105`: physical ADB swipe corresponding to CSS start 88px changed fixed offset `172 -> 0` while drawer `aria-hidden` stayed `true`.
+
+## 2026-07-13 mirror-fixed offset consumption precedes drawer admission
+
+- Drawer admission is not determined by start-edge distance alone. If a `mirror-fixed` rightward gesture can still reduce a positive renderer horizontal offset, renderer pan owns the entire touch sequence and must stop propagation to the parent drawer surface.
+- Only a fresh left-edge right swipe whose renderer offset is already 0 before gesture start may become drawer-open intent. A zero-offset rightward drag starting outside the left-edge hot zone is still renderer crop ownership and must stop before the parent drawer gesture owner, even if the clamped offset cannot move.
+- A regression test proved the old split behavior: offset changed `160 -> 16` while the parent simultaneously emitted `previous`. The fixed contract is paired: positive-offset pan never opens drawer; after reaching 0, a fresh edge swipe still opens it.
+- Verified on Android APK `0.1.3.2107`: with `mirror-fixed`, offset `0`, and a CSS right swipe `181 -> 291`, drawer stayed hidden and offset stayed `0`; a fresh left-edge right swipe `56 -> 200` opened the drawer. Device foreground was zterm and keyguard was false.
+
+## 2026-07-13 Terminal session preview truth
+
+- `terminal.session_preview` is a UI projection feature only. Its data path is `tmux -> daemon mirror -> client sparse buffer -> immutable render store -> shared TerminalView -> preview DOM`; it must not create a preview-only parser, screenshot cache, stale text cache, transport, reconnect path, resize path, tmux geometry write, or buffer reset.
+- Preview selection is a versioned ordered maximum-six preference over currently opened sessions. Resolution must match `sessionId + bridgeHost + bridgePort + sessionName` and stored `daemonHostId` when present, so a stale persisted target cannot bind to a reused session id from another host or tmux session.
+- Preview mode temporarily projects selected session ids into the live body subscription set only while preview is open and foreground. Close/background must restore daemon subscribers and session transports to baseline while preserving the selection preference.
+- Gesture ownership is fixed by start region: left edge right swipe opens drawer, middle horizontal swipe stays with `mirror-fixed` crop, and right edge left swipe opens preview. A preview tile is read-only and cannot focus DOM input, send input, resize, copy, or emit viewport/width writes; tile tap is the only path that sends one explicit active-session switch.
+- Preview tile activation must update both active-session truth and the focused session-group viewport projection. The shared page owner must first run `resolveTerminalSessionGroupSlotReplacement(..., sessionGroupFocusSlot)`, then emit the explicit switch. Calling only `handleSwitchSessionFromChrome(sessionId)` can move input/live ownership while the visible center slot still renders the previous session; once preview subscriptions close, the visible shell appears frozen.
+- In-preview replacement is an ordered selection operation, not a session switch: long press must be movement-cancelled, suppress its synthetic release click, expose only currently open unselected sessions, and replace the source target in place through `replaceSessionPreviewTarget()`. It must not emit active-session, transport, resize, or renderer writes.
+- Preview cancel owns an entry snapshot `{ activeSessionId, slotIds, focusSlot }`. Close button, right-swipe exit, and Android system Back restore exactly that projection; tile activation explicitly discards the snapshot and switches to the chosen tile. The Back listener must exist only while preview is open so normal shell Back behavior is not consumed.
+- Preview selection is valid with any count from 1 through 6; it must not require filling six slots. Grid geometry is derived from selection count and orientation: portrait caps rows at two tiles per row, landscape caps rows at three, and no empty terminal slot is rendered.
+- Preview tile close is a selection operation, not a Session close. It removes only that target from persisted preview selection, preserves remaining order, and if the final target is removed it cancels preview through entry-projection restore.
+- Preview tile body is read-only terminal content but still accepts local visual navigation: vertical scroll and `mirror-fixed` horizontal crop/pan may run inside the tile, while input, resize, viewport, width-mode, reconnect, tile activation, replacement, and preview-exit intents remain blocked.
+- Verified local gates: preview/drawer/StageShell/tab-isolation focused suite 9 files / 88 tests PASS; feature/resource/function/mainline wiki gates 7 files / 48 tests PASS; typecheck PASS; source-to-DOM/source-to-shell gate used six real tmux sessions and proved tmux source, daemon/client sparse truth, immutable render store, preview DOM, real StageShell continuation after tile activation, stale-session exclusion, cross-session isolation, one physical session socket per session, and subscriber lifecycle `0 -> 6 -> 0`. APK `0.1.3.2112` is published with sha256 `7ce0fe3e9ee66be6183e64db562f11f1bafc93706c22cfea4a9c354baf1fb7f2`. Real-device L5 remains unproven when no unlocked ADB device is online.
+## 2026-07-14 Android WebSocket network-switch truth
+
+- Verified root cause for Wi-Fi-to-cellular connection stalls: endpoint IP can remain correct (`100.66.1.82:3333` Tailscale) while the existing WebSocket stays half-open on the old underlay path. `readyState === OPEN` is not physical transport health.
+- `terminal.transport_lifecycle` owns this class of fix. The unique health owner is `src/contexts/session-context-socket-runtime.ts`; UI lifecycle hooks may accelerate probes but must not create separate reconnect owners; daemon must not own client network type.
+- Mobile heartbeat baseline is now 2s with 3 consecutive missed server-activity confirmations before one retryable failure. Pong or any valid server frame is health evidence. Logical session, active-session truth, and buffer must survive replacement of the stale physical WebSocket.
+- Network-switch closure requires real-device black-box evidence: phone can still reach daemon `/health`, app is not killed/reopened, physical WebSocket is replaced once, session id/tmux target stay unchanged, buffer head remains monotonic, and output/input recover within 10s in Wi-Fi->cellular and cellular->Wi-Fi directions.
+
+## 2026-07-14 Windows WezTerm daemon backend live protocol truth
+
+- `daemon.windows_wezterm_backend` live daemon closure requires more than direct WezTerm CLI smoke. The required black-box gate is real daemon control/session WebSocket -> WezTerm backend -> decoded `buffer-sync` target text -> targeted cleanup.
+- The live gate caught a real stale-runtime bug: session creation/connect/input worked, but cleanup failed because `tmux-kill-session` still called tmux in WezTerm mode. The unique close owner is now `TerminalControlRuntime#closeDetachedTerminalSession`; it delegates to `WezTermBackendRuntime#closeSession` when WezTerm is selected and uses `tmux kill-session` only for tmux.
+- Verified 2026-07-14 against `huawei@100.75.122.121` / daemon `ws://100.75.122.121:3333`: unit/runtime/selection/control tests PASS, mock daemon protocol PASS, direct WezTerm remote/input smoke PASS, `tsc --noEmit` PASS, feature/resource/function/mainline gates PASS, and live daemon source marker `ZTERM_WINDOWS_DAEMON_E2E_1784009295061_8d3ac8de` matched decoded target `buffer-sync` with targeted session cleanup.
+- Windows daemon runtime deployed to `D:\zterm-tools\daemon-runtime-test\runtime\server.cjs` with backup `server.cjs.pre-20260714-1410`; existing `ZTermDaemon` scheduled task restarted. Do not treat `zterm-daemon` global install absence as proof the daemon is missing; inspect listener PID/command and service script truth.
+- `windows.desktop_shell` may now proceed from docs only: registry/resource/function/test design/manifest are initialized, but all Windows app symbols are `binding pending`. The first implementation must define a Windows platform bridge and shared desktop shell boundary, not copy Mac `window.ztermMac`, local-tmux transport, daemon/mirror code, or terminal renderer.
+
+## 2026-07-14 Windows desktop shell packaged alpha truth
+
+- `windows.desktop_shell` single-session alpha now exists and reuses shared connection, sparse-buffer, and renderer owners. Windows-only code remains limited to Electron/window/preload/composition/package surfaces.
+- Electron sandbox preload must be CommonJS (`preload.cts` -> `preload.cjs`); ESM preload can pass compile/package yet fail only at packaged runtime.
+- Client visible-range demand must wait for the first daemon `buffer-sync` revision. `connected` alone does not prove mirror readiness.
+- Real packaged Windows source-to-DOM gate passed with `ZTERMWINDOWSLIVE`; deployed archive SHA-256 is `b60b5c5b4f27c73dc2e6b1f2dfc007a644d3c4eadaab4e2ad6dbb32d37655cf0`. Remaining product work is multi-session workspace, Windows file browser/preview, installer/signing/update channel, and real console Ctrl+C semantics.
+- Windows session discovery/create/close UI now has packaged L5 proof. It must remain a thin UI/control owner over shared daemon control helpers; do not fork `list-sessions`, `tmux-create-session`, or `tmux-kill-session` semantics in Windows code.
+## 2026-07-14 - Android preview add selection and logo packaging baseline
+
+- Session preview drawer checkbox must be an actual command surface bound to the selection owner; a visual checkbox outside the row button creates a dead hit target on touch devices.
+- After preview tile removal, add candidates are current open eligible Sessions minus the resolved preview set. Lock both sides: every removed open target is offered, while selected/closed targets are absent and cannot dispatch selection.
+- Android launcher replacement requires all three resource families across five densities: legacy `ic_launcher`, `ic_launcher_round`, and adaptive `ic_launcher_foreground`. Verify the final APK by comparing unpacked icon bytes with source resources.
+- Build `0.1.3.2116` passed local gates and update-channel hash alignment; real-device launcher/touch verification is not established because no ADB device was online.
+- Jason 的真实 Launcher 截图证明 `0.1.3.2116` 前景占满画布会被系统自适应蒙版再次裁切，底部 `zterm` 和边框显示不全。Android 图标验收必须给 adaptive foreground 留安全区并看真实 Launcher；APK 解包 hash 只能证明打包正确，不能证明最终合成正确。
+## 2026-07-15 Android fixed relay Home and ephemeral-tab truth
+
+- Android Home is the fixed relay account projection owned by `ConnectionsPage` + `useTraversalRelayAccount`: display `relay.codewhisper.cc`, accept account/password, and project daemon devices only. Live Session discovery/actions remain in the terminal drawer/picker; Home must not restore Session groups, connection cards/FAB, or saved-tab-list controls.
+- Open tabs, active tab focus, and closed semantic reuse tombstones are current-process client truth, not durable configuration. Cold launch must remove and ignore legacy `OPEN_TABS`, `ACTIVE_SESSION`, `SAVED_TAB_LISTS`, and closed-tab reuse storage. Tab switch/reorder/close may update in-memory truth but must not write those keys.
+- Relay password is request-only form state. Persisted relay account truth may contain access token, account identity, directory, and client settings, but plaintext password must be empty.
+- Fixed production URL is `https://relay.codewhisper.cc/relay/`. DNS alone is insufficient: the target ingress must serve `/relay/` on 443 and present a certificate valid for `relay.codewhisper.cc`; otherwise app login must remain an explicit connectivity/TLS failure.

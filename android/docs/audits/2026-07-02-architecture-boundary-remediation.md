@@ -8,7 +8,7 @@ Scope: Android app architecture, terminal/session ownership, daemon truth, UI pr
 | Block | Current problem | Action | Reason |
 | --- | --- | --- | --- |
 | Terminal session lifecycle | `App.tsx` directly closed/created/switched sessions for force relay / auto mode | Separated in second repair slice | Session open/close/restore is a unique owner concern, not page orchestration |
-| Daemon mirror truth | daemon stored client `widthMode/adaptiveCols` in session/mirror truth | Superseded by adaptive width lease owner in sixth repair slice | daemon must not own client viewport policy; it may own a physical transport subscriber width lease for `adaptive-phone` and must restore baseline when leases disappear |
+| Daemon mirror truth | daemon stored client `widthMode/adaptiveCols` in session/mirror truth and later over-corrected by forbidding adaptive tmux reflow entirely | Superseded by adaptive width lease owner in sixth repair slice and 2026-07-11 correction | daemon must not own client viewport policy, but the single adaptive lease owner must aggregate active adaptive cols, request tmux width reflow, and release baseline when leases disappear |
 | Open-tab persistence | storage read/write failures are normalized into empty/default state | Separated error path in first repair slice | explicit truth failure must not become silent empty truth |
 | Session drawer grouping | UI used `default` / `本机` sentinel for missing hostKey | Removed in fourth repair slice | UI component must consume resolved host identity, not invent it |
 | Open-tab intent fallback | `fallbackActiveSessionId` / `fallbackSessionIds` were used inside core intent logic | Renamed to explicit policy in first repair slice | fallback semantics in core truth should not be implicit |
@@ -51,13 +51,13 @@ Allowed:
 - mirror snapshot and live sync
 
 Forbidden:
-- client viewport policy
+- client viewport policy outside the single adaptive width lease owner
 - client foreground/background or active tab truth
 - renderer follow/reading/renderBottomIndex truth
-- persistent client width policy in daemon state outside the adaptive width lease owner
+- scattered client width policy that mutates tmux session geometry, tmux options, mirror geometry, or tmux session lifecycle outside the single adaptive width lease owner
 
 Boundary rule:
-- daemon may read client intent for one request, but must not keep client policy as long-lived mirror/session truth. The only allowed exception is the `adaptive-phone` physical transport subscriber lease: active adaptive subscribers are aggregated by minimum cols, and the pre-lease tmux geometry must be restored when the final lease disappears.
+- daemon may read client intent for one request, but must not keep client policy as long-lived mirror/session truth. `adaptive-phone` wire fields may only become physical transport subscriber lease metadata `{ cols, heartbeatAt }`; only `terminal-mirror-runtime.ts` adaptive lease owner may aggregate the narrowest active cols and request tmux `resize-window -x`. It must not self-write mirror geometry/content, write `@zterm_adaptive_width_*`, or let `mirror-fixed`/foreground/background/viewport become daemon truth.
 
 ### 3. Client Rendering And Buffer Block
 
@@ -82,17 +82,22 @@ Boundary rule:
 ### 4. UI Projection Block
 
 Owner:
-- `src/lib/connections-server-groups.ts`
-- `src/components/terminal/TerminalSessionDrawer.tsx`
 - `src/pages/ConnectionsPage.tsx`
+- `src/hooks/useTraversalRelayAccount.ts`
+- `src/components/terminal/TerminalSessionDrawer.tsx`
+- `src/components/tmux/TmuxSessionPickerSheet.tsx`
 
 Allowed:
-- projection of resolved server/session labels
-- grouping and ordering
+- fixed relay account login projection
+- relay daemon-device projection
+- live Session drawer / picker projection
+- presentation ordering
 - presentation-only sentinel for legacy data only if explicitly marked
 
 Forbidden:
 - inventing identity when upstream projection is missing
+- Home Session group management
+- saved tab list save/load/import/export
 - creating storage truth
 - session lifecycle control
 
@@ -148,7 +153,7 @@ Boundary rule:
 - Scan core truth modules for `fallback*` names in non-presentation code.
 - Scan `TerminalSessionDrawer` for `default` / `本机` host identity fallback.
 - Current gate owner: `src/lib/architecture-boundary-truth.test.ts`, wired into `pnpm --dir android run test:feature-registry`.
-- Width policy scan is compatibility-aware: `widthMode` may exist in attach/resize wire payload types, but must not become `widthMode` / `adaptiveCols` long-lived state. `tmux resize-window` is allowed only inside the adaptive width lease owner, never in attach glue, message routing, UI state, or general mirror lifecycle code.
+- Width policy scan is compatibility-aware: `widthMode` may exist in attach/resize wire payload types, but must not become `widthMode` / `adaptiveCols` long-lived state. Current rule: adaptive width lease owner is the only place allowed to run `tmux resize-window -x`; all other daemon/client/UI paths must not mutate tmux width or mirror geometry.
 
 2. Add owner-call maps.
 - Each feature must list one owner module, one allowed surface, one forbidden surface, and one test gate set.
@@ -221,15 +226,15 @@ Boundary rule:
 ### 2026-07-09 sixth slice: adaptive width lease owner
 
 - Block: Daemon Truth Block.
-- Decision: Separate / explicitly keep the physical lease owner.
-- Supersedes only the over-broad "daemon never resizes tmux for adaptive" conclusion from the third slice. The daemon still must not own client viewport policy, foreground/background, active tab, renderer visible range, or a logical client session.
+- Decision: Superseded by 2026-07-11 correction. Keep physical lease metadata and make this owner the only place that may request tmux width reflow.
+- The daemon must not own client viewport policy, foreground/background, active tab, renderer visible range, or a logical client session.
 - Owner now: `src/server/terminal-mirror-runtime.ts` adaptive width lease functions.
-- Allowed state: `TerminalTransportSubscriber.adaptiveWidthCols` and `adaptiveWidthHeartbeatAt` as physical transport subscriber lease data; `SessionMirror.adaptiveWidthBaselineGeometry`, `adaptiveWidthAppliedCols`, and `adaptiveWidthLeaseTimer` as the mirror lease aggregate.
-- Allowed side effect: `tmux resize-window` only inside `applyTmuxWindowGeometry`, called by lease reconciliation/restore.
-- Required behavior: multiple adaptive subscribers aggregate by narrowest cols; switching a subscriber to `mirror-fixed`, transport detach/close, moving mirrors, or heartbeat expiry releases the lease and recomputes; when no adaptive lease remains, restore the pre-lease tmux geometry.
-- Forbidden behavior: storing `widthMode`, `TerminalSession.widthMode`, `SessionMirror.adaptiveCols`, `requestedAdaptiveCols`, `terminalWidthMode`, foreground/background, or active tab as daemon truth; running `resize-window` outside the lease owner; treating `mirror-fixed` as an adaptive lease.
-- Positive tests: `terminal-mirror-runtime.test.ts` covers min-cols aggregation, resize updates, fixed release/restore, holder disappearance re-sort, and heartbeat expiry restore.
-- Negative tests: `server.transport-lifecycle-truth.test.ts` and `architecture-boundary-truth.test.ts` forbid old logical client naming, old adaptive owner names, `window-size latest`, client width mode state, and `resize-window` outside `applyTmuxWindowGeometry`.
+- Allowed state: `TerminalTransportSubscriber.adaptiveWidthCols` and `adaptiveWidthHeartbeatAt` as physical transport subscriber lease data; `SessionMirror.adaptiveWidthAppliedCols`, `adaptiveWidthBaselineGeometry`, and `adaptiveWidthLeaseTimer` as owner-local aggregate/release metadata.
+- Allowed side effect: only `resize-window -x <narrowest cols>` and final `set-window-option -u window-size` inside `applyAdaptiveTmuxWidth()` / `releaseAdaptiveTmuxWidth()`.
+- Required behavior: multiple adaptive subscribers aggregate by narrowest cols; switching to `mirror-fixed`, transport detach/close, moving mirrors, invalid cols, or heartbeat expiry recomputes; final lease disappearance restores/releases tmux width ownership.
+- Forbidden behavior: storing `widthMode`, `TerminalSession.widthMode`, `SessionMirror.adaptiveCols`, `requestedAdaptiveCols`, `terminalWidthMode`, foreground/background, or active tab as daemon truth; running `resize-window` outside the adaptive lease owner; writing `@zterm_adaptive_width_*`; treating `mirror-fixed` as an adaptive lease; self-writing `mirror.rows/cols` from requested cols.
+- Positive tests: `terminal-mirror-runtime.test.ts` covers min-cols aggregation, resize updates, fixed release, holder disappearance re-sort, and heartbeat expiry applying/releasing tmux width.
+- Negative tests: `server.transport-lifecycle-truth.test.ts` and `architecture-boundary-truth.test.ts` forbid old logical client naming, old adaptive owner names, client width mode state, scattered `resize-window`/`window-size`, `@zterm_adaptive_width_*`, and mirror geometry self-writes.
 
 ### 2026-07-02 sixth slice: registry/function-map lockstep gate
 

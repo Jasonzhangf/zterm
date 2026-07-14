@@ -21,7 +21,7 @@ Global scope includes:
 | Global runtime | `resource.runtime_home`, `resource.daemon_runtime_artifact`, `resource.daemon_process`, `resource.release_update_artifact`, `resource.debug_channel` | Runtime consumes compiled/staged artifacts and explicit runtime home truth. Debug observes only. |
 | Platform client | `resource.open_tab`, `resource.active_session`, `resource.session_transport`, `resource.transport_target`, `resource.pending_open_intent`, `resource.platform_terminal_surface`, `resource.platform_input_channel` | Platform clients own user intent and transport identity, not backend resources. |
 | Daemon/backend | `resource.terminal_backend`, `resource.backend_session`, `resource.tmux_session`, `resource.wezterm_pane`, `resource.mirror_store`, `resource.transport_subscriber`, `resource.daemon_input_queue`, `resource.schedule_job`, `resource.file_transfer`, `resource.remote_screenshot` | Daemon owns backend sessions, physical subscribers, mirror truth, input queues, and daemon side jobs. It does not own client active/foreground/viewport/follow truth. |
-| Client buffer/render | `resource.client_sparse_buffer`, `resource.renderer_window`, `resource.ui_projection` | Client buffer consumes daemon mirror patches. Renderer declares visible demand. UI projects state and emits intent only. |
+| Client buffer/render | `resource.client_sparse_buffer`, `resource.renderer_window`, `resource.ui_projection`, `resource.session_preview_selection`, `resource.session_preview_mode` | Client buffer consumes daemon mirror patches. Renderer declares visible demand. UI and preview resources project state and emit intent only. |
 
 ## Allowed Direct Relations
 
@@ -40,11 +40,16 @@ flowchart TD
   SessionTransport --> PendingOpenIntent["resource.pending_open_intent"]
   SessionTransport --> TransportSubscriber["resource.transport_subscriber"]
   TransportSubscriber --> MirrorStore["resource.mirror_store"]
+  MirrorStore --> TransportSubscriber
   MirrorStore --> TmuxSession
   MirrorStore --> WeztermPane
   MirrorStore --> ClientSparseBuffer["resource.client_sparse_buffer"]
   ClientSparseBuffer --> RendererWindow["resource.renderer_window"]
   RendererWindow --> UiProjection["resource.ui_projection"]
+  UiProjection --> PreviewSelection["resource.session_preview_selection"]
+  UiProjection --> PreviewMode["resource.session_preview_mode"]
+  PreviewSelection --> OpenTab
+  PreviewMode --> UiProjection
   PlatformSurface["resource.platform_terminal_surface"] --> UiProjection
   PlatformInput["resource.platform_input_channel"] --> SessionTransport
   DaemonInputQueue["resource.daemon_input_queue"] --> BackendSession
@@ -65,6 +70,7 @@ flowchart TD
 | `resource.platform_input_channel` | `resource.wezterm_pane` | via `resource.session_transport -> resource.transport_subscriber -> resource.daemon_input_queue -> resource.backend_session` |
 | `resource.platform_terminal_surface` | `resource.backend_session` | via `resource.active_session -> resource.session_transport -> resource.transport_subscriber -> resource.mirror_store` |
 | `resource.release_update_artifact` | `resource.daemon_process` | via `resource.daemon_runtime_artifact` |
+| `resource.session_transport` | `resource.client_sparse_buffer` | via `resource.transport_subscriber -> resource.mirror_store` |
 
 ## Forbidden Direct Relations
 
@@ -80,12 +86,17 @@ flowchart TD
 
 ## Owner Locks
 
-- `resource.open_tab` is explicit persisted client truth; runtime sessions and daemon facts must not close or merge it.
+- `resource.open_tab` is explicit current-process client truth; runtime sessions and daemon facts must not close or merge it, and cold launch must not restore it.
 - `resource.session_transport` is the only platform-client path to daemon transport.
-- `resource.mirror_store` is the only daemon canonical terminal content and geometry truth.
+- `resource.session_transport` owns physical body-subscription intent and measured RTT/jitter/stall. It does not own active/visible reasons after emitting the physical intent.
+- `resource.transport_subscriber` owns only physical `bodySubscribed`, send accounting/backpressure, last-sent revision, and bounded pending-latest state. It must not store active tab, foreground, pane visibility, follow, reading, or viewport reasons.
+- `resource.mirror_store` is the only daemon canonical terminal content, revision, absolute-index, and geometry truth. Hot-tail range patch and full reconciliation are two validated commit modes inside this one writer, not two truth paths.
+- `resource.mirror_store -> resource.transport_subscriber` is the only unsolicited live body broadcast relation. Unsubscribe removes broadcast eligibility without closing the transport, detaching the mirror, or disabling explicit head/range reads.
 - `resource.client_sparse_buffer` only merges daemon mirror patches by absolute row.
-- `resource.renderer_window` owns follow/reading/render-bottom/visible demand, not terminal content layout.
-- `resource.debug_channel` can observe and diagnose, but cannot become request/response business truth.
+- `resource.renderer_window` owns follow/reading/render-bottom/visible demand and next-RAF commit only, not terminal content layout or network cadence.
+- `resource.session_preview_selection` owns only an ordered 1-6 client preference resolved through current open-tab truth; drawer checkbox and in-preview add both route to this owner, add/replacement candidates are every currently open unselected Session, reorder only changes preference order, and tile close removes only that preview target without closing a Session or transport.
+- `resource.session_preview_mode` owns preview shell projection plus the captured entry-session projection used only by cancel. Entry does not mutate active session; tile activation emits one explicit switch; Back/right-swipe/close cancellation restores the captured entry session. Buffer, transport, and backend geometry remain untouched.
+- `resource.debug_channel` can observe and diagnose through bounded metadata-only trace records, but cannot become request/response business truth or contain terminal text/cells.
 - `resource.release_update_artifact` must promote through `resource.daemon_runtime_artifact`; runtime cannot scan authoring directories as capability truth.
 
 ## Gate Contract

@@ -70,18 +70,15 @@
 ### Connections / Sessions
 
 - `src/pages/ConnectionsPage.tsx`
-  - 页面总容器
-  - 顶部栏 + 列表区 + FAB
+  - 固定 relay 登录主页
+  - 只显示 `relay.codewhisper.cc`、账号/密码登录、退出登录、daemon device 投影
+  - 不显示或管理 Session group、saved tab list、live Session 子列表
 
-- `src/components/connections/ConnectionsHeader.tsx`
-  - 顶部标题 / 关闭 / 账户 / 更多
+- `src/components/terminal/TerminalSessionDrawer.tsx`
+  - 实时 Session 列表与打开/关闭入口
 
-- `src/components/connections/ConnectionCard.tsx`
-  - 单个 connection/session 卡片
-  - 名称 / 预览 / 图标 / 删除/关闭动作
-
-- `src/components/connections/ConnectionFab.tsx`
-  - 右下角新增入口
+- `src/components/tmux/TmuxSessionPickerSheet.tsx`
+  - 远端 daemon / tmux session 选择入口
 
 ### Connection Properties
 
@@ -149,29 +146,25 @@
 
 ### Slice B1
 
-- 目标：先做纯结构页
+- 目标：固定 relay 登录主页
 - 范围：
-  - 顶部 header
-  - connection card list
-  - FAB
-- 不接真实连接逻辑
+  - `ConnectionsPage`
+  - `useTraversalRelayAccount`
+  - 默认 relay service `relay.codewhisper.cc`
+- 成功标准：
+  - 主页没有 group/card/FAB 管理
+  - 登录只需要账号和密码
+  - 登录后只投影 daemon device rows
 
 ### Slice B2
 
-- 目标：把当前 host 数据接到 card list
+- 目标：实时 Session 管理回到 terminal drawer / picker
 - 范围：
-  - `useHostStorage`
-  - `ConnectionCard`
+  - `TerminalSessionDrawer`
+  - `TmuxSessionPickerSheet`
 - 成功标准：
-  - 能显示已有 host
-  - 新增 host 后能回显为 card
-
-### Slice B3
-
-- 目标：连接卡片支持“进入终端”
-- 范围：
-  - 点击卡片 → 切页到 terminal
-- 先不修协议闭环
+  - Home 不打开/关闭 Session
+  - drawer / picker 继续作为 live Session 操作入口
 
 ---
 

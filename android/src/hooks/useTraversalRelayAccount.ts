@@ -117,6 +117,14 @@ export function useTraversalRelayAccount(initialRelaySettings?: TraversalRelayCl
     }
   }, []);
 
+  const logoutRelay = useCallback(() => {
+    writeTraversalRelayAccountState(null);
+    setAccount(null);
+    setRelayDevices([]);
+    setRelayStatus('');
+    setRelayBusy(null);
+  }, []);
+
   return {
     account,
     relayDevices,
@@ -124,5 +132,6 @@ export function useTraversalRelayAccount(initialRelaySettings?: TraversalRelayCl
     relayBusy,
     refreshLocalAccount,
     syncRelay,
+    logoutRelay,
   };
 }

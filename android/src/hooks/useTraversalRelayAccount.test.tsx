@@ -78,9 +78,9 @@ describe('useTraversalRelayAccount', () => {
         deviceId: 'tablet-1',
         deviceName: 'Jason Tablet',
         platform: 'android',
-        wsDevicesUrl: 'wss://claw.codewhisper.cc:18443/relay/ws/devices',
-        wsHostUrl: 'wss://claw.codewhisper.cc:18443/relay/ws/host',
-        wsClientUrl: 'wss://claw.codewhisper.cc:18443/relay/ws/client',
+        wsDevicesUrl: 'wss://relay.codewhisper.cc/relay/ws/devices',
+        wsHostUrl: 'wss://relay.codewhisper.cc/relay/ws/host',
+        wsClientUrl: 'wss://relay.codewhisper.cc/relay/ws/client',
         turnUrl: '',
         turnUsername: '',
         turnCredential: '',
@@ -102,5 +102,13 @@ describe('useTraversalRelayAccount', () => {
       username: 'jason',
       password: 'pw',
     });
+  });
+
+  it('clears relay account truth and local account projection on logout', () => {
+    const { result } = renderHook(() => useTraversalRelayAccount());
+    act(() => result.current.logoutRelay());
+    expect(relayClient.writeTraversalRelayAccountState).toHaveBeenCalledWith(null);
+    expect(result.current.account).toBeNull();
+    expect(result.current.relayDevices).toEqual([]);
   });
 });

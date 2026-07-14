@@ -10,7 +10,7 @@ h1 { font-size: 24px; margin-bottom: 18px; }
 .source { margin-top: 18px; white-space: pre-wrap; color: #5a635f; font-size: 12px; }
 </style></head><body>
 <h1>Mainline Source Wiki</h1>
-<svg class="wiki-graph" viewBox="0 0 3370 754" role="img" aria-label="Mainline graph">
+<svg class="wiki-graph" viewBox="0 0 3370 664" role="img" aria-label="Mainline graph">
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M 0 0 L 10 5 L 0 10 z" class="arrow" />
@@ -29,6 +29,12 @@ h1 { font-size: 24px; margin-bottom: 18px; }
 <path d="M 1980 62 C 2015 62, 2015 152, 2050 152" class="edge" marker-end="url(#arrow)" />
 <path d="M 2310 152 C 2345 152, 2345 152, 2380 152" class="edge" marker-end="url(#arrow)" />
 <path d="M 2640 152 C 2840 152, 2840 62, 3040 62" class="edge" marker-end="url(#arrow)" />
+<path d="M 1980 62 C 2015 62, 2015 242, 2050 242" class="edge" marker-end="url(#arrow)" />
+<path d="M 2310 242 C 2345 242, 2345 242, 2380 242" class="edge" marker-end="url(#arrow)" />
+<path d="M 2640 242 C 2675 242, 2675 242, 2710 242" class="edge" marker-end="url(#arrow)" />
+<path d="M 2310 242 C 2510 242, 2510 152, 2710 152" class="edge" marker-end="url(#arrow)" />
+<path d="M 2640 242 C 2675 242, 2675 152, 2710 152" class="edge" marker-end="url(#arrow)" />
+<path d="M 2970 242 C 2994 242, 2994 152, 2710 152" class="edge" marker-end="url(#arrow)" />
 <path d="M 1650 62 C 1685 62, 1685 152, 1720 152" class="edge" marker-end="url(#arrow)" />
 <path d="M 1650 62 C 1685 62, 1685 242, 1720 242" class="edge" marker-end="url(#arrow)" />
 <path d="M 1980 242 C 2004 242, 2004 152, 70 152" class="edge" marker-end="url(#arrow)" />
@@ -39,7 +45,7 @@ h1 { font-size: 24px; margin-bottom: 18px; }
 <path d="M 1980 242 C 2004 242, 2004 512, 70 512" class="edge" marker-end="url(#arrow)" />
 <path d="M 330 512 C 1025 512, 1025 242, 1720 242" class="edge" marker-end="url(#arrow)" />
 <path d="M 330 152 C 354 152, 354 602, 70 602" class="edge" marker-end="url(#arrow)" />
-<path d="M 330 602 C 354 602, 354 692, 70 692" class="edge" marker-end="url(#arrow)" />
+<path d="M 330 602 C 1520 602, 1520 242, 2710 242" class="edge" marker-end="url(#arrow)" />
   <g class="node" data-node-id="Native">
   <rect x="70" y="34" width="260" height="56" rx="12" />
   <text x="86" y="68">native/android/app/src/main</text>
@@ -88,6 +94,22 @@ h1 { font-size: 24px; margin-bottom: 18px; }
   <rect x="2380" y="124" width="260" height="56" rx="12" />
   <text x="2396" y="158">src/contexts/session-context-transport-open-runtime.ts</text>
 </g>
+<g class="node" data-node-id="SocketMessage">
+  <rect x="2050" y="214" width="260" height="56" rx="12" />
+  <text x="2066" y="248">src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime</text>
+</g>
+<g class="node" data-node-id="BufferApply">
+  <rect x="2380" y="214" width="260" height="56" rx="12" />
+  <text x="2396" y="248">src/contexts/session-context-buffer-runtime.ts#applyIncomingBufferSyncRuntime</text>
+</g>
+<g class="node" data-node-id="RenderGate">
+  <rect x="2710" y="214" width="260" height="56" rx="12" />
+  <text x="2726" y="248">src/lib/session-render-gate.ts</text>
+</g>
+<g class="node" data-node-id="PerformanceTrace">
+  <rect x="2710" y="124" width="260" height="56" rx="12" />
+  <text x="2726" y="158">src/lib/terminal-performance-trace.ts</text>
+</g>
 <g class="node" data-node-id="Connections">
   <rect x="1720" y="124" width="260" height="56" rx="12" />
   <text x="1736" y="158">src/pages/ConnectionsPage.tsx</text>
@@ -120,10 +142,6 @@ h1 { font-size: 24px; margin-bottom: 18px; }
   <rect x="70" y="574" width="260" height="56" rx="12" />
   <text x="86" y="608">src/lib/session-render-buffer-store.ts</text>
 </g>
-<g class="node" data-node-id="RenderGate">
-  <rect x="70" y="664" width="260" height="56" rx="12" />
-  <text x="86" y="698">src/lib/session-render-gate.ts</text>
-</g>
 </svg>
 <pre class="source">flowchart TD
   Native[&quot;native/android/app/src/main&quot;] --&gt; Capacitor[&quot;capacitor.config.ts&quot;]
@@ -139,6 +157,12 @@ h1 { font-size: 24px; margin-bottom: 18px; }
   SessionContext --&gt; TransportOrchestration[&quot;src/contexts/session-context-transport-orchestration-runtime.ts&quot;]
   TransportOrchestration --&gt; TransportOpen[&quot;src/contexts/session-context-transport-open-runtime.ts&quot;]
   TransportOpen --&gt; TransportReusePlan
+  SessionContext --&gt; SocketMessage[&quot;src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime&quot;]
+  SocketMessage --&gt; BufferApply[&quot;src/contexts/session-context-buffer-runtime.ts#applyIncomingBufferSyncRuntime&quot;]
+  BufferApply --&gt; RenderGate[&quot;src/lib/session-render-gate.ts#scheduleCommit&quot;]
+  SocketMessage --&gt; PerformanceTrace[&quot;src/lib/terminal-performance-trace.ts&quot;]
+  BufferApply --&gt; PerformanceTrace
+  RenderGate --&gt; PerformanceTrace
   App --&gt; Connections[&quot;src/pages/ConnectionsPage.tsx&quot;]
   App --&gt; TerminalPage[&quot;src/pages/TerminalPage.tsx&quot;]
   TerminalPage --&gt; TerminalView[&quot;src/components/TerminalView.tsx&quot;]

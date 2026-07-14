@@ -1,5 +1,15 @@
 # 2026-07-12 Android IME input intent / mirror-fixed horizontal pan
 
+## 2026-07-13 Drawer opening gesture promoted a stale session
+
+- 现场日志证明当前 `zterm` 之外的 stale `routecodex2` 不只是错误文案污染：`session.ws.reconnect.onopen`、`session.transport.active-tick` 都把 `session-1782948645655-wc890xa6` 当成 active/live，并真实发起了 `routecodex2` attach。
+- 切换序列在短时间内依次把 `rcc3 -> rcc -> routecodex2` 提升为 active，符合边缘右滑打开抽屉后，Android WebView 在 release 坐标合成 click、命中新出现 drawer row 的跨手势 click-through。drawer refresh/transport retry 只是后果，不是 active intent 真源。
+- 架构映射：`feature_id=terminal.session_drawer`；关系 `resource.ui_projection -> resource.open_tab -> resource.active_session`。唯一修改点是 `TerminalSessionDrawer` 的 row selection press owner。物理移除“没有在 drawer row 内开始 press 也能接受 pointer click”的路径；禁止在 banner、SessionContext、daemon 做过滤或补偿。
+- 测试设计：`docs/testing/terminal-session-drawer-gesture-test-design.md`。正向锁真实 row press/键盘激活；反向锁 opening synthetic click、跨 row 授权和 unavailable row。
+- 最终 L1-L4：drawer/open-tab/transport focused 6 files / 80 tests PASS；补充 drawer catalog refresh 保持 `active-zterm` 且不调用 `applyOpenTabState/createSession/switchSession`；`tsc --noEmit` PASS；`build:android` PASS，发布并安装 `0.1.3.2103`，sha256 `86cae9e2d59649737248100d04fa2c4ee87e6e11c078df51c9ba12a6f64c0312`。
+- L5 缺口：设备 `100.104.163.65:5555` 安装 2103 后仍为 `mCurrentFocus=NotificationShade`、`isKeyguardShowing=true`，UI dump package 是 `com.android.systemui`。不能在锁屏下重放 drawer touch/click，故未宣称真机闭环。
+- 独立 gate 现状：`test:feature-registry` 的 `resource.debug_channel.allowed_operations` 断言未同步另一个 active claim `terminal.performance_pipeline` 的 manifest 改动；本轮未越权修改该 owner。Android build 使用的 terminal contract/core gate 整体通过。
+
 - 架构映射：`feature_id=terminal.keyboard_ime` 与 `terminal.buffer_render`。IME input intent 属于 UI shell/input channel；follow/reading/renderBottomIndex 属于 renderer；`mirror-fixed` 横向位移只属于 renderer projection。daemon/tmux/mirror truth 不参与本轮改动。
 - 根因 1：滚到历史区后点击键盘，输入意图没有先把 renderer 从 reading 对齐回 follow/bottom，导致 native IME show 与可见窗口状态分裂。修复为 terminal click、quickbar show keyboard、blur-to-keyboard 等入口先调用 follow reset，再 show/focus IME。
 - 根因 2：Android 键盘按钮用本地 requested/inset 推断 IME 显隐，刷新或 stale state 后可能误判。修复为 `ImeAnchor.getState()/keyboardState` 暴露 native `keyboardVisible/keyboardHeight`，按钮显示/隐藏以 native IME truth 为准。
@@ -8,6 +18,22 @@
 - 红测：`TerminalView.dynamic-refresh.test.tsx` 覆盖 reading 点击输入前回 follow、mirror-fixed 横向 pan + per-session restore、adaptive-phone 不 pan；`TerminalPage.android-ime.test.tsx` 覆盖 Android native IME visible truth 与 show/hide 路径。
 - 验证：focused L4 `TerminalView.dynamic-refresh + TerminalPage.android-ime` 114/114 PASS；`tsc --noEmit` PASS；`test:feature-registry` 48/48 PASS；`build:android` PASS，发布 `0.1.3.2074`，APK sha256 `ab37682ed7280c892fe6f615204d97be107516ae93b05ef8b513e0aac009313b`。
 - L5 缺口：`ANDROID_SERIAL=100.104.163.65:5555 pnpm --dir android run test:android:terminal-real-device` 被设备锁屏阻塞；证据为 `isKeyguardShowing=true`、`mCurrentFocus=NotificationShade`，脚本明确失败在 `app surface not visible at before-ime`。
+
+## 2026-07-13 Android IME post-visible bottom realign
+
+- 现场：滚到历史区后点 QuickBar `键盘`，IME 可见但 terminal 仍停在旧阅读窗口，底部 prompt / shell line 没有进入可视区。
+- 根因：toggle show 前已经做 follow reset，但 Android IME 上台后 WebView visual viewport 从 `754px` 变成约 `470px`，stage 高度再次变化；只在 show 前 reset 不足以保证缩高后的 viewport 仍贴底。
+- 修复：QuickBar 键盘 toggle 仍先 reset follow 再 native show；当 native `keyboardState(visible=true)` 到达且这次 IME 是 terminal keyboard request 触发时，再做一次 renderer follow reset。这个动作只移动 renderer visible bottom，不触发 `TerminalView` resize、不改 daemon/tmux geometry。
+- 真机验证：2088 安装到 `100.104.163.65:5555` 后，历史区截图 `android/evidence/ime/2088-scrolled-up-before-toggle.png`；点击键盘后 `android/evidence/ime/2088-scrolled-up-after-keyboard-toggle-on.png` 显示 prompt / shell bottom 可见。DevTools 证据：`.wterm` `clientHeight=299`、`scrollHeight=16000`、`scrollTop=15701`、`deltaBottom=0`。
+- 验证：IME focused gates 129/129 PASS；`tsc --noEmit` PASS；`test:feature-registry` 48/48 PASS；`build:android` PASS，发布 `0.1.3.2088`，APK sha256 `3e8205ea26546dab5ce673124cbb85bf0ae97ba95751a34261c9be78957ead3a`。
+
+## 2026-07-13 Drawer refresh stale missing session error projection
+
+- 现场：打开 terminal drawer 后当前会话仍在，但 UI 出现 `连接已断开，正在重连 / Tmux session unavailable: can't find session: routecodex`。本机 tmux truth 证明 `routecodex` 不存在，当前 tmux sessions 仍有 `rcc2/freehand/...`；Android WebView localStorage 里仍有 stale `OPEN_TABS` / terminal layout routecodex 条目。
+- 根因：缺失的 stale open tab 被推进到 transport reconnect 后，`tmux_session_unavailable` 在 inactive / non-live 场景仍会走 retry/error projection。抽屉 / picker refresh 本应只是 catalog/audit fact，不能让非当前 session 的 attach failure 污染当前 UI。
+- 修复：`scheduleReconnectRuntime()` 在 retryable 且 auto reconnect 被 active/live gate 拦住时，只清 reconnect runtime 并把该 session 落回 idle，不再 emit `SESSION_STATUS_EVENT(type='error')`。`handleReconnectHandshakeFailureRuntime()` 在 retryable reconnect handshake failure 后再次检查 active/live gate；若 session 已不再 active/live，停止 retry、落回 idle、不发 terminal error。
+- 边界：owner 是 `terminal.transport_lifecycle`；资源关系是 `resource.active_session -> resource.session_transport`。UI/drawer 不加本地过滤，daemon/tmux 不改；`resource.ui_projection` 不能直连或修补 `resource.session_transport`。
+- 已验证：本机 `tmux has-session -t routecodex` 返回 1，证明 routecodex 是真实缺失 stale session；focused transport gates 31/31 PASS；transport/App/open-tab broader gates 275/275 PASS；`tsc --noEmit` PASS。
 
 # 2026-07-08 Active transport proactive stale probe
 
@@ -2053,3 +2079,284 @@ Need runtime debug to confirm:
 - Critical control: opened system Settings search field using same default WeType. Ordinary system `android.widget.EditText` had the same failure: cursor focused, `mInputShown=true`, `mIsInputViewShown=true`, `contentTopInsets=2505`, screenshot no keyboard. This proves the live failure was not zterm-specific anchor/show logic.
 - Recovery evidence: `adb shell am force-stop com.tencent.wetype` (explicit package-scoped reset) then zterm keyboard tap made WeType visibly appear in zterm. `dumpsys input_method` changed to `contentTopInsets=1509`, proving real keyboard window expansion.
 - Current 2084 APK was direct-built and published manually to update channel because `pnpm --dir android run build:android` repeatedly timed out inside `npm view ... --fetch-timeout=10000`; long-timeout `npm view` verified all three runtime packages are still `0.1.9`. Direct gates run: focused IME gate 52 PASS, tsc PASS, `pnpm --dir android build` including terminal regression/core 621 PASS + common flows 96 PASS + relay smoke PASS, Capacitor sync PASS, Gradle assembleDebug PASS, update bundle verify PASS.
+
+## 2026-07-13 session drawer edge swipe and fixed-width crop pan
+
+- 架构映射：`terminal.session_drawer` owns drawer projection and shell edge gesture; `terminal.buffer_render` renderer owns `mirror-fixed` horizontal crop/pan. Daemon/tmux/mirror truth do not participate; adaptive layout still only through daemon adaptive width lease.
+- UI change: drawer width changed from old `min(280px, 72vw)` shape to compact `width: 48vw; max-width: 187px` (about old width 2/3). Shell-level tab/drawer horizontal gesture now starts inside a 96 CSS px near-edge hot zone, not the system-reserved 0-几 px edge.
+- Behavior: in `adaptive-phone`, middle horizontal swipe is ignored by shell and does not open drawer or switch tab. In `mirror-fixed`, middle horizontal swipe is left to `TerminalView` and updates `.term-grid` crop offset; offset is stored per session in `zterm:terminal:mirror-fixed-horizontal-offsets`.
+- Verified gates: focused UI/renderer tests 4 files / 117 tests PASS; `tsc --noEmit` PASS; `test:feature-registry` 7 files / 48 tests PASS; `git diff --check` PASS; `pnpm --dir android run build:android` PASS, published `0.1.3.2090`, sha256 `4908f782f3a778f622db40687f2cf3d20b911252384037ed0801b3b03e4bca9f`.
+- Real device `100.104.163.65:5555`: installed `versionName=0.1.3.2090`, `versionCode=1032090`; while app focus was `com.zterm.android/.MainActivity` and `isKeyguardShowing=false`, DevTools edge swipe from `x=6 -> 150` opened drawer with rect width `166.76px`, `aria-hidden=false`; middle swipe kept drawer hidden; temporary `mirror-fixed` smoke moved `.term-grid` offset from `0` to `180` and persisted `{"session-1782187153676-6w4w2nxx":180}`. Afterward the device returned to keyguard, so the retained screenshots are not used as acceptance evidence for this run.
+- Correction: 28 CSS px / `x=6` style edge validation is too narrow on Android because the system back gesture can own the physical screen edge. Fixed in `0.1.3.2091`: hot zone widened to 96 CSS px; real device DevTools verified `x=88 -> 236` opens the drawer, `x=170 -> 300` middle swipe keeps drawer hidden, and tapping visible `freehand` row changes active surface from `session-1782187153682-0xjkdxdf` to `session-1783906496653-dyos8b09` and closes drawer.
+
+## 2026-07-13 terminal width mode user preference truth
+
+- 现场：用户设置过 `mirror-fixed`，重装/升级后看到又回到 `adaptive-phone`。这个不能由 viewport 默认覆盖用户偏好。
+- 架构映射：`terminal.width_mode` preference belongs to client settings resource. `bridge-settings` remains the full config truth; new `zterm:terminal-width-mode-preference` is the explicit user-choice resource used only when migrating old settings without `terminalWidthMode`.
+- 修复：`useBridgeSettingsStorage` now writes `zterm:terminal-width-mode-preference` whenever settings change, reads persisted `mirror-fixed` before first render, and uses the preference if old `zterm:bridge-settings` lacks `terminalWidthMode`. Unknown mode normalization stays `adaptive-phone` rather than silently becoming fixed.
+- Verified gates: shared `use-bridge-settings-storage.test.tsx` 8/8 PASS; Android `bridge-settings.test.ts`, `terminal-width-mode-manager.test.ts`, `App.dynamic-refresh.test.tsx` 98/98 PASS; `tsc --noEmit` PASS; `build:android` PASS, published `0.1.3.2092`, sha256 `f579dd3313b32d116c993d6fec2e41b607fd78d2d2be42bb3b5433d29e38aa67`.
+- Real-device status: installed `0.1.3.2092` on `100.104.163.65:5555`, package version verified. Device returned to keyguard (`mCurrentFocus=NotificationShade`, `isKeyguardShowing=true`) after launch; WebView `/json` was reachable but `Runtime.evaluate` stalled while invisible. Do not count L5 UI/storage verification closed until device is unlocked and WebView visible.
+
+## 2026-07-13 quickbar horizontal crop pan
+
+- 架构映射：`terminal.quickbar` UI projection owns bottom shortcut bar horizontal crop/pan. It is separate from renderer `mirror-fixed` pan and from drawer shell swipe. Daemon/tmux/mirror truth do not participate.
+- 修复：`TerminalQuickBar` expanded rows (`terminal-quickbar-shell-rows`) now own touch horizontal pan inside only their actual expanded height. Horizontal drag after an 8px lock moves every `[data-quickbar-scroll-track]` `scrollLeft` together; vertical gestures do not pan; blank click still stops at the quickbar shell and does not bubble into terminal.
+- Boundary: root shell capture still blocks non-interactive click/pointer events. The rows are marked `data-quickbar-pan-surface="true"` only for touch events, not as globally allowed pointer targets.
+- Verified gates: `TerminalQuickBar.test.tsx` 59/59 PASS; combined quickbar/drawer/fixed-pan gates 5 files / 164 tests PASS; `tsc --noEmit` PASS; `build:android` PASS, published `0.1.3.2093`, sha256 `20a19658badbcd54a5271154e5323279da4709f53f7ce5e28fd90fb91c3c5c31`.
+- L5 status: installed `0.1.3.2093` on `100.104.163.65:5555`, package version verified. Device is locked (`mCurrentFocus=NotificationShade`, `isKeyguardShowing=true`), so frontmost WebView quickbar gesture verification is still blocked.
+
+## 2026-07-13 quickbar gesture chain correction
+
+- Jason 反馈 rows-level quickbar pan 影响快捷栏自身滚动。重新审计后确认父级 `terminal-quickbar-shell-rows` 的 touch handler 会接到 scroll track 内开始的 touch，并在横向锁定后 `preventDefault()` + 同步所有 track `scrollLeft`，这会抢走单个 track 的 native horizontal scroll owner。
+- 架构修正：`terminal.quickbar` 仍是唯一 owner，但 owner 内部继续分层。`data-quickbar-scroll-track` 自己拥有 native horizontal scroll；button/input/label 拥有自己的交互；父级 rows 只处理非交互空白区域的横向 pan。
+- 代码修复：`handleQuickBarRowsTouchStart()` 若 target 落在 `[data-quickbar-scroll-track="true"]` 或 quickbar interactive selector 内，直接保持 rows pan inactive，不触发 preventDefault / scrollLeft sync。
+- 验证：`TerminalQuickBar.test.tsx` 增加 scroll-track native-owner no-steal 与 button no-steal；focused quickbar 61/61 PASS；quickbar + drawer + fixed-pan combined 5 files / 166 tests PASS；`tsc --noEmit` PASS；目标文件 `git diff --check` PASS。
+- 完整 build/发布：`build:android` PASS，terminal contracts 48 files / 624 tests PASS，common flows / relay smoke / Vite / Capacitor / Gradle 全绿；发布 `0.1.3.2094`，sha256 `4367c1dba2612f87a4eb7f85e1279b24ad8d48f5e5d845c82f688bf2f021a79a`。
+- 真机 `100.104.163.65:5555`：安装后 `versionCode=1032094`，zterm foreground，`isKeyguardShowing=false`。CDP 真 touch 从 top scroll track 内 `Esc` button 开始横滑，第一 track `scrollLeft 40 -> 132`，第二 track 保持 `40`，所有 touch event `defaultPrevented=false`；证明 native track 独立滚动且父级没有同步抢占。再从 rows 右侧非交互空白开始横滑，前两条 track `40 -> 140` 同步移动；证明 rows 空白 pan 仍工作且热区未扩大到 terminal body。
+
+## 2026-07-13 quickbar collapse/reveal gesture restoration
+
+- 用户纠正：只修 track/native horizontal owner 不完整；QuickBar 还必须能用手势收起和唤出。
+- 架构映射：属于 `terminal.quickbar`，唯一 owner 仍是 `TerminalQuickBar.tsx`；`TerminalPage` 只持有/传递 `quickBarCollapsed` projection。属于“分离下沉”：rows 内 axis lock 同时区分 native track horizontal、rows whitespace horizontal pan、vertical collapse；renderer/drawer/daemon/tmux 禁止参与。
+- 预期链条：expanded rows 向下纵滑超过阈值 -> `onCollapsedChange(true)`；collapsed bottom trigger 向上纵滑超过阈值 -> `onCollapsedChange(false)`。横向 track scroll、rows 空白横移、button click 都不得误触 collapse/reveal。
+- 必跑 gate：`TerminalQuickBar.test.tsx` 正向覆盖 collapse/reveal，反向覆盖水平 no-collapse、短纵滑 no-collapse、track native horizontal 不被抢；`TerminalPage` gate 锁 portrait 不再强制展开；之后 combined gestures、typecheck、feature registry、build 和 unlocked foreground 真机 CDP touch。
+- 修复：rows gesture state 增加 `horizontalPanAllowed + last point`；track/button start 只禁止父级 horizontal pan，仍允许 axis lock 识别纵向 collapse。向下 48px commit collapse；touch cancel 只 reset。collapsed floating bottom trigger 向上 48px commit reveal。`TerminalPage` 删除 portrait 强制展开 effect，并在所有 orientation 传 `collapseAvailable=true`。
+- 回归：`TerminalQuickBar.test.tsx` 64/64 PASS；`TerminalPage.foldable-display-change.test.tsx` 6/6 PASS；combined quickbar/drawer/fixed-pan 6 files / 175 tests PASS；`tsc --noEmit` PASS；feature registry 7 files / 48 tests PASS；`git diff --check` PASS。
+- 完整 build/发布：terminal contracts 48 files / 624 tests PASS，common flows / relay smoke / Vite / Capacitor / Gradle 全绿；发布 `0.1.3.2095`，sha256 `746fc3b82811d877644d87788ae09e5fa9cbf34e76feb415d8b30f5b30cdea09`。
+- 真机 `100.104.163.65:5555`：安装并确认 `versionCode=1032095`、zterm foreground、`isKeyguardShowing=false`。CDP 真 touch 完成 expanded rows 向下滑 -> rows 消失且 `展开快捷栏` bottom trigger 出现 -> trigger 向上滑 -> rows 恢复。随后 track 横滑 `40 -> 122`，sibling 保持 `40`，rows 仍存在，证明 collapse/reveal 没有重新抢占 native horizontal scroll。
+
+## 2026-07-13 quickbar collapsed height truth and full-width reveal
+
+- 用户截图证明 `0.1.3.2096` 虽然 rows 已隐藏，但 terminal stage 仍保留大块底部空白。CDP 现场显示 QuickBar shell 已为 `height=0`，reveal surface 已存在，但 stage 仍是 `bottom=168px`。
+- 根因在页面唯一消费点：`handleQuickBarMeasuredHeightChange()` 使用 `height > 0 ? height : current`，把合法的 collapsed `0` 丢弃并保留旧展开高度。
+- 修复：`TerminalPage` 对 measured chrome height 使用 `Math.max(0, height)`；QuickBar collapsed 时继续上报 0。底部 reveal surface 为全宽 68 CSS px，允许在左侧/中间上滑恢复，不依赖右侧键盘/悬浮按钮。
+- 回归：`TerminalPage.tab-isolation.test.tsx` 锁定先测量 180、再上报 0 后 stage bottom 必须归零；`TerminalQuickBar.test.tsx` 锁定 collapsed 上报 0 和全宽 reveal surface 上滑。
+- 验证：focused 2 files / 81 tests PASS；`tsc --noEmit` PASS；完整 `build:android` PASS；发布 `0.1.3.2097`，sha256 `ec6ed84e629295fc9384e073ef4d39c46b690c0d4eb80c39ecaae8602138e29c`。
+- 真机 `100.104.163.65:5555`：`versionCode=1032097`、zterm foreground、`isKeyguardShowing=false`。CDP 真 touch：展开 stage `bottom=168px,height=586`；rows 下滑后 `bottom=0px,height=754`；从底部左侧 `x=80,y=730 -> y=640` 上滑后 rows 恢复且 stage 回到 `bottom=168px`。
+
+## 2026-07-13 terminal render/network performance audit
+
+- 目标：检查当前 terminal 渲染与 daemon/client 网络传输是否还有更强的性能/帧率提升方式，约束是弱网、窄带宽、不能裁剪真实 payload 语义、不能让客户端做 terminal 排版。
+- 架构映射：涉及 `terminal.buffer_render`、`terminal.transport_lifecycle`、`resource.mirror_store`、`resource.transport_subscriber`、`resource.session_transport`、`resource.client_sparse_buffer`、`resource.renderer_window`。daemon 只能消费 tmux/mirror 与物理 transport 事实；renderer 只消费已应用 body 并 RAF 合并。
+- 现场证据：`/debug/runtime` 显示 daemon pid `5873`，uptime `148128s`，11 mirrors / 10 ready / 0 subscribers；ready mirror 多个 `bufferedLines=3000`，最近 flush duration 样本约 `150-354ms`。当前运行 daemon 未必等同 worktree 最新代码，只能作为现场性能事实，不可当源码版本闭环。
+- 现场 client debug 证据：`/debug/runtime/logs?limit=500` 中 69 条 `session.ws.reconnect.buffer-sync`，64 条是 1 行 diff，但 3 条 `lineCount>=1000`，最大 3000 行；165 条 inactive `buffer-sync.preparse-inactive-drop`；61 条 `runtime.debug.drop-summary` 合计 dropped 793。说明弱网下真实 payload 已经有大包尖峰，且 inactive transport 仍接收后丢弃，debug 本身也在占链路。
+- 源码证据：`terminal-mirror-capture.ts` 每轮读取 pane metrics、cursor、`capture-pane -S -<cache>`，再 canonicalize 全窗口；daemon 默认 `DEFAULT_DAEMON_TERMINAL_CACHE_LINES=3000`。`resolveStableMirrorCaptureSnapshot()` 可最多 4 次完整 capture。`buildChangedRangesBufferSyncPayload()` 用 first changed range 到 last changed range 的连续 span，稀疏变更可能膨胀成大包。
+- 源码证据：`terminal-mirror-runtime.ts` 在 subscriber backpressure 时直接 `continue` 跳过本次 `buffer-sync`，没有 per-subscriber latest-authoritative pending。若输出随后停止，弱网客户端可能长期停在旧 revision，后续靠 repair 才补。
+- 源码证据：高频 pre-serialized `sendText()` 只更新 `lastSendAt`，不更新 `lastSendBytes` / `totalSendBytes` / `lastSendError=null` / trace，所以 debug 下主 `buffer-sync` 发送路径的带宽观测不完整。
+- 源码证据：`session-render-gate.ts` 已按 RAF 合并并在 flush 时读取最新 live buffer，结构上正确；主要剩余风险在 `projectRenderBuffer()` / render store 对 1000 行 retained window 做全窗口 projection/clone/equality scan，需先接入真实 `rx -> apply -> RAF -> commit` trace 后再改。
+- 审计结论：优先级应是 1) metadata-only performance trace 真接入生产；2) backpressure 从 skip 改成 per-subscriber latest-authoritative coalescing；3) inactive read subscription 收窄，避免 inactive tab 收到后丢包；4) hot-tail capture + full-history reconciliation 分层但保持单一 mirror writer；5) sendText accounting；6) runtime RTT/jitter/stall 接入 cadence；7) profiling 后再动 renderer projection；8) 多 range wire v2 最后再考虑。
+
+## 2026-07-13 terminal performance implementation architecture mapping
+
+- 功能块：`terminal.transport_lifecycle` + `terminal.buffer_render` + `daemon.cli_node` observer side channel。
+- 资源链：`resource.session_transport -> resource.transport_subscriber -> resource.mirror_store -> resource.client_sparse_buffer -> resource.renderer_window`；`resource.debug_channel` 只能 observer，不进入业务 payload 或成为正文真源。
+- 唯一 owner：
+  - physical body subscription / subscriber backpressure / pending latest：daemon mirror + transport runtime；
+  - capture/full reconciliation：`terminal-mirror-capture.ts` 单一 mirror writer；
+  - client receive/apply：socket-message runtime -> buffer runtime；
+  - render commit：render gate next RAF；
+  - trace：metadata-only bounded debug observer。
+- 本轮处理类型：分离下沉。把 inactive body demand、subscriber pending、send accounting、trace correlation 分别收回对应 owner；不在 UI、renderer 或 daemon 中新增跨层补偿。
+- allowed paths：资源 registry/map、function map、mainline call map/source、terminal decisions/test design/local skill、上述唯一 owner 与定向 gates。
+- forbidden paths：client reflow/anchor 推断；daemon active/visible/foreground 心智；head/range 请求触发 capture；debug/trace 保存 terminal 文本；fallback/隐藏双协议；slow subscriber 拖慢 healthy subscriber。
+- 必跑 gate：resource/function/mainline/architecture gates；trace/send/subscription/backpressure 成对正反测试；typecheck；之后按阶段进入 daemon/tmux、Mac client、Android 真机弱网 L2-L5。
+
+## 2026-07-13 mirror-fixed crop pan vs drawer edge gesture
+
+- Jason reported that dragging the fixed-width shell horizontally to the right still opens the drawer even when the gesture starts far from the left side.
+- Architecture mapping: `terminal.session_drawer` owns drawer UI intent; `terminal.buffer_render` / `resource.renderer_window` owns `mirror-fixed` horizontal crop pan. UI shell can route gesture ownership but cannot change terminal content layout.
+- Root cause: `TerminalTabSwipeSurface` treated both left and right 96px bands as valid edge starts whenever drawer swipe was enabled. In `mirror-fixed`, StageShell re-enabled that surface for drawer access, so right-side horizontal crop drags could resolve to `previous` and open the drawer.
+- Fix: `TerminalTabSwipeSurface` now supports `allowedStartEdge` and `allowedDirections`; StageShell passes `left + previous` only in `mirror-fixed`, leaving right/middle horizontal drags to renderer crop pan.
+- Extra cleanup: existing StageShell border gate exposed remaining bright terminal chrome borders; StageShell container/pane/group-center borders are now explicitly `0px none`.
+- Verified: focused drawer/fixed-pan gates passed 4 files / 105 tests.
+- L5 real-device verification for `0.1.3.2104`: device `100.104.163.65:5555`, zterm foreground, keyguard false, WebView visible true. CDP CSS viewport `347x754`, `terminalWidthMode=mirror-fixed`. Right-side drag `260,500 -> 330,500` kept drawer `aria-hidden=true` and moved `.term-grid` horizontal offset `13 -> 0`. Left-edge drag `80,500 -> 236,500` opened drawer (`aria-hidden=false`).
+
+## 2026-07-13 performance pipeline incremental closeout: send accounting + trace correlation
+
+- Active performance goal resumed from `/Users/fanzhang/.codex/attachments/4b02c24a-347b-4c6a-b90c-4e520e6720c7/pasted-text-1.txt`; section 11 remains the source of truth.
+- Current-state audit found the existing performance claim had only contract-update evidence and that test design still listed major gaps: production trace wiring, physical body-subscription wire contract, subscriber pending-latest/drain, hot-tail range patch, and real byte-shaping weak-network harness.
+- Completed owner slice E: `terminal-transport-runtime.ts` pre-serialized `sendText()` now updates `lastSendBytes`, `totalSendBytes`, `lastSendError=null`, and backpressure snapshot using the already serialized string without re-stringifying payload. Fail-first evidence: `terminal-transport-runtime.test.ts` failed with `lastSendBytes undefined expected 47`, then passed.
+- Completed owner slice A partial: `terminal-performance-trace.ts` now keeps `traceId`, `mirrorRevision`, and `subscriberId` metadata and summarizes by `sessionId + traceId + mirrorRevision + subscriberId`, preventing same-session different-revision events from becoming a synthetic latency sample. Fail-first evidence: `terminal-performance-trace.test.ts` merged `trace-a/rev10 capture` with `trace-b/rev11 render` into one sample, then passed.
+- Verified gates this slice: `terminal-transport-runtime.test.ts`, `terminal-performance-trace.test.ts`, `multi-pane-refresh.test.ts` = 3 files / 13 tests PASS; `tsc --noEmit` PASS; `test:feature-registry` 7 files / 48 tests PASS; targeted `git diff --check` PASS.
+- Not complete: no production trace wiring, body subscription, latest-authoritative coalescing, hot-tail capture, weak-net proxy, L2-L5 replay, APK/push for performance goal yet.
+
+## 2026-07-13 mirror-fixed non-edge right pan drawer regression
+
+- Architecture mapping: `terminal.session_drawer` owns the left-edge drawer intent; `terminal.buffer_render` / `resource.renderer_window` owns `mirror-fixed` horizontal crop pan. The only modification point is `TerminalTabSwipeSurface` gesture admission.
+- Fail-first evidence: with the existing `EDGE_SWIPE_START_PX=96`, a fixed-mode right swipe starting at CSS `clientX=88` resolved to `previous` and opened the drawer.
+- Fix: narrow the drawer admission band to 64 CSS px. The accepted edge sample remains 56px, outside Android's immediate system-edge strip; 88px and the rest of the terminal surface remain renderer pan territory.
+- Paired tests: `TerminalTabSwipeSurface.test.tsx` proves 56px right swipe is accepted and 88px right swipe is rejected; `TerminalPage.session-drawer.test.tsx` proves an assembled `mirror-fixed` page keeps the drawer hidden for the 88px gesture.
+- Verification: focused gesture/page gates 27 PASS; StageShell + TerminalView gates 80 PASS; `tsc --noEmit` PASS; feature/resource/function/mainline registry gates 48 PASS; full Android build PASS and published `0.1.3.2105`.
+- L5 exact bug path: installed 2105 on `100.104.163.65:5555`; zterm foreground and keyguard false. ADB physical swipe mapped to CSS start 88px moved fixed grid offset `172 -> 0` while drawer remained `aria-hidden=true`. The subsequent 56px positive edge replay was interrupted because the device foreground switched to WeChat, so the positive edge result for 2105 remains covered by tests and the previous 2104 L5 run.
+
+## 2026-07-13 mirror-fixed positive-offset pan still opened drawer
+
+- Jason reported that a rightward shell-position pan still opened the drawer. A nested `TerminalTabSwipeSurface -> TerminalView` fail-first test reproduced the exact semantic split: renderer offset changed `160 -> 16`, while the parent still emitted `previous`.
+- Root cause: `TerminalView` called `preventDefault()` for horizontal pan but did not stop propagation. The parent had already armed the left-edge gesture and consumed the bubbled `touchend`, so one touch sequence drove both renderer pan and drawer open.
+- Fix: `TerminalView` records whether a horizontal gesture actually changed the clamped fixed offset. If yes, it owns the gesture and stops `touchmove/touchend` propagation. If the offset was already 0 and a rightward edge drag cannot move the renderer, the event remains available to the drawer owner.
+- Paired gate: positive offset right pan changes offset without drawer; the next pan reaches 0 without drawer; a fresh left-edge right swipe at offset 0 emits exactly one `previous`.
+- Verification: fail-first reproduced one unwanted `previous`; focused TerminalView/drawer/StageShell gates 111 PASS; `tsc --noEmit` PASS; feature/resource/function/mainline gates 48 PASS; full Android prebuild contracts 628 PASS, common flows 96 PASS, relay smoke PASS; APK `0.1.3.2106` built, published, installed, sha256 `8f1025fc335b1ac2107c0eb314075e5c9b7a8adf69a3238ea849b08ead574391`.
+- L5 visible gesture replay remains blocked: device `100.104.163.65:5555` reports `isKeyguardShowing=true`, `mCurrentFocus=NotificationShade`, and WebView DevTools does not respond while suspended. Locked-screen events are not accepted as app behavior evidence.
+
+## 2026-07-13 17:27 CST performance trace full-chain wiring slice
+
+- Goal source remains `/Users/fanzhang/.codex/attachments/4b02c24a-347b-4c6a-b90c-4e520e6720c7/pasted-text-1.txt`; section 11 of `android/docs/goals/daemon-client-transport-performance-plan.md` is still active and not complete.
+- Implemented production trace wiring for daemon capture stages: `terminal-mirror-capture.ts` now preserves capture/canonicalize absolute timestamps in mirror metadata; `terminal-mirror-runtime.ts` emits `capture-start`, `capture-done`, `canonicalize-done`, and `mirror-commit` with subscriber `traceId=${subscriberId}:${revision}` after the authoritative mirror commit.
+- Implemented raw client receive byte binding: session socket lifecycle estimates UTF-8 frame byte length from the raw `MessageEvent.data` and passes it to `handleSocketServerMessageRuntime`; `client-rx` trace now records those bytes instead of `0`.
+- Updated mainline call map trace edges from `binding pending` to `anchored` and clarified the trace evidence gate wording; current daemon `/debug/runtime` proof is still required before calling trace step closed.
+- Verified: focused trace/transport/mirror/buffer/render gates 10 files / 119 tests PASS; `tsc --noEmit` PASS; `test:feature-registry` 7 files / 48 tests PASS; targeted `git diff --check` PASS.
+
+## 2026-07-13 physical body subscription scheduler demand slice
+
+- Goal source remains `/Users/fanzhang/.codex/attachments/4b02c24a-347b-4c6a-b90c-4e520e6720c7/pasted-text-1.txt`; section 11 remains active and not complete.
+- Architecture mapping: `resource.session_transport` emits physical body subscription intent; `resource.transport_subscriber` stores only `bodySubscribed`; `resource.mirror_store -> resource.transport_subscriber` remains the only unsolicited body broadcast relation. Daemon still stores no active/inactive/foreground/visible reason.
+- Fail-first evidence: new `terminal-mirror-runtime.backpressure.test.ts` case showed a mirror with only ready but body-unsubscribed subscribers still ran recurring live capture. New `terminal-message-runtime.test.ts` case showed resubscribe did not restore scheduler demand.
+- Fix: `terminal-mirror-runtime.ts` now counts only ready `bodySubscribed !== false` subscribers for live capture cadence; all-body-unsubscribed mirrors stop live timers; bulk pending flush skips unsubscribed subscribers. `terminal-message-runtime.ts` routes both unsubscribe and resubscribe back through the mirror scheduler owner; resubscribe sends current head then schedules immediate live demand.
+- Guard: explicit `buffer-sync-request` remains allowed while body-unsubscribed and does not call scheduler/capture; unsubscribe does not close transport or detach mirror.
+- Docs/skills updated: performance plan, refresh-buffer test design, mainline call map/source wiki, generated wiki, and local `terminal-buffer-truth` skill now record scheduler-demand ownership.
+- Verified: fail-first red tests failed before implementation; focused server/client performance gates 11 files / 141 tests PASS; `tsc --noEmit` PASS; `docs:function-wiki` PASS; `test:feature-registry` 7 files / 48 tests PASS; targeted `git diff --check` PASS.
+- L2 verification: `pnpm --dir android run daemon:mirror:close-loop` PASS; real tmux oracle/replay passed `codex-live`, `top-live`, `vim-live`, `initial-sync`, `local-input-echo`, `external-input-echo`, `daemon-restart-recover`, and `schedule-fire`; evidence summary at `android/evidence/daemon-mirror/2026-07-13/summary.json`.
+- Current daemon runtime proof: managed launchd restart via `pnpm --dir android run daemon -- restart` staged `~/.zterm/daemon-runtime/server.cjs` sha256 `b5e718d8201597b6cdd8ba32336e1a6d77230ea69c6b2609f4139e6ddc34646e`; `/health` returned pid `29191`; temporary tmux/WebSocket trace probe reached `liveRevision=2`; `/debug/runtime` exposed `performanceTrace.recordCount=136`. Evidence saved under `android/evidence/performance/2026-07-13/`.
+- Not complete: full Android client rx/apply/render trace correlation, real inactive-byte reduction, healthy+slow real subscriber drain, weak-network byte shaping, L3-L5 replay, APK, commit, and push remain pending.
+
+## 2026-07-13 mirror-fixed zero-offset non-edge right pan guard
+
+- Jason reported that dragging the fixed-width shell horizontally to the right can still open the drawer even when the finger starts far from the left edge.
+- Architecture mapping: `terminal.session_drawer` owns only left-edge drawer intent; `resource.renderer_window` owns `mirror-fixed` crop projection. The fix stays in `TerminalView`/`TerminalTabSwipeSurface` gesture routing and does not touch daemon/tmux/mirror layout.
+- Root cause refinement after the 2106 fix: stopping propagation only when the clamped offset changes is insufficient. At offset 0, a non-left-edge rightward horizontal drag cannot visually move, but it is still renderer crop ownership and must not leak to the parent drawer gesture owner.
+- Fix: shared the 64 CSS px drawer edge threshold through `TERMINAL_DRAWER_EDGE_SWIPE_START_PX`; `TerminalView` now consumes horizontal fixed gestures unless the gesture starts inside that left-edge threshold with offset already 0. Left-edge 56px drawer open remains valid; 88px/non-edge/right-middle gestures remain renderer-owned.
+- Verified: focused drawer/fixed-pan gates passed 5 files / 124 tests; zero-offset non-edge parent propagation red path is locked in `TerminalView.dynamic-refresh.test.tsx`; `tsc --noEmit` PASS; feature/resource/function/mainline registry gates 48 PASS.
+- Build/L5: full Android prebuild passed 48 files / 629 contract tests plus common-flow/relay gates; APK `0.1.3.2107` built, published, installed, sha256 `6b788d40840bcdaebe755363abafdec394e936e35025dbc8aa71914fcbb319ce`. CDP on foreground zterm/keyguard false proved non-edge CSS `181 -> 291` kept drawer hidden at offset 0, while left-edge `56 -> 200` opened it. Evidence: `evidence/gesture/2026-07-13/mirror-fixed-zero-offset-non-edge-2107.json`.
+
+## 2026-07-13 performance pipeline weak-network proxy + real inactive/slow subscriber proof
+
+- Architecture mapping: `daemon.cli_node` owns `scripts/weak-network-byte-proxy.ts` and `scripts/terminal-performance-probe.ts` as out-of-process verification tools; production daemon/client payload path is unchanged. Resources observed: `resource.transport_subscriber`, `resource.session_transport`, `resource.mirror_store`, `resource.debug_channel`.
+- Added transparent TCP byte proxy. It only delays, jitters, rate-limits, stalls, or disconnects sockets; it does not parse WebSocket frames and does not inspect or rewrite terminal payload. White-box gate proves exact bidirectional byte equality, metadata-only metrics, rate/latency shaping, deterministic stall windows, and disconnect/reconnect socket behavior.
+- Added real daemon protocol probe for `inactive-body` and `healthy-slow`: it performs real control/session WebSocket `session-open -> session-ticket -> connect`, toggles versioned `body-subscription`, generates tmux output, and measures actual wire bytes/revisions without daemon internals.
+- Current daemon proof: `/health` pid `29191`, session `zterm-perf-inactive-1783939271` created as explicit tmux sample.
+- Real inactive body direct proof: `android/evidence/performance/2026-07-13/inactive-body-direct-current-daemon.json` shows baseline inactive body `20092` bytes, unsubscribed inactive body `0`, reduction `1.0`, transport not recreated, final revision matched.
+- Real inactive body through good proxy: `inactive-body-proxy-good.json` shows baseline inactive body `10349` bytes, unsubscribed inactive body `0`, transport not recreated, final revision matched.
+- Real inactive body through narrow proxy (256 Kbps + 300ms RTT + jitter): `inactive-body-proxy-narrow.json` shows baseline inactive body `7058` bytes, unsubscribed inactive body `0`, transport not recreated, final revision matched.
+- Real healthy+slow proof through narrow proxy: `healthy-slow-proxy-narrow.json` shows healthy direct latest body in `92ms`, slow shaped latest body in `328ms`, slow drain after healthy `236ms < 1000ms`, both reached revision `10`, and slow subscriber did not lower healthy cadence.
+- Verified gates: `weak-network-byte-proxy.test.ts` 4/4 PASS; `tsc --noEmit` PASS; feature registry/resource/function/mainline gates 48 PASS.
+- Remaining before completion: unstable periodic stall, explicit disconnect/reconnect app smoke, hot-tail capture/full reconciliation, RTT cadence production evidence, V2/renderer threshold decision, Mac gates, Android L5 weak-network app path, APK/commit/push.
+## 2026-07-14 terminal session preview continuation
+
+- Continued run `20260713T155522Z-Macstudio.local-68849-9548-session-preview`; existing claims still uniquely own the preview feature/resources/mainline.
+- Baseline verification on the current dirty worktree: focused preview/drawer tests 38 PASS, `type-check` PASS, feature/resource/function/mainline gates 48 PASS.
+- Audit gap: the existing grid test mocked `TerminalView`, so it proved wiring but not render-store-to-preview DOM parity. Added a separate real-renderer test that publishes six unique session snapshots, concurrently refreshes all six, and automatically asserts per-tile DOM identity plus read-only renderer attributes.
+- Ownership correction: StageShell previously invoked both tile activation and preview close, while `TerminalPage#handleActivateSessionFromPreview` already owns switch-then-close. Removed the duplicate StageShell close so tile activation has one page-level owner; explicit close/back remains on `onCloseSessionPreview`.
+- Added the `android_preview` machine-readable lifecycle with the required adjacent call IDs and real symbol bindings; updated resource relations, function bindings, Mermaid wiki, and regenerated offline HTML. Feature/resource/function/mainline gates pass 48/48.
+- Focused preview + real render parity gates pass 39/39; drawer/fixed-pan/StageShell/tab-isolation regressions pass 128/128; typecheck and targeted diff-check pass.
+- Standard Android build completed: contracts 48 files / 630 tests, common flows 7 files / 96 tests, relay smoke PASS, Gradle assemble PASS. Published APK `update-dist/zterm-0.1.3.2109.apk`, versionCode `1032109`, size `4588786`, sha256 `0bdd1d6700b056009b2ad565a2a2cb4861e8ccc29d0c8c653dc9ae8128358d34`.
+- L5 remains unverified: `adb devices -l` returned no connected device. Do not claim the feature closed until an unlocked device proves drawer selection, right-edge entry, live six-session refresh, rotation, exit, tile activation, subscription cleanup, and performance.
+- Selection identity audit found that resolution used only `sessionId` even though persistence records host/port/tmux identity. Tightened the resolver to require matching bridge host, bridge port, tmux session name, and stored daemon host when present, preventing a restored stale selection from binding to a reused id belonging to another terminal.
+- Added a real local L2 gate that connects six physical daemon session transports in `mirror-fixed`, applies received `buffer-sync` frames through the shared client sparse-buffer function, publishes the resulting immutable snapshots to the real preview renderer, and automatically compares tmux/client/preview DOM markers plus cross-session isolation. The fail-first run exposed Node's read-only global `navigator`; DOM setup now installs globals with explicit configurable properties. Its `finally` block closes only its six sockets and kills only gate sessions created by that invocation.
+- Real source-to-target gate now PASS: six independent tmux markers all matched tmux capture, daemon-delivered/client-applied sparse truth, and their own preview tile DOM; no foreign marker entered another tile; each session used one physical socket. Daemon subscriber/session counts were exactly `0 -> 6 -> 0`, transport bytes were `35544`, preview DOM nodes `3726`, and all six explicitly created tmux gate sessions were removed. Daemon mirror cache remains at 13 ready mirrors with zero subscribers; this is daemon cache state, not a live session/subscriber leak, and is out of preview scope.
+- Rebuilt after the session identity correction. Current package supersedes 2109: `update-dist/zterm-0.1.3.2110.apk`, versionCode `1032110`, size `4588834`, sha256 `a94555b0e32f7058a48797a142b62d09c1804cc38127dc5d0ff3d71468b96106`; update and daemon manifests passed exact hash/size/alias checks.
+
+## 2026-07-14 terminal session preview closeout continuation
+
+- Rechecked active goal objective, existing run `20260713T155522Z-Macstudio.local-68849-9548-session-preview`, .agent-collab claims, resource/function/mainline maps, MemoryPalace, dirty worktree, APK manifests, and ADB state.
+- Added an explicit stale reused-id guard test for stored `daemonHostId` mismatch in `session-preview-selection.test.ts`; focused preview suite remains 6 files / 40 tests PASS.
+- Extended `terminal:preview:source-dom-gate` evidence with local render performance metadata: DOM nodes, transport bytes, subscriber/session lifecycle, render-store publication count, total buffer-sync count, convergence time, and process CPU. Latest run marker `ZPREVIEW-1783961735734` PASS: six tmux sessions matched daemon/client/preview DOM, subscribers `0 -> 6 -> 0`, sessions `0 -> 6 -> 0`, transport bytes `24456`, DOM nodes `3726`.
+- Re-ran `test:feature-registry` 7 files / 48 tests PASS and `type-check` PASS after instrumentation.
+- ADB L5 remains missing: `adb devices -l` empty, mDNS empty, known `100.104.163.65:5555` offline, only `oppo-pad-mini` online on Tailscale but `adb connect 100.119.165.59:5555` refused. Do not claim real-device closure.
+- Current pushed APK remains `android/update-dist/zterm-0.1.3.2110.apk` and `~/.zterm/updates/zterm-0.1.3.2110.apk`, versionCode `1032110`, size `4588834`, sha256 `a94555b0e32f7058a48797a142b62d09c1804cc38127dc5d0ff3d71468b96106`.
+
+## 2026-07-14 Windows daemon live protocol closeout
+
+- Architecture mapping: `daemon.windows_wezterm_backend` owns the selected Windows WezTerm backend adapter and live daemon protocol smoke. Changed only backend/control/runtime gate surfaces; no mirror/capture fallback and no daemon client-state ownership added.
+- Test design added: `android/docs/testing/windows-daemon-live-protocol-test-design.md`. It requires black-box source marker -> real daemon `buffer-sync` target comparison, missing-session explicit failure, and targeted cleanup through daemon control protocol.
+- Implemented `android/scripts/wezterm-daemon-remote-protocol-smoke.ts`. It probes one configured daemon endpoint, opens control/session WebSockets, creates a unique session, decodes `buffer-sync` wire lines, sends a unique input marker, compares target buffer text automatically, and removes only the created session.
+- Root cause found during live gate: deployed Windows daemon on `100.75.122.121:3333` was stale. It passed create/connect/input but cleanup failed because control `tmux-kill-session` still called tmux in WezTerm mode. Fixed unique close owner by adding `TerminalControlRuntime#closeDetachedTerminalSession`; it routes to `WezTermBackendRuntime#closeSession` for WezTerm and to `tmux kill-session` only for tmux.
+- Deployed updated daemon runtime artifact to `D:\zterm-tools\daemon-runtime-test\runtime\server.cjs`, preserving backup `D:\zterm-tools\daemon-runtime-test\runtime\server.cjs.pre-20260714-1410`, and restarted the existing Windows `ZTermDaemon` scheduled task. Current listener PID observed after restart: `27564` on port `3333`.
+- Verified gates: backend unit/runtime/selection/control tests 4 files / 28 tests PASS; mock protocol smoke PASS with targeted cleanup; direct remote smoke PASS pane 58; input smoke PASS panes 59/60; `tsc --noEmit` PASS; feature registry 7 files / 48 tests PASS; live daemon protocol PASS marker `ZTERM_WINDOWS_DAEMON_E2E_1784009295061_8d3ac8de`, target buffer matched, targeted session removed.
+- Remaining: Windows desktop shell has not started. Next step is `windows.desktop_shell` registry/resource/mainline/test design and shared desktop shell boundary from Mac without copying Mac-specific IPC.
+- Initialized `windows.desktop_shell` architecture surface: added feature registry entry, function/resource binding row, `win/docs/testing/windows-desktop-shell-test-design.md`, and `win/docs/windows-desktop-shell-manifest.json`. All implementation symbols remain `binding pending`; next code step is platform-neutral desktop shell extraction from Mac with separate Windows bridge.
+
+## 2026-07-14 preview-to-shell frozen projection diagnosis
+
+- Field symptom: preview tiles continue refreshing, but after tapping a tile and returning to the real shell the visible terminal stops refreshing.
+- Architecture mapping: `terminal.session_preview.tile.activate` may emit one active-session intent, but the visible shell projection is still owned by `terminal.session_group_layout`. The unique shared activation point must update both `resource.active_session` and the focused session-group viewport projection; transport, daemon mirror, sparse buffer, and renderer remain unchanged.
+- Confirmed source cause: `handleActivateSessionFromPreview` called only `handleSwitchSessionFromChrome(sessionId)` and closed preview. `resolveTerminalSessionGroupSlotIds()` intentionally preserves an existing center slot even after `activeSession` changes. Therefore StageShell could keep rendering the old center session while input/live ownership moved to the selected target. After preview subscriptions closed, the old visible center was no longer live, producing exactly “input/target changed but visible shell frozen.”
+- Existing drawer activation already performs the required `resolveTerminalSessionGroupSlotReplacement(current, sessionId, sessionGroupFocusSlot)` projection before switching. Preview duplicated only half that semantic operation.
+- Fix design: extract one page-level open-session viewport activation owner used by drawer and preview. It first projects the target into the focused session-group slot, then calls the existing session switch owner. Preview closes only after this shared operation. No fallback, reconnect, forced refresh, buffer clear, or duplicate renderer.
+- Positive black-box test: open preview with two selected sessions, activate the non-center tile, rerender with that active session, and prove normal shell renders the selected session and continues receiving render-store updates.
+- Negative test: preview exit without tile activation preserves the existing center/active session; tile activation emits exactly one switch and does not invoke a second close/switch path.
+- Implemented fix: `TerminalPage#handleActivateOpenSessionInViewport` is now the shared page-level owner for drawer row activation and preview tile activation. It calls `resolveTerminalSessionGroupSlotReplacement(..., sessionGroupFocusSlot)` before `handleSwitchSessionFromChrome(sessionId)`; preview close remains after that operation.
+- Red/green: `TerminalPage.session-preview.test.tsx` failed before the fix because `terminal-session-group-center` still rendered `terminal-view-s1` after activating preview tile `s2`; after the fix, it renders `terminal-view-s2`, old `s1` is absent, and there is exactly one switch.
+- Source-to-shell gate: `terminal:preview:source-dom-gate` now also replaces the preview grid with real `TerminalStageShell`, appends a live marker to selected session 2, republishes the same client sparse/render-store truth, and proves the real shell DOM continues updating while stale session 1 markers stay excluded. Latest PASS marker `ZPREVIEW-1783988556733`; subscribers `0 -> 6 -> 0`, sessions `0 -> 6 -> 0`, transport bytes `29536`, DOM nodes `3726`, one physical session socket per session.
+- Verification after the fix: preview/drawer/StageShell/tab-isolation focused regression 9 files / 88 tests PASS; feature/resource/function/mainline gates 7 files / 48 tests PASS; `type-check` PASS; `check:no-source-js-pollution` clean.
+- Standard build: first build attempt hit transient `test:relay:smoke` RTC timeout; immediate isolated rerun passed, and the full build then passed contracts 48 files / 630 tests, common flows 7 files / 96 tests, relay smoke, Vite, Capacitor sync, and Gradle assemble. Published APK `0.1.3.2112`, versionCode `1032112`, size `4588922`, sha256 `7ce0fe3e9ee66be6183e64db562f11f1bafc93706c22cfea4a9c354baf1fb7f2`.
+- L5 remains missing: `adb devices -l` returned no devices after the APK build, so real-device preview-to-shell touch verification is still not closed.
+
+## 2026-07-14 preview long-press replacement and Back cancel
+
+- Requirement: long press a preview tile to replace that ordered slot with an unselected open session; Android system Back cancels preview and returns to the session/projection present at entry.
+- Architecture mapping: `terminal.session_preview` remains the only owner. `resource.session_preview_selection` gained only in-place replacement through current `resource.open_tab` truth. `resource.session_preview_mode` captures entry `{ activeSessionId, slotIds, focusSlot }` and may restore only that exact projection on cancel. No daemon, transport, mirror, sparse-buffer, renderer, or tmux changes.
+- Mainline additions: `android_preview:TerminalPreviewTile->PreviewReplacementMenu`, `android_preview:PreviewReplacementMenu->PreviewSelectionOwner`, `android_preview:SystemBackIntent->PreviewModeOwner`, and `android_preview:PreviewModeOwner->EntrySessionProjection`.
+- Implementation: `replaceSessionPreviewTarget()` validates source existence, replacement validity, and not-already-selected status while preserving order. `TerminalPreviewGrid` uses a 420ms movement-cancelled long press, suppresses the release click, and lists only unselected open sessions. `TerminalPage#handleCancelSessionPreview` is the unique close/cancel owner for close button, right swipe, and Capacitor `backButton`; tile activation clears the entry snapshot and keeps its explicit switch semantics.
+- Positive/negative gates: replacement preserves order; selected/missing replacements fail; long press opens menu without activation; movement opens no menu and activates nothing; Back listener exists only while preview is open; Back restores entry Session even if active projection changed while preview was open.
+- Verification: focused preview regression 9 files / 92 tests PASS before the final movement-negative addition; final replacement/back focused suite 3 files / 17 tests PASS; feature/resource/function/mainline gates 7 files / 48 tests PASS; type-check and source pollution gate PASS; real six-session source-to-preview/source-to-shell gate PASS with subscribers/sessions `0 -> 6 -> 0` and one physical socket per session.
+- Build: standard Android build passed 48 files / 630 terminal contract tests, 7 files / 96 common-flow tests, relay smoke, Vite/Capacitor/Gradle, and manifest/hash gates. APK `0.1.3.2113`, versionCode `1032113`, size `4590414`, sha256 `319e158d24f2d3e97cf4a1746cda3933ecbdc9a30d5fc56384364bd9ce99db28` published to update-dist and `~/.zterm/updates`.
+- L5 remains open because `adb devices -l` is empty; no real-device long-press/system-Back claim is made.
+
+## 2026-07-14 preview count layout, tile removal, and body navigation
+
+- Requirement: preview selection count is 1-6, not required to fill six; portrait rows cap at 2 tiles, landscape rows cap at 3; each preview tile needs a close control; tile body should scroll/pan locally; preview font should be smaller; long-press replacement menu must show only unselected open sessions.
+- Architecture mapping: stayed inside `terminal.session_preview`. `resource.session_preview_selection` owns count/order/replacement/removal; `resource.session_preview_mode` owns cancel restore; `TerminalPreviewGrid` owns UI projection. No daemon, transport, mirror, sparse-buffer, reconnect, tmux, or width-owner changes.
+- Implementation: added `resolveSessionPreviewGridLayout()` to derive rows from selected count; portrait now maps 1/2/3/4/5/6 to 1x1/2x1/2x2/2x2/2x3/2x3 and landscape to 1x1/2x1/3x1/3x2/3x2/3x2. Tile close calls `TerminalPage#handleRemoveSessionFromPreview`, persists remaining selection, and cancels preview only when empty. Preview body pointer/touch/click events are stopped before tile activation while `TerminalView` remains mounted read-only with smaller `fontSize=6,rowHeight=9px` at default 10px.
+- Long-press menu proof: page test now asserts already selected `s1/s2` are absent and only unselected open `s3` is offered for replacement.
+- Verification: focused component/page tests 2 files / 26 tests PASS; full preview suite 5 files / 41 tests PASS; feature/resource/function/mainline gates 7 files / 48 tests PASS after adding `android_preview:TerminalPreviewTileClose->PreviewSelectionOwner`; type-check/source-pollution PASS; source-to-DOM/source-to-shell gate PASS marker `ZPREVIEW-1783991765720` with six real tmux sessions and subscriber/session lifecycle restored to baseline.
+- Build: standard Android build PASS with terminal contracts 48 files / 630 tests, common flows 7 files / 96 tests, relay smoke, Vite/Capacitor/Gradle, manifest/hash gates. APK `0.1.3.2114`, versionCode `1032114`, sha256 `ef7439df9c3c28719b70174765f7ff9d8e0a23c782f810dbbaf6fb04400221e2` published to update-dist and `~/.zterm/updates`.
+- L5 remains open: `adb devices -l` is empty, so no real-device gesture claim is made for tile close/body scroll/body pan.
+
+## 2026-07-14 Windows desktop shell packaged alpha
+
+- Architecture mapping: `windows.desktop_shell` owns only Electron main/preload, Windows platform bridge, desktop composition, packaging, and thin shared-core binding. It reuses `openBridgeConnection`, shared sparse-buffer application, and `MacTerminalView`; no daemon/mirror/renderer/Mac IPC/local-tmux implementation was copied into `win/`.
+- Packaged root cause 1: ESM `preload.js` failed under Electron sandbox with `Cannot use import statement outside a module`. Fixed source to `preload.cts`, output to `preload.cjs`, and locked main/manifest/function-map/tests to that binding.
+- Packaged root cause 2: renderer emitted `buffer-sync-request` immediately after `connected`, before the daemon mirror produced its first frame. This caused `buffer-sync-request requires a ready mirror` and moved the shell to error. `requestVisibleRange` now requires connected status and buffer revision greater than zero.
+- Local gates: Windows typecheck PASS; 2 test files / 5 tests PASS; renderer/main build PASS; x64 Electron directory package PASS.
+- Real Windows L5: deployed `D:/zterm-tools/windows-client-alpha/0.1.0-alpha.1/ZTerm.exe`; fresh packaged process exposed `platform=windows` and preload bridge, connected to dedicated `zterm-win-l5-gate` without error, sent source `echo ZTERMWINDOWSLIVE`, and DOM rows automatically matched both command and output. Screenshot payload was 7,892 bytes.
+- Deployment archive SHA-256 `b60b5c5b4f27c73dc2e6b1f2dfc007a644d3c4eadaab4e2ad6dbb32d37655cf0`. Dedicated session was removed; four known app PIDs and CDP/SSH sessions were precisely closed; port 9333 had no listener.
+
+## 2026-07-14 Windows session control packaged alpha
+
+- Architecture mapping: `windows.desktop_shell.session_control` owns UI session discovery/create/close. It calls the existing shared daemon control helpers and does not introduce a Windows-only daemon protocol fork or fallback.
+- Implementation: connection panel now exposes manual refresh, session list selection, new session creation, and explicit close per session. Closing the currently connected session also disconnects only the Windows client transport after daemon close succeeds.
+- Local gates: Windows typecheck PASS; 2 test files / 7 tests PASS; renderer/main build PASS; x64 Electron directory package PASS.
+- Real Windows L5: deployed `D:/zterm-tools/windows-client-alpha/0.1.0-alpha.1/ZTerm.exe`; UI refreshed sessions `default` and `zterm-20260630-115307`, created `ztermwinsessioncontrol`, selected it, connected, sent `echo ZTERMSESSIONCONTROL`, matched both command/output DOM rows, closed it through UI, and daemon final list omitted it. Screenshot payload was 16,032 bytes.
+- Deployment archive SHA-256 `df59c1f382179cfe9c7a2834105e6271b865a4f712b7854f52482a1db669397a`. App PIDs `6628,7544,7884,30628`, holder, and tunnel were precisely cleared; port 9333 had no listener.
+## 2026-07-14 WebSocket Wi-Fi-to-cellular stale transport fix
+
+- User issue: ZTerm connects on Wi-Fi but becomes unusable after leaving Wi-Fi. Live device evidence showed target stayed `100.66.1.82:3333` (Mac Studio Tailscale IP), cellular/Tailscale route could still reach `/health`, and failure was inside client physical WebSocket lifecycle rather than endpoint selection.
+- Root cause: `session-context-socket-runtime.ts` treated `WebSocket.OPEN` as healthy and the previous heartbeat behavior only kept sending ping after pong timeout, so a half-open socket bound to the old Wi-Fi path could be reused forever.
+- Architecture mapping: `terminal.transport_lifecycle` / `resource.session_transport`; unique health owner is `src/contexts/session-context-socket-runtime.ts`. UI lifecycle and daemon must not add their own reconnect loops or network-state truth.
+- Fix: client session heartbeat now runs every 2s and fails a physical socket once after 3 consecutive missed server-activity confirmations. Pong or any valid server frame resets misses; logical session/buffer remain owned above the physical socket and are reused by the existing reconnect owner.
+- Test design added: `docs/testing/session-transport-network-switch-test-design.md` with white-box, module black-box, and real-device Wi-Fi/cellular gates. Feature/function/gate docs now bind socket heartbeat to `terminal.transport_lifecycle`.
+- Verified local gates: `session-context-socket-runtime.test.ts`, `session-context-activity-runtime.test.ts`, `session-context-lifecycle.test.tsx`, `SessionContext.ws-refresh.test.tsx`, `App.dynamic-refresh.test.tsx` PASS; transport/session focused gates PASS; `tsc --noEmit` PASS; `test:feature-registry` PASS; `build:android` PASS.
+- APK built/published/installed: `0.1.3.2115` / `versionCode=1032115`; sha256 `a82bf8d2664f48adc764a1d216d02b61b2a94861ce473d18975c5847b0d44409`; paths `android/update-dist/zterm-0.1.3.2115.apk` and `/Users/fanzhang/.zterm/updates/zterm-0.1.3.2115.apk`; installed on `100.104.163.65:5555` successfully.
+- Remaining gap: not yet closed as L5 network-switch gate because the new APK still needs unlocked foreground app + real session/TUI two-direction Wi-Fi/cellular switch proving output/input recovery within 10s.
+## 2026-07-14 21:57 CST - preview add selection and Android logo package
+
+- Architecture mapping: `terminal.session_preview` remains the only owner. The visible drawer checkbox now dispatches to the existing `toggleSessionPreviewTarget` path; the in-preview add menu continues through `appendSessionPreviewTarget` and only projects currently open, eligible, unselected Sessions. No transport, daemon, mirror, sparse-buffer, or renderer ownership changed. The visual-only checkbox behavior was physically removed by replacing the span with an explicit button.
+- Positive lock: after removing two of six preview tiles, the add menu lists both removed open Sessions and appends either one while preserving order. Negative lock: selected and closed Sessions cannot dispatch add/toggle, and the command never switches or closes a Session.
+- Android App Logo source is now root `assets/logo.png`; 15 legacy/round/adaptive density resources were regenerated. APK `0.1.3.2116` contains byte-identical xxxhdpi legacy/adaptive icon resources.
+- Verification: preview focused tests 52/52; architecture/feature/function/mainline gates 48/48; type-check passed; build preflight 631/631 terminal contracts + 96/96 common flows + relay smoke; Gradle build passed. APK sha256 `78ccc529d63a759641f3ee4ab55bb32851f5e6e1514be9288e7d1111a2f07a49`.
+- L5 gap: `adb devices -l` returned no online device, so launcher rendering and physical touch behavior remain for Jason's upgrade test.
+
+## 2026-07-14 22:17 CST - Android adaptive icon safe-zone correction
+
+- Jason's Launcher screenshot is the L5 counterexample: build `0.1.3.2116` packaged the requested source correctly, but the adaptive foreground filled the full canvas and ColorOS applied a second mask, cropping the lower wordmark and outer frame.
+- Correction: remove only the connected near-white outer background from the source, center the remaining Logo at 80% of every legacy/round/adaptive canvas, and set adaptive background to `#111A23`. This increases the deep border while keeping all Logo semantics inside the Launcher safe zone.
+- Gate correction: source/APK hash equality remains necessary but insufficient; final acceptance requires a real Launcher screenshot.
+## 2026-07-15 - Fixed relay Home and ephemeral tabs closeout
+
+- Home was reduced to the fixed `relay.codewhisper.cc` account/password login projection plus daemon-device rows. Session groups, connection cards/FAB, saved tab lists, and Home session actions were physically removed from the live path.
+- Relay credentials now keep plaintext password only in the login form/request; persisted relay account state stores token/account/directory/client settings with an empty password.
+- Open tabs, active tab focus, and closed-tab reuse tombstones are current-process state only. Startup and runtime writes remove legacy `OPEN_TABS`, `ACTIVE_SESSION`, `SAVED_TAB_LISTS`, and closed-reuse storage keys instead of restoring or rewriting them.
+- Gates passed: focused relay/open-tab suite 9 files / 80 tests; App dynamic matrix 29 tests; real first-paint gates 4 tests; architecture registry/mainline gates 23 tests; TypeScript; Android build preflight 48 files / 572 tests; common flows 77 tests; local relay end-to-end smoke.
+- APK `0.1.3.2119` / versionCode `1032119` published with SHA-256 `00991533d26f999d9982257951cfda689c134d308ad739aee7e8ba5a2c334a0a`.
+- Production relay endpoint is not yet live at the fixed URL: `relay.codewhisper.cc` has no A record; current relay host `claw.codewhisper.cc` resolves to Tailscale IP `100.124.49.106`; that host serves relay health on port 18443, while 443 `/relay/health` returns 404 and the certificate contains only `claw.codewhisper.cc`. DNS A + nginx 443 route + TLS SAN/certificate are all required before production login E2E.
+- ADB target `100.104.163.65:5555` was offline, so APK install and real-device visual/login verification remain open.

@@ -13,7 +13,7 @@ export type PersistedActiveSessionIdState =
 export type PersistedOpenTabsState =
   | { status: 'unavailable' | 'empty'; tabs: PersistedOpenTab[]; hasStoredValue: false }
   | { status: 'available'; tabs: PersistedOpenTab[]; hasStoredValue: true }
-  | { status: 'invalid' | 'failed'; tabs: PersistedOpenTab[]; hasStoredValue: true; error: unknown };
+  | { status: 'invalid' | 'failed'; tabs: PersistedOpenTab[]; hasStoredValue: boolean; error: unknown };
 
 export type PersistOpenTabsStateResult =
   | { ok: true }
@@ -29,32 +29,25 @@ export function readPersistedActiveSessionIdState(): PersistedActiveSessionIdSta
   }
 
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION);
-    const activeSessionId = typeof raw === 'string' && raw.trim() ? raw.trim() : null;
-    return activeSessionId
-      ? { status: 'available', activeSessionId }
-      : { status: 'empty', activeSessionId: null };
+    clearLegacyOpenTabPersistence();
+    return { status: 'empty', activeSessionId: null };
   } catch (error) {
-    console.error('[open-tab-persistence] Failed to restore active session:', error);
+    console.error('[open-tab-persistence] Failed to clear legacy active session:', error);
     return { status: 'failed', activeSessionId: null, error };
   }
 }
 
 export function persistActiveSessionId(activeSessionId: string | null): PersistOpenTabsStateResult {
+  void activeSessionId;
   if (typeof window === 'undefined') {
     return { ok: true };
   }
 
   try {
-    const normalized = typeof activeSessionId === 'string' ? activeSessionId.trim() : '';
-    if (normalized) {
-      localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, normalized);
-      return { ok: true };
-    }
-    localStorage.removeItem(STORAGE_KEYS.ACTIVE_SESSION);
+    clearLegacyOpenTabPersistence();
     return { ok: true };
   } catch (error) {
-    console.error('[open-tab-persistence] Failed to persist active session:', error);
+    console.error('[open-tab-persistence] Failed to clear legacy active session:', error);
     return { ok: false, error };
   }
 }
@@ -169,36 +162,18 @@ export function readPersistedOpenTabsState(): PersistedOpenTabsState {
   }
 
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.OPEN_TABS);
-    if (!raw) {
-      return {
-        status: 'empty',
-        tabs: [] as PersistedOpenTab[],
-        hasStoredValue: false,
-      };
-    }
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return {
-        status: 'invalid',
-        tabs: [] as PersistedOpenTab[],
-        hasStoredValue: true,
-        error: new Error('Persisted OPEN_TABS value is not an array'),
-      };
-    }
+    clearLegacyOpenTabPersistence();
     return {
-      status: 'available',
-      tabs: parsed
-        .map(normalizePersistedOpenTab)
-        .filter((item): item is PersistedOpenTab => item !== null),
-      hasStoredValue: true,
+      status: 'empty',
+      tabs: [] as PersistedOpenTab[],
+      hasStoredValue: false,
     };
   } catch (error) {
-    console.error('[open-tab-persistence] Failed to restore open tabs:', error);
+    console.error('[open-tab-persistence] Failed to clear legacy open tabs:', error);
     return {
       status: 'failed',
       tabs: [] as PersistedOpenTab[],
-      hasStoredValue: true,
+      hasStoredValue: false,
       error,
     };
   }
@@ -245,59 +220,53 @@ export function buildPersistedOpenTabFromHostSession(options: {
 }
 
 export function persistOpenTabsState(tabs: PersistedOpenTab[], activeSessionId: string | null): PersistOpenTabsStateResult {
+  void tabs;
+  void activeSessionId;
   if (typeof window === 'undefined') {
     return { ok: true };
   }
 
   try {
-    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify(tabs));
-    const activeSessionResult = persistActiveSessionId(activeSessionId);
-    if (!activeSessionResult.ok) {
-      return activeSessionResult;
-    }
+    clearLegacyOpenTabPersistence();
     return { ok: true };
   } catch (error) {
-    console.error('[open-tab-persistence] Failed to persist open tabs:', error);
+    console.error('[open-tab-persistence] Failed to clear legacy open tabs:', error);
     return { ok: false, error };
   }
 }
 
 const CLOSED_TAB_REUSE_KEYS_STORAGE_KEY = 'zterm:closed-tab-reuse-keys';
-const CLOSED_TAB_REUSE_KEYS_MAX = 200;
 
 export function readPersistedClosedTabReuseKeys(): Set<string> {
   if (typeof window === 'undefined') {
     return new Set();
   }
   try {
-    const raw = localStorage.getItem(CLOSED_TAB_REUSE_KEYS_STORAGE_KEY);
-    if (!raw) {
-      return new Set();
-    }
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) {
-      return new Set();
-    }
-    return new Set(parsed.filter((item): item is string => typeof item === 'string' && item.trim().length > 0));
+    localStorage.removeItem(CLOSED_TAB_REUSE_KEYS_STORAGE_KEY);
+    return new Set();
   } catch (error) {
-    console.error('[open-tab-persistence] Failed to restore closed tab reuse keys:', error);
+    console.error('[open-tab-persistence] Failed to clear closed tab reuse keys:', error);
     return new Set();
   }
 }
 
 export function persistClosedTabReuseKeys(keys: Set<string>) {
+  void keys;
   if (typeof window === 'undefined') {
     return;
   }
   try {
-    const arr = Array.from(keys);
-    const trimmed = arr.length > CLOSED_TAB_REUSE_KEYS_MAX
-      ? arr.slice(arr.length - CLOSED_TAB_REUSE_KEYS_MAX)
-      : arr;
-    localStorage.setItem(CLOSED_TAB_REUSE_KEYS_STORAGE_KEY, JSON.stringify(trimmed));
+    localStorage.removeItem(CLOSED_TAB_REUSE_KEYS_STORAGE_KEY);
   } catch (error) {
-    console.error('[open-tab-persistence] Failed to persist closed tab reuse keys:', error);
+    console.error('[open-tab-persistence] Failed to clear closed tab reuse keys:', error);
   }
+}
+
+function clearLegacyOpenTabPersistence() {
+  localStorage.removeItem(STORAGE_KEYS.OPEN_TABS);
+  localStorage.removeItem(STORAGE_KEYS.ACTIVE_SESSION);
+  localStorage.removeItem(STORAGE_KEYS.SAVED_TAB_LISTS);
+  localStorage.removeItem(CLOSED_TAB_REUSE_KEYS_STORAGE_KEY);
 }
 
 export function clearClosedTabReuseKeysForOwner(

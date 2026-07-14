@@ -12,7 +12,7 @@ describe('open-tab / history / connections truth gates', () => {
     const openTabRuntimeSource = readSource('hooks/useOpenTabRuntime.ts');
     const sessionContextSource = readSource('contexts/SessionContext.tsx');
     const sessionHistorySource = readSource('hooks/useSessionHistoryStorage.ts');
-    const connectionsProjectionSource = readSource('lib/connections-server-groups.ts');
+    const connectionsProjectionSource = readSource('pages/ConnectionsPage.tsx');
 
     expect(openTabPersistenceSource).toContain('STORAGE_KEYS.OPEN_TABS');
     expect(openTabPersistenceSource).toContain('STORAGE_KEYS.ACTIVE_SESSION');
@@ -30,7 +30,7 @@ describe('open-tab / history / connections truth gates', () => {
     const sessionHistorySource = readSource('hooks/useSessionHistoryStorage.ts');
     const openTabPersistenceSource = readSource('lib/open-tab-persistence.ts');
     const openTabRuntimeSource = readSource('hooks/useOpenTabRuntime.ts');
-    const connectionsProjectionSource = readSource('lib/connections-server-groups.ts');
+    const connectionsProjectionSource = readSource('pages/ConnectionsPage.tsx');
 
     expect(sessionHistorySource).toContain('STORAGE_KEYS.SESSION_GROUPS');
     expect(sessionHistorySource).toContain('localStorage.getItem(STORAGE_KEYS.SESSION_GROUPS)');
@@ -42,15 +42,17 @@ describe('open-tab / history / connections truth gates', () => {
   });
 
   it('keeps connections projection read-only and free of storage/runtime mutation', () => {
-    const connectionsProjectionSource = readSource('lib/connections-server-groups.ts');
+    const connectionsProjectionSource = readSource('pages/ConnectionsPage.tsx');
 
-    expect(connectionsProjectionSource).toContain('export function buildConnectionsServerGroups');
+    expect(connectionsProjectionSource).toContain('export function ConnectionsPage');
+    expect(connectionsProjectionSource).toContain('getDefaultTraversalRelayBaseUrl');
+    expect(connectionsProjectionSource).not.toContain('connections-server-groups');
     expect(connectionsProjectionSource).not.toContain('createSession(');
     expect(connectionsProjectionSource).not.toContain('closeSession(');
     expect(connectionsProjectionSource).not.toContain('switchSession(');
     expect(connectionsProjectionSource).not.toContain('persistOpenTabsState(');
-    expect(connectionsProjectionSource).not.toContain('setSessionGroupSelection(');
-    expect(connectionsProjectionSource).not.toContain('pruneSessionGroupSelectionToRemoteTruth(');
+    expect(connectionsProjectionSource).not.toContain('onOpenServerGroups');
+    expect(connectionsProjectionSource).not.toContain('onSaveServerGroupSelection');
     expect(connectionsProjectionSource).not.toContain('localStorage.');
   });
 
@@ -76,7 +78,7 @@ describe('open-tab / history / connections truth gates', () => {
     expect(connectionsPageSource).not.toContain('createSession(');
   });
 
-  it('keeps cold restore read-only for tombstones while explicit open remains the only tombstone-clearing path', () => {
+  it('keeps cold restore read-only and removes saved-tab import revival paths', () => {
     const restoreRuntimeSource = readSource('hooks/useOpenTabRestoreRuntimeSync.ts');
     const sessionOpenActionsSource = readSource('hooks/useSessionOpenActions.ts');
     const openTabOpenPolicySource = readSource('lib/open-tab-open-policy.ts');
@@ -89,10 +91,12 @@ describe('open-tab / history / connections truth gates', () => {
 
     expect(sessionOpenActionsSource).toContain('clearClosedTabReuseKeysForOwner(');
     expect(sessionOpenActionsSource).toContain('persistClosedTabReuseKeys(');
-    expect(openTabOpenPolicySource).toContain('reconcileImportedTabsWithClosedReuseKeys(');
-    expect(openTabOpenPolicySource).toContain("Extract<OpenTabOpenSource, 'saved-tab-import' | 'saved-tab-import-revive'>");
-    expect(openTabOpenPolicySource).toContain('clearClosedTabReuseKeysForOwner(');
-    expect(openTabOpenPolicySource).toContain('reviveClosedReuseOnImport: true');
+    expect(openTabOpenPolicySource).toContain("'explicit-open': {");
+    expect(openTabOpenPolicySource).toContain("'cold-restore': {");
+    expect(openTabOpenPolicySource).not.toContain('saved-tab-import');
+    expect(openTabOpenPolicySource).not.toContain('saved-tab-import-revive');
+    expect(openTabOpenPolicySource).not.toContain('reconcileImportedTabsWithClosedReuseKeys(');
+    expect(openTabOpenPolicySource).not.toContain('reviveClosedReuseOnImport');
   });
 
   it('keeps remote tmux audits unable to close open tabs automatically', () => {
