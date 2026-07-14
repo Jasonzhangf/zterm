@@ -188,7 +188,6 @@ describe('TerminalPage lifecycle cleanup', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
   }
@@ -221,7 +220,6 @@ describe('TerminalPage lifecycle cleanup', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 

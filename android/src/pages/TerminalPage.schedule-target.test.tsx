@@ -151,7 +151,6 @@ function makeProps(sessions: Session[], activeSession: Session | null) {
     quickActions: [],
     shortcutActions: [],
     sessionDraft: '',
-    onLoadSavedTabList: vi.fn(),
     getScheduleState: vi.fn((sessionId: string) => {
       const session = sessions.find((item) => item.id === sessionId);
       return makeScheduleState(session?.sessionName || '');

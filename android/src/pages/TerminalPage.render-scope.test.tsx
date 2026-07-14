@@ -240,7 +240,6 @@ function renderTerminalPage(
       quickActions={[]}
       shortcutActions={[]}
       sessionDraft=""
-      onLoadSavedTabList={vi.fn()}
     />,
   );
 }
@@ -308,7 +307,6 @@ describe('TerminalPage renderer scope', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -422,7 +420,6 @@ describe('TerminalPage renderer scope', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -478,7 +475,6 @@ describe('TerminalPage renderer scope', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -542,7 +538,6 @@ describe('TerminalPage renderer scope', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -593,7 +588,6 @@ describe('TerminalPage renderer scope', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -625,7 +619,6 @@ describe('TerminalPage renderer scope', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -655,7 +648,6 @@ describe('TerminalPage renderer scope', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -680,7 +672,6 @@ describe('TerminalPage renderer scope', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -711,7 +702,6 @@ describe('TerminalPage renderer scope', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 

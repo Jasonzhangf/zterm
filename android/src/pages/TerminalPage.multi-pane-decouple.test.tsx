@@ -120,7 +120,6 @@ const base = {
   quickActions: [],
   shortcutActions: [],
   sessionDraft: '',
-  onLoadSavedTabList: vi.fn(),
 };
 
 // ---------------------------------------------------------------------------

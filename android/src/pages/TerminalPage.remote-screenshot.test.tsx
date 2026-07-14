@@ -155,7 +155,6 @@ describe('TerminalPage remote screenshot preview', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -199,7 +198,6 @@ describe('TerminalPage remote screenshot preview', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -262,7 +260,6 @@ describe('TerminalPage remote screenshot preview', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -314,7 +311,6 @@ describe('TerminalPage remote screenshot preview', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -373,7 +369,6 @@ describe('TerminalPage remote screenshot preview', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -419,7 +414,6 @@ describe('TerminalPage remote screenshot preview', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 

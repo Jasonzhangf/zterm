@@ -170,7 +170,6 @@ describe('TerminalPage portrait session drawer', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -216,7 +215,6 @@ describe('TerminalPage portrait session drawer', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -272,7 +270,6 @@ describe('TerminalPage portrait session drawer', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -338,7 +335,6 @@ describe('TerminalPage portrait session drawer', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -406,7 +402,6 @@ describe('TerminalPage portrait session drawer', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 

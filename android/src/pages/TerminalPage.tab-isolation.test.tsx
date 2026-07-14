@@ -223,7 +223,6 @@ describe('TerminalPage tab isolation', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -246,7 +245,6 @@ describe('TerminalPage tab isolation', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -276,7 +274,6 @@ describe('TerminalPage tab isolation', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -314,7 +311,6 @@ describe('TerminalPage tab isolation', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
         terminalWidthMode="mirror-fixed"
       />,
     );
@@ -344,7 +340,6 @@ describe('TerminalPage tab isolation', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -377,7 +372,6 @@ describe('TerminalPage tab isolation', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -417,7 +411,6 @@ describe('TerminalPage tab isolation', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -439,7 +432,6 @@ describe('TerminalPage tab isolation', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -483,7 +475,6 @@ describe('TerminalPage tab isolation', () => {
         onQuickActionInput={onQuickActionInput}
         onSessionDraftChange={onSessionDraftChange}
         onSessionDraftSend={onSessionDraftSend}
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -526,7 +517,6 @@ describe('TerminalPage tab isolation', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -565,7 +555,6 @@ describe('TerminalPage tab isolation', () => {
         sessionDraft="draft-s1"
         onSessionDraftChange={onSessionDraftChange}
         onSessionDraftSend={onSessionDraftSend}
-        onLoadSavedTabList={vi.fn()}
         terminalWidthMode="adaptive-phone"
       />,
     );
@@ -621,7 +610,6 @@ describe('TerminalPage tab isolation', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
         terminalWidthMode="adaptive-phone"
       />,
     );
@@ -657,7 +645,6 @@ describe('TerminalPage tab isolation', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
         terminalWidthMode="mirror-fixed"
       />,
     );
@@ -703,7 +690,6 @@ describe('TerminalPage tab isolation', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -744,7 +730,6 @@ describe('TerminalPage tab isolation', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -776,7 +761,6 @@ describe('TerminalPage tab isolation', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -801,7 +785,6 @@ describe('TerminalPage tab isolation', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -823,7 +806,6 @@ describe('TerminalPage tab isolation', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 

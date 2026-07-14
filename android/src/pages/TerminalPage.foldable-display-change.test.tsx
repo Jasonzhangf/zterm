@@ -69,7 +69,7 @@ vi.mock("../components/terminal/TerminalDebugOverlay", () => ({ TerminalDebugOve
 vi.mock("../pages/TerminalPageDebugOverlay", () => ({ TerminalDebugOverlay: () => null }));
 
 function makeProps(session: Session) {
-  return { sessions: [session], activeSession: session, onSwitchSession: vi.fn(), onMoveSession: vi.fn(), onRenameSession: vi.fn(), onCloseSession: vi.fn(), onOpenConnections: vi.fn(), onOpenQuickTabPicker: vi.fn(), onResize: vi.fn(), onTerminalInput: vi.fn(), onTerminalViewportChange: vi.fn(), quickActions: [], shortcutActions: [], sessionDraft: "", onLoadSavedTabList: vi.fn() };
+  return { sessions: [session], activeSession: session, onSwitchSession: vi.fn(), onMoveSession: vi.fn(), onRenameSession: vi.fn(), onCloseSession: vi.fn(), onOpenConnections: vi.fn(), onOpenQuickTabPicker: vi.fn(), onResize: vi.fn(), onTerminalInput: vi.fn(), onTerminalViewportChange: vi.fn(), quickActions: [], shortcutActions: [], sessionDraft: "" };
 }
 
 const wait = (ms: number) => act(async () => { await new Promise((r) => setTimeout(r, ms)); });

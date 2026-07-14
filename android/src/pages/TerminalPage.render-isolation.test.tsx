@@ -178,7 +178,6 @@ function renderTerminalPage(sessions: Session[], activeSession: Session | null) 
     quickActions: [],
     shortcutActions: [],
     sessionDraft: '',
-    onLoadSavedTabList: vi.fn(),
   };
   return render(
     <TerminalPage
@@ -334,7 +333,6 @@ describe('TerminalPage render isolation', () => {
       quickActions: [],
       shortcutActions: [],
       sessionDraft: '',
-      onLoadSavedTabList: vi.fn(),
     };
 
     const view = render(
@@ -403,7 +401,6 @@ describe('TerminalPage render isolation', () => {
       quickActions: [],
       shortcutActions: [],
       sessionDraft: '',
-      onLoadSavedTabList: vi.fn(),
     };
     const view = render(
       <TerminalPage
@@ -452,7 +449,6 @@ describe('TerminalPage render isolation', () => {
       quickActions: [],
       shortcutActions: [],
       sessionDraft: '',
-      onLoadSavedTabList: vi.fn(),
     };
     const view = render(
       <TerminalPage
@@ -503,7 +499,6 @@ describe('TerminalPage render isolation', () => {
       quickActions: [],
       shortcutActions: [],
       sessionDraft: '',
-      onLoadSavedTabList: vi.fn(),
     };
     const view = render(
       <TerminalPage
@@ -555,7 +550,6 @@ describe('TerminalPage render isolation', () => {
       quickActions: [],
       shortcutActions: [],
       sessionDraft: '',
-      onLoadSavedTabList: vi.fn(),
     };
     const view = render(
       <TerminalPage
@@ -615,7 +609,6 @@ describe('TerminalPage render isolation', () => {
       quickActions: [],
       shortcutActions: [],
       sessionDraft: '',
-      onLoadSavedTabList: vi.fn(),
     };
     const view = render(
       <TerminalPage

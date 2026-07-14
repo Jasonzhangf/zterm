@@ -214,7 +214,6 @@ describe('TerminalPage real quickbar split integration', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -246,7 +245,6 @@ describe('TerminalPage real quickbar split integration', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -276,7 +274,6 @@ describe('TerminalPage real quickbar split integration', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -309,7 +306,6 @@ describe('TerminalPage real quickbar split integration', () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 

@@ -333,7 +333,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -364,7 +363,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -408,7 +406,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -478,7 +475,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -533,7 +529,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -584,7 +579,6 @@ describe("TerminalPage Android IME bridge", () => {
             quickActions={[]}
             shortcutActions={[]}
             sessionDraft=""
-            onLoadSavedTabList={vi.fn()}
           />
         </>
       );
@@ -628,7 +622,6 @@ describe("TerminalPage Android IME bridge", () => {
             quickActions={[]}
             shortcutActions={[]}
             sessionDraft=""
-            onLoadSavedTabList={vi.fn()}
           />
         </>
       );
@@ -667,7 +660,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft="overlay-draft-中文"
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -706,7 +698,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -740,7 +731,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -777,7 +767,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -819,7 +808,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -864,7 +852,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -905,7 +892,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -968,7 +954,6 @@ describe("TerminalPage Android IME bridge", () => {
             quickActions={[]}
             shortcutActions={[]}
             sessionDraft=""
-            onLoadSavedTabList={vi.fn()}
           />
         </>
       );
@@ -1007,7 +992,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -1095,7 +1079,6 @@ describe("TerminalPage Android IME bridge", () => {
           quickActions={[]}
           shortcutActions={[]}
           sessionDraft=""
-          onLoadSavedTabList={vi.fn()}
         />,
       );
 
@@ -1189,7 +1172,6 @@ describe("TerminalPage Android IME bridge", () => {
           quickActions={[]}
           shortcutActions={[]}
           sessionDraft=""
-          onLoadSavedTabList={vi.fn()}
         />,
       );
 
@@ -1278,7 +1260,6 @@ describe("TerminalPage Android IME bridge", () => {
           quickActions={[]}
           shortcutActions={[]}
           sessionDraft=""
-          onLoadSavedTabList={vi.fn()}
         />,
       );
 
@@ -1367,7 +1348,6 @@ describe("TerminalPage Android IME bridge", () => {
           quickActions={[]}
           shortcutActions={[]}
           sessionDraft=""
-          onLoadSavedTabList={vi.fn()}
         />,
       );
 
@@ -1444,7 +1424,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
         terminalWidthMode="adaptive-phone"
       />,
     );
@@ -1476,7 +1455,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
         terminalWidthMode="mirror-fixed"
       />,
     );
@@ -1505,7 +1483,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -1534,7 +1511,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -1598,7 +1574,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -1646,7 +1621,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -1691,7 +1665,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -1725,7 +1698,6 @@ describe("TerminalPage Android IME bridge", () => {
           quickActions={[]}
           shortcutActions={[]}
           sessionDraft=""
-          onLoadSavedTabList={vi.fn()}
         />,
       );
 
@@ -1780,7 +1752,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -1823,7 +1794,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -1859,7 +1829,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -1885,7 +1854,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -1915,7 +1883,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -1939,7 +1906,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -1975,7 +1941,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -2026,7 +1991,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -2069,7 +2033,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -2124,7 +2087,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -2156,7 +2118,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -2192,7 +2153,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -2224,7 +2184,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -2261,7 +2220,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -2296,7 +2254,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -2334,7 +2291,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 
@@ -2369,7 +2325,6 @@ describe("TerminalPage Android IME bridge", () => {
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
-        onLoadSavedTabList={vi.fn()}
       />,
     );
 

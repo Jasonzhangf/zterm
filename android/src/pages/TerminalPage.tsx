@@ -66,11 +66,9 @@ import {
 import {
   STORAGE_KEYS,
   type AndroidWorkspacePane,
-  type PersistedOpenTab,
   type QuickAction,
   type RemoteScreenshotCapture,
   type RemoteScreenshotStatusPayload,
-  type SavedTabList,
   type Session,
   type SessionDebugOverlayMetrics,
   type SessionGroupHistory,
@@ -248,7 +246,6 @@ interface TerminalPageProps {
   sessionDraft: string;
   onSessionDraftChange?: (value: string, sessionId?: string) => void;
   onSessionDraftSend?: (value: string, sessionId?: string) => void;
-  onLoadSavedTabList: (tabs: PersistedOpenTab[], activeSessionId?: string) => void;
   scheduleState?: SessionScheduleState | null;
   getScheduleState?: (sessionId: string) => SessionScheduleState;
   onRequestScheduleList?: (sessionId: string) => void;
@@ -808,59 +805,6 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   );
 });
 
-function toPersistedOpenTab(session: Session): PersistedOpenTab {
-  return {
-    sessionId: session.id,
-    hostId: session.hostId,
-    connectionName: session.connectionName,
-    bridgeHost: session.bridgeHost,
-    bridgePort: session.bridgePort,
-    sessionName: session.sessionName,
-    authToken: session.authToken,
-    autoCommand: session.autoCommand,
-    customName: session.customName,
-    createdAt: session.createdAt,
-  };
-}
-
-function normalizePersistedOpenTab(input: unknown): PersistedOpenTab | null {
-  if (!input || typeof input !== 'object') {
-    return null;
-  }
-
-  const candidate = input as Partial<PersistedOpenTab>;
-  const sessionId = typeof candidate.sessionId === 'string' ? candidate.sessionId.trim() : '';
-  const bridgeHost = typeof candidate.bridgeHost === 'string' ? candidate.bridgeHost.trim() : '';
-  const sessionName = typeof candidate.sessionName === 'string' ? candidate.sessionName.trim() : '';
-
-  if (!sessionId || !bridgeHost || !sessionName) {
-    return null;
-  }
-
-  return {
-    sessionId,
-    hostId: typeof candidate.hostId === 'string' ? candidate.hostId : '',
-    connectionName: typeof candidate.connectionName === 'string' && candidate.connectionName.trim()
-      ? candidate.connectionName.trim()
-      : sessionName,
-    bridgeHost,
-    bridgePort:
-      typeof candidate.bridgePort === 'number' && Number.isFinite(candidate.bridgePort)
-        ? candidate.bridgePort
-        : 3333,
-    sessionName,
-    authToken: typeof candidate.authToken === 'string' ? candidate.authToken : undefined,
-    autoCommand: typeof candidate.autoCommand === 'string' ? candidate.autoCommand : undefined,
-    customName: typeof candidate.customName === 'string' && candidate.customName.trim()
-      ? candidate.customName.trim()
-      : undefined,
-    createdAt:
-      typeof candidate.createdAt === 'number' && Number.isFinite(candidate.createdAt)
-        ? candidate.createdAt
-        : Date.now(),
-  };
-}
-
 function formatDebugRate(bytesPerSecond: number) {
   const safeValue = Math.max(0, Number.isFinite(bytesPerSecond) ? bytesPerSecond : 0);
   if (safeValue >= 1024 * 1024) {
@@ -913,41 +857,6 @@ function resolveDebugStatus(
   }
 }
 
-function normalizeSavedTabList(input: unknown): SavedTabList | null {
-  if (!input || typeof input !== 'object') {
-    return null;
-  }
-
-  const candidate = input as Partial<SavedTabList>;
-  const now = Date.now();
-  const id = typeof candidate.id === 'string' && candidate.id.trim()
-    ? candidate.id.trim()
-    : `imported-tab-list-${now}-${Math.random().toString(36).slice(2, 8)}`;
-  const name = typeof candidate.name === 'string' ? candidate.name.trim() : '';
-  const tabs = Array.isArray(candidate.tabs)
-    ? candidate.tabs.map(normalizePersistedOpenTab).filter((item): item is PersistedOpenTab => item !== null)
-    : [];
-
-  if (!name || tabs.length === 0) {
-    return null;
-  }
-
-  return {
-    id,
-    name,
-    tabs,
-    activeSessionId: typeof candidate.activeSessionId === 'string' ? candidate.activeSessionId : undefined,
-    createdAt:
-      typeof candidate.createdAt === 'number' && Number.isFinite(candidate.createdAt)
-        ? candidate.createdAt
-        : now,
-    updatedAt:
-      typeof candidate.updatedAt === 'number' && Number.isFinite(candidate.updatedAt)
-        ? candidate.updatedAt
-        : now,
-  };
-}
-
 function TerminalPageComponent({
   sessions,
   sessionGroups = [],
@@ -987,7 +896,6 @@ function TerminalPageComponent({
   sessionDraft,
   onSessionDraftChange,
   onSessionDraftSend,
-  onLoadSavedTabList,
   scheduleState,
   getScheduleState,
   onRequestScheduleList,
@@ -1034,7 +942,6 @@ function TerminalPageComponent({
   const [viewportWidth, setViewportWidth] = useState(() => resolveWindowWidth());
   const [headerTopInsetPx, setHeaderTopInsetPx] = useState(() => resolveTerminalHeaderTopInsetPx(isAndroid));
   const viewportMetricsFrameRef = useRef<number | null>(null);
-  const [savedTabLists, setSavedTabLists] = useState<SavedTabList[]>([]);
   const [debugOverlayVisible, setDebugOverlayVisible] = useState(false);
   const [absoluteLineNumbersVisible, setAbsoluteLineNumbersVisible] = useState(false);
   const [sessionGroupSlotIds, setSessionGroupSlotIds] = useState<TerminalSessionGroupSlotIds>(() => ({
@@ -1159,40 +1066,6 @@ function TerminalPageComponent({
       updateViewportMetrics();
     });
   }, [updateViewportMetrics]);
-
-  useEffect(() => {
-    const storage = getBrowserStorage();
-    if (!storage) {
-      return;
-    }
-
-    try {
-      const raw = storage.getItem(STORAGE_KEYS.SAVED_TAB_LISTS);
-      if (!raw) {
-        return;
-      }
-      const parsed = JSON.parse(raw);
-      if (!Array.isArray(parsed)) {
-        return;
-      }
-      setSavedTabLists(parsed.map(normalizeSavedTabList).filter((item): item is SavedTabList => item !== null));
-    } catch (error) {
-      console.error('[TerminalPage] Failed to load saved tab lists:', error);
-    }
-  }, []);
-
-  const persistSavedTabLists = (nextLists: SavedTabList[]) => {
-    setSavedTabLists(nextLists);
-    const storage = getBrowserStorage();
-    if (!storage) {
-      return;
-    }
-    try {
-      storage.setItem(STORAGE_KEYS.SAVED_TAB_LISTS, JSON.stringify(nextLists));
-    } catch (error) {
-      console.error('[TerminalPage] Failed to persist saved tab lists:', error);
-    }
-  };
 
   const querySessionInput = (sessionId: string | null | undefined) => {
     if (!sessionId || typeof document === 'undefined') {
@@ -2383,79 +2256,6 @@ function TerminalPageComponent({
     'terminal-page',
     () => terminalPageSnapshotProducerRef.current(),
   ), []);
-  const currentPersistedTabs = sessions.map(toPersistedOpenTab);
-
-  const saveCurrentTabList = (name: string) => {
-    const now = Date.now();
-    const nextList: SavedTabList = {
-      id: `tab-list-${now}-${Math.random().toString(36).slice(2, 8)}`,
-      name,
-      tabs: currentPersistedTabs,
-      activeSessionId: uiSessionId || undefined,
-      createdAt: now,
-      updatedAt: now,
-    };
-    const deduped = [
-      nextList,
-      ...savedTabLists.filter((item) => item.name !== name),
-    ];
-    persistSavedTabLists(deduped);
-  };
-
-  const exportCurrentTabList = () => JSON.stringify({
-    name: `current-${new Date().toISOString()}`,
-    tabs: currentPersistedTabs,
-    activeSessionId: uiSessionId || undefined,
-    exportedAt: new Date().toISOString(),
-  }, null, 2);
-
-  const exportSavedTabList = (listId: string) => {
-    const target = savedTabLists.find((item) => item.id === listId);
-    return JSON.stringify(target || null, null, 2);
-  };
-
-  const deleteSavedTabList = (listId: string) => {
-    persistSavedTabLists(savedTabLists.filter((item) => item.id !== listId));
-  };
-
-  const loadSavedTabList = (listId: string) => {
-    const target = savedTabLists.find((item) => item.id === listId);
-    if (!target) {
-      return;
-    }
-    onLoadSavedTabList(target.tabs, target.activeSessionId);
-    runtimeDebug('terminal.tab.restore', {
-      listId,
-      tabCount: target.tabs.length,
-      activeSessionId: target.activeSessionId,
-    });
-  };
-
-  const importSavedTabLists = (raw: string) => {
-    try {
-      const parsed = JSON.parse(raw);
-      const incoming = Array.isArray(parsed)
-        ? parsed.map(normalizeSavedTabList).filter((item): item is SavedTabList => item !== null)
-        : [normalizeSavedTabList(parsed)].filter((item): item is SavedTabList => item !== null);
-      if (incoming.length === 0) {
-        return { ok: false, message: '没有解析到有效的 tab 列表。' };
-      }
-      const merged = [...incoming];
-      for (const existing of savedTabLists) {
-        if (!merged.some((item) => item.id === existing.id || item.name === existing.name)) {
-          merged.push(existing);
-        }
-      }
-      persistSavedTabLists(merged);
-      return { ok: true, message: `已导入 ${incoming.length} 个 tab 列表。` };
-    } catch (error) {
-      return {
-        ok: false,
-        message: error instanceof Error ? error.message : '导入失败',
-      };
-    }
-  };
-
   const handleSetSplitCount = useCallback((count: number) => {
     setSplitCount(count);
   }, [setSplitCount]);
@@ -2928,7 +2728,6 @@ function TerminalPageComponent({
             : chromeSessions
         }
         activeSessionId={interactiveSession?.id}
-        savedTabLists={savedTabLists}
         onClose={() => {
           setTabManagerOpen(false);
           setTabManagerScopePaneId(null);
@@ -2943,12 +2742,6 @@ function TerminalPageComponent({
           setTabManagerScopePaneId(null);
           handleOpenQuickTabPickerForPane(targetPaneId);
         }}
-        onSaveCurrentTabList={saveCurrentTabList}
-        onLoadSavedTabList={loadSavedTabList}
-        onDeleteSavedTabList={deleteSavedTabList}
-        onExportCurrentTabList={exportCurrentTabList}
-        onExportSavedTabList={exportSavedTabList}
-        onImportSavedTabLists={importSavedTabLists}
       />
       {scheduleComposerTarget ? (
         <SessionScheduleSheet
@@ -3027,7 +2820,6 @@ function terminalPagePropsEqual(
     && prev.sessionDraft === next.sessionDraft
     && prev.onSessionDraftChange === next.onSessionDraftChange
     && prev.onSessionDraftSend === next.onSessionDraftSend
-    && prev.onLoadSavedTabList === next.onLoadSavedTabList
     && prev.scheduleState === next.scheduleState
     && prev.getScheduleState === next.getScheduleState
     && prev.onRequestScheduleList === next.onRequestScheduleList
