@@ -18,6 +18,8 @@
     { "id": "WinDesktopShell", "semantic": "desktop window/workspace composition", "binding": "win/src/WindowsDesktopApp.tsx#WindowsDesktopApp" },
     { "id": "WinWorkspaceModel", "semantic": "Windows tab targets composed through shared pane workspace operations", "binding": "win/src/windows-workspace.ts#createWindowsWorkspaceState" },
     { "id": "WinRuntimeRegistry", "semantic": "one stable terminal runtime per Windows workspace tab", "binding": "win/src/windows-terminal-registry.ts#createWindowsTerminalRegistry" },
+    { "id": "WinFileProvider", "semantic": "typed Windows filesystem list/read/select provider", "binding": "win/electron/windows-file-system.ts#registerWindowsFileSystemIpcHandlers" },
+    { "id": "WinFilePreview", "semantic": "local file browser UI consuming shared preview policy", "binding": "win/src/WindowsFileBrowserPanel.tsx#WindowsFileBrowserPanel" },
     { "id": "WinSessionControl", "semantic": "daemon session discovery/create/close UI control", "binding": "win/src/windows-terminal-session.ts#createWindowsSessionControl" },
     { "id": "WinSharedTransport", "semantic": "existing shared daemon protocol transport", "binding": "win/src/windows-terminal-session.ts#createWindowsTerminalSession" },
     { "id": "WinSharedRenderer", "semantic": "existing shared terminal renderer", "binding": "packages/shared/src/terminal/mac-terminal-view.tsx" }
@@ -29,6 +31,8 @@
     { "edge_id": "windows_desktop_shell:WinDesktopShell->WinSessionControl", "from": "WinDesktopShell", "to": "WinSessionControl", "status": "anchored", "resource_from": "resource.ui_projection", "resource_to": "resource.active_session" },
     { "edge_id": "windows_desktop_shell:WinDesktopShell->WinWorkspaceModel", "from": "WinDesktopShell", "to": "WinWorkspaceModel", "status": "anchored", "resource_from": "resource.ui_projection", "resource_to": "resource.active_session" },
     { "edge_id": "windows_desktop_shell:WinWorkspaceModel->WinRuntimeRegistry", "from": "WinWorkspaceModel", "to": "WinRuntimeRegistry", "status": "anchored", "resource_from": "resource.active_session", "resource_to": "resource.session_transport" },
+    { "edge_id": "windows_desktop_shell:WinDesktopShell->WinFileProvider", "from": "WinDesktopShell", "to": "WinFileProvider", "status": "anchored", "resource_from": "resource.ui_projection", "resource_to": "resource.platform_terminal_surface" },
+    { "edge_id": "windows_desktop_shell:WinFileProvider->WinFilePreview", "from": "WinFileProvider", "to": "WinFilePreview", "status": "anchored", "resource_from": "resource.platform_terminal_surface", "resource_to": "resource.ui_projection", "via_resources": ["resource.file_browser_core"] },
     { "edge_id": "windows_desktop_shell:WinDesktopShell->WinSharedTransport", "from": "WinDesktopShell", "to": "WinSharedTransport", "status": "anchored", "resource_from": "resource.active_session", "resource_to": "resource.session_transport" },
     { "edge_id": "windows_desktop_shell:WinSharedTransport->WinSharedRenderer", "from": "WinSharedTransport", "to": "WinSharedRenderer", "status": "anchored", "resource_from": "resource.session_transport", "resource_to": "resource.renderer_window", "via_resources": ["resource.transport_subscriber", "resource.mirror_store", "resource.client_sparse_buffer"] },
     { "edge_id": "windows_desktop_shell:WinRuntimeRegistry->WinSharedRenderer", "from": "WinRuntimeRegistry", "to": "WinSharedRenderer", "status": "anchored", "resource_from": "resource.session_transport", "resource_to": "resource.renderer_window", "via_resources": ["resource.client_sparse_buffer"] }
@@ -39,6 +43,8 @@
     "win/src/windows-terminal-session.test.ts",
     "win/src/windows-workspace.test.ts",
     "win/src/windows-terminal-registry.test.ts",
+    "win/src/windows-file-system.test.ts",
+    "win/src/WindowsFileBrowserPanel.test.tsx",
     "win/package.json#type-check",
     "win/package.json#build",
     "android/src/lib/feature-registry-truth.test.ts",

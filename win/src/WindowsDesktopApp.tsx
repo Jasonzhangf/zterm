@@ -17,6 +17,7 @@ import {
   type WindowsTerminalTarget,
 } from './windows-terminal-session';
 import { createWindowsTerminalRegistry } from './windows-terminal-registry';
+import { WindowsFileBrowserPanel } from './WindowsFileBrowserPanel';
 import {
   activateWindowsWorkspacePane,
   activateWindowsWorkspaceTab,
@@ -161,6 +162,7 @@ export function WindowsDesktopApp() {
   const [target, setTarget] = useState<WindowsTerminalTarget>(readTarget);
   const [newSessionName, setNewSessionName] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(true);
+  const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
 
   useEffect(() => {
     const tabs = listWindowsWorkspaceRuntimeTabs(workspace);
@@ -203,9 +205,13 @@ export function WindowsDesktopApp() {
           <span className="state-dot" />
           {activeTab?.target?.sessionName ?? 'No session'}
         </div>
-        <button className="icon-button" title="连接设置" aria-label="连接设置" onClick={() => setSettingsOpen((open) => !open)}>⚙</button>
+        <div className="titlebar-actions">
+          <button className="title-command" onClick={() => setFileBrowserOpen((open) => !open)}>Files</button>
+          <button className="icon-button" title="连接设置" aria-label="连接设置" onClick={() => setSettingsOpen((open) => !open)}>⚙</button>
+        </div>
       </header>
       <WindowsWorkspaceStage workspace={workspace} registry={registry} onChange={setWorkspace} />
+      <WindowsFileBrowserPanel open={fileBrowserOpen} onClose={() => setFileBrowserOpen(false)} />
       {settingsOpen ? (
         <aside className="connection-panel" aria-label="连接设置">
           <div className="panel-title">连接</div>

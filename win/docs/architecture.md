@@ -18,6 +18,7 @@ Windows is split into two layers:
 ## Allowed Paths
 
 - Add Windows shell docs, package metadata, launcher, installer, and platform integration under `win/`.
+- Add Windows filesystem IO only behind the typed preload adapter; path/sort/preview decisions remain in shared `FileBrowserCore`.
 - Update shared desktop pane/shell components only when the same behavior is intentionally shared with Mac.
 - Update daemon backend only through `daemon.windows_wezterm_backend` owner paths.
 
@@ -27,6 +28,7 @@ Windows is split into two layers:
 - Do not implement a second terminal renderer under `win/`.
 - Do not implement a second daemon mirror, buffer protocol, or terminal transport stack under `win/`.
 - Do not fall back to tmux when the Windows WezTerm backend fails; expose the error.
+- Do not import Mac filesystem IPC or duplicate file preview eligibility under `win/`.
 
 ## Validation Boundary
 

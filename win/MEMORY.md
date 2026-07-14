@@ -33,3 +33,11 @@
 - Packaged Windows L5 passed with sessions `ztermwinwsa24906188` and `ztermwinwsb24906188`: both panes independently matched their own source markers and excluded the sibling marker. Daemon health stayed exactly `2 attached / 2 ready` across focus switch, proving no reconnect/recreation on projection change.
 - Closing pane A reduced daemon client sessions to `1 attached / 1 ready`; pane B then rendered new marker `ZTERMWINWSB2_24906188`, proving sibling transport/render continuation. Cleanup returned daemon sessions/subscribers to zero, app process count to zero, and CDP listener count to zero.
 - Deployed package path is `D:/zterm-tools/windows-client-alpha/0.1.0-alpha.workspace2/ZTerm.exe`; archive SHA-256 is `b11741b53d3c4a0a6c983d93ac0d9f90971c071dcf3277548380a4f8a2b082d1`.
+
+## 2026-07-14 Windows local file browser packaged proof
+
+- `windows.desktop_shell.file_browser` owns only the Windows Electron filesystem adapter and browser UI projection. It reuses shared `FileBrowserCore` for path normalization, sort policy, text/binary preview decisions, and large-text confirmation; it does not import Mac filesystem IPC or touch daemon/runtime state.
+- Local gates passed: Windows typecheck, 6 files / 15 tests, renderer/main build, and x64 directory package.
+- Packaged Windows L5 passed against fixture `D:/zterm-tools/windows-file-browser-fixture`: `window.ztermWindows.fileSystem` was present, directory listing returned `src`, `image.png`, and `README.md`, Markdown preview DOM contained `WINDOWS_REMOTE_FILE_PREVIEW_SOURCE`, and `image.png` projected `Binary preview is not implemented`.
+- Daemon session counts stayed `0 total / 0 attached / 0 ready` before and after file browsing, proving file browsing did not mutate terminal runtime/transport state. App process count and CDP listener count returned to zero after smoke cleanup.
+- Deployed package path is `D:/zterm-tools/windows-client-alpha/0.1.0-alpha.files/ZTerm.exe`; archive SHA-256 is `fd42c6beb51847813088343e7b5b69862de9742bae6e385cf7ec1a1ceda14492`.

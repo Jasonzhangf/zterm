@@ -1,6 +1,7 @@
-import { app, BrowserWindow, Menu } from 'electron';
+import { app, BrowserWindow, dialog, ipcMain, Menu } from 'electron';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
+import { registerWindowsFileSystemIpcHandlers } from './windows-file-system.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
@@ -33,6 +34,9 @@ function createMainWindow() {
 }
 
 app.whenReady().then(() => {
+  registerWindowsFileSystemIpcHandlers(ipcMain, {
+    showOpenDialog: (options) => dialog.showOpenDialog(options),
+  });
   Menu.setApplicationMenu(Menu.buildFromTemplate([
     { label: 'File', submenu: [{ role: 'quit' }] },
     { label: 'View', submenu: [{ role: 'reload' }, { role: 'toggleDevTools' }, { type: 'separator' }, { role: 'resetZoom' }, { role: 'zoomIn' }, { role: 'zoomOut' }] },

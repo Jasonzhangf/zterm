@@ -3,7 +3,7 @@
 ## Scope
 
 - Feature: `windows.desktop_shell`
-- Status: multi-session workspace packaged Windows gate passed on 2026-07-14.
+- Status: multi-session workspace and local file browser packaged Windows gates passed on 2026-07-14.
 - Resource path: `resource.platform_terminal_surface -> resource.ui_projection`, with terminal data consumed through existing shared `resource.session_transport -> resource.client_sparse_buffer -> resource.renderer_window` owners.
 - Shell owner: `win/` Electron entry, preload/platform bridge, packaging, and Windows-only integration.
 - Shared owner: `packages/shared/` for intentionally cross-platform desktop workspace/render semantics.
@@ -41,6 +41,15 @@ The Windows shell must not own:
 - Module black-box negative: selecting an unknown pane/tab, splitting beyond the shared pane cap, or closing the last empty tab must not create a runtime or corrupt workspace identity.
 - Project black-box: the packaged Windows app opens two real daemon sessions in separate panes, both receive independent source markers, switching focus does not increase physical client transport count, and closing one tab leaves the sibling updating.
 - Packaged proof requires daemon health counts before/after focus switch and tab close, plus per-pane source markers and a new sibling marker after close.
+
+## Windows local file browser test design
+
+- Lifecycle: an explicit Files command opens the browser; renderer invokes only the typed preload bridge; Electron owns Windows path IO; shared `FileBrowserCore` owns normalization, sorting, text/binary eligibility, and large-text confirmation.
+- White-box: `win/` must not import Mac filesystem modules or duplicate extension/preview policy. IPC handlers accept structured path requests and return explicit provider errors.
+- Module black-box positive: a fixture directory lists directory-first, opens a child directory, previews UTF-8 Markdown, and reads a large text file only after confirmation.
+- Module black-box negative: binary files never call `readFile`; missing paths surface provider errors rather than empty success; a missing preload bridge is visible as an error.
+- Project black-box: packaged Windows app opens a real fixture directory through `window.ztermWindows.fileSystem`, lists the fixture, automatically compares expected Markdown source text with preview DOM, and proves binary preview is disabled without reading file content.
+- Resource closeout: closing the panel must not change daemon attached/subscriber counts or terminal runtime identity.
 
 ## White-box gates
 

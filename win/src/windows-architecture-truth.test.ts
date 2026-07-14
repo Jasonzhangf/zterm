@@ -15,10 +15,12 @@ describe('windows desktop shell architecture truth', () => {
     expect(read('src/windows-terminal-session.ts')).toContain('applyBufferSyncToSessionBuffer');
     expect(read('src/windows-workspace.ts')).toContain('addPaneToWorkspace');
     expect(read('src/windows-terminal-registry.ts')).toContain('createWindowsTerminalRegistry');
+    expect(read('electron/windows-file-system.ts')).toContain('registerWindowsFileSystemIpcHandlers');
+    expect(read('src/WindowsFileBrowserPanel.tsx')).toContain('decideFileBrowserPreview');
   });
 
   it('does not import Mac IPC, local tmux, daemon, mirror, or renderer copies', () => {
-    const source = [read('electron/main.ts'), read('electron/preload.cts'), read('src/WindowsDesktopApp.tsx'), read('src/windows-terminal-session.ts'), read('src/windows-workspace.ts'), read('src/windows-terminal-registry.ts')].join('\n');
+    const source = [read('electron/main.ts'), read('electron/preload.cts'), read('electron/windows-file-system.ts'), read('src/WindowsDesktopApp.tsx'), read('src/WindowsFileBrowserPanel.tsx'), read('src/windows-terminal-session.ts'), read('src/windows-workspace.ts'), read('src/windows-terminal-registry.ts')].join('\n');
     expect(source).not.toContain('ztermMac');
     expect(source).not.toContain('local-tmux');
     expect(source).not.toContain('src/server');
