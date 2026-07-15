@@ -2,8 +2,8 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { TraversalRelayDeviceSnapshot } from '../lib/types';
-import { ConnectionsPage } from './ConnectionsPage';
+import type { Host, TraversalRelayDeviceSnapshot } from '../lib/types';
+import { ConnectionsPage, type ConnectionsHomeActiveSession } from './ConnectionsPage';
 
 const syncRelay = vi.fn();
 const logoutRelay = vi.fn();
@@ -54,6 +54,43 @@ function makeRelayDevice(overrides: Partial<TraversalRelayDeviceSnapshot> = {}):
   };
 }
 
+function makeSavedHost(overrides: Partial<Host> = {}): Host {
+  return {
+    id: overrides.id || 'host-tailscale-a',
+    createdAt: overrides.createdAt || 1,
+    name: overrides.name || 'Mac Studio Tailscale',
+    bridgeHost: overrides.bridgeHost || '100.66.1.82',
+    bridgePort: overrides.bridgePort || 3333,
+    daemonHostId: overrides.daemonHostId || 'mac-studio',
+    sessionName: overrides.sessionName || 'zterm',
+    authToken: overrides.authToken || 'token-a',
+    authType: overrides.authType || 'password',
+    password: overrides.password,
+    privateKey: overrides.privateKey,
+    autoCommand: overrides.autoCommand || '',
+    tags: overrides.tags || ['tailscale'],
+    pinned: overrides.pinned ?? false,
+    lastConnected: overrides.lastConnected || 2,
+    relayEndpointCandidates: overrides.relayEndpointCandidates || [],
+  };
+}
+
+function makeActiveSession(overrides: Partial<ConnectionsHomeActiveSession> = {}): ConnectionsHomeActiveSession {
+  return {
+    id: overrides.id || 'session-live-a',
+    title: overrides.title || 'zterm',
+    connectionName: overrides.connectionName || 'Mac Studio Tailscale',
+    bridgeHost: overrides.bridgeHost || '100.66.1.82',
+    bridgePort: overrides.bridgePort || 3333,
+    daemonHostId: overrides.daemonHostId || 'mac-studio',
+    sessionName: overrides.sessionName || 'zterm',
+    state: overrides.state || 'connected',
+    resolvedEndpoint: overrides.resolvedEndpoint,
+    resolvedPath: overrides.resolvedPath,
+    customName: overrides.customName,
+  };
+}
+
 describe('ConnectionsPage fixed relay login home', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -70,16 +107,45 @@ describe('ConnectionsPage fixed relay login home', () => {
 
   afterEach(cleanup);
 
-  it('shows only the fixed relay service plus account/password login fields', () => {
-    render(<ConnectionsPage onRelaySettingsChange={vi.fn()} onOpenSettings={vi.fn()} />);
+  it('shows saved direct connections, active sessions, add action, and fixed relay login while signed out', () => {
+    const onResumeSession = vi.fn();
+    const onOpenSavedConnection = vi.fn();
+    const onOpenAddConnection = vi.fn();
+    const savedHost = makeSavedHost();
+    const activeSession = makeActiveSession();
+
+    render(
+      <ConnectionsPage
+        savedConnections={[savedHost]}
+        activeSessions={[activeSession]}
+        activeSessionId={activeSession.id}
+        onResumeSession={onResumeSession}
+        onOpenSavedConnection={onOpenSavedConnection}
+        onOpenAddConnection={onOpenAddConnection}
+        onRelaySettingsChange={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
 
     expect(screen.getByTestId('relay-fixed-host').textContent).toBe('relay.codewhisper.cc');
     expect(screen.getByLabelText('Relay account')).toBeTruthy();
     expect(screen.getByLabelText('Relay password')).toBeTruthy();
+    expect(screen.getByText('Mac Studio Tailscale')).toBeTruthy();
+    expect(screen.getByText('100.66.1.82:3333')).toBeTruthy();
+    expect(screen.getByTestId('saved-connection-row')).toBeTruthy();
+    expect(screen.getByTestId('active-session-row')).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Add connection' })).toBeTruthy();
     expect(screen.queryByText('All servers')).toBeNull();
     expect(screen.queryByText('Open selected groups')).toBeNull();
     expect(screen.queryByRole('checkbox')).toBeNull();
     expect(screen.queryByDisplayValue(/https?:\/\//)).toBeNull();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Resume zterm' }));
+    expect(onResumeSession).toHaveBeenCalledWith(activeSession.id);
+    fireEvent.click(screen.getByRole('button', { name: 'Open Mac Studio Tailscale' }));
+    expect(onOpenSavedConnection).toHaveBeenCalledWith(savedHost);
+    fireEvent.click(screen.getByRole('button', { name: 'Add connection' }));
+    expect(onOpenAddConnection).toHaveBeenCalledTimes(1);
   });
 
   it('submits account/password through the fixed-domain relay owner and applies returned settings', async () => {
@@ -115,7 +181,7 @@ describe('ConnectionsPage fixed relay login home', () => {
     expect(onRelaySettingsChange).toHaveBeenCalledWith(relaySettings);
   });
 
-  it('projects daemon rows without projecting session children or group actions', () => {
+  it('projects daemon route rows without replacing saved direct connections or adding group actions', () => {
     vi.mocked(useTraversalRelayAccount).mockReturnValue({
       account: {
         username: 'jason',
@@ -139,23 +205,28 @@ describe('ConnectionsPage fixed relay login home', () => {
       logoutRelay,
     });
 
+    const savedHost = makeSavedHost();
+
     render(
       <ConnectionsPage
         relaySettings={relaySettings}
         relayDevices={[makeRelayDevice()]}
+        savedConnections={[savedHost]}
         onRelaySettingsChange={vi.fn()}
         onOpenSettings={vi.fn()}
       />,
     );
 
     expect(screen.getByText('Mac Studio')).toBeTruthy();
+    expect(screen.getByText('Mac Studio Tailscale')).toBeTruthy();
+    expect(screen.getByText('100.66.1.82:3333')).toBeTruthy();
     expect(screen.getByText('ONLINE')).toBeTruthy();
     expect(screen.getAllByTestId('relay-daemon-row')).toHaveLength(1);
     expect(screen.queryByText('sessions')).toBeNull();
     expect(screen.queryByText('Enter')).toBeNull();
   });
 
-  it('logs out through the account owner and clears App relay settings', () => {
+  it('logs out through the account owner and keeps saved direct entries visible', () => {
     vi.mocked(useTraversalRelayAccount).mockReturnValue({
       account: {
         username: 'jason',
@@ -179,10 +250,12 @@ describe('ConnectionsPage fixed relay login home', () => {
       logoutRelay,
     });
     const onRelaySettingsChange = vi.fn();
+    const savedHost = makeSavedHost();
 
     render(
       <ConnectionsPage
         relaySettings={relaySettings}
+        savedConnections={[savedHost]}
         onRelaySettingsChange={onRelaySettingsChange}
         onOpenSettings={vi.fn()}
       />,
@@ -191,5 +264,28 @@ describe('ConnectionsPage fixed relay login home', () => {
 
     expect(logoutRelay).toHaveBeenCalledTimes(1);
     expect(onRelaySettingsChange).toHaveBeenCalledWith(undefined);
+    expect(screen.getByText('Mac Studio Tailscale')).toBeTruthy();
+  });
+
+  it('keeps saved and active entries visible when relay login fails', async () => {
+    syncRelay.mockResolvedValueOnce(null);
+    const savedHost = makeSavedHost();
+    const activeSession = makeActiveSession();
+
+    render(
+      <ConnectionsPage
+        savedConnections={[savedHost]}
+        activeSessions={[activeSession]}
+        onRelaySettingsChange={vi.fn()}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+    fireEvent.change(screen.getByLabelText('Relay account'), { target: { value: 'jason' } });
+    fireEvent.change(screen.getByLabelText('Relay password'), { target: { value: 'secret' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    await waitFor(() => expect(syncRelay).toHaveBeenCalledTimes(1));
+    expect(screen.getByText('Mac Studio Tailscale')).toBeTruthy();
+    expect(screen.getByTestId('active-session-row')).toBeTruthy();
   });
 });

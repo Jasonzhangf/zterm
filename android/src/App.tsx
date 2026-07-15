@@ -507,6 +507,8 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     pickerMode,
     pickerTarget,
     pickerInitialSessions,
+    handleAddNew,
+    handleOpenSavedConnection,
     handleOpenQuickTabPicker,
     handleOpenSingleTmuxSession,
     handleOpenMultipleTmuxSessions,
@@ -554,6 +556,11 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     auditOpenTabsAgainstRemoteSessions,
   });
 
+  const handleResumeHomeSession = useCallback((sessionId: string) => {
+    handleSwitchSession(sessionId);
+    ensureTerminalPageVisible();
+  }, [ensureTerminalPageVisible, handleSwitchSession]);
+
   
   return (
     <div
@@ -570,8 +577,14 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
       <div style={{ width: '100%', height: '100dvh', overflow: 'hidden' }}>
         {pageState.kind === 'connections' && (
           <ConnectionsPage
+            savedConnections={hosts}
+            activeSessions={terminalSessions}
+            activeSessionId={terminalActiveSession?.id || null}
             relaySettings={bridgeSettings.traversalRelay}
             relayDevices={relayDevices}
+            onResumeSession={handleResumeHomeSession}
+            onOpenSavedConnection={handleOpenSavedConnection}
+            onOpenAddConnection={handleAddNew}
             onRelaySettingsChange={(relaySettings) => {
               setBridgeSettings((current) => applyTraversalRelaySettings(current, relaySettings));
             }}

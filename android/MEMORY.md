@@ -1136,3 +1136,10 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - Open tabs, active tab focus, and closed semantic reuse tombstones are current-process client truth, not durable configuration. Cold launch must remove and ignore legacy `OPEN_TABS`, `ACTIVE_SESSION`, `SAVED_TAB_LISTS`, and closed-tab reuse storage. Tab switch/reorder/close may update in-memory truth but must not write those keys.
 - Relay password is request-only form state. Persisted relay account truth may contain access token, account identity, directory, and client settings, but plaintext password must be empty.
 - Fixed production relay display identity is `relay.codewhisper.cc`, but the verified public client endpoint is `https://relay.codewhisper.cc:18443/relay/`. Do not use Tailscale `100.x` addresses as public DNS targets. Authoritative DNS points `relay.codewhisper.cc` to public `159.75.134.56`; public `443` currently resets TLS before nginx, while `18443` serves a valid `relay.codewhisper.cc` certificate, `/relay/health`, login, and `wss://relay.codewhisper.cc:18443/relay/ws/*` URLs.
+
+# 2026-07-15 Relay is optional Home assurance, never a direct-connection gate
+
+- Android Home has three independent projections: current-process active Sessions, saved direct/Tailscale Hosts, and optional Relay account/directory. Relay logged-out, login-error, and logout states must preserve the first two.
+- Relay login augments synchronized machine/device/route candidates, including Tailscale/local/direct endpoints. It must not replace, delete, hide, or own saved Host/Tailscale truth.
+- Home remains a projection layer: saved Host actions go through `useSessionOpenActions` and active Session resume goes through the open-tab/session owner. Home must not create/close sessions, write storage, restore cold-start tabs, or gate navigation on Relay access token.
+- Regression gates: signed-out saved/active/add visibility, login-failure preservation, logout preservation, saved-host picker intent without session creation, App wiring with no Session-group/tab-persistence revival.

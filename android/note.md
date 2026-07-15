@@ -2360,3 +2360,11 @@ Need runtime debug to confirm:
 - APK `0.1.3.2119` / versionCode `1032119` published with SHA-256 `00991533d26f999d9982257951cfda689c134d308ad739aee7e8ba5a2c334a0a`.
 - Production relay endpoint is not yet live at the fixed URL: `relay.codewhisper.cc` has no A record; current relay host `claw.codewhisper.cc` resolves to Tailscale IP `100.124.49.106`; that host serves relay health on port 18443, while 443 `/relay/health` returns 404 and the certificate contains only `claw.codewhisper.cc`. DNS A + nginx 443 route + TLS SAN/certificate are all required before production login E2E.
 - ADB target `100.104.163.65:5555` was offline, so APK install and real-device visual/login verification remain open.
+# 2026-07-15 Relay optional assurance Home correction
+
+- Jason 修正产品语义：Relay 是可选保障与同步增强；未登录 Relay 时 saved direct/Tailscale connections 与 current-process active Sessions 必须仍可见可用。登录后 Relay 可以同步包括 Tailscale 在内的 route candidates，但不得替换 saved Host truth。
+- 根因已定位：`ConnectionsPage` 只接收 Relay props，`App` 只向 Home 注入 Relay settings/devices；旧架构文档和 App 红测还明确禁止 Home resume projection，导致 Relay 登录成为事实导航 gate。
+- 架构映射：`feature_id=relay.directory_ui + connections.history_projection + terminal.open_tabs`；Home 只消费 `Host[]` / current runtime Session projection 并发出 `useSessionOpenActions` / open-tab owner intent。禁止 Home 写 storage、直接 create/close session、恢复 cold tabs 或接管 transport。
+- 测试先行：`ConnectionsPage.test.tsx` 初始 4/5 failure，锁 signed-out saved/active/add entry、login failure preservation、logout preservation；实现后 Connections + session-open owner 25/25 PASS，App integration 32/32 PASS，feature registry 48/48 PASS，typecheck PASS。APK/L5 尚待。
+- 完整 build gate PASS：terminal contracts 48 files / 572 tests、common flows 7 files / 78 tests、relay local smoke PASS、Vite/Gradle PASS。发布并安装 `0.1.3.2122`（versionCode `1032122`），sha256 `652926d1fa38590fc9b72a8cbc8e238dece0c6ed572801c8116e9543c3aa468a`。
+- L5 现场缺口：设备 `100.104.163.65:5555` 安装版本已由 package manager 证实为 2122，但 `mCurrentFocus=NotificationShade`、`isKeyguardShowing=true`；无法在锁屏下验证 signed-out Home saved/active/picker 点击，不宣称真机 UI 闭环。

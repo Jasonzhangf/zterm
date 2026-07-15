@@ -481,13 +481,18 @@
     },
     {
       "feature_id": "connections.history_projection",
-      "title": "Legacy connection history storage outside Home",
+      "title": "Saved direct and Tailscale connection projection",
       "domain": "connections",
       "owners": [
-        "src/hooks/useSessionHistoryStorage.ts"
+        "src/hooks/useSessionHistoryStorage.ts",
+        "packages/shared/src/react/use-host-storage.ts"
       ],
       "allowed_paths": [
         "src/hooks/useSessionHistoryStorage.ts",
+        "packages/shared/src/react/use-host-storage.ts",
+        "src/App.tsx",
+        "src/pages/ConnectionsPage.tsx",
+        "src/pages/ConnectionsPage.test.tsx",
         "src/pages/ConnectionPropertiesPage.tsx",
         "src/hooks/useSessionHistoryStorage.test.ts"
       ],
@@ -498,6 +503,7 @@
       "required_gates": [
         "src/lib/open-tab-history-truth.test.ts",
         "src/hooks/useSessionHistoryStorage.test.ts",
+        "src/pages/ConnectionsPage.test.tsx",
         "src/pages/ConnectionPropertiesPage.test.tsx"
       ],
       "truth_sources": [
@@ -665,7 +671,7 @@
     },
     {
       "feature_id": "relay.directory_ui",
-      "title": "Fixed relay login home and directory projection",
+      "title": "Optional relay assurance and connection home projection",
       "domain": "relay-ui",
       "owners": [
         "src/pages/ConnectionsPage.tsx",
@@ -682,6 +688,7 @@
         "src/components/tmux/TmuxSessionPickerSheet.tsx",
         "src/components/tmux/TmuxSessionPickerSheet.test.tsx",
         "src/components/connection-form/RelayDevicePicker.tsx",
+        "src/App.tsx",
         "src/pages/ConnectionsPage.tsx",
         "src/pages/ConnectionsPage.test.tsx",
         "src/pages/ConnectionPropertiesPage.tsx",

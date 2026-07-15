@@ -994,7 +994,7 @@ describe('App dynamic refresh matrix', () => {
     expect(openTerminalPageSpy).not.toHaveBeenCalled();
   });
 
-  it('keeps the Home projection free of tab resume and group-management actions', async () => {
+  it('projects active Sessions on Home without reviving group management or tab persistence', async () => {
     localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'connections' }));
     sessionHarness.update(
       {
@@ -1011,12 +1011,20 @@ describe('App dynamic refresh matrix', () => {
 
     await waitFor(() => expect(connectionsPageHarness.readProps()).toBeTruthy());
     const props = connectionsPageHarness.readProps();
-    expect('onResumeSession' in props).toBe(false);
+    expect(props.activeSessions.map((session: { id: string }) => session.id)).toEqual(['s1', 's2']);
+    expect(props.activeSessionId).toBe('s1');
+    expect(props.onResumeSession).toEqual(expect.any(Function));
     expect('onOpenServerGroups' in props).toBe(false);
     expect('onSaveServerGroupSelection' in props).toBe(false);
     expect('onLoadSavedTabList' in props).toBe(false);
     expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).toBeNull();
     expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBeNull();
+
+    act(() => {
+      props.onResumeSession('s2');
+    });
+    expect(sessionHarness.switchSession).toHaveBeenCalledWith('s2', { refreshSource: 'explicit-resume' });
+    expect(openTerminalPageSpy).toHaveBeenCalledTimes(1);
   });
 
   // NOTE: d505c65 changed inputResetEpoch from React state to a ref to eliminate

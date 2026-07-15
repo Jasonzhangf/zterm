@@ -63,6 +63,7 @@ vi.mock('./lib/traversal-relay-client', () => ({
   sendTraversalRelayClientDebugSnapshot: (...args: any[]) => (sendDebugSnapshotMock as any)(...args),
   sendTraversalRelayClientDebugLogs: (...args: any[]) => (sendDebugLogsMock as any)(...args),
   applyTraversalRelaySettings: vi.fn(),
+  getDefaultTraversalRelayBaseUrl: () => 'https://relay.codewhisper.cc:18443/relay/',
 }));
 
 vi.mock('./lib/client-debug-snapshot', () => ({

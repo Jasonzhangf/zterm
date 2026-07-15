@@ -68,12 +68,13 @@
 
 ## UI 信息架构
 
-### Screen 1: Relay Login Home
+### Screen 1: Connections Home
 
-- 首页只承载固定 relay 服务 `relay.codewhisper.cc` 的账号登录与 daemon 设备状态。
-- 用户只输入账号和密码；relay base URL、WS、TURN 与 signal 地址不进入用户配置面。
-- 首页禁止投影或管理 Session group、Session 子列表、tab 列表与 tab 保存。
-- 实时 Session 列表、切换、关闭和预览只属于 Terminal drawer / picker。
+- 首页承载三个独立入口：当前进程 active Sessions、已保存 direct/Tailscale connections、固定 relay 服务 `relay.codewhisper.cc` 的可选账号登录与 daemon 设备状态。
+- Relay 是连接保障和同步增强，不是进入终端的 gate；未登录、登录失败或退出登录时，已保存 direct/Tailscale connections 与当前 active Sessions 仍必须可见可用。
+- 用户只输入 relay 账号和密码；relay base URL、WS、TURN 与 signal 地址不进入用户配置面。
+- Relay 登录成功后可以同步/补充所有连接候选，包括 Tailscale/local/direct endpoint，但不得删除、替换或隐藏 saved Host truth。
+- 首页禁止投影或管理 Session group、Session 子列表、tab 列表与 tab 保存；实时 Session 列表、切换、关闭和预览只属于 Terminal drawer / picker。
 - relay 登录密码只用于当次认证，不持久化明文；持久化真相是 token、account directory 与 relay client settings。
 
 ### Screen 1A: Session Picker
@@ -189,12 +190,16 @@ operation -> event -> projection
 - fixed relay service identity `relay.codewhisper.cc`
 - relay account state
 - relay account directory / daemon devices
+- saved Host storage projection
+- current-process active Session projection
 
 硬规则：
 
-- projection 只负责固定域名账号登录与 daemon device 投影
+- projection 负责 fixed-domain relay 登录、daemon device 投影、saved direct/Tailscale connection entry、current-process active Session resume entry
+- relay logged-out / error state 不得隐藏 direct/Tailscale saved Host 或 active Session entry
+- relay account directory 只能增强 route/device candidates，不得成为 saved Host / Tailscale direct connection owner
 - projection 不得写任何 storage
-- projection 不得创建 / 关闭 session
+- projection 不得创建 / 关闭 session；只能发出已存在 owner 的 open/resume intent
 - projection 不得决定 current tabs
 - projection 不得显示或管理 Session group / saved tab list；实时 Session 列表属于 terminal drawer / picker
 

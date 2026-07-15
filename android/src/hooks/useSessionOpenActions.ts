@@ -87,6 +87,7 @@ export interface SessionOpenActionsResult {
   pickerInitialSessions: string[];
   pickerScopePaneId: string | null;
   handleAddNew: () => void;
+  handleOpenSavedConnection: (host: Host) => void;
   handleOpenQuickTabPicker: (paneId?: string, hostKey?: string, createOptions?: QuickTabCreateOptions) => void;
   handleOpenSingleTmuxSession: (target: BridgeTarget, sessionName: string) => void;
   handleOpenMultipleTmuxSessions: (target: BridgeTarget, sessionNames: string[]) => void;
@@ -503,6 +504,27 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     });
   }, [openSessionPicker]);
 
+  const handleOpenSavedConnection = useCallback((host: Host) => {
+    openSessionPicker('new-connection', {
+      target: normalizeBridgeTarget({
+        bridgeHost: host.bridgeHost,
+        bridgePort: host.bridgePort,
+        daemonHostId: host.daemonHostId,
+        relayHostId: host.relayHostId || host.daemonHostId,
+        relayDeviceId: host.relayDeviceId,
+        authToken: host.authToken,
+        tailscaleHost: host.tailscaleHost,
+        ipv6Host: host.ipv6Host,
+        ipv4Host: host.ipv4Host,
+        signalUrl: host.signalUrl,
+        transportMode: host.transportMode,
+        relayEndpointCandidates: host.relayEndpointCandidates || [],
+      }),
+      initialSelectedSessions: host.sessionName.trim() ? [host.sessionName.trim()] : [],
+      paneId: null,
+    });
+  }, [openSessionPicker]);
+
   const enrichTargetFromSavedHosts = useCallback((target: BridgeTarget) => {
     const daemonHostId = (target.daemonHostId || target.relayHostId || '').trim();
     if (!daemonHostId) {
@@ -754,6 +776,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     pickerInitialSessions,
     pickerScopePaneId,
     handleAddNew,
+    handleOpenSavedConnection,
     handleOpenQuickTabPicker,
     handleOpenSingleTmuxSession,
     handleOpenMultipleTmuxSessions,

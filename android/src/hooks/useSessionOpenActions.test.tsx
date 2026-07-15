@@ -325,6 +325,42 @@ describe('useSessionOpenActions explicit-open truth', () => {
     }));
   });
 
+  it('opens a saved direct connection in the existing picker without creating a session', () => {
+    const harness = createOptions();
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+    const savedHost = {
+      id: 'saved-tailscale-a',
+      createdAt: 1,
+      name: 'Mac Studio',
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+      daemonHostId: 'mac-studio',
+      sessionName: 'zterm',
+      authToken: 'token-a',
+      tailscaleHost: 'mac-studio.tailnet.ts.net',
+      relayEndpointCandidates: [],
+      authType: 'password' as const,
+      tags: ['tailscale'],
+      pinned: false,
+    };
+
+    act(() => {
+      result.current.handleOpenSavedConnection(savedHost);
+    });
+
+    expect(harness.spies.createSession).not.toHaveBeenCalled();
+    expect(harness.spies.ensureTerminalPageVisible).not.toHaveBeenCalled();
+    expect(result.current.pickerMode).toBe('new-connection');
+    expect(result.current.pickerInitialSessions).toEqual(['zterm']);
+    expect(result.current.pickerTarget).toEqual(expect.objectContaining({
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+      daemonHostId: 'mac-studio',
+      authToken: 'token-a',
+      tailscaleHost: 'mac-studio.tailnet.ts.net',
+    }));
+  });
+
   it('creates a blank daemon session directly from drawer host key instead of opening the picker', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-06-30T04:05:06.000Z'));
