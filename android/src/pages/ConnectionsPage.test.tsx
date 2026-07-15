@@ -21,16 +21,16 @@ vi.mock('../hooks/useTraversalRelayAccount', () => ({
 import { useTraversalRelayAccount } from '../hooks/useTraversalRelayAccount';
 
 const relaySettings = {
-  relayBaseUrl: 'https://relay.codewhisper.cc/relay/',
+  relayBaseUrl: 'https://relay.codewhisper.cc:18443/relay/',
   accessToken: 'token',
   userId: 'u1',
   username: 'jason',
   deviceId: 'android-1',
   deviceName: 'ZTerm Android',
   platform: 'android',
-  wsDevicesUrl: 'wss://relay.codewhisper.cc/relay/ws/devices',
-  wsHostUrl: 'wss://relay.codewhisper.cc/relay/ws/host',
-  wsClientUrl: 'wss://relay.codewhisper.cc/relay/ws/client',
+  wsDevicesUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/devices',
+  wsHostUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/host',
+  wsClientUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/client',
   turnUrl: '',
   turnUsername: '',
   turnCredential: '',

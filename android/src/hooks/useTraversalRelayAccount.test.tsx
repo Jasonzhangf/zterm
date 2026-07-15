@@ -78,9 +78,9 @@ describe('useTraversalRelayAccount', () => {
         deviceId: 'tablet-1',
         deviceName: 'Jason Tablet',
         platform: 'android',
-        wsDevicesUrl: 'wss://relay.codewhisper.cc/relay/ws/devices',
-        wsHostUrl: 'wss://relay.codewhisper.cc/relay/ws/host',
-        wsClientUrl: 'wss://relay.codewhisper.cc/relay/ws/client',
+        wsDevicesUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/devices',
+        wsHostUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/host',
+        wsClientUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/client',
         turnUrl: '',
         turnUsername: '',
         turnCredential: '',
@@ -94,6 +94,84 @@ describe('useTraversalRelayAccount', () => {
         relayBaseUrl: '',
         username: 'jason',
         password: 'pw',
+      });
+    });
+
+    expect(relayClient.traversalRelayLogin).toHaveBeenCalledWith({
+      relayBaseUrl: relayClient.getDefaultTraversalRelayBaseUrl(),
+      username: 'jason',
+      password: 'pw',
+    });
+  });
+
+  it('keeps fixed relay login on the built-in server even when upgraded settings still contain the old URL', async () => {
+    vi.mocked(relayClient.traversalRelayLogin).mockResolvedValueOnce({
+      username: 'jason',
+      password: 'pw',
+      relayBaseUrl: relayClient.getDefaultTraversalRelayBaseUrl(),
+      accessToken: 'token',
+      user: { id: 'u1', username: 'jason', createdAt: 'now' },
+      deviceId: 'tablet-1',
+      deviceName: 'Jason Tablet',
+      platform: 'android',
+      devices: [],
+      directory: null,
+      updatedAt: 1,
+      relaySettings: {
+        relayBaseUrl: relayClient.getDefaultTraversalRelayBaseUrl(),
+        accessToken: 'token',
+        userId: 'u1',
+        username: 'jason',
+        deviceId: 'tablet-1',
+        deviceName: 'Jason Tablet',
+        platform: 'android',
+        wsDevicesUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/devices',
+        wsHostUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/host',
+        wsClientUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/client',
+        turnUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        updatedAt: 1,
+      },
+    });
+
+    const { result } = renderHook(() => useTraversalRelayAccount({
+      relayBaseUrl: 'https://relay.codewhisper.cc/relay/',
+      accessToken: 'old-token',
+      userId: 'u1',
+      username: 'jason',
+      deviceId: 'tablet-1',
+      deviceName: 'Jason Tablet',
+      platform: 'android',
+      wsDevicesUrl: 'wss://relay.codewhisper.cc/relay/ws/devices',
+      wsHostUrl: 'wss://relay.codewhisper.cc/relay/ws/host',
+      wsClientUrl: 'wss://relay.codewhisper.cc/relay/ws/client',
+      turnUrl: '',
+      turnUsername: '',
+      turnCredential: '',
+      updatedAt: 1,
+    }));
+
+    await act(async () => {
+      await result.current.syncRelay('login', {
+        relayBaseUrl: '',
+        username: 'jason',
+        password: 'pw',
+      }, {
+        relayBaseUrl: 'https://relay.codewhisper.cc/relay/',
+        accessToken: 'old-token',
+        userId: 'u1',
+        username: 'jason',
+        deviceId: 'tablet-1',
+        deviceName: 'Jason Tablet',
+        platform: 'android',
+        wsDevicesUrl: 'wss://relay.codewhisper.cc/relay/ws/devices',
+        wsHostUrl: 'wss://relay.codewhisper.cc/relay/ws/host',
+        wsClientUrl: 'wss://relay.codewhisper.cc/relay/ws/client',
+        turnUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        updatedAt: 1,
       });
     });
 

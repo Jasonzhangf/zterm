@@ -120,7 +120,7 @@ describe('traversal relay client truth', () => {
   });
 
   it('resolves empty relay base url to the built-in default login server', () => {
-    expect(getDefaultTraversalRelayBaseUrl()).toBe('https://relay.codewhisper.cc/relay/');
+    expect(getDefaultTraversalRelayBaseUrl()).toBe('https://relay.codewhisper.cc:18443/relay/');
     expect(resolveTraversalRelayBaseUrl('')).toBe(getDefaultTraversalRelayBaseUrl());
     expect(resolveTraversalRelayBaseUrl('   ')).toBe(getDefaultTraversalRelayBaseUrl());
     expect(resolveTraversalRelayBaseUrl('https://relay.example.com')).toBe('https://relay.example.com/relay/');

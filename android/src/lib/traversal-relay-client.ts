@@ -66,7 +66,7 @@ export interface TraversalRelayAccountState {
 }
 
 const STORAGE_KEY = 'zterm:traversal-relay-account';
-const DEFAULT_TRAVERSAL_RELAY_BASE_URL_PARTS = ['https://', 'relay', '.', 'codewhisper', '.', 'cc', '/relay/'] as const;
+const DEFAULT_TRAVERSAL_RELAY_BASE_URL_PARTS = ['https://', 'relay', '.', 'codewhisper', '.', 'cc:18443', '/relay/'] as const;
 
 function asString(value: unknown) {
   return typeof value === 'string' ? value : '';

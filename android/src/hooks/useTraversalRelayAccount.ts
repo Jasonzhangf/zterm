@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { TraversalRelayClientSettings } from '../lib/bridge-settings';
 import {
   readTraversalRelayAccountState,
+  getDefaultTraversalRelayBaseUrl,
   resolveTraversalRelayBaseUrl,
   traversalRelayLogin,
   traversalRelayRefreshMe,
@@ -69,7 +70,9 @@ export function useTraversalRelayAccount(initialRelaySettings?: TraversalRelayCl
     draft: RelayDraftAccount,
     relaySettings?: TraversalRelayClientSettings,
   ) => {
-    const baseUrl = resolveTraversalRelayBaseUrl(draft.relayBaseUrl || relaySettings?.relayBaseUrl);
+    const baseUrl = mode === 'refresh'
+      ? resolveTraversalRelayBaseUrl(draft.relayBaseUrl || relaySettings?.relayBaseUrl)
+      : getDefaultTraversalRelayBaseUrl();
     setRelayBusy(mode);
     setRelayStatus(mode === 'register' ? '注册中…' : mode === 'login' ? '登录中…' : '刷新中…');
     try {
