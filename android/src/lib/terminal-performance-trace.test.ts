@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   createTerminalPerformanceTraceStore,
+  parseRuntimeDebugPerformanceTraceRecords,
   summarizeTerminalPerformanceTrace,
 } from './terminal-performance-trace';
 
@@ -32,6 +33,32 @@ describe('terminal performance trace', () => {
     expect(summary.p95CaptureToRenderMs).toBe(64);
   });
 
+  it('does not merge the same session across different trace revisions into synthetic latency', () => {
+    const store = createTerminalPerformanceTraceStore({ limit: 20 });
+    store.record({
+      sessionId: 'pane-1',
+      traceId: 'trace-a',
+      mirrorRevision: 10,
+      subscriberId: 'sub-1',
+      stage: 'capture-start',
+      at: 0,
+    });
+    store.record({
+      sessionId: 'pane-1',
+      traceId: 'trace-b',
+      mirrorRevision: 11,
+      subscriberId: 'sub-1',
+      stage: 'render-commit',
+      at: 50,
+    });
+
+    const summary = summarizeTerminalPerformanceTrace(store.snapshot());
+
+    expect(summary.sessions).toHaveLength(2);
+    expect(summary.sessions.map((item) => item.captureToRenderMs)).toEqual([null, null]);
+    expect(summary.p95CaptureToRenderMs).toBeNull();
+  });
+
   it('stores metadata only and rejects terminal payload content', () => {
     const store = createTerminalPerformanceTraceStore({ limit: 20 });
 
@@ -43,5 +70,42 @@ describe('terminal performance trace', () => {
       // @ts-expect-error payload content is intentionally forbidden in trace records
       payload: 'real terminal text',
     })).toThrow('terminal performance trace must not store payload content');
+  });
+
+  it('parses runtime debug trace entries without accepting terminal payload content', () => {
+    const records = parseRuntimeDebugPerformanceTraceRecords([
+      {
+        sessionId: 'pane-1',
+        scope: 'terminal.performance.trace',
+        payload: JSON.stringify({
+          stage: 'client-rx',
+          traceId: 'trace-1',
+          mirrorRevision: 9,
+          subscriberId: 'sub-1',
+          at: 120,
+          bytes: 512,
+          lineCount: 4,
+          text: 'secret terminal output',
+        }),
+      },
+      {
+        sessionId: 'pane-1',
+        scope: 'session.buffer.apply.inspect',
+        payload: JSON.stringify({ stage: 'buffer-apply-done', at: 130 }),
+      },
+    ]);
+
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      sessionId: 'pane-1',
+      stage: 'client-rx',
+      traceId: 'trace-1',
+      mirrorRevision: 9,
+      subscriberId: 'sub-1',
+      at: 120,
+      bytes: 512,
+      lineCount: 4,
+    });
+    expect(JSON.stringify(records)).not.toContain('secret terminal output');
   });
 });

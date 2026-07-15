@@ -110,6 +110,7 @@ export function createSessionInfraFacadeRuntime(options: {
       id,
       applySessionAction,
     });
+    reconcilePhysicalBodySubscriptions('active-session');
   };
 
   const setLiveSessionIdsSync = (ids: string[]) => {
@@ -117,6 +118,7 @@ export function createSessionInfraFacadeRuntime(options: {
       ids,
       applySessionAction,
     });
+    reconcilePhysicalBodySubscriptions('live-sessions');
   };
 
   const createSessionSync = (session: Session) => {
@@ -157,6 +159,32 @@ export function createSessionInfraFacadeRuntime(options: {
   };
 
   const transportAccessors = createTransportInfraAccessorsRuntime(options.transportRuntimeStoreRef);
+
+  function reconcilePhysicalBodySubscriptions(reason: string) {
+    const liveSessionIds = new Set([
+      options.stateRef.current.activeSessionId,
+      ...options.stateRef.current.liveSessionIds,
+    ].filter((sessionId): sessionId is string => typeof sessionId === 'string' && sessionId.length > 0));
+    for (const session of options.stateRef.current.sessions) {
+      const ws = transportAccessors.readSessionTransportSocket(session.id);
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        continue;
+      }
+      const subscribed = liveSessionIds.has(session.id);
+      sendSocketPayload(session.id, ws, JSON.stringify({
+        type: 'body-subscription',
+        payload: {
+          version: 1,
+          subscribed,
+        },
+      }));
+      options.runtimeDebug('session.body-subscription.sent', {
+        sessionId: session.id,
+        subscribed,
+        reason,
+      });
+    }
+  }
 
   const readSessionTransportToken = (sessionId: string) => {
     return readSessionTransportTokenRuntime({
@@ -413,8 +441,9 @@ export function createSessionInfraFacadeRuntime(options: {
       finalizeFailure,
       pingIntervalsRef: options.pingIntervalsRef,
       lastPongAtRef: options.lastPongAtRef,
-      clientPingIntervalMs: 30000,
-      clientPongTimeoutMs: 70000,
+      lastServerActivityAtRef: options.lastServerActivityAtRef,
+      clientPingIntervalMs: 2000,
+      maxConsecutiveMisses: 3,
       sendSocketPayload,
     });
   };

@@ -7,12 +7,12 @@ export interface TerminalWidthModeOption {
 }
 
 export const TERMINAL_WIDTH_MODE_OPTIONS: readonly TerminalWidthModeOption[] = [
-  { id: 'mirror-fixed', label: 'Mirror Fixed' },
   { id: 'adaptive-phone', label: 'Adaptive Phone' },
+  { id: 'mirror-fixed', label: 'Mirror Fixed' },
 ] as const;
 
 export function normalizeTerminalWidthMode(mode: unknown): TerminalWidthMode {
-  return mode === 'adaptive-phone' ? 'adaptive-phone' : 'mirror-fixed';
+  return mode === 'mirror-fixed' ? 'mirror-fixed' : 'adaptive-phone';
 }
 
 export function updateBridgeSettingsTerminalWidthMode(
@@ -28,5 +28,3 @@ export function updateBridgeSettingsTerminalWidthMode(
     terminalWidthMode: normalizedMode,
   };
 }
-
-

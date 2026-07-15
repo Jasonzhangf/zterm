@@ -63,6 +63,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 汇报时必须给出 `versionName`、`versionCode`、APK 路径和 sha256；不能只说测试通过。
 - 若本机有在线 ADB 设备，构建后继续安装 / 启动 / 真机 smoke；若没有在线设备，必须明确写出 “APK 已构建发布，但 L5 真机复测缺口是无 online ADB 设备”。
 - 禁止把源码修复、单测、typecheck、daemon close-loop 当成可供 Jason 复测的交付物；没有升级 APK，就不算移动端交付闭环。
+- 替换 Android App Logo 时，以仓库根 `assets/logo.png` 为源，同时生成 `ic_launcher`、`ic_launcher_round`、`ic_launcher_foreground` 的 mdpi/hdpi/xhdpi/xxhdpi/xxxhdpi 资源。Adaptive foreground 必须按 Launcher 二次蒙版预留安全区，默认前景不超过画布 80%，背景色与 Logo 外围一致；构建后既要从 APK 解包核对 legacy/adaptive hash，也要看真实 Launcher 截图，包内字节一致不能证明最终图标未被裁切。
 
 ### 2.3 旧文档处理
 - `android/note.md` 是 agent 自己看的工作台，不是主真源
@@ -97,6 +98,8 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 
 ### 2.9 连接模型拆分规则
 - mobile 的连接真源必须显式区分 `bridgeHost / bridgePort / sessionName`；禁止再用 `host/username` 混装 server 与 tmux session 语义
+- Android Home 必须把三类入口独立投影：current-process active Sessions、saved direct/Tailscale Hosts、optional Relay account/directory。Relay 未登录、登录失败或退出登录不得隐藏、禁用或删除前两类；Relay directory 只补 route/device candidates，不得成为 saved Host/Tailscale truth owner。
+- Home 点击 saved Host 必须把 intent 交给 `useSessionOpenActions` 打开既有 picker；点击 active Session 必须走 open-tab/session owner resume。禁止 Home 直接 create/close session、写 Host storage、恢复 cold-start tabs，或用 Relay access token 做导航 gate。
 - terminal header / live session / tab 文案必须能直接看出 `server + session` 组合，否则多 server / 多 tmux session 场景会失真
 - 若 `bridgeHost` 已显式写成 `ws://host:port` / `wss://host:port`，Android / Mac / shared storage 都必须把这个 endpoint 当成 display / preset id / effective port 的唯一真源；表单也要同步把 `Bridge Port` 刷成同一个端口，禁止出现双端口假象
 - 若用户在 `bridgeHost` 直接输入原始 `host:port`（如 `100.127.23.27:40807`），shared endpoint 真源也必须当场拆成 `bridgeHost=100.127.23.27` 与 `bridgePort=40807`；禁止再把它和独立 `bridgePort` 二次拼接成非法 ws URL
@@ -161,6 +164,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - Android / Mac 若都要消费快捷按键组合规则，编码/反解/默认 label 必须下沉到 shared 纯函数；平台 UI 只保留 token 编辑与展示，禁止再复制一份组合算法
 - Android WebView 若出现“sheet/表单看起来不能滚”，先不要凭截图猜高度；应先附着 `webview_devtools_remote_<pid>` 给目标滚动容器打 `touchstart/touchmove/scrollTop` probe，并用 `adb logcat` 验证 `defaultPrevented` 与 `scrollTop` 是否真实变化，再决定改事件捕获还是布局
 - Android IME / viewport / keyboard lift 计算只能有一个 helper 真源；页面层不得复制 `resolveKeyboardLiftPx` / viewport height 逻辑。若键盘弹起后出现 gap、内容缺失或 quickbar 错位，先确认 WebView 是 overlay 还是 adjustResize：已 resize 时用当前 viewport height 且 lift=0，overlay 时才用 stable height + lift。
+- IME 高度事件可能先于 OEM `visualViewport.resize` 到达；viewport listener 必须把 current layout height 写入 React UI-shell state，不能只更新 width/top inset。否则后续纯高度 resize 不触发 render，会把首帧 overlay lift 冻结成偶发过度上抬。红测必须按 keyboard-first -> layout/visual resize -> adjustResize zero-lift 顺序重放。
 - Android IME 容器上台只允许 UI shell 消费：`TerminalPage` 计算 `terminalStageBottomPx = terminalChromeBottomPx + terminalImeLiftPx`，QuickBar shell 用同一个 `terminalImeLiftPx` 上台；`TerminalView` 不接收 IME layout token、不触发 Android upstream `onResize`、不把 keyboard 高度写回 daemon/tmux。
 - Android Terminal quickbar 预留只能来自真实测量：`terminalChromeBottomPx = measured quickBarHeight + safeOffset`，`terminalStageBottomPx = terminalChromeBottomPx + terminalImeLiftPx`，QuickBar shell bottom = `safeOffset + terminalImeLiftPx`。禁止为了 IME 或默认态位置引入固定 `render lift`；也禁止 IME active 时只裁到 `terminalImeLiftPx` 而不预留 measured quickbar 高度，否则会遮挡终端内容。
 - QuickBar 自身测量不能扣 `keyboardInsetPx`：IME lift 已由外层 `TerminalQuickBarShell.bottom` 消费，`TerminalQuickBar.onMeasuredHeightChange` 只能上报真实 chrome 高度。否则键盘高度大于快捷栏时会把 `quickBarHeight` 压成 0，stage reserve 丢掉 QuickBar 高度。
@@ -211,6 +215,11 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 ### 2.11 Drawer / sheet 交互收口
 - 抽屉底部这类单按钮动作只保留一个语义 owner，不要在同一按钮上同时挂 `pointerup` / `touchend` / `click` 再加时间戳去重。
 - `touch` / `pointer` 只适合手势关闭、拖拽、滑动判定；如果按钮点击在真机上失效，先收敛成单一语义路径，再补回 regression test。
+- Android WebView 会在一次 touch 序列结束后合成 `click`，如果 drawer/sheet 在 release 后才出现在手指下面，这个合成 click 可能命中新出现的 row。任何 row selection 都必须要求 press ownership 从同一 row 内开始；没有 matching row press 的 pointer click 必须丢弃。keyboard/accessibility `detail=0` 仍允许。
+- `mirror-fixed` 下 renderer 横向裁切平移优先于 shell 抽屉/tab 手势：非左侧热区（包括右侧与中间）的横向拖动都归 `TerminalView` crop pan；外层 drawer swipe 只允许左侧热区 + `previous` 方向。禁止因为 fixed 模式需要抽屉入口而重新启用左右两侧 tab swipe。
+- `mirror-fixed` 的手势优先级不能只看起点热区：若当前 horizontal offset 大于 0，右滑仍能真实回移 renderer，`TerminalView` 必须消费并 `stopPropagation()` 整次横滑；只有 offset 在手势开始前已为 0，左缘右滑才允许交给 drawer。反模式是子级只 `preventDefault()` 但让父级 `touchend` 继续解析成 `previous`。
+- Android drawer 左侧热区当前固定为 64 CSS px：56px 是允许的边缘样本，88px 必须归 `mirror-fixed` crop pan。96px 在约 347px 宽的手机 viewport 上过宽，会把视觉上已经离开左边缘的右滑误判成抽屉。改热区时必须保留 56px 正向 + 88px 反向成对 gate，并用真机确认非边缘右滑同时满足 `drawer hidden` 与 fixed offset 变化。
+- 抽屉打开、catalog refresh、foreground audit 发现 stale persisted tab 时，不得把 stale tab 提升 active 或 materialize transport；只能更新 catalog/audit truth。若看到缺失 session 错误污染当前界面，先查 `open_tab -> active_session` 是否被 UI 合成 click 推进，再查 transport error projection。
 - Android WebView 的 `TerminalSessionDrawer` 底部 `New Session` 例外：真机不能依赖 `click` 或 `pointerup`；用按钮自身单一 `touchend` owner，并 `stopPropagation()` 截断父级 drawer 手势。
 - Android WebView 的 `TerminalSessionDrawer` row 内关闭 `×` 也必须有自身 `touchend` 激活路径；父 row 有 touch/long-press 手势时，close button 要 `stopPropagation()`、清长按 timer、去重 synthetic click，测试必须覆盖 touch close 不触发 select。
 - 若状态浮窗只出现 `drawer:touchstart` 而没有 `add:*`，不要继续猜 `click/pointer/touch`，也不要直接下“遮挡”结论；先加 `cap:start/end:<target>` 确认真实命中节点。`TerminalSessionDrawer` 底部 `New Session` 的语义 owner 应放在整个 footer hit surface，而不是只放在内部可视 button 上。
@@ -229,7 +238,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 ### 2.14 Android IME 显隐与底部对齐
 - 不主动拉起 IME：terminal mount、terminal tap、session switch、quick editor blur 都不得调用 native show；只有 QuickBar 键盘按钮是 show/hide intent owner。
 - QuickBar 键盘按钮是严格 toggle：按下前先读取 native `ImeAnchor.getState().keyboardVisible`；visible 时 hide，不 visible 时 show。不要用本地 requested flag 或 `keyboardInset` 猜测显隐。
-- toggle show 前必须先把 active renderer 从 reading 对齐回 follow/bottom，再延迟调用 `ImeAnchor.show()`；否则滚到历史区后键盘上台会裁切到旧 viewport，表现为输入区/底部缺失。
+- toggle show 前必须先把 active renderer 从 reading 对齐回 follow/bottom，再延迟调用 `ImeAnchor.show()`；native `keyboardState(visible=true)` 到达后，如果本次是 terminal keyboard request，也要再做一次 follow/bottom realign，覆盖 IME 上台导致的 visual viewport 缩高。否则滚到历史区后键盘上台会裁切到旧 viewport，表现为输入区/底部缺失。
 - IME 只允许 UI shell 做裁切/预留：stage reserve = measured QuickBar chrome + IME lift，QuickBar shell 用同一份 IME lift；`TerminalView` 不接收 IME layout token、不触发 upstream resize、不改 daemon/tmux geometry。
 - native `ImeAnchorEditText` 必须保持可服务输入法的真实 rect，但 cursor 不可见；若截图出现额外蓝色/灰色 native 光标，先查 anchor `setCursorVisible(false)`。
 
@@ -245,6 +254,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - session picker 的 row projection 现在对所有模式都必须合并 open tab，不只 quick-tab；daemon 成功枚举后目标 owner 下未被报告的本地 open tab 应显式关闭，避免双列表和 stale tab。
 - OPEN_TABS 已打开 tab 不得按 semantic reuse key 自动合并/替换/删除；同名 tmux session 的 runtime duplicate 只能作为 transport fact，不能顶替 persisted open tab 的 `sessionId`。saved tab list 导入可做 import-only semantic 去重。
 - Terminal drawer 不能维护第二份远端 session 列表；打开抽屉时按稳定 hostKey 触发 `fetchTmuxSessions()`，结果必须回写同一个 `sessionGroups` catalog，再由 drawer 投影 remote-only rows。禁止让 drawer effect 依赖整个投影列表，否则 catalog 更新会反复触发枚举。
+- 抽屉 / session picker 的远端刷新只允许更新 session catalog / audit fact，不得把 stale persisted open tab 自动推进 transport reconnect，也不得把非 active、非 live 的 `tmux_session_unavailable` 投影成全局错误 banner。`routecodex` 这类本地 OPEN_TABS 中的过期 session，若 tmux truth 已不存在，只能表现为缺失事实或 idle closed shell，不能影响当前 session。
 
 ### 2.14 Bridge Auth 规则
 - daemon / websocket bridge 必须支持共享 token 鉴权；server 真源优先为 `~/.wterm/config.json -> mobile.daemon.authToken`，`WTERM_MOBILE_AUTH_TOKEN` 只作为显式 override
@@ -1044,6 +1054,81 @@ android/
 - **动作**: Connections card、drawer hostKey、picker relay device target 必须用 saved server preset/host 补齐 `bridgeHost / bridgePort / authToken` 后再 `fetchTmuxSessions()` / `createTmuxSession()`；directory 只提供 endpoint/session catalog
 - **反模式**: 只拿 relay directory 的 endpoint candidates 当完整 bridge target，会漏 daemon auth token，导致刷新/新建看似“没反应”
 
+### 模式: drawer 手势归近边热区，fixed 裁切归 renderer
+- **触发信号**: 用户要求抽屉只从边缘滑出，或固定宽度下左右滑动调整显示区域。
+- **资源归属**: drawer/tab shell gesture 属于 `terminal.session_drawer`；`mirror-fixed` 横向裁切属于 `terminal.buffer_render` renderer projection；adaptive 宽度属于 daemon adaptive width lease owner。
+- **动作**:
+  1. Shell swipe start 必须限制在屏幕近边热区内；中间横滑不得开 drawer、不得切 tab。`mirror-fixed` 的 drawer 入口只允许左侧 64 CSS px + 向右 `previous` 手势：`x=56` 是正向样本，`x=88` 必须归 renderer crop pan。Android 不要把热区收成 0-几 px 贴边，系统返回手势会抢。
+  2. `adaptive-phone` 中间横滑保持 no-op，不做客户端裁切，不抢 daemon/tmux reflow。
+  3. `mirror-fixed` 中间横滑只移动 `.term-grid` projection offset，并按 session 持久化；不得 resize tmux、不得改 daemon mirror rows/cols。
+- **验证**: 跑 `TerminalTabSwipeSurface.test.tsx`、`TerminalPage.session-drawer.test.tsx`、`TerminalPage.tab-isolation.test.tsx`、`TerminalSessionDrawer.test.tsx`、`TerminalView.dynamic-refresh.test.tsx`；真机用 DevTools/截图证明近边热区打开 drawer、点击 drawer row 能切 session、middle swipe 不打开 drawer、mirror-fixed offset 变化并持久化。
+- **反模式**: 用页面中部横滑同时承担 drawer/tab 和 fixed crop；把抽屉入口限制到 Android 系统返回手势会吃掉的贴边窄条；adaptive 下做 CSS 平移冒充宽度适配；为 fixed pan 改 daemon/tmux geometry。
+
+### 模式: session 快捷预览只复用 terminal 真源
+- **触发信号**: 需要同时查看多个已打开 terminal session，或实现右缘滑入的 2x3/3x2 预览。
+- **资源归属**: `terminal.session_preview` owns selection/mode/grid projection；terminal body truth 仍属于 daemon mirror、client sparse buffer、render store 和 shared `TerminalView`；transport/reconnect/resize owner 不变。
+- **动作**:
+  1. 抽屉多选只能选择当前已打开 session，数量是 1-6，不要求选满 6 个；持久化 identity 必须包含 `sessionId + bridgeHost + bridgePort + sessionName`，有 `daemonHostId` 时恢复也要匹配。
+  2. 右缘左滑进入 preview；左缘右滑仍归 drawer，中间横滑仍归 `mirror-fixed` crop。同一 touch sequence 只能有一个 owner。
+  3. Preview tile 复用 `TerminalView` read-only surface：不传 input/resize/viewport callbacks，不 focus DOM，不 copy，不 IME，不改 width mode，不 reconnect。
+  4. Preview 打开时把 selected ids 临时 union 到 live body subscription；关闭、后台、退出后恢复 baseline，只保留 selection preference。
+  5. Tile 点击只走唯一 page owner：先把目标 session 投进当前 focused session-group slot，再发一次 explicit active-session switch，然后退出 preview；进入/退出 preview 不改变 active session。
+  6. Preview grid 是 count/orientation projection：竖屏每行最多 2 个，横屏每行最多 3 个，只创建所需行数；禁固定铺满 2x3/3x2 空槽。
+  7. Tile 长按只进入 replacement menu：菜单候选必须是当前 open 且未选中的 session；替换保持原顺序并持久化，不切 active session。长按或明显移动必须抑制 release click，避免替换菜单和 tile activation 同时发生。
+  8. Tile 右上角关闭只移除该 preview target，不关闭 Session/transport；移除最后一个 target 时走 preview cancel restore。
+  9. Preview body 允许本地只读上下滚动与 `mirror-fixed` 横向 crop/pan；这些手势不得冒泡成 tile activation、replacement、preview exit、input、resize、viewport 或 width-mode 写。
+  10. Preview entry 捕获 active session + session-group slots/focus；关闭按钮、右滑、Android system Back 都是 cancel，恢复该 entry projection。Tile activation 丢弃 entry snapshot，不得被 cancel restore 覆盖。Back listener 只在 preview open 时注册。
+- **验证**: 白盒 selection/gesture/live-set 正反测试；组件黑盒验证 drawer 普通/多选隔离和 2x3/3x2；source-to-DOM/source-to-shell gate 自动比较 tmux capture、daemon buffer-sync、client sparse buffer、render store、preview DOM 和真实 StageShell DOM，并验证 subscribers `baseline -> +selected -> baseline`。
+- **反模式**: 用截图或 cached text 做预览；为 preview 新开 WebSocket/tmux session；在 tile 内启用输入或 resize；用 UI filter 掩盖 stale session id；用人工看截图代替 source/target 自动对比。
+- **反模式补充**: 只调用 `handleSwitchSessionFromChrome(sessionId)` 不更新 session-group viewport projection；这会让输入/live owner 与可见 shell owner 分裂。
+
+### 模式: terminal width mode 是用户偏好资源
+- **触发信号**: 用户设置过 `mirror-fixed`，升级/重装/冷启动后变回 `adaptive-phone`。
+- **资源归属**: `terminalWidthMode` 属于 client settings/user preference resource，不属于 renderer、daemon、tmux。viewport 检测只用于首次安装没有偏好时的默认值。
+- **动作**:
+  1. 先读完整 `zterm:bridge-settings.terminalWidthMode`。
+  2. 如果旧配置缺字段，再读显式偏好 key `zterm:terminal-width-mode-preference`。
+  3. 两者都没有时才按 viewport 选择首次默认。
+  4. 用户在 Settings 或 terminal header 切 mode 时，同步写 bridge settings 和 explicit preference key。
+- **验证**: storage hook 测试必须覆盖 `mirror-fixed` 首屏读取、旧配置缺字段读取 preference、设置变更写双 key；真机升级验证必须在 WebView 可见且 `isKeyguardShowing=false` 时读 DOM/localStorage，不得用锁屏 invisible WebView 结果当闭环。
+- **反模式**: 重装后用 viewport 默认覆盖用户偏好；只测 adaptive 默认不测 fixed 持久化；把 invalid/unknown mode 当作显式 fixed。
+
+### 模式: quickbar 横向裁切只属于展开 rows 高度
+- **触发信号**: 下方快捷栏内容宽于屏幕，用户要求像 fixed mirror 一样左右滑动选择显示区域。
+- **资源归属**: `terminal.quickbar` owns bottom shortcut bar pan/crop. Renderer `mirror-fixed` pan 只管 terminal body；drawer/tab shell swipe 只管 session shell；daemon/tmux 不参与。
+- **动作**:
+  1. 横滑 touch owner 可放在 `terminal-quickbar-shell-rows`，但触发区域只等于快捷栏展开后的真实高度。
+  2. `data-quickbar-scroll-track` 是自身 native horizontal scroll owner；touch 从 scroll track 内开始时，父级 rows 不得 `preventDefault()`，不得同步改其它 track 的 `scrollLeft`。
+  3. button/input/label 等交互控件是自己的点击/输入 owner；touch 从这些控件开始时，父级 rows 不得启动 pan。
+  4. 只有从 rows 非交互空白区域开始的横向手势，才允许在横向锁定后同步移动 quickbar scroll tracks；纵向手势不 pan。
+  5. 不要把 shell rows 标成全局 pointer allow；只允许 touch pan surface，否则空白 click 会冒泡到 terminal。
+- **验证**: `TerminalQuickBar.test.tsx` 同时覆盖 rows 空白 horizontal pan、vertical no-pan、scroll-track native-owner no-steal、button no-steal、blank shell click still blocked；真机验证必须在 unlocked foreground WebView 上测下方快捷栏 track 原生滚动和空白区域 pan，不用锁屏 invisible WebView 代替。
+- **反模式**: 在 TerminalView / page stage 上吃快捷栏横滑；把 quickbar 手势热区扩大到终端内容区域；父级 rows 对 scroll track touch 调 `preventDefault()`；为了横滑破坏按钮点击或 shell click blocking。
+
+### 模式: quickbar collapse/reveal 与内部滚动共用 axis lock
+- **触发信号**: QuickBar 内部 track 可以横向滚动，但用户无法再用手势收起或唤出整个 QuickBar。
+- **资源归属**: `TerminalQuickBar` 是 collapse/reveal 唯一手势 owner；`TerminalPage` 只持有 `quickBarCollapsed` projection。renderer、drawer、daemon、tmux 不参与。
+- **动作**:
+  1. Expanded rows 的 touch state 同时记录 axis、start/last point、是否允许 rows horizontal pan。
+  2. 横向从 scroll track/button 开始：交给 track/button，不同步 sibling，不 collapse。
+  3. 横向从 rows 空白开始：只做 QuickBar 内容 pan，不 collapse。
+  4. 纵向向下超过 48px：`onCollapsedChange(true)`；短纵滑和 touch cancel 不改变状态。
+  5. Collapsed bottom trigger 向上超过 48px：`onCollapsedChange(false)`；普通 tap 仍可展开。
+  6. Portrait/landscape 都必须允许 collapse；禁止页面 effect 因 orientation 把用户刚收起的 QuickBar 强制展开。
+- **验证**: `TerminalQuickBar.test.tsx` 正反覆盖 vertical collapse/upward reveal/horizontal no-collapse/short no-collapse；`TerminalPage.foldable-display-change.test.tsx` 覆盖 portrait collapse persistence；真机 CDP 必须完成 expanded -> collapsed -> revealed，并复测 track 横滑只动当前 track。
+- **反模式**: 只保留收起按钮/悬浮按钮而丢失手势；让 vertical collapse 抢走 track horizontal native scroll；在 portrait 下自动清 `quickBarCollapsed`。
+
+### 模式: quickbar 折叠高度 0 必须穿透到 stage reserve
+- **触发信号**: QuickBar rows 已经消失，但 terminal 下方仍留着展开态同样高度的空白，shell 没有向下填满。
+- **资源归属**: `TerminalQuickBar` 生产真实 chrome measured height；`TerminalPage` 只消费该高度计算 stage bottom reserve。renderer/tmux/daemon 不参与。
+- **动作**:
+  1. Expanded 时上报真实正高度；collapsed 时显式上报 `0`。
+  2. 页面 consumer 必须接受 `0`，只做 `Math.max(0, height)` 归一；禁止用 `height > 0 ? height : current` 保留 stale positive height。
+  3. Collapsed reveal surface 覆盖整个底部触发带，宽度为全屏，高度只限 collapsed bottom chrome；左侧/中间上滑也必须恢复。
+  4. reveal surface 内的小键盘按钮保留自己的 toggle 语义，但不能成为唯一召回热区。
+- **验证**: 页面级正反测试先锁 positive height reserve，再锁 zero clears reserve；真机 CDP 记录 expanded/collapsed/revealed 三态的 `terminal-stage-shell.style.bottom` 和 rect，高度必须随 0 reserve 释放并恢复。
+- **反模式**: 把 0 当成无效测量；只隐藏 rows 不清 stage reserve；只给右侧小按钮挂 reveal 手势；为修空白去改 renderer 行布局或 tmux geometry。
+
 ---
 
 Inspired by coding-principals skill.
@@ -1119,3 +1204,11 @@ debug overlay 现在显示 MU（菜单位置）和 CE（结束行），长按后
 - relay 已登录时，daemon-first 只能把“已映射 preset”当快捷路径，不能把“未映射 daemon”的首次手工绑定藏掉。
 - 当 selected daemon 没有 bridge preset 时，必须直接显示可编辑的 bridgeHost/authToken，并允许 Connect / Save 以“已选 daemon + 已填 host/token”完成首次绑定，再同步写入 server preset 真源。
 - 再次出现“保存后退出但 Connections 没新增服务器”时，先查是不是 form 层把首次绑定入口挡死了，而不是先怀疑存储层。
+## Android WebSocket Underlay Switch
+
+- Trigger: user reports Wi-Fi works but cellular / network switch stalls, while killing and reopening the app reconnects immediately.
+- First prove the layer split: configured target IP/port, phone-to-daemon `/health` reachability on the new underlay, daemon listener, and client WebSocket/runtime state. Do not call it an endpoint problem if Tailscale IP stays reachable.
+- Treat `WebSocket.OPEN` as insufficient health truth. A socket can remain OPEN while bound to a dead Wi-Fi underlay. Health requires recent pong or any valid server frame.
+- Unique owner: `terminal.transport_lifecycle` via `src/contexts/session-context-socket-runtime.ts`. Do not add UI page reconnect loops, daemon client-network state, fallback endpoints, or per-screen WebSocket rebuild logic.
+- Mobile default: heartbeat every 2s; after 3 consecutive missed server-activity confirmations, finalize the current physical socket once as retryable failure and let the existing reconnect owner replace it while preserving logical session id, active-session truth, and buffer.
+- Required black-box gate before claiming closure: installed APK on real device, live TUI session, Wi-Fi-to-cellular and cellular-to-Wi-Fi switch, phone `/health` still reachable, one replacement physical WebSocket, unchanged session/tmux target, monotonic buffer head, input/output recovery within 10s.

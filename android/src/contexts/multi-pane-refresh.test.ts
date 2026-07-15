@@ -59,7 +59,9 @@ describe('multi-pane refresh truth', () => {
       const sendSocketPayload = vi.fn();
       const refs = {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
-        sessionVisibleRangeRef: { current: new Map() },
+        sessionVisibleRangeRef: {
+          current: new Map([[sessionId, { startIndex: 0, endIndex: 1, viewportRows: 24 }]]),
+        },
         sessionBufferHeadsRef: { current: new Map() },
         sessionPullStateRef: { current: new Map() },
         lastSyncRequestAtRef: { current: new Map() },

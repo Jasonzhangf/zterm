@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { handleSocketServerMessageRuntime } from './session-context-socket-message-runtime';
 import { reduceSessionAction, type SessionManagerState } from './session-context-core';
 import { createSessionBufferState } from '../lib/terminal-buffer';
+import { drainRuntimeDebugEntries } from '../lib/runtime-debug';
 import type { Host, Session, SessionScheduleState, ServerMessage } from '../lib/types';
 
 function makeHost(): Host {
@@ -62,6 +63,66 @@ function makeScheduleState(): SessionScheduleState {
 }
 
 describe('session-context-socket-message-runtime connected truth', () => {
+  it('records client-rx trace bytes from raw received frame metadata', () => {
+    drainRuntimeDebugEntries();
+    handleSocketServerMessageRuntime({
+      params: {
+        sessionId: 'session-1',
+        host: makeHost(),
+        ws: {} as any,
+        debugScope: 'connect',
+        rawFrameBytes: 1234,
+        onConnected: vi.fn(),
+        onFailure: vi.fn(),
+        onClosed: vi.fn(),
+      },
+      msg: {
+        type: 'buffer-sync',
+        payload: {
+          revision: 9,
+          startIndex: 0,
+          endIndex: 1,
+          cols: 80,
+          rows: 24,
+          cursorKeysApp: false,
+          lines: [],
+        },
+      } as ServerMessage,
+      refs: {
+        stateRef: { current: {
+          sessions: [{ ...makeSession(), state: 'connected' }],
+          activeSessionId: 'session-1',
+          } },
+        scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
+        lastHeadRequestAtRef: { current: new Map() },
+        lastPongAtRef: { current: new Map() },
+      },
+      settleSessionPullState: vi.fn(),
+      runtimeDebug: vi.fn(),
+      isSessionTransportActive: vi.fn(() => true),
+      shouldAcceptSessionLiveBuffer: vi.fn(() => true),
+      summarizeBufferPayload: vi.fn(() => ({})),
+      applyIncomingBufferSync: vi.fn(),
+      handleBufferHead: vi.fn(),
+      setScheduleStateForSession: vi.fn(),
+      setSessionTitleSync: vi.fn(),
+      fileTransferMessageRuntime: { dispatch: vi.fn() },
+      updateSessionSync: vi.fn(),
+    });
+
+    const traceEntry = drainRuntimeDebugEntries().find((entry) => (
+      entry.scope === 'terminal.performance.trace'
+    ));
+    expect(traceEntry).toBeTruthy();
+    expect(JSON.parse(traceEntry?.payload || '{}')).toMatchObject({
+      sessionId: 'session-1',
+      traceId: 'session-1:9',
+      mirrorRevision: 9,
+      stage: 'client-rx',
+      bytes: 1234,
+    });
+  });
+
   it('keeps existing daemonHostId when connected payload omits it', () => {
     const state: SessionManagerState = {
       sessions: [makeSession()],
@@ -537,6 +598,69 @@ describe('session-context-socket-message-runtime inactive live buffer gate', () 
         activeSessionId: 'session-2',
         lineCount: 60,
         revision: 7,
+      }),
+    );
+  });
+
+  it('drops inactive buffer-head before it can move local head truth backwards', () => {
+    const handleBufferHead = vi.fn();
+    const onConnected = vi.fn();
+    const runtimeDebug = vi.fn();
+
+    handleSocketServerMessageRuntime({
+      params: {
+        sessionId: 'session-1',
+        host: makeHost(),
+        ws: {} as any,
+        debugScope: 'connect',
+        onConnected,
+        onFailure: vi.fn(),
+        onClosed: vi.fn(),
+      },
+      msg: {
+        type: 'buffer-head',
+        payload: {
+          revision: 3,
+          latestEndIndex: 24,
+          availableStartIndex: 0,
+          availableEndIndex: 24,
+        },
+      } as ServerMessage,
+      refs: {
+        stateRef: {
+          current: {
+            sessions: [{
+              ...makeSession(),
+              state: 'connected',
+            }],
+            activeSessionId: 'session-2',
+          },
+        },
+        scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
+        lastHeadRequestAtRef: { current: new Map() },
+        lastPongAtRef: { current: new Map() },
+      },
+      settleSessionPullState: vi.fn(),
+      runtimeDebug,
+      isSessionTransportActive: vi.fn(() => false),
+      shouldAcceptSessionLiveBuffer: vi.fn(() => false),
+      summarizeBufferPayload: vi.fn(() => ({})),
+      applyIncomingBufferSync: vi.fn(),
+      handleBufferHead,
+      setScheduleStateForSession: vi.fn(),
+      setSessionTitleSync: vi.fn(),
+      fileTransferMessageRuntime: { dispatch: vi.fn() },
+      updateSessionSync: vi.fn(),
+    });
+
+    expect(onConnected).not.toHaveBeenCalled();
+    expect(handleBufferHead).not.toHaveBeenCalled();
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.ws.connect.buffer-head.inactive-drop',
+      expect.objectContaining({
+        sessionId: 'session-1',
+        activeSessionId: 'session-2',
+        revision: 3,
       }),
     );
   });

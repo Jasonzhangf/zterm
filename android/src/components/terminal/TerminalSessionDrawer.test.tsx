@@ -39,6 +39,22 @@ describe('TerminalSessionDrawer', () => {
     fireEvent.click(screen.getByText('创建'));
   }
 
+  it('uses the compact two-thirds drawer width', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-session-drawer').style.width).toBe('48vw');
+    expect(screen.getByTestId('terminal-session-drawer').style.maxWidth).toBe('187px');
+  });
+
   it('renders a single-column session list and routes select/plus actions', () => {
     const onSelectSession = vi.fn();
     const onOpenQuickTabPicker = vi.fn();
@@ -63,6 +79,164 @@ describe('TerminalSessionDrawer', () => {
     });
     expect(screen.getByTestId('terminal-session-drawer-new-session-dialog')).toBeTruthy();
     expect(onOpenQuickTabPicker).not.toHaveBeenCalled();
+  });
+
+  it('keeps preview multi-select isolated from normal session switching', () => {
+    const onSelectSession = vi.fn();
+    const onTogglePreviewSession = vi.fn();
+    const onPreviewSelectionModeChange = vi.fn();
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        previewSelectionMode
+        previewSelectedSessionIds={['s1']}
+        onClose={vi.fn()}
+        onSelectSession={onSelectSession}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onTogglePreviewSession={onTogglePreviewSession}
+        onPreviewSelectionModeChange={onPreviewSelectionModeChange}
+        onClearPreviewSelection={vi.fn()}
+      />,
+    );
+
+    fireEvent.mouseDown(screen.getByTestId('terminal-session-drawer-select-s2'));
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-select-s2'));
+    expect(onTogglePreviewSession).toHaveBeenCalledWith('s2');
+    expect(onSelectSession).not.toHaveBeenCalled();
+    expect(screen.getByTestId('terminal-session-drawer-preview-check-s1').textContent).toBe('1');
+    expect(screen.queryByTestId('terminal-session-drawer-add')).toBeNull();
+    fireEvent.click(screen.getByText('完成 1/6'));
+    expect(onPreviewSelectionModeChange).toHaveBeenCalledWith(false);
+  });
+
+  it('toggles preview selection from the visible checkbox control', () => {
+    const onSelectSession = vi.fn();
+    const onTogglePreviewSession = vi.fn();
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        previewSelectionMode
+        previewSelectedSessionIds={['s1']}
+        onClose={vi.fn()}
+        onSelectSession={onSelectSession}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onTogglePreviewSession={onTogglePreviewSession}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-preview-check-s2'));
+
+    expect(onTogglePreviewSession).toHaveBeenCalledWith('s2');
+    expect(onTogglePreviewSession).toHaveBeenCalledTimes(1);
+    expect(onSelectSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps unavailable preview checkbox controls disabled', () => {
+    const onTogglePreviewSession = vi.fn();
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={[{ ...sessions[0], status: 'closed' }]}
+        previewSelectionMode
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onTogglePreviewSession={onTogglePreviewSession}
+      />,
+    );
+
+    const checkbox = screen.getByTestId('terminal-session-drawer-preview-check-s1');
+    expect(checkbox.hasAttribute('disabled')).toBe(true);
+    fireEvent.click(checkbox);
+    expect(onTogglePreviewSession).not.toHaveBeenCalled();
+  });
+
+  it('does not turn the drawer-opening gesture release into a session selection', () => {
+    const onSelectSession = vi.fn();
+
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        onClose={vi.fn()}
+        onSelectSession={onSelectSession}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    const target = screen.getByTestId('terminal-session-drawer-select-s2');
+    fireEvent.click(target, { detail: 1 });
+
+    expect(onSelectSession).not.toHaveBeenCalled();
+
+    fireEvent.touchStart(target, {
+      touches: [{ clientX: 120, clientY: 180 }],
+    });
+    fireEvent.touchEnd(target, {
+      changedTouches: [{ clientX: 120, clientY: 180 }],
+    });
+    fireEvent.click(target, { detail: 1 });
+
+    expect(onSelectSession).toHaveBeenCalledWith('s2');
+    expect(onSelectSession).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not let a press on one drawer row authorize another row', () => {
+    const onSelectSession = vi.fn();
+
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        onClose={vi.fn()}
+        onSelectSession={onSelectSession}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    fireEvent.touchStart(screen.getByTestId('terminal-session-drawer-select-s1'), {
+      touches: [{ clientX: 120, clientY: 100 }],
+    });
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-select-s2'), { detail: 1 });
+
+    expect(onSelectSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps an unavailable row non-selectable after a matching press', () => {
+    const onSelectSession = vi.fn();
+    const unavailableSessions = [{
+      ...sessions[0],
+      remoteMissing: true,
+    }];
+
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={unavailableSessions}
+        onClose={vi.fn()}
+        onSelectSession={onSelectSession}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    const target = screen.getByTestId('terminal-session-drawer-select-s1');
+    fireEvent.touchStart(target, {
+      touches: [{ clientX: 120, clientY: 100 }],
+    });
+    fireEvent.touchEnd(target, {
+      changedTouches: [{ clientX: 120, clientY: 100 }],
+    });
+    fireEvent.click(target, { detail: 1 });
+
+    expect(onSelectSession).not.toHaveBeenCalled();
   });
 
   it('routes row close button to close only without selecting the session', () => {

@@ -192,20 +192,7 @@ export function ensureActiveSessionFreshRuntime(options: {
     );
 
     if (options.refreshOptions.markResumeTail) {
-      // active-reentry stable: if the session is already connected with a non-empty
-      // local buffer, no tail-refresh is needed. The daemon push already keeps the
-      // tail in sync; a fresh resume-tail here would just trigger duplicate visible-window pull
-      // that races the input path.
-      const skipResumeTailForStableReentry = (
-        options.refreshOptions.source === 'active-reentry'
-        && ws?.readyState === WebSocket.OPEN
-        && sessionState === 'connected'
-        && localBuffer.revision > 0
-        && localBuffer.endIndex >= localBuffer.startIndex
-      );
-      if (!skipResumeTailForStableReentry) {
-        options.refs.pendingResumeTailRefreshRef.current.add(options.refreshOptions.sessionId);
-      }
+      options.refs.pendingResumeTailRefreshRef.current.add(options.refreshOptions.sessionId);
     }
 
     if (shouldSkipImmediateForcedResumeHead) {

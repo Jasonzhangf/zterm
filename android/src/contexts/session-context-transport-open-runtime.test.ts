@@ -150,4 +150,48 @@ describe('handleReconnectHandshakeFailureRuntime', () => {
     expect(emitSessionStatus).toHaveBeenCalledWith('session-1', 'error', 'auth rejected');
     expect(startReconnectAttempt).not.toHaveBeenCalled();
   });
+
+  it('stops retryable reconnect without terminal error projection after the session becomes inactive', () => {
+    const reconnectRuntimesRef = {
+      current: new Map([
+        ['session-1', {
+          attempt: 1,
+          timer: null,
+          nextDelayMs: null,
+          connecting: true,
+        }],
+      ]),
+    };
+    const updateSessionSync = vi.fn();
+    const emitSessionStatus = vi.fn();
+    const startReconnectAttempt = vi.fn();
+
+    handleReconnectHandshakeFailureRuntime({
+      sessionId: 'session-1',
+      message: "Tmux session unavailable: can't find session: routecodex",
+      retryable: true,
+      reconnectRuntimesRef,
+      clearSupersededSockets: vi.fn(),
+      updateSessionSync,
+      emitSessionStatus,
+      createSessionReconnectRuntime: () => ({
+        attempt: 0,
+        timer: null,
+        nextDelayMs: null,
+        connecting: false,
+      }),
+      shouldContinueRetryableReconnect: () => false,
+      startReconnectAttempt,
+    });
+
+    expect(reconnectRuntimesRef.current.has('session-1')).toBe(false);
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', {
+      state: 'idle',
+      lastError: "Tmux session unavailable: can't find session: routecodex",
+      reconnectAttempt: 0,
+      ws: null,
+    });
+    expect(emitSessionStatus).not.toHaveBeenCalled();
+    expect(startReconnectAttempt).not.toHaveBeenCalled();
+  });
 });

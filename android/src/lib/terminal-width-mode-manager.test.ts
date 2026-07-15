@@ -28,16 +28,16 @@ const baseSettings: BridgeSettings = {
 describe('terminal-width-mode-manager', () => {
   it('exports the shared width-mode options once', () => {
     expect(TERMINAL_WIDTH_MODE_OPTIONS).toEqual([
-      { id: 'mirror-fixed', label: 'Mirror Fixed' },
       { id: 'adaptive-phone', label: 'Adaptive Phone' },
+      { id: 'mirror-fixed', label: 'Mirror Fixed' },
     ]);
   });
 
-  it('normalizes any unknown mode back to mirror-fixed', () => {
+  it('normalizes any unknown mode back to adaptive-phone', () => {
     expect(normalizeTerminalWidthMode('adaptive-phone')).toBe('adaptive-phone');
     expect(normalizeTerminalWidthMode('mirror-fixed')).toBe('mirror-fixed');
-    expect(normalizeTerminalWidthMode('weird-mode')).toBe('mirror-fixed');
-    expect(normalizeTerminalWidthMode(null)).toBe('mirror-fixed');
+    expect(normalizeTerminalWidthMode('weird-mode')).toBe('adaptive-phone');
+    expect(normalizeTerminalWidthMode(null)).toBe('adaptive-phone');
   });
 
   it('updates bridge settings through one helper', () => {

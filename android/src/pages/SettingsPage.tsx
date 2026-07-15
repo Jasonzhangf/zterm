@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   getDefaultBridgeServer,
   removeBridgeServer,
@@ -19,6 +19,7 @@ import {
 } from '../lib/terminal-layout-profile';
 import { AppUpdateSection } from '../components/settings/AppUpdateSection';
 import { RememberedServersSection } from '../components/settings/RememberedServersSection';
+import { RelayAccountSettingsSection } from '../components/settings/RelayAccountSettingsSection';
 import { SettingsSectionTitle, settingsInputStyle, settingsSectionStyle } from '../components/settings/SettingsSection';
 import { TerminalThemeSection } from '../components/settings/TerminalThemeSection';
 
@@ -34,6 +35,7 @@ interface SettingsPageProps {
   hasNewVersion: boolean;
   hasUpdateIgnorePolicy: boolean;
   onSave: (settings: BridgeSettings) => void;
+  onRelaySettingsChange?: (settings: BridgeSettings['traversalRelay']) => void;
   onUpdatePreferencesChange: (next: AppUpdatePreferences) => void;
   onCheckForUpdate: (next: AppUpdatePreferences) => void;
   onInstallUpdate: () => void;
@@ -78,6 +80,7 @@ export function SettingsPage({
   hasNewVersion,
   hasUpdateIgnorePolicy,
   onSave,
+  onRelaySettingsChange,
   onUpdatePreferencesChange,
   onCheckForUpdate,
   onInstallUpdate,
@@ -110,6 +113,14 @@ export function SettingsPage({
   useEffect(() => {
     setDraft({ ...settings, servers: sortBridgeServers(settings.servers) });
   }, [settings]);
+
+  const handleRelaySettingsChange = useCallback((nextRelay: BridgeSettings['traversalRelay']) => {
+    setDraft((current) => ({
+      ...current,
+      traversalRelay: nextRelay,
+    }));
+    onRelaySettingsChange?.(nextRelay);
+  }, [onRelaySettingsChange]);
 
   return (
     <div
@@ -178,6 +189,19 @@ export function SettingsPage({
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '18px 18px 32px' }}>
+        <RememberedServersSection
+          settings={draft}
+          onSettingsChange={(updater) => setDraft((current) => updater(current))}
+          onRemoveDefaultServer={() =>
+            setDraft((current) => removeBridgeServer(current, defaultServer?.id || current.defaultServerId || ''))
+          }
+        />
+
+        <RelayAccountSettingsSection
+          relaySettings={draft.traversalRelay}
+          onRelaySettingsChange={handleRelaySettingsChange}
+        />
+
         <AppUpdateSection
           currentVersionName={currentVersionName}
           currentVersionCode={currentVersionCode}
@@ -359,13 +383,6 @@ export function SettingsPage({
           }}
         />
 
-        <RememberedServersSection
-          settings={draft}
-          onSettingsChange={(updater) => setDraft((current) => updater(current))}
-          onRemoveDefaultServer={() =>
-            setDraft((current) => removeBridgeServer(current, defaultServer?.id || current.defaultServerId || ''))
-          }
-        />
       </div>
     </div>
   );

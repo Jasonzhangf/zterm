@@ -15,7 +15,6 @@ import {
 } from '@zterm/shared';
 
 const CLIENT_PING_INTERVAL_MS = 30000;
-const CLIENT_PONG_TIMEOUT_MS = 70000;
 const REMOTE_SCREENSHOT_TIMEOUT_MS = 30000;
 
 interface PendingRemoteScreenshot {
@@ -265,11 +264,6 @@ export function createBridgeTransportController(): BridgeTransportController {
               return;
             }
             if (!ws || ws.readyState !== WebSocket.OPEN) {
-              return;
-            }
-            if (Date.now() - lastPongAt > CLIENT_PONG_TIMEOUT_MS) {
-              ws.close(4000, 'heartbeat timeout');
-              clearHeartbeat();
               return;
             }
             ws.send(JSON.stringify({ type: 'ping' }));

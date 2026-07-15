@@ -13,7 +13,6 @@ interface RenderGateSessionRuntime {
   flushing: boolean;
   dirty: boolean;
   scheduled: boolean;
-  frameTimerId: number | null;
   sourceStartIndex: number;
   sourceEndIndex: number;
   sourceRows: TerminalCell[][];
@@ -195,9 +194,8 @@ export function createSessionRenderGate(options: {
   liveHeadStore: SessionHeadStore;
   recordSessionRenderCommit: (sessionId: string) => void;
   runtimeDebug?: (event: string, payload?: Record<string, unknown>) => void;
-  resolveRenderCommitMs?: (sessionId: string) => number;
 }): SessionRenderGate {
-  const renderStore = createSessionRenderBufferStore();
+  const renderStore = createSessionRenderBufferStore({ runtimeDebug: options.runtimeDebug });
   const runtimes = new Map<string, RenderGateSessionRuntime>();
 
   const ensureRuntime = (sessionId: string) => {
@@ -209,20 +207,12 @@ export function createSessionRenderGate(options: {
       flushing: false,
       dirty: false,
       scheduled: false,
-      frameTimerId: null,
       sourceStartIndex: 0,
       sourceEndIndex: 0,
       sourceRows: [],
     };
     runtimes.set(sessionId, next);
     return next;
-  };
-
-  const clearScheduledTimer = (runtime: RenderGateSessionRuntime) => {
-    if (runtime.frameTimerId !== null) {
-      clearTimeout(runtime.frameTimerId);
-      runtime.frameTimerId = null;
-    }
   };
 
   const flush = (sessionId: string) => {
@@ -269,6 +259,15 @@ export function createSessionRenderGate(options: {
         runtime.sourceRows = sourceRows;
         const changed = renderStore.setBuffer(sessionId, projected);
         if (changed) {
+          runtimeDebugPrechecked('terminal.performance.trace', {
+            sessionId,
+            traceId: `${sessionId}:${Math.max(0, Math.floor(projected.revision || 0))}`,
+            mirrorRevision: Math.max(0, Math.floor(projected.revision || 0)),
+            subscriberId: sessionId,
+            stage: 'render-commit',
+            at: Date.now(),
+            lineCount: projected.lines.length,
+          });
           options.recordSessionRenderCommit(sessionId);
         }
       } while (runtime.dirty);
@@ -277,14 +276,9 @@ export function createSessionRenderGate(options: {
     }
   };
 
-  /**
-   * P4: global RAF coalescing layer.
-   *
-   * We keep the existing per-session debounce contract (`resolveRenderCommitMs`)
-   * so each session still chooses its own coalescing window. Once that window
-   * expires, the session is enrolled into a single shared RAF batch so all dirty
-   * sessions flush in the same browser frame.
-   */
+  // Renderer commit is a pure projection gate: coalesce to one browser frame,
+  // then read the current live buffer exactly once. Do not add a second debounce
+  // here or a stale scheduled frame can publish old buffer before the latest one.
   let rafTickScheduled = false;
   let rafFallbackTimer: number | null = null;
   const pendingRafSessions = new Set<string>();
@@ -302,6 +296,16 @@ export function createSessionRenderGate(options: {
       if (!runtime) {
         continue;
       }
+      const liveBuffer = options.liveBufferStore.getSnapshot(sessionId).buffer;
+      runtimeDebugPrechecked('terminal.performance.trace', {
+        sessionId,
+        traceId: `${sessionId}:${Math.max(0, Math.floor(liveBuffer.revision || 0))}`,
+        mirrorRevision: Math.max(0, Math.floor(liveBuffer.revision || 0)),
+        subscriberId: sessionId,
+        stage: 'render-raf',
+        at: Date.now(),
+        lineCount: liveBuffer.lines.length,
+      });
       flush(sessionId);
       if (runtime.dirty && !runtime.scheduled) {
         scheduleFlush(sessionId);
@@ -327,7 +331,6 @@ export function createSessionRenderGate(options: {
 
   const enrollSessionIntoRafBatch = (sessionId: string) => {
     const runtime = ensureRuntime(sessionId);
-    clearScheduledTimer(runtime);
     runtime.scheduled = false;
     pendingRafSessions.add(sessionId);
     scheduleRafFrame();
@@ -339,8 +342,7 @@ export function createSessionRenderGate(options: {
       return;
     }
     runtime.scheduled = true;
-    const renderCommitMs = Math.max(16, Math.floor(options.resolveRenderCommitMs?.(sessionId) || 33));
-    runtime.frameTimerId = setTimeout(() => enrollSessionIntoRafBatch(sessionId), renderCommitMs) as unknown as number;
+    enrollSessionIntoRafBatch(sessionId);
   };
 
   const scheduleCommit = (sessionId: string) => {
@@ -355,7 +357,6 @@ export function createSessionRenderGate(options: {
   const deleteSession = (sessionId: string) => {
     const runtime = runtimes.get(sessionId);
     if (runtime) {
-      clearScheduledTimer(runtime);
       runtimes.delete(sessionId);
     }
     renderStore.deleteSession(sessionId);

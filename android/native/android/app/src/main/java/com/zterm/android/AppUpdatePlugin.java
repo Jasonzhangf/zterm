@@ -384,6 +384,18 @@ public class AppUpdatePlugin extends Plugin {
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         intent.addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP);
         getActivity().startActivity(intent);
+        terminateCurrentProcessAfterInstallerHandoff();
+    }
+
+    private void terminateCurrentProcessAfterInstallerHandoff() {
+        getActivity().getWindow().getDecorView().postDelayed(() -> {
+            try {
+                getActivity().finishAndRemoveTask();
+            } catch (Exception error) {
+                Log.w(TAG, "failed to finish activity after installer handoff", error);
+            }
+            android.os.Process.killProcess(android.os.Process.myPid());
+        }, 750L);
     }
 
     private String resolvePackageName(File apkFile) throws Exception {

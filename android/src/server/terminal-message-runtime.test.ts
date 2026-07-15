@@ -49,8 +49,35 @@ function createSession(id = 'session-1'): TerminalSession {
     closeTransport: vi.fn(),
     sessionName: 'demo',
     mirrorKey: 'demo',
+    bodySubscribed: true,
     pendingPasteImage: null,
     pendingAttachFile: null,
+  };
+}
+
+function createReadyMirror(): SessionMirror {
+  return {
+    key: 'demo',
+    sessionName: 'demo',
+    scratchBridge: null,
+    lifecycle: 'ready',
+    cols: 120,
+    rows: 40,
+    cursorKeysApp: false,
+    revision: 3,
+    lastScrollbackCount: 0,
+    bufferStartIndex: 0,
+    bufferLines: [],
+    cursor: null,
+    lastFlushStartedAt: 0,
+    lastFlushCompletedAt: 0,
+    lastLiveActivityAt: 0,
+    lastHeadBroadcastAt: 0,
+    flushInFlight: false,
+    flushPromise: null,
+    liveSyncTimer: null,
+    consecutiveFailures: 0,
+    subscribers: new Set(),
   };
 }
 
@@ -75,6 +102,7 @@ function createRuntime(options?: {
   const sendTransportMessage = vi.fn();
   const sendMessage = vi.fn();
   const sendBufferHeadToSession = vi.fn();
+  const scheduleMirrorLiveSync = vi.fn();
   const refreshMirrorHeadForSession = vi.fn(async () => true);
   const handleInput = vi.fn(async () => true) as unknown as ReturnType<typeof vi.fn> & TerminalMessageRuntimeDeps['handleInput'];
   const closeSession = vi.fn();
@@ -91,6 +119,7 @@ function createRuntime(options?: {
     normalizeBufferSyncRequestPayload: (_session, request) => request,
     getSessionMirror: () => options?.mirror ?? null,
     sendBufferHeadToSession,
+    scheduleMirrorLiveSync,
     refreshMirrorHeadForSession,
     handleInput,
     closeSession,
@@ -117,6 +146,7 @@ function createRuntime(options?: {
       sendScheduleStateToSession: vi.fn(),
       listTmuxSessions: vi.fn(() => []),
       createDetachedTmuxSession: vi.fn(() => 'demo'),
+      closeDetachedTerminalSession: vi.fn(),
       renameTmuxSession: vi.fn(() => 'demo'),
       runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
       sanitizeSessionName: vi.fn((input?: string) => input?.trim() || 'demo'),
@@ -135,6 +165,7 @@ function createRuntime(options?: {
     sendTransportMessage,
     sendMessage,
     sendBufferHeadToSession,
+    scheduleMirrorLiveSync,
     refreshMirrorHeadForSession,
     handleClientDebugLog,
     handleClientDebugSnapshot,
@@ -146,6 +177,35 @@ function createRuntime(options?: {
 }
 
 describe('terminal message runtime explicit error truth', () => {
+  it('updates physical body subscription without closing the transport, and resubscribe sends head truth plus live demand', async () => {
+    const mirror = createReadyMirror();
+    const { runtime, sessions, sendBufferHeadToSession, scheduleMirrorLiveSync } = createRuntime({ mirror });
+    const session = createSession();
+    sessions.set(session.id, session);
+    const connection = createConnection(session.id);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'body-subscription',
+      payload: { version: 1, subscribed: false },
+    })));
+
+    expect(session.bodySubscribed).toBe(false);
+    expect(connection.transport.close).not.toHaveBeenCalled();
+    expect(sendBufferHeadToSession).not.toHaveBeenCalled();
+    expect(scheduleMirrorLiveSync).toHaveBeenCalledWith(mirror, 0);
+    scheduleMirrorLiveSync.mockClear();
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'body-subscription',
+      payload: { version: 1, subscribed: true },
+    })));
+
+    expect(session.bodySubscribed).toBe(true);
+    expect(connection.transport.close).not.toHaveBeenCalled();
+    expect(sendBufferHeadToSession).toHaveBeenCalledWith(session, mirror);
+    expect(scheduleMirrorLiveSync).toHaveBeenCalledWith(mirror, 0);
+  });
+
   it('does not echo legacy clientSessionId in session-ticket because daemon owns no client state', async () => {
     const { runtime, sendTransportMessage } = createRuntime();
     const connection = createConnection(null);
@@ -234,6 +294,47 @@ describe('terminal message runtime explicit error truth', () => {
         code: 'session_not_ready',
       },
     });
+  });
+
+  it('allows explicit buffer-sync range reads while physical body subscription is disabled', async () => {
+    const mirror = createReadyMirror();
+    mirror.bufferLines = [[{
+      char: 97,
+      fg: 256,
+      bg: 256,
+      flags: 0,
+      width: 1,
+    }]];
+    mirror.revision = 4;
+    const { runtime, sessions, sendMessage, sendBufferHeadToSession, scheduleMirrorLiveSync } = createRuntime({ mirror });
+    const session = createSession();
+    session.bodySubscribed = false;
+    sessions.set(session.id, session);
+    const connection = createConnection(session.id);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'buffer-sync-request',
+      payload: {
+        knownRevision: 4,
+        localStartIndex: 0,
+        localEndIndex: 0,
+        requestStartIndex: 0,
+        requestEndIndex: 1,
+      },
+    })));
+
+    expect(sendBufferHeadToSession).not.toHaveBeenCalled();
+    expect(scheduleMirrorLiveSync).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledWith(session, expect.objectContaining({
+      type: 'buffer-sync',
+      payload: expect.objectContaining({
+        revision: 4,
+        startIndex: 0,
+        endIndex: 1,
+        availableStartIndex: 0,
+        availableEndIndex: 1,
+      }),
+    }));
   });
 
   it('uses buffer-head-request as a pure head-read probe path', async () => {

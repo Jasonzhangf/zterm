@@ -18,6 +18,7 @@ Windows is split into two layers:
 ## Allowed Paths
 
 - Add Windows shell docs, package metadata, launcher, installer, and platform integration under `win/`.
+- Keep Windows package-channel metadata under `win/package.json`, `win/build/`, and verifier scripts; internal alpha artifacts are unsigned unless a certificate-backed gate is added.
 - Add Windows filesystem IO only behind the typed preload adapter; path/sort/preview decisions remain in shared `FileBrowserCore`.
 - Update shared desktop pane/shell components only when the same behavior is intentionally shared with Mac.
 - Update daemon backend only through `daemon.windows_wezterm_backend` owner paths.

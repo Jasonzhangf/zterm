@@ -203,8 +203,17 @@ function capturePng(serial: string) {
 
 function captureUiDump(serial: string) {
   const path = '/sdcard/Download/zterm-ui-dump.xml';
-  adbText(serial, ['shell', 'uiautomator', 'dump', path]);
-  return adbText(serial, ['shell', 'cat', path]);
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      adbText(serial, ['shell', 'uiautomator', 'dump', path]);
+      return adbText(serial, ['shell', 'cat', path]);
+    } catch (error) {
+      lastError = error;
+      sleep(500 * attempt);
+    }
+  }
+  throw lastError;
 }
 
 function captureInputMethodDump(serial: string) {
@@ -321,10 +330,52 @@ async function collectRuntime(remote: { bridgeHost: string; bridgePort: number; 
   return { health, control, snapshot, logs };
 }
 
-function extractInputEvidence(logs: unknown, sessionId: string | null) {
-  const entries = Array.isArray((logs as { entries?: unknown[] })?.entries)
-    ? ((logs as { entries?: unknown[] }).entries as Array<Record<string, unknown>>)
+function safeParseRuntimePayload(payload: unknown) {
+  if (typeof payload !== 'string' || !payload.trim()) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(payload);
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
+}
+
+function entryEpochMs(entry: Record<string, unknown>) {
+  const candidates = [entry.ingestedAt, entry.ts];
+  for (const candidate of candidates) {
+    if (typeof candidate !== 'string' || !candidate.trim()) {
+      continue;
+    }
+    const parsed = Date.parse(candidate);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return 0;
+}
+
+function readLogEntries(logs: unknown, key: 'entries' | 'daemonEntries') {
+  return Array.isArray((logs as Record<string, unknown> | null)?.[key])
+    ? ((logs as Record<string, unknown>)[key] as Array<Record<string, unknown>>)
     : [];
+}
+
+function payloadMentionsSession(entry: Record<string, unknown>, sessionId: string | null) {
+  if (!sessionId) {
+    return true;
+  }
+  const payload = typeof entry.payload === 'string' ? entry.payload : '';
+  return payload.includes(`"sessionId":"${sessionId}"`);
+}
+
+function extractInputEvidence(logs: unknown, sessionId: string | null, minimumTimestamp: string) {
+  const minimumEpochMs = Date.parse(minimumTimestamp);
+  const entries = readLogEntries(logs, 'entries')
+    .filter((entry) => !Number.isFinite(minimumEpochMs) || entryEpochMs(entry) >= minimumEpochMs);
+  const daemonEntries = readLogEntries(logs, 'daemonEntries')
+    .filter((entry) => !Number.isFinite(minimumEpochMs) || entryEpochMs(entry) >= minimumEpochMs);
   const parsed = parseRuntimeSequenceEntries(entries.map((entry) => ({
     seq: typeof entry.seq === 'number' ? entry.seq : undefined,
     ts: typeof entry.ts === 'string' ? entry.ts : undefined,
@@ -332,19 +383,54 @@ function extractInputEvidence(logs: unknown, sessionId: string | null) {
     payload: typeof entry.payload === 'string' ? entry.payload : null,
   })));
   const filtered = sessionId ? parsed.filter((entry) => entry.sessionId === sessionId) : parsed;
-  const anomalies = detectRuntimeSequenceAnomalies(filtered);
+  const rawSessionEntries = sessionId
+    ? entries.filter((entry) => payloadMentionsSession(entry, sessionId))
+    : entries;
+  const physicalSessionIds = new Set<string>();
+  for (const entry of entries) {
+    const payload = safeParseRuntimePayload(entry.payload);
+    if (sessionId && payload?.sessionId !== sessionId) {
+      continue;
+    }
+    if (typeof entry.sessionId === 'string' && entry.sessionId.trim()) {
+      physicalSessionIds.add(entry.sessionId.trim());
+    }
+  }
+  const daemonFiltered = daemonEntries.filter((entry) => (
+    typeof entry.sessionId === 'string'
+    && physicalSessionIds.has(entry.sessionId)
+  ));
+  const anomalyInputsByPhysicalSession = new Map<string, Array<Record<string, unknown>>>();
+  for (const entry of rawSessionEntries) {
+    const physicalSessionId = typeof entry.sessionId === 'string' && entry.sessionId.trim()
+      ? entry.sessionId.trim()
+      : '__unknown__';
+    const current = anomalyInputsByPhysicalSession.get(physicalSessionId) || [];
+    current.push(entry);
+    anomalyInputsByPhysicalSession.set(physicalSessionId, current);
+  }
+  const anomalies = Array.from(anomalyInputsByPhysicalSession.values()).flatMap((sessionEntries) => (
+    detectRuntimeSequenceAnomalies(parseRuntimeSequenceEntries(sessionEntries.map((entry) => ({
+      seq: typeof entry.seq === 'number' ? entry.seq : undefined,
+      ts: typeof entry.ts === 'string' ? entry.ts : undefined,
+      scope: typeof entry.scope === 'string' ? entry.scope : undefined,
+      payload: typeof entry.payload === 'string' ? entry.payload : null,
+    }))))
+  ));
   const latestScopes = filtered.slice(-30).map((entry) => entry.scope);
   return {
     parsed,
     filtered,
+    physicalSessionIds: Array.from(physicalSessionIds),
+    daemonFiltered,
     anomalies,
     checks: {
       clientInputSend: filtered.some((entry) => entry.scope === 'session.input.send'),
-      daemonInputReceive: filtered.some((entry) => entry.scope === 'input-receive'),
-      daemonInputWrite: filtered.some((entry) => entry.scope === 'input-write'),
+      daemonInputReceive: daemonFiltered.some((entry) => entry.scope === 'input-receive'),
+      daemonInputWrite: daemonFiltered.some((entry) => entry.scope === 'input-write'),
       bufferHead: filtered.some((entry) => entry.scope === 'session.buffer.head'),
       bufferApplied: filtered.some((entry) => entry.scope === 'session.buffer.applied'),
-      renderCommit: filtered.some((entry) => entry.scope === 'session.render-gate.flush.inspect'),
+      renderCommit: rawSessionEntries.some((entry) => entry.scope === 'session.render-gate.flush.inspect'),
       noLocalTruthAnomaly: anomalies.length === 0,
     },
     latestScopes,
@@ -400,6 +486,7 @@ async function main() {
   if (/^Error:/m.test(startOutput) || !/Status:\s+ok/m.test(startOutput)) {
     fail(`apk start failed\n${startOutput}`);
   }
+  ensureInteractiveDevice(serial);
   adbText(serial, ['shell', 'cmd', 'statusbar', 'collapse']);
   const activityDump = waitForForeground(serial, 10_000);
   const center = resolveDisplayCenter(serial);
@@ -440,7 +527,7 @@ async function main() {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   let finalRuntime = baselineRuntime;
   let finalActiveSessionId = evidenceSessionId;
-  let finalEvidence = extractInputEvidence(baselineRuntime.logs, evidenceSessionId);
+  let finalEvidence = extractInputEvidence(baselineRuntime.logs, evidenceSessionId, smokeStartedAt);
 
   while (Date.now() <= deadline) {
     finalRuntime = await collectRuntime(storageTarget.target);
@@ -452,10 +539,12 @@ async function main() {
       selectFreshApkSmokeSnapshotRecord(finalRuntime.snapshot, smokeStartedAt),
     );
     finalActiveSessionId = storageTarget.target.sessionId || currentSnapshotSessionId || evidenceSessionId;
-    finalEvidence = extractInputEvidence(finalRuntime.logs, finalActiveSessionId);
+    finalEvidence = extractInputEvidence(finalRuntime.logs, finalActiveSessionId, smokeStartedAt);
     if (
       finalActiveSessionId
       && finalEvidence.checks.clientInputSend
+      && finalEvidence.checks.daemonInputReceive
+      && finalEvidence.checks.daemonInputWrite
       && finalEvidence.checks.bufferApplied
       && finalEvidence.checks.renderCommit
     ) {
@@ -496,6 +585,8 @@ async function main() {
   const summary = {
     ok: Boolean(finalActiveSessionId)
       && finalEvidence.checks.clientInputSend
+      && finalEvidence.checks.daemonInputReceive
+      && finalEvidence.checks.daemonInputWrite
       && finalEvidence.checks.bufferApplied
       && finalEvidence.checks.renderCommit
       && finalEvidence.checks.noLocalTruthAnomaly,

@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type TouchEvent } from "react";
 import { Capacitor } from "@capacitor/core";
 import { Keyboard } from "@capacitor/keyboard";
 import { mobileTheme } from "../../lib/mobile-ui";
@@ -124,6 +124,13 @@ interface ImageUploadBatchState {
   activeFileName: string;
 }
 
+const QUICKBAR_HORIZONTAL_PAN_LOCK_PX = 8;
+const QUICKBAR_COLLAPSE_SWIPE_PX = 48;
+const QUICKBAR_COLLAPSED_BOTTOM_GESTURE_GUARD_PX =
+  FLOATING_BUBBLE_SIZE + FLOATING_BUBBLE_MARGIN * 2;
+const QUICKBAR_COLLAPSED_REVEAL_SURFACE_HEIGHT_PX =
+  QUICKBAR_COLLAPSED_BOTTOM_GESTURE_GUARD_PX * 2;
+
 function TerminalQuickBarComponent({
   activeSessionId,
   quickActions,
@@ -234,10 +241,38 @@ function TerminalQuickBarComponent({
     moved: false,
     startX: 0,
     startY: 0,
+    lastX: 0,
+    lastY: 0,
     originX: 0,
     originY: 0,
     width: FLOATING_BUBBLE_SIZE,
     height: FLOATING_BUBBLE_SIZE,
+  });
+  const quickBarPanRef = useRef<{
+    active: boolean;
+    axis: "horizontal" | "vertical" | null;
+    horizontalPanAllowed: boolean;
+    startX: number;
+    startY: number;
+    lastX: number;
+    lastY: number;
+    startScrollLeft: number;
+  }>({
+    active: false,
+    axis: null,
+    horizontalPanAllowed: false,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastY: 0,
+    startScrollLeft: 0,
+  });
+  const collapsedRevealPanRef = useRef({
+    active: false,
+    startX: 0,
+    startY: 0,
+    lastX: 0,
+    lastY: 0,
   });
   const normalizedSplitCountOptions = useMemo(
     () =>
@@ -1678,6 +1713,12 @@ function TerminalQuickBarComponent({
     [stopRepeatingAction],
   );
 
+  const shellCollapsed =
+    (shellMode === "floating-collapsed" || collapsed) &&
+    !floatingMenuOpen &&
+    !editorOpen &&
+    !shortcutEditorOpen;
+
   useEffect(() => {
     const host = rootRef.current;
     if (!host) {
@@ -1685,6 +1726,10 @@ function TerminalQuickBarComponent({
     }
 
     const syncHeight = () => {
+      if (shellCollapsed) {
+        onMeasuredHeightChange?.(0);
+        return;
+      }
       const measuredPx = Math.max(
         0,
         Math.round(
@@ -1704,22 +1749,176 @@ function TerminalQuickBarComponent({
       observer.disconnect();
       window.removeEventListener("resize", syncHeight);
     };
-  }, [keyboardInsetPx, keyboardVisible, onMeasuredHeightChange]);
-
-  const shellCollapsed =
-    (shellMode === "floating-collapsed" || collapsed) &&
-    !floatingMenuOpen &&
-    !editorOpen &&
-    !shortcutEditorOpen;
+  }, [keyboardInsetPx, keyboardVisible, onMeasuredHeightChange, shellCollapsed]);
 
   const blockShellEvent = (event: React.SyntheticEvent<HTMLElement>) => {
     const target = event.target as HTMLElement | null;
+    if (
+      event.type.startsWith("touch") &&
+      target?.closest('[data-quickbar-pan-surface="true"]')
+    ) {
+      return;
+    }
     if (shouldAllowQuickBarShellPointerEvent(target)) {
       return;
     }
     event.stopPropagation();
     event.preventDefault();
   };
+
+  const getQuickBarScrollTracks = useCallback(() => {
+    const root = rootRef.current;
+    if (!root) {
+      return [];
+    }
+    return Array.from(
+      root.querySelectorAll<HTMLElement>('[data-quickbar-scroll-track="true"]'),
+    );
+  }, []);
+
+  const getQuickBarPrimaryScrollLeft = useCallback(() => {
+    return getQuickBarScrollTracks()[0]?.scrollLeft || 0;
+  }, [getQuickBarScrollTracks]);
+
+  const setQuickBarScrollLeft = useCallback(
+    (nextScrollLeft: number) => {
+      const tracks = getQuickBarScrollTracks();
+      for (const track of tracks) {
+        track.scrollLeft = Math.max(
+          0,
+          Math.min(nextScrollLeft, Math.max(0, track.scrollWidth - track.clientWidth)),
+        );
+      }
+    },
+    [getQuickBarScrollTracks],
+  );
+
+  const handleQuickBarRowsTouchStart = useCallback((event: TouchEvent<HTMLDivElement>) => {
+    const target = event.target as HTMLElement | null;
+    if (event.touches.length !== 1) {
+      quickBarPanRef.current.active = false;
+      quickBarPanRef.current.axis = null;
+      return;
+    }
+    const touch = event.touches[0];
+    const horizontalPanAllowed = !(
+      target?.closest('[data-quickbar-scroll-track="true"]') ||
+      shouldAllowQuickBarShellPointerEvent(target)
+    );
+    quickBarPanRef.current = {
+      active: true,
+      axis: null,
+      horizontalPanAllowed,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      lastX: touch.clientX,
+      lastY: touch.clientY,
+      startScrollLeft: getQuickBarPrimaryScrollLeft(),
+    };
+  }, [getQuickBarPrimaryScrollLeft]);
+
+  const handleQuickBarRowsTouchMove = useCallback((event: TouchEvent<HTMLDivElement>) => {
+    const pan = quickBarPanRef.current;
+    const touch = event.touches[0];
+    if (!pan.active || !touch || event.touches.length !== 1) {
+      return;
+    }
+    pan.lastX = touch.clientX;
+    pan.lastY = touch.clientY;
+    const deltaX = touch.clientX - pan.startX;
+    const deltaY = touch.clientY - pan.startY;
+    if (!pan.axis) {
+      if (
+        Math.abs(deltaX) < QUICKBAR_HORIZONTAL_PAN_LOCK_PX &&
+        Math.abs(deltaY) < QUICKBAR_HORIZONTAL_PAN_LOCK_PX
+      ) {
+        return;
+      }
+      pan.axis = Math.abs(deltaX) >= Math.abs(deltaY) ? "horizontal" : "vertical";
+    }
+    if (pan.axis !== "horizontal") {
+      return;
+    }
+    if (!pan.horizontalPanAllowed) {
+      return;
+    }
+    event.preventDefault();
+    setQuickBarScrollLeft(pan.startScrollLeft - deltaX);
+  }, [setQuickBarScrollLeft]);
+
+  const resetQuickBarRowsGesture = useCallback(() => {
+    quickBarPanRef.current.active = false;
+    quickBarPanRef.current.axis = null;
+  }, []);
+
+  const handleQuickBarRowsTouchEnd = useCallback(() => {
+    const pan = quickBarPanRef.current;
+    const deltaY = pan.lastY - pan.startY;
+    if (
+      pan.active &&
+      pan.axis === "vertical" &&
+      collapseAvailable &&
+      !collapsed &&
+      deltaY >= QUICKBAR_COLLAPSE_SWIPE_PX
+    ) {
+      onCollapsedChange?.(true);
+    }
+    resetQuickBarRowsGesture();
+  }, [
+    collapseAvailable,
+    collapsed,
+    onCollapsedChange,
+    resetQuickBarRowsGesture,
+  ]);
+
+  const handleCollapsedRevealTouchStart = useCallback((event: TouchEvent<HTMLDivElement>) => {
+    if (event.touches.length !== 1) {
+      collapsedRevealPanRef.current.active = false;
+      return;
+    }
+    const touch = event.touches[0];
+    collapsedRevealPanRef.current = {
+      active: true,
+      startX: touch.clientX,
+      startY: touch.clientY,
+      lastX: touch.clientX,
+      lastY: touch.clientY,
+    };
+  }, []);
+
+  const handleCollapsedRevealTouchMove = useCallback((event: TouchEvent<HTMLDivElement>) => {
+    const touch = event.touches[0];
+    const pan = collapsedRevealPanRef.current;
+    if (!pan.active || !touch || event.touches.length !== 1) {
+      return;
+    }
+    pan.lastX = touch.clientX;
+    pan.lastY = touch.clientY;
+    const deltaX = touch.clientX - pan.startX;
+    const deltaY = touch.clientY - pan.startY;
+    if (Math.abs(deltaY) > Math.abs(deltaX) && deltaY < 0) {
+      event.preventDefault();
+      event.stopPropagation();
+    }
+  }, []);
+
+  const handleCollapsedRevealTouchEnd = useCallback(() => {
+    const pan = collapsedRevealPanRef.current;
+    const deltaX = pan.lastX - pan.startX;
+    const deltaY = pan.lastY - pan.startY;
+    if (
+      pan.active &&
+      Math.abs(deltaY) > Math.abs(deltaX) &&
+      deltaY <= -QUICKBAR_COLLAPSE_SWIPE_PX
+    ) {
+      onCollapsedChange?.(false);
+    }
+    collapsedRevealPanRef.current.active = false;
+  }, [onCollapsedChange]);
+
+  const resetCollapsedRevealGesture = useCallback(() => {
+    collapsedRevealPanRef.current.active = false;
+  }, []);
 
   return (
     <div
@@ -3404,6 +3603,8 @@ function TerminalQuickBarComponent({
               moved: false,
               startX: touch.clientX,
               startY: touch.clientY,
+              lastX: touch.clientX,
+              lastY: touch.clientY,
               originX: rect.left,
               originY: rect.top,
               width: rect.width || FLOATING_BUBBLE_SIZE,
@@ -3416,8 +3617,22 @@ function TerminalQuickBarComponent({
             if (!touch) {
               return;
             }
+            drag.lastX = touch.clientX;
+            drag.lastY = touch.clientY;
             const deltaX = touch.clientX - drag.startX;
             const deltaY = touch.clientY - drag.startY;
+            if (
+              collapsed &&
+              Math.abs(deltaY) >= FLOATING_BUBBLE_DRAG_THRESHOLD_PX &&
+              Math.abs(deltaY) > Math.abs(deltaX)
+            ) {
+              event.preventDefault();
+              event.stopPropagation();
+              drag.active = true;
+              drag.moved = true;
+              suppressBubbleClickRef.current = true;
+              return;
+            }
             if (
               !drag.active &&
               Math.hypot(deltaX, deltaY) >= FLOATING_BUBBLE_DRAG_THRESHOLD_PX
@@ -3441,6 +3656,16 @@ function TerminalQuickBarComponent({
             );
           }}
           onTouchEnd={() => {
+            const drag = floatingBubbleTouchDragRef.current;
+            const deltaX = drag.lastX - drag.startX;
+            const deltaY = drag.lastY - drag.startY;
+            if (
+              collapsed &&
+              Math.abs(deltaY) > Math.abs(deltaX) &&
+              deltaY <= -QUICKBAR_COLLAPSE_SWIPE_PX
+            ) {
+              onCollapsedChange?.(false);
+            }
             if (floatingBubbleTouchDragRef.current.active) {
               suppressBubbleClickRef.current = true;
               window.setTimeout(() => {
@@ -3498,7 +3723,12 @@ function TerminalQuickBarComponent({
       {shellMode === "inline" && !shellCollapsed && !floatingMenuOpen && (
         <div
           data-testid="terminal-quickbar-shell-rows"
-          style={{ position: "relative" }}
+          data-quickbar-pan-surface="true"
+          onTouchStart={handleQuickBarRowsTouchStart}
+          onTouchMove={handleQuickBarRowsTouchMove}
+          onTouchEnd={handleQuickBarRowsTouchEnd}
+          onTouchCancel={resetQuickBarRowsGesture}
+          style={{ position: "relative", touchAction: "pan-y" }}
         >
           {landscape ? (
             <>
@@ -3714,22 +3944,42 @@ function TerminalQuickBarComponent({
         </div>
       )}
       {shellMode === "inline" && shellCollapsed && !floatingMenuOpen ? (
-        <div
-          data-testid="terminal-quickbar-collapsed-keyboard"
-          style={{
-            position: "fixed",
-            right: `calc(${FLOATING_BUBBLE_SIZE + FLOATING_BUBBLE_MARGIN + 8}px + env(safe-area-inset-right, 0px))`,
-            bottom: `calc(${FLOATING_BUBBLE_MARGIN}px + env(safe-area-inset-bottom, 0px))`,
-            zIndex: 128,
-            width: "78px",
-            height: `${FLOATING_BUBBLE_SIZE}px`,
-          }}
-        >
-          {renderBaseActionButton(
-            { id: "keyboard", label: "键盘", sequence: "" },
-            { fixed: true, compact: true },
-          )}
-        </div>
+        <>
+          <div
+            data-testid="terminal-quickbar-collapsed-reveal-surface"
+            data-quickbar-allow-pointer="true"
+            onTouchStart={handleCollapsedRevealTouchStart}
+            onTouchMove={handleCollapsedRevealTouchMove}
+            onTouchEnd={handleCollapsedRevealTouchEnd}
+            onTouchCancel={resetCollapsedRevealGesture}
+            onClick={() => onCollapsedChange?.(false)}
+            style={{
+              position: "fixed",
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 127,
+              height: `calc(${QUICKBAR_COLLAPSED_REVEAL_SURFACE_HEIGHT_PX}px + env(safe-area-inset-bottom, 0px))`,
+              touchAction: "none",
+            }}
+          />
+          <div
+            data-testid="terminal-quickbar-collapsed-keyboard"
+            style={{
+              position: "fixed",
+              right: `calc(${FLOATING_BUBBLE_SIZE + FLOATING_BUBBLE_MARGIN + 8}px + env(safe-area-inset-right, 0px))`,
+              bottom: `calc(${FLOATING_BUBBLE_MARGIN}px + env(safe-area-inset-bottom, 0px))`,
+              zIndex: 128,
+              width: "78px",
+              height: `${FLOATING_BUBBLE_SIZE}px`,
+            }}
+          >
+            {renderBaseActionButton(
+              { id: "keyboard", label: "键盘", sequence: "" },
+              { fixed: true, compact: true },
+            )}
+          </div>
+        </>
       ) : null}
       {toastMessage && (
         <div

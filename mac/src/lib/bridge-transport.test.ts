@@ -4,6 +4,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createBridgeTransportController } from './bridge-transport';
 import type { BridgeServerMessage, EditableHost } from '@zterm/shared';
 
+const CLIENT_PING_INTERVAL_MS = 30000;
+const CLIENT_PONG_TIMEOUT_MS = 70000;
+
 class MockWebSocket {
   static CONNECTING = 0;
   static OPEN = 1;
@@ -238,6 +241,45 @@ describe('Mac bridge transport connection', () => {
       loading: false,
       error: 'daemon transport closed',
     });
+  });
+
+  it('does not close an open daemon websocket only because heartbeat pong is overdue', () => {
+    const controller = createBridgeTransportController();
+    const nowSpy = vi.spyOn(Date, 'now');
+    let now = 1_000;
+    nowSpy.mockImplementation(() => now);
+    try {
+      controller.connect(makeHost());
+      const ws = MockWebSocket.instances[0]!;
+      ws.triggerOpen();
+      const sessionOpen = readSent(ws).at(-1);
+      ws.triggerMessage({
+        type: 'session-ticket',
+        payload: {
+          openRequestId: sessionOpen.payload.openRequestId,
+          sessionTransportToken: 'ticket-1',
+          sessionName: 'zterm_mirror_lab',
+        },
+      } as BridgeServerMessage);
+      ws.triggerMessage({
+        type: 'connected',
+        payload: { sessionId: 'daemon-session-1' },
+      } as BridgeServerMessage);
+
+      ws.sent.length = 0;
+      now += CLIENT_PONG_TIMEOUT_MS + 1;
+      vi.advanceTimersByTime(CLIENT_PING_INTERVAL_MS);
+
+      expect(ws.readyState).toBe(MockWebSocket.OPEN);
+      expect(readSent(ws)).toContainEqual({ type: 'ping' });
+      expect(controller.getState()).toMatchObject({
+        status: 'connected',
+        connectedSessionId: 'daemon-session-1',
+        error: '',
+      });
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it('keeps manual disconnect as idle instead of reporting a transport error', () => {

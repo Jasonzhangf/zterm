@@ -11,7 +11,10 @@
     "build": "pnpm run build:renderer && pnpm run build:main",
     "type-check": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.node.json",
     "test": "vitest run",
-    "package": "pnpm run build && electron-builder --win dir --x64"
+    "package": "pnpm run build && electron-builder --win --x64 --publish never",
+    "package:dir": "pnpm run build && electron-builder --win dir --x64 --publish never",
+    "package:installer": "pnpm run build && electron-builder --win nsis --x64 --publish never",
+    "package:verify": "node scripts/verify-windows-package.mjs"
   },
   "dependencies": {
     "@jsonstudio/wtermmod-react": "^0.1.9",
@@ -41,7 +44,30 @@
     "productName": "ZTerm",
     "directories": { "output": "out" },
     "files": ["dist/**/*", "dist-electron/**/*", "package.json"],
-    "win": { "target": ["dir"] }
+    "artifactName": "ZTerm-${version}-${arch}.${ext}",
+    "publish": [
+      {
+        "provider": "generic",
+        "url": "https://updates.invalid/zterm/windows/"
+      }
+    ],
+    "win": {
+      "target": [
+        { "target": "dir", "arch": ["x64"] },
+        { "target": "nsis", "arch": ["x64"] }
+      ],
+      "icon": "build/icon.ico",
+      "forceCodeSigning": false,
+      "publisherName": "JsonStudio"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "ZTerm"
+    }
   },
   "packageManager": "pnpm@9.15.9"
 }

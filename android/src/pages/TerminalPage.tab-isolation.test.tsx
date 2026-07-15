@@ -81,7 +81,8 @@ vi.mock('../components/terminal/TerminalQuickBar', () => ({
       <button type="button" onClick={() => onSessionDraftSend?.('draft-send')}>send-draft</button>
       <button type="button" onClick={() => onToggleSplitLayout?.()}>toggle-split</button>
       <button type="button" onClick={() => onCycleSplitPane?.()}>cycle-split</button>
-      <button type="button" onClick={() => onMeasuredHeightChange?.(180)}>measure-quickbar</button>
+        <button type="button" onClick={() => onMeasuredHeightChange?.(180)}>measure-quickbar</button>
+        <button type="button" onClick={() => onMeasuredHeightChange?.(0)}>collapse-quickbar</button>
     </div>
   ),
 }));
@@ -383,6 +384,12 @@ describe('TerminalPage tab isolation', () => {
       expect(shell?.getAttribute('style') || '').not.toContain('padding-bottom: 180px;');
       expect(screen.getByTestId('terminal-stage-shell').getAttribute('style') || '').toContain('bottom: 180px;');
     });
+
+    fireEvent.click(screen.getByText('collapse-quickbar'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-stage-shell').style.bottom).toBe('0px');
+    });
   });
 
   it('keeps pane-target truth when applying an explicit non-P1 pane attach intent', async () => {
@@ -590,7 +597,7 @@ describe('TerminalPage tab isolation', () => {
     expect(onSessionDraftSend).toHaveBeenCalledWith('draft-send', 's1');
   });
 
-  it('routes adaptive swipe at the shell layer instead of the renderer', () => {
+  it('ignores adaptive horizontal swipe that starts away from the screen edge', () => {
     const sessions = [makeSession('s1'), makeSession('s2')];
     const onSwitchSession = vi.fn();
 
@@ -617,15 +624,15 @@ describe('TerminalPage tab isolation', () => {
     const surface = screen.getByTestId('terminal-swipe-surface-s1');
     fireEvent.touchStart(surface, { touches: [{ clientX: 220, clientY: 160 }] });
     fireEvent.touchMove(surface, {
-      touches: [{ clientX: 120, clientY: 166 }],
+      touches: [{ clientX: 880, clientY: 166 }],
       cancelable: true,
     });
-    fireEvent.touchEnd(surface, { changedTouches: [{ clientX: 120, clientY: 166 }] });
+    fireEvent.touchEnd(surface, { changedTouches: [{ clientX: 880, clientY: 166 }] });
 
-    expect(onSwitchSession).toHaveBeenCalledWith('s2');
+    expect(onSwitchSession).not.toHaveBeenCalled();
   });
 
-  it('keeps mirror-fixed swipe available when no dedicated horizontal pan owner is active', () => {
+  it('ignores mirror-fixed middle swipe so the renderer can own horizontal crop pan', () => {
     const sessions = [makeSession('s1'), makeSession('s2')];
     const onSwitchSession = vi.fn();
 
@@ -650,16 +657,62 @@ describe('TerminalPage tab isolation', () => {
     );
 
     const surface = screen.getByTestId('terminal-swipe-surface-s1');
-    expect(surface.getAttribute('data-swipe-enabled')).toBe('true');
-
     fireEvent.touchStart(surface, { touches: [{ clientX: 220, clientY: 160 }] });
     fireEvent.touchMove(surface, {
-      touches: [{ clientX: 120, clientY: 166 }],
+      touches: [{ clientX: 880, clientY: 166 }],
       cancelable: true,
     });
-    fireEvent.touchEnd(surface, { changedTouches: [{ clientX: 120, clientY: 166 }] });
+    fireEvent.touchEnd(surface, { changedTouches: [{ clientX: 880, clientY: 166 }] });
 
-    expect(onSwitchSession).toHaveBeenCalledWith('s2');
+    expect(onSwitchSession).not.toHaveBeenCalled();
+  });
+
+  it('opens the drawer from a left-edge swipe in mirror-fixed mode', () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: {
+        width: 390,
+        height: 844,
+        offsetTop: 0,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    });
+    const sessions = [makeSession('s1'), makeSession('s2')];
+    const onSwitchSession = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={onSwitchSession}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        terminalWidthMode="mirror-fixed"
+      />,
+    );
+
+    const surface = screen.getByTestId('terminal-swipe-surface-s1');
+    fireEvent.touchStart(surface, { touches: [{ clientX: 56, clientY: 160 }] });
+    fireEvent.touchMove(surface, {
+      touches: [{ clientX: 236, clientY: 166 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(surface, { changedTouches: [{ clientX: 236, clientY: 166 }] });
+
+    expect(onSwitchSession).not.toHaveBeenCalled();
+    expect(screen.getByTestId('terminal-session-drawer').getAttribute('aria-hidden')).toBe('false');
   });
 
   it('auto closes split when width shrinks back from wide profile to single-column', async () => {

@@ -64,6 +64,7 @@ import {
 import { createTerminalBridgeRuntime } from './terminal-bridge-runtime';
 import { createTerminalAttachTokenRuntime } from './terminal-attach-token-runtime';
 import { captureRemoteScreenshotWithDaemon } from './remote-screenshot-daemon';
+import { createTerminalPerformanceTraceStore } from '../lib/terminal-performance-trace';
 
 const DAEMON_CONFIG = resolveDaemonRuntimeConfig();
 const PORT = DAEMON_CONFIG.port || DEFAULT_BRIDGE_PORT;
@@ -106,6 +107,7 @@ const mirrors = new Map<string, SessionMirror>();
 const scheduleStore = loadScheduleStore();
 const clientRuntimeDebugStore = createRuntimeDebugStore();
 const daemonRuntimeDebugStore = createRuntimeDebugStore();
+const performanceTraceStore = createTerminalPerformanceTraceStore({ limit: 5000 });
 const terminalAttachTokenRuntime = createTerminalAttachTokenRuntime();
 let terminalScheduleRuntime: TerminalScheduleRuntime;
 let terminalControlRuntime: TerminalControlRuntime;
@@ -153,6 +155,7 @@ const terminalRuntime = createTerminalRuntime({
   mirrors,
   sendMessage: (session, message) => terminalTransportRuntimeSendMessage(session, message),
   sendText: (transport, text) => terminalTransportRuntime.sendText(transport, text),
+  recordPerformanceTrace: (record) => performanceTraceStore.record(record),
   sendScheduleStateToSession: (session, sessionName) =>
     terminalScheduleRuntime.sendScheduleStateToSession(session, sessionName),
   buildConnectedPayload: (sessionId, requestOrigin) => terminalHttpRuntime.buildConnectedPayload(sessionId, requestOrigin),
@@ -232,6 +235,7 @@ const {
   writeToLiveMirror,
   listTmuxSessions,
   createDetachedTmuxSession,
+  closeDetachedTerminalSession,
   renameTmuxSession,
 } = terminalControlRuntime;
 
@@ -243,6 +247,7 @@ const terminalTransportRuntime = createTerminalTransportRuntime({
   connections,
   daemonRuntimeDebug,
   summarizePayload,
+  recordPerformanceTrace: (record) => performanceTraceStore.record(record),
 });
 const {
   createWebSocketSessionTransport,
@@ -285,6 +290,7 @@ const terminalHttpRuntime = createTerminalHttpRuntime({
   mirrors,
   clientRuntimeDebugStore,
   daemonRuntimeDebugStore,
+  performanceTraceStore,
   resolveDebugRouteLimit,
   broadcastRuntimeDebugControl,
   setDaemonRuntimeDebugEnabled,
@@ -298,6 +304,7 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
   normalizeBufferSyncRequestPayload,
   getSessionMirror: terminalRuntime.getSubscriberMirror,
   sendBufferHeadToSession: terminalRuntime.sendBufferHeadToSession,
+  scheduleMirrorLiveSync: terminalRuntime.scheduleMirrorLiveSync,
   refreshMirrorHeadForSession: terminalRuntime.refreshMirrorHeadForSession,
   handleInput: terminalRuntime.handleInput,
   closeSession: terminalRuntime.closeTransportSubscriber,
@@ -316,6 +323,7 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
     sendScheduleStateToSession,
     listTmuxSessions,
     createDetachedTmuxSession,
+    closeDetachedTerminalSession,
     renameTmuxSession,
     runTmux,
     sanitizeSessionName,

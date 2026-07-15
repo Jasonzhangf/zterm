@@ -27,12 +27,17 @@ Owner feature: `terminal.keyboard_ime`.
 ## White-Box Plan
 
 - `terminal-keyboard-lift.test.ts` covers keyboard lift normalization, capped overlay lift, already-resized WebView detection, Android header inset stability, and foldable/landscape bottom chrome lift.
+- Positive transition: an overlay WebView keeps exactly one reported/occluded IME lift after the visual viewport resize event.
+- Positive transition: an adjustResize WebView reclassifies to zero external lift when its layout and visual viewport settle at the keyboard top.
+- Negative transition: a keyboard event arriving before the OEM viewport resize must not leave the initial overlay classification frozen for the rest of that IME-open lifecycle.
+- Negative geometry: QuickBar measured height excludes external IME lift, and stage bottom remains `quickbar chrome + safe offsets + exactly one IME lift`.
 - `TerminalQuickBar.test.tsx` proves QuickBar reports its real chrome height while IME lift is applied outside the component.
 - Negative path: `TerminalQuickBar` must not subtract `keyboardInsetPx` from measured chrome height, because `TerminalQuickBarShell.bottom` already consumes that lift.
 
 ## Module Black-Box Plan
 
 - `TerminalPage.android-ime.test.tsx` proves stage bottom reserve equals measured QuickBar chrome + safe offset + bottom chrome lift + IME lift.
+- It also dispatches the real registered `visualViewport.resize` listener after a keyboard-first race and proves `TerminalPage` re-renders from over-lift to adjustResize geometry without a second keyboard event.
 - `TerminalPage.lifecycle-cleanup.test.tsx` proves Keyboard, visualViewport, and virtualKeyboard listeners are registered and removed from their original sources.
 - `TerminalPageStageShell.pane-stage.test.tsx` proves stage positioning remains owned by shell layout and does not pass IME geometry into `TerminalView` resize.
 
@@ -45,4 +50,4 @@ Owner feature: `terminal.keyboard_ime`.
 ## Known Gaps
 
 - This test design does not replace L5 APK / real WebView visual verification.
-- It does not validate OEM-specific IME animation timing frame-by-frame; it locks the steady-state geometry contract after keyboard state settles.
+- Automated device verification must repeat IME open/close transitions and record `KB/LIFT/SH/RESZ`; a single successful toggle is not evidence for this intermittent race.

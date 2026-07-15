@@ -18,6 +18,7 @@ import {
   hasTerminalViewportLayoutChanged,
   detectDoubleWidthChar,
   hasDiscontinuousNeighbor,
+  buildTerminalVisibleRowViewModel,
   renderGapMarker,
   renderRowCells,
   resolveCursorOverlay,
@@ -375,9 +376,35 @@ describe('shared terminal renderer pure helpers', () => {
     });
 
     expect(gap.key).toBe('row-99');
-    expect(gap.rowStyle.background).toBe('transparent');
+    expect(gap.rowStyle.background).toBe(theme.background);
     expect(gap.rowStyle.borderTop).toBe('none');
     expect(gap.fillProps['data-terminal-gap-fill']).toBe('true');
+  });
+
+  it('keeps terminal row presentation fixed-height; visual wrapping must not be CSS auto-height', () => {
+    const viewModel = buildTerminalVisibleRowViewModel({
+      absoluteIndex: 42,
+      row: Array.from('1234567890').map((char) => ({
+        char: char.codePointAt(0)!,
+        fg: 256,
+        bg: 256,
+        flags: 0,
+        width: 1,
+      })),
+      rowHeight: '17px',
+      cellWidthPx: 8,
+      isGap: false,
+      theme,
+      cursorColumn: 9,
+    });
+
+    expect(viewModel.kind).toBe('row');
+    expect(viewModel.cells).toHaveLength(10);
+    expect(viewModel.rowStyle.height).toBe('17px');
+    expect(viewModel.rowStyle.minHeight).toBeUndefined();
+    expect(viewModel.cellWrapProps.style.width).toBeUndefined();
+    expect(viewModel.cellWrapProps.style.maxWidth).toBeUndefined();
+    expect(viewModel.cellWrapProps.style.whiteSpace).toBe('pre');
   });
 
   it('resolves cursor overlay only for matching visible cursor row', () => {

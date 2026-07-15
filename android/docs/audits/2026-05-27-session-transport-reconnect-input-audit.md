@@ -1,5 +1,15 @@
 # zterm Session / Transport / Reconnect / Input 路径审计报告
 
+> Superseded on 2026-07-08 for WebSocket lifecycle policy.
+> This audit remains historical evidence only. Current truth: a same-session,
+> same-target `WebSocket.OPEN` does not expire from quiet time, stale
+> `lastServerActivityAt`, missed pong, or pong-only traffic. These signals may
+> only trigger same-socket ping / `buffer-head-request` observation; they must
+> not close or force-replace the transport. See
+> `docs/decisions/2026-04-28-terminal-transport-session-lifecycle-truth.md`,
+> `docs/testing/websocket-transport-reuse-test-design.md`, and
+> `.agents/skills/terminal-buffer-truth/SKILL.md`.
+
 # zterm Session / Transport / Reconnect / Input 路径审计报告
 
 **日期**: 2026-05-27

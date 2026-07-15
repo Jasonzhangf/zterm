@@ -56,7 +56,7 @@ const requiredCoveragePaths = [
   'src/lib/terminal-layout-profile.ts',
   'src/pages/useTerminalPageInteractionRuntime.ts',
   'src/pages/useTerminalPageShellActionsRuntime.ts',
-  'src/lib/connections-server-groups.ts',
+  'src/pages/ConnectionsPage.tsx',
   'src/lib/file-transfer-message-runtime.ts',
 ] as const;
 

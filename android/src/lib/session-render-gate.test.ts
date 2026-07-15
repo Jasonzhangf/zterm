@@ -51,30 +51,6 @@ describe('session-render-gate', () => {
     }
   });
 
-  it('resolves render cadence with the scheduled session id', async () => {
-    vi.useFakeTimers();
-    try {
-      const liveBufferStore = createSessionBufferStore();
-      const liveHeadStore = createSessionHeadStore();
-      const recordSessionRenderCommit = vi.fn();
-      const resolveRenderCommitMs = vi.fn(() => 16);
-      const gate = createSessionRenderGate({
-        liveBufferStore,
-        liveHeadStore,
-        recordSessionRenderCommit,
-        resolveRenderCommitMs,
-      });
-
-      liveBufferStore.setBuffer('session-fast', makeBuffer(['alpha'], 1));
-      liveHeadStore.setHead('session-fast', { daemonHeadRevision: 1, daemonHeadEndIndex: 1 });
-      gate.scheduleCommit('session-fast');
-
-      expect(resolveRenderCommitMs).toHaveBeenCalledWith('session-fast');
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   it('coalesces burst commit requests and publishes the latest truth once per frame', async () => {
     vi.useFakeTimers();
     try {
@@ -353,7 +329,7 @@ describe('session-render-gate', () => {
     }
   });
 
-  it('uses requestAnimationFrame after the per-session debounce when requestAnimationFrame exists', async () => {
+  it('uses requestAnimationFrame immediately when requestAnimationFrame exists', async () => {
     vi.useFakeTimers();
     const originalRequestAnimationFrame = window.requestAnimationFrame;
     const originalCancelAnimationFrame = window.cancelAnimationFrame;
@@ -373,7 +349,6 @@ describe('session-render-gate', () => {
         liveBufferStore,
         liveHeadStore,
         recordSessionRenderCommit,
-        resolveRenderCommitMs: () => 33,
       });
       const renderStore = gate.getRenderStore();
 
@@ -381,13 +356,10 @@ describe('session-render-gate', () => {
       liveHeadStore.setHead('session-1', { daemonHeadRevision: 1, daemonHeadEndIndex: 1 });
       gate.scheduleCommit('session-1');
 
-      expect(rafSpy).not.toHaveBeenCalled();
-      await vi.advanceTimersByTimeAsync(32);
+      expect(rafSpy).toHaveBeenCalledTimes(1);
       expect(recordSessionRenderCommit).toHaveBeenCalledTimes(0);
       expect(renderStore.getSnapshot('session-1').buffer.lines).toEqual([]);
 
-      await vi.advanceTimersByTimeAsync(1);
-      expect(rafSpy).toHaveBeenCalledTimes(1);
       await vi.runAllTimersAsync();
       expect(recordSessionRenderCommit).toHaveBeenCalledTimes(1);
       expect(renderStore.getSnapshot('session-1').buffer.lines).toEqual(makeBuffer(['alpha'], 1).lines);
@@ -416,7 +388,6 @@ describe('session-render-gate', () => {
         liveBufferStore,
         liveHeadStore,
         recordSessionRenderCommit,
-        resolveRenderCommitMs: () => 66,
       });
       const renderStore = gate.getRenderStore();
 
@@ -424,12 +395,11 @@ describe('session-render-gate', () => {
       liveHeadStore.setHead('session-1', { daemonHeadRevision: 1, daemonHeadEndIndex: 1 });
       gate.scheduleCommit('session-1');
 
-      await vi.advanceTimersByTimeAsync(65);
+      await vi.advanceTimersByTimeAsync(15);
       expect(recordSessionRenderCommit).toHaveBeenCalledTimes(0);
       expect(renderStore.getSnapshot('session-1').buffer.lines).toEqual([]);
 
-      // debounce timer fires (66ms) -> RAF fallback (16ms) -> flush at 82ms total
-      await vi.advanceTimersByTimeAsync(17);
+      await vi.advanceTimersByTimeAsync(1);
       expect(recordSessionRenderCommit).toHaveBeenCalledTimes(1);
       expect(renderStore.getSnapshot('session-1').buffer.lines).toEqual(makeBuffer(['alpha'], 1).lines);
     } finally {
@@ -439,31 +409,42 @@ describe('session-render-gate', () => {
     }
   });
 
-  it('uses 16ms fast lane before RAF enrollment when render cadence resolver returns 16ms', async () => {
+  it('reads latest live buffer at RAF flush and never publishes the older scheduled buffer first', async () => {
     vi.useFakeTimers();
+    const originalRequestAnimationFrame = window.requestAnimationFrame;
     try {
+      const rafCallbacks: FrameRequestCallback[] = [];
+      window.requestAnimationFrame = vi.fn((callback: FrameRequestCallback) => {
+        rafCallbacks.push(callback);
+        return rafCallbacks.length;
+      });
       const liveBufferStore = createSessionBufferStore();
       const liveHeadStore = createSessionHeadStore();
       const recordSessionRenderCommit = vi.fn();
-      const gate = createSessionRenderGate({
-        liveBufferStore,
-        liveHeadStore,
-        recordSessionRenderCommit,
-        resolveRenderCommitMs: () => 16,
-      });
+      const gate = createSessionRenderGate({ liveBufferStore, liveHeadStore, recordSessionRenderCommit });
       const renderStore = gate.getRenderStore();
 
-      liveBufferStore.setBuffer('session-1', makeBuffer(['fast'], 1));
+      liveBufferStore.setBuffer('session-1', makeBuffer(['old-buffer'], 1));
       liveHeadStore.setHead('session-1', { daemonHeadRevision: 1, daemonHeadEndIndex: 1 });
       gate.scheduleCommit('session-1');
+      expect(rafCallbacks).toHaveLength(1);
 
-      await vi.advanceTimersByTimeAsync(15);
+      liveBufferStore.setBuffer('session-1', makeBuffer(['new-buffer'], 2));
+      liveHeadStore.setHead('session-1', { daemonHeadRevision: 2, daemonHeadEndIndex: 1 });
+      gate.scheduleCommit('session-1');
+
       expect(recordSessionRenderCommit).toHaveBeenCalledTimes(0);
-      // debounce fires at 16ms, then RAF callback runs (jsdom default uses setTimeout(16))
-      await vi.runAllTimersAsync();
+      expect(renderStore.getSnapshot('session-1').buffer.lines).toEqual([]);
+
+      rafCallbacks[0]!(Date.now());
+
       expect(recordSessionRenderCommit).toHaveBeenCalledTimes(1);
-      expect(renderStore.getSnapshot('session-1').buffer.lines).toEqual(makeBuffer(['fast'], 1).lines);
+      const snapshot = renderStore.getSnapshot('session-1').buffer;
+      expect(snapshot.revision).toBe(2);
+      expect(snapshot.daemonHeadRevision).toBe(2);
+      expect(snapshot.lines).toEqual(makeBuffer(['new-buffer'], 2).lines);
     } finally {
+      window.requestAnimationFrame = originalRequestAnimationFrame;
       vi.useRealTimers();
     }
   });

@@ -1,5 +1,6 @@
 import { memo as ReactMemo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { Keyboard } from '@capacitor/keyboard';
+import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { Directory, Filesystem } from '@capacitor/filesystem';
 import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
@@ -52,6 +53,19 @@ import {
   type TerminalSessionGroupSlotName,
 } from '../lib/session-group-viewport';
 import { TerminalStageShell } from './TerminalPageStageShell';
+import {
+  appendSessionPreviewTarget,
+  moveSessionPreviewTarget,
+  projectSessionPreviewLiveIds,
+  pruneSessionPreviewSelectionToOpenSessions,
+  readSessionPreviewSelection,
+  removeSessionPreviewTarget,
+  replaceSessionPreviewTarget,
+  resolveSessionPreviewTargets,
+  toggleSessionPreviewTarget,
+  writeSessionPreviewSelection,
+  type SessionPreviewSelectionV1,
+} from '../lib/session-preview-selection';
 export {
   resolveTerminalSessionGroupSlotReplacement,
   resolveTerminalSessionGroupViewportSlots,
@@ -64,7 +78,6 @@ import {
   type RemoteScreenshotPreviewState,
 } from '../lib/remote-screenshot-preview-runtime';
 import {
-  STORAGE_KEYS,
   type AndroidWorkspacePane,
   type QuickAction,
   type RemoteScreenshotCapture,
@@ -918,6 +931,7 @@ function TerminalPageComponent({
   const [inputIntentFollowResetEpoch, setInputIntentFollowResetEpoch] = useState(0);
   const terminalFontSize = 10;
   const [terminalKeyboardRequested, setTerminalKeyboardRequested] = useState(false);
+  const terminalKeyboardRequestedRef = useRef(false);
   const [androidImeVisible, setAndroidImeVisible] = useState(false);
   const [networkOnline, setNetworkOnline] = useState(() =>
     typeof navigator === 'undefined' ? true : navigator.onLine,
@@ -928,6 +942,22 @@ function TerminalPageComponent({
   const [quickBarCollapsed, setQuickBarCollapsed] = useState(false);
   const [quickBarEditorFocused, setQuickBarEditorFocused] = useState(false);
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
+  const initialSessionPreviewRead = useMemo(() => {
+    const storage = getBrowserStorage();
+    return storage
+      ? readSessionPreviewSelection(storage)
+      : { status: 'empty' as const, selection: { version: 1 as const, orderedTargets: [] } };
+  }, []);
+  const [sessionPreviewSelection, setSessionPreviewSelection] = useState<SessionPreviewSelectionV1>(() =>
+    initialSessionPreviewRead.status === 'invalid'
+      ? { version: 1, orderedTargets: [] }
+      : initialSessionPreviewRead.selection,
+  );
+  const [sessionPreviewSelectionMode, setSessionPreviewSelectionMode] = useState(false);
+  const [sessionPreviewOpen, setSessionPreviewOpen] = useState(false);
+  const [sessionPreviewError, setSessionPreviewError] = useState<string | null>(() =>
+    initialSessionPreviewRead.status === 'invalid' ? '预览选择存储损坏，请重新选择。' : null,
+  );
   const [sessionDrawerDebug, setSessionDrawerDebug] = useState({
     lastEvent: '-',
     eventSeq: 0,
@@ -940,6 +970,9 @@ function TerminalPageComponent({
   const [fileTransferOpen, setFileTransferOpen] = useState(false);
   const [remoteScreenshotPreview, setRemoteScreenshotPreview] = useState<RemoteScreenshotPreviewState | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() => resolveWindowWidth());
+  const [currentLayoutViewportHeight, setCurrentLayoutViewportHeight] = useState(
+    () => resolveCurrentLayoutViewportHeight(),
+  );
   const [headerTopInsetPx, setHeaderTopInsetPx] = useState(() => resolveTerminalHeaderTopInsetPx(isAndroid));
   const viewportMetricsFrameRef = useRef<number | null>(null);
   const [debugOverlayVisible, setDebugOverlayVisible] = useState(false);
@@ -950,6 +983,11 @@ function TerminalPageComponent({
     bottom: null,
   }));
   const [sessionGroupFocusSlot, setSessionGroupFocusSlot] = useState<TerminalSessionGroupSlotName>('center');
+  const sessionPreviewEntryRef = useRef<{
+    activeSessionId: string | null;
+    slotIds: TerminalSessionGroupSlotIds;
+    focusSlot: TerminalSessionGroupSlotName;
+  } | null>(null);
   const landscape = typeof window !== 'undefined' ? resolveTerminalOrientation() === 'landscape' : false;
   const portraitSessionDrawerEnabled = !landscape;
   const sessionViewportModeStoreRef = useRef(createSessionViewportModeStore());
@@ -1034,6 +1072,7 @@ function TerminalPageComponent({
   }, [isAndroid, keyboardViewportFreezeActive, rawShellHeight]);
 
   const updateTerminalKeyboardRequested = useCallback((next: boolean) => {
+    terminalKeyboardRequestedRef.current = next;
     setTerminalKeyboardRequested((current) => (current === next ? current : next));
   }, []);
 
@@ -1049,8 +1088,12 @@ function TerminalPageComponent({
 
   const updateViewportMetrics = useCallback(() => {
     const nextWidth = resolveWindowWidth();
+    const nextCurrentLayoutViewportHeight = resolveCurrentLayoutViewportHeight();
     const nextTopInset = resolveTerminalHeaderTopInsetPx(isAndroid);
     setViewportWidth((current) => (current === nextWidth ? current : nextWidth));
+    setCurrentLayoutViewportHeight((current) => (
+      current === nextCurrentLayoutViewportHeight ? current : nextCurrentLayoutViewportHeight
+    ));
     setHeaderTopInsetPx((current) => (current === nextTopInset ? current : nextTopInset));
   }, [isAndroid]);
 
@@ -1193,10 +1236,24 @@ function TerminalPageComponent({
   const renderedPaneSessions = splitVisible
     ? visiblePaneEntries.map((entry) => entry.session)
     : (interactiveSession ? [interactiveSession] : []);
-  const livePaneSessionIds = useMemo(
-    () => renderedPaneSessions.map((session) => session.id),
-    [renderedPaneSessions],
+  const sessionPreviewSessions = useMemo(
+    () => resolveSessionPreviewTargets(sessionPreviewSelection, sessions),
+    [sessionPreviewSelection, sessions],
   );
+  const sessionPreviewReplacementCandidates = useMemo(() => {
+    const selectedIds = new Set(sessionPreviewSessions.map((session) => session.id));
+    return sessions.filter((session) =>
+      !selectedIds.has(session.id)
+      && !session.remoteMissing
+      && session.state !== 'closed',
+    );
+  }, [sessionPreviewSessions, sessions]);
+  const livePaneSessionIds = useMemo(() => projectSessionPreviewLiveIds(
+    renderedPaneSessions.map((session) => session.id),
+    sessionPreviewSessions.map((session) => session.id),
+    sessionPreviewOpen,
+    true,
+  ), [renderedPaneSessions, sessionPreviewOpen, sessionPreviewSessions]);
   const livePaneSessionIdsKey = useMemo(
     () => livePaneSessionIds.join('||'),
     [livePaneSessionIds],
@@ -1257,6 +1314,18 @@ function TerminalPageComponent({
       };
       sessionName: string;
     }>();
+    const closeTargets = new Map<string, {
+      target: {
+        name: string;
+        bridgeHost: string;
+        bridgePort: number;
+        daemonHostId?: string;
+        authToken?: string;
+        sessionNames: string[];
+      };
+      sessionName: string;
+      localSessionId: string | null;
+    }>();
     const items: TerminalSessionDrawerItem[] = [];
     for (const group of sessionGroups) {
       const missing = new Set(group.missingSessionNames || []);
@@ -1274,18 +1343,24 @@ function TerminalPageComponent({
         });
         const liveSession = liveSessionByReuseKey.get(reuseKey) || null;
         const id = liveSession?.id || `remote:${ownerKey}::session:${sessionName}`;
+        const remoteCatalogTarget = {
+          name: group.name,
+          bridgeHost: group.bridgeHost,
+          bridgePort: group.bridgePort,
+          daemonHostId: group.daemonHostId,
+          authToken: group.authToken,
+          sessionNames: group.sessionNames,
+        };
+        closeTargets.set(id, {
+          target: remoteCatalogTarget,
+          sessionName,
+          localSessionId: liveSession?.id || null,
+        });
         if (liveSession) {
           catalogLiveSessionIds.add(liveSession.id);
         } else {
           targets.set(id, {
-            target: {
-              name: group.name,
-              bridgeHost: group.bridgeHost,
-              bridgePort: group.bridgePort,
-              daemonHostId: group.daemonHostId,
-              authToken: group.authToken,
-              sessionNames: group.sessionNames,
-            },
+            target: remoteCatalogTarget,
             sessionName,
           });
         }
@@ -1302,7 +1377,7 @@ function TerminalPageComponent({
         });
       }
     }
-    return { items, targets, catalogLiveSessionIds };
+    return { items, targets, closeTargets, catalogLiveSessionIds };
   }, [drawerServerIdentityAliases, sessionGroups, sessions]);
   const drawerSessions = useMemo(() => {
     const activeSessionIds = new Set(renderedPaneSessions.map((session) => session.id));
@@ -1362,6 +1437,23 @@ function TerminalPageComponent({
       setSessionDrawerOpen(false);
     }
   }, [portraitSessionDrawerEnabled, sessionDrawerOpen]);
+
+  useEffect(() => {
+    const closePreviewWhenHidden = () => {
+      if (document.visibilityState !== 'visible') setSessionPreviewOpen(false);
+    };
+    document.addEventListener('visibilitychange', closePreviewWhenHidden);
+    return () => document.removeEventListener('visibilitychange', closePreviewWhenHidden);
+  }, []);
+
+  useEffect(() => {
+    if (sessions.length === 0) return;
+    const next = pruneSessionPreviewSelectionToOpenSessions(sessionPreviewSelection, sessions);
+    if (next === sessionPreviewSelection) return;
+    setSessionPreviewSelection(next);
+    const storage = getBrowserStorage();
+    if (storage) writeSessionPreviewSelection(storage, next);
+  }, [sessionPreviewSelection, sessions]);
 
   useEffect(() => {
     setSessionDrawerOpen(false);
@@ -1483,6 +1575,11 @@ function TerminalPageComponent({
     }
     setInputIntentFollowResetEpoch((value) => value + 1);
   }, [uiSessionId]);
+  const alignActiveTerminalToFollowForInputRef = useRef(alignActiveTerminalToFollowForInput);
+
+  useEffect(() => {
+    alignActiveTerminalToFollowForInputRef.current = alignActiveTerminalToFollowForInput;
+  }, [alignActiveTerminalToFollowForInput]);
 
   const clearPendingAndroidImeFocus = useCallback(() => {
     if (pendingAndroidImeFocusTimerRef.current === null) {
@@ -1619,7 +1716,7 @@ function TerminalPageComponent({
       keyboardInset,
       timestamp: Date.now(),
     });
-    setQuickBarHeight((current) => (height > 0 ? height : current));
+    setQuickBarHeight(Math.max(0, height));
   }, [keyboardInset]);
 
   const handleQuickBarSendSequence = useCallback((sequence: string) => {
@@ -2016,6 +2113,9 @@ function TerminalPageComponent({
           }
           updateKeyboardInset(height);
           updateAndroidImeVisible(visible);
+          if (visible && isAndroid && terminalKeyboardRequestedRef.current && !quickBarEditorFocusedRef.current) {
+            alignActiveTerminalToFollowForInputRef.current();
+          }
           if (!quickBarEditorFocusedRef.current) {
             updateTerminalKeyboardRequested(visible);
           }
@@ -2185,11 +2285,6 @@ function TerminalPageComponent({
     };
   }, [updateKeyboardInset]);
 
-  useEffect(() => {
-    if (!landscape && quickBarCollapsed) {
-      setQuickBarCollapsed(false);
-    }
-  }, [landscape, quickBarCollapsed]);
   const layoutProfile = useMemo(() => resolveTerminalLayoutProfile({
     splitVisible,
     topInsetPx: headerTopInsetPx,
@@ -2220,7 +2315,7 @@ function TerminalPageComponent({
   const visualViewportDebugOffsetTop = typeof window !== 'undefined'
     ? Math.round(window.visualViewport?.offsetTop || 0)
     : 0;
-  const currentLayoutViewportDebugHeight = resolveCurrentLayoutViewportHeight();
+  const currentLayoutViewportDebugHeight = currentLayoutViewportHeight;
   // Use a ref to hold the live snapshot lambda so the registration useEffect
   // never needs to re-run. The producer reads ref.current, which is kept fresh
   // every render. This decouples the snapshot source from all reactive deps,
@@ -2334,6 +2429,15 @@ function TerminalPageComponent({
     onSwitchSession(sessionId);
   }, [findPaneForSession, onSwitchSession, switchTabInPane, workspace.panes]);
 
+  const handleActivateOpenSessionInViewport = useCallback((sessionId: string) => {
+    setSessionGroupSlotIds((current) => resolveTerminalSessionGroupSlotReplacement(
+      current,
+      sessionId,
+      sessionGroupFocusSlot,
+    ));
+    handleSwitchSessionFromChrome(sessionId);
+  }, [handleSwitchSessionFromChrome, sessionGroupFocusSlot]);
+
   const handleSelectSessionFromDrawer = useCallback((sessionId: string) => {
     const remoteTarget = drawerRemoteSessions.targets.get(sessionId);
     if (remoteTarget) {
@@ -2341,14 +2445,191 @@ function TerminalPageComponent({
       setSessionDrawerOpen(false);
       return;
     }
-    handleSwitchSessionFromChrome(sessionId);
-    setSessionGroupSlotIds((current) => resolveTerminalSessionGroupSlotReplacement(
-      current,
-      sessionId,
-      sessionGroupFocusSlot,
-    ));
+    handleActivateOpenSessionInViewport(sessionId);
     setSessionDrawerOpen(false);
-  }, [drawerRemoteSessions.targets, handleSwitchSessionFromChrome, onOpenDrawerRemoteSession, sessionGroupFocusSlot]);
+  }, [drawerRemoteSessions.targets, handleActivateOpenSessionInViewport, onOpenDrawerRemoteSession]);
+
+  const persistSessionPreviewSelection = useCallback((next: SessionPreviewSelectionV1) => {
+    setSessionPreviewSelection(next);
+    const storage = getBrowserStorage();
+    if (!storage) {
+      setSessionPreviewError('无法访问预览选择存储。');
+      return;
+    }
+    const result = writeSessionPreviewSelection(storage, next);
+    setSessionPreviewError(result.ok ? null : '保存预览选择失败。');
+  }, []);
+
+  const handleToggleSessionPreviewSelection = useCallback((sessionId: string) => {
+    const session = sessions.find((candidate) =>
+      candidate.id === sessionId
+      && !candidate.remoteMissing
+      && candidate.state !== 'closed',
+    );
+    if (!session) {
+      setSessionPreviewError('该 session 尚未打开，不能加入实时预览。');
+      return;
+    }
+    const currentSelection = pruneSessionPreviewSelectionToOpenSessions(sessionPreviewSelection, sessions);
+    const result = toggleSessionPreviewTarget(currentSelection, {
+      sessionId: session.id,
+      daemonHostId: session.daemonHostId,
+      bridgeHost: session.bridgeHost,
+      bridgePort: session.bridgePort,
+      sessionName: session.sessionName,
+    });
+    if (!result.ok) {
+      setSessionPreviewError(result.reason === 'limit' ? '最多选择 6 个 session。' : '该 session 无法加入预览。');
+      return;
+    }
+    persistSessionPreviewSelection(result.selection);
+  }, [persistSessionPreviewSelection, sessionPreviewSelection, sessions]);
+
+  const handleSessionPreviewSelectionModeChange = useCallback((active: boolean) => {
+    setSessionPreviewSelectionMode(active);
+    setSessionPreviewError(null);
+    if (!active) setSessionDrawerOpen(false);
+  }, []);
+
+  const handleReplaceSessionPreview = useCallback((sourceSessionId: string, replacementSessionId: string) => {
+    const replacementSession = sessions.find((session) => session.id === replacementSessionId);
+    if (!replacementSession) {
+      setSessionPreviewError('替换目标已不在打开的 session 中。');
+      return;
+    }
+    const result = replaceSessionPreviewTarget(sessionPreviewSelection, sourceSessionId, {
+      sessionId: replacementSession.id,
+      daemonHostId: replacementSession.daemonHostId,
+      bridgeHost: replacementSession.bridgeHost,
+      bridgePort: replacementSession.bridgePort,
+      sessionName: replacementSession.sessionName,
+    });
+    if (!result.ok) {
+      setSessionPreviewError(
+        result.reason === 'already-selected'
+          ? '该 session 已在预览中。'
+          : '当前预览项已失效，无法替换。',
+      );
+      return;
+    }
+    persistSessionPreviewSelection(result.selection);
+  }, [persistSessionPreviewSelection, sessionPreviewSelection, sessions]);
+
+  const handleAddSessionPreview = useCallback((sessionId: string) => {
+    const session = sessions.find((item) =>
+      item.id === sessionId && !item.remoteMissing && item.state !== 'closed',
+    );
+    if (!session) {
+      setSessionPreviewError('只能添加当前仍打开的 session。');
+      return;
+    }
+    const currentSelection = pruneSessionPreviewSelectionToOpenSessions(sessionPreviewSelection, sessions);
+    const result = appendSessionPreviewTarget(currentSelection, {
+      sessionId: session.id,
+      daemonHostId: session.daemonHostId,
+      bridgeHost: session.bridgeHost,
+      bridgePort: session.bridgePort,
+      sessionName: session.sessionName,
+    });
+    if (!result.ok) {
+      setSessionPreviewError(
+        result.reason === 'limit'
+          ? '最多选择 6 个 session。'
+          : result.reason === 'already-selected'
+            ? '该 session 已在预览中。'
+            : '该 session 无法加入预览。',
+      );
+      return;
+    }
+    persistSessionPreviewSelection(result.selection);
+  }, [persistSessionPreviewSelection, sessionPreviewSelection, sessions]);
+
+  const handleMoveSessionPreview = useCallback((sourceSessionId: string, targetIndex: number) => {
+    const currentSelection = pruneSessionPreviewSelectionToOpenSessions(sessionPreviewSelection, sessions);
+    const result = moveSessionPreviewTarget(currentSelection, sourceSessionId, targetIndex);
+    if (!result.ok) {
+      setSessionPreviewError('当前预览项或目标位置已失效，无法移动。');
+      return;
+    }
+    persistSessionPreviewSelection(result.selection);
+  }, [persistSessionPreviewSelection, sessionPreviewSelection, sessions]);
+
+  const handleOpenSessionPreview = useCallback(() => {
+    if (sessionPreviewSessions.length === 0) {
+      setSessionPreviewError('请先在抽屉中选择至少一个已打开的 session。');
+      return;
+    }
+    if (keyboardInset > 0 || terminalKeyboardRequestedRef.current) {
+      setSessionPreviewError('请先收起输入法再进入终端预览。');
+      return;
+    }
+    sessionPreviewEntryRef.current = {
+      activeSessionId: activeSession?.id || null,
+      slotIds: { ...effectiveSessionGroupSlotIds },
+      focusSlot: sessionGroupFocusSlot,
+    };
+    setSessionPreviewOpen(true);
+  }, [activeSession?.id, effectiveSessionGroupSlotIds, keyboardInset, sessionGroupFocusSlot, sessionPreviewSessions.length]);
+
+  const handleCancelSessionPreview = useCallback(() => {
+    const entry = sessionPreviewEntryRef.current;
+    sessionPreviewEntryRef.current = null;
+    setSessionPreviewOpen(false);
+    if (!entry) return;
+    setSessionGroupSlotIds(entry.slotIds);
+    setSessionGroupFocusSlot(entry.focusSlot);
+    if (entry.activeSessionId && entry.activeSessionId !== activeSession?.id) {
+      const entryStillOpen = sessions.some((session) => session.id === entry.activeSessionId);
+      if (!entryStillOpen) {
+        setSessionPreviewError('进入预览前的 session 已关闭，无法恢复。');
+        return;
+      }
+      handleSwitchSessionFromChrome(entry.activeSessionId);
+    }
+  }, [activeSession?.id, handleSwitchSessionFromChrome, sessions]);
+
+  const handleActivateSessionFromPreview = useCallback((sessionId: string) => {
+    sessionPreviewEntryRef.current = null;
+    handleActivateOpenSessionInViewport(sessionId);
+    setSessionPreviewOpen(false);
+  }, [handleActivateOpenSessionInViewport]);
+
+  const handleRemoveSessionFromPreview = useCallback((sessionId: string) => {
+    const session = sessions.find((item) => item.id === sessionId);
+    if (!session) {
+      setSessionPreviewError('要移除的预览 session 已不在打开列表中。');
+      return;
+    }
+    const currentSelection = pruneSessionPreviewSelectionToOpenSessions(sessionPreviewSelection, sessions);
+    const result = removeSessionPreviewTarget(currentSelection, session.id);
+    if (!result.ok) {
+      setSessionPreviewError('无法从预览中移除该 session。');
+      return;
+    }
+    persistSessionPreviewSelection(result.selection);
+    if (result.selection.orderedTargets.length === 0) handleCancelSessionPreview();
+  }, [handleCancelSessionPreview, persistSessionPreviewSelection, sessionPreviewSelection, sessions]);
+
+  useEffect(() => {
+    if (!sessionPreviewOpen) return;
+    let disposed = false;
+    let listenerHandle: { remove: () => Promise<void> | void } | null = null;
+    void Promise.resolve(CapacitorApp.addListener('backButton', handleCancelSessionPreview))
+      .then((handle) => {
+        if (disposed) {
+          void handle.remove();
+          return;
+        }
+        listenerHandle = handle;
+      })
+      .catch((error) => {
+        setSessionPreviewError(`系统返回监听失败：${error instanceof Error ? error.message : String(error)}`);
+      });
+    return () => {
+      disposed = true;
+      if (listenerHandle) void listenerHandle.remove();
+    };
+  }, [handleCancelSessionPreview, sessionPreviewOpen]);
 
   const handleAssignSessionGroupSlot = useCallback((sessionId: string, slot: TerminalSessionGroupSlotName) => {
     setSessionGroupSlotIds((current) => {
@@ -2376,13 +2657,27 @@ function TerminalPageComponent({
   }, [handleSwitchSessionFromChrome, resolveSessionGroupSlot]);
 
   const handleCloseSessionFromDrawer = useCallback((sessionId: string) => {
-    const remoteTarget = drawerRemoteSessions.targets.get(sessionId);
-    if (remoteTarget) {
-      void onCloseDrawerRemoteSession?.(remoteTarget.target, remoteTarget.sessionName);
+    const remoteCloseTarget = drawerRemoteSessions.closeTargets.get(sessionId);
+    if (remoteCloseTarget) {
+      if (!onCloseDrawerRemoteSession) {
+        window.alert?.('Remote close is unavailable.');
+        return;
+      }
+      void Promise.resolve(onCloseDrawerRemoteSession(remoteCloseTarget.target, remoteCloseTarget.sessionName))
+        .then(() => {
+          if (remoteCloseTarget.localSessionId) {
+            onCloseSession(remoteCloseTarget.localSessionId, 'terminal-session-drawer-remote-close-success');
+          }
+        })
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : String(error);
+          console.error('[TerminalPage] Failed to close remote tmux session from drawer:', error);
+          window.alert?.(message);
+        });
       return;
     }
     onCloseSession(sessionId, 'terminal-session-drawer-close-button');
-  }, [drawerRemoteSessions.targets, onCloseDrawerRemoteSession, onCloseSession]);
+  }, [drawerRemoteSessions.closeTargets, onCloseDrawerRemoteSession, onCloseSession]);
 
   const handleOpenQuickTabPickerForPane = useCallback((paneId?: string, hostKey?: string, createOptions?: { sessionName?: string; cwd?: string }) => {
     if (paneId) {
@@ -2450,7 +2745,7 @@ function TerminalPageComponent({
       splitAvailable={splitAvailable}
       splitVisible={splitVisible}
       shellMode={layoutProfile.quickBar.shellMode}
-      collapseAvailable={landscape}
+      collapseAvailable
       collapsed={quickBarCollapsed}
       onCollapsedChange={setQuickBarCollapsed}
       currentSplitCount={workspacePanes.length}
@@ -2620,6 +2915,12 @@ function TerminalPageComponent({
               onOpenQuickTabPicker={handleOpenQuickTabPickerFromDrawer}
               onRefreshHostSessions={onRefreshDrawerHostSessions}
               onDebugAddEvent={handleSessionDrawerDebugAddEvent}
+              previewSelectionMode={sessionPreviewSelectionMode}
+              previewSelectedSessionIds={sessionPreviewSessions.map((session) => session.id)}
+              previewSelectionError={sessionPreviewError}
+              onPreviewSelectionModeChange={handleSessionPreviewSelectionModeChange}
+              onTogglePreviewSession={handleToggleSessionPreviewSelection}
+              onClearPreviewSelection={() => persistSessionPreviewSelection({ version: 1, orderedTargets: [] })}
             />
           </>
         ) : null}
@@ -2654,6 +2955,16 @@ function TerminalPageComponent({
           absoluteLineNumbersVisible={absoluteLineNumbersVisible}
           copySelection={copySelection}
           onLongPressRow={handleLongPressCopyRow}
+          sessionPreviewOpen={sessionPreviewOpen}
+          sessionPreviewSessions={sessionPreviewSessions}
+          sessionPreviewReplacementCandidates={sessionPreviewReplacementCandidates}
+          onOpenSessionPreview={handleOpenSessionPreview}
+          onCloseSessionPreview={handleCancelSessionPreview}
+          onActivatePreviewSession={handleActivateSessionFromPreview}
+          onAddPreviewSession={handleAddSessionPreview}
+          onRemovePreviewSession={handleRemoveSessionFromPreview}
+          onMovePreviewSession={handleMoveSessionPreview}
+          onReplacePreviewSession={handleReplaceSessionPreview}
         />
         {copySelection.menu ? (
           <TerminalPageCopyMenu

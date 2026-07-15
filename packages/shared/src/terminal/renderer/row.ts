@@ -450,7 +450,12 @@ export function buildTerminalVisibleRowViewModel(options: {
     } satisfies CSSProperties,
     lineNumber,
     cellWrapProps: {
-      style: { display: 'inline-block', minWidth: 0, flex: 1 } satisfies CSSProperties,
+      style: {
+        display: 'inline-block',
+        minWidth: 0,
+        flex: 1,
+        whiteSpace: 'pre',
+      } satisfies CSSProperties,
     },
     cells: renderRowCells({
       absoluteIndex: options.absoluteIndex,

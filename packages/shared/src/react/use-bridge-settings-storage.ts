@@ -1,6 +1,34 @@
 import { useEffect, useState } from 'react';
-import { DEFAULT_BRIDGE_SETTINGS, normalizeBridgeSettings, type BridgeSettings } from '../connection/bridge-settings';
+import {
+  DEFAULT_BRIDGE_SETTINGS,
+  normalizeBridgeSettings,
+  type BridgeSettings,
+  type TerminalWidthMode,
+} from '../connection/bridge-settings';
 import { STORAGE_KEYS } from '../connection/types';
+
+function normalizeStoredTerminalWidthMode(input: unknown): TerminalWidthMode | null {
+  return input === 'adaptive-phone' || input === 'mirror-fixed' ? input : null;
+}
+
+function readStoredTerminalWidthModePreference(): TerminalWidthMode | null {
+  if (typeof window === 'undefined') {
+    return null;
+  }
+  try {
+    return normalizeStoredTerminalWidthMode(localStorage.getItem(STORAGE_KEYS.TERMINAL_WIDTH_MODE_PREFERENCE));
+  } catch (error) {
+    console.error('[useBridgeSettingsStorage] Failed to load terminal width mode preference:', error);
+    return null;
+  }
+}
+
+function writeStoredTerminalWidthModePreference(mode: TerminalWidthMode) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  localStorage.setItem(STORAGE_KEYS.TERMINAL_WIDTH_MODE_PREFERENCE, mode);
+}
 
 function resolveInitialTerminalWidthMode() {
   if (typeof window === 'undefined') {
@@ -20,6 +48,24 @@ function buildDetectedDefaultBridgeSettings(): BridgeSettings {
   };
 }
 
+function normalizeStoredBridgeSettings(input: unknown): BridgeSettings {
+  if (!input || typeof input !== 'object') {
+    return buildDetectedDefaultBridgeSettings();
+  }
+  const candidate = input as Partial<BridgeSettings>;
+  const storedPreference = readStoredTerminalWidthModePreference();
+  return normalizeBridgeSettings({
+    ...candidate,
+    terminalWidthMode:
+      candidate.terminalWidthMode === 'adaptive-phone' ||
+      candidate.terminalWidthMode === 'mirror-fixed'
+        ? candidate.terminalWidthMode
+        : storedPreference
+          ? storedPreference
+        : resolveInitialTerminalWidthMode(),
+  });
+}
+
 function readStoredBridgeSettings(): BridgeSettings {
   if (typeof window === 'undefined') {
     return buildDetectedDefaultBridgeSettings();
@@ -31,7 +77,7 @@ function readStoredBridgeSettings(): BridgeSettings {
       return buildDetectedDefaultBridgeSettings();
     }
 
-    return normalizeBridgeSettings(JSON.parse(stored));
+    return normalizeStoredBridgeSettings(JSON.parse(stored));
   } catch (error) {
     console.error('[useBridgeSettingsStorage] Failed to load bridge settings:', error);
     return buildDetectedDefaultBridgeSettings();
@@ -54,6 +100,7 @@ export function useBridgeSettingsStorage() {
       const value = typeof next === 'function' ? next(current) : next;
       if (typeof window !== 'undefined') {
         localStorage.setItem(STORAGE_KEYS.BRIDGE_SETTINGS, JSON.stringify(value));
+        writeStoredTerminalWidthModePreference(value.terminalWidthMode);
       }
       return value;
     });

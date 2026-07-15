@@ -3,7 +3,7 @@
  * 只负责页面级切换与跨页 orchestration。
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { parseConnectionConfigShareLink } from '@zterm/shared';
 import { TmuxSessionPickerSheet } from './components/tmux/TmuxSessionPickerSheet';
@@ -22,7 +22,7 @@ import { useSessionOpenActions } from './hooks/useSessionOpenActions';
 import { useAppPageState } from './hooks/useAppPageState';
 import { useTerminalShellActions } from './hooks/useTerminalShellActions';
 import { updateBridgeSettingsTerminalWidthMode } from './lib/terminal-width-mode-manager';
-import { upsertBridgeServer } from './lib/bridge-settings';
+import { upsertBridgeServer, type BridgeServerPreset, type BridgeSettings } from './lib/bridge-settings';
 import { applyTraversalRelaySettings } from './lib/traversal-relay-client';
 import { APP_VERSION, APP_VERSION_CODE } from './lib/app-version';
 import {
@@ -39,7 +39,9 @@ import { ConnectionsPage } from './pages/ConnectionsPage';
 import { ConnectionPropertiesPage } from './pages/ConnectionPropertiesPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TerminalPage } from './pages/TerminalPage';
-import type { TerminalWidthMode, TraversalRelayDeviceSnapshot } from './lib/types';
+import { DEFAULT_BRIDGE_PORT } from './lib/mobile-config';
+import { resolveRelayDeviceBridgeTarget } from './lib/session-picker';
+import type { Host, TerminalWidthMode, TraversalRelayDeviceSnapshot } from './lib/types';
 
 const RELAY_DEVICE_STREAM_RECONNECT_BASE_DELAY_MS = 300;
 const RELAY_DEVICE_STREAM_RECONNECT_MAX_DELAY_MS = 5000;
@@ -57,6 +59,175 @@ function projectRelayDevicesFromAccountState(account: ReturnType<typeof readTrav
   }
   const directoryDevices = projectRelayDirectoryDeviceSnapshots(account.directory);
   return directoryDevices.length > 0 ? directoryDevices : account.devices || [];
+}
+
+function getHomeConnectionEndpointKey(input: Pick<Host, 'bridgeHost' | 'bridgePort'>) {
+  return `${input.bridgeHost.trim()}:${input.bridgePort || DEFAULT_BRIDGE_PORT}`;
+}
+
+function getHomeConnectionDaemonKey(input: Pick<Host, 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'relayHostId'>) {
+  const daemonHostId = (input.daemonHostId || input.relayHostId || '').trim();
+  return daemonHostId ? `${daemonHostId}|${getHomeConnectionEndpointKey(input)}` : '';
+}
+
+function getHomeConnectionIdentityKeys(input: Pick<Host, 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'relayHostId'>) {
+  return {
+    endpointKey: getHomeConnectionEndpointKey(input),
+    daemonKey: getHomeConnectionDaemonKey(input),
+  };
+}
+
+function shouldReplaceHomeConnection(current: Host, next: Host) {
+  const currentIsServer = current.sessionName.trim() === '';
+  const nextIsServer = next.sessionName.trim() === '';
+  if (currentIsServer !== nextIsServer) {
+    return nextIsServer;
+  }
+  if (current.pinned !== next.pinned) {
+    return next.pinned;
+  }
+  return Math.max(next.lastConnected || 0, next.createdAt || 0) > Math.max(current.lastConnected || 0, current.createdAt || 0);
+}
+
+function buildHomeConnectionFromPreset(server: BridgeServerPreset): Host | null {
+  const bridgeHost = server.targetHost?.trim() || '';
+  if (!bridgeHost) {
+    return null;
+  }
+  const bridgePort = Number.isFinite(server.targetPort) ? server.targetPort : DEFAULT_BRIDGE_PORT;
+  const daemonHostId = server.relayHostId?.trim() || '';
+  return {
+    id: `bridge-preset:${server.id || `${bridgeHost}:${bridgePort}`}`,
+    createdAt: 0,
+    name: server.name?.trim() || bridgeHost,
+    bridgeHost,
+    bridgePort,
+    daemonHostId,
+    relayHostId: daemonHostId,
+    relayDeviceId: server.relayDeviceId,
+    sessionName: '',
+    authToken: server.authToken || '',
+    transportMode: 'auto',
+    authType: 'password',
+    password: undefined,
+    privateKey: undefined,
+    tags: ['bridge-server'],
+    pinned: false,
+    lastConnected: undefined,
+    autoCommand: '',
+  };
+}
+
+function buildHomeConnectionFromRelayDevice(
+  bridgeSettings: BridgeSettings,
+  device: TraversalRelayDeviceSnapshot,
+): Host | null {
+  if (!device.daemon.connected && !device.daemon.hostId.trim()) {
+    return null;
+  }
+  const target = resolveRelayDeviceBridgeTarget(bridgeSettings.servers, device);
+  if (!target.bridgeHost.trim() && (target.relayEndpointCandidates || []).length === 0) {
+    return null;
+  }
+  const daemonHostId = target.daemonHostId || target.relayHostId || device.daemon.hostId.trim();
+  const name = device.deviceName.trim() || daemonHostId || device.deviceId;
+  return {
+    id: `relay-device:${device.deviceId}:${daemonHostId || target.bridgeHost}`,
+    createdAt: 0,
+    name,
+    bridgeHost: target.bridgeHost,
+    bridgePort: target.bridgePort,
+    daemonHostId,
+    relayHostId: target.relayHostId || daemonHostId,
+    relayDeviceId: target.relayDeviceId || device.deviceId,
+    sessionName: '',
+    authToken: target.authToken || '',
+    tailscaleHost: target.tailscaleHost,
+    ipv6Host: target.ipv6Host,
+    ipv4Host: target.ipv4Host,
+    signalUrl: target.signalUrl,
+    transportMode: target.transportMode || 'auto',
+    relayEndpointCandidates: target.relayEndpointCandidates || [],
+    authType: 'password',
+    password: undefined,
+    privateKey: undefined,
+    tags: ['relay-directory'],
+    pinned: false,
+    lastConnected: Date.parse(device.daemon.lastSeenAt || device.updatedAt || '') || undefined,
+    autoCommand: '',
+  };
+}
+
+function projectHomeSavedConnections(
+  hosts: Host[],
+  bridgeSettings: BridgeSettings,
+  relayDevices: TraversalRelayDeviceSnapshot[],
+): Host[] {
+  const projected: Host[] = [];
+  const endpointIndex = new Map<string, number>();
+  const daemonIndex = new Map<string, number>();
+  const addConnection = (connection: Host) => {
+    const { endpointKey, daemonKey } = getHomeConnectionIdentityKeys(connection);
+    const hasEndpointKey = connection.bridgeHost.trim().length > 0;
+    const existingIndex = (daemonKey ? daemonIndex.get(daemonKey) : undefined) ?? (hasEndpointKey ? endpointIndex.get(endpointKey) : undefined);
+    if (existingIndex !== undefined) {
+      const current = projected[existingIndex];
+      if (current && shouldReplaceHomeConnection(current, connection)) {
+        projected[existingIndex] = connection;
+        if (hasEndpointKey) {
+          endpointIndex.set(endpointKey, existingIndex);
+        }
+        if (daemonKey) {
+          daemonIndex.set(daemonKey, existingIndex);
+        }
+      }
+      return;
+    }
+    const index = projected.length;
+    projected.push(connection);
+    if (hasEndpointKey) {
+      endpointIndex.set(endpointKey, index);
+    }
+    if (daemonKey) {
+      daemonIndex.set(daemonKey, index);
+    }
+  };
+
+  hosts.forEach(addConnection);
+  const servers: BridgeServerPreset[] = Array.isArray(bridgeSettings.servers) ? [...bridgeSettings.servers] : [];
+  const targetHost = bridgeSettings.targetHost?.trim() || '';
+  const targetPort = Number.isFinite(bridgeSettings.targetPort) ? bridgeSettings.targetPort : DEFAULT_BRIDGE_PORT;
+
+  if (
+    targetHost
+    && !servers.some((server) => server.targetHost === targetHost && server.targetPort === targetPort)
+  ) {
+    servers.push({
+      id: `target:${targetHost}:${targetPort}`,
+      name: targetHost,
+      targetHost,
+      targetPort,
+      authToken: bridgeSettings.targetAuthToken || '',
+    });
+  }
+
+  for (const server of servers) {
+    const homeConnection = buildHomeConnectionFromPreset(server);
+    if (!homeConnection) {
+      continue;
+    }
+    addConnection(homeConnection);
+  }
+
+  for (const device of relayDevices) {
+    const homeConnection = buildHomeConnectionFromRelayDevice(bridgeSettings, device);
+    if (!homeConnection) {
+      continue;
+    }
+    addConnection(homeConnection);
+  }
+
+  return projected;
 }
 
 interface AppContentProps {
@@ -163,6 +334,10 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
   void sendMessageRaw;
   void onFileTransferMessage;
   const { hosts, isLoaded: hostsLoaded, addHost, upsertHost, updateHost, deleteHost } = useHostStorage();
+  const homeSavedConnections = useMemo(
+    () => projectHomeSavedConnections(hosts, bridgeSettings, relayDevices),
+    [bridgeSettings, hosts, relayDevices],
+  );
   const { quickActions, setQuickActions } = useQuickActionStorage();
   const { shortcutActions, setShortcutActions } = useShortcutActionStorage();
   const shortcutFrequencyStorage = useShortcutFrequencyStorage();
@@ -507,7 +682,6 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     pickerMode,
     pickerTarget,
     pickerInitialSessions,
-    handleAddNew,
     handleOpenSavedConnection,
     handleOpenQuickTabPicker,
     handleOpenSingleTmuxSession,
@@ -577,17 +751,11 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
       <div style={{ width: '100%', height: '100dvh', overflow: 'hidden' }}>
         {pageState.kind === 'connections' && (
           <ConnectionsPage
-            savedConnections={hosts}
+            savedConnections={homeSavedConnections}
             activeSessions={terminalSessions}
             activeSessionId={terminalActiveSession?.id || null}
-            relaySettings={bridgeSettings.traversalRelay}
-            relayDevices={relayDevices}
             onResumeSession={handleResumeHomeSession}
             onOpenSavedConnection={handleOpenSavedConnection}
-            onOpenAddConnection={handleAddNew}
-            onRelaySettingsChange={(relaySettings) => {
-              setBridgeSettings((current) => applyTraversalRelaySettings(current, relaySettings));
-            }}
             onOpenSettings={handleOpenSettingsPage}
           />
         )}
@@ -628,6 +796,9 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
                 terminalWidthMode: updateBridgeSettingsTerminalWidthMode(next, next.terminalWidthMode).terminalWidthMode,
               }));
               handleOpenConnectionsPageWithAudit();
+            }}
+            onRelaySettingsChange={(relaySettings) => {
+              setBridgeSettings((current) => applyTraversalRelaySettings(current, relaySettings));
             }}
             onUpdatePreferencesChange={setAppUpdatePreferences}
             onCheckForUpdate={(nextPreferences) => {

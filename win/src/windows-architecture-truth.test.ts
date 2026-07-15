@@ -32,4 +32,15 @@ describe('windows desktop shell architecture truth', () => {
     expect(read('electron/preload.cts')).toContain("from 'electron'");
     expect(read('electron/main.ts')).toContain("path.join(__dirname, 'preload.cjs')");
   });
+
+  it('locks Windows installer, icon, and generic update channel metadata', () => {
+    const packageJson = JSON.parse(read('package.json'));
+    expect(packageJson.build.win.icon).toBe('build/icon.ico');
+    expect(JSON.stringify(packageJson.build.win.target)).toContain('nsis');
+    expect(JSON.stringify(packageJson.build.win.target)).toContain('dir');
+    expect(packageJson.build.nsis.oneClick).toBe(false);
+    expect(packageJson.build.nsis.allowToChangeInstallationDirectory).toBe(true);
+    expect(packageJson.build.publish[0].provider).toBe('generic');
+    expect(read('scripts/verify-windows-package.mjs')).toContain('alpha.yml');
+  });
 });

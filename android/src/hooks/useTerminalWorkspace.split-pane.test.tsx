@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useTerminalWorkspace } from '../../src/hooks/useTerminalWorkspace';
 import type { Session } from '../../src/lib/types';
@@ -36,6 +36,10 @@ function makeSession(id: string): Session {
 }
 
 describe('useTerminalWorkspace split-pane isolation', () => {
+  beforeEach(() => {
+    localStorage.clear();
+  });
+
   it('split from 1 pane with 2 tabs: each pane gets its own active tab', () => {
     const sessions = [makeSession('s1'), makeSession('s2')];
     const { result } = renderHook(() => useTerminalWorkspace({

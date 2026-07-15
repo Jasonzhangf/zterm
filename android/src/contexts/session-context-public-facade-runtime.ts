@@ -63,7 +63,7 @@ export function createSessionPublicFacadeRuntime(options: {
   ) => boolean;
   ensureActiveSessionFresh: (options: {
     sessionId: string;
-    source: 'explicit-resume' | 'active-resume' | 'active-reentry' | 'active-tick';
+    source: 'explicit-resume' | 'active-reentry' | 'active-tick';
     forceHead?: boolean;
     markResumeTail?: boolean;
     allowReconnectIfUnavailable?: boolean;
@@ -155,6 +155,9 @@ export function createSessionPublicFacadeRuntime(options: {
   };
 
   const updateSessionViewport = (sessionId: string, visibleRange: TerminalVisibleRange | TerminalViewportState) => {
+    const declaredMissingRanges = 'mode' in visibleRange && Array.isArray(visibleRange.missingRanges)
+      ? visibleRange.missingRanges
+      : undefined;
     const normalizedVisibleRange = 'mode' in visibleRange
       ? {
           startIndex: Math.max(0, Math.floor(visibleRange.viewportEndIndex - visibleRange.viewportRows)),
@@ -172,7 +175,8 @@ export function createSessionPublicFacadeRuntime(options: {
       sessionBufferHeadsRef: options.sessionBufferHeadsRef,
       readSessionBufferSnapshot: options.readSessionBufferSnapshot,
       requestSessionBufferSync: options.requestSessionBufferSync,
-      triggerRepair: !('mode' in visibleRange) || visibleRange.mode !== 'follow',
+      triggerRepair: !('mode' in visibleRange) || visibleRange.mode !== 'follow' || Boolean(declaredMissingRanges?.length),
+      requestMissingRangesOverride: declaredMissingRanges,
     });
   };
 

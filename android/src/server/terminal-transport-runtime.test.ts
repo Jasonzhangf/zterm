@@ -92,4 +92,23 @@ describe('terminal transport performance truth', () => {
     expect(transport.totalSendBytes).toBeGreaterThan(0);
     expect(transport.lastSendAt).toBeGreaterThan(0);
   });
+
+  it('updates the same send accounting for pre-serialized text fanout', () => {
+    const runtime = createRuntime();
+    const transport: TerminalSessionTransport = {
+      kind: 'ws',
+      readyState: WebSocket.OPEN,
+      bufferedAmount: 64,
+      sendText: vi.fn(),
+      close: vi.fn(),
+    };
+
+    runtime.sendText(transport, '{"type":"buffer-sync","payload":{"revision":7}}');
+
+    expect(transport.lastSendBytes).toBe(Buffer.byteLength('{"type":"buffer-sync","payload":{"revision":7}}', 'utf8'));
+    expect(transport.totalSendBytes).toBe(transport.lastSendBytes);
+    expect(transport.lastSendAt).toBeGreaterThan(0);
+    expect(transport.lastSendError).toBeNull();
+    expect(transport.backpressureCount).toBe(0);
+  });
 });

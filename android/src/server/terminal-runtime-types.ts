@@ -37,6 +37,29 @@ export interface PendingBinaryTransfer<TPayload extends { byteLength: number }> 
   chunks: Buffer[];
 }
 
+export interface TerminalAbsoluteRange {
+  startIndex: number;
+  endIndex: number;
+}
+
+export type TerminalSubscriberBufferSyncResyncReason =
+  | 'range-count'
+  | 'span-lines'
+  | 'age'
+  | 'transport-generation';
+
+export interface TerminalSubscriberBufferSyncState {
+  lastSentRevision: number;
+  pendingLatestRevision: number | null;
+  pendingChangedAbsoluteRanges: TerminalAbsoluteRange[];
+  pendingSince: number;
+  pendingTransportId: string | null;
+  highWaterActive: boolean;
+  highWaterEnteredAt: number;
+  resyncRequired: boolean;
+  resyncReason: TerminalSubscriberBufferSyncResyncReason | null;
+}
+
 export interface TerminalTransportSubscriber {
   id: string;
   transportId: string;
@@ -44,10 +67,12 @@ export interface TerminalTransportSubscriber {
   closeTransport?: (reason: string) => void;
   sessionName: string;
   mirrorKey: string | null;
+  bodySubscribed?: boolean;
   adaptiveWidthCols?: number | null;
   adaptiveWidthHeartbeatAt?: number;
   pendingPasteImage: PendingBinaryTransfer<PasteImageStartPayload> | null;
   pendingAttachFile: PendingBinaryTransfer<AttachFileStartPayload> | null;
+  bufferSyncState?: TerminalSubscriberBufferSyncState;
 }
 
 export type TerminalSession = TerminalTransportSubscriber;
@@ -89,6 +114,13 @@ export interface SessionMirror {
     canonicalLineCount: number;
     totalAvailableLines: number;
     visibleTopIndex: number;
+  } | null;
+  pendingPerformanceTraceCapture?: {
+    captureStartedAt: number;
+    captureDoneAt: number;
+    canonicalizeDoneAt: number;
+    capturedLineCount: number;
+    canonicalLineCount: number;
   } | null;
   adaptiveWidthBaselineGeometry?: {
     cols: number;

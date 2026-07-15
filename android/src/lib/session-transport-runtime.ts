@@ -14,6 +14,21 @@ export interface SessionTransportRuntime {
   } | null;
 }
 
+export type SessionTransportSocketState = 'missing' | 'connecting' | 'open' | 'closing' | 'closed' | 'unknown';
+
+export interface SessionTransportResource {
+  sessionId: string;
+  runtime: SessionTransportRuntime | null;
+  targetRuntime: TargetTransportRuntime | null;
+  targetKey: string | null;
+  host: Host | null;
+  socket: BridgeTransportSocket | null;
+  socketReadyState: number | null;
+  socketState: SessionTransportSocketState;
+  controlSocket: BridgeTransportSocket | null;
+  requestedTerminalGeometry: SessionTransportRuntime['requestedTerminalGeometry'] | null;
+}
+
 export interface TargetTransportRuntime {
   key: string;
   bridgeHost: string;
@@ -153,6 +168,47 @@ export function getSessionTransportRuntime(
   sessionId: string,
 ) {
   return store.sessions.get(sessionId) || null;
+}
+
+export function resolveTransportSocketState(
+  socket: BridgeTransportSocket | null,
+): SessionTransportSocketState {
+  if (!socket) {
+    return 'missing';
+  }
+  switch (socket.readyState) {
+    case 0:
+      return 'connecting';
+    case 1:
+      return 'open';
+    case 2:
+      return 'closing';
+    case 3:
+      return 'closed';
+    default:
+      return 'unknown';
+  }
+}
+
+export function getSessionTransportResource(
+  store: SessionTransportRuntimeStore,
+  sessionId: string,
+): SessionTransportResource {
+  const runtime = getSessionTransportRuntime(store, sessionId);
+  const targetRuntime = runtime ? getSessionTargetTransportRuntime(store, sessionId) : null;
+  const socket = runtime?.activeSocket || null;
+  return {
+    sessionId,
+    runtime,
+    targetRuntime,
+    targetKey: runtime?.targetKey || null,
+    host: runtime?.host || null,
+    socket,
+    socketReadyState: socket?.readyState ?? null,
+    socketState: resolveTransportSocketState(socket),
+    controlSocket: targetRuntime?.controlTransport || null,
+    requestedTerminalGeometry: runtime?.requestedTerminalGeometry || null,
+  };
 }
 
 export function getSessionTransportHost(

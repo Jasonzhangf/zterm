@@ -52,6 +52,7 @@ Out of scope：
 - `android/scripts/wezterm-backend-remote-smoke.ts`
 - `android/scripts/wezterm-backend-input-smoke.ts`
 - `android/scripts/wezterm-daemon-protocol-smoke.ts`
+- `android/scripts/wezterm-daemon-remote-protocol-smoke.ts`
 - `android/scripts/windows/zterm-daemon.ps1`
 
 需要补齐或校准：
@@ -79,6 +80,7 @@ pnpm --dir android exec vitest run src/server/wezterm-backend.test.ts --reporter
 pnpm --dir android exec vitest run src/server/wezterm-backend-runtime.test.ts --reporter dot
 pnpm --dir android exec vitest run src/server/terminal-backend-selection.test.ts src/server/terminal-control-runtime.input-queue.test.ts --reporter dot
 pnpm --dir android exec tsx scripts/wezterm-daemon-protocol-smoke.ts
+pnpm --dir android exec tsx scripts/wezterm-daemon-remote-protocol-smoke.ts
 pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false
 ```
 
@@ -103,7 +105,7 @@ pnpm --dir android exec tsx scripts/wezterm-backend-input-smoke.ts
 4. 修 backend closeout 缺口：backend selection、runtime lifecycle、explicit errors、input contract、snapshot projection、cleanup。
 5. 补/改正反测试，锁住 no fallback、stdin-only input、missing pane explicit error、cleanup failure、Ctrl+C 已知边界。
 6. 跑本地 gate 和 mock protocol smoke。
-7. 跑真实 Windows remote/input smoke；若失败，追唯一真源并修，不做降级。
+7. 跑真实 Windows direct remote/input smoke 和 daemon live protocol smoke；若失败，追唯一真源并修，不做降级。
 8. 更新 docs、feature registry、function map、mainline call map、`win/` 文档骨架、`note.md` / `MEMORY.md`。
 9. 最后检查 git diff，只提交本任务相关文件；commit 并 push。
 
@@ -111,7 +113,7 @@ pnpm --dir android exec tsx scripts/wezterm-backend-input-smoke.ts
 
 - `daemon.windows_wezterm_backend` 的代码、docs、feature registry、function map、gate 互相一致。
 - 本地单测、mock protocol、typecheck 通过。
-- 真实 Windows remote/input smoke 通过；若环境不可达，不得标记 closeout 完成。
+- 真实 Windows remote/input smoke 和 daemon live protocol smoke 通过；若环境不可达，不得标记 daemon backend closeout 完成。
 - `win/` 有最小架构骨架，且明确禁止复制 runtime/daemon/renderer。
 - `note.md` 提炼到 `MEMORY.md`，MemoryPalace 同 wing mine 后可检索新短语。
 - git commit/push 完成，最终汇报包含：改了什么、怎么验证、剩余风险/未完成、下一步。

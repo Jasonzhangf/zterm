@@ -60,6 +60,9 @@
 - terminal 宽度模式必须显式区分：
   - `adaptive-phone`
   - `mirror-fixed`
+- `adaptive-phone` 必须由 daemon 唯一 adaptive width lease owner 处理：记录客户端 `{ cols, heartbeatAt }`，按 active adaptive holders 聚合最窄 cols，并只在该 owner 内执行 `resize-window -x <cols>` 让 tmux 真实重排
+- adaptive lease owner 之外不得执行 `resize-window`、读写 `window-size`、写 `@zterm_adaptive_width_*`、修改 tmux option、或根据 foreground/background/viewport/UI 状态恢复/改写 tmux geometry；最后一个 adaptive holder 消失时，lease owner 必须恢复/释放本轮 tmux width ownership
+- daemon 请求 tmux 重排后不得自写 mirror truth；`mirror.rows/cols/bufferStartIndex/bufferLines/cursor` 仍只能来自 tmux capture/readback
 - `mirror-fixed` 下，client viewport / IME / 容器宽度变化**不得**改写 daemon mirror / tmux 宽度；renderer 只能裁切和横向平移
 - `mirror-fixed` 下自动关闭左右滑切 tab，避免和横向平移抢同一手势语义
 - 不提交大批 evidence / 构建物 / node_modules

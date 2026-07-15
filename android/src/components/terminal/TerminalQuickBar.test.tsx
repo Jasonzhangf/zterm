@@ -410,6 +410,306 @@ describe("TerminalQuickBar", () => {
     });
   });
 
+  it("reports zero chrome height when quickbar rows are collapsed", async () => {
+    const onMeasuredHeightChange = vi.fn();
+    const view = renderQuickBar({
+      collapseAvailable: true,
+      collapsed: false,
+      onMeasuredHeightChange,
+    });
+
+    const root = screen
+      .getByTestId("terminal-quickbar-shell-rows")
+      .parentElement as HTMLElement;
+    stubElementHeight(root, 184);
+    fireEvent(window, new Event("resize"));
+
+    await waitFor(() => {
+      expect(onMeasuredHeightChange).toHaveBeenLastCalledWith(184);
+    });
+
+    view.rerender(
+      <TerminalQuickBar
+        activeSessionId="session-1"
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onSendSequence={vi.fn()}
+        onSessionDraftChange={vi.fn()}
+        onSessionDraftSend={vi.fn()}
+        onQuickActionsChange={vi.fn()}
+        onShortcutActionsChange={vi.fn()}
+        onOpenScheduleComposer={vi.fn()}
+        onMeasuredHeightChange={onMeasuredHeightChange}
+        shellMode="inline"
+        collapseAvailable
+        collapsed
+      />,
+    );
+
+    await waitFor(() => {
+      expect(onMeasuredHeightChange).toHaveBeenLastCalledWith(0);
+    });
+  });
+
+  it("pans quickbar scroll tracks only from the expanded shell rows touch region", async () => {
+    const onCollapsedChange = vi.fn();
+    renderQuickBar({
+      shortcutActions: [
+        { id: "s1", label: "S1", sequence: "\u001b[1;2A", row: "top-scroll", order: 1 },
+        { id: "s2", label: "S2", sequence: "\u001b[1;2B", row: "bottom-scroll", order: 2 },
+      ],
+      collapseAvailable: true,
+      onCollapsedChange,
+      onOpenFileTransfer: vi.fn(),
+      onToggleDebugOverlay: vi.fn(),
+      onToggleAbsoluteLineNumbers: vi.fn(),
+      onRequestRemoteScreenshot: vi.fn(),
+    });
+
+    const shellRows = screen.getByTestId("terminal-quickbar-shell-rows");
+    expect(shellRows.getAttribute("data-quickbar-pan-surface")).toBe("true");
+    expect(shellRows.getAttribute("style") || "").toContain("touch-action: pan-y");
+
+    const tracks = Array.from(
+      shellRows.querySelectorAll<HTMLElement>('[data-quickbar-scroll-track="true"]'),
+    );
+    expect(tracks.length).toBeGreaterThan(1);
+    for (const track of tracks) {
+      Object.defineProperty(track, "scrollWidth", {
+        configurable: true,
+        value: 900,
+      });
+      Object.defineProperty(track, "clientWidth", {
+        configurable: true,
+        value: 260,
+      });
+      track.scrollLeft = 40;
+    }
+
+    fireEvent.touchStart(shellRows, { touches: [{ clientX: 280, clientY: 620 }] });
+    fireEvent.touchMove(shellRows, {
+      touches: [{ clientX: 120, clientY: 624 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(shellRows);
+
+    expect(tracks.map((track) => track.scrollLeft)).toEqual(
+      tracks.map(() => 200),
+    );
+    expect(onCollapsedChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps vertical quickbar shell row gestures from panning horizontal tracks", async () => {
+    renderQuickBar();
+
+    const shellRows = screen.getByTestId("terminal-quickbar-shell-rows");
+    const tracks = Array.from(
+      shellRows.querySelectorAll<HTMLElement>('[data-quickbar-scroll-track="true"]'),
+    );
+    for (const track of tracks) {
+      Object.defineProperty(track, "scrollWidth", {
+        configurable: true,
+        value: 900,
+      });
+      Object.defineProperty(track, "clientWidth", {
+        configurable: true,
+        value: 260,
+      });
+      track.scrollLeft = 40;
+    }
+
+    fireEvent.touchStart(shellRows, { touches: [{ clientX: 180, clientY: 620 }] });
+    fireEvent.touchMove(shellRows, {
+      touches: [{ clientX: 184, clientY: 700 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(shellRows);
+
+    expect(tracks.map((track) => track.scrollLeft)).toEqual(
+      tracks.map(() => 40),
+    );
+  });
+
+  it("leaves scroll-track gestures to the track native scroll owner", async () => {
+    renderQuickBar();
+
+    const shellRows = screen.getByTestId("terminal-quickbar-shell-rows");
+    const tracks = Array.from(
+      shellRows.querySelectorAll<HTMLElement>('[data-quickbar-scroll-track="true"]'),
+    );
+    expect(tracks.length).toBeGreaterThan(1);
+    for (const track of tracks) {
+      Object.defineProperty(track, "scrollWidth", {
+        configurable: true,
+        value: 900,
+      });
+      Object.defineProperty(track, "clientWidth", {
+        configurable: true,
+        value: 260,
+      });
+      track.scrollLeft = 40;
+    }
+
+    fireEvent.touchStart(tracks[0]!, {
+      touches: [{ clientX: 280, clientY: 620 }],
+    });
+    fireEvent.touchMove(tracks[0]!, {
+      touches: [{ clientX: 120, clientY: 624 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(tracks[0]!);
+
+    expect(tracks.map((track) => track.scrollLeft)).toEqual(
+      tracks.map(() => 40),
+    );
+  });
+
+  it("does not start rows-level pan from a quickbar action button", async () => {
+    renderQuickBar();
+
+    const shellRows = screen.getByTestId("terminal-quickbar-shell-rows");
+    const tracks = Array.from(
+      shellRows.querySelectorAll<HTMLElement>('[data-quickbar-scroll-track="true"]'),
+    );
+    for (const track of tracks) {
+      Object.defineProperty(track, "scrollWidth", {
+        configurable: true,
+        value: 900,
+      });
+      Object.defineProperty(track, "clientWidth", {
+        configurable: true,
+        value: 260,
+      });
+      track.scrollLeft = 40;
+    }
+
+    const keyboardButton = screen.getByRole("button", { name: "键盘" });
+    fireEvent.touchStart(keyboardButton, {
+      touches: [{ clientX: 120, clientY: 620 }],
+    });
+    fireEvent.touchMove(keyboardButton, {
+      touches: [{ clientX: 40, clientY: 624 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(keyboardButton);
+
+    expect(tracks.map((track) => track.scrollLeft)).toEqual(
+      tracks.map(() => 40),
+    );
+  });
+
+  it("collapses expanded quickbar from a downward vertical swipe on its rows", async () => {
+    const onCollapsedChange = vi.fn();
+    renderQuickBar({
+      collapseAvailable: true,
+      collapsed: false,
+      onCollapsedChange,
+    });
+
+    const shellRows = screen.getByTestId("terminal-quickbar-shell-rows");
+    const track = shellRows.querySelector<HTMLElement>(
+      '[data-quickbar-scroll-track="true"]',
+    );
+    expect(track).not.toBeNull();
+    track!.scrollLeft = 40;
+
+    fireEvent.touchStart(track!, {
+      touches: [{ clientX: 240, clientY: 610 }],
+    });
+    fireEvent.touchMove(track!, {
+      touches: [{ clientX: 244, clientY: 676 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(track!);
+
+    expect(track!.scrollLeft).toBe(40);
+    expect(onCollapsedChange).toHaveBeenCalledTimes(1);
+    expect(onCollapsedChange).toHaveBeenCalledWith(true);
+  });
+
+  it("does not collapse quickbar for a short vertical touch", async () => {
+    const onCollapsedChange = vi.fn();
+    renderQuickBar({
+      collapseAvailable: true,
+      collapsed: false,
+      onCollapsedChange,
+    });
+
+    const shellRows = screen.getByTestId("terminal-quickbar-shell-rows");
+    fireEvent.touchStart(shellRows, {
+      touches: [{ clientX: 240, clientY: 610 }],
+    });
+    fireEvent.touchMove(shellRows, {
+      touches: [{ clientX: 242, clientY: 638 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(shellRows);
+
+    expect(onCollapsedChange).not.toHaveBeenCalled();
+  });
+
+  it("reveals collapsed quickbar from an upward swipe on the bottom trigger", async () => {
+    const onCollapsedChange = vi.fn();
+    renderQuickBar({
+      collapseAvailable: true,
+      collapsed: true,
+      onCollapsedChange,
+    });
+
+    const trigger = screen.getByRole("button", { name: "展开快捷栏" });
+    fireEvent.touchStart(trigger, {
+      touches: [{ clientX: 320, clientY: 720 }],
+    });
+    fireEvent.touchMove(trigger, {
+      touches: [{ clientX: 316, clientY: 650 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(trigger);
+
+    expect(onCollapsedChange).toHaveBeenCalledTimes(1);
+    expect(onCollapsedChange).toHaveBeenCalledWith(false);
+  });
+
+  it("extends the raised reveal surface through the full lower edge", async () => {
+    const onCollapsedChange = vi.fn();
+    renderQuickBar({
+      collapseAvailable: true,
+      collapsed: true,
+      onCollapsedChange,
+    });
+
+    const surface = screen.getByTestId("terminal-quickbar-collapsed-reveal-surface");
+    expect(surface.style.bottom).toBe("0px");
+    expect(surface.style.height).toContain("136px");
+    fireEvent.click(surface);
+
+    expect(onCollapsedChange).toHaveBeenCalledTimes(1);
+    expect(onCollapsedChange).toHaveBeenCalledWith(false);
+  });
+
+  it("reveals collapsed quickbar from an upward swipe near the bottom of the full reveal surface", async () => {
+    const onCollapsedChange = vi.fn();
+    renderQuickBar({
+      collapseAvailable: true,
+      collapsed: true,
+      onCollapsedChange,
+    });
+
+    const surface = screen.getByTestId("terminal-quickbar-collapsed-reveal-surface");
+    fireEvent.touchStart(surface, {
+      touches: [{ clientX: 180, clientY: 730 }],
+    });
+    fireEvent.touchMove(surface, {
+      touches: [{ clientX: 178, clientY: 650 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(surface);
+
+    expect(onCollapsedChange).toHaveBeenCalledTimes(1);
+    expect(onCollapsedChange).toHaveBeenCalledWith(false);
+  });
+
   it("renders two shell rows in landscape with tools merged into the second row", async () => {
     Object.defineProperty(window, "innerWidth", {
       configurable: true,

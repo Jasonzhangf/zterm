@@ -81,6 +81,15 @@ interface UseSessionOpenActionsOptions {
   auditOpenTabsAgainstRemoteSessions: (reason: OpenTabAuditReason) => Promise<void>;
 }
 
+function buildGeneratedSessionName() {
+  const stamp = new Date()
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\..+$/, '')
+    .replace('T', '-');
+  return `zterm-${stamp}`;
+}
+
 export interface SessionOpenActionsResult {
   pickerMode: PickerMode;
   pickerTarget: BridgeTarget | null;
@@ -498,15 +507,13 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
 
   const handleAddNew = useCallback(() => {
     openSessionPicker('new-connection', {
-      target: normalizeBridgeTarget(null),
       initialSelectedSessions: [],
       paneId: null,
     });
   }, [openSessionPicker]);
 
   const handleOpenSavedConnection = useCallback((host: Host) => {
-    openSessionPicker('new-connection', {
-      target: normalizeBridgeTarget({
+    const target = normalizeBridgeTarget({
         bridgeHost: host.bridgeHost,
         bridgePort: host.bridgePort,
         daemonHostId: host.daemonHostId,
@@ -519,11 +526,24 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         signalUrl: host.signalUrl,
         transportMode: host.transportMode,
         relayEndpointCandidates: host.relayEndpointCandidates || [],
-      }),
-      initialSelectedSessions: host.sessionName.trim() ? [host.sessionName.trim()] : [],
-      paneId: null,
     });
-  }, [openSessionPicker]);
+    const existingSessionName = host.sessionName.trim();
+    const sessionName = existingSessionName || buildGeneratedSessionName();
+    setPickerMode(null);
+    setPickerScopePaneId(null);
+
+    void (async () => {
+      try {
+        if (!existingSessionName) {
+          await createTmuxSession(target, bridgeSettingsRef.current, sessionName);
+        }
+        const draft = buildDraftFromTmuxSession(hosts, bridgeSettingsRef.current.servers, target, sessionName);
+        handleQuickConnectDraft(draft, host.name || target.bridgeHost || target.daemonHostId || target.relayHostId);
+      } catch (error) {
+        window.alert?.(error instanceof Error ? error.message : String(error));
+      }
+    })();
+  }, [bridgeSettingsRef, handleQuickConnectDraft, hosts]);
 
   const enrichTargetFromSavedHosts = useCallback((target: BridgeTarget) => {
     const daemonHostId = (target.daemonHostId || target.relayHostId || '').trim();
@@ -595,12 +615,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
   }, [bridgeSettings.servers, enrichTargetFromSavedHosts, relayDevices, sessionsRef]);
 
   const buildBlankSessionName = useCallback(() => {
-    const stamp = new Date()
-      .toISOString()
-      .replace(/[-:]/g, '')
-      .replace(/\..+$/, '')
-      .replace('T', '-');
-    return `zterm-${stamp}`;
+    return buildGeneratedSessionName();
   }, []);
 
   const handleOpenQuickTabPicker = useCallback((paneId?: string, hostKey?: string, createOptions?: QuickTabCreateOptions) => {

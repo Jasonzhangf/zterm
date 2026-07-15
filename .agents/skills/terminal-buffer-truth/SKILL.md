@@ -113,6 +113,7 @@ terminal / daemon / client / renderer 相关任务完成前，先写清本轮影
 - `session.state === connected`、terminal page 显示 connected、activeSessionId 命中，都**不是** transport freshness 真源
 - transport freshness 唯一 owner 只能留在 `SessionContext -> ensureActiveSessionFresh / buildActiveSessionRefreshPlan`
 - transport `closed/error/tmux_session_unavailable` 只属于 **transport / attach fact**，**不得**被 App 直接映射成 open-tab 物理关闭
+- `tmux_session_unavailable` 也不得从非 active、非 live session 投影成当前 UI 的错误/重连 banner。抽屉打开、session picker refresh、foreground audit 发现 stale persisted tab 时，只能记录缺失事实并停止该 session 的自动 retry；不能 emit `SESSION_STATUS_EVENT(type='error')`，不能让缺失的旧 tab 污染当前 active session。
 - open-tab 物理关闭只能由用户显式 close 触发；远端 tmux session-name audit 只能记录缺失/更新历史 session group，不得删除 open tab、切走 active tab、写 closed tombstone、调用 runtime `closeSession`
 - terminal tab chrome 必须以 `OPEN_TABS` 为唯一真源 materialize；runtime sessions 只补 transport/state。若 persisted open tab 的 runtime shell 缺失，UI 必须保留 closed placeholder；只有用户显式 resume/open 才允许按 persisted tab 重建 runtime shell 和 transport，禁止用 `open tabs ∩ runtime sessions` 过滤导致“看起来自动关闭 tab”。
 - `OPEN_TABS` 的物理身份只能是 `sessionId`；`sessionName + daemon/bridge owner` 语义 key 不得用于 normalize/upsert/runtime-merge/close 时合并、替换、删除已打开 tab。semantic key 只允许用于 saved-list import 去重与用户显式 close 后的 tombstone。
@@ -136,7 +137,8 @@ terminal / daemon / client / renderer 相关任务完成前，先写清本轮影
 - PowerShell 5.1 写 JSON 配置时默认容易带 BOM，daemon 读取会直接炸 `Unexpected token '﻿'`；Windows runner 必须用 no-BOM UTF-8 写配置，不能依赖 `Set-Content -Encoding UTF8` 这种默认行为。
 - Windows Scheduled Task 运行环境不继承交互式 shell 的 PATH；runner 不能假设 `wezterm.exe` 可直接找到，必须显式探测/固化 `ZTERM_WEZTERM_EXE` 或安装目录。
 - Windows direct route 验证必须同时看：本机 `127.0.0.1:<port>`、本机 Tailscale IP `<100.x>:<port>`、远端设备到 `<100.x>:<port>`；前两者成功不等于 Android/Mac 经 Tailscale 可达。
-- Windows WezTerm closeout 必须把 remote/input smoke 当真实 gate。若 Tailscale peer offline、node key expired、或 SSH 超时，只能记录阻塞；本地单测、mock protocol、typecheck、feature-registry gate 不能替代真实 Windows smoke。
+- Windows WezTerm closeout 必须同时跑 direct remote/input smoke 和 live daemon protocol smoke。live gate 必须自动比较输入 source marker 与解码后的真实 `buffer-sync` target，并通过 daemon control 精确关闭本轮 session；只验 CLI、create/connect/input，或通过 SSH 绕过 daemon 清理，都不算闭环。
+- 后端 session 关闭必须经 selected backend 唯一 owner：WezTerm 调 `WezTermBackendRuntime#closeSession`，tmux 才允许 `tmux kill-session`。禁止让兼容 wire 名 `tmux-kill-session` 把实现锁死到 tmux。
 
 ## 1. daemon server
 
@@ -187,6 +189,25 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
   - `widthMode`、`terminalWidthMode`、`requestedAdaptiveCols` 不得写入 daemon 业务真相；`resize-window` / `window-size` 只允许出现在 adaptive lease owner 的 apply/release 函数里。
   - daemon 请求 tmux resize 后不得自写 `mirror.rows/cols`；mirror 内容和尺寸仍只能来自 tmux capture/readback。
 - 好网 fast lane 与弱网 slow lane 必须由红测锁定；性能 trace 只记录 timestamp/duration/bytes/line count/id/kind 这类 metadata，禁止记录真实 terminal payload 内容。
+- 生产性能 trace 必须按 `traceId + mirrorRevision + subscriberId` 关联独立样本；同 session 的不同 revision 不得被拼成一个伪 latency。完整阶段是 `capture -> canonicalize -> mirror commit -> send -> client rx -> buffer apply -> RAF -> render commit`，只允许有界 metadata ring 和 p50/p95/p99 summary。
+- physical subscriber 与 live body subscription 必须分离：
+  - attach transport 不等于永久订阅正文；
+  - daemon 只保存 `bodySubscribed` 这一物理事实，不保存 active/inactive/visible/foreground 原因；
+  - unsubscribe 只停止 unsolicited `buffer-sync`，不得 close transport、detach mirror、禁用 input/file/schedule 或 explicit head/range read；
+  - recurring capture 只由 ready 且 `bodySubscribed` 的 physical subscriber demand 驱动；unsubscribe 必须经同一个 scheduler owner 立即停旧 timer，恢复 demand 后恢复 scheduler，不得由 head/range 请求直接 capture。
+- subscriber backpressure 禁止直接永久 skip 当前 revision：
+  - 每个 subscriber 最多保留一个 bounded pending latest revision 和合并后的 absolute ranges；
+  - pending flush 时必须从当前 mirror store 读取最新权威行，禁止保存历史 serialized payload/cells；
+  - high/low water 必须迟滞；send error/non-open/旧 generation 不得清 pending 或推进 sent revision；
+  - 一个 slow subscriber 不得降低 healthy subscriber cadence；输出停止并 drain 后必须到达 daemon latest revision。
+- mirror capture 允许的性能优化只有同一 writer 内的 authoritative hot-range patch：
+  - range 至少覆盖完整 mutable pane，absolute anchor 只来自 tmux `pane identity/history_size/rows/cols/alternate/captured count`；
+  - 已确认旧 history 只能作为同一 mirror store 内的 retained prefix；
+  - cols/reflow、rows 变化导致未知 prefix、pane/alternate 变化、history shrink/clear、absolute discontinuity、结构不稳定或周期 reconciliation 到期时，必须由同一 owner 做 full reconciliation；
+  - hot patch/full reconciliation 是同一个 validator/committer 的两种 commit mode，不是 fallback 或第二真源。
+- structured send 与 pre-serialized `sendText` 必须进入同一 accounting owner，记录 bytes/total/error/buffered-before-after/duration/backpressure transition；禁止为统计重新 stringify terminal payload。
+- 网络 RTT/jitter/stall 只调节 producer 的 head/pull/probe cadence；body 到达后 renderer 只允许 next-RAF commit，禁止再加 network debounce。
+- 弱网性能闭环必须使用主链外透明 TCP byte proxy：只允许延迟、限速、暂停读取、周期 stall、显式断连；禁止解析、重写、压缩或裁剪 WebSocket/terminal payload。代理测试必须证明双向字节完全等价，并用真实 control/session WebSocket 统计 inactive body bytes、slow/healthy cadence 和 final revision。
 - `buffer-head` 只允许更新 head metadata / cursor metadata / planner 输入
 - **只有 `buffer-sync apply` 可以触发正文 body repaint**
 - daemon **不得改写 buffer cells 本身**
@@ -500,6 +521,8 @@ UI 只负责容器位置与裁切：
   - 自动关闭左右滑切 tab
   - 单指横滑只服务于 renderer horizontal pan
   - 不允许一次手势里同时尝试切 tab 与横向平移
+  - horizontal offset 尚未到 0 时，能真实改变 offset 的横滑必须由 renderer 独占并截断父级 `touchmove/touchend`
+  - 只有 offset 在手势开始前已经为 0，左缘右滑才可进入 drawer owner；只缩热区不能解决子级 pan 与父级 drawer 同时解析同一 touch 序列的问题
 - `mirror-fixed` 下若当前客户端并没有独立 horizontal pan 手势链在生效：
   - 禁止把左右滑切 tab 直接禁用成“无交互出口”
   - 此时单指横滑仍归 UI shell swipe surface 所有，继续用于切 tab
@@ -716,6 +739,19 @@ tmux truth
   3. IME 只移动 QuickBar/UI shell，不改变 TerminalView 内容 stage，不触发 upstream resize，不改 tmux rows/cols
   4. 真机脚本必须确认 app surface 可见；keyguard/SystemUI 拥有焦点时只能标 L5 阻塞
 - `mirror-fixed` 横向滑动只能是 renderer projection：`.term-grid` 可按 session 记住水平 offset 并做 `translateX(-offset)`；禁止把横滑映射成 daemon resize、tmux width change、adaptive lease 或 buffer/mirror truth 修改。`adaptive-phone` 不响应横向 pan，它的宽度变化只走 daemon adaptive lease owner。
+- `mirror-fixed` 横向手势归属：只有 offset 已为 0 且起点在左缘热区内的右滑可交给 drawer；positive offset 右滑、非左缘右滑、右侧/中间横滑都必须由 `TerminalView` 消费并 `stopPropagation()`，即使 offset 已经被 clamp 到 0、视觉上不能继续移动。禁止只 `preventDefault()` 后让父层 `touchend` 解析成 drawer `previous`。
+
+## Session preview truth
+
+- 多终端快捷预览只能是 UI projection：数据链必须保持 `tmux -> daemon mirror -> client sparse buffer -> immutable render store -> shared TerminalView -> preview DOM`。
+- 禁止 preview 自建 ANSI/cell/cursor parser、截图/文本 cache、transport/reconnect、resize、viewport writeback、width-mode write、tmux geometry write 或 buffer reset。
+- Preview tile 必须把 `TerminalView` 作为 read-only shared renderer 使用：`active=false`、`live=true`、无 input/resize/viewport callbacks、`allowDomFocus=false`、`mirror-fixed`。
+- Preview selection 持久化时必须存完整 open-session identity，并在恢复时至少匹配 `sessionId + bridgeHost + bridgePort + sessionName`，有 `daemonHostId` 时也必须匹配；stale target 是失效选择，不是隐式 open/reconnect intent。
+- Preview 打开才允许把 selected ids 临时加入 body subscription live set；关闭/后台必须回到 baseline。黑盒 gate 必须自动比较 tmux source、daemon/client sparse truth、render store 和 preview DOM，并验证 subscriber lifecycle。
+- Preview tile activation 必须走唯一 page owner：先把目标 session 投进当前 focused session-group slot，再发 active-session switch。只切 active session 不改 viewport projection，会让输入/live 到新 session、真实 shell 仍显示旧 center session；preview 关闭后旧 center 不再 live，表现为“preview 刷新但进入 shell 不刷新”。
+- Source-to-shell 黑盒 gate 必须覆盖 preview grid -> real `TerminalStageShell` 替换后继续刷新：选中 session 新 marker 出现在真实 shell DOM，旧 session marker 被排除，物理 socket 不重建，subscribers 恢复 baseline。
+- Preview tile 长按替换只改 ordered selection：420ms 长按必须有移动阈值，触发或移动后都要抑制 synthetic click；菜单只列当前 open 且未选中的 session，替换保持原 slot 顺序。禁止借替换触发 active switch、socket open owner、buffer reset 或 renderer 写入。
+- Preview 打开时由 mode owner 捕获 entry `{ activeSessionId, slotIds, focusSlot }`。关闭按钮、右滑退出、Android system Back 都走唯一 cancel owner 并恢复该快照；tile tap activation 必须先清除快照再执行显式 switch。Back listener 只在 preview open 生命周期注册。
 
 ## 2026-06-29 buffer publish short-circuit
 

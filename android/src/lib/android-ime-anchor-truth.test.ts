@@ -28,6 +28,24 @@ describe('Android IME anchor truth', () => {
     expect(pluginSource).not.toContain('imeEditText.setCursorVisible(true)');
   });
 
+  it('does not let physical screen taps use the transparent anchor as keyboard show intent', () => {
+    expect(pluginSource).toContain('imeEditText.setShowSoftInputOnFocus(false)');
+    expect(pluginSource).not.toContain('imeEditText.setShowSoftInputOnFocus(true)');
+    expect(pluginSource).toContain(
+      'public boolean dispatchTouchEvent(MotionEvent event) {\n            return false;\n        }',
+    );
+    expect(pluginSource).toContain('setTerminalAnchorInputEnabled(false)');
+    expect(pluginSource).toContain(
+      'pendingShowRequest = true;\n            setTerminalAnchorInputEnabled(true);',
+    );
+    expect(pluginSource).toContain(
+      'if (!keyboardVisible && pendingShowRequest) {\n                pendingShowRequest = false;\n                setTerminalAnchorInputEnabled(false);',
+    );
+    expect(pluginSource).toContain(
+      'imeEditText.setVisibility(enabled ? View.VISIBLE : View.INVISIBLE)',
+    );
+  });
+
   it('does not repeat toggle-based show requests after the explicit keyboard intent', () => {
     expect(pluginSource).not.toContain('PENDING_SHOW_GUARD_DELAYS_MS');
     expect(pluginSource).not.toContain('schedulePendingShowGuards();');

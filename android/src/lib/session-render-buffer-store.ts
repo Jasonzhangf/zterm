@@ -13,6 +13,10 @@ export interface SessionRenderBufferStore {
   deleteSession: (sessionId: string) => void;
 }
 
+export interface SessionRenderBufferStoreOptions {
+  runtimeDebug?: (event: string, payload?: Record<string, unknown>) => void;
+}
+
 const EMPTY_LINES: TerminalCell[][] = [];
 const EMPTY_GAPS: TerminalGapRange[] = [];
 
@@ -158,7 +162,9 @@ function renderBuffersEqual(left: SessionRenderBufferSnapshot, right: SessionRen
   return true;
 }
 
-export function createSessionRenderBufferStore(): SessionRenderBufferStore {
+export function createSessionRenderBufferStore(
+  options: SessionRenderBufferStoreOptions = {},
+): SessionRenderBufferStore {
   const snapshots = new Map<string, SessionRenderStoreSnapshot>();
   const listeners = new Map<string, Set<() => void>>();
 
@@ -194,6 +200,23 @@ export function createSessionRenderBufferStore(): SessionRenderBufferStore {
 
   const setBuffer = (sessionId: string, buffer: SessionRenderBufferSnapshot) => {
     const previous = snapshots.get(sessionId);
+    if (
+      previous
+      && previous.buffer.revision > 0
+      && buffer.revision > 0
+      && buffer.revision < previous.buffer.revision
+    ) {
+      options.runtimeDebug?.('session.render-store.revision-regression-drop', {
+        sessionId,
+        previousRevision: previous.buffer.revision,
+        incomingRevision: buffer.revision,
+        previousStartIndex: previous.buffer.startIndex,
+        previousEndIndex: previous.buffer.endIndex,
+        incomingStartIndex: buffer.startIndex,
+        incomingEndIndex: buffer.endIndex,
+      });
+      return false;
+    }
     if (previous && renderBuffersEqual(previous.buffer, buffer)) {
       return false;
     }

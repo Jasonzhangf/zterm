@@ -3,6 +3,11 @@ import type { IncomingMessage, ServerResponse } from 'http';
 import { basename, join, resolve } from 'path';
 import type { RuntimeDebugStore } from './runtime-debug-store';
 import type { TerminalTransportSubscriber, SessionMirror } from './terminal-runtime-types';
+import {
+  parseRuntimeDebugPerformanceTraceRecords,
+  summarizeTerminalPerformanceTrace,
+  type createTerminalPerformanceTraceStore,
+} from '../lib/terminal-performance-trace';
 
 export interface TerminalHttpRuntimeDeps {
   host: string;
@@ -17,6 +22,7 @@ export interface TerminalHttpRuntimeDeps {
   mirrors: Map<string, SessionMirror>;
   clientRuntimeDebugStore: RuntimeDebugStore;
   daemonRuntimeDebugStore: RuntimeDebugStore;
+  performanceTraceStore: ReturnType<typeof createTerminalPerformanceTraceStore>;
   resolveDebugRouteLimit: (input: string | null | undefined) => number;
   broadcastRuntimeDebugControl: (enabled: boolean, reason: string, sessionId?: string) => void;
   setDaemonRuntimeDebugEnabled: (enabled: boolean) => void;
@@ -170,6 +176,25 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
   function buildDebugRuntimeSnapshot(request: IncomingMessage) {
     const subscriberEntries = Array.from(deps.sessions.values());
     const mirrorEntries = Array.from(deps.mirrors.values());
+    const traceLimit = 1000;
+    const daemonTraceRecords = deps.performanceTraceStore.snapshot();
+    const clientTraceRecords = parseRuntimeDebugPerformanceTraceRecords(
+      deps.clientRuntimeDebugStore.listEntries({
+        limit: traceLimit,
+        scopeIncludes: 'terminal.performance.trace',
+      }),
+    );
+    const daemonDebugTraceRecords = parseRuntimeDebugPerformanceTraceRecords(
+      deps.daemonRuntimeDebugStore.listEntries({
+        limit: traceLimit,
+        scopeIncludes: 'terminal.performance.trace',
+      }),
+    );
+    const performanceTraceRecords = [
+      ...daemonTraceRecords,
+      ...clientTraceRecords,
+      ...daemonDebugTraceRecords,
+    ];
     return {
       ok: true,
       generatedAt: deps.logTimePrefix(),
@@ -177,6 +202,10 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
       health: buildRuntimeHealthSnapshot(request),
       clientDebug: deps.clientRuntimeDebugStore.getSummary(),
       daemonDebug: deps.daemonRuntimeDebugStore.getSummary(),
+      performanceTrace: {
+        recordCount: performanceTraceRecords.length,
+        summary: summarizeTerminalPerformanceTrace(performanceTraceRecords),
+      },
       clientDebugSnapshots: deps.clientRuntimeDebugStore.listSnapshots(),
       transportSubscribers: subscriberEntries.map((subscriber) => ({
         id: subscriber.id,

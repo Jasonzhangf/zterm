@@ -76,7 +76,7 @@ export const DEFAULT_BRIDGE_SETTINGS: BridgeSettings = {
   transportMode: 'auto',
   terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
   terminalThemeId: DEFAULT_TERMINAL_THEME_ID,
-  terminalWidthMode: 'mirror-fixed',
+  terminalWidthMode: 'adaptive-phone',
   terminalSessionGroupLayoutMode: 'auto',
   cwd: undefined,
   shortcutSmartSort: true,
@@ -360,7 +360,7 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
       : DEFAULT_BRIDGE_SETTINGS.transportMode;
   const terminalThemeId = normalizeTerminalThemeId(candidate.terminalThemeId);
   const terminalWidthMode: TerminalWidthMode =
-    candidate.terminalWidthMode === 'adaptive-phone' ? 'adaptive-phone' : 'mirror-fixed';
+    candidate.terminalWidthMode === 'mirror-fixed' ? 'mirror-fixed' : 'adaptive-phone';
   const terminalSessionGroupLayoutMode: TerminalSessionGroupLayoutMode =
     candidate.terminalSessionGroupLayoutMode === 'horizontal' || candidate.terminalSessionGroupLayoutMode === 'vertical'
       ? candidate.terminalSessionGroupLayoutMode

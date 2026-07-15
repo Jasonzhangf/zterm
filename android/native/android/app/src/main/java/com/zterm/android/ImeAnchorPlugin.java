@@ -12,6 +12,7 @@ import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.KeyEvent;
+import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewTreeObserver;
 import android.view.inputmethod.EditorInfo;
@@ -55,6 +56,7 @@ public class ImeAnchorPlugin extends Plugin {
             Log.i(TAG, "show()");
             ensureImeAnchor();
             pendingShowRequest = true;
+            setTerminalAnchorInputEnabled(true);
             requestFocusAndShowKeyboard();
             call.resolve(buildState("show"));
         });
@@ -66,6 +68,7 @@ public class ImeAnchorPlugin extends Plugin {
             Log.i(TAG, "hide()");
             pendingShowRequest = false;
             hideKeyboard();
+            setTerminalAnchorInputEnabled(false);
             call.resolve();
         });
     }
@@ -79,6 +82,7 @@ public class ImeAnchorPlugin extends Plugin {
                 imeEditText.clearFocus();
             }
             hideKeyboard();
+            setTerminalAnchorInputEnabled(false);
             call.resolve();
         });
     }
@@ -109,15 +113,11 @@ public class ImeAnchorPlugin extends Plugin {
                     // cannot steal focus from WebView <input>/<textarea> elements.
                     // Do NOT hide keyboard — the HTML editor input needs it.
                     pendingShowRequest = false;
-                    if (imeEditText.hasFocus()) {
-                        imeEditText.clearFocus();
-                    }
-                    imeEditText.setFocusable(false);
-                    imeEditText.setFocusableInTouchMode(false);
+                    setTerminalAnchorInputEnabled(false);
                 } else {
-                    // Terminal mode: re-enable ImeAnchor for terminal input.
-                    imeEditText.setFocusable(true);
-                    imeEditText.setFocusableInTouchMode(true);
+                    // Terminal mode remains inert until the keyboard button
+                    // creates an explicit show request.
+                    setTerminalAnchorInputEnabled(false);
                 }
             }
             call.resolve(buildState("setEditorActive"));
@@ -166,7 +166,7 @@ public class ImeAnchorPlugin extends Plugin {
         imeEditText.setImportantForAutofill(View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS);
         imeEditText.setFocusable(true);
         imeEditText.setFocusableInTouchMode(true);
-        imeEditText.setShowSoftInputOnFocus(true);
+        imeEditText.setShowSoftInputOnFocus(false);
         imeEditText.setOnFocusChangeListener((view, hasFocus) -> {
             Log.i(
                 TAG,
@@ -214,7 +214,21 @@ public class ImeAnchorPlugin extends Plugin {
         layoutParams.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
         layoutParams.bottomMargin = dpToPx(12);
         rootView.addView(imeEditText, layoutParams);
+        setTerminalAnchorInputEnabled(false);
         Log.i(TAG, "ensureImeAnchor(): anchor attached");
+    }
+
+    private void setTerminalAnchorInputEnabled(boolean enabled) {
+        if (imeEditText == null) {
+            return;
+        }
+        if (!enabled && imeEditText.hasFocus()) {
+            imeEditText.clearFocus();
+        }
+        imeEditText.setEnabled(enabled);
+        imeEditText.setFocusable(enabled);
+        imeEditText.setFocusableInTouchMode(enabled);
+        imeEditText.setVisibility(enabled ? View.VISIBLE : View.INVISIBLE);
     }
 
     private void ensureKeyboardObserver() {
@@ -239,6 +253,10 @@ public class ImeAnchorPlugin extends Plugin {
 
             lastKeyboardVisible = keyboardVisible;
             lastKeyboardHeight = keyboardHeight;
+            if (!keyboardVisible && pendingShowRequest) {
+                pendingShowRequest = false;
+                setTerminalAnchorInputEnabled(false);
+            }
             Log.i(TAG, "keyboardState(): visible=" + keyboardVisible + " height=" + keyboardHeight);
             JSObject payload = new JSObject();
             payload.put("visible", keyboardVisible);
@@ -622,6 +640,7 @@ public class ImeAnchorPlugin extends Plugin {
         state.put("hasWindowFocus", imeEditText != null && imeEditText.hasWindowFocus());
         state.put("isAttached", imeEditText != null && imeEditText.isAttachedToWindow());
         state.put("hasWindowToken", imeEditText != null && imeEditText.getWindowToken() != null);
+        state.put("inputEnabled", imeEditText != null && imeEditText.isEnabled());
         state.put("textLength", imeEditText != null && imeEditText.getText() != null ? imeEditText.getText().length() : 0);
         return state;
     }
@@ -645,6 +664,11 @@ public class ImeAnchorPlugin extends Plugin {
 
         void setPlugin(ImeAnchorPlugin plugin) {
             this.plugin = plugin;
+        }
+
+        @Override
+        public boolean dispatchTouchEvent(MotionEvent event) {
+            return false;
         }
 
         @Override

@@ -198,4 +198,25 @@ describe('TerminalView RAF throttle', () => {
     expect(onParentTouchStart).toHaveBeenCalledTimes(1);
     expect(onLongPressRow).not.toHaveBeenCalled();
   });
+
+  it('hides the inner terminal scrollbar while keeping vertical scrolling enabled', () => {
+    const { container } = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId="s1"
+          renderBufferSnapshot={buildRenderBufferSnapshot()}
+          active
+          live
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const host = container.querySelector('.wterm') as HTMLDivElement;
+    expect(host).toBeTruthy();
+    expect(host.style.overflowY).toBe('auto');
+    expect(host.style.scrollbarWidth).toBe('none');
+    expect(container.textContent).toContain('.wterm::-webkit-scrollbar');
+  });
 });

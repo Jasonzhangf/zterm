@@ -142,6 +142,7 @@ export interface TerminalRenderBufferProjection {
 export const STORAGE_KEYS = {
   HOSTS: 'zterm:hosts',
   BRIDGE_SETTINGS: 'zterm:bridge-settings',
+  TERMINAL_WIDTH_MODE_PREFERENCE: 'zterm:terminal-width-mode-preference',
   SESSION_HISTORY: 'zterm:session-history',
   SESSION_GROUPS: 'zterm:session-groups',
   OPEN_TABS: 'zterm:open-tabs',

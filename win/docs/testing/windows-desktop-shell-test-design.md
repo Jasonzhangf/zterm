@@ -3,7 +3,7 @@
 ## Scope
 
 - Feature: `windows.desktop_shell`
-- Status: multi-session workspace and local file browser packaged Windows gates passed on 2026-07-14.
+- Status: multi-session workspace and local file browser packaged Windows gates passed; installer/update-channel metadata implementation is in progress.
 - Resource path: `resource.platform_terminal_surface -> resource.ui_projection`, with terminal data consumed through existing shared `resource.session_transport -> resource.client_sparse_buffer -> resource.renderer_window` owners.
 - Shell owner: `win/` Electron entry, preload/platform bridge, packaging, and Windows-only integration.
 - Shared owner: `packages/shared/` for intentionally cross-platform desktop workspace/render semantics.
@@ -51,6 +51,15 @@ The Windows shell must not own:
 - Project black-box: packaged Windows app opens a real fixture directory through `window.ztermWindows.fileSystem`, lists the fixture, automatically compares expected Markdown source text with preview DOM, and proves binary preview is disabled without reading file content.
 - Resource closeout: closing the panel must not change daemon attached/subscriber counts or terminal runtime identity.
 
+## Windows installer/update-channel test design
+
+- Lifecycle: one `package` command builds renderer/main, creates an unpacked x64 app, creates an NSIS installer, emits `alpha.yml` for the prerelease channel, and leaves signing explicitly unsigned for internal alpha.
+- White-box: package metadata must define `build/icon.ico`, `dir` and `nsis` x64 targets, generic publish metadata, NSIS install-directory controls, and a verifier that checks installer hash/size against `alpha.yml`.
+- Module black-box positive: `pnpm --dir win run package:verify` must find the unpacked app, installer, icon, and `alpha.yml`, then compare the installer SHA-512 with update metadata.
+- Module black-box negative: missing icon, missing installer, missing update manifest, or mismatched hash must fail verification.
+- Project black-box: copy the generated installer to the real Windows host, run the installed app from the installer output location, and prove the preload/UI/file-browser smoke still passes from the installed app.
+- Signing boundary: this remains an unsigned internal alpha. Do not claim Authenticode signing until a certificate-backed signing gate exists.
+
 ## White-box gates
 
 - Static architecture gate proves no `window.ztermMac`, Mac Electron module, local-tmux transport, daemon source, mirror source, or renderer copy is imported by `win/`.
@@ -88,4 +97,4 @@ The Windows shell must not own:
 
 ## Completion signal
 
-The multi-session workspace slice is complete only when maps and symbols agree, local positive/negative gates pass, and the packaged Windows two-session source-to-DOM/transport-lifecycle gate passes. Filesystem browser, installer/signing, and Ctrl+C console-control semantics remain separate follow-up features.
+The Windows package-channel slice is complete only when maps and symbols agree, local package verification passes, and the real Windows installed-app smoke passes. Authenticode signing and Ctrl+C console-control semantics remain separate follow-up features.

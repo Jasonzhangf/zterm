@@ -42,7 +42,7 @@ describe('session-runtime-cadence', () => {
       recentPayloadBytes: 1200,
       hasRecentProgress: true,
     });
-    expect(resolveTerminalRefreshCadence({ runtimeTransport }).renderCommitMs).toBe(16);
+    expect(resolveTerminalRefreshCadence({ runtimeTransport }).headTickMs).toBe(16);
   });
 
   it('maps socket backlog into slow-lane cadence input without changing payload semantics', () => {

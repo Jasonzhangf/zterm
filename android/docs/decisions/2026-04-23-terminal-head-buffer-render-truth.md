@@ -320,10 +320,10 @@ buffer manager 是客户端唯一 buffer worker。
 
 每轮都先问 head，然后比较本地尾窗和 daemon head：
 
-#### 情况 A：本地为空 / 失真 / 距离 head 超过 3 屏
+#### 情况 A：本地为空 / 失真 / 距离 head 超过当前 visible window
 
 直接：
-- 请求 `head` 最新三屏
+- 请求当前 visible window
 - 把本地 sliding window 移到最新尾部
 - **中间缺口不补**
 
@@ -367,7 +367,7 @@ buffer manager 自己还必须守住这条边界：
 
 - active tab：
   - 持续 head-first tick
-  - follow 时做 tail diff / 三屏重锚
+  - follow 时做 tail diff / visible-window 重锚
   - reading 时额外做 gap repair
 - inactive tab：
   - 只是不再主动高频拉 `head/range`
@@ -423,7 +423,7 @@ buffer manager 不得自行反推 renderer 当前窗口。
 
 - 用户上滚进入 reading
 - reading 时只改自己的 `renderBottomIndex`
-- 取的是 reading head 往回 3 屏的渲染窗口
+- 取的是当前 visible range 的渲染窗口
 - buffer 更新不会自动改变滚动语义
 - 若当前窗口有 gap，仍先按已有行渲染，缺的行画空白占位
 

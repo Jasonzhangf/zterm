@@ -198,10 +198,17 @@ export function updateSessionViewportRuntime(options: {
       requestMissingRangesOverride?: Array<{ startIndex: number; endIndex: number }> | null;
     },
   ) => boolean;
+  requestMissingRangesOverride?: Array<{ startIndex: number; endIndex: number }> | null;
 }) {
   const normalized = normalizeSessionVisibleRangeState(options.visibleRange);
   const previous = options.sessionVisibleRangeRef.current.get(options.sessionId);
-  if (visibleRangeStatesEqual(previous, normalized)) {
+  const declaredMissingRanges = (options.requestMissingRangesOverride || [])
+    .map((range) => ({
+      startIndex: Math.max(0, Math.floor(range.startIndex || 0)),
+      endIndex: Math.max(0, Math.floor(range.endIndex || 0)),
+    }))
+    .filter((range) => range.endIndex > range.startIndex);
+  if (visibleRangeStatesEqual(previous, normalized) && declaredMissingRanges.length === 0) {
     return;
   }
   options.sessionVisibleRangeRef.current.set(options.sessionId, normalized);
@@ -235,6 +242,7 @@ export function updateSessionViewportRuntime(options: {
     (
       !shouldRepairVisibleRange
       && !expandedFollowRepairRange
+      && declaredMissingRanges.length === 0
     )
   ) {
     return;
@@ -248,9 +256,16 @@ export function updateSessionViewportRuntime(options: {
           requestStartIndex: normalized.startIndex,
           requestEndIndex: normalized.endIndex,
         }
+      : declaredMissingRanges.length > 0
+        ? {
+            requestStartIndex: normalized.startIndex,
+            requestEndIndex: normalized.endIndex,
+          }
       : null,
     requestMissingRangesOverride: expandedFollowRepairRange
       ? [expandedFollowRepairRange]
+      : declaredMissingRanges.length > 0
+        ? declaredMissingRanges
       : null,
   });
 }

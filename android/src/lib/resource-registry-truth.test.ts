@@ -210,7 +210,13 @@ describe('resource registry truth gate', () => {
 
     expect(debugResource).toBeTruthy();
     expect(debugResource?.direct_relations).toEqual([]);
-    expect(debugResource?.allowed_operations).toEqual(['observe', 'record_metadata', 'diagnose']);
+    expect(debugResource?.allowed_operations).toEqual([
+      'observe',
+      'record_metadata',
+      'record_trace_metadata',
+      'summarize_bounded_trace',
+      'diagnose',
+    ]);
     expect(debugResource?.forbidden_direct_relations).toEqual(
       expect.arrayContaining([
         'resource.open_tab',

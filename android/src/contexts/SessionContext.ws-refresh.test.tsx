@@ -3895,7 +3895,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         expect(typeof connectMessage?.payload?.openRequestId).toBe('string');
         expect(connectMessage?.payload?.openRequestId).not.toBe('session-1');
         expect(connectMessage?.payload?.widthMode).toBe('adaptive-phone');
-        expect(connectMessage?.payload?.cols).toBeUndefined();
+        expect(connectMessage?.payload?.cols).toBe(80);
         expect(connectMessage?.payload?.rows).toBeUndefined();
       });
 
@@ -7021,10 +7021,7 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       ws.triggerMessage({ type: 'closed', payload: { reason: 'tmux session closed' } });
 
-      expect(statusListener).toHaveBeenCalledTimes(1);
-      expect(statusListener.mock.calls[0]?.[0]).toMatchObject({
-        detail: { sessionId: 'session-1', type: 'error', message: 'tmux session closed' },
-      });
+      expect(statusListener).not.toHaveBeenCalled();
       await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('reconnecting'));
       await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThan(1));
     } finally {

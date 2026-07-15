@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TerminalPage } from "./TerminalPage";
 import type { Session } from "../lib/types";
@@ -48,9 +48,15 @@ vi.mock("../plugins/StoragePermissionPlugin", () => ({ StoragePermissionPlugin: 
 vi.mock("../components/terminal/TerminalHeader", () => ({ TerminalHeader: () => <div data-testid="terminal-header" /> }));
 vi.mock("../components/terminal/TabManagerSheet", () => ({ TabManagerSheet: () => null }));
 vi.mock("../components/terminal/TerminalQuickBar", () => ({
-  TerminalQuickBar: ({ onToggleKeyboard, keyboardVisible, collapsed }: any) => (
-    <div data-testid="terminal-quickbar" data-keyboard-visible={keyboardVisible ? "true" : "false"} data-collapsed={collapsed ? "true" : "false"}>
+  TerminalQuickBar: ({ onToggleKeyboard, keyboardVisible, collapseAvailable, collapsed, onCollapsedChange }: any) => (
+    <div
+      data-testid="terminal-quickbar"
+      data-keyboard-visible={keyboardVisible ? "true" : "false"}
+      data-collapse-available={collapseAvailable ? "true" : "false"}
+      data-collapsed={collapsed ? "true" : "false"}
+    >
       <button onClick={() => onToggleKeyboard?.()}>toggle-keyboard</button>
+      <button onClick={() => onCollapsedChange?.(true)}>collapse-quickbar</button>
     </div>
   ),
 }));
@@ -109,6 +115,22 @@ describe("foldable display change - quick bar debounce regression", () => {
     expect(screen.getByTestId("terminal-quickbar").getAttribute("data-collapsed")).not.toBe("true");
   });
 
+  it("allows portrait quickbar collapse without forcing it open again", async () => {
+    const session = makeSession("portrait-collapse");
+    render(<TerminalPage {...makeProps(session)} />);
+
+    const quickbar = screen.getByTestId("terminal-quickbar");
+    expect(quickbar.getAttribute("data-collapse-available")).toBe("true");
+
+    fireEvent.click(screen.getByRole("button", { name: "collapse-quickbar" }));
+
+    await waitFor(() => {
+      expect(
+        screen.getByTestId("terminal-quickbar").getAttribute("data-collapsed"),
+      ).toBe("true");
+    });
+  });
+
   it("stage shell always reserves space for quick bar (bottom > 0)", async () => {
     const session = makeSession("s2");
     render(<TerminalPage {...makeProps(session)} />);
@@ -136,16 +158,16 @@ describe("foldable display change - quick bar debounce regression", () => {
     expect(screen.getByTestId("terminal-quickbar-shell")).toBeTruthy();
   });
 
-  it("after keyboard fully closes (no re-show within 400ms), quick bar shell bottom returns to 0px", async () => {
+  it("after keyboard fully closes, quick bar shell returns to its pre-keyboard bottom", async () => {
     const session = makeSession("s4");
     render(<TerminalPage {...makeProps(session)} />);
     await waitFor(() => { expect(imeListeners.has("keyboardState")).toBe(true); });
+    const baselineBottom = getShellBottom("terminal-quickbar-shell");
     keyboardListeners.get("keyboardDidShow")?.({ keyboardHeight: 320 });
     await wait(10);
     keyboardListeners.get("keyboardDidHide")?.();
     await wait(500); // Wait past the 400ms debounce
-    // Now quick bar shell must have bottom: 0px (no keyboard lift)
-    expect(getShellBottom("terminal-quickbar-shell")).toBe("0px");
+    expect(getShellBottom("terminal-quickbar-shell")).toBe(baselineBottom);
   });
 
   it("stage shell bottom does not become negative after multiple display changes", async () => {

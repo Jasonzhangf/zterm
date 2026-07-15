@@ -428,8 +428,9 @@ export function startSocketHeartbeatInfraRuntime(options: {
   finalizeFailure: (message: string, retryable: boolean) => void;
   pingIntervalsRef: { current: Map<string, ReturnType<typeof setInterval>> };
   lastPongAtRef: { current: Map<string, number> };
+  lastServerActivityAtRef: { current: Map<string, number> };
   clientPingIntervalMs: number;
-  clientPongTimeoutMs: number;
+  maxConsecutiveMisses: number;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
 }) {
   startSocketHeartbeatRuntime(options);

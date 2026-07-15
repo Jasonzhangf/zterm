@@ -145,7 +145,7 @@ describe('session-context-lifecycle', () => {
     )).toEqual([]);
   });
 
-  it('triggers active-resume refresh exactly once when app foreground truth flips back to active', async () => {
+  it('triggers explicit resume refresh exactly once when app foreground truth flips back to active', async () => {
     vi.useFakeTimers();
     const ensureActiveSessionFresh = vi.fn(() => true);
 
@@ -204,7 +204,7 @@ describe('session-context-lifecycle', () => {
     expect(ensureActiveSessionFresh).toHaveBeenCalledTimes(1);
     expect(ensureActiveSessionFresh).toHaveBeenCalledWith({
       sessionId: 's1',
-      source: 'active-resume',
+      source: 'explicit-resume',
       forceHead: true,
       markResumeTail: true,
       allowReconnectIfUnavailable: true,
@@ -216,6 +216,74 @@ describe('session-context-lifecycle', () => {
     });
 
     expect(ensureActiveSessionFresh).toHaveBeenCalledTimes(1);
+  });
+
+  it('marks resume-tail when the active session changes through lifecycle reentry', async () => {
+    vi.useFakeTimers();
+    const ensureActiveSessionFresh = vi.fn(() => true);
+    const lifecycleRefs = {
+      foregroundActiveRef: { current: true },
+      stateRef: {
+        current: {
+          sessions: [{ id: 's1', state: 'connected' } as any, { id: 's2', state: 'connected' } as any],
+          activeSessionId: 's1',
+          liveSessionIds: [],
+        } as any,
+      },
+      scheduleStatesRef: { current: {} },
+      sessionDebugMetricsStoreRef: { current: { refresh: () => ({}) } },
+      transportRuntimeStoreRef: { current: { sessions: new Map() } },
+      sessionPullStateRef: { current: new Map() },
+      lastActivatedSessionIdRef: { current: 's1' },
+      lastActiveReentryAtRef: { current: new Map() },
+      lastConnectedBaselineAtRef: { current: new Map() },
+      lastServerActivityAtRef: { current: new Map() },
+      remoteScreenshotRuntimeRef: { current: { dispose: () => undefined } },
+      pingIntervalsRef: { current: new Map() },
+      handshakeTimeoutsRef: { current: new Map() },
+      reconnectRuntimesRef: { current: new Map() },
+      manualCloseRef: { current: new Set<string>() },
+    };
+
+    function Harness({ activeSessionId }: { activeSessionId: string }) {
+      const state = {
+        sessions: [{ id: 's1', state: 'connected' } as any, { id: 's2', state: 'connected' } as any],
+        activeSessionId,
+        liveSessionIds: [],
+      } as any;
+      useSessionContextLifecycle({
+        appForegroundActive: true,
+        state,
+        scheduleStates: {},
+        refs: lifecycleRefs,
+        flushRuntimeDebugLogs: () => undefined,
+        clientRuntimeDebugFlushIntervalMs: 10_000,
+        ensureActiveSessionFresh,
+        resolveActiveHeadRefreshTickMs: () => 10_000,
+        resolveHeadStalePingMs: () => 10_000,
+        clearSessionHandshakeTimeout: () => undefined,
+        cleanupSocket: () => undefined,
+        cleanupControlSocket: () => undefined,
+      });
+      return null;
+    }
+
+    const view = render(<Harness activeSessionId="s1" />);
+    expect(ensureActiveSessionFresh).not.toHaveBeenCalled();
+
+    view.rerender(<Harness activeSessionId="s2" />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(ensureActiveSessionFresh).toHaveBeenCalledTimes(1);
+    expect(ensureActiveSessionFresh).toHaveBeenCalledWith({
+      sessionId: 's2',
+      source: 'active-reentry',
+      forceHead: true,
+      markResumeTail: true,
+      allowReconnectIfUnavailable: true,
+    });
   });
 
   it('uses >=900ms timeout cadence while app foreground truth is false', () => {

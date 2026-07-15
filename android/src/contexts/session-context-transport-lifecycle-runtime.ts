@@ -141,6 +141,7 @@ export function bindSessionTransportSocketLifecycleOrchestrationRuntime(options:
     host: Host;
     ws: BridgeTransportSocket;
     debugScope: 'connect' | 'reconnect';
+    rawFrameBytes?: number;
     onConnected: () => void;
     onFailure: (message: string, retryable: boolean) => void;
     onClosed: (reason?: string) => void;

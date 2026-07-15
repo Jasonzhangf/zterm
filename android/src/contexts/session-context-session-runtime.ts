@@ -417,14 +417,15 @@ export function reconnectSessionRuntime(options: {
 
   const primeState = buildSessionTransportPrimeState(host, 'reconnect');
   const pendingTransportOpen = options.hasPendingSessionTransportOpen(options.sessionId);
+  const pendingTransportOpenStale = pendingTransportOpen
+    ? options.isPendingSessionTransportOpenStale(options.sessionId)
+    : false;
   const reusePlan = buildSessionTransportReusePlan({
     currentTargetKey: targetKey,
     requestedTargetKey: buildTransportTargetKey(primeState.transportHost),
     wsReadyState: options.readSessionTransportSocket(options.sessionId)?.readyState ?? null,
     pendingTransportOpen,
-    pendingTransportOpenStale: pendingTransportOpen
-      ? options.isPendingSessionTransportOpenStale(options.sessionId)
-      : false,
+    pendingTransportOpenStale,
     source: 'reconnect',
   });
   options.runtimeDebug('session.reconnect.reuse-plan', {
@@ -453,6 +454,13 @@ export function reconnectSessionRuntime(options: {
     return;
   }
 
+  if (pendingTransportOpenStale && options.refs.pendingSessionTransportOpenIntentsRef) {
+    deletePendingSessionTransportOpenIntent(
+      options.refs.pendingSessionTransportOpenIntentsRef.current as Parameters<typeof deletePendingSessionTransportOpenIntent>[0],
+      options.sessionId,
+    );
+    options.cleanupControlSocket?.(options.sessionId, true);
+  }
   options.cleanupSocket(options.sessionId, false);
   options.refs.manualCloseRef.current.delete(options.sessionId);
   options.writeSessionTransportHost(options.sessionId, primeState.transportHost);
@@ -529,7 +537,6 @@ export function scheduleReconnectRuntime(options: {
   })) {
     clearReconnectRuntimeEntry(options.refs.reconnectRuntimesRef.current, options.sessionId);
     options.updateSessionSync(options.sessionId, buildSessionIdleAfterReconnectBlockedUpdates(options.message));
-    options.emitSessionStatus(options.sessionId, 'error', options.message);
     return;
   }
 

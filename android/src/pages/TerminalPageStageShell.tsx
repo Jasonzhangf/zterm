@@ -3,6 +3,13 @@ import { PaneStage, type PaneSlotDefinition } from "@zterm/shared";
 import { TerminalView } from "../components/TerminalView";
 import type { SessionRenderBufferStore } from "../lib/session-render-buffer-store";
 import { TerminalTabSwipeSurface } from "../components/terminal/TerminalTabSwipeSurface";
+import { TerminalPreviewGrid } from "../components/terminal/TerminalPreviewGrid";
+import {
+  beginSessionPreviewGesture,
+  createSessionPreviewGestureState,
+  resolveSessionPreviewGesture,
+  updateSessionPreviewGesture,
+} from "../lib/session-preview-gesture";
 import { resolveTerminalOrientation } from "../lib/terminal-viewport-metrics";
 import {
   resolveTerminalLayoutProfile,
@@ -28,6 +35,7 @@ const TerminalStageShell = ReactMemo(
     terminalChromeBottomPx,
     inputResetEpochBySession,
     followResetEpoch,
+    inputIntentFollowResetEpoch,
     terminalKeyboardRequested,
     isAndroid,
     onResize,
@@ -46,6 +54,16 @@ const TerminalStageShell = ReactMemo(
     absoluteLineNumbersVisible,
     copySelection,
     onLongPressRow,
+    sessionPreviewOpen = false,
+    sessionPreviewSessions = [],
+    sessionPreviewReplacementCandidates = [],
+    onOpenSessionPreview,
+    onCloseSessionPreview,
+    onActivatePreviewSession,
+    onAddPreviewSession,
+    onRemovePreviewSession,
+    onMovePreviewSession,
+    onReplacePreviewSession,
   }: {
     interactiveSession: Session | null;
     sessionBufferStore?: SessionRenderBufferStore | null;
@@ -62,6 +80,7 @@ const TerminalStageShell = ReactMemo(
     terminalChromeBottomPx: number;
     inputResetEpochBySession?: Record<string, number>;
     followResetEpoch?: number;
+    inputIntentFollowResetEpoch?: number;
     terminalKeyboardRequested: boolean;
     isAndroid: boolean;
     onResize?: TerminalResizeHandler;
@@ -89,7 +108,18 @@ const TerminalStageShell = ReactMemo(
       clientX: number,
       clientY: number,
     ) => void;
+    sessionPreviewOpen?: boolean;
+    sessionPreviewSessions?: Session[];
+    sessionPreviewReplacementCandidates?: Session[];
+    onOpenSessionPreview?: () => void;
+    onCloseSessionPreview?: () => void;
+    onActivatePreviewSession?: (sessionId: string) => void;
+    onAddPreviewSession?: (sessionId: string) => void;
+    onRemovePreviewSession?: (sessionId: string) => void;
+    onMovePreviewSession?: (sourceSessionId: string, targetIndex: number) => void;
+    onReplacePreviewSession?: (sourceSessionId: string, replacementSessionId: string) => void;
   }) {
+    const previewGestureRef = useRef(createSessionPreviewGestureState());
     const landscape =
       typeof window !== "undefined"
         ? resolveTerminalOrientation() === "landscape"
@@ -134,6 +164,8 @@ const TerminalStageShell = ReactMemo(
           sessionId={session.id}
           active={sessionIsActive}
           enabled={allowSessionDrawerSwipe || terminalWidthMode !== "mirror-fixed"}
+          allowedStartEdge={terminalWidthMode === "mirror-fixed" ? "left" : "both"}
+          allowedDirections={terminalWidthMode === "mirror-fixed" ? "previous" : "both"}
           onSwipeTab={handleSwipeTab}
         >
           <TerminalView
@@ -142,7 +174,11 @@ const TerminalStageShell = ReactMemo(
             active={sessionIsActive}
             live
             inputResetEpoch={inputResetEpochBySession?.[session.id] || 0}
-            followResetEpoch={sessionIsActive ? followResetEpoch : 0}
+            followResetEpoch={
+              sessionIsActive
+                ? (followResetEpoch || 0) + (inputIntentFollowResetEpoch || 0)
+                : 0
+            }
             allowDomFocus={
               isAndroid ? false : sessionIsActive && terminalKeyboardRequested
             }
@@ -186,6 +222,7 @@ const TerminalStageShell = ReactMemo(
             }
             onLongPressRow={onLongPressRow}
             splitVisible={splitVisible}
+            reserveRightEdgeSwipe={Boolean(onOpenSessionPreview && sessionPreviewSessions.length > 0)}
           />
         </TerminalTabSwipeSurface>
       ),
@@ -193,6 +230,7 @@ const TerminalStageShell = ReactMemo(
         absoluteLineNumbersVisible,
         focusNonce,
         followResetEpoch,
+        inputIntentFollowResetEpoch,
         handleActiveTerminalActivateInput,
         handleSwipeTab,
         handleTerminalViewportChange,
@@ -250,7 +288,8 @@ const TerminalStageShell = ReactMemo(
                   position: "relative",
                   overflow: "hidden",
                   backgroundColor: mobileTheme.colors.canvas,
-                  border: `1px solid ${mobileTheme.colors.cardBorder}`,
+                  borderWidth: "0px",
+                  borderStyle: "none",
                   boxSizing: "border-box",
                 }}
               >
@@ -438,6 +477,39 @@ const TerminalStageShell = ReactMemo(
     return (
       <div
         data-testid="terminal-stage-shell"
+        onTouchStartCapture={(event) => {
+          if (sessionPreviewOpen || !onOpenSessionPreview || sessionPreviewSessions.length === 0) {
+            previewGestureRef.current = createSessionPreviewGestureState();
+            return;
+          }
+          const touch = event.touches[0];
+          const width = window.visualViewport?.width || window.innerWidth || 0;
+          previewGestureRef.current = touch
+            ? beginSessionPreviewGesture(touch.clientX, touch.clientY, width)
+            : createSessionPreviewGestureState();
+        }}
+        onTouchMoveCapture={(event) => {
+          const touch = event.touches[0];
+          if (!touch) return;
+          previewGestureRef.current = updateSessionPreviewGesture(
+            previewGestureRef.current,
+            touch.clientX,
+            touch.clientY,
+          );
+          const state = previewGestureRef.current;
+          if (state.armed && state.axis === 'horizontal' && state.currentX < state.startX) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
+        onTouchEndCapture={() => {
+          const intent = resolveSessionPreviewGesture(previewGestureRef.current);
+          previewGestureRef.current = createSessionPreviewGestureState();
+          if (intent === 'open-preview') onOpenSessionPreview?.();
+        }}
+        onTouchCancelCapture={() => {
+          previewGestureRef.current = createSessionPreviewGestureState();
+        }}
         style={{
           position: "absolute",
           top: 0,
@@ -457,14 +529,28 @@ const TerminalStageShell = ReactMemo(
               ? "transparent"
               : mobileTheme.colors.canvas,
             overflow: "hidden",
-            border: splitVisible
-              ? "none"
-              : `1px solid ${mobileTheme.colors.cardBorder}`,
+            borderWidth: "0px",
+            borderStyle: "none",
             position: "relative",
             overscrollBehaviorY: "contain",
           }}
         >
-          {sessionGroup ? (
+          {sessionPreviewOpen && sessionPreviewSessions.length > 0 ? (
+            <TerminalPreviewGrid
+              sessions={sessionPreviewSessions}
+              replacementCandidates={sessionPreviewReplacementCandidates}
+              sessionBufferStore={sessionBufferStore}
+              landscape={landscape}
+              fontSize={terminalFontSize}
+              themeId={terminalThemeId}
+              onActivateSession={(sessionId) => onActivatePreviewSession?.(sessionId)}
+              onAddSession={(sessionId) => onAddPreviewSession?.(sessionId)}
+              onRemoveSession={(sessionId) => onRemovePreviewSession?.(sessionId)}
+              onMoveSession={(sourceSessionId, targetIndex) => onMovePreviewSession?.(sourceSessionId, targetIndex)}
+              onReplaceSession={(sourceSessionId, replacementSessionId) => onReplacePreviewSession?.(sourceSessionId, replacementSessionId)}
+              onClose={() => onCloseSessionPreview?.()}
+            />
+          ) : sessionGroup ? (
             <div
               data-testid="terminal-session-group-stage"
               data-layout-mode={paneProfile.mode}
@@ -488,7 +574,8 @@ const TerminalStageShell = ReactMemo(
                   minHeight: 0,
                   position: "relative",
                   overflow: "hidden",
-                  border: `1px solid ${mobileTheme.colors.cardBorder}`,
+                  borderWidth: "0px",
+                  borderStyle: "none",
                   borderRadius: paneProfile.stage.paneRadius,
                   backgroundColor: mobileTheme.colors.canvas,
                 }}
@@ -560,6 +647,7 @@ const TerminalStageShell = ReactMemo(
         next.renderedPaneSessions,
       ) &&
     prev.followResetEpoch === next.followResetEpoch &&
+    prev.inputIntentFollowResetEpoch === next.inputIntentFollowResetEpoch &&
     prev.terminalKeyboardRequested === next.terminalKeyboardRequested &&
     prev.isAndroid === next.isAndroid &&
     prev.onResize === next.onResize &&
@@ -578,6 +666,18 @@ const TerminalStageShell = ReactMemo(
     prev.absoluteLineNumbersVisible === next.absoluteLineNumbersVisible &&
     prev.copySelection === next.copySelection &&
     prev.onLongPressRow === next.onLongPressRow &&
+    prev.sessionPreviewOpen === next.sessionPreviewOpen &&
+    terminalPageRenderedSessionsUiKey(prev.sessionPreviewSessions || []) ===
+      terminalPageRenderedSessionsUiKey(next.sessionPreviewSessions || []) &&
+    terminalPageRenderedSessionsUiKey(prev.sessionPreviewReplacementCandidates || []) ===
+      terminalPageRenderedSessionsUiKey(next.sessionPreviewReplacementCandidates || []) &&
+    prev.onOpenSessionPreview === next.onOpenSessionPreview &&
+    prev.onCloseSessionPreview === next.onCloseSessionPreview &&
+    prev.onActivatePreviewSession === next.onActivatePreviewSession &&
+    prev.onAddPreviewSession === next.onAddPreviewSession &&
+    prev.onRemovePreviewSession === next.onRemovePreviewSession &&
+    prev.onMovePreviewSession === next.onMovePreviewSession &&
+    prev.onReplacePreviewSession === next.onReplacePreviewSession &&
     prev.visiblePaneEntries
       .map((entry) => `${entry.pane.id}:${entry.session?.id || ""}`)
       .join("||") ===

@@ -164,7 +164,7 @@ describe('bridge-settings helpers', () => {
     }).terminalCacheLines).toBe(DEFAULT_TERMINAL_CACHE_LINES);
   });
 
-  it('normalizes terminal width mode and defaults to mirror-fixed', () => {
+  it('normalizes terminal width mode and defaults unknown values to adaptive-phone', () => {
     expect(normalizeBridgeSettings({
       ...baseSettings,
       terminalWidthMode: 'adaptive-phone',
@@ -172,8 +172,13 @@ describe('bridge-settings helpers', () => {
 
     expect(normalizeBridgeSettings({
       ...baseSettings,
-      terminalWidthMode: 'unknown-mode',
+      terminalWidthMode: 'mirror-fixed',
     }).terminalWidthMode).toBe('mirror-fixed');
+
+    expect(normalizeBridgeSettings({
+      ...baseSettings,
+      terminalWidthMode: 'unknown-mode',
+    }).terminalWidthMode).toBe('adaptive-phone');
   });
 
   it('normalizes session group layout mode and defaults to auto', () => {

@@ -93,7 +93,7 @@ describe('SettingsPage terminal theme selection', () => {
     expect(screen.getByText('Night Owl')).toBeTruthy();
     expect(screen.getByText('Kanagawa Wave')).toBeTruthy();
     expect(screen.getByText('Rose Pine Moon')).toBeTruthy();
-    expect(screen.getByText('登录并同步控制面')).toBeTruthy();
+    expect(screen.getByText('Relay Account')).toBeTruthy();
   });
 
   it('persists terminal theme immediately when a theme card is selected', () => {
@@ -212,48 +212,6 @@ describe('SettingsPage terminal theme selection', () => {
     }));
   });
 
-  it('persists relay path priority from the remote access controls', () => {
-    const onSave = vi.fn();
-
-    render(
-      <SettingsPage
-        settings={baseSettings}
-        currentVersionName="0.1.1.1590"
-        currentVersionCode={1011590}
-        updatePreferences={{
-          manifestUrl: '',
-          autoCheckOnLaunch: false,
-          skippedVersionCode: undefined,
-          ignoreUntilManualCheck: false,
-          lastCheckedAt: undefined,
-          lastSeenVersionCode: undefined,
-        }}
-        latestManifest={null}
-        updateChecking={false}
-        updateInstalling={false}
-        updateError={null}
-        hasNewVersion={false}
-        hasUpdateIgnorePolicy={false}
-        onSave={onSave}
-        onUpdatePreferencesChange={vi.fn()}
-        onCheckForUpdate={vi.fn()}
-        onInstallUpdate={vi.fn()}
-        onResetUpdateIgnorePolicy={vi.fn()}
-        onTerminalThemeChange={vi.fn()}
-        onBack={vi.fn()}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Relay 上移' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Relay 上移' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Relay 上移' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-
-    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
-      traversalPathPriority: ['rtc-relay', 'ipv6', 'tailscale', 'ipv4'],
-    }));
-  });
-
   it('toggles daemon debug through the runtime debug storage truth', () => {
     render(
       <SettingsPage
@@ -294,7 +252,7 @@ describe('SettingsPage terminal theme selection', () => {
     expect(screen.getByRole('button', { name: '○Daemon Debug 已关闭' })).toBeTruthy();
   });
 
-  it('hides the built-in relay base url in the settings field and keeps the field empty', () => {
+  it('shows the fixed Relay service without exposing a configurable base-url field', () => {
     render(
       <SettingsPage
         settings={{
@@ -342,7 +300,7 @@ describe('SettingsPage terminal theme selection', () => {
       />,
     );
 
-    const input = screen.getByPlaceholderText('https://your-relay.example.com/relay/') as HTMLInputElement;
-    expect(input.value).toBe('');
+    expect(screen.getByTestId('settings-relay-fixed-host').textContent).toBe('relay.codewhisper.cc');
+    expect(screen.queryByPlaceholderText('https://your-relay.example.com/relay/')).toBeNull();
   });
 });

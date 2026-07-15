@@ -66,6 +66,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
       host: Host;
       ws: BridgeTransportSocket;
       debugScope: 'connect' | 'reconnect';
+      rawFrameBytes?: number;
       onConnected: () => void;
       onFailure: (message: string, retryable: boolean) => void;
     }, msg: ServerMessage) => void) | null>;
@@ -377,6 +378,11 @@ export function createSessionTransportOrchestrationRuntime(options: {
       updateSessionSync: options.updateSessionSync,
       emitSessionStatus,
       createSessionReconnectRuntime,
+      shouldContinueRetryableReconnect: (sessionId) => shouldAutoReconnectSession({
+        sessionId,
+        activeSessionId: options.stateRef.current.activeSessionId,
+        liveSessionIds: options.stateRef.current.liveSessionIds,
+      }),
       startReconnectAttempt,
     });
   };

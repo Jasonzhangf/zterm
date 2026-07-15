@@ -2,14 +2,19 @@ export type TerminalPerformanceTraceStage =
   | 'capture-start'
   | 'capture-done'
   | 'canonicalize-done'
+  | 'mirror-commit'
   | 'send-start'
   | 'send-done'
   | 'client-rx'
   | 'buffer-apply-done'
+  | 'render-raf'
   | 'render-commit';
 
 export interface TerminalPerformanceTraceRecord {
   sessionId: string;
+  traceId?: string;
+  mirrorRevision?: number;
+  subscriberId?: string;
   stage: TerminalPerformanceTraceStage;
   at: number;
   bytes?: number;
@@ -17,8 +22,17 @@ export interface TerminalPerformanceTraceRecord {
   transportKind?: string;
 }
 
+export interface RuntimeDebugPerformanceTraceEntry {
+  sessionId: string;
+  scope: string;
+  payload?: string;
+}
+
 export interface TerminalPerformanceTraceSessionSummary {
   sessionId: string;
+  traceId: string | null;
+  mirrorRevision: number | null;
+  subscriberId: string | null;
   captureToRenderMs: number | null;
   sendToRxMs: number | null;
   rxToRenderMs: number | null;
@@ -29,9 +43,12 @@ export interface TerminalPerformanceTraceSessionSummary {
 export interface TerminalPerformanceTraceSummary {
   sessions: TerminalPerformanceTraceSessionSummary[];
   p95CaptureToRenderMs: number | null;
+  p95SendToRxMs: number | null;
+  p95RxToRenderMs: number | null;
 }
 
 const FORBIDDEN_PAYLOAD_KEYS = new Set(['payload', 'text', 'lines', 'cells', 'content', 'data']);
+const TRACE_DEBUG_SCOPE = 'terminal.performance.trace';
 
 function assertMetadataOnly(record: Record<string, unknown>) {
   for (const key of FORBIDDEN_PAYLOAD_KEYS) {
@@ -50,6 +67,9 @@ export function createTerminalPerformanceTraceStore(options?: { limit?: number }
       assertMetadataOnly(record as unknown as Record<string, unknown>);
       records.push({
         sessionId: record.sessionId,
+        traceId: record.traceId,
+        mirrorRevision: Number.isFinite(record.mirrorRevision) ? Math.max(0, Math.floor(record.mirrorRevision || 0)) : undefined,
+        subscriberId: record.subscriberId,
         stage: record.stage,
         at: Math.max(0, Math.floor(record.at || 0)),
         bytes: Number.isFinite(record.bytes) ? Math.max(0, Math.floor(record.bytes || 0)) : undefined,
@@ -69,6 +89,75 @@ export function createTerminalPerformanceTraceStore(options?: { limit?: number }
   };
 }
 
+function normalizeTraceStage(input: unknown): TerminalPerformanceTraceStage | null {
+  if (typeof input !== 'string') {
+    return null;
+  }
+  switch (input) {
+    case 'capture-start':
+    case 'capture-done':
+    case 'canonicalize-done':
+    case 'mirror-commit':
+    case 'send-start':
+    case 'send-done':
+    case 'client-rx':
+    case 'buffer-apply-done':
+    case 'render-raf':
+    case 'render-commit':
+      return input;
+    default:
+      return null;
+  }
+}
+
+function numberOrUndefined(input: unknown) {
+  return typeof input === 'number' && Number.isFinite(input)
+    ? Math.max(0, Math.floor(input))
+    : undefined;
+}
+
+export function parseRuntimeDebugPerformanceTraceRecords(
+  entries: RuntimeDebugPerformanceTraceEntry[],
+): TerminalPerformanceTraceRecord[] {
+  const records: TerminalPerformanceTraceRecord[] = [];
+  for (const entry of entries) {
+    if (entry.scope !== TRACE_DEBUG_SCOPE || !entry.payload) {
+      continue;
+    }
+    let parsed: Record<string, unknown>;
+    try {
+      parsed = JSON.parse(entry.payload) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+    const stage = normalizeTraceStage(parsed.stage);
+    if (!stage) {
+      continue;
+    }
+    const safeRecord: TerminalPerformanceTraceRecord = {
+      sessionId: typeof parsed.sessionId === 'string' && parsed.sessionId.trim()
+        ? parsed.sessionId.trim()
+        : entry.sessionId,
+      traceId: typeof parsed.traceId === 'string' && parsed.traceId.trim()
+        ? parsed.traceId.trim()
+        : undefined,
+      mirrorRevision: numberOrUndefined(parsed.mirrorRevision),
+      subscriberId: typeof parsed.subscriberId === 'string' && parsed.subscriberId.trim()
+        ? parsed.subscriberId.trim()
+        : undefined,
+      stage,
+      at: numberOrUndefined(parsed.at) ?? Date.now(),
+      bytes: numberOrUndefined(parsed.bytes),
+      lineCount: numberOrUndefined(parsed.lineCount),
+      transportKind: typeof parsed.transportKind === 'string' && parsed.transportKind.trim()
+        ? parsed.transportKind.trim()
+        : undefined,
+    };
+    records.push(safeRecord);
+  }
+  return records;
+}
+
 function percentile95(values: number[]) {
   if (values.length === 0) {
     return null;
@@ -81,14 +170,21 @@ function percentile95(values: number[]) {
 export function summarizeTerminalPerformanceTrace(
   records: TerminalPerformanceTraceRecord[],
 ): TerminalPerformanceTraceSummary {
-  const bySession = new Map<string, TerminalPerformanceTraceRecord[]>();
+  const bySample = new Map<string, TerminalPerformanceTraceRecord[]>();
   for (const record of records) {
-    const current = bySession.get(record.sessionId) || [];
+    const sampleKey = [
+      record.sessionId,
+      record.traceId || '__legacy_trace__',
+      Number.isFinite(record.mirrorRevision) ? String(record.mirrorRevision) : '__legacy_revision__',
+      record.subscriberId || '__legacy_subscriber__',
+    ].join('\u0000');
+    const current = bySample.get(sampleKey) || [];
     current.push(record);
-    bySession.set(record.sessionId, current);
+    bySample.set(sampleKey, current);
   }
 
-  const sessions = Array.from(bySession.entries()).map(([sessionId, sessionRecords]) => {
+  const sessions = Array.from(bySample.values()).map((sessionRecords) => {
+    const first = sessionRecords[0];
     const byStage = new Map<TerminalPerformanceTraceStage, TerminalPerformanceTraceRecord>();
     for (const record of sessionRecords) {
       byStage.set(record.stage, record);
@@ -98,7 +194,10 @@ export function summarizeTerminalPerformanceTrace(
     const clientRx = byStage.get('client-rx')?.at;
     const renderCommit = byStage.get('render-commit')?.at;
     return {
-      sessionId,
+      sessionId: first?.sessionId || '',
+      traceId: first?.traceId || null,
+      mirrorRevision: Number.isFinite(first?.mirrorRevision) ? Math.max(0, Math.floor(first?.mirrorRevision || 0)) : null,
+      subscriberId: first?.subscriberId || null,
       captureToRenderMs: Number.isFinite(captureStart) && Number.isFinite(renderCommit)
         ? Math.max(0, (renderCommit || 0) - (captureStart || 0))
         : null,
@@ -118,6 +217,16 @@ export function summarizeTerminalPerformanceTrace(
     p95CaptureToRenderMs: percentile95(
       sessions
         .map((session) => session.captureToRenderMs)
+        .filter((value): value is number => Number.isFinite(value)),
+    ),
+    p95SendToRxMs: percentile95(
+      sessions
+        .map((session) => session.sendToRxMs)
+        .filter((value): value is number => Number.isFinite(value)),
+    ),
+    p95RxToRenderMs: percentile95(
+      sessions
+        .map((session) => session.rxToRenderMs)
         .filter((value): value is number => Number.isFinite(value)),
     ),
   };

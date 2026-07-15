@@ -117,6 +117,40 @@ describe('useTerminalWorkspace explicit pane truth', () => {
     expect(result.current.workspace.panes.flatMap((pane) => pane.tabs.map((tab) => tab.sessionId))).toEqual(['s1', 's2']);
   });
 
+  it('does not resurrect stale persisted layout tabs when no open-tab/session truth exists', () => {
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [
+        {
+          id: 'pane-main',
+          size: 1,
+          activeTabId: 'tab-session-stale-routecodex',
+          tabs: [{ id: 'tab-session-stale-routecodex', sessionId: 'session-stale-routecodex' }],
+        },
+      ],
+      activePaneId: 'pane-main',
+    }));
+
+    const { result } = renderHook(() => useTerminalWorkspace({
+      sessions: [],
+      activeSessionId: null,
+      viewportWidth: 390,
+      viewportHeight: 844,
+      maxSplitCount: 4,
+    }));
+
+    expect(result.current.workspace).toEqual({
+      panes: [{
+        id: 'pane-main',
+        size: 1,
+        tabs: [],
+        activeTabId: '',
+      }],
+      activePaneId: 'pane-main',
+    });
+    expect(result.current.activePaneSessionId).toBeNull();
+    expect(result.current.findPaneForSession('session-stale-routecodex')).toBeNull();
+  });
+
   it('keeps persisted pane tabs when a runtime transport is closed but open-tab truth is still present', () => {
     localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
       panes: [

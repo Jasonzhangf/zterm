@@ -46,9 +46,16 @@ export interface TerminalSessionDrawerProps {
   onOpenQuickTabPicker: (hostKey?: string, createOptions?: { sessionName?: string; cwd?: string }) => void;
   onRefreshHostSessions?: (hostKey?: string) => void;
   onDebugAddEvent?: (eventName: string) => void;
+  previewSelectionMode?: boolean;
+  previewSelectedSessionIds?: string[];
+  previewSelectionError?: string | null;
+  onPreviewSelectionModeChange?: (active: boolean) => void;
+  onTogglePreviewSession?: (sessionId: string) => void;
+  onClearPreviewSelection?: () => void;
 }
 
-const DRAWER_WIDTH = 'min(280px, 72vw)';
+const DRAWER_WIDTH = '48vw';
+const DRAWER_MAX_WIDTH = '187px';
 const SWIPE_CLOSE_THRESHOLD_PX = 48;
 const SWIPE_CLOSE_VERTICAL_TOLERANCE_PX = 44;
 const UNSCOPED_HOST_GROUP_KEY = '__unscoped__';
@@ -116,10 +123,17 @@ function TerminalSessionDrawerComponent({
   onOpenQuickTabPicker,
   onRefreshHostSessions,
   onDebugAddEvent,
+  previewSelectionMode = false,
+  previewSelectedSessionIds = [],
+  previewSelectionError = null,
+  onPreviewSelectionModeChange,
+  onTogglePreviewSession,
+  onClearPreviewSelection,
 }: TerminalSessionDrawerProps) {
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const suppressNextClickRef = useRef(false);
+  const selectionPressRef = useRef<{ sessionId: string; x: number; y: number } | null>(null);
   const closeTouchHandledRef = useRef<string | null>(null);
   const [slotMenu, setSlotMenu] = useState<{
     sessionId: string;
@@ -255,6 +269,10 @@ function TerminalSessionDrawerComponent({
   const refreshHostKey = currentHostGroup?.hostKey;
 
   useEffect(() => {
+    selectionPressRef.current = null;
+  }, [open]);
+
+  useEffect(() => {
     if (!open || !onRefreshHostSessions || !refreshHostKey) {
       return;
     }
@@ -342,6 +360,7 @@ function TerminalSessionDrawerComponent({
           left: 0,
           bottom: 0,
           width: DRAWER_WIDTH,
+          maxWidth: DRAWER_MAX_WIDTH,
           transform: open ? 'translateX(0)' : 'translateX(calc(-100% - 12px))',
           transition: 'transform 180ms ease',
           zIndex: 14,
@@ -373,13 +392,31 @@ function TerminalSessionDrawerComponent({
           </div>
           <div
             style={{
-              marginTop: '6px',
-              fontSize: '17px',
-              fontWeight: 780,
-              color: '#dce8ff',
+              marginTop: '6px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px',
             }}
           >
-            快速切换
+            <span style={{ fontSize: '17px', fontWeight: 780, color: '#dce8ff' }}>
+              {previewSelectionMode ? '选择快捷预览' : '快速切换'}
+            </span>
+            {onPreviewSelectionModeChange ? (
+              <button
+                type="button"
+                data-testid="terminal-session-drawer-preview-mode"
+                aria-pressed={previewSelectionMode}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onPreviewSelectionModeChange(!previewSelectionMode);
+                }}
+                style={{
+                  height: '28px', padding: '0 8px', borderRadius: '6px',
+                  border: '1px solid rgba(139,213,255,0.35)',
+                  background: previewSelectionMode ? 'rgba(139,213,255,0.18)' : 'rgba(255,255,255,0.05)',
+                  color: '#8bd5ff', fontSize: '11px', fontWeight: 850,
+                }}
+              >
+                {previewSelectionMode ? '完成' : '预览多选'}
+              </button>
+            ) : null}
           </div>
           <div
             style={{
@@ -389,8 +426,15 @@ function TerminalSessionDrawerComponent({
               color: 'rgba(220, 232, 255, 0.6)',
             }}
           >
-            左滑收起，点击进入，上下滑动浏览。
+            {previewSelectionMode
+              ? `点击勾选，最多 6 个。已选 ${previewSelectedSessionIds.length}/6。`
+              : '左滑收起，点击进入，上下滑动浏览。'}
           </div>
+          {previewSelectionError ? (
+            <div role="alert" style={{ marginTop: '6px', color: '#ff9ba3', fontSize: '11px' }}>
+              {previewSelectionError}
+            </div>
+          ) : null}
         </div>
 
         {multiHost ? (
@@ -479,6 +523,8 @@ function TerminalSessionDrawerComponent({
         >
           {visibleSessions.map((session) => {
             const unavailable = Boolean(session.remoteMissing);
+            const previewUnavailable = unavailable || session.status === 'closed';
+            const previewSelectionIndex = previewSelectedSessionIds.indexOf(session.id);
             const slotTone = resolveSessionGroupSlotTone(session.sessionGroupSlot, sessionGroupLayoutAxis);
             return (
             <div
@@ -529,11 +575,58 @@ function TerminalSessionDrawerComponent({
                 <button
                   type="button"
                   data-testid={`terminal-session-drawer-select-${session.id}`}
+                  onMouseDown={(event) => {
+                    selectionPressRef.current = {
+                      sessionId: session.id,
+                      x: event.clientX,
+                      y: event.clientY,
+                    };
+                  }}
+                  onTouchStart={(event) => {
+                    const touch = event.touches[0];
+                    if (!touch) {
+                      selectionPressRef.current = null;
+                      return;
+                    }
+                    selectionPressRef.current = {
+                      sessionId: session.id,
+                      x: touch.clientX,
+                      y: touch.clientY,
+                    };
+                  }}
+                  onTouchMove={(event) => {
+                    const press = selectionPressRef.current;
+                    const touch = event.touches[0];
+                    if (
+                      !press
+                      || press.sessionId !== session.id
+                      || !touch
+                      || Math.hypot(touch.clientX - press.x, touch.clientY - press.y) > 8
+                    ) {
+                      selectionPressRef.current = null;
+                    }
+                  }}
+                  onTouchCancel={() => {
+                    if (selectionPressRef.current?.sessionId === session.id) {
+                      selectionPressRef.current = null;
+                    }
+                  }}
                   onClick={(event) => {
                     event.stopPropagation();
+                    const pointerClick = event.detail > 0;
+                    const pressStartedOnThisRow = selectionPressRef.current?.sessionId === session.id;
+                    selectionPressRef.current = null;
+                    if (pointerClick && !pressStartedOnThisRow) {
+                      event.preventDefault();
+                      return;
+                    }
                     if (suppressNextClickRef.current) {
                       event.preventDefault();
                       suppressNextClickRef.current = false;
+                      return;
+                    }
+                    if (previewSelectionMode) {
+                      if (!previewUnavailable) onTogglePreviewSession?.(session.id);
                       return;
                     }
                     if (!unavailable) onSelectSession(session.id);
@@ -606,6 +699,37 @@ function TerminalSessionDrawerComponent({
                   gap: '8px',
                 }}
               >
+                {previewSelectionMode ? (
+                  <button
+                    type="button"
+                    data-testid={`terminal-session-drawer-preview-check-${session.id}`}
+                    aria-label={previewSelectionIndex >= 0 ? `预览顺序 ${previewSelectionIndex + 1}` : '选择预览'}
+                    disabled={previewUnavailable}
+                    onMouseDown={(event) => event.stopPropagation()}
+                    onTouchStart={(event) => {
+                      event.stopPropagation();
+                      clearLongPressTimer();
+                    }}
+                    onTouchEnd={(event) => event.stopPropagation()}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      if (!previewUnavailable) onTogglePreviewSession?.(session.id);
+                    }}
+                    style={{
+                      padding: 0,
+                      width: '24px', height: '24px', borderRadius: '6px', display: 'flex',
+                      alignItems: 'center', justifyContent: 'center',
+                      border: previewSelectionIndex >= 0 ? '1px solid #8bd5ff' : '1px solid rgba(255,255,255,0.16)',
+                      background: previewSelectionIndex >= 0 ? 'rgba(139,213,255,0.18)' : 'transparent',
+                      color: previewSelectionIndex >= 0 ? '#8bd5ff' : previewUnavailable ? 'rgba(220,232,255,0.18)' : 'rgba(220,232,255,0.45)',
+                      opacity: previewUnavailable ? 0.45 : 1,
+                      fontSize: '11px', fontWeight: 900,
+                    }}
+                  >
+                    {previewSelectionIndex >= 0 ? previewSelectionIndex + 1 : ''}
+                  </button>
+                ) : null}
                 {session.paneLabel ? (
                   <span
                     style={{
@@ -890,6 +1014,31 @@ function TerminalSessionDrawerComponent({
           </div>
         ) : null}
 
+        {previewSelectionMode ? (
+          <div
+            data-testid="terminal-session-drawer-preview-footer"
+            style={{
+              padding: `10px 12px ${Math.max(12, Math.round(bottomInsetPx) + 12)}px`,
+              borderTop: '1px solid rgba(255,255,255,0.08)', display: 'flex', gap: '8px', flexShrink: 0,
+            }}
+          >
+            <button
+              type="button"
+              onClick={onClearPreviewSelection}
+              disabled={previewSelectedSessionIds.length === 0}
+              style={{ flex: 1, height: '38px', borderRadius: '6px', border: '1px solid rgba(255,255,255,0.10)', background: 'rgba(255,255,255,0.05)', color: '#dce8ff' }}
+            >
+              清空
+            </button>
+            <button
+              type="button"
+              onClick={() => onPreviewSelectionModeChange?.(false)}
+              style={{ flex: 1, height: '38px', borderRadius: '6px', border: '1px solid rgba(139,213,255,0.35)', background: 'rgba(139,213,255,0.18)', color: '#8bd5ff', fontWeight: 850 }}
+            >
+              完成 {previewSelectedSessionIds.length}/6
+            </button>
+          </div>
+        ) : (
         <div
           data-testid="terminal-session-drawer-add"
           role="button"
@@ -964,6 +1113,7 @@ function TerminalSessionDrawerComponent({
             <span>New Session</span>
           </div>
         </div>
+        )}
       </aside>
     </>
   );

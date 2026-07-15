@@ -6,7 +6,7 @@ import {
 } from './session-transport-open-helpers';
 import { hasSessionLocalWindow } from './session-buffer-planner-helpers';
 import { normalizeIncomingBufferPayload, normalizeTerminalCursorState } from './session-wire-helpers';
-import { setRuntimeDebugEnabled } from '../lib/runtime-debug';
+import { runtimeDebugPrechecked, setRuntimeDebugEnabled } from '../lib/runtime-debug';
 import { isFileTransferMessage } from '../lib/file-transfer-message-runtime';
 import type {
   ClientMessage,
@@ -56,6 +56,7 @@ export function handleSocketServerMessageRuntime(options: {
     host: Host;
     ws: BridgeTransportSocket;
     debugScope: 'connect' | 'reconnect';
+    rawFrameBytes?: number;
     onConnected: () => void;
     onFailure: (message: string, retryable: boolean) => void;
     onClosed: (reason?: string) => void;
@@ -124,6 +125,18 @@ export function handleSocketServerMessageRuntime(options: {
       if (shouldPromoteConnectedFromLiveBuffer) {
         params.onConnected();
       }
+      runtimeDebugPrechecked('terminal.performance.trace', {
+        sessionId: params.sessionId,
+        traceId: `${params.sessionId}:${Math.max(0, Math.floor(msg.payload.revision || 0))}`,
+        mirrorRevision: Math.max(0, Math.floor(msg.payload.revision || 0)),
+        subscriberId: params.sessionId,
+        stage: 'client-rx',
+        at: Date.now(),
+        bytes: Number.isFinite(params.rawFrameBytes)
+          ? Math.max(0, Math.floor(params.rawFrameBytes || 0))
+          : 0,
+        lineCount: Array.isArray(msg.payload.lines) ? msg.payload.lines.length : 0,
+      });
       options.settleSessionPullState(params.sessionId, msg.payload);
       options.runtimeDebug(`session.ws.${params.debugScope}.buffer-sync`, {
         sessionId: params.sessionId,
@@ -133,6 +146,17 @@ export function handleSocketServerMessageRuntime(options: {
       options.applyIncomingBufferSync(params.sessionId, normalizeIncomingBufferPayload(msg.payload));
       break;
     case 'buffer-head':
+      if (!shouldAcceptLiveBufferPayload) {
+        options.runtimeDebug(`session.ws.${params.debugScope}.buffer-head.inactive-drop`, {
+          sessionId: params.sessionId,
+          activeSessionId: options.refs.stateRef.current.activeSessionId,
+          revision: msg.payload.revision,
+          latestEndIndex: msg.payload.latestEndIndex,
+          availableStartIndex: msg.payload.availableStartIndex ?? null,
+          availableEndIndex: msg.payload.availableEndIndex ?? null,
+        });
+        break;
+      }
       if (shouldPromoteConnectedFromLiveBuffer) {
         params.onConnected();
       }

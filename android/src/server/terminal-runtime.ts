@@ -1,5 +1,6 @@
 import { WebSocket } from 'ws';
 import type { ServerMessage } from '../lib/types';
+import type { TerminalPerformanceTraceRecord } from '../lib/terminal-performance-trace';
 import { detachMirrorSubscriber } from './mirror-lifecycle';
 import { createTerminalMirrorRuntime } from './terminal-mirror-runtime';
 import type {
@@ -67,6 +68,7 @@ interface TerminalRuntimeDeps {
   waitMs: (delayMs: number) => Promise<void>;
   runTmux: (args: string[]) => { ok: true; stdout: string };
   daemonRuntimeDebug: (scope: string, payload?: unknown) => void;
+  recordPerformanceTrace?: (record: TerminalPerformanceTraceRecord) => void;
   logTimePrefix: () => string;
 }
 
@@ -131,6 +133,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
       closeTransport: connection.closeTransport,
       sessionName: deps.defaultSessionName,
       mirrorKey: null,
+      bodySubscribed: true,
       adaptiveWidthCols: null,
       adaptiveWidthHeartbeatAt: 0,
       pendingPasteImage: null,
@@ -165,6 +168,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     subscriber.transportId = connection.transportId;
     subscriber.transport = connection.transport;
     subscriber.closeTransport = connection.closeTransport;
+    subscriber.bodySubscribed = true;
     connection.transport.requestOrigin = connection.requestOrigin;
     connection.transport.connectedSent = false;
     connection.role = 'session';
@@ -263,9 +267,10 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     defaultViewport: deps.defaultViewport,
     sessions,
     mirrors,
-  sendMessage: deps.sendMessage,
-  sendText: deps.sendText,
-  sendScheduleStateToSession: deps.sendScheduleStateToSession,
+    sendMessage: deps.sendMessage,
+    sendText: deps.sendText,
+    recordPerformanceTrace: deps.recordPerformanceTrace,
+    sendScheduleStateToSession: deps.sendScheduleStateToSession,
     buildConnectedPayload: deps.buildConnectedPayload,
     buildBufferHeadPayload: deps.buildBufferHeadPayload,
     buildChangedRangesBufferSyncPayload: deps.buildChangedRangesBufferSyncPayload,

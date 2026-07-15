@@ -1,6 +1,7 @@
 import { v4 as uuidv4 } from 'uuid';
 import { WebSocket } from 'ws';
 import type { ServerMessage } from '../lib/types';
+import type { TerminalPerformanceTraceRecord } from '../lib/terminal-performance-trace';
 import type {
   TerminalTransportSubscriber,
   TerminalSession,
@@ -19,6 +20,7 @@ export interface TerminalTransportBackpressureSnapshot {
   ready: boolean;
   bufferedBytes: number;
   backpressure: boolean;
+  lowWaterDrained: boolean;
   backpressureCount: number;
   lastSendBytes: number;
   totalSendBytes: number;
@@ -31,6 +33,7 @@ export interface TerminalTransportRuntimeDeps {
   connections: Map<string, DaemonTransportConnection>;
   daemonRuntimeDebug: (scope: string, payload?: unknown) => void;
   summarizePayload: (message: ServerMessage) => Record<string, unknown> | null;
+  recordPerformanceTrace?: (record: TerminalPerformanceTraceRecord) => void;
 }
 
 export interface TerminalTransportRuntime {
@@ -47,6 +50,7 @@ export interface TerminalTransportRuntime {
 }
 
 const TRANSPORT_BACKPRESSURE_BUFFERED_BYTES = 128_000;
+const TRANSPORT_BACKPRESSURE_LOW_WATER_BYTES = 64_000;
 
 export function estimateTransportMessageBytes(text: string) {
   return Buffer.byteLength(text, 'utf8');
@@ -70,6 +74,7 @@ export function readTerminalTransportBackpressureSnapshot(
     ready: transport.readyState === WebSocket.OPEN,
     bufferedBytes,
     backpressure,
+    lowWaterDrained: bufferedBytes <= TRANSPORT_BACKPRESSURE_LOW_WATER_BYTES,
     backpressureCount: Math.max(0, Math.floor(transport.backpressureCount || 0)),
     lastSendBytes: Math.max(0, Math.floor(transport.lastSendBytes || 0)),
     totalSendBytes: Math.max(0, Math.floor(transport.totalSendBytes || 0)),
@@ -145,17 +150,21 @@ export function createTerminalTransportRuntime(
     }
   }
 
-  // R5: broadcast helper that pre-serializes once and fans out without re-stringifying per sub.
-  // Owns: open-check, lastSendAt, lastSendError. Does NOT update totalSendBytes (caller owns).
   function sendText(transport: TerminalSessionTransport | null | undefined, text: string) {
     if (!transport || transport.readyState !== WebSocket.OPEN) {
       return;
     }
+    const bytes = estimateTransportMessageBytes(text);
     try {
       transport.sendText(text);
       transport.lastSendAt = Date.now();
+      transport.lastSendBytes = bytes;
+      transport.totalSendBytes = Math.max(0, Math.floor(transport.totalSendBytes || 0)) + bytes;
+      transport.lastSendError = null;
+      readTerminalTransportBackpressureSnapshot(transport);
     } catch (error) {
       transport.lastSendAt = Date.now();
+      transport.lastSendBytes = bytes;
       transport.lastSendError = error instanceof Error ? error.message : String(error);
       throw error;
     }
@@ -170,6 +179,34 @@ export function createTerminalTransportRuntime(
           type: message.type,
           payloadSummary: deps.summarizePayload(message),
         });
+      }
+      if (message.type === 'buffer-sync') {
+        const text = JSON.stringify(message);
+        const traceId = `${session.id}:${Math.max(0, Math.floor(message.payload.revision || 0))}`;
+        deps.recordPerformanceTrace?.({
+          sessionId: session.id,
+          traceId,
+          mirrorRevision: Math.max(0, Math.floor(message.payload.revision || 0)),
+          subscriberId: session.id,
+          stage: 'send-start',
+          at: Date.now(),
+          bytes: estimateTransportMessageBytes(text),
+          lineCount: Array.isArray(message.payload.lines) ? message.payload.lines.length : 0,
+          transportKind: session.transport.kind,
+        });
+        sendText(session.transport, text);
+        deps.recordPerformanceTrace?.({
+          sessionId: session.id,
+          traceId,
+          mirrorRevision: Math.max(0, Math.floor(message.payload.revision || 0)),
+          subscriberId: session.id,
+          stage: 'send-done',
+          at: Date.now(),
+          bytes: estimateTransportMessageBytes(text),
+          lineCount: Array.isArray(message.payload.lines) ? message.payload.lines.length : 0,
+          transportKind: session.transport.kind,
+        });
+        return;
       }
       sendTransportMessage(session.transport, message);
     }

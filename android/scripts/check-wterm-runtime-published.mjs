@@ -17,7 +17,16 @@ for (const name of runtimePackages) {
     throw new Error(`missing runtime dependency: ${name}`);
   }
   const expected = range.replace(/^[~^]/, '');
-  const published = execFileSync('npm', ['view', name, 'version'], { encoding: 'utf8' }).trim();
+  const published = execFileSync('npm', [
+    'view',
+    name,
+    'version',
+    '--fetch-timeout=60000',
+    '--fetch-retries=2',
+  ], {
+    encoding: 'utf8',
+    timeout: 180000,
+  }).trim();
   const ok = published === expected;
   result.push({ name, expected, published, ok });
 }

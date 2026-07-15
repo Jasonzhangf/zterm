@@ -37,6 +37,7 @@ export interface TerminalMessageRuntimeDeps {
   ) => BufferSyncRequestPayload;
   getSessionMirror: (session: TerminalSession) => SessionMirror | null;
   sendBufferHeadToSession: (session: TerminalSession, mirror: SessionMirror) => void;
+  scheduleMirrorLiveSync: (mirror: SessionMirror, delayMs?: number) => void;
   refreshMirrorHeadForSession: (session: TerminalSession, mirror: SessionMirror) => Promise<boolean>;
   handleInput: (session: TerminalSession, data: string, shouldWrite?: () => boolean) => Promise<boolean>;
   closeSession: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
@@ -304,6 +305,34 @@ export function createTerminalMessageRuntime(
           });
         }
         break;
+      case 'body-subscription': {
+        if (!session) {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'error',
+            payload: { message: 'body-subscription requires an attached session transport', code: 'session_required' },
+          });
+          break;
+        }
+        if (message.payload?.version !== 1 || typeof message.payload.subscribed !== 'boolean') {
+          deps.sendMessage(session, {
+            type: 'error',
+            payload: {
+              message: 'body-subscription requires version=1 and boolean subscribed',
+              code: 'body_subscription_invalid',
+            },
+          });
+          break;
+        }
+        session.bodySubscribed = message.payload.subscribed;
+        const mirror = deps.getSessionMirror(session);
+        if (mirror?.lifecycle === 'ready') {
+          if (message.payload.subscribed) {
+            deps.sendBufferHeadToSession(session, mirror);
+          }
+          deps.scheduleMirrorLiveSync(mirror, 0);
+        }
+        break;
+      }
       case 'buffer-head-request': {
         if (!session) {
           deps.sendTransportMessage(connection.transport, {

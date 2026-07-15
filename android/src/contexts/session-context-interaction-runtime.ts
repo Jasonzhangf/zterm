@@ -6,6 +6,7 @@ import {
   sendInputRuntime,
 } from './session-context-transfer-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
+import type { SessionTransportResource } from '../lib/session-transport-runtime';
 import type {
   RemoteScreenshotCapture,
   RemoteScreenshotStatusPayload,
@@ -37,26 +38,15 @@ export function createSessionInteractionRuntime(options: {
   };
   imagePasteReadyTimeoutMs: number;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
+  readSessionTransportResource: (sessionId: string) => SessionTransportResource;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   markPendingInputTailRefresh: (sessionId: string, localRevision: number) => boolean;
   readSessionBufferSnapshot: (sessionId: string) => { revision: number };
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
-  isSessionTransportActivityStale: (sessionId: string) => boolean;
   isReconnectInFlight: (sessionId: string) => boolean;
-  probeOrReconnectStaleSessionTransport: (
-    sessionId: string,
-    ws: BridgeTransportSocket,
-    reason: 'input' | 'active-tick' | 'active-reentry',
-  ) => void;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
   isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
-  shouldReconnectQueuedActiveInput: (options: {
-    isActiveTarget: boolean;
-    wsReadyState: number | null;
-    reconnectInFlight: boolean;
-  }) => boolean;
-  reconnectSession: (sessionId: string) => void;
 }) {
   const sendInput = (sessionId: string, data: string) => {
     sendInputRuntime({
@@ -66,18 +56,15 @@ export function createSessionInteractionRuntime(options: {
         stateRef: options.refs.stateRef,
       },
       runtimeDebug: options.runtimeDebug,
+      readSessionTransportResource: options.readSessionTransportResource,
       readSessionTransportSocket: options.readSessionTransportSocket,
-      isSessionTransportActivityStale: options.isSessionTransportActivityStale,
       isReconnectInFlight: options.isReconnectInFlight,
       sendSocketPayload: options.sendSocketPayload,
       markPendingInputTailRefresh: options.markPendingInputTailRefresh,
       readSessionBufferSnapshot: options.readSessionBufferSnapshot,
       requestSessionBufferHead: options.requestSessionBufferHead,
-      probeOrReconnectStaleSessionTransport: options.probeOrReconnectStaleSessionTransport,
       hasPendingSessionTransportOpen: options.hasPendingSessionTransportOpen,
       isPendingSessionTransportOpenStale: options.isPendingSessionTransportOpenStale,
-      shouldReconnectQueuedActiveInput: options.shouldReconnectQueuedActiveInput,
-      reconnectSession: options.reconnectSession,
     });
   };
 

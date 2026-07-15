@@ -6,6 +6,7 @@ import {
   getSessionTargetControlTransport,
   getSessionTargetTransportRuntime,
   getSessionTransportHost,
+  getSessionTransportResource,
   getSessionTransportRuntime,
   getSessionTransportSocket,
   getSessionTransportTargetKey,
@@ -30,7 +31,18 @@ type PendingSessionTransportWireIntent = PendingSessionTransportOpenIntent & {
   hostConfigPayload: HostConfigMessage;
 };
 
+function estimateIncomingFrameBytes(data: string | ArrayBuffer) {
+  if (typeof data !== 'string') {
+    return data.byteLength;
+  }
+  if (typeof TextEncoder !== 'undefined') {
+    return new TextEncoder().encode(data).byteLength;
+  }
+  return data.length;
+}
+
 export interface SessionContextTransportAccessors {
+  readSessionTransportResource: (sessionId: string) => ReturnType<typeof getSessionTransportResource>;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   readSessionTransportHost: (sessionId: string) => Host | null;
   readSessionTransportRuntime: (sessionId: string) => ReturnType<typeof getSessionTransportRuntime>;
@@ -70,6 +82,7 @@ export function createSessionContextTransportAccessors(
   storeRef: SessionTransportRuntimeStoreRef,
 ): SessionContextTransportAccessors {
   return {
+    readSessionTransportResource: (sessionId) => getSessionTransportResource(storeRef.current, sessionId),
     readSessionTransportSocket: (sessionId) => getSessionTransportSocket(storeRef.current, sessionId),
     readSessionTransportHost: (sessionId) => getSessionTransportHost(storeRef.current, sessionId),
     readSessionTransportRuntime: (sessionId) => getSessionTransportRuntime(storeRef.current, sessionId),
@@ -405,6 +418,7 @@ export function bindSessionTransportSocketLifecycle(options: {
     host: Host;
     ws: BridgeTransportSocket;
     debugScope: 'connect' | 'reconnect';
+    rawFrameBytes?: number;
     onConnected: () => void;
     onFailure: (message: string, retryable: boolean) => void;
     onClosed: (reason?: string) => void;
@@ -468,6 +482,7 @@ export function bindSessionTransportSocketLifecycle(options: {
         host,
         ws,
         debugScope,
+        rawFrameBytes: estimateIncomingFrameBytes(event.data),
         onConnected,
         onFailure: finalizeFailure,
         onClosed: (reason) => {

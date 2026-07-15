@@ -22,7 +22,6 @@ describe('mobile-config refresh cadence', () => {
     const cadence = resolveTerminalRefreshCadence();
     expect(cadence.headTickMs).toBe(33);
     expect(cadence.minTailRefreshGapMs).toBe(33);
-    expect(cadence.renderCommitMs).toBe(33);
     expect(cadence.readingSyncDelayMs).toBe(24);
   });
 
@@ -31,7 +30,6 @@ describe('mobile-config refresh cadence', () => {
     const cadence = resolveTerminalRefreshCadence();
     expect(cadence.headTickMs).toBe(66);
     expect(cadence.minTailRefreshGapMs).toBe(66);
-    expect(cadence.renderCommitMs).toBe(33);
     expect(cadence.readingSyncDelayMs).toBe(48);
   });
 
@@ -40,16 +38,14 @@ describe('mobile-config refresh cadence', () => {
     let cadence = resolveTerminalRefreshCadence();
     expect(cadence.headTickMs).toBe(120);
     expect(cadence.minTailRefreshGapMs).toBe(120);
-    expect(cadence.renderCommitMs).toBe(33);
     expect(cadence.readingSyncDelayMs).toBe(72);
 
     mockConnection('4g', true);
     cadence = resolveTerminalRefreshCadence();
     expect(cadence.headTickMs).toBe(120);
-    expect(cadence.renderCommitMs).toBe(33);
   });
 
-  it('uses render fast lane when runtime transport quality is good', () => {
+  it('uses fast lane when runtime transport quality is good', () => {
     mockConnection('4g', false);
     const cadence = resolveTerminalRefreshCadence({
       runtimeTransport: {
@@ -62,7 +58,6 @@ describe('mobile-config refresh cadence', () => {
 
     expect(cadence.headTickMs).toBe(16);
     expect(cadence.minTailRefreshGapMs).toBe(16);
-    expect(cadence.renderCommitMs).toBe(16);
   });
 
   it('keeps fast cadence for high-throughput runtime progress without backpressure', () => {
@@ -79,7 +74,6 @@ describe('mobile-config refresh cadence', () => {
 
     expect(cadence.headTickMs).toBe(16);
     expect(cadence.minTailRefreshGapMs).toBe(16);
-    expect(cadence.renderCommitMs).toBe(16);
   });
 
   it('uses slow lane when runtime transport reports backpressure even on 4g', () => {
@@ -95,6 +89,5 @@ describe('mobile-config refresh cadence', () => {
 
     expect(cadence.headTickMs).toBeGreaterThanOrEqual(120);
     expect(cadence.minTailRefreshGapMs).toBeGreaterThanOrEqual(120);
-    expect(cadence.renderCommitMs).toBeGreaterThanOrEqual(33);
   });
 });

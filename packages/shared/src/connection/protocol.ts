@@ -177,6 +177,7 @@ export type BridgeClientMessage =
   | { type: 'session-open'; payload: HostConfigMessage }
   | { type: 'connect'; payload: HostConfigMessage }
   | { type: 'resize'; payload: { cols?: number; rows?: number; widthMode?: TerminalWidthMode } }
+  | { type: 'body-subscription'; payload: { version: 1; subscribed: boolean } }
   | { type: 'buffer-head-request' }
   | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
   | { type: 'debug-log'; payload: { entries: Array<{ seq: number; ts: string; scope: string; payload?: string }> } }

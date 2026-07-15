@@ -206,7 +206,7 @@ tmux oracle
 3. inactive tab 不会触发 client side close / daemon side close
 4. daemon shutdown 会统一回收 logical session / transport / mirror
 5. same target multi-session 时，一个 session 的旧 transport 卡住不会挡住兄弟 session
-6. foreground / active re-entry 会先 probe / reuse 原 session transport，只有失败后才 reconnect
+6. foreground / active re-entry 复用原 session transport；若 socket 仍为 `OPEN`，只允许 request-head / ping 观测，不得因安静或 stale activity reconnect
 
 ### Group F. APK smoke
 
@@ -294,7 +294,7 @@ tmux oracle
 1. 当前“connected/open”是否只是旧 socket 表象，而不是活的 transport
 2. active re-entry / foreground resume 时，旧 in-flight pull bookkeeping 是否已经清掉
 3. active re-entry 后是否真的出现新的 `buffer-head-request`
-4. 若 head / pong / 任意 server activity 都没有推进，是否立即把旧 transport 判失活并重建
+4. 若 head / pong / 任意 server activity 都没有推进，是否仍只在原 `OPEN` transport 上 request-head / ping 观测，而不是把安静误判为失活并重建
 
 ### 5.8 某些 tab 一切回来就重连很慢 / 某些 tab 直接挂住
 

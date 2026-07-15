@@ -67,6 +67,27 @@ describe('ensureActiveSessionFreshRuntime', () => {
     expect(reconnectSession).not.toHaveBeenCalled();
   });
 
+  it('marks resume-tail on active reentry even when an old local buffer exists', () => {
+    const ws = { readyState: WebSocket.OPEN } as any;
+    const refs = createBaseOptions().refs;
+    const options = createBaseOptions({
+      refreshOptions: {
+        sessionId: 'session-1',
+        source: 'active-reentry',
+        forceHead: true,
+        markResumeTail: true,
+        allowReconnectIfUnavailable: true,
+      },
+      refs,
+      readSessionTransportSocket: () => ws,
+      readSessionBufferSnapshot: () => ({ revision: 9, startIndex: 100, endIndex: 124 }),
+      requestSessionBufferHead: vi.fn(() => true),
+    });
+
+    expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
+    expect(refs.pendingResumeTailRefreshRef.current.has('session-1')).toBe(true);
+  });
+
   it('does not let active reentry guards suppress an explicit resume forced head request', () => {
     const now = 2000;
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
@@ -115,13 +136,52 @@ describe('ensureActiveSessionFreshRuntime', () => {
     expect(reconnectSession).not.toHaveBeenCalled();
   });
 
-  it('waits for pending transport open even when pending bookkeeping is stale', () => {
+  it('reconnects explicit resume when pending transport-open bookkeeping is stale', () => {
     const reconnectSession = vi.fn();
     const updateSessionSync = vi.fn();
     const options = createBaseOptions({
+      refreshOptions: {
+        sessionId: 'session-1',
+        source: 'explicit-resume',
+        allowReconnectIfUnavailable: true,
+      },
       readSessionTransportSocket: () => null,
       hasPendingSessionTransportOpen: () => true,
       isPendingSessionTransportOpenStale: () => true,
+      reconnectSession,
+      updateSessionSync,
+      refs: {
+        ...createBaseOptions().refs,
+        stateRef: {
+          current: {
+            sessions: [{ id: 'session-1', state: 'reconnecting' } as any],
+            activeSessionId: 'session-1',
+            liveSessionIds: [],
+          },
+        },
+      },
+    });
+
+    expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
+    expect(updateSessionSync).not.toHaveBeenCalledWith('session-1', {
+      state: 'reconnecting',
+      lastError: 'Waiting for existing websocket open',
+    });
+    expect(reconnectSession).toHaveBeenCalledWith('session-1');
+  });
+
+  it('waits for fresh pending transport open instead of starting a second reconnect', () => {
+    const reconnectSession = vi.fn();
+    const updateSessionSync = vi.fn();
+    const options = createBaseOptions({
+      refreshOptions: {
+        sessionId: 'session-1',
+        source: 'explicit-resume',
+        allowReconnectIfUnavailable: true,
+      },
+      readSessionTransportSocket: () => null,
+      hasPendingSessionTransportOpen: () => true,
+      isPendingSessionTransportOpenStale: () => false,
       reconnectSession,
       updateSessionSync,
       refs: {

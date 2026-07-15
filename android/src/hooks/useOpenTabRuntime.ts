@@ -132,7 +132,6 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     switchSession,
     moveSession,
     renameSession,
-    reconnectSession,
     resumeActiveSessionTransport,
     clearSessionDraft,
     ensureTerminalPageVisible,
@@ -478,7 +477,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     foregroundRefreshRuntimeRef,
     onForegroundActiveChange,
     auditOpenTabsAgainstRemoteSessions,
-    reconnectSession,
+    resumeActiveSessionTransport,
     bumpFollowResetEpoch,
   });
 

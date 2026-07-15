@@ -70,9 +70,13 @@
 ### Connections / Sessions
 
 - `src/pages/ConnectionsPage.tsx`
-  - 固定 relay 登录主页
-  - 只显示 `relay.codewhisper.cc`、账号/密码登录、退出登录、daemon device 投影
-  - 不显示或管理 Session group、saved tab list、live Session 子列表
+  - Home server projection
+  - 显示当前进程 active Sessions 与 deduped connectable server rows
+  - 不显示 Relay 登录表单；不显示或管理 Session group、saved tab list、live Session 子列表
+
+- `src/pages/SettingsPage.tsx` / `src/components/settings/RelayAccountSettingsSection.tsx`
+  - 固定 relay 服务 `relay.codewhisper.cc` 的账号/密码登录、退出登录
+  - 新 server preset / remembered bridge entry 配置入口
 
 - `src/components/terminal/TerminalSessionDrawer.tsx`
   - 实时 Session 列表与打开/关闭入口
@@ -146,14 +150,17 @@
 
 ### Slice B1
 
-- 目标：固定 relay 登录主页
+- 目标：Home 服务器入口 + Settings 固定 relay 鉴权
 - 范围：
   - `ConnectionsPage`
+  - `SettingsPage`
+  - `RelayAccountSettingsSection`
   - `useTraversalRelayAccount`
   - 默认 relay service `relay.codewhisper.cc`
 - 成功标准：
-  - 主页没有 group/card/FAB 管理
-  - 登录只需要账号和密码
+  - Home 没有 group/card/FAB 管理，也没有 Relay 登录表单
+  - Home 服务器行直接进入 Terminal/session 主界面
+  - Settings 登录只需要账号和密码
   - 登录后只投影 daemon device rows
 
 ### Slice B2

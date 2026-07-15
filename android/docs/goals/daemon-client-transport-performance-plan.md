@@ -89,15 +89,16 @@ Out of scope：
 - send path 记录 bytes、buffered amount、send error、lastSendAt。
 - scheduler 消费 backpressure truth 决定 delay / coalesce。
 
-### 问题 4：client cadence / render commit 固定 33ms，好网没有 fast lane
+### 问题 4：client producer cadence 与 renderer commit cadence 必须分离
 
 证据：
-- `mobile-config.ts` 好网默认 `headTickMs=33`、`renderCommitMs=33`。
-- `session-render-gate.ts` 使用 `Math.max(16, renderCommitMs)`，默认仍 33ms。
+- `mobile-config.ts` 只允许描述 head / tail refresh / stale ping / pull / reading sync 等 producer cadence。
+- `session-render-gate.ts` 已废止 `renderCommitMs`，只允许 RAF coalescing，并在 RAF flush 时读取当前 live buffer。
 - `session-context-buffer-runtime.ts` sync debounce 固定 33ms。
 
 红测：
-- 好网红测：低 RTT / 空队列 / 小 payload 下 render commit cadence 可进入 16ms fast lane。
+- 好网红测：低 RTT / 空队列 / 小 payload 下 producer cadence 可进入 fast lane。
+- renderer 红测：同一帧内旧 buffer 先 schedule，RAF 前 live buffer 更新后，只发布最新 live buffer，不发布旧帧。
 - 弱网红测：高 RTT / saveData / 2g / backpressure 下主动 head/pull 降频。
 - 输入路径红测：用户输入后首个 pending tail refresh 不被普通 debounce 吃掉。
 - 多 pane 红测：visible live panes 都能接收 live payload，但 hidden inactive 仍 preparse drop。
@@ -269,3 +270,428 @@ Out of scope：
 - 禁止 staging 无关 dirty 文件、release 资产删除、mac 无关改动。
 - 禁止 broad kill。
 - 禁止宣称完成但没有红测失败证据、转绿证据、APK 路径、commit hash、push 输出。
+
+## 11. 2026-07-13 完整实现基线
+
+本节基于 2026-07-13 的源码审计和真实 daemon `/health`、`/debug/runtime`、`/debug/runtime/logs` 证据追加。与前文冲突时以本节为准。任务目标是闭环性能，不是把前文每个候选优化机械实现；是否进入 renderer 或 wire v2 必须由生产 trace 和明确阈值决定。
+
+### 11.1 已确认基线
+
+- daemon 默认 `DEFAULT_DAEMON_TERMINAL_CACHE_LINES=3000`。
+- live mirror 样本存在 `bufferedLines=3000`，最近 flush duration 样本约 `150-354ms`。
+- 最近 500 条 client runtime logs 中：
+  - 69 条 `buffer-sync`；
+  - 64 条是 1 行 diff；
+  - 3 条 `lineCount>=1000`；
+  - 最大 3000 行；
+  - 165 条 inactive `buffer-sync.preparse-inactive-drop`；
+  - 61 条 `runtime.debug.drop-summary`，累计 dropped 793。
+- `terminal-mirror-runtime.ts` 的 subscriber backpressure 当前直接跳过该次 diff，没有 subscriber-local pending latest truth。
+- 高频 pre-serialized `sendText()` 没有完整更新 send bytes/error/trace。
+- client cadence 支持 `runtimeTransport.rttMs`，但生产输入没有真实 session RTT。
+- renderer 已保持 next-RAF commit，不能添加网络相关 render debounce；剩余 projection 优化必须先由 trace 证明。
+- 当前 live daemon 启动时间早于 worktree 的部分变更，因此它是现场性能样本，不是当前源码版本的最终闭环证据。
+
+### 11.2 最终目标与验收
+
+目标：
+
+1. 好网下 active/visible terminal 更新不被固定 timer、全窗口 capture 或全窗口 renderer projection无意义限速。
+2. 弱网、窄带宽、抖动和短时停顿下不堆积历史帧、不丢最终权威状态、不让 inactive session 消耗正文带宽。
+3. tmux 继续拥有 terminal 排版；daemon mirror 是唯一正文/geometry 真源；client 不重排、不猜 anchor、不建立第二份正文。
+4. 所有优化保持真实请求/响应语义等价；只允许裁剪 debug/trace metadata，不允许裁剪 terminal 业务 payload 达成提速。
+
+必须达到：
+
+- metadata-only `capture -> canonicalize -> send -> rx -> apply -> RAF -> commit` trace 在真实 daemon 和 Android client 主链可用。
+- inactive、非 visible、无 bootstrap demand 的 session transport 保持物理连接，但正文订阅不产生 `buffer-sync` 字节；同样样本下 inactive body bytes 至少下降 95%。
+- 每个 subscriber 背压期间最多保留一个 bounded pending latest truth；输出停止并 transport drain 后，客户端必须在 `max(1000ms, 2 * measured RTT)` 内达到 daemon latest revision。
+- 一个 slow subscriber 不得降低其他 healthy subscriber 的发送 cadence。
+- 同一真实 TUI/输入样本下，daemon hot-path capture + canonicalize p95 相对基线至少下降 60%，且 tmux oracle、mirror absolute indexes、cursor、rows/cols 完全一致。
+- good-link 真实样本中 `client-rx -> render-commit` p95 不超过 32ms；body 到达后不得被网络 cadence 二次延迟。
+- 256 Kbps、300ms RTT、50-150ms jitter、周期性 1-2s stall 的真实字节限速代理路径中：
+  - send queue 不无界增长；
+  - inactive session 不接收正文；
+  - active session 无 stale final frame；
+  - reconnect/resume 后 visible tail 可恢复；
+  - input string payload 语义不变。
+- 所有红测、架构 gate、L2 daemon/tmux、L3 client transport、L4 app shell、L5 真机弱网 smoke 通过。
+
+### 11.3 资源与唯一 owner
+
+涉及功能：
+
+- `terminal.buffer_render`
+- `terminal.transport_lifecycle`
+- `terminal.daemon_input`
+- `daemon.runtime_entry`
+- `daemon.cli_node`
+
+涉及资源：
+
+- `resource.tmux_session`
+- `resource.mirror_store`
+- `resource.transport_subscriber`
+- `resource.session_transport`
+- `resource.client_sparse_buffer`
+- `resource.renderer_window`
+- `resource.debug_channel`
+
+唯一 owner：
+
+- tmux capture/readback 与 mirror commit：`src/server/terminal-mirror-capture.ts`
+- mirror cadence、subscriber broadcast、pending latest：`src/server/terminal-mirror-runtime.ts`
+- send accounting/backpressure snapshot：`src/server/terminal-transport-runtime.ts`
+- wire builder/parser：`src/server/buffer-sync-contract.ts` 与 client 相邻 parser owner
+- client cadence/RTT input：`src/lib/session-runtime-cadence.ts`、`src/lib/mobile-config.ts`
+- client body apply：`src/contexts/session-context-buffer-runtime.ts`
+- renderer commit：`src/lib/session-render-gate.ts`
+- renderer snapshot store：`src/lib/session-render-buffer-store.ts`
+- debug/trace：debug owner 模块，不进入 terminal payload
+
+禁止：
+
+- renderer/client 本地 wrap、reflow、内容拼接或 anchor 推断。
+- daemon 读取 active tab、foreground、reading、follow、viewport 或 pane UI state。
+- head/range request 触发 tmux capture。
+- 为兼容旧行为保留隐藏双路径、fallback、第二协议成功路径。
+- 通过降低真实 terminal history、丢最后一帧、吞 send error 或清空本地 buffer 提速。
+
+资源关系、function map、mainline call map、test design 与 gate 必须先同步。若新 wire/version 或 subscription relation 尚未声明，先标 `binding pending`，不得伪造 symbol。
+
+### 11.4 技术方案
+
+#### A. 生产性能 trace 与 debug 收口
+
+新增同一 `trace_id / mirror_revision / subscriber_id` 可关联的 metadata stage：
+
+```text
+capture-start
+capture-done
+canonicalize-done
+mirror-commit
+send-start
+send-done
+client-rx
+buffer-apply-done
+render-raf
+render-commit
+```
+
+每条只允许：
+
+- timestamp / duration
+- bytes / line count / range count
+- revision / absolute bounds
+- transport kind / buffered bytes
+- id / error code
+
+禁止 terminal text、cells、command、token、文件内容进入 trace。
+
+`/debug/runtime` 输出 per-session/per-mirror p50/p95/p99、render Hz、payload Bps、capture cost、queue high-water、coalesced count、inactive body bytes。ring buffer 必须有界。
+
+现有 `session.buffer.apply.inspect`、`session.render-gate.flush.inspect` 等重 payload debug：
+
+- 默认生产关闭；
+- 开启时也只构造 metadata summary；
+- 禁止发送 terminal 行文本；
+- debug drop 不得影响业务链。
+
+#### B. 物理正文订阅 demand
+
+保持 client session transport 打开，不在 tab/pane 切换时 fresh recreate。
+
+新增或收口唯一 physical body subscription truth：
+
+```text
+visible/bootstrap demand
+  -> session transport subscription intent
+  -> daemon transport subscriber bodySubscribed
+  -> mirror broadcast eligibility
+```
+
+daemon 只保存 `bodySubscribed`、transport health、last delivered revision 等物理订阅事实，不保存 active/inactive/visible/foreground 原因。
+
+要求：
+
+- active pane和所有 visible panes订阅正文；
+- inactive/non-visible 且无 bootstrap demand 的 transport 取消正文订阅；
+- unsubscribe 不关闭 transport，不销毁 mirror；
+- resubscribe 先恢复物理订阅，再走当前 mirror head + visible/tail demand；
+- `buffer-head-request` / `buffer-sync-request` 仍只读 mirror，不触发 capture；
+- 只有 ready 且 `bodySubscribed` 的 physical subscriber count 驱动 daemon capture cadence，不成为客户端 UI 真相；
+- subscription 改变必须回到唯一 mirror scheduler owner：最后一个 demand 消失时立即停旧 timer，demand 恢复时立即恢复 live sync。
+
+若需要新增 wire control message，必须先定义 version、builder/parser、正反 contract tests、protocol mismatch 显式错误和旧链物理删除计划。禁止静默兼容双路径。
+
+#### C. Backpressure latest-authoritative coalescing
+
+每 subscriber 维护有界物理发送状态：
+
+```text
+lastDeliveredRevision
+bufferedBytes
+highWaterEnteredAt
+pendingLatestRevision
+pendingChangedAbsoluteRanges
+pendingSince
+```
+
+规则：
+
+- healthy subscriber 立即发送；
+- 达到 high-water 后不排每个历史 payload；
+- 将之后所有 changed absolute ranges 合并到一个 pending latest truth；
+- pending rows 始终在 flush 时从最新 mirror store 读取；
+- transport 下降到 low-water 后发送一次 latest authoritative projection；
+- 成功 send 后推进 `lastDeliveredRevision` 并清 pending；
+- send error 显式记录，不能当成功清 pending；
+- 高低水位必须迟滞；
+- pending memory/范围数有硬上限，超过上限进入显式 protocol resync 状态，不能静默 drop。
+
+如果现有连续 span contract 无法在 revision gap 下同时满足语义正确和窄带宽目标，则进入明确的 Buffer Sync V2：
+
+```text
+baseRevision
+revision
+availableStartIndex
+availableEndIndex
+ranges[] {
+  startIndex
+  endIndex
+  compactLines[]
+}
+cursor metadata
+```
+
+V2 只发送从 `baseRevision` 到 `revision` 之间所有 changed rows 的最新权威值。客户端只有在 base revision contract 满足时 apply；不满足时显式报 revision mismatch 并走唯一 visible repair owner。V2 必须有协议协商/版本门禁，不能偷偷保留双业务路径。
+
+进入 V2 的硬判定：
+
+- 同一真实样本连续 span payload 的 `sentLineCount / changedLineCount` p95 大于 4；或
+- 单次 span payload p95 大于 64 KiB；或
+- coalesced revision gap 必须发送超过 client retained window 才能保证正确。
+
+满足任一条件必须实现 V2；否则记录证据并不做无收益协议迁移。
+
+#### D. Daemon hot-tail authoritative range capture
+
+保持一个 mirror writer、一个 mirror store。禁止 `history capture + visible capture + concat` 双真源。
+
+允许的优化是：每个 cycle 只有一次 tmux authoritative capture，capture window 可以是 hot absolute range；range anchor 必须只来自 tmux readback：
+
+```text
+history_size
+pane_rows
+pane_cols
+alternate_on
+capture returned line count
+```
+
+不得用文本 overlap、重复内容或客户端状态推断 anchor。
+
+稳定旧 history 只能作为同一 mirror store 内先前已确认的 absolute rows保留。发生以下任一结构事实时必须 full authoritative reconciliation：
+
+- history size 回退或清空；
+- rows/cols 变化；
+- alternate screen 变化；
+- adaptive tmux resize readback；
+- absolute window 不连续；
+- capture range 超出当前 mirror continuity；
+- periodic bounded reconciliation 到期；
+- owner validator 判定 range patch 不可证明。
+
+full reconciliation 仍是 single capture -> canonicalize -> authoritative mirror commit。hot range patch 和 full reconciliation 都只能经过同一 owning validator/committer。
+
+必须先更新 terminal truth decision、local skill、resource/function/call maps 和测试设计，再允许实现这一架构变化。
+
+#### E. Send accounting 与真实 RTT
+
+`sendTransportMessage()` 和 pre-serialized `sendText()` 必须经过同一 send accounting owner：
+
+- bytes
+- total bytes
+- last success/error
+- buffered amount before/after
+- send timestamp/duration
+- backpressure transitions
+
+不能为统计重新 stringify 高频 payload。
+
+client 从现有 ping/pong 或 head request/reply correlation 计算：
+
+- RTT EWMA
+- jitter EWMA
+- recent timeout/stall count
+- last progress age
+- downlink payload cadence
+
+这些事实进入现有 cadence resolver。网络 cadence只控制 head/pull/probe/reading sync，不控制正文到达后的 RAF commit。
+
+#### F. Renderer profiling 与条件优化
+
+先用生产 trace 判定：
+
+- 若 `client-rx -> buffer-apply-done` 或 `buffer-apply-done -> render-commit` p95 超过 16ms；
+- 或 renderer main-thread stage 占 capture-to-render p95 超过 25%；
+
+则实现 absolute dirty-row projection：
+
+- buffer apply 输出 changed absolute indexes；
+- render gate 只投影 changed rows；
+- 未变化 row 保持对象引用；
+- geometry/window shift 走显式 full projection；
+- renderer 仍不排版、不重排。
+
+未达到阈值，不做 renderer 重构，并在 evidence 中记录“测量证明非当前瓶颈”。
+
+#### G. 真实弱网测试代理
+
+新增 app/daemon 主链外的测试 harness，提供真实字节转发：
+
+- bandwidth cap
+- fixed latency
+- jitter
+- periodic stall
+- explicit disconnect
+
+代理只用于测试，不解析或改写 terminal payload，不进入生产 runtime truth。
+
+至少覆盖：
+
+- good：低延迟、无限速；
+- narrow：256 Kbps、300ms RTT、50-150ms jitter；
+- unstable：narrow 基础上每 10-20s stall 1-2s；
+- reconnect：显式断开后恢复。
+
+Android 真机必须经该代理连接当前 staged daemon，不能只跑 fake clock/unit test。
+
+### 11.5 测试设计
+
+实施前更新 `docs/testing/terminal-refresh-buffer-truth-test-design.md`，至少包含：
+
+- 生命周期：capture、commit、broadcast、backpressure、drain、client apply、render。
+- white-box：scheduler、range merge、low-water flush、RTT EWMA、dirty-row projector。
+- module black-box：daemon mirror + two subscribers；client socket + sparse buffer + renderer。
+- project black-box：真实 tmux `top` / `vim` / 高速输出、Android 真机、弱网代理。
+- 已知缺口与非目标。
+
+正向测试：
+
+- healthy immediate send。
+- slow subscriber pending latest drain 后达到 latest revision。
+- inactive正文订阅停止字节，transport 仍 open。
+- visible multi-pane 都继续刷新。
+- hot range patch 与 full reconciliation 的 mirror 等于 tmux oracle。
+- good link body 下一 RAF commit。
+- RTT 变差后 producer cadence 降低。
+- V2 若触发，稀疏 ranges 正确 apply。
+
+反向测试：
+
+- slow subscriber 不拖慢 healthy subscriber。
+- pending queue 不按 revision 无界增长。
+- output 停止后不能留下 stale final frame。
+- unsubscribe 不关闭 transport、不销毁 mirror、不改 open tabs。
+- daemon 不出现 active/follow/reading/viewport/UI 字段。
+- head/range request 不触发 tmux capture。
+- hot range 不使用内容 overlap 推 anchor。
+- geometry/history discontinuity 不能错误 patch，必须进入 full reconciliation。
+- send error 不能清 pending或推进 delivered revision。
+- runtime debug/trace 不包含 terminal text/cells。
+- renderer 不因弱网增加 debounce。
+- input payload 保持 string-only。
+- protocol mismatch 显式失败，不走旧链 fallback。
+
+### 11.6 实施顺序
+
+1. 刷新 `.agent-collab`，按 `feature_id/resource_id/mainline_node_id/gate_id` 建 claim；不同 worker 不得共同写同一 owner 文件。
+2. MemoryPalace -> resource registry/map -> function map -> mainline call map -> verification map -> canonical source。
+3. 更新 architecture decision、resource registry/map、function map、mainline call map、wiki、test design、local skill；新 symbol 未实现标 `binding pending`。
+4. 先补 trace/debug metadata 红测并确认失败，再实现生产 trace。
+5. 建立弱网代理和基线采集，保存同一 tmux/Android样本的 before evidence。
+6. 先补 physical body subscription 正反红测，再实现 inactive bandwidth 收口。
+7. 先补 backpressure pending latest 正反红测，再实现 high/low-water 和 drain flush。
+8. 根据 span inflation hard threshold 决定是否进入 Buffer Sync V2；若进入，先文档/manifest/contract 红测，再做协调迁移和旧链物理删除。
+9. 先补 hot-tail/full-reconciliation oracle 红测，再实现唯一 mirror writer 内的 authoritative range capture。
+10. 补全 `sendText()` accounting 和 client RTT/jitter/stall。
+11. 用 trace 判断是否触发 renderer dirty-row 优化阈值；触发才实施。
+12. 运行 L0-L5 完整门禁；失败回唯一 owner 修，不做 fallback。
+13. 将确证经验从 `note.md` 提炼到 `MEMORY.md` 和 local skill；运行安全语料 mine，并搜索新短语证明可检索。
+14. 精确 stage 本任务文件，独立 review diff 和 evidence；验证后 commit 并 push 当前分支。禁止夹带其它 worker 变更。
+
+### 11.7 必跑验证
+
+L0/L1：
+
+- resource/function/mainline/architecture gates
+- server scheduler/transport/mirror/contract tests
+- client cadence/buffer/render/multi-pane tests
+- runtime debug/trace payload red tests
+- typecheck
+
+L2：
+
+- `pnpm --dir android run daemon:mirror:close-loop`
+- 真实 tmux oracle：`top`、`vim`、高速单行更新、history growth、clear-history、resize、alternate screen
+- two-subscriber healthy/slow isolation
+
+L3/L4：
+
+- Android open-tab/transport/buffer/TerminalView/TerminalPage targeted gates
+- Mac client transport/runtime gates，证明共享 daemon contract 没破坏
+- `pnpm --dir mac test -- --reporter dot`
+- `pnpm --dir mac run type-check`
+
+L5：
+
+- staging current daemon artifact并 managed restart，禁止 broad kill
+- health/debug trace schema验证
+- 构建 Android升级 APK
+- 在线真机安装、解锁、zterm foreground
+- 真机经弱网代理完成 good/narrow/unstable/reconnect 四组 smoke
+- exact same tmux sample before/after replay
+
+完整回归：
+
+- `pnpm --dir android run test:terminal:regression`
+- `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+- `pnpm --dir android run test:feature-registry -- --reporter dot`
+- `pnpm --dir android run build:android`
+- `git diff --check`
+
+### 11.8 Evidence 要求
+
+必须保存：
+
+- before/after trace summary
+- capture/canonicalize p50/p95/p99
+- payload bytes、line count、range inflation
+- inactive body bytes
+- queue/pending high-water
+- RTT/jitter/stall
+- client rx/apply/render p50/p95/p99
+- healthy + slow subscriber隔离结果
+- tmux oracle vs mirror/client final revision
+- APK versionName/versionCode/path/sha256
+- daemon artifact/version/pid/health
+- 真机前台、未锁屏、真实 session 和弱网 profile 证明
+- fail-first 红测摘要和转绿摘要
+- commit hash 与 push 结果
+
+不能用构建成功、单测成功、静态阅读或旧 daemon日志代替真实当前版本闭环。
+
+### 11.9 完成定义
+
+只有同时满足以下条件才可宣称完成：
+
+- 资源关系、function map、mainline call map、wiki、test design、skill 与代码一致且有 gate。
+- production trace 可量化完整 capture-to-render 主链，且不泄漏 terminal payload。
+- inactive正文带宽、backpressure final-state、hot capture cost、真实 RTT cadence 达到 11.2 的验收阈值。
+- renderer 是否修改有 trace 判定证据；未触发阈值则明确记录不改原因。
+- wire V2 是否实施有 hard threshold 证据；若实施，旧业务链已按计划物理删除，无 fallback。
+- L0-L5、完整回归和 exact sample replay 全通过。
+- Android APK和当前 daemon artifact均已真实运行验证。
+- 文档、note、MEMORY、skill、MemoryPalace 检索闭环完成。
+- 本任务变更已由独立 checker review，精确提交并 push。
+- 没有遗留 pending latest、无界 queue、stale final frame、inactive正文浪费或 client terminal reflow。

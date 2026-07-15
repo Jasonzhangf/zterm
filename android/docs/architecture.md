@@ -70,7 +70,10 @@
 
 ### Screen 1: Connections Home
 
-- 首页承载三个独立入口：当前进程 active Sessions、已保存 direct/Tailscale connections、固定 relay 服务 `relay.codewhisper.cc` 的可选账号登录与 daemon 设备状态。
+- 首页承载两个独立入口：当前进程 active Sessions、已配置且可进入的 server rows（direct/Tailscale saved Host、bridge presets、Relay directory daemon device 投影）。
+- Home 的 server row 是服务器级入口，不展示/管理 Session group、saved tab list 或 Relay 登录表单；点击 server row 必须通过 session-open owner 直接进入 Terminal/session 主界面。
+- 无 saved `sessionName` 的 server row 进入时，由 session-open owner 先创建显式命名的 clean tmux session，再 materialize/open tab；不得把 server display name 当 tmux session name fallback。
+- Settings 是配置入口：新增/修改 server preset、固定 relay 服务 `relay.codewhisper.cc` 的账号鉴权、更新/备份等设置均在 Settings 完成。
 - Relay 是连接保障和同步增强，不是进入终端的 gate；未登录、登录失败或退出登录时，已保存 direct/Tailscale connections 与当前 active Sessions 仍必须可见可用。
 - 用户只输入 relay 账号和密码；relay base URL、WS、TURN 与 signal 地址不进入用户配置面。
 - Relay 登录成功后可以同步/补充所有连接候选，包括 Tailscale/local/direct endpoint，但不得删除、替换或隐藏 saved Host truth。
@@ -79,7 +82,7 @@
 
 ### Screen 1A: Session Picker
 
-- `New connection` 先进入 session picker，而不是直接空白表单
+- Terminal 顶部 `+` / drawer quick-new 等高级入口进入 session picker；Home 普通 server row 不停在 picker。
 - 顶部先选目标 server，或手动输入 Tailscale IP / tailnet 域名
 - server 输入后不自动探测；必须由用户显式点击 `Connect / Refresh`
 - 列表顺序：历史连接优先、当前 tmux sessions 次之、最后才是 clean session/custom form

@@ -13,9 +13,6 @@ import {
 import {
   createSessionPublicFacadeRuntime,
 } from './session-context-public-facade-runtime';
-import {
-  shouldReconnectQueuedActiveInput,
-} from './session-transport-open-helpers';
 import type {
   SessionProviderAssembliesSharedOptions,
   SessionProviderCoreAssembliesResult,
@@ -74,6 +71,7 @@ export function useSessionProviderFacadeAssemblies(
       sessionDebugMetricsStoreRef,
       lastServerActivityAtRef: options.refs.lastServerActivityAtRef,
       lastHeadRequestAtRef: options.refs.lastHeadRequestAtRef,
+      lastPongAtRef: options.refs.lastPongAtRef,
       staleTransportProbeAtRef: options.refs.staleTransportProbeAtRef,
     },
     runtimeDebug,
@@ -113,6 +111,7 @@ export function useSessionProviderFacadeAssemblies(
     core,
     manualCloseRef,
     options.refs.lastServerActivityAtRef,
+    options.refs.lastPongAtRef,
     options.refs.pendingConnectTailRefreshRef,
     options.refs.pendingInputTailRefreshRef,
     options.refs.pendingResumeTailRefreshRef,
@@ -135,7 +134,6 @@ export function useSessionProviderFacadeAssemblies(
     renameSession,
     reconnectSession,
     reconnectAllSessions,
-    probeOrReconnectStaleSessionTransport,
     ensureActiveSessionFresh,
   } = sessionLifecycleRuntime;
   const switchSession = (id: string, switchOptions?: { refreshSource?: 'explicit-resume' | 'active-reentry' }) => {
@@ -207,23 +205,18 @@ export function useSessionProviderFacadeAssemblies(
     },
     imagePasteReadyTimeoutMs: IMAGE_PASTE_READY_TIMEOUT_MS,
     runtimeDebug,
+    readSessionTransportResource: core.readSessionTransportResource,
     readSessionTransportSocket: core.readSessionTransportSocket,
     sendSocketPayload: core.sendSocketPayload,
     markPendingInputTailRefresh: core.markPendingInputTailRefresh,
     readSessionBufferSnapshot: core.readSessionBufferSnapshot,
     requestSessionBufferHead: core.requestSessionBufferHead,
-    isSessionTransportActivityStale: core.isSessionTransportActivityStale,
     isReconnectInFlight: core.isReconnectInFlight,
-    probeOrReconnectStaleSessionTransport,
     hasPendingSessionTransportOpen: core.hasPendingSessionTransportOpen,
     isPendingSessionTransportOpenStale: core.isPendingSessionTransportOpenStale,
-    shouldReconnectQueuedActiveInput,
-    reconnectSession,
   }), [
     core,
     options.stateRef,
-    probeOrReconnectStaleSessionTransport,
-    reconnectSession,
     remoteScreenshotRuntimeRef,
   ]);
 

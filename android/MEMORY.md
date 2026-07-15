@@ -1143,3 +1143,9 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - Relay login augments synchronized machine/device/route candidates, including Tailscale/local/direct endpoints. It must not replace, delete, hide, or own saved Host/Tailscale truth.
 - Home remains a projection layer: saved Host actions go through `useSessionOpenActions` and active Session resume goes through the open-tab/session owner. Home must not create/close sessions, write storage, restore cold-start tabs, or gate navigation on Relay access token.
 - Regression gates: signed-out saved/active/add visibility, login-failure preservation, logout preservation, saved-host picker intent without session creation, App wiring with no Session-group/tab-persistence revival.
+
+## 2026-07-15 Android Home visual and drawer remote close truth
+
+- Home visual must stay server-entry-only: configured direct/Tailscale/Relay-capable servers plus current-process active Sessions. Relay account login/config stays in Settings; do not reintroduce Home Relay login, session group management, saved tab lists, or cold-tab restore controls while polishing the screen.
+- Terminal drawer `X` on any daemon catalog row means remote tmux close, even when that row has already been materialized as a local open tab. The click path must first call the existing remote close owner (`killTmuxSession -> fetchTmuxSessions -> handleRemoteSessionsRefreshed`), then close the local tab only after remote kill succeeds. If remote kill fails, expose the error and keep the local tab; never fake-close only the current phone.
+- Regression shape: component/page tests must cover remote-only row close, opened daemon catalog row close, and remote kill failure. A black-box gate should create a dedicated tmux session through the app API, list it, kill it through the same API, list again, and confirm the session is absent from tmux truth.

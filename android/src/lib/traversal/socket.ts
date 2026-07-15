@@ -345,7 +345,7 @@ export class TraversalSocket implements BridgeTransportSocket {
       accountId: settings.traversalRelay?.userId,
       daemonHostId: target.relayHostId || target.daemonHostId,
     };
-    this.autoReconnect = options?.autoReconnect !== false;
+    this.autoReconnect = options?.autoReconnect === true;
     this.diagnostics = {
       mode: plan.mode,
       stage: 'connecting',

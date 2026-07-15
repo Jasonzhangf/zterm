@@ -79,7 +79,7 @@
   - bootstrap 先 head 后 latest follow window
   - switch connected tab 会主动问最新 head
   - reconnect stale active tab
-  - input queue against closed ws -> immediate reconnect
+  - input against closed/unavailable ws -> explicit unavailable/drop; reconnect only via lifecycle owner
   - follow 不带 `missingRanges`
   - input 强制 fresh head
   - input -> head -> tail fetch
@@ -117,13 +117,13 @@
 - `src/contexts/SessionContext.ws-refresh.test.tsx`
   - active session reconnect 优先
   - opened reconnect socket never completes handshake 时会释放 bucket
-  - active tab stale-open transport 会立即重连
+  - active tab stale-open transport 保持原 WebSocket，只 request head / ping 观测
 
 ### 还缺
 
 - [ ] **专项断言：inactive tab 停轮询后 transport 仍保持打开**
 - [ ] **专项断言：foreground resume / tab re-entry 不会先 cleanup session 再 brand-new connect**
-- [ ] **专项断言：foreground resume 遇到 stale-open ws 时，先 probe 复用旧 transport，不直接 reconnect**
+- [x] **专项断言：foreground resume / active tick 遇到 stale-open ws 时，复用旧 transport，不直接 reconnect**
 - [ ] **专项断言：reconnect handshake 带同一个 `clientSessionId`**
 - [ ] **专项断言：同 host 多 tab 下，hidden tab 不会抢占 active tab 的 same-session retry**
 - [ ] **daemon 专项：ws close 只 detach transport，不删除 logical client session**

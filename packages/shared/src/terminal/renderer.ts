@@ -51,6 +51,7 @@ export const TERMINAL_FONT_STACK = [
 ].join(', ');
 
 export const OVERSCAN_ROWS = 4;
+export const TERMINAL_DRAWER_EDGE_SWIPE_START_PX = 64;
 export const TAB_SWIPE_LOCK_THRESHOLD_PX = 18;
 export const TAB_SWIPE_TRIGGER_THRESHOLD_PX = 72;
 

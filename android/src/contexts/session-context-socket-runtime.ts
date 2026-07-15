@@ -72,8 +72,9 @@ export function startSocketHeartbeat(options: {
   finalizeFailure: (message: string, retryable: boolean) => void;
   pingIntervalsRef: MutableRefObject<Map<string, ReturnType<typeof setInterval>>>;
   lastPongAtRef: MutableRefObject<Map<string, number>>;
+  lastServerActivityAtRef: MutableRefObject<Map<string, number>>;
   clientPingIntervalMs: number;
-  clientPongTimeoutMs: number;
+  maxConsecutiveMisses: number;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
 }) {
   const existingHeartbeat = options.pingIntervalsRef.current.get(options.sessionId);
@@ -81,16 +82,36 @@ export function startSocketHeartbeat(options: {
     clearInterval(existingHeartbeat);
     options.pingIntervalsRef.current.delete(options.sessionId);
   }
+  let lastObservedServerActivityAt = Math.max(
+    options.lastServerActivityAtRef.current.get(options.sessionId) || 0,
+    options.lastPongAtRef.current.get(options.sessionId) || 0,
+    Date.now(),
+  );
+  let consecutiveMisses = 0;
+  let failureFinalized = false;
   const pingInterval = setInterval(() => {
     if (options.ws.readyState !== WebSocket.OPEN) {
       return;
     }
 
-    const lastPongAt = options.lastPongAtRef.current.get(options.sessionId) || 0;
-    if (Date.now() - lastPongAt > options.clientPongTimeoutMs) {
-      options.finalizeFailure('heartbeat timeout', true);
-      if (options.ws.readyState < WebSocket.CLOSING) {
-        options.ws.close();
+    const currentServerActivityAt = Math.max(
+      options.lastServerActivityAtRef.current.get(options.sessionId) || 0,
+      options.lastPongAtRef.current.get(options.sessionId) || 0,
+    );
+    if (currentServerActivityAt > lastObservedServerActivityAt) {
+      lastObservedServerActivityAt = currentServerActivityAt;
+      consecutiveMisses = 0;
+    } else {
+      consecutiveMisses += 1;
+    }
+
+    if (consecutiveMisses >= options.maxConsecutiveMisses) {
+      if (!failureFinalized) {
+        failureFinalized = true;
+        options.finalizeFailure('heartbeat server activity timeout', true);
+        if (options.ws.readyState < WebSocket.CLOSING) {
+          options.ws.close();
+        }
       }
       return;
     }

@@ -199,8 +199,37 @@ describe('TerminalView terminal themes', () => {
     const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
 
     expect(cellNode.style.color).toBe(hexToRgbString('#222222'));
-    expect(cellNode.style.background).toBe('transparent');
+    expect(cellNode.style.background).toBe(hexToRgbString('#ffffff'));
     expect(scroller.style.backgroundColor).toBe(hexToRgbString('#ffffff'));
+  });
+
+  it('uses the Classic Dark terminal surface for default background cells instead of pure black', () => {
+    const row = [[
+      { char: 'D'.codePointAt(0) || 68, fg: 256, bg: 256, flags: 0, width: 1 },
+      { char: 'A'.codePointAt(0) || 65, fg: 256, bg: 0, flags: 0, width: 1 },
+    ]];
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId="theme-classic-default-bg"
+          initialBufferLines={row}
+          bufferStartIndex={0}
+          bufferEndIndex={1}
+          bufferTailEndIndex={1}
+          active
+          fontSize={11}
+          themeId="classic-dark"
+        />
+      </div>,
+    );
+
+    const cells = Array.from(view.container.querySelectorAll('[data-terminal-row="true"] > span > span')) as HTMLSpanElement[];
+    const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+
+    expect(scroller.style.backgroundColor).toBe(hexToRgbString('#1e1e1e'));
+    expect(cells[0]?.style.background).toBe(hexToRgbString('#1e1e1e'));
+    expect(cells[1]?.style.background).toBe(hexToRgbString('#1e1e1e'));
   });
 
   it('does not invent cursor colors on the client and only echoes the payload styling', () => {

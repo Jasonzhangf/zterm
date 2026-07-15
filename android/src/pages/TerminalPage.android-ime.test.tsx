@@ -833,6 +833,63 @@ describe("TerminalPage Android IME bridge", () => {
     expect(vi.mocked(ImeAnchor.show)).toHaveBeenCalledTimes(1);
   });
 
+  it("realigns follow again after Android IME becomes visible from keyboard toggle", async () => {
+    const session = makeSession("s1");
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("keyboardState")).toBe(true);
+    });
+    fireEvent.click(screen.getByText("toggle-keyboard"));
+
+    await waitFor(() => {
+      expect(
+        Number(
+          screen
+            .getByTestId("terminal-view-s1")
+            .getAttribute("data-follow-reset-epoch") || "0",
+        ),
+      ).toBeGreaterThan(0);
+    });
+    const toggleEpoch = Number(
+      screen
+        .getByTestId("terminal-view-s1")
+        .getAttribute("data-follow-reset-epoch") || "0",
+    );
+
+    act(() => {
+      imeListeners.get("keyboardState")?.({ visible: true, height: 320 });
+    });
+
+    await waitFor(() => {
+      expect(
+        Number(
+          screen
+            .getByTestId("terminal-view-s1")
+            .getAttribute("data-follow-reset-epoch") || "0",
+        ),
+      ).toBeGreaterThan(toggleEpoch);
+    });
+  });
+
   it("shows Android IME when keyboard was requested but no inset is visible", async () => {
     const session = makeSession("s1");
 
@@ -1401,6 +1458,89 @@ describe("TerminalPage Android IME bridge", () => {
         configurable: true,
         value: originalVisualViewport,
       });
+    }
+  });
+
+  it("reclassifies keyboard-first overlay geometry when adjustResize settles on visual viewport resize", async () => {
+    const originalInnerHeight = window.innerHeight;
+    const originalInnerWidth = window.innerWidth;
+    const originalDocumentClientHeight = document.documentElement.clientHeight;
+    const originalDocumentClientWidth = document.documentElement.clientWidth;
+    const originalVisualViewport = window.visualViewport;
+    let visualViewportResizeListener: EventListenerOrEventListenerObject | null = null;
+    const visualViewport = {
+      width: 393,
+      height: 900,
+      offsetTop: 0,
+      offsetLeft: 0,
+      addEventListener: vi.fn((eventName: string, listener: EventListenerOrEventListenerObject) => {
+        if (eventName === "resize") {
+          visualViewportResizeListener = listener;
+        }
+      }),
+      removeEventListener: vi.fn(),
+    };
+    const session = makeSession("s1");
+
+    try {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 393 });
+      Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, value: 393 });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: 900 });
+      Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: 900 });
+      Object.defineProperty(window, "visualViewport", { configurable: true, value: visualViewport });
+
+      render(
+        <TerminalPage
+          sessions={[session]}
+          activeSession={session}
+          onSwitchSession={vi.fn()}
+          onMoveSession={vi.fn()}
+          onRenameSession={vi.fn()}
+          onCloseSession={vi.fn()}
+          onOpenConnections={vi.fn()}
+          onOpenQuickTabPicker={vi.fn()}
+          onResize={vi.fn()}
+          onTerminalInput={vi.fn()}
+          onTerminalViewportChange={vi.fn()}
+          quickActions={[]}
+          shortcutActions={[]}
+          sessionDraft=""
+        />,
+      );
+
+      await waitFor(() => {
+        expect(imeListeners.has("keyboardState")).toBe(true);
+        expect(visualViewportResizeListener).not.toBeNull();
+      });
+      fireEvent.click(screen.getByText("measure-quickbar"));
+      act(() => {
+        imeListeners.get("keyboardState")?.({ visible: true, height: 320 });
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-quickbar").getAttribute("data-keyboard-inset")).toBe("320");
+      });
+
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: 600 });
+      Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: 600 });
+      visualViewport.height = 600;
+      act(() => {
+        if (typeof visualViewportResizeListener === "function") {
+          visualViewportResizeListener(new Event("resize"));
+        } else {
+          visualViewportResizeListener?.handleEvent(new Event("resize"));
+        }
+      });
+
+      await waitFor(() => {
+        expect(screen.getByTestId("terminal-quickbar").getAttribute("data-keyboard-inset")).toBe("0");
+        expect(screen.getByTestId("terminal-stage-shell").style.bottom).toBe("184px");
+      });
+    } finally {
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalInnerWidth });
+      Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: originalDocumentClientHeight });
+      Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, value: originalDocumentClientWidth });
+      Object.defineProperty(window, "visualViewport", { configurable: true, value: originalVisualViewport });
     }
   });
 

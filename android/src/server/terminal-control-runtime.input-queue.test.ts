@@ -265,20 +265,33 @@ describe('terminal control runtime input queue', () => {
     ]);
   });
 
-  it('routes list/create/write through wezterm backend without invoking tmux', async () => {
+  it('routes list/create/write/close through wezterm backend without invoking tmux', async () => {
     const { runtime, wezTermBackend } = createWezTermRuntime();
 
     expect(runtime.listTmuxSessions()).toEqual(['demo']);
     expect(runtime.createDetachedTmuxSession('new-demo', 'D:/src')).toBe('new-demo');
     runtime.writeToTmuxSession('demo', 'echo OK', true);
     expect(await runtime.enqueueLiveMirrorInput('demo', 'abc', false, () => true)).toBe(true);
+    runtime.closeDetachedTerminalSession('demo');
 
     expect(wezTermBackend.listSessions).toHaveBeenCalled();
     expect(wezTermBackend.createSession).toHaveBeenCalledWith({ sessionName: 'new-demo', cwd: 'D:/src' });
     expect(wezTermBackend.writeInput).toHaveBeenCalledWith('demo', 'echo OK\r');
     expect(wezTermBackend.writeInput).toHaveBeenCalledWith('demo', 'abc');
+    expect(wezTermBackend.closeSession).toHaveBeenCalledWith('demo');
     expect(spawnMock).not.toHaveBeenCalled();
     expect(spawnSyncMock).not.toHaveBeenCalled();
+  });
+
+  it('routes close through tmux only when tmux is the selected backend', () => {
+    const { runtime } = createRuntime();
+
+    runtime.closeDetachedTerminalSession('demo');
+
+    expect(spawnSyncMock.mock.calls[0]?.slice(0, 2)).toEqual([
+      'tmux',
+      ['kill-session', '-t', 'demo'],
+    ]);
   });
 
   it('throws explicit errors for tmux-only operations in wezterm mode', async () => {

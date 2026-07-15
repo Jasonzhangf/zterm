@@ -362,6 +362,11 @@ describe('bindSessionTransportSocketLifecycle', () => {
 
     expect(recordSessionRx).toHaveBeenCalledWith('session-2', payload);
     expect(handleSocketServerMessage).toHaveBeenCalledTimes(1);
+    expect(handleSocketServerMessage.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        rawFrameBytes: new TextEncoder().encode(payload).byteLength,
+      }),
+    );
     expect(runtimeDebug).not.toHaveBeenCalledWith(
       'session.ws.connect.buffer-sync.preparse-inactive-drop',
       expect.anything(),

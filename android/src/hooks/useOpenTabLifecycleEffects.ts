@@ -26,7 +26,7 @@ interface UseOpenTabLifecycleEffectsOptions {
   foregroundRefreshRuntimeRef: MutableRefObject<ReturnType<typeof createForegroundRefreshRuntime>>;
   onForegroundActiveChange?: (active: boolean) => void;
   auditOpenTabsAgainstRemoteSessions: (reason: OpenTabAuditReason) => Promise<void>;
-  reconnectSession: (sessionId: string) => void;
+  resumeActiveSessionTransport: (sessionId: string) => boolean;
   bumpFollowResetEpoch: () => void;
 }
 
@@ -37,7 +37,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     foregroundRefreshRuntimeRef,
     onForegroundActiveChange,
     auditOpenTabsAgainstRemoteSessions,
-    reconnectSession,
+    resumeActiveSessionTransport,
     bumpFollowResetEpoch,
   } = options;
 
@@ -88,7 +88,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
       runtimeDebug('app.network.online', {});
       const activeSessionId = openTabStateRef.current.activeSessionId;
       if (activeSessionId) {
-        reconnectSession(activeSessionId);
+        resumeActiveSessionTransport(activeSessionId);
       }
       notifyResume('online');
     };
@@ -129,7 +129,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     foregroundRefreshRuntimeRef,
     openTabStateRef,
     onForegroundActiveChange,
-    reconnectSession,
+    resumeActiveSessionTransport,
     sessionsRef,
   ]);
 

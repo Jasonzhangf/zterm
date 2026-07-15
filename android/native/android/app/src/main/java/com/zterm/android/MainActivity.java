@@ -1,6 +1,11 @@
 package com.zterm.android;
 
+import android.content.Context;
 import android.content.Intent;
+import android.content.SharedPreferences;
+import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
@@ -13,9 +18,12 @@ import com.getcapacitor.BridgeWebChromeClient;
  */
 public class MainActivity extends BridgeActivity {
     private static final String TAG = "ZTermMainActivity";
+    private static final String PREFS_NAME = "zterm_webview_cache_version";
+    private static final String PREF_VERSION_CODE = "versionCode";
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        clearWebViewAssetCacheAfterUpgrade();
         registerPlugin(ImeAnchorPlugin.class);
         registerPlugin(AppUpdatePlugin.class);
         registerPlugin(DeviceClipboardPlugin.class);
@@ -45,6 +53,49 @@ public class MainActivity extends BridgeActivity {
                     return true;
                 }
             });
+        }
+    }
+
+    private long readCurrentVersionCode() throws PackageManager.NameNotFoundException {
+        PackageInfo packageInfo = getPackageManager().getPackageInfo(getPackageName(), 0);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            return packageInfo.getLongVersionCode();
+        }
+        return packageInfo.versionCode;
+    }
+
+    private void clearWebViewAssetCacheAfterUpgrade() {
+        try {
+            long currentVersionCode = readCurrentVersionCode();
+            SharedPreferences prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+            long lastVersionCode = prefs.getLong(PREF_VERSION_CODE, -1L);
+            if (lastVersionCode == currentVersionCode) {
+                return;
+            }
+
+            deleteRecursively(new java.io.File(getCacheDir(), "WebView/Default/HTTP Cache"));
+            deleteRecursively(getCodeCacheDir());
+            prefs.edit().putLong(PREF_VERSION_CODE, currentVersionCode).apply();
+            Log.i(TAG, "cleared WebView asset cache for versionCode=" + currentVersionCode + " previous=" + lastVersionCode);
+        } catch (Exception error) {
+            Log.e(TAG, "failed to clear WebView asset cache after upgrade", error);
+        }
+    }
+
+    private void deleteRecursively(java.io.File file) {
+        if (file == null || !file.exists()) {
+            return;
+        }
+        if (file.isDirectory()) {
+            java.io.File[] children = file.listFiles();
+            if (children != null) {
+                for (java.io.File child : children) {
+                    deleteRecursively(child);
+                }
+            }
+        }
+        if (!file.delete() && file.exists()) {
+            Log.w(TAG, "failed to delete cache path: " + file.getAbsolutePath());
         }
     }
 

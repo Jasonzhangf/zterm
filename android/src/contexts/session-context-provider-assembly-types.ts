@@ -62,6 +62,7 @@ export interface SessionProviderCoreAssembliesResult {
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
   queueConnectTransportOpenIntent: (sessionId: string, host: Host) => void;
   sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: 'adaptive-phone' | 'mirror-fixed') => boolean;
+  readSessionTransportResource: (sessionId: string) => any;
   readSessionTransportSocket: (sessionId: string) => any;
   readSessionTransportHost: (sessionId: string) => any;
   readSessionTransportRuntime: (sessionId: string) => any;

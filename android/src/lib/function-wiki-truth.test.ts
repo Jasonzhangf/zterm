@@ -113,6 +113,7 @@ describe('function wiki truth gate', () => {
     expect(manifest.schema_version).toBe(1);
     expect(manifest.lifecycles.map((lifecycle) => lifecycle.lifecycle_id)).toEqual([
       'android_mainline',
+      'android_preview',
       'daemon_mainline',
       'cli_mainline',
     ]);

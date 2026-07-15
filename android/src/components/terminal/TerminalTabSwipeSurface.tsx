@@ -1,4 +1,5 @@
 import { memo, useCallback, useRef, type ReactNode } from 'react';
+import { TERMINAL_DRAWER_EDGE_SWIPE_START_PX } from '@zterm/shared';
 import {
   beginTerminalTabSwipeGesture,
   createTerminalTabSwipeGestureState,
@@ -10,12 +11,16 @@ export const TerminalTabSwipeSurface = memo(function TerminalTabSwipeSurface({
   sessionId,
   active,
   enabled,
+  allowedStartEdge = 'both',
+  allowedDirections = 'both',
   onSwipeTab,
   children,
 }: {
   sessionId: string;
   active: boolean;
   enabled: boolean;
+  allowedStartEdge?: 'both' | 'left';
+  allowedDirections?: 'both' | 'previous' | 'next';
   onSwipeTab?: ((sessionId: string, direction: 'previous' | 'next') => void) | null;
   children: ReactNode;
 }) {
@@ -26,6 +31,20 @@ export const TerminalTabSwipeSurface = memo(function TerminalTabSwipeSurface({
   }, []);
 
   const swipeEnabled = active && enabled && Boolean(onSwipeTab);
+  const isEdgeSwipeStart = (clientX: number) => {
+    if (typeof window === 'undefined') {
+      return clientX <= TERMINAL_DRAWER_EDGE_SWIPE_START_PX;
+    }
+    const viewportWidth = window.visualViewport?.width || window.innerWidth || 0;
+    if (clientX <= TERMINAL_DRAWER_EDGE_SWIPE_START_PX) {
+      return true;
+    }
+    return (
+      allowedStartEdge === 'both' &&
+      viewportWidth > 0 &&
+      clientX >= viewportWidth - TERMINAL_DRAWER_EDGE_SWIPE_START_PX
+    );
+  };
 
   return (
     <div
@@ -37,6 +56,10 @@ export const TerminalTabSwipeSurface = memo(function TerminalTabSwipeSurface({
           return;
         }
         const touch = event.touches[0];
+        if (!isEdgeSwipeStart(touch.clientX)) {
+          resetGesture();
+          return;
+        }
         gestureRef.current = beginTerminalTabSwipeGesture(touch.clientX, touch.clientY);
       }}
       onTouchMove={(event) => {
@@ -56,6 +79,9 @@ export const TerminalTabSwipeSurface = memo(function TerminalTabSwipeSurface({
         const direction = swipeEnabled ? resolveTerminalTabSwipeDirection(gestureRef.current) : null;
         resetGesture();
         if (!direction) {
+          return;
+        }
+        if (allowedDirections !== 'both' && direction !== allowedDirections) {
           return;
         }
         onSwipeTab?.(sessionId, direction);

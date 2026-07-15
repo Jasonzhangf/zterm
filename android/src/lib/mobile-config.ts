@@ -27,10 +27,7 @@ export interface TerminalRefreshCadence {
   headStalePingMs: number;
   pullRequestStaleMs: number;
   readingSyncDelayMs: number;
-  renderCommitMs: number;
 }
-
-const TERMINAL_RENDER_COMMIT_MS = ACTIVE_HEAD_REFRESH_TICK_MS;
 
 export interface TerminalRefreshCadenceOptions {
   runtimeTransport?: {
@@ -84,7 +81,6 @@ export function resolveTerminalRefreshCadence(options?: TerminalRefreshCadenceOp
       headStalePingMs: 520,
       pullRequestStaleMs: 2500,
       readingSyncDelayMs: 72,
-      renderCommitMs: TERMINAL_RENDER_COMMIT_MS,
     };
   }
 
@@ -97,7 +93,6 @@ export function resolveTerminalRefreshCadence(options?: TerminalRefreshCadenceOp
       headStalePingMs: 160,
       pullRequestStaleMs: 1200,
       readingSyncDelayMs: 16,
-      renderCommitMs: 16,
     };
   }
 
@@ -108,7 +103,6 @@ export function resolveTerminalRefreshCadence(options?: TerminalRefreshCadenceOp
       headStalePingMs: 520,
       pullRequestStaleMs: 2500,
       readingSyncDelayMs: 72,
-      renderCommitMs: TERMINAL_RENDER_COMMIT_MS,
     };
   }
 
@@ -119,7 +113,6 @@ export function resolveTerminalRefreshCadence(options?: TerminalRefreshCadenceOp
       headStalePingMs: 360,
       pullRequestStaleMs: 2000,
       readingSyncDelayMs: 48,
-      renderCommitMs: TERMINAL_RENDER_COMMIT_MS,
     };
   }
 
@@ -130,7 +123,6 @@ export function resolveTerminalRefreshCadence(options?: TerminalRefreshCadenceOp
       headStalePingMs: 520,
       pullRequestStaleMs: 2200,
       readingSyncDelayMs: 72,
-      renderCommitMs: TERMINAL_RENDER_COMMIT_MS,
     };
   }
 
@@ -141,7 +133,6 @@ export function resolveTerminalRefreshCadence(options?: TerminalRefreshCadenceOp
       headStalePingMs: 320,
       pullRequestStaleMs: 1800,
       readingSyncDelayMs: 48,
-      renderCommitMs: TERMINAL_RENDER_COMMIT_MS,
     };
   }
 
@@ -151,7 +142,6 @@ export function resolveTerminalRefreshCadence(options?: TerminalRefreshCadenceOp
     headStalePingMs: 200,
     pullRequestStaleMs: 1500,
     readingSyncDelayMs: 24,
-    renderCommitMs: TERMINAL_RENDER_COMMIT_MS,
   };
 }
 

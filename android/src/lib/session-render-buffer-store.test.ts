@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { createSessionRenderBufferStore } from './session-render-buffer-store';
 import type { SessionRenderBufferSnapshot, TerminalCell } from './types';
 
@@ -80,6 +80,40 @@ describe('session-render-buffer-store', () => {
     expect(String.fromCodePoint(stored.lines[0]![0]!.char)).toBe('a');
     expect(stored.gapRanges).toHaveLength(0);
     expect(stored.cursor).toBeNull();
+  });
+
+  it('rejects a lower-revision render snapshot instead of publishing older rows over newer rows', () => {
+    const runtimeDebug = vi.fn();
+    const store = createSessionRenderBufferStore({ runtimeDebug });
+    const newer = makeSnapshot([[makeCell('n')]], 12);
+    const older = makeSnapshot([[makeCell('o')]], 11);
+
+    expect(store.setBuffer('s1', newer)).toBe(true);
+    expect(store.setBuffer('s1', older)).toBe(false);
+
+    const stored = store.getSnapshot('s1');
+    expect(stored.buffer.revision).toBe(12);
+    expect(String.fromCodePoint(stored.buffer.lines[0]![0]!.char)).toBe('n');
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.render-store.revision-regression-drop',
+      expect.objectContaining({
+        sessionId: 's1',
+        previousRevision: 12,
+        incomingRevision: 11,
+      }),
+    );
+  });
+
+  it('allows a lower render revision only after explicit session deletion resets render truth', () => {
+    const store = createSessionRenderBufferStore();
+
+    expect(store.setBuffer('s1', makeSnapshot([[makeCell('n')]], 12))).toBe(true);
+    store.deleteSession('s1');
+    expect(store.setBuffer('s1', makeSnapshot([[makeCell('r')]], 1))).toBe(true);
+
+    const stored = store.getSnapshot('s1');
+    expect(stored.buffer.revision).toBe(1);
+    expect(String.fromCodePoint(stored.buffer.lines[0]![0]!.char)).toBe('r');
   });
 });
 

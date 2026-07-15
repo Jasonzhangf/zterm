@@ -310,7 +310,20 @@ describe('useSessionOpenActions explicit-open truth', () => {
   });
 
   it('uses the main page entry to open the new-server connection picker', () => {
-    const harness = createOptions();
+    const bridgeSettings = {
+      servers: [{
+        id: 'preset-1',
+        name: 'Daemon A',
+        targetHost: '100.127.23.27',
+        targetPort: 3333,
+        authToken: 'token-a',
+        relayHostId: 'daemon-a',
+      }],
+      targetHost: '100.127.23.27',
+      targetPort: 3333,
+      targetAuthToken: 'token-a',
+    };
+    const harness = createOptions({ bridgeSettings });
     const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
 
     act(() => {
@@ -320,13 +333,15 @@ describe('useSessionOpenActions explicit-open truth', () => {
     expect(harness.spies.ensureTerminalPageVisible).not.toHaveBeenCalled();
     expect(result.current.pickerMode).toBe('new-connection');
     expect(result.current.pickerTarget).toEqual(expect.objectContaining({
-      bridgeHost: '',
+      bridgeHost: '100.127.23.27',
       bridgePort: 3333,
+      authToken: 'token-a',
     }));
   });
 
-  it('opens a saved direct connection in the existing picker without creating a session', () => {
+  it('opens a saved direct connection session from Home without opening the picker', async () => {
     const harness = createOptions();
+    harness.spies.createSession.mockReturnValue('runtime:mac-studio:zterm');
     const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
     const savedHost = {
       id: 'saved-tailscale-a',
@@ -344,21 +359,89 @@ describe('useSessionOpenActions explicit-open truth', () => {
       pinned: false,
     };
 
-    act(() => {
+    await act(async () => {
       result.current.handleOpenSavedConnection(savedHost);
+      await Promise.resolve();
+      await Promise.resolve();
     });
 
-    expect(harness.spies.createSession).not.toHaveBeenCalled();
-    expect(harness.spies.ensureTerminalPageVisible).not.toHaveBeenCalled();
-    expect(result.current.pickerMode).toBe('new-connection');
-    expect(result.current.pickerInitialSessions).toEqual(['zterm']);
-    expect(result.current.pickerTarget).toEqual(expect.objectContaining({
+    expect(createTmuxSessionMock).not.toHaveBeenCalled();
+    expect(harness.spies.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        sessionName: 'zterm',
+        authToken: 'token-a',
+        tailscaleHost: 'mac-studio.tailnet.ts.net',
+      }),
+      expect.objectContaining({ activate: false }),
+    );
+    expect(harness.spies.ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
+    expect(result.current.pickerMode).toBeNull();
+    expect(harness.refs.openTabStateRef.current).toEqual({
+      tabs: [expect.objectContaining({
+        sessionId: 'runtime:mac-studio:zterm',
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        sessionName: 'zterm',
+      })],
+      activeSessionId: 'runtime:mac-studio:zterm',
+    });
+  });
+
+  it('creates a generated tmux session before opening a Home server row without saved sessionName', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-15T06:07:08.000Z'));
+    const harness = createOptions();
+    harness.spies.createSession.mockReturnValue('runtime:mac-studio:zterm-20260715-060708');
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+    const savedServer = {
+      id: 'bridge-preset:mac-studio',
+      createdAt: 1,
+      name: 'Mac Studio',
       bridgeHost: '100.66.1.82',
       bridgePort: 3333,
       daemonHostId: 'mac-studio',
+      relayHostId: 'mac-studio',
+      sessionName: '',
       authToken: 'token-a',
-      tailscaleHost: 'mac-studio.tailnet.ts.net',
-    }));
+      relayEndpointCandidates: [],
+      authType: 'password' as const,
+      tags: ['bridge-server'],
+      pinned: false,
+    };
+
+    await act(async () => {
+      result.current.handleOpenSavedConnection(savedServer);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(createTmuxSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        relayHostId: 'mac-studio',
+        authToken: 'token-a',
+      }),
+      expect.any(Object),
+      'zterm-20260715-060708',
+    );
+    expect(harness.spies.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        sessionName: 'zterm-20260715-060708',
+      }),
+      expect.objectContaining({ activate: false }),
+    );
+    expect(harness.spies.ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
+    expect(result.current.pickerMode).toBeNull();
+    vi.useRealTimers();
   });
 
   it('creates a blank daemon session directly from drawer host key instead of opening the picker', async () => {

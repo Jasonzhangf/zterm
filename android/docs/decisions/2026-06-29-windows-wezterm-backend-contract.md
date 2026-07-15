@@ -1,6 +1,6 @@
 # Windows WezTerm backend contract
 
-Status: closeout candidate for a production-selectable daemon backend. It is only complete when local, mock protocol, typecheck, and real Windows remote/input smoke gates pass in the current worktree.
+Status: daemon backend closeout candidate with live Windows daemon protocol proof. It is complete for daemon backend alpha only when local, mock protocol, typecheck, direct Windows WezTerm remote/input, and live Windows daemon protocol gates pass in the current worktree. Windows desktop shell packaging remains separate.
 
 ## Decision
 
@@ -81,6 +81,13 @@ Observed limitation:
 - `pnpm --dir android exec vitest run src/server/wezterm-backend-runtime.test.ts --reporter dot`
 - `pnpm --dir android exec vitest run src/server/terminal-backend-selection.test.ts src/server/terminal-control-runtime.input-queue.test.ts --reporter dot`
 - `pnpm --dir android exec tsx scripts/wezterm-daemon-protocol-smoke.ts`
+- `pnpm --dir android exec tsx scripts/wezterm-daemon-remote-protocol-smoke.ts`
 - `pnpm --dir android exec tsx scripts/wezterm-backend-remote-smoke.ts`
 - `pnpm --dir android exec tsx scripts/wezterm-backend-input-smoke.ts`
 - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+
+## Live daemon protocol proof
+
+The strongest daemon gate is `scripts/wezterm-daemon-remote-protocol-smoke.ts` against the Windows daemon endpoint. It creates one uniquely named session through the daemon control WebSocket, connects through the ticketed session WebSocket, decodes real `buffer-sync` wire lines, sends one source marker as terminal input, proves the target `buffer-sync` contains the marker, then removes only that created session through the daemon control path.
+
+The gate intentionally fails if cleanup returns an explicit error. That caught stale deployed daemon runtime where `tmux-kill-session` still attempted tmux cleanup in WezTerm mode. The selected backend close path is now `TerminalControlRuntime#closeDetachedTerminalSession`, which delegates to `WezTermBackendRuntime#closeSession` when the daemon backend is WezTerm and to `tmux kill-session` only in tmux mode.

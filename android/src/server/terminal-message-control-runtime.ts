@@ -33,6 +33,7 @@ export interface TerminalMessageControlRuntimeDeps {
   sendScheduleStateToSession: (session: TerminalTransportSubscriber, sessionName?: string) => void;
   listTmuxSessions: () => string[];
   createDetachedTmuxSession: (sessionName?: string, cwd?: string) => string;
+  closeDetachedTerminalSession: (sessionName: string) => void;
   renameTmuxSession: (currentName?: string, nextName?: string) => string;
   runTmux: (args: string[]) => { ok: true; stdout: string };
   sanitizeSessionName: (input?: string) => string;
@@ -307,7 +308,7 @@ export function handleTmuxControlMessageRuntime(
     case 'tmux-kill-session':
       try {
         const sessionName = deps.sanitizeSessionName(message.payload.sessionName);
-        deps.runTmux(['kill-session', '-t', sessionName]);
+        deps.closeDetachedTerminalSession(sessionName);
         deps.scheduleEngine.markSessionMissing(sessionName, 'session killed');
         const mirror = deps.mirrors.get(deps.getMirrorKey(sessionName));
         if (mirror) {

@@ -1,4 +1,7 @@
 import type {
+  TerminalPerformanceTraceRecord,
+} from '../lib/terminal-performance-trace';
+import type {
   ServerMessage,
   TerminalCell,
   TerminalCursorState,
@@ -12,7 +15,10 @@ import type {
   TerminalSession,
   SessionMirror,
   TerminalAttachPayload,
+  TerminalAbsoluteRange,
   TerminalGeometry,
+  TerminalSubscriberBufferSyncResyncReason,
+  TerminalSubscriberBufferSyncState,
   TmuxPaneMetrics,
 } from './terminal-runtime-types';
 
@@ -22,6 +28,7 @@ export interface TerminalMirrorRuntimeDeps {
   mirrors: Map<string, SessionMirror>;
   sendMessage: (session: TerminalSession, message: ServerMessage) => void;
   sendText: (transport: import('./terminal-runtime-types').TerminalSessionTransport | null | undefined, text: string) => void;
+  recordPerformanceTrace?: (record: TerminalPerformanceTraceRecord) => void;
   sendScheduleStateToSession: (session: TerminalSession, sessionName?: string) => void;
   buildConnectedPayload: (
     sessionId: string,
@@ -83,6 +90,16 @@ export interface TerminalMirrorRuntime {
   ) => void;
   ensureSessionReady: (session: TerminalSession, mirror: SessionMirror) => void;
   sendBufferHeadToSession: (session: TerminalSession, mirror: SessionMirror) => void;
+  flushPendingSubscriberBufferSync: (
+    mirror: SessionMirror,
+    sessionId: string,
+  ) => 'sent'
+    | 'no-pending'
+    | 'missing-subscriber'
+    | 'transport-not-open'
+    | 'backpressured'
+    | 'send-error'
+    | 'stale-transport';
   refreshMirrorHeadForSession: (session: TerminalSession, mirror: SessionMirror) => Promise<boolean>;
   syncMirrorCanonicalBuffer: (mirror: SessionMirror, options?: { forceRevision?: boolean }) => Promise<boolean>;
   scheduleMirrorLiveSync: (mirror: SessionMirror, delayMs?: number) => void;
@@ -109,6 +126,9 @@ export interface TerminalMirrorRuntime {
 const MIRROR_LIVE_SYNC_ACTIVE_MS = 33;
 const MIRROR_LIVE_SYNC_IDLE_MS = 120;
 const ADAPTIVE_WIDTH_LEASE_TTL_MS = 65000;
+const SUBSCRIBER_PENDING_RANGE_LIMIT = 64;
+const SUBSCRIBER_PENDING_SPAN_LINE_LIMIT = 4096;
+const SUBSCRIBER_PENDING_AGE_LIMIT_MS = 15_000;
 
 export function resolvePerSubscriberTransportSnapshot(
   sessions: Map<string, TerminalSession>,
@@ -147,6 +167,182 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
   const mirrors = deps.mirrors;
   const mirrorHeadBroadcastCache = new WeakMap<SessionMirror, { revision: number }>();
 
+  function createSubscriberBufferSyncState(): TerminalSubscriberBufferSyncState {
+    return {
+      lastSentRevision: 0,
+      pendingLatestRevision: null,
+      pendingChangedAbsoluteRanges: [],
+      pendingSince: 0,
+      pendingTransportId: null,
+      highWaterActive: false,
+      highWaterEnteredAt: 0,
+      resyncRequired: false,
+      resyncReason: null,
+    };
+  }
+
+  function ensureSubscriberBufferSyncState(session: TerminalSession) {
+    if (!session.bufferSyncState) {
+      session.bufferSyncState = createSubscriberBufferSyncState();
+    }
+    return session.bufferSyncState;
+  }
+
+  function normalizeAbsoluteRanges(ranges: TerminalAbsoluteRange[]) {
+    return ranges
+      .map((range) => ({
+        startIndex: Math.max(0, Math.floor(range.startIndex || 0)),
+        endIndex: Math.max(0, Math.floor(range.endIndex || 0)),
+      }))
+      .filter((range) => range.endIndex > range.startIndex)
+      .sort((left, right) => left.startIndex - right.startIndex || left.endIndex - right.endIndex);
+  }
+
+  function mergeAbsoluteRanges(ranges: TerminalAbsoluteRange[]) {
+    const normalized = normalizeAbsoluteRanges(ranges);
+    const merged: TerminalAbsoluteRange[] = [];
+    for (const range of normalized) {
+      const previous = merged[merged.length - 1];
+      if (previous && range.startIndex <= previous.endIndex) {
+        previous.endIndex = Math.max(previous.endIndex, range.endIndex);
+        continue;
+      }
+      merged.push({ ...range });
+    }
+    return merged;
+  }
+
+  function collapseRangesToSpan(ranges: TerminalAbsoluteRange[]) {
+    const normalized = normalizeAbsoluteRanges(ranges);
+    if (normalized.length === 0) {
+      return [];
+    }
+    return [{
+      startIndex: normalized[0]!.startIndex,
+      endIndex: normalized[normalized.length - 1]!.endIndex,
+    }];
+  }
+
+  function pendingSpanLineCount(ranges: TerminalAbsoluteRange[]) {
+    const normalized = normalizeAbsoluteRanges(ranges);
+    if (normalized.length === 0) {
+      return 0;
+    }
+    return normalized[normalized.length - 1]!.endIndex - normalized[0]!.startIndex;
+  }
+
+  function markSubscriberBufferSyncResyncRequired(
+    state: TerminalSubscriberBufferSyncState,
+    reason: TerminalSubscriberBufferSyncResyncReason,
+    collapseToSpan: boolean,
+  ) {
+    state.resyncRequired = true;
+    state.resyncReason = reason;
+    if (collapseToSpan) {
+      state.pendingChangedAbsoluteRanges = collapseRangesToSpan(state.pendingChangedAbsoluteRanges);
+    }
+  }
+
+  function validateSubscriberPendingBounds(state: TerminalSubscriberBufferSyncState, now = Date.now()) {
+    if (state.pendingChangedAbsoluteRanges.length > SUBSCRIBER_PENDING_RANGE_LIMIT) {
+      markSubscriberBufferSyncResyncRequired(state, 'range-count', true);
+      return;
+    }
+    if (pendingSpanLineCount(state.pendingChangedAbsoluteRanges) > SUBSCRIBER_PENDING_SPAN_LINE_LIMIT) {
+      markSubscriberBufferSyncResyncRequired(state, 'span-lines', true);
+      return;
+    }
+    if (
+      state.pendingSince > 0
+      && now - state.pendingSince > SUBSCRIBER_PENDING_AGE_LIMIT_MS
+    ) {
+      markSubscriberBufferSyncResyncRequired(state, 'age', false);
+    }
+  }
+
+  function queueSubscriberPendingBufferSync(
+    session: TerminalSession,
+    mirror: SessionMirror,
+    changedRanges: TerminalAbsoluteRange[],
+    now = Date.now(),
+  ) {
+    const state = ensureSubscriberBufferSyncState(session);
+    const nextRanges = mergeAbsoluteRanges([
+      ...state.pendingChangedAbsoluteRanges,
+      ...changedRanges,
+    ]);
+    if (nextRanges.length === 0) {
+      return state;
+    }
+    state.pendingChangedAbsoluteRanges = nextRanges;
+    state.pendingLatestRevision = mirror.revision;
+    if (!state.pendingSince) {
+      state.pendingSince = now;
+    }
+    state.pendingTransportId = session.transportId;
+    const snapshot = readTerminalTransportBackpressureSnapshot(session.transport);
+    if (snapshot?.backpressure) {
+      state.highWaterActive = true;
+      if (!state.highWaterEnteredAt) {
+        state.highWaterEnteredAt = now;
+      }
+    }
+    if (state.pendingChangedAbsoluteRanges.length > SUBSCRIBER_PENDING_RANGE_LIMIT) {
+      state.pendingChangedAbsoluteRanges = [{
+        startIndex: Math.max(0, Math.floor(mirror.bufferStartIndex || 0)),
+        endIndex: Math.max(
+          Math.max(0, Math.floor(mirror.bufferStartIndex || 0)),
+          Math.floor((mirror.bufferStartIndex || 0) + mirror.bufferLines.length),
+        ),
+      }];
+      markSubscriberBufferSyncResyncRequired(state, 'range-count', false);
+      return state;
+    }
+    if (pendingSpanLineCount(state.pendingChangedAbsoluteRanges) > SUBSCRIBER_PENDING_SPAN_LINE_LIMIT) {
+      state.pendingChangedAbsoluteRanges = [{
+        startIndex: Math.max(0, Math.floor(mirror.bufferStartIndex || 0)),
+        endIndex: Math.max(
+          Math.max(0, Math.floor(mirror.bufferStartIndex || 0)),
+          Math.floor((mirror.bufferStartIndex || 0) + mirror.bufferLines.length),
+        ),
+      }];
+      markSubscriberBufferSyncResyncRequired(state, 'span-lines', false);
+      return state;
+    }
+    validateSubscriberPendingBounds(state, now);
+    return state;
+  }
+
+  function shouldHoldPendingForBackpressure(state: TerminalSubscriberBufferSyncState, session: TerminalSession) {
+    const snapshot = readTerminalTransportBackpressureSnapshot(session.transport);
+    if (!snapshot?.ready) {
+      return true;
+    }
+    if (snapshot.backpressure) {
+      state.highWaterActive = true;
+      if (!state.highWaterEnteredAt) {
+        state.highWaterEnteredAt = Date.now();
+      }
+      return true;
+    }
+    if (state.highWaterActive && !snapshot.lowWaterDrained) {
+      return true;
+    }
+    return false;
+  }
+
+  function clearSubscriberPendingBufferSync(state: TerminalSubscriberBufferSyncState, sentRevision: number) {
+    state.lastSentRevision = sentRevision;
+    state.pendingLatestRevision = null;
+    state.pendingChangedAbsoluteRanges = [];
+    state.pendingSince = 0;
+    state.pendingTransportId = null;
+    state.highWaterActive = false;
+    state.highWaterEnteredAt = 0;
+    state.resyncRequired = false;
+    state.resyncReason = null;
+  }
+
   function isTmuxSessionUnavailableError(error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     return /no server running|can(?:'t| not) find session|no such session|session .*not found|wezterm session not found/i.test(message);
@@ -173,7 +369,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       now,
       lastLiveActivityAt: mirror.lastLiveActivityAt || 0,
       consecutiveFailures: mirror.consecutiveFailures,
-      subscriberCount: mirror.subscribers.size,
+      subscriberCount: countReadyBodySubscribedSubscribers(mirror),
       // Backpressure is handled per-subscriber in broadcastChangedRangesBufferSyncToSubscribers.
       // Mirror-level capture cadence must not be dragged down by a single slow subscriber.
       transportBufferedBytes: 0,
@@ -182,6 +378,21 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       lastCanonicalizeDurationMs: mirror.lastCanonicalizeDurationMs || 0,
       flushInFlight: mirror.flushInFlight,
     }).delayMs;
+  }
+
+  function countReadyBodySubscribedSubscribers(mirror: SessionMirror) {
+    let count = 0;
+    for (const sessionId of mirror.subscribers) {
+      const session = sessions.get(sessionId);
+      if (!session || session.bodySubscribed === false) {
+        continue;
+      }
+      if (!session.transport || session.transport.readyState !== 1) {
+        continue;
+      }
+      count += 1;
+    }
+    return count;
   }
 
   function createMirror(sessionName: string): SessionMirror {
@@ -209,6 +420,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       flushInFlight: false,
       flushPromise: null,
       pendingStableCaptureSnapshot: null,
+      pendingPerformanceTraceCapture: null,
       adaptiveWidthBaselineGeometry: null,
       adaptiveWidthAppliedCols: null,
       adaptiveWidthLeaseTimer: null,
@@ -284,6 +496,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirror.flushInFlight = false;
     mirror.flushPromise = null;
     mirror.pendingStableCaptureSnapshot = null;
+    mirror.pendingPerformanceTraceCapture = null;
     if (mirror.adaptiveWidthLeaseTimer) {
       clearTimeout(mirror.adaptiveWidthLeaseTimer);
       mirror.adaptiveWidthLeaseTimer = null;
@@ -342,29 +555,101 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirror: SessionMirror,
     changedRanges: Array<{ startIndex: number; endIndex: number }>,
   ) {
-    const payload = deps.buildChangedRangesBufferSyncPayload(mirror, changedRanges);
-    if (!payload) {
+    const normalizedRanges = normalizeAbsoluteRanges(changedRanges);
+    if (normalizedRanges.length === 0) {
       return;
     }
-    // R5: pre-serialize once, fan out via sendText to avoid N×JSON.stringify per sub.
-    // sendText owns transport open-check + lastSendAt; runtime-debug is skipped for
-    // high-frequency buffer-sync to keep CPU low at high subscriber counts.
-    const text = JSON.stringify({ type: 'buffer-sync', payload });
     const now = Date.now();
     for (const sessionId of mirror.subscribers) {
       const session = sessions.get(sessionId);
-      if (!session || !session.transport || session.transport.readyState !== 1) {
+      if (!session) {
         continue;
       }
-      // Per-subscriber cadence: a slow subscriber must not slow the whole mirror.
-      // Healthy subscribers still receive this diff immediately; only the slow peer's
-      // own transport pressure is considered for its lane decision.
-      const decision = resolveMirrorLiveSyncDelayForSubscriber(mirror, sessionId, sessions, now, 0);
-      if (decision.lane === 'slow' && decision.reason === 'transport-backpressure') {
+      if (session.bodySubscribed === false) {
         continue;
       }
+      queueSubscriberPendingBufferSync(session, mirror, normalizedRanges, now);
+      flushPendingSubscriberBufferSync(mirror, sessionId);
+    }
+  }
+
+  function flushPendingSubscriberBufferSync(
+    mirror: SessionMirror,
+    sessionId: string,
+  ): 'sent'
+    | 'no-pending'
+    | 'missing-subscriber'
+    | 'transport-not-open'
+    | 'backpressured'
+    | 'send-error'
+    | 'stale-transport' {
+    const session = sessions.get(sessionId);
+    if (!session) {
+      return 'missing-subscriber';
+    }
+    const state = ensureSubscriberBufferSyncState(session);
+    if (state.pendingLatestRevision === null || state.pendingChangedAbsoluteRanges.length === 0) {
+      return 'no-pending';
+    }
+    if (state.pendingTransportId && state.pendingTransportId !== session.transportId) {
+      markSubscriberBufferSyncResyncRequired(state, 'transport-generation', false);
+      return 'stale-transport';
+    }
+    validateSubscriberPendingBounds(state);
+    if (!session.transport || session.transport.readyState !== 1) {
+      return 'transport-not-open';
+    }
+    if (shouldHoldPendingForBackpressure(state, session)) {
+      return 'backpressured';
+    }
+    const payload = deps.buildChangedRangesBufferSyncPayload(
+      mirror,
+      state.pendingChangedAbsoluteRanges,
+    );
+    if (!payload) {
+      clearSubscriberPendingBufferSync(state, Math.max(state.lastSentRevision, state.pendingLatestRevision));
+      return 'no-pending';
+    }
+    const text = JSON.stringify({ type: 'buffer-sync', payload });
+    const traceId = `${session.id}:${Math.max(0, Math.floor(payload.revision || 0))}`;
+    const traceBase = {
+      sessionId: session.id,
+      traceId,
+      mirrorRevision: Math.max(0, Math.floor(payload.revision || 0)),
+      subscriberId: session.id,
+      transportKind: session.transport.kind,
+    };
+    deps.recordPerformanceTrace?.({
+      ...traceBase,
+      stage: 'send-start',
+      at: Date.now(),
+      bytes: Buffer.byteLength(text, 'utf8'),
+      lineCount: Array.isArray(payload.lines) ? payload.lines.length : 0,
+    });
+    try {
       ensureSessionReady(session, mirror);
       deps.sendText(session.transport, text);
+    } catch {
+      return 'send-error';
+    }
+    deps.recordPerformanceTrace?.({
+      ...traceBase,
+      stage: 'send-done',
+      at: Date.now(),
+      bytes: Buffer.byteLength(text, 'utf8'),
+      lineCount: Array.isArray(payload.lines) ? payload.lines.length : 0,
+    });
+    clearSubscriberPendingBufferSync(state, payload.revision);
+    return 'sent';
+  }
+
+  function flushPendingBufferSyncToSubscribers(mirror: SessionMirror) {
+    for (const sessionId of mirror.subscribers) {
+      const session = sessions.get(sessionId);
+      if (session?.bodySubscribed === false) {
+        continue;
+      }
+      flushPendingSubscriberBufferSync(mirror, sessionId);
     }
   }
 
@@ -435,6 +720,44 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
           mirror.revision += 1;
           mirror.lastLiveActivityAt = Date.now();
         }
+        if (hasLiveActivity) {
+          const captureTrace = mirror.pendingPerformanceTraceCapture;
+          const committedAt = Date.now();
+          for (const subscriberId of mirror.subscribers) {
+            const traceBase = {
+              sessionId: subscriberId,
+              traceId: `${subscriberId}:${Math.max(0, Math.floor(mirror.revision || 0))}`,
+              mirrorRevision: Math.max(0, Math.floor(mirror.revision || 0)),
+              subscriberId,
+            };
+            if (captureTrace) {
+              deps.recordPerformanceTrace?.({
+                ...traceBase,
+                stage: 'capture-start',
+                at: captureTrace.captureStartedAt,
+                lineCount: captureTrace.capturedLineCount,
+              });
+              deps.recordPerformanceTrace?.({
+                ...traceBase,
+                stage: 'capture-done',
+                at: captureTrace.captureDoneAt,
+                lineCount: captureTrace.capturedLineCount,
+              });
+              deps.recordPerformanceTrace?.({
+                ...traceBase,
+                stage: 'canonicalize-done',
+                at: captureTrace.canonicalizeDoneAt,
+                lineCount: captureTrace.canonicalLineCount,
+              });
+            }
+            deps.recordPerformanceTrace?.({
+              ...traceBase,
+              stage: 'mirror-commit',
+              at: committedAt,
+              lineCount: mirror.bufferLines.length,
+            });
+          }
+        }
         if (changedRanges.length > 0 || cursorChanged || cursorKeysAppChanged || forceRevision) {
           const firstRange = changedRanges[0] || null;
           const lastRange = changedRanges[changedRanges.length - 1] || null;
@@ -475,6 +798,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         if (cursorChanged || cursorKeysAppChanged) {
           broadcastBufferHeadToSubscribers(mirror);
         }
+        flushPendingBufferSyncToSubscribers(mirror);
         return true;
       })
       .catch((error) => {
@@ -518,7 +842,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     if (mirror.lifecycle !== 'ready') {
       return;
     }
-    if (mirror.subscribers.size === 0) {
+    if (countReadyBodySubscribedSubscribers(mirror) === 0) {
       stopMirrorLiveSync(mirror);
       return;
     }
@@ -526,11 +850,15 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     stopMirrorLiveSync(mirror);
     mirror.liveSyncTimer = setTimeout(() => {
       mirror.liveSyncTimer = null;
-      if (mirror.lifecycle !== 'ready' || mirror.subscribers.size === 0) {
+      if (mirror.lifecycle !== 'ready' || countReadyBodySubscribedSubscribers(mirror) === 0) {
         return;
       }
       void syncMirrorCanonicalBuffer(mirror).finally(() => {
-        if (mirror.lifecycle !== 'ready' || mirror.liveSyncTimer) {
+        if (
+          mirror.lifecycle !== 'ready'
+          || mirror.liveSyncTimer
+          || countReadyBodySubscribedSubscribers(mirror) === 0
+        ) {
           return;
         }
         scheduleMirrorLiveSync(mirror, MIRROR_LIVE_SYNC_ACTIVE_MS);
@@ -955,6 +1283,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     destroyMirror,
     ensureSessionReady,
     sendBufferHeadToSession,
+    flushPendingSubscriberBufferSync,
     refreshMirrorHeadForSession,
     syncMirrorCanonicalBuffer,
     scheduleMirrorLiveSync,

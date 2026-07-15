@@ -66,7 +66,8 @@ function syncWorkspaceWithSessions(
 ): AndroidWorkspaceState {
   const openTabSessionIds = sessions.map((session) => session.id);
   if (openTabSessionIds.length === 0) {
-    return readPersistedWorkspace([], activeSessionId);
+    const emptyWorkspace = createWorkspaceFromNoSessions();
+    return workspaceStatesEqual(current, emptyWorkspace) ? current : emptyWorkspace;
   }
 
   const sessionIds = new Set(openTabSessionIds);
@@ -239,6 +240,18 @@ export interface UseTerminalWorkspaceResult {
 const MOBILE_SPLIT_TARGET_PHONE_WIDTH_HEIGHT_RATIO = 0.42;
 const MOBILE_SPLIT_CONTROL_MIN_WIDTH_HEIGHT_RATIO = 0.7;
 
+function createWorkspaceFromNoSessions(): AndroidWorkspaceState {
+  return {
+    panes: [{
+      id: 'pane-main',
+      size: 1,
+      tabs: [],
+      activeTabId: '',
+    }],
+    activePaneId: 'pane-main',
+  };
+}
+
 export function useTerminalWorkspace({
   sessions,
   activeSessionId,
@@ -249,7 +262,9 @@ export function useTerminalWorkspace({
 }: UseTerminalWorkspaceOptions): UseTerminalWorkspaceResult {
   const sessionIds = sessions.map((session) => session.id);
   const [workspace, setWorkspace] = useState<AndroidWorkspaceState>(() => (
-    readPersistedWorkspace(sessionIds, activeSessionId)
+    sessionIds.length > 0
+      ? readPersistedWorkspace(sessionIds, activeSessionId)
+      : createWorkspaceFromNoSessions()
   ));
   const layoutSnapshotRef = useRef(resolveStaticPaneLayout({
     viewportWidth,

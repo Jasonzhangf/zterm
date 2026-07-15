@@ -182,7 +182,7 @@ describe('TerminalPage portrait session drawer', () => {
     const resolvedSwipeSurface = swipeSurface!;
     const activeSurfaceSessionId = resolvedSwipeSurface.getAttribute('data-testid')?.replace('terminal-swipe-surface-', '') || '';
     const targetSessionId = activeSurfaceSessionId === 's1' ? 's2' : 's1';
-    fireEvent.touchStart(resolvedSwipeSurface, { touches: [{ clientX: 48, clientY: 200 }] });
+    fireEvent.touchStart(resolvedSwipeSurface, { touches: [{ clientX: 56, clientY: 200 }] });
     fireEvent.touchMove(resolvedSwipeSurface, {
       touches: [{ clientX: 236, clientY: 206 }],
       cancelable: true,
@@ -221,7 +221,7 @@ describe('TerminalPage portrait session drawer', () => {
     const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
     expect(swipeSurface).toBeTruthy();
     const resolvedSwipeSurface = swipeSurface!;
-    fireEvent.touchStart(resolvedSwipeSurface, { touches: [{ clientX: 48, clientY: 200 }] });
+    fireEvent.touchStart(resolvedSwipeSurface, { touches: [{ clientX: 56, clientY: 200 }] });
     fireEvent.touchMove(resolvedSwipeSurface, {
       touches: [{ clientX: 236, clientY: 206 }],
       cancelable: true,
@@ -234,6 +234,44 @@ describe('TerminalPage portrait session drawer', () => {
     expect(screen.getByTestId('terminal-session-drawer-new-session-dialog')).toBeTruthy();
     fireEvent.click(screen.getByText('创建'));
     expect(onOpenQuickTabPicker).toHaveBeenCalled();
+  });
+
+  it('keeps mirror-fixed non-edge right pan from opening the session drawer', () => {
+    const sessions = [makeSession('s1'), makeSession('s2')];
+    const onSwitchSession = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        terminalWidthMode="mirror-fixed"
+        onSwitchSession={onSwitchSession}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+    expect(swipeSurface).toBeTruthy();
+    const resolvedSwipeSurface = swipeSurface!;
+    fireEvent.touchStart(resolvedSwipeSurface, { touches: [{ clientX: 88, clientY: 200 }] });
+    fireEvent.touchMove(resolvedSwipeSurface, {
+      touches: [{ clientX: 236, clientY: 206 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(resolvedSwipeSurface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    expect(screen.getByTestId('terminal-session-drawer').getAttribute('aria-hidden')).toBe('true');
+    expect(onSwitchSession).not.toHaveBeenCalled();
   });
 
   it('refreshes drawer host sessions and opens remote-only sessions from the drawer', async () => {
@@ -276,7 +314,7 @@ describe('TerminalPage portrait session drawer', () => {
     const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
     expect(swipeSurface).toBeTruthy();
     const resolvedSwipeSurface = swipeSurface!;
-    fireEvent.touchStart(resolvedSwipeSurface, { touches: [{ clientX: 48, clientY: 200 }] });
+    fireEvent.touchStart(resolvedSwipeSurface, { touches: [{ clientX: 56, clientY: 200 }] });
     fireEvent.touchMove(resolvedSwipeSurface, {
       touches: [{ clientX: 236, clientY: 206 }],
       cancelable: true,
@@ -341,7 +379,7 @@ describe('TerminalPage portrait session drawer', () => {
     const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
     expect(swipeSurface).toBeTruthy();
     const resolvedSwipeSurface = swipeSurface!;
-    fireEvent.touchStart(resolvedSwipeSurface, { touches: [{ clientX: 48, clientY: 200 }] });
+    fireEvent.touchStart(resolvedSwipeSurface, { touches: [{ clientX: 56, clientY: 200 }] });
     fireEvent.touchMove(resolvedSwipeSurface, {
       touches: [{ clientX: 236, clientY: 206 }],
       cancelable: true,
@@ -363,6 +401,128 @@ describe('TerminalPage portrait session drawer', () => {
       },
       'remote-beta',
     );
+  });
+
+  it('routes opened daemon catalog drawer close through remote tmux kill before closing the local tab', async () => {
+    const sessions = [makeSession('s1')];
+    sessions[0]!.daemonHostId = 'daemon-a';
+    const onCloseSession = vi.fn();
+    const onCloseDrawerRemoteSession = vi.fn(async () => undefined);
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        sessionGroups={[{
+          id: 'daemon:daemon-a',
+          name: 'Daemon A',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-a',
+          authToken: 'token-a',
+          sessionNames: ['tmux-s1', 'remote-beta'],
+          lastOpenedAt: 1,
+        }]}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={onCloseSession}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenDrawerRemoteSession={vi.fn()}
+        onCloseDrawerRemoteSession={onCloseDrawerRemoteSession}
+        onRefreshDrawerHostSessions={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+    expect(swipeSurface).toBeTruthy();
+    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface!, {
+      touches: [{ clientX: 236, clientY: 206 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    await waitFor(() => expect(screen.getByText('tab-s1')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-close-s1'));
+
+    expect(onCloseDrawerRemoteSession).toHaveBeenCalledWith(
+      {
+        name: 'Daemon A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        authToken: 'token-a',
+        sessionNames: ['tmux-s1', 'remote-beta'],
+      },
+      'tmux-s1',
+    );
+    await waitFor(() => expect(onCloseSession).toHaveBeenCalledWith('s1', 'terminal-session-drawer-remote-close-success'));
+  });
+
+  it('does not close the local tab when opened catalog remote kill fails', async () => {
+    const sessions = [makeSession('s1')];
+    sessions[0]!.daemonHostId = 'daemon-a';
+    const onCloseSession = vi.fn();
+    const onCloseDrawerRemoteSession = vi.fn(async () => {
+      throw new Error('remote kill failed');
+    });
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
+    const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        sessionGroups={[{
+          id: 'daemon:daemon-a',
+          name: 'Daemon A',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-a',
+          authToken: 'token-a',
+          sessionNames: ['tmux-s1'],
+          lastOpenedAt: 1,
+        }]}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={onCloseSession}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenDrawerRemoteSession={vi.fn()}
+        onCloseDrawerRemoteSession={onCloseDrawerRemoteSession}
+        onRefreshDrawerHostSessions={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement;
+    fireEvent.touchStart(swipeSurface, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface, {
+      touches: [{ clientX: 236, clientY: 206 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(swipeSurface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    await waitFor(() => expect(screen.getByText('tab-s1')).toBeTruthy());
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-close-s1'));
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('remote kill failed'));
+    expect(consoleErrorSpy).toHaveBeenCalled();
+    expect(onCloseSession).not.toHaveBeenCalled();
   });
 
   it('shows only daemon catalog sessions and hides stale opened tabs from the drawer', async () => {
@@ -408,7 +568,7 @@ describe('TerminalPage portrait session drawer', () => {
     const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
     expect(swipeSurface).toBeTruthy();
     const resolvedSwipeSurface = swipeSurface!;
-    fireEvent.touchStart(resolvedSwipeSurface, { touches: [{ clientX: 48, clientY: 200 }] });
+    fireEvent.touchStart(resolvedSwipeSurface, { touches: [{ clientX: 56, clientY: 200 }] });
     fireEvent.touchMove(resolvedSwipeSurface, {
       touches: [{ clientX: 236, clientY: 206 }],
       cancelable: true,
@@ -423,6 +583,67 @@ describe('TerminalPage portrait session drawer', () => {
 
     fireEvent.click(screen.getByText('live tab'));
     expect(onSwitchSession).toHaveBeenCalledWith('live');
+  });
+
+  it('does not select a session from the synthetic click after edge-opening the drawer', async () => {
+    const sessions = [makeSession('active'), makeSession('other')];
+    sessions[0]!.daemonHostId = 'daemon-a';
+    sessions[0]!.sessionName = 'active-main';
+    sessions[1]!.daemonHostId = 'daemon-a';
+    sessions[1]!.sessionName = 'other-main';
+    const onSwitchSession = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        sessionGroups={[{
+          id: 'daemon:daemon-a',
+          name: 'Daemon A',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-a',
+          authToken: 'token-a',
+          sessionNames: ['active-main', 'other-main'],
+          lastOpenedAt: 1,
+        }]}
+        activeSession={sessions[0]}
+        onSwitchSession={onSwitchSession}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onRefreshDrawerHostSessions={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement;
+    fireEvent.touchStart(swipeSurface, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface, {
+      touches: [{ clientX: 236, clientY: 206 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(swipeSurface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    const otherRow = await screen.findByTestId('terminal-session-drawer-select-other');
+    fireEvent.click(otherRow, { detail: 1 });
+    expect(onSwitchSession).not.toHaveBeenCalled();
+
+    fireEvent.touchStart(otherRow, {
+      touches: [{ clientX: 120, clientY: 220 }],
+    });
+    fireEvent.touchEnd(otherRow, {
+      changedTouches: [{ clientX: 120, clientY: 220 }],
+    });
+    fireEvent.click(otherRow, { detail: 1 });
+    expect(onSwitchSession).toHaveBeenCalledWith('other');
+    expect(onSwitchSession).toHaveBeenCalledTimes(1);
   });
 });
 

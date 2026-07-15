@@ -1064,6 +1064,15 @@ export function applyIncomingBufferSyncRuntime(options: {
     gapRangeCount: nextBuffer.gapRanges.length,
     lineCount: nextBuffer.lines.length,
   });
+  runtimeDebugPrechecked('terminal.performance.trace', {
+    sessionId: options.sessionId,
+    traceId: `${options.sessionId}:${Math.max(0, Math.floor(options.payload.revision || 0))}`,
+    mirrorRevision: Math.max(0, Math.floor(options.payload.revision || 0)),
+    subscriberId: options.sessionId,
+    stage: 'buffer-apply-done',
+    at: Date.now(),
+    lineCount: Array.isArray(options.payload.lines) ? options.payload.lines.length : 0,
+  });
   options.scheduleSessionRenderCommit(options.sessionId);
 
   const nextSession: Session = {

@@ -212,6 +212,7 @@ export function createSessionMessageAssemblies(
     host: any;
     ws: any;
     debugScope: 'connect' | 'reconnect';
+    rawFrameBytes?: number;
     onConnected: () => void;
     onFailure: (message: string, retryable: boolean) => void;
     onClosed: (reason?: string) => void;

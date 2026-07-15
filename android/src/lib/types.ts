@@ -122,6 +122,7 @@ export interface TerminalViewportState {
   mode: TerminalViewportMode;
   viewportEndIndex: number;
   viewportRows: number;
+  missingRanges?: TerminalGapRange[];
 }
 
 export interface TerminalVisibleRange {

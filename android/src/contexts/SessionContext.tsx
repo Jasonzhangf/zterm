@@ -25,7 +25,7 @@ import {
   type SessionProviderProps,
   sessionReducer,
 } from './session-context-core';
-export { shouldReconnectActivatedSession, shouldReconnectQueuedActiveInput } from './session-transport-open-helpers';
+export { shouldReconnectActivatedSession } from './session-transport-open-helpers';
 
 const SESSION_STATUS_EVENT = 'zterm:session-status';
 

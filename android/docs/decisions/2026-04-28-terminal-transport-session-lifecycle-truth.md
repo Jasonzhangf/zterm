@@ -289,7 +289,7 @@ transport/session-status closed
 1. 用户显式 close
 2. remote tmux truth audit
   - active re-entry
-  - active tick / stale health refresh
+- active tick / health refresh
   - runtime/open-tab sync
 
 允许 reopen 的唯一入口只能是显式 intent，例如：
@@ -318,6 +318,7 @@ session transport 的生命周期：
 - session 首次 attach 后建立
 - tab 切换 / foreground / background / inactive 时都不应主动销毁
 - 这些场景只允许暂停或恢复取数，不允许 fresh recreate transport
+- `WebSocket.OPEN` 是物理 transport 仍可用的必要事实；缺 pong、缺 head、缺业务消息只能触发 `ping` / `buffer-head-request` 观测，不得因 `lastServerActivityAt` 或“安静时间”主动重建 session transport
 - 只有：
   - 用户显式 close 该 session
   - daemon 不可达且该 session retry 终止

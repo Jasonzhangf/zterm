@@ -189,7 +189,7 @@ export function useSessionContextLifecycle(options: {
   clientRuntimeDebugFlushIntervalMs: number;
   ensureActiveSessionFresh: (options: {
     sessionId: string;
-    source: 'explicit-resume' | 'active-resume' | 'active-reentry' | 'active-tick';
+    source: 'explicit-resume' | 'active-reentry' | 'active-tick';
     forceHead?: boolean;
     markResumeTail?: boolean;
     allowReconnectIfUnavailable?: boolean;
@@ -221,7 +221,7 @@ export function useSessionContextLifecycle(options: {
     }
     options.ensureActiveSessionFresh({
       sessionId: activeSessionId,
-      source: 'active-resume',
+      source: 'explicit-resume',
       forceHead: true,
       markResumeTail: true,
       allowReconnectIfUnavailable: true,
@@ -281,6 +281,7 @@ export function useSessionContextLifecycle(options: {
       sessionId: options.state.activeSessionId,
       source: 'active-reentry',
       forceHead: true,
+      markResumeTail: true,
       allowReconnectIfUnavailable: true,
     });
   }, [options.ensureActiveSessionFresh, options.state.activeSessionId]);

@@ -18,6 +18,7 @@ import {
   // renderer pure functions
   DEFAULT_ROWS,
   OVERSCAN_ROWS,
+  TERMINAL_DRAWER_EDGE_SWIPE_START_PX,
   TERMINAL_FONT_STACK,
   measureTerminalViewport,
   buildTerminalRenderRows,
@@ -63,6 +64,7 @@ import type {
   TerminalWidthModeHandler,
   TerminalWidthMode,
 } from "../lib/types";
+import { SESSION_PREVIEW_RIGHT_EDGE_PX } from "../lib/session-preview-gesture";
 
 import { VisibleRow } from "./terminal/VisibleRow";
 
@@ -98,6 +100,7 @@ interface TerminalViewProps {
     clientY: number,
   ) => void;
   splitVisible?: boolean;
+  reserveRightEdgeSwipe?: boolean;
 }
 
 function terminalCellToText(
@@ -152,6 +155,62 @@ const EMPTY_RENDER_BUFFER: SessionRenderBufferSnapshot = {
   revision: 0,
 };
 
+const MIRROR_FIXED_HORIZONTAL_OFFSET_STORAGE_KEY =
+  "zterm:terminal:mirror-fixed-horizontal-offsets";
+const HORIZONTAL_PAN_LOCK_PX = 8;
+
+function clampHorizontalOffset(offsetPx: number, maxOffsetPx: number) {
+  if (!Number.isFinite(offsetPx)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(maxOffsetPx, Math.round(offsetPx)));
+}
+
+function readStoredHorizontalOffset(sessionId: string | null) {
+  if (!sessionId || typeof localStorage === "undefined") {
+    return 0;
+  }
+  try {
+    const parsed = JSON.parse(
+      localStorage.getItem(MIRROR_FIXED_HORIZONTAL_OFFSET_STORAGE_KEY) || "{}",
+    );
+    const value =
+      parsed && typeof parsed === "object"
+        ? Number((parsed as Record<string, unknown>)[sessionId])
+        : 0;
+    return Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeStoredHorizontalOffset(sessionId: string | null, offsetPx: number) {
+  if (!sessionId || typeof localStorage === "undefined") {
+    return;
+  }
+  try {
+    const parsed = JSON.parse(
+      localStorage.getItem(MIRROR_FIXED_HORIZONTAL_OFFSET_STORAGE_KEY) || "{}",
+    );
+    const next =
+      parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? { ...(parsed as Record<string, unknown>) }
+        : {};
+    next[sessionId] = clampHorizontalOffset(offsetPx, Number.MAX_SAFE_INTEGER);
+    localStorage.setItem(
+      MIRROR_FIXED_HORIZONTAL_OFFSET_STORAGE_KEY,
+      JSON.stringify(next),
+    );
+  } catch {
+    localStorage.setItem(
+      MIRROR_FIXED_HORIZONTAL_OFFSET_STORAGE_KEY,
+      JSON.stringify({
+        [sessionId]: clampHorizontalOffset(offsetPx, Number.MAX_SAFE_INTEGER),
+      }),
+    );
+  }
+}
+
 function TerminalViewComponent({
   sessionId,
   sessionBufferStore = null,
@@ -179,6 +238,7 @@ function TerminalViewComponent({
   copyPreviewRowIndex = null,
   onLongPressRow,
   splitVisible = false,
+  reserveRightEdgeSwipe = false,
 }: TerminalViewProps) {
   const theme = getTerminalThemePreset(themeId);
   const refreshActive = live ?? active;
@@ -218,6 +278,25 @@ function TerminalViewComponent({
   const pendingFollowRenderBottomIndexRef = useRef<number | null>(null);
   const pendingImmediateFollowScrollSyncRef = useRef(false);
   const lastQueuedFollowRenderBottomIndexRef = useRef<number | null>(null);
+  const horizontalPanRef = useRef<{
+    active: boolean;
+    axis: "horizontal" | "vertical" | null;
+    startX: number;
+    startY: number;
+    startOffsetPx: number;
+    consumedHorizontal: boolean;
+  }>({
+    active: false,
+    axis: null,
+    startX: 0,
+    startY: 0,
+    startOffsetPx: 0,
+    consumedHorizontal: false,
+  });
+  const [mirrorFixedHorizontalOffsetPx, setMirrorFixedHorizontalOffsetPx] =
+    useState(0);
+  const mirrorFixedHorizontalOffsetRef = useRef(0);
+  const restoredHorizontalOffsetSessionRef = useRef<string | null>(null);
   const pendingFollowScrollSyncRef = useRef(false);
   const pendingFollowViewportRealignRef = useRef(false);
   const recentViewportLayoutChangeRef = useRef(false);
@@ -255,6 +334,7 @@ function TerminalViewComponent({
   const [resolvedCellWidthPx, setResolvedCellWidthPx] = useState(
     Math.max(1, fontSize * 0.62),
   );
+  const [viewportClientWidthPx, setViewportClientWidthPx] = useState(0);
   const [viewportClientHeightPx, setViewportClientHeightPx] = useState(0);
   const [renderBottomIndex, setRenderBottomIndex] = useState(
     effectiveBufferEndIndex,
@@ -565,6 +645,13 @@ function TerminalViewComponent({
         nextViewport,
         nextClientHeight,
       );
+      const nextClientWidth = Math.max(
+        0,
+        Math.round(containerRef.current?.clientWidth || 0),
+      );
+      setViewportClientWidthPx((current) =>
+        current === nextClientWidth ? current : nextClientWidth,
+      );
       setViewportClientHeightPx((current) =>
         current === nextState.viewportClientHeightPx
           ? current
@@ -670,6 +757,160 @@ function TerminalViewComponent({
     viewportClientHeightPx,
     viewportRows,
   ]);
+
+  const maxMirrorFixedHorizontalOffsetPx = Math.max(
+    0,
+    Math.round((renderBuffer.cols || 0) * resolvedCellWidthPx - viewportClientWidthPx),
+  );
+
+  const commitMirrorFixedHorizontalOffset = useCallback(
+    (nextOffsetPx: number) => {
+      const clamped = clampHorizontalOffset(
+        nextOffsetPx,
+        maxMirrorFixedHorizontalOffsetPx,
+      );
+      mirrorFixedHorizontalOffsetRef.current = clamped;
+      setMirrorFixedHorizontalOffsetPx((current) =>
+        current === clamped ? current : clamped,
+      );
+      return clamped;
+    },
+    [maxMirrorFixedHorizontalOffsetPx],
+  );
+
+  useEffect(() => {
+    if (widthMode !== "mirror-fixed" || !sessionId) {
+      restoredHorizontalOffsetSessionRef.current = null;
+      mirrorFixedHorizontalOffsetRef.current = 0;
+      setMirrorFixedHorizontalOffsetPx(0);
+      return;
+    }
+    if (viewportClientWidthPx <= 0) {
+      return;
+    }
+    if (restoredHorizontalOffsetSessionRef.current === sessionId) {
+      return;
+    }
+    restoredHorizontalOffsetSessionRef.current = sessionId;
+    commitMirrorFixedHorizontalOffset(readStoredHorizontalOffset(sessionId));
+  }, [commitMirrorFixedHorizontalOffset, sessionId, viewportClientWidthPx, widthMode]);
+
+  useEffect(() => {
+    if (widthMode !== "mirror-fixed" || !sessionId) {
+      return;
+    }
+    if (viewportClientWidthPx <= 0) {
+      return;
+    }
+    setMirrorFixedHorizontalOffsetPx((current) => {
+      const clamped = clampHorizontalOffset(
+        current,
+        maxMirrorFixedHorizontalOffsetPx,
+      );
+      mirrorFixedHorizontalOffsetRef.current = clamped;
+      if (clamped !== current) {
+        writeStoredHorizontalOffset(sessionId, clamped);
+      }
+      return current === clamped ? current : clamped;
+    });
+  }, [
+    maxMirrorFixedHorizontalOffsetPx,
+    sessionId,
+    viewportClientWidthPx,
+    widthMode,
+  ]);
+
+  const handleMirrorFixedTouchStart = useCallback(
+    (event: TouchEvent<HTMLDivElement>) => {
+      if (
+        widthMode !== "mirror-fixed" ||
+        copyModeActive ||
+        event.touches.length !== 1
+      ) {
+        horizontalPanRef.current.active = false;
+        return;
+      }
+      const startX = event.touches[0].clientX;
+      const startOffsetPx = mirrorFixedHorizontalOffsetRef.current;
+      const viewportWidth = window.visualViewport?.width || window.innerWidth || 0;
+      const reservedRightEdge = reserveRightEdgeSwipe
+        && viewportWidth > 0
+        && startX >= viewportWidth - SESSION_PREVIEW_RIGHT_EDGE_PX;
+      horizontalPanRef.current = {
+        active: !reservedRightEdge,
+        axis: null,
+        startX,
+        startY: event.touches[0].clientY,
+        startOffsetPx,
+        consumedHorizontal: false,
+      };
+      if (reservedRightEdge) return;
+      if (
+        startOffsetPx > 0 ||
+        startX > TERMINAL_DRAWER_EDGE_SWIPE_START_PX
+      ) {
+        event.stopPropagation();
+      }
+    },
+    [copyModeActive, reserveRightEdgeSwipe, widthMode],
+  );
+
+  const handleMirrorFixedTouchMove = useCallback(
+    (event: TouchEvent<HTMLDivElement>) => {
+      const pan = horizontalPanRef.current;
+      if (!pan.active || widthMode !== "mirror-fixed" || event.touches.length !== 1) {
+        if (event.touches.length === 1) {
+          markUserScrollIntent(userScrollIntentDeadlineRef, 300);
+        }
+        return;
+      }
+      const deltaX = event.touches[0].clientX - pan.startX;
+      const deltaY = event.touches[0].clientY - pan.startY;
+      if (!pan.axis) {
+        if (
+          Math.abs(deltaX) < HORIZONTAL_PAN_LOCK_PX &&
+          Math.abs(deltaY) < HORIZONTAL_PAN_LOCK_PX
+        ) {
+          markUserScrollIntent(userScrollIntentDeadlineRef, 300);
+          return;
+        }
+        pan.axis = Math.abs(deltaX) > Math.abs(deltaY) ? "horizontal" : "vertical";
+      }
+      if (pan.axis !== "horizontal") {
+        markUserScrollIntent(userScrollIntentDeadlineRef, 300);
+        return;
+      }
+      const nextOffset = commitMirrorFixedHorizontalOffset(pan.startOffsetPx - deltaX);
+      const shouldReserveForRenderer =
+        pan.startOffsetPx > 0 ||
+        pan.startX > TERMINAL_DRAWER_EDGE_SWIPE_START_PX ||
+        nextOffset !== pan.startOffsetPx;
+      if (shouldReserveForRenderer) {
+        pan.consumedHorizontal = true;
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    },
+    [commitMirrorFixedHorizontalOffset, widthMode],
+  );
+
+  const commitMirrorFixedTouchEnd = useCallback((event?: TouchEvent<HTMLDivElement>) => {
+    const pan = horizontalPanRef.current;
+    horizontalPanRef.current = {
+      active: false,
+      axis: null,
+      startX: 0,
+      startY: 0,
+      startOffsetPx: 0,
+      consumedHorizontal: false,
+    };
+    if (pan.consumedHorizontal) {
+      event?.stopPropagation();
+    }
+    if (widthMode === "mirror-fixed" && sessionId && pan.axis === "horizontal") {
+      writeStoredHorizontalOffset(sessionId, mirrorFixedHorizontalOffsetRef.current);
+    }
+  }, [sessionId, widthMode]);
 
   const emitRenderDemand = useCallback(
     (
@@ -1328,6 +1569,10 @@ function TerminalViewComponent({
         if (!sessionId) {
           return;
         }
+        alignRenderBottomToFollow({
+          resetReportedViewport: true,
+          immediateScrollSync: true,
+        });
         if (allowDomFocus) {
           focusTerminal();
           return;
@@ -1347,10 +1592,11 @@ function TerminalViewComponent({
         lastSettledScrollTopRef.current = host.scrollTop;
       }}
       onTouchMove={(event) => {
-        if (event.touches.length === 1) {
-          markUserScrollIntent(userScrollIntentDeadlineRef, 300);
-        }
+        handleMirrorFixedTouchMove(event);
       }}
+      onTouchStart={handleMirrorFixedTouchStart}
+      onTouchEnd={commitMirrorFixedTouchEnd}
+      onTouchCancel={commitMirrorFixedTouchEnd}
       onWheel={() => {
         markUserScrollIntent(userScrollIntentDeadlineRef, 250);
       }}
@@ -1361,8 +1607,10 @@ function TerminalViewComponent({
         backgroundColor: theme.background,
         overflowY: "auto",
         overflowX: "hidden",
+        scrollbarWidth: "none",
         overscrollBehavior: "contain",
-        touchAction: copyModeActive ? "pan-y" : "auto",
+        touchAction:
+          widthMode === "mirror-fixed" && !copyModeActive ? "pan-y" : copyModeActive ? "pan-y" : "auto",
         userSelect: copyModeActive ? "none" : undefined,
         WebkitUserSelect: copyModeActive ? "none" : undefined,
         padding: "0",
@@ -1378,10 +1626,27 @@ function TerminalViewComponent({
       <div
         className="term-grid"
         data-cursor-source="cursor-metadata"
+        data-horizontal-offset-px={
+          widthMode === "mirror-fixed"
+            ? String(mirrorFixedHorizontalOffsetPx)
+            : undefined
+        }
         onContextMenu={suppressNativeCopyMenu}
         style={{
           paddingTop: `${termGridPaddingTopPx}px`,
           paddingBottom: `${termGridPaddingBottomPx}px`,
+          minWidth:
+            widthMode === "mirror-fixed"
+              ? `${Math.max(
+                  viewportClientWidthPx,
+                  Math.round((renderBuffer.cols || 0) * resolvedCellWidthPx),
+                )}px`
+              : undefined,
+          transform:
+            widthMode === "mirror-fixed" && mirrorFixedHorizontalOffsetPx > 0
+              ? `translateX(-${mirrorFixedHorizontalOffsetPx}px)`
+              : undefined,
+          willChange: widthMode === "mirror-fixed" ? "transform" : undefined,
         }}
       >
         {renderRows.map(({ absoluteIndex, row, isGap }, rowIndex) =>
@@ -1475,7 +1740,7 @@ function TerminalViewComponent({
           caretColor: "transparent",
         }}
       />
-      <style>{`@keyframes zterm-history-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}.wterm[data-copy-mode="true"],.wterm[data-copy-mode="true"] [data-terminal-row="true"]{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;}`}</style>
+      <style>{`@keyframes zterm-history-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}.wterm::-webkit-scrollbar{display:none;width:0;height:0}.wterm[data-copy-mode="true"],.wterm[data-copy-mode="true"] [data-terminal-row="true"]{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;}`}</style>
     </div>
   );
 }

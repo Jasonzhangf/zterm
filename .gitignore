@@ -1,5 +1,6 @@
 .DS_Store
 .agent-state/
+.agent-collab/
 .cursor/
 .local-index/
 .mempalace/
@@ -11,6 +12,8 @@ dist/
 coverage/
 test-results/
 playwright-report/
+project-architecture-analysis.html
+docs/file_*.png
 android/node_modules/
 android/dist/
 android/.turbo/
@@ -39,6 +42,7 @@ mac/mac/evidence/**
 win/dist/
 win/dist-electron/
 win/out/
+win/build/
 win/evidence/**
 !win/evidence/
 !win/evidence/README.md

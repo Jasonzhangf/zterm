@@ -19,6 +19,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 
 class ResizeObserverMock { observe(){} unobserve(){} disconnect(){} }
+const terminalSwipeSurfaceSpy = vi.hoisted(() => vi.fn());
 const terminalViewSpy = vi.fn();
 
 beforeAll(() => {
@@ -29,6 +30,7 @@ beforeAll(() => {
 afterEach(() => {
   cleanup();
   terminalViewSpy.mockClear();
+  terminalSwipeSurfaceSpy.mockClear();
   vi.useRealTimers();
 });
 
@@ -57,7 +59,10 @@ vi.mock('../../plugins/ImeAnchorPlugin', () => ({
 }));
 
 vi.mock('../components/terminal/TerminalTabSwipeSurface', () => ({
-  TerminalTabSwipeSurface: ({ children }: any) => <div data-testid="terminal-swipe-surface">{children}</div>,
+  TerminalTabSwipeSurface: (props: any) => {
+    terminalSwipeSurfaceSpy(props);
+    return <div data-testid={`terminal-swipe-surface-${props.sessionId}`}>{props.children}</div>;
+  },
 }));
 
 vi.mock('../components/TerminalView', () => ({
@@ -230,6 +235,43 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
     expect(style).toContain('bottom: 30px;');
     expect(style).not.toContain('bottom: 310px;');
     expect(style).not.toContain('transform: translateY');
+  });
+
+  it('passes left-edge-only drawer swipe ownership when mirror-fixed crop pan is active', async () => {
+    const { TerminalStageShell } = await import('./TerminalPageStageShell');
+    const session = { id: 's1', state: 'connected', sessionName: 'main' } as any;
+
+    render(
+      <TerminalStageShell
+        interactiveSession={session}
+        renderedPaneSessions={[session]}
+        visiblePaneEntries={[]}
+        splitVisible={false}
+        activePaneId="pane-main"
+        terminalChromeBottomPx={0}
+        terminalKeyboardRequested={false}
+        isAndroid
+        handleTerminalViewportChange={vi.fn()}
+        handleSwipeTab={vi.fn()}
+        handleActiveTerminalActivateInput={vi.fn()}
+        onActivatePane={vi.fn()}
+        focusNonce={0}
+        terminalFontSize={14}
+        terminalThemeId="default"
+        terminalWidthMode="mirror-fixed"
+        allowSessionDrawerSwipe
+        absoluteLineNumbersVisible={false}
+        copySelection={{ active: false, sessionId: null, startRowIndex: null, endRowIndex: null, menu: null }}
+        onLongPressRow={vi.fn()}
+      />,
+    );
+
+    const props = terminalSwipeSurfaceSpy.mock.calls.find((call) => call[0]?.sessionId === 's1')?.[0];
+    expect(props).toMatchObject({
+      enabled: true,
+      allowedStartEdge: 'left',
+      allowedDirections: 'previous',
+    });
   });
 
   it('forwards copy props into TerminalView for active session', async () => {
@@ -553,5 +595,97 @@ describe('TerminalStageShell shared PaneStage integration (red baseline)', () =>
 
     expect(screen.queryByTestId('terminal-session-group-peek-top')).toBeNull();
     expect(screen.getByTestId('terminal-session-group-peek-bottom')).toBeTruthy();
+  });
+
+  it('does not draw bright chrome borders around the terminal viewport', async () => {
+    const { TerminalStageShell } = await import('./TerminalPageStageShell');
+    const s1 = { id: 's1', state: 'connected', sessionName: 'main' } as any;
+    const s2 = { id: 's2', state: 'connected', sessionName: 'logs' } as any;
+
+    const { unmount } = render(
+      <TerminalStageShell
+        interactiveSession={s1}
+        renderedPaneSessions={[s1, s2]}
+        visiblePaneEntries={[
+          {
+            pane: { id: 'p1', size: 0.5, tabs: [], activeTabId: 's1' } as any,
+            paneIndex: 0,
+            session: s1,
+          },
+          {
+            pane: { id: 'p2', size: 0.5, tabs: [], activeTabId: 's2' } as any,
+            paneIndex: 1,
+            session: s2,
+          },
+        ]}
+        splitVisible
+        activePaneId="p1"
+        terminalChromeBottomPx={0}
+        terminalKeyboardRequested={false}
+        isAndroid
+        handleTerminalViewportChange={vi.fn()}
+        handleSwipeTab={vi.fn()}
+        handleActiveTerminalActivateInput={vi.fn()}
+        onActivatePane={vi.fn()}
+        focusNonce={0}
+        terminalFontSize={14}
+        terminalThemeId="default"
+        terminalWidthMode="adaptive-phone"
+        absoluteLineNumbersVisible={false}
+        copySelection={{ active: false, sessionId: null, startRowIndex: null, endRowIndex: null, menu: null }}
+        onLongPressRow={vi.fn()}
+      />,
+    );
+
+    const stageFrame = screen.getByTestId('terminal-stage-shell').firstElementChild as HTMLElement;
+    expect(stageFrame.style.borderWidth).toBe('0px');
+    expect(stageFrame.style.borderStyle).toBe('none');
+    expect(screen.getAllByTestId('terminal-pane-shell').map((pane) => ({
+      borderWidth: pane.style.borderWidth,
+      borderStyle: pane.style.borderStyle,
+    }))).toEqual([
+      { borderWidth: '0px', borderStyle: 'none' },
+      { borderWidth: '0px', borderStyle: 'none' },
+    ]);
+
+    unmount();
+
+    render(
+      <TerminalStageShell
+        interactiveSession={s1}
+        renderedPaneSessions={[s1]}
+        sessionGroupViewport={{
+          slots: { top: s2, center: s1, bottom: null },
+          visible: { top: true, bottom: false },
+        }}
+        sessionGroupLayoutAxis="horizontal"
+        visiblePaneEntries={[
+          {
+            pane: { id: 'p1', size: 1, tabs: [], activeTabId: 's1' } as any,
+            paneIndex: 0,
+            session: s1,
+          },
+        ]}
+        splitVisible={false}
+        activePaneId="p1"
+        terminalChromeBottomPx={0}
+        terminalKeyboardRequested={false}
+        isAndroid
+        handleTerminalViewportChange={vi.fn()}
+        handleSwipeTab={vi.fn()}
+        handleActiveTerminalActivateInput={vi.fn()}
+        onActivatePane={vi.fn()}
+        focusNonce={0}
+        terminalFontSize={14}
+        terminalThemeId="default"
+        terminalWidthMode="adaptive-phone"
+        absoluteLineNumbersVisible={false}
+        copySelection={{ active: false, sessionId: null, startRowIndex: null, endRowIndex: null, menu: null }}
+        onLongPressRow={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-session-group-center').style.borderWidth).toBe('0px');
+    expect(screen.getByTestId('terminal-session-group-center').style.borderStyle).toBe('none');
   });
 });

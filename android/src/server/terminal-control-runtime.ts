@@ -31,6 +31,7 @@ export interface TerminalControlRuntime {
   disposeLiveMirrorInputBatch: (sessionName: string, reason: string) => number;
   listTmuxSessions: () => string[];
   createDetachedTmuxSession: (input?: string, cwd?: string) => string;
+  closeDetachedTerminalSession: (sessionName: string) => void;
   renameTmuxSession: (currentName?: string, nextName?: string) => string;
 }
 
@@ -453,6 +454,15 @@ export function createTerminalControlRuntime(
     return sessionName;
   }
 
+  function closeDetachedTerminalSession(input: string) {
+    const sessionName = deps.sanitizeSessionName(input);
+    if (deps.wezTermBackend) {
+      deps.wezTermBackend.closeSession(sessionName);
+      return;
+    }
+    runTmux(['kill-session', '-t', sessionName]);
+  }
+
   function renameTmuxSession(currentName?: string, nextName?: string) {
     if (deps.wezTermBackend) {
       throw new Error('wezterm backend does not support tmux rename-session');
@@ -474,6 +484,7 @@ export function createTerminalControlRuntime(
     disposeLiveMirrorInputBatch,
     listTmuxSessions,
     createDetachedTmuxSession,
+    closeDetachedTerminalSession,
     renameTmuxSession,
   };
 }

@@ -160,7 +160,7 @@ describe('scheduleReconnectRuntime', () => {
     vi.useRealTimers();
   });
 
-  it('clears queued reconnect timer when auto reconnect is blocked for inactive session', () => {
+  it('clears queued reconnect timer without projecting terminal error when auto reconnect is blocked for inactive session', () => {
     vi.useFakeTimers();
     const timer = setTimeout(() => undefined, 10_000) as unknown as number;
     const reconnectRuntimesRef = {
@@ -211,7 +211,7 @@ describe('scheduleReconnectRuntime', () => {
     expect(reconnectRuntimesRef.current.has('session-1')).toBe(false);
     expect(vi.getTimerCount()).toBe(0);
     expect(updateSessionSync).toHaveBeenCalled();
-    expect(emitSessionStatus).toHaveBeenCalledWith('session-1', 'error', 'inactive-blocked');
+    expect(emitSessionStatus).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 
@@ -606,7 +606,7 @@ describe('session transport reuse runtime gates', () => {
     expect(scheduleReconnect).not.toHaveBeenCalled();
   });
 
-  it('reconnectSessionRuntime waits for a pending same-target socket instead of clearing stale pending state', () => {
+  it('reconnectSessionRuntime clears stale pending open bookkeeping and rebuilds the same target', () => {
     const cleanupSocket = vi.fn();
     const cleanupControlSocket = vi.fn();
     const scheduleReconnect = vi.fn();
@@ -651,10 +651,14 @@ describe('session transport reuse runtime gates', () => {
       scheduleReconnect,
     } as any);
 
-    expect(pendingStore.has('session-1')).toBe(true);
-    expect(cleanupControlSocket).not.toHaveBeenCalled();
-    expect(cleanupSocket).not.toHaveBeenCalled();
-    expect(scheduleReconnect).not.toHaveBeenCalled();
+    expect(pendingStore.has('session-1')).toBe(false);
+    expect(cleanupControlSocket).toHaveBeenCalledWith('session-1', true);
+    expect(cleanupSocket).toHaveBeenCalledWith('session-1', false);
+    expect(scheduleReconnect).toHaveBeenCalledWith('session-1', 'manual reconnect', true, {
+      immediate: true,
+      resetAttempt: true,
+      force: true,
+    });
   });
 
   it('reconnectSessionRuntime still rebuilds a closed same-target socket', () => {

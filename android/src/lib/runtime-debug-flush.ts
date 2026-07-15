@@ -25,7 +25,9 @@ export function flushRuntimeDebugLogsToSessionTransport(input: {
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
 }) {
-  if (!isRuntimeDebugEnabled() && !isForceFlushEnabled()) {
+  const debugEnabled = isRuntimeDebugEnabled();
+  const pendingEntryCount = getPendingRuntimeDebugEntryCount();
+  if (!debugEnabled && !isForceFlushEnabled() && pendingEntryCount === 0) {
     return false;
   }
 
@@ -40,7 +42,7 @@ export function flushRuntimeDebugLogsToSessionTransport(input: {
   }
 
   let flushed = false;
-  if (getPendingRuntimeDebugEntryCount() > 0) {
+  if (pendingEntryCount > 0) {
     const entries = drainRuntimeDebugEntries();
     if (entries.length > 0) {
       const logFrame = JSON.stringify({
@@ -54,7 +56,7 @@ export function flushRuntimeDebugLogsToSessionTransport(input: {
 
   const now = Date.now();
   const previousSnapshotSentAt = lastSnapshotSentAtBySession.get(activeSessionId) || 0;
-  if (now - previousSnapshotSentAt >= CLIENT_RUNTIME_DEBUG_SNAPSHOT_INTERVAL_MS) {
+  if (debugEnabled && now - previousSnapshotSentAt >= CLIENT_RUNTIME_DEBUG_SNAPSHOT_INTERVAL_MS) {
     const snapshotFrame = JSON.stringify({
       type: 'debug-snapshot',
       payload: {

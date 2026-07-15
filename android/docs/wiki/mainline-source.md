@@ -19,6 +19,12 @@ flowchart TD
   SessionContext --> TransportOrchestration["src/contexts/session-context-transport-orchestration-runtime.ts"]
   TransportOrchestration --> TransportOpen["src/contexts/session-context-transport-open-runtime.ts"]
   TransportOpen --> TransportReusePlan
+  SessionContext --> SocketMessage["src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime"]
+  SocketMessage --> BufferApply["src/contexts/session-context-buffer-runtime.ts#applyIncomingBufferSyncRuntime"]
+  BufferApply --> RenderGate["src/lib/session-render-gate.ts#scheduleCommit"]
+  SocketMessage --> PerformanceTrace["src/lib/terminal-performance-trace.ts"]
+  BufferApply --> PerformanceTrace
+  RenderGate --> PerformanceTrace
   App --> Connections["src/pages/ConnectionsPage.tsx"]
   App --> TerminalPage["src/pages/TerminalPage.tsx"]
   TerminalPage --> TerminalView["src/components/TerminalView.tsx"]
@@ -32,6 +38,29 @@ flowchart TD
   Renderer --> RenderGate["src/lib/session-render-gate.ts"]
 ```
 
+## Android Session Preview Mainline
+
+```mermaid
+flowchart TD
+  SessionDrawer["src/components/terminal/TerminalSessionDrawer.tsx#TerminalSessionDrawer"] --> PreviewSelectionOwner["src/lib/session-preview-selection.ts#toggleSessionPreviewTarget"]
+  PreviewSelectionOwner --> OpenTabResolver["src/lib/session-preview-selection.ts#resolveSessionPreviewTargets"]
+  TerminalShellGesture["src/lib/session-preview-gesture.ts#resolveSessionPreviewGesture"] --> PreviewModeOwner["src/pages/TerminalPage.tsx#sessionPreviewOpen"]
+  PreviewModeOwner --> PreviewLiveSetProjector["src/lib/session-preview-selection.ts#projectSessionPreviewLiveIds"]
+  PreviewLiveSetProjector --> SessionBodySubscriptionIntent["src/pages/TerminalPage.tsx#onLiveSessionIdsChange"]
+  PreviewModeOwner --> TerminalPreviewGrid["src/components/terminal/TerminalPreviewGrid.tsx#TerminalPreviewGrid"]
+  TerminalPreviewGrid --> TerminalPreviewTile["src/components/terminal/TerminalPreviewGrid.tsx#preview-tile"]
+  TerminalPreviewTile --> SharedRenderSurface["src/components/TerminalView.tsx#TerminalView"]
+  TerminalPreviewTile --> PreviewReplacementMenu["src/components/terminal/TerminalPreviewGrid.tsx#preview-replacement-menu"]
+  PreviewReplacementMenu --> PreviewSelectionOwner
+  PreviewAddMenu["src/components/terminal/TerminalPreviewGrid.tsx#terminal-preview-add-menu"] --> PreviewSelectionOwner
+  TerminalPreviewTileClose["src/pages/TerminalPage.tsx#handleRemoveSessionFromPreview"] --> PreviewSelectionOwner
+  TerminalPreviewTile --> ActiveSessionIntent["src/pages/TerminalPage.tsx#handleActivateOpenSessionInViewport"]
+  ActiveSessionIntent --> TerminalPage["src/pages/TerminalPage.tsx"]
+  SystemBackIntent["@capacitor/app#backButton"] --> PreviewModeOwner
+  PreviewModeOwner --> EntrySessionProjection["src/pages/TerminalPage.tsx#handleCancelSessionPreview"]
+  EntrySessionProjection --> TerminalPage
+```
+
 ## Daemon Mainline
 
 ```mermaid
@@ -43,6 +72,10 @@ flowchart TD
   Runtime --> Message["src/server/terminal-message-runtime.ts"]
   Message --> Mirror["src/server/terminal-mirror-runtime.ts"]
   Mirror --> Capture["src/server/terminal-mirror-capture.ts"]
+  Mirror --> TransportSend["src/server/terminal-transport-runtime.ts#sendText"]
+  Capture --> PerformanceTrace["src/lib/terminal-performance-trace.ts"]
+  Mirror --> PerformanceTrace
+  TransportSend --> PerformanceTrace
   Message --> Control["src/server/terminal-message-control-runtime.ts"]
   Control --> Tmux["src/server/terminal-control-runtime.ts"]
   Control --> Schedule["src/server/terminal-schedule-runtime.ts"]
@@ -86,15 +119,24 @@ flowchart TD
   BackendSession --> WeztermPane["resource.wezterm_pane"]
   SessionTransport["resource.session_transport"] --> TransportSubscriber["resource.transport_subscriber"]
   TransportSubscriber --> MirrorStore["resource.mirror_store"]
+  MirrorStore --> TransportSubscriber
   MirrorStore --> ClientSparseBuffer["resource.client_sparse_buffer"]
   ClientSparseBuffer --> RendererWindow["resource.renderer_window"]
   RendererWindow --> UiProjection["resource.ui_projection"]
+  UiProjection --> PreviewSelection["resource.session_preview_selection"]
+  UiProjection --> PreviewMode["resource.session_preview_mode"]
+  PreviewSelection --> OpenTab
+  PreviewMode --> UiProjection
   OpenTab["resource.open_tab"] --> ActiveSession["resource.active_session"]
   ActiveSession --> SessionTransport
   PlatformInput["resource.platform_input_channel"] --> SessionTransport
   DaemonInputQueue["resource.daemon_input_queue"] --> BackendSession
   ReleaseArtifact["resource.release_update_artifact"] --> DaemonArtifact
-  DebugChannel["resource.debug_channel"] -. observe only .-> DaemonProcess
+  DebugChannel["resource.debug_channel"] --> DaemonProcess
+  MirrorStore --> DebugChannel
+  TransportSubscriber --> DebugChannel
+  ClientSparseBuffer --> DebugChannel
+  RendererWindow --> DebugChannel
 ```
 
 ## Published Source Surfaces
@@ -102,11 +144,13 @@ flowchart TD
 | surface | files |
 | --- | --- |
 | Android app entry | `src/main.tsx`, `src/App.tsx`, `src/pages/ConnectionsPage.tsx`, `src/pages/TerminalPage.tsx` |
-| Client transport lifecycle | `src/contexts/SessionContext.tsx`, `src/contexts/session-context-session-orchestration-runtime.ts`, `src/contexts/session-context-session-runtime.ts`, `src/contexts/session-context-activity-runtime.ts`, `src/contexts/session-context-transport-orchestration-runtime.ts`, `src/contexts/session-context-transport-open-runtime.ts`, `src/contexts/session-transport-open-helpers.ts` |
-| Terminal renderer | `src/components/TerminalView.tsx`, `src/lib/session-render-buffer-store.ts`, `src/lib/session-render-gate.ts` |
+| Client transport lifecycle | `src/contexts/SessionContext.tsx`, `src/contexts/session-context-session-orchestration-runtime.ts`, `src/contexts/session-context-session-runtime.ts`, `src/contexts/session-context-activity-runtime.ts`, `src/contexts/session-context-transport-orchestration-runtime.ts`, `src/contexts/session-context-transport-open-runtime.ts`, `src/contexts/session-context-socket-message-runtime.ts`, `src/contexts/session-transport-open-helpers.ts` |
+| Terminal body receive/apply/render | `src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime`, `src/contexts/session-context-buffer-runtime.ts#applyIncomingBufferSyncRuntime`, `src/lib/session-render-gate.ts#scheduleCommit`, `src/lib/session-render-buffer-store.ts` |
+| Terminal performance observer | `src/lib/terminal-performance-trace.ts`, `src/server/terminal-debug-runtime.ts`, `src/lib/runtime-debug.ts`; metadata only, no terminal text/cells |
 | Terminal shell and panes | `src/pages/TerminalPageStageShell.tsx`, `src/hooks/useTerminalWorkspace.ts`, `src/components/terminal/TerminalQuickBar.tsx` |
 | Terminal session group layout | `src/lib/terminal-layout-profile.ts`, `src/pages/TerminalPageStageShell.tsx`, `docs/features/terminal-session-group-layout.md`, `docs/testing/terminal-session-group-layout-test-design.md` |
 | Session drawer (multi-host) | `src/components/terminal/TerminalSessionDrawer.tsx` (UI), `src/pages/TerminalPage.tsx` (hostKey/hostLabel + opened-first ordering in `drawerSessions` useMemo) |
+| Session quick preview | `src/lib/session-preview-selection.ts`, `src/lib/session-preview-gesture.ts`, `src/components/terminal/TerminalPreviewGrid.tsx`, `src/pages/TerminalPageStageShell.tsx` |
 | Daemon runtime | `src/server/server.ts`, `src/server/terminal-daemon-runtime.ts`, `src/server/terminal-runtime.ts`, `src/server/terminal-message-runtime.ts`, `src/server/terminal-mirror-runtime.ts`, `src/server/terminal-message-control-runtime.ts`, `src/server/terminal-transport-runtime.ts` |
 | Daemon control edges | `src/server/terminal-control-runtime.ts`, `src/server/terminal-file-transfer-runtime.ts`, `src/server/terminal-schedule-runtime.ts`, `src/server/remote-screenshot-daemon.ts`, `src/server/terminal-http-runtime.ts` |
 | Daemon CLI | `scripts/zterm-daemon.sh`, `scripts/windows/zterm-daemon.ps1`, `scripts/install-global-daemon-cli.sh`, `scripts/prepare-global-daemon-release.sh`, `scripts/prepare-daemon-npm-package.mjs` |

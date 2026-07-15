@@ -12,6 +12,7 @@ import {
   buildSessionClosedUpdates,
   buildSessionConnectingLabelUpdates,
   buildSessionErrorUpdates,
+  buildSessionIdleAfterReconnectBlockedUpdates,
   buildSessionReconnectingFailureUpdates,
   buildSessionScheduleErrorState,
   buildSessionScheduleLoadingState,
@@ -296,6 +297,7 @@ export function handleReconnectHandshakeFailureRuntime(options: {
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
   emitSessionStatus: (sessionId: string, type: 'closed' | 'error', message?: string) => void;
   createSessionReconnectRuntime: () => SessionReconnectRuntime;
+  shouldContinueRetryableReconnect?: (sessionId: string) => boolean;
   startReconnectAttempt: (sessionId: string) => void;
 }) {
   const currentReconnectRuntime = options.reconnectRuntimesRef.current.get(options.sessionId) || null;
@@ -311,6 +313,14 @@ export function handleReconnectHandshakeFailureRuntime(options: {
     options.reconnectRuntimesRef.current.delete(options.sessionId);
     options.updateSessionSync(options.sessionId, buildSessionErrorUpdates(options.message));
     options.emitSessionStatus(options.sessionId, 'error', options.message);
+    return;
+  }
+  if (options.shouldContinueRetryableReconnect && !options.shouldContinueRetryableReconnect(options.sessionId)) {
+    if (currentReconnectRuntime?.timer) {
+      clearTimeout(currentReconnectRuntime.timer);
+    }
+    options.reconnectRuntimesRef.current.delete(options.sessionId);
+    options.updateSessionSync(options.sessionId, buildSessionIdleAfterReconnectBlockedUpdates(options.message));
     return;
   }
   const nextReconnectRuntime = options.reconnectRuntimesRef.current.get(options.sessionId) || options.createSessionReconnectRuntime();

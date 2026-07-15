@@ -271,6 +271,12 @@ async function main() {
       12_000,
     );
 
+    send(control, { type: 'tmux-kill-session', payload: { sessionName } } as ClientMessage);
+    await waitForMessage(
+      control,
+      (message) => message.type === 'sessions' && !message.payload.sessions.includes(sessionName),
+    );
+
     control.close(1000, 'smoke complete');
     session.close(1000, 'smoke complete');
     console.log(JSON.stringify({
@@ -280,6 +286,7 @@ async function main() {
       sessionName,
       createdSessions: createdSessions.type === 'sessions' ? createdSessions.payload.sessions : [],
       inputSyncType: inputSync.type,
+      cleanup: 'targeted-session-removed',
     }, null, 2));
   } finally {
     if (!server.killed) {

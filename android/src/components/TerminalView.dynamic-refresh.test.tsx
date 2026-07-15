@@ -4,6 +4,7 @@ import type React from 'react';
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalView as BaseTerminalView } from './TerminalView';
+import { TerminalTabSwipeSurface } from './terminal/TerminalTabSwipeSurface';
 import { createSessionBufferState } from '../lib/terminal-buffer';
 import { createSessionRenderBufferStore } from '../lib/session-render-buffer-store';
 import type { Session, SessionRenderBufferSnapshot, TerminalCell } from '../lib/types';
@@ -227,6 +228,37 @@ function buildTuiFrameRows(frame: number, count: number) {
   });
 }
 
+function makeRenderSnapshotFromTextRows(options: {
+  rows: string[];
+  revision: number;
+  startIndex?: number;
+  bufferTailEndIndex?: number;
+}): SessionRenderBufferSnapshot {
+  const startIndex = options.startIndex ?? 0;
+  const bufferTailEndIndex = options.bufferTailEndIndex ?? startIndex + options.rows.length;
+  const buffer = createSessionBufferState({
+    lines: options.rows,
+    startIndex,
+    endIndex: startIndex + options.rows.length,
+    bufferHeadStartIndex: startIndex,
+    bufferTailEndIndex,
+    rows: 24,
+    cols: 80,
+    cacheLines: 500,
+    revision: options.revision,
+  });
+  return toRenderBufferSnapshot({
+    initialBufferLines: buffer.lines,
+    bufferStartIndex: buffer.startIndex,
+    bufferEndIndex: buffer.endIndex,
+    bufferHeadStartIndex: buffer.bufferHeadStartIndex,
+    bufferTailEndIndex: buffer.bufferTailEndIndex,
+    bufferGapRanges: buffer.gapRanges,
+    cursorKeysApp: buffer.cursorKeysApp,
+    revision: buffer.revision,
+  });
+}
+
 function expectRenderedRowsMatchSource(container: HTMLElement, sourceRows: string[], startIndex: number) {
   const renderedRows = readRenderedIndexedRows(container).filter((row) => !row.isGap);
   expect(renderedRows.length).toBeGreaterThan(0);
@@ -248,6 +280,7 @@ describe('TerminalView minimal mirror render', () => {
   let mockClientHeight = 408;
 
   beforeEach(() => {
+    localStorage.clear();
     mockClientWidth = 640;
     mockClientHeight = 408;
     ResizeObserverMock.reset();
@@ -514,6 +547,114 @@ describe('TerminalView minimal mirror render', () => {
       expect(rows).toContain('tail-040');
       expect(rows).not.toContain('stream-loading');
       expect(rows).not.toContain('echo hi');
+    });
+  });
+
+  it('keeps bottom rows scoped to the active session across switch, late old-session publish, and IME layout refresh', async () => {
+    const renderStore = createSessionRenderBufferStore();
+    const sessionARows = [
+      ...buildRows(36, 'session-a-body'),
+      'session-a-bottom-prompt',
+      'session-a-bottom-status',
+    ];
+    const sessionBRows = [
+      ...buildRows(36, 'session-b-body'),
+      'session-b-bottom-prompt',
+      'session-b-bottom-status',
+    ];
+    const sessionALateRows = [
+      ...buildRows(36, 'session-a-late-body'),
+      'session-a-late-bottom-prompt',
+      'session-a-late-bottom-status',
+    ];
+
+    renderStore.setBuffer('s-a', makeRenderSnapshotFromTextRows({
+      rows: sessionARows,
+      revision: 1,
+    }));
+    renderStore.setBuffer('s-b', makeRenderSnapshotFromTextRows({
+      rows: sessionBRows,
+      revision: 1,
+    }));
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <BaseTerminalView
+          sessionId="s-a"
+          sessionBufferStore={renderStore}
+          active
+          allowDomFocus
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => expect(readRenderedRows(view.container)).toContain('session-a-bottom-status'));
+    expect(readRenderedRows(view.container)).not.toContain('session-b-bottom-status');
+
+    view.rerender(
+      <div style={{ width: '640px', height: '408px' }}>
+        <BaseTerminalView
+          sessionId="s-b"
+          sessionBufferStore={renderStore}
+          active
+          allowDomFocus
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      const rows = readRenderedRows(view.container);
+      expect(rows).toContain('session-b-bottom-status');
+      expect(rows).not.toContain('session-a-bottom-status');
+    });
+
+    expect(renderStore.setBuffer('s-a', makeRenderSnapshotFromTextRows({
+      rows: sessionALateRows,
+      revision: 2,
+    }))).toBe(true);
+
+    await act(async () => {
+      mockClientHeight = 320;
+      ResizeObserverMock.triggerAll();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+
+    await waitFor(() => {
+      const rows = readRenderedRows(view.container);
+      expect(rows).toContain('session-b-bottom-status');
+      expect(rows).toContain('session-b-bottom-prompt');
+      expect(rows).not.toContain('session-a-bottom-status');
+      expect(rows).not.toContain('session-a-bottom-prompt');
+      expect(rows).not.toContain('session-a-late-bottom-status');
+      expect(rows).not.toContain('session-a-late-bottom-prompt');
+    });
+
+    view.rerender(
+      <div style={{ width: '640px', height: '320px' }}>
+        <BaseTerminalView
+          sessionId="s-a"
+          sessionBufferStore={renderStore}
+          active
+          allowDomFocus
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      const rows = readRenderedRows(view.container);
+      expect(rows).toContain('session-a-late-bottom-status');
+      expect(rows).toContain('session-a-late-bottom-prompt');
+      expect(rows).not.toContain('session-b-bottom-status');
+      expect(rows).not.toContain('session-b-bottom-prompt');
     });
   });
 
@@ -805,6 +946,61 @@ describe('TerminalView minimal mirror render', () => {
     scroller.scrollTop = 952;
     fireEvent.scroll(scroller);
 
+    await waitFor(() => {
+      const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
+      expect(lastCall?.mode).toBe('follow');
+      expect(lastCall?.viewportEndIndex).toBe(80);
+    });
+  });
+
+  it('aligns to follow before activating input from reading mode', async () => {
+    const onViewportChange = vi.fn();
+    const onActivateInput = vi.fn();
+    const session = makeSession({
+      revision: 1,
+      lines: buildRows(80),
+      bufferTailEndIndex: 80,
+    });
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          allowDomFocus={false}
+          onActivateInput={onActivateInput}
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          onViewportChange={onViewportChange}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+    Object.defineProperty(scroller, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return 2040;
+      },
+    });
+    scrollFromBottomIntoReading(scroller);
+
+    await waitFor(() => {
+      const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
+      expect(lastCall?.mode).toBe('reading');
+      expect(lastCall?.viewportEndIndex).toBe(24);
+    });
+
+    fireEvent.click(scroller);
+
+    expect(onActivateInput).toHaveBeenCalledWith(session.id);
     await waitFor(() => {
       const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
       expect(lastCall?.mode).toBe('follow');
@@ -2614,6 +2810,450 @@ describe('TerminalView minimal mirror render', () => {
     expect(onResize).not.toHaveBeenCalled();
     view.unmount();
     vi.useRealTimers();
+  });
+
+  it('keeps adaptive-phone rows fixed-height so virtual scrolling and IME bottom alignment stay stable', async () => {
+    const wideRow = '1234567890'.repeat(8);
+    const session = makeSession({
+      revision: 1,
+      lines: [wideRow],
+      bufferTailEndIndex: 1,
+    });
+
+    mockClientWidth = 320;
+    const adaptiveView = render(
+      <div style={{ width: '320px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+          widthMode="adaptive-phone"
+        />
+      </div>,
+    );
+
+    act(() => {
+      ResizeObserverMock.triggerAll();
+    });
+
+    await waitFor(() => {
+      const rows = readRenderedIndexedRows(adaptiveView.container);
+      expect(rows[rows.length - 1]?.text).toBe(wideRow);
+    });
+    const adaptiveRow = adaptiveView.container.querySelector('[data-terminal-row="true"]') as HTMLElement;
+    const adaptiveCellWrap = adaptiveRow?.querySelector(':scope > span') as HTMLElement;
+    expect(adaptiveRow.style.height).toBeTruthy();
+    expect(adaptiveRow.style.height).not.toBe('auto');
+    expect(adaptiveRow.style.minHeight).toBe('');
+    expect(adaptiveCellWrap.style.width).toBe('');
+    expect(adaptiveCellWrap.style.maxWidth).toBe('');
+    expect(adaptiveCellWrap.style.whiteSpace).toBe('pre');
+    adaptiveView.unmount();
+
+    const fixedView = render(
+      <div style={{ width: '320px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+          widthMode="mirror-fixed"
+        />
+      </div>,
+    );
+
+    act(() => {
+      ResizeObserverMock.triggerAll();
+    });
+
+    await waitFor(() => {
+      const rows = readRenderedIndexedRows(fixedView.container);
+      expect(rows[rows.length - 1]?.text).toBe(wideRow);
+    });
+    const fixedRow = fixedView.container.querySelector('[data-terminal-row="true"]') as HTMLElement;
+    const fixedCellWrap = fixedRow?.querySelector(':scope > span') as HTMLElement;
+    expect(fixedCellWrap.style.width).toBe('');
+    expect(fixedCellWrap.style.whiteSpace).toBe('pre');
+  });
+
+  it('pans mirror-fixed content horizontally and restores the offset per session', async () => {
+    const wideRow = '1234567890'.repeat(8);
+    const session = makeSession({
+      revision: 1,
+      lines: [wideRow],
+      bufferTailEndIndex: 1,
+    });
+
+    mockClientWidth = 320;
+    const view = render(
+      <div style={{ width: '320px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+          widthMode="mirror-fixed"
+        />
+      </div>,
+    );
+
+    act(() => {
+      ResizeObserverMock.triggerAll();
+    });
+
+    const scroller = view.container.querySelector('.wterm') as HTMLElement;
+    const grid = view.container.querySelector('.term-grid') as HTMLElement;
+    expect(grid.dataset.horizontalOffsetPx).toBe('0');
+
+    fireEvent.touchStart(scroller, {
+      touches: [{ clientX: 280, clientY: 120 }],
+    });
+    fireEvent.touchMove(scroller, {
+      touches: [{ clientX: 120, clientY: 124 }],
+    });
+    fireEvent.touchEnd(scroller);
+
+    await waitFor(() => {
+      expect(grid.dataset.horizontalOffsetPx).toBe('160');
+      expect(grid.style.transform).toBe('translateX(-160px)');
+    });
+    expect(localStorage.getItem('zterm:terminal:mirror-fixed-horizontal-offsets')).toContain('"s1":160');
+
+    view.unmount();
+    const restored = render(
+      <div style={{ width: '320px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+          widthMode="mirror-fixed"
+        />
+      </div>,
+    );
+
+    act(() => {
+      ResizeObserverMock.triggerAll();
+    });
+
+    await waitFor(() => {
+      const restoredGrid = restored.container.querySelector('.term-grid') as HTMLElement;
+      expect(restoredGrid.dataset.horizontalOffsetPx).toBe('160');
+      expect(restoredGrid.style.transform).toBe('translateX(-160px)');
+    });
+  });
+
+  it('keeps a rightward fixed-content pan from opening the drawer until the horizontal offset reaches zero', async () => {
+    const wideRow = '1234567890'.repeat(8);
+    const session = makeSession({
+      revision: 1,
+      lines: [wideRow],
+      bufferTailEndIndex: 1,
+    });
+    const onSwipeTab = vi.fn();
+
+    mockClientWidth = 320;
+    const view = render(
+      <div style={{ width: '320px', height: '408px' }}>
+        <TerminalTabSwipeSurface
+          sessionId={session.id}
+          active
+          enabled
+          allowedStartEdge="left"
+          allowedDirections="previous"
+          onSwipeTab={onSwipeTab}
+        >
+          <TerminalView
+            sessionId={session.id}
+            initialBufferLines={session.buffer.lines}
+            bufferStartIndex={session.buffer.startIndex}
+            bufferEndIndex={session.buffer.endIndex}
+            bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+            bufferGapRanges={session.buffer.gapRanges}
+            cursorKeysApp={session.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            fontSize={5}
+            widthMode="mirror-fixed"
+          />
+        </TerminalTabSwipeSurface>
+      </div>,
+    );
+
+    act(() => {
+      ResizeObserverMock.triggerAll();
+    });
+
+    const scroller = view.container.querySelector('.wterm') as HTMLElement;
+    const grid = view.container.querySelector('.term-grid') as HTMLElement;
+
+    fireEvent.touchStart(scroller, {
+      touches: [{ clientX: 280, clientY: 120 }],
+    });
+    fireEvent.touchMove(scroller, {
+      touches: [{ clientX: 120, clientY: 124 }],
+    });
+    fireEvent.touchEnd(scroller);
+
+    await waitFor(() => {
+      expect(grid.dataset.horizontalOffsetPx).toBe('160');
+    });
+    onSwipeTab.mockClear();
+
+    fireEvent.touchStart(scroller, {
+      touches: [{ clientX: 56, clientY: 120 }],
+    });
+    fireEvent.touchMove(scroller, {
+      touches: [{ clientX: 200, clientY: 124 }],
+    });
+    fireEvent.touchEnd(scroller);
+
+    await waitFor(() => {
+      expect(grid.dataset.horizontalOffsetPx).toBe('16');
+    });
+    expect(onSwipeTab).not.toHaveBeenCalled();
+
+    fireEvent.touchStart(scroller, {
+      touches: [{ clientX: 56, clientY: 120 }],
+    });
+    fireEvent.touchMove(scroller, {
+      touches: [{ clientX: 96, clientY: 124 }],
+    });
+    fireEvent.touchEnd(scroller);
+
+    await waitFor(() => {
+      expect(grid.dataset.horizontalOffsetPx).toBe('0');
+    });
+    expect(onSwipeTab).not.toHaveBeenCalled();
+
+    fireEvent.touchStart(scroller, {
+      touches: [{ clientX: 56, clientY: 120 }],
+    });
+    fireEvent.touchMove(scroller, {
+      touches: [{ clientX: 200, clientY: 124 }],
+    });
+    fireEvent.touchEnd(scroller);
+
+    expect(onSwipeTab).toHaveBeenCalledTimes(1);
+    expect(onSwipeTab).toHaveBeenCalledWith(session.id, 'previous');
+  });
+
+  it('keeps mirror-fixed positive-offset edge right pan out of the parent drawer gesture from touchstart', async () => {
+    const wideRow = '1234567890'.repeat(8);
+    const session = makeSession({
+      revision: 1,
+      lines: [wideRow],
+      bufferTailEndIndex: 1,
+    });
+    const onParentTouchStart = vi.fn();
+    const onParentTouchMove = vi.fn();
+    const onParentTouchEnd = vi.fn();
+
+    mockClientWidth = 320;
+    const view = render(
+      <div
+        style={{ width: '320px', height: '408px' }}
+        onTouchStart={onParentTouchStart}
+        onTouchMove={onParentTouchMove}
+        onTouchEnd={onParentTouchEnd}
+      >
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+          widthMode="mirror-fixed"
+        />
+      </div>,
+    );
+
+    act(() => {
+      ResizeObserverMock.triggerAll();
+    });
+
+    const scroller = view.container.querySelector('.wterm') as HTMLElement;
+    const grid = view.container.querySelector('.term-grid') as HTMLElement;
+
+    fireEvent.touchStart(scroller, {
+      touches: [{ clientX: 280, clientY: 120 }],
+    });
+    fireEvent.touchMove(scroller, {
+      touches: [{ clientX: 120, clientY: 124 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(scroller, {
+      changedTouches: [{ clientX: 120, clientY: 124 }],
+    });
+
+    await waitFor(() => {
+      expect(grid.dataset.horizontalOffsetPx).toBe('160');
+    });
+    onParentTouchStart.mockClear();
+    onParentTouchMove.mockClear();
+    onParentTouchEnd.mockClear();
+
+    fireEvent.touchStart(scroller, {
+      touches: [{ clientX: 56, clientY: 120 }],
+    });
+    fireEvent.touchMove(scroller, {
+      touches: [{ clientX: 200, clientY: 124 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(scroller, {
+      changedTouches: [{ clientX: 200, clientY: 124 }],
+    });
+
+    await waitFor(() => {
+      expect(grid.dataset.horizontalOffsetPx).toBe('16');
+    });
+    expect(onParentTouchStart).not.toHaveBeenCalled();
+    expect(onParentTouchMove).not.toHaveBeenCalled();
+    expect(onParentTouchEnd).not.toHaveBeenCalled();
+  });
+
+  it('keeps mirror-fixed zero-offset non-edge right pan out of the parent drawer gesture', async () => {
+    const wideRow = '1234567890'.repeat(8);
+    const session = makeSession({
+      revision: 1,
+      lines: [wideRow],
+      bufferTailEndIndex: 1,
+    });
+    const onParentTouchStart = vi.fn();
+    const onParentTouchMove = vi.fn();
+    const onParentTouchEnd = vi.fn();
+
+    mockClientWidth = 320;
+    const view = render(
+      <div
+        style={{ width: '320px', height: '408px' }}
+        onTouchStart={onParentTouchStart}
+        onTouchMove={onParentTouchMove}
+        onTouchEnd={onParentTouchEnd}
+      >
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+          widthMode="mirror-fixed"
+        />
+      </div>,
+    );
+
+    act(() => {
+      ResizeObserverMock.triggerAll();
+    });
+
+    const scroller = view.container.querySelector('.wterm') as HTMLElement;
+    const grid = view.container.querySelector('.term-grid') as HTMLElement;
+    expect(grid.dataset.horizontalOffsetPx).toBe('0');
+
+    fireEvent.touchStart(scroller, {
+      touches: [{ clientX: 180, clientY: 120 }],
+    });
+    fireEvent.touchMove(scroller, {
+      touches: [{ clientX: 260, clientY: 124 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(scroller, {
+      changedTouches: [{ clientX: 260, clientY: 124 }],
+    });
+
+    expect(grid.dataset.horizontalOffsetPx).toBe('0');
+    expect(onParentTouchStart).not.toHaveBeenCalled();
+    expect(onParentTouchMove).not.toHaveBeenCalled();
+    expect(onParentTouchEnd).not.toHaveBeenCalled();
+  });
+
+  it('does not pan adaptive-phone content horizontally', async () => {
+    const wideRow = '1234567890'.repeat(8);
+    const session = makeSession({
+      revision: 1,
+      lines: [wideRow],
+      bufferTailEndIndex: 1,
+    });
+
+    mockClientWidth = 320;
+    const view = render(
+      <div style={{ width: '320px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={session.buffer.gapRanges}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+          widthMode="adaptive-phone"
+        />
+      </div>,
+    );
+
+    act(() => {
+      ResizeObserverMock.triggerAll();
+    });
+
+    const scroller = view.container.querySelector('.wterm') as HTMLElement;
+    const grid = view.container.querySelector('.term-grid') as HTMLElement;
+    fireEvent.touchStart(scroller, {
+      touches: [{ clientX: 280, clientY: 120 }],
+    });
+    fireEvent.touchMove(scroller, {
+      touches: [{ clientX: 120, clientY: 124 }],
+    });
+    fireEvent.touchEnd(scroller);
+
+    expect(grid.dataset.horizontalOffsetPx).toBeUndefined();
+    expect(grid.style.transform).toBe('');
+    expect(localStorage.getItem('zterm:terminal:mirror-fixed-horizontal-offsets')).toBeNull();
   });
 
   it('only emits adaptive-phone upstream resize when width truth changes, not for pure height changes', async () => {

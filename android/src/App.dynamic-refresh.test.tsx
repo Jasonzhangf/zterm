@@ -463,6 +463,7 @@ vi.mock('./hooks/useSessionHistoryStorage', () => ({
 
 const openTerminalPageSpy = vi.fn();
 const fetchTmuxSessionsMock = vi.fn();
+const createTmuxSessionMock = vi.fn();
 
 const tmuxPickerHarness = vi.hoisted(() => {
   let latestProps: any = null;
@@ -702,6 +703,7 @@ vi.mock('./pages/TerminalPage', () => ({
 }));
 
 vi.mock('./lib/tmux-sessions', () => ({
+  createTmuxSession: (...args: unknown[]) => createTmuxSessionMock(...args),
   fetchTmuxSessions: (...args: unknown[]) => fetchTmuxSessionsMock(...args),
 }));
 
@@ -715,6 +717,8 @@ describe('App dynamic refresh matrix', () => {
     openTerminalPageSpy.mockClear();
     terminalPageRenderSpy.mockClear();
     fetchTmuxSessionsMock.mockReset();
+    createTmuxSessionMock.mockReset();
+    createTmuxSessionMock.mockResolvedValue([]);
     connectionsPageHarness.reset();
     fetchTmuxSessionsMock.mockImplementation(async (target: { bridgeHost?: string; bridgePort?: number }) => {
       if (target?.bridgeHost === '100.127.23.27' && target?.bridgePort === 3333) {
@@ -1025,6 +1029,76 @@ describe('App dynamic refresh matrix', () => {
     });
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('s2', { refreshSource: 'explicit-resume' });
     expect(openTerminalPageSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('projects bridge server presets on Home and opens them directly without requiring Relay login', async () => {
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'connections' }));
+    const bridgeSettings = {
+      servers: [{
+        id: '100.66.1.82:3333::daemon:mac-studio',
+        name: 'Mac Studio Tailscale',
+        targetHost: '100.66.1.82',
+        targetPort: 3333,
+        authToken: 'token-a',
+        relayHostId: 'mac-studio',
+      }],
+      targetHost: '100.66.1.82',
+      targetPort: 3333,
+      targetAuthToken: 'token-a',
+      traversalRelay: undefined,
+    };
+
+    render(
+      <AppContent bridgeSettings={bridgeSettings as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(connectionsPageHarness.readProps()).toBeTruthy());
+    const props = connectionsPageHarness.readProps();
+    expect(props.relaySettings).toBeUndefined();
+    expect(props.savedConnections).toEqual([
+      expect.objectContaining({
+        id: 'bridge-preset:100.66.1.82:3333::daemon:mac-studio',
+        name: 'Mac Studio Tailscale',
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        authToken: 'token-a',
+      }),
+    ]);
+
+    sessionHarness.createSession.mockClear();
+    sessionHarness.createSession.mockReturnValueOnce('runtime:mac-studio:zterm-20260715-060708');
+    openTerminalPageSpy.mockClear();
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-15T06:07:08.000Z'));
+    await act(async () => {
+      props.onOpenSavedConnection(props.savedConnections[0]);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(createTmuxSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        authToken: 'token-a',
+      }),
+      expect.any(Object),
+      'zterm-20260715-060708',
+    );
+    expect(sessionHarness.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        sessionName: 'zterm-20260715-060708',
+        authToken: 'token-a',
+      }),
+      expect.objectContaining({ activate: false }),
+    );
+    vi.useRealTimers();
+    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toContain('runtime:mac-studio:zterm-20260715-060708'));
+    expect(tmuxPickerHarness.readProps()).toEqual(expect.objectContaining({ open: false }));
   });
 
   // NOTE: d505c65 changed inputResetEpoch from React state to a ref to eliminate
