@@ -1158,3 +1158,10 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - Regression shape: `TerminalPage.session-drawer.test.tsx` must model first tap on remote-only row, session-open owner returning `remote-opened`, parent rerender with the new Session active, and DOM center rendering `terminal-view-remote-opened` without a second tap. Negative guard: no fake render/switch of the remote placeholder id.
 - Open tabs remain current-process truth. Explicit runtime switch tests must require `switchSession(target, { refreshSource:'explicit-resume' })` but must not expect legacy `ACTIVE_SESSION` localStorage persistence to revive.
 - Home/Connections remains server-entry-only; fixed Relay account URL ownership lives in Settings `RelayAccountSettingsSection`, not `ConnectionsPage`.
+
+## 2026-07-16 Android Settings and upgrade entry truth
+
+- Home can be server-entry-only, but it must keep a visible Settings entry. Icon-only gear in the header is insufficient after removing old group/config screens because users may not recognize it as the upgrade/config path.
+- Terminal portrait shell must also expose Settings because long-running usage can stay inside the terminal page; `TerminalPage` must consume `onOpenSettings` instead of accepting it unused.
+- Upgrade logic remains uniquely owned by Settings/App Update (`settings.config_transfer`, `AppUpdateSection`). Home and Terminal may only navigate to Settings; they must not duplicate update checking, install, or manifest state.
+- Regression shape: `ConnectionsPage.test.tsx` locks a visible `设置和升级` Home entry, `TerminalPage.session-drawer.test.tsx` locks the portrait shell entry, and `SettingsPage.relay-account.test.tsx` locks `版本与升级` before server/relay configuration with `检查更新` / `下载并安装` controls.

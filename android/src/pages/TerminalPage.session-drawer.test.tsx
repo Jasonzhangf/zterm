@@ -195,6 +195,34 @@ describe('TerminalPage portrait session drawer', () => {
     expect(onSwitchSession).toHaveBeenCalledWith(targetSessionId);
   });
 
+  it('exposes Settings and upgrade entry from the portrait terminal shell', () => {
+    const sessions = [makeSession('s1')];
+    const onOpenSettings = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenSettings={onOpenSettings}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '设置和升级' }));
+    expect(onOpenSettings).toHaveBeenCalledTimes(1);
+  });
+
   it('routes drawer plus action to the quick tab picker', () => {
     const sessions = [makeSession('s1'), makeSession('s2')];
     const onOpenQuickTabPicker = vi.fn();

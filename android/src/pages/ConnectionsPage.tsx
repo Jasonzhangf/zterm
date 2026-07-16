@@ -222,22 +222,29 @@ export function ConnectionsPage({
           </div>
           <button
             type="button"
-            aria-label="Open settings"
-            title="Settings"
+            aria-label="设置和升级"
+            title="设置和升级"
             onClick={onOpenSettings}
             style={{
-              width: '48px',
+              minWidth: '78px',
               height: '48px',
+              padding: '0 12px',
               borderRadius: '16px',
               border: `1px solid ${mobileTheme.colors.lightBorder}`,
               backgroundColor: '#ffffff',
               color: mobileTheme.colors.lightText,
-              fontSize: '21px',
+              fontSize: '14px',
+              fontWeight: 900,
               boxShadow: mobileTheme.shadow.soft,
               flex: '0 0 auto',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              gap: '6px',
             }}
           >
-            ⚙
+            <span aria-hidden="true" style={{ fontSize: '18px', lineHeight: 1 }}>⚙</span>
+            <span>设置</span>
           </button>
         </header>
 

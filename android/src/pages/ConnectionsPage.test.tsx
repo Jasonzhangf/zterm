@@ -72,6 +72,7 @@ describe('ConnectionsPage server home', () => {
     expect(screen.getAllByText('Tailscale').length).toBeGreaterThan(0);
     expect(screen.getByTestId('saved-connection-row')).toBeTruthy();
     expect(screen.getByTestId('active-session-row')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '设置和升级' })).toBeTruthy();
     expect(screen.getByRole('button', { name: 'Configure servers' })).toBeTruthy();
     expect(screen.queryByLabelText('Relay account')).toBeNull();
     expect(screen.queryByLabelText('Relay password')).toBeNull();
@@ -112,7 +113,7 @@ describe('ConnectionsPage server home', () => {
     render(<ConnectionsPage onOpenSettings={onOpenSettings} />);
 
     expect(screen.getByText('No configured servers')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Open settings' }));
+    fireEvent.click(screen.getByRole('button', { name: '设置和升级' }));
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 });

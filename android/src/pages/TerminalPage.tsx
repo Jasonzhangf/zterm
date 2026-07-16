@@ -899,7 +899,7 @@ function TerminalPageComponent({
   onLiveSessionIdsChange,
   onImagePaste,
   onFileAttach,
-  onOpenSettings: _onOpenSettings,
+  onOpenSettings,
   onRequestRemoteScreenshot,
   quickActions,
   shortcutActions,
@@ -2913,6 +2913,39 @@ function TerminalPageComponent({
             >
               ←
             </button>
+            {onOpenSettings ? (
+              <button
+                type="button"
+                aria-label="设置和升级"
+                data-testid="terminal-portrait-settings-button"
+                onClick={onOpenSettings}
+                style={{
+                  position: 'absolute',
+                  top: `${Math.max(8, headerTopInsetPx + 8)}px`,
+                  right: '10px',
+                  zIndex: 15,
+                  minWidth: '64px',
+                  height: '34px',
+                  padding: '0 10px',
+                  borderRadius: '12px',
+                  border: '1px solid rgba(255,255,255,0.08)',
+                  background: 'rgba(10, 16, 26, 0.64)',
+                  color: '#dce8ff',
+                  fontSize: '13px',
+                  fontWeight: 850,
+                  lineHeight: 1,
+                  boxShadow: '0 8px 18px rgba(0,0,0,0.18)',
+                  backdropFilter: 'blur(8px)',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '5px',
+                }}
+              >
+                <span aria-hidden="true" style={{ fontSize: '15px', lineHeight: 1 }}>⚙</span>
+                <span>设置</span>
+              </button>
+            ) : null}
             <TerminalSessionDrawer
               open={sessionDrawerOpen}
               topInsetPx={headerTopInsetPx}

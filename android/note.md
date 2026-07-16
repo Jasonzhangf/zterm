@@ -2401,3 +2401,11 @@ Need runtime debug to confirm:
 - Verification: drawer/session-open/open-tab focused suite 4 files / 68 tests PASS; open-tab/history/StageShell/transport suite 6 files / 77 tests PASS; `type-check` PASS; feature/resource/mainline registry gates 7 files / 48 tests PASS; `build:android` PASS with terminal contracts 48 files / 574 tests and common flows 76 tests.
 - APK published: `0.1.3.2127` (`versionCode=1032127`, size `5848294`, sha256 `b411f9ac8718374386679cab1a1bd8c78fe6f8ede0a7216a0d7ef5309f28eb20`) to `android/update-dist/` and `/Users/fanzhang/.zterm/updates/`.
 - L5 gap: `adb devices -l` returned no online device, so no real-device drawer tap claim is made for 2127.
+
+## 2026-07-16 settings/update entry visibility
+
+- User issue: after Home simplification, the app felt like it had no Settings or upgrade entry. Source audit confirmed Home still had an icon-only gear, but Terminal portrait destructured `onOpenSettings` as `_onOpenSettings` and never rendered an entry.
+- Architecture mapping: Home entry visibility stays in `connections.history_projection` / `relay.directory_ui`; Settings upgrade controls stay in `settings.config_transfer` via `AppUpdateSection`; Terminal only emits the existing `onOpenSettings` UI intent and does not own update logic.
+- Red/green: focused tests first failed for missing `设置和升级` Home/Terminal buttons and missing `settings-update-section`; after the fix, Home exposes a visible settings button, Terminal portrait exposes a settings button, and Settings moves `版本与升级` above server/relay configuration with update controls.
+- Verification: focused entry/settings suite 38 PASS, feature/resource/function/mainline gates 48 PASS, type-check PASS, `build:android` PASS with terminal contracts 48 files / 574 tests, common flows 76 tests, relay smoke, Vite/Capacitor/Gradle, and update bundle manifest/hash verification.
+- APK published: `0.1.3.2128` (`versionCode=1032128`, size `5848522`, sha256 `2643cb4fca29c3ad64ea965309def4005bb04b8b078abec852413694169b8e57`) to `android/update-dist/` and `/Users/fanzhang/.zterm/updates/`; latest aliases hash-identical. L5 gap: `adb devices -l` returned no online device, so no installed-device visual proof is claimed.

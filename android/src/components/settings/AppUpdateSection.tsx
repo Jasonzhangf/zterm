@@ -16,7 +16,7 @@ interface AppUpdateSectionProps {
   onUpdateDraftChange: (updater: (current: AppUpdatePreferences) => AppUpdatePreferences) => void;
   onCheckForUpdate: () => void;
   onInstallUpdate: () => void;
- onResetUpdateIgnorePolicy: () => void;
+  onResetUpdateIgnorePolicy: () => void;
   onExportConfig?: () => void;
   onImportConfig?: () => void;
   configExporting?: boolean;
@@ -50,8 +50,8 @@ export function AppUpdateSection({
   onRollback,
 }: AppUpdateSectionProps) {
   return (
-    <div style={settingsSectionStyle()}>
-      <SettingsSectionTitle>App Update</SettingsSectionTitle>
+    <div data-testid="settings-update-section" style={settingsSectionStyle()}>
+      <SettingsSectionTitle>版本与升级</SettingsSectionTitle>
 
       <div>
         <div style={{ marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>Manifest URL</div>

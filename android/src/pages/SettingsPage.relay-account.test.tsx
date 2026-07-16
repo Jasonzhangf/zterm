@@ -165,4 +165,18 @@ describe('SettingsPage Relay account configuration', () => {
       targetAuthToken: 'wterm-4123456',
     }));
   });
+
+  it('keeps upgrade controls visible before server and relay configuration', () => {
+    const onCheckForUpdate = vi.fn();
+    renderSettings({ onCheckForUpdate });
+
+    const updateSection = screen.getByTestId('settings-update-section');
+    const serverNameInput = screen.getByLabelText('Server name');
+    expect(updateSection.compareDocumentPosition(serverNameInput) & Node.DOCUMENT_POSITION_FOLLOWING).not.toBe(0);
+    expect(screen.getByText('版本与升级')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '下载并安装' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '检查更新' }));
+    expect(onCheckForUpdate).toHaveBeenCalledTimes(1);
+  });
 });

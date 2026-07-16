@@ -189,19 +189,6 @@ export function SettingsPage({
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '18px 18px 32px' }}>
-        <RememberedServersSection
-          settings={draft}
-          onSettingsChange={(updater) => setDraft((current) => updater(current))}
-          onRemoveDefaultServer={() =>
-            setDraft((current) => removeBridgeServer(current, defaultServer?.id || current.defaultServerId || ''))
-          }
-        />
-
-        <RelayAccountSettingsSection
-          relaySettings={draft.traversalRelay}
-          onRelaySettingsChange={handleRelaySettingsChange}
-        />
-
         <AppUpdateSection
           currentVersionName={currentVersionName}
           currentVersionCode={currentVersionCode}
@@ -216,7 +203,7 @@ export function SettingsPage({
           onUpdateDraftChange={(updater) => setUpdateDraft((current) => updater(current))}
           onCheckForUpdate={() => onCheckForUpdate(updateDraft)}
           onInstallUpdate={onInstallUpdate}
-         onResetUpdateIgnorePolicy={onResetUpdateIgnorePolicy}
+          onResetUpdateIgnorePolicy={onResetUpdateIgnorePolicy}
           onExportConfig={onExportConfig}
           onImportConfig={onImportConfig}
           configExporting={configExporting}
@@ -224,6 +211,19 @@ export function SettingsPage({
           rollbackBackup={rollbackBackup}
           isRollingBack={isRollingBack}
           onRollback={onRollback}
+        />
+
+        <RememberedServersSection
+          settings={draft}
+          onSettingsChange={(updater) => setDraft((current) => updater(current))}
+          onRemoveDefaultServer={() =>
+            setDraft((current) => removeBridgeServer(current, defaultServer?.id || current.defaultServerId || ''))
+          }
+        />
+
+        <RelayAccountSettingsSection
+          relaySettings={draft.traversalRelay}
+          onRelaySettingsChange={handleRelaySettingsChange}
         />
 
         <div style={settingsSectionStyle()}>
