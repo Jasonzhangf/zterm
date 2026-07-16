@@ -371,7 +371,7 @@
           "to": "Connections",
           "owner_feature": "relay.directory_ui",
           "semantic_input": "home route plus saved-host, bridge preset, active-session, and optional relay directory truth",
-          "semantic_output": "deduped connectable server rows and active session resume entries; Relay auth remains in Settings",
+          "semantic_output": "deduped connectable server rows, merged relay route candidates, explicit Auto/Relay open intents, and active session resume entries; Relay auth remains in Settings",
           "status": "anchored",
           "edge_id": "android_mainline:App->Connections",
           "resource_from": "resource.transport_target",

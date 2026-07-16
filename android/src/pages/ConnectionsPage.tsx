@@ -1,4 +1,5 @@
 import { type CSSProperties, useMemo } from 'react';
+import { hasRelayRtcCandidate } from '../lib/home-connection-projection';
 import { mobileTheme } from '../lib/mobile-ui';
 import type { Host, Session } from '../lib/types';
 
@@ -23,6 +24,7 @@ interface ConnectionsPageProps {
   activeSessionId?: string | null;
   onResumeSession?: (sessionId: string) => void;
   onOpenSavedConnection?: (host: Host) => void;
+  onOpenSavedConnectionViaRelay?: (host: Host) => void;
   onOpenSettings: () => void;
 }
 
@@ -86,7 +88,7 @@ function getHostEndpoint(host: Host) {
 function getHostBadge(host: Host) {
   const tagText = (host.tags || []).join(' ').toLowerCase();
   const endpoint = getHostEndpoint(host).toLowerCase();
-  if ((host.relayEndpointCandidates || []).length > 0 && !host.bridgeHost.trim()) {
+  if (hasRelayRtcCandidate(host) && !host.bridgeHost.trim()) {
     return 'Relay';
   }
   if (tagText.includes('tailscale') || endpoint.includes('100.') || endpoint.includes('.ts.net')) {
@@ -153,6 +155,7 @@ export function ConnectionsPage({
   activeSessionId = null,
   onResumeSession,
   onOpenSavedConnection,
+  onOpenSavedConnectionViaRelay,
   onOpenSettings,
 }: ConnectionsPageProps) {
   const orderedActiveSessions = useMemo(() => [...activeSessions].sort((left, right) => {
@@ -372,59 +375,100 @@ export function ConnectionsPage({
             <div data-testid="saved-connection-list" style={{ display: 'grid', gap: '10px' }}>
               {orderedSavedConnections.map((host) => {
                 const endpoint = getHostEndpoint(host);
+                const hostBadge = getHostBadge(host);
+                const relayAvailable = hasRelayRtcCandidate(host);
                 return (
-                  <button
+                  <div
                     key={host.id}
-                    type="button"
                     data-testid="saved-connection-row"
-                    aria-label={`Open ${host.name}`}
-                    onClick={() => onOpenSavedConnection?.(host)}
                     style={{
                       width: '100%',
                       minHeight: '82px',
-                      padding: '13px 12px',
                       border: `1px solid ${mobileTheme.colors.lightBorder}`,
                       borderRadius: '20px',
                       backgroundColor: '#ffffff',
                       color: mobileTheme.colors.lightText,
                       display: 'grid',
-                      gridTemplateColumns: 'auto 1fr auto',
+                      gridTemplateColumns: relayAvailable ? '1fr auto' : '1fr',
                       alignItems: 'center',
-                      gap: '12px',
                       textAlign: 'left',
                       boxShadow: mobileTheme.shadow.soft,
+                      overflow: 'hidden',
                     }}
                   >
-                    <ServerGlyph label={host.name} />
-                    <span style={{ minWidth: 0 }}>
-                      <span style={{ display: 'block', fontSize: '15px', fontWeight: 900, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {host.name}
-                      </span>
-                      <span style={{ display: 'block', marginTop: '5px', color: mobileTheme.colors.lightMuted, fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {endpoint}
-                      </span>
-                      <span style={{ marginTop: '8px', display: 'flex', gap: '6px', minWidth: 0, flexWrap: 'wrap' }}>
-                        <HomeBadge>{getHostBadge(host)}</HomeBadge>
-                        {host.pinned ? <HomeBadge>Pinned</HomeBadge> : null}
-                      </span>
-                    </span>
-                    <span
+                    <button
+                      type="button"
+                      data-testid="saved-connection-open"
+                      aria-label={`Open ${host.name}`}
+                      onClick={() => onOpenSavedConnection?.(host)}
                       style={{
-                        width: '32px',
-                        height: '32px',
-                        borderRadius: '12px',
+                        width: '100%',
+                        minHeight: '82px',
+                        padding: '13px 12px',
+                        border: 'none',
+                        backgroundColor: 'transparent',
+                        color: 'inherit',
                         display: 'grid',
-                        placeItems: 'center',
-                        backgroundColor: '#eef3f8',
-                        color: mobileTheme.colors.lightMuted,
-                        fontSize: '20px',
-                        lineHeight: 1,
+                        gridTemplateColumns: 'auto 1fr auto',
+                        alignItems: 'center',
+                        gap: '12px',
+                        textAlign: 'left',
+                        minWidth: 0,
                       }}
-                      aria-hidden="true"
                     >
-                      ›
-                    </span>
-                  </button>
+                      <ServerGlyph label={host.name} />
+                      <span style={{ minWidth: 0 }}>
+                        <span style={{ display: 'block', fontSize: '15px', fontWeight: 900, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {host.name}
+                        </span>
+                        <span style={{ display: 'block', marginTop: '5px', color: mobileTheme.colors.lightMuted, fontSize: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {endpoint}
+                        </span>
+                        <span style={{ marginTop: '8px', display: 'flex', gap: '6px', minWidth: 0, flexWrap: 'wrap' }}>
+                          <HomeBadge>{hostBadge}</HomeBadge>
+                          {relayAvailable && hostBadge !== 'Relay' ? <HomeBadge>Relay 可用</HomeBadge> : null}
+                          {host.pinned ? <HomeBadge>Pinned</HomeBadge> : null}
+                        </span>
+                      </span>
+                      <span
+                        style={{
+                          width: '32px',
+                          height: '32px',
+                          borderRadius: '12px',
+                          display: 'grid',
+                          placeItems: 'center',
+                          backgroundColor: '#eef3f8',
+                          color: mobileTheme.colors.lightMuted,
+                          fontSize: '20px',
+                          lineHeight: 1,
+                        }}
+                        aria-hidden="true"
+                      >
+                        ›
+                      </span>
+                    </button>
+                    {relayAvailable ? (
+                      <button
+                        type="button"
+                        data-testid="saved-connection-relay-button"
+                        aria-label={`Open ${host.name} with Relay`}
+                        onClick={() => onOpenSavedConnectionViaRelay?.(host)}
+                        style={{
+                          alignSelf: 'stretch',
+                          minWidth: '68px',
+                          padding: '0 12px',
+                          border: 'none',
+                          borderLeft: `1px solid ${mobileTheme.colors.lightBorder}`,
+                          backgroundColor: '#f4f8fb',
+                          color: mobileTheme.colors.lightText,
+                          fontSize: '12px',
+                          fontWeight: 950,
+                        }}
+                      >
+                        Relay
+                      </button>
+                    ) : null}
+                  </div>
                 );
               })}
             </div>

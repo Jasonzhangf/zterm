@@ -48,6 +48,7 @@ describe('ConnectionsPage server home', () => {
   it('shows configured servers and active sessions without embedding Relay login on Home', () => {
     const onResumeSession = vi.fn();
     const onOpenSavedConnection = vi.fn();
+    const onOpenSavedConnectionViaRelay = vi.fn();
     const onOpenSettings = vi.fn();
     const savedHost = makeSavedHost();
     const activeSession = makeActiveSession();
@@ -59,6 +60,7 @@ describe('ConnectionsPage server home', () => {
         activeSessionId={activeSession.id}
         onResumeSession={onResumeSession}
         onOpenSavedConnection={onOpenSavedConnection}
+        onOpenSavedConnectionViaRelay={onOpenSavedConnectionViaRelay}
         onOpenSettings={onOpenSettings}
       />,
     );
@@ -85,8 +87,53 @@ describe('ConnectionsPage server home', () => {
     expect(onResumeSession).toHaveBeenCalledWith(activeSession.id);
     fireEvent.click(screen.getByRole('button', { name: 'Open Mac Studio Tailscale' }));
     expect(onOpenSavedConnection).toHaveBeenCalledWith(savedHost);
+    expect(onOpenSavedConnectionViaRelay).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: 'Configure servers' }));
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('shows an explicit Relay action when a saved server row has relay-rtc candidates', () => {
+    const onOpenSavedConnection = vi.fn();
+    const onOpenSavedConnectionViaRelay = vi.fn();
+    const savedHost = makeSavedHost({
+      relayHostId: 'mac-studio',
+      relayEndpointCandidates: [
+        {
+          id: 'direct:tailscale:mac-studio',
+          kind: 'tailscale',
+          host: 'mac-studio.tailnet.ts.net',
+          port: 3333,
+          authRequired: true,
+          lastSeenAt: '2026-07-16T10:00:00.000Z',
+        },
+        {
+          id: 'relay-rtc:mac-studio',
+          kind: 'relay-rtc',
+          relayHostId: 'mac-studio',
+          authRequired: true,
+          lastSeenAt: '2026-07-16T10:00:00.000Z',
+        },
+      ],
+    });
+
+    render(
+      <ConnectionsPage
+        savedConnections={[savedHost]}
+        onOpenSavedConnection={onOpenSavedConnection}
+        onOpenSavedConnectionViaRelay={onOpenSavedConnectionViaRelay}
+        onOpenSettings={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText('Tailscale')).toBeTruthy();
+    expect(screen.getByText('Relay 可用')).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open Mac Studio Tailscale' }));
+    expect(onOpenSavedConnection).toHaveBeenCalledWith(savedHost);
+    expect(onOpenSavedConnectionViaRelay).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Open Mac Studio Tailscale with Relay' }));
+    expect(onOpenSavedConnectionViaRelay).toHaveBeenCalledWith(savedHost);
   });
 
   it('renders a relay-only server row with daemon identity instead of an empty endpoint', () => {

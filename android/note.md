@@ -1,3 +1,10 @@
+# 2026-07-16 Relay Home visible route entry
+
+- 现场：Settings 已登录 Relay，但 Home 没有显式 Relay 选项；用户无法知道或选择 Relay。代码证据：`ConnectionsPage.getHostBadge()` 只有 `bridgeHost` 为空时才显示 `Relay`，saved Tailscale/direct row 即使有 `relay-rtc` 候选也显示 Tailscale；`projectHomeSavedConnections()` dedupe 同 daemon row 时会保留 saved row 但丢掉 relay directory endpoint candidates。
+- 架构映射：`feature_id=relay.directory_ui`，资源 `resource.ui_projection -> resource.transport_target`。唯一修复面是 Home projection helper、ConnectionsPage 投影、App 到 session-open owner 的 intent；禁止改 daemon、TerminalView、buffer/renderer、transport lifecycle。
+- 测试设计：`docs/testing/relay-login-home-and-ephemeral-tabs-test-design.md` 增加 same-daemon saved row 合并 Relay candidates、Home Auto/Relay 双 intent、Relay action 不走 direct fallback 的正反门禁。
+- 实现方向：新增 `home-connection-projection.ts` 作为 Home server rows 唯一 projection helper；同 daemon dedupe 时 merge `relayEndpointCandidates/relayHostId/relayDeviceId`；Home row 主点击保留 Auto，`relay-rtc` 存在时显示 `Relay 可用` 与独立 `Relay` 按钮；Relay 按钮构造 `transportMode='webrtc'` 且只带 `relay-rtc` candidates 的 Host 后交给现有 `useSessionOpenActions.handleOpenSavedConnection`。
+
 # 2026-07-16 Preview remote-only selection auto materialize
 
 - 现场：drawer 预览多选时，远端 catalog row 还没本地打开会显示“该 session 尚未打开，不能加入实时预览”，导致 Jason 不能直接把远端 session 加入预览。

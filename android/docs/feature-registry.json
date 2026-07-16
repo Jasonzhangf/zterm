@@ -683,6 +683,8 @@
       "allowed_paths": [
         "src/lib/traversal-relay-client.ts",
         "src/lib/traversal-relay-client.test.ts",
+        "src/lib/home-connection-projection.ts",
+        "src/lib/home-connection-projection.test.ts",
         "src/hooks/useTraversalRelayAccount.ts",
         "src/hooks/useTraversalRelayAccount.test.tsx",
         "src/lib/session-picker.ts",
@@ -706,6 +708,7 @@
         "src/components/TerminalView.tsx"
       ],
       "required_gates": [
+        "src/lib/home-connection-projection.test.ts",
         "src/lib/traversal-relay-client.test.ts",
         "src/hooks/useTraversalRelayAccount.test.tsx",
         "src/lib/session-picker.test.ts",

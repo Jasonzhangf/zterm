@@ -13,9 +13,10 @@
 2. Relay logged-out state is not a navigation gate: saved connections, bridge presets, active in-process Sessions, and Settings remain visible.
 3. The user opens Settings to add/edit server presets or provide Relay account/password; the client sends login to `https://relay.codewhisper.cc:18443/relay/`.
 4. A successful Settings login stores token/account/directory truth, updates bridge relay settings, starts the existing account device stream, and adds synchronized route/device candidates to Home projection.
-5. Relay account directory can augment connection candidates, including Tailscale/local/direct endpoints, but it must not delete, replace, or hide direct saved-host truth.
+5. Relay account directory can augment connection candidates, including Tailscale/local/direct endpoints and `relay-rtc`, but it must not delete, replace, or hide direct saved-host truth. If the same daemon already has a saved direct/Tailscale Home row, Home must merge the Relay route candidates into that row so Relay remains visible and usable.
 6. The home page projects active runtime Sessions and server rows only as entry points. Server row tap emits session-open owner intent and enters Terminal directly; Session discovery and advanced Session actions remain in the terminal drawer/picker.
-7. Open tabs exist only for the current app process. A reload/cold launch starts with no tabs and does not restore `OPEN_TABS`, `ACTIVE_SESSION`, or saved tab lists.
+7. A Home server row with a `relay-rtc` candidate must expose an explicit Relay action in addition to the normal Auto row tap. Auto keeps the existing route chooser; Relay emits the same session-open owner intent with a `webrtc`-only Host target and without direct endpoint fallback candidates.
+8. Open tabs exist only for the current app process. A reload/cold launch starts with no tabs and does not restore `OPEN_TABS`, `ACTIVE_SESSION`, or saved tab lists.
 
 ## White-Box Positive
 
@@ -29,6 +30,8 @@
 - Successful Settings login emits the returned `TraversalRelayClientSettings` to the App bridge-settings owner.
 - Settings server form upserts bridge presets; Home projects the newly configured server.
 - Successful login can add synchronized Relay/device route candidates while preserving the saved direct/Tailscale host rows.
+- Successful login can merge Relay route candidates into an existing saved direct/Tailscale Home row for the same daemon, and that row shows an explicit Relay action.
+- The explicit Relay Home action builds a `transportMode='webrtc'` target with only `relay-rtc` route candidates; direct/Tailscale endpoints remain available only to the Auto route.
 - Relay account persistence retains token/account/directory truth but never retains the plaintext login password.
 - Runtime open/close/switch still updates the in-memory open-tab projection during the current process.
 
@@ -42,6 +45,7 @@
 - Relay login failure must not hide or disable saved direct/Tailscale rows.
 - Relay logout clears relay account/bridge relay settings without touching saved Hosts, active runtime Sessions, or open-tab truth.
 - Relay account directory projection must not replace saved-host identity or become the owner of Tailscale/local direct connection truth.
+- The explicit Relay Home action must not fall back to direct/Tailscale candidates when no `relay-rtc` route is present; no Relay button is rendered for that row.
 - Cold bootstrap ignores and removes legacy `OPEN_TABS`, `ACTIVE_SESSION`, and `SAVED_TAB_LISTS` storage.
 - Runtime tab changes do not write those storage keys.
 
@@ -52,6 +56,7 @@
 - Render Settings, submit credentials, and assert fixed-domain login and explicit busy/error states without removing saved/active Home rows.
 - Render Settings, add a direct server, save, and assert bridge settings receive the preset.
 - Render the signed-in Home and assert relay directory daemon devices can be projected as server rows, with no Session group controls.
+- Render the signed-in Home with a saved Tailscale row plus a Relay directory device for the same daemon and assert there is one server row, the saved direct display remains, `Relay 可用` is visible, and the Relay action emits the dedicated Relay open intent.
 - Exercise logout and assert the account owner and App relay-settings owner are both cleared while saved/active rows remain rendered.
 - Mount open-tab runtime with stale legacy storage and prove startup remains empty and legacy keys are removed.
 
@@ -63,6 +68,7 @@
 - Logged out: open Settings, add a server preset, save, and prove Home shows the new server row.
 - Logged out with an active current-process Session: tap Resume and prove Terminal becomes reachable without a Relay token.
 - Login with a real relay account in Settings after DNS is configured; verify account device stream and daemon rows appear on Home as server candidates.
+- With a saved Tailscale server and an online Relay daemon for the same host, verify Home shows Relay as an available route and that tapping the Relay action opens Terminal through the Relay route.
 - Login/logout with saved Tailscale connections present; prove the saved rows remain visible and usable.
 - Open multiple Sessions through the terminal drawer, terminate/relaunch the app, and prove no tabs are restored.
 

@@ -99,6 +99,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 ### 2.9 连接模型拆分规则
 - mobile 的连接真源必须显式区分 `bridgeHost / bridgePort / sessionName`；禁止再用 `host/username` 混装 server 与 tmux session 语义
 - Android Home 必须把三类入口独立投影：current-process active Sessions、saved direct/Tailscale Hosts、optional Relay account/directory。Relay 未登录、登录失败或退出登录不得隐藏、禁用或删除前两类；Relay directory 只补 route/device candidates，不得成为 saved Host/Tailscale truth owner。
+- Android Home 的 Relay 路由必须显式可见：同 daemon 的 saved direct/Tailscale row 要合并 Relay directory `relayEndpointCandidates/relayHostId/relayDeviceId`，但保留 saved row 身份和显示端点；有 `relay-rtc` 时显示 Relay 可用和独立 Relay action。Relay action 只能构造 `transportMode='webrtc'` 且只带 `relay-rtc` candidates 的 Host 交给 session-open owner，禁止回落到 direct/Tailscale candidates 或让 Relay directory 替换 saved Host truth。
 - Android Home 改版为 server-entry-only 时，仍必须保留**显式可见**的设置/升级入口；不要只留无文字齿轮或把入口藏在 Relay/login 语境里。Terminal 竖屏 shell 也必须有 Settings 入口，因为用户可能长期停留在终端页。升级实现仍只属于 Settings 的 App Update owner，Home/Terminal 只能发 open-settings intent，不新增第二套升级逻辑。
 - Home 点击 saved Host 必须把 intent 交给 `useSessionOpenActions` 打开既有 picker；点击 active Session 必须走 open-tab/session owner resume。禁止 Home 直接 create/close session、写 Host storage、恢复 cold-start tabs，或用 Relay access token 做导航 gate。
 - terminal header / live session / tab 文案必须能直接看出 `server + session` 组合，否则多 server / 多 tmux session 场景会失真
