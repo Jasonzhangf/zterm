@@ -2430,3 +2430,22 @@ Need runtime debug to confirm:
 - Red/green: focused tests first failed for missing `设置和升级` Home/Terminal buttons and missing `settings-update-section`; after the fix, Home exposes a visible settings button, Terminal portrait exposes a settings button, and Settings moves `版本与升级` above server/relay configuration with update controls.
 - Verification: focused entry/settings suite 38 PASS, feature/resource/function/mainline gates 48 PASS, type-check PASS, `build:android` PASS with terminal contracts 48 files / 574 tests, common flows 76 tests, relay smoke, Vite/Capacitor/Gradle, and update bundle manifest/hash verification.
 - APK published: `0.1.3.2128` (`versionCode=1032128`, size `5848522`, sha256 `2643cb4fca29c3ad64ea965309def4005bb04b8b078abec852413694169b8e57`) to `android/update-dist/` and `/Users/fanzhang/.zterm/updates/`; latest aliases hash-identical. L5 gap: `adb devices -l` returned no online device, so no installed-device visual proof is claimed.
+## 2026-07-16 Relay visible route live failure
+
+- Jason reported the newly visible Home Relay option did not connect; previous commit `a567973` proved UI projection/build/install only, not the real relay route.
+- Live black-box route evidence against production account `jason`:
+  - `https://relay.codewhisper.cc:18443/relay/health` returns 200 and reports TURN configured.
+  - Login returns `mac-studio` daemon online, `ws.client=wss://relay.codewhisper.cc:18443/relay/ws/client`, `turn.url=turn:claw.codewhisper.cc:3479?transport=udp`.
+  - Standard RTC (`iceTransportPolicy=all`) through relay signaling to `mac-studio` opens a data channel and `list-sessions` returns live tmux sessions in ~100ms.
+  - Forced TURN relay-only (`iceTransportPolicy=relay`) receives answer/candidates but ICE fails after ~15s; local and remote relay candidates are allocated on `159.75.134.56:49xxx`, so the remaining failure is TURN/public relay-port/server config, not Home UI projection.
+- Root cause for app-visible failure: `TraversalSocket` forced `iceTransportPolicy='relay'` for the production `rtc-relay` candidate. That made the Home Relay button depend on the failing TURN-only gate even when standard WebRTC via the relay control plane was healthy.
+- Fix direction: production `rtc-relay` uses standard ICE (`all`) with relay signaling + TURN config; forced relay-only remains the black-box TURN gate and must not be claimed as fixed until relay-only passes.
+- Closeout verification after code change:
+  - Focused relay/Home/session-open gate: 9 files / 74 tests PASS.
+  - Feature/resource/function/mainline architecture gate: 7 files / 48 tests PASS.
+  - `tsc --noEmit` PASS.
+  - Production `TraversalSocket` smoke against `relay.codewhisper.cc` and `mac-studio`: `relay-rtc:mac-studio` opened in 105ms, diagnostics stage `open`, and `list-sessions` returned 11 sessions (`agentpi`, `freehand`, `onestop`, `rcc`, `rcc1`, `rcc2`, `rcc3`, `rccstart`, `server`, `zterm`, `zterm-20260716-154518`).
+  - Forced TURN-only diagnostic still fails: ICE failed after 15389ms even though local and remote relay candidates were allocated on `159.75.134.56`, so public TURN/off-network relay remains unclosed.
+  - `build:android` PASS with terminal contracts 48 files / 574 tests, common flows 7 files / 77 tests, local relay smoke, Vite/Capacitor/Gradle, and update manifest verification.
+  - APK `0.1.3.2134` (`versionCode=1032134`, size `5849766`, sha256 `cf0900e23be32859cb9c886095e35e9f30f5dda4179714347a715749568764c7`) published to `android/update-dist/` and `/Users/fanzhang/.zterm/updates/`; latest aliases hash-identical.
+  - Real device `100.104.163.65:5555` installed `0.1.3.2134` and package manager confirms the version. UI click L5 remains unproven because the device is stuck behind `NotificationShade` / lockscreen (`mAwake=false`, `mDreamingLockscreen=true`), so screenshots are black and no Home Relay tap is claimed.

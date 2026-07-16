@@ -54,6 +54,72 @@ class MockWebSocket {
   }
 }
 
+class MockRTCDataChannel {
+  readyState: RTCDataChannelState = 'connecting';
+  binaryType: BinaryType = 'blob';
+  sent: Array<string | ArrayBuffer> = [];
+  onopen: (() => void) | null = null;
+  onmessage: ((event: MessageEvent) => void) | null = null;
+  onerror: (() => void) | null = null;
+  onclose: (() => void) | null = null;
+
+  send(data: string | ArrayBuffer) {
+    this.sent.push(data);
+  }
+
+  close() {
+    this.readyState = 'closed';
+    this.onclose?.();
+  }
+}
+
+class MockRTCPeerConnection {
+  static instances: MockRTCPeerConnection[] = [];
+  readonly channel = new MockRTCDataChannel();
+  localDescription: RTCSessionDescriptionInit | null = null;
+  remoteDescription: RTCSessionDescriptionInit | null = null;
+  onicecandidate: ((event: RTCPeerConnectionIceEvent) => void) | null = null;
+  onconnectionstatechange: (() => void) | null = null;
+  connectionState: RTCPeerConnectionState = 'new';
+
+  constructor(public readonly config: RTCConfiguration) {
+    MockRTCPeerConnection.instances.push(this);
+  }
+
+  createDataChannel() {
+    return this.channel as unknown as RTCDataChannel;
+  }
+
+  async createOffer() {
+    return { type: 'offer' as const, sdp: 'mock-offer' };
+  }
+
+  async setLocalDescription(description: RTCSessionDescriptionInit) {
+    this.localDescription = description;
+  }
+
+  async setRemoteDescription(description: RTCSessionDescriptionInit) {
+    this.remoteDescription = description;
+  }
+
+  async addIceCandidate() {
+    return undefined;
+  }
+
+  async getStats() {
+    return new Map();
+  }
+
+  close() {
+    this.connectionState = 'closed';
+    this.channel.close();
+  }
+
+  static reset() {
+    MockRTCPeerConnection.instances = [];
+  }
+}
+
 const target = {
   bridgeHost: '203.0.113.10',
   bridgePort: 3333,
@@ -100,11 +166,19 @@ describe('TraversalSocket reconnect', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     MockWebSocket.reset();
+    MockRTCPeerConnection.reset();
     vi.stubGlobal('window', {
       setTimeout: globalThis.setTimeout,
       clearTimeout: globalThis.clearTimeout,
     });
     vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.stubGlobal('RTCPeerConnection', MockRTCPeerConnection);
+    vi.stubGlobal('RTCSessionDescription', class {
+      constructor(public readonly init: RTCSessionDescriptionInit) {}
+    });
+    vi.stubGlobal('RTCIceCandidate', class {
+      constructor(public readonly init: RTCIceCandidateInit) {}
+    });
   });
 
   afterEach(() => {
@@ -113,7 +187,7 @@ describe('TraversalSocket reconnect', () => {
   });
 
   it('reconnects quickly after an opened traversal backend closes', async () => {
-    const socket = createSocket();
+    const socket = createSocket({}, { autoReconnect: true });
     await flushMicrotasks();
 
     expect(MockWebSocket.instances).toHaveLength(1);
@@ -199,7 +273,7 @@ describe('TraversalSocket reconnect', () => {
   });
 
   it('backs off repeated reconnect attempts and resets candidate order from the first path', async () => {
-    const socket = createSocket();
+    const socket = createSocket({}, { autoReconnect: true });
     await flushMicrotasks();
 
     expect(MockWebSocket.instances[0].url).toContain('240e:1234::10');
@@ -268,6 +342,71 @@ describe('TraversalSocket reconnect', () => {
       status: 'success',
       rttMs: 42,
     });
+  });
+
+  it('uses standard ICE for relay control-plane RTC candidates and keeps TURN relay-only as a diagnostic concern', async () => {
+    const socket = new TraversalSocket(
+      {
+        bridgeHost: '',
+        bridgePort: 3333,
+        authToken: 'token',
+        relayHostId: 'daemon-host-a',
+        transportMode: 'webrtc',
+        relayEndpointCandidates: [{
+          id: 'relay-rtc:daemon-host-a',
+          kind: 'relay-rtc',
+          relayHostId: 'daemon-host-a',
+          authRequired: true,
+          lastSeenAt: '2026-07-16T00:00:00.000Z',
+        }],
+      },
+      {
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'webrtc',
+        traversalRelay: {
+          relayBaseUrl: 'https://relay.example.test/relay/',
+          accessToken: 'relay-access',
+          userId: 'user-1',
+          username: 'jason',
+          deviceId: 'android-1',
+          deviceName: 'Android',
+          platform: 'android',
+          wsDevicesUrl: 'wss://relay.example.test/relay/ws/devices',
+          wsHostUrl: 'wss://relay.example.test/relay/ws/host',
+          wsClientUrl: 'wss://relay.example.test/relay/ws/client',
+          turnUrl: 'turn:relay.example.test:3478?transport=udp',
+          turnUsername: 'turn-user',
+          turnCredential: 'turn-secret',
+          updatedAt: 1,
+        },
+      },
+      { routeHealthCache: new TraversalRouteHealthCache() },
+    );
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    MockWebSocket.instances[0].triggerOpen();
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(MockRTCPeerConnection.instances).toHaveLength(1);
+    expect(MockRTCPeerConnection.instances[0].config).toMatchObject({
+      iceTransportPolicy: 'all',
+      iceServers: [{
+        urls: 'turn:relay.example.test:3478?transport=udp',
+        username: 'turn-user',
+        credential: 'turn-secret',
+      }],
+    });
+    expect(MockWebSocket.instances[0].sent.map((item) => JSON.parse(String(item)).type)).toEqual([
+      'rtc-init',
+      'rtc-offer',
+    ]);
+
+    socket.close();
   });
 
   it('skips a freshly auth-failed direct candidate and opens the next candidate', async () => {

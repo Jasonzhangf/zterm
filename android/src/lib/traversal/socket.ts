@@ -167,7 +167,7 @@ class WebRtcBackend implements Backend {
         this.signalSocket = signalSocket;
         const peerConnection = new RTCPeerConnection({
           iceServers: this.candidate.iceServers,
-          iceTransportPolicy: this.candidate.path === 'rtc-relay' ? 'relay' : 'all',
+          iceTransportPolicy: 'all',
         });
         this.peerConnection = peerConnection;
         const channel = peerConnection.createDataChannel('zterm', {

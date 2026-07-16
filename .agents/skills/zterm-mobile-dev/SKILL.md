@@ -113,6 +113,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - relay account directory 发布必须来自 daemon truth：`relay-ready` 后由 daemon relay host client 发布 `directory-update`，session catalog 只能来自 tmux 枚举；枚举失败必须显式报错，禁止把失败伪造成空 sessions 的成功目录。
 - relay smoke / 真实链路里 client device 与 daemon device 必须使用不同 `deviceId`；复用同一 id 会让 client metadata 覆盖 daemon directory identity，造成 account directory 假状态。
 - Android relay account directory 的 client 真源是 `account.directory`；旧 `TraversalRelayDeviceSnapshot[]` 只能作为现有 UI 的 adapter projection，禁止在 Connections / Picker / Settings 各自从 legacy devices 反向补 endpoint/session 目录语义。
+- Relay route 入口不能只靠 directory 里存在 `relay-rtc` 就宣称可用；必须用真实 `TraversalSocket` 对目标 daemon 跑 `list-sessions` / session open 黑盒证明。生产 `rtc-relay` 走标准 WebRTC ICE (`iceTransportPolicy=all`) 消费 relay signaling + TURN 配置；强制 `iceTransportPolicy=relay` 只作为 TURN/off-network gate。若标准 RTC 通过但 relay-only 失败，只能报告 TURN/公网 relay-port/server 配置未闭环，不能把普通 RTC 结果冒充 TURN 成功。
 - 发行包验证必须覆盖 native runtime 依赖：TURN/RTC 需要 `@roamhq/wrtc` 与当前平台 `@roamhq/wrtc-<platform>-<arch>/wrtc.node` 随 release staging 打包；只在源码环境通过不代表全局安装可启动。
 - 验证过程中产生的临时 tmux session 需要及时清掉，只保留一个明确实验 session，避免把测试垃圾当成真实 session 列表
 - `bridgePort` / daemon 端口 / daemon tmux session 名必须共用同一配置真源；不要在 UI、server、shell script、文案里散落硬编码
