@@ -548,6 +548,10 @@
           "label": "src/lib/session-preview-selection.ts#toggleSessionPreviewTarget"
         },
         {
+          "id": "RemoteSessionOpenOwner",
+          "label": "src/hooks/useSessionOpenActions.ts#handleOpenGroupSession"
+        },
+        {
           "id": "OpenTabResolver",
           "label": "src/lib/session-preview-selection.ts#resolveSessionPreviewTargets"
         },
@@ -613,11 +617,39 @@
           "from": "SessionDrawer",
           "to": "PreviewSelectionOwner",
           "owner_feature": "terminal.session_preview",
-          "semantic_input": "eligible open-session row toggle intent",
+          "semantic_input": "eligible already-open row toggle intent",
           "semantic_output": "ordered maximum-six preview target selection",
           "status": "anchored",
           "edge_id": "android_preview:SessionDrawer->PreviewSelectionOwner",
           "resource_from": "resource.ui_projection",
+          "resource_to": "resource.session_preview_selection",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "SessionDrawer",
+          "to": "RemoteSessionOpenOwner",
+          "owner_feature": "terminal.session_preview",
+          "semantic_input": "remote catalog row preview toggle intent",
+          "semantic_output": "background materialized open-session id",
+          "status": "anchored",
+          "edge_id": "android_preview:SessionDrawer->RemoteSessionOpenOwner",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.open_tab",
+          "via_resources": [
+            "resource.pending_open_intent"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "RemoteSessionOpenOwner",
+          "to": "PreviewSelectionOwner",
+          "owner_feature": "terminal.session_preview",
+          "semantic_input": "materialized local session id plus server/tmux identity",
+          "semantic_output": "ordered maximum-six preview target selection without remote placeholder ids",
+          "status": "anchored",
+          "edge_id": "android_preview:RemoteSessionOpenOwner->PreviewSelectionOwner",
+          "resource_from": "resource.open_tab",
           "resource_to": "resource.session_preview_selection",
           "via_resources": [],
           "relation_status": "direct"

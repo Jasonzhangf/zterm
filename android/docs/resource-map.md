@@ -57,6 +57,7 @@ flowchart TD
   FileTransfer["resource.file_transfer"] --> BackendSession
   RemoteScreenshot["resource.remote_screenshot"] --> BackendSession
   ReleaseArtifact["resource.release_update_artifact"] --> DaemonArtifact
+  OpenTab --> PreviewSelection
 ```
 
 ## Required Indirect Relations
@@ -94,7 +95,7 @@ flowchart TD
 - `resource.mirror_store -> resource.transport_subscriber` is the only unsolicited live body broadcast relation. Unsubscribe removes broadcast eligibility without closing the transport, detaching the mirror, or disabling explicit head/range reads.
 - `resource.client_sparse_buffer` only merges daemon mirror patches by absolute row.
 - `resource.renderer_window` owns follow/reading/render-bottom/visible demand and next-RAF commit only, not terminal content layout or network cadence.
-- `resource.session_preview_selection` owns only an ordered 1-6 client preference resolved through current open-tab truth; drawer checkbox and in-preview add both route to this owner, add/replacement candidates are every currently open unselected Session, reorder only changes preference order, and tile close removes only that preview target without closing a Session or transport.
+- `resource.session_preview_selection` owns only an ordered 1-6 client preference resolved through current open-tab truth; remote drawer catalog rows must first materialize through the existing session-open owner and persist only the returned local session id; drawer checkbox and in-preview add both route to this owner, add/replacement candidates are every currently open unselected Session, reorder only changes preference order, and tile close removes only that preview target without closing a Session or transport.
 - `resource.session_preview_mode` owns preview shell projection plus the captured entry-session projection used only by cancel. Entry does not mutate active session; tile activation emits one explicit switch; Back/right-swipe/close cancellation restores the captured entry session. Buffer, transport, and backend geometry remain untouched.
 - `resource.debug_channel` can observe and diagnose through bounded metadata-only trace records, but cannot become request/response business truth or contain terminal text/cells.
 - `resource.release_update_artifact` must promote through `resource.daemon_runtime_artifact`; runtime cannot scan authoring directories as capability truth.

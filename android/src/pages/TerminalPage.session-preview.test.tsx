@@ -252,6 +252,139 @@ describe('TerminalPage session preview integration', () => {
     expect(screen.queryByTestId('terminal-view-s1')).toBeNull();
   });
 
+  it('materializes a remote-only drawer row before adding it to preview selection', async () => {
+    const currentSession = makeSession('s1');
+    currentSession.daemonHostId = 'daemon-a';
+    currentSession.sessionName = 'tmux-s1';
+    const openedSession = makeSession('remote-opened');
+    openedSession.daemonHostId = 'daemon-a';
+    openedSession.bridgeHost = '100.127.23.27';
+    openedSession.bridgePort = 3333;
+    openedSession.sessionName = 'remote-beta';
+    openedSession.title = 'remote beta tab';
+    const onOpenDrawerRemoteSession = vi.fn((_target: unknown, _sessionName: string, _options?: { activate?: boolean; navigate?: boolean }) => 'remote-opened');
+    const stableNoop = vi.fn();
+    const { TerminalPage } = await import('./TerminalPage');
+
+    function Harness() {
+      const [sessions, setSessions] = useState<Session[]>([currentSession]);
+      return (
+        <TerminalPage
+          sessions={sessions}
+          sessionGroups={[{
+            id: 'daemon:daemon-a',
+            name: 'Daemon A',
+            bridgeHost: '100.127.23.27',
+            bridgePort: 3333,
+            daemonHostId: 'daemon-a',
+            authToken: 'token-a',
+            sessionNames: ['tmux-s1', 'remote-beta'],
+            lastOpenedAt: 1,
+          }]}
+          activeSession={sessions[0] || null}
+          onSwitchSession={stableNoop}
+          onMoveSession={stableNoop}
+          onRenameSession={stableNoop}
+          onCloseSession={stableNoop}
+          onOpenConnections={stableNoop}
+          onOpenQuickTabPicker={stableNoop}
+          onOpenDrawerRemoteSession={(target, sessionName, options) => {
+            const openedId = onOpenDrawerRemoteSession(target, sessionName, options);
+            setSessions([currentSession, openedSession]);
+            return openedId;
+          }}
+          onTerminalViewportChange={stableNoop}
+          quickActions={[]}
+          shortcutActions={[]}
+          sessionDraft=""
+        />
+      );
+    }
+
+    render(<Harness />);
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+    expect(swipeSurface).toBeTruthy();
+    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
+    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+    fireEvent.click(await screen.findByTestId('terminal-session-drawer-preview-mode'));
+    fireEvent.click(await screen.findByTestId('terminal-session-drawer-preview-check-remote:daemon:daemon-a::session:remote-beta'));
+
+    await waitFor(() => expect(onOpenDrawerRemoteSession).toHaveBeenCalledWith(
+      {
+        name: 'Daemon A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        authToken: 'token-a',
+        sessionNames: ['tmux-s1', 'remote-beta'],
+      },
+      'remote-beta',
+      { activate: false, navigate: false },
+    ));
+    await waitFor(() => expect(screen.getByTestId('terminal-session-drawer-preview-check-remote-opened').textContent).toBe('1'));
+    const stored = JSON.parse(localStorage.getItem(SESSION_PREVIEW_SELECTION_STORAGE_KEY) || '{}');
+    expect(stored.orderedTargets.map((item: { sessionId: string }) => item.sessionId)).toEqual(['remote-opened']);
+    expect(stored.orderedTargets[0]).toEqual(expect.objectContaining({
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      sessionName: 'remote-beta',
+      daemonHostId: 'daemon-a',
+    }));
+    expect(stored.orderedTargets[0].sessionId).not.toContain('remote:daemon');
+    expect(stableNoop).not.toHaveBeenCalledWith('remote:daemon:daemon-a::session:remote-beta');
+  });
+
+  it('does not persist a remote placeholder when preview auto-open fails', async () => {
+    const currentSession = makeSession('s1');
+    currentSession.daemonHostId = 'daemon-a';
+    currentSession.sessionName = 'tmux-s1';
+    const onOpenDrawerRemoteSession = vi.fn((_target: unknown, _sessionName: string, _options?: { activate?: boolean; navigate?: boolean }) => undefined);
+    const stableNoop = vi.fn();
+    const { TerminalPage } = await import('./TerminalPage');
+
+    render(
+      <TerminalPage
+        sessions={[currentSession]}
+        sessionGroups={[{
+          id: 'daemon:daemon-a',
+          name: 'Daemon A',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-a',
+          authToken: 'token-a',
+          sessionNames: ['tmux-s1', 'remote-beta'],
+          lastOpenedAt: 1,
+        }]}
+        activeSession={currentSession}
+        onSwitchSession={stableNoop}
+        onMoveSession={stableNoop}
+        onRenameSession={stableNoop}
+        onCloseSession={stableNoop}
+        onOpenConnections={stableNoop}
+        onOpenQuickTabPicker={stableNoop}
+        onOpenDrawerRemoteSession={onOpenDrawerRemoteSession}
+        onTerminalViewportChange={stableNoop}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+    expect(swipeSurface).toBeTruthy();
+    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
+    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+    fireEvent.click(await screen.findByTestId('terminal-session-drawer-preview-mode'));
+    fireEvent.click(await screen.findByTestId('terminal-session-drawer-preview-check-remote:daemon:daemon-a::session:remote-beta'));
+
+    expect(onOpenDrawerRemoteSession).toHaveBeenCalledTimes(1);
+    await waitFor(() => expect(screen.getByText('无法打开该 session，不能加入实时预览。')).toBeTruthy());
+    const stored = localStorage.getItem(SESSION_PREVIEW_SELECTION_STORAGE_KEY);
+    expect(stored === null || JSON.parse(stored).orderedTargets.length === 0).toBe(true);
+  });
+
   it('replaces a preview tile with an unselected open session without changing active session', async () => {
     const previewSessions = [makeSession('s1'), makeSession('s2'), makeSession('s3')];
     localStorage.setItem(SESSION_PREVIEW_SELECTION_STORAGE_KEY, JSON.stringify({

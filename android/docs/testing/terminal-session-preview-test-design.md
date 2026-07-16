@@ -5,6 +5,7 @@
 `drawer-normal -> drawer-preview-selecting -> shell-preview-ready -> preview-open -> preview-replacement-menu -> preview-open -> shell`
 
 - Selection is ordered client projection truth, maximum six.
+- Selection storage remains open-session truth. A remote-only drawer catalog row is selectable only by first materializing it through the existing drawer remote-open owner; the stored target must be the returned local `sessionId`, not the `remote:<owner>::session:<name>` placeholder.
 - Preview entry/exit preserves active session and existing transports.
 - Selected sessions join live body demand only while preview is open and foreground.
 - Tile activation first projects the target into the focused session-group viewport, emits one explicit active-session intent, then exits. The visible shell session and input/live session must never diverge.
@@ -17,6 +18,7 @@
 ## White-Box Positive
 
 - Add, remove, persist, and resolve 1-6 open sessions.
+- Select a remote-only drawer row in preview mode, materialize it without activation/navigation, and persist only the returned open-session target.
 - Project normal live ids union selected ids while preview is open.
 - Admit a leftward swipe beginning in the right-edge band.
 - Render every tile from its own immutable render-store snapshot.
@@ -29,7 +31,8 @@
 ## White-Box Negative
 
 - Reject selection seven and duplicate targets.
-- Exclude stale, remote-only, and reused-id targets whose host/tmux identity differs from persisted selection.
+- Exclude stale, unmaterialized remote placeholders, and reused-id targets whose host/tmux identity differs from persisted selection.
+- If remote materialization returns no local session id, expose an explicit error and do not write a placeholder target.
 - Reject middle, left-edge, vertical, short, and wrong-direction preview gestures.
 - Preview must not call input, resize, width-mode, connect, reconnect, or active-session mutation on entry/exit.
 - Preview exit without tile activation must not change the focused session-group slot or active session.
@@ -44,6 +47,7 @@
 
 - Drawer normal row tap switches; selection mode row tap only toggles checkbox.
 - Drawer preview mode checkbox itself is an actionable selection command; tapping its visible hit target adds/removes through the same selection owner and never switches the Session.
+- Drawer preview mode accepts remote catalog rows by calling the existing remote-open owner in background materialize mode, then toggling the returned local open-session target.
 - Long-press slot assignment and close controls do not toggle preview selection.
 - Left-edge right swipe opens drawer, middle horizontal swipe remains fixed crop, right-edge left swipe opens preview.
 - Portrait uses at most two columns and landscape at most three, with rows derived from the selected count; tile tap updates the focused shell projection and switches once; close removes only the preview target; body touch scrolls/pans locally; long press opens an unselected-session replacement menu; Back/right swipe cancels and restores the entry shell projection.

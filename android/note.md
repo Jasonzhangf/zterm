@@ -1,3 +1,10 @@
+# 2026-07-16 Preview remote-only selection auto materialize
+
+- 现场：drawer 预览多选时，远端 catalog row 还没本地打开会显示“该 session 尚未打开，不能加入实时预览”，导致 Jason 不能直接把远端 session 加入预览。
+- 架构映射：`feature_id=terminal.session_preview`，资源 `resource.ui_projection -> resource.open_tab -> resource.session_preview_selection`。唯一修复面是 `TerminalPage` 预览选择 owner 复用 `onOpenDrawerRemoteSession` / `useSessionOpenActions.handleOpenGroupSession` 物化本地 open tab；selection storage 仍只存本地 open-session target，禁止存 `remote:<owner>::session:<name>` placeholder。daemon、transport、renderer 不参与。
+- 根因：`handleToggleSessionPreviewSelection()` 只从 `sessions` 查已打开 session；对 drawer remote-only placeholder 没走已有 remote-open materialize 主线，直接报“未打开”。
+- 修复：预览选择 remote row 时先以 `{ activate:false, navigate:false }` 调现有 remote-open owner，拿返回 local `sessionId` 后持久化 preview target；打开失败显式报错并不写 placeholder。
+
 # 2026-07-16 Relay signed-in status / Home relay server openability
 
 - 现场：Settings 已登录 relay 后，UI 状态仍像登录表单；Home 能看到 Relay server row，但点击不能稳定进入 terminal。

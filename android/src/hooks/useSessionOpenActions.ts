@@ -101,7 +101,7 @@ export interface SessionOpenActionsResult {
   handleOpenQuickTabPicker: (paneId?: string, hostKey?: string, createOptions?: QuickTabCreateOptions) => void;
   handleOpenSingleTmuxSession: (target: BridgeTarget, sessionName: string) => void;
   handleOpenMultipleTmuxSessions: (target: BridgeTarget, sessionNames: string[]) => void;
-  handleOpenGroupSession: (group: SessionOpenGroupTarget, sessionName: string) => string;
+  handleOpenGroupSession: (group: SessionOpenGroupTarget, sessionName: string, options?: { activate?: boolean; navigate?: boolean }) => string;
   handleCloseGroupSession: (group: SessionOpenGroupTarget & { name?: string; sessionNames?: string[] }, sessionName: string) => Promise<void>;
   handleOpenServerGroups: (groups: Array<{
     name: string;
@@ -295,8 +295,12 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     );
   }, [bridgeSettingsRef, sessionsRef, terminalActiveSessionIdRef]);
 
-  const handleQuickConnectDraft = useCallback((draft: HostDraft, rememberName?: string) => {
-    const opened = openDraftAsSession(draft, { rememberName, activate: true, navigate: true });
+  const handleQuickConnectDraft = useCallback((draft: HostDraft, rememberName?: string, options?: { activate?: boolean; navigate?: boolean }) => {
+    const opened = openDraftAsSession(draft, {
+      rememberName,
+      activate: options?.activate !== false,
+      navigate: options?.navigate !== false,
+    });
     if (pickerScopePaneId) {
       onSessionsOpenedInPane?.([opened.sessionId], pickerScopePaneId);
     }
@@ -332,7 +336,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     handleQuickConnectDraft(draft, target.bridgeHost);
   }, [bridgeSettings.servers, handleQuickConnectDraft, hosts]);
 
-  const handleOpenGroupSession = useCallback((group: SessionOpenGroupTarget, sessionName: string) => {
+  const handleOpenGroupSession = useCallback((group: SessionOpenGroupTarget, sessionName: string, options?: { activate?: boolean; navigate?: boolean }) => {
     return handleQuickConnectDraft(
       {
         name: `${group.bridgeHost} · ${sessionName}`,
@@ -351,6 +355,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         lastConnected: Date.now(),
       },
       group.bridgeHost,
+      options,
     );
   }, [handleQuickConnectDraft]);
 

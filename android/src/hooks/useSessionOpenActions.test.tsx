@@ -195,6 +195,43 @@ describe('useSessionOpenActions explicit-open truth', () => {
     });
   });
 
+  it('can materialize a drawer group session without activating it for preview selection', () => {
+    const harness = createOptions();
+    harness.spies.createSession.mockReturnValue('runtime:daemon-a:remote-beta');
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    let openedSessionId = '';
+    act(() => {
+      openedSessionId = result.current.handleOpenGroupSession({
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        authToken: 'token-a',
+      }, 'remote-beta', { activate: false, navigate: false });
+    });
+
+    expect(openedSessionId).toBe('runtime:daemon-a:remote-beta');
+    expect(harness.spies.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'remote-beta',
+      }),
+      expect.objectContaining({ activate: false }),
+    );
+    expect(harness.spies.applyOpenTabState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        tabs: [expect.objectContaining({
+          sessionId: 'runtime:daemon-a:remote-beta',
+          sessionName: 'remote-beta',
+        })],
+      }),
+      undefined,
+    );
+    expect(harness.spies.ensureTerminalPageVisible).not.toHaveBeenCalled();
+  });
+
   it('clears reopened semantic tab tombstones in memory without saving tab state', () => {
     const target = {
       bridgeHost: '100.127.23.27',

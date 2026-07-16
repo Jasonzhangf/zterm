@@ -43,6 +43,8 @@ flowchart TD
 ```mermaid
 flowchart TD
   SessionDrawer["src/components/terminal/TerminalSessionDrawer.tsx#TerminalSessionDrawer"] --> PreviewSelectionOwner["src/lib/session-preview-selection.ts#toggleSessionPreviewTarget"]
+  SessionDrawer --> RemoteSessionOpenOwner["src/hooks/useSessionOpenActions.ts#handleOpenGroupSession"]
+  RemoteSessionOpenOwner --> PreviewSelectionOwner
   PreviewSelectionOwner --> OpenTabResolver["src/lib/session-preview-selection.ts#resolveSessionPreviewTargets"]
   TerminalShellGesture["src/lib/session-preview-gesture.ts#resolveSessionPreviewGesture"] --> PreviewModeOwner["src/pages/TerminalPage.tsx#sessionPreviewOpen"]
   PreviewModeOwner --> PreviewLiveSetProjector["src/lib/session-preview-selection.ts#projectSessionPreviewLiveIds"]

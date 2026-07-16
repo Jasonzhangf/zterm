@@ -65,6 +65,7 @@ import {
   toggleSessionPreviewTarget,
   writeSessionPreviewSelection,
   type SessionPreviewSelectionV1,
+  type SessionPreviewTarget,
 } from '../lib/session-preview-selection';
 export {
   resolveTerminalSessionGroupSlotReplacement,
@@ -226,7 +227,7 @@ interface TerminalPageProps {
     daemonHostId?: string;
     authToken?: string;
     sessionNames: string[];
-  }, sessionName: string) => string | null | undefined | void;
+  }, sessionName: string, options?: { activate?: boolean; navigate?: boolean }) => string | null | undefined | void;
   onCloseDrawerRemoteSession?: (target: {
     name: string;
     bridgeHost: string;
@@ -2472,30 +2473,75 @@ function TerminalPageComponent({
     setSessionPreviewError(result.ok ? null : '保存预览选择失败。');
   }, []);
 
-  const handleToggleSessionPreviewSelection = useCallback((sessionId: string) => {
-    const session = sessions.find((candidate) =>
+  const resolveSessionPreviewTargetFromDrawerSelection = useCallback((sessionId: string): SessionPreviewTarget | null => {
+    const openSession = sessions.find((candidate) =>
       candidate.id === sessionId
       && !candidate.remoteMissing
       && candidate.state !== 'closed',
     );
-    if (!session) {
+    if (openSession) {
+      return {
+        sessionId: openSession.id,
+        daemonHostId: openSession.daemonHostId,
+        bridgeHost: openSession.bridgeHost,
+        bridgePort: openSession.bridgePort,
+        sessionName: openSession.sessionName,
+      };
+    }
+
+    const remoteTarget = drawerRemoteSessions.targets.get(sessionId);
+    if (!remoteTarget) {
       setSessionPreviewError('该 session 尚未打开，不能加入实时预览。');
+      return null;
+    }
+
+    const openedSessionId = onOpenDrawerRemoteSession?.(remoteTarget.target, remoteTarget.sessionName, {
+      activate: false,
+      navigate: false,
+    });
+    const materializedSessionId = typeof openedSessionId === 'string' ? openedSessionId.trim() : '';
+    if (!materializedSessionId) {
+      setSessionPreviewError('无法打开该 session，不能加入实时预览。');
+      return null;
+    }
+
+    const materializedSession = sessions.find((candidate) =>
+      candidate.id === materializedSessionId
+      && !candidate.remoteMissing
+      && candidate.state !== 'closed',
+    );
+    if (materializedSession) {
+      return {
+        sessionId: materializedSession.id,
+        daemonHostId: materializedSession.daemonHostId,
+        bridgeHost: materializedSession.bridgeHost,
+        bridgePort: materializedSession.bridgePort,
+        sessionName: materializedSession.sessionName,
+      };
+    }
+
+    return {
+      sessionId: materializedSessionId,
+      daemonHostId: remoteTarget.target.daemonHostId,
+      bridgeHost: remoteTarget.target.bridgeHost,
+      bridgePort: remoteTarget.target.bridgePort,
+      sessionName: remoteTarget.sessionName,
+    };
+  }, [drawerRemoteSessions.targets, onOpenDrawerRemoteSession, sessions]);
+
+  const handleToggleSessionPreviewSelection = useCallback((sessionId: string) => {
+    const target = resolveSessionPreviewTargetFromDrawerSelection(sessionId);
+    if (!target) {
       return;
     }
     const currentSelection = pruneSessionPreviewSelectionToOpenSessions(sessionPreviewSelection, sessions);
-    const result = toggleSessionPreviewTarget(currentSelection, {
-      sessionId: session.id,
-      daemonHostId: session.daemonHostId,
-      bridgeHost: session.bridgeHost,
-      bridgePort: session.bridgePort,
-      sessionName: session.sessionName,
-    });
+    const result = toggleSessionPreviewTarget(currentSelection, target);
     if (!result.ok) {
       setSessionPreviewError(result.reason === 'limit' ? '最多选择 6 个 session。' : '该 session 无法加入预览。');
       return;
     }
     persistSessionPreviewSelection(result.selection);
-  }, [persistSessionPreviewSelection, sessionPreviewSelection, sessions]);
+  }, [persistSessionPreviewSelection, resolveSessionPreviewTargetFromDrawerSelection, sessionPreviewSelection, sessions]);
 
   const handleSessionPreviewSelectionModeChange = useCallback((active: boolean) => {
     setSessionPreviewSelectionMode(active);

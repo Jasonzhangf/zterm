@@ -1163,6 +1163,8 @@
         "src/components/terminal/TerminalSessionDrawer.test.tsx",
         "src/components/TerminalView.tsx",
         "src/components/TerminalView.dynamic-refresh.test.tsx",
+        "src/hooks/useSessionOpenActions.ts",
+        "src/hooks/useSessionOpenActions.test.tsx",
         "src/pages/TerminalPage.tsx",
         "src/pages/TerminalPageStageShell.tsx",
         "src/pages/TerminalPage.session-preview.test.tsx",
@@ -1183,6 +1185,7 @@
         "src/components/terminal/TerminalPreviewGrid.test.tsx",
         "src/components/terminal/TerminalPreviewGrid.render-truth.test.tsx",
         "src/pages/TerminalPage.session-preview.test.tsx",
+        "src/hooks/useSessionOpenActions.test.tsx",
         "src/lib/feature-registry-truth.test.ts",
         "src/lib/resource-registry-truth.test.ts",
         "src/lib/function-wiki-truth.test.ts"
