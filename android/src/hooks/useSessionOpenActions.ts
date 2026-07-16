@@ -13,6 +13,7 @@ import {
 } from '../lib/open-tab-intent';
 import {
   buildCleanDraft,
+  buildBridgeTargetFromHost,
   buildDraftFromTmuxSession,
   buildPreferredTarget,
   buildTransientHostFromDraft,
@@ -513,20 +514,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
   }, [openSessionPicker]);
 
   const handleOpenSavedConnection = useCallback((host: Host) => {
-    const target = normalizeBridgeTarget({
-        bridgeHost: host.bridgeHost,
-        bridgePort: host.bridgePort,
-        daemonHostId: host.daemonHostId,
-        relayHostId: host.relayHostId || host.daemonHostId,
-        relayDeviceId: host.relayDeviceId,
-        authToken: host.authToken,
-        tailscaleHost: host.tailscaleHost,
-        ipv6Host: host.ipv6Host,
-        ipv4Host: host.ipv4Host,
-        signalUrl: host.signalUrl,
-        transportMode: host.transportMode,
-        relayEndpointCandidates: host.relayEndpointCandidates || [],
-    });
+    const target = buildBridgeTargetFromHost(host);
     const existingSessionName = host.sessionName.trim();
     const sessionName = existingSessionName || buildGeneratedSessionName();
     setPickerMode(null);

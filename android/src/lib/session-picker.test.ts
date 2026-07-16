@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { buildCleanDraft, buildDraftFromTmuxSession, normalizeBridgeTarget, resolveRelayDeviceBridgeTarget, type BridgeTarget } from './session-picker';
+import {
+  buildBridgeTargetFromHost,
+  buildCleanDraft,
+  buildDraftFromTmuxSession,
+  normalizeBridgeTarget,
+  resolveRelayDeviceBridgeTarget,
+  type BridgeTarget,
+} from './session-picker';
 import type { BridgeServerPreset } from './bridge-settings';
 import type { Host, TraversalRelayDeviceSnapshot } from './types';
 
@@ -263,5 +270,51 @@ describe('session-picker relay truth', () => {
         relayTmuxSessions: device.daemon.sessions,
       }),
     );
+  });
+
+  it('resolves a relay directory Home host row to its direct endpoint candidate before opening', () => {
+    const target = buildBridgeTargetFromHost({
+      id: 'relay-device:daemon-device-c:daemon-host-c',
+      createdAt: 1,
+      name: 'Directory Daemon',
+      bridgeHost: '',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-host-c',
+      relayHostId: 'daemon-host-c',
+      relayDeviceId: 'daemon-device-c',
+      sessionName: '',
+      authType: 'password',
+      tags: ['relay-directory'],
+      pinned: false,
+      relayEndpointCandidates: [
+        {
+          id: 'direct:tailscale:daemon-host-c',
+          kind: 'tailscale',
+          host: 'mac.tailnet.ts.net',
+          port: 3333,
+          authRequired: true,
+          lastSeenAt: '2026-06-28T00:00:00.000Z',
+        },
+        {
+          id: 'relay-rtc:daemon-host-c',
+          kind: 'relay-rtc',
+          relayHostId: 'daemon-host-c',
+          authRequired: true,
+          lastSeenAt: '2026-06-28T00:00:00.000Z',
+        },
+      ],
+    });
+
+    expect(target).toEqual(expect.objectContaining({
+      bridgeHost: 'mac.tailnet.ts.net',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-host-c',
+      relayHostId: 'daemon-host-c',
+      relayDeviceId: 'daemon-device-c',
+      relayEndpointCandidates: expect.arrayContaining([
+        expect.objectContaining({ kind: 'tailscale', host: 'mac.tailnet.ts.net' }),
+        expect.objectContaining({ kind: 'relay-rtc', relayHostId: 'daemon-host-c' }),
+      ]),
+    }));
   });
 });

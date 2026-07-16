@@ -444,6 +444,108 @@ describe('useSessionOpenActions explicit-open truth', () => {
     vi.useRealTimers();
   });
 
+  it('opens a relay directory Home server row through endpoint candidates without a local preset', async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-07-15T06:07:08.000Z'));
+    const harness = createOptions({
+      bridgeSettings: {
+        servers: [],
+        targetHost: '',
+        targetPort: 3333,
+        targetAuthToken: '',
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'auto',
+        traversalRelay: {
+          relayBaseUrl: 'https://relay.codewhisper.cc:18443/relay/',
+          accessToken: 'relay-token',
+          userId: 'u1',
+          username: 'jason',
+          deviceId: 'android-1',
+          deviceName: 'ZTerm Android',
+          platform: 'android',
+          wsDevicesUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/devices',
+          wsHostUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/host',
+          wsClientUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/client',
+          turnUrl: 'turn:relay.codewhisper.cc:3478?transport=udp',
+          turnUsername: 'turn-user',
+          turnCredential: 'turn-secret',
+          updatedAt: 1,
+        },
+      },
+    });
+    harness.spies.createSession.mockReturnValue('runtime:mac-studio:zterm-20260715-060708');
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+    const relayServer = {
+      id: 'relay-device:mac-studio-device:mac-studio',
+      createdAt: 1,
+      name: 'Mac Studio',
+      bridgeHost: '',
+      bridgePort: 3333,
+      daemonHostId: 'mac-studio',
+      relayHostId: 'mac-studio',
+      relayDeviceId: 'mac-studio-device',
+      sessionName: '',
+      authToken: '',
+      relayEndpointCandidates: [
+        {
+          id: 'direct:tailscale:mac-studio',
+          kind: 'tailscale' as const,
+          host: 'mac-studio.tailnet.ts.net',
+          port: 3333,
+          authRequired: true,
+          lastSeenAt: '2026-07-15T06:00:00.000Z',
+        },
+        {
+          id: 'relay-rtc:mac-studio',
+          kind: 'relay-rtc' as const,
+          relayHostId: 'mac-studio',
+          authRequired: true,
+          lastSeenAt: '2026-07-15T06:00:00.000Z',
+        },
+      ],
+      authType: 'password' as const,
+      tags: ['relay-directory'],
+      pinned: false,
+    };
+
+    await act(async () => {
+      result.current.handleOpenSavedConnection(relayServer);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(createTmuxSessionMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: 'mac-studio.tailnet.ts.net',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        relayHostId: 'mac-studio',
+        relayDeviceId: 'mac-studio-device',
+        relayEndpointCandidates: expect.arrayContaining([
+          expect.objectContaining({ kind: 'tailscale', host: 'mac-studio.tailnet.ts.net' }),
+          expect.objectContaining({ kind: 'relay-rtc', relayHostId: 'mac-studio' }),
+        ]),
+      }),
+      expect.any(Object),
+      'zterm-20260715-060708',
+    );
+    expect(harness.spies.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: 'mac-studio.tailnet.ts.net',
+        daemonHostId: 'mac-studio',
+        relayHostId: 'mac-studio',
+        relayDeviceId: 'mac-studio-device',
+        sessionName: 'zterm-20260715-060708',
+      }),
+      expect.objectContaining({ activate: false }),
+    );
+    expect(harness.spies.ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
   it('creates a blank daemon session directly from drawer host key instead of opening the picker', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-06-30T04:05:06.000Z'));

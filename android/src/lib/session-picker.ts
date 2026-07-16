@@ -23,6 +23,12 @@ export interface BridgeTarget {
 
 export type HostDraft = Omit<Host, 'id' | 'createdAt'>;
 
+function resolvePreferredRelayDirectEndpoint(candidates: RelayEndpointCandidate[]) {
+  return candidates.find((endpoint) =>
+    (endpoint.kind === 'tailscale' || endpoint.kind === 'ipv6' || endpoint.kind === 'ipv4')
+    && (endpoint.host?.trim() || endpoint.wsUrl?.trim())) || null;
+}
+
 export function normalizeBridgeTarget(target?: Partial<BridgeTarget> | null): BridgeTarget {
   return {
     bridgeHost: target?.bridgeHost?.trim() || '',
@@ -39,6 +45,32 @@ export function normalizeBridgeTarget(target?: Partial<BridgeTarget> | null): Br
     relayEndpointCandidates: target?.relayEndpointCandidates || [],
     relayTmuxSessions: target?.relayTmuxSessions || [],
   };
+}
+
+export function buildBridgeTargetFromHost(host: Host): BridgeTarget {
+  const relayEndpointCandidates = host.relayEndpointCandidates || [];
+  const preferredDirectEndpoint = host.bridgeHost.trim()
+    ? null
+    : resolvePreferredRelayDirectEndpoint(relayEndpointCandidates);
+  const directoryBridgeHost = preferredDirectEndpoint?.host?.trim()
+    || preferredDirectEndpoint?.wsUrl?.trim()
+    || '';
+  const bridgeHost = host.bridgeHost.trim() || directoryBridgeHost;
+  const bridgePort = preferredDirectEndpoint?.port || host.bridgePort;
+  return normalizeBridgeTarget({
+    bridgeHost,
+    bridgePort,
+    daemonHostId: host.daemonHostId,
+    relayHostId: host.relayHostId || host.daemonHostId,
+    relayDeviceId: host.relayDeviceId,
+    authToken: host.authToken,
+    tailscaleHost: host.tailscaleHost || (preferredDirectEndpoint?.kind === 'tailscale' ? directoryBridgeHost : ''),
+    ipv6Host: host.ipv6Host || (preferredDirectEndpoint?.kind === 'ipv6' ? directoryBridgeHost : ''),
+    ipv4Host: host.ipv4Host || (preferredDirectEndpoint?.kind === 'ipv4' ? directoryBridgeHost : ''),
+    signalUrl: host.signalUrl,
+    transportMode: host.transportMode,
+    relayEndpointCandidates,
+  });
 }
 
 export function findBridgePresetForDaemonHostId(
@@ -95,9 +127,7 @@ export function resolveRelayDeviceBridgeTarget(
     });
   }
 
-  const preferredDirectEndpoint = relayEndpointCandidates.find((endpoint) =>
-    (endpoint.kind === 'tailscale' || endpoint.kind === 'ipv6' || endpoint.kind === 'ipv4')
-    && (endpoint.host?.trim() || endpoint.wsUrl?.trim()));
+  const preferredDirectEndpoint = resolvePreferredRelayDirectEndpoint(relayEndpointCandidates);
   return normalizeBridgeTarget({
     bridgeHost: preferredDirectEndpoint?.host?.trim()
       || preferredDirectEndpoint?.wsUrl?.trim()

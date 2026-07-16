@@ -1,3 +1,10 @@
+# 2026-07-16 Relay signed-in status / Home relay server openability
+
+- 现场：Settings 已登录 relay 后，UI 状态仍像登录表单；Home 能看到 Relay server row，但点击不能稳定进入 terminal。
+- 架构映射：`feature_id=relay.directory_ui`，资源 `resource.ui_projection -> resource.transport_target`。唯一 owner 面是 `ConnectionsPage` / `SettingsPage` / `RelayAccountSettingsSection` / `useTraversalRelayAccount` / `useSessionOpenActions`；本轮禁止改 daemon、TerminalView、buffer/renderer。
+- 当前假设：Settings 登录态投影需要更明确地显示 signed-in account/directory；Home relay row open 必须保留 relay directory endpoint candidates 并由 session-open owner 直接 materialize/open，不能只按 direct `bridgeHost` 判断。
+- 测试先行：补 Settings signed-in UI red/green；补 Home relay-only server row / useSessionOpenActions relay endpoint open red/green；再跑 `relay.directory_ui` 相关 required gates。
+
 # 2026-07-12 Android IME input intent / mirror-fixed horizontal pan
 
 ## 2026-07-13 Drawer opening gesture promoted a stale session

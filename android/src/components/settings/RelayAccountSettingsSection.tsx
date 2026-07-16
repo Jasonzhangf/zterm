@@ -25,7 +25,11 @@ export function RelayAccountSettingsSection({
   const [username, setUsername] = useState(() => account?.username || relaySettings?.username || '');
   const [password, setPassword] = useState('');
   const relayHost = new URL(getDefaultTraversalRelayBaseUrl()).hostname;
-  const loggedIn = Boolean(account?.accessToken && relaySettings?.accessToken);
+  const loggedIn = Boolean(account?.accessToken || relaySettings?.accessToken);
+  const accountName = account?.user?.username || account?.username || relaySettings?.username || username || 'Unknown';
+  const deviceCount = relayDevices.length;
+  const deviceSummary = `${deviceCount} device${deviceCount === 1 ? '' : 's'}`;
+  const deviceId = account?.deviceId || relaySettings?.deviceId || 'zterm-android';
   const busy = relayBusy !== null;
 
   useEffect(() => {
@@ -92,6 +96,30 @@ export function RelayAccountSettingsSection({
           }}
           style={{ padding: '16px', display: 'grid', gap: '14px' }}
         >
+          {loggedIn ? (
+            <div
+              data-testid="settings-relay-signed-in-panel"
+              style={{
+                padding: '12px 14px',
+                borderRadius: '8px',
+                backgroundColor: 'rgba(8, 122, 70, 0.08)',
+                border: '1px solid rgba(8, 122, 70, 0.24)',
+                display: 'grid',
+                gap: '5px',
+              }}
+            >
+              <div style={{ fontSize: '11px', fontWeight: 850, color: '#087a46', textTransform: 'uppercase' }}>
+                Signed in
+              </div>
+              <div style={{ fontSize: '15px', fontWeight: 850, color: mobileTheme.colors.lightText }}>
+                {accountName}
+              </div>
+              <div style={{ fontSize: '12px', color: mobileTheme.colors.lightMuted }}>
+                {deviceSummary} · device={deviceId}
+              </div>
+            </div>
+          ) : null}
+
           <label style={{ display: 'grid', gap: '7px', fontSize: '13px', fontWeight: 700 }}>
             Account
             <input
@@ -109,6 +137,7 @@ export function RelayAccountSettingsSection({
               aria-label="Relay password"
               type="password"
               autoComplete="current-password"
+              placeholder={loggedIn ? 'Enter password to sign in again' : ''}
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               disabled={busy}

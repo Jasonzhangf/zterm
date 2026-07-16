@@ -22,6 +22,8 @@ vi.mock('../hooks/useTraversalRelayAccount', () => ({
   })),
 }));
 
+import { useTraversalRelayAccount } from '../hooks/useTraversalRelayAccount';
+
 const baseSettings: BridgeSettings = {
   targetHost: '',
   targetPort: 3333,
@@ -94,6 +96,15 @@ function renderSettings(overrides: Partial<ComponentProps<typeof SettingsPage>> 
 describe('SettingsPage Relay account configuration', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    vi.mocked(useTraversalRelayAccount).mockReturnValue({
+      account: null,
+      relayDevices: [],
+      relayStatus: '',
+      relayBusy: null,
+      refreshLocalAccount: vi.fn(),
+      syncRelay,
+      logoutRelay,
+    });
   });
 
   afterEach(cleanup);
@@ -137,6 +148,60 @@ describe('SettingsPage Relay account configuration', () => {
     expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
       traversalRelay: relaySettings,
     }));
+  });
+
+  it('renders a clear signed-in account panel after relay login', () => {
+    vi.mocked(useTraversalRelayAccount).mockReturnValue({
+      account: {
+        username: 'jason',
+        password: '',
+        relayBaseUrl: relaySettings.relayBaseUrl,
+        accessToken: 'token',
+        user: { id: 'u1', username: 'jason', createdAt: 'now' },
+        deviceId: 'android-1',
+        deviceName: 'ZTerm Android',
+        platform: 'android',
+        devices: [],
+        directory: null,
+        updatedAt: 1,
+        relaySettings,
+      },
+      relayDevices: [
+        {
+          deviceId: 'mac-device',
+          deviceName: 'Mac Studio',
+          platform: 'darwin',
+          appVersion: '0.1.3',
+          client: { connected: false, lastSeenAt: '' },
+          daemon: {
+            connected: true,
+            lastSeenAt: '2026-07-16T10:00:00.000Z',
+            hostId: 'mac-studio',
+            version: '0.1.3',
+          },
+          updatedAt: '2026-07-16T10:00:00.000Z',
+        },
+      ],
+      relayStatus: '',
+      relayBusy: null,
+      refreshLocalAccount: vi.fn(),
+      syncRelay,
+      logoutRelay,
+    });
+
+    renderSettings({
+      settings: {
+        ...baseSettings,
+        traversalRelay: relaySettings,
+      },
+    });
+
+    expect(screen.getByText('SIGNED IN')).toBeTruthy();
+    const signedInPanel = screen.getByTestId('settings-relay-signed-in-panel');
+    expect(signedInPanel.textContent).toContain('jason');
+    expect(signedInPanel.textContent).toContain('1 device');
+    expect(screen.getByRole('button', { name: 'Sign in again' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeTruthy();
   });
 
   it('adds a direct server inside Settings so Home can project it as a server row', () => {

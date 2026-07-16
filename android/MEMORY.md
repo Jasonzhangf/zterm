@@ -1165,3 +1165,10 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - Terminal portrait shell must also expose Settings because long-running usage can stay inside the terminal page; `TerminalPage` must consume `onOpenSettings` instead of accepting it unused.
 - Upgrade logic remains uniquely owned by Settings/App Update (`settings.config_transfer`, `AppUpdateSection`). Home and Terminal may only navigate to Settings; they must not duplicate update checking, install, or manifest state.
 - Regression shape: `ConnectionsPage.test.tsx` locks a visible `设置和升级` Home entry, `TerminalPage.session-drawer.test.tsx` locks the portrait shell entry, and `SettingsPage.relay-account.test.tsx` locks `版本与升级` before server/relay configuration with `检查更新` / `下载并安装` controls.
+
+## 2026-07-16 Android Relay signed-in UI and Home relay row open truth
+
+- Settings Relay login state must project from either the account owner token or persisted relay settings token. If those two stores are temporarily out of sync, the UI must still show a clear signed-in account panel instead of the logged-out form-only state.
+- Home relay-directory server rows may have an empty direct `bridgeHost`; before opening, `useSessionOpenActions` must materialize a `BridgeTarget` through `buildBridgeTargetFromHost()` and prefer direct relay endpoint candidates (`tailscale`, `ipv6`, `ipv4`) while preserving all relay endpoint candidates for the transport layer.
+- `relay.directory_ui` fixes must stay in UI projection/open-target owners (`RelayAccountSettingsSection`, `useSessionOpenActions`, `session-picker`). Do not patch daemon, renderer, buffer, or TerminalView for this class of Home relay row click failure.
+- Verified gates: focused Settings/session-picker/session-open tests 3 files / 35 tests PASS; relay directory required tests 7 files / 43 tests PASS; feature/resource/function/mainline gates 7 files / 48 tests PASS; `tsc --noEmit` PASS; APK `0.1.3.2129` published with sha256 `7b873e634c61109eb7f40e8c9ca3d0812c5a8d04dc10b5cea141328988f18d74`. Real-device install/smoke remains unproven when no ADB device is attached.
