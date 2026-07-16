@@ -43,9 +43,11 @@ describe('open-tab / history / connections truth gates', () => {
 
   it('keeps connections projection read-only and free of storage/runtime mutation', () => {
     const connectionsProjectionSource = readSource('pages/ConnectionsPage.tsx');
+    const relaySettingsSectionSource = readSource('components/settings/RelayAccountSettingsSection.tsx');
 
     expect(connectionsProjectionSource).toContain('export function ConnectionsPage');
-    expect(connectionsProjectionSource).toContain('getDefaultTraversalRelayBaseUrl');
+    expect(connectionsProjectionSource).not.toContain('getDefaultTraversalRelayBaseUrl');
+    expect(relaySettingsSectionSource).toContain('getDefaultTraversalRelayBaseUrl');
     expect(connectionsProjectionSource).not.toContain('connections-server-groups');
     expect(connectionsProjectionSource).not.toContain('createSession(');
     expect(connectionsProjectionSource).not.toContain('closeSession(');

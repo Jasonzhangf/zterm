@@ -100,7 +100,7 @@ export interface SessionOpenActionsResult {
   handleOpenQuickTabPicker: (paneId?: string, hostKey?: string, createOptions?: QuickTabCreateOptions) => void;
   handleOpenSingleTmuxSession: (target: BridgeTarget, sessionName: string) => void;
   handleOpenMultipleTmuxSessions: (target: BridgeTarget, sessionNames: string[]) => void;
-  handleOpenGroupSession: (group: SessionOpenGroupTarget, sessionName: string) => void;
+  handleOpenGroupSession: (group: SessionOpenGroupTarget, sessionName: string) => string;
   handleCloseGroupSession: (group: SessionOpenGroupTarget & { name?: string; sessionNames?: string[] }, sessionName: string) => Promise<void>;
   handleOpenServerGroups: (groups: Array<{
     name: string;
@@ -332,7 +332,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
   }, [bridgeSettings.servers, handleQuickConnectDraft, hosts]);
 
   const handleOpenGroupSession = useCallback((group: SessionOpenGroupTarget, sessionName: string) => {
-    handleQuickConnectDraft(
+    return handleQuickConnectDraft(
       {
         name: `${group.bridgeHost} · ${sessionName}`,
         bridgeHost: group.bridgeHost,

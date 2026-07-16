@@ -4,8 +4,8 @@
 
 - Feature: `terminal.session_drawer`
 - Resources: `resource.ui_projection -> resource.open_tab -> resource.active_session`; fixed-width crop gestures also border `resource.renderer_window` but must not mutate terminal content truth.
-- Owner: `src/components/terminal/TerminalSessionDrawer.tsx`
-- Change class: physically remove cross-gesture selection and separate fixed-width crop pan from drawer open. The edge swipe that opens the drawer may expose rows under the release point, but that same gesture must never become a row-selection intent. In `mirror-fixed`, right-side or middle horizontal drags belong to renderer crop pan; the drawer may only start from the left edge and only emit the `previous` drawer-open direction.
+- Owner: `src/components/terminal/TerminalSessionDrawer.tsx` for drawer intent; `src/pages/TerminalPage.tsx` for page-level projection of that intent into the focused session-group viewport slot.
+- Change class: physically remove cross-gesture selection, separate fixed-width crop pan from drawer open, and ensure remote catalog row selection materializes and projects the selected session on the first tap. The edge swipe that opens the drawer may expose rows under the release point, but that same gesture must never become a row-selection intent. In `mirror-fixed`, right-side or middle horizontal drags belong to renderer crop pan; the drawer may only start from the left edge and only emit the `previous` drawer-open direction.
 
 ## Lifecycle
 
@@ -19,14 +19,18 @@
 8. If the `mirror-fixed` renderer still has a positive horizontal offset, a rightward drag must first consume that offset and stop propagation even when it starts inside the drawer edge band.
 9. If the renderer offset is already zero, a non-left-edge rightward horizontal drag still belongs to renderer crop ownership and must not bubble into drawer/tab swipe.
 10. The drawer may receive a left-edge right swipe only after the renderer offset is already zero before that gesture starts.
+11. A remote-only catalog row press emits one session-open owner intent. When the owner returns the materialized local `sessionId`, TerminalPage must immediately project that session into the focused session-group viewport slot.
+12. After parent state includes the materialized Session, the visible center terminal must render that Session without requiring a second drawer tap. The page must not project the synthetic `remote:<owner>::session:<name>` catalog id as active truth.
 
 ## Paired Tests
 
 - Positive: a press beginning on an available drawer row followed by click selects exactly that session.
 - Positive: keyboard/accessibility click (`detail=0`) still selects the row.
+- Positive: selecting a remote-only catalog row calls the session-open owner, consumes the returned materialized `sessionId`, and renders that Session in the center viewport after the parent supplies it.
 - Negative: a pointer click delivered after drawer open without a matching row press does not select any session.
 - Negative: an unavailable row remains non-selectable even after a matching press.
 - Negative: arming one row cannot authorize selection of another row.
+- Negative: selecting a remote-only catalog row must not switch or render the remote catalog placeholder id when no materialized `sessionId` is returned.
 - Negative: `mirror-fixed` right-side horizontal drag does not emit drawer/tab swipe.
 - Negative: `mirror-fixed` rightward pan with positive renderer offset changes the offset but does not emit drawer/tab swipe, including a start inside the left edge band.
 - Negative: `mirror-fixed` zero-offset non-left-edge right pan stops before the parent drawer gesture owner, even though the visual offset cannot move further.
@@ -37,6 +41,7 @@
 
 - Opening the drawer while `zterm` is active and a stale persisted tab such as `routecodex2` exists must leave both persisted and runtime active session ids on `zterm`.
 - Drawer catalog refresh may mark the stale tab missing, but must not start its transport and must not project its error banner.
+- Selecting a remote-only catalog row must not freeze the old visible center terminal while the new transport connects. The first tap must produce the same visible target that a second tap on the newly materialized live row would have produced.
 
 ## Required Gates
 

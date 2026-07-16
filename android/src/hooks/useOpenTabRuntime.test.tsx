@@ -139,7 +139,7 @@ describe('useOpenTabRuntime explicit resume gating', () => {
     expect(switchSession).toHaveBeenCalledTimes(1);
     expect(switchSession).toHaveBeenCalledWith('s2', { refreshSource: 'explicit-resume' });
     expect(resumeActiveSessionTransport).not.toHaveBeenCalled();
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBeNull();
   });
 
   it('keeps explicit resume for a disconnected target that needs transport reopen', () => {

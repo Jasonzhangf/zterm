@@ -216,6 +216,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 抽屉底部这类单按钮动作只保留一个语义 owner，不要在同一按钮上同时挂 `pointerup` / `touchend` / `click` 再加时间戳去重。
 - `touch` / `pointer` 只适合手势关闭、拖拽、滑动判定；如果按钮点击在真机上失效，先收敛成单一语义路径，再补回 regression test。
 - Android WebView 会在一次 touch 序列结束后合成 `click`，如果 drawer/sheet 在 release 后才出现在手指下面，这个合成 click 可能命中新出现的 row。任何 row selection 都必须要求 press ownership 从同一 row 内开始；没有 matching row press 的 pointer click 必须丢弃。keyboard/accessibility `detail=0` 仍允许。
+- 抽屉 remote-only catalog row 的点击不是普通 local row switch：session-open owner 必须返回 materialized local `sessionId`，TerminalPage 只消费这个 id 去更新 focused session-group viewport slot；禁止把 `remote:<owner>::session:<name>` placeholder 当 active truth，也禁止在 drawer/UI 里新增重连或 transport fallback。回归要模拟 first tap -> owner returns id -> parent rerender with active Session -> center `TerminalView` 直接渲染新 session，不需要第二次点击。
 - `mirror-fixed` 下 renderer 横向裁切平移优先于 shell 抽屉/tab 手势：非左侧热区（包括右侧与中间）的横向拖动都归 `TerminalView` crop pan；外层 drawer swipe 只允许左侧热区 + `previous` 方向。禁止因为 fixed 模式需要抽屉入口而重新启用左右两侧 tab swipe。
 - `mirror-fixed` 的手势优先级不能只看起点热区：若当前 horizontal offset 大于 0，右滑仍能真实回移 renderer，`TerminalView` 必须消费并 `stopPropagation()` 整次横滑；只有 offset 在手势开始前已为 0，左缘右滑才允许交给 drawer。反模式是子级只 `preventDefault()` 但让父级 `touchend` 继续解析成 `previous`。
 - Android drawer 左侧热区当前固定为 64 CSS px：56px 是允许的边缘样本，88px 必须归 `mirror-fixed` crop pan。96px 在约 347px 宽的手机 viewport 上过宽，会把视觉上已经离开左边缘的右滑误判成抽屉。改热区时必须保留 56px 正向 + 88px 反向成对 gate，并用真机确认非边缘右滑同时满足 `drawer hidden` 与 fixed offset 变化。
@@ -1140,7 +1141,7 @@ Inspired by coding-principals skill.
 - **真源**: npm registry 官方源在中国网络下速度极慢（~5KB/s）
 - **解决方案**: 
   1. 切换到 npmmirror: `pnpm config set registry https://registry.npmmirror.com`
-  2. 重新执行: `pkill -9 -f pnpm; pnpm install --no-frozen-lockfile`
+  2. 若已有安装进程卡住，只允许用明确 PID 结束该进程；再执行 `pnpm install --no-frozen-lockfile`
 - **验证**: 切换后 resolved 应快速达到 1400+，packages 应显示 +1293
 - **恢复**: 安装完成后可恢复官方源: `pnpm config set registry https://registry.npmjs.org`
 

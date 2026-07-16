@@ -226,7 +226,7 @@ interface TerminalPageProps {
     daemonHostId?: string;
     authToken?: string;
     sessionNames: string[];
-  }, sessionName: string) => void;
+  }, sessionName: string) => string | null | undefined | void;
   onCloseDrawerRemoteSession?: (target: {
     name: string;
     bridgeHost: string;
@@ -2429,25 +2429,37 @@ function TerminalPageComponent({
     onSwitchSession(sessionId);
   }, [findPaneForSession, onSwitchSession, switchTabInPane, workspace.panes]);
 
-  const handleActivateOpenSessionInViewport = useCallback((sessionId: string) => {
+  const activateSessionInViewportSlot = useCallback((sessionId: string) => {
     setSessionGroupSlotIds((current) => resolveTerminalSessionGroupSlotReplacement(
       current,
       sessionId,
       sessionGroupFocusSlot,
     ));
+  }, [sessionGroupFocusSlot]);
+
+  const handleActivateOpenSessionInViewport = useCallback((sessionId: string) => {
+    activateSessionInViewportSlot(sessionId);
     handleSwitchSessionFromChrome(sessionId);
-  }, [handleSwitchSessionFromChrome, sessionGroupFocusSlot]);
+  }, [activateSessionInViewportSlot, handleSwitchSessionFromChrome]);
 
   const handleSelectSessionFromDrawer = useCallback((sessionId: string) => {
     const remoteTarget = drawerRemoteSessions.targets.get(sessionId);
     if (remoteTarget) {
-      onOpenDrawerRemoteSession?.(remoteTarget.target, remoteTarget.sessionName);
+      const openedSessionId = onOpenDrawerRemoteSession?.(remoteTarget.target, remoteTarget.sessionName);
+      if (typeof openedSessionId === 'string' && openedSessionId.trim()) {
+        activateSessionInViewportSlot(openedSessionId.trim());
+      }
       setSessionDrawerOpen(false);
       return;
     }
     handleActivateOpenSessionInViewport(sessionId);
     setSessionDrawerOpen(false);
-  }, [drawerRemoteSessions.targets, handleActivateOpenSessionInViewport, onOpenDrawerRemoteSession]);
+  }, [
+    activateSessionInViewportSlot,
+    drawerRemoteSessions.targets,
+    handleActivateOpenSessionInViewport,
+    onOpenDrawerRemoteSession,
+  ]);
 
   const persistSessionPreviewSelection = useCallback((next: SessionPreviewSelectionV1) => {
     setSessionPreviewSelection(next);
