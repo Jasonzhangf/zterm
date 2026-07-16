@@ -317,4 +317,52 @@ describe('session-picker relay truth', () => {
       ]),
     }));
   });
+
+  it('preserves an explicit webrtc Relay route instead of resolving a direct endpoint candidate', () => {
+    const target = buildBridgeTargetFromHost({
+      id: 'relay-route:saved-mac',
+      createdAt: 1,
+      name: 'Mac Studio Relay',
+      bridgeHost: '',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-host-c',
+      relayHostId: 'daemon-host-c',
+      relayDeviceId: 'daemon-device-c',
+      sessionName: '',
+      authType: 'password',
+      tags: ['relay-directory', 'relay-route'],
+      pinned: false,
+      transportMode: 'webrtc',
+      relayEndpointCandidates: [
+        {
+          id: 'direct:tailscale:daemon-host-c',
+          kind: 'tailscale',
+          host: 'mac.tailnet.ts.net',
+          port: 3333,
+          authRequired: true,
+          lastSeenAt: '2026-06-28T00:00:00.000Z',
+        },
+        {
+          id: 'relay-rtc:daemon-host-c',
+          kind: 'relay-rtc',
+          relayHostId: 'daemon-host-c',
+          authRequired: true,
+          lastSeenAt: '2026-06-28T00:00:00.000Z',
+        },
+      ],
+    });
+
+    expect(target).toEqual(expect.objectContaining({
+      bridgeHost: '',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-host-c',
+      relayHostId: 'daemon-host-c',
+      relayDeviceId: 'daemon-device-c',
+      transportMode: 'webrtc',
+      relayEndpointCandidates: expect.arrayContaining([
+        expect.objectContaining({ kind: 'tailscale', host: 'mac.tailnet.ts.net' }),
+        expect.objectContaining({ kind: 'relay-rtc', relayHostId: 'daemon-host-c' }),
+      ]),
+    }));
+  });
 });

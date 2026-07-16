@@ -29,6 +29,10 @@ function resolvePreferredRelayDirectEndpoint(candidates: RelayEndpointCandidate[
     && (endpoint.host?.trim() || endpoint.wsUrl?.trim())) || null;
 }
 
+function isExplicitRelayRouteHost(host: Pick<Host, 'transportMode' | 'tags'>) {
+  return host.transportMode === 'webrtc' || (host.tags || []).includes('relay-route');
+}
+
 export function normalizeBridgeTarget(target?: Partial<BridgeTarget> | null): BridgeTarget {
   return {
     bridgeHost: target?.bridgeHost?.trim() || '',
@@ -49,7 +53,7 @@ export function normalizeBridgeTarget(target?: Partial<BridgeTarget> | null): Br
 
 export function buildBridgeTargetFromHost(host: Host): BridgeTarget {
   const relayEndpointCandidates = host.relayEndpointCandidates || [];
-  const preferredDirectEndpoint = host.bridgeHost.trim()
+  const preferredDirectEndpoint = host.bridgeHost.trim() || isExplicitRelayRouteHost(host)
     ? null
     : resolvePreferredRelayDirectEndpoint(relayEndpointCandidates);
   const directoryBridgeHost = preferredDirectEndpoint?.host?.trim()

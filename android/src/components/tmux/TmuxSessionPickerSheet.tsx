@@ -95,6 +95,17 @@ function getDirectorySessionNames(target: BridgeTarget) {
   );
 }
 
+function getTargetRelayHostId(target: Pick<BridgeTarget, 'relayHostId' | 'daemonHostId'>) {
+  return target.relayHostId?.trim() || target.daemonHostId?.trim() || '';
+}
+
+function hasRelayRtcEndpointCandidate(target: Pick<BridgeTarget, 'relayEndpointCandidates'>) {
+  return (target.relayEndpointCandidates || []).some((candidate) => (
+    candidate.kind === 'relay-rtc'
+    && candidate.relayHostId?.trim()
+  ));
+}
+
 function readFileAsDataUrl(file: File) {
   return new Promise<string>((resolve, reject) => {
     const reader = new FileReader();
@@ -230,7 +241,19 @@ export function TmuxSessionPickerSheet({
   void clockTick;
   const isEditGroupMode = mode === 'edit-group';
   const relayEnabled = Boolean(bridgeSettings.traversalRelay?.accessToken);
-  const daemonFirst = relayEnabled && relayDevices.length > 0;
+  const relayDevicesAvailable = relayEnabled && relayDevices.length > 0;
+  const selectedTargetRelayHostId = getTargetRelayHostId(selectedTarget);
+  const selectedTargetCanUseRelayTransport = relayEnabled
+    && Boolean(selectedTargetRelayHostId)
+    && hasRelayRtcEndpointCandidate(selectedTarget);
+  const selectedTargetIsRelayDirectoryTarget = relayEnabled
+    && Boolean(selectedTargetRelayHostId)
+    && (
+      selectedTargetCanUseRelayTransport
+      || (selectedTarget.relayTmuxSessions || []).length > 0
+      || Boolean(selectedTarget.relayDeviceId?.trim())
+    );
+  const targetInputLocked = selectedTargetCanUseRelayTransport && !selectedTarget.bridgeHost.trim();
   const showOpenTabState = true;
   const unifiedSessionRows = useMemo(() => buildTmuxSessionPickerRows({
     availableSessions,
@@ -387,19 +410,18 @@ export function TmuxSessionPickerSheet({
   const handleRefreshNow = async () => {
     const bridgeHost = selectedTarget.bridgeHost.trim();
     const authToken = selectedTarget.authToken?.trim() || '';
-    const relayHostId = selectedTarget.relayHostId?.trim() || selectedTarget.daemonHostId?.trim() || '';
+    const relayHostId = getTargetRelayHostId(selectedTarget);
+    const canUseRelayTransport = relayEnabled && Boolean(relayHostId) && hasRelayRtcEndpointCandidate(selectedTarget);
+    const relayDirectoryTarget = relayEnabled
+      && Boolean(relayHostId)
+      && (
+        canUseRelayTransport
+        || (selectedTarget.relayTmuxSessions || []).length > 0
+        || Boolean(selectedTarget.relayDeviceId?.trim())
+      );
     const directorySessions = getDirectorySessionNames(selectedTarget);
 
-    if (daemonFirst && !relayHostId) {
-      setAvailableSessions([]);
-      setSelectedSessions([]);
-      setDiscoveryState('idle');
-      setErrorMessage('先选择一个在线 daemon，再点击 Connect。');
-      setLastRefreshedAt(null);
-      return;
-    }
-
-    if (daemonFirst && directorySessions.length > 0) {
+    if (relayDirectoryTarget && directorySessions.length > 0) {
       setAvailableSessions(directorySessions);
       setSelectedSessions((current) => {
         const nextRows = buildTmuxSessionPickerRows({
@@ -417,16 +439,16 @@ export function TmuxSessionPickerSheet({
       return;
     }
 
-    if (!bridgeHost) {
+    if (!bridgeHost && !canUseRelayTransport) {
       setAvailableSessions([]);
       setSelectedSessions([]);
       setDiscoveryState('idle');
-      setErrorMessage(daemonFirst ? '当前 daemon directory 没有 session catalog 或 endpoint candidates。等待 daemon 重新发布目录。' : '先输入 Tailscale IP / bridge host，再点击 Connect。');
+      setErrorMessage(relayEnabled ? '先输入 Tailscale IP / bridge host，或选择带 relay-rtc 的在线 daemon。' : '先输入 Tailscale IP / bridge host，再点击 Connect。');
       setLastRefreshedAt(null);
       return;
     }
 
-    if (!authToken && !(daemonFirst && selectedTarget.relayEndpointCandidates?.length)) {
+    if (!authToken && !canUseRelayTransport) {
       setAvailableSessions([]);
       setSelectedSessions([]);
       setDiscoveryState('idle');
@@ -473,7 +495,7 @@ export function TmuxSessionPickerSheet({
   useEffect(() => {
     if (!shouldAutoRefreshTmuxPicker({
       open,
-      daemonFirst,
+      relayDirectoryTarget: selectedTargetIsRelayDirectoryTarget,
       target: selectedTarget,
     })) {
       return;
@@ -481,17 +503,19 @@ export function TmuxSessionPickerSheet({
     void handleRefreshNow();
   }, [
     open,
-    daemonFirst,
+    selectedTargetIsRelayDirectoryTarget,
     selectedTarget.authToken,
     selectedTarget.bridgeHost,
     selectedTarget.bridgePort,
     selectedTarget.daemonHostId,
+    selectedTarget.relayEndpointCandidates,
     selectedTarget.relayHostId,
+    selectedTarget.relayTmuxSessions,
   ]);
 
   const handleCreateSession = async () => {
     const sessionName = newSessionName.trim();
-    if (!selectedTarget.bridgeHost.trim()) {
+    if (!selectedTarget.bridgeHost.trim() && !selectedTargetCanUseRelayTransport) {
       alert('先输入 Tailscale IP 或选择服务器');
       return;
     }
@@ -878,7 +902,7 @@ export function TmuxSessionPickerSheet({
           </div>
         )}
 
-        {daemonFirst && (
+        {relayDevicesAvailable && (
           <div
             style={{
               borderRadius: '22px',
@@ -890,7 +914,7 @@ export function TmuxSessionPickerSheet({
               gap: '12px',
             }}
           >
-            <SectionTitle title="Daemon" subtitle="先选在线 daemon。tab/session 语义只认 daemon + tmux session，不认 WS/RTC/Tailscale/TURN 路径。" />
+            <SectionTitle title="Daemon" subtitle="Relay daemon 是可选 route；直接 Tailscale/bridge target 仍可在下方输入或选择后刷新。" />
             <RelayDevicePicker
               relayEnabled
               devices={relayDevices}
@@ -938,8 +962,8 @@ export function TmuxSessionPickerSheet({
           <SectionTitle
             title={mode === 'new-connection' ? '已有服务器' : 'Target'}
             subtitle={
-              daemonFirst
-                ? 'bridge host/token 对用户不是一级心智；这里只展示当前 daemon 对应的桥接配置。需要更改时回连接配置页编辑。'
+              relayDevicesAvailable
+                ? '可直接刷新 Tailscale/bridge target；选择 Relay daemon 时也可以通过 relay-rtc 刷新 tmux sessions。'
                 : '支持手动输入 Tailscale IP/域名；填写完成后显式点击 Connect，才会测试连通并刷新 tmux sessions。'
             }
           />
@@ -947,7 +971,7 @@ export function TmuxSessionPickerSheet({
             value={selectedTarget.bridgeHost}
             onChange={(event) => setSelectedTarget((current) => ({ ...current, bridgeHost: event.target.value }))}
             placeholder="100.127.23.27 或 your-device.ts.net"
-            disabled={daemonFirst}
+            disabled={targetInputLocked}
             style={{
               minHeight: '48px',
               borderRadius: '16px',
@@ -966,7 +990,7 @@ export function TmuxSessionPickerSheet({
                   bridgePort: Number.parseInt(event.target.value, 10) || DEFAULT_BRIDGE_PORT,
                 }))
               }
-              disabled={daemonFirst}
+              disabled={targetInputLocked}
               style={{
                 width: '136px',
                 minHeight: '48px',
@@ -980,7 +1004,7 @@ export function TmuxSessionPickerSheet({
               value={selectedTarget.authToken || ''}
               onChange={(event) => setSelectedTarget((current) => ({ ...current, authToken: event.target.value }))}
               placeholder="Bridge auth token"
-              disabled={daemonFirst}
+              disabled={targetInputLocked}
               style={{
                 flex: 1,
                 minWidth: 0,
@@ -1067,7 +1091,7 @@ export function TmuxSessionPickerSheet({
             </div>
           </div>
 
-          {!daemonFirst && <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px' }}>
             {serverViews.map(({ server, daemonHostId, bridgeLabel, daemonLabel, targetBadge }) => {
               const active = server.targetHost === selectedTarget.bridgeHost && server.targetPort === selectedTarget.bridgePort;
               return (
@@ -1102,10 +1126,10 @@ export function TmuxSessionPickerSheet({
                 </button>
               );
             })}
-          </div>}
+          </div>
         </div>
 
-        {!daemonFirst && <RelayDevicePicker
+        {!relayDevicesAvailable && <RelayDevicePicker
           relayEnabled={relayEnabled}
           devices={relayDevices}
           selectedRelayHostId={selectedTarget.relayHostId || selectedTarget.daemonHostId || ''}

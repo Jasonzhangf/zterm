@@ -150,6 +150,97 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
     );
   });
 
+  it('refreshes a direct Tailscale target even when Relay account devices are present', async () => {
+    tmuxSessionsMock.fetchTmuxSessions.mockResolvedValueOnce(['zterm', 'server']);
+    const onRemoteSessionsRefreshed = vi.fn();
+
+    render(
+      <TmuxSessionPickerSheet
+        mode="quick-tab"
+        open
+        servers={[]}
+        bridgeSettings={bridgeSettings}
+        initialTarget={{
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          authToken: 'token-direct',
+        }}
+        onClose={vi.fn()}
+        onOpenTmuxSession={vi.fn()}
+        onOpenMultipleTmuxSessions={vi.fn()}
+        onSelectCleanSession={vi.fn()}
+        onRemoteSessionsRefreshed={onRemoteSessionsRefreshed}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Connect'));
+
+    await waitFor(() => {
+      expect(tmuxSessionsMock.fetchTmuxSessions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          authToken: 'token-direct',
+          relayHostId: '',
+        }),
+        expect.objectContaining({ traversalRelay: expect.objectContaining({ accessToken: 'access-1' }) }),
+      );
+    });
+    expect(await screen.findByText('zterm')).toBeTruthy();
+    expect(onRemoteSessionsRefreshed).toHaveBeenCalledWith(
+      expect.objectContaining({ bridgeHost: '100.66.1.82', relayHostId: '' }),
+      ['server', 'zterm'],
+    );
+  });
+
+  it('refreshes an explicit Relay-only target through rtc candidates without requiring bridgeHost', async () => {
+    tmuxSessionsMock.fetchTmuxSessions.mockResolvedValueOnce(['relay-main']);
+
+    render(
+      <TmuxSessionPickerSheet
+        mode="quick-tab"
+        open
+        servers={[]}
+        bridgeSettings={bridgeSettings}
+        initialTarget={{
+          bridgeHost: '',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-host-a',
+          relayHostId: 'daemon-host-a',
+          relayDeviceId: 'daemon-device-a',
+          transportMode: 'webrtc',
+          relayEndpointCandidates: [{
+            id: 'relay-rtc:daemon-host-a',
+            kind: 'relay-rtc',
+            relayHostId: 'daemon-host-a',
+            authRequired: true,
+            lastSeenAt: '2026-06-28T00:00:00.000Z',
+          }],
+        }}
+        onClose={vi.fn()}
+        onOpenTmuxSession={vi.fn()}
+        onOpenMultipleTmuxSessions={vi.fn()}
+        onSelectCleanSession={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Connect'));
+
+    await waitFor(() => {
+      expect(tmuxSessionsMock.fetchTmuxSessions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bridgeHost: '',
+          daemonHostId: 'daemon-host-a',
+          relayHostId: 'daemon-host-a',
+          transportMode: 'webrtc',
+          relayEndpointCandidates: [expect.objectContaining({ kind: 'relay-rtc' })],
+        }),
+        expect.objectContaining({ traversalRelay: expect.objectContaining({ accessToken: 'access-1' }) }),
+      );
+    });
+    expect(await screen.findByText('relay-main')).toBeTruthy();
+  });
+
   it('opens a directory tmux session without requiring a local bridge preset', () => {
     const onOpenTmuxSession = vi.fn();
 

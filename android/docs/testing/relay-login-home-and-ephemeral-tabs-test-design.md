@@ -32,6 +32,8 @@
 - Successful login can add synchronized Relay/device route candidates while preserving the saved direct/Tailscale host rows.
 - Successful login can merge Relay route candidates into an existing saved direct/Tailscale Home row for the same daemon, and that row shows an explicit Relay action.
 - The explicit Relay Home action builds a `transportMode='webrtc'` target with only `relay-rtc` route candidates; direct/Tailscale endpoints remain available only to the Auto route.
+- Terminal Session Picker refresh is scoped to the current target, not global Relay login state: a signed-in Relay account with online daemon devices must not block or short-circuit a direct/Tailscale target that has `bridgeHost + authToken`.
+- An explicit Relay-only Session Picker target with `transportMode='webrtc'` and `relay-rtc` candidates must be allowed to live fetch sessions even when `bridgeHost` is empty.
 - Relay account persistence retains token/account/directory truth but never retains the plaintext login password.
 - Runtime open/close/switch still updates the in-memory open-tab projection during the current process.
 
@@ -42,6 +44,8 @@
 - Home does not import or invoke `connections-server-groups`, Session-group selection, Session close, or tab-list save/load owners.
 - Home must not require a Relay access token before opening a saved/preset server row, active Session resume, or settings.
 - Home server row must not stop at `TmuxSessionPickerSheet` for the normal enter path.
+- Session Picker must not use a global `daemonFirst` / Relay logged-in flag to disable direct target fields, hide saved direct servers, require `relayHostId`, or replace live direct refresh with Relay directory snapshots.
+- `buildBridgeTargetFromHost()` must not resolve a direct/Tailscale endpoint into `bridgeHost` for a Host explicitly marked as `transportMode='webrtc'` or `relay-route`.
 - Relay login failure must not hide or disable saved direct/Tailscale rows.
 - Relay logout clears relay account/bridge relay settings without touching saved Hosts, active runtime Sessions, or open-tab truth.
 - Relay account directory projection must not replace saved-host identity or become the owner of Tailscale/local direct connection truth.

@@ -124,31 +124,31 @@ describe('tmux session picker rows', () => {
   it('auto-refreshes only when the picker has a concrete authenticated target', () => {
     expect(shouldAutoRefreshTmuxPicker({
       open: true,
-      daemonFirst: false,
+      relayDirectoryTarget: false,
       target: { bridgeHost: '100.66.1.82', authToken: 'token-a' },
     })).toBe(true);
 
     expect(shouldAutoRefreshTmuxPicker({
       open: true,
-      daemonFirst: false,
+      relayDirectoryTarget: false,
       target: { bridgeHost: '100.66.1.82', authToken: '' },
     })).toBe(false);
 
     expect(shouldAutoRefreshTmuxPicker({
       open: true,
-      daemonFirst: true,
+      relayDirectoryTarget: false,
       target: { bridgeHost: '100.66.1.82', authToken: 'token-a', daemonHostId: '' },
-    })).toBe(false);
+    })).toBe(true);
 
     expect(shouldAutoRefreshTmuxPicker({
       open: true,
-      daemonFirst: true,
+      relayDirectoryTarget: true,
       target: { bridgeHost: '100.66.1.82', authToken: 'token-a', daemonHostId: 'daemon-a' },
     })).toBe(true);
 
     expect(shouldAutoRefreshTmuxPicker({
       open: true,
-      daemonFirst: true,
+      relayDirectoryTarget: true,
       target: {
         bridgeHost: 'daemon-a',
         authToken: '',
