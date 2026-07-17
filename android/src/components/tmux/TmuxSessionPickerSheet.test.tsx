@@ -241,7 +241,8 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
     expect(await screen.findByText('relay-main')).toBeTruthy();
   });
 
-  it('opens a directory tmux session without requiring a local bridge preset', () => {
+  it('opens a Relay daemon tmux session after live refresh without requiring a local bridge preset', async () => {
+    tmuxSessionsMock.fetchTmuxSessions.mockResolvedValueOnce(['main']);
     const onOpenTmuxSession = vi.fn();
 
     render(
@@ -259,7 +260,7 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
 
     fireEvent.click(screen.getByText('MacStudio Relay'));
 
-    expect(screen.getByTestId('tmux-session-name').textContent).toBe('main');
+    expect((await screen.findByTestId('tmux-session-name')).textContent).toBe('main');
     fireEvent.click(screen.getByText('Open'));
 
     expect(onOpenTmuxSession).toHaveBeenCalledWith(
@@ -275,6 +276,49 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
         ]),
       }),
       'main',
+    );
+  });
+
+  it('refreshes live sessions after selecting a Relay daemon instead of treating directory sessions as final truth', async () => {
+    tmuxSessionsMock.fetchTmuxSessions.mockResolvedValueOnce(['relay-live', 'zterm-live']);
+    const onRemoteSessionsRefreshed = vi.fn();
+
+    render(
+      <TmuxSessionPickerSheet
+        mode="quick-tab"
+        open
+        servers={[]}
+        bridgeSettings={bridgeSettings}
+        onClose={vi.fn()}
+        onOpenTmuxSession={vi.fn()}
+        onOpenMultipleTmuxSessions={vi.fn()}
+        onSelectCleanSession={vi.fn()}
+        onRemoteSessionsRefreshed={onRemoteSessionsRefreshed}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('MacStudio Relay'));
+
+    await waitFor(() => {
+      expect(tmuxSessionsMock.fetchTmuxSessions).toHaveBeenCalledWith(
+        expect.objectContaining({
+          bridgeHost: 'mac.tailnet.ts.net',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-host-a',
+          relayHostId: 'daemon-host-a',
+          relayEndpointCandidates: expect.arrayContaining([
+            expect.objectContaining({ kind: 'relay-rtc', relayHostId: 'daemon-host-a' }),
+          ]),
+        }),
+        expect.objectContaining({ traversalRelay: expect.objectContaining({ accessToken: 'access-1' }) }),
+      );
+    });
+    expect(await screen.findByText('relay-live')).toBeTruthy();
+    expect(screen.getByText('zterm-live')).toBeTruthy();
+    expect(screen.queryByText('main')).toBeNull();
+    expect(onRemoteSessionsRefreshed).toHaveBeenLastCalledWith(
+      expect.objectContaining({ relayHostId: 'daemon-host-a' }),
+      ['relay-live', 'zterm-live'],
     );
   });
 

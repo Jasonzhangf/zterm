@@ -412,33 +412,6 @@ export function TmuxSessionPickerSheet({
     const authToken = selectedTarget.authToken?.trim() || '';
     const relayHostId = getTargetRelayHostId(selectedTarget);
     const canUseRelayTransport = relayEnabled && Boolean(relayHostId) && hasRelayRtcEndpointCandidate(selectedTarget);
-    const relayDirectoryTarget = relayEnabled
-      && Boolean(relayHostId)
-      && (
-        canUseRelayTransport
-        || (selectedTarget.relayTmuxSessions || []).length > 0
-        || Boolean(selectedTarget.relayDeviceId?.trim())
-      );
-    const directorySessions = getDirectorySessionNames(selectedTarget);
-
-    if (relayDirectoryTarget && directorySessions.length > 0) {
-      setAvailableSessions(directorySessions);
-      setSelectedSessions((current) => {
-        const nextRows = buildTmuxSessionPickerRows({
-          availableSessions: directorySessions,
-          openTabs,
-          target: selectedTarget,
-          includeOpenTabs: showOpenTabState,
-        });
-        return filterActionableTmuxSelections(current, nextRows, showOpenTabState);
-      });
-      setDiscoveryState('done');
-      setErrorMessage('');
-      setLastRefreshedAt(Date.now());
-      onRemoteSessionsRefreshed?.(selectedTarget, directorySessions);
-      return;
-    }
-
     if (!bridgeHost && !canUseRelayTransport) {
       setAvailableSessions([]);
       setSelectedSessions([]);
