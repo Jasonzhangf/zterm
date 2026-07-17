@@ -22,7 +22,7 @@ import { useTerminalPageCopyRuntime } from './useTerminalPageCopyRuntime';
 import { APP_VERSION, APP_VERSION_CODE } from '../lib/app-version';
 import { getBrowserStorage } from '../lib/browser-storage';
 import { mobileTheme } from '../lib/mobile-ui';
-import { buildServerIdentityAliasMap, resolveServerIdentity } from '../lib/server-identity';
+import { buildServerIdentityAliasMap, resolveServerIdentity, type ServerIdentityInput } from '../lib/server-identity';
 import { buildSessionSemanticOwnerKey, buildSessionSemanticReuseKey } from '../lib/session-semantic-identity';
 import { resolveSessionRemoteMissing } from '../lib/terminal-drawer-remote-missing';
 import { ImeAnchor } from '../plugins/ImeAnchorPlugin';
@@ -241,6 +241,7 @@ interface TerminalPageProps {
   }, sessionName: string) => void | Promise<void>;
   onRefreshDrawerHostSessions?: (hostKey?: string) => void | Promise<void>;
   relayDevices?: TraversalRelayDeviceSnapshot[];
+  serverIdentityAliasInputs?: ServerIdentityInput[];
   sessionPickerDebugMode?: string | null;
   pendingPaneAttachIntent?: { sessionIds: string[]; paneId: string; nonce: number } | null;
   onPaneAttachIntentApplied?: (intent: { sessionIds: string[]; paneId: string; nonce: number }) => void;
@@ -389,6 +390,76 @@ function buildRelayDeviceServerIdentityAliasInputs(relayDevices: TraversalRelayD
       .map((endpoint) => resolveRelayDeviceEndpointAliasInput(device, endpoint))
       .filter((item): item is { bridgeHost: string; bridgePort: number; daemonHostId: string; connectionName: string } => item !== null),
   );
+}
+
+function buildRelayDeviceSessionCatalogAliasInputs(
+  relayDevices: TraversalRelayDeviceSnapshot[],
+  sessionGroups: SessionGroupHistory[],
+): ServerIdentityInput[] {
+  const relayCatalogs = relayDevices
+    .map((device) => ({
+      device,
+      daemonHostId: device.daemon.hostId.trim(),
+      sessionNames: new Set((device.daemon.sessions || [])
+        .map((session) => session.name?.trim())
+        .filter((name): name is string => Boolean(name))),
+    }))
+    .filter((catalog) => catalog.daemonHostId && catalog.sessionNames.size > 0);
+
+  const aliases: ServerIdentityInput[] = [];
+  for (const group of sessionGroups) {
+    const bridgeHost = group.bridgeHost?.trim();
+    if (!bridgeHost || group.daemonHostId?.trim()) {
+      continue;
+    }
+    const missing = new Set((group.missingSessionNames || []).map((name) => name.trim()).filter(Boolean));
+    const groupSessionNames = group.sessionNames
+      .map((name) => name.trim())
+      .filter((name) => name && !missing.has(name));
+    if (groupSessionNames.length === 0) {
+      continue;
+    }
+    const matches = relayCatalogs.filter((catalog) =>
+      groupSessionNames.every((name) => catalog.sessionNames.has(name)),
+    );
+    if (matches.length !== 1) {
+      continue;
+    }
+    const match = matches[0];
+    aliases.push({
+      bridgeHost,
+      bridgePort: group.bridgePort || DEFAULT_BRIDGE_PORT,
+      daemonHostId: match.daemonHostId,
+      connectionName: match.device.deviceName.trim() || match.daemonHostId,
+    });
+  }
+  return aliases;
+}
+
+function terminalPageRelayDevicesUiKey(relayDevices: readonly TraversalRelayDeviceSnapshot[] | undefined) {
+  return (relayDevices || []).map((device) => [
+    device.deviceId,
+    device.deviceName,
+    device.daemon.hostId,
+    device.daemon.connected ? '1' : '0',
+    (device.daemon.endpoints || []).map((endpoint) => [
+      endpoint.id,
+      endpoint.kind,
+      endpoint.host || '',
+      endpoint.wsUrl || '',
+      endpoint.relayHostId || '',
+      String(endpoint.port || ''),
+    ].join('~')).join(','),
+  ].join('|')).join('||');
+}
+
+function terminalPageServerIdentityAliasInputsUiKey(inputs: readonly ServerIdentityInput[] | undefined) {
+  return (inputs || []).map((input) => [
+    input.bridgeHost || '',
+    String(input.bridgePort || ''),
+    input.daemonHostId || '',
+    input.connectionName || '',
+  ].join('|')).join('||');
 }
 
 function resolveSessionInputEpoch(
@@ -942,6 +1013,7 @@ function TerminalPageComponent({
   onCloseDrawerRemoteSession,
   onRefreshDrawerHostSessions,
   relayDevices = [],
+  serverIdentityAliasInputs = [],
   sessionPickerDebugMode = null,
   pendingPaneAttachIntent = null,
   onPaneAttachIntentApplied,
@@ -1319,8 +1391,10 @@ function TerminalPageComponent({
   const drawerServerIdentityAliases = useMemo(() => buildServerIdentityAliasMap([
     ...sessions,
     ...sessionGroups,
+    ...buildRelayDeviceSessionCatalogAliasInputs(relayDevices, sessionGroups),
+    ...serverIdentityAliasInputs,
     ...buildRelayDeviceServerIdentityAliasInputs(relayDevices),
-  ]), [relayDevices, sessionGroups, sessions]);
+  ]), [relayDevices, serverIdentityAliasInputs, sessionGroups, sessions]);
   const drawerHosts = useMemo<TerminalSessionDrawerHost[]>(() => {
     const hosts = new Map<string, TerminalSessionDrawerHost>();
     for (const device of relayDevices) {
@@ -3264,6 +3338,9 @@ function terminalPagePropsEqual(
     && prev.onCloseDrawerRemoteSession === next.onCloseDrawerRemoteSession
     && prev.onRefreshDrawerHostSessions === next.onRefreshDrawerHostSessions
     && prev.sessionGroups === next.sessionGroups
+    && terminalPageRelayDevicesUiKey(prev.relayDevices) === terminalPageRelayDevicesUiKey(next.relayDevices)
+    && terminalPageServerIdentityAliasInputsUiKey(prev.serverIdentityAliasInputs)
+      === terminalPageServerIdentityAliasInputsUiKey(next.serverIdentityAliasInputs)
     && prev.onResize === next.onResize
     && prev.onTerminalInput === next.onTerminalInput
     && prev.onTerminalViewportChange === next.onTerminalViewportChange

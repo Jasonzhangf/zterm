@@ -38,6 +38,8 @@ flowchart TD
   Renderer --> RenderGate["src/lib/session-render-gate.ts"]
 ```
 
+`App -> TerminalPage -> SessionDrawer` carries saved/Home server identity aliases alongside Relay endpoint and Session catalog facts. `TerminalPage` canonicalizes these into one daemon host rail; ambiguous rtc-only catalog matches remain separate and never guess identity.
+
 ## Android Session Preview Mainline
 
 ```mermaid

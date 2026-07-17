@@ -4,7 +4,7 @@
 
 - Feature: `terminal.session_drawer`
 - Resources: `resource.ui_projection -> resource.open_tab -> resource.active_session`; fixed-width crop gestures also border `resource.renderer_window` but must not mutate terminal content truth.
-- Owner: `src/components/terminal/TerminalSessionDrawer.tsx` for drawer intent; `src/pages/TerminalPage.tsx` for page-level projection of that intent into the focused session-group viewport slot.
+- Owner: `src/components/terminal/TerminalSessionDrawer.tsx` for drawer intent; `src/pages/TerminalPage.tsx` for page-level projection and host canonicalization; `src/lib/server-identity.ts` for endpoint-to-daemon alias resolution; `src/App.tsx` only wires saved/Home server identity inputs into the page.
 - Change class: physically remove cross-gesture selection, separate fixed-width crop pan from drawer open, and ensure remote catalog row selection materializes and projects the selected session on the first tap. The edge swipe that opens the drawer may expose rows under the release point, but that same gesture must never become a row-selection intent. In `mirror-fixed`, right-side or middle horizontal drags belong to renderer crop pan; the drawer may only start from the left edge and only emit the `previous` drawer-open direction.
 
 ## Lifecycle
@@ -21,7 +21,9 @@
 10. The drawer may receive a left-edge right swipe only after the renderer offset is already zero before that gesture starts.
 11. A remote-only catalog row press emits one session-open owner intent. When the owner returns the materialized local `sessionId`, TerminalPage must immediately project that session into the focused session-group viewport slot.
 12. After parent state includes the materialized Session, the visible center terminal must render that Session without requiring a second drawer tap. The page must not project the synthetic `remote:<owner>::session:<name>` catalog id as active truth.
-13. Relay directory direct endpoints are identity aliases only: an IP-keyed direct Session/SessionGroup whose endpoint belongs to a Relay daemon must project into that daemon's canonical host rail, not create a second IP rail.
+13. Relay directory direct endpoints and saved/Home server mappings are identity aliases only: an IP-keyed direct Session/SessionGroup whose endpoint belongs to a Relay daemon must project into that daemon's canonical host rail, not create a second IP rail.
+14. Production Relay directory may expose only `relay-rtc`. If no endpoint mapping exists, a direct SessionGroup may bind to a Relay daemon only when its non-missing Session names are all present in exactly one Relay daemon catalog. Zero or multiple matches remain separate instead of guessing.
+15. A Relay directory or saved/Home alias update must invalidate the memoized TerminalPage identity projection so the open drawer re-canonicalizes without a page restart.
 
 ## Paired Tests
 
@@ -29,11 +31,14 @@
 - Positive: keyboard/accessibility click (`detail=0`) still selects the row.
 - Positive: selecting a remote-only catalog row calls the session-open owner, consumes the returned materialized `sessionId`, and renders that Session in the center viewport after the parent supplies it.
 - Positive: a direct/Tailscale session group matching a Relay directory endpoint appears under the Relay daemon host rail with its real session count.
+- Positive: a saved/Home server mapping aliases an IP group into the matching daemon rail when production Relay exposes only `relay-rtc`.
+- Positive: an rtc-only Relay daemon catalog that uniquely contains every non-missing Session name aliases that direct group into the daemon rail.
 - Negative: a pointer click delivered after drawer open without a matching row press does not select any session.
 - Negative: an unavailable row remains non-selectable even after a matching press.
 - Negative: arming one row cannot authorize selection of another row.
 - Negative: selecting a remote-only catalog row must not switch or render the remote catalog placeholder id when no materialized `sessionId` is returned.
 - Negative: the matching direct endpoint must not remain as a duplicate IP host rail with the Relay daemon rail showing zero sessions.
+- Negative: two Relay daemon catalogs containing the same direct-group Session names are ambiguous and must not be merged.
 - Negative: `mirror-fixed` right-side horizontal drag does not emit drawer/tab swipe.
 - Negative: `mirror-fixed` rightward pan with positive renderer offset changes the offset but does not emit drawer/tab swipe, including a start inside the left edge band.
 - Negative: `mirror-fixed` zero-offset non-left-edge right pan stops before the parent drawer gesture owner, even though the visual offset cannot move further.
@@ -52,6 +57,7 @@
 - `src/components/terminal/TerminalTabSwipeSurface.test.tsx`
 - `src/pages/TerminalPageStageShell.pane-stage.test.tsx`
 - `src/pages/TerminalPage.session-drawer.test.tsx`
+- `src/lib/server-identity.test.ts`
 - `src/hooks/useOpenTabRuntime.test.tsx`
 - `src/contexts/session-context-session-runtime.test.ts`
 - `src/contexts/session-context-transport-open-runtime.test.ts`

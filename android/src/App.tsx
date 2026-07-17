@@ -704,6 +704,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             onCloseDrawerRemoteSession={handleCloseGroupSession}
             onRefreshDrawerHostSessions={handleRefreshDrawerHostSessions}
             relayDevices={relayDevices}
+            serverIdentityAliasInputs={homeSavedConnections}
             sessionPickerDebugMode={pickerMode}
             pendingPaneAttachIntent={pendingPaneAttachIntent}
             onPaneAttachIntentApplied={(intent) => {

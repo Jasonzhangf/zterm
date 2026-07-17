@@ -572,6 +572,7 @@ vi.mock('./pages/TerminalPage', () => ({
     onTerminalWidthModeChange,
     onSessionDraftSend,
     followResetEpoch,
+    serverIdentityAliasInputs = [],
   }: {
     activeSession: { id: string; buffer?: { revision?: number } } | null;
     sessions: Array<{ id: string }>;
@@ -584,12 +585,14 @@ vi.mock('./pages/TerminalPage', () => ({
     onTerminalWidthModeChange?: (sessionId: string, mode: 'adaptive-phone' | 'mirror-fixed', cols?: number | null) => void;
     onSessionDraftSend?: (value: string, sessionId?: string) => void;
     followResetEpoch?: number;
+    serverIdentityAliasInputs?: Array<{ bridgeHost?: string; bridgePort?: number; daemonHostId?: string; name?: string }>;
   }) => {
     const activeRevision = activeSession?.buffer?.revision ?? -1;
     terminalPageRenderSpy({
       activeSessionId: activeSession?.id || null,
       sessionIds: sessions.map((session) => session.id),
       activeRevision,
+      serverIdentityAliasInputs,
     });
     return (
       <div>
@@ -686,11 +689,18 @@ vi.mock('./pages/TerminalPage', () => ({
     const nextRevision = next.activeSession?.buffer?.revision ?? -1;
     const prevInputResetEpoch = prevActiveId ? (prev.inputResetEpochBySession?.[prevActiveId] || 0) : -1;
     const nextInputResetEpoch = nextActiveId ? (next.inputResetEpochBySession?.[nextActiveId] || 0) : -1;
+    const prevAliasInputs = (prev.serverIdentityAliasInputs || [])
+      .map((input: any) => [input.bridgeHost || '', input.bridgePort || '', input.daemonHostId || '', input.name || ''].join('|'))
+      .join('||');
+    const nextAliasInputs = (next.serverIdentityAliasInputs || [])
+      .map((input: any) => [input.bridgeHost || '', input.bridgePort || '', input.daemonHostId || '', input.name || ''].join('|'))
+      .join('||');
     const equal = (
       prevActiveId === nextActiveId
       && prevSessionIds === nextSessionIds
       && prevRevision === nextRevision
       && prevInputResetEpoch === nextInputResetEpoch
+      && prevAliasInputs === nextAliasInputs
       && (prev.followResetEpoch ?? -1) === (next.followResetEpoch ?? -1)
       && prev.onSwitchSession === next.onSwitchSession
       && prev.onMoveSession === next.onMoveSession
@@ -1099,6 +1109,35 @@ describe('App dynamic refresh matrix', () => {
     vi.useRealTimers();
     await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toContain('runtime:mac-studio:zterm-20260715-060708'));
     expect(tmuxPickerHarness.readProps()).toEqual(expect.objectContaining({ open: false }));
+  });
+
+  it('passes Home server identity aliases into the TerminalPage drawer projection', async () => {
+    const bridgeSettings = {
+      servers: [{
+        id: '100.66.1.82:3333::daemon:mac-studio',
+        name: 'Mac Studio Tailscale',
+        targetHost: '100.66.1.82',
+        targetPort: 3333,
+        authToken: 'token-a',
+        relayHostId: 'mac-studio',
+      }],
+      traversalRelay: undefined,
+    };
+
+    render(
+      <AppContent bridgeSettings={bridgeSettings as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(terminalPageRenderSpy).toHaveBeenCalled());
+    const lastRender = terminalPageRenderSpy.mock.calls[terminalPageRenderSpy.mock.calls.length - 1]?.[0];
+    expect(lastRender.serverIdentityAliasInputs).toEqual([
+      expect.objectContaining({
+        name: 'Mac Studio Tailscale',
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+      }),
+    ]);
   });
 
   // NOTE: d505c65 changed inputResetEpoch from React state to a ref to eliminate

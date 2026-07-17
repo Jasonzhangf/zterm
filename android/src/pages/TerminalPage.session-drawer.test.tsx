@@ -98,6 +98,8 @@ function makeRelayDevice(overrides: Partial<{
   deviceName: string;
   hostId: string;
   endpointHost: string;
+  includeDirectEndpoint: boolean;
+  sessions: string[];
 }> = {}) {
   const deviceId = overrides.deviceId || 'device-mac-studio';
   const hostId = overrides.hostId || 'mac-studio';
@@ -118,14 +120,14 @@ function makeRelayDevice(overrides: Partial<{
       hostId,
       version: 'test',
       endpoints: [
-        {
+        ...(overrides.includeDirectEndpoint === false ? [] : [{
           id: `direct:tailscale:${hostId}`,
           kind: 'tailscale' as const,
           host: endpointHost,
           port: 3333,
           authRequired: true,
           lastSeenAt: '2026-07-17T00:00:00.000Z',
-        },
+        }]),
         {
           id: `relay-rtc:${hostId}`,
           kind: 'relay-rtc' as const,
@@ -134,7 +136,12 @@ function makeRelayDevice(overrides: Partial<{
           lastSeenAt: '2026-07-17T00:00:00.000Z',
         },
       ],
-      sessions: [],
+      sessions: (overrides.sessions || []).map((name) => ({
+        name,
+        cwd: '/Users/jason',
+        title: name,
+        updatedAt: '2026-07-17T00:00:00.000Z',
+      })),
     },
   };
 }
@@ -366,6 +373,255 @@ describe('TerminalPage portrait session drawer', () => {
     expect(await screen.findByTestId('terminal-session-drawer-host-mac-studio')).toBeTruthy();
     expect(screen.queryByTestId('terminal-session-drawer-host-100.66.1.82:3333')).toBeNull();
     expect(screen.getByTestId('terminal-session-drawer-row-direct-rcc')).toBeTruthy();
+  });
+
+  it('uses saved server daemon identity aliases when Relay directory only exposes rtc endpoint', async () => {
+    const directSession = makeSession('direct-rcc');
+    directSession.bridgeHost = '100.66.1.82';
+    directSession.bridgePort = 3333;
+    directSession.sessionName = 'rcc';
+    directSession.title = 'rcc';
+    directSession.connectionName = '100.66.1.82';
+
+    render(
+      <TerminalPage
+        sessions={[directSession]}
+        activeSession={directSession}
+        sessionGroups={[{
+          id: 'group-direct-mac-studio',
+          name: '100.66.1.82',
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          sessionNames: ['rcc'],
+          lastOpenedAt: 1,
+        }]}
+        relayDevices={[
+          makeRelayDevice({ includeDirectEndpoint: false }),
+          makeRelayDevice({
+            deviceId: 'device-windows',
+            deviceName: 'Windows PC',
+            hostId: 'windows-pc',
+            endpointHost: '100.66.1.90',
+          }),
+        ]}
+        serverIdentityAliasInputs={[{
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          daemonHostId: 'mac-studio',
+          connectionName: 'Mac Studio',
+        }]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+    expect(swipeSurface).toBeTruthy();
+    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface!, {
+      touches: [{ clientX: 236, clientY: 206 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    expect((await screen.findByTestId('terminal-session-drawer-host-mac-studio')).textContent).toContain('1');
+    expect(screen.queryByTestId('terminal-session-drawer-host-100.66.1.82:3333')).toBeNull();
+    expect(screen.getByTestId('terminal-session-drawer-row-direct-rcc')).toBeTruthy();
+  });
+
+  it('uses an unambiguous Relay session catalog alias when rtc is the only published endpoint', async () => {
+    const directSession = makeSession('direct-rcc');
+    directSession.bridgeHost = '100.66.1.82';
+    directSession.bridgePort = 3333;
+    directSession.sessionName = 'rcc';
+    directSession.title = 'rcc';
+
+    render(
+      <TerminalPage
+        sessions={[directSession]}
+        activeSession={directSession}
+        sessionGroups={[{
+          id: 'group-direct-mac-studio',
+          name: '100.66.1.82',
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          sessionNames: ['rcc', 'freehand'],
+          lastOpenedAt: 1,
+        }]}
+        relayDevices={[
+          makeRelayDevice({
+            includeDirectEndpoint: false,
+            sessions: ['rcc', 'freehand', 'onestop'],
+          }),
+          makeRelayDevice({
+            deviceId: 'device-windows',
+            deviceName: 'Windows PC',
+            hostId: 'windows-pc',
+            endpointHost: '100.66.1.90',
+            sessions: ['powershell'],
+          }),
+        ]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+    expect(swipeSurface).toBeTruthy();
+    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
+    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    expect((await screen.findByTestId('terminal-session-drawer-host-mac-studio')).textContent).toContain('2');
+    expect(screen.queryByTestId('terminal-session-drawer-host-100.66.1.82:3333')).toBeNull();
+  });
+
+  it('does not merge an rtc-only direct group when multiple Relay catalogs match', async () => {
+    const directSession = makeSession('direct-rcc');
+    directSession.bridgeHost = '100.66.1.82';
+    directSession.bridgePort = 3333;
+    directSession.sessionName = 'rcc';
+    directSession.title = 'rcc';
+
+    render(
+      <TerminalPage
+        sessions={[directSession]}
+        activeSession={directSession}
+        sessionGroups={[{
+          id: 'group-direct-ambiguous',
+          name: '100.66.1.82',
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          sessionNames: ['rcc'],
+          lastOpenedAt: 1,
+        }]}
+        relayDevices={[
+          makeRelayDevice({ includeDirectEndpoint: false, sessions: ['rcc'] }),
+          makeRelayDevice({
+            deviceId: 'device-windows',
+            deviceName: 'Windows PC',
+            hostId: 'windows-pc',
+            endpointHost: '100.66.1.90',
+            includeDirectEndpoint: false,
+            sessions: ['rcc'],
+          }),
+        ]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+    expect(swipeSurface).toBeTruthy();
+    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
+    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    expect(await screen.findByTestId('terminal-session-drawer-host-100.66.1.82:3333')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-host-mac-studio').textContent).toContain('0');
+    expect(screen.getByTestId('terminal-session-drawer-host-windows-pc').textContent).toContain('0');
+  });
+
+  it('updates drawer identity when relay devices change under the memoized TerminalPage', async () => {
+    const directSession = makeSession('direct-rcc');
+    directSession.bridgeHost = '100.66.1.82';
+    directSession.bridgePort = 3333;
+    directSession.sessionName = 'rcc';
+    directSession.title = 'rcc';
+
+    const baseProps = {
+      sessions: [directSession],
+      activeSession: directSession,
+      sessionGroups: [{
+        id: 'group-direct-mac-studio',
+        name: '100.66.1.82',
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        sessionNames: ['rcc'],
+        lastOpenedAt: 1,
+      }],
+      onSwitchSession: vi.fn(),
+      onMoveSession: vi.fn(),
+      onRenameSession: vi.fn(),
+      onCloseSession: vi.fn(),
+      onOpenConnections: vi.fn(),
+      onOpenQuickTabPicker: vi.fn(),
+      onResize: vi.fn(),
+      onTerminalInput: vi.fn(),
+      onTerminalViewportChange: vi.fn(),
+      quickActions: [],
+      shortcutActions: [],
+      sessionDraft: '',
+    };
+
+    const { rerender } = render(
+      <TerminalPage
+        {...baseProps}
+        relayDevices={[
+          makeRelayDevice({ includeDirectEndpoint: false }),
+          makeRelayDevice({
+            deviceId: 'device-windows',
+            deviceName: 'Windows PC',
+            hostId: 'windows-pc',
+            endpointHost: '100.66.1.90',
+          }),
+        ]}
+      />,
+    );
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+    expect(swipeSurface).toBeTruthy();
+    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
+    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+    expect(await screen.findByTestId('terminal-session-drawer-host-100.66.1.82:3333')).toBeTruthy();
+
+    rerender(
+      <TerminalPage
+        {...baseProps}
+        relayDevices={[
+          makeRelayDevice(),
+          makeRelayDevice({
+            deviceId: 'device-windows',
+            deviceName: 'Windows PC',
+            hostId: 'windows-pc',
+            endpointHost: '100.66.1.90',
+          }),
+        ]}
+      />,
+    );
+
+    expect((await screen.findByTestId('terminal-session-drawer-host-mac-studio')).textContent).toContain('1');
+    expect(screen.queryByTestId('terminal-session-drawer-host-100.66.1.82:3333')).toBeNull();
   });
 
   it('keeps mirror-fixed non-edge right pan from opening the session drawer', () => {

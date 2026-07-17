@@ -1,6 +1,6 @@
 import { getServerColorToneByKey, type ServerColorTone } from './server-color';
 
-type ServerIdentityInput = {
+export type ServerIdentityInput = {
   bridgeHost?: string | null;
   bridgePort?: number | null;
   daemonHostId?: string | null;

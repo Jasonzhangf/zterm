@@ -1078,7 +1078,10 @@
         "src/components/terminal/TerminalSessionDrawer.tsx"
       ],
       "allowed_paths": [
+        "src/App.tsx",
         "src/components/terminal/TerminalSessionDrawer.tsx",
+        "src/lib/server-identity.ts",
+        "src/lib/server-identity.test.ts",
         "src/pages/TerminalPage.tsx",
         "src/pages/TerminalPage.session-drawer.test.tsx"
       ],
@@ -1087,11 +1090,13 @@
       ],
       "required_gates": [
         "src/components/terminal/TerminalSessionDrawer.test.tsx",
+        "src/lib/server-identity.test.ts",
         "src/pages/TerminalPage.session-drawer.test.tsx"
       ],
       "truth_sources": [
         "docs/function-map.md",
-        "docs/ui-slices.md"
+        "docs/ui-slices.md",
+        "docs/testing/terminal-session-drawer-gesture-test-design.md"
       ]
     },
     {
