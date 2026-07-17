@@ -34,12 +34,14 @@ function createOptions(overrides: Partial<any> = {}) {
     options?.sessionId || `runtime:${host.daemonHostId || host.relayHostId || host.bridgeHost}:${host.sessionName}`
   ));
   const setSessionGroupSelection = vi.fn();
+  const markSessionGroupEntered = vi.fn();
   const deleteSessionGroup = vi.fn();
   const pruneSessionGroupSelectionToRemoteTruth = vi.fn();
   const ensureTerminalPageVisible = vi.fn();
   const closeSession = vi.fn();
   const switchSession = vi.fn();
   const setPageState = vi.fn();
+  const auditOpenTabsAgainstRemoteSessions = vi.fn(async () => undefined);
   const applyOpenTabState = vi.fn((nextState: { tabs: any[]; activeSessionId: string | null }, persistOptions?: { preserveActiveSessionId?: string | null; switchRuntime?: OpenTabRuntimeSwitchReason }) => {
     const normalized = normalizeOpenTabIntentState(
       nextState.tabs,
@@ -84,10 +86,12 @@ function createOptions(overrides: Partial<any> = {}) {
     },
     setBridgeSettings,
     hosts: overrides.hosts || [],
+    sessionGroups: overrides.sessionGroups || [],
     relayDevices: overrides.relayDevices || [],
     deleteSessionGroup,
     pruneSessionGroupSelectionToRemoteTruth,
     setSessionGroupSelection,
+    markSessionGroupEntered,
     createSession,
     closeSession,
     switchSession,
@@ -96,6 +100,7 @@ function createOptions(overrides: Partial<any> = {}) {
     ensureTerminalPageVisible,
     applyOpenTabState,
     setPageState,
+    auditOpenTabsAgainstRemoteSessions,
   };
 
   return {
@@ -110,6 +115,7 @@ function createOptions(overrides: Partial<any> = {}) {
       setBridgeSettings,
       createSession,
       setSessionGroupSelection,
+      markSessionGroupEntered,
       deleteSessionGroup,
       pruneSessionGroupSelectionToRemoteTruth,
       ensureTerminalPageVisible,
@@ -117,6 +123,7 @@ function createOptions(overrides: Partial<any> = {}) {
       switchSession,
       applyOpenTabState,
       setPageState,
+      auditOpenTabsAgainstRemoteSessions,
     },
   };
 }
@@ -428,10 +435,125 @@ describe('useSessionOpenActions explicit-open truth', () => {
     });
   });
 
-  it('creates a generated tmux session before opening a Home server row without saved sessionName', async () => {
+  it('opens the first remote tmux session for a Home server row without saved session history', async () => {
+    const harness = createOptions();
+    fetchTmuxSessionsMock.mockResolvedValueOnce(['zterm', 'agentpi']);
+    harness.spies.createSession.mockReturnValue('runtime:mac-studio:agentpi');
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+    const savedServer = {
+      id: 'bridge-preset:mac-studio',
+      createdAt: 1,
+      name: 'Mac Studio',
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+      daemonHostId: 'mac-studio',
+      relayHostId: 'mac-studio',
+      sessionName: '',
+      authToken: 'token-a',
+      relayEndpointCandidates: [],
+      authType: 'password' as const,
+      tags: ['bridge-server'],
+      pinned: false,
+    };
+
+    await act(async () => {
+      result.current.handleOpenSavedConnection(savedServer);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(fetchTmuxSessionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        relayHostId: 'mac-studio',
+        authToken: 'token-a',
+      }),
+      expect.any(Object),
+    );
+    expect(createTmuxSessionMock).not.toHaveBeenCalled();
+    expect(harness.spies.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        sessionName: 'agentpi',
+      }),
+      expect.objectContaining({ activate: false }),
+    );
+    expect(harness.spies.markSessionGroupEntered).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+      }),
+      'agentpi',
+    );
+    expect(harness.spies.ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
+    expect(result.current.pickerMode).toBeNull();
+  });
+
+  it('opens the last entered session for a Home server row before the first remote session', async () => {
+    const harness = createOptions({
+      sessionGroups: [{
+        id: 'daemon:mac-studio',
+        name: 'Mac Studio',
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        authToken: 'token-a',
+        sessionNames: ['agentpi', 'zterm'],
+        lastOpenedSessionName: 'zterm',
+        lastOpenedAt: 10,
+      }],
+    });
+    fetchTmuxSessionsMock.mockResolvedValueOnce(['agentpi', 'zterm']);
+    harness.spies.createSession.mockReturnValue('runtime:mac-studio:zterm');
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+    const savedServer = {
+      id: 'bridge-preset:mac-studio',
+      createdAt: 1,
+      name: 'Mac Studio',
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+      daemonHostId: 'mac-studio',
+      relayHostId: 'mac-studio',
+      sessionName: '',
+      authToken: 'token-a',
+      relayEndpointCandidates: [],
+      authType: 'password' as const,
+      tags: ['bridge-server'],
+      pinned: false,
+    };
+
+    await act(async () => {
+      result.current.handleOpenSavedConnection(savedServer);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(createTmuxSessionMock).not.toHaveBeenCalled();
+    expect(harness.spies.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        sessionName: 'zterm',
+      }),
+      expect.objectContaining({ activate: false }),
+    );
+    expect(harness.spies.markSessionGroupEntered).toHaveBeenCalledWith(
+      expect.objectContaining({ daemonHostId: 'mac-studio' }),
+      'zterm',
+    );
+  });
+
+  it('creates a generated tmux session only when the Home server has no remote sessions', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-15T06:07:08.000Z'));
     const harness = createOptions();
+    fetchTmuxSessionsMock.mockResolvedValueOnce([]);
     harness.spies.createSession.mockReturnValue('runtime:mac-studio:zterm-20260715-060708');
     const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
     const savedServer = {
@@ -477,13 +599,22 @@ describe('useSessionOpenActions explicit-open truth', () => {
       expect.objectContaining({ activate: false }),
     );
     expect(harness.spies.ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
-    expect(result.current.pickerMode).toBeNull();
     vi.useRealTimers();
   });
 
-  it('resumes an existing current-process Home server session instead of creating another tmux session', () => {
+  it('resumes the existing current-process Home server session when it matches last-entered history', () => {
     const harness = createOptions({
       runtimeActiveSessionId: 'runtime:mac-studio:zterm',
+      sessionGroups: [{
+        id: 'daemon:mac-studio',
+        name: 'Mac Studio',
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        sessionNames: ['zterm', 'zterm-20260717-123456'],
+        lastOpenedSessionName: 'zterm',
+        lastOpenedAt: 10,
+      }],
       sessions: [
         {
           id: 'runtime:mac-studio:zterm',
@@ -527,6 +658,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
     });
 
     expect(createTmuxSessionMock).not.toHaveBeenCalled();
+    expect(fetchTmuxSessionsMock).not.toHaveBeenCalled();
     expect(harness.spies.createSession).not.toHaveBeenCalled();
     expect(harness.spies.applyOpenTabState).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -548,8 +680,6 @@ describe('useSessionOpenActions explicit-open truth', () => {
   });
 
   it('opens a relay directory Home server row through endpoint candidates without a local preset', async () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-07-15T06:07:08.000Z'));
     const harness = createOptions({
       bridgeSettings: {
         servers: [],
@@ -579,7 +709,8 @@ describe('useSessionOpenActions explicit-open truth', () => {
         },
       },
     });
-    harness.spies.createSession.mockReturnValue('runtime:mac-studio:zterm-20260715-060708');
+    fetchTmuxSessionsMock.mockResolvedValueOnce(['zterm']);
+    harness.spies.createSession.mockReturnValue('runtime:mac-studio:zterm');
     const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
     const relayServer = {
       id: 'relay-device:mac-studio-device:mac-studio',
@@ -620,7 +751,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
       await Promise.resolve();
     });
 
-    expect(createTmuxSessionMock).toHaveBeenCalledWith(
+    expect(fetchTmuxSessionsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         bridgeHost: 'mac-studio.tailnet.ts.net',
         bridgePort: 3333,
@@ -633,20 +764,19 @@ describe('useSessionOpenActions explicit-open truth', () => {
         ]),
       }),
       expect.any(Object),
-      'zterm-20260715-060708',
     );
+    expect(createTmuxSessionMock).not.toHaveBeenCalled();
     expect(harness.spies.createSession).toHaveBeenCalledWith(
       expect.objectContaining({
         bridgeHost: 'mac-studio.tailnet.ts.net',
         daemonHostId: 'mac-studio',
         relayHostId: 'mac-studio',
         relayDeviceId: 'mac-studio-device',
-        sessionName: 'zterm-20260715-060708',
+        sessionName: 'zterm',
       }),
       expect.objectContaining({ activate: false }),
     );
     expect(harness.spies.ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
-    vi.useRealTimers();
   });
 
   it('creates a blank daemon session directly from drawer host key instead of opening the picker', async () => {

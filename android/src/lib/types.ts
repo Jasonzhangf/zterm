@@ -461,6 +461,7 @@ export interface SessionGroupHistory {
   relayEndpointCandidates?: RelayEndpointCandidate[];
   sessionNames: string[];
   missingSessionNames?: string[];
+  lastOpenedSessionName?: string;
   lastOpenedAt: number;
 }
 

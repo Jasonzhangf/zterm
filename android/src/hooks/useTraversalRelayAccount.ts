@@ -10,7 +10,7 @@ import {
   writeTraversalRelayAccountState,
   type TraversalRelayAccountState,
 } from '../lib/traversal-relay-client';
-import { projectRelayDirectoryDeviceSnapshots } from '../lib/relay-account-directory';
+import { projectOnlineTraversalRelayDaemonDevicesFromAccount } from '../lib/traversal-relay-devices';
 import type { TraversalRelayDeviceSnapshot } from '../lib/types';
 
 interface RelayDraftAccount {
@@ -41,11 +41,7 @@ function buildFallbackRefreshAccount(
 }
 
 function projectRelayDevicesFromAccountState(account: TraversalRelayAccountState | null) {
-  if (!account) {
-    return [];
-  }
-  const directoryDevices = projectRelayDirectoryDeviceSnapshots(account.directory);
-  return directoryDevices.length > 0 ? directoryDevices : account.devices;
+  return projectOnlineTraversalRelayDaemonDevicesFromAccount(account);
 }
 
 export function useTraversalRelayAccount(initialRelaySettings?: TraversalRelayClientSettings) {

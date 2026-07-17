@@ -34,6 +34,10 @@ import {
 import { collectClientDebugSnapshot, registerClientDebugSnapshotSource } from './lib/client-debug-snapshot';
 import { runtimeDebug } from './lib/runtime-debug';
 import { projectRelayDirectoryDeviceSnapshots } from './lib/relay-account-directory';
+import {
+  listOnlineTraversalRelayDaemonDevices,
+  projectOnlineTraversalRelayDaemonDevicesFromAccount,
+} from './lib/traversal-relay-devices';
 import { openConnectionsPage, openTerminalPage } from './lib/page-state';
 import { ConnectionsPage } from './pages/ConnectionsPage';
 import { ConnectionPropertiesPage } from './pages/ConnectionPropertiesPage';
@@ -53,11 +57,7 @@ function computeRelayDeviceStreamReconnectDelay(attempt: number) {
 }
 
 function projectRelayDevicesFromAccountState(account: ReturnType<typeof readTraversalRelayAccountState>) {
-  if (!account) {
-    return [];
-  }
-  const directoryDevices = projectRelayDirectoryDeviceSnapshots(account.directory);
-  return directoryDevices.length > 0 ? directoryDevices : account.devices || [];
+  return projectOnlineTraversalRelayDaemonDevicesFromAccount(account);
 }
 
 interface AppContentProps {
@@ -172,7 +172,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
   const { shortcutActions, setShortcutActions } = useShortcutActionStorage();
   const shortcutFrequencyStorage = useShortcutFrequencyStorage();
   const { drafts: sessionDrafts, setDraft: setSessionDraft, clearDraft: clearSessionDraft, pruneDrafts } = useSessionDraftStorage();
-  const { sessionGroups, setSessionGroupSelection, deleteSessionGroup, pruneSessionGroupSelectionToRemoteTruth } = useSessionHistoryStorage();
+  const { sessionGroups, setSessionGroupSelection, markSessionGroupEntered, deleteSessionGroup, pruneSessionGroupSelectionToRemoteTruth } = useSessionHistoryStorage();
   const sessions = state.sessions;
 
   const ensureTerminalPageVisible = useCallback(() => {
@@ -329,12 +329,12 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
           runtimeDebug('relay.device-stream.open', { deviceId: account.deviceId });
         },
         onDevices: (devices) => {
-          setRelayDevices(devices);
+          setRelayDevices(listOnlineTraversalRelayDaemonDevices(devices));
         },
         onDirectory: (directory) => {
           const directoryDevices = projectRelayDirectoryDeviceSnapshots(directory);
           if (directoryDevices.length > 0) {
-            setRelayDevices(directoryDevices);
+            setRelayDevices(listOnlineTraversalRelayDaemonDevices(directoryDevices));
           }
         },
         onError: (message) => {
@@ -432,6 +432,25 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     onForegroundActiveChange,
   });
 
+  const markRuntimeSessionEntered = useCallback((sessionId: string) => {
+    const session = runtimeRefs.sessionsRef.current.find((candidate) => candidate.id === sessionId) || null;
+    if (!session || session.state === 'closed' || !session.sessionName.trim()) {
+      return;
+    }
+    markSessionGroupEntered({
+      name: session.connectionName || session.bridgeHost || session.daemonHostId || session.sessionName,
+      bridgeHost: session.bridgeHost,
+      bridgePort: session.bridgePort,
+      daemonHostId: session.daemonHostId,
+      authToken: session.authToken,
+    }, session.sessionName);
+  }, [markSessionGroupEntered, runtimeRefs.sessionsRef]);
+
+  const handleSwitchSessionWithHistory = useCallback((sessionId: string) => {
+    markRuntimeSessionEntered(sessionId);
+    handleSwitchSession(sessionId);
+  }, [handleSwitchSession, markRuntimeSessionEntered]);
+
   useEffect(() => registerClientDebugSnapshotSource('app-shell', () => ({
     page: pageState.kind,
     activeRuntimeSessionId: state.activeSessionId,
@@ -500,7 +519,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     pruneDrafts,
     sessionIds,
     runtimeRefs,
-    handleSwitchSession,
+    handleSwitchSession: handleSwitchSessionWithHistory,
     bridgeSettings,
     shortcutFrequencyStorage,
   });
@@ -529,10 +548,12 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     bridgeSettings,
     setBridgeSettings,
     hosts,
+    sessionGroups,
     relayDevices,
     deleteSessionGroup,
     pruneSessionGroupSelectionToRemoteTruth,
     setSessionGroupSelection,
+    markSessionGroupEntered,
     createSession,
     closeSession,
     switchSession,
@@ -561,9 +582,9 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
   });
 
   const handleResumeHomeSession = useCallback((sessionId: string) => {
-    handleSwitchSession(sessionId);
+    handleSwitchSessionWithHistory(sessionId);
     ensureTerminalPageVisible();
-  }, [ensureTerminalPageVisible, handleSwitchSession]);
+  }, [ensureTerminalPageVisible, handleSwitchSessionWithHistory]);
 
   const handleOpenSavedConnectionViaRelay = useCallback((host: Host) => {
     const relayHost = buildHomeRelayConnectionHost(host);
@@ -692,7 +713,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             activeSession={terminalActiveSession}
             getSessionDebugMetrics={getSessionDebugMetrics}
             sessionBufferStore={sessionRenderBufferStore}
-            onSwitchSession={handleSwitchSession}
+            onSwitchSession={handleSwitchSessionWithHistory}
             onMoveSession={handleMoveSession}
             onRenameSession={handleRenameSession}
             onCloseSession={handleCloseSession}
@@ -772,7 +793,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
         initialTarget={pickerTarget}
         initialSelectedSessions={pickerInitialSessions}
         onClose={closePicker}
-        onSwitchOpenTab={handleSwitchSession}
+        onSwitchOpenTab={handleSwitchSessionWithHistory}
         onRenameOpenTab={handleRenameSession}
         onCloseOpenTab={handleCloseSession}
         onOpenTmuxSession={handleOpenSingleTmuxSession}

@@ -322,6 +322,32 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
     );
   });
 
+  it('does not render directory sessions while the Relay daemon live refresh is pending', async () => {
+    let resolveFetch!: (sessions: string[]) => void;
+    tmuxSessionsMock.fetchTmuxSessions.mockReturnValueOnce(new Promise<string[]>((resolve) => {
+      resolveFetch = resolve;
+    }));
+
+    render(
+      <TmuxSessionPickerSheet
+        mode="quick-tab"
+        open
+        servers={[]}
+        bridgeSettings={bridgeSettings}
+        onClose={vi.fn()}
+        onOpenTmuxSession={vi.fn()}
+        onOpenMultipleTmuxSessions={vi.fn()}
+        onSelectCleanSession={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('MacStudio Relay'));
+
+    expect(screen.queryByText('main')).toBeNull();
+    resolveFetch(['relay-live']);
+    expect(await screen.findByText('relay-live')).toBeTruthy();
+  });
+
   it('shows an explicit add-server action in new-connection mode', () => {
     const onSelectCleanSession = vi.fn();
 

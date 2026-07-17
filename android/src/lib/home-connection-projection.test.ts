@@ -69,6 +69,31 @@ function makeRelayDevice(): TraversalRelayDeviceSnapshot {
   };
 }
 
+function makeDisconnectedStaleRelayDevice(): TraversalRelayDeviceSnapshot {
+  return {
+    ...makeRelayDevice(),
+    deviceId: 'rtc-device-1784267569532',
+    deviceName: 'rtc-device-1784267569532',
+    daemon: {
+      connected: false,
+      lastSeenAt: '2026-07-16T10:00:00.000Z',
+      hostId: 'rtc-verify-1784267569532',
+      version: '0.1.3',
+      endpoints: [{
+        id: 'relay-rtc:rtc-verify-1784267569532',
+        kind: 'relay-rtc',
+        relayHostId: 'rtc-verify-1784267569532',
+        authRequired: true,
+        lastSeenAt: '2026-07-16T10:00:00.000Z',
+      }],
+      sessions: [{
+        name: 'stale-session',
+        updatedAt: '2026-07-16T10:00:00.000Z',
+      }],
+    },
+  };
+}
+
 const bridgeSettings: BridgeSettings = {
   ...DEFAULT_BRIDGE_SETTINGS,
   servers: [],
@@ -138,5 +163,15 @@ describe('home connection projection relay route visibility', () => {
 
     expect(hasRelayRtcCandidate(host)).toBe(false);
     expect(buildHomeRelayConnectionHost(host)).toBeNull();
+  });
+
+  it('does not project disconnected stale relay daemon devices as Home server rows', () => {
+    const projected = projectHomeSavedConnections(
+      [],
+      bridgeSettings,
+      [makeDisconnectedStaleRelayDevice()],
+    );
+
+    expect(projected).toEqual([]);
   });
 });

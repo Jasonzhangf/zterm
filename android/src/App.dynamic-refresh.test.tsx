@@ -286,15 +286,18 @@ const sessionDraftHarness = vi.hoisted(() => {
 const sessionHistoryHarness = vi.hoisted(() => {
   const sessionGroups: any[] = [];
   const setSessionGroupSelection = vi.fn();
+  const markSessionGroupEntered = vi.fn();
   const deleteSessionGroup = vi.fn();
   const pruneSessionGroupSelectionToRemoteTruth = vi.fn();
   return {
     sessionGroups,
     setSessionGroupSelection,
+    markSessionGroupEntered,
     deleteSessionGroup,
     pruneSessionGroupSelectionToRemoteTruth,
     reset() {
       setSessionGroupSelection.mockReset();
+      markSessionGroupEntered.mockReset();
       deleteSessionGroup.mockReset();
       pruneSessionGroupSelectionToRemoteTruth.mockReset();
       sessionGroups.splice(0, sessionGroups.length);
@@ -456,6 +459,7 @@ vi.mock('./hooks/useSessionHistoryStorage', () => ({
   useSessionHistoryStorage: () => ({
     sessionGroups: sessionHistoryHarness.sessionGroups,
     setSessionGroupSelection: sessionHistoryHarness.setSessionGroupSelection,
+    markSessionGroupEntered: sessionHistoryHarness.markSessionGroupEntered,
     deleteSessionGroup: sessionHistoryHarness.deleteSessionGroup,
     pruneSessionGroupSelectionToRemoteTruth: sessionHistoryHarness.pruneSessionGroupSelectionToRemoteTruth,
   }),
@@ -1077,16 +1081,15 @@ describe('App dynamic refresh matrix', () => {
     ]);
 
     sessionHarness.createSession.mockClear();
-    sessionHarness.createSession.mockReturnValueOnce('runtime:mac-studio:zterm-20260715-060708');
+    fetchTmuxSessionsMock.mockResolvedValueOnce(['zterm', 'agentpi']);
+    sessionHarness.createSession.mockReturnValueOnce('runtime:mac-studio:agentpi');
     openTerminalPageSpy.mockClear();
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-07-15T06:07:08.000Z'));
     await act(async () => {
       props.onOpenSavedConnection(props.savedConnections[0]);
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(createTmuxSessionMock).toHaveBeenCalledWith(
+    expect(fetchTmuxSessionsMock).toHaveBeenCalledWith(
       expect.objectContaining({
         bridgeHost: '100.66.1.82',
         bridgePort: 3333,
@@ -1094,24 +1097,23 @@ describe('App dynamic refresh matrix', () => {
         authToken: 'token-a',
       }),
       expect.any(Object),
-      'zterm-20260715-060708',
     );
+    expect(createTmuxSessionMock).not.toHaveBeenCalled();
     expect(sessionHarness.createSession).toHaveBeenCalledWith(
       expect.objectContaining({
         bridgeHost: '100.66.1.82',
         bridgePort: 3333,
         daemonHostId: 'mac-studio',
-        sessionName: 'zterm-20260715-060708',
+        sessionName: 'agentpi',
         authToken: 'token-a',
       }),
       expect.objectContaining({ activate: false }),
     );
-    vi.useRealTimers();
-    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toContain('runtime:mac-studio:zterm-20260715-060708'));
+    await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toContain('runtime:mac-studio:agentpi'));
     expect(tmuxPickerHarness.readProps()).toEqual(expect.objectContaining({ open: false }));
   });
 
-  it('resumes an already-open Home server session instead of creating another generated session', async () => {
+  it('resumes the last-entered current-process Home server session instead of creating another session', async () => {
     localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'connections' }));
     const existingSession = {
       ...makeSession('runtime-mac-zterm', 7),
@@ -1150,6 +1152,17 @@ describe('App dynamic refresh matrix', () => {
       }],
       traversalRelay: undefined,
     };
+    sessionHistoryHarness.sessionGroups.push({
+      id: 'daemon:mac-studio',
+      name: 'Mac Studio Tailscale',
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+      daemonHostId: 'mac-studio',
+      authToken: 'token-a',
+      sessionNames: ['zterm'],
+      lastOpenedSessionName: 'zterm',
+      lastOpenedAt: 1,
+    });
 
     render(
       <AppContent bridgeSettings={bridgeSettings as any} setBridgeSettings={vi.fn()} />,

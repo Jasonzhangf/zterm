@@ -38,6 +38,9 @@ function normalizeGroupEntry(input: unknown): SessionGroupHistory | null {
 
   const candidate = input as Partial<SessionGroupHistory>;
   const bridgeHost = typeof candidate.bridgeHost === 'string' ? candidate.bridgeHost.trim() : '';
+  const daemonHostId = typeof candidate.daemonHostId === 'string' && candidate.daemonHostId.trim()
+    ? candidate.daemonHostId.trim()
+    : undefined;
   const sessionNames = Array.isArray(candidate.sessionNames)
     ? candidate.sessionNames.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
     : [];
@@ -49,11 +52,18 @@ function normalizeGroupEntry(input: unknown): SessionGroupHistory | null {
     new Date().toISOString(),
   );
 
-  if (!bridgeHost || sessionNames.length === 0) {
+  if ((!bridgeHost && !daemonHostId) || sessionNames.length === 0) {
     return null;
   }
 
   const sortedSessionNames = [...new Set(sessionNames)].sort((a, b) => a.localeCompare(b));
+  const sortedMissingSessionNames = [...new Set(missingSessionNames)]
+    .filter((item) => sortedSessionNames.includes(item))
+    .sort((a, b) => a.localeCompare(b));
+  const missingSessionNameSet = new Set(sortedMissingSessionNames);
+  const lastOpenedSessionName = typeof candidate.lastOpenedSessionName === 'string'
+    ? candidate.lastOpenedSessionName.trim()
+    : '';
   const bridgePort =
     typeof candidate.bridgePort === 'number' && Number.isFinite(candidate.bridgePort)
       ? candidate.bridgePort
@@ -64,20 +74,23 @@ function normalizeGroupEntry(input: unknown): SessionGroupHistory | null {
       typeof candidate.id === 'string' && candidate.id.trim()
         ? candidate.id
         : toServerGroupKey({
-          daemonHostId: typeof candidate.daemonHostId === 'string' ? candidate.daemonHostId.trim() || undefined : undefined,
+          daemonHostId,
           bridgeHost,
           bridgePort,
         }),
-    name: typeof candidate.name === 'string' && candidate.name.trim() ? candidate.name : `${bridgeHost} · ${sortedSessionNames.length} sessions`,
+    name: typeof candidate.name === 'string' && candidate.name.trim() ? candidate.name : `${daemonHostId || bridgeHost} · ${sortedSessionNames.length} sessions`,
     bridgeHost,
     bridgePort,
-    daemonHostId: typeof candidate.daemonHostId === 'string' && candidate.daemonHostId.trim()
-      ? candidate.daemonHostId.trim()
-      : undefined,
+    daemonHostId,
     authToken: typeof candidate.authToken === 'string' ? candidate.authToken : undefined,
     ...(relayEndpointCandidates.length > 0 ? { relayEndpointCandidates } : {}),
     sessionNames: sortedSessionNames,
-    missingSessionNames: [...new Set(missingSessionNames)].filter((item) => sortedSessionNames.includes(item)).sort((a, b) => a.localeCompare(b)),
+    missingSessionNames: sortedMissingSessionNames,
+    ...(lastOpenedSessionName
+      && sortedSessionNames.includes(lastOpenedSessionName)
+      && !missingSessionNameSet.has(lastOpenedSessionName)
+      ? { lastOpenedSessionName }
+      : {}),
     lastOpenedAt:
       typeof candidate.lastOpenedAt === 'number' && Number.isFinite(candidate.lastOpenedAt)
         ? candidate.lastOpenedAt
@@ -147,6 +160,13 @@ export function useSessionHistoryStorage() {
 
   const setSessionGroupSelection = useCallback((group: Omit<SessionGroupHistory, 'id' | 'lastOpenedAt'>) => {
     setSessionGroups((current) => {
+      const existing = current.find(
+        (item) => sessionSemanticOwnersMatch(item, group),
+      );
+      const existingLastOpenedSessionName = existing?.lastOpenedSessionName?.trim() || '';
+      const groupSessionNameSet = new Set(
+        group.sessionNames.map((item) => item.trim()).filter(Boolean),
+      );
       const filtered = current.filter(
         (item) => !sessionSemanticOwnersMatch(item, group),
       );
@@ -154,6 +174,10 @@ export function useSessionHistoryStorage() {
       const normalized = normalizeGroupEntry({
         ...group,
         id: toServerGroupKey(group),
+        lastOpenedSessionName: group.lastOpenedSessionName?.trim()
+          || (existingLastOpenedSessionName && groupSessionNameSet.has(existingLastOpenedSessionName)
+            ? existingLastOpenedSessionName
+            : undefined),
         lastOpenedAt: Date.now(),
       });
 
@@ -173,6 +197,45 @@ export function useSessionHistoryStorage() {
     });
   }, []);
 
+  const markSessionGroupEntered = useCallback((target: {
+    name?: string;
+    bridgeHost: string;
+    bridgePort: number;
+    daemonHostId?: string;
+    authToken?: string;
+    relayEndpointCandidates?: RelayEndpointCandidate[];
+  }, sessionName: string) => {
+    const normalizedSessionName = sessionName.trim();
+    if (!normalizedSessionName) {
+      return;
+    }
+
+    setSessionGroups((current) => {
+      const existing = current.find((item) => sessionSemanticOwnersMatch(item, target));
+      const filtered = current.filter((item) => !sessionSemanticOwnersMatch(item, target));
+      const normalized = normalizeGroupEntry({
+        ...(existing || {}),
+        name: target.name?.trim() || existing?.name || target.daemonHostId || target.bridgeHost || normalizedSessionName,
+        bridgeHost: target.bridgeHost,
+        bridgePort: target.bridgePort,
+        daemonHostId: target.daemonHostId,
+        authToken: target.authToken ?? existing?.authToken,
+        relayEndpointCandidates: mergeRelayEndpointCandidates(
+          existing?.relayEndpointCandidates,
+          target.relayEndpointCandidates,
+        ),
+        sessionNames: [...new Set([...(existing?.sessionNames || []), normalizedSessionName])],
+        missingSessionNames: (existing?.missingSessionNames || []).filter((item) => item !== normalizedSessionName),
+        lastOpenedSessionName: normalizedSessionName,
+        lastOpenedAt: Date.now(),
+        id: toServerGroupKey(target),
+      });
+      const next = normalized ? collapseServerGroups([normalized, ...filtered]) : filtered;
+      saveJson(STORAGE_KEYS.SESSION_GROUPS, next);
+      return next;
+    });
+  }, []);
+
   const pruneSessionGroupSelectionToRemoteTruth = useCallback((
     target: Pick<SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort'>,
     remoteSessionNames: string[],
@@ -187,13 +250,17 @@ export function useSessionHistoryStorage() {
         const nextMissingSessionNames = item.sessionNames.filter((sessionName) => !normalizedRemoteSessionNames.has(sessionName));
         const currentMissingKey = (item.missingSessionNames || []).join('\u0000');
         const nextMissingKey = nextMissingSessionNames.join('\u0000');
-        if (currentMissingKey === nextMissingKey) {
+        const nextLastOpenedSessionName = item.lastOpenedSessionName && normalizedRemoteSessionNames.has(item.lastOpenedSessionName)
+          ? item.lastOpenedSessionName
+          : undefined;
+        if (currentMissingKey === nextMissingKey && item.lastOpenedSessionName === nextLastOpenedSessionName) {
           return [item];
         }
         changed = true;
         return [{
           ...item,
           missingSessionNames: nextMissingSessionNames,
+          lastOpenedSessionName: nextLastOpenedSessionName,
         }];
       });
       if (!changed) {
@@ -208,6 +275,7 @@ export function useSessionHistoryStorage() {
   return {
     sessionGroups,
     setSessionGroupSelection,
+    markSessionGroupEntered,
     deleteSessionGroup,
     pruneSessionGroupSelectionToRemoteTruth,
   };

@@ -168,6 +168,72 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
     }));
   });
 
+  it('records the last entered session for a server group without replacing the catalog', () => {
+    const { result } = renderHook(() => useSessionHistoryStorage());
+
+    act(() => {
+      result.current.setSessionGroupSelection({
+        name: 'Daemon A',
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-host-a',
+        authToken: 'token-a',
+        sessionNames: ['main', 'logs'],
+      });
+    });
+
+    act(() => {
+      result.current.markSessionGroupEntered({
+        name: 'Daemon A',
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-host-a',
+        authToken: 'token-a',
+      }, 'logs');
+    });
+
+    expect(result.current.sessionGroups[0]).toEqual(expect.objectContaining({
+      daemonHostId: 'daemon-host-a',
+      sessionNames: ['logs', 'main'],
+      lastOpenedSessionName: 'logs',
+    }));
+    expect(JSON.parse(window.localStorage.getItem('zterm:session-groups') || '[]')[0]).toEqual(expect.objectContaining({
+      lastOpenedSessionName: 'logs',
+    }));
+  });
+
+  it('keeps relay-only daemon session group history when bridgeHost is empty', () => {
+    const { result } = renderHook(() => useSessionHistoryStorage());
+
+    act(() => {
+      result.current.setSessionGroupSelection({
+        name: 'Mac Studio',
+        bridgeHost: '',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        relayEndpointCandidates: [{
+          id: 'relay-rtc:mac-studio',
+          kind: 'relay-rtc',
+          relayHostId: 'mac-studio',
+          authRequired: true,
+          lastSeenAt: '2026-07-17T00:00:00.000Z',
+        }],
+        sessionNames: ['zterm'],
+        lastOpenedSessionName: 'zterm',
+      });
+    });
+
+    expect(result.current.sessionGroups).toEqual([
+      expect.objectContaining({
+        id: 'daemon:mac-studio',
+        bridgeHost: '',
+        daemonHostId: 'mac-studio',
+        sessionNames: ['zterm'],
+        lastOpenedSessionName: 'zterm',
+      }),
+    ]);
+  });
+
   it('marks missing stored session names against remote tmux truth for the matching server only', () => {
     const { result } = renderHook(() => useSessionHistoryStorage());
 
@@ -243,6 +309,39 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
         missingSessionNames: ['stale'],
       }),
     ]);
+  });
+
+  it('clears last entered session when remote tmux truth no longer contains it', () => {
+    const { result } = renderHook(() => useSessionHistoryStorage());
+
+    act(() => {
+      result.current.setSessionGroupSelection({
+        name: 'Daemon A',
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-host-a',
+        authToken: 'token-a',
+        sessionNames: ['main', 'logs'],
+        lastOpenedSessionName: 'logs',
+      });
+    });
+
+    act(() => {
+      result.current.pruneSessionGroupSelectionToRemoteTruth(
+        {
+          bridgeHost: '100.64.0.10',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-host-a',
+        },
+        ['main'],
+      );
+    });
+
+    expect(result.current.sessionGroups[0]).toEqual(expect.objectContaining({
+      sessionNames: ['logs', 'main'],
+      missingSessionNames: ['logs'],
+      lastOpenedSessionName: undefined,
+    }));
   });
 
   it('deletes a stored server group explicitly and persists the removal', () => {

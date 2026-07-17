@@ -89,12 +89,6 @@ function formatRefreshClock(ts?: number | null) {
   return new Date(ts).toLocaleTimeString('zh-CN', { hour12: false });
 }
 
-function getDirectorySessionNames(target: BridgeTarget) {
-  return normalizeRemoteTmuxSessionNames(
-    (target.relayTmuxSessions || []).map((session) => session.name),
-  );
-}
-
 function getTargetRelayHostId(target: Pick<BridgeTarget, 'relayHostId' | 'daemonHostId'>) {
   return target.relayHostId?.trim() || target.daemonHostId?.trim() || '';
 }
@@ -895,19 +889,15 @@ export function TmuxSessionPickerSheet({
               selectedRelayDeviceId={selectedTarget.relayDeviceId || ''}
               onSelect={(device) => {
                 const resolvedTarget = resolveRelayDeviceBridgeTarget(sortedServers, device);
-                const directorySessions = getDirectorySessionNames(resolvedTarget);
                 setSelectedTarget((current) => ({
                   ...current,
                   ...resolvedTarget,
                 }));
-                if (directorySessions.length > 0) {
-                  setAvailableSessions(directorySessions);
-                  setSelectedSessions([]);
-                  setDiscoveryState('done');
-                  setErrorMessage('');
-                  setLastRefreshedAt(Date.now());
-                  onRemoteSessionsRefreshed?.(resolvedTarget, directorySessions);
-                }
+                setAvailableSessions([]);
+                setSelectedSessions([]);
+                setDiscoveryState('loading');
+                setErrorMessage('');
+                setLastRefreshedAt(null);
               }}
               onClear={() =>
                 setSelectedTarget((current) => ({
@@ -1109,19 +1099,15 @@ export function TmuxSessionPickerSheet({
           selectedRelayDeviceId={selectedTarget.relayDeviceId || ''}
           onSelect={(device) => {
             const resolvedTarget = resolveRelayDeviceBridgeTarget(sortedServers, device);
-            const directorySessions = getDirectorySessionNames(resolvedTarget);
             setSelectedTarget((current) => ({
               ...current,
               ...resolvedTarget,
             }));
-            if (directorySessions.length > 0) {
-              setAvailableSessions(directorySessions);
-              setSelectedSessions([]);
-              setDiscoveryState('done');
-              setErrorMessage('');
-              setLastRefreshedAt(Date.now());
-              onRemoteSessionsRefreshed?.(resolvedTarget, directorySessions);
-            }
+            setAvailableSessions([]);
+            setSelectedSessions([]);
+            setDiscoveryState('loading');
+            setErrorMessage('');
+            setLastRefreshedAt(null);
           }}
           onClear={() =>
             setSelectedTarget((current) => ({

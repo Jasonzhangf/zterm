@@ -691,6 +691,8 @@
         "src/lib/traversal-relay-client.test.ts",
         "src/lib/home-connection-projection.ts",
         "src/lib/home-connection-projection.test.ts",
+        "src/lib/traversal-relay-devices.ts",
+        "src/lib/traversal-relay-devices.test.ts",
         "src/hooks/useTraversalRelayAccount.ts",
         "src/hooks/useTraversalRelayAccount.test.tsx",
         "src/hooks/useSessionOpenActions.ts",
@@ -717,6 +719,7 @@
       ],
       "required_gates": [
         "src/lib/home-connection-projection.test.ts",
+        "src/lib/traversal-relay-devices.test.ts",
         "src/lib/traversal-relay-client.test.ts",
         "src/hooks/useTraversalRelayAccount.test.tsx",
         "src/hooks/useSessionOpenActions.test.tsx",
@@ -1083,6 +1086,8 @@
       "allowed_paths": [
         "src/App.tsx",
         "src/components/terminal/TerminalSessionDrawer.tsx",
+        "src/lib/traversal-relay-devices.ts",
+        "src/lib/traversal-relay-devices.test.ts",
         "src/lib/server-identity.ts",
         "src/lib/server-identity.test.ts",
         "src/pages/TerminalPage.tsx",
@@ -1093,6 +1098,7 @@
       ],
       "required_gates": [
         "src/components/terminal/TerminalSessionDrawer.test.tsx",
+        "src/lib/traversal-relay-devices.test.ts",
         "src/lib/server-identity.test.ts",
         "src/pages/TerminalPage.session-drawer.test.tsx"
       ],

@@ -24,6 +24,7 @@ import { getBrowserStorage } from '../lib/browser-storage';
 import { mobileTheme } from '../lib/mobile-ui';
 import { buildServerIdentityAliasMap, resolveServerIdentity, type ServerIdentityInput } from '../lib/server-identity';
 import { buildSessionSemanticOwnerKey, buildSessionSemanticReuseKey } from '../lib/session-semantic-identity';
+import { listOnlineTraversalRelayDaemonDevices } from '../lib/traversal-relay-devices';
 import { resolveSessionRemoteMissing } from '../lib/terminal-drawer-remote-missing';
 import { ImeAnchor } from '../plugins/ImeAnchorPlugin';
 import { registerClientDebugSnapshotSource } from '../lib/client-debug-snapshot';
@@ -449,6 +450,10 @@ function terminalPageRelayDevicesUiKey(relayDevices: readonly TraversalRelayDevi
       endpoint.wsUrl || '',
       endpoint.relayHostId || '',
       String(endpoint.port || ''),
+    ].join('~')).join(','),
+    (device.daemon.sessions || []).map((session) => [
+      session.name || '',
+      session.updatedAt || '',
     ].join('~')).join(','),
   ].join('|')).join('||');
 }
@@ -1388,16 +1393,20 @@ function TerminalPageComponent({
   const activeChromeSession = useMemo(() => (
     interactiveSession ? toTerminalTabChromeItem(interactiveSession) : null
   ), [activeHeaderSessionUiKey, interactiveSession]);
+  const onlineRelayDaemonDevices = useMemo(
+    () => listOnlineTraversalRelayDaemonDevices(relayDevices),
+    [relayDevices],
+  );
   const drawerServerIdentityAliases = useMemo(() => buildServerIdentityAliasMap([
     ...sessions,
     ...sessionGroups,
-    ...buildRelayDeviceSessionCatalogAliasInputs(relayDevices, sessionGroups),
+    ...buildRelayDeviceSessionCatalogAliasInputs(onlineRelayDaemonDevices, sessionGroups),
     ...serverIdentityAliasInputs,
-    ...buildRelayDeviceServerIdentityAliasInputs(relayDevices),
-  ]), [relayDevices, serverIdentityAliasInputs, sessionGroups, sessions]);
+    ...buildRelayDeviceServerIdentityAliasInputs(onlineRelayDaemonDevices),
+  ]), [onlineRelayDaemonDevices, serverIdentityAliasInputs, sessionGroups, sessions]);
   const drawerHosts = useMemo<TerminalSessionDrawerHost[]>(() => {
     const hosts = new Map<string, TerminalSessionDrawerHost>();
-    for (const device of relayDevices) {
+    for (const device of onlineRelayDaemonDevices) {
       const hostKey = device.daemon.hostId.trim();
       if (!hostKey) {
         continue;
@@ -1421,7 +1430,7 @@ function TerminalPageComponent({
       }
     }
     return [...hosts.values()];
-  }, [drawerServerIdentityAliases, relayDevices, sessions]);
+  }, [drawerServerIdentityAliases, onlineRelayDaemonDevices, sessions]);
   const drawerRemoteSessions = useMemo(() => {
     const liveSessionByReuseKey = new Map(sessions.map((session) => [
       buildSessionSemanticReuseKey({

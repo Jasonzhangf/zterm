@@ -1,6 +1,7 @@
 import { type BridgeServerPreset, type BridgeSettings } from './bridge-settings';
 import { DEFAULT_BRIDGE_PORT } from './mobile-config';
 import { resolveRelayDeviceBridgeTarget } from './session-picker';
+import { isOnlineTraversalRelayDaemonDevice } from './traversal-relay-devices';
 import type { Host, TraversalRelayDeviceSnapshot } from './types';
 import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
 
@@ -130,7 +131,7 @@ function buildHomeConnectionFromRelayDevice(
   bridgeSettings: BridgeSettings,
   device: TraversalRelayDeviceSnapshot,
 ): Host | null {
-  if (!device.daemon.connected && !device.daemon.hostId.trim()) {
+  if (!isOnlineTraversalRelayDaemonDevice(device)) {
     return null;
   }
   const target = resolveRelayDeviceBridgeTarget(bridgeSettings.servers, device);

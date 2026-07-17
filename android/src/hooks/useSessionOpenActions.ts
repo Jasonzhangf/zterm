@@ -28,8 +28,10 @@ import { openConnectionPropertiesPage, type AppPageState } from '../lib/page-sta
 import { DEFAULT_BRIDGE_PORT } from '../lib/mobile-config';
 import { normalizeRemoteTmuxSessionNames } from '../lib/tmux-session-list';
 import { createTmuxSession, fetchTmuxSessions, killTmuxSession } from '../lib/tmux-sessions';
-import type { Host, PersistedOpenTab, Session, TraversalRelayDeviceSnapshot } from '../lib/types';
+import type { Host, PersistedOpenTab, Session, SessionGroupHistory, TraversalRelayDeviceSnapshot } from '../lib/types';
 import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
+import { sessionSemanticOwnersMatch } from '../lib/session-semantic-identity';
+import { listOnlineTraversalRelayDaemonDevices } from '../lib/traversal-relay-devices';
 
 type PickerMode = 'new-connection' | 'quick-tab' | 'edit-group' | null;
 
@@ -50,6 +52,7 @@ interface UseSessionOpenActionsOptions {
   bridgeSettings: BridgeSettings;
   setBridgeSettings: Dispatch<SetStateAction<BridgeSettings>>;
   hosts: Host[];
+  sessionGroups?: SessionGroupHistory[];
   relayDevices?: TraversalRelayDeviceSnapshot[];
   deleteSessionGroup: (group: { bridgeHost: string; bridgePort: number; daemonHostId?: string }) => void;
   pruneSessionGroupSelectionToRemoteTruth: (target: { bridgeHost: string; bridgePort: number; daemonHostId?: string }, remoteSessionNames: string[]) => void;
@@ -61,7 +64,16 @@ interface UseSessionOpenActionsOptions {
     authToken?: string;
     relayEndpointCandidates?: RelayEndpointCandidate[];
     sessionNames: string[];
+    lastOpenedSessionName?: string;
   }) => void;
+  markSessionGroupEntered: (group: {
+    name?: string;
+    bridgeHost: string;
+    bridgePort: number;
+    daemonHostId?: string;
+    authToken?: string;
+    relayEndpointCandidates?: RelayEndpointCandidate[];
+  }, sessionName: string) => void;
   createSession: (
     host: Host,
     options?: {
@@ -156,6 +168,17 @@ function resolveReusableOpenSessionForTarget(
   })[0] || null;
 }
 
+function resolveSessionGroupForTarget(
+  sessionGroups: SessionGroupHistory[],
+  target: Pick<BridgeTarget, 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'relayHostId'>,
+) {
+  return sessionGroups.find((group) => sessionSemanticOwnersMatch(group, {
+    bridgeHost: target.bridgeHost,
+    bridgePort: target.bridgePort,
+    daemonHostId: target.daemonHostId || target.relayHostId,
+  })) || null;
+}
+
 export interface SessionOpenActionsResult {
   pickerMode: PickerMode;
   pickerTarget: BridgeTarget | null;
@@ -208,10 +231,12 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     bridgeSettings,
     setBridgeSettings,
     hosts,
+    sessionGroups = [],
     relayDevices = [],
     deleteSessionGroup,
     pruneSessionGroupSelectionToRemoteTruth,
     setSessionGroupSelection,
+    markSessionGroupEntered,
     createSession,
     closeSession,
     switchSession,
@@ -238,6 +263,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
   const [pickerTarget, setPickerTarget] = useState<BridgeTarget | null>(null);
   const [pickerInitialSessions, setPickerInitialSessions] = useState<string[]>([]);
   const [pickerScopePaneId, setPickerScopePaneId] = useState<string | null>(null);
+  const sessionGroupsRef = useRef(sessionGroups);
   const openDraftAsSessionRef = useRef<((host: HostDraft, options?: {
     rememberName?: string;
     activate?: boolean;
@@ -258,6 +284,10 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       }),
     );
   }, [setBridgeSettings]);
+
+  useEffect(() => {
+    sessionGroupsRef.current = sessionGroups;
+  }, [sessionGroups]);
 
   const openDraftAsSession = useCallback((
     draft: HostDraft,
@@ -316,6 +346,16 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     applyOpenTabState(nextOpenTabState, shouldActivate ? {
       switchRuntime: 'explicit-resume',
     } : undefined);
+    if (shouldActivate && sessionHost.sessionName.trim()) {
+      markSessionGroupEntered({
+        name: options?.rememberName || draft.name || draft.bridgeHost,
+        bridgeHost: sessionHost.bridgeHost,
+        bridgePort: sessionHost.bridgePort,
+        daemonHostId: sessionHost.daemonHostId || sessionHost.relayHostId,
+        authToken: sessionHost.authToken,
+        relayEndpointCandidates: sessionHost.relayEndpointCandidates || [],
+      }, sessionHost.sessionName);
+    }
     if (options?.navigate !== false) {
       ensureTerminalPageVisible();
     }
@@ -328,6 +368,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     openTabStateRef,
     pendingMaterializedOpenTabSessionIdsRef,
     applyOpenTabState,
+    markSessionGroupEntered,
     rememberBridgeTarget,
     runtimeActiveSessionId,
   ]);
@@ -593,15 +634,13 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
   const handleOpenSavedConnection = useCallback((host: Host) => {
     const target = buildBridgeTargetFromHost(host);
     const existingSessionName = host.sessionName.trim();
+    const historyGroup = resolveSessionGroupForTarget(sessionGroupsRef.current, target);
+    const historySessionName = historyGroup?.lastOpenedSessionName?.trim() || '';
+    const preferredExistingSessionName = existingSessionName || historySessionName;
     setPickerMode(null);
     setPickerScopePaneId(null);
-    const reusableSession = resolveReusableOpenSessionForTarget(
-      sessionsRef.current,
-      target,
-      existingSessionName,
-      [terminalActiveSessionIdRef.current, runtimeActiveSessionId],
-    );
-    if (reusableSession) {
+
+    const activateReusableSession = (reusableSession: Session) => {
       const existingOpenTab = openTabStateRef.current.tabs.some((tab) => tab.sessionId === reusableSession.id);
       const nextOpenTabState = existingOpenTab
         ? activateOpenTabIntentSession(openTabStateRef.current, reusableSession.id)
@@ -616,16 +655,65 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       applyOpenTabState(nextOpenTabState, {
         switchRuntime: 'explicit-resume',
       });
+      markSessionGroupEntered({
+        name: host.name || target.bridgeHost || target.daemonHostId || target.relayHostId,
+        bridgeHost: target.bridgeHost,
+        bridgePort: target.bridgePort,
+        daemonHostId: target.daemonHostId || target.relayHostId,
+        authToken: target.authToken,
+        relayEndpointCandidates: target.relayEndpointCandidates || [],
+      }, reusableSession.sessionName);
       ensureTerminalPageVisible();
+    };
+
+    if (preferredExistingSessionName) {
+      const reusableSession = resolveReusableOpenSessionForTarget(
+        sessionsRef.current,
+        target,
+        preferredExistingSessionName,
+        [terminalActiveSessionIdRef.current, runtimeActiveSessionId],
+      );
+      if (reusableSession) {
+        activateReusableSession(reusableSession);
+        return;
+      }
+    }
+
+    if (existingSessionName) {
+      void (async () => {
+        try {
+          const draft = buildDraftFromTmuxSession(hosts, bridgeSettingsRef.current.servers, target, existingSessionName);
+          handleQuickConnectDraft(draft, host.name || target.bridgeHost || target.daemonHostId || target.relayHostId);
+        } catch (error) {
+          window.alert?.(error instanceof Error ? error.message : String(error));
+        }
+      })();
       return;
     }
 
-    const sessionName = existingSessionName || buildGeneratedSessionName();
-
     void (async () => {
       try {
-        if (!existingSessionName) {
+        const remoteSessionNames = normalizeRemoteTmuxSessionNames(
+          await fetchTmuxSessions(target, bridgeSettingsRef.current),
+        );
+        handleRemoteSessionsRefreshed(target, remoteSessionNames);
+        const remoteSessionNameSet = new Set(remoteSessionNames);
+        let sessionName = historySessionName && remoteSessionNameSet.has(historySessionName)
+          ? historySessionName
+          : remoteSessionNames[0] || '';
+        if (!sessionName) {
+          sessionName = buildGeneratedSessionName();
           await createTmuxSession(target, bridgeSettingsRef.current, sessionName);
+        }
+        const reusableSession = resolveReusableOpenSessionForTarget(
+          sessionsRef.current,
+          target,
+          sessionName,
+          [terminalActiveSessionIdRef.current, runtimeActiveSessionId],
+        );
+        if (reusableSession) {
+          activateReusableSession(reusableSession);
+          return;
         }
         const draft = buildDraftFromTmuxSession(hosts, bridgeSettingsRef.current.servers, target, sessionName);
         handleQuickConnectDraft(draft, host.name || target.bridgeHost || target.daemonHostId || target.relayHostId);
@@ -633,7 +721,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         window.alert?.(error instanceof Error ? error.message : String(error));
       }
     })();
-  }, [applyOpenTabState, bridgeSettingsRef, ensureTerminalPageVisible, handleQuickConnectDraft, hosts, openTabStateRef, runtimeActiveSessionId, sessionsRef, terminalActiveSessionIdRef]);
+  }, [applyOpenTabState, bridgeSettingsRef, ensureTerminalPageVisible, handleQuickConnectDraft, handleRemoteSessionsRefreshed, hosts, markSessionGroupEntered, openTabStateRef, runtimeActiveSessionId, sessionsRef, terminalActiveSessionIdRef]);
 
   const enrichTargetFromSavedHosts = useCallback((target: BridgeTarget) => {
     const daemonHostId = (target.daemonHostId || target.relayHostId || '').trim();
@@ -662,7 +750,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     if (!normalizedHostKey) {
       return null;
     }
-    const matchedDevice = relayDevices.find((device) => (
+    const matchedDevice = listOnlineTraversalRelayDaemonDevices(relayDevices).find((device) => (
       device.daemon.hostId.trim() === normalizedHostKey
       || device.deviceId.trim() === normalizedHostKey
       || device.deviceName.trim() === normalizedHostKey
