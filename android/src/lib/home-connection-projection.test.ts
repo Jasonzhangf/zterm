@@ -126,7 +126,7 @@ describe('home connection projection relay route visibility', () => {
     expect(hasRelayRtcCandidate(projected[0])).toBe(true);
   });
 
-  it('builds a webrtc-only Home Relay target without direct route candidates', () => {
+  it('builds a Home Relay target that keeps WebRTC direct, direct websocket, and TURN candidates', () => {
     const projected = projectHomeSavedConnections(
       [makeSavedHost()],
       bridgeSettings,
@@ -142,9 +142,10 @@ describe('home connection projection relay route visibility', () => {
       daemonHostId: 'mac-studio',
       relayHostId: 'mac-studio',
       relayDeviceId: 'device-mac',
-      transportMode: 'webrtc',
+      transportMode: 'auto',
     }));
     expect(relayHost?.relayEndpointCandidates).toEqual([
+      expect.objectContaining({ kind: 'tailscale', host: 'mac-studio.tailnet.ts.net' }),
       expect.objectContaining({ kind: 'relay-rtc', relayHostId: 'mac-studio' }),
     ]);
   });

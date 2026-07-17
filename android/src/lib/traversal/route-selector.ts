@@ -22,6 +22,7 @@ interface SelectTraversalRouteOptions {
 }
 
 const PATH_COST: Record<TraversalResolvedPath, number> = {
+  'rtc-direct': 5,
   tailscale: 10,
   ipv6: 20,
   ipv4: 30,

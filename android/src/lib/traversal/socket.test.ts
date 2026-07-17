@@ -421,7 +421,7 @@ describe('TraversalSocket reconnect', () => {
     });
   });
 
-  it('uses TURN-only ICE for rtc-relay candidates so Relay cannot masquerade as Tailscale or P2P', async () => {
+  it('uses WebRTC direct first with ICE all and no TURN credentials', async () => {
     const socket = createRelayRtcSocket();
     await flushMicrotasks();
 
@@ -432,13 +432,10 @@ describe('TraversalSocket reconnect', () => {
 
     expect(MockRTCPeerConnection.instances).toHaveLength(1);
     expect(MockRTCPeerConnection.instances[0].config).toMatchObject({
-      iceTransportPolicy: 'relay',
-      iceServers: [{
-        urls: 'turn:relay.example.test:3478?transport=udp',
-        username: 'turn-user',
-        credential: 'turn-secret',
-      }],
+      iceTransportPolicy: 'all',
+      iceServers: [{ urls: 'stun:relay.example.test:3478' }],
     });
+    expect(JSON.stringify(MockRTCPeerConnection.instances[0].config)).not.toContain('turn-secret');
     const sentMessages = MockWebSocket.instances[0].sent.map((item) => JSON.parse(String(item)));
     expect(sentMessages.map((item) => item.type)).toEqual([
       'rtc-init',
@@ -447,8 +444,51 @@ describe('TraversalSocket reconnect', () => {
     expect(sentMessages[0]).toMatchObject({
       type: 'rtc-init',
       payload: {
-        iceTransportPolicy: 'relay',
+        iceTransportPolicy: 'all',
       },
+    });
+
+    socket.close();
+  });
+
+  it('uses TURN-only ICE only after WebRTC direct fails', async () => {
+    const socket = createRelayRtcSocket();
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    const directSignalSocket = MockWebSocket.instances[0];
+    directSignalSocket.triggerOpen();
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(MockRTCPeerConnection.instances).toHaveLength(1);
+    expect(MockRTCPeerConnection.instances[0].config).toMatchObject({
+      iceTransportPolicy: 'all',
+    });
+
+    directSignalSocket.onmessage?.({
+      data: JSON.stringify({
+        type: 'rtc-error',
+        payload: { message: 'direct ICE failed' },
+      }),
+    } as MessageEvent);
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances).toHaveLength(2);
+    const relaySignalSocket = MockWebSocket.instances[1];
+    relaySignalSocket.triggerOpen();
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(MockRTCPeerConnection.instances).toHaveLength(2);
+    expect(MockRTCPeerConnection.instances[1].config).toMatchObject({
+      iceTransportPolicy: 'relay',
+      iceServers: [{
+        urls: 'turn:relay.example.test:3478?transport=udp',
+        username: 'turn-user',
+        credential: 'turn-secret',
+      }],
     });
 
     socket.close();
@@ -486,14 +526,14 @@ describe('TraversalSocket reconnect', () => {
 
     expect(signalSocket.sent).toHaveLength(sentCountAfterError);
     expect(socket.getDiagnostics().attempts[0]).toMatchObject({
-      path: 'rtc-relay',
+      path: 'rtc-direct',
       stage: 'closed',
       ok: false,
       reason: 'rtc data channel closed',
     });
   });
 
-  it('marks relay RTC diagnostics as TURN when the selected ICE candidate pair uses a relay candidate', async () => {
+  it('marks TURN relay diagnostics only after the direct RTC candidate fails', async () => {
     MockRTCPeerConnection.statsCandidateTypes = {
       local: 'relay',
       remote: 'srflx',
@@ -503,9 +543,22 @@ describe('TraversalSocket reconnect', () => {
     socket.onopen = onopen;
     await flushMicrotasks();
 
-    MockWebSocket.instances[0].triggerOpen();
+    const directSignalSocket = MockWebSocket.instances[0];
+    directSignalSocket.triggerOpen();
     await flushMicrotasks();
-    MockRTCPeerConnection.instances[0].channel.triggerOpen();
+    directSignalSocket.onmessage?.({
+      data: JSON.stringify({
+        type: 'rtc-error',
+        payload: { message: 'direct ICE failed' },
+      }),
+    } as MessageEvent);
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances).toHaveLength(2);
+    MockWebSocket.instances[1].triggerOpen();
+    await flushMicrotasks();
+    MockRTCPeerConnection.instances[1].channel.triggerOpen();
     await flushMicrotasks();
 
     expect(onopen).toHaveBeenCalledTimes(1);
@@ -519,7 +572,7 @@ describe('TraversalSocket reconnect', () => {
     socket.close();
   });
 
-  it('does not mark relay RTC diagnostics as TURN when the selected ICE candidate pair is direct', async () => {
+  it('marks WebRTC direct diagnostics as direct when the selected ICE candidate pair is direct', async () => {
     MockRTCPeerConnection.statsCandidateTypes = {
       local: 'host',
       remote: 'srflx',
@@ -537,9 +590,9 @@ describe('TraversalSocket reconnect', () => {
     expect(onopen).toHaveBeenCalledTimes(1);
     expect(socket.getDiagnostics()).toMatchObject({
       stage: 'open',
-      resolvedPath: 'rtc-relay',
+      resolvedPath: 'rtc-direct',
       resolvedRelayTransport: 'direct',
-      resolvedEndpoint: 'relay:daemon-host-a',
+      resolvedEndpoint: 'rtc-direct:daemon-host-a',
     });
 
     socket.close();

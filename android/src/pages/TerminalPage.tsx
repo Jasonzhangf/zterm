@@ -23,6 +23,7 @@ import { APP_VERSION, APP_VERSION_CODE } from '../lib/app-version';
 import { getBrowserStorage } from '../lib/browser-storage';
 import { mobileTheme } from '../lib/mobile-ui';
 import { buildServerIdentityAliasMap, resolveServerIdentity, type ServerIdentityInput } from '../lib/server-identity';
+import { getRelayRtcEndpointCandidates } from '../lib/session-picker';
 import { buildSessionSemanticOwnerKey, buildSessionSemanticReuseKey } from '../lib/session-semantic-identity';
 import { listOnlineTraversalRelayDaemonDevices } from '../lib/traversal-relay-devices';
 import { resolveSessionRemoteMissing } from '../lib/terminal-drawer-remote-missing';
@@ -83,6 +84,7 @@ import {
   DEFAULT_BRIDGE_PORT,
   type AndroidWorkspacePane,
   type QuickAction,
+  type Host,
   type RemoteScreenshotCapture,
   type RemoteScreenshotStatusPayload,
   type Session,
@@ -96,6 +98,18 @@ import {
   type TerminalWidthMode,
   type TraversalRelayDeviceSnapshot,
 } from '../lib/types';
+
+type DrawerRemoteSessionTarget = {
+  name: string;
+  bridgeHost: string;
+  bridgePort: number;
+  daemonHostId?: string;
+  relayHostId?: string;
+  authToken?: string;
+  relayEndpointCandidates?: SessionGroupHistory['relayEndpointCandidates'];
+  transportMode?: Host['transportMode'];
+  sessionNames: string[];
+};
 
 type VirtualKeyboardApi = {
   overlaysContent: boolean;
@@ -222,24 +236,8 @@ interface TerminalPageProps {
   onUseAutoSession?: (id: string) => void;
   onOpenConnections: () => void;
   onOpenQuickTabPicker: (paneId?: string, hostKey?: string, createOptions?: { sessionName?: string; cwd?: string }) => void;
-  onOpenDrawerRemoteSession?: (target: {
-    name: string;
-    bridgeHost: string;
-    bridgePort: number;
-    daemonHostId?: string;
-    authToken?: string;
-    relayEndpointCandidates?: SessionGroupHistory['relayEndpointCandidates'];
-    sessionNames: string[];
-  }, sessionName: string, options?: { activate?: boolean; navigate?: boolean }) => string | null | undefined | void;
-  onCloseDrawerRemoteSession?: (target: {
-    name: string;
-    bridgeHost: string;
-    bridgePort: number;
-    daemonHostId?: string;
-    authToken?: string;
-    relayEndpointCandidates?: SessionGroupHistory['relayEndpointCandidates'];
-    sessionNames: string[];
-  }, sessionName: string) => void | Promise<void>;
+  onOpenDrawerRemoteSession?: (target: DrawerRemoteSessionTarget, sessionName: string, options?: { activate?: boolean; navigate?: boolean }) => string | null | undefined | void;
+  onCloseDrawerRemoteSession?: (target: DrawerRemoteSessionTarget, sessionName: string) => void | Promise<void>;
   onRefreshDrawerHostSessions?: (hostKey?: string) => void | Promise<void>;
   relayDevices?: TraversalRelayDeviceSnapshot[];
   serverIdentityAliasInputs?: ServerIdentityInput[];
@@ -430,6 +428,45 @@ function buildRelayDeviceSessionCatalogAliasInputs(
     aliases.push({
       bridgeHost,
       bridgePort: group.bridgePort || DEFAULT_BRIDGE_PORT,
+      daemonHostId: match.daemonHostId,
+      connectionName: match.device.deviceName.trim() || match.daemonHostId,
+    });
+  }
+  return aliases;
+}
+
+function buildRelayDeviceLiveSessionCatalogAliasInputs(
+  relayDevices: TraversalRelayDeviceSnapshot[],
+  sessions: Session[],
+): ServerIdentityInput[] {
+  const relayCatalogs = relayDevices
+    .map((device) => ({
+      device,
+      daemonHostId: device.daemon.hostId.trim(),
+      sessionNames: new Set((device.daemon.sessions || [])
+        .map((session) => session.name?.trim())
+        .filter((name): name is string => Boolean(name))),
+    }))
+    .filter((catalog) => catalog.daemonHostId && catalog.sessionNames.size > 0);
+
+  const aliases: ServerIdentityInput[] = [];
+  for (const session of sessions) {
+    const bridgeHost = session.bridgeHost?.trim();
+    if (!bridgeHost || session.daemonHostId?.trim()) {
+      continue;
+    }
+    const sessionName = session.sessionName.trim();
+    if (!sessionName) {
+      continue;
+    }
+    const matches = relayCatalogs.filter((catalog) => catalog.sessionNames.has(sessionName));
+    if (matches.length !== 1) {
+      continue;
+    }
+    const match = matches[0];
+    aliases.push({
+      bridgeHost,
+      bridgePort: session.bridgePort || DEFAULT_BRIDGE_PORT,
       daemonHostId: match.daemonHostId,
       connectionName: match.device.deviceName.trim() || match.daemonHostId,
     });
@@ -1401,69 +1438,53 @@ function TerminalPageComponent({
     ...sessions,
     ...sessionGroups,
     ...buildRelayDeviceSessionCatalogAliasInputs(onlineRelayDaemonDevices, sessionGroups),
+    ...buildRelayDeviceLiveSessionCatalogAliasInputs(onlineRelayDaemonDevices, sessions),
     ...serverIdentityAliasInputs,
     ...buildRelayDeviceServerIdentityAliasInputs(onlineRelayDaemonDevices),
   ]), [onlineRelayDaemonDevices, serverIdentityAliasInputs, sessionGroups, sessions]);
-  const drawerHosts = useMemo<TerminalSessionDrawerHost[]>(() => {
-    const hosts = new Map<string, TerminalSessionDrawerHost>();
+  const relayDeviceByDaemonHostId = useMemo(() => {
+    const devices = new Map<string, TraversalRelayDeviceSnapshot>();
     for (const device of onlineRelayDaemonDevices) {
-      const hostKey = device.daemon.hostId.trim();
-      if (!hostKey) {
-        continue;
-      }
-      hosts.set(hostKey, {
-        hostKey,
-        hostLabel: device.deviceName.trim() || hostKey,
-        connected: device.daemon.connected,
-      });
-    }
-    for (const session of sessions) {
-      const serverIdentity = resolveServerIdentity(session, drawerServerIdentityAliases);
-      if (!serverIdentity.key) {
-        continue;
-      }
-      if (!hosts.has(serverIdentity.key)) {
-        hosts.set(serverIdentity.key, {
-          hostKey: serverIdentity.key,
-          hostLabel: serverIdentity.label,
-        });
+      const hostId = device.daemon.hostId.trim();
+      if (hostId) {
+        devices.set(hostId, device);
       }
     }
-    return [...hosts.values()];
-  }, [drawerServerIdentityAliases, onlineRelayDaemonDevices, sessions]);
+    return devices;
+  }, [onlineRelayDaemonDevices]);
   const drawerRemoteSessions = useMemo(() => {
-    const liveSessionByReuseKey = new Map(sessions.map((session) => [
-      buildSessionSemanticReuseKey({
-        daemonHostId: session.daemonHostId,
-        bridgeHost: session.bridgeHost,
-        bridgePort: session.bridgePort,
-        sessionName: session.sessionName,
-      }),
-      session,
-    ]));
+    const liveSessionByReuseKey = new Map<string, Session>();
+    for (const session of sessions) {
+      liveSessionByReuseKey.set(
+        buildSessionSemanticReuseKey({
+          daemonHostId: session.daemonHostId,
+          bridgeHost: session.bridgeHost,
+          bridgePort: session.bridgePort,
+          sessionName: session.sessionName,
+        }),
+        session,
+      );
+      const rawIdentity = resolveServerIdentity(session);
+      const aliasedIdentity = resolveServerIdentity(session, drawerServerIdentityAliases);
+      if (aliasedIdentity.key && aliasedIdentity.key !== rawIdentity.key) {
+        liveSessionByReuseKey.set(
+          buildSessionSemanticReuseKey({
+            daemonHostId: aliasedIdentity.key,
+            bridgeHost: session.bridgeHost,
+            bridgePort: session.bridgePort,
+            sessionName: session.sessionName,
+          }),
+          session,
+        );
+      }
+    }
     const catalogLiveSessionIds = new Set<string>();
     const targets = new Map<string, {
-      target: {
-        name: string;
-        bridgeHost: string;
-        bridgePort: number;
-        daemonHostId?: string;
-        authToken?: string;
-        relayEndpointCandidates?: SessionGroupHistory['relayEndpointCandidates'];
-        sessionNames: string[];
-      };
+      target: DrawerRemoteSessionTarget;
       sessionName: string;
     }>();
     const closeTargets = new Map<string, {
-      target: {
-        name: string;
-        bridgeHost: string;
-        bridgePort: number;
-        daemonHostId?: string;
-        authToken?: string;
-        relayEndpointCandidates?: SessionGroupHistory['relayEndpointCandidates'];
-        sessionNames: string[];
-      };
+      target: DrawerRemoteSessionTarget;
       sessionName: string;
       localSessionId: string | null;
     }>();
@@ -1484,13 +1505,28 @@ function TerminalPageComponent({
         });
         const liveSession = liveSessionByReuseKey.get(reuseKey) || null;
         const id = liveSession?.id || `remote:${ownerKey}::session:${sessionName}`;
+        const relayDevice = relayDeviceByDaemonHostId.get(serverIdentity.key) || null;
+        const relayRtcCandidates = getRelayRtcEndpointCandidates(relayDevice?.daemon.endpoints || []);
+        const useRelayRouteTarget = Boolean(relayDevice && relayRtcCandidates.length > 0);
+        const targetBridgeHost = useRelayRouteTarget && liveSession?.bridgeHost?.trim() && !group.bridgeHost.trim()
+          ? liveSession.bridgeHost
+          : group.bridgeHost;
+        const targetBridgePort = useRelayRouteTarget && liveSession?.bridgeHost?.trim() && !group.bridgeHost.trim()
+          ? liveSession.bridgePort || group.bridgePort
+          : group.bridgePort;
+        const relayEndpointCandidates = relayDevice && relayRtcCandidates.length > 0
+          ? relayDevice.daemon.endpoints || relayRtcCandidates
+          : group.relayEndpointCandidates || [];
+        const canonicalDaemonHostId = group.daemonHostId?.trim()
+          || (relayDevice && relayRtcCandidates.length > 0 ? serverIdentity.key : '');
         const remoteCatalogTarget = {
           name: group.name,
-          bridgeHost: group.bridgeHost,
-          bridgePort: group.bridgePort,
-          daemonHostId: group.daemonHostId,
+          bridgeHost: targetBridgeHost,
+          bridgePort: targetBridgePort,
+          ...(canonicalDaemonHostId ? { daemonHostId: canonicalDaemonHostId, relayHostId: canonicalDaemonHostId } : {}),
           authToken: group.authToken,
-          ...(group.relayEndpointCandidates?.length ? { relayEndpointCandidates: group.relayEndpointCandidates } : {}),
+          ...(relayEndpointCandidates?.length ? { relayEndpointCandidates } : {}),
+          ...(useRelayRouteTarget ? { transportMode: 'auto' as const } : {}),
           sessionNames: group.sessionNames,
         };
         closeTargets.set(id, {
@@ -1500,6 +1536,12 @@ function TerminalPageComponent({
         });
         if (liveSession) {
           catalogLiveSessionIds.add(liveSession.id);
+          if (useRelayRouteTarget) {
+            targets.set(id, {
+              target: remoteCatalogTarget,
+              sessionName,
+            });
+          }
         } else {
           targets.set(id, {
             target: remoteCatalogTarget,
@@ -1520,7 +1562,32 @@ function TerminalPageComponent({
       }
     }
     return { items, targets, closeTargets, catalogLiveSessionIds };
-  }, [drawerServerIdentityAliases, sessionGroups, sessions]);
+  }, [drawerServerIdentityAliases, relayDeviceByDaemonHostId, sessionGroups, sessions]);
+  const drawerHosts = useMemo<TerminalSessionDrawerHost[]>(() => {
+    const hosts = new Map<string, TerminalSessionDrawerHost>();
+    for (const device of onlineRelayDaemonDevices) {
+      const hostKey = device.daemon.hostId.trim();
+      if (!hostKey) {
+        continue;
+      }
+      hosts.set(hostKey, {
+        hostKey,
+        hostLabel: device.deviceName.trim() || hostKey,
+        connected: device.daemon.connected,
+      });
+    }
+    for (const item of drawerRemoteSessions.items) {
+      const hostKey = item.hostKey?.trim();
+      if (!hostKey || hosts.has(hostKey)) {
+        continue;
+      }
+      hosts.set(hostKey, {
+        hostKey,
+        hostLabel: item.hostLabel?.trim() || hostKey,
+      });
+    }
+    return [...hosts.values()];
+  }, [drawerRemoteSessions.items, onlineRelayDaemonDevices]);
   const drawerSessions = useMemo(() => {
     const activeSessionIds = new Set(renderedPaneSessions.map((session) => session.id));
     const resolveDrawerServerIdentity = (session: Session) => resolveServerIdentity(session, drawerServerIdentityAliases);

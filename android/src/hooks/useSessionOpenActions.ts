@@ -21,6 +21,7 @@ import {
   buildTransientHostFromDraft,
   normalizeBridgeTarget,
   resolveRelayDeviceBridgeTarget,
+  resolveRelayWebRtcFirstDeviceBridgeTarget,
   type BridgeTarget,
   type HostDraft,
 } from '../lib/session-picker';
@@ -44,8 +45,10 @@ interface SessionOpenGroupTarget {
   bridgeHost: string;
   bridgePort: number;
   daemonHostId?: string;
+  relayHostId?: string;
   authToken?: string;
   relayEndpointCandidates?: RelayEndpointCandidate[];
+  transportMode?: Host['transportMode'];
 }
 
 interface UseSessionOpenActionsOptions {
@@ -449,9 +452,11 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         bridgeHost: group.bridgeHost,
         bridgePort: group.bridgePort,
         daemonHostId: group.daemonHostId,
+        relayHostId: group.relayHostId || group.daemonHostId,
         sessionName,
         authToken: group.authToken || '',
         relayEndpointCandidates: group.relayEndpointCandidates || [],
+        transportMode: group.transportMode || 'auto',
         authType: 'password',
         password: undefined,
         privateKey: undefined,
@@ -469,16 +474,20 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     bridgeHost: string;
     bridgePort: number;
     daemonHostId?: string;
+    relayHostId?: string;
     authToken?: string;
     relayEndpointCandidates?: RelayEndpointCandidate[];
+    transportMode?: Host['transportMode'];
   }, sessionNames: string[]) => {
     openSessionPicker('edit-group', {
       target: {
         bridgeHost: group.bridgeHost,
         bridgePort: group.bridgePort,
         daemonHostId: group.daemonHostId,
+        relayHostId: group.relayHostId || group.daemonHostId,
         authToken: group.authToken,
         relayEndpointCandidates: group.relayEndpointCandidates || [],
+        transportMode: group.transportMode,
       },
       initialSelectedSessions: sessionNames,
     });
@@ -517,8 +526,10 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     bridgeHost: string;
     bridgePort: number;
     daemonHostId?: string;
+    relayHostId?: string;
     authToken?: string;
     relayEndpointCandidates?: RelayEndpointCandidate[];
+    transportMode?: Host['transportMode'];
     sessionNames: string[];
   }>) => {
     let activeSessionId: string | null = null;
@@ -538,8 +549,10 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
             bridgeHost: group.bridgeHost,
             bridgePort: group.bridgePort,
             daemonHostId: group.daemonHostId,
+            relayHostId: group.relayHostId || group.daemonHostId,
             authToken: group.authToken,
             relayEndpointCandidates: group.relayEndpointCandidates || [],
+            transportMode: group.transportMode,
           },
           sessionName,
         );
@@ -597,9 +610,10 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       bridgeHost: group.bridgeHost,
       bridgePort: group.bridgePort,
       daemonHostId: group.daemonHostId,
-      relayHostId: group.daemonHostId,
+      relayHostId: group.relayHostId || group.daemonHostId,
       authToken: group.authToken,
       relayEndpointCandidates: group.relayEndpointCandidates || [],
+      transportMode: group.transportMode,
     });
     await killTmuxSession(target, bridgeSettingsRef.current, sessionName);
     const sessionNames = await fetchTmuxSessions(target, bridgeSettingsRef.current);
@@ -756,7 +770,10 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       || device.deviceName.trim() === normalizedHostKey
     ));
     if (matchedDevice) {
-      return enrichTargetFromSavedHosts(resolveRelayDeviceBridgeTarget(bridgeSettings.servers, matchedDevice));
+      return enrichTargetFromSavedHosts(
+        resolveRelayWebRtcFirstDeviceBridgeTarget(bridgeSettings.servers, matchedDevice)
+          || resolveRelayDeviceBridgeTarget(bridgeSettings.servers, matchedDevice),
+      );
     }
     const matchedPreset = bridgeSettings.servers.find((server) => (
       server.id.trim() === normalizedHostKey

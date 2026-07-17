@@ -29,6 +29,11 @@ function resolvePreferredRelayDirectEndpoint(candidates: RelayEndpointCandidate[
     && (endpoint.host?.trim() || endpoint.wsUrl?.trim())) || null;
 }
 
+export function getRelayRtcEndpointCandidates(candidates: RelayEndpointCandidate[] | undefined) {
+  return (candidates || []).filter((endpoint) =>
+    endpoint.kind === 'relay-rtc' && endpoint.relayHostId?.trim());
+}
+
 function isExplicitRelayRouteHost(host: Pick<Host, 'transportMode' | 'tags'>) {
   return host.transportMode === 'webrtc' || (host.tags || []).includes('relay-route');
 }
@@ -144,6 +149,29 @@ export function resolveRelayDeviceBridgeTarget(
     transportMode: 'auto',
     relayEndpointCandidates,
     relayTmuxSessions,
+  });
+}
+
+export function resolveRelayWebRtcFirstDeviceBridgeTarget(
+  presets: BridgeServerPreset[],
+  device: TraversalRelayDeviceSnapshot,
+): BridgeTarget | null {
+  const daemonHostId = device.daemon.hostId.trim();
+  const relayEndpointCandidates = getRelayRtcEndpointCandidates(device.daemon.endpoints || []);
+  if (!daemonHostId || relayEndpointCandidates.length === 0) {
+    return null;
+  }
+  const baseTarget = resolveRelayDeviceBridgeTarget(presets, device);
+  const relayHostId = relayEndpointCandidates.find((endpoint) => endpoint.relayHostId?.trim())?.relayHostId?.trim()
+    || daemonHostId;
+  return normalizeBridgeTarget({
+    ...baseTarget,
+    daemonHostId,
+    relayHostId,
+    relayDeviceId: device.deviceId.trim() || baseTarget.relayDeviceId,
+    transportMode: 'auto',
+    relayEndpointCandidates: device.daemon.endpoints || relayEndpointCandidates,
+    relayTmuxSessions: device.daemon.sessions || [],
   });
 }
 

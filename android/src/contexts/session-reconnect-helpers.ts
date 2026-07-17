@@ -1,5 +1,5 @@
 import type { Host, Session, SessionState } from '../lib/types';
-import { buildSessionSemanticReuseKey } from '../lib/session-semantic-identity';
+import { buildSessionSemanticReuseKey, sessionSemanticReuseMatch } from '../lib/session-semantic-identity';
 
 export function orderSessionsForReconnect(sessions: Session[], activeSessionId: string | null) {
   if (!activeSessionId) {
@@ -46,20 +46,19 @@ export function findReusableManagedSession(options: {
   resolvedSessionName: string;
   activeSessionId: string | null;
 }) {
-  const reuseKey = buildManagedSessionReuseKey({
-    daemonHostId: options.host.daemonHostId,
-    relayHostId: options.host.relayHostId,
-    bridgeHost: options.host.bridgeHost,
-    bridgePort: options.host.bridgePort,
-    sessionName: options.resolvedSessionName,
-  });
   return options.sessions
-    .filter((session) => buildManagedSessionReuseKey({
+    .filter((session) => sessionSemanticReuseMatch({
       daemonHostId: session.daemonHostId,
       bridgeHost: session.bridgeHost,
       bridgePort: session.bridgePort,
       sessionName: session.sessionName,
-    }) === reuseKey)
+    }, {
+      daemonHostId: options.host.daemonHostId,
+      relayHostId: options.host.relayHostId,
+      bridgeHost: options.host.bridgeHost,
+      bridgePort: options.host.bridgePort,
+      sessionName: options.resolvedSessionName,
+    }))
     .sort((left, right) => (
       scoreReusableManagedSession(right, options.activeSessionId)
       - scoreReusableManagedSession(left, options.activeSessionId)

@@ -5,6 +5,15 @@ import type { TraversalPlanCandidate } from './types';
 
 const candidates = [
   {
+    id: 'rtc-direct:daemon-a',
+    kind: 'rtc',
+    path: 'rtc-direct',
+    endpoint: 'rtc-direct:daemon-a',
+    signalUrl: 'wss://relay.example.com/ws/client?hostId=daemon-a',
+    iceServers: [],
+    iceTransportPolicy: 'all',
+  },
+  {
     id: 'direct:tailscale',
     kind: 'ws',
     path: 'tailscale',
@@ -30,9 +39,18 @@ const candidates = [
 ] satisfies TraversalPlanCandidate[];
 
 describe('selectBestTraversalRoute', () => {
+  it('selects WebRTC direct before Tailscale when no route has recent health', () => {
+    const selection = selectBestTraversalRoute({
+      candidates,
+      traversalPathPriority: ['rtc-direct', 'tailscale', 'ipv4', 'rtc-relay'],
+    });
+
+    expect(selection.selected).toMatchObject({ id: 'rtc-direct:daemon-a', path: 'rtc-direct' });
+  });
+
   it('selects reachable direct candidate with recent low RTT success', () => {
     const cache = new TraversalRouteHealthCache({ now: () => 1000 });
-    cache.recordSuccess({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidates[1], 35);
+    cache.recordSuccess({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidates[2], 35);
 
     const selection = selectBestTraversalRoute({
       candidates,
@@ -51,8 +69,9 @@ describe('selectBestTraversalRoute', () => {
   it('rejects fresh unreachable and auth-failed candidates instead of treating relay as hidden fallback', () => {
     const cache = new TraversalRouteHealthCache({ now: () => 1000 });
     cache.recordFailure({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidates[0], 'timeout');
-    cache.recordFailure({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidates[1], '401 unauthorized', { authFailure: true });
-    cache.recordSuccess({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidates[2], 180);
+    cache.recordFailure({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidates[1], 'timeout');
+    cache.recordFailure({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidates[2], '401 unauthorized', { authFailure: true });
+    cache.recordSuccess({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidates[3], 180);
 
     const selection = selectBestTraversalRoute({
       candidates,
@@ -75,7 +94,7 @@ describe('selectBestTraversalRoute', () => {
     let now = 1000;
     const cache = new TraversalRouteHealthCache({ ttlMs: 50, now: () => now });
     cache.recordFailure({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidates[0], 'timeout');
-    cache.recordSuccess({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidates[2], 200);
+    cache.recordSuccess({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidates[3], 200);
 
     now = 1060;
     const selection = selectBestTraversalRoute({
@@ -94,6 +113,7 @@ describe('selectBestTraversalRoute', () => {
     cache.recordFailure({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidates[0], 'timeout');
     cache.recordFailure({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidates[1], 'timeout');
     cache.recordFailure({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidates[2], 'timeout');
+    cache.recordFailure({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidates[3], 'timeout');
 
     const selection = selectBestTraversalRoute({
       candidates,

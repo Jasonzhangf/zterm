@@ -821,8 +821,30 @@ describe('terminal mirror runtime lifecycle truth', () => {
     });
   });
 
+  it('keeps mirror-fixed client cols out of tmux resize ownership', async () => {
+    const { runtime, sessions, runTmux } = createRuntime();
+    const session = createSession('session-1');
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 60,
+      rows: 30,
+      widthMode: 'mirror-fixed',
+    });
+
+    const resizeResult = runtime.handleAdaptiveResize(session, {
+      cols: 50,
+      widthMode: 'mirror-fixed',
+    });
+
+    expect(resizeResult).toEqual({ ok: true });
+    expect(session.adaptiveWidthCols).toBeNull();
+    expect(runTmux).not.toHaveBeenCalled();
+  });
+
   it('keeps existing mirror geometry when a later subscriber sends different client cols', async () => {
-    const { runtime, sessions, mirrors } = createRuntime();
+    const { runtime, sessions, mirrors, runTmux } = createRuntime();
     const adaptiveSession = createSession('session-1');
     const fixedSession = createSession('session-2');
     fixedSession.transportId = 'transport-2';
@@ -848,6 +870,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     expect(mirror?.cols).toBe(120);
     expect(fixedSession).not.toHaveProperty('widthMode');
     expect(mirror).not.toHaveProperty('adaptiveCols');
+    expect(runTmux).not.toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '60']);
   });
 
   it('stops recurring live sync once the last subscriber detaches, then resumes on reattach', async () => {

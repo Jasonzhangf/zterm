@@ -202,6 +202,7 @@
         "src/contexts/session-context-transport-runtime.ts",
         "src/contexts/session-context-session-runtime.ts",
         "src/contexts/session-transport-open-helpers.ts",
+        "src/contexts/session-reconnect-helpers.ts",
         "src/lib/tmux-sessions.ts",
         "src/server/terminal-bridge-runtime.ts",
         "src/server/rtc-bridge.ts"
@@ -222,6 +223,7 @@
         "src/contexts/session-context-transport-runtime.ts",
         "src/contexts/session-sync-helpers.test.ts",
         "src/contexts/session-transport-open-helpers.ts",
+        "src/contexts/session-reconnect-helpers.ts",
         "src/contexts/session-context-socket-message-runtime.ts",
         "src/lib/tmux-sessions.ts",
         "src/lib/tmux-sessions.test.ts",
@@ -658,8 +660,14 @@
         "src/lib/traversal/config.test.ts",
         "src/lib/traversal/socket.ts",
         "src/lib/traversal/socket.test.ts",
+        "src/lib/traversal/route-diagnostics.ts",
         "src/lib/traversal/types.ts",
         "src/lib/bridge-settings.ts",
+        "packages/shared/src/connection/bridge-settings.ts",
+        "src/lib/types.ts",
+        "src/components/terminal/TerminalHeader.tsx",
+        "src/components/terminal/TabManagerSheet.tsx",
+        "src/components/terminal/pane-android-adapter.ts",
         "packages/shared/src/connection/relay-directory.ts"
       ],
       "forbidden_paths": [

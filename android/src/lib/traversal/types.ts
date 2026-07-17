@@ -3,7 +3,7 @@ import type { Host } from '../types';
 import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
 
 export type TraversalTransportMode = 'auto' | 'websocket' | 'webrtc';
-export type TraversalResolvedPath = 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
+export type TraversalResolvedPath = 'rtc-direct' | 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
 export type TraversalResolvedRelayTransport = 'direct' | 'turn';
 export type TraversalRtcIceTransportPolicy = 'all' | 'relay';
 
@@ -98,7 +98,7 @@ export interface WebSocketTraversalCandidate extends TraversalPlanCandidateBase 
 
 export interface RtcTraversalCandidate extends TraversalPlanCandidateBase {
   kind: 'rtc';
-  path: 'rtc-relay';
+  path: 'rtc-direct' | 'rtc-relay';
   signalUrl: string;
   iceServers: TraversalIceServer[];
   iceTransportPolicy: TraversalRtcIceTransportPolicy;

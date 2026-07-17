@@ -92,6 +92,21 @@ function buildIceServers(settings: TraversalSettingsSource): TraversalIceServer[
   }];
 }
 
+function buildDirectIceServers(settings: TraversalSettingsSource): TraversalIceServer[] {
+  const turnUrl = settings.traversalRelay?.turnUrl?.trim() || settings.turnServerUrl?.trim() || '';
+  if (!turnUrl) {
+    return [];
+  }
+  const stunUrl = turnUrl
+    .replace(/^turns:/i, 'stuns:')
+    .replace(/^turn:/i, 'stun:')
+    .replace(/\?.*$/, '');
+  if (stunUrl === turnUrl || !/^stuns?:/i.test(stunUrl)) {
+    return [];
+  }
+  return [{ urls: stunUrl }];
+}
+
 function addDirectCandidate(
   candidates: WebSocketTraversalCandidate[],
   seenUrls: Set<string>,
@@ -197,7 +212,7 @@ export function buildTraversalPlan(
       ipv4: target.ipv4Host || '',
     };
     for (const path of normalizeTraversalPathPriority(settings.traversalPathPriority || DEFAULT_TRAVERSAL_PATH_PRIORITY)) {
-      if (path === 'rtc-relay') {
+      if (path === 'rtc-direct' || path === 'rtc-relay') {
         continue;
       }
       addDirectCandidate(wsCandidates, seenWsUrls, path, directCandidates[path], target.bridgePort, target.authToken);
@@ -219,7 +234,8 @@ export function buildTraversalPlan(
     const relayAccessToken = settings.traversalRelay?.accessToken?.trim() || '';
     const directoryRelayEndpoint = resolveDirectoryRelayEndpoint(target);
     const relayHostId = target.relayHostId?.trim() || target.daemonHostId?.trim() || directoryRelayEndpoint?.relayHostId?.trim() || '';
-    const iceServers = buildIceServers(settings);
+    const relayIceServers = buildIceServers(settings);
+    const directIceServers = buildDirectIceServers(settings);
     const signalUrl = normalizeSignalUrl(
       relaySignalUrl || target.signalUrl?.trim() || settings.signalUrl?.trim() || '',
       relaySignalUrl ? relayAccessToken : target.authToken,
@@ -227,7 +243,22 @@ export function buildTraversalPlan(
     if (relaySignalUrl && mode === 'webrtc' && !relayHostId) {
       throw new Error('WebRTC relay mode requires selecting an online relay daemon device');
     }
-    if (iceServers.length > 0 && signalUrl && (!relaySignalUrl || relayHostId)) {
+    if (signalUrl && (!relaySignalUrl || relayHostId)) {
+      const parsedSignalUrl = new URL(signalUrl);
+      if (relaySignalUrl && relayHostId) {
+        parsedSignalUrl.searchParams.set('hostId', relayHostId);
+      }
+      rtcCandidates.push({
+        id: relayHostId ? `rtc-direct:${relayHostId}` : `rtc-direct:${parsedSignalUrl.toString()}`,
+        kind: 'rtc',
+        path: 'rtc-direct',
+        endpoint: relayHostId ? `rtc-direct:${relayHostId}` : 'rtc-direct',
+        signalUrl: parsedSignalUrl.toString(),
+        iceServers: directIceServers,
+        iceTransportPolicy: 'all',
+      });
+    }
+    if (relayIceServers.length > 0 && signalUrl && (!relaySignalUrl || relayHostId)) {
       const parsedSignalUrl = new URL(signalUrl);
       if (relaySignalUrl && relayHostId) {
         parsedSignalUrl.searchParams.set('hostId', relayHostId);
@@ -238,12 +269,12 @@ export function buildTraversalPlan(
         path: 'rtc-relay',
         endpoint: relayHostId ? `relay:${relayHostId}` : 'relay',
         signalUrl: parsedSignalUrl.toString(),
-        iceServers,
+        iceServers: relayIceServers,
         iceTransportPolicy: 'relay',
       });
     }
     if (mode === 'webrtc' && rtcCandidates.length === 0) {
-      throw new Error('WebRTC mode requires explicit signalUrl and TURN configuration');
+      throw new Error('WebRTC mode requires explicit signalUrl and relay daemon target');
     }
   }
 

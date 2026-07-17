@@ -33,6 +33,8 @@ function asString(value?: string | null) {
 
 function formatRouteLabel(path: TraversalResolvedPath) {
   switch (path) {
+    case 'rtc-direct':
+      return 'WebRTC';
     case 'tailscale':
       return 'Tailscale';
     case 'ipv6':
@@ -73,12 +75,22 @@ function buildTraversalRouteCandidates(endpointCandidates: RelayEndpointCandidat
     seen.add(id);
 
     if (endpoint.kind === 'relay-rtc') {
+      const relayHostId = asString(endpoint.relayHostId) || id;
+      candidates.push({
+        id: `rtc-direct:${relayHostId}`,
+        kind: 'rtc',
+        path: 'rtc-direct',
+        endpoint: relayHostId,
+        signalUrl: asString(endpoint.wsUrl) || `wss://${relayHostId || 'relay.invalid'}`,
+        iceServers: [],
+        iceTransportPolicy: 'all',
+      });
       candidates.push({
         id,
         kind: 'rtc',
         path: 'rtc-relay',
-        endpoint: asString(endpoint.relayHostId) || id,
-        signalUrl: asString(endpoint.wsUrl) || `wss://${asString(endpoint.relayHostId) || 'relay.invalid'}`,
+        endpoint: relayHostId || id,
+        signalUrl: asString(endpoint.wsUrl) || `wss://${relayHostId || 'relay.invalid'}`,
         iceServers: [],
         iceTransportPolicy: 'relay',
       });

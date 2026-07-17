@@ -239,6 +239,44 @@ describe('useSessionOpenActions explicit-open truth', () => {
     expect(harness.spies.ensureTerminalPageVisible).not.toHaveBeenCalled();
   });
 
+  it('preserves drawer WebRTC-first target truth when materializing a remote group session', () => {
+    const relayEndpointCandidates = [{
+      id: 'relay-rtc:daemon-a',
+      kind: 'relay-rtc' as const,
+      relayHostId: 'daemon-a',
+      authRequired: true,
+      lastSeenAt: '2026-07-17T00:00:00.000Z',
+    }];
+    const harness = createOptions();
+    harness.spies.createSession.mockReturnValue('runtime:daemon-a:remote-beta');
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    act(() => {
+      result.current.handleOpenGroupSession({
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
+        authToken: 'token-a',
+        relayEndpointCandidates,
+        transportMode: 'auto',
+      } as any, 'remote-beta', { activate: false, navigate: false });
+    });
+
+    expect(harness.spies.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
+        sessionName: 'remote-beta',
+        relayEndpointCandidates,
+        transportMode: 'auto',
+      }),
+      expect.objectContaining({ activate: false }),
+    );
+  });
+
   it('clears reopened semantic tab tombstones in memory without saving tab state', () => {
     const target = {
       bridgeHost: '100.127.23.27',
@@ -836,13 +874,24 @@ describe('useSessionOpenActions explicit-open truth', () => {
         daemonHostId: 'daemon-a',
         relayHostId: 'daemon-a',
         authToken: 'token-win',
+        transportMode: 'auto',
+        relayEndpointCandidates: [
+          expect.objectContaining({ kind: 'relay-rtc', relayHostId: 'daemon-a' }),
+        ],
       }),
       expect.any(Object),
       'work-api',
       { cwd: '~/code/api' },
     );
     expect(harness.spies.createSession).toHaveBeenCalledWith(
-      expect.objectContaining({ daemonHostId: 'daemon-a', sessionName: 'work-api' }),
+      expect.objectContaining({
+        daemonHostId: 'daemon-a',
+        sessionName: 'work-api',
+        transportMode: 'auto',
+        relayEndpointCandidates: [
+          expect.objectContaining({ kind: 'relay-rtc', relayHostId: 'daemon-a' }),
+        ],
+      }),
       expect.any(Object),
     );
     expect(onSessionsOpenedInPane).toHaveBeenCalledWith(['runtime:daemon-a:work-api'], 'pane-2');
@@ -1156,6 +1205,65 @@ describe('useSessionOpenActions explicit-open truth', () => {
     expect(harness.spies.applyOpenTabState).not.toHaveBeenCalled();
     expect(harness.spies.createSession).not.toHaveBeenCalled();
     expect(harness.spies.switchSession).not.toHaveBeenCalled();
+  });
+
+  it('refreshes a relay daemon drawer host through a WebRTC-first target instead of the saved direct route', async () => {
+    const harness = createOptions({
+      bridgeSettings: {
+        servers: [{
+          id: 'preset-a',
+          name: 'Machine A',
+          targetHost: '100.75.122.121',
+          targetPort: 3333,
+          authToken: 'token-win',
+          relayHostId: 'daemon-a',
+        }],
+        targetHost: '100.75.122.121',
+        targetPort: 3333,
+        targetAuthToken: 'token-win',
+      },
+      relayDevices: [{
+        deviceId: 'device-a',
+        deviceName: 'Machine A',
+        platform: 'win32',
+        appVersion: '0.1.3',
+        updatedAt: '2026-06-30T04:00:00.000Z',
+        client: { connected: false, lastSeenAt: '2026-06-30T04:00:00.000Z' },
+        daemon: {
+          connected: true,
+          lastSeenAt: '2026-06-30T04:00:00.000Z',
+          hostId: 'daemon-a',
+          version: '0.1.3',
+          endpoints: [
+            { id: 'direct:tailscale:daemon-a', kind: 'tailscale', host: '100.75.122.121', port: 3333, authRequired: true, lastSeenAt: '2026-06-30T04:00:00.000Z' },
+            { id: 'relay-a', kind: 'relay-rtc', relayHostId: 'daemon-a', authRequired: true, lastSeenAt: '2026-06-30T04:00:00.000Z' },
+          ],
+          sessions: [],
+        },
+      }],
+    });
+    fetchTmuxSessionsMock.mockResolvedValueOnce(['alpha']);
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    await act(async () => {
+      await result.current.handleRefreshDrawerHostSessions('daemon-a');
+    });
+
+    expect(fetchTmuxSessionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.75.122.121',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
+        authToken: 'token-win',
+        transportMode: 'auto',
+        relayEndpointCandidates: expect.arrayContaining([
+          expect.objectContaining({ kind: 'tailscale', host: '100.75.122.121' }),
+          expect.objectContaining({ kind: 'relay-rtc', relayHostId: 'daemon-a' }),
+        ]),
+      }),
+      expect.any(Object),
+    );
   });
 
   it('does not expose saved-tab list loading from the session-open owner', () => {

@@ -383,6 +383,107 @@ describe('active truth ownership gates', () => {
     );
   });
 
+  it('createSessionRuntime reuses a stale direct session when a relay daemon target resolves the same endpoint owner', () => {
+    const connectSession = vi.fn();
+    const writeSessionTransportHost = vi.fn();
+    const updateSessionSync = vi.fn();
+
+    const existingSession: Session = {
+      id: 'session-existing',
+      hostId: 'host-direct',
+      connectionName: '100.66.1.82',
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+      daemonHostId: undefined,
+      sessionName: 'rcc',
+      authToken: 'wterm-4123456',
+      autoCommand: undefined,
+      title: 'rcc',
+      ws: null,
+      state: 'connected',
+      hasUnread: false,
+      customName: undefined,
+      buffer: createSessionBufferState({ cols: 80, rows: 24, cacheLines: 1000 }),
+      daemonHeadRevision: 0,
+      daemonHeadEndIndex: 0,
+      reconnectAttempt: 0,
+      createdAt: 1,
+    };
+
+    const sessionId = createSessionRuntime({
+      host: {
+        id: 'host-relay',
+        createdAt: 2,
+        name: 'Mac Studio · rcc',
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        relayHostId: 'mac-studio',
+        sessionName: 'rcc',
+        authToken: 'wterm-4123456',
+        transportMode: 'auto',
+        relayEndpointCandidates: [{
+          id: 'relay-rtc:mac-studio',
+          kind: 'relay-rtc',
+          relayHostId: 'mac-studio',
+          authRequired: true,
+          lastSeenAt: '2026-07-17T00:00:00.000Z',
+        }],
+        authType: 'password',
+        tags: [],
+        pinned: false,
+      },
+      createOptions: {
+        connect: false,
+      },
+      refs: {
+        stateRef: {
+          current: {
+            sessions: [existingSession],
+            activeSessionId: 'session-existing',
+          },
+        },
+        pendingSessionTransportOpenIntentsRef: { current: new Map() },
+        sessionBufferStoreRef: { current: { commitBuffer: vi.fn(), setBuffer: vi.fn() } },
+        sessionHeadStoreRef: { current: { setHead: vi.fn() } },
+      },
+      runtimeDebug: vi.fn(),
+      resolveSessionCacheLines: vi.fn(() => 1000),
+      createSessionSync: vi.fn(),
+      updateSessionSync,
+      writeSessionTransportHost,
+      readSessionTransportSocket: vi.fn(() => null),
+      connectSession,
+      defaultViewport: { cols: 80, rows: 24 },
+    });
+
+    expect(sessionId).toBe('session-existing');
+    expect(connectSession).not.toHaveBeenCalled();
+    expect(writeSessionTransportHost).toHaveBeenCalledWith(
+      'session-existing',
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        relayHostId: 'mac-studio',
+        transportMode: 'auto',
+        relayEndpointCandidates: [expect.objectContaining({
+          kind: 'relay-rtc',
+          relayHostId: 'mac-studio',
+        })],
+      }),
+    );
+    expect(updateSessionSync).toHaveBeenCalledWith(
+      'session-existing',
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        sessionName: 'rcc',
+      }),
+    );
+  });
+
   it('createSessionRuntime restores transport identity for a closed local shell without opening websocket', () => {
     const connectSession = vi.fn();
     const writeSessionTransportHost = vi.fn();

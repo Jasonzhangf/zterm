@@ -168,17 +168,17 @@ function buildHomeConnectionFromRelayDevice(
 }
 
 export function buildHomeRelayConnectionHost(host: Host): Host | null {
-  const relayEndpointCandidates = (host.relayEndpointCandidates || []).filter((candidate) => (
+  const relayRtcEndpointCandidates = (host.relayEndpointCandidates || []).filter((candidate) => (
     candidate.kind === 'relay-rtc'
     && candidate.relayHostId?.trim()
   ));
   const relayHostId = (
     host.relayHostId
     || host.daemonHostId
-    || relayEndpointCandidates[0]?.relayHostId
+    || relayRtcEndpointCandidates[0]?.relayHostId
     || ''
   ).trim();
-  if (!relayHostId || relayEndpointCandidates.length === 0) {
+  if (!relayHostId || relayRtcEndpointCandidates.length === 0) {
     return null;
   }
   return {
@@ -187,8 +187,8 @@ export function buildHomeRelayConnectionHost(host: Host): Host | null {
     bridgeHost: '',
     daemonHostId: host.daemonHostId || relayHostId,
     relayHostId,
-    relayEndpointCandidates,
-    transportMode: 'webrtc',
+    relayEndpointCandidates: host.relayEndpointCandidates || relayRtcEndpointCandidates,
+    transportMode: 'auto',
     tags: [...new Set([...(host.tags || []), 'relay-route'])],
   };
 }

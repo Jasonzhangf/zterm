@@ -169,6 +169,7 @@ export function createSessionRuntime(options: {
       || options.host.name !== existingSession.connectionName
       || options.host.bridgeHost !== existingSession.bridgeHost
       || options.host.bridgePort !== existingSession.bridgePort
+      || (options.host.daemonHostId || options.host.relayHostId || undefined) !== existingSession.daemonHostId
       || resolvedSessionName !== existingSession.sessionName
       || options.host.authToken !== existingSession.authToken
       || options.host.autoCommand !== existingSession.autoCommand

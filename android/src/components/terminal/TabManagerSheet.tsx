@@ -9,7 +9,7 @@ export interface TabManagerSessionItem {
   bridgePort: number;
   sessionName: string;
   customName?: string;
-  resolvedPath?: 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
+  resolvedPath?: 'rtc-direct' | 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
   resolvedRelayTransport?: 'direct' | 'turn';
 }
 
@@ -30,6 +30,8 @@ function formatResolvedPath(
   relayTransport?: TabManagerSessionItem['resolvedRelayTransport'],
 ) {
   switch (path) {
+    case 'rtc-direct':
+      return 'RTC';
     case 'tailscale':
       return 'Tailscale';
     case 'ipv6':

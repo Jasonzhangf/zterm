@@ -497,6 +497,208 @@ describe('TerminalPage portrait session drawer', () => {
     expect(screen.queryByTestId('terminal-session-drawer-host-100.66.1.82:3333')).toBeNull();
   });
 
+  it('does not render an empty direct runtime host rail when the Relay catalog owns the drawer group', async () => {
+    const directSession = makeSession('direct-zterm');
+    directSession.bridgeHost = '100.66.1.82';
+    directSession.bridgePort = 3333;
+    directSession.daemonHostId = undefined;
+    directSession.sessionName = 'zterm';
+    directSession.title = 'zterm';
+
+    render(
+      <TerminalPage
+        sessions={[directSession]}
+        activeSession={directSession}
+        sessionGroups={[{
+          id: 'daemon:mac-studio',
+          name: 'Mac Studio',
+          bridgeHost: '',
+          bridgePort: 3333,
+          daemonHostId: 'mac-studio',
+          relayEndpointCandidates: [{
+            id: 'relay-rtc:mac-studio',
+            kind: 'relay-rtc' as const,
+            relayHostId: 'mac-studio',
+            authRequired: true,
+            lastSeenAt: '2026-07-17T00:00:00.000Z',
+          }],
+          sessionNames: ['zterm', 'rcc'],
+          lastOpenedAt: 1,
+        }]}
+        relayDevices={[
+          makeRelayDevice({
+            includeDirectEndpoint: false,
+            sessions: ['zterm', 'rcc'],
+          }),
+          makeRelayDevice({
+            deviceId: 'device-windows',
+            deviceName: 'Windows PC',
+            hostId: 'windows-pc',
+            includeDirectEndpoint: false,
+            sessions: ['server'],
+          }),
+        ]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+    expect(swipeSurface).toBeTruthy();
+    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
+    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    expect((await screen.findByTestId('terminal-session-drawer-host-mac-studio')).textContent).toContain('2');
+    expect(screen.queryByTestId('terminal-session-drawer-host-100.66.1.82:3333')).toBeNull();
+  });
+
+  it('opens an rtc-only aliased drawer session with a WebRTC-first target instead of the stale direct group target', async () => {
+    const directSession = makeSession('direct-rcc');
+    directSession.bridgeHost = '100.66.1.82';
+    directSession.bridgePort = 3333;
+    directSession.daemonHostId = undefined;
+    directSession.sessionName = 'rcc';
+    directSession.title = 'rcc';
+    const onOpenDrawerRemoteSession = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[directSession]}
+        activeSession={directSession}
+        sessionGroups={[{
+          id: 'group-direct-mac-studio',
+          name: '100.66.1.82',
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          sessionNames: ['rcc', 'freehand'],
+          lastOpenedAt: 1,
+        }]}
+        relayDevices={[
+          makeRelayDevice({
+            includeDirectEndpoint: false,
+            sessions: ['rcc', 'freehand', 'onestop'],
+          }),
+        ]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenDrawerRemoteSession={onOpenDrawerRemoteSession}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+    expect(swipeSurface).toBeTruthy();
+    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
+    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    fireEvent.click(await screen.findByTestId('terminal-session-drawer-select-remote:bridge:100.66.1.82::3333::session:freehand'));
+
+    expect(onOpenDrawerRemoteSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        relayHostId: 'mac-studio',
+        transportMode: 'auto',
+        relayEndpointCandidates: [expect.objectContaining({
+          kind: 'relay-rtc',
+          relayHostId: 'mac-studio',
+        })],
+      }),
+      'freehand',
+    );
+  });
+
+  it('routes an already-open direct drawer row back through the WebRTC-first open owner when Relay owns the catalog', async () => {
+    const directSession = makeSession('direct-rcc');
+    directSession.bridgeHost = '100.66.1.82';
+    directSession.bridgePort = 3333;
+    directSession.daemonHostId = undefined;
+    directSession.sessionName = 'rcc';
+    directSession.title = 'rcc';
+    const onOpenDrawerRemoteSession = vi.fn(() => 'direct-rcc');
+    const onSwitchSession = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[directSession]}
+        activeSession={directSession}
+        sessionGroups={[{
+          id: 'group-direct-mac-studio',
+          name: '100.66.1.82',
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          sessionNames: ['rcc', 'freehand'],
+          lastOpenedAt: 1,
+        }]}
+        relayDevices={[
+          makeRelayDevice({
+            includeDirectEndpoint: false,
+            sessions: ['rcc', 'freehand', 'onestop'],
+          }),
+        ]}
+        onSwitchSession={onSwitchSession}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenDrawerRemoteSession={onOpenDrawerRemoteSession}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+    expect(swipeSurface).toBeTruthy();
+    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
+    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    fireEvent.click(await screen.findByTestId('terminal-session-drawer-select-direct-rcc'));
+
+    expect(onSwitchSession).not.toHaveBeenCalled();
+    expect(onOpenDrawerRemoteSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        relayHostId: 'mac-studio',
+        transportMode: 'auto',
+        relayEndpointCandidates: [expect.objectContaining({
+          kind: 'relay-rtc',
+          relayHostId: 'mac-studio',
+        })],
+      }),
+      'rcc',
+    );
+  });
+
   it('recomputes drawer enumeration when only the Relay session catalog changes', async () => {
     const directSession = makeSession('direct-rcc');
     directSession.bridgeHost = '100.66.1.82';
@@ -885,15 +1087,16 @@ describe('TerminalPage portrait session drawer', () => {
     fireEvent.click(await screen.findByTestId('terminal-session-drawer-select-remote:daemon:daemon-a::session:remote-beta'));
 
     expect(onOpenDrawerRemoteSession).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         name: 'Daemon A',
         bridgeHost: '100.127.23.27',
         bridgePort: 3333,
         daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
         authToken: 'token-a',
         relayEndpointCandidates,
         sessionNames: ['tmux-s1', 'remote-beta'],
-      },
+      }),
       'remote-beta',
     );
   });
@@ -1021,14 +1224,15 @@ describe('TerminalPage portrait session drawer', () => {
 
     expect(onCloseSession).not.toHaveBeenCalled();
     expect(onCloseDrawerRemoteSession).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         name: 'Daemon A',
         bridgeHost: '100.127.23.27',
         bridgePort: 3333,
         daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
         authToken: 'token-a',
         sessionNames: ['tmux-s1', 'remote-beta'],
-      },
+      }),
       'remote-beta',
     );
   });
@@ -1084,14 +1288,15 @@ describe('TerminalPage portrait session drawer', () => {
     fireEvent.click(screen.getByTestId('terminal-session-drawer-close-s1'));
 
     expect(onCloseDrawerRemoteSession).toHaveBeenCalledWith(
-      {
+      expect.objectContaining({
         name: 'Daemon A',
         bridgeHost: '100.127.23.27',
         bridgePort: 3333,
         daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
         authToken: 'token-a',
         sessionNames: ['tmux-s1', 'remote-beta'],
-      },
+      }),
       'tmux-s1',
     );
     await waitFor(() => expect(onCloseSession).toHaveBeenCalledWith('s1', 'terminal-session-drawer-remote-close-success'));
