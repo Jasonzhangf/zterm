@@ -172,6 +172,27 @@ class WebRtcBackend implements Backend {
     }
   }
 
+  private sendSignalMessage(signalSocket: WebSocket, message: { type: string; payload?: unknown }) {
+    if (signalSocket.readyState !== OPEN) {
+      return false;
+    }
+    try {
+      signalSocket.send(JSON.stringify(message));
+      return true;
+    } catch (error) {
+      console.warn('[TraversalSocket] Failed to send RTC signaling message:', error);
+      return false;
+    }
+  }
+
+  private closeRtcPeer() {
+    try {
+      this.peerConnection?.close();
+    } catch (error) {
+      console.warn('[TraversalSocket] Failed to close RTC peer connection:', error);
+    }
+  }
+
   public start(handlers: {
     onopen: () => void;
     onmessage: (event: BridgeSocketMessageLike) => void;
@@ -209,10 +230,10 @@ class WebRtcBackend implements Backend {
           if (!event.candidate) {
             return;
           }
-          signalSocket.send(JSON.stringify({
+          this.sendSignalMessage(signalSocket, {
             type: 'rtc-candidate',
             payload: event.candidate.toJSON(),
-          }));
+          });
         };
         peerConnection.onconnectionstatechange = async () => {
           if (peerConnection.connectionState === 'failed') {
@@ -229,20 +250,24 @@ class WebRtcBackend implements Backend {
           }
         };
 
-        signalSocket.send(JSON.stringify({
+        if (!this.sendSignalMessage(signalSocket, {
           type: 'rtc-init',
           payload: {
             iceServers: this.candidate.iceServers,
             iceTransportPolicy: this.candidate.iceTransportPolicy,
           },
-        }));
+        })) {
+          throw new Error('rtc signaling websocket closed before init');
+        }
 
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
-        signalSocket.send(JSON.stringify({
+        if (!this.sendSignalMessage(signalSocket, {
           type: 'rtc-offer',
           payload: { sdp: offer.sdp, type: offer.type },
-        }));
+        })) {
+          throw new Error('rtc signaling websocket closed before offer');
+        }
       } catch (error) {
         handlers.onerror(error instanceof Error ? error.message : 'rtc init error');
       }
@@ -256,6 +281,10 @@ class WebRtcBackend implements Backend {
         };
         if (message.type === 'rtc-error') {
           handlers.onerror(typeof message.payload?.message === 'string' ? message.payload.message : 'rtc signaling error');
+          this.closeRtcPeer();
+          if (signalSocket.readyState === CONNECTING || signalSocket.readyState === OPEN) {
+            signalSocket.close(4004, 'rtc signaling error');
+          }
           return;
         }
         if (message.type === 'rtc-answer') {
@@ -304,7 +333,7 @@ class WebRtcBackend implements Backend {
       console.warn('[TraversalSocket] Failed to close RTC data channel:', error);
     }
     try {
-      this.peerConnection?.close();
+      this.closeRtcPeer();
     } catch (error) {
       console.warn('[TraversalSocket] Failed to close RTC peer connection:', error);
     }

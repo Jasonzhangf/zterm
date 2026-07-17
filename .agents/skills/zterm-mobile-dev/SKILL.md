@@ -122,6 +122,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - Android relay account directory 的 client 真源是 `account.directory`；旧 `TraversalRelayDeviceSnapshot[]` 只能作为现有 UI 的 adapter projection，禁止在 Connections / Picker / Settings 各自从 legacy devices 反向补 endpoint/session 目录语义。
 - Relay route 入口不能只靠 directory 里存在 `relay-rtc` 就宣称可用；必须用真实 `TraversalSocket` 对目标 daemon 跑 relay-only/TURN `list-sessions` / session open 黑盒证明。生产 `rtc-relay` 必须使用 `iceTransportPolicy=relay`，client `rtc-init` 必须把同一 policy 传给 daemon `rtc-bridge`，禁止用 host/srflx/P2P/Tailscale ICE 冒充 Relay。标准 ICE (`iceTransportPolicy=all`) 只能作为诊断“signaling/P2P 可通”，不能作为产品 Relay 可用证据。若 standard RTC 通过但 relay-only 失败，只能报告 TURN/公网 relay-port/server 配置未闭环。
 - Relay account device stream 打开前必须先刷新 `/api/auth/me` 控制面真源并覆盖本地 `TraversalRelayClientSettings`；旧固定域名 `claw.codewhisper.cc` 只能作为历史别名迁移到 `relay.codewhisper.cc`，不得继续用于 TURN/WS。刷新失败时禁止打开 `/ws/devices` 或继续使用 stale TURN/WS 配置冒充 Relay 可用。
+- RTC signaling 收到 `rtc-error` 或 signaling socket 关闭后，client 侧 ICE candidate 回调必须检查 WebSocket `readyState` 后再发送，并主动收口 peer/signaling；禁止让异步 ICE candidate 往 CLOSING/CLOSED socket 继续 `send()`，否则用户会看到误导性的 `WebSocket is already in CLOSING or CLOSED state`。
 - 发行包验证必须覆盖 native runtime 依赖：TURN/RTC 需要 `@roamhq/wrtc` 与当前平台 `@roamhq/wrtc-<platform>-<arch>/wrtc.node` 随 release staging 打包；只在源码环境通过不代表全局安装可启动。
 - 验证过程中产生的临时 tmux session 需要及时清掉，只保留一个明确实验 session，避免把测试垃圾当成真实 session 列表
 - `bridgePort` / daemon 端口 / daemon tmux session 名必须共用同一配置真源；不要在 UI、server、shell script、文案里散落硬编码

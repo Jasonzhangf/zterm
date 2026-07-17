@@ -454,6 +454,45 @@ describe('TraversalSocket reconnect', () => {
     socket.close();
   });
 
+  it('closes a failed rtc signaling attempt and does not send later ICE candidates to a closed socket', async () => {
+    const socket = createRelayRtcSocket();
+    await flushMicrotasks();
+
+    MockWebSocket.instances[0].triggerOpen();
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    const signalSocket = MockWebSocket.instances[0];
+    expect(signalSocket.sent.map((item) => JSON.parse(String(item)).type)).toEqual([
+      'rtc-init',
+      'rtc-offer',
+    ]);
+
+    signalSocket.onmessage?.({
+      data: JSON.stringify({
+        type: 'rtc-error',
+        payload: { message: 'host daemon-host-a is offline' },
+      }),
+    } as MessageEvent);
+    await flushMicrotasks();
+
+    expect(signalSocket.readyState).toBe(MockWebSocket.CLOSED);
+    const sentCountAfterError = signalSocket.sent.length;
+    MockRTCPeerConnection.instances[0].onicecandidate?.({
+      candidate: {
+        toJSON: () => ({ candidate: 'candidate:relay-after-close typ relay' }),
+      },
+    } as RTCPeerConnectionIceEvent);
+
+    expect(signalSocket.sent).toHaveLength(sentCountAfterError);
+    expect(socket.getDiagnostics().attempts[0]).toMatchObject({
+      path: 'rtc-relay',
+      stage: 'closed',
+      ok: false,
+      reason: 'rtc data channel closed',
+    });
+  });
+
   it('marks relay RTC diagnostics as TURN when the selected ICE candidate pair uses a relay candidate', async () => {
     MockRTCPeerConnection.statsCandidateTypes = {
       local: 'relay',
