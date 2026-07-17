@@ -458,6 +458,7 @@ export interface SessionGroupHistory {
   bridgePort: number;
   daemonHostId?: string;
   authToken?: string;
+  relayEndpointCandidates?: RelayEndpointCandidate[];
   sessionNames: string[];
   missingSessionNames?: string[];
   lastOpenedAt: number;

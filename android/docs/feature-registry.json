@@ -202,6 +202,7 @@
         "src/contexts/session-context-transport-runtime.ts",
         "src/contexts/session-context-session-runtime.ts",
         "src/contexts/session-transport-open-helpers.ts",
+        "src/lib/tmux-sessions.ts",
         "src/server/terminal-bridge-runtime.ts"
       ],
       "allowed_paths": [
@@ -221,6 +222,8 @@
         "src/contexts/session-sync-helpers.test.ts",
         "src/contexts/session-transport-open-helpers.ts",
         "src/contexts/session-context-socket-message-runtime.ts",
+        "src/lib/tmux-sessions.ts",
+        "src/lib/tmux-sessions.test.ts",
         "src/lib/session-transport-runtime.ts",
         "src/server/terminal-bridge-runtime.ts",
         "src/server/terminal-transport-runtime.ts",
@@ -244,7 +247,8 @@
         "src/server/terminal-message-runtime.test.ts",
         "src/server/terminal-transport-runtime.test.ts",
         "src/lib/session-transport-runtime.test.ts",
-        "src/contexts/session-context-transport-runtime.test.ts"
+        "src/contexts/session-context-transport-runtime.test.ts",
+        "src/lib/tmux-sessions.test.ts"
       ],
       "truth_sources": [
         ".agents/skills/terminal-buffer-truth/SKILL.md",
@@ -491,9 +495,11 @@
         "src/hooks/useSessionHistoryStorage.ts",
         "packages/shared/src/react/use-host-storage.ts",
         "src/App.tsx",
+        "src/lib/types.ts",
         "src/pages/ConnectionsPage.tsx",
         "src/pages/ConnectionsPage.test.tsx",
         "src/pages/ConnectionPropertiesPage.tsx",
+        "src/hooks/useSessionOpenActions.ts",
         "src/hooks/useSessionHistoryStorage.test.ts"
       ],
       "forbidden_paths": [
@@ -1073,13 +1079,15 @@
       ],
       "allowed_paths": [
         "src/components/terminal/TerminalSessionDrawer.tsx",
-        "src/pages/TerminalPage.tsx"
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPage.session-drawer.test.tsx"
       ],
       "forbidden_paths": [
         "src/server/"
       ],
       "required_gates": [
-        "src/components/terminal/TerminalSessionDrawer.test.tsx"
+        "src/components/terminal/TerminalSessionDrawer.test.tsx",
+        "src/pages/TerminalPage.session-drawer.test.tsx"
       ],
       "truth_sources": [
         "docs/function-map.md",

@@ -6,12 +6,17 @@ import type { BridgeSettings } from './bridge-settings';
 const traversalHarness = vi.hoisted(() => {
   class MockTraversalSocket {
     static instances: MockTraversalSocket[] = [];
+    static readonly CONNECTING = 0;
+    static readonly OPEN = 1;
+    static readonly CLOSED = 3;
 
     onopen: (() => void) | null = null;
     onmessage: ((event: { data: string }) => void) | null = null;
     onerror: (() => void) | null = null;
     onclose: (() => void) | null = null;
+    readyState = MockTraversalSocket.CONNECTING;
     sent: string[] = [];
+    closeCalls = 0;
     readonly diagnostics = { reason: 'mock transport error' };
 
     constructor(
@@ -27,6 +32,8 @@ const traversalHarness = vi.hoisted(() => {
     }
 
     close() {
+      this.closeCalls += 1;
+      this.readyState = MockTraversalSocket.CLOSED;
       this.onclose?.();
     }
 
@@ -35,6 +42,7 @@ const traversalHarness = vi.hoisted(() => {
     }
 
     triggerOpen() {
+      this.readyState = MockTraversalSocket.OPEN;
       this.onopen?.();
     }
 
@@ -47,7 +55,12 @@ const traversalHarness = vi.hoisted(() => {
     }
 
     triggerTransportError() {
+      this.readyState = MockTraversalSocket.CLOSED;
       this.onerror?.();
+    }
+
+    triggerClose() {
+      this.close();
     }
 
     static latest() {
@@ -85,6 +98,12 @@ const target = {
   authToken: 'token-a',
 };
 
+async function loadTmuxSessionsModule() {
+  const module = await import('./tmux-sessions');
+  module.resetTmuxSessionTransportPoolForTests();
+  return module;
+}
+
 describe('tmux-sessions transport contract', () => {
   beforeEach(() => {
     traversalHarness.MockTraversalSocket.reset();
@@ -95,7 +114,7 @@ describe('tmux-sessions transport contract', () => {
   });
 
   it('requests tmux session list over traversal transport', async () => {
-    const { fetchTmuxSessions } = await import('./tmux-sessions');
+    const { fetchTmuxSessions } = await loadTmuxSessionsModule();
     const promise = fetchTmuxSessions(target, bridgeSettings);
     const socket = traversalHarness.MockTraversalSocket.latest();
 
@@ -104,10 +123,11 @@ describe('tmux-sessions transport contract', () => {
 
     socket.triggerSessions(['main', 'logs']);
     await expect(promise).resolves.toEqual(['main', 'logs']);
+    expect(socket.closeCalls).toBe(0);
   });
 
   it('sends create / rename / kill tmux operations with the exact request payloads', async () => {
-    const { createTmuxSession, renameTmuxSession, killTmuxSession } = await import('./tmux-sessions');
+    const { createTmuxSession, renameTmuxSession, killTmuxSession } = await loadTmuxSessionsModule();
 
     const createPromise = createTmuxSession(target, bridgeSettings, 'new-tab');
     const createSocket = traversalHarness.MockTraversalSocket.latest();
@@ -120,8 +140,8 @@ describe('tmux-sessions transport contract', () => {
 
     const createWithCwdPromise = createTmuxSession(target, bridgeSettings, 'work-api', { cwd: '~/code/api' });
     const createWithCwdSocket = traversalHarness.MockTraversalSocket.latest();
-    createWithCwdSocket.triggerOpen();
-    expect(createWithCwdSocket.sent).toEqual([
+    expect(createWithCwdSocket).toBe(createSocket);
+    expect(createWithCwdSocket.sent.slice(1)).toEqual([
       JSON.stringify({ type: 'tmux-create-session', payload: { sessionName: 'work-api', cwd: '~/code/api' } }),
     ]);
     createWithCwdSocket.triggerSessions(['work-api']);
@@ -129,8 +149,8 @@ describe('tmux-sessions transport contract', () => {
 
     const renamePromise = renameTmuxSession(target, bridgeSettings, 'new-tab', 'renamed-tab');
     const renameSocket = traversalHarness.MockTraversalSocket.latest();
-    renameSocket.triggerOpen();
-    expect(renameSocket.sent).toEqual([
+    expect(renameSocket).toBe(createSocket);
+    expect(renameSocket.sent.slice(2)).toEqual([
       JSON.stringify({ type: 'tmux-rename-session', payload: { sessionName: 'new-tab', nextSessionName: 'renamed-tab' } }),
     ]);
     renameSocket.triggerSessions(['renamed-tab']);
@@ -138,16 +158,18 @@ describe('tmux-sessions transport contract', () => {
 
     const killPromise = killTmuxSession(target, bridgeSettings, 'renamed-tab');
     const killSocket = traversalHarness.MockTraversalSocket.latest();
-    killSocket.triggerOpen();
-    expect(killSocket.sent).toEqual([
+    expect(killSocket).toBe(createSocket);
+    expect(killSocket.sent.slice(3)).toEqual([
       JSON.stringify({ type: 'tmux-kill-session', payload: { sessionName: 'renamed-tab' } }),
     ]);
     killSocket.triggerSessions([]);
     await expect(killPromise).resolves.toEqual([]);
+    expect(traversalHarness.MockTraversalSocket.instances).toHaveLength(1);
+    expect(createSocket.closeCalls).toBe(0);
   });
 
   it('surfaces daemon-side tmux management errors explicitly', async () => {
-    const { fetchTmuxSessions } = await import('./tmux-sessions');
+    const { fetchTmuxSessions } = await loadTmuxSessionsModule();
     const promise = fetchTmuxSessions(target, bridgeSettings);
     const socket = traversalHarness.MockTraversalSocket.latest();
 
@@ -158,12 +180,107 @@ describe('tmux-sessions transport contract', () => {
   });
 
   it('surfaces transport errors explicitly without silent fallback', async () => {
-    const { fetchTmuxSessions } = await import('./tmux-sessions');
+    const { fetchTmuxSessions } = await loadTmuxSessionsModule();
     const promise = fetchTmuxSessions(target, bridgeSettings);
     const socket = traversalHarness.MockTraversalSocket.latest();
 
     socket.triggerTransportError();
 
     await expect(promise).rejects.toThrow('mock transport error');
+  });
+
+  it('reuses one open traversal transport for sequential tmux session list requests on the same target', async () => {
+    const { fetchTmuxSessions } = await loadTmuxSessionsModule();
+
+    const first = fetchTmuxSessions(target, bridgeSettings);
+    const socket = traversalHarness.MockTraversalSocket.latest();
+    socket.triggerOpen();
+    expect(socket.sent).toEqual([JSON.stringify({ type: 'list-sessions' })]);
+    socket.triggerSessions(['first']);
+    await expect(first).resolves.toEqual(['first']);
+
+    const second = fetchTmuxSessions(target, bridgeSettings);
+    expect(traversalHarness.MockTraversalSocket.instances).toHaveLength(1);
+    expect(socket.sent).toEqual([
+      JSON.stringify({ type: 'list-sessions' }),
+      JSON.stringify({ type: 'list-sessions' }),
+    ]);
+    socket.triggerSessions(['second']);
+    await expect(second).resolves.toEqual(['second']);
+    expect(socket.closeCalls).toBe(0);
+  });
+
+  it('serializes concurrent tmux management requests on one target transport', async () => {
+    const { fetchTmuxSessions } = await loadTmuxSessionsModule();
+
+    const first = fetchTmuxSessions(target, bridgeSettings);
+    const second = fetchTmuxSessions(target, bridgeSettings);
+    const socket = traversalHarness.MockTraversalSocket.latest();
+
+    socket.triggerOpen();
+    expect(traversalHarness.MockTraversalSocket.instances).toHaveLength(1);
+    expect(socket.sent).toEqual([JSON.stringify({ type: 'list-sessions' })]);
+
+    socket.triggerSessions(['first']);
+    await expect(first).resolves.toEqual(['first']);
+    expect(socket.sent).toEqual([
+      JSON.stringify({ type: 'list-sessions' }),
+      JSON.stringify({ type: 'list-sessions' }),
+    ]);
+
+    socket.triggerSessions(['second']);
+    await expect(second).resolves.toEqual(['second']);
+  });
+
+  it('opens a separate traversal transport for a different target key', async () => {
+    const { fetchTmuxSessions } = await loadTmuxSessionsModule();
+
+    const first = fetchTmuxSessions(target, bridgeSettings);
+    const firstSocket = traversalHarness.MockTraversalSocket.latest();
+    firstSocket.triggerOpen();
+    firstSocket.triggerSessions(['first']);
+    await expect(first).resolves.toEqual(['first']);
+
+    const second = fetchTmuxSessions({ ...target, bridgeHost: '100.64.0.11' }, bridgeSettings);
+    const secondSocket = traversalHarness.MockTraversalSocket.latest();
+    expect(secondSocket).not.toBe(firstSocket);
+    expect(traversalHarness.MockTraversalSocket.instances).toHaveLength(2);
+    secondSocket.triggerOpen();
+    secondSocket.triggerSessions(['second']);
+    await expect(second).resolves.toEqual(['second']);
+  });
+
+  it('drops the pooled traversal transport after a physical transport error', async () => {
+    const { fetchTmuxSessions } = await loadTmuxSessionsModule();
+
+    const first = fetchTmuxSessions(target, bridgeSettings);
+    const firstSocket = traversalHarness.MockTraversalSocket.latest();
+    firstSocket.triggerOpen();
+    firstSocket.triggerTransportError();
+    await expect(first).rejects.toThrow('mock transport error');
+
+    const second = fetchTmuxSessions(target, bridgeSettings);
+    const secondSocket = traversalHarness.MockTraversalSocket.latest();
+    expect(secondSocket).not.toBe(firstSocket);
+    expect(traversalHarness.MockTraversalSocket.instances).toHaveLength(2);
+    secondSocket.triggerOpen();
+    secondSocket.triggerSessions(['second']);
+    await expect(second).resolves.toEqual(['second']);
+  });
+
+  it('keeps request-level daemon errors explicit while preserving the healthy transport', async () => {
+    const { fetchTmuxSessions } = await loadTmuxSessionsModule();
+
+    const first = fetchTmuxSessions(target, bridgeSettings);
+    const socket = traversalHarness.MockTraversalSocket.latest();
+    socket.triggerOpen();
+    socket.triggerError('cannot list tmux sessions');
+    await expect(first).rejects.toThrow('cannot list tmux sessions');
+
+    const second = fetchTmuxSessions(target, bridgeSettings);
+    expect(traversalHarness.MockTraversalSocket.instances).toHaveLength(1);
+    expect(socket.sent).toHaveLength(2);
+    socket.triggerSessions(['recovered']);
+    await expect(second).resolves.toEqual(['recovered']);
   });
 });

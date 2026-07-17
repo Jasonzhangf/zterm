@@ -56,6 +56,7 @@ interface UseSessionOpenActionsOptions {
     bridgePort: number;
     daemonHostId?: string;
     authToken?: string;
+    relayEndpointCandidates?: RelayEndpointCandidate[];
     sessionNames: string[];
   }) => void;
   createSession: (
@@ -383,6 +384,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     bridgePort: number;
     daemonHostId?: string;
     authToken?: string;
+    relayEndpointCandidates?: RelayEndpointCandidate[];
   }, sessionNames: string[]) => {
     setSessionGroupSelection({
       name: `${group.bridgeHost} · ${sessionNames.length} sessions`,
@@ -390,6 +392,9 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       bridgePort: group.bridgePort,
       daemonHostId: group.daemonHostId,
       authToken: group.authToken,
+      ...(group.relayEndpointCandidates?.length
+        ? { relayEndpointCandidates: group.relayEndpointCandidates }
+        : {}),
       sessionNames,
     });
   }, [setSessionGroupSelection]);
@@ -463,6 +468,9 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         bridgePort: target.bridgePort,
         daemonHostId: target.daemonHostId || target.relayHostId,
         authToken: target.authToken,
+        ...(target.relayEndpointCandidates?.length
+          ? { relayEndpointCandidates: target.relayEndpointCandidates }
+          : {}),
         sessionNames: normalizedSessionNames,
       });
     }

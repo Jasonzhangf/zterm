@@ -14,6 +14,7 @@ Owner:
 - `src/contexts/session-context-session-runtime.ts`
 - `src/contexts/session-context-transport-open-runtime.ts`
 - `src/contexts/session-context-activity-runtime.ts`
+- `src/lib/tmux-sessions.ts` for target-scoped tmux management control transports
 
 Forbidden test targets:
 - `src/App.tsx`
@@ -23,6 +24,8 @@ Forbidden test targets:
 - buffer/render modules
 
 The UI may trigger resume/switch intent, but tests must prove socket reuse is owned below the UI layer.
+
+Tmux management requests are a separate control lane. Because the daemon response has no request id, one target-scoped `TraversalSocket` must serialize requests FIFO. Successful responses and request-level daemon errors keep that physical socket reusable; physical close/error, malformed protocol data, or request timeout removes and closes it. The pool caches no session-list result.
 
 ## Mainline Under Test
 
@@ -96,10 +99,19 @@ Negative:
 - Sending input while the socket is open uses the existing socket even if the session label is stale.
 - Closing the socket and then reconnecting still creates a new socket.
 
+## L1 Tmux Management Control Cases
+
+- Positive: sequential list/create/kill operations for the same normalized target reuse one `TraversalSocket` and each operation receives its own current daemon response.
+- Positive: concurrent calls for one target are sent FIFO and only the active request consumes the next uncorrelated response.
+- Positive: a daemon `error` response rejects only the active request and leaves the physical socket available for the next request.
+- Negative: different target or Relay account identity must never share a control socket.
+- Negative: physical error/close, malformed response, unexpected response type, or timeout must reject pending work and evict the socket before a later request creates a new one.
+- Negative: no successful sessions payload is cached or returned without a fresh request/response exchange.
+
 ## Verification Commands
 
 Targeted:
-- `pnpm --dir android exec vitest run src/contexts/session-sync-helpers.test.ts src/contexts/session-context-session-runtime.test.ts src/contexts/SessionContext.ws-refresh.test.tsx --reporter dot`
+- `pnpm --dir android exec vitest run src/lib/tmux-sessions.test.ts src/contexts/session-sync-helpers.test.ts src/contexts/session-context-session-runtime.test.ts src/contexts/SessionContext.ws-refresh.test.tsx --reporter dot`
 
 Architecture/static:
 - `pnpm --dir android run test:feature-registry -- --reporter dot`

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { normalizeRelayEndpointCandidates, type RelayEndpointCandidate } from '@zterm/shared/relay-directory';
 import { normalizeRemoteTmuxSessionNames } from '../lib/tmux-session-list';
 import { DEFAULT_BRIDGE_PORT, STORAGE_KEYS, type SessionGroupHistory } from '../lib/types';
 import {
@@ -7,6 +8,20 @@ import {
 } from '../lib/session-semantic-identity';
 
 const MAX_GROUP_ENTRIES = 12;
+
+function mergeRelayEndpointCandidates(
+  first: RelayEndpointCandidate[] | undefined,
+  second: RelayEndpointCandidate[] | undefined,
+) {
+  const byId = new Map<string, RelayEndpointCandidate>();
+  for (const candidate of [...(first || []), ...(second || [])]) {
+    if (!candidate.id.trim()) {
+      continue;
+    }
+    byId.set(candidate.id, candidate);
+  }
+  return [...byId.values()];
+}
 
 function toServerGroupKey(entry: Pick<SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort'>) {
   return buildSessionSemanticOwnerKey({
@@ -29,6 +44,10 @@ function normalizeGroupEntry(input: unknown): SessionGroupHistory | null {
   const missingSessionNames = Array.isArray(candidate.missingSessionNames)
     ? candidate.missingSessionNames.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
     : [];
+  const relayEndpointCandidates = normalizeRelayEndpointCandidates(
+    candidate.relayEndpointCandidates,
+    new Date().toISOString(),
+  );
 
   if (!bridgeHost || sessionNames.length === 0) {
     return null;
@@ -56,6 +75,7 @@ function normalizeGroupEntry(input: unknown): SessionGroupHistory | null {
       ? candidate.daemonHostId.trim()
       : undefined,
     authToken: typeof candidate.authToken === 'string' ? candidate.authToken : undefined,
+    ...(relayEndpointCandidates.length > 0 ? { relayEndpointCandidates } : {}),
     sessionNames: sortedSessionNames,
     missingSessionNames: [...new Set(missingSessionNames)].filter((item) => sortedSessionNames.includes(item)).sort((a, b) => a.localeCompare(b)),
     lastOpenedAt:
@@ -79,6 +99,16 @@ function collapseServerGroups(entries: SessionGroupHistory[]) {
   for (const entry of ordered) {
     const existingIndex = collapsed.findIndex((item) => sessionSemanticOwnersMatch(item, entry));
     if (existingIndex >= 0) {
+      const mergedRelayEndpointCandidates = mergeRelayEndpointCandidates(
+        collapsed[existingIndex]?.relayEndpointCandidates,
+        entry.relayEndpointCandidates,
+      );
+      if (mergedRelayEndpointCandidates.length > 0 && collapsed[existingIndex]) {
+        collapsed[existingIndex] = {
+          ...collapsed[existingIndex],
+          relayEndpointCandidates: mergedRelayEndpointCandidates,
+        };
+      }
       continue;
     }
     collapsed.push({

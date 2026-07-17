@@ -125,6 +125,49 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
     );
   });
 
+  it('preserves relay endpoint candidates on stored session group truth', () => {
+    const { result } = renderHook(() => useSessionHistoryStorage());
+    const relayEndpointCandidates = [{
+      id: 'relay-rtc:daemon-host-a',
+      kind: 'relay-rtc' as const,
+      relayHostId: 'daemon-host-a',
+      authRequired: true,
+      lastSeenAt: '2026-07-17T00:00:00.000Z',
+    }];
+
+    act(() => {
+      result.current.setSessionGroupSelection({
+        name: 'Daemon A',
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-host-a',
+        authToken: 'token-a',
+        relayEndpointCandidates,
+        sessionNames: ['rcc'],
+      });
+    });
+
+    expect(result.current.sessionGroups[0]).toEqual(expect.objectContaining({
+      daemonHostId: 'daemon-host-a',
+      relayEndpointCandidates: [
+        expect.objectContaining({
+          id: 'relay-rtc:daemon-host-a',
+          kind: 'relay-rtc',
+          relayHostId: 'daemon-host-a',
+        }),
+      ],
+    }));
+    expect(JSON.parse(window.localStorage.getItem('zterm:session-groups') || '[]')[0]).toEqual(expect.objectContaining({
+      relayEndpointCandidates: [
+        expect.objectContaining({
+          id: 'relay-rtc:daemon-host-a',
+          kind: 'relay-rtc',
+          relayHostId: 'daemon-host-a',
+        }),
+      ],
+    }));
+  });
+
   it('marks missing stored session names against remote tmux truth for the matching server only', () => {
     const { result } = renderHook(() => useSessionHistoryStorage());
 

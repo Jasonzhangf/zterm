@@ -79,6 +79,7 @@ import {
   type RemoteScreenshotPreviewState,
 } from '../lib/remote-screenshot-preview-runtime';
 import {
+  DEFAULT_BRIDGE_PORT,
   type AndroidWorkspacePane,
   type QuickAction,
   type RemoteScreenshotCapture,
@@ -226,6 +227,7 @@ interface TerminalPageProps {
     bridgePort: number;
     daemonHostId?: string;
     authToken?: string;
+    relayEndpointCandidates?: SessionGroupHistory['relayEndpointCandidates'];
     sessionNames: string[];
   }, sessionName: string, options?: { activate?: boolean; navigate?: boolean }) => string | null | undefined | void;
   onCloseDrawerRemoteSession?: (target: {
@@ -234,6 +236,7 @@ interface TerminalPageProps {
     bridgePort: number;
     daemonHostId?: string;
     authToken?: string;
+    relayEndpointCandidates?: SessionGroupHistory['relayEndpointCandidates'];
     sessionNames: string[];
   }, sessionName: string) => void | Promise<void>;
   onRefreshDrawerHostSessions?: (hostKey?: string) => void | Promise<void>;
@@ -341,6 +344,51 @@ function terminalPageActiveRuntimeStatusKey(session: Session | null | undefined)
     session.state,
     session.lastError || '',
   ].join('::');
+}
+
+function resolveRelayDeviceEndpointAliasInput(
+  device: TraversalRelayDeviceSnapshot,
+  endpoint: NonNullable<TraversalRelayDeviceSnapshot['daemon']['endpoints']>[number],
+) {
+  if (endpoint.kind !== 'tailscale' && endpoint.kind !== 'ipv6' && endpoint.kind !== 'ipv4') {
+    return null;
+  }
+  const daemonHostId = device.daemon.hostId.trim();
+  if (!daemonHostId) {
+    return null;
+  }
+  const directHost = endpoint.host?.trim();
+  if (directHost) {
+    return {
+      bridgeHost: directHost,
+      bridgePort: endpoint.port || DEFAULT_BRIDGE_PORT,
+      daemonHostId,
+      connectionName: device.deviceName,
+    };
+  }
+  const wsUrl = endpoint.wsUrl?.trim();
+  if (!wsUrl) {
+    return null;
+  }
+  try {
+    const parsed = new URL(wsUrl);
+    return {
+      bridgeHost: parsed.hostname || parsed.host,
+      bridgePort: endpoint.port || (parsed.port ? Number.parseInt(parsed.port, 10) : DEFAULT_BRIDGE_PORT),
+      daemonHostId,
+      connectionName: device.deviceName,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function buildRelayDeviceServerIdentityAliasInputs(relayDevices: TraversalRelayDeviceSnapshot[]) {
+  return relayDevices.flatMap((device) =>
+    (device.daemon.endpoints || [])
+      .map((endpoint) => resolveRelayDeviceEndpointAliasInput(device, endpoint))
+      .filter((item): item is { bridgeHost: string; bridgePort: number; daemonHostId: string; connectionName: string } => item !== null),
+  );
 }
 
 function resolveSessionInputEpoch(
@@ -1268,7 +1316,11 @@ function TerminalPageComponent({
   const activeChromeSession = useMemo(() => (
     interactiveSession ? toTerminalTabChromeItem(interactiveSession) : null
   ), [activeHeaderSessionUiKey, interactiveSession]);
-  const drawerServerIdentityAliases = useMemo(() => buildServerIdentityAliasMap(sessions), [sessions]);
+  const drawerServerIdentityAliases = useMemo(() => buildServerIdentityAliasMap([
+    ...sessions,
+    ...sessionGroups,
+    ...buildRelayDeviceServerIdentityAliasInputs(relayDevices),
+  ]), [relayDevices, sessionGroups, sessions]);
   const drawerHosts = useMemo<TerminalSessionDrawerHost[]>(() => {
     const hosts = new Map<string, TerminalSessionDrawerHost>();
     for (const device of relayDevices) {
@@ -1314,6 +1366,7 @@ function TerminalPageComponent({
         bridgePort: number;
         daemonHostId?: string;
         authToken?: string;
+        relayEndpointCandidates?: SessionGroupHistory['relayEndpointCandidates'];
         sessionNames: string[];
       };
       sessionName: string;
@@ -1325,6 +1378,7 @@ function TerminalPageComponent({
         bridgePort: number;
         daemonHostId?: string;
         authToken?: string;
+        relayEndpointCandidates?: SessionGroupHistory['relayEndpointCandidates'];
         sessionNames: string[];
       };
       sessionName: string;
@@ -1353,6 +1407,7 @@ function TerminalPageComponent({
           bridgePort: group.bridgePort,
           daemonHostId: group.daemonHostId,
           authToken: group.authToken,
+          ...(group.relayEndpointCandidates?.length ? { relayEndpointCandidates: group.relayEndpointCandidates } : {}),
           sessionNames: group.sessionNames,
         };
         closeTargets.set(id, {

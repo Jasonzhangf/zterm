@@ -21,16 +21,19 @@
 10. The drawer may receive a left-edge right swipe only after the renderer offset is already zero before that gesture starts.
 11. A remote-only catalog row press emits one session-open owner intent. When the owner returns the materialized local `sessionId`, TerminalPage must immediately project that session into the focused session-group viewport slot.
 12. After parent state includes the materialized Session, the visible center terminal must render that Session without requiring a second drawer tap. The page must not project the synthetic `remote:<owner>::session:<name>` catalog id as active truth.
+13. Relay directory direct endpoints are identity aliases only: an IP-keyed direct Session/SessionGroup whose endpoint belongs to a Relay daemon must project into that daemon's canonical host rail, not create a second IP rail.
 
 ## Paired Tests
 
 - Positive: a press beginning on an available drawer row followed by click selects exactly that session.
 - Positive: keyboard/accessibility click (`detail=0`) still selects the row.
 - Positive: selecting a remote-only catalog row calls the session-open owner, consumes the returned materialized `sessionId`, and renders that Session in the center viewport after the parent supplies it.
+- Positive: a direct/Tailscale session group matching a Relay directory endpoint appears under the Relay daemon host rail with its real session count.
 - Negative: a pointer click delivered after drawer open without a matching row press does not select any session.
 - Negative: an unavailable row remains non-selectable even after a matching press.
 - Negative: arming one row cannot authorize selection of another row.
 - Negative: selecting a remote-only catalog row must not switch or render the remote catalog placeholder id when no materialized `sessionId` is returned.
+- Negative: the matching direct endpoint must not remain as a duplicate IP host rail with the Relay daemon rail showing zero sessions.
 - Negative: `mirror-fixed` right-side horizontal drag does not emit drawer/tab swipe.
 - Negative: `mirror-fixed` rightward pan with positive renderer offset changes the offset but does not emit drawer/tab swipe, including a start inside the left edge band.
 - Negative: `mirror-fixed` zero-offset non-left-edge right pan stops before the parent drawer gesture owner, even though the visual offset cannot move further.

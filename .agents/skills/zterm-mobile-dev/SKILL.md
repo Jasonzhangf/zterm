@@ -101,6 +101,8 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - Android Home 必须把三类入口独立投影：current-process active Sessions、saved direct/Tailscale Hosts、optional Relay account/directory。Relay 未登录、登录失败或退出登录不得隐藏、禁用或删除前两类；Relay directory 只补 route/device candidates，不得成为 saved Host/Tailscale truth owner。
 - Android Home 的 Relay 路由必须显式可见：同 daemon 的 saved direct/Tailscale row 要合并 Relay directory `relayEndpointCandidates/relayHostId/relayDeviceId`，但保留 saved row 身份和显示端点；有 `relay-rtc` 时显示 Relay 可用和独立 Relay action。Relay action 只能构造 `transportMode='webrtc'` 且只带 `relay-rtc` candidates 的 Host 交给 session-open owner，禁止回落到 direct/Tailscale candidates 或让 Relay directory 替换 saved Host truth。
 - Relay 登录态不能成为 Session Picker 的全局模式开关：即使账号下有在线 daemon，直接 Tailscale/bridge target 仍必须能输入、选择 saved server、用 `bridgeHost + authToken` live fetch sessions。只有当前 target 自身带 `relay-rtc` candidates / relay identity 时，才允许按 Relay target 处理；显式 `transportMode='webrtc'` / `relay-route` target 禁止在 `buildBridgeTargetFromHost()` 中自动解析 direct endpoint 填入 `bridgeHost`。
+- Relay directory 的 direct endpoints 也是 daemon identity alias：drawer host rail / side peek / server identity projection 必须把 `100.x:3333`、IPv4/IPv6/wsUrl direct rows canonicalize 到同一 `daemon.hostId`，否则同一 daemon 会显示成“名字 0 sessions + IP 有 sessions”。alias 只能用于 UI 分组身份，不能替代 transport route truth。
+- `SessionGroupHistory` 必须保留 normalized `relayEndpointCandidates`。drawer catalog open/close 和 session-open owner 之间要透传这些候选，否则从 drawer 点 remote-only session 会退化成 direct `bridgeHost/bridgePort` WebSocket，现场表现为 Relay 行可见但打开时报 `ws connect timeout`。
 - Android Home 改版为 server-entry-only 时，仍必须保留**显式可见**的设置/升级入口；不要只留无文字齿轮或把入口藏在 Relay/login 语境里。Terminal 竖屏 shell 也必须有 Settings 入口，因为用户可能长期停留在终端页。升级实现仍只属于 Settings 的 App Update owner，Home/Terminal 只能发 open-settings intent，不新增第二套升级逻辑。
 - Home 点击 saved Host 必须把 intent 交给 `useSessionOpenActions` 打开既有 picker；点击 active Session 必须走 open-tab/session owner resume。禁止 Home 直接 create/close session、写 Host storage、恢复 cold-start tabs，或用 Relay access token 做导航 gate。
 - terminal header / live session / tab 文案必须能直接看出 `server + session` 组合，否则多 server / 多 tmux session 场景会失真
@@ -283,6 +285,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - session group layout axis 默认按 aspect ratio：窄竖屏（当前阈值 `width / height <= 0.4`）强制 vertical，上下滚；宽竖屏默认 horizontal，但 Settings 可切 vertical；landscape 永远 horizontal。这个设置只影响 layout projection，禁止改写 drawer 固定槽位、session/tab/pane 真相。
 - 横向 session group side peek 的身份显示必须避开 status bar / 返回按钮：不要把 session 名贴顶部；应放在中部安全区，session 名和 host 至少允许两行，以保证窄侧边仍能识别目标。
 - 多 daemon / 多服务器 UI 身份必须走 `src/lib/server-identity.ts`：用户可见 label 优先是 connection/daemon 名，颜色也按同一 server key；禁止在 drawer、side peek、tab 文案里把 `bridgeHost:bridgePort` 或 telnet/bridge 端口当服务器名。
+- 如果 Relay directory 和 direct/Tailscale 历史同时存在，`server-identity` alias 输入必须同时来自 live sessions、session groups、Relay daemon endpoints；只从 live sessions 建 alias 会漏掉“目录里有 daemon，历史 group 用 IP”的常见路径。
 - 多服务器身份色必须走 `src/lib/server-color.ts` 的固定红/黄/蓝/绿/青/橙 palette；禁止连续 hue hash 漂到紫/粉区，常见服务器 key 需要测试锁住不同色。
 - traversal route health cache 是进程级全局状态；会创建 `TraversalSocket` 或断言 WebSocket 实例/线路选择的测试必须在 `beforeEach` 清 `defaultTraversalRouteHealthCache`，否则前一用例记录的坏线路会让后续用例不创建 socket，表现为 `MockWebSocket.instances` 为 0。
 
