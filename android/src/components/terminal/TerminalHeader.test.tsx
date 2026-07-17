@@ -64,6 +64,7 @@ function toHeaderSession(session: Session): TerminalHeaderSessionItem {
     sessionName: session.sessionName,
     customName: session.customName,
     resolvedPath: session.resolvedPath,
+    resolvedRelayTransport: session.resolvedRelayTransport,
   };
 }
 describe('TerminalHeader', () => {
@@ -228,6 +229,30 @@ describe('TerminalHeader', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '切回 Auto 重连当前 tab' }));
     expect(onUseAutoSession).toHaveBeenCalledWith('session-1');
+  });
+
+  it('shows TURN on the active path badge when relay RTC resolves through TURN', () => {
+    const session = makeSession();
+    session.resolvedPath = 'rtc-relay';
+    session.resolvedRelayTransport = 'turn';
+
+    render(
+      <TerminalHeader
+        sessions={[toHeaderSession(session)]}
+        activeSession={toHeaderSession(session)}
+        topInsetPx={0}
+        onBack={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenTabManager={vi.fn()}
+        onSwitchSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onForceRelaySession={vi.fn()}
+        onUseAutoSession={vi.fn()}
+      />,
+    );
+
+    const badge = screen.getByRole('button', { name: '切回 Auto 重连当前 tab' });
+    expect(badge.textContent).toBe('TURN');
   });
 
   it('keeps active-tab close working on touch events used by touch devices', () => {

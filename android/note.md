@@ -2465,3 +2465,12 @@ Need runtime debug to confirm:
 - Black-box source evidence: direct WebSocket `127.0.0.1:3333` returned 21 sessions in 36ms; Tailscale `100.66.1.82:3333` returned the same 21 sessions in 6ms; production Relay WebRTC `mac-studio` returned the same 21 sessions in 113ms.
 - Verification: focused picker/session/traversal/tmux gates 4 files / 34 tests PASS; `test:feature-registry` 7 files / 48 tests PASS; `tsc --noEmit` PASS; `build:android` PASS with terminal contracts 48 files / 574 tests, common flows 7 files / 77 tests, relay local smoke, Vite/Capacitor/Gradle, and update manifest verification.
 - APK published: `0.1.3.2136` (`versionCode=1032136`, size `5849714`, sha256 `d450bdf215b316a41b4a103ae8c77729dd82437c4aef54e978665ce407886463`) to `android/update-dist/` and `/Users/fanzhang/.zterm/updates/`. ADB has no online devices, so install/UI tap L5 is not claimed.
+
+## 2026-07-17 TURN relay status projection
+
+- User need: when a session is connected through TURN, the session status should show that fact instead of only showing generic Relay.
+- Architecture mapping: route detection belongs to `relay.route_selection` / `TraversalSocket` diagnostics; session runtime only copies diagnostics into `Session`; `TerminalHeader` and `TabManagerSheet` only render status badges. No daemon, buffer, renderer, or Relay server change.
+- Key distinction: `resolvedPath='rtc-relay'` means WebRTC/relay route was selected; it does not prove TURN. TURN display must be based on the selected ICE candidate pair where local or remote candidate `candidateType === 'relay'`.
+- Fix: `TraversalSocket` inspects `RTCPeerConnection.getStats()` on RTC open/connected, records `resolvedRelayTransport='turn' | 'direct'`, and UI shows `TURN` / `Relay TURN` only for the TURN case.
+- Verification: focused TURN route/UI gate 4 files / 35 tests PASS; `tsc --noEmit` PASS; feature/resource/function/mainline gates 7 files / 48 tests PASS; `build:android` PASS with terminal contracts 48 files / 575 tests, common flows 7 files / 77 tests, local relay smoke, Vite/Capacitor/Gradle, and update manifest verification.
+- APK published: `0.1.3.2137` (`versionCode=1032137`, size `5849894`, sha256 `f7947f625a7c20cdf068e1bc294c83428faa19a5ac60c093c02955869a6154c2`) to `android/update-dist/` and `/Users/fanzhang/.zterm/updates/`. ADB has no online devices, so install/UI tap L5 is not claimed.

@@ -13,6 +13,7 @@ export interface TerminalHeaderSessionItem {
   sessionName: string;
   customName?: string;
   resolvedPath?: 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
+  resolvedRelayTransport?: 'direct' | 'turn';
 }
 
 export interface TerminalHeaderPaneGroup {
@@ -50,7 +51,10 @@ export interface TerminalHeaderProps {
   onActivatePane?: (paneId: string) => void;
 }
 
-function formatResolvedPath(path?: TerminalHeaderSessionItem['resolvedPath']) {
+function formatResolvedPath(
+  path?: TerminalHeaderSessionItem['resolvedPath'],
+  relayTransport?: TerminalHeaderSessionItem['resolvedRelayTransport'],
+) {
   switch (path) {
     case 'tailscale':
       return 'TS';
@@ -59,6 +63,9 @@ function formatResolvedPath(path?: TerminalHeaderSessionItem['resolvedPath']) {
     case 'ipv4':
       return 'IPv4';
     case 'rtc-relay':
+      if (relayTransport === 'turn') {
+        return 'TURN';
+      }
       return 'Relay';
     default:
       return null;
@@ -365,7 +372,7 @@ function renderTabExtras(
   if (!session || !active) {
     return null;
   }
-  const resolvedPathLabel = formatResolvedPath(session.resolvedPath);
+  const resolvedPathLabel = formatResolvedPath(session.resolvedPath, session.resolvedRelayTransport);
   if (!resolvedPathLabel) {
     return null;
   }

@@ -17,6 +17,7 @@ const session = {
   sessionName: "main",
   customName: "Main",
   resolvedPath: "/tmp",
+  resolvedRelayTransport: "turn",
   state: "connected",
   lastError: "",
 } as any;
@@ -24,13 +25,13 @@ const session = {
 describe("terminal-page-render-keys", () => {
   it("builds rendered key with host+connection fields", () => {
     expect(terminalPageRenderedSessionUiKey(session)).toBe(
-      "s1::h1::conn::127.0.0.1::8765::main::Main::/tmp",
+      "s1::h1::conn::127.0.0.1::8765::main::Main::/tmp::turn",
     );
   });
 
   it("builds header key without hostId/connectionName", () => {
     expect(terminalPageHeaderSessionUiKey(session)).toBe(
-      "s1::127.0.0.1::8765::main::Main::/tmp",
+      "s1::127.0.0.1::8765::main::Main::/tmp::turn",
     );
   });
 
@@ -52,6 +53,7 @@ describe("terminal-page-render-keys", () => {
       sessionName: "main",
       customName: "Main",
       resolvedPath: "/tmp",
+      resolvedRelayTransport: "turn",
     });
   });
 });

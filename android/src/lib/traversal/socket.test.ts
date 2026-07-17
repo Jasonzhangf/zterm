@@ -67,14 +67,25 @@ class MockRTCDataChannel {
     this.sent.push(data);
   }
 
+  triggerOpen() {
+    this.readyState = 'open';
+    this.onopen?.();
+  }
+
   close() {
     this.readyState = 'closed';
     this.onclose?.();
   }
 }
 
+type MockRtcStatsCandidateType = 'host' | 'srflx' | 'prflx' | 'relay';
+
 class MockRTCPeerConnection {
   static instances: MockRTCPeerConnection[] = [];
+  static statsCandidateTypes: {
+    local: MockRtcStatsCandidateType;
+    remote: MockRtcStatsCandidateType;
+  } | null = null;
   readonly channel = new MockRTCDataChannel();
   localDescription: RTCSessionDescriptionInit | null = null;
   remoteDescription: RTCSessionDescriptionInit | null = null;
@@ -107,7 +118,29 @@ class MockRTCPeerConnection {
   }
 
   async getStats() {
-    return new Map();
+    if (!MockRTCPeerConnection.statsCandidateTypes) {
+      return new Map();
+    }
+    return new Map<string, Record<string, unknown>>([
+      ['pair-1', {
+        id: 'pair-1',
+        type: 'candidate-pair',
+        state: 'succeeded',
+        nominated: true,
+        localCandidateId: 'local-1',
+        remoteCandidateId: 'remote-1',
+      }],
+      ['local-1', {
+        id: 'local-1',
+        type: 'local-candidate',
+        candidateType: MockRTCPeerConnection.statsCandidateTypes.local,
+      }],
+      ['remote-1', {
+        id: 'remote-1',
+        type: 'remote-candidate',
+        candidateType: MockRTCPeerConnection.statsCandidateTypes.remote,
+      }],
+    ]);
   }
 
   close() {
@@ -117,6 +150,7 @@ class MockRTCPeerConnection {
 
   static reset() {
     MockRTCPeerConnection.instances = [];
+    MockRTCPeerConnection.statsCandidateTypes = null;
   }
 }
 
@@ -160,6 +194,49 @@ function createSocket(
     },
     autoReconnect: options?.autoReconnect,
   });
+}
+
+function createRelayRtcSocket() {
+  return new TraversalSocket(
+    {
+      bridgeHost: '',
+      bridgePort: 3333,
+      authToken: 'token',
+      relayHostId: 'daemon-host-a',
+      transportMode: 'webrtc',
+      relayEndpointCandidates: [{
+        id: 'relay-rtc:daemon-host-a',
+        kind: 'relay-rtc',
+        relayHostId: 'daemon-host-a',
+        authRequired: true,
+        lastSeenAt: '2026-07-16T00:00:00.000Z',
+      }],
+    },
+    {
+      signalUrl: '',
+      turnServerUrl: '',
+      turnUsername: '',
+      turnCredential: '',
+      transportMode: 'webrtc',
+      traversalRelay: {
+        relayBaseUrl: 'https://relay.example.test/relay/',
+        accessToken: 'relay-access',
+        userId: 'user-1',
+        username: 'jason',
+        deviceId: 'android-1',
+        deviceName: 'Android',
+        platform: 'android',
+        wsDevicesUrl: 'wss://relay.example.test/relay/ws/devices',
+        wsHostUrl: 'wss://relay.example.test/relay/ws/host',
+        wsClientUrl: 'wss://relay.example.test/relay/ws/client',
+        turnUrl: 'turn:relay.example.test:3478?transport=udp',
+        turnUsername: 'turn-user',
+        turnCredential: 'turn-secret',
+        updatedAt: 1,
+      },
+    },
+    { routeHealthCache: new TraversalRouteHealthCache() },
+  );
 }
 
 describe('TraversalSocket reconnect', () => {
@@ -345,46 +422,7 @@ describe('TraversalSocket reconnect', () => {
   });
 
   it('uses standard ICE for relay control-plane RTC candidates and keeps TURN relay-only as a diagnostic concern', async () => {
-    const socket = new TraversalSocket(
-      {
-        bridgeHost: '',
-        bridgePort: 3333,
-        authToken: 'token',
-        relayHostId: 'daemon-host-a',
-        transportMode: 'webrtc',
-        relayEndpointCandidates: [{
-          id: 'relay-rtc:daemon-host-a',
-          kind: 'relay-rtc',
-          relayHostId: 'daemon-host-a',
-          authRequired: true,
-          lastSeenAt: '2026-07-16T00:00:00.000Z',
-        }],
-      },
-      {
-        signalUrl: '',
-        turnServerUrl: '',
-        turnUsername: '',
-        turnCredential: '',
-        transportMode: 'webrtc',
-        traversalRelay: {
-          relayBaseUrl: 'https://relay.example.test/relay/',
-          accessToken: 'relay-access',
-          userId: 'user-1',
-          username: 'jason',
-          deviceId: 'android-1',
-          deviceName: 'Android',
-          platform: 'android',
-          wsDevicesUrl: 'wss://relay.example.test/relay/ws/devices',
-          wsHostUrl: 'wss://relay.example.test/relay/ws/host',
-          wsClientUrl: 'wss://relay.example.test/relay/ws/client',
-          turnUrl: 'turn:relay.example.test:3478?transport=udp',
-          turnUsername: 'turn-user',
-          turnCredential: 'turn-secret',
-          updatedAt: 1,
-        },
-      },
-      { routeHealthCache: new TraversalRouteHealthCache() },
-    );
+    const socket = createRelayRtcSocket();
     await flushMicrotasks();
 
     expect(MockWebSocket.instances).toHaveLength(1);
@@ -405,6 +443,58 @@ describe('TraversalSocket reconnect', () => {
       'rtc-init',
       'rtc-offer',
     ]);
+
+    socket.close();
+  });
+
+  it('marks relay RTC diagnostics as TURN when the selected ICE candidate pair uses a relay candidate', async () => {
+    MockRTCPeerConnection.statsCandidateTypes = {
+      local: 'relay',
+      remote: 'srflx',
+    };
+    const socket = createRelayRtcSocket();
+    const onopen = vi.fn();
+    socket.onopen = onopen;
+    await flushMicrotasks();
+
+    MockWebSocket.instances[0].triggerOpen();
+    await flushMicrotasks();
+    MockRTCPeerConnection.instances[0].channel.triggerOpen();
+    await flushMicrotasks();
+
+    expect(onopen).toHaveBeenCalledTimes(1);
+    expect(socket.getDiagnostics()).toMatchObject({
+      stage: 'open',
+      resolvedPath: 'rtc-relay',
+      resolvedRelayTransport: 'turn',
+      resolvedEndpoint: 'rtc',
+    });
+
+    socket.close();
+  });
+
+  it('does not mark relay RTC diagnostics as TURN when the selected ICE candidate pair is direct', async () => {
+    MockRTCPeerConnection.statsCandidateTypes = {
+      local: 'host',
+      remote: 'srflx',
+    };
+    const socket = createRelayRtcSocket();
+    const onopen = vi.fn();
+    socket.onopen = onopen;
+    await flushMicrotasks();
+
+    MockWebSocket.instances[0].triggerOpen();
+    await flushMicrotasks();
+    MockRTCPeerConnection.instances[0].channel.triggerOpen();
+    await flushMicrotasks();
+
+    expect(onopen).toHaveBeenCalledTimes(1);
+    expect(socket.getDiagnostics()).toMatchObject({
+      stage: 'open',
+      resolvedPath: 'rtc-relay',
+      resolvedRelayTransport: 'direct',
+      resolvedEndpoint: 'rtc',
+    });
 
     socket.close();
   });

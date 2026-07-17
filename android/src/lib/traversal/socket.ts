@@ -2,6 +2,7 @@ import type {
   BridgeSocketCloseLike,
   BridgeSocketMessageLike,
   BridgeTransportSocket,
+  TraversalResolvedRelayTransport,
   TraversalAttemptDiagnostic,
   TraversalDiagnostics,
   TraversalPlanCandidate,
@@ -44,7 +45,7 @@ type Backend = {
     onmessage: (event: BridgeSocketMessageLike) => void;
     onerror: (reason?: string) => void;
     onclose: (event?: BridgeSocketCloseLike) => void;
-    onpath?: (path: TraversalResolvedPath) => void;
+    onpath?: (path: TraversalResolvedPath, relayTransport?: TraversalResolvedRelayTransport) => void;
   }): void;
 };
 
@@ -69,7 +70,7 @@ class WebSocketBackend implements Backend {
     onmessage: (event: BridgeSocketMessageLike) => void;
     onerror: (reason?: string) => void;
     onclose: (event?: BridgeSocketCloseLike) => void;
-    onpath?: (path: TraversalResolvedPath) => void;
+    onpath?: (path: TraversalResolvedPath, relayTransport?: TraversalResolvedRelayTransport) => void;
   }) {
     this.socket.onopen = () => {
       handlers.onpath?.(this.candidate.path);
@@ -102,6 +103,7 @@ class WebRtcBackend implements Backend {
   private dataChannel: RTCDataChannel | null = null;
 
   private currentResolvedPath: TraversalResolvedPath;
+  private currentResolvedRelayTransport: TraversalResolvedRelayTransport | undefined;
 
   public constructor(private readonly candidate: Extract<TraversalPlanCandidate, { kind: 'rtc' }>) {
     this.currentResolvedPath = candidate.path;
@@ -121,13 +123,12 @@ class WebRtcBackend implements Backend {
     return Math.max(0, Math.floor(this.dataChannel?.bufferedAmount || 0));
   }
 
-  private async detectResolvedPath() {
-    if (this.candidate.path === 'rtc-relay') {
-      this.currentResolvedPath = 'rtc-relay';
-      return this.currentResolvedPath;
-    }
+  private async detectResolvedRoute() {
     if (!this.peerConnection) {
-      return this.currentResolvedPath;
+      return {
+        path: this.currentResolvedPath,
+        relayTransport: this.currentResolvedRelayTransport,
+      };
     }
 
     try {
@@ -139,18 +140,35 @@ class WebRtcBackend implements Backend {
         }
       });
       if (!selectedPair) {
-        return this.currentResolvedPath;
+        if (this.candidate.path === 'rtc-relay') {
+          this.currentResolvedPath = 'rtc-relay';
+        }
+        return {
+          path: this.currentResolvedPath,
+          relayTransport: this.currentResolvedRelayTransport,
+        };
       }
       const pair = selectedPair as RTCIceCandidatePairStats;
       const local = pair.localCandidateId ? stats.get(pair.localCandidateId) as IceCandidateStatsLike | undefined : undefined;
       const remote = pair.remoteCandidateId ? stats.get(pair.remoteCandidateId) as IceCandidateStatsLike | undefined : undefined;
-      this.currentResolvedPath = local?.candidateType === 'relay' || remote?.candidateType === 'relay'
-        ? 'rtc-relay'
-        : this.currentResolvedPath;
-      return this.currentResolvedPath;
+      const usesTurn = local?.candidateType === 'relay' || remote?.candidateType === 'relay';
+      if (this.candidate.path === 'rtc-relay' || usesTurn) {
+        this.currentResolvedPath = 'rtc-relay';
+      }
+      this.currentResolvedRelayTransport = usesTurn ? 'turn' : 'direct';
+      return {
+        path: this.currentResolvedPath,
+        relayTransport: this.currentResolvedRelayTransport,
+      };
     } catch (error) {
       console.warn('[TraversalSocket] Failed to inspect RTC stats:', error);
-      return this.currentResolvedPath;
+      if (this.candidate.path === 'rtc-relay') {
+        this.currentResolvedPath = 'rtc-relay';
+      }
+      return {
+        path: this.currentResolvedPath,
+        relayTransport: this.currentResolvedRelayTransport,
+      };
     }
   }
 
@@ -159,7 +177,7 @@ class WebRtcBackend implements Backend {
     onmessage: (event: BridgeSocketMessageLike) => void;
     onerror: (reason?: string) => void;
     onclose: (event?: BridgeSocketCloseLike) => void;
-    onpath?: (path: TraversalResolvedPath) => void;
+    onpath?: (path: TraversalResolvedPath, relayTransport?: TraversalResolvedRelayTransport) => void;
   }) {
     const signalSocket = new WebSocket(this.candidate.signalUrl);
     signalSocket.onopen = async () => {
@@ -177,8 +195,8 @@ class WebRtcBackend implements Backend {
 
         channel.binaryType = 'arraybuffer';
         channel.onopen = async () => {
-          const nextPath = await this.detectResolvedPath();
-          handlers.onpath?.(nextPath);
+          const nextRoute = await this.detectResolvedRoute();
+          handlers.onpath?.(nextRoute.path, nextRoute.relayTransport);
           handlers.onopen();
         };
         channel.onmessage = (event) => {
@@ -206,8 +224,8 @@ class WebRtcBackend implements Backend {
             return;
           }
           if (peerConnection.connectionState === 'connected') {
-            const nextPath = await this.detectResolvedPath();
-            handlers.onpath?.(nextPath);
+            const nextRoute = await this.detectResolvedRoute();
+            handlers.onpath?.(nextRoute.path, nextRoute.relayTransport);
           }
         };
 
@@ -552,8 +570,9 @@ export class TraversalSocket implements BridgeTransportSocket {
         }
         this.onclose?.(event);
       },
-      onpath: (path) => {
+      onpath: (path, relayTransport) => {
         this.diagnostics.resolvedPath = path;
+        this.diagnostics.resolvedRelayTransport = relayTransport;
       },
     });
   }

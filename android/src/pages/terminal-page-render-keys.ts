@@ -7,6 +7,7 @@ export interface TerminalTabChromeItem {
   sessionName: string;
   customName?: string;
   resolvedPath?: Session["resolvedPath"];
+  resolvedRelayTransport?: Session["resolvedRelayTransport"];
 }
 
 export function terminalPageRenderedSessionUiKey(session: Session | null | undefined) {
@@ -22,6 +23,7 @@ export function terminalPageRenderedSessionUiKey(session: Session | null | undef
     session.sessionName,
     session.customName || "",
     session.resolvedPath || "",
+    session.resolvedRelayTransport || "",
   ].join("::");
 }
 
@@ -42,6 +44,7 @@ export function terminalPageHeaderSessionUiKey(session: Session | null | undefin
     session.sessionName,
     session.customName || "",
     session.resolvedPath || "",
+    session.resolvedRelayTransport || "",
   ].join("::");
 }
 
@@ -90,5 +93,6 @@ export function toTerminalTabChromeItem(session: Session): TerminalTabChromeItem
     sessionName: session.sessionName,
     customName: session.customName,
     resolvedPath: session.resolvedPath,
+    resolvedRelayTransport: session.resolvedRelayTransport,
   };
 }

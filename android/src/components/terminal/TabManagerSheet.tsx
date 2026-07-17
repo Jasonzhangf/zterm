@@ -10,6 +10,7 @@ export interface TabManagerSessionItem {
   sessionName: string;
   customName?: string;
   resolvedPath?: 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
+  resolvedRelayTransport?: 'direct' | 'turn';
 }
 
 interface TabManagerSheetProps {
@@ -24,7 +25,10 @@ interface TabManagerSheetProps {
   onOpenQuickTabPicker: () => void;
 }
 
-function formatResolvedPath(path?: TabManagerSessionItem['resolvedPath']) {
+function formatResolvedPath(
+  path?: TabManagerSessionItem['resolvedPath'],
+  relayTransport?: TabManagerSessionItem['resolvedRelayTransport'],
+) {
   switch (path) {
     case 'tailscale':
       return 'Tailscale';
@@ -33,6 +37,9 @@ function formatResolvedPath(path?: TabManagerSessionItem['resolvedPath']) {
     case 'ipv4':
       return 'IPv4';
     case 'rtc-relay':
+      if (relayTransport === 'turn') {
+        return 'Relay TURN';
+      }
       return 'Relay';
     default:
       return null;
@@ -280,7 +287,7 @@ function TabManagerSheetComponent({
                     </div>
                     <div style={{ marginTop: '4px', fontSize: '11px', color: mobileTheme.colors.lightMuted }}>
                       {session.bridgeHost}:{session.bridgePort} · {session.sessionName}
-                      {formatResolvedPath(session.resolvedPath) ? ` · ${formatResolvedPath(session.resolvedPath)}` : ''}
+                      {formatResolvedPath(session.resolvedPath, session.resolvedRelayTransport) ? ` · ${formatResolvedPath(session.resolvedPath, session.resolvedRelayTransport)}` : ''}
                     </div>
                   </button>
                   <button

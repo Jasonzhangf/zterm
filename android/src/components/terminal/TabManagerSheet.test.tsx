@@ -50,6 +50,7 @@ function toTabManagerSession(session: Session): TabManagerSessionItem {
     sessionName: session.sessionName,
     customName: session.customName,
     resolvedPath: session.resolvedPath,
+    resolvedRelayTransport: session.resolvedRelayTransport,
   };
 }
 describe('TabManagerSheet', () => {
@@ -143,5 +144,27 @@ describe('TabManagerSheet', () => {
     const closeButton = screen.getByRole('button', { name: '关闭 tab-1' });
     fireEvent.pointerUp(closeButton, { pointerId: 7 });
     expect(onCloseSession).toHaveBeenCalledWith('s1', 'tab-manager-close-button');
+  });
+
+  it('shows Relay TURN when a session route resolves through TURN', () => {
+    const session = buildSession('s1', 'tab-1');
+    session.resolvedPath = 'rtc-relay';
+    session.resolvedRelayTransport = 'turn';
+
+    render(
+      <TabManagerSheet
+        open
+        sessions={[toTabManagerSession(session)]}
+        activeSessionId="s1"
+        onClose={vi.fn()}
+        onSwitchSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByText(/Relay TURN/)).toBeTruthy();
   });
 });

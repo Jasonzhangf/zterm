@@ -360,6 +360,7 @@ export function applyTransportDiagnosticsRuntime(options: {
   const diagnostics = options.socket.getDiagnostics();
   options.updateSessionSync(options.sessionId, {
     resolvedPath: diagnostics.resolvedPath,
+    resolvedRelayTransport: diagnostics.resolvedRelayTransport,
     resolvedEndpoint: diagnostics.resolvedEndpoint,
     lastConnectStage: diagnostics.stage,
     lastError: diagnostics.reason || undefined,

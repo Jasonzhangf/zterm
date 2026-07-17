@@ -4,6 +4,7 @@ import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
 
 export type TraversalTransportMode = 'auto' | 'websocket' | 'webrtc';
 export type TraversalResolvedPath = 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
+export type TraversalResolvedRelayTransport = 'direct' | 'turn';
 
 export interface TraversalIceServer {
   urls: string | string[];
@@ -27,6 +28,7 @@ export interface TraversalDiagnostics {
   mode: TraversalTransportMode;
   resolvedPath?: TraversalResolvedPath;
   resolvedEndpoint?: string;
+  resolvedRelayTransport?: TraversalResolvedRelayTransport;
   stage: 'idle' | 'connecting' | 'open' | 'closed' | 'error';
   reason?: string;
   attempts: TraversalAttemptDiagnostic[];

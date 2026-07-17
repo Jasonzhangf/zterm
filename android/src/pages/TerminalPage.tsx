@@ -292,6 +292,7 @@ interface TerminalTabChromeItem {
   sessionName: string;
   customName?: string;
   resolvedPath?: Session['resolvedPath'];
+  resolvedRelayTransport?: Session['resolvedRelayTransport'];
 }
 
 function normalizeDrawerStatus(state: Session['state'] | undefined): TerminalSessionDrawerItem['status'] {
@@ -323,6 +324,7 @@ function terminalPageHeaderSessionUiKey(session: Session | null | undefined) {
     session.sessionName,
     session.customName || '',
     session.resolvedPath || '',
+    session.resolvedRelayTransport || '',
   ].join('::');
 }
 
@@ -359,6 +361,7 @@ function toTerminalTabChromeItem(session: Session): TerminalTabChromeItem {
     sessionName: session.sessionName,
     customName: session.customName,
     resolvedPath: session.resolvedPath,
+    resolvedRelayTransport: session.resolvedRelayTransport,
   };
 }
 
