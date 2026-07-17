@@ -14,7 +14,7 @@
 3. The user opens Settings to add/edit server presets or provide Relay account/password; the client sends login to `https://relay.codewhisper.cc:18443/relay/`.
 4. A successful Settings login stores token/account/directory truth, updates bridge relay settings, starts the existing account device stream, and adds synchronized route/device candidates to Home projection.
 5. Relay account directory can augment connection candidates, including Tailscale/local/direct endpoints and `relay-rtc`, but it must not delete, replace, or hide direct saved-host truth. If the same daemon already has a saved direct/Tailscale Home row, Home must merge the Relay route candidates into that row so Relay remains visible and usable.
-6. The home page projects active runtime Sessions and server rows only as entry points. Server row tap emits session-open owner intent and enters Terminal directly; Session discovery and advanced Session actions remain in the terminal drawer/picker.
+6. The home page projects active runtime Sessions and server rows only as entry points. Server row tap first reuses a current-process open Session for that same server/session when one exists; otherwise it emits the session-open owner intent and enters Terminal directly. Session discovery and advanced Session actions remain in the terminal drawer/picker.
 7. A Home server row with a `relay-rtc` candidate must expose an explicit Relay action in addition to the normal Auto row tap. Auto keeps the existing route chooser; Relay emits the same session-open owner intent with a `webrtc`-only Host target and without direct endpoint fallback candidates.
 8. Open tabs exist only for the current app process. A reload/cold launch starts with no tabs and does not restore `OPEN_TABS`, `ACTIVE_SESSION`, or saved tab lists.
 
@@ -25,7 +25,8 @@
 - Logged-out Home receives bridge server presets and renders one deduped server row per endpoint/daemon, not one row per saved session.
 - Logged-out Home receives current runtime Sessions and renders resume rows; resume emits an existing session-switch intent and navigates to Terminal.
 - Home server row with saved `sessionName` directly materializes/opens that session through `useSessionOpenActions`.
-- Home server row without saved `sessionName` first creates a generated `zterm-<timestamp>` tmux session, then materializes/opens it through `useSessionOpenActions`.
+- Home server row without saved `sessionName` reuses an existing current-process Session for the same server before creating a generated `zterm-<timestamp>` tmux session. Creation is only for the no-open-session case.
+- Home server row with a saved `sessionName` reuses an existing current-process open tab for that same tmux session before materializing it again.
 - Settings login calls the relay account owner with the fixed URL plus the entered account/password.
 - Successful Settings login emits the returned `TraversalRelayClientSettings` to the App bridge-settings owner.
 - Settings server form upserts bridge presets; Home projects the newly configured server.
@@ -57,6 +58,7 @@
 
 - Render the signed-out home with saved Tailscale/direct Hosts and bridge presets and assert server rows plus Settings/config entry are visible before Relay login.
 - Render the signed-out home with active runtime Sessions and assert resume rows are visible and emit `onResumeSession(sessionId)`.
+- Render the signed-out home with an active runtime Session and a saved server row for the same daemon; tapping the server row must resume that existing Session and must not call `createTmuxSession`.
 - Render Settings, submit credentials, and assert fixed-domain login and explicit busy/error states without removing saved/active Home rows.
 - Render Settings, add a direct server, save, and assert bridge settings receive the preset.
 - Render the signed-in Home and assert relay directory daemon devices can be projected as server rows, with no Session group controls.

@@ -5,10 +5,12 @@ import { upsertBridgeServer, type BridgeSettings } from '../lib/bridge-settings'
 import type { OpenTabRuntimeRefs } from './useOpenTabRuntime';
 import { runtimeDebug } from '../lib/runtime-debug';
 import {
+  buildPersistedOpenTabFromSession,
   clearClosedTabReuseKeysForOwner,
   persistClosedTabReuseKeys,
 } from '../lib/open-tab-persistence';
 import {
+  activateOpenTabIntentSession,
   upsertOpenTabIntentSession,
 } from '../lib/open-tab-intent';
 import {
@@ -23,9 +25,10 @@ import {
   type HostDraft,
 } from '../lib/session-picker';
 import { openConnectionPropertiesPage, type AppPageState } from '../lib/page-state';
+import { DEFAULT_BRIDGE_PORT } from '../lib/mobile-config';
 import { normalizeRemoteTmuxSessionNames } from '../lib/tmux-session-list';
 import { createTmuxSession, fetchTmuxSessions, killTmuxSession } from '../lib/tmux-sessions';
-import type { Host, PersistedOpenTab, TraversalRelayDeviceSnapshot } from '../lib/types';
+import type { Host, PersistedOpenTab, Session, TraversalRelayDeviceSnapshot } from '../lib/types';
 import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
 
 type PickerMode = 'new-connection' | 'quick-tab' | 'edit-group' | null;
@@ -90,6 +93,67 @@ function buildGeneratedSessionName() {
     .replace(/\..+$/, '')
     .replace('T', '-');
   return `zterm-${stamp}`;
+}
+
+function normalizeEndpointKey(host?: string | null, port?: number | null) {
+  const normalizedHost = host?.trim();
+  if (!normalizedHost) {
+    return '';
+  }
+  return `${normalizedHost}:${port || DEFAULT_BRIDGE_PORT}`;
+}
+
+function normalizeDaemonKey(input: Pick<BridgeTarget, 'daemonHostId' | 'relayHostId'> | Pick<Session, 'daemonHostId'>) {
+  return ('relayHostId' in input ? input.relayHostId?.trim() : '')
+    || input.daemonHostId?.trim()
+    || '';
+}
+
+function sessionMatchesOpenTarget(session: Session, target: BridgeTarget, sessionName: string) {
+  if (session.state === 'closed') {
+    return false;
+  }
+  if (sessionName && session.sessionName.trim() !== sessionName) {
+    return false;
+  }
+  const targetDaemonKey = normalizeDaemonKey(target);
+  const sessionDaemonKey = normalizeDaemonKey(session);
+  if (targetDaemonKey && sessionDaemonKey && targetDaemonKey === sessionDaemonKey) {
+    return true;
+  }
+  const targetEndpointKey = normalizeEndpointKey(target.bridgeHost, target.bridgePort);
+  const sessionEndpointKey = normalizeEndpointKey(session.bridgeHost, session.bridgePort);
+  return Boolean(targetEndpointKey && sessionEndpointKey && targetEndpointKey === sessionEndpointKey);
+}
+
+function resolveReusableOpenSessionForTarget(
+  sessions: Session[],
+  target: BridgeTarget,
+  sessionName: string,
+  prioritySessionIds: Array<string | null | undefined>,
+) {
+  const matches = sessions.filter((session) => sessionMatchesOpenTarget(session, target, sessionName));
+  if (matches.length === 0) {
+    return null;
+  }
+  for (const prioritySessionId of prioritySessionIds) {
+    const normalizedPrioritySessionId = prioritySessionId?.trim();
+    if (!normalizedPrioritySessionId) {
+      continue;
+    }
+    const matched = matches.find((session) => session.id === normalizedPrioritySessionId);
+    if (matched) {
+      return matched;
+    }
+  }
+  return [...matches].sort((left, right) => {
+    const stateScore = (session: Session) => (session.state === 'connected' ? 2 : session.state === 'connecting' ? 1 : 0);
+    const scoreDelta = stateScore(right) - stateScore(left);
+    if (scoreDelta !== 0) {
+      return scoreDelta;
+    }
+    return (right.createdAt || 0) - (left.createdAt || 0);
+  })[0] || null;
 }
 
 export interface SessionOpenActionsResult {
@@ -529,9 +593,34 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
   const handleOpenSavedConnection = useCallback((host: Host) => {
     const target = buildBridgeTargetFromHost(host);
     const existingSessionName = host.sessionName.trim();
-    const sessionName = existingSessionName || buildGeneratedSessionName();
     setPickerMode(null);
     setPickerScopePaneId(null);
+    const reusableSession = resolveReusableOpenSessionForTarget(
+      sessionsRef.current,
+      target,
+      existingSessionName,
+      [terminalActiveSessionIdRef.current, runtimeActiveSessionId],
+    );
+    if (reusableSession) {
+      const existingOpenTab = openTabStateRef.current.tabs.some((tab) => tab.sessionId === reusableSession.id);
+      const nextOpenTabState = existingOpenTab
+        ? activateOpenTabIntentSession(openTabStateRef.current, reusableSession.id)
+        : upsertOpenTabIntentSession(
+            openTabStateRef.current,
+            buildPersistedOpenTabFromSession(reusableSession),
+            {
+              activate: true,
+              preserveActiveSessionId: runtimeActiveSessionId,
+            },
+          );
+      applyOpenTabState(nextOpenTabState, {
+        switchRuntime: 'explicit-resume',
+      });
+      ensureTerminalPageVisible();
+      return;
+    }
+
+    const sessionName = existingSessionName || buildGeneratedSessionName();
 
     void (async () => {
       try {
@@ -544,7 +633,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         window.alert?.(error instanceof Error ? error.message : String(error));
       }
     })();
-  }, [bridgeSettingsRef, handleQuickConnectDraft, hosts]);
+  }, [applyOpenTabState, bridgeSettingsRef, ensureTerminalPageVisible, handleQuickConnectDraft, hosts, openTabStateRef, runtimeActiveSessionId, sessionsRef, terminalActiveSessionIdRef]);
 
   const enrichTargetFromSavedHosts = useCallback((target: BridgeTarget) => {
     const daemonHostId = (target.daemonHostId || target.relayHostId || '').trim();

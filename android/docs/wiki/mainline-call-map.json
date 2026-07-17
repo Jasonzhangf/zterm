@@ -83,6 +83,10 @@
           "label": "src/pages/ConnectionsPage.tsx"
         },
         {
+          "id": "SessionOpenOwner",
+          "label": "src/hooks/useSessionOpenActions.ts#handleOpenSavedConnection"
+        },
+        {
           "id": "TerminalPage",
           "label": "src/pages/TerminalPage.tsx"
         },
@@ -378,6 +382,36 @@
           "resource_to": "resource.ui_projection",
           "via_resources": [],
           "relation_status": "observer"
+        },
+        {
+          "from": "Connections",
+          "to": "SessionOpenOwner",
+          "owner_feature": "relay.directory_ui",
+          "semantic_input": "Home server-row open intent with saved direct/Tailscale, bridge preset, or Relay route candidates",
+          "semantic_output": "current-process open Session reuse intent, or generated clean tmux materialization only when no reusable Session exists",
+          "status": "anchored",
+          "edge_id": "android_mainline:Connections->SessionOpenOwner",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.open_tab",
+          "via_resources": [
+            "resource.transport_target"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "SessionOpenOwner",
+          "to": "SessionContext",
+          "owner_feature": "terminal.open_tabs",
+          "semantic_input": "explicit open-tab activation or new session materialization request",
+          "semantic_output": "runtime active Session switch with explicit-resume transport refresh source",
+          "status": "anchored",
+          "edge_id": "android_mainline:SessionOpenOwner->SessionContext",
+          "resource_from": "resource.open_tab",
+          "resource_to": "resource.session_transport",
+          "via_resources": [
+            "resource.active_session"
+          ],
+          "relation_status": "via"
         },
         {
           "from": "App",

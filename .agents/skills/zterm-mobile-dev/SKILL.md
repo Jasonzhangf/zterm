@@ -106,7 +106,8 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - TerminalPage 是 memoized 组件；任何影响 drawer host identity 的输入（`relayDevices`、saved/Home alias inputs）都必须进入 comparator 的 UI key。否则 Relay stream 更新或 saved server 映射更新后，drawer 会继续显示旧 IP rail。
 - `SessionGroupHistory` 必须保留 normalized `relayEndpointCandidates`。drawer catalog open/close 和 session-open owner 之间要透传这些候选，否则从 drawer 点 remote-only session 会退化成 direct `bridgeHost/bridgePort` WebSocket，现场表现为 Relay 行可见但打开时报 `ws connect timeout`。
 - Android Home 改版为 server-entry-only 时，仍必须保留**显式可见**的设置/升级入口；不要只留无文字齿轮或把入口藏在 Relay/login 语境里。Terminal 竖屏 shell 也必须有 Settings 入口，因为用户可能长期停留在终端页。升级实现仍只属于 Settings 的 App Update owner，Home/Terminal 只能发 open-settings intent，不新增第二套升级逻辑。
-- Home 点击 saved Host 必须把 intent 交给 `useSessionOpenActions` 打开既有 picker；点击 active Session 必须走 open-tab/session owner resume。禁止 Home 直接 create/close session、写 Host storage、恢复 cold-start tabs，或用 Relay access token 做导航 gate。
+- Home 点击 saved Host 必须把 intent 交给 `useSessionOpenActions` 的 session-open 主线直接进入 Terminal；点击 active Session 必须走 open-tab/session owner resume。禁止 Home 直接 create/close session、写 Host storage、恢复 cold-start tabs，或用 Relay access token 做导航 gate。
+- Home server row 无 saved `sessionName` 时不能直接创建 `zterm-*`。`useSessionOpenActions.handleOpenSavedConnection` 必须先匹配当前进程同 daemon/endpoint 的 open Session，命中后写 open-tab active truth 并走 `explicit-resume`；只有没有可复用 Session 时才生成 clean tmux session。测试必须证明 `createTmuxSession/createSession` 未被调用。
 - terminal header / live session / tab 文案必须能直接看出 `server + session` 组合，否则多 server / 多 tmux session 场景会失真
 - 若 `bridgeHost` 已显式写成 `ws://host:port` / `wss://host:port`，Android / Mac / shared storage 都必须把这个 endpoint 当成 display / preset id / effective port 的唯一真源；表单也要同步把 `Bridge Port` 刷成同一个端口，禁止出现双端口假象
 - 若用户在 `bridgeHost` 直接输入原始 `host:port`（如 `100.127.23.27:40807`），shared endpoint 真源也必须当场拆成 `bridgeHost=100.127.23.27` 与 `bridgePort=40807`；禁止再把它和独立 `bridgePort` 二次拼接成非法 ws URL

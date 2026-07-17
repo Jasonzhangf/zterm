@@ -5,6 +5,14 @@
 - 测试设计：`docs/testing/relay-login-home-and-ephemeral-tabs-test-design.md` 增加 same-daemon saved row 合并 Relay candidates、Home Auto/Relay 双 intent、Relay action 不走 direct fallback 的正反门禁。
 - 实现方向：新增 `home-connection-projection.ts` 作为 Home server rows 唯一 projection helper；同 daemon dedupe 时 merge `relayEndpointCandidates/relayHostId/relayDeviceId`；Home row 主点击保留 Auto，`relay-rtc` 存在时显示 `Relay 可用` 与独立 `Relay` 按钮；Relay 按钮构造 `transportMode='webrtc'` 且只带 `relay-rtc` candidates 的 Host 后交给现有 `useSessionOpenActions.handleOpenSavedConnection`。
 
+# 2026-07-17 Home server row reuse existing Session before generated tmux
+
+- 现场：Home 上已存在 `zterm` / `zterm-*` active sessions，但点击 server row 会继续创建新的 `zterm-<timestamp>`。代码根因：`useSessionOpenActions.handleOpenSavedConnection()` 以前只读取 `host.sessionName.trim()`；无 saved `sessionName` 时直接 `buildGeneratedSessionName()` + `createTmuxSession()`，没有先查当前进程同 daemon/endpoint 的 open Session。
+- 架构映射：`feature_id=relay.directory_ui` / `connections.history_projection`，主修改点是 `src/hooks/useSessionOpenActions.ts` 的 Home row open intent；Home 仍只投影 server entry，session 管理仍归 drawer/picker。禁止改 daemon、renderer、transport reconnect。
+- 修复：Home server row 打开前先按 saved `sessionName`、daemonHostId/relayHostId、bridge endpoint 匹配当前进程 open Session；优先当前 terminal/runtime active，再按 connected/newer 排序。命中时写 open-tab active truth 并以 `explicit-resume` 切 runtime，不调用 `createTmuxSession()`；只有无可复用 Session 时才生成 `zterm-*` 并创建 tmux。
+- 验证：focused Home gates 60/60 PASS；broader relay/Home/picker 81/81 PASS；`tsc --noEmit` PASS；`docs:function-wiki` PASS；`test:feature-registry` 48/48 PASS；`git diff --check` PASS；`build:android` 第二次 PASS（第一次 AAPT2 daemon startup transient failure），发布 `0.1.3.2141` sha256 `d1560f1849ba1dc85d90ad3cb26b3ad0fd93e06bf243a5072c9441ce46d8ee6e`。
+- 真机：ADB 安装 `0.1.3.2141` 到 `100.104.163.65:5555` 成功，`dumpsys package` 显示 versionCode `1032141` / versionName `0.1.3.2141`。L5 UI smoke 未闭环：`mFocusedApp=com.zterm.android/.MainActivity`，但 `mCurrentFocus=NotificationShade` 且 `isKeyguardShowing=true`。
+
 # 2026-07-16 Preview remote-only selection auto materialize
 
 - 现场：drawer 预览多选时，远端 catalog row 还没本地打开会显示“该 session 尚未打开，不能加入实时预览”，导致 Jason 不能直接把远端 session 加入预览。

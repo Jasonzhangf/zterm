@@ -26,6 +26,8 @@ flowchart TD
   BufferApply --> PerformanceTrace
   RenderGate --> PerformanceTrace
   App --> Connections["src/pages/ConnectionsPage.tsx"]
+  Connections --> SessionOpenOwner["src/hooks/useSessionOpenActions.ts#handleOpenSavedConnection"]
+  SessionOpenOwner --> SessionContext
   App --> TerminalPage["src/pages/TerminalPage.tsx"]
   TerminalPage --> TerminalView["src/components/TerminalView.tsx"]
   TerminalPage --> QuickBar["src/components/terminal/TerminalQuickBar.tsx"]

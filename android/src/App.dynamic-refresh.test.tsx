@@ -1111,6 +1111,65 @@ describe('App dynamic refresh matrix', () => {
     expect(tmuxPickerHarness.readProps()).toEqual(expect.objectContaining({ open: false }));
   });
 
+  it('resumes an already-open Home server session instead of creating another generated session', async () => {
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'connections' }));
+    const existingSession = {
+      ...makeSession('runtime-mac-zterm', 7),
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+      daemonHostId: 'mac-studio',
+      sessionName: 'zterm',
+      title: 'zterm',
+      connectionName: 'Mac Studio Tailscale',
+    };
+    const activeOtherServerSession = {
+      ...makeSession('runtime-other-active', 5),
+      bridgeHost: '100.66.2.91',
+      bridgePort: 3333,
+      daemonHostId: 'other-daemon',
+      sessionName: 'other',
+      title: 'other',
+      connectionName: 'Other Server',
+    };
+    sessionHarness.update(
+      {
+        sessions: [activeOtherServerSession, existingSession],
+        activeSessionId: activeOtherServerSession.id,
+        connectedCount: 2,
+      } as any,
+      activeOtherServerSession as any,
+    );
+    const bridgeSettings = {
+      servers: [{
+        id: '100.66.1.82:3333::daemon:mac-studio',
+        name: 'Mac Studio Tailscale',
+        targetHost: '100.66.1.82',
+        targetPort: 3333,
+        authToken: 'token-a',
+        relayHostId: 'mac-studio',
+      }],
+      traversalRelay: undefined,
+    };
+
+    render(
+      <AppContent bridgeSettings={bridgeSettings as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(connectionsPageHarness.readProps()).toBeTruthy());
+    const props = connectionsPageHarness.readProps();
+    sessionHarness.createSession.mockClear();
+    createTmuxSessionMock.mockClear();
+    openTerminalPageSpy.mockClear();
+    await act(async () => {
+      props.onOpenSavedConnection(props.savedConnections[0]);
+      await Promise.resolve();
+    });
+
+    expect(createTmuxSessionMock).not.toHaveBeenCalled();
+    expect(sessionHarness.createSession).not.toHaveBeenCalled();
+    expect(sessionHarness.switchSession).toHaveBeenCalledWith(existingSession.id, { refreshSource: 'explicit-resume' });
+  });
+
   it('passes Home server identity aliases into the TerminalPage drawer projection', async () => {
     const bridgeSettings = {
       servers: [{

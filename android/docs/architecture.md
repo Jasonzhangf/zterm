@@ -72,7 +72,7 @@
 
 - 首页承载两个独立入口：当前进程 active Sessions、已配置且可进入的 server rows（direct/Tailscale saved Host、bridge presets、Relay directory daemon device 投影）。
 - Home 的 server row 是服务器级入口，不展示/管理 Session group、saved tab list 或 Relay 登录表单；点击 server row 必须通过 session-open owner 直接进入 Terminal/session 主界面。
-- 无 saved `sessionName` 的 server row 进入时，由 session-open owner 先创建显式命名的 clean tmux session，再 materialize/open tab；不得把 server display name 当 tmux session name fallback。
+- 无 saved `sessionName` 的 server row 进入时，session-open owner 必须先复用当前进程中同 server/session 的 open Session；只有没有可复用 Session 时，才创建显式生成名的 clean tmux session 并 materialize/open tab；不得把 server display name 当 tmux session name fallback。
 - Settings 是配置入口：新增/修改 server preset、固定 relay 服务 `relay.codewhisper.cc` 的账号鉴权、更新/备份等设置均在 Settings 完成。
 - Relay 是连接保障和同步增强，不是进入终端的 gate；未登录、登录失败或退出登录时，已保存 direct/Tailscale connections 与当前 active Sessions 仍必须可见可用。
 - 用户只输入 relay 账号和密码；relay base URL、WS、TURN 与 signal 地址不进入用户配置面。

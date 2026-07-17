@@ -481,6 +481,72 @@ describe('useSessionOpenActions explicit-open truth', () => {
     vi.useRealTimers();
   });
 
+  it('resumes an existing current-process Home server session instead of creating another tmux session', () => {
+    const harness = createOptions({
+      runtimeActiveSessionId: 'runtime:mac-studio:zterm',
+      sessions: [
+        {
+          id: 'runtime:mac-studio:zterm',
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          daemonHostId: 'mac-studio',
+          sessionName: 'zterm',
+          state: 'connected',
+          createdAt: 10,
+        },
+        {
+          id: 'runtime:mac-studio:generated',
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          daemonHostId: 'mac-studio',
+          sessionName: 'zterm-20260717-123456',
+          state: 'connected',
+          createdAt: 20,
+        },
+      ],
+    });
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+    const savedServer = {
+      id: 'bridge-preset:mac-studio',
+      createdAt: 1,
+      name: 'Mac Studio',
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+      daemonHostId: 'mac-studio',
+      relayHostId: 'mac-studio',
+      sessionName: '',
+      authToken: 'token-a',
+      relayEndpointCandidates: [],
+      authType: 'password' as const,
+      tags: ['bridge-server'],
+      pinned: false,
+    };
+
+    act(() => {
+      result.current.handleOpenSavedConnection(savedServer);
+    });
+
+    expect(createTmuxSessionMock).not.toHaveBeenCalled();
+    expect(harness.spies.createSession).not.toHaveBeenCalled();
+    expect(harness.spies.applyOpenTabState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activeSessionId: 'runtime:mac-studio:zterm',
+        tabs: expect.arrayContaining([
+          expect.objectContaining({
+            sessionId: 'runtime:mac-studio:zterm',
+            bridgeHost: '100.66.1.82',
+            bridgePort: 3333,
+            daemonHostId: 'mac-studio',
+            sessionName: 'zterm',
+          }),
+        ]),
+      }),
+      { switchRuntime: 'explicit-resume' },
+    );
+    expect(harness.spies.switchSession).not.toHaveBeenCalled();
+    expect(harness.spies.ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
+  });
+
   it('opens a relay directory Home server row through endpoint candidates without a local preset', async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date('2026-07-15T06:07:08.000Z'));

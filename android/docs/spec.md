@@ -28,7 +28,7 @@
 - 一个连接配置至少显式包含：
   - `bridgeHost`
   - `bridgePort`（默认由统一配置决定，当前为 `3333`）
-  - `sessionName`（可空，运行时回退到 connection name）
+  - `sessionName`（可空；Home server row 运行时先复用当前进程已打开 Session，无可复用 Session 时再生成显式 `zterm-*` tmux session）
 - 连接配置不能再用单一 `host/username` 混装 bridge server 与 tmux session 语义
 - tab / live session / terminal header 必须能区分：
   - 不同 server 上不同 session
