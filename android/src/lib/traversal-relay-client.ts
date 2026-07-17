@@ -67,6 +67,7 @@ export interface TraversalRelayAccountState {
 
 const STORAGE_KEY = 'zterm:traversal-relay-account';
 const DEFAULT_TRAVERSAL_RELAY_BASE_URL_PARTS = ['https://', 'relay', '.', 'codewhisper', '.', 'cc:18443', '/relay/'] as const;
+const LEGACY_DEFAULT_TRAVERSAL_RELAY_HOSTS = new Set(['claw.codewhisper.cc']);
 
 function asString(value: unknown) {
   return typeof value === 'string' ? value : '';
@@ -91,6 +92,9 @@ export function normalizeTraversalRelayBaseUrl(input: string) {
     }
     parsed.search = '';
     parsed.hash = '';
+    if (LEGACY_DEFAULT_TRAVERSAL_RELAY_HOSTS.has(parsed.hostname)) {
+      return getDefaultTraversalRelayBaseUrl();
+    }
     return parsed.toString();
   } catch (error) {
     console.error('[traversal-relay-client] Failed to normalize relay base url:', error);
@@ -384,18 +388,27 @@ export async function traversalRelayRefreshMe(state: TraversalRelayAccountState)
   if (!response.ok) {
     throw new Error(payload.message || `me failed: HTTP ${response.status}`);
   }
+  const refreshPayload: TraversalRelayAuthPayload = {
+    ...payload,
+    accessToken: asString(payload.accessToken).trim() || state.accessToken,
+  };
+  const nextRelaySettings = deriveTraversalRelayClientSettings(refreshPayload, state);
+  if (!nextRelaySettings) {
+    throw new Error('relay control payload missing ws/control settings');
+  }
   const nextState: TraversalRelayAccountState = {
     ...state,
+    accessToken: refreshPayload.accessToken || state.accessToken,
     user: payload.user || state.user,
     devices: Array.isArray(payload.devices) ? payload.devices : state.devices,
     directory: requireRelayAccountDirectory(payload.directory),
     updatedAt: Date.now(),
-    relaySettings: deriveTraversalRelayClientSettings(payload, state) || state.relaySettings,
+    relaySettings: nextRelaySettings,
   };
   writeTraversalRelayAccountState(nextState);
   return {
     account: nextState,
-    relaySettings: deriveTraversalRelayClientSettings(payload, state),
+    relaySettings: nextRelaySettings,
   };
 }
 

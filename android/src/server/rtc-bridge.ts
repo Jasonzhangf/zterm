@@ -45,6 +45,17 @@ interface PeerState {
   closeSignal: (reason: string) => void;
 }
 
+function resolveRtcIceTransportPolicy(value: unknown): RTCIceTransportPolicy {
+  return value === 'relay' ? 'relay' : 'all';
+}
+
+export function buildRtcPeerConnectionConfig(payload?: Record<string, unknown>): RTCConfiguration {
+  return {
+    iceServers: Array.isArray(payload?.iceServers) ? payload.iceServers as RTCIceServer[] : [],
+    iceTransportPolicy: resolveRtcIceTransportPolicy(payload?.iceTransportPolicy),
+  };
+}
+
 class RtcPeerTransport implements RtcServerTransport {
   public id: string;
 
@@ -190,11 +201,7 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
       if (peer.peerConnection) {
         return;
       }
-      const iceServers = Array.isArray(message.payload?.iceServers) ? message.payload?.iceServers as RTCIceServer[] : [];
-      const peerConnection = new RTCPeerConnection({
-        iceServers,
-        iceTransportPolicy: 'all',
-      });
+      const peerConnection = new RTCPeerConnection(buildRtcPeerConnectionConfig(message.payload));
       peer.peerConnection = peerConnection;
       peerConnection.onicecandidate = (event) => {
         if (!event.candidate) {

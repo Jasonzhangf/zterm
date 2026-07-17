@@ -80,6 +80,7 @@ function buildTraversalRouteCandidates(endpointCandidates: RelayEndpointCandidat
         endpoint: asString(endpoint.relayHostId) || id,
         signalUrl: asString(endpoint.wsUrl) || `wss://${asString(endpoint.relayHostId) || 'relay.invalid'}`,
         iceServers: [],
+        iceTransportPolicy: 'relay',
       });
       continue;
     }

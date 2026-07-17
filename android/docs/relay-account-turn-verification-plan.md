@@ -77,11 +77,11 @@ ZTERM_TRAVERSAL_DEVICE_NAME=smoke-daemon
 ## TURN Relay Flow
 1. 从登录 payload 读取 `ws.client` 与 TURN 配置，不从本地硬编码 TURN。
 2. 用 `ws.client?token=<access>&hostId=<daemon-host-id>` 建立 signaling WebSocket。
-3. 先跑普通 RTC：`iceTransportPolicy=all`，验证 signaling 与 daemon RTC bridge 可用。
-4. 再跑强制中继 RTC：`iceTransportPolicy=relay`，验证 TURN 服务器真实可用。
+3. 可选先跑普通 RTC：`iceTransportPolicy=all`，只验证 signaling 与 daemon RTC bridge/P2P 可用，不能作为产品 Relay 通过证据。
+4. 必须跑中继 RTC：client 与 daemon RTC bridge 都使用 `iceTransportPolicy=relay`，验证 TURN 服务器真实可用。
 5. relay-only 通过标准：RTC data channel open，并且 selected candidate pair 中本地 candidate type 为 `relay`。
-6. 生产 `rtc-relay` 连接使用标准 ICE (`iceTransportPolicy=all`) 消费同一个 relay signaling + TURN 配置；强制 `relay` 只属于 TURN 黑盒 gate。
-7. 若普通 RTC 通过但 relay-only 失败，结论只能是 TURN 配置/网络未验证通过，不能宣称 off-network TURN 闭环，也不能把“标准 ICE 可通”冒充“TURN 可用”。
+6. 生产 `rtc-relay` 连接使用 `iceTransportPolicy=relay` 消费同一个 relay signaling + TURN 配置；direct/Tailscale/P2P 必须作为单独 direct/Auto candidate，不得混进 Relay candidate。
+7. 若普通 RTC 通过但 relay-only 失败，结论只能是 TURN 配置/网络未验证通过，不能宣称 off-network TURN 闭环，也不能把“标准 ICE 可通”冒充“Relay/TURN 可用”。
 8. 若 `/ws/client` 报 `host offline`，先修 daemon `/ws/host` presence，不修改 client 连接逻辑。
 
 ## Evidence

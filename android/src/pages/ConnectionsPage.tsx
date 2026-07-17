@@ -426,7 +426,7 @@ export function ConnectionsPage({
                         </span>
                         <span style={{ marginTop: '8px', display: 'flex', gap: '6px', minWidth: 0, flexWrap: 'wrap' }}>
                           <HomeBadge>{hostBadge}</HomeBadge>
-                          {relayAvailable && hostBadge !== 'Relay' ? <HomeBadge>Relay 可用</HomeBadge> : null}
+                          {relayAvailable && hostBadge !== 'Relay' ? <HomeBadge>Relay 路由</HomeBadge> : null}
                           {host.pinned ? <HomeBadge>Pinned</HomeBadge> : null}
                         </span>
                       </span>

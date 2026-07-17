@@ -8,6 +8,7 @@ import {
   readTraversalRelayAccountState,
   resolveTraversalRelayBaseUrl,
   traversalRelayLogin,
+  traversalRelayRefreshMe,
   writeTraversalRelayAccountState,
 } from './traversal-relay-client';
 
@@ -126,6 +127,38 @@ describe('traversal relay client truth', () => {
     expect(resolveTraversalRelayBaseUrl('https://relay.example.com')).toBe('https://relay.example.com/relay/');
   });
 
+  it('normalizes legacy fixed relay host aliases to the canonical relay domain', () => {
+    expect(normalizeTraversalRelayBaseUrl('https://claw.codewhisper.cc:18443/relay/')).toBe(
+      'https://relay.codewhisper.cc:18443/relay/',
+    );
+    window.localStorage.setItem('zterm:traversal-relay-account', JSON.stringify({
+      username: 'jason',
+      relayBaseUrl: 'https://claw.codewhisper.cc:18443/relay/',
+      accessToken: 'token-1',
+      deviceId: 'android-1',
+      deviceName: 'ZTerm Android',
+      platform: 'android',
+      relaySettings: {
+        relayBaseUrl: 'https://claw.codewhisper.cc:18443/relay/',
+        accessToken: 'token-1',
+        userId: 'u1',
+        username: 'jason',
+        deviceId: 'android-1',
+        deviceName: 'ZTerm Android',
+        platform: 'android',
+        wsDevicesUrl: 'wss://claw.codewhisper.cc:18443/relay/ws/devices',
+        wsHostUrl: 'wss://claw.codewhisper.cc:18443/relay/ws/host',
+        wsClientUrl: 'wss://claw.codewhisper.cc:18443/relay/ws/client',
+        turnUrl: 'turn:claw.codewhisper.cc:3479?transport=udp',
+        turnUsername: 'old-turn-user',
+        turnCredential: 'old-turn-secret',
+      },
+    }));
+
+    expect(readTraversalRelayAccountState()?.relayBaseUrl).toBe('https://relay.codewhisper.cc:18443/relay/');
+    expect(readTraversalRelayAccountState()?.relaySettings?.relayBaseUrl).toBe('https://relay.codewhisper.cc:18443/relay/');
+  });
+
   it('logs and returns null when stored relay account payload is invalid json', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     window.localStorage.setItem('zterm:traversal-relay-account', '{bad-json');
@@ -192,6 +225,71 @@ describe('traversal relay client truth', () => {
       password: 'pw',
     })).rejects.toThrow('relay account directory missing or invalid');
     expect(readTraversalRelayAccountState()).toBeNull();
+  });
+
+  it('refreshes account control settings from /me and replaces stale stored TURN config', async () => {
+    writeTraversalRelayAccountState({
+      username: 'jason',
+      password: '',
+      relayBaseUrl: 'https://relay.codewhisper.cc:18443/relay/',
+      accessToken: 'token-1',
+      user: { id: 'u1', username: 'jason', createdAt: 'now' },
+      deviceId: 'android-1',
+      deviceName: 'ZTerm Android',
+      platform: 'android',
+      devices: [],
+      directory: directoryPayload as any,
+      updatedAt: 1,
+      relaySettings: {
+        relayBaseUrl: 'https://relay.codewhisper.cc:18443/relay/',
+        accessToken: 'token-1',
+        userId: 'u1',
+        username: 'jason',
+        deviceId: 'android-1',
+        deviceName: 'ZTerm Android',
+        platform: 'android',
+        wsDevicesUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/devices',
+        wsHostUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/host',
+        wsClientUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/client',
+        turnUrl: 'turn:claw.codewhisper.cc:3479?transport=udp',
+        turnUsername: 'old-turn-user',
+        turnCredential: 'old-turn-secret',
+        updatedAt: 1,
+      },
+    });
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        user: { id: 'u1', username: 'jason', createdAt: 'now' },
+        devices: [],
+        directory: directoryPayload,
+        relayBaseUrl: 'https://relay.codewhisper.cc:18443/relay/',
+        ws: {
+          devices: 'wss://relay.codewhisper.cc:18443/relay/ws/devices',
+          host: 'wss://relay.codewhisper.cc:18443/relay/ws/host',
+          client: 'wss://relay.codewhisper.cc:18443/relay/ws/client',
+        },
+        turn: {
+          url: 'turn:relay.codewhisper.cc:3479?transport=udp',
+          username: 'fresh-turn-user',
+          credential: 'fresh-turn-secret',
+        },
+      }),
+    } as Response);
+
+    const refreshed = await traversalRelayRefreshMe(readTraversalRelayAccountState()!);
+
+    expect(fetch).toHaveBeenCalledWith(
+      'https://relay.codewhisper.cc:18443/relay/api/auth/me',
+      expect.objectContaining({
+        headers: { authorization: 'Bearer token-1' },
+      }),
+    );
+    expect(refreshed.relaySettings.turnUrl).toBe('turn:relay.codewhisper.cc:3479?transport=udp');
+    expect(refreshed.relaySettings.accessToken).toBe('token-1');
+    expect(readTraversalRelayAccountState()?.relaySettings?.turnUrl).toBe('turn:relay.codewhisper.cc:3479?transport=udp');
+    expect(readTraversalRelayAccountState()?.relaySettings?.turnUsername).toBe('fresh-turn-user');
   });
 
   it('persists directory snapshots from relay device stream without rewriting devices truth', () => {

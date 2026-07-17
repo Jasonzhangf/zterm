@@ -52,6 +52,7 @@ class MockRelayWebSocket {
 
 const connectRelayDevicesStreamMock = vi.fn();
 const readRelayAccountStateMock = vi.fn();
+const traversalRelayRefreshMeMock = vi.fn();
 const sendDebugSnapshotMock = vi.fn();
 const sendDebugLogsMock = vi.fn();
 const collectClientDebugSnapshotMock = vi.fn(() => ({}));
@@ -60,9 +61,10 @@ const runtimeDebugMock = vi.fn();
 vi.mock('./lib/traversal-relay-client', () => ({
   connectTraversalRelayDevicesStream: (...args: any[]) => (connectRelayDevicesStreamMock as any)(...args),
   readTraversalRelayAccountState: (...args: any[]) => (readRelayAccountStateMock as any)(...args),
+  traversalRelayRefreshMe: (...args: any[]) => (traversalRelayRefreshMeMock as any)(...args),
   sendTraversalRelayClientDebugSnapshot: (...args: any[]) => (sendDebugSnapshotMock as any)(...args),
   sendTraversalRelayClientDebugLogs: (...args: any[]) => (sendDebugLogsMock as any)(...args),
-  applyTraversalRelaySettings: vi.fn(),
+  applyTraversalRelaySettings: (base: any, relay: any) => ({ ...base, traversalRelay: relay }),
   getDefaultTraversalRelayBaseUrl: () => 'https://relay.codewhisper.cc:18443/relay/',
 }));
 
@@ -280,6 +282,7 @@ function setupRelayAccount(enabled: boolean) {
       devices: [],
       directory: null,
       updatedAt: 1,
+      relaySettings: makeRelayBridgeSettings(true).traversalRelay,
     });
   } else {
     readRelayAccountStateMock.mockReturnValue(null);
@@ -323,11 +326,16 @@ describe('App relay device stream reconnect lifecycle', () => {
     localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'connections' }));
     connectRelayDevicesStreamMock.mockReset();
     readRelayAccountStateMock.mockReset();
+    traversalRelayRefreshMeMock.mockReset();
     runtimeDebugMock.mockReset();
     sendDebugSnapshotMock.mockReset();
     sendDebugLogsMock.mockReset();
     collectClientDebugSnapshotMock.mockReset();
     setupRelayAccount(true);
+    traversalRelayRefreshMeMock.mockImplementation(async (account) => ({
+      account,
+      relaySettings: account.relaySettings,
+    }));
     connectRelayDevicesStreamMock.mockImplementation((options: {
       onOpen?: () => void;
       onClose?: (event: CloseEvent) => void;
@@ -358,7 +366,73 @@ describe('App relay device stream reconnect lifecycle', () => {
   it('opens a relay device stream when relay settings are enabled', { timeout: 10000 }, async () => {
     render(<AppContent bridgeSettings={makeRelayBridgeSettings(true)} setBridgeSettings={vi.fn()} />);
     await waitFor(() => expect(connectRelayDevicesStreamMock).toHaveBeenCalled(), { timeout: 10000 });
+    expect(traversalRelayRefreshMeMock.mock.invocationCallOrder[0]).toBeLessThan(
+      connectRelayDevicesStreamMock.mock.invocationCallOrder[0],
+    );
     expect(MockRelayWebSocket.instances).toHaveLength(1);
+  });
+
+  it('refreshes relay account control truth before opening the device stream', { timeout: 10000 }, async () => {
+    const staleRelaySettings = {
+      ...makeRelayBridgeSettings(true).traversalRelay,
+      turnUrl: 'turn:claw.codewhisper.cc:3479?transport=udp',
+      turnUsername: 'old-turn-user',
+      turnCredential: 'old-turn-secret',
+    };
+    const freshRelaySettings = {
+      ...makeRelayBridgeSettings(true).traversalRelay,
+      turnUrl: 'turn:relay.codewhisper.cc:3479?transport=udp',
+      turnUsername: 'fresh-turn-user',
+      turnCredential: 'fresh-turn-secret',
+      updatedAt: 2,
+    };
+    const staleAccount = {
+      username: 'jason',
+      password: '',
+      relayBaseUrl: 'https://relay.example.com/relay/',
+      accessToken: 'token-1',
+      user: { id: 'u1', username: 'jason', createdAt: 'now' },
+      deviceId: 'android-1',
+      deviceName: 'ZTerm Android',
+      platform: 'android',
+      devices: [],
+      directory: null,
+      updatedAt: 1,
+      relaySettings: staleRelaySettings,
+    };
+    const freshAccount = {
+      ...staleAccount,
+      updatedAt: 2,
+      relaySettings: freshRelaySettings,
+    };
+    readRelayAccountStateMock.mockReturnValue(staleAccount);
+    traversalRelayRefreshMeMock.mockResolvedValueOnce({
+      account: freshAccount,
+      relaySettings: freshRelaySettings,
+    });
+    const setBridgeSettings = vi.fn();
+
+    render(<AppContent bridgeSettings={{ ...makeRelayBridgeSettings(true), traversalRelay: staleRelaySettings }} setBridgeSettings={setBridgeSettings} />);
+
+    await waitFor(() => expect(connectRelayDevicesStreamMock).toHaveBeenCalled(), { timeout: 10000 });
+    expect(connectRelayDevicesStreamMock.mock.calls[0]?.[0].account.relaySettings.turnUrl).toBe('turn:relay.codewhisper.cc:3479?transport=udp');
+    expect(setBridgeSettings).toHaveBeenCalledWith(expect.any(Function));
+    const updater = setBridgeSettings.mock.calls[0]?.[0];
+    expect(updater({ ...makeRelayBridgeSettings(true), traversalRelay: staleRelaySettings }).traversalRelay.turnUrl).toBe(
+      'turn:relay.codewhisper.cc:3479?transport=udp',
+    );
+  });
+
+  it('does not open a relay device stream when account refresh fails', { timeout: 10000 }, async () => {
+    traversalRelayRefreshMeMock.mockRejectedValueOnce(new Error('relay control unavailable'));
+
+    render(<AppContent bridgeSettings={makeRelayBridgeSettings(true)} setBridgeSettings={vi.fn()} />);
+
+    await waitFor(() => expect(runtimeDebugMock).toHaveBeenCalledWith(
+      'relay.device-stream.account-refresh.error',
+      { message: 'relay control unavailable' },
+    ), { timeout: 10000 });
+    expect(connectRelayDevicesStreamMock).not.toHaveBeenCalled();
   });
 
   it('reconnects with backoff after a relay device stream closes', { timeout: 10000 }, async () => {

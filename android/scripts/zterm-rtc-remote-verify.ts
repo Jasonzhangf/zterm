@@ -114,7 +114,13 @@ async function rtcSmoke(accessToken: string, signalBase: string, iceServers: RTC
 
     signalSocket.on('open', async () => {
       try {
-        signalSocket.send(JSON.stringify({ type: 'rtc-init', payload: { iceServers } }));
+        signalSocket.send(JSON.stringify({
+          type: 'rtc-init',
+          payload: {
+            iceServers,
+            iceTransportPolicy: relayOnly ? 'relay' : 'all',
+          },
+        }));
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
         signalSocket.send(JSON.stringify({ type: 'rtc-offer', payload: { type: offer.type, sdp: offer.sdp } }));

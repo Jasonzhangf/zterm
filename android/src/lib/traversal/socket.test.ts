@@ -421,7 +421,7 @@ describe('TraversalSocket reconnect', () => {
     });
   });
 
-  it('uses standard ICE for relay control-plane RTC candidates and keeps TURN relay-only as a diagnostic concern', async () => {
+  it('uses TURN-only ICE for rtc-relay candidates so Relay cannot masquerade as Tailscale or P2P', async () => {
     const socket = createRelayRtcSocket();
     await flushMicrotasks();
 
@@ -432,17 +432,24 @@ describe('TraversalSocket reconnect', () => {
 
     expect(MockRTCPeerConnection.instances).toHaveLength(1);
     expect(MockRTCPeerConnection.instances[0].config).toMatchObject({
-      iceTransportPolicy: 'all',
+      iceTransportPolicy: 'relay',
       iceServers: [{
         urls: 'turn:relay.example.test:3478?transport=udp',
         username: 'turn-user',
         credential: 'turn-secret',
       }],
     });
-    expect(MockWebSocket.instances[0].sent.map((item) => JSON.parse(String(item)).type)).toEqual([
+    const sentMessages = MockWebSocket.instances[0].sent.map((item) => JSON.parse(String(item)));
+    expect(sentMessages.map((item) => item.type)).toEqual([
       'rtc-init',
       'rtc-offer',
     ]);
+    expect(sentMessages[0]).toMatchObject({
+      type: 'rtc-init',
+      payload: {
+        iceTransportPolicy: 'relay',
+      },
+    });
 
     socket.close();
   });
@@ -467,7 +474,7 @@ describe('TraversalSocket reconnect', () => {
       stage: 'open',
       resolvedPath: 'rtc-relay',
       resolvedRelayTransport: 'turn',
-      resolvedEndpoint: 'rtc',
+      resolvedEndpoint: 'relay:daemon-host-a',
     });
 
     socket.close();
@@ -493,7 +500,7 @@ describe('TraversalSocket reconnect', () => {
       stage: 'open',
       resolvedPath: 'rtc-relay',
       resolvedRelayTransport: 'direct',
-      resolvedEndpoint: 'rtc',
+      resolvedEndpoint: 'relay:daemon-host-a',
     });
 
     socket.close();

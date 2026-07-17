@@ -236,9 +236,10 @@ export function buildTraversalPlan(
         id: directoryRelayEndpoint?.id || `relay-rtc:${relayHostId || parsedSignalUrl.toString()}`,
         kind: 'rtc',
         path: 'rtc-relay',
-        endpoint: target.bridgeHost.trim() || target.ipv4Host?.trim() || target.ipv6Host?.trim() || target.tailscaleHost?.trim() || 'rtc',
+        endpoint: relayHostId ? `relay:${relayHostId}` : 'relay',
         signalUrl: parsedSignalUrl.toString(),
         iceServers,
+        iceTransportPolicy: 'relay',
       });
     }
     if (mode === 'webrtc' && rtcCandidates.length === 0) {

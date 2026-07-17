@@ -25,6 +25,7 @@ const candidates = [
     endpoint: 'relay',
     signalUrl: 'wss://relay.example.com/ws/client?hostId=daemon-a',
     iceServers: [],
+    iceTransportPolicy: 'relay',
   },
 ] satisfies TraversalPlanCandidate[];
 

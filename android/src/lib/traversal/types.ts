@@ -5,6 +5,7 @@ import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
 export type TraversalTransportMode = 'auto' | 'websocket' | 'webrtc';
 export type TraversalResolvedPath = 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
 export type TraversalResolvedRelayTransport = 'direct' | 'turn';
+export type TraversalRtcIceTransportPolicy = 'all' | 'relay';
 
 export interface TraversalIceServer {
   urls: string | string[];
@@ -100,6 +101,7 @@ export interface RtcTraversalCandidate extends TraversalPlanCandidateBase {
   path: 'rtc-relay';
   signalUrl: string;
   iceServers: TraversalIceServer[];
+  iceTransportPolicy: TraversalRtcIceTransportPolicy;
 }
 
 export type TraversalPlanCandidate = WebSocketTraversalCandidate | RtcTraversalCandidate;

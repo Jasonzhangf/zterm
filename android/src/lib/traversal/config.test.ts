@@ -237,6 +237,8 @@ describe('buildTraversalPlan', () => {
     expect(plan.candidates).toContainEqual(expect.objectContaining({
       kind: 'rtc',
       signalUrl: 'ws://159.75.134.56/relay/ws/client?token=access-1&hostId=daemon-host-a',
+      endpoint: 'relay:daemon-host-a',
+      iceTransportPolicy: 'relay',
       iceServers: [{
         urls: 'turn:claw.codewhisper.cc:3479?transport=udp',
         username: 'ztermturn',
@@ -284,6 +286,8 @@ describe('buildTraversalPlan', () => {
       kind: 'rtc',
       path: 'rtc-relay',
       signalUrl: 'ws://159.75.134.56/relay/ws/client?token=access-1&hostId=daemon-host-a',
+      endpoint: 'relay:daemon-host-a',
+      iceTransportPolicy: 'relay',
     });
   });
 
@@ -350,6 +354,8 @@ describe('buildTraversalPlan', () => {
       kind: 'rtc',
       path: 'rtc-relay',
       signalUrl: 'ws://159.75.134.56/relay/ws/client?token=access-1&hostId=daemon-host-a',
+      endpoint: 'relay:daemon-host-a',
+      iceTransportPolicy: 'relay',
     }));
   });
 

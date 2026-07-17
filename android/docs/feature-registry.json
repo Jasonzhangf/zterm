@@ -203,7 +203,8 @@
         "src/contexts/session-context-session-runtime.ts",
         "src/contexts/session-transport-open-helpers.ts",
         "src/lib/tmux-sessions.ts",
-        "src/server/terminal-bridge-runtime.ts"
+        "src/server/terminal-bridge-runtime.ts",
+        "src/server/rtc-bridge.ts"
       ],
       "allowed_paths": [
         "src/contexts/SessionContext.tsx",
@@ -226,6 +227,8 @@
         "src/lib/tmux-sessions.test.ts",
         "src/lib/session-transport-runtime.ts",
         "src/server/terminal-bridge-runtime.ts",
+        "src/server/rtc-bridge.ts",
+        "src/server/rtc-bridge.test.ts",
         "src/server/terminal-transport-runtime.ts",
         "src/server/terminal-message-runtime.ts",
         "src/server/terminal-mirror-runtime.ts",
@@ -248,7 +251,8 @@
         "src/server/terminal-transport-runtime.test.ts",
         "src/lib/session-transport-runtime.test.ts",
         "src/contexts/session-context-transport-runtime.test.ts",
-        "src/lib/tmux-sessions.test.ts"
+        "src/lib/tmux-sessions.test.ts",
+        "src/server/rtc-bridge.test.ts"
       ],
       "truth_sources": [
         ".agents/skills/terminal-buffer-truth/SKILL.md",
@@ -703,6 +707,7 @@
         "src/components/tmux/TmuxSessionPickerSheet.test.tsx",
         "src/components/connection-form/RelayDevicePicker.tsx",
         "src/App.tsx",
+        "src/App.relay-stream-lifecycle.test.tsx",
         "src/pages/ConnectionsPage.tsx",
         "src/pages/ConnectionsPage.test.tsx",
         "src/pages/SettingsPage.tsx",
@@ -718,6 +723,7 @@
         "src/components/TerminalView.tsx"
       ],
       "required_gates": [
+        "src/App.relay-stream-lifecycle.test.tsx",
         "src/lib/home-connection-projection.test.ts",
         "src/lib/traversal-relay-devices.test.ts",
         "src/lib/traversal-relay-client.test.ts",

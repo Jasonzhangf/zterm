@@ -185,7 +185,7 @@ class WebRtcBackend implements Backend {
         this.signalSocket = signalSocket;
         const peerConnection = new RTCPeerConnection({
           iceServers: this.candidate.iceServers,
-          iceTransportPolicy: 'all',
+          iceTransportPolicy: this.candidate.iceTransportPolicy,
         });
         this.peerConnection = peerConnection;
         const channel = peerConnection.createDataChannel('zterm', {
@@ -233,6 +233,7 @@ class WebRtcBackend implements Backend {
           type: 'rtc-init',
           payload: {
             iceServers: this.candidate.iceServers,
+            iceTransportPolicy: this.candidate.iceTransportPolicy,
           },
         }));
 

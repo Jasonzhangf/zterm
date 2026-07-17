@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { createServer } from 'http';
 import { WebSocket, WebSocketServer } from 'ws';
 import wrtc from '@roamhq/wrtc';
-import { createRtcBridgeServer } from './rtc-bridge';
+import { buildRtcPeerConnectionConfig, createRtcBridgeServer } from './rtc-bridge';
 
 const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = wrtc as unknown as {
   RTCPeerConnection: typeof globalThis.RTCPeerConnection;
@@ -26,6 +26,30 @@ describe('rtc-bridge', () => {
       const task = cleanupTasks.pop();
       await task?.();
     }
+  });
+
+  it('honors relay-only ICE policy from rtc-init instead of widening it on the daemon side', () => {
+    expect(buildRtcPeerConnectionConfig({
+      iceServers: [{ urls: 'turn:relay.example.test:3478?transport=udp' }],
+      iceTransportPolicy: 'relay',
+    })).toEqual({
+      iceServers: [{ urls: 'turn:relay.example.test:3478?transport=udp' }],
+      iceTransportPolicy: 'relay',
+    });
+    expect(buildRtcPeerConnectionConfig({
+      iceServers: [{ urls: 'turn:relay.example.test:3478?transport=udp' }],
+      iceTransportPolicy: 'all',
+    })).toEqual({
+      iceServers: [{ urls: 'turn:relay.example.test:3478?transport=udp' }],
+      iceTransportPolicy: 'all',
+    });
+    expect(buildRtcPeerConnectionConfig({
+      iceServers: [{ urls: 'turn:relay.example.test:3478?transport=udp' }],
+      iceTransportPolicy: 'invalid',
+    })).toEqual({
+      iceServers: [{ urls: 'turn:relay.example.test:3478?transport=udp' }],
+      iceTransportPolicy: 'all',
+    });
   });
 
   it('bridges rtc datachannel messages through the server transport', async () => {

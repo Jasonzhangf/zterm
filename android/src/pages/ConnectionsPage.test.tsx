@@ -126,7 +126,8 @@ describe('ConnectionsPage server home', () => {
     );
 
     expect(screen.getByText('Tailscale')).toBeTruthy();
-    expect(screen.getByText('Relay 可用')).toBeTruthy();
+    expect(screen.queryByText('Relay 可用')).toBeNull();
+    expect(screen.getByText('Relay 路由')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: 'Open Mac Studio Tailscale' }));
     expect(onOpenSavedConnection).toHaveBeenCalledWith(savedHost);

@@ -30,7 +30,9 @@ import {
   readTraversalRelayAccountState,
   sendTraversalRelayClientDebugSnapshot,
   sendTraversalRelayClientDebugLogs,
+  traversalRelayRefreshMe,
 } from './lib/traversal-relay-client';
+import type { TraversalRelayClientSettings } from './lib/bridge-settings';
 import { collectClientDebugSnapshot, registerClientDebugSnapshotSource } from './lib/client-debug-snapshot';
 import { runtimeDebug } from './lib/runtime-debug';
 import { projectRelayDirectoryDeviceSnapshots } from './lib/relay-account-directory';
@@ -48,12 +50,37 @@ import type { Host, TerminalWidthMode, TraversalRelayDeviceSnapshot } from './li
 
 const RELAY_DEVICE_STREAM_RECONNECT_BASE_DELAY_MS = 300;
 const RELAY_DEVICE_STREAM_RECONNECT_MAX_DELAY_MS = 5000;
+const TRAVERSAL_RELAY_SETTING_COMPARE_KEYS = [
+  'relayBaseUrl',
+  'accessToken',
+  'userId',
+  'username',
+  'deviceId',
+  'deviceName',
+  'platform',
+  'wsDevicesUrl',
+  'wsHostUrl',
+  'wsClientUrl',
+  'turnUrl',
+  'turnUsername',
+  'turnCredential',
+] as const satisfies readonly (keyof TraversalRelayClientSettings)[];
 
 function computeRelayDeviceStreamReconnectDelay(attempt: number) {
   return Math.min(
     RELAY_DEVICE_STREAM_RECONNECT_MAX_DELAY_MS,
     RELAY_DEVICE_STREAM_RECONNECT_BASE_DELAY_MS * 2 ** Math.max(0, attempt),
   );
+}
+
+function areTraversalRelaySettingsEqual(
+  current: TraversalRelayClientSettings | undefined,
+  next: TraversalRelayClientSettings | undefined,
+) {
+  if (!current || !next) {
+    return current === next;
+  }
+  return TRAVERSAL_RELAY_SETTING_COMPARE_KEYS.every((key) => current[key] === next[key]);
 }
 
 function projectRelayDevicesFromAccountState(account: ReturnType<typeof readTraversalRelayAccountState>) {
@@ -117,12 +144,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
       }
       setBridgeSettings((current) => {
         const currentRelay = current.traversalRelay;
-        if (
-          currentRelay
-          && currentRelay.accessToken === nextRelay.accessToken
-          && currentRelay.relayBaseUrl === nextRelay.relayBaseUrl
-          && currentRelay.wsDevicesUrl === nextRelay.wsDevicesUrl
-        ) {
+        if (areTraversalRelaySettingsEqual(currentRelay, nextRelay)) {
           return current;
         }
         return applyTraversalRelaySettings(current, nextRelay);
@@ -295,15 +317,23 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
       relayDeviceReconnectTimerRef.current = null;
     };
 
-    const account = readTraversalRelayAccountState();
-    if (!bridgeSettings.traversalRelay?.accessToken || !account?.accessToken || !account.relayBaseUrl) {
+    const readEnabledAccount = () => {
+      const account = readTraversalRelayAccountState();
+      if (!bridgeSettings.traversalRelay?.accessToken || !account?.accessToken || !account.relayBaseUrl) {
+        return null;
+      }
+      return account;
+    };
+
+    const initialAccount = readEnabledAccount();
+    if (!initialAccount) {
       clearReconnectTimer();
       relayDeviceSocketRef.current?.close(1000, 'relay disabled');
       relayDeviceSocketRef.current = null;
       setRelayDevices([]);
       return;
     }
-    setRelayDevices(projectRelayDevicesFromAccountState(account));
+    setRelayDevices(projectRelayDevicesFromAccountState(initialAccount));
 
     const scheduleReconnect = (reason: string) => {
       if (disposed || relayDeviceStreamGenerationRef.current !== generation || relayDeviceReconnectTimerRef.current !== null) {
@@ -318,66 +348,101 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
       }, delayMs);
     };
 
+    const refreshAccountForDeviceStream = async () => {
+      const cachedAccount = readEnabledAccount();
+      if (!cachedAccount) {
+        throw new Error('relay account missing or disabled');
+      }
+      const refreshed = await traversalRelayRefreshMe(cachedAccount);
+      if (disposed || relayDeviceStreamGenerationRef.current !== generation) {
+        throw new Error('relay device stream disposed');
+      }
+      const nextRelay = refreshed.relaySettings || refreshed.account.relaySettings;
+      if (!nextRelay) {
+        throw new Error('relay control payload missing ws/control settings');
+      }
+      setRelayDevices(projectRelayDevicesFromAccountState(refreshed.account));
+      setBridgeSettings((current) => (
+        areTraversalRelaySettingsEqual(current.traversalRelay, nextRelay)
+          ? current
+          : applyTraversalRelaySettings(current, nextRelay)
+      ));
+      return refreshed.account;
+    };
+
     const openDeviceStream = () => {
       if (disposed || relayDeviceStreamGenerationRef.current !== generation) {
         return;
       }
-      const socket = connectTraversalRelayDevicesStream({
-        account,
-        onOpen: () => {
-          reconnectAttempt = 0;
-          runtimeDebug('relay.device-stream.open', { deviceId: account.deviceId });
-        },
-        onDevices: (devices) => {
-          setRelayDevices(listOnlineTraversalRelayDaemonDevices(devices));
-        },
-        onDirectory: (directory) => {
-          const directoryDevices = projectRelayDirectoryDeviceSnapshots(directory);
-          if (directoryDevices.length > 0) {
-            setRelayDevices(listOnlineTraversalRelayDaemonDevices(directoryDevices));
-          }
-        },
-        onError: (message) => {
-          runtimeDebug('relay.device-stream.error', { message });
-        },
-        onClose: (event) => {
-          if (relayDeviceSocketRef.current === socket) {
-            relayDeviceSocketRef.current = null;
-          }
-          const reason = event.reason || `relay device stream closed: ${event.code}`;
-          runtimeDebug('relay.device-stream.close', { code: event.code, reason });
-          scheduleReconnect(reason);
-        },
-        onDebugRequest: (payload, liveSocket) => {
-          runtimeDebug('relay.device-stream.debug-request', {
-            requestId: payload.requestId || null,
-            reason: payload.reason || null,
-            includeSnapshot: payload.includeSnapshot !== false,
-            includeLogs: payload.includeLogs !== false,
-            logLimit: payload.logLimit || null,
-          });
-          if (payload.includeSnapshot !== false) {
-            sendTraversalRelayClientDebugSnapshot({
-              socket: liveSocket,
-              account,
-              requestId: payload.requestId,
-              reason: payload.reason || 'remote-request',
-              snapshot: collectClientDebugSnapshot({
-                requestId: payload.requestId || null,
-                reason: payload.reason || null,
-              }),
+      void refreshAccountForDeviceStream().then((account) => {
+        if (disposed || relayDeviceStreamGenerationRef.current !== generation) {
+          return;
+        }
+        const socket = connectTraversalRelayDevicesStream({
+          account,
+          onOpen: () => {
+            reconnectAttempt = 0;
+            runtimeDebug('relay.device-stream.open', { deviceId: account.deviceId });
+          },
+          onDevices: (devices) => {
+            setRelayDevices(listOnlineTraversalRelayDaemonDevices(devices));
+          },
+          onDirectory: (directory) => {
+            const directoryDevices = projectRelayDirectoryDeviceSnapshots(directory);
+            if (directoryDevices.length > 0) {
+              setRelayDevices(listOnlineTraversalRelayDaemonDevices(directoryDevices));
+            }
+          },
+          onError: (message) => {
+            runtimeDebug('relay.device-stream.error', { message });
+          },
+          onClose: (event) => {
+            if (relayDeviceSocketRef.current === socket) {
+              relayDeviceSocketRef.current = null;
+            }
+            const reason = event.reason || `relay device stream closed: ${event.code}`;
+            runtimeDebug('relay.device-stream.close', { code: event.code, reason });
+            scheduleReconnect(reason);
+          },
+          onDebugRequest: (payload, liveSocket) => {
+            runtimeDebug('relay.device-stream.debug-request', {
+              requestId: payload.requestId || null,
+              reason: payload.reason || null,
+              includeSnapshot: payload.includeSnapshot !== false,
+              includeLogs: payload.includeLogs !== false,
+              logLimit: payload.logLimit || null,
             });
-          }
-          if (payload.includeLogs !== false) {
-            sendTraversalRelayClientDebugLogs({
-              socket: liveSocket,
-              account,
-              limit: payload.logLimit || 120,
-            });
-          }
-        },
+            if (payload.includeSnapshot !== false) {
+              sendTraversalRelayClientDebugSnapshot({
+                socket: liveSocket,
+                account,
+                requestId: payload.requestId,
+                reason: payload.reason || 'remote-request',
+                snapshot: collectClientDebugSnapshot({
+                  requestId: payload.requestId || null,
+                  reason: payload.reason || null,
+                }),
+              });
+            }
+            if (payload.includeLogs !== false) {
+              sendTraversalRelayClientDebugLogs({
+                socket: liveSocket,
+                account,
+                limit: payload.logLimit || 120,
+              });
+            }
+          },
+        });
+        relayDeviceSocketRef.current = socket;
+      }).catch((error) => {
+        if (disposed || relayDeviceStreamGenerationRef.current !== generation) {
+          return;
+        }
+        const message = error instanceof Error ? error.message : String(error);
+        runtimeDebug('relay.device-stream.account-refresh.error', { message });
+        setRelayDevices([]);
+        scheduleReconnect(message);
       });
-      relayDeviceSocketRef.current = socket;
     };
 
     openDeviceStream();
@@ -395,7 +460,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
         relayDeviceSocketRef.current = null;
       }
     };
-  }, [bridgeSettings.traversalRelay?.accessToken, bridgeSettings.traversalRelay?.relayBaseUrl]);
+  }, [bridgeSettings.traversalRelay?.accessToken, bridgeSettings.traversalRelay?.relayBaseUrl, setBridgeSettings]);
 
   const {
     openTabState,
