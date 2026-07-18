@@ -337,6 +337,36 @@ describe('session sync helper refresh planner', () => {
       source: 'explicit-resume',
     })).toEqual({ action: 'skip', reason: 'transport-unavailable' });
   });
+
+  it('keeps a recently alive unavailable transport inside the keepalive grace window', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connected',
+      wsReadyState: WebSocket.CLOSED,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      allowReconnectIfUnavailable: true,
+      keepaliveGraceActive: true,
+      transportStale: false,
+      source: 'explicit-resume',
+    })).toEqual({ action: 'skip', reason: 'transport-keepalive-grace' });
+  });
+
+  it('allows reconnect after the keepalive grace window expires', () => {
+    expect(buildActiveSessionRefreshPlan({
+      hasSession: true,
+      isRefreshTarget: true,
+      sessionState: 'connected',
+      wsReadyState: WebSocket.CLOSED,
+      reconnectInFlight: false,
+      pendingTransportOpen: false,
+      allowReconnectIfUnavailable: true,
+      keepaliveGraceActive: false,
+      transportStale: true,
+      source: 'explicit-resume',
+    })).toEqual({ action: 'reconnect' });
+  });
 });
 
 describe('session transport reuse planner', () => {

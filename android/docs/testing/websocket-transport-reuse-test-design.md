@@ -64,6 +64,7 @@ Negative:
 - Fresh `WebSocket.CONNECTING` session socket after the control intent has settled still waits and does not create a duplicate socket before the active wait budget expires.
 - Active tick, explicit resume, and active reentry all must not force-replace a pending or `CONNECTING` socket solely because a wait budget elapsed.
 - Stale reconnect bookkeeping must not be treated as socket failure. The only allowed rebuild reasons are physical close/error, target mismatch, explicit user reconnect/open, or missing/closed socket in an explicit open/resume path.
+- Foreground resume and active reentry must honor the client keepalive grace window: if the session had server activity or a connected baseline within `SESSION_TRANSPORT_KEEPALIVE_GRACE_MS` (120 seconds), missing/closed local transport truth is observed as `transport-keepalive-grace` and must not immediately call the reconnect owner. After the grace window expires, the same unavailable transport enters the existing reconnect/throttle path. Active tick / explicit input recovery must keep the existing immediate recovery path and is not blocked by this lifecycle grace.
 
 ## L1 Runtime Cases
 
@@ -82,6 +83,9 @@ Negative:
 - Force replacement is not a lifecycle/probe/input/foreground/online recovery API.
 - Given an `OPEN` socket with an expired head probe marker, `ensureActiveSessionFreshRuntime()` must request head again on the same socket and must not call `reconnectSession`.
 - Given closed/missing socket, it still schedules immediate reconnect.
+- Given closed/missing socket with recent server activity or connected baseline inside the keepalive grace window, it must skip immediate reconnect and emit `transport-keepalive-grace` debug metadata.
+- Given the same unavailable socket after the keepalive grace window expires, it must call the unique reconnect owner.
+- Given reconnect already in flight inside the grace window, it must keep the existing in-flight behavior and must not queue a duplicate reconnect.
 - Given manual close, it must skip reconnect.
 
 `openSessionTransportByIntentRuntime()`:
@@ -93,6 +97,7 @@ Negative:
 
 `SessionContext.ws-refresh.test.tsx`:
 - Foreground false -> true with an already open active session keeps `MockWebSocket.instances.length` unchanged and sends a head request on the existing socket.
+- Foreground false -> true within the keepalive grace window after recent server activity keeps `MockWebSocket.instances.length` unchanged even when the local socket is unavailable; reconnect is allowed only after the grace window expires.
 - Foreground false -> true with a stale `CONNECTING` active session socket keeps `MockWebSocket.instances.length` unchanged and does not close the pending socket.
 - Switching back to an already connected session keeps that session's socket instance stable.
 - Clicking explicit reconnect while the session socket is still open does not create a second session WebSocket.

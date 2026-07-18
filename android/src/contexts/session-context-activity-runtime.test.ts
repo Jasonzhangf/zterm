@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ensureActiveSessionFreshRuntime } from './session-context-activity-runtime';
+import {
+  SESSION_TRANSPORT_KEEPALIVE_GRACE_MS,
+  ensureActiveSessionFreshRuntime,
+  resolveSessionTransportKeepaliveGrace,
+} from './session-context-activity-runtime';
 
 function createBaseOptions(overrides: Partial<Parameters<typeof ensureActiveSessionFreshRuntime>[0]> = {}) {
   const stateRef = {
@@ -49,6 +53,28 @@ function createBaseOptions(overrides: Partial<Parameters<typeof ensureActiveSess
 }
 
 describe('ensureActiveSessionFreshRuntime', () => {
+  it('resolves keepalive grace from recent server activity or connected baseline', () => {
+    const refs = createBaseOptions().refs;
+    refs.lastServerActivityAtRef.current.set('session-1', 10_000);
+    refs.lastConnectedBaselineAtRef.current.set('session-1', 20_000);
+
+    expect(resolveSessionTransportKeepaliveGrace({
+      sessionId: 'session-1',
+      refs,
+      now: 20_000 + SESSION_TRANSPORT_KEEPALIVE_GRACE_MS - 1,
+    })).toEqual({
+      active: true,
+      lastAliveAt: 20_000,
+      ageMs: SESSION_TRANSPORT_KEEPALIVE_GRACE_MS - 1,
+      graceMs: SESSION_TRANSPORT_KEEPALIVE_GRACE_MS,
+    });
+    expect(resolveSessionTransportKeepaliveGrace({
+      sessionId: 'session-1',
+      refs,
+      now: 20_000 + SESSION_TRANSPORT_KEEPALIVE_GRACE_MS,
+    }).active).toBe(false);
+  });
+
   it('requests head on the existing open socket for active reentry', () => {
     const ws = { readyState: WebSocket.OPEN } as any;
     const requestSessionBufferHead = vi.fn(() => true);
@@ -249,6 +275,113 @@ describe('ensureActiveSessionFreshRuntime', () => {
 
     expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
     expect(reconnectSession).toHaveBeenCalledWith('session-1');
+  });
+
+  it('does not reconnect a recently alive unavailable transport during explicit resume', () => {
+    const now = 100_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+    const reconnectSession = vi.fn();
+    const runtimeDebug = vi.fn();
+    const refs = createBaseOptions().refs;
+    refs.lastServerActivityAtRef.current.set('session-1', now - 5_000);
+    const options = createBaseOptions({
+      refreshOptions: {
+        sessionId: 'session-1',
+        source: 'explicit-resume',
+        allowReconnectIfUnavailable: true,
+      },
+      refs,
+      readSessionTransportSocket: () => ({ readyState: WebSocket.CLOSED } as any),
+      reconnectSession,
+      runtimeDebug,
+    });
+
+    try {
+      expect(ensureActiveSessionFreshRuntime(options)).toBe(false);
+      expect(reconnectSession).not.toHaveBeenCalled();
+      expect(runtimeDebug).toHaveBeenCalledWith('session.transport.explicit-resume.skip', expect.objectContaining({
+        reason: 'transport-keepalive-grace',
+        keepaliveGraceActive: true,
+      }));
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('does not apply keepalive grace to active tick recovery', () => {
+    const now = 100_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+    const reconnectSession = vi.fn();
+    const refs = createBaseOptions().refs;
+    refs.lastServerActivityAtRef.current.set('session-1', now - 5_000);
+    const options = createBaseOptions({
+      refreshOptions: {
+        sessionId: 'session-1',
+        source: 'active-tick',
+        allowReconnectIfUnavailable: true,
+      },
+      refs,
+      readSessionTransportSocket: () => ({ readyState: WebSocket.CLOSED } as any),
+      reconnectSession,
+    });
+
+    try {
+      expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
+      expect(reconnectSession).toHaveBeenCalledWith('session-1');
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('reconnects an unavailable transport after the keepalive grace window expires', () => {
+    const now = 300_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+    const reconnectSession = vi.fn();
+    const refs = createBaseOptions().refs;
+    refs.lastConnectedBaselineAtRef.current.set('session-1', now - SESSION_TRANSPORT_KEEPALIVE_GRACE_MS - 1);
+    const options = createBaseOptions({
+      refreshOptions: {
+        sessionId: 'session-1',
+        source: 'active-reentry',
+        allowReconnectIfUnavailable: true,
+      },
+      refs,
+      readSessionTransportSocket: () => null,
+      reconnectSession,
+    });
+
+    try {
+      expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
+      expect(reconnectSession).toHaveBeenCalledWith('session-1');
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('keeps current reconnect in-flight behavior while inside keepalive grace', () => {
+    const now = 100_000;
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+    const reconnectSession = vi.fn();
+    const refs = createBaseOptions().refs;
+    refs.lastServerActivityAtRef.current.set('session-1', now - 5_000);
+    const options = createBaseOptions({
+      refreshOptions: {
+        sessionId: 'session-1',
+        source: 'explicit-resume',
+        allowReconnectIfUnavailable: true,
+      },
+      refs,
+      readSessionTransportSocket: () => null,
+      isReconnectInFlight: () => true,
+      reconnectSession,
+    });
+
+    try {
+      expect(ensureActiveSessionFreshRuntime(options)).toBe(false);
+      expect(reconnectSession).not.toHaveBeenCalled();
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it('marks a same-socket head probe pending and clears no transport when the probe is fresh', () => {

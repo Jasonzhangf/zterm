@@ -22,6 +22,30 @@ interface SessionTargetRuntimeLike {
 }
 
 export const ACTIVE_SESSION_PENDING_OPEN_STALE_MS = 1200;
+export const SESSION_TRANSPORT_KEEPALIVE_GRACE_MS = 2 * 60 * 1000;
+
+export function resolveSessionTransportKeepaliveGrace(options: {
+  sessionId: string;
+  refs: {
+    lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
+    lastServerActivityAtRef: MutableRefObject<Map<string, number>>;
+  };
+  now?: number;
+  graceMs?: number;
+}) {
+  const now = options.now ?? Date.now();
+  const graceMs = Math.max(0, Math.floor(options.graceMs ?? SESSION_TRANSPORT_KEEPALIVE_GRACE_MS));
+  const lastServerActivityAt = options.refs.lastServerActivityAtRef.current.get(options.sessionId) || 0;
+  const lastConnectedBaselineAt = options.refs.lastConnectedBaselineAtRef.current.get(options.sessionId) || 0;
+  const lastAliveAt = Math.max(lastServerActivityAt, lastConnectedBaselineAt);
+  const ageMs = lastAliveAt > 0 ? now - lastAliveAt : Number.POSITIVE_INFINITY;
+  return {
+    active: lastAliveAt > 0 && ageMs >= 0 && ageMs < graceMs,
+    lastAliveAt: lastAliveAt || null,
+    ageMs: Number.isFinite(ageMs) ? ageMs : null,
+    graceMs,
+  };
+}
 
 export function ensureActiveSessionFreshRuntime(options: {
   refreshOptions: {
@@ -83,6 +107,22 @@ export function ensureActiveSessionFreshRuntime(options: {
       )
     : false;
   const transportStale = session ? options.isSessionTransportActivityStale(options.refreshOptions.sessionId) : false;
+  const now = Date.now();
+  const keepaliveGrace = resolveSessionTransportKeepaliveGrace({
+    sessionId: options.refreshOptions.sessionId,
+    refs: {
+      lastConnectedBaselineAtRef: options.refs.lastConnectedBaselineAtRef,
+      lastServerActivityAtRef: options.refs.lastServerActivityAtRef,
+    },
+    now,
+  });
+  const keepaliveGraceActiveForLifecycle = (
+    keepaliveGrace.active
+    && (
+      options.refreshOptions.source === 'explicit-resume'
+      || options.refreshOptions.source === 'active-reentry'
+    )
+  );
   const refreshPlan = buildActiveSessionRefreshPlan({
     hasSession: Boolean(session),
     isRefreshTarget,
@@ -92,6 +132,7 @@ export function ensureActiveSessionFreshRuntime(options: {
     pendingTransportOpen,
     pendingTransportOpenStale,
     allowReconnectIfUnavailable: options.refreshOptions.allowReconnectIfUnavailable,
+    keepaliveGraceActive: keepaliveGraceActiveForLifecycle,
     transportStale,
     source: options.refreshOptions.source,
   });
@@ -121,13 +162,16 @@ export function ensureActiveSessionFreshRuntime(options: {
       targetSessionCount: targetRuntime?.sessionIds.length || 0,
       pendingTransportOpenStale,
       activePendingOpenStaleAfterMs: activePendingOpenStaleAfterMs ?? null,
+      keepaliveGraceActive: keepaliveGraceActiveForLifecycle,
+      keepaliveGraceLastAliveAt: keepaliveGrace.lastAliveAt,
+      keepaliveGraceAgeMs: keepaliveGrace.ageMs,
+      keepaliveGraceMs: keepaliveGrace.graceMs,
       reason: refreshPlan.reason,
     });
     return false;
   }
 
   const localBuffer = options.readSessionBufferSnapshot(options.refreshOptions.sessionId);
-  const now = Date.now();
   const cadence = options.resolveTerminalRefreshCadence(options.refreshOptions.sessionId);
   const pendingProbeStartedAt = options.refs.staleTransportProbeAtRef.current.get(options.refreshOptions.sessionId) || 0;
   const pendingProbeAgeMs = pendingProbeStartedAt > 0 ? now - pendingProbeStartedAt : 0;
@@ -151,6 +195,10 @@ export function ensureActiveSessionFreshRuntime(options: {
     pendingTransportOpen,
     pendingTransportOpenStale,
     activePendingOpenStaleAfterMs: activePendingOpenStaleAfterMs ?? null,
+    keepaliveGraceActive: keepaliveGraceActiveForLifecycle,
+    keepaliveGraceLastAliveAt: keepaliveGrace.lastAliveAt,
+    keepaliveGraceAgeMs: keepaliveGrace.ageMs,
+    keepaliveGraceMs: keepaliveGrace.graceMs,
     pendingProbeStartedAt: pendingProbeStartedAt || null,
     pendingProbeAgeMs,
     staleProbeTimedOut,

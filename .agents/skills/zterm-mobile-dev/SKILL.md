@@ -1016,6 +1016,12 @@ android/
 - **动作**: App 只提供 foreground truth；真正的 transport 恢复必须由 `SessionContext lifecycle` 在 false->true 时唯一触发 `explicit-resume`，和冷启动恢复共用同一 transport owner
 - **反模式**: 指望 active tick 被动兜底，或在 App/page 层再长一套 reconnect fallback
 
+### 模式: session switch / foreground resume 要有短保活窗口
+- **触发信号**: 用户短时间切 session、切后台回来，UI 每次都进入 reconnect / 新建 WebSocket，体验上比杀进程重进更慢
+- **动作**: 在 `terminal.transport_lifecycle` owner 内用 recent alive truth（`lastServerActivityAtRef` / `lastConnectedBaselineAtRef`）给 `explicit-resume` / `active-reentry` 加短 keepalive grace；窗口内 missing/closed local socket 只返回 `transport-keepalive-grace`，超过窗口再走现有 reconnect/throttle owner
+- **边界**: 这个 grace 只属于 lifecycle freshness，不属于 `active-tick` 或显式 input recovery；用户输入撞到 closed socket 仍必须走现有即时恢复路径
+- **反模式**: 为了解决频繁重连在 App/TerminalPage 加延迟、把 daemon 改成记客户端 foreground、或让输入路径也等待保活窗口
+
 ### 模式: stale reconnect bookkeeping 必须允许重启 reconnect
 - **触发信号**: runtime/logs 出现 `sessionState=reconnecting + ws=null + no pending open intent`
 - **动作**: 判定为 reconnect bookkeeping 卡死；foreground/explicit refresh 必须允许直接重启 reconnect
