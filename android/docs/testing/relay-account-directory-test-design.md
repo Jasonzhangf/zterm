@@ -144,3 +144,5 @@ Minimum evidence:
 - Direct IPv6 / IPv4 reachability must be verified from the actual Android device route, not inferred from daemon reachability.
 - TURN credential freshness is still relay server config truth; this test design only verifies propagation and selected route behavior.
 - Existing `devices-snapshot` compatibility can remain during migration, but new UI completion requires `directory-snapshot` as the consumed truth.
+  - `/updates/latest.json` and `/updates/<apk>` are served from the relay updates directory, preserving manifest `apkUrl` semantics and returning explicit 404 for missing assets.
+  - fetch relay `/updates/latest.json`, resolve the relative `apkUrl`, and download the same bytes from the relay route.

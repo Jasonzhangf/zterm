@@ -62,6 +62,7 @@ export function AppUpdateSection({
             onUpdateDraftChange((current) => ({
               ...current,
               manifestUrl: event.target.value,
+              manifestSource: event.target.value.trim() ? 'user-saved' : 'none',
             }))
           }
           placeholder="https://server.example.com/zterm/android/stable/latest.json"
@@ -74,6 +75,7 @@ export function AppUpdateSection({
                 onUpdateDraftChange((current) => ({
                   ...current,
                   manifestUrl: suggestedManifestUrl,
+                  manifestSource: 'server-connected',
                 }))
               }
               style={{

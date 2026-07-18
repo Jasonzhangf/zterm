@@ -219,4 +219,31 @@ describe('useAppUpdate', () => {
     expect(result.current.latestManifest?.versionCode).toBe(1011569);
   });
 
+  it('exposes relay manifest injection without app-layer URL derivation', async () => {
+    globalThis.localStorage.setItem('zterm:app-update-settings', JSON.stringify({
+      manifestUrl: 'http://100.66.1.82:3333/updates/latest.json',
+      manifestSource: 'server-connected',
+      autoCheckOnLaunch: false,
+      ignoreUntilManualCheck: false,
+    }));
+
+    vi.stubGlobal('fetch', vi.fn() as unknown as typeof fetch);
+
+    const { useAppUpdate } = await import('./useAppUpdate');
+    const { result } = renderHook(() => useAppUpdate());
+
+    await waitFor(() => expect(result.current.runtimeVersionCode).toBe(1011491));
+
+    await act(async () => {
+      result.current.applyRelayManifestSource('wss://relay.codewhisper.cc:18443/relay/ws/host?token=abc');
+    });
+
+    expect(result.current.preferences.manifestUrl).toBe('https://relay.codewhisper.cc:18443/relay/updates/latest.json');
+    expect(result.current.preferences.manifestSource).toBe('relay-injected');
+    expect(JSON.parse(globalThis.localStorage.getItem('zterm:app-update-settings') || '{}')).toMatchObject({
+      manifestUrl: 'https://relay.codewhisper.cc:18443/relay/updates/latest.json',
+      manifestSource: 'relay-injected',
+    });
+  });
+
 });

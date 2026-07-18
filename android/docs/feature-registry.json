@@ -1239,3 +1239,20 @@
     }
   ]
 }
+        "src/hooks/useAppUpdate.ts",
+        "src/hooks/useAppUpdate.test.tsx",
+        "src/lib/app-update.ts",
+        "src/lib/app-update.test.ts",
+        "src/lib/app-update-runtime.ts",
+        "src/lib/app-update-runtime.test.ts",
+        "src/lib/app-update-relay-manifest.ts",
+        "src/lib/app-update-relay-manifest.test.ts",
+        "packages/shared/src/interaction/projection.ts",
+        "src/hooks/useAppUpdate.test.tsx",
+        "src/lib/app-update.test.ts",
+        "src/lib/app-update-relay-manifest.test.ts",
+        "src/lib/app-update-runtime.test.ts",
+        "src/traversal-relay/relay-server-release-package.test.ts",
+        "scripts/prepare-relay-server-npm-package.mjs",
+        "scripts/verify-relay-server-package.mjs",
+        "src/traversal-relay/relay-server-release-package.test.ts",

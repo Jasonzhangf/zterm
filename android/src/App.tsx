@@ -118,6 +118,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     ignoreUntilManualCheck,
     resetIgnorePolicy,
     startUpdate,
+    applyRelayManifestSource,
     rollbackBackup,
     isRollingBack,
     rollbackToPreviousVersion,
@@ -154,7 +155,15 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     return () => window.removeEventListener('traversal-relay-account-change', handler);
   }, [setBridgeSettings]);
 
-  // relay-derived manifest injection is handled by app-update runtime only.
+  useEffect(() => {
+    const wsHostUrl = bridgeSettings.traversalRelay?.wsHostUrl?.trim() || '';
+    if (!wsHostUrl) {
+      return;
+    }
+    applyRelayManifestSource(wsHostUrl);
+  }, [applyRelayManifestSource, bridgeSettings.traversalRelay?.wsHostUrl]);
+
+  // relay-derived manifest URL parsing is handled by app-update runtime only.
   const {
     state,
     scheduleStates = {},
@@ -529,6 +538,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     updateInstalling,
     updateError,
     updateManifestUrlConfigured: Boolean(appUpdatePreferences.manifestUrl.trim()),
+    updateManifestSource: appUpdatePreferences.manifestSource || 'none',
     updateAutoCheckOnLaunch: Boolean(appUpdatePreferences.autoCheckOnLaunch),
     latestManifestVersionCode: latestManifest?.versionCode || null,
     latestManifestVersionName: latestManifest?.versionName || null,

@@ -79,6 +79,15 @@ describe('AppUpdateSection', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '使用当前 daemon 地址' }));
     expect(onUpdateDraftChange).toHaveBeenCalledTimes(1);
+    expect(onUpdateDraftChange.mock.calls[0][0]({
+      manifestUrl: '',
+      manifestSource: 'none',
+      autoCheckOnLaunch: false,
+      ignoreUntilManualCheck: false,
+    })).toMatchObject({
+      manifestUrl: 'http://100.66.1.82:3333/updates/latest.json',
+      manifestSource: 'server-connected',
+    });
   });
 
   it('shows rollback button when rollback backup exists and triggers onRollback', () => {

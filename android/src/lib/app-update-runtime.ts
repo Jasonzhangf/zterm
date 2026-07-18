@@ -12,6 +12,7 @@ import {
   type AppUpdatePreferences,
   type AppUpdateRollbackBackup,
 } from './app-update';
+import { buildRelayInjectedAppUpdatePreferences } from './app-update-relay-manifest';
 import type { DownloadAndInstallOptions } from '../plugins/AppUpdatePlugin';
 
 export type AppUpdateStage =
@@ -142,6 +143,22 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
     },
 
     setPreferences,
+
+    applyRelayManifestSource(wsHostUrl: string) {
+      const nextPreferences = buildRelayInjectedAppUpdatePreferences(snapshot.preferences, wsHostUrl);
+      if (
+        nextPreferences.manifestUrl === snapshot.preferences.manifestUrl
+        && nextPreferences.manifestSource === snapshot.preferences.manifestSource
+      ) {
+        return snapshot;
+      }
+      setSnapshot((current) => ({
+        ...current,
+        preferences: nextPreferences,
+      }));
+      persistPreferences(deps.storage, nextPreferences, deps.onError);
+      return snapshot;
+    },
 
     async checkForUpdates(options?: { manual?: boolean; manifestUrlOverride?: string }): Promise<AppUpdateCheckResult> {
       const manifestUrl = (options?.manifestUrlOverride || snapshot.preferences.manifestUrl).trim();

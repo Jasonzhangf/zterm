@@ -65,6 +65,11 @@ export function useAppUpdate() {
     [syncSnapshot],
   );
 
+  const applyRelayManifestSource = useCallback((wsHostUrl: string) => {
+    runtimeRef.current.applyRelayManifestSource(wsHostUrl);
+    syncSnapshot();
+  }, [syncSnapshot]);
+
   const checkForUpdates = useCallback(async (options?: { manual?: boolean; manifestUrlOverride?: string }): Promise<AppUpdateCheckResult> => {
     const result = await runtimeRef.current.checkForUpdates(options);
     syncSnapshot();
@@ -142,6 +147,7 @@ export function useAppUpdate() {
     hasUpdateIgnorePolicy: projection.hasUpdateIgnorePolicy,
     updateManifestUrlConfigured: projection.updateManifestUrlConfigured,
     setPreferences,
+    applyRelayManifestSource,
     checkForUpdates,
     dismissAvailableManifest,
     skipCurrentVersion,
@@ -162,6 +168,7 @@ export function useAppUpdate() {
     projection.hasUpdateIgnorePolicy,
     projection.updateManifestUrlConfigured,
     setPreferences,
+    applyRelayManifestSource,
     checkForUpdates,
     dismissAvailableManifest,
     skipCurrentVersion,

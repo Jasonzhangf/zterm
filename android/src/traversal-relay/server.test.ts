@@ -15,6 +15,19 @@ describe('traversal relay server directory contract', () => {
     expect(source).toContain('directory: store.getAccountDirectory(user.id)');
   });
 
+  it('serves update manifest and APK assets from the relay updates directory', () => {
+    const source = readServerSource();
+
+    expect(source).toContain('ZTERM_TRAVERSAL_UPDATES_DIR');
+    expect(source).toContain("pathname === routePath('/updates/latest.json')");
+    expect(source).toContain("pathname.startsWith(routePath('/updates/'))");
+    expect(source).toContain("request.method === 'GET' || request.method === 'HEAD'");
+    expect(source).toContain("request.method === 'HEAD'");
+    expect(source).toContain("response.setHeader('Content-Length', fileStat.size)");
+    expect(source).toContain('createReadStream(filePath).pipe(response)');
+    expect(source).toContain("message: 'update manifest not found'");
+  });
+
   it('broadcasts directory snapshots alongside legacy device snapshots', () => {
     const source = readServerSource();
 

@@ -57,7 +57,8 @@ const checks = {
   relayServerBinRunsServer: bin.includes('runtime/server.cjs'),
   relayServerBinRunsSmoke: bin.includes('runtime/smoke.cjs'),
   relayServerReadmeHasSmoke: readme.includes('zterm-relay-server smoke --base-url'),
-  relayServerReadmeHasEnv: readme.includes('ZTERM_TRAVERSAL_BASE_PATH') && readme.includes('ZTERM_TURN_URL'),
+  relayServerReadmeHasEnv: readme.includes('ZTERM_TRAVERSAL_BASE_PATH') && readme.includes('ZTERM_TRAVERSAL_UPDATES_DIR') && readme.includes('ZTERM_TURN_URL'),
+  relayServerReadmeHasUpdatesRoute: readme.includes('/relay/updates/latest.json'),
   relayServerNotDaemonPackage: packedPackageJson.name !== '@jsonstudio/zterm-daemon' && !bin.includes('zterm-daemon'),
 };
 

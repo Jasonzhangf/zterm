@@ -41,6 +41,7 @@ export interface AppUpdateInstallContext {
 
 export interface AppUpdatePreferences {
   manifestUrl: string;
+  manifestSource?: AppUpdateManifestSource;
   autoCheckOnLaunch: boolean;
   skippedVersionCode?: number;
   ignoreUntilManualCheck: boolean;
@@ -57,6 +58,7 @@ export interface AppUpdateCheckResult {
 
 export const DEFAULT_APP_UPDATE_PREFERENCES: AppUpdatePreferences = {
   manifestUrl: '',
+  manifestSource: 'none',
   autoCheckOnLaunch: true,
   skippedVersionCode: undefined,
   ignoreUntilManualCheck: false,
@@ -81,6 +83,48 @@ function toFiniteNumber(value: unknown) {
   return null;
 }
 
+function isValidManifestSource(value: unknown): value is AppUpdateManifestSource {
+  return value === 'user-saved'
+    || value === 'relay-injected'
+    || value === 'server-connected'
+    || value === 'manual-override'
+    || value === 'none';
+}
+
+function isPrivateOrLocalHost(hostname: string) {
+  const host = hostname.trim().toLowerCase();
+  if (!host || host === 'localhost' || host === '127.0.0.1' || host === '::1') {
+    return true;
+  }
+  const parts = host.split('.').map((part) => Number.parseInt(part, 10));
+  if (parts.length !== 4 || parts.some((part) => !Number.isFinite(part) || part < 0 || part > 255)) {
+    return false;
+  }
+  const [a, b] = parts;
+  return a === 10
+    || (a === 172 && b >= 16 && b <= 31)
+    || (a === 192 && b === 168)
+    || (a === 100 && b >= 64 && b <= 127);
+}
+
+function inferLegacyManifestSource(manifestUrl: string): AppUpdateManifestSource {
+  if (!manifestUrl) {
+    return 'none';
+  }
+  try {
+    const parsed = new URL(manifestUrl);
+    if (parsed.hostname === 'relay.codewhisper.cc') {
+      return 'relay-injected';
+    }
+    if (parsed.pathname.endsWith('/updates/latest.json') && isPrivateOrLocalHost(parsed.hostname)) {
+      return 'server-connected';
+    }
+  } catch {
+    return 'user-saved';
+  }
+  return 'user-saved';
+}
+
 export function normalizeAppUpdatePreferences(input: unknown): AppUpdatePreferences {
   if (!input || typeof input !== 'object') {
     return DEFAULT_APP_UPDATE_PREFERENCES;
@@ -88,6 +132,11 @@ export function normalizeAppUpdatePreferences(input: unknown): AppUpdatePreferen
 
   const candidate = input as Partial<AppUpdatePreferences>;
   const manifestUrl = typeof candidate.manifestUrl === 'string' ? candidate.manifestUrl.trim() : '';
+  const manifestSource = manifestUrl
+    ? (isValidManifestSource(candidate.manifestSource) && candidate.manifestSource !== 'none'
+      ? candidate.manifestSource
+      : inferLegacyManifestSource(manifestUrl))
+    : 'none';
   const skippedVersionCode = toFiniteNumber(candidate.skippedVersionCode);
   const lastCheckedAt = toFiniteNumber(candidate.lastCheckedAt);
   const lastSeenVersionCode = toFiniteNumber(candidate.lastSeenVersionCode);
@@ -109,6 +158,7 @@ export function normalizeAppUpdatePreferences(input: unknown): AppUpdatePreferen
 
   return {
     manifestUrl,
+    manifestSource,
     autoCheckOnLaunch: candidate.autoCheckOnLaunch !== false,
     skippedVersionCode: skippedVersionCode && skippedVersionCode > 0 ? skippedVersionCode : undefined,
     ignoreUntilManualCheck: candidate.ignoreUntilManualCheck === true,

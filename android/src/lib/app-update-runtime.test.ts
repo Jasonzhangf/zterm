@@ -67,6 +67,48 @@ describe('app-update-runtime', () => {
     expect(runtime.getSnapshot().preferences.autoCheckOnLaunch).toBe(false);
   });
 
+  it('applies relay-derived manifest through the app-update runtime owner', () => {
+    const storage = createStorage({
+      'zterm:app-update-settings': JSON.stringify({
+        manifestUrl: 'http://100.66.1.82:3333/updates/latest.json',
+        manifestSource: 'server-connected',
+        autoCheckOnLaunch: false,
+      }),
+    });
+    const runtime = createRuntime(storage);
+    runtime.restorePreferences();
+
+    runtime.applyRelayManifestSource('wss://relay.codewhisper.cc:18443/relay/ws/host?token=abc');
+
+    expect(runtime.getSnapshot().preferences).toMatchObject({
+      manifestUrl: 'https://relay.codewhisper.cc:18443/relay/updates/latest.json',
+      manifestSource: 'relay-injected',
+      autoCheckOnLaunch: false,
+    });
+    expect(JSON.parse(storage.getItem('zterm:app-update-settings') || '{}')).toMatchObject({
+      manifestUrl: 'https://relay.codewhisper.cc:18443/relay/updates/latest.json',
+      manifestSource: 'relay-injected',
+    });
+  });
+
+  it('keeps explicit user-saved update manifest when relay settings change', () => {
+    const runtime = createRuntime(createStorage({
+      'zterm:app-update-settings': JSON.stringify({
+        manifestUrl: 'https://updates.example.com/latest.json',
+        manifestSource: 'user-saved',
+        autoCheckOnLaunch: false,
+      }),
+    }));
+    runtime.restorePreferences();
+
+    runtime.applyRelayManifestSource('wss://relay.codewhisper.cc:18443/relay/ws/host');
+
+    expect(runtime.getSnapshot().preferences).toMatchObject({
+      manifestUrl: 'https://updates.example.com/latest.json',
+      manifestSource: 'user-saved',
+    });
+  });
+
   it('checks manifest and computes available manifest inside the runtime block', async () => {
     const runtime = createRuntime(createStorage({
       'zterm:app-update-settings': JSON.stringify({

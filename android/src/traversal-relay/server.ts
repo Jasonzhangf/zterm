@@ -1,7 +1,7 @@
 import { createServer, type IncomingMessage, type ServerResponse } from 'http';
-import { mkdirSync } from 'fs';
+import { createReadStream, existsSync, mkdirSync, readFileSync, statSync } from 'fs';
 import { homedir } from 'os';
-import { dirname, join } from 'path';
+import { basename, dirname, join, resolve } from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'crypto';
 import type { RelayEndpointCandidate, RelayTmuxSessionSnapshot } from '@zterm/shared/relay-directory';
@@ -97,6 +97,14 @@ function resolveStorePath() {
   return join(baseDir, 'store.json');
 }
 
+function resolveUpdatesDir(storePath: string) {
+  const configured = asString(process.env.ZTERM_TRAVERSAL_UPDATES_DIR || process.env.ZTERM_RELAY_UPDATES_DIR);
+  if (configured) {
+    return resolve(configured);
+  }
+  return join(dirname(storePath), 'updates');
+}
+
 function resolveBasePath() {
   const raw = asString(process.env.ZTERM_TRAVERSAL_BASE_PATH);
   if (!raw || raw === '/') {
@@ -144,13 +152,18 @@ function buildWebSocketBaseUrl(request: IncomingMessage) {
 function writeCorsHeaders(response: ServerResponse) {
   response.setHeader('Access-Control-Allow-Origin', '*');
   response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  response.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  response.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,POST,OPTIONS');
 }
 
-function serveJson(response: ServerResponse, payload: unknown, statusCode = 200) {
+function serveJson(
+  response: ServerResponse,
+  payload: unknown,
+  statusCode = 200,
+  options: { omitBody?: boolean } = {},
+) {
   response.statusCode = statusCode;
   response.setHeader('Content-Type', 'application/json; charset=utf-8');
-  response.end(JSON.stringify(payload));
+  response.end(options.omitBody ? undefined : JSON.stringify(payload));
 }
 
 function serveHtml(response: ServerResponse, html: string, statusCode = 200) {
@@ -483,9 +496,11 @@ function buildAuthPage(mode: 'login' | 'register') {
 const PORT = resolvePort();
 const HOST = resolveHost();
 const STORE_PATH = resolveStorePath();
+const UPDATES_DIR = resolveUpdatesDir(STORE_PATH);
 const BASE_PATH = resolveBasePath();
 const TURN_CONFIG = resolveTurnConfig();
 mkdirSync(dirname(STORE_PATH), { recursive: true });
+mkdirSync(UPDATES_DIR, { recursive: true });
 const store = new TraversalRelayStore(STORE_PATH);
 const hosts = new Map<string, RelayHostConnection>();
 const clients = new Map<string, RelayClientConnection>();
@@ -527,6 +542,10 @@ function buildHealthSnapshot(request: IncomingMessage) {
       port: PORT,
     },
     store: store.summary(),
+    updates: {
+      dir: UPDATES_DIR,
+      manifestPresent: existsSync(join(UPDATES_DIR, 'latest.json')),
+    },
     relay: {
       hosts: hosts.size,
       clients: clients.size,
@@ -536,6 +555,25 @@ function buildHealthSnapshot(request: IncomingMessage) {
     },
     turn: buildHealthTurnSnapshot(),
   };
+}
+
+function resolveUpdateFilePath(pathname: string) {
+  const updatesPrefix = routePath('/updates/');
+  if (!pathname.startsWith(updatesPrefix)) {
+    return null;
+  }
+  const relativePath = pathname.slice(updatesPrefix.length);
+  const safeName = basename(relativePath);
+  const updatesRoot = resolve(UPDATES_DIR);
+  const absolutePath = resolve(updatesRoot, safeName);
+  if (absolutePath !== updatesRoot && !absolutePath.startsWith(`${updatesRoot}/`)) {
+    return null;
+  }
+  return absolutePath;
+}
+
+function isGetOrHead(request: IncomingMessage) {
+  return request.method === 'GET' || request.method === 'HEAD';
 }
 
 function buildHealthTurnSnapshot() {
@@ -600,6 +638,43 @@ async function handleHttpRequest(request: IncomingMessage, response: ServerRespo
 
   if (request.method === 'GET' && pathname === routePath('/health')) {
     serveJson(response, buildHealthSnapshot(request));
+    return;
+  }
+
+  if (isGetOrHead(request) && pathname === routePath('/updates/latest.json')) {
+    const manifestPath = join(UPDATES_DIR, 'latest.json');
+    if (!existsSync(manifestPath)) {
+      serveJson(response, { ok: false, message: 'update manifest not found' }, 404, { omitBody: request.method === 'HEAD' });
+      return;
+    }
+    try {
+      serveJson(response, JSON.parse(readFileSync(manifestPath, 'utf-8')), 200, { omitBody: request.method === 'HEAD' });
+    } catch (error) {
+      serveJson(
+        response,
+        { ok: false, message: `invalid update manifest: ${error instanceof Error ? error.message : String(error)}` },
+        500,
+        { omitBody: request.method === 'HEAD' },
+      );
+    }
+    return;
+  }
+
+  if (isGetOrHead(request) && pathname.startsWith(routePath('/updates/'))) {
+    const filePath = resolveUpdateFilePath(pathname);
+    if (!filePath || !existsSync(filePath)) {
+      serveJson(response, { ok: false, message: 'update file not found' }, 404, { omitBody: request.method === 'HEAD' });
+      return;
+    }
+    const fileStat = statSync(filePath);
+    response.statusCode = 200;
+    response.setHeader('Content-Type', filePath.endsWith('.apk') ? 'application/vnd.android.package-archive' : 'application/octet-stream');
+    response.setHeader('Content-Length', fileStat.size);
+    if (request.method === 'HEAD') {
+      response.end();
+      return;
+    }
+    createReadStream(filePath).pipe(response);
     return;
   }
 

@@ -26,7 +26,9 @@ describe('relay server independent release package gates', () => {
     expect(script).toContain("runtime/smoke.cjs");
     expect(script).toContain("ZTERM_TRAVERSAL_BASE_PATH");
     expect(script).toContain("ZTERM_TRAVERSAL_STORE_PATH");
+    expect(script).toContain("ZTERM_TRAVERSAL_UPDATES_DIR");
     expect(script).toContain("ZTERM_TURN_URL");
+    expect(script).toContain("/relay/updates/latest.json");
     expect(script).toContain("zterm-relay-server smoke --base-url");
     expect(script).not.toContain("@jsonstudio/zterm-daemon");
     expect(script).not.toContain("zterm-daemon install-service");

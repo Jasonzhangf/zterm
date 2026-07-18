@@ -1,5 +1,13 @@
+export type AppUpdateProjectionManifestSource =
+  | 'user-saved'
+  | 'relay-injected'
+  | 'server-connected'
+  | 'manual-override'
+  | 'none';
+
 export interface AppUpdateProjectionPreferences {
   manifestUrl: string;
+  manifestSource?: AppUpdateProjectionManifestSource;
   autoCheckOnLaunch: boolean;
   skippedVersionCode?: number;
   ignoreUntilManualCheck: boolean;

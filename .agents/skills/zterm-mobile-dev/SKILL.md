@@ -63,6 +63,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 汇报时必须给出 `versionName`、`versionCode`、APK 路径和 sha256；不能只说测试通过。
 - 若本机有在线 ADB 设备，构建后继续安装 / 启动 / 真机 smoke；若没有在线设备，必须明确写出 “APK 已构建发布，但 L5 真机复测缺口是无 online ADB 设备”。
 - 禁止把源码修复、单测、typecheck、daemon close-loop 当成可供 Jason 复测的交付物；没有升级 APK，就不算移动端交付闭环。
+- Relay 场景下升级地址必须跟随当前 Relay 公网路由：`App` 只能把 `traversalRelay.wsHostUrl` 交给 `app-update-runtime`，由唯一 owner 派生 `/relay/updates/latest.json`。显式 `user-saved` manifest 不覆盖；旧私网/Tailscale `server-connected` 或旧 `relay-injected` URL 可被当前 Relay URL 替换。Relay server 必须通过 `ZTERM_TRAVERSAL_UPDATES_DIR` / `ZTERM_RELAY_UPDATES_DIR` 服务 `/relay/updates/latest.json` 和 `/relay/updates/<apk>`，且 public GET/HEAD + APK sha256 都验证通过；只在客户端改 URL 而生产 Relay 不服务更新包不算闭环。
 - 替换 Android App Logo 时，以仓库根 `assets/logo.png` 为源，同时生成 `ic_launcher`、`ic_launcher_round`、`ic_launcher_foreground` 的 mdpi/hdpi/xhdpi/xxhdpi/xxxhdpi 资源。Adaptive foreground 必须按 Launcher 二次蒙版预留安全区，默认前景不超过画布 80%，背景色与 Logo 外围一致；构建后既要从 APK 解包核对 legacy/adaptive hash，也要看真实 Launcher 截图，包内字节一致不能证明最终图标未被裁切。
 
 ### 2.3 旧文档处理

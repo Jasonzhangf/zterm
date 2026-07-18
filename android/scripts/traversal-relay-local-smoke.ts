@@ -1,6 +1,6 @@
 import { spawn, spawnSync } from 'child_process';
 import { createServer } from 'http';
-import { mkdtempSync, mkdirSync, rmSync } from 'fs';
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
@@ -28,7 +28,17 @@ const relayPassword = `smoke-${randomUUID()}`;
 const tmuxSession = `zterm-relay-smoke-${Date.now()}`;
 const tempRoot = mkdtempSync(join(tmpdir(), 'zterm-traversal-smoke-'));
 const tempHome = join(tempRoot, 'home');
+const relayUpdatesDir = join(tempRoot, 'relay-updates');
 mkdirSync(tempHome, { recursive: true });
+mkdirSync(relayUpdatesDir, { recursive: true });
+writeFileSync(join(relayUpdatesDir, 'zterm-relay-smoke.apk'), 'relay update smoke apk bytes');
+writeFileSync(join(relayUpdatesDir, 'latest.json'), `${JSON.stringify({
+  versionName: '0.0.0-relay-smoke',
+  versionCode: 1,
+  apkUrl: 'zterm-relay-smoke.apk',
+  sha256: 'relay-smoke-sha',
+  notes: [],
+}, null, 2)}\n`);
 
 const tsxBin = join(androidDir, 'node_modules', '.bin', 'tsx');
 
@@ -114,6 +124,28 @@ async function registerAndLogin() {
     throw new Error(`login failed: ${JSON.stringify(loginBody)}`);
   }
   return loginBody.accessToken;
+}
+
+async function fetchRelayUpdateSmoke() {
+  const manifestUrl = `${relayUrl}/updates/latest.json`;
+  const manifestResponse = await fetch(manifestUrl);
+  const manifest = await manifestResponse.json() as { apkUrl?: string; versionCode?: number; versionName?: string };
+  if (!manifestResponse.ok || manifest.apkUrl !== 'zterm-relay-smoke.apk') {
+    throw new Error(`relay update manifest smoke failed: HTTP ${manifestResponse.status} ${JSON.stringify(manifest)}`);
+  }
+  const apkUrl = new URL(manifest.apkUrl, manifestUrl).toString();
+  const apkResponse = await fetch(apkUrl);
+  const apkText = await apkResponse.text();
+  if (!apkResponse.ok || apkText !== 'relay update smoke apk bytes') {
+    throw new Error(`relay update apk smoke failed: HTTP ${apkResponse.status} body=${JSON.stringify(apkText)}`);
+  }
+  return {
+    manifestUrl,
+    apkUrl,
+    versionName: manifest.versionName || '',
+    versionCode: manifest.versionCode || 0,
+    bytes: apkText.length,
+  };
 }
 
 async function waitForDaemonRelayRegistration(timeoutMs = 15_000) {
@@ -461,6 +493,7 @@ async function main() {
     // Inherited deployment env may set a non-empty base path like /relay.
     ZTERM_TRAVERSAL_BASE_PATH: '',
     ZTERM_TRAVERSAL_DATA_DIR: join(tempRoot, 'relay-data'),
+    ZTERM_TRAVERSAL_UPDATES_DIR: relayUpdatesDir,
   };
 
   const daemonEnv = {
@@ -499,6 +532,7 @@ async function main() {
 
   try {
     await waitForHealth(`${relayUrl}/health`, 'relay');
+    const relayUpdateSmoke = await fetchRelayUpdateSmoke();
     const tmuxCreate = spawnSync('tmux', ['new-session', '-d', '-s', tmuxSession, 'printf "relay smoke ready\\n"; exec bash'], {
       encoding: 'utf-8',
     });
@@ -529,6 +563,7 @@ async function main() {
       deviceStreamSnapshot: deviceStream.firstSnapshot,
       directoryStreamSnapshot,
       routeSelection,
+      relayUpdateSmoke,
       rtcResult,
     }, null, 2)}\n`);
   } finally {
