@@ -77,6 +77,7 @@ terminal / daemon / client / renderer 相关任务完成前，先写清本轮影
 - Mac 默认命令：`pnpm --dir mac test -- --reporter dot` 与 `pnpm --dir mac run type-check`。
 - Mac 必须覆盖：`bridge-transport`、`local-tmux-transport`、`terminal-runtime`、workbench active target。
 - Android/Web 默认至少覆盖：open-tab restore/resume、SessionContext transport、buffer apply、TerminalPage/TerminalView 渲染入口的目标测试。
+- Session 切换、foreground resume、drawer/preview active 投影、或用户报告“session 名字和内容对不上”时，必须加入 session identity 黑盒门禁：同一测试里给两个 session 写不同 body marker，通过真实 `sessionBufferStore -> TerminalPageStageShell -> TerminalView` 渲染，断言 header/active id/name 与 DOM body marker 同源；同时模拟旧 session 迟到 publish、pause/resume、layout/IME resize，证明旧 body 不会出现在新 active 名字下。
 
 ### L4 app shell / UI 行为 gate
 - 证明：页面入口、tab/split/drawer/IME/layout 等 UI shell 行为在测试环境中按语义工作。

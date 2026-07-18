@@ -35,6 +35,7 @@ function makeSession(id: string, revision: number) {
       cursor: null,
       updateKind: 'replace' as const,
       revision,
+      marker: `body-${id}-rev-${revision}`,
     },
   };
 }
@@ -576,6 +577,7 @@ vi.mock('./pages/TerminalPage', () => ({
     onTerminalWidthModeChange,
     onSessionDraftSend,
     followResetEpoch,
+    sessionBufferStore,
     serverIdentityAliasInputs = [],
   }: {
     activeSession: { id: string; buffer?: { revision?: number } } | null;
@@ -589,18 +591,24 @@ vi.mock('./pages/TerminalPage', () => ({
     onTerminalWidthModeChange?: (sessionId: string, mode: 'adaptive-phone' | 'mirror-fixed', cols?: number | null) => void;
     onSessionDraftSend?: (value: string, sessionId?: string) => void;
     followResetEpoch?: number;
+    sessionBufferStore?: { getSnapshot: (sessionId: string) => { buffer?: { marker?: string; revision?: number } } };
     serverIdentityAliasInputs?: Array<{ bridgeHost?: string; bridgePort?: number; daemonHostId?: string; name?: string }>;
   }) => {
     const activeRevision = activeSession?.buffer?.revision ?? -1;
+    const activeStoreSnapshot = activeSession ? sessionBufferStore?.getSnapshot(activeSession.id)?.buffer : null;
+    const activeBodyMarker = activeStoreSnapshot?.marker || `body-missing-${activeSession?.id || 'none'}`;
     terminalPageRenderSpy({
       activeSessionId: activeSession?.id || null,
       sessionIds: sessions.map((session) => session.id),
       activeRevision,
+      activeBodyMarker,
       serverIdentityAliasInputs,
     });
     return (
       <div>
         <div data-testid="terminal-revision">{activeRevision}</div>
+        <div data-testid="terminal-active-session-id">{activeSession?.id || ''}</div>
+        <div data-testid="terminal-active-body-marker">{activeBodyMarker}</div>
         <div data-testid="terminal-session-ids">{sessions.map((session) => session.id).join(',')}</div>
         <div data-testid="terminal-input-reset-epoch">{activeSession ? (inputResetEpochBySession?.[activeSession.id] || 0) : -1}</div>
         <div data-testid="terminal-follow-reset-epoch">{String(followResetEpoch ?? -1)}</div>
@@ -889,6 +897,64 @@ describe('App dynamic refresh matrix', () => {
     });
     view.rerender(<AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />);
     await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('9'));
+  });
+
+  it('keeps active session body matched after tab switch and foreground resume', async () => {
+    sessionHarness.update(
+      {
+        sessions: [makeSession('s1', 1), makeSession('s2', 9)],
+        activeSessionId: 's1',
+        connectedCount: 2,
+      } as any,
+      makeSession('s1', 1),
+    );
+
+    const view = render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-active-session-id').textContent).toBe('s1'));
+    expect(screen.getByTestId('terminal-active-body-marker').textContent).toBe('body-s1-rev-1');
+
+    act(() => {
+      sessionHarness.update(
+        {
+          sessions: [makeSession('s1', 1), makeSession('s2', 9)],
+          activeSessionId: 's2',
+          connectedCount: 2,
+        } as any,
+        makeSession('s1', 1),
+      );
+    });
+    view.rerender(<AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByTestId('terminal-active-session-id').textContent).toBe('s2'));
+    expect(screen.getByTestId('terminal-active-body-marker').textContent).toBe('body-s2-rev-9');
+
+    act(() => {
+      document.dispatchEvent(new Event('pause'));
+      capacitorAppHarness.emit({ isActive: false });
+      sessionHarness.update(
+        {
+          sessions: [makeSession('s1', 3), makeSession('s2', 10)],
+          activeSessionId: 's2',
+          connectedCount: 2,
+        } as any,
+        makeSession('s1', 3),
+      );
+    });
+    view.rerender(<AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />);
+
+    act(() => {
+      document.dispatchEvent(new Event('resume'));
+      capacitorAppHarness.emit({ isActive: true });
+    });
+    view.rerender(<AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />);
+
+    await waitFor(() => expect(screen.getByTestId('terminal-active-session-id').textContent).toBe('s2'));
+    expect(screen.getByTestId('terminal-active-body-marker').textContent).toBe('body-s2-rev-10');
+    expect(screen.getByTestId('terminal-active-body-marker').textContent).not.toBe('body-s1-rev-3');
+    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalledWith('s1');
   });
 
   it('does not rerender TerminalPage when only an inactive session runtime state changes', async () => {

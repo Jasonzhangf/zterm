@@ -2552,3 +2552,14 @@ Need runtime debug to confirm:
 - Verified: focused relay/route/drawer/session/mirror suite 163 PASS; broader relay UI suite 30 PASS; server transport/RTC truth 21 PASS; feature/resource/function/mainline gates 48 PASS; `tsc --noEmit` PASS; `git diff --check` PASS; local relay smoke PASS twice and selected `rtc-direct` with `iceTransportPolicy='all'` / STUN-only candidate; `build:android` published `0.1.3.2147` sha256 `b3ede68f37dae59a6c624546826bccfc20786a06beb704036056490d2c0c9e7d`.
 - L5 gap: `adb devices -l` returned no online devices after build, so APK is in the update channel but not installed/visually verified on a phone in this run.
 - MemoryPalace remains unavailable with bad interpreter `/Users/fanzhang/.local/pipx/venvs/mempalace/bin/python`, so mine/search persistence is not claimable until that toolchain is repaired.
+
+## 2026-07-18 Session name/body identity black-box gate
+
+- Jason reported a severe session identity risk: after switching sessions and backgrounding/foregrounding the app, the session list/header name can appear to belong to one session while the terminal body belongs to another.
+- Architecture mapping: this is `resource.active_session -> resource.session_transport -> resource.client_sparse_buffer -> resource.renderer_window -> resource.ui_projection`. The owner chain is `App -> SessionContext/BufferApply -> session-render-buffer-store -> TerminalPage/StageShell -> TerminalView`; UI text must not compensate for buffer identity mistakes.
+- Detection added:
+  - `App.dynamic-refresh.test.tsx` now marks each mocked session body and asserts active session body remains `s2` after tab switch and foreground resume even when a stale getter still points to `s1`.
+  - New `TerminalPage.session-content-identity.test.tsx` uses real `TerminalPageStageShell`, real `TerminalView`, and real `sessionBufferStore`; only Header is mocked to expose active name/id. It asserts Alpha header/body, switch to Beta header/body, then Alpha late publish + Beta resumed publish + pause/resume + resize still render Beta body only.
+- Verification passed: focused gate `pnpm --dir android exec vitest run src/App.dynamic-refresh.test.tsx src/components/TerminalView.dynamic-refresh.test.tsx src/pages/TerminalPage.session-content-identity.test.tsx src/contexts/SessionContext.ws-refresh.test.tsx --reporter dot` = 4 files / 235 tests PASS; `test:feature-registry` = 7 files / 48 tests PASS; `tsc --noEmit` PASS; `git diff --check` PASS.
+- Current conclusion: local black-box tests did not reproduce wrong session body binding. This is a newly locked regression gate, not proof the real device bug is gone. Remaining gap is live device/daemon source-to-DOM replay across actual background/foreground with two uniquely marked tmux sessions.
+- MemoryPalace remains unavailable with bad interpreter `/Users/fanzhang/.local/pipx/venvs/mempalace/bin/python`, so no mine/search closure is claimed.
