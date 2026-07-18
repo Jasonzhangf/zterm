@@ -1,5 +1,12 @@
 import { spawn, spawnSync } from 'child_process';
 import { homedir } from 'os';
+import {
+  TERMINAL_INPUT_CHUNK_BYTES,
+  TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES,
+  TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS,
+  getTerminalInputUtf8ByteLength,
+  splitTerminalInputUtf8Chunks,
+} from '@zterm/shared/terminal/input-chunking';
 import type { SessionMirror } from './terminal-runtime-types';
 import type { WezTermBackendRuntime } from './wezterm-backend';
 
@@ -38,14 +45,20 @@ export interface TerminalControlRuntime {
 export function createTerminalControlRuntime(
   deps: TerminalControlRuntimeDeps,
 ): TerminalControlRuntime {
+  type LiveMirrorInputItem = {
+    payload: string;
+    appendEnter: boolean;
+    shouldWrite?: () => boolean;
+    resolve: (value: boolean) => void;
+    reject: (reason?: unknown) => void;
+  };
+  type LiveMirrorInputGroup = {
+    payload: string;
+    appendEnter: boolean;
+    items: LiveMirrorInputItem[];
+  };
   const liveMirrorInputBatches = new Map<string, {
-    items: Array<{
-      payload: string;
-      appendEnter: boolean;
-      shouldWrite?: () => boolean;
-      resolve: (value: boolean) => void;
-      reject: (reason?: unknown) => void;
-    }>;
+    items: LiveMirrorInputItem[];
     scheduled: boolean;
     flushing: boolean;
 
@@ -168,6 +181,40 @@ export function createTerminalControlRuntime(
     });
   }
 
+  function sleepTmuxWriteSettleSync() {
+    if (TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS <= 0) {
+      return;
+    }
+    Atomics.wait(
+      new Int32Array(new SharedArrayBuffer(4)),
+      0,
+      0,
+      TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS,
+    );
+  }
+
+  function sleepTmuxWriteSettleAsync() {
+    if (TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS <= 0) {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve) => {
+      setTimeout(resolve, TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS);
+    });
+  }
+
+  function writeTmuxLiteralChunksSync(sessionName: string, payload: string) {
+    const chunks = splitTerminalInputUtf8Chunks(
+      payload,
+      TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES,
+    );
+    for (let index = 0; index < chunks.length; index += 1) {
+      runTmux(['send-keys', '-t', sessionName, '-l', '--', chunks[index]!]);
+      if (index < chunks.length - 1) {
+        sleepTmuxWriteSettleSync();
+      }
+    }
+  }
+
   // Daemon shares the system-default tmux socket so that sessions created by
   // the user's interactive `tmux` shell are visible to the client and vice
   // versa. Using a private socket would hide user sessions and break the
@@ -199,10 +246,20 @@ export function createTerminalControlRuntime(
 
   function writeToTmuxSession(sessionName: string, payload: string, appendEnter: boolean) {
     if (deps.wezTermBackend) {
-      deps.wezTermBackend.writeInput(sessionName, `${payload}${appendEnter ? '\r' : ''}`);
+      const chunks = splitTerminalInputUtf8Chunks(payload, TERMINAL_INPUT_CHUNK_BYTES);
+      if (chunks.length <= 1) {
+        deps.wezTermBackend.writeInput(sessionName, `${chunks[0] || ''}${appendEnter ? '\r' : ''}`);
+        return;
+      }
+      for (const chunk of chunks) {
+        deps.wezTermBackend.writeInput(sessionName, chunk);
+      }
+      if (appendEnter) {
+        deps.wezTermBackend.writeInput(sessionName, '\r');
+      }
       return;
     }
-    runTmux(['send-keys', '-t', sessionName, '-l', '--', payload]);
+    writeTmuxLiteralChunksSync(sessionName, payload);
     if (appendEnter) {
       runTmux(['send-keys', '-t', sessionName, 'Enter']);
     }
@@ -214,14 +271,110 @@ export function createTerminalControlRuntime(
       return false;
     }
     if (deps.wezTermBackend) {
-      deps.wezTermBackend.writeInput(sessionName, `${payload}${appendEnter ? '\r' : ''}`);
+      const chunks = splitTerminalInputUtf8Chunks(payload, TERMINAL_INPUT_CHUNK_BYTES);
+      if (chunks.length <= 1) {
+        deps.wezTermBackend.writeInput(sessionName, `${chunks[0] || ''}${appendEnter ? '\r' : ''}`);
+        return true;
+      }
+      for (const chunk of chunks) {
+        deps.wezTermBackend.writeInput(sessionName, chunk);
+      }
+      if (appendEnter) {
+        deps.wezTermBackend.writeInput(sessionName, '\r');
+      }
       return true;
     }
-    runTmux(['send-keys', '-t', sessionName, '-l', '--', payload]);
+    writeTmuxLiteralChunksSync(sessionName, payload);
     if (appendEnter) {
       runTmux(['send-keys', '-t', sessionName, 'Enter']);
     }
     return true;
+  }
+
+  function buildLiveMirrorInputGroups(items: LiveMirrorInputItem[]): LiveMirrorInputGroup[] {
+    const maxGroupBytes = deps.wezTermBackend
+      ? TERMINAL_INPUT_CHUNK_BYTES
+      : TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES;
+    const groups: LiveMirrorInputGroup[] = [];
+    let groupPayload = '';
+    let groupBytes = 0;
+    const groupItems = new Set<LiveMirrorInputItem>();
+    const flushGroup = (appendEnter: boolean) => {
+      if (!groupPayload && groupItems.size === 0 && !appendEnter) {
+        return;
+      }
+      groups.push({
+        payload: groupPayload,
+        appendEnter,
+        items: Array.from(groupItems),
+      });
+      groupPayload = '';
+      groupBytes = 0;
+      groupItems.clear();
+    };
+
+    for (const item of items) {
+      const chunks = splitTerminalInputUtf8Chunks(item.payload, maxGroupBytes);
+      if (chunks.length === 0) {
+        groupItems.add(item);
+        if (item.appendEnter) {
+          flushGroup(true);
+        }
+        continue;
+      }
+      for (let index = 0; index < chunks.length; index += 1) {
+        const chunk = chunks[index]!;
+        const chunkBytes = getTerminalInputUtf8ByteLength(chunk);
+        if (groupBytes > 0 && groupBytes + chunkBytes > maxGroupBytes) {
+          flushGroup(false);
+        }
+        groupPayload += chunk;
+        groupBytes += chunkBytes;
+        groupItems.add(item);
+        if (item.appendEnter && index === chunks.length - 1) {
+          flushGroup(true);
+        }
+      }
+    }
+
+    flushGroup(false);
+    return groups;
+  }
+
+  function createLiveMirrorInputGroupSettler(
+    writableItems: LiveMirrorInputItem[],
+    groups: LiveMirrorInputGroup[],
+  ) {
+    const unresolved = new Set(writableItems);
+    const failedItems = new Set<LiveMirrorInputItem>();
+    const pendingGroupCounts = new Map<LiveMirrorInputItem, number>();
+    for (const group of groups) {
+      for (const item of group.items) {
+        pendingGroupCounts.set(item, (pendingGroupCounts.get(item) || 0) + 1);
+      }
+    }
+    const settleGroup = (group: LiveMirrorInputGroup, value: boolean) => {
+      for (const item of group.items) {
+        if (!unresolved.has(item)) {
+          continue;
+        }
+        if (!value) {
+          failedItems.add(item);
+        }
+        const nextCount = (pendingGroupCounts.get(item) || 1) - 1;
+        if (nextCount > 0) {
+          pendingGroupCounts.set(item, nextCount);
+          continue;
+        }
+        pendingGroupCounts.delete(item);
+        unresolved.delete(item);
+        item.resolve(!failedItems.has(item));
+      }
+    };
+    return {
+      unresolved,
+      settleGroup,
+    };
   }
 
   async function flushPendingLiveMirrorInput(mirrorKey: string) {
@@ -268,45 +421,29 @@ export function createTerminalControlRuntime(
       return;
     }
 
-    const groups: Array<{
-      payload: string;
-      appendEnter: boolean;
-      items: typeof writableItems;
-    }> = [];
-    let groupPayload = '';
-    let groupItems: typeof writableItems = [];
-    for (const item of writableItems) {
-      groupPayload += item.payload;
-      groupItems.push(item);
-      if (item.appendEnter) {
-        groups.push({ payload: groupPayload, appendEnter: true, items: groupItems });
-        groupPayload = '';
-        groupItems = [];
-      }
-    }
-    if (groupItems.length > 0) {
-      groups.push({ payload: groupPayload, appendEnter: false, items: groupItems });
-    }
-
-    const unresolved = new Set(writableItems);
-    const resolveGroup = (group: typeof groups[number], value: boolean) => {
-      for (const item of group.items) {
-        unresolved.delete(item);
-        item.resolve(value);
-      }
-    };
-    const isGroupWritable = (group: typeof groups[number]) =>
+    const groups = buildLiveMirrorInputGroups(writableItems);
+    const { unresolved, settleGroup } = createLiveMirrorInputGroupSettler(writableItems, groups);
+    const isGroupWritable = (group: LiveMirrorInputGroup) =>
       group.items.every((item) => !item.shouldWrite || item.shouldWrite());
 
     if (deps.wezTermBackend) {
       try {
         for (const group of groups) {
           if (!isGroupWritable(group)) {
-            resolveGroup(group, false);
+            settleGroup(group, false);
             continue;
           }
-          deps.wezTermBackend.writeInput(mirror.sessionName, `${group.payload}${group.appendEnter ? '\r' : ''}`);
-          resolveGroup(group, true);
+          if (group.payload) {
+            deps.wezTermBackend.writeInput(mirror.sessionName, group.payload);
+          }
+          if (group.appendEnter) {
+            if (!isGroupWritable(group)) {
+              settleGroup(group, false);
+              continue;
+            }
+            deps.wezTermBackend.writeInput(mirror.sessionName, '\r');
+          }
+          settleGroup(group, true);
         }
       } catch (error) {
         for (const item of unresolved) {
@@ -324,9 +461,10 @@ export function createTerminalControlRuntime(
     }
 
     try {
-      for (const group of groups) {
+      for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
+        const group = groups[groupIndex]!;
         if (!isGroupWritable(group)) {
-          resolveGroup(group, false);
+          settleGroup(group, false);
           continue;
         }
         if (group.payload) {
@@ -334,12 +472,15 @@ export function createTerminalControlRuntime(
         }
         if (group.appendEnter) {
           if (!isGroupWritable(group)) {
-            resolveGroup(group, false);
+            settleGroup(group, false);
             continue;
           }
           await runTmuxAsync(['send-keys', '-t', mirror.sessionName, 'Enter']);
         }
-        resolveGroup(group, true);
+        settleGroup(group, true);
+        if (groupIndex < groups.length - 1) {
+          await sleepTmuxWriteSettleAsync();
+        }
       }
     } catch (error) {
       for (const item of unresolved) {

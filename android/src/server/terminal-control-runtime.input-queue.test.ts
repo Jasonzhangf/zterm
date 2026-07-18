@@ -1,5 +1,10 @@
 import { EventEmitter } from 'events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES,
+  TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS,
+  getTerminalInputUtf8ByteLength,
+} from '@zterm/shared/terminal/input-chunking';
 import type { SessionMirror } from './terminal-runtime-types';
 import { createTerminalControlRuntime } from './terminal-control-runtime';
 import type { WezTermBackendRuntime } from './wezterm-backend';
@@ -112,6 +117,10 @@ async function runSpawnMockImmediately() {
   });
 }
 
+async function waitForTmuxWriteSettle() {
+  await new Promise((resolve) => setTimeout(resolve, TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS + 1));
+}
+
 describe('terminal control runtime input queue', () => {
   beforeEach(() => {
     spawnMock.mockReset();
@@ -213,6 +222,113 @@ describe('terminal control runtime input queue', () => {
       '--',
       'next',
     ]);
+  });
+
+  it('splits coalesced burst input before tmux write groups exceed the safe byte budget', async () => {
+    await runSpawnMockImmediately();
+    const { runtime } = createRuntime();
+    const first = 'a'.repeat(TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES - 16);
+    const second = `${'b'.repeat(24)}中文😀tail`;
+
+    const writes = await Promise.all([
+      runtime.enqueueLiveMirrorInput('demo', first, false, () => true),
+      runtime.enqueueLiveMirrorInput('demo', second, false, () => true),
+    ]);
+
+    expect(writes).toEqual([true, true]);
+    const payloadWrites = spawnMock.mock.calls
+      .map((call) => call[1] as string[])
+      .filter((args) => args.includes('-l'))
+      .map((args) => args[args.length - 1] || '');
+    expect(payloadWrites.length).toBeGreaterThan(1);
+    expect(payloadWrites.join('')).toBe(`${first}${second}`);
+    for (const payload of payloadWrites) {
+      expect(getTerminalInputUtf8ByteLength(payload)).toBeLessThanOrEqual(
+        TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES,
+      );
+    }
+  });
+
+  it('does not resolve an oversized single input item until all of its tmux chunks finish', async () => {
+    const children: Array<ReturnType<typeof createFakeChild>> = [];
+    spawnMock.mockImplementation(() => {
+      const child = createFakeChild();
+      children.push(child);
+      return child;
+    });
+    const { runtime } = createRuntime();
+    const source = `${'x'.repeat(TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES)}${'y'.repeat(64)}`;
+
+    let resolved = false;
+    const write = runtime.enqueueLiveMirrorInput('demo', source, false, () => true).then((value) => {
+      resolved = true;
+      return value;
+    });
+
+    await Promise.resolve();
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+    children[0]?.emit('close', 0);
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+    await waitForTmuxWriteSettle();
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    children[1]?.emit('close', 0);
+    await expect(write).resolves.toBe(true);
+    expect(resolved).toBe(true);
+  });
+
+  it('drains input queued while a previous tmux write is still in flight', async () => {
+    const children: Array<ReturnType<typeof createFakeChild>> = [];
+    spawnMock.mockImplementation(() => {
+      const child = createFakeChild();
+      children.push(child);
+      return child;
+    });
+    const { runtime } = createRuntime();
+
+    const firstWrite = runtime.enqueueLiveMirrorInput('demo', 'first', false, () => true);
+    await Promise.resolve();
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+
+    const secondWrite = runtime.enqueueLiveMirrorInput('demo', 'second', false, () => true);
+    children[0]?.emit('close', 0);
+    await expect(firstWrite).resolves.toBe(true);
+    await Promise.resolve();
+    await waitForTmuxWriteSettle();
+    expect(spawnMock).toHaveBeenCalledTimes(2);
+    expect(spawnMock.mock.calls[1]?.[1]).toEqual([
+      'send-keys',
+      '-t',
+      'demo',
+      '-l',
+      '--',
+      'second',
+    ]);
+
+    children[1]?.emit('close', 0);
+    await expect(secondWrite).resolves.toBe(true);
+  });
+
+  it('chunks direct tmux writes so fallback paths do not send oversized literal arguments', () => {
+    const { runtime } = createRuntime();
+    const source = 'z'.repeat(TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES + 9);
+
+    runtime.writeToTmuxSession('demo', source, true);
+
+    const sendKeyCalls = spawnSyncMock.mock.calls
+      .map((call) => call[1] as string[])
+      .filter((args) => args[0] === 'send-keys');
+    expect(sendKeyCalls).toHaveLength(3);
+    const payloads = sendKeyCalls
+      .filter((args) => args.includes('-l'))
+      .map((args) => args[args.length - 1] || '');
+    expect(payloads.join('')).toBe(source);
+    for (const payload of payloads) {
+      expect(getTerminalInputUtf8ByteLength(payload)).toBeLessThanOrEqual(
+        TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES,
+      );
+    }
+    expect(sendKeyCalls[sendKeyCalls.length - 1]).toEqual(['send-keys', '-t', 'demo', 'Enter']);
   });
 
   // R3 reverse tests: close/destroy must NOT leak input into a future attach.

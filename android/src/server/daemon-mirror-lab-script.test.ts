@@ -79,6 +79,20 @@ describe('daemon mirror lab isolation gate', () => {
     expect(waitForMarkerBlock).not.toContain('normalizeWireLines(payload.lines');
   });
 
+  it('keeps long-input source digest and mirror recovery as separate black-box gates', () => {
+    const script = readFileSync(join(process.cwd(), 'scripts', 'daemon-mirror-lab.ts'), 'utf8');
+    const longInputBlock = script.slice(
+      script.indexOf('function buildLongInputDigestStep('),
+      script.indexOf('async function runExternalInputCase('),
+    );
+    expect(longInputBlock).toContain('readyMarker');
+    expect(longInputBlock).toContain('\\x04python3');
+    expect(longInputBlock).toContain("'long-input-source-target-digest'");
+    expect(longInputBlock).toContain("'long-input-mirror-recovered'");
+    expect(longInputBlock).toContain("'long input mirror recovered settled payload'");
+    expect(longInputBlock).not.toContain('waitForMarker(`${marker} ${digest}`');
+  });
+
   it('waits for top/vim exit payloads to settle to tmux truth after alternate-screen returns to shell', () => {
     const script = readFileSync(join(process.cwd(), 'scripts', 'daemon-mirror-lab.ts'), 'utf8');
     expect(script).toContain("'top enter settled payload'");

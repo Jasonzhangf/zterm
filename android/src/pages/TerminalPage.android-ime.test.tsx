@@ -451,7 +451,8 @@ describe("TerminalPage Android IME bridge", () => {
     imeListeners.get("input")?.({ text: "语音输入\n下一行" });
     imeListeners.get("backspace")?.({ count: 2 });
 
-    expect(onTerminalInput).toHaveBeenCalledWith("s1", "语音输入\r下一行");
+    expect(onTerminalInput).toHaveBeenCalledWith("s1", "语音输入 下一行");
+    expect(onTerminalInput).not.toHaveBeenCalledWith("s1", "语音输入\r下一行");
     expect(onTerminalInput).toHaveBeenCalledWith("s1", "\x7f\x7f");
   });
 
@@ -2372,6 +2373,45 @@ describe("TerminalPage Android IME bridge", () => {
     await waitFor(() => {
       expect(onTerminalInput).toHaveBeenCalledWith("s1", "ABC123,.! 中文");
     });
+  });
+
+  it("treats voice IME line breaks as text separators, not terminal Enter", async () => {
+    const session = makeSession("s1");
+    const onTerminalInput = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("input")).toBe(true);
+    });
+
+    imeListeners.get("input")?.({ text: "第一段语音😀\n第二段，含特殊符号￥\r\n第三段" });
+
+    await waitFor(() => {
+      expect(onTerminalInput).toHaveBeenCalledWith(
+        "s1",
+        "第一段语音😀 第二段,含特殊符号￥ 第三段",
+      );
+    });
+    expect(onTerminalInput).not.toHaveBeenCalledWith(expect.any(String), expect.stringContaining("\r"));
+    expect(onTerminalInput).not.toHaveBeenCalledWith(expect.any(String), expect.stringContaining("\n"));
   });
 
   it("flushes a committed CJK result immediately without waiting for a later priming space", async () => {

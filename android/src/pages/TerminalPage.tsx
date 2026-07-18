@@ -2270,7 +2270,7 @@ function TerminalPageComponent({
       try {
         inputListener = await ImeAnchor.addListener('input', (event) => {
           emitToActiveSession(
-            normalizeTerminalCommittedText(event.text || '').replace(/\n/g, '\r'),
+            normalizeTerminalCommittedText(event.text || ''),
             'ime-input',
           );
         });

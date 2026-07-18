@@ -3,8 +3,10 @@ package com.zterm.android;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.nio.charset.StandardCharsets;
 
 class ImeAnchorInputLogic {
+    static final int MAX_EMIT_INPUT_BYTES = 16 * 1024;
 
     enum EventType {
         EMIT_INPUT,
@@ -87,8 +89,39 @@ class ImeAnchorInputLogic {
     private List<Event> emitCommittedText(String text) {
         reset();
         List<Event> events = new ArrayList<>();
-        events.add(Event.emitInput(text));
+        for (String chunk : splitUtf8Chunks(text, MAX_EMIT_INPUT_BYTES)) {
+            events.add(Event.emitInput(chunk));
+        }
         events.add(Event.clearEditable());
         return events;
+    }
+
+    private static List<String> splitUtf8Chunks(String text, int maxBytes) {
+        if (maxBytes < 4) {
+            throw new IllegalArgumentException("terminal input chunk size must be at least 4 UTF-8 bytes");
+        }
+        if (text.isEmpty()) {
+            return Collections.emptyList();
+        }
+        List<String> chunks = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        int currentBytes = 0;
+        for (int index = 0; index < text.length();) {
+            int codePoint = text.codePointAt(index);
+            String codePointText = new String(Character.toChars(codePoint));
+            int codePointBytes = codePointText.getBytes(StandardCharsets.UTF_8).length;
+            if (currentBytes > 0 && currentBytes + codePointBytes > maxBytes) {
+                chunks.add(current.toString());
+                current.setLength(0);
+                currentBytes = 0;
+            }
+            current.append(codePointText);
+            currentBytes += codePointBytes;
+            index += Character.charCount(codePoint);
+        }
+        if (current.length() > 0) {
+            chunks.add(current.toString());
+        }
+        return chunks;
     }
 }

@@ -60,6 +60,7 @@ describe('server control runtime truth gates', () => {
   it('keeps tmux/shell control implementations inside dedicated control runtime', () => {
     const source = readControlRuntimeSource();
     const runBlock = extractBlock(source, 'function runTmux(');
+    const tmuxLiteralChunkBlock = extractBlock(source, 'function writeTmuxLiteralChunksSync(');
     const mirrorWriteBlock = extractBlock(source, 'function writeToLiveMirror(');
     const enqueueWriteBlock = extractBlock(source, 'function enqueueLiveMirrorInput(');
     const sessionsBlock = extractBlock(source, 'function listTmuxSessions(');
@@ -68,8 +69,14 @@ describe('server control runtime truth gates', () => {
     expect(runBlock).toContain('isTmuxNoServerForListSessions(stderr, args)');
     expect(source).toContain("stderr.includes('no server running on')");
     expect(source).toContain("stderr.includes('error connecting to') && stderr.includes('No such file or directory')");
-    expect(mirrorWriteBlock).toContain("runTmux(['send-keys', '-t', sessionName, '-l', '--', payload])");
+    expect(tmuxLiteralChunkBlock).toContain('splitTerminalInputUtf8Chunks(');
+    expect(tmuxLiteralChunkBlock).toContain('TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES');
+    expect(tmuxLiteralChunkBlock).toContain("runTmux(['send-keys', '-t', sessionName, '-l', '--', chunks[index]!])");
+    expect(mirrorWriteBlock).toContain('writeTmuxLiteralChunksSync(sessionName, payload)');
+    expect(mirrorWriteBlock).not.toContain("runTmux(['send-keys', '-t', sessionName, '-l', '--', payload])");
     expect(source).toContain('const liveMirrorInputBatches = new Map<string, {');
+    expect(source).toContain('function buildLiveMirrorInputGroups(');
+    expect(source).toContain('TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES');
     expect(enqueueWriteBlock).toContain('schedulePendingLiveMirrorInput(mirrorKey)');
     expect(enqueueWriteBlock).not.toContain("await runTmuxAsync(['send-keys', '-t', sessionName, '-l', '--', payload])");
     expect(sessionsBlock).toContain("runTmux(['list-sessions', '-F', '#S'])");

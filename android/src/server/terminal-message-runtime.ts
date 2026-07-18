@@ -1,8 +1,9 @@
 import type { RawData } from 'ws';
 import { buildRequestedRangeBufferPayload } from './buffer-sync-contract';
+import { TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES } from '@zterm/shared/terminal/input-chunking';
 // R13: hard cap on a single input frame. Anything larger must be chunked by
 // the client and resent as smaller `input` frames.
-const MAX_INPUT_PAYLOAD_BYTES = 256 * 1024;
+const MAX_INPUT_PAYLOAD_BYTES = TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES;
 import type {
   BufferSyncRequestPayload,
   ClientMessage,

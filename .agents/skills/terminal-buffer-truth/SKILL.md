@@ -705,6 +705,12 @@ tmux truth
 - 若现场表现为“**语音/CJK commit 已经发生，但要再补一个字符才刷新**”，优先查两件事：
   1. **same-end 新 revision** 是否被旧的 in-flight tail-refresh 误判成“已覆盖”；同窗同 range 但 `targetHeadRevision` 变了，必须允许重发
   2. `buffer-head.cursor` 是否被 client 丢弃；head 已经带来的 cursor metadata 必须立刻进入本地 truth，不能等下一次 buffer-sync 才纠正高亮/光标
+- 若现场表现为“**长输入/语音输入丢字，或语音换行直接执行命令**”，必须把文本语义与传输完整性分开锁：
+  1. Android committed text 的 CR/LF 只在 `terminal.keyboard_ime` normalization owner 归一成文本分隔空格；显式 Enter 继续走 editor action / hardware key 独立路径，禁止 daemon、transport、renderer 再过滤语音换行
+  2. input wire 在协议协商前保持 string-only；native bridge、client WebSocket frame、daemon frame cap、backend write 各自使用独立 UTF-8 byte budget，禁止把对象 envelope 或 renderer/local echo 当补偿
+  3. tmux `send-keys -l` 的 argv 可接受不等于 PTY 长输入稳定；必须用 source SHA-256 与 tmux target file SHA-256 自动比较，并把 byte-exact source/target gate 与 mirror recovery gate 分开
+  4. 长 payload 测试要先单独发送 `stty -echo` / sink prelude，并等待 ready marker 后再流式发送 body；禁止把关闭 echo 与大 payload 混在同一 burst 后把回显洪泛误判成 input byte loss
+  5. 若 source/target digest 通过而 mirror recovery 失败，归类为 mirror/read-render 恢复故障，不得报告成输入丢字
 - 若现场表现为“**偶发先出现错误帧内容，下一帧又恢复正常**”，优先审 **render truth 边界是否持有 live buffer 的可变引用**：
   1. `SessionBufferState -> SessionRenderBufferSnapshot` 必须产出 **immutable render snapshot**
   2. `lines / gapRanges / cursor` 不得把 live buffer 引用直接交给 renderer/store

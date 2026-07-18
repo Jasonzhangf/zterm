@@ -3,6 +3,7 @@ package com.zterm.android;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertTrue;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 import org.junit.Test;
 
@@ -29,6 +30,19 @@ public class ImeAnchorInputLogicTest {
         assertEquals(2, events.size());
         assertEquals(ImeAnchorInputLogic.EventType.EMIT_INPUT, events.get(0).type);
         assertEquals("你", events.get(0).text);
+        assertEquals(ImeAnchorInputLogic.EventType.CLEAR_EDITABLE, events.get(1).type);
+    }
+
+    @Test
+    public void voiceStyleCommitTextEmitsCjkEmojiSymbolsAndLineBreaksAsOneTextEvent() {
+        ImeAnchorInputLogic logic = new ImeAnchorInputLogic();
+        String source = "第一段语音😀\n第二段，含特殊符号￥\n第三段";
+
+        List<ImeAnchorInputLogic.Event> events = logic.onCommitText(source);
+
+        assertEquals(2, events.size());
+        assertEquals(ImeAnchorInputLogic.EventType.EMIT_INPUT, events.get(0).type);
+        assertEquals(source, events.get(0).text);
         assertEquals(ImeAnchorInputLogic.EventType.CLEAR_EDITABLE, events.get(1).type);
     }
 
@@ -94,5 +108,56 @@ public class ImeAnchorInputLogicTest {
         assertEquals(ImeAnchorInputLogic.EventType.EMIT_INPUT, events.get(0).type);
         assertEquals("\r", events.get(0).text);
         assertEquals(ImeAnchorInputLogic.EventType.CLEAR_EDITABLE, events.get(1).type);
+    }
+
+    @Test
+    public void longCommitTextIsChunkedBeforeBridgeEmissionAndPreservesOrder() {
+        ImeAnchorInputLogic logic = new ImeAnchorInputLogic();
+        StringBuilder builder = new StringBuilder();
+        for (int index = 0; index < ImeAnchorInputLogic.MAX_EMIT_INPUT_BYTES / 3 + 16; index++) {
+            builder.append("中");
+        }
+        builder.append("tail");
+        String source = builder.toString();
+
+        List<ImeAnchorInputLogic.Event> events = logic.onCommitText(source);
+
+        assertTrue(events.size() > 2);
+        assertEquals(ImeAnchorInputLogic.EventType.CLEAR_EDITABLE, events.get(events.size() - 1).type);
+        StringBuilder emitted = new StringBuilder();
+        for (int index = 0; index < events.size() - 1; index++) {
+            ImeAnchorInputLogic.Event event = events.get(index);
+            assertEquals(ImeAnchorInputLogic.EventType.EMIT_INPUT, event.type);
+            assertTrue(event.text.getBytes(StandardCharsets.UTF_8).length <= ImeAnchorInputLogic.MAX_EMIT_INPUT_BYTES);
+            emitted.append(event.text);
+        }
+        assertEquals(source, emitted.toString());
+    }
+
+    @Test
+    public void longCommitTextDoesNotSplitEmojiSurrogatePairs() {
+        ImeAnchorInputLogic logic = new ImeAnchorInputLogic();
+        StringBuilder builder = new StringBuilder("a");
+        for (int index = 0; index < ImeAnchorInputLogic.MAX_EMIT_INPUT_BYTES / 4 + 4; index++) {
+            builder.append("😀");
+        }
+        builder.append("z");
+        String source = builder.toString();
+
+        List<ImeAnchorInputLogic.Event> events = logic.onCommitText(source);
+
+        assertTrue(events.size() > 2);
+        StringBuilder emitted = new StringBuilder();
+        for (int index = 0; index < events.size() - 1; index++) {
+            String chunk = events.get(index).text;
+            char first = chunk.charAt(0);
+            char last = chunk.charAt(chunk.length() - 1);
+            assertTrue(first < 0xdc00 || first > 0xdfff);
+            assertTrue(last < 0xd800 || last > 0xdbff);
+            assertTrue(chunk.getBytes(StandardCharsets.UTF_8).length <= ImeAnchorInputLogic.MAX_EMIT_INPUT_BYTES);
+            emitted.append(chunk);
+        }
+        assertEquals(source, emitted.toString());
+        assertEquals(ImeAnchorInputLogic.EventType.CLEAR_EDITABLE, events.get(events.size() - 1).type);
     }
 }

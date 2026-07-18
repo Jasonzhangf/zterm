@@ -1,6 +1,11 @@
 import type { Session } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionTransportResource } from '../lib/session-transport-runtime';
+import {
+  TERMINAL_INPUT_CHUNK_BYTES,
+  getTerminalInputUtf8ByteLength,
+  splitTerminalInputUtf8Chunks,
+} from '@zterm/shared/terminal/input-chunking';
 
 interface MutableRefObject<T> {
   current: T;
@@ -111,9 +116,13 @@ export function sendInputThroughSessionTransport(options: {
       return;
     }
     const localRevision = options.readSessionBufferSnapshot(targetSessionId).revision;
+    const inputChunks = splitTerminalInputUtf8Chunks(options.data, TERMINAL_INPUT_CHUNK_BYTES);
     options.runtimeDebug('session.input.send', {
       sessionId: targetSessionId,
       size: options.data.length,
+      bytes: getTerminalInputUtf8ByteLength(options.data),
+      chunks: inputChunks.length,
+      maxChunkBytes: TERMINAL_INPUT_CHUNK_BYTES,
       preview: options.data.slice(0, 32),
       resourceTargetKey: resource.targetKey,
       resourceSocketState: resource.socketState,
@@ -122,11 +131,13 @@ export function sendInputThroughSessionTransport(options: {
       targetSessionId,
       localRevision,
     );
-    options.sendSocketPayload(
-      targetSessionId,
-      ws,
-      JSON.stringify({ type: 'input', payload: options.data }),
-    );
+    for (const chunk of inputChunks) {
+      options.sendSocketPayload(
+        targetSessionId,
+        ws,
+        JSON.stringify({ type: 'input', payload: chunk }),
+      );
+    }
     if (isFirstPendingInputTailRefresh) {
       scheduleInputHeadRefresh({
         sessionId: targetSessionId,

@@ -1,5 +1,6 @@
 import { Buffer } from 'node:buffer';
 import { describe, expect, it, vi } from 'vitest';
+import { TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES } from '@zterm/shared/terminal/input-chunking';
 import { createTerminalMessageRuntime } from './terminal-message-runtime';
 import type { TerminalMessageRuntimeDeps } from './terminal-message-runtime';
 import type {
@@ -539,6 +540,57 @@ describe('terminal message runtime explicit error truth', () => {
       queueDepth: 0,
     }));
     expect(JSON.stringify(daemonRuntimeDebug.mock.calls)).not.toContain('pwd');
+  });
+
+  it('accepts input payloads at the daemon frame byte limit', async () => {
+    const { runtime, sessions, handleInput, sendMessage } = createRuntime();
+    const session = createSession();
+    const connection = createConnection(session.id);
+    bindSessionToConnection(session, connection);
+    sessions.set(session.id, session);
+    const payload = 'a'.repeat(TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'input',
+      payload,
+    })));
+
+    expect(handleInput).toHaveBeenCalledWith(session, payload, expect.any(Function));
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      session,
+      expect.objectContaining({ type: 'error' }),
+    );
+  });
+
+  it('rejects input payloads over the daemon frame byte limit before tmux write', async () => {
+    const { runtime, sessions, handleInput, sendTransportMessage, daemonRuntimeDebug } = createRuntime();
+    const session = createSession();
+    const connection = createConnection(session.id);
+    bindSessionToConnection(session, connection);
+    sessions.set(session.id, session);
+    const payload = 'a'.repeat(TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES + 1);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'input',
+      payload,
+    })));
+
+    expect(handleInput).not.toHaveBeenCalled();
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'error',
+      payload: {
+        message: `input payload exceeds ${TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES} bytes; client must chunk`,
+        code: 'input_too_large',
+      },
+    });
+    expect(daemonRuntimeDebug).toHaveBeenCalledWith('input-drop', expect.objectContaining({
+      transportId: connection.transportId,
+      sessionId: session.id,
+      reason: 'input_too_large',
+      bytes: TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES + 1,
+      max: TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES,
+    }));
+    expect(JSON.stringify(daemonRuntimeDebug.mock.calls)).not.toContain(payload.slice(0, 32));
   });
 
   it('rejects object input payloads instead of writing object stringification to tmux', async () => {

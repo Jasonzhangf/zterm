@@ -1,3 +1,15 @@
+# 2026-07-18 Long input tmux literal command limit
+
+- 长输入专项 L2 首次失败已追到第三层真源：probe 发出的 6 个 string-only input frame（5 x 65,536 bytes + 27,155 bytes）全部到达 daemon；随后 `terminal-control-runtime` 的 64 KiB `tmux send-keys -l` 参数逐个报 `command too long`，tmux oracle 未收到任何内容。
+- 独立 tmux probe 实测：4,096 / 8,192 / 12,000 / 16,000 bytes 成功，20,000 bytes 及以上稳定失败。因此 WebSocket frame budget 与 tmux argv budget 不能共用；client frame 保持 64 KiB，daemon tmux literal write 需要更小 UTF-8 chunk。
+- 架构仍归 `terminal.daemon_input` 唯一 backend write owner；不在 UI、renderer、buffer manager 增加补偿。新增反向 queue gate：前一 tmux write in-flight 时到达的新 input 必须在前一写完成后继续 drain，不得遗留。
+- 继续实测：8 KiB 后不再报 `command too long`，但超长 here-doc digest 仍不等价；直接 `send-keys` / `paste-buffer` 都会在 tmux/zsh/pty 长输入中把下一行前缀插入当前行。追加节流矩阵：2 KiB / 1 KiB / 512B 都失败，只有 256B + 2ms inter-write settle 达到 source SHA == target SHA。这个只影响多 chunk 长输入；普通几十字单 chunk 不增加等待。
+
+# 2026-07-18 Android voice IME committed text
+
+- Jason 反馈几十字语音输入也会丢，且语音换行会直接发出去。代码根因之一已确认：`TerminalPage` 的 Android `ImeAnchor input` listener 对所有 committed text 做 `.replace(/\n/g, '\r')`，所以语音识别插入的文本换行被投成 terminal Enter。
+- 显式 Enter 已有独立 `performEditorAction` / native key 路径；Android committed text 中的 CR/LF 应在 `src/lib/terminal-input-normalization.ts` 归一为空格，保留中文、emoji、`￥`、`、` 等非 ASCII 符号。唯一 owner 仍是 `terminal.keyboard_ime`，禁止在 daemon/input transport/renderer 层过滤换行。
+
 # 2026-07-18 Drawer duplicate session enumeration
 
 - 现场：同一 daemon 同时存在 direct/Tailscale history 与 Relay history 时，`TerminalPage.drawerRemoteSessions` 按原始 `sessionGroups` 逐组追加 rows；虽然 `drawerServerIdentityAliases` 已把两组 canonicalize 到同一 host rail，但 row 枚举没有按 canonical daemon + tmux session 去重，因此每个 session 会显示两次。
@@ -2571,3 +2583,13 @@ Need runtime debug to confirm:
 - Implementation: added `SESSION_TRANSPORT_KEEPALIVE_GRACE_MS = 120000`. `ensureActiveSessionFreshRuntime()` resolves recent alive truth from `lastServerActivityAtRef` and `lastConnectedBaselineAtRef`; `buildActiveSessionRefreshPlan()` returns `transport-keepalive-grace` for missing/closed local socket during `explicit-resume` / `active-reentry` inside the grace window. After the grace expires, the existing reconnect/throttle owner still runs. `active-tick` / explicit input recovery is not blocked by this lifecycle grace.
 - Verification: focused transport gate 5 files / 245 tests PASS; feature/resource/function/mainline gates 7 files / 48 tests PASS; `tsc --noEmit` PASS; `git diff --check` PASS; `build:android` PASS with terminal contracts 48 files / 579 tests, common flows 7 files / 82 tests, local relay smoke PASS, Vite/Capacitor/Gradle PASS, and update manifest verification PASS.
 - APK published: `0.1.3.2149` / versionCode `1032149`, sha256 `fc60b8c056497d7e262c634bb2370ffa9272b23811b87c1f2245e93e8ac48fc7`, paths `android/update-dist/zterm-0.1.3.2149.apk` and `/Users/fanzhang/.zterm/updates/zterm-0.1.3.2149.apk`. `adb devices -l` returned no online devices, so installed-device L5 is not claimed. MemoryPalace remains unavailable due bad interpreter, so mine/search persistence is not claimed.
+
+## 2026-07-18 Long terminal input delivery investigation
+
+- User issue: latest Android version loses longer terminal input.
+- MemoryPalace initially failed in the earlier shell with a stale pipx interpreter, so local `CACHE.md`/`MEMORY.md`/docs were read directly before implementation. Closeout must re-run the canonical safe-corpus mine and unique-phrase search before claiming persistence.
+- Architecture mapping: `terminal.keyboard_ime` owns Android native IME commit into `resource.platform_input_channel`; `terminal.transport_lifecycle` owns JS session transport send; `terminal.daemon_input` owns `resource.daemon_input_queue -> backend_session -> tmux_session`. Mainline IDs: `daemon_mainline:Runtime->Message`, `daemon_mainline:Message->Control`, `daemon_mainline:Control->Tmux`.
+- Verified cause in code/history: `terminal-message-runtime.ts` rejects any single string `input.payload` over 256KB with `input_too_large`, but Android client `session-context-input-runtime.ts` sent long input as one JSON frame. The R13 audit explicitly said "client 端做 chunking"; that part was missing. Secondary same-chain risk: `terminal-control-runtime.ts` coalesced same-microtask input into one `tmux send-keys -l -- <payload>`, so multiple safe frames could be merged back into an unsafe tmux argument.
+- Fix direction implemented in source: shared UTF-8 chunk helper; native `ImeAnchorInputLogic` chunks long commit events before WebView bridge emission; Android session input sends ordered string-only frames; daemon message frame max remains 256KB; daemon control queue preserves small coalescing but splits tmux write groups by byte budget and direct write paths use the same chunking.
+- Verified closeout: focused JS/native/daemon tests, shared chunk tests, Java IME tests, typecheck, feature/resource/function/mainline gates, full nine-case daemon mirror close-loop, Android build, and update manifest passed. `long-input-echo` automatically matched the 357,840-byte source and tmux target digest, then proved mirror recovery. APK `0.1.3.2150` was published with SHA-256 `82365b6c2614ccf41843d3e88f8d38d0e6caa335baf1e306e814992fc822a621`.
+- `adb devices -l` returned no online device, so real voice IME / Capacitor bridge / visible terminal L5 remains unverified.

@@ -2,7 +2,9 @@ import { spawn, spawnSync } from 'child_process';
 import { createWriteStream, existsSync, mkdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { createServer } from 'net';
+import { createHash } from 'crypto';
 import { WebSocket } from 'ws';
+import { splitTerminalInputUtf8Chunks, TERMINAL_INPUT_CHUNK_BYTES } from '@zterm/shared/terminal/input-chunking';
 import type { BufferSyncRequestPayload, ClientMessage, ScheduleEventPayload, ScheduleStatePayload, ServerMessage, TerminalBufferPayload, TerminalCell } from '../src/lib/types';
 import { resolveDaemonRuntimeConfig } from '../src/server/daemon-config';
 import { loadScheduleStore, saveScheduleStore } from '../src/server/schedule-store';
@@ -25,6 +27,7 @@ type CaseName =
   | 'vim-live'
   | 'initial-sync'
   | 'local-input-echo'
+  | 'long-input-echo'
   | 'external-input-echo'
   | 'daemon-restart-recover'
   | 'schedule-fire';
@@ -72,6 +75,7 @@ interface CaseStepResult {
   compare: CompareResult;
   clientMirrorCompare: CompareResult;
   historyLength: number;
+  details?: Record<string, unknown>;
 }
 
 interface CaseResult {
@@ -623,6 +627,46 @@ function buildStepResult(
   };
 }
 
+function findExactOracleLine(oracle: OracleSnapshot, expected: string) {
+  return oracle.lines.find((line) => line.trim() === expected) || '';
+}
+
+function buildLongInputDigestStep(options: {
+  oracle: OracleSnapshot;
+  daemonPayload: TerminalBufferPayload | null;
+  history: Array<{ at: string; type: string; payload: TerminalBufferPayload }>;
+  digest: string;
+  marker: string;
+  preludeChunkCount: number;
+  bodyChunkCount: number;
+  bodyBytes: number;
+}) {
+  const markerLine = findExactOracleLine(options.oracle, options.marker);
+  const digestLine = findExactOracleLine(options.oracle, options.digest);
+  const ok = Boolean(markerLine) && digestLine === options.digest && options.bodyChunkCount > 1;
+  const compare: CompareResult = {
+    ok,
+    mismatchIndex: ok ? null : 0,
+    expected: [options.marker, options.digest],
+    actual: [markerLine, digestLine].filter(Boolean),
+  };
+  return {
+    label: 'long-input-source-target-digest',
+    ok,
+    reason: ok ? undefined : 'daemon long-input source digest was not reproduced by tmux target file',
+    oracle: options.oracle,
+    daemonPayload: options.daemonPayload,
+    compare,
+    clientMirrorCompare: replayClientMirrorCompare(options.oracle, options.history),
+    historyLength: options.history.length,
+    details: {
+      preludeChunkCount: options.preludeChunkCount,
+      bodyChunkCount: options.bodyChunkCount,
+      bodyBytes: options.bodyBytes,
+    },
+  } satisfies CaseStepResult;
+}
+
 function finalizeCase(caseName: CaseName, steps: CaseStepResult[]): CaseResult {
   const failedStep = steps.find((step) => !step.ok);
   const primary = failedStep || steps[steps.length - 1];
@@ -929,7 +973,7 @@ class DaemonProbe {
     ]);
   }
 
-  sendInput(data: string) {
+  sendInput(data: string, options?: { requestHead?: boolean }) {
     if (!this.ws || !this.connected) {
       throw new Error('probe is not connected');
     }
@@ -941,10 +985,12 @@ class DaemonProbe {
       payload: summarizeProbeMessage(message.type, message.payload),
     });
     this.ws.send(JSON.stringify(message));
-    this.requestHead(true);
+    if (options?.requestHead !== false) {
+      this.requestHead(true);
+    }
   }
 
-  private requestHead(force = false) {
+  requestHead(force = false) {
     if (!this.ws || !this.connected) {
       return;
     }
@@ -1193,6 +1239,100 @@ async function runLocalInputCase(probe: DaemonProbe): Promise<CaseResult> {
   );
 
   return finalizeCase('local-input-echo', steps);
+}
+
+function buildLongInputDigestProbe() {
+  const lines: string[] = [];
+  for (let index = 0; index < 420; index += 1) {
+    lines.push(`zterm-long-input-${String(index).padStart(3, '0')}-${'abc123XYZ'.repeat(90)}-中文-😀-￥-、`);
+  }
+  const fileContent = `${lines.join('\n')}\n`;
+  const digest = createHash('sha256').update(fileContent, 'utf8').digest('hex');
+  const filePath = `/tmp/zterm_long_input_${Date.now()}.txt`;
+  const marker = `__zterm_long_input_sha256_${digest.slice(0, 16)}__`;
+  const readyMarker = `__zterm_long_input_ready_${digest.slice(0, 16)}__`;
+  const preludeInput = `stty -echo; printf '${readyMarker}\\n'; cat > ${filePath}\r`;
+  const bodyInput = [
+    `${fileContent}\x04python3 -c "import hashlib,pathlib; p=pathlib.Path('${filePath}'); print('${marker}'); print(hashlib.sha256(p.read_bytes()).hexdigest())"`,
+    `rm -f ${filePath}`,
+    'stty echo',
+    '',
+  ].join('\r');
+  return {
+    digest,
+    marker,
+    readyMarker,
+    fileContent,
+    preludeInput,
+    bodyInput,
+  };
+}
+
+async function runLongInputCase(probe: DaemonProbe): Promise<CaseResult> {
+  const { digest, marker, readyMarker, fileContent, preludeInput, bodyInput } = buildLongInputDigestProbe();
+  const preludeChunks = splitTerminalInputUtf8Chunks(preludeInput, TERMINAL_INPUT_CHUNK_BYTES);
+  for (const chunk of preludeChunks) {
+    probe.sendInput(chunk);
+  }
+  await probe.waitForMarker(readyMarker, 8000);
+  await sleep(150);
+
+  const bodyChunks = splitTerminalInputUtf8Chunks(bodyInput, TERMINAL_INPUT_CHUNK_BYTES);
+  if (bodyChunks.length <= 1) {
+    throw new Error('long-input case did not exceed one terminal input chunk');
+  }
+  for (const chunk of bodyChunks) {
+    probe.sendInput(chunk, { requestHead: false });
+  }
+  probe.requestHead(true);
+  const digestOracle = await waitForOracle(
+    'long input source digest reflects in tmux target',
+    (oracle) => (
+      findExactOracleLine(oracle, marker) === marker
+      && findExactOracleLine(oracle, digest) === digest
+    ),
+    30000,
+  );
+  const steps: CaseStepResult[] = [
+    buildLongInputDigestStep({
+      oracle: digestOracle,
+      daemonPayload: probe.payload,
+      history: probe.history,
+      digest,
+      marker,
+      preludeChunkCount: preludeChunks.length,
+      bodyChunkCount: bodyChunks.length,
+      bodyBytes: Buffer.byteLength(fileContent, 'utf8'),
+    }),
+  ];
+  if (!steps[0]?.ok) {
+    return finalizeCase('long-input-echo', steps);
+  }
+
+  try {
+    const payload = await waitForPayloadToMatchOracle(
+      probe,
+      'long input mirror recovered settled payload',
+      digestOracle,
+      20000,
+    );
+    steps.push(
+      buildStepResult('long-input-mirror-recovered', digestOracle, payload, probe.history, 'daemon mirror did not recover to tmux truth after long input'),
+    );
+  } catch (error) {
+    steps.push({
+      label: 'long-input-mirror-recovered',
+      ok: false,
+      reason: `daemon mirror did not recover after byte-exact long input: ${error instanceof Error ? error.message : String(error)}`,
+      oracle: digestOracle,
+      daemonPayload: probe.payload,
+      compare: replayHistoryMirrorCompare(digestOracle, probe.history),
+      clientMirrorCompare: replayClientMirrorCompare(digestOracle, probe.history),
+      historyLength: probe.history.length,
+    });
+  }
+
+  return finalizeCase('long-input-echo', steps);
 }
 
 async function runExternalInputCase(probe: DaemonProbe): Promise<CaseResult> {
@@ -1823,6 +1963,9 @@ async function runCase(caseName: CaseName, daemonController: LabDaemonController
       case 'local-input-echo':
         result = await runLocalInputCase(probe);
         break;
+      case 'long-input-echo':
+        result = await runLongInputCase(probe);
+        break;
       case 'external-input-echo':
         result = await runExternalInputCase(probe);
         break;
@@ -1855,7 +1998,7 @@ async function main() {
   const caseArg = process.argv.find((arg) => arg.startsWith('--case='))?.split('=', 2)[1] || 'all';
   const managedDaemon = process.argv.includes('--managed-daemon');
   const requestedCases: CaseName[] = caseArg === 'all'
-    ? ['codex-live', 'top-live', 'vim-live', 'initial-sync', 'local-input-echo', 'external-input-echo', 'daemon-restart-recover', 'schedule-fire']
+    ? ['codex-live', 'top-live', 'vim-live', 'initial-sync', 'local-input-echo', 'long-input-echo', 'external-input-echo', 'daemon-restart-recover', 'schedule-fire']
     : [caseArg as CaseName];
 
   const daemonController = managedDaemon ? new LabDaemonController() : null;
@@ -1866,7 +2009,7 @@ async function main() {
     }
 
     for (const caseName of requestedCases) {
-      if (!['codex-live', 'top-live', 'vim-live', 'initial-sync', 'local-input-echo', 'external-input-echo', 'daemon-restart-recover', 'schedule-fire'].includes(caseName)) {
+      if (!['codex-live', 'top-live', 'vim-live', 'initial-sync', 'local-input-echo', 'long-input-echo', 'external-input-echo', 'daemon-restart-recover', 'schedule-fire'].includes(caseName)) {
         throw new Error(`unsupported case: ${caseName}`);
       }
       const result = await runCase(caseName, daemonController);

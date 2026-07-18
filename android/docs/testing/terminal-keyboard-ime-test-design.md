@@ -31,12 +31,15 @@ Owner feature: `terminal.keyboard_ime`.
 - Positive transition: an adjustResize WebView reclassifies to zero external lift when its layout and visual viewport settle at the keyboard top.
 - Negative transition: a keyboard event arriving before the OEM viewport resize must not leave the initial overlay classification frozen for the rest of that IME-open lifecycle.
 - Negative geometry: QuickBar measured height excludes external IME lift, and stage bottom remains `quickbar chrome + safe offsets + exactly one IME lift`.
+- `terminal-input-normalization.test.ts` proves committed text preserves CJK/emoji/special symbols, converts terminal-oriented full-width ASCII/punctuation to half-width, and turns IME line breaks into text separators instead of `\r`.
+- `ImeAnchorInputLogicTest` proves native voice-style CJK/emoji/symbol commits emit one ordered text event and keep explicit Enter on the `performEditorAction` / key path.
 - `TerminalQuickBar.test.tsx` proves QuickBar reports its real chrome height while IME lift is applied outside the component.
 - Negative path: `TerminalQuickBar` must not subtract `keyboardInsetPx` from measured chrome height, because `TerminalQuickBarShell.bottom` already consumes that lift.
 
 ## Module Black-Box Plan
 
 - `TerminalPage.android-ime.test.tsx` proves stage bottom reserve equals measured QuickBar chrome + safe offset + bottom chrome lift + IME lift.
+- It also proves Android native `ImeAnchor input` committed text routes CJK/emoji/special symbols to the active session without converting voice-inserted line breaks into terminal Enter.
 - It also dispatches the real registered `visualViewport.resize` listener after a keyboard-first race and proves `TerminalPage` re-renders from over-lift to adjustResize geometry without a second keyboard event.
 - `TerminalPage.lifecycle-cleanup.test.tsx` proves Keyboard, visualViewport, and virtualKeyboard listeners are registered and removed from their original sources.
 - `TerminalPageStageShell.pane-stage.test.tsx` proves stage positioning remains owned by shell layout and does not pass IME geometry into `TerminalView` resize.

@@ -20,6 +20,7 @@
     "./terminal/buffer-head-state": "./src/terminal/buffer-head-state.ts",
     "./terminal/viewport-utils": "./src/terminal/viewport-utils.ts",
     "./terminal/buffer-sync-planner": "./src/terminal/buffer-sync-planner.ts",
+    "./terminal/input-chunking": "./src/terminal/input-chunking.ts",
     "./terminal/gap-repair-planner": "./src/terminal/gap-repair-planner.ts",
     "./terminal/pull-state-planner": "./src/terminal/pull-state-planner.ts",
     "./terminal/buffer-sync-request-planner": "./src/terminal/buffer-sync-request-planner.ts"

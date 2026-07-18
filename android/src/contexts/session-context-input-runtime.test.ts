@@ -1,6 +1,10 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from 'vitest';
+import {
+  TERMINAL_INPUT_CHUNK_BYTES,
+  getTerminalInputUtf8ByteLength,
+} from '@zterm/shared/terminal/input-chunking';
 import { sendInputThroughSessionTransport } from './session-context-input-runtime';
 
 function createSocket(readyState: number, bufferedAmount = 0) {
@@ -54,6 +58,15 @@ function sendInput(overrides: Partial<Parameters<typeof sendInputThroughSessionT
   return options;
 }
 
+function parseSentInputPayloads(sendSocketPayload: ReturnType<typeof vi.fn>) {
+  return sendSocketPayload.mock.calls.map((call) => {
+    const message = JSON.parse(String(call[2]));
+    expect(message.type).toBe('input');
+    expect(typeof message.payload).toBe('string');
+    return String(message.payload);
+  });
+}
+
 describe('session-context-input-runtime', () => {
   it('sends input on an open transport without consulting reconnect policy', () => {
     const sendSocketPayload = vi.fn();
@@ -65,6 +78,44 @@ describe('session-context-input-runtime', () => {
       payload: 'pwd\r',
     });
     expect(options.requestSessionBufferHead).not.toHaveBeenCalled();
+  });
+
+  it('chunks long input into ordered string-only frames under the daemon payload cap', () => {
+    const sendSocketPayload = vi.fn();
+    const longInput = `${'a'.repeat(TERMINAL_INPUT_CHUNK_BYTES - 3)}中文😀${'b'.repeat(128)}`;
+
+    sendInput({
+      data: longInput,
+      sendSocketPayload,
+    });
+
+    const payloads = parseSentInputPayloads(sendSocketPayload);
+    expect(payloads.length).toBeGreaterThan(1);
+    expect(payloads.join('')).toBe(longInput);
+    for (const payload of payloads) {
+      expect(getTerminalInputUtf8ByteLength(payload)).toBeLessThanOrEqual(TERMINAL_INPUT_CHUNK_BYTES);
+    }
+  });
+
+  it('keeps unicode code points intact when chunking long input frames', () => {
+    const sendSocketPayload = vi.fn();
+    const longInput = `${'界'.repeat(Math.ceil(TERMINAL_INPUT_CHUNK_BYTES / 3) + 3)}😀tail\r`;
+
+    sendInput({
+      data: longInput,
+      sendSocketPayload,
+    });
+
+    const payloads = parseSentInputPayloads(sendSocketPayload);
+    expect(payloads.length).toBeGreaterThan(1);
+    expect(payloads.join('')).toBe(longInput);
+    for (const payload of payloads) {
+      const first = payload.charCodeAt(0);
+      const last = payload.charCodeAt(payload.length - 1);
+      expect(first < 0xdc00 || first > 0xdfff).toBe(true);
+      expect(last < 0xd800 || last > 0xdbff).toBe(true);
+      expect(getTerminalInputUtf8ByteLength(payload)).toBeLessThanOrEqual(TERMINAL_INPUT_CHUNK_BYTES);
+    }
   });
 
   it('defers the first pending input head refresh off the key event stack', async () => {
