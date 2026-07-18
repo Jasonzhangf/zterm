@@ -1488,6 +1488,7 @@ function TerminalPageComponent({
       sessionName: string;
       localSessionId: string | null;
     }>();
+    const rowIdByCanonicalSessionKey = new Map<string, string>();
     const items: TerminalSessionDrawerItem[] = [];
     for (const group of sessionGroups) {
       const missing = new Set(group.missingSessionNames || []);
@@ -1529,6 +1530,27 @@ function TerminalPageComponent({
           ...(useRelayRouteTarget ? { transportMode: 'auto' as const } : {}),
           sessionNames: group.sessionNames,
         };
+        const canonicalSessionRowKey = `${serverIdentity.key}::session:${sessionName}`;
+        const existingRowId = rowIdByCanonicalSessionKey.get(canonicalSessionRowKey);
+        if (existingRowId) {
+          const existingCloseTarget = closeTargets.get(existingRowId);
+          closeTargets.set(existingRowId, {
+            target: useRelayRouteTarget ? remoteCatalogTarget : existingCloseTarget?.target || remoteCatalogTarget,
+            sessionName,
+            localSessionId: existingCloseTarget?.localSessionId || liveSession?.id || null,
+          });
+          if (!targets.has(existingRowId) || useRelayRouteTarget) {
+            targets.set(existingRowId, {
+              target: remoteCatalogTarget,
+              sessionName,
+            });
+          }
+          if (liveSession) {
+            catalogLiveSessionIds.add(liveSession.id);
+          }
+          continue;
+        }
+        rowIdByCanonicalSessionKey.set(canonicalSessionRowKey, id);
         closeTargets.set(id, {
           target: remoteCatalogTarget,
           sessionName,

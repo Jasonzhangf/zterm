@@ -24,6 +24,7 @@
 13. Relay directory direct endpoints and saved/Home server mappings are identity aliases only: an IP-keyed direct Session/SessionGroup whose endpoint belongs to a Relay daemon must project into that daemon's canonical host rail, not create a second IP rail.
 14. Production Relay directory may expose only `relay-rtc`. If no endpoint mapping exists, a direct SessionGroup may bind to a Relay daemon only when its non-missing Session names are all present in exactly one Relay daemon catalog. Zero or multiple matches remain separate instead of guessing.
 15. A Relay directory or saved/Home alias update must invalidate the memoized TerminalPage identity projection so the open drawer re-canonicalizes without a page restart.
+16. If direct/Tailscale history and Relay history both resolve to the same canonical daemon, the drawer must enumerate each tmux session name exactly once. Route candidates and close/open intent metadata may merge, but duplicate history sources must not create duplicate rows.
 
 ## Paired Tests
 
@@ -38,6 +39,8 @@
 - Negative: arming one row cannot authorize selection of another row.
 - Negative: selecting a remote-only catalog row must not switch or render the remote catalog placeholder id when no materialized `sessionId` is returned.
 - Negative: the matching direct endpoint must not remain as a duplicate IP host rail with the Relay daemon rail showing zero sessions.
+- Positive: direct/Tailscale and Relay history for one canonical daemon merge into one row per tmux session while retaining the Relay-capable open target.
+- Negative: two history records for the same canonical daemon/session must not render two rows, emit duplicate React keys, or require source-specific selection.
 - Negative: two Relay daemon catalogs containing the same direct-group Session names are ambiguous and must not be merged.
 - Negative: `mirror-fixed` right-side horizontal drag does not emit drawer/tab swipe.
 - Negative: `mirror-fixed` rightward pan with positive renderer offset changes the offset but does not emit drawer/tab swipe, including a start inside the left edge band.

@@ -1,3 +1,10 @@
+# 2026-07-18 Drawer duplicate session enumeration
+
+- 现场：同一 daemon 同时存在 direct/Tailscale history 与 Relay history 时，`TerminalPage.drawerRemoteSessions` 按原始 `sessionGroups` 逐组追加 rows；虽然 `drawerServerIdentityAliases` 已把两组 canonicalize 到同一 host rail，但 row 枚举没有按 canonical daemon + tmux session 去重，因此每个 session 会显示两次。
+- 架构映射：`feature_id=terminal.session_drawer`，资源 `resource.ui_projection -> resource.open_tab -> resource.active_session`；唯一修改点是 `TerminalPage` drawer catalog projection。属于物理移除重复投影，不改 history storage、session transport、daemon、buffer 或 renderer。allowed path 是 canonical identity 后的 UI projection；forbidden path 是在 drawer component 或 transport 层用隐藏/过滤补偿。
+- 测试设计：`docs/testing/terminal-session-drawer-gesture-test-design.md` 增加 direct + Relay history overlap 的正反黑盒 gate，要求同 canonical daemon/session 只出现一行，同时保留 Relay-capable target metadata。
+- 修复：`drawerRemoteSessions` 增加 canonical row key map，重复来源只合并 `targets/closeTargets/catalogLiveSessionIds`，不再 push 第二个 drawer item。红测先复现 React duplicate key `direct-rcc`，修复后 focused drawer 34/34 PASS、drawer/relay/session-open suite 107/107 PASS、typecheck PASS、feature registry 48/48 PASS、`build:android` PASS 并发布 APK `0.1.3.2148` sha256 `df618c463a036f30661276f4625ecb31c44436b5e348067c43087cb3c38b5c0d`。本机 `adb devices -l` 无 online 设备，L5 真机验证未完成。
+
 # 2026-07-16 Relay Home visible route entry
 
 - 现场：Settings 已登录 Relay，但 Home 没有显式 Relay 选项；用户无法知道或选择 Relay。代码证据：`ConnectionsPage.getHostBadge()` 只有 `bridgeHost` 为空时才显示 `Relay`，saved Tailscale/direct row 即使有 `relay-rtc` 候选也显示 Tailscale；`projectHomeSavedConnections()` dedupe 同 daemon row 时会保留 saved row 但丢掉 relay directory endpoint candidates。
