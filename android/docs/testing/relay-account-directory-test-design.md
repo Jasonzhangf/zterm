@@ -71,9 +71,9 @@ daemon tmux truth
   - Connect uses directory-derived target and selected route.
   - stale/error states are visible.
 - `src/hooks/useSessionOpenActions.test.tsx`
-  - drawer host refresh / quick-new for an online Relay daemon with `relay-rtc` uses an explicit WebRTC-first `transportMode='auto'` target and keeps direct/Tailscale endpoints as middle route candidates before TURN.
+  - drawer host refresh / quick-new for an online Relay daemon with `relay-rtc` uses an explicit route-aware `transportMode='auto'` target and keeps direct LAN/Tailscale endpoints ahead of WebRTC direct and TURN.
 - `src/pages/TerminalPage.session-drawer.test.tsx` + `src/contexts/session-context-session-runtime.test.ts`
-  - a drawer row that is already open through stale direct/Tailscale identity is still routed through the WebRTC-first session-open owner when the Relay catalog uniquely owns that daemon, and the existing local session is reused instead of duplicated.
+  - a drawer row that is already open through stale direct/Tailscale identity is still routed through the session-open owner when the Relay catalog uniquely owns that daemon, and the existing local session is reused instead of duplicated.
 - `src/pages/ConnectionsPage.test.tsx`
   - remote machine card shows online/offline, session count, route badge, RTT/last error when available.
 - `src/pages/ConnectionPropertiesPage.test.tsx`
@@ -97,18 +97,21 @@ daemon tmux truth
 - Negative: invalid update does not overwrite existing directory with empty success.
 - Positive: online daemon without local preset is openable.
 - Negative: offline daemon with stale route is shown stale and cannot be silently treated as fresh.
-- Positive: direct candidate with lower RTT wins.
-- Negative: auth-failed direct candidate cannot win over relay.
-- Positive: logged-in route plan orders `rtc-direct -> tailscale -> rtc-relay`.
-- Negative: `rtc-direct` must not contain TURN credentials or use `iceTransportPolicy='relay'`; otherwise TURN would bypass the Tailscale middle step.
-- Negative: a legacy/global `wsUrl` override must not collapse a Relay/WebRTC-first Host into a single WebSocket candidate; hosts with `relay-rtc`, `relayHostId` / `daemonHostId`, explicit `signalUrl`, or `transportMode='webrtc'` must still enter `TraversalSocket` with the full candidate plan.
+- Positive: private LAN IPv4 wins before Tailscale, WebRTC direct, and TURN/Relay when no route has recent health.
+- Positive: Tailscale wins before public IPv4, WebRTC direct, and TURN/Relay by default.
+- Positive: slow Tailscale can lose to WebRTC direct when RTT health proves direct is faster, but it must not jump straight to TURN/Relay.
+- Negative: public IPv4 must not outrank Tailscale only because the `ipv4` path is listed before `tailscale`.
+- Negative: auth-failed direct/Tailscale candidates cannot win over a healthy later route.
+- Positive: route plan contains candidates in product order `private LAN IPv4 -> Tailscale/direct websocket -> WebRTC direct -> TURN/Relay`; opened-route heartbeat/close failure records route health and lets the next attempt try another route.
+- Negative: `rtc-direct` must not contain TURN credentials or use `iceTransportPolicy='relay'`; otherwise TURN would bypass direct/Tailscale routes.
+- Negative: a legacy/global `wsUrl` override must not collapse a route-aware Host into a single WebSocket candidate; hosts with `relay-rtc`, `relayHostId` / `daemonHostId`, explicit `signalUrl`, or `transportMode='webrtc'` must still enter `TraversalSocket` with the full candidate plan.
 - Positive: `rtc-direct/direct` diagnostics include selected ICE pair local/remote candidate type, address, port, protocol, and RTT when WebRTC stats expose them.
 - Negative: app/debug UI must not infer P2P from `requestOrigin="relay-host"` or from stale `targetKey`; only `resolvedPath` plus selected ICE pair metadata can prove the actual route.
-- Positive: TURN-only `rtc-relay` wins only after WebRTC direct and direct websocket candidates are unavailable/unhealthy.
+- Positive: TURN-only `rtc-relay` wins only after private LAN/Tailscale/direct websocket and WebRTC direct candidates are unavailable/unhealthy.
 - Negative: TURN-only `rtc-relay` does not remain selected after a fresh direct candidate wins by score.
-- Positive: drawer host actions for an online relay daemon use relay identity, build both `rtc-direct` and `rtc-relay` candidates, and still keep saved direct/Tailscale as the middle route candidate.
+- Positive: drawer host actions for an online relay daemon use relay identity, build direct LAN/Tailscale, `rtc-direct`, and `rtc-relay` candidates, and still keep saved direct/Tailscale ahead of WebRTC/TURN.
 - Negative: a saved direct/Tailscale preset for the same daemon must not make drawer refresh/open duplicate daemon rails or replace the relay daemon identity; it is only a route candidate.
-- Positive: selecting an already-open stale direct row from a Relay-owned drawer catalog upgrades that session transport target to WebRTC-first target truth and reuses the existing session id.
+- Positive: selecting an already-open stale direct row from a Relay-owned drawer catalog upgrades that session transport target to route-aware target truth and reuses the existing session id.
 - Negative: selecting that row must not bypass the session-open owner with a raw `switchSession`, and must not create a second open tab for the same tmux session.
 
 ## Required Gates Before APK

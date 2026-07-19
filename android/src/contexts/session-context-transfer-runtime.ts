@@ -67,7 +67,9 @@ export function sendInputRuntime(options: {
   isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
 }) {
   const sessionsSnapshotRef = {
-    current: options.refs.stateRef.current.sessions,
+    get current() {
+      return options.refs.stateRef.current.sessions;
+    },
   };
   return sendInputThroughSessionTransport({
     sessionId: options.sessionId,

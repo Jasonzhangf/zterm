@@ -21,7 +21,10 @@ export type RemoteWindowOverlayState =
       requestEpoch: number;
       target: RemoteWindowStreamTargetManifest;
       mode: RemoteWindowOverlayMode;
-      streamStarted: false;
+      streamStarted: boolean;
+      streamStatus: 'idle' | 'starting' | 'streaming' | 'error';
+      streamId?: string;
+      streamErrorMessage?: string | null;
       errors: RemoteWindowStreamErrorPayload[];
     };
 
@@ -106,7 +109,64 @@ export function selectRemoteWindowTarget(
     target,
     mode: 'floating',
     streamStarted: false,
+    streamStatus: 'idle',
     errors: state.errors,
+  };
+}
+
+export function beginRemoteWindowStreamSetup(
+  state: RemoteWindowOverlayState,
+  streamId: string,
+): RemoteWindowOverlayState {
+  if (state.phase !== 'targetLocked') {
+    return state;
+  }
+  const normalizedStreamId = streamId.trim();
+  if (!normalizedStreamId) {
+    return {
+      ...state,
+      streamStarted: false,
+      streamStatus: 'error',
+      streamErrorMessage: 'Remote window stream requires streamId',
+    };
+  }
+  return {
+    ...state,
+    streamId: normalizedStreamId,
+    streamStarted: false,
+    streamStatus: 'starting',
+    streamErrorMessage: null,
+  };
+}
+
+export function attachRemoteWindowStreamReceiver(
+  state: RemoteWindowOverlayState,
+  streamId: string,
+): RemoteWindowOverlayState {
+  if (state.phase !== 'targetLocked' || state.streamId !== streamId) {
+    return state;
+  }
+  return {
+    ...state,
+    streamStarted: true,
+    streamStatus: 'streaming',
+    streamErrorMessage: null,
+  };
+}
+
+export function failRemoteWindowStream(
+  state: RemoteWindowOverlayState,
+  streamId: string,
+  error: unknown,
+): RemoteWindowOverlayState {
+  if (state.phase !== 'targetLocked' || state.streamId !== streamId) {
+    return state;
+  }
+  return {
+    ...state,
+    streamStarted: false,
+    streamStatus: 'error',
+    streamErrorMessage: error instanceof Error ? error.message : String(error),
   };
 }
 

@@ -425,6 +425,8 @@ export class TraversalSocket implements BridgeTransportSocket {
 
   private readonly candidates: TraversalPlanCandidate[];
 
+  private readonly traversalPathPriority: TraversalPlanCandidate['path'][];
+
   private backend: Backend | null = null;
 
   private activeAttempt: TraversalAttemptDiagnostic | null = null;
@@ -455,6 +457,9 @@ export class TraversalSocket implements BridgeTransportSocket {
   ) {
     const plan = buildTraversalPlan(target, settings, options?.overrideUrl);
     this.candidates = plan.candidates;
+    this.traversalPathPriority = plan.candidates
+      .map((candidate) => candidate.path)
+      .filter((path, index, paths) => paths.indexOf(path) === index);
     this.routeHealthCache = options?.routeHealthCache || defaultTraversalRouteHealthCache;
     this.routeHealthScope = options?.routeHealthScope || {
       accountId: settings.traversalRelay?.userId,
@@ -560,6 +565,7 @@ export class TraversalSocket implements BridgeTransportSocket {
       candidates: remainingCandidates,
       healthCache: this.routeHealthCache,
       scope: this.routeHealthScope,
+      traversalPathPriority: this.traversalPathPriority,
     });
     const candidate = selection.selected;
     if (!candidate) {
@@ -655,6 +661,9 @@ export class TraversalSocket implements BridgeTransportSocket {
         if (settled && !this.closedByClient) {
           const reason = event?.reason || `${candidate.kind} closed`;
           this.markAttempt(candidate, 'closed', true, reason);
+          this.routeHealthCache.recordFailure(this.routeHealthScope, candidate, reason, {
+            authFailure: this.isAuthFailure(reason),
+          });
           this.diagnostics.stage = this.closedByClient ? 'closed' : 'error';
           if (event?.reason) {
             this.diagnostics.reason = event.reason;

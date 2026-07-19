@@ -3,6 +3,7 @@ import type { Host, ServerMessage, SessionScheduleState } from '../lib/types';
 import { createFileTransferMessageRuntime } from '../lib/file-transfer-message-runtime';
 import { createRemoteScreenshotRuntime } from '../lib/remote-screenshot-runtime';
 import { createRemoteWindowMessageRuntime } from '../lib/remote-window-message-runtime';
+import { createRemoteWindowReceiverRuntime } from '../lib/remote-window-receiver-runtime';
 import { createSessionDebugMetricsStore } from '../lib/session-debug-metrics-store';
 import { createSessionTransportRuntimeStore } from '../lib/session-transport-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
@@ -80,7 +81,16 @@ export function useSessionProviderRuntime(options: {
   const pendingSessionTransportOpenIntentsRef = useRef<Map<string, PendingSessionTransportOpenIntent>>(new Map());
   const activeBodySubscriptionSuppressedRef = useRef(false);
   const remoteScreenshotRuntimeRef = useRef(createRemoteScreenshotRuntime());
-  const remoteWindowMessageRuntimeRef = useRef(createRemoteWindowMessageRuntime());
+  const remoteWindowReceiverRuntimeRef = useRef(createRemoteWindowReceiverRuntime());
+  const remoteWindowMessageRuntimeRef = useRef(createRemoteWindowMessageRuntime({
+    onStreamIceCandidate: (payload) => remoteWindowReceiverRuntimeRef.current.addIceCandidate(payload),
+    onStreamStatus: (payload) => {
+      remoteWindowReceiverRuntimeRef.current.handleStatus(payload);
+    },
+    onListenerError: (phase, error) => {
+      console.error(`[SessionContext] remote-window receiver listener error (${phase}):`, error);
+    },
+  }));
   const fileTransferMessageRuntimeRef = useRef(createFileTransferMessageRuntime({
     onRemoteScreenshotStatus: (payload) => {
       remoteScreenshotRuntimeRef.current.handleStatus(payload);
@@ -137,6 +147,7 @@ export function useSessionProviderRuntime(options: {
       activeBodySubscriptionSuppressedRef,
       remoteScreenshotRuntimeRef,
       remoteWindowMessageRuntimeRef,
+      remoteWindowReceiverRuntimeRef,
       fileTransferMessageRuntimeRef,
       foregroundActiveRef,
       handleSocketConnectedBaselineRef,

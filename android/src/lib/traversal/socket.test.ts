@@ -367,7 +367,7 @@ describe('TraversalSocket reconnect', () => {
     expect(MockWebSocket.instances).toHaveLength(2);
   });
 
-  it('backs off repeated reconnect attempts and resets candidate order from the first path', async () => {
+  it('backs off repeated reconnect attempts and skips the just-failed open route first', async () => {
     const socket = createSocket({}, { autoReconnect: true });
     await flushMicrotasks();
 
@@ -378,7 +378,7 @@ describe('TraversalSocket reconnect', () => {
     await vi.advanceTimersByTimeAsync(300);
     await flushMicrotasks();
     expect(MockWebSocket.instances).toHaveLength(2);
-    expect(MockWebSocket.instances[1].url).toContain('240e:1234::10');
+    expect(MockWebSocket.instances[1].url).toContain('203.0.113.10');
 
     MockWebSocket.instances[1].triggerOpen();
     MockWebSocket.instances[1].triggerClose(1006, 'second close');
@@ -394,6 +394,42 @@ describe('TraversalSocket reconnect', () => {
       stage: 'connecting',
       path: 'ipv6',
     });
+  });
+
+  it('records an opened route close as route failure so the next socket can choose the healthier path', async () => {
+    const routeHealthCache = new TraversalRouteHealthCache();
+    const scope = {
+      accountId: 'user-1',
+      daemonHostId: 'daemon-1',
+    };
+    const firstSocket = createSocket({}, {
+      routeHealthCache,
+      routeHealthScope: scope,
+    });
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances[0].url).toContain('240e:1234::10');
+    MockWebSocket.instances[0].triggerOpen();
+    MockWebSocket.instances[0].triggerClose(1006, 'heartbeat server activity timeout');
+
+    expect(routeHealthCache.get(scope, {
+      id: 'direct:ipv6:240e:1234::10:3333',
+      path: 'ipv6',
+      endpoint: '240e:1234::10:3333',
+    })).toMatchObject({
+      status: 'failure',
+      error: 'heartbeat server activity timeout',
+    });
+
+    const secondSocket = createSocket({}, {
+      routeHealthCache,
+      routeHealthScope: scope,
+    });
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances[1].url).toContain('203.0.113.10');
+    firstSocket.close(1000, 'test cleanup');
+    secondSocket.close(1000, 'test cleanup');
   });
 
   it('records successful route health with RTT and candidate id', async () => {

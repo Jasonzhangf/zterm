@@ -405,14 +405,15 @@ export function buildSessionReconnectingFailureUpdates(
 }
 
 export function buildSessionConnectedUpdates(
-  options?: { daemonHostId?: string | null },
-): Pick<Session, 'state' | 'reconnectAttempt' | 'lastError' | 'daemonHostId'> {
+  options?: { daemonHostId?: string | null; reliableInputSupported?: boolean },
+): Pick<Session, 'state' | 'reconnectAttempt' | 'lastError' | 'daemonHostId' | 'reliableInputSupported'> {
   const normalizedDaemonHostId = options?.daemonHostId?.trim() || '';
   return {
     state: 'connected',
     reconnectAttempt: 0,
     lastError: undefined,
     ...(normalizedDaemonHostId ? { daemonHostId: normalizedDaemonHostId } : {}),
+    ...(options?.reliableInputSupported ? { reliableInputSupported: true } : {}),
   };
 }
 

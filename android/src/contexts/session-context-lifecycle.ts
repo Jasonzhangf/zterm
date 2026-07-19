@@ -41,6 +41,10 @@ interface RemoteWindowMessageRuntimeLike {
   dispose: (reason: string) => void;
 }
 
+interface RemoteWindowReceiverRuntimeLike {
+  dispose: (reason: string) => void;
+}
+
 export function collectNewlyVisibleLiveSessionIds(previousIds: string[], nextIds: string[]) {
   const previousSet = new Set(previousIds.filter(Boolean));
   return nextIds.filter((sessionId) => Boolean(sessionId) && !previousSet.has(sessionId));
@@ -185,6 +189,7 @@ export function useSessionContextLifecycle(options: {
     lastServerActivityAtRef: { current: Map<string, number> };
     remoteScreenshotRuntimeRef: { current: RemoteScreenshotRuntimeLike };
     remoteWindowMessageRuntimeRef: { current: RemoteWindowMessageRuntimeLike };
+    remoteWindowReceiverRuntimeRef?: { current: RemoteWindowReceiverRuntimeLike };
     pingIntervalsRef: { current: Map<string, ReturnType<typeof setInterval>> };
     handshakeTimeoutsRef: { current: Map<string, number> };
     reconnectRuntimesRef: { current: Map<string, SessionReconnectRuntime> };
@@ -463,6 +468,9 @@ export function useSessionContextLifecycle(options: {
     );
     options.refs.remoteWindowMessageRuntimeRef.current.dispose(
       'Session provider disposed before remote window request completed',
+    );
+    options.refs.remoteWindowReceiverRuntimeRef?.current.dispose(
+      'Session provider disposed before remote window receiver completed',
     );
     for (const timer of options.refs.pingIntervalsRef.current.values()) {
       clearInterval(timer);

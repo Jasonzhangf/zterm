@@ -218,22 +218,54 @@ describe('TerminalPage session content identity', () => {
   const originalResizeObserver = globalThis.ResizeObserver;
   const originalClientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
   const originalClientHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
+  const originalWindowInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+  const originalWindowInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+  const originalDocumentClientWidth = Object.getOwnPropertyDescriptor(document.documentElement, 'clientWidth');
+  const originalDocumentClientHeight = Object.getOwnPropertyDescriptor(document.documentElement, 'clientHeight');
   const originalGetBoundingClientRect = HTMLElement.prototype.getBoundingClientRect;
+  let mockViewportWidth = 640;
+  let mockViewportHeight = 408;
 
   beforeEach(() => {
     cleanup();
     ResizeObserverMock.reset();
+    mockViewportWidth = 640;
+    mockViewportHeight = 408;
     globalThis.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    Object.defineProperty(window, 'innerWidth', {
+      configurable: true,
+      get() {
+        return mockViewportWidth;
+      },
+    });
+    Object.defineProperty(window, 'innerHeight', {
+      configurable: true,
+      get() {
+        return mockViewportHeight;
+      },
+    });
+    Object.defineProperty(document.documentElement, 'clientWidth', {
+      configurable: true,
+      get() {
+        return mockViewportWidth;
+      },
+    });
+    Object.defineProperty(document.documentElement, 'clientHeight', {
+      configurable: true,
+      get() {
+        return mockViewportHeight;
+      },
+    });
     Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
       configurable: true,
       get() {
-        return 640;
+        return mockViewportWidth;
       },
     });
     Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
       configurable: true,
       get() {
-        return 408;
+        return mockViewportHeight;
       },
     });
     HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
@@ -284,6 +316,22 @@ describe('TerminalPage session content identity', () => {
     }
     if (originalClientHeight) {
       Object.defineProperty(HTMLElement.prototype, 'clientHeight', originalClientHeight);
+    }
+    if (originalWindowInnerWidth) {
+      Object.defineProperty(window, 'innerWidth', originalWindowInnerWidth);
+    }
+    if (originalWindowInnerHeight) {
+      Object.defineProperty(window, 'innerHeight', originalWindowInnerHeight);
+    }
+    if (originalDocumentClientWidth) {
+      Object.defineProperty(document.documentElement, 'clientWidth', originalDocumentClientWidth);
+    } else {
+      delete (document.documentElement as unknown as { clientWidth?: number }).clientWidth;
+    }
+    if (originalDocumentClientHeight) {
+      Object.defineProperty(document.documentElement, 'clientHeight', originalDocumentClientHeight);
+    } else {
+      delete (document.documentElement as unknown as { clientHeight?: number }).clientHeight;
     }
     HTMLElement.prototype.getBoundingClientRect = originalGetBoundingClientRect;
     ResizeObserverMock.reset();
@@ -359,5 +407,59 @@ describe('TerminalPage session content identity', () => {
     expect(screen.getByTestId('terminal-header').getAttribute('data-active-session-name')).toBe('tmux-beta');
     expect(readRenderedRows(view.container)).toContain('BETA_BODY_RESUMED_PROMPT');
     expect(readRenderedRows(view.container)).not.toContain('ALPHA_BODY_LATE_PROMPT');
+  });
+
+  it('keeps portrait session-group center matched when an already connected active session changes externally', async () => {
+    mockViewportWidth = 390;
+    mockViewportHeight = 844;
+    const renderStore = createSessionRenderBufferStore();
+    const alpha = makeSession('session-alpha', 'tmux-alpha');
+    const beta = makeSession('session-beta', 'tmux-beta');
+    renderStore.setBuffer(alpha.id, makeRenderSnapshot(['ALPHA_PORTRAIT_BODY'], 1));
+    renderStore.setBuffer(beta.id, makeRenderSnapshot(['BETA_PORTRAIT_BODY'], 1));
+
+    const view = renderTerminalPage({
+      sessions: [alpha, beta],
+      activeSession: alpha,
+      sessionBufferStore: renderStore,
+    });
+
+    await waitFor(() => expect(readRenderedRows(view.container)).toContain('ALPHA_PORTRAIT_BODY'));
+
+    view.rerender(
+      <TerminalPage
+        sessions={[alpha, beta]}
+        activeSession={beta}
+        sessionBufferStore={renderStore}
+        getSessionDebugMetrics={() => ({
+          uplinkBps: 0,
+          downlinkBps: 0,
+          renderHz: 0,
+          pullHz: 0,
+          transportBufferedBytes: 0,
+          transportBackpressured: false,
+          lastRenderCommitAt: 0,
+          bufferPullActive: false,
+          status: 'waiting',
+          active: true,
+          updatedAt: 1,
+        })}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => expect(readRenderedRows(view.container)).toContain('BETA_PORTRAIT_BODY'));
+    expect(readRenderedRows(view.container)).not.toContain('ALPHA_PORTRAIT_BODY');
   });
 });

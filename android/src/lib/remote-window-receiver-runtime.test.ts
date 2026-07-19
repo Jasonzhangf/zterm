@@ -1,0 +1,327 @@
+import { describe, expect, it, vi } from 'vitest';
+import { createRemoteWindowReceiverRuntime } from './remote-window-receiver-runtime';
+import type { RemoteWindowStreamTargetManifest } from './types';
+
+class MockMediaTrack {
+  kind = 'video';
+  stop = vi.fn();
+}
+
+class MockMediaStream {
+  private tracks: MockMediaTrack[] = [];
+
+  constructor(tracks: MockMediaTrack[] = []) {
+    this.tracks = tracks;
+  }
+
+  addTrack(track: MockMediaTrack) {
+    this.tracks.push(track);
+  }
+
+  getTracks() {
+    return this.tracks;
+  }
+}
+
+class MockRTCPeerConnection {
+  static instances: MockRTCPeerConnection[] = [];
+
+  localDescription: RTCSessionDescriptionInit | null = null;
+  remoteDescription: RTCSessionDescriptionInit | null = null;
+  onicecandidate: ((event: RTCPeerConnectionIceEvent) => void) | null = null;
+  ontrack: ((event: RTCTrackEvent) => void) | null = null;
+  onconnectionstatechange: (() => void) | null = null;
+  addTransceiver = vi.fn();
+  addIceCandidate = vi.fn(async () => undefined);
+  close = vi.fn();
+
+  constructor(public readonly configuration: RTCConfiguration) {
+    MockRTCPeerConnection.instances.push(this);
+  }
+
+  async createOffer() {
+    return { type: 'offer' as const, sdp: 'local-offer-sdp' };
+  }
+
+  async setLocalDescription(description: RTCSessionDescriptionInit) {
+    this.localDescription = description;
+  }
+
+  async setRemoteDescription(description: RTCSessionDescriptionInit) {
+    this.remoteDescription = description;
+  }
+
+  emitLocalCandidate() {
+    this.onicecandidate?.({
+      candidate: {
+        candidate: 'candidate:local',
+        sdpMid: '0',
+        sdpMLineIndex: 0,
+        usernameFragment: 'ufrag-local',
+        toJSON() {
+          return {
+            candidate: 'candidate:local',
+            sdpMid: '0',
+            sdpMLineIndex: 0,
+            usernameFragment: 'ufrag-local',
+          };
+        },
+      },
+    } as RTCPeerConnectionIceEvent);
+  }
+
+  emitVideoTrack(stream = new MockMediaStream([new MockMediaTrack()])) {
+    this.ontrack?.({
+      track: stream.getTracks()[0],
+      streams: [stream],
+    } as unknown as RTCTrackEvent);
+    return stream;
+  }
+
+  static reset() {
+    MockRTCPeerConnection.instances = [];
+  }
+}
+
+function makeTarget(): RemoteWindowStreamTargetManifest {
+  return {
+    streamTargetId: 'pane-1',
+    videoTarget: {
+      kind: 'iterm2-pane',
+      appBundleId: 'com.googlecode.iterm2',
+      pid: 123,
+      windowId: 'window-1',
+      title: 'zterm pane',
+      windowBoundsTopLeftPx: { x: 0, y: 80, width: 1000, height: 800 },
+      cropRectTopLeftPx: { x: 0, y: 100, width: 1000, height: 400 },
+    },
+    inputTarget: {
+      kind: 'tmux-pane',
+      itermSessionId: 'iterm-1',
+      tty: '/dev/ttys001',
+      tmuxSession: 'zterm',
+      tmuxWindowId: '@1',
+      tmuxPaneId: '%2',
+    },
+    streamMode: 'view',
+    focusPolicy: 'no-focus-steal',
+    inputRoute: 'tmux-input',
+    capture: {
+      source: 'ScreenCaptureKit',
+      coordinateSpace: 'macos-top-left-px',
+      scale: 1,
+      createdAt: '2026-07-19T00:00:00.000Z',
+    },
+  };
+}
+
+function createRuntime(timeoutHandlers?: Array<() => void>) {
+  MockRTCPeerConnection.reset();
+  return createRemoteWindowReceiverRuntime({
+    peerConnectionFactory: (configuration) => new MockRTCPeerConnection(configuration) as unknown as RTCPeerConnection,
+    mediaStreamFactory: () => new MockMediaStream() as unknown as MediaStream,
+    trackTimeoutMs: 50,
+    setTimeoutFn: vi.fn((handler) => {
+      timeoutHandlers?.push(handler as () => void);
+      return 1;
+    }) as any,
+    clearTimeoutFn: vi.fn() as any,
+  });
+}
+
+async function flushMicrotasks(times = 5) {
+  for (let index = 0; index < times; index += 1) {
+    await Promise.resolve();
+  }
+}
+
+describe('remote window receiver runtime', () => {
+  it('creates a recvonly video offer, waits for a real video track, and returns the receiver stream', async () => {
+    const runtime = createRuntime();
+    const sendIceCandidate = vi.fn();
+    const startRemote = vi.fn(async (_offer) => ({
+      requestId: 'rw-start-1',
+      streamId: 'stream-1',
+      targetId: 'pane-1',
+      answer: { type: 'answer' as const, sdp: 'remote-answer-sdp' },
+      capture: {
+        source: 'ScreenCaptureKit' as const,
+        frameWidth: 640,
+        frameHeight: 360,
+        frameRate: 5,
+        targetKind: 'iterm2-pane' as const,
+      },
+      transport: { kind: 'webrtc-video' as const },
+    }));
+
+    const started = runtime.startStream({
+      streamId: 'stream-1',
+      target: makeTarget(),
+      iceServers: [{ urls: 'stun:relay.codewhisper.cc:3478' }],
+      sendIceCandidate,
+      startRemote,
+    });
+
+    await flushMicrotasks();
+    const peer = MockRTCPeerConnection.instances[0]!;
+    expect(peer.configuration).toMatchObject({ iceServers: [{ urls: 'stun:relay.codewhisper.cc:3478' }] });
+    expect(peer.addTransceiver).toHaveBeenCalledWith('video', { direction: 'recvonly' });
+    await flushMicrotasks();
+    expect(startRemote).toHaveBeenCalledWith({ type: 'offer', sdp: 'local-offer-sdp' });
+    expect(peer.remoteDescription).toEqual({ type: 'answer', sdp: 'remote-answer-sdp' });
+
+    const mediaStream = peer.emitVideoTrack();
+
+    await expect(started).resolves.toMatchObject({
+      streamId: 'stream-1',
+      mediaStream,
+      started: { streamId: 'stream-1', targetId: 'pane-1' },
+    });
+  });
+
+  it('sends local ICE candidates and applies remote candidates by stream id', async () => {
+    const runtime = createRuntime();
+    const sendIceCandidate = vi.fn();
+    const startRemote = vi.fn(async () => ({
+      requestId: 'rw-start-1',
+      streamId: 'stream-1',
+      targetId: 'pane-1',
+      answer: { type: 'answer' as const, sdp: 'remote-answer-sdp' },
+      capture: {
+        source: 'ScreenCaptureKit' as const,
+        frameWidth: 640,
+        frameHeight: 360,
+        frameRate: 5,
+        targetKind: 'iterm2-pane' as const,
+      },
+      transport: { kind: 'webrtc-video' as const },
+    }));
+
+    const started = runtime.startStream({
+      streamId: 'stream-1',
+      target: makeTarget(),
+      sendIceCandidate,
+      startRemote,
+    });
+    await flushMicrotasks();
+    const peer = MockRTCPeerConnection.instances[0]!;
+    peer.emitLocalCandidate();
+    peer.emitVideoTrack();
+    await started;
+
+    expect(sendIceCandidate).toHaveBeenCalledWith({
+      candidate: 'candidate:local',
+      sdpMid: '0',
+      sdpMLineIndex: 0,
+      usernameFragment: 'ufrag-local',
+    });
+    await expect(runtime.addIceCandidate({
+      streamId: 'stream-1',
+      candidate: { candidate: 'candidate:remote', sdpMid: '0', sdpMLineIndex: 0 },
+    })).resolves.toBe(true);
+    expect(peer.addIceCandidate).toHaveBeenCalledWith({
+      candidate: 'candidate:remote',
+      sdpMid: '0',
+      sdpMLineIndex: 0,
+      usernameFragment: null,
+    });
+  });
+
+  it('cleans the peer exactly once on stop and ignores late candidates', async () => {
+    const runtime = createRuntime();
+    const track = new MockMediaTrack();
+    const mediaStream = new MockMediaStream([track]);
+    const started = runtime.startStream({
+      streamId: 'stream-1',
+      target: makeTarget(),
+      sendIceCandidate: vi.fn(),
+      startRemote: vi.fn(async () => ({
+        requestId: 'rw-start-1',
+        streamId: 'stream-1',
+        targetId: 'pane-1',
+        answer: { type: 'answer' as const, sdp: 'remote-answer-sdp' },
+        capture: {
+          source: 'ScreenCaptureKit' as const,
+          frameWidth: 640,
+          frameHeight: 360,
+          frameRate: 5,
+          targetKind: 'iterm2-pane' as const,
+        },
+        transport: { kind: 'webrtc-video' as const },
+      })),
+    });
+    await flushMicrotasks();
+    const peer = MockRTCPeerConnection.instances[0]!;
+    peer.emitVideoTrack(mediaStream);
+    await started;
+
+    expect(runtime.stopStream('stream-1')).toBe(true);
+    expect(runtime.stopStream('stream-1')).toBe(false);
+    expect(peer.close).toHaveBeenCalledTimes(1);
+    expect(track.stop).toHaveBeenCalledTimes(1);
+    await expect(runtime.addIceCandidate({
+      streamId: 'stream-1',
+      candidate: { candidate: 'candidate:late' },
+    })).resolves.toBe(false);
+  });
+
+  it('rejects stream setup failures and closes the peer without rendering a fake stream', async () => {
+    const runtime = createRuntime();
+    const failure = runtime.startStream({
+      streamId: 'stream-1',
+      target: makeTarget(),
+      sendIceCandidate: vi.fn(),
+      startRemote: vi.fn(async () => {
+        throw new Error('ScreenCaptureKit capture start failure');
+      }),
+    });
+
+    await expect(failure).rejects.toThrow('ScreenCaptureKit capture start failure');
+    expect(MockRTCPeerConnection.instances[0]!.close).toHaveBeenCalledTimes(1);
+    expect(runtime.getActiveStreamIds()).toEqual([]);
+  });
+
+  it('rejects when no video track arrives before timeout', async () => {
+    const timeoutHandlers: Array<() => void> = [];
+    const runtime = createRuntime(timeoutHandlers);
+    const pending = runtime.startStream({
+      streamId: 'stream-1',
+      target: makeTarget(),
+      sendIceCandidate: vi.fn(),
+      startRemote: vi.fn(async () => ({
+        requestId: 'rw-start-1',
+        streamId: 'stream-1',
+        targetId: 'pane-1',
+        answer: { type: 'answer' as const, sdp: 'remote-answer-sdp' },
+        capture: {
+          source: 'ScreenCaptureKit' as const,
+          frameWidth: 640,
+          frameHeight: 360,
+          frameRate: 5,
+          targetKind: 'iterm2-pane' as const,
+        },
+        transport: { kind: 'webrtc-video' as const },
+      })),
+    });
+
+    await Promise.resolve();
+    timeoutHandlers[0]?.();
+
+    await expect(pending).rejects.toThrow('Remote window receiver did not receive a video track');
+    expect(MockRTCPeerConnection.instances[0]!.close).toHaveBeenCalledTimes(1);
+    expect(runtime.getActiveStreamIds()).toEqual([]);
+  });
+
+  it('fails explicitly when the WebView does not provide WebRTC primitives', async () => {
+    const runtime = createRemoteWindowReceiverRuntime({
+      mediaStreamFactory: () => new MockMediaStream() as unknown as MediaStream,
+    });
+
+    await expect(runtime.startStream({
+      streamId: 'stream-1',
+      target: makeTarget(),
+      sendIceCandidate: vi.fn(),
+      startRemote: vi.fn(),
+    })).rejects.toThrow('Remote window receiver requires RTCPeerConnection');
+  });
+});

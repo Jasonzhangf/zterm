@@ -8,7 +8,7 @@ import { createSessionViewportModeStore, useSessionViewportModeSnapshot, type Se
 import { SessionScheduleSheet } from '../components/terminal/SessionScheduleSheet';
 import { FileTransferSheet } from '../components/terminal/FileTransferSheet';
 import { RemoteScreenshotSheet } from '../components/terminal/RemoteScreenshotSheet';
-import { RemoteWindowOverlay } from '../components/terminal/RemoteWindowOverlay';
+import { RemoteWindowOverlay, type RemoteWindowInputContext } from '../components/terminal/RemoteWindowOverlay';
 import { TerminalHeader } from '../components/terminal/TerminalHeader';
 import { TerminalSessionDrawer, type TerminalSessionDrawerHost, type TerminalSessionDrawerItem } from '../components/terminal/TerminalSessionDrawer';
 import { TabManagerSheet } from '../components/terminal/TabManagerSheet';
@@ -33,6 +33,12 @@ import { runtimeDebug } from '../lib/runtime-debug';
 import { DebugInput, isDebugInputSupported } from '../plugins/DebugInputPlugin';
 import { useTerminalWorkspace } from '../hooks/useTerminalWorkspace';
 import { normalizeTerminalCommittedText } from '../lib/terminal-input-normalization';
+import {
+  buildRemoteWindowBackspaceInputEvents,
+  buildRemoteWindowKeyInputEventsFromSequence,
+  buildRemoteWindowKeyboardInputEvents,
+  buildRemoteWindowTextInputEvents,
+} from '../lib/remote-window-input-mapping';
 import {
   resolveTerminalLayoutProfile,
   resolveTerminalSessionGroupLayoutAxis,
@@ -87,6 +93,8 @@ import {
   type Host,
   type RemoteScreenshotCapture,
   type RemoteScreenshotStatusPayload,
+  type RemoteWindowInputEventPayload,
+  type RemoteWindowStreamTargetManifest,
   type RemoteWindowStreamTargetsResponsePayload,
   type Session,
   type SessionDebugOverlayMetrics,
@@ -99,6 +107,7 @@ import {
   type TerminalWidthMode,
   type TraversalRelayDeviceSnapshot,
 } from '../lib/types';
+import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
 
 type DrawerRemoteSessionTarget = {
   name: string;
@@ -127,9 +136,11 @@ function logAsyncCleanupFailure(scope: string, error: unknown) {
 
 const TerminalQuickBarShell = ReactMemo(function TerminalQuickBarShell({
   bottomPx,
+  zIndex = 10,
   children,
 }: {
   bottomPx: number;
+  zIndex?: number;
   children: ReactNode;
 }) {
   return (
@@ -140,7 +151,7 @@ const TerminalQuickBarShell = ReactMemo(function TerminalQuickBarShell({
         left: 0,
         right: 0,
         bottom: `${bottomPx}px`,
-        zIndex: 10,
+        zIndex,
       }}
     >
       {children}
@@ -258,6 +269,16 @@ interface TerminalPageProps {
     onProgress?: (progress: RemoteScreenshotStatusPayload) => void,
   ) => Promise<RemoteScreenshotCapture>;
   onRequestRemoteWindowTargets?: (sessionId: string) => Promise<RemoteWindowStreamTargetsResponsePayload>;
+  onRequestRemoteWindowStreamStart?: (
+    sessionId: string,
+    target: RemoteWindowStreamTargetManifest,
+    streamId: string,
+  ) => Promise<RemoteWindowReceiverStartResult>;
+  onStopRemoteWindowStream?: (sessionId: string, streamId: string) => boolean;
+  onSendRemoteWindowInput?: (
+    sessionId: string,
+    payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
+  ) => void;
   quickActions: QuickAction[];
   shortcutActions: TerminalShortcutAction[];
   onQuickActionInput?: (sequence: string, sessionId?: string) => void;
@@ -563,6 +584,49 @@ function resolveTerminalSessionGroupSlotIds(options: {
   );
 
   return { top, center, bottom };
+}
+
+function terminalSessionGroupSlotIdsEqual(
+  left: TerminalSessionGroupSlotIds,
+  right: TerminalSessionGroupSlotIds,
+) {
+  return left.top === right.top && left.center === right.center && left.bottom === right.bottom;
+}
+
+function resolveTerminalSessionGroupActiveSessionProjection(options: {
+  slots: TerminalSessionGroupSlotIds;
+  sessions: Session[];
+  activeSessionId: string | null;
+}): { slots: TerminalSessionGroupSlotIds; focusSlot: TerminalSessionGroupSlotName } | null {
+  if (!options.activeSessionId) {
+    return null;
+  }
+  const sessionIds = new Set(options.sessions.map((session) => session.id));
+  if (!sessionIds.has(options.activeSessionId)) {
+    return null;
+  }
+  const normalizedSlots = resolveTerminalSessionGroupSlotIds({
+    slots: options.slots,
+    sessions: options.sessions,
+    centerSessionId: options.activeSessionId,
+  });
+  if (normalizedSlots.top === options.activeSessionId) {
+    return { slots: normalizedSlots, focusSlot: 'top' };
+  }
+  if (normalizedSlots.center === options.activeSessionId) {
+    return { slots: normalizedSlots, focusSlot: 'center' };
+  }
+  if (normalizedSlots.bottom === options.activeSessionId) {
+    return { slots: normalizedSlots, focusSlot: 'bottom' };
+  }
+  return {
+    slots: resolveTerminalSessionGroupSlotIds({
+      slots: resolveTerminalSessionGroupSlotReplacement(normalizedSlots, options.activeSessionId, 'center'),
+      sessions: options.sessions,
+      centerSessionId: options.activeSessionId,
+    }),
+    focusSlot: 'center',
+  };
 }
 
 const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
@@ -916,6 +980,9 @@ function TerminalPageComponent({
   onOpenSettings,
   onRequestRemoteScreenshot,
   onRequestRemoteWindowTargets,
+  onRequestRemoteWindowStreamStart,
+  onStopRemoteWindowStream,
+  onSendRemoteWindowInput,
   quickActions,
   shortcutActions,
   onQuickActionInput,
@@ -957,6 +1024,7 @@ function TerminalPageComponent({
   const [quickBarCollapsed, setQuickBarCollapsed] = useState(false);
   const [quickBarEditorFocused, setQuickBarEditorFocused] = useState(false);
   const [remoteWindowOverlayOpen, setRemoteWindowOverlayOpen] = useState(false);
+  const [remoteWindowInputContext, setRemoteWindowInputContext] = useState<RemoteWindowInputContext | null>(null);
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
   const initialSessionPreviewRead = useMemo(() => {
     const storage = getBrowserStorage();
@@ -1014,6 +1082,7 @@ function TerminalPageComponent({
   const quickBarEditorFocusedRef = useRef(quickBarEditorFocused);
   const androidImeVisibleRef = useRef(false);
   const terminalInputHandlerRef = useRef<typeof onTerminalInput>(onTerminalInput);
+  const remoteWindowInputContextRef = useRef<RemoteWindowInputContext | null>(null);
   const appliedPaneAttachIntentNonceRef = useRef<number | null>(null);
   const pendingAndroidImeFocusTimerRef = useRef<number | null>(null);
   const androidImeFocusRouteKeyRef = useRef<string | null>(null);
@@ -1053,6 +1122,10 @@ function TerminalPageComponent({
   useEffect(() => {
     quickBarEditorFocusedRef.current = quickBarEditorFocused;
   }, [quickBarEditorFocused]);
+
+  useEffect(() => {
+    remoteWindowInputContextRef.current = remoteWindowInputContext;
+  }, [remoteWindowInputContext]);
 
   const rawShellHeight = resolveLayoutViewportHeight();
   const keyboardViewportAlreadyResized = isAndroid
@@ -1214,6 +1287,26 @@ function TerminalPageComponent({
     handleQuickBarToggleCopyMode,
   } = copyRuntime;
   const uiSessionId = uiSession?.id || null;
+  useLayoutEffect(() => {
+    if (sessionPreviewOpen) {
+      return;
+    }
+    const projection = resolveTerminalSessionGroupActiveSessionProjection({
+      slots: sessionGroupSlotIds,
+      sessions,
+      activeSessionId: uiSessionId,
+    });
+    if (!projection) {
+      return;
+    }
+    if (!terminalSessionGroupSlotIdsEqual(sessionGroupSlotIds, projection.slots)) {
+      setSessionGroupSlotIds(projection.slots);
+    }
+    if (sessionGroupFocusSlot !== projection.focusSlot) {
+      setSessionGroupFocusSlot(projection.focusSlot);
+    }
+  }, [sessionGroupFocusSlot, sessionGroupSlotIds, sessionPreviewOpen, sessions, uiSessionId]);
+
   const effectiveSessionGroupSlotIds = useMemo(() => resolveTerminalSessionGroupSlotIds({
     slots: sessionGroupSlotIds,
     sessions,
@@ -1794,23 +1887,67 @@ function TerminalPageComponent({
     setQuickBarHeight(Math.max(0, height));
   }, [keyboardInset]);
 
+  const emitRemoteWindowInputEvents = useCallback((
+    events: Array<RemoteWindowInputEventPayload['event']>,
+    source: 'quickbar-sequence' | 'quickbar-draft' | 'ime-input' | 'ime-backspace' | 'ime-key' | 'debug-input',
+  ) => {
+    const context = remoteWindowInputContextRef.current;
+    if (!context) {
+      return false;
+    }
+    runtimeDebug('desktop.remote_window_stream.input.route', {
+      source,
+      sessionId: context.sessionId,
+      streamId: context.streamId,
+      targetId: context.targetId,
+      targetKind: context.targetKind,
+      inputTargetKind: context.inputTargetKind,
+      inputRoute: context.inputRoute,
+      focusPolicy: context.focusPolicy,
+      eventCount: events.length,
+    });
+    if (!onSendRemoteWindowInput || events.length === 0) {
+      return true;
+    }
+    events.forEach((event) => {
+      onSendRemoteWindowInput(context.sessionId, {
+        streamId: context.streamId,
+        targetId: context.targetId,
+        event,
+      });
+    });
+    return true;
+  }, [onSendRemoteWindowInput]);
+
   const handleQuickBarSendSequence = useCallback((sequence: string) => {
+    if (emitRemoteWindowInputEvents(
+      buildRemoteWindowKeyInputEventsFromSequence(sequence),
+      'quickbar-sequence',
+    )) {
+      return;
+    }
     onQuickActionInput?.(sequence, uiSessionId || undefined);
     if (terminalKeyboardRequested) {
       keepTerminalInputFocused();
     }
-  }, [keepTerminalInputFocused, onQuickActionInput, terminalKeyboardRequested, uiSessionId]);
+  }, [emitRemoteWindowInputEvents, keepTerminalInputFocused, onQuickActionInput, terminalKeyboardRequested, uiSessionId]);
 
   const handleQuickBarSessionDraftChange = useCallback((value: string) => {
     onSessionDraftChange?.(value, uiSessionId || undefined);
   }, [onSessionDraftChange, uiSessionId]);
 
   const handleQuickBarSessionDraftSend = useCallback((value: string) => {
+    if (emitRemoteWindowInputEvents(
+      buildRemoteWindowKeyInputEventsFromSequence(value),
+      'quickbar-draft',
+    )) {
+      return;
+    }
     onSessionDraftSend?.(value, uiSessionId || undefined);
     if (terminalKeyboardRequested) {
       keepTerminalInputFocused();
     }
-  }, [keepTerminalInputFocused, onSessionDraftSend, terminalKeyboardRequested, uiSessionId]);
+  }, [emitRemoteWindowInputEvents, keepTerminalInputFocused, onSessionDraftSend, terminalKeyboardRequested, uiSessionId]);
 
   const handleQuickBarOpenScheduleComposer = useCallback((text: string) => {
     const targetSessionId = uiSessionId;
@@ -2020,11 +2157,18 @@ function TerminalPageComponent({
 
   const handleRemoteWindowOverlayOpenStateChange = useCallback((open: boolean) => {
     setRemoteWindowOverlayOpen(open);
-    onActiveBodySubscriptionSuppressedChange?.(open);
     if (open) {
       hideTerminalInputForRemoteWindow();
     }
-  }, [hideTerminalInputForRemoteWindow, onActiveBodySubscriptionSuppressedChange]);
+  }, [hideTerminalInputForRemoteWindow]);
+
+  const handleRemoteWindowBodySubscriptionSuppressedChange = useCallback((suppressed: boolean) => {
+    onActiveBodySubscriptionSuppressedChange?.(suppressed);
+  }, [onActiveBodySubscriptionSuppressedChange]);
+
+  const handleRemoteWindowInputContextChange = useCallback((context: RemoteWindowInputContext | null) => {
+    setRemoteWindowInputContext(context);
+  }, []);
 
   useEffect(() => () => {
     onActiveBodySubscriptionSuppressedChange?.(false);
@@ -2164,8 +2308,16 @@ function TerminalPageComponent({
     const attachListeners = async () => {
       try {
         inputListener = await ImeAnchor.addListener('input', (event) => {
+          const rawText = event.text || '';
+          if (emitRemoteWindowInputEvents(
+            buildRemoteWindowTextInputEvents(rawText),
+            'ime-input',
+          )) {
+            return;
+          }
+          const text = normalizeTerminalCommittedText(rawText);
           emitToActiveSession(
-            normalizeTerminalCommittedText(event.text || ''),
+            text,
             'ime-input',
           );
         });
@@ -2178,6 +2330,12 @@ function TerminalPageComponent({
         }
         backspaceListener = await ImeAnchor.addListener('backspace', (event) => {
           const count = Math.max(1, Math.round(event.count || 1));
+          if (emitRemoteWindowInputEvents(
+            buildRemoteWindowBackspaceInputEvents(count),
+            'ime-backspace',
+          )) {
+            return;
+          }
           emitToActiveSession('\x7f'.repeat(count), 'ime-backspace');
         });
         if (disposed) {
@@ -2191,6 +2349,20 @@ function TerminalPageComponent({
           if (disposed) return;
           const sessionId = activeSessionIdRef.current;
           if (!sessionId || quickBarEditorFocusedRef.current) {
+            return;
+          }
+          if (remoteWindowInputContextRef.current) {
+            emitRemoteWindowInputEvents(
+              buildRemoteWindowKeyboardInputEvents({
+                key: event.key || '',
+                code: event.code || '',
+                ctrlKey: Boolean(event.ctrlKey),
+                altKey: Boolean(event.altKey),
+                metaKey: Boolean(event.metaKey),
+                shiftKey: Boolean(event.shiftKey),
+              }),
+              'ime-key',
+            );
             return;
           }
           const keyboardEvent = new KeyboardEvent('keydown', {
@@ -2261,6 +2433,12 @@ function TerminalPageComponent({
         if (isDebugInputSupported()) {
           debugInputListener = await DebugInput.addListener('debug-input', (event) => {
             const payload = `${event.text || ''}${event.newline || ''}`;
+            if (emitRemoteWindowInputEvents(
+              buildRemoteWindowTextInputEvents(normalizeTerminalCommittedText(payload)),
+              'debug-input',
+            )) {
+              return;
+            }
             emitToActiveSession(payload, 'debug-input');
           });
           if (disposed) {
@@ -2305,7 +2483,7 @@ function TerminalPageComponent({
         });
       }
     };
-  }, [captureStableLayoutViewportHeight, isAndroid]);
+  }, [captureStableLayoutViewportHeight, emitRemoteWindowInputEvents, isAndroid]);
 
   useEffect(() => {
     if (!isAndroid || !quickBarEditorFocused) {
@@ -2432,6 +2610,9 @@ function TerminalPageComponent({
       + terminalBottomChromeLiftPx,
   );
   const terminalStageBottomPx = terminalChromeBottomPx + terminalImeLiftPx;
+  const terminalStageTopPx = portraitSessionDrawerEnabled
+    ? Math.max(0, headerTopInsetPx + 50)
+    : 0;
   const visualViewportDebugWidth = typeof window !== 'undefined'
     ? Math.round(window.visualViewport?.width || 0)
     : 0;
@@ -2959,6 +3140,7 @@ function TerminalPageComponent({
       debugOverlayVisible={debugOverlayVisible}
       absoluteLineNumbersVisible={absoluteLineNumbersVisible}
       remoteScreenshotStatus={resolveRemoteScreenshotQuickBarStatus(remoteScreenshotPreview)}
+      remoteWindowInputActive={Boolean(remoteWindowInputContext)}
       shortcutSmartSort={shortcutSmartSort}
       shortcutFrequencyMap={shortcutFrequencyMap}
       onShortcutUse={onShortcutUse}
@@ -2992,6 +3174,7 @@ function TerminalPageComponent({
     quickActions,
     quickBarShellKeyboardLiftPx,
     remoteScreenshotPreview?.phase,
+    remoteWindowInputContext,
     shortcutActions,
     shortcutFrequencyMap,
     shortcutSmartSort,
@@ -3157,6 +3340,7 @@ function TerminalPageComponent({
       visiblePaneEntries={visiblePaneEntries}
           splitVisible={splitVisible}
           activePaneId={workspace.activePaneId}
+          terminalChromeTopPx={terminalStageTopPx}
           terminalChromeBottomPx={terminalStageBottomPx}
           inputResetEpochBySession={inputResetEpochBySession}
           followResetEpoch={followResetEpoch}
@@ -3245,15 +3429,21 @@ function TerminalPageComponent({
         <RemoteWindowOverlay
           activeSessionId={uiSessionId}
           requestTargets={onRequestRemoteWindowTargets}
+          startStream={onRequestRemoteWindowStreamStart}
+          stopStream={onStopRemoteWindowStream}
+          sendInput={onSendRemoteWindowInput}
           bottomInsetPx={
             quickBarShellKeyboardLiftPx
             + layoutProfile.quickBar.touchSafeOffsetPx
             + terminalBottomChromeLiftPx
           }
           onOpenStateChange={handleRemoteWindowOverlayOpenStateChange}
+          onBodySubscriptionSuppressedChange={handleRemoteWindowBodySubscriptionSuppressedChange}
+          onInputContextChange={handleRemoteWindowInputContextChange}
         />
         {!remoteWindowOverlayOpen ? (
           <TerminalQuickBarShell
+            zIndex={remoteWindowInputContext ? 96 : 10}
             bottomPx={
               quickBarShellKeyboardLiftPx
               + layoutProfile.quickBar.touchSafeOffsetPx
@@ -3364,6 +3554,9 @@ function terminalPagePropsEqual(
     && prev.onOpenSettings === next.onOpenSettings
     && prev.onRequestRemoteScreenshot === next.onRequestRemoteScreenshot
     && prev.onRequestRemoteWindowTargets === next.onRequestRemoteWindowTargets
+    && prev.onRequestRemoteWindowStreamStart === next.onRequestRemoteWindowStreamStart
+    && prev.onStopRemoteWindowStream === next.onStopRemoteWindowStream
+    && prev.onSendRemoteWindowInput === next.onSendRemoteWindowInput
     && prev.quickActions === next.quickActions
     && prev.shortcutActions === next.shortcutActions
     && prev.onQuickActionInput === next.onQuickActionInput

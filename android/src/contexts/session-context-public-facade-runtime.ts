@@ -2,6 +2,8 @@ import type {
   ClientMessage,
   RemoteScreenshotCapture,
   RemoteScreenshotStatusPayload,
+  RemoteWindowInputEventPayload,
+  RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
   ScheduleJobDraft,
   Session,
@@ -14,6 +16,7 @@ import type {
 import type { SessionBufferStore } from '../lib/session-buffer-store';
 import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
 import type { SessionHeadStore } from '../lib/session-head-store';
+import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
 import type {
   CreateSessionOptions,
   SessionContextValue,
@@ -275,6 +278,16 @@ export function buildSessionContextValueRuntime(options: {
     onProgress?: (progress: RemoteScreenshotStatusPayload) => void,
   ) => Promise<RemoteScreenshotCapture>;
   requestRemoteWindowTargets: (sessionId: string) => Promise<RemoteWindowStreamTargetsResponsePayload>;
+  requestRemoteWindowStreamStart: (
+    sessionId: string,
+    target: RemoteWindowStreamTargetManifest,
+    streamId: string,
+  ) => Promise<RemoteWindowReceiverStartResult>;
+  stopRemoteWindowStream: (sessionId: string, streamId: string) => boolean;
+  sendRemoteWindowInput: (
+    sessionId: string,
+    payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
+  ) => void;
   updateSessionViewport: (sessionId: string, visibleRange: TerminalVisibleRange | TerminalViewportState) => void;
   requestScheduleList: (sessionId: string) => void;
   upsertScheduleJob: (sessionId: string, job: ScheduleJobDraft) => void;
@@ -312,6 +325,9 @@ export function buildSessionContextValueRuntime(options: {
     sendFileAttach: options.sendFileAttach,
     requestRemoteScreenshot: options.requestRemoteScreenshot,
     requestRemoteWindowTargets: options.requestRemoteWindowTargets,
+    requestRemoteWindowStreamStart: options.requestRemoteWindowStreamStart,
+    stopRemoteWindowStream: options.stopRemoteWindowStream,
+    sendRemoteWindowInput: options.sendRemoteWindowInput,
     updateSessionViewport: options.updateSessionViewport,
     requestScheduleList: options.requestScheduleList,
     upsertScheduleJob: options.upsertScheduleJob,

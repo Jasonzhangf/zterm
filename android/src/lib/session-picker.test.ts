@@ -367,7 +367,7 @@ describe('session-picker relay truth', () => {
     }));
   });
 
-  it('builds a relay WebRTC-first target that keeps direct endpoints as the middle route', () => {
+  it('builds a route-aware relay target that keeps direct endpoints ahead of media relay', () => {
     const device: TraversalRelayDeviceSnapshot = {
       deviceId: 'daemon-device-a',
       deviceName: 'Directory Daemon',

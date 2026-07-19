@@ -2731,3 +2731,149 @@ Need runtime debug to confirm:
 - 测试设计已补：catalog readiness 必须允许 `session=connecting + socket=OPEN` 发一次 `remote-window-targets-request`；无 open socket 必须显式 remote-window catalog transport error，不能复用 paste ready 的 `Active session is not ready yet`，也不能启动 screenshot/terminal buffer/video fallback。
 - 带宽尚未定根因。当前只能确认 catalog 未启动视频流；大流量下一步要用 runtime/debug 或真 daemon 统计 `remote-window-targets-request`、`body-subscription`、`buffer-head-request`、`buffer-sync-request` 的频率和 bytes，不能把 catalog ready bug 和带宽 bug 混成一个结论。
 - 带宽现场证据：`/debug/runtime` 中 `remote-window` scope 为 0，`body-subscription` scope 为 0，但 `clientDebug.totalEntries=2000`、`performanceTrace.recordCount=5932`，最近条目主要是 `terminal.performance.trace`、`session.buffer.applied`、`session.ws.reconnect.buffer-sync`、`runtime.debug.drop-summary`。根因之一是 `flushRuntimeDebugLogsToSessionTransport()` 在 runtime debug disabled 但 pending queue 非空时仍会把 `runtimeDebugPrechecked('terminal.performance.trace')` 队列上送。修复为：debug 未开启时不 flush pending queue；debug flag 写 TTL，旧无 TTL 的永久 flag 冷启动时清理。剩余真实下行 buffer-sync 体积需另用网络字节 gate 统计，不能归入 remote-window 视频。
+
+# 2026-07-19 Remote window real video mainline continuation
+
+- Goal file re-read: current target is not APK packaging. Required next slice is daemon real ScreenCaptureKit capture + WebRTC sender, then Android receiver pixel proof, then APK only after gates.
+- MemoryPalace search for `desktop.remote_window_stream ScreenCaptureKit WebRTC RemoteWindowOverlay` returned no results; current truth remains local docs/maps/MEMORY.
+- Architecture owner: `desktop.remote_window_stream`; direct resources are `resource.remote_window_overlay -> resource.remote_window_stream` through existing `resource.session_transport`. Forbidden fixes remain Android coordinate math, terminal mirror/buffer/render video truth, screenshot/static/mock fallback, and fresh transport creation.
+- Current source state: Android receiver/control-plane code exists; daemon `RemoteWindowStreamDaemonRuntime` still only exposes `listTargets`. `terminal-message-runtime.ts` only routes `remote-window-targets-request`. Next code edit must add adjacent start/candidate/stop control edges and daemon capture/media lifecycle.
+- Local Swift checks: `ScreenCaptureKit` imports, `SCStreamConfiguration.sourceRect` exists, `SCContentFilter(desktopIndependentWindow:)` requires `AppKit` / `NSApplication.shared` on the main actor, and a real `SCStream` can emit a first frame on this Mac Studio.
+
+# 2026-07-19 Remote window video start timeout root cause
+
+- Jason screenshot showed `视频流启动失败 / Remote window stream start timed out` after selecting a generic app window. Direct daemon WebSocket smoke reproduced against `app-window:486:1439` / `微信` with crop `1037x1177`: catalog succeeded, stream emitted only `phase=starting`, then timed out.
+- Root cause was daemon-side frame conversion, not Android picker/receiver and not Relay/session transport. The active service logs are under `~/.wterm/logs/launchd-stderr.log`; the daemon had crashed with `TypeError: Expected a .byteLength of 1831931, not 1830823` from `convertRgbaToI420Frame`.
+- Fix: I420 allocation now uses `Y = width * height` and chroma planes `ceil(width/2) * ceil(height/2) * 2`; `onFrame` conversion errors are caught and close the stream with explicit stopped status instead of crashing the daemon process.
+- Verification: remote-window server focused tests now pass `2 files / 42 tests`, full remote-window focused suite passes `9 files / 92 tests`, feature/resource/function/mainline gates pass `7 files / 48 tests`, `tsc --noEmit` passes, and `git diff --check` passes.
+- Live gates from the fixed staged daemon runtime: same `微信` target produced `remote-window-stream-started`, `phase=streaming`, WebRTC video track `live`, and stopped cleanly at `framesSent=22` with daemon PID stable. Android CDP receiver proof showed `<video data-testid="remote-window-video">` `readyState=4`, `videoWidth=1037`, `videoHeight=1177`, track `live`. Controlled AppKit marker rendered through Android video with canvas samples red `[254,8,7,255]`, green `[0,249,58,255]`, blue `[0,52,246,255]`, all classified true.
+- Delivery build: `pnpm --dir android run build:android` passed full build gates (`terminal contracts 48 files / 588 tests`, common flows 82 tests, local Relay smoke, typecheck/Vite/Gradle/update-manifest verification). APK `0.1.3.2164` / versionCode `1032164` was published to local update channel and installed on ADB device `100.104.163.65:5555`; sha256 `40db98e2c66701212471f920ffd4a7a7188340f716116934eb8ce2a5febdbe3b`. Post-install UI smoke for 2164 is blocked because the device is on `NotificationShade` with `isKeyguardShowing=true`; do not claim 2164 visual L5 beyond install/version proof.
+
+# 2026-07-19 Session switch connected but body not updating
+
+- Jason reported that switching sessions can show the new session as connected while the visible shell body stops updating. MemoryPalace hit the earlier drawer remote-open/session-group slot class of bugs; this run confirmed the current symptom at the UI projection layer, not the WebSocket owner.
+- Root cause: `TerminalPage` kept `sessionGroupSlotIds.center` from initial render. `resolveTerminalSessionGroupSlotIds()` only fell back to the new `activeSession` when the old center session no longer existed. In portrait/session-group mode, an external active session change to an already-open session could therefore leave `TerminalPageStageShell` rendering the old center `TerminalView`.
+- Red test: `TerminalPage.session-content-identity.test.tsx` now forces a portrait viewport, renders `ALPHA_PORTRAIT_BODY`, rerenders with active session beta, and fails if DOM rows still contain alpha instead of `BETA_PORTRAIT_BODY`.
+- Fix: `TerminalPage#resolveTerminalSessionGroupActiveSessionProjection` synchronizes active session id to the existing top/center/bottom slot before StageShell render. If active is already in a slot, focus that slot; otherwise replace center with active. This stays in `terminal.session_group_layout` / UI projection and does not open, close, reconnect, or rebuild transports.
+- Additional cleanup: `TerminalPage.session-preview.test.tsx` expected a remote drawer materialization target without `relayHostId`; current route identity correctly includes `relayHostId`, so the assertion was aligned.
+- Verification:
+  - `TerminalPage.session-content-identity.test.tsx` PASS, 2 tests.
+  - Session/body/drawer/preview/layout/transport/render focused gate PASS, 7 files / 292 tests.
+  - `test:feature-registry` PASS, 7 files / 48 tests.
+  - `tsc --noEmit` PASS; `git diff --check` PASS.
+  - `pnpm --dir android run build:android` PASS: terminal contracts 48 files / 588 tests, common user flows 7 files / 82 tests, local Relay smoke, typecheck/Vite/Capacitor/Gradle/update-manifest verification.
+- APK published/installed: `0.1.3.2165` / versionCode `1032165`, sha256 `71273aa50420d2dc86d53e92ed312a4b2c6fe2bb9b70a535703d32b3fef1bd89`, size `5867362`, paths `android/update-dist/zterm-0.1.3.2165.apk` and `/Users/fanzhang/.zterm/updates/zterm-0.1.3.2165.apk`; ADB install on `100.104.163.65:5555` succeeded and package manager reports versionName `0.1.3.2165`.
+- L5 gap: launching the app focuses `com.zterm.android/.MainActivity`, but `mCurrentFocus=NotificationShade`, `mDreamingLockscreen=true`, `isKeyguardShowing=true`; real UI session-switch visual proof is not claimed until the device is unlocked.
+
+# 2026-07-19 Session switch report recheck
+
+- Jason reported the same connected-but-not-updating switch symptom again. Current local code still maps this class first to `terminal.session_group_layout` / `resource.ui_projection`, not WebSocket: connected state can be true while `TerminalPageStageShell` is still rendering the old session-group center slot.
+- Rechecked current installed device package: `com.zterm.android` is `0.1.3.2165` / versionCode `1032165`. The device is currently locked behind `NotificationShade` / keyguard, so live DOM/session-body replay is blocked and not claimed.
+- Local focused gate re-run passed: `TerminalPage.session-content-identity.test.tsx` 2/2 PASS and the wider session/body/drawer/preview/layout/transport/render gate 7 files / 291 tests PASS. If the issue still reproduces on 2165 after unlock, the remaining suspect is a second projection path outside the covered portrait external-active-session case, not the daemon WebSocket owner until a session/body marker gate proves otherwise.
+
+# 2026-07-19 Remote window fullscreen interaction 2166 closeout
+
+- Jason requested remote-window fullscreen support for pinch zoom, zoomed single-finger pan, and a top-right minimap; this sits in `desktop.remote_window_stream` / `resource.remote_window_overlay`, with input requests crossing the existing active session transport to daemon `resource.remote_window_stream`.
+- Implemented overlay interaction slice: partial daemon catalog errors are hidden when selectable targets exist; floating video no longer suppresses QuickBar; picker/fullscreen still suppress QuickBar and active body push; floating toolbar has an explicit fullscreen button next to close; fullscreen uses aspect-fit letterbox, pinch scale `1..4`, pan clamps to content bounds, and minimap shows viewport position.
+- Implemented input intent path: Android maps pointer/key events from the video content rect to daemon target coordinates and sends `remote-window-input` over the already-open session transport. Daemon accepts only `focusPolicy=bring-to-focus` + `inputRoute=os-event` for generic app windows and explicitly rejects no-focus/generic, target mismatch, stopped stream, and unsupported iTerm2/tmux routes.
+- Verification passed before package delivery: remote-window focused suite `9 files / 101 tests`; `tsc --noEmit`; feature/resource/function/mainline gates `7 files / 48 tests`; `git diff --check`; Swift input script parse gate; full `build:android` including terminal contracts `48 files / 588 tests`, common user flows `7 files / 82 tests`, local Relay smoke, Vite/Capacitor/Gradle/update manifest verification.
+- APK `0.1.3.2166` / versionCode `1032166` was built and published to local update channel. sha256 `fa0dd5c9ab14a535e21a4f2c8541b2a883d5df2c5f543e99c485f0d4a34f90f3` matches `android/update-dist/zterm-0.1.3.2166.apk`, `android/update-dist/zterm-latest-debug.apk`, and `/Users/fanzhang/.zterm/updates/zterm-0.1.3.2166.apk`.
+- ADB install on `100.104.163.65:5555` succeeded. Package manager reports `versionName=0.1.3.2166` and `versionCode=1032166`; `am start` focused `com.zterm.android/.MainActivity` with keyguard not showing.
+- Remaining gap: no live physical pinch/pan/minimap visual proof and no live OS input injection proof on a remote target in this closeout. Unit/component/runtime gates prove the interaction mapping and explicit unsupported routes; Jason device testing is still needed for actual gesture feel and macOS input permission behavior.
+
+# 2026-07-19 Remote window video Relay ICE and fullscreen safe-area 2167
+
+- Jason reported two regressions on 2166: remote-window video still failed with `Remote window stream start timed out`, and fullscreen toolbar overlapped the Android status bar.
+- Local daemon/WebRTC black-box still proved ScreenCaptureKit/WebRTC itself can stream: direct daemon WebSocket selected a real `app-window` target, emitted `phase=starting`, `phase=streaming`, `remote-window-stream-started`, delivered a live video track, and stopped cleanly. That narrowed the new failure to Android remote-window media negotiation on the current session route, not daemon capture.
+- Fix: remote-window video is still a separate WebRTC peer, but `requestRemoteWindowStreamStartRuntime()` now derives ICE servers from the active session traversal route. `rtc-direct` inherits STUN-only direct ICE; `rtc-relay` inherits Relay TURN ICE; direct WebSocket/Tailscale paths do not fabricate ICE. This prevents cellular/Relay remote-window video from starting with an empty no-ICE peer.
+- Fix: `RemoteWindowOverlay` fullscreen root now uses `box-sizing: border-box` and `padding-top: calc(16px + env(safe-area-inset-top, 0px))`, moving the toolbar below the status-bar safe area.
+- Verification passed before delivery: focused remote-window route/overlay tests `2 files / 20 tests`; full remote-window focused suite `9 files / 102 tests`; `tsc --noEmit`; feature/resource/function/mainline gates `7 files / 48 tests`; `git diff --check`; full `pnpm --dir android run build:android` including terminal contracts `48 files / 588 tests`, common user flows `7 files / 82 tests`, local Relay smoke, Vite/Capacitor/Gradle/update manifest verification.
+- APK `0.1.3.2167` / versionCode `1032167` built and published to local update channels: `android/update-dist/zterm-0.1.3.2167.apk`, `android/update-dist/zterm-latest-debug.apk`, and `/Users/fanzhang/.zterm/updates/zterm-0.1.3.2167.apk`, sha256 `8ed0e1e717f27076cd00d10858002741aa942e43f28fb9c949a5f7cc975d024d`.
+- ADB install on `100.104.163.65:5555` succeeded and package manager reported `versionName=0.1.3.2167`, `versionCode=1032167`; `am start` focused `com.zterm.android/.MainActivity` with keyguard false. After a later CDP/ADB probing attempt the phone dropped off Tailscale/ADB (`tailscale status Online=false`, ping 100% loss), so live Android rendered-pixel/video-open and visual safe-area proof for 2167 are not claimed in this note.
+
+# 2026-07-19 Fast-path route, reliable input resend, and portrait top chrome
+
+- Jason reported 2167 was hard to use: the top UI bug persisted, route choice was wrong for real networks, and user input still needed resend semantics. Current product route policy is `private LAN IPv4 -> Tailscale/direct websocket -> WebRTC direct/hole-punch -> TURN/Relay`; Relay/TURN is last, not default.
+- Architecture mapping: `relay.route_selection` owns route cost/health and `TraversalSocket` candidate selection; `terminal.daemon_input` owns input resend/ack/dedupe; `terminal.keyboard_ime` / `TerminalPageStageShell` own Android top/bottom chrome avoidance. No daemon client-state fallback or terminal renderer workaround was added.
+- Code changes now under test:
+  - route selector default priority and cost make private LAN IPv4 win first, public IPv4 stay below Tailscale, WebRTC direct stay before TURN/Relay, and opened-route close/heartbeat failure records route health so the next attempt can try another candidate.
+  - reliable input remains string-only for old daemons; new daemon capability `connected.capabilities.reliableInput.version=1` enables client seq/ack/retry, daemon accepted-seq dedupe, retryable stale-transport/session-required nacks staying queued, and invalid/oversize nacks stopping.
+  - portrait terminal stage now reserves top chrome for the Android safe area plus floating top controls; remote-window picker has an 8s local watchdog so it cannot remain indefinitely at `读取中`.
+- Focused verification passed before APK build:
+  - route/config/socket: 3 files / 35 tests PASS.
+  - input/protocol/session sync: 4 files / 128 tests PASS.
+  - UI/remote-window focused: 2 files / 64 tests PASS, plus remote-window wider focused 8 files / 93 tests PASS.
+  - session-open/drawer/infra/picker old route wording gate: 4 files / 80 tests PASS.
+  - transport/session wider gate: 5 files / 166 tests PASS.
+  - feature/resource/function/mainline gates: 7 files / 48 tests PASS.
+  - `tsc --noEmit` PASS and `git diff --check` PASS.
+- Remaining gap: APK build/update publish and any ADB/live network proof are not yet claimed in this note.
+
+# 2026-07-19 Remote window floating preview and hit surface fixes
+
+- Jason reported the remote-window stream can show video in fullscreen but not in the floating window, fullscreen input is not effective, and the window floating marker cannot be moved / can obstruct UI. Same screenshot also showed the quickbar command bubble persisted near the Android status bar.
+- Architecture mapping: `desktop.remote_window_stream` owns `RemoteWindowOverlay` floating/fullscreen projection and video/input hit surface; `terminal.quickbar` owns the independent command bubble clamp. No daemon coordinate truth, ScreenCaptureKit capture, terminal mirror/buffer/render, or transport fallback was changed.
+- Implemented source-side fixes:
+  - floating remote preview now derives width cap and video surface `aspect-ratio` from selected `cropRectTopLeftPx` / `windowBoundsTopLeftPx` instead of using fixed 16:10.
+  - floating overlay is a flex shell with a real aspect-ratio video surface; received media `<video>` is pointer-transparent so fullscreen/floating pointer/key input belongs to `remote-window-video-surface`.
+  - remote-window floating entry is draggable and suppresses the synthetic click from the same drag gesture.
+  - quickbar command bubble clamp now has a 64px top guard to keep it below Android status icons after persisted/manual movement.
+- Verification so far:
+  - `pnpm --dir android exec vitest run src/components/terminal/RemoteWindowOverlay.test.tsx src/components/terminal/TerminalQuickBar.test.tsx --reporter dot` PASS, 2 files / 82 tests.
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS.
+- Broader gates passed after the focused fix:
+  - Remote-window + quickbar runtime suite PASS, 10 files / 178 tests.
+  - `pnpm --dir android run test:feature-registry -- --reporter dot` PASS, 7 files / 48 tests.
+  - `git diff --check` PASS.
+  - `pnpm --dir android run build:android` PASS, including terminal contracts, common flows, local Relay smoke, Vite/Capacitor/Gradle/update-manifest verification.
+- Delivery:
+  - APK `0.1.3.2169` / versionCode `1032169`, sha256 `72b276cd2906687ea502e15a676ab9fc0ef65abb93f0482160cd4b07331b9dff`, size `5873874`.
+  - Local paths: `android/update-dist/zterm-0.1.3.2169.apk`, `android/update-dist/zterm-latest-debug.apk`, `/Users/fanzhang/.zterm/updates/zterm-0.1.3.2169.apk`.
+  - ADB install succeeded on `100.104.163.65:5555`; package manager reports `versionName=0.1.3.2169`, `versionCode=1032169`.
+  - Public Relay update route `https://relay.codewhisper.cc:18443/relay/updates/latest.json` now returns build `2169`; APK sha matches the local package.
+- 2026-07-19 recheck: focused overlay/quickbar gate PASS 82 tests, `tsc --noEmit` PASS, `git diff --check` PASS, public Relay manifest still returns 2169 and local APK sha matches. Live Android rendered-pixel/input proof remains blocked because the device is behind `NotificationShade` / keyguard (`isKeyguardShowing=true`), and CDP `/json/list` timed out.
+
+# 2026-07-19 Remote window floating overlay drag pointer capture
+
+- Jason reported the remote-window floating window still could not be dragged. Architecture/map lookup keeps this in `desktop.remote_window_stream.overlay.project` / `resource.remote_window_overlay`; the fix point is `RemoteWindowOverlay`, not daemon, transport, terminal buffer, or renderer.
+- Red test changed the drag gate to require `setPointerCapture/releasePointerCapture` on the toolbar handle. Old implementation failed that assertion and relied on `window.pointermove`, which can be unreliable in Android WebView touch drags.
+- Fix: toolbar drag now captures pointer, handles toolbar-local move/up/cancel through the same bounded floating-offset helper, releases capture from the saved element, and leaves video surface pointer events separate for remote-window input.
+- Verification: `RemoteWindowOverlay.test.tsx` 15 PASS; remote-window input/QuickBar/IME suite 5 files / 146 tests PASS; overlay/page focused suite 2 files / 16 tests PASS; feature/resource/function/mainline gates 7 files / 48 tests PASS; `tsc --noEmit` and `git diff --check` PASS.
+- Full `build:android` PASS: terminal contracts 48 files / 590 tests, common flows 7 files / 82 tests, local Relay smoke, typecheck, Vite, Capacitor, Gradle, and update-manifest verification.
+- Delivery: APK `0.1.3.2170` / versionCode `1032170`, size `5875906`, sha256 `489fad6910fb94d1c7c080a2b2c517f993ac11947adcb60051d9a40ca9a62e97`. Local update paths and public Relay update route carry the same package; public manifest/HEAD/downloaded APK sha were verified.
+- L5 gap: `adb devices` returned no online device, so install and physical touch-drag proof are not claimed. Jason must verify the toolbar drag on an upgraded unlocked phone.
+
+# 2026-07-19 Remote window IME lift, raw input, and scroll injection
+
+- Jason reported that after the Android keyboard opens, an already-open remote-window preview stays under the IME; keyboard text does not reach the remote app; vertical drag gestures do not scroll the remote window.
+- Architecture mapping: all fixes stay inside `desktop.remote_window_stream`. Android `RemoteWindowOverlay` owns overlay projection/input intent, `TerminalPage` only routes active remote-window IME/QuickBar intent, and daemon `remote-window-stream-daemon.ts#injectInput` owns macOS focus/input injection. Terminal buffer/render/transport are not modified for this symptom.
+- Root cause: `TerminalPage` already passed the IME bottom inset to `RemoteWindowOverlay`, but target-locked floating overlay still used fixed `bottom: 118`; only the closed entry button consumed the inset.
+- Root cause: touch drag on the video surface was pointer input only; normal macOS apps need scroll-wheel input for vertical content scrolling. Added explicit `RemoteWindowInputEventPayload.event.kind='scroll'` with pixel deltas and target coordinates.
+- Root cause: remote-window IME input was sharing terminal committed-text normalization. Remote-window input now sends raw committed text so CJK, special symbols, and newline text are preserved for the selected app.
+- Mac SDK check: Apple docs confirm `CGEvent.post(tap:)` posts Quartz events into the event stream and `NSRunningApplication.activate(options:)` attempts to activate the app. Local AppKit experiment with a key/active flipped scroll view proved `CGEvent` pixel scroll moves content; negative macOS `wheel1` moves content down, so daemon is the single owner that translates DOM positive-down/right deltas to negative CGEvent wheel values.
+- Verification: remote-window focused suite PASS `11 files / 174 tests`; feature/resource/function/mainline gates PASS `7 files / 48 tests`; `tsc --noEmit` PASS; `git diff --check` PASS; `pnpm --dir android run build:android` PASS including terminal contracts `48 files / 590 tests`, common flows `7 files / 82 tests`, local Relay smoke, Vite/Capacitor/Gradle/update-manifest verification.
+- Delivery: APK `0.1.3.2171` / versionCode `1032171`, size `5876330`, sha256 `296a98b90a8cd6f6ff4e9b1266a43c5dbc55ff7accd860f29ee2e30a44a86c42`. Local update channel and `~/.zterm/updates` have matching artifacts. Public Relay `GET/HEAD https://relay.codewhisper.cc:18443/relay/updates/latest.json` and APK `HEAD` return 200; downloaded public APK sha matches local.
+- L5 gap: `adb devices` showed no attached/online device, so installed APK and physical Android IME/scroll/input replay are not claimed in this closeout.
+
+# 2026-07-20 Remote window input no-op on 2171 root correction
+
+- Jason reported Android `0.1.3.2171` had no visible behavior change: click/input/gesture did not reach the Mac target, and WeChat did not come to foreground.
+- Root cause 1: 2171 APK had been published, but daemon-side input changes were not installed into the running Mac daemon. The stale running daemon explains why phone upgrade alone looked unchanged for click/input.
+- Root cause 2: daemon input Swift used only `pid + app.activate`; for covered/background normal app windows this does not guarantee the selected window is front. WeChat is in this class. Fix: input config now carries selected `windowId/title/windowBoundsTopLeftPx`; Swift matches the AX window by bounds, activates the app, performs `AXRaise`, sets focused/main window when supported, then posts pointer/key/scroll.
+- Coordinate correction: a live AppKit experiment proved `CGWindowList` bounds center works directly as `CGEvent` location. The old failed experiment used AppKit bottom-left frame coordinates, not daemon manifest coordinates. Therefore no y-axis conversion belongs in daemon input for manifest coordinates.
+- Black-box focus proof: created a marked AppKit target scroll window and a separate cover window over the target point. Pixel scroll before AXRaise left target `y=500`; after AXRaise the target became key and scrolled to `y=620` (`coveredDidNotMove=true`, `raisedMovedDown=true`, `trusted=true`).
+- Runtime closeout: ran `pnpm --dir android run daemon:prepare-release`, installed `android/release-dist/zterm-daemon-0.1.3-darwin-arm64/bin/install-global.sh`, then service-scoped `~/.local/bin/zterm-daemon restart`. `/health` returned pid `25719`, uptime `1`, and installed runtime contains `remote input target window could not be matched for focus`, `kAXFocusedWindowAttribute`, and `(-deltaY)`.
+- Live daemon catalog after restart returned `targetCount=34`, `appWindows=21`, `itermPanes=13`, `errors=[]`.
+- Verification after fix: exact Swift input script extracted from source compiled/ran; focused source gates PASS `11 files / 175 tests`; architecture gates PASS `7 files / 48 tests`; `tsc --noEmit` PASS; `git diff --check` PASS.
+
+# 2026-07-20 Remote window persistent input helper correction
+
+- Additional live daemon black-box found a second root cause after the stale daemon/AXRaise fix: `remote-window-input` pointer/key could pass, but scroll returned `remote_window_input_failed` with `The data couldn't be read because it is missing.` The daemon Swift input schema incorrectly required `phase` for every event, while the wire protocol correctly omits `phase` for `kind=scroll`.
+- Per-event `swift -e` was also the wrong lifecycle for pointer/scroll/key sequences. Each user interaction compiled a fresh Swift script, so continuous input could be delayed, fail on compile/runtime warnings, or time out independently. The daemon now lazily owns one persistent Swift helper per runtime and sends JSON-line configs to it.
+- Source fix: `MACOS_REMOTE_WINDOW_INPUT_SWIFT` supports stdin JSON-line helper mode and one-shot env mode; `RemoteInputEvent.phase` is optional; pointer/key explicitly require phase; scroll decodes without phase; `createDefaultRemoteWindowInputHelper()` serializes input requests, keeps stderr metadata out of per-event success, times out stuck helpers, and is disposed with the remote-window daemon runtime.
+- White-box gates after this correction: `pnpm --dir android exec vitest run src/server/remote-window-stream-daemon.test.ts --reporter dot` PASS `24 tests`; `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS.
+- Runtime closeout: `pnpm --dir android run daemon:prepare-release` PASS, install-global PASS, service-scoped `~/.local/bin/zterm-daemon restart` PASS. `/health` returned pid `54921`, uptime `1`; installed runtime sha matched release runtime sha `b0700c64a5cfe1a72c46138c79affddaab10a97d8df3d6086d6314b9a794718f`; archive sha `3e544498ed549ce37b6d2646f8598be3162864bd6a2866f0689a9f231949f2e3`.
+- Live catalog after restart returned `total=35`, `appWindows=22`, `itermPanes=13`, `errors=[]`.
+- Live input black-box with marked AppKit probe window `ZTERM_REMOTE_INPUT_BLACKBOX_20260720`: protocol stream started; pointer down/up, pixel scroll, key down/up all returned `remote-window-input-result accepted=true`; target stdout observed `PROBE_MOUSE_DOWN`, `PROBE_MOUSE_UP`, `PROBE_SCROLL dx=0 dy=-96`, `PROBE_KEY_DOWN`, and `PROBE_KEY_UP`.
+- Live WeChat focus black-box: test first activated iTerm2, then sent a harmless pointer move to selected WeChat app-window target `app-window:486:1439`; protocol returned `accepted=true`, and `System Events` reported `frontmostBefore=iTerm2`, `frontmostAfter=WeChat`, `focusPassed=true`.
+- Cleanup: temporary AppKit probe process pid `44933` was stopped with Ctrl-C through its own PTY; `ps -p 44933` returned no process. Daemon remained healthy on pid `54921`.

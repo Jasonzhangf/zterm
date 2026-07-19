@@ -9,6 +9,7 @@ import { normalizeIncomingBufferPayload, normalizeTerminalCursorState } from './
 import { runtimeDebugPrechecked, setRuntimeDebugEnabled } from '../lib/runtime-debug';
 import { isFileTransferMessage } from '../lib/file-transfer-message-runtime';
 import { isRemoteWindowControlMessage, type RemoteWindowControlMessage } from '../lib/remote-window-message-runtime';
+import { handleTerminalInputAck } from './session-context-input-runtime';
 import type {
   ClientMessage,
   Host,
@@ -113,6 +114,7 @@ export function handleSocketServerMessageRuntime(options: {
     case 'connected':
       options.updateSessionSync(params.sessionId, buildSessionConnectedUpdates({
         daemonHostId: msg.payload.daemonHostId,
+        reliableInputSupported: msg.payload.capabilities?.reliableInput?.version === 1,
       }));
       params.onConnected();
       break;
@@ -228,10 +230,17 @@ export function handleSocketServerMessageRuntime(options: {
       }
       break;
     case 'remote-window-targets-response':
+    case 'remote-window-stream-started':
+    case 'remote-window-stream-ice-candidate':
+    case 'remote-window-stream-status':
+    case 'remote-window-input-result':
     case 'remote-window-error':
       if (options.remoteWindowMessageRuntime && isRemoteWindowControlMessage(msg)) {
         options.remoteWindowMessageRuntime.dispatch(msg);
       }
+      break;
+    case 'input-ack':
+      handleTerminalInputAck(params.sessionId, msg.payload);
       break;
     case 'error':
       if (isRetryableTerminalAttachCode(msg.payload.code)) {

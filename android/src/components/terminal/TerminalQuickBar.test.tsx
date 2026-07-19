@@ -13,7 +13,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Capacitor } from "@capacitor/core";
 import { Keyboard } from "@capacitor/keyboard";
 import { TerminalQuickBar } from "./TerminalQuickBar";
-import { resolveOverlayViewportMetrics } from "./terminal-quickbar-helpers";
+import {
+  FLOATING_BUBBLE_POSITION_STORAGE_KEY,
+  resolveOverlayViewportMetrics,
+} from "./terminal-quickbar-helpers";
 
 vi.mock("@capacitor/core", () => ({
   Capacitor: {
@@ -376,6 +379,33 @@ describe("TerminalQuickBar", () => {
     });
     const style = bubble.getAttribute("style") || "";
     expect(style).toContain("bottom: calc(312px");
+  });
+
+  it("rescues a dragged floating bubble below the status bar guard", async () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      writable: true,
+      value: 390,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      writable: true,
+      value: 820,
+    });
+    stubVisualViewport({ width: 390, height: 820, offsetTop: 0, offsetLeft: 0 });
+    localStorage.setItem(
+      FLOATING_BUBBLE_POSITION_STORAGE_KEY,
+      JSON.stringify({ x: 320, y: 8 }),
+    );
+
+    renderQuickBar();
+
+    await waitFor(() => {
+      const bubble = screen.getByRole("button", {
+        name: "Toggle floating quick menu",
+      });
+      expect(bubble.getAttribute("style") || "").toContain("top: 64px");
+    });
   });
 
   it("does not add a second keyboard inset padding inside shell quick rows", async () => {
@@ -1448,6 +1478,46 @@ describe("TerminalQuickBar", () => {
     await waitFor(() => {
       expect(onSendSequence).toHaveBeenCalledWith("ls -la\r");
     });
+  });
+
+  it("keeps generic remote-window controls usable while greying terminal-only actions", async () => {
+    const onSendSequence = vi.fn();
+    const onToggleKeyboard = vi.fn();
+    const onToggleCopyMode = vi.fn();
+    const onSetSplitCount = vi.fn();
+
+    renderQuickBar({
+      remoteWindowInputActive: true,
+      splitAvailable: true,
+      splitCountOptions: [1, 2],
+      currentSplitCount: 1,
+      onSendSequence,
+      onToggleKeyboard,
+      onToggleCopyMode,
+      onSetSplitCount,
+    });
+
+    const copyButton = screen.getByRole("button", { name: "拷贝" }) as HTMLButtonElement;
+    const splitButton = screen.getByRole("button", { name: "2 分屏" }) as HTMLButtonElement;
+    const keyboardButton = screen.getByRole("button", { name: "键盘" }) as HTMLButtonElement;
+    const arrowButton = screen.getByRole("button", { name: "↑" }) as HTMLButtonElement;
+
+    expect(copyButton.disabled).toBe(true);
+    expect(copyButton.getAttribute("aria-disabled")).toBe("true");
+    expect(splitButton.disabled).toBe(true);
+    expect(keyboardButton.disabled).toBe(false);
+    expect(arrowButton.disabled).toBe(false);
+
+    fireEvent.click(copyButton);
+    fireEvent.click(splitButton);
+    expect(onToggleCopyMode).not.toHaveBeenCalled();
+    expect(onSetSplitCount).not.toHaveBeenCalled();
+
+    fireEvent.click(keyboardButton);
+    expect(onToggleKeyboard).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(arrowButton);
+    expect(onSendSequence).toHaveBeenCalledWith("\x1b[A");
   });
 
   it("uses combo preview as default shortcut label when saving ctrl combination", async () => {

@@ -243,6 +243,65 @@ describe('session-context-socket-message-runtime connected truth', () => {
     expect(stateRef.current.sessions[0]?.state).toBe('connected');
   });
 
+  it('records reliable input capability from the daemon connected payload', () => {
+    const state: SessionManagerState = {
+      sessions: [makeSession()],
+      activeSessionId: 'session-1',
+      liveSessionIds: ['session-1'],
+      liveSessionIdsExplicit: true,
+      connectedCount: 0,
+    };
+    const stateRef = { current: state };
+
+    const updateSessionSync = (id: string, updates: Partial<Session>) => {
+      stateRef.current = reduceSessionAction(stateRef.current, {
+        type: 'UPDATE_SESSION',
+        id,
+        updates,
+      });
+    };
+
+    handleSocketServerMessageRuntime({
+      params: {
+        sessionId: 'session-1',
+        host: makeHost(),
+        ws: {} as any,
+        debugScope: 'connect',
+        onConnected: vi.fn(),
+        onFailure: vi.fn(),
+        onClosed: vi.fn(),
+      },
+      msg: {
+        type: 'connected',
+        payload: {
+          sessionId: 'session-1',
+          capabilities: {
+            reliableInput: { version: 1 },
+          },
+        },
+      } as ServerMessage,
+      refs: {
+        stateRef,
+        scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
+        lastHeadRequestAtRef: { current: new Map() },
+        lastPongAtRef: { current: new Map() },
+      },
+      settleSessionPullState: vi.fn(),
+      runtimeDebug: vi.fn(),
+      isSessionTransportActive: vi.fn(() => true),
+      shouldAcceptSessionLiveBuffer: vi.fn(() => true),
+      summarizeBufferPayload: vi.fn(() => ({})),
+      applyIncomingBufferSync: vi.fn(),
+      handleBufferHead: vi.fn(),
+      setScheduleStateForSession: vi.fn(),
+      setSessionTitleSync: vi.fn(),
+      fileTransferMessageRuntime: { dispatch: vi.fn() },
+      updateSessionSync,
+    });
+
+    expect(stateRef.current.sessions[0]?.reliableInputSupported).toBe(true);
+  });
+
   it('does not advance head throttle timestamp when a buffer-sync payload arrives', () => {
     const state: SessionManagerState = {
       sessions: [{
@@ -578,6 +637,98 @@ describe('session-context-socket-message-runtime remote window messages', () => 
         targets: [],
       },
     });
+    expect(fileTransferDispatch).not.toHaveBeenCalled();
+  });
+
+  it('routes remote window stream control messages to the remote window message runtime only', () => {
+    const fileTransferDispatch = vi.fn();
+    const remoteWindowDispatch = vi.fn();
+    const baseOptions = {
+      params: {
+        sessionId: 'session-1',
+        host: makeHost(),
+        ws: {} as any,
+        debugScope: 'connect' as const,
+        onConnected: vi.fn(),
+        onFailure: vi.fn(),
+        onClosed: vi.fn(),
+      },
+      refs: {
+        stateRef: { current: { sessions: [makeSession()], activeSessionId: 'session-1' } },
+        scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
+        lastHeadRequestAtRef: { current: new Map() },
+        lastPongAtRef: { current: new Map() },
+      },
+      settleSessionPullState: vi.fn(),
+      runtimeDebug: vi.fn(),
+      isSessionTransportActive: vi.fn(() => true),
+      shouldAcceptSessionLiveBuffer: vi.fn(() => true),
+      summarizeBufferPayload: vi.fn(() => ({})),
+      applyIncomingBufferSync: vi.fn(),
+      handleBufferHead: vi.fn(),
+      setScheduleStateForSession: vi.fn(),
+      setSessionTitleSync: vi.fn(),
+      fileTransferMessageRuntime: { dispatch: fileTransferDispatch },
+      remoteWindowMessageRuntime: { dispatch: remoteWindowDispatch },
+      updateSessionSync: vi.fn(),
+    };
+
+    for (const msg of [
+      {
+        type: 'remote-window-stream-started',
+        payload: {
+          requestId: 'rw-start-1',
+          streamId: 'stream-1',
+          targetId: 'pane-1',
+          answer: { type: 'answer', sdp: 'answer-sdp' },
+          capture: {
+            source: 'ScreenCaptureKit',
+            frameWidth: 640,
+            frameHeight: 360,
+            frameRate: 5,
+            targetKind: 'iterm2-pane',
+          },
+          transport: { kind: 'webrtc-video' },
+        },
+      },
+      {
+        type: 'remote-window-stream-ice-candidate',
+        payload: {
+          streamId: 'stream-1',
+          candidate: { candidate: 'candidate:remote' },
+        },
+      },
+      {
+        type: 'remote-window-stream-status',
+        payload: {
+          streamId: 'stream-1',
+          phase: 'streaming',
+          framesSent: 2,
+        },
+      },
+      {
+        type: 'remote-window-input-result',
+        payload: {
+          requestId: 'rw-input-1',
+          streamId: 'stream-1',
+          targetId: 'pane-1',
+          accepted: true,
+        },
+      },
+    ] satisfies ServerMessage[]) {
+      handleSocketServerMessageRuntime({
+        ...baseOptions,
+        msg,
+      });
+    }
+
+    expect(remoteWindowDispatch).toHaveBeenCalledTimes(4);
+    expect(remoteWindowDispatch.mock.calls.map((call) => call[0].type)).toEqual([
+      'remote-window-stream-started',
+      'remote-window-stream-ice-candidate',
+      'remote-window-stream-status',
+      'remote-window-input-result',
+    ]);
     expect(fileTransferDispatch).not.toHaveBeenCalled();
   });
 });

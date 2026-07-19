@@ -1,7 +1,14 @@
 import type {
   ClientMessage,
+  RemoteWindowStreamIceCandidate,
+  RemoteWindowStreamIceCandidatePayload,
+  RemoteWindowInputEventPayload,
+  RemoteWindowStreamStartedPayload,
+  RemoteWindowStreamStatusPayload,
+  RemoteWindowStreamTargetManifest,
   RemoteWindowStreamErrorPayload,
   RemoteWindowStreamRequestPayload,
+  RemoteWindowStreamRtcDescription,
   RemoteWindowStreamTargetsResponsePayload,
   ServerMessage,
 } from './types';
@@ -9,19 +16,41 @@ import type { BridgeTransportSocket } from './traversal/types';
 
 export type RemoteWindowControlMessage = Extract<
   ServerMessage,
-  { type: 'remote-window-targets-response' } | { type: 'remote-window-error' }
+  | { type: 'remote-window-targets-response' }
+  | { type: 'remote-window-stream-started' }
+  | { type: 'remote-window-stream-ice-candidate' }
+  | { type: 'remote-window-stream-status' }
+  | { type: 'remote-window-input-result' }
+  | { type: 'remote-window-error' }
 >;
 
 interface PendingRemoteWindowTargetsRequest {
+  kind: 'targets';
+  streamId?: undefined;
   timeoutId: number | null;
   resolve: (payload: RemoteWindowStreamTargetsResponsePayload) => void;
   reject: (error: Error) => void;
 }
 
+interface PendingRemoteWindowStreamStartRequest {
+  kind: 'stream-start';
+  streamId: string;
+  timeoutId: number | null;
+  resolve: (payload: RemoteWindowStreamStartedPayload) => void;
+  reject: (error: Error) => void;
+}
+
+type PendingRemoteWindowRequest = PendingRemoteWindowTargetsRequest | PendingRemoteWindowStreamStartRequest;
+
 export const REMOTE_WINDOW_TARGETS_REQUEST_TIMEOUT_MS = 15000;
 
 export function isRemoteWindowControlMessage(msg: ServerMessage): msg is RemoteWindowControlMessage {
-  return msg.type === 'remote-window-targets-response' || msg.type === 'remote-window-error';
+  return msg.type === 'remote-window-targets-response'
+    || msg.type === 'remote-window-stream-started'
+    || msg.type === 'remote-window-stream-ice-candidate'
+    || msg.type === 'remote-window-stream-status'
+    || msg.type === 'remote-window-input-result'
+    || msg.type === 'remote-window-error';
 }
 
 function buildRemoteWindowError(payload: RemoteWindowStreamErrorPayload) {
@@ -36,14 +65,31 @@ export function createRemoteWindowMessageRuntime(input?: {
   setTimeoutFn?: typeof window.setTimeout;
   clearTimeoutFn?: typeof window.clearTimeout;
   now?: () => number;
+  onStreamIceCandidate?: (payload: RemoteWindowStreamIceCandidatePayload) => void | Promise<unknown>;
+  onStreamStatus?: (payload: RemoteWindowStreamStatusPayload) => void | Promise<unknown>;
+  onListenerError?: (phase: 'ice-candidate' | 'status', error: unknown) => void;
 }) {
   const pendingRequests = new Map<string, PendingRemoteWindowTargetsRequest>();
+  const pendingStreamStarts = new Map<string, PendingRemoteWindowStreamStartRequest>();
   const timeoutMs = input?.timeoutMs ?? REMOTE_WINDOW_TARGETS_REQUEST_TIMEOUT_MS;
-  const setTimeoutFn = input?.setTimeoutFn ?? window.setTimeout.bind(window);
-  const clearTimeoutFn = input?.clearTimeoutFn ?? window.clearTimeout.bind(window);
+  const setTimeoutFn = input?.setTimeoutFn ?? globalThis.setTimeout.bind(globalThis);
+  const clearTimeoutFn = input?.clearTimeoutFn ?? globalThis.clearTimeout.bind(globalThis);
   const now = input?.now ?? (() => Date.now());
+  const dispatchListener = <TPayload,>(
+    phase: 'ice-candidate' | 'status',
+    handler: ((payload: TPayload) => void | Promise<unknown>) | undefined,
+    payload: TPayload,
+  ) => {
+    if (!handler) {
+      return false;
+    }
+    void Promise.resolve(handler(payload)).catch((error) => {
+      input?.onListenerError?.(phase, error);
+    });
+    return true;
+  };
 
-  const clearPendingTimeout = (pending: PendingRemoteWindowTargetsRequest) => {
+  const clearPendingTimeout = (pending: PendingRemoteWindowRequest) => {
     if (pending.timeoutId !== null) {
       clearTimeoutFn(pending.timeoutId);
       pending.timeoutId = null;
@@ -68,6 +114,33 @@ export function createRemoteWindowMessageRuntime(input?: {
     return true;
   };
 
+  const armPendingStreamTimeout = (requestId: string) => {
+    const pending = pendingStreamStarts.get(requestId);
+    if (!pending) {
+      return false;
+    }
+    clearPendingTimeout(pending);
+    pending.timeoutId = setTimeoutFn(() => {
+      const activePending = pendingStreamStarts.get(requestId);
+      if (!activePending) {
+        return;
+      }
+      pendingStreamStarts.delete(requestId);
+      activePending.timeoutId = null;
+      activePending.reject(new Error('Remote window stream start timed out'));
+    }, timeoutMs) as unknown as number;
+    return true;
+  };
+
+  const sendClientMessage = (
+    sessionId: string,
+    ws: BridgeTransportSocket,
+    sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void,
+    message: ClientMessage,
+  ) => {
+    sendSocketPayload(sessionId, ws, JSON.stringify(message));
+  };
+
   const runtime = {
     requestTargets(sessionId: string, options: {
       ws: BridgeTransportSocket;
@@ -81,6 +154,7 @@ export function createRemoteWindowMessageRuntime(input?: {
       const requestId = `rw-${now()}-${Math.random().toString(36).slice(2, 8)}`;
       return new Promise<RemoteWindowStreamTargetsResponsePayload>((resolve, reject) => {
         const pending: PendingRemoteWindowTargetsRequest = {
+          kind: 'targets',
           timeoutId: null,
           resolve,
           reject,
@@ -94,15 +168,120 @@ export function createRemoteWindowMessageRuntime(input?: {
             includeAppWindows: options.request?.includeAppWindows ?? true,
             includeIterm2: options.request?.includeIterm2 ?? true,
           };
-          options.sendSocketPayload(targetSessionId, options.ws, JSON.stringify({
+          sendClientMessage(targetSessionId, options.ws, options.sendSocketPayload, {
             type: 'remote-window-targets-request',
             payload,
-          } satisfies ClientMessage));
+          });
         } catch (error) {
           pendingRequests.delete(requestId);
           clearPendingTimeout(pending);
           reject(error instanceof Error ? error : new Error(String(error)));
         }
+      });
+    },
+
+    requestStreamStart(sessionId: string, options: {
+      ws: BridgeTransportSocket;
+      streamId: string;
+      target: RemoteWindowStreamTargetManifest;
+      offer: RemoteWindowStreamRtcDescription;
+      iceServers?: Array<Record<string, unknown>>;
+      sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+    }) {
+      const targetSessionId = sessionId.trim();
+      if (!targetSessionId) {
+        throw new Error('No target session for remote window stream');
+      }
+      const streamId = options.streamId.trim();
+      if (!streamId) {
+        throw new Error('Remote window stream start requires streamId');
+      }
+      const requestId = `rw-start-${now()}-${Math.random().toString(36).slice(2, 8)}`;
+      return new Promise<RemoteWindowStreamStartedPayload>((resolve, reject) => {
+        const pending: PendingRemoteWindowStreamStartRequest = {
+          kind: 'stream-start',
+          streamId,
+          timeoutId: null,
+          resolve,
+          reject,
+        };
+        pendingStreamStarts.set(requestId, pending);
+        armPendingStreamTimeout(requestId);
+
+        try {
+          sendClientMessage(targetSessionId, options.ws, options.sendSocketPayload, {
+            type: 'remote-window-stream-start-request',
+            payload: {
+              requestId,
+              streamId,
+              target: options.target,
+              offer: options.offer,
+              ...(options.iceServers ? { iceServers: options.iceServers } : {}),
+            },
+          });
+        } catch (error) {
+          pendingStreamStarts.delete(requestId);
+          clearPendingTimeout(pending);
+          reject(error instanceof Error ? error : new Error(String(error)));
+        }
+      });
+    },
+
+    sendStreamIceCandidate(sessionId: string, options: {
+      ws: BridgeTransportSocket;
+      streamId: string;
+      candidate: RemoteWindowStreamIceCandidate;
+      sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+    }) {
+      const targetSessionId = sessionId.trim();
+      const streamId = options.streamId.trim();
+      if (!targetSessionId || !streamId) {
+        throw new Error('Remote window stream candidate requires sessionId and streamId');
+      }
+      sendClientMessage(targetSessionId, options.ws, options.sendSocketPayload, {
+        type: 'remote-window-stream-ice-candidate',
+        payload: {
+          streamId,
+          candidate: options.candidate,
+        },
+      });
+    },
+
+    stopStream(sessionId: string, options: {
+      ws: BridgeTransportSocket;
+      streamId: string;
+      sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+    }) {
+      const targetSessionId = sessionId.trim();
+      const streamId = options.streamId.trim();
+      if (!targetSessionId || !streamId) {
+        throw new Error('Remote window stream stop requires sessionId and streamId');
+      }
+      sendClientMessage(targetSessionId, options.ws, options.sendSocketPayload, {
+        type: 'remote-window-stream-stop-request',
+        payload: {
+          requestId: `rw-stop-${now()}-${Math.random().toString(36).slice(2, 8)}`,
+          streamId,
+        },
+      });
+    },
+
+    sendInputEvent(sessionId: string, options: {
+      ws: BridgeTransportSocket;
+      payload: Omit<RemoteWindowInputEventPayload, 'requestId'>;
+      sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+    }) {
+      const targetSessionId = sessionId.trim();
+      const streamId = options.payload.streamId.trim();
+      if (!targetSessionId || !streamId || !options.payload.targetId.trim()) {
+        throw new Error('Remote window input requires sessionId, streamId, and targetId');
+      }
+      sendClientMessage(targetSessionId, options.ws, options.sendSocketPayload, {
+        type: 'remote-window-input',
+        payload: {
+          ...options.payload,
+          requestId: `rw-input-${now()}-${Math.random().toString(36).slice(2, 8)}`,
+        },
       });
     },
 
@@ -117,20 +296,50 @@ export function createRemoteWindowMessageRuntime(input?: {
       return true;
     },
 
-    handleError(payload: RemoteWindowStreamErrorPayload) {
-      const pending = pendingRequests.get(payload.requestId);
-      if (!pending) {
+    handleStreamStarted(payload: RemoteWindowStreamStartedPayload) {
+      const pending = pendingStreamStarts.get(payload.requestId);
+      if (!pending || pending.streamId !== payload.streamId) {
         return false;
       }
-      pendingRequests.delete(payload.requestId);
+      pendingStreamStarts.delete(payload.requestId);
       clearPendingTimeout(pending);
-      pending.reject(buildRemoteWindowError(payload));
+      pending.resolve(payload);
       return true;
+    },
+
+    handleError(payload: RemoteWindowStreamErrorPayload) {
+      const pending = pendingRequests.get(payload.requestId);
+      if (pending) {
+        pendingRequests.delete(payload.requestId);
+        clearPendingTimeout(pending);
+        pending.reject(buildRemoteWindowError(payload));
+        return true;
+      }
+      const streamPending = pendingStreamStarts.get(payload.requestId);
+      if (streamPending && (!payload.streamId || payload.streamId === streamPending.streamId)) {
+        pendingStreamStarts.delete(payload.requestId);
+        clearPendingTimeout(streamPending);
+        streamPending.reject(buildRemoteWindowError(payload));
+        return true;
+      }
+      return false;
     },
 
     dispatch(msg: RemoteWindowControlMessage) {
       if (msg.type === 'remote-window-targets-response') {
         return runtime.handleTargetsResponse(msg.payload);
+      }
+      if (msg.type === 'remote-window-stream-started') {
+        return runtime.handleStreamStarted(msg.payload);
+      }
+      if (msg.type === 'remote-window-stream-ice-candidate') {
+        return dispatchListener('ice-candidate', input?.onStreamIceCandidate, msg.payload);
+      }
+      if (msg.type === 'remote-window-stream-status') {
+        return dispatchListener('status', input?.onStreamStatus, msg.payload);
+      }
+      if (msg.type === 'remote-window-input-result') {
+        return false;
       }
       return runtime.handleError(msg.payload);
     },
@@ -141,10 +350,19 @@ export function createRemoteWindowMessageRuntime(input?: {
         pending.reject(new Error(reason));
       }
       pendingRequests.clear();
+      for (const pending of pendingStreamStarts.values()) {
+        clearPendingTimeout(pending);
+        pending.reject(new Error(reason));
+      }
+      pendingStreamStarts.clear();
     },
 
     getPendingCount() {
-      return pendingRequests.size;
+      return pendingRequests.size + pendingStreamStarts.size;
+    },
+
+    getPendingRequestIds() {
+      return [...pendingRequests.keys(), ...pendingStreamStarts.keys()];
     },
   };
 

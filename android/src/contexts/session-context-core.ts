@@ -4,6 +4,8 @@ import type {
   Host,
   RemoteScreenshotCapture,
   RemoteScreenshotStatusPayload,
+  RemoteWindowInputEventPayload,
+  RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
   ScheduleJobDraft,
   Session,
@@ -19,6 +21,7 @@ import type { SessionRenderBufferSnapshot } from '../lib/types';
 import type { SessionBufferStore } from '../lib/session-buffer-store';
 import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
 import type { SessionHeadStore } from '../lib/session-head-store';
+import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
 import type {
   QueueSessionTransportOpenIntentOptions as SessionTransportOpenIntentHelperOptions,
 } from './session-transport-open-helpers';
@@ -215,6 +218,16 @@ export interface SessionContextValue {
     onProgress?: (progress: RemoteScreenshotStatusPayload) => void,
   ) => Promise<RemoteScreenshotCapture>;
   requestRemoteWindowTargets: (sessionId: string) => Promise<RemoteWindowStreamTargetsResponsePayload>;
+  requestRemoteWindowStreamStart: (
+    sessionId: string,
+    target: RemoteWindowStreamTargetManifest,
+    streamId: string,
+  ) => Promise<RemoteWindowReceiverStartResult>;
+  stopRemoteWindowStream: (sessionId: string, streamId: string) => boolean;
+  sendRemoteWindowInput: (
+    sessionId: string,
+    payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
+  ) => void;
   sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: TerminalWidthMode) => boolean;
   updateSessionViewport: (sessionId: string, visibleRange: TerminalVisibleRange | TerminalViewportState) => void;
   requestScheduleList: (sessionId: string) => void;

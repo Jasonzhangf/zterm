@@ -73,6 +73,9 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
     return {
       sessionId,
       daemonHostId: deps.daemonHostId?.trim() || undefined,
+      capabilities: {
+        reliableInput: { version: 1 },
+      },
       appUpdate:
         latestManifest && Number.isFinite(latestManifest.versionCode) && latestManifest.versionCode! > 0 && latestManifest.versionName
           ? {

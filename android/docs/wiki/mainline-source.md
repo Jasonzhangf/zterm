@@ -34,6 +34,11 @@ flowchart TD
   TerminalPage --> TerminalView["src/components/TerminalView.tsx"]
   TerminalPage --> QuickBar["src/components/terminal/TerminalQuickBar.tsx"]
   TerminalPage --> RemoteWindowOverlay["src/components/terminal/RemoteWindowOverlay.tsx#RemoteWindowOverlay"]
+  TerminalPage --> RemoteWindowInputRuntime["src/contexts/session-context-remote-window-runtime.ts#sendRemoteWindowInputRuntime"]
+  RemoteWindowOverlay --> RemoteWindowMessageRuntime["src/lib/remote-window-message-runtime.ts#createRemoteWindowMessageRuntime"]
+  RemoteWindowOverlay --> RemoteWindowInputRuntime["src/contexts/session-context-remote-window-runtime.ts#sendRemoteWindowInputRuntime"]
+  RemoteWindowInputRuntime --> RemoteWindowMessageRuntime
+  RemoteWindowMessageRuntime --> RemoteWindowReceiver["src/contexts/session-context-remote-window-runtime.ts#requestRemoteWindowStreamStartRuntime"]
   TerminalPage --> StageShell["src/pages/TerminalPageStageShell.tsx"]
   TerminalPage --> LayoutProfile["src/lib/terminal-layout-profile.ts"]
   LayoutProfile --> StageShell
@@ -90,7 +95,11 @@ flowchart TD
   Control --> Schedule["src/server/terminal-schedule-runtime.ts"]
   Control --> Transfer["src/server/terminal-file-transfer-runtime.ts"]
   Control --> Screenshot["src/server/remote-screenshot-daemon.ts"]
-  Control --> RemoteWindowStream["docs/decisions/2026-07-19-remote-window-stream-truth.md#remote-window-stream-binding-pending"]
+  Control --> RemoteWindowStream["src/server/remote-window-stream-daemon.ts#createRemoteWindowStreamDaemonRuntime"]
+  RemoteWindowStream --> RemoteWindowCapture["src/server/remote-window-stream-daemon.ts#startScreenCaptureKitFrameSource"]
+  RemoteWindowCapture --> RemoteWindowMedia["src/server/remote-window-stream-daemon.ts#startStream"]
+  RemoteWindowStream --> RemoteWindowInput["src/server/remote-window-stream-daemon.ts#injectInput"]
+  RemoteWindowStream --> RemoteWindowCleanup["src/server/remote-window-stream-daemon.ts#stopStream"]
   Server --> Http["src/server/terminal-http-runtime.ts"]
   Server --> Debug["src/server/terminal-debug-runtime.ts"]
   Server --> Transport["src/server/terminal-transport-runtime.ts"]
@@ -161,8 +170,8 @@ flowchart TD
 | Terminal body receive/apply/render | `src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime`, `src/contexts/session-context-buffer-runtime.ts#applyIncomingBufferSyncRuntime`, `src/lib/session-render-gate.ts#scheduleCommit`, `src/lib/session-render-buffer-store.ts` |
 | Terminal performance observer | `src/lib/terminal-performance-trace.ts`, `src/server/terminal-debug-runtime.ts`, `src/lib/runtime-debug.ts`; metadata only, no terminal text/cells |
 | Terminal shell and panes | `src/pages/TerminalPageStageShell.tsx`, `src/hooks/useTerminalWorkspace.ts`, `src/components/terminal/TerminalQuickBar.tsx` |
-| Remote window stream projection | `packages/shared/src/connection/protocol.ts`, `src/server/remote-window-stream-daemon.ts`, `src/server/terminal-message-runtime.ts`, `src/server/server.ts`, `src/components/terminal/RemoteWindowOverlay.tsx`, `src/lib/remote-window-overlay-runtime.ts`, `src/lib/remote-window-message-runtime.ts`, `src/contexts/session-context-remote-window-runtime.ts`, `docs/decisions/2026-07-19-remote-window-stream-truth.md`; ScreenCaptureKit/WebRTC sender and input-return runtime pending |
-| Terminal session group layout | `src/lib/terminal-layout-profile.ts`, `src/pages/TerminalPageStageShell.tsx`, `docs/features/terminal-session-group-layout.md`, `docs/testing/terminal-session-group-layout-test-design.md` |
+| Remote window stream projection | `packages/shared/src/connection/protocol.ts`, `src/server/remote-window-stream-daemon.ts`, `src/server/terminal-message-runtime.ts`, `src/server/server.ts`, `src/components/terminal/RemoteWindowOverlay.tsx`, `src/lib/remote-window-overlay-runtime.ts`, `src/lib/remote-window-message-runtime.ts`, `src/lib/remote-window-receiver-runtime.ts`, `src/contexts/session-context-remote-window-runtime.ts`, `docs/decisions/2026-07-19-remote-window-stream-truth.md`; ScreenCaptureKit/WebRTC bindings are anchored under `RemoteWindowMessageRuntime`, `RemoteWindowReceiver`, `RemoteWindowCapture`, `RemoteWindowMedia`, `RemoteWindowInput`, and `RemoteWindowCleanup`; remaining live gates are Android rendered-pixel recheck and iTerm2-pane stream/input proof |
+| Terminal session group layout | `src/lib/terminal-layout-profile.ts`, `src/lib/session-group-viewport.ts`, `src/pages/TerminalPage.tsx#resolveTerminalSessionGroupActiveSessionProjection`, `src/pages/TerminalPageStageShell.tsx`, `docs/features/terminal-session-group-layout.md`, `docs/testing/terminal-session-group-layout-test-design.md` |
 | Session drawer (multi-host) | `src/components/terminal/TerminalSessionDrawer.tsx` (UI), `src/pages/TerminalPage.tsx` (`drawerServerIdentityAliases` canonicalizes live/session-group/Relay endpoint identity; `drawerSessions` projects hostKey/hostLabel + opened-first ordering) |
 | Session quick preview | `src/lib/session-preview-selection.ts`, `src/lib/session-preview-gesture.ts`, `src/components/terminal/TerminalPreviewGrid.tsx`, `src/pages/TerminalPageStageShell.tsx` |
 | Daemon runtime | `src/server/server.ts`, `src/server/terminal-daemon-runtime.ts`, `src/server/terminal-runtime.ts`, `src/server/terminal-message-runtime.ts`, `src/server/terminal-mirror-runtime.ts`, `src/server/terminal-message-control-runtime.ts`, `src/server/terminal-transport-runtime.ts`, `src/server/remote-window-stream-daemon.ts` |

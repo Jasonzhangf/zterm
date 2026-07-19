@@ -28,6 +28,8 @@ LEGACY_LAUNCH_AGENT_PATH="${HOME}/Library/LaunchAgents/${LEGACY_LAUNCH_AGENT_LAB
 STAGED_DAEMON_ENTRY="${RUNTIME_DIR}/server.cjs"
 STAGED_NODE_PTY_HELPER_GLOB="${RUNTIME_DIR}/node_modules/node-pty/prebuilds/darwin-*/spawn-helper"
 NATIVE_DAEMON_BIN="${PACKAGE_ROOT}/support/zterm-daemon"
+ITERM2_PYTHON_VENV="${WTERM_HOME}/python/iterm2"
+ITERM2_PYTHON_BIN="${ITERM2_PYTHON_VENV}/bin/python3"
 
 read_config() {
   "$NODE_BIN" <<'NODE'
@@ -465,15 +467,34 @@ RUNNER
   chmod +x "${USER_BIN_DIR}/wterm"
 }
 
+prepare_iterm2_python_env() {
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    return 0
+  fi
+  mkdir -p "${WTERM_HOME}/python"
+  if [[ ! -x "$ITERM2_PYTHON_BIN" ]]; then
+    python3 -m venv "$ITERM2_PYTHON_VENV"
+  fi
+  if "$ITERM2_PYTHON_BIN" - <<'PY' >/dev/null 2>&1
+import iterm2
+PY
+  then
+    return 0
+  fi
+  "$ITERM2_PYTHON_BIN" -m pip install --upgrade pip >/dev/null
+  "$ITERM2_PYTHON_BIN" -m pip install --upgrade iterm2
+}
+
 write_launch_agent() {
   install_user_shims
+  prepare_iterm2_python_env || echo "[zterm-daemon] iTerm2 Python API environment unavailable; remote-window pane catalog will report an explicit error" >&2
   mkdir -p "${HOME}/Library/LaunchAgents" "$LOG_DIR" "$WTERM_BIN_DIR" "$RUNTIME_STATE_DIR"
   cat > "$DIRECT_RUNNER" <<RUNNER
 #!/usr/bin/env bash
 set -euo pipefail
 cd "${HOME}"
 chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
-exec env -u TMUX -u TMUX_PANE ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
+exec env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
 RUNNER
   chmod +x "$DIRECT_RUNNER"
 
@@ -518,7 +539,7 @@ if [[ "\${RECENT_LAUNCHES:-0}" -ge 5 ]]; then
 fi
 cd "${HOME}"
 chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
-exec env -u TMUX -u TMUX_PANE ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
+exec env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
 RUNNER
   chmod +x "$LAUNCH_RUNNER"
 

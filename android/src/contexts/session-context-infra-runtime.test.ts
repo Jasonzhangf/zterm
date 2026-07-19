@@ -113,7 +113,7 @@ describe('applySessionActionRuntime', () => {
     vi.mocked(TraversalSocket).mockClear();
   });
 
-  it('does not let a legacy wsUrl override bypass WebRTC-first relay candidates', () => {
+  it('does not let a legacy wsUrl override bypass route-aware relay candidates', () => {
     const host = buildHost({
       daemonHostId: 'mac-studio',
       relayHostId: 'mac-studio',

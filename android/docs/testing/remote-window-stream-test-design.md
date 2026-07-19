@@ -6,25 +6,45 @@ Feature id: `desktop.remote_window_stream`
 
 This gate covers remote app/window and iTerm2 pane video streaming from a daemon host to Android, plus the future input-return contract. The stream is a desktop media resource, not terminal buffer truth.
 
-## Current Minimal Android Slice
+## Current Implementation Status
 
-The current implemented Android slice is intentionally narrower than feature completion:
+The implemented Android/catalog slice started narrower than feature completion:
 
 1. `TerminalPage` renders the remote-window floating entry and passes only the active session id plus the SessionContext catalog request callback.
 2. The picker requests and renders the daemon `RemoteWindowStreamTargetManifest[]` catalog, including explicit partial and top-level errors.
-3. Selecting one manifest locks a floating overlay shell to that target; toolbar drag repositions only the floating projection, double tap/double click on the video surface enters fullscreen, Back/minimize returns to floating, and close invalidates the UI state.
-4. While the picker or locked overlay is open, `TerminalPage` suppresses the terminal quickbar/input shell and asks the existing IME owner to hide the system keyboard. The overlay does not create a second terminal input path.
-5. The shell displays `等待视频流`. It does not claim that capture started and does not use terminal mirror, sparse buffer, renderer rows, screenshot runtime, or any synthetic frame source as video.
-6. ScreenCaptureKit capture, WebRTC frame delivery, stream-id lifecycle, and input return remain pending and are still required by the completion rule.
+3. Selecting one manifest locks a floating overlay shell to that target; the floating video surface sizes from the selected manifest crop aspect ratio, toolbar drag repositions only the floating projection, the explicit fullscreen button or double tap/double click on the video surface enters fullscreen, Back/minimize returns to floating, and close invalidates the UI state.
+4. While the picker is open, `TerminalPage` suppresses the terminal quickbar/input shell and asks the existing IME owner to hide the system keyboard. Once a remote-window stream is target-locked, floating and fullscreen modes keep the QuickBar available above the overlay; opening the Android IME lifts the floating preview by the reported bottom inset. QuickBar keyboard/text/paste/arrow actions and Android IME committed text/backspace/key events route to `remote-window-input` for supported app-window OS-event targets instead of terminal input, and committed text remains raw rather than using terminal normalization.
+5. Before stream start the shell displays an honest setup/waiting state. It does not claim that capture started and does not use terminal mirror, sparse buffer, renderer rows, screenshot runtime, or any synthetic frame source as video.
+
+The current real-video implementation slice now additionally binds:
+
+1. `remote-window-stream-start-request` / ICE / status / stop protocol over the existing active session transport.
+2. Android `createRemoteWindowReceiverRuntime()` WebRTC recvonly setup and `<video data-testid="remote-window-video">` receiver surface.
+3. Daemon `startStream()` / `addIceCandidate()` / `stopStream()` lifecycle in `src/server/remote-window-stream-daemon.ts`.
+4. Daemon `startScreenCaptureKitFrameSource()` real macOS ScreenCaptureKit process source, RGBA-to-I420 conversion, `RTCVideoSource` feeding, and exactly-once cleanup.
+5. Mac local live proof for a generic app-window marker: temporary native AppKit window -> catalog target -> ScreenCaptureKit capture -> WebRTC receiver -> pixel oracle. This does not replace the required Android rendered-pixel gate.
+6. Android overlay now maps video-surface pointer/key/scroll events to `remote-window-input` intents. Unzoomed touch drag and wheel input emit pixel scroll; zoomed fullscreen drag remains local pan. The daemon implements generic `bring-to-focus + os-event` pointer/key/scroll injection for active streams.
+7. Remote-window QuickBar input is projection-only: terminal/tmux/iTerm-specific actions such as tmux copy are disabled/grey while generic key, text, paste, arrows, and keyboard invocation remain available. Android IME committed text and native key/backspace events route to the active remote-window stream while the context is active.
+
+Still pending for feature completion:
+
+1. Android real-device rendered-pixel proof through the installed WebView receiver.
+2. Live iTerm2-pane stream pixel proof through the same ScreenCaptureKit/WebRTC path.
+3. iTerm2/tmux-specific input-return proof.
+4. APK build/publish for this interaction slice after focused, architecture, type, and local daemon gates pass.
 
 Current executable gates:
 
 - `src/lib/remote-window-message-runtime.test.ts`
 - `src/lib/remote-window-overlay-runtime.test.ts`
 - `src/components/terminal/RemoteWindowOverlay.test.tsx`
+- `src/lib/remote-window-receiver-runtime.test.ts`
 - `src/pages/TerminalPage.remote-window-overlay.test.tsx`
 - `src/contexts/session-context-remote-window-runtime.test.ts`
 - `src/contexts/session-context-socket-message-runtime.test.ts`
+- `src/server/remote-window-stream-daemon.test.ts`
+- `src/server/terminal-message-runtime.test.ts`
+- `src/lib/remote-window-input-mapping.test.ts`
 
 ## White-Box Gates
 
@@ -61,9 +81,16 @@ Current executable gates:
    - Current minimal slice: `targetLocked/fullscreen + Back -> targetLocked/floating`
    - Current minimal slice: `targetLocked/fullscreen + minimize -> targetLocked/floating`
    - Current minimal slice: late catalog responses from an older request epoch cannot overwrite the current picker/closed state.
+   - Current minimal slice: a catalog request that never settles must leave loading and show an explicit UI timeout within the bounded watchdog window; the picker cannot remain indefinitely at `读取中`.
    - Current minimal slice: `close -> closed`, with no frame source fabricated.
-   - Current minimal slice: `pickerOpen/targetLocked` reports open state to `TerminalPage`; the quickbar/input shell is not rendered while the overlay owns the surface, and it returns after close.
-   - Current minimal slice: toolbar pointer drag changes the floating projection offset, remains bounded to the viewport, and is disabled in fullscreen; video/input surface gestures remain separate.
+   - Current slice: `pickerOpen/fullscreen` reports shell suppression to `TerminalPage`; floating video reports suppression false so QuickBar returns while the stream remains open.
+   - Current slice: `pickerOpen` suppresses QuickBar; target-locked fullscreen still suppresses terminal body subscription but keeps QuickBar visible above the overlay for remote-window input.
+   - Current minimal slice: toolbar pointer drag captures the pointer, updates the floating projection from toolbar-local pointer moves as well as window moves, releases capture on end/cancel, remains bounded to the viewport, and is disabled in fullscreen; video/input surface gestures remain separate.
+   - Current slice: the floating preview shell derives its video aspect ratio from the selected `windowBoundsTopLeftPx` / `cropRectTopLeftPx`, not from a fixed 16:10 preview frame.
+   - Current slice: a target-locked floating preview consumes `bottomInsetPx`; an IME inset of `320` lifts the preview from its `118` base to `438px`. Fullscreen remains governed by safe-area layout instead of this floating offset.
+   - Current slice: fullscreen button enters letterbox mode; pinch zoom shows a minimap; zoomed fullscreen single-finger drag pans the projected viewport without restarting the stream.
+   - Current slice: QuickBar sequences map to remote-window key/text events for the active stream and do not call terminal input while a supported remote-window input context exists.
+   - Current slice: ImeAnchor input/backspace/key events route to remote-window input context while active; committed CJK, special symbols, and newlines are preserved exactly and do not leak into the terminal session under the video overlay.
    - Full stream slice: `fullscreenStream + Back -> floatingStream`
    - Full stream slice: `fullscreenStream + minimize -> floatingStream`
    - `close -> closed`
@@ -75,16 +102,47 @@ Current executable gates:
    - A session whose UI/runtime state is still `connecting` but whose physical session socket is already `OPEN` must be able to send exactly one `remote-window-targets-request`.
    - Catalog readiness must not reuse image/file paste readiness, because paste requires heavier terminal-session connected semantics.
    - If no open physical session socket exists, the picker must surface an explicit remote-window catalog transport error and must not wait for the paste timeout or emit `Active session is not ready yet`.
+   - If `requestTargets()` never resolves or rejects, the overlay's local watchdog must surface `远程窗口列表读取超时` and move to an error state without starting screenshot/video/terminal-buffer fallback.
    - The negative gate must prove catalog failure does not start screenshot, terminal buffer render, hidden video, or transport rebuild fallback.
 
 8. Input return policy
-   - `bring-to-focus + os-event` focuses target before forwarding mouse/keyboard.
+   - Android pointer/key events are sent only as explicit `remote-window-input` over an existing stream transport.
+   - Android video-surface pointer coordinates must resolve to daemon manifest global macOS top-left coordinates (`crop/window x + normalized * width`); DOM-relative or app-local coordinates are not accepted as a pass.
+   - Unzoomed touch drag must emit `kind=scroll`, `unit=pixel`, target coordinates, and incremental deltas without also emitting pointer drag. Zoomed fullscreen drag must pan locally and must not emit remote scroll.
+   - DOM positive-down/right scroll deltas remain the wire contract. The daemon must negate them exactly once when constructing macOS `CGEvent` wheel values.
+   - The daemon macOS input schema must match the protocol union: pointer/key events require `phase`; scroll events do not carry `phase` and must still decode and inject.
+   - The daemon owns a persistent Swift input helper for a selected stream/runtime. Pointer, scroll, and key sequences must not compile a fresh `swift -e` process per event.
+   - QuickBar key/text/IME input must use the same active stream id and target id as the visible overlay; stale stream ids after close/shrink/reselect are a failure.
+   - The real `<video>` receiver is pointer-transparent; fullscreen and floating hit tests belong to the overlay video surface so user taps are not swallowed by media playback.
+   - `bring-to-focus + os-event` matches the target AX window by manifest bounds, activates/raises it, and focuses target before forwarding mouse/keyboard/scroll.
    - `no-focus-steal + os-event` rejects generic app input explicitly.
    - `no-focus-steal + iterm2-api` and `no-focus-steal + tmux-input` may pass only for declared terminal-specific targets.
 
 9. Catalog bandwidth isolation
    - With runtime debug disabled, queued `terminal.performance.trace` metadata must not be flushed as `debug-log` frames over the session WebSocket.
    - Enabling runtime debug is temporary and expires, so a stale client setting cannot keep uploading diagnostics before remote-window video starts.
+
+10. Stream protocol and lifecycle
+   - `remote-window-stream-start-request` carries one selected daemon manifest plus a WebRTC receive offer over the existing session transport.
+   - Android derives the remote-window video ICE servers from the current session traversal route: `rtc-direct` uses STUN-only direct ICE, `rtc-relay` uses TURN relay ICE, and direct WebSocket/Tailscale paths do not fabricate relay ICE.
+   - `remote-window-stream-started` carries the answer, stream id, target id, and capture metadata; route/ICE diagnostics remain metadata and do not prove video success.
+   - `remote-window-stream-ice-candidate` is tied to a stream id and cannot create or select a target by itself.
+   - `remote-window-stream-status` can report `starting`, `streaming`, and `stopped`, but `streaming` requires real capture/media readiness from the daemon stream owner.
+   - `remote-window-stream-stop-request` releases capture/media/timers exactly once.
+   - `remote-window-error` for stream start/capture/media must not be converted into an empty catalog, waiting state, screenshot success, or terminal-buffer preview.
+
+11. Android receiver state
+   - Selecting a manifest starts media negotiation and moves from `targetLocked` to an honest stream setup state.
+   - Receiver attach binds a stream id and media stream to the selected target.
+   - Late started/status/candidate messages for a stale or closed stream cannot revive the overlay.
+   - Back/minimize keep the same stream id; close sends stop.
+   - The video surface must render a real `<video>`/receiver-backed surface or an explicit setup/error state. It must not read `TerminalView`, `sessionBufferStore`, sparse rows, screenshot preview state, or mocked frame data as the business source.
+
+12. Daemon stream owner
+   - Capture starts only from the selected target manifest and rejects missing targets, missing/invalid crop rects, permission failures, and media setup failures explicitly.
+   - Capture frames must originate from ScreenCaptureKit/window capture and be fed into the WebRTC video sender; unit tests may inject a fake frame source only to lock lifecycle and cleanup.
+   - Close, media failure, capture process exit, and transport failure must share one exactly-once cleanup path.
+   - Frame success is not complete until a live pixel oracle matches a source marker to receiver pixels.
 
 ## Black-Box Mac Gates
 
@@ -123,13 +181,26 @@ Current executable gates:
    - After test: verify no unmarked iTerm2 test window, tmux session, pipe-pane, debug port, venv, or temp dir remains.
    - Fixed reusable resources must have a marker and owner/case note.
 
+6. Generic app focus and scroll proof
+   - Require `AXIsProcessTrusted() == true`; missing Accessibility permission is an explicit failure.
+   - Create a marked AppKit target window and a separate covering window whose bounds overlap the target center.
+   - Verify posting pixel scroll to the target point while covered does not move the target.
+   - Match the target AX window by its `CGWindowList` bounds, activate the app, `AXRaise` that window, and verify it becomes key/focused.
+   - Post pixel scroll through `CGEvent.post(tap: .cghidEventTap)` using the `CGWindowList` top-left target point directly; no AppKit bottom-left conversion is allowed for daemon manifest coordinates.
+   - Use a flipped document view so increasing content `y` has unambiguous down-scroll semantics.
+   - Through the live daemon WebSocket protocol, start a real app-window stream against a marked AppKit probe window, send pointer down/up, pixel scroll, and key down/up over `remote-window-input`, and assert both protocol `accepted=true` and probe stdout events are observed.
+   - For WeChat or another ordinary app, first activate a different app, then send a harmless pointer move over the live daemon stream and assert `System Events` frontmost app changes to the selected target app. This is the black-box guard for AX window matching + `AXRaise`.
+   - Assert negative macOS `wheel1` moves content down and positive `wheel1` moves it back up. This locks the one-time DOM-to-CGEvent sign conversion.
+   - Close the marked window and leave no test process or temporary file.
+
 ## Black-Box Android Gates
 
 The picker and target-locked overlay shell are covered now. Gates that require a real frame or remote input remain pending until the ScreenCaptureKit/WebRTC receiver and input-return slices exist.
 
 1. Floating entry
-   - Existing floating quick entry is removed or hidden for the stream mode.
    - Tapping the floating entry opens the remote window picker.
+   - Dragging the floating entry moves only that entry and suppresses the synthetic click from the same pointer sequence.
+   - The entry and other floating command bubbles must be clamped below the Android status-bar guard so they cannot sit on top of system icons.
 
 2. Picker
    - App/window list renders daemon catalog rows.
@@ -139,16 +210,23 @@ The picker and target-locked overlay shell are covered now. Gates that require a
 
 3. Overlay
    - Current minimal slice: selecting a pane locks the floating overlay shell to the exact manifest and displays an honest waiting state.
-   - Current minimal slice: dragging the floating toolbar moves the overlay without entering fullscreen or closing it.
+   - Current minimal slice: dragging the floating toolbar moves the overlay without entering fullscreen or closing it; the regression must assert `setPointerCapture/releasePointerCapture` so Android WebView does not lose the drag when `window.pointermove` is unreliable.
    - Full stream slice: selecting a pane starts the floating stream overlay and binds a real stream id.
    - Double tap enters fullscreen letterbox.
+   - Explicit fullscreen button enters fullscreen.
+   - Pinch zoom enlarges the fullscreen video, one-finger drag pans while zoomed, and the top-right minimap marks the visible viewport.
+   - Fullscreen overlay top chrome must respect Android safe-area/status-bar inset and must not overlap system status icons.
+   - Opening the IME while the floating stream is target-locked moves the preview above the QuickBar/keyboard rather than leaving it under the keyboard.
    - Current minimal slice: Back/minimize shrinks to the same target-locked floating shell.
    - Full stream slice: Back/minimize keeps the same stream id.
    - Current minimal slice: close removes the overlay and invalidates outstanding catalog response epochs.
    - Full stream slice: close tears down the stream and removes overlay.
 
 4. Input
-   - With `bring-to-focus`, a click/key event focuses the selected target and reaches it.
+   - Android overlay maps pointer coordinates from the letterboxed/zoomed content rect to the selected target crop.
+   - A single-finger vertical drag on an unzoomed floating/fullscreen video sends pixel scroll to the selected target; no pointer drag is emitted for the same gesture.
+   - Android IME CJK/special-character/newline committed text reaches the selected app unchanged and does not enter the terminal session.
+   - With `bring-to-focus`, a click/key event raises/focuses the selected target window and reaches it even when another window previously covered the target point.
    - With `no-focus-steal`, generic app OS input returns an explicit policy error.
    - With `tmux-input`, a terminal key marker appears in the selected tmux pane only.
 

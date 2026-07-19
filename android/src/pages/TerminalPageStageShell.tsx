@@ -33,6 +33,7 @@ const TerminalStageShell = ReactMemo(
     splitVisible,
     activePaneId,
     terminalChromeBottomPx,
+    terminalChromeTopPx = 0,
     inputResetEpochBySession,
     followResetEpoch,
     inputIntentFollowResetEpoch,
@@ -78,6 +79,7 @@ const TerminalStageShell = ReactMemo(
     splitVisible: boolean;
     activePaneId: string;
     terminalChromeBottomPx: number;
+    terminalChromeTopPx?: number;
     inputResetEpochBySession?: Record<string, number>;
     followResetEpoch?: number;
     inputIntentFollowResetEpoch?: number;
@@ -512,7 +514,7 @@ const TerminalStageShell = ReactMemo(
         }}
         style={{
           position: "absolute",
-          top: 0,
+          top: `${Math.max(0, Math.floor(terminalChromeTopPx))}px`,
           left: 0,
           right: 0,
           bottom: `${terminalChromeBottomPx}px`,

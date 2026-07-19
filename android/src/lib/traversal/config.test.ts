@@ -3,7 +3,7 @@ import { DEFAULT_BRIDGE_SETTINGS } from '../bridge-settings';
 import { buildTraversalPlan, resolveTraversalConfigFromHost } from './config';
 
 describe('buildTraversalPlan', () => {
-  it('orders logged-in auto paths as WebRTC direct -> tailscale -> ipv6 -> ipv4 -> TURN relay', () => {
+  it('orders logged-in auto candidates as direct IPv4 -> Tailscale -> WebRTC direct -> IPv6 -> TURN relay', () => {
     const plan = buildTraversalPlan(
       {
         bridgeHost: '203.0.113.10',
@@ -38,20 +38,20 @@ describe('buildTraversalPlan', () => {
     );
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'rtc-direct',
-      'tailscale',
-      'ipv6',
       'ipv4',
+      'tailscale',
+      'rtc-direct',
+      'ipv6',
       'rtc-relay',
     ]);
-    expect(plan.candidates[0]).toMatchObject({
+    expect(plan.candidates[2]).toMatchObject({
       kind: 'rtc',
       path: 'rtc-direct',
       endpoint: 'rtc-direct:daemon-host-a',
       iceTransportPolicy: 'all',
       iceServers: [{ urls: 'stun:turn.example.com:3478' }],
     });
-    expect(JSON.stringify(plan.candidates[0])).not.toContain('secret');
+    expect(JSON.stringify(plan.candidates[2])).not.toContain('secret');
   });
 
   it('orders auto paths from the user selected traversal priority', () => {
@@ -73,7 +73,7 @@ describe('buildTraversalPlan', () => {
         turnUsername: '',
         turnCredential: '',
         transportMode: 'auto',
-        traversalPathPriority: ['rtc-direct', 'tailscale', 'ipv4', 'ipv6', 'rtc-relay'],
+        traversalPathPriority: ['ipv4', 'tailscale', 'rtc-direct', 'ipv6', 'rtc-relay'],
         traversalRelay: {
           relayBaseUrl: 'http://159.75.134.56/relay/',
           accessToken: 'access-1',
@@ -94,9 +94,9 @@ describe('buildTraversalPlan', () => {
     );
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'rtc-direct',
-      'tailscale',
       'ipv4',
+      'tailscale',
+      'rtc-direct',
       'ipv6',
       'rtc-relay',
     ]);
@@ -293,7 +293,7 @@ describe('buildTraversalPlan', () => {
         turnUsername: '',
         turnCredential: '',
         transportMode: 'auto',
-        traversalPathPriority: ['rtc-direct', 'tailscale', 'ipv6', 'ipv4', 'rtc-relay'],
+        traversalPathPriority: ['ipv4', 'tailscale', 'rtc-direct', 'ipv6', 'rtc-relay'],
         traversalRelay: {
           relayBaseUrl: 'http://159.75.134.56/relay/',
           accessToken: 'access-1',
@@ -313,13 +313,13 @@ describe('buildTraversalPlan', () => {
       },
     );
 
-    expect(plan.candidates[0]).toMatchObject({
+    expect(plan.candidates).toContainEqual(expect.objectContaining({
       kind: 'rtc',
       path: 'rtc-direct',
       signalUrl: 'ws://159.75.134.56/relay/ws/client?token=access-1&hostId=daemon-host-a',
       endpoint: 'rtc-direct:daemon-host-a',
       iceTransportPolicy: 'all',
-    });
+    }));
   });
 
   it('builds route candidates from relay directory endpoints without local bridge preset', () => {
@@ -353,7 +353,7 @@ describe('buildTraversalPlan', () => {
         turnUsername: '',
         turnCredential: '',
         transportMode: 'auto',
-        traversalPathPriority: ['rtc-direct', 'tailscale', 'ipv6', 'ipv4', 'rtc-relay'],
+        traversalPathPriority: ['ipv4', 'tailscale', 'rtc-direct', 'ipv6', 'rtc-relay'],
         traversalRelay: {
           relayBaseUrl: 'http://159.75.134.56/relay/',
           accessToken: 'access-1',
@@ -431,7 +431,7 @@ describe('buildTraversalPlan', () => {
         turnUsername: '',
         turnCredential: '',
         transportMode: 'auto',
-        traversalPathPriority: ['rtc-direct', 'tailscale', 'ipv6', 'ipv4', 'rtc-relay'],
+        traversalPathPriority: ['ipv4', 'tailscale', 'rtc-direct', 'ipv6', 'rtc-relay'],
       },
     );
 

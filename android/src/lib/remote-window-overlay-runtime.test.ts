@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyRemoteWindowTargetCatalog,
+  attachRemoteWindowStreamReceiver,
+  beginRemoteWindowStreamSetup,
   beginRemoteWindowTargetEnumeration,
   closeRemoteWindowOverlay,
   enterRemoteWindowFullscreen,
+  failRemoteWindowStream,
   failRemoteWindowTargetCatalog,
   initialRemoteWindowOverlayState,
   selectRemoteWindowTarget,
@@ -90,6 +93,75 @@ describe('remote window overlay runtime', () => {
     expect(floating).toMatchObject({ phase: 'targetLocked', mode: 'floating' });
     expect(closed).toMatchObject({ phase: 'closed' });
     expect(closed.requestEpoch).toBe(fullscreen.requestEpoch + 1);
+  });
+
+  it('starts and attaches a real stream without changing target projection', () => {
+    const started = beginRemoteWindowTargetEnumeration(initialRemoteWindowOverlayState);
+    const target = makeTarget('pane-1', 'iterm2-pane');
+    const picker = applyRemoteWindowTargetCatalog(started.state, started.requestEpoch, {
+      requestId: 'rw-1',
+      targets: [target],
+    });
+    const locked = selectRemoteWindowTarget(picker, 'pane-1');
+    const streamStarting = beginRemoteWindowStreamSetup(locked, 'stream-1');
+    const fullscreen = enterRemoteWindowFullscreen(streamStarting);
+    const attached = attachRemoteWindowStreamReceiver(fullscreen, 'stream-1');
+    const floating = shrinkRemoteWindowOverlay(attached);
+
+    expect(streamStarting).toMatchObject({
+      phase: 'targetLocked',
+      streamId: 'stream-1',
+      streamStarted: false,
+      streamStatus: 'starting',
+      target,
+    });
+    expect(attached).toMatchObject({
+      phase: 'targetLocked',
+      mode: 'fullscreen',
+      streamId: 'stream-1',
+      streamStarted: true,
+      streamStatus: 'streaming',
+      target,
+    });
+    expect(floating).toMatchObject({
+      phase: 'targetLocked',
+      mode: 'floating',
+      streamId: 'stream-1',
+      streamStarted: true,
+    });
+  });
+
+  it('surfaces stream setup errors explicitly without falling back to screenshot or terminal buffer preview', () => {
+    const started = beginRemoteWindowTargetEnumeration(initialRemoteWindowOverlayState);
+    const picker = applyRemoteWindowTargetCatalog(started.state, started.requestEpoch, {
+      requestId: 'rw-1',
+      targets: [makeTarget('pane-1', 'iterm2-pane')],
+    });
+    const locked = beginRemoteWindowStreamSetup(selectRemoteWindowTarget(picker, 'pane-1'), 'stream-1');
+    const failed = failRemoteWindowStream(locked, 'stream-1', new Error('ScreenCaptureKit capture start failure'));
+
+    expect(failed).toMatchObject({
+      phase: 'targetLocked',
+      streamId: 'stream-1',
+      streamStarted: false,
+      streamStatus: 'error',
+      streamErrorMessage: 'ScreenCaptureKit capture start failure',
+    });
+  });
+
+  it('ignores late stream events for closed or different stream ids', () => {
+    const started = beginRemoteWindowTargetEnumeration(initialRemoteWindowOverlayState);
+    const picker = applyRemoteWindowTargetCatalog(started.state, started.requestEpoch, {
+      requestId: 'rw-1',
+      targets: [makeTarget('pane-1', 'iterm2-pane')],
+    });
+    const locked = beginRemoteWindowStreamSetup(selectRemoteWindowTarget(picker, 'pane-1'), 'stream-1');
+    const wrongStream = attachRemoteWindowStreamReceiver(locked, 'stream-other');
+    const closed = closeRemoteWindowOverlay(locked);
+    const lateAttached = attachRemoteWindowStreamReceiver(closed, 'stream-1');
+
+    expect(wrongStream).toBe(locked);
+    expect(lateAttached).toBe(closed);
   });
 
   it('surfaces catalog failure explicitly instead of treating it as an empty success', () => {

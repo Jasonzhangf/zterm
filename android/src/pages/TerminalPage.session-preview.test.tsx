@@ -316,6 +316,7 @@ describe('TerminalPage session preview integration', () => {
         bridgeHost: '100.127.23.27',
         bridgePort: 3333,
         daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
         authToken: 'token-a',
         sessionNames: ['tmux-s1', 'remote-beta'],
       },

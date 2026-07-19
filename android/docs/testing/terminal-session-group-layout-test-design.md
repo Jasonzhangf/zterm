@@ -72,6 +72,7 @@ Lifecycle path:
 
 ```text
 workspace + sessions + layout mode + viewport
+-> active session to session-group slot synchronization
 -> session group viewport slots
 -> render policy
 -> live / preview / offscreen mount decisions
@@ -80,6 +81,7 @@ workspace + sessions + layout mode + viewport
 White-box plan:
 
 - Pure resolver tests for fully visible, partially visible, and offscreen slots.
+- `TerminalPage` active-session projection sync keeps top/center/bottom slot focus aligned with the externally active session id before `TerminalPageStageShell` receives slot props.
 - Negative tests proving projection cannot create/close/merge session truth.
 - Negative tests proving partially visible slots do not mount live terminal by default.
 - Negative tests proving unassigned slots stay placeholders instead of auto-filling from session list order.
@@ -87,6 +89,7 @@ White-box plan:
 Module black-box plan:
 
 - Phone portrait: vertical top/center/bottom slots.
+- External active session changes in portrait must replace or focus the corresponding session-group slot and render the new session body marker through real `sessionBufferStore -> TerminalPageStageShell -> TerminalView`; the old session body marker must disappear without requiring a second tap.
 - Tablet portrait: horizontal left/center/right slots.
 - Tablet landscape: side peek slots plus multi-pane center workspace.
 

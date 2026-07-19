@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   TERMINAL_INPUT_CHUNK_BYTES,
   getTerminalInputUtf8ByteLength,
 } from '@zterm/shared/terminal/input-chunking';
-import { sendInputThroughSessionTransport } from './session-context-input-runtime';
+import {
+  handleTerminalInputAck,
+  resetTerminalReliableInputRuntimeForTests,
+  sendInputThroughSessionTransport,
+  TERMINAL_RELIABLE_INPUT_RETRY_MS,
+} from './session-context-input-runtime';
 
 function createSocket(readyState: number, bufferedAmount = 0) {
   return {
@@ -58,6 +63,11 @@ function sendInput(overrides: Partial<Parameters<typeof sendInputThroughSessionT
   return options;
 }
 
+afterEach(() => {
+  resetTerminalReliableInputRuntimeForTests();
+  vi.useRealTimers();
+});
+
 function parseSentInputPayloads(sendSocketPayload: ReturnType<typeof vi.fn>) {
   return sendSocketPayload.mock.calls.map((call) => {
     const message = JSON.parse(String(call[2]));
@@ -65,6 +75,26 @@ function parseSentInputPayloads(sendSocketPayload: ReturnType<typeof vi.fn>) {
     expect(typeof message.payload).toBe('string');
     return String(message.payload);
   });
+}
+
+function parseSentReliableInputPayload(sendSocketPayload: ReturnType<typeof vi.fn>, index = 0) {
+  const message = JSON.parse(String(sendSocketPayload.mock.calls[index]![2]));
+  expect(message.type).toBe('input');
+  expect(typeof message.payload).toBe('object');
+  expect(message.payload).toMatchObject({
+    version: 1,
+    seq: expect.any(String),
+    data: expect.any(String),
+    sentAt: expect.any(Number),
+    attempt: expect.any(Number),
+  });
+  return message.payload as {
+    version: 1;
+    seq: string;
+    data: string;
+    sentAt: number;
+    attempt: number;
+  };
 }
 
 describe('session-context-input-runtime', () => {
@@ -78,6 +108,157 @@ describe('session-context-input-runtime', () => {
       payload: 'pwd\r',
     });
     expect(options.requestSessionBufferHead).not.toHaveBeenCalled();
+  });
+
+  it('uses reliable seq ack retry only after the connected daemon advertises support', () => {
+    vi.useFakeTimers();
+    const sendSocketPayload = vi.fn();
+
+    sendInput({
+      refs: {
+        sessionsRef: { current: [{ id: 'session-2', reliableInputSupported: true } as any] },
+        stateRef: { current: { activeSessionId: 'session-2' } },
+      },
+      sendSocketPayload,
+    });
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    const first = parseSentReliableInputPayload(sendSocketPayload);
+    expect(first).toMatchObject({
+      data: 'pwd\r',
+      attempt: 1,
+    });
+
+    vi.advanceTimersByTime(TERMINAL_RELIABLE_INPUT_RETRY_MS);
+    expect(sendSocketPayload).toHaveBeenCalledTimes(2);
+    const retry = parseSentReliableInputPayload(sendSocketPayload, 1);
+    expect(retry).toMatchObject({
+      seq: first.seq,
+      data: 'pwd\r',
+      attempt: 2,
+    });
+
+    handleTerminalInputAck('session-2', {
+      version: 1,
+      seq: first.seq,
+      accepted: true,
+      bytes: 4,
+    });
+    vi.advanceTimersByTime(TERMINAL_RELIABLE_INPUT_RETRY_MS * 2);
+    expect(sendSocketPayload).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not send the next reliable chunk until the daemon acks the current chunk', () => {
+    vi.useFakeTimers();
+    const sendSocketPayload = vi.fn();
+    const longInput = `${'a'.repeat(TERMINAL_INPUT_CHUNK_BYTES - 3)}中文😀${'b'.repeat(128)}`;
+
+    sendInput({
+      data: longInput,
+      refs: {
+        sessionsRef: { current: [{ id: 'session-2', reliableInputSupported: true } as any] },
+        stateRef: { current: { activeSessionId: 'session-2' } },
+      },
+      sendSocketPayload,
+    });
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    const first = parseSentReliableInputPayload(sendSocketPayload);
+    expect(first.data.length).toBeLessThan(longInput.length);
+
+    handleTerminalInputAck('session-2', {
+      version: 1,
+      seq: first.seq,
+      accepted: true,
+      bytes: getTerminalInputUtf8ByteLength(first.data),
+    });
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(2);
+    const second = parseSentReliableInputPayload(sendSocketPayload, 1);
+    expect(second.seq).not.toBe(first.seq);
+    expect(first.data + second.data).toBe(longInput);
+  });
+
+  it('queues reliable input while the transport is not open and sends it when the same transport owner becomes open', () => {
+    vi.useFakeTimers();
+    const sendSocketPayload = vi.fn();
+    let currentWs: any = null;
+
+    sendInput({
+      refs: {
+        sessionsRef: { current: [{ id: 'session-2', reliableInputSupported: true } as any] },
+        stateRef: { current: { activeSessionId: 'session-2' } },
+      },
+      readSessionTransportResource: (sessionId) => createResource(sessionId, currentWs),
+      readSessionTransportSocket: () => currentWs,
+      hasPendingSessionTransportOpen: () => true,
+      sendSocketPayload,
+    });
+
+    expect(sendSocketPayload).not.toHaveBeenCalled();
+    currentWs = createSocket(WebSocket.OPEN);
+    vi.advanceTimersByTime(TERMINAL_RELIABLE_INPUT_RETRY_MS);
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    expect(parseSentReliableInputPayload(sendSocketPayload)).toMatchObject({
+      data: 'pwd\r',
+      attempt: 1,
+    });
+  });
+
+  it('keeps reliable input queued after a retryable daemon nack and resends the same seq', () => {
+    vi.useFakeTimers();
+    const sendSocketPayload = vi.fn();
+
+    sendInput({
+      refs: {
+        sessionsRef: { current: [{ id: 'session-2', reliableInputSupported: true } as any] },
+        stateRef: { current: { activeSessionId: 'session-2' } },
+      },
+      sendSocketPayload,
+    });
+
+    const first = parseSentReliableInputPayload(sendSocketPayload);
+    handleTerminalInputAck('session-2', {
+      version: 1,
+      seq: first.seq,
+      accepted: false,
+      bytes: 4,
+      error: 'input_stale_transport',
+    });
+
+    vi.advanceTimersByTime(TERMINAL_RELIABLE_INPUT_RETRY_MS);
+    expect(sendSocketPayload).toHaveBeenCalledTimes(2);
+    expect(parseSentReliableInputPayload(sendSocketPayload, 1)).toMatchObject({
+      seq: first.seq,
+      data: 'pwd\r',
+      attempt: 2,
+    });
+  });
+
+  it('drops non-retryable reliable input nack to avoid writing invalid payloads forever', () => {
+    vi.useFakeTimers();
+    const sendSocketPayload = vi.fn();
+
+    sendInput({
+      refs: {
+        sessionsRef: { current: [{ id: 'session-2', reliableInputSupported: true } as any] },
+        stateRef: { current: { activeSessionId: 'session-2' } },
+      },
+      sendSocketPayload,
+    });
+
+    const first = parseSentReliableInputPayload(sendSocketPayload);
+    handleTerminalInputAck('session-2', {
+      version: 1,
+      seq: first.seq,
+      accepted: false,
+      bytes: 0,
+      error: 'input_invalid',
+    });
+
+    vi.advanceTimersByTime(TERMINAL_RELIABLE_INPUT_RETRY_MS * 2);
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
   });
 
   it('chunks long input into ordered string-only frames under the daemon payload cap', () => {

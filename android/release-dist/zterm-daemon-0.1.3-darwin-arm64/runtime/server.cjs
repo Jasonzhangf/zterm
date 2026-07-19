@@ -4567,7 +4567,7 @@ var require_datachannelevent = __commonJS({
 var require_icecandidate = __commonJS({
   "../node_modules/.pnpm/@roamhq+wrtc@0.10.0/node_modules/@roamhq/wrtc/lib/icecandidate.js"(exports2, module2) {
     "use strict";
-    function RTCIceCandidate2(candidateInitDict) {
+    function RTCIceCandidate3(candidateInitDict) {
       [
         "candidate",
         "sdpMid",
@@ -4603,7 +4603,7 @@ var require_icecandidate = __commonJS({
         return json;
       };
     }
-    module2.exports = RTCIceCandidate2;
+    module2.exports = RTCIceCandidate3;
   }
 });
 
@@ -4675,7 +4675,7 @@ var require_rtcpeerconnectioniceerrorevent = __commonJS({
 var require_sessiondescription = __commonJS({
   "../node_modules/.pnpm/@roamhq+wrtc@0.10.0/node_modules/@roamhq/wrtc/lib/sessiondescription.js"(exports2, module2) {
     "use strict";
-    function RTCSessionDescription2(descriptionInitDict) {
+    function RTCSessionDescription3(descriptionInitDict) {
       if (descriptionInitDict) {
         this.type = descriptionInitDict.type;
         this.sdp = descriptionInitDict.sdp;
@@ -4688,7 +4688,7 @@ var require_sessiondescription = __commonJS({
         };
       };
     }
-    module2.exports = RTCSessionDescription2;
+    module2.exports = RTCSessionDescription3;
   }
 });
 
@@ -4700,11 +4700,11 @@ var require_peerconnection = __commonJS({
     var _webrtc = require_binding();
     var EventTarget = require_eventtarget();
     var RTCDataChannelEvent = require_datachannelevent();
-    var RTCIceCandidate2 = require_icecandidate();
+    var RTCIceCandidate3 = require_icecandidate();
     var RTCPeerConnectionIceEvent = require_rtcpeerconnectioniceevent();
     var RTCPeerConnectionIceErrorEvent = require_rtcpeerconnectioniceerrorevent();
-    var RTCSessionDescription2 = require_sessiondescription();
-    function RTCPeerConnection2() {
+    var RTCSessionDescription3 = require_sessiondescription();
+    function RTCPeerConnection3() {
       var self = this;
       var pc = new _webrtc.RTCPeerConnection(arguments[0] || {});
       EventTarget.call(this);
@@ -4722,7 +4722,7 @@ var require_peerconnection = __commonJS({
         self.dispatchEvent({ type: "connectionstatechange", target: self });
       };
       pc.onicecandidate = function onicecandidate(candidate) {
-        var icecandidate = new RTCIceCandidate2(candidate);
+        var icecandidate = new RTCIceCandidate3(candidate);
         self.dispatchEvent(
           new RTCPeerConnectionIceEvent("icecandidate", {
             candidate: icecandidate,
@@ -4781,37 +4781,37 @@ var require_peerconnection = __commonJS({
         },
         currentLocalDescription: {
           get: function getCurrentLocalDescription() {
-            return pc.currentLocalDescription ? new RTCSessionDescription2(pc.currentLocalDescription) : null;
+            return pc.currentLocalDescription ? new RTCSessionDescription3(pc.currentLocalDescription) : null;
           },
           enumerable: true
         },
         localDescription: {
           get: function getLocalDescription() {
-            return pc.localDescription ? new RTCSessionDescription2(pc.localDescription) : null;
+            return pc.localDescription ? new RTCSessionDescription3(pc.localDescription) : null;
           },
           enumerable: true
         },
         pendingLocalDescription: {
           get: function getPendingLocalDescription() {
-            return pc.pendingLocalDescription ? new RTCSessionDescription2(pc.pendingLocalDescription) : null;
+            return pc.pendingLocalDescription ? new RTCSessionDescription3(pc.pendingLocalDescription) : null;
           },
           enumerable: true
         },
         currentRemoteDescription: {
           get: function getCurrentRemoteDescription() {
-            return pc.currentRemoteDescription ? new RTCSessionDescription2(pc.currentRemoteDescription) : null;
+            return pc.currentRemoteDescription ? new RTCSessionDescription3(pc.currentRemoteDescription) : null;
           },
           enumerable: true
         },
         remoteDescription: {
           get: function getRemoteDescription() {
-            return pc.remoteDescription ? new RTCSessionDescription2(pc.remoteDescription) : null;
+            return pc.remoteDescription ? new RTCSessionDescription3(pc.remoteDescription) : null;
           },
           enumerable: true
         },
         pendingRemoteDescription: {
           get: function getPendingRemoteDescription() {
-            return pc.pendingRemoteDescription ? new RTCSessionDescription2(pc.pendingRemoteDescription) : null;
+            return pc.pendingRemoteDescription ? new RTCSessionDescription3(pc.pendingRemoteDescription) : null;
           },
           enumerable: true
         },
@@ -4871,9 +4871,9 @@ var require_peerconnection = __commonJS({
         }
       });
     }
-    inherits(RTCPeerConnection2, EventTarget);
-    RTCPeerConnection2.prototype.ontrack = null;
-    RTCPeerConnection2.prototype.addIceCandidate = function addIceCandidate(candidate) {
+    inherits(RTCPeerConnection3, EventTarget);
+    RTCPeerConnection3.prototype.ontrack = null;
+    RTCPeerConnection3.prototype.addIceCandidate = function addIceCandidate(candidate) {
       if (!candidate?.candidate) {
         candidate = void 0;
       }
@@ -4883,19 +4883,19 @@ var require_peerconnection = __commonJS({
       }
       return promise;
     };
-    RTCPeerConnection2.prototype.addTransceiver = function addTransceiver() {
+    RTCPeerConnection3.prototype.addTransceiver = function addTransceiver() {
       return this._pc.addTransceiver.apply(this._pc, arguments);
     };
-    RTCPeerConnection2.prototype.addTrack = function addTrack(track, ...streams) {
+    RTCPeerConnection3.prototype.addTrack = function addTrack(track, ...streams) {
       return this._pc.addTrack(track, streams);
     };
-    RTCPeerConnection2.prototype.close = function close() {
+    RTCPeerConnection3.prototype.close = function close() {
       this._pc.close();
     };
-    RTCPeerConnection2.prototype.createDataChannel = function createDataChannel() {
+    RTCPeerConnection3.prototype.createDataChannel = function createDataChannel() {
       return this._pc.createDataChannel.apply(this._pc, arguments);
     };
-    RTCPeerConnection2.prototype.createOffer = function createOffer() {
+    RTCPeerConnection3.prototype.createOffer = function createOffer() {
       var options = arguments.length === 3 ? arguments[2] : arguments[0];
       var promise = this._pc.createOffer(options || {});
       if (arguments.length >= 2) {
@@ -4903,7 +4903,7 @@ var require_peerconnection = __commonJS({
       }
       return promise;
     };
-    RTCPeerConnection2.prototype.createAnswer = function createAnswer() {
+    RTCPeerConnection3.prototype.createAnswer = function createAnswer() {
       var options = arguments.length === 3 ? arguments[2] : arguments[0];
       var promise = this._pc.createAnswer(options || {});
       if (arguments.length >= 2) {
@@ -4911,45 +4911,45 @@ var require_peerconnection = __commonJS({
       }
       return promise;
     };
-    RTCPeerConnection2.prototype.getConfiguration = function getConfiguration() {
+    RTCPeerConnection3.prototype.getConfiguration = function getConfiguration() {
       return this._pc.getConfiguration();
     };
-    RTCPeerConnection2.prototype.getReceivers = function getReceivers() {
+    RTCPeerConnection3.prototype.getReceivers = function getReceivers() {
       return this._pc.getReceivers();
     };
-    RTCPeerConnection2.prototype.getSenders = function getSenders() {
+    RTCPeerConnection3.prototype.getSenders = function getSenders() {
       return this._pc.getSenders();
     };
-    RTCPeerConnection2.prototype.getTransceivers = function getTransceivers() {
+    RTCPeerConnection3.prototype.getTransceivers = function getTransceivers() {
       return this._pc.getTransceivers();
     };
-    RTCPeerConnection2.prototype.getStats = function getStats() {
+    RTCPeerConnection3.prototype.getStats = function getStats() {
       return this._pc.getStats(arguments[0]);
     };
-    RTCPeerConnection2.prototype.removeTrack = function removeTrack(sender) {
+    RTCPeerConnection3.prototype.removeTrack = function removeTrack(sender) {
       this._pc.removeTrack(sender);
     };
-    RTCPeerConnection2.prototype.setConfiguration = function setConfiguration(configuration) {
+    RTCPeerConnection3.prototype.setConfiguration = function setConfiguration(configuration) {
       return this._pc.setConfiguration(configuration);
     };
-    RTCPeerConnection2.prototype.setLocalDescription = function setLocalDescription(description) {
+    RTCPeerConnection3.prototype.setLocalDescription = function setLocalDescription(description) {
       var promise = this._pc.setLocalDescription(description);
       if (arguments.length === 3) {
         promise.then(arguments[1], arguments[2]);
       }
       return promise;
     };
-    RTCPeerConnection2.prototype.setRemoteDescription = function setRemoteDescription(description) {
+    RTCPeerConnection3.prototype.setRemoteDescription = function setRemoteDescription(description) {
       var promise = this._pc.setRemoteDescription(description);
       if (arguments.length === 3) {
         promise.then(arguments[1], arguments[2]);
       }
       return promise;
     };
-    RTCPeerConnection2.prototype.restartIce = function restartIce() {
+    RTCPeerConnection3.prototype.restartIce = function restartIce() {
       return this._pc.restartIce();
     };
-    module2.exports = RTCPeerConnection2;
+    module2.exports = RTCPeerConnection3;
   }
 });
 
@@ -5002,7 +5002,7 @@ var require_lib2 = __commonJS({
       this._send(data);
     };
     var mediaDevices = new MediaDevices();
-    var nonstandard = {
+    var nonstandard2 = {
       i420ToRgba,
       RTCAudioSink,
       RTCAudioSource,
@@ -5028,7 +5028,7 @@ var require_lib2 = __commonJS({
       RTCSessionDescription: require_sessiondescription(),
       getUserMedia,
       mediaDevices,
-      nonstandard
+      nonstandard: nonstandard2
     };
   }
 });
@@ -5660,7 +5660,7 @@ function normalizeRequestedMissingRanges(missingRanges, startIndex, endIndex) {
   return missingRanges.map((range) => ({
     startIndex: Math.max(startIndex, Math.min(endIndex, Math.floor(range?.startIndex || 0))),
     endIndex: Math.max(startIndex, Math.min(endIndex, Math.floor(range?.endIndex || 0)))
-  })).filter((range) => range.endIndex > range.startIndex);
+  })).filter((range) => range.endIndex > range.startIndex).sort((left, right) => left.startIndex - right.startIndex || left.endIndex - right.endIndex);
 }
 function buildBufferSyncPayload(mirror, requestStartIndex, requestEndIndex, lines) {
   const availableStartIndex = Math.max(0, Math.floor(mirror.bufferStartIndex || 0));
@@ -5687,7 +5687,7 @@ function buildChangedRangesBufferSyncPayload(mirror, changedRanges) {
   const normalizedRanges = changedRanges.map((range) => ({
     startIndex: Math.max(availableStartIndex, Math.min(availableEndIndex, Math.floor(range?.startIndex || 0))),
     endIndex: Math.max(availableStartIndex, Math.min(availableEndIndex, Math.floor(range?.endIndex || 0)))
-  })).filter((range) => range.endIndex > range.startIndex);
+  })).filter((range) => range.endIndex > range.startIndex).sort((left, right) => left.startIndex - right.startIndex || left.endIndex - right.endIndex);
   if (normalizedRanges.length === 0) {
     return null;
   }
@@ -5726,14 +5726,17 @@ function buildRequestedRangeBufferPayload(mirror, request) {
     requestStartIndex,
     requestEndIndex
   );
-  const requestedRanges = requestedMissingRanges.length > 0 ? requestedMissingRanges : [{ startIndex: requestStartIndex, endIndex: requestEndIndex }];
-  const indexedLines = requestedRanges.flatMap((range) => sliceIndexedLines(
+  const requestedSpan = requestedMissingRanges.length > 0 ? {
+    startIndex: requestedMissingRanges[0].startIndex,
+    endIndex: requestedMissingRanges[requestedMissingRanges.length - 1].endIndex
+  } : { startIndex: requestStartIndex, endIndex: requestEndIndex };
+  const indexedLines = sliceIndexedLines(
     mirror.bufferStartIndex,
     mirror.bufferLines,
-    range.startIndex,
-    range.endIndex
-  ));
-  return buildBufferSyncPayload(mirror, requestStartIndex, requestEndIndex, indexedLines);
+    requestedSpan.startIndex,
+    requestedSpan.endIndex
+  );
+  return buildBufferSyncPayload(mirror, requestedSpan.startIndex, requestedSpan.endIndex, indexedLines);
 }
 
 // src/server/mirror-geometry.ts
@@ -6127,7 +6130,10 @@ function currentMirrorMatchesSnapshot(mirror, snapshot) {
       totalAvailableLines: getMirrorAvailableEndIndex2(mirror),
       visibleTopIndex: Math.max(mirror.bufferStartIndex, getMirrorAvailableEndIndex2(mirror) - mirror.rows),
       captureDurationMs: mirror.lastCaptureDurationMs || 0,
-      canonicalizeDurationMs: mirror.lastCanonicalizeDurationMs || 0
+      canonicalizeDurationMs: mirror.lastCanonicalizeDurationMs || 0,
+      captureStartedAt: 0,
+      captureDoneAt: 0,
+      canonicalizeDoneAt: 0
     },
     snapshot
   );
@@ -6378,7 +6384,10 @@ function createTerminalMirrorCaptureRuntime(deps) {
       totalAvailableLines,
       visibleTopIndex,
       captureDurationMs: Math.max(0, captureDoneAt - captureStartedAt),
-      canonicalizeDurationMs: Math.max(0, canonicalizeDoneAt - canonicalizeStartedAt)
+      canonicalizeDurationMs: Math.max(0, canonicalizeDoneAt - canonicalizeStartedAt),
+      captureStartedAt,
+      captureDoneAt,
+      canonicalizeDoneAt
     };
   }
   async function captureMirrorAuthoritativeBufferFromTmux(mirror) {
@@ -6397,11 +6406,15 @@ function createTerminalMirrorCaptureRuntime(deps) {
         totalAvailableLines: snapshot2.bufferStartIndex + snapshot2.bufferLines.length,
         visibleTopIndex: Math.max(snapshot2.bufferStartIndex, snapshot2.bufferStartIndex + snapshot2.bufferLines.length - snapshot2.rows),
         captureDurationMs: 0,
-        canonicalizeDurationMs: 0
+        canonicalizeDurationMs: 0,
+        captureStartedAt: Date.now(),
+        captureDoneAt: Date.now(),
+        canonicalizeDoneAt: Date.now()
       });
       mirror.lastCaptureDurationMs = 0;
       mirror.lastCanonicalizeDurationMs = 0;
       mirror.pendingStableCaptureSnapshot = null;
+      mirror.pendingPerformanceTraceCapture = null;
       return true;
     }
     const stableCapture = await resolveStableMirrorCaptureSnapshot({
@@ -6413,6 +6426,13 @@ function createTerminalMirrorCaptureRuntime(deps) {
     mirror.lastCaptureDurationMs = snapshot.captureDurationMs;
     mirror.lastCanonicalizeDurationMs = snapshot.canonicalizeDurationMs;
     mirror.pendingStableCaptureSnapshot = null;
+    mirror.pendingPerformanceTraceCapture = {
+      captureStartedAt: snapshot.captureStartedAt ?? Date.now(),
+      captureDoneAt: snapshot.captureDoneAt ?? Date.now(),
+      canonicalizeDoneAt: snapshot.canonicalizeDoneAt ?? Date.now(),
+      capturedLineCount: snapshot.capturedLineCount,
+      canonicalLineCount: snapshot.canonicalLineCount
+    };
     console.log(
       `[${deps.logTimePrefix()}] [mirror:${mirror.sessionName}] tmux capture sync captured=${snapshot.capturedLineCount} canonical=${snapshot.canonicalLineCount} continuity=authoritative-replace matched=0 total=${snapshot.totalAvailableLines} rows=${snapshot.rows} cols=${snapshot.cols} buffer=${mirror.bufferStartIndex}-${getMirrorAvailableEndIndex2(mirror)} visible=${snapshot.visibleTopIndex}-${getMirrorAvailableEndIndex2(mirror)} stabilizeAttempts=${stableCapture.attempts} stabilizeMode=${stableCapture.stabilizedAgainst}`
     );
@@ -6779,6 +6799,7 @@ var v4_default = v4;
 
 // src/server/terminal-transport-runtime.ts
 var TRANSPORT_BACKPRESSURE_BUFFERED_BYTES = 128e3;
+var TRANSPORT_BACKPRESSURE_LOW_WATER_BYTES = 64e3;
 function estimateTransportMessageBytes(text) {
   return Buffer.byteLength(text, "utf8");
 }
@@ -6798,6 +6819,7 @@ function readTerminalTransportBackpressureSnapshot(transport) {
     ready: transport.readyState === import_websocket.default.OPEN,
     bufferedBytes,
     backpressure,
+    lowWaterDrained: bufferedBytes <= TRANSPORT_BACKPRESSURE_LOW_WATER_BYTES,
     backpressureCount: Math.max(0, Math.floor(transport.backpressureCount || 0)),
     lastSendBytes: Math.max(0, Math.floor(transport.lastSendBytes || 0)),
     totalSendBytes: Math.max(0, Math.floor(transport.totalSendBytes || 0)),
@@ -6871,11 +6893,17 @@ function createTerminalTransportRuntime(deps) {
     if (!transport || transport.readyState !== import_websocket.default.OPEN) {
       return;
     }
+    const bytes = estimateTransportMessageBytes(text);
     try {
       transport.sendText(text);
       transport.lastSendAt = Date.now();
+      transport.lastSendBytes = bytes;
+      transport.totalSendBytes = Math.max(0, Math.floor(transport.totalSendBytes || 0)) + bytes;
+      transport.lastSendError = null;
+      readTerminalTransportBackpressureSnapshot(transport);
     } catch (error) {
       transport.lastSendAt = Date.now();
+      transport.lastSendBytes = bytes;
       transport.lastSendError = error instanceof Error ? error.message : String(error);
       throw error;
     }
@@ -6887,8 +6915,36 @@ function createTerminalTransportRuntime(deps) {
           sessionId: session.id,
           sessionName: session.sessionName,
           type: message.type,
-          payload: deps.summarizePayload(message)
+          payloadSummary: deps.summarizePayload(message)
         });
+      }
+      if (message.type === "buffer-sync") {
+        const text = JSON.stringify(message);
+        const traceId = `${session.id}:${Math.max(0, Math.floor(message.payload.revision || 0))}`;
+        deps.recordPerformanceTrace?.({
+          sessionId: session.id,
+          traceId,
+          mirrorRevision: Math.max(0, Math.floor(message.payload.revision || 0)),
+          subscriberId: session.id,
+          stage: "send-start",
+          at: Date.now(),
+          bytes: estimateTransportMessageBytes(text),
+          lineCount: Array.isArray(message.payload.lines) ? message.payload.lines.length : 0,
+          transportKind: session.transport.kind
+        });
+        sendText(session.transport, text);
+        deps.recordPerformanceTrace?.({
+          sessionId: session.id,
+          traceId,
+          mirrorRevision: Math.max(0, Math.floor(message.payload.revision || 0)),
+          subscriberId: session.id,
+          stage: "send-done",
+          at: Date.now(),
+          bytes: estimateTransportMessageBytes(text),
+          lineCount: Array.isArray(message.payload.lines) ? message.payload.lines.length : 0,
+          transportKind: session.transport.kind
+        });
+        return;
       }
       sendTransportMessage2(session.transport, message);
     }
@@ -6942,8 +6998,9 @@ function createTerminalTransportRuntime(deps) {
 var MIRROR_LIVE_SYNC_ACTIVE_MS = 33;
 var MIRROR_LIVE_SYNC_IDLE_MS = 120;
 var ADAPTIVE_WIDTH_LEASE_TTL_MS = 65e3;
-var ADAPTIVE_WIDTH_BASELINE_OPTION = "@zterm_adaptive_width_baseline";
-var ADAPTIVE_WIDTH_APPLIED_OPTION = "@zterm_adaptive_width_applied";
+var SUBSCRIBER_PENDING_RANGE_LIMIT = 64;
+var SUBSCRIBER_PENDING_SPAN_LINE_LIMIT = 4096;
+var SUBSCRIBER_PENDING_AGE_LIMIT_MS = 15e3;
 function resolvePerSubscriberTransportSnapshot(sessions2, sessionId) {
   const session = sessions2.get(sessionId);
   return readTerminalTransportBackpressureSnapshot(session?.transport);
@@ -6969,23 +7026,159 @@ function createTerminalMirrorRuntime(deps) {
   const sessions2 = deps.sessions;
   const mirrors2 = deps.mirrors;
   const mirrorHeadBroadcastCache = /* @__PURE__ */ new WeakMap();
+  function createSubscriberBufferSyncState() {
+    return {
+      lastSentRevision: 0,
+      pendingLatestRevision: null,
+      pendingChangedAbsoluteRanges: [],
+      pendingSince: 0,
+      pendingTransportId: null,
+      highWaterActive: false,
+      highWaterEnteredAt: 0,
+      resyncRequired: false,
+      resyncReason: null
+    };
+  }
+  function ensureSubscriberBufferSyncState(session) {
+    if (!session.bufferSyncState) {
+      session.bufferSyncState = createSubscriberBufferSyncState();
+    }
+    return session.bufferSyncState;
+  }
+  function normalizeAbsoluteRanges(ranges) {
+    return ranges.map((range) => ({
+      startIndex: Math.max(0, Math.floor(range.startIndex || 0)),
+      endIndex: Math.max(0, Math.floor(range.endIndex || 0))
+    })).filter((range) => range.endIndex > range.startIndex).sort((left, right) => left.startIndex - right.startIndex || left.endIndex - right.endIndex);
+  }
+  function mergeAbsoluteRanges(ranges) {
+    const normalized = normalizeAbsoluteRanges(ranges);
+    const merged = [];
+    for (const range of normalized) {
+      const previous = merged[merged.length - 1];
+      if (previous && range.startIndex <= previous.endIndex) {
+        previous.endIndex = Math.max(previous.endIndex, range.endIndex);
+        continue;
+      }
+      merged.push({ ...range });
+    }
+    return merged;
+  }
+  function collapseRangesToSpan(ranges) {
+    const normalized = normalizeAbsoluteRanges(ranges);
+    if (normalized.length === 0) {
+      return [];
+    }
+    return [{
+      startIndex: normalized[0].startIndex,
+      endIndex: normalized[normalized.length - 1].endIndex
+    }];
+  }
+  function pendingSpanLineCount(ranges) {
+    const normalized = normalizeAbsoluteRanges(ranges);
+    if (normalized.length === 0) {
+      return 0;
+    }
+    return normalized[normalized.length - 1].endIndex - normalized[0].startIndex;
+  }
+  function markSubscriberBufferSyncResyncRequired(state, reason, collapseToSpan) {
+    state.resyncRequired = true;
+    state.resyncReason = reason;
+    if (collapseToSpan) {
+      state.pendingChangedAbsoluteRanges = collapseRangesToSpan(state.pendingChangedAbsoluteRanges);
+    }
+  }
+  function validateSubscriberPendingBounds(state, now = Date.now()) {
+    if (state.pendingChangedAbsoluteRanges.length > SUBSCRIBER_PENDING_RANGE_LIMIT) {
+      markSubscriberBufferSyncResyncRequired(state, "range-count", true);
+      return;
+    }
+    if (pendingSpanLineCount(state.pendingChangedAbsoluteRanges) > SUBSCRIBER_PENDING_SPAN_LINE_LIMIT) {
+      markSubscriberBufferSyncResyncRequired(state, "span-lines", true);
+      return;
+    }
+    if (state.pendingSince > 0 && now - state.pendingSince > SUBSCRIBER_PENDING_AGE_LIMIT_MS) {
+      markSubscriberBufferSyncResyncRequired(state, "age", false);
+    }
+  }
+  function queueSubscriberPendingBufferSync(session, mirror, changedRanges, now = Date.now()) {
+    const state = ensureSubscriberBufferSyncState(session);
+    const nextRanges = mergeAbsoluteRanges([
+      ...state.pendingChangedAbsoluteRanges,
+      ...changedRanges
+    ]);
+    if (nextRanges.length === 0) {
+      return state;
+    }
+    state.pendingChangedAbsoluteRanges = nextRanges;
+    state.pendingLatestRevision = mirror.revision;
+    if (!state.pendingSince) {
+      state.pendingSince = now;
+    }
+    state.pendingTransportId = session.transportId;
+    const snapshot = readTerminalTransportBackpressureSnapshot(session.transport);
+    if (snapshot?.backpressure) {
+      state.highWaterActive = true;
+      if (!state.highWaterEnteredAt) {
+        state.highWaterEnteredAt = now;
+      }
+    }
+    if (state.pendingChangedAbsoluteRanges.length > SUBSCRIBER_PENDING_RANGE_LIMIT) {
+      state.pendingChangedAbsoluteRanges = [{
+        startIndex: Math.max(0, Math.floor(mirror.bufferStartIndex || 0)),
+        endIndex: Math.max(
+          Math.max(0, Math.floor(mirror.bufferStartIndex || 0)),
+          Math.floor((mirror.bufferStartIndex || 0) + mirror.bufferLines.length)
+        )
+      }];
+      markSubscriberBufferSyncResyncRequired(state, "range-count", false);
+      return state;
+    }
+    if (pendingSpanLineCount(state.pendingChangedAbsoluteRanges) > SUBSCRIBER_PENDING_SPAN_LINE_LIMIT) {
+      state.pendingChangedAbsoluteRanges = [{
+        startIndex: Math.max(0, Math.floor(mirror.bufferStartIndex || 0)),
+        endIndex: Math.max(
+          Math.max(0, Math.floor(mirror.bufferStartIndex || 0)),
+          Math.floor((mirror.bufferStartIndex || 0) + mirror.bufferLines.length)
+        )
+      }];
+      markSubscriberBufferSyncResyncRequired(state, "span-lines", false);
+      return state;
+    }
+    validateSubscriberPendingBounds(state, now);
+    return state;
+  }
+  function shouldHoldPendingForBackpressure(state, session) {
+    const snapshot = readTerminalTransportBackpressureSnapshot(session.transport);
+    if (!snapshot?.ready) {
+      return true;
+    }
+    if (snapshot.backpressure) {
+      state.highWaterActive = true;
+      if (!state.highWaterEnteredAt) {
+        state.highWaterEnteredAt = Date.now();
+      }
+      return true;
+    }
+    if (state.highWaterActive && !snapshot.lowWaterDrained) {
+      return true;
+    }
+    return false;
+  }
+  function clearSubscriberPendingBufferSync(state, sentRevision) {
+    state.lastSentRevision = sentRevision;
+    state.pendingLatestRevision = null;
+    state.pendingChangedAbsoluteRanges = [];
+    state.pendingSince = 0;
+    state.pendingTransportId = null;
+    state.highWaterActive = false;
+    state.highWaterEnteredAt = 0;
+    state.resyncRequired = false;
+    state.resyncReason = null;
+  }
   function isTmuxSessionUnavailableError(error) {
     const message = error instanceof Error ? error.message : String(error);
     return /no server running|can(?:'t| not) find session|no such session|session .*not found|wezterm session not found/i.test(message);
-  }
-  function resolveMirrorBaselineCols(mirror) {
-    const baselineCols = mirror.baselineCols;
-    if (typeof baselineCols === "number" && Number.isFinite(baselineCols) && baselineCols > 0) {
-      return deps.normalizeTerminalCols(baselineCols);
-    }
-    return deps.normalizeTerminalCols(mirror.cols);
-  }
-  function resolveMirrorBaselineRows(mirror) {
-    const baselineRows = mirror.baselineRows;
-    if (typeof baselineRows === "number" && Number.isFinite(baselineRows) && baselineRows > 0) {
-      return deps.normalizeTerminalRows(baselineRows);
-    }
-    return deps.normalizeTerminalRows(mirror.rows);
   }
   function writeMirrorBaselineGeometry(mirror, geometry) {
     mirror.baselineCols = deps.normalizeTerminalCols(geometry.cols);
@@ -7006,7 +7199,7 @@ function createTerminalMirrorRuntime(deps) {
       now,
       lastLiveActivityAt: mirror.lastLiveActivityAt || 0,
       consecutiveFailures: mirror.consecutiveFailures,
-      subscriberCount: mirror.subscribers.size,
+      subscriberCount: countReadyBodySubscribedSubscribers(mirror),
       // Backpressure is handled per-subscriber in broadcastChangedRangesBufferSyncToSubscribers.
       // Mirror-level capture cadence must not be dragged down by a single slow subscriber.
       transportBufferedBytes: 0,
@@ -7015,6 +7208,20 @@ function createTerminalMirrorRuntime(deps) {
       lastCanonicalizeDurationMs: mirror.lastCanonicalizeDurationMs || 0,
       flushInFlight: mirror.flushInFlight
     }).delayMs;
+  }
+  function countReadyBodySubscribedSubscribers(mirror) {
+    let count = 0;
+    for (const sessionId of mirror.subscribers) {
+      const session = sessions2.get(sessionId);
+      if (!session || session.bodySubscribed === false) {
+        continue;
+      }
+      if (!session.transport || session.transport.readyState !== 1) {
+        continue;
+      }
+      count += 1;
+    }
+    return count;
   }
   function createMirror(sessionName) {
     const mirror = {
@@ -7041,6 +7248,7 @@ function createTerminalMirrorRuntime(deps) {
       flushInFlight: false,
       flushPromise: null,
       pendingStableCaptureSnapshot: null,
+      pendingPerformanceTraceCapture: null,
       adaptiveWidthBaselineGeometry: null,
       adaptiveWidthAppliedCols: null,
       adaptiveWidthLeaseTimer: null,
@@ -7096,6 +7304,7 @@ function createTerminalMirrorRuntime(deps) {
     mirror.flushInFlight = false;
     mirror.flushPromise = null;
     mirror.pendingStableCaptureSnapshot = null;
+    mirror.pendingPerformanceTraceCapture = null;
     if (mirror.adaptiveWidthLeaseTimer) {
       clearTimeout(mirror.adaptiveWidthLeaseTimer);
       mirror.adaptiveWidthLeaseTimer = null;
@@ -7148,23 +7357,90 @@ function createTerminalMirrorRuntime(deps) {
     }
   }
   function broadcastChangedRangesBufferSyncToSubscribers(mirror, changedRanges) {
-    const payload = deps.buildChangedRangesBufferSyncPayload(mirror, changedRanges);
-    if (!payload) {
+    const normalizedRanges = normalizeAbsoluteRanges(changedRanges);
+    if (normalizedRanges.length === 0) {
       return;
     }
-    const text = JSON.stringify({ type: "buffer-sync", payload });
     const now = Date.now();
     for (const sessionId of mirror.subscribers) {
       const session = sessions2.get(sessionId);
-      if (!session || !session.transport || session.transport.readyState !== 1) {
+      if (!session) {
         continue;
       }
-      const decision = resolveMirrorLiveSyncDelayForSubscriber(mirror, sessionId, sessions2, now, 0);
-      if (decision.lane === "slow" && decision.reason === "transport-backpressure") {
+      if (session.bodySubscribed === false) {
         continue;
       }
+      queueSubscriberPendingBufferSync(session, mirror, normalizedRanges, now);
+      flushPendingSubscriberBufferSync(mirror, sessionId);
+    }
+  }
+  function flushPendingSubscriberBufferSync(mirror, sessionId) {
+    const session = sessions2.get(sessionId);
+    if (!session) {
+      return "missing-subscriber";
+    }
+    const state = ensureSubscriberBufferSyncState(session);
+    if (state.pendingLatestRevision === null || state.pendingChangedAbsoluteRanges.length === 0) {
+      return "no-pending";
+    }
+    if (state.pendingTransportId && state.pendingTransportId !== session.transportId) {
+      markSubscriberBufferSyncResyncRequired(state, "transport-generation", false);
+      return "stale-transport";
+    }
+    validateSubscriberPendingBounds(state);
+    if (!session.transport || session.transport.readyState !== 1) {
+      return "transport-not-open";
+    }
+    if (shouldHoldPendingForBackpressure(state, session)) {
+      return "backpressured";
+    }
+    const payload = deps.buildChangedRangesBufferSyncPayload(
+      mirror,
+      state.pendingChangedAbsoluteRanges
+    );
+    if (!payload) {
+      clearSubscriberPendingBufferSync(state, Math.max(state.lastSentRevision, state.pendingLatestRevision));
+      return "no-pending";
+    }
+    const text = JSON.stringify({ type: "buffer-sync", payload });
+    const traceId = `${session.id}:${Math.max(0, Math.floor(payload.revision || 0))}`;
+    const traceBase = {
+      sessionId: session.id,
+      traceId,
+      mirrorRevision: Math.max(0, Math.floor(payload.revision || 0)),
+      subscriberId: session.id,
+      transportKind: session.transport.kind
+    };
+    deps.recordPerformanceTrace?.({
+      ...traceBase,
+      stage: "send-start",
+      at: Date.now(),
+      bytes: Buffer.byteLength(text, "utf8"),
+      lineCount: Array.isArray(payload.lines) ? payload.lines.length : 0
+    });
+    try {
       ensureSessionReady(session, mirror);
       deps.sendText(session.transport, text);
+    } catch {
+      return "send-error";
+    }
+    deps.recordPerformanceTrace?.({
+      ...traceBase,
+      stage: "send-done",
+      at: Date.now(),
+      bytes: Buffer.byteLength(text, "utf8"),
+      lineCount: Array.isArray(payload.lines) ? payload.lines.length : 0
+    });
+    clearSubscriberPendingBufferSync(state, payload.revision);
+    return "sent";
+  }
+  function flushPendingBufferSyncToSubscribers(mirror) {
+    for (const sessionId of mirror.subscribers) {
+      const session = sessions2.get(sessionId);
+      if (session?.bodySubscribed === false) {
+        continue;
+      }
+      flushPendingSubscriberBufferSync(mirror, sessionId);
     }
   }
   function sendBufferHeadToSession(session, mirror) {
@@ -7223,6 +7499,44 @@ function createTerminalMirrorRuntime(deps) {
         mirror.revision += 1;
         mirror.lastLiveActivityAt = Date.now();
       }
+      if (hasLiveActivity) {
+        const captureTrace = mirror.pendingPerformanceTraceCapture;
+        const committedAt = Date.now();
+        for (const subscriberId of mirror.subscribers) {
+          const traceBase = {
+            sessionId: subscriberId,
+            traceId: `${subscriberId}:${Math.max(0, Math.floor(mirror.revision || 0))}`,
+            mirrorRevision: Math.max(0, Math.floor(mirror.revision || 0)),
+            subscriberId
+          };
+          if (captureTrace) {
+            deps.recordPerformanceTrace?.({
+              ...traceBase,
+              stage: "capture-start",
+              at: captureTrace.captureStartedAt,
+              lineCount: captureTrace.capturedLineCount
+            });
+            deps.recordPerformanceTrace?.({
+              ...traceBase,
+              stage: "capture-done",
+              at: captureTrace.captureDoneAt,
+              lineCount: captureTrace.capturedLineCount
+            });
+            deps.recordPerformanceTrace?.({
+              ...traceBase,
+              stage: "canonicalize-done",
+              at: captureTrace.canonicalizeDoneAt,
+              lineCount: captureTrace.canonicalLineCount
+            });
+          }
+          deps.recordPerformanceTrace?.({
+            ...traceBase,
+            stage: "mirror-commit",
+            at: committedAt,
+            lineCount: mirror.bufferLines.length
+          });
+        }
+      }
       if (changedRanges.length > 0 || cursorChanged || cursorKeysAppChanged || forceRevision) {
         const firstRange = changedRanges[0] || null;
         const lastRange = changedRanges[changedRanges.length - 1] || null;
@@ -7259,6 +7573,7 @@ function createTerminalMirrorRuntime(deps) {
       if (cursorChanged || cursorKeysAppChanged) {
         broadcastBufferHeadToSubscribers(mirror);
       }
+      flushPendingBufferSyncToSubscribers(mirror);
       return true;
     }).catch((error) => {
       mirror.consecutiveFailures += 1;
@@ -7296,7 +7611,7 @@ function createTerminalMirrorRuntime(deps) {
     if (mirror.lifecycle !== "ready") {
       return;
     }
-    if (mirror.subscribers.size === 0) {
+    if (countReadyBodySubscribedSubscribers(mirror) === 0) {
       stopMirrorLiveSync(mirror);
       return;
     }
@@ -7304,101 +7619,16 @@ function createTerminalMirrorRuntime(deps) {
     stopMirrorLiveSync(mirror);
     mirror.liveSyncTimer = setTimeout(() => {
       mirror.liveSyncTimer = null;
-      if (mirror.lifecycle !== "ready" || mirror.subscribers.size === 0) {
+      if (mirror.lifecycle !== "ready" || countReadyBodySubscribedSubscribers(mirror) === 0) {
         return;
       }
       void syncMirrorCanonicalBuffer(mirror).finally(() => {
-        if (mirror.lifecycle !== "ready" || mirror.liveSyncTimer) {
+        if (mirror.lifecycle !== "ready" || mirror.liveSyncTimer || countReadyBodySubscribedSubscribers(mirror) === 0) {
           return;
         }
         scheduleMirrorLiveSync(mirror, MIRROR_LIVE_SYNC_ACTIVE_MS);
       });
     }, Math.max(0, effectiveDelay));
-  }
-  function readCurrentTmuxGeometry(sessionName) {
-    try {
-      const metrics = deps.readTmuxPaneMetrics(sessionName);
-      return {
-        cols: deps.normalizeTerminalCols(metrics.paneCols),
-        rows: deps.normalizeTerminalRows(metrics.paneRows)
-      };
-    } catch (error) {
-      console.warn(
-        `[${deps.logTimePrefix()}] adaptive width lease failed to read tmux geometry for ${sessionName}: ${error instanceof Error ? error.message : String(error)}`
-      );
-      return null;
-    }
-  }
-  function parsePersistedAdaptiveWidthBaseline(value) {
-    return parseTerminalGeometry(value);
-  }
-  function parseTerminalGeometry(value) {
-    const match = value?.trim().match(/^(\d+)x(\d+)$/);
-    if (!match) {
-      return null;
-    }
-    return {
-      cols: deps.normalizeTerminalCols(Number(match[1])),
-      rows: deps.normalizeTerminalRows(Number(match[2]))
-    };
-  }
-  function readPersistedAdaptiveWidthBaseline(sessionName) {
-    try {
-      const result = deps.runTmux(["show-window-options", "-v", "-t", sessionName, ADAPTIVE_WIDTH_BASELINE_OPTION]);
-      return parsePersistedAdaptiveWidthBaseline(result.stdout);
-    } catch {
-      return null;
-    }
-  }
-  function readAttachedTmuxClientGeometry(sessionName) {
-    try {
-      const result = deps.runTmux(["display-message", "-p", "-t", sessionName, "#{client_width}x#{client_height}"]);
-      return parseTerminalGeometry(result.stdout);
-    } catch {
-      return null;
-    }
-  }
-  function writePersistedAdaptiveWidthBaseline(sessionName, geometry) {
-    deps.runTmux([
-      "set-window-option",
-      "-t",
-      sessionName,
-      ADAPTIVE_WIDTH_BASELINE_OPTION,
-      `${deps.normalizeTerminalCols(geometry.cols)}x${deps.normalizeTerminalRows(geometry.rows)}`
-    ]);
-  }
-  function writePersistedAdaptiveWidthApplied(sessionName, cols) {
-    deps.runTmux([
-      "set-window-option",
-      "-t",
-      sessionName,
-      ADAPTIVE_WIDTH_APPLIED_OPTION,
-      String(deps.normalizeTerminalCols(cols))
-    ]);
-  }
-  function clearPersistedAdaptiveWidthLease(sessionName) {
-    for (const option of [ADAPTIVE_WIDTH_BASELINE_OPTION, ADAPTIVE_WIDTH_APPLIED_OPTION]) {
-      try {
-        deps.runTmux(["set-window-option", "-u", "-t", sessionName, option]);
-      } catch (error) {
-        console.warn(
-          `[${deps.logTimePrefix()}] adaptive width lease failed to clear ${option} for ${sessionName}: ${error instanceof Error ? error.message : String(error)}`
-        );
-      }
-    }
-  }
-  function applyTmuxWindowGeometryToSession(sessionName, geometry, reason) {
-    const args = ["resize-window", "-t", sessionName, "-x", String(deps.normalizeTerminalCols(geometry.cols))];
-    if (typeof geometry.rows === "number" && Number.isFinite(geometry.rows) && geometry.rows > 0) {
-      args.push("-y", String(deps.normalizeTerminalRows(geometry.rows)));
-    }
-    deps.runTmux(args);
-    console.log(
-      `[${deps.logTimePrefix()}] adaptive width lease ${reason}: session=${sessionName} cols=${geometry.cols}${geometry.rows ? ` rows=${geometry.rows}` : ""}`
-    );
-  }
-  function applyTmuxWindowGeometry(mirror, geometry, reason) {
-    applyTmuxWindowGeometryToSession(mirror.sessionName, geometry, reason);
   }
   function resolveActiveAdaptiveWidthLeases(mirror, now = Date.now()) {
     const leases = [];
@@ -7440,27 +7670,64 @@ function createTerminalMirrorRuntime(deps) {
     }, delayMs);
     mirror.adaptiveWidthLeaseTimer.unref?.();
   }
-  function restoreAdaptiveWidthBaseline(mirror, reason) {
+  function clearAdaptiveWidthLeaseAggregate(mirror, reason = "clear") {
     if (mirror.adaptiveWidthLeaseTimer) {
       clearTimeout(mirror.adaptiveWidthLeaseTimer);
       mirror.adaptiveWidthLeaseTimer = null;
     }
-    const baseline = mirror.adaptiveWidthBaselineGeometry || readPersistedAdaptiveWidthBaseline(mirror.sessionName) || resolveOrphanedAdaptiveWidthRestoreGeometry(mirror.sessionName);
+    if (mirror.adaptiveWidthAppliedCols !== null) {
+      releaseAdaptiveTmuxWidth(mirror, reason);
+    }
     mirror.adaptiveWidthAppliedCols = null;
     mirror.adaptiveWidthBaselineGeometry = null;
-    if (!baseline) {
-      return;
-    }
-    applyTmuxWindowGeometry(mirror, baseline, `restore:${reason}`);
-    clearPersistedAdaptiveWidthLease(mirror.sessionName);
-    mirror.cols = baseline.cols;
-    mirror.rows = baseline.rows;
-    writeMirrorBaselineGeometry(mirror, baseline);
-    if (mirror.lifecycle === "ready") {
-      scheduleMirrorLiveSync(mirror, 0);
+  }
+  function readCurrentTmuxGeometry(sessionName) {
+    try {
+      const metrics = deps.readTmuxPaneMetrics(sessionName);
+      return {
+        cols: deps.normalizeTerminalCols(metrics.paneCols),
+        rows: deps.normalizeTerminalRows(metrics.paneRows)
+      };
+    } catch (error) {
+      console.error(
+        `[${deps.logTimePrefix()}] adaptive width failed to read tmux geometry for ${sessionName}: ${error instanceof Error ? error.message : String(error)}`
+      );
+      throw error;
     }
   }
+  function applyAdaptiveTmuxWidth(mirror, targetCols, reason) {
+    const cols = deps.normalizeTerminalCols(targetCols);
+    if (!mirror.adaptiveWidthBaselineGeometry) {
+      mirror.adaptiveWidthBaselineGeometry = readCurrentTmuxGeometry(mirror.sessionName) || {
+        cols: deps.normalizeTerminalCols(mirror.baselineCols || mirror.cols),
+        rows: deps.normalizeTerminalRows(mirror.baselineRows || mirror.rows)
+      };
+    }
+    if (mirror.adaptiveWidthAppliedCols === cols) {
+      return;
+    }
+    deps.runTmux(["resize-window", "-t", mirror.sessionName, "-x", String(cols)]);
+    mirror.adaptiveWidthAppliedCols = cols;
+    console.log(`[${deps.logTimePrefix()}] adaptive width applied`, {
+      sessionName: mirror.sessionName,
+      cols,
+      reason
+    });
+  }
+  function releaseAdaptiveTmuxWidth(mirror, reason) {
+    const baseline = mirror.adaptiveWidthBaselineGeometry;
+    if (baseline) {
+      deps.runTmux(["resize-window", "-t", mirror.sessionName, "-x", String(deps.normalizeTerminalCols(baseline.cols))]);
+    }
+    deps.runTmux(["set-window-option", "-u", "-t", mirror.sessionName, "window-size"]);
+    console.log(`[${deps.logTimePrefix()}] adaptive width released`, {
+      sessionName: mirror.sessionName,
+      restoredCols: baseline?.cols ?? null,
+      reason
+    });
+  }
   function reconcileAdaptiveWidthLeases(mirror, reason) {
+    void reason;
     const now = Date.now();
     for (const subscriberId of mirror.subscribers) {
       const subscriber = sessions2.get(subscriberId);
@@ -7475,27 +7742,13 @@ function createTerminalMirrorRuntime(deps) {
     }
     const leases = resolveActiveAdaptiveWidthLeases(mirror);
     if (leases.length === 0) {
-      restoreAdaptiveWidthBaseline(mirror, reason);
+      clearAdaptiveWidthLeaseAggregate(mirror, reason);
       return;
     }
     const targetCols = leases[0].cols;
-    if (!mirror.adaptiveWidthBaselineGeometry) {
-      mirror.adaptiveWidthBaselineGeometry = readPersistedAdaptiveWidthBaseline(mirror.sessionName) || readCurrentTmuxGeometry(mirror.sessionName) || {
-        cols: resolveMirrorBaselineCols(mirror),
-        rows: resolveMirrorBaselineRows(mirror)
-      };
-      writePersistedAdaptiveWidthBaseline(mirror.sessionName, mirror.adaptiveWidthBaselineGeometry);
-    }
     if (mirror.adaptiveWidthAppliedCols !== targetCols) {
-      applyTmuxWindowGeometry(mirror, { cols: targetCols }, `apply:${reason}`);
-      writePersistedAdaptiveWidthApplied(mirror.sessionName, targetCols);
-      mirror.adaptiveWidthAppliedCols = targetCols;
-      mirror.cols = targetCols;
-      writeMirrorBaselineGeometry(mirror, {
-        cols: targetCols,
-        rows: resolveMirrorBaselineRows(mirror)
-      });
       if (mirror.lifecycle === "ready") {
+        applyAdaptiveTmuxWidth(mirror, targetCols, reason);
         scheduleMirrorLiveSync(mirror, 0);
       }
     }
@@ -7520,51 +7773,15 @@ function createTerminalMirrorRuntime(deps) {
     reconcileAdaptiveWidthLeases(mirror, reason);
     return { ok: true };
   }
-  function resolveOrphanedAdaptiveWidthRestoreGeometry(sessionName) {
-    const current = readCurrentTmuxGeometry(sessionName);
-    const attachedClient = readAttachedTmuxClientGeometry(sessionName);
-    if (!current || !attachedClient) {
-      return null;
-    }
-    if (current.cols >= attachedClient.cols) {
-      return null;
-    }
-    return attachedClient;
-  }
   function restorePersistedAdaptiveWidthBaselines(sessionNames) {
-    let restored = 0;
-    for (const sessionName of sessionNames) {
-      const baseline = readPersistedAdaptiveWidthBaseline(sessionName) || resolveOrphanedAdaptiveWidthRestoreGeometry(sessionName);
-      if (!baseline) {
-        continue;
-      }
-      applyTmuxWindowGeometryToSession(sessionName, baseline, "restore:daemon-start-no-subscriber");
-      clearPersistedAdaptiveWidthLease(sessionName);
-      const mirror = mirrors2.get(deps.getMirrorKey(sessionName));
-      if (mirror) {
-        mirror.adaptiveWidthBaselineGeometry = null;
-        mirror.adaptiveWidthAppliedCols = null;
-        mirror.cols = baseline.cols;
-        mirror.rows = baseline.rows;
-        writeMirrorBaselineGeometry(mirror, baseline);
-      }
-      restored += 1;
-    }
-    return restored;
+    void sessionNames;
+    return 0;
   }
   async function startMirror(mirror, options) {
     if (mirror.lifecycle === "ready" || mirror.lifecycle === "booting") {
       return;
     }
     mirror.lifecycle = "booting";
-    mirror.lastScrollbackCount = -1;
-    mirror.bufferLines = [];
-    mirror.bufferStartIndex = 0;
-    mirror.cursor = null;
-    const targetCols = deps.normalizeTerminalCols(options?.cols ?? mirror.cols);
-    const targetRows = deps.normalizeTerminalRows(options?.rows ?? mirror.rows);
-    mirror.cols = targetCols;
-    mirror.rows = targetRows;
     try {
       deps.assertTmuxSessionExists(mirror.sessionName);
     } catch (error) {
@@ -7583,6 +7800,7 @@ function createTerminalMirrorRuntime(deps) {
       return;
     }
     mirror.lifecycle = "ready";
+    reconcileAdaptiveWidthLeases(mirror, "mirror-ready");
     try {
       await deps.waitMs(80);
       const captured = await syncMirrorCanonicalBuffer(mirror, { forceRevision: true });
@@ -7657,7 +7875,7 @@ function createTerminalMirrorRuntime(deps) {
       }
     })();
     const requestedGeometry = deps.resolveAttachGeometry({
-      requestedGeometry: payload.widthMode === "adaptive-phone" && typeof payload.cols === "number" ? {
+      requestedGeometry: payload.widthMode === "adaptive-phone" ? null : typeof payload.cols === "number" && Number.isFinite(payload.cols) && payload.cols > 0 ? {
         cols: payload.cols,
         rows: typeof payload.rows === "number" ? payload.rows : deps.defaultViewport.rows
       } : null,
@@ -7687,9 +7905,6 @@ function createTerminalMirrorRuntime(deps) {
     let mirror = existingMirror;
     if (!mirror) {
       mirror = createMirror(nextSessionName);
-      writeMirrorBaselineGeometry(mirror, existingTmuxGeometry || { cols: requestedCols, rows: requestedRows });
-      mirror.cols = resolveMirrorBaselineCols(mirror);
-      mirror.rows = resolveMirrorBaselineRows(mirror);
     }
     mirror.subscribers.add(session.id);
     if (payload.widthMode === "adaptive-phone") {
@@ -7702,10 +7917,6 @@ function createTerminalMirrorRuntime(deps) {
       }
     } else {
       releaseAdaptiveWidthLease(session, "attach-non-adaptive");
-    }
-    if (mirror.lifecycle !== "ready") {
-      mirror.cols = requestedCols;
-      mirror.rows = resolveMirrorBaselineRows(mirror);
     }
     deps.sendMessage(session, { type: "title", payload: mirror.sessionName });
     if (mirror.lifecycle === "ready") {
@@ -7778,6 +7989,7 @@ function createTerminalMirrorRuntime(deps) {
     destroyMirror,
     ensureSessionReady,
     sendBufferHeadToSession,
+    flushPendingSubscriberBufferSync,
     refreshMirrorHeadForSession,
     syncMirrorCanonicalBuffer,
     scheduleMirrorLiveSync,
@@ -7807,6 +8019,7 @@ function createTerminalRuntime(deps) {
       closeTransport: connection.closeTransport,
       sessionName: deps.defaultSessionName,
       mirrorKey: null,
+      bodySubscribed: true,
       adaptiveWidthCols: null,
       adaptiveWidthHeartbeatAt: 0,
       pendingPasteImage: null,
@@ -7834,6 +8047,7 @@ function createTerminalRuntime(deps) {
     subscriber.transportId = connection.transportId;
     subscriber.transport = connection.transport;
     subscriber.closeTransport = connection.closeTransport;
+    subscriber.bodySubscribed = true;
     connection.transport.requestOrigin = connection.requestOrigin;
     connection.transport.connectedSent = false;
     connection.role = "session";
@@ -7915,6 +8129,7 @@ function createTerminalRuntime(deps) {
     mirrors: mirrors2,
     sendMessage: deps.sendMessage,
     sendText: deps.sendText,
+    recordPerformanceTrace: deps.recordPerformanceTrace,
     sendScheduleStateToSession: deps.sendScheduleStateToSession,
     buildConnectedPayload: deps.buildConnectedPayload,
     buildBufferHeadPayload: deps.buildBufferHeadPayload,
@@ -8508,6 +8723,52 @@ function createTerminalFileTransferRuntime(deps) {
   };
 }
 
+// ../packages/shared/src/terminal/input-chunking.ts
+var TERMINAL_INPUT_CHUNK_BYTES = 64 * 1024;
+var TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES = 256 * 1024;
+var TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES = 256;
+var TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS = 2;
+function getTerminalInputUtf8ByteLength(input) {
+  return new TextEncoder().encode(input).byteLength;
+}
+function getCodePointUtf8ByteLength(codePoint) {
+  if (codePoint <= 127) return 1;
+  if (codePoint <= 2047) return 2;
+  if (codePoint <= 65535) return 3;
+  return 4;
+}
+function splitTerminalInputUtf8Chunks(input, maxChunkBytes = TERMINAL_INPUT_CHUNK_BYTES) {
+  if (!Number.isFinite(maxChunkBytes) || maxChunkBytes < 4) {
+    throw new Error("terminal input chunk size must be at least 4 UTF-8 bytes");
+  }
+  if (!input) {
+    return [];
+  }
+  const chunks = [];
+  let current = "";
+  let currentBytes = 0;
+  for (let index = 0; index < input.length; ) {
+    const codePoint = input.codePointAt(index);
+    if (codePoint === void 0) {
+      break;
+    }
+    const text = String.fromCodePoint(codePoint);
+    const bytes = getCodePointUtf8ByteLength(codePoint);
+    if (currentBytes > 0 && currentBytes + bytes > maxChunkBytes) {
+      chunks.push(current);
+      current = "";
+      currentBytes = 0;
+    }
+    current += text;
+    currentBytes += bytes;
+    index += text.length;
+  }
+  if (current) {
+    chunks.push(current);
+  }
+  return chunks;
+}
+
 // ../packages/shared/src/schedule/next-fire.ts
 var DEFAULT_TIMEZONE = "UTC";
 var WEEKDAY_SET = /* @__PURE__ */ new Set([1, 2, 3, 4, 5]);
@@ -8969,7 +9230,7 @@ function handleTmuxControlMessageRuntime(deps, connection, message) {
     case "tmux-kill-session":
       try {
         const sessionName = deps.sanitizeSessionName(message.payload.sessionName);
-        deps.runTmux(["kill-session", "-t", sessionName]);
+        deps.closeDetachedTerminalSession(sessionName);
         deps.scheduleEngine.markSessionMissing(sessionName, "session killed");
         const mirror = deps.mirrors.get(deps.getMirrorKey(sessionName));
         if (mirror) {
@@ -8991,7 +9252,7 @@ function handleTmuxControlMessageRuntime(deps, connection, message) {
 }
 
 // src/server/terminal-message-runtime.ts
-var MAX_INPUT_PAYLOAD_BYTES = 256 * 1024;
+var MAX_INPUT_PAYLOAD_BYTES = TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES;
 function createTerminalMessageRuntime(deps) {
   function debugInput(scope, payload) {
     deps.daemonRuntimeDebug?.(`input-${scope}`, payload);
@@ -9009,7 +9270,54 @@ function createTerminalMessageRuntime(deps) {
     }
     return current;
   }
-  function reportInputDrop(connection, reason, bytes) {
+  const reliableInputAckedSeqs = /* @__PURE__ */ new Map();
+  const RELIABLE_INPUT_ACKED_SEQ_MAX = 2048;
+  function reliableInputKey(sessionId, seq) {
+    return `${sessionId}\0${seq}`;
+  }
+  function rememberReliableInputAck(sessionId, seq, bytes) {
+    reliableInputAckedSeqs.set(reliableInputKey(sessionId, seq), { accepted: true, bytes });
+    while (reliableInputAckedSeqs.size > RELIABLE_INPUT_ACKED_SEQ_MAX) {
+      const oldestKey = reliableInputAckedSeqs.keys().next().value;
+      if (typeof oldestKey !== "string") {
+        break;
+      }
+      reliableInputAckedSeqs.delete(oldestKey);
+    }
+  }
+  function readReliableInputAck(sessionId, seq) {
+    return reliableInputAckedSeqs.get(reliableInputKey(sessionId, seq)) || null;
+  }
+  function sendInputAck(connection, payload) {
+    deps.sendTransportMessage(connection.transport, {
+      type: "input-ack",
+      payload
+    });
+  }
+  function normalizeReliableInputPayload(payload) {
+    if (!payload || typeof payload !== "object") {
+      return null;
+    }
+    const candidate = payload;
+    if (candidate.version !== 1 || typeof candidate.seq !== "string" || candidate.seq.trim().length === 0 || typeof candidate.data !== "string" || typeof candidate.sentAt !== "number" || !Number.isFinite(candidate.sentAt) || typeof candidate.attempt !== "number" || !Number.isFinite(candidate.attempt)) {
+      return null;
+    }
+    return {
+      version: 1,
+      seq: candidate.seq,
+      data: candidate.data,
+      sentAt: candidate.sentAt,
+      attempt: Math.max(0, Math.floor(candidate.attempt))
+    };
+  }
+  function readReliableInputSeq(payload) {
+    if (!payload || typeof payload !== "object") {
+      return "";
+    }
+    const seq = payload.seq;
+    return typeof seq === "string" ? seq.trim() : "";
+  }
+  function reportInputDrop(connection, reason, bytes, ackSeq) {
     debugInput("drop", {
       transportId: connection.transportId,
       sessionId: connection.boundSubscriberId,
@@ -9017,12 +9325,21 @@ function createTerminalMessageRuntime(deps) {
       bytes,
       queueDepth: 0
     });
+    if (ackSeq) {
+      sendInputAck(connection, {
+        version: 1,
+        seq: ackSeq,
+        accepted: false,
+        bytes,
+        error: reason
+      });
+    }
     deps.sendTransportMessage(connection.transport, {
       type: "error",
       payload: reason === "input_stale_transport" ? { message: "input requires the current attached session transport", code: "input_stale_transport" } : { message: "input requires an attached session transport", code: "session_required" }
     });
   }
-  async function writeInputIfCurrent(connection, data) {
+  async function writeInputIfCurrent(connection, data, ackSeq) {
     const bytes = Buffer.byteLength(data, "utf8");
     if (bytes > MAX_INPUT_PAYLOAD_BYTES) {
       debugInput("drop", {
@@ -9040,6 +9357,15 @@ function createTerminalMessageRuntime(deps) {
           code: "input_too_large"
         }
       });
+      if (ackSeq) {
+        sendInputAck(connection, {
+          version: 1,
+          seq: ackSeq,
+          accepted: false,
+          bytes,
+          error: "input_too_large"
+        });
+      }
       return;
     }
     debugInput("receive", {
@@ -9053,9 +9379,30 @@ function createTerminalMessageRuntime(deps) {
       reportInputDrop(
         connection,
         connection.boundSubscriberId && deps.sessions.has(connection.boundSubscriberId) ? "input_stale_transport" : "session_required",
-        bytes
+        bytes,
+        ackSeq
       );
       return;
+    }
+    if (ackSeq) {
+      const existingAck = readReliableInputAck(inputSession.id, ackSeq);
+      if (existingAck) {
+        sendInputAck(connection, {
+          version: 1,
+          seq: ackSeq,
+          accepted: true,
+          bytes: existingAck.bytes
+        });
+        debugInput("write", {
+          transportId: connection.transportId,
+          sessionId: inputSession.id,
+          sessionName: inputSession.sessionName,
+          bytes: existingAck.bytes,
+          duplicateSeq: ackSeq,
+          queueDepth: 0
+        });
+        return;
+      }
     }
     const startedAt = Date.now();
     const wrote = await deps.handleInput(inputSession, data, () => {
@@ -9063,8 +9410,17 @@ function createTerminalMessageRuntime(deps) {
       return current?.id === inputSession.id;
     });
     if (!wrote) {
-      reportInputDrop(connection, "input_stale_transport", bytes);
+      reportInputDrop(connection, "input_stale_transport", bytes, ackSeq);
       return;
+    }
+    if (ackSeq) {
+      rememberReliableInputAck(inputSession.id, ackSeq, bytes);
+      sendInputAck(connection, {
+        version: 1,
+        seq: ackSeq,
+        accepted: true,
+        bytes
+      });
     }
     debugInput("write", {
       transportId: connection.transportId,
@@ -9208,6 +9564,34 @@ function createTerminalMessageRuntime(deps) {
           });
         }
         break;
+      case "body-subscription": {
+        if (!session) {
+          deps.sendTransportMessage(connection.transport, {
+            type: "error",
+            payload: { message: "body-subscription requires an attached session transport", code: "session_required" }
+          });
+          break;
+        }
+        if (message.payload?.version !== 1 || typeof message.payload.subscribed !== "boolean") {
+          deps.sendMessage(session, {
+            type: "error",
+            payload: {
+              message: "body-subscription requires version=1 and boolean subscribed",
+              code: "body_subscription_invalid"
+            }
+          });
+          break;
+        }
+        session.bodySubscribed = message.payload.subscribed;
+        const mirror = deps.getSessionMirror(session);
+        if (mirror?.lifecycle === "ready") {
+          if (message.payload.subscribed) {
+            deps.sendBufferHeadToSession(session, mirror);
+          }
+          deps.scheduleMirrorLiveSync(mirror, 0);
+        }
+        break;
+      }
       case "buffer-head-request": {
         if (!session) {
           deps.sendTransportMessage(connection.transport, {
@@ -9316,6 +9700,25 @@ function createTerminalMessageRuntime(deps) {
           await writeInputIfCurrent(connection, message.payload);
           break;
         }
+        {
+          const reliablePayload = normalizeReliableInputPayload(message.payload);
+          if (reliablePayload) {
+            await writeInputIfCurrent(connection, reliablePayload.data, reliablePayload.seq);
+            break;
+          }
+        }
+        {
+          const invalidSeq = readReliableInputSeq(message.payload);
+          if (invalidSeq) {
+            sendInputAck(connection, {
+              version: 1,
+              seq: invalidSeq,
+              accepted: false,
+              bytes: 0,
+              error: "input_invalid"
+            });
+          }
+        }
         if (!session) {
           deps.sendTransportMessage(connection.transport, {
             type: "error",
@@ -9388,6 +9791,91 @@ function createTerminalMessageRuntime(deps) {
         }
         void deps.terminalFileTransferRuntime.handleRemoteScreenshotRequest(session, message.payload);
         break;
+      case "remote-window-targets-request":
+        void deps.remoteWindowStreamRuntime.listTargets(message.payload).then((payload) => {
+          deps.sendTransportMessage(connection.transport, "targets" in payload ? { type: "remote-window-targets-response", payload } : { type: "remote-window-error", payload });
+        }).catch((error) => {
+          deps.sendTransportMessage(connection.transport, {
+            type: "remote-window-error",
+            payload: {
+              requestId: message.payload.requestId || "",
+              code: "remote_window_catalog_failed",
+              message: error instanceof Error ? error.message : "remote window catalog failed"
+            }
+          });
+        });
+        break;
+      case "remote-window-stream-start-request":
+        void deps.remoteWindowStreamRuntime.startStream(message.payload, {
+          sendIceCandidate: (payload) => {
+            deps.sendTransportMessage(connection.transport, {
+              type: "remote-window-stream-ice-candidate",
+              payload
+            });
+          },
+          sendStatus: (payload) => {
+            deps.sendTransportMessage(connection.transport, {
+              type: "remote-window-stream-status",
+              payload
+            });
+          }
+        }).then((payload) => {
+          deps.sendTransportMessage(connection.transport, "answer" in payload ? { type: "remote-window-stream-started", payload } : { type: "remote-window-error", payload });
+        }).catch((error) => {
+          deps.sendTransportMessage(connection.transport, {
+            type: "remote-window-error",
+            payload: {
+              requestId: message.payload.requestId || "",
+              streamId: message.payload.streamId || "",
+              code: "remote_window_stream_start_failed",
+              message: error instanceof Error ? error.message : "remote window stream start failed"
+            }
+          });
+        });
+        break;
+      case "remote-window-stream-ice-candidate":
+        void deps.remoteWindowStreamRuntime.addIceCandidate(message.payload).catch((error) => {
+          deps.sendTransportMessage(connection.transport, {
+            type: "remote-window-error",
+            payload: {
+              requestId: message.payload.requestId || "",
+              streamId: message.payload.streamId || "",
+              code: "remote_window_stream_candidate_failed",
+              message: error instanceof Error ? error.message : "remote window stream ICE candidate failed"
+            }
+          });
+        });
+        break;
+      case "remote-window-stream-stop-request":
+        void deps.remoteWindowStreamRuntime.stopStream(message.payload).then((payload) => {
+          deps.sendTransportMessage(connection.transport, "phase" in payload ? { type: "remote-window-stream-status", payload } : { type: "remote-window-error", payload });
+        }).catch((error) => {
+          deps.sendTransportMessage(connection.transport, {
+            type: "remote-window-error",
+            payload: {
+              requestId: message.payload.requestId || "",
+              streamId: message.payload.streamId || "",
+              code: "remote_window_stream_stop_failed",
+              message: error instanceof Error ? error.message : "remote window stream stop failed"
+            }
+          });
+        });
+        break;
+      case "remote-window-input":
+        void deps.remoteWindowStreamRuntime.injectInput(message.payload).then((payload) => {
+          deps.sendTransportMessage(connection.transport, "accepted" in payload ? { type: "remote-window-input-result", payload } : { type: "remote-window-error", payload });
+        }).catch((error) => {
+          deps.sendTransportMessage(connection.transport, {
+            type: "remote-window-error",
+            payload: {
+              requestId: message.payload.requestId || "",
+              streamId: message.payload.streamId || "",
+              code: "remote_window_input_failed",
+              message: error instanceof Error ? error.message : "remote window input failed"
+            }
+          });
+        });
+        break;
       case "file-upload-start":
         if (!session) {
           deps.sendTransportMessage(connection.transport, {
@@ -9430,6 +9918,158 @@ function createTerminalMessageRuntime(deps) {
 // src/server/terminal-http-runtime.ts
 var import_fs5 = require("fs");
 var import_path5 = require("path");
+
+// src/lib/terminal-performance-trace.ts
+var FORBIDDEN_PAYLOAD_KEYS = /* @__PURE__ */ new Set(["payload", "text", "lines", "cells", "content", "data"]);
+var TRACE_DEBUG_SCOPE = "terminal.performance.trace";
+function assertMetadataOnly(record) {
+  for (const key of FORBIDDEN_PAYLOAD_KEYS) {
+    if (key in record) {
+      throw new Error("terminal performance trace must not store payload content");
+    }
+  }
+}
+function createTerminalPerformanceTraceStore(options) {
+  const limit = Math.max(1, Math.floor(options?.limit || 500));
+  const records = [];
+  return {
+    record(record) {
+      assertMetadataOnly(record);
+      records.push({
+        sessionId: record.sessionId,
+        traceId: record.traceId,
+        mirrorRevision: Number.isFinite(record.mirrorRevision) ? Math.max(0, Math.floor(record.mirrorRevision || 0)) : void 0,
+        subscriberId: record.subscriberId,
+        stage: record.stage,
+        at: Math.max(0, Math.floor(record.at || 0)),
+        bytes: Number.isFinite(record.bytes) ? Math.max(0, Math.floor(record.bytes || 0)) : void 0,
+        lineCount: Number.isFinite(record.lineCount) ? Math.max(0, Math.floor(record.lineCount || 0)) : void 0,
+        transportKind: record.transportKind
+      });
+      while (records.length > limit) {
+        records.shift();
+      }
+    },
+    snapshot() {
+      return records.map((record) => ({ ...record }));
+    },
+    clear() {
+      records.splice(0, records.length);
+    }
+  };
+}
+function normalizeTraceStage(input) {
+  if (typeof input !== "string") {
+    return null;
+  }
+  switch (input) {
+    case "capture-start":
+    case "capture-done":
+    case "canonicalize-done":
+    case "mirror-commit":
+    case "send-start":
+    case "send-done":
+    case "client-rx":
+    case "buffer-apply-done":
+    case "render-raf":
+    case "render-commit":
+      return input;
+    default:
+      return null;
+  }
+}
+function numberOrUndefined(input) {
+  return typeof input === "number" && Number.isFinite(input) ? Math.max(0, Math.floor(input)) : void 0;
+}
+function parseRuntimeDebugPerformanceTraceRecords(entries) {
+  const records = [];
+  for (const entry of entries) {
+    if (entry.scope !== TRACE_DEBUG_SCOPE || !entry.payload) {
+      continue;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(entry.payload);
+    } catch {
+      continue;
+    }
+    const stage = normalizeTraceStage(parsed.stage);
+    if (!stage) {
+      continue;
+    }
+    const safeRecord = {
+      sessionId: typeof parsed.sessionId === "string" && parsed.sessionId.trim() ? parsed.sessionId.trim() : entry.sessionId,
+      traceId: typeof parsed.traceId === "string" && parsed.traceId.trim() ? parsed.traceId.trim() : void 0,
+      mirrorRevision: numberOrUndefined(parsed.mirrorRevision),
+      subscriberId: typeof parsed.subscriberId === "string" && parsed.subscriberId.trim() ? parsed.subscriberId.trim() : void 0,
+      stage,
+      at: numberOrUndefined(parsed.at) ?? Date.now(),
+      bytes: numberOrUndefined(parsed.bytes),
+      lineCount: numberOrUndefined(parsed.lineCount),
+      transportKind: typeof parsed.transportKind === "string" && parsed.transportKind.trim() ? parsed.transportKind.trim() : void 0
+    };
+    records.push(safeRecord);
+  }
+  return records;
+}
+function percentile95(values) {
+  if (values.length === 0) {
+    return null;
+  }
+  const sorted = [...values].sort((a, b) => a - b);
+  const index = Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1);
+  return sorted[index] ?? null;
+}
+function summarizeTerminalPerformanceTrace(records) {
+  const bySample = /* @__PURE__ */ new Map();
+  for (const record of records) {
+    const sampleKey = [
+      record.sessionId,
+      record.traceId || "__legacy_trace__",
+      Number.isFinite(record.mirrorRevision) ? String(record.mirrorRevision) : "__legacy_revision__",
+      record.subscriberId || "__legacy_subscriber__"
+    ].join("\0");
+    const current = bySample.get(sampleKey) || [];
+    current.push(record);
+    bySample.set(sampleKey, current);
+  }
+  const sessions2 = Array.from(bySample.values()).map((sessionRecords) => {
+    const first = sessionRecords[0];
+    const byStage = /* @__PURE__ */ new Map();
+    for (const record of sessionRecords) {
+      byStage.set(record.stage, record);
+    }
+    const captureStart = byStage.get("capture-start")?.at;
+    const sendDone = byStage.get("send-done")?.at;
+    const clientRx = byStage.get("client-rx")?.at;
+    const renderCommit = byStage.get("render-commit")?.at;
+    return {
+      sessionId: first?.sessionId || "",
+      traceId: first?.traceId || null,
+      mirrorRevision: Number.isFinite(first?.mirrorRevision) ? Math.max(0, Math.floor(first?.mirrorRevision || 0)) : null,
+      subscriberId: first?.subscriberId || null,
+      captureToRenderMs: Number.isFinite(captureStart) && Number.isFinite(renderCommit) ? Math.max(0, (renderCommit || 0) - (captureStart || 0)) : null,
+      sendToRxMs: Number.isFinite(sendDone) && Number.isFinite(clientRx) ? Math.max(0, (clientRx || 0) - (sendDone || 0)) : null,
+      rxToRenderMs: Number.isFinite(clientRx) && Number.isFinite(renderCommit) ? Math.max(0, (renderCommit || 0) - (clientRx || 0)) : null,
+      bytes: sessionRecords.reduce((sum, record) => sum + Math.max(0, record.bytes || 0), 0),
+      lineCount: sessionRecords.reduce((max, record) => Math.max(max, record.lineCount || 0), 0)
+    };
+  });
+  return {
+    sessions: sessions2,
+    p95CaptureToRenderMs: percentile95(
+      sessions2.map((session) => session.captureToRenderMs).filter((value) => Number.isFinite(value))
+    ),
+    p95SendToRxMs: percentile95(
+      sessions2.map((session) => session.sendToRxMs).filter((value) => Number.isFinite(value))
+    ),
+    p95RxToRenderMs: percentile95(
+      sessions2.map((session) => session.rxToRenderMs).filter((value) => Number.isFinite(value))
+    )
+  };
+}
+
+// src/server/terminal-http-runtime.ts
 function createTerminalHttpRuntime(deps) {
   function readLatestUpdateManifest() {
     const manifestPath = (0, import_path5.join)(deps.updatesDir, "latest.json");
@@ -9454,6 +10094,9 @@ function createTerminalHttpRuntime(deps) {
     return {
       sessionId,
       daemonHostId: deps.daemonHostId?.trim() || void 0,
+      capabilities: {
+        reliableInput: { version: 1 }
+      },
       appUpdate: latestManifest && Number.isFinite(latestManifest.versionCode) && latestManifest.versionCode > 0 && latestManifest.versionName ? {
         versionCode: latestManifest.versionCode,
         versionName: latestManifest.versionName,
@@ -9545,6 +10188,25 @@ function createTerminalHttpRuntime(deps) {
   function buildDebugRuntimeSnapshot(request) {
     const subscriberEntries = Array.from(deps.sessions.values());
     const mirrorEntries = Array.from(deps.mirrors.values());
+    const traceLimit = 1e3;
+    const daemonTraceRecords = deps.performanceTraceStore.snapshot();
+    const clientTraceRecords = parseRuntimeDebugPerformanceTraceRecords(
+      deps.clientRuntimeDebugStore.listEntries({
+        limit: traceLimit,
+        scopeIncludes: "terminal.performance.trace"
+      })
+    );
+    const daemonDebugTraceRecords = parseRuntimeDebugPerformanceTraceRecords(
+      deps.daemonRuntimeDebugStore.listEntries({
+        limit: traceLimit,
+        scopeIncludes: "terminal.performance.trace"
+      })
+    );
+    const performanceTraceRecords = [
+      ...daemonTraceRecords,
+      ...clientTraceRecords,
+      ...daemonDebugTraceRecords
+    ];
     return {
       ok: true,
       generatedAt: deps.logTimePrefix(),
@@ -9552,6 +10214,10 @@ function createTerminalHttpRuntime(deps) {
       health: buildRuntimeHealthSnapshot(request),
       clientDebug: deps.clientRuntimeDebugStore.getSummary(),
       daemonDebug: deps.daemonRuntimeDebugStore.getSummary(),
+      performanceTrace: {
+        recordCount: performanceTraceRecords.length,
+        summary: summarizeTerminalPerformanceTrace(performanceTraceRecords)
+      },
       clientDebugSnapshots: deps.clientRuntimeDebugStore.listSnapshots(),
       transportSubscribers: subscriberEntries.map((subscriber) => ({
         id: subscriber.id,
@@ -10166,6 +10832,37 @@ function createTerminalControlRuntime(deps) {
       });
     });
   }
+  function sleepTmuxWriteSettleSync() {
+    if (TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS <= 0) {
+      return;
+    }
+    Atomics.wait(
+      new Int32Array(new SharedArrayBuffer(4)),
+      0,
+      0,
+      TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS
+    );
+  }
+  function sleepTmuxWriteSettleAsync() {
+    if (TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS <= 0) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve4) => {
+      setTimeout(resolve4, TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS);
+    });
+  }
+  function writeTmuxLiteralChunksSync(sessionName, payload) {
+    const chunks = splitTerminalInputUtf8Chunks(
+      payload,
+      TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES
+    );
+    for (let index = 0; index < chunks.length; index += 1) {
+      runTmux2(["send-keys", "-t", sessionName, "-l", "--", chunks[index]]);
+      if (index < chunks.length - 1) {
+        sleepTmuxWriteSettleSync();
+      }
+    }
+  }
   function ensureTmuxServerRunning() {
     if (deps.wezTermBackend) {
       return;
@@ -10185,18 +10882,22 @@ function createTerminalControlRuntime(deps) {
       }
     }
   }
-  function ensureTmuxSessionAlternateScreenDisabled(sessionName) {
-    if (deps.wezTermBackend) {
-      return;
-    }
-    runTmux2(["set-option", "-t", sessionName, "alternate-screen", "off"]);
-  }
   function writeToTmuxSession2(sessionName, payload, appendEnter2) {
     if (deps.wezTermBackend) {
-      deps.wezTermBackend.writeInput(sessionName, `${payload}${appendEnter2 ? "\r" : ""}`);
+      const chunks = splitTerminalInputUtf8Chunks(payload, TERMINAL_INPUT_CHUNK_BYTES);
+      if (chunks.length <= 1) {
+        deps.wezTermBackend.writeInput(sessionName, `${chunks[0] || ""}${appendEnter2 ? "\r" : ""}`);
+        return;
+      }
+      for (const chunk of chunks) {
+        deps.wezTermBackend.writeInput(sessionName, chunk);
+      }
+      if (appendEnter2) {
+        deps.wezTermBackend.writeInput(sessionName, "\r");
+      }
       return;
     }
-    runTmux2(["send-keys", "-t", sessionName, "-l", "--", payload]);
+    writeTmuxLiteralChunksSync(sessionName, payload);
     if (appendEnter2) {
       runTmux2(["send-keys", "-t", sessionName, "Enter"]);
     }
@@ -10207,14 +10908,101 @@ function createTerminalControlRuntime(deps) {
       return false;
     }
     if (deps.wezTermBackend) {
-      deps.wezTermBackend.writeInput(sessionName, `${payload}${appendEnter2 ? "\r" : ""}`);
+      const chunks = splitTerminalInputUtf8Chunks(payload, TERMINAL_INPUT_CHUNK_BYTES);
+      if (chunks.length <= 1) {
+        deps.wezTermBackend.writeInput(sessionName, `${chunks[0] || ""}${appendEnter2 ? "\r" : ""}`);
+        return true;
+      }
+      for (const chunk of chunks) {
+        deps.wezTermBackend.writeInput(sessionName, chunk);
+      }
+      if (appendEnter2) {
+        deps.wezTermBackend.writeInput(sessionName, "\r");
+      }
       return true;
     }
-    runTmux2(["send-keys", "-t", sessionName, "-l", "--", payload]);
+    writeTmuxLiteralChunksSync(sessionName, payload);
     if (appendEnter2) {
       runTmux2(["send-keys", "-t", sessionName, "Enter"]);
     }
     return true;
+  }
+  function buildLiveMirrorInputGroups(items) {
+    const maxGroupBytes = deps.wezTermBackend ? TERMINAL_INPUT_CHUNK_BYTES : TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES;
+    const groups = [];
+    let groupPayload = "";
+    let groupBytes = 0;
+    const groupItems = /* @__PURE__ */ new Set();
+    const flushGroup = (appendEnter2) => {
+      if (!groupPayload && groupItems.size === 0 && !appendEnter2) {
+        return;
+      }
+      groups.push({
+        payload: groupPayload,
+        appendEnter: appendEnter2,
+        items: Array.from(groupItems)
+      });
+      groupPayload = "";
+      groupBytes = 0;
+      groupItems.clear();
+    };
+    for (const item of items) {
+      const chunks = splitTerminalInputUtf8Chunks(item.payload, maxGroupBytes);
+      if (chunks.length === 0) {
+        groupItems.add(item);
+        if (item.appendEnter) {
+          flushGroup(true);
+        }
+        continue;
+      }
+      for (let index = 0; index < chunks.length; index += 1) {
+        const chunk = chunks[index];
+        const chunkBytes = getTerminalInputUtf8ByteLength(chunk);
+        if (groupBytes > 0 && groupBytes + chunkBytes > maxGroupBytes) {
+          flushGroup(false);
+        }
+        groupPayload += chunk;
+        groupBytes += chunkBytes;
+        groupItems.add(item);
+        if (item.appendEnter && index === chunks.length - 1) {
+          flushGroup(true);
+        }
+      }
+    }
+    flushGroup(false);
+    return groups;
+  }
+  function createLiveMirrorInputGroupSettler(writableItems, groups) {
+    const unresolved = new Set(writableItems);
+    const failedItems = /* @__PURE__ */ new Set();
+    const pendingGroupCounts = /* @__PURE__ */ new Map();
+    for (const group of groups) {
+      for (const item of group.items) {
+        pendingGroupCounts.set(item, (pendingGroupCounts.get(item) || 0) + 1);
+      }
+    }
+    const settleGroup = (group, value) => {
+      for (const item of group.items) {
+        if (!unresolved.has(item)) {
+          continue;
+        }
+        if (!value) {
+          failedItems.add(item);
+        }
+        const nextCount = (pendingGroupCounts.get(item) || 1) - 1;
+        if (nextCount > 0) {
+          pendingGroupCounts.set(item, nextCount);
+          continue;
+        }
+        pendingGroupCounts.delete(item);
+        unresolved.delete(item);
+        item.resolve(!failedItems.has(item));
+      }
+    };
+    return {
+      unresolved,
+      settleGroup
+    };
   }
   async function flushPendingLiveMirrorInput(mirrorKey) {
     const pending = liveMirrorInputBatches.get(mirrorKey);
@@ -10257,38 +11045,27 @@ function createTerminalControlRuntime(deps) {
       }
       return;
     }
-    const groups = [];
-    let groupPayload = "";
-    let groupItems = [];
-    for (const item of writableItems) {
-      groupPayload += item.payload;
-      groupItems.push(item);
-      if (item.appendEnter) {
-        groups.push({ payload: groupPayload, appendEnter: true, items: groupItems });
-        groupPayload = "";
-        groupItems = [];
-      }
-    }
-    if (groupItems.length > 0) {
-      groups.push({ payload: groupPayload, appendEnter: false, items: groupItems });
-    }
-    const unresolved = new Set(writableItems);
-    const resolveGroup = (group, value) => {
-      for (const item of group.items) {
-        unresolved.delete(item);
-        item.resolve(value);
-      }
-    };
+    const groups = buildLiveMirrorInputGroups(writableItems);
+    const { unresolved, settleGroup } = createLiveMirrorInputGroupSettler(writableItems, groups);
     const isGroupWritable = (group) => group.items.every((item) => !item.shouldWrite || item.shouldWrite());
     if (deps.wezTermBackend) {
       try {
         for (const group of groups) {
           if (!isGroupWritable(group)) {
-            resolveGroup(group, false);
+            settleGroup(group, false);
             continue;
           }
-          deps.wezTermBackend.writeInput(mirror.sessionName, `${group.payload}${group.appendEnter ? "\r" : ""}`);
-          resolveGroup(group, true);
+          if (group.payload) {
+            deps.wezTermBackend.writeInput(mirror.sessionName, group.payload);
+          }
+          if (group.appendEnter) {
+            if (!isGroupWritable(group)) {
+              settleGroup(group, false);
+              continue;
+            }
+            deps.wezTermBackend.writeInput(mirror.sessionName, "\r");
+          }
+          settleGroup(group, true);
         }
       } catch (error) {
         for (const item of unresolved) {
@@ -10305,9 +11082,10 @@ function createTerminalControlRuntime(deps) {
       return;
     }
     try {
-      for (const group of groups) {
+      for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
+        const group = groups[groupIndex];
         if (!isGroupWritable(group)) {
-          resolveGroup(group, false);
+          settleGroup(group, false);
           continue;
         }
         if (group.payload) {
@@ -10315,12 +11093,15 @@ function createTerminalControlRuntime(deps) {
         }
         if (group.appendEnter) {
           if (!isGroupWritable(group)) {
-            resolveGroup(group, false);
+            settleGroup(group, false);
             continue;
           }
           await runTmuxAsync(["send-keys", "-t", mirror.sessionName, "Enter"]);
         }
-        resolveGroup(group, true);
+        settleGroup(group, true);
+        if (groupIndex < groups.length - 1) {
+          await sleepTmuxWriteSettleAsync();
+        }
       }
     } catch (error) {
       for (const item of unresolved) {
@@ -10413,6 +11194,14 @@ function createTerminalControlRuntime(deps) {
     runTmux2(args);
     return sessionName;
   }
+  function closeDetachedTerminalSession2(input) {
+    const sessionName = deps.sanitizeSessionName(input);
+    if (deps.wezTermBackend) {
+      deps.wezTermBackend.closeSession(sessionName);
+      return;
+    }
+    runTmux2(["kill-session", "-t", sessionName]);
+  }
   function renameTmuxSession2(currentName, nextName) {
     if (deps.wezTermBackend) {
       throw new Error("wezterm backend does not support tmux rename-session");
@@ -10427,13 +11216,13 @@ function createTerminalControlRuntime(deps) {
     ensureTmuxServerRunning,
     runTmuxAsync,
     runCommand,
-    ensureTmuxSessionAlternateScreenDisabled,
     writeToTmuxSession: writeToTmuxSession2,
     writeToLiveMirror: writeToLiveMirror2,
     enqueueLiveMirrorInput,
     disposeLiveMirrorInputBatch,
     listTmuxSessions: listTmuxSessions2,
     createDetachedTmuxSession: createDetachedTmuxSession2,
+    closeDetachedTerminalSession: closeDetachedTerminalSession2,
     renameTmuxSession: renameTmuxSession2
   };
 }
@@ -10775,6 +11564,10 @@ function createWezTermBackendRuntime(options) {
   function closeSession(sessionName) {
     const session = resolveSession(sessionName);
     options.runner.run(buildWezTermKillPaneArgs(session.paneId));
+    const paneStillExists = listPaneRecords().some((pane) => pane.paneId === session.paneId);
+    if (paneStillExists) {
+      throw new Error(`wezterm pane cleanup failed: ${session.sessionName} pane ${session.paneId} still listed`);
+    }
     sessionPaneIds.delete(session.sessionName);
     snapshotState.delete(session.sessionName);
   }
@@ -10856,8 +11649,8 @@ function createTerminalDebugRuntime(deps) {
         sanitized[key] = source[key];
       }
     }
-    if (source.payload && typeof source.payload === "object" && !Array.isArray(source.payload)) {
-      sanitized.payloadSummary = source.payload;
+    if (source.payloadSummary && typeof source.payloadSummary === "object" && !Array.isArray(source.payloadSummary)) {
+      sanitized.payloadSummary = source.payloadSummary;
     }
     return sanitized;
   }
@@ -11220,6 +12013,15 @@ var CONNECTING = 0;
 var OPEN = 1;
 var CLOSING = 2;
 var CLOSED = 3;
+function resolveRtcIceTransportPolicy(value) {
+  return value === "relay" ? "relay" : "all";
+}
+function buildRtcPeerConnectionConfig(payload) {
+  return {
+    iceServers: Array.isArray(payload?.iceServers) ? payload.iceServers : [],
+    iceTransportPolicy: resolveRtcIceTransportPolicy(payload?.iceTransportPolicy)
+  };
+}
 var RtcPeerTransport = class {
   constructor(id, requestOrigin) {
     this.requestOrigin = requestOrigin;
@@ -11338,11 +12140,7 @@ function createRtcBridgeServer(options) {
       if (peer.peerConnection) {
         return;
       }
-      const iceServers = Array.isArray(message.payload?.iceServers) ? message.payload?.iceServers : [];
-      const peerConnection = new RTCPeerConnection({
-        iceServers,
-        iceTransportPolicy: "all"
-      });
+      const peerConnection = new RTCPeerConnection(buildRtcPeerConnectionConfig(message.payload));
       peer.peerConnection = peerConnection;
       peerConnection.onicecandidate = (event) => {
         if (!event.candidate) {
@@ -11674,6 +12472,1737 @@ async function captureRemoteScreenshotWithDaemon(options) {
   });
 }
 
+// src/server/remote-window-stream-daemon.ts
+var import_node_child_process2 = require("node:child_process");
+var import_wrtc2 = __toESM(require_lib2(), 1);
+var DEFAULT_ITERM2_PYTHON_TIMEOUT_MS = 5e3;
+var DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS = 5e3;
+var DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS = 8e3;
+var DEFAULT_REMOTE_WINDOW_FRAME_RATE = 12;
+var ITERM2_APP_BUNDLE_ID = "com.googlecode.iterm2";
+var ITERM2_PANE_GAP_PX = 1;
+var REMOTE_WINDOW_ERROR_MESSAGE_MAX_CHARS = 220;
+var REMOTE_WINDOW_CAPTURE_FRAME_MAGIC = Buffer.from("ZRW1");
+var {
+  RTCPeerConnection: RTCPeerConnection2,
+  RTCSessionDescription: RTCSessionDescription2,
+  RTCIceCandidate: RTCIceCandidate2,
+  nonstandard
+} = import_wrtc2.default;
+var ITERM2_CATALOG_PYTHON = String.raw`
+import json
+import iterm2
+
+def frame_dict(frame):
+    return {
+        "x": int(round(frame.origin.x)),
+        "y": int(round(frame.origin.y)),
+        "width": int(round(frame.size.width)),
+        "height": int(round(frame.size.height)),
+    }
+
+async def node_dict(node):
+    if hasattr(node, "session_id"):
+        tty = None
+        try:
+            tty = await node.async_get_variable("session.tty")
+        except Exception:
+            tty = None
+        grid = None
+        try:
+            grid = {"width": int(node.grid_size.width), "height": int(node.grid_size.height)}
+        except Exception:
+            grid = None
+        return {
+            "type": "session",
+            "sessionId": node.session_id,
+            "title": getattr(node, "name", "") or "",
+            "tty": tty,
+            "frame": frame_dict(node.frame),
+            "gridSize": grid,
+        }
+    children = []
+    for child in getattr(node, "children", []) or []:
+        children.append(await node_dict(child))
+    return {
+        "type": "splitter",
+        "vertical": bool(getattr(node, "vertical", False)),
+        "children": children,
+    }
+
+async def main(connection):
+    app = await iterm2.async_get_app(connection)
+    windows = []
+    for window in app.terminal_windows:
+        frame = await window.async_get_frame()
+        tabs = []
+        for tab in window.tabs:
+            try:
+                await tab.async_update_layout()
+            except Exception:
+                pass
+            root = await node_dict(tab.root) if tab.root else None
+            tabs.append({
+                "tabId": tab.tab_id,
+                "activeSessionId": tab.active_session_id,
+                "root": root,
+            })
+        windows.append({
+            "windowId": getattr(window, "window_id", "") or "",
+            "title": "iTerm2",
+            "pid": 0,
+            "frame": frame_dict(frame),
+            "tabs": tabs,
+        })
+    print(json.dumps({"windows": windows}, ensure_ascii=False))
+
+iterm2.run_until_complete(main)
+`;
+var MACOS_APP_WINDOW_CATALOG_SWIFT = String.raw`
+import AppKit
+import CoreGraphics
+import Foundation
+
+func number(_ value: Any?) -> Double? {
+    if let number = value as? NSNumber {
+        return number.doubleValue
+    }
+    return nil
+}
+
+let windowInfoList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+var windows: [[String: Any]] = []
+
+for info in windowInfoList {
+    guard let layerValue = number(info[kCGWindowLayer as String]), Int(layerValue) == 0 else {
+        continue
+    }
+    let alpha = number(info[kCGWindowAlpha as String]) ?? 1
+    if alpha <= 0 {
+        continue
+    }
+    guard
+        let pidNumber = info[kCGWindowOwnerPID as String] as? NSNumber,
+        let bounds = info[kCGWindowBounds as String] as? [String: Any],
+        let x = number(bounds["X"]),
+        let y = number(bounds["Y"]),
+        let width = number(bounds["Width"]),
+        let height = number(bounds["Height"])
+    else {
+        continue
+    }
+    if width < 40 || height < 40 {
+        continue
+    }
+    let pid = pidNumber.intValue
+    let ownerName = info[kCGWindowOwnerName as String] as? String ?? ""
+    let rawTitle = info[kCGWindowName as String] as? String ?? ""
+    let appBundleId = NSRunningApplication(processIdentifier: pid_t(pid))?.bundleIdentifier ?? ""
+    let windowId = (info[kCGWindowNumber as String] as? NSNumber)?.stringValue ?? ""
+    let title = rawTitle.isEmpty ? (ownerName.isEmpty ? appBundleId : ownerName) : rawTitle
+    windows.append([
+        "windowId": windowId,
+        "ownerName": ownerName,
+        "appBundleId": appBundleId,
+        "pid": pid,
+        "title": title,
+        "frame": [
+            "x": Int(x.rounded()),
+            "y": Int(y.rounded()),
+            "width": Int(width.rounded()),
+            "height": Int(height.rounded()),
+        ],
+    ])
+}
+
+let data = try JSONSerialization.data(withJSONObject: ["windows": windows], options: [])
+FileHandle.standardOutput.write(data)
+`;
+var MACOS_REMOTE_WINDOW_INPUT_SWIFT = String.raw`
+import AppKit
+import CoreGraphics
+import Foundation
+
+struct InputConfig: Decodable {
+    let pid: Int32
+    let focusPolicy: String
+    let window: RemoteInputWindow
+    let event: RemoteInputEvent
+}
+
+struct Rect: Decodable {
+    let x: Double
+    let y: Double
+    let width: Double
+    let height: Double
+}
+
+struct RemoteInputWindow: Decodable {
+    let windowId: String
+    let title: String
+    let bounds: Rect
+}
+
+struct RemoteInputEvent: Decodable {
+    let kind: String
+    let phase: String?
+    let button: String?
+    let buttons: Int?
+    let x: Double?
+    let y: Double?
+    let unit: String?
+    let deltaX: Double?
+    let deltaY: Double?
+    let key: String?
+    let code: String?
+    let text: String?
+    let shiftKey: Bool?
+    let altKey: Bool?
+    let ctrlKey: Bool?
+    let metaKey: Bool?
+}
+
+func fail(_ message: String) -> Never {
+    FileHandle.standardError.write((message + "\n").data(using: .utf8)!)
+    exit(2)
+}
+
+func inputError(_ message: String, code: Int = 1) -> NSError {
+    return NSError(domain: "RemoteWindowInput", code: code, userInfo: [NSLocalizedDescriptionKey: message])
+}
+
+func closeEnough(_ lhs: Double, _ rhs: Double, tolerance: Double = 8.0) -> Bool {
+    return abs(lhs - rhs) <= tolerance
+}
+
+func copyAttribute(_ element: AXUIElement, _ attribute: String) -> AnyObject? {
+    var value: CFTypeRef?
+    let result = AXUIElementCopyAttributeValue(element, attribute as CFString, &value)
+    if result != .success {
+        return nil
+    }
+    return value as AnyObject?
+}
+
+func rectScore(_ position: CGPoint, _ size: CGSize, _ bounds: Rect) -> Double {
+    return abs(position.x - bounds.x)
+        + abs(position.y - bounds.y)
+        + abs(size.width - bounds.width)
+        + abs(size.height - bounds.height)
+}
+
+func axPoint(_ value: AnyObject?) -> CGPoint? {
+    guard let value = value else { return nil }
+    let axValue = value as! AXValue
+    var point = CGPoint.zero
+    if AXValueGetType(axValue) != .cgPoint {
+        return nil
+    }
+    AXValueGetValue(axValue, .cgPoint, &point)
+    return point
+}
+
+func axSize(_ value: AnyObject?) -> CGSize? {
+    guard let value = value else { return nil }
+    let axValue = value as! AXValue
+    var size = CGSize.zero
+    if AXValueGetType(axValue) != .cgSize {
+        return nil
+    }
+    AXValueGetValue(axValue, .cgSize, &size)
+    return size
+}
+
+func focusTargetWindow(_ config: InputConfig) throws {
+    guard config.focusPolicy == "bring-to-focus" else {
+        return
+    }
+    guard AXIsProcessTrusted() else {
+        throw NSError(domain: "RemoteWindowInput", code: 2, userInfo: [NSLocalizedDescriptionKey: "macOS Accessibility permission is required for remote window input"])
+    }
+    guard let app = NSRunningApplication(processIdentifier: config.pid) else {
+        throw NSError(domain: "RemoteWindowInput", code: 3, userInfo: [NSLocalizedDescriptionKey: "remote input target app is not running"])
+    }
+    let appElement = AXUIElementCreateApplication(config.pid)
+    let windows = copyAttribute(appElement, kAXWindowsAttribute) as? [AXUIElement] ?? []
+    var bestWindow: AXUIElement?
+    var bestScore = Double.greatestFiniteMagnitude
+    for window in windows {
+        guard
+            let position = axPoint(copyAttribute(window, kAXPositionAttribute)),
+            let size = axSize(copyAttribute(window, kAXSizeAttribute))
+        else {
+            continue
+        }
+        let score = rectScore(position, size, config.window.bounds)
+        if score < bestScore {
+            bestScore = score
+            bestWindow = window
+        }
+    }
+    guard let window = bestWindow, bestScore <= 96.0 else {
+        throw NSError(domain: "RemoteWindowInput", code: 4, userInfo: [NSLocalizedDescriptionKey: "remote input target window could not be matched for focus"])
+    }
+    app.unhide()
+    if !app.activate(options: [.activateIgnoringOtherApps]) {
+        throw NSError(domain: "RemoteWindowInput", code: 5, userInfo: [NSLocalizedDescriptionKey: "remote input target app could not be activated"])
+    }
+    AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+    AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, window)
+    AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+    AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+    app.activate(options: [.activateIgnoringOtherApps])
+    usleep(120000)
+}
+
+let source = CGEventSource(stateID: .hidSystemState)
+
+func flags(_ event: RemoteInputEvent) -> CGEventFlags {
+    var result = CGEventFlags()
+    if event.shiftKey == true { result.insert(.maskShift) }
+    if event.altKey == true { result.insert(.maskAlternate) }
+    if event.ctrlKey == true { result.insert(.maskControl) }
+    if event.metaKey == true { result.insert(.maskCommand) }
+    return result
+}
+
+func mouseButton(_ button: String?) -> CGMouseButton {
+    switch button {
+    case "right": return .right
+    case "middle": return .center
+    default: return .left
+    }
+}
+
+func mouseType(phase: String, button: String?) -> CGEventType {
+    let right = button == "right"
+    if phase == "down" { return right ? .rightMouseDown : .leftMouseDown }
+    if phase == "up" { return right ? .rightMouseUp : .leftMouseUp }
+    return right ? .rightMouseDragged : .mouseMoved
+}
+
+let keyCodes: [String: CGKeyCode] = [
+    "Enter": 36,
+    "NumpadEnter": 76,
+    "Escape": 53,
+    "Backspace": 51,
+    "Tab": 48,
+    "Space": 49,
+    "ArrowLeft": 123,
+    "ArrowRight": 124,
+    "ArrowDown": 125,
+    "ArrowUp": 126,
+    "Delete": 117,
+    "Home": 115,
+    "End": 119,
+    "PageUp": 116,
+    "PageDown": 121,
+]
+
+func handleConfig(_ config: InputConfig) throws {
+    try focusTargetWindow(config)
+
+    if config.event.kind == "pointer" {
+        guard let phase = config.event.phase else {
+            throw inputError("remote pointer input missing phase")
+        }
+        guard let x = config.event.x, let y = config.event.y else {
+            throw inputError("remote pointer input missing coordinates")
+        }
+        let point = CGPoint(x: x, y: y)
+        let event = CGEvent(
+            mouseEventSource: source,
+            mouseType: mouseType(phase: phase, button: config.event.button),
+            mouseCursorPosition: point,
+            mouseButton: mouseButton(config.event.button)
+        )
+        event?.post(tap: .cghidEventTap)
+    } else if config.event.kind == "scroll" {
+        guard
+            let x = config.event.x,
+            let y = config.event.y,
+            let deltaX = config.event.deltaX,
+            let deltaY = config.event.deltaY
+        else {
+            throw inputError("remote scroll input missing delta or coordinates")
+        }
+        let units: CGScrollEventUnit = config.event.unit == "pixel" ? .pixel : .line
+        let point = CGPoint(x: x, y: y)
+        // Android/DOM deltas use positive values for scrolling down/right; CGEvent
+        // wheel values use the opposite sign for pixel scroll injection.
+        let wheel1 = Int32(max(-32767, min(32767, (-deltaY).rounded())))
+        let wheel2 = Int32(max(-32767, min(32767, (-deltaX).rounded())))
+        let event = CGEvent(
+            scrollWheelEvent2Source: source,
+            units: units,
+            wheelCount: 2,
+            wheel1: wheel1,
+            wheel2: wheel2,
+            wheel3: 0
+        )
+        event?.location = point
+        event?.post(tap: .cghidEventTap)
+    } else if config.event.kind == "key" {
+        guard let phase = config.event.phase else {
+            throw inputError("remote key input missing phase")
+        }
+        let down = phase == "down"
+        let code = config.event.code ?? ""
+        if let keyCode = keyCodes[code] {
+            let event = CGEvent(keyboardEventSource: source, virtualKey: keyCode, keyDown: down)
+            event?.flags = flags(config.event)
+            event?.post(tap: .cghidEventTap)
+        } else if !(config.event.text ?? config.event.key ?? "").isEmpty {
+            var utf16 = (config.event.text ?? config.event.key ?? "").utf16.map { UniChar($0) }
+            let event = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: down)
+            event?.flags = flags(config.event)
+            event?.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: &utf16)
+            event?.post(tap: .cghidEventTap)
+        } else {
+            throw inputError("remote key input unsupported: \(code)")
+        }
+    } else {
+        throw inputError("remote input event kind unsupported")
+    }
+}
+
+func writeResult(ok: Bool, error: String? = nil) {
+    var result: [String: Any] = ["ok": ok]
+    if let error = error {
+        result["error"] = error
+    }
+    if let data = try? JSONSerialization.data(withJSONObject: result, options: []) {
+        FileHandle.standardOutput.write(data)
+        FileHandle.standardOutput.write("\n".data(using: .utf8)!)
+    }
+}
+
+@discardableResult
+func handleRawConfig(_ rawConfig: String, exitOnFailure: Bool) -> Bool {
+    do {
+        guard let data = rawConfig.data(using: .utf8) else {
+            throw inputError("remote input config is not utf8")
+        }
+        let config = try JSONDecoder().decode(InputConfig.self, from: data)
+        try handleConfig(config)
+        writeResult(ok: true)
+        return true
+    } catch {
+        writeResult(ok: false, error: error.localizedDescription)
+        if exitOnFailure {
+            exit(2)
+        }
+        return false
+    }
+}
+
+if let rawConfig = ProcessInfo.processInfo.environment["ZTERM_REMOTE_WINDOW_INPUT_CONFIG"] {
+    handleRawConfig(rawConfig, exitOnFailure: true)
+} else {
+    while let line = readLine(strippingNewline: true) {
+        if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            continue
+        }
+        handleRawConfig(line, exitOnFailure: false)
+    }
+}
+`;
+var SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT = String.raw`
+import AppKit
+import CoreGraphics
+import CoreMedia
+import Foundation
+import ScreenCaptureKit
+
+struct CaptureConfig: Decodable {
+    let windowId: String
+    let appBundleId: String
+    let title: String
+    let windowBounds: Rect
+    let cropRect: Rect
+    let frameRate: Int
+}
+
+struct Rect: Decodable {
+    let x: Double
+    let y: Double
+    let width: Double
+    let height: Double
+}
+
+func stderrLine(_ message: String) {
+    if let data = (message + "\n").data(using: .utf8) {
+        FileHandle.standardError.write(data)
+    }
+}
+
+func appendUInt32(_ value: UInt32, to data: inout Data) {
+    var littleEndian = value.littleEndian
+    withUnsafeBytes(of: &littleEndian) { bytes in
+        data.append(contentsOf: bytes)
+    }
+}
+
+func closeEnough(_ lhs: Double, _ rhs: Double) -> Bool {
+    return abs(lhs - rhs) <= 4.0
+}
+
+func rectMatches(_ frame: CGRect, _ rect: Rect) -> Bool {
+    return closeEnough(frame.origin.x, rect.x)
+        && closeEnough(frame.origin.y, rect.y)
+        && closeEnough(frame.size.width, rect.width)
+        && closeEnough(frame.size.height, rect.height)
+}
+
+final class FrameOutput: NSObject, SCStreamOutput {
+    private var emitted = 0
+
+    func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
+        guard type == .screen else {
+            return
+        }
+        guard sampleBuffer.isValid, let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else {
+            return
+        }
+
+        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
+        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
+
+        let width = CVPixelBufferGetWidth(pixelBuffer)
+        let height = CVPixelBufferGetHeight(pixelBuffer)
+        let bytesPerRow = CVPixelBufferGetBytesPerRow(pixelBuffer)
+        guard width > 0, height > 0, let baseAddress = CVPixelBufferGetBaseAddress(pixelBuffer) else {
+            return
+        }
+
+        let source = baseAddress.assumingMemoryBound(to: UInt8.self)
+        var rgba = Data(count: width * height * 4)
+        rgba.withUnsafeMutableBytes { destinationRaw in
+            guard let destinationBase = destinationRaw.baseAddress?.assumingMemoryBound(to: UInt8.self) else {
+                return
+            }
+            for y in 0..<height {
+                let sourceRow = source.advanced(by: y * bytesPerRow)
+                let destinationRow = destinationBase.advanced(by: y * width * 4)
+                for x in 0..<width {
+                    let sourcePixel = sourceRow.advanced(by: x * 4)
+                    let destinationPixel = destinationRow.advanced(by: x * 4)
+                    destinationPixel[0] = sourcePixel[2]
+                    destinationPixel[1] = sourcePixel[1]
+                    destinationPixel[2] = sourcePixel[0]
+                    destinationPixel[3] = sourcePixel[3]
+                }
+            }
+        }
+
+        var header = Data()
+        header.append(contentsOf: [0x5A, 0x52, 0x57, 0x31])
+        appendUInt32(UInt32(width), to: &header)
+        appendUInt32(UInt32(height), to: &header)
+        appendUInt32(UInt32(rgba.count), to: &header)
+        FileHandle.standardOutput.write(header)
+        FileHandle.standardOutput.write(rgba)
+        emitted += 1
+    }
+}
+
+let env = ProcessInfo.processInfo.environment
+guard let configJson = env["ZTERM_REMOTE_WINDOW_CAPTURE_CONFIG"],
+      let configData = configJson.data(using: .utf8) else {
+    stderrLine("missing ZTERM_REMOTE_WINDOW_CAPTURE_CONFIG")
+    exit(2)
+}
+
+let config: CaptureConfig
+do {
+    config = try JSONDecoder().decode(CaptureConfig.self, from: configData)
+} catch {
+    stderrLine("invalid capture config: " + String(describing: error))
+    exit(2)
+}
+
+NSApplication.shared
+let output = FrameOutput()
+let sampleQueue = DispatchQueue(label: "zterm.remote-window.capture.sample")
+var activeStream: SCStream?
+
+Task { @MainActor in
+    do {
+        let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
+        let numericWindowId = UInt32(config.windowId)
+        let window = content.windows.first { candidate in
+            if let numericWindowId = numericWindowId, candidate.windowID == numericWindowId {
+                return true
+            }
+            if !config.appBundleId.isEmpty && candidate.owningApplication?.bundleIdentifier != config.appBundleId {
+                return false
+            }
+            return rectMatches(candidate.frame, config.windowBounds)
+        }
+        guard let targetWindow = window else {
+            stderrLine("ScreenCaptureKit window not found for " + config.windowId)
+            exit(3)
+        }
+
+        let filter = SCContentFilter(desktopIndependentWindow: targetWindow)
+        let streamConfiguration = SCStreamConfiguration()
+        streamConfiguration.capturesAudio = false
+        streamConfiguration.pixelFormat = kCVPixelFormatType_32BGRA
+        streamConfiguration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, config.frameRate)))
+        streamConfiguration.width = max(1, Int(config.cropRect.width.rounded()))
+        streamConfiguration.height = max(1, Int(config.cropRect.height.rounded()))
+        streamConfiguration.sourceRect = CGRect(
+            x: max(0, config.cropRect.x - config.windowBounds.x),
+            y: max(0, config.cropRect.y - config.windowBounds.y),
+            width: max(1, config.cropRect.width),
+            height: max(1, config.cropRect.height)
+        )
+
+        let stream = SCStream(filter: filter, configuration: streamConfiguration, delegate: nil)
+        activeStream = stream
+        try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: sampleQueue)
+        try await stream.startCapture()
+        stderrLine("zterm remote window capture started")
+    } catch {
+        stderrLine("ScreenCaptureKit capture start failed: " + String(describing: error))
+        exit(4)
+    }
+}
+
+dispatchMain()
+`;
+function remoteWindowError(payload, code, message) {
+  return {
+    requestId: payload.requestId || "",
+    code,
+    message
+  };
+}
+function normalizeWhitespace(value) {
+  return value.replace(/\s+/g, " ").trim();
+}
+function truncateRemoteWindowErrorMessage(message) {
+  const normalized = normalizeWhitespace(message);
+  if (normalized.length <= REMOTE_WINDOW_ERROR_MESSAGE_MAX_CHARS) {
+    return normalized;
+  }
+  return `${normalized.slice(0, REMOTE_WINDOW_ERROR_MESSAGE_MAX_CHARS - 1).trimEnd()}...`;
+}
+function summarizeRemoteWindowCatalogError(error, fallbackMessage) {
+  const raw = error instanceof Error ? error.message : String(error);
+  const normalizedRaw = normalizeWhitespace(raw);
+  const missingPythonModule = normalizedRaw.match(/No module named ['"]?([A-Za-z0-9_.-]+)['"]?/u);
+  if (missingPythonModule?.[1]) {
+    return `iTerm2 Python API unavailable: missing Python module ${missingPythonModule[1]}`;
+  }
+  const candidateLines = raw.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean).filter((line) => !line.startsWith("Command failed:"));
+  const diagnosticLine = [...candidateLines].reverse().find(
+    (line) => /(?:error|exception|denied|permission|timeout|timed out|not found|unavailable|failed)/iu.test(line)
+  ) || candidateLines[0] || normalizedRaw || fallbackMessage;
+  return truncateRemoteWindowErrorMessage(diagnosticLine || fallbackMessage);
+}
+function validateRect(rect, label) {
+  for (const key of ["x", "y", "width", "height"]) {
+    const value = rect[key];
+    if (!Number.isFinite(value)) {
+      throw new Error(`${label}.${key} must be finite`);
+    }
+  }
+  if (rect.width < 0 || rect.height < 0) {
+    throw new Error(`${label} dimensions must be non-negative`);
+  }
+  return {
+    x: rect.x,
+    y: rect.y,
+    width: rect.width,
+    height: rect.height
+  };
+}
+function rectWithOffset(rect, offset) {
+  return {
+    x: offset.x + rect.x,
+    y: offset.y + rect.y,
+    width: rect.width,
+    height: rect.height
+  };
+}
+function measureIterm2Node(node) {
+  if (node.type === "session") {
+    const frame = validateRect(node.frame, `session:${node.sessionId}`);
+    return {
+      width: frame.x + frame.width,
+      height: frame.y + frame.height
+    };
+  }
+  if (node.children.length === 0) {
+    return { width: 0, height: 0 };
+  }
+  let cursor = 0;
+  let width = 0;
+  let height = 0;
+  for (const child of node.children) {
+    if (child.type === "session") {
+      const frame = validateRect(child.frame, `session:${child.sessionId}`);
+      width = Math.max(width, frame.x + frame.width);
+      height = Math.max(height, frame.y + frame.height);
+      cursor = Math.max(
+        cursor,
+        node.vertical ? frame.x + frame.width : frame.y + frame.height
+      ) + ITERM2_PANE_GAP_PX;
+      continue;
+    }
+    const childSize = measureIterm2Node(child);
+    const childOffset = node.vertical ? { x: cursor, y: 0 } : { x: 0, y: cursor };
+    width = Math.max(width, childOffset.x + childSize.width);
+    height = Math.max(height, childOffset.y + childSize.height);
+    cursor += (node.vertical ? childSize.width : childSize.height) + ITERM2_PANE_GAP_PX;
+  }
+  return { width, height };
+}
+function flattenIterm2SplitTree(node, origin = { x: 0, y: 0 }) {
+  if (!node) {
+    return [];
+  }
+  if (node.type === "session") {
+    return [{
+      sessionId: node.sessionId,
+      title: node.title,
+      tty: node.tty || null,
+      frame: rectWithOffset(validateRect(node.frame, `session:${node.sessionId}`), origin),
+      gridSize: node.gridSize
+    }];
+  }
+  const panes = [];
+  let cursor = 0;
+  for (const child of node.children) {
+    if (child.type === "session") {
+      panes.push(...flattenIterm2SplitTree(child, origin));
+      const childFrame = validateRect(child.frame, `session:${child.sessionId}`);
+      cursor = Math.max(
+        cursor,
+        node.vertical ? childFrame.x + childFrame.width : childFrame.y + childFrame.height
+      ) + ITERM2_PANE_GAP_PX;
+      continue;
+    }
+    const childSize = measureIterm2Node(child);
+    const childOrigin = node.vertical ? { x: origin.x + cursor, y: origin.y } : { x: origin.x, y: origin.y + cursor };
+    panes.push(...flattenIterm2SplitTree(child, childOrigin));
+    cursor += (node.vertical ? childSize.width : childSize.height) + ITERM2_PANE_GAP_PX;
+  }
+  return panes;
+}
+function parseTmuxClientTargets(stdout) {
+  const targets = /* @__PURE__ */ new Map();
+  for (const line of stdout.split("\n")) {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      continue;
+    }
+    const [tty, tmuxSession, tmuxWindowId, tmuxPaneId] = trimmed.split("	");
+    if (!tty || !tmuxSession) {
+      continue;
+    }
+    targets.set(tty, {
+      tty,
+      tmuxSession,
+      tmuxWindowId: tmuxWindowId || void 0,
+      tmuxPaneId: tmuxPaneId || void 0
+    });
+  }
+  return targets;
+}
+function computeContentBounds(panes) {
+  return panes.reduce(
+    (bounds, pane) => ({
+      width: Math.max(bounds.width, pane.frame.x + pane.frame.width),
+      height: Math.max(bounds.height, pane.frame.y + pane.frame.height)
+    }),
+    { width: 0, height: 0 }
+  );
+}
+function assertPaneCropWithinWindow(windowFrame, cropRect, label) {
+  const relativeLeft = cropRect.x - windowFrame.x;
+  const relativeTop = cropRect.y - windowFrame.y;
+  const relativeRight = relativeLeft + cropRect.width;
+  const relativeBottom = relativeTop + cropRect.height;
+  if (relativeLeft < 0 || relativeTop < 0 || relativeRight > windowFrame.width || relativeBottom > windowFrame.height) {
+    throw new Error(`${label} crop rectangle is outside its window bounds`);
+  }
+}
+function buildRemoteWindowStreamTargets(catalog, tmuxTargets, now, options = {}) {
+  const targets = [];
+  const includeAppWindowTargets = options.includeAppWindowTargets !== false;
+  const appWindows = options.macosAppWindowCatalog?.windows || [];
+  const requireCaptureWindowForPanes = options.requireCaptureWindowForPanes === true;
+  let iTermPaneCount = 0;
+  let skippedPaneCount = 0;
+  for (const window of catalog.windows) {
+    const itermWindowFrame = validateRect(window.frame, `window:${window.windowId}`);
+    const captureWindow = findMatchingIterm2CaptureWindow(window, appWindows);
+    const captureWindowFrame = captureWindow ? validateRect(captureWindow.frame, `app-window:${captureWindow.windowId}`) : itermWindowFrame;
+    if (includeAppWindowTargets && (!requireCaptureWindowForPanes || captureWindow)) {
+      targets.push({
+        streamTargetId: captureWindow ? `app-window:${captureWindow.pid}:${captureWindow.windowId}` : `app-window:${window.windowId}`,
+        videoTarget: {
+          kind: "app-window",
+          appBundleId: ITERM2_APP_BUNDLE_ID,
+          pid: captureWindow?.pid ?? window.pid ?? 0,
+          windowId: captureWindow?.windowId ?? window.windowId,
+          title: captureWindow?.title || window.title || "iTerm2",
+          windowBoundsTopLeftPx: captureWindowFrame,
+          cropRectTopLeftPx: captureWindowFrame
+        },
+        inputTarget: {
+          kind: "app-window"
+        },
+        streamMode: "view",
+        focusPolicy: "bring-to-focus",
+        inputRoute: "os-event",
+        capture: {
+          source: "ScreenCaptureKit",
+          coordinateSpace: "macos-top-left-px",
+          scale: 1,
+          createdAt: now
+        }
+      });
+    }
+    if (requireCaptureWindowForPanes && !captureWindow) {
+      for (const tab of window.tabs) {
+        skippedPaneCount += flattenIterm2SplitTree(tab.root).length;
+      }
+      continue;
+    }
+    for (const tab of window.tabs) {
+      const panes = flattenIterm2SplitTree(tab.root);
+      iTermPaneCount += panes.length;
+      const contentBounds = computeContentBounds(panes);
+      if (contentBounds.width > captureWindowFrame.width || contentBounds.height > captureWindowFrame.height) {
+        throw new Error(`window:${window.windowId}:tab:${tab.tabId} content bounds exceed window bounds`);
+      }
+      const contentTopInsetPx = captureWindowFrame.height - contentBounds.height;
+      for (const pane of panes) {
+        const tmuxTarget = pane.tty ? tmuxTargets.get(pane.tty) : void 0;
+        const cropRectTopLeftPx = {
+          x: captureWindowFrame.x + pane.frame.x,
+          y: captureWindowFrame.y + contentTopInsetPx + pane.frame.y,
+          width: pane.frame.width,
+          height: pane.frame.height
+        };
+        assertPaneCropWithinWindow(
+          captureWindowFrame,
+          cropRectTopLeftPx,
+          `window:${window.windowId}:tab:${tab.tabId}:pane:${pane.sessionId}`
+        );
+        targets.push({
+          streamTargetId: `iterm2-pane:${window.windowId}:${tab.tabId}:${pane.sessionId}`,
+          videoTarget: {
+            kind: "iterm2-pane",
+            appBundleId: ITERM2_APP_BUNDLE_ID,
+            pid: captureWindow?.pid ?? window.pid ?? 0,
+            windowId: captureWindow?.windowId ?? window.windowId,
+            title: pane.title || window.title || "iTerm2 pane",
+            windowBoundsTopLeftPx: captureWindowFrame,
+            paneRectInContentPx: pane.frame,
+            cropRectTopLeftPx,
+            contentTopInsetPx
+          },
+          inputTarget: tmuxTarget ? {
+            kind: "tmux-pane",
+            itermSessionId: pane.sessionId,
+            tty: pane.tty || void 0,
+            tmuxSession: tmuxTarget.tmuxSession,
+            tmuxWindowId: tmuxTarget.tmuxWindowId,
+            tmuxPaneId: tmuxTarget.tmuxPaneId
+          } : {
+            kind: "iterm2-pane",
+            itermSessionId: pane.sessionId,
+            tty: pane.tty || void 0
+          },
+          streamMode: "view",
+          focusPolicy: tmuxTarget ? "no-focus-steal" : "bring-to-focus",
+          inputRoute: tmuxTarget ? "tmux-input" : "iterm2-api",
+          capture: {
+            source: "ScreenCaptureKit",
+            coordinateSpace: "macos-top-left-px",
+            scale: 1,
+            createdAt: now
+          }
+        });
+      }
+    }
+  }
+  if (requireCaptureWindowForPanes && iTermPaneCount === 0 && skippedPaneCount > 0) {
+    throw new Error("iTerm2 ScreenCaptureKit window id unavailable for all panes");
+  }
+  return targets;
+}
+function findMatchingIterm2CaptureWindow(window, appWindows) {
+  const itermWindowFrame = validateRect(window.frame, `window:${window.windowId}`);
+  let best = null;
+  for (const candidate of appWindows) {
+    if (candidate.appBundleId !== ITERM2_APP_BUNDLE_ID) {
+      continue;
+    }
+    const frame = validateRect(candidate.frame, `app-window:${candidate.windowId}`);
+    const geometryScore = Math.abs(frame.x - itermWindowFrame.x) + Math.abs(frame.width - itermWindowFrame.width) + Math.abs(frame.height - itermWindowFrame.height);
+    if (geometryScore > 48) {
+      continue;
+    }
+    const score = geometryScore + Math.min(48, Math.abs(frame.y - itermWindowFrame.y));
+    if (!best || score < best.score) {
+      best = { window: candidate, score };
+    }
+  }
+  return best?.window || null;
+}
+function buildMacosAppWindowTargets(catalog, now) {
+  return catalog.windows.map((window) => {
+    const windowFrame = validateRect(window.frame, `app-window:${window.windowId}`);
+    return {
+      streamTargetId: `app-window:${window.pid}:${window.windowId}`,
+      videoTarget: {
+        kind: "app-window",
+        appBundleId: window.appBundleId,
+        pid: window.pid,
+        windowId: window.windowId,
+        title: window.title || window.ownerName || window.appBundleId || `Window ${window.windowId}`,
+        windowBoundsTopLeftPx: windowFrame,
+        cropRectTopLeftPx: windowFrame
+      },
+      inputTarget: {
+        kind: "app-window"
+      },
+      streamMode: "view",
+      focusPolicy: "bring-to-focus",
+      inputRoute: "os-event",
+      capture: {
+        source: "ScreenCaptureKit",
+        coordinateSpace: "macos-top-left-px",
+        scale: 1,
+        createdAt: now
+      }
+    };
+  });
+}
+function runDefaultIterm2Python(script, options) {
+  return new Promise((resolve4, reject) => {
+    (0, import_node_child_process2.execFile)(options.pythonBinary, ["-c", script], {
+      timeout: options.timeoutMs,
+      windowsHide: true
+    }, (error, stdout, stderr) => {
+      if (error) {
+        const details = [stderr, stdout, error.message && !error.message.includes(" -c ") ? error.message : ""].filter(Boolean).join("\n");
+        reject(new Error(details || "iTerm2 Python API failed"));
+        return;
+      }
+      resolve4(stdout);
+    });
+  });
+}
+function runDefaultMacosAppWindowCatalog(script, options) {
+  return new Promise((resolve4, reject) => {
+    (0, import_node_child_process2.execFile)(options.swiftBinary, ["-e", script], {
+      timeout: options.timeoutMs,
+      windowsHide: true
+    }, (error, stdout, stderr) => {
+      if (error) {
+        const details = [stderr, stdout, error.message && !error.message.includes(" -e ") ? error.message : ""].filter(Boolean).join("\n");
+        reject(new Error(details || "macOS app window catalog failed"));
+        return;
+      }
+      resolve4(stdout);
+    });
+  });
+}
+function createDefaultRemoteWindowInputHelper(options) {
+  let child = null;
+  let stdoutBuffer = "";
+  let stderrBuffer = "";
+  let active = null;
+  const queue = [];
+  let disposed = false;
+  const stderrSummary = () => stderrBuffer.trim().slice(-REMOTE_WINDOW_ERROR_MESSAGE_MAX_CHARS);
+  const rejectRequest = (request, error) => {
+    if (!request) {
+      return;
+    }
+    if (request.timeout) {
+      clearTimeout(request.timeout);
+      request.timeout = null;
+    }
+    request.reject(error);
+  };
+  const rejectAll = (error) => {
+    rejectRequest(active, error);
+    active = null;
+    while (queue.length > 0) {
+      rejectRequest(queue.shift() || null, error);
+    }
+  };
+  const startChild = () => {
+    if (child && !child.killed) {
+      return child;
+    }
+    stderrBuffer = "";
+    stdoutBuffer = "";
+    const currentChild = (0, import_node_child_process2.spawn)(options.swiftBinary, ["-e", MACOS_REMOTE_WINDOW_INPUT_SWIFT], {
+      windowsHide: true,
+      env: process.env
+    });
+    child = currentChild;
+    currentChild.stdout.setEncoding("utf8");
+    currentChild.stderr.setEncoding("utf8");
+    currentChild.stdout.on("data", (chunk) => {
+      stdoutBuffer += String(chunk);
+      let newlineIndex = stdoutBuffer.indexOf("\n");
+      while (newlineIndex >= 0) {
+        const rawLine = stdoutBuffer.slice(0, newlineIndex).trim();
+        stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
+        if (rawLine && active) {
+          const request = active;
+          active = null;
+          if (request.timeout) {
+            clearTimeout(request.timeout);
+            request.timeout = null;
+          }
+          try {
+            const response = JSON.parse(rawLine);
+            if (response.ok === true) {
+              request.resolve();
+            } else {
+              request.reject(new Error(String(response.error || "remote window input event failed")));
+            }
+          } catch (error) {
+            request.reject(error instanceof Error ? error : new Error("remote window input helper returned invalid JSON"));
+          }
+          pump();
+        }
+        newlineIndex = stdoutBuffer.indexOf("\n");
+      }
+    });
+    currentChild.stderr.on("data", (chunk) => {
+      stderrBuffer = (stderrBuffer + String(chunk)).slice(-4096);
+    });
+    currentChild.on("error", (error) => {
+      const message = stderrSummary();
+      if (child === currentChild) {
+        child = null;
+      }
+      rejectAll(new Error(message ? `${error.message}
+${message}` : error.message));
+    });
+    currentChild.on("exit", (code, signal) => {
+      const message = [
+        `remote window input helper exited code=${code ?? "null"} signal=${signal ?? "null"}`,
+        stderrSummary()
+      ].filter(Boolean).join("\n");
+      if (child === currentChild) {
+        child = null;
+      }
+      if (!disposed) {
+        rejectAll(new Error(message));
+      }
+    });
+    return currentChild;
+  };
+  const pump = () => {
+    if (disposed || active || queue.length === 0) {
+      return;
+    }
+    const request = queue.shift();
+    if (!request) {
+      return;
+    }
+    const helperProcess = startChild();
+    active = request;
+    request.timeout = setTimeout(() => {
+      if (active !== request) {
+        return;
+      }
+      active = null;
+      rejectRequest(request, new Error("remote window input helper timed out"));
+      if (child && !child.killed) {
+        child.kill("SIGTERM");
+      }
+      if (child === helperProcess) {
+        child = null;
+      }
+      pump();
+    }, 5e3);
+    helperProcess.stdin.write(`${JSON.stringify(request.config)}
+`, (error) => {
+      if (!error || active !== request) {
+        return;
+      }
+      active = null;
+      rejectRequest(request, error);
+      pump();
+    });
+  };
+  return {
+    send(config) {
+      if (disposed) {
+        return Promise.reject(new Error("remote window input helper is disposed"));
+      }
+      return new Promise((resolve4, reject) => {
+        queue.push({
+          config,
+          resolve: resolve4,
+          reject,
+          timeout: null
+        });
+        pump();
+      });
+    },
+    dispose() {
+      disposed = true;
+      rejectAll(new Error("remote window input helper disposed"));
+      if (child && !child.killed) {
+        child.kill("SIGTERM");
+      }
+      child = null;
+    }
+  };
+}
+function buildRemoteWindowInputConfig(payload, target) {
+  return {
+    pid: target.videoTarget.pid,
+    focusPolicy: target.focusPolicy,
+    window: {
+      windowId: target.videoTarget.windowId,
+      title: target.videoTarget.title,
+      bounds: target.videoTarget.windowBoundsTopLeftPx
+    },
+    event: payload.event
+  };
+}
+function normalizeRtcDescription(description, expectedType) {
+  if (!description || description.type !== expectedType || typeof description.sdp !== "string") {
+    throw new Error(`remote window daemon expected ${expectedType} description`);
+  }
+  return {
+    type: expectedType,
+    sdp: description.sdp
+  };
+}
+function normalizeIceCandidate(candidate) {
+  const candidateLike = typeof candidate.toJSON === "function" ? candidate.toJSON() : candidate;
+  return {
+    candidate: String(candidateLike.candidate || ""),
+    sdpMid: candidateLike.sdpMid ?? null,
+    sdpMLineIndex: candidateLike.sdpMLineIndex ?? null,
+    usernameFragment: candidateLike.usernameFragment ?? null
+  };
+}
+function validateStreamTargetForCapture(target) {
+  if (!target.streamTargetId.trim()) {
+    throw new Error("remote window stream target id is required");
+  }
+  const windowBounds = validateRect(target.videoTarget.windowBoundsTopLeftPx, "remote-window.windowBoundsTopLeftPx");
+  const cropRect = target.videoTarget.cropRectTopLeftPx ? validateRect(target.videoTarget.cropRectTopLeftPx, "remote-window.cropRectTopLeftPx") : null;
+  if (!cropRect) {
+    throw new Error("remote window stream target requires cropRectTopLeftPx");
+  }
+  if (cropRect.width <= 0 || cropRect.height <= 0) {
+    throw new Error("remote window stream crop rectangle must be drawable");
+  }
+  assertPaneCropWithinWindow(windowBounds, cropRect, target.streamTargetId);
+  return {
+    windowBounds,
+    cropRect
+  };
+}
+function convertRgbaToI420Frame(frame, convert) {
+  const width = Math.max(1, Math.floor(frame.width));
+  const height = Math.max(1, Math.floor(frame.height));
+  const chromaWidth = Math.ceil(width / 2);
+  const chromaHeight = Math.ceil(height / 2);
+  const i420 = {
+    width,
+    height,
+    data: new Uint8Array(width * height + chromaWidth * chromaHeight * 2)
+  };
+  convert({
+    width,
+    height,
+    data: frame.rgba
+  }, i420);
+  return i420;
+}
+function buildScreenCaptureKitConfig(target, frameRate) {
+  const { windowBounds, cropRect } = validateStreamTargetForCapture(target);
+  return {
+    windowId: target.videoTarget.windowId,
+    appBundleId: target.videoTarget.appBundleId,
+    title: target.videoTarget.title,
+    windowBounds,
+    cropRect,
+    frameRate
+  };
+}
+function stopChildProcess(child) {
+  if (child.exitCode !== null || child.killed) {
+    return;
+  }
+  child.kill("SIGTERM");
+}
+function startScreenCaptureKitFrameSource(target, options) {
+  const captureConfig = buildScreenCaptureKitConfig(target, options.frameRate);
+  const child = (0, import_node_child_process2.spawn)(options.swiftBinary, ["-e", SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT], {
+    env: {
+      ...process.env,
+      ZTERM_REMOTE_WINDOW_CAPTURE_CONFIG: JSON.stringify(captureConfig)
+    },
+    stdio: ["pipe", "pipe", "pipe"]
+  });
+  child.stdin.end();
+  let stdoutBuffer = Buffer.alloc(0);
+  let stderrBuffer = "";
+  let firstFrameResolved = false;
+  let stopped = false;
+  let frameWidth = Math.max(1, Math.floor(captureConfig.cropRect.width));
+  let frameHeight = Math.max(1, Math.floor(captureConfig.cropRect.height));
+  const cleanupListeners = () => {
+    child.stdout.removeListener("data", onStdout);
+    child.stderr.removeListener("data", onStderr);
+    child.removeListener("error", onChildError);
+    child.removeListener("exit", onChildExit);
+  };
+  const frameSource = {
+    get width() {
+      return frameWidth;
+    },
+    get height() {
+      return frameHeight;
+    },
+    frameRate: Math.max(1, Math.floor(options.frameRate)),
+    stop() {
+      if (stopped) {
+        return;
+      }
+      stopped = true;
+      cleanupListeners();
+      stopChildProcess(child);
+    }
+  };
+  let resolveStart = () => void 0;
+  let rejectStart = () => void 0;
+  const startup = new Promise((resolve4, reject) => {
+    resolveStart = resolve4;
+    rejectStart = reject;
+  });
+  const startupTimer = setTimeout(() => {
+    if (firstFrameResolved || stopped) {
+      return;
+    }
+    frameSource.stop();
+    rejectStart(new Error("ScreenCaptureKit capture did not produce a frame before timeout"));
+  }, Math.max(1, options.startupTimeoutMs));
+  function fail(error) {
+    if (!firstFrameResolved) {
+      clearTimeout(startupTimer);
+      frameSource.stop();
+      rejectStart(error);
+      return;
+    }
+    options.onError(error);
+  }
+  function emitFrame(width, height, rgba) {
+    frameWidth = width;
+    frameHeight = height;
+    const frame = {
+      width,
+      height,
+      rgba: new Uint8Array(rgba.buffer, rgba.byteOffset, rgba.byteLength)
+    };
+    options.onFrame(frame);
+    if (!firstFrameResolved) {
+      firstFrameResolved = true;
+      clearTimeout(startupTimer);
+      resolveStart(frameSource);
+    }
+  }
+  function onStdout(chunk) {
+    stdoutBuffer = Buffer.concat([stdoutBuffer, chunk]);
+    while (stdoutBuffer.length >= 16) {
+      if (!stdoutBuffer.subarray(0, 4).equals(REMOTE_WINDOW_CAPTURE_FRAME_MAGIC)) {
+        fail(new Error("ScreenCaptureKit frame stream header mismatch"));
+        return;
+      }
+      const width = stdoutBuffer.readUInt32LE(4);
+      const height = stdoutBuffer.readUInt32LE(8);
+      const byteLength = stdoutBuffer.readUInt32LE(12);
+      if (width === 0 || height === 0 || byteLength !== width * height * 4) {
+        fail(new Error("ScreenCaptureKit frame stream emitted invalid frame dimensions"));
+        return;
+      }
+      const packetLength = 16 + byteLength;
+      if (stdoutBuffer.length < packetLength) {
+        return;
+      }
+      const rgba = Buffer.from(stdoutBuffer.subarray(16, packetLength));
+      stdoutBuffer = stdoutBuffer.subarray(packetLength);
+      if (!stopped) {
+        emitFrame(width, height, rgba);
+      }
+    }
+  }
+  function onStderr(chunk) {
+    stderrBuffer = `${stderrBuffer}${chunk.toString("utf8")}`;
+    stderrBuffer = stderrBuffer.slice(-1200);
+  }
+  function onChildError(error) {
+    fail(new Error(`ScreenCaptureKit capture process failed: ${error.message}`));
+  }
+  function onChildExit(code, signal) {
+    if (stopped) {
+      return;
+    }
+    const detail = truncateRemoteWindowErrorMessage(stderrBuffer || `capture process exited code=${code ?? "null"} signal=${signal ?? "null"}`);
+    fail(new Error(`ScreenCaptureKit capture process exited: ${detail}`));
+  }
+  child.stdout.on("data", onStdout);
+  child.stderr.on("data", onStderr);
+  child.on("error", onChildError);
+  child.on("exit", onChildExit);
+  return startup;
+}
+function parseIterm2Catalog(stdout) {
+  const parsed = JSON.parse(stdout);
+  if (!parsed || !Array.isArray(parsed.windows)) {
+    throw new Error("iTerm2 catalog missing windows");
+  }
+  return parsed;
+}
+function parseMacosAppWindowCatalog(stdout) {
+  const parsed = JSON.parse(stdout);
+  if (!parsed || !Array.isArray(parsed.windows)) {
+    throw new Error("macOS app window catalog missing windows");
+  }
+  return parsed;
+}
+function createRemoteWindowStreamDaemonRuntime(deps) {
+  const platform = deps.platform || process.platform;
+  const pythonBinary = (deps.pythonBinary || process.env.ZTERM_ITERM2_PYTHON || "python3").trim();
+  const swiftBinary = (deps.swiftBinary || process.env.ZTERM_MACOS_SWIFT || "swift").trim();
+  const iterm2PythonTimeoutMs = deps.iterm2PythonTimeoutMs || DEFAULT_ITERM2_PYTHON_TIMEOUT_MS;
+  const appWindowCatalogTimeoutMs = deps.appWindowCatalogTimeoutMs || DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS;
+  const captureStartupTimeoutMs = deps.captureStartupTimeoutMs || DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS;
+  const frameRate = deps.frameRate || DEFAULT_REMOTE_WINDOW_FRAME_RATE;
+  const runIterm2Python = deps.runIterm2Python || runDefaultIterm2Python;
+  const runMacosAppWindowCatalog = deps.runMacosAppWindowCatalog || runDefaultMacosAppWindowCatalog;
+  let remoteWindowInputHelper = null;
+  const getRemoteWindowInputHelper = () => {
+    if (!remoteWindowInputHelper) {
+      remoteWindowInputHelper = deps.remoteWindowInputHelperFactory ? deps.remoteWindowInputHelperFactory({ swiftBinary }) : createDefaultRemoteWindowInputHelper({ swiftBinary });
+    }
+    return remoteWindowInputHelper;
+  };
+  const runRemoteWindowInputEvent = deps.runRemoteWindowInputEvent || ((payload, target) => getRemoteWindowInputHelper().send(buildRemoteWindowInputConfig(payload, target)));
+  const now = deps.now || (() => (/* @__PURE__ */ new Date()).toISOString());
+  const captureSourceFactory = deps.captureSourceFactory || startScreenCaptureKitFrameSource;
+  const createPeerConnection = deps.peerConnectionFactory || ((configuration) => new RTCPeerConnection2(configuration));
+  const createRtcSessionDescription = deps.rtcSessionDescriptionFactory || ((description) => new RTCSessionDescription2(description));
+  const createRtcIceCandidate = deps.rtcIceCandidateFactory || ((candidate) => new RTCIceCandidate2(candidate));
+  const createVideoSource = deps.videoSourceFactory || (() => new nonstandard.RTCVideoSource({ isScreencast: true }));
+  const rgbaToI420 = deps.rgbaToI420 || nonstandard.rgbaToI420;
+  const activeStreams = /* @__PURE__ */ new Map();
+  async function queryIterm2Catalog() {
+    const stdout = await runIterm2Python(ITERM2_CATALOG_PYTHON, {
+      pythonBinary,
+      timeoutMs: iterm2PythonTimeoutMs
+    });
+    return parseIterm2Catalog(stdout);
+  }
+  async function queryMacosAppWindowCatalog() {
+    const stdout = await runMacosAppWindowCatalog(MACOS_APP_WINDOW_CATALOG_SWIFT, {
+      swiftBinary,
+      timeoutMs: appWindowCatalogTimeoutMs
+    });
+    return parseMacosAppWindowCatalog(stdout);
+  }
+  async function listTargets(payload) {
+    if (!payload.requestId) {
+      return remoteWindowError(payload, "remote_window_request_invalid", "remote window target request requires requestId");
+    }
+    if (platform !== "darwin") {
+      return remoteWindowError(payload, "remote_window_platform_unsupported", "remote window stream catalog is only available on macOS daemon hosts");
+    }
+    const createdAt = now();
+    const includeAppWindows = payload.includeAppWindows !== false;
+    const includeIterm2 = payload.includeIterm2 !== false;
+    const targets = [];
+    const errors = [];
+    let macosAppWindowCatalogOk = false;
+    let macosAppWindowCatalog = null;
+    if (includeAppWindows) {
+      try {
+        macosAppWindowCatalog = await queryMacosAppWindowCatalog();
+        targets.push(...buildMacosAppWindowTargets(macosAppWindowCatalog, createdAt));
+        macosAppWindowCatalogOk = true;
+      } catch (error) {
+        const message = summarizeRemoteWindowCatalogError(error, "macOS app window catalog unavailable");
+        errors.push(remoteWindowError(payload, "app_window_catalog_unavailable", message || "macOS app window catalog unavailable"));
+      }
+    }
+    let catalog = null;
+    if (includeIterm2) {
+      try {
+        catalog = await queryIterm2Catalog();
+      } catch (error) {
+        const message = summarizeRemoteWindowCatalogError(error, "iTerm2 Python API unavailable");
+        errors.push(remoteWindowError(payload, "iterm2_api_unavailable", message || "iTerm2 Python API unavailable"));
+      }
+    }
+    let tmuxTargets = /* @__PURE__ */ new Map();
+    if (catalog) {
+      if (!macosAppWindowCatalogOk) {
+        try {
+          macosAppWindowCatalog = await queryMacosAppWindowCatalog();
+          macosAppWindowCatalogOk = true;
+        } catch (error) {
+          const message = summarizeRemoteWindowCatalogError(error, "macOS app window catalog unavailable");
+          errors.push(remoteWindowError(payload, "app_window_catalog_unavailable", message || "macOS app window catalog unavailable"));
+        }
+      }
+      try {
+        tmuxTargets = parseTmuxClientTargets(deps.runTmux([
+          "list-clients",
+          "-F",
+          "#{client_tty}	#{session_name}	#{window_id}	#{pane_id}"
+        ]).stdout);
+      } catch {
+        tmuxTargets = /* @__PURE__ */ new Map();
+      }
+    }
+    if (catalog) {
+      try {
+        targets.push(...buildRemoteWindowStreamTargets(catalog, tmuxTargets, createdAt, {
+          includeAppWindowTargets: false,
+          macosAppWindowCatalog,
+          requireCaptureWindowForPanes: true
+        }));
+      } catch (error) {
+        const message = summarizeRemoteWindowCatalogError(error, "remote window target manifest invalid");
+        errors.push(remoteWindowError(payload, "remote_window_manifest_invalid", message || "remote window target manifest invalid"));
+      }
+    }
+    if (targets.length > 0) {
+      return {
+        requestId: payload.requestId,
+        targets,
+        ...errors.length > 0 ? { errors } : {}
+      };
+    }
+    return errors[0] || {
+      requestId: payload.requestId,
+      targets: []
+    };
+  }
+  function buildStreamError(payload, code, message) {
+    return {
+      requestId: payload.requestId || "",
+      ...payload.streamId ? { streamId: payload.streamId } : {},
+      code,
+      message: truncateRemoteWindowErrorMessage(message || code)
+    };
+  }
+  function cleanupStream(entry, reason) {
+    if (entry.cleanupDone) {
+      return false;
+    }
+    entry.cleanupDone = true;
+    activeStreams.delete(entry.streamId);
+    try {
+      entry.captureSource?.stop();
+    } catch {
+    }
+    entry.captureSource = null;
+    try {
+      entry.videoTrack.stop();
+    } catch {
+    }
+    entry.peerConnection.onicecandidate = null;
+    entry.peerConnection.onconnectionstatechange = null;
+    try {
+      entry.peerConnection.close();
+    } catch {
+    }
+    entry.handlers.sendStatus?.({
+      requestId: entry.requestId,
+      streamId: entry.streamId,
+      phase: "stopped",
+      framesSent: entry.framesSent,
+      message: reason
+    });
+    return true;
+  }
+  function isCurrentStream(entry) {
+    return activeStreams.get(entry.streamId) === entry && !entry.cleanupDone;
+  }
+  function validateRemoteWindowInput(payload, entry) {
+    if (!payload.requestId || !payload.streamId || !payload.targetId) {
+      throw new Error("remote window input requires requestId, streamId, and targetId");
+    }
+    if (payload.targetId !== entry.targetId) {
+      throw new Error(`remote window input target mismatch: ${payload.targetId}`);
+    }
+    if (entry.target.inputRoute === "os-event" && entry.target.focusPolicy !== "bring-to-focus") {
+      throw new Error("remote window OS input requires bring-to-focus policy");
+    }
+    if (entry.target.inputRoute !== "os-event") {
+      throw new Error(`remote window input route is not implemented: ${entry.target.inputRoute}`);
+    }
+    if (payload.event.kind === "pointer") {
+      const values = [
+        payload.event.x,
+        payload.event.y,
+        payload.event.normalizedX,
+        payload.event.normalizedY
+      ];
+      if (!values.every((value) => Number.isFinite(value))) {
+        throw new Error("remote window pointer input coordinates are invalid");
+      }
+      if (payload.event.normalizedX < 0 || payload.event.normalizedX > 1 || payload.event.normalizedY < 0 || payload.event.normalizedY > 1) {
+        throw new Error("remote window pointer input normalized coordinates are out of range");
+      }
+    }
+    if (payload.event.kind === "scroll") {
+      const values = [
+        payload.event.x,
+        payload.event.y,
+        payload.event.normalizedX,
+        payload.event.normalizedY,
+        payload.event.deltaX,
+        payload.event.deltaY
+      ];
+      if (!values.every((value) => Number.isFinite(value))) {
+        throw new Error("remote window scroll input coordinates or delta are invalid");
+      }
+      if (payload.event.normalizedX < 0 || payload.event.normalizedX > 1 || payload.event.normalizedY < 0 || payload.event.normalizedY > 1) {
+        throw new Error("remote window scroll input normalized coordinates are out of range");
+      }
+      if (payload.event.unit !== "pixel") {
+        throw new Error("remote window scroll input unit is invalid");
+      }
+    }
+    if (payload.event.kind === "key" && payload.event.phase !== "down" && payload.event.phase !== "up") {
+      throw new Error("remote window key input phase is invalid");
+    }
+  }
+  async function startStream(payload, handlers = {}) {
+    if (!payload.requestId || !payload.streamId) {
+      return buildStreamError(payload, "remote_window_stream_request_invalid", "remote window stream start requires requestId and streamId");
+    }
+    if (platform !== "darwin") {
+      return buildStreamError(payload, "remote_window_platform_unsupported", "remote window stream is only available on macOS daemon hosts");
+    }
+    if (activeStreams.has(payload.streamId)) {
+      return buildStreamError(payload, "remote_window_stream_exists", `remote window stream already exists: ${payload.streamId}`);
+    }
+    let entry = null;
+    try {
+      validateStreamTargetForCapture(payload.target);
+      const peerConnection = createPeerConnection({
+        iceServers: Array.isArray(payload.iceServers) ? payload.iceServers : []
+      });
+      const videoSource = createVideoSource();
+      const videoTrack = videoSource.createTrack();
+      peerConnection.addTrack(videoTrack);
+      entry = {
+        streamId: payload.streamId,
+        requestId: payload.requestId,
+        targetId: payload.target.streamTargetId,
+        target: payload.target,
+        peerConnection,
+        videoSource,
+        videoTrack,
+        captureSource: null,
+        handlers,
+        framesSent: 0,
+        cleanupDone: false
+      };
+      activeStreams.set(payload.streamId, entry);
+      peerConnection.onicecandidate = (event) => {
+        if (!entry || !isCurrentStream(entry) || !event.candidate) {
+          return;
+        }
+        handlers.sendIceCandidate?.({
+          requestId: payload.requestId,
+          streamId: payload.streamId,
+          candidate: normalizeIceCandidate(event.candidate)
+        });
+      };
+      peerConnection.onconnectionstatechange = () => {
+        if (!entry || !isCurrentStream(entry)) {
+          return;
+        }
+        const state = peerConnection.connectionState;
+        if (state === "failed" || state === "closed") {
+          cleanupStream(entry, `remote window WebRTC connection ${state}`);
+        }
+      };
+      handlers.sendStatus?.({
+        requestId: payload.requestId,
+        streamId: payload.streamId,
+        phase: "starting"
+      });
+      await peerConnection.setRemoteDescription(createRtcSessionDescription({
+        type: payload.offer.type,
+        sdp: payload.offer.sdp
+      }));
+      const captureSource = await captureSourceFactory(payload.target, {
+        frameRate,
+        startupTimeoutMs: captureStartupTimeoutMs,
+        swiftBinary,
+        onFrame: (frame) => {
+          if (!entry || !isCurrentStream(entry)) {
+            return;
+          }
+          try {
+            const i420Frame = convertRgbaToI420Frame(frame, rgbaToI420);
+            entry.videoSource.onFrame(i420Frame);
+            entry.framesSent += 1;
+            if (entry.framesSent === 1) {
+              handlers.sendStatus?.({
+                requestId: payload.requestId,
+                streamId: payload.streamId,
+                phase: "streaming",
+                framesSent: entry.framesSent,
+                frameWidth: frame.width,
+                frameHeight: frame.height
+              });
+            }
+          } catch (error) {
+            cleanupStream(
+              entry,
+              `remote window frame conversion failed: ${error instanceof Error ? error.message : String(error)}`
+            );
+          }
+        },
+        onError: (error) => {
+          if (!entry || !isCurrentStream(entry)) {
+            return;
+          }
+          cleanupStream(entry, error.message || "remote window capture failed");
+        }
+      });
+      if (!isCurrentStream(entry)) {
+        captureSource.stop();
+        throw new Error("remote window stream was closed before capture started");
+      }
+      entry.captureSource = captureSource;
+      const answer = await peerConnection.createAnswer();
+      await peerConnection.setLocalDescription(answer);
+      if (!isCurrentStream(entry)) {
+        throw new Error("remote window stream was closed before media negotiation completed");
+      }
+      return {
+        requestId: payload.requestId,
+        streamId: payload.streamId,
+        targetId: payload.target.streamTargetId,
+        answer: normalizeRtcDescription(peerConnection.localDescription || answer, "answer"),
+        capture: {
+          source: "ScreenCaptureKit",
+          frameWidth: captureSource.width,
+          frameHeight: captureSource.height,
+          frameRate: captureSource.frameRate,
+          targetKind: payload.target.videoTarget.kind
+        },
+        transport: {
+          kind: "webrtc-video"
+        }
+      };
+    } catch (error) {
+      if (entry) {
+        cleanupStream(entry, error instanceof Error ? error.message : String(error));
+      }
+      return buildStreamError(
+        payload,
+        "remote_window_stream_start_failed",
+        error instanceof Error ? error.message : "remote window stream start failed"
+      );
+    }
+  }
+  async function addIceCandidate(payload) {
+    const entry = activeStreams.get(payload.streamId);
+    if (!entry || entry.cleanupDone) {
+      return false;
+    }
+    await entry.peerConnection.addIceCandidate(createRtcIceCandidate({
+      candidate: payload.candidate.candidate,
+      sdpMid: payload.candidate.sdpMid ?? null,
+      sdpMLineIndex: payload.candidate.sdpMLineIndex ?? null,
+      usernameFragment: payload.candidate.usernameFragment ?? null
+    }));
+    return true;
+  }
+  async function stopStream(payload) {
+    if (!payload.requestId || !payload.streamId) {
+      return buildStreamError(payload, "remote_window_stream_stop_invalid", "remote window stream stop requires requestId and streamId");
+    }
+    const entry = activeStreams.get(payload.streamId);
+    if (!entry) {
+      return {
+        requestId: payload.requestId,
+        streamId: payload.streamId,
+        phase: "stopped",
+        framesSent: 0,
+        message: "remote window stream already stopped"
+      };
+    }
+    const framesSent = entry.framesSent;
+    cleanupStream(entry, "remote window stream stopped");
+    return {
+      requestId: payload.requestId,
+      streamId: payload.streamId,
+      phase: "stopped",
+      framesSent,
+      message: "remote window stream stopped"
+    };
+  }
+  async function injectInput(payload) {
+    const entry = activeStreams.get(payload.streamId);
+    if (!entry || entry.cleanupDone) {
+      return buildStreamError(payload, "remote_window_input_stream_missing", `remote window stream is not active: ${payload.streamId || "missing"}`);
+    }
+    try {
+      validateRemoteWindowInput(payload, entry);
+      await runRemoteWindowInputEvent(payload, entry.target, {
+        swiftBinary,
+        runTmux: deps.runTmux
+      });
+      return {
+        requestId: payload.requestId,
+        streamId: payload.streamId,
+        targetId: payload.targetId,
+        accepted: true
+      };
+    } catch (error) {
+      return buildStreamError(
+        payload,
+        "remote_window_input_failed",
+        error instanceof Error ? error.message : "remote window input failed"
+      );
+    }
+  }
+  function dispose(reason = "remote window daemon runtime disposed") {
+    for (const entry of Array.from(activeStreams.values())) {
+      cleanupStream(entry, reason);
+    }
+    remoteWindowInputHelper?.dispose();
+    remoteWindowInputHelper = null;
+  }
+  return {
+    listTargets,
+    startStream,
+    addIceCandidate,
+    stopStream,
+    injectInput,
+    dispose
+  };
+}
+
 // src/server/server.ts
 var DAEMON_CONFIG = resolveDaemonRuntimeConfig();
 var PORT = DAEMON_CONFIG.port || DEFAULT_BRIDGE_PORT;
@@ -11712,6 +14241,7 @@ var mirrors = /* @__PURE__ */ new Map();
 var scheduleStore = loadScheduleStore();
 var clientRuntimeDebugStore = createRuntimeDebugStore();
 var daemonRuntimeDebugStore = createRuntimeDebugStore();
+var performanceTraceStore = createTerminalPerformanceTraceStore({ limit: 5e3 });
 var terminalAttachTokenRuntime = createTerminalAttachTokenRuntime();
 var terminalScheduleRuntime;
 var terminalControlRuntime;
@@ -11759,6 +14289,7 @@ var terminalRuntime = createTerminalRuntime({
   mirrors,
   sendMessage: (session, message) => terminalTransportRuntimeSendMessage(session, message),
   sendText: (transport, text) => terminalTransportRuntime.sendText(transport, text),
+  recordPerformanceTrace: (record) => performanceTraceStore.record(record),
   sendScheduleStateToSession: (session, sessionName) => terminalScheduleRuntime.sendScheduleStateToSession(session, sessionName),
   buildConnectedPayload: (sessionId, requestOrigin) => terminalHttpRuntime.buildConnectedPayload(sessionId, requestOrigin),
   buildBufferHeadPayload: (sessionId, mirror) => buildBufferHeadPayload(sessionId, mirror),
@@ -11777,7 +14308,6 @@ var terminalRuntime = createTerminalRuntime({
       return;
     }
     terminalControlRuntime.runTmux(["has-session", "-t", sessionName]);
-    terminalControlRuntime.ensureTmuxSessionAlternateScreenDisabled(sessionName);
   },
   captureMirrorAuthoritativeBufferFromTmux: terminalMirrorCapture.captureMirrorAuthoritativeBufferFromTmux,
   mirrorBufferChanged: (mirror, previousStartIndex, previousLines) => findChangedIndexedRanges({
@@ -11831,15 +14361,21 @@ var {
   writeToLiveMirror,
   listTmuxSessions,
   createDetachedTmuxSession,
+  closeDetachedTerminalSession,
   renameTmuxSession
 } = terminalControlRuntime;
+var remoteWindowStreamRuntime = createRemoteWindowStreamDaemonRuntime({
+  platform: process.platform,
+  runTmux
+});
 terminalControlRuntime.ensureTmuxServerRunning();
 terminalRuntime.restorePersistedAdaptiveWidthBaselines(listTmuxSessions());
 var terminalTransportRuntime = createTerminalTransportRuntime({
   sessions,
   connections,
   daemonRuntimeDebug,
-  summarizePayload
+  summarizePayload,
+  recordPerformanceTrace: (record) => performanceTraceStore.record(record)
 });
 var {
   createWebSocketSessionTransport,
@@ -11879,6 +14415,7 @@ var terminalHttpRuntime = createTerminalHttpRuntime({
   mirrors,
   clientRuntimeDebugStore,
   daemonRuntimeDebugStore,
+  performanceTraceStore,
   resolveDebugRouteLimit,
   broadcastRuntimeDebugControl,
   setDaemonRuntimeDebugEnabled,
@@ -11891,10 +14428,12 @@ var terminalMessageRuntime = createTerminalMessageRuntime({
   normalizeBufferSyncRequestPayload,
   getSessionMirror: terminalRuntime.getSubscriberMirror,
   sendBufferHeadToSession: terminalRuntime.sendBufferHeadToSession,
+  scheduleMirrorLiveSync: terminalRuntime.scheduleMirrorLiveSync,
   refreshMirrorHeadForSession: terminalRuntime.refreshMirrorHeadForSession,
   handleInput: terminalRuntime.handleInput,
   closeSession: terminalRuntime.closeTransportSubscriber,
   terminalFileTransferRuntime,
+  remoteWindowStreamRuntime,
   handleClientDebugLog,
   handleClientDebugSnapshot,
   daemonRuntimeDebug,
@@ -11909,6 +14448,7 @@ var terminalMessageRuntime = createTerminalMessageRuntime({
     sendScheduleStateToSession,
     listTmuxSessions,
     createDetachedTmuxSession,
+    closeDetachedTerminalSession,
     renameTmuxSession,
     runTmux,
     sanitizeSessionName,

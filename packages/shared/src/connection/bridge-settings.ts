@@ -365,6 +365,15 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
     candidate.terminalSessionGroupLayoutMode === 'horizontal' || candidate.terminalSessionGroupLayoutMode === 'vertical'
       ? candidate.terminalSessionGroupLayoutMode
       : 'auto';
+  const traversalPathPriority = Array.isArray(candidate.traversalPathPriority)
+    ? candidate.traversalPathPriority.filter((item): item is NonNullable<BridgeSettings['traversalPathPriority']>[number] => (
+      item === 'rtc-direct'
+      || item === 'tailscale'
+      || item === 'ipv6'
+      || item === 'ipv4'
+      || item === 'rtc-relay'
+    ))
+    : undefined;
   const mergedServers =
     targetHost && servers.every((server) => server.targetHost !== targetHost || server.targetPort !== targetPort)
       ? sortBridgeServers([
@@ -412,5 +421,6 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
       normalizedDefaultServerId
       || mergedServers.find((server) => server.targetHost === targetHost && server.targetPort === targetPort)?.id,
     traversalRelay: normalizeTraversalRelayClientSettings((candidate as { traversalRelay?: unknown }).traversalRelay),
+    traversalPathPriority,
   };
 }

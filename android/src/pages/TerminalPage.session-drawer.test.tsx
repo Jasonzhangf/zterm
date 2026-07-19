@@ -635,7 +635,7 @@ describe('TerminalPage portrait session drawer', () => {
     expect(screen.queryByTestId('terminal-session-drawer-host-100.66.1.82:3333')).toBeNull();
   });
 
-  it('opens an rtc-only aliased drawer session with a WebRTC-first target instead of the stale direct group target', async () => {
+  it('opens an rtc-only aliased drawer session with a route-aware target instead of the stale direct group target', async () => {
     const directSession = makeSession('direct-rcc');
     directSession.bridgeHost = '100.66.1.82';
     directSession.bridgePort = 3333;

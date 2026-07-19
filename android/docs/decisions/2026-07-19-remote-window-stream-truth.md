@@ -11,17 +11,22 @@ Remote window stream starts from the Android floating entry. The old floating qu
 1. Choose a remote app/window.
 2. If the app is iTerm2, enumerate iTerm2 tabs/panes and the tmux client/session mapping.
 3. Choose one window or pane target.
-4. Start a floating live video overlay.
+4. Start a floating live video overlay sized from the selected target crop/window aspect ratio.
 5. Drag the floating overlay by its toolbar to reposition it without stealing video/input gestures.
-6. Double tap the video surface to enter fullscreen letterbox mode.
+6. Use the explicit fullscreen button next to close, or double tap the video surface, to enter fullscreen letterbox mode.
 7. Android system Back in fullscreen shrinks back to floating mode.
 8. The fullscreen top-right minimize button also shrinks back to floating mode.
-9. The close button tears down the stream.
+9. Fullscreen preserves source aspect ratio with letterbox fitting. Pinch zoom scales the video, zoomed fullscreen allows one-finger pan, and the top-right minimap projects the current viewport.
+10. Opening the Android IME lifts the target-locked floating preview by the same bottom inset as the QuickBar so the preview remains visible above the keyboard.
+11. On an unzoomed video surface, a single-finger drag emits remote pixel scroll input. In zoomed fullscreen mode, the same gesture remains local pan.
+12. The close button tears down the stream.
 
 The stream is not view-only long term. It must support mouse and keyboard event return. Input return must carry an explicit focus policy:
 
 - `bring-to-focus`: the daemon brings the selected app/window/pane to focus before forwarding OS input.
 - `no-focus-steal`: the daemon must not claim generic OS mouse/keyboard success for normal apps. Terminal-specific routes may still use iTerm2 API or tmux input if declared.
+
+Generic app OS input requires macOS Accessibility permission. App activation alone is not enough for covered or background windows, including apps such as WeChat. The daemon input config must carry the target window id/title/bounds, match the Accessibility window by bounds, activate the owning app, `AXRaise` the matched window, set it as focused/main when supported, and only then post Quartz events. Event coordinates use the daemon manifest/`CGWindowList` top-left coordinate space directly. Android IME committed text is sent without terminal punctuation/newline normalization. Android/DOM scroll deltas use positive values for down/right, while macOS `CGEvent` pixel wheel values use the opposite sign; the daemon input owner performs that conversion exactly once. The daemon input owner also owns the macOS helper lifecycle: pointer/scroll/key sequences must go through a persistent Swift helper, not a fresh `swift -e` compilation per event. The Swift decode schema must match the wire union, so scroll events omit `phase` while pointer/key events require it.
 
 ## Resource Boundary
 
@@ -30,7 +35,7 @@ Two resources are introduced:
 - `resource.remote_window_overlay`: Android picker/floating/fullscreen projection and user intent.
 - `resource.remote_window_stream`: daemon/native catalog, coordinate manifest, capture, encoder/WebRTC sender, target lease, and input injection truth.
 
-`resource.remote_window_overlay` may project UI state and emit stream/input intents. It must not compute macOS coordinates, read iTerm2 split trees, or inject remote input.
+`resource.remote_window_overlay` may project UI state, fullscreen zoom/pan/minimap state, and stream/input intents. It must not compute macOS coordinates, read iTerm2 split trees, or inject remote input.
 
 `resource.remote_window_stream` owns desktop facts on the daemon host:
 
@@ -130,6 +135,10 @@ idle
 
 Only `closed` releases capture, encoder, WebRTC sender, and target lease. Back from `fullscreenStream` must not close or recreate the stream.
 
+Floating preview geometry and fullscreen zoom state are projection-only. The floating preview uses the selected manifest crop/window aspect ratio instead of a fixed frame. Pinch/pan/minimap must not resize tmux, restart capture, renegotiate WebRTC, or change daemon-side coordinate truth. Pointer/keyboard events emitted from the video surface are normalized against the selected manifest crop and sent as explicit input intents; the media `<video>` is pointer-transparent and daemon/native input policy is still the only injection truth.
+
+Remote-window media negotiation is a separate WebRTC peer connection, but its ICE configuration must be derived from the current session traversal route. When the active session resolved through `rtc-direct`, the video receiver/start request uses the same STUN-only direct ICE truth. When it resolved through `rtc-relay`, the video receiver/start request uses the Relay TURN ICE truth. Android must not leave the remote-window video peer connection as no-ICE on Relay/cellular paths, and must not invent a screenshot or terminal-buffer fallback if ICE/media negotiation fails.
+
 ## Explicit Errors
 
 The daemon must fail explicitly for:
@@ -150,4 +159,4 @@ No fallback may silently downgrade this feature to screenshot, terminal buffer r
 
 ## Implementation Status
 
-Current status is `binding pending`. The architecture/resource/function/mainline maps are created before runtime code. Implementation must replace pending doc owners with real owner files and tests in the same change set that introduces behavior.
+Current status is anchored for app-window catalog, real ScreenCaptureKit/WebRTC video, Android floating/fullscreen projection with safe-area top chrome and IME bottom-inset lift, fullscreen zoom/pan/minimap, route-derived ICE for remote-window video, raw Android IME text routing, touch/wheel pixel-scroll intent, and generic `bring-to-focus + AXRaise + os-event` pointer/key/scroll injection. Remaining live completion gaps are Android real-device input replay after this interaction slice and iTerm2-pane stream/input proof.

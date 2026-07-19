@@ -239,7 +239,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
     expect(harness.spies.ensureTerminalPageVisible).not.toHaveBeenCalled();
   });
 
-  it('preserves drawer WebRTC-first target truth when materializing a remote group session', () => {
+  it('preserves drawer route-aware target truth when materializing a remote group session', () => {
     const relayEndpointCandidates = [{
       id: 'relay-rtc:daemon-a',
       kind: 'relay-rtc' as const,
@@ -1207,7 +1207,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
     expect(harness.spies.switchSession).not.toHaveBeenCalled();
   });
 
-  it('refreshes a relay daemon drawer host through a WebRTC-first target instead of the saved direct route', async () => {
+  it('refreshes a relay daemon drawer host through a route-aware target instead of the saved direct route', async () => {
     const harness = createOptions({
       bridgeSettings: {
         servers: [{

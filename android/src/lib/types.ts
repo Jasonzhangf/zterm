@@ -74,9 +74,21 @@ export type SessionState =
 
 export type {
   HostConfigMessage,
+  TerminalInputAckPayload,
+  TerminalReliableInputPayload,
+  TerminalSessionCapabilitiesPayload,
+  RemoteWindowInputEventPayload,
+  RemoteWindowInputResultPayload,
   RemoteWindowStreamErrorPayload,
+  RemoteWindowStreamIceCandidate,
+  RemoteWindowStreamIceCandidatePayload,
   RemoteWindowStreamRect,
   RemoteWindowStreamRequestPayload,
+  RemoteWindowStreamRtcDescription,
+  RemoteWindowStreamStartedPayload,
+  RemoteWindowStreamStartRequestPayload,
+  RemoteWindowStreamStatusPayload,
+  RemoteWindowStreamStopRequestPayload,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
 } from '@zterm/shared/protocol';
@@ -174,6 +186,7 @@ export interface Session {
   autoCommand?: string;
   title: string;             // 动态标题（来自 tmux / 远端 terminal）
   ws: WebSocket | null;
+  reliableInputSupported?: boolean;
   resolvedPath?: 'rtc-direct' | 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
   resolvedRelayTransport?: 'direct' | 'turn';
   resolvedEndpoint?: string;

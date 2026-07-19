@@ -10,6 +10,7 @@ import {
 
 export const FLOATING_BUBBLE_SIZE = 48;
 export const FLOATING_BUBBLE_MARGIN = 10;
+export const FLOATING_BUBBLE_TOP_GUARD_PX = 64;
 export const FLOATING_BUBBLE_DRAG_THRESHOLD_PX = 8;
 export const QUICK_BAR_SIDE_PADDING = 6;
 export const QUICK_BAR_ROW_GAP = 4;

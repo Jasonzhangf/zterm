@@ -92,7 +92,7 @@ Negative:
 - Given current same-target session socket is `OPEN`, it must not cleanup or build a second session socket.
 - Given current same-target session socket is `CONNECTING`, it must not cleanup or build a second session socket.
 - Given target mismatch, closed socket, or missing socket, it may cleanup and build a new session socket.
-- Given a Relay/WebRTC-first Host plus a legacy provider `wsUrl`, `buildTraversalSocketForHostRuntime()` must not pass the override into `TraversalSocket`; the resulting plan must still include `rtc-direct -> direct websocket -> rtc-relay`.
+- Given a route-aware Relay Host plus a legacy provider `wsUrl`, `buildTraversalSocketForHostRuntime()` must not pass the override into `TraversalSocket`; the resulting plan must still include direct LAN/Tailscale candidates before WebRTC direct and TURN/Relay candidates.
 - Given a legacy non-relay Host plus a provider `wsUrl`, the same factory may pass the role-scoped override for compatibility.
 - Given an opened WebRTC transport, `applyTransportDiagnosticsRuntime()` must project the actual selected ICE pair metadata from `TraversalSocket.getDiagnostics()` without reading daemon/client target metadata as route truth.
 

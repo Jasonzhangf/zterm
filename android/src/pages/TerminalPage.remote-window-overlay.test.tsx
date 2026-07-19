@@ -2,6 +2,7 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { Keyboard } from '@capacitor/keyboard';
 import type { RemoteWindowStreamTargetManifest, Session } from '../lib/types';
 import { TerminalPage } from './TerminalPage';
 
@@ -73,7 +74,26 @@ vi.mock('../components/TerminalView', () => ({
 }));
 
 vi.mock('../components/terminal/TerminalQuickBar', () => ({
-  TerminalQuickBar: () => <div data-testid="terminal-quickbar" />,
+  TerminalQuickBar: ({
+    onSendSequence,
+    onSessionDraftSend,
+    onToggleKeyboard,
+    remoteWindowInputActive,
+  }: {
+    onSendSequence?: (sequence: string) => void;
+    onSessionDraftSend?: (value: string) => void;
+    onToggleKeyboard?: () => void;
+    remoteWindowInputActive?: boolean;
+  }) => (
+    <div
+      data-testid="terminal-quickbar"
+      data-remote-window-input-active={remoteWindowInputActive ? 'true' : 'false'}
+    >
+      <button type="button" onClick={() => onSendSequence?.('\x1b[A')}>quickbar-arrow-up</button>
+      <button type="button" onClick={() => onSessionDraftSend?.('继续执行\r')}>quickbar-send-draft</button>
+      <button type="button" onClick={() => onToggleKeyboard?.()}>quickbar-keyboard</button>
+    </div>
+  ),
 }));
 
 function makeSession(id: string): Session {
@@ -108,27 +128,22 @@ function makeSession(id: string): Session {
 
 function makeTarget(): RemoteWindowStreamTargetManifest {
   return {
-    streamTargetId: 'pane-1',
+    streamTargetId: 'app-1',
     videoTarget: {
-      kind: 'iterm2-pane',
-      appBundleId: 'com.googlecode.iterm2',
+      kind: 'app-window',
+      appBundleId: 'com.apple.TextEdit',
       pid: 123,
       windowId: 'window-1',
-      title: 'zterm pane',
+      title: 'TextEdit',
       windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 600 },
       cropRectTopLeftPx: { x: 10, y: 40, width: 800, height: 560 },
     },
     inputTarget: {
-      kind: 'tmux-pane',
-      itermSessionId: 'iterm-1',
-      tty: '/dev/ttys001',
-      tmuxSession: 'zterm',
-      tmuxWindowId: '@1',
-      tmuxPaneId: '%2',
+      kind: 'app-window',
     },
     streamMode: 'interactive',
     focusPolicy: 'bring-to-focus',
-    inputRoute: 'tmux-input',
+    inputRoute: 'os-event',
     capture: {
       source: 'ScreenCaptureKit',
       coordinateSpace: 'macos-top-left-px',
@@ -144,13 +159,41 @@ describe('TerminalPage remote window overlay', () => {
     vi.unstubAllGlobals();
   });
 
-  it('opens the picker through the active session and locks the selected target without using terminal buffer video', async () => {
+  it('opens the picker through the active session and routes fullscreen quickbar input to the remote window', async () => {
     const session = makeSession('s1');
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const onRequestRemoteWindowTargets = vi.fn(async () => ({
       requestId: 'rw-1',
       targets: [makeTarget()],
       errors: [],
     }));
+    const onRequestRemoteWindowStreamStart = vi.fn(async (
+      _sessionId: string,
+      _target: RemoteWindowStreamTargetManifest,
+      streamId: string,
+    ) => ({
+      streamId,
+      mediaStream,
+      started: {
+        requestId: 'rw-start-1',
+        streamId,
+        targetId: 'app-1',
+        answer: { type: 'answer' as const, sdp: 'v=0' },
+        capture: {
+          source: 'ScreenCaptureKit' as const,
+          frameWidth: 800,
+          frameHeight: 560,
+          frameRate: 30,
+          targetKind: 'app-window' as const,
+        },
+        transport: {
+          kind: 'webrtc-video' as const,
+        },
+      },
+    }));
+    const onSendRemoteWindowInput = vi.fn();
+    const onQuickActionInput = vi.fn();
+    const onSessionDraftSend = vi.fn();
     const onActiveBodySubscriptionSuppressedChange = vi.fn();
 
     render(
@@ -168,6 +211,10 @@ describe('TerminalPage remote window overlay', () => {
         onTerminalViewportChange={vi.fn()}
         onActiveBodySubscriptionSuppressedChange={onActiveBodySubscriptionSuppressedChange}
         onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
+        onRequestRemoteWindowStreamStart={onRequestRemoteWindowStreamStart}
+        onSendRemoteWindowInput={onSendRemoteWindowInput}
+        onQuickActionInput={onQuickActionInput}
+        onSessionDraftSend={onSessionDraftSend}
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
@@ -179,18 +226,80 @@ describe('TerminalPage remote window overlay', () => {
 
     await waitFor(() => {
       expect(onRequestRemoteWindowTargets).toHaveBeenCalledWith('s1');
-      expect(screen.getByTestId('remote-window-target-pane-1')).toBeTruthy();
+      expect(screen.getByTestId('remote-window-target-app-1')).toBeTruthy();
       expect(screen.queryByTestId('terminal-quickbar')).toBeNull();
       expect(onActiveBodySubscriptionSuppressedChange).toHaveBeenCalledWith(true);
     });
 
-    fireEvent.click(screen.getByTestId('remote-window-target-pane-1'));
+    fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
 
     await waitFor(() => {
       expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
-      expect(screen.getByText('等待视频流')).toBeTruthy();
+      expect(onRequestRemoteWindowStreamStart).toHaveBeenCalledWith('s1', expect.objectContaining({
+        streamTargetId: 'app-1',
+      }), expect.stringMatching(/^rw-stream-/));
+      expect(screen.getByTestId('remote-window-video')).toBeTruthy();
       expect(screen.queryByTestId('terminal-view-s1')).toBeTruthy();
-      expect(screen.queryByTestId('terminal-quickbar')).toBeNull();
+      expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
+      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-remote-window-input-active')).toBe('true');
+      expect(onActiveBodySubscriptionSuppressedChange).toHaveBeenLastCalledWith(false);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
+      expect(screen.getByTestId('terminal-quickbar-shell').getAttribute('style') || '').toContain('z-index: 96');
+      expect(onActiveBodySubscriptionSuppressedChange).toHaveBeenLastCalledWith(true);
+    });
+
+    fireEvent.click(screen.getByText('quickbar-arrow-up'));
+    await waitFor(() => {
+      expect(onSendRemoteWindowInput).toHaveBeenCalledWith('s1', expect.objectContaining({
+        streamId: expect.stringMatching(/^rw-stream-/),
+        targetId: 'app-1',
+        event: expect.objectContaining({
+          kind: 'key',
+          phase: 'down',
+          key: 'ArrowUp',
+          code: 'ArrowUp',
+        }),
+      }));
+      expect(onQuickActionInput).not.toHaveBeenCalled();
+    });
+
+    fireEvent.click(screen.getByText('quickbar-send-draft'));
+    await waitFor(() => {
+      expect(onSendRemoteWindowInput).toHaveBeenCalledWith('s1', expect.objectContaining({
+        targetId: 'app-1',
+        event: expect.objectContaining({
+          kind: 'key',
+          phase: 'down',
+          key: '继续执行',
+          text: '继续执行',
+        }),
+      }));
+      expect(onSendRemoteWindowInput).toHaveBeenCalledWith('s1', expect.objectContaining({
+        targetId: 'app-1',
+        event: expect.objectContaining({
+          kind: 'key',
+          phase: 'down',
+          key: 'Enter',
+          code: 'Enter',
+        }),
+      }));
+      expect(onSessionDraftSend).not.toHaveBeenCalled();
+    });
+
+    fireEvent.click(screen.getByText('quickbar-keyboard'));
+    await waitFor(() => {
+      expect(Keyboard.show).toHaveBeenCalled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '缩小远程窗口' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
+      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-remote-window-input-active')).toBe('true');
+      expect(onActiveBodySubscriptionSuppressedChange).toHaveBeenLastCalledWith(false);
     });
 
     fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));

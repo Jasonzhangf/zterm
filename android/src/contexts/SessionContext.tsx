@@ -75,6 +75,7 @@ export function SessionProvider({
       activeBodySubscriptionSuppressedRef,
       remoteScreenshotRuntimeRef,
       remoteWindowMessageRuntimeRef,
+      remoteWindowReceiverRuntimeRef,
       fileTransferMessageRuntimeRef,
       foregroundActiveRef,
       handleSocketConnectedBaselineRef,
@@ -107,6 +108,9 @@ export function SessionProvider({
     sendFileAttach,
     requestRemoteScreenshot,
     requestRemoteWindowTargets,
+    requestRemoteWindowStreamStart,
+    stopRemoteWindowStream,
+    sendRemoteWindowInput,
     updateSessionViewport,
     requestScheduleList,
     upsertScheduleJob,
@@ -160,6 +164,7 @@ export function SessionProvider({
       activeBodySubscriptionSuppressedRef,
       remoteScreenshotRuntimeRef,
       remoteWindowMessageRuntimeRef,
+      remoteWindowReceiverRuntimeRef,
       fileTransferMessageRuntimeRef,
       foregroundActiveRef,
       handleSocketConnectedBaselineRef,
@@ -187,6 +192,9 @@ export function SessionProvider({
     sendFileAttach,
     requestRemoteScreenshot,
     requestRemoteWindowTargets,
+    requestRemoteWindowStreamStart,
+    stopRemoteWindowStream,
+    sendRemoteWindowInput,
     updateSessionViewport,
     requestScheduleList,
     upsertScheduleJob,
@@ -222,6 +230,9 @@ export function SessionProvider({
     sendFileAttach,
     requestRemoteScreenshot,
     requestRemoteWindowTargets,
+    requestRemoteWindowStreamStart,
+    stopRemoteWindowStream,
+    sendRemoteWindowInput,
     updateSessionViewport,
     requestScheduleList,
     upsertScheduleJob,
@@ -269,6 +280,15 @@ export function SessionProvider({
     ) => contextRuntimeRef.current.requestRemoteScreenshot(sessionId, onProgress),
     requestRemoteWindowTargets: (sessionId: string) => (
       contextRuntimeRef.current.requestRemoteWindowTargets(sessionId)
+    ),
+    requestRemoteWindowStreamStart: (...args: Parameters<typeof requestRemoteWindowStreamStart>) => (
+      contextRuntimeRef.current.requestRemoteWindowStreamStart(...args)
+    ),
+    stopRemoteWindowStream: (sessionId: string, streamId: string) => (
+      contextRuntimeRef.current.stopRemoteWindowStream(sessionId, streamId)
+    ),
+    sendRemoteWindowInput: (...args: Parameters<typeof sendRemoteWindowInput>) => (
+      contextRuntimeRef.current.sendRemoteWindowInput(...args)
     ),
     updateSessionViewport: (
       sessionId: string,

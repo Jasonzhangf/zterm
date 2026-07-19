@@ -111,6 +111,18 @@
           "label": "src/components/terminal/RemoteWindowOverlay.tsx#RemoteWindowOverlay"
         },
         {
+          "id": "RemoteWindowMessageRuntime",
+          "label": "src/lib/remote-window-message-runtime.ts#createRemoteWindowMessageRuntime"
+        },
+        {
+          "id": "RemoteWindowInputRuntime",
+          "label": "src/contexts/session-context-remote-window-runtime.ts#sendRemoteWindowInputRuntime"
+        },
+        {
+          "id": "RemoteWindowReceiver",
+          "label": "src/contexts/session-context-remote-window-runtime.ts#requestRemoteWindowStreamStartRuntime"
+        },
+        {
           "id": "StageShell",
           "label": "src/pages/TerminalPageStageShell.tsx"
         },
@@ -498,8 +510,8 @@
           "from": "TerminalPage",
           "to": "RemoteWindowOverlay",
           "owner_feature": "desktop.remote_window_stream",
-          "semantic_input": "active session id plus remote-window catalog request callback",
-          "semantic_output": "picker, target-locked floating/fullscreen overlay shell, fullscreen Back/minimize/close intent; frame stream pending",
+          "semantic_input": "active session id plus remote-window catalog/start/stop/input callbacks",
+          "semantic_output": "picker, stream setup, floating/fullscreen video overlay, fullscreen button, Back/minimize projection, zoom/pan/minimap projection, separate QuickBar/body suppression state, active remote-window input context, and close intent",
           "status": "anchored",
           "edge_id": "android_mainline:TerminalPage->RemoteWindowOverlay",
           "resource_from": "resource.ui_projection",
@@ -508,11 +520,100 @@
           "relation_status": "direct"
         },
         {
+          "from": "RemoteWindowOverlay",
+          "to": "RemoteWindowMessageRuntime",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "selected daemon target manifest, receiver offer, stop intent, ICE candidate, or mapped input event",
+          "semantic_output": "remote-window stream start/stop/candidate/input control messages over the existing active session transport",
+          "status": "anchored",
+          "edge_id": "android_mainline:RemoteWindowOverlay->RemoteWindowMessageRuntime",
+          "resource_from": "resource.remote_window_overlay",
+          "resource_to": "resource.session_transport",
+          "via_resources": [
+            "resource.active_session"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "SocketMessage",
+          "to": "RemoteWindowMessageRuntime",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "remote-window stream answer/status/error/candidate/input-result server messages",
+          "semantic_output": "matched stream lifecycle promise or explicit error without catalog/terminal fallback",
+          "status": "anchored",
+          "edge_id": "android_mainline:SocketMessage->RemoteWindowMessageRuntime",
+          "resource_from": "resource.session_transport",
+          "resource_to": "resource.remote_window_overlay",
+          "via_resources": [
+            "resource.active_session"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "RemoteWindowOverlay",
+          "to": "RemoteWindowInputRuntime",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "letterboxed or zoomed video-surface pointer/key event plus selected stream target",
+          "semantic_output": "normalized remote-window-input payload against daemon manifest crop, sent over existing session transport",
+          "status": "anchored",
+          "edge_id": "android_mainline:RemoteWindowOverlay->RemoteWindowInputRuntime",
+          "resource_from": "resource.remote_window_overlay",
+          "resource_to": "resource.session_transport",
+          "via_resources": [
+            "resource.active_session"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "TerminalPage",
+          "to": "RemoteWindowInputRuntime",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "active remote-window input context plus QuickBar key/text/paste/arrow events or Android IME input/backspace/key events",
+          "semantic_output": "remote-window-input payloads sent over the existing active session transport instead of terminal input",
+          "status": "anchored",
+          "edge_id": "android_mainline:TerminalPage->RemoteWindowInputRuntime",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.session_transport",
+          "via_resources": [
+            "resource.remote_window_overlay",
+            "resource.active_session"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "RemoteWindowMessageRuntime",
+          "to": "RemoteWindowReceiver",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "matched stream answer and ICE candidates",
+          "semantic_output": "Android receiver attached to one stream id and one selected target manifest",
+          "status": "anchored",
+          "edge_id": "android_mainline:RemoteWindowMessageRuntime->RemoteWindowReceiver",
+          "resource_from": "resource.session_transport",
+          "resource_to": "resource.remote_window_overlay",
+          "via_resources": [
+            "resource.active_session"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "RemoteWindowReceiver",
+          "to": "RemoteWindowOverlay",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "real WebRTC video MediaStream and stream status",
+          "semantic_output": "floating/fullscreen receiver-backed video surface; no terminal buffer or screenshot frame source",
+          "status": "binding pending",
+          "edge_id": "android_mainline:RemoteWindowReceiver->RemoteWindowOverlay",
+          "resource_from": "resource.remote_window_overlay",
+          "resource_to": "resource.remote_window_overlay",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
           "from": "TerminalPage",
           "to": "StageShell",
           "owner_feature": "terminal.workspace_panes",
-          "semantic_input": "pane layout state",
-          "semantic_output": "stage slots",
+          "semantic_input": "pane layout state plus active session-group slot projection",
+          "semantic_output": "stage slots whose live terminal body source matches the active session projection",
           "status": "anchored",
           "edge_id": "android_mainline:TerminalPage->StageShell",
           "resource_from": "resource.platform_terminal_surface",
@@ -1035,7 +1136,23 @@
         },
         {
           "id": "RemoteWindowStream",
-          "label": "docs/decisions/2026-07-19-remote-window-stream-truth.md#remote-window-stream-binding-pending"
+          "label": "src/server/remote-window-stream-daemon.ts#createRemoteWindowStreamDaemonRuntime"
+        },
+        {
+          "id": "RemoteWindowCapture",
+          "label": "src/server/remote-window-stream-daemon.ts#startScreenCaptureKitFrameSource"
+        },
+        {
+          "id": "RemoteWindowMedia",
+          "label": "src/server/remote-window-stream-daemon.ts#startStream"
+        },
+        {
+          "id": "RemoteWindowInput",
+          "label": "src/server/remote-window-stream-daemon.ts#injectInput"
+        },
+        {
+          "id": "RemoteWindowCleanup",
+          "label": "src/server/remote-window-stream-daemon.ts#stopStream"
         },
         {
           "id": "Http",
@@ -1277,10 +1394,62 @@
           "from": "Control",
           "to": "RemoteWindowStream",
           "owner_feature": "desktop.remote_window_stream",
-          "semantic_input": "remote-window-targets-request control message",
-          "semantic_output": "macOS app-window catalog, iTerm2 pane catalog, coordinate manifest, tmux reverse lookup, or explicit catalog error",
+          "semantic_input": "remote-window catalog/start/stop/candidate/input control messages",
+          "semantic_output": "target catalog, stream lifecycle status, media negotiation answer/candidates, input result, or explicit remote-window error",
           "status": "anchored",
           "edge_id": "daemon_mainline:Control->RemoteWindowStream",
+          "resource_from": "resource.remote_window_stream",
+          "resource_to": "resource.daemon_process",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "RemoteWindowStream",
+          "to": "RemoteWindowInput",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "remote-window-input payload plus active stream target lease",
+          "semantic_output": "macOS OS event injection for bring-to-focus app targets or explicit focus-policy/input-route error",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:RemoteWindowStream->RemoteWindowInput",
+          "resource_from": "resource.remote_window_stream",
+          "resource_to": "resource.daemon_process",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "RemoteWindowStream",
+          "to": "RemoteWindowCapture",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "selected app-window or iTerm2-pane target manifest",
+          "semantic_output": "real ScreenCaptureKit capture frame source or explicit capture error",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:RemoteWindowStream->RemoteWindowCapture",
+          "resource_from": "resource.remote_window_stream",
+          "resource_to": "resource.daemon_process",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "RemoteWindowCapture",
+          "to": "RemoteWindowMedia",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "real capture frames plus WebRTC sender",
+          "semantic_output": "encoded media frames sent on the negotiated WebRTC track with metadata-only route diagnostics",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:RemoteWindowCapture->RemoteWindowMedia",
+          "resource_from": "resource.remote_window_stream",
+          "resource_to": "resource.transport_target",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "RemoteWindowStream",
+          "to": "RemoteWindowCleanup",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "stop request, capture/media error, transport close, or dispose",
+          "semantic_output": "exactly-once cleanup for capture/media/timers/stream state",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:RemoteWindowStream->RemoteWindowCleanup",
           "resource_from": "resource.remote_window_stream",
           "resource_to": "resource.daemon_process",
           "via_resources": [],

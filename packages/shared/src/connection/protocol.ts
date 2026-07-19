@@ -184,8 +184,137 @@ export interface RemoteWindowStreamTargetsResponsePayload {
 
 export interface RemoteWindowStreamErrorPayload {
   requestId: string;
+  streamId?: string;
   code: string;
   message: string;
+}
+
+export interface RemoteWindowStreamRtcDescription {
+  type: 'offer' | 'answer';
+  sdp: string;
+}
+
+export interface RemoteWindowStreamIceCandidate {
+  candidate: string;
+  sdpMid?: string | null;
+  sdpMLineIndex?: number | null;
+  usernameFragment?: string | null;
+}
+
+export interface RemoteWindowStreamStartRequestPayload {
+  requestId: string;
+  streamId: string;
+  target: RemoteWindowStreamTargetManifest;
+  offer: RemoteWindowStreamRtcDescription;
+  iceServers?: Array<Record<string, unknown>>;
+}
+
+export interface RemoteWindowStreamStartedPayload {
+  requestId: string;
+  streamId: string;
+  targetId: string;
+  answer: RemoteWindowStreamRtcDescription;
+  capture: {
+    source: 'ScreenCaptureKit';
+    frameWidth: number;
+    frameHeight: number;
+    frameRate: number;
+    targetKind: 'app-window' | 'iterm2-pane';
+  };
+  transport: {
+    kind: 'webrtc-video';
+    selectedRoute?: string;
+  };
+}
+
+export interface RemoteWindowStreamIceCandidatePayload {
+  requestId?: string;
+  streamId: string;
+  candidate: RemoteWindowStreamIceCandidate;
+}
+
+export interface RemoteWindowStreamStatusPayload {
+  requestId?: string;
+  streamId: string;
+  phase: 'starting' | 'streaming' | 'stopped';
+  framesSent?: number;
+  frameWidth?: number;
+  frameHeight?: number;
+  message?: string;
+}
+
+export interface RemoteWindowStreamStopRequestPayload {
+  requestId: string;
+  streamId: string;
+}
+
+export interface RemoteWindowInputEventPayload {
+  requestId: string;
+  streamId: string;
+  targetId: string;
+  event:
+    | {
+        kind: 'pointer';
+        phase: 'move' | 'down' | 'up';
+        pointerId: number;
+        button: 'left' | 'middle' | 'right' | 'none';
+        buttons: number;
+        x: number;
+        y: number;
+        normalizedX: number;
+        normalizedY: number;
+      }
+    | {
+        kind: 'scroll';
+        unit: 'pixel';
+        deltaX: number;
+        deltaY: number;
+        x: number;
+        y: number;
+        normalizedX: number;
+        normalizedY: number;
+      }
+    | {
+        kind: 'key';
+        phase: 'down' | 'up';
+        key: string;
+        code: string;
+        text?: string;
+        repeat?: boolean;
+        shiftKey?: boolean;
+        altKey?: boolean;
+        ctrlKey?: boolean;
+        metaKey?: boolean;
+      };
+}
+
+export interface RemoteWindowInputResultPayload {
+  requestId: string;
+  streamId: string;
+  targetId: string;
+  accepted: boolean;
+}
+
+export interface TerminalReliableInputPayload {
+  version: 1;
+  seq: string;
+  data: string;
+  sentAt: number;
+  attempt: number;
+}
+
+export interface TerminalInputAckPayload {
+  version: 1;
+  seq: string;
+  accepted: boolean;
+  bytes: number;
+  error?: string;
+}
+
+export interface TerminalSessionCapabilitiesPayload {
+  reliableInput?: {
+    version: 1;
+  };
 }
 
 export interface HostConfigMessage {
@@ -251,12 +380,16 @@ export type BridgeClientMessage =
   | { type: 'tmux-create-session'; payload: { sessionName: string } }
   | { type: 'tmux-rename-session'; payload: { sessionName: string; nextSessionName: string } }
   | { type: 'tmux-kill-session'; payload: { sessionName: string } }
-  | { type: 'input'; payload: string }
+  | { type: 'input'; payload: string | TerminalReliableInputPayload }
   | { type: 'paste-image-start'; payload: PasteImageStartPayload }
   | { type: 'paste-image'; payload: PasteImagePayload }
   | { type: 'attach-file-start'; payload: AttachFileStartPayload }
   | { type: 'remote-screenshot-request'; payload: RemoteScreenshotRequestPayload }
   | { type: 'remote-window-targets-request'; payload: RemoteWindowStreamRequestPayload }
+  | { type: 'remote-window-stream-start-request'; payload: RemoteWindowStreamStartRequestPayload }
+  | { type: 'remote-window-stream-ice-candidate'; payload: RemoteWindowStreamIceCandidatePayload }
+  | { type: 'remote-window-stream-stop-request'; payload: RemoteWindowStreamStopRequestPayload }
+  | { type: 'remote-window-input'; payload: RemoteWindowInputEventPayload }
   | { type: 'file-list-request'; payload: FileListRequestPayload }
   | { type: 'file-create-directory-request'; payload: { requestId: string; path: string; name: string } }
   | { type: 'file-download-request'; payload: FileDownloadRequestPayload }
@@ -301,6 +434,7 @@ export type BridgeServerControlMessage =
       payload: {
         sessionId: string;
         daemonHostId?: string;
+        capabilities?: TerminalSessionCapabilitiesPayload;
         appUpdate?: {
           versionCode: number;
           versionName: string;
@@ -320,6 +454,11 @@ export type BridgeServerControlMessage =
   | { type: 'file-create-directory-error'; payload: { requestId: string; error: string } }
   | { type: 'remote-screenshot-status'; payload: RemoteScreenshotStatusPayload }
   | { type: 'remote-window-targets-response'; payload: RemoteWindowStreamTargetsResponsePayload }
+  | { type: 'remote-window-stream-started'; payload: RemoteWindowStreamStartedPayload }
+  | { type: 'remote-window-stream-ice-candidate'; payload: RemoteWindowStreamIceCandidatePayload }
+  | { type: 'remote-window-stream-status'; payload: RemoteWindowStreamStatusPayload }
+  | { type: 'remote-window-input-result'; payload: RemoteWindowInputResultPayload }
+  | { type: 'input-ack'; payload: TerminalInputAckPayload }
   | { type: 'remote-window-error'; payload: RemoteWindowStreamErrorPayload }
   | { type: 'file-download-chunk'; payload: FileDownloadChunkPayload }
   | { type: 'file-download-complete'; payload: FileDownloadCompletePayload }

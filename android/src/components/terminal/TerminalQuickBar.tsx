@@ -15,6 +15,7 @@ import {
   FLOATING_BUBBLE_MARGIN,
   FLOATING_BUBBLE_POSITION_STORAGE_KEY,
   FLOATING_BUBBLE_SIZE,
+  FLOATING_BUBBLE_TOP_GUARD_PX,
   QUICK_BAR_FIXED_COLUMNS,
   QUICK_BAR_ROW_GAP,
   QUICK_BAR_SIDE_PADDING,
@@ -113,6 +114,7 @@ interface TerminalQuickBarProps {
     | "preview-ready"
     | "saving"
     | "failed";
+  remoteWindowInputActive?: boolean;
   shortcutSmartSort?: boolean;
   shortcutFrequencyMap?: Record<string, number>;
   onShortcutUse?: (shortcutId: string) => void;
@@ -170,6 +172,7 @@ function TerminalQuickBarComponent({
   copyModeActive = false,
   onToggleCopyMode,
   remoteScreenshotStatus = "idle",
+  remoteWindowInputActive = false,
   shortcutSmartSort = false,
   shortcutFrequencyMap,
   onShortcutUse,
@@ -507,8 +510,25 @@ function TerminalQuickBarComponent({
     setRepeatingActionId(null);
   }, [clearRepeatLongPressTimer]);
 
+  const isRemoteWindowTerminalOnlyAction = useCallback(
+    (actionId: string) => {
+      if (!remoteWindowInputActive) {
+        return false;
+      }
+      return (
+        actionId === "tmux-copy" ||
+        actionId === "split-toggle" ||
+        actionId.startsWith("split-count-")
+      );
+    },
+    [remoteWindowInputActive],
+  );
+
   const triggerActionSequence = useCallback(
     (action: { id: string; label: string; sequence: string }) => {
+      if (isRemoteWindowTerminalOnlyAction(action.id)) {
+        return;
+      }
       if (action.id === "quickbar-collapse") {
         onCollapsedChange?.(true);
         setFloatingMenuOpen(false);
@@ -572,6 +592,7 @@ function TerminalQuickBarComponent({
     },
     [
       activeSessionId,
+      isRemoteWindowTerminalOnlyAction,
       onCollapsedChange,
       onRequestRemoteScreenshot,
       onSendSequence,
@@ -609,6 +630,9 @@ function TerminalQuickBarComponent({
 
   const triggerCopyModeFromPressStart = useCallback(
     (action: { id: string; label: string; sequence: string }) => {
+      if (isRemoteWindowTerminalOnlyAction(action.id)) {
+        return true;
+      }
       if (action.id !== "tmux-copy") {
         return false;
       }
@@ -626,7 +650,7 @@ function TerminalQuickBarComponent({
       triggerActionSequence(action);
       return true;
     },
-    [repeatingActionId, stopRepeatingAction, triggerActionSequence],
+    [isRemoteWindowTerminalOnlyAction, repeatingActionId, stopRepeatingAction, triggerActionSequence],
   );
 
   const finishCopyModePress = useCallback(
@@ -1013,9 +1037,10 @@ function TerminalQuickBarComponent({
       FLOATING_BUBBLE_MARGIN,
       viewport.height - height - FLOATING_BUBBLE_MARGIN,
     );
+    const minY = Math.min(FLOATING_BUBBLE_TOP_GUARD_PX, maxY);
     return {
       x: Math.min(Math.max(FLOATING_BUBBLE_MARGIN, nextX), maxX),
-      y: Math.min(Math.max(FLOATING_BUBBLE_MARGIN, nextY), maxY),
+      y: Math.min(Math.max(minY, nextY), maxY),
     };
   };
 
@@ -1471,16 +1496,21 @@ function TerminalQuickBarComponent({
     const fixed = options?.fixed ?? false;
     const repeatable = isRepeatableAction(action);
     const repeatActive = repeatingActionId === action.id;
+    const disabled = isRemoteWindowTerminalOnlyAction(action.id);
     const actionDisplayLabel = resolveShortcutVisualLabel(action.label);
     const actionUsesSpaceBarVisual = isSpaceShortcutLabel(action.label);
     return (
       <button
         key={action.id}
         tabIndex={-1}
+        disabled={disabled}
         onPointerDown={(event) => {
           event.preventDefault();
           event.stopPropagation();
           blurCurrentTarget(event.currentTarget);
+          if (disabled) {
+            return;
+          }
           if (triggerCopyModeFromPressStart(action)) {
             return;
           }
@@ -1553,6 +1583,9 @@ function TerminalQuickBarComponent({
           event.preventDefault();
           event.stopPropagation();
           blurCurrentTarget(event.currentTarget);
+          if (disabled) {
+            return;
+          }
           if (repeatActive) {
             stopRepeatingAction();
             suppressActionClickRef.current = null;
@@ -1580,6 +1613,7 @@ function TerminalQuickBarComponent({
         onFocus={(event) => event.currentTarget.blur()}
         aria-label={action.label}
         aria-pressed={repeatActive}
+        aria-disabled={disabled}
         style={{
           minHeight: compact ? "32px" : "34px",
           width: fixed ? "100%" : undefined,
@@ -1596,34 +1630,38 @@ function TerminalQuickBarComponent({
           borderRadius: "10px",
           backgroundColor: repeatActive
             ? "rgba(113, 164, 255, 0.28)"
-            : action.id === "keyboard" && keyboardVisible
-              ? "rgba(31,214,122,0.18)"
-              : action.id === "tmux-copy" && copyModeActive
-                ? "rgba(113, 164, 255, 0.28)"
-                : action.id === "debug-overlay" && debugOverlayVisible
-                  ? "rgba(31,214,122,0.18)"
-                  : action.id === "line-numbers" && absoluteLineNumbersVisible
+            : disabled
+              ? "rgba(68, 74, 86, 0.48)"
+              : action.id === "keyboard" && keyboardVisible
+                ? "rgba(31,214,122,0.18)"
+                : action.id === "tmux-copy" && copyModeActive
+                  ? "rgba(113, 164, 255, 0.28)"
+                  : action.id === "debug-overlay" && debugOverlayVisible
                     ? "rgba(31,214,122,0.18)"
-                    : action.id === "remote-screenshot" &&
-                        remoteScreenshotStatus !== "idle"
-                      ? "rgba(113, 164, 255, 0.18)"
-                      : fixed
-                        ? "rgba(22, 28, 41, 0.92)"
-                        : "rgba(31, 38, 53, 0.82)",
+                    : action.id === "line-numbers" && absoluteLineNumbersVisible
+                      ? "rgba(31,214,122,0.18)"
+                      : action.id === "remote-screenshot" &&
+                          remoteScreenshotStatus !== "idle"
+                        ? "rgba(113, 164, 255, 0.18)"
+                        : fixed
+                          ? "rgba(22, 28, 41, 0.92)"
+                          : "rgba(31, 38, 53, 0.82)",
           color: repeatActive
             ? "#bcd3ff"
-            : action.id === "keyboard" && keyboardVisible
-              ? mobileTheme.colors.accent
-              : action.id === "tmux-copy" && copyModeActive
-                ? "#8db7ff"
-                : action.id === "debug-overlay" && debugOverlayVisible
-                  ? mobileTheme.colors.accent
-                  : action.id === "line-numbers" && absoluteLineNumbersVisible
+            : disabled
+              ? "rgba(218, 224, 235, 0.46)"
+              : action.id === "keyboard" && keyboardVisible
+                ? mobileTheme.colors.accent
+                : action.id === "tmux-copy" && copyModeActive
+                  ? "#8db7ff"
+                  : action.id === "debug-overlay" && debugOverlayVisible
                     ? mobileTheme.colors.accent
-                    : action.id === "remote-screenshot" &&
-                        remoteScreenshotStatus !== "idle"
-                      ? "#8db7ff"
-                      : "#fff",
+                    : action.id === "line-numbers" && absoluteLineNumbersVisible
+                      ? mobileTheme.colors.accent
+                      : action.id === "remote-screenshot" &&
+                          remoteScreenshotStatus !== "idle"
+                        ? "#8db7ff"
+                        : "#fff",
           fontSize: fixed
             ? "13px"
             : action.id === "continue"
@@ -1632,7 +1670,7 @@ function TerminalQuickBarComponent({
                 ? "11px"
                 : "14px",
           fontWeight: 700,
-          cursor: "pointer",
+          cursor: disabled ? "not-allowed" : "pointer",
           flexShrink: 0,
           appearance: "none",
           WebkitTapHighlightColor: "transparent",
@@ -1640,7 +1678,10 @@ function TerminalQuickBarComponent({
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
-          boxShadow: repeatActive
+          opacity: disabled ? 0.58 : 1,
+          boxShadow: disabled
+            ? "inset 0 0 0 1px rgba(255,255,255,0.06)"
+            : repeatActive
             ? "inset 0 0 0 1px rgba(141,183,255,0.55)"
             : action.id === "remote-screenshot" &&
                 remoteScreenshotStatus !== "idle"
@@ -3206,15 +3247,21 @@ function TerminalQuickBarComponent({
                 >
                   {normalizedSplitCountOptions.map((count) => {
                     const active = count === currentSplitCount;
+                    const disabled = isRemoteWindowTerminalOnlyAction(`split-count-${count}`);
                     return (
                       <button
                         key={`split-count-${count}`}
                         type="button"
                         onClick={() => {
+                          if (disabled) {
+                            return;
+                          }
                           onSetSplitCount?.(count);
                           setFloatingMenuOpen(false);
                         }}
+                        disabled={disabled}
                         aria-label={`${count} 分屏`}
+                        aria-disabled={disabled}
                         style={{
                           minWidth: "72px",
                           minHeight: "34px",
@@ -3223,9 +3270,13 @@ function TerminalQuickBarComponent({
                           borderRadius: "14px",
                           backgroundColor: active
                             ? "rgba(113, 164, 255, 0.18)"
+                            : disabled
+                              ? "rgba(68, 74, 86, 0.48)"
                             : "rgba(31, 38, 53, 0.82)",
-                          color: active ? "#8db7ff" : "#fff",
+                          color: disabled ? "rgba(218, 224, 235, 0.46)" : active ? "#8db7ff" : "#fff",
                           fontWeight: 800,
+                          opacity: disabled ? 0.58 : 1,
+                          cursor: disabled ? "not-allowed" : "pointer",
                         }}
                       >
                         {count} 分屏
@@ -3236,19 +3287,30 @@ function TerminalQuickBarComponent({
                     <button
                       type="button"
                       onClick={() => {
+                        if (isRemoteWindowTerminalOnlyAction("split-toggle")) {
+                          return;
+                        }
                         onToggleSplitLayout?.();
                         setFloatingMenuOpen(false);
                       }}
+                      disabled={isRemoteWindowTerminalOnlyAction("split-toggle")}
+                      aria-disabled={isRemoteWindowTerminalOnlyAction("split-toggle")}
                       style={{
                         flex: 1,
                         minHeight: "40px",
                         border: "1px solid rgba(113, 164, 255, 0.24)",
                         borderRadius: "14px",
-                        backgroundColor: splitVisible
+                        backgroundColor: isRemoteWindowTerminalOnlyAction("split-toggle")
+                          ? "rgba(68, 74, 86, 0.48)"
+                          : splitVisible
                           ? "rgba(113, 164, 255, 0.18)"
                           : "rgba(31, 38, 53, 0.82)",
-                        color: splitVisible ? "#8db7ff" : "#fff",
+                        color: isRemoteWindowTerminalOnlyAction("split-toggle")
+                          ? "rgba(218, 224, 235, 0.46)"
+                          : splitVisible ? "#8db7ff" : "#fff",
                         fontWeight: 800,
+                        opacity: isRemoteWindowTerminalOnlyAction("split-toggle") ? 0.58 : 1,
+                        cursor: isRemoteWindowTerminalOnlyAction("split-toggle") ? "not-allowed" : "pointer",
                       }}
                     >
                       {splitVisible ? "关闭分屏" : "开启分屏"}

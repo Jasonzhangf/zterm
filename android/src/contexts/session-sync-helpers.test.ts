@@ -699,6 +699,16 @@ describe('session sync helper session connection config truth', () => {
     });
   });
 
+  it('records reliable input capability only when the daemon advertises it', () => {
+    expect(buildSessionConnectedUpdates()).not.toHaveProperty('reliableInputSupported');
+    expect(buildSessionConnectedUpdates({ reliableInputSupported: true })).toEqual({
+      state: 'connected',
+      reconnectAttempt: 0,
+      lastError: undefined,
+      reliableInputSupported: true,
+    });
+  });
+
   it('builds schedule-list loading state on connected', () => {
     expect(buildSessionScheduleListLoadingState({
       sessionName: 'old',

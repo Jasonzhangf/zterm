@@ -10,6 +10,8 @@ import type {
   HostConfigMessage,
   RuntimeDebugLogEntry,
   ServerMessage,
+  TerminalInputAckPayload,
+  TerminalReliableInputPayload,
 } from '../lib/types';
 import type {
   TerminalTransportSubscriber,
@@ -81,7 +83,75 @@ export function createTerminalMessageRuntime(
     return current;
   }
 
-  function reportInputDrop(connection: TerminalTransportConnection, reason: 'session_required' | 'input_stale_transport', bytes: number) {
+  const reliableInputAckedSeqs = new Map<string, { accepted: true; bytes: number }>();
+  const RELIABLE_INPUT_ACKED_SEQ_MAX = 2048;
+
+  function reliableInputKey(sessionId: string, seq: string) {
+    return `${sessionId}\u0000${seq}`;
+  }
+
+  function rememberReliableInputAck(sessionId: string, seq: string, bytes: number) {
+    reliableInputAckedSeqs.set(reliableInputKey(sessionId, seq), { accepted: true, bytes });
+    while (reliableInputAckedSeqs.size > RELIABLE_INPUT_ACKED_SEQ_MAX) {
+      const oldestKey = reliableInputAckedSeqs.keys().next().value;
+      if (typeof oldestKey !== 'string') {
+        break;
+      }
+      reliableInputAckedSeqs.delete(oldestKey);
+    }
+  }
+
+  function readReliableInputAck(sessionId: string, seq: string) {
+    return reliableInputAckedSeqs.get(reliableInputKey(sessionId, seq)) || null;
+  }
+
+  function sendInputAck(connection: TerminalTransportConnection, payload: TerminalInputAckPayload) {
+    deps.sendTransportMessage(connection.transport, {
+      type: 'input-ack',
+      payload,
+    });
+  }
+
+  function normalizeReliableInputPayload(payload: unknown): TerminalReliableInputPayload | null {
+    if (!payload || typeof payload !== 'object') {
+      return null;
+    }
+    const candidate = payload as Partial<TerminalReliableInputPayload>;
+    if (
+      candidate.version !== 1
+      || typeof candidate.seq !== 'string'
+      || candidate.seq.trim().length === 0
+      || typeof candidate.data !== 'string'
+      || typeof candidate.sentAt !== 'number'
+      || !Number.isFinite(candidate.sentAt)
+      || typeof candidate.attempt !== 'number'
+      || !Number.isFinite(candidate.attempt)
+    ) {
+      return null;
+    }
+    return {
+      version: 1,
+      seq: candidate.seq,
+      data: candidate.data,
+      sentAt: candidate.sentAt,
+      attempt: Math.max(0, Math.floor(candidate.attempt)),
+    };
+  }
+
+  function readReliableInputSeq(payload: unknown) {
+    if (!payload || typeof payload !== 'object') {
+      return '';
+    }
+    const seq = (payload as { seq?: unknown }).seq;
+    return typeof seq === 'string' ? seq.trim() : '';
+  }
+
+  function reportInputDrop(
+    connection: TerminalTransportConnection,
+    reason: 'session_required' | 'input_stale_transport',
+    bytes: number,
+    ackSeq?: string,
+  ) {
     debugInput('drop', {
       transportId: connection.transportId,
       sessionId: connection.boundSubscriberId,
@@ -89,6 +159,15 @@ export function createTerminalMessageRuntime(
       bytes,
       queueDepth: 0,
     });
+    if (ackSeq) {
+      sendInputAck(connection, {
+        version: 1,
+        seq: ackSeq,
+        accepted: false,
+        bytes,
+        error: reason,
+      });
+    }
     deps.sendTransportMessage(connection.transport, {
       type: 'error',
       payload: reason === 'input_stale_transport'
@@ -97,7 +176,7 @@ export function createTerminalMessageRuntime(
     });
   }
 
-  async function writeInputIfCurrent(connection: TerminalTransportConnection, data: string) {
+  async function writeInputIfCurrent(connection: TerminalTransportConnection, data: string, ackSeq?: string) {
     const bytes = Buffer.byteLength(data, 'utf8');
     // R13: reject oversized input payloads before they reach the tmux write
     // path. tmux's send-keys has a hard limit (~1MB) and a multi-MB paste can
@@ -118,6 +197,15 @@ export function createTerminalMessageRuntime(
           code: 'input_too_large',
         },
       });
+      if (ackSeq) {
+        sendInputAck(connection, {
+          version: 1,
+          seq: ackSeq,
+          accepted: false,
+          bytes,
+          error: 'input_too_large',
+        });
+      }
       return;
     }
     debugInput('receive', {
@@ -132,8 +220,29 @@ export function createTerminalMessageRuntime(
         connection,
         connection.boundSubscriberId && deps.sessions.has(connection.boundSubscriberId) ? 'input_stale_transport' : 'session_required',
         bytes,
+        ackSeq,
       );
       return;
+    }
+    if (ackSeq) {
+      const existingAck = readReliableInputAck(inputSession.id, ackSeq);
+      if (existingAck) {
+        sendInputAck(connection, {
+          version: 1,
+          seq: ackSeq,
+          accepted: true,
+          bytes: existingAck.bytes,
+        });
+        debugInput('write', {
+          transportId: connection.transportId,
+          sessionId: inputSession.id,
+          sessionName: inputSession.sessionName,
+          bytes: existingAck.bytes,
+          duplicateSeq: ackSeq,
+          queueDepth: 0,
+        });
+        return;
+      }
     }
     const startedAt = Date.now();
     const wrote = await deps.handleInput(inputSession, data, () => {
@@ -141,8 +250,17 @@ export function createTerminalMessageRuntime(
       return current?.id === inputSession.id;
     });
     if (!wrote) {
-      reportInputDrop(connection, 'input_stale_transport', bytes);
+      reportInputDrop(connection, 'input_stale_transport', bytes, ackSeq);
       return;
+    }
+    if (ackSeq) {
+      rememberReliableInputAck(inputSession.id, ackSeq, bytes);
+      sendInputAck(connection, {
+        version: 1,
+        seq: ackSeq,
+        accepted: true,
+        bytes,
+      });
     }
     debugInput('write', {
       transportId: connection.transportId,
@@ -448,6 +566,25 @@ export function createTerminalMessageRuntime(
           await writeInputIfCurrent(connection, message.payload);
           break;
         }
+        {
+          const reliablePayload = normalizeReliableInputPayload(message.payload);
+          if (reliablePayload) {
+            await writeInputIfCurrent(connection, reliablePayload.data, reliablePayload.seq);
+            break;
+          }
+        }
+        {
+          const invalidSeq = readReliableInputSeq(message.payload);
+          if (invalidSeq) {
+            sendInputAck(connection, {
+              version: 1,
+              seq: invalidSeq,
+              accepted: false,
+              bytes: 0,
+              error: 'input_invalid',
+            });
+          }
+        }
         if (!session) {
           deps.sendTransportMessage(connection.transport, {
             type: 'error',
@@ -532,6 +669,83 @@ export function createTerminalMessageRuntime(
               requestId: message.payload.requestId || '',
               code: 'remote_window_catalog_failed',
               message: error instanceof Error ? error.message : 'remote window catalog failed',
+            },
+          });
+        });
+        break;
+      case 'remote-window-stream-start-request':
+        void deps.remoteWindowStreamRuntime.startStream(message.payload, {
+          sendIceCandidate: (payload) => {
+            deps.sendTransportMessage(connection.transport, {
+              type: 'remote-window-stream-ice-candidate',
+              payload,
+            });
+          },
+          sendStatus: (payload) => {
+            deps.sendTransportMessage(connection.transport, {
+              type: 'remote-window-stream-status',
+              payload,
+            });
+          },
+        }).then((payload) => {
+          deps.sendTransportMessage(connection.transport, 'answer' in payload
+            ? { type: 'remote-window-stream-started', payload }
+            : { type: 'remote-window-error', payload });
+        }).catch((error: unknown) => {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'remote-window-error',
+            payload: {
+              requestId: message.payload.requestId || '',
+              streamId: message.payload.streamId || '',
+              code: 'remote_window_stream_start_failed',
+              message: error instanceof Error ? error.message : 'remote window stream start failed',
+            },
+          });
+        });
+        break;
+      case 'remote-window-stream-ice-candidate':
+        void deps.remoteWindowStreamRuntime.addIceCandidate(message.payload).catch((error: unknown) => {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'remote-window-error',
+            payload: {
+              requestId: message.payload.requestId || '',
+              streamId: message.payload.streamId || '',
+              code: 'remote_window_stream_candidate_failed',
+              message: error instanceof Error ? error.message : 'remote window stream ICE candidate failed',
+            },
+          });
+        });
+        break;
+      case 'remote-window-stream-stop-request':
+        void deps.remoteWindowStreamRuntime.stopStream(message.payload).then((payload) => {
+          deps.sendTransportMessage(connection.transport, 'phase' in payload
+            ? { type: 'remote-window-stream-status', payload }
+            : { type: 'remote-window-error', payload });
+        }).catch((error: unknown) => {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'remote-window-error',
+            payload: {
+              requestId: message.payload.requestId || '',
+              streamId: message.payload.streamId || '',
+              code: 'remote_window_stream_stop_failed',
+              message: error instanceof Error ? error.message : 'remote window stream stop failed',
+            },
+          });
+        });
+        break;
+      case 'remote-window-input':
+        void deps.remoteWindowStreamRuntime.injectInput(message.payload).then((payload) => {
+          deps.sendTransportMessage(connection.transport, 'accepted' in payload
+            ? { type: 'remote-window-input-result', payload }
+            : { type: 'remote-window-error', payload });
+        }).catch((error: unknown) => {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'remote-window-error',
+            payload: {
+              requestId: message.payload.requestId || '',
+              streamId: message.payload.streamId || '',
+              code: 'remote_window_input_failed',
+              message: error instanceof Error ? error.message : 'remote window input failed',
             },
           });
         });

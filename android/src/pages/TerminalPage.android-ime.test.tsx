@@ -10,7 +10,7 @@ import {
 } from "@testing-library/react";
 import { useState } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { STORAGE_KEYS, type Session } from "../lib/types";
+import { STORAGE_KEYS, type RemoteWindowStreamTargetManifest, type Session } from "../lib/types";
 import {
   TerminalPage,
   resolveKeyboardLiftPx,
@@ -268,6 +268,33 @@ function makeSession(id: string): Session {
   };
 }
 
+function makeRemoteWindowTarget(): RemoteWindowStreamTargetManifest {
+  return {
+    streamTargetId: "app-1",
+    videoTarget: {
+      kind: "app-window",
+      appBundleId: "com.apple.TextEdit",
+      pid: 123,
+      windowId: "window-1",
+      title: "TextEdit",
+      windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 600 },
+      cropRectTopLeftPx: { x: 10, y: 40, width: 800, height: 560 },
+    },
+    inputTarget: {
+      kind: "app-window",
+    },
+    streamMode: "interactive",
+    focusPolicy: "bring-to-focus",
+    inputRoute: "os-event",
+    capture: {
+      source: "ScreenCaptureKit",
+      coordinateSpace: "macos-top-left-px",
+      scale: 1,
+      createdAt: "2026-07-19T00:00:00.000Z",
+    },
+  };
+}
+
 async function flushAndroidImeFocusTimer() {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 80));
@@ -342,6 +369,115 @@ describe("TerminalPage Android IME bridge", () => {
     await flushAndroidImeFocusTimer();
 
     expect(vi.mocked(ImeAnchor.show)).not.toHaveBeenCalled();
+  });
+
+  it("routes Android IME text, backspace, and Enter to the active remote-window stream", async () => {
+    const session = makeSession("s1");
+    const mediaStream = { id: "media-stream-1" } as MediaStream;
+    const onTerminalInput = vi.fn();
+    const onSendRemoteWindowInput = vi.fn();
+    const onRequestRemoteWindowTargets = vi.fn(async () => ({
+      requestId: "rw-1",
+      targets: [makeRemoteWindowTarget()],
+      errors: [],
+    }));
+    const onRequestRemoteWindowStreamStart = vi.fn(async (
+      _sessionId: string,
+      _target: RemoteWindowStreamTargetManifest,
+      streamId: string,
+    ) => ({
+      streamId,
+      mediaStream,
+      started: {
+        requestId: "rw-start-1",
+        streamId,
+        targetId: "app-1",
+        answer: { type: "answer" as const, sdp: "v=0" },
+        capture: {
+          source: "ScreenCaptureKit" as const,
+          frameWidth: 800,
+          frameHeight: 560,
+          frameRate: 30,
+          targetKind: "app-window" as const,
+        },
+        transport: {
+          kind: "webrtc-video" as const,
+        },
+      },
+    }));
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
+        onRequestRemoteWindowStreamStart={onRequestRemoteWindowStreamStart}
+        onSendRemoteWindowInput={onSendRemoteWindowInput}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("input")).toBe(true);
+      expect(imeListeners.has("backspace")).toBe(true);
+      expect(imeListeners.has("key")).toBe(true);
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "打开远程窗口" }));
+    await screen.findByTestId("remote-window-target-app-1");
+    fireEvent.click(screen.getByTestId("remote-window-target-app-1"));
+
+    await waitFor(() => {
+      expect(onRequestRemoteWindowStreamStart).toHaveBeenCalled();
+    });
+
+    act(() => {
+      imeListeners.get("input")?.({ text: "中文￥\ninput" });
+      imeListeners.get("backspace")?.({ count: 1 });
+      imeListeners.get("key")?.({ key: "Enter", code: "Enter" });
+    });
+
+    await waitFor(() => {
+      expect(onSendRemoteWindowInput).toHaveBeenCalledWith("s1", expect.objectContaining({
+        targetId: "app-1",
+        event: expect.objectContaining({
+          kind: "key",
+          phase: "down",
+          key: "中文￥\ninput",
+          text: "中文￥\ninput",
+        }),
+      }));
+      expect(onSendRemoteWindowInput).toHaveBeenCalledWith("s1", expect.objectContaining({
+        targetId: "app-1",
+        event: expect.objectContaining({
+          kind: "key",
+          phase: "down",
+          key: "Backspace",
+          code: "Backspace",
+        }),
+      }));
+      expect(onSendRemoteWindowInput).toHaveBeenCalledWith("s1", expect.objectContaining({
+        targetId: "app-1",
+        event: expect.objectContaining({
+          kind: "key",
+          phase: "down",
+          key: "Enter",
+          code: "Enter",
+        }),
+      }));
+    });
+    expect(onTerminalInput).not.toHaveBeenCalled();
   });
 
   it("does not show Android IME when tapping the terminal surface", async () => {
@@ -1081,6 +1217,59 @@ describe("TerminalPage Android IME bridge", () => {
       ).toBe("false");
     });
     expect(onResize).not.toHaveBeenCalled();
+  });
+
+  it("reserves Android status-bar safe area for the portrait terminal stage", () => {
+    const originalInnerWidth = window.innerWidth;
+    const originalInnerHeight = window.innerHeight;
+    const originalClientWidth = document.documentElement.clientWidth;
+    const originalClientHeight = document.documentElement.clientHeight;
+    const originalVisualViewport = window.visualViewport;
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 393 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 852 });
+    Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, value: 393 });
+    Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: 852 });
+    Object.defineProperty(window, "visualViewport", {
+      configurable: true,
+      value: {
+        width: 393,
+        height: 852,
+        offsetTop: 0,
+        offsetLeft: 0,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    });
+
+    try {
+      const session = makeSession("s1");
+      render(
+        <TerminalPage
+          sessions={[session]}
+          activeSession={session}
+          onSwitchSession={vi.fn()}
+          onMoveSession={vi.fn()}
+          onRenameSession={vi.fn()}
+          onCloseSession={vi.fn()}
+          onOpenConnections={vi.fn()}
+          onOpenQuickTabPicker={vi.fn()}
+          onResize={vi.fn()}
+          onTerminalInput={vi.fn()}
+          onTerminalViewportChange={vi.fn()}
+          quickActions={[]}
+          shortcutActions={[]}
+          sessionDraft=""
+        />,
+      );
+
+      expect(screen.getByTestId("terminal-stage-shell").getAttribute("style") || "").toContain("top: 66px;");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalInnerWidth });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });
+      Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, value: originalClientWidth });
+      Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: originalClientHeight });
+      Object.defineProperty(window, "visualViewport", { configurable: true, value: originalVisualViewport });
+    }
   });
 
   it("keeps the terminal stage container stable while lifting quickbar above the IME", async () => {

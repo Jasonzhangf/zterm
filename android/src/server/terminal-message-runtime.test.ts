@@ -57,6 +57,40 @@ function createSession(id = 'session-1'): TerminalSession {
   };
 }
 
+function makeRemoteWindowTargetManifest() {
+  return {
+    streamTargetId: 'iterm2-pane:window:tab:pane',
+    videoTarget: {
+      kind: 'iterm2-pane' as const,
+      appBundleId: 'com.googlecode.iterm2',
+      pid: 0,
+      windowId: 'window',
+      title: 'pane',
+      windowBoundsTopLeftPx: { x: 0, y: 10, width: 800, height: 600 },
+      paneRectInContentPx: { x: 0, y: 20, width: 800, height: 300 },
+      cropRectTopLeftPx: { x: 0, y: 30, width: 800, height: 300 },
+      contentTopInsetPx: 10,
+    },
+    inputTarget: {
+      kind: 'tmux-pane' as const,
+      itermSessionId: 'pane',
+      tty: '/dev/ttys001',
+      tmuxSession: 'zterm',
+      tmuxWindowId: '@1',
+      tmuxPaneId: '%2',
+    },
+    streamMode: 'view' as const,
+    focusPolicy: 'no-focus-steal' as const,
+    inputRoute: 'tmux-input' as const,
+    capture: {
+      source: 'ScreenCaptureKit' as const,
+      coordinateSpace: 'macos-top-left-px' as const,
+      scale: 1,
+      createdAt: '2026-07-19T00:00:00.000Z',
+    },
+  };
+}
+
 function createReadyMirror(): SessionMirror {
   return {
     key: 'demo',
@@ -107,6 +141,9 @@ function createRuntime(options?: {
   mirror?: SessionMirror | null;
 }) {
   type RemoteWindowListTargetsResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['listTargets']>>;
+  type RemoteWindowStartStreamResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['startStream']>>;
+  type RemoteWindowStopStreamResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['stopStream']>>;
+  type RemoteWindowInputResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['injectInput']>>;
   const sessions = new Map<string, TerminalSession>();
   const sendTransportMessage = vi.fn();
   const sendMessage = vi.fn();
@@ -126,6 +163,33 @@ function createRuntime(options?: {
     }));
   const remoteWindowStreamRuntime = {
     listTargets: listRemoteWindowTargets,
+    startStream: vi.fn(async (): Promise<RemoteWindowStartStreamResult> => ({
+      requestId: 'remote-window-start-default',
+      streamId: 'stream-default',
+      targetId: 'target-default',
+      answer: { type: 'answer', sdp: 'answer-sdp' },
+      capture: {
+        source: 'ScreenCaptureKit',
+        frameWidth: 640,
+        frameHeight: 360,
+        frameRate: 12,
+        targetKind: 'app-window',
+      },
+      transport: { kind: 'webrtc-video' },
+    })),
+    addIceCandidate: vi.fn(async () => true),
+    stopStream: vi.fn(async (): Promise<RemoteWindowStopStreamResult> => ({
+      requestId: 'remote-window-stop-default',
+      streamId: 'stream-default',
+      phase: 'stopped',
+    })),
+    injectInput: vi.fn(async (): Promise<RemoteWindowInputResult> => ({
+      requestId: 'remote-window-input-default',
+      streamId: 'stream-default',
+      targetId: 'target-default',
+      accepted: true,
+    })),
+    dispose: vi.fn(),
   };
 
   const runtime = createTerminalMessageRuntime({
@@ -560,6 +624,77 @@ describe('terminal message runtime explicit error truth', () => {
     expect(JSON.stringify(daemonRuntimeDebug.mock.calls)).not.toContain('pwd');
   });
 
+  it('writes reliable input payloads once and acks the accepted seq', async () => {
+    const { runtime, sessions, handleInput, sendTransportMessage } = createRuntime();
+    const session = createSession();
+    const connection = createConnection(session.id);
+    bindSessionToConnection(session, connection);
+    sessions.set(session.id, session);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'input',
+      payload: {
+        version: 1,
+        seq: 'input-seq-1',
+        data: 'pwd\r',
+        sentAt: 1000,
+        attempt: 1,
+      },
+    })));
+
+    expect(handleInput).toHaveBeenCalledWith(session, 'pwd\r', expect.any(Function));
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'input-ack',
+      payload: {
+        version: 1,
+        seq: 'input-seq-1',
+        accepted: true,
+        bytes: 4,
+      },
+    });
+  });
+
+  it('acks duplicate reliable input seq without writing it to tmux twice', async () => {
+    const { runtime, sessions, handleInput, sendTransportMessage } = createRuntime();
+    const session = createSession();
+    const connection = createConnection(session.id);
+    bindSessionToConnection(session, connection);
+    sessions.set(session.id, session);
+    const message = Buffer.from(JSON.stringify({
+      type: 'input',
+      payload: {
+        version: 1,
+        seq: 'input-seq-dup',
+        data: 'echo once\r',
+        sentAt: 1000,
+        attempt: 1,
+      },
+    }));
+
+    await runtime.handleMessage(connection, message);
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'input',
+      payload: {
+        version: 1,
+        seq: 'input-seq-dup',
+        data: 'echo once\r',
+        sentAt: 1500,
+        attempt: 2,
+      },
+    })));
+
+    expect(handleInput).toHaveBeenCalledTimes(1);
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'input-ack',
+      payload: {
+        version: 1,
+        seq: 'input-seq-dup',
+        accepted: true,
+        bytes: 10,
+      },
+    });
+  });
+
   it('accepts input payloads at the daemon frame byte limit', async () => {
     const { runtime, sessions, handleInput, sendMessage } = createRuntime();
     const session = createSession();
@@ -612,7 +747,7 @@ describe('terminal message runtime explicit error truth', () => {
   });
 
   it('rejects object input payloads instead of writing object stringification to tmux', async () => {
-    const { runtime, sessions, handleInput, sendMessage } = createRuntime();
+    const { runtime, sessions, handleInput, sendMessage, sendTransportMessage } = createRuntime();
     const session = createSession();
     const connection = createConnection(session.id);
     bindSessionToConnection(session, connection);
@@ -627,6 +762,47 @@ describe('terminal message runtime explicit error truth', () => {
     })));
 
     expect(handleInput).not.toHaveBeenCalled();
+    expect(sendMessage).toHaveBeenCalledWith(session, {
+      type: 'error',
+      payload: {
+        message: 'invalid input payload',
+        code: 'input_invalid',
+      },
+    });
+    expect(sendTransportMessage).not.toHaveBeenCalledWith(connection.transport, expect.objectContaining({
+      type: 'input-ack',
+    }));
+  });
+
+  it('rejects invalid reliable input seq with nack and never writes object data to tmux', async () => {
+    const { runtime, sessions, handleInput, sendMessage, sendTransportMessage } = createRuntime();
+    const session = createSession();
+    const connection = createConnection(session.id);
+    bindSessionToConnection(session, connection);
+    sessions.set(session.id, session);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'input',
+      payload: {
+        version: 1,
+        seq: 'bad-seq',
+        data: ['not-string'],
+        sentAt: 1000,
+        attempt: 1,
+      },
+    })));
+
+    expect(handleInput).not.toHaveBeenCalled();
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'input-ack',
+      payload: {
+        version: 1,
+        seq: 'bad-seq',
+        accepted: false,
+        bytes: 0,
+        error: 'input_invalid',
+      },
+    });
     expect(sendMessage).toHaveBeenCalledWith(session, {
       type: 'error',
       payload: {
@@ -733,37 +909,7 @@ describe('terminal message runtime explicit error truth', () => {
     const connection = createConnection(null);
     const payload = {
       requestId: 'rw-1',
-      targets: [{
-        streamTargetId: 'iterm2-pane:window:tab:pane',
-        videoTarget: {
-          kind: 'iterm2-pane' as const,
-          appBundleId: 'com.googlecode.iterm2',
-          pid: 0,
-          windowId: 'window',
-          title: 'pane',
-          windowBoundsTopLeftPx: { x: 0, y: 10, width: 800, height: 600 },
-          paneRectInContentPx: { x: 0, y: 20, width: 800, height: 300 },
-          cropRectTopLeftPx: { x: 0, y: 30, width: 800, height: 300 },
-          contentTopInsetPx: 10,
-        },
-        inputTarget: {
-          kind: 'tmux-pane' as const,
-          itermSessionId: 'pane',
-          tty: '/dev/ttys001',
-          tmuxSession: 'zterm',
-          tmuxWindowId: '@1',
-          tmuxPaneId: '%2',
-        },
-        streamMode: 'view' as const,
-        focusPolicy: 'no-focus-steal' as const,
-        inputRoute: 'tmux-input' as const,
-        capture: {
-          source: 'ScreenCaptureKit' as const,
-          coordinateSpace: 'macos-top-left-px' as const,
-          scale: 1,
-          createdAt: '2026-07-19T00:00:00.000Z',
-        },
-      }],
+      targets: [makeRemoteWindowTargetManifest()],
     };
     remoteWindowStreamRuntime.listTargets.mockResolvedValueOnce(payload);
 
@@ -800,6 +946,235 @@ describe('terminal message runtime explicit error truth', () => {
     expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
       type: 'remote-window-error',
       payload,
+    });
+  });
+
+  it('routes remote window stream start and daemon candidates through the same control transport', async () => {
+    const { runtime, sendTransportMessage, remoteWindowStreamRuntime, terminalFileTransferRuntime } = createRuntime();
+    const connection = createConnection(null);
+    const startedPayload = {
+      requestId: 'rw-start-1',
+      streamId: 'stream-1',
+      targetId: 'iterm2-pane:window:tab:pane',
+      answer: { type: 'answer' as const, sdp: 'daemon-answer' },
+      capture: {
+        source: 'ScreenCaptureKit' as const,
+        frameWidth: 800,
+        frameHeight: 300,
+        frameRate: 12,
+        targetKind: 'iterm2-pane' as const,
+      },
+      transport: { kind: 'webrtc-video' as const },
+    };
+    (remoteWindowStreamRuntime.startStream as any).mockImplementationOnce(async (_payload: unknown, handlers: any) => {
+      handlers?.sendIceCandidate?.({
+        requestId: 'rw-start-1',
+        streamId: 'stream-1',
+        candidate: { candidate: 'candidate:daemon', sdpMid: '0', sdpMLineIndex: 0 },
+      });
+      handlers?.sendStatus?.({
+        requestId: 'rw-start-1',
+        streamId: 'stream-1',
+        phase: 'streaming',
+        framesSent: 1,
+      });
+      return startedPayload;
+    });
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'remote-window-stream-start-request',
+      payload: {
+        requestId: 'rw-start-1',
+        streamId: 'stream-1',
+        target: makeRemoteWindowTargetManifest(),
+        offer: { type: 'offer', sdp: 'android-offer' },
+      },
+    })));
+    await flushAsyncHandlers();
+
+    expect(remoteWindowStreamRuntime.startStream).toHaveBeenCalledWith(
+      expect.objectContaining({ requestId: 'rw-start-1', streamId: 'stream-1' }),
+      expect.objectContaining({
+        sendIceCandidate: expect.any(Function),
+        sendStatus: expect.any(Function),
+      }),
+    );
+    expect(terminalFileTransferRuntime.handleRemoteScreenshotRequest).not.toHaveBeenCalled();
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'remote-window-stream-ice-candidate',
+      payload: {
+        requestId: 'rw-start-1',
+        streamId: 'stream-1',
+        candidate: { candidate: 'candidate:daemon', sdpMid: '0', sdpMLineIndex: 0 },
+      },
+    });
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'remote-window-stream-status',
+      payload: {
+        requestId: 'rw-start-1',
+        streamId: 'stream-1',
+        phase: 'streaming',
+        framesSent: 1,
+      },
+    });
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'remote-window-stream-started',
+      payload: startedPayload,
+    });
+  });
+
+  it('routes stream ICE candidates and stop requests to the daemon stream owner', async () => {
+    const { runtime, sendTransportMessage, remoteWindowStreamRuntime } = createRuntime();
+    const connection = createConnection(null);
+    const stopPayload = {
+      requestId: 'rw-stop-1',
+      streamId: 'stream-1',
+      phase: 'stopped' as const,
+      framesSent: 3,
+      message: 'remote window stream stopped',
+    };
+    remoteWindowStreamRuntime.stopStream.mockResolvedValueOnce(stopPayload);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'remote-window-stream-ice-candidate',
+      payload: {
+        requestId: 'rw-candidate-1',
+        streamId: 'stream-1',
+        candidate: { candidate: 'candidate:android', sdpMid: '0', sdpMLineIndex: 0 },
+      },
+    })));
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'remote-window-stream-stop-request',
+      payload: {
+        requestId: 'rw-stop-1',
+        streamId: 'stream-1',
+      },
+    })));
+    await flushAsyncHandlers();
+
+    expect(remoteWindowStreamRuntime.addIceCandidate).toHaveBeenCalledWith({
+      requestId: 'rw-candidate-1',
+      streamId: 'stream-1',
+      candidate: { candidate: 'candidate:android', sdpMid: '0', sdpMLineIndex: 0 },
+    });
+    expect(remoteWindowStreamRuntime.stopStream).toHaveBeenCalledWith({
+      requestId: 'rw-stop-1',
+      streamId: 'stream-1',
+    });
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'remote-window-stream-status',
+      payload: stopPayload,
+    });
+  });
+
+  it('routes remote window input to the daemon stream owner and returns explicit acceptance', async () => {
+    const { runtime, sendTransportMessage, remoteWindowStreamRuntime } = createRuntime();
+    const connection = createConnection(null);
+    const inputPayload = {
+      requestId: 'rw-input-1',
+      streamId: 'stream-1',
+      targetId: 'target-1',
+      accepted: true,
+    };
+    remoteWindowStreamRuntime.injectInput.mockResolvedValueOnce(inputPayload);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'remote-window-input',
+      payload: {
+        requestId: 'rw-input-1',
+        streamId: 'stream-1',
+        targetId: 'target-1',
+        event: {
+          kind: 'pointer',
+          phase: 'down',
+          pointerId: 1,
+          button: 'left',
+          buttons: 1,
+          x: 100,
+          y: 120,
+          normalizedX: 0.5,
+          normalizedY: 0.6,
+        },
+      },
+    })));
+    await flushAsyncHandlers();
+
+    expect(remoteWindowStreamRuntime.injectInput).toHaveBeenCalledWith({
+      requestId: 'rw-input-1',
+      streamId: 'stream-1',
+      targetId: 'target-1',
+      event: expect.objectContaining({
+        kind: 'pointer',
+        phase: 'down',
+      }),
+    });
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'remote-window-input-result',
+      payload: inputPayload,
+    });
+  });
+
+  it('surfaces remote window input policy errors explicitly', async () => {
+    const { runtime, sendTransportMessage, remoteWindowStreamRuntime } = createRuntime();
+    const connection = createConnection(null);
+    const errorPayload = {
+      requestId: 'rw-input-fail',
+      streamId: 'stream-1',
+      code: 'remote_window_input_failed',
+      message: 'remote window OS input requires bring-to-focus policy',
+    };
+    remoteWindowStreamRuntime.injectInput.mockResolvedValueOnce(errorPayload);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'remote-window-input',
+      payload: {
+        requestId: 'rw-input-fail',
+        streamId: 'stream-1',
+        targetId: 'target-1',
+        event: {
+          kind: 'key',
+          phase: 'down',
+          key: 'a',
+          code: 'KeyA',
+          text: 'a',
+        },
+      },
+    })));
+    await flushAsyncHandlers();
+
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'remote-window-error',
+      payload: errorPayload,
+    });
+  });
+
+  it('surfaces stream start errors explicitly without converting them into catalog or screenshot success', async () => {
+    const { runtime, sendTransportMessage, remoteWindowStreamRuntime, terminalFileTransferRuntime } = createRuntime();
+    const connection = createConnection(null);
+    const errorPayload = {
+      requestId: 'rw-start-fail',
+      streamId: 'stream-fail',
+      code: 'remote_window_stream_start_failed',
+      message: 'ScreenCaptureKit capture start failure',
+    };
+    remoteWindowStreamRuntime.startStream.mockResolvedValueOnce(errorPayload);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'remote-window-stream-start-request',
+      payload: {
+        requestId: 'rw-start-fail',
+        streamId: 'stream-fail',
+        target: makeRemoteWindowTargetManifest(),
+        offer: { type: 'offer', sdp: 'android-offer' },
+      },
+    })));
+    await flushAsyncHandlers();
+
+    expect(terminalFileTransferRuntime.handleRemoteScreenshotRequest).not.toHaveBeenCalled();
+    expect(remoteWindowStreamRuntime.listTargets).not.toHaveBeenCalled();
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'remote-window-error',
+      payload: errorPayload,
     });
   });
 });
