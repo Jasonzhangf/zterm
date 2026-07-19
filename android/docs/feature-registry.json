@@ -165,6 +165,45 @@
       ]
     },
     {
+      "feature_id": "desktop.remote_window_stream",
+      "title": "Remote app/window and iTerm2 pane video stream",
+      "domain": "remote-desktop",
+      "owners": [
+        "docs/decisions/2026-07-19-remote-window-stream-truth.md"
+      ],
+      "allowed_paths": [
+        "docs/decisions/2026-07-19-remote-window-stream-truth.md",
+        "docs/testing/remote-window-stream-test-design.md",
+        "docs/resource-registry.json",
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/feature-gates.md",
+        "docs/wiki/mainline-source.md",
+        "docs/wiki/mainline-call-map.json",
+        "docs/architecture.md"
+      ],
+      "forbidden_paths": [
+        "src/components/TerminalView.tsx",
+        "src/lib/session-render-gate.ts",
+        "src/contexts/session-context-buffer-runtime.ts",
+        "src/server/terminal-mirror-runtime.ts",
+        "src/lib/remote-screenshot-runtime.ts"
+      ],
+      "required_gates": [
+        "src/lib/feature-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/function-map-resource-truth.test.ts",
+        "src/lib/mainline-resource-call-map.test.ts",
+        "src/lib/function-wiki-truth.test.ts",
+        "docs/testing/remote-window-stream-test-design.md"
+      ],
+      "truth_sources": [
+        "docs/architecture.md",
+        "docs/dev-workflow.md",
+        "docs/decisions/2026-07-19-remote-window-stream-truth.md"
+      ]
+    },
+    {
       "feature_id": "terminal.open_tabs",
       "title": "Ephemeral open tab projection and explicit close lifecycle",
       "domain": "terminal-session",

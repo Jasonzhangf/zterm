@@ -33,6 +33,7 @@ flowchart TD
   App --> TerminalPage["src/pages/TerminalPage.tsx"]
   TerminalPage --> TerminalView["src/components/TerminalView.tsx"]
   TerminalPage --> QuickBar["src/components/terminal/TerminalQuickBar.tsx"]
+  TerminalPage --> RemoteWindowOverlay["docs/decisions/2026-07-19-remote-window-stream-truth.md#remote-window-overlay-binding-pending"]
   TerminalPage --> StageShell["src/pages/TerminalPageStageShell.tsx"]
   TerminalPage --> LayoutProfile["src/lib/terminal-layout-profile.ts"]
   LayoutProfile --> StageShell
@@ -89,6 +90,7 @@ flowchart TD
   Control --> Schedule["src/server/terminal-schedule-runtime.ts"]
   Control --> Transfer["src/server/terminal-file-transfer-runtime.ts"]
   Control --> Screenshot["src/server/remote-screenshot-daemon.ts"]
+  Control --> RemoteWindowStream["docs/decisions/2026-07-19-remote-window-stream-truth.md#remote-window-stream-binding-pending"]
   Server --> Http["src/server/terminal-http-runtime.ts"]
   Server --> Debug["src/server/terminal-debug-runtime.ts"]
   Server --> Transport["src/server/terminal-transport-runtime.ts"]
@@ -133,6 +135,9 @@ flowchart TD
   RendererWindow --> UiProjection["resource.ui_projection"]
   UiProjection --> PreviewSelection["resource.session_preview_selection"]
   UiProjection --> PreviewMode["resource.session_preview_mode"]
+  UiProjection --> RemoteWindowOverlay["resource.remote_window_overlay"]
+  RemoteWindowOverlay --> RemoteWindowStream["resource.remote_window_stream"]
+  RemoteWindowStream --> DaemonProcess
   PreviewSelection --> OpenTab
   PreviewMode --> UiProjection
   OpenTab["resource.open_tab"] --> ActiveSession["resource.active_session"]
@@ -156,11 +161,12 @@ flowchart TD
 | Terminal body receive/apply/render | `src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime`, `src/contexts/session-context-buffer-runtime.ts#applyIncomingBufferSyncRuntime`, `src/lib/session-render-gate.ts#scheduleCommit`, `src/lib/session-render-buffer-store.ts` |
 | Terminal performance observer | `src/lib/terminal-performance-trace.ts`, `src/server/terminal-debug-runtime.ts`, `src/lib/runtime-debug.ts`; metadata only, no terminal text/cells |
 | Terminal shell and panes | `src/pages/TerminalPageStageShell.tsx`, `src/hooks/useTerminalWorkspace.ts`, `src/components/terminal/TerminalQuickBar.tsx` |
+| Remote window stream projection | `docs/decisions/2026-07-19-remote-window-stream-truth.md`; implementation pending for Android overlay owner and daemon/native stream owner |
 | Terminal session group layout | `src/lib/terminal-layout-profile.ts`, `src/pages/TerminalPageStageShell.tsx`, `docs/features/terminal-session-group-layout.md`, `docs/testing/terminal-session-group-layout-test-design.md` |
 | Session drawer (multi-host) | `src/components/terminal/TerminalSessionDrawer.tsx` (UI), `src/pages/TerminalPage.tsx` (`drawerServerIdentityAliases` canonicalizes live/session-group/Relay endpoint identity; `drawerSessions` projects hostKey/hostLabel + opened-first ordering) |
 | Session quick preview | `src/lib/session-preview-selection.ts`, `src/lib/session-preview-gesture.ts`, `src/components/terminal/TerminalPreviewGrid.tsx`, `src/pages/TerminalPageStageShell.tsx` |
 | Daemon runtime | `src/server/server.ts`, `src/server/terminal-daemon-runtime.ts`, `src/server/terminal-runtime.ts`, `src/server/terminal-message-runtime.ts`, `src/server/terminal-mirror-runtime.ts`, `src/server/terminal-message-control-runtime.ts`, `src/server/terminal-transport-runtime.ts` |
-| Daemon control edges | `src/server/terminal-control-runtime.ts`, `src/server/terminal-file-transfer-runtime.ts`, `src/server/terminal-schedule-runtime.ts`, `src/server/remote-screenshot-daemon.ts`, `src/server/terminal-http-runtime.ts` |
+| Daemon control edges | `src/server/terminal-control-runtime.ts`, `src/server/terminal-file-transfer-runtime.ts`, `src/server/terminal-schedule-runtime.ts`, `src/server/remote-screenshot-daemon.ts`, `src/server/terminal-http-runtime.ts`; remote window stream daemon/native owner binding pending in `docs/decisions/2026-07-19-remote-window-stream-truth.md` |
 | Daemon CLI | `scripts/zterm-daemon.sh`, `scripts/windows/zterm-daemon.ps1`, `scripts/install-global-daemon-cli.sh`, `scripts/prepare-global-daemon-release.sh`, `scripts/prepare-daemon-npm-package.mjs` |
 | Release/update | `scripts/build-android-debug.sh`, `scripts/prepare-update-bundle.mjs`, `scripts/verify-release-assets.mjs`; Relay public update route is authored in `src/traversal-relay/server.ts` and packaged by `scripts/prepare-relay-server-npm-package.mjs` with `ZTERM_TRAVERSAL_UPDATES_DIR` |
 | Worker wiki generator | `scripts/build-function-wiki.mjs`, `docs/wiki/daemon.md`, `docs/wiki/cli.md`, `docs/wiki/mainline-source.md` |

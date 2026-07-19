@@ -311,6 +311,20 @@
       "canonical_docs": ["docs/resource-map.md", "docs/function-map.md"]
     },
     {
+      "resource_id": "resource.remote_window_stream",
+      "resource_type": "daemon_backend_truth",
+      "identity": "Remote app/window/iTerm2 pane catalog, coordinate manifest, WebRTC media sender, and remote input target lease",
+      "owner_feature": "desktop.remote_window_stream",
+      "truth_store": "docs/decisions/2026-07-19-remote-window-stream-truth.md",
+      "allowed_operations": ["enumerate_targets", "resolve_iterm2_pane", "normalize_coordinates", "start_stream", "shrink_stream_projection", "stop_stream", "inject_input"],
+      "direct_relations": ["resource.daemon_process", "resource.transport_target"],
+      "indirect_relations": ["resource.tmux_session", "resource.daemon_input_queue"],
+      "via_resources": ["resource.daemon_input_queue", "resource.backend_session"],
+      "forbidden_direct_relations": ["resource.mirror_store", "resource.client_sparse_buffer", "resource.renderer_window", "resource.ui_projection"],
+      "required_gates": ["src/lib/resource-registry-truth.test.ts", "docs/testing/remote-window-stream-test-design.md"],
+      "canonical_docs": ["docs/resource-map.md", "docs/function-map.md", "docs/decisions/2026-07-19-remote-window-stream-truth.md"]
+    },
+    {
       "resource_id": "resource.client_sparse_buffer",
       "resource_type": "client_buffer_render_truth",
       "identity": "Client local sparse buffer and visible-range gap repair truth",
@@ -347,13 +361,28 @@
       "allowed_operations": ["display_projection", "emit_user_intent", "sort_projection"],
       "direct_relations": [
         "resource.session_preview_selection",
-        "resource.session_preview_mode"
+        "resource.session_preview_mode",
+        "resource.remote_window_overlay"
       ],
       "indirect_relations": ["resource.session_transport"],
       "via_resources": ["resource.active_session"],
       "forbidden_direct_relations": ["resource.backend_session", "resource.tmux_session", "resource.wezterm_pane", "resource.daemon_runtime_artifact"],
       "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/components/terminal/TerminalSessionDrawer.test.tsx"],
       "canonical_docs": ["docs/resource-map.md", "docs/function-map.md"]
+    },
+    {
+      "resource_id": "resource.remote_window_overlay",
+      "resource_type": "projection_resource",
+      "identity": "Android remote window picker, floating stream overlay, fullscreen letterbox projection, and Back/minimize/close intent",
+      "owner_feature": "desktop.remote_window_stream",
+      "truth_store": "docs/decisions/2026-07-19-remote-window-stream-truth.md",
+      "allowed_operations": ["open_picker", "select_stream_target", "show_floating_overlay", "enter_fullscreen", "shrink_to_floating", "emit_close_intent"],
+      "direct_relations": ["resource.remote_window_stream"],
+      "indirect_relations": ["resource.transport_target"],
+      "via_resources": ["resource.active_session", "resource.session_transport"],
+      "forbidden_direct_relations": ["resource.daemon_process", "resource.tmux_session", "resource.mirror_store", "resource.client_sparse_buffer", "resource.renderer_window"],
+      "required_gates": ["src/lib/resource-registry-truth.test.ts", "docs/testing/remote-window-stream-test-design.md"],
+      "canonical_docs": ["docs/resource-map.md", "docs/function-map.md", "docs/decisions/2026-07-19-remote-window-stream-truth.md"]
     },
     {
       "resource_id": "resource.session_preview_selection",
@@ -424,6 +453,16 @@
       "from": "resource.release_update_artifact",
       "to": "resource.daemon_process",
       "via_resources": ["resource.daemon_runtime_artifact"]
+    },
+    {
+      "from": "resource.remote_window_overlay",
+      "to": "resource.transport_target",
+      "via_resources": ["resource.active_session", "resource.session_transport"]
+    },
+    {
+      "from": "resource.remote_window_stream",
+      "to": "resource.tmux_session",
+      "via_resources": ["resource.daemon_input_queue", "resource.backend_session"]
     }
   ],
   "forbidden_direct_relations": [
@@ -461,6 +500,16 @@
       "from": "resource.release_update_artifact",
       "to": "resource.daemon_process",
       "reason": "Runtime must consume promoted deterministic artifacts, not direct release/update outputs."
+    },
+    {
+      "from": "resource.ui_projection",
+      "to": "resource.remote_window_stream",
+      "reason": "Android UI may only project the overlay and emit intents; daemon/native stream truth owns catalog, coordinates, capture, WebRTC, and input injection."
+    },
+    {
+      "from": "resource.remote_window_stream",
+      "to": "resource.mirror_store",
+      "reason": "Remote window video is desktop media truth and must not reuse terminal mirror rows as video truth."
     }
   ]
 }

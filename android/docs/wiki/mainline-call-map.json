@@ -107,6 +107,10 @@
           "label": "src/components/terminal/TerminalQuickBar.tsx"
         },
         {
+          "id": "RemoteWindowOverlay",
+          "label": "docs/decisions/2026-07-19-remote-window-stream-truth.md#remote-window-overlay-binding-pending"
+        },
+        {
           "id": "StageShell",
           "label": "src/pages/TerminalPageStageShell.tsx"
         },
@@ -489,6 +493,19 @@
             "resource.active_session"
           ],
           "relation_status": "via"
+        },
+        {
+          "from": "TerminalPage",
+          "to": "RemoteWindowOverlay",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "floating entry, picker, stream overlay, fullscreen Back/minimize/close intent",
+          "semantic_output": "remote window overlay projection and stream target intent",
+          "status": "binding pending",
+          "edge_id": "android_mainline:TerminalPage->RemoteWindowOverlay",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.remote_window_overlay",
+          "via_resources": [],
+          "relation_status": "direct"
         },
         {
           "from": "TerminalPage",
@@ -1017,6 +1034,10 @@
           "label": "src/server/remote-screenshot-daemon.ts"
         },
         {
+          "id": "RemoteWindowStream",
+          "label": "docs/decisions/2026-07-19-remote-window-stream-truth.md#remote-window-stream-binding-pending"
+        },
+        {
           "id": "Http",
           "label": "src/server/terminal-http-runtime.ts"
         },
@@ -1249,6 +1270,19 @@
           "edge_id": "daemon_mainline:Control->Screenshot",
           "resource_from": "resource.remote_screenshot",
           "resource_to": "resource.backend_session",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "Control",
+          "to": "RemoteWindowStream",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "remote window catalog, target lock, stream start/stop, or input return request",
+          "semantic_output": "daemon/native window stream capture, WebRTC sender, coordinate manifest, or explicit stream/input error",
+          "status": "binding pending",
+          "edge_id": "daemon_mainline:Control->RemoteWindowStream",
+          "resource_from": "resource.remote_window_stream",
+          "resource_to": "resource.daemon_process",
           "via_resources": [],
           "relation_status": "direct"
         },

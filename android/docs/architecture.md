@@ -9,12 +9,13 @@
 5. `docs/decisions/2026-04-28-terminal-transport-session-lifecycle-truth.md`：terminal client session / transport 生命周期真源（daemon 不持有客户端逻辑）
 6. `docs/decisions/2026-04-22-session-schedule-timed-send.md`：per-session 定时发送 / heartbeat 调度真源
 7. `docs/decisions/2026-04-28-remote-screenshot-helper-truth.md`：remote screenshot daemon 唯一真源（文件名沿用历史编号）
-8. `dev-workflow.md`：执行门禁
-9. `task.md`：当前任务
-10. `CACHE.md`：短期上下文
-11. `MEMORY.md`：长期经验
-12. `evidence/`：运行证据
-13. `.agents/skills/terminal-buffer-truth/SKILL.md`：terminal buffer / render / scroll 真源规则
+8. `docs/decisions/2026-07-19-remote-window-stream-truth.md`：remote window stream / iTerm2 pane coordinate / input return 真源
+9. `dev-workflow.md`：执行门禁
+10. `task.md`：当前任务
+11. `CACHE.md`：短期上下文
+12. `MEMORY.md`：长期经验
+13. `evidence/`：运行证据
+14. `.agents/skills/terminal-buffer-truth/SKILL.md`：terminal buffer / render / scroll 真源规则
 
 ## 模块边界
 
@@ -57,6 +58,7 @@
 - Server live mirror cadence 只允许由 daemon 物理事实决定：健康 subscriber 存在时保持 active capture cadence；无 subscriber、失败/backoff、transport backpressure、capture cost 过高才允许降速。daemon 不读取 client active/visible/follow 状态，也不得用“最近无内容变化”把 ready mirror 降到 idle。
 - Server daemon 启动入口：`scripts/zterm-daemon.sh`
 - Screenshot Helper：运行在 macOS GUI session 的独立截图执行主体；只接受 daemon 本机 IPC 请求，不承载 tmux/session 真相
+- Remote Window Stream：daemon/native side owns app/window catalog, iTerm2 pane coordinate truth, ScreenCaptureKit capture, WebRTC sender lifecycle, and remote input injection policy. Android floating/fullscreen overlay only projects picker/stream UI and emits explicit intents.
 
 ## 跨尺寸布局真源
 
@@ -275,6 +277,27 @@ Android client -> zterm-daemon -> macOS screenshot truth
 - daemon 直接产出截图文件并通过既有 file-download stream 回传
 - daemon 不关心 Android preview/save UI
 - client 只消费 `capturing / transferring / preview-ready / failed`
+
+## Remote window stream 链路
+
+```text
+Android floating entry
+  -> remote window picker projection
+  -> zterm-daemon target catalog
+  -> iTerm2 pane coordinate / tmux reverse lookup
+  -> ScreenCaptureKit window capture + pane crop
+  -> WebRTC media stream
+  -> Android floating/fullscreen letterbox overlay
+```
+
+规则：
+
+- `resource.remote_window_overlay` 只拥有 Android picker / floating overlay / fullscreen overlay / Back 缩小 / close intent 投影。
+- `resource.remote_window_stream` 是 daemon/native 侧唯一真源，拥有 app/window 枚举、iTerm2 pane 枚举、坐标归一化、tmux 反查、capture、encoder/WebRTC sender、input target lease。
+- Android 不计算 macOS 坐标，不读取 iTerm2 split tree，不把 terminal buffer/render 当视频真源。
+- fullscreen Back 只从 fullscreen 缩小为 floating；只有 close 才释放 capture / encoder / WebRTC sender / target lease。
+- 后续鼠标键盘回传必须声明 `focusPolicy` 与 `inputRoute`。普通 app 的通用 OS input 默认要求 `bring-to-focus`；`no-focus-steal` 只可用于显式声明的 terminal-specific route，例如 iTerm2 API 或 tmux input。
+- 缺权限、窗口/pane 消失、坐标越界、iTerm2 API 不可用、tmux 反查失败、capture/WebRTC/input policy 失败都必须显式报错，禁止 fallback 到截图、terminal buffer、旧缓存图像或假成功。
 
 ## Session schedule / timed send 真源
 

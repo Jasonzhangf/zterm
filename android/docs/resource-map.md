@@ -12,7 +12,7 @@ Global scope includes:
 - Android, Mac, and Windows platform terminal surfaces.
 - terminal backend resources, including tmux and Windows WezTerm.
 - client session, transport, input, buffer, renderer, and UI projection resources.
-- CLI, release, update, debug, file transfer, schedule, and screenshot side resources.
+- CLI, release, update, debug, file transfer, schedule, screenshot, and remote window stream side resources.
 
 ## Resource Families
 
@@ -20,8 +20,8 @@ Global scope includes:
 | --- | --- | --- |
 | Global runtime | `resource.runtime_home`, `resource.daemon_runtime_artifact`, `resource.daemon_process`, `resource.release_update_artifact`, `resource.debug_channel` | Runtime consumes compiled/staged artifacts and explicit runtime home truth. Debug observes only. |
 | Platform client | `resource.open_tab`, `resource.active_session`, `resource.session_transport`, `resource.transport_target`, `resource.pending_open_intent`, `resource.platform_terminal_surface`, `resource.platform_input_channel` | Platform clients own user intent and transport identity, not backend resources. |
-| Daemon/backend | `resource.terminal_backend`, `resource.backend_session`, `resource.tmux_session`, `resource.wezterm_pane`, `resource.mirror_store`, `resource.transport_subscriber`, `resource.daemon_input_queue`, `resource.schedule_job`, `resource.file_transfer`, `resource.remote_screenshot` | Daemon owns backend sessions, physical subscribers, mirror truth, input queues, and daemon side jobs. It does not own client active/foreground/viewport/follow truth. |
-| Client buffer/render | `resource.client_sparse_buffer`, `resource.renderer_window`, `resource.ui_projection`, `resource.session_preview_selection`, `resource.session_preview_mode` | Client buffer consumes daemon mirror patches. Renderer declares visible demand. UI and preview resources project state and emit intent only. |
+| Daemon/backend | `resource.terminal_backend`, `resource.backend_session`, `resource.tmux_session`, `resource.wezterm_pane`, `resource.mirror_store`, `resource.transport_subscriber`, `resource.daemon_input_queue`, `resource.schedule_job`, `resource.file_transfer`, `resource.remote_screenshot`, `resource.remote_window_stream` | Daemon owns backend sessions, physical subscribers, mirror truth, input queues, and daemon side jobs. It does not own client active/foreground/viewport/follow truth. Remote window stream owns desktop media capture/input truth, not terminal buffer truth. |
+| Client buffer/render | `resource.client_sparse_buffer`, `resource.renderer_window`, `resource.ui_projection`, `resource.session_preview_selection`, `resource.session_preview_mode`, `resource.remote_window_overlay` | Client buffer consumes daemon mirror patches. Renderer declares visible demand. UI, preview, and remote-window overlay resources project state and emit intent only. |
 
 ## Allowed Direct Relations
 
@@ -48,6 +48,10 @@ flowchart TD
   RendererWindow --> UiProjection["resource.ui_projection"]
   UiProjection --> PreviewSelection["resource.session_preview_selection"]
   UiProjection --> PreviewMode["resource.session_preview_mode"]
+  UiProjection --> RemoteWindowOverlay["resource.remote_window_overlay"]
+  RemoteWindowOverlay --> RemoteWindowStream["resource.remote_window_stream"]
+  RemoteWindowStream --> DaemonProcess
+  RemoteWindowStream --> TransportTarget
   PreviewSelection --> OpenTab
   PreviewMode --> UiProjection
   PlatformSurface["resource.platform_terminal_surface"] --> UiProjection
@@ -72,6 +76,8 @@ flowchart TD
 | `resource.platform_terminal_surface` | `resource.backend_session` | via `resource.active_session -> resource.session_transport -> resource.transport_subscriber -> resource.mirror_store` |
 | `resource.release_update_artifact` | `resource.daemon_process` | via `resource.daemon_runtime_artifact` |
 | `resource.session_transport` | `resource.client_sparse_buffer` | via `resource.transport_subscriber -> resource.mirror_store` |
+| `resource.remote_window_overlay` | `resource.transport_target` | via `resource.active_session -> resource.session_transport` |
+| `resource.remote_window_stream` | `resource.tmux_session` | via `resource.daemon_input_queue -> resource.backend_session` |
 
 ## Forbidden Direct Relations
 
@@ -84,6 +90,8 @@ flowchart TD
 | `resource.daemon_process -> resource.active_session` | Daemon must not store client active/session/foreground state. |
 | `resource.debug_channel -> resource.mirror_store` | Debug side channels observe only and cannot become business truth. |
 | `resource.release_update_artifact -> resource.daemon_process` | Runtime must consume promoted deterministic artifacts, not direct release/update outputs. |
+| `resource.ui_projection -> resource.remote_window_stream` | UI may only project the overlay and emit intent; daemon/native stream truth owns catalog, coordinates, capture, WebRTC, and input injection. |
+| `resource.remote_window_stream -> resource.mirror_store` | Remote window video is desktop media truth and must not reuse terminal mirror rows as video truth. |
 
 ## Owner Locks
 
@@ -97,6 +105,8 @@ flowchart TD
 - `resource.renderer_window` owns follow/reading/render-bottom/visible demand and next-RAF commit only, not terminal content layout or network cadence.
 - `resource.session_preview_selection` owns only an ordered 1-6 client preference resolved through current open-tab truth; remote drawer catalog rows must first materialize through the existing session-open owner and persist only the returned local session id; drawer checkbox and in-preview add both route to this owner, add/replacement candidates are every currently open unselected Session, reorder only changes preference order, and tile close removes only that preview target without closing a Session or transport.
 - `resource.session_preview_mode` owns preview shell projection plus the captured entry-session projection used only by cancel. Entry does not mutate active session; tile activation emits one explicit switch; Back/right-swipe/close cancellation restores the captured entry session. Buffer, transport, and backend geometry remain untouched.
+- `resource.remote_window_overlay` owns only the Android picker/floating/fullscreen projection, Back shrink, minimize, and close intent. It does not compute macOS coordinates, read iTerm2 split trees, inject input, or own capture lifecycle.
+- `resource.remote_window_stream` owns daemon/native app/window/iTerm2 pane catalog, coordinate manifest, ScreenCaptureKit capture, WebRTC sender lifecycle, and input target lease. It may reverse-map iTerm2 `tty` to tmux client/session metadata, but terminal mirror/buffer/render resources are forbidden as video truth.
 - `resource.debug_channel` can observe and diagnose through bounded metadata-only trace records, but cannot become request/response business truth or contain terminal text/cells.
 - `resource.release_update_artifact` must promote through `resource.daemon_runtime_artifact`; runtime cannot scan authoring directories as capability truth.
 
