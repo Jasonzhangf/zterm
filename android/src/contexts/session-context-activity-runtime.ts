@@ -243,6 +243,21 @@ export function ensureActiveSessionFreshRuntime(options: {
       options.refs.pendingResumeTailRefreshRef.current.add(options.refreshOptions.sessionId);
     }
 
+    if (
+      options.refreshOptions.source === 'active-tick'
+      && ws?.readyState === WebSocket.OPEN
+      && pendingProbeStartedAt > 0
+      && !staleProbeTimedOut
+    ) {
+      options.runtimeDebug('session.transport.active-tick.head-probe.pending', {
+        sessionId: options.refreshOptions.sessionId,
+        activeSessionId: options.refs.stateRef.current.activeSessionId,
+        pendingProbeStartedAt,
+        pendingProbeAgeMs,
+      });
+      return false;
+    }
+
     if (shouldSkipImmediateForcedResumeHead) {
       options.refs.connectedBaselineBurstGuardRef.current.delete(options.refreshOptions.sessionId);
       return true;

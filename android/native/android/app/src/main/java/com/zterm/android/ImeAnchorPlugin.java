@@ -353,6 +353,29 @@ public class ImeAnchorPlugin extends Plugin {
         notifyListeners("key", payload);
     }
 
+    private void emitImeEnterKey(String source) {
+        Log.i(TAG, "emitImeEnterKey(): source=" + source);
+        emitHardwareKey("Enter", "Enter", false, false, false, false);
+    }
+
+    private void emitImeShiftEnterKey(String source) {
+        Log.i(TAG, "emitImeShiftEnterKey(): source=" + source);
+        emitHardwareKey("Enter", "Enter", false, false, false, true);
+    }
+
+    private boolean isLineBreakOnly(CharSequence text) {
+        if (text == null || text.length() == 0) {
+            return false;
+        }
+        for (int index = 0; index < text.length(); index += 1) {
+            char ch = text.charAt(index);
+            if (ch != '\n' && ch != '\r') {
+                return false;
+            }
+        }
+        return true;
+    }
+
     static String mapHardwareKeyEventToKey(int keyCode, KeyEvent event) {
         return mapHardwareKeyToKey(
             keyCode,
@@ -727,6 +750,11 @@ public class ImeAnchorPlugin extends Plugin {
                 @Override
                 public boolean commitText(CharSequence text, int newCursorPosition) {
                     if (plugin != null) {
+                        if (plugin.isLineBreakOnly(text)) {
+                            plugin.emitImeShiftEnterKey("commitText");
+                            plugin.clearImeEditText();
+                            return true;
+                        }
                         plugin.suppressFrameworkEditableDispatch = true;
                         boolean handled;
                         try {
@@ -746,6 +774,12 @@ public class ImeAnchorPlugin extends Plugin {
                 @Override
                 public boolean finishComposingText() {
                     if (plugin != null) {
+                        Editable editable = getText();
+                        if (plugin.isLineBreakOnly(editable)) {
+                            plugin.emitImeShiftEnterKey("finishComposingText");
+                            plugin.clearImeEditText();
+                            return true;
+                        }
                         plugin.suppressFrameworkEditableDispatch = true;
                         boolean handled;
                         try {
@@ -753,9 +787,9 @@ public class ImeAnchorPlugin extends Plugin {
                         } finally {
                             plugin.suppressFrameworkEditableDispatch = false;
                         }
-                        Editable editable = getText();
+                        Editable currentEditable = getText();
                         plugin.dispatchInputLogicEvents(
-                            plugin.inputLogic.onFinishComposingText(editable == null ? "" : editable.toString()),
+                            plugin.inputLogic.onFinishComposingText(currentEditable == null ? "" : currentEditable.toString()),
                             "finishComposingText"
                         );
                         return handled;
@@ -772,10 +806,8 @@ public class ImeAnchorPlugin extends Plugin {
                             case EditorInfo.IME_ACTION_SEND:
                             case EditorInfo.IME_ACTION_GO:
                             case EditorInfo.IME_ACTION_NEXT:
-                                plugin.dispatchInputLogicEvents(
-                                    plugin.inputLogic.onCommitText("\r"),
-                                    "performEditorAction"
-                                );
+                                plugin.emitImeEnterKey("performEditorAction");
+                                plugin.clearImeEditText();
                                 return true;
                             default:
                                 break;

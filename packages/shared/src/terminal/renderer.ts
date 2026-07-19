@@ -405,6 +405,9 @@ export function resolveTerminalKeyboardInput(
   if (event.key in arrows) {
     return arrows[event.key as keyof typeof arrows];
   }
+  if (event.key === 'Enter' && event.shiftKey) {
+    return '\n';
+  }
   switch (event.key) {
     case 'Enter': return '\r';
     case 'Backspace': return '\x7f';

@@ -1,3 +1,9 @@
+# 2026-07-18 Session switch slow reconnect audit
+
+- Jason 反馈当前每次切 session 都像要十来秒重新连接，旧版本没有。静态审计确认切换主线本身不应关闭旧 socket：`switchSession()` 只切 active、重置 pull bookkeeping、调用 `ensureActiveSessionFresh()`；`setActiveSessionSync()` 经 `reconcilePhysicalBodySubscriptions()` 给旧 session 发 `body-subscription:false`、给新 active/live session 发 `true`，服务端仅切 `session.bodySubscribed`，不 close transport。
+- 当前慢点来自 transport lifecycle 判定与重开路径：`buildActiveSessionRefreshPlan()` 在 `active-reentry/explicit-resume` 且最近有 activity 但 `ws` 已 `null/CLOSING/CLOSED` 时会返回 `transport-keepalive-grace`，先不 reconnect；若随后进入 reconnect，`reconnectSessionRuntime()` 会 `cleanupSocket(sessionId, false)`，把旧 active socket 移到 superseded、清 heartbeat/active socket，再走 control/session open。这个路径不再是“恢复 body push + ping/head probe”，而是 rebuild 语义。
+- 10 秒量级来自 traversal/open timeout：`TraversalSocket` 的 RTC candidate timeout 是 8000ms，WS candidate 是 1800ms；session/control handshake timeout 是 4000ms。若 route selector 先试不可达 WebRTC/relay candidate，再等 session ticket/handshake，体感就是 8-12s。下一步修复应在唯一 owner `terminal.transport_lifecycle`：切换回旧 session 时，若存在同 target old socket 或最近健康 baseline，先恢复 `body-subscription:true` + `ping/buffer-head-request` 探活，1-1.5s 无响应才 replace；禁止切换路径直接 cleanup/rebuild。回归 gate 必须锁 A->B->A 同 socket 保持、只发 body subscription/head probe、无 `cleanupSocket/reconnectSession/new TraversalSocket`；以及 closed socket probe timeout 后才重建并限制等待。
+
 # 2026-07-18 Long input tmux literal command limit
 
 - 长输入专项 L2 首次失败已追到第三层真源：probe 发出的 6 个 string-only input frame（5 x 65,536 bytes + 27,155 bytes）全部到达 daemon；随后 `terminal-control-runtime` 的 64 KiB `tmux send-keys -l` 参数逐个报 `command too long`，tmux oracle 未收到任何内容。
@@ -2593,3 +2599,46 @@ Need runtime debug to confirm:
 - Fix direction implemented in source: shared UTF-8 chunk helper; native `ImeAnchorInputLogic` chunks long commit events before WebView bridge emission; Android session input sends ordered string-only frames; daemon message frame max remains 256KB; daemon control queue preserves small coalescing but splits tmux write groups by byte budget and direct write paths use the same chunking.
 - Verified closeout: focused JS/native/daemon tests, shared chunk tests, Java IME tests, typecheck, feature/resource/function/mainline gates, full nine-case daemon mirror close-loop, Android build, and update manifest passed. `long-input-echo` automatically matched the 357,840-byte source and tmux target digest, then proved mirror recovery. APK `0.1.3.2150` was published with SHA-256 `82365b6c2614ccf41843d3e88f8d38d0e6caa335baf1e306e814992fc822a621`.
 - `adb devices -l` returned no online device, so real voice IME / Capacitor bridge / visible terminal L5 remains unverified.
+
+## 2026-07-18 Android IME shift-enter / RTC timeout closeout
+
+- User clarified the intended system IME semantics: `换行` is `Shift+Enter`, and `完成` is submit/Enter.
+- Implemented at the native IME owner:
+  - line-break-only `commitText()` / `finishComposingText()` emit shifted Enter
+  - `performEditorAction()` emits plain Enter submit
+  - shared terminal keyboard mapping preserves `Shift+Enter` as `\n` and plain Enter as `\r`
+- Shortened traversal RTC candidate timeout from 8000ms to 2500ms so session switching does not sit in a long candidate wait window.
+- Verified:
+  - focused IME / traversal / session-runtime / shared keyboard tests: 110 tests PASS
+  - `pnpm --dir android run test:feature-registry` PASS
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS
+  - `pnpm --dir android run build:android` PASS
+- APK published:
+  - version `0.1.3.2152`
+  - versionCode `1032152`
+  - sha256 `e3fb6bfabbbb6faa773bcd8852fd3b4d2bcdfd5e7e8eae2677e7237753d50b7c`
+  - path `android/update-dist/zterm-0.1.3.2152.apk`
+- `adb devices -l` returned no attached device in this workspace, so no install or UI L5 was claimed here.
+
+## 2026-07-18 Connected switch bookkeeping trim
+
+- Jason provided a recovery screenshot showing the switched session already in `connected / waiting`, while exit/re-enter worked normally.
+- Root finding: the switch path still owns the immediate `ensureActiveSessionFresh()` probe, but `tab-switch-in` bookkeeping reset was too aggressive for already-connected sessions. Keep the freshness probe, but skip the bookkeeping reset only when the target session is already connected.
+- Verified locally:
+  - `pnpm --dir android exec vitest run src/contexts/SessionContext.ws-refresh.test.tsx src/contexts/session-context-lifecycle.test.tsx --reporter dot` PASS
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS
+  - `pnpm --dir android run build:android` PASS
+- APK published:
+  - version `0.1.3.2155`
+  - versionCode `1032155`
+  - path `android/update-dist/zterm-0.1.3.2155.apk`
+- Remaining gap: no live device replay in this turn, so the fix is locally verified but not yet claimed against the exact phone-side screenshot path.
+
+## 2026-07-18 Relay update manifest follows public Relay route
+
+- Jason 要求 Relay 时升级 IP 跟着切到当前 Relay 公网路径。架构映射：`settings.config_transfer` owns app update preferences/runtime; `relay.account_directory` owns public Relay update assets. `App.tsx` 只把 `bridgeSettings.traversalRelay.wsHostUrl` 交给 `app-update-runtime.applyRelayManifestSource()`，不自行拼 URL。
+- 实现事实：`AppUpdatePreferences.manifestSource` 区分 `user-saved`、`relay-injected`、`server-connected`、`none`；显式 `user-saved` 不覆盖；旧私网/Tailscale daemon URL 和旧 Relay 注入 URL 可替换为当前 Relay URL。`wss://relay.codewhisper.cc:18443/relay/ws/host` 派生为 `https://relay.codewhisper.cc:18443/relay/updates/latest.json`，保留 `/relay` base path。
+- Relay server 新增 `ZTERM_TRAVERSAL_UPDATES_DIR` / `ZTERM_RELAY_UPDATES_DIR`，默认 `dirname(STORE_PATH)/updates`，公开服务 `/relay/updates/latest.json` 和 `/relay/updates/<apk>`；manifest `apkUrl` 保持原样，客户端按同一路由解析相对 APK。补充 `HEAD` 支持，避免 public smoke `curl -I` 误报 404。
+- Production 已部署到 `relay.codewhisper.cc`：`zterm-traversal-relay.service` PID `515028`，health 包含 `updates.dir=/var/lib/zterm-traversal-relay/updates`、`manifestPresent=true`。公网验证 `GET/HEAD https://relay.codewhisper.cc:18443/relay/updates/latest.json` 200；`HEAD/GET https://relay.codewhisper.cc:18443/relay/updates/zterm-0.1.3.2158.apk` 200，下载大小 `5857562`，sha256 `3bc28bc20238b41612f7babf7125c5dcb1630fd6c9379653abf3ffb934572cf3` 与本地 APK 一致。
+- 验证：focused app-update/Relay package tests 7 files / 33 tests PASS；`tsc --noEmit` PASS；feature/resource/function/mainline gates 7 files / 48 tests PASS；local Relay smoke PASS with `relayUpdateSmoke` fetching manifest and APK bytes; `relay:prepare-npm` / `relay:verify-package` PASS; `build:android` PASS with terminal contracts 48 files / 586 tests, common flows 7 files / 82 tests, Relay smoke PASS, Vite/Capacitor/Gradle PASS.
+- APK 发布并安装：`0.1.3.2158` / versionCode `1032158`，APK `android/update-dist/zterm-0.1.3.2158.apk` 和 `/Users/fanzhang/.zterm/updates/zterm-0.1.3.2158.apk`，sha256 `3bc28bc20238b41612f7babf7125c5dcb1630fd6c9379653abf3ffb934572cf3`；ADB device `100.104.163.65:5555` install success，`dumpsys package` 显示 versionCode `1032158` / versionName `0.1.3.2158`。设备仍锁屏在 `NotificationShade` / `isKeyguardShowing=true`，所以 App 内检查更新 UI L5 未宣称。

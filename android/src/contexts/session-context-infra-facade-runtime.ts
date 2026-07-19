@@ -370,6 +370,7 @@ export function createSessionInfraFacadeRuntime(options: {
       sessionId,
       socket,
       updateSessionSync,
+      runtimeDebug: options.runtimeDebug,
     });
   };
 

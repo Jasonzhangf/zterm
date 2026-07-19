@@ -702,7 +702,13 @@ describe('TerminalPage portrait session drawer', () => {
     );
   });
 
-  it('routes an already-open direct drawer row back through the WebRTC-first open owner when Relay owns the catalog', async () => {
+  it('switches an already-open direct drawer row locally when Relay owns the catalog', async () => {
+    const activeSession = makeSession('active-zterm');
+    activeSession.bridgeHost = '100.66.1.82';
+    activeSession.bridgePort = 3333;
+    activeSession.daemonHostId = undefined;
+    activeSession.sessionName = 'zterm';
+    activeSession.title = 'zterm';
     const directSession = makeSession('direct-rcc');
     directSession.bridgeHost = '100.66.1.82';
     directSession.bridgePort = 3333;
@@ -714,20 +720,20 @@ describe('TerminalPage portrait session drawer', () => {
 
     render(
       <TerminalPage
-        sessions={[directSession]}
-        activeSession={directSession}
+        sessions={[activeSession, directSession]}
+        activeSession={activeSession}
         sessionGroups={[{
           id: 'group-direct-mac-studio',
           name: '100.66.1.82',
           bridgeHost: '100.66.1.82',
           bridgePort: 3333,
-          sessionNames: ['rcc', 'freehand'],
+          sessionNames: ['zterm', 'rcc', 'freehand'],
           lastOpenedAt: 1,
         }]}
         relayDevices={[
           makeRelayDevice({
             includeDirectEndpoint: false,
-            sessions: ['rcc', 'freehand', 'onestop'],
+            sessions: ['zterm', 'rcc', 'freehand', 'onestop'],
           }),
         ]}
         onSwitchSession={onSwitchSession}
@@ -754,21 +760,8 @@ describe('TerminalPage portrait session drawer', () => {
 
     fireEvent.click(await screen.findByTestId('terminal-session-drawer-select-direct-rcc'));
 
-    expect(onSwitchSession).not.toHaveBeenCalled();
-    expect(onOpenDrawerRemoteSession).toHaveBeenCalledWith(
-      expect.objectContaining({
-        bridgeHost: '100.66.1.82',
-        bridgePort: 3333,
-        daemonHostId: 'mac-studio',
-        relayHostId: 'mac-studio',
-        transportMode: 'auto',
-        relayEndpointCandidates: [expect.objectContaining({
-          kind: 'relay-rtc',
-          relayHostId: 'mac-studio',
-        })],
-      }),
-      'rcc',
-    );
+    expect(onSwitchSession).toHaveBeenCalledWith('direct-rcc');
+    expect(onOpenDrawerRemoteSession).not.toHaveBeenCalled();
   });
 
   it('recomputes drawer enumeration when only the Relay session catalog changes', async () => {

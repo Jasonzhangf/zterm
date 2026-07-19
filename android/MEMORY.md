@@ -1214,6 +1214,14 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - Verified for Android package `0.1.3.2150`: focused JS/native/daemon gates passed (`109` Vitest tests, `3` shared chunk tests, Java `ImeAnchorInputLogicTest`); typecheck and feature/resource/function/mainline gates passed; full `daemon:mirror:close-loop` passed all nine cases including `long-input-echo`, whose `357840`-byte CJK/emoji/symbol source matched target SHA-256 `251987fe7a904c59b5a893365135251cd6523595f8d50a5a4e2e33e19d486c30`; Android build and update-manifest verification passed. Published APK SHA-256 is `82365b6c2614ccf41843d3e88f8d38d0e6caa335baf1e306e814992fc822a621`.
 - No ADB device was online during this closeout, so physical voice-IME commit, real Capacitor bridge delivery, and visible terminal result remain an explicit L5 gap. Local/native/L2 evidence cannot be reported as true-device voice-input closure.
 
+## 2026-07-18 Android IME shift-enter / faster RTC timeout closeout
+
+- System IME semantics are split: `换行` maps to `Shift+Enter`, and `完成` maps to plain Enter submit. Native line-break-only `commitText()` / `finishComposingText()` emit shifted Enter; `performEditorAction()` emits plain Enter; shared keyboard mapping preserves `Shift+Enter` as `\n` and plain Enter as `\r`.
+- Traversal candidate wait for RTC was shortened from 8000ms to 2500ms to avoid long session-switch stalls before route fallback.
+- Verified gates: focused IME / traversal / session-runtime / shared keyboard tests 110 PASS, feature registry PASS, `tsc --noEmit` PASS, and `build:android` PASS.
+- Published APK: `0.1.3.2152`, versionCode `1032152`, sha256 `e3fb6bfabbbb6faa773bcd8852fd3b4d2bcdfd5e7e8eae2677e7237753d50b7c`, path `android/update-dist/zterm-0.1.3.2152.apk`.
+- No attached ADB device was available in this workspace, so install/UI L5 is still unclaimed for this closeout.
+
 ## 2026-07-18 Relay-scoped Android update route truth
 
 - Android update manifest URL source is owned by `settings.config_transfer` / app-update runtime, not by App/page code. Relay login/settings may call `applyRelayManifestSource(wsHostUrl)`, which derives the update manifest from the current Relay WS host and preserves the route base path: `wss://relay.codewhisper.cc:18443/relay/ws/host` -> `https://relay.codewhisper.cc:18443/relay/updates/latest.json`.

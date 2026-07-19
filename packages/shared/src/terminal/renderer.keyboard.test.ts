@@ -25,6 +25,11 @@ describe('terminal renderer keyboard mapping', () => {
     expect(resolveTerminalKeyboardInput(keydown({ key: 'f', altKey: true }), false)).toBe('\x1bf');
   });
 
+  it('maps shift enter to a newline while plain enter stays carriage return', () => {
+    expect(resolveTerminalKeyboardInput(keydown({ key: 'Enter', shiftKey: true }), false)).toBe('\n');
+    expect(resolveTerminalKeyboardInput(keydown({ key: 'Enter' }), false)).toBe('\r');
+  });
+
   it('keeps ctrl chords but rejects ctrl when meta/alt also pressed', () => {
     expect(resolveTerminalCtrlChord(keydown({ key: 'c', ctrlKey: true }))).toBe('\x03');
     expect(resolveTerminalCtrlChord(keydown({ key: ' ', ctrlKey: true }))).toBe('\x00');

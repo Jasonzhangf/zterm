@@ -24,6 +24,12 @@ export function terminalPageRenderedSessionUiKey(session: Session | null | undef
     session.customName || "",
     session.resolvedPath || "",
     session.resolvedRelayTransport || "",
+    session.selectedIcePair?.local?.candidateType || "",
+    session.selectedIcePair?.local?.address || "",
+    String(session.selectedIcePair?.local?.port || ""),
+    session.selectedIcePair?.remote?.candidateType || "",
+    session.selectedIcePair?.remote?.address || "",
+    String(session.selectedIcePair?.remote?.port || ""),
   ].join("::");
 }
 

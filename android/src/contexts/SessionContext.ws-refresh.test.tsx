@@ -2118,6 +2118,14 @@ describe('SessionContext websocket dynamic refresh', () => {
       });
       expect(screen.getByTestId('active-session').textContent).toBe('session-1');
       fireEvent.click(screen.getByText('live-both'));
+      ws1.triggerMessage({
+        type: 'buffer-head',
+        payload: { sessionId: 'session-1', revision: 1, latestEndIndex: 0, availableStartIndex: 0, availableEndIndex: 0 },
+      });
+      ws2.triggerMessage({
+        type: 'buffer-head',
+        payload: { sessionId: 'session-2', revision: 1, latestEndIndex: 0, availableStartIndex: 0, availableEndIndex: 0 },
+      });
       ws1.sent.length = 0;
       ws2.sent.length = 0;
 
@@ -2321,6 +2329,10 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       expect(screen.getByTestId('active-session').textContent).toBe('session-1');
       fireEvent.click(screen.getByText('live-both'));
+      ws2.triggerMessage({
+        type: 'buffer-head',
+        payload: { sessionId: 'session-2', revision: 1, latestEndIndex: 0, availableStartIndex: 0, availableEndIndex: 0 },
+      });
       ws1.sent.length = 0;
       ws2.sent.length = 0;
 
@@ -2330,6 +2342,14 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       expect(readSentMessages(ws1).filter((item) => item.type === 'buffer-head-request').length).toBeGreaterThan(0);
       expect(readSentMessages(ws2).filter((item) => item.type === 'buffer-head-request').length).toBeGreaterThan(0);
+      ws1.triggerMessage({
+        type: 'buffer-head',
+        payload: { sessionId: 'session-1', revision: 1, latestEndIndex: 0, availableStartIndex: 0, availableEndIndex: 0 },
+      });
+      ws2.triggerMessage({
+        type: 'buffer-head',
+        payload: { sessionId: 'session-2', revision: 1, latestEndIndex: 0, availableStartIndex: 0, availableEndIndex: 0 },
+      });
 
       fireEvent.click(screen.getByText('switch-second'));
       await act(async () => {
@@ -2337,6 +2357,10 @@ describe('SessionContext websocket dynamic refresh', () => {
         await Promise.resolve();
       });
       expect(screen.getByTestId('active-session').textContent).toBe('session-2');
+      ws2.triggerMessage({
+        type: 'buffer-head',
+        payload: { sessionId: 'session-2', revision: 2, latestEndIndex: 0, availableStartIndex: 0, availableEndIndex: 0 },
+      });
       ws1.sent.length = 0;
       ws2.sent.length = 0;
 
@@ -2383,6 +2407,10 @@ describe('SessionContext websocket dynamic refresh', () => {
         await Promise.resolve();
       });
       expect(screen.getByTestId('active-session').textContent).toBe('session-2');
+      ws2.triggerMessage({
+        type: 'buffer-head',
+        payload: { sessionId: 'session-2', revision: 1, latestEndIndex: 0, availableStartIndex: 0, availableEndIndex: 0 },
+      });
       fireEvent.click(screen.getByText('live-second-duplicated'));
       ws1.sent.length = 0;
       ws2.sent.length = 0;
@@ -6287,6 +6315,10 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       fireEvent.click(screen.getByText('switch-second'));
       await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
+      ws2.triggerMessage({
+        type: 'buffer-head',
+        payload: { sessionId: 'session-2', revision: 1, latestEndIndex: 0, availableStartIndex: 0, availableEndIndex: 0 },
+      });
       ws2.sent.length = 0;
 
       now = new Date('2026-04-27T00:00:02.600Z').getTime();
@@ -6330,9 +6362,14 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       fireEvent.click(screen.getByText('switch-second'));
       await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
+      expect(readSentMessages(ws2).some((item) => item.type === 'buffer-head-request')).toBe(true);
+      ws2.triggerMessage({
+        type: 'buffer-head',
+        payload: { sessionId: 'session-2', revision: 1, latestEndIndex: 0, availableStartIndex: 0, availableEndIndex: 0 },
+      });
       ws2.sent.length = 0;
 
-      now = new Date('2026-04-27T00:00:00.250Z').getTime();
+      now = new Date('2026-04-27T00:00:00.600Z').getTime();
       await new Promise((resolve) => setTimeout(resolve, 80));
 
       expect(readSentMessages(ws2).some((item) => item.type === 'buffer-head-request')).toBe(true);
@@ -6668,7 +6705,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
-  it('keeps polling buffer head while the active session is still connecting', async () => {
+  it('keeps one pending buffer head probe while the active session is still connecting', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <SessionHarness />
@@ -6687,7 +6724,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     await new Promise((resolve) => setTimeout(resolve, 120));
 
     const sentMessages = readSentMessages(ws);
-    expect(sentMessages.filter((item) => item.type === 'buffer-head-request').length).toBeGreaterThanOrEqual(2);
+    expect(sentMessages.filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
     expect(screen.getByTestId('session-state').textContent).toBe('connecting');
   });
 

@@ -2063,6 +2063,40 @@ describe("TerminalPage Android IME bridge", () => {
     expect(onTerminalInput).toHaveBeenNthCalledWith(5, "s2", "\u0003");
   });
 
+  it("maps Android IME shift enter to a newline and plain enter to submit", async () => {
+    const session = makeSession("s1");
+    const onTerminalInput = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("key")).toBe(true);
+    });
+
+    imeListeners.get("key")?.({ key: "Enter", code: "Enter", shiftKey: true });
+    imeListeners.get("key")?.({ key: "Enter", code: "Enter" });
+
+    expect(onTerminalInput).toHaveBeenNthCalledWith(1, "s1", "\n");
+    expect(onTerminalInput).toHaveBeenNthCalledWith(2, "s1", "\r");
+  });
+
   it("uses native ImeAnchor keyboardState to raise terminal chrome on Android", async () => {
     const session = makeSession("s1");
 

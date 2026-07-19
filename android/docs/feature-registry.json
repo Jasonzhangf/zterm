@@ -201,6 +201,7 @@
       "owners": [
         "src/contexts/session-context-transport-runtime.ts",
         "src/contexts/session-context-session-runtime.ts",
+        "src/contexts/session-context-infra-runtime.ts",
         "src/contexts/session-transport-open-helpers.ts",
         "src/contexts/session-reconnect-helpers.ts",
         "src/lib/tmux-sessions.ts",
@@ -215,6 +216,8 @@
         "src/contexts/session-context-session-orchestration-runtime.ts",
         "src/contexts/session-context-session-runtime.ts",
         "src/contexts/session-context-session-runtime.test.ts",
+        "src/contexts/session-context-infra-runtime.ts",
+        "src/contexts/session-context-infra-runtime.test.ts",
         "src/contexts/session-context-socket-runtime.ts",
         "src/contexts/session-context-socket-runtime.test.ts",
         "src/contexts/session-context-transport-open-runtime.ts",
@@ -242,6 +245,7 @@
       ],
       "required_gates": [
         "src/contexts/session-sync-helpers.test.ts",
+        "src/contexts/session-context-infra-runtime.test.ts",
         "src/contexts/session-context-session-runtime.test.ts",
         "src/contexts/session-context-socket-runtime.test.ts",
         "src/contexts/session-context-activity-runtime.test.ts",
@@ -574,9 +578,18 @@
       "allowed_paths": [
         "src/hooks/useConfigExport.ts",
         "src/hooks/useConfigExport.test.tsx",
+        "src/hooks/useAppUpdate.ts",
+        "src/hooks/useAppUpdate.test.tsx",
+        "src/lib/app-update.ts",
+        "src/lib/app-update.test.ts",
+        "src/lib/app-update-runtime.ts",
+        "src/lib/app-update-runtime.test.ts",
+        "src/lib/app-update-relay-manifest.ts",
+        "src/lib/app-update-relay-manifest.test.ts",
         "src/App.tsx",
         "src/components/settings/AppUpdateSection.tsx",
         "src/components/settings/AppUpdateSection.test.tsx",
+        "packages/shared/src/interaction/projection.ts",
         "docs/testing/config-transfer-test-design.md"
       ],
       "forbidden_paths": [
@@ -586,6 +599,10 @@
       ],
       "required_gates": [
         "src/hooks/useConfigExport.test.tsx",
+        "src/hooks/useAppUpdate.test.tsx",
+        "src/lib/app-update.test.ts",
+        "src/lib/app-update-relay-manifest.test.ts",
+        "src/lib/app-update-runtime.test.ts",
         "src/components/settings/AppUpdateSection.test.tsx",
         "docs/testing/config-transfer-test-design.md"
       ],
@@ -611,6 +628,7 @@
         "src/traversal-relay/server.ts",
         "src/traversal-relay/store.test.ts",
         "src/traversal-relay/server.test.ts",
+        "src/traversal-relay/relay-server-release-package.test.ts",
         "src/server/relay-client.ts",
         "src/server/relay-client.test.ts",
         "src/server/daemon-config.ts",
@@ -620,6 +638,8 @@
         "src/lib/traversal-relay-client.ts",
         "src/lib/traversal-relay-client.test.ts",
         "scripts/traversal-relay-local-smoke.ts",
+        "scripts/prepare-relay-server-npm-package.mjs",
+        "scripts/verify-relay-server-package.mjs",
         "packages/shared/src/connection/relay-directory.ts"
       ],
       "forbidden_paths": [
@@ -630,6 +650,7 @@
       "required_gates": [
         "src/traversal-relay/store.test.ts",
         "src/traversal-relay/server.test.ts",
+        "src/traversal-relay/relay-server-release-package.test.ts",
         "src/server/relay-client.test.ts",
         "src/lib/relay-account-directory.test.ts",
         "src/lib/traversal-relay-client.test.ts",
@@ -1239,20 +1260,3 @@
     }
   ]
 }
-        "src/hooks/useAppUpdate.ts",
-        "src/hooks/useAppUpdate.test.tsx",
-        "src/lib/app-update.ts",
-        "src/lib/app-update.test.ts",
-        "src/lib/app-update-runtime.ts",
-        "src/lib/app-update-runtime.test.ts",
-        "src/lib/app-update-relay-manifest.ts",
-        "src/lib/app-update-relay-manifest.test.ts",
-        "packages/shared/src/interaction/projection.ts",
-        "src/hooks/useAppUpdate.test.tsx",
-        "src/lib/app-update.test.ts",
-        "src/lib/app-update-relay-manifest.test.ts",
-        "src/lib/app-update-runtime.test.ts",
-        "src/traversal-relay/relay-server-release-package.test.ts",
-        "scripts/prepare-relay-server-npm-package.mjs",
-        "scripts/verify-relay-server-package.mjs",
-        "src/traversal-relay/relay-server-release-package.test.ts",

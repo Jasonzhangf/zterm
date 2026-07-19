@@ -1,5 +1,4 @@
 import { memo as ReactMemo, useEffect, useState } from "react";
-import { APP_VERSION, APP_VERSION_CODE } from "../lib/app-version";
 import { useSessionViewportModeSnapshot, type SessionViewportModeStore } from "../lib/session-viewport-mode-store";
 import type { Session, SessionDebugOverlayMetrics } from "../lib/types";
 import { formatDebugHz, formatDebugRate, resolveDebugStatus } from "./terminal-page-debug-helpers";
@@ -7,6 +6,7 @@ import { formatDebugHz, formatDebugRate, resolveDebugStatus } from "./terminal-p
 const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   visible,
   session,
+  visiblePaneSessions,
   sessionViewportModeStore,
   getSessionDebugMetrics,
   debugOverlayPos,
@@ -15,16 +15,32 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   onMove,
   keyboardInset,
   shellHeight,
+  rawShellHeight,
   visualViewportHeight,
+  visualViewportWidth,
+  visualViewportOffsetTop,
+  currentLayoutViewportHeight,
   terminalKeyboardRequested,
+  keyboardViewportAlreadyResized,
   containerHeightPx,
   viewportRows,
   copyModeActive,
   copyStartRowIndex,
+  effectiveKeyboardLiftPx,
+  terminalImeLiftPx,
+  quickBarShellKeyboardLiftPx,
+  quickBarHeight,
+  terminalChromeBottomPx,
+  layoutMode,
+  landscape,
+  splitVisible,
+  quickBarCollapsed,
   copySelection,
+  sessionDrawerDebug,
 }: {
   visible: boolean;
   session: Session | null;
+  visiblePaneSessions?: Session[];
   sessionViewportModeStore: SessionViewportModeStore;
   getSessionDebugMetrics?: (
     sessionId: string,
@@ -41,13 +57,35 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   onMove: (next: { x: number; y: number }) => void;
   keyboardInset?: number;
   shellHeight?: number;
+  rawShellHeight?: number;
   visualViewportHeight?: number;
+  visualViewportWidth?: number;
+  visualViewportOffsetTop?: number;
+  currentLayoutViewportHeight?: number;
   terminalKeyboardRequested?: boolean;
+  keyboardViewportAlreadyResized?: boolean;
   containerHeightPx?: number;
   viewportRows?: number;
   copyModeActive?: boolean;
   copyStartRowIndex?: number | null;
+  effectiveKeyboardLiftPx?: number;
+  terminalImeLiftPx?: number;
+  quickBarShellKeyboardLiftPx?: number;
+  quickBarHeight?: number;
+  terminalChromeBottomPx?: number;
+  layoutMode?: string;
+  landscape?: boolean;
+  splitVisible?: boolean;
+  quickBarCollapsed?: boolean;
   copySelection?: { active: boolean; sessionId: string | null; startRowIndex: number | null; endRowIndex: number | null; menu: { x: number; y: number; rowIndex: number } | null } | undefined;
+  sessionDrawerDebug?: {
+    open: boolean;
+    lastEvent: string;
+    eventSeq: number;
+    callbackSeq: number;
+    pageCallbackSeq: number;
+    pickerMode: string | null;
+  };
 }) {
   const [tick, setTick] = useState(0);
   const viewportModeSnapshot = useSessionViewportModeSnapshot(
@@ -76,15 +114,21 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
     : undefined;
   const status = resolveDebugStatus(session, metrics);
   const viewportMode = viewportModeSnapshot.mode;
+  const sessionLabel = session.customName?.trim() || session.title || session.sessionName;
+  const routeLabel = [
+    session.resolvedPath || '-',
+    session.resolvedRelayTransport || null,
+    session.lastConnectStage || null,
+  ].filter(Boolean).join(' / ');
+  const icePairLabel = formatIcePairLabel(session.selectedIcePair);
   const overlayStyle: React.CSSProperties = {
     position: "absolute",
     top: debugOverlayPos.y >= 0 ? `${debugOverlayPos.y}px` : "10px",
     left: debugOverlayPos.x >= 0 ? `${debugOverlayPos.x}px` : undefined,
     right: debugOverlayPos.x >= 0 ? undefined : "10px",
     zIndex: 12,
-    minWidth: "88px",
-    maxWidth: "96px",
-    padding: "5px 6px",
+    width: "192px",
+    padding: "6px 7px",
     borderRadius: "10px",
     border: `1.5px solid ${metrics?.bufferPullActive ? "rgba(34, 197, 94, 0.6)" : "rgba(83, 139, 255, 0.6)"}`,
     background: "rgba(10, 16, 26, 0.35)",
@@ -110,10 +154,7 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
         debugOverlayDragRef.current = {
           startX: touch.clientX,
           startY: touch.clientY,
-          startPosX:
-            debugOverlayPos.x >= 0
-              ? debugOverlayPos.x
-              : window.innerWidth - 10 - 96,
+          startPosX: debugOverlayPos.x >= 0 ? debugOverlayPos.x : window.innerWidth - 10 - 192,
           startPosY: debugOverlayPos.y >= 0 ? debugOverlayPos.y : 10,
           dragging: false,
         };
@@ -122,32 +163,22 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
         const touch = e.touches[0];
         const dx = touch.clientX - debugOverlayDragRef.current.startX;
         const dy = touch.clientY - debugOverlayDragRef.current.startY;
-        if (
-          !debugOverlayDragRef.current.dragging &&
-          Math.abs(dx) + Math.abs(dy) < 8
-        )
+        if (!debugOverlayDragRef.current.dragging && Math.abs(dx) + Math.abs(dy) < 8) {
           return;
+        }
         debugOverlayDragRef.current.dragging = true;
         e.preventDefault();
         const newX = debugOverlayDragRef.current.startPosX + dx;
         const newY = debugOverlayDragRef.current.startPosY + dy;
-        const clampedX = Math.max(0, Math.min(newX, window.innerWidth - 96));
-        const clampedY = Math.max(0, Math.min(newY, window.innerHeight - 80));
+        const clampedX = Math.max(0, Math.min(newX, window.innerWidth - 192));
+        const clampedY = Math.max(0, Math.min(newY, window.innerHeight - 132));
         onMove({ x: clampedX, y: clampedY });
       }}
       onTouchEnd={() => {
         debugOverlayDragRef.current.dragging = false;
       }}
     >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "4px",
-          fontWeight: 700,
-        }}
-      >
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "4px", fontWeight: 700 }}>
         <span>状态</span>
         <button
           type="button"
@@ -170,169 +201,123 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
         </button>
       </div>
       <div
+        data-testid="terminal-debug-ime-metrics"
         style={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: "4px",
-          fontWeight: 700,
+          display: "grid",
+          gridTemplateColumns: "44px 1fr",
+          columnGap: "6px",
+          rowGap: "3px",
+          marginTop: "4px",
+          paddingTop: "4px",
+          borderTop: "1px solid rgba(255,255,255,0.10)",
+          color: "rgba(231, 238, 252, 0.86)",
+          fontVariantNumeric: "tabular-nums",
+          wordBreak: "break-word",
         }}
       >
-        <span>渲染</span>
-        <span
-          style={{ color: viewportMode === "reading" ? "#fbbf24" : "#93c5fd" }}
-        >
-          {viewportMode}
-        </span>
-      </div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: "4px",
-          fontWeight: 700,
-        }}
-      >
+        <span>会话</span><span>{sessionLabel} · {session.id}</span>
         <span>状态</span>
         <span
+          data-testid="terminal-debug-active-flag"
           style={{ color: metrics?.bufferPullActive ? "#86efac" : "#93c5fd" }}
         >
-          {status}
+          {session.state}{metrics ? ` / ${status}` : ""}{metrics?.active ? " · A" : ""}
         </span>
-      </div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: "4px",
-          fontWeight: 700,
-        }}
-      >
-        <span>A</span>
-        <span
-          data-testid="terminal-debug-active-flag"
-          style={{ color: metrics?.active ? "#86efac" : "#fca5a5" }}
-        >
-          {metrics?.active ? "1" : "0"}
+        <span>渲染</span><span>{viewportMode}</span>
+        <span>路由</span><span>{routeLabel}</span>
+        {icePairLabel ? (
+          <>
+            <span>ICE</span><span>{icePairLabel}</span>
+          </>
+        ) : null}
+        <span>窗格</span><span>x{visiblePaneSessions && visiblePaneSessions.length > 0 ? visiblePaneSessions.length : 1}</span>
+        <span>刷新</span><span>{formatDebugHz(metrics?.renderHz || 0)} / {formatDebugHz(metrics?.pullHz || 0)}</span>
+        <span>流量</span>
+        <span>
+          ↑ {formatDebugRate(metrics?.uplinkBps || 0)} ↓ {formatDebugRate(metrics?.downlinkBps || 0)}
+          {" · "}
+          buf {formatDebugBytes(metrics?.transportBufferedBytes || 0)}
+          {metrics?.transportBackpressured ? " · BP" : ""}
         </span>
-      </div>
-      <div
-        style={{ display: "flex", justifyContent: "space-between", gap: "4px" }}
-      >
-        <span>↑</span>
-        <span>{formatDebugRate(metrics?.uplinkBps || 0)}</span>
-      </div>
-      <div
-        style={{ display: "flex", justifyContent: "space-between", gap: "4px" }}
-      >
-        <span>↓</span>
-        <span>{formatDebugRate(metrics?.downlinkBps || 0)}</span>
-      </div>
-      <div
-        style={{ display: "flex", justifyContent: "space-between", gap: "4px" }}
-      >
-        <span>R</span>
-        <span>{formatDebugHz(metrics?.renderHz || 0)}</span>
-      </div>
-      <div
-        style={{ display: "flex", justifyContent: "space-between", gap: "4px" }}
-      >
-        <span>P</span>
-        <span>{formatDebugHz(metrics?.pullHz || 0)}</span>
-      </div>
-      <div
-        style={{
-          display: "flex",
-          justifyContent: "space-between",
-          gap: "4px",
-          marginTop: "2px",
-        }}
-      >
-        <span>KB</span>
-        <span
-          style={{ color: (keyboardInset ?? 0) > 0 ? "#86efac" : "#fca5a5" }}
-        >
-          {keyboardInset ?? 0}
+        <span>视图</span>
+        <span>
+          LP {layoutMode ?? "?"} · LS {landscape ? "Y" : "N"} · SP {splitVisible ? "Y" : "N"} · QC {quickBarCollapsed ? "Y" : "N"}
         </span>
-      </div>
-      <div
-        style={{ display: "flex", justifyContent: "space-between", gap: "4px" }}
-      >
-        <span>IM</span>
-        <span
-          style={{ color: terminalKeyboardRequested ? "#86efac" : "#fca5a5" }}
-        >
-          {terminalKeyboardRequested ? "Y" : "N"}
+        <span>IME</span>
+        <span>
+          KB {keyboardInset ?? 0} · RESZ {keyboardViewportAlreadyResized ? "Y" : "N"} · IME {terminalKeyboardRequested ? "Y" : "N"}
+          {" · "}
+          SH {shellHeight ?? "?"} / RAW {rawShellHeight ?? "?"}
+          {" · "}
+          VV {visualViewportHeight ?? "?"}x{visualViewportWidth ?? "?"}@{visualViewportOffsetTop ?? "?"}
+          {" · "}
+          CUR {currentLayoutViewportHeight ?? "?"} · CH {containerHeightPx ?? "?"} · VR {viewportRows ?? "?"}
+          {" · "}
+          IMEL {terminalImeLiftPx ?? 0} / QBL {quickBarShellKeyboardLiftPx ?? 0} / LIFT {effectiveKeyboardLiftPx ?? 0}
+          {" · "}
+          QB {quickBarHeight ?? "?"} · TB {terminalChromeBottomPx ?? "?"}
         </span>
-      </div>
-      <div
-        style={{ display: "flex", justifyContent: "space-between", gap: "4px" }}
-      >
-        <span>SH</span>
-        <span>{shellHeight ?? "?"}</span>
-      </div>
-      <div
-        style={{ display: "flex", justifyContent: "space-between", gap: "4px" }}
-      >
-        <span>VV</span>
-        <span>{visualViewportHeight ?? "?"}</span>
-      </div>
-      <div
-        style={{ display: "flex", justifyContent: "space-between", gap: "4px" }}
-      >
-        <span>CH</span>
-        <span>{containerHeightPx ?? "?"}</span>
-      </div>
-      <div
-        style={{ display: "flex", justifyContent: "space-between", gap: "4px" }}
-      >
-        <span>VR</span>
-        <span>{viewportRows ?? "?"}</span>
-      </div>
-      <div
-        style={{ display: "flex", justifyContent: "space-between", gap: "4px" }}
-      >
-        <span>CM</span>
-        <span style={{ color: copyModeActive ? "#86efac" : "#fca5a5" }}>
+        <span>复制</span>
+        <span>
           {copyModeActive ? "ON" : "OFF"}
+          {" · "}
+          CS {copyStartRowIndex ?? "-"} · CE {copySelection?.endRowIndex ?? "-"}
+          {copySelection?.menu ? ` · MU ${copySelection.menu.rowIndex}` : ""}
         </span>
-      </div>
-      <div
-        style={{ display: "flex", justifyContent: "space-between", gap: "4px" }}
-      >
-        <span>CS</span>
-        <span>{copyStartRowIndex ?? "-"}</span>
-      </div>
-      <div
-        style={{ display: "flex", justifyContent: "space-between", gap: "4px" }}
-      >
-        <span>CE</span>
-        <span>{copySelection?.endRowIndex ?? "-"}</span>
-      </div>
-      <div
-        style={{ display: "flex", justifyContent: "space-between", gap: "4px" }}
-      >
-        <span>MU</span>
-        <span style={{ color: copySelection?.menu ? "#86efac" : "#fca5a5" }}>
-          {copySelection?.menu
-            ? `x=${copySelection.menu.x} y=${copySelection.menu.y} r=${copySelection.menu.rowIndex}`
-            : "null"}
-        </span>
-      </div>
-      <div
-        style={{
-          marginTop: "2px",
-          paddingTop: "2px",
-          borderTop: "1px solid rgba(255,255,255,0.10)",
-          color: "rgba(231, 238, 252, 0.65)",
-          fontSize: "7px",
-          lineHeight: 1.2,
-          wordBreak: "break-all",
-        }}
-      >
-        V {APP_VERSION} / {APP_VERSION_CODE}
+        {sessionDrawerDebug ? (
+          <>
+            <span>抽屉</span>
+            <span>
+              {sessionDrawerDebug.open ? "OPEN" : "CLOSED"}
+              {" · "}
+              EV {sessionDrawerDebug.eventSeq}:{sessionDrawerDebug.lastEvent}
+              {" · "}
+              CB {sessionDrawerDebug.callbackSeq}/{sessionDrawerDebug.pageCallbackSeq}
+              {" · "}
+              PM {sessionDrawerDebug.pickerMode || "-"}
+            </span>
+          </>
+        ) : null}
       </div>
     </div>
   );
 });
+
+function formatDebugBytes(bytes: number) {
+  const safeValue = Math.max(0, Number.isFinite(bytes) ? bytes : 0);
+  if (safeValue >= 1024 * 1024) {
+    return `${(safeValue / (1024 * 1024)).toFixed(2)} MB`;
+  }
+  if (safeValue >= 1024) {
+    return `${(safeValue / 1024).toFixed(1)} KB`;
+  }
+  return `${Math.round(safeValue)} B`;
+}
+
+function formatIceCandidateLabel(candidate?: Session['selectedIcePair'] extends infer T
+  ? T extends { local?: infer C } ? C : never
+  : never) {
+  if (!candidate) {
+    return '-';
+  }
+  const address = typeof candidate.address === 'string' && candidate.address.trim()
+    ? candidate.address.trim()
+    : '';
+  const port = typeof candidate.port === 'number' ? `:${candidate.port}` : '';
+  const protocol = candidate.protocol ? `/${candidate.protocol}` : '';
+  return [
+    candidate.candidateType || '?',
+    address ? `${address}${port}` : '',
+    protocol,
+  ].filter(Boolean).join(' ');
+}
+
+function formatIcePairLabel(pair?: Session['selectedIcePair']) {
+  if (!pair?.local && !pair?.remote) {
+    return '';
+  }
+  const rtt = typeof pair.roundTripTimeMs === 'number' ? ` · ${pair.roundTripTimeMs}ms` : '';
+  return `L ${formatIceCandidateLabel(pair.local)} / R ${formatIceCandidateLabel(pair.remote)}${rtt}`;
+}
 
 export { TerminalDebugOverlay };

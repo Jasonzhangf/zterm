@@ -3,10 +3,12 @@ import type {
   BridgeSocketMessageLike,
   BridgeTransportSocket,
   TraversalResolvedRelayTransport,
+  TraversalIceCandidateDiagnostic,
   TraversalAttemptDiagnostic,
   TraversalDiagnostics,
   TraversalPlanCandidate,
   TraversalResolvedPath,
+  TraversalSelectedIcePairDiagnostic,
 } from './types';
 import { buildTraversalPlan } from './config';
 import type { TraversalSettingsSource, TraversalTargetSource } from './types';
@@ -23,12 +25,21 @@ const CLOSING = 2;
 const CLOSED = 3;
 
 const WS_CANDIDATE_TIMEOUT_MS = 1800;
-const RTC_CANDIDATE_TIMEOUT_MS = 8000;
+const RTC_DIRECT_CANDIDATE_TIMEOUT_MS = 5000;
+const RTC_RELAY_CANDIDATE_TIMEOUT_MS = 2500;
 const RECONNECT_BASE_DELAY_MS = 300;
 const RECONNECT_MAX_DELAY_MS = 5000;
 
 type IceCandidateStatsLike = {
+  id?: string;
   candidateType?: string;
+  address?: string;
+  ip?: string;
+  port?: number;
+  protocol?: string;
+  networkType?: string;
+  relayProtocol?: string;
+  url?: string;
 };
 
 function computeTraversalReconnectDelay(attempt: number) {
@@ -45,9 +56,22 @@ type Backend = {
     onmessage: (event: BridgeSocketMessageLike) => void;
     onerror: (reason?: string) => void;
     onclose: (event?: BridgeSocketCloseLike) => void;
-    onpath?: (path: TraversalResolvedPath, relayTransport?: TraversalResolvedRelayTransport) => void;
+    onpath?: (
+      path: TraversalResolvedPath,
+      relayTransport?: TraversalResolvedRelayTransport,
+      selectedIcePair?: TraversalSelectedIcePairDiagnostic,
+    ) => void;
   }): void;
 };
+
+function resolveCandidateTimeoutMs(candidate: TraversalPlanCandidate) {
+  if (candidate.kind === 'ws') {
+    return WS_CANDIDATE_TIMEOUT_MS;
+  }
+  return candidate.path === 'rtc-direct'
+    ? RTC_DIRECT_CANDIDATE_TIMEOUT_MS
+    : RTC_RELAY_CANDIDATE_TIMEOUT_MS;
+}
 
 class WebSocketBackend implements Backend {
   public socket: WebSocket;
@@ -70,7 +94,11 @@ class WebSocketBackend implements Backend {
     onmessage: (event: BridgeSocketMessageLike) => void;
     onerror: (reason?: string) => void;
     onclose: (event?: BridgeSocketCloseLike) => void;
-    onpath?: (path: TraversalResolvedPath, relayTransport?: TraversalResolvedRelayTransport) => void;
+    onpath?: (
+      path: TraversalResolvedPath,
+      relayTransport?: TraversalResolvedRelayTransport,
+      selectedIcePair?: TraversalSelectedIcePairDiagnostic,
+    ) => void;
   }) {
     this.socket.onopen = () => {
       handlers.onpath?.(this.candidate.path);
@@ -123,11 +151,36 @@ class WebRtcBackend implements Backend {
     return Math.max(0, Math.floor(this.dataChannel?.bufferedAmount || 0));
   }
 
+  private buildIceCandidateDiagnostic(report?: IceCandidateStatsLike): TraversalIceCandidateDiagnostic | undefined {
+    if (!report) {
+      return undefined;
+    }
+    const address = typeof report.address === 'string' && report.address.trim()
+      ? report.address.trim()
+      : typeof report.ip === 'string' && report.ip.trim()
+        ? report.ip.trim()
+        : undefined;
+    const port = typeof report.port === 'number' && Number.isFinite(report.port)
+      ? Math.max(0, Math.floor(report.port))
+      : undefined;
+    return {
+      id: typeof report.id === 'string' ? report.id : undefined,
+      candidateType: typeof report.candidateType === 'string' ? report.candidateType : undefined,
+      address,
+      port,
+      protocol: typeof report.protocol === 'string' ? report.protocol : undefined,
+      networkType: typeof report.networkType === 'string' ? report.networkType : undefined,
+      relayProtocol: typeof report.relayProtocol === 'string' ? report.relayProtocol : undefined,
+      url: typeof report.url === 'string' ? report.url : undefined,
+    };
+  }
+
   private async detectResolvedRoute() {
     if (!this.peerConnection) {
       return {
         path: this.currentResolvedPath,
         relayTransport: this.currentResolvedRelayTransport,
+        selectedIcePair: undefined,
       };
     }
 
@@ -146,6 +199,7 @@ class WebRtcBackend implements Backend {
         return {
           path: this.currentResolvedPath,
           relayTransport: this.currentResolvedRelayTransport,
+          selectedIcePair: undefined,
         };
       }
       const pair = selectedPair as RTCIceCandidatePairStats;
@@ -156,9 +210,17 @@ class WebRtcBackend implements Backend {
         this.currentResolvedPath = 'rtc-relay';
       }
       this.currentResolvedRelayTransport = usesTurn ? 'turn' : 'direct';
+      const roundTripTimeMs = typeof pair.currentRoundTripTime === 'number' && Number.isFinite(pair.currentRoundTripTime)
+        ? Math.max(0, Math.round(pair.currentRoundTripTime * 1000))
+        : undefined;
       return {
         path: this.currentResolvedPath,
         relayTransport: this.currentResolvedRelayTransport,
+        selectedIcePair: {
+          local: this.buildIceCandidateDiagnostic(local),
+          remote: this.buildIceCandidateDiagnostic(remote),
+          roundTripTimeMs,
+        },
       };
     } catch (error) {
       console.warn('[TraversalSocket] Failed to inspect RTC stats:', error);
@@ -168,6 +230,7 @@ class WebRtcBackend implements Backend {
       return {
         path: this.currentResolvedPath,
         relayTransport: this.currentResolvedRelayTransport,
+        selectedIcePair: undefined,
       };
     }
   }
@@ -198,7 +261,11 @@ class WebRtcBackend implements Backend {
     onmessage: (event: BridgeSocketMessageLike) => void;
     onerror: (reason?: string) => void;
     onclose: (event?: BridgeSocketCloseLike) => void;
-    onpath?: (path: TraversalResolvedPath, relayTransport?: TraversalResolvedRelayTransport) => void;
+    onpath?: (
+      path: TraversalResolvedPath,
+      relayTransport?: TraversalResolvedRelayTransport,
+      selectedIcePair?: TraversalSelectedIcePairDiagnostic,
+    ) => void;
   }) {
     const signalSocket = new WebSocket(this.candidate.signalUrl);
     signalSocket.onopen = async () => {
@@ -217,7 +284,7 @@ class WebRtcBackend implements Backend {
         channel.binaryType = 'arraybuffer';
         channel.onopen = async () => {
           const nextRoute = await this.detectResolvedRoute();
-          handlers.onpath?.(nextRoute.path, nextRoute.relayTransport);
+          handlers.onpath?.(nextRoute.path, nextRoute.relayTransport, nextRoute.selectedIcePair);
           handlers.onopen();
         };
         channel.onmessage = (event) => {
@@ -246,7 +313,7 @@ class WebRtcBackend implements Backend {
           }
           if (peerConnection.connectionState === 'connected') {
             const nextRoute = await this.detectResolvedRoute();
-            handlers.onpath?.(nextRoute.path, nextRoute.relayTransport);
+            handlers.onpath?.(nextRoute.path, nextRoute.relayTransport, nextRoute.selectedIcePair);
           }
         };
 
@@ -506,12 +573,16 @@ export class TraversalSocket implements BridgeTransportSocket {
     this.attemptedCandidateKeys.add(this.candidateKey(candidate));
 
     this.activeAttempt = null;
+    this.diagnostics.resolvedPath = undefined;
+    this.diagnostics.resolvedEndpoint = undefined;
+    this.diagnostics.resolvedRelayTransport = undefined;
+    this.diagnostics.selectedIcePair = undefined;
     this.markAttempt(candidate, 'connecting', false, undefined, undefined, selectedDiagnostic?.score);
     const backend: Backend = candidate.kind === 'ws'
       ? new WebSocketBackend(candidate)
       : new WebRtcBackend(candidate);
     this.backend = backend;
-    const timeoutMs = candidate.kind === 'ws' ? WS_CANDIDATE_TIMEOUT_MS : RTC_CANDIDATE_TIMEOUT_MS;
+    const timeoutMs = resolveCandidateTimeoutMs(candidate);
     let settled = false;
     let advanced = false;
     const startedAt = Date.now();
@@ -546,7 +617,7 @@ export class TraversalSocket implements BridgeTransportSocket {
         this.markAttempt(candidate, 'open', true, undefined, rttMs, selectedDiagnostic?.score);
         this.diagnostics.stage = 'open';
         this.diagnostics.reason = undefined;
-        this.diagnostics.resolvedPath = candidate.path;
+        this.diagnostics.resolvedPath = this.diagnostics.resolvedPath || candidate.path;
         this.diagnostics.resolvedEndpoint = candidate.endpoint;
         this.onopen?.();
       },
@@ -600,9 +671,10 @@ export class TraversalSocket implements BridgeTransportSocket {
         }
         this.onclose?.(event);
       },
-      onpath: (path, relayTransport) => {
+      onpath: (path, relayTransport, selectedIcePair) => {
         this.diagnostics.resolvedPath = path;
         this.diagnostics.resolvedRelayTransport = relayTransport;
+        this.diagnostics.selectedIcePair = selectedIcePair;
       },
     });
   }

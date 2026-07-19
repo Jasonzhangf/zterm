@@ -457,4 +457,40 @@ describe('ensureActiveSessionFreshRuntime', () => {
       nowSpy.mockRestore();
     }
   });
+
+  it('does not stack active-tick head probes while a same-socket probe is still pending', () => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1500);
+    const ws = { readyState: WebSocket.OPEN } as any;
+    const requestSessionBufferHead = vi.fn(() => true);
+    const reconnectSession = vi.fn();
+    const runtimeDebug = vi.fn();
+    const refs = createBaseOptions().refs;
+    refs.staleTransportProbeAtRef.current.set('session-1', 1000);
+    const options = createBaseOptions({
+      refreshOptions: {
+        sessionId: 'session-1',
+        source: 'active-tick',
+        allowReconnectIfUnavailable: true,
+      },
+      refs,
+      readSessionTransportSocket: () => ws,
+      requestSessionBufferHead,
+      reconnectSession,
+      runtimeDebug,
+      resolveTerminalRefreshCadence: () => ({ headTickMs: 500, headStalePingMs: 500, pullRequestStaleMs: 1200 }),
+    });
+
+    try {
+      expect(ensureActiveSessionFreshRuntime(options)).toBe(false);
+      expect(requestSessionBufferHead).not.toHaveBeenCalled();
+      expect(reconnectSession).not.toHaveBeenCalled();
+      expect(refs.staleTransportProbeAtRef.current.get('session-1')).toBe(1000);
+      expect(runtimeDebug).toHaveBeenCalledWith('session.transport.active-tick.head-probe.pending', expect.objectContaining({
+        sessionId: 'session-1',
+        pendingProbeAgeMs: 500,
+      }));
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
 });

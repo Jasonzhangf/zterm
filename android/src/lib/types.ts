@@ -172,6 +172,29 @@ export interface Session {
   resolvedPath?: 'rtc-direct' | 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
   resolvedRelayTransport?: 'direct' | 'turn';
   resolvedEndpoint?: string;
+  selectedIcePair?: {
+    local?: {
+      id?: string;
+      candidateType?: string;
+      address?: string;
+      port?: number;
+      protocol?: string;
+      networkType?: string;
+      relayProtocol?: string;
+      url?: string;
+    };
+    remote?: {
+      id?: string;
+      candidateType?: string;
+      address?: string;
+      port?: number;
+      protocol?: string;
+      networkType?: string;
+      relayProtocol?: string;
+      url?: string;
+    };
+    roundTripTimeMs?: number;
+  };
   lastConnectStage?: string;
   state: SessionState;
   hasUnread: boolean;        // 是否有未读输出

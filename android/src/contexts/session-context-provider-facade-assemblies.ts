@@ -139,13 +139,16 @@ export function useSessionProviderFacadeAssemblies(
   const switchSession = (id: string, switchOptions?: { refreshSource?: 'explicit-resume' | 'active-reentry' }) => {
     const refreshSource = switchOptions?.refreshSource || 'active-reentry';
     const prev = options.stateRef.current.activeSessionId;
+    const targetSession = options.stateRef.current.sessions.find((session) => session.id === id) || null;
     if (prev && prev !== id) {
       core.resetSessionTransportPullBookkeeping(prev, 'tab-switch-out');
       lastActiveReentryAtRef.current.delete(prev);
     }
     lastActivatedSessionIdRef.current = id;
     core.setActiveSessionSync(id);
-    core.resetSessionTransportPullBookkeeping(id, 'tab-switch-in');
+    if (targetSession?.state !== 'connected') {
+      core.resetSessionTransportPullBookkeeping(id, 'tab-switch-in');
+    }
     ensureActiveSessionFresh({
       sessionId: id,
       source: refreshSource,

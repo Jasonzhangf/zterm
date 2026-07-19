@@ -25,11 +25,29 @@ export interface TraversalAttemptDiagnostic {
   score?: number;
 }
 
+export interface TraversalIceCandidateDiagnostic {
+  id?: string;
+  candidateType?: string;
+  address?: string;
+  port?: number;
+  protocol?: string;
+  networkType?: string;
+  relayProtocol?: string;
+  url?: string;
+}
+
+export interface TraversalSelectedIcePairDiagnostic {
+  local?: TraversalIceCandidateDiagnostic;
+  remote?: TraversalIceCandidateDiagnostic;
+  roundTripTimeMs?: number;
+}
+
 export interface TraversalDiagnostics {
   mode: TraversalTransportMode;
   resolvedPath?: TraversalResolvedPath;
   resolvedEndpoint?: string;
   resolvedRelayTransport?: TraversalResolvedRelayTransport;
+  selectedIcePair?: TraversalSelectedIcePairDiagnostic;
   stage: 'idle' | 'connecting' | 'open' | 'closed' | 'error';
   reason?: string;
   attempts: TraversalAttemptDiagnostic[];

@@ -23,6 +23,12 @@ describe('Android IME anchor truth', () => {
     expect(pluginSource).toContain('imeEditText.requestRectangleOnScreen(');
   });
 
+  it('keeps line-break IME text on the shifted enter path while completion stays on plain enter', () => {
+    expect(pluginSource).toContain('emitImeShiftEnterKey("commitText")');
+    expect(pluginSource).toContain('emitImeShiftEnterKey("finishComposingText")');
+    expect(pluginSource).toContain('emitImeEnterKey("performEditorAction")');
+  });
+
   it('keeps the serviceable native anchor cursor invisible so it cannot render as a terminal cursor', () => {
     expect(pluginSource).toContain('imeEditText.setCursorVisible(false)');
     expect(pluginSource).not.toContain('imeEditText.setCursorVisible(true)');

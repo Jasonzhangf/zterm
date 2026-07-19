@@ -4182,6 +4182,13 @@ function resolveStorePath() {
   const baseDir = asString2(process.env.ZTERM_TRAVERSAL_DATA_DIR) || (0, import_path2.join)((0, import_os.homedir)(), ".zterm", "traversal-relay");
   return (0, import_path2.join)(baseDir, "store.json");
 }
+function resolveUpdatesDir(storePath) {
+  const configured = asString2(process.env.ZTERM_TRAVERSAL_UPDATES_DIR || process.env.ZTERM_RELAY_UPDATES_DIR);
+  if (configured) {
+    return (0, import_path2.resolve)(configured);
+  }
+  return (0, import_path2.join)((0, import_path2.dirname)(storePath), "updates");
+}
 function resolveBasePath() {
   const raw = asString2(process.env.ZTERM_TRAVERSAL_BASE_PATH);
   if (!raw || raw === "/") {
@@ -4219,12 +4226,12 @@ function buildWebSocketBaseUrl(request) {
 function writeCorsHeaders(response) {
   response.setHeader("Access-Control-Allow-Origin", "*");
   response.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
-  response.setHeader("Access-Control-Allow-Methods", "GET,POST,OPTIONS");
+  response.setHeader("Access-Control-Allow-Methods", "GET,HEAD,POST,OPTIONS");
 }
-function serveJson(response, payload, statusCode = 200) {
+function serveJson(response, payload, statusCode = 200, options = {}) {
   response.statusCode = statusCode;
   response.setHeader("Content-Type", "application/json; charset=utf-8");
-  response.end(JSON.stringify(payload));
+  response.end(options.omitBody ? void 0 : JSON.stringify(payload));
 }
 function serveHtml(response, html, statusCode = 200) {
   response.statusCode = statusCode;
@@ -4548,9 +4555,11 @@ function buildAuthPage(mode) {
 var PORT = resolvePort();
 var HOST = resolveHost();
 var STORE_PATH = resolveStorePath();
+var UPDATES_DIR = resolveUpdatesDir(STORE_PATH);
 var BASE_PATH = resolveBasePath();
 var TURN_CONFIG = resolveTurnConfig();
 (0, import_fs2.mkdirSync)((0, import_path2.dirname)(STORE_PATH), { recursive: true });
+(0, import_fs2.mkdirSync)(UPDATES_DIR, { recursive: true });
 var store = new TraversalRelayStore(STORE_PATH);
 var hosts = /* @__PURE__ */ new Map();
 var clients = /* @__PURE__ */ new Map();
@@ -4589,6 +4598,10 @@ function buildHealthSnapshot(request) {
       port: PORT
     },
     store: store.summary(),
+    updates: {
+      dir: UPDATES_DIR,
+      manifestPresent: (0, import_fs2.existsSync)((0, import_path2.join)(UPDATES_DIR, "latest.json"))
+    },
     relay: {
       hosts: hosts.size,
       clients: clients.size,
@@ -4598,6 +4611,23 @@ function buildHealthSnapshot(request) {
     },
     turn: buildHealthTurnSnapshot()
   };
+}
+function resolveUpdateFilePath(pathname) {
+  const updatesPrefix = routePath("/updates/");
+  if (!pathname.startsWith(updatesPrefix)) {
+    return null;
+  }
+  const relativePath = pathname.slice(updatesPrefix.length);
+  const safeName = (0, import_path2.basename)(relativePath);
+  const updatesRoot = (0, import_path2.resolve)(UPDATES_DIR);
+  const absolutePath = (0, import_path2.resolve)(updatesRoot, safeName);
+  if (absolutePath !== updatesRoot && !absolutePath.startsWith(`${updatesRoot}/`)) {
+    return null;
+  }
+  return absolutePath;
+}
+function isGetOrHead(request) {
+  return request.method === "GET" || request.method === "HEAD";
 }
 function buildHealthTurnSnapshot() {
   if (!TURN_CONFIG) {
@@ -4656,6 +4686,41 @@ async function handleHttpRequest(request, response) {
   const pathname = url.pathname;
   if (request.method === "GET" && pathname === routePath("/health")) {
     serveJson(response, buildHealthSnapshot(request));
+    return;
+  }
+  if (isGetOrHead(request) && pathname === routePath("/updates/latest.json")) {
+    const manifestPath = (0, import_path2.join)(UPDATES_DIR, "latest.json");
+    if (!(0, import_fs2.existsSync)(manifestPath)) {
+      serveJson(response, { ok: false, message: "update manifest not found" }, 404, { omitBody: request.method === "HEAD" });
+      return;
+    }
+    try {
+      serveJson(response, JSON.parse((0, import_fs2.readFileSync)(manifestPath, "utf-8")), 200, { omitBody: request.method === "HEAD" });
+    } catch (error) {
+      serveJson(
+        response,
+        { ok: false, message: `invalid update manifest: ${error instanceof Error ? error.message : String(error)}` },
+        500,
+        { omitBody: request.method === "HEAD" }
+      );
+    }
+    return;
+  }
+  if (isGetOrHead(request) && pathname.startsWith(routePath("/updates/"))) {
+    const filePath = resolveUpdateFilePath(pathname);
+    if (!filePath || !(0, import_fs2.existsSync)(filePath)) {
+      serveJson(response, { ok: false, message: "update file not found" }, 404, { omitBody: request.method === "HEAD" });
+      return;
+    }
+    const fileStat = (0, import_fs2.statSync)(filePath);
+    response.statusCode = 200;
+    response.setHeader("Content-Type", filePath.endsWith(".apk") ? "application/vnd.android.package-archive" : "application/octet-stream");
+    response.setHeader("Content-Length", fileStat.size);
+    if (request.method === "HEAD") {
+      response.end();
+      return;
+    }
+    (0, import_fs2.createReadStream)(filePath).pipe(response);
     return;
   }
   if (request.method === "GET" && (pathname === routePath("/") || pathname === routePath("/login"))) {

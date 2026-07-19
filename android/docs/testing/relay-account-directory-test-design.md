@@ -33,6 +33,7 @@ daemon tmux truth
   - `/ws/host` accepts `directory-update` only from authenticated daemon.
   - device stream emits `directory-snapshot` after update.
   - invalid directory payload emits relay-error, not success-shaped empty directory.
+  - `/updates/latest.json` and `/updates/<apk>` are served from the relay updates directory, preserving manifest `apkUrl` semantics and returning explicit 404 for missing assets.
 - `src/server/relay-client.test.ts`
   - daemon host client sends directory-update after relay-ready.
   - tmux session read failure is reported explicitly.
@@ -48,6 +49,9 @@ daemon tmux truth
   - logged-in daemon routes prefer `rtc-direct` WebRTC UDP candidate first, then direct/Tailscale websocket candidates, then TURN-only `rtc-relay`.
   - expires stale route TTL.
   - returns explainable diagnostics for selected and rejected candidates.
+- `src/lib/traversal/socket.test.ts`
+  - exposes the selected WebRTC ICE pair as metadata-only diagnostics after `rtc-direct` or `rtc-relay` opens.
+  - reports `rtc-direct/direct` only when the selected pair is non-TURN, and reports `rtc-relay/turn` when either selected candidate type is `relay`.
 - `src/lib/traversal/route-health-cache.test.ts`
   - stores success/failure with TTL.
   - keys health by account + daemon + endpoint candidate id.
@@ -79,6 +83,7 @@ daemon tmux truth
 
 - `scripts/traversal-relay-local-smoke.ts`
   - register/login.
+  - fetch relay `/updates/latest.json`, resolve the relative `apkUrl`, and download the same bytes from the relay route.
   - daemon connects to `/ws/host`.
   - daemon publishes `directory-update`.
   - client fetches `/api/directory`.
@@ -96,6 +101,9 @@ daemon tmux truth
 - Negative: auth-failed direct candidate cannot win over relay.
 - Positive: logged-in route plan orders `rtc-direct -> tailscale -> rtc-relay`.
 - Negative: `rtc-direct` must not contain TURN credentials or use `iceTransportPolicy='relay'`; otherwise TURN would bypass the Tailscale middle step.
+- Negative: a legacy/global `wsUrl` override must not collapse a Relay/WebRTC-first Host into a single WebSocket candidate; hosts with `relay-rtc`, `relayHostId` / `daemonHostId`, explicit `signalUrl`, or `transportMode='webrtc'` must still enter `TraversalSocket` with the full candidate plan.
+- Positive: `rtc-direct/direct` diagnostics include selected ICE pair local/remote candidate type, address, port, protocol, and RTT when WebRTC stats expose them.
+- Negative: app/debug UI must not infer P2P from `requestOrigin="relay-host"` or from stale `targetKey`; only `resolvedPath` plus selected ICE pair metadata can prove the actual route.
 - Positive: TURN-only `rtc-relay` wins only after WebRTC direct and direct websocket candidates are unavailable/unhealthy.
 - Negative: TURN-only `rtc-relay` does not remain selected after a fresh direct candidate wins by score.
 - Positive: drawer host actions for an online relay daemon use relay identity, build both `rtc-direct` and `rtc-relay` candidates, and still keep saved direct/Tailscale as the middle route candidate.
@@ -144,5 +152,3 @@ Minimum evidence:
 - Direct IPv6 / IPv4 reachability must be verified from the actual Android device route, not inferred from daemon reachability.
 - TURN credential freshness is still relay server config truth; this test design only verifies propagation and selected route behavior.
 - Existing `devices-snapshot` compatibility can remain during migration, but new UI completion requires `directory-snapshot` as the consumed truth.
-  - `/updates/latest.json` and `/updates/<apk>` are served from the relay updates directory, preserving manifest `apkUrl` semantics and returning explicit 404 for missing assets.
-  - fetch relay `/updates/latest.json`, resolve the relative `apkUrl`, and download the same bytes from the relay route.

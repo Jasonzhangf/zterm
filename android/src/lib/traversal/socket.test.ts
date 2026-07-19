@@ -82,9 +82,26 @@ type MockRtcStatsCandidateType = 'host' | 'srflx' | 'prflx' | 'relay';
 
 class MockRTCPeerConnection {
   static instances: MockRTCPeerConnection[] = [];
-  static statsCandidateTypes: {
-    local: MockRtcStatsCandidateType;
-    remote: MockRtcStatsCandidateType;
+  static statsCandidates: {
+    local: {
+      candidateType: MockRtcStatsCandidateType;
+      address?: string;
+      port?: number;
+      protocol?: string;
+      networkType?: string;
+      relayProtocol?: string;
+      url?: string;
+    };
+    remote: {
+      candidateType: MockRtcStatsCandidateType;
+      address?: string;
+      port?: number;
+      protocol?: string;
+      networkType?: string;
+      relayProtocol?: string;
+      url?: string;
+    };
+    currentRoundTripTime?: number;
   } | null = null;
   readonly channel = new MockRTCDataChannel();
   localDescription: RTCSessionDescriptionInit | null = null;
@@ -118,7 +135,7 @@ class MockRTCPeerConnection {
   }
 
   async getStats() {
-    if (!MockRTCPeerConnection.statsCandidateTypes) {
+    if (!MockRTCPeerConnection.statsCandidates) {
       return new Map();
     }
     return new Map<string, Record<string, unknown>>([
@@ -129,16 +146,17 @@ class MockRTCPeerConnection {
         nominated: true,
         localCandidateId: 'local-1',
         remoteCandidateId: 'remote-1',
+        currentRoundTripTime: MockRTCPeerConnection.statsCandidates.currentRoundTripTime,
       }],
       ['local-1', {
         id: 'local-1',
         type: 'local-candidate',
-        candidateType: MockRTCPeerConnection.statsCandidateTypes.local,
+        ...MockRTCPeerConnection.statsCandidates.local,
       }],
       ['remote-1', {
         id: 'remote-1',
         type: 'remote-candidate',
-        candidateType: MockRTCPeerConnection.statsCandidateTypes.remote,
+        ...MockRTCPeerConnection.statsCandidates.remote,
       }],
     ]);
   }
@@ -150,7 +168,7 @@ class MockRTCPeerConnection {
 
   static reset() {
     MockRTCPeerConnection.instances = [];
-    MockRTCPeerConnection.statsCandidateTypes = null;
+    MockRTCPeerConnection.statsCandidates = null;
   }
 }
 
@@ -494,6 +512,31 @@ describe('TraversalSocket reconnect', () => {
     socket.close();
   });
 
+  it('keeps rtc-direct long enough for P2P before falling through to the next route', async () => {
+    const socket = createRelayRtcSocket();
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    const signalSocket = MockWebSocket.instances[0];
+    signalSocket.triggerOpen();
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(MockRTCPeerConnection.instances).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(4999);
+    expect(MockWebSocket.instances).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances.length).toBeGreaterThan(1);
+    expect(socket.getDiagnostics()).toMatchObject({
+      stage: 'connecting',
+      reason: expect.stringContaining('connect timeout'),
+    });
+
+    socket.close();
+  });
+
   it('closes a failed rtc signaling attempt and does not send later ICE candidates to a closed socket', async () => {
     const socket = createRelayRtcSocket();
     await flushMicrotasks();
@@ -534,9 +577,21 @@ describe('TraversalSocket reconnect', () => {
   });
 
   it('marks TURN relay diagnostics only after the direct RTC candidate fails', async () => {
-    MockRTCPeerConnection.statsCandidateTypes = {
-      local: 'relay',
-      remote: 'srflx',
+    MockRTCPeerConnection.statsCandidates = {
+      local: {
+        candidateType: 'relay',
+        address: '159.75.134.56',
+        port: 49152,
+        protocol: 'udp',
+        relayProtocol: 'udp',
+      },
+      remote: {
+        candidateType: 'srflx',
+        address: '120.229.11.244',
+        port: 52000,
+        protocol: 'udp',
+      },
+      currentRoundTripTime: 0.091,
     };
     const socket = createRelayRtcSocket();
     const onopen = vi.fn();
@@ -567,15 +622,44 @@ describe('TraversalSocket reconnect', () => {
       resolvedPath: 'rtc-relay',
       resolvedRelayTransport: 'turn',
       resolvedEndpoint: 'relay:daemon-host-a',
+      selectedIcePair: {
+        local: {
+          candidateType: 'relay',
+          address: '159.75.134.56',
+          port: 49152,
+          protocol: 'udp',
+          relayProtocol: 'udp',
+        },
+        remote: {
+          candidateType: 'srflx',
+          address: '120.229.11.244',
+          port: 52000,
+          protocol: 'udp',
+        },
+        roundTripTimeMs: 91,
+      },
     });
 
     socket.close();
   });
 
   it('marks WebRTC direct diagnostics as direct when the selected ICE candidate pair is direct', async () => {
-    MockRTCPeerConnection.statsCandidateTypes = {
-      local: 'host',
-      remote: 'srflx',
+    MockRTCPeerConnection.statsCandidates = {
+      local: {
+        candidateType: 'host',
+        address: '192.168.0.28',
+        port: 42300,
+        protocol: 'udp',
+        networkType: 'wifi',
+      },
+      remote: {
+        candidateType: 'host',
+        address: '192.168.0.6',
+        port: 53551,
+        protocol: 'udp',
+        networkType: 'wifi',
+      },
+      currentRoundTripTime: 0.012,
     };
     const socket = createRelayRtcSocket();
     const onopen = vi.fn();
@@ -593,6 +677,23 @@ describe('TraversalSocket reconnect', () => {
       resolvedPath: 'rtc-direct',
       resolvedRelayTransport: 'direct',
       resolvedEndpoint: 'rtc-direct:daemon-host-a',
+      selectedIcePair: {
+        local: {
+          candidateType: 'host',
+          address: '192.168.0.28',
+          port: 42300,
+          protocol: 'udp',
+          networkType: 'wifi',
+        },
+        remote: {
+          candidateType: 'host',
+          address: '192.168.0.6',
+          port: 53551,
+          protocol: 'udp',
+          networkType: 'wifi',
+        },
+        roundTripTimeMs: 12,
+      },
     });
 
     socket.close();

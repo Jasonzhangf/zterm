@@ -67,6 +67,14 @@
           "label": "src/contexts/session-context-transport-open-runtime.ts"
         },
         {
+          "id": "TraversalSocketFactory",
+          "label": "src/contexts/session-context-infra-runtime.ts#buildTraversalSocketForHostRuntime"
+        },
+        {
+          "id": "TraversalSocket",
+          "label": "src/lib/traversal/socket.ts#TraversalSocket"
+        },
+        {
           "id": "SocketMessage",
           "label": "src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime"
         },
@@ -286,6 +294,32 @@
           "edge_id": "android_mainline:TransportOpen->TransportReusePlan",
           "resource_from": "resource.active_session",
           "resource_to": "resource.session_transport",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "TransportOpen",
+          "to": "TraversalSocketFactory",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "host route target plus optional legacy wsUrl",
+          "semantic_output": "role-scoped traversal socket constructor inputs with legacy override only for non-Relay/non-WebRTC hosts",
+          "status": "anchored",
+          "edge_id": "android_mainline:TransportOpen->TraversalSocketFactory",
+          "resource_from": "resource.session_transport",
+          "resource_to": "resource.transport_target",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "TraversalSocketFactory",
+          "to": "TraversalSocket",
+          "owner_feature": "relay.route_selection",
+          "semantic_input": "TraversalTargetSource and TraversalSettingsSource",
+          "semantic_output": "explicit traversal candidate runner and selected route diagnostics",
+          "status": "anchored",
+          "edge_id": "android_mainline:TraversalSocketFactory->TraversalSocket",
+          "resource_from": "resource.session_transport",
+          "resource_to": "resource.transport_target",
           "via_resources": [],
           "relation_status": "direct"
         },

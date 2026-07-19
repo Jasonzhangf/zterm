@@ -327,6 +327,24 @@ export function sendSocketPayloadInfraRuntime(options: {
   options.ws.send(options.data);
 }
 
+function hasRelayRtcEndpointCandidate(host: Host) {
+  return (host.relayEndpointCandidates || []).some((candidate) =>
+    candidate.kind === 'relay-rtc' && candidate.relayHostId?.trim());
+}
+
+export function shouldUseLegacyWsOverrideForHostRuntime(host: Host) {
+  if (host.transportMode === 'webrtc') {
+    return false;
+  }
+  if (host.relayHostId?.trim() || host.daemonHostId?.trim()) {
+    return false;
+  }
+  if (host.signalUrl?.trim()) {
+    return false;
+  }
+  return !hasRelayRtcEndpointCandidate(host);
+}
+
 export function buildTraversalSocketForHostRuntime(options: {
   host: Host;
   bridgeSettings: BridgeSettings;
@@ -335,7 +353,7 @@ export function buildTraversalSocketForHostRuntime(options: {
 }) {
   const traversal = resolveTraversalConfigFromHost(options.host, options.bridgeSettings);
   const overrideUrl = (() => {
-    if (!options.wsUrl) {
+    if (!options.wsUrl || !shouldUseLegacyWsOverrideForHostRuntime(options.host)) {
       return undefined;
     }
     try {
@@ -356,14 +374,25 @@ export function applyTransportDiagnosticsRuntime(options: {
   sessionId: string;
   socket: BridgeTransportSocket;
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
+  runtimeDebug?: (event: string, payload?: Record<string, unknown>) => void;
 }) {
   const diagnostics = options.socket.getDiagnostics();
   options.updateSessionSync(options.sessionId, {
     resolvedPath: diagnostics.resolvedPath,
     resolvedRelayTransport: diagnostics.resolvedRelayTransport,
     resolvedEndpoint: diagnostics.resolvedEndpoint,
+    selectedIcePair: diagnostics.selectedIcePair,
     lastConnectStage: diagnostics.stage,
     lastError: diagnostics.reason || undefined,
+  });
+  options.runtimeDebug?.('session.transport.diagnostics', {
+    sessionId: options.sessionId,
+    resolvedPath: diagnostics.resolvedPath || null,
+    resolvedRelayTransport: diagnostics.resolvedRelayTransport || null,
+    resolvedEndpoint: diagnostics.resolvedEndpoint || null,
+    selectedIcePair: diagnostics.selectedIcePair || null,
+    stage: diagnostics.stage,
+    reason: diagnostics.reason || null,
   });
 }
 

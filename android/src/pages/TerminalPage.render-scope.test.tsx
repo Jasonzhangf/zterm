@@ -455,7 +455,7 @@ describe('TerminalPage renderer scope', () => {
     fireEvent.click(screen.getByRole('button', { name: '状态' }));
     expect(screen.getByText('渲染')).not.toBeNull();
     expect(screen.getByText('follow')).not.toBeNull();
-    expect(screen.getByTestId('terminal-debug-active-flag').textContent).toBe('1');
+    expect(screen.getByTestId('terminal-debug-active-flag').textContent).toBe('connected / waiting · A');
     expect(screen.getByTestId('terminal-view-s1').getAttribute('data-show-line-numbers')).toBe('false');
 
     view.rerender(
@@ -479,7 +479,7 @@ describe('TerminalPage renderer scope', () => {
     );
 
     expect(screen.getByText('reading')).not.toBeNull();
-    expect(screen.getByTestId('terminal-debug-active-flag').textContent).toBe('1');
+    expect(screen.getByTestId('terminal-debug-active-flag').textContent).toBe('connected / waiting · A');
     expect(screen.getByTestId('terminal-view-s2').getAttribute('data-show-line-numbers')).toBe('false');
   });
 
@@ -543,11 +543,13 @@ describe('TerminalPage renderer scope', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '状态' }));
 
-    expect(screen.getByTestId('terminal-debug-pane-metrics')).not.toBeNull();
-    expect(screen.getByTestId('terminal-debug-pane-metric-s1').textContent).toContain('15.0 Hz');
-    expect(screen.getByTestId('terminal-debug-pane-metric-s2').textContent).toContain('7.5 Hz');
-    expect(screen.getByTestId('terminal-debug-pane-metric-s3').textContent).toContain('4.0 KB/s');
-    expect(screen.getByTestId('terminal-debug-pane-metric-s4').textContent).toContain('2.5 Hz');
+    expect(screen.getByText('窗格')).not.toBeNull();
+    expect(screen.getByText('x4')).not.toBeNull();
+    expect(screen.queryByTestId('terminal-debug-pane-metrics')).toBeNull();
+    expect(screen.queryByTestId('terminal-debug-pane-metric-s1')).toBeNull();
+    expect(screen.queryByTestId('terminal-debug-pane-metric-s2')).toBeNull();
+    expect(screen.queryByTestId('terminal-debug-pane-metric-s3')).toBeNull();
+    expect(screen.queryByTestId('terminal-debug-pane-metric-s4')).toBeNull();
   });
 
   it('toggles absolute line numbers independently from the 行号 quickbar button', () => {

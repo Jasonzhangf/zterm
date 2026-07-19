@@ -19,6 +19,7 @@ export ZTERM_TRAVERSAL_HOST=127.0.0.1
 export ZTERM_TRAVERSAL_PORT=19090
 export ZTERM_TRAVERSAL_BASE_PATH=/relay
 export ZTERM_TRAVERSAL_STORE_PATH=/var/lib/zterm-relay/store.json
+export ZTERM_TRAVERSAL_UPDATES_DIR=/var/lib/zterm-relay/updates
 export ZTERM_TURN_URL='turn:claw.codewhisper.cc:3479?transport=udp'
 export ZTERM_TURN_USERNAME='<secret>'
 export ZTERM_TURN_CREDENTIAL='<secret>'
@@ -71,3 +72,8 @@ location /relay/ {
   proxy_set_header X-Forwarded-Proto https;
 }
 ```
+
+The relay server also serves Android update assets from
+`ZTERM_TRAVERSAL_UPDATES_DIR` at `/relay/updates/latest.json` and
+`/relay/updates/<apk>`. The manifest should keep `apkUrl` relative so
+clients resolve the APK against the same public relay route.
