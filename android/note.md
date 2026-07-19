@@ -2654,4 +2654,18 @@ Need runtime debug to confirm:
 - Created a temporary iTerm2 tab `zterm-iterm2-crop-20260719-pass2`, split it into two panes, drew red and blue marker rows, captured the desktop, and force-closed the temporary tab in `finally`.
 - Window frame was `{x:0,y:84,width:3825,height:2046}`. Flattened content was `{width:3825,height:1978,topInset:68}`. Top pane frame was `{x:0,y:0,width:3825,height:1327}` and bottom pane frame was `{x:0,y:1328,width:3825,height:650}`.
 - Direct formula `cropY = window.y + topInset + pane.y` matched expected samples: top red `4/4`, bottom blue `3/4` with one probe outside the drawn marker width. Inverted-y formula matched `0`.
-- Cleanup check after tab close found no `ZTERM_CROP` / `sleep 300` process except the check command itself. Remaining cleanup: remove the temporary venv and screenshot directories after docs are updated.
+- Cleanup check after tab close found no `ZTERM_CROP` / `sleep 300` process except the check command itself. Follow-up cleanup confirmed no matching temporary venv/screenshot directory remains.
+
+## 2026-07-19 Remote window target catalog runtime closeout
+
+- Implemented daemon-side `desktop.remote_window_stream` target catalog slice: shared protocol messages, `remote-window-stream-daemon.ts`, server/message-runtime wiring, iTerm2 Python catalog, split-tree flattening, crop manifest, tmux `tty -> list-clients` reverse lookup, and explicit error responses.
+- Live black-box initially exposed a real bug in the complex existing iTerm2 layout: two rightmost pane crops were out of bounds because nested split measurement double-counted positioned leaf `frame.x` offsets. The bug was not caught by the simple nested test.
+- Fix: `measureIterm2Node()` now computes bounding boxes with the same cursor/offset semantics as flattening. It treats iTerm2 leaf frames as local to the immediate splitter and only applies parent splitter offsets once. `buildRemoteWindowStreamTargets()` rejects content/crop rectangles outside the owning window instead of returning bad manifests.
+- Added regression with the live four-column/nested-stack iTerm2 tree. It locks expected rightmost pane x `2984` and asserts every pane crop stays within `{x:0,y:85,width:3799,height:2045}`.
+- Verification passed:
+  - `pnpm --dir android exec vitest run src/server/remote-window-stream-daemon.test.ts src/server/terminal-message-runtime.test.ts --reporter dot` = 2 files / 27 tests PASS.
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `pnpm --dir android run test:feature-registry -- --reporter dot` = 7 files / 48 tests PASS.
+  - `git diff --check` PASS.
+  - Live catalog gate with temporary venv and real iTerm2 API returned `targets=12`, `appWindows=1`, `panes=11`, `tmuxPanes=10`, `outOfBounds=0`; temp venv cleaned at exit.
+- Scope still pending: Android picker/overlay, ScreenCaptureKit/WebRTC frame stream, and input return runtime.

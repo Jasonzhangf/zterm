@@ -128,6 +128,64 @@ export interface RemoteScreenshotCapture {
   totalBytes: number;
 }
 
+// ─── Remote window stream target catalog types ───
+
+export interface RemoteWindowStreamRequestPayload {
+  requestId: string;
+  includeIterm2?: boolean;
+}
+
+export interface RemoteWindowStreamRect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+export interface RemoteWindowStreamTargetManifest {
+  streamTargetId: string;
+  videoTarget: {
+    kind: 'app-window' | 'iterm2-pane';
+    appBundleId: string;
+    pid: number;
+    windowId: string;
+    title: string;
+    windowBoundsTopLeftPx: RemoteWindowStreamRect;
+    paneRectInContentPx?: RemoteWindowStreamRect;
+    cropRectTopLeftPx?: RemoteWindowStreamRect;
+    contentTopInsetPx?: number;
+  };
+  inputTarget: {
+    kind: 'app-window' | 'iterm2-pane' | 'tmux-pane';
+    itermSessionId?: string;
+    tty?: string;
+    tmuxSession?: string;
+    tmuxWindowId?: string;
+    tmuxPaneId?: string;
+  };
+  streamMode: 'view' | 'interactive';
+  focusPolicy: 'bring-to-focus' | 'no-focus-steal';
+  inputRoute: 'os-event' | 'iterm2-api' | 'tmux-input';
+  capture: {
+    source: 'ScreenCaptureKit';
+    coordinateSpace: 'macos-top-left-px';
+    displayId?: string;
+    scale: number;
+    createdAt: string;
+  };
+}
+
+export interface RemoteWindowStreamTargetsResponsePayload {
+  requestId: string;
+  targets: RemoteWindowStreamTargetManifest[];
+}
+
+export interface RemoteWindowStreamErrorPayload {
+  requestId: string;
+  code: string;
+  message: string;
+}
+
 export interface HostConfigMessage {
   /**
    * Client-generated one-shot request identity for the control -> session attach handshake.
@@ -196,6 +254,7 @@ export type BridgeClientMessage =
   | { type: 'paste-image'; payload: PasteImagePayload }
   | { type: 'attach-file-start'; payload: AttachFileStartPayload }
   | { type: 'remote-screenshot-request'; payload: RemoteScreenshotRequestPayload }
+  | { type: 'remote-window-targets-request'; payload: RemoteWindowStreamRequestPayload }
   | { type: 'file-list-request'; payload: FileListRequestPayload }
   | { type: 'file-create-directory-request'; payload: { requestId: string; path: string; name: string } }
   | { type: 'file-download-request'; payload: FileDownloadRequestPayload }
@@ -258,6 +317,8 @@ export type BridgeServerControlMessage =
   | { type: 'file-create-directory-complete'; payload: { requestId: string; path: string; name: string } }
   | { type: 'file-create-directory-error'; payload: { requestId: string; error: string } }
   | { type: 'remote-screenshot-status'; payload: RemoteScreenshotStatusPayload }
+  | { type: 'remote-window-targets-response'; payload: RemoteWindowStreamTargetsResponsePayload }
+  | { type: 'remote-window-error'; payload: RemoteWindowStreamErrorPayload }
   | { type: 'file-download-chunk'; payload: FileDownloadChunkPayload }
   | { type: 'file-download-complete'; payload: FileDownloadCompletePayload }
   | { type: 'file-download-error'; payload: FileDownloadErrorPayload }

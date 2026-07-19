@@ -27,6 +27,7 @@ import {
   handleTmuxControlMessageRuntime,
 } from './terminal-message-control-runtime';
 import type { TerminalMessageControlRuntimeDeps } from './terminal-message-control-runtime';
+import type { RemoteWindowStreamDaemonRuntime } from './remote-window-stream-daemon';
 
 export interface TerminalMessageRuntimeDeps {
   sessions: Map<string, TerminalTransportSubscriber>;
@@ -43,6 +44,7 @@ export interface TerminalMessageRuntimeDeps {
   handleInput: (session: TerminalSession, data: string, shouldWrite?: () => boolean) => Promise<boolean>;
   closeSession: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
   terminalFileTransferRuntime: TerminalFileTransferRuntime;
+  remoteWindowStreamRuntime: RemoteWindowStreamDaemonRuntime;
   handleClientDebugLog: (session: TerminalSession, payload: { entries: RuntimeDebugLogEntry[] }) => void;
   handleClientDebugSnapshot: (session: TerminalSession, payload: { snapshot?: unknown }) => void;
   controlRuntimeDeps: TerminalMessageControlRuntimeDeps;
@@ -517,6 +519,22 @@ export function createTerminalMessageRuntime(
           break;
         }
         void deps.terminalFileTransferRuntime.handleRemoteScreenshotRequest(session, message.payload);
+        break;
+      case 'remote-window-targets-request':
+        void deps.remoteWindowStreamRuntime.listTargets(message.payload).then((payload) => {
+          deps.sendTransportMessage(connection.transport, 'targets' in payload
+            ? { type: 'remote-window-targets-response', payload }
+            : { type: 'remote-window-error', payload });
+        }).catch((error: unknown) => {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'remote-window-error',
+            payload: {
+              requestId: message.payload.requestId || '',
+              code: 'remote_window_catalog_failed',
+              message: error instanceof Error ? error.message : 'remote window catalog failed',
+            },
+          });
+        });
         break;
       case 'file-upload-start':
         if (!session) {

@@ -169,7 +169,8 @@
       "title": "Remote app/window and iTerm2 pane video stream",
       "domain": "remote-desktop",
       "owners": [
-        "docs/decisions/2026-07-19-remote-window-stream-truth.md"
+        "docs/decisions/2026-07-19-remote-window-stream-truth.md",
+        "src/server/remote-window-stream-daemon.ts"
       ],
       "allowed_paths": [
         "docs/decisions/2026-07-19-remote-window-stream-truth.md",
@@ -180,7 +181,13 @@
         "docs/feature-gates.md",
         "docs/wiki/mainline-source.md",
         "docs/wiki/mainline-call-map.json",
-        "docs/architecture.md"
+        "docs/architecture.md",
+        "packages/shared/src/connection/protocol.ts",
+        "src/server/server.ts",
+        "src/server/terminal-message-runtime.ts",
+        "src/server/terminal-message-runtime.test.ts",
+        "src/server/remote-window-stream-daemon.ts",
+        "src/server/remote-window-stream-daemon.test.ts"
       ],
       "forbidden_paths": [
         "src/components/TerminalView.tsx",
@@ -195,6 +202,8 @@
         "src/lib/function-map-resource-truth.test.ts",
         "src/lib/mainline-resource-call-map.test.ts",
         "src/lib/function-wiki-truth.test.ts",
+        "src/server/remote-window-stream-daemon.test.ts",
+        "src/server/terminal-message-runtime.test.ts",
         "docs/testing/remote-window-stream-test-design.md"
       ],
       "truth_sources": [

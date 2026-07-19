@@ -10,6 +10,7 @@ import type {
   TerminalTransportConnection,
 } from './terminal-runtime-types';
 import type { TerminalFileTransferRuntime } from './terminal-file-transfer-runtime';
+import type { RemoteWindowStreamDaemonRuntime } from './remote-window-stream-daemon';
 
 function createTransport(): TerminalSessionTransport {
   return {
@@ -96,9 +97,16 @@ function createFileTransferRuntimeStub(): TerminalFileTransferRuntime {
   };
 }
 
+function flushAsyncHandlers() {
+  return new Promise<void>((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
 function createRuntime(options?: {
   mirror?: SessionMirror | null;
 }) {
+  type RemoteWindowListTargetsResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['listTargets']>>;
   const sessions = new Map<string, TerminalSession>();
   const sendTransportMessage = vi.fn();
   const sendMessage = vi.fn();
@@ -112,6 +120,13 @@ function createRuntime(options?: {
   const handleAdaptiveResize = vi.fn();
   const daemonRuntimeDebug = vi.fn();
   const terminalFileTransferRuntime = createFileTransferRuntimeStub();
+  const listRemoteWindowTargets = vi.fn(async (): Promise<RemoteWindowListTargetsResult> => ({
+      requestId: 'remote-window-default',
+      targets: [],
+    }));
+  const remoteWindowStreamRuntime = {
+    listTargets: listRemoteWindowTargets,
+  };
 
   const runtime = createTerminalMessageRuntime({
     sessions,
@@ -125,6 +140,7 @@ function createRuntime(options?: {
     handleInput,
     closeSession,
     terminalFileTransferRuntime,
+    remoteWindowStreamRuntime,
     handleClientDebugLog,
     handleClientDebugSnapshot,
     daemonRuntimeDebug,
@@ -174,6 +190,8 @@ function createRuntime(options?: {
     closeSession,
     handleAdaptiveResize,
     daemonRuntimeDebug,
+    terminalFileTransferRuntime,
+    remoteWindowStreamRuntime,
   };
 }
 
@@ -707,6 +725,81 @@ describe('terminal message runtime explicit error truth', () => {
     expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
       type: 'error',
       payload: { message: 'input requires the current attached session transport', code: 'input_stale_transport' },
+    });
+  });
+
+  it('routes remote window target requests to the daemon stream owner without requiring an attached terminal session', async () => {
+    const { runtime, sendTransportMessage, remoteWindowStreamRuntime } = createRuntime();
+    const connection = createConnection(null);
+    const payload = {
+      requestId: 'rw-1',
+      targets: [{
+        streamTargetId: 'iterm2-pane:window:tab:pane',
+        videoTarget: {
+          kind: 'iterm2-pane' as const,
+          appBundleId: 'com.googlecode.iterm2',
+          pid: 0,
+          windowId: 'window',
+          title: 'pane',
+          windowBoundsTopLeftPx: { x: 0, y: 10, width: 800, height: 600 },
+          paneRectInContentPx: { x: 0, y: 20, width: 800, height: 300 },
+          cropRectTopLeftPx: { x: 0, y: 30, width: 800, height: 300 },
+          contentTopInsetPx: 10,
+        },
+        inputTarget: {
+          kind: 'tmux-pane' as const,
+          itermSessionId: 'pane',
+          tty: '/dev/ttys001',
+          tmuxSession: 'zterm',
+          tmuxWindowId: '@1',
+          tmuxPaneId: '%2',
+        },
+        streamMode: 'view' as const,
+        focusPolicy: 'no-focus-steal' as const,
+        inputRoute: 'tmux-input' as const,
+        capture: {
+          source: 'ScreenCaptureKit' as const,
+          coordinateSpace: 'macos-top-left-px' as const,
+          scale: 1,
+          createdAt: '2026-07-19T00:00:00.000Z',
+        },
+      }],
+    };
+    remoteWindowStreamRuntime.listTargets.mockResolvedValueOnce(payload);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'remote-window-targets-request',
+      payload: { requestId: 'rw-1' },
+    })));
+    await flushAsyncHandlers();
+
+    expect(remoteWindowStreamRuntime.listTargets).toHaveBeenCalledWith({ requestId: 'rw-1' });
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'remote-window-targets-response',
+      payload,
+    });
+  });
+
+  it('surfaces remote window catalog errors explicitly without screenshot or terminal render fallback', async () => {
+    const { runtime, sendTransportMessage, remoteWindowStreamRuntime, terminalFileTransferRuntime } = createRuntime();
+    const connection = createConnection(null);
+    const payload = {
+      requestId: 'rw-2',
+      code: 'iterm2_api_unavailable',
+      message: 'No module named iterm2',
+    };
+    remoteWindowStreamRuntime.listTargets.mockResolvedValueOnce(payload);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'remote-window-targets-request',
+      payload: { requestId: 'rw-2' },
+    })));
+    await flushAsyncHandlers();
+
+    expect(terminalFileTransferRuntime.handleRemoteScreenshotRequest).not.toHaveBeenCalled();
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'remote-window-error',
+      payload,
     });
   });
 });

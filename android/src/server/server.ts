@@ -64,6 +64,7 @@ import {
 import { createTerminalBridgeRuntime } from './terminal-bridge-runtime';
 import { createTerminalAttachTokenRuntime } from './terminal-attach-token-runtime';
 import { captureRemoteScreenshotWithDaemon } from './remote-screenshot-daemon';
+import { createRemoteWindowStreamDaemonRuntime } from './remote-window-stream-daemon';
 import { createTerminalPerformanceTraceStore } from '../lib/terminal-performance-trace';
 
 const DAEMON_CONFIG = resolveDaemonRuntimeConfig();
@@ -238,6 +239,10 @@ const {
   closeDetachedTerminalSession,
   renameTmuxSession,
 } = terminalControlRuntime;
+const remoteWindowStreamRuntime = createRemoteWindowStreamDaemonRuntime({
+  platform: process.platform,
+  runTmux,
+});
 
 // Ensure tmux server is running with standardized socket path
 terminalControlRuntime.ensureTmuxServerRunning();
@@ -309,6 +314,7 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
   handleInput: terminalRuntime.handleInput,
   closeSession: terminalRuntime.closeTransportSubscriber,
   terminalFileTransferRuntime,
+  remoteWindowStreamRuntime,
   handleClientDebugLog,
   handleClientDebugSnapshot,
   daemonRuntimeDebug,
