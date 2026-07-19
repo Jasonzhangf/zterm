@@ -303,4 +303,77 @@ describe('SettingsPage terminal theme selection', () => {
     expect(screen.getByTestId('settings-relay-fixed-host').textContent).toBe('relay.codewhisper.cc');
     expect(screen.queryByPlaceholderText('https://your-relay.example.com/relay/')).toBeNull();
   });
+
+  it('offers relay public update manifest as a route candidate alongside direct daemon addresses', () => {
+    const onUpdatePreferencesChange = vi.fn();
+
+    render(
+      <SettingsPage
+        settings={{
+          ...baseSettings,
+          targetHost: '100.66.1.82',
+          targetPort: 3333,
+          servers: [{
+            id: 'mac-studio-direct',
+            name: 'Mac Studio',
+            targetHost: '100.66.1.82',
+            targetPort: 3333,
+            authToken: 'token',
+          }],
+          defaultServerId: 'mac-studio-direct',
+          traversalRelay: {
+            relayBaseUrl: 'https://relay.codewhisper.cc:18443/relay/',
+            accessToken: 'token',
+            userId: 'u1',
+            username: 'jason',
+            deviceId: 'tablet-1',
+            deviceName: 'Jason Tablet',
+            platform: 'android',
+            wsDevicesUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/devices',
+            wsHostUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/host',
+            wsClientUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/client',
+            turnUrl: '',
+            turnUsername: '',
+            turnCredential: '',
+            updatedAt: 1,
+          },
+        }}
+        currentVersionName="0.1.1.1590"
+        currentVersionCode={1011590}
+        updatePreferences={{
+          manifestUrl: 'http://100.66.1.82:3333/updates/latest.json',
+          manifestSource: 'server-connected',
+          autoCheckOnLaunch: false,
+          skippedVersionCode: undefined,
+          ignoreUntilManualCheck: false,
+          lastCheckedAt: undefined,
+          lastSeenVersionCode: undefined,
+        }}
+        latestManifest={null}
+        updateChecking={false}
+        updateInstalling={false}
+        updateError={null}
+        hasNewVersion={false}
+        hasUpdateIgnorePolicy={false}
+        onSave={vi.fn()}
+        onUpdatePreferencesChange={onUpdatePreferencesChange}
+        onCheckForUpdate={vi.fn()}
+        onInstallUpdate={vi.fn()}
+        onResetUpdateIgnorePolicy={vi.fn()}
+        onTerminalThemeChange={vi.fn()}
+        onBack={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: '使用 Relay 公网' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: '使用 Mac Studio' })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole('button', { name: '使用 Relay 公网' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    expect(onUpdatePreferencesChange).toHaveBeenCalledWith(expect.objectContaining({
+      manifestUrl: 'https://relay.codewhisper.cc:18443/relay/updates/latest.json',
+      manifestSource: 'relay-injected',
+    }));
+  });
 });

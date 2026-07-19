@@ -90,6 +90,65 @@ describe('AppUpdateSection', () => {
     });
   });
 
+  it('fills manifest url from an explicit relay update route candidate', () => {
+    const onUpdateDraftChange = vi.fn();
+
+    render(
+      <AppUpdateSection
+        currentVersionName="0.1.1.1590"
+        currentVersionCode={1011590}
+        updateDraft={{
+          manifestUrl: '',
+          autoCheckOnLaunch: false,
+          skippedVersionCode: undefined,
+          ignoreUntilManualCheck: false,
+          lastCheckedAt: undefined,
+          lastSeenVersionCode: undefined,
+        }}
+        latestManifest={null}
+        updateChecking={false}
+        updateInstalling={false}
+        updateError={null}
+        hasNewVersion={false}
+        hasUpdateIgnorePolicy={false}
+        suggestedManifestUrl=""
+        manifestCandidates={[
+          {
+            id: 'relay-public',
+            label: 'Relay 公网',
+            manifestUrl: 'https://relay.codewhisper.cc:18443/relay/updates/latest.json',
+            manifestSource: 'relay-injected',
+          },
+          {
+            id: 'daemon-direct',
+            label: 'Mac Studio daemon',
+            manifestUrl: 'http://100.66.1.82:3333/updates/latest.json',
+            manifestSource: 'server-connected',
+          },
+        ]}
+        onUpdateDraftChange={onUpdateDraftChange}
+        onCheckForUpdate={vi.fn()}
+        onInstallUpdate={vi.fn()}
+        onResetUpdateIgnorePolicy={vi.fn()}
+        rollbackBackup={null}
+        isRollingBack={false}
+        onRollback={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '使用 Relay 公网' }));
+    expect(onUpdateDraftChange).toHaveBeenCalledTimes(1);
+    expect(onUpdateDraftChange.mock.calls[0][0]({
+      manifestUrl: '',
+      manifestSource: 'none',
+      autoCheckOnLaunch: false,
+      ignoreUntilManualCheck: false,
+    })).toMatchObject({
+      manifestUrl: 'https://relay.codewhisper.cc:18443/relay/updates/latest.json',
+      manifestSource: 'relay-injected',
+    });
+  });
+
   it('shows rollback button when rollback backup exists and triggers onRollback', () => {
     const onRollback = vi.fn();
 

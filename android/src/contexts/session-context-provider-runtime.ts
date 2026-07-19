@@ -78,6 +78,7 @@ export function useSessionProviderRuntime(options: {
   const sessionPullStateRef = useRef<Map<string, SessionPullStates>>(new Map());
   const sessionAttachTokensRef = useRef<Map<string, string>>(new Map());
   const pendingSessionTransportOpenIntentsRef = useRef<Map<string, PendingSessionTransportOpenIntent>>(new Map());
+  const activeBodySubscriptionSuppressedRef = useRef(false);
   const remoteScreenshotRuntimeRef = useRef(createRemoteScreenshotRuntime());
   const remoteWindowMessageRuntimeRef = useRef(createRemoteWindowMessageRuntime());
   const fileTransferMessageRuntimeRef = useRef(createFileTransferMessageRuntime({
@@ -133,6 +134,7 @@ export function useSessionProviderRuntime(options: {
       sessionPullStateRef,
       sessionAttachTokensRef,
       pendingSessionTransportOpenIntentsRef,
+      activeBodySubscriptionSuppressedRef,
       remoteScreenshotRuntimeRef,
       remoteWindowMessageRuntimeRef,
       fileTransferMessageRuntimeRef,

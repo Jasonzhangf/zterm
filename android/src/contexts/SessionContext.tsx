@@ -72,6 +72,7 @@ export function SessionProvider({
       sessionPullStateRef,
       sessionAttachTokensRef,
       pendingSessionTransportOpenIntentsRef,
+      activeBodySubscriptionSuppressedRef,
       remoteScreenshotRuntimeRef,
       remoteWindowMessageRuntimeRef,
       fileTransferMessageRuntimeRef,
@@ -97,6 +98,7 @@ export function SessionProvider({
     reconnectSession,
     reconnectAllSessions,
     setLiveSessionIds,
+    setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport,
     sendTerminalResize,
     sendMessage,
@@ -155,6 +157,7 @@ export function SessionProvider({
       sessionPullStateRef,
       sessionAttachTokensRef,
       pendingSessionTransportOpenIntentsRef,
+      activeBodySubscriptionSuppressedRef,
       remoteScreenshotRuntimeRef,
       remoteWindowMessageRuntimeRef,
       fileTransferMessageRuntimeRef,
@@ -175,6 +178,7 @@ export function SessionProvider({
     reconnectSession,
     reconnectAllSessions,
     setLiveSessionIds,
+    setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport,
     sendTerminalResize,
     sendMessage,
@@ -209,6 +213,7 @@ export function SessionProvider({
     reconnectSession,
     reconnectAllSessions,
     setLiveSessionIds,
+    setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport,
     sendTerminalResize,
     sendMessage,
@@ -245,6 +250,9 @@ export function SessionProvider({
     reconnectSession: (id: string) => contextRuntimeRef.current.reconnectSession(id),
     reconnectAllSessions: () => contextRuntimeRef.current.reconnectAllSessions(),
     setLiveSessionIds: (ids: string[]) => contextRuntimeRef.current.setLiveSessionIds(ids),
+    setActiveBodySubscriptionSuppressed: (suppressed: boolean) => (
+      contextRuntimeRef.current.setActiveBodySubscriptionSuppressed(suppressed)
+    ),
     resumeActiveSessionTransport: (id: string) => contextRuntimeRef.current.resumeActiveSessionTransport(id),
     sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: 'adaptive-phone' | 'mirror-fixed') => (
       contextRuntimeRef.current.sendTerminalResize(sessionId, cols, rows, widthMode)

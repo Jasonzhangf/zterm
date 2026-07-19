@@ -175,6 +175,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     renameSession,
     reconnectSession,
     setLiveSessionIds,
+    setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport,
     sendTerminalResize,
     sendInput,
@@ -827,6 +828,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             onTerminalViewportChange={handleTerminalViewportChange}
             onTerminalWidthModeChange={handleTerminalWidthModeChange}
             onLiveSessionIdsChange={setLiveSessionIds}
+            onActiveBodySubscriptionSuppressedChange={setActiveBodySubscriptionSuppressed}
             inputResetEpochBySession={inputResetEpochBySession}
             followResetEpoch={followResetEpoch}
             onImagePaste={sendImagePaste}

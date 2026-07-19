@@ -252,6 +252,34 @@ describe('zterm daemon service script truth gates', () => {
     expect(launchBody.indexOf('install_user_shims')).toBeLessThan(launchBody.indexOf('mkdir -p "${HOME}/Library/LaunchAgents"'));
   });
 
+  it('pins daemon iTerm2 Python API execution to a managed user venv', () => {
+    const script = readDaemonScript();
+    const launchBody = extractBlock(script, 'write_launch_agent() {', 2400);
+    const prepareBody = extractBlock(script, 'prepare_iterm2_python_env() {', 900);
+
+    expect(script).toContain('ITERM2_PYTHON_VENV="${WTERM_HOME}/python/iterm2"');
+    expect(script).toContain('ITERM2_PYTHON_BIN="${ITERM2_PYTHON_VENV}/bin/python3"');
+    expect(prepareBody).toContain('python3 -m venv "$ITERM2_PYTHON_VENV"');
+    expect(prepareBody).toContain('import iterm2');
+    expect(prepareBody).toContain('"$ITERM2_PYTHON_BIN" -m pip install --upgrade iterm2');
+    expect(launchBody).toContain('prepare_iterm2_python_env');
+    expect(launchBody).toContain('ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}"');
+  });
+
+  it('pins released daemon iTerm2 Python API execution to the same managed venv', () => {
+    const script = readReleaseScript();
+    const launchBody = extractBlock(script, 'write_launch_agent() {', 2400);
+    const prepareBody = extractBlock(script, 'prepare_iterm2_python_env() {', 900);
+
+    expect(script).toContain('ITERM2_PYTHON_VENV="${WTERM_HOME}/python/iterm2"');
+    expect(script).toContain('ITERM2_PYTHON_BIN="${ITERM2_PYTHON_VENV}/bin/python3"');
+    expect(prepareBody).toContain('python3 -m venv "$ITERM2_PYTHON_VENV"');
+    expect(prepareBody).toContain('import iterm2');
+    expect(prepareBody).toContain('"$ITERM2_PYTHON_BIN" -m pip install --upgrade iterm2');
+    expect(launchBody).toContain('prepare_iterm2_python_env');
+    expect(launchBody).toContain('ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}"');
+  });
+
   it('does not fallback to tmux session when launchd service start or restart is unhealthy', () => {
     const script = readDaemonScript();
     const startBody = extractBlock(script, 'start_service() {', 1400);

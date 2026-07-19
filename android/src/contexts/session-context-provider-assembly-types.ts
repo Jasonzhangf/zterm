@@ -40,6 +40,7 @@ export interface SessionProviderCoreAssembliesResult {
   readSessionBufferSnapshot: (sessionId: string) => any;
   setActiveSessionSync: (id: string) => void;
   setLiveSessionIdsSync: (ids: string[]) => void;
+  setActiveBodySubscriptionSuppressedSync: (suppressed: boolean, reason?: string) => void;
   createSessionSync: (session: any) => void;
   deleteSessionSync: (id: string) => void;
   moveSessionSync: (id: string, toIndex: number) => void;

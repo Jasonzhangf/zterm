@@ -12,10 +12,11 @@ Remote window stream starts from the Android floating entry. The old floating qu
 2. If the app is iTerm2, enumerate iTerm2 tabs/panes and the tmux client/session mapping.
 3. Choose one window or pane target.
 4. Start a floating live video overlay.
-5. Double tap the overlay to enter fullscreen letterbox mode.
-6. Android system Back in fullscreen shrinks back to floating mode.
-7. The fullscreen top-right minimize button also shrinks back to floating mode.
-8. The close button tears down the stream.
+5. Drag the floating overlay by its toolbar to reposition it without stealing video/input gestures.
+6. Double tap the video surface to enter fullscreen letterbox mode.
+7. Android system Back in fullscreen shrinks back to floating mode.
+8. The fullscreen top-right minimize button also shrinks back to floating mode.
+9. The close button tears down the stream.
 
 The stream is not view-only long term. It must support mouse and keyboard event return. Input return must carry an explicit focus policy:
 

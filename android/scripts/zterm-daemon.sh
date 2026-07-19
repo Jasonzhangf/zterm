@@ -27,6 +27,8 @@ STAGED_NODE_PTY_HELPER_GLOB="${DAEMON_RUNTIME_DIR}/node_modules/node-pty/prebuil
 STAGED_DAEMON_ENTRY="${DAEMON_RUNTIME_DIR}/server.cjs"
 NATIVE_DAEMON_BIN="${WTERM_BIN_DIR}/zterm-daemon"
 NATIVE_DAEMON_SOURCE="${ROOT_DIR}/scripts/native/zterm-daemon.swift"
+ITERM2_PYTHON_VENV="${WTERM_HOME}/python/iterm2"
+ITERM2_PYTHON_BIN="${ITERM2_PYTHON_VENV}/bin/python3"
 LAUNCH_AGENT_LABEL="com.zterm.android.zterm-daemon"
 LAUNCH_AGENT_PATH="${HOME}/Library/LaunchAgents/${LAUNCH_AGENT_LABEL}.plist"
 PREVIOUS_LAUNCH_AGENT_LABEL="com.zterm.android.daemon"
@@ -576,17 +578,36 @@ stop_direct() {
   echo "zterm daemon stopped: pid=${pid}"
 }
 
+prepare_iterm2_python_env() {
+  if [[ "$(uname -s)" != "Darwin" ]]; then
+    return 0
+  fi
+  mkdir -p "${WTERM_HOME}/python"
+  if [[ ! -x "$ITERM2_PYTHON_BIN" ]]; then
+    python3 -m venv "$ITERM2_PYTHON_VENV"
+  fi
+  if "$ITERM2_PYTHON_BIN" - <<'PY' >/dev/null 2>&1
+import iterm2
+PY
+  then
+    return 0
+  fi
+  "$ITERM2_PYTHON_BIN" -m pip install --upgrade pip >/dev/null
+  "$ITERM2_PYTHON_BIN" -m pip install --upgrade iterm2
+}
+
 write_launch_agent() {
   install_user_shims
   stage_daemon_runtime
   stage_native_daemon_binary
+  prepare_iterm2_python_env || echo "[zterm-daemon] iTerm2 Python API environment unavailable; remote-window pane catalog will report an explicit error" >&2
   mkdir -p "${HOME}/Library/LaunchAgents" "$LOG_DIR" "$WTERM_BIN_DIR" "$RUNTIME_STATE_DIR"
 cat > "$DIRECT_RUNNER" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 cd "${HOME}"
 chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
-exec env -u TMUX -u TMUX_PANE ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
+exec env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
 EOF
   chmod +x "$DIRECT_RUNNER"
 cat > "$LAUNCH_RUNNER" <<EOF
@@ -635,7 +656,7 @@ fi
 
 cd "${HOME}"
 chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
-exec env -u TMUX -u TMUX_PANE ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
+exec env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
 EOF
   chmod +x "$LAUNCH_RUNNER"
   (

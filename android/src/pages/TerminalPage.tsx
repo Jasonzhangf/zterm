@@ -249,6 +249,7 @@ interface TerminalPageProps {
   onTerminalInput?: (sessionId: string, data: string) => void;
   onTerminalViewportChange?: TerminalViewportChangeHandler;
   onLiveSessionIdsChange?: (ids: string[]) => void;
+  onActiveBodySubscriptionSuppressedChange?: (suppressed: boolean) => void;
   onImagePaste?: (sessionId: string, file: File) => Promise<void> | void;
   onFileAttach?: (sessionId: string, file: File) => Promise<void> | void;
   onOpenSettings?: () => void;
@@ -909,6 +910,7 @@ function TerminalPageComponent({
   onTerminalInput,
   onTerminalViewportChange,
   onLiveSessionIdsChange,
+  onActiveBodySubscriptionSuppressedChange,
   onImagePaste,
   onFileAttach,
   onOpenSettings,
@@ -954,6 +956,7 @@ function TerminalPageComponent({
   const [quickBarHeight, setQuickBarHeight] = useState(0);
   const [quickBarCollapsed, setQuickBarCollapsed] = useState(false);
   const [quickBarEditorFocused, setQuickBarEditorFocused] = useState(false);
+  const [remoteWindowOverlayOpen, setRemoteWindowOverlayOpen] = useState(false);
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
   const initialSessionPreviewRead = useMemo(() => {
     const storage = getBrowserStorage();
@@ -1975,6 +1978,57 @@ function TerminalPageComponent({
 
     scheduleTerminalFocusRetries({ delaysMs: [32, 120], includeKeyboardShow: true });
   }, [alignActiveTerminalToFollowForInput, clearPendingAndroidImeFocus, clearTerminalFocusRetries, focusTerminalInput, isAndroid, keyboardInset, quickBarEditorFocused, requestAndroidImeFocus, scheduleTerminalFocusRetries, setAndroidEditorActive, terminalKeyboardRequested, uiSessionId, updateAndroidImeVisible, updateKeyboardInset]);
+
+  const hideTerminalInputForRemoteWindow = useCallback(() => {
+    if (quickBarEditorFocusedRef.current && typeof document !== 'undefined') {
+      const activeElement = document.activeElement;
+      if (activeElement instanceof HTMLElement) {
+        activeElement.blur();
+      }
+      quickBarEditorFocusedRef.current = false;
+      setQuickBarEditorFocused(false);
+      if (isAndroid) {
+        setAndroidEditorActive(false);
+      }
+    }
+
+    updateTerminalKeyboardRequested(false);
+    clearPendingAndroidImeFocus();
+    clearTerminalFocusRetries();
+    androidImeFocusRouteKeyRef.current = null;
+    const input = querySessionInput(uiSessionId);
+    input?.blur();
+
+    if (isAndroid) {
+      void ImeAnchor.hide()
+        .then(() => {
+          updateAndroidImeVisible(false);
+          updateKeyboardInset(0);
+        })
+        .catch((error) => {
+          console.warn('[TerminalPage] ImeAnchor.hide() failed while opening remote window:', error);
+        });
+      return;
+    }
+
+    void Keyboard.hide()
+      .then(() => updateKeyboardInset(0))
+      .catch((error) => {
+        console.warn('[TerminalPage] Keyboard.hide() failed while opening remote window:', error);
+      });
+  }, [clearPendingAndroidImeFocus, clearTerminalFocusRetries, isAndroid, setAndroidEditorActive, uiSessionId, updateAndroidImeVisible, updateKeyboardInset, updateTerminalKeyboardRequested]);
+
+  const handleRemoteWindowOverlayOpenStateChange = useCallback((open: boolean) => {
+    setRemoteWindowOverlayOpen(open);
+    onActiveBodySubscriptionSuppressedChange?.(open);
+    if (open) {
+      hideTerminalInputForRemoteWindow();
+    }
+  }, [hideTerminalInputForRemoteWindow, onActiveBodySubscriptionSuppressedChange]);
+
+  useEffect(() => () => {
+    onActiveBodySubscriptionSuppressedChange?.(false);
+  }, [onActiveBodySubscriptionSuppressedChange]);
 
   const handleQuickBarEditorDomFocusChange = useCallback((active: boolean) => {
     quickBarEditorFocusedRef.current = active;
@@ -3196,16 +3250,19 @@ function TerminalPageComponent({
             + layoutProfile.quickBar.touchSafeOffsetPx
             + terminalBottomChromeLiftPx
           }
+          onOpenStateChange={handleRemoteWindowOverlayOpenStateChange}
         />
-        <TerminalQuickBarShell
-          bottomPx={
-            quickBarShellKeyboardLiftPx
-            + layoutProfile.quickBar.touchSafeOffsetPx
-            + terminalBottomChromeLiftPx
-          }
-        >
-          {quickBarNode}
-        </TerminalQuickBarShell>
+        {!remoteWindowOverlayOpen ? (
+          <TerminalQuickBarShell
+            bottomPx={
+              quickBarShellKeyboardLiftPx
+              + layoutProfile.quickBar.touchSafeOffsetPx
+              + terminalBottomChromeLiftPx
+            }
+          >
+            {quickBarNode}
+          </TerminalQuickBarShell>
+        ) : null}
       </div>
       <TabManagerSheet
         open={tabManagerOpen}
@@ -3301,6 +3358,7 @@ function terminalPagePropsEqual(
     && prev.onTerminalInput === next.onTerminalInput
     && prev.onTerminalViewportChange === next.onTerminalViewportChange
     && prev.onLiveSessionIdsChange === next.onLiveSessionIdsChange
+    && prev.onActiveBodySubscriptionSuppressedChange === next.onActiveBodySubscriptionSuppressedChange
     && prev.onImagePaste === next.onImagePaste
     && prev.onFileAttach === next.onFileAttach
     && prev.onOpenSettings === next.onOpenSettings

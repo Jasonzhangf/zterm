@@ -11,6 +11,7 @@ const DEFAULT_ITERM2_PYTHON_TIMEOUT_MS = 5000;
 const DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS = 5000;
 const ITERM2_APP_BUNDLE_ID = 'com.googlecode.iterm2';
 const ITERM2_PANE_GAP_PX = 1;
+const REMOTE_WINDOW_ERROR_MESSAGE_MAX_CHARS = 220;
 
 export interface MacosAppWindowCatalog {
   windows: MacosAppWindow[];
@@ -234,6 +235,37 @@ function remoteWindowError(
     code,
     message,
   };
+}
+
+function normalizeWhitespace(value: string) {
+  return value.replace(/\s+/g, ' ').trim();
+}
+
+function truncateRemoteWindowErrorMessage(message: string) {
+  const normalized = normalizeWhitespace(message);
+  if (normalized.length <= REMOTE_WINDOW_ERROR_MESSAGE_MAX_CHARS) {
+    return normalized;
+  }
+  return `${normalized.slice(0, REMOTE_WINDOW_ERROR_MESSAGE_MAX_CHARS - 1).trimEnd()}...`;
+}
+
+export function summarizeRemoteWindowCatalogError(error: unknown, fallbackMessage: string) {
+  const raw = error instanceof Error ? error.message : String(error);
+  const normalizedRaw = normalizeWhitespace(raw);
+  const missingPythonModule = normalizedRaw.match(/No module named ['"]?([A-Za-z0-9_.-]+)['"]?/u);
+  if (missingPythonModule?.[1]) {
+    return `iTerm2 Python API unavailable: missing Python module ${missingPythonModule[1]}`;
+  }
+
+  const candidateLines = raw
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => !line.startsWith('Command failed:'));
+  const diagnosticLine = [...candidateLines].reverse().find((line) =>
+    /(?:error|exception|denied|permission|timeout|timed out|not found|unavailable|failed)/iu.test(line),
+  ) || candidateLines[0] || normalizedRaw || fallbackMessage;
+  return truncateRemoteWindowErrorMessage(diagnosticLine || fallbackMessage);
 }
 
 function validateRect(rect: RemoteWindowStreamRect, label: string): RemoteWindowStreamRect {
@@ -539,7 +571,9 @@ function runDefaultIterm2Python(
       windowsHide: true,
     }, (error, stdout, stderr) => {
       if (error) {
-        const details = [error.message, stderr, stdout].filter(Boolean).join('\n');
+        const details = [stderr, stdout, error.message && !error.message.includes(' -c ') ? error.message : '']
+          .filter(Boolean)
+          .join('\n');
         reject(new Error(details || 'iTerm2 Python API failed'));
         return;
       }
@@ -558,7 +592,9 @@ function runDefaultMacosAppWindowCatalog(
       windowsHide: true,
     }, (error, stdout, stderr) => {
       if (error) {
-        const details = [error.message, stderr, stdout].filter(Boolean).join('\n');
+        const details = [stderr, stdout, error.message && !error.message.includes(' -e ') ? error.message : '']
+          .filter(Boolean)
+          .join('\n');
         reject(new Error(details || 'macOS app window catalog failed'));
         return;
       }
@@ -633,7 +669,7 @@ export function createRemoteWindowStreamDaemonRuntime(
         targets.push(...buildMacosAppWindowTargets(appWindowCatalog, createdAt));
         macosAppWindowCatalogOk = true;
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = summarizeRemoteWindowCatalogError(error, 'macOS app window catalog unavailable');
         errors.push(remoteWindowError(payload, 'app_window_catalog_unavailable', message || 'macOS app window catalog unavailable'));
       }
     }
@@ -643,7 +679,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       try {
         catalog = await queryIterm2Catalog();
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = summarizeRemoteWindowCatalogError(error, 'iTerm2 Python API unavailable');
         errors.push(remoteWindowError(payload, 'iterm2_api_unavailable', message || 'iTerm2 Python API unavailable'));
       }
     }
@@ -667,7 +703,7 @@ export function createRemoteWindowStreamDaemonRuntime(
           includeAppWindowTargets: includeAppWindows && !macosAppWindowCatalogOk,
         }));
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
+        const message = summarizeRemoteWindowCatalogError(error, 'remote window target manifest invalid');
         errors.push(remoteWindowError(payload, 'remote_window_manifest_invalid', message || 'remote window target manifest invalid'));
       }
     }

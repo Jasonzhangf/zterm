@@ -513,7 +513,8 @@ function TerminalSessionDrawerComponent({
         <div
           data-testid="terminal-session-drawer-list"
           style={{
-            flex: 1,
+            flex: '0 1 auto',
+            minHeight: 0,
             overflowY: 'auto',
             padding: '10px',
             display: 'flex',

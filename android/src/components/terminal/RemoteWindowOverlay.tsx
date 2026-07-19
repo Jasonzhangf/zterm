@@ -1,4 +1,13 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import {
+  memo,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { mobileTheme } from '../../lib/mobile-ui';
 import type {
@@ -22,6 +31,29 @@ interface RemoteWindowOverlayProps {
   activeSessionId?: string | null;
   requestTargets?: (sessionId: string) => Promise<RemoteWindowStreamTargetsResponsePayload>;
   bottomInsetPx?: number;
+  onOpenStateChange?: (open: boolean) => void;
+}
+
+interface FloatingOverlayOffset {
+  x: number;
+  y: number;
+}
+
+interface FloatingOverlayDrag {
+  pointerId: number;
+  startClientX: number;
+  startClientY: number;
+  startOffset: FloatingOverlayOffset;
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+const FLOATING_OVERLAY_VIEWPORT_MARGIN_PX = 8;
+
+function clampFloatingOffset(value: number, min: number, max: number) {
+  return Math.min(max, Math.max(min, value));
 }
 
 function formatTargetKind(target: RemoteWindowStreamTargetManifest) {
@@ -67,9 +99,21 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   activeSessionId,
   requestTargets,
   bottomInsetPx = 0,
+  onOpenStateChange,
 }: RemoteWindowOverlayProps) {
   const [state, setState] = useState<RemoteWindowOverlayState>(initialRemoteWindowOverlayState);
+  const [floatingOffset, setFloatingOffsetState] = useState<FloatingOverlayOffset>({ x: 0, y: 0 });
+  const floatingOffsetRef = useRef(floatingOffset);
+  const floatingOverlayRef = useRef<HTMLDivElement | null>(null);
+  const floatingDragRef = useRef<FloatingOverlayDrag | null>(null);
   const lastTouchEndAtRef = useRef(0);
+  const lastReportedOpenRef = useRef<boolean | null>(null);
+  const overlayOpen = state.phase !== 'closed';
+
+  const setFloatingOffset = useCallback((next: FloatingOverlayOffset) => {
+    floatingOffsetRef.current = next;
+    setFloatingOffsetState(next);
+  }, []);
 
   const handleOpenPicker = useCallback(() => {
     const started = beginRemoteWindowTargetEnumeration(state);
@@ -92,8 +136,10 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   }, [activeSessionId, requestTargets, state]);
 
   const handleClose = useCallback(() => {
+    floatingDragRef.current = null;
+    setFloatingOffset({ x: 0, y: 0 });
     setState((current) => closeRemoteWindowOverlay(current));
-  }, []);
+  }, [setFloatingOffset]);
 
   const handleShrink = useCallback(() => {
     setState((current) => shrinkRemoteWindowOverlay(current));
@@ -102,6 +148,86 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const handleFullscreen = useCallback(() => {
     setState((current) => enterRemoteWindowFullscreen(current));
   }, []);
+
+  const handleFloatingDragStart = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (
+      state.phase !== 'targetLocked'
+      || state.mode !== 'floating'
+      || (event.pointerType === 'mouse' && event.button !== 0)
+      || (event.target instanceof Element && event.target.closest('button'))
+    ) {
+      return;
+    }
+    const overlay = floatingOverlayRef.current;
+    if (!overlay) {
+      return;
+    }
+    const rect = overlay.getBoundingClientRect();
+    const viewportWidth = window.visualViewport?.width || window.innerWidth;
+    const viewportHeight = window.visualViewport?.height || window.innerHeight;
+    const startOffset = floatingOffsetRef.current;
+    floatingDragRef.current = {
+      pointerId: event.pointerId,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startOffset,
+      minX: startOffset.x + FLOATING_OVERLAY_VIEWPORT_MARGIN_PX - rect.left,
+      maxX: startOffset.x + viewportWidth - FLOATING_OVERLAY_VIEWPORT_MARGIN_PX - rect.right,
+      minY: startOffset.y + FLOATING_OVERLAY_VIEWPORT_MARGIN_PX - rect.top,
+      maxY: startOffset.y + viewportHeight - FLOATING_OVERLAY_VIEWPORT_MARGIN_PX - rect.bottom,
+    };
+    event.preventDefault();
+    event.stopPropagation();
+  }, [state]);
+
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      const drag = floatingDragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) {
+        return;
+      }
+      event.preventDefault();
+      setFloatingOffset({
+        x: clampFloatingOffset(
+          drag.startOffset.x + event.clientX - drag.startClientX,
+          drag.minX,
+          drag.maxX,
+        ),
+        y: clampFloatingOffset(
+          drag.startOffset.y + event.clientY - drag.startClientY,
+          drag.minY,
+          drag.maxY,
+        ),
+      });
+    };
+    const handlePointerEnd = (event: PointerEvent) => {
+      if (floatingDragRef.current?.pointerId === event.pointerId) {
+        floatingDragRef.current = null;
+      }
+    };
+    window.addEventListener('pointermove', handlePointerMove, { passive: false });
+    window.addEventListener('pointerup', handlePointerEnd);
+    window.addEventListener('pointercancel', handlePointerEnd);
+    return () => {
+      floatingDragRef.current = null;
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerEnd);
+      window.removeEventListener('pointercancel', handlePointerEnd);
+    };
+  }, [setFloatingOffset]);
+
+  useEffect(() => {
+    if (lastReportedOpenRef.current === overlayOpen) {
+      return;
+    }
+    lastReportedOpenRef.current = overlayOpen;
+    onOpenStateChange?.(overlayOpen);
+  }, [onOpenStateChange, overlayOpen]);
+
+  useEffect(() => () => {
+    lastReportedOpenRef.current = false;
+    onOpenStateChange?.(false);
+  }, [onOpenStateChange]);
 
   useEffect(() => {
     if (state.phase !== 'targetLocked' || state.mode !== 'fullscreen') {
@@ -165,7 +291,10 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
                 key={target.streamTargetId}
                 type="button"
                 data-testid={`remote-window-target-${target.streamTargetId}`}
-                onClick={() => setState((current) => selectRemoteWindowTarget(current, target.streamTargetId))}
+                onClick={() => {
+                  setFloatingOffset({ x: 0, y: 0 });
+                  setState((current) => selectRemoteWindowTarget(current, target.streamTargetId));
+                }}
                 style={styles.targetRow}
               >
                 <span style={styles.targetKind}>{formatTargetKind(target)}</span>
@@ -181,19 +310,26 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
 
   const lockedContent = state.phase === 'targetLocked' ? (
     <div
+      ref={floatingOverlayRef}
       data-testid="remote-window-locked-overlay"
       data-mode={state.mode}
-      onDoubleClick={handleFullscreen}
-      onTouchEnd={() => {
-        const now = Date.now();
-        if (now - lastTouchEndAtRef.current < 300) {
-          handleFullscreen();
-        }
-        lastTouchEndAtRef.current = now;
-      }}
-      style={state.mode === 'fullscreen' ? styles.fullscreenOverlay : styles.floatingOverlay}
+      style={state.mode === 'fullscreen'
+        ? styles.fullscreenOverlay
+        : {
+            ...styles.floatingOverlay,
+            transform: `translate(${floatingOffset.x}px, ${floatingOffset.y}px)`,
+          }}
     >
-      <div style={styles.lockedToolbar}>
+      <div
+        data-testid="remote-window-drag-handle"
+        onPointerDown={handleFloatingDragStart}
+        style={{
+          ...styles.lockedToolbar,
+          cursor: state.mode === 'floating' ? 'move' : 'default',
+          touchAction: state.mode === 'floating' ? 'none' : 'auto',
+          userSelect: 'none',
+        }}
+      >
         <div style={styles.lockedTitle}>
           <span style={styles.targetKind}>{formatTargetKind(state.target)}</span>
           <span>{state.target.videoTarget.title || state.target.videoTarget.appBundleId}</span>
@@ -209,7 +345,18 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           </button>
         </div>
       </div>
-      <div style={styles.videoPlaceholder}>
+      <div
+        data-testid="remote-window-video-surface"
+        onDoubleClick={handleFullscreen}
+        onTouchEnd={() => {
+          const now = Date.now();
+          if (now - lastTouchEndAtRef.current < 300) {
+            handleFullscreen();
+          }
+          lastTouchEndAtRef.current = now;
+        }}
+        style={styles.videoPlaceholder}
+      >
         <div style={styles.videoFrame}>
           <div style={styles.videoStatus}>等待视频流</div>
           <div style={styles.videoMeta}>{formatTargetSubtitle(state.target)}</div>

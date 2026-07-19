@@ -12,9 +12,10 @@ The current implemented Android slice is intentionally narrower than feature com
 
 1. `TerminalPage` renders the remote-window floating entry and passes only the active session id plus the SessionContext catalog request callback.
 2. The picker requests and renders the daemon `RemoteWindowStreamTargetManifest[]` catalog, including explicit partial and top-level errors.
-3. Selecting one manifest locks a floating overlay shell to that target; double tap/double click enters fullscreen, Back/minimize returns to floating, and close invalidates the UI state.
-4. The shell displays `等待视频流`. It does not claim that capture started and does not use terminal mirror, sparse buffer, renderer rows, screenshot runtime, or any synthetic frame source as video.
-5. ScreenCaptureKit capture, WebRTC frame delivery, stream-id lifecycle, and input return remain pending and are still required by the completion rule.
+3. Selecting one manifest locks a floating overlay shell to that target; toolbar drag repositions only the floating projection, double tap/double click on the video surface enters fullscreen, Back/minimize returns to floating, and close invalidates the UI state.
+4. While the picker or locked overlay is open, `TerminalPage` suppresses the terminal quickbar/input shell and asks the existing IME owner to hide the system keyboard. The overlay does not create a second terminal input path.
+5. The shell displays `等待视频流`. It does not claim that capture started and does not use terminal mirror, sparse buffer, renderer rows, screenshot runtime, or any synthetic frame source as video.
+6. ScreenCaptureKit capture, WebRTC frame delivery, stream-id lifecycle, and input return remain pending and are still required by the completion rule.
 
 Current executable gates:
 
@@ -61,6 +62,8 @@ Current executable gates:
    - Current minimal slice: `targetLocked/fullscreen + minimize -> targetLocked/floating`
    - Current minimal slice: late catalog responses from an older request epoch cannot overwrite the current picker/closed state.
    - Current minimal slice: `close -> closed`, with no frame source fabricated.
+   - Current minimal slice: `pickerOpen/targetLocked` reports open state to `TerminalPage`; the quickbar/input shell is not rendered while the overlay owns the surface, and it returns after close.
+   - Current minimal slice: toolbar pointer drag changes the floating projection offset, remains bounded to the viewport, and is disabled in fullscreen; video/input surface gestures remain separate.
    - Full stream slice: `fullscreenStream + Back -> floatingStream`
    - Full stream slice: `fullscreenStream + minimize -> floatingStream`
    - `close -> closed`
@@ -125,6 +128,7 @@ The picker and target-locked overlay shell are covered now. Gates that require a
 
 3. Overlay
    - Current minimal slice: selecting a pane locks the floating overlay shell to the exact manifest and displays an honest waiting state.
+   - Current minimal slice: dragging the floating toolbar moves the overlay without entering fullscreen or closing it.
    - Full stream slice: selecting a pane starts the floating stream overlay and binds a real stream id.
    - Double tap enters fullscreen letterbox.
    - Current minimal slice: Back/minimize shrinks to the same target-locked floating shell.

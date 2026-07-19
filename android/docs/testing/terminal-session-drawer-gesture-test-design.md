@@ -5,7 +5,7 @@
 - Feature: `terminal.session_drawer`
 - Resources: `resource.ui_projection -> resource.open_tab -> resource.active_session`; fixed-width crop gestures also border `resource.renderer_window` but must not mutate terminal content truth.
 - Owner: `src/components/terminal/TerminalSessionDrawer.tsx` for drawer intent; `src/pages/TerminalPage.tsx` for page-level projection and host canonicalization; `src/lib/server-identity.ts` for endpoint-to-daemon alias resolution; `src/App.tsx` only wires saved/Home server identity inputs into the page.
-- Change class: physically remove cross-gesture selection, separate fixed-width crop pan from drawer open, and ensure remote catalog row selection materializes and projects the selected session on the first tap. The edge swipe that opens the drawer may expose rows under the release point, but that same gesture must never become a row-selection intent. In `mirror-fixed`, right-side or middle horizontal drags belong to renderer crop pan; the drawer may only start from the left edge and only emit the `previous` drawer-open direction.
+- Change class: physically remove cross-gesture selection, keep the session list content-sized with bounded scrolling, separate fixed-width crop pan from drawer open, and ensure remote catalog row selection materializes and projects the selected session on the first tap. The edge swipe that opens the drawer may expose rows under the release point, but that same gesture must never become a row-selection intent. In `mirror-fixed`, right-side or middle horizontal drags belong to renderer crop pan; the drawer may only start from the left edge and only emit the `previous` drawer-open direction.
 
 ## Lifecycle
 
@@ -25,6 +25,7 @@
 14. Production Relay directory may expose only `relay-rtc`. If no endpoint mapping exists, a direct SessionGroup may bind to a Relay daemon only when its non-missing Session names are all present in exactly one Relay daemon catalog. Zero or multiple matches remain separate instead of guessing.
 15. A Relay directory or saved/Home alias update must invalidate the memoized TerminalPage identity projection so the open drawer re-canonicalizes without a page restart.
 16. If direct/Tailscale history and Relay history both resolve to the same canonical daemon, the drawer must enumerate each tmux session name exactly once. Route candidates and close/open intent metadata may merge, but duplicate history sources must not create duplicate rows.
+17. Short session catalogs size the list to its rows and place the footer directly after the list. Long catalogs may shrink the list and scroll inside it, but the list must not use growing flex space that creates a large blank band above the footer.
 
 ## Paired Tests
 
@@ -47,6 +48,8 @@
 - Negative: `mirror-fixed` zero-offset non-left-edge right pan stops before the parent drawer gesture owner, even though the visual offset cannot move further.
 - Negative: `mirror-fixed` left-edge left swipe does not switch to next tab.
 - Positive: `mirror-fixed` left-edge right swipe at renderer offset zero still emits drawer-open intent.
+- Positive: a short drawer catalog uses `flex: 0 1 auto` with `min-height: 0`, keeping the footer adjacent to the final row.
+- Negative: the session list must not use `flex: 1` or another grow rule that turns unused drawer height into blank list space.
 
 ## Black-Box Impact
 

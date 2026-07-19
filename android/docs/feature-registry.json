@@ -672,6 +672,8 @@
         "src/lib/app-update-relay-manifest.ts",
         "src/lib/app-update-relay-manifest.test.ts",
         "src/App.tsx",
+        "src/pages/SettingsPage.tsx",
+        "src/pages/SettingsPage.theme.test.tsx",
         "src/components/settings/AppUpdateSection.tsx",
         "src/components/settings/AppUpdateSection.test.tsx",
         "packages/shared/src/interaction/projection.ts",
@@ -688,6 +690,7 @@
         "src/lib/app-update.test.ts",
         "src/lib/app-update-relay-manifest.test.ts",
         "src/lib/app-update-runtime.test.ts",
+        "src/pages/SettingsPage.theme.test.tsx",
         "src/components/settings/AppUpdateSection.test.tsx",
         "docs/testing/config-transfer-test-design.md"
       ],
@@ -1204,7 +1207,11 @@
         "src/components/terminal/TerminalSessionDrawer.tsx"
       ],
       "allowed_paths": [
+        "docs/feature-gates.md",
+        "docs/function-map.md",
+        "docs/testing/terminal-session-drawer-gesture-test-design.md",
         "src/App.tsx",
+        "src/components/terminal/TerminalSessionDrawer.test.tsx",
         "src/components/terminal/TerminalSessionDrawer.tsx",
         "src/lib/traversal-relay-devices.ts",
         "src/lib/traversal-relay-devices.test.ts",

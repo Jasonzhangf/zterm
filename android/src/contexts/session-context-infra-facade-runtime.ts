@@ -34,6 +34,7 @@ import {
   recordSessionRxBytesOnlyInfraRuntime,
   recordSessionTxInfraRuntime,
   resetSessionTransportPullBookkeepingInfraRuntime,
+  resolvePhysicalBodySubscribedSessionIdsRuntime,
   resolveSessionCacheLinesRuntime,
   sendSocketPayloadInfraRuntime,
   setActiveSessionSyncRuntime,
@@ -60,6 +61,7 @@ export function createSessionInfraFacadeRuntime(options: {
   setScheduleStates: React.Dispatch<React.SetStateAction<Record<string, SessionScheduleState>>>;
   sessionAttachTokensRef: { current: Map<string, string> };
   pendingSessionTransportOpenIntentsRef: { current: Map<string, unknown> };
+  activeBodySubscriptionSuppressedRef: { current: boolean };
   reconnectRuntimesRef: { current: Map<string, SessionReconnectRuntime> };
   pendingInputTailRefreshRef: { current: Map<string, { requestedAt: number; localRevision: number }> };
   pendingConnectTailRefreshRef: { current: Set<string> };
@@ -121,6 +123,14 @@ export function createSessionInfraFacadeRuntime(options: {
     reconcilePhysicalBodySubscriptions('live-sessions');
   };
 
+  const setActiveBodySubscriptionSuppressedSync = (suppressed: boolean, reason = 'active-body-subscription-suppressed') => {
+    if (options.activeBodySubscriptionSuppressedRef.current === suppressed) {
+      return;
+    }
+    options.activeBodySubscriptionSuppressedRef.current = suppressed;
+    reconcilePhysicalBodySubscriptions(reason);
+  };
+
   const createSessionSync = (session: Session) => {
     createSessionSyncRuntime({
       session,
@@ -161,10 +171,11 @@ export function createSessionInfraFacadeRuntime(options: {
   const transportAccessors = createTransportInfraAccessorsRuntime(options.transportRuntimeStoreRef);
 
   function reconcilePhysicalBodySubscriptions(reason: string) {
-    const liveSessionIds = new Set([
-      options.stateRef.current.activeSessionId,
-      ...options.stateRef.current.liveSessionIds,
-    ].filter((sessionId): sessionId is string => typeof sessionId === 'string' && sessionId.length > 0));
+    const liveSessionIds = resolvePhysicalBodySubscribedSessionIdsRuntime({
+      activeSessionId: options.stateRef.current.activeSessionId,
+      liveSessionIds: options.stateRef.current.liveSessionIds,
+      activeBodySubscriptionSuppressed: options.activeBodySubscriptionSuppressedRef.current,
+    });
     for (const session of options.stateRef.current.sessions) {
       const ws = transportAccessors.readSessionTransportSocket(session.id);
       if (!ws || ws.readyState !== WebSocket.OPEN) {
@@ -455,6 +466,7 @@ export function createSessionInfraFacadeRuntime(options: {
     updateSessionSync,
     setActiveSessionSync,
     setLiveSessionIdsSync,
+    setActiveBodySubscriptionSuppressedSync,
     createSessionSync,
     deleteSessionSync,
     moveSessionSync,

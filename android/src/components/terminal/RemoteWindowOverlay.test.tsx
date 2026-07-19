@@ -94,7 +94,7 @@ describe('RemoteWindowOverlay', () => {
     expect(overlay.getAttribute('data-mode')).toBe('floating');
     expect(screen.getByText('等待视频流')).toBeTruthy();
 
-    fireEvent.doubleClick(overlay);
+    fireEvent.doubleClick(screen.getByTestId('remote-window-video-surface'));
     await waitFor(() => {
       expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
     });
@@ -120,5 +120,91 @@ describe('RemoteWindowOverlay', () => {
     await waitFor(() => {
       expect(screen.getByTestId('remote-window-picker-error').textContent).toContain('当前没有可用的 daemon session');
     });
+  });
+
+  it('reports overlay open state while picker or locked target owns the surface', async () => {
+    const onOpenStateChange = vi.fn();
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('pane-1', 'zterm pane', 'iterm2-pane')],
+    }));
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        requestTargets={requestTargets}
+        onOpenStateChange={onOpenStateChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-target-pane-1');
+    expect(onOpenStateChange).toHaveBeenCalledWith(true);
+
+    fireEvent.click(screen.getByTestId('remote-window-target-pane-1'));
+    fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
+
+    await waitFor(() => {
+      expect(onOpenStateChange).toHaveBeenLastCalledWith(false);
+    });
+  });
+
+  it('moves the floating overlay from the toolbar without entering fullscreen', async () => {
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('pane-1', 'zterm pane', 'iterm2-pane')],
+    }));
+
+    render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-target-pane-1');
+    fireEvent.click(screen.getByTestId('remote-window-target-pane-1'));
+
+    const overlay = screen.getByTestId('remote-window-locked-overlay');
+    const toolbar = screen.getByTestId('remote-window-drag-handle');
+    Object.defineProperty(overlay, 'getBoundingClientRect', {
+      value: () => ({
+        x: 600,
+        y: 420,
+        left: 600,
+        top: 420,
+        right: 960,
+        bottom: 645,
+        width: 360,
+        height: 225,
+        toJSON: () => ({}),
+      }),
+    });
+
+    fireEvent.pointerDown(toolbar, { pointerId: 1, clientX: 700, clientY: 440 });
+    fireEvent.pointerMove(window, { pointerId: 1, clientX: 620, clientY: 380 });
+    fireEvent.pointerUp(window, { pointerId: 1, clientX: 620, clientY: 380 });
+
+    expect(overlay.style.transform).toBe('translate(-80px, -60px)');
+    expect(overlay.getAttribute('data-mode')).toBe('floating');
+  });
+
+  it('does not move the overlay from toolbar pointer gestures in fullscreen', async () => {
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('pane-1', 'zterm pane', 'iterm2-pane')],
+    }));
+
+    render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-target-pane-1');
+    fireEvent.click(screen.getByTestId('remote-window-target-pane-1'));
+    fireEvent.doubleClick(screen.getByTestId('remote-window-video-surface'));
+
+    const overlay = screen.getByTestId('remote-window-locked-overlay');
+    const toolbar = screen.getByTestId('remote-window-drag-handle');
+    fireEvent.pointerDown(toolbar, { pointerId: 2, clientX: 300, clientY: 20 });
+    fireEvent.pointerMove(window, { pointerId: 2, clientX: 100, clientY: 120 });
+    fireEvent.pointerUp(window, { pointerId: 2, clientX: 100, clientY: 120 });
+
+    expect(overlay.getAttribute('data-mode')).toBe('fullscreen');
+    expect(overlay.style.transform).toBe('');
   });
 });

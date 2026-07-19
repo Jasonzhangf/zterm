@@ -17,11 +17,12 @@ import {
   TERMINAL_SESSION_GROUP_LAYOUT_OPTIONS,
   normalizeTerminalSessionGroupLayoutMode,
 } from '../lib/terminal-layout-profile';
-import { AppUpdateSection } from '../components/settings/AppUpdateSection';
+import { AppUpdateSection, type AppUpdateManifestCandidate } from '../components/settings/AppUpdateSection';
 import { RememberedServersSection } from '../components/settings/RememberedServersSection';
 import { RelayAccountSettingsSection } from '../components/settings/RelayAccountSettingsSection';
 import { SettingsSectionTitle, settingsInputStyle, settingsSectionStyle } from '../components/settings/SettingsSection';
 import { TerminalThemeSection } from '../components/settings/TerminalThemeSection';
+import { deriveRelayUpdateManifestUrl } from '../lib/app-update-relay-manifest';
 
 interface SettingsPageProps {
   settings: BridgeSettings;
@@ -51,6 +52,13 @@ interface SettingsPageProps {
   onBack: () => void;
 }
 
+interface DaemonUpdateRouteInput {
+  id: string;
+  name: string;
+  targetHost: string;
+  targetPort: number;
+}
+
 function deriveDaemonUpdateManifestUrl(targetHost: string, targetPort: number) {
   const rawHost = targetHost.trim();
   if (!rawHost) {
@@ -66,6 +74,64 @@ function deriveDaemonUpdateManifestUrl(targetHost: string, targetPort: number) {
     console.warn('[SettingsPage] Failed to derive daemon update manifest URL:', error);
     return '';
   }
+}
+
+function addManifestCandidate(
+  candidates: AppUpdateManifestCandidate[],
+  seenUrls: Set<string>,
+  candidate: AppUpdateManifestCandidate,
+) {
+  const url = candidate.manifestUrl.trim();
+  if (!url || seenUrls.has(url)) {
+    return;
+  }
+  seenUrls.add(url);
+  candidates.push({ ...candidate, manifestUrl: url });
+}
+
+function buildAppUpdateManifestCandidates(settings: BridgeSettings): AppUpdateManifestCandidate[] {
+  const candidates: AppUpdateManifestCandidate[] = [];
+  const seenUrls = new Set<string>();
+  const relayWsHostUrl = settings.traversalRelay?.wsHostUrl?.trim() || '';
+
+  if (relayWsHostUrl) {
+    try {
+      addManifestCandidate(candidates, seenUrls, {
+        id: 'relay-public',
+        label: 'Relay 公网',
+        manifestUrl: deriveRelayUpdateManifestUrl(relayWsHostUrl),
+        manifestSource: 'relay-injected',
+      });
+    } catch (error) {
+      console.warn('[SettingsPage] Failed to derive relay update manifest URL:', error);
+    }
+  }
+
+  const defaultServer = getDefaultBridgeServer(settings);
+  const directInputs: Array<DaemonUpdateRouteInput | null | undefined> = [
+    defaultServer,
+    ...settings.servers.filter((server) => server.id !== defaultServer?.id),
+    settings.targetHost.trim()
+      ? {
+          id: 'current-target',
+          name: '当前 daemon 地址',
+          targetHost: settings.targetHost,
+          targetPort: settings.targetPort,
+        }
+      : null,
+  ];
+
+  for (const server of directInputs.filter((item): item is DaemonUpdateRouteInput => Boolean(item))) {
+    const manifestUrl = deriveDaemonUpdateManifestUrl(server.targetHost, server.targetPort);
+    addManifestCandidate(candidates, seenUrls, {
+      id: `daemon-${server.id || `${server.targetHost}:${server.targetPort}`}`,
+      label: server.name?.trim() || '当前 daemon 地址',
+      manifestUrl,
+      manifestSource: 'server-connected',
+    });
+  }
+
+  return candidates;
 }
 
 export function SettingsPage({
@@ -99,12 +165,10 @@ export function SettingsPage({
   const [updateDraft, setUpdateDraft] = useState(updatePreferences);
   const [runtimeDebugEnabled, setRuntimeDebugEnabledState] = useState(() => isRuntimeDebugEnabled());
   const defaultServer = useMemo(() => getDefaultBridgeServer(draft), [draft]);
+  const manifestCandidates = useMemo(() => buildAppUpdateManifestCandidates(draft), [draft]);
   const suggestedManifestUrl = useMemo(
-    () => deriveDaemonUpdateManifestUrl(
-      defaultServer?.targetHost || draft.targetHost || '',
-      defaultServer?.targetPort || draft.targetPort || 3333,
-    ),
-    [defaultServer?.targetHost, defaultServer?.targetPort, draft.targetHost, draft.targetPort],
+    () => manifestCandidates.find((candidate) => candidate.manifestSource === 'server-connected')?.manifestUrl || '',
+    [manifestCandidates],
   );
   useEffect(() => {
     setUpdateDraft(updatePreferences);
@@ -200,6 +264,7 @@ export function SettingsPage({
           hasNewVersion={hasNewVersion}
           hasUpdateIgnorePolicy={hasUpdateIgnorePolicy}
           suggestedManifestUrl={suggestedManifestUrl}
+          manifestCandidates={manifestCandidates}
           onUpdateDraftChange={(updater) => setUpdateDraft((current) => updater(current))}
           onCheckForUpdate={() => onCheckForUpdate(updateDraft)}
           onInstallUpdate={onInstallUpdate}

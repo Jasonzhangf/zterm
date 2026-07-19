@@ -153,6 +153,27 @@ export function isSessionTransportActiveRuntime(options: {
   );
 }
 
+export function resolvePhysicalBodySubscribedSessionIdsRuntime(options: {
+  activeSessionId?: string | null;
+  liveSessionIds?: string[] | null;
+  activeBodySubscriptionSuppressed?: boolean;
+}) {
+  const ids = new Set<string>();
+  if (!options.activeBodySubscriptionSuppressed) {
+    const activeSessionId = typeof options.activeSessionId === 'string' ? options.activeSessionId.trim() : '';
+    if (activeSessionId) {
+      ids.add(activeSessionId);
+    }
+  }
+  for (const sessionId of Array.isArray(options.liveSessionIds) ? options.liveSessionIds : []) {
+    const normalizedSessionId = typeof sessionId === 'string' ? sessionId.trim() : '';
+    if (normalizedSessionId) {
+      ids.add(normalizedSessionId);
+    }
+  }
+  return ids;
+}
+
 export function shouldAcceptSessionLiveBufferRuntime(options: {
   sessionId: string;
   stateRef: { current: SessionManagerState };

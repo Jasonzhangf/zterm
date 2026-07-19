@@ -151,6 +151,7 @@ describe('TerminalPage remote window overlay', () => {
       targets: [makeTarget()],
       errors: [],
     }));
+    const onActiveBodySubscriptionSuppressedChange = vi.fn();
 
     render(
       <TerminalPage
@@ -165,6 +166,7 @@ describe('TerminalPage remote window overlay', () => {
         onResize={vi.fn()}
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
+        onActiveBodySubscriptionSuppressedChange={onActiveBodySubscriptionSuppressedChange}
         onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
         quickActions={[]}
         shortcutActions={[]}
@@ -172,11 +174,14 @@ describe('TerminalPage remote window overlay', () => {
       />,
     );
 
+    expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
 
     await waitFor(() => {
       expect(onRequestRemoteWindowTargets).toHaveBeenCalledWith('s1');
       expect(screen.getByTestId('remote-window-target-pane-1')).toBeTruthy();
+      expect(screen.queryByTestId('terminal-quickbar')).toBeNull();
+      expect(onActiveBodySubscriptionSuppressedChange).toHaveBeenCalledWith(true);
     });
 
     fireEvent.click(screen.getByTestId('remote-window-target-pane-1'));
@@ -185,6 +190,14 @@ describe('TerminalPage remote window overlay', () => {
       expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
       expect(screen.getByText('等待视频流')).toBeTruthy();
       expect(screen.queryByTestId('terminal-view-s1')).toBeTruthy();
+      expect(screen.queryByTestId('terminal-quickbar')).toBeNull();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
+    await waitFor(() => {
+      expect(screen.queryByTestId('remote-window-locked-overlay')).toBeNull();
+      expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
+      expect(onActiveBodySubscriptionSuppressedChange).toHaveBeenLastCalledWith(false);
     });
   });
 });

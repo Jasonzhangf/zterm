@@ -81,6 +81,24 @@ describe('TerminalSessionDrawer', () => {
     expect(onOpenQuickTabPicker).not.toHaveBeenCalled();
   });
 
+  it('keeps the session list content-sized so the drawer does not leave a large blank gap above the footer', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    const list = screen.getByTestId('terminal-session-drawer-list');
+    expect(list.style.flex).toBe('0 1 auto');
+    expect(list.style.minHeight).toBe('0px');
+    expect(screen.getByTestId('terminal-session-drawer-add')).toBeTruthy();
+  });
+
   it('keeps preview multi-select isolated from normal session switching', () => {
     const onSelectSession = vi.fn();
     const onTogglePreviewSession = vi.fn();

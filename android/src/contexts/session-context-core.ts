@@ -200,6 +200,7 @@ export interface SessionContextValue {
   closeSession: (id: string) => void;
   switchSession: (id: string, options?: { refreshSource?: 'explicit-resume' | 'active-reentry' }) => void;
   setLiveSessionIds: (ids: string[]) => void;
+  setActiveBodySubscriptionSuppressed: (suppressed: boolean) => void;
   moveSession: (id: string, toIndex: number) => void;
   renameSession: (id: string, name: string) => void;
   reconnectSession: (id: string) => void;

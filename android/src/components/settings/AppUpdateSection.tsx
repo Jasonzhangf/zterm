@@ -1,6 +1,22 @@
 import { mobileTheme } from '../../lib/mobile-ui';
-import type { AppUpdateManifest, AppUpdatePreferences, AppUpdateRollbackBackup } from '../../lib/app-update';
+import type {
+  AppUpdateManifest,
+  AppUpdateManifestSource,
+  AppUpdatePreferences,
+  AppUpdateRollbackBackup,
+} from '../../lib/app-update';
 import { SettingsSectionTitle, settingsInputStyle, settingsSectionStyle } from './SettingsSection';
+
+export interface AppUpdateManifestCandidate {
+  id: string;
+  label: string;
+  manifestUrl: string;
+  manifestSource: AppUpdateManifestSource;
+}
+
+function formatManifestCandidateButtonLabel(label: string) {
+  return label === '当前 daemon 地址' ? '使用当前 daemon 地址' : `使用 ${label}`;
+}
 
 interface AppUpdateSectionProps {
   currentVersionName: string;
@@ -13,6 +29,7 @@ interface AppUpdateSectionProps {
   hasNewVersion: boolean;
   hasUpdateIgnorePolicy: boolean;
   suggestedManifestUrl: string;
+  manifestCandidates?: AppUpdateManifestCandidate[];
   onUpdateDraftChange: (updater: (current: AppUpdatePreferences) => AppUpdatePreferences) => void;
   onCheckForUpdate: () => void;
   onInstallUpdate: () => void;
@@ -37,6 +54,7 @@ export function AppUpdateSection({
   hasNewVersion,
   hasUpdateIgnorePolicy,
   suggestedManifestUrl,
+  manifestCandidates,
   onUpdateDraftChange,
   onCheckForUpdate,
   onInstallUpdate,
@@ -49,6 +67,17 @@ export function AppUpdateSection({
   isRollingBack = false,
   onRollback,
 }: AppUpdateSectionProps) {
+  const routeCandidates = manifestCandidates?.length
+    ? manifestCandidates
+    : suggestedManifestUrl
+      ? [{
+          id: 'current-daemon',
+          label: '当前 daemon 地址',
+          manifestUrl: suggestedManifestUrl,
+          manifestSource: 'server-connected' as const,
+        }]
+      : [];
+
   return (
     <div data-testid="settings-update-section" style={settingsSectionStyle()}>
       <SettingsSectionTitle>版本与升级</SettingsSectionTitle>
@@ -68,29 +97,33 @@ export function AppUpdateSection({
           placeholder="https://server.example.com/zterm/android/stable/latest.json"
           style={settingsInputStyle()}
         />
-        {suggestedManifestUrl ? (
-          <div style={{ marginTop: '10px' }}>
-            <button
-              onClick={() =>
-                onUpdateDraftChange((current) => ({
-                  ...current,
-                  manifestUrl: suggestedManifestUrl,
-                  manifestSource: 'server-connected',
-                }))
-              }
-              style={{
-                minHeight: '40px',
-                padding: '0 14px',
-                borderRadius: '14px',
-                border: 'none',
-                backgroundColor: '#eef2f8',
-                color: mobileTheme.colors.lightText,
-                fontWeight: 700,
-                cursor: 'pointer',
-              }}
-            >
-              使用当前 daemon 地址
-            </button>
+        {routeCandidates.length > 0 ? (
+          <div style={{ marginTop: '10px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            {routeCandidates.map((candidate) => (
+              <button
+                key={candidate.id}
+                type="button"
+                onClick={() =>
+                  onUpdateDraftChange((current) => ({
+                    ...current,
+                    manifestUrl: candidate.manifestUrl,
+                    manifestSource: candidate.manifestSource,
+                  }))
+                }
+                style={{
+                  minHeight: '40px',
+                  padding: '0 14px',
+                  borderRadius: '14px',
+                  border: 'none',
+                  backgroundColor: updateDraft.manifestUrl === candidate.manifestUrl ? mobileTheme.colors.shell : '#eef2f8',
+                  color: updateDraft.manifestUrl === candidate.manifestUrl ? '#fff' : mobileTheme.colors.lightText,
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                {formatManifestCandidateButtonLabel(candidate.label)}
+              </button>
+            ))}
           </div>
         ) : null}
       </div>

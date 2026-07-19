@@ -5,6 +5,7 @@ import {
   createRemoteWindowStreamDaemonRuntime,
   flattenIterm2SplitTree,
   parseTmuxClientTargets,
+  summarizeRemoteWindowCatalogError,
   type Iterm2RawCatalog,
   type Iterm2RawNode,
   type MacosAppWindowCatalog,
@@ -413,8 +414,45 @@ describe('remote window stream daemon owner', () => {
     expect('errors' in response ? response.errors : []).toEqual([{
       requestId: 'rw-partial',
       code: 'iterm2_api_unavailable',
-      message: 'No module named iterm2',
+      message: 'iTerm2 Python API unavailable: missing Python module iterm2',
     }]);
+  });
+
+  it('does not expose the inline Python catalog script in user-visible daemon errors', async () => {
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      runMacosAppWindowCatalog: vi.fn(async () => JSON.stringify(makeAppWindowCatalog())),
+      runIterm2Python: vi.fn(async () => {
+        throw new Error([
+          'Command failed: python3 -c import json import iterm2 def frame_dict(frame): return {"x": frame.origin.x}',
+          'Traceback (most recent call last):',
+          '  File "<string>", line 3, in <module>',
+          "ModuleNotFoundError: No module named 'iterm2'",
+        ].join('\n'));
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const response = await runtime.listTargets({ requestId: 'rw-short-error' });
+    const errorMessage = 'errors' in response ? response.errors?.[0]?.message || '' : '';
+
+    expect(errorMessage).toBe('iTerm2 Python API unavailable: missing Python module iterm2');
+    expect(errorMessage).not.toContain('python3 -c');
+    expect(errorMessage).not.toContain('frame_dict');
+  });
+
+  it('summarizes long catalog failures without dropping the explicit failure reason', () => {
+    const message = summarizeRemoteWindowCatalogError(
+      new Error([
+        'Command failed: swift -e import AppKit func number(_ value: Any?) -> Double? { return nil }',
+        'remote permission denied while listing windows',
+      ].join('\n')),
+      'macOS app window catalog unavailable',
+    );
+
+    expect(message).toBe('remote permission denied while listing windows');
+    expect(message).not.toContain('swift -e');
+    expect(message.length).toBeLessThanOrEqual(220);
   });
 
   it('surfaces iTerm2 API failures explicitly instead of falling back to screenshot or terminal buffer truth', async () => {
@@ -431,7 +469,7 @@ describe('remote window stream daemon owner', () => {
     expect(response).toEqual({
       requestId: 'rw-error',
       code: 'iterm2_api_unavailable',
-      message: 'No module named iterm2',
+      message: 'iTerm2 Python API unavailable: missing Python module iterm2',
     });
   });
 });

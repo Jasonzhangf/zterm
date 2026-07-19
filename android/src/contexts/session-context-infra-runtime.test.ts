@@ -9,6 +9,7 @@ import {
   applySessionActionRuntime,
   buildTraversalSocketForHostRuntime,
   isSessionTransportActiveRuntime,
+  resolvePhysicalBodySubscribedSessionIdsRuntime,
   shouldUseLegacyWsOverrideForHostRuntime,
 } from './session-context-infra-runtime';
 
@@ -267,5 +268,19 @@ describe('applySessionActionRuntime', () => {
     expect(isSessionTransportActiveRuntime({ sessionId: 's2', stateRef })).toBe(true);
     expect(isSessionTransportActiveRuntime({ sessionId: 's1', stateRef })).toBe(true);
     expect(isSessionTransportActiveRuntime({ sessionId: 'missing', stateRef })).toBe(false);
+  });
+
+  it('can suppress active terminal body push without closing live pane subscriptions', () => {
+    expect([...resolvePhysicalBodySubscribedSessionIdsRuntime({
+      activeSessionId: 's1',
+      liveSessionIds: ['s2', 's2', ''],
+      activeBodySubscriptionSuppressed: false,
+    })]).toEqual(['s1', 's2']);
+
+    expect([...resolvePhysicalBodySubscribedSessionIdsRuntime({
+      activeSessionId: 's1',
+      liveSessionIds: ['s2'],
+      activeBodySubscriptionSuppressed: true,
+    })]).toEqual(['s2']);
   });
 });

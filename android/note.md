@@ -2695,3 +2695,20 @@ Need runtime debug to confirm:
 - Verification passed: remote-window focused suite `6 files / 26 tests`; daemon catalog/message suite `2 files / 31 tests`; App/lifecycle related suite `4 files / 50 tests`; architecture/resource/function/mainline gate `7 files / 48 tests`; `tsc --noEmit`; `git diff --check`; `build:android` including terminal contracts `48 files / 586 tests`, common flows `7 files / 82 tests`, Relay smoke, Vite, Capacitor sync, and Gradle assemble.
 - APK published and installed: `0.1.3.2159` / versionCode `1032159`, sha256 `cd9ce9f03eafd734966ebc366cc762bd05a709dd1ac4a4e5019f1dbf77395e56`, paths `android/update-dist/zterm-0.1.3.2159.apk` and `/Users/fanzhang/.zterm/updates/zterm-0.1.3.2159.apk`; `adb install -r` succeeded on `100.104.163.65:5555`, `dumpsys package` reports the same version.
 - Remaining gap: Android launch intent focused `com.zterm.android/.MainActivity`, but `mCurrentFocus=NotificationShade` and `mDreamingLockscreen=true`; UI visual L5 is not claimed. Real ScreenCaptureKit/WebRTC frame delivery and input return remain pending by design.
+
+## 2026-07-19 Remote window Android triage after device screenshots
+
+- Jason reported three regressions: update check path still tied to a Tailscale/direct daemon URL, remote window picker timed out with zero targets, and the terminal quickbar/input surface remained visible while the remote-window overlay was open.
+- Architecture mapping: update route belongs to `settings.config_transfer`; remote target catalog belongs to `desktop.remote_window_stream`; bottom quickbar suppression belongs to `TerminalPage` projection between `desktop.remote_window_stream` and `terminal.quickbar`.
+- ADB confirms device `100.104.163.65:5555` is installed at `0.1.3.2159` / versionCode `1032159`; the screenshot showing `0.1.3.2157` is not the current installed package truth.
+- Root cause found for catalog timeout: running daemon PID `3312` started 2026-07-16 from `~/.zterm/daemon-runtime/server.cjs`; that staged runtime has no `remote-window-targets-request`, so Android waits until the 15s catalog timeout. Source has the handler; daemon runtime staging/service needs update.
+
+## 2026-07-19 Remote window overlay drag and daemon catalog service closeout
+
+- Jason reported two UI regressions after the remote-window slice: Terminal drawer left a large blank area above the footer, and the remote-window floating overlay could not be moved.
+- Architecture mapping: drawer spacing stays in `terminal.session_drawer` / `TerminalSessionDrawer`; overlay movement stays in `desktop.remote_window_stream` / `resource.remote_window_overlay`. No terminal buffer/render/transport fallback was added.
+- Red/green: `RemoteWindowOverlay.test.tsx` first failed on missing `remote-window-drag-handle`, then passed after adding toolbar-only floating drag. Drag is disabled in fullscreen; double-click/double-tap fullscreen intent moved to the video surface so future video/input gestures are not hijacked by toolbar drag.
+- Drawer fix remains content-sized list projection: list uses `flex: 0 1 auto` and `minHeight: 0`, with a regression test preventing `flex: 1` blank-space growth.
+- Daemon root cause for zero iTerm2 panes was the launchd runner using base Python without `iterm2`; `scripts/zterm-daemon.sh` and release script now prepare `~/.zterm/python/iterm2` and launch daemon with `ZTERM_ITERM2_PYTHON`.
+- Live verification after service-scoped `bash android/scripts/zterm-daemon.sh restart`: health pid `79375`, uptime `19s`; launch runner exports `ZTERM_ITERM2_PYTHON=/Users/fanzhang/.zterm/python/iterm2/bin/python3`; `import iterm2` passes; real WebSocket catalog returned `targetCount=31`, `appWindows=20`, `itermPanes=11`, `errors=[]`.
+- Local gates passed before APK build: remote-window required gates `8 files / 62 tests`, drawer required gates `4 files / 62 tests`, Settings/update focused gates `6 files / 33 tests`, feature/resource/function/mainline gates `7 files / 48 tests`, and `tsc --noEmit`.

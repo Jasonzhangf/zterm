@@ -71,6 +71,7 @@ export function createSessionPublicFacadeRuntime(options: {
   }) => boolean;
   sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: 'adaptive-phone' | 'mirror-fixed') => boolean;
   setLiveSessionIdsSync: (ids: string[]) => void;
+  setActiveBodySubscriptionSuppressedSync: (suppressed: boolean, reason?: string) => void;
   isSessionTransportActive: (sessionId: string) => boolean;
   sessionDebugMetricsStoreRef: {
     current: {
@@ -139,6 +140,10 @@ export function createSessionPublicFacadeRuntime(options: {
 
   const setLiveSessionIds = (ids: string[]) => {
     options.setLiveSessionIdsSync(ids);
+  };
+
+  const setActiveBodySubscriptionSuppressed = (suppressed: boolean) => {
+    options.setActiveBodySubscriptionSuppressedSync(suppressed, 'remote-window-overlay');
   };
 
   const resumeActiveSessionTransport = (sessionId: string) => {
@@ -234,6 +239,7 @@ export function createSessionPublicFacadeRuntime(options: {
     toggleScheduleJob,
     runScheduleJobNow,
     setLiveSessionIds,
+    setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport,
     sendTerminalResize,
     updateSessionViewport,
@@ -257,6 +263,7 @@ export function buildSessionContextValueRuntime(options: {
   reconnectSession: (id: string) => void;
   reconnectAllSessions: () => void;
   setLiveSessionIds: (ids: string[]) => void;
+  setActiveBodySubscriptionSuppressed: (suppressed: boolean) => void;
   resumeActiveSessionTransport: (id: string) => boolean;
   sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: 'adaptive-phone' | 'mirror-fixed') => boolean;
   sendMessage: (sessionId: string, msg: ClientMessage) => void;
@@ -296,6 +303,7 @@ export function buildSessionContextValueRuntime(options: {
     reconnectSession: options.reconnectSession,
     reconnectAllSessions: options.reconnectAllSessions,
     setLiveSessionIds: options.setLiveSessionIds,
+    setActiveBodySubscriptionSuppressed: options.setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport: options.resumeActiveSessionTransport,
     sendTerminalResize: options.sendTerminalResize,
     sendMessage: options.sendMessage,
