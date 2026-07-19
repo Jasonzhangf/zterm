@@ -69,6 +69,7 @@ describe('session-context-message-assemblies cadence', () => {
         pendingSessionTransportOpenIntentsRef: { current: new Map() },
         manualCloseRef: { current: new Set() },
         fileTransferMessageRuntimeRef: { current: { dispatch: vi.fn() } },
+        remoteWindowMessageRuntimeRef: { current: { dispatch: vi.fn() } },
         readSessionTransportSocket: () => ws,
         readSessionBufferSnapshot: () => session.buffer,
         sendSocketPayload,

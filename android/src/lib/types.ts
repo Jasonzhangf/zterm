@@ -74,6 +74,11 @@ export type SessionState =
 
 export type {
   HostConfigMessage,
+  RemoteWindowStreamErrorPayload,
+  RemoteWindowStreamRect,
+  RemoteWindowStreamRequestPayload,
+  RemoteWindowStreamTargetManifest,
+  RemoteWindowStreamTargetsResponsePayload,
 } from '@zterm/shared/protocol';
 export type {
   BufferHeadPayload,

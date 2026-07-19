@@ -109,6 +109,7 @@ const sessionHarness = vi.hoisted(() => {
   const sendImagePaste = vi.fn();
   const sendFileAttach = vi.fn();
   const requestRemoteScreenshot = vi.fn();
+  const requestRemoteWindowTargets = vi.fn();
   const sendMessageRaw = vi.fn();
   const onFileTransferMessage = vi.fn(() => vi.fn());
   const updateSessionViewport = vi.fn();
@@ -155,6 +156,7 @@ const sessionHarness = vi.hoisted(() => {
     sendImagePaste,
     sendFileAttach,
     requestRemoteScreenshot,
+    requestRemoteWindowTargets,
     sendMessageRaw,
     onFileTransferMessage,
     updateSessionViewport,
@@ -204,6 +206,7 @@ const sessionHarness = vi.hoisted(() => {
       sendImagePaste.mockReset();
       sendFileAttach.mockReset();
       requestRemoteScreenshot.mockReset();
+      requestRemoteWindowTargets.mockReset();
       sendMessageRaw.mockReset();
       onFileTransferMessage.mockReset();
       onFileTransferMessage.mockImplementation(() => vi.fn());
@@ -386,6 +389,7 @@ vi.mock('./contexts/SessionContext', () => ({
     sendImagePaste: sessionHarness.sendImagePaste,
     sendFileAttach: sessionHarness.sendFileAttach,
     requestRemoteScreenshot: sessionHarness.requestRemoteScreenshot,
+    requestRemoteWindowTargets: sessionHarness.requestRemoteWindowTargets,
     sendMessageRaw: sessionHarness.sendMessageRaw,
     onFileTransferMessage: sessionHarness.onFileTransferMessage,
     updateSessionViewport: sessionHarness.updateSessionViewport,
@@ -409,6 +413,7 @@ vi.mock('./hooks/useAppUpdate', () => ({
     lastError: null,
     updateStage: 'idle',
     setPreferences: vi.fn(),
+    applyRelayManifestSource: vi.fn(),
     checkForUpdates: vi.fn(),
     dismissAvailableManifest: vi.fn(),
     skipCurrentVersion: vi.fn(),

@@ -6,6 +6,25 @@ Feature id: `desktop.remote_window_stream`
 
 This gate covers remote app/window and iTerm2 pane video streaming from a daemon host to Android, plus the future input-return contract. The stream is a desktop media resource, not terminal buffer truth.
 
+## Current Minimal Android Slice
+
+The current implemented Android slice is intentionally narrower than feature completion:
+
+1. `TerminalPage` renders the remote-window floating entry and passes only the active session id plus the SessionContext catalog request callback.
+2. The picker requests and renders the daemon `RemoteWindowStreamTargetManifest[]` catalog, including explicit partial and top-level errors.
+3. Selecting one manifest locks a floating overlay shell to that target; double tap/double click enters fullscreen, Back/minimize returns to floating, and close invalidates the UI state.
+4. The shell displays `等待视频流`. It does not claim that capture started and does not use terminal mirror, sparse buffer, renderer rows, screenshot runtime, or any synthetic frame source as video.
+5. ScreenCaptureKit capture, WebRTC frame delivery, stream-id lifecycle, and input return remain pending and are still required by the completion rule.
+
+Current executable gates:
+
+- `src/lib/remote-window-message-runtime.test.ts`
+- `src/lib/remote-window-overlay-runtime.test.ts`
+- `src/components/terminal/RemoteWindowOverlay.test.tsx`
+- `src/pages/TerminalPage.remote-window-overlay.test.tsx`
+- `src/contexts/session-context-remote-window-runtime.test.ts`
+- `src/contexts/session-context-socket-message-runtime.test.ts`
+
 ## White-Box Gates
 
 1. Resource/function/mainline gates
@@ -38,8 +57,12 @@ This gate covers remote app/window and iTerm2 pane video streaming from a daemon
    - Do not silently hide source errors as a fallback success.
 
 6. Overlay state machine
-   - `fullscreenStream + Back -> floatingStream`
-   - `fullscreenStream + minimize -> floatingStream`
+   - Current minimal slice: `targetLocked/fullscreen + Back -> targetLocked/floating`
+   - Current minimal slice: `targetLocked/fullscreen + minimize -> targetLocked/floating`
+   - Current minimal slice: late catalog responses from an older request epoch cannot overwrite the current picker/closed state.
+   - Current minimal slice: `close -> closed`, with no frame source fabricated.
+   - Full stream slice: `fullscreenStream + Back -> floatingStream`
+   - Full stream slice: `fullscreenStream + minimize -> floatingStream`
    - `close -> closed`
    - Back/minimize must not tear down capture, encoder, or WebRTC sender.
    - Close must release all stream resources exactly once.
@@ -88,6 +111,8 @@ This gate covers remote app/window and iTerm2 pane video streaming from a daemon
 
 ## Black-Box Android Gates
 
+The picker and target-locked overlay shell are covered now. Gates that require a real frame or remote input remain pending until the ScreenCaptureKit/WebRTC receiver and input-return slices exist.
+
 1. Floating entry
    - Existing floating quick entry is removed or hidden for the stream mode.
    - Tapping the floating entry opens the remote window picker.
@@ -99,11 +124,13 @@ This gate covers remote app/window and iTerm2 pane video streaming from a daemon
    - Missing permission/catalog failures surface explicit errors.
 
 3. Overlay
-   - Selecting a pane starts floating stream overlay.
+   - Current minimal slice: selecting a pane locks the floating overlay shell to the exact manifest and displays an honest waiting state.
+   - Full stream slice: selecting a pane starts the floating stream overlay and binds a real stream id.
    - Double tap enters fullscreen letterbox.
-   - Back shrinks to floating overlay and keeps the same stream id.
-   - Minimize shrinks to floating overlay and keeps the same stream id.
-   - Close tears down the stream and removes overlay.
+   - Current minimal slice: Back/minimize shrinks to the same target-locked floating shell.
+   - Full stream slice: Back/minimize keeps the same stream id.
+   - Current minimal slice: close removes the overlay and invalidates outstanding catalog response epochs.
+   - Full stream slice: close tears down the stream and removes overlay.
 
 4. Input
    - With `bring-to-focus`, a click/key event focuses the selected target and reaches it.

@@ -10,7 +10,7 @@ h1 { font-size: 24px; margin-bottom: 18px; }
 .source { margin-top: 18px; white-space: pre-wrap; color: #5a635f; font-size: 12px; }
 </style></head><body>
 <h1>Mainline Source Wiki</h1>
-<svg class="wiki-graph" viewBox="0 0 4030 664" role="img" aria-label="Mainline graph">
+<svg class="wiki-graph" viewBox="0 0 4030 754" role="img" aria-label="Mainline graph">
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M 0 0 L 10 5 L 0 10 z" class="arrow" />
@@ -29,12 +29,14 @@ h1 { font-size: 24px; margin-bottom: 18px; }
 <path d="M 2640 62 C 2675 62, 2675 152, 2710 152" class="edge" marker-end="url(#arrow)" />
 <path d="M 2970 152 C 3005 152, 3005 152, 3040 152" class="edge" marker-end="url(#arrow)" />
 <path d="M 3300 152 C 3500 152, 3500 62, 3700 62" class="edge" marker-end="url(#arrow)" />
+<path d="M 3300 152 C 3335 152, 3335 242, 3370 242" class="edge" marker-end="url(#arrow)" />
+<path d="M 3630 242 C 3665 242, 3665 152, 3700 152" class="edge" marker-end="url(#arrow)" />
 <path d="M 2640 62 C 2675 62, 2675 242, 2710 242" class="edge" marker-end="url(#arrow)" />
 <path d="M 2970 242 C 3005 242, 3005 242, 3040 242" class="edge" marker-end="url(#arrow)" />
-<path d="M 3300 242 C 3335 242, 3335 242, 3370 242" class="edge" marker-end="url(#arrow)" />
+<path d="M 3300 242 C 3335 242, 3335 332, 3370 332" class="edge" marker-end="url(#arrow)" />
 <path d="M 2970 242 C 3170 242, 3170 152, 3370 152" class="edge" marker-end="url(#arrow)" />
 <path d="M 3300 242 C 3335 242, 3335 152, 3370 152" class="edge" marker-end="url(#arrow)" />
-<path d="M 3630 242 C 3654 242, 3654 152, 3370 152" class="edge" marker-end="url(#arrow)" />
+<path d="M 3630 332 C 3654 332, 3654 152, 3370 152" class="edge" marker-end="url(#arrow)" />
 <path d="M 1650 62 C 1685 62, 1685 62, 1720 62" class="edge" marker-end="url(#arrow)" />
 <path d="M 1980 62 C 2015 62, 2015 62, 2050 62" class="edge" marker-end="url(#arrow)" />
 <path d="M 2310 62 C 2345 62, 2345 62, 2380 62" class="edge" marker-end="url(#arrow)" />
@@ -43,11 +45,12 @@ h1 { font-size: 24px; margin-bottom: 18px; }
 <path d="M 1980 152 C 2004 152, 2004 242, 70 242" class="edge" marker-end="url(#arrow)" />
 <path d="M 1980 152 C 2004 152, 2004 332, 70 332" class="edge" marker-end="url(#arrow)" />
 <path d="M 1980 152 C 2004 152, 2004 422, 70 422" class="edge" marker-end="url(#arrow)" />
-<path d="M 330 422 C 354 422, 354 332, 70 332" class="edge" marker-end="url(#arrow)" />
 <path d="M 1980 152 C 2004 152, 2004 512, 70 512" class="edge" marker-end="url(#arrow)" />
-<path d="M 330 512 C 1025 512, 1025 152, 1720 152" class="edge" marker-end="url(#arrow)" />
-<path d="M 330 152 C 354 152, 354 602, 70 602" class="edge" marker-end="url(#arrow)" />
-<path d="M 330 602 C 1850 602, 1850 242, 3370 242" class="edge" marker-end="url(#arrow)" />
+<path d="M 330 512 C 354 512, 354 422, 70 422" class="edge" marker-end="url(#arrow)" />
+<path d="M 1980 152 C 2004 152, 2004 602, 70 602" class="edge" marker-end="url(#arrow)" />
+<path d="M 330 602 C 1025 602, 1025 152, 1720 152" class="edge" marker-end="url(#arrow)" />
+<path d="M 330 152 C 354 152, 354 692, 70 692" class="edge" marker-end="url(#arrow)" />
+<path d="M 330 692 C 1850 692, 1850 332, 3370 332" class="edge" marker-end="url(#arrow)" />
   <g class="node" data-node-id="Native">
   <rect x="70" y="34" width="260" height="56" rx="12" />
   <text x="86" y="68">native/android/app/src/main</text>
@@ -96,6 +99,14 @@ h1 { font-size: 24px; margin-bottom: 18px; }
   <rect x="3040" y="124" width="260" height="56" rx="12" />
   <text x="3056" y="158">src/contexts/session-context-transport-open-runtime.ts</text>
 </g>
+<g class="node" data-node-id="TraversalSocketFactory">
+  <rect x="3370" y="214" width="260" height="56" rx="12" />
+  <text x="3386" y="248">src/contexts/session-context-infra-runtime.ts#buildTraversalSocketForHostRuntime</text>
+</g>
+<g class="node" data-node-id="TraversalSocket">
+  <rect x="3700" y="124" width="260" height="56" rx="12" />
+  <text x="3716" y="158">src/lib/traversal/socket.ts#TraversalSocket</text>
+</g>
 <g class="node" data-node-id="SocketMessage">
   <rect x="2710" y="214" width="260" height="56" rx="12" />
   <text x="2726" y="248">src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime</text>
@@ -105,8 +116,8 @@ h1 { font-size: 24px; margin-bottom: 18px; }
   <text x="3056" y="248">src/contexts/session-context-buffer-runtime.ts#applyIncomingBufferSyncRuntime</text>
 </g>
 <g class="node" data-node-id="RenderGate">
-  <rect x="3370" y="214" width="260" height="56" rx="12" />
-  <text x="3386" y="248">src/lib/session-render-gate.ts</text>
+  <rect x="3370" y="304" width="260" height="56" rx="12" />
+  <text x="3386" y="338">src/lib/session-render-gate.ts</text>
 </g>
 <g class="node" data-node-id="PerformanceTrace">
   <rect x="3370" y="124" width="260" height="56" rx="12" />
@@ -132,21 +143,25 @@ h1 { font-size: 24px; margin-bottom: 18px; }
   <rect x="70" y="214" width="260" height="56" rx="12" />
   <text x="86" y="248">src/components/terminal/TerminalQuickBar.tsx</text>
 </g>
-<g class="node" data-node-id="StageShell">
+<g class="node" data-node-id="RemoteWindowOverlay">
   <rect x="70" y="304" width="260" height="56" rx="12" />
-  <text x="86" y="338">src/pages/TerminalPageStageShell.tsx</text>
+  <text x="86" y="338">src/components/terminal/RemoteWindowOverlay.tsx#RemoteWindowOverlay</text>
+</g>
+<g class="node" data-node-id="StageShell">
+  <rect x="70" y="394" width="260" height="56" rx="12" />
+  <text x="86" y="428">src/pages/TerminalPageStageShell.tsx</text>
 </g>
 <g class="node" data-node-id="LayoutProfile">
-  <rect x="70" y="394" width="260" height="56" rx="12" />
-  <text x="86" y="428">src/lib/terminal-layout-profile.ts</text>
+  <rect x="70" y="484" width="260" height="56" rx="12" />
+  <text x="86" y="518">src/lib/terminal-layout-profile.ts</text>
 </g>
 <g class="node" data-node-id="SessionDrawer">
-  <rect x="70" y="484" width="260" height="56" rx="12" />
-  <text x="86" y="518">src/components/terminal/TerminalSessionDrawer.tsx</text>
+  <rect x="70" y="574" width="260" height="56" rx="12" />
+  <text x="86" y="608">src/components/terminal/TerminalSessionDrawer.tsx</text>
 </g>
 <g class="node" data-node-id="Renderer">
-  <rect x="70" y="574" width="260" height="56" rx="12" />
-  <text x="86" y="608">src/lib/session-render-buffer-store.ts</text>
+  <rect x="70" y="664" width="260" height="56" rx="12" />
+  <text x="86" y="698">src/lib/session-render-buffer-store.ts</text>
 </g>
 </svg>
 <pre class="source">flowchart TD
@@ -163,6 +178,8 @@ h1 { font-size: 24px; margin-bottom: 18px; }
   SessionContext --&gt; TransportOrchestration[&quot;src/contexts/session-context-transport-orchestration-runtime.ts&quot;]
   TransportOrchestration --&gt; TransportOpen[&quot;src/contexts/session-context-transport-open-runtime.ts&quot;]
   TransportOpen --&gt; TransportReusePlan
+  TransportOpen --&gt; TraversalSocketFactory[&quot;src/contexts/session-context-infra-runtime.ts#buildTraversalSocketForHostRuntime&quot;]
+  TraversalSocketFactory --&gt; TraversalSocket[&quot;src/lib/traversal/socket.ts#TraversalSocket&quot;]
   SessionContext --&gt; SocketMessage[&quot;src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime&quot;]
   SocketMessage --&gt; BufferApply[&quot;src/contexts/session-context-buffer-runtime.ts#applyIncomingBufferSyncRuntime&quot;]
   BufferApply --&gt; RenderGate[&quot;src/lib/session-render-gate.ts#scheduleCommit&quot;]
@@ -175,6 +192,7 @@ h1 { font-size: 24px; margin-bottom: 18px; }
   App --&gt; TerminalPage[&quot;src/pages/TerminalPage.tsx&quot;]
   TerminalPage --&gt; TerminalView[&quot;src/components/TerminalView.tsx&quot;]
   TerminalPage --&gt; QuickBar[&quot;src/components/terminal/TerminalQuickBar.tsx&quot;]
+  TerminalPage --&gt; RemoteWindowOverlay[&quot;src/components/terminal/RemoteWindowOverlay.tsx#RemoteWindowOverlay&quot;]
   TerminalPage --&gt; StageShell[&quot;src/pages/TerminalPageStageShell.tsx&quot;]
   TerminalPage --&gt; LayoutProfile[&quot;src/lib/terminal-layout-profile.ts&quot;]
   LayoutProfile --&gt; StageShell

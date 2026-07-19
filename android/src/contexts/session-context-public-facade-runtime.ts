@@ -2,6 +2,7 @@ import type {
   ClientMessage,
   RemoteScreenshotCapture,
   RemoteScreenshotStatusPayload,
+  RemoteWindowStreamTargetsResponsePayload,
   ScheduleJobDraft,
   Session,
   SessionBufferState,
@@ -266,6 +267,7 @@ export function buildSessionContextValueRuntime(options: {
     sessionId: string,
     onProgress?: (progress: RemoteScreenshotStatusPayload) => void,
   ) => Promise<RemoteScreenshotCapture>;
+  requestRemoteWindowTargets: (sessionId: string) => Promise<RemoteWindowStreamTargetsResponsePayload>;
   updateSessionViewport: (sessionId: string, visibleRange: TerminalVisibleRange | TerminalViewportState) => void;
   requestScheduleList: (sessionId: string) => void;
   upsertScheduleJob: (sessionId: string, job: ScheduleJobDraft) => void;
@@ -301,6 +303,7 @@ export function buildSessionContextValueRuntime(options: {
     sendImagePaste: options.sendImagePaste,
     sendFileAttach: options.sendFileAttach,
     requestRemoteScreenshot: options.requestRemoteScreenshot,
+    requestRemoteWindowTargets: options.requestRemoteWindowTargets,
     updateSessionViewport: options.updateSessionViewport,
     requestScheduleList: options.requestScheduleList,
     upsertScheduleJob: options.upsertScheduleJob,

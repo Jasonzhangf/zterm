@@ -56,6 +56,7 @@ export interface SessionMessageAssembliesOptions {
   pendingSessionTransportOpenIntentsRef: MutableRefObject<any>;
   manualCloseRef: MutableRefObject<any>;
   fileTransferMessageRuntimeRef: MutableRefObject<any>;
+  remoteWindowMessageRuntimeRef: MutableRefObject<any>;
   readSessionTransportSocket: (sessionId: string) => any;
   readSessionBufferSnapshot: (sessionId: string) => any;
   sendSocketPayload: (sessionId: string, ws: any, data: string | ArrayBuffer) => void;
@@ -236,6 +237,7 @@ export function createSessionMessageAssemblies(
       setScheduleStateForSession: options.setScheduleStateForSession,
       setSessionTitleSync: options.setSessionTitleSync,
       fileTransferMessageRuntime: options.fileTransferMessageRuntimeRef.current,
+      remoteWindowMessageRuntime: options.remoteWindowMessageRuntimeRef.current,
       updateSessionSync: options.updateSessionSync,
     });
   };

@@ -40,6 +40,7 @@ export function useSessionProviderFacadeAssemblies(
     sessionVisibleRangeRef,
     sessionBufferHeadsRef,
     remoteScreenshotRuntimeRef,
+    remoteWindowMessageRuntimeRef,
     foregroundActiveRef,
     sessionPullStateRef,
     lastActivatedSessionIdRef,
@@ -205,6 +206,7 @@ export function useSessionProviderFacadeAssemblies(
     refs: {
       stateRef: options.stateRef,
       remoteScreenshotRuntimeRef,
+      remoteWindowMessageRuntimeRef,
     },
     imagePasteReadyTimeoutMs: IMAGE_PASTE_READY_TIMEOUT_MS,
     runtimeDebug,
@@ -221,6 +223,7 @@ export function useSessionProviderFacadeAssemblies(
     core,
     options.stateRef,
     remoteScreenshotRuntimeRef,
+    remoteWindowMessageRuntimeRef,
   ]);
 
   const {
@@ -228,6 +231,7 @@ export function useSessionProviderFacadeAssemblies(
     sendImagePaste,
     sendFileAttach,
     requestRemoteScreenshot,
+    requestRemoteWindowTargets,
   } = sessionInteractionRuntime;
 
   useSessionContextLifecycle({
@@ -246,6 +250,7 @@ export function useSessionProviderFacadeAssemblies(
       lastConnectedBaselineAtRef,
       lastServerActivityAtRef: options.refs.lastServerActivityAtRef,
       remoteScreenshotRuntimeRef,
+      remoteWindowMessageRuntimeRef,
       pingIntervalsRef,
       handshakeTimeoutsRef,
       reconnectRuntimesRef,
@@ -278,6 +283,7 @@ export function useSessionProviderFacadeAssemblies(
     sendImagePaste,
     sendFileAttach,
     requestRemoteScreenshot,
+    requestRemoteWindowTargets,
     updateSessionViewport,
     requestScheduleList,
     upsertScheduleJob,
@@ -303,6 +309,7 @@ export function useSessionProviderFacadeAssemblies(
     reconnectSession,
     renameSession,
     requestRemoteScreenshot,
+    requestRemoteWindowTargets,
     requestScheduleList,
     resumeActiveSessionTransport,
     runScheduleJobNow,

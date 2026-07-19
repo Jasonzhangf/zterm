@@ -529,6 +529,59 @@ describe('session-context-socket-message-runtime connected truth', () => {
   });
 });
 
+describe('session-context-socket-message-runtime remote window messages', () => {
+  it('routes remote window catalog responses to the remote window message runtime only', () => {
+    const fileTransferDispatch = vi.fn();
+    const remoteWindowDispatch = vi.fn();
+
+    handleSocketServerMessageRuntime({
+      params: {
+        sessionId: 'session-1',
+        host: makeHost(),
+        ws: {} as any,
+        debugScope: 'connect',
+        onConnected: vi.fn(),
+        onFailure: vi.fn(),
+        onClosed: vi.fn(),
+      },
+      msg: {
+        type: 'remote-window-targets-response',
+        payload: {
+          requestId: 'rw-1',
+          targets: [],
+        },
+      } as ServerMessage,
+      refs: {
+        stateRef: { current: { sessions: [makeSession()], activeSessionId: 'session-1' } },
+        scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
+        lastHeadRequestAtRef: { current: new Map() },
+        lastPongAtRef: { current: new Map() },
+      },
+      settleSessionPullState: vi.fn(),
+      runtimeDebug: vi.fn(),
+      isSessionTransportActive: vi.fn(() => true),
+      shouldAcceptSessionLiveBuffer: vi.fn(() => true),
+      summarizeBufferPayload: vi.fn(() => ({})),
+      applyIncomingBufferSync: vi.fn(),
+      handleBufferHead: vi.fn(),
+      setScheduleStateForSession: vi.fn(),
+      setSessionTitleSync: vi.fn(),
+      fileTransferMessageRuntime: { dispatch: fileTransferDispatch },
+      remoteWindowMessageRuntime: { dispatch: remoteWindowDispatch },
+      updateSessionSync: vi.fn(),
+    });
+
+    expect(remoteWindowDispatch).toHaveBeenCalledWith({
+      type: 'remote-window-targets-response',
+      payload: {
+        requestId: 'rw-1',
+        targets: [],
+      },
+    });
+    expect(fileTransferDispatch).not.toHaveBeenCalled();
+  });
+});
+
 describe('session-context-socket-message-runtime inactive live buffer gate', () => {
   it('drops inactive buffer-sync before payload summarization/apply so hidden tabs do not parse live frames', () => {
     const summarizeBufferPayload = vi.fn(() => ({}));

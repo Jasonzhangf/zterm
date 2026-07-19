@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import type { Host, ServerMessage, SessionScheduleState } from '../lib/types';
 import { createFileTransferMessageRuntime } from '../lib/file-transfer-message-runtime';
 import { createRemoteScreenshotRuntime } from '../lib/remote-screenshot-runtime';
+import { createRemoteWindowMessageRuntime } from '../lib/remote-window-message-runtime';
 import { createSessionDebugMetricsStore } from '../lib/session-debug-metrics-store';
 import { createSessionTransportRuntimeStore } from '../lib/session-transport-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
@@ -78,6 +79,7 @@ export function useSessionProviderRuntime(options: {
   const sessionAttachTokensRef = useRef<Map<string, string>>(new Map());
   const pendingSessionTransportOpenIntentsRef = useRef<Map<string, PendingSessionTransportOpenIntent>>(new Map());
   const remoteScreenshotRuntimeRef = useRef(createRemoteScreenshotRuntime());
+  const remoteWindowMessageRuntimeRef = useRef(createRemoteWindowMessageRuntime());
   const fileTransferMessageRuntimeRef = useRef(createFileTransferMessageRuntime({
     onRemoteScreenshotStatus: (payload) => {
       remoteScreenshotRuntimeRef.current.handleStatus(payload);
@@ -132,6 +134,7 @@ export function useSessionProviderRuntime(options: {
       sessionAttachTokensRef,
       pendingSessionTransportOpenIntentsRef,
       remoteScreenshotRuntimeRef,
+      remoteWindowMessageRuntimeRef,
       fileTransferMessageRuntimeRef,
       foregroundActiveRef,
       handleSocketConnectedBaselineRef,

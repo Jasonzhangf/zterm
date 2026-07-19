@@ -4,6 +4,7 @@ import type {
   Host,
   RemoteScreenshotCapture,
   RemoteScreenshotStatusPayload,
+  RemoteWindowStreamTargetsResponsePayload,
   ScheduleJobDraft,
   Session,
   SessionBufferState,
@@ -212,6 +213,7 @@ export interface SessionContextValue {
     sessionId: string,
     onProgress?: (progress: RemoteScreenshotStatusPayload) => void,
   ) => Promise<RemoteScreenshotCapture>;
+  requestRemoteWindowTargets: (sessionId: string) => Promise<RemoteWindowStreamTargetsResponsePayload>;
   sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: TerminalWidthMode) => boolean;
   updateSessionViewport: (sessionId: string, visibleRange: TerminalVisibleRange | TerminalViewportState) => void;
   requestScheduleList: (sessionId: string) => void;

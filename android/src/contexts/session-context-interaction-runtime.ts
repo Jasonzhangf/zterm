@@ -5,11 +5,13 @@ import {
   sendImagePasteRuntime,
   sendInputRuntime,
 } from './session-context-transfer-runtime';
+import { requestRemoteWindowTargetsRuntime } from './session-context-remote-window-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionTransportResource } from '../lib/session-transport-runtime';
 import type {
   RemoteScreenshotCapture,
   RemoteScreenshotStatusPayload,
+  RemoteWindowStreamTargetsResponsePayload,
   Session,
 } from '../lib/types';
 
@@ -31,10 +33,22 @@ interface RemoteScreenshotRuntimeLike {
   ) => Promise<RemoteScreenshotCapture>;
 }
 
+interface RemoteWindowMessageRuntimeLike {
+  requestTargets: (
+    sessionId: string,
+    options: {
+      ws: BridgeTransportSocket;
+      request?: { includeAppWindows?: boolean; includeIterm2?: boolean };
+      sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+    },
+  ) => Promise<RemoteWindowStreamTargetsResponsePayload>;
+}
+
 export function createSessionInteractionRuntime(options: {
   refs: {
     stateRef: StateRefLike;
     remoteScreenshotRuntimeRef: { current: RemoteScreenshotRuntimeLike };
+    remoteWindowMessageRuntimeRef: { current: RemoteWindowMessageRuntimeLike };
   };
   imagePasteReadyTimeoutMs: number;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
@@ -111,11 +125,21 @@ export function createSessionInteractionRuntime(options: {
     });
   };
 
+  const requestRemoteWindowTargets = async (sessionId: string) => {
+    return requestRemoteWindowTargetsRuntime({
+      sessionId,
+      ensureSessionReady: ensureSessionReadyForPaste,
+      remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
+      sendSocketPayload: options.sendSocketPayload,
+    });
+  };
+
   return {
     sendInput,
     ensureSessionReadyForPaste,
     sendImagePaste,
     sendFileAttach,
     requestRemoteScreenshot,
+    requestRemoteWindowTargets,
   };
 }

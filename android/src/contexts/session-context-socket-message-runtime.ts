@@ -8,6 +8,7 @@ import { hasSessionLocalWindow } from './session-buffer-planner-helpers';
 import { normalizeIncomingBufferPayload, normalizeTerminalCursorState } from './session-wire-helpers';
 import { runtimeDebugPrechecked, setRuntimeDebugEnabled } from '../lib/runtime-debug';
 import { isFileTransferMessage } from '../lib/file-transfer-message-runtime';
+import { isRemoteWindowControlMessage, type RemoteWindowControlMessage } from '../lib/remote-window-message-runtime';
 import type {
   ClientMessage,
   Host,
@@ -40,6 +41,10 @@ interface FileTransferDispatcher {
     | 'file-upload-complete'
     | 'file-upload-error'
   }>) => unknown;
+}
+
+interface RemoteWindowMessageDispatcher {
+  dispatch: (msg: RemoteWindowControlMessage) => unknown;
 }
 
 function isTerminalSessionMissingCode(code?: string) {
@@ -91,6 +96,7 @@ export function handleSocketServerMessageRuntime(options: {
   ) => void;
   setSessionTitleSync: (id: string, title: string) => void;
   fileTransferMessageRuntime: FileTransferDispatcher;
+  remoteWindowMessageRuntime?: RemoteWindowMessageDispatcher;
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
 }) {
   const { params, msg } = options;
@@ -219,6 +225,12 @@ export function handleSocketServerMessageRuntime(options: {
     case 'file-upload-error':
       if (isFileTransferMessage(msg)) {
         options.fileTransferMessageRuntime.dispatch(msg);
+      }
+      break;
+    case 'remote-window-targets-response':
+    case 'remote-window-error':
+      if (options.remoteWindowMessageRuntime && isRemoteWindowControlMessage(msg)) {
+        options.remoteWindowMessageRuntime.dispatch(msg);
       }
       break;
     case 'error':

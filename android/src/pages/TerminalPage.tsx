@@ -8,6 +8,7 @@ import { createSessionViewportModeStore, useSessionViewportModeSnapshot, type Se
 import { SessionScheduleSheet } from '../components/terminal/SessionScheduleSheet';
 import { FileTransferSheet } from '../components/terminal/FileTransferSheet';
 import { RemoteScreenshotSheet } from '../components/terminal/RemoteScreenshotSheet';
+import { RemoteWindowOverlay } from '../components/terminal/RemoteWindowOverlay';
 import { TerminalHeader } from '../components/terminal/TerminalHeader';
 import { TerminalSessionDrawer, type TerminalSessionDrawerHost, type TerminalSessionDrawerItem } from '../components/terminal/TerminalSessionDrawer';
 import { TabManagerSheet } from '../components/terminal/TabManagerSheet';
@@ -86,6 +87,7 @@ import {
   type Host,
   type RemoteScreenshotCapture,
   type RemoteScreenshotStatusPayload,
+  type RemoteWindowStreamTargetsResponsePayload,
   type Session,
   type SessionDebugOverlayMetrics,
   type SessionGroupHistory,
@@ -254,6 +256,7 @@ interface TerminalPageProps {
     sessionId: string,
     onProgress?: (progress: RemoteScreenshotStatusPayload) => void,
   ) => Promise<RemoteScreenshotCapture>;
+  onRequestRemoteWindowTargets?: (sessionId: string) => Promise<RemoteWindowStreamTargetsResponsePayload>;
   quickActions: QuickAction[];
   shortcutActions: TerminalShortcutAction[];
   onQuickActionInput?: (sequence: string, sessionId?: string) => void;
@@ -910,6 +913,7 @@ function TerminalPageComponent({
   onFileAttach,
   onOpenSettings,
   onRequestRemoteScreenshot,
+  onRequestRemoteWindowTargets,
   quickActions,
   shortcutActions,
   onQuickActionInput,
@@ -3144,7 +3148,7 @@ function TerminalPageComponent({
             onClose={handleCloseCopyMenu}
           />
         ) : null}
-    <TerminalDebugOverlay
+        <TerminalDebugOverlay
       visible={debugOverlayVisible}
       session={interactiveSession}
       visiblePaneSessions={renderedPaneSessions}
@@ -3183,6 +3187,15 @@ function TerminalPageComponent({
             pageCallbackSeq: sessionDrawerDebug.pageCallbackSeq,
             pickerMode: sessionPickerDebugMode,
           }}
+        />
+        <RemoteWindowOverlay
+          activeSessionId={uiSessionId}
+          requestTargets={onRequestRemoteWindowTargets}
+          bottomInsetPx={
+            quickBarShellKeyboardLiftPx
+            + layoutProfile.quickBar.touchSafeOffsetPx
+            + terminalBottomChromeLiftPx
+          }
         />
         <TerminalQuickBarShell
           bottomPx={
@@ -3292,6 +3305,7 @@ function terminalPagePropsEqual(
     && prev.onFileAttach === next.onFileAttach
     && prev.onOpenSettings === next.onOpenSettings
     && prev.onRequestRemoteScreenshot === next.onRequestRemoteScreenshot
+    && prev.onRequestRemoteWindowTargets === next.onRequestRemoteWindowTargets
     && prev.quickActions === next.quickActions
     && prev.shortcutActions === next.shortcutActions
     && prev.onQuickActionInput === next.onQuickActionInput

@@ -108,7 +108,7 @@
         },
         {
           "id": "RemoteWindowOverlay",
-          "label": "docs/decisions/2026-07-19-remote-window-stream-truth.md#remote-window-overlay-binding-pending"
+          "label": "src/components/terminal/RemoteWindowOverlay.tsx#RemoteWindowOverlay"
         },
         {
           "id": "StageShell",
@@ -498,9 +498,9 @@
           "from": "TerminalPage",
           "to": "RemoteWindowOverlay",
           "owner_feature": "desktop.remote_window_stream",
-          "semantic_input": "floating entry, picker, stream overlay, fullscreen Back/minimize/close intent",
-          "semantic_output": "remote window overlay projection and stream target intent",
-          "status": "binding pending",
+          "semantic_input": "active session id plus remote-window catalog request callback",
+          "semantic_output": "picker, target-locked floating/fullscreen overlay shell, fullscreen Back/minimize/close intent; frame stream pending",
+          "status": "anchored",
           "edge_id": "android_mainline:TerminalPage->RemoteWindowOverlay",
           "resource_from": "resource.ui_projection",
           "resource_to": "resource.remote_window_overlay",

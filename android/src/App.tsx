@@ -181,6 +181,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     sendImagePaste,
     sendFileAttach,
     requestRemoteScreenshot,
+    requestRemoteWindowTargets,
     sendMessageRaw,
     onFileTransferMessage,
     updateSessionViewport,
@@ -832,6 +833,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             onFileAttach={sendFileAttach}
             onOpenSettings={handleOpenSettingsPage}
             onRequestRemoteScreenshot={requestRemoteScreenshot}
+            onRequestRemoteWindowTargets={requestRemoteWindowTargets}
             quickActions={quickActions}
             shortcutActions={shortcutActions}
             onQuickActionInput={handleQuickActionInput}
