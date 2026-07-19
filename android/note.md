@@ -2712,3 +2712,14 @@ Need runtime debug to confirm:
 - Daemon root cause for zero iTerm2 panes was the launchd runner using base Python without `iterm2`; `scripts/zterm-daemon.sh` and release script now prepare `~/.zterm/python/iterm2` and launch daemon with `ZTERM_ITERM2_PYTHON`.
 - Live verification after service-scoped `bash android/scripts/zterm-daemon.sh restart`: health pid `79375`, uptime `19s`; launch runner exports `ZTERM_ITERM2_PYTHON=/Users/fanzhang/.zterm/python/iterm2/bin/python3`; `import iterm2` passes; real WebSocket catalog returned `targetCount=31`, `appWindows=20`, `itermPanes=11`, `errors=[]`.
 - Local gates passed before APK build: remote-window required gates `8 files / 62 tests`, drawer required gates `4 files / 62 tests`, Settings/update focused gates `6 files / 33 tests`, feature/resource/function/mainline gates `7 files / 48 tests`, and `tsc --noEmit`.
+
+## 2026-07-19 Public Relay update channel 2161 publish
+
+- Public Relay update route had stayed on `0.1.3.2158` after local 2161 build/install. Correct production host access is `ssh -i ~/.ssh/claw.pem -o IdentitiesOnly=yes root@159.75.134.56`; default `id_rsa` root SSH is denied.
+- Published only the 2161 update assets to `/var/lib/zterm-traversal-relay/updates`: `latest.json` and `zterm-0.1.3.2161.apk`. No service restart was required.
+- Public verification passed:
+  - `GET https://relay.codewhisper.cc:18443/relay/updates/latest.json` returns `versionName=0.1.3.2161`, `versionCode=1032161`, `sha256=9ed1bbe370264ed3e14e87ae7a716303ccbf38e411b4193128115b2b616643c4`, `size=5863118`.
+  - `HEAD latest.json` and `HEAD zterm-0.1.3.2161.apk` both return 200; APK `Content-Length=5863118`.
+  - Downloaded public APK sha256 is `9ed1bbe370264ed3e14e87ae7a716303ccbf38e411b4193128115b2b616643c4`.
+  - Relay `/health` still reports `updates.dir=/var/lib/zterm-traversal-relay/updates` and `manifestPresent=true`.
+- Device visual L5 remains blocked: ADB device `100.104.163.65:5555` is online and app focused, but `mCurrentFocus=NotificationShade`, `mDreamingLockscreen=true`, `isKeyguardShowing=true`; drawer/remote-window visual smoke is not claimed.
