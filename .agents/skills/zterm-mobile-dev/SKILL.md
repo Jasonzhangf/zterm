@@ -58,6 +58,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 
 ### 2.2.1 Android 交付包硬门禁
 - 每次 Android 功能修复 / bug 修复 / renderer / daemon-client 协议 / UI 行为改动，只要需要 Jason 复测或会影响真机行为，完成前必须构建可升级 APK 包。
+- 例外：`desktop.remote_window_stream` 的视频主链尚未完成时，不为中间态 catalog / overlay shell / debug 诊断改动反复构建 APK；先完成真实远程视频（ScreenCaptureKit/WebRTC frame stream 可见）并通过对应 gates，再构建 APK 给 Jason 测。除非 Jason 明确要求止血包或升级恢复包，否则不要在远程视频完成前编包。
 - 默认命令：`pnpm --dir android run build:android`。
 - 构建结果必须进入升级通道：`android/update-dist/latest.json`、`android/update-dist/zterm-<version>.apk`、`android/update-dist/zterm-latest-debug.apk`、`~/.zterm/updates/latest.json`、`~/.zterm/updates/zterm-<version>.apk` sha/version 对齐。
 - 汇报时必须给出 `versionName`、`versionCode`、APK 路径和 sha256；不能只说测试通过。
