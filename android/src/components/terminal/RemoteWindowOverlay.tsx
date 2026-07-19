@@ -93,6 +93,8 @@ interface FullscreenViewportState {
   panY: number;
 }
 
+type FullscreenDisplayMode = 'fit' | 'fill';
+
 interface SurfacePointerPosition {
   clientX: number;
   clientY: number;
@@ -184,6 +186,8 @@ const initialFullscreenViewport: FullscreenViewportState = {
   panY: 0,
 };
 
+const initialFullscreenDisplayMode: FullscreenDisplayMode = 'fit';
+
 function clampFloatingOffset(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
@@ -196,12 +200,18 @@ function getRemoteWindowSourceRect(target: RemoteWindowStreamTargetManifest) {
   return target.videoTarget.cropRectTopLeftPx || target.videoTarget.windowBoundsTopLeftPx;
 }
 
-function resolveAspectFitRect(surface: SurfaceSize, source: { width: number; height: number }): SurfaceRect {
+function resolveAspectRect(
+  surface: SurfaceSize,
+  source: { width: number; height: number },
+  displayMode: FullscreenDisplayMode,
+): SurfaceRect {
   const surfaceWidth = Math.max(1, surface.width);
   const surfaceHeight = Math.max(1, surface.height);
   const sourceWidth = Math.max(1, source.width);
   const sourceHeight = Math.max(1, source.height);
-  const scale = Math.min(surfaceWidth / sourceWidth, surfaceHeight / sourceHeight);
+  const scale = displayMode === 'fill'
+    ? Math.max(surfaceWidth / sourceWidth, surfaceHeight / sourceHeight)
+    : Math.min(surfaceWidth / sourceWidth, surfaceHeight / sourceHeight);
   const width = sourceWidth * scale;
   const height = sourceHeight * scale;
   return {
@@ -212,10 +222,27 @@ function resolveAspectFitRect(surface: SurfaceSize, source: { width: number; hei
   };
 }
 
+function resolveFullscreenViewportRect(
+  surface: SurfaceSize,
+  source: { width: number; height: number },
+  displayMode: FullscreenDisplayMode,
+): SurfaceRect {
+  if (displayMode === 'fill') {
+    return {
+      left: 0,
+      top: 0,
+      width: Math.max(1, surface.width),
+      height: Math.max(1, surface.height),
+    };
+  }
+  return resolveAspectRect(surface, source, 'fit');
+}
+
 function clampFullscreenViewport(
   viewport: FullscreenViewportState,
   surface: SurfaceSize | null,
   source: { width: number; height: number } | null,
+  displayMode: FullscreenDisplayMode = initialFullscreenDisplayMode,
 ): FullscreenViewportState {
   const scale = clampNumber(
     Number.isFinite(viewport.scale) ? viewport.scale : 1,
@@ -225,9 +252,10 @@ function clampFullscreenViewport(
   if (!surface || !source || scale <= 1) {
     return { scale, panX: 0, panY: 0 };
   }
-  const fit = resolveAspectFitRect(surface, source);
-  const maxPanX = Math.max(0, (fit.width * scale - fit.width) / 2);
-  const maxPanY = Math.max(0, (fit.height * scale - fit.height) / 2);
+  const base = resolveAspectRect(surface, source, displayMode);
+  const viewportRect = resolveFullscreenViewportRect(surface, source, displayMode);
+  const maxPanX = Math.max(0, (base.width * scale - viewportRect.width) / 2);
+  const maxPanY = Math.max(0, (base.height * scale - viewportRect.height) / 2);
   return {
     scale,
     panX: clampNumber(viewport.panX, -maxPanX, maxPanX),
@@ -239,16 +267,18 @@ function resolveZoomedContentRect(
   surface: SurfaceSize,
   source: { width: number; height: number },
   viewport: FullscreenViewportState,
-): { fit: SurfaceRect; content: SurfaceRect } {
-  const fit = resolveAspectFitRect(surface, source);
+  displayMode: FullscreenDisplayMode = initialFullscreenDisplayMode,
+): { viewport: SurfaceRect; content: SurfaceRect } {
+  const base = resolveAspectRect(surface, source, displayMode);
+  const viewportRect = resolveFullscreenViewportRect(surface, source, displayMode);
   const scale = Math.max(1, viewport.scale);
-  const width = fit.width * scale;
-  const height = fit.height * scale;
+  const width = base.width * scale;
+  const height = base.height * scale;
   return {
-    fit,
+    viewport: viewportRect,
     content: {
-      left: fit.left + (fit.width - width) / 2 + viewport.panX,
-      top: fit.top + (fit.height - height) / 2 + viewport.panY,
+      left: base.left + (base.width - width) / 2 + viewport.panX,
+      top: base.top + (base.height - height) / 2 + viewport.panY,
       width,
       height,
     },
@@ -358,10 +388,12 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const [entryOffset, setEntryOffsetState] = useState<FloatingOverlayOffset>({ x: 0, y: 0 });
   const [surfaceSize, setSurfaceSize] = useState<SurfaceSize | null>(null);
   const [fullscreenViewport, setFullscreenViewportState] = useState<FullscreenViewportState>(initialFullscreenViewport);
+  const [fullscreenDisplayMode, setFullscreenDisplayModeState] = useState<FullscreenDisplayMode>(initialFullscreenDisplayMode);
   const [receiverMediaStream, setReceiverMediaStream] = useState<MediaStream | null>(null);
   const floatingOffsetRef = useRef(floatingOffset);
   const entryOffsetRef = useRef(entryOffset);
   const fullscreenViewportRef = useRef(fullscreenViewport);
+  const fullscreenDisplayModeRef = useRef<FullscreenDisplayMode>(fullscreenDisplayMode);
   const floatingOverlayRef = useRef<HTMLDivElement | null>(null);
   const entryButtonRef = useRef<HTMLButtonElement | null>(null);
   const floatingDragRef = useRef<FloatingOverlayDrag | null>(null);
@@ -483,7 +515,10 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     setFullscreenViewportState((current) => {
       const raw = typeof next === 'function' ? next(current) : next;
       const sourceRect = state.phase === 'targetLocked' ? getRemoteWindowSourceRect(state.target) : null;
-      const clamped = clampFullscreenViewport(raw, measuredSurfaceSize, sourceRect);
+      const displayMode = state.phase === 'targetLocked' && state.mode === 'fullscreen'
+        ? fullscreenDisplayModeRef.current
+        : initialFullscreenDisplayMode;
+      const clamped = clampFullscreenViewport(raw, measuredSurfaceSize, sourceRect, displayMode);
       fullscreenViewportRef.current = clamped;
       return clamped;
     });
@@ -494,6 +529,11 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     setFullscreenViewportState(initialFullscreenViewport);
     surfacePointersRef.current.clear();
     surfaceGestureRef.current = null;
+  }, []);
+
+  const setFullscreenDisplayMode = useCallback((next: FullscreenDisplayMode) => {
+    fullscreenDisplayModeRef.current = next;
+    setFullscreenDisplayModeState(next);
   }, []);
 
   useLayoutEffect(() => {
@@ -515,8 +555,11 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         current && current.width === next.width && current.height === next.height ? current : next
       ));
       const sourceRect = getRemoteWindowSourceRect(state.target);
+      const displayMode = state.mode === 'fullscreen'
+        ? fullscreenDisplayMode
+        : initialFullscreenDisplayMode;
       setFullscreenViewportState((current) => {
-        const clamped = clampFullscreenViewport(current, next, sourceRect);
+        const clamped = clampFullscreenViewport(current, next, sourceRect, displayMode);
         fullscreenViewportRef.current = clamped;
         return clamped;
       });
@@ -530,7 +573,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       observer?.disconnect();
       window.removeEventListener('resize', update);
     };
-  }, [state]);
+  }, [fullscreenDisplayMode, state]);
 
   const handleOpenPicker = useCallback(() => {
     clearCatalogWatchdog();
@@ -582,8 +625,9 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     setReceiverMediaStream(null);
     setFloatingOffset({ x: 0, y: 0 });
     resetFullscreenViewport();
+    setFullscreenDisplayMode(initialFullscreenDisplayMode);
     setState((current) => closeRemoteWindowOverlay(current));
-  }, [activeSessionId, clearCatalogWatchdog, resetFullscreenViewport, setFloatingOffset, state, stopStream]);
+  }, [activeSessionId, clearCatalogWatchdog, resetFullscreenViewport, setFloatingOffset, setFullscreenDisplayMode, state, stopStream]);
 
   const handleShrink = useCallback(() => {
     resetFullscreenViewport();
@@ -594,6 +638,11 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     resetFullscreenViewport();
     setState((current) => enterRemoteWindowFullscreen(current));
   }, [resetFullscreenViewport]);
+
+  const handleToggleFullscreenDisplayMode = useCallback(() => {
+    resetFullscreenViewport();
+    setFullscreenDisplayMode(fullscreenDisplayMode === 'fit' ? 'fill' : 'fit');
+  }, [fullscreenDisplayMode, resetFullscreenViewport, setFullscreenDisplayMode]);
 
   const updateFloatingDragFromPointer = useCallback((pointerId: number, clientX: number, clientY: number) => {
     const drag = floatingDragRef.current;
@@ -821,6 +870,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const handleSelectTarget = useCallback((target: RemoteWindowStreamTargetManifest) => {
     setFloatingOffset({ x: 0, y: 0 });
     resetFullscreenViewport();
+    setFullscreenDisplayMode(initialFullscreenDisplayMode);
     setReceiverMediaStream(null);
 
     if (!startStream) {
@@ -861,7 +911,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         }
         setState((current) => failRemoteWindowStream(startingState(current), streamId, error));
       });
-  }, [activeSessionId, resetFullscreenViewport, setFloatingOffset, startStream]);
+  }, [activeSessionId, resetFullscreenViewport, setFloatingOffset, setFullscreenDisplayMode, startStream]);
 
   const emitRemoteWindowInput = useCallback((eventPayload: RemoteWindowInputEventPayload['event']) => {
     if (
@@ -901,10 +951,14 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     const viewport = state.mode === 'fullscreen'
       ? fullscreenViewportRef.current
       : initialFullscreenViewport;
+    const displayMode = state.mode === 'fullscreen'
+      ? fullscreenDisplayModeRef.current
+      : initialFullscreenDisplayMode;
     const { content } = resolveZoomedContentRect(
       { width: surfaceRect.width, height: surfaceRect.height },
       sourceRect,
       viewport,
+      displayMode,
     );
     const normalizedX = clampNumber(
       (clientX - surfaceRect.left - content.left) / Math.max(1, content.width),
@@ -1353,14 +1407,17 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     }
     const sourceRect = getRemoteWindowSourceRect(state.target);
     const viewport = state.mode === 'fullscreen' ? fullscreenViewport : initialFullscreenViewport;
-    return resolveZoomedContentRect(surfaceSize, sourceRect, viewport);
-  }, [fullscreenViewport, state, surfaceSize]);
+    const displayMode = state.mode === 'fullscreen'
+      ? fullscreenDisplayMode
+      : initialFullscreenDisplayMode;
+    return resolveZoomedContentRect(surfaceSize, sourceRect, viewport, displayMode);
+  }, [fullscreenDisplayMode, fullscreenViewport, state, surfaceSize]);
 
   const minimapViewport = useMemo(() => {
     if (state.phase !== 'targetLocked' || state.mode !== 'fullscreen' || fullscreenViewport.scale <= 1.01 || !lockedSurfaceLayout) {
       return null;
     }
-    return resolveRemoteWindowMinimapViewport(lockedSurfaceLayout.fit, lockedSurfaceLayout.content);
+    return resolveRemoteWindowMinimapViewport(lockedSurfaceLayout.viewport, lockedSurfaceLayout.content);
   }, [fullscreenViewport.scale, lockedSurfaceLayout, state]);
 
   const videoContentStyle = lockedSurfaceLayout
@@ -1439,6 +1496,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       ref={floatingOverlayRef}
       data-testid="remote-window-locked-overlay"
       data-mode={state.mode}
+      data-display-mode={state.mode === 'fullscreen' ? fullscreenDisplayMode : initialFullscreenDisplayMode}
       style={state.mode === 'fullscreen'
         ? styles.fullscreenOverlay
         : floatingOverlayStyle}
@@ -1462,9 +1520,20 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         </div>
         <div style={styles.lockedActions}>
           {state.mode === 'fullscreen' ? (
-            <button type="button" aria-label="缩小远程窗口" onClick={handleShrink} style={styles.headerIconButton}>
-              -
-            </button>
+            <>
+              <button
+                type="button"
+                data-testid="remote-window-fullscreen-display-toggle"
+                aria-label={fullscreenDisplayMode === 'fit' ? '切换为充满屏幕' : '切换为完整显示'}
+                onClick={handleToggleFullscreenDisplayMode}
+                style={styles.headerModeButton}
+              >
+                {fullscreenDisplayMode === 'fit' ? '填满' : '适配'}
+              </button>
+              <button type="button" aria-label="缩小远程窗口" onClick={handleShrink} style={styles.headerIconButton}>
+                -
+              </button>
+            </>
           ) : (
             <button type="button" aria-label="全屏远程窗口" onClick={handleFullscreen} style={styles.headerIconButton}>
               []
@@ -1626,6 +1695,17 @@ const styles: Record<string, CSSProperties> = {
     border: '1px solid rgba(151, 164, 186, 0.18)',
     background: 'rgba(36, 48, 72, 0.84)',
     color: '#edf4ff',
+    fontWeight: 900,
+  },
+  headerModeButton: {
+    minWidth: 46,
+    height: 32,
+    padding: '0 8px',
+    borderRadius: 10,
+    border: '1px solid rgba(151, 164, 186, 0.18)',
+    background: 'rgba(36, 48, 72, 0.84)',
+    color: '#edf4ff',
+    fontSize: 12,
     fontWeight: 900,
   },
   errorBox: {

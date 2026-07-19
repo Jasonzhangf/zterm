@@ -12,7 +12,7 @@ The implemented Android/catalog slice started narrower than feature completion:
 
 1. `TerminalPage` renders the remote-window floating entry and passes only the active session id plus the SessionContext catalog request callback.
 2. The picker requests and renders the daemon `RemoteWindowStreamTargetManifest[]` catalog, including explicit partial and top-level errors.
-3. Selecting one manifest locks a floating overlay shell to that target; the floating video surface sizes from the selected manifest crop aspect ratio, toolbar drag repositions only the floating projection, the explicit fullscreen button or double tap/double click on the video surface enters fullscreen, Back/minimize returns to floating, and close invalidates the UI state.
+3. Selecting one manifest locks a floating overlay shell to that target; the floating video surface sizes from the selected manifest crop aspect ratio, toolbar drag repositions only the floating projection, the explicit fullscreen button or double tap/double click on the video surface enters fullscreen, Back/minimize returns to floating, and close invalidates the UI state. Fullscreen defaults to aspect-fit complete display and exposes an explicit aspect-fill option that covers the current portrait or landscape phone surface without changing daemon capture geometry.
 4. While the picker is open, `TerminalPage` suppresses the terminal quickbar/input shell and asks the existing IME owner to hide the system keyboard. Once a remote-window stream is target-locked, floating and fullscreen modes keep the QuickBar available above the overlay; opening the Android IME lifts the floating preview by the reported bottom inset. QuickBar keyboard/text/paste/arrow actions and Android IME committed text/backspace/key events route to `remote-window-input` for supported app-window OS-event targets instead of terminal input, and committed text remains raw rather than using terminal normalization.
 5. Before stream start the shell displays an honest setup/waiting state. It does not claim that capture started and does not use terminal mirror, sparse buffer, renderer rows, screenshot runtime, or any synthetic frame source as video.
 
@@ -88,7 +88,8 @@ Current executable gates:
    - Current minimal slice: toolbar pointer drag captures the pointer, updates the floating projection from toolbar-local pointer moves as well as window moves, releases capture on end/cancel, remains bounded to the viewport, and is disabled in fullscreen; video/input surface gestures remain separate.
    - Current slice: the floating preview shell derives its video aspect ratio from the selected `windowBoundsTopLeftPx` / `cropRectTopLeftPx`, not from a fixed 16:10 preview frame.
    - Current slice: a target-locked floating preview consumes `bottomInsetPx`; an IME inset of `320` lifts the preview from its `118` base to `438px`. Fullscreen remains governed by safe-area layout instead of this floating offset.
-   - Current slice: fullscreen button enters letterbox mode; pinch zoom shows a minimap; zoomed fullscreen single-finger drag pans the projected viewport without restarting the stream.
+   - Current slice: fullscreen button defaults to aspect-fit letterbox mode; an explicit display-mode control switches to aspect-fill cover mode in both portrait and landscape surfaces. Switching display mode resets local zoom/pan only, never restarts capture or renegotiates WebRTC.
+   - Current slice: pinch zoom shows a minimap; zoomed fullscreen single-finger drag pans the projected viewport without restarting the stream.
    - Current slice: QuickBar sequences map to remote-window key/text events for the active stream and do not call terminal input while a supported remote-window input context exists.
    - Current slice: ImeAnchor input/backspace/key events route to remote-window input context while active; committed CJK, special symbols, and newlines are preserved exactly and do not leak into the terminal session under the video overlay.
    - Full stream slice: `fullscreenStream + Back -> floatingStream`
@@ -107,7 +108,7 @@ Current executable gates:
 
 8. Input return policy
    - Android pointer/key events are sent only as explicit `remote-window-input` over an existing stream transport.
-   - Android video-surface pointer coordinates must resolve to daemon manifest global macOS top-left coordinates (`crop/window x + normalized * width`); DOM-relative or app-local coordinates are not accepted as a pass.
+   - Android video-surface pointer coordinates must resolve to daemon manifest global macOS top-left coordinates (`crop/window x + normalized * width`); DOM-relative or app-local coordinates are not accepted as a pass. In aspect-fill mode the normalization must use the actual centered cover rect, including cropped negative offsets, rather than pretending the source exactly matches the phone surface.
    - Unzoomed touch drag must emit `kind=scroll`, `unit=pixel`, target coordinates, and incremental deltas without also emitting pointer drag. Zoomed fullscreen drag must pan locally and must not emit remote scroll.
    - DOM positive-down/right scroll deltas remain the wire contract. The daemon must negate them exactly once when constructing macOS `CGEvent` wheel values.
    - The daemon macOS input schema must match the protocol union: pointer/key events require `phase`; scroll events do not carry `phase` and must still decode and inject.
@@ -212,8 +213,9 @@ The picker and target-locked overlay shell are covered now. Gates that require a
    - Current minimal slice: selecting a pane locks the floating overlay shell to the exact manifest and displays an honest waiting state.
    - Current minimal slice: dragging the floating toolbar moves the overlay without entering fullscreen or closing it; the regression must assert `setPointerCapture/releasePointerCapture` so Android WebView does not lose the drag when `window.pointermove` is unreliable.
    - Full stream slice: selecting a pane starts the floating stream overlay and binds a real stream id.
-   - Double tap enters fullscreen letterbox.
+   - Double tap enters fullscreen with aspect-fit letterbox as the default.
    - Explicit fullscreen button enters fullscreen.
+   - The fullscreen display-mode control switches between complete aspect-fit and aspect-fill cover; cover fills both portrait and landscape phone surfaces without stretching the source, changing daemon capture, or creating a second stream.
    - Pinch zoom enlarges the fullscreen video, one-finger drag pans while zoomed, and the top-right minimap marks the visible viewport.
    - Fullscreen overlay top chrome must respect Android safe-area/status-bar inset and must not overlap system status icons.
    - Opening the IME while the floating stream is target-locked moves the preview above the QuickBar/keyboard rather than leaving it under the keyboard.
@@ -223,7 +225,7 @@ The picker and target-locked overlay shell are covered now. Gates that require a
    - Full stream slice: close tears down the stream and removes overlay.
 
 4. Input
-   - Android overlay maps pointer coordinates from the letterboxed/zoomed content rect to the selected target crop.
+   - Android overlay maps pointer coordinates from the actual aspect-fit, aspect-fill, or zoomed content rect to the selected target crop.
    - A single-finger vertical drag on an unzoomed floating/fullscreen video sends pixel scroll to the selected target; no pointer drag is emitted for the same gesture.
    - Android IME CJK/special-character/newline committed text reaches the selected app unchanged and does not enter the terminal session.
    - With `bring-to-focus`, a click/key event raises/focuses the selected target window and reaches it even when another window previously covered the target point.

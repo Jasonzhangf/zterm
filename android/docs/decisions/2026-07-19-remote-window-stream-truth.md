@@ -13,10 +13,10 @@ Remote window stream starts from the Android floating entry. The old floating qu
 3. Choose one window or pane target.
 4. Start a floating live video overlay sized from the selected target crop/window aspect ratio.
 5. Drag the floating overlay by its toolbar to reposition it without stealing video/input gestures.
-6. Use the explicit fullscreen button next to close, or double tap the video surface, to enter fullscreen letterbox mode.
+6. Use the explicit fullscreen button next to close, or double tap the video surface, to enter fullscreen. Fullscreen defaults to complete aspect-fit letterbox mode.
 7. Android system Back in fullscreen shrinks back to floating mode.
 8. The fullscreen top-right minimize button also shrinks back to floating mode.
-9. Fullscreen preserves source aspect ratio with letterbox fitting. Pinch zoom scales the video, zoomed fullscreen allows one-finger pan, and the top-right minimap projects the current viewport.
+9. Fullscreen preserves source aspect ratio. The default display mode is aspect-fit complete display; an explicit display-mode control can switch to aspect-fill cover so the app fills the current portrait or landscape phone surface without stretching. Pinch zoom scales the video, zoomed fullscreen allows one-finger pan, and the top-right minimap projects the current viewport.
 10. Opening the Android IME lifts the target-locked floating preview by the same bottom inset as the QuickBar so the preview remains visible above the keyboard.
 11. On an unzoomed video surface, a single-finger drag emits remote pixel scroll input. In zoomed fullscreen mode, the same gesture remains local pan.
 12. The close button tears down the stream.
@@ -135,7 +135,7 @@ idle
 
 Only `closed` releases capture, encoder, WebRTC sender, and target lease. Back from `fullscreenStream` must not close or recreate the stream.
 
-Floating preview geometry and fullscreen zoom state are projection-only. The floating preview uses the selected manifest crop/window aspect ratio instead of a fixed frame. Pinch/pan/minimap must not resize tmux, restart capture, renegotiate WebRTC, or change daemon-side coordinate truth. Pointer/keyboard events emitted from the video surface are normalized against the selected manifest crop and sent as explicit input intents; the media `<video>` is pointer-transparent and daemon/native input policy is still the only injection truth.
+Floating preview geometry, fullscreen display mode, and fullscreen zoom state are projection-only. The floating preview uses the selected manifest crop/window aspect ratio instead of a fixed frame. Fullscreen aspect-fit and aspect-fill cover use Android's actual projected content rect for both drawing and pointer normalization; the cover mode may crop the source visually but must not stretch it, resize tmux, restart capture, renegotiate WebRTC, or change daemon-side coordinate truth. Pinch/pan/minimap must not resize tmux, restart capture, renegotiate WebRTC, or change daemon-side coordinate truth. Pointer/keyboard events emitted from the video surface are normalized against the selected manifest crop and sent as explicit input intents; the media `<video>` is pointer-transparent and daemon/native input policy is still the only injection truth.
 
 Remote-window media negotiation is a separate WebRTC peer connection, but its ICE configuration must be derived from the current session traversal route. When the active session resolved through `rtc-direct`, the video receiver/start request uses the same STUN-only direct ICE truth. When it resolved through `rtc-relay`, the video receiver/start request uses the Relay TURN ICE truth. Android must not leave the remote-window video peer connection as no-ICE on Relay/cellular paths, and must not invent a screenshot or terminal-buffer fallback if ICE/media negotiation fails.
 
@@ -159,4 +159,4 @@ No fallback may silently downgrade this feature to screenshot, terminal buffer r
 
 ## Implementation Status
 
-Current status is anchored for app-window catalog, real ScreenCaptureKit/WebRTC video, Android floating/fullscreen projection with safe-area top chrome and IME bottom-inset lift, fullscreen zoom/pan/minimap, route-derived ICE for remote-window video, raw Android IME text routing, touch/wheel pixel-scroll intent, and generic `bring-to-focus + AXRaise + os-event` pointer/key/scroll injection. Remaining live completion gaps are Android real-device input replay after this interaction slice and iTerm2-pane stream/input proof.
+Current status is anchored for app-window catalog, real ScreenCaptureKit/WebRTC video, Android floating/fullscreen projection with safe-area top chrome and IME bottom-inset lift, fullscreen aspect-fit default plus aspect-fill cover display option, fullscreen zoom/pan/minimap, route-derived ICE for remote-window video, raw Android IME text routing, touch/wheel pixel-scroll intent, and generic `bring-to-focus + AXRaise + os-event` pointer/key/scroll injection. Remaining live completion gaps are Android real-device input replay after this interaction slice and iTerm2-pane stream/input proof.
