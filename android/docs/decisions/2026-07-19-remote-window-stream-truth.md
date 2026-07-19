@@ -84,6 +84,8 @@ type RemoteWindowStreamTargetManifest = {
 };
 ```
 
+`app-window` targets are not limited to iTerm2. They come from daemon-side macOS app/window catalog truth and use generic OS input policy (`focusPolicy="bring-to-focus"`, `inputRoute="os-event"`). iTerm2 pane targets are additional child targets when the iTerm2 API is available.
+
 ## iTerm2 Coordinate Rule
 
 The verified coordinate model is:
@@ -109,6 +111,8 @@ tmux reverse lookup:
 ```text
 iTerm2 session id -> iTerm2 session tty -> tmux list-clients client_tty -> tmux session/window/pane
 ```
+
+tmux metadata is enrichment only. An iTerm2 pane with no matching `tmux list-clients` entry must still be returned as an explicit `iterm2-pane` target with `inputRoute="iterm2-api"` and no fake tmux identifiers.
 
 ## State Machine
 

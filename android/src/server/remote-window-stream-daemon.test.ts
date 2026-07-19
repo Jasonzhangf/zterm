@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
+  buildMacosAppWindowTargets,
   buildRemoteWindowStreamTargets,
   createRemoteWindowStreamDaemonRuntime,
   flattenIterm2SplitTree,
   parseTmuxClientTargets,
   type Iterm2RawCatalog,
   type Iterm2RawNode,
+  type MacosAppWindowCatalog,
 } from './remote-window-stream-daemon';
 
 function makeNestedItermTree(): Iterm2RawNode {
@@ -57,6 +59,29 @@ function makeCatalog(): Iterm2RawCatalog {
         root: makeNestedItermTree(),
       }],
     }],
+  };
+}
+
+function makeAppWindowCatalog(): MacosAppWindowCatalog {
+  return {
+    windows: [
+      {
+        windowId: '64',
+        ownerName: 'Google Chrome',
+        appBundleId: 'com.google.Chrome',
+        pid: 487,
+        title: 'Chrome Window',
+        frame: { x: 700, y: 139, width: 1200, height: 800 },
+      },
+      {
+        windowId: '33',
+        ownerName: 'iTerm',
+        appBundleId: 'com.googlecode.iterm2',
+        pid: 479,
+        title: 'Default (tmux)',
+        frame: { x: 0, y: 30, width: 1600, height: 900 },
+      },
+    ],
   };
 }
 
@@ -166,6 +191,29 @@ function makeLiveComplexItermTree(): Iterm2RawNode {
 }
 
 describe('remote window stream daemon owner', () => {
+  it('builds selectable non-iTerm2 app-window manifests from the macOS app catalog', () => {
+    const targets = buildMacosAppWindowTargets(makeAppWindowCatalog(), '2026-07-19T00:00:00.000Z');
+    const chrome = targets.find((target) => target.videoTarget.appBundleId === 'com.google.Chrome');
+
+    expect(targets).toHaveLength(2);
+    expect(chrome).toMatchObject({
+      streamTargetId: 'app-window:487:64',
+      videoTarget: {
+        kind: 'app-window',
+        appBundleId: 'com.google.Chrome',
+        pid: 487,
+        windowId: '64',
+        title: 'Chrome Window',
+        cropRectTopLeftPx: { x: 700, y: 139, width: 1200, height: 800 },
+      },
+      inputTarget: {
+        kind: 'app-window',
+      },
+      focusPolicy: 'bring-to-focus',
+      inputRoute: 'os-event',
+    });
+  });
+
   it('flattens nested iTerm2 splitters before applying top-left crop math', () => {
     const panes = flattenIterm2SplitTree(makeNestedItermTree());
 
@@ -258,17 +306,39 @@ describe('remote window stream daemon owner', () => {
     expect(bottomPane?.videoTarget.cropRectTopLeftPx?.y).not.toBe(70);
   });
 
+  it('keeps non-tmux iTerm2 panes selectable without fake tmux metadata', () => {
+    const targets = buildRemoteWindowStreamTargets(
+      makeCatalog(),
+      new Map(),
+      '2026-07-19T00:00:00.000Z',
+      { includeAppWindowTargets: false },
+    );
+
+    expect(targets).toHaveLength(3);
+    for (const target of targets) {
+      expect(target.inputTarget).toMatchObject({
+        kind: 'iterm2-pane',
+      });
+      expect(target.inputTarget.tmuxSession).toBeUndefined();
+      expect(target.focusPolicy).toBe('bring-to-focus');
+      expect(target.inputRoute).toBe('iterm2-api');
+    }
+  });
+
   it('returns an explicit unsupported-platform error without querying iTerm2', async () => {
     const runIterm2Python = vi.fn(async () => JSON.stringify(makeCatalog()));
+    const runMacosAppWindowCatalog = vi.fn(async () => JSON.stringify(makeAppWindowCatalog()));
     const runtime = createRemoteWindowStreamDaemonRuntime({
       platform: 'linux',
       runIterm2Python,
+      runMacosAppWindowCatalog,
       runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
     });
 
     const response = await runtime.listTargets({ requestId: 'rw-linux' });
 
     expect(runIterm2Python).not.toHaveBeenCalled();
+    expect(runMacosAppWindowCatalog).not.toHaveBeenCalled();
     expect(response).toEqual({
       requestId: 'rw-linux',
       code: 'remote_window_platform_unsupported',
@@ -284,15 +354,67 @@ describe('remote window stream daemon owner', () => {
       runTmux: vi.fn(() => ({ ok: true as const, stdout: '/dev/ttys001\talpha\t@5\t%6\n' })),
     });
 
-    const response = await runtime.listTargets({ requestId: 'rw-darwin' });
+    const response = await runtime.listTargets({ requestId: 'rw-darwin', includeAppWindows: false });
 
-    expect('targets' in response ? response.targets.length : 0).toBe(4);
-    expect('targets' in response ? response.targets[1]?.inputTarget : null).toMatchObject({
+    expect('targets' in response ? response.targets.length : 0).toBe(3);
+    expect('targets' in response ? response.targets[0]?.inputTarget : null).toMatchObject({
       kind: 'tmux-pane',
       tmuxSession: 'alpha',
       tmuxWindowId: '@5',
       tmuxPaneId: '%6',
     });
+  });
+
+  it('returns non-iTerm2 app windows and non-tmux iTerm2 panes in the same catalog response', async () => {
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      now: () => '2026-07-19T00:00:00.000Z',
+      runMacosAppWindowCatalog: vi.fn(async () => JSON.stringify(makeAppWindowCatalog())),
+      runIterm2Python: vi.fn(async () => JSON.stringify(makeCatalog())),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const response = await runtime.listTargets({ requestId: 'rw-combined' });
+    expect('targets' in response ? response.targets : []).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          streamTargetId: 'app-window:487:64',
+          videoTarget: expect.objectContaining({
+            kind: 'app-window',
+            appBundleId: 'com.google.Chrome',
+          }),
+          inputTarget: { kind: 'app-window' },
+        }),
+        expect.objectContaining({
+          streamTargetId: 'iterm2-pane:window-1:tab-1:left',
+          inputTarget: expect.objectContaining({
+            kind: 'iterm2-pane',
+          }),
+        }),
+      ]),
+    );
+    expect('targets' in response ? response.targets.filter((target) => target.videoTarget.kind === 'app-window') : []).toHaveLength(2);
+    expect('targets' in response ? response.targets.filter((target) => target.videoTarget.kind === 'iterm2-pane') : []).toHaveLength(3);
+  });
+
+  it('keeps app-window targets selectable while surfacing iTerm2 catalog errors explicitly', async () => {
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      runMacosAppWindowCatalog: vi.fn(async () => JSON.stringify(makeAppWindowCatalog())),
+      runIterm2Python: vi.fn(async () => {
+        throw new Error('No module named iterm2');
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const response = await runtime.listTargets({ requestId: 'rw-partial' });
+
+    expect('targets' in response ? response.targets.map((target) => target.streamTargetId) : []).toContain('app-window:487:64');
+    expect('errors' in response ? response.errors : []).toEqual([{
+      requestId: 'rw-partial',
+      code: 'iterm2_api_unavailable',
+      message: 'No module named iterm2',
+    }]);
   });
 
   it('surfaces iTerm2 API failures explicitly instead of falling back to screenshot or terminal buffer truth', async () => {
@@ -304,7 +426,7 @@ describe('remote window stream daemon owner', () => {
       runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
     });
 
-    const response = await runtime.listTargets({ requestId: 'rw-error' });
+    const response = await runtime.listTargets({ requestId: 'rw-error', includeAppWindows: false });
 
     expect(response).toEqual({
       requestId: 'rw-error',

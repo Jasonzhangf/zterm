@@ -132,6 +132,7 @@ export interface RemoteScreenshotCapture {
 
 export interface RemoteWindowStreamRequestPayload {
   requestId: string;
+  includeAppWindows?: boolean;
   includeIterm2?: boolean;
 }
 
@@ -178,6 +179,7 @@ export interface RemoteWindowStreamTargetManifest {
 export interface RemoteWindowStreamTargetsResponsePayload {
   requestId: string;
   targets: RemoteWindowStreamTargetManifest[];
+  errors?: RemoteWindowStreamErrorPayload[];
 }
 
 export interface RemoteWindowStreamErrorPayload {

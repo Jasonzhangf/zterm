@@ -2669,3 +2669,18 @@ Need runtime debug to confirm:
   - `git diff --check` PASS.
   - Live catalog gate with temporary venv and real iTerm2 API returned `targets=12`, `appWindows=1`, `panes=11`, `tmuxPanes=10`, `outOfBounds=0`; temp venv cleaned at exit.
 - Scope still pending: Android picker/overlay, ScreenCaptureKit/WebRTC frame stream, and input return runtime.
+
+## 2026-07-19 Remote window generic app and non-tmux pane closeout
+
+- Jason clarified two selection requirements: daemon must allow selecting iTerm2 panes with no tmux mapping, and daemon must allow selecting non-iTerm2 app windows.
+- Architecture mapping stayed inside `desktop.remote_window_stream` / `resource.remote_window_stream`. Android overlay, terminal buffer/render, remote screenshot, daemon input, and tmux truth were not changed.
+- Implementation:
+  - Added daemon-side macOS app-window catalog via `CGWindowListCopyWindowInfo` Swift script. It emits generic `app-window` manifests with bundle id, pid, window id, title, top-left bounds, crop rect, `focusPolicy=bring-to-focus`, and `inputRoute=os-event`.
+  - Kept iTerm2 pane catalog independent. Missing tmux reverse lookup now remains explicitly selectable as `inputTarget.kind=iterm2-pane`, `inputRoute=iterm2-api`, with no fake tmux ids.
+  - `RemoteWindowStreamTargetsResponsePayload` now supports partial `errors` so non-iTerm2 app windows can remain selectable while an optional iTerm2 source error is visible instead of silently hidden.
+- Verification passed:
+  - `pnpm --dir android exec vitest run src/server/remote-window-stream-daemon.test.ts src/server/terminal-message-runtime.test.ts --reporter dot` = 2 files / 31 tests PASS.
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS.
+  - `pnpm --dir android run test:feature-registry -- --reporter dot` = 7 files / 48 tests PASS.
+  - `git diff --check` PASS.
+  - Live Mac Studio catalog gate with real Swift app-window catalog + real iTerm2 API returned `targets=31`, `appWindows=20`, `nonItermAppWindows=18`, `panes=11`, `tmuxPanes=10`, `nonTmuxPanes=1`, `outOfBounds=0`, `errors=[]`; temp venv cleaned at exit.

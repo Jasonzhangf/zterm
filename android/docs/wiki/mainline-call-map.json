@@ -1278,7 +1278,7 @@
           "to": "RemoteWindowStream",
           "owner_feature": "desktop.remote_window_stream",
           "semantic_input": "remote-window-targets-request control message",
-          "semantic_output": "iTerm2 app-window/pane catalog, coordinate manifest, tmux reverse lookup, or explicit catalog error",
+          "semantic_output": "macOS app-window catalog, iTerm2 pane catalog, coordinate manifest, tmux reverse lookup, or explicit catalog error",
           "status": "anchored",
           "edge_id": "daemon_mainline:Control->RemoteWindowStream",
           "resource_from": "resource.remote_window_stream",

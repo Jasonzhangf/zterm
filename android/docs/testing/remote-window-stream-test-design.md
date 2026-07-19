@@ -16,6 +16,7 @@ This gate covers remote app/window and iTerm2 pane video streaming from a daemon
    - `src/lib/feature-registry-truth.test.ts`
 
 2. Coordinate normalization
+   - Enumerate generic macOS app windows through daemon-side window catalog truth and produce `app-window` manifests.
    - Convert macOS window frame and flattened iTerm2 pane frames into one top-left pixel coordinate space.
    - Red-test inverted-y math after split-tree flattening; `pane.y` must not be inverted again once it is content top-left.
    - Cover Retina scale, multi-display origin, title/tab/content inset, pane split divider, and rect-out-of-bounds rejection.
@@ -29,15 +30,21 @@ This gate covers remote app/window and iTerm2 pane video streaming from a daemon
    - Map `iTerm2 session tty` to `tmux list-clients #{client_tty}`.
    - Return tmux session/window/pane ids when present.
    - Preserve non-tmux iTerm2 panes as explicit `iterm2-pane` targets without fake tmux ids.
+   - Non-tmux panes must remain selectable; tmux metadata is enrichment, not a selection precondition.
 
-5. Overlay state machine
+5. Multi-source catalog errors
+   - If generic app-window enumeration succeeds and iTerm2 API fails, return selectable app-window targets with an explicit iTerm2 catalog error.
+   - If a requested catalog source fully fails and no targets remain, return a top-level explicit error.
+   - Do not silently hide source errors as a fallback success.
+
+6. Overlay state machine
    - `fullscreenStream + Back -> floatingStream`
    - `fullscreenStream + minimize -> floatingStream`
    - `close -> closed`
    - Back/minimize must not tear down capture, encoder, or WebRTC sender.
    - Close must release all stream resources exactly once.
 
-6. Input return policy
+7. Input return policy
    - `bring-to-focus + os-event` focuses target before forwarding mouse/keyboard.
    - `no-focus-steal + os-event` rejects generic app input explicitly.
    - `no-focus-steal + iterm2-api` and `no-focus-steal + tmux-input` may pass only for declared terminal-specific targets.
@@ -62,13 +69,19 @@ This gate covers remote app/window and iTerm2 pane video streaming from a daemon
    - Assert iTerm2 grid size and tmux client grid agree.
    - Do not write to user tmux sessions. Use read-only enumeration unless a marked test session is explicitly created.
 
-3. ScreenCaptureKit stream proof
+3. Generic app-window catalog proof
+   - Enumerate real non-iTerm2 app windows through the daemon catalog.
+   - Assert at least one non-iTerm2 `app-window` manifest has bundle id, pid, window id, title, top-left bounds, crop rect, `focusPolicy=bring-to-focus`, and `inputRoute=os-event`.
+   - Assert iTerm2 pane rows are still present when the iTerm2 API is available.
+
+4. ScreenCaptureKit stream proof
    - Start capture on a selected iTerm2 pane.
+   - Start capture on a selected non-iTerm2 app window.
    - Receive real frames through the WebRTC sender path.
    - Pixel-check the Android/Web receiver frame against the selected marker.
    - Verify covered desktop windows do not produce false success. If window capture is occlusion-independent, record the capture source metadata.
 
-4. Lifecycle cleanup proof
+5. Lifecycle cleanup proof
    - Before test: list existing iTerm2 windows, tmux sessions, daemon PIDs, WebRTC ports, temp dirs.
    - After test: verify no unmarked iTerm2 test window, tmux session, pipe-pane, debug port, venv, or temp dir remains.
    - Fixed reusable resources must have a marker and owner/case note.

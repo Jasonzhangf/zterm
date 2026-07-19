@@ -8,8 +8,22 @@ import type {
 } from '@zterm/shared/protocol';
 
 const DEFAULT_ITERM2_PYTHON_TIMEOUT_MS = 5000;
+const DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS = 5000;
 const ITERM2_APP_BUNDLE_ID = 'com.googlecode.iterm2';
 const ITERM2_PANE_GAP_PX = 1;
+
+export interface MacosAppWindowCatalog {
+  windows: MacosAppWindow[];
+}
+
+export interface MacosAppWindow {
+  windowId: string;
+  ownerName: string;
+  appBundleId: string;
+  pid: number;
+  title: string;
+  frame: RemoteWindowStreamRect;
+}
 
 export interface Iterm2RawCatalog {
   windows: Iterm2RawWindow[];
@@ -65,8 +79,11 @@ export interface RemoteWindowStreamDaemonDeps {
   platform?: NodeJS.Platform;
   now?: () => string;
   pythonBinary?: string;
+  swiftBinary?: string;
   iterm2PythonTimeoutMs?: number;
+  appWindowCatalogTimeoutMs?: number;
   runIterm2Python?: (script: string, options: { pythonBinary: string; timeoutMs: number }) => Promise<string>;
+  runMacosAppWindowCatalog?: (script: string, options: { swiftBinary: string; timeoutMs: number }) => Promise<string>;
   runTmux: (args: string[]) => { ok: true; stdout: string };
 }
 
@@ -144,6 +161,67 @@ async def main(connection):
     print(json.dumps({"windows": windows}, ensure_ascii=False))
 
 iterm2.run_until_complete(main)
+`;
+
+const MACOS_APP_WINDOW_CATALOG_SWIFT = String.raw`
+import AppKit
+import CoreGraphics
+import Foundation
+
+func number(_ value: Any?) -> Double? {
+    if let number = value as? NSNumber {
+        return number.doubleValue
+    }
+    return nil
+}
+
+let windowInfoList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
+var windows: [[String: Any]] = []
+
+for info in windowInfoList {
+    guard let layerValue = number(info[kCGWindowLayer as String]), Int(layerValue) == 0 else {
+        continue
+    }
+    let alpha = number(info[kCGWindowAlpha as String]) ?? 1
+    if alpha <= 0 {
+        continue
+    }
+    guard
+        let pidNumber = info[kCGWindowOwnerPID as String] as? NSNumber,
+        let bounds = info[kCGWindowBounds as String] as? [String: Any],
+        let x = number(bounds["X"]),
+        let y = number(bounds["Y"]),
+        let width = number(bounds["Width"]),
+        let height = number(bounds["Height"])
+    else {
+        continue
+    }
+    if width < 40 || height < 40 {
+        continue
+    }
+    let pid = pidNumber.intValue
+    let ownerName = info[kCGWindowOwnerName as String] as? String ?? ""
+    let rawTitle = info[kCGWindowName as String] as? String ?? ""
+    let appBundleId = NSRunningApplication(processIdentifier: pid_t(pid))?.bundleIdentifier ?? ""
+    let windowId = (info[kCGWindowNumber as String] as? NSNumber)?.stringValue ?? ""
+    let title = rawTitle.isEmpty ? (ownerName.isEmpty ? appBundleId : ownerName) : rawTitle
+    windows.append([
+        "windowId": windowId,
+        "ownerName": ownerName,
+        "appBundleId": appBundleId,
+        "pid": pid,
+        "title": title,
+        "frame": [
+            "x": Int(x.rounded()),
+            "y": Int(y.rounded()),
+            "width": Int(width.rounded()),
+            "height": Int(height.rounded()),
+        ],
+    ])
+}
+
+let data = try JSONSerialization.data(withJSONObject: ["windows": windows], options: [])
+FileHandle.standardOutput.write(data)
 `;
 
 function remoteWindowError(
@@ -320,35 +398,39 @@ export function buildRemoteWindowStreamTargets(
   catalog: Iterm2RawCatalog,
   tmuxTargets: Map<string, TmuxClientTarget>,
   now: string,
+  options: { includeAppWindowTargets?: boolean } = {},
 ): RemoteWindowStreamTargetManifest[] {
   const targets: RemoteWindowStreamTargetManifest[] = [];
+  const includeAppWindowTargets = options.includeAppWindowTargets !== false;
 
   for (const window of catalog.windows) {
     const windowFrame = validateRect(window.frame, `window:${window.windowId}`);
-    targets.push({
-      streamTargetId: `app-window:${window.windowId}`,
-      videoTarget: {
-        kind: 'app-window',
-        appBundleId: ITERM2_APP_BUNDLE_ID,
-        pid: window.pid || 0,
-        windowId: window.windowId,
-        title: window.title || 'iTerm2',
-        windowBoundsTopLeftPx: windowFrame,
-        cropRectTopLeftPx: windowFrame,
-      },
-      inputTarget: {
-        kind: 'app-window',
-      },
-      streamMode: 'view',
-      focusPolicy: 'bring-to-focus',
-      inputRoute: 'os-event',
-      capture: {
-        source: 'ScreenCaptureKit',
-        coordinateSpace: 'macos-top-left-px',
-        scale: 1,
-        createdAt: now,
-      },
-    });
+    if (includeAppWindowTargets) {
+      targets.push({
+        streamTargetId: `app-window:${window.windowId}`,
+        videoTarget: {
+          kind: 'app-window',
+          appBundleId: ITERM2_APP_BUNDLE_ID,
+          pid: window.pid || 0,
+          windowId: window.windowId,
+          title: window.title || 'iTerm2',
+          windowBoundsTopLeftPx: windowFrame,
+          cropRectTopLeftPx: windowFrame,
+        },
+        inputTarget: {
+          kind: 'app-window',
+        },
+        streamMode: 'view',
+        focusPolicy: 'bring-to-focus',
+        inputRoute: 'os-event',
+        capture: {
+          source: 'ScreenCaptureKit',
+          coordinateSpace: 'macos-top-left-px',
+          scale: 1,
+          createdAt: now,
+        },
+      });
+    }
 
     for (const tab of window.tabs) {
       const panes = flattenIterm2SplitTree(tab.root);
@@ -414,6 +496,39 @@ export function buildRemoteWindowStreamTargets(
   return targets;
 }
 
+export function buildMacosAppWindowTargets(
+  catalog: MacosAppWindowCatalog,
+  now: string,
+): RemoteWindowStreamTargetManifest[] {
+  return catalog.windows.map((window) => {
+    const windowFrame = validateRect(window.frame, `app-window:${window.windowId}`);
+    return {
+      streamTargetId: `app-window:${window.pid}:${window.windowId}`,
+      videoTarget: {
+        kind: 'app-window',
+        appBundleId: window.appBundleId,
+        pid: window.pid,
+        windowId: window.windowId,
+        title: window.title || window.ownerName || window.appBundleId || `Window ${window.windowId}`,
+        windowBoundsTopLeftPx: windowFrame,
+        cropRectTopLeftPx: windowFrame,
+      },
+      inputTarget: {
+        kind: 'app-window',
+      },
+      streamMode: 'view',
+      focusPolicy: 'bring-to-focus',
+      inputRoute: 'os-event',
+      capture: {
+        source: 'ScreenCaptureKit',
+        coordinateSpace: 'macos-top-left-px',
+        scale: 1,
+        createdAt: now,
+      },
+    };
+  });
+}
+
 function runDefaultIterm2Python(
   script: string,
   options: { pythonBinary: string; timeoutMs: number },
@@ -433,10 +548,37 @@ function runDefaultIterm2Python(
   });
 }
 
+function runDefaultMacosAppWindowCatalog(
+  script: string,
+  options: { swiftBinary: string; timeoutMs: number },
+): Promise<string> {
+  return new Promise((resolve, reject) => {
+    execFile(options.swiftBinary, ['-e', script], {
+      timeout: options.timeoutMs,
+      windowsHide: true,
+    }, (error, stdout, stderr) => {
+      if (error) {
+        const details = [error.message, stderr, stdout].filter(Boolean).join('\n');
+        reject(new Error(details || 'macOS app window catalog failed'));
+        return;
+      }
+      resolve(stdout);
+    });
+  });
+}
+
 function parseIterm2Catalog(stdout: string): Iterm2RawCatalog {
   const parsed = JSON.parse(stdout) as Iterm2RawCatalog;
   if (!parsed || !Array.isArray(parsed.windows)) {
     throw new Error('iTerm2 catalog missing windows');
+  }
+  return parsed;
+}
+
+function parseMacosAppWindowCatalog(stdout: string): MacosAppWindowCatalog {
+  const parsed = JSON.parse(stdout) as MacosAppWindowCatalog;
+  if (!parsed || !Array.isArray(parsed.windows)) {
+    throw new Error('macOS app window catalog missing windows');
   }
   return parsed;
 }
@@ -446,8 +588,11 @@ export function createRemoteWindowStreamDaemonRuntime(
 ): RemoteWindowStreamDaemonRuntime {
   const platform = deps.platform || process.platform;
   const pythonBinary = (deps.pythonBinary || process.env.ZTERM_ITERM2_PYTHON || 'python3').trim();
+  const swiftBinary = (deps.swiftBinary || process.env.ZTERM_MACOS_SWIFT || 'swift').trim();
   const iterm2PythonTimeoutMs = deps.iterm2PythonTimeoutMs || DEFAULT_ITERM2_PYTHON_TIMEOUT_MS;
+  const appWindowCatalogTimeoutMs = deps.appWindowCatalogTimeoutMs || DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS;
   const runIterm2Python = deps.runIterm2Python || runDefaultIterm2Python;
+  const runMacosAppWindowCatalog = deps.runMacosAppWindowCatalog || runDefaultMacosAppWindowCatalog;
   const now = deps.now || (() => new Date().toISOString());
 
   async function queryIterm2Catalog() {
@@ -456,6 +601,14 @@ export function createRemoteWindowStreamDaemonRuntime(
       timeoutMs: iterm2PythonTimeoutMs,
     });
     return parseIterm2Catalog(stdout);
+  }
+
+  async function queryMacosAppWindowCatalog() {
+    const stdout = await runMacosAppWindowCatalog(MACOS_APP_WINDOW_CATALOG_SWIFT, {
+      swiftBinary,
+      timeoutMs: appWindowCatalogTimeoutMs,
+    });
+    return parseMacosAppWindowCatalog(stdout);
   }
 
   async function listTargets(
@@ -467,41 +620,69 @@ export function createRemoteWindowStreamDaemonRuntime(
     if (platform !== 'darwin') {
       return remoteWindowError(payload, 'remote_window_platform_unsupported', 'remote window stream catalog is only available on macOS daemon hosts');
     }
-    if (payload.includeIterm2 === false) {
-      return {
-        requestId: payload.requestId,
-        targets: [],
-      };
+    const createdAt = now();
+    const includeAppWindows = payload.includeAppWindows !== false;
+    const includeIterm2 = payload.includeIterm2 !== false;
+    const targets: RemoteWindowStreamTargetManifest[] = [];
+    const errors: RemoteWindowStreamErrorPayload[] = [];
+
+    let macosAppWindowCatalogOk = false;
+    if (includeAppWindows) {
+      try {
+        const appWindowCatalog = await queryMacosAppWindowCatalog();
+        targets.push(...buildMacosAppWindowTargets(appWindowCatalog, createdAt));
+        macosAppWindowCatalogOk = true;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        errors.push(remoteWindowError(payload, 'app_window_catalog_unavailable', message || 'macOS app window catalog unavailable'));
+      }
     }
 
-    let catalog: Iterm2RawCatalog;
-    try {
-      catalog = await queryIterm2Catalog();
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return remoteWindowError(payload, 'iterm2_api_unavailable', message || 'iTerm2 Python API unavailable');
+    let catalog: Iterm2RawCatalog | null = null;
+    if (includeIterm2) {
+      try {
+        catalog = await queryIterm2Catalog();
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        errors.push(remoteWindowError(payload, 'iterm2_api_unavailable', message || 'iTerm2 Python API unavailable'));
+      }
     }
 
     let tmuxTargets = new Map<string, TmuxClientTarget>();
-    try {
-      tmuxTargets = parseTmuxClientTargets(deps.runTmux([
-        'list-clients',
-        '-F',
-        '#{client_tty}\t#{session_name}\t#{window_id}\t#{pane_id}',
-      ]).stdout);
-    } catch {
-      tmuxTargets = new Map<string, TmuxClientTarget>();
+    if (catalog) {
+      try {
+        tmuxTargets = parseTmuxClientTargets(deps.runTmux([
+          'list-clients',
+          '-F',
+          '#{client_tty}\t#{session_name}\t#{window_id}\t#{pane_id}',
+        ]).stdout);
+      } catch {
+        tmuxTargets = new Map<string, TmuxClientTarget>();
+      }
     }
 
-    try {
+    if (catalog) {
+      try {
+        targets.push(...buildRemoteWindowStreamTargets(catalog, tmuxTargets, createdAt, {
+          includeAppWindowTargets: includeAppWindows && !macosAppWindowCatalogOk,
+        }));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        errors.push(remoteWindowError(payload, 'remote_window_manifest_invalid', message || 'remote window target manifest invalid'));
+      }
+    }
+
+    if (targets.length > 0) {
       return {
         requestId: payload.requestId,
-        targets: buildRemoteWindowStreamTargets(catalog, tmuxTargets, now()),
+        targets,
+        ...(errors.length > 0 ? { errors } : {}),
       };
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return remoteWindowError(payload, 'remote_window_manifest_invalid', message || 'remote window target manifest invalid');
     }
+    return errors[0] || {
+      requestId: payload.requestId,
+      targets: [],
+    };
   }
 
   return {

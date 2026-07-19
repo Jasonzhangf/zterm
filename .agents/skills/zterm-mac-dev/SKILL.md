@@ -56,6 +56,7 @@ description: "zterm Mac 客户端开发工作流 - Electron 壳、terminal rende
 - 每个 live / blackbox smoke 结束前必须复核生命周期：列出本轮新增 session / pipe-pane / app PID / debug port，关闭临时资源；若固定 gate session 需要保留供复用，必须说明 marker 与名称。
 - API / 坐标 / 截图这类探索实验也按同一资源协议执行：优先复用现有 iTerm2 / tmux / daemon 观测资源；必须新建窗口、session、端口、venv、临时目录时，用固定 marker 或可追踪 run id 标识，并在 `finally` / 结束清单中关闭或说明保留理由。禁止只跑完实验不清理测试窗口、临时服务、pipe-pane、debug port。
 - iTerm2 Python API pane 坐标进入 daemon/stream 真源时，leaf `frame.x/y` 只保证相对其 immediate splitter；嵌套 split 必须先按 splitter cursor/offset 递归 flatten，再套一次 window top-left + content inset。禁止在度量阶段再次累加已定位 leaf offset；必须用真实复杂 split tree 回归和 live crop bounds gate 锁 `cropRect` 不越过 window。
+- Remote window catalog 不能把 target 限死在 tmux 或 iTerm2：generic macOS app-window 走 daemon-side window catalog truth；无 tmux 映射的 iTerm2 pane 仍是 selectable `iterm2-pane`，不能造假 tmux id 或拒绝选择。live gate 至少断言 `nonItermAppWindows >= 1`、`nonTmuxPanes >= 1`、`outOfBounds == 0`。
 
 ### 2.4 Desktop workspace owner gate
 - Mac desktop workspace / multi-window / pane-tab-runtime / file browser 重构必须先查并同步：
