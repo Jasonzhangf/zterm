@@ -27,7 +27,7 @@ export function flushRuntimeDebugLogsToSessionTransport(input: {
 }) {
   const debugEnabled = isRuntimeDebugEnabled();
   const pendingEntryCount = getPendingRuntimeDebugEntryCount();
-  if (!debugEnabled && !isForceFlushEnabled() && pendingEntryCount === 0) {
+  if (!debugEnabled && !isForceFlushEnabled()) {
     return false;
   }
 

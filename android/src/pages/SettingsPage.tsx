@@ -383,7 +383,7 @@ export function SettingsPage({
         <div style={settingsSectionStyle()}>
           <SettingsSectionTitle>Daemon Debug</SettingsSectionTitle>
           <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
-            打开后，客户端会通过当前已连接的 Tailscale WebSocket 自动持续把 runtime debug 日志上送到 daemon。关闭后立即停止上送。
+            打开后，客户端会临时通过当前已连接的会话 WebSocket 上送 runtime debug 日志到 daemon，默认 10 分钟后自动停止。关闭后立即停止上送。
           </div>
           <button
             type="button"

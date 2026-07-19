@@ -128,7 +128,8 @@ export function createSessionInteractionRuntime(options: {
   const requestRemoteWindowTargets = async (sessionId: string) => {
     return requestRemoteWindowTargetsRuntime({
       sessionId,
-      ensureSessionReady: ensureSessionReadyForPaste,
+      sessions: options.refs.stateRef.current.sessions,
+      readSessionTransportSocket: options.readSessionTransportSocket,
       remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
       sendSocketPayload: options.sendSocketPayload,
     });

@@ -2,6 +2,8 @@ import type { RuntimeDebugLogEntry } from './types';
 
 const RUNTIME_DEBUG_STORAGE_KEY = 'zterm:runtime-debug-log';
 const RUNTIME_DEBUG_CONSOLE_STORAGE_KEY = 'zterm:runtime-debug-console';
+const RUNTIME_DEBUG_EXPIRES_AT_STORAGE_KEY = 'zterm:runtime-debug-log-expires-at';
+const DEFAULT_RUNTIME_DEBUG_TTL_MS = 10 * 60 * 1000;
 const MAX_RUNTIME_DEBUG_QUEUE = 120;
 const MAX_RUNTIME_DEBUG_PAYLOAD_CHARS = 900;
 const MAX_RUNTIME_DEBUG_BATCH_ENTRIES = 8;
@@ -14,10 +16,43 @@ let droppedRuntimeDebugEntries = 0;
 const runtimeDebugQueue: RuntimeDebugLogEntry[] = [];
 const runtimeDebugLastSampleAt = new Map<string, number>();
 let runtimeDebugEnabledCache: boolean | null = null;
+let runtimeDebugEnabledExpiresAtCache: number | null = null;
 let runtimeDebugConsoleEnabledCache: boolean | null = null;
+
+export function resetRuntimeDebugStateForTests() {
+  runtimeDebugEnabledCache = null;
+  runtimeDebugEnabledExpiresAtCache = null;
+  runtimeDebugConsoleEnabledCache = null;
+  runtimeDebugLastSampleAt.clear();
+}
+
+function parseRuntimeDebugExpiresAt(input: string | null) {
+  const parsed = Number.parseInt(input || '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function clearRuntimeDebugStorageFlag() {
+  if (typeof window !== 'undefined') {
+    try {
+      window.localStorage.removeItem(RUNTIME_DEBUG_STORAGE_KEY);
+      window.localStorage.removeItem(RUNTIME_DEBUG_EXPIRES_AT_STORAGE_KEY);
+    } catch (error) {
+      console.warn('[runtime-debug] Failed to clear runtime debug flag:', error);
+    }
+  }
+  runtimeDebugEnabledCache = false;
+  runtimeDebugEnabledExpiresAtCache = null;
+}
 
 function safeReadStorageFlag() {
   if (runtimeDebugEnabledCache !== null) {
+    if (!runtimeDebugEnabledCache) {
+      return false;
+    }
+    if (runtimeDebugEnabledExpiresAtCache !== null && Date.now() <= runtimeDebugEnabledExpiresAtCache) {
+      return true;
+    }
+    clearRuntimeDebugStorageFlag();
     return runtimeDebugEnabledCache;
   }
   if (typeof window === 'undefined') {
@@ -25,7 +60,15 @@ function safeReadStorageFlag() {
   }
 
   try {
-    runtimeDebugEnabledCache = window.localStorage.getItem(RUNTIME_DEBUG_STORAGE_KEY) === '1';
+    runtimeDebugEnabledExpiresAtCache = parseRuntimeDebugExpiresAt(
+      window.localStorage.getItem(RUNTIME_DEBUG_EXPIRES_AT_STORAGE_KEY),
+    );
+    runtimeDebugEnabledCache = window.localStorage.getItem(RUNTIME_DEBUG_STORAGE_KEY) === '1'
+      && runtimeDebugEnabledExpiresAtCache !== null
+      && Date.now() <= runtimeDebugEnabledExpiresAtCache;
+    if (!runtimeDebugEnabledCache) {
+      clearRuntimeDebugStorageFlag();
+    }
     return runtimeDebugEnabledCache;
   } catch (error) {
     console.warn('[runtime-debug] Failed to read runtime debug flag:', error);
@@ -79,12 +122,14 @@ export function setRuntimeDebugEnabled(enabled: boolean) {
 
   try {
     if (enabled) {
+      const expiresAt = Date.now() + DEFAULT_RUNTIME_DEBUG_TTL_MS;
       window.localStorage.setItem(RUNTIME_DEBUG_STORAGE_KEY, '1');
+      window.localStorage.setItem(RUNTIME_DEBUG_EXPIRES_AT_STORAGE_KEY, String(expiresAt));
       runtimeDebugEnabledCache = true;
+      runtimeDebugEnabledExpiresAtCache = expiresAt;
       return;
     }
-    window.localStorage.removeItem(RUNTIME_DEBUG_STORAGE_KEY);
-    runtimeDebugEnabledCache = false;
+    clearRuntimeDebugStorageFlag();
   } catch (error) {
     console.warn('[runtime-debug] Failed to update runtime debug flag:', error);
   }
@@ -267,7 +312,9 @@ export {
   MAX_RUNTIME_DEBUG_BATCH_CHARS,
   MAX_RUNTIME_DEBUG_PAYLOAD_CHARS,
   MAX_RUNTIME_DEBUG_QUEUE,
+  DEFAULT_RUNTIME_DEBUG_TTL_MS,
   RUNTIME_DEBUG_CONSOLE_STORAGE_KEY,
-  INSPECT_RUNTIME_DEBUG_MIN_INTERVAL_MS,
+  RUNTIME_DEBUG_EXPIRES_AT_STORAGE_KEY,
   RUNTIME_DEBUG_STORAGE_KEY,
+  INSPECT_RUNTIME_DEBUG_MIN_INTERVAL_MS,
 };

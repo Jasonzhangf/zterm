@@ -2723,3 +2723,11 @@ Need runtime debug to confirm:
   - Downloaded public APK sha256 is `9ed1bbe370264ed3e14e87ae7a716303ccbf38e411b4193128115b2b616643c4`.
   - Relay `/health` still reports `updates.dir=/var/lib/zterm-traversal-relay/updates` and `manifestPresent=true`.
 - Device visual L5 remains blocked: ADB device `100.104.163.65:5555` is online and app focused, but `mCurrentFocus=NotificationShade`, `mDreamingLockscreen=true`, `isKeyguardShowing=true`; drawer/remote-window visual smoke is not claimed.
+
+# 2026-07-19 Remote window catalog readiness and bandwidth audit
+
+- Jason 现场反馈：远程能连旧 session，但远程窗口列举显示 `0 个目标 / 没有可选窗口`，并且未开始视频连接时带宽已经异常。静态追踪确认 catalog 请求入口 `requestRemoteWindowTargetsRuntime()` 以前复用 `ensureSessionReadyForPasteRuntime()`，后者下沉到 `ensureSessionReadyForTransfer()`，要求 `session.state === connected && ws.OPEN`，因此物理 session socket 已经 open 但 UI/runtime session 仍是 `connecting` 时会等 paste timeout 后报 `Active session is not ready yet (connecting)`。
+- 架构映射：`feature_id=desktop.remote_window_stream`，资源关系为 `resource.remote_window_overlay -> resource.active_session -> resource.session_transport -> resource.remote_window_stream`。本轮唯一行为修复点是 catalog transport readiness，不改 daemon catalog、不改 terminal mirror/buffer/render、不改 screenshot/file transfer paste ready gate。
+- 测试设计已补：catalog readiness 必须允许 `session=connecting + socket=OPEN` 发一次 `remote-window-targets-request`；无 open socket 必须显式 remote-window catalog transport error，不能复用 paste ready 的 `Active session is not ready yet`，也不能启动 screenshot/terminal buffer/video fallback。
+- 带宽尚未定根因。当前只能确认 catalog 未启动视频流；大流量下一步要用 runtime/debug 或真 daemon 统计 `remote-window-targets-request`、`body-subscription`、`buffer-head-request`、`buffer-sync-request` 的频率和 bytes，不能把 catalog ready bug 和带宽 bug 混成一个结论。
+- 带宽现场证据：`/debug/runtime` 中 `remote-window` scope 为 0，`body-subscription` scope 为 0，但 `clientDebug.totalEntries=2000`、`performanceTrace.recordCount=5932`，最近条目主要是 `terminal.performance.trace`、`session.buffer.applied`、`session.ws.reconnect.buffer-sync`、`runtime.debug.drop-summary`。根因之一是 `flushRuntimeDebugLogsToSessionTransport()` 在 runtime debug disabled 但 pending queue 非空时仍会把 `runtimeDebugPrechecked('terminal.performance.trace')` 队列上送。修复为：debug 未开启时不 flush pending queue；debug flag 写 TTL，旧无 TTL 的永久 flag 冷启动时清理。剩余真实下行 buffer-sync 体积需另用网络字节 gate 统计，不能归入 remote-window 视频。

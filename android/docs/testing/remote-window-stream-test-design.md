@@ -70,10 +70,21 @@ Current executable gates:
    - Back/minimize must not tear down capture, encoder, or WebRTC sender.
    - Close must release all stream resources exactly once.
 
-7. Input return policy
+7. Catalog transport readiness
+   - Current minimal slice: target catalog requests use the existing open session transport only.
+   - A session whose UI/runtime state is still `connecting` but whose physical session socket is already `OPEN` must be able to send exactly one `remote-window-targets-request`.
+   - Catalog readiness must not reuse image/file paste readiness, because paste requires heavier terminal-session connected semantics.
+   - If no open physical session socket exists, the picker must surface an explicit remote-window catalog transport error and must not wait for the paste timeout or emit `Active session is not ready yet`.
+   - The negative gate must prove catalog failure does not start screenshot, terminal buffer render, hidden video, or transport rebuild fallback.
+
+8. Input return policy
    - `bring-to-focus + os-event` focuses target before forwarding mouse/keyboard.
    - `no-focus-steal + os-event` rejects generic app input explicitly.
    - `no-focus-steal + iterm2-api` and `no-focus-steal + tmux-input` may pass only for declared terminal-specific targets.
+
+9. Catalog bandwidth isolation
+   - With runtime debug disabled, queued `terminal.performance.trace` metadata must not be flushed as `debug-log` frames over the session WebSocket.
+   - Enabling runtime debug is temporary and expires, so a stale client setting cannot keep uploading diagnostics before remote-window video starts.
 
 ## Black-Box Mac Gates
 

@@ -2,11 +2,14 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  DEFAULT_RUNTIME_DEBUG_TTL_MS,
   isRuntimeDebugEnabled,
   RUNTIME_DEBUG_CONSOLE_STORAGE_KEY,
+  RUNTIME_DEBUG_EXPIRES_AT_STORAGE_KEY,
   RUNTIME_DEBUG_STORAGE_KEY,
   drainRuntimeDebugEntries,
   runtimeDebug,
+  resetRuntimeDebugStateForTests,
   shouldCollectRuntimeDebugScope,
   setRuntimeDebugEnabled,
 } from './runtime-debug';
@@ -32,6 +35,7 @@ describe('runtime debug storage flag', () => {
     while (drainRuntimeDebugEntries().length > 0) {
       // drain shared queue between tests
     }
+    resetRuntimeDebugStateForTests();
     vi.restoreAllMocks();
   });
 
@@ -40,11 +44,34 @@ describe('runtime debug storage flag', () => {
 
     setRuntimeDebugEnabled(true);
     expect(window.localStorage.getItem(RUNTIME_DEBUG_STORAGE_KEY)).toBe('1');
+    expect(Number(window.localStorage.getItem(RUNTIME_DEBUG_EXPIRES_AT_STORAGE_KEY))).toBeGreaterThan(Date.now());
     expect(isRuntimeDebugEnabled()).toBe(true);
 
     setRuntimeDebugEnabled(false);
     expect(window.localStorage.getItem(RUNTIME_DEBUG_STORAGE_KEY)).toBe(null);
+    expect(window.localStorage.getItem(RUNTIME_DEBUG_EXPIRES_AT_STORAGE_KEY)).toBe(null);
     expect(isRuntimeDebugEnabled()).toBe(false);
+  });
+
+  it('expires runtime debug upload and clears legacy permanent flags', () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1_000);
+      setRuntimeDebugEnabled(true);
+      expect(isRuntimeDebugEnabled()).toBe(true);
+
+      vi.setSystemTime(1_000 + DEFAULT_RUNTIME_DEBUG_TTL_MS + 1);
+      expect(isRuntimeDebugEnabled()).toBe(false);
+      expect(window.localStorage.getItem(RUNTIME_DEBUG_STORAGE_KEY)).toBe(null);
+      expect(window.localStorage.getItem(RUNTIME_DEBUG_EXPIRES_AT_STORAGE_KEY)).toBe(null);
+
+      window.localStorage.setItem(RUNTIME_DEBUG_STORAGE_KEY, '1');
+      resetRuntimeDebugStateForTests();
+      expect(isRuntimeDebugEnabled()).toBe(false);
+      expect(window.localStorage.getItem(RUNTIME_DEBUG_STORAGE_KEY)).toBe(null);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('queues debug entries without mirroring to console by default', () => {
