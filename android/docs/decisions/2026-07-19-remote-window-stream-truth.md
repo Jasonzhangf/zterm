@@ -90,7 +90,7 @@ The verified coordinate model is:
 
 ```text
 window top-left frame: macOS Accessibility / System Events
-iTerm2 pane frame: iTerm2 Python API list_sessions split tree
+iTerm2 pane frame: iTerm2 Python API split tree, flattened to content top-left coordinates
 contentTopInset = windowHeight - max(pane.y + pane.height)
 cropRect = {
   x: window.x + pane.x,
@@ -100,7 +100,9 @@ cropRect = {
 }
 ```
 
-The iTerm2 API window frame uses lower-left coordinates, while Android-visible crop uses top-left pixel coordinates. The daemon must normalize this once and return the normalized manifest. Android must not repeat this conversion.
+Mac Studio live proof on 2026-07-19 used a temporary two-pane iTerm2 tab with red/blue marker rows. The direct top-left formula above hit the expected pane colors, while an inverted-y formula hit zero expected samples. Do not invert `pane.y` after the pane tree has been flattened to content coordinates.
+
+iTerm2 session frames can be local to their immediate splitter. For nested split layouts, the daemon must flatten splitter child offsets first, then apply the formula once. The daemon must normalize this once and return the normalized manifest. Android must not repeat this conversion.
 
 tmux reverse lookup:
 

@@ -2647,3 +2647,11 @@ Need runtime debug to confirm:
 
 - Jason confirmed remote window video is not view-only long term. It must later support mouse/keyboard event return, with a user-selectable "bring to focus" policy before forwarding input to the selected remote window/pane.
 - Fullscreen remote window stream Back behavior: Android system Back shrinks the fullscreen stream back to floating-window mode. The explicit close button is the stream teardown action.
+
+## 2026-07-19 iTerm2 pane coordinate live experiment
+
+- Used temporary venv `/tmp/zterm-iterm2-pane-crop-20260719-67865` because the base Python had no `iterm2` module. iTerm2 RPC connected and enumerated the existing Mac Studio iTerm2 window, including `session.tty` values for pane-to-tmux reverse lookup.
+- Created a temporary iTerm2 tab `zterm-iterm2-crop-20260719-pass2`, split it into two panes, drew red and blue marker rows, captured the desktop, and force-closed the temporary tab in `finally`.
+- Window frame was `{x:0,y:84,width:3825,height:2046}`. Flattened content was `{width:3825,height:1978,topInset:68}`. Top pane frame was `{x:0,y:0,width:3825,height:1327}` and bottom pane frame was `{x:0,y:1328,width:3825,height:650}`.
+- Direct formula `cropY = window.y + topInset + pane.y` matched expected samples: top red `4/4`, bottom blue `3/4` with one probe outside the drawn marker width. Inverted-y formula matched `0`.
+- Cleanup check after tab close found no `ZTERM_CROP` / `sleep 300` process except the check command itself. Remaining cleanup: remove the temporary venv and screenshot directories after docs are updated.

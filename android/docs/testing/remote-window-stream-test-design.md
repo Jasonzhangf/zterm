@@ -16,7 +16,8 @@ This gate covers remote app/window and iTerm2 pane video streaming from a daemon
    - `src/lib/feature-registry-truth.test.ts`
 
 2. Coordinate normalization
-   - Convert iTerm2 lower-left API frames and macOS top-left Accessibility frames into one top-left pixel coordinate space.
+   - Convert macOS window frame and flattened iTerm2 pane frames into one top-left pixel coordinate space.
+   - Red-test inverted-y math after split-tree flattening; `pane.y` must not be inverted again once it is content top-left.
    - Cover Retina scale, multi-display origin, title/tab/content inset, pane split divider, and rect-out-of-bounds rejection.
 
 3. iTerm2 split tree flatten
@@ -46,10 +47,12 @@ This gate covers remote app/window and iTerm2 pane video streaming from a daemon
 1. iTerm2 coordinate crop proof
    - Reuse existing iTerm2 instance when possible.
    - If a test window is required, create one marked with `ZTERM_ITERM_COORD_TEST_<run_id>`.
-   - Create three colored panes with unique markers.
+   - Create two or more colored panes with unique markers.
    - Read app/window top-left frame through Accessibility/System Events.
    - Read pane relative frames through iTerm2 Python API.
+   - Flatten nested splitter offsets before computing pane crop rects.
    - Crop each pane and assert own-color pixels exceed threshold while wrong-color pixels remain below threshold.
+   - Assert an inverted-y crop formula fails against the same marker oracle.
    - Move/resize the window and repeat.
    - Close the marked test window and clean temp files in `finally`.
 
