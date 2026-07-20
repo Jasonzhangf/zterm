@@ -166,6 +166,31 @@ function makeTarget(): RemoteWindowStreamTargetManifest {
   };
 }
 
+function makeItermTarget(): RemoteWindowStreamTargetManifest {
+  return {
+    ...makeTarget(),
+    streamTargetId: 'pane-1',
+    videoTarget: {
+      kind: 'iterm2-pane',
+      appBundleId: 'com.googlecode.iterm2',
+      pid: 456,
+      windowId: 'window-2',
+      title: 'zterm pane',
+      windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 600 },
+      cropRectTopLeftPx: { x: 10, y: 40, width: 800, height: 560 },
+    },
+    inputTarget: {
+      kind: 'tmux-pane',
+      itermSessionId: 'iterm-1',
+      tty: '/dev/ttys001',
+      tmuxSession: 'zterm',
+      tmuxWindowId: '@1',
+      tmuxPaneId: '%2',
+    },
+    inputRoute: 'tmux-input',
+  };
+}
+
 describe('TerminalPage remote window overlay', () => {
   afterEach(() => {
     cleanup();
@@ -345,5 +370,78 @@ describe('TerminalPage remote window overlay', () => {
       expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
       expect(onActiveBodySubscriptionSuppressedChange).toHaveBeenLastCalledWith(false);
     });
+  });
+
+  it('does not route quickbar input through unsupported iTerm pane remote-window targets', async () => {
+    const session = makeSession('s1');
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const onRequestRemoteWindowTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeItermTarget()],
+      errors: [],
+    }));
+    const onRequestRemoteWindowStreamStart = vi.fn(async (
+      _sessionId: string,
+      _target: RemoteWindowStreamTargetManifest,
+      streamId: string,
+    ) => ({
+      streamId,
+      mediaStream,
+      started: {
+        requestId: 'rw-start-iterm',
+        streamId,
+        targetId: 'pane-1',
+        answer: { type: 'answer' as const, sdp: 'v=0' },
+        capture: {
+          source: 'ScreenCaptureKit' as const,
+          frameWidth: 800,
+          frameHeight: 560,
+          frameRate: 30,
+          targetKind: 'iterm2-pane' as const,
+        },
+        transport: {
+          kind: 'webrtc-video' as const,
+        },
+      },
+    }));
+    const onSendRemoteWindowInput = vi.fn();
+    const onQuickActionInput = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
+        onRequestRemoteWindowStreamStart={onRequestRemoteWindowStreamStart}
+        onSendRemoteWindowInput={onSendRemoteWindowInput}
+        onQuickActionInput={onQuickActionInput}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-iterm-pane-group');
+    fireEvent.click(screen.getByTestId('remote-window-iterm-pane-group'));
+    fireEvent.click(screen.getByTestId('remote-window-target-pane-1'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-video')).toBeTruthy();
+      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-remote-window-input-active')).toBe('false');
+    });
+
+    fireEvent.click(screen.getByText('quickbar-arrow-up'));
+    expect(onSendRemoteWindowInput).not.toHaveBeenCalled();
+    expect(onQuickActionInput).toHaveBeenCalledWith('\x1b[A', 's1');
   });
 });

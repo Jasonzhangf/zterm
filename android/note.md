@@ -2935,3 +2935,9 @@ Need runtime debug to confirm:
 - Full `build:android` PASS: terminal contracts `48 files / 590 tests`, common flows `7 files / 82 tests`, local Relay smoke, typecheck, Vite, Capacitor, Gradle, and update-manifest verification.
 - Delivery: APK `0.1.3.2172` / versionCode `1032172`, size `5876698`, sha256 `088d448b2610fcaba4510824b4d6f4d130775e9c4b0a0ae47c1ace1e26a16ad1`. Local update channel and `/Users/fanzhang/.zterm/updates` match. Public Relay `GET/HEAD https://relay.codewhisper.cc:18443/relay/updates/latest.json` and APK `HEAD` return 200; downloaded public APK sha matches local.
 - L5 gap: `adb devices` returned no attached device, so installed APK and physical fullscreen fill visual/input proof are not claimed.
+
+# 2026-07-20 Remote window picker/resize/iTerm input diagnosis
+
+- Symptom 1: remote-window picker now returns many generic app windows plus iTerm2 panes in one flat list. Expected: app windows remain directly selectable; iTerm2 panes are collapsed until explicitly expanded. First divergence is Android overlay picker projection, not daemon catalog, because daemon catalog must still expose all targets.
+- Symptom 2: floating preview can resize larger until the toolbar/top becomes unreachable. Expected: resize owner caps or adjusts projection so the toolbar remains inside the viewport and can still be dragged. First divergence is Android floating overlay resize bounds; daemon capture/window coordinates are unchanged.
+- Symptom 3: iTerm2 pane targets look interactive but current daemon input owner rejects `tmux-input` / `iterm2-api` (`remote window input route is not implemented`). Expected for this slice: do not expose remote-window input context or send pointer/key/scroll for unsupported routes; mark the target read-only. Implementing real tmux/iTerm input remains a separate daemon route slice.

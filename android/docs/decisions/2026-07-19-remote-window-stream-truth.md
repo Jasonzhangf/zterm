@@ -90,7 +90,7 @@ type RemoteWindowStreamTargetManifest = {
 };
 ```
 
-`app-window` targets are not limited to iTerm2. They come from daemon-side macOS app/window catalog truth and use generic OS input policy (`focusPolicy="bring-to-focus"`, `inputRoute="os-event"`). iTerm2 pane targets are additional child targets when the iTerm2 API is available.
+`app-window` targets are not limited to iTerm2. They come from daemon-side macOS app/window catalog truth and use generic OS input policy (`focusPolicy="bring-to-focus"`, `inputRoute="os-event"`). iTerm2 pane targets are additional child targets when the iTerm2 API is available. Android picker projection keeps iTerm2 panes collapsed by default; expanding the group is an explicit user action and does not change daemon catalog truth.
 
 ## iTerm2 Coordinate Rule
 
@@ -118,7 +118,7 @@ tmux reverse lookup:
 iTerm2 session id -> iTerm2 session tty -> tmux list-clients client_tty -> tmux session/window/pane
 ```
 
-tmux metadata is enrichment only. An iTerm2 pane with no matching `tmux list-clients` entry must still be returned as an explicit `iterm2-pane` target with `inputRoute="iterm2-api"` and no fake tmux identifiers.
+tmux metadata is enrichment only. An iTerm2 pane with no matching `tmux list-clients` entry must still be returned as an explicit `iterm2-pane` target with `inputRoute="iterm2-api"` and no fake tmux identifiers. Until the daemon has a verified `tmux-input` / `iterm2-api` input route, Android must project those pane targets as read-only for input and must not publish a remote-window input context or send pointer/key/scroll events for them.
 
 ## State Machine
 
@@ -163,4 +163,4 @@ No fallback may silently downgrade this feature to screenshot, terminal buffer r
 
 ## Implementation Status
 
-Current status is anchored for app-window catalog, real ScreenCaptureKit/WebRTC video, Android floating/fullscreen projection with safe-area top chrome and IME bottom-inset lift, fullscreen aspect-fit default plus aspect-fill cover display option, fullscreen zoom/pan/minimap, route-derived ICE for remote-window video, per-window bitrate start/update control, focus-aware image paste routing, raw Android IME text routing, touch/wheel pixel-scroll intent, and generic `bring-to-focus + AXRaise + os-event` pointer/key/scroll injection. Remaining live completion gaps are Android real-device input replay after this interaction slice and iTerm2-pane stream/input proof.
+Current status is anchored for app-window catalog, default-collapsed iTerm2 picker grouping, real ScreenCaptureKit/WebRTC video, Android floating/fullscreen projection with safe-area top chrome and IME bottom-inset lift, toolbar-reachable floating resize, fullscreen aspect-fit default plus aspect-fill cover display option, fullscreen zoom/pan/minimap, route-derived ICE for remote-window video, per-window bitrate start/update control, focus-aware image paste routing, raw Android IME text routing, touch/wheel pixel-scroll intent for supported app-window targets, read-only projection for unsupported iTerm pane input routes, and generic `bring-to-focus + AXRaise + os-event` pointer/key/scroll injection. Remaining live completion gaps are Android real-device input replay after this interaction slice and iTerm2-pane stream/input proof.

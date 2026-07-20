@@ -51,6 +51,10 @@ function makeTarget(id: string, title: string, kind: 'app-window' | 'iterm2-pane
   };
 }
 
+async function expandItermPaneGroup() {
+  fireEvent.click(await screen.findByTestId('remote-window-iterm-pane-group'));
+}
+
 describe('RemoteWindowOverlay', () => {
   afterEach(() => {
     cleanup();
@@ -59,7 +63,7 @@ describe('RemoteWindowOverlay', () => {
     vi.useRealTimers();
   });
 
-  it('opens the picker from the floating entry and renders daemon catalog rows', async () => {
+  it('opens the picker with app windows visible and iTerm2 panes collapsed until expanded', async () => {
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-1',
       targets: [
@@ -76,9 +80,13 @@ describe('RemoteWindowOverlay', () => {
     expect(requestTargets).toHaveBeenCalledWith('session-1');
     await waitFor(() => {
       expect(screen.getByTestId('remote-window-target-app-1')).toBeTruthy();
-      expect(screen.getByTestId('remote-window-target-pane-1')).toBeTruthy();
+      expect(screen.getByTestId('remote-window-iterm-pane-group')).toBeTruthy();
+      expect(screen.queryByTestId('remote-window-target-pane-1')).toBeNull();
       expect(screen.queryByTestId('remote-window-partial-errors')).toBeNull();
     });
+
+    fireEvent.click(screen.getByTestId('remote-window-iterm-pane-group'));
+    expect(screen.getByTestId('remote-window-target-pane-1')).toBeTruthy();
   });
 
   it('fails the picker locally when the daemon catalog promise never settles', async () => {
@@ -107,7 +115,7 @@ describe('RemoteWindowOverlay', () => {
     render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} />);
 
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
-    await screen.findByTestId('remote-window-target-pane-1');
+    await expandItermPaneGroup();
     fireEvent.click(screen.getByTestId('remote-window-target-pane-1'));
 
     const overlay = screen.getByTestId('remote-window-locked-overlay');
@@ -154,7 +162,7 @@ describe('RemoteWindowOverlay', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
-    await screen.findByTestId('remote-window-target-pane-1');
+    await expandItermPaneGroup();
     fireEvent.click(screen.getByTestId('remote-window-target-pane-1'));
 
     await waitFor(() => {
@@ -440,7 +448,7 @@ describe('RemoteWindowOverlay', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
-    await screen.findByTestId('remote-window-target-pane-1');
+    await expandItermPaneGroup();
     fireEvent.click(screen.getByTestId('remote-window-target-pane-1'));
 
     await waitFor(() => {
@@ -477,7 +485,7 @@ describe('RemoteWindowOverlay', () => {
     );
 
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
-    await screen.findByTestId('remote-window-target-pane-1');
+    await expandItermPaneGroup();
     expect(onOpenStateChange).toHaveBeenCalledWith(true);
     expect(onBodySubscriptionSuppressedChange).toHaveBeenCalledWith(true);
 
@@ -547,6 +555,62 @@ describe('RemoteWindowOverlay', () => {
     });
   });
 
+  it('marks iTerm pane streams as read-only and does not emit unsupported input', async () => {
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const onInputContextChange = vi.fn();
+    const sendInput = vi.fn();
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('pane-1', 'zterm pane', 'iterm2-pane')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+    }));
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        requestTargets={requestTargets}
+        startStream={startStream}
+        sendInput={sendInput}
+        onInputContextChange={onInputContextChange}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await expandItermPaneGroup();
+    fireEvent.click(screen.getByTestId('remote-window-target-pane-1'));
+    await screen.findByTestId('remote-window-video');
+
+    expect(screen.getByTestId('remote-window-input-mode').textContent).toContain('只读');
+
+    const surface = screen.getByTestId('remote-window-video-surface');
+    Object.defineProperty(surface, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 200,
+        bottom: 100,
+        width: 200,
+        height: 100,
+        toJSON: () => ({}),
+      }),
+    });
+
+    fireEvent.pointerDown(surface, { pointerId: 17, pointerType: 'touch', clientX: 100, clientY: 50, button: 0, buttons: 1 });
+    fireEvent.pointerUp(surface, { pointerId: 17, pointerType: 'touch', clientX: 100, clientY: 50, button: 0, buttons: 0 });
+    fireEvent.wheel(surface, { clientX: 100, clientY: 50, deltaX: 0, deltaY: 64 });
+    fireEvent.keyDown(surface, { key: 'a', code: 'KeyA' });
+    fireEvent.keyUp(surface, { key: 'a', code: 'KeyA' });
+
+    expect(sendInput).not.toHaveBeenCalled();
+    expect(onInputContextChange.mock.calls.some(([context]) => context?.targetId === 'pane-1')).toBe(false);
+  });
+
   it('moves the floating overlay from the toolbar without entering fullscreen', async () => {
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-1',
@@ -556,7 +620,7 @@ describe('RemoteWindowOverlay', () => {
     render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} />);
 
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
-    await screen.findByTestId('remote-window-target-pane-1');
+    await expandItermPaneGroup();
     fireEvent.click(screen.getByTestId('remote-window-target-pane-1'));
 
     const overlay = screen.getByTestId('remote-window-locked-overlay');
@@ -599,7 +663,7 @@ describe('RemoteWindowOverlay', () => {
     render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} />);
 
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
-    await screen.findByTestId('remote-window-target-pane-1');
+    await expandItermPaneGroup();
     fireEvent.click(screen.getByTestId('remote-window-target-pane-1'));
 
     const overlay = screen.getByTestId('remote-window-locked-overlay');
@@ -667,7 +731,7 @@ describe('RemoteWindowOverlay', () => {
     render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} />);
 
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
-    await screen.findByTestId('remote-window-target-pane-1');
+    await expandItermPaneGroup();
     fireEvent.click(screen.getByTestId('remote-window-target-pane-1'));
 
     const overlay = screen.getByTestId('remote-window-locked-overlay');
@@ -704,6 +768,64 @@ describe('RemoteWindowOverlay', () => {
     expect(releasePointerCapture).toHaveBeenCalledWith(18);
   });
 
+  it('caps floating resize so the toolbar remains reachable after enlargement', async () => {
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('pane-1', 'zterm pane', 'iterm2-pane')],
+    }));
+
+    render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await expandItermPaneGroup();
+    fireEvent.click(screen.getByTestId('remote-window-target-pane-1'));
+
+    const overlay = screen.getByTestId('remote-window-locked-overlay');
+    const toolbar = screen.getByTestId('remote-window-drag-handle');
+    const resizeHandle = screen.getByTestId('remote-window-resize-handle-right');
+    Object.defineProperty(overlay, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 540,
+        y: 20,
+        left: 540,
+        top: 20,
+        right: 960,
+        bottom: 356,
+        width: 420,
+        height: 336,
+        toJSON: () => ({}),
+      }),
+    });
+
+    fireEvent.pointerDown(resizeHandle, { pointerId: 28, pointerType: 'touch', clientX: 960, clientY: 356, button: 0 });
+    fireEvent.pointerMove(resizeHandle, { pointerId: 28, pointerType: 'touch', clientX: 1100, clientY: 356, button: 0 });
+    fireEvent.pointerUp(resizeHandle, { pointerId: 28, pointerType: 'touch', clientX: 1100, clientY: 356, button: 0 });
+
+    expect(Number.parseFloat(overlay.style.width)).toBeLessThanOrEqual(426);
+
+    Object.defineProperty(overlay, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 546,
+        y: 8,
+        left: 546,
+        top: 8,
+        right: 972,
+        bottom: 356,
+        width: 426,
+        height: 348,
+        toJSON: () => ({}),
+      }),
+    });
+
+    fireEvent.pointerDown(toolbar, { pointerId: 29, clientX: 700, clientY: 24 });
+    fireEvent.pointerMove(toolbar, { pointerId: 29, clientX: 700, clientY: 44 });
+    fireEvent.pointerUp(toolbar, { pointerId: 29, clientX: 700, clientY: 44 });
+
+    expect(overlay.style.transform).toBe('translate(6px, 20px)');
+  });
+
   it('does not move the overlay from toolbar pointer gestures in fullscreen', async () => {
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-1',
@@ -713,7 +835,7 @@ describe('RemoteWindowOverlay', () => {
     render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} />);
 
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
-    await screen.findByTestId('remote-window-target-pane-1');
+    await expandItermPaneGroup();
     fireEvent.click(screen.getByTestId('remote-window-target-pane-1'));
     fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
 

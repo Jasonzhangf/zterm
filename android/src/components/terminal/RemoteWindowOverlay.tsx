@@ -394,6 +394,14 @@ function formatInputRoute(target: RemoteWindowStreamTargetManifest) {
   }
 }
 
+function isRemoteWindowInputSupported(target: RemoteWindowStreamTargetManifest) {
+  return target.streamMode === 'interactive'
+    && target.videoTarget.kind === 'app-window'
+    && target.inputTarget.kind === 'app-window'
+    && target.inputRoute === 'os-event'
+    && target.focusPolicy === 'bring-to-focus';
+}
+
 function formatBitrateOption(preset: RemoteWindowVideoBitratePreset) {
   if (preset === 'fullscreen') {
     return '全屏 20 Mbps';
@@ -407,7 +415,8 @@ function formatTargetSubtitle(target: RemoteWindowStreamTargetManifest) {
     : '';
   const geometry = target.videoTarget.cropRectTopLeftPx || target.videoTarget.windowBoundsTopLeftPx;
   const route = formatInputRoute(target);
-  return [tmux, `${geometry.width}x${geometry.height}`, route].filter(Boolean).join(' · ');
+  const inputMode = isRemoteWindowInputSupported(target) ? '可操作' : '只读';
+  return [tmux, `${geometry.width}x${geometry.height}`, route, inputMode].filter(Boolean).join(' · ');
 }
 
 function renderErrors(errors: RemoteWindowStreamErrorPayload[]) {
@@ -447,6 +456,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const [fullscreenDisplayMode, setFullscreenDisplayModeState] = useState<FullscreenDisplayMode>(initialFullscreenDisplayMode);
   const [bitratePreset, setBitratePreset] = useState<RemoteWindowVideoBitratePreset>('5mbps');
   const [receiverMediaStream, setReceiverMediaStream] = useState<MediaStream | null>(null);
+  const [itermPaneTargetsExpanded, setItermPaneTargetsExpanded] = useState(false);
   const floatingOffsetRef = useRef(floatingOffset);
   const floatingOverlayWidthPxRef = useRef(floatingOverlayWidthPx);
   const entryOffsetRef = useRef(entryOffset);
@@ -480,6 +490,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const inputContext = state.phase === 'targetLocked'
     && state.streamId
     && state.streamStatus !== 'error'
+    && isRemoteWindowInputSupported(state.target)
     && activeSessionId
     ? {
         sessionId: activeSessionId,
@@ -519,7 +530,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   }, []);
 
   const resolveFloatingOverlayResizeBounds = useCallback((
-    rect: { left: number; right: number; width: number },
+    rect: { left: number; right: number; bottom: number; width: number },
     source: { width: number; height: number },
     anchor: FloatingResizeAnchor,
   ) => {
@@ -541,9 +552,13 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       FLOATING_OVERLAY_MIN_WIDTH_PX,
       (viewportHeight - bottomReserve - FLOATING_OVERLAY_VIEWPORT_MARGIN_PX - FLOATING_OVERLAY_TOOLBAR_ESTIMATE_PX) * aspectRatio,
     );
+    const maxByReachableToolbar = Math.max(
+      FLOATING_OVERLAY_MIN_WIDTH_PX,
+      (rect.bottom - FLOATING_OVERLAY_VIEWPORT_MARGIN_PX - FLOATING_OVERLAY_TOOLBAR_ESTIMATE_PX) * aspectRatio,
+    );
     const maxWidth = Math.max(
       FLOATING_OVERLAY_MIN_WIDTH_PX,
-      Math.min(FLOATING_OVERLAY_MAX_WIDTH_PX, maxByWidth, maxByHeight),
+      Math.min(FLOATING_OVERLAY_MAX_WIDTH_PX, maxByWidth, maxByHeight, maxByReachableToolbar),
     );
     return {
       aspectRatio,
@@ -735,6 +750,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
 
   const handleOpenPicker = useCallback(() => {
     clearCatalogWatchdog();
+    setItermPaneTargetsExpanded(false);
     const started = beginRemoteWindowTargetEnumeration(state);
     setState(started.state);
     const targetSessionId = activeSessionId?.trim() || '';
@@ -771,6 +787,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
 
   const handleClose = useCallback(() => {
     clearCatalogWatchdog();
+    setItermPaneTargetsExpanded(false);
     floatingDragRef.current = null;
     floatingResizeRef.current = null;
     surfacePointersRef.current.clear();
@@ -1311,6 +1328,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       || !state.streamId
       || !activeSessionId
       || !sendInput
+      || !isRemoteWindowInputSupported(state.target)
     ) {
       return false;
     }
@@ -1752,6 +1770,25 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     if (state.phase !== 'targetEnumerating' && state.phase !== 'pickerOpen') {
       return null;
     }
+    const appTargets = state.phase === 'pickerOpen'
+      ? state.targets.filter((target) => target.videoTarget.kind === 'app-window')
+      : [];
+    const itermPaneTargets = state.phase === 'pickerOpen'
+      ? state.targets.filter((target) => target.videoTarget.kind === 'iterm2-pane')
+      : [];
+    const renderTargetRow = (target: RemoteWindowStreamTargetManifest) => (
+      <button
+        key={target.streamTargetId}
+        type="button"
+        data-testid={`remote-window-target-${target.streamTargetId}`}
+        onClick={() => handleSelectTarget(target)}
+        style={styles.targetRow}
+      >
+        <span style={styles.targetKind}>{formatTargetKind(target)}</span>
+        <span style={styles.targetMain}>{target.videoTarget.title || target.videoTarget.appBundleId}</span>
+        <span style={styles.targetMeta}>{formatTargetSubtitle(target)}</span>
+      </button>
+    );
     return (
       <div data-testid="remote-window-picker" style={styles.pickerPanel}>
         <div style={styles.panelHeader}>
@@ -1780,24 +1817,30 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           ) : state.targets.length === 0 ? (
             <div data-testid="remote-window-picker-empty" style={styles.emptyState}>没有可选窗口</div>
           ) : (
-            state.targets.map((target) => (
-              <button
-                key={target.streamTargetId}
-                type="button"
-                data-testid={`remote-window-target-${target.streamTargetId}`}
-                onClick={() => handleSelectTarget(target)}
-                style={styles.targetRow}
-              >
-                <span style={styles.targetKind}>{formatTargetKind(target)}</span>
-                <span style={styles.targetMain}>{target.videoTarget.title || target.videoTarget.appBundleId}</span>
-                <span style={styles.targetMeta}>{formatTargetSubtitle(target)}</span>
-              </button>
-            ))
+            <>
+              {appTargets.map(renderTargetRow)}
+              {itermPaneTargets.length > 0 ? (
+                <button
+                  type="button"
+                  data-testid="remote-window-iterm-pane-group"
+                  aria-expanded={itermPaneTargetsExpanded}
+                  onClick={() => setItermPaneTargetsExpanded((current) => !current)}
+                  style={styles.targetGroupRow}
+                >
+                  <span style={styles.targetKind}>iTerm2</span>
+                  <span style={styles.targetMain}>iTerm2 Panes</span>
+                  <span style={styles.targetMeta}>
+                    {itermPaneTargetsExpanded ? `${itermPaneTargets.length} 个 pane` : `${itermPaneTargets.length} 个 pane · 已折叠`}
+                  </span>
+                </button>
+              ) : null}
+              {itermPaneTargetsExpanded ? itermPaneTargets.map(renderTargetRow) : null}
+            </>
           )}
         </div>
       </div>
     );
-  }, [handleClose, handleOpenPicker, handleSelectTarget, state]);
+  }, [handleClose, handleOpenPicker, handleSelectTarget, itermPaneTargetsExpanded, state]);
 
   const lockedSurfaceLayout = useMemo(() => {
     if (state.phase !== 'targetLocked' || !surfaceSize) {
@@ -1935,6 +1978,9 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       >
         <div style={styles.lockedTitle}>
           <span style={styles.targetKind}>{formatTargetKind(state.target)}</span>
+          <span data-testid="remote-window-input-mode" style={styles.inputModeBadge}>
+            {isRemoteWindowInputSupported(state.target) ? '可操作' : '只读'}
+          </span>
           <span>{state.target.videoTarget.title || state.target.videoTarget.appBundleId}</span>
         </div>
         <div style={styles.lockedActions}>
@@ -2207,6 +2253,17 @@ const styles: Record<string, CSSProperties> = {
     background: 'rgba(27, 37, 56, 0.88)',
     color: '#edf4ff',
   },
+  targetGroupRow: {
+    display: 'grid',
+    gridTemplateColumns: '86px minmax(0, 1fr)',
+    gap: '4px 10px',
+    padding: '10px 11px',
+    textAlign: 'left',
+    borderRadius: 12,
+    border: '1px solid rgba(151, 164, 186, 0.18)',
+    background: 'rgba(20, 31, 49, 0.92)',
+    color: '#edf4ff',
+  },
   targetKind: {
     color: mobileTheme.colors.accent,
     fontSize: 11,
@@ -2305,6 +2362,15 @@ const styles: Record<string, CSSProperties> = {
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     fontSize: 12,
+    fontWeight: 850,
+  },
+  inputModeBadge: {
+    flex: '0 0 auto',
+    padding: '2px 6px',
+    borderRadius: 8,
+    border: '1px solid rgba(151, 164, 186, 0.18)',
+    color: 'rgba(237,244,255,0.68)',
+    fontSize: 11,
     fontWeight: 850,
   },
   lockedActions: {
