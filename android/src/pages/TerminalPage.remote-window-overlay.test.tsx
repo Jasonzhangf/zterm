@@ -253,7 +253,7 @@ describe('TerminalPage remote window overlay', () => {
       expect(onRequestRemoteWindowStreamStart).toHaveBeenCalledWith('s1', expect.objectContaining({
         streamTargetId: 'app-1',
       }), expect.stringMatching(/^rw-stream-/), {
-        videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+        videoBitrate: { preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000 },
       });
       expect(screen.getByTestId('remote-window-video')).toBeTruthy();
       expect(screen.queryByTestId('terminal-view-s1')).toBeTruthy();

@@ -376,7 +376,7 @@
       "identity": "Android remote window picker, floating stream overlay, fullscreen aspect-fit/aspect-fill zoom/pan/minimap projection, and Back/minimize/close/input intent",
       "owner_feature": "desktop.remote_window_stream",
       "truth_store": "docs/decisions/2026-07-19-remote-window-stream-truth.md",
-      "allowed_operations": ["open_picker", "select_stream_target", "show_floating_overlay", "enter_fullscreen", "select_fullscreen_display_mode", "zoom_fullscreen", "pan_zoomed_fullscreen", "show_minimap", "shrink_to_floating", "emit_close_intent", "emit_input_intent"],
+      "allowed_operations": ["open_picker", "select_stream_target", "show_floating_overlay", "resize_floating_overlay", "enter_fullscreen", "select_fullscreen_display_mode", "zoom_fullscreen", "pan_zoomed_fullscreen", "pan_keyboard_open_fullscreen", "show_minimap", "select_effective_video_quality", "shrink_to_floating", "emit_close_intent", "emit_input_intent"],
       "direct_relations": ["resource.remote_window_stream"],
       "indirect_relations": ["resource.transport_target"],
       "via_resources": ["resource.active_session", "resource.session_transport"],

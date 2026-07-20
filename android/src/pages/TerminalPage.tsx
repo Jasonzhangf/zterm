@@ -168,7 +168,7 @@ const TerminalQuickBarShell = ReactMemo(function TerminalQuickBarShell({
   );
 });
 
-const TerminalNetworkBanner = ReactMemo(function TerminalNetworkBanner({
+export const TerminalNetworkBanner = ReactMemo(function TerminalNetworkBanner({
   connectionIssueVisible,
   networkOnline,
   activeSessionState,
@@ -215,7 +215,12 @@ const TerminalNetworkBanner = ReactMemo(function TerminalNetworkBanner({
     <div
       data-testid="terminal-network-banner"
       style={{
-        margin: '0 10px 8px',
+        position: 'fixed',
+        top: 'calc(env(safe-area-inset-top, 0px) + 10px)',
+        left: 12,
+        right: 12,
+        zIndex: 140,
+        pointerEvents: 'none',
         padding: '9px 12px',
         borderRadius: '12px',
         border: `1px solid ${networkBanner.border}`,

@@ -121,6 +121,19 @@ export function buildRemoteWindowVideoBitrateConfig(
   };
 }
 
+export function resolveEffectiveRemoteWindowVideoBitratePreset(
+  selectedPreset: RemoteWindowVideoBitratePreset,
+  projection: { mode: 'floating' | 'fullscreen'; fullscreenScale?: number },
+): RemoteWindowVideoBitratePreset {
+  if (projection.mode === 'floating') {
+    return '2mbps';
+  }
+  if ((projection.fullscreenScale || 1) <= 1.01) {
+    return selectedPreset === '2mbps' ? '2mbps' : '5mbps';
+  }
+  return selectedPreset;
+}
+
 export function readRemoteWindowVideoBitratePreset(
   target: RemoteWindowStreamTargetManifest,
   storage: BrowserStorageLike | null | undefined = typeof window === 'undefined' ? null : window.localStorage,

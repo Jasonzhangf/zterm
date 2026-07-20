@@ -4,6 +4,7 @@ import {
   REMOTE_WINDOW_VIDEO_BITRATE_STORAGE_KEY,
   buildRemoteWindowVideoBitrateConfig,
   readRemoteWindowVideoBitratePreset,
+  resolveEffectiveRemoteWindowVideoBitratePreset,
   resolveDefaultRemoteWindowVideoBitratePreset,
   resolveRemoteWindowVideoResolutionKey,
   writeRemoteWindowVideoBitratePreset,
@@ -82,5 +83,28 @@ describe('remote-window-video-quality', () => {
 
     expect(readRemoteWindowVideoBitratePreset(resizedWindow, storage)).toBe('5mbps');
     expect(readRemoteWindowVideoBitratePreset(otherWindowSameNewResolution, storage)).toBe('fullscreen');
+  });
+
+  it('caps effective bitrate by projection size without rewriting the remembered preset', () => {
+    expect(resolveEffectiveRemoteWindowVideoBitratePreset('fullscreen', {
+      mode: 'floating',
+      fullscreenScale: 1,
+    })).toBe('2mbps');
+    expect(resolveEffectiveRemoteWindowVideoBitratePreset('20mbps', {
+      mode: 'fullscreen',
+      fullscreenScale: 1,
+    })).toBe('5mbps');
+    expect(resolveEffectiveRemoteWindowVideoBitratePreset('10mbps', {
+      mode: 'fullscreen',
+      fullscreenScale: 1,
+    })).toBe('5mbps');
+    expect(resolveEffectiveRemoteWindowVideoBitratePreset('2mbps', {
+      mode: 'fullscreen',
+      fullscreenScale: 1,
+    })).toBe('2mbps');
+    expect(resolveEffectiveRemoteWindowVideoBitratePreset('fullscreen', {
+      mode: 'fullscreen',
+      fullscreenScale: 1.4,
+    })).toBe('fullscreen');
   });
 });

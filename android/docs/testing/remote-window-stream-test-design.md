@@ -89,13 +89,15 @@ Current executable gates:
    - Current slice: `pickerOpen` suppresses QuickBar; target-locked fullscreen still suppresses terminal body subscription but keeps QuickBar visible above the overlay for remote-window input.
    - Current minimal slice: toolbar pointer drag captures the pointer, updates the floating projection from toolbar-local pointer moves as well as window moves, releases capture on end/cancel, remains bounded to the viewport, and is disabled in fullscreen; video/input surface gestures remain separate.
    - Current slice: the floating preview shell derives its video aspect ratio from the selected `windowBoundsTopLeftPx` / `cropRectTopLeftPx`, not from a fixed 16:10 preview frame.
+   - Current slice: a floating preview can be resized from its edge; the resized video surface keeps the selected source aspect ratio and remains movable through the toolbar after resizing.
    - Current slice: a target-locked floating preview consumes `bottomInsetPx`; an IME inset of `320` lifts the preview from its `118` base to `438px`. Fullscreen remains governed by safe-area layout instead of this floating offset.
+   - Current slice: target-locked fullscreen consumes `bottomInsetPx` as overlay padding, not page layout height. While the keyboard is open, one-finger fullscreen drag can pan the local letterboxed projection without sending a remote scroll gesture.
    - Current slice: fullscreen button defaults to aspect-fit letterbox mode; an explicit display-mode control switches to aspect-fill cover mode in both portrait and landscape surfaces. Switching display mode resets local zoom/pan only, never restarts capture or renegotiates WebRTC.
    - Current slice: pinch zoom shows a minimap; zoomed fullscreen single-finger drag pans the projected viewport without restarting the stream.
    - Current slice: QuickBar sequences map to remote-window key/text events for the active stream and do not call terminal input while a supported remote-window input context exists.
    - Current slice: ImeAnchor input/backspace/key events route to remote-window input context while active; committed CJK, special symbols, and newlines are preserved exactly and do not leak into the terminal session under the video overlay.
    - Current slice: QuickBar image paste sends a remote-window paste target while the remote-window focus context is active, and after terminal surface focus activation the same image button calls the terminal paste path without a paste target.
-   - Current slice: bitrate presets are remembered per selected desktop window identity; changing a selected active stream from the overlay calls quality update exactly once and does not call stream start again.
+   - Current slice: bitrate presets are remembered per selected desktop window identity, but the effective stream bitrate is capped by projection size: floating preview always requests `2mbps`, unzoomed fullscreen requests no more than `5mbps`, and zoomed fullscreen may request the remembered high preset. Projection changes update the active stream quality exactly once and do not call stream start again.
    - Full stream slice: `fullscreenStream + Back -> floatingStream`
    - Full stream slice: `fullscreenStream + minimize -> floatingStream`
    - `close -> closed`

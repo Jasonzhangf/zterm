@@ -330,6 +330,8 @@
         "src/lib/tmux-sessions.ts",
         "src/lib/tmux-sessions.test.ts",
         "src/lib/session-transport-runtime.ts",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPage.network-banner.test.tsx",
         "src/server/terminal-bridge-runtime.ts",
         "src/server/rtc-bridge.ts",
         "src/server/rtc-bridge.test.ts",
@@ -357,7 +359,8 @@
         "src/lib/session-transport-runtime.test.ts",
         "src/contexts/session-context-transport-runtime.test.ts",
         "src/lib/tmux-sessions.test.ts",
-        "src/server/rtc-bridge.test.ts"
+        "src/server/rtc-bridge.test.ts",
+        "src/pages/TerminalPage.network-banner.test.tsx"
       ],
       "truth_sources": [
         ".agents/skills/terminal-buffer-truth/SKILL.md",

@@ -72,6 +72,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - Remote-window image paste 的路由真源只能是 Android active focus context：remote-window context active 才允许发送 `pasteTarget.kind=remote-window`；terminal surface focus 必须清掉 context；否则同一 QuickBar image action 保持 terminal Ctrl+V paste path。daemon 不猜焦点，不按 app title/window list 自行决定投递目标。
 - Remote-window 粘贴执行必须复用 file-transfer paste-image owner 写 macOS clipboard；remote-window target 只追加 Command+V 注入，terminal target 只追加 terminal Ctrl+V。禁止新增第二套图片上传或 clipboard 流水线。
 - Remote-window 视频码率是 stream-local quality control：start 携带当前 preset，后续 selector 发送 `remote-window-stream-quality-request`；daemon 只在 stream owner 内校验并应用 WebRTC sender `maxBitrate`。应用码率时只能保留并修改 sender 现有 `RTCRtpSendParameters.encodings`，禁止在空 encodings 时伪造新 encoding；启动阶段没有可改 encoding 时显式报告码率未应用但不阻断视频，运行中切码率则返回显式失败。禁止用码率切换重启 capture、receiver、session transport 或改坐标真源。
+- Remote-window 有效码率还必须受 Android 投影大小限制，而不是直接等于用户记忆 preset：floating preview 固定 `2mbps`；fullscreen 未放大时最高 `5mbps`；只有 zoomed fullscreen 才允许使用记忆的高 preset。selector 显示/记忆和实际发给 stream 的 effective bitrate 是两层语义，禁止通过重启 stream 实现码率变化。
 - 相关改动最小 gate：`RemoteWindowOverlay.test.tsx`、`TerminalPage.remote-window-overlay.test.tsx`、`session-context-remote-window-runtime.test.ts`、`session-context-transfer-runtime.test.ts`、`terminal-file-transfer-binary-runtime.test.ts`、`remote-window-stream-daemon.test.ts`、`terminal-message-runtime.test.ts`、`remote-window-video-quality.test.ts`、`tsc --noEmit`、`test:feature-registry`。daemon 可用时追加 live WS 显式错误/成功 smoke。
 
 ### 2.3 旧文档处理
@@ -244,11 +245,12 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 视频闭环不能只看 catalog、单测或 `<video>.readyState`。最低黑盒 gate 是受控 AppKit/窗口 marker 通过 Android WebView canvas 采样到预期颜色；同时确认 daemon `/health` PID 没变、stream stop 后 capture 子进程清理干净。
 - daemon 运行日志路径以 launchd plist 为准；当前全局服务 stderr/stdout 在 `~/.wterm/logs/launchd-stderr.log` / `launchd-stdout.log`，不要只看旧 `~/.zterm/logs`。
 - remote-window catalog 的 partial source error 不是阻塞弹窗：只要 targets 非空，picker 不显示 iTerm2/source partial error 条；只在无可选目标或顶层失败时显式显示错误。
-- remote-window floating stream 不隐藏 QuickBar；只有 picker 和 fullscreen 抑制 QuickBar/IME/body-subscription。浮动预览必须按所选 manifest 的窗口/裁切 aspect ratio 定尺寸，不能固定 16:10；入口悬浮标可拖动且同一拖拽手势不能合成点击打开 picker；浮窗本体拖动只属于 toolbar，必须 `setPointerCapture/releasePointerCapture` 并处理 toolbar-local `pointermove/up/cancel`，不能只依赖 `window.pointermove`；fullscreen 必须有显式按钮、Back/minimize 回浮窗、pinch zoom、zoom 后单指 pan、右上 minimap。
+- remote-window floating stream 不隐藏 QuickBar；只有 picker 和 fullscreen 抑制 QuickBar/IME/body-subscription。浮动预览必须按所选 manifest 的窗口/裁切 aspect ratio 定尺寸并允许边缘 resize 保持该 aspect ratio，不能固定 16:10；入口悬浮标可拖动且同一拖拽手势不能合成点击打开 picker；若父级裁切导致入口只能移动几像素，入口坐标必须切到 fixed/viewport owner；浮窗本体拖动只属于 toolbar，必须 `setPointerCapture/releasePointerCapture` 并处理 toolbar-local `pointermove/up/cancel`，不能只依赖 `window.pointermove`；fullscreen 必须有显式按钮、Back/minimize 回浮窗、pinch zoom、zoom 后单指 pan、右上 minimap。
 - remote-window fullscreen display mode 只属于 Android overlay projection：默认 aspect-fit 完整显示；aspect-fill 必须是等比 cover/crop 充满横竖屏 phone surface，不可拉伸变形。绘制和 pointer/input mapping 必须共用同一个 projected content rect，禁止为了填满屏幕去改 daemon capture geometry、Mac coordinate manifest、WebRTC negotiation、tmux width、terminal mirror 或 renderer。
 - remote-window 视频是独立 WebRTC peer connection，但 ICE 配置必须从当前 session traversal route 派生：`rtc-direct` 用 STUN-only direct ICE，`rtc-relay` 用 Relay TURN ICE。5G/Relay 下禁止让 remote-window video 用空 ICE 启动，也禁止失败后假装截图/terminal buffer 视频成功。
 - remote-window 输入回传必须走 `remote-window-input` 显式协议和 daemon `injectInput` owner；Android 只按 manifest crop 归一化 pointer/key intent，不能在 UI 做 macOS 坐标真源或假注入成功。
 - remote-window target-locked 浮窗必须消费 Android IME 的 `bottomInsetPx`，不能只抬入口悬浮标；fullscreen 继续只服从 safe-area。远程 IME committed text 保持原始 CJK/特殊字符/换行，不走 terminal punctuation/newline normalization。
+- remote-window fullscreen 在 IME 打开时也要消费 `bottomInsetPx` 作为 overlay padding，并允许本地 letterbox pan 避开键盘遮挡；这只是 Android projection，不得改变 page shell layout、daemon capture/crop、Mac 坐标、tmux 宽度或 terminal renderer。
 - remote-window 未放大全屏和浮窗中的单指拖动语义是远端 pixel scroll；只有 fullscreen `scale > 1` 时单指拖动属于本地 pan。协议 delta 保持 DOM 正向（down/right 为正），daemon `CGEvent` 注入层唯一取反为 macOS wheel 值，禁止 Android 和 daemon 双重取反。
 - generic app `os-event` 输入必须有 Accessibility 权限并使用 `bring-to-focus`；只 `NSRunningApplication.activate` 不够，尤其是微信/被遮挡窗口。daemon input config 必须带目标 `windowId/title/bounds`，按 `CGWindowList` bounds 匹配 AX window，执行 `AXRaise` / focused window 后再发 Quartz pointer/key/scroll event。`CGWindowList` top-left 坐标可直接用于 `CGEvent` location，禁止再用 AppKit bottom-left 转换。`no-focus-steal + os-event` 必须显式报错，不能宣称输入成功；验证应使用“目标窗口被 cover window 遮住，未 AXRaise 不动，AXRaise 后真实滚动”的黑盒。
 - generic app `os-event` 输入不能每个事件启动一次 `swift -e`；点击、滚动、键盘是连续流，daemon 必须用唯一常驻 Swift helper。Swift schema 必须匹配 wire union：scroll 没有 `phase`，pointer/key 才要求 `phase`。黑盒必须通过运行中 daemon WebSocket 启动真实 app-window stream，对受控 AppKit 窗口发送 pointer/scroll/key 并读取目标 stdout，再把 iTerm2 切前台后用 harmless pointer move 验证 WeChat 可被 AXRaise 到前台。
@@ -1049,6 +1051,12 @@ android/
 - **动作**: 在 `terminal.transport_lifecycle` owner 内用 recent alive truth（`lastServerActivityAtRef` / `lastConnectedBaselineAtRef`）给 `explicit-resume` / `active-reentry` 加短 keepalive grace；窗口内 missing/closed local socket 只返回 `transport-keepalive-grace`，超过窗口再走现有 reconnect/throttle owner
 - **边界**: 这个 grace 只属于 lifecycle freshness，不属于 `active-tick` 或显式 input recovery；用户输入撞到 closed socket 仍必须走现有即时恢复路径
 - **反模式**: 为了解决频繁重连在 App/TerminalPage 加延迟、把 daemon 改成记客户端 foreground、或让输入路径也等待保活窗口
+
+### 模式: reconnect / offline 通知只做顶层悬浮投影
+- **触发信号**: 网络状态条出现或消失时，terminal、QuickBar、remote-window video 发生上下跳动、重新测量或 resize
+- **动作**: 状态 truth 仍由 `terminal.transport_lifecycle` owner 提供；页面只渲染 `position: fixed`、高 z-index、`pointer-events: none` 的顶层通知 overlay
+- **边界**: 通知不得进入 flex/grid 正常流、不得占 margin/height、不得改变 page shell / terminal stage / remote-window container 尺寸，也不得借 UI 状态触发 reconnect
+- **反模式**: 把 banner 当普通 page row 插入布局，或在每个页面复制一套网络状态判断
 
 ### 模式: stale reconnect bookkeeping 必须允许重启 reconnect
 - **触发信号**: runtime/logs 出现 `sessionState=reconnecting + ws=null + no pending open intent`
