@@ -128,9 +128,6 @@ export function resolveEffectiveRemoteWindowVideoBitratePreset(
   if (projection.mode === 'floating') {
     return '2mbps';
   }
-  if ((projection.fullscreenScale || 1) <= 1.01) {
-    return selectedPreset === '2mbps' ? '2mbps' : '5mbps';
-  }
   return selectedPreset;
 }
 

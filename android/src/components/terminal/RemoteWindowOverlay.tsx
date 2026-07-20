@@ -65,6 +65,7 @@ interface RemoteWindowOverlayProps {
     payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
   ) => void;
   bottomInsetPx?: number;
+  bottomChromeInsetPx?: number;
   onOpenStateChange?: (open: boolean) => void;
   onBodySubscriptionSuppressedChange?: (suppressed: boolean) => void;
   onInputContextChange?: (context: RemoteWindowInputContext | null) => void;
@@ -179,11 +180,17 @@ interface FloatingOverlayDrag {
 interface FloatingOverlayResize {
   pointerId: number;
   startClientX: number;
+  startClientY: number;
   startWidth: number;
+  startOffset: FloatingOverlayOffset;
   minWidth: number;
   maxWidth: number;
+  aspectRatio: number;
+  anchor: FloatingResizeAnchor;
   captureElement: HTMLDivElement | null;
 }
+
+type FloatingResizeAnchor = 'left-bottom' | 'right-bottom';
 
 interface FloatingEntryDrag {
   pointerId: number;
@@ -270,7 +277,7 @@ function clampFullscreenViewport(
   surface: SurfaceSize | null,
   source: { width: number; height: number } | null,
   displayMode: FullscreenDisplayMode = initialFullscreenDisplayMode,
-  allowLetterboxPan = false,
+  keyboardPanAllowancePx = 0,
 ): FullscreenViewportState {
   const scale = clampNumber(
     Number.isFinite(viewport.scale) ? viewport.scale : 1,
@@ -281,7 +288,8 @@ function clampFullscreenViewport(
     return { scale, panX: 0, panY: 0 };
   }
   const base = resolveAspectRect(surface, source, displayMode);
-  const viewportRect = allowLetterboxPan
+  const allowKeyboardPan = keyboardPanAllowancePx > 0;
+  const viewportRect = allowKeyboardPan
     ? {
         left: 0,
         top: 0,
@@ -292,7 +300,8 @@ function clampFullscreenViewport(
   const scaledWidth = base.width * scale;
   const scaledHeight = base.height * scale;
   const maxPanX = Math.max(0, Math.abs(scaledWidth - viewportRect.width) / 2);
-  const maxPanY = Math.max(0, Math.abs(scaledHeight - viewportRect.height) / 2);
+  const maxPanY = Math.max(0, Math.abs(scaledHeight - viewportRect.height) / 2)
+    + Math.max(0, keyboardPanAllowancePx);
   return {
     scale,
     panX: clampNumber(viewport.panX, -maxPanX, maxPanX),
@@ -424,6 +433,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   stopStream,
   sendInput,
   bottomInsetPx = 0,
+  bottomChromeInsetPx = 0,
   onOpenStateChange,
   onBodySubscriptionSuppressedChange,
   onInputContextChange,
@@ -460,6 +470,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const lastReportedBodySuppressionRef = useRef<boolean | null>(null);
   const lastReportedInputContextKeyRef = useRef<string | null>(null);
   const suppressEntryClickRef = useRef(false);
+  const bitratePresetTouchedRef = useRef(false);
+  const lastAutoFullscreenImePanRef = useRef<{ key: string; panY: number } | null>(null);
   const quickBarSuppressed = state.phase === 'targetEnumerating'
     || state.phase === 'pickerOpen';
   const bodySubscriptionSuppressed = state.phase === 'targetEnumerating'
@@ -506,18 +518,24 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     setEntryOffsetState(next);
   }, []);
 
-  const clampFloatingOverlayWidth = useCallback((
-    startWidth: number,
-    nextWidth: number,
+  const resolveFloatingOverlayResizeBounds = useCallback((
+    rect: { left: number; right: number; width: number },
     source: { width: number; height: number },
+    anchor: FloatingResizeAnchor,
   ) => {
     const viewportWidth = Math.round(window.visualViewport?.width || window.innerWidth || 0);
     const viewportHeight = Math.round(window.visualViewport?.height || window.innerHeight || 0);
     const bottomReserve = REMOTE_WINDOW_FLOATING_BOTTOM_BASE_PX + Math.max(0, bottomInsetPx);
     const aspectRatio = Math.max(0.2, Math.min(5, source.width / Math.max(1, source.height)));
+    const maxByHorizontalPosition = anchor === 'right-bottom'
+      ? viewportWidth - FLOATING_OVERLAY_VIEWPORT_MARGIN_PX - rect.left
+      : rect.right - FLOATING_OVERLAY_VIEWPORT_MARGIN_PX;
     const maxByWidth = Math.max(
       FLOATING_OVERLAY_MIN_WIDTH_PX,
-      viewportWidth - FLOATING_OVERLAY_VIEWPORT_MARGIN_PX * 2,
+      Math.min(
+        viewportWidth - FLOATING_OVERLAY_VIEWPORT_MARGIN_PX * 2,
+        maxByHorizontalPosition,
+      ),
     );
     const maxByHeight = Math.max(
       FLOATING_OVERLAY_MIN_WIDTH_PX,
@@ -527,11 +545,11 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       FLOATING_OVERLAY_MIN_WIDTH_PX,
       Math.min(FLOATING_OVERLAY_MAX_WIDTH_PX, maxByWidth, maxByHeight),
     );
-    const minWidth = Math.min(
+    return {
+      aspectRatio,
+      minWidth: Math.min(maxWidth, FLOATING_OVERLAY_MIN_WIDTH_PX),
       maxWidth,
-      Math.max(FLOATING_OVERLAY_MIN_WIDTH_PX, Math.min(startWidth, 220)),
-    );
-    return Math.round(clampNumber(nextWidth, minWidth, maxWidth));
+    };
   }, [bottomInsetPx]);
 
   const clampEntryOffset = useCallback((
@@ -606,7 +624,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         measuredSurfaceSize,
         sourceRect,
         displayMode,
-        bottomInsetPx > 0,
+        bottomInsetPx,
       );
       fullscreenViewportRef.current = clamped;
       return clamped;
@@ -648,7 +666,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         ? fullscreenDisplayMode
         : initialFullscreenDisplayMode;
       setFullscreenViewportState((current) => {
-        const clamped = clampFullscreenViewport(current, next, sourceRect, displayMode, bottomInsetPx > 0);
+        const clamped = clampFullscreenViewport(current, next, sourceRect, displayMode, bottomInsetPx);
         fullscreenViewportRef.current = clamped;
         return clamped;
       });
@@ -663,6 +681,57 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       window.removeEventListener('resize', update);
     };
   }, [bottomInsetPx, fullscreenDisplayMode, state]);
+
+  useEffect(() => {
+    if (
+      state.phase !== 'targetLocked'
+      || state.mode !== 'fullscreen'
+      || !surfaceSize
+    ) {
+      lastAutoFullscreenImePanRef.current = null;
+      return;
+    }
+    const safeBottomInsetPx = Math.max(0, Math.round(bottomInsetPx));
+    const safeChromeInsetPx = Math.max(0, Math.min(
+      safeBottomInsetPx,
+      Math.round(bottomChromeInsetPx),
+    ));
+    const keyboardLiftPx = safeBottomInsetPx - safeChromeInsetPx;
+    if (safeBottomInsetPx <= 0 || safeChromeInsetPx <= 0 || keyboardLiftPx <= 0) {
+      lastAutoFullscreenImePanRef.current = null;
+      return;
+    }
+
+    const sourceRect = getRemoteWindowSourceRect(state.target);
+    const autoKey = [
+      state.target.streamTargetId,
+      fullscreenDisplayMode,
+      surfaceSize.width,
+      surfaceSize.height,
+      safeBottomInsetPx,
+      safeChromeInsetPx,
+    ].join('|');
+    const requestedPanY = -safeChromeInsetPx;
+    setFullscreenViewportState((current) => {
+      const lastAutoPan = lastAutoFullscreenImePanRef.current;
+      const manualPanActive = lastAutoPan
+        ? Math.abs(current.panY - lastAutoPan.panY) > 1
+        : Math.abs(current.panY) > 1;
+      if (manualPanActive) {
+        return current;
+      }
+      const clamped = clampFullscreenViewport(
+        { ...current, panY: requestedPanY },
+        surfaceSize,
+        sourceRect,
+        fullscreenDisplayMode,
+        safeBottomInsetPx,
+      );
+      lastAutoFullscreenImePanRef.current = { key: autoKey, panY: clamped.panY };
+      fullscreenViewportRef.current = clamped;
+      return clamped;
+    });
+  }, [bottomChromeInsetPx, bottomInsetPx, fullscreenDisplayMode, state, surfaceSize]);
 
   const handleOpenPicker = useCallback(() => {
     clearCatalogWatchdog();
@@ -706,6 +775,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     floatingResizeRef.current = null;
     surfacePointersRef.current.clear();
     surfaceGestureRef.current = null;
+    bitratePresetTouchedRef.current = false;
+    lastAutoFullscreenImePanRef.current = null;
     if (state.phase === 'targetLocked' && state.streamId && activeSessionId && stopStream) {
       void Promise.resolve(stopStream(activeSessionId, state.streamId)).catch((error) => {
         console.error('[RemoteWindowOverlay] remote stream stop failed:', error);
@@ -745,9 +816,14 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
 
   const handleFullscreen = useCallback(() => {
     publishRemoteWindowInputContext();
+    if (state.phase === 'targetLocked' && !bitratePresetTouchedRef.current) {
+      setBitratePreset((current) => (
+        current === 'fullscreen' || current === '20mbps' ? current : 'fullscreen'
+      ));
+    }
     resetFullscreenViewport();
     setState((current) => enterRemoteWindowFullscreen(current));
-  }, [publishRemoteWindowInputContext, resetFullscreenViewport]);
+  }, [publishRemoteWindowInputContext, resetFullscreenViewport, state]);
 
   const handleToggleFullscreenDisplayMode = useCallback(() => {
     resetFullscreenViewport();
@@ -758,6 +834,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     if (!REMOTE_WINDOW_VIDEO_BITRATE_PRESETS.includes(nextPreset)) {
       return;
     }
+    bitratePresetTouchedRef.current = true;
     setBitratePreset(nextPreset);
     if (state.phase !== 'targetLocked') {
       return;
@@ -839,18 +916,32 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     return true;
   }, []);
 
-  const updateFloatingResizeFromPointer = useCallback((pointerId: number, clientX: number) => {
+  const updateFloatingResizeFromPointer = useCallback((pointerId: number, clientX: number, clientY: number) => {
     const resize = floatingResizeRef.current;
     if (!resize || resize.pointerId !== pointerId) {
       return false;
     }
-    setFloatingOverlayWidthPx(Math.round(clampNumber(
-      resize.startWidth - (clientX - resize.startClientX),
+    const horizontalDelta = resize.anchor === 'right-bottom'
+      ? clientX - resize.startClientX
+      : resize.startClientX - clientX;
+    const verticalDelta = (clientY - resize.startClientY) * resize.aspectRatio;
+    const widthDelta = Math.abs(verticalDelta) > Math.abs(horizontalDelta)
+      ? verticalDelta
+      : horizontalDelta;
+    const nextWidth = Math.round(clampNumber(
+      resize.startWidth + widthDelta,
       resize.minWidth,
       resize.maxWidth,
-    )));
+    ));
+    setFloatingOverlayWidthPx(nextWidth);
+    if (resize.anchor === 'right-bottom') {
+      setFloatingOffset({
+        ...resize.startOffset,
+        x: resize.startOffset.x + nextWidth - resize.startWidth,
+      });
+    }
     return true;
-  }, [setFloatingOverlayWidthPx]);
+  }, [setFloatingOffset, setFloatingOverlayWidthPx]);
 
   const finishFloatingResize = useCallback((pointerId: number) => {
     const resize = floatingResizeRef.current;
@@ -964,7 +1055,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     event.stopPropagation();
   }, [finishFloatingDrag]);
 
-  const handleFloatingResizeStart = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+  const handleFloatingResizeStart = useCallback((event: ReactPointerEvent<HTMLDivElement>, anchor: FloatingResizeAnchor) => {
     if (
       state.phase !== 'targetLocked'
       || state.mode !== 'floating'
@@ -982,8 +1073,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       FLOATING_OVERLAY_MIN_WIDTH_PX,
       Math.round(floatingOverlayWidthPxRef.current || rect.width || FLOATING_OVERLAY_MIN_WIDTH_PX),
     );
-    const maxWidth = clampFloatingOverlayWidth(currentWidth, Number.POSITIVE_INFINITY, sourceRect);
-    const minWidth = clampFloatingOverlayWidth(currentWidth, FLOATING_OVERLAY_MIN_WIDTH_PX, sourceRect);
+    const resizeBounds = resolveFloatingOverlayResizeBounds(rect, sourceRect, anchor);
     try {
       event.currentTarget.setPointerCapture?.(event.pointerId);
     } catch (error) {
@@ -992,17 +1082,21 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     floatingResizeRef.current = {
       pointerId: event.pointerId,
       startClientX: event.clientX,
-      startWidth: currentWidth,
-      minWidth,
-      maxWidth,
+      startClientY: event.clientY,
+      startWidth: clampNumber(currentWidth, resizeBounds.minWidth, resizeBounds.maxWidth),
+      startOffset: floatingOffsetRef.current,
+      minWidth: resizeBounds.minWidth,
+      maxWidth: resizeBounds.maxWidth,
+      aspectRatio: resizeBounds.aspectRatio,
+      anchor,
       captureElement: event.currentTarget,
     };
     event.preventDefault();
     event.stopPropagation();
-  }, [clampFloatingOverlayWidth, state]);
+  }, [resolveFloatingOverlayResizeBounds, state]);
 
   const handleFloatingResizeMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
-    if (!updateFloatingResizeFromPointer(event.pointerId, event.clientX)) {
+    if (!updateFloatingResizeFromPointer(event.pointerId, event.clientX, event.clientY)) {
       return;
     }
     event.preventDefault();
@@ -1067,7 +1161,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       if (updateFloatingDragFromPointer(event.pointerId, event.clientX, event.clientY)) {
         event.preventDefault();
       }
-      if (updateFloatingResizeFromPointer(event.pointerId, event.clientX)) {
+      if (updateFloatingResizeFromPointer(event.pointerId, event.clientX, event.clientY)) {
         event.preventDefault();
       }
       if (updateEntryDragFromPointer(event.pointerId, event.clientX, event.clientY)) {
@@ -1145,6 +1239,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     setFloatingOffset({ x: 0, y: 0 });
     setFloatingOverlayWidthPx(null);
     lastAppliedStreamQualityKeyRef.current = null;
+    bitratePresetTouchedRef.current = false;
+    lastAutoFullscreenImePanRef.current = null;
     resetFullscreenViewport();
     setFullscreenDisplayMode(initialFullscreenDisplayMode);
     setReceiverMediaStream(null);
@@ -1793,9 +1889,15 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         bottom: REMOTE_WINDOW_FLOATING_BOTTOM_BASE_PX + Math.max(0, bottomInsetPx),
         transform: `translate(${floatingOffset.x}px, ${floatingOffset.y}px)`,
       };
+  const fullscreenBottomPaddingPx = state.phase === 'targetLocked' && state.mode === 'fullscreen'
+    ? Math.max(
+        0,
+        Math.round(Math.max(0, bottomInsetPx) - Math.min(Math.max(0, bottomInsetPx), Math.max(0, -fullscreenViewport.panY))),
+      )
+    : Math.max(0, bottomInsetPx);
   const fullscreenOverlayStyle = {
     ...styles.fullscreenOverlay,
-    paddingBottom: `${Math.max(0, bottomInsetPx)}px`,
+    paddingBottom: `${fullscreenBottomPaddingPx}px`,
   };
   const videoSurfaceStyle = state.phase === 'targetLocked' && state.mode === 'floating' && lockedSourceRect
     ? {
@@ -1916,15 +2018,26 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         ) : null}
       </div>
       {state.mode === 'floating' ? (
-        <div
-          data-testid="remote-window-resize-handle"
-          data-no-drag="true"
-          onPointerDown={handleFloatingResizeStart}
-          onPointerMove={handleFloatingResizeMove}
-          onPointerUp={handleFloatingResizeEnd}
-          onPointerCancel={handleFloatingResizeEnd}
-          style={styles.floatingResizeHandle}
-        />
+        <>
+          <div
+            data-testid="remote-window-resize-handle"
+            data-no-drag="true"
+            onPointerDown={(event) => handleFloatingResizeStart(event, 'left-bottom')}
+            onPointerMove={handleFloatingResizeMove}
+            onPointerUp={handleFloatingResizeEnd}
+            onPointerCancel={handleFloatingResizeEnd}
+            style={styles.floatingResizeHandleLeft}
+          />
+          <div
+            data-testid="remote-window-resize-handle-right"
+            data-no-drag="true"
+            onPointerDown={(event) => handleFloatingResizeStart(event, 'right-bottom')}
+            onPointerMove={handleFloatingResizeMove}
+            onPointerUp={handleFloatingResizeEnd}
+            onPointerCancel={handleFloatingResizeEnd}
+            style={styles.floatingResizeHandleRight}
+          />
+        </>
       ) : null}
     </div>
   ) : null;
@@ -2140,16 +2253,27 @@ const styles: Record<string, CSSProperties> = {
     color: '#edf4ff',
     boxShadow: '0 24px 60px rgba(0,0,0,0.46)',
   },
-  floatingResizeHandle: {
+  floatingResizeHandleLeft: {
     position: 'absolute',
     left: 0,
-    top: 42,
     bottom: 0,
-    width: 18,
+    width: 38,
+    height: 38,
     zIndex: 2,
-    cursor: 'ew-resize',
+    cursor: 'nesw-resize',
     touchAction: 'none',
-    background: 'linear-gradient(90deg, rgba(31,214,122,0.24), rgba(31,214,122,0))',
+    background: 'radial-gradient(circle at bottom left, rgba(31,214,122,0.36), rgba(31,214,122,0) 68%)',
+  },
+  floatingResizeHandleRight: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    width: 38,
+    height: 38,
+    zIndex: 2,
+    cursor: 'nwse-resize',
+    touchAction: 'none',
+    background: 'radial-gradient(circle at bottom right, rgba(31,214,122,0.36), rgba(31,214,122,0) 68%)',
   },
   fullscreenOverlay: {
     position: 'fixed',

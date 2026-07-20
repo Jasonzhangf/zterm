@@ -3486,6 +3486,7 @@ function TerminalPageComponent({
             + layoutProfile.quickBar.touchSafeOffsetPx
             + terminalBottomChromeLiftPx
           }
+          bottomChromeInsetPx={terminalChromeBottomPx}
           onOpenStateChange={handleRemoteWindowOverlayOpenStateChange}
           onBodySubscriptionSuppressedChange={handleRemoteWindowBodySubscriptionSuppressedChange}
           onInputContextChange={handleRemoteWindowInputContextChange}

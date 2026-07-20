@@ -85,7 +85,7 @@ describe('remote-window-video-quality', () => {
     expect(readRemoteWindowVideoBitratePreset(otherWindowSameNewResolution, storage)).toBe('fullscreen');
   });
 
-  it('caps effective bitrate by projection size without rewriting the remembered preset', () => {
+  it('uses floating preview bitrate separately from the fullscreen selected preset', () => {
     expect(resolveEffectiveRemoteWindowVideoBitratePreset('fullscreen', {
       mode: 'floating',
       fullscreenScale: 1,
@@ -93,11 +93,11 @@ describe('remote-window-video-quality', () => {
     expect(resolveEffectiveRemoteWindowVideoBitratePreset('20mbps', {
       mode: 'fullscreen',
       fullscreenScale: 1,
-    })).toBe('5mbps');
+    })).toBe('20mbps');
     expect(resolveEffectiveRemoteWindowVideoBitratePreset('10mbps', {
       mode: 'fullscreen',
       fullscreenScale: 1,
-    })).toBe('5mbps');
+    })).toBe('10mbps');
     expect(resolveEffectiveRemoteWindowVideoBitratePreset('2mbps', {
       mode: 'fullscreen',
       fullscreenScale: 1,
