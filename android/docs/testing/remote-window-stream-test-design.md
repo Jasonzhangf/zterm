@@ -25,7 +25,7 @@ The current real-video implementation slice now additionally binds:
 5. Mac local live proof for a generic app-window marker: temporary native AppKit window -> catalog target -> ScreenCaptureKit capture -> WebRTC receiver -> pixel oracle. This does not replace the required Android rendered-pixel gate.
 6. Android overlay now maps video-surface pointer/key/scroll events to `remote-window-input` intents. Unzoomed touch drag and wheel input emit pixel scroll; zoomed fullscreen drag remains local pan. The daemon implements generic `bring-to-focus + os-event` pointer/key/scroll injection for active streams.
 7. Remote-window QuickBar input is projection-only: terminal/tmux/iTerm-specific actions such as tmux copy are disabled/grey while generic key, text, paste, arrows, image paste, and keyboard invocation remain available. Android IME committed text and native key/backspace events route to the active remote-window stream while the context is active. QuickBar image paste uses `pasteTarget.kind=remote-window` only while the active focus context is the remote window; terminal surface focus clears that context and returns the same image action to the terminal Ctrl+V paste path.
-8. Video bitrate is stream-local quality control: stream start carries the selected bitrate config, the overlay selector sends `remote-window-stream-quality-request` for an active stream, the daemon applies it to the existing WebRTC sender, and the update must not restart capture or rebuild transport.
+8. Video bitrate is stream-local quality control: stream start carries the selected bitrate config, the overlay selector sends `remote-window-stream-quality-request` for an active stream, and the daemon may update only the existing WebRTC sender encoding entries without changing the `encodings` array structure. An empty sender `encodings` array must not fail stream startup or produce a false `capture.maxBitrateBps`; a later live quality update against the same unsupported sender must fail explicitly. The update must not restart capture or rebuild transport.
 
 Still pending for feature completion:
 
@@ -147,6 +147,7 @@ Current executable gates:
 12. Daemon stream owner
    - Capture starts only from the selected target manifest and rejects missing targets, missing/invalid crop rects, permission failures, and media setup failures explicitly.
    - Capture frames must originate from ScreenCaptureKit/window capture and be fed into the WebRTC video sender; unit tests may inject a fake frame source only to lock lifecycle and cleanup.
+   - Bitrate apply preserves the sender's existing `RTCRtpSendParameters.encodings` count/order and changes only `maxBitrate`. The positive gate proves existing encodings are updated; the negative gate starts with `encodings=[]`, proves `setParameters()` is not called and video start still returns an answer without `capture.maxBitrateBps`, then proves a live quality update returns `remote_window_stream_quality_failed`.
    - Close, media failure, capture process exit, and transport failure must share one exactly-once cleanup path.
    - Frame success is not complete until a live pixel oracle matches a source marker to receiver pixels.
 

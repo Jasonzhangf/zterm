@@ -71,7 +71,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 ### 2.2.2 Remote-window 输入 / 粘贴 / 码率规则
 - Remote-window image paste 的路由真源只能是 Android active focus context：remote-window context active 才允许发送 `pasteTarget.kind=remote-window`；terminal surface focus 必须清掉 context；否则同一 QuickBar image action 保持 terminal Ctrl+V paste path。daemon 不猜焦点，不按 app title/window list 自行决定投递目标。
 - Remote-window 粘贴执行必须复用 file-transfer paste-image owner 写 macOS clipboard；remote-window target 只追加 Command+V 注入，terminal target 只追加 terminal Ctrl+V。禁止新增第二套图片上传或 clipboard 流水线。
-- Remote-window 视频码率是 stream-local quality control：start 携带当前 preset，后续 selector 发送 `remote-window-stream-quality-request`；daemon 只在 stream owner 内校验并应用 WebRTC sender `maxBitrate`。禁止用码率切换重启 capture、receiver、session transport 或改坐标真源。
+- Remote-window 视频码率是 stream-local quality control：start 携带当前 preset，后续 selector 发送 `remote-window-stream-quality-request`；daemon 只在 stream owner 内校验并应用 WebRTC sender `maxBitrate`。应用码率时只能保留并修改 sender 现有 `RTCRtpSendParameters.encodings`，禁止在空 encodings 时伪造新 encoding；启动阶段没有可改 encoding 时显式报告码率未应用但不阻断视频，运行中切码率则返回显式失败。禁止用码率切换重启 capture、receiver、session transport 或改坐标真源。
 - 相关改动最小 gate：`RemoteWindowOverlay.test.tsx`、`TerminalPage.remote-window-overlay.test.tsx`、`session-context-remote-window-runtime.test.ts`、`session-context-transfer-runtime.test.ts`、`terminal-file-transfer-binary-runtime.test.ts`、`remote-window-stream-daemon.test.ts`、`terminal-message-runtime.test.ts`、`remote-window-video-quality.test.ts`、`tsc --noEmit`、`test:feature-registry`。daemon 可用时追加 live WS 显式错误/成功 smoke。
 
 ### 2.3 旧文档处理

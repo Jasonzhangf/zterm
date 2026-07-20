@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { RemoteWindowStreamStatusPayload } from '@zterm/shared/protocol';
 import {
   buildRemoteWindowInputConfig,
   buildMacosAppWindowTargets,
@@ -113,8 +114,10 @@ function makeFakeMediaStreamTrack() {
   return { stop: vi.fn() } as unknown as MediaStreamTrack & { stop: ReturnType<typeof vi.fn> };
 }
 
-function makeFakeRtpSender() {
-  let parameters: RTCRtpSendParameters = { encodings: [{} as RTCRtpEncodingParameters] } as RTCRtpSendParameters;
+function makeFakeRtpSender(
+  initialParameters: RTCRtpSendParameters = { encodings: [{} as RTCRtpEncodingParameters] } as RTCRtpSendParameters,
+) {
+  let parameters: RTCRtpSendParameters = initialParameters;
   return {
     getParameters: vi.fn(() => parameters),
     setParameters: vi.fn(async (nextParameters: RTCRtpSendParameters) => {
@@ -803,6 +806,70 @@ describe('remote window stream daemon owner', () => {
     expect(fakeSender.setParameters).toHaveBeenLastCalledWith(expect.objectContaining({
       encodings: [expect.objectContaining({ maxBitrate: 20_000_000 })],
     }));
+  });
+
+  it('starts remote window stream without fabricating sender encodings for video bitrate', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeSender = makeFakeRtpSender({ encodings: [] } as unknown as RTCRtpSendParameters);
+    fakePeer.addTrack.mockReturnValue(fakeSender);
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const statuses: RemoteWindowStreamStatusPayload[] = [];
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(12) });
+        return { width: 2, height: 2, frameRate: 12, stop: vi.fn() };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(7);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const started = await runtime.startStream({
+      requestId: 'rw-bitrate-empty-start',
+      streamId: 'stream-bitrate-empty',
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+      videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+    }, {
+      sendStatus: (status) => {
+        statuses.push(status);
+      },
+    });
+
+    expect('answer' in started).toBe(true);
+    if ('answer' in started) {
+      expect(started.capture).not.toHaveProperty('maxBitrateBps');
+    }
+    expect(fakeSender.setParameters).not.toHaveBeenCalled();
+    expect(statuses[0]).toEqual({
+      requestId: 'rw-bitrate-empty-start',
+      streamId: 'stream-bitrate-empty',
+      phase: 'starting',
+      message: 'video bitrate not applied: remote window video bitrate sender has no encodings to update',
+    });
+
+    const updated = await runtime.updateStreamQuality({
+      requestId: 'rw-bitrate-empty-update',
+      streamId: 'stream-bitrate-empty',
+      targetId: 'iterm2-pane:window-1:tab-1:left',
+      videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+    });
+
+    expect(updated).toEqual({
+      requestId: 'rw-bitrate-empty-update',
+      streamId: 'stream-bitrate-empty',
+      code: 'remote_window_stream_quality_failed',
+      message: 'remote window video bitrate sender has no encodings to update',
+    });
+    expect(fakeSender.setParameters).not.toHaveBeenCalled();
   });
 
   it('rejects stream quality updates for the wrong target without changing sender parameters', async () => {

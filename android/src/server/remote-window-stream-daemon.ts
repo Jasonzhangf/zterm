@@ -1495,21 +1495,34 @@ function normalizeRemoteWindowVideoBitrateConfig(
   };
 }
 
+type RemoteWindowVideoBitrateApplyResult =
+  | { applied: true; videoBitrate: RemoteWindowVideoBitrateConfig }
+  | { applied: false; reason: string };
+
 async function applyRemoteWindowVideoBitrate(
   sender: RTCRtpSender | null,
   config: RemoteWindowVideoBitrateConfig,
-) {
+): Promise<RemoteWindowVideoBitrateApplyResult> {
   if (
     !sender
     || typeof sender.getParameters !== 'function'
     || typeof sender.setParameters !== 'function'
   ) {
-    throw new Error('remote window video bitrate control is not available on this WebRTC sender');
+    return {
+      applied: false,
+      reason: 'remote window video bitrate control is not available on this WebRTC sender',
+    };
   }
   const currentParameters = sender.getParameters();
-  const currentEncodings = Array.isArray(currentParameters.encodings) && currentParameters.encodings.length > 0
+  const currentEncodings = Array.isArray(currentParameters.encodings)
     ? currentParameters.encodings
-    : [{} as RTCRtpEncodingParameters];
+    : [];
+  if (currentEncodings.length === 0) {
+    return {
+      applied: false,
+      reason: 'remote window video bitrate sender has no encodings to update',
+    };
+  }
   const nextParameters = {
     ...currentParameters,
     encodings: currentEncodings.map((encoding) => ({
@@ -1518,6 +1531,7 @@ async function applyRemoteWindowVideoBitrate(
     })),
   } as RTCRtpSendParameters;
   await sender.setParameters(nextParameters);
+  return { applied: true, videoBitrate: config };
 }
 
 function validateStreamTargetForCapture(target: RemoteWindowStreamTargetManifest) {
@@ -2000,9 +2014,22 @@ export function createRemoteWindowStreamDaemonRuntime(
       const videoSource = createVideoSource();
       const videoTrack = videoSource.createTrack();
       const videoSender = peerConnection.addTrack(videoTrack) as RTCRtpSender | undefined;
-      const videoBitrate = normalizeRemoteWindowVideoBitrateConfig(payload.videoBitrate);
-      if (videoBitrate) {
-        await applyRemoteWindowVideoBitrate(videoSender || null, videoBitrate);
+      const requestedVideoBitrate = normalizeRemoteWindowVideoBitrateConfig(payload.videoBitrate);
+      let videoBitrate: RemoteWindowVideoBitrateConfig | null = null;
+      let videoBitrateWarning: string | null = null;
+      if (requestedVideoBitrate) {
+        try {
+          const applyResult = await applyRemoteWindowVideoBitrate(videoSender || null, requestedVideoBitrate);
+          if (applyResult.applied) {
+            videoBitrate = applyResult.videoBitrate;
+          } else {
+            videoBitrateWarning = applyResult.reason;
+          }
+        } catch (error) {
+          videoBitrateWarning = error instanceof Error
+            ? error.message
+            : 'remote window video bitrate could not be applied';
+        }
       }
 
       entry = {
@@ -2046,6 +2073,9 @@ export function createRemoteWindowStreamDaemonRuntime(
         requestId: payload.requestId,
         streamId: payload.streamId,
         phase: 'starting',
+        ...(videoBitrateWarning
+          ? { message: `video bitrate not applied: ${videoBitrateWarning}` }
+          : {}),
       });
 
       await peerConnection.setRemoteDescription(createRtcSessionDescription({
@@ -2189,14 +2219,17 @@ export function createRemoteWindowStreamDaemonRuntime(
       if (!videoBitrate) {
         throw new Error('remote window stream quality requires videoBitrate');
       }
-      await applyRemoteWindowVideoBitrate(entry.videoSender, videoBitrate);
-      entry.videoBitrate = videoBitrate;
+      const applyResult = await applyRemoteWindowVideoBitrate(entry.videoSender, videoBitrate);
+      if (!applyResult.applied) {
+        throw new Error(applyResult.reason);
+      }
+      entry.videoBitrate = applyResult.videoBitrate;
       return {
         requestId: payload.requestId,
         streamId: payload.streamId,
         targetId: payload.targetId,
         accepted: true,
-        videoBitrate,
+        videoBitrate: applyResult.videoBitrate,
       };
     } catch (error) {
       return buildStreamError(
