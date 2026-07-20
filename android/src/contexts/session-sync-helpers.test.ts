@@ -338,7 +338,7 @@ describe('session sync helper refresh planner', () => {
     })).toEqual({ action: 'skip', reason: 'transport-unavailable' });
   });
 
-  it('keeps a recently alive unavailable transport inside the keepalive grace window', () => {
+  it('reconnects an unavailable transport inside the keepalive grace window because no socket can be reused', () => {
     expect(buildActiveSessionRefreshPlan({
       hasSession: true,
       isRefreshTarget: true,
@@ -350,7 +350,7 @@ describe('session sync helper refresh planner', () => {
       keepaliveGraceActive: true,
       transportStale: false,
       source: 'explicit-resume',
-    })).toEqual({ action: 'skip', reason: 'transport-keepalive-grace' });
+    })).toEqual({ action: 'reconnect' });
   });
 
   it('allows reconnect after the keepalive grace window expires', () => {

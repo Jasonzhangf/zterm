@@ -2,6 +2,10 @@ import {
   DEFAULT_TRAVERSAL_PATH_PRIORITY,
   normalizeTraversalPathPriority,
 } from '../bridge-settings';
+import {
+  isPrivateLanIpv4Host,
+  parseEndpointHost,
+} from '../network-target';
 import type {
   TraversalPlanCandidate,
   TraversalResolvedPath,
@@ -35,40 +39,6 @@ const AUTH_FAILURE_ROUTE_PENALTY = 900;
 function priorityCost(path: TraversalResolvedPath, priority: TraversalResolvedPath[]) {
   const index = priority.indexOf(path);
   return index >= 0 ? index * 5 : 50;
-}
-
-function parseEndpointHost(endpoint: string) {
-  const value = endpoint.trim();
-  if (!value) {
-    return '';
-  }
-  try {
-    const parsed = new URL(value.includes('://') ? value : `ws://${value}`);
-    return parsed.hostname.replace(/^\[(.*)\]$/, '$1').toLowerCase();
-  } catch {
-    return value.split(':')[0]?.toLowerCase() || '';
-  }
-}
-
-function isPrivateLanIpv4Host(host: string) {
-  const match = host.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
-  if (!match) {
-    return false;
-  }
-  const [a, b, c, d] = match.slice(1).map((part) => Number.parseInt(part, 10));
-  if ([a, b, c, d].some((part) => Number.isNaN(part) || part < 0 || part > 255)) {
-    return false;
-  }
-  if (a === 10 || a === 127 || a === 169 && b === 254) {
-    return true;
-  }
-  if (a === 172 && b >= 16 && b <= 31) {
-    return true;
-  }
-  if (a === 192 && b === 168) {
-    return true;
-  }
-  return false;
 }
 
 function pathCost(candidate: TraversalPlanCandidate, reasons: string[]) {
@@ -131,7 +101,9 @@ export function selectBestTraversalRoute(options: SelectTraversalRouteOptions): 
     };
   });
 
-  const selectedDiagnostic = diagnostics
+  const selectableDiagnostics = diagnostics.filter((diagnostic) => diagnostic.selectable);
+  const selectionPool = selectableDiagnostics.length > 0 ? selectableDiagnostics : diagnostics;
+  const selectedDiagnostic = [...selectionPool]
     .sort((left, right) => left.score - right.score || left.endpoint.localeCompare(right.endpoint))[0] || null;
   const selected = selectedDiagnostic
     ? options.candidates.find((candidate) =>

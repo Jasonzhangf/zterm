@@ -277,6 +277,48 @@ describe('TerminalPage portrait session drawer', () => {
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
+  it('shows live route and bandwidth metrics in the portrait top status strip', () => {
+    const sessions = [makeSession('s1')];
+    sessions[0]!.resolvedPath = 'ipv4';
+    sessions[0]!.resolvedEndpoint = '192.168.1.20:3333';
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        getSessionDebugMetrics={() => ({
+          uplinkBps: 1024,
+          downlinkBps: 2048,
+          renderHz: 0,
+          pullHz: 0,
+          transportBufferedBytes: 0,
+          transportBackpressured: false,
+          lastRenderCommitAt: 0,
+          bufferPullActive: false,
+          status: 'waiting',
+          active: true,
+          updatedAt: 1,
+        })}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-connection-status-route').textContent).toContain('局域网');
+    expect(screen.getByTestId('terminal-connection-status-bandwidth').textContent).toContain('3.0 KB/s');
+    expect(screen.getByTestId('terminal-connection-status-rates').textContent).toContain('↑ 1.0 KB/s ↓ 2.0 KB/s');
+  });
+
   it('routes drawer plus action to the quick tab picker', () => {
     const sessions = [makeSession('s1'), makeSession('s2')];
     const onOpenQuickTabPicker = vi.fn();

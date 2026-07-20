@@ -277,7 +277,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
     expect(reconnectSession).toHaveBeenCalledWith('session-1');
   });
 
-  it('does not reconnect a recently alive unavailable transport during explicit resume', () => {
+  it('reconnects a recently alive unavailable transport during explicit resume because there is no socket to reuse', () => {
     const now = 100_000;
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
     const reconnectSession = vi.fn();
@@ -297,10 +297,10 @@ describe('ensureActiveSessionFreshRuntime', () => {
     });
 
     try {
-      expect(ensureActiveSessionFreshRuntime(options)).toBe(false);
-      expect(reconnectSession).not.toHaveBeenCalled();
-      expect(runtimeDebug).toHaveBeenCalledWith('session.transport.explicit-resume.skip', expect.objectContaining({
-        reason: 'transport-keepalive-grace',
+      expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
+      expect(reconnectSession).toHaveBeenCalledWith('session-1');
+      expect(runtimeDebug).toHaveBeenCalledWith('session.transport.explicit-resume', expect.objectContaining({
+        plan: 'reconnect',
         keepaliveGraceActive: true,
       }));
     } finally {

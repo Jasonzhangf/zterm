@@ -64,7 +64,7 @@ Negative:
 - Fresh `WebSocket.CONNECTING` session socket after the control intent has settled still waits and does not create a duplicate socket before the active wait budget expires.
 - Active tick, explicit resume, and active reentry all must not force-replace a pending or `CONNECTING` socket solely because a wait budget elapsed.
 - Stale reconnect bookkeeping must not be treated as socket failure. The only allowed rebuild reasons are physical close/error, target mismatch, explicit user reconnect/open, or missing/closed socket in an explicit open/resume path.
-- Foreground resume and active reentry must honor the client keepalive grace window: if the session had server activity or a connected baseline within `SESSION_TRANSPORT_KEEPALIVE_GRACE_MS` (120 seconds), missing/closed local transport truth is observed as `transport-keepalive-grace` and must not immediately call the reconnect owner. After the grace window expires, the same unavailable transport enters the existing reconnect/throttle path. Active tick / explicit input recovery must keep the existing immediate recovery path and is not blocked by this lifecycle grace.
+- Foreground resume and active reentry must reuse only real `OPEN` / `CONNECTING` transport truth. `SESSION_TRANSPORT_KEEPALIVE_GRACE_MS` is diagnostic context only; it must not convert missing/closed local transport truth into a fake reusable connection. Closed/missing socket still enters the unique reconnect owner. Active tick / explicit input recovery keeps the existing immediate recovery path.
 
 ## L1 Runtime Cases
 
@@ -83,8 +83,8 @@ Negative:
 - Force replacement is not a lifecycle/probe/input/foreground/online recovery API.
 - Given an `OPEN` socket with an expired head probe marker, `ensureActiveSessionFreshRuntime()` must request head again on the same socket and must not call `reconnectSession`.
 - Given closed/missing socket, it still schedules immediate reconnect.
-- Given closed/missing socket with recent server activity or connected baseline inside the keepalive grace window, it must skip immediate reconnect and emit `transport-keepalive-grace` debug metadata.
-- Given the same unavailable socket after the keepalive grace window expires, it must call the unique reconnect owner.
+- Given closed/missing socket with recent server activity or connected baseline inside the keepalive grace window, it must call the unique reconnect owner because no live socket can be reused.
+- Given the same unavailable socket after the keepalive grace window expires, it must call the same unique reconnect owner.
 - Given reconnect already in flight inside the grace window, it must keep the existing in-flight behavior and must not queue a duplicate reconnect.
 - Given manual close, it must skip reconnect.
 

@@ -22,6 +22,7 @@ import type { CopySelectionState } from './terminal-copy-selection';
 import { useTerminalPageCopyRuntime } from './useTerminalPageCopyRuntime';
 import { getBrowserStorage } from '../lib/browser-storage';
 import { mobileTheme } from '../lib/mobile-ui';
+import { isPrivateLanIpv4Host, parseEndpointHost } from '../lib/network-target';
 import { buildServerIdentityAliasMap, resolveServerIdentity, type ServerIdentityInput } from '../lib/server-identity';
 import { getRelayRtcEndpointCandidates } from '../lib/session-picker';
 import { buildSessionSemanticOwnerKey, buildSessionSemanticReuseKey } from '../lib/session-semantic-identity';
@@ -235,6 +236,116 @@ export const TerminalNetworkBanner = ReactMemo(function TerminalNetworkBanner({
       <div style={{ marginTop: '3px', fontSize: '12px', lineHeight: 1.35, color: 'rgba(255,255,255,0.9)' }}>
         {networkBanner.detail}
       </div>
+    </div>
+  );
+});
+
+const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatusStrip({
+  session,
+  getSessionDebugMetrics,
+  topInsetPx,
+}: {
+  session: Session | null;
+  getSessionDebugMetrics?: (sessionId: string) => SessionDebugOverlayMetrics | null;
+  topInsetPx: number;
+}) {
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    if (!session) {
+      return;
+    }
+    const timer = window.setInterval(() => {
+      setTick((value) => value + 1);
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [session]);
+
+  void tick;
+
+  if (!session) {
+    return null;
+  }
+
+  const metrics = getSessionDebugMetrics ? getSessionDebugMetrics(session.id) : null;
+  const uplinkBps = metrics?.uplinkBps || 0;
+  const downlinkBps = metrics?.downlinkBps || 0;
+  const totalBps = uplinkBps + downlinkBps;
+  const routeLabel = formatConnectionRouteLabel(session);
+  const status = resolveDebugStatus(session, metrics || undefined);
+  const statusTone = status === 'error' || status === 'closed'
+    ? '#ff8a8a'
+    : status === 'reconnecting' || status === 'connecting'
+      ? '#ffd27a'
+      : '#8ce6b5';
+
+  return (
+    <div
+      data-testid="terminal-connection-status-strip"
+      aria-label={`连接状态 ${routeLabel} 上行 ${formatDebugRate(uplinkBps)} 下行 ${formatDebugRate(downlinkBps)}`}
+      style={{
+        position: 'absolute',
+        top: `${Math.max(8, topInsetPx + 8)}px`,
+        left: '56px',
+        right: '84px',
+        zIndex: 15,
+        height: '34px',
+        minWidth: 0,
+        borderRadius: '12px',
+        border: '1px solid rgba(255,255,255,0.08)',
+        background: 'rgba(10, 16, 26, 0.58)',
+        color: '#dce8ff',
+        boxShadow: '0 8px 18px rgba(0,0,0,0.14)',
+        backdropFilter: 'blur(8px)',
+        display: 'flex',
+        alignItems: 'center',
+        gap: '7px',
+        padding: '0 9px',
+        overflow: 'hidden',
+        pointerEvents: 'none',
+        fontVariantNumeric: 'tabular-nums',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      <span
+        data-testid="terminal-connection-status-route"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '4px',
+          minWidth: 0,
+          color: statusTone,
+          fontSize: '11px',
+          fontWeight: 900,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+        }}
+      >
+        <span
+          aria-hidden="true"
+          style={{
+            width: '6px',
+            height: '6px',
+            borderRadius: '999px',
+            background: statusTone,
+            boxShadow: `0 0 10px ${statusTone}`,
+            flex: '0 0 auto',
+          }}
+        />
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{routeLabel}</span>
+      </span>
+      <span
+        data-testid="terminal-connection-status-bandwidth"
+        style={{ color: 'rgba(220,232,255,0.92)', fontSize: '10px', fontWeight: 800 }}
+      >
+        带宽 {formatDebugRate(totalBps)}
+      </span>
+      <span
+        data-testid="terminal-connection-status-rates"
+        style={{ color: 'rgba(220,232,255,0.74)', fontSize: '10px', fontWeight: 750 }}
+      >
+        ↑ {formatDebugRate(uplinkBps)} ↓ {formatDebugRate(downlinkBps)}
+      </span>
     </div>
   );
 });
@@ -937,6 +1048,25 @@ function formatDebugBytes(bytes: number) {
     return `${(safeValue / 1024).toFixed(1)} KB`;
   }
   return `${Math.round(safeValue)} B`;
+}
+
+function formatConnectionRouteLabel(session: Session) {
+  switch (session.resolvedPath) {
+    case 'rtc-direct':
+      return 'UDP';
+    case 'tailscale':
+      return 'Tailscale';
+    case 'ipv6':
+      return 'IPv6';
+    case 'ipv4': {
+      const endpointHost = parseEndpointHost(session.resolvedEndpoint || session.bridgeHost);
+      return isPrivateLanIpv4Host(endpointHost) ? '局域网' : 'IPv4';
+    }
+    case 'rtc-relay':
+      return session.resolvedRelayTransport === 'turn' ? 'Relay/TURN' : 'Relay';
+    default:
+      return session.state === 'connected' ? '连接中' : '未连接';
+  }
 }
 
 function formatDebugHz(value: number) {
@@ -3298,6 +3428,11 @@ function TerminalPageComponent({
       >
         {portraitSessionDrawerEnabled ? (
           <>
+            <TerminalConnectionStatusStrip
+              session={uiSession}
+              getSessionDebugMetrics={getSessionDebugMetrics}
+              topInsetPx={headerTopInsetPx}
+            />
             <button
               type="button"
               aria-label="返回连接列表"

@@ -1536,7 +1536,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     expect(readSentMessages(ws).some((item) => item.type === 'buffer-sync-request')).toBe(false);
   });
 
-  it('keeps a recently alive closed websocket through a short session switch grace window', async () => {
+  it('reconnects a recently alive closed websocket on session switch because the old socket cannot be reused', async () => {
     const nowSpy = vi.spyOn(Date, 'now');
     let now = new Date('2026-07-18T00:00:00.000Z').getTime();
     nowSpy.mockImplementation(() => now);
@@ -1569,8 +1569,8 @@ describe('SessionContext websocket dynamic refresh', () => {
       fireEvent.click(screen.getByText('switch-second'));
 
       await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
-      expect(MockWebSocket.instances).toHaveLength(2);
-      expect(screen.getByTestId('session-2-state').textContent).toBe('connected');
+      await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('reconnecting'));
+      await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(3));
     } finally {
       nowSpy.mockRestore();
     }

@@ -24,7 +24,7 @@ export interface ActiveSessionRefreshPlanOptions {
 }
 
 export type ActiveSessionRefreshPlan =
-  | { action: 'skip'; reason: 'inactive-or-missing-session' | 'tick-blocked-by-reconnect' | 'transport-unavailable' | 'transport-open-pending' | 'closed-session-requires-explicit-open' | 'transport-keepalive-grace' }
+  | { action: 'skip'; reason: 'inactive-or-missing-session' | 'tick-blocked-by-reconnect' | 'transport-unavailable' | 'transport-open-pending' | 'closed-session-requires-explicit-open' }
   | { action: 'request-head'; resetPullBookkeeping: boolean }
   | { action: 'reconnect' };
 
@@ -505,18 +505,6 @@ export function buildActiveSessionRefreshPlan(options: ActiveSessionRefreshPlanO
 
   if (options.wsReadyState === WebSocket.CONNECTING && options.source !== 'active-tick') {
     return { action: 'skip', reason: 'transport-open-pending' };
-  }
-
-  if (
-    options.keepaliveGraceActive
-    && !options.reconnectInFlight
-    && (
-      options.wsReadyState === null
-      || options.wsReadyState === WebSocket.CLOSING
-      || options.wsReadyState === WebSocket.CLOSED
-    )
-  ) {
-    return { action: 'skip', reason: 'transport-keepalive-grace' };
   }
 
   if (shouldReconnectActivatedSession({
