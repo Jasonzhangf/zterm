@@ -78,7 +78,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - Remote-window picker 默认只直接列 app-window；iTerm2 panes 必须折叠到一个可展开组里，避免和普通 app 窗口混在一个长列表。daemon catalog 仍返回完整 targets，折叠只是 Android overlay projection。
 - Remote-window input context 只允许发布给已验证支持的 app-window `bring-to-focus + os-event` target。当前 `tmux-input` / `iterm2-api` iTerm pane 路线必须显示只读并禁止发送 pointer/key/scroll/QuickBar input；不要把 daemon 会拒绝的路线伪装成可操作。
 - Remote-window floating resize 必须是 Android overlay projection：至少覆盖左下角和右下角拖拽，按 selected source aspect ratio 等比缩放，右下角扩缩时保持左边稳定并移动右边，左下角扩缩时保持右边稳定，并且放大时要 cap 到 toolbar 仍在 viewport 顶部安全边界内。测试不能只证明“有一个 handle”。
-- Remote-window fullscreen + IME pan 必须覆盖 source aspect 正好填满 video surface 的场景：`bottomInsetPx` 既提供额外本地 pan 范围，又在上移时等量减少 fullscreen bottom padding；`bottomChromeInsetPx` 是键盘打开时的自动初始上抬量，用来让 QuickBar chrome 不遮住有效画面，用户手动 pan 后不得被自动逻辑抢回；不得通过改 terminal renderer、daemon capture 或远端 scroll 补偿。
+- Remote-window unzoomed fullscreen / floating 的单指触控默认属于远端输入：点击发 pointer，拖动发连续 pixel scroll，即使 `bottomInsetPx` 存在也不得被本地容器 pan 抢走。`bottomChromeInsetPx` 只负责键盘打开时的自动初始上抬，`scale > 1` 后单指拖动才属于本地 zoom pan；不得通过改 terminal renderer、daemon capture 或隐藏本地 pan 补偿远端输入。
 - 相关改动最小 gate：`RemoteWindowOverlay.test.tsx`、`TerminalPage.remote-window-overlay.test.tsx`、`session-context-remote-window-runtime.test.ts`、`session-context-transfer-runtime.test.ts`、`terminal-file-transfer-binary-runtime.test.ts`、`remote-window-stream-daemon.test.ts`、`terminal-message-runtime.test.ts`、`remote-window-video-quality.test.ts`、`tsc --noEmit`、`test:feature-registry`。daemon 可用时追加 live WS 显式错误/成功 smoke。
 
 ### 2.3 旧文档处理

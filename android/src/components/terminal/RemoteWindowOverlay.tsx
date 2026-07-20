@@ -1514,6 +1514,23 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     }
   }, [emitRemoteWindowInput, resolvePointerInputEvent]);
 
+  const emitTouchScrollInput = useCallback((
+    fromClientX: number,
+    fromClientY: number,
+    toClientX: number,
+    toClientY: number,
+  ) => {
+    const scrollPayload = resolveScrollInputEvent(
+      toClientX,
+      toClientY,
+      fromClientX - toClientX,
+      fromClientY - toClientY,
+    );
+    if (scrollPayload) {
+      emitRemoteWindowInput(scrollPayload);
+    }
+  }, [emitRemoteWindowInput, resolveScrollInputEvent]);
+
   const handleVideoSurfacePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (state.phase !== 'targetLocked') {
       return;
@@ -1553,7 +1570,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
 
     if (
       state.mode === 'fullscreen'
-      && (fullscreenViewportRef.current.scale > 1.01 || bottomInsetPx > 0)
+      && fullscreenViewportRef.current.scale > 1.01
     ) {
       surfaceGestureRef.current = {
         mode: 'pan',
@@ -1590,7 +1607,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     emitPointerInput(event, 'down');
     event.preventDefault();
     event.stopPropagation();
-  }, [bottomInsetPx, emitPointerInput, publishRemoteWindowInputContext, state]);
+  }, [emitPointerInput, publishRemoteWindowInputContext, state]);
 
   const handleVideoSurfacePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (state.phase !== 'targetLocked') {
@@ -1659,12 +1676,24 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         lastClientX: event.clientX,
         lastClientY: event.clientY,
       };
+      emitTouchScrollInput(
+        gesture.startClientX,
+        gesture.startClientY,
+        event.clientX,
+        event.clientY,
+      );
       event.preventDefault();
       event.stopPropagation();
       return;
     }
 
     if (gesture.mode === 'scroll' && gesture.pointerId === event.pointerId) {
+      emitTouchScrollInput(
+        gesture.lastClientX,
+        gesture.lastClientY,
+        event.clientX,
+        event.clientY,
+      );
       surfaceGestureRef.current = {
         ...gesture,
         lastClientX: event.clientX,
@@ -1680,7 +1709,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       event.preventDefault();
       event.stopPropagation();
     }
-  }, [emitPointerInput, emitRemoteWindowInput, resolveScrollInputEvent, setFullscreenViewport, state]);
+  }, [emitPointerInput, emitTouchScrollInput, setFullscreenViewport, state]);
 
   const handleVideoSurfacePointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const gesture = surfaceGestureRef.current;
@@ -1718,14 +1747,16 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     if (gesture.mode === 'scroll' && gesture.pointerId === event.pointerId) {
       const finalClientX = Number.isFinite(event.clientX) ? event.clientX : gesture.lastClientX;
       const finalClientY = Number.isFinite(event.clientY) ? event.clientY : gesture.lastClientY;
-      const scrollPayload = resolveScrollInputEvent(
-        gesture.startClientX,
-        gesture.startClientY,
-        gesture.startClientX - finalClientX,
-        gesture.startClientY - finalClientY,
-      );
-      if (scrollPayload) {
-        emitRemoteWindowInput(scrollPayload);
+      if (
+        finalClientX !== gesture.lastClientX
+        || finalClientY !== gesture.lastClientY
+      ) {
+        emitTouchScrollInput(
+          gesture.lastClientX,
+          gesture.lastClientY,
+          finalClientX,
+          finalClientY,
+        );
       }
       surfaceGestureRef.current = null;
       event.preventDefault();
@@ -1738,7 +1769,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         remaining
         && state.phase === 'targetLocked'
         && state.mode === 'fullscreen'
-        && (fullscreenViewportRef.current.scale > 1.01 || bottomInsetPx > 0)
+        && fullscreenViewportRef.current.scale > 1.01
       ) {
         surfaceGestureRef.current = {
           mode: 'pan',
@@ -1747,7 +1778,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           startClientY: remaining[1].clientY,
           startPanX: fullscreenViewportRef.current.panX,
           startPanY: fullscreenViewportRef.current.panY,
-          moved: false,
+          moved: true,
         };
       } else {
         surfaceGestureRef.current = null;
@@ -1755,7 +1786,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       event.preventDefault();
       event.stopPropagation();
     }
-  }, [bottomInsetPx, emitPointerInput, state]);
+  }, [emitPointerInput, emitTouchScrollInput, state]);
 
   const handleVideoSurfacePointerCancel = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const gesture = surfaceGestureRef.current;
@@ -2505,7 +2536,7 @@ const styles: Record<string, CSSProperties> = {
     width: '100%',
     height: '100%',
     display: 'block',
-    objectFit: 'fill',
+    objectFit: 'contain',
     background: 'transparent',
     pointerEvents: 'none',
     position: 'relative',

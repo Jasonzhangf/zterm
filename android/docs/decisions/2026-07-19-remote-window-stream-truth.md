@@ -17,7 +17,7 @@ Remote window stream starts from the Android floating entry. The old floating qu
 7. Android system Back in fullscreen shrinks back to floating mode.
 8. The fullscreen top-right minimize button also shrinks back to floating mode.
 9. Fullscreen preserves source aspect ratio. The default display mode is aspect-fit complete display; an explicit display-mode control can switch to aspect-fill cover so the app fills the current portrait or landscape phone surface without stretching. Pinch zoom scales the video, zoomed fullscreen allows one-finger pan, and the top-right minimap projects the current viewport.
-10. Opening the Android IME lifts the target-locked floating preview by the same bottom inset as the QuickBar so the preview remains visible above the keyboard. In fullscreen, the same bottom inset is consumed as overlay padding and keyboard-open single-finger drag moves the local letterboxed projection rather than changing the page shell layout.
+10. Opening the Android IME lifts the target-locked floating preview by the same bottom inset as the QuickBar so the preview remains visible above the keyboard. In fullscreen, the same bottom inset is consumed as overlay padding and `bottomChromeInsetPx` may auto-lift the projection, but unzoomed single-finger touch still belongs to the remote app: tap sends pointer and drag sends continuous pixel scroll. Local single-finger pan is reserved for zoomed fullscreen projection.
 11. On an unzoomed video surface, a single-finger drag emits remote pixel scroll input. In zoomed fullscreen mode, the same gesture remains local pan.
 12. The close button tears down the stream.
 
