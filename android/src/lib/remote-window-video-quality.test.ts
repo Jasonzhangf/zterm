@@ -4,6 +4,7 @@ import {
   REMOTE_WINDOW_VIDEO_BITRATE_STORAGE_KEY,
   buildRemoteWindowVideoBitrateConfig,
   readRemoteWindowVideoBitratePreset,
+  resolveAdaptiveRemoteWindowVideoBitratePreset,
   resolveEffectiveRemoteWindowVideoBitratePreset,
   resolveDefaultRemoteWindowVideoBitratePreset,
   resolveRemoteWindowVideoResolutionKey,
@@ -56,6 +57,11 @@ describe('remote-window-video-quality', () => {
       preset: 'fullscreen',
       bitrateMbps: 20,
       maxBitrateBps: 20_000_000,
+      maxFrameRateFps: 12,
+    });
+    expect(buildRemoteWindowVideoBitrateConfig('2mbps')).toMatchObject({
+      maxBitrateBps: 2_000_000,
+      maxFrameRateFps: 5,
     });
   });
 
@@ -105,6 +111,29 @@ describe('remote-window-video-quality', () => {
     expect(resolveEffectiveRemoteWindowVideoBitratePreset('fullscreen', {
       mode: 'fullscreen',
       fullscreenScale: 1.4,
+    })).toBe('fullscreen');
+  });
+
+  it('caps selected quality by network grade without upgrading a lower user preset', () => {
+    expect(resolveAdaptiveRemoteWindowVideoBitratePreset('fullscreen', {
+      effectiveType: '4g',
+      downlinkMbps: 1.4,
+      rttMs: 120,
+    })).toBe('5mbps');
+    expect(resolveAdaptiveRemoteWindowVideoBitratePreset('20mbps', {
+      effectiveType: '4g',
+      downlinkMbps: 0.5,
+      rttMs: 900,
+    })).toBe('2mbps');
+    expect(resolveAdaptiveRemoteWindowVideoBitratePreset('2mbps', {
+      effectiveType: '4g',
+      downlinkMbps: 20,
+      rttMs: 30,
+    })).toBe('2mbps');
+    expect(resolveAdaptiveRemoteWindowVideoBitratePreset('fullscreen', {
+      effectiveType: '4g',
+      downlinkMbps: 20,
+      rttMs: 30,
     })).toBe('fullscreen');
   });
 });

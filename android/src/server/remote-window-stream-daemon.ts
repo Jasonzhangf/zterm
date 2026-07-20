@@ -1469,29 +1469,35 @@ function normalizeRemoteWindowVideoBitrateConfig(
   if (!input) {
     return null;
   }
-  const bitrateMbps = (() => {
+  const defaults = (() => {
     switch (input.preset) {
       case '2mbps':
-        return 2 as const;
+        return { bitrateMbps: 2 as const, maxFrameRateFps: 5 as const };
       case '5mbps':
-        return 5 as const;
+        return { bitrateMbps: 5 as const, maxFrameRateFps: 8 as const };
       case '10mbps':
-        return 10 as const;
+        return { bitrateMbps: 10 as const, maxFrameRateFps: 12 as const };
       case '20mbps':
       case 'fullscreen':
-        return 20 as const;
+        return { bitrateMbps: 20 as const, maxFrameRateFps: 12 as const };
       default:
         throw new Error(`remote window video bitrate preset is invalid: ${String(input.preset)}`);
     }
   })();
+  const bitrateMbps = defaults.bitrateMbps;
   const maxBitrateBps = bitrateMbps * 1_000_000;
   if (input.bitrateMbps !== bitrateMbps || input.maxBitrateBps !== maxBitrateBps) {
     throw new Error('remote window video bitrate config does not match its preset');
+  }
+  const maxFrameRateFps = input.maxFrameRateFps ?? defaults.maxFrameRateFps;
+  if (maxFrameRateFps !== defaults.maxFrameRateFps) {
+    throw new Error('remote window video frame-rate config does not match its preset');
   }
   return {
     preset: input.preset,
     bitrateMbps,
     maxBitrateBps,
+    maxFrameRateFps,
   };
 }
 
@@ -1528,6 +1534,7 @@ async function applyRemoteWindowVideoBitrate(
     encodings: currentEncodings.map((encoding) => ({
       ...encoding,
       maxBitrate: config.maxBitrateBps,
+      maxFramerate: config.maxFrameRateFps,
     })),
   } as RTCRtpSendParameters;
   await sender.setParameters(nextParameters);

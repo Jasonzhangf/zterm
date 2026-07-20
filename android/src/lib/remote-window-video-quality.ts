@@ -14,6 +14,13 @@ export const REMOTE_WINDOW_VIDEO_BITRATE_PRESETS: RemoteWindowVideoBitratePreset
   'fullscreen',
 ];
 
+export interface RemoteWindowNetworkQualityInput {
+  effectiveType?: string | null;
+  downlinkMbps?: number | null;
+  rttMs?: number | null;
+  saveData?: boolean | null;
+}
+
 type RemoteWindowVideoBitrateStorage = {
   version: 1;
   byTarget: Record<string, RemoteWindowVideoBitratePreset>;
@@ -114,10 +121,16 @@ export function buildRemoteWindowVideoBitrateConfig(
       : preset === '10mbps'
         ? 10
         : 20;
+  const maxFrameRateFps = preset === '2mbps'
+    ? 5
+    : preset === '5mbps'
+      ? 8
+      : 12;
   return {
     preset,
     bitrateMbps,
     maxBitrateBps: bitrateMbps * 1_000_000,
+    maxFrameRateFps,
   };
 }
 
@@ -128,6 +141,75 @@ export function resolveEffectiveRemoteWindowVideoBitratePreset(
   if (projection.mode === 'floating') {
     return '2mbps';
   }
+  return selectedPreset;
+}
+
+function bitrateRank(preset: RemoteWindowVideoBitratePreset) {
+  switch (preset) {
+    case '2mbps':
+      return 0;
+    case '5mbps':
+      return 1;
+    case '10mbps':
+      return 2;
+    case '20mbps':
+      return 3;
+    case 'fullscreen':
+      return 4;
+    default:
+      return 0;
+  }
+}
+
+function minBitratePreset(
+  selectedPreset: RemoteWindowVideoBitratePreset,
+  capPreset: RemoteWindowVideoBitratePreset,
+) {
+  return bitrateRank(selectedPreset) <= bitrateRank(capPreset)
+    ? selectedPreset
+    : capPreset;
+}
+
+export function resolveAdaptiveRemoteWindowVideoBitratePreset(
+  selectedPreset: RemoteWindowVideoBitratePreset,
+  network: RemoteWindowNetworkQualityInput | null | undefined,
+): RemoteWindowVideoBitratePreset {
+  if (!network) {
+    return selectedPreset;
+  }
+  const effectiveType = `${network.effectiveType || ''}`.toLowerCase();
+  const downlinkMbps = typeof network.downlinkMbps === 'number' && Number.isFinite(network.downlinkMbps)
+    ? network.downlinkMbps
+    : null;
+  const rttMs = typeof network.rttMs === 'number' && Number.isFinite(network.rttMs)
+    ? network.rttMs
+    : null;
+
+  if (
+    network.saveData
+    || effectiveType === 'slow-2g'
+    || effectiveType === '2g'
+    || (downlinkMbps !== null && downlinkMbps < 0.8)
+    || (rttMs !== null && rttMs >= 800)
+  ) {
+    return minBitratePreset(selectedPreset, '2mbps');
+  }
+
+  if (
+    effectiveType === '3g'
+    || (downlinkMbps !== null && downlinkMbps < 2)
+    || (rttMs !== null && rttMs >= 500)
+  ) {
+    return minBitratePreset(selectedPreset, '5mbps');
+  }
+
+  if (
+    (downlinkMbps !== null && downlinkMbps < 5)
+    || (rttMs !== null && rttMs >= 250)
+  ) {
+    return minBitratePreset(selectedPreset, '10mbps');
+  }
+
   return selectedPreset;
 }
 

@@ -83,6 +83,16 @@ interface RemoteWindowReceiverRuntimeLike {
   stopStream: (streamId: string) => boolean;
 }
 
+export const REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 60_000;
+
+export interface RemoteWindowTargetCatalogCacheEntry {
+  cacheKey: string;
+  updatedAt: number;
+  payload: RemoteWindowStreamTargetsResponsePayload;
+}
+
+export type RemoteWindowTargetCatalogCacheStore = Map<string, RemoteWindowTargetCatalogCacheEntry>;
+
 function formatSocketReadyState(ws: BridgeTransportSocket | null) {
   if (!ws) {
     return 'missing';
@@ -99,6 +109,23 @@ function formatSocketReadyState(ws: BridgeTransportSocket | null) {
     default:
       return `unknown:${ws.readyState}`;
   }
+}
+
+function buildRemoteWindowTargetCatalogCacheKey(session: Session) {
+  return [
+    session.daemonHostId || '',
+    session.bridgeHost || '',
+    session.bridgePort || 0,
+    session.authToken || '',
+  ].join('|');
+}
+
+function cloneRemoteWindowTargetsPayload(payload: RemoteWindowStreamTargetsResponsePayload): RemoteWindowStreamTargetsResponsePayload {
+  return {
+    requestId: payload.requestId,
+    targets: [...payload.targets],
+    ...(payload.errors ? { errors: [...payload.errors] } : {}),
+  };
 }
 
 function resolveRemoteWindowTransport(options: {
@@ -200,21 +227,41 @@ export async function requestRemoteWindowTargetsRuntime(options: {
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   remoteWindowMessageRuntime: RemoteWindowCatalogMessageRuntimeLike;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+  targetCatalogCache?: RemoteWindowTargetCatalogCacheStore;
+  cacheTtlMs?: number;
+  now?: () => number;
 }) {
   const targetSessionId = options.sessionId.trim();
   if (!targetSessionId) {
     throw new Error('No target session for remote window catalog');
   }
 
+  const session = options.sessions.find((item) => item.id === targetSessionId) || null;
+  if (!session) {
+    throw new Error('Remote window catalog session no longer exists');
+  }
   const ws = resolveRemoteWindowCatalogTransport({
     sessionId: targetSessionId,
     sessions: options.sessions,
     readSessionTransportSocket: options.readSessionTransportSocket,
   });
-  return options.remoteWindowMessageRuntime.requestTargets(targetSessionId, {
+  const cacheKey = buildRemoteWindowTargetCatalogCacheKey(session);
+  const now = options.now?.() ?? Date.now();
+  const cacheTtlMs = Math.max(0, Math.floor(options.cacheTtlMs ?? REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS));
+  const cached = options.targetCatalogCache?.get(cacheKey) || null;
+  if (cached && now - cached.updatedAt >= 0 && now - cached.updatedAt < cacheTtlMs) {
+    return cloneRemoteWindowTargetsPayload(cached.payload);
+  }
+  const payload = await options.remoteWindowMessageRuntime.requestTargets(targetSessionId, {
     ws,
     sendSocketPayload: options.sendSocketPayload,
   });
+  options.targetCatalogCache?.set(cacheKey, {
+    cacheKey,
+    updatedAt: now,
+    payload: cloneRemoteWindowTargetsPayload(payload),
+  });
+  return payload;
 }
 
 export async function requestRemoteWindowStreamStartRuntime(options: {

@@ -200,6 +200,7 @@
         "src/lib/remote-window-receiver-runtime.test.ts",
         "src/lib/remote-window-video-quality.ts",
         "src/lib/remote-window-video-quality.test.ts",
+        "src/contexts/session-context-provider-runtime.ts",
         "src/contexts/SessionContext.tsx",
         "src/contexts/session-context-core.ts",
         "src/contexts/session-context-interaction-runtime.ts",

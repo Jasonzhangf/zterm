@@ -81,6 +81,7 @@ export function useSessionProviderRuntime(options: {
   const pendingSessionTransportOpenIntentsRef = useRef<Map<string, PendingSessionTransportOpenIntent>>(new Map());
   const activeBodySubscriptionSuppressedRef = useRef(false);
   const remoteScreenshotRuntimeRef = useRef(createRemoteScreenshotRuntime());
+  const remoteWindowTargetCatalogCacheRef = useRef(new Map());
   const remoteWindowReceiverRuntimeRef = useRef(createRemoteWindowReceiverRuntime());
   const remoteWindowMessageRuntimeRef = useRef(createRemoteWindowMessageRuntime({
     onStreamIceCandidate: (payload) => remoteWindowReceiverRuntimeRef.current.addIceCandidate(payload),
@@ -146,6 +147,7 @@ export function useSessionProviderRuntime(options: {
       pendingSessionTransportOpenIntentsRef,
       activeBodySubscriptionSuppressedRef,
       remoteScreenshotRuntimeRef,
+      remoteWindowTargetCatalogCacheRef,
       remoteWindowMessageRuntimeRef,
       remoteWindowReceiverRuntimeRef,
       fileTransferMessageRuntimeRef,

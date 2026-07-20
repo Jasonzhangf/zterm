@@ -60,6 +60,7 @@ describe('RemoteWindowOverlay', () => {
     cleanup();
     backListeners.splice(0, backListeners.length);
     window.localStorage.clear();
+    Reflect.deleteProperty(navigator, 'connection');
     vi.useRealTimers();
   });
 
@@ -121,6 +122,7 @@ describe('RemoteWindowOverlay', () => {
     const overlay = screen.getByTestId('remote-window-locked-overlay');
     expect(overlay.getAttribute('data-mode')).toBe('floating');
     expect(screen.getByText('等待视频流')).toBeTruthy();
+    expect(screen.getByTestId('remote-window-video-wallpaper').textContent).toContain('ZTERM');
 
     fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
     await waitFor(() => {
@@ -169,7 +171,7 @@ describe('RemoteWindowOverlay', () => {
       expect(startStream).toHaveBeenCalledWith('session-1', expect.objectContaining({
         streamTargetId: 'pane-1',
       }), expect.stringMatching(/^rw-stream-/), {
-        videoBitrate: { preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000 },
+        videoBitrate: { preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000, maxFrameRateFps: 5 },
       });
     });
     await waitFor(() => {
@@ -184,6 +186,83 @@ describe('RemoteWindowOverlay', () => {
       expect(stopStream).toHaveBeenCalledWith('session-1', expect.stringMatching(/^rw-stream-/));
       expect(screen.queryByTestId('remote-window-video')).toBeNull();
     });
+  });
+
+  it('keeps the ZTERM engraved wallpaper behind an unplayed receiver video', async () => {
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+    }));
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        requestTargets={requestTargets}
+        startStream={startStream}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
+    await screen.findByTestId('remote-window-video');
+
+    expect(screen.getByTestId('remote-window-video-wallpaper').textContent).toContain('ZTERM');
+  });
+
+  it('caps fullscreen quality to low bitrate and 5fps when network information reports poor connectivity', async () => {
+    Object.defineProperty(navigator, 'connection', {
+      configurable: true,
+      value: {
+        effectiveType: '2g',
+        downlink: 0.4,
+        rtt: 900,
+        saveData: false,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    });
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+    }));
+    const updateStreamQuality = vi.fn();
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        requestTargets={requestTargets}
+        startStream={startStream}
+        updateStreamQuality={updateStreamQuality}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
+    await screen.findByTestId('remote-window-video');
+    expect(startStream).toHaveBeenCalledWith('session-1', expect.objectContaining({
+      streamTargetId: 'app-1',
+    }), expect.stringMatching(/^rw-stream-/), {
+      videoBitrate: {
+        preset: '2mbps',
+        bitrateMbps: 2,
+        maxBitrateBps: 2_000_000,
+        maxFrameRateFps: 5,
+      },
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
+    expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
+    expect(updateStreamQuality).not.toHaveBeenCalled();
   });
 
   it('remembers a high bitrate selection without raising the floating preview bitrate', async () => {
@@ -258,7 +337,7 @@ describe('RemoteWindowOverlay', () => {
     expect(startStream).toHaveBeenCalledWith('session-1', expect.objectContaining({
       streamTargetId: 'app-1',
     }), expect.stringMatching(/^rw-stream-/), {
-      videoBitrate: { preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000 },
+      videoBitrate: { preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000, maxFrameRateFps: 5 },
     });
 
     fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
@@ -272,6 +351,7 @@ describe('RemoteWindowOverlay', () => {
           preset: 'fullscreen',
           bitrateMbps: 20,
           maxBitrateBps: 20_000_000,
+          maxFrameRateFps: 12,
         },
       });
     });

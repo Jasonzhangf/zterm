@@ -103,6 +103,137 @@ describe('session context remote window runtime', () => {
     expect(requestTargets).toHaveBeenCalledTimes(1);
   });
 
+  it('reuses a fresh remote-window target catalog cache without re-enumerating daemon targets', async () => {
+    const ws = makeSocket();
+    const targetCatalogCache = new Map();
+    let now = 10_000;
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-live',
+      targets: [makeTarget()],
+      errors: [],
+    }));
+    const sendSocketPayload = vi.fn();
+
+    await expect(requestRemoteWindowTargetsRuntime({
+      sessionId: 'session-1',
+      sessions: [{ ...baseSession, bridgeHost: '100.66.1.82', bridgePort: 3333 }],
+      readSessionTransportSocket: () => ws,
+      remoteWindowMessageRuntime: { requestTargets },
+      sendSocketPayload,
+      targetCatalogCache,
+      now: () => now,
+    })).resolves.toMatchObject({ requestId: 'rw-live', targets: [expect.objectContaining({ streamTargetId: 'pane-1' })] });
+
+    now += 1000;
+    await expect(requestRemoteWindowTargetsRuntime({
+      sessionId: 'session-1',
+      sessions: [{ ...baseSession, bridgeHost: '100.66.1.82', bridgePort: 3333 }],
+      readSessionTransportSocket: () => ws,
+      remoteWindowMessageRuntime: { requestTargets },
+      sendSocketPayload,
+      targetCatalogCache,
+      now: () => now,
+    })).resolves.toMatchObject({ requestId: 'rw-live', targets: [expect.objectContaining({ streamTargetId: 'pane-1' })] });
+
+    expect(requestTargets).toHaveBeenCalledTimes(1);
+  });
+
+  it('shares the daemon app catalog cache across session switches on the same daemon', async () => {
+    const ws = makeSocket();
+    const targetCatalogCache = new Map();
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-daemon-wide',
+      targets: [makeTarget()],
+      errors: [],
+    }));
+    const daemon = {
+      daemonHostId: 'mac-studio',
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+    };
+
+    await requestRemoteWindowTargetsRuntime({
+      sessionId: 'session-1',
+      sessions: [{ ...baseSession, ...daemon }],
+      readSessionTransportSocket: () => ws,
+      remoteWindowMessageRuntime: { requestTargets },
+      sendSocketPayload: vi.fn(),
+      targetCatalogCache,
+      now: () => 30_000,
+    });
+
+    await expect(requestRemoteWindowTargetsRuntime({
+      sessionId: 'session-2',
+      sessions: [{ ...baseSession, id: 'session-2', ...daemon }],
+      readSessionTransportSocket: () => ws,
+      remoteWindowMessageRuntime: { requestTargets },
+      sendSocketPayload: vi.fn(),
+      targetCatalogCache,
+      now: () => 30_001,
+    })).resolves.toMatchObject({ requestId: 'rw-daemon-wide' });
+
+    expect(requestTargets).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes remote-window targets after the catalog cache ttl expires', async () => {
+    const ws = makeSocket();
+    const targetCatalogCache = new Map();
+    let now = 20_000;
+    const requestTargets = vi.fn()
+      .mockResolvedValueOnce({ requestId: 'rw-first', targets: [], errors: [] })
+      .mockResolvedValueOnce({ requestId: 'rw-second', targets: [makeTarget()], errors: [] });
+
+    await requestRemoteWindowTargetsRuntime({
+      sessionId: 'session-1',
+      sessions: [{ ...baseSession, bridgeHost: '100.66.1.82', bridgePort: 3333 }],
+      readSessionTransportSocket: () => ws,
+      remoteWindowMessageRuntime: { requestTargets },
+      sendSocketPayload: vi.fn(),
+      targetCatalogCache,
+      cacheTtlMs: 500,
+      now: () => now,
+    });
+    now += 501;
+
+    await expect(requestRemoteWindowTargetsRuntime({
+      sessionId: 'session-1',
+      sessions: [{ ...baseSession, bridgeHost: '100.66.1.82', bridgePort: 3333 }],
+      readSessionTransportSocket: () => ws,
+      remoteWindowMessageRuntime: { requestTargets },
+      sendSocketPayload: vi.fn(),
+      targetCatalogCache,
+      cacheTtlMs: 500,
+      now: () => now,
+    })).resolves.toMatchObject({ requestId: 'rw-second' });
+
+    expect(requestTargets).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not use target catalog cache to hide a closed transport', async () => {
+    const targetCatalogCache = new Map();
+    await requestRemoteWindowTargetsRuntime({
+      sessionId: 'session-1',
+      sessions: [{ ...baseSession, bridgeHost: '100.66.1.82', bridgePort: 3333 }],
+      readSessionTransportSocket: () => makeSocket(),
+      remoteWindowMessageRuntime: {
+        requestTargets: vi.fn(async () => ({ requestId: 'rw-cached', targets: [makeTarget()], errors: [] })),
+      },
+      sendSocketPayload: vi.fn(),
+      targetCatalogCache,
+      now: () => 1,
+    });
+
+    await expect(requestRemoteWindowTargetsRuntime({
+      sessionId: 'session-1',
+      sessions: [{ ...baseSession, state: 'connecting', bridgeHost: '100.66.1.82', bridgePort: 3333 }],
+      readSessionTransportSocket: () => ({ ...makeSocket(), readyState: WebSocket.CLOSED }),
+      remoteWindowMessageRuntime: { requestTargets: vi.fn() },
+      sendSocketPayload: vi.fn(),
+      targetCatalogCache,
+      now: () => 2,
+    })).rejects.toThrow('Remote window catalog transport is not open (session=connecting, socket=closed)');
+  });
+
   it('rejects a missing session id before touching transport state', async () => {
     const readSessionTransportSocket = vi.fn();
     const requestTargets = vi.fn();

@@ -6,6 +6,7 @@ import {
   sendInputRuntime,
 } from './session-context-transfer-runtime';
 import {
+  type RemoteWindowTargetCatalogCacheStore,
   requestRemoteWindowStreamStartRuntime,
   requestRemoteWindowTargetsRuntime,
   sendRemoteWindowInputRuntime,
@@ -71,6 +72,7 @@ export function createSessionInteractionRuntime(options: {
   refs: {
     stateRef: StateRefLike;
     remoteScreenshotRuntimeRef: { current: RemoteScreenshotRuntimeLike };
+    remoteWindowTargetCatalogCacheRef?: { current: RemoteWindowTargetCatalogCacheStore };
     remoteWindowMessageRuntimeRef: { current: RemoteWindowMessageRuntimeLike };
     remoteWindowReceiverRuntimeRef: { current: RemoteWindowReceiverRuntimeLike };
   };
@@ -162,6 +164,7 @@ export function createSessionInteractionRuntime(options: {
       readSessionTransportSocket: options.readSessionTransportSocket,
       remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
       sendSocketPayload: options.sendSocketPayload,
+      targetCatalogCache: options.refs.remoteWindowTargetCatalogCacheRef?.current,
     });
   };
 

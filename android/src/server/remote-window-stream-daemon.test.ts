@@ -786,7 +786,7 @@ describe('remote window stream daemon owner', () => {
 
     expect('answer' in started ? started.capture.maxBitrateBps : null).toBe(5_000_000);
     expect(fakeSender.setParameters).toHaveBeenCalledWith(expect.objectContaining({
-      encodings: [expect.objectContaining({ maxBitrate: 5_000_000 })],
+      encodings: [expect.objectContaining({ maxBitrate: 5_000_000, maxFramerate: 8 })],
     }));
 
     const updated = await runtime.updateStreamQuality({
@@ -801,10 +801,10 @@ describe('remote window stream daemon owner', () => {
       streamId: 'stream-bitrate',
       targetId: 'iterm2-pane:window-1:tab-1:left',
       accepted: true,
-      videoBitrate: { preset: 'fullscreen', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
+      videoBitrate: { preset: 'fullscreen', bitrateMbps: 20, maxBitrateBps: 20_000_000, maxFrameRateFps: 12 },
     });
     expect(fakeSender.setParameters).toHaveBeenLastCalledWith(expect.objectContaining({
-      encodings: [expect.objectContaining({ maxBitrate: 20_000_000 })],
+      encodings: [expect.objectContaining({ maxBitrate: 20_000_000, maxFramerate: 12 })],
     }));
   });
 

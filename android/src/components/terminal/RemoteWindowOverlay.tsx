@@ -42,8 +42,10 @@ import {
   buildRemoteWindowVideoBitrateConfig,
   getRemoteWindowSourceRect,
   readRemoteWindowVideoBitratePreset,
+  resolveAdaptiveRemoteWindowVideoBitratePreset,
   resolveEffectiveRemoteWindowVideoBitratePreset,
   writeRemoteWindowVideoBitratePreset,
+  type RemoteWindowNetworkQualityInput,
 } from '../../lib/remote-window-video-quality';
 
 interface RemoteWindowOverlayProps {
@@ -111,6 +113,13 @@ interface FullscreenViewportState {
 }
 
 type FullscreenDisplayMode = 'fit' | 'fill';
+
+type NavigatorConnectionLike = EventTarget & {
+  effectiveType?: string;
+  downlink?: number;
+  rtt?: number;
+  saveData?: boolean;
+};
 
 interface SurfacePointerPosition {
   clientX: number;
@@ -402,6 +411,42 @@ function isRemoteWindowInputSupported(target: RemoteWindowStreamTargetManifest) 
     && target.focusPolicy === 'bring-to-focus';
 }
 
+function readRemoteWindowNetworkQuality(): RemoteWindowNetworkQualityInput | null {
+  const connection = typeof navigator === 'undefined'
+    ? null
+    : ((navigator as Navigator & {
+        connection?: NavigatorConnectionLike;
+        mozConnection?: NavigatorConnectionLike;
+        webkitConnection?: NavigatorConnectionLike;
+      }).connection
+      || (navigator as Navigator & { mozConnection?: NavigatorConnectionLike }).mozConnection
+      || (navigator as Navigator & { webkitConnection?: NavigatorConnectionLike }).webkitConnection
+      || null);
+  if (!connection) {
+    return null;
+  }
+  return {
+    effectiveType: connection.effectiveType || null,
+    downlinkMbps: typeof connection.downlink === 'number' ? connection.downlink : null,
+    rttMs: typeof connection.rtt === 'number' ? connection.rtt : null,
+    saveData: Boolean(connection.saveData),
+  };
+}
+
+function getRemoteWindowNetworkConnection(): NavigatorConnectionLike | null {
+  if (typeof navigator === 'undefined') {
+    return null;
+  }
+  return ((navigator as Navigator & {
+    connection?: NavigatorConnectionLike;
+    mozConnection?: NavigatorConnectionLike;
+    webkitConnection?: NavigatorConnectionLike;
+  }).connection
+    || (navigator as Navigator & { mozConnection?: NavigatorConnectionLike }).mozConnection
+    || (navigator as Navigator & { webkitConnection?: NavigatorConnectionLike }).webkitConnection
+    || null);
+}
+
 function formatBitrateOption(preset: RemoteWindowVideoBitratePreset) {
   if (preset === 'fullscreen') {
     return '全屏 20 Mbps';
@@ -455,6 +500,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const [fullscreenViewport, setFullscreenViewportState] = useState<FullscreenViewportState>(initialFullscreenViewport);
   const [fullscreenDisplayMode, setFullscreenDisplayModeState] = useState<FullscreenDisplayMode>(initialFullscreenDisplayMode);
   const [bitratePreset, setBitratePreset] = useState<RemoteWindowVideoBitratePreset>('5mbps');
+  const [networkQuality, setNetworkQuality] = useState<RemoteWindowNetworkQualityInput | null>(() => readRemoteWindowNetworkQuality());
+  const [videoHasPlayed, setVideoHasPlayed] = useState(false);
   const [receiverMediaStream, setReceiverMediaStream] = useState<MediaStream | null>(null);
   const [itermPaneTargetsExpanded, setItermPaneTargetsExpanded] = useState(false);
   const floatingOffsetRef = useRef(floatingOffset);
@@ -865,6 +912,23 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         fullscreenScale: fullscreenViewport.scale,
       })
     : null;
+  const adaptiveBitratePreset = effectiveBitratePreset
+    ? resolveAdaptiveRemoteWindowVideoBitratePreset(effectiveBitratePreset, networkQuality)
+    : null;
+
+  useEffect(() => {
+    const connection = getRemoteWindowNetworkConnection();
+    if (!connection || typeof connection.addEventListener !== 'function') {
+      return;
+    }
+    const handleNetworkChange = () => {
+      setNetworkQuality(readRemoteWindowNetworkQuality());
+    };
+    connection.addEventListener('change', handleNetworkChange);
+    return () => {
+      connection.removeEventListener('change', handleNetworkChange);
+    };
+  }, []);
 
   useEffect(() => {
     if (
@@ -873,7 +937,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       || !state.streamStarted
       || !activeSessionId
       || !updateStreamQuality
-      || !effectiveBitratePreset
+      || !adaptiveBitratePreset
     ) {
       return;
     }
@@ -881,13 +945,13 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       activeSessionId,
       state.streamId,
       state.target.streamTargetId,
-      effectiveBitratePreset,
+      adaptiveBitratePreset,
     ].join('|');
     if (lastAppliedStreamQualityKeyRef.current === qualityKey) {
       return;
     }
     lastAppliedStreamQualityKeyRef.current = qualityKey;
-    const videoBitrate = buildRemoteWindowVideoBitrateConfig(effectiveBitratePreset);
+    const videoBitrate = buildRemoteWindowVideoBitrateConfig(adaptiveBitratePreset);
     try {
       updateStreamQuality(activeSessionId, {
         streamId: state.streamId,
@@ -897,7 +961,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     } catch (error) {
       console.warn('[RemoteWindowOverlay] remote window bitrate update failed:', error);
     }
-  }, [activeSessionId, effectiveBitratePreset, state, updateStreamQuality]);
+  }, [activeSessionId, adaptiveBitratePreset, state, updateStreamQuality]);
 
   const updateFloatingDragFromPointer = useCallback((pointerId: number, clientX: number, clientY: number) => {
     const drag = floatingDragRef.current;
@@ -1215,7 +1279,14 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     if (!video) {
       return;
     }
+    setVideoHasPlayed(false);
     video.srcObject = receiverMediaStream;
+    const playResult = typeof video.play === 'function' ? video.play() : null;
+    if (playResult && typeof playResult.catch === 'function') {
+      playResult.catch(() => {
+        setVideoHasPlayed(false);
+      });
+    }
   }, [receiverMediaStream, state]);
 
   useEffect(() => {
@@ -1267,7 +1338,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       mode: 'floating',
       fullscreenScale: 1,
     });
-    const videoBitrate = buildRemoteWindowVideoBitrateConfig(effectiveStartBitratePreset);
+    const adaptiveStartBitratePreset = resolveAdaptiveRemoteWindowVideoBitratePreset(effectiveStartBitratePreset, networkQuality);
+    const videoBitrate = buildRemoteWindowVideoBitrateConfig(adaptiveStartBitratePreset);
 
     if (!startStream) {
       setState((current) => selectRemoteWindowTarget(current, target.streamTargetId));
@@ -1281,7 +1353,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       targetSessionId,
       streamId,
       target.streamTargetId,
-      effectiveStartBitratePreset,
+      adaptiveStartBitratePreset,
     ].join('|');
     const startingState = (current: RemoteWindowOverlayState) => beginRemoteWindowStreamSetup(
       selectRemoteWindowTarget(current, target.streamTargetId),
@@ -1315,6 +1387,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       });
   }, [
     activeSessionId,
+    networkQuality,
     resetFullscreenViewport,
     setFloatingOffset,
     setFloatingOverlayWidthPx,
@@ -1868,25 +1941,36 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         top: lockedSurfaceLayout.content.top,
         width: lockedSurfaceLayout.content.width,
         height: lockedSurfaceLayout.content.height,
-      }
+    }
     : styles.videoContentFallback;
+
+  const ztermVideoWallpaper = (
+    <div data-testid="remote-window-video-wallpaper" style={styles.videoWallpaper} aria-hidden="true">
+      <div style={styles.videoWallpaperMark}>ZTERM</div>
+    </div>
+  );
 
   const lockedVideoContent = state.phase === 'targetLocked' ? (() => {
     if (state.streamStarted && receiverMediaStream) {
       return (
-        <video
-          data-testid="remote-window-video"
-          ref={videoElementRef}
-          autoPlay
-          muted
-          playsInline
-          style={styles.videoElement}
-        />
+        <>
+          {!videoHasPlayed ? ztermVideoWallpaper : null}
+          <video
+            data-testid="remote-window-video"
+            ref={videoElementRef}
+            autoPlay
+            muted
+            playsInline
+            onPlaying={() => setVideoHasPlayed(true)}
+            style={styles.videoElement}
+          />
+        </>
       );
     }
     if (state.streamStatus === 'starting') {
       return (
         <div style={styles.videoFrame}>
+          {ztermVideoWallpaper}
           <div style={styles.videoStatus}>正在建立视频流</div>
           <div style={styles.videoMeta}>{formatTargetSubtitle(state.target)}</div>
         </div>
@@ -1895,6 +1979,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     if (state.streamStatus === 'error') {
       return (
         <div data-testid="remote-window-stream-error" style={{ ...styles.videoFrame, ...styles.videoError }}>
+          {ztermVideoWallpaper}
           <div style={styles.videoStatus}>视频流启动失败</div>
           <div style={styles.videoMeta}>{state.streamErrorMessage || 'remote window stream failed'}</div>
         </div>
@@ -1902,6 +1987,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     }
     return (
       <div style={styles.videoFrame}>
+        {ztermVideoWallpaper}
         <div style={styles.videoStatus}>等待视频流</div>
         <div style={styles.videoMeta}>{formatTargetSubtitle(state.target)}</div>
       </div>
@@ -2382,7 +2468,7 @@ const styles: Record<string, CSSProperties> = {
     minHeight: 0,
     position: 'relative',
     overflow: 'hidden',
-    background: '#000',
+    background: '#0a101b',
     outline: 'none',
     touchAction: 'none',
   },
@@ -2391,7 +2477,7 @@ const styles: Record<string, CSSProperties> = {
     display: 'grid',
     placeItems: 'center',
     overflow: 'hidden',
-    background: '#000',
+    background: '#0a101b',
     pointerEvents: 'none',
   },
   videoContentFallback: {
@@ -2400,10 +2486,11 @@ const styles: Record<string, CSSProperties> = {
     display: 'grid',
     placeItems: 'center',
     overflow: 'hidden',
-    background: '#000',
+    background: '#0a101b',
     pointerEvents: 'none',
   },
   videoFrame: {
+    position: 'relative',
     width: '100%',
     height: '100%',
     display: 'grid',
@@ -2411,32 +2498,55 @@ const styles: Record<string, CSSProperties> = {
     alignContent: 'center',
     gap: 8,
     border: '1px solid rgba(151, 164, 186, 0.12)',
-    background: 'rgba(10, 16, 26, 0.82)',
+    background: '#0a101b',
+    overflow: 'hidden',
   },
   videoElement: {
     width: '100%',
     height: '100%',
     display: 'block',
     objectFit: 'fill',
-    background: '#000',
+    background: 'transparent',
     pointerEvents: 'none',
+    position: 'relative',
+    zIndex: 1,
   },
   videoError: {
     borderColor: 'rgba(248, 113, 113, 0.34)',
-    background: 'rgba(64, 15, 22, 0.72)',
+    background: '#170d14',
   },
   videoStatus: {
+    position: 'relative',
+    zIndex: 1,
     fontSize: 14,
     fontWeight: 900,
     color: '#edf4ff',
   },
   videoMeta: {
+    position: 'relative',
+    zIndex: 1,
     maxWidth: '90%',
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     fontSize: 11,
     color: 'rgba(237,244,255,0.62)',
+  },
+  videoWallpaper: {
+    position: 'absolute',
+    inset: 0,
+    display: 'grid',
+    placeItems: 'center',
+    background: '#0a101b',
+    boxShadow: 'inset 0 0 0 1px rgba(237,244,255,0.04), inset 0 18px 48px rgba(255,255,255,0.035), inset 0 -36px 80px rgba(0,0,0,0.38)',
+    pointerEvents: 'none',
+  },
+  videoWallpaperMark: {
+    fontSize: 'clamp(42px, 18vw, 132px)',
+    fontWeight: 950,
+    letterSpacing: 0,
+    color: '#0a101b',
+    textShadow: '0 -1px 0 rgba(255,255,255,0.08), 0 1px 0 rgba(0,0,0,0.72)',
   },
   minimap: {
     position: 'absolute',
