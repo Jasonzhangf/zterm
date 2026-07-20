@@ -93,9 +93,12 @@ import {
   type Host,
   type RemoteScreenshotCapture,
   type RemoteScreenshotStatusPayload,
+  type PasteImageStartPayload,
   type RemoteWindowInputEventPayload,
+  type RemoteWindowStreamQualityRequestPayload,
   type RemoteWindowStreamTargetManifest,
   type RemoteWindowStreamTargetsResponsePayload,
+  type RemoteWindowVideoBitrateConfig,
   type Session,
   type SessionDebugOverlayMetrics,
   type SessionGroupHistory,
@@ -137,21 +140,27 @@ function logAsyncCleanupFailure(scope: string, error: unknown) {
 const TerminalQuickBarShell = ReactMemo(function TerminalQuickBarShell({
   bottomPx,
   zIndex = 10,
+  centered = false,
   children,
 }: {
   bottomPx: number;
   zIndex?: number;
+  centered?: boolean;
   children: ReactNode;
 }) {
   return (
     <div
       data-testid="terminal-quickbar-shell"
+      data-layout={centered ? 'remote-window-centered' : 'standard'}
       style={{
         position: 'absolute',
-        left: 0,
-        right: 0,
+        left: centered ? '50%' : 0,
+        right: centered ? 'auto' : 0,
         bottom: `${bottomPx}px`,
         zIndex,
+        width: centered ? 'min(calc(100vw - 24px), 720px)' : undefined,
+        transform: centered ? 'translateX(-50%)' : undefined,
+        pointerEvents: 'auto',
       }}
     >
       {children}
@@ -261,7 +270,11 @@ interface TerminalPageProps {
   onTerminalViewportChange?: TerminalViewportChangeHandler;
   onLiveSessionIdsChange?: (ids: string[]) => void;
   onActiveBodySubscriptionSuppressedChange?: (suppressed: boolean) => void;
-  onImagePaste?: (sessionId: string, file: File) => Promise<void> | void;
+  onImagePaste?: (
+    sessionId: string,
+    file: File,
+    options?: { pasteTarget?: PasteImageStartPayload['pasteTarget'] },
+  ) => Promise<void> | void;
   onFileAttach?: (sessionId: string, file: File) => Promise<void> | void;
   onOpenSettings?: () => void;
   onRequestRemoteScreenshot?: (
@@ -273,7 +286,12 @@ interface TerminalPageProps {
     sessionId: string,
     target: RemoteWindowStreamTargetManifest,
     streamId: string,
+    options?: { videoBitrate?: RemoteWindowVideoBitrateConfig },
   ) => Promise<RemoteWindowReceiverStartResult>;
+  onUpdateRemoteWindowStreamQuality?: (
+    sessionId: string,
+    payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>,
+  ) => void;
   onStopRemoteWindowStream?: (sessionId: string, streamId: string) => boolean;
   onSendRemoteWindowInput?: (
     sessionId: string,
@@ -981,6 +999,7 @@ function TerminalPageComponent({
   onRequestRemoteScreenshot,
   onRequestRemoteWindowTargets,
   onRequestRemoteWindowStreamStart,
+  onUpdateRemoteWindowStreamQuality,
   onStopRemoteWindowStream,
   onSendRemoteWindowInput,
   quickActions,
@@ -1919,6 +1938,23 @@ function TerminalPageComponent({
     return true;
   }, [onSendRemoteWindowInput]);
 
+  const handleQuickBarImagePaste = useCallback((
+    sessionId: string,
+    file: File,
+  ) => {
+    const context = remoteWindowInputContextRef.current;
+    if (context?.streamId && context.targetId) {
+      return onImagePaste?.(sessionId, file, {
+        pasteTarget: {
+          kind: 'remote-window',
+          streamId: context.streamId,
+          targetId: context.targetId,
+        },
+      });
+    }
+    return onImagePaste?.(sessionId, file);
+  }, [onImagePaste]);
+
   const handleQuickBarSendSequence = useCallback((sequence: string) => {
     if (emitRemoteWindowInputEvents(
       buildRemoteWindowKeyInputEventsFromSequence(sequence),
@@ -2167,7 +2203,13 @@ function TerminalPageComponent({
   }, [onActiveBodySubscriptionSuppressedChange]);
 
   const handleRemoteWindowInputContextChange = useCallback((context: RemoteWindowInputContext | null) => {
+    remoteWindowInputContextRef.current = context;
     setRemoteWindowInputContext(context);
+  }, []);
+
+  const handleTerminalFocusOwnerActivate = useCallback(() => {
+    remoteWindowInputContextRef.current = null;
+    setRemoteWindowInputContext(null);
   }, []);
 
   useEffect(() => () => {
@@ -3103,7 +3145,7 @@ function TerminalPageComponent({
       shortcutActions={shortcutActions}
       onMeasuredHeightChange={handleQuickBarMeasuredHeightChange}
       onSendSequence={handleQuickBarSendSequence}
-      onImagePaste={onImagePaste}
+      onImagePaste={handleQuickBarImagePaste}
       onFileAttach={onFileAttach}
       keyboardVisible={terminalImeActive && effectiveKeyboardLiftPx > 0}
       keyboardInsetPx={quickBarShellKeyboardLiftPx}
@@ -3162,12 +3204,12 @@ function TerminalPageComponent({
     handleQuickBarToggleAbsoluteLineNumbers,
     handleQuickBarToggleDebugOverlay,
     handleToggleKeyboard,
+    handleQuickBarImagePaste,
     landscape,
     handleQuickBarEditorDomFocusChange,
     keyboardInset,
     keyboardViewportAlreadyResized,
     onFileAttach,
-    onImagePaste,
     onQuickActionsChange,
     onShortcutActionsChange,
     onShortcutUse,
@@ -3355,6 +3397,7 @@ function TerminalPageComponent({
           handleActiveTerminalActivateInput={handleActiveTerminalActivateInput}
           onActivatePane={activatePaneAndSession}
           onActivateSession={handleActivateSessionGroupSlot}
+          onTerminalFocusOwnerActivate={handleTerminalFocusOwnerActivate}
           focusNonce={focusNonce}
           terminalFontSize={terminalFontSize}
           terminalThemeId={terminalThemeId}
@@ -3430,6 +3473,7 @@ function TerminalPageComponent({
           activeSessionId={uiSessionId}
           requestTargets={onRequestRemoteWindowTargets}
           startStream={onRequestRemoteWindowStreamStart}
+          updateStreamQuality={onUpdateRemoteWindowStreamQuality}
           stopStream={onStopRemoteWindowStream}
           sendInput={onSendRemoteWindowInput}
           bottomInsetPx={
@@ -3444,6 +3488,7 @@ function TerminalPageComponent({
         {!remoteWindowOverlayOpen ? (
           <TerminalQuickBarShell
             zIndex={remoteWindowInputContext ? 96 : 10}
+            centered={Boolean(remoteWindowInputContext)}
             bottomPx={
               quickBarShellKeyboardLiftPx
               + layoutProfile.quickBar.touchSafeOffsetPx
@@ -3555,6 +3600,7 @@ function terminalPagePropsEqual(
     && prev.onRequestRemoteScreenshot === next.onRequestRemoteScreenshot
     && prev.onRequestRemoteWindowTargets === next.onRequestRemoteWindowTargets
     && prev.onRequestRemoteWindowStreamStart === next.onRequestRemoteWindowStreamStart
+    && prev.onUpdateRemoteWindowStreamQuality === next.onUpdateRemoteWindowStreamQuality
     && prev.onStopRemoteWindowStream === next.onStopRemoteWindowStream
     && prev.onSendRemoteWindowInput === next.onSendRemoteWindowInput
     && prev.quickActions === next.quickActions

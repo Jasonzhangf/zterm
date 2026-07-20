@@ -54,6 +54,7 @@ describe('RemoteWindowOverlay', () => {
   afterEach(() => {
     cleanup();
     backListeners.splice(0, backListeners.length);
+    window.localStorage.clear();
     vi.useRealTimers();
   });
 
@@ -158,7 +159,9 @@ describe('RemoteWindowOverlay', () => {
     await waitFor(() => {
       expect(startStream).toHaveBeenCalledWith('session-1', expect.objectContaining({
         streamTargetId: 'pane-1',
-      }), expect.stringMatching(/^rw-stream-/));
+      }), expect.stringMatching(/^rw-stream-/), {
+        videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+      });
     });
     await waitFor(() => {
       const video = screen.getByTestId('remote-window-video') as HTMLVideoElement;
@@ -172,6 +175,48 @@ describe('RemoteWindowOverlay', () => {
       expect(stopStream).toHaveBeenCalledWith('session-1', expect.stringMatching(/^rw-stream-/));
       expect(screen.queryByTestId('remote-window-video')).toBeNull();
     });
+  });
+
+  it('updates the active stream bitrate without restarting the stream', async () => {
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+    }));
+    const updateStreamQuality = vi.fn();
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        requestTargets={requestTargets}
+        startStream={startStream}
+        updateStreamQuality={updateStreamQuality}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-target-app-1');
+    fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
+    await screen.findByTestId('remote-window-video');
+
+    fireEvent.change(screen.getByTestId('remote-window-bitrate-select'), {
+      target: { value: '20mbps' },
+    });
+
+    expect(updateStreamQuality).toHaveBeenCalledWith('session-1', {
+      streamId: expect.stringMatching(/^rw-stream-/),
+      targetId: 'app-1',
+      videoBitrate: {
+        preset: '20mbps',
+        bitrateMbps: 20,
+        maxBitrateBps: 20_000_000,
+      },
+    });
+    expect(startStream).toHaveBeenCalledTimes(1);
   });
 
   it('sizes the floating preview from the selected app window aspect ratio', async () => {
@@ -240,6 +285,10 @@ describe('RemoteWindowOverlay', () => {
     render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} />);
 
     const entry = screen.getByRole('button', { name: '打开远程窗口' });
+    const setPointerCapture = vi.fn();
+    const releasePointerCapture = vi.fn();
+    Object.defineProperty(entry, 'setPointerCapture', { value: setPointerCapture, configurable: true });
+    Object.defineProperty(entry, 'releasePointerCapture', { value: releasePointerCapture, configurable: true });
     Object.defineProperty(entry, 'getBoundingClientRect', {
       configurable: true,
       value: () => ({
@@ -262,6 +311,42 @@ describe('RemoteWindowOverlay', () => {
 
     expect(requestTargets).not.toHaveBeenCalled();
     expect(entry.getAttribute('style') || '').toContain('transform: translate(-72px, -102px)');
+    expect(screen.queryByTestId('remote-window-picker')).toBeNull();
+    expect(setPointerCapture).toHaveBeenCalledWith(9);
+    expect(releasePointerCapture).toHaveBeenCalledWith(9);
+  });
+
+  it('keeps moving the floating entry when Android WebView delivers drag moves to window', async () => {
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+    }));
+
+    render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} />);
+
+    const entry = screen.getByRole('button', { name: '打开远程窗口' });
+    Object.defineProperty(entry, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 330,
+        y: 720,
+        left: 330,
+        top: 720,
+        right: 374,
+        bottom: 764,
+        width: 44,
+        height: 44,
+        toJSON: () => ({}),
+      }),
+    });
+
+    fireEvent.pointerDown(entry, { pointerId: 19, pointerType: 'touch', clientX: 352, clientY: 742, button: 0 });
+    fireEvent.pointerMove(window, { pointerId: 19, pointerType: 'touch', clientX: 210, clientY: 520, button: 0 });
+    fireEvent.pointerUp(window, { pointerId: 19, pointerType: 'touch', clientX: 210, clientY: 520, button: 0 });
+    fireEvent.click(entry);
+
+    expect(requestTargets).not.toHaveBeenCalled();
+    expect(entry.getAttribute('style') || '').toContain('transform: translate(-142px, -222px)');
     expect(screen.queryByTestId('remote-window-picker')).toBeNull();
   });
 
@@ -565,6 +650,7 @@ describe('RemoteWindowOverlay', () => {
 
     fireEvent.pointerDown(surface, { pointerId: 21, pointerType: 'touch', clientX: 100, clientY: 70, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 21, pointerType: 'touch', clientX: 100, clientY: 40, button: 0, buttons: 1 });
+    expect(sendInput).not.toHaveBeenCalled();
     fireEvent.pointerUp(surface, { pointerId: 21, pointerType: 'touch', clientX: 100, clientY: 40, button: 0, buttons: 0 });
 
     await waitFor(() => {
@@ -579,7 +665,68 @@ describe('RemoteWindowOverlay', () => {
     expect(payload.event.deltaY).toBe(30);
     expect(payload.event.unit).toBe('pixel');
     expect(payload.event.normalizedX).toBeCloseTo(0.5, 3);
-    expect(payload.event.normalizedY).toBeCloseTo(0.4, 3);
+    expect(payload.event.normalizedY).toBeCloseTo(0.7, 3);
+  });
+
+  it('coalesces multi-move touch scrolling into one remote scroll at the gesture start point', async () => {
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const sendInput = vi.fn();
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+    }));
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        requestTargets={requestTargets}
+        startStream={startStream}
+        sendInput={sendInput}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-target-app-1');
+    fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
+    await screen.findByTestId('remote-window-video');
+
+    const surface = screen.getByTestId('remote-window-video-surface');
+    Object.defineProperty(surface, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 200,
+        bottom: 100,
+        width: 200,
+        height: 100,
+        toJSON: () => ({}),
+      }),
+    });
+
+    fireEvent.pointerDown(surface, { pointerId: 22, pointerType: 'touch', clientX: 120, clientY: 80, button: 0, buttons: 1 });
+    fireEvent.pointerMove(surface, { pointerId: 22, pointerType: 'touch', clientX: 120, clientY: 64, button: 0, buttons: 1 });
+    fireEvent.pointerMove(surface, { pointerId: 22, pointerType: 'touch', clientX: 120, clientY: 52, button: 0, buttons: 1 });
+    fireEvent.pointerMove(surface, { pointerId: 22, pointerType: 'touch', clientX: 120, clientY: 40, button: 0, buttons: 1 });
+    expect(sendInput).not.toHaveBeenCalled();
+    fireEvent.pointerUp(surface, { pointerId: 22, pointerType: 'touch', clientX: 120, clientY: 40, button: 0, buttons: 0 });
+
+    await waitFor(() => {
+      expect(sendInput).toHaveBeenCalledTimes(1);
+    });
+    expect(sendInput.mock.calls[0][1].event).toMatchObject({
+      kind: 'scroll',
+      deltaX: 0,
+      deltaY: 40,
+      normalizedX: 0.64,
+      normalizedY: 0.8,
+    });
   });
 
   it('keeps fullscreen video surface interactive for remote input at scale one', async () => {

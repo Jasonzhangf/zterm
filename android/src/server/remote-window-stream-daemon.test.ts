@@ -113,6 +113,19 @@ function makeFakeMediaStreamTrack() {
   return { stop: vi.fn() } as unknown as MediaStreamTrack & { stop: ReturnType<typeof vi.fn> };
 }
 
+function makeFakeRtpSender() {
+  let parameters: RTCRtpSendParameters = { encodings: [{} as RTCRtpEncodingParameters] } as RTCRtpSendParameters;
+  return {
+    getParameters: vi.fn(() => parameters),
+    setParameters: vi.fn(async (nextParameters: RTCRtpSendParameters) => {
+      parameters = nextParameters;
+    }),
+  } as unknown as RTCRtpSender & {
+    getParameters: ReturnType<typeof vi.fn>;
+    setParameters: ReturnType<typeof vi.fn>;
+  };
+}
+
 function makeNestedItermTree(): Iterm2RawNode {
   return {
     type: 'splitter',
@@ -331,6 +344,10 @@ describe('remote window stream daemon owner', () => {
   it('keeps scroll input compatible with the macOS helper schema', () => {
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('let phase: String?');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('let phase: String\n');
+  });
+
+  it('maps Command+V through a real macOS virtual key code for remote-window image paste', () => {
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('"KeyV": 9');
   });
 
   it('builds selectable non-iTerm2 app-window manifests from the macOS app catalog', () => {
@@ -721,6 +738,119 @@ describe('remote window stream daemon owner', () => {
         usernameFragment: 'daemon',
       },
     }]);
+  });
+
+  it('applies requested video bitrate at stream start and on quality update', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeSender = makeFakeRtpSender();
+    fakePeer.addTrack.mockReturnValue(fakeSender);
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const fakeVideoSource = {
+      createTrack: vi.fn(() => fakeTrack),
+      onFrame: vi.fn(),
+    };
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({
+          width: 2,
+          height: 2,
+          rgba: new Uint8Array(16).fill(12),
+        });
+        return {
+          width: 2,
+          height: 2,
+          frameRate: 12,
+          stop: vi.fn(),
+        };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => fakeVideoSource as any),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(7);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const started = await runtime.startStream({
+      requestId: 'rw-bitrate-start',
+      streamId: 'stream-bitrate',
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+      videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+    });
+
+    expect('answer' in started ? started.capture.maxBitrateBps : null).toBe(5_000_000);
+    expect(fakeSender.setParameters).toHaveBeenCalledWith(expect.objectContaining({
+      encodings: [expect.objectContaining({ maxBitrate: 5_000_000 })],
+    }));
+
+    const updated = await runtime.updateStreamQuality({
+      requestId: 'rw-bitrate-update',
+      streamId: 'stream-bitrate',
+      targetId: 'iterm2-pane:window-1:tab-1:left',
+      videoBitrate: { preset: 'fullscreen', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
+    });
+
+    expect(updated).toEqual({
+      requestId: 'rw-bitrate-update',
+      streamId: 'stream-bitrate',
+      targetId: 'iterm2-pane:window-1:tab-1:left',
+      accepted: true,
+      videoBitrate: { preset: 'fullscreen', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
+    });
+    expect(fakeSender.setParameters).toHaveBeenLastCalledWith(expect.objectContaining({
+      encodings: [expect.objectContaining({ maxBitrate: 20_000_000 })],
+    }));
+  });
+
+  it('rejects stream quality updates for the wrong target without changing sender parameters', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeSender = makeFakeRtpSender();
+    fakePeer.addTrack.mockReturnValue(fakeSender);
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(12) });
+        return { width: 2, height: 2, frameRate: 12, stop: vi.fn() };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(7);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await runtime.startStream({
+      requestId: 'rw-bitrate-mismatch-start',
+      streamId: 'stream-bitrate-mismatch',
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+      videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+    });
+    fakeSender.setParameters.mockClear();
+
+    const updated = await runtime.updateStreamQuality({
+      requestId: 'rw-bitrate-mismatch',
+      streamId: 'stream-bitrate-mismatch',
+      targetId: 'wrong-target',
+      videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+    });
+
+    expect(updated).toEqual({
+      requestId: 'rw-bitrate-mismatch',
+      streamId: 'stream-bitrate-mismatch',
+      code: 'remote_window_stream_quality_target_mismatch',
+      message: 'remote window stream quality target mismatch: wrong-target',
+    });
+    expect(fakeSender.setParameters).not.toHaveBeenCalled();
   });
 
   it('allocates I420 planes correctly for odd-sized capture frames', async () => {

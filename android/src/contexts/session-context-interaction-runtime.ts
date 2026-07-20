@@ -10,16 +10,20 @@ import {
   requestRemoteWindowTargetsRuntime,
   sendRemoteWindowInputRuntime,
   stopRemoteWindowStreamRuntime,
+  updateRemoteWindowStreamQualityRuntime,
 } from './session-context-remote-window-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionTransportResource } from '../lib/session-transport-runtime';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import type {
+  PasteImageStartPayload,
   RemoteScreenshotCapture,
   RemoteScreenshotStatusPayload,
   RemoteWindowInputEventPayload,
+  RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamTargetsResponsePayload,
   RemoteWindowStreamTargetManifest,
+  RemoteWindowVideoBitrateConfig,
   Session,
 } from '../lib/types';
 import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
@@ -52,6 +56,7 @@ interface RemoteWindowMessageRuntimeLike {
     },
   ) => Promise<RemoteWindowStreamTargetsResponsePayload>;
   requestStreamStart: (...args: any[]) => Promise<any>;
+  sendStreamQuality: (...args: any[]) => void;
   sendStreamIceCandidate: (...args: any[]) => void;
   stopStream: (...args: any[]) => void;
   sendInputEvent: (...args: any[]) => void;
@@ -114,10 +119,15 @@ export function createSessionInteractionRuntime(options: {
     });
   };
 
-  const sendImagePaste = async (sessionId: string, file: File) => {
+  const sendImagePaste = async (
+    sessionId: string,
+    file: File,
+    pasteOptions?: { pasteTarget?: PasteImageStartPayload['pasteTarget'] },
+  ) => {
     return sendImagePasteRuntime({
       sessionId,
       file,
+      pasteTarget: pasteOptions?.pasteTarget,
       ensureSessionReadyForPaste,
       sendSocketPayload: options.sendSocketPayload,
     });
@@ -159,16 +169,32 @@ export function createSessionInteractionRuntime(options: {
     sessionId: string,
     target: RemoteWindowStreamTargetManifest,
     streamId: string,
+    startOptions?: { videoBitrate?: RemoteWindowVideoBitrateConfig },
   ) => {
     return requestRemoteWindowStreamStartRuntime({
       sessionId,
       streamId,
       target,
+      videoBitrate: startOptions?.videoBitrate,
       bridgeSettings: options.bridgeSettings,
       sessions: options.refs.stateRef.current.sessions,
       readSessionTransportSocket: options.readSessionTransportSocket,
       remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
       remoteWindowReceiverRuntime: options.refs.remoteWindowReceiverRuntimeRef.current,
+      sendSocketPayload: options.sendSocketPayload,
+    });
+  };
+
+  const updateRemoteWindowStreamQuality = (
+    sessionId: string,
+    payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>,
+  ) => {
+    return updateRemoteWindowStreamQualityRuntime({
+      sessionId,
+      payload,
+      sessions: options.refs.stateRef.current.sessions,
+      readSessionTransportSocket: options.readSessionTransportSocket,
+      remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
       sendSocketPayload: options.sendSocketPayload,
     });
   };
@@ -207,6 +233,7 @@ export function createSessionInteractionRuntime(options: {
     requestRemoteScreenshot,
     requestRemoteWindowTargets,
     requestRemoteWindowStreamStart,
+    updateRemoteWindowStreamQuality,
     stopRemoteWindowStream,
     sendRemoteWindowInput,
   };

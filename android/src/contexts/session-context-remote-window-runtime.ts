@@ -1,8 +1,10 @@
 import type {
   RemoteWindowStreamIceCandidate,
   RemoteWindowInputEventPayload,
+  RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamStartedPayload,
   RemoteWindowStreamTargetManifest,
+  RemoteWindowVideoBitrateConfig,
   Session,
   RemoteWindowStreamTargetsResponsePayload,
 } from '../lib/types';
@@ -31,9 +33,18 @@ interface RemoteWindowStreamMessageRuntimeLike extends RemoteWindowCatalogMessag
       target: RemoteWindowStreamTargetManifest;
       offer: { type: 'offer'; sdp: string };
       iceServers?: Array<Record<string, unknown>>;
+      videoBitrate?: RemoteWindowVideoBitrateConfig;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     },
   ) => Promise<RemoteWindowStreamStartedPayload>;
+  sendStreamQuality: (
+    sessionId: string,
+    options: {
+      ws: BridgeTransportSocket;
+      payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>;
+      sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+    },
+  ) => void;
   sendStreamIceCandidate: (
     sessionId: string,
     options: {
@@ -210,6 +221,7 @@ export async function requestRemoteWindowStreamStartRuntime(options: {
   sessionId: string;
   streamId: string;
   target: RemoteWindowStreamTargetManifest;
+  videoBitrate?: RemoteWindowVideoBitrateConfig;
   iceServers?: RTCIceServer[];
   bridgeSettings?: BridgeSettings | null;
   sessions: Session[];
@@ -254,8 +266,33 @@ export async function requestRemoteWindowStreamStartRuntime(options: {
       target: options.target,
       offer,
       iceServers: iceServers?.map((server) => ({ ...server })) as Array<Record<string, unknown>> | undefined,
+      videoBitrate: options.videoBitrate,
       sendSocketPayload: options.sendSocketPayload,
     }),
+  });
+}
+
+export function updateRemoteWindowStreamQualityRuntime(options: {
+  sessionId: string;
+  payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>;
+  sessions: Session[];
+  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  remoteWindowMessageRuntime: RemoteWindowStreamMessageRuntimeLike;
+  sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+}) {
+  const targetSessionId = options.sessionId.trim();
+  if (!targetSessionId) {
+    throw new Error('No target session for remote window stream quality');
+  }
+  const ws = resolveRemoteWindowStreamTransport({
+    sessionId: targetSessionId,
+    sessions: options.sessions,
+    readSessionTransportSocket: options.readSessionTransportSocket,
+  });
+  options.remoteWindowMessageRuntime.sendStreamQuality(targetSessionId, {
+    ws,
+    payload: options.payload,
+    sendSocketPayload: options.sendSocketPayload,
   });
 }
 

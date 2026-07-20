@@ -1,10 +1,13 @@
 import type {
   ClientMessage,
+  PasteImageStartPayload,
   RemoteScreenshotCapture,
   RemoteScreenshotStatusPayload,
   RemoteWindowInputEventPayload,
+  RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
+  RemoteWindowVideoBitrateConfig,
   ScheduleJobDraft,
   Session,
   SessionBufferState,
@@ -271,7 +274,11 @@ export function buildSessionContextValueRuntime(options: {
   sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: 'adaptive-phone' | 'mirror-fixed') => boolean;
   sendMessage: (sessionId: string, msg: ClientMessage) => void;
   sendInput: (sessionId: string, data: string) => void;
-  sendImagePaste: (sessionId: string, file: File) => Promise<void>;
+  sendImagePaste: (
+    sessionId: string,
+    file: File,
+    options?: { pasteTarget?: PasteImageStartPayload['pasteTarget'] },
+  ) => Promise<void>;
   sendFileAttach: (sessionId: string, file: File) => Promise<void>;
   requestRemoteScreenshot: (
     sessionId: string,
@@ -282,7 +289,12 @@ export function buildSessionContextValueRuntime(options: {
     sessionId: string,
     target: RemoteWindowStreamTargetManifest,
     streamId: string,
+    options?: { videoBitrate?: RemoteWindowVideoBitrateConfig },
   ) => Promise<RemoteWindowReceiverStartResult>;
+  updateRemoteWindowStreamQuality: (
+    sessionId: string,
+    payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>,
+  ) => void;
   stopRemoteWindowStream: (sessionId: string, streamId: string) => boolean;
   sendRemoteWindowInput: (
     sessionId: string,
@@ -326,6 +338,7 @@ export function buildSessionContextValueRuntime(options: {
     requestRemoteScreenshot: options.requestRemoteScreenshot,
     requestRemoteWindowTargets: options.requestRemoteWindowTargets,
     requestRemoteWindowStreamStart: options.requestRemoteWindowStreamStart,
+    updateRemoteWindowStreamQuality: options.updateRemoteWindowStreamQuality,
     stopRemoteWindowStream: options.stopRemoteWindowStream,
     sendRemoteWindowInput: options.sendRemoteWindowInput,
     updateSessionViewport: options.updateSessionViewport,

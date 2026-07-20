@@ -115,6 +115,10 @@
           "label": "src/lib/remote-window-message-runtime.ts#createRemoteWindowMessageRuntime"
         },
         {
+          "id": "RemoteWindowStreamQualityRuntime",
+          "label": "src/contexts/session-context-remote-window-runtime.ts#updateRemoteWindowStreamQualityRuntime"
+        },
+        {
           "id": "RemoteWindowInputRuntime",
           "label": "src/contexts/session-context-remote-window-runtime.ts#sendRemoteWindowInputRuntime"
         },
@@ -523,10 +527,25 @@
           "from": "RemoteWindowOverlay",
           "to": "RemoteWindowMessageRuntime",
           "owner_feature": "desktop.remote_window_stream",
-          "semantic_input": "selected daemon target manifest, receiver offer, stop intent, ICE candidate, or mapped input event",
-          "semantic_output": "remote-window stream start/stop/candidate/input control messages over the existing active session transport",
+          "semantic_input": "selected daemon target manifest, receiver offer, stop intent, ICE candidate, quality update, or mapped input event",
+          "semantic_output": "remote-window stream start/stop/candidate/quality/input control messages over the existing active session transport",
           "status": "anchored",
           "edge_id": "android_mainline:RemoteWindowOverlay->RemoteWindowMessageRuntime",
+          "resource_from": "resource.remote_window_overlay",
+          "resource_to": "resource.session_transport",
+          "via_resources": [
+            "resource.active_session"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "RemoteWindowOverlay",
+          "to": "RemoteWindowStreamQualityRuntime",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "active stream id, target id, and selected per-window bitrate preset",
+          "semantic_output": "remote-window-stream-quality-request sent over existing active session transport without restarting capture or receiver",
+          "status": "anchored",
+          "edge_id": "android_mainline:RemoteWindowOverlay->RemoteWindowStreamQualityRuntime",
           "resource_from": "resource.remote_window_overlay",
           "resource_to": "resource.session_transport",
           "via_resources": [
@@ -568,8 +587,8 @@
           "from": "TerminalPage",
           "to": "RemoteWindowInputRuntime",
           "owner_feature": "desktop.remote_window_stream",
-          "semantic_input": "active remote-window input context plus QuickBar key/text/paste/arrow events or Android IME input/backspace/key events",
-          "semantic_output": "remote-window-input payloads sent over the existing active session transport instead of terminal input",
+          "semantic_input": "active remote-window input context plus QuickBar key/text/paste/image/arrow events or Android IME input/backspace/key events",
+          "semantic_output": "remote-window-input payloads or explicit remote-window paste target sent over the existing active session transport while remote focus is active; terminal focus clears the context and keeps terminal paste/input paths",
           "status": "anchored",
           "edge_id": "android_mainline:TerminalPage->RemoteWindowInputRuntime",
           "resource_from": "resource.ui_projection",
@@ -1394,8 +1413,8 @@
           "from": "Control",
           "to": "RemoteWindowStream",
           "owner_feature": "desktop.remote_window_stream",
-          "semantic_input": "remote-window catalog/start/stop/candidate/input control messages",
-          "semantic_output": "target catalog, stream lifecycle status, media negotiation answer/candidates, input result, or explicit remote-window error",
+          "semantic_input": "remote-window catalog/start/stop/candidate/quality/input control messages",
+          "semantic_output": "target catalog, stream lifecycle status, media negotiation answer/candidates, sender quality update result, input result, or explicit remote-window error",
           "status": "anchored",
           "edge_id": "daemon_mainline:Control->RemoteWindowStream",
           "resource_from": "resource.remote_window_stream",

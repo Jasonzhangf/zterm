@@ -240,6 +240,7 @@ export function useSessionProviderFacadeAssemblies(
     requestRemoteScreenshot,
     requestRemoteWindowTargets,
     requestRemoteWindowStreamStart,
+    updateRemoteWindowStreamQuality,
     stopRemoteWindowStream,
     sendRemoteWindowInput,
   } = sessionInteractionRuntime;
@@ -297,6 +298,7 @@ export function useSessionProviderFacadeAssemblies(
     requestRemoteScreenshot,
     requestRemoteWindowTargets,
     requestRemoteWindowStreamStart,
+    updateRemoteWindowStreamQuality,
     stopRemoteWindowStream,
     sendRemoteWindowInput,
     updateSessionViewport,
@@ -326,6 +328,7 @@ export function useSessionProviderFacadeAssemblies(
     requestRemoteScreenshot,
     requestRemoteWindowTargets,
     requestRemoteWindowStreamStart,
+    updateRemoteWindowStreamQuality,
     requestScheduleList,
     resumeActiveSessionTransport,
     runScheduleJobNow,

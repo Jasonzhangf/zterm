@@ -193,6 +193,7 @@ describe('remote window message runtime', () => {
       target: makeTarget(),
       offer: { type: 'offer', sdp: 'offer-sdp' },
       iceServers: [{ urls: 'stun:relay.codewhisper.cc:3478' }],
+      videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
       sendSocketPayload,
     });
 
@@ -204,6 +205,7 @@ describe('remote window message runtime', () => {
         streamId: 'stream-1',
         target: { streamTargetId: 'pane-1' },
         offer: { type: 'offer', sdp: 'offer-sdp' },
+        videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
       },
     });
 
@@ -300,6 +302,42 @@ describe('remote window message runtime', () => {
         streamId: 'stream-3',
       },
     });
+  });
+
+  it('sends stream quality requests and classifies the daemon result as remote-window control', () => {
+    const sendSocketPayload = vi.fn();
+    const runtime = createRemoteWindowMessageRuntime({ now: () => 471 });
+    const ws = makeSocket();
+
+    runtime.sendStreamQuality('session-1', {
+      ws,
+      payload: {
+        streamId: 'stream-3',
+        targetId: 'target-3',
+        videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+      },
+      sendSocketPayload,
+    });
+
+    expect(JSON.parse(sendSocketPayload.mock.calls[0][2] as string)).toMatchObject({
+      type: 'remote-window-stream-quality-request',
+      payload: {
+        requestId: expect.stringMatching(/^rw-quality-471-/),
+        streamId: 'stream-3',
+        targetId: 'target-3',
+        videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+      },
+    });
+    expect(isRemoteWindowControlMessage({
+      type: 'remote-window-stream-quality-result',
+      payload: {
+        requestId: 'rw-quality-1',
+        streamId: 'stream-3',
+        targetId: 'target-3',
+        accepted: true,
+        videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+      },
+    } as ServerMessage)).toBe(true);
   });
 
   it('sends remote input events with a generated request id', () => {

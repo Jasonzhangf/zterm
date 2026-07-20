@@ -68,6 +68,12 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 发布 public Relay update assets 时，生产机访问使用 `ssh/scp -i ~/.ssh/claw.pem -o IdentitiesOnly=yes root@159.75.134.56`，目标目录是 `/var/lib/zterm-traversal-relay/updates`；只上传 `latest.json` 与对应版本 APK，通常不需要重启 `zterm-traversal-relay.service`。完成后必须从公网重新 `GET/HEAD https://relay.codewhisper.cc:18443/relay/updates/latest.json` 与版本 APK，并下载 APK 比对 sha256；服务器本机文件存在不等于公网升级通道闭环。
 - 替换 Android App Logo 时，以仓库根 `assets/logo.png` 为源，同时生成 `ic_launcher`、`ic_launcher_round`、`ic_launcher_foreground` 的 mdpi/hdpi/xhdpi/xxhdpi/xxxhdpi 资源。Adaptive foreground 必须按 Launcher 二次蒙版预留安全区，默认前景不超过画布 80%，背景色与 Logo 外围一致；构建后既要从 APK 解包核对 legacy/adaptive hash，也要看真实 Launcher 截图，包内字节一致不能证明最终图标未被裁切。
 
+### 2.2.2 Remote-window 输入 / 粘贴 / 码率规则
+- Remote-window image paste 的路由真源只能是 Android active focus context：remote-window context active 才允许发送 `pasteTarget.kind=remote-window`；terminal surface focus 必须清掉 context；否则同一 QuickBar image action 保持 terminal Ctrl+V paste path。daemon 不猜焦点，不按 app title/window list 自行决定投递目标。
+- Remote-window 粘贴执行必须复用 file-transfer paste-image owner 写 macOS clipboard；remote-window target 只追加 Command+V 注入，terminal target 只追加 terminal Ctrl+V。禁止新增第二套图片上传或 clipboard 流水线。
+- Remote-window 视频码率是 stream-local quality control：start 携带当前 preset，后续 selector 发送 `remote-window-stream-quality-request`；daemon 只在 stream owner 内校验并应用 WebRTC sender `maxBitrate`。禁止用码率切换重启 capture、receiver、session transport 或改坐标真源。
+- 相关改动最小 gate：`RemoteWindowOverlay.test.tsx`、`TerminalPage.remote-window-overlay.test.tsx`、`session-context-remote-window-runtime.test.ts`、`session-context-transfer-runtime.test.ts`、`terminal-file-transfer-binary-runtime.test.ts`、`remote-window-stream-daemon.test.ts`、`terminal-message-runtime.test.ts`、`remote-window-video-quality.test.ts`、`tsc --noEmit`、`test:feature-registry`。daemon 可用时追加 live WS 显式错误/成功 smoke。
+
 ### 2.3 旧文档处理
 - `android/note.md` 是 agent 自己看的工作台，不是主真源
 - 探索过程里的高信号发现、假设、踩坑和回归锁定要写进去；不要把完整流程说明塞进 note

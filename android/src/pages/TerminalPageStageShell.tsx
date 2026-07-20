@@ -47,6 +47,7 @@ const TerminalStageShell = ReactMemo(
     handleActiveTerminalActivateInput,
     onActivatePane,
     onActivateSession,
+    onTerminalFocusOwnerActivate,
     focusNonce,
     terminalFontSize,
     terminalThemeId,
@@ -97,6 +98,7 @@ const TerminalStageShell = ReactMemo(
     handleActiveTerminalActivateInput: () => void;
     onActivatePane?: (paneId: string) => void;
     onActivateSession?: (sessionId: string, sourceSlot?: TerminalSessionGroupSlotName) => void;
+    onTerminalFocusOwnerActivate?: () => void;
     focusNonce: number;
     terminalFontSize: number;
     terminalThemeId?: string;
@@ -282,7 +284,10 @@ const TerminalStageShell = ReactMemo(
               <div
                 data-testid="terminal-pane-shell"
                 data-pane-id={pane.id}
-                onPointerDown={() => onActivatePane?.(pane.id)}
+                onPointerDown={() => {
+                  onTerminalFocusOwnerActivate?.();
+                  onActivatePane?.(pane.id);
+                }}
                 style={{
                   flex: `${Math.max(0.01, pane.size ?? 1)} 1 0%`,
                   minHeight: 0,
@@ -301,7 +306,7 @@ const TerminalStageShell = ReactMemo(
           },
         };
       });
-    }, [activePaneId, interactiveSession?.id, renderedPaneSessions, renderTerminal, splitVisible, visiblePaneEntries]);
+    }, [activePaneId, interactiveSession?.id, onActivatePane, onTerminalFocusOwnerActivate, renderedPaneSessions, renderTerminal, splitVisible, visiblePaneEntries]);
 
     const activateSessionGroupSlot = useCallback((session: Session, slot: TerminalSessionGroupSlotName) => {
       if (slot === "center") {

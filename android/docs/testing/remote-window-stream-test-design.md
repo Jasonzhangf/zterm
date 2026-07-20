@@ -24,7 +24,8 @@ The current real-video implementation slice now additionally binds:
 4. Daemon `startScreenCaptureKitFrameSource()` real macOS ScreenCaptureKit process source, RGBA-to-I420 conversion, `RTCVideoSource` feeding, and exactly-once cleanup.
 5. Mac local live proof for a generic app-window marker: temporary native AppKit window -> catalog target -> ScreenCaptureKit capture -> WebRTC receiver -> pixel oracle. This does not replace the required Android rendered-pixel gate.
 6. Android overlay now maps video-surface pointer/key/scroll events to `remote-window-input` intents. Unzoomed touch drag and wheel input emit pixel scroll; zoomed fullscreen drag remains local pan. The daemon implements generic `bring-to-focus + os-event` pointer/key/scroll injection for active streams.
-7. Remote-window QuickBar input is projection-only: terminal/tmux/iTerm-specific actions such as tmux copy are disabled/grey while generic key, text, paste, arrows, and keyboard invocation remain available. Android IME committed text and native key/backspace events route to the active remote-window stream while the context is active.
+7. Remote-window QuickBar input is projection-only: terminal/tmux/iTerm-specific actions such as tmux copy are disabled/grey while generic key, text, paste, arrows, image paste, and keyboard invocation remain available. Android IME committed text and native key/backspace events route to the active remote-window stream while the context is active. QuickBar image paste uses `pasteTarget.kind=remote-window` only while the active focus context is the remote window; terminal surface focus clears that context and returns the same image action to the terminal Ctrl+V paste path.
+8. Video bitrate is stream-local quality control: stream start carries the selected bitrate config, the overlay selector sends `remote-window-stream-quality-request` for an active stream, the daemon applies it to the existing WebRTC sender, and the update must not restart capture or rebuild transport.
 
 Still pending for feature completion:
 
@@ -45,6 +46,7 @@ Current executable gates:
 - `src/server/remote-window-stream-daemon.test.ts`
 - `src/server/terminal-message-runtime.test.ts`
 - `src/lib/remote-window-input-mapping.test.ts`
+- `src/lib/remote-window-video-quality.test.ts`
 
 ## White-Box Gates
 
@@ -92,6 +94,8 @@ Current executable gates:
    - Current slice: pinch zoom shows a minimap; zoomed fullscreen single-finger drag pans the projected viewport without restarting the stream.
    - Current slice: QuickBar sequences map to remote-window key/text events for the active stream and do not call terminal input while a supported remote-window input context exists.
    - Current slice: ImeAnchor input/backspace/key events route to remote-window input context while active; committed CJK, special symbols, and newlines are preserved exactly and do not leak into the terminal session under the video overlay.
+   - Current slice: QuickBar image paste sends a remote-window paste target while the remote-window focus context is active, and after terminal surface focus activation the same image button calls the terminal paste path without a paste target.
+   - Current slice: bitrate presets are remembered per selected desktop window identity; changing a selected active stream from the overlay calls quality update exactly once and does not call stream start again.
    - Full stream slice: `fullscreenStream + Back -> floatingStream`
    - Full stream slice: `fullscreenStream + minimize -> floatingStream`
    - `close -> closed`
@@ -113,6 +117,7 @@ Current executable gates:
    - DOM positive-down/right scroll deltas remain the wire contract. The daemon must negate them exactly once when constructing macOS `CGEvent` wheel values.
    - The daemon macOS input schema must match the protocol union: pointer/key events require `phase`; scroll events do not carry `phase` and must still decode and inject.
    - The daemon owns a persistent Swift input helper for a selected stream/runtime. Pointer, scroll, and key sequences must not compile a fresh `swift -e` process per event.
+   - Remote-window image paste must use the same paste-image upload owner but with an explicit remote-window target, causing daemon clipboard write plus Command+V injection for the selected stream. Terminal focus must remove that target and keep the existing terminal Ctrl+V path.
    - QuickBar key/text/IME input must use the same active stream id and target id as the visible overlay; stale stream ids after close/shrink/reselect are a failure.
    - The real `<video>` receiver is pointer-transparent; fullscreen and floating hit tests belong to the overlay video surface so user taps are not swallowed by media playback.
    - `bring-to-focus + os-event` matches the target AX window by manifest bounds, activates/raises it, and focuses target before forwarding mouse/keyboard/scroll.

@@ -6,6 +6,7 @@ import {
   resolveRemoteWindowStreamIceServers,
   sendRemoteWindowInputRuntime,
   stopRemoteWindowStreamRuntime,
+  updateRemoteWindowStreamQualityRuntime,
 } from './session-context-remote-window-runtime';
 import type { RemoteWindowStreamTargetManifest } from '../lib/types';
 import { DEFAULT_BRIDGE_SETTINGS } from '../lib/bridge-settings';
@@ -162,11 +163,13 @@ describe('session context remote window runtime', () => {
       sessionId: ' session-1 ',
       streamId: 'stream-1',
       target,
+      videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
       sessions: [baseSession],
       readSessionTransportSocket: () => ws,
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart,
+        sendStreamQuality: vi.fn(),
         sendStreamIceCandidate,
         stopStream: vi.fn(),
         sendInputEvent: vi.fn(),
@@ -200,6 +203,7 @@ describe('session context remote window runtime', () => {
       target,
       offer: { type: 'offer', sdp: 'offer-sdp' },
       iceServers: undefined,
+      videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
       sendSocketPayload,
     });
   });
@@ -290,6 +294,7 @@ describe('session context remote window runtime', () => {
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart,
+        sendStreamQuality: vi.fn(),
         sendStreamIceCandidate: vi.fn(),
         stopStream: vi.fn(),
         sendInputEvent: vi.fn(),
@@ -326,6 +331,7 @@ describe('session context remote window runtime', () => {
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart: vi.fn(),
+        sendStreamQuality: vi.fn(),
         sendStreamIceCandidate: vi.fn(),
         stopStream: vi.fn(),
         sendInputEvent: vi.fn(),
@@ -354,6 +360,7 @@ describe('session context remote window runtime', () => {
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart: vi.fn(),
+        sendStreamQuality: vi.fn(),
         sendStreamIceCandidate: vi.fn(),
         stopStream: stopMessage,
         sendInputEvent: vi.fn(),
@@ -369,6 +376,42 @@ describe('session context remote window runtime', () => {
     expect(stopMessage).toHaveBeenCalledWith('session-1', {
       ws,
       streamId: 'stream-1',
+      sendSocketPayload,
+    });
+  });
+
+  it('sends stream quality updates over the existing stream transport', () => {
+    const ws = makeSocket();
+    const sendStreamQuality = vi.fn();
+    const sendSocketPayload = vi.fn();
+
+    updateRemoteWindowStreamQualityRuntime({
+      sessionId: ' session-1 ',
+      payload: {
+        streamId: 'stream-1',
+        targetId: 'target-1',
+        videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+      },
+      sessions: [baseSession],
+      readSessionTransportSocket: () => ws,
+      remoteWindowMessageRuntime: {
+        requestTargets: vi.fn(),
+        requestStreamStart: vi.fn(),
+        sendStreamQuality,
+        sendStreamIceCandidate: vi.fn(),
+        stopStream: vi.fn(),
+        sendInputEvent: vi.fn(),
+      },
+      sendSocketPayload,
+    });
+
+    expect(sendStreamQuality).toHaveBeenCalledWith('session-1', {
+      ws,
+      payload: {
+        streamId: 'stream-1',
+        targetId: 'target-1',
+        videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+      },
       sendSocketPayload,
     });
   });
@@ -400,6 +443,7 @@ describe('session context remote window runtime', () => {
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart: vi.fn(),
+        sendStreamQuality: vi.fn(),
         sendStreamIceCandidate: vi.fn(),
         stopStream: vi.fn(),
         sendInputEvent,
@@ -440,6 +484,7 @@ describe('session context remote window runtime', () => {
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart: vi.fn(),
+        sendStreamQuality: vi.fn(),
         sendStreamIceCandidate: vi.fn(),
         stopStream: vi.fn(),
         sendInputEvent: vi.fn(),

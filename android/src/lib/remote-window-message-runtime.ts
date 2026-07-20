@@ -9,7 +9,9 @@ import type {
   RemoteWindowStreamErrorPayload,
   RemoteWindowStreamRequestPayload,
   RemoteWindowStreamRtcDescription,
+  RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamTargetsResponsePayload,
+  RemoteWindowVideoBitrateConfig,
   ServerMessage,
 } from './types';
 import type { BridgeTransportSocket } from './traversal/types';
@@ -20,6 +22,7 @@ export type RemoteWindowControlMessage = Extract<
   | { type: 'remote-window-stream-started' }
   | { type: 'remote-window-stream-ice-candidate' }
   | { type: 'remote-window-stream-status' }
+  | { type: 'remote-window-stream-quality-result' }
   | { type: 'remote-window-input-result' }
   | { type: 'remote-window-error' }
 >;
@@ -49,6 +52,7 @@ export function isRemoteWindowControlMessage(msg: ServerMessage): msg is RemoteW
     || msg.type === 'remote-window-stream-started'
     || msg.type === 'remote-window-stream-ice-candidate'
     || msg.type === 'remote-window-stream-status'
+    || msg.type === 'remote-window-stream-quality-result'
     || msg.type === 'remote-window-input-result'
     || msg.type === 'remote-window-error';
 }
@@ -186,6 +190,7 @@ export function createRemoteWindowMessageRuntime(input?: {
       target: RemoteWindowStreamTargetManifest;
       offer: RemoteWindowStreamRtcDescription;
       iceServers?: Array<Record<string, unknown>>;
+      videoBitrate?: RemoteWindowVideoBitrateConfig;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     }) {
       const targetSessionId = sessionId.trim();
@@ -217,6 +222,7 @@ export function createRemoteWindowMessageRuntime(input?: {
               target: options.target,
               offer: options.offer,
               ...(options.iceServers ? { iceServers: options.iceServers } : {}),
+              ...(options.videoBitrate ? { videoBitrate: options.videoBitrate } : {}),
             },
           });
         } catch (error) {
@@ -224,6 +230,28 @@ export function createRemoteWindowMessageRuntime(input?: {
           clearPendingTimeout(pending);
           reject(error instanceof Error ? error : new Error(String(error)));
         }
+      });
+    },
+
+    sendStreamQuality(sessionId: string, options: {
+      ws: BridgeTransportSocket;
+      payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>;
+      sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+    }) {
+      const targetSessionId = sessionId.trim();
+      const streamId = options.payload.streamId.trim();
+      const targetId = options.payload.targetId.trim();
+      if (!targetSessionId || !streamId || !targetId) {
+        throw new Error('Remote window stream quality requires sessionId, streamId, and targetId');
+      }
+      sendClientMessage(targetSessionId, options.ws, options.sendSocketPayload, {
+        type: 'remote-window-stream-quality-request',
+        payload: {
+          ...options.payload,
+          streamId,
+          targetId,
+          requestId: `rw-quality-${now()}-${Math.random().toString(36).slice(2, 8)}`,
+        },
       });
     },
 
@@ -337,6 +365,9 @@ export function createRemoteWindowMessageRuntime(input?: {
       }
       if (msg.type === 'remote-window-stream-status') {
         return dispatchListener('status', input?.onStreamStatus, msg.payload);
+      }
+      if (msg.type === 'remote-window-stream-quality-result') {
+        return false;
       }
       if (msg.type === 'remote-window-input-result') {
         return false;

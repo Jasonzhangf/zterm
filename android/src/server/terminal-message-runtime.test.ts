@@ -141,9 +141,10 @@ function createRuntime(options?: {
   mirror?: SessionMirror | null;
 }) {
   type RemoteWindowListTargetsResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['listTargets']>>;
-  type RemoteWindowStartStreamResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['startStream']>>;
-  type RemoteWindowStopStreamResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['stopStream']>>;
-  type RemoteWindowInputResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['injectInput']>>;
+      type RemoteWindowStartStreamResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['startStream']>>;
+      type RemoteWindowStopStreamResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['stopStream']>>;
+      type RemoteWindowQualityResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['updateStreamQuality']>>;
+      type RemoteWindowInputResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['injectInput']>>;
   const sessions = new Map<string, TerminalSession>();
   const sendTransportMessage = vi.fn();
   const sendMessage = vi.fn();
@@ -182,6 +183,13 @@ function createRuntime(options?: {
       requestId: 'remote-window-stop-default',
       streamId: 'stream-default',
       phase: 'stopped',
+    })),
+    updateStreamQuality: vi.fn(async (): Promise<RemoteWindowQualityResult> => ({
+      requestId: 'remote-window-quality-default',
+      streamId: 'stream-default',
+      targetId: 'target-default',
+      accepted: true,
+      videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
     })),
     injectInput: vi.fn(async (): Promise<RemoteWindowInputResult> => ({
       requestId: 'remote-window-input-default',
@@ -1064,6 +1072,69 @@ describe('terminal message runtime explicit error truth', () => {
     expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
       type: 'remote-window-stream-status',
       payload: stopPayload,
+    });
+  });
+
+  it('routes remote window stream quality requests to the daemon stream owner', async () => {
+    const { runtime, sendTransportMessage, remoteWindowStreamRuntime } = createRuntime();
+    const connection = createConnection(null);
+    const qualityPayload = {
+      requestId: 'rw-quality-1',
+      streamId: 'stream-1',
+      targetId: 'target-1',
+      accepted: true,
+      videoBitrate: { preset: '10mbps' as const, bitrateMbps: 10 as const, maxBitrateBps: 10_000_000 },
+    };
+    remoteWindowStreamRuntime.updateStreamQuality.mockResolvedValueOnce(qualityPayload);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'remote-window-stream-quality-request',
+      payload: {
+        requestId: 'rw-quality-1',
+        streamId: 'stream-1',
+        targetId: 'target-1',
+        videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+      },
+    })));
+    await flushAsyncHandlers();
+
+    expect(remoteWindowStreamRuntime.updateStreamQuality).toHaveBeenCalledWith({
+      requestId: 'rw-quality-1',
+      streamId: 'stream-1',
+      targetId: 'target-1',
+      videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
+    });
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'remote-window-stream-quality-result',
+      payload: qualityPayload,
+    });
+  });
+
+  it('surfaces remote window stream quality errors explicitly', async () => {
+    const { runtime, sendTransportMessage, remoteWindowStreamRuntime } = createRuntime();
+    const connection = createConnection(null);
+    const errorPayload = {
+      requestId: 'rw-quality-fail',
+      streamId: 'stream-1',
+      code: 'remote_window_stream_quality_failed',
+      message: 'remote window video bitrate config does not match its preset',
+    };
+    remoteWindowStreamRuntime.updateStreamQuality.mockResolvedValueOnce(errorPayload);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'remote-window-stream-quality-request',
+      payload: {
+        requestId: 'rw-quality-fail',
+        streamId: 'stream-1',
+        targetId: 'target-1',
+        videoBitrate: { preset: '10mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+      },
+    })));
+    await flushAsyncHandlers();
+
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'remote-window-error',
+      payload: errorPayload,
     });
   });
 

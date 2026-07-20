@@ -6,6 +6,7 @@ import type {
   FileUploadEndPayload,
   FileUploadStartPayload,
   PasteImagePayload,
+  PasteImageStartPayload,
   RemoteScreenshotRequestPayload,
   ServerMessage,
 } from '../lib/types';
@@ -35,6 +36,11 @@ export interface TerminalFileTransferRuntimeDeps {
   writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean) => boolean;
   readTmuxPaneCurrentPath: (sessionName: string) => string;
   runCommand: (command: string, args: string[]) => void;
+  pasteImageToRemoteWindow?: (
+    session: TerminalSession,
+    target: NonNullable<PasteImageStartPayload['pasteTarget']>,
+    image: { name: string; mimeType: string; bytes: number },
+  ) => Promise<void> | void;
   captureRemoteScreenshot: (options: { outputPath: string; timeoutMs: number }) => Promise<{ outputPath: string }>;
   logTimePrefix: () => string;
 }

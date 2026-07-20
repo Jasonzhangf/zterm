@@ -201,12 +201,26 @@ export interface RemoteWindowStreamIceCandidate {
   usernameFragment?: string | null;
 }
 
+export type RemoteWindowVideoBitratePreset =
+  | '2mbps'
+  | '5mbps'
+  | '10mbps'
+  | '20mbps'
+  | 'fullscreen';
+
+export interface RemoteWindowVideoBitrateConfig {
+  preset: RemoteWindowVideoBitratePreset;
+  bitrateMbps: 2 | 5 | 10 | 20;
+  maxBitrateBps: number;
+}
+
 export interface RemoteWindowStreamStartRequestPayload {
   requestId: string;
   streamId: string;
   target: RemoteWindowStreamTargetManifest;
   offer: RemoteWindowStreamRtcDescription;
   iceServers?: Array<Record<string, unknown>>;
+  videoBitrate?: RemoteWindowVideoBitrateConfig;
 }
 
 export interface RemoteWindowStreamStartedPayload {
@@ -219,6 +233,7 @@ export interface RemoteWindowStreamStartedPayload {
     frameWidth: number;
     frameHeight: number;
     frameRate: number;
+    maxBitrateBps?: number;
     targetKind: 'app-window' | 'iterm2-pane';
   };
   transport: {
@@ -246,6 +261,21 @@ export interface RemoteWindowStreamStatusPayload {
 export interface RemoteWindowStreamStopRequestPayload {
   requestId: string;
   streamId: string;
+}
+
+export interface RemoteWindowStreamQualityRequestPayload {
+  requestId: string;
+  streamId: string;
+  targetId: string;
+  videoBitrate: RemoteWindowVideoBitrateConfig;
+}
+
+export interface RemoteWindowStreamQualityResultPayload {
+  requestId: string;
+  streamId: string;
+  targetId: string;
+  accepted: boolean;
+  videoBitrate: RemoteWindowVideoBitrateConfig;
 }
 
 export interface RemoteWindowInputEventPayload {
@@ -347,6 +377,11 @@ export interface PasteImageStartPayload {
   mimeType: string;
   byteLength: number;
   pasteSequence?: string;
+  pasteTarget?: {
+    kind: 'remote-window';
+    streamId: string;
+    targetId: string;
+  };
 }
 
 export interface PasteImagePayload {
@@ -354,6 +389,11 @@ export interface PasteImagePayload {
   mimeType: string;
   dataBase64: string;
   pasteSequence?: string;
+  pasteTarget?: {
+    kind: 'remote-window';
+    streamId: string;
+    targetId: string;
+  };
 }
 
 export interface AttachFileStartPayload {
@@ -389,6 +429,7 @@ export type BridgeClientMessage =
   | { type: 'remote-window-stream-start-request'; payload: RemoteWindowStreamStartRequestPayload }
   | { type: 'remote-window-stream-ice-candidate'; payload: RemoteWindowStreamIceCandidatePayload }
   | { type: 'remote-window-stream-stop-request'; payload: RemoteWindowStreamStopRequestPayload }
+  | { type: 'remote-window-stream-quality-request'; payload: RemoteWindowStreamQualityRequestPayload }
   | { type: 'remote-window-input'; payload: RemoteWindowInputEventPayload }
   | { type: 'file-list-request'; payload: FileListRequestPayload }
   | { type: 'file-create-directory-request'; payload: { requestId: string; path: string; name: string } }
@@ -457,6 +498,7 @@ export type BridgeServerControlMessage =
   | { type: 'remote-window-stream-started'; payload: RemoteWindowStreamStartedPayload }
   | { type: 'remote-window-stream-ice-candidate'; payload: RemoteWindowStreamIceCandidatePayload }
   | { type: 'remote-window-stream-status'; payload: RemoteWindowStreamStatusPayload }
+  | { type: 'remote-window-stream-quality-result'; payload: RemoteWindowStreamQualityResultPayload }
   | { type: 'remote-window-input-result'; payload: RemoteWindowInputResultPayload }
   | { type: 'input-ack'; payload: TerminalInputAckPayload }
   | { type: 'remote-window-error'; payload: RemoteWindowStreamErrorPayload }

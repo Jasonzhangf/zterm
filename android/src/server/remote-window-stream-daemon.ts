@@ -9,12 +9,15 @@ import type {
   RemoteWindowStreamRect,
   RemoteWindowStreamRequestPayload,
   RemoteWindowStreamRtcDescription,
+  RemoteWindowStreamQualityRequestPayload,
+  RemoteWindowStreamQualityResultPayload,
   RemoteWindowStreamStartedPayload,
   RemoteWindowStreamStartRequestPayload,
   RemoteWindowStreamStatusPayload,
   RemoteWindowStreamStopRequestPayload,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
+  RemoteWindowVideoBitrateConfig,
 } from '@zterm/shared/protocol';
 
 const DEFAULT_ITERM2_PYTHON_TIMEOUT_MS = 5000;
@@ -153,6 +156,9 @@ export interface RemoteWindowStreamDaemonRuntime {
   stopStream: (
     payload: RemoteWindowStreamStopRequestPayload,
   ) => Promise<RemoteWindowStreamStatusPayload | RemoteWindowStreamErrorPayload>;
+  updateStreamQuality: (
+    payload: RemoteWindowStreamQualityRequestPayload,
+  ) => Promise<RemoteWindowStreamQualityResultPayload | RemoteWindowStreamErrorPayload>;
   injectInput: (
     payload: RemoteWindowInputEventPayload,
   ) => Promise<RemoteWindowInputResultPayload | RemoteWindowStreamErrorPayload>;
@@ -216,8 +222,10 @@ interface ActiveRemoteWindowStream {
   targetId: string;
   target: RemoteWindowStreamTargetManifest;
   peerConnection: RTCPeerConnection;
+  videoSender: RTCRtpSender | null;
   videoSource: RtcVideoSourceLike;
   videoTrack: MediaStreamTrack;
+  videoBitrate: RemoteWindowVideoBitrateConfig | null;
   captureSource: RemoteWindowCaptureFrameSource | null;
   handlers: RemoteWindowStreamDaemonHandlers;
   framesSent: number;
@@ -541,6 +549,7 @@ let keyCodes: [String: CGKeyCode] = [
     "ArrowRight": 124,
     "ArrowDown": 125,
     "ArrowUp": 126,
+    "KeyV": 9,
     "Delete": 117,
     "Home": 115,
     "End": 119,
@@ -1454,6 +1463,63 @@ function normalizeIceCandidate(candidate: RTCIceCandidate): RemoteWindowStreamIc
   };
 }
 
+function normalizeRemoteWindowVideoBitrateConfig(
+  input: RemoteWindowVideoBitrateConfig | undefined,
+): RemoteWindowVideoBitrateConfig | null {
+  if (!input) {
+    return null;
+  }
+  const bitrateMbps = (() => {
+    switch (input.preset) {
+      case '2mbps':
+        return 2 as const;
+      case '5mbps':
+        return 5 as const;
+      case '10mbps':
+        return 10 as const;
+      case '20mbps':
+      case 'fullscreen':
+        return 20 as const;
+      default:
+        throw new Error(`remote window video bitrate preset is invalid: ${String(input.preset)}`);
+    }
+  })();
+  const maxBitrateBps = bitrateMbps * 1_000_000;
+  if (input.bitrateMbps !== bitrateMbps || input.maxBitrateBps !== maxBitrateBps) {
+    throw new Error('remote window video bitrate config does not match its preset');
+  }
+  return {
+    preset: input.preset,
+    bitrateMbps,
+    maxBitrateBps,
+  };
+}
+
+async function applyRemoteWindowVideoBitrate(
+  sender: RTCRtpSender | null,
+  config: RemoteWindowVideoBitrateConfig,
+) {
+  if (
+    !sender
+    || typeof sender.getParameters !== 'function'
+    || typeof sender.setParameters !== 'function'
+  ) {
+    throw new Error('remote window video bitrate control is not available on this WebRTC sender');
+  }
+  const currentParameters = sender.getParameters();
+  const currentEncodings = Array.isArray(currentParameters.encodings) && currentParameters.encodings.length > 0
+    ? currentParameters.encodings
+    : [{} as RTCRtpEncodingParameters];
+  const nextParameters = {
+    ...currentParameters,
+    encodings: currentEncodings.map((encoding) => ({
+      ...encoding,
+      maxBitrate: config.maxBitrateBps,
+    })),
+  } as RTCRtpSendParameters;
+  await sender.setParameters(nextParameters);
+}
+
 function validateStreamTargetForCapture(target: RemoteWindowStreamTargetManifest) {
   if (!target.streamTargetId.trim()) {
     throw new Error('remote window stream target id is required');
@@ -1933,7 +1999,11 @@ export function createRemoteWindowStreamDaemonRuntime(
       });
       const videoSource = createVideoSource();
       const videoTrack = videoSource.createTrack();
-      peerConnection.addTrack(videoTrack);
+      const videoSender = peerConnection.addTrack(videoTrack) as RTCRtpSender | undefined;
+      const videoBitrate = normalizeRemoteWindowVideoBitrateConfig(payload.videoBitrate);
+      if (videoBitrate) {
+        await applyRemoteWindowVideoBitrate(videoSender || null, videoBitrate);
+      }
 
       entry = {
         streamId: payload.streamId,
@@ -1941,8 +2011,10 @@ export function createRemoteWindowStreamDaemonRuntime(
         targetId: payload.target.streamTargetId,
         target: payload.target,
         peerConnection,
+        videoSender: videoSender || null,
         videoSource,
         videoTrack,
+        videoBitrate,
         captureSource: null,
         handlers,
         framesSent: 0,
@@ -2039,6 +2111,7 @@ export function createRemoteWindowStreamDaemonRuntime(
           frameWidth: captureSource.width,
           frameHeight: captureSource.height,
           frameRate: captureSource.frameRate,
+          ...(entry.videoBitrate ? { maxBitrateBps: entry.videoBitrate.maxBitrateBps } : {}),
           targetKind: payload.target.videoTarget.kind,
         },
         transport: {
@@ -2098,6 +2171,42 @@ export function createRemoteWindowStreamDaemonRuntime(
     };
   }
 
+  async function updateStreamQuality(
+    payload: RemoteWindowStreamQualityRequestPayload,
+  ): Promise<RemoteWindowStreamQualityResultPayload | RemoteWindowStreamErrorPayload> {
+    if (!payload.requestId || !payload.streamId || !payload.targetId) {
+      return buildStreamError(payload, 'remote_window_stream_quality_invalid', 'remote window stream quality requires requestId, streamId, and targetId');
+    }
+    const entry = activeStreams.get(payload.streamId);
+    if (!entry || entry.cleanupDone) {
+      return buildStreamError(payload, 'remote_window_stream_quality_missing', `remote window stream is not active: ${payload.streamId}`);
+    }
+    if (payload.targetId !== entry.targetId) {
+      return buildStreamError(payload, 'remote_window_stream_quality_target_mismatch', `remote window stream quality target mismatch: ${payload.targetId}`);
+    }
+    try {
+      const videoBitrate = normalizeRemoteWindowVideoBitrateConfig(payload.videoBitrate);
+      if (!videoBitrate) {
+        throw new Error('remote window stream quality requires videoBitrate');
+      }
+      await applyRemoteWindowVideoBitrate(entry.videoSender, videoBitrate);
+      entry.videoBitrate = videoBitrate;
+      return {
+        requestId: payload.requestId,
+        streamId: payload.streamId,
+        targetId: payload.targetId,
+        accepted: true,
+        videoBitrate,
+      };
+    } catch (error) {
+      return buildStreamError(
+        payload,
+        'remote_window_stream_quality_failed',
+        error instanceof Error ? error.message : 'remote window stream quality update failed',
+      );
+    }
+  }
+
   async function injectInput(
     payload: RemoteWindowInputEventPayload,
   ): Promise<RemoteWindowInputResultPayload | RemoteWindowStreamErrorPayload> {
@@ -2139,6 +2248,7 @@ export function createRemoteWindowStreamDaemonRuntime(
     startStream,
     addIceCandidate,
     stopStream,
+    updateStreamQuality,
     injectInput,
     dispose,
   };

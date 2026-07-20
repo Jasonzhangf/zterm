@@ -139,6 +139,10 @@ Floating preview geometry, fullscreen display mode, and fullscreen zoom state ar
 
 Remote-window media negotiation is a separate WebRTC peer connection, but its ICE configuration must be derived from the current session traversal route. When the active session resolved through `rtc-direct`, the video receiver/start request uses the same STUN-only direct ICE truth. When it resolved through `rtc-relay`, the video receiver/start request uses the Relay TURN ICE truth. Android must not leave the remote-window video peer connection as no-ICE on Relay/cellular paths, and must not invent a screenshot or terminal-buffer fallback if ICE/media negotiation fails.
 
+Video quality is stream-local control, not transport lifecycle. Android may remember a bitrate preset per selected desktop window identity and seed defaults from source resolution, then send `remote-window-stream-quality-request` for an already active stream. Changing bitrate must not restart capture, recreate the receiver, rebuild the session transport, or change daemon coordinate truth. The daemon stream owner applies the requested sender bitrate through the WebRTC sender parameters and rejects unsupported or inconsistent bitrate payloads explicitly.
+
+Image paste follows the current focus owner. When the active focus owner is a remote-window stream, Android sends the normal paste-image upload with `pasteTarget.kind=remote-window`; the daemon writes the macOS clipboard and injects Command+V through the remote-window input owner for that stream/target. When terminal surface focus is activated, Android clears the remote-window input context and the same QuickBar image action remains on the terminal paste path, writing the macOS clipboard and sending the terminal Ctrl+V sequence. The daemon must not guess focus from the desktop window list or app title.
+
 ## Explicit Errors
 
 The daemon must fail explicitly for:
@@ -159,4 +163,4 @@ No fallback may silently downgrade this feature to screenshot, terminal buffer r
 
 ## Implementation Status
 
-Current status is anchored for app-window catalog, real ScreenCaptureKit/WebRTC video, Android floating/fullscreen projection with safe-area top chrome and IME bottom-inset lift, fullscreen aspect-fit default plus aspect-fill cover display option, fullscreen zoom/pan/minimap, route-derived ICE for remote-window video, raw Android IME text routing, touch/wheel pixel-scroll intent, and generic `bring-to-focus + AXRaise + os-event` pointer/key/scroll injection. Remaining live completion gaps are Android real-device input replay after this interaction slice and iTerm2-pane stream/input proof.
+Current status is anchored for app-window catalog, real ScreenCaptureKit/WebRTC video, Android floating/fullscreen projection with safe-area top chrome and IME bottom-inset lift, fullscreen aspect-fit default plus aspect-fill cover display option, fullscreen zoom/pan/minimap, route-derived ICE for remote-window video, per-window bitrate start/update control, focus-aware image paste routing, raw Android IME text routing, touch/wheel pixel-scroll intent, and generic `bring-to-focus + AXRaise + os-event` pointer/key/scroll injection. Remaining live completion gaps are Android real-device input replay after this interaction slice and iTerm2-pane stream/input proof.

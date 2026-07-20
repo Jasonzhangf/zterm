@@ -75,13 +75,17 @@ vi.mock('../components/TerminalView', () => ({
 
 vi.mock('../components/terminal/TerminalQuickBar', () => ({
   TerminalQuickBar: ({
+    activeSessionId,
     onSendSequence,
     onSessionDraftSend,
+    onImagePaste,
     onToggleKeyboard,
     remoteWindowInputActive,
   }: {
+    activeSessionId?: string | null;
     onSendSequence?: (sequence: string) => void;
     onSessionDraftSend?: (value: string) => void;
+    onImagePaste?: (sessionId: string, file: File) => void;
     onToggleKeyboard?: () => void;
     remoteWindowInputActive?: boolean;
   }) => (
@@ -91,6 +95,15 @@ vi.mock('../components/terminal/TerminalQuickBar', () => ({
     >
       <button type="button" onClick={() => onSendSequence?.('\x1b[A')}>quickbar-arrow-up</button>
       <button type="button" onClick={() => onSessionDraftSend?.('继续执行\r')}>quickbar-send-draft</button>
+      <button
+        type="button"
+        onClick={() => activeSessionId && onImagePaste?.(
+          activeSessionId,
+          new File(['image'], 'proof.png', { type: 'image/png' }),
+        )}
+      >
+        quickbar-image
+      </button>
       <button type="button" onClick={() => onToggleKeyboard?.()}>quickbar-keyboard</button>
     </div>
   ),
@@ -194,6 +207,7 @@ describe('TerminalPage remote window overlay', () => {
     const onSendRemoteWindowInput = vi.fn();
     const onQuickActionInput = vi.fn();
     const onSessionDraftSend = vi.fn();
+    const onImagePaste = vi.fn();
     const onActiveBodySubscriptionSuppressedChange = vi.fn();
 
     render(
@@ -213,6 +227,7 @@ describe('TerminalPage remote window overlay', () => {
         onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
         onRequestRemoteWindowStreamStart={onRequestRemoteWindowStreamStart}
         onSendRemoteWindowInput={onSendRemoteWindowInput}
+        onImagePaste={onImagePaste}
         onQuickActionInput={onQuickActionInput}
         onSessionDraftSend={onSessionDraftSend}
         quickActions={[]}
@@ -237,12 +252,34 @@ describe('TerminalPage remote window overlay', () => {
       expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
       expect(onRequestRemoteWindowStreamStart).toHaveBeenCalledWith('s1', expect.objectContaining({
         streamTargetId: 'app-1',
-      }), expect.stringMatching(/^rw-stream-/));
+      }), expect.stringMatching(/^rw-stream-/), {
+        videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
+      });
       expect(screen.getByTestId('remote-window-video')).toBeTruthy();
       expect(screen.queryByTestId('terminal-view-s1')).toBeTruthy();
       expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
       expect(screen.getByTestId('terminal-quickbar').getAttribute('data-remote-window-input-active')).toBe('true');
       expect(onActiveBodySubscriptionSuppressedChange).toHaveBeenLastCalledWith(false);
+    });
+
+    fireEvent.click(screen.getByText('quickbar-image'));
+    await waitFor(() => {
+      expect(onImagePaste).toHaveBeenCalledWith('s1', expect.any(File), {
+        pasteTarget: {
+          kind: 'remote-window',
+          streamId: expect.stringMatching(/^rw-stream-/),
+          targetId: 'app-1',
+        },
+      });
+    });
+
+    fireEvent.pointerDown(screen.getByTestId('terminal-pane-shell'));
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-quickbar').getAttribute('data-remote-window-input-active')).toBe('false');
+    });
+    fireEvent.click(screen.getByText('quickbar-image'));
+    await waitFor(() => {
+      expect(onImagePaste).toHaveBeenLastCalledWith('s1', expect.any(File));
     });
 
     fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));

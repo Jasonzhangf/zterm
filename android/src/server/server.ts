@@ -113,6 +113,8 @@ const terminalAttachTokenRuntime = createTerminalAttachTokenRuntime();
 let terminalScheduleRuntime: TerminalScheduleRuntime;
 let terminalControlRuntime: TerminalControlRuntime;
 let terminalTransportRuntimeSendMessage: (session: TerminalTransportSubscriber, message: ServerMessage) => void;
+let remoteWindowStreamRuntime: ReturnType<typeof createRemoteWindowStreamDaemonRuntime>;
+let remoteWindowPasteRequestSeq = 0;
 const terminalDebugRuntime = createTerminalDebugRuntime({
   daemonRuntimeDebugEnabled: DAEMON_RUNTIME_DEBUG,
   maxClientDebugBatchLogEntries: MAX_CLIENT_DEBUG_BATCH_LOG_ENTRIES,
@@ -215,6 +217,24 @@ const terminalFileTransferRuntime = createTerminalFileTransferRuntime({
   runCommand: (command, args) => {
     terminalControlRuntime.runCommand(command, args);
   },
+  pasteImageToRemoteWindow: async (_session, target) => {
+    const requestPrefix = `paste-image-${Date.now()}-${remoteWindowPasteRequestSeq += 1}`;
+    const events = [
+      { kind: 'key' as const, phase: 'down' as const, key: 'v', code: 'KeyV', metaKey: true },
+      { kind: 'key' as const, phase: 'up' as const, key: 'v', code: 'KeyV', metaKey: true },
+    ];
+    for (let index = 0; index < events.length; index += 1) {
+      const result = await remoteWindowStreamRuntime.injectInput({
+        requestId: `${requestPrefix}-${index}`,
+        streamId: target.streamId,
+        targetId: target.targetId,
+        event: events[index]!,
+      });
+      if (!('accepted' in result) || !result.accepted) {
+        throw new Error('message' in result ? result.message : 'remote window image paste rejected');
+      }
+    }
+  },
   captureRemoteScreenshot: captureRemoteScreenshotWithDaemon,
   logTimePrefix,
 });
@@ -239,7 +259,7 @@ const {
   closeDetachedTerminalSession,
   renameTmuxSession,
 } = terminalControlRuntime;
-const remoteWindowStreamRuntime = createRemoteWindowStreamDaemonRuntime({
+remoteWindowStreamRuntime = createRemoteWindowStreamDaemonRuntime({
   platform: process.platform,
   runTmux,
 });

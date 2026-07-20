@@ -112,6 +112,7 @@ export async function ensureSessionReadyForPasteRuntime(options: {
 export async function sendImagePasteRuntime(options: {
   sessionId: string;
   file: File;
+  pasteTarget?: PasteImageStartPayload['pasteTarget'];
   ensureSessionReadyForPaste: (sessionId: string, timeoutMs?: number) => Promise<BridgeTransportSocket>;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
 }) {
@@ -126,7 +127,9 @@ export async function sendImagePasteRuntime(options: {
     name: options.file.name || 'upload',
     mimeType: options.file.type || 'application/octet-stream',
     byteLength: fileBuffer.byteLength,
-    pasteSequence: '\x16',
+    ...(options.pasteTarget
+      ? { pasteTarget: options.pasteTarget }
+      : { pasteSequence: '\x16' }),
   };
 
   options.sendSocketPayload(targetSessionId, ws, JSON.stringify({

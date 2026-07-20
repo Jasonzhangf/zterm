@@ -123,45 +123,85 @@ export function createTerminalFileTransferBinaryRuntime(
     };
   }
 
-  function emitImagePaste(session: TerminalSession, payload: { name: string; mimeType: string; pasteSequence?: string }, bufferFactory: () => { sourcePath: string; pngPath: string; bytes: number }) {
-    const mirror = deps.getSessionMirror(session);
-    if (!mirror || mirror.lifecycle !== 'ready') {
-      deps.sendMessage(session, {
-        type: 'error',
-        payload: { message: 'Session is not ready for image paste', code: 'session_not_ready' },
-      });
-      return;
+  function cleanupClipboardImageFiles(sourcePath: string, pngPath: string) {
+    try {
+      unlinkSync(sourcePath);
+    } catch (error) {
+      logCleanupFailure('paste-image', sourcePath, error);
     }
+    try {
+      unlinkSync(pngPath);
+    } catch (error) {
+      logCleanupFailure('paste-image', pngPath, error);
+    }
+  }
 
+  function sendImagePasted(session: TerminalSession, payload: { name: string; mimeType: string }, bytes: number) {
+    deps.sendMessage(session, {
+      type: 'image-pasted',
+      payload: {
+        name: payload.name,
+        mimeType: payload.mimeType,
+        bytes,
+      },
+    });
+  }
+
+  function sendImagePasteError(session: TerminalSession, message: string) {
+    deps.sendMessage(session, {
+      type: 'error',
+      payload: { message: `Failed to paste image: ${message}`, code: 'paste_image_failed' },
+    });
+  }
+
+  function emitImagePaste(
+    session: TerminalSession,
+    payload: {
+      name: string;
+      mimeType: string;
+      pasteSequence?: string;
+      pasteTarget?: PasteImageStartPayload['pasteTarget'];
+    },
+    bufferFactory: () => { sourcePath: string; pngPath: string; bytes: number },
+  ) {
     try {
       const { sourcePath, pngPath, bytes } = bufferFactory();
-      const pasteSequence = payload.pasteSequence || '\x16';
-      deps.writeToLiveMirror(mirror.sessionName, pasteSequence, false);
-      deps.scheduleMirrorLiveSync(mirror, 33);
-      deps.sendMessage(session, {
-        type: 'image-pasted',
-        payload: {
+      if (payload.pasteTarget?.kind === 'remote-window') {
+        if (!deps.pasteImageToRemoteWindow) {
+          cleanupClipboardImageFiles(sourcePath, pngPath);
+          sendImagePasteError(session, 'remote window image paste is not available');
+          return;
+        }
+        void Promise.resolve(deps.pasteImageToRemoteWindow(session, payload.pasteTarget, {
           name: payload.name,
           mimeType: payload.mimeType,
           bytes,
-        },
-      });
-      try {
-        unlinkSync(sourcePath);
-      } catch (error) {
-        logCleanupFailure('paste-image', sourcePath, error);
+        })).then(() => {
+          sendImagePasted(session, payload, bytes);
+          cleanupClipboardImageFiles(sourcePath, pngPath);
+        }).catch((error) => {
+          cleanupClipboardImageFiles(sourcePath, pngPath);
+          sendImagePasteError(session, error instanceof Error ? error.message : String(error));
+        });
+        return;
       }
-      try {
-        unlinkSync(pngPath);
-      } catch (error) {
-        logCleanupFailure('paste-image', pngPath, error);
+
+      const mirror = deps.getSessionMirror(session);
+      if (!mirror || mirror.lifecycle !== 'ready') {
+        cleanupClipboardImageFiles(sourcePath, pngPath);
+        deps.sendMessage(session, {
+          type: 'error',
+          payload: { message: 'Session is not ready for image paste', code: 'session_not_ready' },
+        });
+        return;
       }
+      const pasteSequence = payload.pasteSequence || '\x16';
+      deps.writeToLiveMirror(mirror.sessionName, pasteSequence, false);
+      deps.scheduleMirrorLiveSync(mirror, 33);
+      sendImagePasted(session, payload, bytes);
+      cleanupClipboardImageFiles(sourcePath, pngPath);
     } catch (error) {
-      const err = error instanceof Error ? error.message : String(error);
-      deps.sendMessage(session, {
-        type: 'error',
-        payload: { message: `Failed to paste image: ${err}`, code: 'paste_image_failed' },
-      });
+      sendImagePasteError(session, error instanceof Error ? error.message : String(error));
     }
   }
 

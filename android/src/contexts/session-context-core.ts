@@ -2,11 +2,14 @@ import type { BridgeSettings } from '../lib/bridge-settings';
 import type {
   ClientMessage,
   Host,
+  PasteImageStartPayload,
   RemoteScreenshotCapture,
   RemoteScreenshotStatusPayload,
   RemoteWindowInputEventPayload,
+  RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
+  RemoteWindowVideoBitrateConfig,
   ScheduleJobDraft,
   Session,
   SessionBufferState,
@@ -211,7 +214,11 @@ export interface SessionContextValue {
   resumeActiveSessionTransport: (id: string) => boolean;
   sendMessage: (sessionId: string, msg: ClientMessage) => void;
   sendInput: (sessionId: string, data: string) => void;
-  sendImagePaste: (sessionId: string, file: File) => Promise<void>;
+  sendImagePaste: (
+    sessionId: string,
+    file: File,
+    options?: { pasteTarget?: PasteImageStartPayload['pasteTarget'] },
+  ) => Promise<void>;
   sendFileAttach: (sessionId: string, file: File) => Promise<void>;
   requestRemoteScreenshot: (
     sessionId: string,
@@ -222,7 +229,12 @@ export interface SessionContextValue {
     sessionId: string,
     target: RemoteWindowStreamTargetManifest,
     streamId: string,
+    options?: { videoBitrate?: RemoteWindowVideoBitrateConfig },
   ) => Promise<RemoteWindowReceiverStartResult>;
+  updateRemoteWindowStreamQuality: (
+    sessionId: string,
+    payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>,
+  ) => void;
   stopRemoteWindowStream: (sessionId: string, streamId: string) => boolean;
   sendRemoteWindowInput: (
     sessionId: string,

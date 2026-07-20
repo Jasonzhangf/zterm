@@ -87,10 +87,14 @@ export type {
   RemoteWindowStreamRtcDescription,
   RemoteWindowStreamStartedPayload,
   RemoteWindowStreamStartRequestPayload,
+  RemoteWindowStreamQualityRequestPayload,
+  RemoteWindowStreamQualityResultPayload,
   RemoteWindowStreamStatusPayload,
   RemoteWindowStreamStopRequestPayload,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
+  RemoteWindowVideoBitrateConfig,
+  RemoteWindowVideoBitratePreset,
 } from '@zterm/shared/protocol';
 export type {
   BufferHeadPayload,
@@ -268,6 +272,11 @@ export interface PasteImagePayload {
   mimeType: string;
   dataBase64: string;
   pasteSequence?: string;
+  pasteTarget?: {
+    kind: 'remote-window';
+    streamId: string;
+    targetId: string;
+  };
 }
 
 export interface PasteImageStartPayload {
@@ -275,6 +284,11 @@ export interface PasteImageStartPayload {
   mimeType: string;
   byteLength: number;
   pasteSequence?: string;
+  pasteTarget?: {
+    kind: 'remote-window';
+    streamId: string;
+    targetId: string;
+  };
 }
 
 export interface AttachFileStartPayload {

@@ -184,6 +184,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     requestRemoteScreenshot,
     requestRemoteWindowTargets,
     requestRemoteWindowStreamStart,
+    updateRemoteWindowStreamQuality,
     stopRemoteWindowStream,
     sendRemoteWindowInput,
     sendMessageRaw,
@@ -840,6 +841,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             onRequestRemoteScreenshot={requestRemoteScreenshot}
             onRequestRemoteWindowTargets={requestRemoteWindowTargets}
             onRequestRemoteWindowStreamStart={requestRemoteWindowStreamStart}
+            onUpdateRemoteWindowStreamQuality={updateRemoteWindowStreamQuality}
             onStopRemoteWindowStream={stopRemoteWindowStream}
             onSendRemoteWindowInput={sendRemoteWindowInput}
             quickActions={quickActions}

@@ -8256,44 +8256,72 @@ function createTerminalFileTransferBinaryRuntime(deps) {
       error: null
     };
   }
-  function emitImagePaste(session, payload, bufferFactory) {
-    const mirror = deps.getSessionMirror(session);
-    if (!mirror || mirror.lifecycle !== "ready") {
-      deps.sendMessage(session, {
-        type: "error",
-        payload: { message: "Session is not ready for image paste", code: "session_not_ready" }
-      });
-      return;
+  function cleanupClipboardImageFiles(sourcePath, pngPath) {
+    try {
+      (0, import_fs3.unlinkSync)(sourcePath);
+    } catch (error) {
+      logCleanupFailure("paste-image", sourcePath, error);
     }
     try {
+      (0, import_fs3.unlinkSync)(pngPath);
+    } catch (error) {
+      logCleanupFailure("paste-image", pngPath, error);
+    }
+  }
+  function sendImagePasted(session, payload, bytes) {
+    deps.sendMessage(session, {
+      type: "image-pasted",
+      payload: {
+        name: payload.name,
+        mimeType: payload.mimeType,
+        bytes
+      }
+    });
+  }
+  function sendImagePasteError(session, message) {
+    deps.sendMessage(session, {
+      type: "error",
+      payload: { message: `Failed to paste image: ${message}`, code: "paste_image_failed" }
+    });
+  }
+  function emitImagePaste(session, payload, bufferFactory) {
+    try {
       const { sourcePath, pngPath, bytes } = bufferFactory();
-      const pasteSequence = payload.pasteSequence || "";
-      deps.writeToLiveMirror(mirror.sessionName, pasteSequence, false);
-      deps.scheduleMirrorLiveSync(mirror, 33);
-      deps.sendMessage(session, {
-        type: "image-pasted",
-        payload: {
+      if (payload.pasteTarget?.kind === "remote-window") {
+        if (!deps.pasteImageToRemoteWindow) {
+          cleanupClipboardImageFiles(sourcePath, pngPath);
+          sendImagePasteError(session, "remote window image paste is not available");
+          return;
+        }
+        void Promise.resolve(deps.pasteImageToRemoteWindow(session, payload.pasteTarget, {
           name: payload.name,
           mimeType: payload.mimeType,
           bytes
-        }
-      });
-      try {
-        (0, import_fs3.unlinkSync)(sourcePath);
-      } catch (error) {
-        logCleanupFailure("paste-image", sourcePath, error);
+        })).then(() => {
+          sendImagePasted(session, payload, bytes);
+          cleanupClipboardImageFiles(sourcePath, pngPath);
+        }).catch((error) => {
+          cleanupClipboardImageFiles(sourcePath, pngPath);
+          sendImagePasteError(session, error instanceof Error ? error.message : String(error));
+        });
+        return;
       }
-      try {
-        (0, import_fs3.unlinkSync)(pngPath);
-      } catch (error) {
-        logCleanupFailure("paste-image", pngPath, error);
+      const mirror = deps.getSessionMirror(session);
+      if (!mirror || mirror.lifecycle !== "ready") {
+        cleanupClipboardImageFiles(sourcePath, pngPath);
+        deps.sendMessage(session, {
+          type: "error",
+          payload: { message: "Session is not ready for image paste", code: "session_not_ready" }
+        });
+        return;
       }
+      const pasteSequence = payload.pasteSequence || "";
+      deps.writeToLiveMirror(mirror.sessionName, pasteSequence, false);
+      deps.scheduleMirrorLiveSync(mirror, 33);
+      sendImagePasted(session, payload, bytes);
+      cleanupClipboardImageFiles(sourcePath, pngPath);
     } catch (error) {
-      const err = error instanceof Error ? error.message : String(error);
-      deps.sendMessage(session, {
-        type: "error",
-        payload: { message: `Failed to paste image: ${err}`, code: "paste_image_failed" }
-      });
+      sendImagePasteError(session, error instanceof Error ? error.message : String(error));
     }
   }
   function handlePasteImage(session, payload) {
@@ -9857,6 +9885,21 @@ function createTerminalMessageRuntime(deps) {
               streamId: message.payload.streamId || "",
               code: "remote_window_stream_stop_failed",
               message: error instanceof Error ? error.message : "remote window stream stop failed"
+            }
+          });
+        });
+        break;
+      case "remote-window-stream-quality-request":
+        void deps.remoteWindowStreamRuntime.updateStreamQuality(message.payload).then((payload) => {
+          deps.sendTransportMessage(connection.transport, "accepted" in payload ? { type: "remote-window-stream-quality-result", payload } : { type: "remote-window-error", payload });
+        }).catch((error) => {
+          deps.sendTransportMessage(connection.transport, {
+            type: "remote-window-error",
+            payload: {
+              requestId: message.payload.requestId || "",
+              streamId: message.payload.streamId || "",
+              code: "remote_window_stream_quality_failed",
+              message: error instanceof Error ? error.message : "remote window stream quality update failed"
             }
           });
         });
@@ -12792,6 +12835,7 @@ let keyCodes: [String: CGKeyCode] = [
     "ArrowRight": 124,
     "ArrowDown": 125,
     "ArrowUp": 126,
+    "KeyV": 9,
     "Delete": 117,
     "Home": 115,
     "End": 119,
@@ -13594,6 +13638,50 @@ function normalizeIceCandidate(candidate) {
     usernameFragment: candidateLike.usernameFragment ?? null
   };
 }
+function normalizeRemoteWindowVideoBitrateConfig(input) {
+  if (!input) {
+    return null;
+  }
+  const bitrateMbps = (() => {
+    switch (input.preset) {
+      case "2mbps":
+        return 2;
+      case "5mbps":
+        return 5;
+      case "10mbps":
+        return 10;
+      case "20mbps":
+      case "fullscreen":
+        return 20;
+      default:
+        throw new Error(`remote window video bitrate preset is invalid: ${String(input.preset)}`);
+    }
+  })();
+  const maxBitrateBps = bitrateMbps * 1e6;
+  if (input.bitrateMbps !== bitrateMbps || input.maxBitrateBps !== maxBitrateBps) {
+    throw new Error("remote window video bitrate config does not match its preset");
+  }
+  return {
+    preset: input.preset,
+    bitrateMbps,
+    maxBitrateBps
+  };
+}
+async function applyRemoteWindowVideoBitrate(sender, config) {
+  if (!sender || typeof sender.getParameters !== "function" || typeof sender.setParameters !== "function") {
+    throw new Error("remote window video bitrate control is not available on this WebRTC sender");
+  }
+  const currentParameters = sender.getParameters();
+  const currentEncodings = Array.isArray(currentParameters.encodings) && currentParameters.encodings.length > 0 ? currentParameters.encodings : [{}];
+  const nextParameters = {
+    ...currentParameters,
+    encodings: currentEncodings.map((encoding) => ({
+      ...encoding,
+      maxBitrate: config.maxBitrateBps
+    }))
+  };
+  await sender.setParameters(nextParameters);
+}
 function validateStreamTargetForCapture(target) {
   if (!target.streamTargetId.trim()) {
     throw new Error("remote window stream target id is required");
@@ -14008,15 +14096,21 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
       });
       const videoSource = createVideoSource();
       const videoTrack = videoSource.createTrack();
-      peerConnection.addTrack(videoTrack);
+      const videoSender = peerConnection.addTrack(videoTrack);
+      const videoBitrate = normalizeRemoteWindowVideoBitrateConfig(payload.videoBitrate);
+      if (videoBitrate) {
+        await applyRemoteWindowVideoBitrate(videoSender || null, videoBitrate);
+      }
       entry = {
         streamId: payload.streamId,
         requestId: payload.requestId,
         targetId: payload.target.streamTargetId,
         target: payload.target,
         peerConnection,
+        videoSender: videoSender || null,
         videoSource,
         videoTrack,
+        videoBitrate,
         captureSource: null,
         handlers,
         framesSent: 0,
@@ -14107,6 +14201,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
           frameWidth: captureSource.width,
           frameHeight: captureSource.height,
           frameRate: captureSource.frameRate,
+          ...entry.videoBitrate ? { maxBitrateBps: entry.videoBitrate.maxBitrateBps } : {},
           targetKind: payload.target.videoTarget.kind
         },
         transport: {
@@ -14161,6 +14256,39 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
       message: "remote window stream stopped"
     };
   }
+  async function updateStreamQuality(payload) {
+    if (!payload.requestId || !payload.streamId || !payload.targetId) {
+      return buildStreamError(payload, "remote_window_stream_quality_invalid", "remote window stream quality requires requestId, streamId, and targetId");
+    }
+    const entry = activeStreams.get(payload.streamId);
+    if (!entry || entry.cleanupDone) {
+      return buildStreamError(payload, "remote_window_stream_quality_missing", `remote window stream is not active: ${payload.streamId}`);
+    }
+    if (payload.targetId !== entry.targetId) {
+      return buildStreamError(payload, "remote_window_stream_quality_target_mismatch", `remote window stream quality target mismatch: ${payload.targetId}`);
+    }
+    try {
+      const videoBitrate = normalizeRemoteWindowVideoBitrateConfig(payload.videoBitrate);
+      if (!videoBitrate) {
+        throw new Error("remote window stream quality requires videoBitrate");
+      }
+      await applyRemoteWindowVideoBitrate(entry.videoSender, videoBitrate);
+      entry.videoBitrate = videoBitrate;
+      return {
+        requestId: payload.requestId,
+        streamId: payload.streamId,
+        targetId: payload.targetId,
+        accepted: true,
+        videoBitrate
+      };
+    } catch (error) {
+      return buildStreamError(
+        payload,
+        "remote_window_stream_quality_failed",
+        error instanceof Error ? error.message : "remote window stream quality update failed"
+      );
+    }
+  }
   async function injectInput(payload) {
     const entry = activeStreams.get(payload.streamId);
     if (!entry || entry.cleanupDone) {
@@ -14198,6 +14326,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
     startStream,
     addIceCandidate,
     stopStream,
+    updateStreamQuality,
     injectInput,
     dispose
   };
@@ -14246,6 +14375,8 @@ var terminalAttachTokenRuntime = createTerminalAttachTokenRuntime();
 var terminalScheduleRuntime;
 var terminalControlRuntime;
 var terminalTransportRuntimeSendMessage;
+var remoteWindowStreamRuntime;
+var remoteWindowPasteRequestSeq = 0;
 var terminalDebugRuntime = createTerminalDebugRuntime({
   daemonRuntimeDebugEnabled: DAEMON_RUNTIME_DEBUG,
   maxClientDebugBatchLogEntries: MAX_CLIENT_DEBUG_BATCH_LOG_ENTRIES,
@@ -14341,6 +14472,24 @@ var terminalFileTransferRuntime = createTerminalFileTransferRuntime({
   runCommand: (command, args) => {
     terminalControlRuntime.runCommand(command, args);
   },
+  pasteImageToRemoteWindow: async (_session, target) => {
+    const requestPrefix = `paste-image-${Date.now()}-${remoteWindowPasteRequestSeq += 1}`;
+    const events = [
+      { kind: "key", phase: "down", key: "v", code: "KeyV", metaKey: true },
+      { kind: "key", phase: "up", key: "v", code: "KeyV", metaKey: true }
+    ];
+    for (let index = 0; index < events.length; index += 1) {
+      const result = await remoteWindowStreamRuntime.injectInput({
+        requestId: `${requestPrefix}-${index}`,
+        streamId: target.streamId,
+        targetId: target.targetId,
+        event: events[index]
+      });
+      if (!("accepted" in result) || !result.accepted) {
+        throw new Error("message" in result ? result.message : "remote window image paste rejected");
+      }
+    }
+  },
   captureRemoteScreenshot: captureRemoteScreenshotWithDaemon,
   logTimePrefix
 });
@@ -14364,7 +14513,7 @@ var {
   closeDetachedTerminalSession,
   renameTmuxSession
 } = terminalControlRuntime;
-var remoteWindowStreamRuntime = createRemoteWindowStreamDaemonRuntime({
+remoteWindowStreamRuntime = createRemoteWindowStreamDaemonRuntime({
   platform: process.platform,
   runTmux
 });

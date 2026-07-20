@@ -1,3 +1,12 @@
+# 2026-07-20 Remote-window paste focus and bitrate closeout
+
+- 架构映射：`feature_id=desktop.remote_window_stream`。Android `RemoteWindowOverlay` 只投影/发布 active remote-window input context；`TerminalPage` 是 QuickBar/IME/focus 路由 owner；daemon `remote-window-stream-daemon` 是 ScreenCaptureKit/WebRTC sender、input injection、bitrate apply owner；file-transfer owner 仍负责 paste-image upload/clipboard/temp file。
+- 修复：图片粘贴不再固定进入 iTerm/tmux。remote-window context active 时 `handleQuickBarImagePaste()` 发送 `pasteTarget.kind=remote-window`，daemon 写 clipboard 后对选中 stream/target 注入 macOS Command+V；terminal pane pointer down 清空 context 后，同一 image 按钮恢复 terminal Ctrl+V path。daemon 不猜焦点。
+- 修复：新增 per-window bitrate preset helper；start request 携带 bitrate config；overlay selector 发 `remote-window-stream-quality-request`；daemon 校验 preset/bitrate/maxBitrateBps 并通过 WebRTC sender parameters 设置 `maxBitrate`，target mismatch/missing stream 显式报错。
+- 回归：focused remote-window/file-transfer/daemon gates 10 files / 164 tests PASS；`tsc --noEmit` PASS；resource/function/mainline registry 7 files / 48 tests PASS；`docs:function-wiki` PASS；`git diff --check` PASS。
+- Live daemon：`daemon:prepare-release` + `daemon:install-global` + service-scoped `zterm-daemon restart` 后 `/health` ok，PID `72857`；installed `~/.zterm/daemon-runtime/server.cjs` 含 `remote-window-stream-quality-request`、`KeyV`、`pasteImageToRemoteWindow`、`maxBitrate`。Live WS against temp `zterm-rwq-1784519076` returned `remote-window-error code=remote_window_stream_quality_missing`; temp tmux session removed.
+- Android build：`pnpm --dir android run build:android` PASS。Prebuild terminal contracts 48 files / 590 tests PASS、common flows 7 files / 82 tests PASS、relay local smoke PASS。APK `0.1.3.2173` / `1032173` sha256 `7d75b8987e9d6b27afd5b932209d4775f4c393a1ccbb9333706d1de53efa3e3f` published to `android/update-dist`, `~/.zterm/updates`, and public Relay `/relay/updates`; public GET/HEAD and downloaded APK sha PASS. ADB has no online device, so local device install smoke remains L5 gap.
+
 # 2026-07-18 Session switch slow reconnect audit
 
 - Jason 反馈当前每次切 session 都像要十来秒重新连接，旧版本没有。静态审计确认切换主线本身不应关闭旧 socket：`switchSession()` 只切 active、重置 pull bookkeeping、调用 `ensureActiveSessionFresh()`；`setActiveSessionSync()` 经 `reconcilePhysicalBodySubscriptions()` 给旧 session 发 `body-subscription:false`、给新 active/live session 发 `true`，服务端仅切 `session.bodySubscribed`，不 close transport。

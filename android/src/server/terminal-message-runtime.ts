@@ -733,6 +733,23 @@ export function createTerminalMessageRuntime(
           });
         });
         break;
+      case 'remote-window-stream-quality-request':
+        void deps.remoteWindowStreamRuntime.updateStreamQuality(message.payload).then((payload) => {
+          deps.sendTransportMessage(connection.transport, 'accepted' in payload
+            ? { type: 'remote-window-stream-quality-result', payload }
+            : { type: 'remote-window-error', payload });
+        }).catch((error: unknown) => {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'remote-window-error',
+            payload: {
+              requestId: message.payload.requestId || '',
+              streamId: message.payload.streamId || '',
+              code: 'remote_window_stream_quality_failed',
+              message: error instanceof Error ? error.message : 'remote window stream quality update failed',
+            },
+          });
+        });
+        break;
       case 'remote-window-input':
         void deps.remoteWindowStreamRuntime.injectInput(message.payload).then((payload) => {
           deps.sendTransportMessage(connection.transport, 'accepted' in payload

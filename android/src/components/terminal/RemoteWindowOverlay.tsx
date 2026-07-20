@@ -16,9 +16,12 @@ import { mobileTheme } from '../../lib/mobile-ui';
 import type {
   RemoteWindowStreamErrorPayload,
   RemoteWindowInputEventPayload,
+  RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamStartedPayload,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
+  RemoteWindowVideoBitrateConfig,
+  RemoteWindowVideoBitratePreset,
 } from '../../lib/types';
 import {
   applyRemoteWindowTargetCatalog,
@@ -34,6 +37,13 @@ import {
   shrinkRemoteWindowOverlay,
   type RemoteWindowOverlayState,
 } from '../../lib/remote-window-overlay-runtime';
+import {
+  REMOTE_WINDOW_VIDEO_BITRATE_PRESETS,
+  buildRemoteWindowVideoBitrateConfig,
+  getRemoteWindowSourceRect,
+  readRemoteWindowVideoBitratePreset,
+  writeRemoteWindowVideoBitratePreset,
+} from '../../lib/remote-window-video-quality';
 
 interface RemoteWindowOverlayProps {
   activeSessionId?: string | null;
@@ -42,7 +52,12 @@ interface RemoteWindowOverlayProps {
     sessionId: string,
     target: RemoteWindowStreamTargetManifest,
     streamId: string,
+    options?: { videoBitrate?: RemoteWindowVideoBitrateConfig },
   ) => Promise<RemoteWindowStreamStartResult>;
+  updateStreamQuality?: (
+    sessionId: string,
+    payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>,
+  ) => void;
   stopStream?: (sessionId: string, streamId: string) => unknown;
   sendInput?: (
     sessionId: string,
@@ -123,6 +138,8 @@ type SurfacePointerGesture =
   | {
       mode: 'scroll';
       pointerId: number;
+      startClientX: number;
+      startClientY: number;
       lastClientX: number;
       lastClientY: number;
     }
@@ -167,6 +184,7 @@ interface FloatingEntryDrag {
   width: number;
   height: number;
   active: boolean;
+  captureElement: HTMLButtonElement | null;
 }
 
 const FLOATING_OVERLAY_VIEWPORT_MARGIN_PX = 8;
@@ -194,10 +212,6 @@ function clampFloatingOffset(value: number, min: number, max: number) {
 
 function clampNumber(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
-}
-
-function getRemoteWindowSourceRect(target: RemoteWindowStreamTargetManifest) {
-  return target.videoTarget.cropRectTopLeftPx || target.videoTarget.windowBoundsTopLeftPx;
 }
 
 function resolveAspectRect(
@@ -348,6 +362,13 @@ function formatInputRoute(target: RemoteWindowStreamTargetManifest) {
   }
 }
 
+function formatBitrateOption(preset: RemoteWindowVideoBitratePreset) {
+  if (preset === 'fullscreen') {
+    return '全屏 20 Mbps';
+  }
+  return `${buildRemoteWindowVideoBitrateConfig(preset).bitrateMbps} Mbps`;
+}
+
 function formatTargetSubtitle(target: RemoteWindowStreamTargetManifest) {
   const tmux = target.inputTarget.tmuxSession
     ? `tmux ${target.inputTarget.tmuxSession}${target.inputTarget.tmuxPaneId ? ` ${target.inputTarget.tmuxPaneId}` : ''}`
@@ -376,6 +397,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   activeSessionId,
   requestTargets,
   startStream,
+  updateStreamQuality,
   stopStream,
   sendInput,
   bottomInsetPx = 0,
@@ -389,6 +411,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const [surfaceSize, setSurfaceSize] = useState<SurfaceSize | null>(null);
   const [fullscreenViewport, setFullscreenViewportState] = useState<FullscreenViewportState>(initialFullscreenViewport);
   const [fullscreenDisplayMode, setFullscreenDisplayModeState] = useState<FullscreenDisplayMode>(initialFullscreenDisplayMode);
+  const [bitratePreset, setBitratePreset] = useState<RemoteWindowVideoBitratePreset>('5mbps');
   const [receiverMediaStream, setReceiverMediaStream] = useState<MediaStream | null>(null);
   const floatingOffsetRef = useRef(floatingOffset);
   const entryOffsetRef = useRef(entryOffset);
@@ -629,20 +652,53 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     setState((current) => closeRemoteWindowOverlay(current));
   }, [activeSessionId, clearCatalogWatchdog, resetFullscreenViewport, setFloatingOffset, setFullscreenDisplayMode, state, stopStream]);
 
+  const publishRemoteWindowInputContext = useCallback(() => {
+    if (!inputContext) {
+      return;
+    }
+    lastReportedInputContextKeyRef.current = inputContextKey;
+    onInputContextChange?.(inputContext);
+  }, [inputContext, inputContextKey, onInputContextChange]);
+
   const handleShrink = useCallback(() => {
     resetFullscreenViewport();
     setState((current) => shrinkRemoteWindowOverlay(current));
   }, [resetFullscreenViewport]);
 
   const handleFullscreen = useCallback(() => {
+    publishRemoteWindowInputContext();
     resetFullscreenViewport();
     setState((current) => enterRemoteWindowFullscreen(current));
-  }, [resetFullscreenViewport]);
+  }, [publishRemoteWindowInputContext, resetFullscreenViewport]);
 
   const handleToggleFullscreenDisplayMode = useCallback(() => {
     resetFullscreenViewport();
     setFullscreenDisplayMode(fullscreenDisplayMode === 'fit' ? 'fill' : 'fit');
   }, [fullscreenDisplayMode, resetFullscreenViewport, setFullscreenDisplayMode]);
+
+  const handleBitratePresetChange = useCallback((nextPreset: RemoteWindowVideoBitratePreset) => {
+    if (!REMOTE_WINDOW_VIDEO_BITRATE_PRESETS.includes(nextPreset)) {
+      return;
+    }
+    setBitratePreset(nextPreset);
+    if (state.phase !== 'targetLocked') {
+      return;
+    }
+    writeRemoteWindowVideoBitratePreset(state.target, nextPreset);
+    if (!state.streamId || !state.streamStarted || !activeSessionId || !updateStreamQuality) {
+      return;
+    }
+    const videoBitrate = buildRemoteWindowVideoBitrateConfig(nextPreset);
+    try {
+      updateStreamQuality(activeSessionId, {
+        streamId: state.streamId,
+        targetId: state.target.streamTargetId,
+        videoBitrate,
+      });
+    } catch (error) {
+      console.warn('[RemoteWindowOverlay] remote window bitrate update failed:', error);
+    }
+  }, [activeSessionId, state, updateStreamQuality]);
 
   const updateFloatingDragFromPointer = useCallback((pointerId: number, clientX: number, clientY: number) => {
     const drag = floatingDragRef.current;
@@ -678,12 +734,57 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     return true;
   }, []);
 
+  const updateEntryDragFromPointer = useCallback((pointerId: number, clientX: number, clientY: number) => {
+    const drag = entryDragRef.current;
+    if (!drag || drag.pointerId !== pointerId) {
+      return false;
+    }
+    const deltaX = clientX - drag.startClientX;
+    const deltaY = clientY - drag.startClientY;
+    if (!drag.active && Math.hypot(deltaX, deltaY) >= FLOATING_ENTRY_DRAG_THRESHOLD_PX) {
+      drag.active = true;
+      suppressEntryClickRef.current = true;
+    }
+    if (!drag.active) {
+      return false;
+    }
+    setEntryOffset(clampEntryOffset(
+      drag,
+      drag.baseLeft + deltaX,
+      drag.baseTop + deltaY,
+    ));
+    return true;
+  }, [clampEntryOffset, setEntryOffset]);
+
+  const finishEntryDrag = useCallback((pointerId: number, options: { suppressClick: boolean } = { suppressClick: true }) => {
+    const drag = entryDragRef.current;
+    if (!drag || drag.pointerId !== pointerId) {
+      return false;
+    }
+    if (drag.active && options.suppressClick) {
+      suppressEntryClickRef.current = true;
+      window.setTimeout(() => {
+        suppressEntryClickRef.current = false;
+      }, 180);
+    }
+    entryDragRef.current = null;
+    try {
+      drag.captureElement?.releasePointerCapture?.(pointerId);
+    } catch (error) {
+      console.warn('[RemoteWindowOverlay] remote window entry pointer release failed:', error);
+    }
+    return true;
+  }, []);
+
   const handleFloatingDragStart = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (
       state.phase !== 'targetLocked'
       || state.mode !== 'floating'
       || (event.pointerType === 'mouse' && event.button !== 0)
-      || (event.target instanceof Element && event.target.closest('button'))
+      || (
+        event.target instanceof Element
+        && event.target.closest('button, select, input, textarea, [data-no-drag="true"]')
+      )
     ) {
       return;
     }
@@ -749,81 +850,57 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       width: rect.width || 44,
       height: rect.height || 44,
       active: false,
+      captureElement: event.currentTarget,
     };
   }, [state]);
 
   const handleEntryPointerMove = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
-    const drag = entryDragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) {
-      return;
-    }
-    const deltaX = event.clientX - drag.startClientX;
-    const deltaY = event.clientY - drag.startClientY;
-    if (!drag.active && Math.hypot(deltaX, deltaY) >= FLOATING_ENTRY_DRAG_THRESHOLD_PX) {
-      drag.active = true;
-      suppressEntryClickRef.current = true;
-    }
-    if (!drag.active) {
+    if (!updateEntryDragFromPointer(event.pointerId, event.clientX, event.clientY)) {
       return;
     }
     event.preventDefault();
     event.stopPropagation();
-    setEntryOffset(clampEntryOffset(
-      drag,
-      drag.baseLeft + deltaX,
-      drag.baseTop + deltaY,
-    ));
-  }, [clampEntryOffset, setEntryOffset]);
+  }, [updateEntryDragFromPointer]);
 
   const handleEntryPointerUp = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
-    const drag = entryDragRef.current;
-    if (drag?.pointerId === event.pointerId) {
-      if (drag.active) {
-        suppressEntryClickRef.current = true;
-        window.setTimeout(() => {
-          suppressEntryClickRef.current = false;
-        }, 180);
-      }
-      entryDragRef.current = null;
+    if (finishEntryDrag(event.pointerId)) {
+      event.preventDefault();
+      event.stopPropagation();
     }
-    try {
-      event.currentTarget.releasePointerCapture?.(event.pointerId);
-    } catch (error) {
-      console.warn('[RemoteWindowOverlay] remote window entry pointer release failed:', error);
-    }
-  }, []);
+  }, [finishEntryDrag]);
 
   const handleEntryPointerCancel = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
-    if (entryDragRef.current?.pointerId === event.pointerId) {
-      entryDragRef.current = null;
+    if (finishEntryDrag(event.pointerId, { suppressClick: false })) {
+      suppressEntryClickRef.current = false;
+      event.preventDefault();
+      event.stopPropagation();
     }
-    suppressEntryClickRef.current = false;
-    try {
-      event.currentTarget.releasePointerCapture?.(event.pointerId);
-    } catch (error) {
-      console.warn('[RemoteWindowOverlay] remote window entry pointer cancel failed:', error);
-    }
-  }, []);
+  }, [finishEntryDrag]);
 
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
       if (updateFloatingDragFromPointer(event.pointerId, event.clientX, event.clientY)) {
         event.preventDefault();
       }
+      if (updateEntryDragFromPointer(event.pointerId, event.clientX, event.clientY)) {
+        event.preventDefault();
+      }
     };
     const handlePointerEnd = (event: PointerEvent) => {
       finishFloatingDrag(event.pointerId);
+      finishEntryDrag(event.pointerId);
     };
     window.addEventListener('pointermove', handlePointerMove, { passive: false });
     window.addEventListener('pointerup', handlePointerEnd);
     window.addEventListener('pointercancel', handlePointerEnd);
     return () => {
       floatingDragRef.current = null;
+      entryDragRef.current = null;
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerEnd);
       window.removeEventListener('pointercancel', handlePointerEnd);
     };
-  }, [finishFloatingDrag, updateFloatingDragFromPointer]);
+  }, [finishEntryDrag, finishFloatingDrag, updateEntryDragFromPointer, updateFloatingDragFromPointer]);
 
   useEffect(() => {
     const video = videoElementRef.current;
@@ -872,6 +949,9 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     resetFullscreenViewport();
     setFullscreenDisplayMode(initialFullscreenDisplayMode);
     setReceiverMediaStream(null);
+    const selectedBitratePreset = readRemoteWindowVideoBitratePreset(target);
+    setBitratePreset(selectedBitratePreset);
+    const videoBitrate = buildRemoteWindowVideoBitrateConfig(selectedBitratePreset);
 
     if (!startStream) {
       setState((current) => selectRemoteWindowTarget(current, target.streamTargetId));
@@ -896,7 +976,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     }
 
     setState(startingState);
-    void startStream(targetSessionId, target, streamId)
+    void startStream(targetSessionId, target, streamId, { videoBitrate })
       .then((result) => {
         setState((current) => {
           return attachRemoteWindowStreamReceiver(startingState(current), result.streamId);
@@ -1038,6 +1118,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     if (event.pointerType === 'mouse' && event.button > 2) {
       return;
     }
+    publishRemoteWindowInputContext();
     event.currentTarget.focus();
     event.currentTarget.setPointerCapture?.(event.pointerId);
     surfacePointersRef.current.set(event.pointerId, {
@@ -1103,7 +1184,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     emitPointerInput(event, 'down');
     event.preventDefault();
     event.stopPropagation();
-  }, [emitPointerInput, state]);
+  }, [emitPointerInput, publishRemoteWindowInputContext, state]);
 
   const handleVideoSurfacePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (state.phase !== 'targetLocked') {
@@ -1164,41 +1245,25 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         event.stopPropagation();
         return;
       }
-      const scrollPayload = resolveScrollInputEvent(
-        event.clientX,
-        event.clientY,
-        gesture.lastClientX - event.clientX,
-        gesture.lastClientY - event.clientY,
-      );
       surfaceGestureRef.current = {
         mode: 'scroll',
         pointerId: event.pointerId,
+        startClientX: gesture.startClientX,
+        startClientY: gesture.startClientY,
         lastClientX: event.clientX,
         lastClientY: event.clientY,
       };
-      if (scrollPayload) {
-        emitRemoteWindowInput(scrollPayload);
-      }
       event.preventDefault();
       event.stopPropagation();
       return;
     }
 
     if (gesture.mode === 'scroll' && gesture.pointerId === event.pointerId) {
-      const scrollPayload = resolveScrollInputEvent(
-        event.clientX,
-        event.clientY,
-        gesture.lastClientX - event.clientX,
-        gesture.lastClientY - event.clientY,
-      );
       surfaceGestureRef.current = {
         ...gesture,
         lastClientX: event.clientX,
         lastClientY: event.clientY,
       };
-      if (scrollPayload) {
-        emitRemoteWindowInput(scrollPayload);
-      }
       event.preventDefault();
       event.stopPropagation();
       return;
@@ -1245,6 +1310,17 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       return;
     }
     if (gesture.mode === 'scroll' && gesture.pointerId === event.pointerId) {
+      const finalClientX = Number.isFinite(event.clientX) ? event.clientX : gesture.lastClientX;
+      const finalClientY = Number.isFinite(event.clientY) ? event.clientY : gesture.lastClientY;
+      const scrollPayload = resolveScrollInputEvent(
+        gesture.startClientX,
+        gesture.startClientY,
+        gesture.startClientX - finalClientX,
+        gesture.startClientY - finalClientY,
+      );
+      if (scrollPayload) {
+        emitRemoteWindowInput(scrollPayload);
+      }
       surfaceGestureRef.current = null;
       event.preventDefault();
       event.stopPropagation();
@@ -1288,6 +1364,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   }, []);
 
   const handleVideoSurfaceWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
+    publishRemoteWindowInputContext();
     const scrollPayload = resolveScrollInputEvent(
       event.clientX,
       event.clientY,
@@ -1300,7 +1377,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     emitRemoteWindowInput(scrollPayload);
     event.preventDefault();
     event.stopPropagation();
-  }, [emitRemoteWindowInput, resolveScrollInputEvent]);
+  }, [emitRemoteWindowInput, publishRemoteWindowInputContext, resolveScrollInputEvent]);
 
   const handleVideoSurfaceKey = useCallback((
     event: ReactKeyboardEvent<HTMLDivElement>,
@@ -1309,6 +1386,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     if (state.phase !== 'targetLocked' || !state.streamId) {
       return;
     }
+    publishRemoteWindowInputContext();
     emitRemoteWindowInput({
       kind: 'key',
       phase,
@@ -1323,7 +1401,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     });
     event.preventDefault();
     event.stopPropagation();
-  }, [emitRemoteWindowInput, state]);
+  }, [emitRemoteWindowInput, publishRemoteWindowInputContext, state]);
 
   useEffect(() => {
     if (state.phase !== 'targetLocked' || state.mode !== 'fullscreen') {
@@ -1519,6 +1597,18 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           <span>{state.target.videoTarget.title || state.target.videoTarget.appBundleId}</span>
         </div>
         <div style={styles.lockedActions}>
+          <select
+            data-testid="remote-window-bitrate-select"
+            data-no-drag="true"
+            aria-label="远程窗口码率"
+            value={bitratePreset}
+            onChange={(event) => handleBitratePresetChange(event.currentTarget.value as RemoteWindowVideoBitratePreset)}
+            style={styles.bitrateSelect}
+          >
+            {REMOTE_WINDOW_VIDEO_BITRATE_PRESETS.map((preset) => (
+              <option key={preset} value={preset}>{formatBitrateOption(preset)}</option>
+            ))}
+          </select>
           {state.mode === 'fullscreen' ? (
             <>
               <button
@@ -1707,6 +1797,17 @@ const styles: Record<string, CSSProperties> = {
     color: '#edf4ff',
     fontSize: 12,
     fontWeight: 900,
+  },
+  bitrateSelect: {
+    height: 32,
+    maxWidth: 108,
+    borderRadius: 10,
+    border: '1px solid rgba(151, 164, 186, 0.18)',
+    background: 'rgba(36, 48, 72, 0.84)',
+    color: '#edf4ff',
+    fontSize: 12,
+    fontWeight: 850,
+    outline: 'none',
   },
   errorBox: {
     margin: '10px 12px 0',
