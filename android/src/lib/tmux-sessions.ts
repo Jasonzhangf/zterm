@@ -224,8 +224,13 @@ function createTmuxControlTransportEntry(
     const diagnostics = ws.getDiagnostics();
     failTmuxControlTransport(entry, new Error(diagnostics.reason || 'Transport error while managing tmux sessions'), false);
   };
-  ws.onclose = () => {
-    failTmuxControlTransport(entry, new Error('Transport closed while managing tmux sessions'), false);
+  ws.onclose = (event) => {
+    const diagnostics = ws.getDiagnostics();
+    failTmuxControlTransport(
+      entry,
+      new Error(diagnostics.reason || event?.reason || 'Transport closed while managing tmux sessions'),
+      false,
+    );
   };
 
   tmuxControlTransportPool.set(key, entry);

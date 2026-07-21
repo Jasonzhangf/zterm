@@ -13,7 +13,7 @@ const traversalHarness = vi.hoisted(() => {
     onopen: (() => void) | null = null;
     onmessage: ((event: { data: string }) => void) | null = null;
     onerror: (() => void) | null = null;
-    onclose: (() => void) | null = null;
+    onclose: ((event?: { code?: number; reason?: string }) => void) | null = null;
     readyState = MockTraversalSocket.CONNECTING;
     sent: string[] = [];
     closeCalls = 0;
@@ -59,8 +59,9 @@ const traversalHarness = vi.hoisted(() => {
       this.onerror?.();
     }
 
-    triggerClose() {
-      this.close();
+    triggerClose(reason?: string) {
+      this.readyState = MockTraversalSocket.CLOSED;
+      this.onclose?.({ code: 1006, reason });
     }
 
     static latest() {
@@ -187,6 +188,17 @@ describe('tmux-sessions transport contract', () => {
     socket.triggerTransportError();
 
     await expect(promise).rejects.toThrow('mock transport error');
+  });
+
+  it('surfaces traversal close diagnostics instead of a generic tmux management close', async () => {
+    const { fetchTmuxSessions } = await loadTmuxSessionsModule();
+    const promise = fetchTmuxSessions(target, bridgeSettings);
+    const socket = traversalHarness.MockTraversalSocket.latest();
+    socket.diagnostics.reason = 'No traversal path succeeded';
+
+    socket.triggerClose('No traversal path succeeded');
+
+    await expect(promise).rejects.toThrow('No traversal path succeeded');
   });
 
   it('reuses one open traversal transport for sequential tmux session list requests on the same target', async () => {

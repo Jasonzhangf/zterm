@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AppContent } from './App';
 import { DEFAULT_TERMINAL_CACHE_LINES } from './lib/mobile-config';
@@ -57,6 +57,7 @@ const sendDebugSnapshotMock = vi.fn();
 const sendDebugLogsMock = vi.fn();
 const collectClientDebugSnapshotMock = vi.fn(() => ({}));
 const runtimeDebugMock = vi.fn();
+const useSessionOpenActionsMock = vi.fn();
 
 vi.mock('./lib/traversal-relay-client', () => ({
   connectTraversalRelayDevicesStream: (...args: any[]) => (connectRelayDevicesStreamMock as any)(...args),
@@ -203,11 +204,14 @@ vi.mock('./contexts/SessionContext', async () => {
   };
 });
 vi.mock('./hooks/useSessionOpenActions', () => ({
-  useSessionOpenActions: () => ({
+  useSessionOpenActions: (options: any) => {
+    useSessionOpenActionsMock(options);
+    return {
     handleOpenTmuxSession: vi.fn(),
     handleRestoreSession: vi.fn(),
     handleOpenTerminalByHost: vi.fn(),
-  }),
+    };
+  },
 }));
 vi.mock('./hooks/useAppPageState', () => ({
   useAppPageState: () => ({
@@ -333,6 +337,7 @@ describe('App relay device stream reconnect lifecycle', () => {
     sendDebugSnapshotMock.mockReset();
     sendDebugLogsMock.mockReset();
     collectClientDebugSnapshotMock.mockReset();
+    useSessionOpenActionsMock.mockReset();
     setupRelayAccount(true);
     traversalRelayRefreshMeMock.mockImplementation(async (account) => ({
       account,
@@ -423,6 +428,85 @@ describe('App relay device stream reconnect lifecycle', () => {
     expect(updater({ ...makeRelayBridgeSettings(true), traversalRelay: staleRelaySettings }).traversalRelay.turnUrl).toBe(
       'turn:relay.codewhisper.cc:3479?transport=udp',
     );
+  });
+
+  it('keeps route-bearing directory devices when legacy devices snapshots omit endpoints and sessions', { timeout: 10000 }, async () => {
+    render(<AppContent bridgeSettings={makeRelayBridgeSettings(true)} setBridgeSettings={vi.fn()} />);
+    await waitFor(() => expect(connectRelayDevicesStreamMock).toHaveBeenCalled(), { timeout: 10000 });
+    const options = connectRelayDevicesStreamMock.mock.calls[0]?.[0];
+
+    await act(async () => {
+      options.onDirectory?.({
+        schemaVersion: 1,
+        user: { id: 'u1', username: 'jason' },
+        updatedAt: '2026-07-21T00:00:00.000Z',
+        devices: [{
+          deviceId: 'daemon-device-1',
+          deviceName: 'mac-studio',
+          platform: 'darwin',
+          appVersion: '0.1.3',
+          client: { connected: false, lastSeenAt: '2026-07-21T00:00:00.000Z' },
+          daemon: {
+            hostId: 'mac-studio',
+            version: '0.1.3',
+            presence: { connected: true, lastSeenAt: '2026-07-21T00:00:00.000Z' },
+            endpoints: [{
+              id: 'relay-rtc:mac-studio',
+              kind: 'relay-rtc',
+              relayHostId: 'mac-studio',
+              authRequired: true,
+              lastSeenAt: '2026-07-21T00:00:00.000Z',
+            }],
+            sessions: [{
+              name: 'zterm',
+              updatedAt: '2026-07-21T00:00:00.000Z',
+            }],
+            lastPublishedAt: '2026-07-21T00:00:00.000Z',
+          },
+        }],
+      });
+    });
+
+    await waitFor(() => {
+      const latest = useSessionOpenActionsMock.mock.lastCall?.[0]?.relayDevices;
+      expect(latest).toHaveLength(1);
+      expect(latest[0].daemon.endpoints).toHaveLength(1);
+      expect(latest[0].daemon.sessions).toEqual([
+        expect.objectContaining({ name: 'zterm' }),
+      ]);
+    });
+
+    await act(async () => {
+      options.onDevices?.([{
+        deviceId: 'daemon-device-1',
+        deviceName: 'mac-studio',
+        platform: 'darwin',
+        appVersion: '0.1.3',
+        updatedAt: '2026-07-21T00:00:01.000Z',
+        client: { connected: false, lastSeenAt: '2026-07-21T00:00:01.000Z' },
+        daemon: {
+          connected: true,
+          lastSeenAt: '2026-07-21T00:00:01.000Z',
+          hostId: 'mac-studio',
+          version: '0.1.3',
+        },
+      }]);
+    });
+
+    await waitFor(() => {
+      const latest = useSessionOpenActionsMock.mock.lastCall?.[0]?.relayDevices;
+      expect(latest).toHaveLength(1);
+      expect(latest[0]).toEqual(expect.objectContaining({
+        deviceId: 'daemon-device-1',
+        updatedAt: '2026-07-21T00:00:01.000Z',
+      }));
+      expect(latest[0].daemon).toEqual(expect.objectContaining({
+        hostId: 'mac-studio',
+        connected: true,
+        endpoints: [expect.objectContaining({ id: 'relay-rtc:mac-studio' })],
+        sessions: [expect.objectContaining({ name: 'zterm' })],
+      }));
+    });
   });
 
   it('syncs normalized relay device identity into bridge settings on startup', { timeout: 10000 }, async () => {

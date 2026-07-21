@@ -87,6 +87,51 @@ function projectRelayDevicesFromAccountState(account: ReturnType<typeof readTrav
   return projectOnlineTraversalRelayDaemonDevicesFromAccount(account);
 }
 
+function hasRelayDirectoryTruth(device: TraversalRelayDeviceSnapshot) {
+  return (device.daemon.endpoints?.length || 0) > 0
+    || (device.daemon.sessions?.length || 0) > 0;
+}
+
+function listRelayDirectoryTruthDevices(devices: TraversalRelayDeviceSnapshot[]) {
+  return devices.filter(hasRelayDirectoryTruth);
+}
+
+function mergeRelayPresenceWithDirectoryTruth(
+  devices: TraversalRelayDeviceSnapshot[],
+  directoryTruthDevices: TraversalRelayDeviceSnapshot[],
+) {
+  const directoryByDeviceId = new Map(
+    directoryTruthDevices.map((device) => [device.deviceId, device]),
+  );
+  const directoryByHostId = new Map(
+    directoryTruthDevices
+      .filter((device) => device.daemon.hostId.trim())
+      .map((device) => [device.daemon.hostId, device]),
+  );
+
+  return listOnlineTraversalRelayDaemonDevices(devices).map((device) => {
+    const directoryDevice = directoryByDeviceId.get(device.deviceId)
+      || directoryByHostId.get(device.daemon.hostId);
+    if (!directoryDevice) {
+      return device;
+    }
+    return {
+      ...directoryDevice,
+      ...device,
+      daemon: {
+        ...directoryDevice.daemon,
+        ...device.daemon,
+        endpoints: device.daemon.endpoints?.length
+          ? device.daemon.endpoints
+          : directoryDevice.daemon.endpoints,
+        sessions: device.daemon.sessions?.length
+          ? device.daemon.sessions
+          : directoryDevice.daemon.sessions,
+      },
+    };
+  });
+}
+
 interface AppContentProps {
   bridgeSettings: ReturnType<typeof useBridgeSettingsStorage>['settings'];
   setBridgeSettings: ReturnType<typeof useBridgeSettingsStorage>['setSettings'];
@@ -98,6 +143,9 @@ interface AppContentProps {
 export function AppContent({ bridgeSettings, setBridgeSettings, appForegroundActive = true, onForegroundActiveChange }: AppContentProps) {
   const [pendingPaneAttachIntent, setPendingPaneAttachIntent] = useState<{ sessionIds: string[]; paneId: string; nonce: number } | null>(null);
   const [relayDevices, setRelayDevices] = useState<TraversalRelayDeviceSnapshot[]>(() => projectRelayDevicesFromAccountState(readTraversalRelayAccountState()));
+  const relayDirectoryTruthDevicesRef = useRef<TraversalRelayDeviceSnapshot[]>(
+    listRelayDirectoryTruthDevices(relayDevices),
+  );
   const relayDeviceSocketRef = useRef<WebSocket | null>(null);
   const relayDeviceReconnectTimerRef = useRef<number | null>(null);
   const relayDeviceStreamGenerationRef = useRef(0);
@@ -139,7 +187,9 @@ export function AppContent({ bridgeSettings, setBridgeSettings, appForegroundAct
     if (typeof window === 'undefined') return;
     const handler = () => {
       const next = readTraversalRelayAccountState();
-      setRelayDevices(projectRelayDevicesFromAccountState(next));
+      const projectedDevices = projectRelayDevicesFromAccountState(next);
+      relayDirectoryTruthDevicesRef.current = listRelayDirectoryTruthDevices(projectedDevices);
+      setRelayDevices(projectedDevices);
       const nextRelay = next?.relaySettings;
       if (!nextRelay) {
         return;
@@ -350,10 +400,13 @@ export function AppContent({ bridgeSettings, setBridgeSettings, appForegroundAct
       clearReconnectTimer();
       relayDeviceSocketRef.current?.close(1000, 'relay disabled');
       relayDeviceSocketRef.current = null;
+      relayDirectoryTruthDevicesRef.current = [];
       setRelayDevices([]);
       return;
     }
-    setRelayDevices(projectRelayDevicesFromAccountState(initialAccount));
+    const initialDevices = projectRelayDevicesFromAccountState(initialAccount);
+    relayDirectoryTruthDevicesRef.current = listRelayDirectoryTruthDevices(initialDevices);
+    setRelayDevices(initialDevices);
 
     const scheduleReconnect = (reason: string) => {
       if (disposed || relayDeviceStreamGenerationRef.current !== generation || relayDeviceReconnectTimerRef.current !== null) {
@@ -381,7 +434,9 @@ export function AppContent({ bridgeSettings, setBridgeSettings, appForegroundAct
       if (!nextRelay) {
         throw new Error('relay control payload missing ws/control settings');
       }
-      setRelayDevices(projectRelayDevicesFromAccountState(refreshed.account));
+      const refreshedDevices = projectRelayDevicesFromAccountState(refreshed.account);
+      relayDirectoryTruthDevicesRef.current = listRelayDirectoryTruthDevices(refreshedDevices);
+      setRelayDevices(refreshedDevices);
       setBridgeSettings((current) => (
         areTraversalRelaySettingsEqual(current.traversalRelay, nextRelay)
           ? current
@@ -405,12 +460,24 @@ export function AppContent({ bridgeSettings, setBridgeSettings, appForegroundAct
             runtimeDebug('relay.device-stream.open', { deviceId: account.deviceId });
           },
           onDevices: (devices) => {
-            setRelayDevices(listOnlineTraversalRelayDaemonDevices(devices));
+            setRelayDevices((current) => {
+              const currentDirectoryTruth = relayDirectoryTruthDevicesRef.current.length > 0
+                ? relayDirectoryTruthDevicesRef.current
+                : listRelayDirectoryTruthDevices(current);
+              const merged = mergeRelayPresenceWithDirectoryTruth(devices, currentDirectoryTruth);
+              const nextDirectoryTruth = listRelayDirectoryTruthDevices(merged);
+              if (nextDirectoryTruth.length > 0) {
+                relayDirectoryTruthDevicesRef.current = nextDirectoryTruth;
+              }
+              return merged;
+            });
           },
           onDirectory: (directory) => {
             const directoryDevices = projectRelayDirectoryDeviceSnapshots(directory);
             if (directoryDevices.length > 0) {
-              setRelayDevices(listOnlineTraversalRelayDaemonDevices(directoryDevices));
+              const onlineDirectoryDevices = listOnlineTraversalRelayDaemonDevices(directoryDevices);
+              relayDirectoryTruthDevicesRef.current = listRelayDirectoryTruthDevices(onlineDirectoryDevices);
+              setRelayDevices(onlineDirectoryDevices);
             }
           },
           onError: (message) => {

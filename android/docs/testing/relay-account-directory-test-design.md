@@ -68,6 +68,9 @@ daemon tmux truth
   - fixed relay home logs into the account owner without an editable relay URL.
   - daemon devices from directory are projected without Session group controls.
   - Home does not open/close sessions or save tab lists.
+- `src/App.relay-stream-lifecycle.test.tsx`
+  - device stream startup refreshes account control truth before opening `/ws/devices`.
+  - a later legacy `devices-snapshot` that carries only online presence must not erase a prior `directory-snapshot` daemon endpoint/session truth before Home/session-open projection consumes it.
 - `src/lib/session-picker.test.ts`
   - relay device resolves from directory endpoints when no preset exists.
   - selected target contains daemon identity and route candidates.
