@@ -623,6 +623,28 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       ].join('|')
     : '';
 
+  const sendRemoteWindowInputIntent = useCallback((
+    sessionId: string,
+    streamId: string,
+    target: RemoteWindowStreamTargetManifest,
+    eventPayload: RemoteWindowInputEventPayload['event'],
+  ) => {
+    if (!sessionId || !streamId || !sendInput || !isRemoteWindowInputSupported(target)) {
+      return false;
+    }
+    try {
+      sendInput(sessionId, {
+        streamId,
+        targetId: target.streamTargetId,
+        event: eventPayload,
+      });
+      return true;
+    } catch (error) {
+      console.warn('[RemoteWindowOverlay] remote input send failed:', error);
+      return false;
+    }
+  }, [sendInput]);
+
   const setFloatingOffset = useCallback((next: FloatingOverlayOffset) => {
     floatingOffsetRef.current = next;
     setFloatingOffsetState(next);
@@ -1541,6 +1563,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         if (activeStreamIdRef.current === result.streamId) {
           setReceiverMediaStream(result.mediaStream || null);
           setReceiverFrameSize(resolveStartedCaptureFrameSize(result.started));
+          sendRemoteWindowInputIntent(targetSessionId, result.streamId, target, { kind: 'focus' });
         }
       })
       .catch((error) => {
@@ -1554,6 +1577,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     activeSessionId,
     networkQuality,
     resetFullscreenViewport,
+    sendRemoteWindowInputIntent,
     setFloatingOffset,
     setFloatingOverlayWidthPx,
     setFullscreenDisplayMode,
@@ -1565,23 +1589,12 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       state.phase !== 'targetLocked'
       || !state.streamId
       || !activeSessionId
-      || !sendInput
       || !isRemoteWindowInputSupported(state.target)
     ) {
       return false;
     }
-    try {
-      sendInput(activeSessionId, {
-        streamId: state.streamId,
-        targetId: state.target.streamTargetId,
-        event: eventPayload,
-      });
-      return true;
-    } catch (error) {
-      console.warn('[RemoteWindowOverlay] remote input send failed:', error);
-      return false;
-    }
-  }, [activeSessionId, sendInput, state]);
+    return sendRemoteWindowInputIntent(activeSessionId, state.streamId, state.target, eventPayload);
+  }, [activeSessionId, sendRemoteWindowInputIntent, state]);
 
   const resolveSurfaceInputPoint = useCallback((
     clientX: number,
@@ -2024,10 +2037,11 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     if (!scrollPayload) {
       return;
     }
+    emitRemoteWindowFocus();
     emitRemoteWindowInput(scrollPayload);
     event.preventDefault();
     event.stopPropagation();
-  }, [emitRemoteWindowInput, publishRemoteWindowInputContext, resolveScrollInputEvent]);
+  }, [emitRemoteWindowFocus, emitRemoteWindowInput, publishRemoteWindowInputContext, resolveScrollInputEvent]);
 
   const handleVideoSurfaceKey = useCallback((
     event: ReactKeyboardEvent<HTMLDivElement>,
@@ -2037,6 +2051,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       return;
     }
     publishRemoteWindowInputContext();
+    emitRemoteWindowFocus();
     emitRemoteWindowInput({
       kind: 'key',
       phase,
@@ -2051,7 +2066,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     });
     event.preventDefault();
     event.stopPropagation();
-  }, [emitRemoteWindowInput, publishRemoteWindowInputContext, state]);
+  }, [emitRemoteWindowFocus, emitRemoteWindowInput, publishRemoteWindowInputContext, state]);
 
   useEffect(() => {
     if (state.phase !== 'targetLocked' || state.mode !== 'fullscreen') {

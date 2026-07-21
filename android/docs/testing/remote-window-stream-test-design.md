@@ -200,7 +200,7 @@ Current executable gates:
    - Create a marked AppKit target window and a separate covering window whose bounds overlap the target center.
    - Verify posting pixel scroll to the target point while covered does not move the target.
    - Match the target AX window by its `CGWindowList` bounds, activate the app, `AXRaise` that window, and verify it becomes frontmost and key/focused before returning accepted input.
-   - Verify Android video-surface pointerdown sends an explicit remote `focus` input intent before delayed tap or gesture release, and QuickBar/IME batches send `focus` before key/text events.
+   - Verify Android sends an explicit remote `focus` input intent as soon as a supported app-window stream is selected and started. Video-surface pointerdown, wheel, and key paths must send `focus` before the corresponding pointer/scroll/key event, and QuickBar/IME batches must send `focus` before key/text events. Read-only iTerm pane targets must emit none of these intents.
    - Post pixel scroll through `CGEvent.post(tap: .cghidEventTap)` using the `CGWindowList` top-left target point directly; no AppKit bottom-left conversion is allowed for daemon manifest coordinates.
    - Use a flipped document view so increasing content `y` has unambiguous down-scroll semantics.
    - Through the live daemon WebSocket protocol, start a real app-window stream against a marked AppKit probe window, send pointer down/up, pixel scroll, gesture/swipe, and key down/up over `remote-window-input`, and assert both protocol `accepted=true` and probe stdout events are observed.
