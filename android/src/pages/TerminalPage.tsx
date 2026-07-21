@@ -2146,12 +2146,12 @@ function TerminalPageComponent({
     if (!onSendRemoteWindowInput || events.length === 0) {
       return true;
     }
-    onSendRemoteWindowInput(context.sessionId, {
-      streamId: context.streamId,
-      targetId: context.targetId,
-      event: { kind: 'focus' },
-    });
     events.forEach((event) => {
+      onSendRemoteWindowInput(context.sessionId, {
+        streamId: context.streamId,
+        targetId: context.targetId,
+        event: { kind: 'focus' },
+      });
       onSendRemoteWindowInput(context.sessionId, {
         streamId: context.streamId,
         targetId: context.targetId,

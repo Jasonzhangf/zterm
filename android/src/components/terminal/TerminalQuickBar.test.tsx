@@ -7,6 +7,7 @@ import {
   fireEvent,
   render,
   screen,
+  within,
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -1556,6 +1557,50 @@ describe("TerminalQuickBar", () => {
       const latest = calls[calls.length - 1]?.[0];
       expect(Array.isArray(latest)).toBe(true);
       expect(latest[latest.length - 1]?.label).toBe("Ctrl + C");
+      expect(latest[latest.length - 1]?.row).toBe("bottom-scroll");
+    });
+  });
+
+  it("saves shift as a one-shot modifier for the next combination key", async () => {
+    const onShortcutActionsChange = vi.fn();
+
+    renderQuickBar({
+      onShortcutActionsChange,
+    });
+
+    fireEvent.click(screen.getAllByRole("button", { name: "+" })[0]);
+    expect(screen.getByText("快捷按键设置")).not.toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "+ 添加组合键" }));
+    await waitFor(() => {
+      expect(
+        screen.getByPlaceholderText("快捷键名称 / 显示名称"),
+      ).not.toBeNull();
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "Shift" }));
+    fireEvent.click(
+      within(screen.getByTestId("shortcut-editor-scroll")).getByRole(
+        "button",
+        { name: "←" },
+      ),
+    );
+    fireEvent.change(
+      screen.getByPlaceholderText("输入组合键里的目标字符，例如 c"),
+      {
+        target: { value: "a" },
+      },
+    );
+    fireEvent.click(screen.getByRole("button", { name: "加入" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加快捷键" }));
+
+    await waitFor(() => {
+      expect(onShortcutActionsChange).toHaveBeenCalled();
+      const calls = onShortcutActionsChange.mock.calls;
+      const latest = calls[calls.length - 1]?.[0];
+      expect(Array.isArray(latest)).toBe(true);
+      expect(latest[latest.length - 1]?.label).toBe("Shift + ← + a");
+      expect(latest[latest.length - 1]?.sequence).toBe("\u001b[1;2Da");
       expect(latest[latest.length - 1]?.row).toBe("bottom-scroll");
     });
   });

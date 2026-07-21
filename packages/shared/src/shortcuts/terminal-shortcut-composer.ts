@@ -10,6 +10,20 @@ export interface BuiltTerminalShortcutSequence {
   error: string;
 }
 
+const SHIFT_ARROW_SHORTCUT_SEQUENCES: Record<string, string> = {
+  '\x1b[A': '\x1b[1;2A',
+  '\x1b[B': '\x1b[1;2B',
+  '\x1b[C': '\x1b[1;2C',
+  '\x1b[D': '\x1b[1;2D',
+};
+
+const SHIFT_ARROW_SHORTCUT_TOKENS: Record<string, Pick<TerminalShortcutToken, 'label' | 'sequence' | 'kind'>> = {
+  '\x1b[1;2A': { label: '↑', sequence: '\x1b[A', kind: 'key' },
+  '\x1b[1;2B': { label: '↓', sequence: '\x1b[B', kind: 'key' },
+  '\x1b[1;2C': { label: '→', sequence: '\x1b[C', kind: 'key' },
+  '\x1b[1;2D': { label: '←', sequence: '\x1b[D', kind: 'key' },
+};
+
 export function encodeCtrlShortcutKey(letter: string) {
   const upper = letter.toUpperCase();
   const code = upper.charCodeAt(0);
@@ -30,44 +44,43 @@ export function formatTerminalShortcutKeyLabel(token: TerminalShortcutToken) {
   return token.label;
 }
 
-export function buildTerminalShortcutSequence(tokens: TerminalShortcutToken[]): BuiltTerminalShortcutSequence {
-  if (tokens.length === 0) {
-    return {
-      sequence: '',
-      preview: '',
-      error: '',
-    };
+function formatTerminalShortcutPreview(modifiers: string[], keyToken: TerminalShortcutToken) {
+  const orderedModifiers = ['Ctrl', 'Option', 'Command', 'Shift']
+    .filter((modifier) => modifiers.includes(modifier));
+  return [...orderedModifiers, formatTerminalShortcutKeyLabel(keyToken)].join(' + ');
+}
+
+function resolveShiftModifiedShortcutSequence(keyToken: TerminalShortcutToken) {
+  if (keyToken.sequence === '\t' || keyToken.label === 'Tab') {
+    return '\x1b[Z';
   }
-
-  const modifiers = tokens.filter(isTerminalShortcutModifierToken).map((token) => token.label);
-  const normalTokens = tokens.filter((token) => !isTerminalShortcutModifierToken(token));
-
-  if (modifiers.length === 0) {
-    return {
-      sequence: normalTokens.map((token) => token.sequence).join(''),
-      preview: normalTokens.map((token) => token.label).join(' + '),
-      error: '',
-    };
+  if (keyToken.sequence === '\r' || keyToken.label === 'Return' || keyToken.label === 'Enter') {
+    return '\n';
   }
-
-  if (normalTokens.length !== 1) {
-    return {
-      sequence: '',
-      preview: tokens.map((token) => token.label).join(' + '),
-      error: '带修饰键时当前只支持一个目标按键',
-    };
+  const shiftedArrowSequence = SHIFT_ARROW_SHORTCUT_SEQUENCES[keyToken.sequence];
+  if (shiftedArrowSequence) {
+    return shiftedArrowSequence;
   }
+  if (keyToken.sequence.length === 1 && /^[a-z]$/i.test(keyToken.sequence)) {
+    return keyToken.sequence.toUpperCase();
+  }
+  return '';
+}
 
-  const keyToken = normalTokens[0];
+function resolveModifiedShortcutSequence(
+  modifiers: string[],
+  keyToken: TerminalShortcutToken,
+): BuiltTerminalShortcutSequence {
   const hasCtrl = modifiers.includes('Ctrl');
   const hasShift = modifiers.includes('Shift');
   const hasCommand = modifiers.includes('Command');
   const hasOption = modifiers.includes('Option');
+  const preview = formatTerminalShortcutPreview(modifiers, keyToken);
 
   if (hasOption) {
     return {
       sequence: '',
-      preview: tokens.map((token) => token.label).join(' + '),
+      preview,
       error: 'Option 组合暂未接入终端编码',
     };
   }
@@ -83,7 +96,7 @@ export function buildTerminalShortcutSequence(tokens: TerminalShortcutToken[]): 
   if (hasCommand && (keyToken.sequence === 'v' || keyToken.sequence === 'V')) {
     return {
       sequence: '\x16',
-      preview: `Command + ${keyToken.label}`,
+      preview,
       error: '',
     };
   }
@@ -94,57 +107,94 @@ export function buildTerminalShortcutSequence(tokens: TerminalShortcutToken[]): 
       if (!encoded) {
         return {
           sequence: '',
-          preview: tokens.map((token) => token.label).join(' + '),
+          preview,
           error: 'Ctrl 当前只支持字母键',
         };
       }
       return {
         sequence: encoded,
-        preview: `Ctrl + ${formatTerminalShortcutKeyLabel(keyToken)}`,
+        preview,
         error: '',
       };
     }
 
     return {
       sequence: '',
-      preview: tokens.map((token) => token.label).join(' + '),
+      preview,
       error: 'Ctrl 当前只支持字母键',
     };
   }
 
   if (hasShift) {
-    if (keyToken.label === 'Tab') {
+    const shiftedSequence = resolveShiftModifiedShortcutSequence(keyToken);
+    if (shiftedSequence) {
       return {
-        sequence: '\x1b[Z',
-        preview: 'Shift + Tab',
+        sequence: shiftedSequence,
+        preview,
         error: '',
       };
     }
-    if (keyToken.label === 'Return' || keyToken.label === 'Enter') {
-      return {
-        sequence: '\n',
-        preview: 'Shift + Enter',
-        error: '',
-      };
-    }
-    if (keyToken.sequence.length === 1) {
-      return {
-        sequence: keyToken.sequence.toUpperCase(),
-        preview: `Shift + ${formatTerminalShortcutKeyLabel(keyToken)}`,
-        error: '',
-      };
-    }
-
     return {
       sequence: '',
-      preview: tokens.map((token) => token.label).join(' + '),
-      error: 'Shift 当前只支持字母/Enter/Tab',
+      preview,
+      error: 'Shift 当前只支持字母/Enter/Tab/方向键',
     };
   }
 
   return {
     sequence: keyToken.sequence,
-    preview: tokens.map((token) => token.label).join(' + '),
+    preview: keyToken.label,
+    error: '',
+  };
+}
+
+export function buildTerminalShortcutSequence(tokens: TerminalShortcutToken[]): BuiltTerminalShortcutSequence {
+  if (tokens.length === 0) {
+    return {
+      sequence: '',
+      preview: '',
+      error: '',
+    };
+  }
+
+  const sequenceParts: string[] = [];
+  const previewParts: string[] = [];
+  let pendingModifiers: string[] = [];
+
+  for (const token of tokens) {
+    if (isTerminalShortcutModifierToken(token)) {
+      if (!pendingModifiers.includes(token.label)) {
+        pendingModifiers = [...pendingModifiers, token.label];
+      }
+      continue;
+    }
+
+    if (pendingModifiers.length > 0) {
+      const built = resolveModifiedShortcutSequence(pendingModifiers, token);
+      if (built.error || !built.sequence) {
+        return built;
+      }
+      sequenceParts.push(built.sequence);
+      previewParts.push(built.preview);
+      pendingModifiers = [];
+      continue;
+    }
+
+    sequenceParts.push(token.sequence);
+    previewParts.push(token.label);
+  }
+
+  if (pendingModifiers.length > 0) {
+    return {
+      sequence: '',
+      preview: pendingModifiers.join(' + '),
+      error: '修饰键后需要选择一个目标按键',
+    };
+  }
+
+  return {
+    sequence: sequenceParts.join(''),
+    preview: previewParts.join(' + '),
     error: '',
   };
 }
@@ -176,6 +226,14 @@ export function buildTerminalShortcutTokensFromSequence(
 
   if (matchedPreset) {
     return [{ label: matchedPreset.label, sequence: matchedPreset.sequence, kind: matchedPreset.kind }];
+  }
+
+  if (sequence in SHIFT_ARROW_SHORTCUT_TOKENS) {
+    const shiftedToken = SHIFT_ARROW_SHORTCUT_TOKENS[sequence];
+    return [
+      { label: 'Shift', sequence: '__SHIFT__', kind: 'modifier' },
+      shiftedToken,
+    ];
   }
 
   const ctrlTokens = decodeCtrlShortcutTokens(sequence);

@@ -39,15 +39,20 @@
       "title": "Terminal floating quickbar and split controls",
       "domain": "terminal-ui",
       "owners": [
-        "src/components/terminal/TerminalQuickBar.tsx"
+        "src/components/terminal/TerminalQuickBar.tsx",
+        "packages/shared/src/shortcuts/terminal-shortcut-composer.ts"
       ],
       "allowed_paths": [
         "src/components/terminal/TerminalQuickBar.tsx",
+        "src/components/terminal/TerminalQuickBar.test.tsx",
+        "src/components/terminal/terminal-quickbar-helpers.tsx",
         "src/pages/TerminalPage.tsx",
         "src/pages/TerminalPageQuickBarAssembly.tsx",
         "src/pages/useTerminalPageOverlays.ts",
         "src/hooks/useTerminalWorkspace.ts",
-        "src/lib/terminal-layout-profile.ts"
+        "src/lib/terminal-layout-profile.ts",
+        "packages/shared/src/shortcuts/terminal-shortcut-composer.ts",
+        "packages/shared/src/shortcuts/terminal-shortcut-composer.test.ts"
       ],
       "forbidden_paths": [
         "src/server/",
@@ -55,6 +60,7 @@
       ],
       "required_gates": [
         "src/components/terminal/TerminalQuickBar.test.tsx",
+        "../packages/shared/src/shortcuts/terminal-shortcut-composer.test.ts",
         "src/pages/TerminalPage.real-quickbar-split.test.tsx",
         "src/hooks/useTerminalWorkspace.test.tsx"
       ],

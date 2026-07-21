@@ -80,6 +80,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - Remote-window input context 只允许发布给已验证支持的 app-window `bring-to-focus + os-event` target。当前 `tmux-input` / `iterm2-api` iTerm pane 路线必须显示只读并禁止发送 pointer/scroll/gesture/key/QuickBar input；不要把 daemon 会拒绝的路线伪装成可操作。
 - Remote-window floating resize 必须是 Android overlay projection：至少覆盖左下角和右下角拖拽，按 selected source aspect ratio 等比缩放，右下角扩缩时保持左边稳定并移动右边，左下角扩缩时保持右边稳定，并且放大时要 cap 到 toolbar 仍在 viewport 顶部安全边界内。测试不能只证明“有一个 handle”。
 - Remote-window unzoomed fullscreen / floating 的单指触控默认属于远端输入：点击发 pointer，拖动在本地识别后于 release 发一个 `gesture/swipe` 命令给 daemon，由 daemon 模拟同等手势；mouse/trackpad wheel 才保持 pixel scroll。即使 `bottomInsetPx` 存在也不得被本地容器 pan 抢走。`bottomChromeInsetPx` 只负责键盘打开时的自动初始上抬，`scale > 1` 后单指拖动才属于本地 zoom pan；不得通过改 terminal renderer、daemon capture 或隐藏本地 pan 补偿远端输入。
+- Remote-window 支持的 app-window 非 `focus` 用户输入必须按“每个逻辑事件 focus-first”发送：pointer / gesture / wheel / key / QuickBar / IME 的每一个真实事件前都要紧邻同 stream/target 的 `focus` intent。只在 stream start、pointerdown 或 batch 开头 focus 不够；daemon 仍是唯一 AX/Quartz focus+input owner，Android 只能发 intent。unsupported iTerm/tmux read-only 目标仍不得发布 input context 或发送 focus/input。
 - 相关改动最小 gate：`RemoteWindowOverlay.test.tsx`、`TerminalPage.remote-window-overlay.test.tsx`、`session-context-remote-window-runtime.test.ts`、`session-context-transfer-runtime.test.ts`、`terminal-file-transfer-binary-runtime.test.ts`、`remote-window-stream-daemon.test.ts`、`terminal-message-runtime.test.ts`、`remote-window-video-quality.test.ts`、`tsc --noEmit`、`test:feature-registry`。daemon 可用时追加 live WS 显式错误/成功 smoke。
 
 ### 2.3 旧文档处理
@@ -199,6 +200,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - keyboard 关闭态不要在 quick bar / bottom overlay 外层保留空 `transform`（如 `translateY(0)`）；这会让内部 `position: fixed` 的悬浮球/面板改绑到容器坐标系，导致入口“消失”
 - 快捷按键编辑器里，组合键默认名必须来自最终组合 preview，而不是第一个被点击的 modifier token；否则 `Ctrl + C` 会被错误保存成 `Ctrl`
 - Android / Mac 若都要消费快捷按键组合规则，编码/反解/默认 label 必须下沉到 shared 纯函数；平台 UI 只保留 token 编辑与展示，禁止再复制一份组合算法
+- 快捷按键 modifier 是 one-shot 语义：`buildTerminalShortcutSequence()` 按 token 顺序消费 pending modifier，只修饰后面的第一个目标键，然后清空；例如 `Shift + ← + a` 编码为 `\x1b[1;2D` + `a`。不要恢复“有 modifier 只能一个目标键”的限制，也不要让平台 UI 自己实现 Shift/方向键规则。
 - Android WebView 若出现“sheet/表单看起来不能滚”，先不要凭截图猜高度；应先附着 `webview_devtools_remote_<pid>` 给目标滚动容器打 `touchstart/touchmove/scrollTop` probe，并用 `adb logcat` 验证 `defaultPrevented` 与 `scrollTop` 是否真实变化，再决定改事件捕获还是布局
 - Android IME / viewport / keyboard lift 计算只能有一个 helper 真源；页面层不得复制 `resolveKeyboardLiftPx` / viewport height 逻辑。若键盘弹起后出现 gap、内容缺失或 quickbar 错位，先确认 WebView 是 overlay 还是 adjustResize：已 resize 时用当前 viewport height 且 lift=0，overlay 时才用 stable height + lift。
 - IME 高度事件可能先于 OEM `visualViewport.resize` 到达；viewport listener 必须把 current layout height 写入 React UI-shell state，不能只更新 width/top inset。否则后续纯高度 resize 不触发 render，会把首帧 overlay lift 冻结成偶发过度上抬。红测必须按 keyboard-first -> layout/visual resize -> adjustResize zero-lift 顺序重放。

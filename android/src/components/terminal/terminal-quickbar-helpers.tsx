@@ -65,7 +65,7 @@ export const SHORTCUT_ROW_META: Record<
     summary: 'Ctrl + C / Shift + Tab / Continue / Paste',
     addLabel: '+ 添加组合键',
     formTag: '当前编辑：第三行组合键',
-    formHint: '这里放组合键或复合动作，单按键请放到第二行。',
+    formHint: '这里放组合键或复合动作，Shift 只修饰后面的第一个键，单按键请放到第二行。',
     inputPlaceholder: '输入组合键里的目标字符，例如 c',
   },
 };

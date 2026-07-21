@@ -191,6 +191,20 @@ function makeItermTarget(): RemoteWindowStreamTargetManifest {
   };
 }
 
+function expectEveryRemoteWindowInputFocusFirst(sendInput: ReturnType<typeof vi.fn>) {
+  const payloads = sendInput.mock.calls.map((call) => call[1]);
+  payloads.forEach((payload, index) => {
+    if (payload?.event?.kind === 'focus') {
+      return;
+    }
+    expect(payloads[index - 1]).toMatchObject({
+      streamId: payload.streamId,
+      targetId: payload.targetId,
+      event: { kind: 'focus' },
+    });
+  });
+}
+
 describe('TerminalPage remote window overlay', () => {
   afterEach(() => {
     cleanup();
@@ -314,6 +328,7 @@ describe('TerminalPage remote window overlay', () => {
       expect(onActiveBodySubscriptionSuppressedChange).toHaveBeenLastCalledWith(true);
     });
 
+    onSendRemoteWindowInput.mockClear();
     fireEvent.click(screen.getByText('quickbar-arrow-up'));
     await waitFor(() => {
       expect(onSendRemoteWindowInput).toHaveBeenCalledWith('s1', expect.objectContaining({
@@ -328,7 +343,15 @@ describe('TerminalPage remote window overlay', () => {
       }));
       expect(onQuickActionInput).not.toHaveBeenCalled();
     });
+    expect(onSendRemoteWindowInput.mock.calls.map((call) => call[1].event.kind)).toEqual([
+      'focus',
+      'key',
+      'focus',
+      'key',
+    ]);
+    expectEveryRemoteWindowInputFocusFirst(onSendRemoteWindowInput);
 
+    onSendRemoteWindowInput.mockClear();
     fireEvent.click(screen.getByText('quickbar-send-draft'));
     await waitFor(() => {
       expect(onSendRemoteWindowInput).toHaveBeenCalledWith('s1', expect.objectContaining({
@@ -351,6 +374,7 @@ describe('TerminalPage remote window overlay', () => {
       }));
       expect(onSessionDraftSend).not.toHaveBeenCalled();
     });
+    expectEveryRemoteWindowInputFocusFirst(onSendRemoteWindowInput);
 
     fireEvent.click(screen.getByText('quickbar-keyboard'));
     await waitFor(() => {

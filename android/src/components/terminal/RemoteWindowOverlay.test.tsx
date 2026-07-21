@@ -91,6 +91,20 @@ function expectFirstRemoteInputFocus(sendInput: ReturnType<typeof vi.fn>) {
   });
 }
 
+function expectEveryNonFocusInputIsFocusFirst(sendInput: ReturnType<typeof vi.fn>) {
+  const payloads = remoteInputPayloads(sendInput);
+  payloads.forEach((payload, index) => {
+    if (payload?.event?.kind === 'focus') {
+      return;
+    }
+    expect(payloads[index - 1]?.event).toMatchObject({ kind: 'focus' });
+    expect(payloads[index - 1]).toMatchObject({
+      streamId: payload.streamId,
+      targetId: payload.targetId,
+    });
+  });
+}
+
 async function waitForNonFocusRemoteInputCount(sendInput: ReturnType<typeof vi.fn>, count: number) {
   await waitFor(() => {
     expect(nonFocusRemoteInputPayloads(sendInput)).toHaveLength(count);
@@ -1169,10 +1183,12 @@ describe('RemoteWindowOverlay', () => {
 
     await waitForNonFocusRemoteInputCount(sendInput, 2);
     expectFirstRemoteInputFocus(sendInput);
+    expectEveryNonFocusInputIsFocusFirst(sendInput);
     expect(remoteInputPayloads(sendInput).map((payload) => payload.event.kind)).toEqual([
       'focus',
       'focus',
       'pointer',
+      'focus',
       'pointer',
     ]);
     const inputPayloads = nonFocusRemoteInputPayloads(sendInput);
@@ -1240,10 +1256,11 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.pointerMove(surface, { pointerId: 21, pointerType: 'touch', clientX: 100, clientY: 40, button: 0, buttons: 1 });
     expectFirstRemoteInputFocus(sendInput);
     expect(nonFocusRemoteInputPayloads(sendInput)).toHaveLength(0);
+    sendInput.mockClear();
     fireEvent.pointerUp(surface, { pointerId: 21, pointerType: 'touch', clientX: 100, clientY: 40, button: 0, buttons: 0 });
     await waitForNonFocusRemoteInputCount(sendInput, 1);
+    expectEveryNonFocusInputIsFocusFirst(sendInput);
     expect(remoteInputPayloads(sendInput).map((payload) => payload.event.kind)).toEqual([
-      'focus',
       'focus',
       'gesture',
     ]);
@@ -1313,8 +1330,10 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.pointerMove(surface, { pointerId: 22, pointerType: 'touch', clientX: 120, clientY: 40, button: 0, buttons: 1 });
     expectFirstRemoteInputFocus(sendInput);
     expect(nonFocusRemoteInputPayloads(sendInput)).toHaveLength(0);
+    sendInput.mockClear();
     fireEvent.pointerUp(surface, { pointerId: 22, pointerType: 'touch', clientX: 120, clientY: 40, button: 0, buttons: 0 });
     await waitForNonFocusRemoteInputCount(sendInput, 1);
+    expectEveryNonFocusInputIsFocusFirst(sendInput);
     expect(nonFocusRemoteInputPayloads(sendInput)[0].event).toMatchObject({
       kind: 'gesture',
       gesture: 'swipe',
@@ -1415,9 +1434,11 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.pointerMove(surface, { pointerId: 52, pointerType: 'touch', clientX: 120, clientY: 250, button: 0, buttons: 1 });
     expectFirstRemoteInputFocus(sendInput);
     expect(nonFocusRemoteInputPayloads(sendInput)).toHaveLength(0);
+    sendInput.mockClear();
     fireEvent.pointerUp(surface, { pointerId: 52, pointerType: 'touch', clientX: 120, clientY: 250, button: 0, buttons: 0 });
 
     await waitForNonFocusRemoteInputCount(sendInput, 1);
+    expectEveryNonFocusInputIsFocusFirst(sendInput);
     expect(nonFocusRemoteInputPayloads(sendInput)[0].event).toMatchObject({
       kind: 'gesture',
       gesture: 'swipe',
@@ -1476,6 +1497,7 @@ describe('RemoteWindowOverlay', () => {
 
     await waitForNonFocusRemoteInputCount(sendInput, 2);
     expectFirstRemoteInputFocus(sendInput);
+    expectEveryNonFocusInputIsFocusFirst(sendInput);
     const inputPayloads = nonFocusRemoteInputPayloads(sendInput);
     expect(inputPayloads).toHaveLength(2);
     expect(inputPayloads[0]).toMatchObject({
