@@ -424,7 +424,7 @@
     {
       "resource_id": "resource.relay_peer_lease",
       "resource_type": "relay_runtime_truth",
-      "identity": "Idle-timeout bounded Relay peer lease and resume token for one daemon target route",
+      "identity": "30-minute idle-timeout bounded Relay peer lease for one account, daemon target route, and concrete client device",
       "owner_feature": "relay.account_directory",
       "truth_store": "src/traversal-relay/server.ts and src/server/relay-client.ts",
       "allowed_operations": [

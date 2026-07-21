@@ -202,6 +202,45 @@ describe('traversal relay client truth', () => {
     expect(readTraversalRelayAccountState()?.password).toBe('');
   });
 
+  it('creates a stable per-install relay device id instead of sharing one Android id across phones', async () => {
+    Object.defineProperty(window.navigator, 'userAgent', {
+      configurable: true,
+      value: 'Mozilla/5.0 (Linux; Android 15) AppleWebKit/537.36',
+    });
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        accessToken: 'token-1',
+        user: { id: 'u1', username: 'jason', createdAt: 'now' },
+        devices: [],
+        directory: directoryPayload,
+        relayBaseUrl: 'https://relay.example.com/relay/',
+        ws: {
+          devices: 'wss://relay.example.com/relay/ws/devices',
+          host: 'wss://relay.example.com/relay/ws/host',
+          client: 'wss://relay.example.com/relay/ws/client',
+        },
+      }),
+    } as Response);
+
+    const first = await traversalRelayLogin({
+      relayBaseUrl: 'https://relay.example.com',
+      username: 'jason',
+      password: 'pw',
+    });
+    const second = await traversalRelayLogin({
+      relayBaseUrl: 'https://relay.example.com',
+      username: 'jason',
+      password: 'pw',
+    });
+
+    expect(first.deviceId).toMatch(/^zterm-android-[a-z0-9-]+$/);
+    expect(first.deviceId).not.toBe('zterm-android');
+    expect(second.deviceId).toBe(first.deviceId);
+    expect(readTraversalRelayAccountState()?.relaySettings?.deviceId).toBe(first.deviceId);
+  });
+
   it('rejects relay login responses that do not include a valid account directory', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,

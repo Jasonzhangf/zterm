@@ -12687,6 +12687,35 @@ function createRtcBridgeServer(options) {
     }
     peers.delete(peerId);
   }
+  function initializePeerConnection(peer, payload) {
+    if (peer.peerConnection || peer.ready) {
+      peer.transport.close("rtc peer replaced by new init");
+    }
+    peer.peerConnection = null;
+    peer.ready = false;
+    const peerConnection = new RTCPeerConnection(buildRtcPeerConnectionConfig(payload));
+    peer.peerConnection = peerConnection;
+    peerConnection.onicecandidate = (event) => {
+      if (!event.candidate) {
+        return;
+      }
+      peer.emitSignal({
+        type: "rtc-candidate",
+        payload: event.candidate.toJSON()
+      });
+    };
+    peerConnection.ondatachannel = (event) => {
+      const channel = event.channel;
+      channel.onopen = () => {
+        if (peer.ready || !peer.peerConnection) {
+          return;
+        }
+        peer.ready = true;
+        const handlers = options.onTransportOpen(peer.transport);
+        peer.transport.attach(peer.peerConnection, channel, handlers);
+      };
+    };
+  }
   async function handleSignalMessage(input) {
     const peer = upsertPeerTransport(input.peerId, input.requestOrigin, input.emitSignal, input.closeSignal);
     const { message } = input;
@@ -12695,31 +12724,7 @@ function createRtcBridgeServer(options) {
       return;
     }
     if (message.type === "rtc-init") {
-      if (peer.peerConnection) {
-        return;
-      }
-      const peerConnection = new RTCPeerConnection(buildRtcPeerConnectionConfig(message.payload));
-      peer.peerConnection = peerConnection;
-      peerConnection.onicecandidate = (event) => {
-        if (!event.candidate) {
-          return;
-        }
-        peer.emitSignal({
-          type: "rtc-candidate",
-          payload: event.candidate.toJSON()
-        });
-      };
-      peerConnection.ondatachannel = (event) => {
-        const channel = event.channel;
-        channel.onopen = () => {
-          if (peer.ready || !peer.peerConnection) {
-            return;
-          }
-          peer.ready = true;
-          const handlers = options.onTransportOpen(peer.transport);
-          peer.transport.attach(peer.peerConnection, channel, handlers);
-        };
-      };
+      initializePeerConnection(peer, message.payload);
       return;
     }
     if (!peer.peerConnection) {

@@ -259,7 +259,7 @@ describe('buildTraversalPlan', () => {
     expect(plan.candidates).toContainEqual(expect.objectContaining({
       kind: 'rtc',
       path: 'rtc-direct',
-      signalUrl: 'ws://159.75.134.56/relay/ws/client?token=access-1&hostId=daemon-host-a',
+      signalUrl: 'ws://159.75.134.56/relay/ws/client?token=access-1&hostId=daemon-host-a&deviceId=tablet-1',
       endpoint: 'rtc-direct:daemon-host-a',
       iceTransportPolicy: 'all',
       iceServers: [{ urls: 'stun:claw.codewhisper.cc:3479' }],
@@ -267,7 +267,7 @@ describe('buildTraversalPlan', () => {
     expect(plan.candidates).toContainEqual(expect.objectContaining({
       kind: 'rtc',
       path: 'rtc-relay',
-      signalUrl: 'ws://159.75.134.56/relay/ws/client?token=access-1&hostId=daemon-host-a',
+      signalUrl: 'ws://159.75.134.56/relay/ws/client?token=access-1&hostId=daemon-host-a&deviceId=tablet-1',
       endpoint: 'relay:daemon-host-a',
       iceTransportPolicy: 'relay',
       iceServers: [{
@@ -316,7 +316,7 @@ describe('buildTraversalPlan', () => {
     expect(plan.candidates).toContainEqual(expect.objectContaining({
       kind: 'rtc',
       path: 'rtc-direct',
-      signalUrl: 'ws://159.75.134.56/relay/ws/client?token=access-1&hostId=daemon-host-a',
+      signalUrl: 'ws://159.75.134.56/relay/ws/client?token=access-1&hostId=daemon-host-a&deviceId=tablet-1',
       endpoint: 'rtc-direct:daemon-host-a',
       iceTransportPolicy: 'all',
     }));
@@ -384,7 +384,7 @@ describe('buildTraversalPlan', () => {
       id: 'rtc-direct:daemon-host-a',
       kind: 'rtc',
       path: 'rtc-direct',
-      signalUrl: 'ws://159.75.134.56/relay/ws/client?token=access-1&hostId=daemon-host-a',
+      signalUrl: 'ws://159.75.134.56/relay/ws/client?token=access-1&hostId=daemon-host-a&deviceId=tablet-1',
       endpoint: 'rtc-direct:daemon-host-a',
       iceTransportPolicy: 'all',
     }));
@@ -392,7 +392,7 @@ describe('buildTraversalPlan', () => {
       id: 'relay-rtc:daemon-host-a',
       kind: 'rtc',
       path: 'rtc-relay',
-      signalUrl: 'ws://159.75.134.56/relay/ws/client?token=access-1&hostId=daemon-host-a',
+      signalUrl: 'ws://159.75.134.56/relay/ws/client?token=access-1&hostId=daemon-host-a&deviceId=tablet-1',
       endpoint: 'relay:daemon-host-a',
       iceTransportPolicy: 'relay',
     }));

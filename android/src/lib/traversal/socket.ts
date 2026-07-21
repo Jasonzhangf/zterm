@@ -393,7 +393,7 @@ class WebRtcBackend implements Backend {
     this.dataChannel.send(data);
   }
 
-  public close() {
+  public close(_code?: number, _reason = 'rtc close') {
     try {
       this.dataChannel?.close();
     } catch (error) {

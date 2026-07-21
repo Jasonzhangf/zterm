@@ -34,6 +34,7 @@ daemon tmux truth
   - device stream emits `directory-snapshot` after update.
   - invalid directory payload emits relay-error, not success-shaped empty directory.
   - `/updates/latest.json` and `/updates/<apk>` are served from the relay updates directory, preserving manifest `apkUrl` semantics and returning explicit 404 for missing assets.
+  - `/ws/client` peer leases are keyed by account + hostId + concrete client device id, stay idle for 30 minutes after signaling close, are not shared across phones, and reject anonymous/missing-device clients.
 - `src/server/relay-client.test.ts`
   - daemon host client sends directory-update after relay-ready.
   - tmux session read failure is reported explicitly.
@@ -113,6 +114,9 @@ daemon tmux truth
 - Negative: a saved direct/Tailscale preset for the same daemon must not make drawer refresh/open duplicate daemon rails or replace the relay daemon identity; it is only a route candidate.
 - Positive: selecting an already-open stale direct row from a Relay-owned drawer catalog upgrades that session transport target to route-aware target truth and reuses the existing session id.
 - Negative: selecting that row must not bypass the session-open owner with a raw `switchSession`, and must not create a second open tab for the same tmux session.
+- Positive: reconnecting the same phone to Relay within 30 minutes reuses that phone's peer lease identity and can renegotiate WebRTC under the same peer id.
+- Negative: a second phone under the same account and hostId must not steal or overwrite the first phone's peer lease; missing device id is rejected; after 30 minutes or a daemon host replacement the peer must be rebuilt explicitly.
+- Black-box gate: `pnpm --dir android run test:relay:peer-lease`.
 
 ## Required Gates Before APK
 

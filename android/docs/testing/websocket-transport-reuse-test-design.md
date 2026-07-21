@@ -7,7 +7,7 @@ Feature: `terminal.transport_lifecycle`
 
 Lock the Android client transport rule that a same-session, same-target usable WebSocket is reused across foreground resume, tab switch, explicit resume, connect, and reconnect paths. Rebuild is allowed only when transport truth says it is necessary.
 
-Next architecture step: replace per-session physical body sockets with one daemon-target physical transport plus per-session logical channels. Relay/WebRTC recovery must be target-scoped too: a valid idle-timeout Relay peer lease may resume a physical daemon-target route, but it cannot preserve or infer terminal channel/session/tmux/UI truth.
+Next architecture step: replace per-session physical body sockets with one daemon-target physical transport plus per-session logical channels. Relay/WebRTC recovery must be target-scoped and client-device-scoped too: a valid 30-minute idle-timeout Relay peer lease may resume a physical daemon-target route for the same phone, but missing device identity is rejected, leases cannot be shared across phones, and leases cannot preserve or infer terminal channel/session/tmux/UI truth.
 
 ## Architecture Boundary
 
@@ -56,7 +56,7 @@ daemon-target physical transport
 -> transport target
 ```
 
-Relay peer lease is route/signaling truth only. It must not connect directly to terminal channel, transport subscriber, tmux, mirror, renderer, active tab, foreground, viewport, or UI projection truth.
+Relay peer lease is route/signaling truth only. It is keyed by account, daemon host, and concrete client device id; the relay server may keep it for 30 minutes after client signaling disconnect, then the route must be rebuilt. Clients without a concrete device id fail explicitly. The lease must not connect directly to terminal channel, transport subscriber, tmux, mirror, renderer, active tab, foreground, viewport, or UI projection truth.
 
 ## Mainline Under Test
 
@@ -167,12 +167,14 @@ Send scheduler:
 
 Relay server:
 - Positive: after a client signaling socket closes, a valid lease remains until idle timeout and the server does not send `relay-peer-close` to daemon immediately.
-- Positive: reconnecting with the same account, hostId, client device id, and valid `relayResumeToken` rebinds the client socket to the existing peer lease.
-- Negative: expired token, mismatched account/host/device, host offline, and replaced daemon host socket fail explicitly and close the stale peer.
+- Positive: reconnecting within 30 minutes with the same account, hostId, and client device id rebinds the client socket to that existing peer lease.
+- Positive: two phones under the same account and daemon host use two independent peer leases because their persisted client device ids differ.
+- Negative: missing client device id, expired lease, mismatched account/host/device, host offline, and replaced daemon host socket fail explicitly and close the stale peer.
 - Negative: peer lease state contains only route/signaling metadata and never stores channel id, sessionName, tmux id, mirror revision, active tab, foreground, viewport, renderer state, or terminal payload.
+- Black-box gate: `pnpm --dir android run test:relay:peer-lease`.
 
 Daemon relay client / RTC bridge:
-- Positive: phone signaling close before idle timeout marks the peer idle but does not close RTCPeerConnection or delete peer truth.
+- Positive: phone signaling close before idle timeout marks the peer idle but does not close RTCPeerConnection or delete peer truth; a second `rtc-init` for the same peer id renegotiates the peer instead of being ignored as a stale duplicate.
 - Positive: lease expiry or host disposal closes and deletes the peer exactly once.
 - Negative: resuming a relay peer must not create a second terminal channel or subscriber when mux target transport is still valid.
 

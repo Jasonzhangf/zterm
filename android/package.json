@@ -39,6 +39,7 @@
     "docs:function-wiki": "node ./scripts/build-function-wiki.mjs",
     "test:common-user-flows": "pnpm exec vitest run src/lib/tmux-sessions.test.ts src/pages/ConnectionPropertiesPage.test.tsx src/pages/ConnectionsPage.test.tsx src/server/schedule-store.test.ts src/server/schedule-dispatch.test.ts src/server/next-fire.test.ts src/server/schedule-engine.test.ts",
     "test:relay:smoke": "tsx scripts/traversal-relay-local-smoke.ts",
+    "test:relay:peer-lease": "tsx scripts/traversal-relay-peer-lease-smoke.ts",
     "test:android:apk-smoke": "tsx scripts/android-apk-smoke.ts",
     "test:android:terminal-real-device": "tsx scripts/terminal-real-device-evidence.ts",
     "check:no-source-js-pollution": "node ./scripts/check-no-source-js-pollution.mjs",

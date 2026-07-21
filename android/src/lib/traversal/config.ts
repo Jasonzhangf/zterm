@@ -242,6 +242,7 @@ export function buildTraversalPlan(
   if (mode !== 'websocket') {
     const relaySignalUrl = settings.traversalRelay?.wsClientUrl?.trim() || '';
     const relayAccessToken = settings.traversalRelay?.accessToken?.trim() || '';
+    const relayDeviceId = settings.traversalRelay?.deviceId?.trim() || '';
     const directoryRelayEndpoint = resolveDirectoryRelayEndpoint(target);
     const relayHostId = target.relayHostId?.trim() || target.daemonHostId?.trim() || directoryRelayEndpoint?.relayHostId?.trim() || '';
     const relayIceServers = buildIceServers(settings);
@@ -258,6 +259,9 @@ export function buildTraversalPlan(
       if (relaySignalUrl && relayHostId) {
         parsedSignalUrl.searchParams.set('hostId', relayHostId);
       }
+      if (relayDeviceId) {
+        parsedSignalUrl.searchParams.set('deviceId', relayDeviceId);
+      }
       rtcCandidates.push({
         id: relayHostId ? `rtc-direct:${relayHostId}` : `rtc-direct:${parsedSignalUrl.toString()}`,
         kind: 'rtc',
@@ -272,6 +276,9 @@ export function buildTraversalPlan(
       const parsedSignalUrl = new URL(signalUrl);
       if (relaySignalUrl && relayHostId) {
         parsedSignalUrl.searchParams.set('hostId', relayHostId);
+      }
+      if (relayDeviceId) {
+        parsedSignalUrl.searchParams.set('deviceId', relayDeviceId);
       }
       rtcCandidates.push({
         id: directoryRelayEndpoint?.id || `relay-rtc:${relayHostId || parsedSignalUrl.toString()}`,

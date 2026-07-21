@@ -315,6 +315,21 @@ describe('TraversalSocket reconnect', () => {
     expect(socket.readyState).toBe(MockWebSocket.CLOSED);
   });
 
+  it('does not send rtc-close on normal relay RTC socket close so relay can keep the client peer lease idle', async () => {
+    const socket = createRelayRtcSocket();
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    MockWebSocket.instances[0].triggerOpen();
+    await flushMicrotasks();
+    MockRTCPeerConnection.instances[0].channel.triggerOpen();
+    await flushMicrotasks();
+
+    socket.close(1000, 'client close');
+
+    expect(MockWebSocket.instances[0].sent.map((item) => JSON.parse(String(item)).type)).not.toContain('rtc-close');
+  });
+
   it('retries after all traversal candidates are exhausted before open', async () => {
     const socket = createSocket({
       traversalPathPriority: ['ipv4'],

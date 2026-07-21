@@ -389,7 +389,9 @@ async function connectDeviceStream(accessToken: string) {
 
 async function rtcClientSmoke(accessToken: string) {
   return await new Promise<Record<string, unknown>>((resolve, reject) => {
-    const signalSocket = new WebSocket(`ws://127.0.0.1:${relayPort}/ws/client?token=${encodeURIComponent(accessToken)}&hostId=${encodeURIComponent(relayHostId)}`);
+    const signalSocket = new WebSocket(
+      `ws://127.0.0.1:${relayPort}/ws/client?token=${encodeURIComponent(accessToken)}&hostId=${encodeURIComponent(relayHostId)}&deviceId=${encodeURIComponent(relayClientDeviceId)}`,
+    );
     const peerConnection = new RTCPeerConnection({ iceServers: [] });
     const channel = peerConnection.createDataChannel('zterm', { ordered: true });
     let settled = false;

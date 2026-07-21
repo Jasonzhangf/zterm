@@ -16,7 +16,7 @@ Acceptance:
 - Physical target close/stale cleanup detaches all channels through the existing daemon subscriber detach owner and leaves tmux sessions/mirror truth intact.
 - Backpressure on one channel cannot permanently delay or corrupt another channel; active input/control/ack always outranks body frames.
 - The new Android path does not silently fall back to per-session sockets. If a daemon does not advertise multiplex capability, the client exposes an explicit upgrade-required error.
-- Relay recovery is target-scoped: after a Relay/WebRTC physical route has been established, the Relay server may keep only an idle-timeout bounded peer lease/resume token for that daemon target. It must not keep session/channel/tmux/UI truth, and it must explicitly fail expired or mismatched resumes.
+- Relay recovery is target-scoped and client-device-scoped: after a Relay/WebRTC physical route has been established, the Relay server may keep only an idle-timeout bounded peer lease for that account, daemon target, and concrete client device id. It must not keep session/channel/tmux/UI truth, and it must explicitly fail missing device identity, expired, or mismatched resumes.
 - Daemon release, Android APK, function map, resource map, mainline call map, test design, gates, and live black-box evidence are all updated before completion is claimed.
 
 ## 2. Evidence-First Diagnosis Contract
@@ -151,7 +151,7 @@ resource.terminal_channel
   one logical terminal channel per open local session on that target transport
 
 resource.relay_peer_lease
-  one idle-timeout bounded Relay peer/signaling lease and resume token for a daemon target route
+  one idle-timeout bounded Relay peer/signaling lease for one account + daemon target + concrete client device
 
 resource.transport_subscriber
   daemon-side physical subscriber for one channel, not for the whole connection
@@ -178,7 +178,7 @@ resource.daemon_target_transport
   -> resource.transport_target
 ```
 
-`resource.relay_peer_lease` is route/signaling truth only. It may rebind a new phone signaling socket to a still-valid peer before idle timeout, but it must not own `resource.terminal_channel`, `resource.transport_subscriber`, `resource.tmux_session`, `resource.mirror_store`, active tab, foreground, viewport, or renderer truth.
+`resource.relay_peer_lease` is route/signaling truth only. It may rebind the same phone signaling socket identity to a still-valid peer before idle timeout, but missing client device id is rejected, another phone gets a different peer lease, and the lease must not own `resource.terminal_channel`, `resource.transport_subscriber`, `resource.tmux_session`, `resource.mirror_store`, active tab, foreground, viewport, or renderer truth.
 
 ### Protocol Shape
 
@@ -210,10 +210,10 @@ type TerminalMuxServerFrame =
 ```
 
 Relay resume protocol:
-- Client receives an opaque `relayResumeToken` only after a Relay/WebRTC daemon-target transport succeeds.
-- Reconnect within idle timeout may present `relayResumeToken` with the same account, hostId, and client device identity.
-- Relay server either rebinds the phone signaling socket to the existing peer lease and returns the same `peerId`, or returns an explicit `resume-expired`, `resume-mismatch`, or `host-offline` error.
-- Resume token is never a terminal session id, channel id, tmux id, or UI state id.
+- Android stores a per-install Relay client `deviceId` and includes it in `/ws/client`.
+- Reconnect within idle timeout may use the same account, hostId, and client device identity to rebind to the existing peer lease.
+- Relay server either rebinds the phone signaling socket to the existing peer lease and keeps the same `peerId`, or returns an explicit `deviceId is required`, `resume-expired`, `resume-mismatch`, or `host-offline` error.
+- Peer id / device id is never a terminal session id, channel id, tmux id, or UI state id.
 
 Channel-bound messages:
 - `input`

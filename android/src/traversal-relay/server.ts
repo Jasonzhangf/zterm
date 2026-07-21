@@ -60,7 +60,11 @@ interface RelayClientConnection {
   userId: string;
   username: string;
   hostId: string;
+  deviceId: string;
   peerId: string;
+  idleTimer: ReturnType<typeof setTimeout> | null;
+  idleSince: number | null;
+  lastIdleReason: string | null;
 }
 
 interface DeviceStreamConnection {
@@ -209,6 +213,14 @@ function hostKey(userId: string, hostId: string) {
 
 function deviceKey(userId: string, deviceId: string) {
   return `${userId}:${deviceId}`;
+}
+
+function clientPeerLeaseKey(userId: string, hostId: string, deviceId: string) {
+  const normalizedDeviceId = asString(deviceId);
+  if (!normalizedDeviceId) {
+    return null;
+  }
+  return `${userId}:${hostId}:${normalizedDeviceId}`;
 }
 
 function buildAuthPage(mode: 'login' | 'register') {
@@ -499,11 +511,13 @@ const STORE_PATH = resolveStorePath();
 const UPDATES_DIR = resolveUpdatesDir(STORE_PATH);
 const BASE_PATH = resolveBasePath();
 const TURN_CONFIG = resolveTurnConfig();
+const RELAY_CLIENT_PEER_IDLE_TIMEOUT_MS = 30 * 60 * 1000;
 mkdirSync(dirname(STORE_PATH), { recursive: true });
 mkdirSync(UPDATES_DIR, { recursive: true });
 const store = new TraversalRelayStore(STORE_PATH);
 const hosts = new Map<string, RelayHostConnection>();
 const clients = new Map<string, RelayClientConnection>();
+const idleClients = new Map<string, RelayClientConnection>();
 const deviceStreams = new Map<string, DeviceStreamConnection>();
 const liveClientDevices = new Map<string, Set<string>>();
 const liveDaemonDevices = new Map<string, Set<string>>();
@@ -872,14 +886,143 @@ const server = createServer((request, response) => {
 
 const wss = new WebSocketServer({ noServer: true });
 
-function closeClientPeer(peerId: string, reason: string) {
+function closeClientPeer(peerId: string, reason: string, options?: { notifyHost?: boolean }) {
   const client = clients.get(peerId);
-  if (!client) {
+  const idleEntry = [...idleClients.entries()].find(([, candidate]) => candidate.peerId === peerId) || null;
+  const target = client || idleEntry?.[1] || null;
+  if (!target) {
     return;
   }
   clients.delete(peerId);
+  if (idleEntry) {
+    idleClients.delete(idleEntry[0]);
+  }
+  if (target.idleTimer) {
+    clearTimeout(target.idleTimer);
+    target.idleTimer = null;
+  }
+  if (options?.notifyHost) {
+    const host = hosts.get(hostKey(target.userId, target.hostId));
+    if (host) {
+      sendHostEnvelope(host.socket, {
+        type: 'relay-peer-close',
+        peerId: target.peerId,
+        reason,
+      });
+    }
+  }
+  if (target.socket.readyState < WebSocket.CLOSING) {
+    target.socket.close(1013, reason.slice(0, 120));
+  }
+}
+
+function closeIdleClientPeer(leaseKey: string, reason: string) {
+  const client = idleClients.get(leaseKey);
+  if (!client) {
+    return;
+  }
+  idleClients.delete(leaseKey);
+  clients.delete(client.peerId);
+  client.idleTimer = null;
+  const host = hosts.get(hostKey(client.userId, client.hostId));
+  if (host) {
+    sendHostEnvelope(host.socket, {
+      type: 'relay-peer-close',
+      peerId: client.peerId,
+      reason,
+    });
+  }
   if (client.socket.readyState < WebSocket.CLOSING) {
     client.socket.close(1013, reason.slice(0, 120));
+  }
+}
+
+function markClientPeerIdle(client: RelayClientConnection, reason: string) {
+  const leaseKey = clientPeerLeaseKey(client.userId, client.hostId, client.deviceId);
+  if (!leaseKey) {
+    closeClientPeer(client.peerId, reason, { notifyHost: true });
+    return;
+  }
+  clients.delete(client.peerId);
+  if (client.idleTimer) {
+    clearTimeout(client.idleTimer);
+  }
+  client.idleSince = Date.now();
+  client.lastIdleReason = reason;
+  idleClients.set(leaseKey, client);
+  client.idleTimer = setTimeout(() => closeIdleClientPeer(leaseKey, reason), RELAY_CLIENT_PEER_IDLE_TIMEOUT_MS);
+  client.idleTimer.unref?.();
+}
+
+function resumeIdleClientPeer(options: {
+  userId: string;
+  username: string;
+  hostId: string;
+  deviceId: string;
+  socket: WebSocket;
+}) {
+  const leaseKey = clientPeerLeaseKey(options.userId, options.hostId, options.deviceId);
+  if (!leaseKey) {
+    return null;
+  }
+  const existing = idleClients.get(leaseKey) || null;
+  if (!existing) {
+    return null;
+  }
+  idleClients.delete(leaseKey);
+  if (existing.idleTimer) {
+    clearTimeout(existing.idleTimer);
+  }
+  existing.socket = options.socket;
+  existing.username = options.username;
+  existing.idleTimer = null;
+  existing.idleSince = null;
+  existing.lastIdleReason = null;
+  clients.set(existing.peerId, existing);
+  return existing;
+}
+
+function findActiveClientPeerByLeaseKey(leaseKey: string | null) {
+  if (!leaseKey) {
+    return null;
+  }
+  for (const client of clients.values()) {
+    if (clientPeerLeaseKey(client.userId, client.hostId, client.deviceId) === leaseKey) {
+      return client;
+    }
+  }
+  return null;
+}
+
+function bindClientPeerSocket(client: RelayClientConnection, socket: WebSocket, username: string) {
+  const previousSocket = client.socket;
+  client.socket = socket;
+  client.username = username;
+  client.idleSince = null;
+  client.lastIdleReason = null;
+  if (client.idleTimer) {
+    clearTimeout(client.idleTimer);
+    client.idleTimer = null;
+  }
+  clients.set(client.peerId, client);
+  if (previousSocket !== socket && previousSocket.readyState < WebSocket.CLOSING) {
+    previousSocket.close(1000, 'relay client socket replaced');
+  }
+}
+
+function clearIdleClientPeersForHost(userId: string, hostId: string, reason: string) {
+  for (const [leaseKey, client] of [...idleClients.entries()]) {
+    if (client.userId !== userId || client.hostId !== hostId) {
+      continue;
+    }
+    idleClients.delete(leaseKey);
+    if (client.idleTimer) {
+      clearTimeout(client.idleTimer);
+      client.idleTimer = null;
+    }
+    if (client.socket.readyState < WebSocket.CLOSING) {
+      client.socket.close(1013, reason.slice(0, 120));
+    }
   }
 }
 
@@ -902,6 +1045,7 @@ function closeHost(host: RelayHostConnection, reason: string) {
       closeClientPeer(client.peerId, reason);
     }
   }
+  clearIdleClientPeersForHost(host.userId, host.hostId, reason);
 }
 
 function registerHost(ws: WebSocket, request: IncomingMessage, url: URL) {
@@ -1001,9 +1145,15 @@ function registerClient(ws: WebSocket, request: IncomingMessage, url: URL) {
   const accessToken = extractAccessToken(request, url);
   const user = accessToken ? store.authenticate(accessToken) : null;
   const hostId = asString(url.searchParams.get('hostId'));
-  if (!user || !hostId) {
-    ws.send(JSON.stringify({ type: 'rtc-error', payload: { message: 'unauthorized relay client' } }));
-    ws.close(4001, 'unauthorized');
+  const deviceId = asString(url.searchParams.get('deviceId'));
+  if (!user || !hostId || !deviceId) {
+    const message = !user
+      ? 'unauthorized relay client'
+      : !hostId
+        ? 'hostId is required'
+        : 'deviceId is required';
+    ws.send(JSON.stringify({ type: 'rtc-error', payload: { message } }));
+    ws.close(!user ? 4001 : 4000, message);
     return;
   }
 
@@ -1014,24 +1164,41 @@ function registerClient(ws: WebSocket, request: IncomingMessage, url: URL) {
     return;
   }
 
-  const peerId = randomUUID();
-  const client: RelayClientConnection = {
+  const leaseKey = clientPeerLeaseKey(user.id, hostId, deviceId);
+  const activeClient = findActiveClientPeerByLeaseKey(leaseKey);
+  const resumedClient = !activeClient && deviceId
+    ? resumeIdleClientPeer({
+      userId: user.id,
+      username: user.username,
+      hostId,
+      deviceId,
+      socket: ws,
+    })
+    : null;
+  const client: RelayClientConnection = activeClient || resumedClient || {
     socket: ws,
     userId: user.id,
     username: user.username,
     hostId,
-    peerId,
+    deviceId,
+    peerId: randomUUID(),
+    idleTimer: null,
+    idleSince: null,
+    lastIdleReason: null,
   };
-  clients.set(peerId, client);
+  bindClientPeerSocket(client, ws, user.username);
 
   ws.on('message', (raw) => {
     try {
       const message = JSON.parse(String(raw)) as SignalMessage;
       sendHostEnvelope(host.socket, {
         type: 'relay-signal',
-        peerId,
+        peerId: client.peerId,
         message,
       });
+      if (message.type === 'rtc-close') {
+        closeClientPeer(client.peerId, 'client explicit rtc close');
+      }
     } catch (error) {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({
@@ -1043,21 +1210,17 @@ function registerClient(ws: WebSocket, request: IncomingMessage, url: URL) {
   });
 
   ws.on('close', () => {
-    clients.delete(peerId);
-    sendHostEnvelope(host.socket, {
-      type: 'relay-peer-close',
-      peerId,
-      reason: 'client relay websocket closed',
-    });
+    if (client.socket !== ws || !clients.has(client.peerId)) {
+      return;
+    }
+    markClientPeerIdle(client, 'client relay websocket closed');
   });
 
   ws.on('error', () => {
-    clients.delete(peerId);
-    sendHostEnvelope(host.socket, {
-      type: 'relay-peer-close',
-      peerId,
-      reason: 'client relay websocket error',
-    });
+    if (client.socket !== ws || !clients.has(client.peerId)) {
+      return;
+    }
+    markClientPeerIdle(client, 'client relay websocket error');
   });
 }
 
@@ -1241,7 +1404,7 @@ server.listen(PORT, HOST, () => {
   console.log(`  - devices: GET http://${HOST}:${PORT}${routePath('/api/devices')}`);
   console.log(`  - devices ws: ws://${HOST}:${PORT}${routePath('/ws/devices')}?token=<access>&deviceId=<deviceId>`);
   console.log(`  - host ws: ws://${HOST}:${PORT}${routePath('/ws/host')}?token=<access>&hostId=<hostId>&deviceId=<deviceId>`);
-  console.log(`  - client ws: ws://${HOST}:${PORT}${routePath('/ws/client')}?token=<access>&hostId=<hostId>`);
+  console.log(`  - client ws: ws://${HOST}:${PORT}${routePath('/ws/client')}?token=<access>&hostId=<hostId>&deviceId=<deviceId>`);
   console.log(`  - store: ${STORE_PATH}`);
   console.log(`  - turn: ${TURN_CONFIG ? TURN_CONFIG.url : 'disabled'}`);
 });

@@ -4271,6 +4271,13 @@ function hostKey(userId, hostId) {
 function deviceKey(userId, deviceId) {
   return `${userId}:${deviceId}`;
 }
+function clientPeerLeaseKey(userId, hostId, deviceId) {
+  const normalizedDeviceId = asString2(deviceId);
+  if (!normalizedDeviceId) {
+    return null;
+  }
+  return `${userId}:${hostId}:${normalizedDeviceId}`;
+}
 function buildAuthPage(mode) {
   const pageTitle = mode === "login" ? "ZTerm Relay Login" : "ZTerm Relay Register";
   return `<!doctype html>
@@ -4558,11 +4565,13 @@ var STORE_PATH = resolveStorePath();
 var UPDATES_DIR = resolveUpdatesDir(STORE_PATH);
 var BASE_PATH = resolveBasePath();
 var TURN_CONFIG = resolveTurnConfig();
+var RELAY_CLIENT_PEER_IDLE_TIMEOUT_MS = 30 * 60 * 1e3;
 (0, import_fs2.mkdirSync)((0, import_path2.dirname)(STORE_PATH), { recursive: true });
 (0, import_fs2.mkdirSync)(UPDATES_DIR, { recursive: true });
 var store = new TraversalRelayStore(STORE_PATH);
 var hosts = /* @__PURE__ */ new Map();
 var clients = /* @__PURE__ */ new Map();
+var idleClients = /* @__PURE__ */ new Map();
 var deviceStreams = /* @__PURE__ */ new Map();
 var liveClientDevices = /* @__PURE__ */ new Map();
 var liveDaemonDevices = /* @__PURE__ */ new Map();
@@ -4897,14 +4906,131 @@ var server = (0, import_http.createServer)((request, response) => {
   });
 });
 var wss = new import_websocket_server.default({ noServer: true });
-function closeClientPeer(peerId, reason) {
+function closeClientPeer(peerId, reason, options) {
   const client = clients.get(peerId);
-  if (!client) {
+  const idleEntry = [...idleClients.entries()].find(([, candidate]) => candidate.peerId === peerId) || null;
+  const target = client || idleEntry?.[1] || null;
+  if (!target) {
     return;
   }
   clients.delete(peerId);
+  if (idleEntry) {
+    idleClients.delete(idleEntry[0]);
+  }
+  if (target.idleTimer) {
+    clearTimeout(target.idleTimer);
+    target.idleTimer = null;
+  }
+  if (options?.notifyHost) {
+    const host = hosts.get(hostKey(target.userId, target.hostId));
+    if (host) {
+      sendHostEnvelope(host.socket, {
+        type: "relay-peer-close",
+        peerId: target.peerId,
+        reason
+      });
+    }
+  }
+  if (target.socket.readyState < import_websocket.default.CLOSING) {
+    target.socket.close(1013, reason.slice(0, 120));
+  }
+}
+function closeIdleClientPeer(leaseKey, reason) {
+  const client = idleClients.get(leaseKey);
+  if (!client) {
+    return;
+  }
+  idleClients.delete(leaseKey);
+  clients.delete(client.peerId);
+  client.idleTimer = null;
+  const host = hosts.get(hostKey(client.userId, client.hostId));
+  if (host) {
+    sendHostEnvelope(host.socket, {
+      type: "relay-peer-close",
+      peerId: client.peerId,
+      reason
+    });
+  }
   if (client.socket.readyState < import_websocket.default.CLOSING) {
     client.socket.close(1013, reason.slice(0, 120));
+  }
+}
+function markClientPeerIdle(client, reason) {
+  const leaseKey = clientPeerLeaseKey(client.userId, client.hostId, client.deviceId);
+  if (!leaseKey) {
+    closeClientPeer(client.peerId, reason, { notifyHost: true });
+    return;
+  }
+  clients.delete(client.peerId);
+  if (client.idleTimer) {
+    clearTimeout(client.idleTimer);
+  }
+  client.idleSince = Date.now();
+  client.lastIdleReason = reason;
+  idleClients.set(leaseKey, client);
+  client.idleTimer = setTimeout(() => closeIdleClientPeer(leaseKey, reason), RELAY_CLIENT_PEER_IDLE_TIMEOUT_MS);
+  client.idleTimer.unref?.();
+}
+function resumeIdleClientPeer(options) {
+  const leaseKey = clientPeerLeaseKey(options.userId, options.hostId, options.deviceId);
+  if (!leaseKey) {
+    return null;
+  }
+  const existing = idleClients.get(leaseKey) || null;
+  if (!existing) {
+    return null;
+  }
+  idleClients.delete(leaseKey);
+  if (existing.idleTimer) {
+    clearTimeout(existing.idleTimer);
+  }
+  existing.socket = options.socket;
+  existing.username = options.username;
+  existing.idleTimer = null;
+  existing.idleSince = null;
+  existing.lastIdleReason = null;
+  clients.set(existing.peerId, existing);
+  return existing;
+}
+function findActiveClientPeerByLeaseKey(leaseKey) {
+  if (!leaseKey) {
+    return null;
+  }
+  for (const client of clients.values()) {
+    if (clientPeerLeaseKey(client.userId, client.hostId, client.deviceId) === leaseKey) {
+      return client;
+    }
+  }
+  return null;
+}
+function bindClientPeerSocket(client, socket, username) {
+  const previousSocket = client.socket;
+  client.socket = socket;
+  client.username = username;
+  client.idleSince = null;
+  client.lastIdleReason = null;
+  if (client.idleTimer) {
+    clearTimeout(client.idleTimer);
+    client.idleTimer = null;
+  }
+  clients.set(client.peerId, client);
+  if (previousSocket !== socket && previousSocket.readyState < import_websocket.default.CLOSING) {
+    previousSocket.close(1e3, "relay client socket replaced");
+  }
+}
+function clearIdleClientPeersForHost(userId, hostId, reason) {
+  for (const [leaseKey, client] of [...idleClients.entries()]) {
+    if (client.userId !== userId || client.hostId !== hostId) {
+      continue;
+    }
+    idleClients.delete(leaseKey);
+    if (client.idleTimer) {
+      clearTimeout(client.idleTimer);
+      client.idleTimer = null;
+    }
+    if (client.socket.readyState < import_websocket.default.CLOSING) {
+      client.socket.close(1013, reason.slice(0, 120));
+    }
   }
 }
 function closeHost(host, reason) {
@@ -4926,6 +5052,7 @@ function closeHost(host, reason) {
       closeClientPeer(client.peerId, reason);
     }
   }
+  clearIdleClientPeersForHost(host.userId, host.hostId, reason);
 }
 function registerHost(ws, request, url) {
   const accessToken = extractAccessToken(request, url);
@@ -5019,9 +5146,11 @@ function registerClient(ws, request, url) {
   const accessToken = extractAccessToken(request, url);
   const user = accessToken ? store.authenticate(accessToken) : null;
   const hostId = asString2(url.searchParams.get("hostId"));
-  if (!user || !hostId) {
-    ws.send(JSON.stringify({ type: "rtc-error", payload: { message: "unauthorized relay client" } }));
-    ws.close(4001, "unauthorized");
+  const deviceId = asString2(url.searchParams.get("deviceId"));
+  if (!user || !hostId || !deviceId) {
+    const message = !user ? "unauthorized relay client" : !hostId ? "hostId is required" : "deviceId is required";
+    ws.send(JSON.stringify({ type: "rtc-error", payload: { message } }));
+    ws.close(!user ? 4001 : 4e3, message);
     return;
   }
   const host = hosts.get(hostKey(user.id, hostId));
@@ -5030,23 +5159,38 @@ function registerClient(ws, request, url) {
     ws.close(4404, "host offline");
     return;
   }
-  const peerId = (0, import_crypto2.randomUUID)();
-  const client = {
+  const leaseKey = clientPeerLeaseKey(user.id, hostId, deviceId);
+  const activeClient = findActiveClientPeerByLeaseKey(leaseKey);
+  const resumedClient = !activeClient && deviceId ? resumeIdleClientPeer({
+    userId: user.id,
+    username: user.username,
+    hostId,
+    deviceId,
+    socket: ws
+  }) : null;
+  const client = activeClient || resumedClient || {
     socket: ws,
     userId: user.id,
     username: user.username,
     hostId,
-    peerId
+    deviceId,
+    peerId: (0, import_crypto2.randomUUID)(),
+    idleTimer: null,
+    idleSince: null,
+    lastIdleReason: null
   };
-  clients.set(peerId, client);
+  bindClientPeerSocket(client, ws, user.username);
   ws.on("message", (raw) => {
     try {
       const message = JSON.parse(String(raw));
       sendHostEnvelope(host.socket, {
         type: "relay-signal",
-        peerId,
+        peerId: client.peerId,
         message
       });
+      if (message.type === "rtc-close") {
+        closeClientPeer(client.peerId, "client explicit rtc close");
+      }
     } catch (error) {
       if (ws.readyState === import_websocket.default.OPEN) {
         ws.send(JSON.stringify({
@@ -5057,20 +5201,16 @@ function registerClient(ws, request, url) {
     }
   });
   ws.on("close", () => {
-    clients.delete(peerId);
-    sendHostEnvelope(host.socket, {
-      type: "relay-peer-close",
-      peerId,
-      reason: "client relay websocket closed"
-    });
+    if (client.socket !== ws || !clients.has(client.peerId)) {
+      return;
+    }
+    markClientPeerIdle(client, "client relay websocket closed");
   });
   ws.on("error", () => {
-    clients.delete(peerId);
-    sendHostEnvelope(host.socket, {
-      type: "relay-peer-close",
-      peerId,
-      reason: "client relay websocket error"
-    });
+    if (client.socket !== ws || !clients.has(client.peerId)) {
+      return;
+    }
+    markClientPeerIdle(client, "client relay websocket error");
   });
 }
 function registerDeviceStream(ws, request, url) {
@@ -5244,7 +5384,7 @@ server.listen(PORT, HOST, () => {
   console.log(`  - devices: GET http://${HOST}:${PORT}${routePath("/api/devices")}`);
   console.log(`  - devices ws: ws://${HOST}:${PORT}${routePath("/ws/devices")}?token=<access>&deviceId=<deviceId>`);
   console.log(`  - host ws: ws://${HOST}:${PORT}${routePath("/ws/host")}?token=<access>&hostId=<hostId>&deviceId=<deviceId>`);
-  console.log(`  - client ws: ws://${HOST}:${PORT}${routePath("/ws/client")}?token=<access>&hostId=<hostId>`);
+  console.log(`  - client ws: ws://${HOST}:${PORT}${routePath("/ws/client")}?token=<access>&hostId=<hostId>&deviceId=<deviceId>`);
   console.log(`  - store: ${STORE_PATH}`);
   console.log(`  - turn: ${TURN_CONFIG ? TURN_CONFIG.url : "disabled"}`);
 });
