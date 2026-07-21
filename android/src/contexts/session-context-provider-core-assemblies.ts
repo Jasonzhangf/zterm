@@ -22,6 +22,7 @@ import type {
 
 
 const SESSION_HANDSHAKE_TIMEOUT_MS = 4000;
+const SESSION_TERMINAL_READY_TIMEOUT_MS = 10000;
 const ACTIVE_TRANSPORT_STALE_ACTIVITY_MS = 2500;
 const DEFAULT_TERMINAL_SESSION_VIEWPORT = {
   cols: 80,
@@ -130,6 +131,7 @@ export function useSessionProviderCoreAssemblies(
     readSessionTargetControlSocket,
     readSessionTargetTerminalSocket,
     readSessionTargetTerminalMuxReady,
+    readSessionTerminalChannel,
     readSessionIdForTerminalChannel,
     readOpeningSessionTerminalChannelsForTarget,
     readSessionRequestedTerminalGeometry,
@@ -188,6 +190,7 @@ export function useSessionProviderCoreAssemblies(
     readSessionBufferSnapshot,
     runtimeDebug,
     sessionHandshakeTimeoutMs: SESSION_HANDSHAKE_TIMEOUT_MS,
+    sessionTerminalReadyTimeoutMs: SESSION_TERMINAL_READY_TIMEOUT_MS,
     refs: {
       pendingSessionTransportOpenIntentsRef,
       reconnectRuntimesRef,
@@ -204,6 +207,7 @@ export function useSessionProviderCoreAssemblies(
     readSessionTargetTerminalMuxReady,
     readSessionTargetRuntime,
     readSessionTargetKey,
+    readSessionTerminalChannel,
     readSessionIdForTerminalChannel,
     readOpeningSessionTerminalChannelsForTarget,
     readSessionTransportSocket,
@@ -267,6 +271,7 @@ export function useSessionProviderCoreAssemblies(
     readSessionTargetTerminalSocket,
     readSessionTargetTerminalMuxReady,
     readSessionIdForTerminalChannel,
+    readSessionTerminalChannel,
     readOpeningSessionTerminalChannelsForTarget,
     readSessionTargetKey,
     readSessionRequestedTerminalGeometry,

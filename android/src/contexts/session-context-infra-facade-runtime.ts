@@ -3,6 +3,7 @@ import type { BridgeSettings } from '../lib/bridge-settings';
 import {
   getSessionTargetTerminalTransport,
   getSessionTerminalChannel,
+  setSessionChannelBodySubscribed,
   type SessionTransportRuntimeStore,
 } from '../lib/session-transport-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
@@ -297,10 +298,11 @@ export function createSessionInfraFacadeRuntime(options: {
     });
     for (const session of options.stateRef.current.sessions) {
       const ws = transportAccessors.readSessionTransportSocket(session.id);
+      const subscribed = liveSessionIds.has(session.id);
+      setSessionChannelBodySubscribed(options.transportRuntimeStoreRef.current, session.id, subscribed);
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         continue;
       }
-      const subscribed = liveSessionIds.has(session.id);
       sendSocketPayload(session.id, ws, JSON.stringify({
         type: 'body-subscription',
         payload: {

@@ -185,6 +185,18 @@ class MockWebSocket {
         sessionName: typeof sessionName === 'string' ? sessionName : channelId,
       },
     });
+    this.triggerRawMessage({
+      type: 'mux-channel-message',
+      payload: {
+        channelId,
+        message: {
+          type: 'connected',
+          payload: {
+            daemonHostId: 'test-daemon',
+          },
+        },
+      },
+    });
     const pending = this.pendingServerMessages.splice(0);
     for (const pendingMessage of pending) {
       this.triggerMessage(pendingMessage);

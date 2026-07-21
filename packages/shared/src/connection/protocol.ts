@@ -612,7 +612,7 @@ export type TerminalMuxChannelServerMessage = BridgeServerMessage;
 export type TerminalMuxClientFrame =
   | { type: 'mux-hello'; payload: { version: typeof TERMINAL_MUX_PROTOCOL_VERSION; clientInstanceId: string } }
   | { type: 'mux-target-message'; payload: { requestId?: string; message: TerminalMuxTargetClientMessage } }
-  | { type: 'mux-channel-open'; payload: { channelId: string; sessionName: string; cols?: number; rows?: number; widthMode?: TerminalWidthMode; autoCommand?: string } }
+  | { type: 'mux-channel-open'; payload: { channelId: string; sessionName: string; cols?: number; rows?: number; widthMode?: TerminalWidthMode; autoCommand?: string; bodySubscribed?: boolean } }
   | { type: 'mux-channel-message'; payload: { channelId: string; message: TerminalMuxChannelClientMessage } }
   | { type: 'mux-channel-binary'; payload: { channelId: string; dataBase64: string } }
   | { type: 'mux-channel-close'; payload: { channelId: string; reason?: string } }
@@ -857,7 +857,8 @@ export function isTerminalMuxClientFrame(value: unknown): value is TerminalMuxCl
         && isTerminalMuxTargetClientMessageType(value.payload.message.type);
     case 'mux-channel-open':
       return Boolean(asNonEmptyString(value.payload.channelId))
-        && Boolean(asNonEmptyString(value.payload.sessionName));
+        && Boolean(asNonEmptyString(value.payload.sessionName))
+        && (typeof value.payload.bodySubscribed === 'undefined' || typeof value.payload.bodySubscribed === 'boolean');
     case 'mux-channel-message':
       return Boolean(asNonEmptyString(value.payload.channelId))
         && isRecord(value.payload.message)

@@ -455,9 +455,11 @@ describe('handleTargetMuxServerFrameRuntime', () => {
     );
   });
 
-  it('marks only the opened channel session as connected when channel-opened arrives', () => {
+  it('marks only the opened channel as allocated without projecting terminal connected', () => {
     const updateSessionTerminalChannelState = vi.fn();
+    const onChannelAllocated = vi.fn();
     const onConnected = vi.fn();
+    const sendSocketPayload = vi.fn();
 
     handleTargetMuxServerFrameRuntime({
       anchorSessionId: 'session-anchor',
@@ -472,9 +474,12 @@ describe('handleTargetMuxServerFrameRuntime', () => {
         },
       },
       resolveSessionIdForChannel: () => 'session-2',
+      readSessionTerminalChannelBodySubscribed: () => false,
       updateSessionTerminalChannelState,
+      sendSocketPayload,
       handleSocketServerMessage: vi.fn(),
       buildChannelCallbacks: () => ({
+        onChannelAllocated,
         onConnected,
         onFailure: vi.fn(),
         onClosed: vi.fn(),
@@ -483,7 +488,64 @@ describe('handleTargetMuxServerFrameRuntime', () => {
     });
 
     expect(updateSessionTerminalChannelState).toHaveBeenCalledWith('session-2', 'open');
-    expect(onConnected).toHaveBeenCalled();
+    expect(onChannelAllocated).toHaveBeenCalledTimes(1);
+    expect(onConnected).not.toHaveBeenCalled();
+    expect(JSON.parse(sendSocketPayload.mock.calls[0][2])).toEqual({
+      type: 'mux-channel-message',
+      payload: {
+        channelId: 'channel-b',
+        message: {
+          type: 'body-subscription',
+          payload: { version: 1, subscribed: false },
+        },
+      },
+    });
+  });
+
+  it('settles terminal connected only from a real channel connected message', () => {
+    const handleSocketServerMessage = vi.fn((_params, msg) => {
+      expect(msg).toEqual({
+        type: 'connected',
+        payload: {
+          daemonHostId: 'mac-studio',
+          capabilities: { reliableInput: { version: 1 } },
+        },
+      });
+    });
+    const onConnected = vi.fn();
+
+    handleTargetMuxServerFrameRuntime({
+      anchorSessionId: 'session-anchor',
+      host: makeHost(),
+      ws: { readyState: WebSocket.OPEN } as any,
+      debugScope: 'reconnect',
+      frame: {
+        type: 'mux-channel-message',
+        payload: {
+          channelId: 'channel-b',
+          message: {
+            type: 'connected',
+            payload: {
+              daemonHostId: 'mac-studio',
+              capabilities: { reliableInput: { version: 1 } },
+            },
+          } as any,
+        },
+      },
+      resolveSessionIdForChannel: () => 'session-2',
+      readSessionTerminalChannelBodySubscribed: () => true,
+      updateSessionTerminalChannelState: vi.fn(),
+      sendSocketPayload: vi.fn(),
+      handleSocketServerMessage,
+      buildChannelCallbacks: () => ({
+        onConnected,
+        onFailure: vi.fn(),
+        onClosed: vi.fn(),
+      }),
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(handleSocketServerMessage).toHaveBeenCalledTimes(1);
   });
 
   it('marks a channel closed before routing a plain closed channel message into reconnect handling', () => {
@@ -613,6 +675,7 @@ describe('bindTargetMuxTransportSocketLifecycleRuntime', () => {
         sessionName: 'tmux-a',
         cols: 90,
         widthMode: 'adaptive-phone',
+        bodySubscribed: true,
       },
     });
     expect(JSON.parse(sendSocketPayload.mock.calls[2][2])).toEqual({
@@ -621,6 +684,7 @@ describe('bindTargetMuxTransportSocketLifecycleRuntime', () => {
         channelId: 'channel-b',
         sessionName: 'tmux-b',
         widthMode: 'mirror-fixed',
+        bodySubscribed: true,
       },
     });
   });

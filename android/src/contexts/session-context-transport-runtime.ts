@@ -31,6 +31,7 @@ import {
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
 import {
+  buildTerminalMuxChannelMessage,
   buildTerminalMuxChannelOpen,
   buildTerminalMuxHello,
   isTerminalMuxServerFrame,
@@ -104,7 +105,7 @@ function resolveIncomingMessageTypeFast(data: string): string | null {
 }
 
 export function buildSessionMuxChannelOpenFrame(options: {
-  channel: Pick<SessionTerminalChannelRuntime, 'channelId' | 'sessionName'>;
+  channel: Pick<SessionTerminalChannelRuntime, 'channelId' | 'sessionName' | 'bodySubscribed'>;
   sessionName?: string;
   host?: Pick<Host, 'autoCommand'>;
   geometry?: { cols?: number | null; rows?: number | null; widthMode?: 'adaptive-phone' | 'mirror-fixed' } | null;
@@ -117,13 +118,14 @@ export function buildSessionMuxChannelOpenFrame(options: {
     ...(Number.isFinite(geometry?.rows) ? { rows: Math.max(1, Math.floor(geometry?.rows || 0)) } : {}),
     ...(geometry?.widthMode ? { widthMode: geometry.widthMode } : {}),
     ...(typeof options.host?.autoCommand === 'string' && options.host.autoCommand.trim() ? { autoCommand: options.host.autoCommand.trim() } : {}),
+    bodySubscribed: options.channel.bodySubscribed,
   });
 }
 
 export function sendSessionMuxChannelOpenRuntime(options: {
   sessionId: string;
   ws: BridgeTransportSocket;
-  channel: Pick<SessionTerminalChannelRuntime, 'channelId' | 'sessionName'>;
+  channel: Pick<SessionTerminalChannelRuntime, 'channelId' | 'sessionName' | 'bodySubscribed'>;
   sessionName?: string;
   host?: Pick<Host, 'autoCommand'>;
   geometry?: { cols?: number | null; rows?: number | null; widthMode?: 'adaptive-phone' | 'mirror-fixed' } | null;
@@ -314,7 +316,9 @@ export function handleTargetMuxServerFrameRuntime(options: {
   rawFrameBytes?: number;
   frame: TerminalMuxServerFrame;
   resolveSessionIdForChannel: (channelId: string) => string | null;
+  readSessionTerminalChannelBodySubscribed?: (sessionId: string) => boolean | null;
   updateSessionTerminalChannelState: (sessionId: string, state: 'opening' | 'open' | 'closing' | 'closed') => unknown;
+  sendSocketPayload?: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   handleSocketServerMessage: (params: {
     sessionId: string;
     host: Host;
@@ -326,6 +330,7 @@ export function handleTargetMuxServerFrameRuntime(options: {
     onClosed: (reason?: string) => void;
   }, msg: ServerMessage) => void;
   buildChannelCallbacks: (sessionId: string) => {
+    onChannelAllocated?: () => void;
     onConnected: () => void;
     onFailure: (message: string, retryable: boolean) => void;
     onClosed: (reason?: string) => void;
@@ -386,7 +391,20 @@ export function handleTargetMuxServerFrameRuntime(options: {
       }
       recordChannelActivity(sessionId);
       options.updateSessionTerminalChannelState(sessionId, 'open');
-      options.buildChannelCallbacks(sessionId).onConnected();
+      options.buildChannelCallbacks(sessionId).onChannelAllocated?.();
+      const bodySubscribed = options.readSessionTerminalChannelBodySubscribed?.(sessionId);
+      if (typeof bodySubscribed === 'boolean') {
+        options.sendSocketPayload?.(sessionId, options.ws, JSON.stringify(buildTerminalMuxChannelMessage(
+          options.frame.payload.channelId,
+          {
+            type: 'body-subscription',
+            payload: {
+              version: 1,
+              subscribed: bodySubscribed,
+            },
+          },
+        )));
+      }
       return;
     }
     case 'mux-channel-closed': {

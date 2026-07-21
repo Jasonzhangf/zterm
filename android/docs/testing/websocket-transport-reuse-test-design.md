@@ -154,7 +154,13 @@ Android target runtime:
 
 Daemon channel registry:
 - Positive: each `mux-channel-open` creates one subscriber binding and returns `mux-channel-opened` with the same `channelId`.
+- Positive: `mux-channel-opened` proves channel allocation only. Android must not project terminal `connected` until the same channel carries the daemon's real `connected` message after tmux attach/mirror readiness.
+- Positive: `mux-channel-opened` clears only the channel allocation timeout on the pending open intent, then arms a bounded terminal-ready timeout. The pending intent remains open until the same channel emits real daemon `connected`, so a late allocation timeout cannot rebuild the physical WebSocket/RTC after allocation already succeeded, but missing `connected` cannot hang forever.
+- Positive: `mux-channel-open.bodySubscribed` initializes daemon body eligibility before tmux attach starts. Inactive channels open with `false`; the active/live channel opens with `true`.
+- Positive: if body demand changes while a channel is opening, Android records the latest channel-local value and sends that value as a channel-bound `body-subscription` immediately after `mux-channel-opened`.
 - Positive: `body-subscription=false` for inactive channels removes live body push eligibility while explicit head/range remains valid.
+- Negative: a channel that has emitted only `mux-channel-opened`/`title` cannot settle terminal connected, delete the pending open intent, become UI-connected truth, or accept user-visible readiness.
+- Negative: initial inactive channel open must not rely on a later global subscription sweep to suppress body traffic; the open frame itself carries the subscription truth.
 - Negative: physical target close detaches every channel subscriber and releases adaptive leases through the existing owner, but does not kill tmux or destroy mirror truth.
 - Negative: late mirror body for a closed channel is dropped with explicit channel-closed accounting and cannot be delivered under another channel id.
 
@@ -202,7 +208,14 @@ Daemon relay client / RTC bridge:
 
 Targeted:
 - `pnpm --dir android exec vitest run src/lib/tmux-sessions.test.ts src/contexts/session-sync-helpers.test.ts src/contexts/session-context-session-runtime.test.ts src/contexts/SessionContext.ws-refresh.test.tsx --reporter dot`
+- `pnpm --dir android exec vitest run src/contexts/session-context-transport-runtime.test.ts src/contexts/session-context-transport-open-runtime.test.ts src/contexts/session-context-infra-facade-runtime.test.ts src/server/terminal-message-runtime.test.ts --reporter dot`
 - `pnpm --dir android exec vitest run src/server/terminal-daemon-runtime.test.ts src/server/terminal-runtime.detached-session.test.ts src/server/server.daemon-runtime-truth.test.ts src/server/server.transport-lifecycle-truth.test.ts --reporter dot`
+
+Live multiplex:
+- Open every daemon-listed tmux session concurrently over one production Relay/WebRTC mux transport.
+- Every channel must receive the same-channel real `connected` plus `buffer-head`/`buffer-sync`, or an explicit same-channel error, inside the handshake budget.
+- A probe that receives only `mux-channel-opened`/`title` is a failure even when `list-sessions` succeeded.
+- Close the probe channels and physical transport after capture; do not create persistent test tmux sessions.
 
 Architecture/static:
 - `pnpm --dir android run test:feature-registry -- --reporter dot`

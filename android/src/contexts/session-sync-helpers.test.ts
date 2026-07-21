@@ -850,6 +850,38 @@ describe('session sync helper transport open intent truth', () => {
     expect(onHandshakeFailure).toHaveBeenCalledWith('late-boom', true, 'live');
   });
 
+  it('clears mux channel allocation timeout without settling terminal connected', () => {
+    const clearHandshakeTimeout = vi.fn();
+    const onHandshakeFailure = vi.fn();
+    const onHandshakeConnected = vi.fn();
+    const onChannelAllocated = vi.fn();
+    const finalizeSocketFailureBaseline = vi.fn().mockReturnValue({ shouldContinue: true, manualClosed: false });
+    const intent = createPendingSessionTransportOpenIntent({
+      sessionId: 's-1',
+      host,
+      resolvedSessionName: 'tmux-1',
+      debugScope: 'connect',
+      clearHandshakeTimeout,
+      finalizeSocketFailureBaseline,
+      onHandshakeFailure,
+      onHandshakeConnected,
+      onChannelAllocated,
+    });
+
+    intent.onChannelAllocated?.();
+
+    expect(clearHandshakeTimeout).toHaveBeenCalledTimes(1);
+    expect(onChannelAllocated).toHaveBeenCalledTimes(1);
+    expect(finalizeSocketFailureBaseline).not.toHaveBeenCalled();
+    expect(onHandshakeFailure).not.toHaveBeenCalled();
+    expect(onHandshakeConnected).not.toHaveBeenCalled();
+
+    intent.onConnected({} as any);
+
+    expect(clearHandshakeTimeout).toHaveBeenCalledTimes(2);
+    expect(onHandshakeConnected).toHaveBeenCalledWith(expect.anything(), 'tmux-1');
+  });
+
   it('generates a fresh openRequestId per pending open intent', () => {
     const intent1 = createPendingSessionTransportOpenIntent({
       sessionId: 's-1',

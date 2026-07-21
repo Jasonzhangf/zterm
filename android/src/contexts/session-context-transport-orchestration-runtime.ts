@@ -61,6 +61,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
   readSessionBufferSnapshot: (sessionId: string) => Session['buffer'];
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
   sessionHandshakeTimeoutMs: number;
+  sessionTerminalReadyTimeoutMs?: number;
   refs: {
     pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, PendingSessionTransportOpenIntent>>;
     reconnectRuntimesRef: MutableRefObject<Map<string, SessionReconnectRuntime>>;
@@ -95,6 +96,16 @@ export function createSessionTransportOrchestrationRuntime(options: {
   readSessionTargetTerminalMuxReady: (sessionId: string) => boolean;
   readSessionTargetRuntime: (sessionId: string) => { sessionIds: string[] } | null;
   readSessionTargetKey: (sessionId: string) => string | null;
+  readSessionTerminalChannel: (sessionId: string) => {
+    channelId: string;
+    sessionId: string;
+    sessionName: string;
+    targetKey: string;
+    state: 'opening' | 'open' | 'closing' | 'closed';
+    bodySubscribed: boolean;
+    openedAt: number;
+    closedAt: number | null;
+  } | null;
   readSessionIdForTerminalChannel: (anchorSessionId: string, channelId: string) => string | null;
   readOpeningSessionTerminalChannelsForTarget: (anchorSessionId: string) => Array<{
     channelId: string;
@@ -308,6 +319,9 @@ export function createSessionTransportOrchestrationRuntime(options: {
       sessionId,
     );
     return {
+      onChannelAllocated: () => {
+        pending?.onChannelAllocated?.();
+      },
       onConnected: () => {
         if (pending) {
           deletePendingSessionTransportOpenIntent(options.refs.pendingSessionTransportOpenIntentsRef.current, sessionId);
@@ -371,7 +385,11 @@ export function createSessionTransportOrchestrationRuntime(options: {
           rawFrameData,
           frame,
           resolveSessionIdForChannel: (channelId) => options.readSessionIdForTerminalChannel(bindOptions.sessionId, channelId),
+          readSessionTerminalChannelBodySubscribed: (sessionId) => (
+            options.readSessionTerminalChannel(sessionId)?.bodySubscribed ?? null
+          ),
           updateSessionTerminalChannelState: options.writeSessionTerminalChannelState,
+          sendSocketPayload: options.sendSocketPayload,
           handleSocketServerMessage: (params, msg) => {
             options.refs.handleSocketServerMessageRef.current?.(params, msg);
           },
@@ -409,6 +427,10 @@ export function createSessionTransportOrchestrationRuntime(options: {
       readSessionTargetTerminalSocket: options.readSessionTargetTerminalSocket,
       isSessionTargetMuxReady: options.readSessionTargetTerminalMuxReady,
       ensureSessionTerminalChannel: options.ensureSessionTerminalChannel,
+      isSessionBodySubscribed: (sessionId) => {
+        const liveSessionIds = new Set(options.stateRef.current.liveSessionIds || []);
+        return options.stateRef.current.activeSessionId === sessionId || liveSessionIds.has(sessionId);
+      },
       updateSessionTerminalChannelState: options.writeSessionTerminalChannelState,
       readRequestedTerminalGeometry: options.readRequestedTerminalGeometry,
       sendSocketPayload: options.sendSocketPayload,
@@ -460,8 +482,21 @@ export function createSessionTransportOrchestrationRuntime(options: {
   };
 
   const queueSessionTransportOpenIntent = (intentOptions: QueueSessionTransportOpenIntentOptions) => {
+    const terminalReadyTimeoutMs = options.sessionTerminalReadyTimeoutMs ?? options.sessionHandshakeTimeoutMs;
     queueSessionTransportOpenIntentRuntime({
-      intentOptions,
+      intentOptions: {
+        ...intentOptions,
+        onChannelAllocated: () => {
+          intentOptions.onChannelAllocated?.();
+          options.setSessionHandshakeTimeout(intentOptions.sessionId, () => {
+            const pending = getPendingSessionTransportOpenIntent(
+              options.refs.pendingSessionTransportOpenIntentsRef.current,
+              intentOptions.sessionId,
+            );
+            pending?.finalizeFailure('terminal mux channel ready timeout', true);
+          }, terminalReadyTimeoutMs);
+        },
+      },
       clearSessionHandshakeTimeout: options.clearSessionHandshakeTimeout,
       finalizeSocketFailureBaseline: (baselineOptions) => {
         const result = options.refs.finalizeSocketFailureBaselineRef.current?.(baselineOptions);

@@ -194,6 +194,7 @@ export function openSessionMuxChannelByIntentRuntime(options: {
     sessionId: string,
     options?: { channelId?: string; now?: number; bodySubscribed?: boolean },
   ) => SessionTerminalChannelRuntime | null;
+  isSessionBodySubscribed?: (sessionId: string) => boolean;
   updateSessionTerminalChannelState: (
     sessionId: string,
     state: SessionTerminalChannelState,
@@ -214,7 +215,11 @@ export function openSessionMuxChannelByIntentRuntime(options: {
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
 }) {
   const { sessionId, host, debugScope, finalizeFailure } = options.intent;
-  const channel = options.ensureSessionTerminalChannel(sessionId);
+  const channel = options.ensureSessionTerminalChannel(sessionId, {
+    bodySubscribed: options.isSessionBodySubscribed
+      ? options.isSessionBodySubscribed(sessionId)
+      : true,
+  });
   if (!channel) {
     finalizeFailure('terminal mux channel could not be created', true);
     return;

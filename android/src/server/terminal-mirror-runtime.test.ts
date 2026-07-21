@@ -3,6 +3,7 @@ import { createTerminalMirrorRuntime } from './terminal-mirror-runtime';
 import { buildChangedRangesBufferSyncPayload } from './buffer-sync-contract';
 import type { TerminalSession, SessionMirror } from './terminal-runtime-types';
 import { findChangedIndexedRanges } from './canonical-buffer';
+import type { TerminalCell } from '../lib/types';
 
 function createSession(id = 'session-1'): TerminalSession {
   return {
@@ -32,6 +33,7 @@ function createRuntime(overrides: {
     paneCols: number;
     alternateOn: boolean;
   };
+  captureMirrorAuthoritativeBufferFromTmux?: (mirror: SessionMirror) => Promise<boolean>;
   normalizeTerminalCols?: (cols?: number) => number;
   normalizeTerminalRows?: (rows?: number) => number;
 } = {}) {
@@ -39,14 +41,15 @@ function createRuntime(overrides: {
   const mirrors = new Map<string, SessionMirror>();
   const assertTmuxSessionExists = vi.fn();
   const runTmux = vi.fn(() => ({ ok: true as const, stdout: '' }));
-  const captureMirrorAuthoritativeBufferFromTmux = vi.fn(async (mirror: SessionMirror) => {
+  const captureMirrorAuthoritativeBufferFromTmux = vi.fn(overrides.captureMirrorAuthoritativeBufferFromTmux || (async (mirror: SessionMirror) => {
     mirror.bufferLines = [];
     mirror.bufferStartIndex = 0;
     mirror.cursor = null;
     mirror.cursorKeysApp = false;
     return true;
-  });
+  }));
   const sendMessage = vi.fn();
+  const sendText = vi.fn();
   const sendScheduleStateToSession = vi.fn();
 
   const runtime = createTerminalMirrorRuntime({
@@ -54,7 +57,7 @@ function createRuntime(overrides: {
     sessions,
     mirrors,
     sendMessage,
-    sendText: vi.fn(),
+    sendText,
     sendScheduleStateToSession,
     buildConnectedPayload: (sessionId: string) => ({ sessionId }),
     buildBufferHeadPayload: (sessionId: string, targetMirror: SessionMirror) => ({
@@ -103,7 +106,7 @@ function createRuntime(overrides: {
     assertTmuxSessionExists,
     captureMirrorAuthoritativeBufferFromTmux,
     sendMessage,
-    sendText: vi.fn(),
+    sendText,
     sendScheduleStateToSession,
   };
 }
@@ -154,6 +157,86 @@ describe('terminal mirror runtime lifecycle truth', () => {
       expect.objectContaining({ type: 'connected' }),
     );
     expect(sendScheduleStateToSession).toHaveBeenCalledWith(session, 'demo');
+  });
+
+  it('attaches an inactive body-suppressed channel without doing initial buffer capture', async () => {
+    const { runtime, sessions, mirrors, assertTmuxSessionExists, captureMirrorAuthoritativeBufferFromTmux, sendMessage, sendScheduleStateToSession } = createRuntime();
+    const session = createSession();
+    session.bodySubscribed = false;
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 120,
+      rows: 40,
+    });
+
+    const mirror = mirrors.get('demo');
+    expect(mirror).toBeTruthy();
+    expect(mirror?.lifecycle).toBe('ready');
+    expect(assertTmuxSessionExists).toHaveBeenCalledTimes(1);
+    expect(captureMirrorAuthoritativeBufferFromTmux).not.toHaveBeenCalled();
+    expect(session.mirrorKey).toBe('demo');
+    expect(session.transport?.connectedSent).toBe(true);
+    expect(sendMessage).toHaveBeenCalledWith(
+      session,
+      expect.objectContaining({ type: 'connected' }),
+    );
+    expect(sendScheduleStateToSession).toHaveBeenCalledWith(session, 'demo');
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      session,
+      expect.objectContaining({ type: 'buffer-head' }),
+    );
+    expect(sendMessage).not.toHaveBeenCalledWith(
+      session,
+      expect.objectContaining({ type: 'buffer-sync' }),
+    );
+  });
+
+  it('bounds oversized initial live sync to the latest render tail instead of one huge transport frame', async () => {
+    const wideRow: TerminalCell[] = Array.from({ length: 200 }, () => ({
+      char: 'W'.codePointAt(0)!,
+      fg: 256,
+      bg: 256,
+      flags: 0,
+      width: 1,
+    }));
+    const { runtime, sessions, sendText } = createRuntime({
+      captureMirrorAuthoritativeBufferFromTmux: async (mirror) => {
+        mirror.cols = 200;
+        mirror.rows = 24;
+        mirror.bufferStartIndex = 0;
+        mirror.bufferLines = Array.from({ length: 3000 }, () => wideRow);
+        mirror.cursor = null;
+        mirror.cursorKeysApp = false;
+        return true;
+      },
+      normalizeTerminalCols: () => 200,
+      normalizeTerminalRows: () => 24,
+    });
+    const session = createSession();
+    sessions.set(session.id, session);
+
+    await runtime.attachTmux(session, {
+      sessionName: 'demo',
+      cols: 200,
+      rows: 24,
+    });
+
+    const syncCall = sendText.mock.calls.find(([, text]) => {
+      try {
+        return JSON.parse(String(text)).type === 'buffer-sync';
+      } catch {
+        return false;
+      }
+    });
+    expect(syncCall).toBeTruthy();
+    const payload = JSON.parse(String(syncCall![1])).payload;
+    expect(payload.availableEndIndex).toBe(3000);
+    expect(payload.startIndex).toBe(2928);
+    expect(payload.endIndex).toBe(3000);
+    expect(payload.lines).toHaveLength(72);
+    expect(Buffer.byteLength(String(syncCall![1]), 'utf8')).toBeLessThan(128_000);
   });
 
   it('fans out the first head request of a revision once, then serves same-revision probes only to the requester', () => {

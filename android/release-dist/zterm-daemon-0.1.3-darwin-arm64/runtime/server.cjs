@@ -5678,6 +5678,20 @@ function buildBufferSyncPayload(mirror, requestStartIndex, requestEndIndex, line
     lines: lines.map((line) => compactLine(line.index, line.cells))
   };
 }
+function buildLiveTailBufferSyncPayload(mirror, options) {
+  const availableStartIndex = Math.max(0, Math.floor(mirror.bufferStartIndex || 0));
+  const availableEndIndex = Math.max(availableStartIndex, getMirrorAvailableEndIndex(mirror));
+  const viewportRows = Math.max(1, Math.floor(options?.viewportRows || mirror.rows || 24));
+  const requestEndIndex = availableEndIndex;
+  const requestStartIndex = Math.max(availableStartIndex, requestEndIndex - viewportRows * 3);
+  const indexedLines = sliceIndexedLines(
+    mirror.bufferStartIndex,
+    mirror.bufferLines,
+    requestStartIndex,
+    requestEndIndex
+  );
+  return buildBufferSyncPayload(mirror, requestStartIndex, requestEndIndex, indexedLines);
+}
 function buildChangedRangesBufferSyncPayload(mirror, changedRanges) {
   if (!Array.isArray(changedRanges) || changedRanges.length === 0) {
     return null;
@@ -6731,7 +6745,7 @@ function isTerminalMuxClientFrame(value) {
     case "mux-target-message":
       return isRecord(value.payload.message) && typeof value.payload.message.type === "string" && isTerminalMuxTargetClientMessageType(value.payload.message.type);
     case "mux-channel-open":
-      return Boolean(asNonEmptyString(value.payload.channelId)) && Boolean(asNonEmptyString(value.payload.sessionName));
+      return Boolean(asNonEmptyString(value.payload.channelId)) && Boolean(asNonEmptyString(value.payload.sessionName)) && (typeof value.payload.bodySubscribed === "undefined" || typeof value.payload.bodySubscribed === "boolean");
     case "mux-channel-message":
       return Boolean(asNonEmptyString(value.payload.channelId)) && isRecord(value.payload.message) && typeof value.payload.message.type === "string" && classifyTerminalMuxClientMessage(value.payload.message) === "channel";
     case "mux-channel-binary":
@@ -7157,6 +7171,7 @@ var ADAPTIVE_WIDTH_LEASE_TTL_MS = 65e3;
 var SUBSCRIBER_PENDING_RANGE_LIMIT = 64;
 var SUBSCRIBER_PENDING_SPAN_LINE_LIMIT = 4096;
 var SUBSCRIBER_PENDING_AGE_LIMIT_MS = 15e3;
+var SUBSCRIBER_BUFFER_SYNC_MAX_BYTES = 128e3;
 function resolvePerSubscriberTransportSnapshot(sessions2, sessionId) {
   const session = sessions2.get(sessionId);
   return readTerminalTransportBackpressureSnapshot(session?.transport);
@@ -7551,7 +7566,7 @@ function createTerminalMirrorRuntime(deps) {
     if (shouldHoldPendingForBackpressure(state, session)) {
       return "backpressured";
     }
-    const payload = deps.buildChangedRangesBufferSyncPayload(
+    let payload = deps.buildChangedRangesBufferSyncPayload(
       mirror,
       state.pendingChangedAbsoluteRanges
     );
@@ -7559,7 +7574,11 @@ function createTerminalMirrorRuntime(deps) {
       clearSubscriberPendingBufferSync(state, Math.max(state.lastSentRevision, state.pendingLatestRevision));
       return "no-pending";
     }
-    const text = JSON.stringify({ type: "buffer-sync", payload });
+    let text = JSON.stringify({ type: "buffer-sync", payload });
+    if (Buffer.byteLength(text, "utf8") > SUBSCRIBER_BUFFER_SYNC_MAX_BYTES) {
+      payload = buildLiveTailBufferSyncPayload(mirror, { viewportRows: mirror.rows });
+      text = JSON.stringify({ type: "buffer-sync", payload });
+    }
     const traceId = `${session.id}:${Math.max(0, Math.floor(payload.revision || 0))}`;
     const traceBase = {
       sessionId: session.id,
@@ -7958,6 +7977,10 @@ function createTerminalMirrorRuntime(deps) {
     }
     mirror.lifecycle = "ready";
     reconcileAdaptiveWidthLeases(mirror, "mirror-ready");
+    if (countReadyBodySubscribedSubscribers(mirror) === 0) {
+      announceMirrorSubscribersReady(mirror);
+      return;
+    }
     try {
       await deps.waitMs(80);
       const captured = await syncMirrorCanonicalBuffer(mirror, { forceRevision: true });
@@ -9677,6 +9700,7 @@ function createTerminalMessageRuntime(deps) {
         }
         const subscriber = deps.controlRuntimeDeps.createMuxChannelSubscriber(connection, frame.payload.channelId);
         subscriber.sessionName = deps.controlRuntimeDeps.sanitizeSessionName(frame.payload.sessionName);
+        subscriber.bodySubscribed = frame.payload.bodySubscribed !== false;
         sendMuxFrame(connection, {
           type: "mux-channel-opened",
           payload: {

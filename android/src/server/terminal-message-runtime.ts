@@ -249,6 +249,7 @@ export function createTerminalMessageRuntime(
         }
         const subscriber = deps.controlRuntimeDeps.createMuxChannelSubscriber(connection, frame.payload.channelId);
         subscriber.sessionName = deps.controlRuntimeDeps.sanitizeSessionName(frame.payload.sessionName);
+        subscriber.bodySubscribed = frame.payload.bodySubscribed !== false;
         sendMuxFrame(connection, {
           type: 'mux-channel-opened',
           payload: {

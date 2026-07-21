@@ -7,6 +7,7 @@ import type {
   TerminalCursorState,
 } from '../lib/types';
 import { summarizeIndexedLinesForDebug } from '../lib/terminal-buffer-debug';
+import { buildLiveTailBufferSyncPayload } from './buffer-sync-contract';
 import { sliceIndexedLines } from './canonical-buffer';
 import { detachMirrorSubscriber, releaseMirrorSubscribers } from './mirror-lifecycle';
 import { resolveTerminalLiveSyncDelay } from './terminal-performance-scheduler';
@@ -129,6 +130,7 @@ const ADAPTIVE_WIDTH_LEASE_TTL_MS = 65000;
 const SUBSCRIBER_PENDING_RANGE_LIMIT = 64;
 const SUBSCRIBER_PENDING_SPAN_LINE_LIMIT = 4096;
 const SUBSCRIBER_PENDING_AGE_LIMIT_MS = 15_000;
+const SUBSCRIBER_BUFFER_SYNC_MAX_BYTES = 128_000;
 
 export function resolvePerSubscriberTransportSnapshot(
   sessions: Map<string, TerminalSession>,
@@ -603,7 +605,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     if (shouldHoldPendingForBackpressure(state, session)) {
       return 'backpressured';
     }
-    const payload = deps.buildChangedRangesBufferSyncPayload(
+    let payload = deps.buildChangedRangesBufferSyncPayload(
       mirror,
       state.pendingChangedAbsoluteRanges,
     );
@@ -611,7 +613,11 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       clearSubscriberPendingBufferSync(state, Math.max(state.lastSentRevision, state.pendingLatestRevision));
       return 'no-pending';
     }
-    const text = JSON.stringify({ type: 'buffer-sync', payload });
+    let text = JSON.stringify({ type: 'buffer-sync', payload });
+    if (Buffer.byteLength(text, 'utf8') > SUBSCRIBER_BUFFER_SYNC_MAX_BYTES) {
+      payload = buildLiveTailBufferSyncPayload(mirror, { viewportRows: mirror.rows });
+      text = JSON.stringify({ type: 'buffer-sync', payload });
+    }
     const traceId = `${session.id}:${Math.max(0, Math.floor(payload.revision || 0))}`;
     const traceBase = {
       sessionId: session.id,
@@ -1062,6 +1068,11 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
 
     mirror.lifecycle = 'ready';
     reconcileAdaptiveWidthLeases(mirror, 'mirror-ready');
+
+    if (countReadyBodySubscribedSubscribers(mirror) === 0) {
+      announceMirrorSubscribersReady(mirror);
+      return;
+    }
 
     try {
       await deps.waitMs(80);

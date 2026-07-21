@@ -377,6 +377,30 @@ describe('terminal message runtime explicit error truth', () => {
     expect(handleInput).not.toHaveBeenCalledWith(subscriberA, expect.anything(), expect.anything());
   });
 
+  it('honors initial mux channel body subscription before tmux attach starts', async () => {
+    const { runtime, sessions } = createRuntime();
+    const connection = createConnection(null);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-hello',
+      payload: {
+        version: 1,
+        clientInstanceId: 'android-client-1',
+      },
+    })));
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-channel-open',
+      payload: {
+        channelId: 'channel-inactive',
+        sessionName: 'alpha',
+        bodySubscribed: false,
+      },
+    })));
+
+    const subscriber = sessions.get('transport-1:channel-inactive');
+    expect(subscriber?.bodySubscribed).toBe(false);
+  });
+
   it('routes mux binary chunks only to the owning channel subscriber', async () => {
     const { runtime, sessions, terminalFileTransferRuntime } = createRuntime();
     const connection = createConnection(null);

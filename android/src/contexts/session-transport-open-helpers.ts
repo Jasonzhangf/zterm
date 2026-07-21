@@ -122,6 +122,7 @@ export interface PendingSessionTransportOpenIntent {
   debugScope: SessionTransportOpenDebugScope;
   onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
   finalizeFailure: (message: string, retryable: boolean) => void;
+  onChannelAllocated?: () => void;
   onConnected: (ws: BridgeTransportSocket) => void;
   onClosed?: (reason?: string) => void;
 }
@@ -135,6 +136,7 @@ export interface QueueSessionTransportOpenIntentOptions {
   onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
   onHandshakeConnected?: (ws: BridgeTransportSocket, sessionName: string) => void;
   onHandshakeFailure?: (message: string, retryable: boolean, stage: SessionTransportOpenFailureStage) => void;
+  onChannelAllocated?: () => void;
   onClosed?: (reason?: string) => void;
   clearHandshakeTimeout: () => void;
   finalizeSocketFailureBaseline: (options: {
@@ -193,6 +195,10 @@ export function createPendingSessionTransportOpenIntent(
       }
       liveFailureHandled = true;
       options.onHandshakeFailure?.(message, retryable, 'live');
+    },
+    onChannelAllocated: () => {
+      options.clearHandshakeTimeout();
+      options.onChannelAllocated?.();
     },
     onConnected: (ws: BridgeTransportSocket) => {
       if (!markHandshakeSettled()) {

@@ -102,6 +102,31 @@ describe('queueSessionTransportOpenIntentRuntime', () => {
     );
     expect(ensureControlTransportForSessionOpen).not.toHaveBeenCalled();
   });
+
+  it('preserves mux channel allocation hooks on the pending open intent', () => {
+    const pendingSessionTransportOpenIntentsRef = {
+      current: new Map<string, PendingSessionTransportOpenIntent>(),
+    };
+    const onChannelAllocated = vi.fn();
+
+    queueSessionTransportOpenIntentRuntime({
+      intentOptions: {
+        sessionId: 'session-1',
+        host: makeHost(),
+        debugScope: 'connect',
+        onChannelAllocated,
+      },
+      clearSessionHandshakeTimeout: vi.fn(),
+      finalizeSocketFailureBaseline: vi.fn().mockReturnValue({ shouldContinue: true, manualClosed: false }),
+      pendingSessionTransportOpenIntentsRef,
+      ensureControlTransportForSessionOpen: vi.fn(),
+      openSessionMuxChannelByIntent: vi.fn(),
+    });
+
+    pendingSessionTransportOpenIntentsRef.current.get('session-1')?.onChannelAllocated?.();
+
+    expect(onChannelAllocated).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('openSessionMuxChannelByIntentRuntime', () => {
@@ -111,6 +136,16 @@ describe('openSessionMuxChannelByIntentRuntime', () => {
     const buildTraversalSocketForHost = vi.fn();
     const primeTargetTerminalTransportSocket = vi.fn();
     const bindTargetMuxTransportSocketLifecycle = vi.fn();
+    const ensureSessionTerminalChannel = vi.fn(() => ({
+      channelId: 'channel-a',
+      sessionId: 'session-1',
+      sessionName: 'tmux-1',
+      targetKey: 'target-a',
+      state: 'opening' as const,
+      bodySubscribed: false,
+      openedAt: 1,
+      closedAt: null,
+    }));
     const intent = {
       ...makeIntent('session-1', 'open-1'),
       resolvedSessionName: 'tmux-1',
@@ -120,16 +155,8 @@ describe('openSessionMuxChannelByIntentRuntime', () => {
       intent,
       readSessionTargetTerminalSocket: () => targetSocket,
       isSessionTargetMuxReady: () => true,
-      ensureSessionTerminalChannel: vi.fn(() => ({
-        channelId: 'channel-a',
-        sessionId: 'session-1',
-        sessionName: 'tmux-1',
-        targetKey: 'target-a',
-        state: 'opening',
-        bodySubscribed: true,
-        openedAt: 1,
-        closedAt: null,
-      })),
+      ensureSessionTerminalChannel,
+      isSessionBodySubscribed: () => false,
       updateSessionTerminalChannelState: vi.fn(),
       readRequestedTerminalGeometry: () => ({ cols: 88, widthMode: 'adaptive-phone' }),
       sendSocketPayload,
@@ -140,6 +167,7 @@ describe('openSessionMuxChannelByIntentRuntime', () => {
     });
 
     expect(buildTraversalSocketForHost).not.toHaveBeenCalled();
+    expect(ensureSessionTerminalChannel).toHaveBeenCalledWith('session-1', { bodySubscribed: false });
     expect(primeTargetTerminalTransportSocket).not.toHaveBeenCalled();
     expect(bindTargetMuxTransportSocketLifecycle).not.toHaveBeenCalled();
     expect(sendSocketPayload).toHaveBeenCalledWith(
@@ -152,6 +180,7 @@ describe('openSessionMuxChannelByIntentRuntime', () => {
           sessionName: 'tmux-1',
           cols: 88,
           widthMode: 'adaptive-phone',
+          bodySubscribed: false,
         },
       }),
     );
