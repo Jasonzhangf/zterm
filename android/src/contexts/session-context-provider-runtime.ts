@@ -12,6 +12,7 @@ import { createSessionRenderGate } from '../lib/session-render-gate';
 import { createSessionHeadStore } from '../lib/session-head-store';
 import { runtimeDebug } from '../lib/runtime-debug';
 import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
+import type { SessionTmuxTargetRequestStore } from './session-context-tmux-management-runtime';
 import type { SessionVisibleRangeState } from './session-visible-range-helpers';
 import type { SessionBufferHeadState } from './session-buffer-planner-helpers';
 import type { SessionPullStates } from './session-pull-state-helpers';
@@ -79,6 +80,7 @@ export function useSessionProviderRuntime(options: {
   const sessionPullStateRef = useRef<Map<string, SessionPullStates>>(new Map());
   const sessionAttachTokensRef = useRef<Map<string, string>>(new Map());
   const pendingSessionTransportOpenIntentsRef = useRef<Map<string, PendingSessionTransportOpenIntent>>(new Map());
+  const tmuxTargetRequestsRef = useRef<SessionTmuxTargetRequestStore>(new Map());
   const activeBodySubscriptionSuppressedRef = useRef(false);
   const remoteScreenshotRuntimeRef = useRef(createRemoteScreenshotRuntime());
   const remoteWindowTargetCatalogCacheRef = useRef(new Map());
@@ -145,6 +147,7 @@ export function useSessionProviderRuntime(options: {
       sessionPullStateRef,
       sessionAttachTokensRef,
       pendingSessionTransportOpenIntentsRef,
+      tmuxTargetRequestsRef,
       activeBodySubscriptionSuppressedRef,
       remoteScreenshotRuntimeRef,
       remoteWindowTargetCatalogCacheRef,

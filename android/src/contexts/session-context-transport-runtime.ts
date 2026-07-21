@@ -35,6 +35,7 @@ import {
   buildTerminalMuxChannelOpen,
   buildTerminalMuxHello,
   isTerminalMuxServerFrame,
+  type TerminalMuxTargetServerMessage,
   type TerminalMuxServerFrame,
 } from '@zterm/shared/protocol';
 import {
@@ -335,6 +336,7 @@ export function handleTargetMuxServerFrameRuntime(options: {
     onFailure: (message: string, retryable: boolean) => void;
     onClosed: (reason?: string) => void;
   };
+  handleTargetMuxMessage?: (payload: { requestId?: string; message: TerminalMuxTargetServerMessage }) => boolean;
   recordSessionRx?: (sessionId: string, data: string | ArrayBuffer) => void;
   rawFrameData?: string;
   runtimeDebug: RuntimeDebugFn;
@@ -441,8 +443,16 @@ export function handleTargetMuxServerFrameRuntime(options: {
       });
       return;
     }
-    case 'mux-ready':
     case 'mux-target-message':
+      if (options.handleTargetMuxMessage?.(options.frame.payload)) {
+        return;
+      }
+      options.runtimeDebug('session.mux.target-frame', {
+        anchorSessionId: options.anchorSessionId,
+        type: options.frame.type,
+      });
+      return;
+    case 'mux-ready':
     case 'mux-pong':
       options.runtimeDebug('session.mux.target-frame', {
         anchorSessionId: options.anchorSessionId,

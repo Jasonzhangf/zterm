@@ -204,9 +204,12 @@ Daemon relay client / RTC bridge:
 - Positive: sequential list/create/kill operations for the same normalized target reuse one `TraversalSocket` and each operation receives its own current daemon response.
 - Positive: concurrent calls for one target are sent FIFO and only the active request consumes the next uncorrelated response.
 - Positive: a daemon `error` response rejects only the active request and leaves the physical socket available for the next request.
+- Positive: when a matching daemon target already has an open mux terminal transport, drawer/session-open tmux management must send `mux-target-message` with a request id on that existing physical transport and must not call the legacy `tmux-sessions.ts` `TraversalSocket` pool.
+- Negative: if a matching non-closed session exists but the mux target management facade cannot use it yet, drawer/session-open must surface that unavailable state and must not open a second legacy tmux management socket that could replace the phone's maintained Relay/RTC transport.
 - Negative: different target or Relay account identity must never share a control socket.
 - Negative: physical error/close, malformed response, unexpected response type, or timeout must reject pending work and evict the socket before a later request creates a new one.
 - Negative: no successful sessions payload is cached or returned without a fresh request/response exchange.
+- Negative: if an open mux-target management request returns daemon `error`, malformed target response, or timeout, the caller must surface that failure and must not fallback to a second legacy tmux management socket for the same target.
 
 ## Verification Commands
 

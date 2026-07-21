@@ -17,6 +17,7 @@ import {
   bindTargetMuxTransportSocketLifecycleRuntime,
   handleTargetMuxServerFrameRuntime,
 } from './session-context-transport-runtime';
+import type { TerminalMuxTargetServerMessage } from '@zterm/shared/protocol';
 import { createSessionControlTransportOrchestrationRuntime } from './session-context-transport-control-orchestration-runtime';
 import {
   applyTransportOpenConnectedEffectsRuntime,
@@ -229,6 +230,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
   ) => void;
   readRequestedTerminalGeometry: (sessionId: string) => { cols?: number | null; rows?: number | null; widthMode?: TerminalWidthMode } | null;
   writeSessionRequestedTerminalGeometry: (sessionId: string, geometry: { cols?: number | null; rows?: number | null; widthMode?: TerminalWidthMode } | null) => unknown;
+  handleTargetMuxMessage?: (payload: { requestId?: string; message: TerminalMuxTargetServerMessage }) => boolean;
 }) {
   let openSessionTransportByIntentRef: ((intent: PendingSessionTransportOpenIntent) => void) | null = null;
   const controlTransportRuntime = createSessionControlTransportOrchestrationRuntime({
@@ -466,6 +468,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
             options.refs.handleSocketServerMessageRef.current?.(params, msg);
           },
           buildChannelCallbacks: (sessionId) => buildMuxChannelCallbacks(sessionId, bindOptions.ws),
+          handleTargetMuxMessage: options.handleTargetMuxMessage,
           recordSessionRx: options.recordSessionRx,
           runtimeDebug: options.runtimeDebug,
         });

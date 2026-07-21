@@ -93,6 +93,43 @@ describe('ensureActiveSessionFreshRuntime', () => {
     expect(reconnectSession).not.toHaveBeenCalled();
   });
 
+  it('reopens a closed mux channel on an open target transport instead of sending head to the dead channel', () => {
+    const targetSocket = { readyState: WebSocket.OPEN } as any;
+    const requestSessionBufferHead = vi.fn(() => true);
+    const reconnectSession = vi.fn();
+    const reopenSessionTerminalChannel = vi.fn();
+    const options = createBaseOptions({
+      readSessionTransportSocket: () => null,
+      readSessionTransportResource: () => ({ socket: targetSocket }),
+      readSessionTerminalChannel: () => ({ state: 'closed' }),
+      requestSessionBufferHead,
+      reconnectSession,
+      reopenSessionTerminalChannel,
+    });
+
+    expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
+    expect(requestSessionBufferHead).not.toHaveBeenCalled();
+    expect(reopenSessionTerminalChannel).toHaveBeenCalledWith('session-1');
+    expect(reconnectSession).not.toHaveBeenCalled();
+  });
+
+  it('does not treat a missing channel handle as a closed mux channel while the socket is open', () => {
+    const targetSocket = { readyState: WebSocket.OPEN } as any;
+    const requestSessionBufferHead = vi.fn(() => true);
+    const reconnectSession = vi.fn();
+    const options = createBaseOptions({
+      readSessionTransportSocket: () => null,
+      readSessionTransportResource: () => ({ socket: targetSocket }),
+      readSessionTerminalChannel: () => null,
+      requestSessionBufferHead,
+      reconnectSession,
+    });
+
+    expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
+    expect(requestSessionBufferHead).toHaveBeenCalledWith('session-1', targetSocket, { force: undefined });
+    expect(reconnectSession).not.toHaveBeenCalled();
+  });
+
   it('marks resume-tail on active reentry even when an old local buffer exists', () => {
     const ws = { readyState: WebSocket.OPEN } as any;
     const refs = createBaseOptions().refs;

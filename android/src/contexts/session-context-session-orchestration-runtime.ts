@@ -85,6 +85,7 @@ interface SessionLifecycleRuntimeOptions {
   readSessionTransportHost: (sessionId: string) => Host | null;
   readSessionTransportRuntime: (sessionId: string) => { targetKey: string | null } | null;
   readSessionTargetRuntime: (sessionId: string) => { sessionIds: string[] } | null;
+  readSessionTerminalChannel?: (sessionId: string) => { state: 'opening' | 'open' | 'closing' | 'closed' } | null;
   readSessionTargetKey: (sessionId: string) => string | null;
   clearSessionTransportRuntime: (sessionId: string) => unknown;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
@@ -219,6 +220,15 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
     });
   };
 
+  const reopenSessionTerminalChannel = (sessionId: string) => {
+    const host = options.readSessionTransportHost(sessionId);
+    if (!host) {
+      reconnectSession(sessionId);
+      return;
+    }
+    connectSession(sessionId, host);
+  };
+
   const reconnectAllSessions = () => {
     reconnectAllSessionsRuntime({
       sessions: options.refs.stateRef.current.sessions,
@@ -253,6 +263,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       readSessionTargetRuntime: options.readSessionTargetRuntime,
       readSessionTransportSocket: options.readSessionTransportSocket,
       readSessionTransportResource: options.readSessionTransportResource,
+      readSessionTerminalChannel: options.readSessionTerminalChannel,
       isReconnectInFlight: options.isReconnectInFlight,
       hasPendingSessionTransportOpen: options.hasPendingSessionTransportOpen,
       isPendingSessionTransportOpenStale: options.isPendingSessionTransportOpenStale,
@@ -264,6 +275,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       requestSessionBufferHead: options.requestSessionBufferHead,
       resolveTerminalRefreshCadence: options.resolveTerminalRefreshCadence,
       reconnectSession,
+      reopenSessionTerminalChannel,
     });
   };
 

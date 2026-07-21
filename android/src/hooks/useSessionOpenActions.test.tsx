@@ -10,6 +10,7 @@ import type { OpenTabRuntimeSwitchReason } from '../lib/open-tab-runtime-switch'
 const resolveRemoteRestorableOpenTabStateMock = vi.fn();
 const createTmuxSessionMock = vi.fn();
 const fetchTmuxSessionsMock = vi.fn();
+const killTmuxSessionMock = vi.fn();
 
 vi.mock('../lib/open-tab-restore', () => ({
   resolveRemoteRestorableOpenTabState: (...args: unknown[]) => resolveRemoteRestorableOpenTabStateMock(...args),
@@ -18,6 +19,7 @@ vi.mock('../lib/open-tab-restore', () => ({
 vi.mock('../lib/tmux-sessions', () => ({
   createTmuxSession: (...args: unknown[]) => createTmuxSessionMock(...args),
   fetchTmuxSessions: (...args: unknown[]) => fetchTmuxSessionsMock(...args),
+  killTmuxSession: (...args: unknown[]) => killTmuxSessionMock(...args),
 }));
 
 function createRef<T>(value: T) {
@@ -42,6 +44,7 @@ function createOptions(overrides: Partial<any> = {}) {
   const switchSession = vi.fn();
   const setPageState = vi.fn();
   const auditOpenTabsAgainstRemoteSessions = vi.fn(async () => undefined);
+  const manageTmuxSessionsOnOpenTransport = overrides.manageTmuxSessionsOnOpenTransport || vi.fn(async () => null);
   const applyOpenTabState = vi.fn((nextState: { tabs: any[]; activeSessionId: string | null }, persistOptions?: { preserveActiveSessionId?: string | null; switchRuntime?: OpenTabRuntimeSwitchReason }) => {
     const normalized = normalizeOpenTabIntentState(
       nextState.tabs,
@@ -99,6 +102,7 @@ function createOptions(overrides: Partial<any> = {}) {
     runtimeRefs,
     ensureTerminalPageVisible,
     applyOpenTabState,
+    manageTmuxSessionsOnOpenTransport,
     setPageState,
     auditOpenTabsAgainstRemoteSessions,
   };
@@ -124,6 +128,7 @@ function createOptions(overrides: Partial<any> = {}) {
       applyOpenTabState,
       setPageState,
       auditOpenTabsAgainstRemoteSessions,
+      manageTmuxSessionsOnOpenTransport,
     },
   };
 }
@@ -152,6 +157,8 @@ describe('useSessionOpenActions explicit-open truth', () => {
     createTmuxSessionMock.mockResolvedValue([]);
     fetchTmuxSessionsMock.mockReset();
     fetchTmuxSessionsMock.mockResolvedValue([]);
+    killTmuxSessionMock.mockReset();
+    killTmuxSessionMock.mockResolvedValue([]);
     resolveRemoteRestorableOpenTabStateMock.mockReset();
     resolveRemoteRestorableOpenTabStateMock.mockImplementation(async ({ tabs, activeSessionId }: any) => ({
       tabs,
@@ -1301,6 +1308,151 @@ describe('useSessionOpenActions explicit-open truth', () => {
     expect(harness.spies.applyOpenTabState).not.toHaveBeenCalled();
     expect(harness.spies.createSession).not.toHaveBeenCalled();
     expect(harness.spies.switchSession).not.toHaveBeenCalled();
+  });
+
+  it('refreshes drawer host sessions through an existing open mux target transport when available', async () => {
+    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => ['beta', 'alpha', 'beta']);
+    const harness = createOptions({
+      runtimeActiveSessionId: 'active-zterm',
+      manageTmuxSessionsOnOpenTransport,
+      sessions: [{
+        id: 'active-zterm',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'zterm',
+        state: 'connected',
+        createdAt: 10,
+      }],
+    });
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    await act(async () => {
+      await result.current.handleRefreshDrawerHostSessions('daemon-a');
+    });
+
+    expect(manageTmuxSessionsOnOpenTransport).toHaveBeenCalledWith(
+      'active-zterm',
+      { type: 'list-sessions' },
+    );
+    expect(fetchTmuxSessionsMock).not.toHaveBeenCalled();
+    expect(harness.spies.setSessionGroupSelection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        daemonHostId: 'daemon-a',
+        sessionNames: ['alpha', 'beta'],
+      }),
+    );
+  });
+
+  it('does not fallback to a second tmux management socket when existing mux target management fails', async () => {
+    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => {
+      throw new Error('mux target request timeout');
+    });
+    const harness = createOptions({
+      runtimeActiveSessionId: 'active-zterm',
+      manageTmuxSessionsOnOpenTransport,
+      sessions: [{
+        id: 'active-zterm',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'zterm',
+        state: 'connected',
+        createdAt: 10,
+      }],
+    });
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    await expect(result.current.handleRefreshDrawerHostSessions('daemon-a')).rejects.toThrow('mux target request timeout');
+    expect(fetchTmuxSessionsMock).not.toHaveBeenCalled();
+  });
+
+  it('falls back to the legacy tmux management pool only when no matching open target session exists', async () => {
+    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => null);
+    const harness = createOptions({
+      manageTmuxSessionsOnOpenTransport,
+      sessions: [],
+    });
+    fetchTmuxSessionsMock.mockResolvedValueOnce(['alpha']);
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    await act(async () => {
+      await result.current.handleRefreshDrawerHostSessions('daemon-a');
+    });
+
+    expect(manageTmuxSessionsOnOpenTransport).not.toHaveBeenCalled();
+    expect(fetchTmuxSessionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ daemonHostId: 'daemon-a' }),
+      expect.any(Object),
+    );
+  });
+
+  it('does not open a legacy tmux management socket when a matching session has no ready mux transport', async () => {
+    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => null);
+    const harness = createOptions({
+      runtimeActiveSessionId: 'active-zterm',
+      manageTmuxSessionsOnOpenTransport,
+      sessions: [{
+        id: 'active-zterm',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'zterm',
+        state: 'connecting',
+        createdAt: 10,
+      }],
+    });
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    await expect(result.current.handleRefreshDrawerHostSessions('daemon-a'))
+      .rejects.toThrow('Existing terminal transport is unavailable for tmux management');
+
+    expect(manageTmuxSessionsOnOpenTransport).toHaveBeenCalledWith(
+      'active-zterm',
+      { type: 'list-sessions' },
+    );
+    expect(fetchTmuxSessionsMock).not.toHaveBeenCalled();
+  });
+
+  it('closes drawer remote tmux sessions through the existing open mux target transport before local close', async () => {
+    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => ['alpha']);
+    const harness = createOptions({
+      runtimeActiveSessionId: 'active-zterm',
+      manageTmuxSessionsOnOpenTransport,
+      sessions: [{
+        id: 'active-zterm',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'zterm',
+        state: 'connected',
+        createdAt: 10,
+      }],
+    });
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    await act(async () => {
+      await result.current.handleCloseGroupSession({
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
+        authToken: 'token-a',
+      }, 'beta');
+    });
+
+    expect(manageTmuxSessionsOnOpenTransport).toHaveBeenCalledWith(
+      'active-zterm',
+      { type: 'tmux-kill-session', payload: { sessionName: 'beta' } },
+    );
+    expect(killTmuxSessionMock).not.toHaveBeenCalled();
+    expect(fetchTmuxSessionsMock).not.toHaveBeenCalled();
+    expect(harness.spies.setSessionGroupSelection).toHaveBeenCalledWith(
+      expect.objectContaining({
+        daemonHostId: 'daemon-a',
+        sessionNames: ['alpha'],
+      }),
+    );
   });
 
   it('refreshes a relay daemon drawer host through a route-aware target instead of the saved direct route', async () => {

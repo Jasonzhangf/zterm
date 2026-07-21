@@ -52,6 +52,7 @@ export function useSessionProviderFacadeAssemblies(
     handshakeTimeoutsRef,
     reconnectRuntimesRef,
     manualCloseRef,
+    tmuxTargetRequestsRef,
   } = options.refs;
 
   const sessionLifecycleRuntime = useMemo(() => createSessionLifecycleRuntime({
@@ -96,6 +97,7 @@ export function useSessionProviderFacadeAssemblies(
     readSessionTransportHost: core.readSessionTransportHost,
     readSessionTransportRuntime: core.readSessionTransportRuntime,
     readSessionTargetRuntime: core.readSessionTargetRuntime,
+    readSessionTerminalChannel: core.readSessionTerminalChannel,
     readSessionTargetKey: core.readSessionTargetKey,
     clearSessionTransportRuntime: core.clearSessionTransportRuntime,
     sendSocketPayload: core.sendSocketPayload,
@@ -169,6 +171,7 @@ export function useSessionProviderFacadeAssemblies(
     readSessionTransportResource: core.readSessionTransportResource,
     readSessionTransportSocket: core.readSessionTransportSocket,
     sendSocketPayload: core.sendSocketPayload,
+    tmuxTargetRequestsRef,
     setScheduleStateForSession: core.setScheduleStateForSession,
     readSessionBufferSnapshot: core.readSessionBufferSnapshot,
     requestSessionBufferSync: core.requestSessionBufferSync,
@@ -178,6 +181,7 @@ export function useSessionProviderFacadeAssemblies(
     setActiveBodySubscriptionSuppressedSync: core.setActiveBodySubscriptionSuppressedSync,
     isSessionTransportActive: core.isSessionTransportActive,
     sessionDebugMetricsStoreRef,
+    runtimeDebug,
   }), [
     core,
     ensureActiveSessionFresh,
@@ -186,6 +190,7 @@ export function useSessionProviderFacadeAssemblies(
     sessionBufferHeadsRef,
     sessionDebugMetricsStoreRef,
     sessionVisibleRangeRef,
+    tmuxTargetRequestsRef,
   ]);
 
   const {
@@ -204,6 +209,7 @@ export function useSessionProviderFacadeAssemblies(
     getSession,
     getSessionScheduleState,
     getSessionDebugMetrics,
+    manageTmuxSessionsOnOpenTransport,
     sendMessageRaw,
   } = sessionPublicFacadeRuntime;
 
@@ -314,6 +320,7 @@ export function useSessionProviderFacadeAssemblies(
     getActiveSession,
     getSession,
     getSessionDebugMetrics,
+    manageTmuxSessionsOnOpenTransport,
     sendMessageRaw,
   }), [
     closeSession,
@@ -323,6 +330,7 @@ export function useSessionProviderFacadeAssemblies(
     getSession,
     getSessionDebugMetrics,
     getSessionScheduleState,
+    manageTmuxSessionsOnOpenTransport,
     moveSession,
     options.scheduleStates,
     reconnectAllSessions,

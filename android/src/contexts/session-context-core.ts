@@ -20,6 +20,7 @@ import type {
   TerminalViewportState,
   TerminalVisibleRange,
 } from '../lib/types';
+import type { TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
 import type { SessionRenderBufferSnapshot } from '../lib/types';
 import type { SessionBufferStore } from '../lib/session-buffer-store';
 import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
@@ -246,6 +247,10 @@ export interface SessionContextValue {
   sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: TerminalWidthMode) => boolean;
   updateSessionViewport: (sessionId: string, visibleRange: TerminalVisibleRange | TerminalViewportState) => void;
   requestScheduleList: (sessionId: string) => void;
+  manageTmuxSessionsOnOpenTransport: (
+    sessionId: string,
+    message: TerminalMuxTargetClientMessage,
+  ) => Promise<string[] | null>;
   upsertScheduleJob: (sessionId: string, job: ScheduleJobDraft) => void;
   deleteScheduleJob: (sessionId: string, jobId: string) => void;
   toggleScheduleJob: (sessionId: string, jobId: string, enabled: boolean) => void;

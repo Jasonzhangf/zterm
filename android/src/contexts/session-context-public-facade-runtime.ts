@@ -16,11 +16,16 @@ import type {
   TerminalViewportState,
   TerminalVisibleRange,
 } from '../lib/types';
+import type { TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
 import type { SessionBufferStore } from '../lib/session-buffer-store';
 import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
 import type { SessionHeadStore } from '../lib/session-head-store';
 import type { SessionTransportResource } from '../lib/session-transport-runtime';
 import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
+import {
+  manageTmuxSessionsOnOpenTransportRuntime,
+  type SessionTmuxTargetRequestStore,
+} from './session-context-tmux-management-runtime';
 import type {
   CreateSessionOptions,
   SessionContextValue,
@@ -51,6 +56,7 @@ export function createSessionPublicFacadeRuntime(options: {
   readSessionTransportResource: (sessionId: string) => SessionTransportResource;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+  tmuxTargetRequestsRef: { current: SessionTmuxTargetRequestStore };
   setScheduleStateForSession: (
     sessionId: string,
     nextState: SessionScheduleState | ((current: SessionScheduleState) => SessionScheduleState),
@@ -86,6 +92,7 @@ export function createSessionPublicFacadeRuntime(options: {
       getMetrics: (sessionId: string, sessionState: Session['state'] | null, active: boolean, now: number) => SessionDebugOverlayMetrics | null;
     };
   };
+  runtimeDebug?: (event: string, payload?: Record<string, unknown>) => void;
 }) {
   const sendMessage = (sessionId: string, msg: ClientMessage) => {
     return sendMessageRuntime({
@@ -105,6 +112,18 @@ export function createSessionPublicFacadeRuntime(options: {
       sendMessage,
     });
   };
+
+  const manageTmuxSessionsOnOpenTransport = (
+    sessionId: string,
+    message: TerminalMuxTargetClientMessage,
+  ) => manageTmuxSessionsOnOpenTransportRuntime({
+    sessionId,
+    message,
+    pendingRequestsRef: options.tmuxTargetRequestsRef,
+    readSessionTransportResource: options.readSessionTransportResource,
+    sendSocketPayload: options.sendSocketPayload,
+    runtimeDebug: options.runtimeDebug,
+  });
 
   const upsertScheduleJob = (sessionId: string, job: ScheduleJobDraft) => {
     upsertScheduleJobRuntime({
@@ -257,6 +276,7 @@ export function createSessionPublicFacadeRuntime(options: {
     getSession,
     getSessionScheduleState,
     getSessionDebugMetrics,
+    manageTmuxSessionsOnOpenTransport,
     sendMessageRaw,
   };
 }
@@ -309,6 +329,10 @@ export function buildSessionContextValueRuntime(options: {
   ) => void;
   updateSessionViewport: (sessionId: string, visibleRange: TerminalVisibleRange | TerminalViewportState) => void;
   requestScheduleList: (sessionId: string) => void;
+  manageTmuxSessionsOnOpenTransport: (
+    sessionId: string,
+    message: TerminalMuxTargetClientMessage,
+  ) => Promise<string[] | null>;
   upsertScheduleJob: (sessionId: string, job: ScheduleJobDraft) => void;
   deleteScheduleJob: (sessionId: string, jobId: string) => void;
   toggleScheduleJob: (sessionId: string, jobId: string, enabled: boolean) => void;
@@ -350,6 +374,7 @@ export function buildSessionContextValueRuntime(options: {
     sendRemoteWindowInput: options.sendRemoteWindowInput,
     updateSessionViewport: options.updateSessionViewport,
     requestScheduleList: options.requestScheduleList,
+    manageTmuxSessionsOnOpenTransport: options.manageTmuxSessionsOnOpenTransport,
     upsertScheduleJob: options.upsertScheduleJob,
     deleteScheduleJob: options.deleteScheduleJob,
     toggleScheduleJob: options.toggleScheduleJob,

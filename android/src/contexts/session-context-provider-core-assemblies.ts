@@ -15,6 +15,9 @@ import {
   createSessionMessageAssemblies,
   type SessionMessageAssembliesResult,
 } from "./session-context-message-assemblies";
+import {
+  settleSessionTmuxTargetRequestRuntime,
+} from './session-context-tmux-management-runtime';
 import type {
   SessionProviderAssembliesSharedOptions,
   SessionProviderCoreAssembliesResult,
@@ -58,6 +61,7 @@ export function useSessionProviderCoreAssemblies(
     sessionPullStateRef,
     sessionAttachTokensRef,
     pendingSessionTransportOpenIntentsRef,
+    tmuxTargetRequestsRef,
     activeBodySubscriptionSuppressedRef,
     fileTransferMessageRuntimeRef,
     remoteWindowMessageRuntimeRef,
@@ -238,6 +242,12 @@ export function useSessionProviderCoreAssemblies(
     startSocketHeartbeat,
     setScheduleStateForSession,
     writeSessionRequestedTerminalGeometry,
+    handleTargetMuxMessage: (payload) => settleSessionTmuxTargetRequestRuntime({
+      pendingRequestsRef: tmuxTargetRequestsRef,
+      requestId: payload.requestId,
+      message: payload.message,
+      runtimeDebug,
+    }),
     readRequestedTerminalGeometry: (sessionId: string) => {
       const requestedGeometry = readSessionRequestedTerminalGeometry(sessionId);
       if (
@@ -429,6 +439,7 @@ export function useSessionProviderCoreAssemblies(
     readSessionTransportHost,
     readSessionTransportRuntime,
     readSessionTargetRuntime,
+    readSessionTerminalChannel,
     readSessionTargetKey,
     readSessionRequestedTerminalGeometry,
     writeSessionRequestedTerminalGeometry,
@@ -461,6 +472,7 @@ export function useSessionProviderCoreAssemblies(
     readSessionBufferSnapshot,
     readSessionTargetKey,
     readSessionTargetRuntime,
+    readSessionTerminalChannel,
     readSessionTransportHost,
     readSessionTransportResource,
     readSessionTransportRuntime,

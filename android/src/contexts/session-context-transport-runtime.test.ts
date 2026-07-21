@@ -377,6 +377,46 @@ describe('bindSessionTransportSocketLifecycle', () => {
 });
 
 describe('handleTargetMuxServerFrameRuntime', () => {
+  it('settles mux target management frames through the target message handler', () => {
+    const handleTargetMuxMessage = vi.fn(() => true);
+    const runtimeDebug = vi.fn();
+
+    handleTargetMuxServerFrameRuntime({
+      anchorSessionId: 'session-anchor',
+      host: makeHost(),
+      ws: { readyState: WebSocket.OPEN } as any,
+      debugScope: 'connect',
+      frame: {
+        type: 'mux-target-message',
+        payload: {
+          requestId: 'tmux-request-1',
+          message: {
+            type: 'sessions',
+            payload: { sessions: ['zterm'] },
+          } as any,
+        },
+      },
+      resolveSessionIdForChannel: () => null,
+      updateSessionTerminalChannelState: vi.fn(),
+      handleSocketServerMessage: vi.fn(),
+      buildChannelCallbacks: vi.fn(),
+      handleTargetMuxMessage,
+      runtimeDebug,
+    });
+
+    expect(handleTargetMuxMessage).toHaveBeenCalledWith({
+      requestId: 'tmux-request-1',
+      message: {
+        type: 'sessions',
+        payload: { sessions: ['zterm'] },
+      },
+    });
+    expect(runtimeDebug).not.toHaveBeenCalledWith(
+      'session.mux.target-frame',
+      expect.anything(),
+    );
+  });
+
   it('routes channel messages to the local session resolved from channelId', () => {
     const handleSocketServerMessage = vi.fn();
     const onConnected = vi.fn();

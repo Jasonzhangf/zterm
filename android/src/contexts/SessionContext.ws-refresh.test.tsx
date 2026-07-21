@@ -173,6 +173,27 @@ class MockWebSocket {
     this.triggerRawMessage(message);
   }
 
+  triggerBufferSync(revision: number, label: string, channelId = this.channelId || '') {
+    if (!channelId) {
+      return;
+    }
+    this.triggerRawMessage({
+      type: 'mux-channel-message',
+      payload: {
+        channelId,
+        message: {
+          type: 'buffer-sync',
+          payload: compactPayload({
+            startIndex: 0,
+            endIndex: 1,
+            revision,
+            lines: [[0, label]],
+          }),
+        },
+      },
+    });
+  }
+
   triggerChannelOpened(channelId = this.channelId || '', sessionName?: unknown) {
     if (!channelId) {
       return;
@@ -6591,6 +6612,45 @@ describe('SessionContext websocket dynamic refresh', () => {
     expect(MockWebSocket.physicalInstances).toHaveLength(1);
   });
 
+  it('reopens a closed inactive mux channel on the same physical socket when switching back', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <MultiSessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitForMockSessionInstances(2);
+    const rootSocket = MockWebSocket.physicalInstances[0]!;
+    const ws1 = MockWebSocket.instances[0]!;
+    const ws2 = MockWebSocket.instances[1]!;
+    ws1.triggerOpen();
+    ws2.triggerOpen();
+    ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+    ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+
+    await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-1'));
+    await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('connected'));
+
+    const sentBeforeClose = rootSocket.sent.length;
+    const secondChannelId = ws2.channelId;
+    ws2.triggerChannelClosed('inactive channel closed', 'channel_closed');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-2-state').textContent).toBe('idle');
+    });
+
+    fireEvent.click(screen.getByText('switch-second'));
+
+    await waitFor(() => {
+      expect(readMuxChannelOpenMessages(rootSocket, sentBeforeClose).some((item) => (
+        item.payload?.channelId === secondChannelId
+      ))).toBe(true);
+    });
+    await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('connected'));
+    expect(MockWebSocket.physicalInstances).toHaveLength(1);
+    expect(MockWebSocket.instances).toHaveLength(2);
+  });
+
   it('lets the second tab continue scrolling deeper while an older reading repair is still in flight', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
@@ -7159,6 +7219,134 @@ describe('SessionContext websocket dynamic refresh', () => {
     expect(MockWebSocket.physicalInstances).toHaveLength(1);
   });
 
+  it('keeps active mux channel render updates alive across repeated session switches', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <MultiSessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitForMockSessionInstances(2);
+
+    const session1 = MockWebSocket.instances[0]!;
+    const session2 = MockWebSocket.instances[1]!;
+    session1.triggerOpen();
+    session2.triggerOpen();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-1-state').textContent).toBe('connected');
+      expect(screen.getByTestId('session-2-state').textContent).toBe('connected');
+    });
+
+    const initialPhysicalCount = MockWebSocket.physicalInstances.length;
+    const firstChannelId = session1.channelId || '';
+    const secondChannelId = session2.channelId || '';
+
+    for (let i = 1; i <= 4; i += 1) {
+      fireEvent.click(screen.getByText('switch-second'));
+      await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
+      session2.triggerBufferSync(100 + i, `second-active-${i}`, secondChannelId);
+      await waitFor(() => expect(screen.getByTestId('session-2-revision').textContent).toBe(String(100 + i)));
+
+      fireEvent.click(screen.getByText('switch-first'));
+      await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-1'));
+      session1.triggerBufferSync(200 + i, `first-active-${i}`, firstChannelId);
+      await waitFor(() => expect(screen.getByTestId('session-1-revision').textContent).toBe(String(200 + i)));
+    }
+
+    expect(MockWebSocket.physicalInstances).toHaveLength(initialPhysicalCount);
+    expect(readSentMessages(session1).filter((item) =>
+      item.type === 'body-subscription' && item.payload?.subscribed === true).length).toBeGreaterThanOrEqual(4);
+    expect(readSentMessages(session2).filter((item) =>
+      item.type === 'body-subscription' && item.payload?.subscribed === true).length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('manages tmux sessions over the existing mux target transport without opening another physical socket', async () => {
+    function TmuxManagementHarness() {
+      const {
+        state,
+        createSession,
+        switchSession,
+        manageTmuxSessionsOnOpenTransport,
+      } = useSession();
+      const [sessionsResult, setSessionsResult] = useState('pending');
+
+      useEffect(() => {
+        createSession(host, { sessionId: 'session-1' });
+        switchSession('session-1');
+      }, [createSession, switchSession]);
+
+      return (
+        <div>
+          <div data-testid="tmux-active-session">{state.activeSessionId || 'missing'}</div>
+          <div data-testid="tmux-management-result">{sessionsResult}</div>
+          <button
+            type="button"
+            onClick={() => {
+              void manageTmuxSessionsOnOpenTransport('session-1', { type: 'list-sessions' })
+                .then((names) => {
+                  setSessionsResult(names ? names.join(',') : 'no-open-target');
+                })
+                .catch((error) => {
+                  setSessionsResult(error instanceof Error ? error.message : String(error));
+                });
+            }}
+          >
+            list-tmux
+          </button>
+        </div>
+      );
+    }
+
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <TmuxManagementHarness />
+      </SessionProvider>,
+    );
+
+    await waitForMockSessionInstances(1);
+    const ws = MockWebSocket.instances[0]!;
+    ws.triggerOpen();
+    ws.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+    await waitFor(() => expect(screen.getByTestId('tmux-active-session').textContent).toBe('session-1'));
+    const sentBefore = ws.sent.length;
+
+    fireEvent.click(screen.getByText('list-tmux'));
+
+    await waitFor(() => {
+      const targetFrame = ws.sent
+        .slice(sentBefore)
+        .filter((item): item is string => typeof item === 'string')
+        .map((item) => JSON.parse(item))
+        .find((item) => item.type === 'mux-target-message');
+      expect(targetFrame).toEqual(expect.objectContaining({
+        payload: expect.objectContaining({
+          requestId: expect.any(String),
+          message: { type: 'list-sessions' },
+        }),
+      }));
+    });
+    const targetFrame = ws.sent
+      .slice(sentBefore)
+      .filter((item): item is string => typeof item === 'string')
+      .map((item) => JSON.parse(item))
+      .find((item) => item.type === 'mux-target-message');
+    const requestId = targetFrame.payload.requestId;
+    ws.triggerMessage({
+      type: 'mux-target-message',
+      payload: {
+        requestId,
+        message: {
+          type: 'sessions',
+          payload: { sessions: ['zterm', 'alpha'] },
+        },
+      },
+    });
+
+    await waitFor(() => expect(screen.getByTestId('tmux-management-result').textContent).toBe('zterm,alpha'));
+    expect(MockWebSocket.physicalInstances).toHaveLength(1);
+  });
+
   it('reuses target-scoped mux semantics when reconnecting sessions on a shared target', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
@@ -7307,6 +7495,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       getSessionRenderBufferStore: unknown;
       requestScheduleList: unknown;
       sendMessageRaw: unknown;
+      manageTmuxSessionsOnOpenTransport: unknown;
       onFileTransferMessage: unknown;
     }> = [];
 
@@ -7323,6 +7512,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         getSessionRenderBufferStore,
         requestScheduleList,
         sendMessageRaw,
+        manageTmuxSessionsOnOpenTransport,
         onFileTransferMessage,
       } = useSession();
 
@@ -7342,6 +7532,7 @@ describe('SessionContext websocket dynamic refresh', () => {
           getSessionRenderBufferStore,
           requestScheduleList,
           sendMessageRaw,
+          manageTmuxSessionsOnOpenTransport,
           onFileTransferMessage,
         });
       }, [
@@ -7356,6 +7547,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         getSessionRenderBufferStore,
         requestScheduleList,
         sendMessageRaw,
+        manageTmuxSessionsOnOpenTransport,
         onFileTransferMessage,
       ]);
 
@@ -7396,6 +7588,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     expect(last.getSessionRenderBufferStore).toBe(first.getSessionRenderBufferStore);
     expect(last.requestScheduleList).toBe(first.requestScheduleList);
     expect(last.sendMessageRaw).toBe(first.sendMessageRaw);
+    expect(last.manageTmuxSessionsOnOpenTransport).toBe(first.manageTmuxSessionsOnOpenTransport);
     expect(last.onFileTransferMessage).toBe(first.onFileTransferMessage);
   });
 });

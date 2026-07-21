@@ -68,6 +68,7 @@ export interface SessionProviderCoreAssembliesResult {
   readSessionTransportHost: (sessionId: string) => any;
   readSessionTransportRuntime: (sessionId: string) => any;
   readSessionTargetRuntime: (sessionId: string) => any;
+  readSessionTerminalChannel: (sessionId: string) => any;
   readSessionTargetKey: (sessionId: string) => any;
   readSessionRequestedTerminalGeometry: (sessionId: string) => any;
   writeSessionRequestedTerminalGeometry: (sessionId: string, geometry: any) => any;

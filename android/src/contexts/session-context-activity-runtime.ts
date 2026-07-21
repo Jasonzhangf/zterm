@@ -21,6 +21,10 @@ interface SessionTargetRuntimeLike {
   sessionIds: string[];
 }
 
+interface SessionTerminalChannelLike {
+  state: 'opening' | 'open' | 'closing' | 'closed';
+}
+
 export const ACTIVE_SESSION_PENDING_OPEN_STALE_MS = 1200;
 export const SESSION_TRANSPORT_KEEPALIVE_GRACE_MS = 2 * 60 * 1000;
 
@@ -70,6 +74,7 @@ export function ensureActiveSessionFreshRuntime(options: {
   readSessionTargetRuntime: (sessionId: string) => SessionTargetRuntimeLike | null;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   readSessionTransportResource?: (sessionId: string) => { socket?: BridgeTransportSocket | null } | null;
+  readSessionTerminalChannel?: (sessionId: string) => SessionTerminalChannelLike | null;
   isReconnectInFlight: (sessionId: string) => boolean;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
   isPendingSessionTransportOpenStale: (sessionId: string, staleAfterMs?: number) => boolean;
@@ -81,6 +86,7 @@ export function ensureActiveSessionFreshRuntime(options: {
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
   resolveTerminalRefreshCadence: (sessionId?: string | null) => { headTickMs: number; headStalePingMs: number; pullRequestStaleMs: number };
   reconnectSession: (sessionId: string) => void;
+  reopenSessionTerminalChannel?: (sessionId: string) => void;
 }) {
   const session = options.refs.stateRef.current.sessions.find((item) => item.id === options.refreshOptions.sessionId) || null;
   const transportRuntime = options.readSessionTransportRuntime(options.refreshOptions.sessionId);
@@ -88,12 +94,48 @@ export function ensureActiveSessionFreshRuntime(options: {
   const ws = options.readSessionTransportResource?.(options.refreshOptions.sessionId)?.socket
     || options.readSessionTransportSocket(options.refreshOptions.sessionId)
     || null;
+  const terminalChannel = options.readSessionTerminalChannel?.(options.refreshOptions.sessionId) || null;
+  const muxChannelUnavailableOnOpenTarget = Boolean(
+    targetRuntime
+    && ws?.readyState === WebSocket.OPEN
+    && terminalChannel
+    && (terminalChannel.state === 'closed' || terminalChannel.state === 'closing')
+  );
+  const effectiveWsReadyState = muxChannelUnavailableOnOpenTarget
+    ? WebSocket.CLOSED
+    : (ws?.readyState ?? null);
   const isActive = options.refs.stateRef.current.activeSessionId === options.refreshOptions.sessionId;
   const isLive = Array.isArray(options.refs.stateRef.current.liveSessionIds)
     && options.refs.stateRef.current.liveSessionIds.includes(options.refreshOptions.sessionId);
   const isExplicitResumeTarget = options.refreshOptions.source === 'explicit-resume';
   const isActiveReentryTarget = options.refreshOptions.source === 'active-reentry';
   const isRefreshTarget = isExplicitResumeTarget || isActiveReentryTarget || isActive || isLive;
+  if (muxChannelUnavailableOnOpenTarget && isRefreshTarget) {
+    options.runtimeDebug(`session.transport.${options.refreshOptions.source}.mux-channel-reopen`, {
+      sessionId: options.refreshOptions.sessionId,
+      activeSessionId: options.refs.stateRef.current.activeSessionId,
+      isActive,
+      isLive,
+      isExplicitResumeTarget,
+      isActiveReentryTarget,
+      physicalWsReadyState: ws?.readyState ?? null,
+      terminalChannelState: terminalChannel?.state || null,
+      targetKey: transportRuntime?.targetKey || null,
+      targetSessionCount: targetRuntime?.sessionIds.length || 0,
+    });
+    if (options.refreshOptions.markResumeTail) {
+      options.refs.pendingResumeTailRefreshRef.current.add(options.refreshOptions.sessionId);
+    }
+    if (options.refreshOptions.source === 'active-reentry') {
+      options.refs.lastActiveReentryAtRef.current.set(options.refreshOptions.sessionId, Date.now());
+    }
+    if (options.reopenSessionTerminalChannel) {
+      options.reopenSessionTerminalChannel(options.refreshOptions.sessionId);
+    } else {
+      options.reconnectSession(options.refreshOptions.sessionId);
+    }
+    return true;
+  }
   const sessionState = session?.state ?? null;
   const reconnectInFlight = options.isReconnectInFlight(options.refreshOptions.sessionId);
   const pendingTransportOpen = options.hasPendingSessionTransportOpen(options.refreshOptions.sessionId);
@@ -130,7 +172,7 @@ export function ensureActiveSessionFreshRuntime(options: {
     hasSession: Boolean(session),
     isRefreshTarget,
     sessionState,
-    wsReadyState: ws?.readyState ?? null,
+    wsReadyState: effectiveWsReadyState,
     reconnectInFlight,
     pendingTransportOpen,
     pendingTransportOpenStale,
@@ -160,7 +202,10 @@ export function ensureActiveSessionFreshRuntime(options: {
       isActiveReentryTarget,
       isRefreshTarget,
       sessionState,
-      wsReadyState: ws?.readyState ?? null,
+      wsReadyState: effectiveWsReadyState,
+      physicalWsReadyState: ws?.readyState ?? null,
+      terminalChannelState: terminalChannel?.state || null,
+      muxChannelUnavailableOnOpenTarget,
       targetKey: transportRuntime?.targetKey || null,
       targetSessionCount: targetRuntime?.sessionIds.length || 0,
       pendingTransportOpenStale,
@@ -207,6 +252,10 @@ export function ensureActiveSessionFreshRuntime(options: {
     staleProbeTimedOut,
     targetKey: transportRuntime?.targetKey || null,
     targetSessionCount: targetRuntime?.sessionIds.length || 0,
+    wsReadyState: effectiveWsReadyState,
+    physicalWsReadyState: ws?.readyState ?? null,
+    terminalChannelState: terminalChannel?.state || null,
+    muxChannelUnavailableOnOpenTarget,
     plan: refreshPlan.action,
   });
 
