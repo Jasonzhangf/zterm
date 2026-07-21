@@ -349,6 +349,23 @@ describe('remote window stream daemon owner', () => {
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('let phase: String\n');
   });
 
+  it('keeps gesture input compatible with the macOS helper schema', () => {
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('let gesture: String?');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('config.event.kind == "gesture"');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('remote gesture input missing delta or coordinates');
+  });
+
+  it('moves the macOS cursor to the remote input coordinate before scroll and gesture wheel events', () => {
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func postMouseMove(x: Double, y: Double)');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('postMouseMove(x: x, y: y)');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toMatch(
+      /func postScrollEvent[\s\S]*postMouseMove\(x: x, y: y\)[\s\S]*scrollWheelEvent2Source/,
+    );
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toMatch(
+      /config\.event\.kind == "gesture"[\s\S]*postScrollEvent\(x: pointX, y: pointY/,
+    );
+  });
+
   it('maps Command+V through a real macOS virtual key code for remote-window image paste', () => {
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('"KeyV": 9');
   });
@@ -1274,17 +1291,58 @@ describe('remote window stream daemon owner', () => {
       targetId: 'app-window:123:456',
       accepted: true,
     });
-    expect(runRemoteWindowInputEvent).toHaveBeenCalledWith(
-      expect.objectContaining({
-        requestId: 'rw-input-scroll',
-        event: expect.objectContaining({ kind: 'scroll', deltaY: 48 }),
-      }),
-      target,
-      expect.objectContaining({ swiftBinary: 'swift' }),
-    );
-  });
+	    expect(runRemoteWindowInputEvent).toHaveBeenCalledWith(
+	      expect.objectContaining({
+	        requestId: 'rw-input-scroll',
+	        event: expect.objectContaining({ kind: 'scroll', deltaY: 48 }),
+	      }),
+	      target,
+	      expect.objectContaining({ swiftBinary: 'swift' }),
+	    );
 
-  it('uses one persistent macOS input helper for pointer, scroll, and key events', async () => {
+	    runRemoteWindowInputEvent.mockClear();
+	    const gestureResult = await runtime.injectInput({
+	      requestId: 'rw-input-gesture',
+	      streamId: 'stream-input',
+	      targetId: 'app-window:123:456',
+	      event: {
+	        kind: 'gesture',
+	        gesture: 'swipe',
+	        phase: 'end',
+	        unit: 'pixel',
+	        pointerId: 1,
+	        startX: 100,
+	        startY: 170,
+	        x: 100,
+	        y: 120,
+	        startNormalizedX: 0.5,
+	        startNormalizedY: 0.85,
+	        normalizedX: 0.5,
+	        normalizedY: 0.6,
+	        deltaX: 0,
+	        deltaY: 50,
+	        durationMs: 120,
+	        velocityX: 0,
+	        velocityY: 416.67,
+	      },
+	    });
+	    expect(gestureResult).toEqual({
+	      requestId: 'rw-input-gesture',
+	      streamId: 'stream-input',
+	      targetId: 'app-window:123:456',
+	      accepted: true,
+	    });
+	    expect(runRemoteWindowInputEvent).toHaveBeenCalledWith(
+	      expect.objectContaining({
+	        requestId: 'rw-input-gesture',
+	        event: expect.objectContaining({ kind: 'gesture', gesture: 'swipe', deltaY: 50 }),
+	      }),
+	      target,
+	      expect.objectContaining({ swiftBinary: 'swift' }),
+	    );
+	  });
+
+  it('uses one persistent macOS input helper for pointer, scroll, gesture, and key events', async () => {
     const fakePeer = new FakeRemoteWindowPeerConnection();
     const fakeTrack = makeFakeMediaStreamTrack();
     const target = makeAppStreamTarget();
@@ -1335,9 +1393,9 @@ describe('remote window stream daemon owner', () => {
         normalizedY: 0.6,
       },
     });
-    await runtime.injectInput({
-      requestId: 'rw-input-helper-scroll',
-      streamId: 'stream-input-helper',
+	    await runtime.injectInput({
+	      requestId: 'rw-input-helper-scroll',
+	      streamId: 'stream-input-helper',
       targetId: target.streamTargetId,
       event: {
         kind: 'scroll',
@@ -1347,11 +1405,36 @@ describe('remote window stream daemon owner', () => {
         x: 100,
         y: 120,
         normalizedX: 0.5,
-        normalizedY: 0.6,
-      },
-    });
-    await runtime.injectInput({
-      requestId: 'rw-input-helper-key',
+	        normalizedY: 0.6,
+	      },
+	    });
+	    await runtime.injectInput({
+	      requestId: 'rw-input-helper-gesture',
+	      streamId: 'stream-input-helper',
+	      targetId: target.streamTargetId,
+	      event: {
+	        kind: 'gesture',
+	        gesture: 'swipe',
+	        phase: 'end',
+	        unit: 'pixel',
+	        pointerId: 1,
+	        startX: 100,
+	        startY: 170,
+	        x: 100,
+	        y: 120,
+	        startNormalizedX: 0.5,
+	        startNormalizedY: 0.85,
+	        normalizedX: 0.5,
+	        normalizedY: 0.6,
+	        deltaX: 0,
+	        deltaY: 50,
+	        durationMs: 120,
+	        velocityX: 0,
+	        velocityY: 416.67,
+	      },
+	    });
+	    await runtime.injectInput({
+	      requestId: 'rw-input-helper-key',
       streamId: 'stream-input-helper',
       targetId: target.streamTargetId,
       event: {
@@ -1359,12 +1442,12 @@ describe('remote window stream daemon owner', () => {
         phase: 'down',
         key: 'Z',
         code: 'KeyZ',
-        text: 'Z',
-      },
-    });
+	        text: 'Z',
+	      },
+	    });
 
     expect(remoteWindowInputHelperFactory).toHaveBeenCalledTimes(1);
-    expect(inputHelper.send).toHaveBeenCalledTimes(3);
+    expect(inputHelper.send).toHaveBeenCalledTimes(4);
     expect(inputHelper.send).toHaveBeenNthCalledWith(1, expect.objectContaining({
       event: expect.objectContaining({ kind: 'pointer' }),
       window: expect.objectContaining({ bounds: target.videoTarget.windowBoundsTopLeftPx }),
@@ -1373,6 +1456,9 @@ describe('remote window stream daemon owner', () => {
       event: expect.objectContaining({ kind: 'scroll', deltaY: 48 }),
     }));
     expect(inputHelper.send).toHaveBeenNthCalledWith(3, expect.objectContaining({
+      event: expect.objectContaining({ kind: 'gesture', gesture: 'swipe', deltaY: 50 }),
+    }));
+    expect(inputHelper.send).toHaveBeenNthCalledWith(4, expect.objectContaining({
       event: expect.objectContaining({ kind: 'key', text: 'Z' }),
     }));
 
@@ -1473,10 +1559,40 @@ describe('remote window stream daemon owner', () => {
         normalizedY: 0.5,
       },
     });
-    expect(invalidScroll).toMatchObject({
-      code: 'remote_window_input_failed',
-      message: 'remote window scroll input coordinates or delta are invalid',
-    });
+	    expect(invalidScroll).toMatchObject({
+	      code: 'remote_window_input_failed',
+	      message: 'remote window scroll input coordinates or delta are invalid',
+	    });
+
+	    const invalidGesture = await runtime.injectInput({
+	      requestId: 'rw-input-invalid-gesture',
+	      streamId: 'stream-input-negative',
+	      targetId: target.streamTargetId,
+	      event: {
+	        kind: 'gesture',
+	        gesture: 'swipe',
+	        phase: 'end',
+	        unit: 'pixel',
+	        pointerId: 1,
+	        startX: 100,
+	        startY: 170,
+	        x: 100,
+	        y: 120,
+	        startNormalizedX: 0.5,
+	        startNormalizedY: 1.2,
+	        normalizedX: 0.5,
+	        normalizedY: 0.6,
+	        deltaX: 0,
+	        deltaY: 50,
+	        durationMs: 120,
+	        velocityX: 0,
+	        velocityY: 416.67,
+	      },
+	    });
+	    expect(invalidGesture).toMatchObject({
+	      code: 'remote_window_input_failed',
+	      message: 'remote window gesture input normalized coordinates are out of range',
+	    });
 
     await runtime.stopStream({ requestId: 'rw-stop-input', streamId: 'stream-input-negative' });
     const stopped = await runtime.injectInput({

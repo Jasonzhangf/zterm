@@ -92,6 +92,7 @@ export function useSessionProviderFacadeAssemblies(
     writeSessionTransportHost: core.writeSessionTransportHost,
     writeSessionTransportToken: core.writeSessionTransportToken,
     readSessionTransportSocket: core.readSessionTransportSocket,
+    readSessionTransportResource: core.readSessionTransportResource,
     readSessionTransportHost: core.readSessionTransportHost,
     readSessionTransportRuntime: core.readSessionTransportRuntime,
     readSessionTargetRuntime: core.readSessionTargetRuntime,
@@ -165,6 +166,7 @@ export function useSessionProviderFacadeAssemblies(
     scheduleStatesRef: options.scheduleStatesRef,
     sessionVisibleRangeRef,
     sessionBufferHeadsRef,
+    readSessionTransportResource: core.readSessionTransportResource,
     readSessionTransportSocket: core.readSessionTransportSocket,
     sendSocketPayload: core.sendSocketPayload,
     setScheduleStateForSession: core.setScheduleStateForSession,
@@ -224,6 +226,7 @@ export function useSessionProviderFacadeAssemblies(
     isReconnectInFlight: core.isReconnectInFlight,
     hasPendingSessionTransportOpen: core.hasPendingSessionTransportOpen,
     isPendingSessionTransportOpenStale: core.isPendingSessionTransportOpenStale,
+    scheduleReconnect: core.scheduleReconnect,
   }), [
     core,
     options.bridgeSettings,

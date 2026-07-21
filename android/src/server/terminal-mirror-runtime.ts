@@ -509,9 +509,10 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
 
   function ensureSessionReady(session: TerminalSession, mirror: SessionMirror) {
     session.sessionName = mirror.sessionName;
-    if (!session.transport || session.transport.connectedSent) {
+    if (!session.transport || session.connectedSent) {
       return;
     }
+    session.connectedSent = true;
     session.transport.connectedSent = true;
     deps.sendMessage(session, {
       type: 'connected',
@@ -1178,6 +1179,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
 
     session.sessionName = nextSessionName;
     session.mirrorKey = nextMirrorKey;
+    session.connectedSent = false;
     if (session.transport) {
       session.transport.connectedSent = false;
     }

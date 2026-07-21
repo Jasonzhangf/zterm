@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   handleReconnectHandshakeFailureRuntime,
+  openSessionMuxChannelByIntentRuntime,
   queueSessionTransportOpenIntentRuntime,
 } from './session-context-transport-open-runtime';
 import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
@@ -16,6 +17,19 @@ function makeHost() {
     authType: 'password' as const,
     tags: [],
     pinned: false,
+  };
+}
+
+function makeIntent(sessionId: string, openRequestId: string): PendingSessionTransportOpenIntent {
+  return {
+    sessionId,
+    openRequestId,
+    createdAt: 1,
+    host: makeHost(),
+    resolvedSessionName: 'tmux-1',
+    debugScope: 'connect',
+    finalizeFailure: vi.fn(),
+    onConnected: vi.fn(),
   };
 }
 
@@ -60,6 +74,231 @@ describe('queueSessionTransportOpenIntentRuntime', () => {
     expect(pendingSessionTransportOpenIntentsRef.current.size).toBe(1);
     expect(pendingSessionTransportOpenIntentsRef.current.get('session-1')?.debugScope).toBe('reconnect');
     expect(ensureControlTransportForSessionOpen).toHaveBeenCalledTimes(2);
+  });
+
+  it('uses the mux opener when provided instead of the legacy control/session-ticket opener', () => {
+    const pendingSessionTransportOpenIntentsRef = {
+      current: new Map<string, PendingSessionTransportOpenIntent>(),
+    };
+    const ensureControlTransportForSessionOpen = vi.fn();
+    const openSessionMuxChannelByIntent = vi.fn();
+
+    queueSessionTransportOpenIntentRuntime({
+      intentOptions: {
+        sessionId: 'session-1',
+        host: makeHost(),
+        debugScope: 'connect',
+        onHandshakeFailure: vi.fn(),
+      },
+      clearSessionHandshakeTimeout: vi.fn(),
+      finalizeSocketFailureBaseline: vi.fn().mockReturnValue({ shouldContinue: true, manualClosed: false }),
+      pendingSessionTransportOpenIntentsRef,
+      ensureControlTransportForSessionOpen,
+      openSessionMuxChannelByIntent,
+    });
+
+    expect(openSessionMuxChannelByIntent).toHaveBeenCalledWith(
+      expect.objectContaining({ sessionId: 'session-1' }),
+    );
+    expect(ensureControlTransportForSessionOpen).not.toHaveBeenCalled();
+  });
+});
+
+describe('openSessionMuxChannelByIntentRuntime', () => {
+  it('opens a channel over an existing ready target transport instead of creating a session socket', () => {
+    const targetSocket = { readyState: WebSocket.OPEN } as any;
+    const sendSocketPayload = vi.fn();
+    const buildTraversalSocketForHost = vi.fn();
+    const primeTargetTerminalTransportSocket = vi.fn();
+    const bindTargetMuxTransportSocketLifecycle = vi.fn();
+    const intent = {
+      ...makeIntent('session-1', 'open-1'),
+      resolvedSessionName: 'tmux-1',
+    };
+
+    openSessionMuxChannelByIntentRuntime({
+      intent,
+      readSessionTargetTerminalSocket: () => targetSocket,
+      isSessionTargetMuxReady: () => true,
+      ensureSessionTerminalChannel: vi.fn(() => ({
+        channelId: 'channel-a',
+        sessionId: 'session-1',
+        sessionName: 'tmux-1',
+        targetKey: 'target-a',
+        state: 'opening',
+        bodySubscribed: true,
+        openedAt: 1,
+        closedAt: null,
+      })),
+      updateSessionTerminalChannelState: vi.fn(),
+      readRequestedTerminalGeometry: () => ({ cols: 88, widthMode: 'adaptive-phone' }),
+      sendSocketPayload,
+      buildTraversalSocketForHost,
+      primeTargetTerminalTransportSocket,
+      bindTargetMuxTransportSocketLifecycle,
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(buildTraversalSocketForHost).not.toHaveBeenCalled();
+    expect(primeTargetTerminalTransportSocket).not.toHaveBeenCalled();
+    expect(bindTargetMuxTransportSocketLifecycle).not.toHaveBeenCalled();
+    expect(sendSocketPayload).toHaveBeenCalledWith(
+      'session-1',
+      targetSocket,
+      JSON.stringify({
+        type: 'mux-channel-open',
+        payload: {
+          channelId: 'channel-a',
+          sessionName: 'tmux-1',
+          cols: 88,
+          widthMode: 'adaptive-phone',
+        },
+      }),
+    );
+  });
+
+  it('creates one target transport when no reusable target transport exists', () => {
+    const builtSocket = { readyState: WebSocket.CONNECTING } as any;
+    const buildTraversalSocketForHost = vi.fn(() => builtSocket);
+    const primeTargetTerminalTransportSocket = vi.fn();
+    const bindTargetMuxTransportSocketLifecycle = vi.fn();
+    const sendSocketPayload = vi.fn();
+    const intent = makeIntent('session-1', 'open-1');
+
+    openSessionMuxChannelByIntentRuntime({
+      intent,
+      readSessionTargetTerminalSocket: () => null,
+      isSessionTargetMuxReady: () => false,
+      ensureSessionTerminalChannel: vi.fn(() => ({
+        channelId: 'channel-a',
+        sessionId: 'session-1',
+        sessionName: 'tmux-1',
+        targetKey: 'target-a',
+        state: 'opening',
+        bodySubscribed: true,
+        openedAt: 1,
+        closedAt: null,
+      })),
+      updateSessionTerminalChannelState: vi.fn(),
+      readRequestedTerminalGeometry: () => null,
+      sendSocketPayload,
+      buildTraversalSocketForHost,
+      primeTargetTerminalTransportSocket,
+      bindTargetMuxTransportSocketLifecycle,
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(buildTraversalSocketForHost).toHaveBeenCalledWith(intent.host, 'session');
+    expect(primeTargetTerminalTransportSocket).toHaveBeenCalledWith('session-1', builtSocket);
+    expect(bindTargetMuxTransportSocketLifecycle).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-1',
+      host: intent.host,
+      ws: builtSocket,
+      debugScope: 'connect',
+    }));
+    expect(sendSocketPayload).not.toHaveBeenCalled();
+  });
+
+  it('waits for mux-ready on an open target transport before sending channel-open', () => {
+    const targetSocket = { readyState: WebSocket.OPEN } as any;
+    const sendSocketPayload = vi.fn();
+    const updateSessionTerminalChannelState = vi.fn();
+
+    openSessionMuxChannelByIntentRuntime({
+      intent: makeIntent('session-1', 'open-1'),
+      readSessionTargetTerminalSocket: () => targetSocket,
+      isSessionTargetMuxReady: () => false,
+      ensureSessionTerminalChannel: vi.fn(() => ({
+        channelId: 'channel-a',
+        sessionId: 'session-1',
+        sessionName: 'tmux-1',
+        targetKey: 'target-a',
+        state: 'opening',
+        bodySubscribed: true,
+        openedAt: 1,
+        closedAt: null,
+      })),
+      updateSessionTerminalChannelState,
+      readRequestedTerminalGeometry: () => null,
+      sendSocketPayload,
+      buildTraversalSocketForHost: vi.fn(),
+      primeTargetTerminalTransportSocket: vi.fn(),
+      bindTargetMuxTransportSocketLifecycle: vi.fn(),
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(sendSocketPayload).not.toHaveBeenCalled();
+    expect(updateSessionTerminalChannelState).toHaveBeenCalledWith('session-1', 'opening');
+  });
+
+  it('queues a stale channel while the shared target transport is connecting without creating another socket', () => {
+    const targetSocket = { readyState: WebSocket.CONNECTING } as any;
+    const updateSessionTerminalChannelState = vi.fn();
+    const buildTraversalSocketForHost = vi.fn();
+    const primeTargetTerminalTransportSocket = vi.fn();
+    const bindTargetMuxTransportSocketLifecycle = vi.fn();
+    const sendSocketPayload = vi.fn();
+
+    openSessionMuxChannelByIntentRuntime({
+      intent: makeIntent('session-2', 'open-2'),
+      readSessionTargetTerminalSocket: () => targetSocket,
+      isSessionTargetMuxReady: () => false,
+      ensureSessionTerminalChannel: vi.fn(() => ({
+        channelId: 'channel-b',
+        sessionId: 'session-2',
+        sessionName: 'tmux-1',
+        targetKey: 'target-a',
+        state: 'open',
+        bodySubscribed: false,
+        openedAt: 1,
+        closedAt: null,
+      })),
+      updateSessionTerminalChannelState,
+      readRequestedTerminalGeometry: () => null,
+      sendSocketPayload,
+      buildTraversalSocketForHost,
+      primeTargetTerminalTransportSocket,
+      bindTargetMuxTransportSocketLifecycle,
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(updateSessionTerminalChannelState).toHaveBeenCalledWith('session-2', 'opening');
+    expect(buildTraversalSocketForHost).not.toHaveBeenCalled();
+    expect(primeTargetTerminalTransportSocket).not.toHaveBeenCalled();
+    expect(bindTargetMuxTransportSocketLifecycle).not.toHaveBeenCalled();
+    expect(sendSocketPayload).not.toHaveBeenCalled();
+  });
+
+  it('reuses an already-open channel only when the shared target mux is ready', () => {
+    const targetSocket = { readyState: WebSocket.OPEN } as any;
+    const updateSessionTerminalChannelState = vi.fn();
+    const intent = makeIntent('session-1', 'open-1');
+
+    openSessionMuxChannelByIntentRuntime({
+      intent,
+      readSessionTargetTerminalSocket: () => targetSocket,
+      isSessionTargetMuxReady: () => true,
+      ensureSessionTerminalChannel: vi.fn(() => ({
+        channelId: 'channel-a',
+        sessionId: 'session-1',
+        sessionName: 'tmux-1',
+        targetKey: 'target-a',
+        state: 'open',
+        bodySubscribed: true,
+        openedAt: 1,
+        closedAt: null,
+      })),
+      updateSessionTerminalChannelState,
+      readRequestedTerminalGeometry: () => null,
+      sendSocketPayload: vi.fn(),
+      buildTraversalSocketForHost: vi.fn(),
+      primeTargetTerminalTransportSocket: vi.fn(),
+      bindTargetMuxTransportSocketLifecycle: vi.fn(),
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(intent.onConnected).toHaveBeenCalledWith(targetSocket);
+    expect(updateSessionTerminalChannelState).not.toHaveBeenCalled();
   });
 });
 

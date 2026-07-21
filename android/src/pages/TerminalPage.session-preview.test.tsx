@@ -252,6 +252,58 @@ describe('TerminalPage session preview integration', () => {
     expect(screen.queryByTestId('terminal-view-s1')).toBeNull();
   });
 
+  it('removes selected preview sessions from live body demand while app foreground truth is false', async () => {
+    const sessions = [makeSession('s1'), makeSession('s2')];
+    localStorage.setItem(SESSION_PREVIEW_SELECTION_STORAGE_KEY, JSON.stringify({
+      version: 1,
+      orderedTargets: sessions.map((item) => ({
+        sessionId: item.id,
+        bridgeHost: item.bridgeHost,
+        bridgePort: item.bridgePort,
+        sessionName: item.sessionName,
+      })),
+    }));
+    const onLiveSessionIdsChange = vi.fn();
+    const stableNoop = vi.fn();
+    const { TerminalPage } = await import('./TerminalPage');
+
+    const renderPage = (appForegroundActive: boolean) => (
+      <TerminalPage
+        appForegroundActive={appForegroundActive}
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={stableNoop}
+        onMoveSession={stableNoop}
+        onRenameSession={stableNoop}
+        onCloseSession={stableNoop}
+        onOpenConnections={stableNoop}
+        onOpenQuickTabPicker={stableNoop}
+        onTerminalViewportChange={stableNoop}
+        onLiveSessionIdsChange={onLiveSessionIdsChange}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />
+    );
+
+    const view = render(renderPage(true));
+    await waitFor(() => expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s1']));
+
+    const stage = screen.getByTestId('terminal-stage-shell');
+    fireEvent.touchStart(stage, { touches: [{ clientX: 338, clientY: 400 }] });
+    fireEvent.touchMove(stage, { touches: [{ clientX: 270, clientY: 404 }], cancelable: true });
+    fireEvent.touchEnd(stage, { changedTouches: [{ clientX: 270, clientY: 404 }] });
+    await waitFor(() => expect(screen.getByTestId('terminal-preview-grid')).toBeTruthy());
+    await waitFor(() => expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s1', 's2']));
+
+    view.rerender(renderPage(false));
+    await waitFor(() => expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s1']));
+    expect(screen.getByTestId('terminal-preview-grid')).toBeTruthy();
+
+    view.rerender(renderPage(true));
+    await waitFor(() => expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s1', 's2']));
+  });
+
   it('materializes a remote-only drawer row before adding it to preview selection', async () => {
     const currentSession = makeSession('s1');
     currentSession.daemonHostId = 'daemon-a';

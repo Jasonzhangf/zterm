@@ -12,6 +12,7 @@ import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import { buildTraversalPlan } from '../lib/traversal/config';
 import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
+import type { SessionTransportResource } from '../lib/session-transport-runtime';
 
 interface RemoteWindowCatalogMessageRuntimeLike {
   requestTargets: (
@@ -132,6 +133,7 @@ function resolveRemoteWindowTransport(options: {
   sessionId: string;
   sessions: Session[];
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
   operationLabel: 'catalog' | 'stream';
 }) {
   const targetSessionId = options.sessionId.trim();
@@ -139,7 +141,9 @@ function resolveRemoteWindowTransport(options: {
   if (!session) {
     throw new Error(`Remote window ${options.operationLabel} session no longer exists`);
   }
-  const ws = options.readSessionTransportSocket(targetSessionId) || null;
+  const ws = options.readSessionTransportResource?.(targetSessionId).socket
+    || options.readSessionTransportSocket(targetSessionId)
+    || null;
   if (ws && ws.readyState === WebSocket.OPEN) {
     return ws;
   }
@@ -203,6 +207,7 @@ export function resolveRemoteWindowCatalogTransport(options: {
   sessionId: string;
   sessions: Session[];
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
 }) {
   return resolveRemoteWindowTransport({
     ...options,
@@ -214,6 +219,7 @@ export function resolveRemoteWindowStreamTransport(options: {
   sessionId: string;
   sessions: Session[];
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
 }) {
   return resolveRemoteWindowTransport({
     ...options,
@@ -225,10 +231,12 @@ export async function requestRemoteWindowTargetsRuntime(options: {
   sessionId: string;
   sessions: Session[];
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
   remoteWindowMessageRuntime: RemoteWindowCatalogMessageRuntimeLike;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   targetCatalogCache?: RemoteWindowTargetCatalogCacheStore;
   cacheTtlMs?: number;
+  forceRefresh?: boolean;
   now?: () => number;
 }) {
   const targetSessionId = options.sessionId.trim();
@@ -243,13 +251,14 @@ export async function requestRemoteWindowTargetsRuntime(options: {
   const ws = resolveRemoteWindowCatalogTransport({
     sessionId: targetSessionId,
     sessions: options.sessions,
+    readSessionTransportResource: options.readSessionTransportResource,
     readSessionTransportSocket: options.readSessionTransportSocket,
   });
   const cacheKey = buildRemoteWindowTargetCatalogCacheKey(session);
   const now = options.now?.() ?? Date.now();
   const cacheTtlMs = Math.max(0, Math.floor(options.cacheTtlMs ?? REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS));
   const cached = options.targetCatalogCache?.get(cacheKey) || null;
-  if (cached && now - cached.updatedAt >= 0 && now - cached.updatedAt < cacheTtlMs) {
+  if (!options.forceRefresh && cached && now - cached.updatedAt >= 0 && now - cached.updatedAt < cacheTtlMs) {
     return cloneRemoteWindowTargetsPayload(cached.payload);
   }
   const payload = await options.remoteWindowMessageRuntime.requestTargets(targetSessionId, {
@@ -273,6 +282,7 @@ export async function requestRemoteWindowStreamStartRuntime(options: {
   bridgeSettings?: BridgeSettings | null;
   sessions: Session[];
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
   remoteWindowMessageRuntime: RemoteWindowStreamMessageRuntimeLike;
   remoteWindowReceiverRuntime: RemoteWindowReceiverRuntimeLike;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
@@ -286,6 +296,7 @@ export async function requestRemoteWindowStreamStartRuntime(options: {
   const ws = resolveRemoteWindowStreamTransport({
     sessionId: targetSessionId,
     sessions: options.sessions,
+    readSessionTransportResource: options.readSessionTransportResource,
     readSessionTransportSocket: options.readSessionTransportSocket,
   });
   const session = options.sessions.find((item) => item.id === targetSessionId)!;
@@ -324,6 +335,7 @@ export function updateRemoteWindowStreamQualityRuntime(options: {
   payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>;
   sessions: Session[];
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
   remoteWindowMessageRuntime: RemoteWindowStreamMessageRuntimeLike;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
 }) {
@@ -334,6 +346,7 @@ export function updateRemoteWindowStreamQualityRuntime(options: {
   const ws = resolveRemoteWindowStreamTransport({
     sessionId: targetSessionId,
     sessions: options.sessions,
+    readSessionTransportResource: options.readSessionTransportResource,
     readSessionTransportSocket: options.readSessionTransportSocket,
   });
   options.remoteWindowMessageRuntime.sendStreamQuality(targetSessionId, {
@@ -348,6 +361,7 @@ export function stopRemoteWindowStreamRuntime(options: {
   streamId: string;
   sessions: Session[];
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
   remoteWindowMessageRuntime: RemoteWindowStreamMessageRuntimeLike;
   remoteWindowReceiverRuntime: RemoteWindowReceiverRuntimeLike;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
@@ -361,6 +375,7 @@ export function stopRemoteWindowStreamRuntime(options: {
   const ws = resolveRemoteWindowStreamTransport({
     sessionId: targetSessionId,
     sessions: options.sessions,
+    readSessionTransportResource: options.readSessionTransportResource,
     readSessionTransportSocket: options.readSessionTransportSocket,
   });
   options.remoteWindowMessageRuntime.stopStream(targetSessionId, {
@@ -376,6 +391,7 @@ export function sendRemoteWindowInputRuntime(options: {
   payload: Omit<RemoteWindowInputEventPayload, 'requestId'>;
   sessions: Session[];
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
   remoteWindowMessageRuntime: RemoteWindowStreamMessageRuntimeLike;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
 }) {
@@ -386,6 +402,7 @@ export function sendRemoteWindowInputRuntime(options: {
   const ws = resolveRemoteWindowStreamTransport({
     sessionId: targetSessionId,
     sessions: options.sessions,
+    readSessionTransportResource: options.readSessionTransportResource,
     readSessionTransportSocket: options.readSessionTransportSocket,
   });
   options.remoteWindowMessageRuntime.sendInputEvent(targetSessionId, {

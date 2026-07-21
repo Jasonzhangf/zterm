@@ -1,7 +1,9 @@
 import { getResolvedSessionName } from '../lib/connection-target';
 import { buildTransportTargetKey } from '../lib/session-transport-runtime';
+import type { SessionTerminalChannelRuntime, SessionTerminalChannelState } from '../lib/session-transport-runtime';
 import type { Host, Session, SessionScheduleState } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
+import { sendSessionMuxChannelOpenRuntime } from './session-context-transport-runtime';
 import type {
   QueueSessionTransportOpenIntent,
   QueueSessionTransportOpenIntentOptions,
@@ -184,6 +186,111 @@ export function openSessionTransportByIntentRuntime(options: {
   });
 }
 
+export function openSessionMuxChannelByIntentRuntime(options: {
+  intent: PendingSessionTransportOpenIntent;
+  readSessionTargetTerminalSocket: (sessionId: string) => BridgeTransportSocket | null;
+  isSessionTargetMuxReady: (sessionId: string) => boolean;
+  ensureSessionTerminalChannel: (
+    sessionId: string,
+    options?: { channelId?: string; now?: number; bodySubscribed?: boolean },
+  ) => SessionTerminalChannelRuntime | null;
+  updateSessionTerminalChannelState: (
+    sessionId: string,
+    state: SessionTerminalChannelState,
+  ) => SessionTerminalChannelRuntime | null;
+  readRequestedTerminalGeometry: (
+    sessionId: string,
+  ) => { cols?: number | null; rows?: number | null; widthMode?: 'adaptive-phone' | 'mirror-fixed' } | null;
+  sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+  buildTraversalSocketForHost: (host: Host, transportRole?: 'control' | 'session') => BridgeTransportSocket;
+  primeTargetTerminalTransportSocket: (sessionId: string, ws: BridgeTransportSocket) => void;
+  bindTargetMuxTransportSocketLifecycle: (options: {
+    sessionId: string;
+    host: Host;
+    ws: BridgeTransportSocket;
+    debugScope: 'connect' | 'reconnect';
+    finalizeFailure: (message: string, retryable: boolean) => void;
+  }) => void;
+  runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
+}) {
+  const { sessionId, host, debugScope, finalizeFailure } = options.intent;
+  const channel = options.ensureSessionTerminalChannel(sessionId);
+  if (!channel) {
+    finalizeFailure('terminal mux channel could not be created', true);
+    return;
+  }
+
+  const markChannelOpening = () => {
+    options.updateSessionTerminalChannelState(sessionId, 'opening');
+  };
+
+  const sendChannelOpen = (ws: BridgeTransportSocket) => {
+    sendSessionMuxChannelOpenRuntime({
+      sessionId,
+      ws,
+      channel,
+      sessionName: options.intent.resolvedSessionName,
+      host,
+      geometry: options.readRequestedTerminalGeometry(sessionId),
+      sendSocketPayload: options.sendSocketPayload,
+    });
+    options.runtimeDebug(`session.mux.${debugScope}.channel-open-sent`, {
+      sessionId,
+      channelId: channel.channelId,
+      sessionName: options.intent.resolvedSessionName,
+    });
+  };
+
+  const currentTargetSocket = options.readSessionTargetTerminalSocket(sessionId);
+  if (currentTargetSocket?.readyState === WebSocket.OPEN) {
+    if (options.isSessionTargetMuxReady(sessionId)) {
+      if (channel.state === 'open') {
+        options.runtimeDebug(`session.mux.${debugScope}.channel-reuse`, {
+          sessionId,
+          channelId: channel.channelId,
+        });
+        options.intent.onConnected(currentTargetSocket);
+        return;
+      }
+      markChannelOpening();
+      sendChannelOpen(currentTargetSocket);
+      return;
+    }
+    markChannelOpening();
+    options.runtimeDebug(`session.mux.${debugScope}.wait-ready`, {
+      sessionId,
+      channelId: channel.channelId,
+    });
+    return;
+  }
+  if (currentTargetSocket?.readyState === WebSocket.CONNECTING) {
+    markChannelOpening();
+    options.runtimeDebug(`session.mux.${debugScope}.wait-connecting`, {
+      sessionId,
+      channelId: channel.channelId,
+    });
+    return;
+  }
+
+  markChannelOpening();
+  const ws = options.buildTraversalSocketForHost(host, 'session');
+  options.primeTargetTerminalTransportSocket(sessionId, ws);
+  options.runtimeDebug(`session.mux.${debugScope}.opening`, {
+    sessionId,
+    channelId: channel.channelId,
+    host: host.bridgeHost,
+    port: host.bridgePort,
+    sessionName: getResolvedSessionName(host),
+  });
+  options.bindTargetMuxTransportSocketLifecycle({
+    sessionId,
+    host,
+    ws,
+    debugScope,
+    finalizeFailure,
+  });
+}
+
 export function queueSessionTransportOpenIntentRuntime(options: {
   intentOptions: QueueSessionTransportOpenIntentOptions;
   clearSessionHandshakeTimeout: (sessionId: string) => void;
@@ -194,6 +301,7 @@ export function queueSessionTransportOpenIntentRuntime(options: {
   }) => { shouldContinue: boolean; manualClosed: boolean } | null | undefined;
   pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, PendingSessionTransportOpenIntent>>;
   ensureControlTransportForSessionOpen: (intent: PendingSessionTransportOpenIntent) => void;
+  openSessionMuxChannelByIntent?: (intent: PendingSessionTransportOpenIntent) => void;
 }) {
   options.clearSessionHandshakeTimeout(options.intentOptions.sessionId);
   const pendingIntent = createPendingSessionTransportOpenIntent({
@@ -206,6 +314,10 @@ export function queueSessionTransportOpenIntentRuntime(options: {
   });
 
   setPendingSessionTransportOpenIntent(options.pendingSessionTransportOpenIntentsRef.current, pendingIntent);
+  if (options.openSessionMuxChannelByIntent) {
+    options.openSessionMuxChannelByIntent(pendingIntent);
+    return;
+  }
   options.ensureControlTransportForSessionOpen(pendingIntent);
 }
 

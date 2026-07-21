@@ -283,8 +283,11 @@ export function SessionProvider({
       sessionId: string,
       onProgress?: Parameters<typeof requestRemoteScreenshot>[1],
     ) => contextRuntimeRef.current.requestRemoteScreenshot(sessionId, onProgress),
-    requestRemoteWindowTargets: (sessionId: string) => (
-      contextRuntimeRef.current.requestRemoteWindowTargets(sessionId)
+    requestRemoteWindowTargets: (
+      sessionId: string,
+      options?: { forceRefresh?: boolean },
+    ) => (
+      contextRuntimeRef.current.requestRemoteWindowTargets(sessionId, options)
     ),
     requestRemoteWindowStreamStart: (...args: Parameters<typeof requestRemoteWindowStreamStart>) => (
       contextRuntimeRef.current.requestRemoteWindowStreamStart(...args)

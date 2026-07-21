@@ -1,5 +1,6 @@
 import { buildEmptyScheduleState } from '@zterm/shared';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
+import type { SessionTransportResource } from '../lib/session-transport-runtime';
 import type {
   ClientMessage,
   ScheduleJobDraft,
@@ -30,11 +31,21 @@ interface SendMessageRuntimeOptions {
   sessionId: string;
   msg: ClientMessage;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
 }
 
+function readEffectiveSessionSocket(options: {
+  sessionId: string;
+  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
+}) {
+  return options.readSessionTransportResource?.(options.sessionId).socket
+    || options.readSessionTransportSocket(options.sessionId);
+}
+
 export function sendMessageRuntime(options: SendMessageRuntimeOptions) {
-  const ws = options.readSessionTransportSocket(options.sessionId);
+  const ws = readEffectiveSessionSocket(options);
   if (ws && ws.readyState === WebSocket.OPEN) {
     options.sendSocketPayload(options.sessionId, ws, JSON.stringify(options.msg));
     return true;
@@ -46,9 +57,10 @@ export function sendMessageRawRuntime(options: {
   sessionId: string;
   msg: unknown;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
 }) {
-  const ws = options.readSessionTransportSocket(options.sessionId);
+  const ws = readEffectiveSessionSocket(options);
   if (ws && ws.readyState === WebSocket.OPEN) {
     options.sendSocketPayload(options.sessionId, ws, JSON.stringify(options.msg));
   }

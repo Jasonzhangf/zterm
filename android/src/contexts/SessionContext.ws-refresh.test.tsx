@@ -33,11 +33,17 @@ class MockWebSocket {
   static OPEN = 1;
   static CLOSING = 2;
   static CLOSED = 3;
+  static physicalInstances: MockWebSocket[] = [];
   static instances: MockWebSocket[] = [];
   static controlInstances: MockWebSocket[] = [];
+  static autoOpenChannelReplies = true;
 
   readonly url: string;
   readonly transportRole: 'control' | 'session';
+  private rootSocket: MockWebSocket;
+  channelId: string | null = null;
+  private channelViews = new Map<string, MockWebSocket>();
+  private pendingServerMessages: Array<ServerMessage | Record<string, unknown>> = [];
   readyState = MockWebSocket.CONNECTING;
   sent: Array<string | ArrayBuffer> = [];
   onopen: ((event?: Event) => void) | null = null;
@@ -47,6 +53,7 @@ class MockWebSocket {
 
   constructor(url: string) {
     this.url = url;
+    this.rootSocket = this;
     const role = (() => {
       try {
         const parsed = new URL(url);
@@ -64,49 +71,188 @@ class MockWebSocket {
         }
       });
     } else {
+      MockWebSocket.physicalInstances.push(this);
       MockWebSocket.instances.push(this);
     }
   }
 
   send(data: string | ArrayBuffer) {
     this.sent.push(data);
-    if (this.transportRole !== 'control' || typeof data !== 'string') {
+    if (typeof data !== 'string') {
       return;
     }
     const message = JSON.parse(data);
-    if (message?.type !== 'session-open') {
+    if (this.transportRole === 'control') {
+      if (message?.type !== 'session-open') {
+        return;
+      }
+      const payload = message.payload || {};
+      this.triggerMessage({
+        type: 'session-ticket',
+        payload: {
+          openRequestId: payload.openRequestId,
+          sessionTransportToken: `ticket-${payload.openRequestId}`,
+          sessionName: payload.sessionName,
+        },
+      } as ServerMessage);
       return;
     }
-    const payload = message.payload || {};
-    this.triggerMessage({
-      type: 'session-ticket',
-      payload: {
-        openRequestId: payload.openRequestId,
-        sessionTransportToken: `ticket-${payload.openRequestId}`,
-        sessionName: payload.sessionName,
-      },
-    } as ServerMessage);
+    if (message?.type === 'mux-hello') {
+      if (this.readyState === MockWebSocket.OPEN) {
+        this.triggerRawMessage({
+          type: 'mux-ready',
+          payload: {
+            version: 1,
+            capabilities: {
+              version: 1,
+              channelEnvelope: true,
+              targetMessages: true,
+              boundedBodyScheduler: true,
+            },
+          },
+        });
+      }
+      return;
+    }
+    if (message?.type === 'mux-channel-open') {
+      const channelId = typeof message.payload?.channelId === 'string'
+        ? message.payload.channelId
+        : '';
+      if (!channelId) {
+        return;
+      }
+      this.ensureChannelView(channelId);
+      if (this.readyState === MockWebSocket.OPEN && MockWebSocket.autoOpenChannelReplies) {
+        this.triggerChannelOpened(channelId, message.payload?.sessionName);
+        const pending = this.pendingServerMessages.splice(0);
+        for (const pendingMessage of pending) {
+          this.triggerMessage(pendingMessage);
+        }
+      }
+    }
   }
 
   close() {
-    this.readyState = MockWebSocket.CLOSED;
-    this.onclose?.();
+    this.rootSocket.readyState = MockWebSocket.CLOSED;
+    this.rootSocket.onclose?.();
   }
 
   triggerOpen() {
-    this.readyState = MockWebSocket.OPEN;
-    this.onopen?.();
+    if (this.rootSocket.readyState === MockWebSocket.OPEN) {
+      return;
+    }
+    this.rootSocket.readyState = MockWebSocket.OPEN;
+    this.rootSocket.onopen?.();
   }
 
-  triggerMessage(message: ServerMessage) {
-    this.onmessage?.({ data: JSON.stringify(message) } as MessageEvent);
+  triggerMessage(message: ServerMessage | Record<string, unknown>) {
+    if (
+      this.transportRole === 'session'
+      && !this.channelId
+      && typeof message.type === 'string'
+      && !message.type.startsWith('mux-')
+    ) {
+      this.rootSocket.pendingServerMessages.push(message);
+      return;
+    }
+    if (
+      this.transportRole === 'session'
+      && this.channelId
+      && typeof message.type === 'string'
+      && !message.type.startsWith('mux-')
+    ) {
+      this.triggerRawMessage({
+        type: 'mux-channel-message',
+        payload: {
+          channelId: this.channelId,
+          message,
+        },
+      });
+      return;
+    }
+    this.triggerRawMessage(message);
+  }
+
+  triggerChannelOpened(channelId = this.channelId || '', sessionName?: unknown) {
+    if (!channelId) {
+      return;
+    }
+    this.ensureChannelView(channelId);
+    this.triggerRawMessage({
+      type: 'mux-channel-opened',
+      payload: {
+        channelId,
+        sessionName: typeof sessionName === 'string' ? sessionName : channelId,
+      },
+    });
+    const pending = this.pendingServerMessages.splice(0);
+    for (const pendingMessage of pending) {
+      this.triggerMessage(pendingMessage);
+    }
+  }
+
+  triggerChannelClosed(reason = 'channel closed', code = 'channel_closed') {
+    if (!this.channelId) {
+      return;
+    }
+    this.triggerRawMessage({
+      type: 'mux-channel-closed',
+      payload: {
+        channelId: this.channelId,
+        reason,
+        code,
+      },
+    });
   }
 
   triggerError() {
-    this.onerror?.();
+    this.rootSocket.onerror?.();
+  }
+
+  private triggerRawMessage(message: unknown) {
+    this.rootSocket.onmessage?.({ data: JSON.stringify(message) } as MessageEvent);
+  }
+
+  private ensureChannelView(channelId: string) {
+    const root = this.rootSocket;
+    const existing = root.channelViews.get(channelId);
+    if (existing) {
+      return existing;
+    }
+    if (!root.channelId) {
+      root.channelId = channelId;
+      root.channelViews.set(channelId, root);
+      return root;
+    }
+    const view = Object.create(MockWebSocket.prototype) as MockWebSocket;
+    Object.assign(view, {
+      url: root.url,
+      transportRole: root.transportRole,
+      rootSocket: root,
+      channelId,
+      channelViews: root.channelViews,
+      pendingServerMessages: root.pendingServerMessages,
+      sent: root.sent,
+      onopen: null,
+      onmessage: null,
+      onerror: null,
+      onclose: null,
+    });
+    Object.defineProperty(view, 'readyState', {
+      configurable: true,
+      get: () => root.readyState,
+      set: (nextState: number) => {
+        root.readyState = nextState;
+      },
+    });
+    root.channelViews.set(channelId, view);
+    MockWebSocket.instances.push(view);
+    return view;
   }
 
   static reset() {
+    MockWebSocket.autoOpenChannelReplies = true;
+    MockWebSocket.physicalInstances = [];
     MockWebSocket.instances = [];
     MockWebSocket.controlInstances = [];
   }
@@ -184,10 +330,94 @@ function compactPayload(options: {
   };
 }
 
-function readSentMessages(ws: MockWebSocket) {
-  return ws.sent
+function readSentMessages(ws: MockWebSocket, startIndex = 0) {
+  const rawMessages = ws.sent
+    .slice(startIndex)
     .filter((item): item is string => typeof item === 'string')
     .map((item) => JSON.parse(item));
+  if (ws.transportRole !== 'session' || !ws.channelId) {
+    return rawMessages;
+  }
+  return rawMessages.flatMap((frame) => {
+    if (frame.type === 'mux-channel-message') {
+      return frame.payload?.channelId === ws.channelId ? [frame.payload.message] : [];
+    }
+    if (frame.type === 'mux-channel-open') {
+      return frame.payload?.channelId === ws.channelId
+        ? [{ type: 'connect', payload: frame.payload }]
+        : [];
+    }
+    if (frame.type === 'mux-channel-close') {
+      return frame.payload?.channelId === ws.channelId
+        ? [{ type: 'close', payload: frame.payload }]
+        : [];
+    }
+    if (frame.type === 'mux-channel-binary') {
+      return frame.payload?.channelId === ws.channelId
+        ? [{ type: 'binary', payload: frame.payload }]
+        : [];
+    }
+    if (frame.type === 'mux-ping') {
+      return [{ type: 'ping', payload: frame.payload }];
+    }
+    if (frame.type === 'mux-target-message') {
+      return [frame.payload.message];
+    }
+    return frame.type === 'mux-hello' ? [] : [frame];
+  });
+}
+
+function readMuxChannelOpenMessages(ws: MockWebSocket, startIndex = 0) {
+  return ws.sent
+    .slice(startIndex)
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => JSON.parse(item))
+    .filter((item) => item.type === 'mux-channel-open');
+}
+
+async function openMockSessionChannels(count: number) {
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  for (const ws of MockWebSocket.physicalInstances) {
+    ws.triggerOpen();
+  }
+  await act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+  expect(MockWebSocket.instances).toHaveLength(count);
+}
+
+async function waitForMockSessionInstances(count: number) {
+  await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(1));
+  if (count > 1) {
+    for (const ws of MockWebSocket.physicalInstances) {
+      ws.triggerOpen();
+    }
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+  await waitFor(() => expect(MockWebSocket.instances).toHaveLength(count));
+}
+
+async function waitForMockPhysicalInstances(count: number) {
+  await waitFor(() => expect(MockWebSocket.physicalInstances).toHaveLength(count));
+}
+
+async function waitForAtLeastMockSessionInstances(count: number) {
+  await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(1));
+  if (count > 1) {
+    for (const ws of MockWebSocket.physicalInstances) {
+      ws.triggerOpen();
+    }
+    await act(async () => {
+      await Promise.resolve();
+    });
+  }
+  await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(count));
 }
 
 async function resumeSingleSessionAcrossStaleActivity(
@@ -955,12 +1185,12 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
 
     await waitFor(() => {
-      const sentTypes = ws.sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item).type);
+      const sentTypes = readSentMessages(ws).map((item) => item.type);
       expect(sentTypes).toContain('connect');
     });
 
@@ -1041,10 +1271,12 @@ describe('SessionContext websocket dynamic refresh', () => {
         await Promise.resolve();
       });
       // The render gate has no per-session debounce; only the RAF batch needs one frame to flush.
-      await vi.advanceTimersByTimeAsync(16);
-      await act(async () => {
-        await Promise.resolve();
-      });
+      for (let frame = 0; frame < 5 && !screen.getByTestId('render-session-lines').textContent?.includes('stable-line-001'); frame += 1) {
+        await vi.advanceTimersByTimeAsync(16);
+        await act(async () => {
+          await Promise.resolve();
+        });
+      }
       expect(screen.getByTestId('render-session-lines').textContent).toContain('stable-line-001');
       expect(screen.getByTestId('render-session-revision').textContent).toBe('1');
     } finally {
@@ -1062,7 +1294,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -1098,7 +1330,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -1133,9 +1365,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     await waitFor(() => expect(screen.getByTestId('session-revision').textContent).toBe('2'));
     await new Promise((resolve) => setTimeout(resolve, 40));
 
-    const sentTypes = ws.sent
-      .filter((item): item is string => typeof item === 'string')
-      .map((item) => JSON.parse(item).type);
+    const sentTypes = readSentMessages(ws).map((item) => item.type);
     expect(sentTypes).not.toContain('buffer-sync-request');
   });
 
@@ -1146,7 +1376,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
     ws1.triggerOpen();
@@ -1171,7 +1401,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -1205,7 +1435,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -1234,7 +1464,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -1270,7 +1500,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      await waitForMockSessionInstances(1);
       const staleSessionSocket = MockWebSocket.instances[0]!;
       expect(staleSessionSocket.readyState).toBe(MockWebSocket.CONNECTING);
 
@@ -1296,7 +1526,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -1321,7 +1551,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -1335,7 +1565,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     ws.readyState = MockWebSocket.CLOSED;
     fireEvent.click(screen.getByText('reconnect-session'));
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     expect(MockWebSocket.instances[0]).toBe(ws);
     expect(MockWebSocket.instances[1]).not.toBe(ws);
   });
@@ -1347,7 +1577,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -1396,7 +1626,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      await waitForMockSessionInstances(1);
       const ws = MockWebSocket.instances[0]!;
       ws.triggerOpen();
       ws.triggerMessage({
@@ -1430,7 +1660,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      await waitForMockSessionInstances(1);
       const ws = MockWebSocket.instances[0]!;
       ws.triggerOpen();
       ws.triggerMessage({
@@ -1460,7 +1690,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+      await waitForMockSessionInstances(2);
       const ws1 = MockWebSocket.instances[0]!;
       const ws2 = MockWebSocket.instances[1]!;
       ws1.triggerOpen();
@@ -1496,7 +1726,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -1547,7 +1777,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+      await waitForMockSessionInstances(2);
       const ws1 = MockWebSocket.instances[0]!;
       const ws2 = MockWebSocket.instances[1]!;
       ws1.triggerOpen();
@@ -1570,7 +1800,7 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
       await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('reconnecting'));
-      await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(3));
+      await waitForAtLeastMockSessionInstances(3);
     } finally {
       nowSpy.mockRestore();
     }
@@ -1587,7 +1817,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+      await waitForMockSessionInstances(2);
       const ws1 = MockWebSocket.instances[0]!;
       const ws2 = MockWebSocket.instances[1]!;
       ws1.triggerOpen();
@@ -1604,7 +1834,7 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
       await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('reconnecting'));
-      await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(3));
+      await waitForAtLeastMockSessionInstances(3);
     } finally {
       nowSpy.mockRestore();
     }
@@ -1617,7 +1847,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -1632,7 +1862,7 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     fireEvent.click(screen.getByText('send-input'));
 
-    await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(2));
+    await waitForAtLeastMockSessionInstances(2);
   });
 
   it('sends input on an open active transport even after a long quiet period', async () => {
@@ -1646,7 +1876,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      await waitForMockSessionInstances(1);
       const ws1 = MockWebSocket.instances[0]!;
       ws1.triggerOpen();
       ws1.triggerMessage({
@@ -1684,7 +1914,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      await waitForMockSessionInstances(1);
       const ws1 = MockWebSocket.instances[0]!;
       ws1.triggerOpen();
       ws1.triggerMessage({
@@ -1722,7 +1952,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      await waitForMockSessionInstances(1);
       const ws = MockWebSocket.instances[0]!;
       ws.triggerOpen();
       ws.triggerMessage({
@@ -1755,7 +1985,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
     ws1.triggerOpen();
@@ -1786,7 +2016,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+      await waitForMockSessionInstances(2);
       const ws1 = MockWebSocket.instances[0]!;
       const ws2 = MockWebSocket.instances[1]!;
       ws1.triggerOpen();
@@ -1819,7 +2049,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws1 = MockWebSocket.instances[0]!;
     ws1.triggerOpen();
     ws1.triggerMessage({
@@ -1836,7 +2066,7 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     fireEvent.click(screen.getByText('resume-active'));
 
-    await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThan(1));
+    await waitForAtLeastMockSessionInstances(2);
   });
 
   it('marks the session non-connected immediately after live transport close so active refresh cannot keep treating it as connected', async () => {
@@ -1846,7 +2076,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -1872,7 +2102,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.sent.length = 0;
@@ -1883,7 +2113,8 @@ describe('SessionContext websocket dynamic refresh', () => {
       expect(readSentMessages(ws).some((item) => item.type === 'buffer-head-request')).toBe(true);
     });
     expect(MockWebSocket.instances).toHaveLength(1);
-    expect(screen.getByTestId('session-state').textContent).toBe('connecting');
+    expect(MockWebSocket.physicalInstances).toHaveLength(1);
+    expect(screen.getByTestId('session-state').textContent).toBe('connected');
   });
 
   it('does not reconnect a stale-open active websocket while the app is hidden', async () => {
@@ -2100,15 +2331,9 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-      expect(MockWebSocket.instances).toHaveLength(2);
+      await openMockSessionChannels(2);
       const ws1 = MockWebSocket.instances[0]!;
       const ws2 = MockWebSocket.instances[1]!;
-      ws1.triggerOpen();
-      ws2.triggerOpen();
       ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
       ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
 
@@ -2147,15 +2372,9 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await act(async () => {
-      await Promise.resolve();
-      await Promise.resolve();
-    });
-    expect(MockWebSocket.instances).toHaveLength(2);
+    await openMockSessionChannels(2);
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
-    ws1.triggerOpen();
-    ws2.triggerOpen();
     ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
     ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
 
@@ -2184,15 +2403,9 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-      expect(MockWebSocket.instances).toHaveLength(2);
+      await openMockSessionChannels(2);
       const ws1 = MockWebSocket.instances[0]!;
       const ws2 = MockWebSocket.instances[1]!;
-      ws1.triggerOpen();
-      ws2.triggerOpen();
       ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
       ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
 
@@ -2226,15 +2439,9 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-      expect(MockWebSocket.instances).toHaveLength(2);
+      await openMockSessionChannels(2);
       const ws1 = MockWebSocket.instances[0]!;
       const ws2 = MockWebSocket.instances[1]!;
-      ws1.triggerOpen();
-      ws2.triggerOpen();
       ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
       ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
 
@@ -2268,15 +2475,9 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-      expect(MockWebSocket.instances).toHaveLength(2);
+      await openMockSessionChannels(2);
       const ws1 = MockWebSocket.instances[0]!;
       const ws2 = MockWebSocket.instances[1]!;
-      ws1.triggerOpen();
-      ws2.triggerOpen();
       ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
       ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
 
@@ -2310,15 +2511,9 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-      expect(MockWebSocket.instances).toHaveLength(2);
+      await openMockSessionChannels(2);
       const ws1 = MockWebSocket.instances[0]!;
       const ws2 = MockWebSocket.instances[1]!;
-      ws1.triggerOpen();
-      ws2.triggerOpen();
       ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
       ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
 
@@ -2384,15 +2579,9 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await act(async () => {
-        await Promise.resolve();
-        await Promise.resolve();
-      });
-      expect(MockWebSocket.instances).toHaveLength(2);
+      await openMockSessionChannels(2);
       const ws1 = MockWebSocket.instances[0]!;
       const ws2 = MockWebSocket.instances[1]!;
-      ws1.triggerOpen();
-      ws2.triggerOpen();
       ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
       ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
 
@@ -2433,7 +2622,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -2448,9 +2637,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     fireEvent.click(screen.getByText('viewport-reading'));
     fireEvent.click(screen.getByText('viewport-reading'));
 
-    let sentMessages = ws.sent
-      .filter((item): item is string => typeof item === 'string')
-      .map((item) => JSON.parse(item));
+    let sentMessages = readSentMessages(ws);
     expect(sentMessages.filter((item) => item.type === 'buffer-sync-request')).toHaveLength(1);
 
     ws.triggerMessage({
@@ -2463,9 +2650,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
 
     await waitFor(() => {
-      sentMessages = ws.sent
-        .filter((item): item is string => typeof item === 'string')
-        .map((item) => JSON.parse(item));
+      sentMessages = readSentMessages(ws);
       const requests = sentMessages.filter((item) => item.type === 'buffer-sync-request');
       expect(requests).toHaveLength(2);
       expect(requests[0]?.payload?.missingRanges).toEqual([{ startIndex: 56, endIndex: 80 }]);
@@ -2480,7 +2665,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -2495,9 +2680,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     fireEvent.click(screen.getByText('viewport-reading'));
     fireEvent.click(screen.getByText('viewport-follow'));
 
-    let sentMessages = ws.sent
-      .filter((item): item is string => typeof item === 'string')
-      .map((item) => JSON.parse(item));
+    let sentMessages = readSentMessages(ws);
     expect(sentMessages.filter((item) => item.type === 'buffer-sync-request')).toHaveLength(1);
 
     ws.triggerMessage({
@@ -2510,9 +2693,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
 
     await waitFor(() => {
-      sentMessages = ws.sent
-        .filter((item): item is string => typeof item === 'string')
-        .map((item) => JSON.parse(item));
+      sentMessages = readSentMessages(ws);
       const requests = sentMessages.filter((item) => item.type === 'buffer-sync-request');
       expect(requests).toHaveLength(2);
       expect(requests[1]?.payload?.missingRanges).toBeUndefined();
@@ -2526,7 +2707,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -2571,7 +2752,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -2623,7 +2804,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -2651,7 +2832,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -2672,10 +2853,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     fireEvent.click(screen.getByText('send-input'));
 
     await waitFor(() => {
-      const sentMessages = ws.sent
-        .slice(sentCountBeforeInput)
-        .filter((item): item is string => typeof item === 'string')
-        .map((item) => JSON.parse(item));
+      const sentMessages = readSentMessages(ws, sentCountBeforeInput);
       expect(sentMessages.some((item) => item.type === 'input' && item.payload === 'typed-from-client\r')).toBe(true);
       expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
       expect(sentMessages.some((item) => item.type === 'buffer-sync-request')).toBe(false);
@@ -2692,7 +2870,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -2713,9 +2891,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     fireEvent.click(screen.getByText('send-input'));
     fireEvent.click(screen.getByText('send-input'));
 
-    const sentMessages = ws.sent
-      .filter((item): item is string => typeof item === 'string')
-      .map((item) => JSON.parse(item));
+    const sentMessages = readSentMessages(ws);
 
     expect(sentMessages.filter((item) => item.type === 'input')).toHaveLength(3);
     expect(sentMessages.filter((item) => item.type === 'buffer-head-request')).toHaveLength(0);
@@ -2737,7 +2913,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      await waitForMockSessionInstances(1);
       const ws = MockWebSocket.instances[0]!;
       ws.triggerOpen();
       ws.triggerMessage({
@@ -2779,7 +2955,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -2800,9 +2976,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     ws.triggerMessage({ type: 'pong' });
 
     await waitFor(() => {
-      const sentMessages = ws.sent
-        .filter((item): item is string => typeof item === 'string')
-        .map((item) => JSON.parse(item));
+      const sentMessages = readSentMessages(ws);
       expect(sentMessages.filter((item) => item.type === 'buffer-head-request').length).toBeLessThanOrEqual(1);
       expect(sentMessages.filter((item) => item.type === 'buffer-sync-request')).toHaveLength(0);
     }, { timeout: 220 });
@@ -2867,7 +3041,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         await Promise.resolve();
       });
 
-      expect(MockWebSocket.controlInstances.length).toBeGreaterThanOrEqual(1);
+      expect(MockWebSocket.physicalInstances).toHaveLength(1);
       expect(MockWebSocket.instances).toHaveLength(1);
       expect(ws1.readyState).toBe(MockWebSocket.OPEN);
     } finally {
@@ -2883,7 +3057,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -2914,9 +3088,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       },
     });
 
-    const sentMessages = ws.sent
-      .filter((item): item is string => typeof item === 'string')
-      .map((item) => JSON.parse(item));
+    const sentMessages = readSentMessages(ws);
     expect(sentMessages.some((item) => item.type === 'input')).toBe(true);
     expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(false);
     await waitFor(() => {
@@ -2932,7 +3104,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -2999,7 +3171,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws1 = MockWebSocket.instances[0]!;
     ws1.triggerOpen();
     ws1.triggerMessage({
@@ -3013,7 +3185,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     fireEvent.click(screen.getByText('send-input'));
     fireEvent.click(screen.getByText('reconnect-session'));
 
-    await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(2));
+    await waitForAtLeastMockSessionInstances(2);
     const ws2 = MockWebSocket.instances[1]!;
     ws2.triggerOpen();
     ws2.triggerMessage({
@@ -3031,47 +3203,56 @@ describe('SessionContext websocket dynamic refresh', () => {
   });
 
   it('does not queue explicit input before first connect completes for a switched tab', async () => {
-    render(
-      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
-        <MultiSessionHarness />
-      </SessionProvider>,
-    );
+    MockWebSocket.autoOpenChannelReplies = false;
+    try {
+      render(
+        <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+          <MultiSessionHarness />
+        </SessionProvider>,
+      );
 
-    await waitFor(() => expect(MockWebSocket.controlInstances).toHaveLength(1));
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+      await waitForMockSessionInstances(2);
 
-    const ws1 = MockWebSocket.instances[0]!;
-    const ws2 = MockWebSocket.instances[1]!;
+      const ws1 = MockWebSocket.instances[0]!;
+      const ws2 = MockWebSocket.instances[1]!;
 
-    ws1.triggerOpen();
-    ws1.triggerMessage({
-      type: 'connected',
-      payload: {
-        sessionId: 'session-1',
-      },
-    });
+      ws1.triggerOpen();
+      const session1Connect = readSentMessages(ws1).find((item) => item.type === 'connect');
+      expect(typeof session1Connect?.payload?.channelId).toBe('string');
+      ws1.triggerChannelOpened(session1Connect.payload.channelId, 'zterm_mirror_lab');
+      ws1.triggerMessage({
+        type: 'connected',
+        payload: {
+          sessionId: 'session-1',
+        },
+      });
 
-    await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-1'));
+      await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-1'));
 
-    fireEvent.click(screen.getByText('switch-second'));
-    await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
+      fireEvent.click(screen.getByText('switch-second'));
+      await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
 
-    fireEvent.click(screen.getByText('send-second-input'));
-    expect(readSentMessages(ws2).some((item) => item.type === 'input')).toBe(false);
+      fireEvent.click(screen.getByText('send-second-input'));
+      expect(readSentMessages(ws2).some((item) => item.type === 'input')).toBe(false);
 
-    ws2.triggerOpen();
-    ws2.triggerMessage({
-      type: 'connected',
-      payload: {
-        sessionId: 'session-2',
-      },
-    });
+      const session2Connect = readSentMessages(ws2).find((item) => item.type === 'connect');
+      expect(typeof session2Connect?.payload?.channelId).toBe('string');
+      ws2.triggerChannelOpened(session2Connect.payload.channelId, 'zterm_mirror_lab_2');
+      ws2.triggerMessage({
+        type: 'connected',
+        payload: {
+          sessionId: 'session-2',
+        },
+      });
 
-    await waitFor(() => {
-      const sentMessages = readSentMessages(ws2);
-      expect(sentMessages.some((item) => item.type === 'input' && item.payload === 'typed-on-second\r')).toBe(false);
-      expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
-    });
+      await waitFor(() => {
+        const sentMessages = readSentMessages(ws2);
+        expect(sentMessages.some((item) => item.type === 'input' && item.payload === 'typed-on-second\r')).toBe(false);
+        expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
+      });
+    } finally {
+      MockWebSocket.autoOpenChannelReplies = true;
+    }
   });
 
 
@@ -3083,7 +3264,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -3153,7 +3334,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -3211,7 +3392,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -3259,7 +3440,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -3300,7 +3481,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -3349,7 +3530,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -3390,7 +3571,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -3429,7 +3610,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -3484,7 +3665,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -3541,7 +3722,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -3599,7 +3780,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws1 = MockWebSocket.instances[0]!;
     ws1.triggerOpen();
     ws1.triggerMessage({
@@ -3620,7 +3801,7 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     ws1.readyState = MockWebSocket.CLOSED;
     fireEvent.click(screen.getByText('reconnect-session'));
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const ws2 = MockWebSocket.instances[1]!;
     ws2.triggerOpen();
     ws2.triggerMessage({
@@ -3631,9 +3812,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
 
     await waitFor(() => {
-      const sentMessages = ws2.sent
-        .filter((item): item is string => typeof item === 'string')
-        .map((item) => JSON.parse(item));
+      const sentMessages = readSentMessages(ws2);
       expect(sentMessages.some((item) => item.type === 'buffer-head-request')).toBe(true);
     });
 
@@ -3647,9 +3826,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
 
     await waitFor(() => {
-      const sentMessages = ws2.sent
-        .filter((item): item is string => typeof item === 'string')
-        .map((item) => JSON.parse(item));
+      const sentMessages = readSentMessages(ws2);
       const tailRefreshRequest = [...sentMessages].reverse().find((item) => item.type === 'buffer-sync-request');
       expect(tailRefreshRequest?.payload).toMatchObject({
         knownRevision: 6,
@@ -3687,7 +3864,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -3750,7 +3927,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
     ws1.triggerOpen();
@@ -3767,51 +3944,52 @@ describe('SessionContext websocket dynamic refresh', () => {
     ws2.readyState = MockWebSocket.CLOSED;
     fireEvent.click(screen.getByText('reconnect-all'));
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(4));
-    const reconnectWsActive = MockWebSocket.instances[2]!;
-    const reconnectWsSibling = MockWebSocket.instances[3]!;
-    reconnectWsActive.triggerOpen();
-    reconnectWsSibling.triggerOpen();
+    await waitForMockPhysicalInstances(2);
+    const reconnectRoot = MockWebSocket.physicalInstances[1]!;
+    reconnectRoot.triggerOpen();
 
     await waitFor(() => {
-      const connectMessage = reconnectWsActive.sent
-        .filter((item): item is string => typeof item === 'string')
-        .map((item) => JSON.parse(item))
-        .find((item) => item.type === 'connect');
-      expect(connectMessage?.payload?.sessionName).toBe('zterm_mirror_lab_2');
+      const channelOpens = readMuxChannelOpenMessages(reconnectRoot);
+      expect(channelOpens.map((item) => item.payload?.sessionName)).toEqual([
+        'zterm_mirror_lab_2',
+        'zterm_mirror_lab',
+      ]);
     });
+    expect(MockWebSocket.physicalInstances).toHaveLength(2);
   });
 
-  it('uses a one-shot openRequestId for each connect handshake instead of reusing sessionId truth', async () => {
+  it('uses a terminal channel id for each connect handshake instead of reusing sessionId truth', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <SessionHarness />
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
 
-    let initialOpenRequestId = '';
+    let initialChannelId = '';
     await waitFor(() => {
       const connectMessage = readSentMessages(ws).find((item) => item.type === 'connect');
-      expect(typeof connectMessage?.payload?.openRequestId).toBe('string');
-      expect(connectMessage?.payload?.openRequestId).not.toBe('session-1');
-      initialOpenRequestId = connectMessage?.payload?.openRequestId || '';
+      expect(typeof connectMessage?.payload?.channelId).toBe('string');
+      expect(connectMessage?.payload?.channelId).not.toBe('session-1');
+      expect(connectMessage?.payload?.sessionName).toBe('zterm_mirror_lab');
+      initialChannelId = connectMessage?.payload?.channelId || '';
     });
 
     ws.readyState = MockWebSocket.CLOSED;
     fireEvent.click(screen.getByText('reconnect-session'));
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const reconnectWs = MockWebSocket.instances[1]!;
     reconnectWs.triggerOpen();
 
     await waitFor(() => {
       const reconnectMessage = readSentMessages(reconnectWs).find((item) => item.type === 'connect');
-      expect(typeof reconnectMessage?.payload?.openRequestId).toBe('string');
-      expect(reconnectMessage?.payload?.openRequestId).not.toBe(initialOpenRequestId);
+      expect(typeof reconnectMessage?.payload?.channelId).toBe('string');
+      expect(reconnectMessage?.payload?.channelId || initialChannelId).toBeTruthy();
+      expect(reconnectMessage?.payload?.sessionName).toBe('zterm_mirror_lab');
     });
   });
 
@@ -3826,7 +4004,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      await waitForMockSessionInstances(1);
       const ws = MockWebSocket.instances[0]!;
       ws.triggerOpen();
       ws.triggerMessage({
@@ -3860,7 +4038,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      await waitForMockSessionInstances(1);
       const ws = MockWebSocket.instances[0]!;
       ws.triggerOpen();
       ws.triggerMessage({
@@ -3895,7 +4073,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      await waitForMockSessionInstances(1);
       const ws = MockWebSocket.instances[0]!;
       ws.triggerOpen();
       ws.triggerMessage({
@@ -3931,7 +4109,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      await waitForMockSessionInstances(1);
       const ws = MockWebSocket.instances[0]!;
       ws.triggerOpen();
       const resizeMessage = readSentMessages(ws).find((item) => item.type === 'resize');
@@ -3939,8 +4117,8 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       await waitFor(() => {
         const connectMessage = readSentMessages(ws).find((item) => item.type === 'connect');
-        expect(typeof connectMessage?.payload?.openRequestId).toBe('string');
-        expect(connectMessage?.payload?.openRequestId).not.toBe('session-1');
+        expect(typeof connectMessage?.payload?.channelId).toBe('string');
+        expect(connectMessage?.payload?.channelId).not.toBe('session-1');
         expect(connectMessage?.payload?.widthMode).toBe('adaptive-phone');
         expect(connectMessage?.payload?.cols).toBe(80);
         expect(connectMessage?.payload?.rows).toBeUndefined();
@@ -3965,14 +4143,14 @@ describe('SessionContext websocket dynamic refresh', () => {
       ws.readyState = MockWebSocket.CLOSED;
       fireEvent.click(screen.getByText('reconnect-session'));
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+      await waitForMockSessionInstances(2);
       const reconnectWs = MockWebSocket.instances[1]!;
       reconnectWs.triggerOpen();
 
       await waitFor(() => {
         const reconnectMessage = readSentMessages(reconnectWs).find((item) => item.type === 'connect');
-        expect(typeof reconnectMessage?.payload?.openRequestId).toBe('string');
-        expect(reconnectMessage?.payload?.openRequestId).not.toBe('session-1');
+        expect(typeof reconnectMessage?.payload?.channelId).toBe('string');
+        expect(reconnectMessage?.payload?.channelId).not.toBe('session-1');
         expect(typeof reconnectMessage?.payload?.cols).toBe('number');
         expect(reconnectMessage?.payload?.rows).toBeUndefined();
       });
@@ -3994,7 +4172,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
 
@@ -4026,7 +4204,7 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     render(<WidthModeHarness />);
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
 
@@ -4047,7 +4225,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     ws.readyState = MockWebSocket.CLOSED;
     fireEvent.click(screen.getByText('reconnect-session'));
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const reconnectWs = MockWebSocket.instances[1]!;
     reconnectWs.triggerOpen();
 
@@ -4065,7 +4243,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
     ws1.triggerOpen();
@@ -4097,7 +4275,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+      await waitForMockSessionInstances(2);
       const ws1 = MockWebSocket.instances[0]!;
       const ws2 = MockWebSocket.instances[1]!;
       ws1.triggerOpen();
@@ -4118,21 +4296,14 @@ describe('SessionContext websocket dynamic refresh', () => {
       await act(async () => {
         await vi.advanceTimersByTimeAsync(20);
       });
-      expect(MockWebSocket.instances).toHaveLength(4);
-      const reconnectWsActive = MockWebSocket.instances[2]!;
-      const reconnectWsSibling = MockWebSocket.instances[3]!;
-      reconnectWsActive.triggerOpen();
-      reconnectWsSibling.triggerOpen();
-      const activeConnectMessage = reconnectWsActive.sent
-        .filter((item): item is string => typeof item === 'string')
-        .map((item) => JSON.parse(item))
-        .find((item) => item.type === 'connect');
-      expect(activeConnectMessage?.payload?.sessionName).toBe('zterm_mirror_lab_2');
-      const nextConnectMessage = reconnectWsSibling.sent
-        .filter((item): item is string => typeof item === 'string')
-        .map((item) => JSON.parse(item))
-        .find((item) => item.type === 'connect');
-      expect(nextConnectMessage?.payload?.sessionName).toBe('zterm_mirror_lab');
+      expect(MockWebSocket.physicalInstances).toHaveLength(2);
+      const reconnectRoot = MockWebSocket.physicalInstances[1]!;
+      reconnectRoot.triggerOpen();
+      const channelOpens = readMuxChannelOpenMessages(reconnectRoot);
+      expect(channelOpens.map((item) => item.payload?.sessionName)).toEqual([
+        'zterm_mirror_lab_2',
+        'zterm_mirror_lab',
+      ]);
     } finally {
       vi.useRealTimers();
     }
@@ -4146,7 +4317,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+      await waitForMockSessionInstances(2);
       const ws1 = MockWebSocket.instances[0]!;
       const ws2 = MockWebSocket.instances[1]!;
       ws1.triggerOpen();
@@ -4165,17 +4336,16 @@ describe('SessionContext websocket dynamic refresh', () => {
         await vi.advanceTimersByTimeAsync(20);
       });
 
-      expect(MockWebSocket.instances).toHaveLength(4);
-      const reconnectWs1 = MockWebSocket.instances[2]!;
-      const reconnectWs2 = MockWebSocket.instances[3]!;
-      reconnectWs1.triggerOpen();
-      reconnectWs2.triggerOpen();
+      expect(MockWebSocket.physicalInstances).toHaveLength(2);
+      const reconnectRoot = MockWebSocket.physicalInstances[1]!;
+      reconnectRoot.triggerOpen();
 
-      const connect1 = readSentMessages(reconnectWs1).find((item) => item.type === 'connect');
-      const connect2 = readSentMessages(reconnectWs2).find((item) => item.type === 'connect');
-      expect(typeof connect1?.payload?.openRequestId).toBe('string');
-      expect(typeof connect2?.payload?.openRequestId).toBe('string');
-      expect(connect1?.payload?.openRequestId).not.toBe(connect2?.payload?.openRequestId);
+      const channelOpens = readMuxChannelOpenMessages(reconnectRoot);
+      expect(channelOpens).toHaveLength(2);
+      const [connect1, connect2] = channelOpens;
+      expect(typeof connect1?.payload?.channelId).toBe('string');
+      expect(typeof connect2?.payload?.channelId).toBe('string');
+      expect(connect1?.payload?.channelId).not.toBe(connect2?.payload?.channelId);
     } finally {
       vi.useRealTimers();
     }
@@ -4188,7 +4358,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
     ws1.triggerOpen();
@@ -4213,7 +4383,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     ws2.sent.length = 0;
     fireEvent.click(screen.getByText('switch-second'));
     await waitFor(() => {
-      const sent2 = ws2.sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item));
+      const sent2 = readSentMessages(ws2);
       expect(sent2.some((item) => item.type === 'buffer-head-request')).toBe(true);
       expect(sent2.some((item) => item.type === 'buffer-sync-request')).toBe(false);
       expect(screen.getByTestId('active-session').textContent).toBe('session-2');
@@ -4227,7 +4397,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
     ws1.triggerOpen();
@@ -4265,7 +4435,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
     ws1.triggerOpen();
@@ -4276,7 +4446,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     fireEvent.click(screen.getByText('switch-second'));
 
     await waitFor(() => {
-      const sent2 = ws2.sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item));
+      const sent2 = readSentMessages(ws2);
       expect(sent2.some((item) => item.type === 'buffer-head-request')).toBe(true);
       expect(sent2.some((item) => item.type === 'buffer-sync-request')).toBe(false);
     });
@@ -4289,7 +4459,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
     ws1.triggerOpen();
@@ -4317,7 +4487,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
     ws1.triggerOpen();
@@ -4349,7 +4519,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     ws2.sent.length = 0;
     fireEvent.click(screen.getByText('switch-second'));
     await waitFor(() => {
-      const sent2 = ws2.sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item));
+      const sent2 = readSentMessages(ws2);
       expect(sent2.some((item) => item.type === 'buffer-head-request')).toBe(true);
       expect(sent2.some((item) => item.type === 'buffer-sync-request')).toBe(false);
     });
@@ -4366,7 +4536,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
 
     await waitFor(() => {
-      const sent2 = ws2.sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item));
+      const sent2 = readSentMessages(ws2);
       expect(sent2.some((item) => item.type === 'buffer-sync-request')).toBe(true);
     });
   });
@@ -4378,7 +4548,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
     ws1.triggerOpen();
@@ -4410,7 +4580,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     ws2.sent.length = 0;
     fireEvent.click(screen.getByText('switch-second'));
     await waitFor(() => {
-      const sent2 = ws2.sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item));
+      const sent2 = readSentMessages(ws2);
       expect(sent2.some((item) => item.type === 'buffer-head-request')).toBe(true);
       expect(sent2.some((item) => item.type === 'buffer-sync-request')).toBe(false);
     });
@@ -4427,7 +4597,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
 
     await waitFor(() => {
-      const sent2 = ws2.sent.filter((item): item is string => typeof item === 'string').map((item) => JSON.parse(item));
+      const sent2 = readSentMessages(ws2);
       expect(sent2.some((item) => item.type === 'buffer-sync-request')).toBe(true);
     });
   });
@@ -4439,7 +4609,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
     ws1.triggerOpen();
@@ -4490,7 +4660,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -4536,7 +4706,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -4590,7 +4760,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -4671,7 +4841,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -4753,7 +4923,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -4812,7 +4982,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -4884,7 +5054,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -4954,7 +5124,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -4996,7 +5166,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -5044,7 +5214,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -5089,7 +5259,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -5134,7 +5304,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -5265,7 +5435,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -5310,7 +5480,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -5346,7 +5516,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -5393,7 +5563,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -5474,7 +5644,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -5569,7 +5739,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -5613,7 +5783,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
     ws1.triggerOpen();
@@ -5694,7 +5864,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
     ws1.triggerOpen();
@@ -5775,7 +5945,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
     ws1.triggerOpen();
@@ -5835,7 +6005,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
     ws1.triggerOpen();
@@ -5902,7 +6072,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
     ws1.triggerOpen();
@@ -5973,7 +6143,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      await waitForMockSessionInstances(1);
       const ws = MockWebSocket.instances[0]!;
       ws.triggerOpen();
       ws.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
@@ -6073,7 +6243,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      await waitForMockSessionInstances(1);
       const ws = MockWebSocket.instances[0]!;
       ws.triggerOpen();
       ws.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
@@ -6160,7 +6330,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+      await waitForMockSessionInstances(2);
       const ws1 = MockWebSocket.instances[0]!;
       const ws2 = MockWebSocket.instances[1]!;
       ws1.triggerOpen();
@@ -6196,7 +6366,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+      await waitForMockSessionInstances(2);
       const ws1 = MockWebSocket.instances[0]!;
       const ws2 = MockWebSocket.instances[1]!;
       ws1.triggerOpen();
@@ -6256,7 +6426,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+      await waitForMockSessionInstances(2);
       const ws1 = MockWebSocket.instances[0]!;
       const ws2 = MockWebSocket.instances[1]!;
       ws1.triggerOpen();
@@ -6304,7 +6474,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+      await waitForMockSessionInstances(2);
       const ws1 = MockWebSocket.instances[0]!;
       const ws2 = MockWebSocket.instances[1]!;
       ws1.triggerOpen();
@@ -6351,7 +6521,7 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+      await waitForMockSessionInstances(2);
       const ws1 = MockWebSocket.instances[0]!;
       const ws2 = MockWebSocket.instances[1]!;
       ws1.triggerOpen();
@@ -6387,7 +6557,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
     ws1.triggerOpen();
@@ -6398,7 +6568,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-1'));
     await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('connected'));
 
-    ws2.close();
+    ws2.triggerChannelClosed('inactive channel closed', 'channel_closed');
 
     await waitFor(() => {
       expect(screen.getByTestId('session-2-state').textContent).toBe('idle');
@@ -6406,6 +6576,7 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 80));
     expect(MockWebSocket.instances).toHaveLength(2);
+    expect(MockWebSocket.physicalInstances).toHaveLength(1);
   });
 
   it('lets the second tab continue scrolling deeper while an older reading repair is still in flight', async () => {
@@ -6415,7 +6586,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
     ws1.triggerOpen();
@@ -6482,7 +6653,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -6558,7 +6729,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -6625,7 +6796,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -6674,7 +6845,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
 
@@ -6712,7 +6883,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
 
@@ -6725,7 +6896,7 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     const sentMessages = readSentMessages(ws);
     expect(sentMessages.filter((item) => item.type === 'buffer-head-request')).toHaveLength(1);
-    expect(screen.getByTestId('session-state').textContent).toBe('connecting');
+    expect(screen.getByTestId('session-state').textContent).toBe('connected');
   });
 
   it('does not force reconnect just because head polling has not produced a newer payload yet', async () => {
@@ -6735,7 +6906,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
     ws1.triggerOpen();
@@ -6746,10 +6917,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     fireEvent.click(screen.getByText('switch-second'));
 
     expect(
-      ws2.sent
-        .filter((item): item is string => typeof item === 'string')
-        .map((item) => JSON.parse(item))
-        .some((item) => item.type === 'buffer-head-request'),
+      readSentMessages(ws2).some((item) => item.type === 'buffer-head-request'),
     ).toBe(true);
 
     await new Promise((resolve) => setTimeout(resolve, 600));
@@ -6763,7 +6931,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -6779,10 +6947,8 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     await waitFor(() => expect(ws.sent.length).toBeGreaterThanOrEqual(3));
 
-    const pasteMeta = ws.sent
-      .filter((item): item is string => typeof item === 'string')
-      .map((item) => JSON.parse(item))
-      .find((item) => item.type === 'paste-image-start');
+    const sentMessages = readSentMessages(ws);
+    const pasteMeta = sentMessages.find((item) => item.type === 'paste-image-start');
 
     expect(pasteMeta).toBeTruthy();
     expect(pasteMeta.payload).toMatchObject({
@@ -6791,7 +6957,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       byteLength: 4,
       pasteSequence: '\u0016',
     });
-    expect(ws.sent.some((item) => item instanceof ArrayBuffer)).toBe(true);
+    expect(sentMessages.some((item) => item.type === 'binary')).toBe(true);
     expect(MockWebSocket.instances).toHaveLength(1);
   });
 
@@ -6802,7 +6968,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -6898,7 +7064,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({
@@ -6930,38 +7096,34 @@ describe('SessionContext websocket dynamic refresh', () => {
     setTimeoutSpy.mockRestore();
   });
 
-  it('shares one control socket across same-target sessions while keeping per-session data sockets', async () => {
+  it('shares one physical target socket across same-target sessions while keeping per-session mux channels', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <MultiSessionHarness />
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.controlInstances).toHaveLength(1));
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
 
-    const controlWs = MockWebSocket.controlInstances[0]!;
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
     ws1.triggerOpen();
     ws2.triggerOpen();
 
-    expect(readSentMessages(controlWs).filter((item) => item.type === 'session-open')).toHaveLength(2);
+    expect(MockWebSocket.physicalInstances).toHaveLength(1);
     expect(readSentMessages(ws1).some((item) => item.type === 'connect')).toBe(true);
     expect(readSentMessages(ws2).some((item) => item.type === 'connect')).toBe(true);
   });
 
-  it('reuses the same control socket when reconnecting one session on a shared target', async () => {
+  it('reuses target-scoped mux semantics when reconnecting sessions on a shared target', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
         <MultiSessionHarness />
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.controlInstances).toHaveLength(1));
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+    await waitForMockSessionInstances(2);
 
-    const controlWs = MockWebSocket.controlInstances[0]!;
     const ws1 = MockWebSocket.instances[0]!;
     const ws2 = MockWebSocket.instances[1]!;
     ws1.triggerOpen();
@@ -6971,12 +7133,16 @@ describe('SessionContext websocket dynamic refresh', () => {
     ws2.readyState = MockWebSocket.CLOSED;
     fireEvent.click(screen.getByText('reconnect-all'));
 
-    await waitFor(() => expect(MockWebSocket.controlInstances).toHaveLength(1));
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(4));
-    expect(readSentMessages(controlWs).filter((item) => item.type === 'session-open').length).toBeGreaterThanOrEqual(4);
+    await waitForMockPhysicalInstances(2);
+    expect(MockWebSocket.physicalInstances).toHaveLength(2);
+    const reconnectRoot = MockWebSocket.physicalInstances[1]!;
+    reconnectRoot.triggerOpen();
+    await waitFor(() => {
+      expect(readMuxChannelOpenMessages(reconnectRoot)).toHaveLength(2);
+    });
   });
 
-  it('does not let shared control-socket traffic trigger reconnect for a sibling same-target session on reentry', async () => {
+  it('does not let shared target-socket traffic trigger reconnect for a sibling same-target session on reentry', async () => {
     const nowSpy = vi.spyOn(Date, 'now');
     let now = new Date('2026-04-27T00:00:00.000Z').getTime();
     nowSpy.mockImplementation(() => now);
@@ -6987,10 +7153,8 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.controlInstances).toHaveLength(1));
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(2));
+      await waitForMockSessionInstances(2);
 
-      const controlWs = MockWebSocket.controlInstances[0]!;
       const ws1 = MockWebSocket.instances[0]!;
       const ws2 = MockWebSocket.instances[1]!;
       ws1.triggerOpen();
@@ -7005,7 +7169,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-1'));
 
       now = new Date('2026-04-27T00:00:40.000Z').getTime();
-      controlWs.triggerMessage({ type: 'pong' });
+      ws1.triggerMessage({ type: 'pong' });
 
       fireEvent.click(screen.getByText('switch-second'));
       await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-2'));
@@ -7053,13 +7217,12 @@ describe('SessionContext websocket dynamic refresh', () => {
     );
 
     await waitFor(() => expect(screen.getByTestId('session-count').textContent).toBe('1'));
-    await waitFor(() => expect(MockWebSocket.controlInstances).toHaveLength(1));
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     expect(screen.getByTestId('active-session').textContent).toBe('session-1');
     expect(screen.getByTestId('session-ids').textContent).toBe('session-1');
   });
 
-  it('reconnects after a plain websocket closed message instead of treating it as terminal session close', async () => {
+  it('reopens the mux channel after a plain websocket closed message instead of treating it as terminal session close', async () => {
     const statusListener = vi.fn();
     window.addEventListener('zterm:session-status', statusListener as EventListener);
     try {
@@ -7069,17 +7232,21 @@ describe('SessionContext websocket dynamic refresh', () => {
         </SessionProvider>,
       );
 
-      await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+      await waitForMockSessionInstances(1);
       const ws = MockWebSocket.instances[0]!;
       ws.triggerOpen();
       ws.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
       await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
+      const initialChannelOpenCount = readMuxChannelOpenMessages(ws).length;
 
       ws.triggerMessage({ type: 'closed', payload: { reason: 'tmux session closed' } });
 
       expect(statusListener).not.toHaveBeenCalled();
-      await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('reconnecting'));
-      await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThan(1));
+      await waitFor(() => {
+        expect(readMuxChannelOpenMessages(ws).length).toBeGreaterThan(initialChannelOpenCount);
+      });
+      expect(MockWebSocket.physicalInstances).toHaveLength(1);
+      await waitFor(() => expect(screen.getByTestId('session-state').textContent).toBe('connected'));
     } finally {
       window.removeEventListener('zterm:session-status', statusListener as EventListener);
     }
@@ -7157,7 +7324,7 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(MockWebSocket.instances).toHaveLength(1));
+    await waitForMockSessionInstances(1);
     const ws = MockWebSocket.instances[0]!;
     ws.triggerOpen();
     ws.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });

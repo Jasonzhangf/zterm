@@ -145,6 +145,26 @@
         {
           "id": "RenderGate",
           "label": "src/lib/session-render-gate.ts"
+        },
+        {
+          "id": "TargetTransportRuntime",
+          "label": "src/lib/session-transport-runtime.ts#target transport runtime"
+        },
+        {
+          "id": "MuxHandshake",
+          "label": "packages/shared/src/connection/protocol.ts#TerminalMuxClientFrame"
+        },
+        {
+          "id": "ChannelRuntime",
+          "label": "src/lib/session-transport-runtime.ts#terminal channel runtime"
+        },
+        {
+          "id": "ChannelMessageSend",
+          "label": "src/contexts/session-context-transport-wire-runtime.ts#mux channel send"
+        },
+        {
+          "id": "ChannelDemux",
+          "label": "src/contexts/session-context-socket-message-runtime.ts#mux channel demux"
         }
       ],
       "edges": [
@@ -347,14 +367,17 @@
           "from": "SessionContext",
           "to": "SocketMessage",
           "owner_feature": "terminal.transport_lifecycle",
-          "semantic_input": "physical session transport server frame",
-          "semantic_output": "typed server message dispatch",
+          "semantic_input": "daemon-target physical transport server frame after channel demux compatibility boundary",
+          "semantic_output": "typed server message dispatch through owning terminal channel",
           "status": "anchored",
           "edge_id": "android_mainline:SessionContext->SocketMessage",
           "resource_from": "resource.session_transport",
           "resource_to": "resource.transport_subscriber",
-          "via_resources": [],
-          "relation_status": "direct"
+          "via_resources": [
+            "resource.daemon_target_transport",
+            "resource.terminal_channel"
+          ],
+          "relation_status": "via"
         },
         {
           "from": "SocketMessage",
@@ -515,7 +538,7 @@
           "to": "RemoteWindowOverlay",
           "owner_feature": "desktop.remote_window_stream",
           "semantic_input": "active session id plus remote-window catalog/start/stop/input callbacks",
-          "semantic_output": "picker, stream setup, floating/fullscreen video overlay, source-aspect floating resize, fullscreen button, aspect-fit/aspect-fill display mode projection, IME bottom-inset fullscreen padding plus auto lift, Back/minimize projection, zoom/pan/minimap projection where local single-finger pan is only enabled after fullscreen zoom, unzoomed remote pointer/scroll input context, separate QuickBar/body suppression state, active remote-window input context, and close intent",
+          "semantic_output": "picker, stream setup, floating/fullscreen video overlay, source-aspect pre-start and daemon-frame-aspect post-start projection, floating resize, fullscreen button, aspect-fit/aspect-fill display mode projection, IME bottom-inset fullscreen padding plus auto lift, Back/minimize projection, zoom/pan/minimap projection where local single-finger pan is only enabled after fullscreen zoom, unzoomed remote pointer/gesture/wheel input context, separate QuickBar/body suppression state, active remote-window input context, and close intent",
           "status": "anchored",
           "edge_id": "android_mainline:TerminalPage->RemoteWindowOverlay",
           "resource_from": "resource.ui_projection",
@@ -572,8 +595,8 @@
           "from": "RemoteWindowOverlay",
           "to": "RemoteWindowInputRuntime",
           "owner_feature": "desktop.remote_window_stream",
-          "semantic_input": "aspect-fit, aspect-fill, unzoomed touch pointer/scroll, or zoomed local-pan video-surface event plus selected stream target",
-          "semantic_output": "normalized remote-window-input payload against daemon manifest crop for unzoomed pointer/scroll events, sent over existing session transport; zoomed fullscreen pan remains local overlay projection",
+          "semantic_input": "aspect-fit, aspect-fill, unzoomed touch pointer/gesture, wheel scroll, or zoomed local-pan video-surface event plus selected stream target",
+          "semantic_output": "normalized remote-window-input payload against daemon manifest crop for unzoomed pointer, recognized gesture/swipe, and wheel scroll events, sent over existing session transport; zoomed fullscreen pan remains local overlay projection",
           "status": "anchored",
           "edge_id": "android_mainline:RemoteWindowOverlay->RemoteWindowInputRuntime",
           "resource_from": "resource.remote_window_overlay",
@@ -723,6 +746,128 @@
           "resource_to": "resource.renderer_window",
           "via_resources": [],
           "relation_status": "direct"
+        },
+        {
+          "from": "TransportOpen",
+          "to": "TargetTransportRuntime",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "open intent for a daemon target",
+          "semantic_output": "one physical daemon-target transport runtime, reused across local sessions",
+          "status": "binding pending",
+          "resource_from": "resource.session_transport",
+          "resource_to": "resource.daemon_target_transport",
+          "via_resources": [],
+          "relation_status": "direct",
+          "edge_id": "android_mainline:TransportOpen->TargetTransportRuntime"
+        },
+        {
+          "from": "TargetTransportRuntime",
+          "to": "MuxHandshake",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "fresh physical target transport",
+          "semantic_output": "multiplex capability negotiation or explicit daemon-upgrade-required error",
+          "status": "binding pending",
+          "resource_from": "resource.daemon_target_transport",
+          "resource_to": "resource.daemon_target_transport",
+          "via_resources": [],
+          "relation_status": "binding pending",
+          "edge_id": "android_mainline:TargetTransportRuntime->MuxHandshake"
+        },
+        {
+          "from": "TargetTransportRuntime",
+          "to": "ChannelRuntime",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "opened target transport plus local session identity",
+          "semantic_output": "transport-local terminal channel identity",
+          "status": "binding pending",
+          "resource_from": "resource.daemon_target_transport",
+          "resource_to": "resource.terminal_channel",
+          "via_resources": [],
+          "relation_status": "direct",
+          "edge_id": "android_mainline:TargetTransportRuntime->ChannelRuntime"
+        },
+        {
+          "from": "ChannelRuntime",
+          "to": "ChannelMessageSend",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "session-bound input, buffer, file, schedule, screenshot, or remote-window intent",
+          "semantic_output": "mux-channel-message frame carrying channelId envelope",
+          "status": "binding pending",
+          "resource_from": "resource.terminal_channel",
+          "resource_to": "resource.transport_subscriber",
+          "via_resources": [
+            "resource.daemon_target_transport"
+          ],
+          "relation_status": "binding pending",
+          "edge_id": "android_mainline:ChannelRuntime->ChannelMessageSend"
+        },
+        {
+          "from": "SocketMessage",
+          "to": "ChannelDemux",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "mux server frame from daemon-target transport",
+          "semantic_output": "validated channel-bound server message or explicit channel mismatch rejection",
+          "status": "binding pending",
+          "resource_from": "resource.daemon_target_transport",
+          "resource_to": "resource.terminal_channel",
+          "via_resources": [],
+          "relation_status": "direct",
+          "edge_id": "android_mainline:SocketMessage->ChannelDemux"
+        },
+        {
+          "from": "ChannelDemux",
+          "to": "BufferApply",
+          "owner_feature": "terminal.buffer_render",
+          "semantic_input": "accepted channel-bound buffer/head message",
+          "semantic_output": "absolute sparse buffer update for the owning local session only",
+          "status": "binding pending",
+          "resource_from": "resource.terminal_channel",
+          "resource_to": "resource.client_sparse_buffer",
+          "via_resources": [
+            "resource.transport_subscriber",
+            "resource.mirror_store"
+          ],
+          "relation_status": "via",
+          "edge_id": "android_mainline:ChannelDemux->BufferApply"
+        },
+        {
+          "from": "TraversalSocket",
+          "to": "TargetTransportRuntime",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "opened traversal socket with route diagnostics and optional relay resume token",
+          "semantic_output": "physical daemon-target transport state",
+          "status": "binding pending",
+          "resource_from": "resource.transport_target",
+          "resource_to": "resource.daemon_target_transport",
+          "via_resources": [],
+          "relation_status": "binding pending",
+          "edge_id": "android_mainline:TraversalSocket->TargetTransportRuntime"
+        },
+        {
+          "from": "TraversalSocket",
+          "to": "MuxHandshake",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "physical socket open event",
+          "semantic_output": "mux hello frame and daemon capability contract",
+          "status": "binding pending",
+          "resource_from": "resource.daemon_target_transport",
+          "resource_to": "resource.daemon_target_transport",
+          "via_resources": [],
+          "relation_status": "binding pending",
+          "edge_id": "android_mainline:TraversalSocket->MuxHandshake"
+        },
+        {
+          "from": "TraversalSocket",
+          "to": "ChannelRuntime",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "same target physical transport reused after switch/foreground resume",
+          "semantic_output": "existing channel restored or new channel opened without creating a second physical socket",
+          "status": "binding pending",
+          "resource_from": "resource.daemon_target_transport",
+          "resource_to": "resource.terminal_channel",
+          "via_resources": [],
+          "relation_status": "direct",
+          "edge_id": "android_mainline:TraversalSocket->ChannelRuntime"
         }
       ]
     },
@@ -1196,6 +1341,22 @@
         {
           "id": "Relay",
           "label": "src/server/relay-client.ts"
+        },
+        {
+          "id": "MuxHandshake",
+          "label": "packages/shared/src/connection/protocol.ts#TerminalMuxServerFrame"
+        },
+        {
+          "id": "ChannelRegistry",
+          "label": "src/server/terminal-runtime.ts#mux channel registry"
+        },
+        {
+          "id": "SendScheduler",
+          "label": "src/server/terminal-transport-runtime.ts#mux send scheduler"
+        },
+        {
+          "id": "RelayPeerLease",
+          "label": "src/traversal-relay/server.ts#relay peer lease"
         }
       ],
       "edges": [
@@ -1239,17 +1400,35 @@
           "relation_status": "direct"
         },
         {
+          "from": "DaemonRuntime",
+          "to": "Runtime",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "stale bound session transport liveness fact",
+          "semantic_output": "subscriber detach through terminal runtime cleanup owner",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:DaemonRuntime->Runtime",
+          "resource_from": "resource.daemon_process",
+          "resource_to": "resource.transport_subscriber",
+          "via_resources": [
+            "resource.session_transport"
+          ],
+          "relation_status": "via"
+        },
+        {
           "from": "Runtime",
           "to": "Bridge",
           "owner_feature": "terminal.transport_lifecycle",
-          "semantic_input": "terminal runtime connection need",
-          "semantic_output": "bridge runtime",
+          "semantic_input": "terminal runtime target/channel transport need",
+          "semantic_output": "bridge runtime transport plus channel subscriber binding",
           "status": "anchored",
           "edge_id": "daemon_mainline:Runtime->Bridge",
           "resource_from": "resource.session_transport",
           "resource_to": "resource.transport_subscriber",
-          "via_resources": [],
-          "relation_status": "direct"
+          "via_resources": [
+            "resource.daemon_target_transport",
+            "resource.terminal_channel"
+          ],
+          "relation_status": "via"
         },
         {
           "from": "Runtime",
@@ -1529,6 +1708,114 @@
           "resource_to": "resource.debug_channel",
           "via_resources": [],
           "relation_status": "observer"
+        },
+        {
+          "from": "Bridge",
+          "to": "MuxHandshake",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "new physical daemon-target transport",
+          "semantic_output": "mux-ready capability reply or explicit protocol error",
+          "status": "binding pending",
+          "resource_from": "resource.daemon_target_transport",
+          "resource_to": "resource.daemon_target_transport",
+          "via_resources": [],
+          "relation_status": "binding pending",
+          "edge_id": "daemon_mainline:Bridge->MuxHandshake"
+        },
+        {
+          "from": "MuxHandshake",
+          "to": "ChannelRegistry",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "mux-channel-open frame",
+          "semantic_output": "channel registry entry bound to a daemon subscriber",
+          "status": "binding pending",
+          "resource_from": "resource.daemon_target_transport",
+          "resource_to": "resource.terminal_channel",
+          "via_resources": [],
+          "relation_status": "direct",
+          "edge_id": "daemon_mainline:MuxHandshake->ChannelRegistry"
+        },
+        {
+          "from": "ChannelRegistry",
+          "to": "Runtime",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "channel open/close/subscription state",
+          "semantic_output": "subscriber attach/detach through the terminal runtime owner",
+          "status": "binding pending",
+          "resource_from": "resource.terminal_channel",
+          "resource_to": "resource.transport_subscriber",
+          "via_resources": [],
+          "relation_status": "direct",
+          "edge_id": "daemon_mainline:ChannelRegistry->Runtime"
+        },
+        {
+          "from": "Message",
+          "to": "ChannelRegistry",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "mux-channel-message frame with channelId",
+          "semantic_output": "subscriber-bound message dispatch or explicit unknown-channel error",
+          "status": "binding pending",
+          "resource_from": "resource.daemon_target_transport",
+          "resource_to": "resource.terminal_channel",
+          "via_resources": [],
+          "relation_status": "direct",
+          "edge_id": "daemon_mainline:Message->ChannelRegistry"
+        },
+        {
+          "from": "Mirror",
+          "to": "SendScheduler",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "mirror revision for one or more body-subscribed channels",
+          "semantic_output": "priority-lane mux send work with pending-latest body coalescing per channel",
+          "status": "binding pending",
+          "resource_from": "resource.mirror_store",
+          "resource_to": "resource.transport_subscriber",
+          "via_resources": [],
+          "relation_status": "direct",
+          "edge_id": "daemon_mainline:Mirror->SendScheduler"
+        },
+        {
+          "from": "SendScheduler",
+          "to": "TransportSend",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "prioritized mux frame work item",
+          "semantic_output": "single physical transport send operation",
+          "status": "binding pending",
+          "resource_from": "resource.transport_subscriber",
+          "resource_to": "resource.daemon_target_transport",
+          "via_resources": [
+            "resource.terminal_channel"
+          ],
+          "relation_status": "binding pending",
+          "edge_id": "daemon_mainline:SendScheduler->TransportSend"
+        },
+        {
+          "from": "Relay",
+          "to": "RelayPeerLease",
+          "owner_feature": "relay.account_directory",
+          "semantic_input": "Relay host/client signaling socket lifecycle and resume token",
+          "semantic_output": "idle-timeout bounded peer lease that may rebind a phone signaling socket without touching terminal channel truth",
+          "status": "binding pending",
+          "resource_from": "resource.transport_target",
+          "resource_to": "resource.relay_peer_lease",
+          "via_resources": [],
+          "relation_status": "binding pending",
+          "edge_id": "daemon_mainline:Relay->RelayPeerLease"
+        },
+        {
+          "from": "RelayPeerLease",
+          "to": "MuxHandshake",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "resumed daemon-target physical route",
+          "semantic_output": "mux ping/head/channel revalidation on the existing target transport",
+          "status": "binding pending",
+          "resource_from": "resource.relay_peer_lease",
+          "resource_to": "resource.daemon_target_transport",
+          "via_resources": [
+            "resource.transport_target"
+          ],
+          "relation_status": "binding pending",
+          "edge_id": "daemon_mainline:RelayPeerLease->MuxHandshake"
         }
       ]
     },

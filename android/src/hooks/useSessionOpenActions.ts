@@ -5,12 +5,10 @@ import { upsertBridgeServer, type BridgeSettings } from '../lib/bridge-settings'
 import type { OpenTabRuntimeRefs } from './useOpenTabRuntime';
 import { runtimeDebug } from '../lib/runtime-debug';
 import {
-  buildPersistedOpenTabFromSession,
   clearClosedTabReuseKeysForOwner,
   persistClosedTabReuseKeys,
 } from '../lib/open-tab-persistence';
 import {
-  activateOpenTabIntentSession,
   upsertOpenTabIntentSession,
 } from '../lib/open-tab-intent';
 import {
@@ -226,6 +224,7 @@ export interface SessionOpenActionsResult {
   handleRefreshDrawerHostSessions: (hostKey?: string) => Promise<void>;
   handleForceRelaySession: (sessionId: string) => void;
   handleUseAutoSession: (sessionId: string) => void;
+  handleUseWebSocketSession: (sessionId: string) => void;
   closePicker: () => void;
 }
 
@@ -655,17 +654,53 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     setPickerScopePaneId(null);
 
     const activateReusableSession = (reusableSession: Session) => {
-      const existingOpenTab = openTabStateRef.current.tabs.some((tab) => tab.sessionId === reusableSession.id);
-      const nextOpenTabState = existingOpenTab
-        ? activateOpenTabIntentSession(openTabStateRef.current, reusableSession.id)
-        : upsertOpenTabIntentSession(
-            openTabStateRef.current,
-            buildPersistedOpenTabFromSession(reusableSession),
-            {
-              activate: true,
-              preserveActiveSessionId: runtimeActiveSessionId,
-            },
-          );
+      const routeDraft = buildDraftFromTmuxSession(
+        hosts,
+        bridgeSettingsRef.current.servers,
+        target,
+        reusableSession.sessionName,
+      );
+      const routeHost = buildTransientHostFromDraft({
+        ...routeDraft,
+        lastConnected: Date.now(),
+      });
+      const reboundSessionId = createSession(routeHost, {
+        activate: false,
+        sessionId: reusableSession.id,
+        createdAt: reusableSession.createdAt,
+        customName: reusableSession.customName,
+      });
+      pendingMaterializedOpenTabSessionIdsRef.current.add(reboundSessionId);
+      closedOpenTabSessionIdsRef.current.delete(reboundSessionId);
+      const deletedAnyReuseKey = clearClosedTabReuseKeysForOwner(closedOpenTabReuseKeysRef.current, {
+        daemonHostId: routeHost.daemonHostId || routeHost.relayHostId,
+        bridgeHost: routeHost.bridgeHost,
+        bridgePort: routeHost.bridgePort,
+        sessionName: routeHost.sessionName,
+      });
+      if (deletedAnyReuseKey) {
+        persistClosedTabReuseKeys(closedOpenTabReuseKeysRef.current);
+      }
+      const nextOpenTabState = upsertOpenTabIntentSession(
+        openTabStateRef.current,
+        {
+          sessionId: reusableSession.id,
+          hostId: routeHost.id,
+          connectionName: routeHost.name,
+          bridgeHost: routeHost.bridgeHost,
+          bridgePort: routeHost.bridgePort,
+          daemonHostId: routeHost.daemonHostId || routeHost.relayHostId,
+          sessionName: routeHost.sessionName,
+          authToken: routeHost.authToken,
+          autoCommand: routeHost.autoCommand,
+          customName: reusableSession.customName,
+          createdAt: reusableSession.createdAt || Date.now(),
+        },
+        {
+          activate: true,
+          preserveActiveSessionId: runtimeActiveSessionId,
+        },
+      );
       applyOpenTabState(nextOpenTabState, {
         switchRuntime: 'explicit-resume',
       });
@@ -735,7 +770,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         window.alert?.(error instanceof Error ? error.message : String(error));
       }
     })();
-  }, [applyOpenTabState, bridgeSettingsRef, ensureTerminalPageVisible, handleQuickConnectDraft, handleRemoteSessionsRefreshed, hosts, markSessionGroupEntered, openTabStateRef, runtimeActiveSessionId, sessionsRef, terminalActiveSessionIdRef]);
+  }, [applyOpenTabState, bridgeSettingsRef, closedOpenTabReuseKeysRef, closedOpenTabSessionIdsRef, createSession, ensureTerminalPageVisible, handleQuickConnectDraft, handleRemoteSessionsRefreshed, hosts, markSessionGroupEntered, openTabStateRef, pendingMaterializedOpenTabSessionIdsRef, runtimeActiveSessionId, sessionsRef, terminalActiveSessionIdRef]);
 
   const enrichTargetFromSavedHosts = useCallback((target: BridgeTarget) => {
     const daemonHostId = (target.daemonHostId || target.relayHostId || '').trim();
@@ -975,6 +1010,41 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     });
   }, [openTabStateRef, reconnectOpenTabWithHost, sessionsRef]);
 
+  const handleUseWebSocketSession = useCallback((sessionId: string) => {
+    const normalizedSessionId = sessionId.trim();
+    const tab = openTabStateRef.current.tabs.find((item) => item.sessionId === normalizedSessionId);
+    const liveSession = sessionsRef.current.find((item) => item.id === normalizedSessionId) || null;
+    if (!tab) {
+      window.alert?.('当前 tab 缺少连接信息，无法切到直连。请从连接列表重新打开。');
+      return;
+    }
+    const relayHostId = tab.daemonHostId?.trim() || liveSession?.daemonHostId?.trim() || '';
+    const directHost: Host = {
+      id: tab.hostId || `websocket:${tab.bridgeHost}:${tab.bridgePort}:${tab.sessionName}`,
+      createdAt: tab.createdAt || Date.now(),
+      name: tab.connectionName || tab.sessionName,
+      bridgeHost: tab.bridgeHost,
+      bridgePort: tab.bridgePort,
+      daemonHostId: relayHostId || undefined,
+      relayHostId: relayHostId || undefined,
+      sessionName: tab.sessionName,
+      authToken: tab.authToken,
+      autoCommand: tab.autoCommand,
+      transportMode: 'websocket',
+      authType: 'password',
+      tags: [],
+      pinned: false,
+      lastConnected: Date.now(),
+    };
+    reconnectOpenTabWithHost(normalizedSessionId, directHost, tab, 'app.session.use-websocket', {
+      sessionId: normalizedSessionId,
+      relayHostId: relayHostId || null,
+      sessionName: directHost.sessionName,
+      bridgeHost: directHost.bridgeHost,
+      bridgePort: directHost.bridgePort,
+    });
+  }, [openTabStateRef, reconnectOpenTabWithHost, sessionsRef]);
+
   const closePicker = useCallback(() => {
     setPickerMode(null);
     setPickerScopePaneId(null);
@@ -1001,6 +1071,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     handleRefreshDrawerHostSessions,
     handleForceRelaySession,
     handleUseAutoSession,
+    handleUseWebSocketSession,
     closePicker,
   };
 }

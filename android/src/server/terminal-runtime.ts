@@ -1,4 +1,5 @@
 import { WebSocket } from 'ws';
+import { buildTerminalMuxServerChannelMessage } from '@zterm/shared/protocol';
 import type { ServerMessage } from '../lib/types';
 import type { TerminalPerformanceTraceRecord } from '../lib/terminal-performance-trace';
 import { detachMirrorSubscriber } from './mirror-lifecycle';
@@ -80,6 +81,10 @@ export interface TerminalRuntime {
   createMirror: (sessionName: string) => SessionMirror;
   getSubscriberMirror: (subscriber: TerminalTransportSubscriber) => SessionMirror | null;
   createTransportSubscriber: (connection: TerminalTransportConnection) => TerminalTransportSubscriber;
+  createMuxChannelSubscriber: (
+    connection: TerminalTransportConnection,
+    channelId: string,
+  ) => TerminalTransportSubscriber;
   bindConnectionToSubscriber: (
     connection: TerminalTransportConnection,
     subscriber: TerminalTransportSubscriber,
@@ -131,6 +136,9 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
       transportId: connection.transportId,
       transport: connection.transport,
       closeTransport: connection.closeTransport,
+      connectedSent: false,
+      muxChannelId: null,
+      muxParentTransportId: null,
       sessionName: deps.defaultSessionName,
       mirrorKey: null,
       bodySubscribed: true,
@@ -142,6 +150,92 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     sessions.set(subscriber.id, subscriber);
     connection.role = 'session';
     connection.boundSubscriberId = subscriber.id;
+    return subscriber;
+  }
+
+  function createMuxChannelTransport(
+    connection: TerminalTransportConnection,
+    channelId: string,
+  ): TerminalSessionTransport {
+    return {
+      kind: connection.transport.kind,
+      requestOrigin: connection.requestOrigin,
+      connectedSent: false,
+      get readyState() {
+        return connection.transport.readyState;
+      },
+      get bufferedAmount() {
+        return Math.max(0, Math.floor(connection.transport.bufferedAmount || 0));
+      },
+      sendText(text: string) {
+        let message: ServerMessage;
+        try {
+          message = JSON.parse(text) as ServerMessage;
+        } catch {
+          deps.sendText(connection.transport, JSON.stringify({
+            type: 'mux-error',
+            payload: {
+              code: 'mux_protocol_invalid',
+              message: 'mux channel send requires a JSON server message',
+              channelId,
+            },
+          }));
+          return;
+        }
+        deps.sendText(
+          connection.transport,
+          JSON.stringify(buildTerminalMuxServerChannelMessage(channelId, message)),
+        );
+      },
+      close() {
+        deps.sendText(connection.transport, JSON.stringify({
+          type: 'mux-channel-closed',
+          payload: {
+            channelId,
+            reason: 'server closed channel transport',
+          },
+        }));
+      },
+    };
+  }
+
+  function createMuxChannelSubscriber(
+    connection: TerminalTransportConnection,
+    channelId: string,
+  ): TerminalTransportSubscriber {
+    const normalizedChannelId = channelId.trim();
+    const subscriberId = `${connection.transportId}:${normalizedChannelId}`;
+    const subscriber: TerminalTransportSubscriber = {
+      id: subscriberId,
+      transportId: connection.transportId,
+      transport: createMuxChannelTransport(connection, normalizedChannelId),
+      closeTransport: (reason: string) => {
+        deps.sendText(connection.transport, JSON.stringify({
+          type: 'mux-channel-closed',
+          payload: {
+            channelId: normalizedChannelId,
+            reason,
+          },
+        }));
+      },
+      connectedSent: false,
+      muxChannelId: normalizedChannelId,
+      muxParentTransportId: connection.transportId,
+      sessionName: deps.defaultSessionName,
+      mirrorKey: null,
+      bodySubscribed: true,
+      adaptiveWidthCols: null,
+      adaptiveWidthHeartbeatAt: 0,
+      pendingPasteImage: null,
+      pendingAttachFile: null,
+    };
+    sessions.set(subscriber.id, subscriber);
+    connection.role = 'session';
+    connection.boundSubscriberId = null;
+    if (!connection.muxChannels) {
+      connection.muxChannels = new Map();
+    }
+    connection.muxChannels.set(normalizedChannelId, subscriber.id);
     return subscriber;
   }
 
@@ -168,6 +262,9 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     subscriber.transportId = connection.transportId;
     subscriber.transport = connection.transport;
     subscriber.closeTransport = connection.closeTransport;
+    subscriber.connectedSent = false;
+    subscriber.muxChannelId = null;
+    subscriber.muxParentTransportId = null;
     subscriber.bodySubscribed = true;
     connection.transport.requestOrigin = connection.requestOrigin;
     connection.transport.connectedSent = false;
@@ -304,6 +401,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     createMirror: mirrorRuntime.createMirror,
     getSubscriberMirror,
     createTransportSubscriber,
+    createMuxChannelSubscriber,
     bindConnectionToSubscriber,
     detachSubscriberTransportOnly,
     closeTransportSubscriber,

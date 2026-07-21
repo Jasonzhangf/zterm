@@ -6800,6 +6800,7 @@ var v4_default = v4;
 // src/server/terminal-transport-runtime.ts
 var TRANSPORT_BACKPRESSURE_BUFFERED_BYTES = 128e3;
 var TRANSPORT_BACKPRESSURE_LOW_WATER_BYTES = 64e3;
+var TERMINAL_TRANSPORT_STALE_INBOUND_MS = 1e4;
 function estimateTransportMessageBytes(text) {
   return Buffer.byteLength(text, "utf8");
 }
@@ -6826,6 +6827,10 @@ function readTerminalTransportBackpressureSnapshot(transport) {
     lastSendAt: Math.max(0, Math.floor(transport.lastSendAt || 0)),
     lastSendError: transport.lastSendError || null
   };
+}
+function markTransportConnectionInboundActivity(connection, now = Date.now()) {
+  connection.wsAlive = true;
+  connection.lastInboundAt = now;
 }
 function createTerminalTransportRuntime(deps) {
   function createWebSocketSessionTransport2(ws) {
@@ -6977,6 +6982,7 @@ function createTerminalTransportRuntime(deps) {
       },
       requestOrigin,
       wsAlive: true,
+      lastInboundAt: Date.now(),
       role: "pending",
       boundSubscriberId: null
     };
@@ -11921,7 +11927,31 @@ function createTerminalDaemonRuntime(deps) {
       return;
     }
     heartbeatTimer = setInterval(() => {
+      const now = Date.now();
       for (const connection of deps.connections.values()) {
+        if (connection.transport.readyState === import_websocket.default.OPEN && connection.boundSubscriberId) {
+          const lastInboundAt = Math.max(0, Math.floor(connection.lastInboundAt || 0));
+          const staleForMs = lastInboundAt > 0 ? now - lastInboundAt : Number.POSITIVE_INFINITY;
+          if (staleForMs > TERMINAL_TRANSPORT_STALE_INBOUND_MS) {
+            const reason = "transport heartbeat stale";
+            console.warn(
+              `[${deps.logTimePrefix()}] transport ${connection.id} stale inbound heartbeat kind=${connection.transport.kind} staleForMs=${Math.floor(staleForMs)}`
+            );
+            const subscriber = deps.sessions.get(connection.boundSubscriberId) || null;
+            if (subscriber) {
+              deps.detachSubscriberTransportOnly(subscriber, reason, connection.transportId);
+            }
+            try {
+              connection.closeTransport(reason);
+            } catch (error) {
+              console.warn(
+                `[${deps.logTimePrefix()}] failed to close stale transport ${connection.id}: ${error instanceof Error ? error.message : String(error)}`
+              );
+            }
+            deps.connections.delete(connection.id);
+            continue;
+          }
+        }
         if (connection.transport.kind !== "ws" || connection.transport.readyState !== import_websocket.default.OPEN) {
           continue;
         }
@@ -12366,7 +12396,7 @@ function createTerminalBridgeRuntime(deps) {
       console.log(`[${deps.logTimePrefix()}] rtc transport ${connection.id} created`);
       return {
         onMessage: (_transportId, data, isBinary) => {
-          connection.wsAlive = true;
+          markTransportConnectionInboundActivity(connection);
           refreshBoundAdaptiveLease(connection);
           enqueueConnectionMessage(connection, data, isBinary);
         },
@@ -12405,11 +12435,11 @@ function createTerminalBridgeRuntime(deps) {
       `[${deps.logTimePrefix()}] websocket transport ${connection.id} created origin=${connection.requestOrigin} role=${connection.role}`
     );
     ws.on("pong", () => {
-      connection.wsAlive = true;
+      markTransportConnectionInboundActivity(connection);
       refreshBoundAdaptiveLease(connection);
     });
     ws.on("message", (rawData, isBinary) => {
-      connection.wsAlive = true;
+      markTransportConnectionInboundActivity(connection);
       refreshBoundAdaptiveLease(connection);
       enqueueConnectionMessage(connection, rawData, isBinary);
     });
@@ -12688,14 +12718,25 @@ struct RemoteInputWindow: Decodable {
 
 struct RemoteInputEvent: Decodable {
     let kind: String
+    let gesture: String?
     let phase: String?
     let button: String?
     let buttons: Int?
+    let pointerId: Int?
+    let startX: Double?
+    let startY: Double?
     let x: Double?
     let y: Double?
+    let startNormalizedX: Double?
+    let startNormalizedY: Double?
+    let normalizedX: Double?
+    let normalizedY: Double?
     let unit: String?
     let deltaX: Double?
     let deltaY: Double?
+    let durationMs: Double?
+    let velocityX: Double?
+    let velocityY: Double?
     let key: String?
     let code: String?
     let text: String?
@@ -12824,6 +12865,25 @@ func mouseType(phase: String, button: String?) -> CGEventType {
     return right ? .rightMouseDragged : .mouseMoved
 }
 
+func postScrollEvent(x: Double, y: Double, deltaX: Double, deltaY: Double, unit: String?) {
+    let units: CGScrollEventUnit = unit == "pixel" ? .pixel : .line
+    let point = CGPoint(x: x, y: y)
+    // Android/DOM deltas use positive values for scrolling down/right; CGEvent
+    // wheel values use the opposite sign for pixel scroll injection.
+    let wheel1 = Int32(max(-32767, min(32767, (-deltaY).rounded())))
+    let wheel2 = Int32(max(-32767, min(32767, (-deltaX).rounded())))
+    let event = CGEvent(
+        scrollWheelEvent2Source: source,
+        units: units,
+        wheelCount: 2,
+        wheel1: wheel1,
+        wheel2: wheel2,
+        wheel3: 0
+    )
+    event?.location = point
+    event?.post(tap: .cghidEventTap)
+}
+
 let keyCodes: [String: CGKeyCode] = [
     "Enter": 36,
     "NumpadEnter": 76,
@@ -12870,22 +12930,36 @@ func handleConfig(_ config: InputConfig) throws {
         else {
             throw inputError("remote scroll input missing delta or coordinates")
         }
-        let units: CGScrollEventUnit = config.event.unit == "pixel" ? .pixel : .line
-        let point = CGPoint(x: x, y: y)
-        // Android/DOM deltas use positive values for scrolling down/right; CGEvent
-        // wheel values use the opposite sign for pixel scroll injection.
-        let wheel1 = Int32(max(-32767, min(32767, (-deltaY).rounded())))
-        let wheel2 = Int32(max(-32767, min(32767, (-deltaX).rounded())))
-        let event = CGEvent(
-            scrollWheelEvent2Source: source,
-            units: units,
-            wheelCount: 2,
-            wheel1: wheel1,
-            wheel2: wheel2,
-            wheel3: 0
-        )
-        event?.location = point
-        event?.post(tap: .cghidEventTap)
+        postScrollEvent(x: x, y: y, deltaX: deltaX, deltaY: deltaY, unit: config.event.unit)
+    } else if config.event.kind == "gesture" {
+        guard config.event.gesture == "swipe", config.event.phase == "end" else {
+            throw inputError("remote gesture input unsupported")
+        }
+        guard
+            let startX = config.event.startX,
+            let startY = config.event.startY,
+            let x = config.event.x,
+            let y = config.event.y,
+            let deltaX = config.event.deltaX,
+            let deltaY = config.event.deltaY
+        else {
+            throw inputError("remote gesture input missing delta or coordinates")
+        }
+        let dominantDelta = max(abs(deltaX), abs(deltaY))
+        let steps = max(1, min(12, Int(ceil(dominantDelta / 48.0))))
+        let stepDeltaX = deltaX / Double(steps)
+        let stepDeltaY = deltaY / Double(steps)
+        let duration = max(1.0, min(1000.0, config.event.durationMs ?? 1.0))
+        let sleepMicros = UInt32(max(4000.0, min(20000.0, (duration / Double(steps)) * 1000.0)))
+        for step in 1...steps {
+            let progress = Double(step) / Double(steps)
+            let pointX = startX + (x - startX) * progress
+            let pointY = startY + (y - startY) * progress
+            postScrollEvent(x: pointX, y: pointY, deltaX: stepDeltaX, deltaY: stepDeltaY, unit: config.event.unit)
+            if step < steps {
+                usleep(sleepMicros)
+            }
+        }
     } else if config.event.kind == "key" {
         guard let phase = config.event.phase else {
             throw inputError("remote key input missing phase")
@@ -13642,29 +13716,35 @@ function normalizeRemoteWindowVideoBitrateConfig(input) {
   if (!input) {
     return null;
   }
-  const bitrateMbps = (() => {
+  const defaults = (() => {
     switch (input.preset) {
       case "2mbps":
-        return 2;
+        return { bitrateMbps: 2, maxFrameRateFps: 5 };
       case "5mbps":
-        return 5;
+        return { bitrateMbps: 5, maxFrameRateFps: 8 };
       case "10mbps":
-        return 10;
+        return { bitrateMbps: 10, maxFrameRateFps: 12 };
       case "20mbps":
       case "fullscreen":
-        return 20;
+        return { bitrateMbps: 20, maxFrameRateFps: 12 };
       default:
         throw new Error(`remote window video bitrate preset is invalid: ${String(input.preset)}`);
     }
   })();
+  const bitrateMbps = defaults.bitrateMbps;
   const maxBitrateBps = bitrateMbps * 1e6;
   if (input.bitrateMbps !== bitrateMbps || input.maxBitrateBps !== maxBitrateBps) {
     throw new Error("remote window video bitrate config does not match its preset");
   }
+  const maxFrameRateFps = input.maxFrameRateFps ?? defaults.maxFrameRateFps;
+  if (maxFrameRateFps !== defaults.maxFrameRateFps) {
+    throw new Error("remote window video frame-rate config does not match its preset");
+  }
   return {
     preset: input.preset,
     bitrateMbps,
-    maxBitrateBps
+    maxBitrateBps,
+    maxFrameRateFps
   };
 }
 async function applyRemoteWindowVideoBitrate(sender, config) {
@@ -13686,7 +13766,8 @@ async function applyRemoteWindowVideoBitrate(sender, config) {
     ...currentParameters,
     encodings: currentEncodings.map((encoding) => ({
       ...encoding,
-      maxBitrate: config.maxBitrateBps
+      maxBitrate: config.maxBitrateBps,
+      maxFramerate: config.maxFrameRateFps
     }))
   };
   await sender.setParameters(nextParameters);
@@ -14084,6 +14165,32 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
         throw new Error("remote window scroll input unit is invalid");
       }
     }
+    if (payload.event.kind === "gesture") {
+      const values = [
+        payload.event.startX,
+        payload.event.startY,
+        payload.event.x,
+        payload.event.y,
+        payload.event.startNormalizedX,
+        payload.event.startNormalizedY,
+        payload.event.normalizedX,
+        payload.event.normalizedY,
+        payload.event.deltaX,
+        payload.event.deltaY,
+        payload.event.durationMs,
+        payload.event.velocityX,
+        payload.event.velocityY
+      ];
+      if (!values.every((value) => Number.isFinite(value))) {
+        throw new Error("remote window gesture input coordinates, delta, or timing are invalid");
+      }
+      if (payload.event.startNormalizedX < 0 || payload.event.startNormalizedX > 1 || payload.event.startNormalizedY < 0 || payload.event.startNormalizedY > 1 || payload.event.normalizedX < 0 || payload.event.normalizedX > 1 || payload.event.normalizedY < 0 || payload.event.normalizedY > 1) {
+        throw new Error("remote window gesture input normalized coordinates are out of range");
+      }
+      if (payload.event.gesture !== "swipe" || payload.event.phase !== "end" || payload.event.unit !== "pixel" || payload.event.durationMs <= 0) {
+        throw new Error("remote window gesture input contract is invalid");
+      }
+    }
     if (payload.event.kind === "key" && payload.event.phase !== "down" && payload.event.phase !== "up") {
       throw new Error("remote window key input phase is invalid");
     }
@@ -14381,7 +14488,7 @@ var LOG_DIR = (0, import_path6.join)(WTERM_HOME_DIR, "logs");
 var APP_UPDATE_VERSION_CODE = Number.parseInt(process.env.ZTERM_APP_UPDATE_VERSION_CODE || "", 10);
 var APP_UPDATE_VERSION_NAME = (process.env.ZTERM_APP_UPDATE_VERSION_NAME || "").trim();
 var APP_UPDATE_MANIFEST_URL = (process.env.ZTERM_APP_UPDATE_MANIFEST_URL || "").trim();
-var WS_HEARTBEAT_INTERVAL_MS = 3e4;
+var WS_HEARTBEAT_INTERVAL_MS = 2e3;
 var STARTUP_PORT_CONFLICT_EXIT_CODE = 78;
 var DAEMON_RUNTIME_DEBUG = process.env.ZTERM_DAEMON_DEBUG_LOG === "1";
 var MAX_CLIENT_DEBUG_BATCH_LOG_ENTRIES = 8;
@@ -14674,6 +14781,7 @@ var terminalDaemonRuntime = createTerminalDaemonRuntime({
     }
     sessionsMap.clear();
   },
+  detachSubscriberTransportOnly: terminalRuntime.detachSubscriberTransportOnly,
   destroyMirror: terminalRuntime.destroyMirror,
   disposeScheduleRuntime: () => terminalScheduleRuntime.dispose(),
   startRelayHostClient: () => relayHostClient.start(),

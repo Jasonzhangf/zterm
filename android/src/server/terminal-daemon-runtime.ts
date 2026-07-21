@@ -3,6 +3,7 @@ import type { Server } from 'http';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { TerminalSession, SessionMirror } from './terminal-runtime';
 import type { DaemonTransportConnection } from './terminal-transport-runtime';
+import { TERMINAL_TRANSPORT_STALE_INBOUND_MS } from './terminal-transport-runtime';
 
 export interface DestroyMirrorOptions {
   closeTransportSubscribers?: boolean;
@@ -34,6 +35,7 @@ export interface TerminalDaemonRuntimeDeps {
   wss: WebSocketServer;
   logTimePrefix: () => string;
   shutdownTerminalSessions: (sessions: Map<string, TerminalSession>, reason: string) => void;
+  detachSubscriberTransportOnly: (subscriber: TerminalSession, reason: string, transportId?: string) => void;
   destroyMirror: (mirror: SessionMirror, reason: string, options?: DestroyMirrorOptions) => void;
   disposeScheduleRuntime: () => void;
   startRelayHostClient: () => void;
@@ -110,7 +112,46 @@ export function createTerminalDaemonRuntime(
       return;
     }
     heartbeatTimer = setInterval(() => {
+      const now = Date.now();
       for (const connection of deps.connections.values()) {
+        const boundSubscriberIds = new Set<string>();
+        if (connection.boundSubscriberId) {
+          boundSubscriberIds.add(connection.boundSubscriberId);
+        }
+        for (const subscriberId of connection.muxChannels?.values() || []) {
+          boundSubscriberIds.add(subscriberId);
+        }
+
+        if (connection.transport.readyState === WebSocket.OPEN && boundSubscriberIds.size > 0) {
+          const lastInboundAt = Math.max(0, Math.floor(connection.lastInboundAt || 0));
+          const staleForMs = lastInboundAt > 0 ? now - lastInboundAt : Number.POSITIVE_INFINITY;
+          if (staleForMs > TERMINAL_TRANSPORT_STALE_INBOUND_MS) {
+            const reason = 'transport heartbeat stale';
+            console.warn(
+              `[${deps.logTimePrefix()}] transport ${connection.id} stale inbound heartbeat kind=${connection.transport.kind} staleForMs=${Math.floor(staleForMs)}`,
+            );
+            for (const subscriberId of boundSubscriberIds) {
+              const subscriber = deps.sessions.get(subscriberId) || null;
+              if (!subscriber) {
+                continue;
+              }
+              deps.detachSubscriberTransportOnly(subscriber, reason, connection.transportId);
+            }
+            connection.muxChannels?.clear();
+            try {
+              connection.closeTransport(reason);
+            } catch (error) {
+              console.warn(
+                `[${deps.logTimePrefix()}] failed to close stale transport ${connection.id}: ${
+                  error instanceof Error ? error.message : String(error)
+                }`,
+              );
+            }
+            deps.connections.delete(connection.id);
+            continue;
+          }
+        }
+
         if (connection.transport.kind !== 'ws' || connection.transport.readyState !== WebSocket.OPEN) {
           continue;
         }

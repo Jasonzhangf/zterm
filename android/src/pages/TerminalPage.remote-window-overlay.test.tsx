@@ -372,6 +372,77 @@ describe('TerminalPage remote window overlay', () => {
     });
   });
 
+  it('stops the remote-window stream when the app goes to background', async () => {
+    const session = makeSession('s1');
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const onRequestRemoteWindowTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget()],
+      errors: [],
+    }));
+    const onRequestRemoteWindowStreamStart = vi.fn(async (
+      _sessionId: string,
+      _target: RemoteWindowStreamTargetManifest,
+      streamId: string,
+    ) => ({
+      streamId,
+      mediaStream,
+      started: {
+        requestId: 'rw-start-1',
+        streamId,
+        targetId: 'app-1',
+        answer: { type: 'answer' as const, sdp: 'v=0' },
+        capture: {
+          source: 'ScreenCaptureKit' as const,
+          frameWidth: 800,
+          frameHeight: 560,
+          frameRate: 30,
+          targetKind: 'app-window' as const,
+        },
+        transport: {
+          kind: 'webrtc-video' as const,
+        },
+      },
+    }));
+    const onStopRemoteWindowStream = vi.fn(() => true);
+
+    const renderPage = (appForegroundActive: boolean) => (
+      <TerminalPage
+        appForegroundActive={appForegroundActive}
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
+        onRequestRemoteWindowStreamStart={onRequestRemoteWindowStreamStart}
+        onStopRemoteWindowStream={onStopRemoteWindowStream}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />
+    );
+
+    const view = render(renderPage(true));
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-target-app-1');
+    fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
+    await waitFor(() => expect(screen.getByTestId('remote-window-video')).toBeTruthy());
+
+    view.rerender(renderPage(false));
+    await waitFor(() => {
+      expect(onStopRemoteWindowStream).toHaveBeenCalledWith('s1', expect.stringMatching(/^rw-stream-/));
+      expect(screen.queryByTestId('remote-window-locked-overlay')).toBeNull();
+      expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
+    });
+  });
+
   it('does not route quickbar input through unsupported iTerm pane remote-window targets', async () => {
     const session = makeSession('s1');
     const mediaStream = { id: 'media-stream-1' } as MediaStream;

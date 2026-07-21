@@ -81,6 +81,7 @@ interface SessionLifecycleRuntimeOptions {
   writeSessionTransportHost: (sessionId: string, host: Host) => unknown;
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => { socket?: BridgeTransportSocket | null } | null;
   readSessionTransportHost: (sessionId: string) => Host | null;
   readSessionTransportRuntime: (sessionId: string) => { targetKey: string | null } | null;
   readSessionTargetRuntime: (sessionId: string) => { sessionIds: string[] } | null;
@@ -251,6 +252,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       readSessionTransportRuntime: options.readSessionTransportRuntime,
       readSessionTargetRuntime: options.readSessionTargetRuntime,
       readSessionTransportSocket: options.readSessionTransportSocket,
+      readSessionTransportResource: options.readSessionTransportResource,
       isReconnectInFlight: options.isReconnectInFlight,
       hasPendingSessionTransportOpen: options.hasPendingSessionTransportOpen,
       isPendingSessionTransportOpenStale: options.isPendingSessionTransportOpenStale,

@@ -196,6 +196,7 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
   - daemon 只保存 `bodySubscribed` 这一物理事实，不保存 active/inactive/visible/foreground 原因；
   - unsubscribe 只停止 unsolicited `buffer-sync`，不得 close transport、detach mirror、禁用 input/file/schedule 或 explicit head/range read；
   - recurring capture 只由 ready 且 `bodySubscribed` 的 physical subscriber demand 驱动；unsubscribe 必须经同一个 scheduler owner 立即停旧 timer，恢复 demand 后恢复 scheduler，不得由 head/range 请求直接 capture。
+  - RTC/Relay datachannel close 可能不会可靠到达 daemon；daemon 必须按 transport inbound heartbeat sweep stale bound subscriber，并只走 `detachSubscriberTransportOnly`。禁止杀 tmux、销毁 mirror、或在 Android UI/renderer/buffer 层做退出补偿。
 - subscriber backpressure 禁止直接永久 skip 当前 revision：
   - 每个 subscriber 最多保留一个 bounded pending latest revision 和合并后的 absolute ranges；
   - pending flush 时必须从当前 mirror store 读取最新权威行，禁止保存历史 serialized payload/cells；
@@ -355,6 +356,7 @@ buffer manager 是独立 worker，不归 daemon、不归 renderer。
   - 否则旧行会作为“未覆盖但保留”的本地 truth 永久存在，表现为大面积刷新时旧内容跟着 buffer 上移
 - `buffer-sync` 的 in-flight / pull bookkeeping 只是 **transport bookkeeping**，不是 buffer truth；active tab 重新进入、resume、reconnect 时不得让旧 bookkeeping 永久挡住新的 head-first 请求链
 - session transport 的重建真相不能来自“安静时间”：`lastServerActivityAt` 过旧、缺 pong、缺 head、pong-only traffic 都不得让仍为 `WebSocket.OPEN` 的长连接过期。active tab 恢复 / 重新进入 / tick 只能在原 transport 上 request-head / ping 观测；只有物理 `close/error`、send 抛错、daemon 不可达、用户显式关闭、或 tmux/session target 事实变更，才允许重建。
+- session transport target identity 必须包含 route 语义。`bridgeHost:bridgePort:authToken` 不足以判定 same target；同 daemon 的 Tailscale/WS、`rtc-direct`、TURN `rtc-relay`、Relay endpoint candidates、`transportMode`、daemon/relay identity 必须影响 target key，Relay `lastSeenAt` 这类 freshness metadata 不得影响 key。否则会复用错误 OPEN socket，出现有上下行速率但可见 body 不更新。
 - transport topology 也必须冻结：
   - daemon 只认 **transport connection truth**
   - daemon 不认 `clientSessionId`、不认 control/session 两级客户端状态机
@@ -755,6 +757,8 @@ tmux truth
 - Preview tile 必须把 `TerminalView` 作为 read-only shared renderer 使用：`active=false`、`live=true`、无 input/resize/viewport callbacks、`allowDomFocus=false`、`mirror-fixed`。
 - Preview selection 持久化时必须存完整 open-session identity，并在恢复时至少匹配 `sessionId + bridgeHost + bridgePort + sessionName`，有 `daemonHostId` 时也必须匹配；stale target 是失效选择，不是隐式 open/reconnect intent。
 - Preview 打开才允许把 selected ids 临时加入 body subscription live set；关闭/后台必须回到 baseline。黑盒 gate 必须自动比较 tmux source、daemon/client sparse truth、render store 和 preview DOM，并验证 subscriber lifecycle。
+- App foreground truth 是唯一的 preview/body-demand 输入；后台态必须把 preview 选中集拉回 baseline，不能继续维持额外 body subscription、视频解码或轮询。任何 offscreen 重媒体流都必须由同一个 foreground gate 停掉，禁止再长出第二套后台 timer/observer 补偿。
+- Android 原生后台服务只能是通知面；禁止 `PARTIAL_WAKE_LOCK`、`WAKE_LOCK` 权限、忽略电池优化权限，禁止用 native service 替 transport owner 做后台保活。
 - Preview tile activation 必须走唯一 page owner：先把目标 session 投进当前 focused session-group slot，再发 active-session switch。只切 active session 不改 viewport projection，会让输入/live 到新 session、真实 shell 仍显示旧 center session；preview 关闭后旧 center 不再 live，表现为“preview 刷新但进入 shell 不刷新”。
 - Source-to-shell 黑盒 gate 必须覆盖 preview grid -> real `TerminalStageShell` 替换后继续刷新：选中 session 新 marker 出现在真实 shell DOM，旧 session marker 被排除，物理 socket 不重建，subscribers 恢复 baseline。
 - Preview tile 长按替换只改 ordered selection：420ms 长按必须有移动阈值，触发或移动后都要抑制 synthetic click；菜单只列当前 open 且未选中的 session，替换保持原 slot 顺序。禁止借替换触发 active switch、socket open owner、buffer reset 或 renderer 写入。

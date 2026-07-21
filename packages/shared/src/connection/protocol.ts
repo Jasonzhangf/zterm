@@ -306,6 +306,26 @@ export interface RemoteWindowInputEventPayload {
         normalizedY: number;
       }
     | {
+        kind: 'gesture';
+        gesture: 'swipe';
+        phase: 'end';
+        unit: 'pixel';
+        pointerId: number;
+        startX: number;
+        startY: number;
+        x: number;
+        y: number;
+        startNormalizedX: number;
+        startNormalizedY: number;
+        normalizedX: number;
+        normalizedY: number;
+        deltaX: number;
+        deltaY: number;
+        durationMs: number;
+        velocityX: number;
+        velocityY: number;
+      }
+    | {
         kind: 'key';
         phase: 'down' | 'up';
         key: string;
@@ -520,4 +540,403 @@ export type BridgeServerMessage = BridgeBufferMessage | BridgeServerControlMessa
 
 export function isBridgeBufferMessage(message: BridgeServerMessage): message is BridgeBufferMessage {
   return message.type === 'buffer-sync';
+}
+
+export const TERMINAL_MUX_PROTOCOL_VERSION = 1 as const;
+
+export type TerminalMuxErrorCode =
+  | 'daemon_multiplex_upgrade_required'
+  | 'mux_version_unsupported'
+  | 'mux_protocol_invalid'
+  | 'mux_unwrapped_session_message'
+  | 'mux_unknown_channel'
+  | 'mux_channel_mismatch'
+  | 'mux_duplicate_channel'
+  | 'mux_channel_closed';
+
+export interface TerminalMuxCapabilities {
+  version: typeof TERMINAL_MUX_PROTOCOL_VERSION;
+  channelEnvelope: true;
+  targetMessages: true;
+  boundedBodyScheduler: true;
+  reliableInput?: TerminalSessionCapabilitiesPayload['reliableInput'];
+  relayPeerResume?: {
+    version: 1;
+    idleTimeoutMs: number;
+  };
+}
+
+export type TerminalMuxTargetClientMessageType =
+  | 'list-sessions'
+  | 'tmux-create-session'
+  | 'tmux-rename-session'
+  | 'tmux-kill-session';
+
+export type TerminalMuxLegacyClientMessageType =
+  | 'session-open'
+  | 'connect'
+  | 'ping'
+  | 'close';
+
+export type TerminalMuxTargetClientMessage = Extract<
+  BridgeClientMessage,
+  { type: TerminalMuxTargetClientMessageType }
+>;
+
+export type TerminalMuxLegacyClientMessage = Extract<
+  BridgeClientMessage,
+  { type: TerminalMuxLegacyClientMessageType }
+>;
+
+export type TerminalMuxChannelClientMessage = Exclude<
+  BridgeClientMessage,
+  TerminalMuxTargetClientMessage | TerminalMuxLegacyClientMessage
+>;
+
+export type TerminalMuxTargetServerMessageType =
+  | 'sessions'
+  | 'debug-control'
+  | 'error'
+  | 'pong';
+
+export type TerminalMuxTargetServerMessage = Extract<
+  BridgeServerMessage,
+  { type: TerminalMuxTargetServerMessageType }
+>;
+
+export type TerminalMuxChannelServerMessage = BridgeServerMessage;
+
+export type TerminalMuxClientFrame =
+  | { type: 'mux-hello'; payload: { version: typeof TERMINAL_MUX_PROTOCOL_VERSION; clientInstanceId: string } }
+  | { type: 'mux-target-message'; payload: { requestId?: string; message: TerminalMuxTargetClientMessage } }
+  | { type: 'mux-channel-open'; payload: { channelId: string; sessionName: string; cols?: number; rows?: number; widthMode?: TerminalWidthMode; autoCommand?: string } }
+  | { type: 'mux-channel-message'; payload: { channelId: string; message: TerminalMuxChannelClientMessage } }
+  | { type: 'mux-channel-binary'; payload: { channelId: string; dataBase64: string } }
+  | { type: 'mux-channel-close'; payload: { channelId: string; reason?: string } }
+  | { type: 'mux-ping'; payload: { sentAt: number } };
+
+export type TerminalMuxServerFrame =
+  | { type: 'mux-ready'; payload: { version: typeof TERMINAL_MUX_PROTOCOL_VERSION; daemonHostId?: string; capabilities: TerminalMuxCapabilities } }
+  | { type: 'mux-target-message'; payload: { requestId?: string; message: TerminalMuxTargetServerMessage } }
+  | { type: 'mux-channel-opened'; payload: { channelId: string; sessionName: string; capabilities?: TerminalSessionCapabilitiesPayload } }
+  | { type: 'mux-channel-message'; payload: { channelId: string; message: TerminalMuxChannelServerMessage } }
+  | { type: 'mux-channel-closed'; payload: { channelId: string; reason: string; code?: string } }
+  | { type: 'mux-pong'; payload: { sentAt: number; receivedAt: number } }
+  | { type: 'mux-error'; payload: { code: TerminalMuxErrorCode; message: string; channelId?: string } };
+
+export const TERMINAL_MUX_TARGET_CLIENT_MESSAGE_TYPES: readonly TerminalMuxTargetClientMessageType[] = [
+  'list-sessions',
+  'tmux-create-session',
+  'tmux-rename-session',
+  'tmux-kill-session',
+] as const;
+
+export const TERMINAL_MUX_LEGACY_CLIENT_MESSAGE_TYPES: readonly TerminalMuxLegacyClientMessageType[] = [
+  'session-open',
+  'connect',
+  'ping',
+  'close',
+] as const;
+
+const TERMINAL_MUX_TARGET_CLIENT_MESSAGE_SET = new Set<string>(TERMINAL_MUX_TARGET_CLIENT_MESSAGE_TYPES);
+const TERMINAL_MUX_LEGACY_CLIENT_MESSAGE_SET = new Set<string>(TERMINAL_MUX_LEGACY_CLIENT_MESSAGE_TYPES);
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function asNonEmptyString(value: unknown) {
+  return typeof value === 'string' && value.trim() ? value.trim() : '';
+}
+
+function hasFiniteNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value);
+}
+
+export function isTerminalMuxTargetClientMessageType(type: string): type is TerminalMuxTargetClientMessageType {
+  return TERMINAL_MUX_TARGET_CLIENT_MESSAGE_SET.has(type);
+}
+
+export function isTerminalMuxLegacyClientMessageType(type: string): type is TerminalMuxLegacyClientMessageType {
+  return TERMINAL_MUX_LEGACY_CLIENT_MESSAGE_SET.has(type);
+}
+
+export function classifyTerminalMuxClientMessage(message: Pick<BridgeClientMessage, 'type'>) {
+  if (isTerminalMuxTargetClientMessageType(message.type)) {
+    return 'target' as const;
+  }
+  if (isTerminalMuxLegacyClientMessageType(message.type)) {
+    return 'legacy' as const;
+  }
+  return 'channel' as const;
+}
+
+export function buildTerminalMuxCapabilities(
+  options: Partial<Omit<TerminalMuxCapabilities, 'version' | 'channelEnvelope' | 'targetMessages' | 'boundedBodyScheduler'>> = {},
+): TerminalMuxCapabilities {
+  return {
+    version: TERMINAL_MUX_PROTOCOL_VERSION,
+    channelEnvelope: true,
+    targetMessages: true,
+    boundedBodyScheduler: true,
+    ...options,
+  };
+}
+
+export function buildTerminalMuxHello(clientInstanceId: string): TerminalMuxClientFrame {
+  const normalizedClientInstanceId = asNonEmptyString(clientInstanceId);
+  if (!normalizedClientInstanceId) {
+    throw new Error('terminal mux clientInstanceId is required');
+  }
+  return {
+    type: 'mux-hello',
+    payload: {
+      version: TERMINAL_MUX_PROTOCOL_VERSION,
+      clientInstanceId: normalizedClientInstanceId,
+    },
+  };
+}
+
+export function buildTerminalMuxReady(options: {
+  daemonHostId?: string;
+  capabilities?: TerminalMuxCapabilities;
+} = {}): TerminalMuxServerFrame {
+  return {
+    type: 'mux-ready',
+    payload: {
+      version: TERMINAL_MUX_PROTOCOL_VERSION,
+      ...(asNonEmptyString(options.daemonHostId) ? { daemonHostId: asNonEmptyString(options.daemonHostId) } : {}),
+      capabilities: options.capabilities || buildTerminalMuxCapabilities(),
+    },
+  };
+}
+
+export function buildTerminalMuxTargetMessage(
+  message: TerminalMuxTargetClientMessage,
+  requestId?: string,
+): TerminalMuxClientFrame {
+  if (classifyTerminalMuxClientMessage(message) !== 'target') {
+    throw new Error(`terminal mux target message cannot carry ${message.type}`);
+  }
+  return {
+    type: 'mux-target-message',
+    payload: {
+      ...(asNonEmptyString(requestId) ? { requestId: asNonEmptyString(requestId) } : {}),
+      message,
+    },
+  };
+}
+
+export function buildTerminalMuxChannelOpen(
+  payload: Extract<TerminalMuxClientFrame, { type: 'mux-channel-open' }>['payload'],
+): TerminalMuxClientFrame {
+  const channelId = asNonEmptyString(payload.channelId);
+  const sessionName = asNonEmptyString(payload.sessionName);
+  if (!channelId) {
+    throw new Error('terminal mux channelId is required');
+  }
+  if (!sessionName) {
+    throw new Error('terminal mux sessionName is required');
+  }
+  return {
+    type: 'mux-channel-open',
+    payload: {
+      ...payload,
+      channelId,
+      sessionName,
+    },
+  };
+}
+
+export function buildTerminalMuxChannelMessage(
+  channelId: string,
+  message: TerminalMuxChannelClientMessage,
+): TerminalMuxClientFrame {
+  const normalizedChannelId = asNonEmptyString(channelId);
+  if (!normalizedChannelId) {
+    throw new Error('terminal mux channelId is required');
+  }
+  if (classifyTerminalMuxClientMessage(message) !== 'channel') {
+    throw new Error(`terminal mux channel message cannot carry ${message.type}`);
+  }
+  return {
+    type: 'mux-channel-message',
+    payload: {
+      channelId: normalizedChannelId,
+      message,
+    },
+  };
+}
+
+export function buildTerminalMuxChannelBinary(
+  channelId: string,
+  dataBase64: string,
+): TerminalMuxClientFrame {
+  const normalizedChannelId = asNonEmptyString(channelId);
+  if (!normalizedChannelId) {
+    throw new Error('terminal mux channelId is required');
+  }
+  if (typeof dataBase64 !== 'string') {
+    throw new Error('terminal mux channel binary dataBase64 is required');
+  }
+  return {
+    type: 'mux-channel-binary',
+    payload: {
+      channelId: normalizedChannelId,
+      dataBase64,
+    },
+  };
+}
+
+export function buildTerminalMuxServerChannelMessage(
+  channelId: string,
+  message: TerminalMuxChannelServerMessage,
+): TerminalMuxServerFrame {
+  const normalizedChannelId = asNonEmptyString(channelId);
+  if (!normalizedChannelId) {
+    throw new Error('terminal mux channelId is required');
+  }
+  return {
+    type: 'mux-channel-message',
+    payload: {
+      channelId: normalizedChannelId,
+      message,
+    },
+  };
+}
+
+export function buildTerminalMuxServerTargetMessage(
+  message: TerminalMuxTargetServerMessage,
+  requestId?: string,
+): TerminalMuxServerFrame {
+  return {
+    type: 'mux-target-message',
+    payload: {
+      ...(asNonEmptyString(requestId) ? { requestId: asNonEmptyString(requestId) } : {}),
+      message,
+    },
+  };
+}
+
+export function buildTerminalMuxError(
+  code: TerminalMuxErrorCode,
+  message: string,
+  channelId?: string,
+): TerminalMuxServerFrame {
+  return {
+    type: 'mux-error',
+    payload: {
+      code,
+      message,
+      ...(asNonEmptyString(channelId) ? { channelId: asNonEmptyString(channelId) } : {}),
+    },
+  };
+}
+
+export function buildTerminalMuxUnwrappedSessionMessageError(messageType: string): TerminalMuxServerFrame {
+  return buildTerminalMuxError(
+    'mux_unwrapped_session_message',
+    `session-bound message ${messageType} must be sent inside mux-channel-message`,
+  );
+}
+
+export function isTerminalMuxClientFrame(value: unknown): value is TerminalMuxClientFrame {
+  if (!isRecord(value) || typeof value.type !== 'string' || !isRecord(value.payload)) {
+    return false;
+  }
+  switch (value.type) {
+    case 'mux-hello':
+      return value.payload.version === TERMINAL_MUX_PROTOCOL_VERSION
+        && Boolean(asNonEmptyString(value.payload.clientInstanceId));
+    case 'mux-target-message':
+      return isRecord(value.payload.message)
+        && typeof value.payload.message.type === 'string'
+        && isTerminalMuxTargetClientMessageType(value.payload.message.type);
+    case 'mux-channel-open':
+      return Boolean(asNonEmptyString(value.payload.channelId))
+        && Boolean(asNonEmptyString(value.payload.sessionName));
+    case 'mux-channel-message':
+      return Boolean(asNonEmptyString(value.payload.channelId))
+        && isRecord(value.payload.message)
+        && typeof value.payload.message.type === 'string'
+        && classifyTerminalMuxClientMessage(value.payload.message as Pick<BridgeClientMessage, 'type'>) === 'channel';
+    case 'mux-channel-binary':
+      return Boolean(asNonEmptyString(value.payload.channelId))
+        && typeof value.payload.dataBase64 === 'string';
+    case 'mux-channel-close':
+      return Boolean(asNonEmptyString(value.payload.channelId));
+    case 'mux-ping':
+      return hasFiniteNumber(value.payload.sentAt);
+    default:
+      return false;
+  }
+}
+
+export function isTerminalMuxServerFrame(value: unknown): value is TerminalMuxServerFrame {
+  if (!isRecord(value) || typeof value.type !== 'string' || !isRecord(value.payload)) {
+    return false;
+  }
+  switch (value.type) {
+    case 'mux-ready':
+      return value.payload.version === TERMINAL_MUX_PROTOCOL_VERSION
+        && isRecord(value.payload.capabilities)
+        && value.payload.capabilities.version === TERMINAL_MUX_PROTOCOL_VERSION
+        && value.payload.capabilities.channelEnvelope === true
+        && value.payload.capabilities.targetMessages === true;
+    case 'mux-target-message':
+      return isRecord(value.payload.message) && typeof value.payload.message.type === 'string';
+    case 'mux-channel-opened':
+      return Boolean(asNonEmptyString(value.payload.channelId))
+        && Boolean(asNonEmptyString(value.payload.sessionName));
+    case 'mux-channel-message':
+      return Boolean(asNonEmptyString(value.payload.channelId))
+        && isRecord(value.payload.message)
+        && typeof value.payload.message.type === 'string';
+    case 'mux-channel-closed':
+      return Boolean(asNonEmptyString(value.payload.channelId))
+        && typeof value.payload.reason === 'string';
+    case 'mux-pong':
+      return hasFiniteNumber(value.payload.sentAt)
+        && hasFiniteNumber(value.payload.receivedAt);
+    case 'mux-error':
+      return typeof value.payload.code === 'string' && typeof value.payload.message === 'string';
+    default:
+      return false;
+  }
+}
+
+export function validateTerminalMuxChannelEnvelope(
+  frame: Pick<TerminalMuxClientFrame | TerminalMuxServerFrame, 'type' | 'payload'>,
+  options: {
+    hasChannel: (channelId: string) => boolean;
+    expectedChannelId?: string;
+  },
+): { ok: true; channelId: string } | { ok: false; error: TerminalMuxServerFrame } {
+  if (!isRecord(frame.payload) || !('channelId' in frame.payload)) {
+    return {
+      ok: false,
+      error: buildTerminalMuxError('mux_protocol_invalid', 'mux frame is missing channelId'),
+    };
+  }
+  const channelId = asNonEmptyString(frame.payload.channelId);
+  if (!channelId) {
+    return {
+      ok: false,
+      error: buildTerminalMuxError('mux_protocol_invalid', 'mux frame has empty channelId'),
+    };
+  }
+  const expectedChannelId = asNonEmptyString(options.expectedChannelId);
+  if (expectedChannelId && expectedChannelId !== channelId) {
+    return {
+      ok: false,
+      error: buildTerminalMuxError('mux_channel_mismatch', `mux channel ${channelId} does not match expected channel ${expectedChannelId}`, channelId),
+    };
+  }
+  if (!options.hasChannel(channelId)) {
+    return {
+      ok: false,
+      error: buildTerminalMuxError('mux_unknown_channel', `mux channel ${channelId} is not open`, channelId),
+    };
+  }
+  return { ok: true, channelId };
 }

@@ -36,6 +36,7 @@ function makeDeps(overrides?: Partial<TerminalMessageControlRuntimeDeps>): Termi
     runTmux: vi.fn(() => ({ ok: true, stdout: '' })),
     sanitizeSessionName: (input?: string) => (input || '').trim(),
     createTransportSubscriber: vi.fn(() => makeSession()),
+    createMuxChannelSubscriber: vi.fn(() => makeSession()),
     bindConnectionToSubscriber: vi.fn((_connection, session) => session),
     getMirrorKey: (sessionName: string) => sessionName,
     attachTmux: vi.fn(),

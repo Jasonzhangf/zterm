@@ -33,6 +33,7 @@ function createConnection(id = 'connection-1'): DaemonTransportConnection {
     role: 'session',
     boundSubscriberId: 'session-1',
     wsAlive: true,
+    lastInboundAt: Date.now(),
     closeTransport: vi.fn(),
     transport: {
       kind: 'ws',
@@ -50,6 +51,8 @@ function createRuntime(handleMessage: (connection: DaemonTransportConnection, ra
   const connections = new Map<string, DaemonTransportConnection>();
   const wss = new WebSocketServer({ noServer: true });
   const connection = createConnection();
+  const detachSubscriberTransportOnly = vi.fn();
+  const refreshAdaptiveWidthLeaseHeartbeat = vi.fn();
   const runtime = createTerminalBridgeRuntime({
     requiredAuthToken: 'test-token',
     sessions,
@@ -61,14 +64,17 @@ function createRuntime(handleMessage: (connection: DaemonTransportConnection, ra
     createWebSocketSessionTransport: () => connection.transport,
     createRtcSessionTransport: () => connection.transport,
     createTransportConnection: () => connection,
-    detachSubscriberTransportOnly: vi.fn(),
-    refreshAdaptiveWidthLeaseHeartbeat: vi.fn(),
+    detachSubscriberTransportOnly,
+    refreshAdaptiveWidthLeaseHeartbeat,
     handleMessage,
   });
   return {
     connection,
     connections,
+    detachSubscriberTransportOnly,
+    refreshAdaptiveWidthLeaseHeartbeat,
     runtime,
+    sessions,
     wss,
   };
 }
@@ -236,6 +242,53 @@ describe('terminal bridge runtime message scheduling', () => {
     await flushMicrotasks();
 
     expect(events).toEqual(['connect:start', 'connect:end', 'input:pwd']);
+    wss.close();
+  });
+
+  it('detaches every mux channel subscriber when the physical websocket closes', async () => {
+    const { connection, detachSubscriberTransportOnly, runtime, sessions, wss } = createRuntime(async () => {});
+    connection.boundSubscriberId = null;
+    connection.muxChannels = new Map([
+      ['channel-a', 'subscriber-a'],
+      ['channel-b', 'subscriber-b'],
+    ]);
+    const subscriberA = {
+      id: 'subscriber-a',
+      transportId: connection.transportId,
+      transport: connection.transport,
+      sessionName: 'alpha',
+      mirrorKey: 'alpha',
+      pendingPasteImage: null,
+      pendingAttachFile: null,
+    } as TerminalTransportSubscriber;
+    const subscriberB = {
+      id: 'subscriber-b',
+      transportId: connection.transportId,
+      transport: connection.transport,
+      sessionName: 'beta',
+      mirrorKey: 'beta',
+      pendingPasteImage: null,
+      pendingAttachFile: null,
+    } as TerminalTransportSubscriber;
+    sessions.set(subscriberA.id, subscriberA);
+    sessions.set(subscriberB.id, subscriberB);
+    const ws = new FakeWebSocket();
+
+    runtime.handleWebSocketConnection(ws as never, createRequest());
+    ws.emit('close', 1006, Buffer.from('network gone'));
+    await flushMicrotasks();
+
+    expect(detachSubscriberTransportOnly).toHaveBeenCalledWith(
+      subscriberA,
+      'websocket closed',
+      connection.transportId,
+    );
+    expect(detachSubscriberTransportOnly).toHaveBeenCalledWith(
+      subscriberB,
+      'websocket closed',
+      connection.transportId,
+    );
+    expect(connection.muxChannels.size).toBe(0);
     wss.close();
   });
 });

@@ -69,6 +69,27 @@ describe('session-context-public-runtime schedule send lifecycle', () => {
     expect(sendSocketPayload).toHaveBeenCalledTimes(1);
   });
 
+  it('sendMessageRuntime uses the mux effective socket from the transport resource when legacy socket is missing', () => {
+    const sendSocketPayload = vi.fn();
+    const muxSocket = { readyState: WebSocket.OPEN } as any;
+
+    expect(sendMessageRuntime({
+      sessionId: 'session-1',
+      msg: { type: 'schedule-list', payload: { sessionName: 'tmux-1' } },
+      readSessionTransportResource: () => ({
+        socket: muxSocket,
+      } as any),
+      readSessionTransportSocket: () => null,
+      sendSocketPayload,
+    })).toBe(true);
+
+    expect(sendSocketPayload).toHaveBeenCalledWith(
+      'session-1',
+      muxSocket,
+      JSON.stringify({ type: 'schedule-list', payload: { sessionName: 'tmux-1' } }),
+    );
+  });
+
   it('requestScheduleListRuntime writes a visible transport error when send fails', () => {
     const setScheduleStateForSession = vi.fn();
 

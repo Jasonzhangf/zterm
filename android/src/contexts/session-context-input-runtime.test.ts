@@ -21,7 +21,11 @@ function createSocket(readyState: number, bufferedAmount = 0) {
   } as any;
 }
 
-function createResource(sessionId: string, socket: any = null) {
+function createResource(
+  sessionId: string,
+  socket: any = null,
+  channel: ReturnType<Parameters<typeof sendInputThroughSessionTransport>[0]['readSessionTransportResource']>['channel'] = null,
+) {
   return {
     sessionId,
     runtime: null,
@@ -34,6 +38,8 @@ function createResource(sessionId: string, socket: any = null) {
       ? (socket.readyState === WebSocket.OPEN ? 'open' : 'unknown')
       : 'missing',
     controlSocket: null,
+    terminalSocket: null,
+    channel,
     requestedTerminalGeometry: null,
   } as const;
 }
@@ -380,6 +386,38 @@ describe('session-context-input-runtime', () => {
       'session-2',
       resourceWs,
       JSON.stringify({ type: 'input', payload: 'pwd\r' }),
+    );
+  });
+
+  it('does not send terminal input while a mux channel is still opening on an open target socket', () => {
+    const resourceWs = createSocket(WebSocket.OPEN);
+    const sendSocketPayload = vi.fn();
+    const runtimeDebug = vi.fn();
+
+    sendInput({
+      runtimeDebug,
+      readSessionTransportResource: (sessionId) => createResource(sessionId, resourceWs, {
+        channelId: 'channel-b',
+        sessionId,
+        sessionName: 'tmux-b',
+        targetKey: 'target-a',
+        state: 'opening',
+        bodySubscribed: true,
+        openedAt: 1,
+        closedAt: null,
+      }),
+      readSessionTransportSocket: () => null,
+      sendSocketPayload,
+      hasPendingSessionTransportOpen: () => true,
+    });
+
+    expect(sendSocketPayload).not.toHaveBeenCalled();
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.input.drop.pending-transport-open',
+      expect.objectContaining({
+        sessionId: 'session-2',
+        resourceSocketState: 'open',
+      }),
     );
   });
 

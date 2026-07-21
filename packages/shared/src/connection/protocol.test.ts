@@ -1,0 +1,222 @@
+import { describe, expect, it } from 'vitest';
+import {
+  TERMINAL_MUX_PROTOCOL_VERSION,
+  buildTerminalMuxCapabilities,
+  buildTerminalMuxChannelBinary,
+  buildTerminalMuxChannelMessage,
+  buildTerminalMuxError,
+  buildTerminalMuxHello,
+  buildTerminalMuxReady,
+  buildTerminalMuxServerChannelMessage,
+  buildTerminalMuxServerTargetMessage,
+  buildTerminalMuxTargetMessage,
+  buildTerminalMuxUnwrappedSessionMessageError,
+  classifyTerminalMuxClientMessage,
+  isTerminalMuxClientFrame,
+  isTerminalMuxServerFrame,
+  validateTerminalMuxChannelEnvelope,
+  type TerminalMuxChannelClientMessage,
+  type TerminalMuxTargetClientMessage,
+} from './protocol';
+
+describe('terminal mux protocol contract', () => {
+  it('builds and validates hello / ready frames with explicit version and capabilities', () => {
+    const hello = buildTerminalMuxHello('android-client-1');
+    expect(hello).toEqual({
+      type: 'mux-hello',
+      payload: {
+        version: TERMINAL_MUX_PROTOCOL_VERSION,
+        clientInstanceId: 'android-client-1',
+      },
+    });
+    expect(isTerminalMuxClientFrame(hello)).toBe(true);
+    expect(isTerminalMuxClientFrame({
+      type: 'mux-hello',
+      payload: { version: 2, clientInstanceId: 'android-client-1' },
+    })).toBe(false);
+
+    const ready = buildTerminalMuxReady({
+      daemonHostId: 'daemon-a',
+      capabilities: buildTerminalMuxCapabilities({
+        relayPeerResume: {
+          version: 1,
+          idleTimeoutMs: 120000,
+        },
+      }),
+    });
+    expect(isTerminalMuxServerFrame(ready)).toBe(true);
+    expect(ready.payload.capabilities).toMatchObject({
+      version: TERMINAL_MUX_PROTOCOL_VERSION,
+      channelEnvelope: true,
+      targetMessages: true,
+      boundedBodyScheduler: true,
+      relayPeerResume: {
+        version: 1,
+        idleTimeoutMs: 120000,
+      },
+    });
+  });
+
+  it('classifies target, channel, and legacy messages without hidden fallback', () => {
+    expect(classifyTerminalMuxClientMessage({ type: 'list-sessions' })).toBe('target');
+    expect(classifyTerminalMuxClientMessage({ type: 'tmux-kill-session' })).toBe('target');
+    expect(classifyTerminalMuxClientMessage({ type: 'input' })).toBe('channel');
+    expect(classifyTerminalMuxClientMessage({ type: 'debug-log' })).toBe('channel');
+    expect(classifyTerminalMuxClientMessage({ type: 'debug-snapshot' })).toBe('channel');
+    expect(classifyTerminalMuxClientMessage({ type: 'remote-window-input' })).toBe('channel');
+    expect(classifyTerminalMuxClientMessage({ type: 'session-open' })).toBe('legacy');
+    expect(classifyTerminalMuxClientMessage({ type: 'connect' })).toBe('legacy');
+  });
+
+  it('wraps session-bound payloads in channel envelopes and rejects target payloads there', () => {
+    const inputMessage = {
+      type: 'input',
+      payload: 'ls\n',
+    } satisfies TerminalMuxChannelClientMessage;
+
+    const frame = buildTerminalMuxChannelMessage('channel-main', inputMessage);
+    expect(frame).toEqual({
+      type: 'mux-channel-message',
+      payload: {
+        channelId: 'channel-main',
+        message: inputMessage,
+      },
+    });
+    expect(isTerminalMuxClientFrame(frame)).toBe(true);
+
+    const targetMessage = {
+      type: 'list-sessions',
+    } satisfies TerminalMuxTargetClientMessage;
+
+    expect(() => buildTerminalMuxChannelMessage(
+      'channel-main',
+      targetMessage as unknown as TerminalMuxChannelClientMessage,
+    )).toThrow(/cannot carry list-sessions/);
+    expect(buildTerminalMuxTargetMessage(targetMessage)).toEqual({
+      type: 'mux-target-message',
+      payload: {
+        message: targetMessage,
+      },
+    });
+  });
+
+  it('returns explicit errors for unwrapped session messages and channel validation failures', () => {
+    expect(buildTerminalMuxUnwrappedSessionMessageError('input')).toEqual(
+      buildTerminalMuxError(
+        'mux_unwrapped_session_message',
+        'session-bound message input must be sent inside mux-channel-message',
+      ),
+    );
+
+    const unknown = validateTerminalMuxChannelEnvelope(
+      {
+        type: 'mux-channel-message',
+        payload: {
+          channelId: 'missing',
+          message: { type: 'input', payload: 'x' },
+        },
+      },
+      { hasChannel: () => false },
+    );
+    expect(unknown).toMatchObject({
+      ok: false,
+      error: {
+        type: 'mux-error',
+        payload: {
+          code: 'mux_unknown_channel',
+          channelId: 'missing',
+        },
+      },
+    });
+
+    const mismatch = validateTerminalMuxChannelEnvelope(
+      {
+        type: 'mux-channel-message',
+        payload: {
+          channelId: 'channel-b',
+          message: { type: 'input', payload: 'x' },
+        },
+      },
+      {
+        expectedChannelId: 'channel-a',
+        hasChannel: () => true,
+      },
+    );
+    expect(mismatch).toMatchObject({
+      ok: false,
+      error: {
+        type: 'mux-error',
+        payload: {
+          code: 'mux_channel_mismatch',
+          channelId: 'channel-b',
+        },
+      },
+    });
+  });
+
+  it('accepts only known channel client message envelopes', () => {
+    expect(isTerminalMuxClientFrame({
+      type: 'mux-channel-message',
+      payload: {
+        channelId: 'channel-a',
+        message: { type: 'input', payload: 'pwd\n' },
+      },
+    })).toBe(true);
+    expect(isTerminalMuxClientFrame({
+      type: 'mux-channel-message',
+      payload: {
+        channelId: 'channel-a',
+        message: { type: 'list-sessions' },
+      },
+    })).toBe(false);
+    expect(isTerminalMuxClientFrame({
+      type: 'input',
+      payload: 'pwd\n',
+    })).toBe(false);
+  });
+
+  it('wraps binary upload chunks with explicit channel identity', () => {
+    const frame = buildTerminalMuxChannelBinary('channel-a', 'aGVsbG8=');
+    expect(frame).toEqual({
+      type: 'mux-channel-binary',
+      payload: {
+        channelId: 'channel-a',
+        dataBase64: 'aGVsbG8=',
+      },
+    });
+    expect(isTerminalMuxClientFrame(frame)).toBe(true);
+    expect(isTerminalMuxClientFrame({
+      type: 'mux-channel-binary',
+      payload: {
+        channelId: '',
+        dataBase64: 'aGVsbG8=',
+      },
+    })).toBe(false);
+  });
+
+  it('wraps server-side session responses in channel envelopes without treating generic errors as target-only', () => {
+    expect(buildTerminalMuxServerChannelMessage('channel-a', {
+      type: 'error',
+      payload: {
+        message: 'resize requires an attached mirror',
+        code: 'session_not_ready',
+      },
+    })).toEqual({
+      type: 'mux-channel-message',
+      payload: {
+        channelId: 'channel-a',
+        message: {
+          type: 'error',
+          payload: {
+            message: 'resize requires an attached mirror',
+            code: 'session_not_ready',
+          },
+        },
+      },
+    });
+    expect(isTerminalMuxServerFrame(buildTerminalMuxServerTargetMessage({
+      type: 'sessions',
+      payload: { sessions: ['a', 'b'] },
+    }))).toBe(true);
+  });
+});

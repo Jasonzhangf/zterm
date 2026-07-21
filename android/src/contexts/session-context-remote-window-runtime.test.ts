@@ -138,6 +138,40 @@ describe('session context remote window runtime', () => {
     expect(requestTargets).toHaveBeenCalledTimes(1);
   });
 
+  it('honors explicit force-refresh even when the daemon app catalog cache is fresh', async () => {
+    const ws = makeSocket();
+    const targetCatalogCache = new Map();
+    const requestTargets = vi.fn()
+      .mockResolvedValueOnce({ requestId: 'rw-first', targets: [], errors: [] })
+      .mockResolvedValueOnce({ requestId: 'rw-refresh', targets: [makeTarget()], errors: [] });
+
+    await requestRemoteWindowTargetsRuntime({
+      sessionId: 'session-1',
+      sessions: [{ ...baseSession, bridgeHost: '100.66.1.82', bridgePort: 3333 }],
+      readSessionTransportSocket: () => ws,
+      remoteWindowMessageRuntime: { requestTargets },
+      sendSocketPayload: vi.fn(),
+      targetCatalogCache,
+      now: () => 10_000,
+    });
+
+    await expect(requestRemoteWindowTargetsRuntime({
+      sessionId: 'session-1',
+      sessions: [{ ...baseSession, bridgeHost: '100.66.1.82', bridgePort: 3333 }],
+      readSessionTransportSocket: () => ws,
+      remoteWindowMessageRuntime: { requestTargets },
+      sendSocketPayload: vi.fn(),
+      targetCatalogCache,
+      forceRefresh: true,
+      now: () => 10_001,
+    })).resolves.toMatchObject({
+      requestId: 'rw-refresh',
+      targets: [expect.objectContaining({ streamTargetId: 'pane-1' })],
+    });
+
+    expect(requestTargets).toHaveBeenCalledTimes(2);
+  });
+
   it('shares the daemon app catalog cache across session switches on the same daemon', async () => {
     const ws = makeSocket();
     const targetCatalogCache = new Map();

@@ -1,4 +1,16 @@
 import type { RawData } from 'ws';
+import {
+  buildTerminalMuxCapabilities,
+  buildTerminalMuxError,
+  buildTerminalMuxReady,
+  buildTerminalMuxServerTargetMessage,
+  buildTerminalMuxUnwrappedSessionMessageError,
+  classifyTerminalMuxClientMessage,
+  isTerminalMuxClientFrame,
+  validateTerminalMuxChannelEnvelope,
+  type TerminalMuxClientFrame,
+  type TerminalMuxServerFrame,
+} from '@zterm/shared/protocol';
 import { buildRequestedRangeBufferPayload } from './buffer-sync-contract';
 import { TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES } from '@zterm/shared/terminal/input-chunking';
 // R13: hard cap on a single input frame. Anything larger must be chunked by
@@ -110,6 +122,238 @@ export function createTerminalMessageRuntime(
       type: 'input-ack',
       payload,
     });
+  }
+
+  function sendMuxFrame(connection: TerminalTransportConnection, frame: TerminalMuxServerFrame) {
+    deps.sendTransportMessage(connection.transport, frame as unknown as ServerMessage);
+  }
+
+  function resolveMuxChannelSubscriber(
+    connection: TerminalTransportConnection,
+    channelId: string,
+  ): TerminalSession | null {
+    const subscriberId = connection.muxChannels?.get(channelId) || '';
+    return subscriberId ? deps.sessions.get(subscriberId) || null : null;
+  }
+
+  function createMuxChannelMessageConnection(
+    connection: TerminalTransportConnection,
+    subscriber: TerminalSession,
+  ): TerminalTransportConnection {
+    return {
+      ...connection,
+      role: 'session',
+      boundSubscriberId: subscriber.id,
+      transport: subscriber.transport || connection.transport,
+      closeTransport: subscriber.closeTransport || (() => {}),
+      muxVersion: undefined,
+      muxClientInstanceId: null,
+      muxChannels: undefined,
+    };
+  }
+
+  function createMuxTargetMessageConnection(
+    connection: TerminalTransportConnection,
+    requestId?: string,
+  ): TerminalTransportConnection {
+    return {
+      ...connection,
+      boundSubscriberId: null,
+      transport: {
+        kind: connection.transport.kind,
+        requestOrigin: connection.requestOrigin,
+        connectedSent: false,
+        get readyState() {
+          return connection.transport.readyState;
+        },
+        get bufferedAmount() {
+          return Math.max(0, Math.floor(connection.transport.bufferedAmount || 0));
+        },
+        sendText(text: string) {
+          let message: ServerMessage;
+          try {
+            message = JSON.parse(text) as ServerMessage;
+          } catch {
+            sendMuxFrame(connection, buildTerminalMuxError(
+              'mux_protocol_invalid',
+              'mux target send requires a JSON server message',
+            ));
+            return;
+          }
+          sendMuxFrame(
+            connection,
+            buildTerminalMuxServerTargetMessage(
+              message as Parameters<typeof buildTerminalMuxServerTargetMessage>[0],
+              requestId,
+            ),
+          );
+        },
+        close: connection.transport.close,
+        ping: connection.transport.ping,
+      },
+      muxVersion: undefined,
+      muxClientInstanceId: null,
+      muxChannels: undefined,
+    };
+  }
+
+  function rejectMuxProtocol(connection: TerminalTransportConnection, message: string, channelId?: string) {
+    sendMuxFrame(connection, buildTerminalMuxError('mux_protocol_invalid', message, channelId));
+  }
+
+  async function handleMuxFrame(connection: TerminalTransportConnection, candidate: unknown) {
+    if (!isTerminalMuxClientFrame(candidate)) {
+      rejectMuxProtocol(connection, 'invalid terminal mux frame');
+      return;
+    }
+    const frame = candidate as TerminalMuxClientFrame;
+    switch (frame.type) {
+      case 'mux-hello':
+        connection.muxVersion = frame.payload.version;
+        connection.muxClientInstanceId = frame.payload.clientInstanceId;
+        if (!connection.muxChannels) {
+          connection.muxChannels = new Map();
+        }
+        sendMuxFrame(connection, buildTerminalMuxReady({
+          capabilities: buildTerminalMuxCapabilities({
+            reliableInput: { version: 1 },
+          }),
+        }));
+        return;
+      case 'mux-target-message': {
+        await handleMessage(
+          createMuxTargetMessageConnection(connection, frame.payload.requestId),
+          Buffer.from(JSON.stringify(frame.payload.message)),
+        );
+        return;
+      }
+      case 'mux-channel-open': {
+        if (!connection.muxVersion) {
+          sendMuxFrame(connection, buildTerminalMuxError(
+            'daemon_multiplex_upgrade_required',
+            'mux-channel-open requires mux-hello / mux-ready first',
+            frame.payload.channelId,
+          ));
+          return;
+        }
+        if (!connection.muxChannels) {
+          connection.muxChannels = new Map();
+        }
+        if (connection.muxChannels.has(frame.payload.channelId)) {
+          sendMuxFrame(connection, buildTerminalMuxError(
+            'mux_duplicate_channel',
+            `mux channel ${frame.payload.channelId} is already open`,
+            frame.payload.channelId,
+          ));
+          return;
+        }
+        const subscriber = deps.controlRuntimeDeps.createMuxChannelSubscriber(connection, frame.payload.channelId);
+        subscriber.sessionName = deps.controlRuntimeDeps.sanitizeSessionName(frame.payload.sessionName);
+        sendMuxFrame(connection, {
+          type: 'mux-channel-opened',
+          payload: {
+            channelId: frame.payload.channelId,
+            sessionName: subscriber.sessionName,
+            capabilities: {
+              reliableInput: { version: 1 },
+            },
+          },
+        });
+        void deps.controlRuntimeDeps.attachTmux(subscriber, {
+          sessionName: frame.payload.sessionName,
+          cols: frame.payload.cols,
+          rows: frame.payload.rows,
+          widthMode: frame.payload.widthMode,
+          autoCommand: frame.payload.autoCommand,
+        }).catch((error: unknown) => {
+          sendMuxFrame(connection, {
+            type: 'mux-channel-message',
+            payload: {
+              channelId: frame.payload.channelId,
+              message: {
+                type: 'error',
+                payload: {
+                  message: error instanceof Error ? error.message : 'Invalid mux channel open payload',
+                  code: 'mux_channel_open_failed',
+                },
+              },
+            },
+          });
+        });
+        return;
+      }
+      case 'mux-channel-message': {
+        const envelope = validateTerminalMuxChannelEnvelope(frame, {
+          hasChannel: (channelId) => Boolean(resolveMuxChannelSubscriber(connection, channelId)),
+        });
+        if (!envelope.ok) {
+          sendMuxFrame(connection, envelope.error);
+          return;
+        }
+        const subscriber = resolveMuxChannelSubscriber(connection, envelope.channelId);
+        if (!subscriber) {
+          sendMuxFrame(connection, buildTerminalMuxError(
+            'mux_unknown_channel',
+            `mux channel ${envelope.channelId} is not open`,
+            envelope.channelId,
+          ));
+          return;
+        }
+        await handleMessage(
+          createMuxChannelMessageConnection(connection, subscriber),
+          Buffer.from(JSON.stringify(frame.payload.message)),
+        );
+        return;
+      }
+      case 'mux-channel-binary': {
+        const envelope = validateTerminalMuxChannelEnvelope(frame, {
+          hasChannel: (channelId) => Boolean(resolveMuxChannelSubscriber(connection, channelId)),
+        });
+        if (!envelope.ok) {
+          sendMuxFrame(connection, envelope.error);
+          return;
+        }
+        const subscriber = resolveMuxChannelSubscriber(connection, envelope.channelId);
+        if (!subscriber) {
+          sendMuxFrame(connection, buildTerminalMuxError(
+            'mux_unknown_channel',
+            `mux channel ${envelope.channelId} is not open`,
+            envelope.channelId,
+          ));
+          return;
+        }
+        await handleMessage(
+          createMuxChannelMessageConnection(connection, subscriber),
+          Buffer.from(frame.payload.dataBase64, 'base64'),
+          true,
+        );
+        return;
+      }
+      case 'mux-channel-close': {
+        const envelope = validateTerminalMuxChannelEnvelope(frame, {
+          hasChannel: (channelId) => Boolean(resolveMuxChannelSubscriber(connection, channelId)),
+        });
+        if (!envelope.ok) {
+          sendMuxFrame(connection, envelope.error);
+          return;
+        }
+        const subscriber = resolveMuxChannelSubscriber(connection, envelope.channelId);
+        if (subscriber) {
+          connection.muxChannels?.delete(envelope.channelId);
+          deps.closeSession(subscriber, frame.payload.reason || 'client requested channel close', false);
+        }
+        return;
+      }
+      case 'mux-ping':
+        sendMuxFrame(connection, {
+          type: 'mux-pong',
+          payload: {
+            sentAt: frame.payload.sentAt,
+            receivedAt: Date.now(),
+          },
+        });
+        return;
+    }
   }
 
   function normalizeReliableInputPayload(payload: unknown): TerminalReliableInputPayload | null {
@@ -334,6 +578,26 @@ export function createTerminalMessageRuntime(
           await writeInputIfCurrent(connection, text);
           return;
         }
+
+    if (typeof (message as { type?: unknown }).type === 'string' && (message as { type: string }).type.startsWith('mux-')) {
+      await handleMuxFrame(connection, message);
+      return;
+    }
+
+    if (connection.muxVersion) {
+      const messageType = (message as { type?: unknown }).type;
+      if (typeof messageType === 'string' && classifyTerminalMuxClientMessage(message) === 'channel') {
+        sendMuxFrame(connection, buildTerminalMuxUnwrappedSessionMessageError(messageType));
+        return;
+      }
+      if (typeof messageType === 'string' && classifyTerminalMuxClientMessage(message) === 'legacy') {
+        sendMuxFrame(connection, buildTerminalMuxError(
+          'mux_unwrapped_session_message',
+          `legacy message ${messageType} is not valid after mux-ready`,
+        ));
+        return;
+      }
+    }
 
     switch (message.type) {
       case 'session-open':

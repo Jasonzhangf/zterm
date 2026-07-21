@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES } from '@zterm/shared/terminal/input-chunking';
 import { createTerminalMessageRuntime } from './terminal-message-runtime';
 import type { TerminalMessageRuntimeDeps } from './terminal-message-runtime';
+import type { ServerMessage } from '../lib/types';
 import type {
   TerminalSession,
   TerminalSessionTransport,
@@ -139,6 +140,7 @@ function flushAsyncHandlers() {
 
 function createRuntime(options?: {
   mirror?: SessionMirror | null;
+  passThroughTransportSend?: boolean;
 }) {
   type RemoteWindowListTargetsResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['listTargets']>>;
       type RemoteWindowStartStreamResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['startStream']>>;
@@ -146,7 +148,11 @@ function createRuntime(options?: {
       type RemoteWindowQualityResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['updateStreamQuality']>>;
       type RemoteWindowInputResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['injectInput']>>;
   const sessions = new Map<string, TerminalSession>();
-  const sendTransportMessage = vi.fn();
+  const sendTransportMessage = vi.fn((transport: TerminalSessionTransport | null | undefined, message: ServerMessage) => {
+    if (options?.passThroughTransportSend && transport?.sendText) {
+      transport.sendText(JSON.stringify(message));
+    }
+  });
   const sendMessage = vi.fn();
   const sendBufferHeadToSession = vi.fn();
   const scheduleMirrorLiveSync = vi.fn();
@@ -200,6 +206,21 @@ function createRuntime(options?: {
     dispose: vi.fn(),
   };
 
+  const createMuxChannelSubscriber = vi.fn((connection: TerminalTransportConnection, channelId: string) => {
+    const subscriber = createSession(`${connection.transportId}:${channelId}`);
+    subscriber.transportId = connection.transportId;
+    subscriber.transport = createTransport();
+    subscriber.closeTransport = vi.fn();
+    subscriber.muxChannelId = channelId;
+    subscriber.muxParentTransportId = connection.transportId;
+    if (!connection.muxChannels) {
+      connection.muxChannels = new Map();
+    }
+    connection.muxChannels.set(channelId, subscriber.id);
+    sessions.set(subscriber.id, subscriber);
+    return subscriber;
+  });
+
   const runtime = createTerminalMessageRuntime({
     sessions,
     sendTransportMessage,
@@ -240,6 +261,7 @@ function createRuntime(options?: {
       runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
       sanitizeSessionName: vi.fn((input?: string) => input?.trim() || 'demo'),
       createTransportSubscriber: vi.fn(),
+      createMuxChannelSubscriber,
       bindConnectionToSubscriber: vi.fn(),
       getMirrorKey: vi.fn((sessionName: string) => sessionName),
       attachTmux: vi.fn(async () => {}),
@@ -264,10 +286,223 @@ function createRuntime(options?: {
     daemonRuntimeDebug,
     terminalFileTransferRuntime,
     remoteWindowStreamRuntime,
+    createMuxChannelSubscriber,
   };
 }
 
 describe('terminal message runtime explicit error truth', () => {
+  it('negotiates mux readiness and wraps target replies on the same physical transport', async () => {
+    const { runtime } = createRuntime({ passThroughTransportSend: true });
+    const connection = createConnection(null);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-hello',
+      payload: {
+        version: 1,
+        clientInstanceId: 'android-client-1',
+      },
+    })));
+
+    expect(connection.muxVersion).toBe(1);
+    expect(connection.transport.sendText).toHaveBeenCalledWith(expect.stringContaining('"type":"mux-ready"'));
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-target-message',
+      payload: {
+        requestId: 'list-1',
+        message: { type: 'list-sessions' },
+      },
+    })));
+
+    const sentFrames = (connection.transport.sendText as ReturnType<typeof vi.fn>).mock.calls
+      .map((call) => JSON.parse(String(call[0])) as { type: string; payload?: unknown });
+    expect(sentFrames).toContainEqual({
+      type: 'mux-target-message',
+      payload: {
+        requestId: 'list-1',
+        message: {
+          type: 'sessions',
+          payload: { sessions: [] },
+        },
+      },
+    });
+  });
+
+  it('binds multiple mux channels on one connection and routes input only to the owning subscriber', async () => {
+    const { runtime, sessions, handleInput, createMuxChannelSubscriber } = createRuntime();
+    const connection = createConnection(null);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-hello',
+      payload: {
+        version: 1,
+        clientInstanceId: 'android-client-1',
+      },
+    })));
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-channel-open',
+      payload: {
+        channelId: 'channel-a',
+        sessionName: 'alpha',
+      },
+    })));
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-channel-open',
+      payload: {
+        channelId: 'channel-b',
+        sessionName: 'beta',
+      },
+    })));
+
+    expect(createMuxChannelSubscriber).toHaveBeenCalledTimes(2);
+    expect(connection.muxChannels?.size).toBe(2);
+    const subscriberA = sessions.get('transport-1:channel-a');
+    const subscriberB = sessions.get('transport-1:channel-b');
+    expect(subscriberA).toBeTruthy();
+    expect(subscriberB).toBeTruthy();
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-channel-message',
+      payload: {
+        channelId: 'channel-b',
+        message: {
+          type: 'input',
+          payload: 'echo beta\r',
+        },
+      },
+    })));
+
+    expect(handleInput).toHaveBeenCalledTimes(1);
+    expect(handleInput).toHaveBeenCalledWith(subscriberB, 'echo beta\r', expect.any(Function));
+    expect(handleInput).not.toHaveBeenCalledWith(subscriberA, expect.anything(), expect.anything());
+  });
+
+  it('routes mux binary chunks only to the owning channel subscriber', async () => {
+    const { runtime, sessions, terminalFileTransferRuntime } = createRuntime();
+    const connection = createConnection(null);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-hello',
+      payload: {
+        version: 1,
+        clientInstanceId: 'android-client-1',
+      },
+    })));
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-channel-open',
+      payload: {
+        channelId: 'channel-a',
+        sessionName: 'alpha',
+      },
+    })));
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-channel-open',
+      payload: {
+        channelId: 'channel-b',
+        sessionName: 'beta',
+      },
+    })));
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-channel-binary',
+      payload: {
+        channelId: 'channel-b',
+        dataBase64: Buffer.from('image-chunk').toString('base64'),
+      },
+    })));
+
+    const subscriberA = sessions.get('transport-1:channel-a');
+    const subscriberB = sessions.get('transport-1:channel-b');
+    expect(terminalFileTransferRuntime.handleBinaryPayload).toHaveBeenCalledTimes(1);
+    expect(terminalFileTransferRuntime.handleBinaryPayload).toHaveBeenCalledWith(
+      subscriberB,
+      Buffer.from('image-chunk'),
+    );
+    expect(terminalFileTransferRuntime.handleBinaryPayload).not.toHaveBeenCalledWith(
+      subscriberA,
+      expect.anything(),
+    );
+  });
+
+  it('rejects mux binary chunks for unknown channels before file-transfer truth', async () => {
+    const { runtime, sendTransportMessage, terminalFileTransferRuntime } = createRuntime();
+    const connection = createConnection(null);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-hello',
+      payload: {
+        version: 1,
+        clientInstanceId: 'android-client-1',
+      },
+    })));
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-channel-binary',
+      payload: {
+        channelId: 'missing-channel',
+        dataBase64: Buffer.from('orphan').toString('base64'),
+      },
+    })));
+
+    expect(terminalFileTransferRuntime.handleBinaryPayload).not.toHaveBeenCalled();
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'mux-error',
+      payload: expect.objectContaining({
+        code: 'mux_unknown_channel',
+        channelId: 'missing-channel',
+      }),
+    });
+  });
+
+  it('rejects unknown mux channels without mutating input or buffer truth', async () => {
+    const { runtime, sendTransportMessage, handleInput, sendMessage } = createRuntime();
+    const connection = createConnection(null);
+    connection.muxVersion = 1;
+    connection.muxChannels = new Map();
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-channel-message',
+      payload: {
+        channelId: 'missing-channel',
+        message: {
+          type: 'input',
+          payload: 'should-not-write\r',
+        },
+      },
+    })));
+
+    expect(handleInput).not.toHaveBeenCalled();
+    expect(sendMessage).not.toHaveBeenCalled();
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'mux-error',
+      payload: {
+        code: 'mux_unknown_channel',
+        message: 'mux channel missing-channel is not open',
+        channelId: 'missing-channel',
+      },
+    });
+  });
+
+  it('rejects unwrapped session-bound messages after mux negotiation', async () => {
+    const { runtime, sendTransportMessage, handleInput } = createRuntime();
+    const connection = createConnection(null);
+    connection.muxVersion = 1;
+    connection.muxChannels = new Map();
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'input',
+      payload: 'bare-input\r',
+    })));
+
+    expect(handleInput).not.toHaveBeenCalled();
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'mux-error',
+      payload: {
+        code: 'mux_unwrapped_session_message',
+        message: 'session-bound message input must be sent inside mux-channel-message',
+      },
+    });
+  });
+
   it('updates physical body subscription without closing the transport, and resubscribe sends head truth plus live demand', async () => {
     const mirror = createReadyMirror();
     const { runtime, sessions, sendBufferHeadToSession, scheduleMirrorLiveSync } = createRuntime({ mirror });

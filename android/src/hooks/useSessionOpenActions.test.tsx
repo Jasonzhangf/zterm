@@ -697,7 +697,20 @@ describe('useSessionOpenActions explicit-open truth', () => {
 
     expect(createTmuxSessionMock).not.toHaveBeenCalled();
     expect(fetchTmuxSessionsMock).not.toHaveBeenCalled();
-    expect(harness.spies.createSession).not.toHaveBeenCalled();
+    expect(harness.spies.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        relayHostId: 'mac-studio',
+        sessionName: 'zterm',
+      }),
+      expect.objectContaining({
+        activate: false,
+        sessionId: 'runtime:mac-studio:zterm',
+        createdAt: 10,
+      }),
+    );
     expect(harness.spies.applyOpenTabState).toHaveBeenCalledWith(
       expect.objectContaining({
         activeSessionId: 'runtime:mac-studio:zterm',
@@ -714,6 +727,89 @@ describe('useSessionOpenActions explicit-open truth', () => {
       { switchRuntime: 'explicit-resume' },
     );
     expect(harness.spies.switchSession).not.toHaveBeenCalled();
+    expect(harness.spies.ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
+  });
+
+  it('rebinds an existing direct session to the current relay-aware route before resuming it', () => {
+    const relayEndpointCandidates = [
+      {
+        id: 'direct:tailscale:mac-studio',
+        kind: 'tailscale' as const,
+        host: '100.66.1.82',
+        port: 3333,
+        authRequired: true,
+        lastSeenAt: '2026-07-20T00:00:00.000Z',
+      },
+      {
+        id: 'relay-rtc:mac-studio',
+        kind: 'relay-rtc' as const,
+        relayHostId: 'mac-studio',
+        authRequired: true,
+        lastSeenAt: '2026-07-20T00:00:00.000Z',
+      },
+    ];
+    const harness = createOptions({
+      runtimeActiveSessionId: 'runtime:mac-studio:zterm',
+      sessions: [{
+        id: 'runtime:mac-studio:zterm',
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        sessionName: 'zterm',
+        state: 'connected',
+        createdAt: 10,
+        customName: 'Main Shell',
+      }],
+    });
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+    const relayServer = {
+      id: 'relay-device:mac-studio',
+      createdAt: 1,
+      name: 'Mac Studio',
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+      daemonHostId: 'mac-studio',
+      relayHostId: 'mac-studio',
+      relayDeviceId: 'mac-studio-device',
+      sessionName: 'zterm',
+      authToken: 'token-a',
+      transportMode: 'auto' as const,
+      relayEndpointCandidates,
+      authType: 'password' as const,
+      tags: ['relay-directory'],
+      pinned: false,
+    };
+
+    act(() => {
+      result.current.handleOpenSavedConnection(relayServer);
+    });
+
+    expect(fetchTmuxSessionsMock).not.toHaveBeenCalled();
+    expect(harness.spies.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        relayHostId: 'mac-studio',
+        relayDeviceId: 'mac-studio-device',
+        sessionName: 'zterm',
+        transportMode: 'auto',
+        relayEndpointCandidates,
+      }),
+      {
+        activate: false,
+        sessionId: 'runtime:mac-studio:zterm',
+        createdAt: 10,
+        customName: 'Main Shell',
+      },
+    );
+    expect(harness.spies.applyOpenTabState).toHaveBeenCalledWith(
+      expect.objectContaining({
+        activeSessionId: 'runtime:mac-studio:zterm',
+      }),
+      { switchRuntime: 'explicit-resume' },
+    );
+    expect(harness.spies.closeSession).not.toHaveBeenCalled();
     expect(harness.spies.ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
   });
 

@@ -90,11 +90,12 @@ function projectRelayDevicesFromAccountState(account: ReturnType<typeof readTrav
 interface AppContentProps {
   bridgeSettings: ReturnType<typeof useBridgeSettingsStorage>['settings'];
   setBridgeSettings: ReturnType<typeof useBridgeSettingsStorage>['setSettings'];
+  appForegroundActive?: boolean;
   onForegroundActiveChange?: (active: boolean) => void;
 }
 
 
-export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActiveChange }: AppContentProps) {
+export function AppContent({ bridgeSettings, setBridgeSettings, appForegroundActive = true, onForegroundActiveChange }: AppContentProps) {
   const [pendingPaneAttachIntent, setPendingPaneAttachIntent] = useState<{ sessionIds: string[]; paneId: string; nonce: number } | null>(null);
   const [relayDevices, setRelayDevices] = useState<TraversalRelayDeviceSnapshot[]>(() => projectRelayDevicesFromAccountState(readTraversalRelayAccountState()));
   const relayDeviceSocketRef = useRef<WebSocket | null>(null);
@@ -632,6 +633,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
     handleRefreshDrawerHostSessions,
     handleForceRelaySession,
     handleUseAutoSession,
+    handleUseWebSocketSession,
     closePicker,
   } = useSessionOpenActions({
     bridgeSettings,
@@ -797,6 +799,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
 
         {pageState.kind === 'terminal' && (
           <TerminalPage
+            appForegroundActive={appForegroundActive}
             sessions={terminalSessions}
             sessionGroups={sessionGroups}
             activeSession={terminalActiveSession}
@@ -808,6 +811,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, onForegroundActi
             onCloseSession={handleCloseSession}
             onForceRelaySession={handleForceRelaySession}
             onUseAutoSession={handleUseAutoSession}
+            onUseWebSocketSession={handleUseWebSocketSession}
             onOpenConnections={handleOpenConnectionsPageWithAudit}
             onOpenQuickTabPicker={handleOpenQuickTabPicker}
             onOpenDrawerRemoteSession={handleOpenGroupSession}
@@ -1045,6 +1049,7 @@ export default function App() {
       <AppContent
         bridgeSettings={bridgeSettings}
         setBridgeSettings={setBridgeSettings}
+        appForegroundActive={appForegroundActive}
         onForegroundActiveChange={setAppForegroundActive}
       />
     </SessionProvider>

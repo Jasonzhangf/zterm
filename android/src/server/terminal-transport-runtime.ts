@@ -13,6 +13,7 @@ import type { RtcServerTransport } from './rtc-bridge';
 export interface DaemonTransportConnection extends TerminalTransportConnection {
   id: string;
   wsAlive: boolean;
+  lastInboundAt: number;
 }
 
 export interface TerminalTransportBackpressureSnapshot {
@@ -51,6 +52,7 @@ export interface TerminalTransportRuntime {
 
 const TRANSPORT_BACKPRESSURE_BUFFERED_BYTES = 128_000;
 const TRANSPORT_BACKPRESSURE_LOW_WATER_BYTES = 64_000;
+export const TERMINAL_TRANSPORT_STALE_INBOUND_MS = 10_000;
 
 export function estimateTransportMessageBytes(text: string) {
   return Buffer.byteLength(text, 'utf8');
@@ -81,6 +83,14 @@ export function readTerminalTransportBackpressureSnapshot(
     lastSendAt: Math.max(0, Math.floor(transport.lastSendAt || 0)),
     lastSendError: transport.lastSendError || null,
   };
+}
+
+export function markTransportConnectionInboundActivity(
+  connection: DaemonTransportConnection,
+  now = Date.now(),
+) {
+  connection.wsAlive = true;
+  connection.lastInboundAt = now;
 }
 
 export function createTerminalTransportRuntime(
@@ -241,6 +251,7 @@ export function createTerminalTransportRuntime(
       },
       requestOrigin,
       wsAlive: true,
+      lastInboundAt: Date.now(),
       role: 'pending',
       boundSubscriberId: null,
     };

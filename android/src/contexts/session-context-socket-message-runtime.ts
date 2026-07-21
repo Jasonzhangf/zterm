@@ -116,7 +116,9 @@ export function handleSocketServerMessageRuntime(options: {
         daemonHostId: msg.payload.daemonHostId,
         reliableInputSupported: msg.payload.capabilities?.reliableInput?.version === 1,
       }));
-      params.onConnected();
+      if (currentSession?.state !== 'connected') {
+        params.onConnected();
+      }
       break;
     case 'buffer-sync':
       if (!shouldAcceptLiveBufferPayload) {

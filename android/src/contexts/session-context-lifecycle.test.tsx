@@ -288,9 +288,11 @@ describe('session-context-lifecycle', () => {
     });
   });
 
-  it('uses >=900ms timeout cadence while app foreground truth is false', () => {
+  it('does not start debug or refresh timers while app foreground truth is false', () => {
     vi.useFakeTimers();
     const setTimeoutSpy = vi.spyOn(window, 'setTimeout');
+    const setIntervalSpy = vi.spyOn(window, 'setInterval');
+    const ensureActiveSessionFresh = vi.fn(() => true);
 
     function Harness() {
       useSessionContextLifecycle({
@@ -327,7 +329,7 @@ describe('session-context-lifecycle', () => {
         },
         flushRuntimeDebugLogs: () => undefined,
         clientRuntimeDebugFlushIntervalMs: 10_000,
-        ensureActiveSessionFresh: vi.fn(() => true),
+        ensureActiveSessionFresh,
         resolveActiveHeadRefreshTickMs: () => 16,
         resolveHeadStalePingMs: () => 10_000,
         clearSessionHandshakeTimeout: () => undefined,
@@ -339,10 +341,12 @@ describe('session-context-lifecycle', () => {
 
     render(<Harness />);
 
-    const timeoutDelays = setTimeoutSpy.mock.calls
-      .map((call) => call[1])
-      .filter((delay): delay is number => typeof delay === 'number');
-    expect(timeoutDelays.length).toBeGreaterThan(0);
-    expect(Math.min(...timeoutDelays)).toBeGreaterThanOrEqual(900);
+    expect(setTimeoutSpy).not.toHaveBeenCalled();
+    expect(setIntervalSpy).not.toHaveBeenCalled();
+
+    act(() => {
+      vi.advanceTimersByTime(5_000);
+    });
+    expect(ensureActiveSessionFresh).not.toHaveBeenCalled();
   });
 });

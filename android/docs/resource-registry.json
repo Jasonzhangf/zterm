@@ -8,13 +8,30 @@
       "identity": "User runtime home such as ~/.wterm or ~/.zterm",
       "owner_feature": "daemon.runtime_entry",
       "truth_store": "~/.wterm",
-      "allowed_operations": ["read_runtime_config", "write_runtime_state", "stage_runtime_artifact"],
-      "direct_relations": ["resource.daemon_runtime_artifact"],
+      "allowed_operations": [
+        "read_runtime_config",
+        "write_runtime_state",
+        "stage_runtime_artifact"
+      ],
+      "direct_relations": [
+        "resource.daemon_runtime_artifact"
+      ],
       "indirect_relations": [],
       "via_resources": [],
-      "forbidden_direct_relations": ["resource.platform_terminal_surface", "resource.renderer_window", "resource.ui_projection"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/lib/mainline-resource-call-map.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", "docs/function-map.md", "docs/wiki/mainline-source.md"]
+      "forbidden_direct_relations": [
+        "resource.platform_terminal_surface",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/mainline-resource-call-map.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/wiki/mainline-source.md"
+      ]
     },
     {
       "resource_id": "resource.daemon_runtime_artifact",
@@ -22,13 +39,30 @@
       "identity": "Staged deterministic daemon runtime artifact",
       "owner_feature": "daemon.cli_shell",
       "truth_store": "~/.wterm/daemon-runtime/server.cjs",
-      "allowed_operations": ["promote_artifact", "verify_artifact", "execute_artifact"],
-      "direct_relations": ["resource.daemon_process"],
+      "allowed_operations": [
+        "promote_artifact",
+        "verify_artifact",
+        "execute_artifact"
+      ],
+      "direct_relations": [
+        "resource.daemon_process"
+      ],
       "indirect_relations": [],
-      "via_resources": ["resource.runtime_home"],
-      "forbidden_direct_relations": ["resource.debug_channel", "resource.ui_projection"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/lib/mainline-resource-call-map.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", "docs/wiki/mainline-source.md"]
+      "via_resources": [
+        "resource.runtime_home"
+      ],
+      "forbidden_direct_relations": [
+        "resource.debug_channel",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/mainline-resource-call-map.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/wiki/mainline-source.md"
+      ]
     },
     {
       "resource_id": "resource.daemon_process",
@@ -36,13 +70,34 @@
       "identity": "Running daemon process and health/control endpoint",
       "owner_feature": "daemon.runtime_entry",
       "truth_store": "src/server/server.ts",
-      "allowed_operations": ["start", "stop", "health_check", "wire_runtime_modules"],
-      "direct_relations": ["resource.terminal_backend", "resource.debug_channel"],
+      "allowed_operations": [
+        "start",
+        "stop",
+        "health_check",
+        "wire_runtime_modules"
+      ],
+      "direct_relations": [
+        "resource.terminal_backend",
+        "resource.debug_channel"
+      ],
       "indirect_relations": [],
-      "via_resources": ["resource.daemon_runtime_artifact"],
-      "forbidden_direct_relations": ["resource.active_session", "resource.renderer_window", "resource.ui_projection"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/server/server.daemon-runtime-truth.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", "docs/architecture.md", "docs/wiki/mainline-source.md"]
+      "via_resources": [
+        "resource.daemon_runtime_artifact"
+      ],
+      "forbidden_direct_relations": [
+        "resource.active_session",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/server/server.daemon-runtime-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/architecture.md",
+        "docs/wiki/mainline-source.md"
+      ]
     },
     {
       "resource_id": "resource.release_update_artifact",
@@ -50,13 +105,32 @@
       "identity": "APK, update, daemon release, and package artifacts",
       "owner_feature": "daemon.support",
       "truth_store": "release/update build outputs and verifiers",
-      "allowed_operations": ["build", "verify", "promote"],
-      "direct_relations": ["resource.daemon_runtime_artifact"],
-      "indirect_relations": ["resource.daemon_process"],
-      "via_resources": ["resource.daemon_runtime_artifact"],
-      "forbidden_direct_relations": ["resource.daemon_process", "resource.debug_channel"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "release:verify"],
-      "canonical_docs": ["docs/resource-map.md", "docs/function-map.md"]
+      "allowed_operations": [
+        "build",
+        "verify",
+        "promote"
+      ],
+      "direct_relations": [
+        "resource.daemon_runtime_artifact"
+      ],
+      "indirect_relations": [
+        "resource.daemon_process"
+      ],
+      "via_resources": [
+        "resource.daemon_runtime_artifact"
+      ],
+      "forbidden_direct_relations": [
+        "resource.daemon_process",
+        "resource.debug_channel"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "release:verify"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md"
+      ]
     },
     {
       "resource_id": "resource.debug_channel",
@@ -64,13 +138,33 @@
       "identity": "Logs, runtime debug snapshots, diagnostics, and local evidence side channels",
       "owner_feature": "daemon.cli_node",
       "truth_store": "debug endpoints, runtime logs, and evidence readers",
-      "allowed_operations": ["observe", "record_metadata", "record_trace_metadata", "summarize_bounded_trace", "diagnose"],
+      "allowed_operations": [
+        "observe",
+        "record_metadata",
+        "record_trace_metadata",
+        "summarize_bounded_trace",
+        "diagnose"
+      ],
       "direct_relations": [],
       "indirect_relations": [],
       "via_resources": [],
-      "forbidden_direct_relations": ["resource.open_tab", "resource.active_session", "resource.mirror_store", "resource.client_sparse_buffer", "resource.ui_projection"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/lib/mainline-resource-call-map.test.ts", "src/lib/terminal-performance-trace.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", "docs/wiki/mainline-source.md", "docs/goals/daemon-client-transport-performance-plan.md"]
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/mainline-resource-call-map.test.ts",
+        "src/lib/terminal-performance-trace.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/wiki/mainline-source.md",
+        "docs/goals/daemon-client-transport-performance-plan.md"
+      ]
     },
     {
       "resource_id": "resource.open_tab",
@@ -78,13 +172,36 @@
       "identity": "Current-process explicit open tab identity",
       "owner_feature": "terminal.open_tabs",
       "truth_store": "useOpenTabRuntime in-memory state",
-      "allowed_operations": ["apply_explicit_open", "apply_explicit_close", "switch_active_tab", "materialize_for_preview_selection", "clear_legacy_persistence"],
-      "direct_relations": ["resource.active_session", "resource.session_preview_selection"],
-      "indirect_relations": ["resource.session_transport"],
-      "via_resources": ["resource.active_session"],
-      "forbidden_direct_relations": ["resource.session_transport", "resource.transport_subscriber", "resource.backend_session"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/lib/open-tab-history-truth.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", "docs/architecture.md"]
+      "allowed_operations": [
+        "apply_explicit_open",
+        "apply_explicit_close",
+        "switch_active_tab",
+        "materialize_for_preview_selection",
+        "clear_legacy_persistence"
+      ],
+      "direct_relations": [
+        "resource.active_session",
+        "resource.session_preview_selection"
+      ],
+      "indirect_relations": [
+        "resource.session_transport"
+      ],
+      "via_resources": [
+        "resource.active_session"
+      ],
+      "forbidden_direct_relations": [
+        "resource.session_transport",
+        "resource.transport_subscriber",
+        "resource.backend_session"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/open-tab-history-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/architecture.md"
+      ]
     },
     {
       "resource_id": "resource.active_session",
@@ -92,27 +209,187 @@
       "identity": "Current active runtime session on a platform client",
       "owner_feature": "terminal.transport_lifecycle",
       "truth_store": "SessionContext active runtime session",
-      "allowed_operations": ["activate_session", "resume_explicit_session", "read_current_transport"],
-      "direct_relations": ["resource.session_transport"],
-      "indirect_relations": ["resource.transport_subscriber", "resource.mirror_store"],
-      "via_resources": ["resource.session_transport"],
-      "forbidden_direct_relations": ["resource.backend_session", "resource.tmux_session", "resource.wezterm_pane"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/lib/function-map-resource-truth.test.ts", "src/contexts/session-context-transport-runtime.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", "docs/decisions/2026-04-28-terminal-transport-session-lifecycle-truth.md"]
+      "allowed_operations": [
+        "activate_session",
+        "resume_explicit_session",
+        "read_current_transport"
+      ],
+      "direct_relations": [
+        "resource.session_transport"
+      ],
+      "indirect_relations": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store"
+      ],
+      "via_resources": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel"
+      ],
+      "forbidden_direct_relations": [
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/function-map-resource-truth.test.ts",
+        "src/contexts/session-context-transport-runtime.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/decisions/2026-04-28-terminal-transport-session-lifecycle-truth.md"
+      ]
     },
     {
       "resource_id": "resource.session_transport",
       "resource_type": "platform_client_truth",
-      "identity": "Per-session physical WebSocket or socket resource",
+      "identity": "Client-facing terminal transport runtime that maps local sessions to daemon-target transport channels",
       "owner_feature": "terminal.transport_lifecycle",
-      "truth_store": "src/contexts/session-context-transport-runtime.ts",
-      "allowed_operations": ["open", "reuse", "close", "send_frame", "receive_frame", "set_body_subscription", "measure_rtt_jitter_stall"],
-      "direct_relations": ["resource.transport_target", "resource.pending_open_intent", "resource.transport_subscriber"],
-      "indirect_relations": ["resource.mirror_store", "resource.client_sparse_buffer", "resource.backend_session"],
-      "via_resources": ["resource.transport_subscriber", "resource.mirror_store"],
-      "forbidden_direct_relations": ["resource.tmux_session", "resource.wezterm_pane", "resource.daemon_runtime_artifact"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/lib/mainline-resource-call-map.test.ts", "src/contexts/session-context-transport-runtime.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", "docs/function-map.md"]
+      "truth_store": "src/lib/session-transport-runtime.ts and SessionContext transport runtime",
+      "allowed_operations": [
+        "open_target_transport",
+        "reuse_target_transport",
+        "open_channel",
+        "close_channel",
+        "send_channel_frame",
+        "receive_channel_frame",
+        "set_channel_body_subscription",
+        "measure_rtt_jitter_stall"
+      ],
+      "direct_relations": [
+        "resource.transport_target",
+        "resource.pending_open_intent",
+        "resource.daemon_target_transport"
+      ],
+      "indirect_relations": [
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.backend_session"
+      ],
+      "via_resources": [
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store"
+      ],
+      "forbidden_direct_relations": [
+        "resource.transport_subscriber",
+        "resource.tmux_session",
+        "resource.wezterm_pane",
+        "resource.daemon_runtime_artifact"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/mainline-resource-call-map.test.ts",
+        "src/contexts/session-context-transport-runtime.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md"
+      ]
+    },
+    {
+      "resource_id": "resource.daemon_target_transport",
+      "resource_type": "platform_client_truth",
+      "identity": "One physical WebSocket or RTC data channel per daemon target route",
+      "owner_feature": "terminal.transport_lifecycle",
+      "truth_store": "src/lib/session-transport-runtime.ts target runtime and src/lib/traversal/socket.ts",
+      "allowed_operations": [
+        "negotiate_mux_capability",
+        "open_physical_transport",
+        "reuse_physical_transport",
+        "send_mux_frame",
+        "receive_mux_frame",
+        "close_physical_transport",
+        "record_transport_diagnostics"
+      ],
+      "direct_relations": [
+        "resource.transport_target",
+        "resource.terminal_channel",
+        "resource.relay_peer_lease"
+      ],
+      "indirect_relations": [
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer"
+      ],
+      "via_resources": [
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store"
+      ],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.tmux_session",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/mainline-resource-call-map.test.ts",
+        "src/lib/session-transport-runtime.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/goals/terminal-transport-multiplex-refactor-plan.md"
+      ]
+    },
+    {
+      "resource_id": "resource.terminal_channel",
+      "resource_type": "platform_client_truth",
+      "identity": "Transport-local logical channel for one terminal session over a daemon-target transport",
+      "owner_feature": "terminal.transport_lifecycle",
+      "truth_store": "SessionContext channel runtime and daemon terminal channel registry",
+      "allowed_operations": [
+        "open_channel",
+        "close_channel",
+        "bind_subscriber",
+        "route_channel_message",
+        "demux_channel_message",
+        "set_body_subscription",
+        "release_channel_subscriber"
+      ],
+      "direct_relations": [
+        "resource.transport_subscriber"
+      ],
+      "indirect_relations": [
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.backend_session"
+      ],
+      "via_resources": [
+        "resource.transport_subscriber",
+        "resource.mirror_store"
+      ],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/mainline-resource-call-map.test.ts",
+        "src/contexts/session-context-transport-runtime.test.ts",
+        "src/server/terminal-transport-runtime.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/goals/terminal-transport-multiplex-refactor-plan.md"
+      ]
     },
     {
       "resource_id": "resource.transport_target",
@@ -120,13 +397,76 @@
       "identity": "bridgeHost + bridgePort + authToken target key",
       "owner_feature": "terminal.transport_lifecycle",
       "truth_store": "bridge settings and SessionContext target resolver",
-      "allowed_operations": ["resolve_target", "compare_target_key"],
+      "allowed_operations": [
+        "resolve_target",
+        "compare_target_key"
+      ],
       "direct_relations": [],
-      "indirect_relations": ["resource.session_transport"],
-      "via_resources": ["resource.session_transport"],
-      "forbidden_direct_relations": ["resource.backend_session", "resource.tmux_session"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/lib/bridge-settings.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", "docs/architecture.md"]
+      "indirect_relations": [
+        "resource.session_transport"
+      ],
+      "via_resources": [
+        "resource.session_transport"
+      ],
+      "forbidden_direct_relations": [
+        "resource.backend_session",
+        "resource.tmux_session"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/bridge-settings.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/architecture.md"
+      ]
+    },
+    {
+      "resource_id": "resource.relay_peer_lease",
+      "resource_type": "relay_runtime_truth",
+      "identity": "Idle-timeout bounded Relay peer lease and resume token for one daemon target route",
+      "owner_feature": "relay.account_directory",
+      "truth_store": "src/traversal-relay/server.ts and src/server/relay-client.ts",
+      "allowed_operations": [
+        "create_peer_lease",
+        "bind_client_signal_socket",
+        "issue_resume_token",
+        "resume_peer_lease",
+        "refresh_idle_deadline",
+        "expire_peer_lease",
+        "reject_invalid_resume"
+      ],
+      "direct_relations": [
+        "resource.transport_target"
+      ],
+      "indirect_relations": [
+        "resource.daemon_target_transport"
+      ],
+      "via_resources": [
+        "resource.transport_target"
+      ],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.tmux_session",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/mainline-resource-call-map.test.ts",
+        "src/traversal-relay/server.test.ts",
+        "src/server/relay-client.test.ts",
+        "src/lib/traversal/socket.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/testing/websocket-transport-reuse-test-design.md"
+      ]
     },
     {
       "resource_id": "resource.pending_open_intent",
@@ -134,13 +474,30 @@
       "identity": "{sessionId,targetKey,openRequestId} single-flight open intent",
       "owner_feature": "terminal.transport_lifecycle",
       "truth_store": "session transport open runtime",
-      "allowed_operations": ["create_single_flight", "resolve_single_flight", "fail_single_flight"],
+      "allowed_operations": [
+        "create_single_flight",
+        "resolve_single_flight",
+        "fail_single_flight"
+      ],
       "direct_relations": [],
-      "indirect_relations": ["resource.session_transport"],
-      "via_resources": ["resource.session_transport"],
-      "forbidden_direct_relations": ["resource.open_tab", "resource.backend_session"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/contexts/session-context-transport-runtime.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", "docs/function-map.md"]
+      "indirect_relations": [
+        "resource.session_transport"
+      ],
+      "via_resources": [
+        "resource.session_transport"
+      ],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.backend_session"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/contexts/session-context-transport-runtime.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md"
+      ]
     },
     {
       "resource_id": "resource.platform_terminal_surface",
@@ -148,13 +505,40 @@
       "identity": "Android, Mac, or Windows terminal workbench/page surface",
       "owner_feature": "terminal.session_group_layout",
       "truth_store": "platform page/workbench shell",
-      "allowed_operations": ["project_layout", "route_user_intent", "host_platform_controls"],
-      "direct_relations": ["resource.ui_projection"],
-      "indirect_relations": ["resource.session_transport", "resource.backend_session"],
-      "via_resources": ["resource.active_session", "resource.session_transport", "resource.transport_subscriber", "resource.mirror_store"],
-      "forbidden_direct_relations": ["resource.backend_session", "resource.tmux_session", "resource.wezterm_pane", "resource.mirror_store"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/lib/mainline-resource-call-map.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", "docs/wiki/mainline-source.md"]
+      "allowed_operations": [
+        "project_layout",
+        "route_user_intent",
+        "host_platform_controls"
+      ],
+      "direct_relations": [
+        "resource.ui_projection"
+      ],
+      "indirect_relations": [
+        "resource.session_transport",
+        "resource.backend_session"
+      ],
+      "via_resources": [
+        "resource.active_session",
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store"
+      ],
+      "forbidden_direct_relations": [
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane",
+        "resource.mirror_store"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/mainline-resource-call-map.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/wiki/mainline-source.md"
+      ]
     },
     {
       "resource_id": "resource.platform_input_channel",
@@ -162,13 +546,38 @@
       "identity": "IME, hardware keyboard, paste, and file input channel",
       "owner_feature": "terminal.keyboard_ime",
       "truth_store": "platform input runtime",
-      "allowed_operations": ["capture_input", "route_input_intent", "send_to_current_transport"],
-      "direct_relations": ["resource.session_transport"],
-      "indirect_relations": ["resource.daemon_input_queue", "resource.backend_session"],
-      "via_resources": ["resource.session_transport", "resource.transport_subscriber", "resource.daemon_input_queue"],
-      "forbidden_direct_relations": ["resource.backend_session", "resource.tmux_session", "resource.wezterm_pane"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/pages/terminal-keyboard-lift.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", ".agents/skills/terminal-buffer-truth/SKILL.md"]
+      "allowed_operations": [
+        "capture_input",
+        "route_input_intent",
+        "send_to_current_transport"
+      ],
+      "direct_relations": [
+        "resource.session_transport"
+      ],
+      "indirect_relations": [
+        "resource.daemon_input_queue",
+        "resource.backend_session"
+      ],
+      "via_resources": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.daemon_input_queue"
+      ],
+      "forbidden_direct_relations": [
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/pages/terminal-keyboard-lift.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        ".agents/skills/terminal-buffer-truth/SKILL.md"
+      ]
     },
     {
       "resource_id": "resource.terminal_backend",
@@ -176,13 +585,34 @@
       "identity": "Selected backend type and backend adapter contract",
       "owner_feature": "daemon.windows_wezterm_backend",
       "truth_store": "backend selection runtime",
-      "allowed_operations": ["select_backend", "validate_backend", "create_backend_session"],
-      "direct_relations": ["resource.backend_session"],
-      "indirect_relations": ["resource.tmux_session", "resource.wezterm_pane"],
-      "via_resources": ["resource.backend_session"],
-      "forbidden_direct_relations": ["resource.open_tab", "resource.renderer_window", "resource.ui_projection"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/server/terminal-backend-selection.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", "docs/function-map.md"]
+      "allowed_operations": [
+        "select_backend",
+        "validate_backend",
+        "create_backend_session"
+      ],
+      "direct_relations": [
+        "resource.backend_session"
+      ],
+      "indirect_relations": [
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "via_resources": [
+        "resource.backend_session"
+      ],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/server/terminal-backend-selection.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md"
+      ]
     },
     {
       "resource_id": "resource.backend_session",
@@ -190,13 +620,36 @@
       "identity": "Backend-side terminal session identity",
       "owner_feature": "terminal.daemon_input",
       "truth_store": "daemon terminal runtime backend adapter",
-      "allowed_operations": ["attach", "write_input", "capture_output", "close_backend_session"],
-      "direct_relations": ["resource.tmux_session", "resource.wezterm_pane"],
-      "indirect_relations": ["resource.mirror_store"],
-      "via_resources": ["resource.tmux_session", "resource.wezterm_pane"],
-      "forbidden_direct_relations": ["resource.open_tab", "resource.active_session", "resource.renderer_window"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/server/terminal-message-runtime.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", "docs/architecture.md"]
+      "allowed_operations": [
+        "attach",
+        "write_input",
+        "capture_output",
+        "close_backend_session"
+      ],
+      "direct_relations": [
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "indirect_relations": [
+        "resource.mirror_store"
+      ],
+      "via_resources": [
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.renderer_window"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/server/terminal-message-runtime.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/architecture.md"
+      ]
     },
     {
       "resource_id": "resource.tmux_session",
@@ -204,13 +657,32 @@
       "identity": "Daemon-side tmux session truth",
       "owner_feature": "terminal.daemon_input",
       "truth_store": "tmux server and terminal-control runtime",
-      "allowed_operations": ["create_explicit_session", "send_keys", "capture_pane", "resize_adaptive_lease"],
+      "allowed_operations": [
+        "create_explicit_session",
+        "send_keys",
+        "capture_pane",
+        "resize_adaptive_lease"
+      ],
       "direct_relations": [],
-      "indirect_relations": ["resource.mirror_store"],
-      "via_resources": ["resource.mirror_store"],
-      "forbidden_direct_relations": ["resource.renderer_window", "resource.ui_projection", "resource.client_sparse_buffer"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/server/terminal-control-runtime.input-queue.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", ".agents/skills/terminal-buffer-truth/SKILL.md"]
+      "indirect_relations": [
+        "resource.mirror_store"
+      ],
+      "via_resources": [
+        "resource.mirror_store"
+      ],
+      "forbidden_direct_relations": [
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.client_sparse_buffer"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/server/terminal-control-runtime.input-queue.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        ".agents/skills/terminal-buffer-truth/SKILL.md"
+      ]
     },
     {
       "resource_id": "resource.wezterm_pane",
@@ -218,13 +690,32 @@
       "identity": "Windows WezTerm pane truth",
       "owner_feature": "daemon.windows_wezterm_backend",
       "truth_store": "WezTerm mux pane and backend adapter",
-      "allowed_operations": ["list_panes", "get_text_capture", "send_text", "kill_pane"],
+      "allowed_operations": [
+        "list_panes",
+        "get_text_capture",
+        "send_text",
+        "kill_pane"
+      ],
       "direct_relations": [],
-      "indirect_relations": ["resource.mirror_store"],
-      "via_resources": ["resource.mirror_store"],
-      "forbidden_direct_relations": ["resource.renderer_window", "resource.ui_projection", "resource.client_sparse_buffer"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/server/wezterm-backend.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", "docs/function-map.md"]
+      "indirect_relations": [
+        "resource.mirror_store"
+      ],
+      "via_resources": [
+        "resource.mirror_store"
+      ],
+      "forbidden_direct_relations": [
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.client_sparse_buffer"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/server/wezterm-backend.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md"
+      ]
     },
     {
       "resource_id": "resource.mirror_store",
@@ -232,27 +723,85 @@
       "identity": "Daemon canonical terminal mirror rows, cols, buffer, cursor, and absolute indexes",
       "owner_feature": "terminal.buffer_render",
       "truth_store": "src/server/terminal-mirror-runtime.ts",
-      "allowed_operations": ["commit_backend_capture", "commit_authoritative_range_patch", "full_reconcile", "read_head", "read_range", "read_revision", "push_sync"],
-      "direct_relations": ["resource.tmux_session", "resource.wezterm_pane", "resource.transport_subscriber", "resource.client_sparse_buffer"],
-      "indirect_relations": ["resource.renderer_window", "resource.ui_projection"],
-      "via_resources": ["resource.client_sparse_buffer"],
-      "forbidden_direct_relations": ["resource.ui_projection", "resource.platform_terminal_surface"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/server/terminal-mirror-runtime.test.ts", "src/server/server.mirror-capture-truth.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", "docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md"]
+      "allowed_operations": [
+        "commit_backend_capture",
+        "commit_authoritative_range_patch",
+        "full_reconcile",
+        "read_head",
+        "read_range",
+        "read_revision",
+        "push_sync"
+      ],
+      "direct_relations": [
+        "resource.tmux_session",
+        "resource.wezterm_pane",
+        "resource.transport_subscriber",
+        "resource.client_sparse_buffer"
+      ],
+      "indirect_relations": [
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "via_resources": [
+        "resource.client_sparse_buffer"
+      ],
+      "forbidden_direct_relations": [
+        "resource.ui_projection",
+        "resource.platform_terminal_surface"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/server/terminal-mirror-runtime.test.ts",
+        "src/server/server.mirror-capture-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md"
+      ]
     },
     {
       "resource_id": "resource.transport_subscriber",
       "resource_type": "daemon_backend_truth",
-      "identity": "Daemon physical transport subscriber",
+      "identity": "Daemon subscriber bound to one logical terminal channel",
       "owner_feature": "terminal.transport_lifecycle",
       "truth_store": "daemon transport runtime",
-      "allowed_operations": ["subscribe", "unsubscribe", "subscribe_body", "unsubscribe_body", "send_snapshot", "track_physical_health", "track_send_accounting", "coalesce_pending_latest", "flush_pending_latest"],
-      "direct_relations": ["resource.mirror_store"],
-      "indirect_relations": ["resource.backend_session"],
-      "via_resources": ["resource.mirror_store"],
-      "forbidden_direct_relations": ["resource.open_tab", "resource.active_session", "resource.renderer_window"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/server/server.transport-lifecycle-truth.test.ts", "src/server/terminal-transport-runtime.test.ts", "src/server/terminal-mirror-runtime.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", "docs/architecture.md", "docs/goals/daemon-client-transport-performance-plan.md"]
+      "allowed_operations": [
+        "subscribe",
+        "unsubscribe",
+        "subscribe_body",
+        "unsubscribe_body",
+        "send_snapshot",
+        "track_channel_health",
+        "track_send_accounting",
+        "coalesce_pending_latest",
+        "flush_pending_latest"
+      ],
+      "direct_relations": [
+        "resource.mirror_store"
+      ],
+      "indirect_relations": [
+        "resource.backend_session"
+      ],
+      "via_resources": [
+        "resource.mirror_store"
+      ],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.daemon_target_transport",
+        "resource.renderer_window"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/server/server.transport-lifecycle-truth.test.ts",
+        "src/server/terminal-transport-runtime.test.ts",
+        "src/server/terminal-mirror-runtime.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/architecture.md",
+        "docs/goals/daemon-client-transport-performance-plan.md"
+      ]
     },
     {
       "resource_id": "resource.daemon_input_queue",
@@ -260,13 +809,33 @@
       "identity": "Daemon input receive/write queue",
       "owner_feature": "terminal.daemon_input",
       "truth_store": "src/server/terminal-message-runtime.ts",
-      "allowed_operations": ["enqueue_input", "validate_input", "write_to_backend"],
-      "direct_relations": ["resource.backend_session"],
-      "indirect_relations": ["resource.tmux_session", "resource.wezterm_pane"],
-      "via_resources": ["resource.backend_session"],
-      "forbidden_direct_relations": ["resource.renderer_window", "resource.ui_projection"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/server/terminal-message-runtime.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", ".agents/skills/terminal-buffer-truth/SKILL.md"]
+      "allowed_operations": [
+        "enqueue_input",
+        "validate_input",
+        "write_to_backend"
+      ],
+      "direct_relations": [
+        "resource.backend_session"
+      ],
+      "indirect_relations": [
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "via_resources": [
+        "resource.backend_session"
+      ],
+      "forbidden_direct_relations": [
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/server/terminal-message-runtime.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        ".agents/skills/terminal-buffer-truth/SKILL.md"
+      ]
     },
     {
       "resource_id": "resource.schedule_job",
@@ -274,13 +843,33 @@
       "identity": "Per-session scheduled send job state and execution truth",
       "owner_feature": "terminal.schedule",
       "truth_store": "schedule store and schedule dispatch runtime",
-      "allowed_operations": ["store_job", "compute_next_fire", "dispatch_to_backend"],
-      "direct_relations": ["resource.backend_session"],
-      "indirect_relations": ["resource.tmux_session", "resource.wezterm_pane"],
-      "via_resources": ["resource.backend_session"],
-      "forbidden_direct_relations": ["resource.renderer_window", "resource.ui_projection"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/server/schedule-engine.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", "docs/function-map.md"]
+      "allowed_operations": [
+        "store_job",
+        "compute_next_fire",
+        "dispatch_to_backend"
+      ],
+      "direct_relations": [
+        "resource.backend_session"
+      ],
+      "indirect_relations": [
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "via_resources": [
+        "resource.backend_session"
+      ],
+      "forbidden_direct_relations": [
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/server/schedule-engine.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md"
+      ]
     },
     {
       "resource_id": "resource.file_transfer",
@@ -288,13 +877,33 @@
       "identity": "Daemon file transfer state",
       "owner_feature": "daemon.file_transfer",
       "truth_store": "file transfer runtime",
-      "allowed_operations": ["receive_file", "normalize_file", "handoff_to_backend_context"],
-      "direct_relations": ["resource.backend_session"],
-      "indirect_relations": ["resource.tmux_session", "resource.wezterm_pane"],
-      "via_resources": ["resource.backend_session"],
-      "forbidden_direct_relations": ["resource.renderer_window", "resource.ui_projection"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/server/server.file-transfer-truth.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", "docs/function-map.md"]
+      "allowed_operations": [
+        "receive_file",
+        "normalize_file",
+        "handoff_to_backend_context"
+      ],
+      "direct_relations": [
+        "resource.backend_session"
+      ],
+      "indirect_relations": [
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "via_resources": [
+        "resource.backend_session"
+      ],
+      "forbidden_direct_relations": [
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/server/server.file-transfer-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md"
+      ]
     },
     {
       "resource_id": "resource.remote_screenshot",
@@ -302,13 +911,30 @@
       "identity": "Remote screenshot request/result state",
       "owner_feature": "terminal.remote_screenshot",
       "truth_store": "remote screenshot daemon helper",
-      "allowed_operations": ["request_screenshot", "capture_screenshot", "return_result"],
-      "direct_relations": ["resource.backend_session"],
+      "allowed_operations": [
+        "request_screenshot",
+        "capture_screenshot",
+        "return_result"
+      ],
+      "direct_relations": [
+        "resource.backend_session"
+      ],
       "indirect_relations": [],
-      "via_resources": ["resource.backend_session"],
-      "forbidden_direct_relations": ["resource.mirror_store", "resource.renderer_window"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/lib/remote-screenshot-runtime.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", "docs/function-map.md"]
+      "via_resources": [
+        "resource.backend_session"
+      ],
+      "forbidden_direct_relations": [
+        "resource.mirror_store",
+        "resource.renderer_window"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/remote-screenshot-runtime.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md"
+      ]
     },
     {
       "resource_id": "resource.remote_window_stream",
@@ -316,13 +942,46 @@
       "identity": "Remote app/window/iTerm2 pane catalog, coordinate manifest, capture frame source, WebRTC media sender, and remote input target lease",
       "owner_feature": "desktop.remote_window_stream",
       "truth_store": "docs/decisions/2026-07-19-remote-window-stream-truth.md",
-      "allowed_operations": ["enumerate_targets", "resolve_iterm2_pane", "normalize_coordinates", "start_stream", "negotiate_media_transport", "emit_capture_frame", "attach_receiver", "shrink_stream_projection", "stop_stream", "cleanup_stream", "inject_input"],
-      "direct_relations": ["resource.daemon_process", "resource.transport_target"],
-      "indirect_relations": ["resource.tmux_session", "resource.daemon_input_queue"],
-      "via_resources": ["resource.daemon_input_queue", "resource.backend_session"],
-      "forbidden_direct_relations": ["resource.mirror_store", "resource.client_sparse_buffer", "resource.renderer_window", "resource.ui_projection"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "docs/testing/remote-window-stream-test-design.md"],
-      "canonical_docs": ["docs/resource-map.md", "docs/function-map.md", "docs/decisions/2026-07-19-remote-window-stream-truth.md"]
+      "allowed_operations": [
+        "enumerate_targets",
+        "resolve_iterm2_pane",
+        "normalize_coordinates",
+        "start_stream",
+        "negotiate_media_transport",
+        "emit_capture_frame",
+        "attach_receiver",
+        "shrink_stream_projection",
+        "stop_stream",
+        "cleanup_stream",
+        "inject_input"
+      ],
+      "direct_relations": [
+        "resource.daemon_process",
+        "resource.transport_target"
+      ],
+      "indirect_relations": [
+        "resource.tmux_session",
+        "resource.daemon_input_queue"
+      ],
+      "via_resources": [
+        "resource.daemon_input_queue",
+        "resource.backend_session"
+      ],
+      "forbidden_direct_relations": [
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "docs/testing/remote-window-stream-test-design.md"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/decisions/2026-07-19-remote-window-stream-truth.md"
+      ]
     },
     {
       "resource_id": "resource.client_sparse_buffer",
@@ -330,13 +989,34 @@
       "identity": "Client local sparse buffer and visible-range gap repair truth",
       "owner_feature": "terminal.buffer_render",
       "truth_store": "src/contexts/session-context-buffer-runtime.ts",
-      "allowed_operations": ["apply_buffer_sync", "apply_revisioned_ranges", "track_gaps", "serve_visible_rows"],
-      "direct_relations": ["resource.renderer_window"],
-      "indirect_relations": ["resource.ui_projection"],
-      "via_resources": ["resource.renderer_window"],
-      "forbidden_direct_relations": ["resource.tmux_session", "resource.wezterm_pane", "resource.backend_session"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/contexts/session-context-buffer-runtime.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", "docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md"]
+      "allowed_operations": [
+        "apply_buffer_sync",
+        "apply_revisioned_ranges",
+        "track_gaps",
+        "serve_visible_rows"
+      ],
+      "direct_relations": [
+        "resource.renderer_window"
+      ],
+      "indirect_relations": [
+        "resource.ui_projection"
+      ],
+      "via_resources": [
+        "resource.renderer_window"
+      ],
+      "forbidden_direct_relations": [
+        "resource.tmux_session",
+        "resource.wezterm_pane",
+        "resource.backend_session"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/contexts/session-context-buffer-runtime.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md"
+      ]
     },
     {
       "resource_id": "resource.renderer_window",
@@ -344,13 +1024,34 @@
       "identity": "follow, reading, renderBottomIndex, and visible range demand",
       "owner_feature": "terminal.buffer_render",
       "truth_store": "renderer runtime and render gate",
-      "allowed_operations": ["declare_visible_range", "read_sparse_buffer", "render_existing_cells", "commit_next_raf"],
-      "direct_relations": ["resource.ui_projection"],
+      "allowed_operations": [
+        "declare_visible_range",
+        "read_sparse_buffer",
+        "render_existing_cells",
+        "commit_next_raf"
+      ],
+      "direct_relations": [
+        "resource.ui_projection"
+      ],
       "indirect_relations": [],
-      "via_resources": ["resource.client_sparse_buffer"],
-      "forbidden_direct_relations": ["resource.tmux_session", "resource.wezterm_pane", "resource.backend_session", "resource.mirror_store"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/lib/session-render-gate.test.ts", "packages/shared/src/terminal/renderer.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", ".agents/skills/terminal-buffer-truth/SKILL.md"]
+      "via_resources": [
+        "resource.client_sparse_buffer"
+      ],
+      "forbidden_direct_relations": [
+        "resource.tmux_session",
+        "resource.wezterm_pane",
+        "resource.backend_session",
+        "resource.mirror_store"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/session-render-gate.test.ts",
+        "packages/shared/src/terminal/renderer.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        ".agents/skills/terminal-buffer-truth/SKILL.md"
+      ]
     },
     {
       "resource_id": "resource.ui_projection",
@@ -358,17 +1059,36 @@
       "identity": "Drawer, page, session list, and platform shell projection",
       "owner_feature": "terminal.session_drawer",
       "truth_store": "UI projection components and selectors",
-      "allowed_operations": ["display_projection", "emit_user_intent", "sort_projection"],
+      "allowed_operations": [
+        "display_projection",
+        "emit_user_intent",
+        "sort_projection"
+      ],
       "direct_relations": [
         "resource.session_preview_selection",
         "resource.session_preview_mode",
         "resource.remote_window_overlay"
       ],
-      "indirect_relations": ["resource.session_transport"],
-      "via_resources": ["resource.active_session"],
-      "forbidden_direct_relations": ["resource.backend_session", "resource.tmux_session", "resource.wezterm_pane", "resource.daemon_runtime_artifact"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/components/terminal/TerminalSessionDrawer.test.tsx"],
-      "canonical_docs": ["docs/resource-map.md", "docs/function-map.md"]
+      "indirect_relations": [
+        "resource.session_transport"
+      ],
+      "via_resources": [
+        "resource.active_session"
+      ],
+      "forbidden_direct_relations": [
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane",
+        "resource.daemon_runtime_artifact"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/components/terminal/TerminalSessionDrawer.test.tsx"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md"
+      ]
     },
     {
       "resource_id": "resource.remote_window_overlay",
@@ -376,13 +1096,49 @@
       "identity": "Android remote window picker, floating stream overlay, fullscreen aspect-fit/aspect-fill zoom/pan/minimap projection, and Back/minimize/close/input intent",
       "owner_feature": "desktop.remote_window_stream",
       "truth_store": "docs/decisions/2026-07-19-remote-window-stream-truth.md",
-      "allowed_operations": ["open_picker", "select_stream_target", "show_floating_overlay", "resize_floating_overlay", "enter_fullscreen", "select_fullscreen_display_mode", "zoom_fullscreen", "pan_zoomed_fullscreen", "pan_keyboard_open_fullscreen", "show_minimap", "select_effective_video_quality", "shrink_to_floating", "emit_close_intent", "emit_input_intent"],
-      "direct_relations": ["resource.remote_window_stream"],
-      "indirect_relations": ["resource.transport_target"],
-      "via_resources": ["resource.active_session", "resource.session_transport"],
-      "forbidden_direct_relations": ["resource.daemon_process", "resource.tmux_session", "resource.mirror_store", "resource.client_sparse_buffer", "resource.renderer_window"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "docs/testing/remote-window-stream-test-design.md"],
-      "canonical_docs": ["docs/resource-map.md", "docs/function-map.md", "docs/decisions/2026-07-19-remote-window-stream-truth.md"]
+      "allowed_operations": [
+        "open_picker",
+        "select_stream_target",
+        "show_floating_overlay",
+        "resize_floating_overlay",
+        "enter_fullscreen",
+        "select_fullscreen_display_mode",
+        "zoom_fullscreen",
+        "pan_zoomed_fullscreen",
+        "pan_keyboard_open_fullscreen",
+        "show_minimap",
+        "select_effective_video_quality",
+        "shrink_to_floating",
+        "emit_close_intent",
+        "emit_input_intent"
+      ],
+      "direct_relations": [
+        "resource.remote_window_stream"
+      ],
+      "indirect_relations": [
+        "resource.transport_target"
+      ],
+      "via_resources": [
+        "resource.active_session",
+        "resource.session_transport",
+        "resource.daemon_target_transport"
+      ],
+      "forbidden_direct_relations": [
+        "resource.daemon_process",
+        "resource.tmux_session",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "docs/testing/remote-window-stream-test-design.md"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/decisions/2026-07-19-remote-window-stream-truth.md"
+      ]
     },
     {
       "resource_id": "resource.session_preview_selection",
@@ -390,13 +1146,42 @@
       "identity": "Ordered maximum-six open-session preview preference",
       "owner_feature": "terminal.session_preview",
       "truth_store": "versioned client storage plus selection owner",
-      "allowed_operations": ["select_open_session", "materialize_remote_catalog_selection", "append_unselected_open_session", "remove_selection", "replace_selection_in_place", "reorder_selection", "resolve_open_tabs", "persist_selection"],
-      "direct_relations": ["resource.open_tab"],
-      "indirect_relations": ["resource.renderer_window", "resource.active_session"],
-      "via_resources": ["resource.open_tab", "resource.client_sparse_buffer"],
-      "forbidden_direct_relations": ["resource.session_transport", "resource.transport_subscriber", "resource.mirror_store", "resource.tmux_session", "resource.backend_session"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/lib/session-preview-selection.test.ts"],
-      "canonical_docs": ["docs/resource-map.md", "docs/goals/terminal-session-preview-plan.md"]
+      "allowed_operations": [
+        "select_open_session",
+        "materialize_remote_catalog_selection",
+        "append_unselected_open_session",
+        "remove_selection",
+        "replace_selection_in_place",
+        "reorder_selection",
+        "resolve_open_tabs",
+        "persist_selection"
+      ],
+      "direct_relations": [
+        "resource.open_tab"
+      ],
+      "indirect_relations": [
+        "resource.renderer_window",
+        "resource.active_session"
+      ],
+      "via_resources": [
+        "resource.open_tab",
+        "resource.client_sparse_buffer"
+      ],
+      "forbidden_direct_relations": [
+        "resource.session_transport",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.tmux_session",
+        "resource.backend_session"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/session-preview-selection.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/goals/terminal-session-preview-plan.md"
+      ]
     },
     {
       "resource_id": "resource.session_preview_mode",
@@ -404,65 +1189,157 @@
       "identity": "Terminal shell preview open or closed projection state",
       "owner_feature": "terminal.session_preview",
       "truth_store": "TerminalPage preview mode owner",
-      "allowed_operations": ["open_preview", "close_preview", "capture_entry_projection", "restore_entry_projection_on_cancel", "project_live_selection", "emit_tile_activation_intent"],
-      "direct_relations": ["resource.ui_projection"],
-      "indirect_relations": ["resource.active_session", "resource.client_sparse_buffer"],
-      "via_resources": ["resource.ui_projection", "resource.open_tab"],
-      "forbidden_direct_relations": ["resource.session_transport", "resource.transport_subscriber", "resource.mirror_store", "resource.tmux_session", "resource.backend_session"],
-      "required_gates": ["src/lib/resource-registry-truth.test.ts", "src/pages/TerminalPage.session-preview.test.tsx"],
-      "canonical_docs": ["docs/resource-map.md", "docs/goals/terminal-session-preview-plan.md"]
+      "allowed_operations": [
+        "open_preview",
+        "close_preview",
+        "capture_entry_projection",
+        "restore_entry_projection_on_cancel",
+        "project_live_selection",
+        "emit_tile_activation_intent"
+      ],
+      "direct_relations": [
+        "resource.ui_projection"
+      ],
+      "indirect_relations": [
+        "resource.active_session",
+        "resource.client_sparse_buffer"
+      ],
+      "via_resources": [
+        "resource.ui_projection",
+        "resource.open_tab"
+      ],
+      "forbidden_direct_relations": [
+        "resource.session_transport",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.tmux_session",
+        "resource.backend_session"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/pages/TerminalPage.session-preview.test.tsx"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/goals/terminal-session-preview-plan.md"
+      ]
     }
   ],
   "required_indirect_relations": [
     {
       "from": "resource.ui_projection",
       "to": "resource.session_transport",
-      "via_resources": ["resource.active_session"]
+      "via_resources": [
+        "resource.active_session"
+      ]
     },
     {
       "from": "resource.session_transport",
       "to": "resource.client_sparse_buffer",
-      "via_resources": ["resource.transport_subscriber", "resource.mirror_store"]
+      "via_resources": [
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store"
+      ]
     },
     {
       "from": "resource.renderer_window",
       "to": "resource.tmux_session",
-      "via_resources": ["resource.client_sparse_buffer", "resource.mirror_store"]
+      "via_resources": [
+        "resource.client_sparse_buffer",
+        "resource.mirror_store"
+      ]
     },
     {
       "from": "resource.renderer_window",
       "to": "resource.wezterm_pane",
-      "via_resources": ["resource.client_sparse_buffer", "resource.mirror_store"]
+      "via_resources": [
+        "resource.client_sparse_buffer",
+        "resource.mirror_store"
+      ]
     },
     {
       "from": "resource.platform_input_channel",
       "to": "resource.tmux_session",
-      "via_resources": ["resource.session_transport", "resource.transport_subscriber", "resource.daemon_input_queue", "resource.backend_session"]
+      "via_resources": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.daemon_input_queue",
+        "resource.backend_session"
+      ]
     },
     {
       "from": "resource.platform_input_channel",
       "to": "resource.wezterm_pane",
-      "via_resources": ["resource.session_transport", "resource.transport_subscriber", "resource.daemon_input_queue", "resource.backend_session"]
+      "via_resources": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.daemon_input_queue",
+        "resource.backend_session"
+      ]
     },
     {
       "from": "resource.platform_terminal_surface",
       "to": "resource.backend_session",
-      "via_resources": ["resource.active_session", "resource.session_transport", "resource.transport_subscriber", "resource.mirror_store"]
+      "via_resources": [
+        "resource.active_session",
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store"
+      ]
     },
     {
       "from": "resource.release_update_artifact",
       "to": "resource.daemon_process",
-      "via_resources": ["resource.daemon_runtime_artifact"]
+      "via_resources": [
+        "resource.daemon_runtime_artifact"
+      ]
     },
     {
       "from": "resource.remote_window_overlay",
       "to": "resource.transport_target",
-      "via_resources": ["resource.active_session", "resource.session_transport"]
+      "via_resources": [
+        "resource.active_session",
+        "resource.session_transport",
+        "resource.daemon_target_transport"
+      ]
     },
     {
       "from": "resource.remote_window_stream",
       "to": "resource.tmux_session",
-      "via_resources": ["resource.daemon_input_queue", "resource.backend_session"]
+      "via_resources": [
+        "resource.daemon_input_queue",
+        "resource.backend_session"
+      ]
+    },
+    {
+      "from": "resource.session_transport",
+      "to": "resource.transport_subscriber",
+      "via_resources": [
+        "resource.daemon_target_transport",
+        "resource.terminal_channel"
+      ]
+    },
+    {
+      "from": "resource.daemon_target_transport",
+      "to": "resource.transport_subscriber",
+      "via_resources": [
+        "resource.terminal_channel"
+      ]
+    },
+    {
+      "from": "resource.relay_peer_lease",
+      "to": "resource.daemon_target_transport",
+      "via_resources": [
+        "resource.transport_target"
+      ]
     }
   ],
   "forbidden_direct_relations": [
@@ -510,6 +1387,41 @@
       "from": "resource.remote_window_stream",
       "to": "resource.mirror_store",
       "reason": "Remote window video is desktop media truth and must not reuse terminal mirror rows as video truth."
+    },
+    {
+      "from": "resource.session_transport",
+      "to": "resource.transport_subscriber",
+      "reason": "The new multiplex path must reach daemon subscribers only through daemon-target transport and terminal channel."
+    },
+    {
+      "from": "resource.relay_peer_lease",
+      "to": "resource.terminal_channel",
+      "reason": "Relay peer lease preserves route/signaling state only and must not own terminal channel truth."
+    },
+    {
+      "from": "resource.relay_peer_lease",
+      "to": "resource.transport_subscriber",
+      "reason": "Relay peer lease cannot bind daemon terminal subscribers directly."
+    },
+    {
+      "from": "resource.relay_peer_lease",
+      "to": "resource.tmux_session",
+      "reason": "Relay idle resume cannot store or infer tmux/session business truth."
+    },
+    {
+      "from": "resource.relay_peer_lease",
+      "to": "resource.mirror_store",
+      "reason": "Relay peer lease is route truth only and cannot observe or write terminal mirror rows."
+    },
+    {
+      "from": "resource.daemon_target_transport",
+      "to": "resource.mirror_store",
+      "reason": "Physical target transport must demux through terminal channels and subscribers before mirror truth."
+    },
+    {
+      "from": "resource.daemon_target_transport",
+      "to": "resource.client_sparse_buffer",
+      "reason": "Physical target transport cannot write client buffer without channel demux and buffer runtime."
     }
   ]
 }

@@ -8,25 +8,22 @@ import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
 import android.os.IBinder;
-import android.os.PowerManager;
 import androidx.core.app.NotificationCompat;
 
 /**
- * BackgroundService - 前台服务，保持 WebSocket 连接
- * 当应用切到后台时，显示通知栏提示
+ * BackgroundService - 前台服务通知面
+ * 后台状态不得持有 WakeLock；连接保活归客户端 transport owner 管。
  */
 public class BackgroundService extends Service {
     private static final String CHANNEL_ID = "wterm_background";
     private static final int NOTIFICATION_ID = 1;
-    
-    private PowerManager.WakeLock wakeLock;
+
     private int sessionCount = 0;
 
     @Override
     public void onCreate() {
         super.onCreate();
         createNotificationChannel();
-        acquireWakeLock();
     }
 
     @Override
@@ -48,7 +45,6 @@ public class BackgroundService extends Service {
 
     @Override
     public void onDestroy() {
-        releaseWakeLock();
         super.onDestroy();
     }
 
@@ -87,30 +83,6 @@ public class BackgroundService extends Service {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setOngoing(true)
             .build();
-    }
-
-    /**
-     * 获取 WakeLock，防止 CPU 休眠
-     */
-    private void acquireWakeLock() {
-        PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
-        if (powerManager != null) {
-            wakeLock = powerManager.newWakeLock(
-                PowerManager.PARTIAL_WAKE_LOCK,
-                "zterm:BackgroundWakeLock"
-            );
-            wakeLock.acquire(10 * 60 * 1000L); // 10分钟
-        }
-    }
-
-    /**
-     * 释放 WakeLock
-     */
-    private void releaseWakeLock() {
-        if (wakeLock != null && wakeLock.isHeld()) {
-            wakeLock.release();
-            wakeLock = null;
-        }
     }
 
     /**

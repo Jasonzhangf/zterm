@@ -209,6 +209,7 @@ export function handleBufferHeadRuntime(options: {
     sessionHeadStoreRef: MutableRefObject<{ setHead: (sessionId: string, head: { daemonHeadRevision: number; daemonHeadEndIndex: number }) => boolean }>;
   };
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => { socket?: BridgeTransportSocket | null } | null;
   readSessionBufferSnapshot: (sessionId: string) => SessionBufferState;
   commitSessionBufferUpdate: (sessionId: string, nextBuffer: SessionBufferState) => boolean;
   scheduleSessionRenderCommit: (sessionId: string) => void;
@@ -228,7 +229,8 @@ export function handleBufferHeadRuntime(options: {
   ) => boolean;
 }) {
   let session = options.refs.stateRef.current.sessions.find((item) => item.id === options.sessionId) || null;
-  const ws = options.readSessionTransportSocket(options.sessionId);
+  const ws = options.readSessionTransportResource?.(options.sessionId)?.socket
+    || options.readSessionTransportSocket(options.sessionId);
   if (
     !session
     || (session.state !== 'connected' && session.state !== 'connecting' && session.state !== 'reconnecting')
@@ -471,6 +473,7 @@ export function requestSessionBufferSyncRuntime(options: {
     pendingResumeTailRefreshRef: MutableRefObject<Set<string>>;
   };
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => { socket?: BridgeTransportSocket | null } | null;
   readSessionBufferSnapshot: (sessionId: string) => SessionBufferState;
   clearSessionPullState: (sessionId: string, purpose?: SessionPullPurpose) => void;
   sendSocketPayload: (
@@ -498,9 +501,10 @@ export function requestSessionBufferSyncRuntime(options: {
   const session = options.requestOptions?.sessionOverride
     || options.refs.stateRef.current.sessions.find((item) => item.id === options.sessionId)
     || null;
-  const activeWs = options.readSessionTransportSocket(options.sessionId);
+  const activeWs = options.readSessionTransportResource?.(options.sessionId)?.socket
+    || options.readSessionTransportSocket(options.sessionId);
   const requestedWs = options.requestOptions?.ws || null;
-  if (requestedWs && activeWs !== requestedWs) {
+  if (requestedWs && activeWs && activeWs !== requestedWs) {
     return false;
   }
   const targetWs = requestedWs || activeWs;
@@ -717,11 +721,14 @@ export function requestSessionBufferHeadRuntime(options: {
     sessionDebugMetricsStoreRef: MutableRefObject<SessionDebugMetricsRecorder>;
   };
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => { socket?: BridgeTransportSocket | null } | null;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   resolveTerminalRefreshCadence: () => { headTickMs: number };
 }) {
-  const activeWs = options.readSessionTransportSocket(options.sessionId) || null;
-  if (options.ws && activeWs !== options.ws) {
+  const activeWs = options.readSessionTransportResource?.(options.sessionId)?.socket
+    || options.readSessionTransportSocket(options.sessionId)
+    || null;
+  if (options.ws && activeWs && activeWs !== options.ws) {
     return false;
   }
   const targetWs = options.ws || activeWs;

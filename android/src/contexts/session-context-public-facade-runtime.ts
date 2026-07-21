@@ -19,6 +19,7 @@ import type {
 import type { SessionBufferStore } from '../lib/session-buffer-store';
 import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
 import type { SessionHeadStore } from '../lib/session-head-store';
+import type { SessionTransportResource } from '../lib/session-transport-runtime';
 import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
 import type {
   CreateSessionOptions,
@@ -47,6 +48,7 @@ export function createSessionPublicFacadeRuntime(options: {
   scheduleStatesRef: { current: Record<string, SessionScheduleState> };
   sessionVisibleRangeRef: { current: Map<string, any> };
   sessionBufferHeadsRef: { current: Map<string, SessionBufferHeadState> };
+  readSessionTransportResource: (sessionId: string) => SessionTransportResource;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   setScheduleStateForSession: (
@@ -89,6 +91,7 @@ export function createSessionPublicFacadeRuntime(options: {
     return sendMessageRuntime({
       sessionId,
       msg,
+      readSessionTransportResource: options.readSessionTransportResource,
       readSessionTransportSocket: options.readSessionTransportSocket,
       sendSocketPayload: options.sendSocketPayload,
     });
@@ -232,6 +235,7 @@ export function createSessionPublicFacadeRuntime(options: {
     sendMessageRawRuntime({
       sessionId,
       msg,
+      readSessionTransportResource: options.readSessionTransportResource,
       readSessionTransportSocket: options.readSessionTransportSocket,
       sendSocketPayload: options.sendSocketPayload,
     });
@@ -284,7 +288,10 @@ export function buildSessionContextValueRuntime(options: {
     sessionId: string,
     onProgress?: (progress: RemoteScreenshotStatusPayload) => void,
   ) => Promise<RemoteScreenshotCapture>;
-  requestRemoteWindowTargets: (sessionId: string) => Promise<RemoteWindowStreamTargetsResponsePayload>;
+  requestRemoteWindowTargets: (
+    sessionId: string,
+    options?: { forceRefresh?: boolean },
+  ) => Promise<RemoteWindowStreamTargetsResponsePayload>;
   requestRemoteWindowStreamStart: (
     sessionId: string,
     target: RemoteWindowStreamTargetManifest,

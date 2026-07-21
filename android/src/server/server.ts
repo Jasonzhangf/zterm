@@ -93,7 +93,7 @@ const LOG_DIR = join(WTERM_HOME_DIR, 'logs');
 const APP_UPDATE_VERSION_CODE = Number.parseInt(process.env.ZTERM_APP_UPDATE_VERSION_CODE || '', 10);
 const APP_UPDATE_VERSION_NAME = (process.env.ZTERM_APP_UPDATE_VERSION_NAME || '').trim();
 const APP_UPDATE_MANIFEST_URL = (process.env.ZTERM_APP_UPDATE_MANIFEST_URL || '').trim();
-const WS_HEARTBEAT_INTERVAL_MS = 30000;
+const WS_HEARTBEAT_INTERVAL_MS = 2000;
 const STARTUP_PORT_CONFLICT_EXIT_CODE = 78;
 const DAEMON_RUNTIME_DEBUG = process.env.ZTERM_DAEMON_DEBUG_LOG === '1';
 const MAX_CLIENT_DEBUG_BATCH_LOG_ENTRIES = 8;
@@ -355,6 +355,8 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
     sanitizeSessionName,
     createTransportSubscriber: (connection) =>
       terminalRuntime.createTransportSubscriber(connection as DaemonTransportConnection),
+    createMuxChannelSubscriber: (connection, channelId) =>
+      terminalRuntime.createMuxChannelSubscriber(connection as DaemonTransportConnection, channelId),
     bindConnectionToSubscriber: (connection, subscriber) =>
       terminalRuntime.bindConnectionToSubscriber(connection as DaemonTransportConnection, subscriber),
     getMirrorKey,
@@ -406,6 +408,7 @@ const terminalDaemonRuntime = createTerminalDaemonRuntime({
     }
     sessionsMap.clear();
   },
+  detachSubscriberTransportOnly: terminalRuntime.detachSubscriberTransportOnly,
   destroyMirror: terminalRuntime.destroyMirror,
   disposeScheduleRuntime: () => terminalScheduleRuntime.dispose(),
   startRelayHostClient: () => relayHostClient.start(),

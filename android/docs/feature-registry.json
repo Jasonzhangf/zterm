@@ -306,7 +306,9 @@
         "src/contexts/session-reconnect-helpers.ts",
         "src/lib/tmux-sessions.ts",
         "src/server/terminal-bridge-runtime.ts",
-        "src/server/rtc-bridge.ts"
+        "src/server/terminal-daemon-runtime.ts",
+        "src/server/rtc-bridge.ts",
+        "packages/shared/src/connection/protocol.ts"
       ],
       "allowed_paths": [
         "src/contexts/SessionContext.tsx",
@@ -334,13 +336,21 @@
         "src/pages/TerminalPage.tsx",
         "src/pages/TerminalPage.network-banner.test.tsx",
         "src/server/terminal-bridge-runtime.ts",
+        "src/server/terminal-daemon-runtime.ts",
+        "src/server/terminal-daemon-runtime.test.ts",
         "src/server/rtc-bridge.ts",
         "src/server/rtc-bridge.test.ts",
         "src/server/terminal-transport-runtime.ts",
         "src/server/terminal-message-runtime.ts",
         "src/server/terminal-mirror-runtime.ts",
         "src/server/terminal-runtime.ts",
-        "src/server/terminal-runtime-types.ts"
+        "src/server/terminal-runtime-types.ts",
+        "src/lib/android-power-policy.test.ts",
+        "native/android/app/src/main/AndroidManifest.xml",
+        "native/android/app/src/main/java/com/zterm/android/BackgroundService.java",
+        "packages/shared/src/connection/protocol.ts",
+        "docs/goals/terminal-transport-multiplex-refactor-plan.md",
+        "packages/shared/src/connection/protocol.test.ts"
       ],
       "forbidden_paths": [
         "src/components/TerminalView.tsx"
@@ -352,7 +362,9 @@
         "src/contexts/session-context-socket-runtime.test.ts",
         "src/contexts/session-context-activity-runtime.test.ts",
         "src/contexts/SessionContext.ws-refresh.test.tsx",
+        "src/server/server.daemon-runtime-truth.test.ts",
         "src/server/server.transport-lifecycle-truth.test.ts",
+        "src/server/terminal-daemon-runtime.test.ts",
         "src/server/terminal-mirror-runtime.test.ts",
         "src/server/terminal-runtime.detached-session.test.ts",
         "src/server/terminal-message-runtime.test.ts",
@@ -361,13 +373,16 @@
         "src/contexts/session-context-transport-runtime.test.ts",
         "src/lib/tmux-sessions.test.ts",
         "src/server/rtc-bridge.test.ts",
-        "src/pages/TerminalPage.network-banner.test.tsx"
+        "src/pages/TerminalPage.network-banner.test.tsx",
+        "src/lib/android-power-policy.test.ts",
+        "packages/shared/src/connection/protocol.test.ts"
       ],
       "truth_sources": [
         ".agents/skills/terminal-buffer-truth/SKILL.md",
         "docs/architecture.md",
         "docs/decisions/2026-04-28-terminal-transport-session-lifecycle-truth.md",
-        "docs/testing/websocket-transport-reuse-test-design.md"
+        "docs/testing/websocket-transport-reuse-test-design.md",
+        "docs/goals/terminal-transport-multiplex-refactor-plan.md"
       ]
     },
     {
@@ -760,12 +775,14 @@
         "src/server/relay-client.test.ts",
         "src/lib/relay-account-directory.test.ts",
         "src/lib/traversal-relay-client.test.ts",
-        "scripts/traversal-relay-local-smoke.ts"
+        "scripts/traversal-relay-local-smoke.ts",
+        "src/lib/traversal/socket.test.ts"
       ],
       "truth_sources": [
         "docs/goals/relay-account-directory-and-route-plan.md",
         "docs/testing/relay-account-directory-test-design.md",
-        "docs/architecture.md"
+        "docs/architecture.md",
+        "docs/testing/websocket-transport-reuse-test-design.md"
       ]
     },
     {
@@ -1034,31 +1051,31 @@
         "docs/function-map.md"
       ]
     },
-  {
-    "feature_id": "daemon.cli_node",
-    "owners": [
-      "scripts/runtime-debug-remote.ts",
-      "scripts/collect-runtime-audit.ts",
-      "scripts/analyze-runtime-debug.ts",
-      "scripts/weak-network-byte-proxy.ts",
-      "scripts/terminal-performance-probe.ts"
-    ],
-    "allowed_paths": [
-      "scripts/runtime-debug-remote.ts",
-      "scripts/collect-runtime-audit.ts",
-      "scripts/analyze-runtime-debug.ts",
+    {
+      "feature_id": "daemon.cli_node",
+      "owners": [
+        "scripts/runtime-debug-remote.ts",
+        "scripts/collect-runtime-audit.ts",
+        "scripts/analyze-runtime-debug.ts",
+        "scripts/weak-network-byte-proxy.ts",
+        "scripts/terminal-performance-probe.ts"
+      ],
+      "allowed_paths": [
+        "scripts/runtime-debug-remote.ts",
+        "scripts/collect-runtime-audit.ts",
+        "scripts/analyze-runtime-debug.ts",
         "scripts/terminal-real-device-evidence.ts",
-      "scripts/traversal-relay-local-smoke.ts",
-      "scripts/daemon-mirror-close-loop.ts",
-      "scripts/weak-network-byte-proxy.ts",
-      "scripts/terminal-performance-probe.ts",
-      "scripts/build-function-wiki.mjs"
-    ],
+        "scripts/traversal-relay-local-smoke.ts",
+        "scripts/daemon-mirror-close-loop.ts",
+        "scripts/weak-network-byte-proxy.ts",
+        "scripts/terminal-performance-probe.ts",
+        "scripts/build-function-wiki.mjs"
+      ],
       "forbidden_paths": [],
-    "required_gates": [
-      "src/lib/function-wiki-truth.test.ts",
-      "src/lib/weak-network-byte-proxy.test.ts"
-    ],
+      "required_gates": [
+        "src/lib/function-wiki-truth.test.ts",
+        "src/lib/weak-network-byte-proxy.test.ts"
+      ],
       "truth_sources": [
         "docs/wiki/cli.md",
         "docs/function-map.md"

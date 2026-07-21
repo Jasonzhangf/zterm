@@ -4,6 +4,7 @@ import { WebSocket, WebSocketServer, type RawData } from 'ws';
 import { createRtcBridgeServer, type RtcServerTransport, type SignalMessage } from './rtc-bridge';
 import type { TerminalTransportSubscriber } from './terminal-runtime';
 import type { DaemonTransportConnection } from './terminal-transport-runtime';
+import { markTransportConnectionInboundActivity } from './terminal-transport-runtime';
 
 export interface TerminalBridgeRuntimeDeps {
   requiredAuthToken: string;
@@ -63,8 +64,21 @@ export function createTerminalBridgeRuntime(
       if (parsed.type === 'input') {
         return 'input';
       }
+      if (parsed.type === 'mux-channel-message' && typeof (parsed as {
+        payload?: { message?: { type?: unknown } };
+      }).payload?.message?.type === 'string') {
+        return (parsed as { payload: { message: { type: string } } }).payload.message.type === 'input'
+          ? 'input'
+          : 'message';
+      }
       if (parsed.type === 'session-open' || parsed.type === 'connect' || parsed.type === 'close') {
         return 'attach';
+      }
+      if (parsed.type === 'mux-channel-open' || parsed.type === 'mux-channel-close') {
+        return 'attach';
+      }
+      if (parsed.type === 'mux-channel-binary') {
+        return 'message';
       }
       return 'message';
     } catch {
@@ -121,11 +135,38 @@ export function createTerminalBridgeRuntime(
   }
 
   function refreshBoundAdaptiveLease(connection: DaemonTransportConnection) {
-    const subscriber = connection.boundSubscriberId ? deps.sessions.get(connection.boundSubscriberId) || null : null;
-    if (!subscriber) {
-      return;
+    const subscriberIds = new Set<string>();
+    if (connection.boundSubscriberId) {
+      subscriberIds.add(connection.boundSubscriberId);
     }
-    deps.refreshAdaptiveWidthLeaseHeartbeat(subscriber);
+    for (const subscriberId of connection.muxChannels?.values() || []) {
+      subscriberIds.add(subscriberId);
+    }
+    for (const subscriberId of subscriberIds) {
+      const subscriber = deps.sessions.get(subscriberId) || null;
+      if (!subscriber) {
+        continue;
+      }
+      deps.refreshAdaptiveWidthLeaseHeartbeat(subscriber);
+    }
+  }
+
+  function detachConnectionSubscribers(connection: DaemonTransportConnection, reason: string) {
+    const subscriberIds = new Set<string>();
+    if (connection.boundSubscriberId) {
+      subscriberIds.add(connection.boundSubscriberId);
+    }
+    for (const subscriberId of connection.muxChannels?.values() || []) {
+      subscriberIds.add(subscriberId);
+    }
+    for (const subscriberId of subscriberIds) {
+      const subscriber = deps.sessions.get(subscriberId) || null;
+      if (!subscriber) {
+        continue;
+      }
+      deps.detachSubscriberTransportOnly(subscriber, reason, connection.transportId);
+    }
+    connection.muxChannels?.clear();
   }
 
   const rtcBridgeServer = createRtcBridgeServer({
@@ -137,24 +178,18 @@ export function createTerminalBridgeRuntime(
       console.log(`[${deps.logTimePrefix()}] rtc transport ${connection.id} created`);
       return {
         onMessage: (_transportId, data, isBinary) => {
-          connection.wsAlive = true;
+          markTransportConnectionInboundActivity(connection);
           refreshBoundAdaptiveLease(connection);
           enqueueConnectionMessage(connection, data, isBinary);
         },
         onClose: (_transportId, reason) => {
           console.log(`[${deps.logTimePrefix()}] rtc transport ${connection.id} closed: ${reason}`);
-          const subscriber = connection.boundSubscriberId ? deps.sessions.get(connection.boundSubscriberId) || null : null;
-          if (subscriber) {
-            deps.detachSubscriberTransportOnly(subscriber, reason, connection.transportId);
-          }
+          detachConnectionSubscribers(connection, reason);
           deps.connections.delete(connection.id);
         },
         onError: (_transportId, message) => {
           console.error(`[${deps.logTimePrefix()}] rtc transport ${connection.id} error: ${message}`);
-          const subscriber = connection.boundSubscriberId ? deps.sessions.get(connection.boundSubscriberId) || null : null;
-          if (subscriber) {
-            deps.detachSubscriberTransportOnly(subscriber, `rtc error: ${message}`, connection.transportId);
-          }
+          detachConnectionSubscribers(connection, `rtc error: ${message}`);
           deps.connections.delete(connection.id);
         },
       };
@@ -179,12 +214,12 @@ export function createTerminalBridgeRuntime(
     );
 
     ws.on('pong', () => {
-      connection.wsAlive = true;
+      markTransportConnectionInboundActivity(connection);
       refreshBoundAdaptiveLease(connection);
     });
 
     ws.on('message', (rawData, isBinary) => {
-      connection.wsAlive = true;
+      markTransportConnectionInboundActivity(connection);
       refreshBoundAdaptiveLease(connection);
       enqueueConnectionMessage(connection, rawData, isBinary);
     });
@@ -194,19 +229,13 @@ export function createTerminalBridgeRuntime(
       console.log(
         `[${deps.logTimePrefix()}] websocket transport ${connection.id} closed code=${code} reason=${reason || 'n/a'} role=${connection.role} bound=${connection.boundSubscriberId || 'none'}`,
       );
-      const subscriber = connection.boundSubscriberId ? deps.sessions.get(connection.boundSubscriberId) || null : null;
-      if (subscriber) {
-        deps.detachSubscriberTransportOnly(subscriber, 'websocket closed', connection.transportId);
-      }
+      detachConnectionSubscribers(connection, 'websocket closed');
       deps.connections.delete(connection.id);
     });
 
     ws.on('error', (error) => {
       console.error(`[${deps.logTimePrefix()}] websocket transport ${connection.id} error: ${error.message}`);
-      const subscriber = connection.boundSubscriberId ? deps.sessions.get(connection.boundSubscriberId) || null : null;
-      if (subscriber) {
-        deps.detachSubscriberTransportOnly(subscriber, `websocket error: ${error.message}`, connection.transportId);
-      }
+      detachConnectionSubscribers(connection, `websocket error: ${error.message}`);
       deps.connections.delete(connection.id);
     });
   }

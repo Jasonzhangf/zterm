@@ -142,7 +142,7 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
       sessions: {
         total: subscriberEntries.length,
         attached: subscriberEntries.filter((subscriber) => Boolean(subscriber.transport)).length,
-        ready: subscriberEntries.filter((subscriber) => Boolean(subscriber.transport?.connectedSent)).length,
+        ready: subscriberEntries.filter((subscriber) => Boolean(subscriber.connectedSent || subscriber.transport?.connectedSent)).length,
       },
       mirrors: {
         total: mirrorEntries.length,
@@ -215,7 +215,8 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
         sessionName: subscriber.sessionName,
         mirrorKey: subscriber.mirrorKey,
         transportId: subscriber.transportId,
-        connectedSent: Boolean(subscriber.transport?.connectedSent),
+        connectedSent: Boolean(subscriber.connectedSent || subscriber.transport?.connectedSent),
+        muxChannelId: subscriber.muxChannelId || null,
         requestOrigin: subscriber.transport?.requestOrigin || null,
       })),
       mirrors: mirrorEntries.map((mirror) => ({

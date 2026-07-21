@@ -1,11 +1,24 @@
 import { flushRuntimeDebugLogsToSessionTransport } from '../lib/runtime-debug-flush';
 import type { BridgeSettings } from '../lib/bridge-settings';
+import {
+  getSessionTargetTerminalTransport,
+  getSessionTerminalChannel,
+  type SessionTransportRuntimeStore,
+} from '../lib/session-transport-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { Host, Session, SessionBufferState, SessionRenderBufferSnapshot, SessionScheduleState, TerminalBufferPayload } from '../lib/types';
 import type { RecordSessionTxOptions } from './session-context-pull-runtime';
 import type { RevisionResetExpectation, SessionAction, SessionManagerState, SessionReconnectRuntime } from './session-context-core';
 import type { SessionBufferHeadState } from './session-buffer-planner-helpers';
 import type { SessionPullPurpose } from './session-pull-state-helpers';
+import {
+  buildTerminalMuxChannelBinary,
+  buildTerminalMuxChannelMessage,
+  buildTerminalMuxTargetMessage,
+  classifyTerminalMuxClientMessage,
+  type BridgeClientMessage,
+  type TerminalMuxClientFrame,
+} from '@zterm/shared/protocol';
 import {
   applySessionActionRuntime,
   applyTransportDiagnosticsRuntime,
@@ -47,6 +60,112 @@ import {
   updateSessionSyncRuntime,
   writeSessionTransportTokenRuntime,
 } from './session-context-infra-runtime';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function encodeArrayBufferToBase64(data: ArrayBuffer) {
+  const bytes = new Uint8Array(data);
+  let binary = '';
+  for (let offset = 0; offset < bytes.byteLength; offset += 0x8000) {
+    const chunk = bytes.subarray(offset, Math.min(offset + 0x8000, bytes.byteLength));
+    binary += String.fromCharCode(...chunk);
+  }
+  if (typeof btoa === 'function') {
+    return btoa(binary);
+  }
+  const bufferCtor = (globalThis as unknown as {
+    Buffer?: { from(input: string, encoding: 'binary'): { toString(encoding: 'base64'): string } };
+  }).Buffer;
+  if (bufferCtor) {
+    return bufferCtor.from(binary, 'binary').toString('base64');
+  }
+  throw new Error('terminal mux binary encoding unavailable');
+}
+
+function requireTerminalMuxChannel(
+  store: SessionTransportRuntimeStore,
+  sessionId: string,
+) {
+  const channel = getSessionTerminalChannel(store, sessionId);
+  if (!channel || (channel.state !== 'opening' && channel.state !== 'open')) {
+    throw new Error(`terminal mux channel is not open for session ${sessionId}`);
+  }
+  return channel;
+}
+
+export function wrapSessionPayloadForTargetMuxRuntime(options: {
+  store: SessionTransportRuntimeStore;
+  sessionId: string;
+  ws: BridgeTransportSocket;
+  data: string | ArrayBuffer;
+  now?: number;
+}): string | ArrayBuffer {
+  const targetSocket = getSessionTargetTerminalTransport(options.store, options.sessionId);
+  if (!targetSocket || targetSocket !== options.ws) {
+    return options.data;
+  }
+  if (typeof options.data !== 'string') {
+    const channel = requireTerminalMuxChannel(options.store, options.sessionId);
+    return JSON.stringify(buildTerminalMuxChannelBinary(
+      channel.channelId,
+      encodeArrayBufferToBase64(options.data),
+    ));
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(options.data);
+  } catch {
+    const channel = requireTerminalMuxChannel(options.store, options.sessionId);
+    return JSON.stringify(buildTerminalMuxChannelMessage(channel.channelId, {
+      type: 'input',
+      payload: options.data,
+    }));
+  }
+
+  if (!isRecord(parsed) || typeof parsed.type !== 'string') {
+    throw new Error('terminal mux outbound payload requires a typed JSON message');
+  }
+  if (parsed.type.startsWith('mux-')) {
+    return options.data;
+  }
+  if (parsed.type === 'ping') {
+    const frame: TerminalMuxClientFrame = {
+      type: 'mux-ping',
+      payload: {
+        sentAt: Number.isFinite(options.now) ? Math.max(0, Math.floor(options.now || 0)) : Date.now(),
+      },
+    };
+    return JSON.stringify(frame);
+  }
+  if (parsed.type === 'close') {
+    const channel = requireTerminalMuxChannel(options.store, options.sessionId);
+    const frame: TerminalMuxClientFrame = {
+      type: 'mux-channel-close',
+      payload: {
+        channelId: channel.channelId,
+        reason: 'client requested channel close',
+      },
+    };
+    return JSON.stringify(frame);
+  }
+
+  const message = parsed as BridgeClientMessage;
+  const lane = classifyTerminalMuxClientMessage(message);
+  if (lane === 'legacy') {
+    throw new Error(`legacy terminal message ${message.type} cannot be sent on mux target transport`);
+  }
+  if (lane === 'target') {
+    return JSON.stringify(buildTerminalMuxTargetMessage(message as Parameters<typeof buildTerminalMuxTargetMessage>[0]));
+  }
+  const channel = requireTerminalMuxChannel(options.store, options.sessionId);
+  return JSON.stringify(buildTerminalMuxChannelMessage(
+    channel.channelId,
+    message as Parameters<typeof buildTerminalMuxChannelMessage>[1],
+  ));
+}
 
 export function createSessionInfraFacadeRuntime(options: {
   stateRef: { current: SessionManagerState };
@@ -358,10 +477,16 @@ export function createSessionInfraFacadeRuntime(options: {
   };
 
   const sendSocketPayload = (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer, recordOptions?: RecordSessionTxOptions) => {
-    sendSocketPayloadInfraRuntime({
+    const outboundData = wrapSessionPayloadForTargetMuxRuntime({
+      store: options.transportRuntimeStoreRef.current,
       sessionId,
       ws,
       data,
+    });
+    sendSocketPayloadInfraRuntime({
+      sessionId,
+      ws,
+      data: outboundData,
       recordSessionTx,
       recordOptions,
     });

@@ -29,6 +29,9 @@ export interface TerminalTransportConnection {
   requestOrigin: string;
   role: 'pending' | 'control' | 'session';
   boundSubscriberId: string | null;
+  muxVersion?: number;
+  muxClientInstanceId?: string | null;
+  muxChannels?: Map<string, string>;
 }
 
 export interface PendingBinaryTransfer<TPayload extends { byteLength: number }> {
@@ -65,6 +68,9 @@ export interface TerminalTransportSubscriber {
   transportId: string;
   transport: TerminalSessionTransport | null;
   closeTransport?: (reason: string) => void;
+  connectedSent?: boolean;
+  muxChannelId?: string | null;
+  muxParentTransportId?: string | null;
   sessionName: string;
   mirrorKey: string | null;
   bodySubscribed?: boolean;

@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   bindSessionTransportSocketLifecycle,
+  bindTargetMuxTransportSocketLifecycleRuntime,
   ensureControlTransportForSessionOpen,
+  handleTargetMuxServerFrameRuntime,
   handleControlTransportMessage,
 } from './session-context-transport-runtime';
 import { sendTerminalResizeRuntime } from './session-context-transport-lifecycle-runtime';
@@ -371,6 +373,290 @@ describe('bindSessionTransportSocketLifecycle', () => {
       'session.ws.connect.buffer-sync.preparse-inactive-drop',
       expect.anything(),
     );
+  });
+});
+
+describe('handleTargetMuxServerFrameRuntime', () => {
+  it('routes channel messages to the local session resolved from channelId', () => {
+    const handleSocketServerMessage = vi.fn();
+    const onConnected = vi.fn();
+    const onFailure = vi.fn();
+    const onClosed = vi.fn();
+    const ws = { readyState: WebSocket.OPEN } as any;
+
+    handleTargetMuxServerFrameRuntime({
+      anchorSessionId: 'session-anchor',
+      host: makeHost(),
+      ws,
+      debugScope: 'connect',
+      rawFrameBytes: 123,
+      frame: {
+        type: 'mux-channel-message',
+        payload: {
+          channelId: 'channel-a',
+          message: {
+            type: 'buffer-head',
+            payload: {
+              revision: 7,
+              latestEndIndex: 10,
+            },
+          } as any,
+        },
+      },
+      resolveSessionIdForChannel: () => 'session-1',
+      updateSessionTerminalChannelState: vi.fn(),
+      handleSocketServerMessage,
+      buildChannelCallbacks: () => ({ onConnected, onFailure, onClosed }),
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(handleSocketServerMessage).toHaveBeenCalledWith(
+      expect.objectContaining({
+        sessionId: 'session-1',
+        host: expect.objectContaining({ bridgeHost: '100.127.23.27' }),
+        ws,
+        debugScope: 'connect',
+        rawFrameBytes: 123,
+        onConnected,
+        onFailure,
+        onClosed,
+      }),
+      expect.objectContaining({ type: 'buffer-head' }),
+    );
+  });
+
+  it('does not dispatch unknown channel messages into any session truth', () => {
+    const handleSocketServerMessage = vi.fn();
+    const runtimeDebug = vi.fn();
+
+    handleTargetMuxServerFrameRuntime({
+      anchorSessionId: 'session-anchor',
+      host: makeHost(),
+      ws: { readyState: WebSocket.OPEN } as any,
+      debugScope: 'connect',
+      frame: {
+        type: 'mux-channel-message',
+        payload: {
+          channelId: 'missing-channel',
+          message: { type: 'buffer-sync', payload: { revision: 1, lines: [] } } as any,
+        },
+      },
+      resolveSessionIdForChannel: () => null,
+      updateSessionTerminalChannelState: vi.fn(),
+      handleSocketServerMessage,
+      buildChannelCallbacks: vi.fn(),
+      runtimeDebug,
+    });
+
+    expect(handleSocketServerMessage).not.toHaveBeenCalled();
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.mux.channel-message.unknown-channel',
+      expect.objectContaining({ channelId: 'missing-channel' }),
+    );
+  });
+
+  it('marks only the opened channel session as connected when channel-opened arrives', () => {
+    const updateSessionTerminalChannelState = vi.fn();
+    const onConnected = vi.fn();
+
+    handleTargetMuxServerFrameRuntime({
+      anchorSessionId: 'session-anchor',
+      host: makeHost(),
+      ws: { readyState: WebSocket.OPEN } as any,
+      debugScope: 'reconnect',
+      frame: {
+        type: 'mux-channel-opened',
+        payload: {
+          channelId: 'channel-b',
+          sessionName: 'tmux-b',
+        },
+      },
+      resolveSessionIdForChannel: () => 'session-2',
+      updateSessionTerminalChannelState,
+      handleSocketServerMessage: vi.fn(),
+      buildChannelCallbacks: () => ({
+        onConnected,
+        onFailure: vi.fn(),
+        onClosed: vi.fn(),
+      }),
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(updateSessionTerminalChannelState).toHaveBeenCalledWith('session-2', 'open');
+    expect(onConnected).toHaveBeenCalled();
+  });
+
+  it('marks a channel closed before routing a plain closed channel message into reconnect handling', () => {
+    const updateSessionTerminalChannelState = vi.fn();
+    const handleSocketServerMessage = vi.fn((_params, msg) => {
+      expect(updateSessionTerminalChannelState).toHaveBeenCalledWith('session-1', 'closed');
+      expect(msg).toMatchObject({ type: 'closed' });
+    });
+    const onFailure = vi.fn();
+
+    handleTargetMuxServerFrameRuntime({
+      anchorSessionId: 'session-anchor',
+      host: makeHost(),
+      ws: { readyState: WebSocket.OPEN } as any,
+      debugScope: 'reconnect',
+      frame: {
+        type: 'mux-channel-message',
+        payload: {
+          channelId: 'channel-a',
+          message: {
+            type: 'closed',
+            payload: {
+              reason: 'tmux session closed',
+            },
+          } as any,
+        },
+      },
+      resolveSessionIdForChannel: () => 'session-1',
+      updateSessionTerminalChannelState,
+      handleSocketServerMessage,
+      buildChannelCallbacks: () => ({
+        onConnected: vi.fn(),
+        onFailure,
+        onClosed: vi.fn(),
+      }),
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(handleSocketServerMessage).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('bindTargetMuxTransportSocketLifecycleRuntime', () => {
+  it('sends mux-hello on target open and flushes opening channels only after mux-ready', () => {
+    const ws = {
+      readyState: WebSocket.OPEN,
+      onopen: null,
+      onmessage: null,
+      onerror: null,
+      onclose: null,
+      getDiagnostics: () => ({ reason: '' }),
+    } as any;
+    const sendSocketPayload = vi.fn();
+
+    bindTargetMuxTransportSocketLifecycleRuntime({
+      sessionId: 'session-anchor',
+      host: makeHost(),
+      ws,
+      debugScope: 'connect',
+      readSessionTargetTerminalSocket: () => ws,
+      readRequestedTerminalGeometry: (sessionId) => (
+        sessionId === 'session-1'
+          ? { cols: 90, widthMode: 'adaptive-phone' }
+          : { widthMode: 'mirror-fixed' }
+      ),
+      getOpeningSessionTerminalChannelsForTarget: () => [
+        {
+          channelId: 'channel-a',
+          sessionId: 'session-1',
+          sessionName: 'tmux-a',
+          targetKey: 'target-a',
+          state: 'opening',
+          bodySubscribed: true,
+          openedAt: 1,
+          closedAt: null,
+        },
+        {
+          channelId: 'channel-b',
+          sessionId: 'session-2',
+          sessionName: 'tmux-b',
+          targetKey: 'target-a',
+          state: 'opening',
+          bodySubscribed: true,
+          openedAt: 1,
+          closedAt: null,
+        },
+      ],
+      setSessionTargetMuxReady: vi.fn(),
+      sendSocketPayload,
+      handleTargetMuxServerFrame: vi.fn(),
+      applyTransportDiagnostics: vi.fn(),
+      runtimeDebug: vi.fn(),
+      finalizeFailure: vi.fn(),
+    });
+
+    ws.onopen?.();
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    expect(JSON.parse(sendSocketPayload.mock.calls[0][2])).toEqual({
+      type: 'mux-hello',
+      payload: {
+        version: 1,
+        clientInstanceId: 'session-anchor',
+      },
+    });
+
+    ws.onmessage?.({
+      data: JSON.stringify({
+        type: 'mux-ready',
+        payload: {
+          version: 1,
+          capabilities: {
+            version: 1,
+            channelEnvelope: true,
+            targetMessages: true,
+            boundedBodyScheduler: true,
+          },
+        },
+      }),
+    });
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(3);
+    expect(JSON.parse(sendSocketPayload.mock.calls[1][2])).toEqual({
+      type: 'mux-channel-open',
+      payload: {
+        channelId: 'channel-a',
+        sessionName: 'tmux-a',
+        cols: 90,
+        widthMode: 'adaptive-phone',
+      },
+    });
+    expect(JSON.parse(sendSocketPayload.mock.calls[2][2])).toEqual({
+      type: 'mux-channel-open',
+      payload: {
+        channelId: 'channel-b',
+        sessionName: 'tmux-b',
+        widthMode: 'mirror-fixed',
+      },
+    });
+  });
+
+  it('rejects invalid mux frames without routing them into session handlers', () => {
+    const ws = {
+      readyState: WebSocket.OPEN,
+      onopen: null,
+      onmessage: null,
+      onerror: null,
+      onclose: null,
+      getDiagnostics: () => ({ reason: '' }),
+    } as any;
+    const finalizeFailure = vi.fn();
+    const handleTargetMuxServerFrame = vi.fn();
+
+    bindTargetMuxTransportSocketLifecycleRuntime({
+      sessionId: 'session-anchor',
+      host: makeHost(),
+      ws,
+      debugScope: 'connect',
+      readSessionTargetTerminalSocket: () => ws,
+      readRequestedTerminalGeometry: () => null,
+      getOpeningSessionTerminalChannelsForTarget: () => [],
+      setSessionTargetMuxReady: vi.fn(),
+      sendSocketPayload: vi.fn(),
+      handleTargetMuxServerFrame,
+      applyTransportDiagnostics: vi.fn(),
+      runtimeDebug: vi.fn(),
+      finalizeFailure,
+    });
+
+    ws.onmessage?.({ data: JSON.stringify({ type: 'buffer-sync', payload: {} }) });
+
+    expect(handleTargetMuxServerFrame).not.toHaveBeenCalled();
+    expect(finalizeFailure).toHaveBeenCalledWith('invalid terminal mux frame', true);
   });
 });
 

@@ -38,6 +38,10 @@ export interface TerminalMessageControlRuntimeDeps {
   runTmux: (args: string[]) => { ok: true; stdout: string };
   sanitizeSessionName: (input?: string) => string;
   createTransportSubscriber: (connection: TerminalTransportConnection) => TerminalTransportSubscriber;
+  createMuxChannelSubscriber: (
+    connection: TerminalTransportConnection,
+    channelId: string,
+  ) => TerminalTransportSubscriber;
   bindConnectionToSubscriber: (
     connection: TerminalTransportConnection,
     subscriber: TerminalTransportSubscriber,

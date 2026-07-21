@@ -58,6 +58,7 @@ export interface SessionMessageAssembliesOptions {
   fileTransferMessageRuntimeRef: MutableRefObject<any>;
   remoteWindowMessageRuntimeRef: MutableRefObject<any>;
   readSessionTransportSocket: (sessionId: string) => any;
+  readSessionTransportResource?: (sessionId: string) => any;
   readSessionBufferSnapshot: (sessionId: string) => any;
   sendSocketPayload: (sessionId: string, ws: any, data: string | ArrayBuffer) => void;
   clearSessionPullState: (sessionId: string) => void;
@@ -119,6 +120,7 @@ export function createSessionMessageAssemblies(
       pendingResumeTailRefreshRef: options.pendingResumeTailRefreshRef,
     },
     readSessionTransportSocket: options.readSessionTransportSocket,
+    readSessionTransportResource: options.readSessionTransportResource,
     readSessionBufferSnapshot: options.readSessionBufferSnapshot,
     clearSessionPullState: options.clearSessionPullState,
     sendSocketPayload: options.sendSocketPayload,
@@ -140,6 +142,7 @@ export function createSessionMessageAssemblies(
       sessionDebugMetricsStoreRef: options.sessionDebugMetricsStoreRef,
     },
     readSessionTransportSocket: options.readSessionTransportSocket,
+    readSessionTransportResource: options.readSessionTransportResource,
     sendSocketPayload: options.sendSocketPayload,
     resolveTerminalRefreshCadence: () => options.resolveTerminalRefreshCadence(sessionId),
   });
@@ -172,6 +175,7 @@ export function createSessionMessageAssemblies(
         sessionHeadStoreRef: options.sessionHeadStoreRef,
       },
       readSessionTransportSocket: options.readSessionTransportSocket,
+      readSessionTransportResource: options.readSessionTransportResource,
       readSessionBufferSnapshot: options.readSessionBufferSnapshot,
       commitSessionBufferUpdate,
       scheduleSessionRenderCommit: options.scheduleSessionRenderCommit,

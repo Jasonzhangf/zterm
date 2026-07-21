@@ -57,6 +57,9 @@ describe('server daemon runtime truth gates', () => {
     expect(heartbeatBlock).toContain('heartbeat missed pong');
     expect(heartbeatBlock).not.toContain("connection.transport.close('heartbeat timeout')");
     expect(heartbeatBlock).toContain('connection.transport.ping?.()');
+    expect(heartbeatBlock).toContain('TERMINAL_TRANSPORT_STALE_INBOUND_MS');
+    expect(heartbeatBlock).toContain('deps.detachSubscriberTransportOnly(subscriber, reason, connection.transportId)');
+    expect(heartbeatBlock).toContain('connection.closeTransport(reason)');
     expect(shutdownBlock).toContain('deps.shutdownTerminalSessions(deps.sessions, reason)');
     expect(shutdownBlock).toContain('deps.destroyMirror(mirror, reason, {');
     expect(shutdownBlock).toContain('deps.server.close((error) => {');

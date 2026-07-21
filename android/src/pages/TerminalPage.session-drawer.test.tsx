@@ -277,7 +277,7 @@ describe('TerminalPage portrait session drawer', () => {
     expect(onOpenSettings).toHaveBeenCalledTimes(1);
   });
 
-  it('shows live route and bandwidth metrics in the portrait top status strip', () => {
+  it('shows live route and direction rates in the portrait top status strip without aggregate bandwidth', () => {
     const sessions = [makeSession('s1')];
     sessions[0]!.resolvedPath = 'ipv4';
     sessions[0]!.resolvedEndpoint = '192.168.1.20:3333';
@@ -315,8 +315,40 @@ describe('TerminalPage portrait session drawer', () => {
     );
 
     expect(screen.getByTestId('terminal-connection-status-route').textContent).toContain('局域网');
-    expect(screen.getByTestId('terminal-connection-status-bandwidth').textContent).toContain('3.0 KB/s');
+    expect(screen.queryByTestId('terminal-connection-status-bandwidth')).toBeNull();
     expect(screen.getByTestId('terminal-connection-status-rates').textContent).toContain('↑ 1.0 KB/s ↓ 2.0 KB/s');
+  });
+
+  it('opens the portrait route selector and sends the manual websocket preference', () => {
+    const sessions = [makeSession('s1')];
+    sessions[0]!.resolvedPath = 'rtc-relay';
+    sessions[0]!.resolvedRelayTransport = 'turn';
+    const onUseWebSocketSession = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onUseWebSocketSession={onUseWebSocketSession}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('terminal-connection-status-strip'));
+    fireEvent.click(screen.getByTestId('terminal-route-option-websocket'));
+
+    expect(onUseWebSocketSession).toHaveBeenCalledWith('s1');
   });
 
   it('routes drawer plus action to the quick tab picker', () => {

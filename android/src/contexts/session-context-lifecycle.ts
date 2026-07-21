@@ -251,6 +251,9 @@ export function useSessionContextLifecycle(options: {
   }, [options.flushRuntimeDebugLogs]);
 
   useEffect(() => {
+    if (options.appForegroundActive === false) {
+      return;
+    }
     const timer = window.setInterval(() => {
       const now = Date.now();
       options.refs.sessionDebugMetricsStoreRef.current.refresh(
@@ -276,7 +279,7 @@ export function useSessionContextLifecycle(options: {
     }, 500);
 
     return () => window.clearInterval(timer);
-  }, []);
+  }, [options.appForegroundActive]);
 
   useEffect(() => {
     if (!options.state.activeSessionId) {
@@ -329,13 +332,19 @@ export function useSessionContextLifecycle(options: {
   }, [options.ensureActiveSessionFresh, options.state.liveSessionIds, options.state.sessions]);
 
   useEffect(() => {
+    if (options.appForegroundActive === false) {
+      return;
+    }
     const timer = window.setInterval(() => {
       flushRuntimeDebugLogsRef.current();
     }, options.clientRuntimeDebugFlushIntervalMs);
     return () => window.clearInterval(timer);
-  }, [options.clientRuntimeDebugFlushIntervalMs]);
+  }, [options.appForegroundActive, options.clientRuntimeDebugFlushIntervalMs]);
 
   useEffect(() => {
+    if (options.appForegroundActive === false) {
+      return;
+    }
     let cancelled = false;
     let timer: number | null = null;
 
@@ -343,15 +352,15 @@ export function useSessionContextLifecycle(options: {
       if (cancelled) {
         return;
       }
-      const nextDelay = !options.refs.foregroundActiveRef.current
-        ? 1000
-        : Math.max(16, options.resolveActiveHeadRefreshTickMs(options.refs.stateRef.current.activeSessionId));
+      if (!options.refs.foregroundActiveRef.current) {
+        return;
+      }
+      const nextDelay = Math.max(16, options.resolveActiveHeadRefreshTickMs(options.refs.stateRef.current.activeSessionId));
       timer = window.setTimeout(() => {
         if (cancelled) {
           return;
         }
         if (!options.refs.foregroundActiveRef.current) {
-          scheduleNext();
           return;
         }
         const activeSessionId = options.refs.stateRef.current.activeSessionId;
@@ -386,9 +395,12 @@ export function useSessionContextLifecycle(options: {
         window.clearTimeout(timer);
       }
     };
-  }, [options.ensureActiveSessionFresh, options.resolveActiveHeadRefreshTickMs, options.resolveHeadStalePingMs]);
+  }, [options.appForegroundActive, options.ensureActiveSessionFresh, options.resolveActiveHeadRefreshTickMs, options.resolveHeadStalePingMs]);
 
   useEffect(() => {
+    if (options.appForegroundActive === false) {
+      return;
+    }
     let cancelled = false;
     let timer: number | null = null;
 
@@ -397,12 +409,6 @@ export function useSessionContextLifecycle(options: {
         return;
       }
       if (!options.refs.foregroundActiveRef.current) {
-        timer = window.setTimeout(() => {
-          if (cancelled) {
-            return;
-          }
-          scheduleNext();
-        }, 1000);
         return;
       }
       const refreshTargets = buildPassiveVisibleRefreshTargets(options.refs.stateRef.current);
@@ -460,7 +466,7 @@ export function useSessionContextLifecycle(options: {
         window.clearTimeout(timer);
       }
     };
-  }, [options.ensureActiveSessionFresh, options.resolveActiveHeadRefreshTickMs, options.resolveHeadStalePingMs]);
+  }, [options.appForegroundActive, options.ensureActiveSessionFresh, options.resolveActiveHeadRefreshTickMs, options.resolveHeadStalePingMs]);
 
   useEffect(() => () => {
     options.refs.remoteScreenshotRuntimeRef.current.dispose(

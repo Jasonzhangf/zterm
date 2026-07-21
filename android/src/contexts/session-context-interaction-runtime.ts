@@ -88,6 +88,12 @@ export function createSessionInteractionRuntime(options: {
   isReconnectInFlight: (sessionId: string) => boolean;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
   isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
+  scheduleReconnect?: (
+    sessionId: string,
+    message: string,
+    retryable?: boolean,
+    options?: { immediate?: boolean; resetAttempt?: boolean; force?: boolean },
+  ) => void;
 }) {
   const sendInput = (sessionId: string, data: string) => {
     sendInputRuntime({
@@ -106,6 +112,7 @@ export function createSessionInteractionRuntime(options: {
       requestSessionBufferHead: options.requestSessionBufferHead,
       hasPendingSessionTransportOpen: options.hasPendingSessionTransportOpen,
       isPendingSessionTransportOpenStale: options.isPendingSessionTransportOpenStale,
+      scheduleReconnect: options.scheduleReconnect,
     });
   };
 
@@ -117,6 +124,7 @@ export function createSessionInteractionRuntime(options: {
       sessionId,
       timeoutMs,
       sessions: options.refs.stateRef.current.sessions,
+      readSessionTransportResource: options.readSessionTransportResource,
       readSessionTransportSocket: options.readSessionTransportSocket,
     });
   };
@@ -157,14 +165,19 @@ export function createSessionInteractionRuntime(options: {
     });
   };
 
-  const requestRemoteWindowTargets = async (sessionId: string) => {
+  const requestRemoteWindowTargets = async (
+    sessionId: string,
+    requestOptions?: { forceRefresh?: boolean },
+  ) => {
     return requestRemoteWindowTargetsRuntime({
       sessionId,
       sessions: options.refs.stateRef.current.sessions,
+      readSessionTransportResource: options.readSessionTransportResource,
       readSessionTransportSocket: options.readSessionTransportSocket,
       remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
       sendSocketPayload: options.sendSocketPayload,
       targetCatalogCache: options.refs.remoteWindowTargetCatalogCacheRef?.current,
+      forceRefresh: requestOptions?.forceRefresh === true,
     });
   };
 
@@ -181,6 +194,7 @@ export function createSessionInteractionRuntime(options: {
       videoBitrate: startOptions?.videoBitrate,
       bridgeSettings: options.bridgeSettings,
       sessions: options.refs.stateRef.current.sessions,
+      readSessionTransportResource: options.readSessionTransportResource,
       readSessionTransportSocket: options.readSessionTransportSocket,
       remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
       remoteWindowReceiverRuntime: options.refs.remoteWindowReceiverRuntimeRef.current,
@@ -196,6 +210,7 @@ export function createSessionInteractionRuntime(options: {
       sessionId,
       payload,
       sessions: options.refs.stateRef.current.sessions,
+      readSessionTransportResource: options.readSessionTransportResource,
       readSessionTransportSocket: options.readSessionTransportSocket,
       remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
       sendSocketPayload: options.sendSocketPayload,
@@ -207,6 +222,7 @@ export function createSessionInteractionRuntime(options: {
       sessionId,
       streamId,
       sessions: options.refs.stateRef.current.sessions,
+      readSessionTransportResource: options.readSessionTransportResource,
       readSessionTransportSocket: options.readSessionTransportSocket,
       remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
       remoteWindowReceiverRuntime: options.refs.remoteWindowReceiverRuntimeRef.current,
@@ -222,6 +238,7 @@ export function createSessionInteractionRuntime(options: {
       sessionId,
       payload,
       sessions: options.refs.stateRef.current.sessions,
+      readSessionTransportResource: options.readSessionTransportResource,
       readSessionTransportSocket: options.readSessionTransportSocket,
       remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
       sendSocketPayload: options.sendSocketPayload,

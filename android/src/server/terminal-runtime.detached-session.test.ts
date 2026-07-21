@@ -24,6 +24,7 @@ function createDeps() {
   const sessions = new Map<string, TerminalSession>();
   const mirrors = new Map<string, SessionMirror>();
   const runTmux = vi.fn(() => ({ ok: true as const, stdout: '' }));
+  const sendText = vi.fn();
   let paneMetrics = {
     paneId: '%1',
     tmuxAvailableLineCountHint: 0,
@@ -47,7 +48,7 @@ function createDeps() {
       sessions,
       mirrors,
       sendMessage: vi.fn(),
-      sendText: vi.fn(),
+      sendText,
       sendScheduleStateToSession: vi.fn(),
       buildConnectedPayload: (sessionId: string) => ({ sessionId }),
       buildBufferHeadPayload: (sessionId: string, mirror: SessionMirror) => ({
@@ -95,10 +96,60 @@ function createDeps() {
       daemonRuntimeDebug: vi.fn(),
       logTimePrefix: () => '2026-05-03 00:00:00',
     }),
+    sendText,
   };
 }
 
 describe('terminal runtime detached transport cleanup', () => {
+  it('creates mux channel subscribers without rebinding the physical connection to a single subscriber', () => {
+    const { runtime, sessions } = createDeps();
+    const connection = createTransportConnection('transport-1');
+
+    const first = runtime.createMuxChannelSubscriber(connection, 'channel-a');
+    const second = runtime.createMuxChannelSubscriber(connection, 'channel-b');
+
+    expect(connection.boundSubscriberId).toBeNull();
+    expect(connection.muxChannels?.get('channel-a')).toBe(first.id);
+    expect(connection.muxChannels?.get('channel-b')).toBe(second.id);
+    expect(sessions.get(first.id)).toBe(first);
+    expect(sessions.get(second.id)).toBe(second);
+    expect(first.transport).not.toBe(connection.transport);
+    expect(second.transport).not.toBe(connection.transport);
+    expect(first.transportId).toBe(connection.transportId);
+    expect(second.transportId).toBe(connection.transportId);
+  });
+
+  it('wraps mux channel subscriber outbound messages in a channel envelope over the physical transport', () => {
+    const { runtime, sendText } = createDeps();
+    const connection = createTransportConnection('transport-1');
+    const session = runtime.createMuxChannelSubscriber(connection, 'channel-a');
+
+    session.transport?.sendText(JSON.stringify({
+      type: 'title',
+      payload: 'demo',
+    }));
+
+    expect(sendText).toHaveBeenCalledTimes(1);
+    expect(sendText).toHaveBeenCalledWith(connection.transport, expect.stringContaining('"type":"mux-channel-message"'));
+    const frame = JSON.parse(String(sendText.mock.calls[0]?.[1])) as {
+      type: string;
+      payload: {
+        channelId: string;
+        message: unknown;
+      };
+    };
+    expect(frame).toEqual({
+      type: 'mux-channel-message',
+      payload: {
+        channelId: 'channel-a',
+        message: {
+          type: 'title',
+          payload: 'demo',
+        },
+      },
+    });
+  });
+
   it('removes detached transport-bound sessions from runtime maps and mirror subscribers', () => {
     const { runtime, sessions, mirrors } = createDeps();
     const connection = createTransportConnection('transport-1');

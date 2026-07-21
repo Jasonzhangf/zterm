@@ -102,26 +102,39 @@ describe('server transport/session lifecycle truth gates', () => {
     const source = readBridgeRuntimeSource();
     const closeBlock = extractBlock(source, "ws.on('close'");
     const errorBlock = extractBlock(source, "ws.on('error'");
-    const detachBlock = extractBlock(source, "deps.detachSubscriberTransportOnly(subscriber, 'websocket closed'", 220);
-    expect(closeBlock).toContain("if (subscriber)");
-    expect(closeBlock).toContain("deps.detachSubscriberTransportOnly(subscriber, 'websocket closed'");
+    const detachBlock = extractBlock(source, 'function detachConnectionSubscribers', 900);
+    expect(closeBlock).toContain("detachConnectionSubscribers(connection, 'websocket closed')");
     expect(closeBlock).not.toContain("closeTransportSubscriber(session, 'websocket closed', false)");
-    expect(errorBlock).toContain("if (subscriber)");
-    expect(errorBlock).toContain("deps.detachSubscriberTransportOnly(subscriber, `websocket error: ${error.message}`");
+    expect(errorBlock).toContain("detachConnectionSubscribers(connection, `websocket error: ${error.message}`)");
     expect(errorBlock).not.toContain("closeTransportSubscriber(session, `websocket error: ${error.message}`, false)");
-    expect(detachBlock).toContain("deps.detachSubscriberTransportOnly(subscriber, 'websocket closed'");
+    expect(detachBlock).toContain('connection.boundSubscriberId');
+    expect(detachBlock).toContain('connection.muxChannels?.values()');
+    expect(detachBlock).toContain('if (!subscriber)');
+    expect(detachBlock).toContain('deps.detachSubscriberTransportOnly(subscriber, reason, connection.transportId)');
+    expect(detachBlock).toContain('connection.muxChannels?.clear()');
   });
 
   it('detaches bound rtc transports instead of closing logical sessions on rtc close/error', () => {
     const source = readBridgeRuntimeSource();
     const rtcCloseBlock = extractBlock(source, 'onClose: (_transportId, reason) =>');
     const rtcErrorBlock = extractBlock(source, 'onError: (_transportId, message) =>');
-    expect(rtcCloseBlock).toContain('if (subscriber)');
-    expect(rtcCloseBlock).toContain('deps.detachSubscriberTransportOnly(subscriber, reason');
+    expect(rtcCloseBlock).toContain('detachConnectionSubscribers(connection, reason)');
     expect(rtcCloseBlock).not.toContain('closeTransportSubscriber(session, reason, false)');
-    expect(rtcErrorBlock).toContain('if (subscriber)');
-    expect(rtcErrorBlock).toContain('deps.detachSubscriberTransportOnly(subscriber, `rtc error: ${message}`');
+    expect(rtcErrorBlock).toContain('detachConnectionSubscribers(connection, `rtc error: ${message}`)');
     expect(rtcErrorBlock).not.toContain('closeTransportSubscriber(session, `rtc error: ${message}`, false)');
+  });
+
+  it('detaches stale bound daemon transports without destroying mirror or tmux session truth', () => {
+    const daemonRuntimeSource = readDaemonRuntimeSource();
+    const heartbeatBlock = extractBlock(daemonRuntimeSource, 'function startHeartbeatLoop(', 3600);
+
+    expect(heartbeatBlock).toContain('TERMINAL_TRANSPORT_STALE_INBOUND_MS');
+    expect(heartbeatBlock).toContain('connection.boundSubscriberId');
+    expect(heartbeatBlock).toContain('deps.detachSubscriberTransportOnly(subscriber, reason, connection.transportId)');
+    expect(heartbeatBlock).toContain('connection.closeTransport(reason)');
+    expect(heartbeatBlock).not.toContain('deps.destroyMirror(');
+    expect(heartbeatBlock).not.toContain('closeTransportSubscriber(');
+    expect(heartbeatBlock).not.toContain('kill-session');
   });
 
   it('keeps mirror truth alive when session transport detaches or session closes', () => {

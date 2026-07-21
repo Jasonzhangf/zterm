@@ -240,16 +240,35 @@ export const TerminalNetworkBanner = ReactMemo(function TerminalNetworkBanner({
   );
 });
 
+const connectionRouteOptionStyle = {
+  minHeight: '34px',
+  borderRadius: '10px',
+  border: '1px solid rgba(151, 164, 186, 0.16)',
+  background: 'rgba(28, 39, 59, 0.9)',
+  color: '#dce8ff',
+  fontSize: '12px',
+  fontWeight: 850,
+  textAlign: 'left',
+  padding: '0 10px',
+} as const;
+
 const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatusStrip({
   session,
   getSessionDebugMetrics,
   topInsetPx,
+  onForceRelaySession,
+  onUseAutoSession,
+  onUseWebSocketSession,
 }: {
   session: Session | null;
   getSessionDebugMetrics?: (sessionId: string) => SessionDebugOverlayMetrics | null;
   topInsetPx: number;
+  onForceRelaySession?: (id: string) => void;
+  onUseAutoSession?: (id: string) => void;
+  onUseWebSocketSession?: (id: string) => void;
 }) {
   const [tick, setTick] = useState(0);
+  const [routeMenuOpen, setRouteMenuOpen] = useState(false);
 
   useEffect(() => {
     if (!session) {
@@ -270,7 +289,6 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
   const metrics = getSessionDebugMetrics ? getSessionDebugMetrics(session.id) : null;
   const uplinkBps = metrics?.uplinkBps || 0;
   const downlinkBps = metrics?.downlinkBps || 0;
-  const totalBps = uplinkBps + downlinkBps;
   const routeLabel = formatConnectionRouteLabel(session);
   const status = resolveDebugStatus(session, metrics || undefined);
   const statusTone = status === 'error' || status === 'closed'
@@ -283,6 +301,9 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
     <div
       data-testid="terminal-connection-status-strip"
       aria-label={`连接状态 ${routeLabel} 上行 ${formatDebugRate(uplinkBps)} 下行 ${formatDebugRate(downlinkBps)}`}
+      role="button"
+      tabIndex={0}
+      onClick={() => setRouteMenuOpen((current) => !current)}
       style={{
         position: 'absolute',
         top: `${Math.max(8, topInsetPx + 8)}px`,
@@ -301,10 +322,11 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
         alignItems: 'center',
         gap: '7px',
         padding: '0 9px',
-        overflow: 'hidden',
-        pointerEvents: 'none',
+        overflow: 'visible',
+        pointerEvents: 'auto',
         fontVariantNumeric: 'tabular-nums',
         whiteSpace: 'nowrap',
+        cursor: 'pointer',
       }}
     >
       <span
@@ -314,6 +336,7 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
           alignItems: 'center',
           gap: '4px',
           minWidth: 0,
+          flex: '1 1 auto',
           color: statusTone,
           fontSize: '11px',
           fontWeight: 900,
@@ -335,17 +358,70 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{routeLabel}</span>
       </span>
       <span
-        data-testid="terminal-connection-status-bandwidth"
-        style={{ color: 'rgba(220,232,255,0.92)', fontSize: '10px', fontWeight: 800 }}
-      >
-        带宽 {formatDebugRate(totalBps)}
-      </span>
-      <span
         data-testid="terminal-connection-status-rates"
-        style={{ color: 'rgba(220,232,255,0.74)', fontSize: '10px', fontWeight: 750 }}
+        style={{
+          flex: '0 0 auto',
+          color: 'rgba(220,232,255,0.74)',
+          fontSize: '10px',
+          fontWeight: 750,
+        }}
       >
         ↑ {formatDebugRate(uplinkBps)} ↓ {formatDebugRate(downlinkBps)}
       </span>
+      {routeMenuOpen ? (
+        <div
+          data-testid="terminal-connection-route-menu"
+          style={{
+            position: 'absolute',
+            left: 0,
+            top: '40px',
+            width: '210px',
+            zIndex: 30,
+            display: 'grid',
+            gap: '6px',
+            padding: '8px',
+            borderRadius: '12px',
+            border: '1px solid rgba(151, 164, 186, 0.22)',
+            background: 'rgba(13, 19, 31, 0.97)',
+            boxShadow: '0 18px 42px rgba(0,0,0,0.38)',
+          }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <button
+            type="button"
+            data-testid="terminal-route-option-auto"
+            onClick={() => {
+              setRouteMenuOpen(false);
+              onUseAutoSession?.(session.id);
+            }}
+            style={connectionRouteOptionStyle}
+          >
+            自动选择
+          </button>
+          <button
+            type="button"
+            data-testid="terminal-route-option-websocket"
+            onClick={() => {
+              setRouteMenuOpen(false);
+              onUseWebSocketSession?.(session.id);
+            }}
+            style={connectionRouteOptionStyle}
+          >
+            直连 / Tailscale
+          </button>
+          <button
+            type="button"
+            data-testid="terminal-route-option-webrtc"
+            onClick={() => {
+              setRouteMenuOpen(false);
+              onForceRelaySession?.(session.id);
+            }}
+            style={connectionRouteOptionStyle}
+          >
+            WebRTC / Relay
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 });
@@ -358,6 +434,7 @@ export {
 };
 
 interface TerminalPageProps {
+  appForegroundActive?: boolean;
   sessions: Session[];
   sessionGroups?: SessionGroupHistory[];
   activeSession: Session | null;
@@ -371,6 +448,7 @@ interface TerminalPageProps {
   onCloseSession: (id: string, source?: string) => void;
   onForceRelaySession?: (id: string) => void;
   onUseAutoSession?: (id: string) => void;
+  onUseWebSocketSession?: (id: string) => void;
   onOpenConnections: () => void;
   onOpenQuickTabPicker: (paneId?: string, hostKey?: string, createOptions?: { sessionName?: string; cwd?: string }) => void;
   onOpenDrawerRemoteSession?: (target: DrawerRemoteSessionTarget, sessionName: string, options?: { activate?: boolean; navigate?: boolean }) => string | null | undefined | void;
@@ -397,7 +475,10 @@ interface TerminalPageProps {
     sessionId: string,
     onProgress?: (progress: RemoteScreenshotStatusPayload) => void,
   ) => Promise<RemoteScreenshotCapture>;
-  onRequestRemoteWindowTargets?: (sessionId: string) => Promise<RemoteWindowStreamTargetsResponsePayload>;
+  onRequestRemoteWindowTargets?: (
+    sessionId: string,
+    options?: { forceRefresh?: boolean },
+  ) => Promise<RemoteWindowStreamTargetsResponsePayload>;
   onRequestRemoteWindowStreamStart?: (
     sessionId: string,
     target: RemoteWindowStreamTargetManifest,
@@ -1100,6 +1181,7 @@ function resolveDebugStatus(
 }
 
 function TerminalPageComponent({
+  appForegroundActive = true,
   sessions,
   sessionGroups = [],
   activeSession,
@@ -1113,6 +1195,7 @@ function TerminalPageComponent({
   onCloseSession,
   onForceRelaySession,
   onUseAutoSession,
+  onUseWebSocketSession,
   onOpenConnections,
   onOpenQuickTabPicker,
   onOpenDrawerRemoteSession,
@@ -1515,8 +1598,8 @@ function TerminalPageComponent({
     renderedPaneSessions.map((session) => session.id),
     sessionPreviewSessions.map((session) => session.id),
     sessionPreviewOpen,
-    true,
-  ), [renderedPaneSessions, sessionPreviewOpen, sessionPreviewSessions]);
+    appForegroundActive !== false,
+  ), [appForegroundActive, renderedPaneSessions, sessionPreviewOpen, sessionPreviewSessions]);
   const livePaneSessionIdsKey = useMemo(
     () => livePaneSessionIds.join('||'),
     [livePaneSessionIds],
@@ -3432,6 +3515,9 @@ function TerminalPageComponent({
               session={uiSession}
               getSessionDebugMetrics={getSessionDebugMetrics}
               topInsetPx={headerTopInsetPx}
+              onForceRelaySession={onForceRelaySession}
+              onUseAutoSession={onUseAutoSession}
+              onUseWebSocketSession={onUseWebSocketSession}
             />
             <button
               type="button"
@@ -3611,6 +3697,7 @@ function TerminalPageComponent({
         />
         <RemoteWindowOverlay
           activeSessionId={uiSessionId}
+          appForegroundActive={appForegroundActive}
           requestTargets={onRequestRemoteWindowTargets}
           startStream={onRequestRemoteWindowStreamStart}
           updateStreamQuality={onUpdateRemoteWindowStreamQuality}
@@ -3709,7 +3796,8 @@ function terminalPagePropsEqual(
   next: Readonly<TerminalPageProps>,
 ) {
   return (
-    terminalPageHeaderSessionsUiKey(prev.sessions) === terminalPageHeaderSessionsUiKey(next.sessions)
+    prev.appForegroundActive === next.appForegroundActive
+    && terminalPageHeaderSessionsUiKey(prev.sessions) === terminalPageHeaderSessionsUiKey(next.sessions)
     && terminalPageActiveRuntimeStatusKey(prev.activeSession)
       === terminalPageActiveRuntimeStatusKey(next.activeSession)
     && prev.getSessionDebugMetrics === next.getSessionDebugMetrics
@@ -3721,6 +3809,9 @@ function terminalPagePropsEqual(
     && prev.onMoveSession === next.onMoveSession
     && prev.onRenameSession === next.onRenameSession
     && prev.onCloseSession === next.onCloseSession
+    && prev.onForceRelaySession === next.onForceRelaySession
+    && prev.onUseAutoSession === next.onUseAutoSession
+    && prev.onUseWebSocketSession === next.onUseWebSocketSession
     && prev.onOpenConnections === next.onOpenConnections
     && prev.onOpenQuickTabPicker === next.onOpenQuickTabPicker
     && prev.onOpenDrawerRemoteSession === next.onOpenDrawerRemoteSession

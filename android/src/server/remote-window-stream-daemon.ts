@@ -402,14 +402,25 @@ struct RemoteInputWindow: Decodable {
 
 struct RemoteInputEvent: Decodable {
     let kind: String
+    let gesture: String?
     let phase: String?
     let button: String?
     let buttons: Int?
+    let pointerId: Int?
+    let startX: Double?
+    let startY: Double?
     let x: Double?
     let y: Double?
+    let startNormalizedX: Double?
+    let startNormalizedY: Double?
+    let normalizedX: Double?
+    let normalizedY: Double?
     let unit: String?
     let deltaX: Double?
     let deltaY: Double?
+    let durationMs: Double?
+    let velocityX: Double?
+    let velocityY: Double?
     let key: String?
     let code: String?
     let text: String?
@@ -538,6 +549,37 @@ func mouseType(phase: String, button: String?) -> CGEventType {
     return right ? .rightMouseDragged : .mouseMoved
 }
 
+func postMouseMove(x: Double, y: Double) {
+    let point = CGPoint(x: x, y: y)
+    let event = CGEvent(
+        mouseEventSource: source,
+        mouseType: .mouseMoved,
+        mouseCursorPosition: point,
+        mouseButton: .left
+    )
+    event?.post(tap: .cghidEventTap)
+}
+
+func postScrollEvent(x: Double, y: Double, deltaX: Double, deltaY: Double, unit: String?) {
+    let units: CGScrollEventUnit = unit == "pixel" ? .pixel : .line
+    let point = CGPoint(x: x, y: y)
+    postMouseMove(x: x, y: y)
+    // Android/DOM deltas use positive values for scrolling down/right; CGEvent
+    // wheel values use the opposite sign for pixel scroll injection.
+    let wheel1 = Int32(max(-32767, min(32767, (-deltaY).rounded())))
+    let wheel2 = Int32(max(-32767, min(32767, (-deltaX).rounded())))
+    let event = CGEvent(
+        scrollWheelEvent2Source: source,
+        units: units,
+        wheelCount: 2,
+        wheel1: wheel1,
+        wheel2: wheel2,
+        wheel3: 0
+    )
+    event?.location = point
+    event?.post(tap: .cghidEventTap)
+}
+
 let keyCodes: [String: CGKeyCode] = [
     "Enter": 36,
     "NumpadEnter": 76,
@@ -584,22 +626,36 @@ func handleConfig(_ config: InputConfig) throws {
         else {
             throw inputError("remote scroll input missing delta or coordinates")
         }
-        let units: CGScrollEventUnit = config.event.unit == "pixel" ? .pixel : .line
-        let point = CGPoint(x: x, y: y)
-        // Android/DOM deltas use positive values for scrolling down/right; CGEvent
-        // wheel values use the opposite sign for pixel scroll injection.
-        let wheel1 = Int32(max(-32767, min(32767, (-deltaY).rounded())))
-        let wheel2 = Int32(max(-32767, min(32767, (-deltaX).rounded())))
-        let event = CGEvent(
-            scrollWheelEvent2Source: source,
-            units: units,
-            wheelCount: 2,
-            wheel1: wheel1,
-            wheel2: wheel2,
-            wheel3: 0
-        )
-        event?.location = point
-        event?.post(tap: .cghidEventTap)
+        postScrollEvent(x: x, y: y, deltaX: deltaX, deltaY: deltaY, unit: config.event.unit)
+    } else if config.event.kind == "gesture" {
+        guard config.event.gesture == "swipe", config.event.phase == "end" else {
+            throw inputError("remote gesture input unsupported")
+        }
+        guard
+            let startX = config.event.startX,
+            let startY = config.event.startY,
+            let x = config.event.x,
+            let y = config.event.y,
+            let deltaX = config.event.deltaX,
+            let deltaY = config.event.deltaY
+        else {
+            throw inputError("remote gesture input missing delta or coordinates")
+        }
+        let dominantDelta = max(abs(deltaX), abs(deltaY))
+        let steps = max(1, min(12, Int(ceil(dominantDelta / 48.0))))
+        let stepDeltaX = deltaX / Double(steps)
+        let stepDeltaY = deltaY / Double(steps)
+        let duration = max(1.0, min(1000.0, config.event.durationMs ?? 1.0))
+        let sleepMicros = UInt32(max(4000.0, min(20000.0, (duration / Double(steps)) * 1000.0)))
+        for step in 1...steps {
+            let progress = Double(step) / Double(steps)
+            let pointX = startX + (x - startX) * progress
+            let pointY = startY + (y - startY) * progress
+            postScrollEvent(x: pointX, y: pointY, deltaX: stepDeltaX, deltaY: stepDeltaY, unit: config.event.unit)
+            if step < steps {
+                usleep(sleepMicros)
+            }
+        }
     } else if config.event.kind == "key" {
         guard let phase = config.event.phase else {
             throw inputError("remote key input missing phase")
@@ -1991,6 +2047,46 @@ export function createRemoteWindowStreamDaemonRuntime(
       }
       if (payload.event.unit !== 'pixel') {
         throw new Error('remote window scroll input unit is invalid');
+      }
+    }
+    if (payload.event.kind === 'gesture') {
+      const values = [
+        payload.event.startX,
+        payload.event.startY,
+        payload.event.x,
+        payload.event.y,
+        payload.event.startNormalizedX,
+        payload.event.startNormalizedY,
+        payload.event.normalizedX,
+        payload.event.normalizedY,
+        payload.event.deltaX,
+        payload.event.deltaY,
+        payload.event.durationMs,
+        payload.event.velocityX,
+        payload.event.velocityY,
+      ];
+      if (!values.every((value) => Number.isFinite(value))) {
+        throw new Error('remote window gesture input coordinates, delta, or timing are invalid');
+      }
+      if (
+        payload.event.startNormalizedX < 0
+        || payload.event.startNormalizedX > 1
+        || payload.event.startNormalizedY < 0
+        || payload.event.startNormalizedY > 1
+        || payload.event.normalizedX < 0
+        || payload.event.normalizedX > 1
+        || payload.event.normalizedY < 0
+        || payload.event.normalizedY > 1
+      ) {
+        throw new Error('remote window gesture input normalized coordinates are out of range');
+      }
+      if (
+        payload.event.gesture !== 'swipe'
+        || payload.event.phase !== 'end'
+        || payload.event.unit !== 'pixel'
+        || payload.event.durationMs <= 0
+      ) {
+        throw new Error('remote window gesture input contract is invalid');
       }
     }
     if (payload.event.kind === 'key' && payload.event.phase !== 'down' && payload.event.phase !== 'up') {

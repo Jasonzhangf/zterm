@@ -10,6 +10,7 @@ import {
   openSessionTransportByIntentRuntime,
 } from './session-context-transport-open-runtime';
 import { createSessionBufferState } from '../lib/terminal-buffer';
+import { buildTransportTargetKey } from '../lib/session-transport-runtime';
 import type { Session } from '../lib/types';
 
 const host = {
@@ -24,7 +25,7 @@ const host = {
   pinned: false,
 };
 
-const targetKey = '127.0.0.1:3333:';
+const targetKey = buildTransportTargetKey(host);
 
 describe('closeSessionRuntime', () => {
   it('closes the session socket instead of parking it as superseded', () => {
@@ -906,6 +907,70 @@ describe('session transport reuse runtime gates', () => {
 
     expect(cleanupSocket).toHaveBeenCalledWith('session-1', false);
     expect(buildTraversalSocketForHost).toHaveBeenCalledWith(host, 'session');
+    expect(primeSessionTransportSocket).toHaveBeenCalledWith('session-1', builtSocket);
+  });
+
+  it('openSessionTransportByIntentRuntime rebuilds when route-aware host identity differs from an open direct socket', () => {
+    const directHost = {
+      ...host,
+      transportMode: 'websocket' as const,
+      tailscaleHost: '100.66.1.82',
+      bridgeHost: '100.66.1.82',
+    };
+    const relayAwareHost = {
+      ...directHost,
+      transportMode: 'auto' as const,
+      daemonHostId: 'mac-studio',
+      relayHostId: 'mac-studio',
+      relayEndpointCandidates: [
+        {
+          id: 'direct:tailscale:mac-studio',
+          kind: 'tailscale' as const,
+          host: '100.66.1.82',
+          port: 3333,
+          authRequired: true,
+          lastSeenAt: '2026-07-20T00:00:00.000Z',
+        },
+        {
+          id: 'relay-rtc:mac-studio',
+          kind: 'relay-rtc' as const,
+          relayHostId: 'mac-studio',
+          authRequired: true,
+          lastSeenAt: '2026-07-20T00:00:00.000Z',
+        },
+      ],
+    };
+    const existingSocket = { readyState: WebSocket.OPEN } as any;
+    const builtSocket = { readyState: WebSocket.CONNECTING } as any;
+    const cleanupSocket = vi.fn();
+    const buildTraversalSocketForHost = vi.fn(() => builtSocket);
+    const primeSessionTransportSocket = vi.fn();
+    const onConnected = vi.fn();
+
+    openSessionTransportByIntentRuntime({
+      intent: {
+        sessionId: 'session-1',
+        openRequestId: 'open-1',
+        host: relayAwareHost,
+        resolvedSessionName: 'tmux-1',
+        debugScope: 'reconnect',
+        finalizeFailure: vi.fn(),
+        onConnected,
+      },
+      readSessionTransportToken: () => 'ticket-1',
+      readSessionTransportSocket: () => existingSocket,
+      readSessionTargetKey: () => buildTransportTargetKey(directHost),
+      cleanupSocket,
+      buildTraversalSocketForHost,
+      runtimeDebug: vi.fn(),
+      primeSessionTransportSocket,
+      bindSessionTransportSocketLifecycle: vi.fn(),
+      writeSessionTransportToken: vi.fn(),
+    } as any);
+
+    expect(onConnected).not.toHaveBeenCalled();
+    expect(cleanupSocket).toHaveBeenCalledWith('session-1', false);
+    expect(buildTraversalSocketForHost).toHaveBeenCalledWith(relayAwareHost, 'session');
     expect(primeSessionTransportSocket).toHaveBeenCalledWith('session-1', builtSocket);
   });
 });

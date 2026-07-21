@@ -35,6 +35,12 @@ interface SendInputTransportOptions {
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
   isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
+  scheduleReconnect?: (
+    sessionId: string,
+    message: string,
+    retryable?: boolean,
+    options?: { immediate?: boolean; resetAttempt?: boolean; force?: boolean },
+  ) => void;
 }
 
 interface ReliableInputQueueItem {
@@ -61,6 +67,19 @@ const pendingInputHeadRefreshes = new Map<string, {
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
 }>();
+
+function isSessionMessageTransportReady(
+  resource: SessionTransportResource,
+  ws: BridgeTransportSocket | null,
+): ws is BridgeTransportSocket {
+  return Boolean(ws)
+    && ws?.readyState === WebSocket.OPEN
+    && (!resource.channel || resource.channel.state === 'open');
+}
+
+function readSocketReadyState(ws: BridgeTransportSocket | null) {
+  return ws ? ws.readyState : null;
+}
 
 function scheduleInputHeadRefresh(options: {
   sessionId: string;
@@ -199,15 +218,17 @@ function flushReliableInputQueue(sessionId: string) {
 
   const resource = queue.options.readSessionTransportResource(sessionId);
   const ws = resource.socket || queue.options.readSessionTransportSocket(sessionId);
+  const wsReadyState = readSocketReadyState(ws);
   const reconnectInFlight = queue.options.isReconnectInFlight(sessionId);
-  if (!ws || ws.readyState !== WebSocket.OPEN) {
+  if (!isSessionMessageTransportReady(resource, ws)) {
     queue.options.runtimeDebug('session.input.reliable-wait.transport-unavailable', {
       sessionId,
       queueDepth: queue.items.length,
-      wsReadyState: ws?.readyState ?? null,
+      wsReadyState,
       reconnectInFlight,
       resourceTargetKey: resource.targetKey,
       resourceSocketState: resource.socketState,
+      channelState: resource.channel?.state ?? null,
     });
     scheduleReliableInputFlush(queue);
     return;
@@ -347,6 +368,7 @@ export function sendInputThroughSessionTransport(options: SendInputTransportOpti
 
   const resource = options.readSessionTransportResource(targetSessionId);
   const ws = resource.socket;
+  const wsReadyState = readSocketReadyState(ws);
   const runtimeActiveSessionId = options.refs.stateRef.current.activeSessionId;
   const isActiveTarget = runtimeActiveSessionId === targetSessionId;
   const isExplicitInputTarget = true;
@@ -363,14 +385,25 @@ export function sendInputThroughSessionTransport(options: SendInputTransportOpti
       preview: options.data.slice(0, 32),
       resourceTargetKey: resource.targetKey,
       resourceSocketState: resource.socketState,
-      wsReadyState: ws?.readyState ?? null,
+      wsReadyState,
       reconnectInFlight,
     });
     enqueueReliableInputChunks(options, targetSessionId, inputChunks);
+    if (
+      (!ws || ws.readyState !== WebSocket.OPEN)
+      && isActiveTarget
+      && !reconnectInFlight
+    ) {
+      options.scheduleReconnect?.(targetSessionId, 'input transport unavailable', true, {
+        immediate: true,
+        resetAttempt: true,
+        force: true,
+      });
+    }
     return;
   }
 
-  if (ws && ws.readyState === WebSocket.OPEN) {
+  if (isSessionMessageTransportReady(resource, ws)) {
     const bufferedBytes = Number.isFinite(ws.bufferedAmount)
       ? Math.max(0, Math.floor(ws.bufferedAmount || 0))
       : 0;
@@ -433,7 +466,8 @@ export function sendInputThroughSessionTransport(options: SendInputTransportOpti
     reconnectInFlight,
     resourceTargetKey: resource.targetKey,
     resourceSocketState: resource.socketState,
-    wsReadyState: ws?.readyState ?? null,
+    wsReadyState,
+    channelState: resource.channel?.state ?? null,
   });
   const pendingTransportOpen = options.hasPendingSessionTransportOpen(targetSessionId);
   const pendingTransportOpenStale = pendingTransportOpen
@@ -444,11 +478,19 @@ export function sendInputThroughSessionTransport(options: SendInputTransportOpti
       sessionId: targetSessionId,
       size: options.data.length,
       preview: options.data.slice(0, 32),
-      wsReadyState: ws?.readyState ?? null,
+      wsReadyState,
       reconnectInFlight,
       pendingTransportOpenStale,
       resourceTargetKey: resource.targetKey,
       resourceSocketState: resource.socketState,
+    });
+    return;
+  }
+  if (isActiveTarget && !reconnectInFlight) {
+    options.scheduleReconnect?.(targetSessionId, 'input transport unavailable', true, {
+      immediate: true,
+      resetAttempt: true,
+      force: true,
     });
   }
 }

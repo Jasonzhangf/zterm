@@ -1250,7 +1250,21 @@ describe('App dynamic refresh matrix', () => {
     });
 
     expect(createTmuxSessionMock).not.toHaveBeenCalled();
-    expect(sessionHarness.createSession).not.toHaveBeenCalled();
+    expect(sessionHarness.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        relayHostId: 'mac-studio',
+        sessionName: 'zterm',
+        authToken: 'token-a',
+      }),
+      expect.objectContaining({
+        activate: false,
+        sessionId: existingSession.id,
+        createdAt: existingSession.createdAt,
+      }),
+    );
     expect(sessionHarness.switchSession).toHaveBeenCalledWith(existingSession.id, { refreshSource: 'explicit-resume' });
   });
 

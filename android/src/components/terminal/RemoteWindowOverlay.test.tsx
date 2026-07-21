@@ -51,6 +51,28 @@ function makeTarget(id: string, title: string, kind: 'app-window' | 'iterm2-pane
   };
 }
 
+function makeStartedPayload(
+  streamId: string,
+  targetId: string,
+  frameWidth: number,
+  frameHeight: number,
+) {
+  return {
+    requestId: `rw-started-${streamId}`,
+    streamId,
+    targetId,
+    answer: { type: 'answer' as const, sdp: 'daemon-answer-sdp' },
+    capture: {
+      source: 'ScreenCaptureKit' as const,
+      frameWidth,
+      frameHeight,
+      frameRate: 12,
+      targetKind: 'app-window' as const,
+    },
+    transport: { kind: 'webrtc-video' as const },
+  };
+}
+
 async function expandItermPaneGroup() {
   fireEvent.click(await screen.findByTestId('remote-window-iterm-pane-group'));
 }
@@ -105,6 +127,57 @@ describe('RemoteWindowOverlay', () => {
 
     expect(screen.queryByTestId('remote-window-picker-loading')).toBeNull();
     expect(screen.getByTestId('remote-window-picker-error').textContent).toContain('远程窗口列表读取超时');
+  });
+
+  it('reopens the remote-window picker from the cached catalog without a blank loading panel', async () => {
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+    }));
+
+    render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-target-app-1');
+    fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口选择' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+
+    expect(screen.queryByTestId('remote-window-picker-loading')).toBeNull();
+    expect(screen.getByTestId('remote-window-target-app-1')).toBeTruthy();
+    expect(requestTargets).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps cached target rows visible while an explicit catalog refresh runs', async () => {
+    let resolveRefresh: ((payload: { requestId: string; targets: RemoteWindowStreamTargetManifest[] }) => void) | null = null;
+    const requestTargets = vi.fn()
+      .mockResolvedValueOnce({
+        requestId: 'rw-1',
+        targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+      })
+      .mockImplementationOnce(() => new Promise((resolve) => {
+        resolveRefresh = resolve;
+      }));
+
+    render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-target-app-1');
+    fireEvent.click(screen.getByRole('button', { name: '刷新远程窗口列表' }));
+
+    expect(requestTargets).toHaveBeenLastCalledWith('session-1', { forceRefresh: true });
+    expect(screen.queryByTestId('remote-window-picker-loading')).toBeNull();
+    expect(screen.getByTestId('remote-window-target-app-1')).toBeTruthy();
+    expect(screen.getByText(/更新中/)).toBeTruthy();
+
+    await act(async () => {
+      resolveRefresh?.({
+        requestId: 'rw-2',
+        targets: [makeTarget('app-2', 'Safari', 'app-window')],
+      });
+    });
+
+    await screen.findByTestId('remote-window-target-app-2');
+    expect(screen.queryByTestId('remote-window-target-app-1')).toBeNull();
   });
 
   it('selects a target, expands to fullscreen, shrinks on Back, and closes explicitly', async () => {
@@ -507,6 +580,44 @@ describe('RemoteWindowOverlay', () => {
 
     expect(requestTargets).not.toHaveBeenCalled();
     expect(entry.getAttribute('style') || '').toContain('transform: translate(-142px, -222px)');
+    expect(screen.queryByTestId('remote-window-picker')).toBeNull();
+  });
+
+  it('lets a long press arm remote window entry dragging before the touch moves', async () => {
+    vi.useFakeTimers();
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+    }));
+
+    render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} />);
+
+    const entry = screen.getByRole('button', { name: '打开远程窗口' });
+    Object.defineProperty(entry, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 330,
+        y: 720,
+        left: 330,
+        top: 720,
+        right: 374,
+        bottom: 764,
+        width: 44,
+        height: 44,
+        toJSON: () => ({}),
+      }),
+    });
+
+    fireEvent.pointerDown(entry, { pointerId: 29, pointerType: 'touch', clientX: 352, clientY: 742, button: 0 });
+    await act(async () => {
+      vi.advanceTimersByTime(300);
+    });
+    fireEvent.pointerMove(window, { pointerId: 29, pointerType: 'touch', clientX: 300, clientY: 690, button: 0 });
+    fireEvent.pointerUp(window, { pointerId: 29, pointerType: 'touch', clientX: 300, clientY: 690, button: 0 });
+    fireEvent.click(entry);
+
+    expect(requestTargets).not.toHaveBeenCalled();
+    expect(entry.getAttribute('style') || '').toContain('transform: translate(-52px, -52px)');
     expect(screen.queryByTestId('remote-window-picker')).toBeNull();
   });
 
@@ -994,7 +1105,7 @@ describe('RemoteWindowOverlay', () => {
     expect(sendInput.mock.calls[1][1].event.phase).toBe('up');
   });
 
-  it('maps a touch drag on the video surface to remote scroll instead of pointer drag', async () => {
+  it('maps a touch drag on the video surface to a remote gesture command instead of pointer drag', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const sendInput = vi.fn();
     const requestTargets = vi.fn(async () => ({
@@ -1038,25 +1149,30 @@ describe('RemoteWindowOverlay', () => {
 
     fireEvent.pointerDown(surface, { pointerId: 21, pointerType: 'touch', clientX: 100, clientY: 70, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 21, pointerType: 'touch', clientX: 100, clientY: 40, button: 0, buttons: 1 });
+    expect(sendInput).not.toHaveBeenCalled();
+    fireEvent.pointerUp(surface, { pointerId: 21, pointerType: 'touch', clientX: 100, clientY: 40, button: 0, buttons: 0 });
     await waitFor(() => {
       expect(sendInput).toHaveBeenCalledTimes(1);
     });
-    fireEvent.pointerUp(surface, { pointerId: 21, pointerType: 'touch', clientX: 100, clientY: 40, button: 0, buttons: 0 });
 
     const payload = sendInput.mock.calls[0][1];
-    expect(payload.event.kind).toBe('scroll');
-    if (payload.event.kind !== 'scroll') {
-      throw new Error('expected scroll payload');
+    expect(payload.event.kind).toBe('gesture');
+    if (payload.event.kind !== 'gesture') {
+      throw new Error('expected gesture payload');
     }
+    expect(payload.event.gesture).toBe('swipe');
+    expect(payload.event.phase).toBe('end');
     expect(payload.event.deltaX).toBe(0);
     expect(payload.event.deltaY).toBe(30);
     expect(payload.event.unit).toBe('pixel');
+    expect(payload.event.startNormalizedX).toBeCloseTo(0.5, 3);
+    expect(payload.event.startNormalizedY).toBeCloseTo(0.7, 3);
     expect(payload.event.normalizedX).toBeCloseTo(0.5, 3);
     expect(payload.event.normalizedY).toBeCloseTo(0.4, 3);
     expect(sendInput).toHaveBeenCalledTimes(1);
   });
 
-  it('streams incremental remote scroll deltas while an unzoomed touch drag is moving', async () => {
+  it('coalesces an unzoomed touch drag into one remote gesture command on release', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const sendInput = vi.fn();
     const requestTargets = vi.fn(async () => ({
@@ -1102,46 +1218,37 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.pointerMove(surface, { pointerId: 22, pointerType: 'touch', clientX: 120, clientY: 64, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 22, pointerType: 'touch', clientX: 120, clientY: 52, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 22, pointerType: 'touch', clientX: 120, clientY: 40, button: 0, buttons: 1 });
-    await waitFor(() => {
-      expect(sendInput).toHaveBeenCalledTimes(3);
-    });
-    expect(sendInput.mock.calls.map((call) => call[1].event)).toEqual([
-      expect.objectContaining({
-        kind: 'scroll',
-        deltaX: 0,
-        deltaY: 16,
-        normalizedX: 0.64,
-        normalizedY: 0.64,
-      }),
-      expect.objectContaining({
-        kind: 'scroll',
-        deltaX: 0,
-        deltaY: 12,
-        normalizedX: 0.64,
-        normalizedY: 0.52,
-      }),
-      expect.objectContaining({
-        kind: 'scroll',
-        deltaX: 0,
-        deltaY: 12,
-        normalizedX: 0.64,
-        normalizedY: 0.4,
-      }),
-    ]);
-
+    expect(sendInput).not.toHaveBeenCalled();
     fireEvent.pointerUp(surface, { pointerId: 22, pointerType: 'touch', clientX: 120, clientY: 40, button: 0, buttons: 0 });
-    expect(sendInput).toHaveBeenCalledTimes(3);
+    await waitFor(() => {
+      expect(sendInput).toHaveBeenCalledTimes(1);
+    });
+    expect(sendInput.mock.calls[0][1].event).toMatchObject({
+      kind: 'gesture',
+      gesture: 'swipe',
+      phase: 'end',
+      pointerId: 22,
+      deltaX: 0,
+      deltaY: 40,
+      startNormalizedX: 0.64,
+      startNormalizedY: 0.8,
+      normalizedX: 0.64,
+      normalizedY: 0.4,
+    });
   });
 
-  it('keeps receiver video intrinsic aspect ratio instead of stretching it', async () => {
+  it('sizes the receiver projection from daemon capture frame aspect after stream start', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const target = makeTarget('app-1', 'TextEdit', 'app-window');
+    target.videoTarget.cropRectTopLeftPx = { x: 10, y: 40, width: 800, height: 600 };
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-1',
-      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+      targets: [target],
     }));
     const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
       streamId,
       mediaStream,
+      started: makeStartedPayload(streamId, target.streamTargetId, 640, 360),
     }));
 
     render(
@@ -1156,11 +1263,14 @@ describe('RemoteWindowOverlay', () => {
     await screen.findByTestId('remote-window-target-app-1');
     fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
 
-    const video = await screen.findByTestId('remote-window-video');
-    expect(video.style.objectFit).toBe('contain');
+    await screen.findByTestId('remote-window-video');
+    const surface = screen.getByTestId('remote-window-video-surface');
+    await waitFor(() => {
+      expect(surface.style.aspectRatio).toBe('640 / 360');
+    });
   });
 
-  it('sends unzoomed fullscreen touch scroll remotely even when the IME inset is present', async () => {
+  it('sends unzoomed fullscreen touch drag as one remote gesture even when the IME inset is present', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const sendInput = vi.fn();
     const requestTargets = vi.fn(async () => ({
@@ -1211,12 +1321,16 @@ describe('RemoteWindowOverlay', () => {
 
     fireEvent.pointerDown(surface, { pointerId: 52, pointerType: 'touch', clientX: 120, clientY: 300, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 52, pointerType: 'touch', clientX: 120, clientY: 250, button: 0, buttons: 1 });
+    expect(sendInput).not.toHaveBeenCalled();
+    fireEvent.pointerUp(surface, { pointerId: 52, pointerType: 'touch', clientX: 120, clientY: 250, button: 0, buttons: 0 });
 
     await waitFor(() => {
       expect(sendInput).toHaveBeenCalledTimes(1);
     });
     expect(sendInput.mock.calls[0][1].event).toMatchObject({
-      kind: 'scroll',
+      kind: 'gesture',
+      gesture: 'swipe',
+      phase: 'end',
       deltaX: 0,
       deltaY: 50,
     });
@@ -1487,7 +1601,7 @@ describe('RemoteWindowOverlay', () => {
     expect(sendInput).not.toHaveBeenCalled();
   });
 
-  it('lifts the fullscreen display container above IME without stealing unzoomed remote scroll', async () => {
+  it('lifts the fullscreen display container above IME without stealing unzoomed remote gesture', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const sendInput = vi.fn();
     const requestTargets = vi.fn(async () => ({
@@ -1541,12 +1655,16 @@ describe('RemoteWindowOverlay', () => {
 
     fireEvent.pointerDown(surface, { pointerId: 41, pointerType: 'touch', clientX: 120, clientY: 300, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 41, pointerType: 'touch', clientX: 120, clientY: 250, button: 0, buttons: 1 });
+    expect(sendInput).not.toHaveBeenCalled();
+    fireEvent.pointerUp(surface, { pointerId: 41, pointerType: 'touch', clientX: 120, clientY: 250, button: 0, buttons: 0 });
 
     await waitFor(() => {
       expect(sendInput).toHaveBeenCalledTimes(1);
     });
     expect(sendInput.mock.calls[0][1].event).toMatchObject({
-      kind: 'scroll',
+      kind: 'gesture',
+      gesture: 'swipe',
+      phase: 'end',
       deltaX: 0,
       deltaY: 50,
     });
@@ -1612,7 +1730,7 @@ describe('RemoteWindowOverlay', () => {
     expect(sendInput).not.toHaveBeenCalled();
   });
 
-  it('keeps exact-fill fullscreen IME projection stable while unzoomed drag scrolls the remote app', async () => {
+  it('keeps exact-fill fullscreen IME projection stable while unzoomed drag sends a remote gesture', async () => {
     const target = makeTarget('app-1', 'TextEdit', 'app-window');
     target.videoTarget.cropRectTopLeftPx = { x: 10, y: 40, width: 300, height: 500 };
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
@@ -1670,12 +1788,16 @@ describe('RemoteWindowOverlay', () => {
 
     fireEvent.pointerDown(surface, { pointerId: 51, pointerType: 'touch', clientX: 120, clientY: 300, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 51, pointerType: 'touch', clientX: 120, clientY: 220, button: 0, buttons: 1 });
+    expect(sendInput).not.toHaveBeenCalled();
+    fireEvent.pointerUp(surface, { pointerId: 51, pointerType: 'touch', clientX: 120, clientY: 220, button: 0, buttons: 0 });
 
     await waitFor(() => {
       expect(sendInput).toHaveBeenCalledTimes(1);
     });
     expect(sendInput.mock.calls[0][1].event).toMatchObject({
-      kind: 'scroll',
+      kind: 'gesture',
+      gesture: 'swipe',
+      phase: 'end',
       deltaX: 0,
       deltaY: 80,
     });

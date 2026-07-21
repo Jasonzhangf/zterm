@@ -48,7 +48,7 @@ describe('server bridge runtime truth gates', () => {
     const wsBlock = extractBlock(source, 'function handleWebSocketConnection(');
     const upgradeBlock = extractBlock(source, 'function handleServerUpgrade(');
 
-    expect(rtcBlock).toContain("deps.detachSubscriberTransportOnly(subscriber, reason, connection.transportId)");
+    expect(rtcBlock).toContain('detachConnectionSubscribers(connection, reason)');
     expect(rtcBlock).toContain('deps.connections.delete(connection.id)');
     expect(source).toContain('const connectionAttachChains = new Map<string, Promise<void>>()');
     expect(source).toContain('const connectionInputChains = new Map<string, Promise<void>>()');
@@ -59,7 +59,7 @@ describe('server bridge runtime truth gates', () => {
     expect(queueBlock).toContain("lane === 'input'");
     expect(queueBlock).toContain('.then(() => deps.handleMessage(connection, rawData, isBinary))');
     expect(wsBlock).toContain("ws.on('close', (code, rawReason) => {");
-    expect(wsBlock).toContain("deps.detachSubscriberTransportOnly(subscriber, 'websocket closed', connection.transportId)");
+    expect(wsBlock).toContain("detachConnectionSubscribers(connection, 'websocket closed')");
     expect(wsBlock).toContain('enqueueConnectionMessage(connection, rawData, isBinary)');
     expect(upgradeBlock).toContain("if (pathname === '/signal')");
     expect(upgradeBlock).toContain("if (pathname !== '/' && pathname !== '/ws')");

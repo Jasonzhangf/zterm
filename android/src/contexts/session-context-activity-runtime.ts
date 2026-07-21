@@ -69,6 +69,7 @@ export function ensureActiveSessionFreshRuntime(options: {
   readSessionTransportRuntime: (sessionId: string) => SessionTransportRuntimeLike | null;
   readSessionTargetRuntime: (sessionId: string) => SessionTargetRuntimeLike | null;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => { socket?: BridgeTransportSocket | null } | null;
   isReconnectInFlight: (sessionId: string) => boolean;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
   isPendingSessionTransportOpenStale: (sessionId: string, staleAfterMs?: number) => boolean;
@@ -84,7 +85,9 @@ export function ensureActiveSessionFreshRuntime(options: {
   const session = options.refs.stateRef.current.sessions.find((item) => item.id === options.refreshOptions.sessionId) || null;
   const transportRuntime = options.readSessionTransportRuntime(options.refreshOptions.sessionId);
   const targetRuntime = options.readSessionTargetRuntime(options.refreshOptions.sessionId);
-  const ws = options.readSessionTransportSocket(options.refreshOptions.sessionId) || null;
+  const ws = options.readSessionTransportResource?.(options.refreshOptions.sessionId)?.socket
+    || options.readSessionTransportSocket(options.refreshOptions.sessionId)
+    || null;
   const isActive = options.refs.stateRef.current.activeSessionId === options.refreshOptions.sessionId;
   const isLive = Array.isArray(options.refs.stateRef.current.liveSessionIds)
     && options.refs.stateRef.current.liveSessionIds.includes(options.refreshOptions.sessionId);

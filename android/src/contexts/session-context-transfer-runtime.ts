@@ -65,6 +65,12 @@ export function sendInputRuntime(options: {
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
   isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
+  scheduleReconnect?: (
+    sessionId: string,
+    message: string,
+    retryable?: boolean,
+    options?: { immediate?: boolean; resetAttempt?: boolean; force?: boolean },
+  ) => void;
 }) {
   const sessionsSnapshotRef = {
     get current() {
@@ -90,6 +96,7 @@ export function sendInputRuntime(options: {
     requestSessionBufferHead: options.requestSessionBufferHead,
     hasPendingSessionTransportOpen: options.hasPendingSessionTransportOpen,
     isPendingSessionTransportOpenStale: options.isPendingSessionTransportOpenStale,
+    scheduleReconnect: options.scheduleReconnect,
   });
 }
 
@@ -98,6 +105,7 @@ export async function ensureSessionReadyForPasteRuntime(options: {
   timeoutMs: number;
   sessions: Session[];
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
 }) {
   return ensureSessionReadyForTransfer({
     sessionId: options.sessionId,
@@ -105,7 +113,10 @@ export async function ensureSessionReadyForPasteRuntime(options: {
     sessionsRef: {
       current: options.sessions,
     },
-    readSessionTransportSocket: options.readSessionTransportSocket,
+    readSessionTransportSocket: (sessionId) => (
+      options.readSessionTransportResource?.(sessionId).socket
+      || options.readSessionTransportSocket(sessionId)
+    ),
   });
 }
 

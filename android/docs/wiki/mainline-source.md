@@ -21,7 +21,14 @@ flowchart TD
   TransportOpen --> TransportReusePlan
   TransportOpen --> TraversalSocketFactory["src/contexts/session-context-infra-runtime.ts#buildTraversalSocketForHostRuntime"]
   TraversalSocketFactory --> TraversalSocket["src/lib/traversal/socket.ts#TraversalSocket"]
+  TransportOpen --> TargetTransportRuntime["src/lib/session-transport-runtime.ts#target transport runtime"]
+  TraversalSocket --> TargetTransportRuntime
+  TargetTransportRuntime --> MuxHandshake["packages/shared/src/connection/protocol.ts#TerminalMuxClientFrame"]
+  TargetTransportRuntime --> ChannelRuntime["src/lib/session-transport-runtime.ts#terminal channel runtime"]
+  ChannelRuntime --> ChannelMessageSend["src/contexts/session-context-transport-wire-runtime.ts#mux channel send"]
   SessionContext --> SocketMessage["src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime"]
+  SocketMessage --> ChannelDemux["src/contexts/session-context-socket-message-runtime.ts#mux channel demux"]
+  ChannelDemux --> BufferApply
   SocketMessage --> BufferApply["src/contexts/session-context-buffer-runtime.ts#applyIncomingBufferSyncRuntime"]
   BufferApply --> RenderGate["src/lib/session-render-gate.ts#scheduleCommit"]
   SocketMessage --> PerformanceTrace["src/lib/terminal-performance-trace.ts"]
@@ -84,10 +91,17 @@ flowchart TD
   CLI["scripts/zterm-daemon.sh"] --> Server["src/server/server.ts"]
   Server --> DaemonRuntime["src/server/terminal-daemon-runtime.ts"]
   Server --> Runtime["src/server/terminal-runtime.ts"]
+  DaemonRuntime --> Runtime
   Runtime --> Bridge["src/server/terminal-bridge-runtime.ts"]
+  Bridge --> MuxHandshake["packages/shared/src/connection/protocol.ts#TerminalMuxServerFrame"]
+  MuxHandshake --> ChannelRegistry["src/server/terminal-runtime.ts#mux channel registry"]
+  ChannelRegistry --> Runtime
   Runtime --> Message["src/server/terminal-message-runtime.ts"]
+  Message --> ChannelRegistry
   Message --> Mirror["src/server/terminal-mirror-runtime.ts"]
   Mirror --> Capture["src/server/terminal-mirror-capture.ts"]
+  Mirror --> SendScheduler["src/server/terminal-transport-runtime.ts#mux send scheduler"]
+  SendScheduler --> TransportSend
   Mirror --> TransportSend["src/server/terminal-transport-runtime.ts#sendText"]
   Capture --> PerformanceTrace["src/lib/terminal-performance-trace.ts"]
   Mirror --> PerformanceTrace
@@ -106,6 +120,8 @@ flowchart TD
   Server --> Debug["src/server/terminal-debug-runtime.ts"]
   Server --> Transport["src/server/terminal-transport-runtime.ts"]
   Server --> Relay["src/server/relay-client.ts"]
+  Relay --> RelayPeerLease["src/traversal-relay/server.ts#relay peer lease"]
+  RelayPeerLease --> MuxHandshake
 ```
 
 ## CLI Mainline
@@ -138,7 +154,12 @@ flowchart TD
   TerminalBackend --> BackendSession["resource.backend_session"]
   BackendSession --> TmuxSession["resource.tmux_session"]
   BackendSession --> WeztermPane["resource.wezterm_pane"]
-  SessionTransport["resource.session_transport"] --> TransportSubscriber["resource.transport_subscriber"]
+  SessionTransport["resource.session_transport"] --> DaemonTargetTransport["resource.daemon_target_transport"]
+  DaemonTargetTransport --> TransportTarget["resource.transport_target"]
+  DaemonTargetTransport --> RelayPeerLease["resource.relay_peer_lease"]
+  RelayPeerLease --> TransportTarget
+  DaemonTargetTransport --> TerminalChannel["resource.terminal_channel"]
+  TerminalChannel --> TransportSubscriber["resource.transport_subscriber"]
   TransportSubscriber --> MirrorStore["resource.mirror_store"]
   MirrorStore --> TransportSubscriber
   MirrorStore --> ClientSparseBuffer["resource.client_sparse_buffer"]
@@ -168,18 +189,18 @@ flowchart TD
 | surface | files |
 | --- | --- |
 | Android app entry | `src/main.tsx`, `src/App.tsx`, `src/pages/ConnectionsPage.tsx`, `src/pages/TerminalPage.tsx` |
-| Client transport lifecycle | `src/contexts/SessionContext.tsx`, `src/contexts/session-context-session-orchestration-runtime.ts`, `src/contexts/session-context-session-runtime.ts`, `src/contexts/session-context-activity-runtime.ts`, `src/contexts/session-context-transport-orchestration-runtime.ts`, `src/contexts/session-context-transport-open-runtime.ts`, `src/contexts/session-context-socket-message-runtime.ts`, `src/contexts/session-transport-open-helpers.ts`; WebRTC route diagnostics include metadata-only selected ICE pair projection through `src/lib/traversal/socket.ts` and `src/pages/TerminalPageDebugOverlay.tsx` |
+| Client transport lifecycle | `packages/shared/src/connection/protocol.ts`, `src/contexts/SessionContext.tsx`, `src/contexts/session-context-session-orchestration-runtime.ts`, `src/contexts/session-context-session-runtime.ts`, `src/contexts/session-context-activity-runtime.ts`, `src/contexts/session-context-transport-orchestration-runtime.ts`, `src/contexts/session-context-transport-open-runtime.ts`, `src/contexts/session-context-socket-message-runtime.ts`, `src/contexts/session-transport-open-helpers.ts`, `src/lib/session-transport-runtime.ts`; target mux nodes are `TargetTransportRuntime`, `MuxHandshake`, `ChannelRuntime`, `ChannelMessageSend`, and `ChannelDemux`; WebRTC route diagnostics include metadata-only selected ICE pair projection through `src/lib/traversal/socket.ts` and `src/pages/TerminalPageDebugOverlay.tsx` |
 | Terminal body receive/apply/render | `src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime`, `src/contexts/session-context-buffer-runtime.ts#applyIncomingBufferSyncRuntime`, `src/lib/session-render-gate.ts#scheduleCommit`, `src/lib/session-render-buffer-store.ts` |
 | Terminal performance observer | `src/lib/terminal-performance-trace.ts`, `src/server/terminal-debug-runtime.ts`, `src/lib/runtime-debug.ts`; metadata only, no terminal text/cells |
 | Terminal shell and panes | `src/pages/TerminalPageStageShell.tsx`, `src/hooks/useTerminalWorkspace.ts`, `src/components/terminal/TerminalQuickBar.tsx` |
-| Remote window stream projection | `packages/shared/src/connection/protocol.ts`, `src/server/remote-window-stream-daemon.ts`, `src/server/terminal-message-runtime.ts`, `src/server/server.ts`, `src/server/terminal-file-transfer-binary-runtime.ts`, `src/components/terminal/RemoteWindowOverlay.tsx`, `src/lib/remote-window-overlay-runtime.ts`, `src/lib/remote-window-message-runtime.ts`, `src/lib/remote-window-receiver-runtime.ts`, `src/lib/remote-window-video-quality.ts`, `src/contexts/session-context-remote-window-runtime.ts`, `src/contexts/session-context-transfer-runtime.ts`, `docs/decisions/2026-07-19-remote-window-stream-truth.md`; ScreenCaptureKit/WebRTC bindings are anchored under `RemoteWindowMessageRuntime`, `RemoteWindowReceiver`, `RemoteWindowStreamQualityRuntime`, `RemoteWindowCapture`, `RemoteWindowMedia`, `RemoteWindowInput`, and `RemoteWindowCleanup`; Android fullscreen projection now owns default-collapsed iTerm2 picker grouping, daemon-wide 60-second target catalog cache keyed by daemon identity, aspect-fit/default, aspect-fill cover display mode using one content rect for drawing and input mapping, source-aspect floating resize with toolbar reachability cap, IME bottom-inset fullscreen padding plus QuickBar chrome auto-pan, unzoomed pointer/continuous pixel-scroll input even while IME inset is present, zoomed-only local single-finger pan, supported app-window-only input context, focus-aware image paste routing, floating-preview low bitrate, fullscreen default 20Mbps stream quality updates, adaptive network quality caps, and explicit max frame-rate request values; remaining live gates are Android rendered-pixel recheck and iTerm2-pane stream/input proof |
+| Remote window stream projection | `packages/shared/src/connection/protocol.ts`, `src/server/remote-window-stream-daemon.ts`, `src/server/terminal-message-runtime.ts`, `src/server/server.ts`, `src/server/terminal-file-transfer-binary-runtime.ts`, `src/components/terminal/RemoteWindowOverlay.tsx`, `src/lib/remote-window-overlay-runtime.ts`, `src/lib/remote-window-message-runtime.ts`, `src/lib/remote-window-receiver-runtime.ts`, `src/lib/remote-window-video-quality.ts`, `src/contexts/session-context-remote-window-runtime.ts`, `src/contexts/session-context-transfer-runtime.ts`, `docs/decisions/2026-07-19-remote-window-stream-truth.md`; ScreenCaptureKit/WebRTC bindings are anchored under `RemoteWindowMessageRuntime`, `RemoteWindowReceiver`, `RemoteWindowStreamQualityRuntime`, `RemoteWindowCapture`, `RemoteWindowMedia`, `RemoteWindowInput`, and `RemoteWindowCleanup`; Android fullscreen projection now owns default-collapsed iTerm2 picker grouping, daemon-wide 60-second target catalog cache keyed by daemon identity, aspect-fit/default, aspect-fill cover display mode using one content rect for drawing and input mapping, source-aspect floating resize with toolbar reachability cap, daemon-frame-aspect receiver projection after stream start, IME bottom-inset fullscreen padding plus QuickBar chrome auto-pan, unzoomed pointer/gesture input and wheel pixel-scroll input even while IME inset is present, zoomed-only local single-finger pan, supported app-window-only input context, focus-aware image paste routing, floating-preview low bitrate, fullscreen default 20Mbps stream quality updates, adaptive network quality caps, and explicit max frame-rate request values; remaining live gates are Android rendered-pixel recheck and iTerm2-pane stream/input proof |
 | Terminal session group layout | `src/lib/terminal-layout-profile.ts`, `src/lib/session-group-viewport.ts`, `src/pages/TerminalPage.tsx#resolveTerminalSessionGroupActiveSessionProjection`, `src/pages/TerminalPageStageShell.tsx`, `docs/features/terminal-session-group-layout.md`, `docs/testing/terminal-session-group-layout-test-design.md` |
 | Session drawer (multi-host) | `src/components/terminal/TerminalSessionDrawer.tsx` (UI), `src/pages/TerminalPage.tsx` (`drawerServerIdentityAliases` canonicalizes live/session-group/Relay endpoint identity; `drawerSessions` projects hostKey/hostLabel + opened-first ordering) |
 | Session quick preview | `src/lib/session-preview-selection.ts`, `src/lib/session-preview-gesture.ts`, `src/components/terminal/TerminalPreviewGrid.tsx`, `src/pages/TerminalPageStageShell.tsx` |
 | Daemon runtime | `src/server/server.ts`, `src/server/terminal-daemon-runtime.ts`, `src/server/terminal-runtime.ts`, `src/server/terminal-message-runtime.ts`, `src/server/terminal-mirror-runtime.ts`, `src/server/terminal-message-control-runtime.ts`, `src/server/terminal-transport-runtime.ts`, `src/server/remote-window-stream-daemon.ts` |
 | Daemon control edges | `src/server/terminal-control-runtime.ts`, `src/server/terminal-file-transfer-runtime.ts`, `src/server/terminal-schedule-runtime.ts`, `src/server/remote-screenshot-daemon.ts`, `src/server/remote-window-stream-daemon.ts`, `src/server/terminal-http-runtime.ts` |
 | Daemon CLI | `scripts/zterm-daemon.sh`, `scripts/windows/zterm-daemon.ps1`, `scripts/install-global-daemon-cli.sh`, `scripts/prepare-global-daemon-release.sh`, `scripts/prepare-daemon-npm-package.mjs` |
-| Release/update | `scripts/build-android-debug.sh`, `scripts/prepare-update-bundle.mjs`, `scripts/verify-release-assets.mjs`; Relay public update route is authored in `src/traversal-relay/server.ts` and packaged by `scripts/prepare-relay-server-npm-package.mjs` with `ZTERM_TRAVERSAL_UPDATES_DIR` |
+| Release/update | `scripts/build-android-debug.sh`, `scripts/prepare-update-bundle.mjs`, `scripts/verify-release-assets.mjs`; Relay public update route and future `RelayPeerLease` idle-resume resource are authored in `src/traversal-relay/server.ts` and packaged by `scripts/prepare-relay-server-npm-package.mjs` with `ZTERM_TRAVERSAL_UPDATES_DIR` |
 | Worker wiki generator | `scripts/build-function-wiki.mjs`, `docs/wiki/daemon.md`, `docs/wiki/cli.md`, `docs/wiki/mainline-source.md` |
 | Global resource truth | `docs/resource-registry.json`, `docs/resource-map.md`, `docs/testing/resource-truth-test-design.md` |
 
