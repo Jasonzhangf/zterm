@@ -481,6 +481,31 @@ func axSize(_ value: AnyObject?) -> CGSize? {
     return size
 }
 
+func frontmostPidMatches(_ pid: Int32) -> Bool {
+    guard let frontmost = NSWorkspace.shared.frontmostApplication else {
+        return false
+    }
+    return frontmost.processIdentifier == pid
+}
+
+func axWindowMatchesBounds(_ window: AXUIElement, _ bounds: Rect) -> Bool {
+    guard
+        let position = axPoint(copyAttribute(window, kAXPositionAttribute)),
+        let size = axSize(copyAttribute(window, kAXSizeAttribute))
+    else {
+        return false
+    }
+    return rectScore(position, size, bounds) <= 96.0
+}
+
+func focusedWindowMatchesTarget(_ appElement: AXUIElement, _ bounds: Rect) -> Bool {
+    guard let focusedWindow = copyAttribute(appElement, kAXFocusedWindowAttribute) else {
+        return false
+    }
+    let focusedElement = focusedWindow as! AXUIElement
+    return axWindowMatchesBounds(focusedElement, bounds)
+}
+
 func focusTargetWindow(_ config: InputConfig) throws {
     guard config.focusPolicy == "bring-to-focus" else {
         return
@@ -511,16 +536,29 @@ func focusTargetWindow(_ config: InputConfig) throws {
     guard let window = bestWindow, bestScore <= 96.0 else {
         throw NSError(domain: "RemoteWindowInput", code: 4, userInfo: [NSLocalizedDescriptionKey: "remote input target window could not be matched for focus"])
     }
-    app.unhide()
-    if !app.activate(options: [.activateIgnoringOtherApps]) {
-        throw NSError(domain: "RemoteWindowInput", code: 5, userInfo: [NSLocalizedDescriptionKey: "remote input target app could not be activated"])
+    var isFrontmost = false
+    var isFocused = false
+    for attempt in 0..<3 {
+        app.unhide()
+        _ = app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+        AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, window)
+        AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        _ = app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        usleep(attempt == 0 ? 120000 : 180000)
+        isFrontmost = frontmostPidMatches(config.pid)
+        isFocused = focusedWindowMatchesTarget(appElement, config.window.bounds)
+        if isFrontmost && isFocused {
+            return
+        }
     }
-    AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-    AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, window)
-    AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
-    AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-    app.activate(options: [.activateIgnoringOtherApps])
-    usleep(120000)
+    if !isFrontmost {
+        throw NSError(domain: "RemoteWindowInput", code: 5, userInfo: [NSLocalizedDescriptionKey: "remote input target app did not become frontmost"])
+    }
+    if !isFocused {
+        throw NSError(domain: "RemoteWindowInput", code: 6, userInfo: [NSLocalizedDescriptionKey: "remote input target window did not become focused"])
+    }
 }
 
 let source = CGEventSource(stateID: .hidSystemState)
@@ -602,7 +640,9 @@ let keyCodes: [String: CGKeyCode] = [
 func handleConfig(_ config: InputConfig) throws {
     try focusTargetWindow(config)
 
-    if config.event.kind == "pointer" {
+    if config.event.kind == "focus" {
+        return
+    } else if config.event.kind == "pointer" {
         guard let phase = config.event.phase else {
             throw inputError("remote pointer input missing phase")
         }
@@ -2015,6 +2055,9 @@ export function createRemoteWindowStreamDaemonRuntime(
     }
     if (entry.target.inputRoute !== 'os-event') {
       throw new Error(`remote window input route is not implemented: ${entry.target.inputRoute}`);
+    }
+    if (payload.event.kind === 'focus') {
+      return;
     }
     if (payload.event.kind === 'pointer') {
       const values = [

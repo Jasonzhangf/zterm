@@ -6624,6 +6624,156 @@ function saveScheduleStore(jobs, storePath = getScheduleStorePath()) {
 `, "utf-8");
 }
 
+// ../packages/shared/src/connection/protocol.ts
+var TERMINAL_MUX_PROTOCOL_VERSION = 1;
+var TERMINAL_MUX_TARGET_CLIENT_MESSAGE_TYPES = [
+  "list-sessions",
+  "tmux-create-session",
+  "tmux-rename-session",
+  "tmux-kill-session"
+];
+var TERMINAL_MUX_LEGACY_CLIENT_MESSAGE_TYPES = [
+  "session-open",
+  "connect",
+  "ping",
+  "close"
+];
+var TERMINAL_MUX_TARGET_CLIENT_MESSAGE_SET = new Set(TERMINAL_MUX_TARGET_CLIENT_MESSAGE_TYPES);
+var TERMINAL_MUX_LEGACY_CLIENT_MESSAGE_SET = new Set(TERMINAL_MUX_LEGACY_CLIENT_MESSAGE_TYPES);
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function asNonEmptyString(value) {
+  return typeof value === "string" && value.trim() ? value.trim() : "";
+}
+function hasFiniteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value);
+}
+function isTerminalMuxTargetClientMessageType(type) {
+  return TERMINAL_MUX_TARGET_CLIENT_MESSAGE_SET.has(type);
+}
+function isTerminalMuxLegacyClientMessageType(type) {
+  return TERMINAL_MUX_LEGACY_CLIENT_MESSAGE_SET.has(type);
+}
+function classifyTerminalMuxClientMessage(message) {
+  if (isTerminalMuxTargetClientMessageType(message.type)) {
+    return "target";
+  }
+  if (isTerminalMuxLegacyClientMessageType(message.type)) {
+    return "legacy";
+  }
+  return "channel";
+}
+function buildTerminalMuxCapabilities(options = {}) {
+  return {
+    version: TERMINAL_MUX_PROTOCOL_VERSION,
+    channelEnvelope: true,
+    targetMessages: true,
+    boundedBodyScheduler: true,
+    ...options
+  };
+}
+function buildTerminalMuxReady(options = {}) {
+  return {
+    type: "mux-ready",
+    payload: {
+      version: TERMINAL_MUX_PROTOCOL_VERSION,
+      ...asNonEmptyString(options.daemonHostId) ? { daemonHostId: asNonEmptyString(options.daemonHostId) } : {},
+      capabilities: options.capabilities || buildTerminalMuxCapabilities()
+    }
+  };
+}
+function buildTerminalMuxServerChannelMessage(channelId, message) {
+  const normalizedChannelId = asNonEmptyString(channelId);
+  if (!normalizedChannelId) {
+    throw new Error("terminal mux channelId is required");
+  }
+  return {
+    type: "mux-channel-message",
+    payload: {
+      channelId: normalizedChannelId,
+      message
+    }
+  };
+}
+function buildTerminalMuxServerTargetMessage(message, requestId) {
+  return {
+    type: "mux-target-message",
+    payload: {
+      ...asNonEmptyString(requestId) ? { requestId: asNonEmptyString(requestId) } : {},
+      message
+    }
+  };
+}
+function buildTerminalMuxError(code, message, channelId) {
+  return {
+    type: "mux-error",
+    payload: {
+      code,
+      message,
+      ...asNonEmptyString(channelId) ? { channelId: asNonEmptyString(channelId) } : {}
+    }
+  };
+}
+function buildTerminalMuxUnwrappedSessionMessageError(messageType) {
+  return buildTerminalMuxError(
+    "mux_unwrapped_session_message",
+    `session-bound message ${messageType} must be sent inside mux-channel-message`
+  );
+}
+function isTerminalMuxClientFrame(value) {
+  if (!isRecord(value) || typeof value.type !== "string" || !isRecord(value.payload)) {
+    return false;
+  }
+  switch (value.type) {
+    case "mux-hello":
+      return value.payload.version === TERMINAL_MUX_PROTOCOL_VERSION && Boolean(asNonEmptyString(value.payload.clientInstanceId));
+    case "mux-target-message":
+      return isRecord(value.payload.message) && typeof value.payload.message.type === "string" && isTerminalMuxTargetClientMessageType(value.payload.message.type);
+    case "mux-channel-open":
+      return Boolean(asNonEmptyString(value.payload.channelId)) && Boolean(asNonEmptyString(value.payload.sessionName));
+    case "mux-channel-message":
+      return Boolean(asNonEmptyString(value.payload.channelId)) && isRecord(value.payload.message) && typeof value.payload.message.type === "string" && classifyTerminalMuxClientMessage(value.payload.message) === "channel";
+    case "mux-channel-binary":
+      return Boolean(asNonEmptyString(value.payload.channelId)) && typeof value.payload.dataBase64 === "string";
+    case "mux-channel-close":
+      return Boolean(asNonEmptyString(value.payload.channelId));
+    case "mux-ping":
+      return hasFiniteNumber(value.payload.sentAt);
+    default:
+      return false;
+  }
+}
+function validateTerminalMuxChannelEnvelope(frame, options) {
+  if (!isRecord(frame.payload) || !("channelId" in frame.payload)) {
+    return {
+      ok: false,
+      error: buildTerminalMuxError("mux_protocol_invalid", "mux frame is missing channelId")
+    };
+  }
+  const channelId = asNonEmptyString(frame.payload.channelId);
+  if (!channelId) {
+    return {
+      ok: false,
+      error: buildTerminalMuxError("mux_protocol_invalid", "mux frame has empty channelId")
+    };
+  }
+  const expectedChannelId = asNonEmptyString(options.expectedChannelId);
+  if (expectedChannelId && expectedChannelId !== channelId) {
+    return {
+      ok: false,
+      error: buildTerminalMuxError("mux_channel_mismatch", `mux channel ${channelId} does not match expected channel ${expectedChannelId}`, channelId)
+    };
+  }
+  if (!options.hasChannel(channelId)) {
+    return {
+      ok: false,
+      error: buildTerminalMuxError("mux_unknown_channel", `mux channel ${channelId} is not open`, channelId)
+    };
+  }
+  return { ok: true, channelId };
+}
+
 // src/server/mirror-lifecycle.ts
 function detachMirrorSubscriber(subscribers, sessionId) {
   const nextSubscribers = new Set(subscribers);
@@ -7322,9 +7472,10 @@ function createTerminalMirrorRuntime(deps) {
   }
   function ensureSessionReady(session, mirror) {
     session.sessionName = mirror.sessionName;
-    if (!session.transport || session.transport.connectedSent) {
+    if (!session.transport || session.connectedSent) {
       return;
     }
+    session.connectedSent = true;
     session.transport.connectedSent = true;
     deps.sendMessage(session, {
       type: "connected",
@@ -7905,6 +8056,7 @@ function createTerminalMirrorRuntime(deps) {
     }
     session.sessionName = nextSessionName;
     session.mirrorKey = nextMirrorKey;
+    session.connectedSent = false;
     if (session.transport) {
       session.transport.connectedSent = false;
     }
@@ -8023,6 +8175,9 @@ function createTerminalRuntime(deps) {
       transportId: connection.transportId,
       transport: connection.transport,
       closeTransport: connection.closeTransport,
+      connectedSent: false,
+      muxChannelId: null,
+      muxParentTransportId: null,
       sessionName: deps.defaultSessionName,
       mirrorKey: null,
       bodySubscribed: true,
@@ -8034,6 +8189,84 @@ function createTerminalRuntime(deps) {
     sessions2.set(subscriber.id, subscriber);
     connection.role = "session";
     connection.boundSubscriberId = subscriber.id;
+    return subscriber;
+  }
+  function createMuxChannelTransport(connection, channelId) {
+    return {
+      kind: connection.transport.kind,
+      requestOrigin: connection.requestOrigin,
+      connectedSent: false,
+      get readyState() {
+        return connection.transport.readyState;
+      },
+      get bufferedAmount() {
+        return Math.max(0, Math.floor(connection.transport.bufferedAmount || 0));
+      },
+      sendText(text) {
+        let message;
+        try {
+          message = JSON.parse(text);
+        } catch {
+          deps.sendText(connection.transport, JSON.stringify({
+            type: "mux-error",
+            payload: {
+              code: "mux_protocol_invalid",
+              message: "mux channel send requires a JSON server message",
+              channelId
+            }
+          }));
+          return;
+        }
+        deps.sendText(
+          connection.transport,
+          JSON.stringify(buildTerminalMuxServerChannelMessage(channelId, message))
+        );
+      },
+      close() {
+        deps.sendText(connection.transport, JSON.stringify({
+          type: "mux-channel-closed",
+          payload: {
+            channelId,
+            reason: "server closed channel transport"
+          }
+        }));
+      }
+    };
+  }
+  function createMuxChannelSubscriber(connection, channelId) {
+    const normalizedChannelId = channelId.trim();
+    const subscriberId = `${connection.transportId}:${normalizedChannelId}`;
+    const subscriber = {
+      id: subscriberId,
+      transportId: connection.transportId,
+      transport: createMuxChannelTransport(connection, normalizedChannelId),
+      closeTransport: (reason) => {
+        deps.sendText(connection.transport, JSON.stringify({
+          type: "mux-channel-closed",
+          payload: {
+            channelId: normalizedChannelId,
+            reason
+          }
+        }));
+      },
+      connectedSent: false,
+      muxChannelId: normalizedChannelId,
+      muxParentTransportId: connection.transportId,
+      sessionName: deps.defaultSessionName,
+      mirrorKey: null,
+      bodySubscribed: true,
+      adaptiveWidthCols: null,
+      adaptiveWidthHeartbeatAt: 0,
+      pendingPasteImage: null,
+      pendingAttachFile: null
+    };
+    sessions2.set(subscriber.id, subscriber);
+    connection.role = "session";
+    connection.boundSubscriberId = null;
+    if (!connection.muxChannels) {
+      connection.muxChannels = /* @__PURE__ */ new Map();
+    }
+    connection.muxChannels.set(normalizedChannelId, subscriber.id);
     return subscriber;
   }
   function getTransportSubscriber(subscriberId) {
@@ -8053,6 +8286,9 @@ function createTerminalRuntime(deps) {
     subscriber.transportId = connection.transportId;
     subscriber.transport = connection.transport;
     subscriber.closeTransport = connection.closeTransport;
+    subscriber.connectedSent = false;
+    subscriber.muxChannelId = null;
+    subscriber.muxParentTransportId = null;
     subscriber.bodySubscribed = true;
     connection.transport.requestOrigin = connection.requestOrigin;
     connection.transport.connectedSent = false;
@@ -8169,6 +8405,7 @@ function createTerminalRuntime(deps) {
     createMirror: mirrorRuntime.createMirror,
     getSubscriberMirror,
     createTransportSubscriber,
+    createMuxChannelSubscriber,
     bindConnectionToSubscriber,
     detachSubscriberTransportOnly,
     closeTransportSubscriber,
@@ -9328,6 +9565,224 @@ function createTerminalMessageRuntime(deps) {
       payload
     });
   }
+  function sendMuxFrame(connection, frame) {
+    deps.sendTransportMessage(connection.transport, frame);
+  }
+  function resolveMuxChannelSubscriber(connection, channelId) {
+    const subscriberId = connection.muxChannels?.get(channelId) || "";
+    return subscriberId ? deps.sessions.get(subscriberId) || null : null;
+  }
+  function createMuxChannelMessageConnection(connection, subscriber) {
+    return {
+      ...connection,
+      role: "session",
+      boundSubscriberId: subscriber.id,
+      transport: subscriber.transport || connection.transport,
+      closeTransport: subscriber.closeTransport || (() => {
+      }),
+      muxVersion: void 0,
+      muxClientInstanceId: null,
+      muxChannels: void 0
+    };
+  }
+  function createMuxTargetMessageConnection(connection, requestId) {
+    return {
+      ...connection,
+      boundSubscriberId: null,
+      transport: {
+        kind: connection.transport.kind,
+        requestOrigin: connection.requestOrigin,
+        connectedSent: false,
+        get readyState() {
+          return connection.transport.readyState;
+        },
+        get bufferedAmount() {
+          return Math.max(0, Math.floor(connection.transport.bufferedAmount || 0));
+        },
+        sendText(text) {
+          let message;
+          try {
+            message = JSON.parse(text);
+          } catch {
+            sendMuxFrame(connection, buildTerminalMuxError(
+              "mux_protocol_invalid",
+              "mux target send requires a JSON server message"
+            ));
+            return;
+          }
+          sendMuxFrame(
+            connection,
+            buildTerminalMuxServerTargetMessage(
+              message,
+              requestId
+            )
+          );
+        },
+        close: connection.transport.close,
+        ping: connection.transport.ping
+      },
+      muxVersion: void 0,
+      muxClientInstanceId: null,
+      muxChannels: void 0
+    };
+  }
+  function rejectMuxProtocol(connection, message, channelId) {
+    sendMuxFrame(connection, buildTerminalMuxError("mux_protocol_invalid", message, channelId));
+  }
+  async function handleMuxFrame(connection, candidate) {
+    if (!isTerminalMuxClientFrame(candidate)) {
+      rejectMuxProtocol(connection, "invalid terminal mux frame");
+      return;
+    }
+    const frame = candidate;
+    switch (frame.type) {
+      case "mux-hello":
+        connection.muxVersion = frame.payload.version;
+        connection.muxClientInstanceId = frame.payload.clientInstanceId;
+        if (!connection.muxChannels) {
+          connection.muxChannels = /* @__PURE__ */ new Map();
+        }
+        sendMuxFrame(connection, buildTerminalMuxReady({
+          capabilities: buildTerminalMuxCapabilities({
+            reliableInput: { version: 1 }
+          })
+        }));
+        return;
+      case "mux-target-message": {
+        await handleMessage(
+          createMuxTargetMessageConnection(connection, frame.payload.requestId),
+          Buffer.from(JSON.stringify(frame.payload.message))
+        );
+        return;
+      }
+      case "mux-channel-open": {
+        if (!connection.muxVersion) {
+          sendMuxFrame(connection, buildTerminalMuxError(
+            "daemon_multiplex_upgrade_required",
+            "mux-channel-open requires mux-hello / mux-ready first",
+            frame.payload.channelId
+          ));
+          return;
+        }
+        if (!connection.muxChannels) {
+          connection.muxChannels = /* @__PURE__ */ new Map();
+        }
+        if (connection.muxChannels.has(frame.payload.channelId)) {
+          sendMuxFrame(connection, buildTerminalMuxError(
+            "mux_duplicate_channel",
+            `mux channel ${frame.payload.channelId} is already open`,
+            frame.payload.channelId
+          ));
+          return;
+        }
+        const subscriber = deps.controlRuntimeDeps.createMuxChannelSubscriber(connection, frame.payload.channelId);
+        subscriber.sessionName = deps.controlRuntimeDeps.sanitizeSessionName(frame.payload.sessionName);
+        sendMuxFrame(connection, {
+          type: "mux-channel-opened",
+          payload: {
+            channelId: frame.payload.channelId,
+            sessionName: subscriber.sessionName,
+            capabilities: {
+              reliableInput: { version: 1 }
+            }
+          }
+        });
+        void deps.controlRuntimeDeps.attachTmux(subscriber, {
+          sessionName: frame.payload.sessionName,
+          cols: frame.payload.cols,
+          rows: frame.payload.rows,
+          widthMode: frame.payload.widthMode,
+          autoCommand: frame.payload.autoCommand
+        }).catch((error) => {
+          sendMuxFrame(connection, {
+            type: "mux-channel-message",
+            payload: {
+              channelId: frame.payload.channelId,
+              message: {
+                type: "error",
+                payload: {
+                  message: error instanceof Error ? error.message : "Invalid mux channel open payload",
+                  code: "mux_channel_open_failed"
+                }
+              }
+            }
+          });
+        });
+        return;
+      }
+      case "mux-channel-message": {
+        const envelope = validateTerminalMuxChannelEnvelope(frame, {
+          hasChannel: (channelId) => Boolean(resolveMuxChannelSubscriber(connection, channelId))
+        });
+        if (!envelope.ok) {
+          sendMuxFrame(connection, envelope.error);
+          return;
+        }
+        const subscriber = resolveMuxChannelSubscriber(connection, envelope.channelId);
+        if (!subscriber) {
+          sendMuxFrame(connection, buildTerminalMuxError(
+            "mux_unknown_channel",
+            `mux channel ${envelope.channelId} is not open`,
+            envelope.channelId
+          ));
+          return;
+        }
+        await handleMessage(
+          createMuxChannelMessageConnection(connection, subscriber),
+          Buffer.from(JSON.stringify(frame.payload.message))
+        );
+        return;
+      }
+      case "mux-channel-binary": {
+        const envelope = validateTerminalMuxChannelEnvelope(frame, {
+          hasChannel: (channelId) => Boolean(resolveMuxChannelSubscriber(connection, channelId))
+        });
+        if (!envelope.ok) {
+          sendMuxFrame(connection, envelope.error);
+          return;
+        }
+        const subscriber = resolveMuxChannelSubscriber(connection, envelope.channelId);
+        if (!subscriber) {
+          sendMuxFrame(connection, buildTerminalMuxError(
+            "mux_unknown_channel",
+            `mux channel ${envelope.channelId} is not open`,
+            envelope.channelId
+          ));
+          return;
+        }
+        await handleMessage(
+          createMuxChannelMessageConnection(connection, subscriber),
+          Buffer.from(frame.payload.dataBase64, "base64"),
+          true
+        );
+        return;
+      }
+      case "mux-channel-close": {
+        const envelope = validateTerminalMuxChannelEnvelope(frame, {
+          hasChannel: (channelId) => Boolean(resolveMuxChannelSubscriber(connection, channelId))
+        });
+        if (!envelope.ok) {
+          sendMuxFrame(connection, envelope.error);
+          return;
+        }
+        const subscriber = resolveMuxChannelSubscriber(connection, envelope.channelId);
+        if (subscriber) {
+          connection.muxChannels?.delete(envelope.channelId);
+          deps.closeSession(subscriber, frame.payload.reason || "client requested channel close", false);
+        }
+        return;
+      }
+      case "mux-ping":
+        sendMuxFrame(connection, {
+          type: "mux-pong",
+          payload: {
+            sentAt: frame.payload.sentAt,
+            receivedAt: Date.now()
+          }
+        });
+        return;
+    }
+  }
   function normalizeReliableInputPayload(payload) {
     if (!payload || typeof payload !== "object") {
       return null;
@@ -9508,6 +9963,24 @@ function createTerminalMessageRuntime(deps) {
       }
       await writeInputIfCurrent(connection, text);
       return;
+    }
+    if (typeof message.type === "string" && message.type.startsWith("mux-")) {
+      await handleMuxFrame(connection, message);
+      return;
+    }
+    if (connection.muxVersion) {
+      const messageType = message.type;
+      if (typeof messageType === "string" && classifyTerminalMuxClientMessage(message) === "channel") {
+        sendMuxFrame(connection, buildTerminalMuxUnwrappedSessionMessageError(messageType));
+        return;
+      }
+      if (typeof messageType === "string" && classifyTerminalMuxClientMessage(message) === "legacy") {
+        sendMuxFrame(connection, buildTerminalMuxError(
+          "mux_unwrapped_session_message",
+          `legacy message ${messageType} is not valid after mux-ready`
+        ));
+        return;
+      }
     }
     switch (message.type) {
       case "session-open":
@@ -10203,7 +10676,7 @@ function createTerminalHttpRuntime(deps) {
       sessions: {
         total: subscriberEntries.length,
         attached: subscriberEntries.filter((subscriber) => Boolean(subscriber.transport)).length,
-        ready: subscriberEntries.filter((subscriber) => Boolean(subscriber.transport?.connectedSent)).length
+        ready: subscriberEntries.filter((subscriber) => Boolean(subscriber.connectedSent || subscriber.transport?.connectedSent)).length
       },
       mirrors: {
         total: mirrorEntries.length,
@@ -10273,7 +10746,8 @@ function createTerminalHttpRuntime(deps) {
         sessionName: subscriber.sessionName,
         mirrorKey: subscriber.mirrorKey,
         transportId: subscriber.transportId,
-        connectedSent: Boolean(subscriber.transport?.connectedSent),
+        connectedSent: Boolean(subscriber.connectedSent || subscriber.transport?.connectedSent),
+        muxChannelId: subscriber.muxChannelId || null,
         requestOrigin: subscriber.transport?.requestOrigin || null
       })),
       mirrors: mirrorEntries.map((mirror) => ({
@@ -11929,7 +12403,14 @@ function createTerminalDaemonRuntime(deps) {
     heartbeatTimer = setInterval(() => {
       const now = Date.now();
       for (const connection of deps.connections.values()) {
-        if (connection.transport.readyState === import_websocket.default.OPEN && connection.boundSubscriberId) {
+        const boundSubscriberIds = /* @__PURE__ */ new Set();
+        if (connection.boundSubscriberId) {
+          boundSubscriberIds.add(connection.boundSubscriberId);
+        }
+        for (const subscriberId of connection.muxChannels?.values() || []) {
+          boundSubscriberIds.add(subscriberId);
+        }
+        if (connection.transport.readyState === import_websocket.default.OPEN && boundSubscriberIds.size > 0) {
           const lastInboundAt = Math.max(0, Math.floor(connection.lastInboundAt || 0));
           const staleForMs = lastInboundAt > 0 ? now - lastInboundAt : Number.POSITIVE_INFINITY;
           if (staleForMs > TERMINAL_TRANSPORT_STALE_INBOUND_MS) {
@@ -11937,10 +12418,14 @@ function createTerminalDaemonRuntime(deps) {
             console.warn(
               `[${deps.logTimePrefix()}] transport ${connection.id} stale inbound heartbeat kind=${connection.transport.kind} staleForMs=${Math.floor(staleForMs)}`
             );
-            const subscriber = deps.sessions.get(connection.boundSubscriberId) || null;
-            if (subscriber) {
+            for (const subscriberId of boundSubscriberIds) {
+              const subscriber = deps.sessions.get(subscriberId) || null;
+              if (!subscriber) {
+                continue;
+              }
               deps.detachSubscriberTransportOnly(subscriber, reason, connection.transportId);
             }
+            connection.muxChannels?.clear();
             try {
               connection.closeTransport(reason);
             } catch (error) {
@@ -12339,8 +12824,17 @@ function createTerminalBridgeRuntime(deps) {
       if (parsed.type === "input") {
         return "input";
       }
+      if (parsed.type === "mux-channel-message" && typeof parsed.payload?.message?.type === "string") {
+        return parsed.payload.message.type === "input" ? "input" : "message";
+      }
       if (parsed.type === "session-open" || parsed.type === "connect" || parsed.type === "close") {
         return "attach";
+      }
+      if (parsed.type === "mux-channel-open" || parsed.type === "mux-channel-close") {
+        return "attach";
+      }
+      if (parsed.type === "mux-channel-binary") {
+        return "message";
       }
       return "message";
     } catch {
@@ -12381,11 +12875,37 @@ function createTerminalBridgeRuntime(deps) {
     settleConnectionChain(connectionMessageChains, connection.id, next);
   }
   function refreshBoundAdaptiveLease(connection) {
-    const subscriber = connection.boundSubscriberId ? deps.sessions.get(connection.boundSubscriberId) || null : null;
-    if (!subscriber) {
-      return;
+    const subscriberIds = /* @__PURE__ */ new Set();
+    if (connection.boundSubscriberId) {
+      subscriberIds.add(connection.boundSubscriberId);
     }
-    deps.refreshAdaptiveWidthLeaseHeartbeat(subscriber);
+    for (const subscriberId of connection.muxChannels?.values() || []) {
+      subscriberIds.add(subscriberId);
+    }
+    for (const subscriberId of subscriberIds) {
+      const subscriber = deps.sessions.get(subscriberId) || null;
+      if (!subscriber) {
+        continue;
+      }
+      deps.refreshAdaptiveWidthLeaseHeartbeat(subscriber);
+    }
+  }
+  function detachConnectionSubscribers(connection, reason) {
+    const subscriberIds = /* @__PURE__ */ new Set();
+    if (connection.boundSubscriberId) {
+      subscriberIds.add(connection.boundSubscriberId);
+    }
+    for (const subscriberId of connection.muxChannels?.values() || []) {
+      subscriberIds.add(subscriberId);
+    }
+    for (const subscriberId of subscriberIds) {
+      const subscriber = deps.sessions.get(subscriberId) || null;
+      if (!subscriber) {
+        continue;
+      }
+      deps.detachSubscriberTransportOnly(subscriber, reason, connection.transportId);
+    }
+    connection.muxChannels?.clear();
   }
   const rtcBridgeServer2 = createRtcBridgeServer({
     onTransportOpen: (transport) => {
@@ -12402,18 +12922,12 @@ function createTerminalBridgeRuntime(deps) {
         },
         onClose: (_transportId, reason) => {
           console.log(`[${deps.logTimePrefix()}] rtc transport ${connection.id} closed: ${reason}`);
-          const subscriber = connection.boundSubscriberId ? deps.sessions.get(connection.boundSubscriberId) || null : null;
-          if (subscriber) {
-            deps.detachSubscriberTransportOnly(subscriber, reason, connection.transportId);
-          }
+          detachConnectionSubscribers(connection, reason);
           deps.connections.delete(connection.id);
         },
         onError: (_transportId, message) => {
           console.error(`[${deps.logTimePrefix()}] rtc transport ${connection.id} error: ${message}`);
-          const subscriber = connection.boundSubscriberId ? deps.sessions.get(connection.boundSubscriberId) || null : null;
-          if (subscriber) {
-            deps.detachSubscriberTransportOnly(subscriber, `rtc error: ${message}`, connection.transportId);
-          }
+          detachConnectionSubscribers(connection, `rtc error: ${message}`);
           deps.connections.delete(connection.id);
         }
       };
@@ -12448,18 +12962,12 @@ function createTerminalBridgeRuntime(deps) {
       console.log(
         `[${deps.logTimePrefix()}] websocket transport ${connection.id} closed code=${code} reason=${reason || "n/a"} role=${connection.role} bound=${connection.boundSubscriberId || "none"}`
       );
-      const subscriber = connection.boundSubscriberId ? deps.sessions.get(connection.boundSubscriberId) || null : null;
-      if (subscriber) {
-        deps.detachSubscriberTransportOnly(subscriber, "websocket closed", connection.transportId);
-      }
+      detachConnectionSubscribers(connection, "websocket closed");
       deps.connections.delete(connection.id);
     });
     ws.on("error", (error) => {
       console.error(`[${deps.logTimePrefix()}] websocket transport ${connection.id} error: ${error.message}`);
-      const subscriber = connection.boundSubscriberId ? deps.sessions.get(connection.boundSubscriberId) || null : null;
-      if (subscriber) {
-        deps.detachSubscriberTransportOnly(subscriber, `websocket error: ${error.message}`, connection.transportId);
-      }
+      detachConnectionSubscribers(connection, `websocket error: ${error.message}`);
       deps.connections.delete(connection.id);
     });
   }
@@ -12797,6 +13305,31 @@ func axSize(_ value: AnyObject?) -> CGSize? {
     return size
 }
 
+func frontmostPidMatches(_ pid: Int32) -> Bool {
+    guard let frontmost = NSWorkspace.shared.frontmostApplication else {
+        return false
+    }
+    return frontmost.processIdentifier == pid
+}
+
+func axWindowMatchesBounds(_ window: AXUIElement, _ bounds: Rect) -> Bool {
+    guard
+        let position = axPoint(copyAttribute(window, kAXPositionAttribute)),
+        let size = axSize(copyAttribute(window, kAXSizeAttribute))
+    else {
+        return false
+    }
+    return rectScore(position, size, bounds) <= 96.0
+}
+
+func focusedWindowMatchesTarget(_ appElement: AXUIElement, _ bounds: Rect) -> Bool {
+    guard let focusedWindow = copyAttribute(appElement, kAXFocusedWindowAttribute) else {
+        return false
+    }
+    let focusedElement = focusedWindow as! AXUIElement
+    return axWindowMatchesBounds(focusedElement, bounds)
+}
+
 func focusTargetWindow(_ config: InputConfig) throws {
     guard config.focusPolicy == "bring-to-focus" else {
         return
@@ -12827,16 +13360,29 @@ func focusTargetWindow(_ config: InputConfig) throws {
     guard let window = bestWindow, bestScore <= 96.0 else {
         throw NSError(domain: "RemoteWindowInput", code: 4, userInfo: [NSLocalizedDescriptionKey: "remote input target window could not be matched for focus"])
     }
-    app.unhide()
-    if !app.activate(options: [.activateIgnoringOtherApps]) {
-        throw NSError(domain: "RemoteWindowInput", code: 5, userInfo: [NSLocalizedDescriptionKey: "remote input target app could not be activated"])
+    var isFrontmost = false
+    var isFocused = false
+    for attempt in 0..<3 {
+        app.unhide()
+        _ = app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+        AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, window)
+        AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        _ = app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
+        usleep(attempt == 0 ? 120000 : 180000)
+        isFrontmost = frontmostPidMatches(config.pid)
+        isFocused = focusedWindowMatchesTarget(appElement, config.window.bounds)
+        if isFrontmost && isFocused {
+            return
+        }
     }
-    AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-    AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, window)
-    AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
-    AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-    app.activate(options: [.activateIgnoringOtherApps])
-    usleep(120000)
+    if !isFrontmost {
+        throw NSError(domain: "RemoteWindowInput", code: 5, userInfo: [NSLocalizedDescriptionKey: "remote input target app did not become frontmost"])
+    }
+    if !isFocused {
+        throw NSError(domain: "RemoteWindowInput", code: 6, userInfo: [NSLocalizedDescriptionKey: "remote input target window did not become focused"])
+    }
 }
 
 let source = CGEventSource(stateID: .hidSystemState)
@@ -12865,9 +13411,21 @@ func mouseType(phase: String, button: String?) -> CGEventType {
     return right ? .rightMouseDragged : .mouseMoved
 }
 
+func postMouseMove(x: Double, y: Double) {
+    let point = CGPoint(x: x, y: y)
+    let event = CGEvent(
+        mouseEventSource: source,
+        mouseType: .mouseMoved,
+        mouseCursorPosition: point,
+        mouseButton: .left
+    )
+    event?.post(tap: .cghidEventTap)
+}
+
 func postScrollEvent(x: Double, y: Double, deltaX: Double, deltaY: Double, unit: String?) {
     let units: CGScrollEventUnit = unit == "pixel" ? .pixel : .line
     let point = CGPoint(x: x, y: y)
+    postMouseMove(x: x, y: y)
     // Android/DOM deltas use positive values for scrolling down/right; CGEvent
     // wheel values use the opposite sign for pixel scroll injection.
     let wheel1 = Int32(max(-32767, min(32767, (-deltaY).rounded())))
@@ -12906,7 +13464,9 @@ let keyCodes: [String: CGKeyCode] = [
 func handleConfig(_ config: InputConfig) throws {
     try focusTargetWindow(config)
 
-    if config.event.kind == "pointer" {
+    if config.event.kind == "focus" {
+        return
+    } else if config.event.kind == "pointer" {
         guard let phase = config.event.phase else {
             throw inputError("remote pointer input missing phase")
         }
@@ -14132,6 +14692,9 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
     if (entry.target.inputRoute !== "os-event") {
       throw new Error(`remote window input route is not implemented: ${entry.target.inputRoute}`);
     }
+    if (payload.event.kind === "focus") {
+      return;
+    }
     if (payload.event.kind === "pointer") {
       const values = [
         payload.event.x,
@@ -14734,6 +15297,7 @@ var terminalMessageRuntime = createTerminalMessageRuntime({
     runTmux,
     sanitizeSessionName,
     createTransportSubscriber: (connection) => terminalRuntime.createTransportSubscriber(connection),
+    createMuxChannelSubscriber: (connection, channelId) => terminalRuntime.createMuxChannelSubscriber(connection, channelId),
     bindConnectionToSubscriber: (connection, subscriber) => terminalRuntime.bindConnectionToSubscriber(connection, subscriber),
     getMirrorKey,
     attachTmux: terminalRuntime.attachTmux,

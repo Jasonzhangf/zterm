@@ -1,3 +1,10 @@
+# 2026-07-21 auto route / mux timeout / remote-window focus closeout
+
+- 现场 `terminal mux channel open timeout` 首轮根因已证实不是 Android mux client 本身，而是 Mac daemon release artifact stale：installed runtime 当时缺 `mux-hello` / `mux-ready` / `mux-channel-open`。本轮已执行 `daemon:prepare-release`、global install、service-scoped restart；当前 live daemon `pid=88422`，installed release runtime sha 与 repo release runtime sha 都是 `7ce8b8d28ee64295eee4ab25915c2d89c76afbe5b8ceb0df8b9a3acf4652d65c`，live mux smoke 得到 `mux-ready` + `mux-channel-opened`。
+- Auto route 本轮设计锁定：Auto 不消费旧 `traversalPathPriority`，默认 `Tailscale/direct websocket -> WebRTC UDP direct -> TURN/Relay`；手动选择只作为显式 override，不写回 Auto 全局顺序。
+- Jason 新反馈 remote-window 视频目标 app 没被拉到 focus。代码/doc 真源显示 focus 属于 `desktop.remote_window_stream.daemon.input_inject`：Android overlay 只能发 input intent，daemon helper 必须 bring-to-front / focus 后再注入 OS event。修复后 Android 视频 surface 在 pointerdown 先发送 explicit `focus` intent，QuickBar/IME batch 先发 `focus` 再发 key/text；daemon helper 对 `focus` 做 focus-only 操作，并验证 frontmost + focused 后才返回成功。本机直接 helper smoke 对微信返回 `ok=true`，frontmost 从 `com.googlecode.iterm2` 变成 `com.tencent.xinWeChat`。本轮 APK `0.1.3.2190` sha256 `05f8237626f1fbade0aca65d2b16b7644a3f379d5b12e87179e3393211efa895`。
+- MemoryPalace 收口 mine 当前被现有 PID `56674` 占用，该进程是另一路 `mempalace mine . --wing routecodex --no-gitignore`；本轮未 broad kill，待 holder 结束后再 mine `wing=zterm` 并搜新短语。
+
 # 2026-07-20 Android exit stale transport keeps tmux window occupied
 
 - Jason reported a follow-up Android field symptom: re-entering a session can show uplink/downlink traffic in the status strip while the terminal body does not update, and asked whether UDP/WebRTC and Tailscale/WebSocket recovery are being conflated.

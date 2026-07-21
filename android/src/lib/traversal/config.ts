@@ -15,6 +15,16 @@ import type {
 } from './types';
 import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
 
+function resolveTraversalPathOrder(
+  mode: TraversalTransportMode,
+  settings: TraversalSettingsSource,
+) {
+  if (mode === 'auto') {
+    return DEFAULT_TRAVERSAL_PATH_PRIORITY;
+  }
+  return normalizeTraversalPathPriority(settings.traversalPathPriority || DEFAULT_TRAVERSAL_PATH_PRIORITY);
+}
+
 function isLikelyIpv6Host(host?: string | null) {
   const value = host?.trim() || '';
   if (!value) {
@@ -211,7 +221,7 @@ export function buildTraversalPlan(
       ipv6: target.ipv6Host || '',
       ipv4: target.ipv4Host || '',
     };
-    for (const path of normalizeTraversalPathPriority(settings.traversalPathPriority || DEFAULT_TRAVERSAL_PATH_PRIORITY)) {
+    for (const path of resolveTraversalPathOrder(mode, settings)) {
       if (path === 'rtc-direct' || path === 'rtc-relay') {
         continue;
       }
@@ -280,7 +290,7 @@ export function buildTraversalPlan(
 
   return {
     mode,
-    candidates: normalizeTraversalPathPriority(settings.traversalPathPriority || DEFAULT_TRAVERSAL_PATH_PRIORITY)
+    candidates: resolveTraversalPathOrder(mode, settings)
       .flatMap((path) => [...wsCandidates, ...rtcCandidates].filter((candidate) => candidate.path === path)),
   };
 }

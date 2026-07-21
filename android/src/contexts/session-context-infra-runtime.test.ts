@@ -151,11 +151,16 @@ describe('applySessionActionRuntime', () => {
     });
     const plan = buildTraversalPlan(target, settings, options?.overrideUrl);
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'rtc-direct',
       'tailscale',
+      'rtc-direct',
       'rtc-relay',
     ]);
     expect(plan.candidates[0]).toMatchObject({
+      kind: 'ws',
+      path: 'tailscale',
+      endpoint: '100.66.1.82:3333',
+    });
+    expect(plan.candidates[1]).toMatchObject({
       kind: 'rtc',
       path: 'rtc-direct',
       endpoint: 'rtc-direct:mac-studio',

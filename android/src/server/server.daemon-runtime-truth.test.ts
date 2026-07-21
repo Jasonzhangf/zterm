@@ -14,6 +14,13 @@ function readPerformanceSchedulerSource() {
   return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-performance-scheduler.ts'), 'utf8');
 }
 
+function readPreparedDaemonReleaseSource() {
+  return readFileSync(
+    join(process.cwd(), 'release-dist', 'zterm-daemon-0.1.3-darwin-arm64', 'runtime', 'server.cjs'),
+    'utf8',
+  );
+}
+
 function extractBlock(source: string, anchor: string, length = 2600) {
   const start = source.indexOf(anchor);
   expect(start).toBeGreaterThanOrEqual(0);
@@ -72,5 +79,15 @@ describe('server daemon runtime truth gates', () => {
     expect(source).not.toMatch(/follow|reading|visibleRange|viewport|paneLayout/);
     expect(source).toContain('transportBufferedBytes');
     expect(source).toContain('lastCaptureDurationMs');
+  });
+
+  it('keeps the prepared daemon release runtime aligned with terminal mux protocol support', () => {
+    const source = readPreparedDaemonReleaseSource();
+
+    expect(source).toContain('mux-hello');
+    expect(source).toContain('mux-ready');
+    expect(source).toContain('mux-channel-open');
+    expect(source).toContain('mux-channel-opened');
+    expect(source).toContain('mux-channel-message');
   });
 });

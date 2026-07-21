@@ -46,6 +46,23 @@ const candidates = [
 ] satisfies TraversalPlanCandidate[];
 
 describe('selectBestTraversalRoute', () => {
+  it('defaults Auto selection to Tailscale before UDP direct and Relay', () => {
+    const selection = selectBestTraversalRoute({
+      candidates: [
+        candidates[4]!,
+        candidates[1]!,
+        candidates[2]!,
+      ],
+    });
+
+    expect(selection.selected).toMatchObject({ id: 'direct:tailscale', path: 'tailscale' });
+    expect(selection.diagnostics.map((item) => item.path)).toEqual([
+      'rtc-relay',
+      'rtc-direct',
+      'tailscale',
+    ]);
+  });
+
   it('selects private LAN before Tailscale, WebRTC direct, and Relay when no route has recent health', () => {
     const selection = selectBestTraversalRoute({
       candidates,

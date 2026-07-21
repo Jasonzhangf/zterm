@@ -285,6 +285,9 @@ export interface RemoteWindowInputEventPayload {
   targetId: string;
   event:
     | {
+        kind: 'focus';
+      }
+    | {
         kind: 'pointer';
         phase: 'move' | 'down' | 'up';
         pointerId: number;

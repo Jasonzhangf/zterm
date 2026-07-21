@@ -3,7 +3,7 @@ import { DEFAULT_BRIDGE_SETTINGS } from '../bridge-settings';
 import { buildTraversalPlan, resolveTraversalConfigFromHost } from './config';
 
 describe('buildTraversalPlan', () => {
-  it('orders logged-in auto candidates as direct IPv4 -> Tailscale -> WebRTC direct -> IPv6 -> TURN relay', () => {
+  it('orders logged-in auto candidates as Tailscale -> UDP direct -> TURN relay without user choice', () => {
     const plan = buildTraversalPlan(
       {
         bridgeHost: '203.0.113.10',
@@ -38,23 +38,23 @@ describe('buildTraversalPlan', () => {
     );
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'ipv4',
       'tailscale',
       'rtc-direct',
-      'ipv6',
       'rtc-relay',
+      'ipv4',
+      'ipv6',
     ]);
-    expect(plan.candidates[2]).toMatchObject({
+    expect(plan.candidates[1]).toMatchObject({
       kind: 'rtc',
       path: 'rtc-direct',
       endpoint: 'rtc-direct:daemon-host-a',
       iceTransportPolicy: 'all',
       iceServers: [{ urls: 'stun:turn.example.com:3478' }],
     });
-    expect(JSON.stringify(plan.candidates[2])).not.toContain('secret');
+    expect(JSON.stringify(plan.candidates[1])).not.toContain('secret');
   });
 
-  it('orders auto paths from the user selected traversal priority', () => {
+  it('ignores stale saved traversal priority in auto mode', () => {
     const plan = buildTraversalPlan(
       {
         bridgeHost: '203.0.113.10',
@@ -73,7 +73,7 @@ describe('buildTraversalPlan', () => {
         turnUsername: '',
         turnCredential: '',
         transportMode: 'auto',
-        traversalPathPriority: ['ipv4', 'tailscale', 'rtc-direct', 'ipv6', 'rtc-relay'],
+        traversalPathPriority: ['rtc-relay', 'ipv4', 'rtc-direct', 'tailscale', 'ipv6'],
         traversalRelay: {
           relayBaseUrl: 'http://159.75.134.56/relay/',
           accessToken: 'access-1',
@@ -94,11 +94,11 @@ describe('buildTraversalPlan', () => {
     );
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
-      'ipv4',
       'tailscale',
       'rtc-direct',
-      'ipv6',
       'rtc-relay',
+      'ipv4',
+      'ipv6',
     ]);
   });
 

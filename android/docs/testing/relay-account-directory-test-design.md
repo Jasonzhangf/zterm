@@ -45,8 +45,8 @@ daemon tmux truth
 - `src/lib/traversal/route-selector.test.ts`
   - selects reachable lowest-scored candidate.
   - rejects unreachable and auth-failed candidates.
-  - applies route priority as weight only.
-  - logged-in daemon routes prefer `rtc-direct` WebRTC UDP candidate first, then direct/Tailscale websocket candidates, then TURN-only `rtc-relay`.
+  - applies the product Auto order rather than stale saved route priority.
+  - logged-in daemon routes prefer direct/Tailscale websocket first, then `rtc-direct` WebRTC UDP candidate, then TURN-only `rtc-relay`.
   - expires stale route TTL.
   - returns explainable diagnostics for selected and rejected candidates.
 - `src/lib/traversal/socket.test.ts`
@@ -100,7 +100,7 @@ daemon tmux truth
 - Positive: private LAN IPv4 wins before Tailscale, WebRTC direct, and TURN/Relay when no route has recent health.
 - Positive: Tailscale wins before public IPv4, WebRTC direct, and TURN/Relay by default.
 - Positive: slow Tailscale can lose to WebRTC direct when RTT health proves direct is faster, but it must not jump straight to TURN/Relay.
-- Negative: public IPv4 must not outrank Tailscale only because the `ipv4` path is listed before `tailscale`.
+- Negative: stale saved `traversalPathPriority` must not make Auto pick UDP or Relay before Tailscale.
 - Negative: auth-failed direct/Tailscale candidates cannot win over a healthy later route.
 - Positive: route plan contains candidates in product order `private LAN IPv4 -> Tailscale/direct websocket -> WebRTC direct -> TURN/Relay`; opened-route heartbeat/close failure records route health and lets the next attempt try another route.
 - Negative: `rtc-direct` must not contain TURN credentials or use `iceTransportPolicy='relay'`; otherwise TURN would bypass direct/Tailscale routes.

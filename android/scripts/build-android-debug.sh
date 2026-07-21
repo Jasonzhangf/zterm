@@ -13,6 +13,7 @@ cd "$ROOT_DIR"
 "$SCRIPT_DIR/ensure-pnpm-install.sh"
 pnpm run deps:check-wterm-published
 pnpm build
+pnpm run daemon:prepare-release
 rm -rf "$ROOT_DIR/native/android/app/src/main/assets/public/assets"
 npx cap sync android
 cd "$ROOT_DIR/native/android"

@@ -355,6 +355,14 @@ describe('remote window stream daemon owner', () => {
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('remote gesture input missing delta or coordinates');
   });
 
+  it('requires macOS helper focus verification before reporting input success', () => {
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('frontmostPidMatches');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('focusedWindowMatchesTarget');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('config.event.kind == "focus"');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('remote input target app did not become frontmost');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('remote input target window did not become focused');
+  });
+
   it('moves the macOS cursor to the remote input coordinate before scroll and gesture wheel events', () => {
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func postMouseMove(x: Double, y: Double)');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('postMouseMove(x: x, y: y)');
@@ -1236,6 +1244,31 @@ describe('remote window stream daemon owner', () => {
       target,
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
+
+    const focusResult = await runtime.injectInput({
+      requestId: 'rw-input-focus',
+      streamId: 'stream-input',
+      targetId: 'app-window:123:456',
+      event: {
+        kind: 'focus',
+      },
+    });
+
+    expect(focusResult).toEqual({
+      requestId: 'rw-input-focus',
+      streamId: 'stream-input',
+      targetId: 'app-window:123:456',
+      accepted: true,
+    });
+    expect(runRemoteWindowInputEvent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        requestId: 'rw-input-focus',
+        event: { kind: 'focus' },
+      }),
+      target,
+      expect.objectContaining({ swiftBinary: 'swift' }),
+    );
+    runRemoteWindowInputEvent.mockClear();
 
     const result = await runtime.injectInput({
       requestId: 'rw-input',
