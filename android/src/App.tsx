@@ -144,6 +144,9 @@ export function AppContent({ bridgeSettings, setBridgeSettings, appForegroundAct
       if (!nextRelay) {
         return;
       }
+      if (areTraversalRelaySettingsEqual(bridgeSettings.traversalRelay, nextRelay)) {
+        return;
+      }
       setBridgeSettings((current) => {
         const currentRelay = current.traversalRelay;
         if (areTraversalRelaySettingsEqual(currentRelay, nextRelay)) {
@@ -152,9 +155,10 @@ export function AppContent({ bridgeSettings, setBridgeSettings, appForegroundAct
         return applyTraversalRelaySettings(current, nextRelay);
       });
     };
+    handler();
     window.addEventListener('traversal-relay-account-change', handler);
     return () => window.removeEventListener('traversal-relay-account-change', handler);
-  }, [setBridgeSettings]);
+  }, [bridgeSettings.traversalRelay, setBridgeSettings]);
 
   useEffect(() => {
     const wsHostUrl = bridgeSettings.traversalRelay?.wsHostUrl?.trim() || '';

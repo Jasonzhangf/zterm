@@ -68,6 +68,7 @@ export interface TraversalRelayAccountState {
 const STORAGE_KEY = 'zterm:traversal-relay-account';
 const DEFAULT_TRAVERSAL_RELAY_BASE_URL_PARTS = ['https://', 'relay', '.', 'codewhisper', '.', 'cc:18443', '/relay/'] as const;
 const LEGACY_DEFAULT_TRAVERSAL_RELAY_HOSTS = new Set(['claw.codewhisper.cc']);
+const LEGACY_FIXED_RELAY_DEVICE_IDS = new Set(['zterm-android', 'zterm-ios', 'zterm-mac', 'zterm-windows', 'zterm-web']);
 
 function asString(value: unknown) {
   return typeof value === 'string' ? value : '';
@@ -158,7 +159,7 @@ function buildDefaultDeviceId(platform: string) {
   const storage = getBrowserStorage();
   const storageKey = `zterm:relay-device-id:${platform}`;
   const stored = asString(storage?.getItem(storageKey)).trim();
-  if (stored) {
+  if (stored && !isLegacyFixedRelayDeviceId(platform, stored)) {
     return stored;
   }
   const randomId = typeof globalThis.crypto?.randomUUID === 'function'
@@ -169,13 +170,45 @@ function buildDefaultDeviceId(platform: string) {
   return deviceId;
 }
 
+function isLegacyFixedRelayDeviceId(platform: string, deviceId: string) {
+  const normalizedPlatform = platform.trim().toLowerCase();
+  const normalizedDeviceId = deviceId.trim().toLowerCase();
+  return normalizedDeviceId === `zterm-${normalizedPlatform}` || LEGACY_FIXED_RELAY_DEVICE_IDS.has(normalizedDeviceId);
+}
+
+function resolveRelayDeviceId(platform: string, candidateDeviceId: unknown) {
+  const candidate = asString(candidateDeviceId).trim();
+  if (candidate && !isLegacyFixedRelayDeviceId(platform, candidate)) {
+    return candidate;
+  }
+  return buildDefaultDeviceId(platform);
+}
+
 function resolveTraversalRelayDeviceMeta(account?: Partial<TraversalRelayAccountState> | null): TraversalRelayDeviceMeta {
   const platform = asString(account?.platform).trim() || resolvePlatform();
   return {
-    deviceId: asString(account?.deviceId).trim() || buildDefaultDeviceId(platform),
+    deviceId: resolveRelayDeviceId(platform, account?.deviceId),
     deviceName: asString(account?.deviceName).trim() || buildDefaultDeviceName(platform),
     platform,
   };
+}
+
+function readRelaySettingsCandidateDeviceMeta(candidate: Partial<TraversalRelayAccountState>, platform: string) {
+  const relay = candidate.relaySettings && typeof candidate.relaySettings === 'object'
+    ? candidate.relaySettings as TraversalRelayClientSettings
+    : undefined;
+  const topLevelId = asString(candidate.deviceId).trim();
+  const relaySettingsId = asString(relay?.deviceId).trim();
+  const deviceId = topLevelId && !isLegacyFixedRelayDeviceId(platform, topLevelId)
+    ? topLevelId
+    : relaySettingsId && !isLegacyFixedRelayDeviceId(platform, relaySettingsId)
+      ? relaySettingsId
+      : '';
+  return resolveTraversalRelayDeviceMeta({
+    deviceId,
+    deviceName: asString(candidate.deviceName).trim() || asString(relay?.deviceName).trim(),
+    platform,
+  });
 }
 
 function normalizeStoredState(input: unknown): TraversalRelayAccountState | null {
@@ -188,6 +221,7 @@ function normalizeStoredState(input: unknown): TraversalRelayAccountState | null
     return null;
   }
   const platform = asString(candidate.platform).trim() || resolvePlatform();
+  const deviceMeta = readRelaySettingsCandidateDeviceMeta(candidate, platform);
   return {
     username: asString(candidate.username).trim(),
     password: '',
@@ -200,15 +234,15 @@ function normalizeStoredState(input: unknown): TraversalRelayAccountState | null
           createdAt: asString((candidate.user as TraversalRelayUser).createdAt).trim(),
         }
       : null,
-    deviceId: asString(candidate.deviceId).trim() || buildDefaultDeviceId(platform),
-    deviceName: asString(candidate.deviceName).trim() || buildDefaultDeviceName(platform),
-    platform,
+    deviceId: deviceMeta.deviceId,
+    deviceName: deviceMeta.deviceName,
+    platform: deviceMeta.platform,
     devices: Array.isArray(candidate.devices) ? candidate.devices as TraversalRelayDeviceSnapshot[] : [],
     directory: normalizeRelayAccountDirectory(candidate.directory),
     updatedAt: typeof candidate.updatedAt === 'number' && Number.isFinite(candidate.updatedAt)
       ? candidate.updatedAt
       : Date.now(),
-    relaySettings: normalizeStoredStateRelaySettings(candidate.relaySettings),
+    relaySettings: normalizeStoredStateRelaySettings(candidate.relaySettings, deviceMeta),
   };
 }
 
@@ -220,13 +254,16 @@ function requireRelayAccountDirectory(input: unknown) {
   return directory;
 }
 
-function normalizeStoredStateRelaySettings(input: unknown): TraversalRelayClientSettings | undefined {
+function normalizeStoredStateRelaySettings(
+  input: unknown,
+  parentDeviceMeta?: Partial<TraversalRelayDeviceMeta> | null,
+): TraversalRelayClientSettings | undefined {
   const relay = input as TraversalRelayClientSettings | undefined;
-  const deviceMeta = resolveTraversalRelayDeviceMeta(relay ? {
+  const deviceMeta = resolveTraversalRelayDeviceMeta(parentDeviceMeta || (relay ? {
     deviceId: relay.deviceId,
     deviceName: relay.deviceName,
     platform: relay.platform,
-  } : null);
+  } : null));
   return deriveTraversalRelayClientSettings({
     ok: true,
     relayBaseUrl: asString(relay?.relayBaseUrl),
@@ -255,13 +292,34 @@ function normalizeStoredStateRelaySettings(input: unknown): TraversalRelayClient
   }, deviceMeta);
 }
 
+function storedRelayDeviceIdentityNeedsMigration(
+  input: unknown,
+  normalized: TraversalRelayAccountState,
+) {
+  if (!input || typeof input !== 'object') {
+    return false;
+  }
+  const candidate = input as Partial<TraversalRelayAccountState>;
+  const relay = candidate.relaySettings && typeof candidate.relaySettings === 'object'
+    ? candidate.relaySettings as TraversalRelayClientSettings
+    : undefined;
+  return asString(candidate.deviceId).trim() !== normalized.deviceId
+    || (relay ? asString(relay.deviceId).trim() !== normalized.relaySettings?.deviceId : false);
+}
+
 export function readTraversalRelayAccountState(): TraversalRelayAccountState | null {
   const storage = getBrowserStorage();
   if (!storage) {
     return null;
   }
   try {
-    return normalizeStoredState(JSON.parse(storage.getItem(STORAGE_KEY) || 'null'));
+    const stored = storage.getItem(STORAGE_KEY) || 'null';
+    const parsed = JSON.parse(stored);
+    const normalized = normalizeStoredState(parsed);
+    if (normalized && storedRelayDeviceIdentityNeedsMigration(parsed, normalized)) {
+      storage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+    }
+    return normalized;
   } catch (error) {
     console.error('[traversal-relay-client] Failed to read account state:', error);
     return null;
@@ -390,9 +448,10 @@ export async function traversalRelayLogin(options: {
 }
 
 export async function traversalRelayRefreshMe(state: TraversalRelayAccountState) {
-  const response = await fetch(buildHttpUrl(state.relayBaseUrl, '/api/auth/me'), {
+  const normalizedState = normalizeStoredState(state) || state;
+  const response = await fetch(buildHttpUrl(normalizedState.relayBaseUrl, '/api/auth/me'), {
     headers: {
-      authorization: `Bearer ${state.accessToken}`,
+      authorization: `Bearer ${normalizedState.accessToken}`,
     },
   });
   const payload = await response.json() as TraversalRelayAuthPayload;
@@ -401,17 +460,20 @@ export async function traversalRelayRefreshMe(state: TraversalRelayAccountState)
   }
   const refreshPayload: TraversalRelayAuthPayload = {
     ...payload,
-    accessToken: asString(payload.accessToken).trim() || state.accessToken,
+    accessToken: asString(payload.accessToken).trim() || normalizedState.accessToken,
   };
-  const nextRelaySettings = deriveTraversalRelayClientSettings(refreshPayload, state);
+  const nextRelaySettings = deriveTraversalRelayClientSettings(refreshPayload, normalizedState);
   if (!nextRelaySettings) {
     throw new Error('relay control payload missing ws/control settings');
   }
   const nextState: TraversalRelayAccountState = {
-    ...state,
-    accessToken: refreshPayload.accessToken || state.accessToken,
-    user: payload.user || state.user,
-    devices: Array.isArray(payload.devices) ? payload.devices : state.devices,
+    ...normalizedState,
+    accessToken: refreshPayload.accessToken || normalizedState.accessToken,
+    user: payload.user || normalizedState.user,
+    deviceId: nextRelaySettings.deviceId,
+    deviceName: nextRelaySettings.deviceName,
+    platform: nextRelaySettings.platform,
+    devices: Array.isArray(payload.devices) ? payload.devices : normalizedState.devices,
     directory: requireRelayAccountDirectory(payload.directory),
     updatedAt: Date.now(),
     relaySettings: nextRelaySettings,
@@ -436,12 +498,13 @@ export function connectTraversalRelayDevicesStream(options: {
   if (!relay?.wsDevicesUrl) {
     throw new Error('relay device stream url missing');
   }
+  const deviceMeta = resolveTraversalRelayDeviceMeta(options.account);
 
   const url = new URL(relay.wsDevicesUrl);
   url.searchParams.set('token', options.account.accessToken);
-  url.searchParams.set('deviceId', options.account.deviceId);
-  url.searchParams.set('deviceName', options.account.deviceName);
-  url.searchParams.set('platform', options.account.platform);
+  url.searchParams.set('deviceId', deviceMeta.deviceId);
+  url.searchParams.set('deviceName', deviceMeta.deviceName);
+  url.searchParams.set('platform', deviceMeta.platform);
   url.searchParams.set('appVersion', APP_VERSION);
 
   const socket = new WebSocket(url.toString());
@@ -450,9 +513,9 @@ export function connectTraversalRelayDevicesStream(options: {
     socket.send(JSON.stringify({
       type: 'device-meta',
       payload: {
-        deviceId: options.account.deviceId,
-        deviceName: options.account.deviceName,
-        platform: options.account.platform,
+        deviceId: deviceMeta.deviceId,
+        deviceName: deviceMeta.deviceName,
+        platform: deviceMeta.platform,
         appVersion: APP_VERSION,
       },
     }));

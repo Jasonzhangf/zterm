@@ -425,6 +425,47 @@ describe('App relay device stream reconnect lifecycle', () => {
     );
   });
 
+  it('syncs normalized relay device identity into bridge settings on startup', { timeout: 10000 }, async () => {
+    const migratedRelaySettings = {
+      ...makeRelayBridgeSettings(true).traversalRelay,
+      deviceId: 'zterm-android-install-1',
+      updatedAt: 2,
+    };
+    const migratedAccount = {
+      username: 'jason',
+      password: '',
+      relayBaseUrl: 'https://relay.example.com/relay/',
+      accessToken: 'token-1',
+      user: { id: 'u1', username: 'jason', createdAt: 'now' },
+      deviceId: 'zterm-android-install-1',
+      deviceName: 'ZTerm Android',
+      platform: 'android',
+      devices: [],
+      directory: null,
+      updatedAt: 2,
+      relaySettings: migratedRelaySettings,
+    };
+    readRelayAccountStateMock.mockReturnValue(migratedAccount);
+    traversalRelayRefreshMeMock.mockResolvedValue({
+      account: migratedAccount,
+      relaySettings: migratedRelaySettings,
+    });
+    const setBridgeSettings = vi.fn();
+    const staleBridgeSettings = {
+      ...makeRelayBridgeSettings(true),
+      traversalRelay: {
+        ...makeRelayBridgeSettings(true).traversalRelay,
+        deviceId: 'zterm-android',
+      },
+    };
+
+    render(<AppContent bridgeSettings={staleBridgeSettings} setBridgeSettings={setBridgeSettings} />);
+
+    await waitFor(() => expect(setBridgeSettings).toHaveBeenCalledWith(expect.any(Function)), { timeout: 10000 });
+    const updater = setBridgeSettings.mock.calls[0]?.[0];
+    expect(updater(staleBridgeSettings).traversalRelay.deviceId).toBe('zterm-android-install-1');
+  });
+
   it('does not open a relay device stream when account refresh fails', { timeout: 10000 }, async () => {
     traversalRelayRefreshMeMock.mockRejectedValueOnce(new Error('relay control unavailable'));
 

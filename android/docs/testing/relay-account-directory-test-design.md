@@ -43,6 +43,10 @@ daemon tmux truth
   - normalizes directory snapshots.
   - preserves endpoint/session semantics.
   - projects online daemon machines without local bridge preset.
+- `src/lib/traversal-relay-client.test.ts`
+  - creates one stable per-install client device id and uses the same identity in account state, Relay settings, device stream, and signaling.
+  - migrates legacy fixed ids such as `zterm-android` before any Relay socket opens, persists the migrated identity, and preserves explicit non-legacy device ids.
+  - refresh/login normalization cannot leave top-level account identity and nested Relay settings with different device ids.
 - `src/lib/traversal/route-selector.test.ts`
   - selects reachable lowest-scored candidate.
   - rejects unreachable and auth-failed candidates.
@@ -116,6 +120,8 @@ daemon tmux truth
 - Negative: selecting that row must not bypass the session-open owner with a raw `switchSession`, and must not create a second open tab for the same tmux session.
 - Positive: reconnecting the same phone to Relay within 30 minutes reuses that phone's peer lease identity and can renegotiate WebRTC under the same peer id.
 - Negative: a second phone under the same account and hostId must not steal or overwrite the first phone's peer lease; missing device id is rejected; after 30 minutes or a daemon host replacement the peer must be rebuilt explicitly.
+- Positive: an upgraded legacy install migrates `zterm-android` to one stable `zterm-android-<install-id>` and immediately uses it for account/device-stream/signaling truth.
+- Negative: migration must not regenerate on each read, preserve a shared legacy fixed id, overwrite an explicit custom device id, or leave top-level account and nested Relay settings with different ids.
 - Black-box gate: `pnpm --dir android run test:relay:peer-lease`.
 
 ## Required Gates Before APK
@@ -126,6 +132,7 @@ pnpm --dir android exec vitest run \
   src/traversal-relay/server.test.ts \
   src/server/relay-client.test.ts \
   src/lib/relay-account-directory.test.ts \
+  src/lib/traversal-relay-client.test.ts \
   src/lib/traversal/route-selector.test.ts \
   src/lib/traversal/route-health-cache.test.ts \
   src/lib/traversal/config.test.ts \

@@ -241,6 +241,93 @@ describe('traversal relay client truth', () => {
     expect(readTraversalRelayAccountState()?.relaySettings?.deviceId).toBe(first.deviceId);
   });
 
+  it('migrates and persists a legacy fixed Android device id before opening Relay sockets', () => {
+    window.localStorage.setItem('zterm:traversal-relay-account', JSON.stringify({
+      username: 'jason',
+      relayBaseUrl: 'https://relay.codewhisper.cc:18443/relay/',
+      accessToken: 'token-1',
+      user: { id: 'u1', username: 'jason', createdAt: 'now' },
+      deviceId: 'zterm-android',
+      deviceName: 'ZTerm Android',
+      platform: 'android',
+      devices: [],
+      directory: directoryPayload,
+      updatedAt: 1,
+      relaySettings: {
+        relayBaseUrl: 'https://relay.codewhisper.cc:18443/relay/',
+        accessToken: 'token-1',
+        userId: 'u1',
+        username: 'jason',
+        deviceId: 'zterm-android',
+        deviceName: 'ZTerm Android',
+        platform: 'android',
+        wsDevicesUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/devices',
+        wsHostUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/host',
+        wsClientUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/client',
+        turnUrl: 'turn:relay.codewhisper.cc:3479?transport=udp',
+        turnUsername: 'turn-user',
+        turnCredential: 'turn-secret',
+        updatedAt: 1,
+      },
+    }));
+
+    const first = readTraversalRelayAccountState();
+    const second = readTraversalRelayAccountState();
+    const persisted = JSON.parse(window.localStorage.getItem('zterm:traversal-relay-account') || '{}');
+
+    expect(first?.deviceId).toMatch(/^zterm-android-[a-z0-9-]+$/);
+    expect(first?.deviceId).not.toBe('zterm-android');
+    expect(first?.relaySettings?.deviceId).toBe(first?.deviceId);
+    expect(second?.deviceId).toBe(first?.deviceId);
+    expect(persisted.deviceId).toBe(first?.deviceId);
+    expect(persisted.relaySettings.deviceId).toBe(first?.deviceId);
+
+    const socket = connectTraversalRelayDevicesStream({
+      account: first!,
+      onDevices: vi.fn(),
+    }) as unknown as MockWebSocket;
+    socket.emitOpen();
+    expect(new URL(socket.url).searchParams.get('deviceId')).toBe(first?.deviceId);
+    expect(JSON.parse(socket.sent[0] || '{}').payload.deviceId).toBe(first?.deviceId);
+  });
+
+  it('preserves an explicit non-legacy device id while aligning nested Relay settings', () => {
+    window.localStorage.setItem('zterm:traversal-relay-account', JSON.stringify({
+      username: 'jason',
+      relayBaseUrl: 'https://relay.codewhisper.cc:18443/relay/',
+      accessToken: 'token-1',
+      deviceId: 'android-phone-jason-2',
+      deviceName: 'Jason Phone',
+      platform: 'android',
+      devices: [],
+      directory: directoryPayload,
+      updatedAt: 1,
+      relaySettings: {
+        relayBaseUrl: 'https://relay.codewhisper.cc:18443/relay/',
+        accessToken: 'token-1',
+        userId: 'u1',
+        username: 'jason',
+        deviceId: 'zterm-android',
+        deviceName: 'ZTerm Android',
+        platform: 'android',
+        wsDevicesUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/devices',
+        wsHostUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/host',
+        wsClientUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/client',
+        turnUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        updatedAt: 1,
+      },
+    }));
+
+    const account = readTraversalRelayAccountState();
+
+    expect(account?.deviceId).toBe('android-phone-jason-2');
+    expect(account?.relaySettings?.deviceId).toBe('android-phone-jason-2');
+    expect(account?.deviceName).toBe('Jason Phone');
+    expect(account?.relaySettings?.deviceName).toBe('Jason Phone');
+  });
+
   it('rejects relay login responses that do not include a valid account directory', async () => {
     vi.mocked(fetch).mockResolvedValueOnce({
       ok: true,
@@ -329,6 +416,60 @@ describe('traversal relay client truth', () => {
     expect(refreshed.relaySettings.accessToken).toBe('token-1');
     expect(readTraversalRelayAccountState()?.relaySettings?.turnUrl).toBe('turn:relay.codewhisper.cc:3479?transport=udp');
     expect(readTraversalRelayAccountState()?.relaySettings?.turnUsername).toBe('fresh-turn-user');
+  });
+
+  it('migrates a directly supplied legacy account during control refresh', async () => {
+    const legacyState = {
+      username: 'jason',
+      password: '',
+      relayBaseUrl: 'https://relay.codewhisper.cc:18443/relay/',
+      accessToken: 'token-1',
+      user: { id: 'u1', username: 'jason', createdAt: 'now' },
+      deviceId: 'zterm-android',
+      deviceName: 'ZTerm Android',
+      platform: 'android',
+      devices: [],
+      directory: directoryPayload as any,
+      updatedAt: 1,
+      relaySettings: {
+        relayBaseUrl: 'https://relay.codewhisper.cc:18443/relay/',
+        accessToken: 'token-1',
+        userId: 'u1',
+        username: 'jason',
+        deviceId: 'zterm-android',
+        deviceName: 'ZTerm Android',
+        platform: 'android',
+        wsDevicesUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/devices',
+        wsHostUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/host',
+        wsClientUrl: 'wss://relay.codewhisper.cc:18443/relay/ws/client',
+        turnUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        updatedAt: 1,
+      },
+    };
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        ok: true,
+        user: { id: 'u1', username: 'jason', createdAt: 'now' },
+        devices: [],
+        directory: directoryPayload,
+        relayBaseUrl: 'https://relay.codewhisper.cc:18443/relay/',
+        ws: {
+          devices: 'wss://relay.codewhisper.cc:18443/relay/ws/devices',
+          host: 'wss://relay.codewhisper.cc:18443/relay/ws/host',
+          client: 'wss://relay.codewhisper.cc:18443/relay/ws/client',
+        },
+      }),
+    } as Response);
+
+    const refreshed = await traversalRelayRefreshMe(legacyState);
+
+    expect(refreshed.account.deviceId).toMatch(/^zterm-android-[a-z0-9-]+$/);
+    expect(refreshed.account.deviceId).not.toBe('zterm-android');
+    expect(refreshed.relaySettings.deviceId).toBe(refreshed.account.deviceId);
+    expect(readTraversalRelayAccountState()?.deviceId).toBe(refreshed.account.deviceId);
   });
 
   it('persists directory snapshots from relay device stream without rewriting devices truth', () => {

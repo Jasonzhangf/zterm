@@ -3106,3 +3106,50 @@ Need runtime debug to confirm:
 - Delivery: Android `0.1.3.2192` / versionCode `1032192`, APK sha256 `5c35bd626bd0631496e9985e68c4940c1ea6ce8965bf838d7124a385b129fab8`, size `4777334`. Local update channel and `/Users/fanzhang/.zterm/updates` match.
 - Runtime delivery: relay package sha256 `528703e3287d65c5665210fd180ccd622282eca1e008ab6922cdb753cd7baf7d`; daemon archive sha256 `a2f41bcf9d8307bfd4d1ac5d8466786583aba4ca958a0e6ad2db489aa1da99e5`; local daemon restarted to pid `46535` and loaded `rtc peer replaced by new init`; production Relay restarted to pid `1442264` and loaded `clientPeerLeaseKey`, `deviceId is required`, and 30-minute idle timeout. Public Relay update route serves `0.1.3.2192`, APK `HEAD` returns `Content-Length=4777334`, streamed APK sha matches local, and production smoke with `jason/welcome2img` passes.
 - L5 gap: no online ADB device in this workspace, so installed-device two-phone UI proof is not claimed. The server-side black-box gate covers the peer lease identity semantics automatically.
+
+# 2026-07-21 Legacy Relay client device identity migration diagnosis
+
+- Symptom: after daemon/Relay deployment and Android `0.1.3.2192` upgrade, a phone can still fail to connect and two upgraded phones can replace the same Relay peer.
+- Expected: every installed client has one stable, per-install Relay `deviceId`; two phones under one account receive independent 30-minute peer leases.
+- Live evidence:
+  - local daemon launchd service is running on PID `46535`; `/health` returned `ok=true`, uptime `2903s`, and the runtime log contains `rtc peer replaced by new init`, so a missing daemon restart is ruled out.
+  - production Relay service is running on PID `1442264`, started `2026-07-21 13:08:37 CST`; public `/relay/health` returned `liveDaemonDevices=1`.
+  - production account directory observed an upgraded Android `0.1.3.2192` client still publishing the legacy fixed identity `deviceId=zterm-android`.
+- SOP/model flow: known `relay.account_directory.peer_lease.resume`.
+  - lifecycle: persisted Android Relay account -> client device metadata normalization -> Relay signaling URL `deviceId` -> Relay `{userId,hostId,deviceId}` peer lease key -> daemon RTC peer.
+  - allowed resource edge: `resource.daemon_target_transport -> resource.relay_peer_lease -> resource.transport_target`.
+  - forbidden: Relay peer lease must not own terminal channel/subscriber/tmux/mirror/UI state.
+- Hypotheses:
+  - H1 confirmed: `resolveTraversalRelayDeviceMeta()` and `normalizeStoredState()` accept any non-empty stored id, so legacy installs retain `zterm-android`; the new per-install generator only runs for a missing id.
+  - H2 ruled out: daemon not restarted. PID/uptime/runtime marker and live Relay daemon presence prove the new daemon is active.
+  - H3 ruled out for first divergence: Relay peer lease keying is already device-aware and its black-box gate separates distinct device ids; pollution happens before signaling when Android emits the shared legacy id.
+- First divergence: Android persisted-account normalization.
+- Unique owner: `src/lib/traversal-relay-client.ts` under `relay.account_directory`.
+- Allowed edit paths:
+  - `src/lib/traversal-relay-client.ts`
+  - `src/lib/traversal-relay-client.test.ts`
+  - `src/App.tsx` and `src/App.relay-stream-lifecycle.test.tsx` only to sync already-normalized account Relay settings into BridgeSettings at startup.
+  - `docs/testing/relay-account-directory-test-design.md`
+  - feature/function/mainline documentation only if the verified contract changes.
+- Forbidden edit paths: daemon RTC bridge, Relay peer lease server, terminal mux/channel, renderer/buffer, route fallback.
+- Required verification:
+  - red/green tests for legacy top-level and nested Relay id migration, persistence, and preservation of explicit non-legacy ids;
+  - Relay/RTC focused regression, typecheck, feature/resource/function/mainline gates;
+  - local Relay peer-lease black-box and Relay smoke;
+  - full Android build and public update artifact verification;
+  - post-upgrade production directory replay proving the phone no longer publishes `zterm-android` remains the final device L5 gate.
+
+# 2026-07-21 Legacy Relay client device identity migration closeout
+
+- Verification passed after fix:
+  - `pnpm --dir android exec vitest run src/lib/traversal-relay-client.test.ts src/App.relay-stream-lifecycle.test.tsx --reporter dot`: 2 files / 18 tests PASS.
+  - Relay/RTC focused gates: 6 files / 56 tests PASS.
+  - Broad Relay suite: 11 files / 77 tests PASS.
+  - `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`: PASS.
+  - `pnpm --dir android run test:feature-registry -- --reporter dot`: 7 files / 48 tests PASS.
+  - `pnpm --dir android run test:relay:peer-lease`: PASS.
+  - `pnpm --dir android run test:relay:smoke`: PASS.
+  - `pnpm --dir android run build:android`: PASS.
+- Delivery: Android `0.1.3.2193` / versionCode `1032193`; local APK `android/update-dist/zterm-0.1.3.2193.apk`; sha256 `599c3ee820ee824860072c61301f35d57779d5adab39325f03f08de4855b6e72`; size `4777730`.
+- Public Relay update route now serves `0.1.3.2193`; APK HEAD returns `Content-Length=4777730`; streamed public APK sha256 matches local; `/relay/health` reports production Relay PID `1442264`, `liveDaemonDevices=1`, and update manifest present.
+- L5 gap: `adb devices -l` has no attached online device in this workspace, so installed-phone proof and post-upgrade account directory proof that phones no longer publish `zterm-android` remain pending.
