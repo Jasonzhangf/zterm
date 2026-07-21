@@ -297,9 +297,16 @@ export function createSessionInfraFacadeRuntime(options: {
       activeBodySubscriptionSuppressed: options.activeBodySubscriptionSuppressedRef.current,
     });
     for (const session of options.stateRef.current.sessions) {
-      const ws = transportAccessors.readSessionTransportSocket(session.id);
+      const channel = transportAccessors.readSessionTerminalChannel(session.id);
       const subscribed = liveSessionIds.has(session.id);
       setSessionChannelBodySubscribed(options.transportRuntimeStoreRef.current, session.id, subscribed);
+      const ws = channel
+        ? (
+          channel.state === 'open'
+            ? transportAccessors.readSessionTransportResource(session.id).socket
+            : null
+        )
+        : transportAccessors.readSessionTransportSocket(session.id);
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         continue;
       }

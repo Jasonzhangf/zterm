@@ -56,6 +56,64 @@ interface MutableRefObject<T> {
   current: T;
 }
 
+export function handleTargetMuxTransportFailureRuntime(options: {
+  anchorSessionId: string;
+  message: string;
+  readSessionTargetRuntime: (sessionId: string) => { sessionIds: string[] } | null;
+  readSessionTerminalChannel: (sessionId: string) => {
+    state: 'opening' | 'open' | 'closing' | 'closed';
+  } | null;
+  writeSessionTerminalChannelState: (sessionId: string, state: 'closed') => unknown;
+  writeSessionTargetTerminalSocket: (sessionId: string, socket: BridgeTransportSocket | null) => unknown;
+  writeSessionTargetTerminalMuxReady: (sessionId: string, ready: boolean) => unknown;
+  clearSessionHandshakeTimeout: (sessionId: string) => void;
+  pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, PendingSessionTransportOpenIntent>>;
+  scheduleReconnect: (
+    sessionId: string,
+    message: string,
+    retryable?: boolean,
+    reconnectOptions?: { immediate?: boolean; resetAttempt?: boolean; force?: boolean },
+  ) => void;
+  runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
+}) {
+  const targetRuntime = options.readSessionTargetRuntime(options.anchorSessionId);
+  const targetSessionIds = targetRuntime?.sessionIds?.length
+    ? targetRuntime.sessionIds
+    : [options.anchorSessionId];
+
+  options.writeSessionTargetTerminalMuxReady(options.anchorSessionId, false);
+  options.writeSessionTargetTerminalSocket(options.anchorSessionId, null);
+
+  for (const sessionId of targetSessionIds) {
+    const channel = options.readSessionTerminalChannel(sessionId);
+    if (channel && channel.state !== 'closed') {
+      options.writeSessionTerminalChannelState(sessionId, 'closed');
+    }
+
+    const pending = getPendingSessionTransportOpenIntent(
+      options.pendingSessionTransportOpenIntentsRef.current,
+      sessionId,
+    );
+    if (pending) {
+      options.clearSessionHandshakeTimeout(sessionId);
+      deletePendingSessionTransportOpenIntent(options.pendingSessionTransportOpenIntentsRef.current, sessionId);
+      pending.finalizeFailure(options.message, true);
+      continue;
+    }
+
+    options.scheduleReconnect(sessionId, options.message, true, {
+      immediate: true,
+      resetAttempt: true,
+    });
+  }
+
+  options.runtimeDebug('session.mux.target-transport-failed', {
+    anchorSessionId: options.anchorSessionId,
+    message: options.message,
+    affectedSessionCount: targetSessionIds.length,
+  });
+}
+
 export function createSessionTransportOrchestrationRuntime(options: {
   stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null; liveSessionIds?: string[] }>;
   readSessionBufferSnapshot: (sessionId: string) => Session['buffer'];
@@ -374,7 +432,21 @@ export function createSessionTransportOrchestrationRuntime(options: {
       sendSocketPayload: options.sendSocketPayload,
       applyTransportDiagnostics: options.applyTransportDiagnostics,
       runtimeDebug: options.runtimeDebug,
-      finalizeFailure: bindOptions.finalizeFailure,
+      finalizeFailure: (message) => {
+        handleTargetMuxTransportFailureRuntime({
+          anchorSessionId: bindOptions.sessionId,
+          message,
+          readSessionTargetRuntime: options.readSessionTargetRuntime,
+          readSessionTerminalChannel: options.readSessionTerminalChannel,
+          writeSessionTerminalChannelState: options.writeSessionTerminalChannelState,
+          writeSessionTargetTerminalSocket: options.writeSessionTargetTerminalSocket,
+          writeSessionTargetTerminalMuxReady: options.writeSessionTargetTerminalMuxReady,
+          clearSessionHandshakeTimeout: options.clearSessionHandshakeTimeout,
+          pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
+          scheduleReconnect,
+          runtimeDebug: options.runtimeDebug,
+        });
+      },
       handleTargetMuxServerFrame: (frame, rawFrameBytes, rawFrameData) => {
         handleTargetMuxServerFrameRuntime({
           anchorSessionId: bindOptions.sessionId,

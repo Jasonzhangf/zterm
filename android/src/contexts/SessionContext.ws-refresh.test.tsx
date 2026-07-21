@@ -7127,6 +7127,38 @@ describe('SessionContext websocket dynamic refresh', () => {
     expect(readSentMessages(ws2).some((item) => item.type === 'connect')).toBe(true);
   });
 
+  it('resubscribes an initially inactive mux channel over the existing target socket when it becomes active', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <MultiSessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitForMockSessionInstances(2);
+
+    const ws1 = MockWebSocket.instances[0]!;
+    const ws2 = MockWebSocket.instances[1]!;
+    ws1.triggerOpen();
+    ws2.triggerOpen();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-1-state').textContent).toBe('connected');
+      expect(screen.getByTestId('session-2-state').textContent).toBe('connected');
+    });
+
+    expect(readSentMessages(ws2).some((item) =>
+      item.type === 'body-subscription' && item.payload?.subscribed === false)).toBe(true);
+
+    const sentBeforeSwitch = ws2.sent.length;
+    fireEvent.click(screen.getByText('switch-second'));
+
+    await waitFor(() => {
+      expect(readSentMessages(ws2, sentBeforeSwitch).some((item) =>
+        item.type === 'body-subscription' && item.payload?.subscribed === true)).toBe(true);
+    });
+    expect(MockWebSocket.physicalInstances).toHaveLength(1);
+  });
+
   it('reuses target-scoped mux semantics when reconnecting sessions on a shared target', async () => {
     render(
       <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
