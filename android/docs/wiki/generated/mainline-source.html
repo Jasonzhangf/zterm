@@ -35,7 +35,8 @@ h1 { font-size: 24px; margin-bottom: 18px; }
 <path d="M 3960 242 C 3995 242, 3995 62, 4030 62" class="edge" marker-end="url(#arrow)" />
 <path d="M 4290 62 C 4325 62, 4325 62, 4360 62" class="edge" marker-end="url(#arrow)" />
 <path d="M 4290 62 C 4325 62, 4325 152, 4360 152" class="edge" marker-end="url(#arrow)" />
-<path d="M 4620 152 C 4655 152, 4655 62, 4690 62" class="edge" marker-end="url(#arrow)" />
+<path d="M 4290 62 C 4325 62, 4325 242, 4360 242" class="edge" marker-end="url(#arrow)" />
+<path d="M 4620 242 C 4655 242, 4655 62, 4690 62" class="edge" marker-end="url(#arrow)" />
 <path d="M 2640 62 C 2675 62, 2675 242, 2710 242" class="edge" marker-end="url(#arrow)" />
 <path d="M 2970 242 C 3005 242, 3005 242, 3040 242" class="edge" marker-end="url(#arrow)" />
 <path d="M 3300 242 C 3335 242, 3335 152, 3370 152" class="edge" marker-end="url(#arrow)" />
@@ -126,13 +127,17 @@ h1 { font-size: 24px; margin-bottom: 18px; }
   <rect x="4030" y="34" width="260" height="56" rx="12" />
   <text x="4046" y="68">src/lib/session-transport-runtime.ts#target transport runtime</text>
 </g>
-<g class="node" data-node-id="MuxHandshake">
+<g class="node" data-node-id="TargetHeartbeat">
   <rect x="4360" y="34" width="260" height="56" rx="12" />
-  <text x="4376" y="68">packages/shared/src/connection/protocol.ts#TerminalMuxClientFrame</text>
+  <text x="4376" y="68">src/contexts/session-context-socket-runtime.ts#startSocketHeartbeat (target-keyed)</text>
+</g>
+<g class="node" data-node-id="MuxHandshake">
+  <rect x="4360" y="124" width="260" height="56" rx="12" />
+  <text x="4376" y="158">packages/shared/src/connection/protocol.ts#TerminalMuxClientFrame</text>
 </g>
 <g class="node" data-node-id="ChannelRuntime">
-  <rect x="4360" y="124" width="260" height="56" rx="12" />
-  <text x="4376" y="158">src/lib/session-transport-runtime.ts#terminal channel runtime</text>
+  <rect x="4360" y="214" width="260" height="56" rx="12" />
+  <text x="4376" y="248">src/lib/session-transport-runtime.ts#terminal channel runtime</text>
 </g>
 <g class="node" data-node-id="ChannelMessageSend">
   <rect x="4690" y="34" width="260" height="56" rx="12" />
@@ -237,6 +242,7 @@ h1 { font-size: 24px; margin-bottom: 18px; }
   TraversalSocketFactory --&gt; TraversalSocket[&quot;src/lib/traversal/socket.ts#TraversalSocket&quot;]
   TransportOpen --&gt; TargetTransportRuntime[&quot;src/lib/session-transport-runtime.ts#target transport runtime&quot;]
   TraversalSocket --&gt; TargetTransportRuntime
+  TargetTransportRuntime --&gt; TargetHeartbeat[&quot;src/contexts/session-context-socket-runtime.ts#startSocketHeartbeat (target-keyed)&quot;]
   TargetTransportRuntime --&gt; MuxHandshake[&quot;packages/shared/src/connection/protocol.ts#TerminalMuxClientFrame&quot;]
   TargetTransportRuntime --&gt; ChannelRuntime[&quot;src/lib/session-transport-runtime.ts#terminal channel runtime&quot;]
   ChannelRuntime --&gt; ChannelMessageSend[&quot;src/contexts/session-context-transport-wire-runtime.ts#mux channel send&quot;]

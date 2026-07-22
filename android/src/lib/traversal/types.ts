@@ -142,5 +142,6 @@ export interface BridgeTransportSocket {
   onclose: ((event?: BridgeSocketCloseLike) => void) | null;
   send(data: string | ArrayBuffer): void;
   close(code?: number, reason?: string): void;
+  reportFailure?(reason: string, options?: { authFailure?: boolean }): void;
   getDiagnostics(): TraversalDiagnostics;
 }

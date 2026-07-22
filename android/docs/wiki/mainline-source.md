@@ -23,6 +23,7 @@ flowchart TD
   TraversalSocketFactory --> TraversalSocket["src/lib/traversal/socket.ts#TraversalSocket"]
   TransportOpen --> TargetTransportRuntime["src/lib/session-transport-runtime.ts#target transport runtime"]
   TraversalSocket --> TargetTransportRuntime
+  TargetTransportRuntime --> TargetHeartbeat["src/contexts/session-context-socket-runtime.ts#startSocketHeartbeat (target-keyed)"]
   TargetTransportRuntime --> MuxHandshake["packages/shared/src/connection/protocol.ts#TerminalMuxClientFrame"]
   TargetTransportRuntime --> ChannelRuntime["src/lib/session-transport-runtime.ts#terminal channel runtime"]
   ChannelRuntime --> ChannelMessageSend["src/contexts/session-context-transport-wire-runtime.ts#mux channel send"]

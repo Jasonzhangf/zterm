@@ -541,9 +541,10 @@ export function createSessionInfraFacadeRuntime(options: {
     });
   };
 
-  const clearHeartbeat = (sessionId: string) => {
+  const clearHeartbeat = (sessionId: string, heartbeatOptions?: { heartbeatKey?: string }) => {
     clearHeartbeatRuntime({
       sessionId,
+      heartbeatKey: heartbeatOptions?.heartbeatKey,
       pingIntervalsRef: options.pingIntervalsRef,
       lastPongAtRef: options.lastPongAtRef,
       lastServerActivityAtRef: options.lastServerActivityAtRef,
@@ -582,15 +583,17 @@ export function createSessionInfraFacadeRuntime(options: {
     sessionId: string,
     ws: BridgeTransportSocket,
     finalizeFailure: (message: string, retryable: boolean) => void,
+    heartbeatOptions?: { heartbeatKey?: string },
   ) => {
     startSocketHeartbeatInfraRuntime({
       sessionId,
+      heartbeatKey: heartbeatOptions?.heartbeatKey,
       ws,
       finalizeFailure,
       pingIntervalsRef: options.pingIntervalsRef,
       lastPongAtRef: options.lastPongAtRef,
       lastServerActivityAtRef: options.lastServerActivityAtRef,
-      clientPingIntervalMs: 2000,
+      clientPingIntervalMs: 60_000,
       maxConsecutiveMisses: 3,
       sendSocketPayload,
     });

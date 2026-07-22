@@ -202,6 +202,7 @@ export function useSessionProviderCoreAssemblies(
       reconnectRuntimesRef,
       manualCloseRef,
       lastPongAtRef,
+      lastServerActivityAtRef,
       staleTransportProbeAtRef,
       sessionDebugMetricsStoreRef,
       handleSocketServerMessageRef,

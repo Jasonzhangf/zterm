@@ -642,6 +642,7 @@ describe('bindTargetMuxTransportSocketLifecycleRuntime', () => {
 
     bindTargetMuxTransportSocketLifecycleRuntime({
       sessionId: 'session-anchor',
+      targetHeartbeatKey: 'target:mac-studio',
       host: makeHost(),
       ws,
       debugScope: 'connect',
@@ -729,6 +730,81 @@ describe('bindTargetMuxTransportSocketLifecycleRuntime', () => {
     });
   });
 
+  it('starts target heartbeat on mux target open and records target activity from mux frames', () => {
+    const ws = {
+      readyState: WebSocket.OPEN,
+      onopen: null,
+      onmessage: null,
+      onerror: null,
+      onclose: null,
+      getDiagnostics: () => ({ reason: '' }),
+    } as any;
+    const sendSocketPayload = vi.fn();
+    const startSocketHeartbeat = vi.fn();
+    const recordTargetServerActivity = vi.fn();
+    const recordTargetPong = vi.fn();
+    const finalizeFailure = vi.fn();
+
+    bindTargetMuxTransportSocketLifecycleRuntime({
+      sessionId: 'session-anchor',
+      targetHeartbeatKey: 'target:mac-studio',
+      host: makeHost(),
+      ws,
+      debugScope: 'connect',
+      readSessionTargetTerminalSocket: () => ws,
+      readRequestedTerminalGeometry: () => null,
+      getOpeningSessionTerminalChannelsForTarget: () => [],
+      setSessionTargetMuxReady: vi.fn(),
+      sendSocketPayload,
+      handleTargetMuxServerFrame: vi.fn(),
+      applyTransportDiagnostics: vi.fn(),
+      runtimeDebug: vi.fn(),
+      finalizeFailure,
+      startSocketHeartbeat,
+      recordTargetServerActivity,
+      recordTargetPong,
+    } as any);
+
+    ws.onopen?.();
+
+    expect(startSocketHeartbeat).toHaveBeenCalledTimes(1);
+    expect(startSocketHeartbeat).toHaveBeenCalledWith('session-anchor', ws, expect.any(Function), {
+      heartbeatKey: 'target:mac-studio',
+    });
+    startSocketHeartbeat.mock.calls[0][2]('heartbeat server activity timeout', true);
+    expect(finalizeFailure).toHaveBeenCalledWith('heartbeat server activity timeout', true);
+
+    ws.onmessage?.({
+      data: JSON.stringify({
+        type: 'mux-ready',
+        payload: {
+          version: 1,
+          capabilities: {
+            version: 1,
+            channelEnvelope: true,
+            targetMessages: true,
+            boundedBodyScheduler: true,
+          },
+        },
+      }),
+    });
+
+    expect(recordTargetServerActivity).toHaveBeenCalledWith('target:mac-studio');
+
+    ws.onmessage?.({
+      data: JSON.stringify({
+        type: 'mux-pong',
+        payload: {
+          sentAt: 1000,
+          receivedAt: 1001,
+        },
+      }),
+    });
+
+    expect(recordTargetServerActivity).toHaveBeenCalledTimes(2);
+    expect(recordTargetPong).toHaveBeenCalledWith('target:mac-studio');
+  });
+
   it('rejects invalid mux frames without routing them into session handlers', () => {
     const ws = {
       readyState: WebSocket.OPEN,
@@ -743,6 +819,7 @@ describe('bindTargetMuxTransportSocketLifecycleRuntime', () => {
 
     bindTargetMuxTransportSocketLifecycleRuntime({
       sessionId: 'session-anchor',
+      targetHeartbeatKey: 'target:mac-studio',
       host: makeHost(),
       ws,
       debugScope: 'connect',

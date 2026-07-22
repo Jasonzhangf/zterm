@@ -447,6 +447,42 @@ describe('TraversalSocket reconnect', () => {
     secondSocket.close(1000, 'test cleanup');
   });
 
+  it('records an explicit heartbeat route failure before client close so the next socket avoids the stale path', async () => {
+    const routeHealthCache = new TraversalRouteHealthCache();
+    const scope = {
+      accountId: 'user-1',
+      daemonHostId: 'daemon-1',
+    };
+    const firstSocket = createSocket({}, {
+      routeHealthCache,
+      routeHealthScope: scope,
+    });
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances[0].url).toContain('240e:1234::10');
+    MockWebSocket.instances[0].triggerOpen();
+    firstSocket.reportFailure?.('heartbeat server activity timeout');
+    firstSocket.close(4000, 'heartbeat server activity timeout');
+
+    expect(routeHealthCache.get(scope, {
+      id: 'direct:ipv6:240e:1234::10:3333',
+      path: 'ipv6',
+      endpoint: '240e:1234::10:3333',
+    })).toMatchObject({
+      status: 'failure',
+      error: 'heartbeat server activity timeout',
+    });
+
+    const secondSocket = createSocket({}, {
+      routeHealthCache,
+      routeHealthScope: scope,
+    });
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances[1].url).toContain('203.0.113.10');
+    secondSocket.close(1000, 'test cleanup');
+  });
+
   it('records successful route health with RTT and candidate id', async () => {
     vi.setSystemTime(1_000);
     const routeHealthCache = new TraversalRouteHealthCache({ now: () => Date.now() });

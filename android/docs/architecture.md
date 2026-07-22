@@ -438,7 +438,7 @@ daemon server
 - daemon 的 host / port / auth token 真源在 `~/.wterm/config.json -> mobile.daemon`
 - client 侧按服务器维度记住 `bridgeHost + bridgePort + authToken`，并在 picker / connection form / reconnect 时复用
 - 连通性探测必须显式触发；未填写 token 时禁止自动探测 / 自动重试 tmux 列表
-- websocket 会话采用双向保活观测：client 负责 app-level `ping`，server 负责 ws protocol heartbeat；缺 pong / 长时间无业务消息只能记录并继续探测，不得把仍为 `OPEN` 的长连接判定为过期并主动 close/reconnect。只有物理 `close/error`、send 抛错、daemon 不可达、用户显式关闭、或 tmux/session target 事实变更，才允许进入重建。
+- websocket mux 采用物理 target 级保活观测：一个 daemon target 的物理 WebSocket/RTC transport 只有一个 app-level `mux-ping` timer，logical tmux session/channel 不得各自发 heartbeat；正常周期为低频 60 秒级。合法 mux frame 更新 target activity，channel 切换、foreground resume、body-subscription 变化不得新建 heartbeat 或物理 transport。只有物理 `close/error`、send 抛错、daemon 不可达，或 target health owner 明确确认物理 transport 失效，才允许进入 target 重建；单个 channel 错误只能重开该 channel。
 - daemon 初始化 / attach 阶段任何 `tmux capture-pane` 失败都只能记录错误并继续提供 `head + range` 能力；禁止再降级成第二套 snapshot 语义，也不允许因此让 daemon 进程退出
 
 ## 当前实现与目标差距

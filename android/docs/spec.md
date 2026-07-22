@@ -155,7 +155,7 @@
 - 服务器端必须能通过单一 daemon CLI 在本地后台启动，默认监听端口由统一配置决定（当前为 `3333`）
 - 全局 daemon CLI 入口为 `zterm-daemon ...`，并支持 `start / stop / restart / status / install-service / uninstall-service / service-status`
 - `zterm-daemon start / restart / install-service` 必须等待 daemon 端口真正 ready，再回报成功；不能只以 launchd 已加载为准
-- websocket bridge 必须做双向保活：client 定时 ping 并校验 pong 超时，server 也要做 ws heartbeat；任一侧丢心跳后都应自动回收并进入重连，不允许死连接长期占住 session
+- websocket mux bridge 必须做物理 target 级双向保活：同一 daemon target 只允许一个低频 client `mux-ping`，逻辑 session/channel 不得各自发 heartbeat；server 也要做 ws heartbeat。只有物理 target health 确认 transport 失效后才回收并重连，channel 错误只重开 channel，不允许死连接长期占住 target transport。
 - daemon canonical mirror 初始化失败时不能崩进程；`capture-pane` 失败必须显式报错并保留后续 `head + range` 读能力，不允许引入第二套快照/降级语义
 - daemon 鉴权真源必须落到 `~/.wterm/config.json`；至少支持 `mobile.daemon.authToken`
 - client 必须按服务器维度记住鉴权配置：`bridgeHost + bridgePort + authToken`

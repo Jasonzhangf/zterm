@@ -9,6 +9,9 @@ import type {
   PendingSessionTransportOpenIntent,
 } from './session-transport-open-helpers';
 import {
+  buildTargetTransportHeartbeatKey,
+} from './session-context-socket-runtime';
+import {
   bindSessionTransportSocketLifecycleOrchestrationRuntime,
   primeSessionTransportSocketRuntime,
   sendTerminalResizeRuntime,
@@ -60,13 +63,14 @@ interface MutableRefObject<T> {
 export function handleTargetMuxTransportFailureRuntime(options: {
   anchorSessionId: string;
   message: string;
-  readSessionTargetRuntime: (sessionId: string) => { sessionIds: string[] } | null;
+  readSessionTargetRuntime: (sessionId: string) => { key?: string; sessionIds: string[] } | null;
   readSessionTerminalChannel: (sessionId: string) => {
     state: 'opening' | 'open' | 'closing' | 'closed';
   } | null;
   writeSessionTerminalChannelState: (sessionId: string, state: 'closed') => unknown;
   writeSessionTargetTerminalSocket: (sessionId: string, socket: BridgeTransportSocket | null) => unknown;
   writeSessionTargetTerminalMuxReady: (sessionId: string, ready: boolean) => unknown;
+  clearHeartbeat?: (sessionId: string, heartbeatOptions?: { heartbeatKey?: string }) => void;
   clearSessionHandshakeTimeout: (sessionId: string) => void;
   pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, PendingSessionTransportOpenIntent>>;
   scheduleReconnect: (
@@ -84,6 +88,12 @@ export function handleTargetMuxTransportFailureRuntime(options: {
 
   options.writeSessionTargetTerminalMuxReady(options.anchorSessionId, false);
   options.writeSessionTargetTerminalSocket(options.anchorSessionId, null);
+  const targetKey = typeof targetRuntime?.key === 'string' ? targetRuntime.key : '';
+  if (targetKey && options.clearHeartbeat) {
+    options.clearHeartbeat(options.anchorSessionId, {
+      heartbeatKey: buildTargetTransportHeartbeatKey(targetKey),
+    });
+  }
 
   for (const sessionId of targetSessionIds) {
     const channel = options.readSessionTerminalChannel(sessionId);
@@ -126,6 +136,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
     reconnectRuntimesRef: MutableRefObject<Map<string, SessionReconnectRuntime>>;
     manualCloseRef: MutableRefObject<Set<string>>;
     lastPongAtRef: MutableRefObject<Map<string, number>>;
+    lastServerActivityAtRef: MutableRefObject<Map<string, number>>;
     staleTransportProbeAtRef: MutableRefObject<Map<string, number>>;
     sessionDebugMetricsStoreRef: MutableRefObject<{
       recordRxBytes: (sessionId: string, data: string | ArrayBuffer) => void;
@@ -153,7 +164,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
   readSessionTargetControlSocket: (sessionId: string) => BridgeTransportSocket | null;
   readSessionTargetTerminalSocket: (sessionId: string) => BridgeTransportSocket | null;
   readSessionTargetTerminalMuxReady: (sessionId: string) => boolean;
-  readSessionTargetRuntime: (sessionId: string) => { sessionIds: string[] } | null;
+  readSessionTargetRuntime: (sessionId: string) => { key?: string; sessionIds: string[] } | null;
   readSessionTargetKey: (sessionId: string) => string | null;
   readSessionTerminalChannel: (sessionId: string) => {
     channelId: string;
@@ -208,7 +219,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
   moveSessionTransportSocketAside: (sessionId: string) => BridgeTransportSocket | null;
   drainSessionSupersededSockets: (sessionId: string) => BridgeTransportSocket[];
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
-  clearHeartbeat: (sessionId: string) => void;
+  clearHeartbeat: (sessionId: string, heartbeatOptions?: { heartbeatKey?: string }) => void;
   clearSessionHandshakeTimeout: (sessionId: string) => void;
   setSessionHandshakeTimeout: (sessionId: string, callback: () => void, delayMs: number) => number;
   clearTailRefreshRuntime: (sessionId: string) => void;
@@ -223,6 +234,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
     sessionId: string,
     ws: BridgeTransportSocket,
     finalizeFailure: (message: string, retryable: boolean) => void,
+    heartbeatOptions?: { heartbeatKey?: string },
   ) => void;
   setScheduleStateForSession: (
     sessionId: string,
@@ -268,7 +280,13 @@ export function createSessionTransportOrchestrationRuntime(options: {
     options.writeSessionTargetTerminalSocket(sessionId, ws);
     options.writeSessionTargetTerminalMuxReady(sessionId, false);
     options.updateSessionSync(sessionId, { ws: null });
-    options.refs.lastPongAtRef.current.set(sessionId, Date.now());
+    const targetKey = options.readSessionTargetKey(sessionId);
+    if (targetKey) {
+      options.refs.lastPongAtRef.current.set(
+        buildTargetTransportHeartbeatKey(targetKey),
+        Date.now(),
+      );
+    }
   };
 
   const clearReconnectForSession = (sessionId: string) => {
@@ -422,8 +440,11 @@ export function createSessionTransportOrchestrationRuntime(options: {
     debugScope: 'connect' | 'reconnect';
     finalizeFailure: (message: string, retryable: boolean) => void;
   }) => {
+    const targetKey = options.readSessionTargetKey(bindOptions.sessionId) || '';
+    const targetHeartbeatKey = targetKey ? buildTargetTransportHeartbeatKey(targetKey) : '';
     bindTargetMuxTransportSocketLifecycleRuntime({
       sessionId: bindOptions.sessionId,
+      targetHeartbeatKey,
       host: bindOptions.host,
       ws: bindOptions.ws,
       debugScope: bindOptions.debugScope,
@@ -433,6 +454,13 @@ export function createSessionTransportOrchestrationRuntime(options: {
       setSessionTargetMuxReady: options.writeSessionTargetTerminalMuxReady,
       sendSocketPayload: options.sendSocketPayload,
       applyTransportDiagnostics: options.applyTransportDiagnostics,
+      startSocketHeartbeat: options.startSocketHeartbeat,
+      recordTargetServerActivity: (heartbeatKey) => {
+        options.refs.lastServerActivityAtRef.current.set(heartbeatKey, Date.now());
+      },
+      recordTargetPong: (heartbeatKey) => {
+        options.refs.lastPongAtRef.current.set(heartbeatKey, Date.now());
+      },
       runtimeDebug: options.runtimeDebug,
       finalizeFailure: (message) => {
         handleTargetMuxTransportFailureRuntime({
@@ -443,6 +471,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
           writeSessionTerminalChannelState: options.writeSessionTerminalChannelState,
           writeSessionTargetTerminalSocket: options.writeSessionTargetTerminalSocket,
           writeSessionTargetTerminalMuxReady: options.writeSessionTargetTerminalMuxReady,
+          clearHeartbeat: options.clearHeartbeat,
           clearSessionHandshakeTimeout: options.clearSessionHandshakeTimeout,
           pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
           scheduleReconnect,

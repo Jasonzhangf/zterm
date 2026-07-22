@@ -155,6 +155,10 @@
           "label": "src/lib/session-transport-runtime.ts#target transport runtime"
         },
         {
+          "id": "TargetHeartbeat",
+          "label": "src/contexts/session-context-socket-runtime.ts#startSocketHeartbeat (target-keyed)"
+        },
+        {
           "id": "MuxHandshake",
           "label": "packages/shared/src/connection/protocol.ts#TerminalMuxClientFrame"
         },
@@ -779,6 +783,19 @@
           "via_resources": [],
           "relation_status": "direct",
           "edge_id": "android_mainline:TransportOpen->TargetTransportRuntime"
+        },
+        {
+          "from": "TargetTransportRuntime",
+          "to": "TargetHeartbeat",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "one physical daemon-target transport identity",
+          "semantic_output": "one low-frequency target-keyed heartbeat and physical-health observation",
+          "status": "anchored",
+          "resource_from": "resource.daemon_target_transport",
+          "resource_to": "resource.daemon_target_transport",
+          "via_resources": [],
+          "relation_status": "observer",
+          "edge_id": "android_mainline:TargetTransportRuntime->TargetHeartbeat"
         },
         {
           "from": "TargetTransportRuntime",

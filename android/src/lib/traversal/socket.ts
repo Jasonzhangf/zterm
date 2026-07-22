@@ -431,6 +431,8 @@ export class TraversalSocket implements BridgeTransportSocket {
 
   private activeAttempt: TraversalAttemptDiagnostic | null = null;
 
+  private activeCandidate: TraversalPlanCandidate | null = null;
+
   private attemptedCandidateKeys = new Set<string>();
 
   private closedByClient = false;
@@ -579,6 +581,7 @@ export class TraversalSocket implements BridgeTransportSocket {
     this.attemptedCandidateKeys.add(this.candidateKey(candidate));
 
     this.activeAttempt = null;
+    this.activeCandidate = candidate;
     this.diagnostics.resolvedPath = undefined;
     this.diagnostics.resolvedEndpoint = undefined;
     this.diagnostics.resolvedRelayTransport = undefined;
@@ -700,5 +703,18 @@ export class TraversalSocket implements BridgeTransportSocket {
     this.clearReconnectTimer();
     this.diagnostics.stage = 'closed';
     this.backend?.close(code, reason);
+  }
+
+  public reportFailure(reason: string, options?: { authFailure?: boolean }) {
+    const message = reason.trim() || 'route failed';
+    this.diagnostics.stage = 'error';
+    this.diagnostics.reason = message;
+    if (!this.activeCandidate) {
+      return;
+    }
+    this.markAttempt(this.activeCandidate, 'error', false, message);
+    this.routeHealthCache.recordFailure(this.routeHealthScope, this.activeCandidate, message, {
+      authFailure: options?.authFailure === true || this.isAuthFailure(message),
+    });
   }
 }

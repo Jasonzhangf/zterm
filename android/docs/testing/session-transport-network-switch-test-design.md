@@ -12,28 +12,30 @@
 
 ## Lifecycle Contract
 
-1. A connected physical socket sends a heartbeat every 2 seconds.
-2. Every valid server frame refreshes server-activity truth; pong also refreshes pong truth.
-3. A heartbeat tick with no server activity since the previous tick counts one missed health confirmation.
-4. Three consecutive misses, bounded by 6 seconds, finalize the current socket generation once as retryable failure.
-5. The existing reconnect owner replaces that physical socket immediately while retaining session id, active-session truth, and local buffer.
-6. A valid server frame resets the consecutive-miss count. A non-open socket does not emit heartbeat traffic.
+1. A mux target transport owns one heartbeat timer keyed by `targetKey`; logical tmux sessions/channels do not own heartbeat timers.
+2. Normal target keepalive is low-frequency (60 seconds). Session switch, channel open, foreground resume, and body-subscription changes do not start another heartbeat.
+3. Every valid mux server frame refreshes target physical activity; `mux-pong` also refreshes pong truth. Activity is recorded under the physical target key, not the anchor session id.
+4. The target health owner may finalize one physical socket generation only after its configured consecutive health policy is exhausted; the target failure fanout then preserves logical session/channel ids and routes recovery through the existing reconnect owner.
+5. The existing reconnect owner replaces only that physical target socket while retaining logical session/channel ids, active-session truth, and local buffers.
+6. A valid target frame resets the consecutive-miss count. A non-open socket does not emit heartbeat traffic. A channel error must not poison the target heartbeat or rebuild the physical socket.
 
 ## White-Box Gates
 
 Positive:
 
-- Healthy socket sends one ping per 2-second tick.
-- Any valid server activity between ticks resets the miss counter.
-- Three consecutive ticks without server activity call `finalizeFailure` exactly once.
+- Two logical sessions sharing one target create exactly one heartbeat timer.
+- Healthy target transport sends one `mux-ping` per 60-second-class tick.
+- Any valid target activity between ticks resets the physical miss counter.
+- Three consecutive target health misses call the physical failure owner exactly once.
 - Stale failure enters the existing reconnect owner and preserves logical session state.
 
 Negative:
 
-- One or two misses cannot fail or close the transport.
-- A busy terminal stream without pong cannot be classified stale.
-- Repeated timer ticks after terminal failure cannot finalize the same socket generation again.
+- One or two misses cannot fail or close the physical transport.
+- A busy terminal stream on any logical channel refreshes target health without requiring a per-session heartbeat.
+- Repeated timer ticks after terminal failure cannot finalize the same physical socket generation again.
 - `CLOSING` or `CLOSED` sockets cannot send ping or create a second reconnect path.
+- A logical channel close/open does not create another physical heartbeat timer.
 
 ## Module Black-Box Gate
 

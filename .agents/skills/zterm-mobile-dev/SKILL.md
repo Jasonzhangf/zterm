@@ -164,7 +164,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - **禁止 read request 触发 write path**：任何 `head/range` 请求都不得 `await` tmux capture / canonical rebuild
 - terminal 排版真源在 daemon / tmux；client 只上报 viewport(`cols / rows`) 并渲染镜像，不能在 keyboard 显隐 / pinch / rotate 时自行 replay buffer
 - `wterm daemon start/restart/install-service` 不能只看 launchd loaded；必须至少等到 daemon 端口真正监听，再允许回报 ready，避免手机首连撞启动窗口
-- websocket bridge 必须做双向 heartbeat：client 需要 `pong timeout -> close -> reconnect`，server 需要 protocol ping/pong 回收僵尸 socket；不能让失联 tab 长时间占住 session
+- websocket mux bridge 的 heartbeat 只能由 `resource.daemon_target_transport` 持有：同一 daemon target 只有一个低频（60 秒级）`mux-ping` timer，logical tmux session/channel 禁止各自发 heartbeat。合法 mux frame / `mux-pong` 更新 physical target activity；channel switch、foreground resume、body-subscription 不得创建第二个 timer 或第二条 WebSocket。只有 physical close/error/send failure 或 target health owner 确认 physical transport 失效才进入 target reconnect；单 channel error 只重开 channel。
 - websocket reconnect / 首次 connect 完成后，active tab 必须立刻恢复 **head-first** 主循环（先 `buffer-head-request`，再按本地 buffer 状态决定 diff / 三屏重锚 / reading gap repair）；不能再依赖第二套 active/idle 语义
 - scrollback 若通过 DOM prepend/trim 历史行，client 在“未贴底”时必须保 scrollTop 锚点；否则持续输出后回滚会像 buffer 丢失
 - 手势滚动进入历史阅读态后，scroll lock 要做成 latch，直到真实输入发生才允许恢复 bottom-follow；不能靠“回到底部”自动解锁
@@ -1297,5 +1297,5 @@ debug overlay 现在显示 MU（菜单位置）和 CE（结束行），长按后
 - First prove the layer split: configured target IP/port, phone-to-daemon `/health` reachability on the new underlay, daemon listener, and client WebSocket/runtime state. Do not call it an endpoint problem if Tailscale IP stays reachable.
 - Treat `WebSocket.OPEN` as insufficient health truth. A socket can remain OPEN while bound to a dead Wi-Fi underlay. Health requires recent pong or any valid server frame.
 - Unique owner: `terminal.transport_lifecycle` via `src/contexts/session-context-socket-runtime.ts`. Do not add UI page reconnect loops, daemon client-network state, fallback endpoints, or per-screen WebSocket rebuild logic.
-- Mobile default: heartbeat every 2s; after 3 consecutive missed server-activity confirmations, finalize the current physical socket once as retryable failure and let the existing reconnect owner replace it while preserving logical session id, active-session truth, and buffer.
+- Mobile default: mux target heartbeat is one timer per physical daemon target, normal interval 60s class; target health activity is keyed by target identity, not session id. After the configured consecutive physical-health policy is exhausted, finalize that target socket once as retryable failure and let the existing reconnect owner replace only the physical transport while preserving logical session/channel ids, active-session truth, and buffers. Never add a heartbeat per logical session.
 - Required black-box gate before claiming closure: installed APK on real device, live TUI session, Wi-Fi-to-cellular and cellular-to-Wi-Fi switch, phone `/health` still reachable, one replacement physical WebSocket, unchanged session/tmux target, monotonic buffer head, input/output recovery within 10s.

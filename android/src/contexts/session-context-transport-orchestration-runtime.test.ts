@@ -39,11 +39,12 @@ describe('handleTargetMuxTransportFailureRuntime', () => {
     const writeSessionTargetTerminalSocket = vi.fn();
     const writeSessionTargetTerminalMuxReady = vi.fn();
     const scheduleReconnect = vi.fn();
+    const clearHeartbeat = vi.fn();
 
     handleTargetMuxTransportFailureRuntime({
       anchorSessionId: 'session-1',
       message: 'rtc data channel error',
-      readSessionTargetRuntime: () => ({ sessionIds: ['session-1', 'session-2', 'session-3'] }),
+      readSessionTargetRuntime: () => ({ key: 'target-a', sessionIds: ['session-1', 'session-2', 'session-3'] }),
       readSessionTerminalChannel: (sessionId) => ({
         channelId: `channel-${sessionId}`,
         sessionId,
@@ -57,6 +58,7 @@ describe('handleTargetMuxTransportFailureRuntime', () => {
       writeSessionTerminalChannelState,
       writeSessionTargetTerminalSocket,
       writeSessionTargetTerminalMuxReady,
+      clearHeartbeat,
       clearSessionHandshakeTimeout: vi.fn(),
       pendingSessionTransportOpenIntentsRef,
       scheduleReconnect,
@@ -65,6 +67,9 @@ describe('handleTargetMuxTransportFailureRuntime', () => {
 
     expect(writeSessionTargetTerminalMuxReady).toHaveBeenCalledWith('session-1', false);
     expect(writeSessionTargetTerminalSocket).toHaveBeenCalledWith('session-1', null);
+    expect(clearHeartbeat).toHaveBeenCalledWith('session-1', {
+      heartbeatKey: 'target:target-a',
+    });
     expect(writeSessionTerminalChannelState).toHaveBeenCalledWith('session-1', 'closed');
     expect(writeSessionTerminalChannelState).toHaveBeenCalledWith('session-2', 'closed');
     expect(writeSessionTerminalChannelState).not.toHaveBeenCalledWith('session-3', 'closed');

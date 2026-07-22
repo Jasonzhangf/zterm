@@ -439,6 +439,7 @@ export function setScheduleStateForSessionRuntime(options: {
 
 export function clearHeartbeatRuntime(options: {
   sessionId: string;
+  heartbeatKey?: string;
   pingIntervalsRef: { current: Map<string, ReturnType<typeof setInterval>> };
   lastPongAtRef: { current: Map<string, number> };
   lastServerActivityAtRef: { current: Map<string, number> };
@@ -476,6 +477,7 @@ export function clearTailRefreshRuntimeInfra(options: {
 
 export function startSocketHeartbeatInfraRuntime(options: {
   sessionId: string;
+  heartbeatKey?: string;
   ws: BridgeTransportSocket;
   finalizeFailure: (message: string, retryable: boolean) => void;
   pingIntervalsRef: { current: Map<string, ReturnType<typeof setInterval>> };

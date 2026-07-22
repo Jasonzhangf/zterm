@@ -464,6 +464,7 @@ export function handleTargetMuxServerFrameRuntime(options: {
 
 export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
   sessionId: string;
+  targetHeartbeatKey: string;
   host: Host;
   ws: BridgeTransportSocket;
   debugScope: 'connect' | 'reconnect';
@@ -480,10 +481,26 @@ export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
     rawFrameData?: string,
   ) => void;
   applyTransportDiagnostics: (sessionId: string, socket: BridgeTransportSocket) => void;
+  startSocketHeartbeat?: (
+    sessionId: string,
+    ws: BridgeTransportSocket,
+    finalizeFailure: (message: string, retryable: boolean) => void,
+    heartbeatOptions?: { heartbeatKey?: string },
+  ) => void;
+  recordTargetServerActivity?: (heartbeatKey: string) => void;
+  recordTargetPong?: (heartbeatKey: string) => void;
   runtimeDebug: RuntimeDebugFn;
   finalizeFailure: (message: string, retryable: boolean) => void;
 }) {
   const isCurrentTargetSocket = () => options.readSessionTargetTerminalSocket(options.sessionId) === options.ws;
+  let targetFailureFinalized = false;
+  const finalizeTargetFailure = (message: string, retryable = true) => {
+    if (targetFailureFinalized) {
+      return;
+    }
+    targetFailureFinalized = true;
+    options.finalizeFailure(message, retryable);
+  };
 
   options.ws.onopen = () => {
     if (!isCurrentTargetSocket()) {
@@ -498,6 +515,13 @@ export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
     options.runtimeDebug(`session.mux.${options.debugScope}.hello-sent`, {
       sessionId: options.sessionId,
     });
+    if (!options.targetHeartbeatKey.trim()) {
+      finalizeTargetFailure('missing terminal mux target heartbeat key', true);
+      return;
+    }
+    options.startSocketHeartbeat?.(options.sessionId, options.ws, finalizeTargetFailure, {
+      heartbeatKey: options.targetHeartbeatKey,
+    });
   };
 
   options.ws.onmessage = (event) => {
@@ -506,14 +530,18 @@ export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
     }
     try {
       if (typeof event.data !== 'string') {
-        options.finalizeFailure('invalid terminal mux frame', true);
+        finalizeTargetFailure('invalid terminal mux frame', true);
         return;
       }
       const rawFrameBytes = estimateIncomingFrameBytes(event.data);
       const parsed = JSON.parse(event.data) as unknown;
       if (!isTerminalMuxServerFrame(parsed)) {
-        options.finalizeFailure('invalid terminal mux frame', true);
+        finalizeTargetFailure('invalid terminal mux frame', true);
         return;
+      }
+      options.recordTargetServerActivity?.(options.targetHeartbeatKey);
+      if (parsed.type === 'mux-pong') {
+        options.recordTargetPong?.(options.targetHeartbeatKey);
       }
       if (parsed.type === 'mux-ready') {
         options.setSessionTargetMuxReady(options.sessionId, true);
@@ -534,7 +562,7 @@ export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
       }
       options.handleTargetMuxServerFrame(parsed, rawFrameBytes, event.data);
     } catch (error) {
-      options.finalizeFailure(error instanceof Error ? error.message : 'terminal mux parse error', true);
+      finalizeTargetFailure(error instanceof Error ? error.message : 'terminal mux parse error', true);
     }
   };
 
@@ -543,7 +571,7 @@ export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
       return;
     }
     options.setSessionTargetMuxReady(options.sessionId, false);
-    options.finalizeFailure(options.ws.getDiagnostics().reason || 'terminal mux transport error', true);
+    finalizeTargetFailure(options.ws.getDiagnostics().reason || 'terminal mux transport error', true);
   };
 
   options.ws.onclose = () => {
@@ -551,7 +579,7 @@ export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
       return;
     }
     options.setSessionTargetMuxReady(options.sessionId, false);
-    options.finalizeFailure(options.ws.getDiagnostics().reason || 'terminal mux transport closed', true);
+    finalizeTargetFailure(options.ws.getDiagnostics().reason || 'terminal mux transport closed', true);
   };
 }
 

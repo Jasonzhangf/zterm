@@ -7,17 +7,19 @@ interface MutableRefObject<T> {
 
 export function clearSessionHeartbeat(options: {
   sessionId: string;
+  heartbeatKey?: string;
   pingIntervalsRef: MutableRefObject<Map<string, ReturnType<typeof setInterval>>>;
   lastPongAtRef: MutableRefObject<Map<string, number>>;
   lastServerActivityAtRef: MutableRefObject<Map<string, number>>;
 }) {
-  const heartbeat = options.pingIntervalsRef.current.get(options.sessionId);
+  const heartbeatKey = resolveSocketHeartbeatKey(options.sessionId, options.heartbeatKey);
+  const heartbeat = options.pingIntervalsRef.current.get(heartbeatKey);
   if (heartbeat) {
     clearInterval(heartbeat);
-    options.pingIntervalsRef.current.delete(options.sessionId);
+    options.pingIntervalsRef.current.delete(heartbeatKey);
   }
-  options.lastPongAtRef.current.delete(options.sessionId);
-  options.lastServerActivityAtRef.current.delete(options.sessionId);
+  options.lastPongAtRef.current.delete(heartbeatKey);
+  options.lastServerActivityAtRef.current.delete(heartbeatKey);
 }
 
 export function clearSessionHandshakeTimeout(options: {
@@ -68,6 +70,7 @@ export function clearTailRefreshRuntime(options: {
 
 export function startSocketHeartbeat(options: {
   sessionId: string;
+  heartbeatKey?: string;
   ws: BridgeTransportSocket;
   finalizeFailure: (message: string, retryable: boolean) => void;
   pingIntervalsRef: MutableRefObject<Map<string, ReturnType<typeof setInterval>>>;
@@ -77,14 +80,15 @@ export function startSocketHeartbeat(options: {
   maxConsecutiveMisses: number;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
 }) {
-  const existingHeartbeat = options.pingIntervalsRef.current.get(options.sessionId);
+  const heartbeatKey = resolveSocketHeartbeatKey(options.sessionId, options.heartbeatKey);
+  const existingHeartbeat = options.pingIntervalsRef.current.get(heartbeatKey);
   if (existingHeartbeat) {
     clearInterval(existingHeartbeat);
-    options.pingIntervalsRef.current.delete(options.sessionId);
+    options.pingIntervalsRef.current.delete(heartbeatKey);
   }
   let lastObservedServerActivityAt = Math.max(
-    options.lastServerActivityAtRef.current.get(options.sessionId) || 0,
-    options.lastPongAtRef.current.get(options.sessionId) || 0,
+    options.lastServerActivityAtRef.current.get(heartbeatKey) || 0,
+    options.lastPongAtRef.current.get(heartbeatKey) || 0,
     Date.now(),
   );
   let consecutiveMisses = 0;
@@ -95,8 +99,8 @@ export function startSocketHeartbeat(options: {
     }
 
     const currentServerActivityAt = Math.max(
-      options.lastServerActivityAtRef.current.get(options.sessionId) || 0,
-      options.lastPongAtRef.current.get(options.sessionId) || 0,
+      options.lastServerActivityAtRef.current.get(heartbeatKey) || 0,
+      options.lastPongAtRef.current.get(heartbeatKey) || 0,
     );
     if (currentServerActivityAt > lastObservedServerActivityAt) {
       lastObservedServerActivityAt = currentServerActivityAt;
@@ -108,7 +112,13 @@ export function startSocketHeartbeat(options: {
     if (consecutiveMisses >= options.maxConsecutiveMisses) {
       if (!failureFinalized) {
         failureFinalized = true;
+        options.ws.reportFailure?.('heartbeat server activity timeout');
         options.finalizeFailure('heartbeat server activity timeout', true);
+        const activeHeartbeat = options.pingIntervalsRef.current.get(heartbeatKey);
+        if (activeHeartbeat) {
+          clearInterval(activeHeartbeat);
+          options.pingIntervalsRef.current.delete(heartbeatKey);
+        }
         if (options.ws.readyState < WebSocket.CLOSING) {
           options.ws.close();
         }
@@ -118,7 +128,16 @@ export function startSocketHeartbeat(options: {
 
     options.sendSocketPayload(options.sessionId, options.ws, JSON.stringify({ type: 'ping' }));
   }, options.clientPingIntervalMs);
-  options.pingIntervalsRef.current.set(options.sessionId, pingInterval);
+  options.pingIntervalsRef.current.set(heartbeatKey, pingInterval);
+}
+
+export function buildTargetTransportHeartbeatKey(targetKey: string) {
+  return `target:${targetKey.trim()}`;
+}
+
+function resolveSocketHeartbeatKey(sessionId: string, heartbeatKey?: string) {
+  const normalizedHeartbeatKey = typeof heartbeatKey === 'string' ? heartbeatKey.trim() : '';
+  return normalizedHeartbeatKey || sessionId;
 }
 
 export function clearSupersededSockets(options: {
