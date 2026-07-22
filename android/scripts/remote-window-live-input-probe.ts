@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { setTimeout as delay } from 'timers/promises';
@@ -20,8 +20,10 @@ const { RTCPeerConnection, RTCSessionDescription } = wrtc as unknown as {
 const DAEMON_WS_URL = process.env.ZTERM_REMOTE_WINDOW_PROBE_WS_URL || 'ws://127.0.0.1:3333';
 const PROBE_TITLE = `ZTERM_REMOTE_INPUT_PROBE_${Date.now()}`;
 const REQUEST_PREFIX = `rw-live-input-${Date.now()}`;
+const KEEP_TEMP = process.env.ZTERM_REMOTE_WINDOW_PROBE_KEEP_TMP === '1';
 const tempRoot = mkdtempSync(join(tmpdir(), 'zterm-remote-window-live-input-'));
-const swiftPath = join(tempRoot, 'RemoteWindowInputProbe.swift');
+const probeSourcePath = join(tempRoot, 'RemoteWindowInputProbe.m');
+const probeLogPath = join(tempRoot, 'probe-events.log');
 const appPath = join(tempRoot, 'RemoteWindowInputProbe.app');
 const appContentsPath = join(appPath, 'Contents');
 const appMacosPath = join(appContentsPath, 'MacOS');
@@ -29,71 +31,117 @@ const probeExecutablePath = join(appMacosPath, 'RemoteWindowInputProbe');
 const appPlistPath = join(appContentsPath, 'Info.plist');
 const probeBundleId = `cc.codewhisper.zterm.RemoteWindowInputProbe.${Date.now()}`;
 
-const swiftSource = String.raw`
-import AppKit
-import Foundation
+const objcSource = String.raw`
+#import <Cocoa/Cocoa.h>
+#include <math.h>
+#include <unistd.h>
 
-func probePrint(_ line: String) {
-    print(line)
-    fflush(stdout)
-}
+static NSString *ProbeLogPath = @"";
 
-final class ProbeView: NSView {
-    override var acceptsFirstResponder: Bool { true }
-
-    override func viewDidMoveToWindow() {
-        super.viewDidMoveToWindow()
-        window?.makeFirstResponder(self)
+static void ProbePrint(NSString *line) {
+    printf("%s\n", [line UTF8String]);
+    fflush(stdout);
+    if ([ProbeLogPath length] == 0) {
+        return;
     }
-
-    override func mouseDown(with event: NSEvent) {
-        probePrint("PROBE_MOUSE_DOWN")
-    }
-
-    override func mouseUp(with event: NSEvent) {
-        probePrint("PROBE_MOUSE_UP")
-    }
-
-    override func scrollWheel(with event: NSEvent) {
-        probePrint("PROBE_SCROLL dx=\(Int(event.scrollingDeltaX.rounded())) dy=\(Int(event.scrollingDeltaY.rounded()))")
-    }
-
-    override func keyDown(with event: NSEvent) {
-        probePrint("PROBE_KEY_DOWN chars=\(event.charactersIgnoringModifiers ?? "")")
-    }
-
-    override func keyUp(with event: NSEvent) {
-        probePrint("PROBE_KEY_UP chars=\(event.charactersIgnoringModifiers ?? "")")
+    NSData *data = [[line stringByAppendingString:@"\n"] dataUsingEncoding:NSUTF8StringEncoding];
+    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:ProbeLogPath];
+    if (handle != nil) {
+        [handle seekToEndOfFile];
+        [handle writeData:data];
+        [handle closeFile];
+    } else {
+        [data writeToFile:ProbeLogPath atomically:YES];
     }
 }
 
-final class ProbeDelegate: NSObject, NSApplicationDelegate {
-    var window: NSWindow?
+@interface ProbeView : NSView
+@end
 
-    func applicationDidFinishLaunching(_ notification: Notification) {
-        let title = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "ZTERM_REMOTE_INPUT_PROBE"
-        let rect = NSRect(x: 220, y: 220, width: 520, height: 372)
-        let window = NSWindow(
-            contentRect: rect,
-            styleMask: [.titled, .closable, .resizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = title
-        window.contentView = ProbeView(frame: NSRect(x: 0, y: 0, width: 520, height: 372))
-        window.makeKeyAndOrderFront(nil)
-        window.makeFirstResponder(window.contentView)
-        self.window = window
-        NSApp.activate(ignoringOtherApps: true)
-        probePrint("PROBE_READY title=\(title) pid=\(getpid())")
-    }
+@implementation ProbeView
+- (BOOL)acceptsFirstResponder {
+    return YES;
 }
 
-let app = NSApplication.shared
-let delegate = ProbeDelegate()
-app.setActivationPolicy(.regular)
-app.delegate = delegate
-app.run()
+- (void)viewDidMoveToWindow {
+    [super viewDidMoveToWindow];
+    [[self window] makeFirstResponder:self];
+}
+
+- (void)mouseDown:(NSEvent *)event {
+    ProbePrint(@"PROBE_MOUSE_DOWN");
+}
+
+- (void)mouseDragged:(NSEvent *)event {
+    ProbePrint(@"PROBE_MOUSE_DRAGGED");
+}
+
+- (void)mouseUp:(NSEvent *)event {
+    ProbePrint(@"PROBE_MOUSE_UP");
+}
+
+- (void)scrollWheel:(NSEvent *)event {
+    ProbePrint([NSString stringWithFormat:@"PROBE_SCROLL dx=%ld dy=%ld",
+        lround([event scrollingDeltaX]),
+        lround([event scrollingDeltaY])
+    ]);
+}
+
+- (void)keyDown:(NSEvent *)event {
+    NSString *chars = [event charactersIgnoringModifiers] ?: @"";
+    ProbePrint([NSString stringWithFormat:@"PROBE_KEY_DOWN chars=%@", chars]);
+}
+
+- (void)keyUp:(NSEvent *)event {
+    NSString *chars = [event charactersIgnoringModifiers] ?: @"";
+    ProbePrint([NSString stringWithFormat:@"PROBE_KEY_UP chars=%@", chars]);
+}
+@end
+
+@interface ProbeDelegate : NSObject <NSApplicationDelegate>
+@property(nonatomic, strong) NSWindow *window;
+@property(nonatomic, copy) NSString *title;
+@end
+
+@implementation ProbeDelegate
+- (void)applicationDidFinishLaunching:(NSNotification *)notification {
+    NSRect rect = NSMakeRect(220, 220, 520, 372);
+    ProbeView *view = [[ProbeView alloc] initWithFrame:NSMakeRect(0, 0, 520, 372)];
+    self.window = [[NSWindow alloc]
+        initWithContentRect:rect
+        styleMask:(NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskResizable)
+        backing:NSBackingStoreBuffered
+        defer:NO
+    ];
+    [self.window setTitle:self.title];
+    [self.window setContentView:view];
+    [self.window makeKeyAndOrderFront:nil];
+    [self.window makeFirstResponder:view];
+    [NSApp activateIgnoringOtherApps:YES];
+    ProbePrint([NSString stringWithFormat:@"PROBE_READY title=%@ pid=%d", self.title, getpid()]);
+}
+@end
+
+static ProbeDelegate *ProbeAppDelegate;
+
+int main(int argc, const char *argv[]) {
+    @autoreleasepool {
+        NSString *title = argc > 1
+            ? [NSString stringWithUTF8String:argv[1]]
+            : @"ZTERM_REMOTE_INPUT_PROBE";
+        ProbeLogPath = argc > 2
+            ? [NSString stringWithUTF8String:argv[2]]
+            : @"";
+        NSApplication *app = [NSApplication sharedApplication];
+        [app setActivationPolicy:NSApplicationActivationPolicyRegular];
+        ProbeAppDelegate = [ProbeDelegate new];
+        ProbeAppDelegate.title = title;
+        [app setDelegate:ProbeAppDelegate];
+        [app finishLaunching];
+        [app run];
+    }
+    return 0;
+}
 `;
 
 function requestId(suffix: string) {
@@ -156,19 +204,20 @@ async function waitForProbeLine(lines: string[], marker: string, timeoutMs = 10_
   const deadline = Date.now() + timeoutMs;
   let cursor = 0;
   while (Date.now() < deadline) {
-    for (; cursor < lines.length; cursor += 1) {
-      const line = lines[cursor]!;
+    const currentLines = readProbeLines(lines);
+    for (; cursor < currentLines.length; cursor += 1) {
+      const line = currentLines[cursor]!;
       if (line.includes(marker)) {
         return line;
       }
     }
     await delay(25);
   }
-  throw new Error(`timed out waiting for probe marker ${marker}; seen=${JSON.stringify(lines)}`);
+  throw new Error(`timed out waiting for probe marker ${marker}; seen=${JSON.stringify(readProbeLines(lines))}`);
 }
 
 function countProbeLines(lines: string[], marker: string) {
-  return lines.filter((line) => line.includes(marker)).length;
+  return readProbeLines(lines).filter((line) => line.includes(marker)).length;
 }
 
 async function waitForProbeLineCount(lines: string[], marker: string, minCount: number, timeoutMs = 10_000) {
@@ -180,7 +229,18 @@ async function waitForProbeLineCount(lines: string[], marker: string, minCount: 
     }
     await delay(25);
   }
-  throw new Error(`timed out waiting for probe marker ${marker} count ${minCount}; seen=${JSON.stringify(lines)}`);
+  throw new Error(`timed out waiting for probe marker ${marker} count ${minCount}; seen=${JSON.stringify(readProbeLines(lines))}`);
+}
+
+function readProbeLines(fallbackLines: string[]) {
+  if (!existsSync(probeLogPath)) {
+    return fallbackLines;
+  }
+  const fileLines = readFileSync(probeLogPath, 'utf8')
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+  return fileLines.length > 0 ? fileLines : fallbackLines;
 }
 
 function targetCenter(target: RemoteWindowStreamTargetManifest) {
@@ -218,7 +278,7 @@ async function sendInputAndRequireAccepted(
 }
 
 async function main() {
-  writeFileSync(swiftPath, swiftSource);
+  writeFileSync(probeSourcePath, objcSource);
   mkdirSync(appMacosPath, { recursive: true });
   writeFileSync(appPlistPath, `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -245,17 +305,29 @@ async function main() {
 </dict>
 </plist>
 `);
-  const compile = spawnSync('swiftc', [swiftPath, '-o', probeExecutablePath], { encoding: 'utf8' });
+  const compile = spawnSync('clang', [
+    '-fobjc-arc',
+    probeSourcePath,
+    '-framework',
+    'AppKit',
+    '-framework',
+    'Foundation',
+    '-o',
+    probeExecutablePath,
+  ], { encoding: 'utf8' });
   if (compile.status !== 0) {
-    fail(`swiftc probe compile failed: ${compile.stderr || compile.stdout}`);
+    fail(`clang probe compile failed: ${compile.stderr || compile.stdout}`);
   }
 
-  const probe = spawn(probeExecutablePath, [PROBE_TITLE], {
+  const probe = spawn(probeExecutablePath, [PROBE_TITLE, probeLogPath], {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   const probeLines: string[] = [];
   let probeStdoutBuffer = '';
   let probeStderr = '';
+  let probePid: number | null = probe.pid && Number.isInteger(probe.pid) ? probe.pid : null;
+  let probeSpawnError: string | null = null;
+  let probeExit: { code: number | null; signal: NodeJS.Signals | null } | null = null;
   probe.stdout.setEncoding('utf8');
   probe.stderr.setEncoding('utf8');
   probe.stdout.on('data', (chunk: string) => {
@@ -271,20 +343,45 @@ async function main() {
   probe.stderr.on('data', (chunk: string) => {
     probeStderr += chunk;
   });
+  probe.on('error', (error) => {
+    probeSpawnError = error instanceof Error ? error.message : String(error);
+  });
+  probe.on('exit', (code, signal) => {
+    probeExit = { code, signal };
+  });
 
   const cleanup = async () => {
-    if (!probe.killed) {
-      probe.kill('SIGTERM');
+    if (probePid && Number.isInteger(probePid)) {
+      try {
+        process.kill(probePid, 'SIGTERM');
+      } catch {
+        // already exited
+      }
       await delay(300);
-      if (probe.exitCode === null) {
-        probe.kill('SIGKILL');
+      try {
+        process.kill(probePid, 0);
+        process.kill(probePid, 'SIGKILL');
+      } catch {
+        // exited after SIGTERM
       }
     }
-    rmSync(tempRoot, { recursive: true, force: true });
+    spawnSync('osascript', ['-e', `tell application id "${probeBundleId}" to quit`], { encoding: 'utf8' });
+    if (!KEEP_TEMP) {
+      rmSync(tempRoot, { recursive: true, force: true });
+    } else {
+      console.error(`keeping remote-window live probe temp root: ${tempRoot}`);
+    }
   };
 
   try {
-    const readyLine = await waitForProbeLine(probeLines, 'PROBE_READY', 20_000);
+    let readyLine: string;
+    try {
+      readyLine = await waitForProbeLine(probeLines, 'PROBE_READY', 20_000);
+    } catch (error) {
+      fail(`probe app did not become ready: ${error instanceof Error ? error.message : String(error)}; exit=${JSON.stringify(probeExit)}; spawnError=${probeSpawnError || 'none'}; stderr=${probeStderr || 'none'}`);
+    }
+    const readyPid = Number.parseInt(readyLine.match(/pid=(\d+)/)?.[1] || '', 10);
+    probePid = Number.isFinite(readyPid) ? readyPid : probePid;
     const ws = new WebSocket(DAEMON_WS_URL);
     const messages: ServerMessage[] = [];
     ws.on('message', (raw) => {
@@ -430,6 +527,23 @@ async function main() {
     await waitForProbeLine(probeLines, 'PROBE_MOUSE_DOWN');
     await sendInputAndRequireAccepted(ws, messages, {
       ...baseInput,
+      requestId: requestId('pointer-move'),
+      clientSentAt: Date.now(),
+      event: {
+        kind: 'pointer',
+        phase: 'move',
+        pointerId: 1,
+        button: 'left',
+        buttons: 1,
+        x: center.x + 24,
+        y: center.y + 18,
+        normalizedX: 0.55,
+        normalizedY: 0.55,
+      },
+    });
+    await waitForProbeLine(probeLines, 'PROBE_MOUSE_DRAGGED');
+    await sendInputAndRequireAccepted(ws, messages, {
+      ...baseInput,
       requestId: requestId('pointer-up'),
       clientSentAt: Date.now(),
       event: {
@@ -438,10 +552,10 @@ async function main() {
         pointerId: 1,
         button: 'left',
         buttons: 0,
-        x: center.x,
-        y: center.y,
-        normalizedX: 0.5,
-        normalizedY: 0.5,
+        x: center.x + 24,
+        y: center.y + 18,
+        normalizedX: 0.55,
+        normalizedY: 0.55,
       },
     });
     await waitForProbeLine(probeLines, 'PROBE_MOUSE_UP');
@@ -461,32 +575,6 @@ async function main() {
       },
     });
     await waitForProbeLineCount(probeLines, 'PROBE_SCROLL', 1);
-    await sendInputAndRequireAccepted(ws, messages, {
-      ...baseInput,
-      requestId: requestId('gesture'),
-      clientSentAt: Date.now(),
-      event: {
-        kind: 'gesture',
-        gesture: 'swipe',
-        phase: 'end',
-        unit: 'pixel',
-        pointerId: 1,
-        startX: center.x,
-        startY: center.y + Math.round(center.height * 0.1),
-        x: center.x,
-        y: center.y - Math.round(center.height * 0.1),
-        startNormalizedX: 0.5,
-        startNormalizedY: 0.6,
-        normalizedX: 0.5,
-        normalizedY: 0.4,
-        deltaX: 0,
-        deltaY: Math.round(center.height * 0.2),
-        durationMs: 180,
-        velocityX: 0,
-        velocityY: Math.round(center.height * 0.2 / 0.18),
-      },
-    });
-    await waitForProbeLineCount(probeLines, 'PROBE_SCROLL', 2);
     await sendInputAndRequireAccepted(ws, messages, {
       ...baseInput,
       requestId: requestId('key-down'),
@@ -544,7 +632,7 @@ async function main() {
       capture: started.payload.capture,
       trackSeen,
       stopped: stopped.payload,
-      probeLines,
+      probeLines: readProbeLines(probeLines),
     }, null, 2));
   } finally {
     await cleanup();
@@ -554,7 +642,11 @@ async function main() {
 main().then(() => {
   process.exit(0);
 }).catch((error) => {
-  rmSync(tempRoot, { recursive: true, force: true });
+  if (!KEEP_TEMP) {
+    rmSync(tempRoot, { recursive: true, force: true });
+  } else {
+    console.error(`keeping remote-window live probe temp root: ${tempRoot}`);
+  }
   console.error(error instanceof Error ? error.stack || error.message : String(error));
   process.exit(1);
 });

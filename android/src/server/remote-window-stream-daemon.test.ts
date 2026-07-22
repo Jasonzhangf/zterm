@@ -364,6 +364,12 @@ describe('remote window stream daemon owner', () => {
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('let phase: String\n');
   });
 
+  it('marks the persistent macOS input helper ready before it accepts realtime input', () => {
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func writeReady()');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('writeReady()');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('"{\\"ready\\":true}"');
+  });
+
   it('keeps gesture input compatible with the macOS helper schema', () => {
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('let gesture: String?');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('config.event.kind == "gesture"');
@@ -390,6 +396,14 @@ describe('remote window stream daemon owner', () => {
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toMatch(
       /config\.event\.kind == "gesture"[\s\S]*postScrollEvent\(x: startX, y: startY/,
     );
+  });
+
+  it('maps pressed left pointer movement to a macOS dragged mouse event', () => {
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func mouseType(phase: String, button: String?, buttons: Int?)');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toMatch(
+      /phase == "move"[\s\S]*buttons[\s\S]*\.leftMouseDragged/,
+    );
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('mouseType(phase: phase, button: config.event.button, buttons: config.event.buttons)');
   });
 
   it('maps Command+V through a real macOS virtual key code for remote-window image paste', () => {
@@ -1604,6 +1618,7 @@ describe('remote window stream daemon owner', () => {
     const fakeTrack = makeFakeMediaStreamTrack();
     const target = makeAppStreamTarget();
     const inputHelper = {
+      warm: vi.fn(async () => undefined),
       send: vi.fn(async () => undefined),
       dispose: vi.fn(),
     };
@@ -1708,6 +1723,7 @@ describe('remote window stream daemon owner', () => {
 	    });
 
     expect(remoteWindowInputHelperFactory).toHaveBeenCalledTimes(1);
+    expect(inputHelper.warm).toHaveBeenCalledTimes(1);
     expect(inputHelper.send).toHaveBeenCalledTimes(4);
     expect(inputHelper.send).toHaveBeenNthCalledWith(1, expect.objectContaining({
       event: expect.objectContaining({ kind: 'pointer' }),
@@ -1725,6 +1741,100 @@ describe('remote window stream daemon owner', () => {
 
     runtime.dispose('helper lifecycle test complete');
     expect(inputHelper.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('warms the macOS input helper during stream start without emitting focus or pointer input', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const target = makeAppStreamTarget();
+    const inputHelper = {
+      warm: vi.fn(async () => undefined),
+      send: vi.fn(async () => undefined),
+      dispose: vi.fn(),
+    };
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1) });
+        return { width: 2, height: 2, frameRate: 12, stop: vi.fn() };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      remoteWindowInputHelperFactory: vi.fn(() => inputHelper),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const started = await runtime.startStream({
+      requestId: 'rw-input-warm-start',
+      streamId: 'stream-input-warm',
+      target,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    expect(started).toMatchObject({
+      requestId: 'rw-input-warm-start',
+      streamId: 'stream-input-warm',
+      targetId: target.streamTargetId,
+    });
+    expect(inputHelper.warm).toHaveBeenCalledTimes(1);
+    expect(inputHelper.send).not.toHaveBeenCalled();
+  });
+
+  it('fails interactive stream start explicitly when the input helper is not ready', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const target = makeAppStreamTarget();
+    const captureStop = vi.fn();
+    const inputHelper = {
+      warm: vi.fn(async () => {
+        throw new Error('remote window input helper did not become ready before timeout');
+      }),
+      send: vi.fn(async () => undefined),
+      dispose: vi.fn(),
+    };
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1) });
+        return { width: 2, height: 2, frameRate: 12, stop: captureStop };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      remoteWindowInputHelperFactory: vi.fn(() => inputHelper),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const result = await runtime.startStream({
+      requestId: 'rw-input-warm-timeout',
+      streamId: 'stream-input-warm-timeout',
+      target,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    expect(result).toMatchObject({
+      requestId: 'rw-input-warm-timeout',
+      streamId: 'stream-input-warm-timeout',
+      code: 'remote_window_stream_start_failed',
+      message: 'remote window input helper did not become ready before timeout',
+    });
+    expect(captureStop).toHaveBeenCalledTimes(1);
+    expect(fakeTrack.stop).toHaveBeenCalledTimes(1);
+    expect(fakePeer.close).toHaveBeenCalledTimes(1);
+    expect(inputHelper.send).not.toHaveBeenCalled();
   });
 
   it('rejects remote input for target mismatch, stopped streams, and no-focus generic os-event policy', async () => {

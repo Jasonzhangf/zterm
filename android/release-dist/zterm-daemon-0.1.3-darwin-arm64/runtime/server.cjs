@@ -13211,6 +13211,7 @@ var DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS = 8e3;
 var DEFAULT_REMOTE_WINDOW_FRAME_RATE = 12;
 var DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 6e4;
 var REMOTE_WINDOW_INPUT_STALE_MS = 1e3;
+var REMOTE_WINDOW_INPUT_HELPER_READY_TIMEOUT_MS = 15e3;
 var ITERM2_APP_BUNDLE_ID = "com.googlecode.iterm2";
 var ITERM2_PANE_GAP_PX = 1;
 var REMOTE_WINDOW_ERROR_MESSAGE_MAX_CHARS = 220;
@@ -13650,11 +13651,17 @@ func mouseButton(_ button: String?) -> CGMouseButton {
     }
 }
 
-func mouseType(phase: String, button: String?) -> CGEventType {
+func mouseType(phase: String, button: String?, buttons: Int?) -> CGEventType {
     let right = button == "right"
+    let middle = button == "middle"
     if phase == "down" { return right ? .rightMouseDown : .leftMouseDown }
     if phase == "up" { return right ? .rightMouseUp : .leftMouseUp }
-    return right ? .rightMouseDragged : .mouseMoved
+    if phase == "move" && (buttons ?? 0) > 0 {
+        if right { return .rightMouseDragged }
+        if middle { return .otherMouseDragged }
+        return .leftMouseDragged
+    }
+    return .mouseMoved
 }
 
 func postMouseMove(x: Double, y: Double) {
@@ -13722,7 +13729,7 @@ func handleConfig(_ config: InputConfig) throws {
         let point = CGPoint(x: x, y: y)
         let event = CGEvent(
             mouseEventSource: source,
-            mouseType: mouseType(phase: phase, button: config.event.button),
+            mouseType: mouseType(phase: phase, button: config.event.button, buttons: config.event.buttons),
             mouseCursorPosition: point,
             mouseButton: mouseButton(config.event.button)
         )
@@ -13808,9 +13815,15 @@ func handleRawConfig(_ rawConfig: String, exitOnFailure: Bool) -> Bool {
     }
 }
 
+func writeReady() {
+    print("{\"ready\":true}")
+    fflush(stdout)
+}
+
 if let rawConfig = ProcessInfo.processInfo.environment["ZTERM_REMOTE_WINDOW_INPUT_CONFIG"] {
     handleRawConfig(rawConfig, exitOnFailure: true)
 } else {
+    writeReady()
     while let line = readLine(strippingNewline: true) {
         if line.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             continue
@@ -14363,8 +14376,31 @@ function createDefaultRemoteWindowInputHelper(options) {
   let stderrBuffer = "";
   let active = null;
   const queue = [];
+  const warmWaiters = [];
   let disposed = false;
+  let ready = false;
+  let waitingForReadyPump = false;
   const stderrSummary = () => stderrBuffer.trim().slice(-REMOTE_WINDOW_ERROR_MESSAGE_MAX_CHARS);
+  const rejectWarmWaiters = (error) => {
+    while (warmWaiters.length > 0) {
+      const waiter = warmWaiters.shift();
+      if (!waiter) {
+        continue;
+      }
+      clearTimeout(waiter.timeout);
+      waiter.reject(error);
+    }
+  };
+  const resolveWarmWaiters = () => {
+    while (warmWaiters.length > 0) {
+      const waiter = warmWaiters.shift();
+      if (!waiter) {
+        continue;
+      }
+      clearTimeout(waiter.timeout);
+      waiter.resolve();
+    }
+  };
   const rejectIfStale = (request) => {
     const sentAt = request.config.clientSentAt;
     if (Number.isFinite(sentAt) && Date.now() - Number(sentAt) > REMOTE_WINDOW_INPUT_STALE_MS) {
@@ -14401,6 +14437,7 @@ function createDefaultRemoteWindowInputHelper(options) {
       env: process.env
     });
     child = currentChild;
+    ready = false;
     currentChild.stdout.setEncoding("utf8");
     currentChild.stderr.setEncoding("utf8");
     currentChild.stdout.on("data", (chunk) => {
@@ -14409,24 +14446,42 @@ function createDefaultRemoteWindowInputHelper(options) {
       while (newlineIndex >= 0) {
         const rawLine = stdoutBuffer.slice(0, newlineIndex).trim();
         stdoutBuffer = stdoutBuffer.slice(newlineIndex + 1);
-        if (rawLine && active) {
-          const request = active;
-          active = null;
-          if (request.timeout) {
-            clearTimeout(request.timeout);
-            request.timeout = null;
-          }
+        if (rawLine) {
           try {
             const response = JSON.parse(rawLine);
-            if (response.ok === true) {
-              request.resolve();
-            } else {
-              request.reject(new Error(String(response.error || "remote window input event failed")));
+            if (response.ready === true) {
+              ready = true;
+              resolveWarmWaiters();
+              pump();
+              newlineIndex = stdoutBuffer.indexOf("\n");
+              continue;
+            }
+            if (active) {
+              const request = active;
+              active = null;
+              if (request.timeout) {
+                clearTimeout(request.timeout);
+                request.timeout = null;
+              }
+              if (response.ok === true) {
+                request.resolve();
+              } else {
+                request.reject(new Error(String(response.error || "remote window input event failed")));
+              }
+              pump();
             }
           } catch (error) {
-            request.reject(error instanceof Error ? error : new Error("remote window input helper returned invalid JSON"));
+            if (active) {
+              const request = active;
+              active = null;
+              if (request.timeout) {
+                clearTimeout(request.timeout);
+                request.timeout = null;
+              }
+              request.reject(error instanceof Error ? error : new Error("remote window input helper returned invalid JSON"));
+              pump();
+            }
           }
-          pump();
         }
         newlineIndex = stdoutBuffer.indexOf("\n");
       }
@@ -14438,9 +14493,12 @@ function createDefaultRemoteWindowInputHelper(options) {
       const message = stderrSummary();
       if (child === currentChild) {
         child = null;
+        ready = false;
       }
-      rejectAll(new Error(message ? `${error.message}
-${message}` : error.message));
+      const wrapped = new Error(message ? `${error.message}
+${message}` : error.message);
+      rejectWarmWaiters(wrapped);
+      rejectAll(wrapped);
     });
     currentChild.on("exit", (code, signal) => {
       const message = [
@@ -14449,12 +14507,58 @@ ${message}` : error.message));
       ].filter(Boolean).join("\n");
       if (child === currentChild) {
         child = null;
+        ready = false;
       }
       if (!disposed) {
-        rejectAll(new Error(message));
+        const error = new Error(message);
+        rejectWarmWaiters(error);
+        rejectAll(error);
       }
     });
     return currentChild;
+  };
+  const waitUntilReady = () => {
+    if (disposed) {
+      return Promise.reject(new Error("remote window input helper is disposed"));
+    }
+    const helperProcess = startChild();
+    if (ready && child === helperProcess && !helperProcess.killed) {
+      return Promise.resolve();
+    }
+    return new Promise((resolve4, reject) => {
+      const waiter = {
+        resolve: resolve4,
+        reject,
+        timeout: setTimeout(() => {
+          const index = warmWaiters.indexOf(waiter);
+          if (index >= 0) {
+            warmWaiters.splice(index, 1);
+          }
+          const message = stderrSummary();
+          const error = new Error(message ? `remote window input helper did not become ready before timeout: ${message}` : "remote window input helper did not become ready before timeout");
+          if (child === helperProcess && !helperProcess.killed) {
+            child.kill("SIGTERM");
+            child = null;
+            ready = false;
+          }
+          reject(error);
+        }, REMOTE_WINDOW_INPUT_HELPER_READY_TIMEOUT_MS)
+      };
+      warmWaiters.push(waiter);
+    });
+  };
+  const startReadyPump = () => {
+    if (waitingForReadyPump) {
+      return;
+    }
+    waitingForReadyPump = true;
+    waitUntilReady().then(() => {
+      waitingForReadyPump = false;
+      pump();
+    }).catch((error) => {
+      waitingForReadyPump = false;
+      rejectAll(error);
+    });
   };
   const pump = () => {
     if (disposed || active || queue.length === 0) {
@@ -14469,6 +14573,11 @@ ${message}` : error.message));
       return;
     }
     const helperProcess = startChild();
+    if (!ready) {
+      queue.unshift(request);
+      startReadyPump();
+      return;
+    }
     active = request;
     request.timeout = setTimeout(() => {
       if (active !== request) {
@@ -14481,6 +14590,7 @@ ${message}` : error.message));
       }
       if (child === helperProcess) {
         child = null;
+        ready = false;
       }
       pump();
     }, REMOTE_WINDOW_INPUT_STALE_MS);
@@ -14495,6 +14605,9 @@ ${message}` : error.message));
     });
   };
   return {
+    warm() {
+      return waitUntilReady();
+    },
     send(config) {
       if (disposed) {
         return Promise.reject(new Error("remote window input helper is disposed"));
@@ -14511,11 +14624,13 @@ ${message}` : error.message));
     },
     dispose() {
       disposed = true;
+      rejectWarmWaiters(new Error("remote window input helper disposed"));
       rejectAll(new Error("remote window input helper disposed"));
       if (child && !child.killed) {
         child.kill("SIGTERM");
       }
       child = null;
+      ready = false;
     }
   };
 }
@@ -14815,6 +14930,12 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
       remoteWindowInputHelper = deps.remoteWindowInputHelperFactory ? deps.remoteWindowInputHelperFactory({ swiftBinary }) : createDefaultRemoteWindowInputHelper({ swiftBinary });
     }
     return remoteWindowInputHelper;
+  };
+  const warmRemoteWindowInputHelperForTarget = async (target) => {
+    if (platform !== "darwin" || deps.runRemoteWindowInputEvent || target.inputRoute !== "os-event" || target.focusPolicy !== "bring-to-focus") {
+      return;
+    }
+    await getRemoteWindowInputHelper().warm();
   };
   const runRemoteWindowInputEvent = deps.runRemoteWindowInputEvent || ((payload, target) => getRemoteWindowInputHelper().send(buildRemoteWindowInputConfig(payload, target)));
   const now = deps.now || (() => (/* @__PURE__ */ new Date()).toISOString());
@@ -15124,6 +15245,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
     let entry = null;
     try {
       validateStreamTargetForCapture(payload.target);
+      const inputHelperWarm = warmRemoteWindowInputHelperForTarget(payload.target).then(() => null, (error) => error instanceof Error ? error : new Error("remote window input helper warm failed"));
       const peerConnection = createPeerConnection({
         iceServers: Array.isArray(payload.iceServers) ? payload.iceServers : []
       });
@@ -15231,6 +15353,10 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
         throw new Error("remote window stream was closed before capture started");
       }
       entry.captureSource = captureSource;
+      const inputHelperWarmError = await inputHelperWarm;
+      if (inputHelperWarmError) {
+        throw inputHelperWarmError;
+      }
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
       if (!isCurrentStream(entry)) {

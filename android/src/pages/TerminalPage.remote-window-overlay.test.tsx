@@ -417,7 +417,7 @@ describe('TerminalPage remote window overlay', () => {
     });
   });
 
-  it('routes phone video-surface tap and swipe through remote-window input instead of terminal input', async () => {
+  it('routes phone video-surface tap and touch drag through remote-window input instead of terminal input', async () => {
     const session = makeSession('s1');
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const onRequestRemoteWindowTargets = vi.fn(async () => ({
@@ -554,7 +554,9 @@ describe('TerminalPage remote window overlay', () => {
       button: 0,
       buttons: 1,
     });
-    expect(onSendRemoteWindowInput).not.toHaveBeenCalled();
+    await waitFor(() => {
+      expect(remoteWindowNonFocusPayloads(onSendRemoteWindowInput)).toHaveLength(2);
+    });
     fireEvent.pointerUp(surface, {
       pointerId: 32,
       pointerType: 'touch',
@@ -565,28 +567,40 @@ describe('TerminalPage remote window overlay', () => {
     });
 
     await waitFor(() => {
-      expect(remoteWindowNonFocusPayloads(onSendRemoteWindowInput)).toHaveLength(1);
+      expect(remoteWindowNonFocusPayloads(onSendRemoteWindowInput)).toHaveLength(3);
     });
     expectEveryRemoteWindowInputFocusFirst(onSendRemoteWindowInput);
     expect(onSendRemoteWindowInput.mock.calls.map((call) => call[1].event.kind)).toEqual([
       'focus',
-      'gesture',
+      'pointer',
+      'focus',
+      'pointer',
+      'focus',
+      'pointer',
     ]);
-    expect(remoteWindowNonFocusPayloads(onSendRemoteWindowInput)[0]).toMatchObject({
-      targetId: 'app-1',
-      event: {
-        kind: 'gesture',
-        gesture: 'swipe',
-        phase: 'end',
+    expect(remoteWindowNonFocusPayloads(onSendRemoteWindowInput).map((payload) => payload.event)).toEqual([
+      expect.objectContaining({
+        kind: 'pointer',
+        phase: 'down',
         pointerId: 32,
-        deltaX: 0,
-        deltaY: -168,
-        startNormalizedX: 0.5,
-        startNormalizedY: 0.7,
+        normalizedX: 0.5,
+        normalizedY: 0.7,
+      }),
+      expect.objectContaining({
+        kind: 'pointer',
+        phase: 'move',
+        pointerId: 32,
         normalizedX: 0.5,
         normalizedY: 0.4,
-      },
-    });
+      }),
+      expect.objectContaining({
+        kind: 'pointer',
+        phase: 'up',
+        pointerId: 32,
+        normalizedX: 0.5,
+        normalizedY: 0.4,
+      }),
+    ]);
     expect(onTerminalInput).not.toHaveBeenCalled();
   });
 
