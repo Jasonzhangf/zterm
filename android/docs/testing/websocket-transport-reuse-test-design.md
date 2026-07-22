@@ -34,7 +34,7 @@ The UI may trigger resume/switch intent, but tests must prove socket reuse is ow
 
 Tmux management requests are a separate control lane. Because the daemon response has no request id, one target-scoped `TraversalSocket` must serialize requests FIFO. Successful responses and request-level daemon errors keep that physical socket reusable; physical close/error, malformed protocol data, or request timeout removes and closes it. The pool caches no session-list result.
 
-Daemon stale physical transport cleanup is separate from client foreground/tab policy. It may close and detach only a session transport whose bound subscriber has no inbound heartbeat/message past the fixed transport liveness window. It must not destroy the tmux session, destroy mirror truth, infer client active/background state, or close idle control transports.
+Daemon stale physical transport cleanup is separate from client foreground/tab policy. It may close and detach only a session transport whose bound subscriber has no inbound heartbeat/message past the fixed transport liveness window. That daemon window must be strictly longer than the Android physical target heartbeat failure contract: the current client sends one target heartbeat every 60 seconds and declares failure after three consecutive misses, so the daemon stale bound is 190 seconds. It must not destroy the tmux session, destroy mirror truth, infer client active/background state, or close idle control transports.
 
 Multiplex resource path:
 
@@ -141,6 +141,7 @@ Negative:
 - Given an opened WebRTC transport, `applyTransportDiagnosticsRuntime()` must project the actual selected ICE pair metadata from `TraversalSocket.getDiagnostics()` without reading daemon/client target metadata as route truth.
 
 `createTerminalDaemonRuntime().startHeartbeatLoop()`:
+- Positive: a quiet bound RTC/Relay session transport remains attached and open at 11 seconds because the Android physical heartbeat is not due until 60 seconds; daemon cleanup cannot create server-detached/client-open split truth before the client liveness policy can run.
 - Positive: a bound RTC/Relay session transport with no inbound heartbeat/message for more than the server stale window is closed, removed from `connections`, and detached through `detachSubscriberTransportOnly`.
 - Positive: the detach path releases adaptive width ownership through the existing mirror owner, so `resize-window -x <baseline>` and `set-window-option -u window-size` happen only when the subscriber held a live adaptive lease.
 - Negative: a bound RTC/Relay session transport that keeps receiving client `ping`/message activity every 2 seconds is not closed or detached.

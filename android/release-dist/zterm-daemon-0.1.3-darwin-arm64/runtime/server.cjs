@@ -6964,7 +6964,7 @@ var v4_default = v4;
 // src/server/terminal-transport-runtime.ts
 var TRANSPORT_BACKPRESSURE_BUFFERED_BYTES = 128e3;
 var TRANSPORT_BACKPRESSURE_LOW_WATER_BYTES = 64e3;
-var TERMINAL_TRANSPORT_STALE_INBOUND_MS = 1e4;
+var TERMINAL_TRANSPORT_STALE_INBOUND_MS = 19e4;
 function estimateTransportMessageBytes(text) {
   return Buffer.byteLength(text, "utf8");
 }

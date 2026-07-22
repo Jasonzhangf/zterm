@@ -1,3 +1,20 @@
+# 2026-07-22 connected green body/catalog stale diagnosis
+
+- Symptom: Android 0.1.3.2213 can show a green transport with rx/tx counters while the terminal body stops refreshing; opening Remote Window then shows `远程窗口列表读取超时`. Killing the app and re-entering restores updates.
+- Expected: one daemon target physical transport remains valid, or the transport lifecycle owner marks it failed and reopens before body/catalog requests are sent. Remote-window catalog is only a control-plane consumer and must not mask transport truth.
+- Flow: `terminal.transport_lifecycle` via `resource.session_transport -> resource.daemon_target_transport -> resource.terminal_channel -> resource.transport_subscriber`; remote-window catalog uses `resource.remote_window_stream` only after an open session transport exists.
+- Evidence:
+  - Local daemon direct catalog is healthy: `remote-window-targets-request includeIterm2=false` returned 19 targets in 945ms; full catalog returned 32 targets in 1690ms.
+  - Local `/health` while Jason's screenshot still showed green connection reported `sessions.total=0`, `attached=0`, `ready=0`, mirrors still ready.
+  - Daemon log at 2026-07-22 20:22:54: `transport ... stale inbound heartbeat kind=rtc staleForMs=10022`, then detached/closed transport. This matches a dead server-side subscriber while Android still projects an open client route.
+  - Source mismatch: daemon `TERMINAL_TRANSPORT_STALE_INBOUND_MS = 10_000`; Android `startSocketHeartbeatInfraRuntime` sends physical heartbeat every `60_000ms` with `maxConsecutiveMisses=3`. A quiet RTC/mux transport can therefore be detached by daemon before the client heartbeat is even due.
+- Active hypothesis: H1, first divergence is daemon physical transport liveness policy. It uses a 10s inbound-stale timeout even though the client heartbeat contract is 60s. This creates server-detached/client-open split truth and downstream body/catalog timeouts.
+- Unique owner: `terminal.transport_lifecycle` / daemon physical transport heartbeat policy in `android/src/server/terminal-transport-runtime.ts` and tests in `android/src/server/terminal-daemon-runtime.test.ts`. Client render and remote-window overlay are downstream consumers and forbidden as compensation points.
+- Required red/green:
+  - Positive: an attached RTC mux transport with no inbound frame at 11s must stay attached/open because the client heartbeat is 60s.
+  - Negative: an attached RTC mux transport beyond the daemon stale bound must still detach every mux subscriber and close only the physical transport, without destroying mirrors.
+  - Existing mapped context/transport gates plus typecheck and diff-check.
+
 # 2026-07-22 remote-window focus + desktop-fullscreen bitrate correction
 
 - Symptom: Jason reports generic remote app control still fails because the selected desktop app is not actually brought to the foreground. Jason also corrected bitrate semantics: app-window default encoding bitrate must be `2mbps`; `fullscreen`/20Mbps means the computer-side window is desktop fullscreen, not Android phone fullscreen.

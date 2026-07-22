@@ -1,7 +1,10 @@
 import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
 import { createTerminalDaemonRuntime } from './terminal-daemon-runtime';
 import type { TerminalTransportSubscriber } from './terminal-runtime';
-import type { DaemonTransportConnection } from './terminal-transport-runtime';
+import {
+  TERMINAL_TRANSPORT_STALE_INBOUND_MS,
+  type DaemonTransportConnection,
+} from './terminal-transport-runtime';
 
 function createSessionSubscriber(transportId: string): TerminalTransportSubscriber {
   return {
@@ -110,12 +113,25 @@ afterEach(() => {
 });
 
 describe('terminal daemon runtime transport liveness', () => {
-  it('detaches stale bound rtc session transports through the subscriber detach owner', () => {
-    const { connection, connections, detachSubscriberTransportOnly, destroyMirror, runtime, subscriber } =
+  it('keeps quiet rtc session transports before the client heartbeat can run', () => {
+    const { connection, connections, detachSubscriberTransportOnly, runtime } =
       createRuntimeHarness();
 
     runtime.startHeartbeatLoop();
     vi.setSystemTime(new Date('2026-07-20T00:00:11Z'));
+    vi.advanceTimersByTime(1000);
+
+    expect(connection.closeTransport).not.toHaveBeenCalled();
+    expect(detachSubscriberTransportOnly).not.toHaveBeenCalled();
+    expect(connections.has(connection.id)).toBe(true);
+  });
+
+  it('detaches stale bound rtc session transports through the subscriber detach owner after the daemon stale bound', () => {
+    const { connection, connections, detachSubscriberTransportOnly, destroyMirror, runtime, subscriber } =
+      createRuntimeHarness();
+
+    runtime.startHeartbeatLoop();
+    vi.setSystemTime(new Date(Date.parse('2026-07-20T00:00:00Z') + TERMINAL_TRANSPORT_STALE_INBOUND_MS + 1000));
     vi.advanceTimersByTime(1000);
 
     expect(connection.closeTransport).toHaveBeenCalledWith('transport heartbeat stale');
@@ -160,7 +176,7 @@ describe('terminal daemon runtime transport liveness', () => {
     sessions.set(subscriberB.id, subscriberB);
 
     runtime.startHeartbeatLoop();
-    vi.setSystemTime(new Date('2026-07-20T00:00:11Z'));
+    vi.setSystemTime(new Date(Date.parse('2026-07-20T00:00:00Z') + TERMINAL_TRANSPORT_STALE_INBOUND_MS + 1000));
     vi.advanceTimersByTime(1000);
 
     expect(connection.closeTransport).toHaveBeenCalledWith('transport heartbeat stale');
