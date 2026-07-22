@@ -5,6 +5,8 @@ import {
   projectHomeSavedConnections,
 } from './home-connection-projection';
 import { DEFAULT_BRIDGE_SETTINGS, type BridgeSettings } from './bridge-settings';
+import { buildTraversalPlan } from './traversal/config';
+import { buildBridgeTargetFromHost } from './session-picker';
 import type { Host, TraversalRelayDeviceSnapshot } from './types';
 
 function makeSavedHost(overrides: Partial<Host> = {}): Host {
@@ -69,6 +71,17 @@ function makeRelayDevice(): TraversalRelayDeviceSnapshot {
   };
 }
 
+function makeRelayOnlyDevice(): TraversalRelayDeviceSnapshot {
+  const device = makeRelayDevice();
+  return {
+    ...device,
+    daemon: {
+      ...device.daemon,
+      endpoints: (device.daemon.endpoints || []).filter((endpoint) => endpoint.kind === 'relay-rtc'),
+    },
+  };
+}
+
 function makeDisconnectedStaleRelayDevice(): TraversalRelayDeviceSnapshot {
   return {
     ...makeRelayDevice(),
@@ -126,18 +139,18 @@ describe('home connection projection relay route visibility', () => {
     expect(hasRelayRtcCandidate(projected[0])).toBe(true);
   });
 
-  it('builds a Home Relay target that keeps WebRTC direct, direct websocket, and TURN candidates', () => {
+  it('keeps the saved direct identity when building a Home Relay target', () => {
     const projected = projectHomeSavedConnections(
       [makeSavedHost()],
       bridgeSettings,
-      [makeRelayDevice()],
+      [makeRelayOnlyDevice()],
     );
     const relayHost = buildHomeRelayConnectionHost(projected[0]);
 
     expect(relayHost).toEqual(expect.objectContaining({
       id: 'relay-route:saved-mac',
       name: 'Mac Studio',
-      bridgeHost: '',
+      bridgeHost: '100.66.1.82',
       bridgePort: 3333,
       daemonHostId: 'mac-studio',
       relayHostId: 'mac-studio',
@@ -145,8 +158,38 @@ describe('home connection projection relay route visibility', () => {
       transportMode: 'auto',
     }));
     expect(relayHost?.relayEndpointCandidates).toEqual([
-      expect.objectContaining({ kind: 'tailscale', host: 'mac-studio.tailnet.ts.net' }),
       expect.objectContaining({ kind: 'relay-rtc', relayHostId: 'mac-studio' }),
+    ]);
+    expect(buildTraversalPlan(
+      buildBridgeTargetFromHost(relayHost as Host),
+      {
+        ...DEFAULT_BRIDGE_SETTINGS,
+        signalUrl: 'wss://relay.example.test/relay/ws/client',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'auto',
+        traversalRelay: {
+          relayBaseUrl: 'https://relay.example.test/relay/',
+          accessToken: 'access-1',
+          userId: 'user-1',
+          username: 'jason',
+          deviceId: 'tablet-1',
+          deviceName: 'Jason Tablet',
+          platform: 'android',
+          wsDevicesUrl: 'wss://relay.example.test/relay/ws/devices',
+          wsHostUrl: 'wss://relay.example.test/relay/ws/host',
+          wsClientUrl: 'wss://relay.example.test/relay/ws/client',
+          turnUrl: 'turn:turn.example.com:3478?transport=udp',
+          turnUsername: 'alice',
+          turnCredential: 'secret',
+          updatedAt: 1,
+        },
+      },
+    ).candidates.map((candidate) => candidate.path)).toEqual([
+      'tailscale',
+      'rtc-direct',
+      'rtc-relay',
     ]);
   });
 

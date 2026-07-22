@@ -98,6 +98,20 @@ function mergeHomeConnectionRouteCandidates(base: Host, supplement: Host): Host 
   };
 }
 
+function resolveHomeRelayConnectionBridgeHost(host: Host) {
+  const bridgeHost = host.bridgeHost.trim();
+  if (bridgeHost) {
+    return bridgeHost;
+  }
+  const relayDirectEndpoint = (host.relayEndpointCandidates || []).find((candidate) => (
+    (candidate.kind === 'tailscale' || candidate.kind === 'ipv6' || candidate.kind === 'ipv4')
+    && (candidate.host?.trim() || candidate.wsUrl?.trim())
+  ));
+  return relayDirectEndpoint?.host?.trim()
+    || relayDirectEndpoint?.wsUrl?.trim()
+    || '';
+}
+
 function buildHomeConnectionFromPreset(server: BridgeServerPreset): Host | null {
   const bridgeHost = server.targetHost?.trim() || '';
   if (!bridgeHost) {
@@ -184,7 +198,7 @@ export function buildHomeRelayConnectionHost(host: Host): Host | null {
   return {
     ...host,
     id: `relay-route:${host.id}`,
-    bridgeHost: '',
+    bridgeHost: resolveHomeRelayConnectionBridgeHost(host),
     daemonHostId: host.daemonHostId || relayHostId,
     relayHostId,
     relayEndpointCandidates: host.relayEndpointCandidates || relayRtcEndpointCandidates,

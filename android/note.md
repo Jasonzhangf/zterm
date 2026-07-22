@@ -1,3 +1,10 @@
+# 2026-07-22 relay route projection keeps losing Tailscale fallback
+
+- Symptom: Jason reports that when Relay is unavailable the whole service fails, which violates the intended design because Tailscale should remain independent and serve as the backup path.
+- Evidence so far: the Home/relay route projection for an explicit relay entry strips `bridgeHost` and currently only keeps `relay-rtc` candidates. In production relay directory snapshots the daemon entry can contain only `relay-rtc`, so the relay-open target can lose the saved direct/Tailscale identity entirely.
+- Working hypothesis: the unique owner is `connections.history_projection` / `relay.directory_ui`, not transport. The fix should preserve the saved direct identity and route candidates in the relay-derived Home target instead of forcing a relay-only target.
+- Verification to add: a black-box test that opening the relay-derived Home entry still preserves the direct/Tailscale route in the traversal plan, and a negative test that a relay-only directory entry does not invent a direct route.
+
 # 2026-07-22 drawer open disconnects because remote audit still opens a second Relay RTC client peer
 
 - Symptom: Jason reports opening the Terminal drawer now always disconnects and cannot self-recover; tapping the top status `UDP` reconnect action recovers.

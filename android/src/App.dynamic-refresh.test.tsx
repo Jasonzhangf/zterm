@@ -1184,6 +1184,78 @@ describe('App dynamic refresh matrix', () => {
     expect(tmuxPickerHarness.readProps()).toEqual(expect.objectContaining({ open: false }));
   });
 
+  it('opens a relay-derived Home server entry without dropping the saved direct Tailscale identity', async () => {
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'connections' }));
+    hostHarness.setHosts([{
+      id: 'saved-mac',
+      createdAt: 1,
+      name: 'Mac Studio',
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+      daemonHostId: 'mac-studio',
+      relayHostId: 'mac-studio',
+      sessionName: '',
+      authToken: 'token-a',
+      relayEndpointCandidates: [{
+        id: 'relay-rtc:mac-studio',
+        kind: 'relay-rtc',
+        relayHostId: 'mac-studio',
+        authRequired: true,
+        lastSeenAt: '2026-07-16T10:00:00.000Z',
+      }],
+      transportMode: 'auto',
+      authType: 'password',
+      password: undefined,
+      privateKey: undefined,
+      tags: ['tailscale'],
+      pinned: false,
+      lastConnected: 10,
+      autoCommand: '',
+    }]);
+
+    render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    await waitFor(() => expect(connectionsPageHarness.readProps()).toBeTruthy());
+    const props = connectionsPageHarness.readProps();
+    const relayHost = props.savedConnections[0];
+
+    expect(relayHost).toEqual(expect.objectContaining({
+      bridgeHost: '100.66.1.82',
+      relayEndpointCandidates: expect.arrayContaining([
+        expect.objectContaining({ kind: 'relay-rtc', relayHostId: 'mac-studio' }),
+      ]),
+    }));
+
+    fetchTmuxSessionsMock.mockClear();
+    sessionHarness.createSession.mockClear();
+    await act(async () => {
+      props.onOpenSavedConnectionViaRelay(relayHost);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(fetchTmuxSessionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+        relayHostId: 'mac-studio',
+        authToken: 'token-a',
+      }),
+      expect.any(Object),
+    );
+    expect(sessionHarness.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        daemonHostId: 'mac-studio',
+      }),
+      expect.objectContaining({ activate: false }),
+    );
+  });
+
   it('resumes the last-entered current-process Home server session instead of creating another session', async () => {
     localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'connections' }));
     const existingSession = {
