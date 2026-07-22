@@ -2414,19 +2414,43 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           : { maxHeight: 'min(52vh, 420px)' }),
       }
     : styles.videoPlaceholder;
-  const screenshotStatusText = (() => {
+  const screenshotFeedback = (() => {
     switch (screenshotStatus.phase) {
       case 'capturing':
-        return '截屏中';
+        return {
+          phase: screenshotStatus.phase,
+          title: '远程原始截屏中',
+          detail: '正在从目标窗口获取 PNG',
+          tone: 'progress' as const,
+        };
       case 'saved':
-        return `已保存 ${screenshotStatus.fileName}`;
+        return {
+          phase: screenshotStatus.phase,
+          title: '原始截图已保存',
+          detail: screenshotStatus.fileName,
+          tone: 'success' as const,
+        };
       case 'failed':
-        return `截图失败 ${screenshotStatus.message}`;
+        return {
+          phase: screenshotStatus.phase,
+          title: '截屏失败',
+          detail: screenshotStatus.message,
+          tone: 'error' as const,
+        };
       case 'idle':
       default:
-        return '';
+        return null;
     }
   })();
+  const screenshotBusy = screenshotStatus.phase === 'capturing';
+  const screenshotButtonStyle = screenshotBusy
+    ? { ...styles.headerIconButton, ...styles.headerIconButtonBusy }
+    : styles.headerIconButton;
+  const screenshotToastToneStyle = screenshotFeedback?.tone === 'success'
+    ? styles.screenshotToastSuccess
+    : screenshotFeedback?.tone === 'error'
+      ? styles.screenshotToastError
+      : styles.screenshotToastProgress;
 
   const lockedContent = state.phase === 'targetLocked' ? (
     <div
@@ -2475,8 +2499,10 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
             type="button"
             data-no-drag="true"
             aria-label="截屏远程窗口"
+            aria-busy={screenshotBusy ? 'true' : undefined}
+            disabled={screenshotBusy}
             onClick={handleRemoteWindowScreenshot}
-            style={styles.headerIconButton}
+            style={screenshotButtonStyle}
           >
             #
           </button>
@@ -2506,16 +2532,6 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         </div>
       </div>
       <div
-        data-testid="remote-window-screenshot-status"
-        aria-live="polite"
-        style={{
-          ...styles.screenshotStatus,
-          display: screenshotStatusText ? 'block' : 'none',
-        }}
-      >
-        {screenshotStatusText}
-      </div>
-      <div
         data-testid="remote-window-video-surface"
         ref={videoSurfaceRef}
         tabIndex={0}
@@ -2542,6 +2558,43 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         <div data-testid="remote-window-video-content" style={videoContentStyle}>
           {lockedVideoContent}
         </div>
+        {screenshotFeedback ? (
+          <div
+            data-testid="remote-window-screenshot-status"
+            data-phase={screenshotFeedback.phase}
+            role={screenshotFeedback.phase === 'failed' ? 'alert' : 'status'}
+            aria-live={screenshotFeedback.phase === 'failed' ? 'assertive' : 'polite'}
+            style={{
+              ...styles.screenshotToast,
+              ...screenshotToastToneStyle,
+            }}
+          >
+            {screenshotFeedback.phase === 'capturing' ? (
+              <span
+                data-testid="remote-window-screenshot-spinner"
+                aria-hidden="true"
+                style={styles.screenshotSpinner}
+              />
+            ) : (
+              <span
+                data-testid={screenshotFeedback.phase === 'saved'
+                  ? 'remote-window-screenshot-saved-icon'
+                  : 'remote-window-screenshot-failed-icon'}
+                aria-hidden="true"
+                style={{
+                  ...styles.screenshotResultIcon,
+                  ...(screenshotFeedback.phase === 'failed' ? styles.screenshotResultIconError : {}),
+                }}
+              >
+                {screenshotFeedback.phase === 'saved' ? 'OK' : '!'}
+              </span>
+            )}
+            <span style={styles.screenshotToastText}>
+              <span style={styles.screenshotToastTitle}>{screenshotFeedback.title}</span>
+              <span style={styles.screenshotToastDetail}>{screenshotFeedback.detail}</span>
+            </span>
+          </div>
+        ) : null}
         {minimapViewport ? (
           <div data-testid="remote-window-minimap" style={styles.minimap}>
             <div
@@ -2613,6 +2666,21 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       ) : null}
       {pickerContent}
       {lockedContent}
+      <style>{`
+        @keyframes zterm-remote-window-shot-spin {
+          from { transform: rotate(0deg); }
+          to { transform: rotate(360deg); }
+        }
+        @keyframes zterm-remote-window-shot-pop {
+          from { transform: translate(-50%, -6px) scale(0.96); opacity: 0; }
+          to { transform: translate(-50%, 0) scale(1); opacity: 1; }
+        }
+        @keyframes zterm-remote-window-shot-pulse {
+          0% { box-shadow: 0 0 0 0 rgba(31,214,122,0.28); }
+          70% { box-shadow: 0 0 0 10px rgba(31,214,122,0); }
+          100% { box-shadow: 0 0 0 0 rgba(31,214,122,0); }
+        }
+      `}</style>
     </>
   );
 });
@@ -2694,6 +2762,11 @@ const styles: Record<string, CSSProperties> = {
     color: '#edf4ff',
     fontWeight: 900,
   },
+  headerIconButtonBusy: {
+    opacity: 0.78,
+    background: 'rgba(31, 214, 122, 0.18)',
+    border: '1px solid rgba(31, 214, 122, 0.42)',
+  },
   headerModeButton: {
     minWidth: 46,
     height: 32,
@@ -2716,11 +2789,84 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 850,
     outline: 'none',
   },
-  screenshotStatus: {
-    padding: '0 12px 8px',
+  screenshotToast: {
+    position: 'absolute',
+    left: '50%',
+    top: 12,
+    zIndex: 5,
+    display: 'flex',
+    alignItems: 'center',
+    gap: 10,
+    width: 'max-content',
+    maxWidth: 'calc(100% - 24px)',
+    minHeight: 38,
+    padding: '8px 12px',
+    borderRadius: 12,
+    color: '#edf4ff',
+    background: 'rgba(6, 12, 22, 0.9)',
+    border: '1px solid rgba(151, 164, 186, 0.2)',
+    boxShadow: '0 14px 36px rgba(0,0,0,0.38)',
+    backdropFilter: 'blur(12px)',
+    pointerEvents: 'none',
+    animation: 'zterm-remote-window-shot-pop 160ms ease-out both',
+  },
+  screenshotToastProgress: {
+    border: '1px solid rgba(31, 214, 122, 0.32)',
+  },
+  screenshotToastSuccess: {
+    border: '1px solid rgba(31, 214, 122, 0.44)',
+    animation: 'zterm-remote-window-shot-pop 160ms ease-out both, zterm-remote-window-shot-pulse 1.1s ease-out 1',
+  },
+  screenshotToastError: {
+    border: '1px solid rgba(255, 104, 124, 0.46)',
+  },
+  screenshotSpinner: {
+    flex: '0 0 auto',
+    width: 18,
+    height: 18,
+    borderRadius: 999,
+    border: '2px solid rgba(237,244,255,0.22)',
+    borderTopColor: mobileTheme.colors.accent,
+    animation: 'zterm-remote-window-shot-spin 0.78s linear infinite',
+  },
+  screenshotResultIcon: {
+    flex: '0 0 auto',
+    width: 24,
+    height: 24,
+    borderRadius: 999,
+    display: 'grid',
+    placeItems: 'center',
+    background: 'rgba(31, 214, 122, 0.16)',
+    color: mobileTheme.colors.accent,
+    fontSize: 10,
+    fontWeight: 950,
+    lineHeight: 1,
+  },
+  screenshotResultIconError: {
+    background: 'rgba(255, 104, 124, 0.16)',
+    color: '#ff7a8d',
+  },
+  screenshotToastText: {
+    minWidth: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2,
+  },
+  screenshotToastTitle: {
+    fontSize: 12,
+    fontWeight: 900,
+    lineHeight: 1.15,
+    whiteSpace: 'nowrap',
+  },
+  screenshotToastDetail: {
+    maxWidth: 'min(240px, 62vw)',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
     color: 'rgba(237,244,255,0.68)',
-    fontSize: 11,
-    lineHeight: 1.3,
+    fontSize: 10,
+    fontWeight: 750,
+    lineHeight: 1.2,
   },
   errorBox: {
     margin: '10px 12px 0',

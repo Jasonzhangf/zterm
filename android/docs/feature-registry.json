@@ -147,13 +147,17 @@
       "domain": "daemon-file-transfer",
       "owners": [
         "src/lib/remote-screenshot-runtime.ts",
+        "src/components/terminal/RemoteWindowOverlay.tsx",
+        "src/server/terminal-file-transfer-list-runtime.ts",
         "src/server/terminal-message-control-runtime.ts"
       ],
       "allowed_paths": [
         "src/lib/remote-screenshot-runtime.ts",
         "src/lib/file-transfer-message-runtime.ts",
+        "src/components/terminal/RemoteWindowOverlay.tsx",
         "src/pages/TerminalPage.tsx",
         "src/server/terminal-message-control-runtime.ts",
+        "src/server/terminal-file-transfer-list-runtime.ts",
         "src/server/terminal-file-transfer-runtime.ts"
       ],
       "forbidden_paths": [
@@ -162,12 +166,17 @@
       "required_gates": [
         "src/lib/remote-screenshot-runtime.test.ts",
         "src/pages/TerminalPage.remote-screenshot.test.tsx",
+        "src/components/terminal/RemoteWindowOverlay.test.tsx",
+        "src/pages/TerminalPage.remote-window-overlay.test.tsx",
+        "src/server/terminal-file-transfer-list-runtime.test.ts",
         "src/server/remote-screenshot-daemon-blackbox.test.ts",
         "src/server/server.file-transfer-truth.test.ts"
       ],
       "truth_sources": [
         "docs/architecture.md",
-        "docs/dev-workflow.md"
+        "docs/dev-workflow.md",
+        "docs/decisions/2026-07-19-remote-window-stream-truth.md",
+        "docs/testing/remote-window-stream-test-design.md"
       ]
     },
     {

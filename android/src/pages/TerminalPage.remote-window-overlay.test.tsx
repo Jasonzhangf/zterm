@@ -208,6 +208,7 @@ function expectEveryRemoteWindowInputFocusFirst(sendInput: ReturnType<typeof vi.
 
 describe('TerminalPage remote window overlay', () => {
   afterEach(() => {
+    vi.restoreAllMocks();
     cleanup();
     vi.unstubAllGlobals();
   });
@@ -471,6 +472,9 @@ describe('TerminalPage remote window overlay', () => {
   it('saves a remote-window screenshot through the existing screenshot transfer path without focusing input', async () => {
     const session = makeSession('s1');
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const canvasToDataUrl = vi.spyOn(HTMLCanvasElement.prototype, 'toDataURL').mockImplementation(() => {
+      throw new Error('local video canvas screenshot must not be used');
+    });
     const onRequestRemoteWindowTargets = vi.fn(async () => ({
       requestId: 'rw-1',
       targets: [makeTarget()],
@@ -552,8 +556,10 @@ describe('TerminalPage remote window overlay', () => {
         path: '/storage/emulated/0/Download/zterm/remote-window-TextEdit.png',
         data: 'cG5n',
       }));
-      expect(screen.getByTestId('remote-window-screenshot-status').textContent).toContain('已保存');
+      expect(screen.getByTestId('remote-window-screenshot-status').textContent).toContain('原始截图已保存');
     });
+    expect(canvasToDataUrl).not.toHaveBeenCalled();
+    canvasToDataUrl.mockRestore();
     expect(onSendRemoteWindowInput).not.toHaveBeenCalled();
   });
 

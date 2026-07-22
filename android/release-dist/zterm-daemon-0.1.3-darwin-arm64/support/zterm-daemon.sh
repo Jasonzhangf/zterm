@@ -448,7 +448,9 @@ stop_direct() {
 }
 
 install_user_shims() {
-  mkdir -p "$USER_BIN_DIR"
+  mkdir -p "$USER_BIN_DIR" "$WTERM_BIN_DIR"
+  cp "$NATIVE_DAEMON_BIN" "${WTERM_BIN_DIR}/zterm-daemon"
+  chmod +x "${WTERM_BIN_DIR}/zterm-daemon"
   rm -f "${USER_BIN_DIR}/zterm-daemon" "${USER_BIN_DIR}/wterm"
   cat > "${USER_BIN_DIR}/zterm-daemon" <<RUNNER
 #!/usr/bin/env bash
@@ -709,6 +711,7 @@ install_service() {
   stop_direct >/dev/null 2>&1 || true
   remove_legacy_service
   write_launch_agent
+  prime_daemon_install_permissions
   if service_loaded; then
     launchctl bootout "gui/$(id -u)/${LAUNCH_AGENT_LABEL}"
     wait_for_service_unloaded || {

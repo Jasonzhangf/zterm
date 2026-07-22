@@ -836,9 +836,9 @@ describe('RemoteWindowOverlay', () => {
   it('captures a selected remote-window screenshot without focusing the desktop app', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const sendInput = vi.fn();
-    const requestScreenshot = vi.fn(async () => ({
-      fileName: 'remote-window-TextEdit.png',
-      savedPath: '/storage/emulated/0/Download/zterm/remote-window-TextEdit.png',
+    let resolveScreenshot: ((result: { fileName: string; savedPath: string }) => void) | null = null;
+    const requestScreenshot = vi.fn(() => new Promise<{ fileName: string; savedPath: string }>((resolve) => {
+      resolveScreenshot = resolve;
     }));
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-1',
@@ -867,11 +867,24 @@ describe('RemoteWindowOverlay', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '截屏远程窗口' }));
 
+    expect(screen.getByTestId('remote-window-screenshot-status').getAttribute('data-phase')).toBe('capturing');
+    expect(screen.getByTestId('remote-window-screenshot-status').textContent).toContain('远程原始截屏中');
+    expect(screen.getByTestId('remote-window-screenshot-spinner')).toBeTruthy();
+    expect(screen.getByRole('button', { name: '截屏远程窗口' }).getAttribute('aria-busy')).toBe('true');
+
+    await act(async () => {
+      resolveScreenshot?.({
+        fileName: 'remote-window-TextEdit.png',
+        savedPath: '/storage/emulated/0/Download/zterm/remote-window-TextEdit.png',
+      });
+    });
+
     await waitFor(() => {
       expect(requestScreenshot).toHaveBeenCalledWith('session-1', expect.objectContaining({
         streamTargetId: 'app-1',
       }));
-      expect(screen.getByTestId('remote-window-screenshot-status').textContent).toContain('已保存');
+      expect(screen.getByTestId('remote-window-screenshot-status').getAttribute('data-phase')).toBe('saved');
+      expect(screen.getByTestId('remote-window-screenshot-status').textContent).toContain('原始截图已保存');
     });
     expect(sendInput).not.toHaveBeenCalled();
   });

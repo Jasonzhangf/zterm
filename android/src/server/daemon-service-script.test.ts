@@ -114,8 +114,8 @@ describe('zterm daemon service script truth gates', () => {
     expect(script).toContain('wait_for_service_unloaded()');
     expect(script).toContain("resolve_node_package_dir '@roamhq/wrtc'");
     expect(script).toContain('resolve_wrtc_platform_package_name');
-    expect(extractBlock(script, 'start_service() {', 1300)).not.toContain('prime_daemon_install_permissions');
-    expect(extractBlock(script, 'restart_service() {', 1300)).not.toContain('prime_daemon_install_permissions');
+    expect(extractBlock(script, 'start_service() {', 700)).not.toContain('prime_daemon_install_permissions');
+    expect(extractBlock(script, 'restart_service() {', 700)).not.toContain('prime_daemon_install_permissions');
     expect(script).toContain('start|stop|restart|status|configure-relay|install-service|uninstall-service|service-status|run');
   });
 

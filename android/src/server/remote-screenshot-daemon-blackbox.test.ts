@@ -53,6 +53,22 @@ describe('remote screenshot daemon black-box contract', () => {
     expect(installBody.indexOf('prime_daemon_install_permissions')).toBeLessThan(installBody.indexOf('bootstrap_service'));
   });
 
+  it('keeps the legacy native screenshot fallback binary aligned with the packaged support binary', () => {
+    const releaseScript = readProjectFile('scripts/prepare-global-daemon-release.sh');
+    const shimBlock = extractBlock(releaseScript, 'install_user_shims() {', 520);
+
+    expect(shimBlock).toContain('cp "$NATIVE_DAEMON_BIN" "${WTERM_BIN_DIR}/zterm-daemon"');
+    expect(shimBlock).toContain('chmod +x "${WTERM_BIN_DIR}/zterm-daemon"');
+  });
+
+  it('captures window-id screenshots without macOS window shadow inflation', () => {
+    const nativeDaemon = readProjectFile('scripts/native/zterm-daemon.swift');
+    const windowIdBlock = extractBlock(nativeDaemon, 'if let windowId = windowId {', 240);
+
+    expect(windowIdBlock).toContain('arguments.append("-o")');
+    expect(windowIdBlock.indexOf('arguments.append("-o")')).toBeLessThan(windowIdBlock.indexOf('arguments.append("-l\\(windowId)")'));
+  });
+
   it('does not expose helper/socket/start-Mac-app guidance to Android users', () => {
     const message = resolveRemoteScreenshotErrorMessage(new Error('daemon screenshot capture unavailable'), 15000);
 

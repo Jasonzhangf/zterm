@@ -47,6 +47,7 @@ func captureScreen(to outputPath: String, windowId: String? = nil, rect: Capture
   var arguments = ["-x"]
   if let windowId = windowId {
     _ = parsePositiveInt(windowId, label: "window id")
+    arguments.append("-o")
     arguments.append("-l\(windowId)")
   }
   if let rect = rect {
