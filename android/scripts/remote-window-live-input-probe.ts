@@ -293,7 +293,13 @@ async function main() {
     await waitForWebSocketOpen(ws);
 
     const catalogRequestId = requestId('catalog');
-    send(ws, { type: 'remote-window-targets-request', payload: { requestId: catalogRequestId } });
+    send(ws, {
+      type: 'remote-window-targets-request',
+      payload: {
+        requestId: catalogRequestId,
+        forceRefresh: true,
+      },
+    });
     const catalog = await waitForServerMessage(
       messages,
       (message) => (
