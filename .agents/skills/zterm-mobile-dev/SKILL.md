@@ -61,6 +61,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 例外：`desktop.remote_window_stream` 的视频主链尚未完成时，不为中间态 catalog / overlay shell / debug 诊断改动反复构建 APK；先完成真实远程视频（ScreenCaptureKit/WebRTC frame stream 可见）并通过对应 gates，再构建 APK 给 Jason 测。除非 Jason 明确要求止血包或升级恢复包，否则不要在远程视频完成前编包。
 - 默认命令：`pnpm --dir android run build:android`。
 - 构建结果必须进入升级通道：`android/update-dist/latest.json`、`android/update-dist/zterm-<version>.apk`、`android/update-dist/zterm-latest-debug.apk`、`~/.zterm/updates/latest.json`、`~/.zterm/updates/zterm-<version>.apk` sha/version 对齐。
+- Android 交付闭环必须同时覆盖 **Tailscale daemon update route** 和 **public Relay update route**：构建后不仅要有本地文件，还必须验证 `http://127.0.0.1:3333/updates/latest.json`、`http://$(tailscale ip -4):3333/updates/latest.json`、`https://relay.codewhisper.cc:18443/relay/updates/latest.json` 都返回新版本；三个通道的 APK 下载 sha256 必须等于 manifest `sha256`。如果 127/Tailscale `/health` 或 `/updates/latest.json` 超时，先做 service-scoped `zterm-daemon restart` 后重测，禁止只说文件已复制。
 - 汇报时必须给出 `versionName`、`versionCode`、APK 路径和 sha256；不能只说测试通过。
 - 若本机有在线 ADB 设备，构建后继续安装 / 启动 / 真机 smoke；若没有在线设备，必须明确写出 “APK 已构建发布，但 L5 真机复测缺口是无 online ADB 设备”。
 - 禁止把源码修复、单测、typecheck、daemon close-loop 当成可供 Jason 复测的交付物；没有升级 APK，就不算移动端交付闭环。
