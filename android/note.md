@@ -3537,3 +3537,11 @@ Need runtime debug to confirm:
 - Tailscale proof: `ZTERM_REMOTE_WINDOW_PROBE_WS_URL=ws://100.66.1.82:3333 pnpm --dir android exec tsx scripts/remote-window-live-input-probe.ts` passed with the same accepted input markers.
 - White-box gate: remote-window overlay/page/message/context/daemon/input-mapping focused suite passed `7 files / 168 tests`; `tsc --noEmit`, `test:feature-registry` `48 PASS`, and `git diff --check` passed.
 - Remaining gap: no online ADB device was attached in this run, so this proves live daemon protocol and macOS OS-event loopback, plus React/SessionContext message construction. It still does not prove installed Android WebView touch delivery on a phone.
+
+# 2026-07-22 Remote-window Android phone logic gate diagnosis
+
+- Symptom: Jason correctly points out that daemon loopback alone is insufficient; the Android phone-side path must prove video-surface touch/gesture actions actually leave `TerminalPage` as `remote-window-input` instead of being swallowed by local overlay, terminal surface, or QuickBar focus routing.
+- SOP/model flow: `desktop.remote_window_stream.client.input_request`; resource path `resource.remote_window_overlay -> resource.active_session -> resource.session_transport`. Android owns only local touch recognition and coordinate projection; daemon owns macOS focus/injection.
+- Code evidence: `RemoteWindowOverlay` has component-level pointer tests for tap/gesture/wheel/key; `TerminalPage.remote-window-overlay.test.tsx` covers QuickBar/image/IME-ish routing, but does not yet prove a real page-level video-surface touch reaches `onSendRemoteWindowInput`. That is the remaining phone-logic gate below the live daemon proof.
+- First divergence risk: page integration could pass QuickBar while video-surface actions are still swallowed or routed to terminal input. Unique owner is `RemoteWindowOverlay` + `TerminalPage` projection test; forbidden fixes remain daemon/input fallback, terminal renderer, and transport reconnect.
+- Required red/green: render real `TerminalPage`, open the picker, select an interactive app-window, set a realistic mobile surface rect, replay touch tap and unzoomed touch drag on `remote-window-video-surface`, assert focus-first `pointer down/up` and single `gesture/swipe` payloads are sent via `onSendRemoteWindowInput`, and assert `onTerminalInput` is not called.

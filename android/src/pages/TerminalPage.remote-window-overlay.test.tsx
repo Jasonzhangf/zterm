@@ -215,6 +215,12 @@ function expectEveryRemoteWindowInputFocusFirst(sendInput: ReturnType<typeof vi.
   });
 }
 
+function remoteWindowNonFocusPayloads(sendInput: ReturnType<typeof vi.fn>) {
+  return sendInput.mock.calls
+    .map((call) => call[1])
+    .filter((payload) => payload?.event?.kind !== 'focus');
+}
+
 describe('TerminalPage remote window overlay', () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -409,6 +415,179 @@ describe('TerminalPage remote window overlay', () => {
       expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
       expect(onActiveBodySubscriptionSuppressedChange).toHaveBeenLastCalledWith(false);
     });
+  });
+
+  it('routes phone video-surface tap and swipe through remote-window input instead of terminal input', async () => {
+    const session = makeSession('s1');
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const onRequestRemoteWindowTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget()],
+      errors: [],
+    }));
+    const onRequestRemoteWindowStreamStart = vi.fn(async (
+      _sessionId: string,
+      _target: RemoteWindowStreamTargetManifest,
+      streamId: string,
+    ) => ({
+      streamId,
+      mediaStream,
+      started: {
+        requestId: 'rw-start-1',
+        streamId,
+        targetId: 'app-1',
+        answer: { type: 'answer' as const, sdp: 'v=0' },
+        capture: {
+          source: 'ScreenCaptureKit' as const,
+          frameWidth: 800,
+          frameHeight: 560,
+          frameRate: 12,
+          targetKind: 'app-window' as const,
+        },
+        transport: {
+          kind: 'webrtc-video' as const,
+        },
+      },
+    }));
+    const onSendRemoteWindowInput = vi.fn();
+    const onTerminalInput = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
+        onRequestRemoteWindowStreamStart={onRequestRemoteWindowStreamStart}
+        onSendRemoteWindowInput={onSendRemoteWindowInput}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-target-app-1');
+    fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
+    await screen.findByTestId('remote-window-video');
+
+    const surface = screen.getByTestId('remote-window-video-surface');
+    Object.defineProperty(surface, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 200,
+        bottom: 100,
+        width: 200,
+        height: 100,
+        toJSON: () => ({}),
+      }),
+    });
+
+    fireEvent.pointerDown(surface, {
+      pointerId: 31,
+      pointerType: 'touch',
+      clientX: 100,
+      clientY: 50,
+      button: 0,
+      buttons: 1,
+    });
+    fireEvent.pointerUp(surface, {
+      pointerId: 31,
+      pointerType: 'touch',
+      clientX: 100,
+      clientY: 50,
+      button: 0,
+      buttons: 0,
+    });
+
+    await waitFor(() => {
+      expect(remoteWindowNonFocusPayloads(onSendRemoteWindowInput)).toHaveLength(2);
+    });
+    expectEveryRemoteWindowInputFocusFirst(onSendRemoteWindowInput);
+    expect(onSendRemoteWindowInput.mock.calls.map((call) => call[1].event.kind)).toEqual([
+      'focus',
+      'pointer',
+      'focus',
+      'pointer',
+    ]);
+    expect(remoteWindowNonFocusPayloads(onSendRemoteWindowInput)[0]).toMatchObject({
+      streamId: expect.stringMatching(/^rw-stream-/),
+      targetId: 'app-1',
+      event: {
+        kind: 'pointer',
+        phase: 'down',
+        pointerId: 31,
+        normalizedX: 0.5,
+        normalizedY: 0.5,
+        x: 410,
+        y: 320,
+      },
+    });
+    expect(onTerminalInput).not.toHaveBeenCalled();
+
+    onSendRemoteWindowInput.mockClear();
+    fireEvent.pointerDown(surface, {
+      pointerId: 32,
+      pointerType: 'touch',
+      clientX: 100,
+      clientY: 70,
+      button: 0,
+      buttons: 1,
+    });
+    fireEvent.pointerMove(surface, {
+      pointerId: 32,
+      pointerType: 'touch',
+      clientX: 100,
+      clientY: 40,
+      button: 0,
+      buttons: 1,
+    });
+    expect(onSendRemoteWindowInput).not.toHaveBeenCalled();
+    fireEvent.pointerUp(surface, {
+      pointerId: 32,
+      pointerType: 'touch',
+      clientX: 100,
+      clientY: 40,
+      button: 0,
+      buttons: 0,
+    });
+
+    await waitFor(() => {
+      expect(remoteWindowNonFocusPayloads(onSendRemoteWindowInput)).toHaveLength(1);
+    });
+    expectEveryRemoteWindowInputFocusFirst(onSendRemoteWindowInput);
+    expect(onSendRemoteWindowInput.mock.calls.map((call) => call[1].event.kind)).toEqual([
+      'focus',
+      'gesture',
+    ]);
+    expect(remoteWindowNonFocusPayloads(onSendRemoteWindowInput)[0]).toMatchObject({
+      targetId: 'app-1',
+      event: {
+        kind: 'gesture',
+        gesture: 'swipe',
+        phase: 'end',
+        pointerId: 32,
+        deltaX: 0,
+        deltaY: -168,
+        startNormalizedX: 0.5,
+        startNormalizedY: 0.7,
+        normalizedX: 0.5,
+        normalizedY: 0.4,
+      },
+    });
+    expect(onTerminalInput).not.toHaveBeenCalled();
   });
 
   it('stops the remote-window stream when the app goes to background', async () => {
