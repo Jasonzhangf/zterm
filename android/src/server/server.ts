@@ -64,7 +64,10 @@ import {
 import { createTerminalBridgeRuntime } from './terminal-bridge-runtime';
 import { createTerminalAttachTokenRuntime } from './terminal-attach-token-runtime';
 import { captureRemoteScreenshotWithDaemon } from './remote-screenshot-daemon';
-import { createRemoteWindowStreamDaemonRuntime } from './remote-window-stream-daemon';
+import {
+  buildRemoteWindowImagePasteInputPayloads,
+  createRemoteWindowStreamDaemonRuntime,
+} from './remote-window-stream-daemon';
 import { createTerminalPerformanceTraceStore } from '../lib/terminal-performance-trace';
 
 const DAEMON_CONFIG = resolveDaemonRuntimeConfig();
@@ -219,17 +222,13 @@ const terminalFileTransferRuntime = createTerminalFileTransferRuntime({
   },
   pasteImageToRemoteWindow: async (_session, target) => {
     const requestPrefix = `paste-image-${Date.now()}-${remoteWindowPasteRequestSeq += 1}`;
-    const events = [
-      { kind: 'key' as const, phase: 'down' as const, key: 'v', code: 'KeyV', metaKey: true },
-      { kind: 'key' as const, phase: 'up' as const, key: 'v', code: 'KeyV', metaKey: true },
-    ];
-    for (let index = 0; index < events.length; index += 1) {
-      const result = await remoteWindowStreamRuntime.injectInput({
-        requestId: `${requestPrefix}-${index}`,
-        streamId: target.streamId,
-        targetId: target.targetId,
-        event: events[index]!,
-      });
+    const payloads = buildRemoteWindowImagePasteInputPayloads({
+      requestPrefix,
+      streamId: target.streamId,
+      targetId: target.targetId,
+    });
+    for (const payload of payloads) {
+      const result = await remoteWindowStreamRuntime.injectInput(payload);
       if (!('accepted' in result) || !result.accepted) {
         throw new Error('message' in result ? result.message : 'remote window image paste rejected');
       }

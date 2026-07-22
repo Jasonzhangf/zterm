@@ -168,6 +168,43 @@ export interface RemoteWindowStreamDaemonRuntime {
   dispose: (reason?: string) => void;
 }
 
+export function buildRemoteWindowImagePasteInputPayloads(options: {
+  requestPrefix: string;
+  streamId: string;
+  targetId: string;
+  now?: () => number;
+}): RemoteWindowInputEventPayload[] {
+  const now = options.now ?? Date.now;
+  return [
+    {
+      requestId: `${options.requestPrefix}-0`,
+      streamId: options.streamId,
+      targetId: options.targetId,
+      clientSentAt: now(),
+      event: {
+        kind: 'key',
+        phase: 'down',
+        key: 'v',
+        code: 'KeyV',
+        metaKey: true,
+      },
+    },
+    {
+      requestId: `${options.requestPrefix}-1`,
+      streamId: options.streamId,
+      targetId: options.targetId,
+      clientSentAt: now(),
+      event: {
+        kind: 'key',
+        phase: 'up',
+        key: 'v',
+        code: 'KeyV',
+        metaKey: true,
+      },
+    },
+  ];
+}
+
 export interface RemoteWindowStreamDaemonHandlers {
   sendIceCandidate?: (payload: RemoteWindowStreamIceCandidatePayload) => void;
   sendStatus?: (payload: RemoteWindowStreamStatusPayload) => void;

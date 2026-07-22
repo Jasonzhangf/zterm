@@ -13220,6 +13220,37 @@ var {
   RTCIceCandidate: RTCIceCandidate2,
   nonstandard
 } = import_wrtc2.default;
+function buildRemoteWindowImagePasteInputPayloads(options) {
+  const now = options.now ?? Date.now;
+  return [
+    {
+      requestId: `${options.requestPrefix}-0`,
+      streamId: options.streamId,
+      targetId: options.targetId,
+      clientSentAt: now(),
+      event: {
+        kind: "key",
+        phase: "down",
+        key: "v",
+        code: "KeyV",
+        metaKey: true
+      }
+    },
+    {
+      requestId: `${options.requestPrefix}-1`,
+      streamId: options.streamId,
+      targetId: options.targetId,
+      clientSentAt: now(),
+      event: {
+        kind: "key",
+        phase: "up",
+        key: "v",
+        code: "KeyV",
+        metaKey: true
+      }
+    }
+  ];
+}
 var ITERM2_CATALOG_PYTHON = String.raw`
 import json
 import iterm2
@@ -15395,17 +15426,13 @@ var terminalFileTransferRuntime = createTerminalFileTransferRuntime({
   },
   pasteImageToRemoteWindow: async (_session, target) => {
     const requestPrefix = `paste-image-${Date.now()}-${remoteWindowPasteRequestSeq += 1}`;
-    const events = [
-      { kind: "key", phase: "down", key: "v", code: "KeyV", metaKey: true },
-      { kind: "key", phase: "up", key: "v", code: "KeyV", metaKey: true }
-    ];
-    for (let index = 0; index < events.length; index += 1) {
-      const result = await remoteWindowStreamRuntime.injectInput({
-        requestId: `${requestPrefix}-${index}`,
-        streamId: target.streamId,
-        targetId: target.targetId,
-        event: events[index]
-      });
+    const payloads = buildRemoteWindowImagePasteInputPayloads({
+      requestPrefix,
+      streamId: target.streamId,
+      targetId: target.targetId
+    });
+    for (const payload of payloads) {
+      const result = await remoteWindowStreamRuntime.injectInput(payload);
       if (!("accepted" in result) || !result.accepted) {
         throw new Error("message" in result ? result.message : "remote window image paste rejected");
       }

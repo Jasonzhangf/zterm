@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { RemoteWindowStreamStatusPayload } from '@zterm/shared/protocol';
 import {
+  buildRemoteWindowImagePasteInputPayloads,
   buildRemoteWindowInputConfig,
   buildMacosAppWindowTargets,
   buildRemoteWindowStreamTargets,
@@ -387,6 +388,48 @@ describe('remote window stream daemon owner', () => {
 
   it('maps Command+V through a real macOS virtual key code for remote-window image paste', () => {
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('"KeyV": 9');
+  });
+
+  it('builds remote-window image paste Command+V input with fresh client timestamps', () => {
+    let now = 1_725_000_000_000;
+    const payloads = buildRemoteWindowImagePasteInputPayloads({
+      requestPrefix: 'paste-image-rw',
+      streamId: 'stream-paste',
+      targetId: 'app-window:123:456',
+      now: () => {
+        now += 7;
+        return now;
+      },
+    });
+
+    expect(payloads).toEqual([
+      {
+        requestId: 'paste-image-rw-0',
+        streamId: 'stream-paste',
+        targetId: 'app-window:123:456',
+        clientSentAt: 1_725_000_000_007,
+        event: {
+          kind: 'key',
+          phase: 'down',
+          key: 'v',
+          code: 'KeyV',
+          metaKey: true,
+        },
+      },
+      {
+        requestId: 'paste-image-rw-1',
+        streamId: 'stream-paste',
+        targetId: 'app-window:123:456',
+        clientSentAt: 1_725_000_000_014,
+        event: {
+          kind: 'key',
+          phase: 'up',
+          key: 'v',
+          code: 'KeyV',
+          metaKey: true,
+        },
+      },
+    ]);
   });
 
   it('builds selectable non-iTerm2 app-window manifests from the macOS app catalog', () => {
@@ -1397,6 +1440,59 @@ describe('remote window stream daemon owner', () => {
 	      expect.objectContaining({ swiftBinary: 'swift' }),
 	    );
 	  });
+
+  it('rejects direct daemon remote-window input without clientSentAt before macOS injection', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const target = makeAppStreamTarget();
+    const runRemoteWindowInputEvent = vi.fn(async () => undefined);
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1) });
+        return { width: 2, height: 2, frameRate: 12, stop: vi.fn() };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      runRemoteWindowInputEvent,
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await runtime.startStream({
+      requestId: 'rw-input-start-missing-sent-at',
+      streamId: 'stream-input-missing-sent-at',
+      target,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    const result = await runtime.injectInput({
+      requestId: 'rw-input-missing-sent-at',
+      streamId: 'stream-input-missing-sent-at',
+      targetId: target.streamTargetId,
+      event: {
+        kind: 'key',
+        phase: 'down',
+        key: 'v',
+        code: 'KeyV',
+        metaKey: true,
+      },
+    });
+
+    expect(result).toMatchObject({
+      requestId: 'rw-input-missing-sent-at',
+      streamId: 'stream-input-missing-sent-at',
+      code: 'remote_window_input_failed',
+      message: 'remote window input requires clientSentAt',
+    });
+    expect(runRemoteWindowInputEvent).not.toHaveBeenCalled();
+  });
 
   it('uses one persistent macOS input helper for pointer, scroll, gesture, and key events', async () => {
     const fakePeer = new FakeRemoteWindowPeerConnection();
