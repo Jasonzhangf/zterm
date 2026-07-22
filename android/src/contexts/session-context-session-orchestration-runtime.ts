@@ -121,6 +121,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       writeSessionTransportHost: options.writeSessionTransportHost,
       writeSessionTransportToken: options.writeSessionTransportToken,
       readSessionTransportSocket: options.readSessionTransportSocket,
+      readSessionTransportResource: options.readSessionTransportResource,
       readSessionTargetKey: options.readSessionTargetKey,
       hasPendingSessionTransportOpen: options.hasPendingSessionTransportOpen,
       isPendingSessionTransportOpenStale: options.isPendingSessionTransportOpenStale,
@@ -146,6 +147,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       updateSessionSync: options.updateSessionSync,
       writeSessionTransportHost: options.writeSessionTransportHost,
       readSessionTransportSocket: options.readSessionTransportSocket,
+      readSessionTransportResource: options.readSessionTransportResource,
       connectSession,
       defaultViewport: options.defaultViewport,
     });
@@ -210,6 +212,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       readSessionTargetKey: options.readSessionTargetKey,
       readSessionTargetRuntime: options.readSessionTargetRuntime,
       readSessionTransportSocket: options.readSessionTransportSocket,
+      readSessionTransportResource: options.readSessionTransportResource,
       hasPendingSessionTransportOpen: options.hasPendingSessionTransportOpen,
       isPendingSessionTransportOpenStale: options.isPendingSessionTransportOpenStale,
       runtimeDebug: options.runtimeDebug,

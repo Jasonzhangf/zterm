@@ -3424,3 +3424,40 @@ Need runtime debug to confirm:
 - Fix implemented: `startSocketHeartbeat` now accepts a target heartbeat key; mux target lifecycle passes `target:<targetKey>` and records target activity/pong under that key. The facade interval is 60s, target failure finalizes once, route health is marked before client close, and logical session/channel open/switch paths reuse the same target timer. Docs/function wiki/skill/gates updated to lock target-level heartbeat semantics.
 - Verification: `test:feature-registry` 48 PASS; mux/heartbeat/traversal focused suite 199 PASS; remote-window dirty-scope gates 81 PASS; `tsc --noEmit` PASS; `docs:function-wiki` regenerated; `git diff --check` PASS. First full `build:android` hit one transient `SessionContext.ws-refresh` render-gate assertion; the exact test and full terminal contracts reran green, then full `build:android` passed.
 - Delivery: Android `0.1.3.2212` / versionCode `1032212`; APK `android/update-dist/zterm-0.1.3.2212.apk`; sha256 `98af72a4b2bf66f6859b61d00196314397f1bb4f6856d1907785fe5cbc2eca87`; size `4783886`. Local `127.0.0.1`, Tailscale `100.66.1.82`, and public Relay update routes all serve the same manifest and APK sha. `adb devices -l` has no online device, so installed-phone Wi-Fi/cellular network-switch L5 remains unclaimed.
+# 2026-07-22 Classic network model / daemon runtime mismatch audit
+
+- Symptom follow-up: after service-scoped daemon restart, Android can connect again, but this is not proof that the latest client/daemon network model is correct.
+- Live daemon evidence: `/health` PID `72729` runs `/Users/fanzhang/.zterm/daemon-runtime/server.cjs` via `/Users/fanzhang/.zterm/bin/zterm-daemon-launchd-run`; this runner is hardcoded to the legacy daemon-runtime path.
+- Runtime SHA divergence:
+  - `/Users/fanzhang/.zterm/releases/zterm-daemon/0.1.3/runtime/server.cjs` = `cf8c1517ffd830c8867fd41e919ae1518fc4af9e3d51c8ad74d64aa65c48a1c7`
+  - `android/release-dist/zterm-daemon-0.1.3-darwin-arm64/runtime/server.cjs` = `71ef58dd744eeea6f53180ab38cc7aa5746f816e374628a758285f2e274729bc`
+  - `/Users/fanzhang/.zterm/daemon-runtime/server.cjs` = `bda7c7cbd2041239a40c8e311b482acd625d7a3ac49c762776d3f804687e9315`
+- Local black-box protocol replay against the currently running daemon:
+  - `ws://127.0.0.1:3333`: open 5ms, mux-ready 5ms, list-sessions 15ms, channel-opened 16ms, connected 20ms, first body 94ms, 10 sessions.
+  - `ws://100.66.1.82:3333`: open 2ms, mux-ready 3ms, list-sessions 7ms, channel-opened 8ms, connected 8ms, first body 60ms, 10 sessions.
+  - Conclusion: current local/Tailscale physical transport and mux channel path are healthy after restart; if phone still fails on stable Tailscale while `/health` and this replay pass, root cause is client state/channel lifecycle or stale runtime delivery, not Tailscale network reachability.
+- Classic model anchors checked:
+  - RFC 6455 WebSocket ping/pong is connection-level keepalive/responsiveness, not per logical tmux session.
+  - `ws` reference heartbeat uses one server interval around 30s and closes broken physical connections.
+  - MDN WebRTC ICE `disconnected` can be transient; `failed` means all candidate pairs failed; `restartIce()` is the standard ICE repair primitive.
+  - Android connectivity docs recommend `ConnectivityManager.NetworkCallback` / `registerDefaultNetworkCallback()` for network changes instead of expensive polling.
+  - Tailscale docs describe direct peer-to-peer first, peer relay if configured, then DERP relay; stable Tailscale IP reachability should behave like a direct endpoint for zterm.
+- Current implementation gaps against classic model:
+  - Daemon server still has `WS_HEARTBEAT_INTERVAL_MS = 2000` and `TERMINAL_TRANSPORT_STALE_INBOUND_MS = 10000`, causing high-frequency physical heartbeat/stale decisions. This may be acceptable only for short smoke tests; it is too aggressive as a long-lived mobile network model.
+  - Android mux heartbeat is now target-keyed and 60s-class, but the live daemon being tested may not be the current release artifact, so behavior must not be called fixed until launchd/runtime artifact truth is aligned.
+  - `TraversalSocket` treats WebRTC `disconnected` as close immediately; classic ICE model says disconnected can recover spontaneously and should not always mean rebuild. Need a bounded grace/ICE-restart design before code edits.
+  - Route health cache records route failure for an active candidate and keeps it for 5 minutes. For stable Tailscale, a transient app/background/RTC/channel error must not poison direct Tailscale reachability when direct `/health` is still reachable.
+- Next required diagnosis before product patch: align daemon runtime truth, then run a matrix gate on one physical target transport with multiple logical channels across direct Tailscale, WebRTC direct, and TURN/relay. The gate must distinguish physical transport close/error from logical channel error and terminal render freshness.
+
+# 2026-07-22 Client target transport effective socket diagnosis
+
+- Symptom: after session switch / foreground resume / drawer interaction, Android can show connected but stall, or spend seconds reconnecting even when the same daemon target is already physically connected.
+- Expected: one daemon target physical transport remains the truth; session switch opens/reuses only mux channels and requests head/body, unless the physical target transport is actually closed past timeout.
+- SOP/model flow: terminal.transport_lifecycle -> resource.session_transport -> resource.daemon_target_transport -> resource.terminal_channel -> resource.transport_subscriber.
+- Source docs checked: android/docs/resource-map.md, android/docs/function-map.md, android/docs/wiki/mainline-call-map.json, android/docs/testing/websocket-transport-reuse-test-design.md.
+- Confirmed first divergence: mux physical socket is stored at target runtime terminalTransport, but connectSessionRuntime/reconnectSessionRuntime/createSessionRuntime still use readSessionTransportSocket(), which reads only legacy runtime.activeSocket. In mux mode that can be null while targetRuntime.terminalTransport is OPEN, so reconnect/reopen decisions rebuild or wait incorrectly.
+- Unique owner / allowed edit scope: android/src/contexts/session-context-session-runtime.ts and its tests; optional orchestration wiring may pass readSessionTransportResource/effective socket reader. Forbidden: renderer, buffer, daemon mirror, tmux, UI compensation.
+- Secondary confirmed gap: TraversalSocket WebRTC treats peer connectionState=disconnected as immediate close and records route failure; classic ICE semantics require bounded grace/ICE repair before close. This is separate after effective-socket fix.
+- Required red tests: connectSessionRuntime and reconnectSessionRuntime must reuse OPEN same-target effective mux socket when legacy activeSocket is null; createSessionRuntime reuse must not reconnect when effective socket is open; TraversalSocket must not close immediately on transient rtc disconnected.
+- Effective-socket fix detail: session lifecycle now reads mux resource socket state when deciding connect/create/reconnect, but treats a closing/closed terminal channel as unavailable so it reopens the logical channel on the existing target transport instead of skipping the open. Unit tests lock both sides: open channel reuses target socket; closed channel queues channel reopen.
+- Verification: `session-context-session-runtime.test.ts` PASS `25`; `SessionContext.ws-refresh.test.tsx` PASS `134`; mapped transport stack `session-context-session-runtime`, `session-context-activity-runtime`, `SessionContext.ws-refresh`, `session-context-transport-runtime`, `session-context-transport-open-runtime`, `session-context-transport-orchestration-runtime` PASS `208`; `test:feature-registry` PASS `48`; `tsc --noEmit` PASS; `git diff --check` PASS.

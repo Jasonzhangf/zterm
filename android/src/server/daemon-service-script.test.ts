@@ -252,6 +252,17 @@ describe('zterm daemon service script truth gates', () => {
     expect(launchBody.indexOf('install_user_shims')).toBeLessThan(launchBody.indexOf('mkdir -p "${HOME}/Library/LaunchAgents"'));
   });
 
+  it('keeps source daemon global install from pointing launchd back at mutable source runtime', () => {
+    const script = readFileSync(join(process.cwd(), 'scripts', 'install-global-daemon-cli.sh'), 'utf8');
+
+    expect(script).toContain('PREPARE_RELEASE_SCRIPT="${ROOT_DIR_REAL}/scripts/prepare-global-daemon-release.sh"');
+    expect(script).toContain('bash "$PREPARE_RELEASE_SCRIPT"');
+    expect(script).toContain('bash "${RELEASE_INSTALLER}"');
+    expect(script).toContain('release-dist');
+    expect(script).not.toContain('exec bash "${ROOT_DIR_REAL}/scripts/zterm-daemon.sh" "$@"');
+    expect(script).not.toContain('exec bash "${ROOT_DIR_REAL}/scripts/zterm-daemon.sh" run');
+  });
+
   it('pins daemon iTerm2 Python API execution to a managed user venv', () => {
     const script = readDaemonScript();
     const launchBody = extractBlock(script, 'write_launch_agent() {', 2400);

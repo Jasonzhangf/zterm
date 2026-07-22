@@ -29,6 +29,13 @@ interface MutableRefObject<T> {
   current: T;
 }
 
+interface SessionTransportResourceLike {
+  socket?: BridgeTransportSocket | null;
+  channel?: {
+    state?: 'opening' | 'open' | 'closing' | 'closed';
+  } | null;
+}
+
 interface RuntimeDebugFn {
   (event: string, payload?: Record<string, unknown>): void;
 }
@@ -55,6 +62,24 @@ interface SessionReconnectRuntime {
 
 export type ReconnectSessionRuntimeOptions = Record<string, never>;
 
+function readEffectiveSessionTransportReadyState(options: {
+  sessionId: string;
+  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => SessionTransportResourceLike | null;
+}) {
+  const resource = options.readSessionTransportResource?.(options.sessionId) || null;
+  const channelState = resource?.channel?.state || null;
+  if (channelState === 'closed' || channelState === 'closing') {
+    return WebSocket.CLOSED;
+  }
+  if (channelState === 'opening') {
+    return WebSocket.CONNECTING;
+  }
+  return resource?.socket?.readyState
+    ?? options.readSessionTransportSocket(options.sessionId)?.readyState
+    ?? null;
+}
+
 function clearReconnectRuntimeEntry(
   reconnectRuntimes: Map<string, SessionReconnectRuntime>,
   sessionId: string,
@@ -77,6 +102,7 @@ export function connectSessionRuntime(options: {
   writeSessionTransportHost: (sessionId: string, host: Host) => unknown;
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => SessionTransportResourceLike | null;
   readSessionTargetKey: (sessionId: string) => string | null;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
   isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
@@ -92,7 +118,7 @@ export function connectSessionRuntime(options: {
   const reusePlan = buildSessionTransportReusePlan({
     currentTargetKey: options.readSessionTargetKey(options.sessionId),
     requestedTargetKey: buildTransportTargetKey(primeState.transportHost),
-    wsReadyState: options.readSessionTransportSocket(options.sessionId)?.readyState ?? null,
+    wsReadyState: readEffectiveSessionTransportReadyState(options),
     pendingTransportOpen,
     pendingTransportOpenStale: pendingTransportOpen
       ? options.isPendingSessionTransportOpenStale(options.sessionId)
@@ -143,6 +169,7 @@ export function createSessionRuntime(options: {
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
   writeSessionTransportHost?: (sessionId: string, host: Host) => unknown;
   readSessionTransportSocket: (sessionId: string) => { readyState: number } | null;
+  readSessionTransportResource?: (sessionId: string) => SessionTransportResourceLike | null;
   connectSession: (sessionId: string, host: Host) => void;
   defaultViewport: {
     cols: number;
@@ -187,9 +214,13 @@ export function createSessionRuntime(options: {
     }
 
     if (shouldConnect) {
-      const currentTransport = options.readSessionTransportSocket(existingSession.id);
+      const currentTransportReadyState = readEffectiveSessionTransportReadyState({
+        sessionId: existingSession.id,
+        readSessionTransportSocket: options.readSessionTransportSocket as (sessionId: string) => BridgeTransportSocket | null,
+        readSessionTransportResource: options.readSessionTransportResource,
+      });
       const shouldReconnectExisting = shouldOpenManagedSessionTransport({
-        readyState: currentTransport?.readyState ?? null,
+        readyState: currentTransportReadyState,
         hasPendingOpenIntent: hasPendingSessionTransportOpenIntent(
           options.refs.pendingSessionTransportOpenIntentsRef.current as Parameters<typeof hasPendingSessionTransportOpenIntent>[0],
           existingSession.id,
@@ -369,6 +400,7 @@ export function reconnectSessionRuntime(options: {
   readSessionTargetKey: (sessionId: string) => string | null;
   readSessionTargetRuntime: (sessionId: string) => { sessionIds: string[] } | null;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => SessionTransportResourceLike | null;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
   isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
   runtimeDebug: RuntimeDebugFn;
@@ -424,7 +456,7 @@ export function reconnectSessionRuntime(options: {
   const reusePlan = buildSessionTransportReusePlan({
     currentTargetKey: targetKey,
     requestedTargetKey: buildTransportTargetKey(primeState.transportHost),
-    wsReadyState: options.readSessionTransportSocket(options.sessionId)?.readyState ?? null,
+    wsReadyState: readEffectiveSessionTransportReadyState(options),
     pendingTransportOpen,
     pendingTransportOpenStale,
     source: 'reconnect',

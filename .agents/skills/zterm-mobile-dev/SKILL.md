@@ -1079,6 +1079,12 @@ android/
 - **边界**: 这个 grace 只属于 lifecycle freshness，不属于 `active-tick` 或显式 input recovery；用户输入撞到 closed socket 仍必须走现有即时恢复路径
 - **反模式**: 为了解决频繁重连在 App/TerminalPage 加延迟、把 daemon 改成记客户端 foreground、或让输入路径也等待保活窗口
 
+### 模式: mux session 生命周期必须联合读取 target socket 与 channel
+- **触发信号**: 同 daemon 的物理 mux socket 仍是 `OPEN`，但切 session / 回前台仍重建连接，或 channel 已关闭却被误判为可复用而一直不刷新。
+- **动作**: connect/create/reconnect 决策统一读取 `SessionTransportResource`：target socket `OPEN` 且 terminal channel `open` 才复用；channel `opening` 视为正在打开；channel `closing/closed` 必须在原 target socket 上重开 channel。
+- **反模式**: 只读 legacy `runtime.activeSocket`；只看 target socket `OPEN` 就跳过 channel reopen；为关闭的 channel 新建第二条 physical socket。
+- **验证**: unit 正反成对锁住 open-channel reuse 与 closed-channel reopen，再跑 `SessionContext.ws-refresh` 黑盒证明同一 physical socket 上关闭 inactive channel 后切回会发新的 `mux-channel-open`。
+
 ### 模式: reconnect / offline 通知只做顶层悬浮投影
 - **触发信号**: 网络状态条出现或消失时，terminal、QuickBar、remote-window video 发生上下跳动、重新测量或 resize
 - **动作**: 状态 truth 仍由 `terminal.transport_lifecycle` owner 提供；页面只渲染 `position: fixed`、高 z-index、`pointer-events: none` 的顶层通知 overlay
