@@ -321,6 +321,7 @@ describe('remote window stream daemon owner', () => {
       requestId: 'rw-input-config',
       streamId: 'stream-input-config',
       targetId: target.streamTargetId,
+      clientSentAt: Date.now(),
       event: {
         kind: 'scroll',
         unit: 'pixel',
@@ -334,6 +335,7 @@ describe('remote window stream daemon owner', () => {
     }, target);
 
     expect(config).toEqual({
+      clientSentAt: expect.any(Number),
       pid: 123,
       appBundleId: 'com.apple.TextEdit',
       focusPolicy: 'bring-to-focus',
@@ -359,6 +361,7 @@ describe('remote window stream daemon owner', () => {
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('let gesture: String?');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('config.event.kind == "gesture"');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('remote gesture input missing delta or coordinates');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('usleep(sleepMicros)');
   });
 
   it('requires macOS helper focus verification before reporting input success', () => {
@@ -378,7 +381,7 @@ describe('remote window stream daemon owner', () => {
       /func postScrollEvent[\s\S]*postMouseMove\(x: x, y: y\)[\s\S]*scrollWheelEvent2Source/,
     );
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toMatch(
-      /config\.event\.kind == "gesture"[\s\S]*postScrollEvent\(x: pointX, y: pointY/,
+      /config\.event\.kind == "gesture"[\s\S]*postScrollEvent\(x: startX, y: startY/,
     );
   });
 
@@ -1265,6 +1268,7 @@ describe('remote window stream daemon owner', () => {
       requestId: 'rw-input-focus',
       streamId: 'stream-input',
       targetId: 'app-window:123:456',
+      clientSentAt: Date.now(),
       event: {
         kind: 'focus',
       },
@@ -1290,6 +1294,7 @@ describe('remote window stream daemon owner', () => {
       requestId: 'rw-input',
       streamId: 'stream-input',
       targetId: 'app-window:123:456',
+      clientSentAt: Date.now(),
       event: {
         kind: 'pointer',
         phase: 'down',
@@ -1323,6 +1328,7 @@ describe('remote window stream daemon owner', () => {
       requestId: 'rw-input-scroll',
       streamId: 'stream-input',
       targetId: 'app-window:123:456',
+      clientSentAt: Date.now(),
       event: {
         kind: 'scroll',
         unit: 'pixel',
@@ -1354,6 +1360,7 @@ describe('remote window stream daemon owner', () => {
 	      requestId: 'rw-input-gesture',
 	      streamId: 'stream-input',
 	      targetId: 'app-window:123:456',
+	      clientSentAt: Date.now(),
 	      event: {
 	        kind: 'gesture',
 	        gesture: 'swipe',
@@ -1430,6 +1437,7 @@ describe('remote window stream daemon owner', () => {
       requestId: 'rw-input-helper-pointer',
       streamId: 'stream-input-helper',
       targetId: target.streamTargetId,
+      clientSentAt: Date.now(),
       event: {
         kind: 'pointer',
         phase: 'down',
@@ -1446,6 +1454,7 @@ describe('remote window stream daemon owner', () => {
 	      requestId: 'rw-input-helper-scroll',
 	      streamId: 'stream-input-helper',
       targetId: target.streamTargetId,
+      clientSentAt: Date.now(),
       event: {
         kind: 'scroll',
         unit: 'pixel',
@@ -1461,6 +1470,7 @@ describe('remote window stream daemon owner', () => {
 	      requestId: 'rw-input-helper-gesture',
 	      streamId: 'stream-input-helper',
 	      targetId: target.streamTargetId,
+	      clientSentAt: Date.now(),
 	      event: {
 	        kind: 'gesture',
 	        gesture: 'swipe',
@@ -1486,6 +1496,7 @@ describe('remote window stream daemon owner', () => {
 	      requestId: 'rw-input-helper-key',
       streamId: 'stream-input-helper',
       targetId: target.streamTargetId,
+      clientSentAt: Date.now(),
       event: {
         kind: 'key',
         phase: 'down',
@@ -1550,6 +1561,7 @@ describe('remote window stream daemon owner', () => {
       requestId: 'rw-input-mismatch',
       streamId: 'stream-input-negative',
       targetId: 'other-target',
+      clientSentAt: Date.now(),
       event: {
         kind: 'key',
         phase: 'down',
@@ -1576,6 +1588,7 @@ describe('remote window stream daemon owner', () => {
       requestId: 'rw-input-no-focus',
       streamId: 'stream-input-no-focus',
       targetId: noFocusTarget.streamTargetId,
+      clientSentAt: Date.now(),
       event: {
         kind: 'pointer',
         phase: 'down',
@@ -1597,6 +1610,7 @@ describe('remote window stream daemon owner', () => {
       requestId: 'rw-input-invalid-scroll',
       streamId: 'stream-input-negative',
       targetId: target.streamTargetId,
+      clientSentAt: Date.now(),
       event: {
         kind: 'scroll',
         unit: 'pixel',
@@ -1617,6 +1631,7 @@ describe('remote window stream daemon owner', () => {
 	      requestId: 'rw-input-invalid-gesture',
 	      streamId: 'stream-input-negative',
 	      targetId: target.streamTargetId,
+	      clientSentAt: Date.now(),
 	      event: {
 	        kind: 'gesture',
 	        gesture: 'swipe',
@@ -1648,6 +1663,7 @@ describe('remote window stream daemon owner', () => {
       requestId: 'rw-input-stopped',
       streamId: 'stream-input-negative',
       targetId: target.streamTargetId,
+      clientSentAt: Date.now(),
       event: {
         kind: 'key',
         phase: 'down',

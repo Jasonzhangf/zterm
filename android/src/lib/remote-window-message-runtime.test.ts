@@ -369,6 +369,7 @@ describe('remote window message runtime', () => {
       type: 'remote-window-input',
       payload: {
         requestId: expect.stringMatching(/^rw-input-48-/),
+        clientSentAt: 48,
         streamId: 'stream-5',
         targetId: 'target-5',
         event: {

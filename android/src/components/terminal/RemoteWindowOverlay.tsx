@@ -253,6 +253,7 @@ const REMOTE_WINDOW_FULLSCREEN_MIN_SCALE = 1;
 const REMOTE_WINDOW_FULLSCREEN_MAX_SCALE = 4;
 const REMOTE_WINDOW_FULLSCREEN_PAN_TAP_THRESHOLD_PX = 8;
 const REMOTE_WINDOW_TOUCH_SCROLL_THRESHOLD_PX = 8;
+const REMOTE_WINDOW_INPUT_STALE_MS = 1_000;
 const REMOTE_WINDOW_CATALOG_UI_TIMEOUT_MS = 8_000;
 const REMOTE_WINDOW_CATALOG_PROJECTION_CACHE_TTL_MS = 60_000;
 
@@ -1697,6 +1698,26 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     };
   }, [resolveSurfaceInputPoint]);
 
+  const resolvePointerInputAtPoint = useCallback((
+    pointerId: number,
+    clientX: number,
+    clientY: number,
+    phase: 'down' | 'up',
+  ): RemoteWindowInputEventPayload['event'] | null => {
+    const point = resolveSurfaceInputPoint(clientX, clientY);
+    if (!point) {
+      return null;
+    }
+    return {
+      kind: 'pointer',
+      phase,
+      pointerId,
+      button: 'left',
+      buttons: phase === 'down' ? 1 : 0,
+      ...point,
+    };
+  }, [resolveSurfaceInputPoint]);
+
   const resolveScrollInputEvent = useCallback((
     clientX: number,
     clientY: number,
@@ -1754,14 +1775,18 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     startAtMs: number,
     endAtMs: number,
   ): RemoteWindowInputEventPayload['event'] | null => {
-    const deltaX = toClientX - fromClientX;
-    const deltaY = toClientY - fromClientY;
-    if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY) || (deltaX === 0 && deltaY === 0)) {
+    const ageMs = Number.isFinite(endAtMs - startAtMs) ? endAtMs - startAtMs : 0;
+    if (ageMs > REMOTE_WINDOW_INPUT_STALE_MS) {
       return null;
     }
     const startPoint = resolveSurfaceInputPoint(fromClientX, fromClientY);
     const endPoint = resolveSurfaceInputPoint(toClientX, toClientY);
     if (!startPoint || !endPoint) {
+      return null;
+    }
+    const deltaX = endPoint.x - startPoint.x;
+    const deltaY = endPoint.y - startPoint.y;
+    if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY) || (deltaX === 0 && deltaY === 0)) {
       return null;
     }
     const durationMs = Math.max(1, Math.round(Number.isFinite(endAtMs - startAtMs) ? endAtMs - startAtMs : 1));
@@ -1874,7 +1899,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         startClientY: event.clientY,
         lastClientX: event.clientX,
         lastClientY: event.clientY,
-        startAtMs: event.timeStamp,
+        startAtMs: Date.now(),
       };
       event.preventDefault();
       event.stopPropagation();
@@ -2004,8 +2029,18 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     }
     if (gesture.mode === 'pan' && gesture.pointerId === event.pointerId) {
       if (!gesture.moved) {
-        const downPayload = resolvePointerInputEvent(event, 'down');
-        const upPayload = resolvePointerInputEvent(event, 'up');
+        const downPayload = resolvePointerInputAtPoint(
+          gesture.pointerId,
+          gesture.startClientX,
+          gesture.startClientY,
+          'down',
+        );
+        const upPayload = resolvePointerInputAtPoint(
+          gesture.pointerId,
+          gesture.startClientX,
+          gesture.startClientY,
+          'up',
+        );
         if (downPayload) {
           emitRemoteWindowInputAfterFocus(downPayload);
         }
@@ -2019,8 +2054,25 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       return;
     }
     if (gesture.mode === 'touchPending' && gesture.pointerId === event.pointerId) {
-      const downPayload = resolvePointerInputEvent(event, 'down');
-      const upPayload = resolvePointerInputEvent(event, 'up');
+      const ageMs = Date.now() - gesture.startAtMs;
+      if (ageMs > REMOTE_WINDOW_INPUT_STALE_MS) {
+        surfaceGestureRef.current = null;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      const downPayload = resolvePointerInputAtPoint(
+        gesture.pointerId,
+        gesture.startClientX,
+        gesture.startClientY,
+        'down',
+      );
+      const upPayload = resolvePointerInputAtPoint(
+        gesture.pointerId,
+        gesture.startClientX,
+        gesture.startClientY,
+        'up',
+      );
       if (downPayload) {
         emitRemoteWindowInputAfterFocus(downPayload);
       }
@@ -2042,7 +2094,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         finalClientX,
         finalClientY,
         gesture.startAtMs,
-        event.timeStamp,
+        Date.now(),
       );
       surfaceGestureRef.current = null;
       event.preventDefault();
@@ -2072,7 +2124,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       event.preventDefault();
       event.stopPropagation();
     }
-  }, [emitRemoteWindowInputAfterFocus, emitTouchGestureInput, resolvePointerInputEvent, state]);
+  }, [emitRemoteWindowInputAfterFocus, emitTouchGestureInput, resolvePointerInputAtPoint, resolvePointerInputEvent, state]);
 
   const handleVideoSurfacePointerCancel = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const gesture = surfaceGestureRef.current;

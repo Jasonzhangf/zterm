@@ -1304,7 +1304,7 @@ describe('RemoteWindowOverlay', () => {
     expect(payload.event.gesture).toBe('swipe');
     expect(payload.event.phase).toBe('end');
     expect(payload.event.deltaX).toBe(0);
-    expect(payload.event.deltaY).toBe(-30);
+    expect(payload.event.deltaY).toBe(-168);
     expect(payload.event.unit).toBe('pixel');
     expect(payload.event.startNormalizedX).toBeCloseTo(0.5, 3);
     expect(payload.event.startNormalizedY).toBeCloseTo(0.7, 3);
@@ -1369,12 +1369,65 @@ describe('RemoteWindowOverlay', () => {
       phase: 'end',
       pointerId: 22,
       deltaX: 0,
-      deltaY: -40,
+      deltaY: -224,
       startNormalizedX: 0.64,
       startNormalizedY: 0.8,
       normalizedX: 0.64,
       normalizedY: 0.4,
     });
+  });
+
+  it('drops stale touch gestures instead of sending delayed remote actions', async () => {
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const sendInput = vi.fn();
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+    }));
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        requestTargets={requestTargets}
+        startStream={startStream}
+        sendInput={sendInput}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-target-app-1');
+    fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
+    await screen.findByTestId('remote-window-video');
+
+    const surface = screen.getByTestId('remote-window-video-surface');
+    Object.defineProperty(surface, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 200,
+        bottom: 100,
+        width: 200,
+        height: 100,
+        toJSON: () => ({}),
+      }),
+    });
+
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000);
+    fireEvent.pointerDown(surface, { pointerId: 23, pointerType: 'touch', clientX: 120, clientY: 80, button: 0, buttons: 1 });
+    vi.advanceTimersByTime(20);
+    fireEvent.pointerMove(surface, { pointerId: 23, pointerType: 'touch', clientX: 120, clientY: 40, button: 0, buttons: 1 });
+    vi.advanceTimersByTime(1_001);
+    fireEvent.pointerUp(surface, { pointerId: 23, pointerType: 'touch', clientX: 120, clientY: 40, button: 0, buttons: 0 });
+
+    expect(sendInput).not.toHaveBeenCalled();
   });
 
   it('sizes the receiver projection from daemon capture frame aspect after stream start', async () => {
@@ -1471,7 +1524,7 @@ describe('RemoteWindowOverlay', () => {
       gesture: 'swipe',
       phase: 'end',
       deltaX: 0,
-      deltaY: -50,
+      deltaY: -133.33333333333337,
     });
     expect(Number.parseFloat(content.style.top || '0')).toBeCloseTo(topBeforeScroll, 1);
   });
@@ -1804,7 +1857,7 @@ describe('RemoteWindowOverlay', () => {
       gesture: 'swipe',
       phase: 'end',
       deltaX: 0,
-      deltaY: -50,
+      deltaY: -133.33333333333337,
     });
     expect(Number.parseFloat(content.style.top || '0')).toBeCloseTo(topBeforePan, 1);
   });

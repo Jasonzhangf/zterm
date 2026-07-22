@@ -13209,6 +13209,7 @@ var DEFAULT_ITERM2_PYTHON_TIMEOUT_MS = 5e3;
 var DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS = 5e3;
 var DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS = 8e3;
 var DEFAULT_REMOTE_WINDOW_FRAME_RATE = 12;
+var REMOTE_WINDOW_INPUT_STALE_MS = 1e3;
 var ITERM2_APP_BUNDLE_ID = "com.googlecode.iterm2";
 var ITERM2_PANE_GAP_PX = 1;
 var REMOTE_WINDOW_ERROR_MESSAGE_MAX_CHARS = 220;
@@ -13718,21 +13719,9 @@ func handleConfig(_ config: InputConfig) throws {
         else {
             throw inputError("remote gesture input missing delta or coordinates")
         }
-        let dominantDelta = max(abs(deltaX), abs(deltaY))
-        let steps = max(1, min(12, Int(ceil(dominantDelta / 48.0))))
-        let stepDeltaX = deltaX / Double(steps)
-        let stepDeltaY = deltaY / Double(steps)
-        let duration = max(1.0, min(1000.0, config.event.durationMs ?? 1.0))
-        let sleepMicros = UInt32(max(4000.0, min(20000.0, (duration / Double(steps)) * 1000.0)))
-        for step in 1...steps {
-            let progress = Double(step) / Double(steps)
-            let pointX = startX + (x - startX) * progress
-            let pointY = startY + (y - startY) * progress
-            postScrollEvent(x: pointX, y: pointY, deltaX: stepDeltaX, deltaY: stepDeltaY, unit: config.event.unit)
-            if step < steps {
-                usleep(sleepMicros)
-            }
-        }
+        _ = x
+        _ = y
+        postScrollEvent(x: startX, y: startY, deltaX: deltaX, deltaY: deltaY, unit: config.event.unit)
     } else if config.event.kind == "key" {
         guard let phase = config.event.phase else {
             throw inputError("remote key input missing phase")
@@ -14317,6 +14306,14 @@ function createDefaultRemoteWindowInputHelper(options) {
   const queue = [];
   let disposed = false;
   const stderrSummary = () => stderrBuffer.trim().slice(-REMOTE_WINDOW_ERROR_MESSAGE_MAX_CHARS);
+  const rejectIfStale = (request) => {
+    const sentAt = request.config.clientSentAt;
+    if (Number.isFinite(sentAt) && Date.now() - Number(sentAt) > REMOTE_WINDOW_INPUT_STALE_MS) {
+      rejectRequest(request, new Error("remote window input stale"));
+      return true;
+    }
+    return false;
+  };
   const rejectRequest = (request, error) => {
     if (!request) {
       return;
@@ -14408,6 +14405,10 @@ ${message}` : error.message));
     if (!request) {
       return;
     }
+    if (rejectIfStale(request)) {
+      pump();
+      return;
+    }
     const helperProcess = startChild();
     active = request;
     request.timeout = setTimeout(() => {
@@ -14423,7 +14424,7 @@ ${message}` : error.message));
         child = null;
       }
       pump();
-    }, 5e3);
+    }, REMOTE_WINDOW_INPUT_STALE_MS);
     helperProcess.stdin.write(`${JSON.stringify(request.config)}
 `, (error) => {
       if (!error || active !== request) {
@@ -14469,6 +14470,7 @@ function buildRemoteWindowInputConfig(payload, target) {
       title: target.videoTarget.title,
       bounds: target.videoTarget.windowBoundsTopLeftPx
     },
+    clientSentAt: payload.clientSentAt,
     event: payload.event
   };
 }
@@ -14900,6 +14902,12 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
   function validateRemoteWindowInput(payload, entry) {
     if (!payload.requestId || !payload.streamId || !payload.targetId) {
       throw new Error("remote window input requires requestId, streamId, and targetId");
+    }
+    if (!Number.isFinite(payload.clientSentAt)) {
+      throw new Error("remote window input requires clientSentAt");
+    }
+    if (Date.now() - Number(payload.clientSentAt) > REMOTE_WINDOW_INPUT_STALE_MS) {
+      throw new Error("remote window input stale");
     }
     if (payload.targetId !== entry.targetId) {
       throw new Error(`remote window input target mismatch: ${payload.targetId}`);

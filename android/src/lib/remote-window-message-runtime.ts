@@ -308,6 +308,9 @@ export function createRemoteWindowMessageRuntime(input?: {
         type: 'remote-window-input',
         payload: {
           ...options.payload,
+          clientSentAt: Number.isFinite(options.payload.clientSentAt)
+            ? options.payload.clientSentAt
+            : now(),
           requestId: `rw-input-${now()}-${Math.random().toString(36).slice(2, 8)}`,
         },
       });

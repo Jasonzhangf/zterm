@@ -288,6 +288,7 @@ export interface RemoteWindowInputEventPayload {
   requestId: string;
   streamId: string;
   targetId: string;
+  clientSentAt?: number;
   event:
     | {
         kind: 'focus';
