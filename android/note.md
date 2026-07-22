@@ -1,3 +1,14 @@
+# 2026-07-22 remote app focus diagnosis
+
+- Symptom: remote video can display a selected app window, but the app is not activated/focused and remote control input is unavailable.
+- SOP/model flow: `desktop.remote_window_stream` -> daemon app-window catalog projection -> Android input capability projection -> explicit focus intent -> daemon AX/Quartz focus verification -> OS input injection.
+- Single active hypothesis: daemon app-window manifests are projected as read-only. `RemoteWindowOverlay.isRemoteWindowInputSupported()` requires `streamMode='interactive'`; the two daemon app-window builders currently emit `streamMode='view'`. This makes `inputContext` null and causes `sendRemoteWindowInputIntent()` to reject the initial focus intent and all later input before transport.
+- First divergence: `buildMacosAppWindowTargets()` / app-window branch of `buildRemoteWindowStreamTargets()` changes an interactive app-window target into `view`.
+- Unique owner and allowed edit scope: `android/src/server/remote-window-stream-daemon.ts` plus its owner tests in `android/src/server/remote-window-stream-daemon.test.ts`. iTerm2 pane targets remain `view`, including `tmux-input` and `iterm2-api` read-only routes.
+- Required verification: daemon manifest positive assertions for app-window `interactive`; negative assertions that iTerm2 panes remain `view`; existing Android overlay focus-context/explicit-focus tests; TypeScript check; feature-registry gates; build only after local gates pass. Live Android input replay remains dependent on an online device.
+- Fix completed: changed the daemon app-window projection to `streamMode='interactive'` in both `buildMacosAppWindowTargets()` and the app-window branch of `buildRemoteWindowStreamTargets()`, leaving iTerm2 panes on `view`.
+- Verification completed: `pnpm --dir android exec vitest run src/server/remote-window-stream-daemon.test.ts src/components/terminal/RemoteWindowOverlay.test.tsx --reporter dot` passed `69 tests`; `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` passed; `pnpm --dir android run test:feature-registry` passed `48 tests`; `pnpm --dir android run build:android` passed with APK `0.1.3.2207`, versionCode `1032207`, sha256 `9295aaac4376e3ca618b919a37137a19bd4e42198bb5d9956e6e6201d417a9d1`. No online ADB device was attached, so live phone focus replay remains open.
+
 # 2026-07-22 relay route projection keeps losing Tailscale fallback
 
 - Symptom: Jason reports that when Relay is unavailable the whole service fails, which violates the intended design because Tailscale should remain independent and serve as the backup path.

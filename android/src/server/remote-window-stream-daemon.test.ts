@@ -62,6 +62,7 @@ function makeAppStreamTarget() {
     inputTarget: {
       kind: 'app-window' as const,
     },
+    streamMode: 'interactive' as const,
     focusPolicy: 'bring-to-focus' as const,
     inputRoute: 'os-event' as const,
   };
@@ -396,6 +397,7 @@ describe('remote window stream daemon owner', () => {
       inputTarget: {
         kind: 'app-window',
       },
+      streamMode: 'interactive',
       focusPolicy: 'bring-to-focus',
       inputRoute: 'os-event',
     });
@@ -478,6 +480,7 @@ describe('remote window stream daemon owner', () => {
     const bottomPane = paneTargets.find((target) => target.inputTarget.itermSessionId === 'right-bottom');
 
     expect(appTarget?.videoTarget.cropRectTopLeftPx).toEqual({ x: 10, y: 20, width: 302, height: 250 });
+    expect(appTarget?.streamMode).toBe('interactive');
     expect(paneTargets).toHaveLength(3);
     expect(tmuxPane?.inputTarget).toMatchObject({
       kind: 'tmux-pane',
@@ -488,6 +491,7 @@ describe('remote window stream daemon owner', () => {
     });
     expect(tmuxPane?.focusPolicy).toBe('no-focus-steal');
     expect(tmuxPane?.inputRoute).toBe('tmux-input');
+    expect(tmuxPane?.streamMode).toBe('view');
     expect(tmuxPane?.videoTarget.windowId).toBe('window-1');
     expect(tmuxPane?.videoTarget.cropRectTopLeftPx).toEqual({ x: 111, y: 70, width: 200, height: 100 });
     expect(bottomPane?.videoTarget.cropRectTopLeftPx).toEqual({ x: 111, y: 171, width: 200, height: 99 });
@@ -507,6 +511,7 @@ describe('remote window stream daemon owner', () => {
       expect(target.inputTarget).toMatchObject({
         kind: 'iterm2-pane',
       });
+      expect(target.streamMode).toBe('view');
       expect(target.inputTarget.tmuxSession).toBeUndefined();
       expect(target.focusPolicy).toBe('bring-to-focus');
       expect(target.inputRoute).toBe('iterm2-api');

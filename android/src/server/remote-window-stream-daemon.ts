@@ -1168,7 +1168,7 @@ export function buildRemoteWindowStreamTargets(
         inputTarget: {
           kind: 'app-window',
         },
-        streamMode: 'view',
+        streamMode: 'interactive',
         focusPolicy: 'bring-to-focus',
         inputRoute: 'os-event',
         capture: {
@@ -1301,7 +1301,7 @@ export function buildMacosAppWindowTargets(
       inputTarget: {
         kind: 'app-window',
       },
-      streamMode: 'view',
+      streamMode: 'interactive',
       focusPolicy: 'bring-to-focus',
       inputRoute: 'os-event',
       capture: {
