@@ -66,6 +66,7 @@ export function ensureActiveSessionFreshRuntime(options: {
     lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
     connectedBaselineBurstGuardRef: MutableRefObject<Set<string>>;
     lastServerActivityAtRef: MutableRefObject<Map<string, number>>;
+    lastTerminalActivityAtRef?: MutableRefObject<Map<string, number>>;
     lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
     staleTransportProbeAtRef: MutableRefObject<Map<string, number>>;
     reconnectRuntimesRef: MutableRefObject<Map<string, { connecting: boolean; timer: number | null }>>;

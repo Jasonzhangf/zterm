@@ -82,6 +82,64 @@ describe('session-context-lifecycle', () => {
     })).toBe(true);
   });
 
+  it('schedules active tick from terminal render freshness instead of generic server activity', () => {
+    const state = {
+      sessions: [{ id: 'session-1', state: 'connected' }],
+      activeSessionId: 'session-1',
+      liveSessionIds: ['session-1'],
+    } as any;
+    const lastServerActivityAtRef = { current: new Map<string, number>([
+      ['session-1', 9_950],
+    ]) };
+    const lastTerminalActivityAtRef = { current: new Map<string, number>([
+      ['session-1', 9_000],
+    ]) };
+
+    expect(shouldScheduleActiveTickRefresh({
+      state,
+      sessionId: 'session-1',
+      lastServerActivityAtRef,
+      lastTerminalActivityAtRef,
+      headStalePingMs: 200,
+      now: 10_000,
+    } as any)).toBe(true);
+  });
+
+  it('uses connected baseline only as a bounded initial head freshness window', () => {
+    const state = {
+      sessions: [{ id: 'session-1', state: 'connected' }],
+      activeSessionId: 'session-1',
+      liveSessionIds: ['session-1'],
+    } as any;
+    const lastServerActivityAtRef = { current: new Map<string, number>([
+      ['session-1', 9_990],
+    ]) };
+    const lastTerminalActivityAtRef = { current: new Map<string, number>() };
+    const lastConnectedBaselineAtRef = { current: new Map<string, number>([
+      ['session-1', 9_900],
+    ]) };
+
+    expect(shouldScheduleActiveTickRefresh({
+      state,
+      sessionId: 'session-1',
+      lastServerActivityAtRef,
+      lastTerminalActivityAtRef,
+      lastConnectedBaselineAtRef,
+      headStalePingMs: 200,
+      now: 10_000,
+    })).toBe(false);
+
+    expect(shouldScheduleActiveTickRefresh({
+      state,
+      sessionId: 'session-1',
+      lastServerActivityAtRef,
+      lastTerminalActivityAtRef,
+      lastConnectedBaselineAtRef,
+      headStalePingMs: 200,
+      now: 10_101,
+    })).toBe(true);
+  });
+
   it('keeps passive visible pane sessions refreshing before first server activity on the slow lane', () => {
     const state = {
       sessions: [

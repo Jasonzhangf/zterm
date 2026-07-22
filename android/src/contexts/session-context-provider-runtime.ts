@@ -64,6 +64,7 @@ export function useSessionProviderRuntime(options: {
   const sessionVisibleRangeRef = useRef<Map<string, SessionVisibleRangeState>>(new Map());
   const lastPongAtRef = useRef<Map<string, number>>(new Map());
   const lastServerActivityAtRef = useRef<Map<string, number>>(new Map());
+  const lastTerminalActivityAtRef = useRef<Map<string, number>>(new Map());
   const staleTransportProbeAtRef = useRef<Map<string, number>>(new Map());
   const reconnectRuntimesRef = useRef<Map<string, SessionReconnectRuntime>>(new Map());
   const manualCloseRef = useRef<Set<string>>(new Set());
@@ -131,6 +132,7 @@ export function useSessionProviderRuntime(options: {
       sessionVisibleRangeRef,
       lastPongAtRef,
       lastServerActivityAtRef,
+      lastTerminalActivityAtRef,
       staleTransportProbeAtRef,
       reconnectRuntimesRef,
       manualCloseRef,

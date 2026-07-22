@@ -129,6 +129,8 @@ export function shouldScheduleActiveTickRefresh(options: {
   state: Pick<SessionManagerState, 'sessions' | 'activeSessionId' | 'liveSessionIds'>;
   sessionId: string;
   lastServerActivityAtRef: { current: Map<string, number> };
+  lastTerminalActivityAtRef?: { current: Map<string, number> };
+  lastConnectedBaselineAtRef?: { current: Map<string, number> };
   headStalePingMs: number;
   now?: number;
 }) {
@@ -139,18 +141,25 @@ export function shouldScheduleActiveTickRefresh(options: {
   if (session.state !== 'connected') {
     return true;
   }
-  const lastServerActivityAt = options.lastServerActivityAtRef.current.get(options.sessionId) || 0;
-  if (lastServerActivityAt <= 0) {
+  const lastTerminalActivityAt = resolveTerminalActivityAt({
+    sessionId: options.sessionId,
+    lastServerActivityAtRef: options.lastServerActivityAtRef,
+    lastTerminalActivityAtRef: options.lastTerminalActivityAtRef,
+    lastConnectedBaselineAtRef: options.lastConnectedBaselineAtRef,
+  });
+  if (lastTerminalActivityAt <= 0) {
     return options.state.activeSessionId === options.sessionId;
   }
   const now = options.now ?? Date.now();
-  return now - lastServerActivityAt >= Math.max(0, Math.floor(options.headStalePingMs || 0));
+  return now - lastTerminalActivityAt >= Math.max(0, Math.floor(options.headStalePingMs || 0));
 }
 
 export function shouldSchedulePassiveVisibleTickRefresh(options: {
   state: Pick<SessionManagerState, 'sessions' | 'activeSessionId' | 'liveSessionIds'>;
   sessionId: string;
   lastServerActivityAtRef: { current: Map<string, number> };
+  lastTerminalActivityAtRef?: { current: Map<string, number> };
+  lastConnectedBaselineAtRef?: { current: Map<string, number> };
   headStalePingMs: number;
   now?: number;
 }) {
@@ -164,12 +173,32 @@ export function shouldSchedulePassiveVisibleTickRefresh(options: {
   if (options.state.activeSessionId === options.sessionId) {
     return false;
   }
-  const lastServerActivityAt = options.lastServerActivityAtRef.current.get(options.sessionId) || 0;
-  if (lastServerActivityAt <= 0) {
+  const lastTerminalActivityAt = resolveTerminalActivityAt({
+    sessionId: options.sessionId,
+    lastServerActivityAtRef: options.lastServerActivityAtRef,
+    lastTerminalActivityAtRef: options.lastTerminalActivityAtRef,
+    lastConnectedBaselineAtRef: options.lastConnectedBaselineAtRef,
+  });
+  if (lastTerminalActivityAt <= 0) {
     return true;
   }
   const now = options.now ?? Date.now();
-  return now - lastServerActivityAt >= Math.max(0, Math.floor(options.headStalePingMs || 0));
+  return now - lastTerminalActivityAt >= Math.max(0, Math.floor(options.headStalePingMs || 0));
+}
+
+function resolveTerminalActivityAt(options: {
+  sessionId: string;
+  lastServerActivityAtRef: { current: Map<string, number> };
+  lastTerminalActivityAtRef?: { current: Map<string, number> };
+  lastConnectedBaselineAtRef?: { current: Map<string, number> };
+}) {
+  if (options.lastTerminalActivityAtRef) {
+    return Math.max(
+      options.lastTerminalActivityAtRef.current.get(options.sessionId) || 0,
+      options.lastConnectedBaselineAtRef?.current.get(options.sessionId) || 0,
+    );
+  }
+  return options.lastServerActivityAtRef.current.get(options.sessionId) || 0;
 }
 
 export function useSessionContextLifecycle(options: {
@@ -188,6 +217,7 @@ export function useSessionContextLifecycle(options: {
     lastActiveReentryAtRef: { current: Map<string, number> };
     lastConnectedBaselineAtRef: { current: Map<string, number> };
     lastServerActivityAtRef: { current: Map<string, number> };
+    lastTerminalActivityAtRef?: { current: Map<string, number> };
     remoteScreenshotRuntimeRef: { current: RemoteScreenshotRuntimeLike };
     remoteWindowMessageRuntimeRef: { current: RemoteWindowMessageRuntimeLike };
     remoteWindowReceiverRuntimeRef?: { current: RemoteWindowReceiverRuntimeLike };
@@ -389,6 +419,8 @@ export function useSessionContextLifecycle(options: {
           state: options.refs.stateRef.current,
           sessionId: activeSessionId,
           lastServerActivityAtRef: options.refs.lastServerActivityAtRef,
+          lastTerminalActivityAtRef: options.refs.lastTerminalActivityAtRef,
+          lastConnectedBaselineAtRef: options.refs.lastConnectedBaselineAtRef,
           headStalePingMs,
           now,
         })) {
@@ -458,6 +490,8 @@ export function useSessionContextLifecycle(options: {
             state: options.refs.stateRef.current,
             sessionId,
             lastServerActivityAtRef: options.refs.lastServerActivityAtRef,
+            lastTerminalActivityAtRef: options.refs.lastTerminalActivityAtRef,
+            lastConnectedBaselineAtRef: options.refs.lastConnectedBaselineAtRef,
             headStalePingMs,
             now,
           })) {

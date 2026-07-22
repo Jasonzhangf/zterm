@@ -715,9 +715,11 @@ export function requestSessionBufferHeadRuntime(options: {
   sessionId: string;
   ws?: BridgeTransportSocket | null;
   force?: boolean;
+  trackProbe?: boolean;
   refs: {
     stateRef: MutableRefObject<{ sessions: Session[] }>;
     lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
+    staleTransportProbeAtRef?: MutableRefObject<Map<string, number>>;
     sessionDebugMetricsStoreRef: MutableRefObject<SessionDebugMetricsRecorder>;
   };
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
@@ -748,6 +750,12 @@ export function requestSessionBufferHeadRuntime(options: {
     return false;
   }
   options.refs.lastHeadRequestAtRef.current.set(options.sessionId, now);
+  if (
+    options.trackProbe !== false
+    && !options.refs.staleTransportProbeAtRef?.current.has(options.sessionId)
+  ) {
+    options.refs.staleTransportProbeAtRef?.current.set(options.sessionId, now);
+  }
   options.refs.sessionDebugMetricsStoreRef.current.recordRefreshRequest(options.sessionId);
   options.sendSocketPayload(options.sessionId, targetWs, JSON.stringify({
     type: 'buffer-head-request',

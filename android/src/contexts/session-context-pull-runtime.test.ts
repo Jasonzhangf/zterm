@@ -1,7 +1,67 @@
 import { describe, expect, it, vi } from 'vitest';
-import { resetSessionTransportPullBookkeeping } from './session-context-pull-runtime';
+import {
+  recordSessionRx,
+  resetSessionTransportPullBookkeeping,
+} from './session-context-pull-runtime';
 
 describe('session-context-pull-runtime', () => {
+  it('keeps a head probe pending when only non-render server activity arrives', () => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(10_000);
+    const refs = {
+      sessionDebugMetricsStoreRef: { current: { recordRxBytes: vi.fn() } },
+      lastServerActivityAtRef: { current: new Map<string, number>() },
+      lastTerminalActivityAtRef: { current: new Map<string, number>() },
+      staleTransportProbeAtRef: { current: new Map<string, number>([['session-1', 9_000]]) },
+    };
+
+    try {
+      recordSessionRx({
+        sessionId: 'session-1',
+        data: JSON.stringify({ type: 'title', payload: 'still alive but not render truth' }),
+        refs: refs as any,
+      });
+
+      expect(refs.lastServerActivityAtRef.current.get('session-1')).toBe(10_000);
+      expect(refs.lastTerminalActivityAtRef.current.has('session-1')).toBe(false);
+      expect(refs.staleTransportProbeAtRef.current.get('session-1')).toBe(9_000);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('clears a head probe only when buffer head or body truth arrives', () => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(10_000);
+    const refs = {
+      sessionDebugMetricsStoreRef: { current: { recordRxBytes: vi.fn() } },
+      lastServerActivityAtRef: { current: new Map<string, number>() },
+      lastTerminalActivityAtRef: { current: new Map<string, number>() },
+      staleTransportProbeAtRef: { current: new Map<string, number>([['session-1', 9_000]]) },
+    };
+
+    try {
+      recordSessionRx({
+        sessionId: 'session-1',
+        data: JSON.stringify({
+          type: 'mux-channel-message',
+          payload: {
+            channelId: 'channel-1',
+            message: {
+              type: 'buffer-head',
+              payload: { revision: 3, latestEndIndex: 42 },
+            },
+          },
+        }),
+        refs: refs as any,
+      });
+
+      expect(refs.lastServerActivityAtRef.current.get('session-1')).toBe(10_000);
+      expect(refs.lastTerminalActivityAtRef.current.get('session-1')).toBe(10_000);
+      expect(refs.staleTransportProbeAtRef.current.has('session-1')).toBe(false);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it('clears both in-flight pull state and sync debounce truth on bookkeeping reset', () => {
     const sessionId = 'session-2';
     const sessionPullStateRef = {

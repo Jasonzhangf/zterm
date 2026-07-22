@@ -303,7 +303,11 @@ export function handleSocketConnectedBaselineRuntime(options: {
   ) => void;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   isSessionTransportActive: (sessionId: string) => boolean;
-  requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
+  requestSessionBufferHead: (
+    sessionId: string,
+    ws?: BridgeTransportSocket | null,
+    options?: { force?: boolean; trackProbe?: boolean },
+  ) => boolean;
   incrementConnectedSync: () => void;
 }) {
   const currentSession = options.refs.stateRef.current.sessions.find((item) => item.id === options.sessionId) || null;
@@ -328,7 +332,10 @@ export function handleSocketConnectedBaselineRuntime(options: {
     options.refs.pendingConnectTailRefreshRef.current.add(options.sessionId);
   }
   if (connectedHeadRefreshPlan.shouldRequestHead) {
-    options.requestSessionBufferHead(options.sessionId, options.ws, { force: true });
+    options.requestSessionBufferHead(options.sessionId, options.ws, {
+      force: true,
+      trackProbe: false,
+    });
   }
   options.refs.lastConnectedBaselineAtRef.current.set(options.sessionId, Date.now());
   options.refs.connectedBaselineBurstGuardRef.current.add(options.sessionId);

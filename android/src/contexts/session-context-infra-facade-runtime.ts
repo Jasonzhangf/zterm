@@ -188,6 +188,7 @@ export function createSessionInfraFacadeRuntime(options: {
   pendingResumeTailRefreshRef: { current: Set<string> };
   sessionPullStateRef: { current: Map<string, unknown> };
   lastServerActivityAtRef: { current: Map<string, number> };
+  lastTerminalActivityAtRef: { current: Map<string, number> };
   staleTransportProbeAtRef: { current: Map<string, number> };
   lastPongAtRef: { current: Map<string, number> };
   pingIntervalsRef: { current: Map<string, ReturnType<typeof setInterval>> };
@@ -426,6 +427,7 @@ export function createSessionInfraFacadeRuntime(options: {
       refs: {
         sessionDebugMetricsStoreRef: options.sessionDebugMetricsStoreRef,
         lastServerActivityAtRef: options.lastServerActivityAtRef,
+        lastTerminalActivityAtRef: options.lastTerminalActivityAtRef,
         staleTransportProbeAtRef: options.staleTransportProbeAtRef,
       },
     });

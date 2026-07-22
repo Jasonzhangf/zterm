@@ -47,6 +47,7 @@ export interface SessionMessageAssembliesOptions {
   sessionDebugMetricsStoreRef: MutableRefObject<any>;
   lastSyncRequestAtRef: MutableRefObject<any>;
   lastHeadRequestAtRef: MutableRefObject<any>;
+  staleTransportProbeAtRef: MutableRefObject<any>;
   lastPongAtRef: MutableRefObject<any>;
   lastConnectedBaselineAtRef: MutableRefObject<any>;
   connectedBaselineBurstGuardRef: MutableRefObject<any>;
@@ -84,7 +85,11 @@ export interface SessionMessageAssembliesOptions {
 
 export interface SessionMessageAssembliesResult {
   requestSessionBufferSync: (sessionId: string, requestOptions?: any) => boolean;
-  requestSessionBufferHead: (sessionId: string, ws?: any, headOptions?: { force?: boolean }) => boolean;
+  requestSessionBufferHead: (
+    sessionId: string,
+    ws?: any,
+    headOptions?: { force?: boolean; trackProbe?: boolean },
+  ) => boolean;
   handleSocketServerMessage: (messageOptions: any, msg: any) => void;
   handleSocketConnectedBaseline: (connectedOptions: any) => void;
   finalizeSocketFailureBaseline: (baselineOptions: any) => any;
@@ -131,14 +136,16 @@ export function createSessionMessageAssemblies(
   const requestSessionBufferHead = (
     sessionId: string,
     ws?: any,
-    headOptions?: { force?: boolean },
+    headOptions?: { force?: boolean; trackProbe?: boolean },
   ) => requestSessionBufferHeadRuntime({
     sessionId,
     ws,
     force: headOptions?.force,
+    trackProbe: headOptions?.trackProbe,
     refs: {
       stateRef: options.stateRef,
       lastHeadRequestAtRef: options.lastHeadRequestAtRef,
+      staleTransportProbeAtRef: options.staleTransportProbeAtRef,
       sessionDebugMetricsStoreRef: options.sessionDebugMetricsStoreRef,
     },
     readSessionTransportSocket: options.readSessionTransportSocket,

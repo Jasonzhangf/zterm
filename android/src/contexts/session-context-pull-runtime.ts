@@ -73,14 +73,47 @@ export function recordSessionRx(options: {
   refs: {
     sessionDebugMetricsStoreRef: MutableRefObject<SessionDebugMetricsRecorder>;
     lastServerActivityAtRef: MutableRefObject<Map<string, number>>;
+    lastTerminalActivityAtRef?: MutableRefObject<Map<string, number>>;
     staleTransportProbeAtRef: MutableRefObject<Map<string, number>>;
   };
 }) {
+  const now = Date.now();
   options.refs.sessionDebugMetricsStoreRef.current.recordRxBytes(options.sessionId, options.data);
-  options.refs.lastServerActivityAtRef.current.set(options.sessionId, Date.now());
-  options.refs.staleTransportProbeAtRef.current.delete(options.sessionId);
+  options.refs.lastServerActivityAtRef.current.set(options.sessionId, now);
+  if (isTerminalRenderActivityFrame(options.data)) {
+    options.refs.lastTerminalActivityAtRef?.current.set(options.sessionId, now);
+    options.refs.staleTransportProbeAtRef.current.delete(options.sessionId);
+  }
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+}
+
+function isTerminalRenderActivityMessage(message: unknown): boolean {
+  if (!isRecord(message) || typeof message.type !== 'string') {
+    return false;
+  }
+  if (message.type === 'buffer-head' || message.type === 'buffer-sync') {
+    return true;
+  }
+  if (message.type === 'mux-channel-message') {
+    const payload = isRecord(message.payload) ? message.payload : null;
+    return isTerminalRenderActivityMessage(payload?.message);
+  }
+  return false;
+}
+
+export function isTerminalRenderActivityFrame(data: string | ArrayBuffer): boolean {
+  if (typeof data !== 'string') {
+    return false;
+  }
+  try {
+    return isTerminalRenderActivityMessage(JSON.parse(data) as unknown);
+  } catch {
+    return false;
+  }
+}
 
 export function markPendingInputTailRefresh(options: {
   sessionId: string;

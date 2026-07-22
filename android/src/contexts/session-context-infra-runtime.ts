@@ -271,6 +271,7 @@ export function recordSessionRxInfraRuntime(options: {
   refs: {
     sessionDebugMetricsStoreRef: { current: unknown };
     lastServerActivityAtRef: { current: Map<string, number> };
+    lastTerminalActivityAtRef?: { current: Map<string, number> };
     staleTransportProbeAtRef: { current: Map<string, number> };
   };
 }) {

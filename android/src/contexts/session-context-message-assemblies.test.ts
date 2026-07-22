@@ -60,6 +60,7 @@ describe('session-context-message-assemblies cadence', () => {
         sessionDebugMetricsStoreRef: { current: { recordRefreshRequest: vi.fn() } },
         lastSyncRequestAtRef: { current: new Map() },
         lastHeadRequestAtRef: { current: new Map() },
+        staleTransportProbeAtRef: { current: new Map() },
         lastPongAtRef: { current: new Map() },
         lastConnectedBaselineAtRef: { current: new Map() },
         connectedBaselineBurstGuardRef: { current: new Set() },

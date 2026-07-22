@@ -55,6 +55,7 @@ interface SessionLifecycleRuntimeOptions {
       clearSession: (sessionId: string) => void;
     }>;
     lastServerActivityAtRef: MutableRefObject<Map<string, number>>;
+    lastTerminalActivityAtRef?: MutableRefObject<Map<string, number>>;
     lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
     lastPongAtRef: MutableRefObject<Map<string, number>>;
     staleTransportProbeAtRef: MutableRefObject<Map<string, number>>;
@@ -255,6 +256,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
         lastConnectedBaselineAtRef: options.refs.lastConnectedBaselineAtRef,
         connectedBaselineBurstGuardRef: options.refs.connectedBaselineBurstGuardRef,
         lastServerActivityAtRef: options.refs.lastServerActivityAtRef,
+        lastTerminalActivityAtRef: options.refs.lastTerminalActivityAtRef,
         lastHeadRequestAtRef: options.refs.lastHeadRequestAtRef,
         staleTransportProbeAtRef: options.refs.staleTransportProbeAtRef,
         reconnectRuntimesRef: options.refs.reconnectRuntimesRef,

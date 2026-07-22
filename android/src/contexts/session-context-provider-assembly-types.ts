@@ -76,6 +76,10 @@ export interface SessionProviderCoreAssembliesResult {
   clearSessionTransportRuntime: (sessionId: string) => any;
   readSessionBufferHead?: (sessionId: string) => any;
   requestSessionBufferSync: (sessionId: string, options?: any) => boolean;
-  requestSessionBufferHead: (sessionId: string, ws?: any, options?: { force?: boolean }) => boolean;
+  requestSessionBufferHead: (
+    sessionId: string,
+    ws?: any,
+    options?: { force?: boolean; trackProbe?: boolean },
+  ) => boolean;
   resolveTerminalRefreshCadence: (sessionId?: string | null) => { headTickMs: number; headStalePingMs: number; pullRequestStaleMs: number };
 }
