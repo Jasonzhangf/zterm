@@ -260,6 +260,7 @@ const {
 } = terminalControlRuntime;
 remoteWindowStreamRuntime = createRemoteWindowStreamDaemonRuntime({
   platform: process.platform,
+  warmTargetCatalogOnStart: true,
   runTmux,
 });
 

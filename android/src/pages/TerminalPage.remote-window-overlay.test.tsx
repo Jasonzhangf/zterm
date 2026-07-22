@@ -82,6 +82,7 @@ vi.mock('../components/terminal/TerminalQuickBar', () => ({
     onImagePaste,
     onToggleKeyboard,
     remoteWindowInputActive,
+    onMeasuredHeightChange,
   }: {
     activeSessionId?: string | null;
     onSendSequence?: (sequence: string) => void;
@@ -89,25 +90,33 @@ vi.mock('../components/terminal/TerminalQuickBar', () => ({
     onImagePaste?: (sessionId: string, file: File) => void;
     onToggleKeyboard?: () => void;
     remoteWindowInputActive?: boolean;
-  }) => (
-    <div
-      data-testid="terminal-quickbar"
-      data-remote-window-input-active={remoteWindowInputActive ? 'true' : 'false'}
-    >
-      <button type="button" onClick={() => onSendSequence?.('\x1b[A')}>quickbar-arrow-up</button>
-      <button type="button" onClick={() => onSessionDraftSend?.('继续执行\r')}>quickbar-send-draft</button>
-      <button
-        type="button"
-        onClick={() => activeSessionId && onImagePaste?.(
-          activeSessionId,
-          new File(['image'], 'proof.png', { type: 'image/png' }),
-        )}
+    onMeasuredHeightChange?: (height: number) => void;
+  }) => {
+    return (
+      <div
+        data-testid="terminal-quickbar"
+        data-remote-window-input-active={remoteWindowInputActive ? 'true' : 'false'}
+        ref={(element) => {
+          if (element) {
+            onMeasuredHeightChange?.(112);
+          }
+        }}
       >
-        quickbar-image
-      </button>
-      <button type="button" onClick={() => onToggleKeyboard?.()}>quickbar-keyboard</button>
-    </div>
-  ),
+        <button type="button" onClick={() => onSendSequence?.('\x1b[A')}>quickbar-arrow-up</button>
+        <button type="button" onClick={() => onSessionDraftSend?.('继续执行\r')}>quickbar-send-draft</button>
+        <button
+          type="button"
+          onClick={() => activeSessionId && onImagePaste?.(
+            activeSessionId,
+            new File(['image'], 'proof.png', { type: 'image/png' }),
+          )}
+        >
+          quickbar-image
+        </button>
+        <button type="button" onClick={() => onToggleKeyboard?.()}>quickbar-keyboard</button>
+      </div>
+    );
+  },
 }));
 
 function makeSession(id: string): Session {
@@ -278,12 +287,16 @@ describe('TerminalPage remote window overlay', () => {
     );
 
     expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-stage-shell').getAttribute('style') || '').toMatch(/bottom: (?!0px)\d+px/);
+    });
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
 
     await waitFor(() => {
       expect(onRequestRemoteWindowTargets).toHaveBeenCalledWith('s1');
       expect(screen.getByTestId('remote-window-target-app-1')).toBeTruthy();
       expect(screen.queryByTestId('terminal-quickbar')).toBeNull();
+      expect(screen.getByTestId('terminal-stage-shell').getAttribute('style') || '').toContain('bottom: 0px');
       expect(onActiveBodySubscriptionSuppressedChange).toHaveBeenCalledWith(true);
     });
 

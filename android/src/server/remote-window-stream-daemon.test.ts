@@ -15,6 +15,12 @@ import {
   type MacosAppWindowCatalog,
 } from './remote-window-stream-daemon';
 
+async function flushPromiseQueue() {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
 function makeStreamTarget() {
   return {
     streamTargetId: 'iterm2-pane:window-1:tab-1:left',
@@ -650,6 +656,105 @@ describe('remote window stream daemon owner', () => {
     );
     expect('targets' in response ? response.targets.filter((target) => target.videoTarget.kind === 'app-window') : []).toHaveLength(2);
     expect('targets' in response ? response.targets.filter((target) => target.videoTarget.kind === 'iterm2-pane') : []).toHaveLength(3);
+  });
+
+  it('returns stale daemon target catalog immediately while a background refresh runs', async () => {
+    let nowMs = 10_000;
+    const refreshGate: { release?: (value: string) => void } = {};
+    const firstCatalog = makeAppWindowCatalog();
+    const secondCatalog = makeAppWindowCatalog();
+    secondCatalog.windows = [{
+      ...secondCatalog.windows[0]!,
+      windowId: '99',
+      title: 'New cached window',
+    }];
+    const runMacosAppWindowCatalog = vi.fn()
+      .mockResolvedValueOnce(JSON.stringify(firstCatalog))
+      .mockImplementationOnce(() => new Promise<string>((resolve) => {
+        refreshGate.release = resolve;
+      }));
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      nowMs: () => nowMs,
+      targetCatalogCacheTtlMs: 500,
+      runMacosAppWindowCatalog,
+      runIterm2Python: vi.fn(async () => JSON.stringify({ windows: [] })),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const first = await runtime.listTargets({
+      requestId: 'rw-first',
+      includeIterm2: false,
+    });
+    expect('targets' in first ? first.targets.map((target) => target.videoTarget.title) : []).toContain('Chrome Window');
+
+    nowMs += 501;
+    const second = await runtime.listTargets({
+      requestId: 'rw-second',
+      includeIterm2: false,
+    });
+    expect('targets' in second ? second.targets.map((target) => target.videoTarget.title) : []).toContain('Chrome Window');
+    expect('targets' in second ? second.requestId : '').toBe('rw-second');
+    expect(runMacosAppWindowCatalog).toHaveBeenCalledTimes(2);
+
+    refreshGate.release?.(JSON.stringify(secondCatalog));
+    await flushPromiseQueue();
+
+    nowMs += 1;
+    const third = await runtime.listTargets({
+      requestId: 'rw-third',
+      includeIterm2: false,
+    });
+    expect('targets' in third ? third.targets.map((target) => target.videoTarget.title) : []).toContain('New cached window');
+    expect(runMacosAppWindowCatalog).toHaveBeenCalledTimes(2);
+  });
+
+  it('honors force-refresh by bypassing the daemon target catalog cache', async () => {
+    const firstCatalog = makeAppWindowCatalog();
+    const secondCatalog = makeAppWindowCatalog();
+    secondCatalog.windows = [{
+      ...secondCatalog.windows[0]!,
+      windowId: '100',
+      title: 'Forced catalog window',
+    }];
+    const runMacosAppWindowCatalog = vi.fn()
+      .mockResolvedValueOnce(JSON.stringify(firstCatalog))
+      .mockResolvedValueOnce(JSON.stringify(secondCatalog));
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      targetCatalogCacheTtlMs: 60_000,
+      runMacosAppWindowCatalog,
+      runIterm2Python: vi.fn(async () => JSON.stringify({ windows: [] })),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await runtime.listTargets({ requestId: 'rw-first', includeIterm2: false });
+    const refreshed = await runtime.listTargets({
+      requestId: 'rw-refresh',
+      includeIterm2: false,
+      forceRefresh: true,
+    });
+
+    expect('targets' in refreshed ? refreshed.targets.map((target) => target.videoTarget.title) : []).toContain('Forced catalog window');
+    expect(runMacosAppWindowCatalog).toHaveBeenCalledTimes(2);
+  });
+
+  it('warms the daemon target catalog cache for the first picker request', async () => {
+    const runMacosAppWindowCatalog = vi.fn(async () => JSON.stringify(makeAppWindowCatalog()));
+    const runIterm2Python = vi.fn(async () => JSON.stringify(makeCatalog()));
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      warmTargetCatalogOnStart: true,
+      runMacosAppWindowCatalog,
+      runIterm2Python,
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const response = await runtime.listTargets({ requestId: 'rw-warmed' });
+
+    expect('targets' in response ? response.targets.length : 0).toBeGreaterThan(0);
+    expect(runMacosAppWindowCatalog).toHaveBeenCalledTimes(1);
+    expect(runIterm2Python).toHaveBeenCalledTimes(1);
   });
 
   it('keeps app-window targets selectable while surfacing iTerm2 catalog errors explicitly', async () => {

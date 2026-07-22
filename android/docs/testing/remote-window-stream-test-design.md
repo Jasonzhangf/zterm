@@ -114,7 +114,10 @@ Current executable gates:
    - If `requestTargets()` never resolves or rejects, the overlay's local watchdog must surface `远程窗口列表读取超时` and move to an error state without starting screenshot/video/terminal-buffer fallback.
    - The negative gate must prove catalog failure does not start screenshot, terminal buffer render, hidden video, or transport rebuild fallback.
    - Catalog cache is keyed by daemon identity rather than session id. Opening the picker for a second tmux session on the same daemon must not send a second `remote-window-targets-request` inside the 60-second TTL. A changed daemon endpoint/auth token or expired TTL must issue one fresh request. A closed physical transport must still return an explicit transport error even if a cache entry exists.
+   - Daemon runtime startup warms the default app-window+iTerm2 catalog once. A fresh process-local cache request must not rerun Swift/iTerm2 enumeration; an expired cache must return stale targets immediately while exactly one background refresh runs; a first uncached request and explicit `forceRefresh` must await the live owner and surface its real result/error.
+   - Cached daemon responses must rewrite the top-level and nested error `requestId` to the current request so concurrent or later callers cannot receive another request's identity.
    - Overlay projection keeps the last successful catalog for the current active session and renders those rows immediately on picker reopen or manual refresh. The first uncached open may show a compact loading row; cached/stale/force-refresh opens must not blank the target list. The Refresh button passes `{ forceRefresh: true }` to the SessionContext catalog owner, bypassing the daemon-wide TTL without creating a second catalog truth.
+   - While picker state suppresses the QuickBar, `TerminalPage` stage bottom reserve must be `0`; target-locked floating/fullscreen modes restore the normal QuickBar/IME chrome projection.
 
 8. Input return policy
    - Android pointer/key events are sent only as explicit `remote-window-input` over an existing stream transport.

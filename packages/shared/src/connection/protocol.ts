@@ -138,6 +138,7 @@ export interface RemoteWindowStreamRequestPayload {
   requestId: string;
   includeAppWindows?: boolean;
   includeIterm2?: boolean;
+  forceRefresh?: boolean;
 }
 
 export interface RemoteWindowStreamRect {

@@ -24,6 +24,7 @@ const DEFAULT_ITERM2_PYTHON_TIMEOUT_MS = 5000;
 const DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS = 5000;
 const DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS = 8000;
 const DEFAULT_REMOTE_WINDOW_FRAME_RATE = 12;
+const DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 60_000;
 const REMOTE_WINDOW_INPUT_STALE_MS = 1_000;
 const ITERM2_APP_BUNDLE_ID = 'com.googlecode.iterm2';
 const ITERM2_PANE_GAP_PX = 1;
@@ -132,6 +133,9 @@ export interface RemoteWindowStreamDaemonDeps {
   swiftBinary?: string;
   iterm2PythonTimeoutMs?: number;
   appWindowCatalogTimeoutMs?: number;
+  targetCatalogCacheTtlMs?: number;
+  nowMs?: () => number;
+  warmTargetCatalogOnStart?: boolean;
   captureStartupTimeoutMs?: number;
   frameRate?: number;
   runIterm2Python?: (script: string, options: { pythonBinary: string; timeoutMs: number }) => Promise<string>;
@@ -166,6 +170,11 @@ export interface RemoteWindowStreamDaemonRuntime {
     payload: RemoteWindowInputEventPayload,
   ) => Promise<RemoteWindowInputResultPayload | RemoteWindowStreamErrorPayload>;
   dispose: (reason?: string) => void;
+}
+
+interface RemoteWindowTargetCatalogCacheEntry {
+  updatedAtMs: number;
+  response: RemoteWindowStreamTargetsResponsePayload;
 }
 
 export function buildRemoteWindowImagePasteInputPayloads(options: {
@@ -1030,6 +1039,44 @@ function remoteWindowError(
     requestId: payload.requestId || '',
     code,
     message,
+  };
+}
+
+function buildRemoteWindowTargetCatalogCacheKey(payload: RemoteWindowStreamRequestPayload) {
+  return [
+    payload.includeAppWindows !== false ? 'app' : 'no-app',
+    payload.includeIterm2 !== false ? 'iterm2' : 'no-iterm2',
+  ].join('|');
+}
+
+function cloneRemoteWindowTargetCatalogResponse(
+  response: RemoteWindowStreamTargetsResponsePayload,
+  requestId: string,
+): RemoteWindowStreamTargetsResponsePayload {
+  return {
+    requestId,
+    targets: response.targets.slice(),
+    ...(response.errors
+      ? {
+          errors: response.errors.map((error) => ({
+            ...error,
+            requestId,
+          })),
+        }
+      : {}),
+  };
+}
+
+function cloneRemoteWindowTargetCatalogResult(
+  result: RemoteWindowStreamTargetsResponsePayload | RemoteWindowStreamErrorPayload,
+  requestId: string,
+) {
+  if ('targets' in result) {
+    return cloneRemoteWindowTargetCatalogResponse(result, requestId);
+  }
+  return {
+    ...result,
+    requestId,
   };
 }
 
@@ -2002,6 +2049,13 @@ export function createRemoteWindowStreamDaemonRuntime(
   const createVideoSource = deps.videoSourceFactory || (() => new nonstandard.RTCVideoSource({ isScreencast: true }));
   const rgbaToI420 = deps.rgbaToI420 || nonstandard.rgbaToI420;
   const activeStreams = new Map<string, ActiveRemoteWindowStream>();
+  const targetCatalogCacheTtlMs = Math.max(
+    0,
+    Math.floor(deps.targetCatalogCacheTtlMs ?? DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS),
+  );
+  const nowMs = deps.nowMs || Date.now;
+  const targetCatalogCache = new Map<string, RemoteWindowTargetCatalogCacheEntry>();
+  const targetCatalogRefreshes = new Map<string, Promise<RemoteWindowStreamTargetsResponsePayload | RemoteWindowStreamErrorPayload>>();
 
   async function queryIterm2Catalog() {
     const stdout = await runIterm2Python(ITERM2_CATALOG_PYTHON, {
@@ -2019,15 +2073,9 @@ export function createRemoteWindowStreamDaemonRuntime(
     return parseMacosAppWindowCatalog(stdout);
   }
 
-  async function listTargets(
+  async function listTargetsLive(
     payload: RemoteWindowStreamRequestPayload,
   ): Promise<RemoteWindowStreamTargetsResponsePayload | RemoteWindowStreamErrorPayload> {
-    if (!payload.requestId) {
-      return remoteWindowError(payload, 'remote_window_request_invalid', 'remote window target request requires requestId');
-    }
-    if (platform !== 'darwin') {
-      return remoteWindowError(payload, 'remote_window_platform_unsupported', 'remote window stream catalog is only available on macOS daemon hosts');
-    }
     const createdAt = now();
     const includeAppWindows = payload.includeAppWindows !== false;
     const includeIterm2 = payload.includeIterm2 !== false;
@@ -2103,6 +2151,88 @@ export function createRemoteWindowStreamDaemonRuntime(
       requestId: payload.requestId,
       targets: [],
     };
+  }
+
+  function startTargetCatalogRefresh(
+    cacheKey: string,
+    payload: RemoteWindowStreamRequestPayload,
+  ) {
+    const existing = targetCatalogRefreshes.get(cacheKey);
+    if (existing) {
+      return existing;
+    }
+    const refreshPayload = {
+      ...payload,
+      requestId: payload.requestId || `rw-catalog-refresh-${nowMs()}`,
+    };
+    const refresh = listTargetsLive(refreshPayload)
+      .catch((error: unknown) => remoteWindowError(
+        refreshPayload,
+        'remote_window_catalog_failed',
+        error instanceof Error ? error.message : 'remote window catalog failed',
+      ))
+      .then((result) => {
+        if ('targets' in result) {
+          targetCatalogCache.set(cacheKey, {
+            updatedAtMs: nowMs(),
+            response: cloneRemoteWindowTargetCatalogResponse(result, result.requestId),
+          });
+        }
+        return result;
+      })
+      .finally(() => {
+        if (targetCatalogRefreshes.get(cacheKey) === refresh) {
+          targetCatalogRefreshes.delete(cacheKey);
+        }
+      });
+    targetCatalogRefreshes.set(cacheKey, refresh);
+    return refresh;
+  }
+
+  async function refreshTargetCatalog(
+    cacheKey: string,
+    payload: RemoteWindowStreamRequestPayload,
+  ) {
+    const result = await startTargetCatalogRefresh(cacheKey, payload);
+    return cloneRemoteWindowTargetCatalogResult(result, payload.requestId);
+  }
+
+  function warmTargetCatalog() {
+    if (platform !== 'darwin') {
+      return;
+    }
+    const payload: RemoteWindowStreamRequestPayload = {
+      requestId: `rw-catalog-warm-${nowMs()}`,
+      includeAppWindows: true,
+      includeIterm2: true,
+    };
+    void startTargetCatalogRefresh(
+      buildRemoteWindowTargetCatalogCacheKey(payload),
+      payload,
+    );
+  }
+
+  async function listTargets(
+    payload: RemoteWindowStreamRequestPayload,
+  ): Promise<RemoteWindowStreamTargetsResponsePayload | RemoteWindowStreamErrorPayload> {
+    if (!payload.requestId) {
+      return remoteWindowError(payload, 'remote_window_request_invalid', 'remote window target request requires requestId');
+    }
+    if (platform !== 'darwin') {
+      return remoteWindowError(payload, 'remote_window_platform_unsupported', 'remote window stream catalog is only available on macOS daemon hosts');
+    }
+    const cacheKey = buildRemoteWindowTargetCatalogCacheKey(payload);
+    const cached = targetCatalogCache.get(cacheKey) || null;
+    const cacheAgeMs = cached ? nowMs() - cached.updatedAtMs : Number.POSITIVE_INFINITY;
+    const cacheFresh = Boolean(cached && cacheAgeMs >= 0 && cacheAgeMs < targetCatalogCacheTtlMs);
+    if (!payload.forceRefresh && cached && cacheFresh) {
+      return cloneRemoteWindowTargetCatalogResponse(cached.response, payload.requestId);
+    }
+    if (!payload.forceRefresh && cached) {
+      void startTargetCatalogRefresh(cacheKey, payload);
+      return cloneRemoteWindowTargetCatalogResponse(cached.response, payload.requestId);
+    }
+    return refreshTargetCatalog(cacheKey, payload);
   }
 
   function buildStreamError(
@@ -2537,8 +2667,14 @@ export function createRemoteWindowStreamDaemonRuntime(
     for (const entry of Array.from(activeStreams.values())) {
       cleanupStream(entry, reason);
     }
+    targetCatalogCache.clear();
+    targetCatalogRefreshes.clear();
     remoteWindowInputHelper?.dispose();
     remoteWindowInputHelper = null;
+  }
+
+  if (deps.warmTargetCatalogOnStart) {
+    warmTargetCatalog();
   }
 
   return {

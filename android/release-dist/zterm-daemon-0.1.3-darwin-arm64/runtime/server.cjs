@@ -13209,6 +13209,7 @@ var DEFAULT_ITERM2_PYTHON_TIMEOUT_MS = 5e3;
 var DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS = 5e3;
 var DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS = 8e3;
 var DEFAULT_REMOTE_WINDOW_FRAME_RATE = 12;
+var DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 6e4;
 var REMOTE_WINDOW_INPUT_STALE_MS = 1e3;
 var ITERM2_APP_BUNDLE_ID = "com.googlecode.iterm2";
 var ITERM2_PANE_GAP_PX = 1;
@@ -13987,6 +13988,33 @@ function remoteWindowError(payload, code, message) {
     requestId: payload.requestId || "",
     code,
     message
+  };
+}
+function buildRemoteWindowTargetCatalogCacheKey(payload) {
+  return [
+    payload.includeAppWindows !== false ? "app" : "no-app",
+    payload.includeIterm2 !== false ? "iterm2" : "no-iterm2"
+  ].join("|");
+}
+function cloneRemoteWindowTargetCatalogResponse(response, requestId) {
+  return {
+    requestId,
+    targets: response.targets.slice(),
+    ...response.errors ? {
+      errors: response.errors.map((error) => ({
+        ...error,
+        requestId
+      }))
+    } : {}
+  };
+}
+function cloneRemoteWindowTargetCatalogResult(result, requestId) {
+  if ("targets" in result) {
+    return cloneRemoteWindowTargetCatalogResponse(result, requestId);
+  }
+  return {
+    ...result,
+    requestId
   };
 }
 function normalizeWhitespace(value) {
@@ -14797,6 +14825,13 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
   const createVideoSource = deps.videoSourceFactory || (() => new nonstandard.RTCVideoSource({ isScreencast: true }));
   const rgbaToI420 = deps.rgbaToI420 || nonstandard.rgbaToI420;
   const activeStreams = /* @__PURE__ */ new Map();
+  const targetCatalogCacheTtlMs = Math.max(
+    0,
+    Math.floor(deps.targetCatalogCacheTtlMs ?? DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS)
+  );
+  const nowMs = deps.nowMs || Date.now;
+  const targetCatalogCache = /* @__PURE__ */ new Map();
+  const targetCatalogRefreshes = /* @__PURE__ */ new Map();
   async function queryIterm2Catalog() {
     const stdout = await runIterm2Python(ITERM2_CATALOG_PYTHON, {
       pythonBinary,
@@ -14811,13 +14846,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
     });
     return parseMacosAppWindowCatalog(stdout);
   }
-  async function listTargets(payload) {
-    if (!payload.requestId) {
-      return remoteWindowError(payload, "remote_window_request_invalid", "remote window target request requires requestId");
-    }
-    if (platform !== "darwin") {
-      return remoteWindowError(payload, "remote_window_platform_unsupported", "remote window stream catalog is only available on macOS daemon hosts");
-    }
+  async function listTargetsLive(payload) {
     const createdAt = now();
     const includeAppWindows = payload.includeAppWindows !== false;
     const includeIterm2 = payload.includeIterm2 !== false;
@@ -14888,6 +14917,73 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
       requestId: payload.requestId,
       targets: []
     };
+  }
+  function startTargetCatalogRefresh(cacheKey, payload) {
+    const existing = targetCatalogRefreshes.get(cacheKey);
+    if (existing) {
+      return existing;
+    }
+    const refreshPayload = {
+      ...payload,
+      requestId: payload.requestId || `rw-catalog-refresh-${nowMs()}`
+    };
+    const refresh = listTargetsLive(refreshPayload).catch((error) => remoteWindowError(
+      refreshPayload,
+      "remote_window_catalog_failed",
+      error instanceof Error ? error.message : "remote window catalog failed"
+    )).then((result) => {
+      if ("targets" in result) {
+        targetCatalogCache.set(cacheKey, {
+          updatedAtMs: nowMs(),
+          response: cloneRemoteWindowTargetCatalogResponse(result, result.requestId)
+        });
+      }
+      return result;
+    }).finally(() => {
+      if (targetCatalogRefreshes.get(cacheKey) === refresh) {
+        targetCatalogRefreshes.delete(cacheKey);
+      }
+    });
+    targetCatalogRefreshes.set(cacheKey, refresh);
+    return refresh;
+  }
+  async function refreshTargetCatalog(cacheKey, payload) {
+    const result = await startTargetCatalogRefresh(cacheKey, payload);
+    return cloneRemoteWindowTargetCatalogResult(result, payload.requestId);
+  }
+  function warmTargetCatalog() {
+    if (platform !== "darwin") {
+      return;
+    }
+    const payload = {
+      requestId: `rw-catalog-warm-${nowMs()}`,
+      includeAppWindows: true,
+      includeIterm2: true
+    };
+    void startTargetCatalogRefresh(
+      buildRemoteWindowTargetCatalogCacheKey(payload),
+      payload
+    );
+  }
+  async function listTargets(payload) {
+    if (!payload.requestId) {
+      return remoteWindowError(payload, "remote_window_request_invalid", "remote window target request requires requestId");
+    }
+    if (platform !== "darwin") {
+      return remoteWindowError(payload, "remote_window_platform_unsupported", "remote window stream catalog is only available on macOS daemon hosts");
+    }
+    const cacheKey = buildRemoteWindowTargetCatalogCacheKey(payload);
+    const cached = targetCatalogCache.get(cacheKey) || null;
+    const cacheAgeMs = cached ? nowMs() - cached.updatedAtMs : Number.POSITIVE_INFINITY;
+    const cacheFresh = Boolean(cached && cacheAgeMs >= 0 && cacheAgeMs < targetCatalogCacheTtlMs);
+    if (!payload.forceRefresh && cached && cacheFresh) {
+      return cloneRemoteWindowTargetCatalogResponse(cached.response, payload.requestId);
+    }
+    if (!payload.forceRefresh && cached) {
+      void startTargetCatalogRefresh(cacheKey, payload);
+      return cloneRemoteWindowTargetCatalogResponse(cached.response, payload.requestId);
+    }
+    return refreshTargetCatalog(cacheKey, payload);
   }
   function buildStreamError(payload, code, message) {
     return {
@@ -15270,8 +15366,13 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
     for (const entry of Array.from(activeStreams.values())) {
       cleanupStream(entry, reason);
     }
+    targetCatalogCache.clear();
+    targetCatalogRefreshes.clear();
     remoteWindowInputHelper?.dispose();
     remoteWindowInputHelper = null;
+  }
+  if (deps.warmTargetCatalogOnStart) {
+    warmTargetCatalog();
   }
   return {
     listTargets,
@@ -15463,6 +15564,7 @@ var {
 } = terminalControlRuntime;
 remoteWindowStreamRuntime = createRemoteWindowStreamDaemonRuntime({
   platform: process.platform,
+  warmTargetCatalogOnStart: true,
   runTmux
 });
 terminalControlRuntime.ensureTmuxServerRunning();

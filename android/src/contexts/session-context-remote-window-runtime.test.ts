@@ -170,6 +170,11 @@ describe('session context remote window runtime', () => {
     });
 
     expect(requestTargets).toHaveBeenCalledTimes(2);
+    expect(requestTargets).toHaveBeenLastCalledWith('session-1', {
+      ws,
+      request: { forceRefresh: true },
+      sendSocketPayload: expect.any(Function),
+    });
   });
 
   it('shares the daemon app catalog cache across session switches on the same daemon', async () => {

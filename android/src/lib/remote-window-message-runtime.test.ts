@@ -120,6 +120,32 @@ describe('remote window message runtime', () => {
     expect(runtime.getPendingCount()).toBe(0);
   });
 
+  it('carries explicit force-refresh to the daemon catalog owner', () => {
+    const sendSocketPayload = vi.fn();
+    const runtime = createRemoteWindowMessageRuntime({
+      now: () => 45,
+      setTimeoutFn: vi.fn(() => 10) as any,
+      clearTimeoutFn: vi.fn() as any,
+    });
+
+    void runtime.requestTargets('session-1', {
+      ws: makeSocket(),
+      request: { forceRefresh: true },
+      sendSocketPayload,
+    });
+
+    const sent = JSON.parse(sendSocketPayload.mock.calls[0][2] as string);
+    expect(sent).toMatchObject({
+      type: 'remote-window-targets-request',
+      payload: {
+        requestId: expect.stringMatching(/^rw-45-/),
+        includeAppWindows: true,
+        includeIterm2: true,
+        forceRefresh: true,
+      },
+    });
+  });
+
   it('times out requests without pretending an empty catalog is success', async () => {
     const timeoutHandlers: Array<() => void> = [];
     const runtime = createRemoteWindowMessageRuntime({

@@ -2902,7 +2902,9 @@ function TerminalPageComponent({
       + layoutProfile.quickBar.touchSafeOffsetPx
       + terminalBottomChromeLiftPx,
   );
-  const terminalStageBottomPx = terminalChromeBottomPx + terminalImeLiftPx;
+  const terminalStageBottomPx = remoteWindowOverlayOpen
+    ? 0
+    : terminalChromeBottomPx + terminalImeLiftPx;
   const terminalStageTopPx = portraitSessionDrawerEnabled
     ? Math.max(0, headerTopInsetPx + 50)
     : 0;

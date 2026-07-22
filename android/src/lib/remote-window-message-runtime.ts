@@ -171,6 +171,7 @@ export function createRemoteWindowMessageRuntime(input?: {
             requestId,
             includeAppWindows: options.request?.includeAppWindows ?? true,
             includeIterm2: options.request?.includeIterm2 ?? true,
+            ...(options.request?.forceRefresh ? { forceRefresh: true } : {}),
           };
           sendClientMessage(targetSessionId, options.ws, options.sendSocketPayload, {
             type: 'remote-window-targets-request',

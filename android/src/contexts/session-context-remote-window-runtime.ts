@@ -19,7 +19,7 @@ interface RemoteWindowCatalogMessageRuntimeLike {
     sessionId: string,
     options: {
       ws: BridgeTransportSocket;
-      request?: { includeAppWindows?: boolean; includeIterm2?: boolean };
+      request?: { includeAppWindows?: boolean; includeIterm2?: boolean; forceRefresh?: boolean };
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     },
   ) => Promise<RemoteWindowStreamTargetsResponsePayload>;
@@ -263,6 +263,7 @@ export async function requestRemoteWindowTargetsRuntime(options: {
   }
   const payload = await options.remoteWindowMessageRuntime.requestTargets(targetSessionId, {
     ws,
+    ...(options.forceRefresh ? { request: { forceRefresh: true } } : {}),
     sendSocketPayload: options.sendSocketPayload,
   });
   options.targetCatalogCache?.set(cacheKey, {
