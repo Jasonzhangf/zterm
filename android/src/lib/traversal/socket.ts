@@ -27,6 +27,7 @@ const CLOSED = 3;
 const WS_CANDIDATE_TIMEOUT_MS = 1800;
 const RTC_DIRECT_CANDIDATE_TIMEOUT_MS = 5000;
 const RTC_RELAY_CANDIDATE_TIMEOUT_MS = 2500;
+const RTC_DISCONNECTED_GRACE_MS = 10000;
 const RECONNECT_BASE_DELAY_MS = 300;
 const RECONNECT_MAX_DELAY_MS = 5000;
 
@@ -129,6 +130,8 @@ class WebRtcBackend implements Backend {
   private peerConnection: RTCPeerConnection | null = null;
 
   private dataChannel: RTCDataChannel | null = null;
+
+  private disconnectedTimer: number | null = null;
 
   private currentResolvedPath: TraversalResolvedPath;
   private currentResolvedRelayTransport: TraversalResolvedRelayTransport | undefined;
@@ -248,12 +251,48 @@ class WebRtcBackend implements Backend {
     }
   }
 
-  private closeRtcPeer() {
+  private clearDisconnectedTimer() {
+    if (this.disconnectedTimer === null) {
+      return;
+    }
+    window.clearTimeout(this.disconnectedTimer);
+    this.disconnectedTimer = null;
+  }
+
+  private closeRtcPeer(options?: { suppressChannelClose?: boolean }) {
+    this.clearDisconnectedTimer();
     try {
+      if (options?.suppressChannelClose && this.dataChannel) {
+        this.dataChannel.onclose = null;
+      }
       this.peerConnection?.close();
     } catch (error) {
       console.warn('[TraversalSocket] Failed to close RTC peer connection:', error);
     }
+  }
+
+  private scheduleDisconnectedClose(
+    peerConnection: RTCPeerConnection,
+    handlers: {
+      onclose: (event?: BridgeSocketCloseLike) => void;
+    },
+  ) {
+    if (this.disconnectedTimer !== null) {
+      return;
+    }
+    try {
+      peerConnection.restartIce?.();
+    } catch (error) {
+      console.warn('[TraversalSocket] Failed to restart RTC ICE after disconnected:', error);
+    }
+    this.disconnectedTimer = window.setTimeout(() => {
+      this.disconnectedTimer = null;
+      if (this.peerConnection !== peerConnection || peerConnection.connectionState !== 'disconnected') {
+        return;
+      }
+      handlers.onclose({ code: 1006, reason: 'rtc peer disconnected' });
+      this.closeRtcPeer({ suppressChannelClose: true });
+    }, RTC_DISCONNECTED_GRACE_MS);
   }
 
   public start(handlers: {
@@ -291,7 +330,10 @@ class WebRtcBackend implements Backend {
           handlers.onmessage({ data: event.data as string | ArrayBuffer });
         };
         channel.onerror = () => handlers.onerror('rtc data channel error');
-        channel.onclose = () => handlers.onclose({ code: 1000, reason: 'rtc data channel closed' });
+        channel.onclose = () => {
+          this.clearDisconnectedTimer();
+          handlers.onclose({ code: 1000, reason: 'rtc data channel closed' });
+        };
 
         peerConnection.onicecandidate = (event) => {
           if (!event.candidate) {
@@ -304,14 +346,21 @@ class WebRtcBackend implements Backend {
         };
         peerConnection.onconnectionstatechange = async () => {
           if (peerConnection.connectionState === 'failed') {
+            this.clearDisconnectedTimer();
             handlers.onerror('rtc peer connection failed');
             return;
           }
-          if (peerConnection.connectionState === 'closed' || peerConnection.connectionState === 'disconnected') {
+          if (peerConnection.connectionState === 'closed') {
+            this.clearDisconnectedTimer();
             handlers.onclose({ code: 1000, reason: `rtc peer ${peerConnection.connectionState}` });
             return;
           }
+          if (peerConnection.connectionState === 'disconnected') {
+            this.scheduleDisconnectedClose(peerConnection, handlers);
+            return;
+          }
           if (peerConnection.connectionState === 'connected') {
+            this.clearDisconnectedTimer();
             const nextRoute = await this.detectResolvedRoute();
             handlers.onpath?.(nextRoute.path, nextRoute.relayTransport, nextRoute.selectedIcePair);
           }
@@ -394,6 +443,7 @@ class WebRtcBackend implements Backend {
   }
 
   public close(_code?: number, _reason = 'rtc close') {
+    this.clearDisconnectedTimer();
     try {
       this.dataChannel?.close();
     } catch (error) {

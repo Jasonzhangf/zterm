@@ -786,6 +786,63 @@ describe('TraversalSocket reconnect', () => {
     socket.close();
   });
 
+  it('keeps an opened WebRTC transport alive through transient ICE disconnected state', async () => {
+    const socket = createRelayRtcSocket();
+    const onclose = vi.fn();
+    socket.onclose = onclose;
+    await flushMicrotasks();
+
+    MockWebSocket.instances[0].triggerOpen();
+    await flushMicrotasks();
+    MockRTCPeerConnection.instances[0].channel.triggerOpen();
+    await flushMicrotasks();
+
+    MockRTCPeerConnection.instances[0].connectionState = 'disconnected';
+    MockRTCPeerConnection.instances[0].onconnectionstatechange?.();
+
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(onclose).not.toHaveBeenCalled();
+    expect(socket.getDiagnostics()).toMatchObject({
+      stage: 'open',
+      resolvedPath: 'rtc-direct',
+    });
+
+    MockRTCPeerConnection.instances[0].connectionState = 'connected';
+    MockRTCPeerConnection.instances[0].onconnectionstatechange?.();
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(onclose).not.toHaveBeenCalled();
+    expect(socket.readyState).toBe(MockWebSocket.OPEN);
+    socket.close();
+  });
+
+  it('closes an opened WebRTC transport when ICE disconnected does not recover within the grace window', async () => {
+    const socket = createRelayRtcSocket();
+    const onclose = vi.fn();
+    socket.onclose = onclose;
+    await flushMicrotasks();
+
+    MockWebSocket.instances[0].triggerOpen();
+    await flushMicrotasks();
+    MockRTCPeerConnection.instances[0].channel.triggerOpen();
+    await flushMicrotasks();
+
+    MockRTCPeerConnection.instances[0].connectionState = 'disconnected';
+    MockRTCPeerConnection.instances[0].onconnectionstatechange?.();
+
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(onclose).toHaveBeenCalledWith({
+      code: 1006,
+      reason: 'rtc peer disconnected',
+    });
+    expect(socket.getDiagnostics()).toMatchObject({
+      stage: 'error',
+      reason: 'rtc peer disconnected',
+    });
+  });
+
   it('skips a freshly auth-failed direct candidate and opens the next candidate', async () => {
     const routeHealthCache = new TraversalRouteHealthCache();
     const socket = createSocket({}, {
