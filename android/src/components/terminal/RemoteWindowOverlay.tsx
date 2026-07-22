@@ -1045,14 +1045,9 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
 
   const handleFullscreen = useCallback(() => {
     publishRemoteWindowInputContext();
-    if (state.phase === 'targetLocked' && !bitratePresetTouchedRef.current) {
-      setBitratePreset((current) => (
-        current === 'fullscreen' || current === '20mbps' ? current : 'fullscreen'
-      ));
-    }
     resetFullscreenViewport();
     setState((current) => enterRemoteWindowFullscreen(current));
-  }, [publishRemoteWindowInputContext, resetFullscreenViewport, state]);
+  }, [publishRemoteWindowInputContext, resetFullscreenViewport]);
 
   const handleToggleFullscreenDisplayMode = useCallback(() => {
     resetFullscreenViewport();
@@ -1563,7 +1558,6 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         if (activeStreamIdRef.current === result.streamId) {
           setReceiverMediaStream(result.mediaStream || null);
           setReceiverFrameSize(resolveStartedCaptureFrameSize(result.started));
-          sendRemoteWindowInputIntent(targetSessionId, result.streamId, target, { kind: 'focus' });
         }
       })
       .catch((error) => {
@@ -1577,7 +1571,6 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     activeSessionId,
     networkQuality,
     resetFullscreenViewport,
-    sendRemoteWindowInputIntent,
     setFloatingOffset,
     setFloatingOverlayWidthPx,
     setFullscreenDisplayMode,
@@ -1683,16 +1676,6 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     };
   }, [resolveSurfaceInputPoint]);
 
-  const emitPointerInput = useCallback((
-    event: ReactPointerEvent<HTMLDivElement>,
-    phase: 'move' | 'down' | 'up',
-  ) => {
-    const pointerPayload = resolvePointerInputEvent(event, phase);
-    if (pointerPayload) {
-      emitRemoteWindowInput(pointerPayload);
-    }
-  }, [emitRemoteWindowInput, resolvePointerInputEvent]);
-
   const emitRemoteWindowFocus = useCallback(() => {
     return emitRemoteWindowInput({ kind: 'focus' });
   }, [emitRemoteWindowInput]);
@@ -1706,6 +1689,16 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     return emitRemoteWindowInput(eventPayload);
   }, [emitRemoteWindowFocus, emitRemoteWindowInput]);
 
+  const emitPointerInputAfterFocus = useCallback((
+    event: ReactPointerEvent<HTMLDivElement>,
+    phase: 'move' | 'down' | 'up',
+  ) => {
+    const pointerPayload = resolvePointerInputEvent(event, phase);
+    if (pointerPayload) {
+      emitRemoteWindowInputAfterFocus(pointerPayload);
+    }
+  }, [emitRemoteWindowInputAfterFocus, resolvePointerInputEvent]);
+
   const resolveSwipeGestureInputEvent = useCallback((
     pointerId: number,
     fromClientX: number,
@@ -1715,8 +1708,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     startAtMs: number,
     endAtMs: number,
   ): RemoteWindowInputEventPayload['event'] | null => {
-    const deltaX = fromClientX - toClientX;
-    const deltaY = fromClientY - toClientY;
+    const deltaX = toClientX - fromClientX;
+    const deltaY = toClientY - fromClientY;
     if (!Number.isFinite(deltaX) || !Number.isFinite(deltaY) || (deltaX === 0 && deltaY === 0)) {
       return null;
     }
@@ -1780,7 +1773,6 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       return;
     }
     publishRemoteWindowInputContext();
-    emitRemoteWindowFocus();
     event.currentTarget.focus();
     event.currentTarget.setPointerCapture?.(event.pointerId);
     surfacePointersRef.current.set(event.pointerId, {
@@ -1847,10 +1839,10 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       mode: 'input',
       pointerId: event.pointerId,
     };
-    emitPointerInput(event, 'down');
+    emitPointerInputAfterFocus(event, 'down');
     event.preventDefault();
     event.stopPropagation();
-  }, [emitPointerInput, emitRemoteWindowFocus, publishRemoteWindowInputContext, state]);
+  }, [emitPointerInputAfterFocus, publishRemoteWindowInputContext, state]);
 
   const handleVideoSurfacePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (state.phase !== 'targetLocked') {
@@ -1969,7 +1961,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         const downPayload = resolvePointerInputEvent(event, 'down');
         const upPayload = resolvePointerInputEvent(event, 'up');
         if (downPayload) {
-          emitRemoteWindowInput(downPayload);
+          emitRemoteWindowInputAfterFocus(downPayload);
         }
         if (upPayload) {
           emitRemoteWindowInputAfterFocus(upPayload);
@@ -1984,7 +1976,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       const downPayload = resolvePointerInputEvent(event, 'down');
       const upPayload = resolvePointerInputEvent(event, 'up');
       if (downPayload) {
-        emitRemoteWindowInput(downPayload);
+        emitRemoteWindowInputAfterFocus(downPayload);
       }
       if (upPayload) {
         emitRemoteWindowInputAfterFocus(upPayload);
@@ -2034,7 +2026,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       event.preventDefault();
       event.stopPropagation();
     }
-  }, [emitRemoteWindowInput, emitRemoteWindowInputAfterFocus, emitTouchGestureInput, resolvePointerInputEvent, state]);
+  }, [emitRemoteWindowInputAfterFocus, emitTouchGestureInput, resolvePointerInputEvent, state]);
 
   const handleVideoSurfacePointerCancel = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     const gesture = surfaceGestureRef.current;

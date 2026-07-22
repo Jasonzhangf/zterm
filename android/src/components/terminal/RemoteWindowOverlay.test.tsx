@@ -407,7 +407,7 @@ describe('RemoteWindowOverlay', () => {
     expect(startStream).toHaveBeenCalledTimes(1);
   });
 
-  it('upgrades fullscreen default bitrate to 20 Mbps without restarting the stream', async () => {
+  it('keeps Android fullscreen projection from upgrading the desktop-area bitrate preset', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const target = makeTarget('app-1', 'TextEdit', 'app-window');
     window.localStorage.setItem(REMOTE_WINDOW_VIDEO_BITRATE_STORAGE_KEY, JSON.stringify({
@@ -450,18 +450,9 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
 
     await waitFor(() => {
-      expect(screen.getByTestId('remote-window-bitrate-select')).toHaveProperty('value', 'fullscreen');
-      expect(updateStreamQuality).toHaveBeenCalledWith('session-1', {
-        streamId: expect.stringMatching(/^rw-stream-/),
-        targetId: 'app-1',
-        videoBitrate: {
-          preset: 'fullscreen',
-          bitrateMbps: 20,
-          maxBitrateBps: 20_000_000,
-          maxFrameRateFps: 12,
-        },
-      });
+      expect(screen.getByTestId('remote-window-bitrate-select')).toHaveProperty('value', '2mbps');
     });
+    expect(updateStreamQuality).not.toHaveBeenCalled();
 
     const surface = screen.getByTestId('remote-window-video-surface');
     Object.defineProperty(surface, 'getBoundingClientRect', {
@@ -483,7 +474,7 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.pointerMove(surface, { pointerId: 2, pointerType: 'touch', clientX: 270, clientY: 100, button: 0, buttons: 1 });
 
     expect(startStream).toHaveBeenCalledTimes(1);
-    expect(updateStreamQuality).toHaveBeenCalledTimes(1);
+    expect(updateStreamQuality).not.toHaveBeenCalled();
   });
 
   it('sizes the floating preview from the selected app window aspect ratio', async () => {
@@ -780,7 +771,7 @@ describe('RemoteWindowOverlay', () => {
     });
   });
 
-  it('focuses a selected app window when the stream starts and before wheel or key input', async () => {
+  it('does not focus on stream setup and focuses only before wheel or key input', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const sendInput = vi.fn();
     const requestTargets = vi.fn(async () => ({
@@ -805,11 +796,7 @@ describe('RemoteWindowOverlay', () => {
     await screen.findByTestId('remote-window-target-app-1');
     fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
     await screen.findByTestId('remote-window-video');
-
-    await waitFor(() => {
-      expect(sendInput).toHaveBeenCalledTimes(1);
-    });
-    expectFirstRemoteInputFocus(sendInput);
+    expect(sendInput).not.toHaveBeenCalled();
 
     const surface = screen.getByTestId('remote-window-video-surface');
     Object.defineProperty(surface, 'getBoundingClientRect', {
@@ -1186,7 +1173,6 @@ describe('RemoteWindowOverlay', () => {
     expectEveryNonFocusInputIsFocusFirst(sendInput);
     expect(remoteInputPayloads(sendInput).map((payload) => payload.event.kind)).toEqual([
       'focus',
-      'focus',
       'pointer',
       'focus',
       'pointer',
@@ -1254,9 +1240,7 @@ describe('RemoteWindowOverlay', () => {
 
     fireEvent.pointerDown(surface, { pointerId: 21, pointerType: 'touch', clientX: 100, clientY: 70, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 21, pointerType: 'touch', clientX: 100, clientY: 40, button: 0, buttons: 1 });
-    expectFirstRemoteInputFocus(sendInput);
-    expect(nonFocusRemoteInputPayloads(sendInput)).toHaveLength(0);
-    sendInput.mockClear();
+    expect(sendInput).not.toHaveBeenCalled();
     fireEvent.pointerUp(surface, { pointerId: 21, pointerType: 'touch', clientX: 100, clientY: 40, button: 0, buttons: 0 });
     await waitForNonFocusRemoteInputCount(sendInput, 1);
     expectEveryNonFocusInputIsFocusFirst(sendInput);
@@ -1273,7 +1257,7 @@ describe('RemoteWindowOverlay', () => {
     expect(payload.event.gesture).toBe('swipe');
     expect(payload.event.phase).toBe('end');
     expect(payload.event.deltaX).toBe(0);
-    expect(payload.event.deltaY).toBe(30);
+    expect(payload.event.deltaY).toBe(-30);
     expect(payload.event.unit).toBe('pixel');
     expect(payload.event.startNormalizedX).toBeCloseTo(0.5, 3);
     expect(payload.event.startNormalizedY).toBeCloseTo(0.7, 3);
@@ -1328,9 +1312,7 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.pointerMove(surface, { pointerId: 22, pointerType: 'touch', clientX: 120, clientY: 64, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 22, pointerType: 'touch', clientX: 120, clientY: 52, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 22, pointerType: 'touch', clientX: 120, clientY: 40, button: 0, buttons: 1 });
-    expectFirstRemoteInputFocus(sendInput);
-    expect(nonFocusRemoteInputPayloads(sendInput)).toHaveLength(0);
-    sendInput.mockClear();
+    expect(sendInput).not.toHaveBeenCalled();
     fireEvent.pointerUp(surface, { pointerId: 22, pointerType: 'touch', clientX: 120, clientY: 40, button: 0, buttons: 0 });
     await waitForNonFocusRemoteInputCount(sendInput, 1);
     expectEveryNonFocusInputIsFocusFirst(sendInput);
@@ -1340,7 +1322,7 @@ describe('RemoteWindowOverlay', () => {
       phase: 'end',
       pointerId: 22,
       deltaX: 0,
-      deltaY: 40,
+      deltaY: -40,
       startNormalizedX: 0.64,
       startNormalizedY: 0.8,
       normalizedX: 0.64,
@@ -1432,9 +1414,7 @@ describe('RemoteWindowOverlay', () => {
 
     fireEvent.pointerDown(surface, { pointerId: 52, pointerType: 'touch', clientX: 120, clientY: 300, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 52, pointerType: 'touch', clientX: 120, clientY: 250, button: 0, buttons: 1 });
-    expectFirstRemoteInputFocus(sendInput);
-    expect(nonFocusRemoteInputPayloads(sendInput)).toHaveLength(0);
-    sendInput.mockClear();
+    expect(sendInput).not.toHaveBeenCalled();
     fireEvent.pointerUp(surface, { pointerId: 52, pointerType: 'touch', clientX: 120, clientY: 250, button: 0, buttons: 0 });
 
     await waitForNonFocusRemoteInputCount(sendInput, 1);
@@ -1444,7 +1424,7 @@ describe('RemoteWindowOverlay', () => {
       gesture: 'swipe',
       phase: 'end',
       deltaX: 0,
-      deltaY: 50,
+      deltaY: -50,
     });
     expect(Number.parseFloat(content.style.top || '0')).toBeCloseTo(topBeforeScroll, 1);
   });
@@ -1711,7 +1691,7 @@ describe('RemoteWindowOverlay', () => {
       expect(Number.parseFloat(content.style.left || '0')).not.toBe(leftAfterPinch);
       expect(screen.getByTestId('remote-window-minimap-viewport')).toBeTruthy();
     });
-    expect(remoteInputPayloads(sendInput).every((payload) => payload.event.kind === 'focus')).toBe(true);
+    expect(sendInput).not.toHaveBeenCalled();
   });
 
   it('lifts the fullscreen display container above IME without stealing unzoomed remote gesture', async () => {
@@ -1768,8 +1748,7 @@ describe('RemoteWindowOverlay', () => {
 
     fireEvent.pointerDown(surface, { pointerId: 41, pointerType: 'touch', clientX: 120, clientY: 300, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 41, pointerType: 'touch', clientX: 120, clientY: 250, button: 0, buttons: 1 });
-    expectFirstRemoteInputFocus(sendInput);
-    expect(nonFocusRemoteInputPayloads(sendInput)).toHaveLength(0);
+    expect(sendInput).not.toHaveBeenCalled();
     fireEvent.pointerUp(surface, { pointerId: 41, pointerType: 'touch', clientX: 120, clientY: 250, button: 0, buttons: 0 });
 
     await waitForNonFocusRemoteInputCount(sendInput, 1);
@@ -1778,7 +1757,7 @@ describe('RemoteWindowOverlay', () => {
       gesture: 'swipe',
       phase: 'end',
       deltaX: 0,
-      deltaY: 50,
+      deltaY: -50,
     });
     expect(Number.parseFloat(content.style.top || '0')).toBeCloseTo(topBeforePan, 1);
   });
@@ -1812,11 +1791,7 @@ describe('RemoteWindowOverlay', () => {
     await screen.findByTestId('remote-window-target-app-1');
     fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
     await screen.findByTestId('remote-window-video');
-    await waitFor(() => {
-      expect(sendInput).toHaveBeenCalledTimes(1);
-    });
-    expectFirstRemoteInputFocus(sendInput);
-    sendInput.mockClear();
+    expect(sendInput).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
 
     const overlay = screen.getByTestId('remote-window-locked-overlay');
@@ -1905,8 +1880,7 @@ describe('RemoteWindowOverlay', () => {
 
     fireEvent.pointerDown(surface, { pointerId: 51, pointerType: 'touch', clientX: 120, clientY: 300, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 51, pointerType: 'touch', clientX: 120, clientY: 220, button: 0, buttons: 1 });
-    expectFirstRemoteInputFocus(sendInput);
-    expect(nonFocusRemoteInputPayloads(sendInput)).toHaveLength(0);
+    expect(sendInput).not.toHaveBeenCalled();
     fireEvent.pointerUp(surface, { pointerId: 51, pointerType: 'touch', clientX: 120, clientY: 220, button: 0, buttons: 0 });
 
     await waitForNonFocusRemoteInputCount(sendInput, 1);
@@ -1915,7 +1889,7 @@ describe('RemoteWindowOverlay', () => {
       gesture: 'swipe',
       phase: 'end',
       deltaX: 0,
-      deltaY: 80,
+      deltaY: -80,
     });
     expect(Number.parseFloat(content.style.top || '0')).toBeCloseTo(0, 1);
     expect(overlay.style.paddingBottom).toBe('280px');

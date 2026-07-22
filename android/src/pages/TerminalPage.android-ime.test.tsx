@@ -455,13 +455,7 @@ describe("TerminalPage Android IME bridge", () => {
     await waitFor(() => {
       expect(onRequestRemoteWindowStreamStart).toHaveBeenCalled();
     });
-    await waitFor(() => {
-      expect(onSendRemoteWindowInput).toHaveBeenCalledWith("s1", expect.objectContaining({
-        targetId: "app-1",
-        event: expect.objectContaining({ kind: "focus" }),
-      }));
-    });
-    onSendRemoteWindowInput.mockClear();
+    expect(onSendRemoteWindowInput).not.toHaveBeenCalled();
 
     act(() => {
       imeListeners.get("input")?.({ text: "中文￥\ninput" });

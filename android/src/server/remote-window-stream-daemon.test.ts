@@ -192,6 +192,8 @@ function makeAppWindowCatalog(): MacosAppWindowCatalog {
         pid: 487,
         title: 'Chrome Window',
         frame: { x: 700, y: 139, width: 1200, height: 800 },
+        displayId: '8',
+        displayBoundsTopLeftPx: { x: 0, y: 0, width: 3840, height: 2160 },
       },
       {
         windowId: '33',
@@ -200,6 +202,8 @@ function makeAppWindowCatalog(): MacosAppWindowCatalog {
         pid: 479,
         title: 'Default (tmux)',
         frame: { x: 10, y: 20, width: 302, height: 250 },
+        displayId: '8',
+        displayBoundsTopLeftPx: { x: 0, y: 0, width: 3840, height: 2160 },
       },
     ],
   };
@@ -331,6 +335,7 @@ describe('remote window stream daemon owner', () => {
 
     expect(config).toEqual({
       pid: 123,
+      appBundleId: 'com.apple.TextEdit',
       focusPolicy: 'bring-to-focus',
       window: {
         windowId: '456',
@@ -357,6 +362,8 @@ describe('remote window stream daemon owner', () => {
   });
 
   it('requires macOS helper focus verification before reporting input success', () => {
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('activateApplicationByBundleId');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('kAXFrontmostAttribute');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('frontmostPidMatches');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('focusedWindowMatchesTarget');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('config.event.kind == "focus"');
@@ -400,6 +407,10 @@ describe('remote window stream daemon owner', () => {
       streamMode: 'interactive',
       focusPolicy: 'bring-to-focus',
       inputRoute: 'os-event',
+      capture: {
+        displayId: '8',
+        displayBoundsTopLeftPx: { x: 0, y: 0, width: 3840, height: 2160 },
+      },
     });
   });
 

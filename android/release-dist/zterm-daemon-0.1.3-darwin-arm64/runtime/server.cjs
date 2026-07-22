@@ -12689,7 +12689,10 @@ function createRtcBridgeServer(options) {
       peerConnection: null,
       ready: false,
       emitSignal,
-      closeSignal
+      closeSignal,
+      signalChain: Promise.resolve(),
+      offerAccepted: false,
+      pendingIceCandidates: []
     };
     peers.set(peerId, created);
     return created;
@@ -12717,6 +12720,8 @@ function createRtcBridgeServer(options) {
     }
     peer.peerConnection = null;
     peer.ready = false;
+    peer.offerAccepted = false;
+    peer.pendingIceCandidates = [];
     const peerConnection = new RTCPeerConnection(buildRtcPeerConnectionConfig(payload));
     peer.peerConnection = peerConnection;
     peerConnection.onicecandidate = (event) => {
@@ -12740,7 +12745,16 @@ function createRtcBridgeServer(options) {
       };
     };
   }
-  async function handleSignalMessage(input) {
+  async function flushPendingIceCandidates(peer) {
+    if (!peer.peerConnection || peer.pendingIceCandidates.length === 0) {
+      return;
+    }
+    const pending = peer.pendingIceCandidates.splice(0);
+    for (const candidate of pending) {
+      await peer.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    }
+  }
+  async function processSignalMessage(input) {
     const peer = upsertPeerTransport(input.peerId, input.requestOrigin, input.emitSignal, input.closeSignal);
     const { message } = input;
     if (message.type === "rtc-close") {
@@ -12759,10 +12773,15 @@ function createRtcBridgeServer(options) {
       return;
     }
     if (message.type === "rtc-offer") {
+      if (peer.offerAccepted) {
+        return;
+      }
+      peer.offerAccepted = true;
       const sdp = typeof message.payload?.sdp === "string" ? message.payload.sdp : "";
       await peer.peerConnection.setRemoteDescription(new RTCSessionDescription({ type: "offer", sdp }));
       const answer = await peer.peerConnection.createAnswer();
       await peer.peerConnection.setLocalDescription(answer);
+      await flushPendingIceCandidates(peer);
       peer.emitSignal({
         type: "rtc-answer",
         payload: { sdp: answer.sdp, type: answer.type }
@@ -12770,8 +12789,28 @@ function createRtcBridgeServer(options) {
       return;
     }
     if (message.type === "rtc-candidate" && message.payload?.candidate) {
-      await peer.peerConnection.addIceCandidate(new RTCIceCandidate(message.payload));
+      const candidate = message.payload;
+      if (!peer.offerAccepted || !peer.peerConnection.remoteDescription) {
+        peer.pendingIceCandidates.push(candidate);
+        return;
+      }
+      await peer.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
     }
+  }
+  async function handleSignalMessage(input) {
+    const peer = upsertPeerTransport(input.peerId, input.requestOrigin, input.emitSignal, input.closeSignal);
+    const next = peer.signalChain.catch(() => void 0).then(async () => {
+      try {
+        await processSignalMessage(input);
+      } catch (error) {
+        peer.emitSignal({
+          type: "rtc-error",
+          payload: { message: error instanceof Error ? error.message : "rtc signaling error" }
+        });
+      }
+    });
+    peer.signalChain = next.catch(() => void 0);
+    await next;
   }
   return {
     handleSignalConnection(signalSocket, requestOrigin) {
@@ -13180,6 +13219,49 @@ func number(_ value: Any?) -> Double? {
     return nil
 }
 
+func rectDict(_ rect: CGRect) -> [String: Any] {
+    return [
+        "x": Int(rect.origin.x.rounded()),
+        "y": Int(rect.origin.y.rounded()),
+        "width": Int(rect.size.width.rounded()),
+        "height": Int(rect.size.height.rounded()),
+    ]
+}
+
+func activeDisplays() -> [CGDirectDisplayID] {
+    var count: UInt32 = 0
+    CGGetActiveDisplayList(0, nil, &count)
+    guard count > 0 else {
+        return []
+    }
+    var displays = [CGDirectDisplayID](repeating: 0, count: Int(count))
+    CGGetActiveDisplayList(count, &displays, &count)
+    return Array(displays.prefix(Int(count)))
+}
+
+func intersectionArea(_ lhs: CGRect, _ rhs: CGRect) -> Double {
+    let intersection = lhs.intersection(rhs)
+    if intersection.isNull || intersection.isEmpty {
+        return 0
+    }
+    return Double(max(0, intersection.width)) * Double(max(0, intersection.height))
+}
+
+func bestDisplay(for frame: CGRect) -> (id: CGDirectDisplayID, bounds: CGRect)? {
+    var best: (id: CGDirectDisplayID, bounds: CGRect, area: Double)? = nil
+    for displayId in activeDisplays() {
+        let bounds = CGDisplayBounds(displayId)
+        let area = intersectionArea(frame, bounds)
+        guard area > 0 else {
+            continue
+        }
+        if best == nil || area > best!.area {
+            best = (displayId, bounds, area)
+        }
+    }
+    return best.map { ($0.id, $0.bounds) }
+}
+
 let windowInfoList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
 var windows: [[String: Any]] = []
 
@@ -13210,19 +13292,20 @@ for info in windowInfoList {
     let appBundleId = NSRunningApplication(processIdentifier: pid_t(pid))?.bundleIdentifier ?? ""
     let windowId = (info[kCGWindowNumber as String] as? NSNumber)?.stringValue ?? ""
     let title = rawTitle.isEmpty ? (ownerName.isEmpty ? appBundleId : ownerName) : rawTitle
-    windows.append([
+    let frameRect = CGRect(x: x, y: y, width: width, height: height)
+    var windowEntry: [String: Any] = [
         "windowId": windowId,
         "ownerName": ownerName,
         "appBundleId": appBundleId,
         "pid": pid,
         "title": title,
-        "frame": [
-            "x": Int(x.rounded()),
-            "y": Int(y.rounded()),
-            "width": Int(width.rounded()),
-            "height": Int(height.rounded()),
-        ],
-    ])
+        "frame": rectDict(frameRect),
+    ]
+    if let display = bestDisplay(for: frameRect) {
+        windowEntry["displayId"] = String(display.id)
+        windowEntry["displayBoundsTopLeftPx"] = rectDict(display.bounds)
+    }
+    windows.append(windowEntry)
 }
 
 let data = try JSONSerialization.data(withJSONObject: ["windows": windows], options: [])
@@ -13235,6 +13318,7 @@ import Foundation
 
 struct InputConfig: Decodable {
     let pid: Int32
+    let appBundleId: String
     let focusPolicy: String
     let window: RemoteInputWindow
     let event: RemoteInputEvent
@@ -13341,6 +13425,21 @@ func frontmostPidMatches(_ pid: Int32) -> Bool {
     return frontmost.processIdentifier == pid
 }
 
+func appleScriptStringLiteral(_ value: String) -> String {
+    return value
+        .replacingOccurrences(of: "\\", with: "\\\\")
+        .replacingOccurrences(of: "\"", with: "\\\"")
+}
+
+func activateApplicationByBundleId(_ bundleId: String) {
+    guard !bundleId.isEmpty else {
+        return
+    }
+    let source = "tell application id \"" + appleScriptStringLiteral(bundleId) + "\" to activate"
+    var error: NSDictionary?
+    _ = NSAppleScript(source: source)?.executeAndReturnError(&error)
+}
+
 func axWindowMatchesBounds(_ window: AXUIElement, _ bounds: Rect) -> Bool {
     guard
         let position = axPoint(copyAttribute(window, kAXPositionAttribute)),
@@ -13393,11 +13492,15 @@ func focusTargetWindow(_ config: InputConfig) throws {
     var isFocused = false
     for attempt in 0..<3 {
         app.unhide()
+        activateApplicationByBundleId(config.appBundleId)
+        AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
         _ = app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
         AXUIElementPerformAction(window, kAXRaiseAction as CFString)
         AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, window)
         AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
         AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+        AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+        activateApplicationByBundleId(config.appBundleId)
         _ = app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
         usleep(attempt == 0 ? 120000 : 180000)
         isFrontmost = frontmostPidMatches(config.pid)
@@ -13962,7 +14065,7 @@ function buildRemoteWindowStreamTargets(catalog, tmuxTargets, now, options = {})
         inputTarget: {
           kind: "app-window"
         },
-        streamMode: "view",
+        streamMode: "interactive",
         focusPolicy: "bring-to-focus",
         inputRoute: "os-event",
         capture: {
@@ -14031,6 +14134,8 @@ function buildRemoteWindowStreamTargets(catalog, tmuxTargets, now, options = {})
           capture: {
             source: "ScreenCaptureKit",
             coordinateSpace: "macos-top-left-px",
+            ...captureWindow?.displayId ? { displayId: captureWindow.displayId } : {},
+            ...captureWindow?.displayBoundsTopLeftPx ? { displayBoundsTopLeftPx: captureWindow.displayBoundsTopLeftPx } : {},
             scale: 1,
             createdAt: now
           }
@@ -14079,12 +14184,14 @@ function buildMacosAppWindowTargets(catalog, now) {
       inputTarget: {
         kind: "app-window"
       },
-      streamMode: "view",
+      streamMode: "interactive",
       focusPolicy: "bring-to-focus",
       inputRoute: "os-event",
       capture: {
         source: "ScreenCaptureKit",
         coordinateSpace: "macos-top-left-px",
+        ...window.displayId ? { displayId: window.displayId } : {},
+        ...window.displayBoundsTopLeftPx ? { displayBoundsTopLeftPx: window.displayBoundsTopLeftPx } : {},
         scale: 1,
         createdAt: now
       }
@@ -14274,6 +14381,7 @@ ${message}` : error.message));
 function buildRemoteWindowInputConfig(payload, target) {
   return {
     pid: target.videoTarget.pid,
+    appBundleId: target.videoTarget.appBundleId,
     focusPolicy: target.focusPolicy,
     window: {
       windowId: target.videoTarget.windowId,

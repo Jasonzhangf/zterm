@@ -43,6 +43,9 @@ interface PeerState {
   ready: boolean;
   emitSignal: (message: SignalMessage) => void;
   closeSignal: (reason: string) => void;
+  signalChain: Promise<void>;
+  offerAccepted: boolean;
+  pendingIceCandidates: RTCIceCandidateInit[];
 }
 
 function resolveRtcIceTransportPolicy(value: unknown): RTCIceTransportPolicy {
@@ -159,6 +162,9 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
       ready: false,
       emitSignal,
       closeSignal,
+      signalChain: Promise.resolve(),
+      offerAccepted: false,
+      pendingIceCandidates: [],
     };
     peers.set(peerId, created);
     return created;
@@ -188,6 +194,8 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
     }
     peer.peerConnection = null;
     peer.ready = false;
+    peer.offerAccepted = false;
+    peer.pendingIceCandidates = [];
     const peerConnection = new RTCPeerConnection(buildRtcPeerConnectionConfig(payload));
     peer.peerConnection = peerConnection;
     peerConnection.onicecandidate = (event) => {
@@ -212,7 +220,17 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
     };
   }
 
-  async function handleSignalMessage(input: {
+  async function flushPendingIceCandidates(peer: PeerState) {
+    if (!peer.peerConnection || peer.pendingIceCandidates.length === 0) {
+      return;
+    }
+    const pending = peer.pendingIceCandidates.splice(0);
+    for (const candidate of pending) {
+      await peer.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
+    }
+  }
+
+  async function processSignalMessage(input: {
     peerId: string;
     requestOrigin: string;
     message: SignalMessage;
@@ -241,10 +259,15 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
     }
 
     if (message.type === 'rtc-offer') {
+      if (peer.offerAccepted) {
+        return;
+      }
+      peer.offerAccepted = true;
       const sdp = typeof message.payload?.sdp === 'string' ? message.payload.sdp : '';
       await peer.peerConnection.setRemoteDescription(new RTCSessionDescription({ type: 'offer', sdp }));
       const answer = await peer.peerConnection.createAnswer();
       await peer.peerConnection.setLocalDescription(answer);
+      await flushPendingIceCandidates(peer);
       peer.emitSignal({
         type: 'rtc-answer',
         payload: { sdp: answer.sdp, type: answer.type },
@@ -253,8 +276,37 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
     }
 
     if (message.type === 'rtc-candidate' && message.payload?.candidate) {
-      await peer.peerConnection.addIceCandidate(new RTCIceCandidate(message.payload as RTCIceCandidateInit));
+      const candidate = message.payload as RTCIceCandidateInit;
+      if (!peer.offerAccepted || !peer.peerConnection.remoteDescription) {
+        peer.pendingIceCandidates.push(candidate);
+        return;
+      }
+      await peer.peerConnection.addIceCandidate(new RTCIceCandidate(candidate));
     }
+  }
+
+  async function handleSignalMessage(input: {
+    peerId: string;
+    requestOrigin: string;
+    message: SignalMessage;
+    emitSignal: (message: SignalMessage) => void;
+    closeSignal: (reason: string) => void;
+  }) {
+    const peer = upsertPeerTransport(input.peerId, input.requestOrigin, input.emitSignal, input.closeSignal);
+    const next = peer.signalChain
+      .catch(() => undefined)
+      .then(async () => {
+        try {
+          await processSignalMessage(input);
+        } catch (error) {
+          peer.emitSignal({
+            type: 'rtc-error',
+            payload: { message: error instanceof Error ? error.message : 'rtc signaling error' },
+          });
+        }
+      });
+    peer.signalChain = next.catch(() => undefined);
+    await next;
   }
 
   return {

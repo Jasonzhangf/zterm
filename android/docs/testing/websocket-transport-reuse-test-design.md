@@ -194,7 +194,9 @@ Relay server:
 
 Daemon relay client / RTC bridge:
 - Positive: phone signaling close before idle timeout marks the peer idle but does not close RTCPeerConnection or delete peer truth; a second `rtc-init` for the same peer id renegotiates the peer instead of being ignored as a stale duplicate.
+- Positive: network-switch signaling reordering is accepted by the daemon RTC bridge: per-peer signaling is serialized, `rtc-candidate` before accepted `rtc-offer` is buffered, and a duplicate `rtc-offer` after one accepted offer does not throw WebRTC `stable` state errors.
 - Positive: lease expiry or host disposal closes and deletes the peer exactly once.
+- Negative: a relay host parse error from duplicate offer or early candidate must not be hidden by UI route fallback, must not close tmux/session/mirror truth, and must not create a second terminal channel while the same physical target route is being renegotiated.
 - Negative: resuming a relay peer must not create a second terminal channel or subscriber when mux target transport is still valid.
 
 ## L3 SessionContext Cases

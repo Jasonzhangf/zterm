@@ -171,6 +171,7 @@ export interface RemoteWindowStreamTargetManifest {
     source: 'ScreenCaptureKit';
     coordinateSpace: 'macos-top-left-px';
     displayId?: string;
+    displayBoundsTopLeftPx?: RemoteWindowStreamRect;
     scale: number;
     createdAt: string;
   };
