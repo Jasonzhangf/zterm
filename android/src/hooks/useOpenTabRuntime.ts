@@ -82,6 +82,7 @@ interface UseOpenTabRuntimeOptions {
   setPageState: Dispatch<SetStateAction<AppPageState>>;
   pruneSessionGroupSelectionToRemoteTruth: (target: { bridgeHost: string; bridgePort: number; daemonHostId?: string }, remoteSessionNames: string[]) => void;
   onForegroundActiveChange?: (active: boolean) => void;
+  onForegroundResume?: (reason: 'visibilitychange' | 'resume' | 'appStateChange') => void;
 }
 
 export interface OpenTabRuntimeRefs {
@@ -144,6 +145,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     setPageState,
     pruneSessionGroupSelectionToRemoteTruth,
     onForegroundActiveChange,
+    onForegroundResume,
   } = options;
 
   const persistedOpenTabsBootstrapRef = useRef(readPersistedOpenTabsState());
@@ -487,6 +489,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     openTabStateRef,
     foregroundRefreshRuntimeRef,
     onForegroundActiveChange,
+    onForegroundResume,
     auditOpenTabsAgainstRemoteSessions,
     resumeActiveSessionTransport,
     bumpFollowResetEpoch,

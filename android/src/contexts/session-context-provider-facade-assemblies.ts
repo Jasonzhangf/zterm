@@ -256,6 +256,7 @@ export function useSessionProviderFacadeAssemblies(
 
   useSessionContextLifecycle({
     appForegroundActive: options.appForegroundActive,
+    foregroundResumeEpoch: options.foregroundResumeEpoch,
     state: options.state,
     scheduleStates: options.scheduleStates,
     refs: {

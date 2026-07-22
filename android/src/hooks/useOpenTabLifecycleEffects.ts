@@ -1,5 +1,6 @@
 import { useEffect, type MutableRefObject } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
+import { shouldResumeForeground } from '@zterm/shared/terminal/foreground-resume';
 import { SESSION_STATUS_EVENT } from '../contexts/SessionContext';
 import { createForegroundRefreshRuntime, markForegroundRuntimeHidden } from '../lib/app-foreground-refresh';
 import { runtimeDebug } from '../lib/runtime-debug';
@@ -16,6 +17,7 @@ export type OpenTabAuditReason =
   | 'session-status-closed';
 
 type ForegroundResumeReason = Extract<OpenTabAuditReason, 'visibilitychange' | 'resume' | 'appStateChange' | 'online'>;
+type ForegroundResumeSignalReason = Exclude<ForegroundResumeReason, 'online'>;
 
 interface UseOpenTabLifecycleEffectsOptions {
   sessionsRef: MutableRefObject<Session[]>;
@@ -25,6 +27,7 @@ interface UseOpenTabLifecycleEffectsOptions {
   }>;
   foregroundRefreshRuntimeRef: MutableRefObject<ReturnType<typeof createForegroundRefreshRuntime>>;
   onForegroundActiveChange?: (active: boolean) => void;
+  onForegroundResume?: (reason: ForegroundResumeSignalReason) => void;
   auditOpenTabsAgainstRemoteSessions: (reason: OpenTabAuditReason) => Promise<void>;
   resumeActiveSessionTransport: (sessionId: string) => boolean;
   bumpFollowResetEpoch: () => void;
@@ -36,19 +39,50 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     openTabStateRef,
     foregroundRefreshRuntimeRef,
     onForegroundActiveChange,
+    onForegroundResume,
     auditOpenTabsAgainstRemoteSessions,
     resumeActiveSessionTransport,
     bumpFollowResetEpoch,
   } = options;
 
-  useEffect(() => {
-    const notifyResume = (reason: ForegroundResumeReason) => {
-      bumpFollowResetEpoch();
-      void auditOpenTabsAgainstRemoteSessions(reason).catch((error) => {
-        console.error('[App] Failed to audit remote session truth on foreground resume:', error);
+  const maybeProjectForegroundResume = (reason: ForegroundResumeSignalReason) => {
+    const now = Date.now();
+    const hasSessions = sessionsRef.current.length > 0;
+    const hasActiveSession = Boolean(openTabStateRef.current.activeSessionId);
+    const wasHiddenForDecision = (
+      foregroundRefreshRuntimeRef.current.wasHidden
+      || reason === 'resume'
+      || reason === 'appStateChange'
+    );
+    const decision = shouldResumeForeground(
+      now,
+      foregroundRefreshRuntimeRef.current.lastResumeAt,
+      800,
+      wasHiddenForDecision,
+      hasSessions,
+      hasActiveSession,
+    );
+    foregroundRefreshRuntimeRef.current.wasHidden = false;
+    if (!decision.shouldResume) {
+      runtimeDebug('app.foreground.resume.skip', {
+        reason,
+        skipReason: decision.skipReason || null,
+        lastResumeAt: foregroundRefreshRuntimeRef.current.lastResumeAt,
+        wasHidden: foregroundRefreshRuntimeRef.current.wasHidden,
+        hasSessions,
+        hasActiveSession,
       });
-    };
+      return;
+    }
+    foregroundRefreshRuntimeRef.current.lastResumeAt = now;
+    onForegroundResume?.(reason);
+    bumpFollowResetEpoch();
+    void auditOpenTabsAgainstRemoteSessions(reason).catch((error) => {
+      console.error('[App] Failed to audit remote session truth on foreground resume:', error);
+    });
+  };
 
+  useEffect(() => {
     const markHidden = () => {
       onForegroundActiveChange?.(false);
       markForegroundRuntimeHidden(foregroundRefreshRuntimeRef.current, document.visibilityState);
@@ -66,16 +100,14 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
 
       if (document.visibilityState === 'visible' && foregroundRefreshRuntimeRef.current.wasHidden) {
         onForegroundActiveChange?.(true);
-        foregroundRefreshRuntimeRef.current.wasHidden = false;
-        notifyResume('visibilitychange');
+        maybeProjectForegroundResume('visibilitychange');
       }
     };
 
     const onDocumentResume = () => {
       onForegroundActiveChange?.(true);
-      foregroundRefreshRuntimeRef.current.wasHidden = false;
       runtimeDebug('app.document.resume', {});
-      notifyResume('resume');
+      maybeProjectForegroundResume('resume');
     };
 
     const onNetworkOnline = () => {
@@ -84,13 +116,15 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
         return;
       }
       onForegroundActiveChange?.(true);
-      foregroundRefreshRuntimeRef.current.wasHidden = false;
       runtimeDebug('app.network.online', {});
       const activeSessionId = openTabStateRef.current.activeSessionId;
       if (activeSessionId) {
         resumeActiveSessionTransport(activeSessionId);
       }
-      notifyResume('online');
+      foregroundRefreshRuntimeRef.current.wasHidden = false;
+      void auditOpenTabsAgainstRemoteSessions('online').catch((error) => {
+        console.error('[App] Failed to audit remote session truth on online recovery:', error);
+      });
     };
 
     const appStateListenerHandle = CapacitorApp.addListener('appStateChange', ({ isActive }) => {
@@ -103,8 +137,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
         return;
       }
       onForegroundActiveChange?.(true);
-      foregroundRefreshRuntimeRef.current.wasHidden = false;
-      notifyResume('appStateChange');
+      maybeProjectForegroundResume('appStateChange');
     });
 
     document.addEventListener('visibilitychange', onVisibilityChange);
@@ -129,6 +162,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     foregroundRefreshRuntimeRef,
     openTabStateRef,
     onForegroundActiveChange,
+    onForegroundResume,
     resumeActiveSessionTransport,
     sessionsRef,
   ]);

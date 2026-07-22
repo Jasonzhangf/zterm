@@ -10,6 +10,7 @@ import type {
 
 export interface SessionProviderAssembliesSharedOptions {
   appForegroundActive?: boolean;
+  foregroundResumeEpoch?: number;
   state: SessionManagerState;
   stateRef: MutableRefObject<SessionManagerState>;
   dispatch: Dispatch<SessionAction>;

@@ -1064,8 +1064,8 @@ android/
 
 ### 模式: foreground 恢复 owner 只能在 SessionContext lifecycle
 - **触发信号**: 现场出现“回到前台 timeout、不重连、杀进程才恢复”，且 App 侧只是在切 `appForegroundActive`
-- **动作**: App 只提供 foreground truth；真正的 transport 恢复必须由 `SessionContext lifecycle` 在 false->true 时唯一触发 `explicit-resume`，和冷启动恢复共用同一 transport owner
-- **反模式**: 指望 active tick 被动兜底，或在 App/page 层再长一套 reconnect fallback
+- **动作**: App 只提供 foreground truth 和单调 `foregroundResumeEpoch` 事件；真正的 transport 恢复必须由 `SessionContext lifecycle` 对每个去重后的 foreground resume 事件唯一触发 `explicit-resume`，和冷启动恢复共用同一 transport owner
+- **反模式**: 只监听 `appForegroundActive false->true` 布尔边、指望 active tick 被动兜底，或在 App/page 层再长一套 reconnect fallback
 
 ### 模式: session switch / foreground resume 要有短保活窗口
 - **触发信号**: 用户短时间切 session、切后台回来，UI 每次都进入 reconnect / 新建 WebSocket，体验上比杀进程重进更慢

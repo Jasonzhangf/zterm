@@ -362,8 +362,20 @@ vi.mock('@capacitor/app', () => ({
 
 vi.mock('./contexts/SessionContext', () => ({
   SESSION_STATUS_EVENT: 'zterm:session-status',
-  SessionProvider: ({ children, appForegroundActive }: { children: React.ReactNode; appForegroundActive?: boolean }) => (
-    <div data-testid="provider-foreground">{appForegroundActive ? '1' : '0'}{children}</div>
+  SessionProvider: ({
+    children,
+    appForegroundActive,
+    foregroundResumeEpoch = 0,
+  }: {
+    children: React.ReactNode;
+    appForegroundActive?: boolean;
+    foregroundResumeEpoch?: number;
+  }) => (
+    <div data-testid="provider-foreground">
+      {appForegroundActive ? '1' : '0'}
+      <span data-testid="provider-resume-epoch">{foregroundResumeEpoch}</span>
+      {children}
+    </div>
   ),
   useSession: () => ({
     state: sessionHarness.readState(),
@@ -1499,6 +1511,10 @@ describe('App dynamic refresh matrix', () => {
   });
 
   it('bumps follow reset epoch exactly once for each foreground resume signal', async () => {
+    const nowSpy = vi.spyOn(Date, 'now');
+    let now = 100_000;
+    nowSpy.mockImplementation(() => now);
+    try {
     render(
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
     );
@@ -1509,6 +1525,7 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('resume'));
     });
     await waitFor(() => expect(screen.getByTestId('terminal-follow-reset-epoch').textContent).toBe('1'));
+    now += 1_000;
 
     act(() => {
       Object.defineProperty(document, 'visibilityState', {
@@ -1526,12 +1543,16 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
     await waitFor(() => expect(screen.getByTestId('terminal-follow-reset-epoch').textContent).toBe('2'));
+    now += 1_000;
 
     act(() => {
       capacitorAppHarness.emit({ isActive: false });
       capacitorAppHarness.emit({ isActive: true });
     });
     await waitFor(() => expect(screen.getByTestId('terminal-follow-reset-epoch').textContent).toBe('3'));
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it('drives SessionProvider foreground truth from lifecycle events', async () => {
@@ -1558,6 +1579,23 @@ describe('App dynamic refresh matrix', () => {
     expect(screen.getByTestId('provider-foreground').textContent?.startsWith('1')).toBe(true);
 
     view.unmount();
+  });
+
+  it('projects foreground resume events into SessionProvider even without a boolean edge', async () => {
+    render(<App />);
+
+    await waitFor(() => expect(capacitorAppHarness.addListener).toHaveBeenCalled());
+    expect(screen.getByTestId('provider-resume-epoch').textContent).toBe('0');
+
+    act(() => {
+      capacitorAppHarness.emit({ isActive: false });
+      capacitorAppHarness.emit({ isActive: true });
+    });
+
+    await waitFor(() => expect(Number(screen.getByTestId('provider-resume-epoch').textContent || '0')).toBeGreaterThanOrEqual(1));
+    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
+    expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
   });
 
   it('does not reconnect hidden unhealthy tabs during foreground resume', async () => {

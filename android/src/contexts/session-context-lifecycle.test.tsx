@@ -219,6 +219,81 @@ describe('session-context-lifecycle', () => {
     expect(ensureActiveSessionFresh).toHaveBeenCalledTimes(1);
   });
 
+  it('triggers explicit resume refresh when a foreground resume event arrives without a boolean edge', async () => {
+    vi.useFakeTimers();
+    const ensureActiveSessionFresh = vi.fn(() => true);
+
+    function Harness({ foregroundResumeEpoch }: { foregroundResumeEpoch: number }) {
+      useSessionContextLifecycle({
+        appForegroundActive: true,
+        foregroundResumeEpoch,
+        state: {
+          sessions: [{ id: 's1', state: 'connected' } as any],
+          activeSessionId: 's1',
+          liveSessionIds: [],
+        } as any,
+        scheduleStates: {},
+        refs: {
+          foregroundActiveRef: { current: true },
+          stateRef: {
+            current: {
+              sessions: [{ id: 's1', state: 'connected' } as any],
+              activeSessionId: 's1',
+              liveSessionIds: [],
+            } as any,
+          },
+          scheduleStatesRef: { current: {} },
+          sessionDebugMetricsStoreRef: { current: { refresh: () => ({}) } },
+          transportRuntimeStoreRef: { current: { sessions: new Map() } },
+          sessionPullStateRef: { current: new Map() },
+          lastActivatedSessionIdRef: { current: 's1' },
+          lastActiveReentryAtRef: { current: new Map() },
+          lastConnectedBaselineAtRef: { current: new Map() },
+          lastServerActivityAtRef: { current: new Map() },
+          remoteScreenshotRuntimeRef: { current: { dispose: () => undefined } },
+          remoteWindowMessageRuntimeRef: { current: { dispose: () => undefined } },
+          pingIntervalsRef: { current: new Map() },
+          handshakeTimeoutsRef: { current: new Map() },
+          reconnectRuntimesRef: { current: new Map() },
+          manualCloseRef: { current: new Set() },
+        },
+        flushRuntimeDebugLogs: () => undefined,
+        clientRuntimeDebugFlushIntervalMs: 10_000,
+        ensureActiveSessionFresh,
+        resolveActiveHeadRefreshTickMs: () => 10_000,
+        resolveHeadStalePingMs: () => 10_000,
+        clearSessionHandshakeTimeout: () => undefined,
+        cleanupSocket: () => undefined,
+        cleanupControlSocket: () => undefined,
+      });
+      return null;
+    }
+
+    const view = render(<Harness foregroundResumeEpoch={0} />);
+    expect(ensureActiveSessionFresh).not.toHaveBeenCalled();
+
+    view.rerender(<Harness foregroundResumeEpoch={1} />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(ensureActiveSessionFresh).toHaveBeenCalledTimes(1);
+    expect(ensureActiveSessionFresh).toHaveBeenCalledWith({
+      sessionId: 's1',
+      source: 'explicit-resume',
+      forceHead: true,
+      markResumeTail: true,
+      allowReconnectIfUnavailable: true,
+    });
+
+    view.rerender(<Harness foregroundResumeEpoch={1} />);
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(ensureActiveSessionFresh).toHaveBeenCalledTimes(1);
+  });
+
   it('marks resume-tail when the active session changes through lifecycle reentry', async () => {
     vi.useFakeTimers();
     const ensureActiveSessionFresh = vi.fn(() => true);

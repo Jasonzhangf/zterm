@@ -272,6 +272,7 @@ export interface SessionProviderProps {
   terminalCacheLines?: number;
   bridgeSettings?: BridgeSettings;
   appForegroundActive?: boolean;
+  foregroundResumeEpoch?: number;
 }
 
 export interface CreateSessionOptions {

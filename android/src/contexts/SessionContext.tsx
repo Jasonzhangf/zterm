@@ -37,6 +37,7 @@ export function SessionProvider({
   terminalCacheLines = DEFAULT_TERMINAL_CACHE_LINES,
   bridgeSettings = DEFAULT_BRIDGE_SETTINGS,
   appForegroundActive,
+  foregroundResumeEpoch,
 }: SessionProviderProps) {
   const [state, dispatch] = useReducer(sessionReducer, initialSessionManagerState);
   const stateRef = useRef(state);
@@ -128,6 +129,7 @@ export function SessionProvider({
     sendMessageRaw,
   } = useSessionProviderAssemblies({
     appForegroundActive,
+    foregroundResumeEpoch,
     state,
     stateRef,
     dispatch,

@@ -44,6 +44,7 @@ type HandleSocketServerMessageFn = (params: {
 
 export function useSessionProviderRuntime(options: {
   appForegroundActive?: boolean;
+  foregroundResumeEpoch?: number;
 }) {
   const [scheduleStates, setScheduleStates] = useState<Record<string, SessionScheduleState>>({});
   const sessionDebugMetricsStoreRef = useRef(createSessionDebugMetricsStore());

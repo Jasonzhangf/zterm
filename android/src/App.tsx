@@ -137,10 +137,17 @@ interface AppContentProps {
   setBridgeSettings: ReturnType<typeof useBridgeSettingsStorage>['setSettings'];
   appForegroundActive?: boolean;
   onForegroundActiveChange?: (active: boolean) => void;
+  onForegroundResume?: (reason: 'visibilitychange' | 'resume' | 'appStateChange') => void;
 }
 
 
-export function AppContent({ bridgeSettings, setBridgeSettings, appForegroundActive = true, onForegroundActiveChange }: AppContentProps) {
+export function AppContent({
+  bridgeSettings,
+  setBridgeSettings,
+  appForegroundActive = true,
+  onForegroundActiveChange,
+  onForegroundResume,
+}: AppContentProps) {
   const [pendingPaneAttachIntent, setPendingPaneAttachIntent] = useState<{ sessionIds: string[]; paneId: string; nonce: number } | null>(null);
   const [relayDevices, setRelayDevices] = useState<TraversalRelayDeviceSnapshot[]>(() => projectRelayDevicesFromAccountState(readTraversalRelayAccountState()));
   const relayDirectoryTruthDevicesRef = useRef<TraversalRelayDeviceSnapshot[]>(
@@ -584,6 +591,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, appForegroundAct
     setPageState,
     pruneSessionGroupSelectionToRemoteTruth,
     onForegroundActiveChange,
+    onForegroundResume,
   });
 
   const markRuntimeSessionEntered = useCallback((sessionId: string) => {
@@ -1113,18 +1121,24 @@ export default function App() {
   const [appForegroundActive, setAppForegroundActive] = useState(
     typeof document === 'undefined' || document.visibilityState !== 'hidden',
   );
+  const [foregroundResumeEpoch, setForegroundResumeEpoch] = useState(0);
+  const handleForegroundResume = useCallback(() => {
+    setForegroundResumeEpoch((current) => current + 1);
+  }, []);
 
   return (
     <SessionProvider
       terminalCacheLines={bridgeSettings.terminalCacheLines}
       bridgeSettings={bridgeSettings}
       appForegroundActive={appForegroundActive}
+      foregroundResumeEpoch={foregroundResumeEpoch}
     >
       <AppContent
         bridgeSettings={bridgeSettings}
         setBridgeSettings={setBridgeSettings}
         appForegroundActive={appForegroundActive}
         onForegroundActiveChange={setAppForegroundActive}
+        onForegroundResume={handleForegroundResume}
       />
     </SessionProvider>
   );

@@ -174,6 +174,7 @@ export function shouldSchedulePassiveVisibleTickRefresh(options: {
 
 export function useSessionContextLifecycle(options: {
   appForegroundActive?: boolean;
+  foregroundResumeEpoch?: number;
   state: SessionManagerState;
   scheduleStates: Record<string, SessionScheduleState>;
   refs: {
@@ -214,15 +215,29 @@ export function useSessionContextLifecycle(options: {
   const lastLiveSessionIdsRef = useRef<string[]>([]);
   const lastRuntimeSessionIdsRef = useRef<string[]>([]);
   const lastForegroundActiveRef = useRef(options.appForegroundActive !== false);
+  const lastForegroundResumeEpochRef = useRef<number | null>(
+    Number.isFinite(options.foregroundResumeEpoch)
+      ? Number(options.foregroundResumeEpoch)
+      : null,
+  );
 
   useEffect(() => {
     const nextForegroundActive = options.appForegroundActive !== false;
-    options.refs.foregroundActiveRef.current = options.appForegroundActive !== false;
-    if (lastForegroundActiveRef.current === nextForegroundActive) {
-      return;
-    }
+    const previousForegroundActive = lastForegroundActiveRef.current;
+    options.refs.foregroundActiveRef.current = nextForegroundActive;
     lastForegroundActiveRef.current = nextForegroundActive;
     if (!nextForegroundActive) {
+      return;
+    }
+    const nextForegroundResumeEpoch = Number.isFinite(options.foregroundResumeEpoch)
+      ? Number(options.foregroundResumeEpoch)
+      : null;
+    if (nextForegroundResumeEpoch !== null) {
+      if (lastForegroundResumeEpochRef.current === nextForegroundResumeEpoch) {
+        return;
+      }
+      lastForegroundResumeEpochRef.current = nextForegroundResumeEpoch;
+    } else if (previousForegroundActive === nextForegroundActive) {
       return;
     }
     const activeSessionId = options.refs.stateRef.current.activeSessionId;
@@ -236,7 +251,7 @@ export function useSessionContextLifecycle(options: {
       markResumeTail: true,
       allowReconnectIfUnavailable: true,
     });
-  }, [options.appForegroundActive]);
+  }, [options.appForegroundActive, options.foregroundResumeEpoch]);
 
   useEffect(() => {
     options.refs.stateRef.current = options.state;
