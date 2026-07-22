@@ -3,6 +3,7 @@ import type {
   ClientMessage,
   PasteImageStartPayload,
   RemoteScreenshotCapture,
+  RemoteScreenshotRequestPayload,
   RemoteScreenshotStatusPayload,
   Session,
 } from '../lib/types';
@@ -44,6 +45,7 @@ interface RemoteScreenshotRuntimeLike {
     options: {
       ws: BridgeTransportSocket;
       onProgress?: (progress: RemoteScreenshotStatusPayload) => void;
+      request?: Omit<RemoteScreenshotRequestPayload, 'requestId'>;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     },
   ) => Promise<RemoteScreenshotCapture>;
@@ -179,6 +181,7 @@ export async function sendFileAttachRuntime(options: {
 export async function requestRemoteScreenshotRuntime(options: {
   sessionId: string;
   onProgress?: (progress: RemoteScreenshotStatusPayload) => void;
+  request?: Omit<RemoteScreenshotRequestPayload, 'requestId'>;
   ensureSessionReadyForPaste: (sessionId: string, timeoutMs?: number) => Promise<BridgeTransportSocket>;
   remoteScreenshotRuntime: RemoteScreenshotRuntimeLike;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
@@ -192,6 +195,7 @@ export async function requestRemoteScreenshotRuntime(options: {
   return options.remoteScreenshotRuntime.request(targetSessionId, {
     ws,
     onProgress: options.onProgress,
+    request: options.request,
     sendSocketPayload: options.sendSocketPayload,
   });
 }

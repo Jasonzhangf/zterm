@@ -120,6 +120,7 @@ export function createRemoteScreenshotRuntime(input?: {
     request(sessionId: string, options: {
       ws: BridgeTransportSocket;
       onProgress?: (progress: RemoteScreenshotStatusPayload) => void;
+      request?: Omit<RemoteScreenshotRequestPayload, 'requestId'>;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     }) {
       const targetSessionId = sessionId.trim();
@@ -142,7 +143,10 @@ export function createRemoteScreenshotRuntime(input?: {
         armPendingTimeout(requestId);
 
         try {
-          const payload: RemoteScreenshotRequestPayload = { requestId };
+          const payload: RemoteScreenshotRequestPayload = {
+            requestId,
+            ...(options.request || {}),
+          };
           options.sendSocketPayload(targetSessionId, options.ws, JSON.stringify({
             type: 'remote-screenshot-request',
             payload,

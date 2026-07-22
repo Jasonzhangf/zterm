@@ -1,0 +1,151 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { createTerminalFileTransferListRuntime } from './terminal-file-transfer-list-runtime';
+import type { ServerMessage } from '../lib/types';
+import type { TerminalSession } from './terminal-runtime-types';
+import type { RemoteScreenshotCaptureOptions } from './terminal-file-transfer-types';
+
+function makeSession(): TerminalSession {
+  return {
+    id: 'session-1',
+    transportId: 'transport-1',
+    transport: null,
+    sessionName: 'client-session-name',
+    mirrorKey: 'mirror-1',
+    pendingPasteImage: null,
+    pendingAttachFile: null,
+  };
+}
+
+function makeTarget(overrides?: { kind?: 'app-window' | 'iterm2-pane'; windowId?: string }) {
+  const kind = overrides?.kind || 'app-window';
+  return {
+    streamTargetId: kind === 'app-window' ? 'app-1' : 'pane-1',
+    videoTarget: {
+      kind,
+      appBundleId: kind === 'app-window' ? 'com.apple.TextEdit' : 'com.googlecode.iterm2',
+      pid: 123,
+      windowId: overrides?.windowId || '42',
+      title: kind === 'app-window' ? 'TextEdit' : 'zterm pane',
+      windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 600 },
+      ...(kind === 'iterm2-pane'
+        ? { cropRectTopLeftPx: { x: 20, y: 80, width: 500, height: 320 } }
+        : {}),
+    },
+    inputTarget: { kind: kind === 'app-window' ? 'app-window' : 'tmux-pane' },
+    streamMode: kind === 'app-window' ? 'interactive' : 'view',
+    focusPolicy: kind === 'app-window' ? 'bring-to-focus' : 'no-focus-steal',
+    inputRoute: kind === 'app-window' ? 'os-event' : 'tmux-input',
+    capture: {
+      source: 'ScreenCaptureKit',
+      coordinateSpace: 'macos-top-left-px',
+      scale: 1,
+      createdAt: '2026-07-22T00:00:00.000Z',
+    },
+  } as const;
+}
+
+async function flushFileTransferMessages() {
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  await new Promise((resolve) => setImmediate(resolve));
+}
+
+describe('terminal-file-transfer-list-runtime remote screenshot target capture', () => {
+  let tempDir: string | null = null;
+
+  afterEach(() => {
+    if (tempDir) {
+      rmSync(tempDir, { recursive: true, force: true });
+      tempDir = null;
+    }
+  });
+
+  function createRuntime(sentMessages: ServerMessage[], captureRemoteScreenshot = vi.fn(async ({ outputPath }: RemoteScreenshotCaptureOptions) => {
+    writeFileSync(outputPath, Buffer.from('png'));
+    return { outputPath };
+  })) {
+    tempDir = mkdtempSync(join(tmpdir(), 'zterm-shot-'));
+    return {
+      runtime: createTerminalFileTransferListRuntime({
+        uploadDir: tempDir,
+        downloadsDir: tempDir,
+        wtermHomeDir: tempDir,
+        platform: 'darwin',
+        sendMessage: (_session, message) => sentMessages.push(message),
+        getSessionMirror: vi.fn(() => null),
+        scheduleMirrorLiveSync: vi.fn(),
+        writeToTmuxSession: vi.fn(),
+        writeToLiveMirror: vi.fn(() => false),
+        readTmuxPaneCurrentPath: vi.fn(() => tempDir!),
+        runCommand: vi.fn(),
+        captureRemoteScreenshot,
+        logTimePrefix: () => '2026-07-22 00:00:00',
+      }),
+      captureRemoteScreenshot,
+    };
+  }
+
+  it('captures a selected app-window screenshot by macOS window id without focusing input', async () => {
+    const sentMessages: ServerMessage[] = [];
+    const { runtime, captureRemoteScreenshot } = createRuntime(sentMessages);
+
+    await runtime.handleRemoteScreenshotRequest(makeSession(), {
+      requestId: 'rs-1',
+      target: {
+        kind: 'remote-window',
+        target: makeTarget({ kind: 'app-window', windowId: '42' }) as any,
+      },
+    });
+    await flushFileTransferMessages();
+
+    expect(captureRemoteScreenshot).toHaveBeenCalledWith(expect.objectContaining({
+      windowId: '42',
+    }));
+    expect(captureRemoteScreenshot.mock.calls[0][0]).not.toHaveProperty('rect');
+    expect(sentMessages.map((message) => message.type)).toContain('remote-screenshot-status');
+    expect(sentMessages.map((message) => message.type)).toContain('file-download-complete');
+  });
+
+  it('captures a selected iTerm pane screenshot by the normalized crop rectangle', async () => {
+    const sentMessages: ServerMessage[] = [];
+    const { runtime, captureRemoteScreenshot } = createRuntime(sentMessages);
+
+    await runtime.handleRemoteScreenshotRequest(makeSession(), {
+      requestId: 'rs-2',
+      target: {
+        kind: 'remote-window',
+        target: makeTarget({ kind: 'iterm2-pane', windowId: '42' }) as any,
+      },
+    });
+    await flushFileTransferMessages();
+
+    expect(captureRemoteScreenshot).toHaveBeenCalledWith(expect.objectContaining({
+      rect: { x: 20, y: 80, width: 500, height: 320 },
+    }));
+    expect(captureRemoteScreenshot.mock.calls[0][0]).not.toHaveProperty('windowId');
+  });
+
+  it('rejects invalid remote-window screenshot targets instead of falling back to a full screenshot', async () => {
+    const sentMessages: ServerMessage[] = [];
+    const { runtime, captureRemoteScreenshot } = createRuntime(sentMessages);
+
+    await runtime.handleRemoteScreenshotRequest(makeSession(), {
+      requestId: 'rs-3',
+      target: {
+        kind: 'remote-window',
+        target: makeTarget({ kind: 'app-window', windowId: 'not-numeric' }) as any,
+      },
+    });
+
+    expect(captureRemoteScreenshot).not.toHaveBeenCalled();
+    expect(sentMessages).toContainEqual({
+      type: 'file-download-error',
+      payload: {
+        requestId: 'rs-3',
+        error: 'remote window screenshot requires a numeric macOS window id',
+      },
+    });
+  });
+});

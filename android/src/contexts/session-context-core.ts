@@ -4,6 +4,7 @@ import type {
   Host,
   PasteImageStartPayload,
   RemoteScreenshotCapture,
+  RemoteScreenshotRequestPayload,
   RemoteScreenshotStatusPayload,
   RemoteWindowInputEventPayload,
   RemoteWindowStreamQualityRequestPayload,
@@ -224,6 +225,7 @@ export interface SessionContextValue {
   requestRemoteScreenshot: (
     sessionId: string,
     onProgress?: (progress: RemoteScreenshotStatusPayload) => void,
+    request?: Omit<RemoteScreenshotRequestPayload, 'requestId'>,
   ) => Promise<RemoteScreenshotCapture>;
   requestRemoteWindowTargets: (
     sessionId: string,

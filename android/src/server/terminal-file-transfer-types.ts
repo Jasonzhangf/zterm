@@ -8,12 +8,20 @@ import type {
   PasteImagePayload,
   PasteImageStartPayload,
   RemoteScreenshotRequestPayload,
+  RemoteWindowStreamRect,
   ServerMessage,
 } from '../lib/types';
 import type { TerminalSession, SessionMirror } from './terminal-runtime-types';
 
 export const FILE_CHUNK_SIZE = 256 * 1024;
 export const REMOTE_SCREENSHOT_CAPTURE_TIMEOUT_MS = 15000;
+
+export interface RemoteScreenshotCaptureOptions {
+  outputPath: string;
+  timeoutMs: number;
+  windowId?: string;
+  rect?: RemoteWindowStreamRect;
+}
 
 export interface PendingUploadState {
   targetDir: string;
@@ -41,7 +49,7 @@ export interface TerminalFileTransferRuntimeDeps {
     target: NonNullable<PasteImageStartPayload['pasteTarget']>,
     image: { name: string; mimeType: string; bytes: number },
   ) => Promise<void> | void;
-  captureRemoteScreenshot: (options: { outputPath: string; timeoutMs: number }) => Promise<{ outputPath: string }>;
+  captureRemoteScreenshot: (options: RemoteScreenshotCaptureOptions) => Promise<{ outputPath: string }>;
   logTimePrefix: () => string;
 }
 

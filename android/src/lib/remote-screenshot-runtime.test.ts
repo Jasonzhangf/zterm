@@ -86,6 +86,64 @@ describe('remote screenshot runtime', () => {
     expect(runtime.getPendingCount()).toBe(0);
   });
 
+  it('includes selected remote-window target truth in screenshot requests', () => {
+    const runtime = createRemoteScreenshotRuntime({
+      now: () => 124,
+    });
+    const sent: any[] = [];
+    const target = {
+      streamTargetId: 'app-1',
+      videoTarget: {
+        kind: 'app-window',
+        appBundleId: 'com.apple.TextEdit',
+        pid: 123,
+        windowId: '42',
+        title: 'TextEdit',
+        windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 600 },
+      },
+      inputTarget: { kind: 'app-window' },
+      streamMode: 'interactive',
+      focusPolicy: 'bring-to-focus',
+      inputRoute: 'os-event',
+      capture: {
+        source: 'ScreenCaptureKit',
+        coordinateSpace: 'macos-top-left-px',
+        scale: 1,
+        createdAt: '2026-07-22T00:00:00.000Z',
+      },
+    };
+
+    void runtime.request('session-1', {
+      ws: createMockSocket(),
+      request: {
+        target: {
+          kind: 'remote-window',
+          target: target as any,
+        },
+      },
+      sendSocketPayload: (_sessionId, _ws, data) => {
+        sent.push(JSON.parse(String(data)));
+      },
+    }).catch(() => undefined);
+
+    expect(sent[0]).toMatchObject({
+      type: 'remote-screenshot-request',
+      payload: {
+        requestId: expect.stringMatching(/^rs-124-/),
+        target: {
+          kind: 'remote-window',
+          target: {
+            streamTargetId: 'app-1',
+            videoTarget: {
+              windowId: '42',
+            },
+          },
+        },
+      },
+    });
+    runtime.dispose('test done');
+  });
+
   it('fails explicitly on timeout', async () => {
     let timeoutHandler: (() => void) | null = null;
     const runtime = createRemoteScreenshotRuntime({

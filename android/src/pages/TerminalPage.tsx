@@ -93,6 +93,7 @@ import {
   type QuickAction,
   type Host,
   type RemoteScreenshotCapture,
+  type RemoteScreenshotRequestPayload,
   type RemoteScreenshotStatusPayload,
   type PasteImageStartPayload,
   type RemoteWindowInputEventPayload,
@@ -474,6 +475,7 @@ interface TerminalPageProps {
   onRequestRemoteScreenshot?: (
     sessionId: string,
     onProgress?: (progress: RemoteScreenshotStatusPayload) => void,
+    request?: Omit<RemoteScreenshotRequestPayload, 'requestId'>,
   ) => Promise<RemoteScreenshotCapture>;
   onRequestRemoteWindowTargets?: (
     sessionId: string,
@@ -2115,6 +2117,32 @@ function TerminalPageComponent({
     }
   }, [onRequestRemoteScreenshot, uiSessionId]);
 
+  const handleRequestRemoteWindowScreenshot = useCallback(async (
+    sessionId: string,
+    target: RemoteWindowStreamTargetManifest,
+  ) => {
+    if (!onRequestRemoteScreenshot) {
+      throw new Error('当前没有可用的截图通道');
+    }
+    const capture = await onRequestRemoteScreenshot(sessionId, undefined, {
+      target: {
+        kind: 'remote-window',
+        target,
+      },
+    });
+    const savedPath = await persistRemoteScreenshotCaptureRuntime({
+      fileName: capture.fileName,
+      dataBase64: capture.dataBase64,
+      directory: Directory.ExternalStorage,
+      mkdir: Filesystem.mkdir,
+      writeFile: Filesystem.writeFile,
+    });
+    return {
+      fileName: capture.fileName,
+      savedPath,
+    };
+  }, [onRequestRemoteScreenshot]);
+
   const handleQuickBarMeasuredHeightChange = useCallback((height: number) => {
     runtimeDebug('terminal.quickbar.measure', {
       measuredHeight: height,
@@ -3707,6 +3735,7 @@ function TerminalPageComponent({
           startStream={onRequestRemoteWindowStreamStart}
           updateStreamQuality={onUpdateRemoteWindowStreamQuality}
           stopStream={onStopRemoteWindowStream}
+          requestScreenshot={handleRequestRemoteWindowScreenshot}
           sendInput={onSendRemoteWindowInput}
           bottomInsetPx={
             quickBarShellKeyboardLiftPx

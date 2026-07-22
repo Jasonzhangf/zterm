@@ -66,6 +66,10 @@ interface RemoteWindowOverlayProps {
     payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>,
   ) => void;
   stopStream?: (sessionId: string, streamId: string) => unknown;
+  requestScreenshot?: (
+    sessionId: string,
+    target: RemoteWindowStreamTargetManifest,
+  ) => Promise<RemoteWindowScreenshotSaveResult>;
   sendInput?: (
     sessionId: string,
     payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
@@ -82,6 +86,17 @@ interface RemoteWindowStreamStartResult {
   mediaStream?: MediaStream | null;
   started?: RemoteWindowStreamStartedPayload;
 }
+
+interface RemoteWindowScreenshotSaveResult {
+  fileName: string;
+  savedPath: string;
+}
+
+type RemoteWindowScreenshotStatus =
+  | { phase: 'idle' }
+  | { phase: 'capturing' }
+  | { phase: 'saved'; fileName: string; savedPath: string }
+  | { phase: 'failed'; message: string };
 
 export interface RemoteWindowInputContext {
   sessionId: string;
@@ -543,6 +558,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   startStream,
   updateStreamQuality,
   stopStream,
+  requestScreenshot,
   sendInput,
   bottomInsetPx = 0,
   bottomChromeInsetPx = 0,
@@ -564,6 +580,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const [receiverFrameSize, setReceiverFrameSize] = useState<SurfaceSize | null>(null);
   const [itermPaneTargetsExpanded, setItermPaneTargetsExpanded] = useState(false);
   const [catalogRefreshing, setCatalogRefreshing] = useState(false);
+  const [screenshotStatus, setScreenshotStatus] = useState<RemoteWindowScreenshotStatus>({ phase: 'idle' });
   const floatingOffsetRef = useRef(floatingOffset);
   const floatingOverlayWidthPxRef = useRef(floatingOverlayWidthPx);
   const entryOffsetRef = useRef(entryOffset);
@@ -996,6 +1013,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     surfacePointersRef.current.clear();
     surfaceGestureRef.current = null;
     bitratePresetTouchedRef.current = false;
+    setScreenshotStatus({ phase: 'idle' });
     lastAutoFullscreenImePanRef.current = null;
     if (state.phase === 'targetLocked' && state.streamId && activeSessionId && stopStream) {
       void Promise.resolve(stopStream(activeSessionId, state.streamId)).catch((error) => {
@@ -1508,6 +1526,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     lastAppliedStreamQualityKeyRef.current = null;
     bitratePresetTouchedRef.current = false;
     lastAutoFullscreenImePanRef.current = null;
+    setScreenshotStatus({ phase: 'idle' });
     resetFullscreenViewport();
     setFullscreenDisplayMode(initialFullscreenDisplayMode);
     setReceiverMediaStream(null);
@@ -1576,6 +1595,33 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     setFullscreenDisplayMode,
     startStream,
   ]);
+
+  const handleRemoteWindowScreenshot = useCallback(() => {
+    if (state.phase !== 'targetLocked') {
+      return;
+    }
+    const targetSessionId = activeSessionId?.trim() || '';
+    if (!targetSessionId || !requestScreenshot) {
+      setScreenshotStatus({ phase: 'failed', message: '当前没有可用的截图通道' });
+      return;
+    }
+    const target = state.target;
+    setScreenshotStatus({ phase: 'capturing' });
+    void requestScreenshot(targetSessionId, target)
+      .then((result) => {
+        setScreenshotStatus({
+          phase: 'saved',
+          fileName: result.fileName,
+          savedPath: result.savedPath,
+        });
+      })
+      .catch((error) => {
+        setScreenshotStatus({
+          phase: 'failed',
+          message: error instanceof Error ? error.message : String(error),
+        });
+      });
+  }, [activeSessionId, requestScreenshot, state]);
 
   const emitRemoteWindowInput = useCallback((eventPayload: RemoteWindowInputEventPayload['event']) => {
     if (
@@ -2306,7 +2352,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     ...styles.fullscreenOverlay,
     paddingBottom: `${fullscreenBottomPaddingPx}px`,
   };
-	  const videoSurfaceStyle = state.phase === 'targetLocked' && state.mode === 'floating' && lockedDisplaySourceSize
+  const videoSurfaceStyle = state.phase === 'targetLocked' && state.mode === 'floating' && lockedDisplaySourceSize
 	    ? {
 	        ...styles.videoPlaceholder,
 	        flex: '0 0 auto',
@@ -2316,6 +2362,19 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           : { maxHeight: 'min(52vh, 420px)' }),
       }
     : styles.videoPlaceholder;
+  const screenshotStatusText = (() => {
+    switch (screenshotStatus.phase) {
+      case 'capturing':
+        return '截屏中';
+      case 'saved':
+        return `已保存 ${screenshotStatus.fileName}`;
+      case 'failed':
+        return `截图失败 ${screenshotStatus.message}`;
+      case 'idle':
+      default:
+        return '';
+    }
+  })();
 
   const lockedContent = state.phase === 'targetLocked' ? (
     <div
@@ -2360,6 +2419,15 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
               <option key={preset} value={preset}>{formatBitrateOption(preset)}</option>
             ))}
           </select>
+          <button
+            type="button"
+            data-no-drag="true"
+            aria-label="截屏远程窗口"
+            onClick={handleRemoteWindowScreenshot}
+            style={styles.headerIconButton}
+          >
+            #
+          </button>
           {state.mode === 'fullscreen' ? (
             <>
               <button
@@ -2384,6 +2452,16 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
             x
           </button>
         </div>
+      </div>
+      <div
+        data-testid="remote-window-screenshot-status"
+        aria-live="polite"
+        style={{
+          ...styles.screenshotStatus,
+          display: screenshotStatusText ? 'block' : 'none',
+        }}
+      >
+        {screenshotStatusText}
       </div>
       <div
         data-testid="remote-window-video-surface"
@@ -2585,6 +2663,12 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 12,
     fontWeight: 850,
     outline: 'none',
+  },
+  screenshotStatus: {
+    padding: '0 12px 8px',
+    color: 'rgba(237,244,255,0.68)',
+    fontSize: 11,
+    lineHeight: 1.3,
   },
   errorBox: {
     margin: '10px 12px 0',

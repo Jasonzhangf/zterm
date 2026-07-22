@@ -89,6 +89,10 @@ export interface FileUploadErrorPayload {
 
 export interface RemoteScreenshotRequestPayload {
   requestId: string;
+  target?: {
+    kind: 'remote-window';
+    target: RemoteWindowStreamTargetManifest;
+  };
 }
 
 export interface RemoteScreenshotStatusPayload {

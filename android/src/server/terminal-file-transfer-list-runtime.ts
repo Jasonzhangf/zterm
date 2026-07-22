@@ -12,6 +12,7 @@ import type {
   FileDownloadRequestPayload,
   FileListRequestPayload,
   RemoteScreenshotRequestPayload,
+  RemoteWindowStreamRect,
 } from '../lib/types';
 import { resolveFileTransferListPath } from './file-transfer-path';
 import { resolveRemoteScreenshotErrorMessage } from './remote-screenshot';
@@ -71,10 +72,73 @@ export function createTerminalFileTransferListRuntime(
     sendNextChunk();
   }
 
-  function buildRemoteScreenshotFileName() {
+  function buildRemoteScreenshotFileName(prefix = 'remote-screenshot') {
     const now = new Date();
     const pad = (value: number) => String(value).padStart(2, '0');
-    return `remote-screenshot-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.png`;
+    const safePrefix = prefix
+      .trim()
+      .replace(/[^A-Za-z0-9._-]+/g, '-')
+      .replace(/^-+|-+$/g, '')
+      .slice(0, 80) || 'remote-screenshot';
+    return `${safePrefix}-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.png`;
+  }
+
+  function normalizeRemoteScreenshotRect(rect: RemoteWindowStreamRect | undefined, label: string): RemoteWindowStreamRect {
+    if (!rect) {
+      throw new Error(`${label} requires a capture rectangle`);
+    }
+    const values = [rect.x, rect.y, rect.width, rect.height];
+    if (!values.every((value) => Number.isFinite(value))) {
+      throw new Error(`${label} capture rectangle is invalid`);
+    }
+    const normalized = {
+      x: Math.round(rect.x),
+      y: Math.round(rect.y),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height),
+    };
+    if (normalized.width <= 0 || normalized.height <= 0) {
+      throw new Error(`${label} capture rectangle must have positive size`);
+    }
+    if (normalized.width > 20000 || normalized.height > 20000) {
+      throw new Error(`${label} capture rectangle is too large`);
+    }
+    return normalized;
+  }
+
+  function resolveRemoteScreenshotCaptureRequest(payload: RemoteScreenshotRequestPayload): {
+    fileName: string;
+    windowId?: string;
+    rect?: RemoteWindowStreamRect;
+  } {
+    const targetPayload = payload.target;
+    if (!targetPayload) {
+      return {
+        fileName: buildRemoteScreenshotFileName(),
+      };
+    }
+    if (targetPayload.kind !== 'remote-window' || !targetPayload.target) {
+      throw new Error('remote screenshot target is invalid');
+    }
+    const target = targetPayload.target;
+    const title = target.videoTarget.title || target.videoTarget.appBundleId || target.streamTargetId || 'window';
+    if (target.videoTarget.kind === 'app-window') {
+      const windowId = String(target.videoTarget.windowId || '').trim();
+      if (!/^\d+$/u.test(windowId)) {
+        throw new Error('remote window screenshot requires a numeric macOS window id');
+      }
+      return {
+        fileName: buildRemoteScreenshotFileName(`remote-window-screenshot-${title}`),
+        windowId,
+      };
+    }
+    return {
+      fileName: buildRemoteScreenshotFileName(`remote-window-screenshot-${title}`),
+      rect: normalizeRemoteScreenshotRect(
+        target.videoTarget.cropRectTopLeftPx,
+        'remote window pane screenshot',
+      ),
+    };
   }
 
   function handleFileListRequest(session: TerminalSession, payload: FileListRequestPayload) {
@@ -199,7 +263,18 @@ export function createTerminalFileTransferListRuntime(
       return;
     }
 
-    const fileName = buildRemoteScreenshotFileName();
+    let captureRequest: ReturnType<typeof resolveRemoteScreenshotCaptureRequest>;
+    try {
+      captureRequest = resolveRemoteScreenshotCaptureRequest(payload);
+    } catch (error) {
+      deps.sendMessage(session, {
+        type: 'file-download-error',
+        payload: { requestId, error: error instanceof Error ? error.message : String(error) },
+      });
+      return;
+    }
+
+    const fileName = captureRequest.fileName;
     const tempPath = join(deps.wtermHomeDir, fileName);
 
     deps.sendMessage(session, {
@@ -213,6 +288,8 @@ export function createTerminalFileTransferListRuntime(
       const captureResult = await deps.captureRemoteScreenshot({
         outputPath: tempPath,
         timeoutMs: REMOTE_SCREENSHOT_CAPTURE_TIMEOUT_MS,
+        ...(captureRequest.windowId ? { windowId: captureRequest.windowId } : {}),
+        ...(captureRequest.rect ? { rect: captureRequest.rect } : {}),
       });
       const fileBuffer = readFileSync(captureResult.outputPath);
       deps.sendMessage(session, {

@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Keyboard } from '@capacitor/keyboard';
+import { Filesystem } from '@capacitor/filesystem';
 import type { RemoteWindowStreamTargetManifest, Session } from '../lib/types';
 import { TerminalPage } from './TerminalPage';
 
@@ -465,6 +466,95 @@ describe('TerminalPage remote window overlay', () => {
       expect(screen.queryByTestId('remote-window-locked-overlay')).toBeNull();
       expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
     });
+  });
+
+  it('saves a remote-window screenshot through the existing screenshot transfer path without focusing input', async () => {
+    const session = makeSession('s1');
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const onRequestRemoteWindowTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget()],
+      errors: [],
+    }));
+    const onRequestRemoteWindowStreamStart = vi.fn(async (
+      _sessionId: string,
+      _target: RemoteWindowStreamTargetManifest,
+      streamId: string,
+    ) => ({
+      streamId,
+      mediaStream,
+      started: {
+        requestId: 'rw-start-1',
+        streamId,
+        targetId: 'app-1',
+        answer: { type: 'answer' as const, sdp: 'v=0' },
+        capture: {
+          source: 'ScreenCaptureKit' as const,
+          frameWidth: 800,
+          frameHeight: 560,
+          frameRate: 30,
+          targetKind: 'app-window' as const,
+        },
+        transport: {
+          kind: 'webrtc-video' as const,
+        },
+      },
+    }));
+    const onRequestRemoteScreenshot = vi.fn(async () => ({
+      fileName: 'remote-window-TextEdit.png',
+      mimeType: 'image/png' as const,
+      dataBase64: 'cG5n',
+      totalBytes: 3,
+    }));
+    const onSendRemoteWindowInput = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        onRequestRemoteScreenshot={onRequestRemoteScreenshot}
+        onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
+        onRequestRemoteWindowStreamStart={onRequestRemoteWindowStreamStart}
+        onSendRemoteWindowInput={onSendRemoteWindowInput}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-target-app-1');
+    fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
+    await screen.findByTestId('remote-window-video');
+    onSendRemoteWindowInput.mockClear();
+
+    fireEvent.click(screen.getByRole('button', { name: '截屏远程窗口' }));
+
+    await waitFor(() => {
+      expect(onRequestRemoteScreenshot).toHaveBeenCalledWith('s1', undefined, {
+        target: {
+          kind: 'remote-window',
+          target: expect.objectContaining({
+            streamTargetId: 'app-1',
+          }),
+        },
+      });
+      expect(Filesystem.writeFile).toHaveBeenCalledWith(expect.objectContaining({
+        path: '/storage/emulated/0/Download/zterm/remote-window-TextEdit.png',
+        data: 'cG5n',
+      }));
+      expect(screen.getByTestId('remote-window-screenshot-status').textContent).toContain('已保存');
+    });
+    expect(onSendRemoteWindowInput).not.toHaveBeenCalled();
   });
 
   it('does not route quickbar input through unsupported iTerm pane remote-window targets', async () => {

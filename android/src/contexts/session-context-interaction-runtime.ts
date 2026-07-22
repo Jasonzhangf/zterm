@@ -19,6 +19,7 @@ import type { BridgeSettings } from '../lib/bridge-settings';
 import type {
   PasteImageStartPayload,
   RemoteScreenshotCapture,
+  RemoteScreenshotRequestPayload,
   RemoteScreenshotStatusPayload,
   RemoteWindowInputEventPayload,
   RemoteWindowStreamQualityRequestPayload,
@@ -42,6 +43,7 @@ interface RemoteScreenshotRuntimeLike {
     options: {
       ws: BridgeTransportSocket;
       onProgress?: (progress: RemoteScreenshotStatusPayload) => void;
+      request?: Omit<RemoteScreenshotRequestPayload, 'requestId'>;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     },
   ) => Promise<RemoteScreenshotCapture>;
@@ -155,10 +157,12 @@ export function createSessionInteractionRuntime(options: {
   const requestRemoteScreenshot = async (
     sessionId: string,
     onProgress?: (progress: RemoteScreenshotStatusPayload) => void,
+    request?: Omit<RemoteScreenshotRequestPayload, 'requestId'>,
   ) => {
     return requestRemoteScreenshotRuntime({
       sessionId,
       onProgress,
+      request,
       ensureSessionReadyForPaste,
       remoteScreenshotRuntime: options.refs.remoteScreenshotRuntimeRef.current,
       sendSocketPayload: options.sendSocketPayload,

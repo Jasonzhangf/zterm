@@ -111,6 +111,10 @@
           "label": "src/components/terminal/RemoteWindowOverlay.tsx#RemoteWindowOverlay"
         },
         {
+          "id": "RemoteScreenshotRuntime",
+          "label": "src/lib/remote-screenshot-runtime.ts#createRemoteScreenshotRuntime"
+        },
+        {
           "id": "RemoteWindowMessageRuntime",
           "label": "src/lib/remote-window-message-runtime.ts#createRemoteWindowMessageRuntime"
         },
@@ -537,14 +541,30 @@
           "from": "TerminalPage",
           "to": "RemoteWindowOverlay",
           "owner_feature": "desktop.remote_window_stream",
-          "semantic_input": "active session id plus remote-window catalog/start/stop/input callbacks",
-          "semantic_output": "picker, stream setup, floating/fullscreen video overlay, source-aspect pre-start and daemon-frame-aspect post-start projection, floating resize, fullscreen button, aspect-fit/aspect-fill display mode projection, IME bottom-inset fullscreen padding plus auto lift, Back/minimize projection, zoom/pan/minimap projection where local single-finger pan is only enabled after fullscreen zoom, unzoomed remote pointer/gesture/wheel input context, separate QuickBar/body suppression state, active remote-window input context, and close intent",
+          "semantic_input": "active session id plus remote-window catalog/start/stop/input/screenshot callbacks",
+          "semantic_output": "picker, stream setup, floating/fullscreen video overlay, source-aspect pre-start and daemon-frame-aspect post-start projection, floating resize, fullscreen button, screenshot button, aspect-fit/aspect-fill display mode projection, IME bottom-inset fullscreen padding plus auto lift, Back/minimize projection, zoom/pan/minimap projection where local single-finger pan is only enabled after fullscreen zoom, unzoomed remote pointer/gesture/wheel input context, separate QuickBar/body suppression state, active remote-window input context, and close intent",
           "status": "anchored",
           "edge_id": "android_mainline:TerminalPage->RemoteWindowOverlay",
           "resource_from": "resource.ui_projection",
           "resource_to": "resource.remote_window_overlay",
           "via_resources": [],
           "relation_status": "direct"
+        },
+        {
+          "from": "RemoteWindowOverlay",
+          "to": "RemoteScreenshotRuntime",
+          "owner_feature": "terminal.remote_screenshot",
+          "semantic_input": "selected remote-window target manifest plus active session id from floating/fullscreen screenshot button",
+          "semantic_output": "remote-screenshot-request carrying target manifest, daemon window-id/rect capture, file-download chunks, and Android local save without remote-window focus/input",
+          "status": "anchored",
+          "edge_id": "android_mainline:RemoteWindowOverlay->RemoteScreenshotRuntime",
+          "resource_from": "resource.remote_window_overlay",
+          "resource_to": "resource.session_transport",
+          "via_resources": [
+            "resource.active_session",
+            "resource.remote_screenshot"
+          ],
+          "relation_status": "via"
         },
         {
           "from": "RemoteWindowOverlay",
@@ -1579,8 +1599,8 @@
           "from": "Control",
           "to": "Screenshot",
           "owner_feature": "terminal.remote_screenshot",
-          "semantic_input": "remote screenshot request",
-          "semantic_output": "native screenshot handoff",
+          "semantic_input": "remote screenshot request, optionally carrying selected remote-window target manifest",
+          "semantic_output": "native screenshot handoff for full screen, macOS window id, or normalized pane crop rectangle",
           "status": "anchored",
           "edge_id": "daemon_mainline:Control->Screenshot",
           "resource_from": "resource.remote_screenshot",

@@ -798,6 +798,10 @@ describe('RemoteWindowOverlay', () => {
     await screen.findByTestId('remote-window-video');
     expect(sendInput).not.toHaveBeenCalled();
 
+    fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
+    fireEvent.click(screen.getByRole('button', { name: '缩小远程窗口' }));
+    expect(sendInput).not.toHaveBeenCalled();
+
     const surface = screen.getByTestId('remote-window-video-surface');
     Object.defineProperty(surface, 'getBoundingClientRect', {
       configurable: true,
@@ -827,6 +831,49 @@ describe('RemoteWindowOverlay', () => {
       'focus',
       'key',
     ]);
+  });
+
+  it('captures a selected remote-window screenshot without focusing the desktop app', async () => {
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const sendInput = vi.fn();
+    const requestScreenshot = vi.fn(async () => ({
+      fileName: 'remote-window-TextEdit.png',
+      savedPath: '/storage/emulated/0/Download/zterm/remote-window-TextEdit.png',
+    }));
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+    }));
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        requestTargets={requestTargets}
+        startStream={startStream}
+        sendInput={sendInput}
+        requestScreenshot={requestScreenshot}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-target-app-1');
+    fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
+    await screen.findByTestId('remote-window-video');
+    expect(sendInput).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: '截屏远程窗口' }));
+
+    await waitFor(() => {
+      expect(requestScreenshot).toHaveBeenCalledWith('session-1', expect.objectContaining({
+        streamTargetId: 'app-1',
+      }));
+      expect(screen.getByTestId('remote-window-screenshot-status').textContent).toContain('已保存');
+    });
+    expect(sendInput).not.toHaveBeenCalled();
   });
 
   it('marks iTerm pane streams as read-only and does not emit unsupported input', async () => {

@@ -11,6 +11,7 @@ import type {
 import type {
   BridgeClientMessage,
   BridgeServerMessage,
+  RemoteWindowStreamTargetManifest as SharedRemoteWindowStreamTargetManifest,
 } from '@zterm/shared/protocol';
 import type {
   SessionBufferState as SharedSessionBufferState,
@@ -364,6 +365,10 @@ export interface FileDownloadRequestPayload {
 
 export interface RemoteScreenshotRequestPayload {
   requestId: string;
+  target?: {
+    kind: 'remote-window';
+    target: SharedRemoteWindowStreamTargetManifest;
+  };
 }
 
 export interface RemoteScreenshotStatusPayload {

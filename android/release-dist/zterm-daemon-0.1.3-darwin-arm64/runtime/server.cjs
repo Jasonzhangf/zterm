@@ -8833,10 +8833,63 @@ function createTerminalFileTransferListRuntime(deps) {
     }
     sendNextChunk();
   }
-  function buildRemoteScreenshotFileName() {
+  function buildRemoteScreenshotFileName(prefix = "remote-screenshot") {
     const now = /* @__PURE__ */ new Date();
     const pad = (value) => String(value).padStart(2, "0");
-    return `remote-screenshot-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.png`;
+    const safePrefix = prefix.trim().replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 80) || "remote-screenshot";
+    return `${safePrefix}-${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}-${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.png`;
+  }
+  function normalizeRemoteScreenshotRect(rect, label) {
+    if (!rect) {
+      throw new Error(`${label} requires a capture rectangle`);
+    }
+    const values = [rect.x, rect.y, rect.width, rect.height];
+    if (!values.every((value) => Number.isFinite(value))) {
+      throw new Error(`${label} capture rectangle is invalid`);
+    }
+    const normalized = {
+      x: Math.round(rect.x),
+      y: Math.round(rect.y),
+      width: Math.round(rect.width),
+      height: Math.round(rect.height)
+    };
+    if (normalized.width <= 0 || normalized.height <= 0) {
+      throw new Error(`${label} capture rectangle must have positive size`);
+    }
+    if (normalized.width > 2e4 || normalized.height > 2e4) {
+      throw new Error(`${label} capture rectangle is too large`);
+    }
+    return normalized;
+  }
+  function resolveRemoteScreenshotCaptureRequest(payload) {
+    const targetPayload = payload.target;
+    if (!targetPayload) {
+      return {
+        fileName: buildRemoteScreenshotFileName()
+      };
+    }
+    if (targetPayload.kind !== "remote-window" || !targetPayload.target) {
+      throw new Error("remote screenshot target is invalid");
+    }
+    const target = targetPayload.target;
+    const title = target.videoTarget.title || target.videoTarget.appBundleId || target.streamTargetId || "window";
+    if (target.videoTarget.kind === "app-window") {
+      const windowId = String(target.videoTarget.windowId || "").trim();
+      if (!/^\d+$/u.test(windowId)) {
+        throw new Error("remote window screenshot requires a numeric macOS window id");
+      }
+      return {
+        fileName: buildRemoteScreenshotFileName(`remote-window-screenshot-${title}`),
+        windowId
+      };
+    }
+    return {
+      fileName: buildRemoteScreenshotFileName(`remote-window-screenshot-${title}`),
+      rect: normalizeRemoteScreenshotRect(
+        target.videoTarget.cropRectTopLeftPx,
+        "remote window pane screenshot"
+      )
+    };
   }
   function handleFileListRequest(session, payload) {
     const { requestId, path: requestedPath, showHidden } = payload;
@@ -8946,7 +8999,17 @@ function createTerminalFileTransferListRuntime(deps) {
       });
       return;
     }
-    const fileName = buildRemoteScreenshotFileName();
+    let captureRequest;
+    try {
+      captureRequest = resolveRemoteScreenshotCaptureRequest(payload);
+    } catch (error) {
+      deps.sendMessage(session, {
+        type: "file-download-error",
+        payload: { requestId, error: error instanceof Error ? error.message : String(error) }
+      });
+      return;
+    }
+    const fileName = captureRequest.fileName;
     const tempPath = (0, import_path4.join)(deps.wtermHomeDir, fileName);
     deps.sendMessage(session, {
       type: "remote-screenshot-status",
@@ -8956,7 +9019,9 @@ function createTerminalFileTransferListRuntime(deps) {
     try {
       const captureResult = await deps.captureRemoteScreenshot({
         outputPath: tempPath,
-        timeoutMs: REMOTE_SCREENSHOT_CAPTURE_TIMEOUT_MS
+        timeoutMs: REMOTE_SCREENSHOT_CAPTURE_TIMEOUT_MS,
+        ...captureRequest.windowId ? { windowId: captureRequest.windowId } : {},
+        ...captureRequest.rect ? { rect: captureRequest.rect } : {}
       });
       const fileBuffer = (0, import_fs4.readFileSync)(captureResult.outputPath);
       deps.sendMessage(session, {
@@ -13107,7 +13172,23 @@ var import_node_path2 = require("node:path");
 async function captureRemoteScreenshotWithDaemon(options) {
   return await new Promise((resolve4, reject) => {
     const daemonBinary = (process.env.ZTERM_DAEMON_NATIVE || "").trim() || (0, import_node_path2.join)((0, import_node_os.homedir)(), ".zterm", "bin", "zterm-daemon");
-    (0, import_node_child_process.execFile)(daemonBinary, ["capture-screen", options.outputPath], {
+    const args = ["capture-screen", options.outputPath];
+    const windowId = options.windowId?.trim();
+    if (windowId) {
+      args.push("--window-id", windowId);
+    }
+    if (options.rect) {
+      args.push(
+        "--rect",
+        [
+          Math.round(options.rect.x),
+          Math.round(options.rect.y),
+          Math.round(options.rect.width),
+          Math.round(options.rect.height)
+        ].join(",")
+      );
+    }
+    (0, import_node_child_process.execFile)(daemonBinary, args, {
       timeout: options.timeoutMs,
       windowsHide: true
     }, (error, stdout, stderr) => {

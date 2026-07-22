@@ -913,6 +913,7 @@
       "truth_store": "remote screenshot daemon helper",
       "allowed_operations": [
         "request_screenshot",
+        "request_remote_window_target_screenshot",
         "capture_screenshot",
         "return_result"
       ],
@@ -929,7 +930,8 @@
       ],
       "required_gates": [
         "src/lib/resource-registry-truth.test.ts",
-        "src/lib/remote-screenshot-runtime.test.ts"
+        "src/lib/remote-screenshot-runtime.test.ts",
+        "src/server/terminal-file-transfer-list-runtime.test.ts"
       ],
       "canonical_docs": [
         "docs/resource-map.md",
@@ -1093,7 +1095,7 @@
     {
       "resource_id": "resource.remote_window_overlay",
       "resource_type": "projection_resource",
-      "identity": "Android remote window picker, floating stream overlay, fullscreen aspect-fit/aspect-fill zoom/pan/minimap projection, and Back/minimize/close/input intent",
+      "identity": "Android remote window picker, floating stream overlay, fullscreen aspect-fit/aspect-fill zoom/pan/minimap projection, and Back/minimize/close/input/screenshot intent",
       "owner_feature": "desktop.remote_window_stream",
       "truth_store": "docs/decisions/2026-07-19-remote-window-stream-truth.md",
       "allowed_operations": [
@@ -1109,6 +1111,7 @@
         "show_minimap",
         "select_effective_video_quality",
         "shrink_to_floating",
+        "emit_screenshot_intent",
         "emit_close_intent",
         "emit_input_intent"
       ],
@@ -1116,7 +1119,8 @@
         "resource.remote_window_stream"
       ],
       "indirect_relations": [
-        "resource.transport_target"
+        "resource.transport_target",
+        "resource.remote_screenshot"
       ],
       "via_resources": [
         "resource.active_session",
