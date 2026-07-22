@@ -1,13 +1,20 @@
 import { runtimeDebug } from './runtime-debug';
 import { fetchRemoteTmuxSessionNamesByOwner } from './open-tab-restore';
 import type { BridgeSettings } from './bridge-settings';
-import type { Host, PersistedOpenTab, SessionGroupHistory } from './types';
+import type { Host, PersistedOpenTab, Session, SessionGroupHistory } from './types';
+import type { TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
 
 export interface RemoteTabAuditDeps {
   openTabStateRef: { current: { tabs: PersistedOpenTab[]; activeSessionId: string | null } };
   sessionGroups: SessionGroupHistory[];
   bridgeSettingsRef: { current: BridgeSettings };
   hostsRef: { current: Host[] };
+  sessionsRef?: { current: Session[] };
+  prioritySessionIdsRef?: { current: Array<string | null | undefined> };
+  manageTmuxSessionsOnOpenTransport?: (
+    sessionId: string,
+    message: TerminalMuxTargetClientMessage,
+  ) => Promise<string[] | null>;
   remoteOpenTabAuditTokenRef: { current: number };
   pruneSessionGroupSelectionToRemoteTruth: (target: { bridgeHost: string; bridgePort: number; daemonHostId?: string }, remoteSessionNames: string[]) => void;
   markSessionRemoteMissing?: (sessionId: string, remoteMissing: boolean) => void;
@@ -38,6 +45,9 @@ export async function auditOpenTabsAgainstRemoteSessions(
     targets: auditTargets,
     bridgeSettings: deps.bridgeSettingsRef.current,
     hosts: deps.hostsRef.current,
+    openSessions: deps.sessionsRef?.current,
+    prioritySessionIds: deps.prioritySessionIdsRef?.current,
+    manageTmuxSessionsOnOpenTransport: deps.manageTmuxSessionsOnOpenTransport,
   });
   if (deps.remoteOpenTabAuditTokenRef.current !== auditToken) {
     return;

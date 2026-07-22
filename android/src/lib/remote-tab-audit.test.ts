@@ -233,4 +233,70 @@ describe('auditOpenTabsAgainstRemoteSessions', () => {
 
     expect(pruneSpy).not.toHaveBeenCalled();
   });
+
+  it('passes current open sessions and mux target manager to remote owner fetch', async () => {
+    const tab: PersistedOpenTab = {
+      sessionId: 'session-1',
+      hostId: 'host-1',
+      connectionName: 'test-host',
+      bridgeHost: '192.168.1.100',
+      bridgePort: 8080,
+      daemonHostId: 'daemon-1',
+      sessionName: 'my-session',
+      authToken: 'token',
+      createdAt: Date.now(),
+    };
+    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => ['my-session']);
+    const liveSession = {
+      id: 'session-1',
+      hostId: 'host-1',
+      connectionName: 'test-host',
+      bridgeHost: '192.168.1.100',
+      bridgePort: 8080,
+      daemonHostId: 'daemon-1',
+      sessionName: 'my-session',
+      title: 'my-session',
+      authToken: 'token',
+      ws: null,
+      state: 'connected',
+      hasUnread: false,
+      createdAt: 1,
+      buffer: {
+        lines: [],
+        gapRanges: [],
+        startIndex: 0,
+        endIndex: 0,
+        bufferHeadStartIndex: 0,
+        bufferTailEndIndex: 0,
+        cols: 80,
+        rows: 24,
+        cursorKeysApp: false,
+        cursor: null,
+        updateKind: 'replace',
+        revision: 0,
+      },
+    } as any;
+    deps.openTabStateRef.current = { tabs: [tab], activeSessionId: 'session-1' };
+    deps.sessionsRef = { current: [liveSession] };
+    deps.prioritySessionIdsRef = { current: ['session-1'] };
+    deps.manageTmuxSessionsOnOpenTransport = manageTmuxSessionsOnOpenTransport;
+    const fetchMock = vi.fn().mockResolvedValue(new Map([['daemon:daemon-1', ['my-session']]]));
+
+    vi.resetModules();
+    vi.doMock('./open-tab-restore', () => ({
+      fetchRemoteTmuxSessionNamesByOwner: fetchMock,
+    }));
+    vi.doMock('./runtime-debug', () => ({
+      runtimeDebug: vi.fn(),
+    }));
+
+    const { auditOpenTabsAgainstRemoteSessions: audit } = await import('./remote-tab-audit');
+    await audit('session-picker-refresh', deps);
+
+    expect(fetchMock).toHaveBeenCalledWith(expect.objectContaining({
+      openSessions: [liveSession],
+      prioritySessionIds: ['session-1'],
+      manageTmuxSessionsOnOpenTransport,
+    }));
+  });
 });

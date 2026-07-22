@@ -68,6 +68,15 @@ open-tab intent / foreground lifecycle / input
 -> request head / explicit resume session-open only when no usable socket exists
 ```
 
+Drawer refresh and open-tab audit ride on the same transport owner:
+
+```text
+session-picker-refresh / drawer refresh
+-> SessionOpenOwner or OpenTabRuntime audit
+-> existing open mux target manager when a matching non-closed Session exists
+-> legacy tmux fetch only when no matching open target exists
+```
+
 ## L1 Pure Planner Cases
 
 Positive reuse:

@@ -280,6 +280,124 @@ describe('open-tab restore truth', () => {
     );
   });
 
+  it('uses an existing open mux target transport for remote tmux owner audit', async () => {
+    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => ['zterm', 'alpha']);
+
+    const { fetchRemoteTmuxSessionNamesByOwner } = await import('./open-tab-restore');
+
+    const result = await fetchRemoteTmuxSessionNamesByOwner({
+      targets: [{
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        authToken: 'token-a',
+      }],
+      openSessions: [{
+        id: 'live-session-a',
+        state: 'connected',
+        daemonHostId: 'daemon-a',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        createdAt: 10,
+      }],
+      prioritySessionIds: ['live-session-a'],
+      manageTmuxSessionsOnOpenTransport,
+      bridgeSettings: {
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'auto',
+        traversalRelay: undefined,
+      },
+    });
+
+    expect(result.get('daemon:daemon-a')).toEqual(['alpha', 'zterm']);
+    expect(manageTmuxSessionsOnOpenTransport).toHaveBeenCalledWith(
+      'live-session-a',
+      { type: 'list-sessions' },
+    );
+    expect(fetchTmuxSessionsMock).not.toHaveBeenCalled();
+  });
+
+  it('does not fallback to legacy tmux fetch when a matching open target is not ready', async () => {
+    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => null);
+
+    const { fetchRemoteTmuxSessionNamesByOwner } = await import('./open-tab-restore');
+
+    const result = await fetchRemoteTmuxSessionNamesByOwner({
+      targets: [{
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        authToken: 'token-a',
+      }],
+      openSessions: [{
+        id: 'live-session-a',
+        state: 'connecting',
+        daemonHostId: 'daemon-a',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        createdAt: 10,
+      }],
+      prioritySessionIds: ['live-session-a'],
+      manageTmuxSessionsOnOpenTransport,
+      bridgeSettings: {
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'auto',
+        traversalRelay: undefined,
+      },
+    });
+
+    expect(result.get('daemon:daemon-a')).toEqual([]);
+    expect(manageTmuxSessionsOnOpenTransport).toHaveBeenCalledWith(
+      'live-session-a',
+      { type: 'list-sessions' },
+    );
+    expect(fetchTmuxSessionsMock).not.toHaveBeenCalled();
+  });
+
+  it('does not fallback to legacy tmux fetch when existing open-target management fails', async () => {
+    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => {
+      throw new Error('mux target request timeout');
+    });
+
+    const { fetchRemoteTmuxSessionNamesByOwner } = await import('./open-tab-restore');
+
+    const result = await fetchRemoteTmuxSessionNamesByOwner({
+      targets: [{
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        authToken: 'token-a',
+      }],
+      openSessions: [{
+        id: 'live-session-a',
+        state: 'connected',
+        daemonHostId: 'daemon-a',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        createdAt: 10,
+      }],
+      prioritySessionIds: ['live-session-a'],
+      manageTmuxSessionsOnOpenTransport,
+      bridgeSettings: {
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'auto',
+        traversalRelay: undefined,
+      },
+    });
+
+    expect(result.get('daemon:daemon-a')).toEqual([]);
+    expect(fetchTmuxSessionsMock).not.toHaveBeenCalled();
+  });
+
   it('resolves remote-restorable tab state with normalized active truth in one helper', async () => {
     fetchTmuxSessionsMock.mockResolvedValueOnce(['beta']);
 

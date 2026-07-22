@@ -1,9 +1,10 @@
 // @vitest-environment jsdom
 
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useOpenTabRuntime } from './useOpenTabRuntime';
 import { STORAGE_KEYS } from '../lib/types';
+import { auditOpenTabsAgainstRemoteSessions as auditOpenTabsAgainstRemoteSessionsMock } from '../lib/remote-tab-audit';
 
 vi.mock('@capacitor/app', () => ({
   App: {
@@ -175,5 +176,52 @@ describe('useOpenTabRuntime explicit resume gating', () => {
     expect(switchSession).toHaveBeenCalledWith('s2', { refreshSource: 'explicit-resume' });
     expect(resumeActiveSessionTransport).toHaveBeenCalledTimes(1);
     expect(resumeActiveSessionTransport).toHaveBeenCalledWith('s2');
+  });
+
+  it('passes open sessions and mux target manager into remote audits', async () => {
+    const auditMock = vi.mocked(auditOpenTabsAgainstRemoteSessionsMock);
+    auditMock.mockClear();
+    localStorage.clear();
+    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => ['session-s1']);
+    const baseOptions = {
+      bridgeSettings: { servers: [] } as any,
+      hosts: [],
+      hostsLoaded: true,
+      restoreSwitchReason: 'explicit-resume' as const,
+      sessionGroups: [],
+      runtimeActiveSessionId: 's1',
+      createSession: vi.fn(() => 's1'),
+      closeSession: vi.fn(),
+      switchSession: vi.fn(),
+      moveSession: vi.fn(),
+      renameSession: vi.fn(),
+      reconnectSession: vi.fn(),
+      resumeActiveSessionTransport: vi.fn(() => true),
+      manageTmuxSessionsOnOpenTransport,
+      clearSessionDraft: vi.fn(),
+      ensureTerminalPageVisible: vi.fn(),
+      setPageState: vi.fn(),
+      pruneSessionGroupSelectionToRemoteTruth: vi.fn(),
+    };
+
+    const { rerender } = renderHook(
+      ({ sessions }) => useOpenTabRuntime({
+        ...baseOptions,
+        sessions,
+      }),
+      { initialProps: { sessions: [] as any[] } },
+    );
+
+    rerender({ sessions: [buildSession('s1', 'connected')] });
+
+    await waitFor(() => expect(auditMock).toHaveBeenCalled());
+    const [, deps] = auditMock.mock.calls[auditMock.mock.calls.length - 1]! as any;
+    expect(deps).toEqual(expect.objectContaining({
+      sessionsRef: expect.any(Object),
+      prioritySessionIdsRef: expect.any(Object),
+      manageTmuxSessionsOnOpenTransport,
+    }));
+    expect((deps as any).sessionsRef.current.map((session: any) => session.id)).toEqual(['s1']);
+    expect((deps as any).prioritySessionIdsRef.current).toEqual([null, 's1']);
   });
 });

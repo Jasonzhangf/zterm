@@ -578,6 +578,7 @@ export function AppContent({ bridgeSettings, setBridgeSettings, appForegroundAct
     renameSession,
     reconnectSession,
     resumeActiveSessionTransport,
+    manageTmuxSessionsOnOpenTransport,
     clearSessionDraft,
     ensureTerminalPageVisible,
     setPageState,

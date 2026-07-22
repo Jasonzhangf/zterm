@@ -26,6 +26,7 @@ import { useOpenTabLifecycleEffects, type OpenTabAuditReason } from './useOpenTa
 import { useOpenTabRestoreRuntimeSync } from './useOpenTabRestoreRuntimeSync';
 import { useOpenTabSessionActions } from './useOpenTabSessionActions';
 import { auditOpenTabsAgainstRemoteSessions as auditOpenTabsAgainstRemoteSessionsLib } from '../lib/remote-tab-audit';
+import type { TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
 
 function buildSessionStructureSignature(
   sessions: Array<Pick<
@@ -72,6 +73,10 @@ interface UseOpenTabRuntimeOptions {
   renameSession: (sessionId: string, name: string) => void;
   reconnectSession: (sessionId: string) => void;
   resumeActiveSessionTransport: (sessionId: string) => boolean;
+  manageTmuxSessionsOnOpenTransport?: (
+    sessionId: string,
+    message: TerminalMuxTargetClientMessage,
+  ) => Promise<string[] | null>;
   clearSessionDraft: (sessionId: string) => void;
   ensureTerminalPageVisible: () => void;
   setPageState: Dispatch<SetStateAction<AppPageState>>;
@@ -133,6 +138,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     moveSession,
     renameSession,
     resumeActiveSessionTransport,
+    manageTmuxSessionsOnOpenTransport,
     clearSessionDraft,
     ensureTerminalPageVisible,
     setPageState,
@@ -366,10 +372,15 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
       sessionGroups,
       bridgeSettingsRef,
       hostsRef,
+      sessionsRef,
+      prioritySessionIdsRef: {
+        current: [terminalActiveSessionIdRef.current, runtimeActiveSessionIdRef.current],
+      },
+      manageTmuxSessionsOnOpenTransport,
       remoteOpenTabAuditTokenRef,
       pruneSessionGroupSelectionToRemoteTruth,
     });
-  }, [pruneSessionGroupSelectionToRemoteTruth, sessionGroups]);
+  }, [manageTmuxSessionsOnOpenTransport, pruneSessionGroupSelectionToRemoteTruth, sessionGroups]);
   useEffect(() => {
     sessionsRef.current = sessions;
     runtimeActiveSessionIdRef.current = runtimeActiveSessionId;

@@ -58,6 +58,7 @@ flowchart TD
 ```
 
 `App -> TerminalPage -> SessionDrawer` carries saved/Home server identity aliases alongside Relay endpoint and Session catalog facts. `TerminalPage` canonicalizes these into one daemon host rail; ambiguous rtc-only catalog matches remain separate and never guess identity.
+`SessionOpenOwner` and the open-tab runtime audit path also reuse an existing open mux target transport for drawer refresh / session-picker refresh when a matching non-closed session exists; legacy tmux fetch is only the no-matching-open-target path.
 
 ## Android Session Preview Mainline
 

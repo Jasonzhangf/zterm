@@ -1,9 +1,10 @@
 import type { BridgeSettings } from './bridge-settings';
 import { normalizeOpenTabIntentState } from './open-tab-intent';
-import { buildSessionSemanticOwnerKey } from './session-semantic-identity';
+import { buildSessionSemanticOwnerKey, sessionSemanticOwnersMatch } from './session-semantic-identity';
 import { fetchTmuxSessions } from './tmux-sessions';
 import { normalizeRemoteTmuxSessionNames } from './tmux-session-list';
-import type { Host, PersistedOpenTab } from './types';
+import type { Host, PersistedOpenTab, Session } from './types';
+import type { TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
 
 const OPEN_TAB_REMOTE_RESTORE_TIMEOUT_MS = 2500;
 
@@ -32,6 +33,47 @@ interface RemoteSessionOwnerTarget {
   bridgeHost: string;
   bridgePort: number;
   authToken?: string;
+}
+
+interface ManagedRemoteSessionTarget {
+  id: string;
+  state: Session['state'];
+  daemonHostId?: string;
+  bridgeHost: string;
+  bridgePort: number;
+  createdAt?: number;
+}
+
+function resolveReusableManagedRemoteSessionForTarget(
+  sessions: ManagedRemoteSessionTarget[],
+  target: RemoteSessionOwnerTarget,
+  prioritySessionIds: Array<string | null | undefined> = [],
+) {
+  const matches = sessions.filter((session) => (
+    session.state !== 'closed'
+    && sessionSemanticOwnersMatch(session, target)
+  ));
+  if (matches.length === 0) {
+    return null;
+  }
+  for (const prioritySessionId of prioritySessionIds) {
+    const normalizedPrioritySessionId = prioritySessionId?.trim();
+    if (!normalizedPrioritySessionId) {
+      continue;
+    }
+    const matched = matches.find((session) => session.id === normalizedPrioritySessionId);
+    if (matched) {
+      return matched;
+    }
+  }
+  return [...matches].sort((left, right) => {
+    const stateScore = (session: ManagedRemoteSessionTarget) => (session.state === 'connected' ? 2 : session.state === 'connecting' ? 1 : 0);
+    const scoreDelta = stateScore(right) - stateScore(left);
+    if (scoreDelta !== 0) {
+      return scoreDelta;
+    }
+    return (right.createdAt || 0) - (left.createdAt || 0);
+  })[0] || null;
 }
 
 async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -113,6 +155,12 @@ export async function fetchRemoteTmuxSessionNamesByOwner(options: {
   targets: Array<Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'authToken'>>;
   bridgeSettings: TraversalSettings;
   hosts?: Array<Pick<Host, 'daemonHostId' | 'relayHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'pinned' | 'lastConnected' | 'createdAt'>>;
+  openSessions?: Array<Pick<Session, 'id' | 'state' | 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'createdAt'>>;
+  prioritySessionIds?: Array<string | null | undefined>;
+  manageTmuxSessionsOnOpenTransport?: (
+    sessionId: string,
+    message: TerminalMuxTargetClientMessage,
+  ) => Promise<string[] | null>;
 }): Promise<Map<string, string[]>> {
   const traversalSettings = buildTraversalSettings(options.bridgeSettings);
   const sessionNamesByTarget = new Map<string, string[]>();
@@ -127,6 +175,28 @@ export async function fetchRemoteTmuxSessionNamesByOwner(options: {
       bridgeHost: target.bridgeHost,
       bridgePort: target.bridgePort,
     });
+    const reusableSession = options.manageTmuxSessionsOnOpenTransport && options.openSessions
+      ? resolveReusableManagedRemoteSessionForTarget(
+        options.openSessions,
+        target,
+        options.prioritySessionIds,
+      )
+      : null;
+    if (reusableSession && options.manageTmuxSessionsOnOpenTransport) {
+      try {
+        const managedSessionNames = await options.manageTmuxSessionsOnOpenTransport(
+          reusableSession.id,
+          { type: 'list-sessions' },
+        );
+        if (managedSessionNames === null) {
+          return { targetKey, sessionNames: [] as string[], ok: false as const };
+        }
+        const sessionNames = normalizeRemoteTmuxSessionNames(managedSessionNames);
+        return { targetKey, sessionNames, ok: true as const };
+      } catch (_error) {
+        return { targetKey, sessionNames: [] as string[], ok: false as const };
+      }
+    }
     try {
       const sessionNames = normalizeRemoteTmuxSessionNames(await withTimeout(fetchTmuxSessions(
         {
