@@ -81,6 +81,7 @@ vi.mock('../components/terminal/TerminalQuickBar', () => ({
     onSessionDraftSend,
     onImagePaste,
     onToggleKeyboard,
+    onToggleDebugOverlay,
     remoteWindowInputActive,
     onMeasuredHeightChange,
   }: {
@@ -89,6 +90,7 @@ vi.mock('../components/terminal/TerminalQuickBar', () => ({
     onSessionDraftSend?: (value: string) => void;
     onImagePaste?: (sessionId: string, file: File) => void;
     onToggleKeyboard?: () => void;
+    onToggleDebugOverlay?: () => void;
     remoteWindowInputActive?: boolean;
     onMeasuredHeightChange?: (height: number) => void;
   }) => {
@@ -114,6 +116,7 @@ vi.mock('../components/terminal/TerminalQuickBar', () => ({
           quickbar-image
         </button>
         <button type="button" onClick={() => onToggleKeyboard?.()}>quickbar-keyboard</button>
+        <button type="button" onClick={() => onToggleDebugOverlay?.()}>状态</button>
       </div>
     );
   },
@@ -537,6 +540,14 @@ describe('TerminalPage remote window overlay', () => {
     });
     expect(onTerminalInput).not.toHaveBeenCalled();
 
+    fireEvent.click(screen.getByRole('button', { name: '状态' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-debug-remote-window-context').textContent).toContain('CTX Y');
+      expect(screen.getByTestId('terminal-debug-remote-window-event').textContent).toContain('overlay · SEND Y · ptr:up #31 b0');
+      expect(screen.getByTestId('terminal-debug-remote-window-point').textContent).toContain('410,320 n=0.50,0.50');
+      expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('F 2 · D 1 · M 0 · U 1');
+    });
+
     onSendRemoteWindowInput.mockClear();
     fireEvent.pointerDown(surface, {
       pointerId: 32,
@@ -602,6 +613,11 @@ describe('TerminalPage remote window overlay', () => {
       }),
     ]);
     expect(onTerminalInput).not.toHaveBeenCalled();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-debug-remote-window-event').textContent).toContain('overlay · SEND Y · ptr:up #32 b0');
+      expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('F 5 · D 2 · M 1 · U 2');
+    });
   });
 
   it('stops the remote-window stream when the app goes to background', async () => {

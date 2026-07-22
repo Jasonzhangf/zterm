@@ -126,6 +126,181 @@ type DrawerRemoteSessionTarget = {
   sessionNames: string[];
 };
 
+type RemoteWindowInputDebugSnapshot = {
+  contextActive: boolean;
+  contextLabel: string;
+  sessionId: string;
+  streamId: string;
+  targetId: string;
+  inputRoute: string;
+  focusPolicy: string;
+  lastSource: string;
+  lastEvent: string;
+  lastSent: boolean | null;
+  lastAt: number | null;
+  lastPoint: string;
+  counts: {
+    focus: number;
+    pointerDown: number;
+    pointerMove: number;
+    pointerUp: number;
+    scroll: number;
+    key: number;
+    text: number;
+  };
+};
+
+type RemoteWindowInputDebugSource =
+  | 'overlay'
+  | 'quickbar-sequence'
+  | 'quickbar-draft'
+  | 'ime-input'
+  | 'ime-backspace'
+  | 'ime-key'
+  | 'debug-input';
+
+type RemoteWindowInputDebugEvent = {
+  source: RemoteWindowInputDebugSource;
+  sent: boolean;
+  sessionId: string | null;
+  streamId: string | null;
+  targetId: string | null;
+  event: RemoteWindowInputEventPayload['event'];
+};
+
+function createRemoteWindowInputDebugCounts(): RemoteWindowInputDebugSnapshot['counts'] {
+  return {
+    focus: 0,
+    pointerDown: 0,
+    pointerMove: 0,
+    pointerUp: 0,
+    scroll: 0,
+    key: 0,
+    text: 0,
+  };
+}
+
+function createRemoteWindowInputDebugSnapshot(): RemoteWindowInputDebugSnapshot {
+  return {
+    contextActive: false,
+    contextLabel: '-',
+    sessionId: '-',
+    streamId: '-',
+    targetId: '-',
+    inputRoute: '-',
+    focusPolicy: '-',
+    lastSource: '-',
+    lastEvent: '-',
+    lastSent: null,
+    lastAt: null,
+    lastPoint: '-',
+    counts: createRemoteWindowInputDebugCounts(),
+  };
+}
+
+function abbreviateRemoteWindowDebugId(value?: string | null) {
+  if (!value) {
+    return '-';
+  }
+  if (value.length <= 20) {
+    return value;
+  }
+  return `${value.slice(0, 7)}...${value.slice(-8)}`;
+}
+
+function formatRemoteWindowInputDebugEvent(event: RemoteWindowInputEventPayload['event']) {
+  switch (event.kind) {
+    case 'focus':
+      return 'focus';
+    case 'pointer':
+      return `ptr:${event.phase} #${event.pointerId} b${event.buttons}`;
+    case 'scroll':
+      return `scroll ${Math.round(event.deltaX)},${Math.round(event.deltaY)}`;
+    case 'gesture':
+      return `gesture:${event.gesture}/${event.phase}`;
+    case 'key': {
+      const keyLabel = event.text
+        ? `text:${event.text.length}`
+        : `key:${event.key || event.code || '-'}`;
+      return `${keyLabel}/${event.phase}`;
+    }
+    default:
+      return 'unknown';
+  }
+}
+
+function formatRemoteWindowInputDebugPoint(event: RemoteWindowInputEventPayload['event']) {
+  if (event.kind === 'pointer' || event.kind === 'scroll') {
+    return `${Math.round(event.x)},${Math.round(event.y)} n=${event.normalizedX.toFixed(2)},${event.normalizedY.toFixed(2)}`;
+  }
+  if (event.kind === 'gesture') {
+    return `${Math.round(event.startX)},${Math.round(event.startY)} -> ${Math.round(event.x)},${Math.round(event.y)}`;
+  }
+  return '-';
+}
+
+function formatRemoteWindowInputDebugAge(lastAt: number | null) {
+  if (!lastAt) {
+    return '-';
+  }
+  const ageMs = Math.max(0, Date.now() - lastAt);
+  if (ageMs < 1000) {
+    return `${Math.round(ageMs)}ms`;
+  }
+  return `${Math.round(ageMs / 1000)}s`;
+}
+
+function incrementRemoteWindowInputDebugCounts(
+  counts: RemoteWindowInputDebugSnapshot['counts'],
+  event: RemoteWindowInputEventPayload['event'],
+): RemoteWindowInputDebugSnapshot['counts'] {
+  const next = { ...counts };
+  if (event.kind === 'focus') {
+    next.focus += 1;
+  } else if (event.kind === 'pointer') {
+    if (event.phase === 'down') {
+      next.pointerDown += 1;
+    } else if (event.phase === 'move') {
+      next.pointerMove += 1;
+    } else {
+      next.pointerUp += 1;
+    }
+  } else if (event.kind === 'scroll') {
+    next.scroll += 1;
+  } else if (event.kind === 'key') {
+    next.key += 1;
+    if (event.text) {
+      next.text += 1;
+    }
+  }
+  return next;
+}
+
+function projectRemoteWindowInputDebugContext(
+  context: RemoteWindowInputContext | null,
+): Pick<RemoteWindowInputDebugSnapshot, 'contextActive' | 'contextLabel' | 'sessionId' | 'streamId' | 'targetId' | 'inputRoute' | 'focusPolicy'> {
+  if (!context) {
+    return {
+      contextActive: false,
+      contextLabel: '-',
+      sessionId: '-',
+      streamId: '-',
+      targetId: '-',
+      inputRoute: '-',
+      focusPolicy: '-',
+    };
+  }
+  return {
+    contextActive: true,
+    contextLabel: `${context.targetKind}/${context.inputTargetKind}`,
+    sessionId: abbreviateRemoteWindowDebugId(context.sessionId),
+    streamId: abbreviateRemoteWindowDebugId(context.streamId),
+    targetId: abbreviateRemoteWindowDebugId(context.targetId),
+    inputRoute: context.inputRoute,
+    focusPolicy: context.focusPolicy,
+  };
+}
+
 type VirtualKeyboardApi = {
   overlaysContent: boolean;
   boundingRect: DOMRectReadOnly;
@@ -880,6 +1055,7 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   quickBarCollapsed,
   copySelection,
   sessionDrawerDebug,
+  getRemoteWindowInputDebug,
 }: {
   visible: boolean;
   session: Session | null;
@@ -927,6 +1103,7 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
     pageCallbackSeq: number;
     pickerMode: string | null;
   };
+  getRemoteWindowInputDebug?: () => RemoteWindowInputDebugSnapshot;
 }) {
   const [tick, setTick] = useState(0);
   const viewportModeSnapshot = useSessionViewportModeSnapshot(sessionViewportModeStore, session?.id || null);
@@ -956,12 +1133,13 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
     session.resolvedRelayTransport || null,
     session.lastConnectStage || null,
   ].filter(Boolean).join(' / ');
+  const remoteWindowInputDebug = getRemoteWindowInputDebug?.();
   const overlayStyle: React.CSSProperties = {
     position: 'absolute',
     top: debugOverlayPos.y >= 0 ? `${debugOverlayPos.y}px` : '10px',
     left: debugOverlayPos.x >= 0 ? `${debugOverlayPos.x}px` : undefined,
     right: debugOverlayPos.x >= 0 ? undefined : '10px',
-    zIndex: 12,
+    zIndex: 120,
     width: '192px',
     padding: '6px 7px',
     borderRadius: '10px',
@@ -1058,6 +1236,50 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
         </span>
         <span>渲染</span><span>{viewportMode}</span>
         <span>路由</span><span>{routeLabel}</span>
+        {remoteWindowInputDebug ? (
+          <>
+            <span>远控</span>
+            <span data-testid="terminal-debug-remote-window-context">
+              CTX {remoteWindowInputDebug.contextActive ? 'Y' : 'N'}
+              {' · '}
+              {remoteWindowInputDebug.contextLabel}
+              {' · '}
+              {remoteWindowInputDebug.inputRoute}/{remoteWindowInputDebug.focusPolicy}
+            </span>
+            <span>RWID</span>
+            <span data-testid="terminal-debug-remote-window-id">
+              c={remoteWindowInputDebug.sessionId} · s={remoteWindowInputDebug.streamId} · t={remoteWindowInputDebug.targetId}
+            </span>
+            <span>RW事件</span>
+            <span data-testid="terminal-debug-remote-window-event">
+              {remoteWindowInputDebug.lastSource}
+              {' · '}
+              SEND {remoteWindowInputDebug.lastSent === null ? '-' : remoteWindowInputDebug.lastSent ? 'Y' : 'N'}
+              {' · '}
+              {remoteWindowInputDebug.lastEvent}
+              {' · '}
+              {formatRemoteWindowInputDebugAge(remoteWindowInputDebug.lastAt)}
+            </span>
+            <span>RW点</span>
+            <span data-testid="terminal-debug-remote-window-point">{remoteWindowInputDebug.lastPoint}</span>
+            <span>RW计数</span>
+            <span data-testid="terminal-debug-remote-window-counts">
+              F {remoteWindowInputDebug.counts.focus}
+              {' · '}
+              D {remoteWindowInputDebug.counts.pointerDown}
+              {' · '}
+              M {remoteWindowInputDebug.counts.pointerMove}
+              {' · '}
+              U {remoteWindowInputDebug.counts.pointerUp}
+              {' · '}
+              S {remoteWindowInputDebug.counts.scroll}
+              {' · '}
+              K {remoteWindowInputDebug.counts.key}
+              {' · '}
+              T {remoteWindowInputDebug.counts.text}
+            </span>
+          </>
+        ) : null}
         <span>窗格</span><span>x{visiblePaneSessions && visiblePaneSessions.length > 0 ? visiblePaneSessions.length : 1}</span>
         <span>刷新</span><span>{formatDebugHz(metrics?.renderHz || 0)} / {formatDebugHz(metrics?.pullHz || 0)}</span>
         <span>流量</span>
@@ -1322,6 +1544,7 @@ function TerminalPageComponent({
   const androidImeVisibleRef = useRef(false);
   const terminalInputHandlerRef = useRef<typeof onTerminalInput>(onTerminalInput);
   const remoteWindowInputContextRef = useRef<RemoteWindowInputContext | null>(null);
+  const remoteWindowInputDebugRef = useRef<RemoteWindowInputDebugSnapshot>(createRemoteWindowInputDebugSnapshot());
   const appliedPaneAttachIntentNonceRef = useRef<number | null>(null);
   const pendingAndroidImeFocusTimerRef = useRef<number | null>(null);
   const androidImeFocusRouteKeyRef = useRef<string | null>(null);
@@ -1365,6 +1588,26 @@ function TerminalPageComponent({
   useEffect(() => {
     remoteWindowInputContextRef.current = remoteWindowInputContext;
   }, [remoteWindowInputContext]);
+
+  const recordRemoteWindowInputDebug = useCallback((debug: RemoteWindowInputDebugEvent) => {
+    const context = remoteWindowInputContextRef.current;
+    const contextProjection = projectRemoteWindowInputDebugContext(context);
+    remoteWindowInputDebugRef.current = {
+      ...remoteWindowInputDebugRef.current,
+      ...contextProjection,
+      sessionId: abbreviateRemoteWindowDebugId(debug.sessionId || context?.sessionId || null),
+      streamId: abbreviateRemoteWindowDebugId(debug.streamId || context?.streamId || null),
+      targetId: abbreviateRemoteWindowDebugId(debug.targetId || context?.targetId || null),
+      lastSource: debug.source,
+      lastEvent: formatRemoteWindowInputDebugEvent(debug.event),
+      lastSent: debug.sent,
+      lastAt: Date.now(),
+      lastPoint: formatRemoteWindowInputDebugPoint(debug.event),
+      counts: incrementRemoteWindowInputDebugCounts(remoteWindowInputDebugRef.current.counts, debug.event),
+    };
+  }, []);
+
+  const getRemoteWindowInputDebug = useCallback(() => remoteWindowInputDebugRef.current, []);
 
   const rawShellHeight = resolveLayoutViewportHeight();
   const keyboardViewportAlreadyResized = isAndroid
@@ -2154,7 +2397,7 @@ function TerminalPageComponent({
 
   const emitRemoteWindowInputEvents = useCallback((
     events: Array<RemoteWindowInputEventPayload['event']>,
-    source: 'quickbar-sequence' | 'quickbar-draft' | 'ime-input' | 'ime-backspace' | 'ime-key' | 'debug-input',
+    source: Exclude<RemoteWindowInputDebugSource, 'overlay'>,
   ) => {
     const context = remoteWindowInputContextRef.current;
     if (!context) {
@@ -2171,23 +2414,43 @@ function TerminalPageComponent({
       focusPolicy: context.focusPolicy,
       eventCount: events.length,
     });
-    if (!onSendRemoteWindowInput || events.length === 0) {
+    if (events.length === 0) {
+      return true;
+    }
+    const recordDebug = (event: RemoteWindowInputEventPayload['event'], sent: boolean) => {
+      recordRemoteWindowInputDebug({
+        source,
+        sent,
+        sessionId: context.sessionId,
+        streamId: context.streamId,
+        targetId: context.targetId,
+        event,
+      });
+    };
+    if (!onSendRemoteWindowInput) {
+      events.forEach((event) => {
+        recordDebug({ kind: 'focus' }, false);
+        recordDebug(event, false);
+      });
       return true;
     }
     events.forEach((event) => {
+      const focusEvent = { kind: 'focus' } as const;
       onSendRemoteWindowInput(context.sessionId, {
         streamId: context.streamId,
         targetId: context.targetId,
-        event: { kind: 'focus' },
+        event: focusEvent,
       });
+      recordDebug(focusEvent, true);
       onSendRemoteWindowInput(context.sessionId, {
         streamId: context.streamId,
         targetId: context.targetId,
         event,
       });
+      recordDebug(event, true);
     });
     return true;
-  }, [onSendRemoteWindowInput]);
+  }, [onSendRemoteWindowInput, recordRemoteWindowInputDebug]);
 
   const handleQuickBarImagePaste = useCallback((
     sessionId: string,
@@ -2455,11 +2718,19 @@ function TerminalPageComponent({
 
   const handleRemoteWindowInputContextChange = useCallback((context: RemoteWindowInputContext | null) => {
     remoteWindowInputContextRef.current = context;
+    remoteWindowInputDebugRef.current = {
+      ...remoteWindowInputDebugRef.current,
+      ...projectRemoteWindowInputDebugContext(context),
+    };
     setRemoteWindowInputContext(context);
   }, []);
 
   const handleTerminalFocusOwnerActivate = useCallback(() => {
     remoteWindowInputContextRef.current = null;
+    remoteWindowInputDebugRef.current = {
+      ...remoteWindowInputDebugRef.current,
+      ...projectRemoteWindowInputDebugContext(null),
+    };
     setRemoteWindowInputContext(null);
   }, []);
 
@@ -3729,6 +4000,7 @@ function TerminalPageComponent({
             pageCallbackSeq: sessionDrawerDebug.pageCallbackSeq,
             pickerMode: sessionPickerDebugMode,
           }}
+          getRemoteWindowInputDebug={getRemoteWindowInputDebug}
         />
         <RemoteWindowOverlay
           activeSessionId={uiSessionId}
@@ -3739,6 +4011,7 @@ function TerminalPageComponent({
           stopStream={onStopRemoteWindowStream}
           requestScreenshot={handleRequestRemoteWindowScreenshot}
           sendInput={onSendRemoteWindowInput}
+          onInputDebug={recordRemoteWindowInputDebug}
           bottomInsetPx={
             quickBarShellKeyboardLiftPx
             + layoutProfile.quickBar.touchSafeOffsetPx

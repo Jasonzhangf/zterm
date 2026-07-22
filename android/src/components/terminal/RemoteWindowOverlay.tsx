@@ -74,6 +74,15 @@ interface RemoteWindowOverlayProps {
     sessionId: string,
     payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
   ) => void;
+  onInputDebug?: (event: {
+    source: 'overlay';
+    sent: boolean;
+    sessionId: string | null;
+    streamId: string | null;
+    targetId: string | null;
+    targetTitle: string | null;
+    event: RemoteWindowInputEventPayload['event'];
+  }) => void;
   bottomInsetPx?: number;
   bottomChromeInsetPx?: number;
   onOpenStateChange?: (open: boolean) => void;
@@ -560,6 +569,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   stopStream,
   requestScreenshot,
   sendInput,
+  onInputDebug,
   bottomInsetPx = 0,
   bottomChromeInsetPx = 0,
   onOpenStateChange,
@@ -646,7 +656,16 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     target: RemoteWindowStreamTargetManifest,
     eventPayload: RemoteWindowInputEventPayload['event'],
   ) => {
+    const baseDebug = {
+      source: 'overlay' as const,
+      sessionId: sessionId || null,
+      streamId: streamId || null,
+      targetId: target.streamTargetId || null,
+      targetTitle: target.videoTarget.title || target.videoTarget.appBundleId || null,
+      event: eventPayload,
+    };
     if (!sessionId || !streamId || !sendInput || !isRemoteWindowInputSupported(target)) {
+      onInputDebug?.({ ...baseDebug, sent: false });
       return false;
     }
     try {
@@ -655,12 +674,14 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         targetId: target.streamTargetId,
         event: eventPayload,
       });
+      onInputDebug?.({ ...baseDebug, sent: true });
       return true;
     } catch (error) {
       console.warn('[RemoteWindowOverlay] remote input send failed:', error);
+      onInputDebug?.({ ...baseDebug, sent: false });
       return false;
     }
-  }, [sendInput]);
+  }, [onInputDebug, sendInput]);
 
   const setFloatingOffset = useCallback((next: FloatingOverlayOffset) => {
     floatingOffsetRef.current = next;
