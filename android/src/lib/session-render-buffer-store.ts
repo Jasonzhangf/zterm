@@ -9,7 +9,11 @@ export interface SessionRenderStoreSnapshot {
 export interface SessionRenderBufferStore {
   getSnapshot: (sessionId: string) => SessionRenderStoreSnapshot;
   subscribe: (sessionId: string, listener: () => void) => () => void;
-  setBuffer: (sessionId: string, buffer: SessionRenderBufferSnapshot) => boolean;
+  setBuffer: (
+    sessionId: string,
+    buffer: SessionRenderBufferSnapshot,
+    options?: { allowRevisionRegression?: boolean },
+  ) => boolean;
   deleteSession: (sessionId: string) => void;
 }
 
@@ -198,13 +202,18 @@ export function createSessionRenderBufferStore(
     }
   };
 
-  const setBuffer = (sessionId: string, buffer: SessionRenderBufferSnapshot) => {
+  const setBuffer = (
+    sessionId: string,
+    buffer: SessionRenderBufferSnapshot,
+    setOptions?: { allowRevisionRegression?: boolean },
+  ) => {
     const previous = snapshots.get(sessionId);
     if (
       previous
       && previous.buffer.revision > 0
       && buffer.revision > 0
       && buffer.revision < previous.buffer.revision
+      && !setOptions?.allowRevisionRegression
     ) {
       options.runtimeDebug?.('session.render-store.revision-regression-drop', {
         sessionId,

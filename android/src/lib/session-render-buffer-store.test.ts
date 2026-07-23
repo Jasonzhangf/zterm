@@ -104,6 +104,28 @@ describe('session-render-buffer-store', () => {
     );
   });
 
+  it('publishes an explicitly authorized lower-revision reset without dropping subscribers', () => {
+    const store = createSessionRenderBufferStore();
+    const listener = vi.fn();
+    const unsubscribe = store.subscribe('s1', listener);
+
+    expect(store.setBuffer('s1', makeSnapshot([[makeCell('n')]], 12))).toBe(true);
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    expect(
+      store.setBuffer('s1', makeSnapshot([[makeCell('r')]], 3), {
+        allowRevisionRegression: true,
+      }),
+    ).toBe(true);
+
+    const stored = store.getSnapshot('s1');
+    expect(stored.buffer.revision).toBe(3);
+    expect(String.fromCodePoint(stored.buffer.lines[0]![0]!.char)).toBe('r');
+    expect(listener).toHaveBeenCalledTimes(2);
+
+    unsubscribe();
+  });
+
   it('allows a lower render revision only after explicit session deletion resets render truth', () => {
     const store = createSessionRenderBufferStore();
 

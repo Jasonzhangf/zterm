@@ -1,3 +1,6 @@
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { RemoteWindowStreamStatusPayload } from '@zterm/shared/protocol';
 import {
@@ -5,11 +8,14 @@ import {
   buildRemoteWindowInputConfig,
   buildMacosAppWindowTargets,
   buildRemoteWindowStreamTargets,
+  createDefaultRemoteWindowInputHelper,
   createRemoteWindowStreamDaemonRuntime,
   flattenIterm2SplitTree,
   isRemoteWindowInputConfigStale,
   MACOS_REMOTE_WINDOW_INPUT_SWIFT,
   parseTmuxClientTargets,
+  resolveRemoteWindowInputHelperTimeoutMs,
+  shouldRefreshRemoteWindowQueuedInputAfterFocus,
   summarizeRemoteWindowCatalogError,
   type Iterm2RawCatalog,
   type Iterm2RawNode,
@@ -373,6 +379,124 @@ describe('remote window stream daemon owner', () => {
     }, 20_001)).toBe(true);
   });
 
+  it('keeps focus as a bounded control action while real input keeps the one-second realtime budget', () => {
+    const target = makeAppStreamTarget();
+    const focusConfig = buildRemoteWindowInputConfig({
+      requestId: 'rw-focus-timeout-policy',
+      streamId: 'stream-timeout-policy',
+      targetId: target.streamTargetId,
+      clientSentAt: 1_000,
+      event: { kind: 'focus' },
+    }, target, { daemonReceivedAtMs: 20_000 });
+    const pointerConfig = buildRemoteWindowInputConfig({
+      requestId: 'rw-pointer-timeout-policy',
+      streamId: 'stream-timeout-policy',
+      targetId: target.streamTargetId,
+      clientSentAt: 1_000,
+      event: {
+        kind: 'pointer',
+        phase: 'down',
+        pointerId: 1,
+        button: 'left',
+        buttons: 1,
+        x: 120,
+        y: 140,
+        normalizedX: 0.5,
+        normalizedY: 0.5,
+      },
+    }, target, { daemonReceivedAtMs: 20_000 });
+    const otherWindowPointerConfig = {
+      ...pointerConfig,
+      window: {
+        ...pointerConfig.window,
+        windowId: 'other-window',
+      },
+    };
+
+    expect(resolveRemoteWindowInputHelperTimeoutMs(focusConfig)).toBe(3_000);
+    expect(resolveRemoteWindowInputHelperTimeoutMs(pointerConfig)).toBe(1_000);
+    expect(isRemoteWindowInputConfigStale(
+      focusConfig,
+      22_500,
+      resolveRemoteWindowInputHelperTimeoutMs(focusConfig),
+    )).toBe(false);
+    expect(isRemoteWindowInputConfigStale(
+      pointerConfig,
+      21_001,
+      resolveRemoteWindowInputHelperTimeoutMs(pointerConfig),
+    )).toBe(true);
+    expect(shouldRefreshRemoteWindowQueuedInputAfterFocus(focusConfig, pointerConfig)).toBe(true);
+    expect(shouldRefreshRemoteWindowQueuedInputAfterFocus(focusConfig, otherWindowPointerConfig)).toBe(false);
+    expect(shouldRefreshRemoteWindowQueuedInputAfterFocus(pointerConfig, focusConfig)).toBe(false);
+  });
+
+  it('lets same-target input wait behind a slow successful focus without becoming stale', async () => {
+    const tempRoot = mkdtempSync(join(tmpdir(), 'zterm-remote-window-input-helper-'));
+    const fakeSwiftPath = join(tempRoot, 'fake-swift.cjs');
+    writeFileSync(fakeSwiftPath, `#!/usr/bin/env node
+process.stdout.write(JSON.stringify({ ready: true }) + "\\n");
+let buffer = "";
+process.stdin.setEncoding("utf8");
+process.stdin.on("data", (chunk) => {
+  buffer += chunk;
+  let index = buffer.indexOf("\\n");
+  while (index >= 0) {
+    const raw = buffer.slice(0, index).trim();
+    buffer = buffer.slice(index + 1);
+    if (raw) {
+      const config = JSON.parse(raw);
+      const delay = config.event && config.event.kind === "focus" ? 1200 : 0;
+      setTimeout(() => {
+        process.stdout.write(JSON.stringify({ ok: true, kind: config.event && config.event.kind }) + "\\n");
+      }, delay);
+    }
+    index = buffer.indexOf("\\n");
+  }
+});
+`);
+    chmodSync(fakeSwiftPath, 0o755);
+    const helper = createDefaultRemoteWindowInputHelper({ swiftBinary: fakeSwiftPath });
+    const target = makeAppStreamTarget();
+    const daemonReceivedAtMs = Date.now();
+    const focusConfig = buildRemoteWindowInputConfig({
+      requestId: 'rw-slow-focus',
+      streamId: 'stream-slow-focus',
+      targetId: target.streamTargetId,
+      clientSentAt: daemonReceivedAtMs,
+      event: { kind: 'focus' },
+    }, target, { daemonReceivedAtMs });
+    const pointerConfig = buildRemoteWindowInputConfig({
+      requestId: 'rw-slow-focus-pointer',
+      streamId: 'stream-slow-focus',
+      targetId: target.streamTargetId,
+      clientSentAt: daemonReceivedAtMs,
+      event: {
+        kind: 'pointer',
+        phase: 'down',
+        pointerId: 1,
+        button: 'left',
+        buttons: 1,
+        x: 120,
+        y: 140,
+        normalizedX: 0.5,
+        normalizedY: 0.5,
+      },
+    }, target, { daemonReceivedAtMs });
+
+    try {
+      await helper.warm();
+      const focusPromise = helper.send(focusConfig);
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      const pointerPromise = helper.send(pointerConfig);
+      await expect(Promise.all([focusPromise, pointerPromise])).resolves.toEqual([undefined, undefined]);
+    } finally {
+      helper.dispose();
+      rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   it('keeps scroll input compatible with the macOS helper schema', () => {
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('let phase: String?');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('let phase: String\n');
@@ -392,13 +516,15 @@ describe('remote window stream daemon owner', () => {
   });
 
   it('requires macOS helper focus verification before reporting input success', () => {
-    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('activateApplicationByBundleId');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('app.activate(options: [.activateAllWindows])');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('kAXFrontmostAttribute');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('frontmostPidMatches');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('focusedWindowMatchesTarget');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('config.event.kind == "focus"');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('remote input target app did not become frontmost');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('remote input target window did not become focused');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('NSAppleScript');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('activateIgnoringOtherApps');
   });
 
   it('short-circuits repeated focus when the target window is already focused', () => {

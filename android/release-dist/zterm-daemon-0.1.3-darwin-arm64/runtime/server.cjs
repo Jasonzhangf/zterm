@@ -13211,6 +13211,7 @@ var DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS = 8e3;
 var DEFAULT_REMOTE_WINDOW_FRAME_RATE = 12;
 var DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 6e4;
 var REMOTE_WINDOW_INPUT_STALE_MS = 1e3;
+var REMOTE_WINDOW_INPUT_FOCUS_TIMEOUT_MS = 3e3;
 var REMOTE_WINDOW_INPUT_HELPER_READY_TIMEOUT_MS = 15e3;
 var ITERM2_APP_BUNDLE_ID = "com.googlecode.iterm2";
 var ITERM2_PANE_GAP_PX = 1;
@@ -13540,22 +13541,7 @@ func frontmostPidMatches(_ pid: Int32) -> Bool {
     return frontmost.processIdentifier == pid
 }
 
-func appleScriptStringLiteral(_ value: String) -> String {
-    return value
-        .replacingOccurrences(of: "\\", with: "\\\\")
-        .replacingOccurrences(of: "\"", with: "\\\"")
-}
-
-func activateApplicationByBundleId(_ bundleId: String) {
-    guard !bundleId.isEmpty else {
-        return
-    }
-    let source = "tell application id \"" + appleScriptStringLiteral(bundleId) + "\" to activate"
-    var error: NSDictionary?
-    _ = NSAppleScript(source: source)?.executeAndReturnError(&error)
-}
-
-func axWindowMatchesBounds(_ window: AXUIElement, _ bounds: Rect) -> Bool {
+	func axWindowMatchesBounds(_ window: AXUIElement, _ bounds: Rect) -> Bool {
     guard
         let position = axPoint(copyAttribute(window, kAXPositionAttribute)),
         let size = axSize(copyAttribute(window, kAXSizeAttribute))
@@ -13606,21 +13592,18 @@ func focusTargetWindow(_ config: InputConfig) throws {
     guard let window = bestWindow, bestScore <= 96.0 else {
         throw NSError(domain: "RemoteWindowInput", code: 4, userInfo: [NSLocalizedDescriptionKey: "remote input target window could not be matched for focus"])
     }
-    var isFrontmost = false
-    var isFocused = false
-    for attempt in 0..<3 {
-        app.unhide()
-        activateApplicationByBundleId(config.appBundleId)
-        AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
-        _ = app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-        AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, window)
-        AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
-        AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-        AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
-        activateApplicationByBundleId(config.appBundleId)
-        _ = app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-        usleep(attempt == 0 ? 120000 : 180000)
+	    var isFrontmost = false
+	    var isFocused = false
+	    for attempt in 0..<3 {
+	        app.unhide()
+	        _ = app.activate(options: [.activateAllWindows])
+	        AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+	        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+	        AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, window)
+	        AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+	        AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+	        AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+	        usleep(attempt == 0 ? 120000 : 180000)
         isFrontmost = frontmostPidMatches(config.pid)
         isFocused = focusedWindowMatchesTarget(appElement, config.window.bounds)
         if isFrontmost && isFocused {
@@ -14373,6 +14356,18 @@ function runDefaultMacosAppWindowCatalog(script, options) {
     });
   });
 }
+function isRemoteWindowFocusInputConfig(config) {
+  return config.event.kind === "focus";
+}
+function resolveRemoteWindowInputHelperTimeoutMs(config) {
+  return isRemoteWindowFocusInputConfig(config) ? REMOTE_WINDOW_INPUT_FOCUS_TIMEOUT_MS : REMOTE_WINDOW_INPUT_STALE_MS;
+}
+function remoteWindowInputConfigsShareTarget(lhs, rhs) {
+  return lhs.pid === rhs.pid && lhs.appBundleId === rhs.appBundleId && lhs.focusPolicy === rhs.focusPolicy && lhs.window.windowId === rhs.window.windowId;
+}
+function shouldRefreshRemoteWindowQueuedInputAfterFocus(focusConfig, queuedConfig) {
+  return isRemoteWindowFocusInputConfig(focusConfig) && !isRemoteWindowFocusInputConfig(queuedConfig) && remoteWindowInputConfigsShareTarget(focusConfig, queuedConfig);
+}
 function createDefaultRemoteWindowInputHelper(options) {
   let child = null;
   let stdoutBuffer = "";
@@ -14405,7 +14400,11 @@ function createDefaultRemoteWindowInputHelper(options) {
     }
   };
   const rejectIfStale = (request) => {
-    if (isRemoteWindowInputConfigStale(request.config)) {
+    if (isRemoteWindowInputConfigStale(
+      request.config,
+      Date.now(),
+      resolveRemoteWindowInputHelperTimeoutMs(request.config)
+    )) {
       rejectRequest(request, new Error("remote window input stale"));
       return true;
     }
@@ -14426,6 +14425,18 @@ function createDefaultRemoteWindowInputHelper(options) {
     active = null;
     while (queue.length > 0) {
       rejectRequest(queue.shift() || null, error);
+    }
+  };
+  const refreshQueueAfterSuccessfulFocus = (focusConfig) => {
+    if (!isRemoteWindowFocusInputConfig(focusConfig)) {
+      return;
+    }
+    const receivedAtMs = Date.now();
+    for (const request of queue) {
+      if (request.refreshReceivedAtAfterFocusConfig === focusConfig && shouldRefreshRemoteWindowQueuedInputAfterFocus(focusConfig, request.config)) {
+        request.config.daemonReceivedAtMs = receivedAtMs;
+        request.refreshReceivedAtAfterFocusConfig = null;
+      }
     }
   };
   const startChild = () => {
@@ -14466,6 +14477,7 @@ function createDefaultRemoteWindowInputHelper(options) {
                 request.timeout = null;
               }
               if (response.ok === true) {
+                refreshQueueAfterSuccessfulFocus(request.config);
                 request.resolve();
               } else {
                 request.reject(new Error(String(response.error || "remote window input event failed")));
@@ -14595,7 +14607,7 @@ ${message}` : error.message);
         ready = false;
       }
       pump();
-    }, REMOTE_WINDOW_INPUT_STALE_MS);
+    }, resolveRemoteWindowInputHelperTimeoutMs(request.config));
     helperProcess.stdin.write(`${JSON.stringify(request.config)}
 `, (error) => {
       if (!error || active !== request) {
@@ -14605,6 +14617,19 @@ ${message}` : error.message);
       rejectRequest(request, error);
       pump();
     });
+  };
+  const findFocusConfigForQueuedInput = (config) => {
+    if (active && shouldRefreshRemoteWindowQueuedInputAfterFocus(active.config, config)) {
+      return active.config;
+    }
+    for (let index = queue.length - 1; index >= 0; index -= 1) {
+      const queuedConfig = queue[index].config;
+      if (!remoteWindowInputConfigsShareTarget(queuedConfig, config)) {
+        continue;
+      }
+      return shouldRefreshRemoteWindowQueuedInputAfterFocus(queuedConfig, config) ? queuedConfig : null;
+    }
+    return null;
   };
   return {
     warm() {
@@ -14619,7 +14644,8 @@ ${message}` : error.message);
           config,
           resolve: resolve4,
           reject,
-          timeout: null
+          timeout: null,
+          refreshReceivedAtAfterFocusConfig: findFocusConfigForQueuedInput(config)
         });
         pump();
       });
@@ -14651,11 +14677,11 @@ function buildRemoteWindowInputConfig(payload, target, options = {}) {
     event: payload.event
   };
 }
-function isRemoteWindowInputConfigStale(config, nowMs = Date.now()) {
+function isRemoteWindowInputConfigStale(config, nowMs = Date.now(), staleMs = REMOTE_WINDOW_INPUT_STALE_MS) {
   if (!Number.isFinite(config.daemonReceivedAtMs)) {
     return true;
   }
-  return nowMs - Number(config.daemonReceivedAtMs) > REMOTE_WINDOW_INPUT_STALE_MS;
+  return nowMs - Number(config.daemonReceivedAtMs) > staleMs;
 }
 function normalizeRtcDescription(description, expectedType) {
   if (!description || description.type !== expectedType || typeof description.sdp !== "string") {

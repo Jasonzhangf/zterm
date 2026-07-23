@@ -89,6 +89,7 @@ describe('daemon mirror lab isolation gate', () => {
     expect(longInputBlock).toContain('\\x04python3');
     expect(longInputBlock).toContain("'long-input-source-target-digest'");
     expect(longInputBlock).toContain("'long-input-mirror-recovered'");
+    expect(longInputBlock).toContain("'long input shell settled after target digest'");
     expect(longInputBlock).toContain("'long input mirror recovered settled payload'");
     expect(longInputBlock).not.toContain('waitForMarker(`${marker} ${digest}`');
   });

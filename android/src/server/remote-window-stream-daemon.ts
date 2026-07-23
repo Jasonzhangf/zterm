@@ -26,6 +26,7 @@ const DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS = 8000;
 const DEFAULT_REMOTE_WINDOW_FRAME_RATE = 12;
 const DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 60_000;
 const REMOTE_WINDOW_INPUT_STALE_MS = 1_000;
+const REMOTE_WINDOW_INPUT_FOCUS_TIMEOUT_MS = 3_000;
 const REMOTE_WINDOW_INPUT_HELPER_READY_TIMEOUT_MS = 15_000;
 const ITERM2_APP_BUNDLE_ID = 'com.googlecode.iterm2';
 const ITERM2_PANE_GAP_PX = 1;
@@ -591,22 +592,7 @@ func frontmostPidMatches(_ pid: Int32) -> Bool {
     return frontmost.processIdentifier == pid
 }
 
-func appleScriptStringLiteral(_ value: String) -> String {
-    return value
-        .replacingOccurrences(of: "\\", with: "\\\\")
-        .replacingOccurrences(of: "\"", with: "\\\"")
-}
-
-func activateApplicationByBundleId(_ bundleId: String) {
-    guard !bundleId.isEmpty else {
-        return
-    }
-    let source = "tell application id \"" + appleScriptStringLiteral(bundleId) + "\" to activate"
-    var error: NSDictionary?
-    _ = NSAppleScript(source: source)?.executeAndReturnError(&error)
-}
-
-func axWindowMatchesBounds(_ window: AXUIElement, _ bounds: Rect) -> Bool {
+	func axWindowMatchesBounds(_ window: AXUIElement, _ bounds: Rect) -> Bool {
     guard
         let position = axPoint(copyAttribute(window, kAXPositionAttribute)),
         let size = axSize(copyAttribute(window, kAXSizeAttribute))
@@ -657,21 +643,18 @@ func focusTargetWindow(_ config: InputConfig) throws {
     guard let window = bestWindow, bestScore <= 96.0 else {
         throw NSError(domain: "RemoteWindowInput", code: 4, userInfo: [NSLocalizedDescriptionKey: "remote input target window could not be matched for focus"])
     }
-    var isFrontmost = false
-    var isFocused = false
-    for attempt in 0..<3 {
-        app.unhide()
-        activateApplicationByBundleId(config.appBundleId)
-        AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
-        _ = app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-        AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, window)
-        AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
-        AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
-        AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
-        activateApplicationByBundleId(config.appBundleId)
-        _ = app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
-        usleep(attempt == 0 ? 120000 : 180000)
+	    var isFrontmost = false
+	    var isFocused = false
+	    for attempt in 0..<3 {
+	        app.unhide()
+	        _ = app.activate(options: [.activateAllWindows])
+	        AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+	        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
+	        AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, window)
+	        AXUIElementSetAttributeValue(window, kAXMainAttribute as CFString, kCFBooleanTrue)
+	        AXUIElementSetAttributeValue(window, kAXFocusedAttribute as CFString, kCFBooleanTrue)
+	        AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
+	        usleep(attempt == 0 ? 120000 : 180000)
         isFrontmost = frontmostPidMatches(config.pid)
         isFocused = focusedWindowMatchesTarget(appElement, config.window.bounds)
         if isFrontmost && isFocused {
@@ -1528,6 +1511,7 @@ interface PendingRemoteWindowInputHelperRequest {
   resolve: () => void;
   reject: (error: Error) => void;
   timeout: ReturnType<typeof setTimeout> | null;
+  refreshReceivedAtAfterFocusConfig: RemoteWindowInputConfig | null;
 }
 
 interface PendingRemoteWindowInputHelperWarm {
@@ -1536,7 +1520,36 @@ interface PendingRemoteWindowInputHelperWarm {
   timeout: ReturnType<typeof setTimeout>;
 }
 
-function createDefaultRemoteWindowInputHelper(options: { swiftBinary: string }): RemoteWindowInputHelper {
+export function isRemoteWindowFocusInputConfig(config: Pick<RemoteWindowInputConfig, 'event'>) {
+  return config.event.kind === 'focus';
+}
+
+export function resolveRemoteWindowInputHelperTimeoutMs(config: Pick<RemoteWindowInputConfig, 'event'>) {
+  return isRemoteWindowFocusInputConfig(config)
+    ? REMOTE_WINDOW_INPUT_FOCUS_TIMEOUT_MS
+    : REMOTE_WINDOW_INPUT_STALE_MS;
+}
+
+function remoteWindowInputConfigsShareTarget(
+  lhs: RemoteWindowInputConfig,
+  rhs: RemoteWindowInputConfig,
+) {
+  return lhs.pid === rhs.pid
+    && lhs.appBundleId === rhs.appBundleId
+    && lhs.focusPolicy === rhs.focusPolicy
+    && lhs.window.windowId === rhs.window.windowId;
+}
+
+export function shouldRefreshRemoteWindowQueuedInputAfterFocus(
+  focusConfig: RemoteWindowInputConfig,
+  queuedConfig: RemoteWindowInputConfig,
+) {
+  return isRemoteWindowFocusInputConfig(focusConfig)
+    && !isRemoteWindowFocusInputConfig(queuedConfig)
+    && remoteWindowInputConfigsShareTarget(focusConfig, queuedConfig);
+}
+
+export function createDefaultRemoteWindowInputHelper(options: { swiftBinary: string }): RemoteWindowInputHelper {
   let child: RemoteWindowInputHelperChildProcess | null = null;
   let stdoutBuffer = '';
   let stderrBuffer = '';
@@ -1572,7 +1585,11 @@ function createDefaultRemoteWindowInputHelper(options: { swiftBinary: string }):
   };
 
   const rejectIfStale = (request: PendingRemoteWindowInputHelperRequest) => {
-    if (isRemoteWindowInputConfigStale(request.config)) {
+    if (isRemoteWindowInputConfigStale(
+      request.config,
+      Date.now(),
+      resolveRemoteWindowInputHelperTimeoutMs(request.config),
+    )) {
       rejectRequest(request, new Error('remote window input stale'));
       return true;
     }
@@ -1595,6 +1612,22 @@ function createDefaultRemoteWindowInputHelper(options: { swiftBinary: string }):
     active = null;
     while (queue.length > 0) {
       rejectRequest(queue.shift() || null, error);
+    }
+  };
+
+  const refreshQueueAfterSuccessfulFocus = (focusConfig: RemoteWindowInputConfig) => {
+    if (!isRemoteWindowFocusInputConfig(focusConfig)) {
+      return;
+    }
+    const receivedAtMs = Date.now();
+    for (const request of queue) {
+      if (
+        request.refreshReceivedAtAfterFocusConfig === focusConfig
+        && shouldRefreshRemoteWindowQueuedInputAfterFocus(focusConfig, request.config)
+      ) {
+        request.config.daemonReceivedAtMs = receivedAtMs;
+        request.refreshReceivedAtAfterFocusConfig = null;
+      }
     }
   };
 
@@ -1636,6 +1669,7 @@ function createDefaultRemoteWindowInputHelper(options: { swiftBinary: string }):
                 request.timeout = null;
               }
               if (response.ok === true) {
+                refreshQueueAfterSuccessfulFocus(request.config);
                 request.resolve();
               } else {
                 request.reject(new Error(String(response.error || 'remote window input event failed')));
@@ -1771,7 +1805,7 @@ function createDefaultRemoteWindowInputHelper(options: { swiftBinary: string }):
         ready = false;
       }
       pump();
-    }, REMOTE_WINDOW_INPUT_STALE_MS);
+    }, resolveRemoteWindowInputHelperTimeoutMs(request.config));
     helperProcess.stdin.write(`${JSON.stringify(request.config)}\n`, (error) => {
       if (!error || active !== request) {
         return;
@@ -1780,6 +1814,22 @@ function createDefaultRemoteWindowInputHelper(options: { swiftBinary: string }):
       rejectRequest(request, error);
       pump();
     });
+  };
+
+  const findFocusConfigForQueuedInput = (config: RemoteWindowInputConfig) => {
+    if (active && shouldRefreshRemoteWindowQueuedInputAfterFocus(active.config, config)) {
+      return active.config;
+    }
+    for (let index = queue.length - 1; index >= 0; index -= 1) {
+      const queuedConfig = queue[index]!.config;
+      if (!remoteWindowInputConfigsShareTarget(queuedConfig, config)) {
+        continue;
+      }
+      return shouldRefreshRemoteWindowQueuedInputAfterFocus(queuedConfig, config)
+        ? queuedConfig
+        : null;
+    }
+    return null;
   };
 
   return {
@@ -1796,6 +1846,7 @@ function createDefaultRemoteWindowInputHelper(options: { swiftBinary: string }):
           resolve,
           reject,
           timeout: null,
+          refreshReceivedAtAfterFocusConfig: findFocusConfigForQueuedInput(config),
         });
         pump();
       });
@@ -1838,11 +1889,12 @@ export function buildRemoteWindowInputConfig(
 export function isRemoteWindowInputConfigStale(
   config: Pick<RemoteWindowInputConfig, 'daemonReceivedAtMs'>,
   nowMs = Date.now(),
+  staleMs = REMOTE_WINDOW_INPUT_STALE_MS,
 ) {
   if (!Number.isFinite(config.daemonReceivedAtMs)) {
     return true;
   }
-  return nowMs - Number(config.daemonReceivedAtMs) > REMOTE_WINDOW_INPUT_STALE_MS;
+  return nowMs - Number(config.daemonReceivedAtMs) > staleMs;
 }
 
 function normalizeRtcDescription(

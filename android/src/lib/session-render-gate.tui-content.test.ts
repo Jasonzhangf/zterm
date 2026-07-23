@@ -22,6 +22,119 @@ async function flushRender() {
 }
 
 describe('session-render-gate: in-place cell content change reprojection', () => {
+  it('publishes lower daemon revisions after daemon restart instead of leaving stale rendered rows', async () => {
+    vi.useFakeTimers();
+    try {
+      const liveBufferStore = createSessionBufferStore();
+      const liveHeadStore = createSessionHeadStore();
+      const gate = createSessionRenderGate({
+        liveBufferStore,
+        liveHeadStore,
+        recordSessionRenderCommit: vi.fn(),
+      });
+      const renderStore = gate.getRenderStore();
+
+      const makeRow = (charCode: number) => [
+        { char: charCode, fg: 256, bg: 256, flags: 0, width: 1 } as const,
+      ];
+
+      liveBufferStore.setBuffer('s-reset', createSessionBufferState({
+        lines: [makeRow(78)], // N
+        startIndex: 0,
+        endIndex: 1,
+        bufferHeadStartIndex: 0,
+        bufferTailEndIndex: 1,
+        rows: 24,
+        cols: 80,
+        cacheLines: 1000,
+        revision: 12,
+      }));
+      liveHeadStore.setHead('s-reset', { daemonHeadRevision: 12, daemonHeadEndIndex: 1 });
+      gate.scheduleCommit('s-reset');
+      await flushRender();
+
+      expect(renderStore.getSnapshot('s-reset').buffer.revision).toBe(12);
+      expect(renderStore.getSnapshot('s-reset').buffer.lines[0]![0]!.char).toBe(78);
+
+      liveBufferStore.setBuffer('s-reset', createSessionBufferState({
+        lines: [makeRow(82)], // R
+        startIndex: 0,
+        endIndex: 1,
+        bufferHeadStartIndex: 0,
+        bufferTailEndIndex: 1,
+        rows: 24,
+        cols: 80,
+        cacheLines: 1000,
+        revision: 3,
+      }));
+      liveHeadStore.setHead('s-reset', { daemonHeadRevision: 3, daemonHeadEndIndex: 1 });
+      gate.scheduleCommit('s-reset');
+      await flushRender();
+
+      const afterRestart = renderStore.getSnapshot('s-reset').buffer;
+      expect(afterRestart.revision).toBe(3);
+      expect(afterRestart.daemonHeadRevision).toBe(3);
+      expect(afterRestart.lines[0]![0]!.char).toBe(82);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not publish a lower buffer revision when daemon head truth did not reset', async () => {
+    vi.useFakeTimers();
+    try {
+      const liveBufferStore = createSessionBufferStore();
+      const liveHeadStore = createSessionHeadStore();
+      const gate = createSessionRenderGate({
+        liveBufferStore,
+        liveHeadStore,
+        recordSessionRenderCommit: vi.fn(),
+      });
+      const renderStore = gate.getRenderStore();
+
+      const makeRow = (charCode: number) => [
+        { char: charCode, fg: 256, bg: 256, flags: 0, width: 1 } as const,
+      ];
+
+      liveBufferStore.setBuffer('s-stale', createSessionBufferState({
+        lines: [makeRow(78)], // N
+        startIndex: 0,
+        endIndex: 1,
+        bufferHeadStartIndex: 0,
+        bufferTailEndIndex: 1,
+        rows: 24,
+        cols: 80,
+        cacheLines: 1000,
+        revision: 12,
+      }));
+      liveHeadStore.setHead('s-stale', { daemonHeadRevision: 12, daemonHeadEndIndex: 1 });
+      gate.scheduleCommit('s-stale');
+      await flushRender();
+
+      liveBufferStore.setBuffer('s-stale', createSessionBufferState({
+        lines: [makeRow(79)], // O
+        startIndex: 0,
+        endIndex: 1,
+        bufferHeadStartIndex: 0,
+        bufferTailEndIndex: 1,
+        rows: 24,
+        cols: 80,
+        cacheLines: 1000,
+        revision: 11,
+      }));
+      liveHeadStore.setHead('s-stale', { daemonHeadRevision: 12, daemonHeadEndIndex: 1 });
+      gate.scheduleCommit('s-stale');
+      await flushRender();
+
+      const stored = renderStore.getSnapshot('s-stale').buffer;
+      expect(stored.revision).toBe(12);
+      expect(stored.daemonHeadRevision).toBe(12);
+      expect(stored.lines[0]![0]!.char).toBe(78);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('must reproject rowE when same absolute index gets new cell content (vim status line scenario)', async () => {
     vi.useFakeTimers();
     try {

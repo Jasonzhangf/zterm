@@ -1293,6 +1293,16 @@ async function runLongInputCase(probe: DaemonProbe): Promise<CaseResult> {
     ),
     30000,
   );
+  const settledOracle = await waitForOracle(
+    'long input shell settled after target digest',
+    (oracle) => (
+      findExactOracleLine(oracle, marker) === marker
+      && findExactOracleLine(oracle, digest) === digest
+      && oracle.paneCommand.toLowerCase() !== 'python'
+      && findExactOracleLine(oracle, 'fanzhang@Macstudio android %') === 'fanzhang@Macstudio android %'
+    ),
+    30000,
+  );
   const steps: CaseStepResult[] = [
     buildLongInputDigestStep({
       oracle: digestOracle,
@@ -1313,21 +1323,21 @@ async function runLongInputCase(probe: DaemonProbe): Promise<CaseResult> {
     const payload = await waitForPayloadToMatchOracle(
       probe,
       'long input mirror recovered settled payload',
-      digestOracle,
+      settledOracle,
       20000,
     );
     steps.push(
-      buildStepResult('long-input-mirror-recovered', digestOracle, payload, probe.history, 'daemon mirror did not recover to tmux truth after long input'),
+      buildStepResult('long-input-mirror-recovered', settledOracle, payload, probe.history, 'daemon mirror did not recover to tmux truth after long input'),
     );
   } catch (error) {
     steps.push({
       label: 'long-input-mirror-recovered',
       ok: false,
       reason: `daemon mirror did not recover after byte-exact long input: ${error instanceof Error ? error.message : String(error)}`,
-      oracle: digestOracle,
+      oracle: settledOracle,
       daemonPayload: probe.payload,
-      compare: replayHistoryMirrorCompare(digestOracle, probe.history),
-      clientMirrorCompare: replayClientMirrorCompare(digestOracle, probe.history),
+      compare: replayHistoryMirrorCompare(settledOracle, probe.history),
+      clientMirrorCompare: replayClientMirrorCompare(settledOracle, probe.history),
       historyLength: probe.history.length,
     });
   }

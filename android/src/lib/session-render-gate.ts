@@ -242,6 +242,12 @@ export function createSessionRenderGate(options: {
           previousSourceEndIndex: runtime.sourceEndIndex,
           previousSourceRows: runtime.sourceRows,
         });
+        const allowRevisionRegression = Boolean(
+          previousProjected.revision > 0
+          && projected.revision > 0
+          && projected.revision < previousProjected.revision
+          && projected.daemonHeadRevision < previousProjected.daemonHeadRevision
+        );
         if (options.runtimeDebug && shouldCollectRuntimeDebugScope('session.render-gate.flush.inspect')) {
           runtimeDebugPrechecked('session.render-gate.flush.inspect', {
             sessionId,
@@ -257,7 +263,22 @@ export function createSessionRenderGate(options: {
         runtime.sourceStartIndex = sourceStartIndex;
         runtime.sourceEndIndex = sourceEndIndex;
         runtime.sourceRows = sourceRows;
-        const changed = renderStore.setBuffer(sessionId, projected);
+        if (allowRevisionRegression) {
+          options.runtimeDebug?.('session.render-gate.revision-reset.publish', {
+            sessionId,
+            previousRevision: previousProjected.revision,
+            nextRevision: projected.revision,
+            previousDaemonHeadRevision: previousProjected.daemonHeadRevision,
+            nextDaemonHeadRevision: projected.daemonHeadRevision,
+            previousStartIndex: previousProjected.startIndex,
+            previousEndIndex: previousProjected.endIndex,
+            nextStartIndex: projected.startIndex,
+            nextEndIndex: projected.endIndex,
+          });
+        }
+        const changed = renderStore.setBuffer(sessionId, projected, {
+          allowRevisionRegression,
+        });
         if (changed) {
           runtimeDebugPrechecked('terminal.performance.trace', {
             sessionId,

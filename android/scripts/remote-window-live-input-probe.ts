@@ -21,6 +21,7 @@ const DAEMON_WS_URL = process.env.ZTERM_REMOTE_WINDOW_PROBE_WS_URL || 'ws://127.
 const USE_MUX = process.env.ZTERM_REMOTE_WINDOW_PROBE_MUX === '1';
 const BURST_INPUT = process.env.ZTERM_REMOTE_WINDOW_PROBE_BURST === '1';
 const PROBE_MUX_SESSION = process.env.ZTERM_REMOTE_WINDOW_PROBE_SESSION || 'zterm';
+const DEFOCUS_BUNDLE_ID = (process.env.ZTERM_REMOTE_WINDOW_PROBE_DEFOCUS_BUNDLE || 'com.apple.finder').trim();
 const CLIENT_CLOCK_OFFSET_MS = Number.parseInt(
   process.env.ZTERM_REMOTE_WINDOW_PROBE_CLIENT_CLOCK_OFFSET_MS || '0',
   10,
@@ -164,6 +165,52 @@ function requestId(suffix: string) {
 
 function fail(message: string): never {
   throw new Error(message);
+}
+
+function appleScriptStringLiteral(value: string) {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+function runAppleScript(source: string) {
+  const result = spawnSync('osascript', ['-e', source], { encoding: 'utf8' });
+  if (result.status !== 0) {
+    fail(`osascript failed: ${result.stderr || result.stdout || source}`);
+  }
+  return result.stdout.trim();
+}
+
+function readFrontmostBundleId() {
+  return runAppleScript('tell application "System Events" to get bundle identifier of first application process whose frontmost is true');
+}
+
+async function waitForFrontmostBundleId(bundleId: string, label: string, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  let last = '';
+  while (Date.now() < deadline) {
+    last = readFrontmostBundleId();
+    if (last === bundleId) {
+      return last;
+    }
+    await delay(50);
+  }
+  fail(`frontmost app did not become ${bundleId} after ${label}; last=${last || 'unknown'}`);
+}
+
+async function activateBundleId(bundleId: string) {
+  runAppleScript(`tell application id "${appleScriptStringLiteral(bundleId)}" to activate`);
+  await waitForFrontmostBundleId(bundleId, `activate ${bundleId}`);
+}
+
+async function defocusTargetBeforeRemoteInput(targetBundleId: string) {
+  if (!DEFOCUS_BUNDLE_ID || DEFOCUS_BUNDLE_ID === targetBundleId) {
+    return null;
+  }
+  await activateBundleId(DEFOCUS_BUNDLE_ID);
+  const frontmost = readFrontmostBundleId();
+  if (frontmost === targetBundleId) {
+    fail(`defocus failed: target ${targetBundleId} is still frontmost before remote focus`);
+  }
+  return frontmost;
 }
 
 function send(ws: WebSocket, message: ClientMessage) {
@@ -324,12 +371,14 @@ async function sendActionEventAfterFocus(
   messages: ServerMessage[],
   streamId: string,
   target: RemoteWindowStreamTargetManifest,
+  targetBundleId: string,
   suffix: string,
   event: RemoteWindowInputEventPayload['event'],
 ) {
   await sendInputAndRequireAccepted(ws, messages, buildInputPayload(streamId, target, `${suffix}-focus`, {
     kind: 'focus',
   }));
+  await waitForFrontmostBundleId(targetBundleId, `${suffix} focus accepted`);
   return sendInputAndRequireAccepted(ws, messages, buildInputPayload(streamId, target, suffix, event));
 }
 
@@ -545,6 +594,10 @@ async function main() {
     if (!target) {
       fail(`probe target not found; targetCount=${catalog.payload.targets.length}; ready=${readyLine}; stderr=${probeStderr}`);
     }
+    const targetBundleId = target.videoTarget.appBundleId || probeBundleId;
+    if (!targetBundleId) {
+      fail(`probe target missing bundle id: ${target.streamTargetId}`);
+    }
 
     const peerConnection = new RTCPeerConnection({ iceServers: [] });
     peerConnection.addTransceiver('video', { direction: 'recvonly' });
@@ -625,6 +678,8 @@ async function main() {
     );
 
     const center = targetCenter(target);
+    const frontmostBeforeDefocus = readFrontmostBundleId();
+    const frontmostAfterDefocus = await defocusTargetBeforeRemoteInput(targetBundleId);
     const inputActions: Array<{ suffix: string; event: RemoteWindowInputEventPayload['event'] }> = [
       {
         suffix: 'tap-down',
@@ -738,22 +793,23 @@ async function main() {
       ]);
       payloads.forEach((payload) => send(ws, { type: 'remote-window-input', payload }));
       await Promise.all(payloads.map((payload) => waitForInputAccepted(messages, payload)));
+      await waitForFrontmostBundleId(targetBundleId, 'burst focus accepted');
     } else {
-      await sendActionEventAfterFocus(ws, messages, streamId, target, 'tap-down', inputActions[0]!.event);
+      await sendActionEventAfterFocus(ws, messages, streamId, target, targetBundleId, 'tap-down', inputActions[0]!.event);
       await waitForProbeLineCount(probeLines, 'PROBE_MOUSE_DOWN', 1);
-      await sendActionEventAfterFocus(ws, messages, streamId, target, 'tap-up', inputActions[1]!.event);
+      await sendActionEventAfterFocus(ws, messages, streamId, target, targetBundleId, 'tap-up', inputActions[1]!.event);
       await waitForProbeLineCount(probeLines, 'PROBE_MOUSE_UP', 1);
-      await sendActionEventAfterFocus(ws, messages, streamId, target, 'drag-down', inputActions[2]!.event);
+      await sendActionEventAfterFocus(ws, messages, streamId, target, targetBundleId, 'drag-down', inputActions[2]!.event);
       await waitForProbeLineCount(probeLines, 'PROBE_MOUSE_DOWN', 2);
-      await sendActionEventAfterFocus(ws, messages, streamId, target, 'drag-move', inputActions[3]!.event);
+      await sendActionEventAfterFocus(ws, messages, streamId, target, targetBundleId, 'drag-move', inputActions[3]!.event);
       await waitForProbeLine(probeLines, 'PROBE_MOUSE_DRAGGED');
-      await sendActionEventAfterFocus(ws, messages, streamId, target, 'drag-up', inputActions[4]!.event);
+      await sendActionEventAfterFocus(ws, messages, streamId, target, targetBundleId, 'drag-up', inputActions[4]!.event);
       await waitForProbeLineCount(probeLines, 'PROBE_MOUSE_UP', 2);
-      await sendActionEventAfterFocus(ws, messages, streamId, target, 'scroll', inputActions[5]!.event);
+      await sendActionEventAfterFocus(ws, messages, streamId, target, targetBundleId, 'scroll', inputActions[5]!.event);
       await waitForProbeLineCount(probeLines, 'PROBE_SCROLL', 1);
-      await sendActionEventAfterFocus(ws, messages, streamId, target, 'key-down', inputActions[6]!.event);
+      await sendActionEventAfterFocus(ws, messages, streamId, target, targetBundleId, 'key-down', inputActions[6]!.event);
       await waitForProbeLine(probeLines, 'PROBE_KEY_DOWN');
-      await sendActionEventAfterFocus(ws, messages, streamId, target, 'key-up', inputActions[7]!.event);
+      await sendActionEventAfterFocus(ws, messages, streamId, target, targetBundleId, 'key-up', inputActions[7]!.event);
       await waitForProbeLine(probeLines, 'PROBE_KEY_UP');
     }
 
@@ -792,6 +848,10 @@ async function main() {
       controlTransport: USE_MUX ? 'mux-channel' : 'raw-ws',
       burstInput: BURST_INPUT,
       clientClockOffsetMs: CLIENT_CLOCK_OFFSET_MS,
+      defocusBundleId: DEFOCUS_BUNDLE_ID || undefined,
+      frontmostBeforeDefocus,
+      frontmostAfterDefocus,
+      frontmostAfterInput: readFrontmostBundleId(),
       muxSession: USE_MUX ? PROBE_MUX_SESSION : undefined,
       muxChannelId: USE_MUX ? PROBE_MUX_CHANNEL_ID : undefined,
       targetId: target.streamTargetId,
