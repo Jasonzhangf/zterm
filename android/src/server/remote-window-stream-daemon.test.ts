@@ -7,6 +7,7 @@ import {
   buildRemoteWindowStreamTargets,
   createRemoteWindowStreamDaemonRuntime,
   flattenIterm2SplitTree,
+  isRemoteWindowInputConfigStale,
   MACOS_REMOTE_WINDOW_INPUT_SWIFT,
   parseTmuxClientTargets,
   summarizeRemoteWindowCatalogError,
@@ -339,9 +340,10 @@ describe('remote window stream daemon owner', () => {
         normalizedX: 0.2,
         normalizedY: 0.3,
       },
-    }, target);
+    }, target, { daemonReceivedAtMs: 7_777 });
 
     expect(config).toEqual({
+      daemonReceivedAtMs: 7_777,
       clientSentAt: expect.any(Number),
       pid: 123,
       appBundleId: 'com.apple.TextEdit',
@@ -357,6 +359,18 @@ describe('remote window stream daemon owner', () => {
         deltaY: 24,
       }),
     });
+  });
+
+  it('uses daemon-local receive time, not client wall clock, for input stale checks', () => {
+    expect(isRemoteWindowInputConfigStale({
+      daemonReceivedAtMs: 20_000,
+    }, 20_999)).toBe(false);
+    expect(isRemoteWindowInputConfigStale({
+      daemonReceivedAtMs: 20_000,
+    }, 21_001)).toBe(true);
+    expect(isRemoteWindowInputConfigStale({
+      daemonReceivedAtMs: Number.NaN,
+    }, 20_001)).toBe(true);
   });
 
   it('keeps scroll input compatible with the macOS helper schema', () => {
@@ -1560,13 +1574,17 @@ describe('remote window stream daemon owner', () => {
 	    );
 	  });
 
-  it('rejects direct daemon remote-window input without clientSentAt before macOS injection', async () => {
+  it('accepts remote-window input without trusting Android client wall-clock timestamps', async () => {
     const fakePeer = new FakeRemoteWindowPeerConnection();
     const fakeTrack = makeFakeMediaStreamTrack();
     const target = makeAppStreamTarget();
     const runRemoteWindowInputEvent = vi.fn(async () => undefined);
+    const nowMs = vi.fn()
+      .mockReturnValueOnce(50_000)
+      .mockReturnValueOnce(50_100);
     const runtime = createRemoteWindowStreamDaemonRuntime({
       platform: 'darwin',
+      nowMs,
       captureSourceFactory: vi.fn(async (_target, options) => {
         options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1) });
         return { width: 2, height: 2, frameRate: 12, stop: vi.fn() };
@@ -1585,15 +1603,15 @@ describe('remote window stream daemon owner', () => {
     });
 
     await runtime.startStream({
-      requestId: 'rw-input-start-missing-sent-at',
-      streamId: 'stream-input-missing-sent-at',
+      requestId: 'rw-input-start-clock-skew',
+      streamId: 'stream-input-clock-skew',
       target,
       offer: { type: 'offer', sdp: 'android-offer-sdp' },
     });
 
-    const result = await runtime.injectInput({
+    const missingTimestampResult = await runtime.injectInput({
       requestId: 'rw-input-missing-sent-at',
-      streamId: 'stream-input-missing-sent-at',
+      streamId: 'stream-input-clock-skew',
       targetId: target.streamTargetId,
       event: {
         kind: 'key',
@@ -1604,13 +1622,43 @@ describe('remote window stream daemon owner', () => {
       },
     });
 
-    expect(result).toMatchObject({
+    expect(missingTimestampResult).toEqual({
       requestId: 'rw-input-missing-sent-at',
-      streamId: 'stream-input-missing-sent-at',
-      code: 'remote_window_input_failed',
-      message: 'remote window input requires clientSentAt',
+      streamId: 'stream-input-clock-skew',
+      targetId: target.streamTargetId,
+      accepted: true,
     });
-    expect(runRemoteWindowInputEvent).not.toHaveBeenCalled();
+    expect(runRemoteWindowInputEvent).toHaveBeenLastCalledWith(
+      expect.objectContaining({ requestId: 'rw-input-missing-sent-at' }),
+      target,
+      expect.objectContaining({ daemonReceivedAtMs: 50_000 }),
+    );
+
+    const staleLookingClientClockResult = await runtime.injectInput({
+      requestId: 'rw-input-client-clock-old',
+      streamId: 'stream-input-clock-skew',
+      targetId: target.streamTargetId,
+      clientSentAt: 1,
+      event: {
+        kind: 'key',
+        phase: 'up',
+        key: 'v',
+        code: 'KeyV',
+        metaKey: true,
+      },
+    });
+
+    expect(staleLookingClientClockResult).toEqual({
+      requestId: 'rw-input-client-clock-old',
+      streamId: 'stream-input-clock-skew',
+      targetId: target.streamTargetId,
+      accepted: true,
+    });
+    expect(runRemoteWindowInputEvent).toHaveBeenLastCalledWith(
+      expect.objectContaining({ requestId: 'rw-input-client-clock-old', clientSentAt: 1 }),
+      target,
+      expect.objectContaining({ daemonReceivedAtMs: 50_100 }),
+    );
   });
 
   it('uses one persistent macOS input helper for pointer, scroll, gesture, and key events', async () => {
@@ -1623,8 +1671,10 @@ describe('remote window stream daemon owner', () => {
       dispose: vi.fn(),
     };
     const remoteWindowInputHelperFactory = vi.fn(() => inputHelper);
+    const nowMs = vi.fn(() => 88_000);
     const runtime = createRemoteWindowStreamDaemonRuntime({
       platform: 'darwin',
+      nowMs,
       captureSourceFactory: vi.fn(async (_target, options) => {
         options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1) });
         return { width: 2, height: 2, frameRate: 12, stop: vi.fn() };
@@ -1726,6 +1776,7 @@ describe('remote window stream daemon owner', () => {
     expect(inputHelper.warm).toHaveBeenCalledTimes(1);
     expect(inputHelper.send).toHaveBeenCalledTimes(4);
     expect(inputHelper.send).toHaveBeenNthCalledWith(1, expect.objectContaining({
+      daemonReceivedAtMs: 88_000,
       event: expect.objectContaining({ kind: 'pointer' }),
       window: expect.objectContaining({ bounds: target.videoTarget.windowBoundsTopLeftPx }),
     }));

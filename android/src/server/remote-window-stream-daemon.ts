@@ -247,10 +247,15 @@ export type RemoteWindowCaptureSourceFactory = (
 export type RemoteWindowInputEventRunner = (
   payload: RemoteWindowInputEventPayload,
   target: RemoteWindowStreamTargetManifest,
-  options: { swiftBinary: string; runTmux: (args: string[]) => { ok: true; stdout: string } },
+  options: {
+    swiftBinary: string;
+    runTmux: (args: string[]) => { ok: true; stdout: string };
+    daemonReceivedAtMs: number;
+  },
 ) => Promise<void>;
 
 export interface RemoteWindowInputConfig {
+  daemonReceivedAtMs: number;
   clientSentAt?: number;
   pid: number;
   appBundleId: string;
@@ -1564,8 +1569,7 @@ function createDefaultRemoteWindowInputHelper(options: { swiftBinary: string }):
   };
 
   const rejectIfStale = (request: PendingRemoteWindowInputHelperRequest) => {
-    const sentAt = request.config.clientSentAt;
-    if (Number.isFinite(sentAt) && Date.now() - Number(sentAt) > REMOTE_WINDOW_INPUT_STALE_MS) {
+    if (isRemoteWindowInputConfigStale(request.config)) {
       rejectRequest(request, new Error('remote window input stale'));
       return true;
     }
@@ -1809,8 +1813,12 @@ function createDefaultRemoteWindowInputHelper(options: { swiftBinary: string }):
 export function buildRemoteWindowInputConfig(
   payload: RemoteWindowInputEventPayload,
   target: RemoteWindowStreamTargetManifest,
+  options: { daemonReceivedAtMs?: number } = {},
 ): RemoteWindowInputConfig {
   return {
+    daemonReceivedAtMs: Number.isFinite(options.daemonReceivedAtMs)
+      ? Number(options.daemonReceivedAtMs)
+      : Date.now(),
     pid: target.videoTarget.pid,
     appBundleId: target.videoTarget.appBundleId,
     focusPolicy: target.focusPolicy,
@@ -1822,6 +1830,16 @@ export function buildRemoteWindowInputConfig(
     clientSentAt: payload.clientSentAt,
     event: payload.event,
   };
+}
+
+export function isRemoteWindowInputConfigStale(
+  config: Pick<RemoteWindowInputConfig, 'daemonReceivedAtMs'>,
+  nowMs = Date.now(),
+) {
+  if (!Number.isFinite(config.daemonReceivedAtMs)) {
+    return true;
+  }
+  return nowMs - Number(config.daemonReceivedAtMs) > REMOTE_WINDOW_INPUT_STALE_MS;
 }
 
 function normalizeRtcDescription(
@@ -2179,8 +2197,10 @@ export function createRemoteWindowStreamDaemonRuntime(
     }
     await getRemoteWindowInputHelper().warm();
   };
-  const runRemoteWindowInputEvent = deps.runRemoteWindowInputEvent || ((payload, target) => (
-    getRemoteWindowInputHelper().send(buildRemoteWindowInputConfig(payload, target))
+  const runRemoteWindowInputEvent = deps.runRemoteWindowInputEvent || ((payload, target, options) => (
+    getRemoteWindowInputHelper().send(buildRemoteWindowInputConfig(payload, target, {
+      daemonReceivedAtMs: options.daemonReceivedAtMs,
+    }))
   ));
   const now = deps.now || (() => new Date().toISOString());
   const captureSourceFactory = deps.captureSourceFactory || startScreenCaptureKitFrameSource;
@@ -2430,12 +2450,6 @@ export function createRemoteWindowStreamDaemonRuntime(
   function validateRemoteWindowInput(payload: RemoteWindowInputEventPayload, entry: ActiveRemoteWindowStream) {
     if (!payload.requestId || !payload.streamId || !payload.targetId) {
       throw new Error('remote window input requires requestId, streamId, and targetId');
-    }
-    if (!Number.isFinite(payload.clientSentAt)) {
-      throw new Error('remote window input requires clientSentAt');
-    }
-    if (Date.now() - Number(payload.clientSentAt) > REMOTE_WINDOW_INPUT_STALE_MS) {
-      throw new Error('remote window input stale');
     }
     if (payload.targetId !== entry.targetId) {
       throw new Error(`remote window input target mismatch: ${payload.targetId}`);
@@ -2791,11 +2805,13 @@ export function createRemoteWindowStreamDaemonRuntime(
     if (!entry || entry.cleanupDone) {
       return buildStreamError(payload, 'remote_window_input_stream_missing', `remote window stream is not active: ${payload.streamId || 'missing'}`);
     }
+    const daemonReceivedAtMs = nowMs();
     try {
       validateRemoteWindowInput(payload, entry);
       await runRemoteWindowInputEvent(payload, entry.target, {
         swiftBinary,
         runTmux: deps.runTmux,
+        daemonReceivedAtMs,
       });
       return {
         requestId: payload.requestId,

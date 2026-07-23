@@ -20,6 +20,10 @@ const { RTCPeerConnection, RTCSessionDescription } = wrtc as unknown as {
 const DAEMON_WS_URL = process.env.ZTERM_REMOTE_WINDOW_PROBE_WS_URL || 'ws://127.0.0.1:3333';
 const USE_MUX = process.env.ZTERM_REMOTE_WINDOW_PROBE_MUX === '1';
 const PROBE_MUX_SESSION = process.env.ZTERM_REMOTE_WINDOW_PROBE_SESSION || 'zterm';
+const CLIENT_CLOCK_OFFSET_MS = Number.parseInt(
+  process.env.ZTERM_REMOTE_WINDOW_PROBE_CLIENT_CLOCK_OFFSET_MS || '0',
+  10,
+) || 0;
 const PROBE_MUX_CHANNEL_ID = `rw-live-input-channel-${Date.now()}`;
 const PROBE_MUX_CLIENT_ID = `rw-live-input-client-${Date.now()}`;
 const PROBE_TITLE = `ZTERM_REMOTE_INPUT_PROBE_${Date.now()}`;
@@ -293,6 +297,39 @@ function targetCenter(target: RemoteWindowStreamTargetManifest) {
     width: rect.width,
     height: rect.height,
   };
+}
+
+function clientSentAt() {
+  return Date.now() + CLIENT_CLOCK_OFFSET_MS;
+}
+
+function buildInputPayload(
+  streamId: string,
+  target: RemoteWindowStreamTargetManifest,
+  suffix: string,
+  event: RemoteWindowInputEventPayload['event'],
+): RemoteWindowInputEventPayload {
+  return {
+    requestId: requestId(suffix),
+    streamId,
+    targetId: target.streamTargetId,
+    clientSentAt: clientSentAt(),
+    event,
+  };
+}
+
+async function sendActionEventAfterFocus(
+  ws: WebSocket,
+  messages: ServerMessage[],
+  streamId: string,
+  target: RemoteWindowStreamTargetManifest,
+  suffix: string,
+  event: RemoteWindowInputEventPayload['event'],
+) {
+  await sendInputAndRequireAccepted(ws, messages, buildInputPayload(streamId, target, `${suffix}-focus`, {
+    kind: 'focus',
+  }));
+  return sendInputAndRequireAccepted(ws, messages, buildInputPayload(streamId, target, suffix, event));
 }
 
 async function sendInputAndRequireAccepted(
@@ -580,107 +617,91 @@ async function main() {
     );
 
     const center = targetCenter(target);
-    const baseInput = {
-      streamId,
-      targetId: target.streamTargetId,
-      clientSentAt: Date.now(),
-    };
-    await sendInputAndRequireAccepted(ws, messages, {
-      ...baseInput,
-      requestId: requestId('focus'),
-      event: { kind: 'focus' },
+    await sendActionEventAfterFocus(ws, messages, streamId, target, 'tap-down', {
+      kind: 'pointer',
+      phase: 'down',
+      pointerId: 1,
+      button: 'left',
+      buttons: 1,
+      x: center.x,
+      y: center.y,
+      normalizedX: 0.5,
+      normalizedY: 0.5,
     });
-    await sendInputAndRequireAccepted(ws, messages, {
-      ...baseInput,
-      requestId: requestId('pointer-down'),
-      clientSentAt: Date.now(),
-      event: {
-        kind: 'pointer',
-        phase: 'down',
-        pointerId: 1,
-        button: 'left',
-        buttons: 1,
-        x: center.x,
-        y: center.y,
-        normalizedX: 0.5,
-        normalizedY: 0.5,
-      },
+    await waitForProbeLineCount(probeLines, 'PROBE_MOUSE_DOWN', 1);
+    await sendActionEventAfterFocus(ws, messages, streamId, target, 'tap-up', {
+      kind: 'pointer',
+      phase: 'up',
+      pointerId: 1,
+      button: 'left',
+      buttons: 0,
+      x: center.x,
+      y: center.y,
+      normalizedX: 0.5,
+      normalizedY: 0.5,
     });
-    await waitForProbeLine(probeLines, 'PROBE_MOUSE_DOWN');
-    await sendInputAndRequireAccepted(ws, messages, {
-      ...baseInput,
-      requestId: requestId('pointer-move'),
-      clientSentAt: Date.now(),
-      event: {
-        kind: 'pointer',
-        phase: 'move',
-        pointerId: 1,
-        button: 'left',
-        buttons: 1,
-        x: center.x + 24,
-        y: center.y + 18,
-        normalizedX: 0.55,
-        normalizedY: 0.55,
-      },
+    await waitForProbeLineCount(probeLines, 'PROBE_MOUSE_UP', 1);
+    await sendActionEventAfterFocus(ws, messages, streamId, target, 'drag-down', {
+      kind: 'pointer',
+      phase: 'down',
+      pointerId: 2,
+      button: 'left',
+      buttons: 1,
+      x: center.x,
+      y: center.y,
+      normalizedX: 0.5,
+      normalizedY: 0.5,
+    });
+    await waitForProbeLineCount(probeLines, 'PROBE_MOUSE_DOWN', 2);
+    await sendActionEventAfterFocus(ws, messages, streamId, target, 'drag-move', {
+      kind: 'pointer',
+      phase: 'move',
+      pointerId: 2,
+      button: 'left',
+      buttons: 1,
+      x: center.x + 24,
+      y: center.y + 18,
+      normalizedX: 0.55,
+      normalizedY: 0.55,
     });
     await waitForProbeLine(probeLines, 'PROBE_MOUSE_DRAGGED');
-    await sendInputAndRequireAccepted(ws, messages, {
-      ...baseInput,
-      requestId: requestId('pointer-up'),
-      clientSentAt: Date.now(),
-      event: {
-        kind: 'pointer',
-        phase: 'up',
-        pointerId: 1,
-        button: 'left',
-        buttons: 0,
-        x: center.x + 24,
-        y: center.y + 18,
-        normalizedX: 0.55,
-        normalizedY: 0.55,
-      },
+    await sendActionEventAfterFocus(ws, messages, streamId, target, 'drag-up', {
+      kind: 'pointer',
+      phase: 'up',
+      pointerId: 2,
+      button: 'left',
+      buttons: 0,
+      x: center.x + 24,
+      y: center.y + 18,
+      normalizedX: 0.55,
+      normalizedY: 0.55,
     });
-    await waitForProbeLine(probeLines, 'PROBE_MOUSE_UP');
-    await sendInputAndRequireAccepted(ws, messages, {
-      ...baseInput,
-      requestId: requestId('scroll'),
-      clientSentAt: Date.now(),
-      event: {
-        kind: 'scroll',
-        unit: 'pixel',
-        deltaX: 0,
-        deltaY: 96,
-        x: center.x,
-        y: center.y,
-        normalizedX: 0.5,
-        normalizedY: 0.5,
-      },
+    await waitForProbeLineCount(probeLines, 'PROBE_MOUSE_UP', 2);
+    await sendActionEventAfterFocus(ws, messages, streamId, target, 'scroll', {
+      kind: 'scroll',
+      unit: 'pixel',
+      deltaX: 0,
+      deltaY: 96,
+      x: center.x,
+      y: center.y,
+      normalizedX: 0.5,
+      normalizedY: 0.5,
     });
     await waitForProbeLineCount(probeLines, 'PROBE_SCROLL', 1);
-    await sendInputAndRequireAccepted(ws, messages, {
-      ...baseInput,
-      requestId: requestId('key-down'),
-      clientSentAt: Date.now(),
-      event: {
-        kind: 'key',
-        phase: 'down',
-        key: 'z',
-        code: 'KeyZ',
-        text: 'z',
-      },
+    await sendActionEventAfterFocus(ws, messages, streamId, target, 'key-down', {
+      kind: 'key',
+      phase: 'down',
+      key: 'z',
+      code: 'KeyZ',
+      text: 'z',
     });
     await waitForProbeLine(probeLines, 'PROBE_KEY_DOWN');
-    await sendInputAndRequireAccepted(ws, messages, {
-      ...baseInput,
-      requestId: requestId('key-up'),
-      clientSentAt: Date.now(),
-      event: {
-        kind: 'key',
-        phase: 'up',
-        key: 'z',
-        code: 'KeyZ',
-        text: 'z',
-      },
+    await sendActionEventAfterFocus(ws, messages, streamId, target, 'key-up', {
+      kind: 'key',
+      phase: 'up',
+      key: 'z',
+      code: 'KeyZ',
+      text: 'z',
     });
     await waitForProbeLine(probeLines, 'PROBE_KEY_UP');
 
@@ -710,6 +731,7 @@ async function main() {
       ok: true,
       daemonWsUrl: DAEMON_WS_URL,
       controlTransport: USE_MUX ? 'mux-channel' : 'raw-ws',
+      clientClockOffsetMs: CLIENT_CLOCK_OFFSET_MS,
       muxSession: USE_MUX ? PROBE_MUX_SESSION : undefined,
       muxChannelId: USE_MUX ? PROBE_MUX_CHANNEL_ID : undefined,
       targetId: target.streamTargetId,

@@ -14402,8 +14402,7 @@ function createDefaultRemoteWindowInputHelper(options) {
     }
   };
   const rejectIfStale = (request) => {
-    const sentAt = request.config.clientSentAt;
-    if (Number.isFinite(sentAt) && Date.now() - Number(sentAt) > REMOTE_WINDOW_INPUT_STALE_MS) {
+    if (isRemoteWindowInputConfigStale(request.config)) {
       rejectRequest(request, new Error("remote window input stale"));
       return true;
     }
@@ -14634,8 +14633,9 @@ ${message}` : error.message);
     }
   };
 }
-function buildRemoteWindowInputConfig(payload, target) {
+function buildRemoteWindowInputConfig(payload, target, options = {}) {
   return {
+    daemonReceivedAtMs: Number.isFinite(options.daemonReceivedAtMs) ? Number(options.daemonReceivedAtMs) : Date.now(),
     pid: target.videoTarget.pid,
     appBundleId: target.videoTarget.appBundleId,
     focusPolicy: target.focusPolicy,
@@ -14647,6 +14647,12 @@ function buildRemoteWindowInputConfig(payload, target) {
     clientSentAt: payload.clientSentAt,
     event: payload.event
   };
+}
+function isRemoteWindowInputConfigStale(config, nowMs = Date.now()) {
+  if (!Number.isFinite(config.daemonReceivedAtMs)) {
+    return true;
+  }
+  return nowMs - Number(config.daemonReceivedAtMs) > REMOTE_WINDOW_INPUT_STALE_MS;
 }
 function normalizeRtcDescription(description, expectedType) {
   if (!description || description.type !== expectedType || typeof description.sdp !== "string") {
@@ -14937,7 +14943,9 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
     }
     await getRemoteWindowInputHelper().warm();
   };
-  const runRemoteWindowInputEvent = deps.runRemoteWindowInputEvent || ((payload, target) => getRemoteWindowInputHelper().send(buildRemoteWindowInputConfig(payload, target)));
+  const runRemoteWindowInputEvent = deps.runRemoteWindowInputEvent || ((payload, target, options) => getRemoteWindowInputHelper().send(buildRemoteWindowInputConfig(payload, target, {
+    daemonReceivedAtMs: options.daemonReceivedAtMs
+  })));
   const now = deps.now || (() => (/* @__PURE__ */ new Date()).toISOString());
   const captureSourceFactory = deps.captureSourceFactory || startScreenCaptureKitFrameSource;
   const createPeerConnection = deps.peerConnectionFactory || ((configuration) => new RTCPeerConnection2(configuration));
@@ -15150,12 +15158,6 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
   function validateRemoteWindowInput(payload, entry) {
     if (!payload.requestId || !payload.streamId || !payload.targetId) {
       throw new Error("remote window input requires requestId, streamId, and targetId");
-    }
-    if (!Number.isFinite(payload.clientSentAt)) {
-      throw new Error("remote window input requires clientSentAt");
-    }
-    if (Date.now() - Number(payload.clientSentAt) > REMOTE_WINDOW_INPUT_STALE_MS) {
-      throw new Error("remote window input stale");
     }
     if (payload.targetId !== entry.targetId) {
       throw new Error(`remote window input target mismatch: ${payload.targetId}`);
@@ -15468,11 +15470,13 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
     if (!entry || entry.cleanupDone) {
       return buildStreamError(payload, "remote_window_input_stream_missing", `remote window stream is not active: ${payload.streamId || "missing"}`);
     }
+    const daemonReceivedAtMs = nowMs();
     try {
       validateRemoteWindowInput(payload, entry);
       await runRemoteWindowInputEvent(payload, entry.target, {
         swiftBinary,
-        runTmux: deps.runTmux
+        runTmux: deps.runTmux,
+        daemonReceivedAtMs
       });
       return {
         requestId: payload.requestId,
