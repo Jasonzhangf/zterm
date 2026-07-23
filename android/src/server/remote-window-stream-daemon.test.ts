@@ -401,6 +401,16 @@ describe('remote window stream daemon owner', () => {
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('remote input target window did not become focused');
   });
 
+  it('short-circuits repeated focus when the target window is already focused', () => {
+    const fastPathIndex = MACOS_REMOTE_WINDOW_INPUT_SWIFT.indexOf(
+      'frontmostPidMatches(config.pid) && focusedWindowMatchesTarget(appElement, config.window.bounds)',
+    );
+    const focusAttemptIndex = MACOS_REMOTE_WINDOW_INPUT_SWIFT.indexOf('for attempt in 0..<3');
+
+    expect(fastPathIndex).toBeGreaterThan(0);
+    expect(focusAttemptIndex).toBeGreaterThan(fastPathIndex);
+  });
+
   it('moves the macOS cursor to the remote input coordinate before scroll and gesture wheel events', () => {
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func postMouseMove(x: Double, y: Double)');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('postMouseMove(x: x, y: y)');

@@ -13584,6 +13584,9 @@ func focusTargetWindow(_ config: InputConfig) throws {
         throw NSError(domain: "RemoteWindowInput", code: 3, userInfo: [NSLocalizedDescriptionKey: "remote input target app is not running"])
     }
     let appElement = AXUIElementCreateApplication(config.pid)
+    if frontmostPidMatches(config.pid) && focusedWindowMatchesTarget(appElement, config.window.bounds) {
+        return
+    }
     let windows = copyAttribute(appElement, kAXWindowsAttribute) as? [AXUIElement] ?? []
     var bestWindow: AXUIElement?
     var bestScore = Double.greatestFiniteMagnitude
