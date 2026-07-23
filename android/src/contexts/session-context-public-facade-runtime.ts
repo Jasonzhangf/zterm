@@ -23,6 +23,7 @@ import type { SessionRenderBufferStore } from '../lib/session-render-buffer-stor
 import type { SessionHeadStore } from '../lib/session-head-store';
 import type { SessionTransportResource } from '../lib/session-transport-runtime';
 import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
+import type { RemoteWindowControlMessage } from '../lib/remote-window-message-runtime';
 import {
   manageTmuxSessionsOnOpenTransportRuntime,
   type SessionTmuxTargetRequestStore,
@@ -347,6 +348,7 @@ export function buildSessionContextValueRuntime(options: {
   getSessionRenderBufferStore: () => SessionRenderBufferStore;
   getSessionHeadStore: () => SessionHeadStore;
   onFileTransferMessage: (handler: (msg: any) => void) => () => void;
+  onRemoteWindowMessage: (handler: (msg: RemoteWindowControlMessage) => void) => () => void;
   sendMessageRaw: (sessionId: string, msg: unknown) => void;
 }): SessionContextValue {
   return {
@@ -389,6 +391,7 @@ export function buildSessionContextValueRuntime(options: {
     getSessionRenderBufferStore: options.getSessionRenderBufferStore,
     getSessionHeadStore: options.getSessionHeadStore,
     onFileTransferMessage: options.onFileTransferMessage,
+    onRemoteWindowMessage: options.onRemoteWindowMessage,
     sendMessageRaw: options.sendMessageRaw,
   };
 }

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { Keyboard } from '@capacitor/keyboard';
 import { Filesystem } from '@capacitor/filesystem';
@@ -454,6 +454,15 @@ describe('TerminalPage remote window overlay', () => {
     }));
     const onSendRemoteWindowInput = vi.fn();
     const onTerminalInput = vi.fn();
+    let remoteWindowMessageHandler: ((msg: any) => void) | null = null;
+    const onRemoteWindowMessage = vi.fn((handler: (msg: any) => void) => {
+      remoteWindowMessageHandler = handler;
+      return () => {
+        if (remoteWindowMessageHandler === handler) {
+          remoteWindowMessageHandler = null;
+        }
+      };
+    });
 
     render(
       <TerminalPage
@@ -471,6 +480,7 @@ describe('TerminalPage remote window overlay', () => {
         onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
         onRequestRemoteWindowStreamStart={onRequestRemoteWindowStreamStart}
         onSendRemoteWindowInput={onSendRemoteWindowInput}
+        onRemoteWindowMessage={onRemoteWindowMessage}
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
@@ -546,6 +556,41 @@ describe('TerminalPage remote window overlay', () => {
       expect(screen.getByTestId('terminal-debug-remote-window-event').textContent).toContain('overlay · SEND Y · ptr:up #31 b0');
       expect(screen.getByTestId('terminal-debug-remote-window-point').textContent).toContain('410,320 n=0.50,0.50');
       expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('F 2 · D 1 · M 0 · U 1');
+    });
+
+    const firstPayload = remoteWindowNonFocusPayloads(onSendRemoteWindowInput)[0];
+    act(() => {
+      remoteWindowMessageHandler?.({
+        type: 'remote-window-input-result',
+        payload: {
+          requestId: 'rw-input-accepted-1',
+          streamId: firstPayload.streamId,
+          targetId: firstPayload.targetId,
+          accepted: true,
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-debug-remote-window-result').textContent).toContain('ACK rw-input-accepted-1');
+      expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('A 1 · E 0');
+    });
+
+    act(() => {
+      remoteWindowMessageHandler?.({
+        type: 'remote-window-error',
+        payload: {
+          requestId: 'rw-input-error-1',
+          streamId: firstPayload.streamId,
+          code: 'remote_window_input_failed',
+          message: 'remote window input stale',
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-debug-remote-window-result').textContent).toContain('ERR remote_window_input_failed');
+      expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('A 1 · E 1');
     });
 
     onSendRemoteWindowInput.mockClear();

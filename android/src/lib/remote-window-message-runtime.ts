@@ -44,6 +44,7 @@ interface PendingRemoteWindowStreamStartRequest {
 }
 
 type PendingRemoteWindowRequest = PendingRemoteWindowTargetsRequest | PendingRemoteWindowStreamStartRequest;
+type RemoteWindowMessageSubscriber = (msg: RemoteWindowControlMessage) => void | Promise<unknown>;
 
 export const REMOTE_WINDOW_TARGETS_REQUEST_TIMEOUT_MS = 15000;
 
@@ -75,6 +76,7 @@ export function createRemoteWindowMessageRuntime(input?: {
 }) {
   const pendingRequests = new Map<string, PendingRemoteWindowTargetsRequest>();
   const pendingStreamStarts = new Map<string, PendingRemoteWindowStreamStartRequest>();
+  const subscribers = new Set<RemoteWindowMessageSubscriber>();
   const timeoutMs = input?.timeoutMs ?? REMOTE_WINDOW_TARGETS_REQUEST_TIMEOUT_MS;
   const setTimeoutFn = input?.setTimeoutFn ?? globalThis.setTimeout.bind(globalThis);
   const clearTimeoutFn = input?.clearTimeoutFn ?? globalThis.clearTimeout.bind(globalThis);
@@ -89,6 +91,17 @@ export function createRemoteWindowMessageRuntime(input?: {
     }
     void Promise.resolve(handler(payload)).catch((error) => {
       input?.onListenerError?.(phase, error);
+    });
+    return true;
+  };
+  const notifySubscribers = (msg: RemoteWindowControlMessage) => {
+    if (subscribers.size === 0) {
+      return false;
+    }
+    subscribers.forEach((handler) => {
+      void Promise.resolve(handler(msg)).catch((error) => {
+        input?.onListenerError?.('status', error);
+      });
     });
     return true;
   };
@@ -368,15 +381,26 @@ export function createRemoteWindowMessageRuntime(input?: {
         return dispatchListener('ice-candidate', input?.onStreamIceCandidate, msg.payload);
       }
       if (msg.type === 'remote-window-stream-status') {
-        return dispatchListener('status', input?.onStreamStatus, msg.payload);
+        const handled = dispatchListener('status', input?.onStreamStatus, msg.payload);
+        const observed = notifySubscribers(msg);
+        return handled || observed;
       }
       if (msg.type === 'remote-window-stream-quality-result') {
-        return false;
+        return notifySubscribers(msg);
       }
       if (msg.type === 'remote-window-input-result') {
-        return false;
+        return notifySubscribers(msg);
       }
-      return runtime.handleError(msg.payload);
+      const handled = runtime.handleError(msg.payload);
+      const observed = notifySubscribers(msg);
+      return handled || observed;
+    },
+
+    subscribe(handler: RemoteWindowMessageSubscriber) {
+      subscribers.add(handler);
+      return () => {
+        subscribers.delete(handler);
+      };
     },
 
     dispose(reason = 'Session provider disposed before remote window request completed') {
@@ -390,6 +414,7 @@ export function createRemoteWindowMessageRuntime(input?: {
         pending.reject(new Error(reason));
       }
       pendingStreamStarts.clear();
+      subscribers.clear();
     },
 
     getPendingCount() {

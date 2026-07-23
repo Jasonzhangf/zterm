@@ -443,4 +443,60 @@ describe('remote window message runtime', () => {
     });
     expect(runtime.getPendingCount()).toBe(0);
   });
+
+  it('dispatches input results and unmatched input errors to subscribers', () => {
+    const runtime = createRemoteWindowMessageRuntime();
+    const listener = vi.fn();
+    const unsubscribe = runtime.subscribe(listener);
+
+    expect(runtime.dispatch({
+      type: 'remote-window-input-result',
+      payload: {
+        requestId: 'rw-input-1',
+        streamId: 'stream-1',
+        targetId: 'target-1',
+        accepted: true,
+      },
+    })).toBe(true);
+    expect(runtime.dispatch({
+      type: 'remote-window-error',
+      payload: {
+        requestId: 'rw-input-2',
+        streamId: 'stream-1',
+        code: 'remote_window_input_failed',
+        message: 'remote window input stale',
+      },
+    })).toBe(true);
+
+    expect(listener).toHaveBeenNthCalledWith(1, {
+      type: 'remote-window-input-result',
+      payload: {
+        requestId: 'rw-input-1',
+        streamId: 'stream-1',
+        targetId: 'target-1',
+        accepted: true,
+      },
+    });
+    expect(listener).toHaveBeenNthCalledWith(2, {
+      type: 'remote-window-error',
+      payload: {
+        requestId: 'rw-input-2',
+        streamId: 'stream-1',
+        code: 'remote_window_input_failed',
+        message: 'remote window input stale',
+      },
+    });
+
+    unsubscribe();
+    expect(runtime.dispatch({
+      type: 'remote-window-input-result',
+      payload: {
+        requestId: 'rw-input-3',
+        streamId: 'stream-1',
+        targetId: 'target-1',
+        accepted: true,
+      },
+    })).toBe(false);
+    expect(listener).toHaveBeenCalledTimes(2);
+  });
 });

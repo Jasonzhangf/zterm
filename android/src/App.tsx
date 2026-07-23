@@ -252,6 +252,7 @@ export function AppContent({
     sendMessageRaw,
     manageTmuxSessionsOnOpenTransport,
     onFileTransferMessage,
+    onRemoteWindowMessage,
     updateSessionViewport,
     requestScheduleList,
     upsertScheduleJob,
@@ -950,6 +951,7 @@ export function AppContent({
             terminalSessionGroupLayoutMode={bridgeSettings.terminalSessionGroupLayoutMode}
             onSendMessage={sendMessageRaw}
             onFileTransferMessage={onFileTransferMessage}
+            onRemoteWindowMessage={onRemoteWindowMessage}
             shortcutSmartSort={bridgeSettings.shortcutSmartSort}
             shortcutFrequencyMap={shortcutFrequencyMap}
             onShortcutUse={handleShortcutUse}

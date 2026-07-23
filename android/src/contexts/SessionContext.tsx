@@ -6,6 +6,7 @@ import React, { createContext, useContext, useMemo, useReducer, useRef } from 'r
 import type {
   SessionScheduleState,
 } from '../lib/types';
+import type { RemoteWindowControlMessage } from '../lib/remote-window-message-runtime';
 import { DEFAULT_BRIDGE_SETTINGS } from '../lib/bridge-settings';
 import {
   DEFAULT_TERMINAL_CACHE_LINES,
@@ -220,6 +221,9 @@ export function SessionProvider({
     getSessionBufferStore,
     getSessionRenderBufferStore,
     getSessionHeadStore,
+    onRemoteWindowMessage: (handler: (msg: RemoteWindowControlMessage) => void) => (
+      remoteWindowMessageRuntimeRef.current.subscribe(handler)
+    ),
     sendMessageRaw,
   });
 
@@ -260,6 +264,9 @@ export function SessionProvider({
     getSessionBufferStore,
     getSessionRenderBufferStore,
     getSessionHeadStore,
+    onRemoteWindowMessage: (handler: (msg: RemoteWindowControlMessage) => void) => (
+      remoteWindowMessageRuntimeRef.current.subscribe(handler)
+    ),
     sendMessageRaw,
   };
 
@@ -338,8 +345,11 @@ export function SessionProvider({
     onFileTransferMessage: (handler: (msg: any) => void) => {
       return fileTransferMessageRuntimeRef.current.subscribe(handler);
     },
+    onRemoteWindowMessage: (handler: (msg: RemoteWindowControlMessage) => void) => {
+      return remoteWindowMessageRuntimeRef.current.subscribe(handler);
+    },
     sendMessageRaw: (sessionId: string, msg: unknown) => contextRuntimeRef.current.sendMessageRaw(sessionId, msg),
-  }), [fileTransferMessageRuntimeRef]);
+  }), [fileTransferMessageRuntimeRef, remoteWindowMessageRuntimeRef]);
 
   const value: SessionContextValue = buildSessionContextValueRuntime({
     state,

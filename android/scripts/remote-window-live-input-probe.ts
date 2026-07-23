@@ -18,6 +18,10 @@ const { RTCPeerConnection, RTCSessionDescription } = wrtc as unknown as {
 };
 
 const DAEMON_WS_URL = process.env.ZTERM_REMOTE_WINDOW_PROBE_WS_URL || 'ws://127.0.0.1:3333';
+const USE_MUX = process.env.ZTERM_REMOTE_WINDOW_PROBE_MUX === '1';
+const PROBE_MUX_SESSION = process.env.ZTERM_REMOTE_WINDOW_PROBE_SESSION || 'zterm';
+const PROBE_MUX_CHANNEL_ID = `rw-live-input-channel-${Date.now()}`;
+const PROBE_MUX_CLIENT_ID = `rw-live-input-client-${Date.now()}`;
 const PROBE_TITLE = `ZTERM_REMOTE_INPUT_PROBE_${Date.now()}`;
 const REQUEST_PREFIX = `rw-live-input-${Date.now()}`;
 const KEEP_TEMP = process.env.ZTERM_REMOTE_WINDOW_PROBE_KEEP_TMP === '1';
@@ -101,10 +105,15 @@ static void ProbePrint(NSString *line) {
 @interface ProbeDelegate : NSObject <NSApplicationDelegate>
 @property(nonatomic, strong) NSWindow *window;
 @property(nonatomic, copy) NSString *title;
+@property(nonatomic, assign) BOOL didCreateWindow;
 @end
 
 @implementation ProbeDelegate
 - (void)applicationDidFinishLaunching:(NSNotification *)notification {
+    if (self.didCreateWindow) {
+        return;
+    }
+    self.didCreateWindow = YES;
     NSRect rect = NSMakeRect(220, 220, 520, 372);
     ProbeView *view = [[ProbeView alloc] initWithFrame:NSMakeRect(0, 0, 520, 372)];
     self.window = [[NSWindow alloc]
@@ -137,7 +146,7 @@ int main(int argc, const char *argv[]) {
         ProbeAppDelegate = [ProbeDelegate new];
         ProbeAppDelegate.title = title;
         [app setDelegate:ProbeAppDelegate];
-        [app finishLaunching];
+        [ProbeAppDelegate applicationDidFinishLaunching:nil];
         [app run];
     }
     return 0;
@@ -153,6 +162,16 @@ function fail(message: string): never {
 }
 
 function send(ws: WebSocket, message: ClientMessage) {
+  if (USE_MUX) {
+    ws.send(JSON.stringify({
+      type: 'mux-channel-message',
+      payload: {
+        channelId: PROBE_MUX_CHANNEL_ID,
+        message,
+      },
+    }));
+    return;
+  }
   ws.send(JSON.stringify(message));
 }
 
@@ -198,6 +217,26 @@ async function waitForServerMessage(
     await delay(25);
   }
   throw new Error(`timed out waiting for ${label}`);
+}
+
+async function waitForRawMuxFrame(
+  frames: any[],
+  predicate: (frame: any) => boolean,
+  label: string,
+  timeoutMs = 15_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  let cursor = 0;
+  while (Date.now() < deadline) {
+    for (; cursor < frames.length; cursor += 1) {
+      const frame = frames[cursor]!;
+      if (predicate(frame)) {
+        return frame;
+      }
+    }
+    await delay(25);
+  }
+  throw new Error(`timed out waiting for ${label}; frames=${JSON.stringify(frames.slice(-8))}`);
 }
 
 async function waitForProbeLine(lines: string[], marker: string, timeoutMs = 10_000) {
@@ -384,10 +423,53 @@ async function main() {
     probePid = Number.isFinite(readyPid) ? readyPid : probePid;
     const ws = new WebSocket(DAEMON_WS_URL);
     const messages: ServerMessage[] = [];
+    const rawFrames: any[] = [];
     ws.on('message', (raw) => {
-      messages.push(JSON.parse(raw.toString('utf8')) as ServerMessage);
+      const parsed = JSON.parse(raw.toString('utf8'));
+      if (USE_MUX) {
+        rawFrames.push(parsed);
+        if (
+          parsed?.type === 'mux-channel-message'
+          && parsed.payload?.channelId === PROBE_MUX_CHANNEL_ID
+          && parsed.payload?.message?.type
+        ) {
+          messages.push(parsed.payload.message as ServerMessage);
+        }
+        return;
+      }
+      messages.push(parsed as ServerMessage);
     });
     await waitForWebSocketOpen(ws);
+    if (USE_MUX) {
+      ws.send(JSON.stringify({
+        type: 'mux-hello',
+        payload: {
+          version: 1,
+          clientInstanceId: PROBE_MUX_CLIENT_ID,
+        },
+      }));
+      await waitForRawMuxFrame(
+        rawFrames,
+        (frame) => frame?.type === 'mux-ready',
+        'mux-ready',
+      );
+      ws.send(JSON.stringify({
+        type: 'mux-channel-open',
+        payload: {
+          channelId: PROBE_MUX_CHANNEL_ID,
+          sessionName: PROBE_MUX_SESSION,
+          bodySubscribed: false,
+        },
+      }));
+      await waitForRawMuxFrame(
+        rawFrames,
+        (frame) => (
+          frame?.type === 'mux-channel-opened'
+          && frame.payload?.channelId === PROBE_MUX_CHANNEL_ID
+        ),
+        `mux-channel-opened:${PROBE_MUX_CHANNEL_ID}`,
+      );
+    }
 
     const catalogRequestId = requestId('catalog');
     send(ws, {
@@ -627,6 +709,9 @@ async function main() {
     console.log(JSON.stringify({
       ok: true,
       daemonWsUrl: DAEMON_WS_URL,
+      controlTransport: USE_MUX ? 'mux-channel' : 'raw-ws',
+      muxSession: USE_MUX ? PROBE_MUX_SESSION : undefined,
+      muxChannelId: USE_MUX ? PROBE_MUX_CHANNEL_ID : undefined,
       targetId: target.streamTargetId,
       targetTitle: target.videoTarget.title,
       capture: started.payload.capture,

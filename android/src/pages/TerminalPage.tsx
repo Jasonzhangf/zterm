@@ -113,6 +113,7 @@ import {
   type TraversalRelayDeviceSnapshot,
 } from '../lib/types';
 import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
+import type { RemoteWindowControlMessage } from '../lib/remote-window-message-runtime';
 
 type DrawerRemoteSessionTarget = {
   name: string;
@@ -139,6 +140,8 @@ type RemoteWindowInputDebugSnapshot = {
   lastSent: boolean | null;
   lastAt: number | null;
   lastPoint: string;
+  lastResult: string;
+  lastResultAt: number | null;
   counts: {
     focus: number;
     pointerDown: number;
@@ -147,6 +150,8 @@ type RemoteWindowInputDebugSnapshot = {
     scroll: number;
     key: number;
     text: number;
+    accepted: number;
+    error: number;
   };
 };
 
@@ -177,6 +182,8 @@ function createRemoteWindowInputDebugCounts(): RemoteWindowInputDebugSnapshot['c
     scroll: 0,
     key: 0,
     text: 0,
+    accepted: 0,
+    error: 0,
   };
 }
 
@@ -194,6 +201,8 @@ function createRemoteWindowInputDebugSnapshot(): RemoteWindowInputDebugSnapshot 
     lastSent: null,
     lastAt: null,
     lastPoint: '-',
+    lastResult: '-',
+    lastResultAt: null,
     counts: createRemoteWindowInputDebugCounts(),
   };
 }
@@ -248,6 +257,17 @@ function formatRemoteWindowInputDebugAge(lastAt: number | null) {
     return `${Math.round(ageMs)}ms`;
   }
   return `${Math.round(ageMs / 1000)}s`;
+}
+
+function formatRemoteWindowInputResultAge(lastAt: number | null) {
+  return formatRemoteWindowInputDebugAge(lastAt);
+}
+
+function truncateRemoteWindowInputResult(value: string) {
+  if (value.length <= 44) {
+    return value;
+  }
+  return `${value.slice(0, 41)}...`;
 }
 
 function incrementRemoteWindowInputDebugCounts(
@@ -671,6 +691,7 @@ interface TerminalPageProps {
     sessionId: string,
     payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
   ) => void;
+  onRemoteWindowMessage?: (handler: (msg: RemoteWindowControlMessage) => void) => () => void;
   quickActions: QuickAction[];
   shortcutActions: TerminalShortcutAction[];
   onQuickActionInput?: (sequence: string, sessionId?: string) => void;
@@ -1262,6 +1283,12 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
             </span>
             <span>RW点</span>
             <span data-testid="terminal-debug-remote-window-point">{remoteWindowInputDebug.lastPoint}</span>
+            <span>RW结果</span>
+            <span data-testid="terminal-debug-remote-window-result">
+              {remoteWindowInputDebug.lastResult}
+              {' · '}
+              {formatRemoteWindowInputResultAge(remoteWindowInputDebug.lastResultAt)}
+            </span>
             <span>RW计数</span>
             <span data-testid="terminal-debug-remote-window-counts">
               F {remoteWindowInputDebug.counts.focus}
@@ -1277,6 +1304,10 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
               K {remoteWindowInputDebug.counts.key}
               {' · '}
               T {remoteWindowInputDebug.counts.text}
+              {' · '}
+              A {remoteWindowInputDebug.counts.accepted}
+              {' · '}
+              E {remoteWindowInputDebug.counts.error}
             </span>
           </>
         ) : null}
@@ -1444,6 +1475,7 @@ function TerminalPageComponent({
   onUpdateRemoteWindowStreamQuality,
   onStopRemoteWindowStream,
   onSendRemoteWindowInput,
+  onRemoteWindowMessage,
   quickActions,
   shortcutActions,
   onQuickActionInput,
@@ -1607,7 +1639,50 @@ function TerminalPageComponent({
     };
   }, []);
 
+  const recordRemoteWindowInputResultDebug = useCallback((msg: RemoteWindowControlMessage) => {
+    const context = remoteWindowInputContextRef.current;
+    const currentCounts = remoteWindowInputDebugRef.current.counts;
+    if (msg.type === 'remote-window-input-result') {
+      remoteWindowInputDebugRef.current = {
+        ...remoteWindowInputDebugRef.current,
+        ...projectRemoteWindowInputDebugContext(context),
+        streamId: abbreviateRemoteWindowDebugId(msg.payload.streamId || context?.streamId || null),
+        targetId: abbreviateRemoteWindowDebugId(msg.payload.targetId || context?.targetId || null),
+        lastResult: `${msg.payload.accepted ? 'ACK' : 'NAK'} ${abbreviateRemoteWindowDebugId(msg.payload.requestId)}`,
+        lastResultAt: Date.now(),
+        counts: {
+          ...currentCounts,
+          accepted: currentCounts.accepted + (msg.payload.accepted ? 1 : 0),
+          error: currentCounts.error + (msg.payload.accepted ? 0 : 1),
+        },
+      };
+      return;
+    }
+    if (msg.type === 'remote-window-error' && msg.payload.code.startsWith('remote_window_input')) {
+      remoteWindowInputDebugRef.current = {
+        ...remoteWindowInputDebugRef.current,
+        ...projectRemoteWindowInputDebugContext(context),
+        streamId: abbreviateRemoteWindowDebugId(msg.payload.streamId || context?.streamId || null),
+        lastResult: `ERR ${msg.payload.code} ${truncateRemoteWindowInputResult(msg.payload.message)}`,
+        lastResultAt: Date.now(),
+        counts: {
+          ...currentCounts,
+          error: currentCounts.error + 1,
+        },
+      };
+    }
+  }, []);
+
   const getRemoteWindowInputDebug = useCallback(() => remoteWindowInputDebugRef.current, []);
+
+  useEffect(() => {
+    if (!onRemoteWindowMessage) {
+      return undefined;
+    }
+    return onRemoteWindowMessage((msg) => {
+      recordRemoteWindowInputResultDebug(msg);
+    });
+  }, [onRemoteWindowMessage, recordRemoteWindowInputResultDebug]);
 
   const rawShellHeight = resolveLayoutViewportHeight();
   const keyboardViewportAlreadyResized = isAndroid
@@ -4144,6 +4219,7 @@ function terminalPagePropsEqual(
     && prev.onUpdateRemoteWindowStreamQuality === next.onUpdateRemoteWindowStreamQuality
     && prev.onStopRemoteWindowStream === next.onStopRemoteWindowStream
     && prev.onSendRemoteWindowInput === next.onSendRemoteWindowInput
+    && prev.onRemoteWindowMessage === next.onRemoteWindowMessage
     && prev.quickActions === next.quickActions
     && prev.shortcutActions === next.shortcutActions
     && prev.onQuickActionInput === next.onQuickActionInput
