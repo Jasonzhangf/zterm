@@ -400,7 +400,7 @@ describe('TerminalPage remote window overlay', () => {
     });
     expectEveryRemoteWindowInputFocusFirst(onSendRemoteWindowInput);
 
-    fireEvent.click(screen.getByText('quickbar-keyboard'));
+    fireEvent.click(screen.getByRole('button', { name: '调起远程窗口键盘' }));
     await waitFor(() => {
       expect(Keyboard.show).toHaveBeenCalled();
     });
@@ -610,9 +610,7 @@ describe('TerminalPage remote window overlay', () => {
       button: 0,
       buttons: 1,
     });
-    await waitFor(() => {
-      expect(remoteWindowNonFocusPayloads(onSendRemoteWindowInput)).toHaveLength(2);
-    });
+    expect(onSendRemoteWindowInput).not.toHaveBeenCalled();
     fireEvent.pointerUp(surface, {
       pointerId: 32,
       pointerType: 'touch',
@@ -623,45 +621,32 @@ describe('TerminalPage remote window overlay', () => {
     });
 
     await waitFor(() => {
-      expect(remoteWindowNonFocusPayloads(onSendRemoteWindowInput)).toHaveLength(3);
+      expect(remoteWindowNonFocusPayloads(onSendRemoteWindowInput)).toHaveLength(1);
     });
     expectEveryRemoteWindowInputFocusFirst(onSendRemoteWindowInput);
     expect(onSendRemoteWindowInput.mock.calls.map((call) => call[1].event.kind)).toEqual([
       'focus',
-      'pointer',
-      'focus',
-      'pointer',
-      'focus',
-      'pointer',
+      'gesture',
     ]);
     expect(remoteWindowNonFocusPayloads(onSendRemoteWindowInput).map((payload) => payload.event)).toEqual([
       expect.objectContaining({
-        kind: 'pointer',
-        phase: 'down',
+        kind: 'gesture',
+        gesture: 'swipe',
+        phase: 'end',
         pointerId: 32,
-        normalizedX: 0.5,
-        normalizedY: 0.7,
-      }),
-      expect.objectContaining({
-        kind: 'pointer',
-        phase: 'move',
-        pointerId: 32,
+        startNormalizedX: 0.5,
+        startNormalizedY: 0.7,
         normalizedX: 0.5,
         normalizedY: 0.4,
-      }),
-      expect.objectContaining({
-        kind: 'pointer',
-        phase: 'up',
-        pointerId: 32,
-        normalizedX: 0.5,
-        normalizedY: 0.4,
+        deltaX: 0,
+        deltaY: -30,
       }),
     ]);
     expect(onTerminalInput).not.toHaveBeenCalled();
 
     await waitFor(() => {
-      expect(screen.getByTestId('terminal-debug-remote-window-event').textContent).toContain('overlay · SEND Y · ptr:up #32 b0');
-      expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('F 5 · D 2 · M 1 · U 2');
+      expect(screen.getByTestId('terminal-debug-remote-window-event').textContent).toContain('overlay · SEND Y · gesture:swipe/end');
+      expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('F 3 · D 1 · M 0 · U 1');
     });
   });
 

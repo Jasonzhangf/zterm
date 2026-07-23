@@ -34,9 +34,9 @@ describe('Android IME anchor truth', () => {
     expect(pluginSource).not.toContain('imeEditText.setCursorVisible(true)');
   });
 
-  it('does not let physical screen taps use the transparent anchor as keyboard show intent', () => {
+  it('only enables soft-input-on-focus during an explicit keyboard show intent', () => {
     expect(pluginSource).toContain('imeEditText.setShowSoftInputOnFocus(false)');
-    expect(pluginSource).not.toContain('imeEditText.setShowSoftInputOnFocus(true)');
+    expect(pluginSource).toContain('imeEditText.setShowSoftInputOnFocus(enabled)');
     expect(pluginSource).toContain(
       'public boolean dispatchTouchEvent(MotionEvent event) {\n            return false;\n        }',
     );

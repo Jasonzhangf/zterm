@@ -2741,6 +2741,41 @@ function TerminalPageComponent({
     scheduleTerminalFocusRetries({ delaysMs: [32, 120], includeKeyboardShow: true });
   }, [alignActiveTerminalToFollowForInput, clearPendingAndroidImeFocus, clearTerminalFocusRetries, focusTerminalInput, isAndroid, keyboardInset, quickBarEditorFocused, requestAndroidImeFocus, scheduleTerminalFocusRetries, setAndroidEditorActive, terminalKeyboardRequested, uiSessionId, updateAndroidImeVisible, updateKeyboardInset]);
 
+  const handleRemoteWindowRequestKeyboard = useCallback(() => {
+    if (quickBarEditorFocusedRef.current && typeof document !== 'undefined') {
+      const activeElement = document.activeElement;
+      if (activeElement instanceof HTMLElement) {
+        activeElement.blur();
+      }
+      quickBarEditorFocusedRef.current = false;
+      setQuickBarEditorFocused(false);
+      if (isAndroid) {
+        setAndroidEditorActive(false);
+      }
+    }
+
+    updateTerminalKeyboardRequested(true);
+    if (isAndroid) {
+      requestAndroidImeFocus({ force: true, delayMs: 48 });
+      return;
+    }
+
+    focusTerminalInput();
+    try {
+      void Keyboard.show();
+    } catch (error) {
+      console.warn('[TerminalPage] Keyboard.show() failed for remote window:', error);
+    }
+    scheduleTerminalFocusRetries({ delaysMs: [32, 120], includeKeyboardShow: true });
+  }, [
+    focusTerminalInput,
+    isAndroid,
+    requestAndroidImeFocus,
+    scheduleTerminalFocusRetries,
+    setAndroidEditorActive,
+    updateTerminalKeyboardRequested,
+  ]);
+
   const hideTerminalInputForRemoteWindow = useCallback(() => {
     if (quickBarEditorFocusedRef.current && typeof document !== 'undefined') {
       const activeElement = document.activeElement;
@@ -4096,6 +4131,7 @@ function TerminalPageComponent({
           onOpenStateChange={handleRemoteWindowOverlayOpenStateChange}
           onBodySubscriptionSuppressedChange={handleRemoteWindowBodySubscriptionSuppressedChange}
           onInputContextChange={handleRemoteWindowInputContextChange}
+          onRequestKeyboard={handleRemoteWindowRequestKeyboard}
         />
         {!remoteWindowOverlayOpen ? (
           <TerminalQuickBarShell

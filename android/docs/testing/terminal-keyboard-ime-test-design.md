@@ -7,7 +7,8 @@ Lock `terminal.keyboard_ime` so Android IME lift only affects the UI shell and Q
 ## Lifecycle Path
 
 ```text
-ImeAnchor / Keyboard physical keyboard state
+ImeAnchor native explicit show policy
+-> ImeAnchor / Keyboard physical keyboard state
 -> TerminalPage keyboardInset + stable shell viewport
 -> resolveKeyboardLiftPx
 -> TerminalPage stage bottom and QuickBar shell bottom
@@ -31,6 +32,7 @@ Owner feature: `terminal.keyboard_ime`.
 - Positive transition: an adjustResize WebView reclassifies to zero external lift when its layout and visual viewport settle at the keyboard top.
 - Negative transition: a keyboard event arriving before the OEM viewport resize must not leave the initial overlay classification frozen for the rest of that IME-open lifecycle.
 - Negative geometry: QuickBar measured height excludes external IME lift, and stage bottom remains `quickbar chrome + safe offsets + exactly one IME lift`.
+- `android-ime-anchor-truth.test.ts` proves the native anchor starts with soft-input-on-focus disabled, enables it only while an explicit keyboard show intent is active, and disables it again with the anchor so physical taps cannot become a hidden fallback keyboard trigger.
 - `terminal-input-normalization.test.ts` proves committed text preserves CJK/emoji/special symbols, converts terminal-oriented full-width ASCII/punctuation to half-width, and turns IME line breaks into text separators instead of `\r`.
 - `ImeAnchorInputLogicTest` proves native voice-style CJK/emoji/symbol commits emit one ordered text event and keep explicit Enter on the `performEditorAction` / key path.
 - `TerminalQuickBar.test.tsx` proves QuickBar reports its real chrome height while IME lift is applied outside the component.
@@ -47,6 +49,7 @@ Owner feature: `terminal.keyboard_ime`.
 ## Project Black-Box Impact
 
 - The local gate simulates the Android field symptom where the IME is visible but the stage no longer reserves QuickBar height, producing bottom misalignment.
+- The installed-phone gate must also verify explicit remote-window `KB` opens a visible Android soft keyboard from the native `ImeAnchor.show()` path; native focus plus `showSoftInput()` returning true is not sufficient if `keyboardVisible=false` and the screenshot has no keyboard.
 - The fix must not change daemon, buffer manager, renderer repaint, or upstream terminal rows/cols.
 - If device screenshots still show drift after this gate passes, next evidence should come from client debug snapshot values for `keyboardInset`, `terminalImeLiftPx`, `quickBarHeight`, and `terminalChromeBottomPx`.
 

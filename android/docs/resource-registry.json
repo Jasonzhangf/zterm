@@ -572,7 +572,8 @@
       ],
       "required_gates": [
         "src/lib/resource-registry-truth.test.ts",
-        "src/pages/terminal-keyboard-lift.test.ts"
+        "src/pages/terminal-keyboard-lift.test.ts",
+        "src/lib/android-ime-anchor-truth.test.ts"
       ],
       "canonical_docs": [
         "docs/resource-map.md",
@@ -1095,7 +1096,7 @@
     {
       "resource_id": "resource.remote_window_overlay",
       "resource_type": "projection_resource",
-      "identity": "Android remote window picker, floating stream overlay, fullscreen aspect-fit/aspect-fill zoom/pan/minimap projection, and Back/minimize/close/input/screenshot intent",
+      "identity": "Android remote window picker, floating stream overlay, fullscreen aspect-fit/aspect-fill zoom/pan/minimap projection, and Back/minimize/close/touch-action/screenshot intent",
       "owner_feature": "desktop.remote_window_stream",
       "truth_store": "docs/decisions/2026-07-19-remote-window-stream-truth.md",
       "allowed_operations": [
@@ -1113,13 +1114,14 @@
         "shrink_to_floating",
         "emit_screenshot_intent",
         "emit_close_intent",
-        "emit_input_intent"
+        "emit_touch_action_intent"
       ],
       "direct_relations": [
-        "resource.remote_window_stream"
+        "resource.remote_window_touch_action"
       ],
       "indirect_relations": [
         "resource.transport_target",
+        "resource.remote_window_stream",
         "resource.remote_screenshot"
       ],
       "via_resources": [
@@ -1136,6 +1138,47 @@
       ],
       "required_gates": [
         "src/lib/resource-registry-truth.test.ts",
+        "docs/testing/remote-window-stream-test-design.md"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/decisions/2026-07-19-remote-window-stream-truth.md"
+      ]
+    },
+    {
+      "resource_id": "resource.remote_window_touch_action",
+      "resource_type": "projection_resource",
+      "identity": "Client-side remote window touch/action classifier and dispatch boundary between WebView/UI surfaces and remote-window input transport",
+      "owner_feature": "desktop.remote_window_stream",
+      "truth_store": "src/lib/remote-window-touch-action-runtime.ts",
+      "allowed_operations": [
+        "classify_surface_touch",
+        "validate_input_context",
+        "dispatch_supported_action",
+        "emit_input_debug"
+      ],
+      "direct_relations": [
+        "resource.remote_window_stream"
+      ],
+      "indirect_relations": [
+        "resource.transport_target"
+      ],
+      "via_resources": [
+        "resource.active_session",
+        "resource.session_transport",
+        "resource.daemon_target_transport"
+      ],
+      "forbidden_direct_relations": [
+        "resource.daemon_process",
+        "resource.tmux_session",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/remote-window-touch-action-runtime.test.ts",
         "docs/testing/remote-window-stream-test-design.md"
       ],
       "canonical_docs": [

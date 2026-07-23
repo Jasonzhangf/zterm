@@ -228,6 +228,7 @@ public class ImeAnchorPlugin extends Plugin {
         imeEditText.setEnabled(enabled);
         imeEditText.setFocusable(enabled);
         imeEditText.setFocusableInTouchMode(enabled);
+        imeEditText.setShowSoftInputOnFocus(enabled);
         imeEditText.setVisibility(enabled ? View.VISIBLE : View.INVISIBLE);
     }
 

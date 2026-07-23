@@ -111,6 +111,10 @@
           "label": "src/components/terminal/RemoteWindowOverlay.tsx#RemoteWindowOverlay"
         },
         {
+          "id": "RemoteWindowTouchAction",
+          "label": "src/lib/remote-window-touch-action-runtime.ts#dispatchRemoteWindowTouchInputActionRuntime"
+        },
+        {
           "id": "RemoteScreenshotRuntime",
           "label": "src/lib/remote-screenshot-runtime.ts#createRemoteScreenshotRuntime"
         },
@@ -546,7 +550,7 @@
           "to": "RemoteWindowOverlay",
           "owner_feature": "desktop.remote_window_stream",
           "semantic_input": "active session id plus remote-window catalog/start/stop/input/screenshot callbacks",
-          "semantic_output": "picker, stream setup, floating/fullscreen video overlay, source-aspect pre-start and daemon-frame-aspect post-start projection, floating resize, fullscreen button, screenshot button, aspect-fit/aspect-fill display mode projection, IME bottom-inset fullscreen padding plus auto lift, Back/minimize projection, zoom/pan/minimap projection where local single-finger pan is only enabled after fullscreen zoom, unzoomed remote pointer down/move/up and wheel input context, separate QuickBar/body suppression state, active remote-window input context, and close intent",
+          "semantic_output": "picker, stream setup, floating/fullscreen video overlay, source-aspect pre-start and daemon-frame-aspect post-start projection, floating resize, fullscreen button, screenshot button, aspect-fit/aspect-fill display mode projection, IME bottom-inset fullscreen padding plus auto lift, Back/minimize projection, zoom/pan/minimap projection where local single-finger pan is only enabled after fullscreen zoom, unzoomed remote tap, release-time drag gesture, and wheel input context, separate QuickBar/body suppression state, active remote-window input context, and close intent",
           "status": "anchored",
           "edge_id": "android_mainline:TerminalPage->RemoteWindowOverlay",
           "resource_from": "resource.ui_projection",
@@ -617,13 +621,26 @@
         },
         {
           "from": "RemoteWindowOverlay",
-          "to": "RemoteWindowInputRuntime",
+          "to": "RemoteWindowTouchAction",
           "owner_feature": "desktop.remote_window_stream",
           "semantic_input": "aspect-fit, aspect-fill, unzoomed touch tap/drag, wheel scroll, or zoomed local-pan video-surface event plus selected stream target",
-          "semantic_output": "normalized operation-scoped remote-window-input payload against daemon manifest crop: tap becomes pointer down/up, drag becomes pointer down on threshold plus absolute pointer moves plus pointer up, and mouse/trackpad wheel remains pixel scroll; every remote input event uses same stream/target focus immediately before the event, while stream setup, fullscreen entry, IME lift, pinch zoom, and zoomed fullscreen pan emit no focus because zoomed fullscreen pan remains local overlay projection",
+          "semantic_output": "touch/action dispatch record with supported-context validation and metadata-only sent/unsent debug; tap becomes pointer down/up, drag becomes one release-time gesture/swipe action without raw move streaming, mouse/trackpad wheel remains pixel scroll, and stream setup/fullscreen entry/IME lift/pinch/zoomed fullscreen pan emit no remote action",
           "status": "anchored",
-          "edge_id": "android_mainline:RemoteWindowOverlay->RemoteWindowInputRuntime",
+          "edge_id": "android_mainline:RemoteWindowOverlay->RemoteWindowTouchAction",
           "resource_from": "resource.remote_window_overlay",
+          "resource_to": "resource.remote_window_touch_action",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "RemoteWindowTouchAction",
+          "to": "RemoteWindowInputRuntime",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "validated focus-first remote-window touch/key/wheel action for one active supported app-window stream",
+          "semantic_output": "remote-window-input payload sent over the existing session transport, or explicit unsent debug when context/dispatcher/target support is missing; UI state alone cannot claim physical transport send success",
+          "status": "anchored",
+          "edge_id": "android_mainline:RemoteWindowTouchAction->RemoteWindowInputRuntime",
+          "resource_from": "resource.remote_window_touch_action",
           "resource_to": "resource.session_transport",
           "via_resources": [
             "resource.active_session"
