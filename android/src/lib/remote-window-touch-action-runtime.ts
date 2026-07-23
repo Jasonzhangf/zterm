@@ -108,6 +108,14 @@ export interface RemoteWindowTouchPointerRuntimeResult {
 const REMOTE_WINDOW_TOUCH_DRAG_THRESHOLD_PX = 8;
 const REMOTE_WINDOW_LOCAL_PAN_TAP_THRESHOLD_PX = 8;
 const REMOTE_WINDOW_INPUT_STALE_MS = 1_000;
+export const REMOTE_WINDOW_TOUCH_GESTURE_DEFAULT_SCALE = 2;
+export const REMOTE_WINDOW_TOUCH_GESTURE_MIN_SCALE = 0.5;
+export const REMOTE_WINDOW_TOUCH_GESTURE_MAX_SCALE = 4;
+
+export interface RemoteWindowTouchGestureTuning {
+  scale?: number;
+  inverted?: boolean;
+}
 
 export interface RemoteWindowTouchInputAction {
   source: RemoteWindowTouchActionSource;
@@ -144,6 +152,28 @@ export function isRemoteWindowInputSupportedTarget(target: RemoteWindowStreamTar
 
 function clampNumber(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
+}
+
+export function resolveRemoteWindowTouchGestureScaleRuntime(scale?: number) {
+  if (typeof scale !== 'number' || !Number.isFinite(scale)) {
+    return REMOTE_WINDOW_TOUCH_GESTURE_DEFAULT_SCALE;
+  }
+  return clampNumber(
+    scale,
+    REMOTE_WINDOW_TOUCH_GESTURE_MIN_SCALE,
+    REMOTE_WINDOW_TOUCH_GESTURE_MAX_SCALE,
+  );
+}
+
+export function resolveRemoteWindowTouchGestureDeltaRuntime(
+  delta: number,
+  tuning: RemoteWindowTouchGestureTuning = {},
+) {
+  if (!Number.isFinite(delta) || delta === 0) {
+    return 0;
+  }
+  const direction = tuning.inverted ? -1 : 1;
+  return delta * resolveRemoteWindowTouchGestureScaleRuntime(tuning.scale) * direction;
 }
 
 function emptyResult(
@@ -326,6 +356,8 @@ function buildGestureSwipeEvent(options: {
   startTimeMs: number;
   endTimeMs: number;
   geometry: RemoteWindowTouchSurfaceGeometry;
+  gestureScale?: number;
+  invertGestureDirection?: boolean;
 }): RemoteWindowInputEventPayload['event'] | null {
   const startPoint = resolveRemoteWindowTouchSurfacePointRuntime(
     options.geometry,
@@ -340,11 +372,17 @@ function buildGestureSwipeEvent(options: {
   if (!startPoint || !endPoint) {
     return null;
   }
-  const deltaX = options.endClientX - options.startClientX;
-  const deltaY = options.endClientY - options.startClientY;
-  if (deltaX === 0 && deltaY === 0) {
+  const rawDeltaX = options.endClientX - options.startClientX;
+  const rawDeltaY = options.endClientY - options.startClientY;
+  if (rawDeltaX === 0 && rawDeltaY === 0) {
     return null;
   }
+  const tuning = {
+    scale: options.gestureScale,
+    inverted: options.invertGestureDirection,
+  };
+  const deltaX = resolveRemoteWindowTouchGestureDeltaRuntime(rawDeltaX, tuning);
+  const deltaY = resolveRemoteWindowTouchGestureDeltaRuntime(rawDeltaY, tuning);
   const durationMs = Math.max(1, options.endTimeMs - options.startTimeMs);
   return {
     kind: 'gesture',
@@ -500,6 +538,8 @@ export function resolveRemoteWindowTouchPointerUpRuntime(options: {
   state: RemoteWindowTouchPointerState;
   pointer: RemoteWindowTouchPointerSample;
   geometry: RemoteWindowTouchSurfaceGeometry;
+  gestureScale?: number;
+  invertGestureDirection?: boolean;
 }): RemoteWindowTouchPointerRuntimeResult {
   const { state, pointer, geometry } = options;
   const idle = createRemoteWindowTouchPointerState();
@@ -552,6 +592,8 @@ export function resolveRemoteWindowTouchPointerUpRuntime(options: {
       startTimeMs: state.startAtMs,
       endTimeMs: pointer.timeMs,
       geometry,
+      gestureScale: options.gestureScale,
+      invertGestureDirection: options.invertGestureDirection,
     });
     return withRemoteEvents(
       idle,

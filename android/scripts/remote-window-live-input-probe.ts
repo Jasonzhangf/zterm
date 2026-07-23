@@ -31,6 +31,8 @@ const PROBE_MUX_CLIENT_ID = `rw-live-input-client-${Date.now()}`;
 const PROBE_TITLE = `ZTERM_REMOTE_INPUT_PROBE_${Date.now()}`;
 const REQUEST_PREFIX = `rw-live-input-${Date.now()}`;
 const KEEP_TEMP = process.env.ZTERM_REMOTE_WINDOW_PROBE_KEEP_TMP === '1';
+const REMOTE_WINDOW_LIVE_CATALOG_TIMEOUT_MS = 30_000;
+const REMOTE_WINDOW_LIVE_STREAM_TIMEOUT_MS = 30_000;
 const tempRoot = mkdtempSync(join(tmpdir(), 'zterm-remote-window-live-input-'));
 const probeSourcePath = join(tempRoot, 'RemoteWindowInputProbe.m');
 const probeLogPath = join(tempRoot, 'probe-events.log');
@@ -606,6 +608,7 @@ async function main() {
         && message.payload.requestId === catalogRequestId
       ),
       'remote window target catalog',
+      REMOTE_WINDOW_LIVE_CATALOG_TIMEOUT_MS,
     );
     if (catalog.type !== 'remote-window-targets-response') {
       fail(`catalog failed: ${JSON.stringify(catalog)}`);
@@ -702,7 +705,7 @@ async function main() {
         && message.payload.requestId === requestId('start')
       ),
       'remote window stream start',
-      20_000,
+      REMOTE_WINDOW_LIVE_STREAM_TIMEOUT_MS,
     );
     if (started.type !== 'remote-window-stream-started') {
       fail(`stream start failed: ${JSON.stringify(started)}`);
@@ -716,7 +719,7 @@ async function main() {
         && message.payload.phase === 'streaming'
       ),
       'remote window stream status',
-      20_000,
+      REMOTE_WINDOW_LIVE_STREAM_TIMEOUT_MS,
     );
 
     const center = targetCenter(target);

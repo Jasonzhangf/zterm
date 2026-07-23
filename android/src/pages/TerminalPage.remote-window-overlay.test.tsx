@@ -639,7 +639,7 @@ describe('TerminalPage remote window overlay', () => {
         normalizedX: 0.5,
         normalizedY: 0.4,
         deltaX: 0,
-        deltaY: -30,
+        deltaY: -60,
       }),
     ]);
     expect(onTerminalInput).not.toHaveBeenCalled();

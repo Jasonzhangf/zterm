@@ -56,7 +56,9 @@ import {
   resolveRemoteWindowTouchPointerDownRuntime,
   resolveRemoteWindowTouchPointerMoveRuntime,
   resolveRemoteWindowTouchPointerUpRuntime,
+  resolveRemoteWindowTouchGestureDeltaRuntime,
   resolveRemoteWindowTouchSurfacePointRuntime,
+  REMOTE_WINDOW_TOUCH_GESTURE_DEFAULT_SCALE,
   type RemoteWindowTouchInputDebugEvent,
   type RemoteWindowTouchLocalEffect,
   type RemoteWindowTouchPointerSample,
@@ -158,6 +160,9 @@ interface FullscreenViewportState {
 
 type FullscreenDisplayMode = 'fit' | 'fill';
 
+const REMOTE_WINDOW_TOUCH_SCROLL_SCALE_OPTIONS = [1, 1.5, 2, 3, 4] as const;
+type RemoteWindowTouchScrollScale = (typeof REMOTE_WINDOW_TOUCH_SCROLL_SCALE_OPTIONS)[number];
+
 type NavigatorConnectionLike = EventTarget & {
   effectiveType?: string;
   downlink?: number;
@@ -194,6 +199,26 @@ type SurfacePointerGesture =
       startScale: number;
       startPanX: number;
       startPanY: number;
+    }
+  | {
+      mode: 'twoFingerCandidate';
+      pointerIds: [number, number];
+      firstStart: SurfacePointerPosition;
+      secondStart: SurfacePointerPosition;
+      startDistance: number;
+      startMidX: number;
+      startMidY: number;
+      lastMidX: number;
+      lastMidY: number;
+      startScale: number;
+      startPanX: number;
+      startPanY: number;
+    }
+  | {
+      mode: 'twoFingerScroll';
+      pointerIds: [number, number];
+      lastMidX: number;
+      lastMidY: number;
     };
 
 interface FloatingOverlayDrag {
@@ -247,8 +272,12 @@ const FLOATING_OVERLAY_TOOLBAR_ESTIMATE_PX = 50;
 const REMOTE_WINDOW_FULLSCREEN_MIN_SCALE = 1;
 const REMOTE_WINDOW_FULLSCREEN_MAX_SCALE = 4;
 const REMOTE_WINDOW_FULLSCREEN_PAN_TAP_THRESHOLD_PX = 8;
-const REMOTE_WINDOW_CATALOG_UI_TIMEOUT_MS = 8_000;
+const REMOTE_WINDOW_FULLSCREEN_PINCH_SCALE_THRESHOLD = 0.08;
+const REMOTE_WINDOW_FULLSCREEN_TWO_FINGER_SCROLL_THRESHOLD_PX = 8;
+const REMOTE_WINDOW_CATALOG_UI_TIMEOUT_MS = 20_000;
 const REMOTE_WINDOW_CATALOG_PROJECTION_CACHE_TTL_MS = 60_000;
+const REMOTE_WINDOW_TOUCH_SCROLL_SCALE_STORAGE_KEY = 'zterm:remote-window:touch-scroll-scale-v1';
+const REMOTE_WINDOW_TOUCH_SCROLL_INVERTED_STORAGE_KEY = 'zterm:remote-window:touch-scroll-inverted-v1';
 
 const initialFullscreenViewport: FullscreenViewportState = {
   scale: 1,
@@ -382,6 +411,42 @@ function resolvePointerMidpoint(a: SurfacePointerPosition, b: SurfacePointerPosi
     clientX: (a.clientX + b.clientX) / 2,
     clientY: (a.clientY + b.clientY) / 2,
   };
+}
+
+function hasPointerPositionMoved(start: SurfacePointerPosition, current: SurfacePointerPosition) {
+  return resolvePointerDistance(start, current) >= 2;
+}
+
+function isPointerMovementAlongAxis(
+  start: SurfacePointerPosition,
+  current: SurfacePointerPosition,
+  axisStart: SurfacePointerPosition,
+  axisEnd: SurfacePointerPosition,
+) {
+  const axisX = axisEnd.clientX - axisStart.clientX;
+  const axisY = axisEnd.clientY - axisStart.clientY;
+  const axisLength = Math.max(1, Math.hypot(axisX, axisY));
+  const deltaX = current.clientX - start.clientX;
+  const deltaY = current.clientY - start.clientY;
+  const projection = Math.abs((deltaX * axisX + deltaY * axisY) / axisLength);
+  const perpendicular = Math.abs((deltaX * -axisY + deltaY * axisX) / axisLength);
+  return projection >= 4 && projection >= perpendicular;
+}
+
+function isSurfacePointerPairGesture(
+  gesture: SurfacePointerGesture,
+): gesture is Extract<SurfacePointerGesture, {
+  mode: 'pinch' | 'twoFingerCandidate' | 'twoFingerScroll';
+}> {
+  return gesture.mode === 'pinch'
+    || gesture.mode === 'twoFingerCandidate'
+    || gesture.mode === 'twoFingerScroll';
+}
+
+function resolveTouchScrollScalePreset(value: unknown): RemoteWindowTouchScrollScale {
+  const parsed = typeof value === 'number' ? value : Number(value);
+  const matched = REMOTE_WINDOW_TOUCH_SCROLL_SCALE_OPTIONS.find((option) => option === parsed);
+  return matched ?? REMOTE_WINDOW_TOUCH_GESTURE_DEFAULT_SCALE;
 }
 
 function resolveRemoteWindowMinimapViewport(
@@ -590,6 +655,40 @@ function formatBitrateOption(preset: RemoteWindowVideoBitratePreset) {
   return `${buildRemoteWindowVideoBitrateConfig(preset).bitrateMbps} Mbps`;
 }
 
+function formatTouchScrollScaleOption(scale: RemoteWindowTouchScrollScale) {
+  return `滚动 ${scale}x`;
+}
+
+function readRemoteWindowTouchScrollScale(): RemoteWindowTouchScrollScale {
+  if (typeof window === 'undefined') {
+    return REMOTE_WINDOW_TOUCH_GESTURE_DEFAULT_SCALE;
+  }
+  return resolveTouchScrollScalePreset(
+    window.localStorage.getItem(REMOTE_WINDOW_TOUCH_SCROLL_SCALE_STORAGE_KEY),
+  );
+}
+
+function writeRemoteWindowTouchScrollScale(scale: RemoteWindowTouchScrollScale) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.localStorage.setItem(REMOTE_WINDOW_TOUCH_SCROLL_SCALE_STORAGE_KEY, String(scale));
+}
+
+function readRemoteWindowTouchScrollInverted() {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+  return window.localStorage.getItem(REMOTE_WINDOW_TOUCH_SCROLL_INVERTED_STORAGE_KEY) === 'true';
+}
+
+function writeRemoteWindowTouchScrollInverted(inverted: boolean) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.localStorage.setItem(REMOTE_WINDOW_TOUCH_SCROLL_INVERTED_STORAGE_KEY, inverted ? 'true' : 'false');
+}
+
 function formatTargetSubtitle(target: RemoteWindowStreamTargetManifest) {
   const tmux = target.inputTarget.tmuxSession
     ? `tmux ${target.inputTarget.tmuxSession}${target.inputTarget.tmuxPaneId ? ` ${target.inputTarget.tmuxPaneId}` : ''}`
@@ -640,6 +739,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const [fullscreenViewport, setFullscreenViewportState] = useState<FullscreenViewportState>(initialFullscreenViewport);
   const [fullscreenDisplayMode, setFullscreenDisplayModeState] = useState<FullscreenDisplayMode>(initialFullscreenDisplayMode);
   const [bitratePreset, setBitratePreset] = useState<RemoteWindowVideoBitratePreset>('5mbps');
+  const [touchScrollScale, setTouchScrollScaleState] = useState<RemoteWindowTouchScrollScale>(() => readRemoteWindowTouchScrollScale());
+  const [touchScrollInverted, setTouchScrollInvertedState] = useState(() => readRemoteWindowTouchScrollInverted());
   const [networkQuality, setNetworkQuality] = useState<RemoteWindowNetworkQualityInput | null>(() => readRemoteWindowNetworkQuality());
   const [videoHasPlayed, setVideoHasPlayed] = useState(false);
   const [receiverMediaStream, setReceiverMediaStream] = useState<MediaStream | null>(null);
@@ -652,6 +753,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const entryOffsetRef = useRef(entryOffset);
   const fullscreenViewportRef = useRef(fullscreenViewport);
   const fullscreenDisplayModeRef = useRef<FullscreenDisplayMode>(fullscreenDisplayMode);
+  const touchScrollScaleRef = useRef<RemoteWindowTouchScrollScale>(touchScrollScale);
+  const touchScrollInvertedRef = useRef(touchScrollInverted);
   const floatingOverlayRef = useRef<HTMLDivElement | null>(null);
   const entryButtonRef = useRef<HTMLButtonElement | null>(null);
   const floatingDragRef = useRef<FloatingOverlayDrag | null>(null);
@@ -899,6 +1002,21 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const setFullscreenDisplayMode = useCallback((next: FullscreenDisplayMode) => {
     fullscreenDisplayModeRef.current = next;
     setFullscreenDisplayModeState(next);
+  }, []);
+
+  const setTouchScrollScale = useCallback((next: RemoteWindowTouchScrollScale) => {
+    touchScrollScaleRef.current = next;
+    setTouchScrollScaleState(next);
+    writeRemoteWindowTouchScrollScale(next);
+  }, []);
+
+  const setTouchScrollInverted = useCallback((next: boolean | ((current: boolean) => boolean)) => {
+    setTouchScrollInvertedState((current) => {
+      const resolved = typeof next === 'function' ? next(current) : next;
+      touchScrollInvertedRef.current = resolved;
+      writeRemoteWindowTouchScrollInverted(resolved);
+      return resolved;
+    });
   }, []);
 
   useLayoutEffect(() => {
@@ -1174,6 +1292,14 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     }
     writeRemoteWindowVideoBitratePreset(state.target, nextPreset);
   }, [state]);
+
+  const handleTouchScrollScaleChange = useCallback((value: string) => {
+    setTouchScrollScale(resolveTouchScrollScalePreset(value));
+  }, [setTouchScrollScale]);
+
+  const handleToggleTouchScrollDirection = useCallback(() => {
+    setTouchScrollInverted((current) => !current);
+  }, [setTouchScrollInverted]);
 
   const effectiveBitratePreset = state.phase === 'targetLocked'
     ? resolveEffectiveRemoteWindowVideoBitratePreset(bitratePreset, {
@@ -1903,11 +2029,15 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       ];
       const midpoint = resolvePointerMidpoint(first[1], second[1]);
       surfaceGestureRef.current = {
-        mode: 'pinch',
+        mode: 'twoFingerCandidate',
         pointerIds: [first[0], second[0]],
+        firstStart: { ...first[1] },
+        secondStart: { ...second[1] },
         startDistance: Math.max(1, resolvePointerDistance(first[1], second[1])),
         startMidX: midpoint.clientX,
         startMidY: midpoint.clientY,
+        lastMidX: midpoint.clientX,
+        lastMidY: midpoint.clientY,
         startScale: fullscreenViewportRef.current.scale,
         startPanX: fullscreenViewportRef.current.panX,
         startPanY: fullscreenViewportRef.current.panY,
@@ -1968,19 +2098,130 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       return;
     }
 
-    if (gesture.mode === 'pinch') {
+    if (isSurfacePointerPairGesture(gesture)) {
       const first = surfacePointersRef.current.get(gesture.pointerIds[0]);
       const second = surfacePointersRef.current.get(gesture.pointerIds[1]);
       if (!first || !second) {
         return;
       }
       const midpoint = resolvePointerMidpoint(first, second);
+      if (gesture.mode === 'twoFingerScroll') {
+        const midpointDeltaX = midpoint.clientX - gesture.lastMidX;
+        const midpointDeltaY = midpoint.clientY - gesture.lastMidY;
+        if (Math.hypot(midpointDeltaX, midpointDeltaY) < REMOTE_WINDOW_FULLSCREEN_TWO_FINGER_SCROLL_THRESHOLD_PX) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        const scrollPayload = resolveScrollInputEvent(
+          midpoint.clientX,
+          midpoint.clientY,
+          resolveRemoteWindowTouchGestureDeltaRuntime(midpointDeltaX, {
+            scale: touchScrollScaleRef.current,
+            inverted: touchScrollInvertedRef.current,
+          }),
+          resolveRemoteWindowTouchGestureDeltaRuntime(midpointDeltaY, {
+            scale: touchScrollScaleRef.current,
+            inverted: touchScrollInvertedRef.current,
+          }),
+        );
+        surfaceGestureRef.current = {
+          mode: 'twoFingerScroll',
+          pointerIds: gesture.pointerIds,
+          lastMidX: midpoint.clientX,
+          lastMidY: midpoint.clientY,
+        };
+        if (scrollPayload) {
+          emitRemoteWindowInputAfterFocus(scrollPayload);
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
       const distance = Math.max(1, resolvePointerDistance(first, second));
-      setFullscreenViewport({
-        scale: gesture.startScale * (distance / gesture.startDistance),
-        panX: gesture.startPanX + midpoint.clientX - gesture.startMidX,
-        panY: gesture.startPanY + midpoint.clientY - gesture.startMidY,
-      });
+      const scaleRatio = distance / Math.max(1, gesture.startDistance);
+      if (gesture.mode === 'pinch') {
+        setFullscreenViewport({
+          scale: gesture.startScale * scaleRatio,
+          panX: gesture.startPanX + midpoint.clientX - gesture.startMidX,
+          panY: gesture.startPanY + midpoint.clientY - gesture.startMidY,
+        });
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
+      const firstMoved = hasPointerPositionMoved(gesture.firstStart, first);
+      const secondMoved = hasPointerPositionMoved(gesture.secondStart, second);
+      const isPinchAxisMotion = isPointerMovementAlongAxis(
+        gesture.firstStart,
+        first,
+        gesture.firstStart,
+        gesture.secondStart,
+      ) || isPointerMovementAlongAxis(
+        gesture.secondStart,
+        second,
+        gesture.firstStart,
+        gesture.secondStart,
+      );
+      if (
+        Math.abs(scaleRatio - 1) >= REMOTE_WINDOW_FULLSCREEN_PINCH_SCALE_THRESHOLD
+        && ((firstMoved && secondMoved) || isPinchAxisMotion)
+      ) {
+        surfaceGestureRef.current = {
+          mode: 'pinch',
+          pointerIds: gesture.pointerIds,
+          startDistance: gesture.startDistance,
+          startMidX: gesture.startMidX,
+          startMidY: gesture.startMidY,
+          startScale: gesture.startScale,
+          startPanX: gesture.startPanX,
+          startPanY: gesture.startPanY,
+        };
+        setFullscreenViewport({
+          scale: gesture.startScale * scaleRatio,
+          panX: gesture.startPanX + midpoint.clientX - gesture.startMidX,
+          panY: gesture.startPanY + midpoint.clientY - gesture.startMidY,
+        });
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
+      const midpointDeltaX = midpoint.clientX - gesture.lastMidX;
+      const midpointDeltaY = midpoint.clientY - gesture.lastMidY;
+      if (
+        !firstMoved
+        || !secondMoved
+        || Math.hypot(midpointDeltaX, midpointDeltaY) < REMOTE_WINDOW_FULLSCREEN_TWO_FINGER_SCROLL_THRESHOLD_PX
+      ) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+
+      const scrollPayload = resolveScrollInputEvent(
+        midpoint.clientX,
+        midpoint.clientY,
+        resolveRemoteWindowTouchGestureDeltaRuntime(midpointDeltaX, {
+          scale: touchScrollScaleRef.current,
+          inverted: touchScrollInvertedRef.current,
+        }),
+        resolveRemoteWindowTouchGestureDeltaRuntime(midpointDeltaY, {
+          scale: touchScrollScaleRef.current,
+          inverted: touchScrollInvertedRef.current,
+        }),
+      );
+      surfaceGestureRef.current = {
+        mode: 'twoFingerScroll',
+        pointerIds: gesture.pointerIds,
+        lastMidX: midpoint.clientX,
+        lastMidY: midpoint.clientY,
+      };
+      if (scrollPayload) {
+        emitRemoteWindowInputAfterFocus(scrollPayload);
+      }
       event.preventDefault();
       event.stopPropagation();
       return;
@@ -2032,6 +2273,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     applyRemoteWindowTouchPointerResult,
     emitRemoteWindowInputAfterFocus,
     resolvePointerInputEvent,
+    resolveScrollInputEvent,
     resolveSurfaceInputGeometry,
     setFullscreenViewport,
     state,
@@ -2053,6 +2295,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           state: runtimeGesture,
           pointer: pointerSampleFromReactEvent(event),
           geometry,
+          gestureScale: touchScrollScaleRef.current,
+          invertGestureDirection: touchScrollInvertedRef.current,
         });
         applyRemoteWindowTouchPointerResult(result);
         if (result.consumed) {
@@ -2098,10 +2342,11 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       event.stopPropagation();
       return;
     }
-    if (gesture.mode === 'pinch' && gesture.pointerIds.includes(event.pointerId)) {
+    if (isSurfacePointerPairGesture(gesture) && gesture.pointerIds.includes(event.pointerId)) {
       const remaining = Array.from(surfacePointersRef.current.entries())[0] || null;
       if (
-        remaining
+        gesture.mode === 'pinch'
+        && remaining
         && state.phase === 'targetLocked'
         && state.mode === 'fullscreen'
         && fullscreenViewportRef.current.scale > 1.01
@@ -2138,11 +2383,11 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       gesture
       && (
         ('pointerId' in gesture && gesture.pointerId === event.pointerId)
-        || (gesture.mode === 'pinch' && gesture.pointerIds.includes(event.pointerId))
+        || (isSurfacePointerPairGesture(gesture) && gesture.pointerIds.includes(event.pointerId))
       )
     ) {
       const runtimeGesture = toRemoteWindowTouchGestureState(gesture);
-      if (runtimeGesture.mode !== 'idle' && gesture.mode !== 'pinch') {
+      if (runtimeGesture.mode !== 'idle' && gesture.mode !== 'pinch' && gesture.mode !== 'twoFingerCandidate' && gesture.mode !== 'twoFingerScroll') {
         const geometry = resolveSurfaceInputGeometry();
         if (geometry) {
           const result = resolveRemoteWindowTouchPointerCancelRuntime({
@@ -2483,27 +2728,43 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         ? fullscreenOverlayStyle
         : floatingOverlayStyle}
     >
-      <div
-        data-testid="remote-window-drag-handle"
-        onPointerDown={handleFloatingDragStart}
-        onPointerMove={handleFloatingDragMove}
-        onPointerUp={handleFloatingDragEnd}
-        onPointerCancel={handleFloatingDragEnd}
-        style={{
-          ...styles.lockedToolbar,
-          cursor: state.mode === 'floating' ? 'move' : 'default',
-          touchAction: state.mode === 'floating' ? 'none' : 'auto',
-          userSelect: 'none',
-        }}
-      >
-        <div style={styles.lockedTitle}>
-          <span style={styles.targetKind}>{formatTargetKind(state.target)}</span>
-          <span data-testid="remote-window-input-mode" style={styles.inputModeBadge}>
-            {isRemoteWindowInputSupported(state.target) ? '可操作' : '只读'}
-          </span>
-          <span>{state.target.videoTarget.title || state.target.videoTarget.appBundleId}</span>
+      <div style={styles.lockedToolbar}>
+        <div
+          data-testid="remote-window-drag-handle"
+          onPointerDown={handleFloatingDragStart}
+          onPointerMove={handleFloatingDragMove}
+          onPointerUp={handleFloatingDragEnd}
+          onPointerCancel={handleFloatingDragEnd}
+          style={{
+            ...styles.lockedTopBar,
+            cursor: state.mode === 'floating' ? 'move' : 'default',
+            touchAction: state.mode === 'floating' ? 'none' : 'auto',
+            userSelect: 'none',
+          }}
+        >
+          <div style={styles.lockedTitle}>
+            <span style={styles.targetKind}>{formatTargetKind(state.target)}</span>
+            <span data-testid="remote-window-input-mode" style={styles.inputModeBadge}>
+              {isRemoteWindowInputSupported(state.target) ? '可操作' : '只读'}
+            </span>
+            <span>{state.target.videoTarget.title || state.target.videoTarget.appBundleId}</span>
+          </div>
+          <div data-testid="remote-window-primary-actions" style={styles.lockedPrimaryActions}>
+            {state.mode === 'fullscreen' ? (
+              <button type="button" aria-label="缩小远程窗口" onClick={handleShrink} style={styles.headerIconButton}>
+                -
+              </button>
+            ) : (
+              <button type="button" aria-label="全屏远程窗口" onClick={handleFullscreen} style={styles.headerIconButton}>
+                []
+              </button>
+            )}
+            <button type="button" aria-label="关闭远程窗口" onClick={handleClose} style={styles.headerIconButton}>
+              x
+            </button>
+          </div>
         </div>
-        <div style={styles.lockedActions}>
+        <div data-testid="remote-window-control-strip" data-no-drag="true" style={styles.lockedControlStrip}>
           <select
             data-testid="remote-window-bitrate-select"
             data-no-drag="true"
@@ -2516,6 +2777,28 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
               <option key={preset} value={preset}>{formatBitrateOption(preset)}</option>
             ))}
           </select>
+          <select
+            data-testid="remote-window-touch-scroll-scale-select"
+            data-no-drag="true"
+            aria-label="远程窗口滚动幅度"
+            value={String(touchScrollScale)}
+            onChange={(event) => handleTouchScrollScaleChange(event.currentTarget.value)}
+            style={styles.touchScrollScaleSelect}
+          >
+            {REMOTE_WINDOW_TOUCH_SCROLL_SCALE_OPTIONS.map((scale) => (
+              <option key={scale} value={scale}>{formatTouchScrollScaleOption(scale)}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            data-testid="remote-window-touch-scroll-direction-toggle"
+            data-no-drag="true"
+            aria-label={touchScrollInverted ? '恢复远程窗口滚动方向' : '反向远程窗口滚动方向'}
+            onClick={handleToggleTouchScrollDirection}
+            style={touchScrollInverted ? styles.headerModeButtonActive : styles.headerModeButton}
+          >
+            {touchScrollInverted ? '反向' : '正向'}
+          </button>
           <button
             type="button"
             data-no-drag="true"
@@ -2537,28 +2820,16 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
             KB
           </button>
           {state.mode === 'fullscreen' ? (
-            <>
-              <button
-                type="button"
-                data-testid="remote-window-fullscreen-display-toggle"
-                aria-label={fullscreenDisplayMode === 'fit' ? '切换为充满屏幕' : '切换为完整显示'}
-                onClick={handleToggleFullscreenDisplayMode}
-                style={styles.headerModeButton}
-              >
-                {fullscreenDisplayMode === 'fit' ? '填满' : '适配'}
-              </button>
-              <button type="button" aria-label="缩小远程窗口" onClick={handleShrink} style={styles.headerIconButton}>
-                -
-              </button>
-            </>
-          ) : (
-            <button type="button" aria-label="全屏远程窗口" onClick={handleFullscreen} style={styles.headerIconButton}>
-              []
+            <button
+              type="button"
+              data-testid="remote-window-fullscreen-display-toggle"
+              aria-label={fullscreenDisplayMode === 'fit' ? '切换为充满屏幕' : '切换为完整显示'}
+              onClick={handleToggleFullscreenDisplayMode}
+              style={styles.headerModeButton}
+            >
+              {fullscreenDisplayMode === 'fit' ? '填满' : '适配'}
             </button>
-          )}
-          <button type="button" aria-label="关闭远程窗口" onClick={handleClose} style={styles.headerIconButton}>
-            x
-          </button>
+          ) : null}
         </div>
       </div>
       <div
@@ -2697,6 +2968,9 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       {pickerContent}
       {lockedContent}
       <style>{`
+        [data-testid="remote-window-control-strip"]::-webkit-scrollbar {
+          display: none;
+        }
         @keyframes zterm-remote-window-shot-spin {
           from { transform: rotate(0deg); }
           to { transform: rotate(360deg); }
@@ -2784,6 +3058,7 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 850,
   },
   headerIconButton: {
+    flex: '0 0 auto',
     width: 32,
     height: 32,
     borderRadius: 10,
@@ -2798,6 +3073,7 @@ const styles: Record<string, CSSProperties> = {
     border: '1px solid rgba(31, 214, 122, 0.42)',
   },
   headerModeButton: {
+    flex: '0 0 auto',
     minWidth: 46,
     height: 32,
     padding: '0 8px',
@@ -2808,9 +3084,34 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 12,
     fontWeight: 900,
   },
+  headerModeButtonActive: {
+    flex: '0 0 auto',
+    minWidth: 46,
+    height: 32,
+    padding: '0 8px',
+    borderRadius: 10,
+    border: '1px solid rgba(31, 214, 122, 0.42)',
+    background: 'rgba(31, 214, 122, 0.18)',
+    color: '#edf4ff',
+    fontSize: 12,
+    fontWeight: 900,
+  },
   bitrateSelect: {
+    flex: '0 0 auto',
     height: 32,
     maxWidth: 108,
+    borderRadius: 10,
+    border: '1px solid rgba(151, 164, 186, 0.18)',
+    background: 'rgba(36, 48, 72, 0.84)',
+    color: '#edf4ff',
+    fontSize: 12,
+    fontWeight: 850,
+    outline: 'none',
+  },
+  touchScrollScaleSelect: {
+    flex: '0 0 auto',
+    height: 32,
+    maxWidth: 92,
     borderRadius: 10,
     border: '1px solid rgba(151, 164, 186, 0.18)',
     background: 'rgba(36, 48, 72, 0.84)',
@@ -3029,15 +3330,38 @@ const styles: Record<string, CSSProperties> = {
   lockedToolbar: {
     minHeight: 42,
     display: 'flex',
+    flexDirection: 'column',
+    background: 'rgba(13, 19, 31, 0.94)',
+    borderBottom: '1px solid rgba(151, 164, 186, 0.14)',
+  },
+  lockedTopBar: {
+    minHeight: 42,
+    display: 'flex',
     justifyContent: 'space-between',
     alignItems: 'center',
     gap: 8,
     padding: '7px 8px',
-    background: 'rgba(13, 19, 31, 0.94)',
-    borderBottom: '1px solid rgba(151, 164, 186, 0.14)',
+  },
+  lockedPrimaryActions: {
+    flex: '0 0 auto',
+    display: 'flex',
+    gap: 6,
+  },
+  lockedControlStrip: {
+    minWidth: 0,
+    display: 'flex',
+    gap: 6,
+    alignItems: 'center',
+    overflowX: 'auto',
+    overflowY: 'hidden',
+    padding: '0 8px 7px',
+    WebkitOverflowScrolling: 'touch',
+    scrollbarWidth: 'none',
+    touchAction: 'pan-x',
   },
   lockedTitle: {
     minWidth: 0,
+    flex: '1 1 auto',
     display: 'flex',
     gap: 8,
     alignItems: 'center',

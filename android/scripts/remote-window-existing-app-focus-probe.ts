@@ -23,6 +23,8 @@ const PROBE_MUX_SESSION = process.env.ZTERM_REMOTE_WINDOW_EXISTING_APP_MUX_SESSI
 const REQUEST_PREFIX = `rw-existing-app-focus-${Date.now()}`;
 const PROBE_MUX_CHANNEL_ID = `${REQUEST_PREFIX}-channel`;
 const PROBE_MUX_CLIENT_ID = `${REQUEST_PREFIX}-client`;
+const REMOTE_WINDOW_EXISTING_APP_CATALOG_TIMEOUT_MS = 30_000;
+const REMOTE_WINDOW_EXISTING_APP_STREAM_TIMEOUT_MS = 30_000;
 
 function fail(message: string): never {
   throw new Error(message);
@@ -248,6 +250,7 @@ async function main() {
       && message.payload.requestId === catalogRequestId
     ),
     'remote window target catalog',
+    REMOTE_WINDOW_EXISTING_APP_CATALOG_TIMEOUT_MS,
   );
   if (catalog.type !== 'remote-window-targets-response') {
     fail(`catalog failed: ${JSON.stringify(catalog)}`);
@@ -311,7 +314,7 @@ async function main() {
       && message.payload.requestId === requestId('start')
     ),
     'remote window stream start',
-    20_000,
+    REMOTE_WINDOW_EXISTING_APP_STREAM_TIMEOUT_MS,
   );
   if (started.type !== 'remote-window-stream-started') {
     fail(`stream start failed: ${JSON.stringify(started)}`);
@@ -325,7 +328,7 @@ async function main() {
       && message.payload.phase === 'streaming'
     ),
     'remote window stream status',
-    20_000,
+    REMOTE_WINDOW_EXISTING_APP_STREAM_TIMEOUT_MS,
   );
 
   const frontmostBeforeDefocus = readFrontmostBundleId();

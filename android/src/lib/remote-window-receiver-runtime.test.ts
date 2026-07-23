@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
-import { createRemoteWindowReceiverRuntime } from './remote-window-receiver-runtime';
+import {
+  createRemoteWindowReceiverRuntime,
+  REMOTE_WINDOW_RECEIVER_TRACK_TIMEOUT_MS,
+} from './remote-window-receiver-runtime';
 import type { RemoteWindowStreamTargetManifest } from './types';
 
 class MockMediaTrack {
@@ -279,6 +282,32 @@ describe('remote window receiver runtime', () => {
     await expect(failure).rejects.toThrow('ScreenCaptureKit capture start failure');
     expect(MockRTCPeerConnection.instances[0]!.close).toHaveBeenCalledTimes(1);
     expect(runtime.getActiveStreamIds()).toEqual([]);
+  });
+
+  it('uses a receiver track timeout longer than the daemon capture startup timeout by default', async () => {
+    MockRTCPeerConnection.reset();
+    const timeoutDelays: number[] = [];
+    const runtime = createRemoteWindowReceiverRuntime({
+      peerConnectionFactory: (configuration) => new MockRTCPeerConnection(configuration) as unknown as RTCPeerConnection,
+      mediaStreamFactory: () => new MockMediaStream() as unknown as MediaStream,
+      setTimeoutFn: vi.fn((_handler, delay) => {
+        timeoutDelays.push(Number(delay));
+        return 1;
+      }) as any,
+      clearTimeoutFn: vi.fn() as any,
+    });
+
+    await expect(runtime.startStream({
+      streamId: 'stream-1',
+      target: makeTarget(),
+      sendIceCandidate: vi.fn(),
+      startRemote: vi.fn(async () => {
+        throw new Error('ScreenCaptureKit capture start failure');
+      }),
+    })).rejects.toThrow('ScreenCaptureKit capture start failure');
+
+    expect(timeoutDelays[0]).toBe(REMOTE_WINDOW_RECEIVER_TRACK_TIMEOUT_MS);
+    expect(REMOTE_WINDOW_RECEIVER_TRACK_TIMEOUT_MS).toBeGreaterThan(20_000);
   });
 
   it('rejects when no video track arrives before timeout', async () => {

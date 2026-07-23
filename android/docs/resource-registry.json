@@ -1111,6 +1111,7 @@
         "pan_keyboard_open_fullscreen",
         "show_minimap",
         "select_effective_video_quality",
+        "configure_touch_scroll_tuning",
         "shrink_to_floating",
         "emit_screenshot_intent",
         "emit_close_intent",
@@ -1154,6 +1155,8 @@
       "truth_store": "src/lib/remote-window-touch-action-runtime.ts",
       "allowed_operations": [
         "classify_surface_touch",
+        "classify_two_finger_scroll",
+        "apply_scroll_tuning",
         "validate_input_context",
         "dispatch_supported_action",
         "emit_input_debug"

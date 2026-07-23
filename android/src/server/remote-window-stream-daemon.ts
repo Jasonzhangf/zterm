@@ -21,8 +21,8 @@ import type {
 } from '@zterm/shared/protocol';
 
 const DEFAULT_ITERM2_PYTHON_TIMEOUT_MS = 5000;
-const DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS = 5000;
-const DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS = 8000;
+const DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS = 15000;
+const DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS = 20000;
 const DEFAULT_REMOTE_WINDOW_FRAME_RATE = 12;
 const DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 60_000;
 const REMOTE_WINDOW_INPUT_STALE_MS = 1_000;
@@ -1120,6 +1120,50 @@ function truncateRemoteWindowErrorMessage(message: string) {
   return `${normalized.slice(0, REMOTE_WINDOW_ERROR_MESSAGE_MAX_CHARS - 1).trimEnd()}...`;
 }
 
+function isExecFileTimeoutError(error: unknown) {
+  if (!error || typeof error !== 'object') {
+    return false;
+  }
+  const candidate = error as {
+    killed?: boolean;
+    signal?: string | null;
+    code?: string | number | null;
+    message?: string;
+  };
+  return candidate.killed === true
+    || candidate.signal === 'SIGTERM'
+    || candidate.code === 'ETIMEDOUT'
+    || /timed out|timeout/iu.test(candidate.message || '');
+}
+
+function formatInlineScriptExecFailure(
+  error: Error,
+  stdout: string,
+  stderr: string,
+  timeoutMs: number,
+  timeoutMessage: string,
+  fallbackMessage: string,
+) {
+  const timeoutDetail = isExecFileTimeoutError(error)
+    ? `${timeoutMessage} after ${timeoutMs}ms`
+    : '';
+  return [stderr, stdout, timeoutDetail, error.message && !error.message.includes(' -c ') && !error.message.includes(' -e ') ? error.message : '']
+    .filter(Boolean)
+    .join('\n') || fallbackMessage;
+}
+
+export function buildScreenCaptureKitStartupTimeoutMessage(stderrBuffer: string, timeoutMs: number) {
+  const stderrDetail = stderrBuffer
+    .split(/\r?\n/u)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .slice(-3)
+    .join(' ');
+  return stderrDetail
+    ? `ScreenCaptureKit capture did not produce a frame before timeout after ${timeoutMs}ms: ${stderrDetail}`
+    : `ScreenCaptureKit capture did not produce a frame before timeout after ${timeoutMs}ms`;
+}
+
 export function summarizeRemoteWindowCatalogError(error: unknown, fallbackMessage: string) {
   const raw = error instanceof Error ? error.message : String(error);
   const normalizedRaw = normalizeWhitespace(raw);
@@ -1497,10 +1541,14 @@ function runDefaultIterm2Python(
       windowsHide: true,
     }, (error, stdout, stderr) => {
       if (error) {
-        const details = [stderr, stdout, error.message && !error.message.includes(' -c ') ? error.message : '']
-          .filter(Boolean)
-          .join('\n');
-        reject(new Error(details || 'iTerm2 Python API failed'));
+        reject(new Error(formatInlineScriptExecFailure(
+          error,
+          stdout,
+          stderr,
+          options.timeoutMs,
+          'iTerm2 Python catalog timed out',
+          'iTerm2 Python API failed',
+        )));
         return;
       }
       resolve(stdout);
@@ -1518,10 +1566,14 @@ function runDefaultMacosAppWindowCatalog(
       windowsHide: true,
     }, (error, stdout, stderr) => {
       if (error) {
-        const details = [stderr, stdout, error.message && !error.message.includes(' -e ') ? error.message : '']
-          .filter(Boolean)
-          .join('\n');
-        reject(new Error(details || 'macOS app window catalog failed'));
+        reject(new Error(formatInlineScriptExecFailure(
+          error,
+          stdout,
+          stderr,
+          options.timeoutMs,
+          'macOS app window catalog timed out',
+          'macOS app window catalog failed',
+        )));
         return;
       }
       resolve(stdout);
@@ -1572,7 +1624,16 @@ export function shouldRefreshRemoteWindowQueuedInputAfterFocus(
     && remoteWindowInputConfigsShareTarget(focusConfig, queuedConfig);
 }
 
-export function createDefaultRemoteWindowInputHelper(options: { swiftBinary: string }): RemoteWindowInputHelper {
+type RemoteWindowInputHelperProcessFactory = (
+  command: string,
+  args: string[],
+  options: { windowsHide: boolean; env: NodeJS.ProcessEnv },
+) => RemoteWindowInputHelperChildProcess;
+
+export function createDefaultRemoteWindowInputHelper(options: {
+  swiftBinary: string;
+  processFactory?: RemoteWindowInputHelperProcessFactory;
+}): RemoteWindowInputHelper {
   let child: RemoteWindowInputHelperChildProcess | null = null;
   let stdoutBuffer = '';
   let stderrBuffer = '';
@@ -1660,10 +1721,13 @@ export function createDefaultRemoteWindowInputHelper(options: { swiftBinary: str
     }
     stderrBuffer = '';
     stdoutBuffer = '';
-    const currentChild = spawn(options.swiftBinary, ['-e', MACOS_REMOTE_WINDOW_INPUT_SWIFT], {
+    const createProcess = options.processFactory || ((command, args, spawnOptions) => (
+      spawn(command, args, spawnOptions) as RemoteWindowInputHelperChildProcess
+    ));
+    const currentChild = createProcess(options.swiftBinary, ['-e', MACOS_REMOTE_WINDOW_INPUT_SWIFT], {
       windowsHide: true,
       env: process.env,
-    }) as RemoteWindowInputHelperChildProcess;
+    });
     child = currentChild;
     ready = false;
     currentChild.stdout.setEncoding('utf8');
@@ -2147,7 +2211,10 @@ export function startScreenCaptureKitFrameSource(
       return;
     }
     frameSource.stop();
-    rejectStart(new Error('ScreenCaptureKit capture did not produce a frame before timeout'));
+    rejectStart(new Error(buildScreenCaptureKitStartupTimeoutMessage(
+      stderrBuffer,
+      options.startupTimeoutMs,
+    )));
   }, Math.max(1, options.startupTimeoutMs));
 
   function fail(error: Error) {

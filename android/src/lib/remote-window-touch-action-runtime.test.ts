@@ -4,6 +4,8 @@ import {
   createRemoteWindowTouchPointerState,
   dispatchRemoteWindowTouchInputActionRuntime,
   isRemoteWindowInputSupportedTarget,
+  resolveRemoteWindowTouchGestureDeltaRuntime,
+  resolveRemoteWindowTouchGestureScaleRuntime,
   resolveRemoteWindowTouchPointerCancelRuntime,
   resolveRemoteWindowTouchPointerDownRuntime,
   resolveRemoteWindowTouchPointerMoveRuntime,
@@ -246,10 +248,53 @@ describe('remote-window-touch-action-runtime', () => {
         normalizedX: 0.6,
         normalizedY: 0.34,
         deltaX: 0,
-        deltaY: -36,
+        deltaY: -72,
       }),
     ]);
     expect(up.remoteEvents.some((event) => event.kind === 'pointer')).toBe(false);
+  });
+
+  it('scales and reverses release-time gesture deltas without changing mapped coordinates', () => {
+    const down = resolveRemoteWindowTouchPointerDownRuntime({
+      state: createRemoteWindowTouchPointerState(),
+      pointer: pointer({ pointerId: 18, clientX: 130, clientY: 90, timeMs: 1_000 }),
+      geometry,
+      zoomedProjection: false,
+    });
+    const move = resolveRemoteWindowTouchPointerMoveRuntime({
+      state: down.nextState,
+      pointer: pointer({ pointerId: 18, clientX: 130, clientY: 54, timeMs: 1_020 }),
+      geometry,
+    });
+    const up = resolveRemoteWindowTouchPointerUpRuntime({
+      state: move.nextState,
+      pointer: pointer({ pointerId: 18, clientX: 130, clientY: 54, buttons: 0, timeMs: 1_040 }),
+      geometry,
+      gestureScale: 3,
+      invertGestureDirection: true,
+    });
+
+    expect(up.remoteEvents).toEqual([
+      { kind: 'focus' },
+      expect.objectContaining({
+        kind: 'gesture',
+        gesture: 'swipe',
+        phase: 'end',
+        pointerId: 18,
+        startNormalizedX: 0.6,
+        startNormalizedY: 0.7,
+        normalizedX: 0.6,
+        normalizedY: 0.34,
+        deltaX: 0,
+        deltaY: 108,
+        durationMs: 40,
+        velocityY: 2.7,
+      }),
+    ]);
+    expect(resolveRemoteWindowTouchGestureScaleRuntime(Number.POSITIVE_INFINITY)).toBe(2);
+    expect(resolveRemoteWindowTouchGestureScaleRuntime(10)).toBe(4);
+    expect(resolveRemoteWindowTouchGestureDeltaRuntime(-10, { scale: 1.5 })).toBe(-15);
+    expect(resolveRemoteWindowTouchGestureDeltaRuntime(-10, { scale: 1.5, inverted: true })).toBe(15);
   });
 
   it('drops stale unzoomed touch drag actions instead of replaying delayed gestures', () => {

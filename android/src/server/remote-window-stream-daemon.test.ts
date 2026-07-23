@@ -1,9 +1,12 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { EventEmitter } from 'node:events';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import type { RemoteWindowStreamStatusPayload } from '@zterm/shared/protocol';
 import {
+  buildScreenCaptureKitStartupTimeoutMessage,
   buildRemoteWindowImagePasteInputPayloads,
   buildRemoteWindowInputConfig,
   buildMacosAppWindowTargets,
@@ -16,6 +19,7 @@ import {
   parseTmuxClientTargets,
   resolveRemoteWindowInputHelperTimeoutMs,
   shouldRefreshRemoteWindowQueuedInputAfterFocus,
+  startScreenCaptureKitFrameSource,
   summarizeRemoteWindowCatalogError,
   type Iterm2RawCatalog,
   type Iterm2RawNode,
@@ -220,6 +224,17 @@ function makeAppWindowCatalog(): MacosAppWindowCatalog {
         displayBoundsTopLeftPx: { x: 0, y: 0, width: 3840, height: 2160 },
       },
     ],
+  };
+}
+
+function makeTempExecutable(prefix: string, body: string) {
+  const tempRoot = mkdtempSync(join(tmpdir(), prefix));
+  const executablePath = join(tempRoot, 'runner');
+  writeFileSync(executablePath, body);
+  chmodSync(executablePath, 0o755);
+  return {
+    executablePath,
+    cleanup: () => rmSync(tempRoot, { recursive: true, force: true }),
   };
 }
 
@@ -431,60 +446,77 @@ describe('remote window stream daemon owner', () => {
   });
 
   it('lets same-target input wait behind a slow successful focus without becoming stale', async () => {
-    const tempRoot = mkdtempSync(join(tmpdir(), 'zterm-remote-window-input-helper-'));
-    const fakeSwiftPath = join(tempRoot, 'fake-swift.cjs');
-    writeFileSync(fakeSwiftPath, `#!/usr/bin/env node
-process.stdout.write(JSON.stringify({ ready: true }) + "\\n");
-let buffer = "";
-process.stdin.setEncoding("utf8");
-process.stdin.on("data", (chunk) => {
-  buffer += chunk;
-  let index = buffer.indexOf("\\n");
-  while (index >= 0) {
-    const raw = buffer.slice(0, index).trim();
-    buffer = buffer.slice(index + 1);
-    if (raw) {
-      const config = JSON.parse(raw);
-      const delay = config.event && config.event.kind === "focus" ? 1200 : 0;
-      setTimeout(() => {
-        process.stdout.write(JSON.stringify({ ok: true, kind: config.event && config.event.kind }) + "\\n");
-      }, delay);
-    }
-    index = buffer.indexOf("\\n");
-  }
-});
-`);
-    chmodSync(fakeSwiftPath, 0o755);
-    const helper = createDefaultRemoteWindowInputHelper({ swiftBinary: fakeSwiftPath });
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const childEvents = new EventEmitter();
+    const fakeChild = {
+      stdin,
+      stdout,
+      stderr,
+      killed: false,
+      kill: vi.fn((signal?: NodeJS.Signals) => {
+        fakeChild.killed = true;
+        childEvents.emit('exit', null, signal || null);
+        return true;
+      }),
+      on: childEvents.on.bind(childEvents),
+    };
+    const processFactory = vi.fn(() => {
+      process.nextTick(() => stdout.write(`${JSON.stringify({ ready: true })}\n`));
+      return fakeChild as any;
+    });
+    let inputBuffer = '';
+    stdin.setEncoding('utf8');
+    stdin.on('data', (chunk) => {
+      inputBuffer += String(chunk);
+      let index = inputBuffer.indexOf('\n');
+      while (index >= 0) {
+        const raw = inputBuffer.slice(0, index).trim();
+        inputBuffer = inputBuffer.slice(index + 1);
+        if (raw) {
+          const config = JSON.parse(raw) as { event?: { kind?: string } };
+          const delay = config.event?.kind === 'focus' ? 1200 : 0;
+          setTimeout(() => {
+            stdout.write(`${JSON.stringify({ ok: true, kind: config.event?.kind })}\n`);
+          }, delay);
+        }
+        index = inputBuffer.indexOf('\n');
+      }
+    });
+    const helper = createDefaultRemoteWindowInputHelper({
+      swiftBinary: 'fake-swift',
+      processFactory,
+    });
     const target = makeAppStreamTarget();
-    const daemonReceivedAtMs = Date.now();
-    const focusConfig = buildRemoteWindowInputConfig({
-      requestId: 'rw-slow-focus',
-      streamId: 'stream-slow-focus',
-      targetId: target.streamTargetId,
-      clientSentAt: daemonReceivedAtMs,
-      event: { kind: 'focus' },
-    }, target, { daemonReceivedAtMs });
-    const pointerConfig = buildRemoteWindowInputConfig({
-      requestId: 'rw-slow-focus-pointer',
-      streamId: 'stream-slow-focus',
-      targetId: target.streamTargetId,
-      clientSentAt: daemonReceivedAtMs,
-      event: {
-        kind: 'pointer',
-        phase: 'down',
-        pointerId: 1,
-        button: 'left',
-        buttons: 1,
-        x: 120,
-        y: 140,
-        normalizedX: 0.5,
-        normalizedY: 0.5,
-      },
-    }, target, { daemonReceivedAtMs });
 
     try {
       await helper.warm();
+      const daemonReceivedAtMs = Date.now();
+      const focusConfig = buildRemoteWindowInputConfig({
+        requestId: 'rw-slow-focus',
+        streamId: 'stream-slow-focus',
+        targetId: target.streamTargetId,
+        clientSentAt: daemonReceivedAtMs,
+        event: { kind: 'focus' },
+      }, target, { daemonReceivedAtMs });
+      const pointerConfig = buildRemoteWindowInputConfig({
+        requestId: 'rw-slow-focus-pointer',
+        streamId: 'stream-slow-focus',
+        targetId: target.streamTargetId,
+        clientSentAt: daemonReceivedAtMs,
+        event: {
+          kind: 'pointer',
+          phase: 'down',
+          pointerId: 1,
+          button: 'left',
+          buttons: 1,
+          x: 120,
+          y: 140,
+          normalizedX: 0.5,
+          normalizedY: 0.5,
+        },
+      }, target, { daemonReceivedAtMs });
       const focusPromise = helper.send(focusConfig);
       await new Promise((resolve) => {
         setTimeout(resolve, 20);
@@ -493,9 +525,8 @@ process.stdin.on("data", (chunk) => {
       await expect(Promise.all([focusPromise, pointerPromise])).resolves.toEqual([undefined, undefined]);
     } finally {
       helper.dispose();
-      rmSync(tempRoot, { recursive: true, force: true });
     }
-  });
+  }, 10_000);
 
   it('keeps scroll input compatible with the macOS helper schema', () => {
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('let phase: String?');
@@ -980,6 +1011,70 @@ process.stdin.on("data", (chunk) => {
     expect(message).toBe('remote permission denied while listing windows');
     expect(message).not.toContain('swift -e');
     expect(message.length).toBeLessThanOrEqual(220);
+  });
+
+  it('reports app-window catalog timeout without exposing the inline Swift script', async () => {
+    const runner = makeTempExecutable('zterm-remote-window-catalog-timeout-', `#!/bin/sh
+sleep 2
+`);
+    try {
+      const runtime = createRemoteWindowStreamDaemonRuntime({
+        platform: 'darwin',
+        swiftBinary: runner.executablePath,
+        appWindowCatalogTimeoutMs: 80,
+        runIterm2Python: vi.fn(async () => JSON.stringify({ windows: [] })),
+        runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+      });
+
+      const response = await runtime.listTargets({
+        requestId: 'rw-catalog-timeout',
+        includeAppWindows: true,
+        includeIterm2: false,
+        forceRefresh: true,
+      });
+
+      expect(response).toEqual({
+        requestId: 'rw-catalog-timeout',
+        code: 'app_window_catalog_unavailable',
+        message: 'macOS app window catalog timed out after 80ms',
+      });
+      const message = 'message' in response ? response.message : '';
+      expect(message).not.toContain('swift -e');
+      expect(message).not.toContain('import AppKit');
+    } finally {
+      runner.cleanup();
+    }
+  });
+
+  it('adds timeout and stderr detail to ScreenCaptureKit startup timeout errors', async () => {
+    expect(buildScreenCaptureKitStartupTimeoutMessage(
+      'ScreenCaptureKit capture start waiting for frame permission gate\n',
+      80,
+    )).toBe(
+      'ScreenCaptureKit capture did not produce a frame before timeout after 80ms: ScreenCaptureKit capture start waiting for frame permission gate',
+    );
+
+    const runner = makeTempExecutable('zterm-remote-window-capture-timeout-', `#!/bin/sh
+echo "ScreenCaptureKit capture start waiting for frame permission gate" >&2
+sleep 2
+`);
+    try {
+      await expect(startScreenCaptureKitFrameSource(makeAppStreamTarget(), {
+        frameRate: 12,
+        startupTimeoutMs: 80,
+        swiftBinary: runner.executablePath,
+        onFrame: vi.fn(),
+        onError: vi.fn(),
+      })).rejects.toThrow('ScreenCaptureKit capture did not produce a frame before timeout after 80ms');
+    } finally {
+      runner.cleanup();
+    }
+  });
+
+  it('formats ScreenCaptureKit startup timeout without stderr detail', () => {
+    expect(buildScreenCaptureKitStartupTimeoutMessage('', 20_000)).toBe(
+      'ScreenCaptureKit capture did not produce a frame before timeout after 20000ms',
+    );
   });
 
   it('surfaces iTerm2 API failures explicitly instead of falling back to screenshot or terminal buffer truth', async () => {

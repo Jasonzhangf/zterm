@@ -156,7 +156,7 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.getByTestId('remote-window-picker-loading')).toBeTruthy();
 
     await act(async () => {
-      vi.advanceTimersByTime(8_000);
+      vi.advanceTimersByTime(20_000);
     });
 
     expect(screen.queryByTestId('remote-window-picker-loading')).toBeNull();
@@ -1058,6 +1058,31 @@ describe('RemoteWindowOverlay', () => {
     expect(releasePointerCapture).toHaveBeenCalledWith(1);
   });
 
+  it('keeps floating drag and close controls in the fixed top bar when tuning controls overflow', async () => {
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+    }));
+
+    render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-target-app-1');
+    fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
+
+    const dragHandle = screen.getByTestId('remote-window-drag-handle');
+    const primaryActions = screen.getByTestId('remote-window-primary-actions');
+    const controlStrip = screen.getByTestId('remote-window-control-strip');
+
+    expect(dragHandle.querySelector('[data-testid="remote-window-touch-scroll-scale-select"]')).toBeNull();
+    expect(dragHandle.querySelector('[data-testid="remote-window-bitrate-select"]')).toBeNull();
+    expect(primaryActions.contains(screen.getByRole('button', { name: '全屏远程窗口' }))).toBe(true);
+    expect(primaryActions.contains(screen.getByRole('button', { name: '关闭远程窗口' }))).toBe(true);
+    expect(controlStrip.contains(screen.getByTestId('remote-window-touch-scroll-scale-select'))).toBe(true);
+    expect(controlStrip.contains(screen.getByTestId('remote-window-bitrate-select'))).toBe(true);
+    expect(controlStrip.style.overflowX).toBe('auto');
+  });
+
   it('resizes the floating overlay from the edge while preserving the source aspect ratio', async () => {
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-1',
@@ -1390,7 +1415,7 @@ describe('RemoteWindowOverlay', () => {
         normalizedX: 0.5,
         normalizedY: 0.4,
         deltaX: 0,
-        deltaY: -30,
+        deltaY: -60,
       }),
     ]);
   });
@@ -1457,7 +1482,7 @@ describe('RemoteWindowOverlay', () => {
       normalizedX: 0.64,
       normalizedY: 0.4,
       deltaX: 0,
-      deltaY: -40,
+      deltaY: -80,
     });
   });
 
@@ -1610,7 +1635,7 @@ describe('RemoteWindowOverlay', () => {
         phase: 'end',
         pointerId: 52,
         deltaX: 0,
-        deltaY: -50,
+        deltaY: -100,
       }),
     ]);
     expect(Number.parseFloat(content.style.top || '0')).toBeCloseTo(topBeforeScroll, 1);
@@ -1881,6 +1906,147 @@ describe('RemoteWindowOverlay', () => {
     expect(sendInput).not.toHaveBeenCalled();
   });
 
+  it('routes zoomed fullscreen two-finger vertical movement to remote scroll instead of local pan', async () => {
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const sendInput = vi.fn();
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+    }));
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        requestTargets={requestTargets}
+        startStream={startStream}
+        sendInput={sendInput}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-target-app-1');
+    fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
+    await screen.findByTestId('remote-window-video');
+    fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
+
+    const surface = screen.getByTestId('remote-window-video-surface');
+    Object.defineProperty(surface, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 300,
+        bottom: 200,
+        width: 300,
+        height: 200,
+        toJSON: () => ({}),
+      }),
+    });
+
+    fireEvent.pointerDown(surface, { pointerId: 61, pointerType: 'touch', clientX: 100, clientY: 100, button: 0, buttons: 1 });
+    fireEvent.pointerDown(surface, { pointerId: 62, pointerType: 'touch', clientX: 200, clientY: 100, button: 0, buttons: 1 });
+    fireEvent.pointerMove(surface, { pointerId: 62, pointerType: 'touch', clientX: 260, clientY: 100, button: 0, buttons: 1 });
+    await screen.findByTestId('remote-window-minimap');
+    fireEvent.pointerUp(surface, { pointerId: 61, pointerType: 'touch', clientX: 100, clientY: 100, button: 0, buttons: 0 });
+    fireEvent.pointerUp(surface, { pointerId: 62, pointerType: 'touch', clientX: 260, clientY: 100, button: 0, buttons: 0 });
+
+    const content = screen.getByTestId('remote-window-video-content');
+    const topBeforeScroll = Number.parseFloat(content.style.top || '0');
+    sendInput.mockClear();
+
+    fireEvent.pointerDown(surface, { pointerId: 63, pointerType: 'touch', clientX: 110, clientY: 130, button: 0, buttons: 1 });
+    fireEvent.pointerDown(surface, { pointerId: 64, pointerType: 'touch', clientX: 190, clientY: 130, button: 0, buttons: 1 });
+    fireEvent.pointerMove(surface, { pointerId: 63, pointerType: 'touch', clientX: 110, clientY: 90, button: 0, buttons: 1 });
+    expect(sendInput).not.toHaveBeenCalled();
+    fireEvent.pointerMove(surface, { pointerId: 64, pointerType: 'touch', clientX: 190, clientY: 90, button: 0, buttons: 1 });
+
+    await waitForNonFocusRemoteInputCount(sendInput, 1);
+    expectEveryNonFocusInputIsFocusFirst(sendInput);
+    expect(nonFocusRemoteInputPayloads(sendInput).map((payload) => payload.event)).toEqual([
+      expect.objectContaining({
+        kind: 'scroll',
+        unit: 'pixel',
+        deltaX: 0,
+        deltaY: -80,
+      }),
+    ]);
+    expect(Number.parseFloat(content.style.top || '0')).toBeCloseTo(topBeforeScroll, 1);
+  });
+
+  it('applies adjustable and reversible two-finger scroll tuning from the fullscreen toolbar', async () => {
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const sendInput = vi.fn();
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+    }));
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        requestTargets={requestTargets}
+        startStream={startStream}
+        sendInput={sendInput}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-target-app-1');
+    fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
+    await screen.findByTestId('remote-window-video');
+    fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
+
+    fireEvent.change(screen.getByTestId('remote-window-touch-scroll-scale-select'), {
+      target: { value: '3' },
+    });
+    fireEvent.click(screen.getByTestId('remote-window-touch-scroll-direction-toggle'));
+    expect(screen.getByTestId('remote-window-touch-scroll-scale-select')).toHaveProperty('value', '3');
+    expect(screen.getByTestId('remote-window-touch-scroll-direction-toggle').textContent).toBe('反向');
+    expect(window.localStorage.getItem('zterm:remote-window:touch-scroll-scale-v1')).toBe('3');
+    expect(window.localStorage.getItem('zterm:remote-window:touch-scroll-inverted-v1')).toBe('true');
+
+    const surface = screen.getByTestId('remote-window-video-surface');
+    Object.defineProperty(surface, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 300,
+        bottom: 200,
+        width: 300,
+        height: 200,
+        toJSON: () => ({}),
+      }),
+    });
+
+    fireEvent.pointerDown(surface, { pointerId: 71, pointerType: 'touch', clientX: 110, clientY: 130, button: 0, buttons: 1 });
+    fireEvent.pointerDown(surface, { pointerId: 72, pointerType: 'touch', clientX: 190, clientY: 130, button: 0, buttons: 1 });
+    fireEvent.pointerMove(surface, { pointerId: 71, pointerType: 'touch', clientX: 110, clientY: 110, button: 0, buttons: 1 });
+    fireEvent.pointerMove(surface, { pointerId: 72, pointerType: 'touch', clientX: 190, clientY: 110, button: 0, buttons: 1 });
+
+    await waitForNonFocusRemoteInputCount(sendInput, 1);
+    expect(nonFocusRemoteInputPayloads(sendInput).map((payload) => payload.event)).toEqual([
+      expect.objectContaining({
+        kind: 'scroll',
+        unit: 'pixel',
+        deltaX: 0,
+        deltaY: 60,
+      }),
+    ]);
+  });
+
   it('lifts the fullscreen display container above IME without stealing unzoomed remote gesture control', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const sendInput = vi.fn();
@@ -1946,7 +2112,7 @@ describe('RemoteWindowOverlay', () => {
         phase: 'end',
         pointerId: 41,
         deltaX: 0,
-        deltaY: -50,
+        deltaY: -100,
       }),
     ]);
     expect(Number.parseFloat(content.style.top || '0')).toBeCloseTo(topBeforePan, 1);
@@ -2081,7 +2247,7 @@ describe('RemoteWindowOverlay', () => {
         phase: 'end',
         pointerId: 51,
         deltaX: 0,
-        deltaY: -80,
+        deltaY: -160,
       }),
     ]);
     expect(Number.parseFloat(content.style.top || '0')).toBeCloseTo(0, 1);

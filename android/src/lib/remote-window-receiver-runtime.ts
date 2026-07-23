@@ -11,6 +11,8 @@ export interface RemoteWindowReceiverStartResult {
   started: RemoteWindowStreamStartedPayload;
 }
 
+export const REMOTE_WINDOW_RECEIVER_TRACK_TIMEOUT_MS = 25_000;
+
 interface ActiveRemoteWindowReceiverStream {
   streamId: string;
   peerConnection: RTCPeerConnection;
@@ -77,7 +79,7 @@ export function createRemoteWindowReceiverRuntime(input?: {
   clearTimeoutFn?: typeof globalThis.clearTimeout;
 }) {
   const activeStreams = new Map<string, ActiveRemoteWindowReceiverStream>();
-  const trackTimeoutMs = Math.max(1, Math.floor(input?.trackTimeoutMs ?? 8000));
+  const trackTimeoutMs = Math.max(1, Math.floor(input?.trackTimeoutMs ?? REMOTE_WINDOW_RECEIVER_TRACK_TIMEOUT_MS));
   const setTimeoutFn = input?.setTimeoutFn ?? globalThis.setTimeout.bind(globalThis);
   const clearTimeoutFn = input?.clearTimeoutFn ?? globalThis.clearTimeout.bind(globalThis);
   const createPeerConnection = () => resolvePeerConnectionFactory(input?.peerConnectionFactory);
