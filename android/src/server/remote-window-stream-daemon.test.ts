@@ -516,15 +516,19 @@ process.stdin.on("data", (chunk) => {
   });
 
   it('requires macOS helper focus verification before reporting input success', () => {
-    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('app.activate(options: [.activateAllWindows])');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func activateTargetApplication(_ config: InputConfig, _ app: NSRunningApplication)');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func waitForRunningApplication(_ pid: Int32) -> NSRunningApplication?');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('usleep(50000)');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('System Events\\" to set frontmost of first process whose unix id is');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('/usr/bin/osascript');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('kAXFrontmostAttribute');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('frontmostPidMatches');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('focusedWindowMatchesTarget');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('config.event.kind == "focus"');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('remote input target app is not running pid=');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('remote input target app did not become frontmost');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('remote input target window did not become focused');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('NSAppleScript');
-    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('activateIgnoringOtherApps');
   });
 
   it('short-circuits repeated focus when the target window is already focused', () => {

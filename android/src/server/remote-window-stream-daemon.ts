@@ -592,7 +592,19 @@ func frontmostPidMatches(_ pid: Int32) -> Bool {
     return frontmost.processIdentifier == pid
 }
 
-	func axWindowMatchesBounds(_ window: AXUIElement, _ bounds: Rect) -> Bool {
+func waitForRunningApplication(_ pid: Int32) -> NSRunningApplication? {
+    for attempt in 0..<6 {
+        if let app = NSRunningApplication(processIdentifier: pid) {
+            return app
+        }
+        if attempt < 5 {
+            usleep(50000)
+        }
+    }
+    return nil
+}
+
+func axWindowMatchesBounds(_ window: AXUIElement, _ bounds: Rect) -> Bool {
     guard
         let position = axPoint(copyAttribute(window, kAXPositionAttribute)),
         let size = axSize(copyAttribute(window, kAXSizeAttribute))
@@ -610,6 +622,18 @@ func focusedWindowMatchesTarget(_ appElement: AXUIElement, _ bounds: Rect) -> Bo
     return axWindowMatchesBounds(focusedElement, bounds)
 }
 
+func activateTargetApplication(_ config: InputConfig, _ app: NSRunningApplication) {
+    app.unhide()
+    let process = Process()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+    process.arguments = [
+        "-e",
+        "tell application \"System Events\" to set frontmost of first process whose unix id is " + String(config.pid) + " to true"
+    ]
+    try? process.run()
+    process.waitUntilExit()
+}
+
 func focusTargetWindow(_ config: InputConfig) throws {
     guard config.focusPolicy == "bring-to-focus" else {
         return
@@ -617,8 +641,8 @@ func focusTargetWindow(_ config: InputConfig) throws {
     guard AXIsProcessTrusted() else {
         throw NSError(domain: "RemoteWindowInput", code: 2, userInfo: [NSLocalizedDescriptionKey: "macOS Accessibility permission is required for remote window input"])
     }
-    guard let app = NSRunningApplication(processIdentifier: config.pid) else {
-        throw NSError(domain: "RemoteWindowInput", code: 3, userInfo: [NSLocalizedDescriptionKey: "remote input target app is not running"])
+    guard let app = waitForRunningApplication(config.pid) else {
+        throw NSError(domain: "RemoteWindowInput", code: 3, userInfo: [NSLocalizedDescriptionKey: "remote input target app is not running pid=" + String(config.pid)])
     }
     let appElement = AXUIElementCreateApplication(config.pid)
     if frontmostPidMatches(config.pid) && focusedWindowMatchesTarget(appElement, config.window.bounds) {
@@ -646,8 +670,7 @@ func focusTargetWindow(_ config: InputConfig) throws {
 	    var isFrontmost = false
 	    var isFocused = false
 	    for attempt in 0..<3 {
-	        app.unhide()
-	        _ = app.activate(options: [.activateAllWindows])
+	        activateTargetApplication(config, app)
 	        AXUIElementSetAttributeValue(appElement, kAXFrontmostAttribute as CFString, kCFBooleanTrue)
 	        AXUIElementPerformAction(window, kAXRaiseAction as CFString)
 	        AXUIElementSetAttributeValue(appElement, kAXFocusedWindowAttribute as CFString, window)

@@ -1,3 +1,12 @@
+# 2026-07-23 remote-window PID focus/live probe closeout
+
+- Confirmed previous `remote-window-live-input-probe.ts` was still too weak for duplicate/temp app identities: bundle-id checks can pass the wrong app instance. The live gate now filters catalog targets by the exact AppKit probe PID from the file-backed `PROBE_READY` log and verifies frontmost by PID after defocus/focus.
+- Live failure after switching to PID truth: raw probe exposed `remote input target app is not running` immediately after a focus ACK. Independent `.app` lifecycle and Swift `NSRunningApplication(processIdentifier:)` checks showed the probe app stays alive and the API can resolve the same PID, so the fix stayed in the daemon input helper rather than Android UI/transport.
+- Fix scope: `desktop.remote_window_stream.daemon.input_inject`. The macOS helper now activates by PID through System Events and uses a bounded `waitForRunningApplication(pid)` before declaring the app not running. The error keeps the PID in the explicit message; no bundle fallback or hidden success path was added.
+- Verified installed daemon runtime SHA `9931f2f94de15e85df00856b1914e4d27025d9084682f814ae4fe9239fe735a1` after `daemon:prepare-release`, `daemon:install-global`, and service-scoped `zterm-daemon restart`; `/health` returned pid `42295`, uptime `3`.
+- Live gates passed serially: raw WebSocket local, raw burst local, mux local `session=zterm`, mux burst with `CLIENT_CLOCK_OFFSET_MS=-60000`, and mux Tailscale `ws://100.66.1.82:3333`. Each successful gate defocused to Finder, restored the target PID, and observed target-side AppKit mouse down/up, dragged, scroll, and key markers.
+- Static gates passed: `remote-window-stream-daemon.test.ts` 44 PASS, `tsc --noEmit` PASS, feature registry gates 48 PASS, resource/function/mainline/wiki gates 20 PASS, `git diff --check` PASS.
+
 # 2026-07-23 remote-window real app control correction diagnosis
 
 - Jason corrected the previous closeout: proving `remote-window-input` frames reach a controlled AppKit probe is not sufficient. The product failure is that real remote app control is not stable: video can stream, but the app is not reliably brought to foreground and user gestures/input do not take effect.
