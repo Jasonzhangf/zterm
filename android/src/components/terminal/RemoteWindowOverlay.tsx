@@ -1741,9 +1741,16 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     if (playResult && typeof playResult.then === 'function') {
       playResult
         .then(() => setVideoHasPlayed(true))
-        .catch(() => setVideoHasPlayed(false));
+        .catch(() => {
+          // Android WebView can reject play() while still rendering a muted MediaStream.
+        });
     }
   }, [receiverMediaStream]);
+
+  const revealReceiverVideo = useCallback(() => {
+    setVideoHasPlayed(true);
+    requestVideoPlayback();
+  }, [requestVideoPlayback]);
 
   const handleEntryPointerCancel = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
     if (finishEntryDrag(event.pointerId, { suppressClick: false })) {
@@ -1799,6 +1806,17 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     }
     setVideoHasPlayed(false);
     requestVideoPlayback();
+    if (!receiverMediaStream) {
+      return;
+    }
+    const fallbackTimer = window.setTimeout(() => {
+      if (videoElementRef.current?.srcObject === receiverMediaStream) {
+        setVideoHasPlayed(true);
+      }
+    }, 1200);
+    return () => {
+      window.clearTimeout(fallbackTimer);
+    };
   }, [receiverMediaStream, requestVideoPlayback]);
 
   useEffect(() => {
@@ -2699,7 +2717,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
 
   const ztermVideoWallpaper = (
     <div data-testid="remote-window-video-wallpaper" style={styles.videoWallpaper} aria-hidden="true">
-      <img src={ztermLogoUrl} alt="" style={styles.videoWallpaperLogo} />
+      <img data-testid="remote-window-video-wallpaper-logo" src={ztermLogoUrl} alt="" style={styles.videoWallpaperLogo} />
     </div>
   );
 
@@ -2717,9 +2735,10 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
             disablePictureInPicture
             preload="auto"
             playsInline
-            onPlaying={() => setVideoHasPlayed(true)}
-            onLoadedMetadata={requestVideoPlayback}
-            onCanPlay={requestVideoPlayback}
+            onPlaying={revealReceiverVideo}
+            onLoadedMetadata={revealReceiverVideo}
+            onLoadedData={revealReceiverVideo}
+            onCanPlay={revealReceiverVideo}
             style={{
               ...styles.videoElement,
               opacity: videoHasPlayed ? 1 : 0,
@@ -3581,14 +3600,15 @@ const styles: Record<string, CSSProperties> = {
     background: '#0a101b',
     boxShadow: 'inset 0 0 0 1px rgba(237,244,255,0.04), inset 0 18px 48px rgba(255,255,255,0.035), inset 0 -36px 80px rgba(0,0,0,0.38)',
     pointerEvents: 'none',
+    isolation: 'isolate',
   },
   videoWallpaperLogo: {
     width: 'min(42%, 156px)',
     maxHeight: '42%',
     objectFit: 'contain',
-    filter: 'grayscale(1) contrast(0.72) brightness(0.36) drop-shadow(0 -1px 0 rgba(255,255,255,0.11)) drop-shadow(0 2px 0 rgba(0,0,0,0.72))',
-    opacity: 0.54,
-    mixBlendMode: 'luminosity',
+    filter: 'grayscale(1) contrast(1.08) brightness(0.82)',
+    opacity: 0.78,
+    mixBlendMode: 'multiply',
   },
   minimap: {
     position: 'absolute',
