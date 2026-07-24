@@ -104,6 +104,7 @@ interface RemoteWindowOverlayProps {
   onBodySubscriptionSuppressedChange?: (suppressed: boolean) => void;
   onInputContextChange?: (context: RemoteWindowInputContext | null) => void;
   onRequestKeyboard?: () => void;
+  onVideoDebug?: (snapshot: RemoteWindowVideoDebugSnapshot) => void;
 }
 
 interface RemoteWindowStreamStartResult {
@@ -132,6 +133,21 @@ export interface RemoteWindowInputContext {
   inputTargetKind: RemoteWindowStreamTargetManifest['inputTarget']['kind'];
   focusPolicy: RemoteWindowStreamTargetManifest['focusPolicy'];
   inputRoute: RemoteWindowStreamTargetManifest['inputRoute'];
+}
+
+export interface RemoteWindowVideoDebugSnapshot {
+  attached: boolean;
+  visible: boolean;
+  readyState: number;
+  paused: boolean;
+  videoWidth: number;
+  videoHeight: number;
+  playAttempts: number;
+  playAccepted: number;
+  playRejected: number;
+  lastEvent: string;
+  lastError: string;
+  updatedAt: number | null;
 }
 
 interface FloatingOverlayOffset {
@@ -744,6 +760,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   onBodySubscriptionSuppressedChange,
   onInputContextChange,
   onRequestKeyboard,
+  onVideoDebug,
 }: RemoteWindowOverlayProps) {
   const [state, setState] = useState<RemoteWindowOverlayState>(initialRemoteWindowOverlayState);
   const [floatingOffset, setFloatingOffsetState] = useState<FloatingOverlayOffset>({ x: 0, y: 0 });
@@ -756,7 +773,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const [touchScrollFraction, setTouchScrollFractionState] = useState<RemoteWindowTouchScrollFraction>(() => readRemoteWindowTouchScrollFraction());
   const [touchScrollInverted, setTouchScrollInvertedState] = useState(() => readRemoteWindowTouchScrollInverted());
   const [networkQuality, setNetworkQuality] = useState<RemoteWindowNetworkQualityInput | null>(() => readRemoteWindowNetworkQuality());
-  const [videoHasPlayed, setVideoHasPlayed] = useState(false);
+  const [videoHasPlayed, setVideoHasPlayedState] = useState(false);
+  const videoHasPlayedRef = useRef(false);
   const [receiverMediaStream, setReceiverMediaStream] = useState<MediaStream | null>(null);
   const [receiverFrameSize, setReceiverFrameSize] = useState<SurfaceSize | null>(null);
   const [itermPaneTargetsExpanded, setItermPaneTargetsExpanded] = useState(false);
@@ -778,6 +796,12 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const videoSurfaceRef = useRef<HTMLDivElement | null>(null);
   const videoElementRef = useRef<HTMLVideoElement | null>(null);
   const activeStreamIdRef = useRef<string | null>(null);
+  const videoPlaybackStatsRef = useRef({
+    playAttempts: 0,
+    playAccepted: 0,
+    playRejected: 0,
+    lastError: '-',
+  });
   const collectStreamStatsRef = useRef<(() => Promise<RemoteWindowVideoStatsSample | null>) | null>(null);
   const adaptiveVideoStateRef = useRef<RemoteWindowVideoAdaptiveState | null>(null);
   const lastAppliedStreamQualityKeyRef = useRef<string | null>(null);
@@ -1725,32 +1749,86 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     }
   }, [finishEntryDrag]);
 
+  const updateReceiverVideoVisibility = useCallback((visible: boolean) => {
+    videoHasPlayedRef.current = visible;
+    setVideoHasPlayedState(visible);
+  }, []);
+
+  const publishVideoDebugSnapshot = useCallback((lastEvent: string, options?: { visible?: boolean; error?: string }) => {
+    const video = videoElementRef.current;
+    const stats = videoPlaybackStatsRef.current;
+    if (options?.error) {
+      stats.lastError = options.error;
+    }
+    onVideoDebug?.({
+      attached: Boolean(video && receiverMediaStream && video.srcObject === receiverMediaStream),
+      visible: options?.visible ?? videoHasPlayedRef.current,
+      readyState: video?.readyState ?? 0,
+      paused: video?.paused ?? true,
+      videoWidth: video?.videoWidth ?? 0,
+      videoHeight: video?.videoHeight ?? 0,
+      playAttempts: stats.playAttempts,
+      playAccepted: stats.playAccepted,
+      playRejected: stats.playRejected,
+      lastEvent,
+      lastError: stats.lastError,
+      updatedAt: Date.now(),
+    });
+  }, [onVideoDebug, receiverMediaStream]);
+
+  const revealReceiverVideo = useCallback((lastEvent = 'playing') => {
+    updateReceiverVideoVisibility(true);
+    publishVideoDebugSnapshot(lastEvent, { visible: true });
+  }, [publishVideoDebugSnapshot, updateReceiverVideoVisibility]);
+
+  const scheduleVideoFrameReveal = useCallback((video: HTMLVideoElement, stream: MediaStream) => {
+    const videoWithFrameCallback = video as HTMLVideoElement & {
+      requestVideoFrameCallback?: (callback: () => void) => number;
+    };
+    if (typeof videoWithFrameCallback.requestVideoFrameCallback !== 'function') {
+      return false;
+    }
+    videoWithFrameCallback.requestVideoFrameCallback(() => {
+      if (videoElementRef.current === video && video.srcObject === stream) {
+        revealReceiverVideo('frame');
+      }
+    });
+    return true;
+  }, [revealReceiverVideo]);
+
   const requestVideoPlayback = useCallback(() => {
     const video = videoElementRef.current;
     if (!video || !receiverMediaStream) {
+      publishVideoDebugSnapshot('play-missing-video');
       return;
     }
-    if (video.srcObject !== receiverMediaStream) {
-      video.srcObject = receiverMediaStream;
-    }
+    video.autoplay = true;
     video.muted = true;
     video.defaultMuted = true;
     video.playsInline = true;
     video.controls = false;
+    if (video.srcObject !== receiverMediaStream) {
+      video.srcObject = receiverMediaStream;
+    }
+    scheduleVideoFrameReveal(video, receiverMediaStream);
+    videoPlaybackStatsRef.current.playAttempts += 1;
+    publishVideoDebugSnapshot('play-request');
     const playResult = typeof video.play === 'function' ? video.play() : null;
     if (playResult && typeof playResult.then === 'function') {
       playResult
-        .then(() => setVideoHasPlayed(true))
-        .catch(() => {
-          // Android WebView can reject play() while still rendering a muted MediaStream.
+        .then(() => {
+          videoPlaybackStatsRef.current.playAccepted += 1;
+          revealReceiverVideo('play-resolved');
+        })
+        .catch((error) => {
+          const message = error instanceof Error ? error.message : String(error || 'play rejected');
+          videoPlaybackStatsRef.current.playRejected += 1;
+          publishVideoDebugSnapshot('play-rejected', { error: message });
         });
+      return;
     }
-  }, [receiverMediaStream]);
-
-  const revealReceiverVideo = useCallback(() => {
-    setVideoHasPlayed(true);
-    requestVideoPlayback();
-  }, [requestVideoPlayback]);
+    publishVideoDebugSnapshot('play-sync-pending');
+  }, [publishVideoDebugSnapshot, receiverMediaStream, revealReceiverVideo, scheduleVideoFrameReveal]);
 
   const handleEntryPointerCancel = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
     if (finishEntryDrag(event.pointerId, { suppressClick: false })) {
@@ -1804,20 +1882,30 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     if (!video) {
       return;
     }
-    setVideoHasPlayed(false);
+    updateReceiverVideoVisibility(false);
+    videoPlaybackStatsRef.current = {
+      playAttempts: 0,
+      playAccepted: 0,
+      playRejected: 0,
+      lastError: '-',
+    };
     requestVideoPlayback();
     if (!receiverMediaStream) {
       return;
     }
-    const fallbackTimer = window.setTimeout(() => {
+    const fallbackTimer = window.setInterval(() => {
       if (videoElementRef.current?.srcObject === receiverMediaStream) {
-        setVideoHasPlayed(true);
+        publishVideoDebugSnapshot('play-poll');
       }
-    }, 1200);
+    }, 350);
+    const stopTimer = window.setTimeout(() => {
+      window.clearInterval(fallbackTimer);
+    }, 5000);
     return () => {
-      window.clearTimeout(fallbackTimer);
+      window.clearInterval(fallbackTimer);
+      window.clearTimeout(stopTimer);
     };
-  }, [receiverMediaStream, requestVideoPlayback]);
+  }, [publishVideoDebugSnapshot, receiverMediaStream, requestVideoPlayback, updateReceiverVideoVisibility]);
 
   useEffect(() => {
     if (lastReportedQuickBarSuppressionRef.current === quickBarSuppressed) {
@@ -2735,13 +2823,23 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
             disablePictureInPicture
             preload="auto"
             playsInline
-            onPlaying={revealReceiverVideo}
-            onLoadedMetadata={revealReceiverVideo}
-            onLoadedData={revealReceiverVideo}
-            onCanPlay={revealReceiverVideo}
+            onPlaying={() => revealReceiverVideo('playing')}
+            onLoadedMetadata={() => {
+              publishVideoDebugSnapshot('loadedmetadata');
+              requestVideoPlayback();
+            }}
+            onLoadedData={() => {
+              publishVideoDebugSnapshot('loadeddata');
+              requestVideoPlayback();
+            }}
+            onCanPlay={() => {
+              publishVideoDebugSnapshot('canplay');
+              requestVideoPlayback();
+            }}
             style={{
               ...styles.videoElement,
               opacity: videoHasPlayed ? 1 : 0,
+              visibility: videoHasPlayed ? 'visible' : 'hidden',
             }}
           />
         </>

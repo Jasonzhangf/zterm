@@ -556,6 +556,8 @@ describe('TerminalPage remote window overlay', () => {
       expect(screen.getByTestId('terminal-debug-remote-window-event').textContent).toContain('overlay · SEND Y · ptr:up #31 b0');
       expect(screen.getByTestId('terminal-debug-remote-window-point').textContent).toContain('410,320 n=0.50,0.50');
       expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('F 2 · D 1 · M 0 · U 1');
+      expect(screen.getByTestId('terminal-debug-remote-window-video').textContent).toContain('aY');
+      expect(screen.getByTestId('terminal-debug-remote-window-video').textContent).toContain('vN');
     });
 
     const firstPayload = remoteWindowNonFocusPayloads(onSendRemoteWindowInput)[0];

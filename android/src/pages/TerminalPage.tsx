@@ -8,7 +8,11 @@ import { createSessionViewportModeStore, useSessionViewportModeSnapshot, type Se
 import { SessionScheduleSheet } from '../components/terminal/SessionScheduleSheet';
 import { FileTransferSheet } from '../components/terminal/FileTransferSheet';
 import { RemoteScreenshotSheet } from '../components/terminal/RemoteScreenshotSheet';
-import { RemoteWindowOverlay, type RemoteWindowInputContext } from '../components/terminal/RemoteWindowOverlay';
+import {
+  RemoteWindowOverlay,
+  type RemoteWindowInputContext,
+  type RemoteWindowVideoDebugSnapshot,
+} from '../components/terminal/RemoteWindowOverlay';
 import { TerminalHeader } from '../components/terminal/TerminalHeader';
 import { TerminalSessionDrawer, type TerminalSessionDrawerHost, type TerminalSessionDrawerItem } from '../components/terminal/TerminalSessionDrawer';
 import { TabManagerSheet } from '../components/terminal/TabManagerSheet';
@@ -153,6 +157,7 @@ type RemoteWindowInputDebugSnapshot = {
     accepted: number;
     error: number;
   };
+  video: string;
 };
 
 type RemoteWindowInputDebugSource =
@@ -204,6 +209,7 @@ function createRemoteWindowInputDebugSnapshot(): RemoteWindowInputDebugSnapshot 
     lastResult: '-',
     lastResultAt: null,
     counts: createRemoteWindowInputDebugCounts(),
+    video: '-',
   };
 }
 
@@ -268,6 +274,25 @@ function truncateRemoteWindowInputResult(value: string) {
     return value;
   }
   return `${value.slice(0, 41)}...`;
+}
+
+function formatRemoteWindowVideoDebug(snapshot: RemoteWindowVideoDebugSnapshot) {
+  const age = formatRemoteWindowInputDebugAge(snapshot.updatedAt);
+  const error = snapshot.lastError && snapshot.lastError !== '-'
+    ? ` err:${truncateRemoteWindowInputResult(snapshot.lastError)}`
+    : '';
+  return [
+    `a${snapshot.attached ? 'Y' : 'N'}`,
+    `v${snapshot.visible ? 'Y' : 'N'}`,
+    `r${snapshot.readyState}`,
+    `p${snapshot.paused ? 'Y' : 'N'}`,
+    `${snapshot.videoWidth}x${snapshot.videoHeight}`,
+    `try${snapshot.playAttempts}`,
+    `ok${snapshot.playAccepted}`,
+    `rej${snapshot.playRejected}`,
+    snapshot.lastEvent,
+    age,
+  ].join(' · ') + error;
 }
 
 function incrementRemoteWindowInputDebugCounts(
@@ -1309,6 +1334,8 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
               {' · '}
               E {remoteWindowInputDebug.counts.error}
             </span>
+            <span>视频</span>
+            <span data-testid="terminal-debug-remote-window-video">{remoteWindowInputDebug.video}</span>
           </>
         ) : null}
         <span>窗格</span><span>x{visiblePaneSessions && visiblePaneSessions.length > 0 ? visiblePaneSessions.length : 1}</span>
@@ -1671,6 +1698,13 @@ function TerminalPageComponent({
         },
       };
     }
+  }, []);
+
+  const recordRemoteWindowVideoDebug = useCallback((snapshot: RemoteWindowVideoDebugSnapshot) => {
+    remoteWindowInputDebugRef.current = {
+      ...remoteWindowInputDebugRef.current,
+      video: formatRemoteWindowVideoDebug(snapshot),
+    };
   }, []);
 
   const getRemoteWindowInputDebug = useCallback(() => remoteWindowInputDebugRef.current, []);
@@ -4132,6 +4166,7 @@ function TerminalPageComponent({
           onBodySubscriptionSuppressedChange={handleRemoteWindowBodySubscriptionSuppressedChange}
           onInputContextChange={handleRemoteWindowInputContextChange}
           onRequestKeyboard={handleRemoteWindowRequestKeyboard}
+          onVideoDebug={recordRemoteWindowVideoDebug}
         />
         {!remoteWindowOverlayOpen ? (
           <TerminalQuickBarShell

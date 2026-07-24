@@ -368,41 +368,13 @@ describe('RemoteWindowOverlay', () => {
     expect(logo.style.filter).not.toContain('drop-shadow');
   });
 
-  it('reveals an attached receiver video on media readiness even when playing has not fired', async () => {
-    const mediaStream = { id: 'media-stream-1' } as MediaStream;
-    const requestTargets = vi.fn(async () => ({
-      requestId: 'rw-1',
-      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
-    }));
-    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
-      streamId,
-      mediaStream,
-    }));
-
-    render(
-      <RemoteWindowOverlay
-        activeSessionId="session-1"
-        requestTargets={requestTargets}
-        startStream={startStream}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
-    fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
-    const video = await screen.findByTestId('remote-window-video');
-    expect(screen.getByTestId('remote-window-video-wallpaper')).toBeTruthy();
-
-    fireEvent.loadedData(video);
-
-    await waitFor(() => {
-      expect(screen.queryByTestId('remote-window-video-wallpaper')).toBeNull();
-    });
-  });
-
-  it('does not re-hide an attached receiver video when WebView rejects play()', async () => {
+  it('keeps the native video hidden on media readiness until playback starts', async () => {
+    const pendingPlay = { resolve: undefined as undefined | (() => void) };
     const playSpy = vi
       .spyOn(HTMLMediaElement.prototype, 'play')
-      .mockImplementation(() => Promise.reject(new Error('autoplay blocked')));
+      .mockImplementation(() => new Promise<void>((resolve) => {
+        pendingPlay.resolve = resolve;
+      }));
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-1',
@@ -425,17 +397,41 @@ describe('RemoteWindowOverlay', () => {
       fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
       fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
       const video = await screen.findByTestId('remote-window-video');
-      fireEvent.canPlay(video);
+      expect(screen.getByTestId('remote-window-video-wallpaper')).toBeTruthy();
+
+      fireEvent.loadedData(video);
+
+      expect(screen.getByTestId('remote-window-video-wallpaper')).toBeTruthy();
+      expect((video as HTMLVideoElement).style.opacity).toBe('0');
+      expect((video as HTMLVideoElement).style.visibility).toBe('hidden');
+
+      pendingPlay.resolve?.();
 
       await waitFor(() => {
         expect(screen.queryByTestId('remote-window-video-wallpaper')).toBeNull();
       });
+      expect((video as HTMLVideoElement).style.visibility).toBe('visible');
     } finally {
       playSpy.mockRestore();
     }
   });
 
-  it('keeps a playing receiver visible across overlay state changes for the same media stream', async () => {
+  it('reveals an attached receiver only after a real video frame callback', async () => {
+    const playSpy = vi
+      .spyOn(HTMLMediaElement.prototype, 'play')
+      .mockImplementation(() => new Promise<void>(() => {}));
+    const videoPrototype = HTMLVideoElement.prototype as unknown as {
+      requestVideoFrameCallback?: (callback: () => void) => number;
+    };
+    const originalRequestVideoFrameCallback = videoPrototype.requestVideoFrameCallback;
+    const frameCallbackRef = { current: undefined as undefined | (() => void) };
+    Object.defineProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback', {
+      configurable: true,
+      value: vi.fn((callback: () => void) => {
+        frameCallbackRef.current = callback;
+        return 1;
+      }),
+    });
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-1',
@@ -446,24 +442,127 @@ describe('RemoteWindowOverlay', () => {
       mediaStream,
     }));
 
-    render(
-      <RemoteWindowOverlay
-        activeSessionId="session-1"
-        requestTargets={requestTargets}
-        startStream={startStream}
-      />,
-    );
+    try {
+      render(
+        <RemoteWindowOverlay
+          activeSessionId="session-1"
+          requestTargets={requestTargets}
+          startStream={startStream}
+        />,
+      );
 
-    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
-    fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
-    const video = await screen.findByTestId('remote-window-video');
-    fireEvent.playing(video);
-    expect(screen.queryByTestId('remote-window-video-wallpaper')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+      fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
+      const video = await screen.findByTestId('remote-window-video');
+      expect(screen.getByTestId('remote-window-video-wallpaper')).toBeTruthy();
+      expect((video as HTMLVideoElement).style.visibility).toBe('hidden');
 
-    fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
+      act(() => {
+        frameCallbackRef.current?.();
+      });
 
-    expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
-    expect(screen.queryByTestId('remote-window-video-wallpaper')).toBeNull();
+      await waitFor(() => {
+        expect(screen.queryByTestId('remote-window-video-wallpaper')).toBeNull();
+      });
+      expect((video as HTMLVideoElement).style.visibility).toBe('visible');
+    } finally {
+      playSpy.mockRestore();
+      if (originalRequestVideoFrameCallback) {
+        Object.defineProperty(HTMLVideoElement.prototype, 'requestVideoFrameCallback', {
+          configurable: true,
+          value: originalRequestVideoFrameCallback,
+        });
+      } else {
+        delete videoPrototype.requestVideoFrameCallback;
+      }
+    }
+  });
+
+  it('does not expose the native video placeholder when WebView rejects play()', async () => {
+    const playSpy = vi
+      .spyOn(HTMLMediaElement.prototype, 'play')
+      .mockImplementation(() => Promise.reject(new Error('autoplay blocked')));
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+    }));
+    const onVideoDebug = vi.fn();
+
+    try {
+      render(
+        <RemoteWindowOverlay
+          activeSessionId="session-1"
+          requestTargets={requestTargets}
+          startStream={startStream}
+          onVideoDebug={onVideoDebug}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+      fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
+      const video = await screen.findByTestId('remote-window-video');
+      fireEvent.canPlay(video);
+
+      await waitFor(() => {
+        expect(playSpy).toHaveBeenCalled();
+      });
+      expect(screen.getByTestId('remote-window-video-wallpaper')).toBeTruthy();
+      expect((video as HTMLVideoElement).style.opacity).toBe('0');
+      expect((video as HTMLVideoElement).style.visibility).toBe('hidden');
+      await waitFor(() => {
+        expect(onVideoDebug).toHaveBeenCalledWith(expect.objectContaining({
+          lastEvent: 'play-rejected',
+          visible: false,
+          playRejected: expect.any(Number),
+        }));
+      });
+    } finally {
+      playSpy.mockRestore();
+    }
+  });
+
+  it('keeps a playing receiver visible across overlay state changes for the same media stream', async () => {
+    const playSpy = vi
+      .spyOn(HTMLMediaElement.prototype, 'play')
+      .mockImplementation(() => Promise.resolve());
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+    }));
+
+    try {
+      render(
+        <RemoteWindowOverlay
+          activeSessionId="session-1"
+          requestTargets={requestTargets}
+          startStream={startStream}
+        />,
+      );
+
+      fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+      fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
+      await screen.findByTestId('remote-window-video');
+      await waitFor(() => {
+        expect(screen.queryByTestId('remote-window-video-wallpaper')).toBeNull();
+      });
+
+      fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
+
+      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
+      expect(screen.queryByTestId('remote-window-video-wallpaper')).toBeNull();
+    } finally {
+      playSpy.mockRestore();
+    }
   });
 
   it('caps fullscreen quality to low bitrate and 30fps when network information reports poor connectivity', async () => {
