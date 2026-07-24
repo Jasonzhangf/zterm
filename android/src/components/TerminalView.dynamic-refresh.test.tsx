@@ -6,8 +6,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalView as BaseTerminalView } from './TerminalView';
 import { TerminalTabSwipeSurface } from './terminal/TerminalTabSwipeSurface';
 import { createSessionBufferState } from '../lib/terminal-buffer';
+import { createSessionBufferStore } from '../lib/session-buffer-store';
+import { createSessionHeadStore } from '../lib/session-head-store';
+import { createSessionRenderGate } from '../lib/session-render-gate';
 import { createSessionRenderBufferStore } from '../lib/session-render-buffer-store';
-import type { Session, SessionRenderBufferSnapshot, TerminalCell } from '../lib/types';
+import { applyIncomingBufferSyncRuntime } from '../contexts/session-context-buffer-runtime';
+import type { Session, SessionBufferState, SessionRenderBufferSnapshot, TerminalBufferPayload, TerminalCell } from '../lib/types';
 
 class ResizeObserverMock {
   static instances = new Set<ResizeObserverMock>();
@@ -269,6 +273,50 @@ function expectRenderedRowsMatchSource(container: HTMLElement, sourceRows: strin
     }
     expect(row.text).toBe(sourceRows[sourceOffset]);
   }
+}
+
+function buildLargeBufferSyncPayload(rows: string[], revision: number): TerminalBufferPayload {
+  return {
+    revision,
+    startIndex: 0,
+    endIndex: rows.length,
+    availableStartIndex: 0,
+    availableEndIndex: rows.length,
+    cols: 80,
+    rows: 24,
+    cursorKeysApp: false,
+    cursor: null,
+    lines: rows.map((line, index) => ({
+      index,
+      cells: Array.from(line).map((char) => cell(char)),
+    })),
+  };
+}
+
+function splitLargeBufferSyncPayload(payload: TerminalBufferPayload, chunkRows: number) {
+  const safeChunkRows = Math.max(1, Math.floor(chunkRows));
+  const chunks: TerminalBufferPayload[] = [];
+  for (let offset = 0; offset < payload.lines.length; offset += safeChunkRows) {
+    const lines = payload.lines.slice(offset, offset + safeChunkRows);
+    const first = lines[0];
+    const last = lines[lines.length - 1];
+    const startIndex = first && 'index' in first ? first.index : first && 'i' in first ? first.i : offset;
+    const lastIndex = last && 'index' in last ? last.index : last && 'i' in last ? last.i : offset + lines.length - 1;
+    chunks.push({
+      ...payload,
+      startIndex,
+      endIndex: lastIndex + 1,
+      lines,
+    });
+  }
+  return chunks;
+}
+
+async function flushRenderGate() {
+  await act(async () => {
+    await new Promise((resolve) => window.requestAnimationFrame(() => resolve(undefined)));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 }
 
 describe('TerminalView minimal mirror render', () => {
@@ -548,6 +596,127 @@ describe('TerminalView minimal mirror render', () => {
       expect(rows).not.toContain('stream-loading');
       expect(rows).not.toContain('echo hi');
     });
+  });
+
+  it('keeps source, buffer, render store, and DOM coherent after more-than-screen body refreshes', async () => {
+    const sessionId = 's-large-refresh';
+    const liveBufferStore = createSessionBufferStore();
+    const liveHeadStore = createSessionHeadStore();
+    const renderCommits = vi.fn();
+    const renderGate = createSessionRenderGate({
+      liveBufferStore,
+      liveHeadStore,
+      recordSessionRenderCommit: renderCommits,
+    });
+    const renderStore = renderGate.getRenderStore();
+    const session = makeSession({
+      revision: 0,
+      lines: [],
+      bufferTailEndIndex: 0,
+    });
+    session.id = sessionId;
+    session.sessionName = sessionId;
+    session.title = sessionId;
+    const refs = {
+      stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+      sessionRevisionResetRef: { current: new Map() },
+      sessionBufferHeadsRef: { current: new Map<string, any>() },
+      pendingInputTailRefreshRef: { current: new Map() },
+      pendingConnectTailRefreshRef: { current: new Set<string>() },
+      pendingResumeTailRefreshRef: { current: new Set<string>() },
+      lastSyncRequestAtRef: { current: new Map() },
+      sessionVisibleRangeRef: {
+        current: new Map([[sessionId, { startIndex: 0, endIndex: 24, viewportRows: 24 }]]),
+      },
+    };
+    const requestSessionBufferSync = vi.fn(() => true);
+    const applyPayload = (payload: TerminalBufferPayload) => {
+      refs.sessionBufferHeadsRef.current.set(sessionId, {
+        revision: payload.revision,
+        latestEndIndex: payload.availableEndIndex ?? payload.endIndex,
+        availableStartIndex: payload.availableStartIndex,
+        availableEndIndex: payload.availableEndIndex,
+        seenAt: Date.now(),
+      });
+      liveHeadStore.setHead(sessionId, {
+        daemonHeadRevision: payload.revision,
+        daemonHeadEndIndex: payload.availableEndIndex ?? payload.endIndex,
+      });
+      applyIncomingBufferSyncRuntime({
+        sessionId,
+        payload,
+        refs,
+        readSessionBufferSnapshot: () => liveBufferStore.getSnapshot(sessionId).buffer,
+        resolveSessionCacheLines: () => 500,
+        summarizeBufferPayload: (incoming) => ({
+          revision: incoming.revision,
+          startIndex: incoming.startIndex,
+          endIndex: incoming.endIndex,
+          lineCount: incoming.lines.length,
+        }),
+        runtimeDebug: vi.fn(),
+        commitSessionBufferUpdate: (_sessionId: string, nextBuffer: SessionBufferState) =>
+          liveBufferStore.commitBuffer(_sessionId, nextBuffer),
+        scheduleSessionRenderCommit: (_sessionId: string) => renderGate.scheduleCommit(_sessionId),
+        isSessionTransportActive: () => true,
+        requestSessionBufferSync,
+      });
+    };
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <BaseTerminalView
+          sessionId={sessionId}
+          sessionBufferStore={renderStore}
+          active
+          allowDomFocus
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const sourceOne = Array.from({ length: 96 }, (_, index) => (
+      `large-source-a-${String(index).padStart(3, '0')}-${'A'.repeat(20)}`
+    ));
+    const payloadOne = buildLargeBufferSyncPayload(sourceOne, 1);
+    for (const chunk of splitLargeBufferSyncPayload(payloadOne, 48)) {
+      applyPayload(chunk);
+    }
+    await flushRenderGate();
+
+    await waitFor(() => {
+      expect(renderStore.getSnapshot(sessionId).buffer.revision).toBe(1);
+      expect(readRenderedRows(view.container)).toContain(sourceOne[sourceOne.length - 1]);
+    });
+    expect(liveBufferStore.getSnapshot(sessionId).buffer.endIndex).toBe(sourceOne.length);
+    expect(renderStore.getSnapshot(sessionId).buffer.endIndex).toBe(sourceOne.length);
+    expectRenderedRowsMatchSource(view.container, sourceOne, 0);
+
+    const sourceTwo = Array.from({ length: 160 }, (_, index) => (
+      `large-source-b-${String(index).padStart(3, '0')}-${'B'.repeat(20)}`
+    ));
+    const payloadTwo = buildLargeBufferSyncPayload(sourceTwo, 2);
+    for (const chunk of splitLargeBufferSyncPayload(payloadTwo, 40)) {
+      applyPayload(chunk);
+    }
+    await flushRenderGate();
+
+    await waitFor(() => {
+      const rows = readRenderedRows(view.container);
+      expect(renderStore.getSnapshot(sessionId).buffer.revision).toBe(2);
+      expect(rows).toContain(sourceTwo[sourceTwo.length - 1]);
+      expect(rows).not.toContain(sourceOne[sourceOne.length - 1]);
+    });
+    expect(liveBufferStore.getSnapshot(sessionId).buffer.endIndex).toBe(sourceTwo.length);
+    expect(renderStore.getSnapshot(sessionId).buffer.endIndex).toBe(sourceTwo.length);
+    expectRenderedRowsMatchSource(view.container, sourceTwo, 0);
+    expect(requestSessionBufferSync).not.toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({ reason: 'buffer-sync-revision-gap-sparse-payload' }),
+    );
+    expect(renderCommits).toHaveBeenCalledTimes(2);
   });
 
   it('keeps bottom rows scoped to the active session across switch, late old-session publish, and IME layout refresh', async () => {

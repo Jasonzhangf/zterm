@@ -3,6 +3,7 @@ import type { RemoteWindowStreamTargetManifest } from './types';
 import {
   REMOTE_WINDOW_VIDEO_BITRATE_STORAGE_KEY,
   buildRemoteWindowVideoBitrateConfig,
+  resolveRemoteWindowVideoAdaptiveDecision,
   readRemoteWindowVideoBitratePreset,
   resolveAdaptiveRemoteWindowVideoBitratePreset,
   resolveRemoteWindowDesktopCoverageRatio,
@@ -69,11 +70,11 @@ describe('remote-window-video-quality', () => {
       preset: 'fullscreen',
       bitrateMbps: 20,
       maxBitrateBps: 20_000_000,
-      maxFrameRateFps: 12,
+      maxFrameRateFps: 60,
     });
     expect(buildRemoteWindowVideoBitrateConfig('2mbps')).toMatchObject({
       maxBitrateBps: 2_000_000,
-      maxFrameRateFps: 5,
+      maxFrameRateFps: 30,
     });
   });
 
@@ -153,5 +154,82 @@ describe('remote-window-video-quality', () => {
       downlinkMbps: 20,
       rttMs: 30,
     })).toBe('fullscreen');
+  });
+
+  it('downgrades on weak WebRTC stats and restores only after a stable window', () => {
+    const baseline = buildRemoteWindowVideoBitrateConfig('20mbps');
+    const firstWeak = resolveRemoteWindowVideoAdaptiveDecision({
+      baseline,
+      sample: {
+        sampledAtMs: 1_000,
+        availableOutgoingBitrateBps: 2_000_000,
+        rttMs: 420,
+        framesPerSecond: 9,
+        framesDropped: 12,
+        qualityLimitationReason: 'bandwidth',
+      },
+    });
+
+    expect(firstWeak.reason).toBe('baseline');
+    expect(firstWeak.state).toEqual({
+      mode: 'normal',
+      degradedAtMs: null,
+      stableSinceMs: null,
+      weakSampleCount: 1,
+    });
+
+    const weak = resolveRemoteWindowVideoAdaptiveDecision({
+      baseline,
+      previous: firstWeak.state,
+      sample: {
+        sampledAtMs: 3_000,
+        availableIncomingBitrateBps: 2_000_000,
+        rttMs: 420,
+        framesPerSecond: 9,
+        framesDropped: 12,
+        qualityLimitationReason: 'bandwidth',
+      },
+    });
+
+    expect(weak.reason).toBe('downgrade');
+    expect(weak.state).toEqual({ mode: 'degraded', degradedAtMs: 3_000, stableSinceMs: null, weakSampleCount: 2 });
+    expect(weak.config).toMatchObject({
+      preset: '20mbps',
+      bitrateMbps: 20,
+      maxBitrateBps: 5_000_000,
+      maxFrameRateFps: 15,
+    });
+
+    const hold = resolveRemoteWindowVideoAdaptiveDecision({
+      baseline,
+      previous: weak.state,
+      sample: {
+        sampledAtMs: 4_000,
+        availableOutgoingBitrateBps: 30_000_000,
+        rttMs: 45,
+        framesPerSecond: 30,
+        framesDropped: 0,
+        qualityLimitationReason: 'none',
+      },
+    });
+    expect(hold.reason).toBe('hold');
+    expect(hold.state).toEqual({ mode: 'degraded', degradedAtMs: 3_000, stableSinceMs: 4_000, weakSampleCount: 0 });
+    expect(hold.config.maxBitrateBps).toBe(5_000_000);
+
+    const restored = resolveRemoteWindowVideoAdaptiveDecision({
+      baseline,
+      previous: hold.state,
+      sample: {
+        sampledAtMs: 12_000,
+        availableOutgoingBitrateBps: 30_000_000,
+        rttMs: 45,
+        framesPerSecond: 30,
+        framesDropped: 0,
+        qualityLimitationReason: 'none',
+      },
+    });
+    expect(restored.reason).toBe('restore');
+    expect(restored.state).toEqual({ mode: 'normal', degradedAtMs: null, stableSinceMs: null, weakSampleCount: 0 });
+    expect(restored.config).toEqual(baseline);
   });
 });

@@ -12,9 +12,10 @@ import type {
   ServerMessage,
 } from '../src/lib/types';
 
-const { RTCPeerConnection, RTCSessionDescription } = wrtc as unknown as {
+const { RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } = wrtc as unknown as {
   RTCPeerConnection: typeof globalThis.RTCPeerConnection;
   RTCSessionDescription: typeof globalThis.RTCSessionDescription;
+  RTCIceCandidate: typeof globalThis.RTCIceCandidate;
 };
 
 const DAEMON_WS_URL = process.env.ZTERM_REMOTE_WINDOW_PROBE_WS_URL || 'ws://127.0.0.1:3333';
@@ -296,6 +297,52 @@ async function waitForServerMessage(
     await delay(25);
   }
   throw new Error(`timed out waiting for ${label}`);
+}
+
+async function waitForReceiverTrack(
+  peerConnection: RTCPeerConnection,
+  messages: ServerMessage[],
+  streamId: string,
+  hasTrack: () => boolean,
+  timeoutMs = 15_000,
+) {
+  const deadline = Date.now() + timeoutMs;
+  const appliedCandidates = new Set<string>();
+  const hasLiveReceiverVideoTrack = () => (
+    typeof peerConnection.getReceivers === 'function'
+    && peerConnection.getReceivers().some((receiver) => (
+      receiver.track?.kind === 'video'
+      && receiver.track.readyState === 'live'
+    ))
+  );
+  while (Date.now() < deadline) {
+    for (const message of messages) {
+      if (
+        message.type !== 'remote-window-stream-ice-candidate'
+        || message.payload.streamId !== streamId
+      ) {
+        continue;
+      }
+      const candidateKey = JSON.stringify(message.payload.candidate);
+      if (appliedCandidates.has(candidateKey)) {
+        continue;
+      }
+      appliedCandidates.add(candidateKey);
+      await peerConnection.addIceCandidate(new RTCIceCandidate(message.payload.candidate as RTCIceCandidateInit));
+    }
+    if (hasTrack() || hasLiveReceiverVideoTrack()) {
+      return;
+    }
+    await delay(25);
+  }
+  const receivers = typeof peerConnection.getReceivers === 'function'
+    ? peerConnection.getReceivers().map((receiver) => ({
+      kind: receiver.track?.kind,
+      id: receiver.track?.id,
+      readyState: receiver.track?.readyState,
+    }))
+    : [];
+  throw new Error(`timed out waiting for remote window receiver track; candidates=${appliedCandidates.size}; state=${peerConnection.connectionState}; ice=${peerConnection.iceConnectionState}; signaling=${peerConnection.signalingState}; receivers=${JSON.stringify(receivers)}`);
 }
 
 async function waitForRawMuxFrame(
@@ -693,7 +740,7 @@ async function main() {
           preset: '2mbps',
           bitrateMbps: 2,
           maxBitrateBps: 2_000_000,
-          maxFrameRateFps: 5,
+          maxFrameRateFps: 30,
         },
       },
     });
@@ -711,6 +758,8 @@ async function main() {
       fail(`stream start failed: ${JSON.stringify(started)}`);
     }
     await peerConnection.setRemoteDescription(new RTCSessionDescription(started.payload.answer));
+    await waitForReceiverTrack(peerConnection, messages, streamId, () => trackSeen, REMOTE_WINDOW_LIVE_STREAM_TIMEOUT_MS);
+    trackSeen = true;
     await waitForServerMessage(
       messages,
       (message) => (
@@ -721,6 +770,62 @@ async function main() {
       'remote window stream status',
       REMOTE_WINDOW_LIVE_STREAM_TIMEOUT_MS,
     );
+
+    const degradedQualityRequestId = requestId('quality-degraded');
+    send(ws, {
+      type: 'remote-window-stream-quality-request',
+      payload: {
+        requestId: degradedQualityRequestId,
+        streamId,
+        targetId: target.streamTargetId,
+        videoBitrate: {
+          preset: '2mbps',
+          bitrateMbps: 2,
+          maxBitrateBps: 500_000,
+          maxFrameRateFps: 15,
+        },
+      },
+    });
+    const degradedQuality = await waitForServerMessage(
+      messages,
+      (message) => (
+        (message.type === 'remote-window-stream-quality-result' || message.type === 'remote-window-error')
+        && 'requestId' in message.payload
+        && message.payload.requestId === degradedQualityRequestId
+      ),
+      'remote window degraded quality update',
+    );
+    if (degradedQuality.type !== 'remote-window-stream-quality-result' || degradedQuality.payload.accepted !== true) {
+      fail(`degraded quality update failed: ${JSON.stringify(degradedQuality)}`);
+    }
+
+    const restoredQualityRequestId = requestId('quality-restored');
+    send(ws, {
+      type: 'remote-window-stream-quality-request',
+      payload: {
+        requestId: restoredQualityRequestId,
+        streamId,
+        targetId: target.streamTargetId,
+        videoBitrate: {
+          preset: '2mbps',
+          bitrateMbps: 2,
+          maxBitrateBps: 2_000_000,
+          maxFrameRateFps: 30,
+        },
+      },
+    });
+    const restoredQuality = await waitForServerMessage(
+      messages,
+      (message) => (
+        (message.type === 'remote-window-stream-quality-result' || message.type === 'remote-window-error')
+        && 'requestId' in message.payload
+        && message.payload.requestId === restoredQualityRequestId
+      ),
+      'remote window restored quality update',
+    );
+    if (restoredQuality.type !== 'remote-window-stream-quality-result' || restoredQuality.payload.accepted !== true) {
+      fail(`restored quality update failed: ${JSON.stringify(restoredQuality)}`);
+    }
 
     const center = targetCenter(target);
     const frontmostBeforeDefocus = {
@@ -909,6 +1014,7 @@ async function main() {
       targetPid,
       targetTitle: target.videoTarget.title,
       capture: started.payload.capture,
+      qualityUpdates: [degradedQuality.payload.videoBitrate, restoredQuality.payload.videoBitrate],
       trackSeen,
       stopped: stopped.payload,
       probeLines: readProbeLines(probeLines),

@@ -31,6 +31,7 @@ Owner feature: `terminal.buffer_render`.
 - `session-render-gate.test.ts` and `session-render-gate.tui-content.test.ts` prove render snapshots are isolated but still reproject changed cell content at the same absolute row.
 - `session-render-buffer-store.test.ts` proves the renderer publication boundary is monotonic: a lower-revision render snapshot cannot publish older rows over a newer render body, and a low revision is accepted again only after explicit `deleteSession()` resets that session render truth.
 - `buffer-sync-contract.test.ts` proves daemon live diff `buffer-sync` payloads cover the complete authoritative changed span between the first and last changed range; it must not send non-adjacent rows with holes that make the client preserve stale middle rows.
+- `terminal-mirror-runtime.backpressure.test.ts` proves an oversized changed-span body refresh is split into contiguous `buffer-sync` chunks that cover every source row in order; it must not fall back to a short live-tail payload that drops changed rows outside the tail.
 - `terminal-mirror-capture.test.ts` proves daemon capture does not publish a transient half frame and does not let a live mirror tail anchor regress when tmux/TUI reports a shorter alternate-screen window.
 - Negative path: `buffer-head` / cursor metadata must not become a body repaint source.
 
@@ -40,6 +41,7 @@ Owner feature: `terminal.buffer_render`.
 - Daemon capture black-box cases replay rapid TUI refresh shapes where one capture is a mixed frame and the next two captures are stable; the published mirror must equal the stable source, not the first transient source.
 - The black-box cases must cover:
   - many rows updating inside the same `[startIndex,endIndex)` window,
+  - oversized body refreshes where serialized bytes exceed the per-message budget,
   - fast TUI-like top/status/footer refresh,
   - alternate-screen tail anchor monotonicity when the visible pane has fewer authoritative rows than the existing mirror tail,
   - bottom row changing while the viewport stays in follow mode,

@@ -7172,6 +7172,75 @@ var SUBSCRIBER_PENDING_RANGE_LIMIT = 64;
 var SUBSCRIBER_PENDING_SPAN_LINE_LIMIT = 4096;
 var SUBSCRIBER_PENDING_AGE_LIMIT_MS = 15e3;
 var SUBSCRIBER_BUFFER_SYNC_MAX_BYTES = 128e3;
+function getWireLineAbsoluteIndex(line) {
+  if (!line) {
+    return null;
+  }
+  if ("i" in line && Number.isFinite(line.i)) {
+    return Math.max(0, Math.floor(line.i));
+  }
+  if ("index" in line && Number.isFinite(line.index)) {
+    return Math.max(0, Math.floor(line.index));
+  }
+  return null;
+}
+function buildBufferSyncMessageText(payload) {
+  return JSON.stringify({ type: "buffer-sync", payload });
+}
+function splitBufferSyncPayloadMessages(payload, maxBytes) {
+  const lines = Array.isArray(payload.lines) ? payload.lines : [];
+  const fullText = buildBufferSyncMessageText(payload);
+  if (Buffer.byteLength(fullText, "utf8") <= maxBytes || lines.length <= 1) {
+    return [{ payload, text: fullText }];
+  }
+  const messages = [];
+  let chunkLines = [];
+  let chunkStartIndex = null;
+  let chunkEndIndex = null;
+  const flushChunk = () => {
+    if (chunkLines.length === 0 || chunkStartIndex === null || chunkEndIndex === null) {
+      return;
+    }
+    const chunkPayload = {
+      ...payload,
+      startIndex: chunkStartIndex,
+      endIndex: chunkEndIndex,
+      lines: chunkLines
+    };
+    messages.push({ payload: chunkPayload, text: buildBufferSyncMessageText(chunkPayload) });
+    chunkLines = [];
+    chunkStartIndex = null;
+    chunkEndIndex = null;
+  };
+  for (const line of lines) {
+    const lineIndex = getWireLineAbsoluteIndex(line);
+    if (lineIndex === null) {
+      continue;
+    }
+    const candidateStartIndex = chunkStartIndex === null ? lineIndex : chunkStartIndex;
+    const candidateEndIndex = Math.max(chunkEndIndex === null ? lineIndex + 1 : chunkEndIndex, lineIndex + 1);
+    const candidateLines = [...chunkLines, line];
+    const candidatePayload = {
+      ...payload,
+      startIndex: candidateStartIndex,
+      endIndex: candidateEndIndex,
+      lines: candidateLines
+    };
+    const candidateText = buildBufferSyncMessageText(candidatePayload);
+    if (chunkLines.length > 0 && Buffer.byteLength(candidateText, "utf8") > maxBytes) {
+      flushChunk();
+      chunkStartIndex = lineIndex;
+      chunkEndIndex = lineIndex + 1;
+      chunkLines = [line];
+      continue;
+    }
+    chunkStartIndex = candidateStartIndex;
+    chunkEndIndex = candidateEndIndex;
+    chunkLines = candidateLines;
+  }
+  flushChunk();
+  return messages.length > 0 ? messages : [{ payload, text: fullText }];
+}
 function resolvePerSubscriberTransportSnapshot(sessions2, sessionId) {
   const session = sessions2.get(sessionId);
   return readTerminalTransportBackpressureSnapshot(session?.transport);
@@ -7207,7 +7276,8 @@ function createTerminalMirrorRuntime(deps) {
       highWaterActive: false,
       highWaterEnteredAt: 0,
       resyncRequired: false,
-      resyncReason: null
+      resyncReason: null,
+      pendingAllowOversizedTailSeed: false
     };
   }
   function ensureSubscriberBufferSyncState(session) {
@@ -7272,8 +7342,9 @@ function createTerminalMirrorRuntime(deps) {
       markSubscriberBufferSyncResyncRequired(state, "age", false);
     }
   }
-  function queueSubscriberPendingBufferSync(session, mirror, changedRanges, now = Date.now()) {
+  function queueSubscriberPendingBufferSync(session, mirror, changedRanges, now = Date.now(), options) {
     const state = ensureSubscriberBufferSyncState(session);
+    const hadPendingRanges = state.pendingChangedAbsoluteRanges.length > 0;
     const nextRanges = mergeAbsoluteRanges([
       ...state.pendingChangedAbsoluteRanges,
       ...changedRanges
@@ -7286,6 +7357,7 @@ function createTerminalMirrorRuntime(deps) {
     if (!state.pendingSince) {
       state.pendingSince = now;
     }
+    state.pendingAllowOversizedTailSeed = Boolean(options?.allowOversizedTailSeed) && !hadPendingRanges;
     state.pendingTransportId = session.transportId;
     const snapshot = readTerminalTransportBackpressureSnapshot(session.transport);
     if (snapshot?.backpressure) {
@@ -7303,6 +7375,7 @@ function createTerminalMirrorRuntime(deps) {
         )
       }];
       markSubscriberBufferSyncResyncRequired(state, "range-count", false);
+      state.pendingAllowOversizedTailSeed = false;
       return state;
     }
     if (pendingSpanLineCount(state.pendingChangedAbsoluteRanges) > SUBSCRIBER_PENDING_SPAN_LINE_LIMIT) {
@@ -7314,6 +7387,7 @@ function createTerminalMirrorRuntime(deps) {
         )
       }];
       markSubscriberBufferSyncResyncRequired(state, "span-lines", false);
+      state.pendingAllowOversizedTailSeed = false;
       return state;
     }
     validateSubscriberPendingBounds(state, now);
@@ -7346,6 +7420,7 @@ function createTerminalMirrorRuntime(deps) {
     state.highWaterEnteredAt = 0;
     state.resyncRequired = false;
     state.resyncReason = null;
+    state.pendingAllowOversizedTailSeed = false;
   }
   function isTmuxSessionUnavailableError(error) {
     const message = error instanceof Error ? error.message : String(error);
@@ -7528,7 +7603,7 @@ function createTerminalMirrorRuntime(deps) {
       });
     }
   }
-  function broadcastChangedRangesBufferSyncToSubscribers(mirror, changedRanges) {
+  function broadcastChangedRangesBufferSyncToSubscribers(mirror, changedRanges, options) {
     const normalizedRanges = normalizeAbsoluteRanges(changedRanges);
     if (normalizedRanges.length === 0) {
       return;
@@ -7542,7 +7617,7 @@ function createTerminalMirrorRuntime(deps) {
       if (session.bodySubscribed === false) {
         continue;
       }
-      queueSubscriberPendingBufferSync(session, mirror, normalizedRanges, now);
+      queueSubscriberPendingBufferSync(session, mirror, normalizedRanges, now, options);
       flushPendingSubscriberBufferSync(mirror, sessionId);
     }
   }
@@ -7566,7 +7641,7 @@ function createTerminalMirrorRuntime(deps) {
     if (shouldHoldPendingForBackpressure(state, session)) {
       return "backpressured";
     }
-    let payload = deps.buildChangedRangesBufferSyncPayload(
+    const payload = deps.buildChangedRangesBufferSyncPayload(
       mirror,
       state.pendingChangedAbsoluteRanges
     );
@@ -7574,10 +7649,10 @@ function createTerminalMirrorRuntime(deps) {
       clearSubscriberPendingBufferSync(state, Math.max(state.lastSentRevision, state.pendingLatestRevision));
       return "no-pending";
     }
-    let text = JSON.stringify({ type: "buffer-sync", payload });
-    if (Buffer.byteLength(text, "utf8") > SUBSCRIBER_BUFFER_SYNC_MAX_BYTES) {
-      payload = buildLiveTailBufferSyncPayload(mirror, { viewportRows: mirror.rows });
-      text = JSON.stringify({ type: "buffer-sync", payload });
+    let messages = splitBufferSyncPayloadMessages(payload, SUBSCRIBER_BUFFER_SYNC_MAX_BYTES);
+    if (messages.length > 1 && state.pendingAllowOversizedTailSeed) {
+      const tailPayload = buildLiveTailBufferSyncPayload(mirror, { viewportRows: mirror.rows });
+      messages = [{ payload: tailPayload, text: buildBufferSyncMessageText(tailPayload) }];
     }
     const traceId = `${session.id}:${Math.max(0, Math.floor(payload.revision || 0))}`;
     const traceBase = {
@@ -7587,26 +7662,28 @@ function createTerminalMirrorRuntime(deps) {
       subscriberId: session.id,
       transportKind: session.transport.kind
     };
-    deps.recordPerformanceTrace?.({
-      ...traceBase,
-      stage: "send-start",
-      at: Date.now(),
-      bytes: Buffer.byteLength(text, "utf8"),
-      lineCount: Array.isArray(payload.lines) ? payload.lines.length : 0
-    });
     try {
       ensureSessionReady(session, mirror);
-      deps.sendText(session.transport, text);
+      for (const message of messages) {
+        deps.recordPerformanceTrace?.({
+          ...traceBase,
+          stage: "send-start",
+          at: Date.now(),
+          bytes: Buffer.byteLength(message.text, "utf8"),
+          lineCount: Array.isArray(message.payload.lines) ? message.payload.lines.length : 0
+        });
+        deps.sendText(session.transport, message.text);
+        deps.recordPerformanceTrace?.({
+          ...traceBase,
+          stage: "send-done",
+          at: Date.now(),
+          bytes: Buffer.byteLength(message.text, "utf8"),
+          lineCount: Array.isArray(message.payload.lines) ? message.payload.lines.length : 0
+        });
+      }
     } catch {
       return "send-error";
     }
-    deps.recordPerformanceTrace?.({
-      ...traceBase,
-      stage: "send-done",
-      at: Date.now(),
-      bytes: Buffer.byteLength(text, "utf8"),
-      lineCount: Array.isArray(payload.lines) ? payload.lines.length : 0
-    });
     clearSubscriberPendingBufferSync(state, payload.revision);
     return "sent";
   }
@@ -7742,7 +7819,8 @@ function createTerminalMirrorRuntime(deps) {
       if (changedRanges.length > 0 || forceRevision) {
         broadcastChangedRangesBufferSyncToSubscribers(
           mirror,
-          forceRevision ? [{ startIndex: mirror.bufferStartIndex, endIndex: mirror.bufferStartIndex + mirror.bufferLines.length }] : changedRanges
+          forceRevision ? [{ startIndex: mirror.bufferStartIndex, endIndex: mirror.bufferStartIndex + mirror.bufferLines.length }] : changedRanges,
+          { allowOversizedTailSeed: forceRevision && changedRanges.length === 0 }
         );
         return true;
       }
@@ -13208,7 +13286,7 @@ var import_wrtc2 = __toESM(require_lib2(), 1);
 var DEFAULT_ITERM2_PYTHON_TIMEOUT_MS = 5e3;
 var DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS = 15e3;
 var DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS = 2e4;
-var DEFAULT_REMOTE_WINDOW_FRAME_RATE = 12;
+var DEFAULT_REMOTE_WINDOW_FRAME_RATE = 30;
 var DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 6e4;
 var REMOTE_WINDOW_INPUT_STALE_MS = 1e3;
 var REMOTE_WINDOW_INPUT_FOCUS_TIMEOUT_MS = 3e3;
@@ -13855,6 +13933,7 @@ struct CaptureConfig: Decodable {
     let windowBounds: Rect
     let cropRect: Rect
     let frameRate: Int
+    let queueDepth: Int
 }
 
 struct Rect: Decodable {
@@ -13982,6 +14061,7 @@ Task { @MainActor in
         let streamConfiguration = SCStreamConfiguration()
         streamConfiguration.capturesAudio = false
         streamConfiguration.pixelFormat = kCVPixelFormatType_32BGRA
+        streamConfiguration.queueDepth = max(1, min(1, config.queueDepth))
         streamConfiguration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, config.frameRate)))
         streamConfiguration.width = max(1, Int(config.cropRect.width.rounded()))
         streamConfiguration.height = max(1, Int(config.cropRect.height.rounded()))
@@ -14759,31 +14839,32 @@ function normalizeRemoteWindowVideoBitrateConfig(input) {
   const defaults = (() => {
     switch (input.preset) {
       case "2mbps":
-        return { bitrateMbps: 2, maxFrameRateFps: 5 };
+        return { bitrateMbps: 2, maxFrameRateFps: 30 };
       case "5mbps":
-        return { bitrateMbps: 5, maxFrameRateFps: 8 };
+        return { bitrateMbps: 5, maxFrameRateFps: 30 };
       case "10mbps":
-        return { bitrateMbps: 10, maxFrameRateFps: 12 };
+        return { bitrateMbps: 10, maxFrameRateFps: 30 };
       case "20mbps":
+        return { bitrateMbps: 20, maxFrameRateFps: 30 };
       case "fullscreen":
-        return { bitrateMbps: 20, maxFrameRateFps: 12 };
+        return { bitrateMbps: 20, maxFrameRateFps: 60 };
       default:
         throw new Error(`remote window video bitrate preset is invalid: ${String(input.preset)}`);
     }
   })();
   const bitrateMbps = defaults.bitrateMbps;
   const maxBitrateBps = bitrateMbps * 1e6;
-  if (input.bitrateMbps !== bitrateMbps || input.maxBitrateBps !== maxBitrateBps) {
+  if (input.bitrateMbps !== bitrateMbps || !Number.isFinite(input.maxBitrateBps) || input.maxBitrateBps <= 0 || input.maxBitrateBps > maxBitrateBps) {
     throw new Error("remote window video bitrate config does not match its preset");
   }
   const maxFrameRateFps = input.maxFrameRateFps ?? defaults.maxFrameRateFps;
-  if (maxFrameRateFps !== defaults.maxFrameRateFps) {
+  if (!Number.isFinite(maxFrameRateFps) || maxFrameRateFps < 5 || maxFrameRateFps > defaults.maxFrameRateFps) {
     throw new Error("remote window video frame-rate config does not match its preset");
   }
   return {
     preset: input.preset,
     bitrateMbps,
-    maxBitrateBps,
+    maxBitrateBps: Math.floor(input.maxBitrateBps),
     maxFrameRateFps
   };
 }
@@ -14812,6 +14893,19 @@ async function applyRemoteWindowVideoBitrate(sender, config) {
   };
   await sender.setParameters(nextParameters);
   return { applied: true, videoBitrate: config };
+}
+function addRemoteWindowVideoTrack(peerConnection, videoTrack, requestedVideoBitrate) {
+  if (requestedVideoBitrate && typeof peerConnection.addTransceiver === "function") {
+    const transceiver = peerConnection.addTransceiver(videoTrack, {
+      direction: "sendonly",
+      sendEncodings: [{
+        maxBitrate: requestedVideoBitrate.maxBitrateBps,
+        maxFramerate: requestedVideoBitrate.maxFrameRateFps
+      }]
+    });
+    return transceiver.sender;
+  }
+  return peerConnection.addTrack(videoTrack);
 }
 function validateStreamTargetForCapture(target) {
   if (!target.streamTargetId.trim()) {
@@ -14856,7 +14950,8 @@ function buildScreenCaptureKitConfig(target, frameRate) {
     title: target.videoTarget.title,
     windowBounds,
     cropRect,
-    frameRate
+    frameRate: Math.max(1, Math.floor(frameRate)),
+    queueDepth: 1
   };
 }
 function stopChildProcess(child) {
@@ -15010,7 +15105,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
   const iterm2PythonTimeoutMs = deps.iterm2PythonTimeoutMs || DEFAULT_ITERM2_PYTHON_TIMEOUT_MS;
   const appWindowCatalogTimeoutMs = deps.appWindowCatalogTimeoutMs || DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS;
   const captureStartupTimeoutMs = deps.captureStartupTimeoutMs || DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS;
-  const frameRate = deps.frameRate || DEFAULT_REMOTE_WINDOW_FRAME_RATE;
+  const defaultFrameRate = deps.frameRate || DEFAULT_REMOTE_WINDOW_FRAME_RATE;
   const runIterm2Python = deps.runIterm2Python || runDefaultIterm2Python;
   const runMacosAppWindowCatalog = deps.runMacosAppWindowCatalog || runDefaultMacosAppWindowCatalog;
   let remoteWindowInputHelper = null;
@@ -15336,8 +15431,13 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
       });
       const videoSource = createVideoSource();
       const videoTrack = videoSource.createTrack();
-      const videoSender = peerConnection.addTrack(videoTrack);
       const requestedVideoBitrate = normalizeRemoteWindowVideoBitrateConfig(payload.videoBitrate);
+      const videoSender = addRemoteWindowVideoTrack(
+        peerConnection,
+        videoTrack,
+        requestedVideoBitrate
+      );
+      const streamFrameRate = requestedVideoBitrate?.maxFrameRateFps ?? defaultFrameRate;
       let videoBitrate = null;
       let videoBitrateWarning = null;
       if (requestedVideoBitrate) {
@@ -15398,7 +15498,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
         sdp: payload.offer.sdp
       }));
       const captureSource = await captureSourceFactory(payload.target, {
-        frameRate,
+        frameRate: streamFrameRate,
         startupTimeoutMs: captureStartupTimeoutMs,
         swiftBinary,
         onFrame: (frame) => {

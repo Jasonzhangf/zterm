@@ -4,11 +4,13 @@ import type {
   RemoteWindowStreamStartedPayload,
   RemoteWindowStreamTargetManifest,
 } from './types';
+import type { RemoteWindowVideoStatsSample } from './remote-window-video-quality';
 
 export interface RemoteWindowReceiverStartResult {
   streamId: string;
   mediaStream: MediaStream;
   started: RemoteWindowStreamStartedPayload;
+  collectStats?: () => Promise<RemoteWindowVideoStatsSample | null>;
 }
 
 export const REMOTE_WINDOW_RECEIVER_TRACK_TIMEOUT_MS = 25_000;
@@ -22,6 +24,12 @@ interface ActiveRemoteWindowReceiverStream {
   trackTimeoutId: ReturnType<typeof setTimeout> | null;
   resolveTrack: ((mediaStream: MediaStream) => void) | null;
   rejectTrack: ((error: Error) => void) | null;
+  statsBaseline: {
+    framesDropped: number;
+    freezeCount: number;
+    jitterBufferDelay: number;
+    jitterBufferEmittedCount: number;
+  } | null;
 }
 
 function normalizeLocalCandidate(candidate: RTCIceCandidate): RemoteWindowStreamIceCandidatePayload['candidate'] {
@@ -194,6 +202,7 @@ export function createRemoteWindowReceiverRuntime(input?: {
         trackTimeoutId: null,
         resolveTrack: null,
         rejectTrack: null,
+        statsBaseline: null,
       };
       activeStreams.set(streamId, entry);
 
@@ -229,6 +238,7 @@ export function createRemoteWindowReceiverRuntime(input?: {
           streamId,
           mediaStream: attachedMediaStream,
           started,
+          collectStats: () => runtime.getStatsSample(streamId),
         };
       } catch (error) {
         cleanupEntry(entry, error instanceof Error ? error.message : String(error));
@@ -256,6 +266,59 @@ export function createRemoteWindowReceiverRuntime(input?: {
         return false;
       }
       return cleanupEntry(entry, 'Remote window stream stopped');
+    },
+
+    async getStatsSample(streamId: string): Promise<RemoteWindowVideoStatsSample | null> {
+      const entry = activeStreams.get(streamId.trim());
+      if (!entry || entry.cleanupDone || typeof entry.peerConnection.getStats !== 'function') {
+        return null;
+      }
+      const report = await entry.peerConnection.getStats();
+      const sample: RemoteWindowVideoStatsSample = { sampledAtMs: Date.now() };
+      report.forEach((item: RTCStats & Record<string, unknown>) => {
+        if (item.type === 'inbound-rtp' && item.kind === 'video') {
+          if (typeof item.framesPerSecond === 'number') sample.framesPerSecond = item.framesPerSecond;
+          const framesDropped = typeof item.framesDropped === 'number' ? item.framesDropped : 0;
+          const freezeCount = typeof item.freezeCount === 'number' ? item.freezeCount : 0;
+          const jitterBufferDelay = typeof item.jitterBufferDelay === 'number' ? item.jitterBufferDelay : 0;
+          const jitterBufferEmittedCount = typeof item.jitterBufferEmittedCount === 'number'
+            ? item.jitterBufferEmittedCount
+            : 0;
+          const previous = entry.statsBaseline;
+          sample.framesDropped = Math.max(0, framesDropped - (previous?.framesDropped ?? 0));
+          sample.freezeCount = Math.max(0, freezeCount - (previous?.freezeCount ?? 0));
+          const jitterDelayDelta = Math.max(0, jitterBufferDelay - (previous?.jitterBufferDelay ?? 0));
+          const jitterEmittedDelta = Math.max(0, jitterBufferEmittedCount - (previous?.jitterBufferEmittedCount ?? 0));
+          if (jitterEmittedDelta > 0) {
+            sample.jitterBufferDelayMs = (jitterDelayDelta / jitterEmittedDelta) * 1000;
+          }
+          if (typeof item.qualityLimitationReason === 'string') {
+            sample.qualityLimitationReason = item.qualityLimitationReason;
+          }
+          entry.statsBaseline = {
+            framesDropped,
+            freezeCount,
+            jitterBufferDelay,
+            jitterBufferEmittedCount,
+          };
+        }
+        if (item.type === 'candidate-pair' && (item.state === 'succeeded' || item.nominated === true)) {
+          if (typeof item.currentRoundTripTime === 'number') sample.rttMs = item.currentRoundTripTime * 1000;
+          if (typeof item.availableIncomingBitrate === 'number') {
+            sample.availableIncomingBitrateBps = item.availableIncomingBitrate;
+          }
+          if (typeof item.availableOutgoingBitrate === 'number') {
+            sample.availableOutgoingBitrateBps = item.availableOutgoingBitrate;
+          }
+        }
+        if (item.type === 'remote-inbound-rtp' && item.kind === 'video') {
+          if (typeof item.roundTripTime === 'number') sample.rttMs = item.roundTripTime * 1000;
+        }
+        if (item.type === 'remote-outbound-rtp' && item.kind === 'video' && typeof item.qualityLimitationReason === 'string') {
+          sample.qualityLimitationReason = item.qualityLimitationReason;
+        }
+      });
+      return sample;
     },
 
     handleStatus(payload: { streamId: string; phase: 'starting' | 'streaming' | 'stopped' }) {

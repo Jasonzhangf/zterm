@@ -3,6 +3,7 @@ import type {
 } from '../lib/terminal-performance-trace';
 import type {
   ServerMessage,
+  TerminalBufferPayload,
   TerminalCell,
   TerminalCursorState,
 } from '../lib/types';
@@ -132,6 +133,82 @@ const SUBSCRIBER_PENDING_SPAN_LINE_LIMIT = 4096;
 const SUBSCRIBER_PENDING_AGE_LIMIT_MS = 15_000;
 const SUBSCRIBER_BUFFER_SYNC_MAX_BYTES = 128_000;
 
+function getWireLineAbsoluteIndex(line: TerminalBufferPayload['lines'][number]) {
+  if (!line) {
+    return null;
+  }
+  if ('i' in line && Number.isFinite(line.i)) {
+    return Math.max(0, Math.floor(line.i));
+  }
+  if ('index' in line && Number.isFinite(line.index)) {
+    return Math.max(0, Math.floor(line.index));
+  }
+  return null;
+}
+
+function buildBufferSyncMessageText(payload: TerminalBufferPayload) {
+  return JSON.stringify({ type: 'buffer-sync', payload });
+}
+
+function splitBufferSyncPayloadMessages(payload: TerminalBufferPayload, maxBytes: number) {
+  const lines = Array.isArray(payload.lines) ? payload.lines : [];
+  const fullText = buildBufferSyncMessageText(payload);
+  if (Buffer.byteLength(fullText, 'utf8') <= maxBytes || lines.length <= 1) {
+    return [{ payload, text: fullText }];
+  }
+
+  const messages: Array<{ payload: TerminalBufferPayload; text: string }> = [];
+  let chunkLines: TerminalBufferPayload['lines'] = [];
+  let chunkStartIndex: number | null = null;
+  let chunkEndIndex: number | null = null;
+
+  const flushChunk = () => {
+    if (chunkLines.length === 0 || chunkStartIndex === null || chunkEndIndex === null) {
+      return;
+    }
+    const chunkPayload: TerminalBufferPayload = {
+      ...payload,
+      startIndex: chunkStartIndex,
+      endIndex: chunkEndIndex,
+      lines: chunkLines,
+    };
+    messages.push({ payload: chunkPayload, text: buildBufferSyncMessageText(chunkPayload) });
+    chunkLines = [];
+    chunkStartIndex = null;
+    chunkEndIndex = null;
+  };
+
+  for (const line of lines) {
+    const lineIndex = getWireLineAbsoluteIndex(line);
+    if (lineIndex === null) {
+      continue;
+    }
+    const candidateStartIndex: number = chunkStartIndex === null ? lineIndex : chunkStartIndex;
+    const candidateEndIndex: number = Math.max(chunkEndIndex === null ? lineIndex + 1 : chunkEndIndex, lineIndex + 1);
+    const candidateLines: TerminalBufferPayload['lines'] = [...chunkLines, line];
+    const candidatePayload: TerminalBufferPayload = {
+      ...payload,
+      startIndex: candidateStartIndex,
+      endIndex: candidateEndIndex,
+      lines: candidateLines,
+    };
+    const candidateText = buildBufferSyncMessageText(candidatePayload);
+    if (chunkLines.length > 0 && Buffer.byteLength(candidateText, 'utf8') > maxBytes) {
+      flushChunk();
+      chunkStartIndex = lineIndex;
+      chunkEndIndex = lineIndex + 1;
+      chunkLines = [line];
+      continue;
+    }
+    chunkStartIndex = candidateStartIndex;
+    chunkEndIndex = candidateEndIndex;
+    chunkLines = candidateLines;
+  }
+  flushChunk();
+
+  return messages.length > 0 ? messages : [{ payload, text: fullText }];
+}
+
 export function resolvePerSubscriberTransportSnapshot(
   sessions: Map<string, TerminalSession>,
   sessionId: string,
@@ -180,6 +257,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       highWaterEnteredAt: 0,
       resyncRequired: false,
       resyncReason: null,
+      pendingAllowOversizedTailSeed: false,
     };
   }
 
@@ -267,8 +345,10 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirror: SessionMirror,
     changedRanges: TerminalAbsoluteRange[],
     now = Date.now(),
+    options?: { allowOversizedTailSeed?: boolean },
   ) {
     const state = ensureSubscriberBufferSyncState(session);
+    const hadPendingRanges = state.pendingChangedAbsoluteRanges.length > 0;
     const nextRanges = mergeAbsoluteRanges([
       ...state.pendingChangedAbsoluteRanges,
       ...changedRanges,
@@ -281,6 +361,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     if (!state.pendingSince) {
       state.pendingSince = now;
     }
+    state.pendingAllowOversizedTailSeed = Boolean(options?.allowOversizedTailSeed) && !hadPendingRanges;
     state.pendingTransportId = session.transportId;
     const snapshot = readTerminalTransportBackpressureSnapshot(session.transport);
     if (snapshot?.backpressure) {
@@ -298,6 +379,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         ),
       }];
       markSubscriberBufferSyncResyncRequired(state, 'range-count', false);
+      state.pendingAllowOversizedTailSeed = false;
       return state;
     }
     if (pendingSpanLineCount(state.pendingChangedAbsoluteRanges) > SUBSCRIBER_PENDING_SPAN_LINE_LIMIT) {
@@ -309,6 +391,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         ),
       }];
       markSubscriberBufferSyncResyncRequired(state, 'span-lines', false);
+      state.pendingAllowOversizedTailSeed = false;
       return state;
     }
     validateSubscriberPendingBounds(state, now);
@@ -343,6 +426,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     state.highWaterEnteredAt = 0;
     state.resyncRequired = false;
     state.resyncReason = null;
+    state.pendingAllowOversizedTailSeed = false;
   }
 
   function isTmuxSessionUnavailableError(error: unknown) {
@@ -557,6 +641,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
   function broadcastChangedRangesBufferSyncToSubscribers(
     mirror: SessionMirror,
     changedRanges: Array<{ startIndex: number; endIndex: number }>,
+    options?: { allowOversizedTailSeed?: boolean },
   ) {
     const normalizedRanges = normalizeAbsoluteRanges(changedRanges);
     if (normalizedRanges.length === 0) {
@@ -571,7 +656,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       if (session.bodySubscribed === false) {
         continue;
       }
-      queueSubscriberPendingBufferSync(session, mirror, normalizedRanges, now);
+      queueSubscriberPendingBufferSync(session, mirror, normalizedRanges, now, options);
       flushPendingSubscriberBufferSync(mirror, sessionId);
     }
   }
@@ -605,7 +690,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     if (shouldHoldPendingForBackpressure(state, session)) {
       return 'backpressured';
     }
-    let payload = deps.buildChangedRangesBufferSyncPayload(
+    const payload = deps.buildChangedRangesBufferSyncPayload(
       mirror,
       state.pendingChangedAbsoluteRanges,
     );
@@ -613,10 +698,13 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       clearSubscriberPendingBufferSync(state, Math.max(state.lastSentRevision, state.pendingLatestRevision));
       return 'no-pending';
     }
-    let text = JSON.stringify({ type: 'buffer-sync', payload });
-    if (Buffer.byteLength(text, 'utf8') > SUBSCRIBER_BUFFER_SYNC_MAX_BYTES) {
-      payload = buildLiveTailBufferSyncPayload(mirror, { viewportRows: mirror.rows });
-      text = JSON.stringify({ type: 'buffer-sync', payload });
+    let messages = splitBufferSyncPayloadMessages(payload, SUBSCRIBER_BUFFER_SYNC_MAX_BYTES);
+    if (
+      messages.length > 1
+      && state.pendingAllowOversizedTailSeed
+    ) {
+      const tailPayload = buildLiveTailBufferSyncPayload(mirror, { viewportRows: mirror.rows });
+      messages = [{ payload: tailPayload, text: buildBufferSyncMessageText(tailPayload) }];
     }
     const traceId = `${session.id}:${Math.max(0, Math.floor(payload.revision || 0))}`;
     const traceBase = {
@@ -626,26 +714,28 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       subscriberId: session.id,
       transportKind: session.transport.kind,
     };
-    deps.recordPerformanceTrace?.({
-      ...traceBase,
-      stage: 'send-start',
-      at: Date.now(),
-      bytes: Buffer.byteLength(text, 'utf8'),
-      lineCount: Array.isArray(payload.lines) ? payload.lines.length : 0,
-    });
     try {
       ensureSessionReady(session, mirror);
-      deps.sendText(session.transport, text);
+      for (const message of messages) {
+        deps.recordPerformanceTrace?.({
+          ...traceBase,
+          stage: 'send-start',
+          at: Date.now(),
+          bytes: Buffer.byteLength(message.text, 'utf8'),
+          lineCount: Array.isArray(message.payload.lines) ? message.payload.lines.length : 0,
+        });
+        deps.sendText(session.transport, message.text);
+        deps.recordPerformanceTrace?.({
+          ...traceBase,
+          stage: 'send-done',
+          at: Date.now(),
+          bytes: Buffer.byteLength(message.text, 'utf8'),
+          lineCount: Array.isArray(message.payload.lines) ? message.payload.lines.length : 0,
+        });
+      }
     } catch {
       return 'send-error';
     }
-    deps.recordPerformanceTrace?.({
-      ...traceBase,
-      stage: 'send-done',
-      at: Date.now(),
-      bytes: Buffer.byteLength(text, 'utf8'),
-      lineCount: Array.isArray(payload.lines) ? payload.lines.length : 0,
-    });
     clearSubscriberPendingBufferSync(state, payload.revision);
     return 'sent';
   }
@@ -799,6 +889,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
             forceRevision
               ? [{ startIndex: mirror.bufferStartIndex, endIndex: mirror.bufferStartIndex + mirror.bufferLines.length }]
               : changedRanges,
+            { allowOversizedTailSeed: forceRevision && changedRanges.length === 0 },
           );
           return true;
         }

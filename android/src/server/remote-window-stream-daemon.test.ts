@@ -7,6 +7,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { RemoteWindowStreamStatusPayload } from '@zterm/shared/protocol';
 import {
   buildScreenCaptureKitStartupTimeoutMessage,
+  buildScreenCaptureKitConfig,
   buildRemoteWindowImagePasteInputPayloads,
   buildRemoteWindowInputConfig,
   buildMacosAppWindowTargets,
@@ -16,6 +17,7 @@ import {
   flattenIterm2SplitTree,
   isRemoteWindowInputConfigStale,
   MACOS_REMOTE_WINDOW_INPUT_SWIFT,
+  SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT,
   parseTmuxClientTargets,
   resolveRemoteWindowInputHelperTimeoutMs,
   shouldRefreshRemoteWindowQueuedInputAfterFocus,
@@ -98,6 +100,8 @@ class FakeRemoteWindowPeerConnection {
   public remoteDescription: RTCSessionDescriptionInit | null = null;
 
   public addTrack = vi.fn();
+
+  public addTransceiver = vi.fn();
 
   public close = vi.fn(() => {
     this.connectionState = 'closed';
@@ -1077,6 +1081,21 @@ sleep 2
     );
   });
 
+  it('configures ScreenCaptureKit for low latency by capping frame queue depth and explicit FPS interval', async () => {
+    expect(buildScreenCaptureKitConfig(makeAppStreamTarget(), 60)).toMatchObject({
+      frameRate: 60,
+      queueDepth: 1,
+      cropRect: { x: 10, y: 20, width: 800, height: 600 },
+    });
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('streamConfiguration.queueDepth = max(1, min(1, config.queueDepth))');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('streamConfiguration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, config.frameRate)))');
+
+    expect(buildScreenCaptureKitConfig(makeAppStreamTarget(), 60)).toMatchObject({
+      frameRate: 60,
+      queueDepth: 1,
+    });
+  });
+
   it('surfaces iTerm2 API failures explicitly instead of falling back to screenshot or terminal buffer truth', async () => {
     const runtime = createRemoteWindowStreamDaemonRuntime({
       platform: 'darwin',
@@ -1114,7 +1133,7 @@ sleep 2
       return {
         width: 2,
         height: 2,
-        frameRate: 12,
+        frameRate: options.frameRate,
         stop: captureStop,
       };
     });
@@ -1150,7 +1169,7 @@ sleep 2
         source: 'ScreenCaptureKit',
         frameWidth: 2,
         frameHeight: 2,
-        frameRate: 12,
+        frameRate: 30,
         targetKind: 'iterm2-pane',
       },
       transport: { kind: 'webrtc-video' },
@@ -1163,7 +1182,7 @@ sleep 2
     expect(captureSourceFactory).toHaveBeenCalledWith(
       makeStreamTarget(),
       expect.objectContaining({
-        frameRate: 12,
+        frameRate: 30,
         swiftBinary: 'swift',
         onFrame: expect.any(Function),
         onError: expect.any(Function),
@@ -1201,7 +1220,7 @@ sleep 2
   it('applies requested video bitrate at stream start and on quality update', async () => {
     const fakePeer = new FakeRemoteWindowPeerConnection();
     const fakeSender = makeFakeRtpSender();
-    fakePeer.addTrack.mockReturnValue(fakeSender);
+    fakePeer.addTransceiver.mockReturnValue({ sender: fakeSender });
     const fakeTrack = makeFakeMediaStreamTrack();
     const fakeVideoSource = {
       createTrack: vi.fn(() => fakeTrack),
@@ -1240,8 +1259,13 @@ sleep 2
     });
 
     expect('answer' in started ? started.capture.maxBitrateBps : null).toBe(5_000_000);
+    expect(fakePeer.addTransceiver).toHaveBeenCalledWith(fakeTrack, {
+      direction: 'sendonly',
+      sendEncodings: [{ maxBitrate: 5_000_000, maxFramerate: 30 }],
+    });
+    expect(fakePeer.addTrack).not.toHaveBeenCalled();
     expect(fakeSender.setParameters).toHaveBeenCalledWith(expect.objectContaining({
-      encodings: [expect.objectContaining({ maxBitrate: 5_000_000, maxFramerate: 8 })],
+      encodings: [expect.objectContaining({ maxBitrate: 5_000_000, maxFramerate: 30 })],
     }));
 
     const updated = await runtime.updateStreamQuality({
@@ -1256,16 +1280,17 @@ sleep 2
       streamId: 'stream-bitrate',
       targetId: 'iterm2-pane:window-1:tab-1:left',
       accepted: true,
-      videoBitrate: { preset: 'fullscreen', bitrateMbps: 20, maxBitrateBps: 20_000_000, maxFrameRateFps: 12 },
+      videoBitrate: { preset: 'fullscreen', bitrateMbps: 20, maxBitrateBps: 20_000_000, maxFrameRateFps: 60 },
     });
     expect(fakeSender.setParameters).toHaveBeenLastCalledWith(expect.objectContaining({
-      encodings: [expect.objectContaining({ maxBitrate: 20_000_000, maxFramerate: 12 })],
+      encodings: [expect.objectContaining({ maxBitrate: 20_000_000, maxFramerate: 60 })],
     }));
   });
 
   it('starts remote window stream without fabricating sender encodings for video bitrate', async () => {
     const fakePeer = new FakeRemoteWindowPeerConnection();
     const fakeSender = makeFakeRtpSender({ encodings: [] } as unknown as RTCRtpSendParameters);
+    fakePeer.addTransceiver = undefined as unknown as FakeRemoteWindowPeerConnection['addTransceiver'];
     fakePeer.addTrack.mockReturnValue(fakeSender);
     const fakeTrack = makeFakeMediaStreamTrack();
     const statuses: RemoteWindowStreamStatusPayload[] = [];
@@ -1330,7 +1355,7 @@ sleep 2
   it('rejects stream quality updates for the wrong target without changing sender parameters', async () => {
     const fakePeer = new FakeRemoteWindowPeerConnection();
     const fakeSender = makeFakeRtpSender();
-    fakePeer.addTrack.mockReturnValue(fakeSender);
+    fakePeer.addTransceiver.mockReturnValue({ sender: fakeSender });
     const fakeTrack = makeFakeMediaStreamTrack();
     const runtime = createRemoteWindowStreamDaemonRuntime({
       platform: 'darwin',

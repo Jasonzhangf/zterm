@@ -22,6 +22,17 @@ function row(char: string): TerminalCell[] {
   }];
 }
 
+function wideRow(seed: number, cols = 120): TerminalCell[] {
+  const text = `large-${String(seed).padStart(4, '0')}-`.padEnd(cols, String(seed % 10));
+  return Array.from(text).slice(0, cols).map((char) => ({
+    char: char.codePointAt(0) || 32,
+    fg: 256,
+    bg: 256,
+    flags: 0,
+    width: 1,
+  }));
+}
+
 function createSession(id: string, bufferedAmount = 0): TerminalSession {
   return {
     id,
@@ -159,6 +170,11 @@ function parseLastBufferSync(session: TerminalSession) {
   const lastCall = mock.mock.calls[mock.mock.calls.length - 1];
   const lastText = lastCall?.[0] as string | undefined;
   return lastText ? JSON.parse(lastText) : null;
+}
+
+function parseBufferSyncMessages(session: TerminalSession) {
+  const mock = session.transport?.sendText as ReturnType<typeof vi.fn>;
+  return mock.mock.calls.map((call) => JSON.parse(call[0] as string));
 }
 
 afterEach(() => {
@@ -310,6 +326,44 @@ describe('terminal mirror per-subscriber latest-authoritative backpressure', () 
       pendingLatestRevision: null,
       pendingChangedAbsoluteRanges: [],
       pendingSince: 0,
+      resyncRequired: false,
+    });
+  });
+
+  it('splits oversized body refreshes into contiguous chunks instead of falling back to live tail', async () => {
+    const subscriber = createSession('subscriber');
+    const lines = Array.from({ length: 1_600 }, (_, index) => wideRow(index));
+    const { runtime, mirror } = createHarness({
+      sessions: [subscriber],
+      captures: [lines],
+      changedRanges: [{ startIndex: 0, endIndex: lines.length }],
+    });
+
+    await runtime.syncMirrorCanonicalBuffer(mirror);
+
+    const messages = parseBufferSyncMessages(subscriber);
+    expect(messages.length).toBeGreaterThan(1);
+    expect(messages.every((message) => message.type === 'buffer-sync')).toBe(true);
+    expect(messages.every((message) => message.payload.revision === 1)).toBe(true);
+    expect(messages.every((message) => message.payload.availableStartIndex === 0)).toBe(true);
+    expect(messages.every((message) => message.payload.availableEndIndex === lines.length)).toBe(true);
+
+    const sentIndexes = messages.flatMap((message) => (
+      message.payload.lines.map((line: { i?: number; index?: number }) => line.i ?? line.index)
+    ));
+    expect(sentIndexes).toEqual(Array.from({ length: lines.length }, (_, index) => index));
+    expect(messages[0]!.payload.startIndex).toBe(0);
+    expect(messages[messages.length - 1]!.payload.endIndex).toBe(lines.length);
+    for (let index = 1; index < messages.length; index += 1) {
+      expect(messages[index]!.payload.startIndex).toBe(messages[index - 1]!.payload.endIndex);
+    }
+    for (const call of (subscriber.transport?.sendText as ReturnType<typeof vi.fn>).mock.calls) {
+      expect(Buffer.byteLength(call[0] as string, 'utf8')).toBeLessThanOrEqual(128_000);
+    }
+    expect(subscriber.bufferSyncState).toMatchObject({
+      lastSentRevision: 1,
+      pendingLatestRevision: null,
+      pendingChangedAbsoluteRanges: [],
       resyncRequired: false,
     });
   });

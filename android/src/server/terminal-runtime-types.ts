@@ -61,6 +61,7 @@ export interface TerminalSubscriberBufferSyncState {
   highWaterEnteredAt: number;
   resyncRequired: boolean;
   resyncReason: TerminalSubscriberBufferSyncResyncReason | null;
+  pendingAllowOversizedTailSeed: boolean;
 }
 
 export interface TerminalTransportSubscriber {

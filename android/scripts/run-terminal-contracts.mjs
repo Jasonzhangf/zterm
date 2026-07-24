@@ -43,6 +43,7 @@ const files = [
   'src/App.first-paint.real-terminal.test.tsx',
   'src/server/terminal-performance-scheduler.test.ts',
   'src/server/terminal-transport-runtime.test.ts',
+  'src/server/terminal-mirror-runtime.backpressure.test.ts',
   'src/server/terminal-mirror-runtime.test.ts',
   'src/server/terminal-mirror-capture.test.ts',
   'src/contexts/multi-pane-refresh.test.ts',

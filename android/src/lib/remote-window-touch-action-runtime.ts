@@ -108,12 +108,12 @@ export interface RemoteWindowTouchPointerRuntimeResult {
 const REMOTE_WINDOW_TOUCH_DRAG_THRESHOLD_PX = 8;
 const REMOTE_WINDOW_LOCAL_PAN_TAP_THRESHOLD_PX = 8;
 const REMOTE_WINDOW_INPUT_STALE_MS = 1_000;
-export const REMOTE_WINDOW_TOUCH_GESTURE_DEFAULT_SCALE = 2;
-export const REMOTE_WINDOW_TOUCH_GESTURE_MIN_SCALE = 0.5;
-export const REMOTE_WINDOW_TOUCH_GESTURE_MAX_SCALE = 4;
+export const REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION = 0.25;
+export const REMOTE_WINDOW_TOUCH_SCROLL_MIN_FRACTION = 0.125;
+export const REMOTE_WINDOW_TOUCH_SCROLL_MAX_FRACTION = 1;
 
 export interface RemoteWindowTouchGestureTuning {
-  scale?: number;
+  fraction?: number;
   inverted?: boolean;
 }
 
@@ -154,26 +154,35 @@ function clampNumber(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
-export function resolveRemoteWindowTouchGestureScaleRuntime(scale?: number) {
-  if (typeof scale !== 'number' || !Number.isFinite(scale)) {
-    return REMOTE_WINDOW_TOUCH_GESTURE_DEFAULT_SCALE;
+export function resolveRemoteWindowTouchScrollFractionRuntime(fraction?: number) {
+  if (typeof fraction !== 'number' || !Number.isFinite(fraction)) {
+    return REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION;
   }
   return clampNumber(
-    scale,
-    REMOTE_WINDOW_TOUCH_GESTURE_MIN_SCALE,
-    REMOTE_WINDOW_TOUCH_GESTURE_MAX_SCALE,
+    fraction,
+    REMOTE_WINDOW_TOUCH_SCROLL_MIN_FRACTION,
+    REMOTE_WINDOW_TOUCH_SCROLL_MAX_FRACTION,
   );
 }
 
-export function resolveRemoteWindowTouchGestureDeltaRuntime(
-  delta: number,
+export function resolveRemoteWindowTouchScrollDeltaRuntime(
+  sourceDelta: number,
+  visibleSizePx: number,
   tuning: RemoteWindowTouchGestureTuning = {},
 ) {
-  if (!Number.isFinite(delta) || delta === 0) {
+  if (
+    !Number.isFinite(sourceDelta)
+    || sourceDelta === 0
+    || !Number.isFinite(visibleSizePx)
+    || visibleSizePx <= 0
+  ) {
     return 0;
   }
   const direction = tuning.inverted ? -1 : 1;
-  return delta * resolveRemoteWindowTouchGestureScaleRuntime(tuning.scale) * direction;
+  return Math.sign(sourceDelta)
+    * visibleSizePx
+    * resolveRemoteWindowTouchScrollFractionRuntime(tuning.fraction)
+    * direction;
 }
 
 function emptyResult(
@@ -356,7 +365,7 @@ function buildGestureSwipeEvent(options: {
   startTimeMs: number;
   endTimeMs: number;
   geometry: RemoteWindowTouchSurfaceGeometry;
-  gestureScale?: number;
+  scrollFraction?: number;
   invertGestureDirection?: boolean;
 }): RemoteWindowInputEventPayload['event'] | null {
   const startPoint = resolveRemoteWindowTouchSurfacePointRuntime(
@@ -378,11 +387,11 @@ function buildGestureSwipeEvent(options: {
     return null;
   }
   const tuning = {
-    scale: options.gestureScale,
+    fraction: options.scrollFraction,
     inverted: options.invertGestureDirection,
   };
-  const deltaX = resolveRemoteWindowTouchGestureDeltaRuntime(rawDeltaX, tuning);
-  const deltaY = resolveRemoteWindowTouchGestureDeltaRuntime(rawDeltaY, tuning);
+  const deltaX = resolveRemoteWindowTouchScrollDeltaRuntime(rawDeltaX, options.geometry.sourceRect.width, tuning);
+  const deltaY = resolveRemoteWindowTouchScrollDeltaRuntime(rawDeltaY, options.geometry.sourceRect.height, tuning);
   const durationMs = Math.max(1, options.endTimeMs - options.startTimeMs);
   return {
     kind: 'gesture',
@@ -538,7 +547,7 @@ export function resolveRemoteWindowTouchPointerUpRuntime(options: {
   state: RemoteWindowTouchPointerState;
   pointer: RemoteWindowTouchPointerSample;
   geometry: RemoteWindowTouchSurfaceGeometry;
-  gestureScale?: number;
+  scrollFraction?: number;
   invertGestureDirection?: boolean;
 }): RemoteWindowTouchPointerRuntimeResult {
   const { state, pointer, geometry } = options;
@@ -592,7 +601,7 @@ export function resolveRemoteWindowTouchPointerUpRuntime(options: {
       startTimeMs: state.startAtMs,
       endTimeMs: pointer.timeMs,
       geometry,
-      gestureScale: options.gestureScale,
+      scrollFraction: options.scrollFraction,
       invertGestureDirection: options.invertGestureDirection,
     });
     return withRemoteEvents(

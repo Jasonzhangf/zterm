@@ -278,7 +278,7 @@ describe('RemoteWindowOverlay', () => {
       expect(startStream).toHaveBeenCalledWith('session-1', expect.objectContaining({
         streamTargetId: 'pane-1',
       }), expect.stringMatching(/^rw-stream-/), {
-        videoBitrate: { preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000, maxFrameRateFps: 5 },
+        videoBitrate: { preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000, maxFrameRateFps: 30 },
       });
     });
     await waitFor(() => {
@@ -391,7 +391,7 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.queryByTestId('remote-window-video-wallpaper')).toBeNull();
   });
 
-  it('caps fullscreen quality to low bitrate and 5fps when network information reports poor connectivity', async () => {
+  it('caps fullscreen quality to low bitrate and 30fps when network information reports poor connectivity', async () => {
     Object.defineProperty(navigator, 'connection', {
       configurable: true,
       value: {
@@ -433,7 +433,7 @@ describe('RemoteWindowOverlay', () => {
         preset: '2mbps',
         bitrateMbps: 2,
         maxBitrateBps: 2_000_000,
-        maxFrameRateFps: 5,
+        maxFrameRateFps: 30,
       },
     });
 
@@ -477,6 +477,55 @@ describe('RemoteWindowOverlay', () => {
     expect(startStream).toHaveBeenCalledTimes(1);
   });
 
+  it('downgrades active stream quality from WebRTC stats without restarting the stream', async () => {
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const collectStats = vi.fn(async () => ({
+      sampledAtMs: 1_000,
+      availableOutgoingBitrateBps: 250_000,
+      rttMs: 500,
+      framesPerSecond: 8,
+      framesDropped: 10,
+      freezeCount: 1,
+      qualityLimitationReason: 'bandwidth',
+    }));
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+      collectStats,
+    }));
+    const updateStreamQuality = vi.fn();
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        requestTargets={requestTargets}
+        startStream={startStream}
+        updateStreamQuality={updateStreamQuality}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
+    await screen.findByTestId('remote-window-video');
+
+    await waitFor(() => {
+      expect(updateStreamQuality).toHaveBeenCalledWith('session-1', expect.objectContaining({
+        videoBitrate: expect.objectContaining({
+          preset: '2mbps',
+          maxBitrateBps: 500_000,
+          maxFrameRateFps: 15,
+        }),
+      }));
+    }, { timeout: 3500 });
+    expect(startStream).toHaveBeenCalledTimes(1);
+
+    expect(startStream).toHaveBeenCalledTimes(1);
+  });
+
   it('keeps Android fullscreen projection from upgrading the desktop-area bitrate preset', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const target = makeTarget('app-1', 'TextEdit', 'app-window');
@@ -514,7 +563,7 @@ describe('RemoteWindowOverlay', () => {
     expect(startStream).toHaveBeenCalledWith('session-1', expect.objectContaining({
       streamTargetId: 'app-1',
     }), expect.stringMatching(/^rw-stream-/), {
-      videoBitrate: { preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000, maxFrameRateFps: 5 },
+      videoBitrate: { preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000, maxFrameRateFps: 30 },
     });
 
     fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
@@ -1074,11 +1123,11 @@ describe('RemoteWindowOverlay', () => {
     const primaryActions = screen.getByTestId('remote-window-primary-actions');
     const controlStrip = screen.getByTestId('remote-window-control-strip');
 
-    expect(dragHandle.querySelector('[data-testid="remote-window-touch-scroll-scale-select"]')).toBeNull();
+    expect(dragHandle.querySelector('[data-testid="remote-window-touch-scroll-fraction-select"]')).toBeNull();
     expect(dragHandle.querySelector('[data-testid="remote-window-bitrate-select"]')).toBeNull();
     expect(primaryActions.contains(screen.getByRole('button', { name: '全屏远程窗口' }))).toBe(true);
     expect(primaryActions.contains(screen.getByRole('button', { name: '关闭远程窗口' }))).toBe(true);
-    expect(controlStrip.contains(screen.getByTestId('remote-window-touch-scroll-scale-select'))).toBe(true);
+    expect(controlStrip.contains(screen.getByTestId('remote-window-touch-scroll-fraction-select'))).toBe(true);
     expect(controlStrip.contains(screen.getByTestId('remote-window-bitrate-select'))).toBe(true);
     expect(controlStrip.style.overflowX).toBe('auto');
   });
@@ -1415,7 +1464,7 @@ describe('RemoteWindowOverlay', () => {
         normalizedX: 0.5,
         normalizedY: 0.4,
         deltaX: 0,
-        deltaY: -60,
+        deltaY: -140,
       }),
     ]);
   });
@@ -1482,7 +1531,7 @@ describe('RemoteWindowOverlay', () => {
       normalizedX: 0.64,
       normalizedY: 0.4,
       deltaX: 0,
-      deltaY: -80,
+      deltaY: -140,
     });
   });
 
@@ -1635,7 +1684,7 @@ describe('RemoteWindowOverlay', () => {
         phase: 'end',
         pointerId: 52,
         deltaX: 0,
-        deltaY: -100,
+        deltaY: -140,
       }),
     ]);
     expect(Number.parseFloat(content.style.top || '0')).toBeCloseTo(topBeforeScroll, 1);
@@ -1973,7 +2022,7 @@ describe('RemoteWindowOverlay', () => {
         kind: 'scroll',
         unit: 'pixel',
         deltaX: 0,
-        deltaY: -80,
+        deltaY: -140,
       }),
     ]);
     expect(Number.parseFloat(content.style.top || '0')).toBeCloseTo(topBeforeScroll, 1);
@@ -2006,13 +2055,13 @@ describe('RemoteWindowOverlay', () => {
     await screen.findByTestId('remote-window-video');
     fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
 
-    fireEvent.change(screen.getByTestId('remote-window-touch-scroll-scale-select'), {
-      target: { value: '3' },
+    fireEvent.change(screen.getByTestId('remote-window-touch-scroll-fraction-select'), {
+      target: { value: '0.5' },
     });
     fireEvent.click(screen.getByTestId('remote-window-touch-scroll-direction-toggle'));
-    expect(screen.getByTestId('remote-window-touch-scroll-scale-select')).toHaveProperty('value', '3');
+    expect(screen.getByTestId('remote-window-touch-scroll-fraction-select')).toHaveProperty('value', '0.5');
     expect(screen.getByTestId('remote-window-touch-scroll-direction-toggle').textContent).toBe('反向');
-    expect(window.localStorage.getItem('zterm:remote-window:touch-scroll-scale-v1')).toBe('3');
+    expect(window.localStorage.getItem('zterm:remote-window:touch-scroll-fraction-v1')).toBe('0.5');
     expect(window.localStorage.getItem('zterm:remote-window:touch-scroll-inverted-v1')).toBe('true');
 
     const surface = screen.getByTestId('remote-window-video-surface');
@@ -2042,7 +2091,7 @@ describe('RemoteWindowOverlay', () => {
         kind: 'scroll',
         unit: 'pixel',
         deltaX: 0,
-        deltaY: 60,
+        deltaY: 280,
       }),
     ]);
   });
@@ -2112,7 +2161,7 @@ describe('RemoteWindowOverlay', () => {
         phase: 'end',
         pointerId: 41,
         deltaX: 0,
-        deltaY: -100,
+        deltaY: -140,
       }),
     ]);
     expect(Number.parseFloat(content.style.top || '0')).toBeCloseTo(topBeforePan, 1);
@@ -2247,7 +2296,7 @@ describe('RemoteWindowOverlay', () => {
         phase: 'end',
         pointerId: 51,
         deltaX: 0,
-        deltaY: -160,
+        deltaY: -125,
       }),
     ]);
     expect(Number.parseFloat(content.style.top || '0')).toBeCloseTo(0, 1);

@@ -37,6 +37,7 @@ class MockRTCPeerConnection {
   addTransceiver = vi.fn();
   addIceCandidate = vi.fn(async () => undefined);
   close = vi.fn();
+  getStats = vi.fn(async () => new Map());
 
   constructor(public readonly configuration: RTCConfiguration) {
     MockRTCPeerConnection.instances.push(this);
@@ -228,6 +229,86 @@ describe('remote window receiver runtime', () => {
       sdpMLineIndex: 0,
       usernameFragment: null,
     });
+  });
+
+  it('collects WebRTC video stats for adaptive remote-window quality decisions', async () => {
+    const runtime = createRuntime();
+    const started = runtime.startStream({
+      streamId: 'stream-stats',
+      target: makeTarget(),
+      sendIceCandidate: vi.fn(),
+      startRemote: vi.fn(async () => ({
+        requestId: 'rw-start-stats',
+        streamId: 'stream-stats',
+        targetId: 'pane-1',
+        answer: { type: 'answer' as const, sdp: 'remote-answer-sdp' },
+        capture: {
+          source: 'ScreenCaptureKit' as const,
+          frameWidth: 640,
+          frameHeight: 360,
+          frameRate: 30,
+          targetKind: 'iterm2-pane' as const,
+        },
+        transport: { kind: 'webrtc-video' as const },
+      })),
+    });
+    await flushMicrotasks();
+    const peer = MockRTCPeerConnection.instances[0]!;
+    peer.emitVideoTrack();
+    const result = await started;
+    peer.getStats.mockResolvedValue(new Map<string, unknown>([
+      ['inbound-video', {
+        type: 'inbound-rtp',
+        kind: 'video',
+        framesPerSecond: 18,
+        framesDropped: 9,
+        freezeCount: 1,
+        jitterBufferDelay: 0.32,
+        jitterBufferEmittedCount: 1,
+      }],
+      ['candidate', {
+        type: 'candidate-pair',
+        state: 'succeeded',
+        availableIncomingBitrate: 5_000_000,
+        currentRoundTripTime: 0.18,
+        availableOutgoingBitrate: 4_000_000,
+      }],
+      ['remote-inbound', {
+        type: 'remote-inbound-rtp',
+        kind: 'video',
+        roundTripTime: 0.21,
+      }],
+    ]));
+
+    await expect(result.collectStats?.()).resolves.toMatchObject({
+      framesPerSecond: 18,
+      framesDropped: 9,
+      freezeCount: 1,
+      jitterBufferDelayMs: 320,
+      availableIncomingBitrateBps: 5_000_000,
+      availableOutgoingBitrateBps: 4_000_000,
+      rttMs: 210,
+    });
+
+    peer.getStats.mockResolvedValue(new Map<string, unknown>([
+      ['inbound-video', {
+        type: 'inbound-rtp',
+        kind: 'video',
+        framesPerSecond: 30,
+        framesDropped: 10,
+        freezeCount: 1,
+        jitterBufferDelay: 0.34,
+        jitterBufferEmittedCount: 11,
+      }],
+    ]));
+
+    const nextSample = await result.collectStats?.();
+    expect(nextSample).toMatchObject({
+      framesPerSecond: 30,
+      framesDropped: 1,
+      freezeCount: 0,
+    });
+    expect(nextSample?.jitterBufferDelayMs).toBeCloseTo(2);
   });
 
   it('cleans the peer exactly once on stop and ignores late candidates', async () => {

@@ -44,7 +44,10 @@ import {
   readRemoteWindowVideoBitratePreset,
   resolveAdaptiveRemoteWindowVideoBitratePreset,
   resolveEffectiveRemoteWindowVideoBitratePreset,
+  resolveRemoteWindowVideoAdaptiveDecision,
   writeRemoteWindowVideoBitratePreset,
+  type RemoteWindowVideoAdaptiveState,
+  type RemoteWindowVideoStatsSample,
   type RemoteWindowNetworkQualityInput,
 } from '../../lib/remote-window-video-quality';
 import {
@@ -56,9 +59,9 @@ import {
   resolveRemoteWindowTouchPointerDownRuntime,
   resolveRemoteWindowTouchPointerMoveRuntime,
   resolveRemoteWindowTouchPointerUpRuntime,
-  resolveRemoteWindowTouchGestureDeltaRuntime,
+  resolveRemoteWindowTouchScrollDeltaRuntime,
   resolveRemoteWindowTouchSurfacePointRuntime,
-  REMOTE_WINDOW_TOUCH_GESTURE_DEFAULT_SCALE,
+  REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION,
   type RemoteWindowTouchInputDebugEvent,
   type RemoteWindowTouchLocalEffect,
   type RemoteWindowTouchPointerSample,
@@ -106,6 +109,7 @@ interface RemoteWindowStreamStartResult {
   streamId: string;
   mediaStream?: MediaStream | null;
   started?: RemoteWindowStreamStartedPayload;
+  collectStats?: () => Promise<RemoteWindowVideoStatsSample | null>;
 }
 
 interface RemoteWindowScreenshotSaveResult {
@@ -160,8 +164,8 @@ interface FullscreenViewportState {
 
 type FullscreenDisplayMode = 'fit' | 'fill';
 
-const REMOTE_WINDOW_TOUCH_SCROLL_SCALE_OPTIONS = [1, 1.5, 2, 3, 4] as const;
-type RemoteWindowTouchScrollScale = (typeof REMOTE_WINDOW_TOUCH_SCROLL_SCALE_OPTIONS)[number];
+const REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_OPTIONS = [0.125, 0.25, 0.5, 1] as const;
+type RemoteWindowTouchScrollFraction = (typeof REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_OPTIONS)[number];
 
 type NavigatorConnectionLike = EventTarget & {
   effectiveType?: string;
@@ -276,7 +280,7 @@ const REMOTE_WINDOW_FULLSCREEN_PINCH_SCALE_THRESHOLD = 0.08;
 const REMOTE_WINDOW_FULLSCREEN_TWO_FINGER_SCROLL_THRESHOLD_PX = 8;
 const REMOTE_WINDOW_CATALOG_UI_TIMEOUT_MS = 20_000;
 const REMOTE_WINDOW_CATALOG_PROJECTION_CACHE_TTL_MS = 60_000;
-const REMOTE_WINDOW_TOUCH_SCROLL_SCALE_STORAGE_KEY = 'zterm:remote-window:touch-scroll-scale-v1';
+const REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_STORAGE_KEY = 'zterm:remote-window:touch-scroll-fraction-v1';
 const REMOTE_WINDOW_TOUCH_SCROLL_INVERTED_STORAGE_KEY = 'zterm:remote-window:touch-scroll-inverted-v1';
 
 const initialFullscreenViewport: FullscreenViewportState = {
@@ -443,10 +447,10 @@ function isSurfacePointerPairGesture(
     || gesture.mode === 'twoFingerScroll';
 }
 
-function resolveTouchScrollScalePreset(value: unknown): RemoteWindowTouchScrollScale {
+function resolveTouchScrollFractionPreset(value: unknown): RemoteWindowTouchScrollFraction {
   const parsed = typeof value === 'number' ? value : Number(value);
-  const matched = REMOTE_WINDOW_TOUCH_SCROLL_SCALE_OPTIONS.find((option) => option === parsed);
-  return matched ?? REMOTE_WINDOW_TOUCH_GESTURE_DEFAULT_SCALE;
+  const matched = REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_OPTIONS.find((option) => option === parsed);
+  return matched ?? REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION;
 }
 
 function resolveRemoteWindowMinimapViewport(
@@ -655,24 +659,33 @@ function formatBitrateOption(preset: RemoteWindowVideoBitratePreset) {
   return `${buildRemoteWindowVideoBitrateConfig(preset).bitrateMbps} Mbps`;
 }
 
-function formatTouchScrollScaleOption(scale: RemoteWindowTouchScrollScale) {
-  return `滚动 ${scale}x`;
+function formatTouchScrollFractionOption(fraction: RemoteWindowTouchScrollFraction) {
+  if (fraction === 1) {
+    return '滚动 1 屏';
+  }
+  if (fraction === 0.5) {
+    return '滚动 1/2 屏';
+  }
+  if (fraction === 0.25) {
+    return '滚动 1/4 屏';
+  }
+  return '滚动 1/8 屏';
 }
 
-function readRemoteWindowTouchScrollScale(): RemoteWindowTouchScrollScale {
+function readRemoteWindowTouchScrollFraction(): RemoteWindowTouchScrollFraction {
   if (typeof window === 'undefined') {
-    return REMOTE_WINDOW_TOUCH_GESTURE_DEFAULT_SCALE;
+    return REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION;
   }
-  return resolveTouchScrollScalePreset(
-    window.localStorage.getItem(REMOTE_WINDOW_TOUCH_SCROLL_SCALE_STORAGE_KEY),
+  return resolveTouchScrollFractionPreset(
+    window.localStorage.getItem(REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_STORAGE_KEY),
   );
 }
 
-function writeRemoteWindowTouchScrollScale(scale: RemoteWindowTouchScrollScale) {
+function writeRemoteWindowTouchScrollFraction(fraction: RemoteWindowTouchScrollFraction) {
   if (typeof window === 'undefined') {
     return;
   }
-  window.localStorage.setItem(REMOTE_WINDOW_TOUCH_SCROLL_SCALE_STORAGE_KEY, String(scale));
+  window.localStorage.setItem(REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_STORAGE_KEY, String(fraction));
 }
 
 function readRemoteWindowTouchScrollInverted() {
@@ -739,7 +752,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const [fullscreenViewport, setFullscreenViewportState] = useState<FullscreenViewportState>(initialFullscreenViewport);
   const [fullscreenDisplayMode, setFullscreenDisplayModeState] = useState<FullscreenDisplayMode>(initialFullscreenDisplayMode);
   const [bitratePreset, setBitratePreset] = useState<RemoteWindowVideoBitratePreset>('5mbps');
-  const [touchScrollScale, setTouchScrollScaleState] = useState<RemoteWindowTouchScrollScale>(() => readRemoteWindowTouchScrollScale());
+  const [touchScrollFraction, setTouchScrollFractionState] = useState<RemoteWindowTouchScrollFraction>(() => readRemoteWindowTouchScrollFraction());
   const [touchScrollInverted, setTouchScrollInvertedState] = useState(() => readRemoteWindowTouchScrollInverted());
   const [networkQuality, setNetworkQuality] = useState<RemoteWindowNetworkQualityInput | null>(() => readRemoteWindowNetworkQuality());
   const [videoHasPlayed, setVideoHasPlayed] = useState(false);
@@ -753,7 +766,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const entryOffsetRef = useRef(entryOffset);
   const fullscreenViewportRef = useRef(fullscreenViewport);
   const fullscreenDisplayModeRef = useRef<FullscreenDisplayMode>(fullscreenDisplayMode);
-  const touchScrollScaleRef = useRef<RemoteWindowTouchScrollScale>(touchScrollScale);
+  const touchScrollFractionRef = useRef<RemoteWindowTouchScrollFraction>(touchScrollFraction);
   const touchScrollInvertedRef = useRef(touchScrollInverted);
   const floatingOverlayRef = useRef<HTMLDivElement | null>(null);
   const entryButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -764,6 +777,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const videoSurfaceRef = useRef<HTMLDivElement | null>(null);
   const videoElementRef = useRef<HTMLVideoElement | null>(null);
   const activeStreamIdRef = useRef<string | null>(null);
+  const collectStreamStatsRef = useRef<(() => Promise<RemoteWindowVideoStatsSample | null>) | null>(null);
+  const adaptiveVideoStateRef = useRef<RemoteWindowVideoAdaptiveState | null>(null);
   const lastAppliedStreamQualityKeyRef = useRef<string | null>(null);
   const surfacePointersRef = useRef<Map<number, SurfacePointerPosition>>(new Map());
   const surfaceGestureRef = useRef<SurfacePointerGesture | null>(null);
@@ -1004,10 +1019,10 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     setFullscreenDisplayModeState(next);
   }, []);
 
-  const setTouchScrollScale = useCallback((next: RemoteWindowTouchScrollScale) => {
-    touchScrollScaleRef.current = next;
-    setTouchScrollScaleState(next);
-    writeRemoteWindowTouchScrollScale(next);
+  const setTouchScrollFraction = useCallback((next: RemoteWindowTouchScrollFraction) => {
+    touchScrollFractionRef.current = next;
+    setTouchScrollFractionState(next);
+    writeRemoteWindowTouchScrollFraction(next);
   }, []);
 
   const setTouchScrollInverted = useCallback((next: boolean | ((current: boolean) => boolean)) => {
@@ -1225,9 +1240,13 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       });
     }
     activeStreamIdRef.current = null;
+    collectStreamStatsRef.current = null;
+    adaptiveVideoStateRef.current = null;
     lastAppliedStreamQualityKeyRef.current = null;
     setReceiverMediaStream(null);
     setReceiverFrameSize(null);
+    collectStreamStatsRef.current = null;
+    adaptiveVideoStateRef.current = null;
     setFloatingOffset({ x: 0, y: 0 });
     setFloatingOverlayWidthPx(null);
     resetFullscreenViewport();
@@ -1293,9 +1312,9 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     writeRemoteWindowVideoBitratePreset(state.target, nextPreset);
   }, [state]);
 
-  const handleTouchScrollScaleChange = useCallback((value: string) => {
-    setTouchScrollScale(resolveTouchScrollScalePreset(value));
-  }, [setTouchScrollScale]);
+  const handleTouchScrollFractionChange = useCallback((value: string) => {
+    setTouchScrollFraction(resolveTouchScrollFractionPreset(value));
+  }, [setTouchScrollFraction]);
 
   const handleToggleTouchScrollDirection = useCallback(() => {
     setTouchScrollInverted((current) => !current);
@@ -1336,17 +1355,19 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     ) {
       return;
     }
+    const videoBitrate = buildRemoteWindowVideoBitrateConfig(adaptiveBitratePreset);
     const qualityKey = [
       activeSessionId,
       state.streamId,
       state.target.streamTargetId,
       adaptiveBitratePreset,
+      videoBitrate.maxBitrateBps,
+      videoBitrate.maxFrameRateFps ?? '',
     ].join('|');
     if (lastAppliedStreamQualityKeyRef.current === qualityKey) {
       return;
     }
     lastAppliedStreamQualityKeyRef.current = qualityKey;
-    const videoBitrate = buildRemoteWindowVideoBitrateConfig(adaptiveBitratePreset);
     try {
       updateStreamQuality(activeSessionId, {
         streamId: state.streamId,
@@ -1356,6 +1377,68 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     } catch (error) {
       console.warn('[RemoteWindowOverlay] remote window bitrate update failed:', error);
     }
+  }, [activeSessionId, adaptiveBitratePreset, state, updateStreamQuality]);
+
+  useEffect(() => {
+    if (
+      state.phase !== 'targetLocked'
+      || !state.streamId
+      || !state.streamStarted
+      || !activeSessionId
+      || !updateStreamQuality
+      || !adaptiveBitratePreset
+    ) {
+      return;
+    }
+    const streamId = state.streamId;
+    const targetId = state.target.streamTargetId;
+    let stopped = false;
+    const tick = async () => {
+      const collectStats = collectStreamStatsRef.current;
+      if (!collectStats) {
+        return;
+      }
+      try {
+        const sample = await collectStats();
+        if (stopped || !sample) {
+          return;
+        }
+        const baseline = buildRemoteWindowVideoBitrateConfig(adaptiveBitratePreset);
+        const decision = resolveRemoteWindowVideoAdaptiveDecision({
+          baseline,
+          previous: adaptiveVideoStateRef.current,
+          sample,
+        });
+        adaptiveVideoStateRef.current = decision.state;
+        const qualityKey = [
+          activeSessionId,
+          streamId,
+          targetId,
+          decision.config.preset,
+          decision.config.maxBitrateBps,
+          decision.config.maxFrameRateFps ?? '',
+        ].join('|');
+        if (lastAppliedStreamQualityKeyRef.current === qualityKey) {
+          return;
+        }
+        lastAppliedStreamQualityKeyRef.current = qualityKey;
+        updateStreamQuality(activeSessionId, {
+          streamId,
+          targetId,
+          videoBitrate: decision.config,
+        });
+      } catch (error) {
+        console.warn('[RemoteWindowOverlay] remote window stats quality update failed:', error);
+      }
+    };
+    const timer = window.setInterval(() => {
+      void tick();
+    }, 2000);
+    void tick();
+    return () => {
+      stopped = true;
+      window.clearInterval(timer);
+    };
   }, [activeSessionId, adaptiveBitratePreset, state, updateStreamQuality]);
 
   const updateFloatingDragFromPointer = useCallback((pointerId: number, clientX: number, clientY: number) => {
@@ -1770,6 +1853,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       streamId,
       target.streamTargetId,
       adaptiveStartBitratePreset,
+      videoBitrate.maxBitrateBps,
+      videoBitrate.maxFrameRateFps ?? '',
     ].join('|');
     const startingState = (current: RemoteWindowOverlayState) => beginRemoteWindowStreamSetup(
       selectRemoteWindowTarget(current, target.streamTargetId),
@@ -1794,12 +1879,15 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         if (activeStreamIdRef.current === result.streamId) {
           setReceiverMediaStream(result.mediaStream || null);
           setReceiverFrameSize(resolveStartedCaptureFrameSize(result.started));
+          collectStreamStatsRef.current = typeof result.collectStats === 'function' ? result.collectStats : null;
         }
       })
       .catch((error) => {
         if (activeStreamIdRef.current === streamId) {
           setReceiverMediaStream(null);
           setReceiverFrameSize(null);
+          collectStreamStatsRef.current = null;
+          adaptiveVideoStateRef.current = null;
         }
         setState((current) => failRemoteWindowStream(startingState(current), streamId, error));
       });
@@ -2113,18 +2201,21 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           event.stopPropagation();
           return;
         }
-        const scrollPayload = resolveScrollInputEvent(
-          midpoint.clientX,
-          midpoint.clientY,
-          resolveRemoteWindowTouchGestureDeltaRuntime(midpointDeltaX, {
-            scale: touchScrollScaleRef.current,
-            inverted: touchScrollInvertedRef.current,
-          }),
-          resolveRemoteWindowTouchGestureDeltaRuntime(midpointDeltaY, {
-            scale: touchScrollScaleRef.current,
-            inverted: touchScrollInvertedRef.current,
-          }),
-        );
+        const geometry = resolveSurfaceInputGeometry();
+        const scrollPayload = geometry
+          ? resolveScrollInputEvent(
+              midpoint.clientX,
+              midpoint.clientY,
+              resolveRemoteWindowTouchScrollDeltaRuntime(midpointDeltaX, geometry.sourceRect.width, {
+                fraction: touchScrollFractionRef.current,
+                inverted: touchScrollInvertedRef.current,
+              }),
+              resolveRemoteWindowTouchScrollDeltaRuntime(midpointDeltaY, geometry.sourceRect.height, {
+                fraction: touchScrollFractionRef.current,
+                inverted: touchScrollInvertedRef.current,
+              }),
+            )
+          : null;
         surfaceGestureRef.current = {
           mode: 'twoFingerScroll',
           pointerIds: gesture.pointerIds,
@@ -2201,18 +2292,21 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         return;
       }
 
-      const scrollPayload = resolveScrollInputEvent(
-        midpoint.clientX,
-        midpoint.clientY,
-        resolveRemoteWindowTouchGestureDeltaRuntime(midpointDeltaX, {
-          scale: touchScrollScaleRef.current,
-          inverted: touchScrollInvertedRef.current,
-        }),
-        resolveRemoteWindowTouchGestureDeltaRuntime(midpointDeltaY, {
-          scale: touchScrollScaleRef.current,
-          inverted: touchScrollInvertedRef.current,
-        }),
-      );
+      const geometry = resolveSurfaceInputGeometry();
+      const scrollPayload = geometry
+        ? resolveScrollInputEvent(
+            midpoint.clientX,
+            midpoint.clientY,
+            resolveRemoteWindowTouchScrollDeltaRuntime(midpointDeltaX, geometry.sourceRect.width, {
+              fraction: touchScrollFractionRef.current,
+              inverted: touchScrollInvertedRef.current,
+            }),
+            resolveRemoteWindowTouchScrollDeltaRuntime(midpointDeltaY, geometry.sourceRect.height, {
+              fraction: touchScrollFractionRef.current,
+              inverted: touchScrollInvertedRef.current,
+            }),
+          )
+        : null;
       surfaceGestureRef.current = {
         mode: 'twoFingerScroll',
         pointerIds: gesture.pointerIds,
@@ -2295,7 +2389,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           state: runtimeGesture,
           pointer: pointerSampleFromReactEvent(event),
           geometry,
-          gestureScale: touchScrollScaleRef.current,
+          scrollFraction: touchScrollFractionRef.current,
           invertGestureDirection: touchScrollInvertedRef.current,
         });
         applyRemoteWindowTouchPointerResult(result);
@@ -2778,15 +2872,15 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
             ))}
           </select>
           <select
-            data-testid="remote-window-touch-scroll-scale-select"
+            data-testid="remote-window-touch-scroll-fraction-select"
             data-no-drag="true"
             aria-label="远程窗口滚动幅度"
-            value={String(touchScrollScale)}
-            onChange={(event) => handleTouchScrollScaleChange(event.currentTarget.value)}
-            style={styles.touchScrollScaleSelect}
+            value={String(touchScrollFraction)}
+            onChange={(event) => handleTouchScrollFractionChange(event.currentTarget.value)}
+            style={styles.touchScrollFractionSelect}
           >
-            {REMOTE_WINDOW_TOUCH_SCROLL_SCALE_OPTIONS.map((scale) => (
-              <option key={scale} value={scale}>{formatTouchScrollScaleOption(scale)}</option>
+            {REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_OPTIONS.map((fraction) => (
+              <option key={fraction} value={fraction}>{formatTouchScrollFractionOption(fraction)}</option>
             ))}
           </select>
           <button
@@ -3108,7 +3202,7 @@ const styles: Record<string, CSSProperties> = {
     fontWeight: 850,
     outline: 'none',
   },
-  touchScrollScaleSelect: {
+  touchScrollFractionSelect: {
     flex: '0 0 auto',
     height: 32,
     maxWidth: 92,

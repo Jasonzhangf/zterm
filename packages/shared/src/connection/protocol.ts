@@ -218,7 +218,7 @@ export interface RemoteWindowVideoBitrateConfig {
   preset: RemoteWindowVideoBitratePreset;
   bitrateMbps: 2 | 5 | 10 | 20;
   maxBitrateBps: number;
-  maxFrameRateFps?: 5 | 8 | 10 | 12;
+  maxFrameRateFps?: 5 | 8 | 10 | 12 | 15 | 30 | 60;
 }
 
 export interface RemoteWindowStreamStartRequestPayload {

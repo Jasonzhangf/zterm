@@ -23,7 +23,7 @@ import type {
 const DEFAULT_ITERM2_PYTHON_TIMEOUT_MS = 5000;
 const DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS = 15000;
 const DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS = 20000;
-const DEFAULT_REMOTE_WINDOW_FRAME_RATE = 12;
+const DEFAULT_REMOTE_WINDOW_FRAME_RATE = 30;
 const DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 60_000;
 const REMOTE_WINDOW_INPUT_STALE_MS = 1_000;
 const REMOTE_WINDOW_INPUT_FOCUS_TIMEOUT_MS = 3_000;
@@ -893,7 +893,7 @@ if let rawConfig = ProcessInfo.processInfo.environment["ZTERM_REMOTE_WINDOW_INPU
 }
 `;
 
-const SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT = String.raw`
+export const SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT = String.raw`
 import AppKit
 import CoreGraphics
 import CoreMedia
@@ -907,6 +907,7 @@ struct CaptureConfig: Decodable {
     let windowBounds: Rect
     let cropRect: Rect
     let frameRate: Int
+    let queueDepth: Int
 }
 
 struct Rect: Decodable {
@@ -1034,6 +1035,7 @@ Task { @MainActor in
         let streamConfiguration = SCStreamConfiguration()
         streamConfiguration.capturesAudio = false
         streamConfiguration.pixelFormat = kCVPixelFormatType_32BGRA
+        streamConfiguration.queueDepth = max(1, min(1, config.queueDepth))
         streamConfiguration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, config.frameRate)))
         streamConfiguration.width = max(1, Int(config.cropRect.width.rounded()))
         streamConfiguration.height = max(1, Int(config.cropRect.height.rounded()))
@@ -2018,31 +2020,41 @@ function normalizeRemoteWindowVideoBitrateConfig(
   const defaults = (() => {
     switch (input.preset) {
       case '2mbps':
-        return { bitrateMbps: 2 as const, maxFrameRateFps: 5 as const };
+        return { bitrateMbps: 2 as const, maxFrameRateFps: 30 as const };
       case '5mbps':
-        return { bitrateMbps: 5 as const, maxFrameRateFps: 8 as const };
+        return { bitrateMbps: 5 as const, maxFrameRateFps: 30 as const };
       case '10mbps':
-        return { bitrateMbps: 10 as const, maxFrameRateFps: 12 as const };
+        return { bitrateMbps: 10 as const, maxFrameRateFps: 30 as const };
       case '20mbps':
+        return { bitrateMbps: 20 as const, maxFrameRateFps: 30 as const };
       case 'fullscreen':
-        return { bitrateMbps: 20 as const, maxFrameRateFps: 12 as const };
+        return { bitrateMbps: 20 as const, maxFrameRateFps: 60 as const };
       default:
         throw new Error(`remote window video bitrate preset is invalid: ${String(input.preset)}`);
     }
   })();
   const bitrateMbps = defaults.bitrateMbps;
   const maxBitrateBps = bitrateMbps * 1_000_000;
-  if (input.bitrateMbps !== bitrateMbps || input.maxBitrateBps !== maxBitrateBps) {
+  if (
+    input.bitrateMbps !== bitrateMbps
+    || !Number.isFinite(input.maxBitrateBps)
+    || input.maxBitrateBps <= 0
+    || input.maxBitrateBps > maxBitrateBps
+  ) {
     throw new Error('remote window video bitrate config does not match its preset');
   }
   const maxFrameRateFps = input.maxFrameRateFps ?? defaults.maxFrameRateFps;
-  if (maxFrameRateFps !== defaults.maxFrameRateFps) {
+  if (
+    !Number.isFinite(maxFrameRateFps)
+    || maxFrameRateFps < 5
+    || maxFrameRateFps > defaults.maxFrameRateFps
+  ) {
     throw new Error('remote window video frame-rate config does not match its preset');
   }
   return {
     preset: input.preset,
     bitrateMbps,
-    maxBitrateBps,
+    maxBitrateBps: Math.floor(input.maxBitrateBps),
     maxFrameRateFps,
   };
 }
@@ -2087,6 +2099,24 @@ async function applyRemoteWindowVideoBitrate(
   return { applied: true, videoBitrate: config };
 }
 
+function addRemoteWindowVideoTrack(
+  peerConnection: RTCPeerConnection,
+  videoTrack: MediaStreamTrack,
+  requestedVideoBitrate: RemoteWindowVideoBitrateConfig | null,
+) {
+  if (requestedVideoBitrate && typeof peerConnection.addTransceiver === 'function') {
+    const transceiver = peerConnection.addTransceiver(videoTrack, {
+      direction: 'sendonly',
+      sendEncodings: [{
+        maxBitrate: requestedVideoBitrate.maxBitrateBps,
+        maxFramerate: requestedVideoBitrate.maxFrameRateFps,
+      }],
+    });
+    return transceiver.sender;
+  }
+  return peerConnection.addTrack(videoTrack);
+}
+
 function validateStreamTargetForCapture(target: RemoteWindowStreamTargetManifest) {
   if (!target.streamTargetId.trim()) {
     throw new Error('remote window stream target id is required');
@@ -2129,7 +2159,7 @@ function convertRgbaToI420Frame(
   return i420;
 }
 
-function buildScreenCaptureKitConfig(target: RemoteWindowStreamTargetManifest, frameRate: number) {
+export function buildScreenCaptureKitConfig(target: RemoteWindowStreamTargetManifest, frameRate: number) {
   const { windowBounds, cropRect } = validateStreamTargetForCapture(target);
   return {
     windowId: target.videoTarget.windowId,
@@ -2137,7 +2167,8 @@ function buildScreenCaptureKitConfig(target: RemoteWindowStreamTargetManifest, f
     title: target.videoTarget.title,
     windowBounds,
     cropRect,
-    frameRate,
+    frameRate: Math.max(1, Math.floor(frameRate)),
+    queueDepth: 1,
   };
 }
 
@@ -2319,7 +2350,7 @@ export function createRemoteWindowStreamDaemonRuntime(
   const iterm2PythonTimeoutMs = deps.iterm2PythonTimeoutMs || DEFAULT_ITERM2_PYTHON_TIMEOUT_MS;
   const appWindowCatalogTimeoutMs = deps.appWindowCatalogTimeoutMs || DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS;
   const captureStartupTimeoutMs = deps.captureStartupTimeoutMs || DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS;
-  const frameRate = deps.frameRate || DEFAULT_REMOTE_WINDOW_FRAME_RATE;
+  const defaultFrameRate = deps.frameRate || DEFAULT_REMOTE_WINDOW_FRAME_RATE;
   const runIterm2Python = deps.runIterm2Python || runDefaultIterm2Python;
   const runMacosAppWindowCatalog = deps.runMacosAppWindowCatalog || runDefaultMacosAppWindowCatalog;
   let remoteWindowInputHelper: RemoteWindowInputHelper | null = null;
@@ -2712,8 +2743,13 @@ export function createRemoteWindowStreamDaemonRuntime(
       });
       const videoSource = createVideoSource();
       const videoTrack = videoSource.createTrack();
-      const videoSender = peerConnection.addTrack(videoTrack) as RTCRtpSender | undefined;
       const requestedVideoBitrate = normalizeRemoteWindowVideoBitrateConfig(payload.videoBitrate);
+      const videoSender = addRemoteWindowVideoTrack(
+        peerConnection,
+        videoTrack,
+        requestedVideoBitrate,
+      ) as RTCRtpSender | undefined;
+      const streamFrameRate = requestedVideoBitrate?.maxFrameRateFps ?? defaultFrameRate;
       let videoBitrate: RemoteWindowVideoBitrateConfig | null = null;
       let videoBitrateWarning: string | null = null;
       if (requestedVideoBitrate) {
@@ -2783,7 +2819,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       }));
 
       const captureSource = await captureSourceFactory(payload.target, {
-        frameRate,
+        frameRate: streamFrameRate,
         startupTimeoutMs: captureStartupTimeoutMs,
         swiftBinary,
         onFrame: (frame) => {

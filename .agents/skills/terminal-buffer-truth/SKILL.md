@@ -200,6 +200,7 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
 - subscriber backpressure 禁止直接永久 skip 当前 revision：
   - 每个 subscriber 最多保留一个 bounded pending latest revision 和合并后的 absolute ranges；
   - pending flush 时必须从当前 mirror store 读取最新权威行，禁止保存历史 serialized payload/cells；
+  - changed span 序列化后超过单消息预算时，必须按 absolute row 连续切成同 revision 多个 `buffer-sync`，覆盖原 span 的每一行；禁止裁成 live tail，否则超过一屏的大刷新会静默丢掉 source rows；
   - high/low water 必须迟滞；send error/non-open/旧 generation 不得清 pending 或推进 sent revision；
   - 一个 slow subscriber 不得降低 healthy subscriber cadence；输出停止并 drain 后必须到达 daemon latest revision。
 - mirror capture 允许的性能优化只有同一 writer 内的 authoritative hot-range patch：

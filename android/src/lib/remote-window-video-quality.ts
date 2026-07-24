@@ -23,6 +23,31 @@ export interface RemoteWindowNetworkQualityInput {
   saveData?: boolean | null;
 }
 
+export interface RemoteWindowVideoStatsSample {
+  sampledAtMs: number;
+  rttMs?: number | null;
+  availableIncomingBitrateBps?: number | null;
+  availableOutgoingBitrateBps?: number | null;
+  framesPerSecond?: number | null;
+  framesDropped?: number | null;
+  freezeCount?: number | null;
+  jitterBufferDelayMs?: number | null;
+  qualityLimitationReason?: string | null;
+}
+
+export interface RemoteWindowVideoAdaptiveState {
+  mode: 'normal' | 'degraded';
+  degradedAtMs: number | null;
+  stableSinceMs: number | null;
+  weakSampleCount: number;
+}
+
+export interface RemoteWindowVideoAdaptiveDecision {
+  state: RemoteWindowVideoAdaptiveState;
+  config: RemoteWindowVideoBitrateConfig;
+  reason: 'baseline' | 'downgrade' | 'hold' | 'restore';
+}
+
 type RemoteWindowVideoBitrateStorage = {
   version: 1;
   byTarget: Record<string, RemoteWindowVideoBitratePreset>;
@@ -151,16 +176,134 @@ export function buildRemoteWindowVideoBitrateConfig(
       : preset === '10mbps'
         ? 10
         : 20;
-  const maxFrameRateFps = preset === '2mbps'
-    ? 5
-    : preset === '5mbps'
-      ? 8
-      : 12;
+  const maxFrameRateFps = preset === 'fullscreen'
+    ? 60
+    : 30;
   return {
     preset,
     bitrateMbps,
     maxBitrateBps: bitrateMbps * 1_000_000,
     maxFrameRateFps,
+  };
+}
+
+export function buildDegradedRemoteWindowVideoBitrateConfig(
+  config: RemoteWindowVideoBitrateConfig,
+): RemoteWindowVideoBitrateConfig {
+  const maxFrameRateFps = Math.max(5, Math.floor((config.maxFrameRateFps ?? 30) / 2)) as RemoteWindowVideoBitrateConfig['maxFrameRateFps'];
+  return {
+    ...config,
+    bitrateMbps: config.bitrateMbps,
+    maxBitrateBps: Math.max(500_000, Math.floor(config.maxBitrateBps / 4)),
+    maxFrameRateFps,
+  };
+}
+
+function videoStatsIndicateWeakNetwork(sample: RemoteWindowVideoStatsSample, baseline: RemoteWindowVideoBitrateConfig) {
+  const targetBitrate = Math.max(1, Math.floor(baseline.maxBitrateBps || 1));
+  const availableBitrate = typeof sample.availableIncomingBitrateBps === 'number' && Number.isFinite(sample.availableIncomingBitrateBps)
+    ? sample.availableIncomingBitrateBps
+    : typeof sample.availableOutgoingBitrateBps === 'number' && Number.isFinite(sample.availableOutgoingBitrateBps)
+      ? sample.availableOutgoingBitrateBps
+      : null;
+  const rttMs = typeof sample.rttMs === 'number' && Number.isFinite(sample.rttMs)
+    ? sample.rttMs
+    : null;
+  const fps = typeof sample.framesPerSecond === 'number' && Number.isFinite(sample.framesPerSecond)
+    ? sample.framesPerSecond
+    : null;
+  const dropped = typeof sample.framesDropped === 'number' && Number.isFinite(sample.framesDropped)
+    ? sample.framesDropped
+    : 0;
+  const freezeCount = typeof sample.freezeCount === 'number' && Number.isFinite(sample.freezeCount)
+    ? sample.freezeCount
+    : 0;
+  const jitterDelayMs = typeof sample.jitterBufferDelayMs === 'number' && Number.isFinite(sample.jitterBufferDelayMs)
+    ? sample.jitterBufferDelayMs
+    : 0;
+  const reason = `${sample.qualityLimitationReason || ''}`.toLowerCase();
+
+  return Boolean(
+    (availableBitrate !== null && availableBitrate < targetBitrate * 0.65)
+    || (rttMs !== null && rttMs >= 350)
+    || (fps !== null && fps < Math.max(5, (baseline.maxFrameRateFps ?? 30) * 0.6))
+    || dropped >= 8
+    || freezeCount > 0
+    || jitterDelayMs >= 250
+    || (reason && reason !== 'none'),
+  );
+}
+
+export function resolveRemoteWindowVideoAdaptiveDecision(options: {
+  baseline: RemoteWindowVideoBitrateConfig;
+  previous?: RemoteWindowVideoAdaptiveState | null;
+  sample?: RemoteWindowVideoStatsSample | null;
+  weakSamplesBeforeDowngrade?: number;
+  restoreStableMs?: number;
+}): RemoteWindowVideoAdaptiveDecision {
+  const previous = options.previous || {
+    mode: 'normal' as const,
+    degradedAtMs: null,
+    stableSinceMs: null,
+    weakSampleCount: 0,
+  };
+  const sample = options.sample || null;
+  if (!sample) {
+    return {
+      state: previous,
+      config: previous.mode === 'degraded'
+        ? buildDegradedRemoteWindowVideoBitrateConfig(options.baseline)
+        : options.baseline,
+      reason: previous.mode === 'degraded' ? 'hold' : 'baseline',
+    };
+  }
+  const weak = videoStatsIndicateWeakNetwork(sample, options.baseline);
+  if (weak) {
+    const weakSampleCount = previous.weakSampleCount + 1;
+    const weakSamplesBeforeDowngrade = Math.max(1, Math.floor(options.weakSamplesBeforeDowngrade ?? 2));
+    if (previous.mode !== 'degraded' && weakSampleCount < weakSamplesBeforeDowngrade) {
+      return {
+        state: {
+          mode: 'normal',
+          degradedAtMs: null,
+          stableSinceMs: null,
+          weakSampleCount,
+        },
+        config: options.baseline,
+        reason: 'baseline',
+      };
+    }
+    return {
+      state: {
+        mode: 'degraded',
+        degradedAtMs: previous.degradedAtMs ?? sample.sampledAtMs,
+        stableSinceMs: null,
+        weakSampleCount,
+      },
+      config: buildDegradedRemoteWindowVideoBitrateConfig(options.baseline),
+      reason: previous.mode === 'degraded' ? 'hold' : 'downgrade',
+    };
+  }
+  if (previous.mode !== 'degraded') {
+    return {
+      state: { mode: 'normal', degradedAtMs: null, stableSinceMs: null, weakSampleCount: 0 },
+      config: options.baseline,
+      reason: 'baseline',
+    };
+  }
+  const stableSinceMs = previous.stableSinceMs ?? sample.sampledAtMs;
+  const restoreStableMs = Math.max(1, Math.floor(options.restoreStableMs ?? 8_000));
+  if (sample.sampledAtMs - stableSinceMs >= restoreStableMs) {
+    return {
+      state: { mode: 'normal', degradedAtMs: null, stableSinceMs: null, weakSampleCount: 0 },
+      config: options.baseline,
+      reason: 'restore',
+    };
+  }
+  return {
+    state: { ...previous, stableSinceMs, weakSampleCount: 0 },
+    config: buildDegradedRemoteWindowVideoBitrateConfig(options.baseline),
+    reason: 'hold',
   };
 }
 

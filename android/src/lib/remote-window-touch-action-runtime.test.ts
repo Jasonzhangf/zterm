@@ -4,8 +4,8 @@ import {
   createRemoteWindowTouchPointerState,
   dispatchRemoteWindowTouchInputActionRuntime,
   isRemoteWindowInputSupportedTarget,
-  resolveRemoteWindowTouchGestureDeltaRuntime,
-  resolveRemoteWindowTouchGestureScaleRuntime,
+  resolveRemoteWindowTouchScrollDeltaRuntime,
+  resolveRemoteWindowTouchScrollFractionRuntime,
   resolveRemoteWindowTouchPointerCancelRuntime,
   resolveRemoteWindowTouchPointerDownRuntime,
   resolveRemoteWindowTouchPointerMoveRuntime,
@@ -248,13 +248,13 @@ describe('remote-window-touch-action-runtime', () => {
         normalizedX: 0.6,
         normalizedY: 0.34,
         deltaX: 0,
-        deltaY: -72,
+        deltaY: -150,
       }),
     ]);
     expect(up.remoteEvents.some((event) => event.kind === 'pointer')).toBe(false);
   });
 
-  it('scales and reverses release-time gesture deltas without changing mapped coordinates', () => {
+  it('uses absolute visible-source fractions for release-time gesture deltas without changing mapped coordinates', () => {
     const down = resolveRemoteWindowTouchPointerDownRuntime({
       state: createRemoteWindowTouchPointerState(),
       pointer: pointer({ pointerId: 18, clientX: 130, clientY: 90, timeMs: 1_000 }),
@@ -270,7 +270,7 @@ describe('remote-window-touch-action-runtime', () => {
       state: move.nextState,
       pointer: pointer({ pointerId: 18, clientX: 130, clientY: 54, buttons: 0, timeMs: 1_040 }),
       geometry,
-      gestureScale: 3,
+      scrollFraction: 0.5,
       invertGestureDirection: true,
     });
 
@@ -286,15 +286,15 @@ describe('remote-window-touch-action-runtime', () => {
         normalizedX: 0.6,
         normalizedY: 0.34,
         deltaX: 0,
-        deltaY: 108,
+        deltaY: 300,
         durationMs: 40,
-        velocityY: 2.7,
+        velocityY: 7.5,
       }),
     ]);
-    expect(resolveRemoteWindowTouchGestureScaleRuntime(Number.POSITIVE_INFINITY)).toBe(2);
-    expect(resolveRemoteWindowTouchGestureScaleRuntime(10)).toBe(4);
-    expect(resolveRemoteWindowTouchGestureDeltaRuntime(-10, { scale: 1.5 })).toBe(-15);
-    expect(resolveRemoteWindowTouchGestureDeltaRuntime(-10, { scale: 1.5, inverted: true })).toBe(15);
+    expect(resolveRemoteWindowTouchScrollFractionRuntime(Number.POSITIVE_INFINITY)).toBe(0.25);
+    expect(resolveRemoteWindowTouchScrollFractionRuntime(10)).toBe(1);
+    expect(resolveRemoteWindowTouchScrollDeltaRuntime(-10, 600, { fraction: 0.25 })).toBe(-150);
+    expect(resolveRemoteWindowTouchScrollDeltaRuntime(-10, 600, { fraction: 0.25, inverted: true })).toBe(150);
   });
 
   it('drops stale unzoomed touch drag actions instead of replaying delayed gestures', () => {
