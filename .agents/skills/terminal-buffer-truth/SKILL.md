@@ -738,6 +738,8 @@ tmux truth
 - terminal input 只允许消费当前 `SessionTransportResource.socket` 并同步写入；它不是 reconnect/open-intent owner。禁止在 input runtime 里调用 `reconnectSession`、`probeOrReconnectStaleSessionTransport`、`shouldReconnectQueuedActiveInput` 或 stale pending-open 补偿。缺 transport / pending-open / backpressure 必须显式 drop/debug，恢复交给 `terminal.transport_lifecycle`。
 - active `buffer-head` 若早于 renderer visible range 到达，buffer owner 必须按 daemon head bounds 直接 bootstrap 当前 tail 的 `buffer-sync` body；非 active / 无 visible demand 不拉正文。禁止把 renderer layout 当首包前置条件，也禁止用 hidden cache window 冒充 visible fetch window。
 - `buffer-head` 只能更新 head/cursor metadata；不得触发正文 render commit。正文 repaint 只来自 `buffer-sync apply`，否则会把旧 body 重新投影成短暂闪屏。
+- `buffer-head` 也不得提前清理 pending body request 权威。若 `tail-refresh` / `reading-repair` 的 `buffer-sync-request` 已发出，head 先到、同 revision body 后到是合法顺序；`lastSyncRequestAtRef` 只能由 body apply/drop 路径消费。否则后到 fresh body 会被误判成 unsolicited same-revision stale overwrite，表现为输入框/可见旧行不刷新。
+- Buffer timestamp 只许做观测元数据：client request `requestedAt`、daemon response `generatedAt/requestSentAt` 可以进 debug 和黑盒 freshness 证据，但不得替代 `revision + absolute row index` 排序，也不得作为 accept/drop body 的业务真相。
 - 若 Android 升级/安装后仍看到旧 terminal/session 内容，先区分 **旧进程残留** 和 **新包冷启动真相**：
   1. `adb install -r` / 系统安装器更新包后，前台旧 WebView 进程可能继续显示旧 JS/runtime projection；这不是 `OPEN_TABS` / `TERMINAL_LAYOUT` 一定复活
   2. 先记录 `dumpsys package` 的 `versionCode/lastUpdateTime`、`pidof com.zterm.android`、`dumpsys window` focus、UI dump 文本；再 `am force-stop` 后冷启动对比

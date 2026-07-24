@@ -20,6 +20,8 @@ export function summarizeBufferPayload(payload: TerminalBufferPayload) {
     revision: payload.revision,
     startIndex: payload.startIndex,
     endIndex: payload.endIndex,
+    generatedAt: payload.generatedAt ?? null,
+    requestSentAt: payload.requestSentAt ?? null,
     cols: payload.cols,
     rows: payload.rows,
     lineCount: payload.lines.length,

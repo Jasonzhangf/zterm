@@ -230,6 +230,7 @@ function buildBufferSyncPayload(
   requestStartIndex: number,
   requestEndIndex: number,
   lines: TerminalIndexedLine[],
+  metadata?: { requestSentAt?: number | null },
 ): TerminalBufferPayload {
   const availableStartIndex = Math.max(0, Math.floor(mirror.bufferStartIndex || 0));
   const availableEndIndex = Math.max(availableStartIndex, getMirrorAvailableEndIndex(mirror));
@@ -237,6 +238,10 @@ function buildBufferSyncPayload(
     revision: Math.max(0, Math.floor(mirror.revision || 0)),
     startIndex: Math.max(0, Math.floor(requestStartIndex || 0)),
     endIndex: Math.max(0, Math.floor(requestEndIndex || 0)),
+    generatedAt: Date.now(),
+    requestSentAt: Number.isFinite(metadata?.requestSentAt)
+      ? Math.max(0, Math.floor(metadata!.requestSentAt!))
+      : undefined,
     availableStartIndex,
     availableEndIndex,
     cols: Math.max(1, Math.floor(mirror.cols || 80)),
@@ -326,7 +331,9 @@ export function buildRequestedRangeBufferPayload(
   );
 
   if (mirrorEndIndex <= mirrorStartIndex || requestEndIndex <= requestStartIndex) {
-    return buildBufferSyncPayload(mirror, requestStartIndex, requestEndIndex, []);
+    return buildBufferSyncPayload(mirror, requestStartIndex, requestEndIndex, [], {
+      requestSentAt: request.requestedAt,
+    });
   }
 
   const requestedMissingRanges = normalizeRequestedMissingRanges(
@@ -347,5 +354,7 @@ export function buildRequestedRangeBufferPayload(
     requestedSpan.endIndex,
   );
 
-  return buildBufferSyncPayload(mirror, requestedSpan.startIndex, requestedSpan.endIndex, indexedLines);
+  return buildBufferSyncPayload(mirror, requestedSpan.startIndex, requestedSpan.endIndex, indexedLines, {
+    requestSentAt: request.requestedAt,
+  });
 }

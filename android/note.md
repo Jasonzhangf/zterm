@@ -3691,6 +3691,12 @@ Need runtime debug to confirm:
 - Verification: focused remote-window daemon/message suite passed `2 files / 60`; typecheck, feature/resource/function/mainline gates, and `git diff --check` passed. Daemon release/install runtime SHA is `74002cca973777d84ddd7633cf30d5b59e00cd0da638e7e267332a0b1339e3da`. Exact WeChat raw local video-only replay and exact WeChat Tailscale mux video-only replay both returned ScreenCaptureKit `1037x1177`, `ontrack=true`, `framesSent=1`, and explicit stream stop. Full focus variant still exposes a separate Tailscale mux control gap where `remote-window-input` focus returns accepted but WeChat does not become frontmost; this is not part of the video-start fix.
 - Delivery: Android update package `0.1.3.2231` / versionCode `1032231` / sha256 `9786f7992d124e07ff1dae1e76850293d9090f9a2c851922cda523f56345921b` is published on local `127.0.0.1`, Tailscale `100.66.1.82`, and public Relay `https://relay.codewhisper.cc:18443/relay/updates/latest.json`; all three downloaded APK streams match the manifest sha. `adb devices -l` has no online device, so installed-phone L5 remains Jason-side.
 
+# 2026-07-24 Terminal input refresh freshness diagnosis
+
+- Symptom: Jason reports current terminal refresh timing is wrong and the input area/body does not refresh reliably. This is `terminal.buffer_render`, not UI chrome or transport fallback. Resource path stays `resource.mirror_store -> resource.transport_subscriber -> resource.client_sparse_buffer -> resource.renderer_window`.
+- First likely divergence: `handleBufferHeadRuntime()` clears `lastSyncRequestAtRef` for `tail-refresh` and `reading-repair` immediately when `buffer-head` arrives. If the explicit body response arrives after that head with the same mirror revision, `applyIncomingBufferSyncRuntime()` no longer sees a pending request and drops the same-revision non-gap overwrite as stale. This matches stale visible rows / input tail not repainting after a head-first sequence.
+- Fix direction: keep body request freshness bookkeeping until the matching body apply/drop path consumes it; do not patch UI or daemon. Add optional buffer protocol timestamps for observability only: client request timestamp and daemon response generation timestamp. Revision/absolute row remain the linear truth.
+
 # 2026-07-24 Same-revision visible refresh / remote-video pending projection
 
 - Symptom A: after repeated network switches/reconnects, terminal bottom live rows continue updating while upper visible rows remain stale, or only part of the visible content refreshes.

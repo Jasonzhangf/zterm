@@ -93,6 +93,9 @@ export function createTerminalCoreSupport(
         : localStartIndex,
       requestStartIndex,
       requestEndIndex: Math.max(requestStartIndex, requestEndIndex),
+      requestedAt: Number.isFinite(request.requestedAt)
+        ? Math.max(0, Math.floor(request.requestedAt || 0))
+        : undefined,
       targetHeadRevision: Number.isFinite(request.targetHeadRevision || 0)
         ? Math.max(0, Math.floor(request.targetHeadRevision || 0))
         : 0,

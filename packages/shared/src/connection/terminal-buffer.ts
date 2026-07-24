@@ -614,6 +614,7 @@ export function applyBufferSyncToSessionBuffer(
     && sparseWindow.startIndex < current.endIndex
   );
   const incomingDoesNotReachTail = sparseWindow.endIndex < authoritativeTailEndIndex;
+  const incomingWindowExceedsCache = (sparseWindow.endIndex - sparseWindow.startIndex) > Math.max(1, Math.floor(cacheLines || 1));
   const preserveCurrentWindow = Boolean(
     (
       current
@@ -624,11 +625,12 @@ export function applyBufferSyncToSessionBuffer(
     )
     || (
       current
-      && revision >= current.revision
+      && revision > current.revision
       && currentAnchoredAtTail
       && incomingOverlapsCurrentWindow
       && incomingDoesNotReachTail
       && sparseWindow.startIndex < current.startIndex
+      && incomingWindowExceedsCache
     )
   );
   const desiredWindow = resolveDesiredLocalWindow({

@@ -75,6 +75,14 @@ export function normalizeIncomingBufferPayload(input: TerminalBufferPayload): Te
         : 0,
     startIndex,
     endIndex,
+    generatedAt:
+      typeof input.generatedAt === 'number' && Number.isFinite(input.generatedAt)
+        ? Math.max(0, Math.floor(input.generatedAt))
+        : undefined,
+    requestSentAt:
+      typeof input.requestSentAt === 'number' && Number.isFinite(input.requestSentAt)
+        ? Math.max(0, Math.floor(input.requestSentAt))
+        : undefined,
     availableStartIndex:
       typeof input.availableStartIndex === 'number' && Number.isFinite(input.availableStartIndex)
         ? Math.max(0, Math.floor(input.availableStartIndex))

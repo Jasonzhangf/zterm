@@ -5662,13 +5662,15 @@ function normalizeRequestedMissingRanges(missingRanges, startIndex, endIndex) {
     endIndex: Math.max(startIndex, Math.min(endIndex, Math.floor(range?.endIndex || 0)))
   })).filter((range) => range.endIndex > range.startIndex).sort((left, right) => left.startIndex - right.startIndex || left.endIndex - right.endIndex);
 }
-function buildBufferSyncPayload(mirror, requestStartIndex, requestEndIndex, lines) {
+function buildBufferSyncPayload(mirror, requestStartIndex, requestEndIndex, lines, metadata) {
   const availableStartIndex = Math.max(0, Math.floor(mirror.bufferStartIndex || 0));
   const availableEndIndex = Math.max(availableStartIndex, getMirrorAvailableEndIndex(mirror));
   return {
     revision: Math.max(0, Math.floor(mirror.revision || 0)),
     startIndex: Math.max(0, Math.floor(requestStartIndex || 0)),
     endIndex: Math.max(0, Math.floor(requestEndIndex || 0)),
+    generatedAt: Date.now(),
+    requestSentAt: Number.isFinite(metadata?.requestSentAt) ? Math.max(0, Math.floor(metadata.requestSentAt)) : void 0,
     availableStartIndex,
     availableEndIndex,
     cols: Math.max(1, Math.floor(mirror.cols || 80)),
@@ -5733,7 +5735,9 @@ function buildRequestedRangeBufferPayload(mirror, request) {
     )
   );
   if (mirrorEndIndex <= mirrorStartIndex || requestEndIndex <= requestStartIndex) {
-    return buildBufferSyncPayload(mirror, requestStartIndex, requestEndIndex, []);
+    return buildBufferSyncPayload(mirror, requestStartIndex, requestEndIndex, [], {
+      requestSentAt: request.requestedAt
+    });
   }
   const requestedMissingRanges = normalizeRequestedMissingRanges(
     request.missingRanges,
@@ -5750,7 +5754,9 @@ function buildRequestedRangeBufferPayload(mirror, request) {
     requestedSpan.startIndex,
     requestedSpan.endIndex
   );
-  return buildBufferSyncPayload(mirror, requestedSpan.startIndex, requestedSpan.endIndex, indexedLines);
+  return buildBufferSyncPayload(mirror, requestedSpan.startIndex, requestedSpan.endIndex, indexedLines, {
+    requestSentAt: request.requestedAt
+  });
 }
 
 // src/server/mirror-geometry.ts
@@ -12503,6 +12509,7 @@ function createTerminalCoreSupport(deps) {
       localEndIndex: Number.isFinite(request.localEndIndex) ? Math.max(localStartIndex, Math.floor(request.localEndIndex)) : localStartIndex,
       requestStartIndex,
       requestEndIndex: Math.max(requestStartIndex, requestEndIndex),
+      requestedAt: Number.isFinite(request.requestedAt) ? Math.max(0, Math.floor(request.requestedAt || 0)) : void 0,
       targetHeadRevision: Number.isFinite(request.targetHeadRevision || 0) ? Math.max(0, Math.floor(request.targetHeadRevision || 0)) : 0,
       missingRanges: request.missingRanges
     };

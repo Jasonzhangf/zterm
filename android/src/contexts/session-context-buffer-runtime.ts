@@ -287,9 +287,6 @@ export function handleBufferHeadRuntime(options: {
     seenAt: Date.now(),
   });
   options.refs.lastHeadRequestAtRef.current.set(options.sessionId, Date.now());
-  // Clear sync debounce for this session when fresh server head arrives
-  options.refs.lastSyncRequestAtRef.current.delete(`${options.sessionId}:tail-refresh`);
-  options.refs.lastSyncRequestAtRef.current.delete(`${options.sessionId}:reading-repair`);
 
 
   const activeTransport = options.isSessionTransportActive(options.sessionId);
@@ -732,7 +729,10 @@ export function requestSessionBufferSyncRuntime(options: {
   });
   options.sendSocketPayload(options.sessionId, targetWs, JSON.stringify({
     type: 'buffer-sync-request',
-    payload,
+    payload: {
+      ...payload,
+      requestedAt: now,
+    },
   } satisfies ClientMessage), {
     pullPurpose: requestPurpose,
     targetHeadRevision,

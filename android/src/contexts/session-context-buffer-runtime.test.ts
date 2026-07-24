@@ -689,6 +689,127 @@ describe('session-context-buffer-runtime inactive gating', () => {
     );
   });
 
+  it('keeps pending tail-refresh authority when buffer-head arrives before the same-revision body response', () => {
+    const sessionId = 'session-1';
+    const baseSession = makeSession(sessionId);
+    const localBuffer = createSessionBufferState({
+      lines: ['stale-input-100', 'stale-input-101', 'stable-tail-102', 'stable-tail-103'],
+      startIndex: 100,
+      endIndex: 104,
+      bufferHeadStartIndex: 100,
+      bufferTailEndIndex: 104,
+      cols: 80,
+      rows: 24,
+      revision: 10,
+      cacheLines: 1000,
+    });
+    const session: Session = {
+      ...baseSession,
+      buffer: localBuffer,
+      daemonHeadRevision: 10,
+      daemonHeadEndIndex: 104,
+    };
+    const committedBuffers: SessionBufferState[] = [];
+    const commitSessionBufferUpdate = vi.fn((_sessionId: string, nextBuffer: SessionBufferState) => {
+      committedBuffers.push(nextBuffer);
+      return true;
+    });
+    const scheduleSessionRenderCommit = vi.fn();
+    const runtimeDebug = vi.fn();
+    const lastSyncRequestAtRef = {
+      current: new Map([[`${sessionId}:tail-refresh`, {
+        sentAt: 10,
+        requestStartIndex: 100,
+        requestEndIndex: 104,
+        knownRevision: 10,
+        localStartIndex: 100,
+        localEndIndex: 104,
+        targetHeadRevision: 10,
+        repairSignature: '',
+      }]]),
+    };
+    const headRefs = makeHeadRuntimeRefs({
+      sessions: [session],
+      activeSessionId: sessionId,
+      visibleRangeEntries: [[sessionId, { startIndex: 100, endIndex: 104, viewportRows: 4 }]],
+      sessionBufferHeadsEntries: [[sessionId, {
+        revision: 10,
+        latestEndIndex: 104,
+        availableStartIndex: 100,
+        availableEndIndex: 104,
+        seenAt: 10,
+      }]],
+    });
+    headRefs.lastSyncRequestAtRef = lastSyncRequestAtRef;
+
+    handleBufferHeadRuntime({
+      sessionId,
+      latestRevision: 10,
+      latestEndIndex: 104,
+      availableStartIndex: 100,
+      availableEndIndex: 104,
+      refs: headRefs,
+      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
+      readSessionBufferSnapshot: () => localBuffer,
+      commitSessionBufferUpdate: vi.fn(() => false),
+      scheduleSessionRenderCommit: vi.fn(),
+      isSessionTransportActive: () => true,
+      runtimeDebug,
+      requestSessionBufferSync: vi.fn(() => false),
+    });
+
+    expect(lastSyncRequestAtRef.current.has(`${sessionId}:tail-refresh`)).toBe(true);
+
+    applyIncomingBufferSyncRuntime({
+      sessionId,
+      payload: {
+        revision: 10,
+        startIndex: 100,
+        endIndex: 104,
+        availableStartIndex: 100,
+        availableEndIndex: 104,
+        cols: 80,
+        rows: 24,
+        cursorKeysApp: false,
+        lines: [
+          { ...makeLine('fresh-input-100'), index: 100 },
+          { ...makeLine('fresh-input-101'), index: 101 },
+          { ...makeLine('stable-tail-102'), index: 102 },
+          { ...makeLine('stable-tail-103'), index: 103 },
+        ],
+      },
+      refs: {
+        stateRef: headRefs.stateRef,
+        sessionRevisionResetRef: headRefs.sessionRevisionResetRef,
+        sessionBufferHeadsRef: headRefs.sessionBufferHeadsRef,
+        pendingInputTailRefreshRef: { current: new Map() },
+        pendingConnectTailRefreshRef: { current: new Set() },
+        pendingResumeTailRefreshRef: { current: new Set([sessionId]) },
+        lastSyncRequestAtRef,
+        sessionVisibleRangeRef: headRefs.sessionVisibleRangeRef,
+      },
+      readSessionBufferSnapshot: () => localBuffer,
+      resolveSessionCacheLines: () => 1000,
+      summarizeBufferPayload: (payload) => ({
+        revision: payload.revision,
+        startIndex: payload.startIndex,
+        endIndex: payload.endIndex,
+        lineCount: payload.lines.length,
+      }),
+      runtimeDebug,
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit,
+      isSessionTransportActive: () => true,
+      requestSessionBufferSync: vi.fn(() => true),
+    });
+
+    expect(commitSessionBufferUpdate).toHaveBeenCalledOnce();
+    expect(cellsToText(committedBuffers[0]!.lines[0])).toBe('fresh-input-100');
+    expect(cellsToText(committedBuffers[0]!.lines[1])).toBe('fresh-input-101');
+    expect(scheduleSessionRenderCommit).toHaveBeenCalledWith(sessionId);
+    expect(lastSyncRequestAtRef.current.has(`${sessionId}:tail-refresh`)).toBe(false);
+  });
+
   it('drops lower-revision buffer-sync instead of repainting older rows over newer rows', () => {
     const sessionId = 'session-1';
     const session = makeSession(sessionId);
@@ -1141,6 +1262,57 @@ describe('session-context-buffer-runtime inactive gating', () => {
 
     expect(requested).toBe(false);
     expect(sendSocketPayload).not.toHaveBeenCalled();
+  });
+
+  it('stamps outgoing buffer-sync requests with client request time metadata', () => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(4444);
+    try {
+      const sessionId = 'session-1';
+      const session = makeSession(sessionId);
+      const ws = { readyState: WebSocket.OPEN } as any;
+      const sendSocketPayload = vi.fn();
+      const lastSyncRequestAtRef = { current: new Map() };
+
+      const requested = requestSessionBufferSyncRuntime({
+        sessionId,
+        requestOptions: {
+          reason: 'test-requested-at',
+          purpose: 'tail-refresh',
+        },
+        refs: {
+          stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+          sessionVisibleRangeRef: {
+            current: new Map([[sessionId, { startIndex: 0, endIndex: 1, viewportRows: 24 }]]),
+          },
+          sessionBufferHeadsRef: { current: new Map() },
+          sessionPullStateRef: { current: new Map() },
+          lastSyncRequestAtRef,
+          pendingInputTailRefreshRef: { current: new Map() },
+          pendingConnectTailRefreshRef: { current: new Set() },
+          pendingResumeTailRefreshRef: { current: new Set() },
+        },
+        readSessionTransportSocket: () => ws,
+        readSessionBufferSnapshot: () => session.buffer,
+        clearSessionPullState: vi.fn(),
+        sendSocketPayload,
+        runtimeDebug: vi.fn(),
+        resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500, minTailRefreshGapMs: 33, readingSyncDelayMs: 24 }),
+      });
+
+      expect(requested).toBe(true);
+      const sent = JSON.parse(String(sendSocketPayload.mock.calls[0]?.[2]));
+      expect(sent).toMatchObject({
+        type: 'buffer-sync-request',
+        payload: expect.objectContaining({
+          requestedAt: 4444,
+        }),
+      });
+      expect(lastSyncRequestAtRef.current.get(`${sessionId}:tail-refresh`)).toMatchObject({
+        sentAt: 4444,
+      });
+    } finally {
+      nowSpy.mockRestore();
+    }
   });
 
   it('expires stale in-flight tail refresh bookkeeping before re-requesting sync', () => {

@@ -83,6 +83,8 @@ export interface TerminalBufferPayload {
   revision: number;
   startIndex: number;
   endIndex: number;
+  generatedAt?: number;
+  requestSentAt?: number;
   availableStartIndex?: number;
   availableEndIndex?: number;
   cols: number;
@@ -98,6 +100,7 @@ export interface BufferSyncRequestPayload {
   localEndIndex: number;
   requestStartIndex: number;
   requestEndIndex: number;
+  requestedAt?: number;
   targetHeadRevision?: number;
   missingRanges?: TerminalGapRange[];
 }

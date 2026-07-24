@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { BufferSyncRequestPayload, TerminalCell } from '../lib/types';
 import {
   buildBufferHeadPayload,
@@ -57,6 +57,38 @@ function createRequest(overrides?: Partial<BufferSyncRequestPayload>): BufferSyn
 }
 
 describe('buildRequestedRangeBufferPayload', () => {
+  it('adds daemon generation time and echoes request timestamp as metadata', () => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(123456);
+    try {
+      const payload = buildRequestedRangeBufferPayload(
+        createMirror(['row-100', 'row-101', 'row-102']),
+        createRequest({
+          requestedAt: 999,
+        }),
+      );
+
+      expect(payload.generatedAt).toBe(123456);
+      expect(payload.requestSentAt).toBe(999);
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('adds daemon generation time to live changed-span payloads', () => {
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(654321);
+    try {
+      const payload = buildChangedRangesBufferSyncPayload(
+        createMirror(['row-100', 'row-101', 'row-102', 'row-103']),
+        [{ startIndex: 101, endIndex: 103 }],
+      );
+
+      expect(payload?.generatedAt).toBe(654321);
+      expect(payload?.requestSentAt).toBeUndefined();
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it('returns current head directly from mirror store without requiring any client planner state', () => {
     const payload = buildBufferHeadPayload('session-1', createMirror(['row-100', 'row-101', 'row-102']));
 
