@@ -363,7 +363,8 @@ describe('RemoteWindowOverlay', () => {
     expect(wallpaper.textContent).not.toContain('ZTERM');
     const logo = screen.getByTestId('remote-window-video-wallpaper-logo');
     expect(logo).toBeTruthy();
-    expect(logo.style.mixBlendMode).toBe('multiply');
+    expect((logo as HTMLImageElement).src).toContain('logo_engraved');
+    expect(logo.style.mixBlendMode).toBe('');
     expect(logo.style.filter).not.toContain('drop-shadow');
   });
 

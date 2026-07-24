@@ -12,7 +12,7 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
-import ztermLogoUrl from '../../../../assets/logo.png';
+import ztermRemoteWindowLogoUrl from '../../../../assets/logo_engraved.png';
 import { mobileTheme } from '../../lib/mobile-ui';
 import type {
   RemoteWindowStreamErrorPayload,
@@ -2717,7 +2717,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
 
   const ztermVideoWallpaper = (
     <div data-testid="remote-window-video-wallpaper" style={styles.videoWallpaper} aria-hidden="true">
-      <img data-testid="remote-window-video-wallpaper-logo" src={ztermLogoUrl} alt="" style={styles.videoWallpaperLogo} />
+      <img data-testid="remote-window-video-wallpaper-logo" src={ztermRemoteWindowLogoUrl} alt="" style={styles.videoWallpaperLogo} />
     </div>
   );
 
@@ -3606,9 +3606,7 @@ const styles: Record<string, CSSProperties> = {
     width: 'min(42%, 156px)',
     maxHeight: '42%',
     objectFit: 'contain',
-    filter: 'grayscale(1) contrast(1.08) brightness(0.82)',
-    opacity: 0.78,
-    mixBlendMode: 'multiply',
+    opacity: 0.62,
   },
   minimap: {
     position: 'absolute',

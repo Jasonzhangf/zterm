@@ -26,7 +26,7 @@ const REQUEST_PREFIX = `rw-existing-app-focus-${Date.now()}`;
 const PROBE_MUX_CHANNEL_ID = `${REQUEST_PREFIX}-channel`;
 const PROBE_MUX_CLIENT_ID = `${REQUEST_PREFIX}-client`;
 const REMOTE_WINDOW_EXISTING_APP_CATALOG_TIMEOUT_MS = 30_000;
-const REMOTE_WINDOW_EXISTING_APP_STREAM_TIMEOUT_MS = 30_000;
+const REMOTE_WINDOW_EXISTING_APP_STREAM_TIMEOUT_MS = 40_000;
 
 function fail(message: string): never {
   throw new Error(message);

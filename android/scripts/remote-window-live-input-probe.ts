@@ -33,7 +33,7 @@ const PROBE_TITLE = `ZTERM_REMOTE_INPUT_PROBE_${Date.now()}`;
 const REQUEST_PREFIX = `rw-live-input-${Date.now()}`;
 const KEEP_TEMP = process.env.ZTERM_REMOTE_WINDOW_PROBE_KEEP_TMP === '1';
 const REMOTE_WINDOW_LIVE_CATALOG_TIMEOUT_MS = 30_000;
-const REMOTE_WINDOW_LIVE_STREAM_TIMEOUT_MS = 30_000;
+const REMOTE_WINDOW_LIVE_STREAM_TIMEOUT_MS = 40_000;
 const tempRoot = mkdtempSync(join(tmpdir(), 'zterm-remote-window-live-input-'));
 const probeSourcePath = join(tempRoot, 'RemoteWindowInputProbe.m');
 const probeLogPath = join(tempRoot, 'probe-events.log');

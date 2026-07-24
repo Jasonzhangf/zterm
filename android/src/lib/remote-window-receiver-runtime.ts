@@ -134,14 +134,21 @@ export function createRemoteWindowReceiverRuntime(input?: {
     }
     entry.resolveTrack = resolve;
     entry.rejectTrack = reject;
+  });
+
+  const armTrackTimeout = (entry: ActiveRemoteWindowReceiverStream) => {
+    if (!isCurrent(entry) || entry.trackAttached || entry.trackTimeoutId !== null) {
+      return false;
+    }
     entry.trackTimeoutId = setTimeoutFn(() => {
       if (!isCurrent(entry)) {
         return;
       }
       entry.trackTimeoutId = null;
-      reject(new Error('Remote window receiver did not receive a video track'));
+      entry.rejectTrack?.(new Error('Remote window receiver did not receive a video track'));
     }, trackTimeoutMs);
-  });
+    return true;
+  };
 
   const attachTrack = (
     entry: ActiveRemoteWindowReceiverStream,
@@ -232,6 +239,7 @@ export function createRemoteWindowReceiverRuntime(input?: {
         const answer = normalizeRtcDescription(started.answer, 'answer');
         await peerConnection.setRemoteDescription(answer);
         assertCurrent(entry);
+        armTrackTimeout(entry);
         const attachedMediaStream = await trackPromise;
         assertCurrent(entry);
         return {

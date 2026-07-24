@@ -2,6 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   createRemoteWindowMessageRuntime,
   isRemoteWindowControlMessage,
+  REMOTE_WINDOW_STREAM_START_REQUEST_TIMEOUT_MS,
+  REMOTE_WINDOW_TARGETS_REQUEST_TIMEOUT_MS,
 } from './remote-window-message-runtime';
 import type { ServerMessage } from './types';
 import type { RemoteWindowStreamTargetManifest } from './types';
@@ -166,6 +168,37 @@ describe('remote window message runtime', () => {
 
     await expect(request).rejects.toThrow('Remote window target catalog timed out');
     expect(runtime.getPendingCount()).toBe(0);
+  });
+
+  it('uses a stream-start timeout that outlives daemon capture startup', () => {
+    const timeoutDelays: number[] = [];
+    const runtime = createRemoteWindowMessageRuntime({
+      now: () => 441,
+      setTimeoutFn: vi.fn((_handler, delay) => {
+        timeoutDelays.push(Number(delay));
+        return timeoutDelays.length;
+      }) as any,
+      clearTimeoutFn: vi.fn() as any,
+    });
+
+    void runtime.requestTargets('session-1', {
+      ws: makeSocket(),
+      sendSocketPayload: vi.fn(),
+    });
+    void runtime.requestStreamStart('session-1', {
+      ws: makeSocket(),
+      streamId: 'stream-1',
+      target: makeTarget(),
+      offer: { type: 'offer', sdp: 'offer-sdp' },
+      sendSocketPayload: vi.fn(),
+    });
+
+    expect(timeoutDelays).toEqual([
+      REMOTE_WINDOW_TARGETS_REQUEST_TIMEOUT_MS,
+      REMOTE_WINDOW_STREAM_START_REQUEST_TIMEOUT_MS,
+    ]);
+    expect(REMOTE_WINDOW_STREAM_START_REQUEST_TIMEOUT_MS).toBeGreaterThan(20_000);
+    expect(REMOTE_WINDOW_STREAM_START_REQUEST_TIMEOUT_MS).toBeGreaterThan(REMOTE_WINDOW_TARGETS_REQUEST_TIMEOUT_MS);
   });
 
   it('classifies only remote window control messages', () => {

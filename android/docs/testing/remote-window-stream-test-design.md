@@ -171,7 +171,9 @@ Current executable gates:
    - Bitrate apply preserves the sender's existing `RTCRtpSendParameters.encodings` count/order and changes only `maxBitrate`. The positive gate proves existing encodings are updated after a sendonly-safe sender is attached; the negative gate starts with `encodings=[]`, proves `setParameters()` is not called and video start still returns an answer without `capture.maxBitrateBps`, then proves a live quality update returns `remote_window_stream_quality_failed`.
    - Close, media failure, capture process exit, and transport failure must share one exactly-once cleanup path.
    - Frame success is not complete until a live pixel oracle matches a source marker to receiver pixels.
-   - Android receiver track timeout must be longer than the daemon ScreenCaptureKit startup timeout. Since the daemon does not return the WebRTC answer until capture produces the first frame or fails explicitly, a shorter receiver timeout turns a daemon-owned capture delay into a misleading client receiver error.
+   - Android stream-start request timeout must be longer than the daemon ScreenCaptureKit startup timeout plus relay/control-plane budget, so daemon-owned capture failures return as explicit `remote-window-error` instead of a client-side request timeout.
+   - Android receiver track timeout is armed only after `remote-window-stream-started` is received and the answer is applied. Since the daemon does not return the WebRTC answer until capture produces the first frame or fails explicitly, arming the receiver timeout before the answer incorrectly spends receiver budget on daemon capture startup and can turn a healthy slow start into a misleading client receiver error.
+   - The pending/unplayed video wallpaper must use an alpha-capable engraved logo asset. CSS blend mode over an opaque RGB app logo is not sufficient proof on Android WebView because the source square can still render as a card.
 
 ## Black-Box Mac Gates
 

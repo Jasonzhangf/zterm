@@ -47,6 +47,7 @@ type PendingRemoteWindowRequest = PendingRemoteWindowTargetsRequest | PendingRem
 type RemoteWindowMessageSubscriber = (msg: RemoteWindowControlMessage) => void | Promise<unknown>;
 
 export const REMOTE_WINDOW_TARGETS_REQUEST_TIMEOUT_MS = 15000;
+export const REMOTE_WINDOW_STREAM_START_REQUEST_TIMEOUT_MS = 40_000;
 
 export function isRemoteWindowControlMessage(msg: ServerMessage): msg is RemoteWindowControlMessage {
   return msg.type === 'remote-window-targets-response'
@@ -77,7 +78,8 @@ export function createRemoteWindowMessageRuntime(input?: {
   const pendingRequests = new Map<string, PendingRemoteWindowTargetsRequest>();
   const pendingStreamStarts = new Map<string, PendingRemoteWindowStreamStartRequest>();
   const subscribers = new Set<RemoteWindowMessageSubscriber>();
-  const timeoutMs = input?.timeoutMs ?? REMOTE_WINDOW_TARGETS_REQUEST_TIMEOUT_MS;
+  const targetsTimeoutMs = input?.timeoutMs ?? REMOTE_WINDOW_TARGETS_REQUEST_TIMEOUT_MS;
+  const streamStartTimeoutMs = input?.timeoutMs ?? REMOTE_WINDOW_STREAM_START_REQUEST_TIMEOUT_MS;
   const setTimeoutFn = input?.setTimeoutFn ?? globalThis.setTimeout.bind(globalThis);
   const clearTimeoutFn = input?.clearTimeoutFn ?? globalThis.clearTimeout.bind(globalThis);
   const now = input?.now ?? (() => Date.now());
@@ -127,7 +129,7 @@ export function createRemoteWindowMessageRuntime(input?: {
       pendingRequests.delete(requestId);
       activePending.timeoutId = null;
       activePending.reject(new Error('Remote window target catalog timed out'));
-    }, timeoutMs) as unknown as number;
+    }, targetsTimeoutMs) as unknown as number;
     return true;
   };
 
@@ -145,7 +147,7 @@ export function createRemoteWindowMessageRuntime(input?: {
       pendingStreamStarts.delete(requestId);
       activePending.timeoutId = null;
       activePending.reject(new Error('Remote window stream start timed out'));
-    }, timeoutMs) as unknown as number;
+    }, streamStartTimeoutMs) as unknown as number;
     return true;
   };
 

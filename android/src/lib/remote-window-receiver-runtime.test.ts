@@ -365,7 +365,74 @@ describe('remote window receiver runtime', () => {
     expect(runtime.getActiveStreamIds()).toEqual([]);
   });
 
-  it('uses a receiver track timeout longer than the daemon capture startup timeout by default', async () => {
+  it('does not spend receiver track timeout while daemon stream start is pending', async () => {
+    MockRTCPeerConnection.reset();
+    const timeoutDelays: number[] = [];
+    const runtime = createRemoteWindowReceiverRuntime({
+      peerConnectionFactory: (configuration) => new MockRTCPeerConnection(configuration) as unknown as RTCPeerConnection,
+      mediaStreamFactory: () => new MockMediaStream() as unknown as MediaStream,
+      setTimeoutFn: vi.fn((_handler, delay) => {
+        timeoutDelays.push(Number(delay));
+        return 1;
+      }) as any,
+      clearTimeoutFn: vi.fn() as any,
+    });
+    type RemoteStartResolve = (payload: {
+      requestId: string;
+      streamId: string;
+      targetId: string;
+      answer: { type: 'answer'; sdp: string };
+      capture: {
+        source: 'ScreenCaptureKit';
+        frameWidth: number;
+        frameHeight: number;
+        frameRate: number;
+        targetKind: 'iterm2-pane';
+      };
+      transport: { kind: 'webrtc-video' };
+    }) => void;
+    let resolveRemote: RemoteStartResolve | undefined;
+
+    const started = runtime.startStream({
+      streamId: 'stream-1',
+      target: makeTarget(),
+      sendIceCandidate: vi.fn(),
+      startRemote: vi.fn(async () => new Promise((resolve) => {
+        resolveRemote = resolve;
+      })),
+    });
+    await flushMicrotasks();
+
+    expect(timeoutDelays).toEqual([]);
+    const completeRemote: RemoteStartResolve | undefined = resolveRemote;
+    if (typeof completeRemote !== 'function') {
+      throw new Error('startRemote resolver was not captured');
+    }
+    completeRemote({
+      requestId: 'rw-start-1',
+      streamId: 'stream-1',
+      targetId: 'pane-1',
+      answer: { type: 'answer', sdp: 'remote-answer-sdp' },
+      capture: {
+        source: 'ScreenCaptureKit',
+        frameWidth: 640,
+        frameHeight: 360,
+        frameRate: 5,
+        targetKind: 'iterm2-pane',
+      },
+      transport: { kind: 'webrtc-video' },
+    });
+    await flushMicrotasks();
+
+    expect(timeoutDelays[0]).toBe(REMOTE_WINDOW_RECEIVER_TRACK_TIMEOUT_MS);
+    expect(REMOTE_WINDOW_RECEIVER_TRACK_TIMEOUT_MS).toBeGreaterThan(20_000);
+    MockRTCPeerConnection.instances[0]!.emitVideoTrack();
+    await expect(started).resolves.toMatchObject({
+      streamId: 'stream-1',
+    });
+  });
+
+  it('does not arm a receiver track timeout when daemon stream start fails before answer', async () => {
     MockRTCPeerConnection.reset();
     const timeoutDelays: number[] = [];
     const runtime = createRemoteWindowReceiverRuntime({
@@ -387,8 +454,7 @@ describe('remote window receiver runtime', () => {
       }),
     })).rejects.toThrow('ScreenCaptureKit capture start failure');
 
-    expect(timeoutDelays[0]).toBe(REMOTE_WINDOW_RECEIVER_TRACK_TIMEOUT_MS);
-    expect(REMOTE_WINDOW_RECEIVER_TRACK_TIMEOUT_MS).toBeGreaterThan(20_000);
+    expect(timeoutDelays).toEqual([]);
   });
 
   it('rejects when no video track arrives before timeout', async () => {
@@ -414,7 +480,7 @@ describe('remote window receiver runtime', () => {
       })),
     });
 
-    await Promise.resolve();
+    await flushMicrotasks();
     timeoutHandlers[0]?.();
 
     await expect(pending).rejects.toThrow('Remote window receiver did not receive a video track');
