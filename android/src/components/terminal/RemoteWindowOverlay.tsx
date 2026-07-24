@@ -2700,7 +2700,6 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const ztermVideoWallpaper = (
     <div data-testid="remote-window-video-wallpaper" style={styles.videoWallpaper} aria-hidden="true">
       <img src={ztermLogoUrl} alt="" style={styles.videoWallpaperLogo} />
-      <div style={styles.videoWallpaperMark}>ZTERM</div>
     </div>
   );
 
@@ -3590,14 +3589,6 @@ const styles: Record<string, CSSProperties> = {
     filter: 'grayscale(1) contrast(0.72) brightness(0.36) drop-shadow(0 -1px 0 rgba(255,255,255,0.11)) drop-shadow(0 2px 0 rgba(0,0,0,0.72))',
     opacity: 0.54,
     mixBlendMode: 'luminosity',
-  },
-  videoWallpaperMark: {
-    position: 'absolute',
-    fontSize: 'clamp(42px, 18vw, 132px)',
-    fontWeight: 950,
-    letterSpacing: 0,
-    color: '#0a101b',
-    textShadow: '0 -1px 0 rgba(255,255,255,0.08), 0 1px 0 rgba(0,0,0,0.72)',
   },
   minimap: {
     position: 'absolute',

@@ -229,7 +229,9 @@ describe('RemoteWindowOverlay', () => {
     const overlay = screen.getByTestId('remote-window-locked-overlay');
     expect(overlay.getAttribute('data-mode')).toBe('floating');
     expect(screen.getByText('等待视频流')).toBeTruthy();
-    expect(screen.getByTestId('remote-window-video-wallpaper').textContent).toContain('ZTERM');
+    const wallpaper = screen.getByTestId('remote-window-video-wallpaper');
+    expect(wallpaper.textContent).not.toContain('ZTERM');
+    expect(wallpaper.querySelector('img')).toBeTruthy();
 
     fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
     await waitFor(() => {
@@ -334,7 +336,7 @@ describe('RemoteWindowOverlay', () => {
     expect(onRequestKeyboard).toHaveBeenCalledTimes(1);
   });
 
-  it('keeps the ZTERM engraved wallpaper behind an unplayed receiver video', async () => {
+  it('keeps the logo-only wallpaper behind an unplayed receiver video', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-1',
@@ -357,7 +359,9 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
     await screen.findByTestId('remote-window-video');
 
-    expect(screen.getByTestId('remote-window-video-wallpaper').textContent).toContain('ZTERM');
+    const wallpaper = screen.getByTestId('remote-window-video-wallpaper');
+    expect(wallpaper.textContent).not.toContain('ZTERM');
+    expect(wallpaper.querySelector('img')).toBeTruthy();
   });
 
   it('keeps a playing receiver visible across overlay state changes for the same media stream', async () => {
