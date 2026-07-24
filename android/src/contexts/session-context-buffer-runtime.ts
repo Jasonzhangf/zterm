@@ -160,6 +160,41 @@ function detectSameRevisionNonGapOverwrite(options: {
   };
 }
 
+function resolvePendingSameRevisionRefreshKey(options: {
+  sessionId: string;
+  payload: TerminalBufferPayload;
+  localBuffer: SessionBufferState;
+  refs: {
+    lastSyncRequestAtRef?: MutableRefObject<Map<string, SessionSyncRequestDebounceState>>;
+  };
+}) {
+  const requests = options.refs.lastSyncRequestAtRef?.current;
+  if (!requests) {
+    return null;
+  }
+  const incomingRevision = Math.max(0, Math.floor(options.payload.revision || 0));
+  const incomingStartIndex = Math.max(0, Math.floor(options.payload.startIndex || 0));
+  const incomingEndIndex = Math.max(incomingStartIndex, Math.floor(options.payload.endIndex || incomingStartIndex));
+  const localRevision = Math.max(0, Math.floor(options.localBuffer.revision || 0));
+  for (const purpose of ['tail-refresh', 'reading-repair'] as const) {
+    const pending = requests.get(`${options.sessionId}:${purpose}`);
+    if (!pending) {
+      continue;
+    }
+    const pendingStart = Math.max(0, Math.floor(pending.requestStartIndex || 0));
+    const pendingEnd = Math.max(pendingStart, Math.floor(pending.requestEndIndex || pendingStart));
+    const isWithinPendingWindow = incomingStartIndex >= pendingStart && incomingEndIndex <= pendingEnd;
+    if (
+      isWithinPendingWindow
+      && Math.max(0, Math.floor(pending.targetHeadRevision || 0)) === incomingRevision
+      && Math.max(0, Math.floor(pending.knownRevision || 0)) === localRevision
+    ) {
+      return `${options.sessionId}:${purpose}`;
+    }
+  }
+  return null;
+}
+
 function resolvePostApplyVisibleRange(options: {
   session: Session;
   previousBuffer: SessionBufferState;
@@ -935,7 +970,15 @@ export function applyIncomingBufferSyncRuntime(options: {
         })
       : null
   );
-  if (sameRevisionOverwrite) {
+  const pendingSameRevisionRefreshKey = sameRevisionOverwrite
+    ? resolvePendingSameRevisionRefreshKey({
+        sessionId: options.sessionId,
+        payload: options.payload,
+        localBuffer,
+        refs: options.refs,
+      })
+    : null;
+  if (sameRevisionOverwrite && !pendingSameRevisionRefreshKey) {
     options.runtimeDebug('session.buffer.sync.stale-same-revision-drop', {
       sessionId: options.sessionId,
       activeSessionId: options.refs.stateRef.current.activeSessionId,
@@ -950,6 +993,22 @@ export function applyIncomingBufferSyncRuntime(options: {
       incoming: options.summarizeBufferPayload(options.payload),
     });
     return;
+  }
+  if (sameRevisionOverwrite && pendingSameRevisionRefreshKey) {
+    options.refs.lastSyncRequestAtRef?.current.delete(pendingSameRevisionRefreshKey);
+    options.runtimeDebug('session.buffer.sync.same-revision-requested-overwrite-apply', {
+      sessionId: options.sessionId,
+      activeSessionId: options.refs.stateRef.current.activeSessionId,
+      localRevision,
+      incomingRevision,
+      localStartIndex: localBuffer.startIndex,
+      localEndIndex: localBuffer.endIndex,
+      incomingStartIndex: sameRevisionOverwrite.incomingStartIndex,
+      incomingEndIndex: sameRevisionOverwrite.incomingEndIndex,
+      conflictCount: sameRevisionOverwrite.conflictCount,
+      firstConflictIndex: sameRevisionOverwrite.firstConflictIndex,
+      incoming: options.summarizeBufferPayload(options.payload),
+    });
   }
   if (
     localRevision > 0

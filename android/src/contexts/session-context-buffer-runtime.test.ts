@@ -540,7 +540,18 @@ describe('session-context-buffer-runtime inactive gating', () => {
         pendingInputTailRefreshRef: { current: new Map() },
         pendingConnectTailRefreshRef: { current: new Set() },
         pendingResumeTailRefreshRef: { current: new Set() },
-        lastSyncRequestAtRef: { current: new Map() },
+        lastSyncRequestAtRef: {
+          current: new Map([[`${sessionId}:tail-refresh`, {
+            sentAt: 10,
+            requestStartIndex: 102,
+            requestEndIndex: 104,
+            knownRevision: 10,
+            localStartIndex: 100,
+            localEndIndex: 104,
+            targetHeadRevision: 10,
+            repairSignature: '',
+          }]]),
+        },
         sessionVisibleRangeRef: {
           current: new Map([[sessionId, { startIndex: 0, endIndex: 1, viewportRows: 24 }]]),
         },
@@ -570,6 +581,110 @@ describe('session-context-buffer-runtime inactive gating', () => {
         localRevision: 10,
         incomingRevision: 10,
         conflictCount: 4,
+      }),
+    );
+  });
+
+  it('applies same-revision overwrite when it is the requested visible refresh after reconnect', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const localBuffer = createSessionBufferState({
+      lines: ['old-top-100', 'old-top-101', 'live-bottom-102', 'live-bottom-103'],
+      startIndex: 100,
+      endIndex: 104,
+      bufferHeadStartIndex: 100,
+      bufferTailEndIndex: 104,
+      cols: 80,
+      rows: 24,
+      revision: 10,
+      cacheLines: 1000,
+    });
+    const committedBuffers: SessionBufferState[] = [];
+    const commitSessionBufferUpdate = vi.fn((_sessionId: string, nextBuffer: SessionBufferState) => {
+      committedBuffers.push(nextBuffer);
+      return true;
+    });
+    const scheduleSessionRenderCommit = vi.fn();
+    const runtimeDebug = vi.fn();
+    const lastSyncRequestAtRef = {
+      current: new Map([[`${sessionId}:tail-refresh`, {
+        sentAt: 10,
+        requestStartIndex: 100,
+        requestEndIndex: 104,
+        knownRevision: 10,
+        localStartIndex: 100,
+        localEndIndex: 104,
+        targetHeadRevision: 10,
+        repairSignature: '',
+      }]]),
+    };
+
+    applyIncomingBufferSyncRuntime({
+      sessionId,
+      payload: {
+        revision: 10,
+        startIndex: 100,
+        endIndex: 104,
+        availableStartIndex: 100,
+        availableEndIndex: 104,
+        cols: 80,
+        rows: 24,
+        cursorKeysApp: false,
+        lines: [
+          { ...makeLine('fresh-top-100'), index: 100 },
+          { ...makeLine('fresh-top-101'), index: 101 },
+          { ...makeLine('live-bottom-102'), index: 102 },
+          { ...makeLine('live-bottom-103'), index: 103 },
+        ],
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionBufferHeadsRef: {
+          current: new Map([[sessionId, {
+            revision: 10,
+            latestEndIndex: 104,
+            availableStartIndex: 100,
+            availableEndIndex: 104,
+            seenAt: 10,
+          }]]),
+        },
+        pendingInputTailRefreshRef: { current: new Map() },
+        pendingConnectTailRefreshRef: { current: new Set() },
+        pendingResumeTailRefreshRef: { current: new Set([sessionId]) },
+        lastSyncRequestAtRef,
+        sessionVisibleRangeRef: {
+          current: new Map([[sessionId, { startIndex: 100, endIndex: 104, viewportRows: 4 }]]),
+        },
+      },
+      readSessionBufferSnapshot: () => localBuffer,
+      resolveSessionCacheLines: () => 1000,
+      summarizeBufferPayload: (payload) => ({
+        revision: payload.revision,
+        startIndex: payload.startIndex,
+        endIndex: payload.endIndex,
+        lineCount: payload.lines.length,
+      }),
+      runtimeDebug,
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit,
+      isSessionTransportActive: () => true,
+      requestSessionBufferSync: vi.fn(() => true),
+    });
+
+    expect(commitSessionBufferUpdate).toHaveBeenCalledOnce();
+    expect(cellsToText(committedBuffers[0]!.lines[0])).toBe('fresh-top-100');
+    expect(cellsToText(committedBuffers[0]!.lines[1])).toBe('fresh-top-101');
+    expect(cellsToText(committedBuffers[0]!.lines[2])).toBe('live-bottom-102');
+    expect(scheduleSessionRenderCommit).toHaveBeenCalledWith(sessionId);
+    expect(lastSyncRequestAtRef.current.has(`${sessionId}:tail-refresh`)).toBe(false);
+    expect(runtimeDebug).toHaveBeenCalledWith(
+      'session.buffer.sync.same-revision-requested-overwrite-apply',
+      expect.objectContaining({
+        sessionId,
+        localRevision: 10,
+        incomingRevision: 10,
+        conflictCount: 2,
       }),
     );
   });

@@ -12,6 +12,7 @@ import {
   type WheelEvent as ReactWheelEvent,
 } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
+import ztermLogoUrl from '../../../../assets/logo.png';
 import { mobileTheme } from '../../lib/mobile-ui';
 import type {
   RemoteWindowStreamErrorPayload,
@@ -1724,6 +1725,26 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     }
   }, [finishEntryDrag]);
 
+  const requestVideoPlayback = useCallback(() => {
+    const video = videoElementRef.current;
+    if (!video || !receiverMediaStream) {
+      return;
+    }
+    if (video.srcObject !== receiverMediaStream) {
+      video.srcObject = receiverMediaStream;
+    }
+    video.muted = true;
+    video.defaultMuted = true;
+    video.playsInline = true;
+    video.controls = false;
+    const playResult = typeof video.play === 'function' ? video.play() : null;
+    if (playResult && typeof playResult.then === 'function') {
+      playResult
+        .then(() => setVideoHasPlayed(true))
+        .catch(() => setVideoHasPlayed(false));
+    }
+  }, [receiverMediaStream]);
+
   const handleEntryPointerCancel = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
     if (finishEntryDrag(event.pointerId, { suppressClick: false })) {
       suppressEntryClickRef.current = false;
@@ -1777,14 +1798,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       return;
     }
     setVideoHasPlayed(false);
-    video.srcObject = receiverMediaStream;
-    const playResult = typeof video.play === 'function' ? video.play() : null;
-    if (playResult && typeof playResult.catch === 'function') {
-      playResult.catch(() => {
-        setVideoHasPlayed(false);
-      });
-    }
-  }, [receiverMediaStream]);
+    requestVideoPlayback();
+  }, [receiverMediaStream, requestVideoPlayback]);
 
   useEffect(() => {
     if (lastReportedQuickBarSuppressionRef.current === quickBarSuppressed) {
@@ -2098,6 +2113,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     if (state.phase !== 'targetLocked') {
       return;
     }
+    requestVideoPlayback();
     if (event.pointerType === 'mouse' && event.button > 2) {
       return;
     }
@@ -2165,6 +2181,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     emitPointerInputAfterFocus,
     applyRemoteWindowTouchPointerResult,
     publishRemoteWindowInputContext,
+    requestVideoPlayback,
     resolveSurfaceInputGeometry,
     state,
   ]);
@@ -2682,6 +2699,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
 
   const ztermVideoWallpaper = (
     <div data-testid="remote-window-video-wallpaper" style={styles.videoWallpaper} aria-hidden="true">
+      <img src={ztermLogoUrl} alt="" style={styles.videoWallpaperLogo} />
       <div style={styles.videoWallpaperMark}>ZTERM</div>
     </div>
   );
@@ -2696,9 +2714,17 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
             ref={videoElementRef}
             autoPlay
             muted
+            controls={false}
+            disablePictureInPicture
+            preload="auto"
             playsInline
             onPlaying={() => setVideoHasPlayed(true)}
-            style={styles.videoElement}
+            onLoadedMetadata={requestVideoPlayback}
+            onCanPlay={requestVideoPlayback}
+            style={{
+              ...styles.videoElement,
+              opacity: videoHasPlayed ? 1 : 0,
+            }}
           />
         </>
       );
@@ -3525,6 +3551,7 @@ const styles: Record<string, CSSProperties> = {
     pointerEvents: 'none',
     position: 'relative',
     zIndex: 1,
+    transition: 'opacity 120ms ease-out',
   },
   videoError: {
     borderColor: 'rgba(248, 113, 113, 0.34)',
@@ -3556,7 +3583,16 @@ const styles: Record<string, CSSProperties> = {
     boxShadow: 'inset 0 0 0 1px rgba(237,244,255,0.04), inset 0 18px 48px rgba(255,255,255,0.035), inset 0 -36px 80px rgba(0,0,0,0.38)',
     pointerEvents: 'none',
   },
+  videoWallpaperLogo: {
+    width: 'min(42%, 156px)',
+    maxHeight: '42%',
+    objectFit: 'contain',
+    filter: 'grayscale(1) contrast(0.72) brightness(0.36) drop-shadow(0 -1px 0 rgba(255,255,255,0.11)) drop-shadow(0 2px 0 rgba(0,0,0,0.72))',
+    opacity: 0.54,
+    mixBlendMode: 'luminosity',
+  },
   videoWallpaperMark: {
+    position: 'absolute',
     fontSize: 'clamp(42px, 18vw, 132px)',
     fontWeight: 950,
     letterSpacing: 0,
