@@ -14894,17 +14894,14 @@ async function applyRemoteWindowVideoBitrate(sender, config) {
   await sender.setParameters(nextParameters);
   return { applied: true, videoBitrate: config };
 }
-function addRemoteWindowVideoTrack(peerConnection, videoTrack, requestedVideoBitrate) {
-  if (requestedVideoBitrate && typeof peerConnection.addTransceiver === "function") {
-    const transceiver = peerConnection.addTransceiver(videoTrack, {
-      direction: "sendonly",
-      sendEncodings: [{
-        maxBitrate: requestedVideoBitrate.maxBitrateBps,
-        maxFramerate: requestedVideoBitrate.maxFrameRateFps
-      }]
-    });
-    return transceiver.sender;
+function formatRemoteWindowVideoBitrateError(error) {
+  if (error instanceof Error) {
+    return error.message || error.name || "remote window video bitrate could not be applied";
   }
+  const message = String(error || "").trim();
+  return message || "remote window video bitrate could not be applied";
+}
+function addRemoteWindowVideoTrack(peerConnection, videoTrack) {
   return peerConnection.addTrack(videoTrack);
 }
 function validateStreamTargetForCapture(target) {
@@ -15434,24 +15431,11 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
       const requestedVideoBitrate = normalizeRemoteWindowVideoBitrateConfig(payload.videoBitrate);
       const videoSender = addRemoteWindowVideoTrack(
         peerConnection,
-        videoTrack,
-        requestedVideoBitrate
+        videoTrack
       );
       const streamFrameRate = requestedVideoBitrate?.maxFrameRateFps ?? defaultFrameRate;
       let videoBitrate = null;
       let videoBitrateWarning = null;
-      if (requestedVideoBitrate) {
-        try {
-          const applyResult = await applyRemoteWindowVideoBitrate(videoSender || null, requestedVideoBitrate);
-          if (applyResult.applied) {
-            videoBitrate = applyResult.videoBitrate;
-          } else {
-            videoBitrateWarning = applyResult.reason;
-          }
-        } catch (error) {
-          videoBitrateWarning = error instanceof Error ? error.message : "remote window video bitrate could not be applied";
-        }
-      }
       entry = {
         streamId: payload.streamId,
         requestId: payload.requestId,
@@ -15546,6 +15530,27 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
       await peerConnection.setLocalDescription(answer);
       if (!isCurrentStream(entry)) {
         throw new Error("remote window stream was closed before media negotiation completed");
+      }
+      if (requestedVideoBitrate) {
+        try {
+          const applyResult = await applyRemoteWindowVideoBitrate(videoSender || null, requestedVideoBitrate);
+          if (applyResult.applied) {
+            videoBitrate = applyResult.videoBitrate;
+            entry.videoBitrate = videoBitrate;
+          } else {
+            videoBitrateWarning = applyResult.reason;
+          }
+        } catch (error) {
+          videoBitrateWarning = formatRemoteWindowVideoBitrateError(error);
+        }
+        if (videoBitrateWarning) {
+          handlers.sendStatus?.({
+            requestId: payload.requestId,
+            streamId: payload.streamId,
+            phase: "starting",
+            message: `video bitrate not applied: ${videoBitrateWarning}`
+          });
+        }
       }
       return {
         requestId: payload.requestId,
@@ -15644,7 +15649,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
       return buildStreamError(
         payload,
         "remote_window_stream_quality_failed",
-        error instanceof Error ? error.message : "remote window stream quality update failed"
+        formatRemoteWindowVideoBitrateError(error)
       );
     }
   }

@@ -1217,10 +1217,10 @@ sleep 2
     }]);
   });
 
-  it('applies requested video bitrate at stream start and on quality update', async () => {
+  it('uses addTrack for stream start so bitrate requests still negotiate a sendonly video track', async () => {
     const fakePeer = new FakeRemoteWindowPeerConnection();
     const fakeSender = makeFakeRtpSender();
-    fakePeer.addTransceiver.mockReturnValue({ sender: fakeSender });
+    fakePeer.addTrack.mockReturnValue(fakeSender);
     const fakeTrack = makeFakeMediaStreamTrack();
     const fakeVideoSource = {
       createTrack: vi.fn(() => fakeTrack),
@@ -1259,14 +1259,14 @@ sleep 2
     });
 
     expect('answer' in started ? started.capture.maxBitrateBps : null).toBe(5_000_000);
-    expect(fakePeer.addTransceiver).toHaveBeenCalledWith(fakeTrack, {
-      direction: 'sendonly',
-      sendEncodings: [{ maxBitrate: 5_000_000, maxFramerate: 30 }],
-    });
-    expect(fakePeer.addTrack).not.toHaveBeenCalled();
+    expect(fakePeer.addTrack).toHaveBeenCalledWith(fakeTrack);
+    expect(fakePeer.addTransceiver).not.toHaveBeenCalled();
     expect(fakeSender.setParameters).toHaveBeenCalledWith(expect.objectContaining({
       encodings: [expect.objectContaining({ maxBitrate: 5_000_000, maxFramerate: 30 })],
     }));
+    expect(fakePeer.setLocalDescription.mock.invocationCallOrder[0]).toBeLessThan(
+      fakeSender.setParameters.mock.invocationCallOrder[0]!,
+    );
 
     const updated = await runtime.updateStreamQuality({
       requestId: 'rw-bitrate-update',
@@ -1329,7 +1329,7 @@ sleep 2
       expect(started.capture).not.toHaveProperty('maxBitrateBps');
     }
     expect(fakeSender.setParameters).not.toHaveBeenCalled();
-    expect(statuses[0]).toEqual({
+    expect(statuses).toContainEqual({
       requestId: 'rw-bitrate-empty-start',
       streamId: 'stream-bitrate-empty',
       phase: 'starting',
@@ -1355,7 +1355,7 @@ sleep 2
   it('rejects stream quality updates for the wrong target without changing sender parameters', async () => {
     const fakePeer = new FakeRemoteWindowPeerConnection();
     const fakeSender = makeFakeRtpSender();
-    fakePeer.addTransceiver.mockReturnValue({ sender: fakeSender });
+    fakePeer.addTrack.mockReturnValue(fakeSender);
     const fakeTrack = makeFakeMediaStreamTrack();
     const runtime = createRemoteWindowStreamDaemonRuntime({
       platform: 'darwin',

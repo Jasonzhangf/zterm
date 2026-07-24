@@ -170,6 +170,33 @@ function fail(message: string): never {
   throw new Error(message);
 }
 
+function summarizeQualityUpdate(message: ServerMessage) {
+  if (message.type === 'remote-window-stream-quality-result') {
+    return {
+      accepted: message.payload.accepted,
+      videoBitrate: message.payload.videoBitrate,
+    };
+  }
+  if (message.type === 'remote-window-error' && message.payload.code === 'remote_window_stream_quality_failed') {
+    return {
+      accepted: false,
+      code: message.payload.code,
+      message: message.payload.message,
+    };
+  }
+  fail(`unexpected remote window quality update response: ${JSON.stringify(message)}`);
+}
+
+function assertQualityUpdateContract(message: ServerMessage, label: string) {
+  if (message.type === 'remote-window-stream-quality-result' && message.payload.accepted === true) {
+    return;
+  }
+  if (message.type === 'remote-window-error' && message.payload.code === 'remote_window_stream_quality_failed') {
+    return;
+  }
+  fail(`${label} quality update returned invalid response: ${JSON.stringify(message)}`);
+}
+
 function appleScriptStringLiteral(value: string) {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
@@ -308,13 +335,6 @@ async function waitForReceiverTrack(
 ) {
   const deadline = Date.now() + timeoutMs;
   const appliedCandidates = new Set<string>();
-  const hasLiveReceiverVideoTrack = () => (
-    typeof peerConnection.getReceivers === 'function'
-    && peerConnection.getReceivers().some((receiver) => (
-      receiver.track?.kind === 'video'
-      && receiver.track.readyState === 'live'
-    ))
-  );
   while (Date.now() < deadline) {
     for (const message of messages) {
       if (
@@ -330,7 +350,7 @@ async function waitForReceiverTrack(
       appliedCandidates.add(candidateKey);
       await peerConnection.addIceCandidate(new RTCIceCandidate(message.payload.candidate as RTCIceCandidateInit));
     }
-    if (hasTrack() || hasLiveReceiverVideoTrack()) {
+    if (hasTrack()) {
       return;
     }
     await delay(25);
@@ -342,7 +362,7 @@ async function waitForReceiverTrack(
       readyState: receiver.track?.readyState,
     }))
     : [];
-  throw new Error(`timed out waiting for remote window receiver track; candidates=${appliedCandidates.size}; state=${peerConnection.connectionState}; ice=${peerConnection.iceConnectionState}; signaling=${peerConnection.signalingState}; receivers=${JSON.stringify(receivers)}`);
+  throw new Error(`timed out waiting for remote window receiver ontrack event; candidates=${appliedCandidates.size}; state=${peerConnection.connectionState}; ice=${peerConnection.iceConnectionState}; signaling=${peerConnection.signalingState}; receivers=${JSON.stringify(receivers)}`);
 }
 
 async function waitForRawMuxFrame(
@@ -795,9 +815,7 @@ async function main() {
       ),
       'remote window degraded quality update',
     );
-    if (degradedQuality.type !== 'remote-window-stream-quality-result' || degradedQuality.payload.accepted !== true) {
-      fail(`degraded quality update failed: ${JSON.stringify(degradedQuality)}`);
-    }
+    assertQualityUpdateContract(degradedQuality, 'degraded');
 
     const restoredQualityRequestId = requestId('quality-restored');
     send(ws, {
@@ -823,9 +841,7 @@ async function main() {
       ),
       'remote window restored quality update',
     );
-    if (restoredQuality.type !== 'remote-window-stream-quality-result' || restoredQuality.payload.accepted !== true) {
-      fail(`restored quality update failed: ${JSON.stringify(restoredQuality)}`);
-    }
+    assertQualityUpdateContract(restoredQuality, 'restored');
 
     const center = targetCenter(target);
     const frontmostBeforeDefocus = {
@@ -1014,7 +1030,10 @@ async function main() {
       targetPid,
       targetTitle: target.videoTarget.title,
       capture: started.payload.capture,
-      qualityUpdates: [degradedQuality.payload.videoBitrate, restoredQuality.payload.videoBitrate],
+      qualityUpdates: [
+        summarizeQualityUpdate(degradedQuality),
+        summarizeQualityUpdate(restoredQuality),
+      ],
       trackSeen,
       stopped: stopped.payload,
       probeLines: readProbeLines(probeLines),
