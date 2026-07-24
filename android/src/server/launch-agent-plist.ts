@@ -28,6 +28,7 @@ export function buildLaunchAgentPlistXml(options: LaunchAgentPlistOptions) {
   <string>${label}</string>
   <key>ProgramArguments</key>
   <array>
+    <string>/bin/bash</string>
     <string>${launchRunner}</string>
   </array>
   <key>RunAtLoad</key>

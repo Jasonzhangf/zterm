@@ -93,7 +93,7 @@ class FakeRemoteWindowPeerConnection {
 
   public onconnectionstatechange: (() => void) | null = null;
 
-  public connectionState: RTCPeerConnectionState = 'new';
+  public connectionState: RTCPeerConnectionState = 'connected';
 
   public localDescription: RTCSessionDescriptionInit | null = null;
 
@@ -550,6 +550,17 @@ describe('remote window stream daemon owner', () => {
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('usleep(sleepMicros)');
   });
 
+  it('replays touch swipe gestures as bounded scroll steps instead of one unbounded wheel event', () => {
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('let REMOTE_GESTURE_REPLAY_MAX_STEP_PX = 120.0');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('let REMOTE_GESTURE_REPLAY_MAX_STEPS = 12');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func boundedGestureReplayStepCount(deltaX: Double, deltaY: Double) -> Int');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('Int(ceil(magnitude / REMOTE_GESTURE_REPLAY_MAX_STEP_PX))');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func postGestureSwipeScrollEvent');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toMatch(
+      /for step in 0..<stepCount[\s\S]*postScrollEvent\(x: stepX, y: stepY, deltaX: stepDeltaX, deltaY: stepDeltaY/,
+    );
+  });
+
   it('requires macOS helper focus verification before reporting input success', () => {
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func activateTargetApplication(_ config: InputConfig, _ app: NSRunningApplication)');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func waitForRunningApplication(_ pid: Int32) -> NSRunningApplication?');
@@ -583,7 +594,7 @@ describe('remote window stream daemon owner', () => {
       /func postScrollEvent[\s\S]*postMouseMove\(x: x, y: y\)[\s\S]*scrollWheelEvent2Source/,
     );
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toMatch(
-      /config\.event\.kind == "gesture"[\s\S]*postScrollEvent\(x: startX, y: startY/,
+      /config\.event\.kind == "gesture"[\s\S]*postGestureSwipeScrollEvent\(/,
     );
   });
 
@@ -1215,6 +1226,150 @@ sleep 2
         usernameFragment: 'daemon',
       },
     }]);
+  });
+
+  it('defers the first capture frame until the WebRTC media path is connected', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    fakePeer.connectionState = 'new';
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const fakeVideoSource = {
+      createTrack: vi.fn(() => fakeTrack),
+      onFrame: vi.fn(),
+    };
+    const statuses: unknown[] = [];
+    const captureSourceFactory = vi.fn(async (_target, options) => {
+      options.onFrame({
+        width: 2,
+        height: 2,
+        rgba: new Uint8Array(16).fill(12),
+      });
+      return {
+        width: 2,
+        height: 2,
+        frameRate: options.frameRate,
+        stop: vi.fn(),
+      };
+    });
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory,
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => fakeVideoSource as any),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(7);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const result = await runtime.startStream({
+      requestId: 'rw-early-frame',
+      streamId: 'stream-early-frame',
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    }, {
+      sendStatus: (payload) => statuses.push(payload),
+    });
+
+    expect('answer' in result).toBe(true);
+    expect(fakeVideoSource.onFrame).not.toHaveBeenCalled();
+    expect(statuses).toEqual([
+      { requestId: 'rw-early-frame', streamId: 'stream-early-frame', phase: 'starting' },
+    ]);
+
+    fakePeer.connectionState = 'connected';
+    fakePeer.onconnectionstatechange?.();
+
+    expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(1);
+    expect(fakeVideoSource.onFrame).toHaveBeenCalledWith({
+      width: 2,
+      height: 2,
+      data: new Uint8Array(6).fill(7),
+    });
+    expect(statuses).toEqual([
+      { requestId: 'rw-early-frame', streamId: 'stream-early-frame', phase: 'starting' },
+      {
+        requestId: 'rw-early-frame',
+        streamId: 'stream-early-frame',
+        phase: 'streaming',
+        framesSent: 1,
+        frameWidth: 2,
+        frameHeight: 2,
+      },
+    ]);
+  });
+
+  it('drops a pending capture frame when the stream stops before WebRTC media is connected', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    fakePeer.connectionState = 'new';
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const fakeVideoSource = {
+      createTrack: vi.fn(() => fakeTrack),
+      onFrame: vi.fn(),
+    };
+    const captureStop = vi.fn();
+    const statuses: unknown[] = [];
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({
+          width: 2,
+          height: 2,
+          rgba: new Uint8Array(16).fill(12),
+        });
+        return {
+          width: 2,
+          height: 2,
+          frameRate: options.frameRate,
+          stop: captureStop,
+        };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => fakeVideoSource as any),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(7);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const result = await runtime.startStream({
+      requestId: 'rw-early-frame-stop',
+      streamId: 'stream-early-frame-stop',
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    }, {
+      sendStatus: (payload) => statuses.push(payload),
+    });
+
+    expect('answer' in result).toBe(true);
+    expect(fakeVideoSource.onFrame).not.toHaveBeenCalled();
+
+    const stopped = await runtime.stopStream({
+      requestId: 'rw-stop-before-connected',
+      streamId: 'stream-early-frame-stop',
+    });
+    fakePeer.connectionState = 'connected';
+    fakePeer.onconnectionstatechange?.();
+
+    expect(stopped).toMatchObject({
+      requestId: 'rw-stop-before-connected',
+      streamId: 'stream-early-frame-stop',
+      phase: 'stopped',
+      framesSent: 0,
+    });
+    expect(captureStop).toHaveBeenCalledTimes(1);
+    expect(fakeVideoSource.onFrame).not.toHaveBeenCalled();
+    expect(statuses).toEqual([
+      { requestId: 'rw-early-frame-stop', streamId: 'stream-early-frame-stop', phase: 'starting' },
+      {
+        requestId: 'rw-early-frame-stop',
+        streamId: 'stream-early-frame-stop',
+        phase: 'stopped',
+        framesSent: 0,
+        message: 'remote window stream stopped',
+      },
+    ]);
   });
 
   it('uses addTrack for stream start so bitrate requests still negotiate a sendonly video track', async () => {

@@ -74,6 +74,11 @@ import {
 interface RemoteWindowOverlayProps {
   activeSessionId?: string | null;
   appForegroundActive?: boolean;
+  streamInvalidation?: {
+    streamId: string;
+    message: string;
+    nonce: number;
+  } | null;
   requestTargets?: (
     sessionId: string,
     options?: { forceRefresh?: boolean },
@@ -747,6 +752,7 @@ function renderErrors(errors: RemoteWindowStreamErrorPayload[]) {
 export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   activeSessionId,
   appForegroundActive = true,
+  streamInvalidation = null,
   requestTargets,
   startStream,
   updateStreamQuality,
@@ -853,6 +859,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         inputContext.inputRoute,
       ].join('|')
     : '';
+  const currentLockedStreamId = state.phase === 'targetLocked' ? state.streamId || null : null;
 
   const dispatchRemoteWindowInputEvents = useCallback((
     events: Array<RemoteWindowInputEventPayload['event']>,
@@ -1295,6 +1302,30 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     }
     handleClose();
   }, [appForegroundActive, handleClose, state.phase]);
+
+  useEffect(() => {
+    if (
+      !streamInvalidation
+      || state.phase !== 'targetLocked'
+      || !currentLockedStreamId
+      || currentLockedStreamId !== streamInvalidation.streamId
+    ) {
+      return;
+    }
+    activeStreamIdRef.current = null;
+    collectStreamStatsRef.current = null;
+    adaptiveVideoStateRef.current = null;
+    lastAppliedStreamQualityKeyRef.current = null;
+    surfacePointersRef.current.clear();
+    surfaceGestureRef.current = null;
+    setReceiverMediaStream(null);
+    setReceiverFrameSize(null);
+    setState((current) => failRemoteWindowStream(
+      current,
+      streamInvalidation.streamId,
+      new Error(streamInvalidation.message || 'remote window stream is no longer active'),
+    ));
+  }, [currentLockedStreamId, state.phase, streamInvalidation]);
 
   const publishRemoteWindowInputContext = useCallback(() => {
     if (!inputContext) {

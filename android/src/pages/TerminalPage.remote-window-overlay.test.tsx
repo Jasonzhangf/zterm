@@ -652,6 +652,98 @@ describe('TerminalPage remote window overlay', () => {
     });
   });
 
+  it('invalidates the remote-window overlay when daemon reports the input stream is missing', async () => {
+    const session = makeSession('s1');
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const onRequestRemoteWindowTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget()],
+      errors: [],
+    }));
+    const onRequestRemoteWindowStreamStart = vi.fn(async (
+      _sessionId: string,
+      _target: RemoteWindowStreamTargetManifest,
+      streamId: string,
+    ) => ({
+      streamId,
+      mediaStream,
+      started: {
+        requestId: 'rw-start-1',
+        streamId,
+        targetId: 'app-1',
+        answer: { type: 'answer' as const, sdp: 'v=0' },
+        capture: {
+          source: 'ScreenCaptureKit' as const,
+          frameWidth: 800,
+          frameHeight: 560,
+          frameRate: 12,
+          targetKind: 'app-window' as const,
+        },
+        transport: {
+          kind: 'webrtc-video' as const,
+        },
+      },
+    }));
+    const onSendRemoteWindowInput = vi.fn();
+    let remoteWindowMessageHandler: ((msg: any) => void) | null = null;
+    const onRemoteWindowMessage = vi.fn((handler: (msg: any) => void) => {
+      remoteWindowMessageHandler = handler;
+      return () => {
+        if (remoteWindowMessageHandler === handler) {
+          remoteWindowMessageHandler = null;
+        }
+      };
+    });
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
+        onRequestRemoteWindowStreamStart={onRequestRemoteWindowStreamStart}
+        onSendRemoteWindowInput={onSendRemoteWindowInput}
+        onRemoteWindowMessage={onRemoteWindowMessage}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-target-app-1');
+    fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
+    await screen.findByTestId('remote-window-video');
+
+    const streamId = onRequestRemoteWindowStreamStart.mock.calls[0]?.[2] || '';
+    expect(streamId).toEqual(expect.stringMatching(/^rw-stream-/));
+
+    act(() => {
+      remoteWindowMessageHandler?.({
+        type: 'remote-window-error',
+        payload: {
+          requestId: 'rw-input-stale-stream',
+          streamId,
+          code: 'remote_window_input_stream_missing',
+          message: 'remote window stream is not active',
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-stream-error').textContent).toContain('remote window stream is not active');
+    });
+    expect(screen.queryByTestId('remote-window-video')).toBeNull();
+  });
+
   it('stops the remote-window stream when the app goes to background', async () => {
     const session = makeSession('s1');
     const mediaStream = { id: 'media-stream-1' } as MediaStream;

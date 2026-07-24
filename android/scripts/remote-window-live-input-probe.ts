@@ -27,10 +27,11 @@ const CLIENT_CLOCK_OFFSET_MS = Number.parseInt(
   process.env.ZTERM_REMOTE_WINDOW_PROBE_CLIENT_CLOCK_OFFSET_MS || '0',
   10,
 ) || 0;
-const PROBE_MUX_CHANNEL_ID = `rw-live-input-channel-${Date.now()}`;
-const PROBE_MUX_CLIENT_ID = `rw-live-input-client-${Date.now()}`;
-const PROBE_TITLE = `ZTERM_REMOTE_INPUT_PROBE_${Date.now()}`;
-const REQUEST_PREFIX = `rw-live-input-${Date.now()}`;
+const PROBE_RUN_ID = `${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 8)}`;
+const PROBE_MUX_CHANNEL_ID = `rw-live-input-channel-${PROBE_RUN_ID}`;
+const PROBE_MUX_CLIENT_ID = `rw-live-input-client-${PROBE_RUN_ID}`;
+const PROBE_TITLE = `ZTERM_REMOTE_INPUT_PROBE_${PROBE_RUN_ID}`;
+const REQUEST_PREFIX = `rw-live-input-${PROBE_RUN_ID}`;
 const KEEP_TEMP = process.env.ZTERM_REMOTE_WINDOW_PROBE_KEEP_TMP === '1';
 const REMOTE_WINDOW_LIVE_CATALOG_TIMEOUT_MS = 30_000;
 const REMOTE_WINDOW_LIVE_STREAM_TIMEOUT_MS = 40_000;
@@ -42,7 +43,7 @@ const appContentsPath = join(appPath, 'Contents');
 const appMacosPath = join(appContentsPath, 'MacOS');
 const probeExecutablePath = join(appMacosPath, 'RemoteWindowInputProbe');
 const appPlistPath = join(appContentsPath, 'Info.plist');
-const probeBundleId = `cc.codewhisper.zterm.RemoteWindowInputProbe.${Date.now()}`;
+const probeBundleId = `cc.codewhisper.zterm.RemoteWindowInputProbe.${PROBE_RUN_ID.replace(/-/g, '.')}`;
 
 const objcSource = String.raw`
 #import <Cocoa/Cocoa.h>
@@ -934,6 +935,29 @@ async function main() {
         },
       },
       {
+        suffix: 'gesture-swipe',
+        event: {
+          kind: 'gesture',
+          gesture: 'swipe',
+          phase: 'end',
+          unit: 'pixel',
+          pointerId: 3,
+          startX: center.x,
+          startY: center.y + Math.round(center.height * 0.2),
+          x: center.x,
+          y: center.y - Math.round(center.height * 0.2),
+          startNormalizedX: 0.5,
+          startNormalizedY: 0.7,
+          normalizedX: 0.5,
+          normalizedY: 0.3,
+          deltaX: 0,
+          deltaY: -Math.max(1, Math.round(center.height * 0.4)),
+          durationMs: 420,
+          velocityX: 0,
+          velocityY: -Math.max(1, Math.round(center.height * 0.4)) / 420,
+        },
+      },
+      {
         suffix: 'key-down',
         event: {
           kind: 'key',
@@ -976,16 +1000,18 @@ async function main() {
       await waitForProbeLineCount(probeLines, 'PROBE_MOUSE_UP', 2);
       await sendActionEventAfterFocus(ws, messages, streamId, target, targetPid, 'scroll', inputActions[5]!.event);
       await waitForProbeLineCount(probeLines, 'PROBE_SCROLL', 1);
-      await sendActionEventAfterFocus(ws, messages, streamId, target, targetPid, 'key-down', inputActions[6]!.event);
+      await sendActionEventAfterFocus(ws, messages, streamId, target, targetPid, 'gesture-swipe', inputActions[6]!.event);
+      await waitForProbeLineCount(probeLines, 'PROBE_SCROLL', 2);
+      await sendActionEventAfterFocus(ws, messages, streamId, target, targetPid, 'key-down', inputActions[7]!.event);
       await waitForProbeLine(probeLines, 'PROBE_KEY_DOWN');
-      await sendActionEventAfterFocus(ws, messages, streamId, target, targetPid, 'key-up', inputActions[7]!.event);
+      await sendActionEventAfterFocus(ws, messages, streamId, target, targetPid, 'key-up', inputActions[8]!.event);
       await waitForProbeLine(probeLines, 'PROBE_KEY_UP');
     }
 
     await waitForProbeLineCount(probeLines, 'PROBE_MOUSE_DOWN', 2);
     await waitForProbeLine(probeLines, 'PROBE_MOUSE_DRAGGED');
     await waitForProbeLineCount(probeLines, 'PROBE_MOUSE_UP', 2);
-    await waitForProbeLineCount(probeLines, 'PROBE_SCROLL', 1);
+    await waitForProbeLineCount(probeLines, 'PROBE_SCROLL', 2);
     await waitForProbeLine(probeLines, 'PROBE_KEY_DOWN');
     await waitForProbeLine(probeLines, 'PROBE_KEY_UP');
 

@@ -13789,6 +13789,37 @@ func postScrollEvent(x: Double, y: Double, deltaX: Double, deltaY: Double, unit:
     event?.post(tap: .cghidEventTap)
 }
 
+let REMOTE_GESTURE_REPLAY_MAX_STEP_PX = 120.0
+let REMOTE_GESTURE_REPLAY_MAX_STEPS = 12
+
+func boundedGestureReplayStepCount(deltaX: Double, deltaY: Double) -> Int {
+    let magnitude = max(abs(deltaX), abs(deltaY))
+    if magnitude <= REMOTE_GESTURE_REPLAY_MAX_STEP_PX {
+        return 1
+    }
+    return max(1, min(REMOTE_GESTURE_REPLAY_MAX_STEPS, Int(ceil(magnitude / REMOTE_GESTURE_REPLAY_MAX_STEP_PX))))
+}
+
+func postGestureSwipeScrollEvent(
+    startX: Double,
+    startY: Double,
+    x: Double,
+    y: Double,
+    deltaX: Double,
+    deltaY: Double,
+    unit: String?
+) {
+    let stepCount = boundedGestureReplayStepCount(deltaX: deltaX, deltaY: deltaY)
+    let stepDeltaX = deltaX / Double(stepCount)
+    let stepDeltaY = deltaY / Double(stepCount)
+    for step in 0..<stepCount {
+        let progress = Double(step + 1) / Double(stepCount)
+        let stepX = startX + (x - startX) * progress
+        let stepY = startY + (y - startY) * progress
+        postScrollEvent(x: stepX, y: stepY, deltaX: stepDeltaX, deltaY: stepDeltaY, unit: unit)
+    }
+}
+
 let keyCodes: [String: CGKeyCode] = [
     "Enter": 36,
     "NumpadEnter": 76,
@@ -13852,9 +13883,15 @@ func handleConfig(_ config: InputConfig) throws {
         else {
             throw inputError("remote gesture input missing delta or coordinates")
         }
-        _ = x
-        _ = y
-        postScrollEvent(x: startX, y: startY, deltaX: deltaX, deltaY: deltaY, unit: config.event.unit)
+        postGestureSwipeScrollEvent(
+            startX: startX,
+            startY: startY,
+            x: x,
+            y: y,
+            deltaX: deltaX,
+            deltaY: deltaY,
+            unit: config.event.unit
+        )
     } else if config.event.kind == "key" {
         guard let phase = config.event.phase else {
             throw inputError("remote key input missing phase")
@@ -15310,6 +15347,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
     }
     entry.cleanupDone = true;
     activeStreams.delete(entry.streamId);
+    entry.pendingVideoFrame = null;
     try {
       entry.captureSource?.stop();
     } catch {
@@ -15336,6 +15374,65 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
   }
   function isCurrentStream(entry) {
     return activeStreams.get(entry.streamId) === entry && !entry.cleanupDone;
+  }
+  function isRemoteWindowPeerMediaReady(entry) {
+    if (!entry.peerConnection.localDescription) {
+      return false;
+    }
+    return entry.peerConnection.connectionState === "connected";
+  }
+  function sendRemoteWindowVideoFrame(entry, captureFrame) {
+    const i420Frame = convertRgbaToI420Frame(captureFrame, rgbaToI420);
+    entry.videoSource.onFrame(i420Frame);
+    entry.framesSent += 1;
+    if (entry.framesSent === 1) {
+      entry.handlers.sendStatus?.({
+        requestId: entry.requestId,
+        streamId: entry.streamId,
+        phase: "streaming",
+        framesSent: entry.framesSent,
+        frameWidth: captureFrame.width,
+        frameHeight: captureFrame.height
+      });
+    }
+  }
+  function flushPendingRemoteWindowVideoFrame(entry) {
+    if (!isCurrentStream(entry) || !isRemoteWindowPeerMediaReady(entry) || !entry.pendingVideoFrame) {
+      return;
+    }
+    const pending = entry.pendingVideoFrame;
+    entry.pendingVideoFrame = null;
+    try {
+      sendRemoteWindowVideoFrame(entry, pending.frame);
+    } catch (error) {
+      cleanupStream(
+        entry,
+        `remote window frame conversion failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
+  }
+  function handleRemoteWindowCaptureFrame(entry, captureFrame) {
+    if (!isCurrentStream(entry)) {
+      return;
+    }
+    if (!isRemoteWindowPeerMediaReady(entry)) {
+      entry.pendingVideoFrame = {
+        frame: {
+          width: captureFrame.width,
+          height: captureFrame.height,
+          rgba: new Uint8Array(captureFrame.rgba)
+        }
+      };
+      return;
+    }
+    try {
+      sendRemoteWindowVideoFrame(entry, captureFrame);
+    } catch (error) {
+      cleanupStream(
+        entry,
+        `remote window frame conversion failed: ${error instanceof Error ? error.message : String(error)}`
+      );
+    }
   }
   function validateRemoteWindowInput(payload, entry) {
     if (!payload.requestId || !payload.streamId || !payload.targetId) {
@@ -15456,6 +15553,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
         captureSource: null,
         handlers,
         framesSent: 0,
+        pendingVideoFrame: null,
         cleanupDone: false
       };
       activeStreams.set(payload.streamId, entry);
@@ -15474,6 +15572,9 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
           return;
         }
         const state = peerConnection.connectionState;
+        if (state === "connected") {
+          flushPendingRemoteWindowVideoFrame(entry);
+        }
         if (state === "failed" || state === "closed") {
           cleanupStream(entry, `remote window WebRTC connection ${state}`);
         }
@@ -15496,26 +15597,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
           if (!entry || !isCurrentStream(entry)) {
             return;
           }
-          try {
-            const i420Frame = convertRgbaToI420Frame(frame, rgbaToI420);
-            entry.videoSource.onFrame(i420Frame);
-            entry.framesSent += 1;
-            if (entry.framesSent === 1) {
-              handlers.sendStatus?.({
-                requestId: payload.requestId,
-                streamId: payload.streamId,
-                phase: "streaming",
-                framesSent: entry.framesSent,
-                frameWidth: frame.width,
-                frameHeight: frame.height
-              });
-            }
-          } catch (error) {
-            cleanupStream(
-              entry,
-              `remote window frame conversion failed: ${error instanceof Error ? error.message : String(error)}`
-            );
-          }
+          handleRemoteWindowCaptureFrame(entry, frame);
         },
         onError: (error) => {
           if (!entry || !isCurrentStream(entry)) {
@@ -15538,6 +15620,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
       if (!isCurrentStream(entry)) {
         throw new Error("remote window stream was closed before media negotiation completed");
       }
+      flushPendingRemoteWindowVideoFrame(entry);
       if (requestedVideoBitrate) {
         try {
           const applyResult = await applyRemoteWindowVideoBitrate(videoSender || null, requestedVideoBitrate);
@@ -15598,6 +15681,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
       sdpMLineIndex: payload.candidate.sdpMLineIndex ?? null,
       usernameFragment: payload.candidate.usernameFragment ?? null
     }));
+    flushPendingRemoteWindowVideoFrame(entry);
     return true;
   }
   async function stopStream(payload) {

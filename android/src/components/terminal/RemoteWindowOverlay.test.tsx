@@ -1643,6 +1643,52 @@ describe('RemoteWindowOverlay', () => {
     ]);
   });
 
+  it('marks the active stream failed when the daemon reports that the stream is missing', async () => {
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+    }));
+    const props = {
+      activeSessionId: 'session-1',
+      requestTargets,
+      startStream,
+    };
+    const { rerender } = render(
+      <RemoteWindowOverlay
+        {...props}
+        streamInvalidation={null}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-target-app-1');
+    fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
+    await screen.findByTestId('remote-window-video');
+    const streamId = startStream.mock.calls[0]?.[2] || '';
+    expect(streamId).toEqual(expect.stringMatching(/^rw-stream-/));
+
+    rerender(
+      <RemoteWindowOverlay
+        {...props}
+        streamInvalidation={{
+          streamId,
+          message: 'remote window stream is not active',
+          nonce: 1,
+        }}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-stream-error').textContent).toContain('remote window stream is not active');
+    });
+    expect(screen.queryByTestId('remote-window-video')).toBeNull();
+  });
+
   it('maps an unzoomed touch drag to one gesture action without raw move streaming', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const sendInput = vi.fn();

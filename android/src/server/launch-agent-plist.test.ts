@@ -14,6 +14,7 @@ describe('buildLaunchAgentPlistXml', () => {
     expect(xml).toContain('<string>Interactive</string>');
     expect(xml).toContain('<key>LimitLoadToSessionType</key>');
     expect(xml).toContain('<string>Aqua</string>');
+    expect(xml).toContain('<string>/bin/bash</string>');
     expect(xml).toContain('/Users/fanzhang/.zterm/bin/zterm-daemon-launchd-run');
   });
 });

@@ -1545,6 +1545,11 @@ function TerminalPageComponent({
   const [quickBarEditorFocused, setQuickBarEditorFocused] = useState(false);
   const [remoteWindowOverlayOpen, setRemoteWindowOverlayOpen] = useState(false);
   const [remoteWindowInputContext, setRemoteWindowInputContext] = useState<RemoteWindowInputContext | null>(null);
+  const [remoteWindowStreamInvalidation, setRemoteWindowStreamInvalidation] = useState<{
+    streamId: string;
+    message: string;
+    nonce: number;
+  } | null>(null);
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
   const initialSessionPreviewRead = useMemo(() => {
     const storage = getBrowserStorage();
@@ -1686,6 +1691,13 @@ function TerminalPageComponent({
       return;
     }
     if (msg.type === 'remote-window-error' && msg.payload.code.startsWith('remote_window_input')) {
+      if (msg.payload.code === 'remote_window_input_stream_missing' && msg.payload.streamId) {
+        setRemoteWindowStreamInvalidation({
+          streamId: msg.payload.streamId,
+          message: msg.payload.message,
+          nonce: Date.now(),
+        });
+      }
       remoteWindowInputDebugRef.current = {
         ...remoteWindowInputDebugRef.current,
         ...projectRemoteWindowInputDebugContext(context),
@@ -4149,6 +4161,7 @@ function TerminalPageComponent({
         <RemoteWindowOverlay
           activeSessionId={uiSessionId}
           appForegroundActive={appForegroundActive}
+          streamInvalidation={remoteWindowStreamInvalidation}
           requestTargets={onRequestRemoteWindowTargets}
           startStream={onRequestRemoteWindowStreamStart}
           updateStreamQuality={onUpdateRemoteWindowStreamQuality}
