@@ -777,6 +777,7 @@ describe('TerminalPage remote window overlay', () => {
       },
     }));
     const onStopRemoteWindowStream = vi.fn(() => true);
+    const onActiveBodySubscriptionSuppressedChange = vi.fn();
 
     const renderPage = (appForegroundActive: boolean) => (
       <TerminalPage
@@ -792,6 +793,7 @@ describe('TerminalPage remote window overlay', () => {
         onResize={vi.fn()}
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
+        onActiveBodySubscriptionSuppressedChange={onActiveBodySubscriptionSuppressedChange}
         onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
         onRequestRemoteWindowStreamStart={onRequestRemoteWindowStreamStart}
         onStopRemoteWindowStream={onStopRemoteWindowStream}
@@ -812,6 +814,7 @@ describe('TerminalPage remote window overlay', () => {
       expect(onStopRemoteWindowStream).toHaveBeenCalledWith('s1', expect.stringMatching(/^rw-stream-/));
       expect(screen.queryByTestId('remote-window-locked-overlay')).toBeNull();
       expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
+      expect(onActiveBodySubscriptionSuppressedChange).toHaveBeenLastCalledWith(false);
     });
   });
 

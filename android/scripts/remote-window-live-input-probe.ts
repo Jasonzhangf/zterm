@@ -70,6 +70,8 @@ static void ProbePrint(NSString *line) {
 }
 
 @interface ProbeView : NSView
+@property(nonatomic, strong) NSTimer *animationTimer;
+@property(nonatomic, assign) NSInteger animationTick;
 @end
 
 @implementation ProbeView
@@ -80,6 +82,41 @@ static void ProbePrint(NSString *line) {
 - (void)viewDidMoveToWindow {
     [super viewDidMoveToWindow];
     [[self window] makeFirstResponder:self];
+    if (self.animationTimer == nil) {
+        self.animationTimer = [NSTimer scheduledTimerWithTimeInterval:0.1 repeats:YES block:^(NSTimer *timer) {
+            self.animationTick += 1;
+            [self setNeedsDisplay:YES];
+            [self displayIfNeeded];
+            [[self window] displayIfNeeded];
+            if (self.animationTick % 10 == 0) {
+                ProbePrint([NSString stringWithFormat:@"PROBE_ANIMATION_TICK %ld", (long)self.animationTick]);
+            }
+        }];
+    }
+}
+
+- (void)dealloc {
+    [self.animationTimer invalidate];
+}
+
+- (void)drawRect:(NSRect)dirtyRect {
+    [super drawRect:dirtyRect];
+    CGFloat phase = (CGFloat)(self.animationTick % 60) / 60.0;
+    NSColor *background = [NSColor colorWithCalibratedRed:(0.12 + phase * 0.45)
+                                                    green:(0.20 + (1.0 - phase) * 0.35)
+                                                     blue:0.42
+                                                    alpha:1.0];
+    [background setFill];
+    NSRectFill(self.bounds);
+    NSRect pulse = NSMakeRect(24 + phase * 360, 120, 120, 120);
+    [[NSColor colorWithCalibratedRed:0.95 green:0.82 blue:0.16 alpha:1.0] setFill];
+    NSRectFill(pulse);
+    NSString *label = [NSString stringWithFormat:@"FRAME %ld", (long)self.animationTick];
+    NSDictionary *attributes = @{
+        NSFontAttributeName: [NSFont boldSystemFontOfSize:42],
+        NSForegroundColorAttributeName: [NSColor whiteColor]
+    };
+    [label drawAtPoint:NSMakePoint(32, 300) withAttributes:attributes];
 }
 
 - (void)mouseDown:(NSEvent *)event {
@@ -1033,6 +1070,10 @@ async function main() {
     );
     if (stopped.type !== 'remote-window-stream-status') {
       fail(`unexpected stop response: ${JSON.stringify(stopped)}`);
+    }
+    const framesSent = stopped.payload.framesSent ?? 0;
+    if (framesSent < 3) {
+      fail(`remote window video did not refresh multiple frames; framesSent=${framesSent}; probeLines=${JSON.stringify(readProbeLines(probeLines).slice(-12))}`);
     }
     peerConnection.close();
     ws.close();

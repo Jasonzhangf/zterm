@@ -1092,18 +1092,18 @@ sleep 2
     );
   });
 
-  it('configures ScreenCaptureKit for low latency by capping frame queue depth and explicit FPS interval', async () => {
+  it('configures ScreenCaptureKit with bounded frame queue depth and explicit FPS interval', async () => {
     expect(buildScreenCaptureKitConfig(makeAppStreamTarget(), 60)).toMatchObject({
       frameRate: 60,
-      queueDepth: 1,
+      queueDepth: 3,
       cropRect: { x: 10, y: 20, width: 800, height: 600 },
     });
-    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('streamConfiguration.queueDepth = max(1, min(1, config.queueDepth))');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('streamConfiguration.queueDepth = max(3, min(3, config.queueDepth))');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('streamConfiguration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, config.frameRate)))');
 
     expect(buildScreenCaptureKitConfig(makeAppStreamTarget(), 60)).toMatchObject({
       frameRate: 60,
-      queueDepth: 1,
+      queueDepth: 3,
     });
   });
 
@@ -1228,7 +1228,7 @@ sleep 2
     }]);
   });
 
-  it('defers the first capture frame until the WebRTC media path is connected', async () => {
+  it('defers the first capture frame only until the sender local description is ready', async () => {
     const fakePeer = new FakeRemoteWindowPeerConnection();
     fakePeer.connectionState = 'new';
     const fakeTrack = makeFakeMediaStreamTrack();
@@ -1237,7 +1237,9 @@ sleep 2
       onFrame: vi.fn(),
     };
     const statuses: unknown[] = [];
+    let pushFrame: (frame: { width: number; height: number; rgba: Uint8Array }) => void = () => undefined;
     const captureSourceFactory = vi.fn(async (_target, options) => {
+      pushFrame = options.onFrame;
       options.onFrame({
         width: 2,
         height: 2,
@@ -1272,20 +1274,19 @@ sleep 2
     });
 
     expect('answer' in result).toBe(true);
-    expect(fakeVideoSource.onFrame).not.toHaveBeenCalled();
-    expect(statuses).toEqual([
-      { requestId: 'rw-early-frame', streamId: 'stream-early-frame', phase: 'starting' },
-    ]);
-
-    fakePeer.connectionState = 'connected';
-    fakePeer.onconnectionstatechange?.();
-
+    expect(fakePeer.connectionState).toBe('new');
     expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(1);
     expect(fakeVideoSource.onFrame).toHaveBeenCalledWith({
       width: 2,
       height: 2,
       data: new Uint8Array(6).fill(7),
     });
+    pushFrame({
+      width: 2,
+      height: 2,
+      rgba: new Uint8Array(16).fill(13),
+    });
+    expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(2);
     expect(statuses).toEqual([
       { requestId: 'rw-early-frame', streamId: 'stream-early-frame', phase: 'starting' },
       {
@@ -1299,7 +1300,7 @@ sleep 2
     ]);
   });
 
-  it('drops a pending capture frame when the stream stops before WebRTC media is connected', async () => {
+  it('does not replay pending frames after the stream is stopped', async () => {
     const fakePeer = new FakeRemoteWindowPeerConnection();
     fakePeer.connectionState = 'new';
     const fakeTrack = makeFakeMediaStreamTrack();
@@ -1343,7 +1344,7 @@ sleep 2
     });
 
     expect('answer' in result).toBe(true);
-    expect(fakeVideoSource.onFrame).not.toHaveBeenCalled();
+    expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(1);
 
     const stopped = await runtime.stopStream({
       requestId: 'rw-stop-before-connected',
@@ -1356,17 +1357,25 @@ sleep 2
       requestId: 'rw-stop-before-connected',
       streamId: 'stream-early-frame-stop',
       phase: 'stopped',
-      framesSent: 0,
+      framesSent: 1,
     });
     expect(captureStop).toHaveBeenCalledTimes(1);
-    expect(fakeVideoSource.onFrame).not.toHaveBeenCalled();
+    expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(1);
     expect(statuses).toEqual([
       { requestId: 'rw-early-frame-stop', streamId: 'stream-early-frame-stop', phase: 'starting' },
       {
         requestId: 'rw-early-frame-stop',
         streamId: 'stream-early-frame-stop',
+        phase: 'streaming',
+        framesSent: 1,
+        frameWidth: 2,
+        frameHeight: 2,
+      },
+      {
+        requestId: 'rw-early-frame-stop',
+        streamId: 'stream-early-frame-stop',
         phase: 'stopped',
-        framesSent: 0,
+        framesSent: 1,
         message: 'remote window stream stopped',
       },
     ]);

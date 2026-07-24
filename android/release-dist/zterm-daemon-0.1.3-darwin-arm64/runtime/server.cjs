@@ -14105,7 +14105,7 @@ Task { @MainActor in
         let streamConfiguration = SCStreamConfiguration()
         streamConfiguration.capturesAudio = false
         streamConfiguration.pixelFormat = kCVPixelFormatType_32BGRA
-        streamConfiguration.queueDepth = max(1, min(1, config.queueDepth))
+        streamConfiguration.queueDepth = max(3, min(3, config.queueDepth))
         streamConfiguration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, config.frameRate)))
         streamConfiguration.width = max(1, Int(config.cropRect.width.rounded()))
         streamConfiguration.height = max(1, Int(config.cropRect.height.rounded()))
@@ -14992,7 +14992,7 @@ function buildScreenCaptureKitConfig(target, frameRate) {
     windowBounds,
     cropRect,
     frameRate: Math.max(1, Math.floor(frameRate)),
-    queueDepth: 1
+    queueDepth: 3
   };
 }
 function stopChildProcess(child) {
@@ -15376,10 +15376,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
     return activeStreams.get(entry.streamId) === entry && !entry.cleanupDone;
   }
   function isRemoteWindowPeerMediaReady(entry) {
-    if (!entry.peerConnection.localDescription) {
-      return false;
-    }
-    return entry.peerConnection.connectionState === "connected";
+    return Boolean(entry.peerConnection.localDescription);
   }
   function sendRemoteWindowVideoFrame(entry, captureFrame) {
     const i420Frame = convertRgbaToI420Frame(captureFrame, rgbaToI420);

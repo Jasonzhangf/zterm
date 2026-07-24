@@ -1300,8 +1300,10 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     if (appForegroundActive !== false || state.phase === 'closed') {
       return;
     }
+    lastReportedBodySuppressionRef.current = false;
+    onBodySubscriptionSuppressedChange?.(false);
     handleClose();
-  }, [appForegroundActive, handleClose, state.phase]);
+  }, [appForegroundActive, handleClose, onBodySubscriptionSuppressedChange, state.phase]);
 
   useEffect(() => {
     if (
