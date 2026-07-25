@@ -498,7 +498,7 @@ function buildInputPayload(
   };
 }
 
-async function sendActionEventAfterFocus(
+async function sendActionEventAndRequireFocus(
   ws: WebSocket,
   messages: ServerMessage[],
   streamId: string,
@@ -507,11 +507,9 @@ async function sendActionEventAfterFocus(
   suffix: string,
   event: RemoteWindowInputEventPayload['event'],
 ) {
-  await sendInputAndRequireAccepted(ws, messages, buildInputPayload(streamId, target, `${suffix}-focus`, {
-    kind: 'focus',
-  }));
-  await waitForFrontmostPid(targetPid, `${suffix} focus accepted`);
-  return sendInputAndRequireAccepted(ws, messages, buildInputPayload(streamId, target, suffix, event));
+  const result = await sendInputAndRequireAccepted(ws, messages, buildInputPayload(streamId, target, suffix, event));
+  await waitForFrontmostPid(targetPid, `${suffix} action accepted`);
+  return result;
 }
 
 async function waitForInputAccepted(
@@ -889,82 +887,12 @@ async function main() {
     const frontmostAfterDefocus = await defocusTargetBeforeRemoteInput(targetPid, targetBundleId);
     const inputActions: Array<{ suffix: string; event: RemoteWindowInputEventPayload['event'] }> = [
       {
-        suffix: 'tap-down',
+        suffix: 'click',
         event: {
-          kind: 'pointer',
-          phase: 'down',
+          kind: 'click',
           pointerId: 1,
           button: 'left',
-          buttons: 1,
-          x: center.x,
-          y: center.y,
-          normalizedX: 0.5,
-          normalizedY: 0.5,
-        },
-      },
-      {
-        suffix: 'tap-up',
-        event: {
-          kind: 'pointer',
-          phase: 'up',
-          pointerId: 1,
-          button: 'left',
-          buttons: 0,
-          x: center.x,
-          y: center.y,
-          normalizedX: 0.5,
-          normalizedY: 0.5,
-        },
-      },
-      {
-        suffix: 'drag-down',
-        event: {
-          kind: 'pointer',
-          phase: 'down',
-          pointerId: 2,
-          button: 'left',
-          buttons: 1,
-          x: center.x,
-          y: center.y,
-          normalizedX: 0.5,
-          normalizedY: 0.5,
-        },
-      },
-      {
-        suffix: 'drag-move',
-        event: {
-          kind: 'pointer',
-          phase: 'move',
-          pointerId: 2,
-          button: 'left',
-          buttons: 1,
-          x: center.x + 24,
-          y: center.y + 18,
-          normalizedX: 0.55,
-          normalizedY: 0.55,
-        },
-      },
-      {
-        suffix: 'drag-up',
-        event: {
-          kind: 'pointer',
-          phase: 'up',
-          pointerId: 2,
-          button: 'left',
-          buttons: 0,
-          x: center.x + 24,
-          y: center.y + 18,
-          normalizedX: 0.55,
-          normalizedY: 0.55,
-        },
-      },
-      {
-        suffix: 'scroll',
-        event: {
-          kind: 'scroll',
-          unit: 'pixel',
-          deltaX: 0,
-          deltaY: 96,
+          clickCount: 1,
           x: center.x,
           y: center.y,
           normalizedX: 0.5,
@@ -995,6 +923,19 @@ async function main() {
         },
       },
       {
+        suffix: 'scroll',
+        event: {
+          kind: 'scroll',
+          unit: 'pixel',
+          deltaX: 0,
+          deltaY: 96,
+          x: center.x,
+          y: center.y,
+          normalizedX: 0.5,
+          normalizedY: 0.5,
+        },
+      },
+      {
         suffix: 'key-down',
         event: {
           kind: 'key',
@@ -1017,37 +958,26 @@ async function main() {
     ];
 
     if (BURST_INPUT) {
-      const payloads = inputActions.flatMap((action) => [
-        buildInputPayload(streamId, target, `${action.suffix}-focus`, { kind: 'focus' }),
-        buildInputPayload(streamId, target, action.suffix, action.event),
-      ]);
+      const payloads = inputActions.map((action) => buildInputPayload(streamId, target, action.suffix, action.event));
       payloads.forEach((payload) => send(ws, { type: 'remote-window-input', payload }));
       await Promise.all(payloads.map((payload) => waitForInputAccepted(messages, payload)));
-      await waitForFrontmostPid(targetPid, 'burst focus accepted');
+      await waitForFrontmostPid(targetPid, 'burst actions accepted');
     } else {
-      await sendActionEventAfterFocus(ws, messages, streamId, target, targetPid, 'tap-down', inputActions[0]!.event);
+      await sendActionEventAndRequireFocus(ws, messages, streamId, target, targetPid, 'click', inputActions[0]!.event);
       await waitForProbeLineCount(probeLines, 'PROBE_MOUSE_DOWN', 1);
-      await sendActionEventAfterFocus(ws, messages, streamId, target, targetPid, 'tap-up', inputActions[1]!.event);
       await waitForProbeLineCount(probeLines, 'PROBE_MOUSE_UP', 1);
-      await sendActionEventAfterFocus(ws, messages, streamId, target, targetPid, 'drag-down', inputActions[2]!.event);
-      await waitForProbeLineCount(probeLines, 'PROBE_MOUSE_DOWN', 2);
-      await sendActionEventAfterFocus(ws, messages, streamId, target, targetPid, 'drag-move', inputActions[3]!.event);
-      await waitForProbeLine(probeLines, 'PROBE_MOUSE_DRAGGED');
-      await sendActionEventAfterFocus(ws, messages, streamId, target, targetPid, 'drag-up', inputActions[4]!.event);
-      await waitForProbeLineCount(probeLines, 'PROBE_MOUSE_UP', 2);
-      await sendActionEventAfterFocus(ws, messages, streamId, target, targetPid, 'scroll', inputActions[5]!.event);
+      await sendActionEventAndRequireFocus(ws, messages, streamId, target, targetPid, 'gesture-swipe', inputActions[1]!.event);
       await waitForProbeLineCount(probeLines, 'PROBE_SCROLL', 1);
-      await sendActionEventAfterFocus(ws, messages, streamId, target, targetPid, 'gesture-swipe', inputActions[6]!.event);
+      await sendActionEventAndRequireFocus(ws, messages, streamId, target, targetPid, 'scroll', inputActions[2]!.event);
       await waitForProbeLineCount(probeLines, 'PROBE_SCROLL', 2);
-      await sendActionEventAfterFocus(ws, messages, streamId, target, targetPid, 'key-down', inputActions[7]!.event);
+      await sendActionEventAndRequireFocus(ws, messages, streamId, target, targetPid, 'key-down', inputActions[3]!.event);
       await waitForProbeLine(probeLines, 'PROBE_KEY_DOWN');
-      await sendActionEventAfterFocus(ws, messages, streamId, target, targetPid, 'key-up', inputActions[8]!.event);
+      await sendActionEventAndRequireFocus(ws, messages, streamId, target, targetPid, 'key-up', inputActions[4]!.event);
       await waitForProbeLine(probeLines, 'PROBE_KEY_UP');
     }
 
-    await waitForProbeLineCount(probeLines, 'PROBE_MOUSE_DOWN', 2);
-    await waitForProbeLine(probeLines, 'PROBE_MOUSE_DRAGGED');
-    await waitForProbeLineCount(probeLines, 'PROBE_MOUSE_UP', 2);
+    await waitForProbeLineCount(probeLines, 'PROBE_MOUSE_DOWN', 1);
+    await waitForProbeLineCount(probeLines, 'PROBE_MOUSE_UP', 1);
     await waitForProbeLineCount(probeLines, 'PROBE_SCROLL', 2);
     await waitForProbeLine(probeLines, 'PROBE_KEY_DOWN');
     await waitForProbeLine(probeLines, 'PROBE_KEY_UP');

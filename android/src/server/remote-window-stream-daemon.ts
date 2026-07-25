@@ -515,6 +515,7 @@ struct RemoteInputEvent: Decodable {
     let button: String?
     let buttons: Int?
     let pointerId: Int?
+    let clickCount: Int?
     let startX: Double?
     let startY: Double?
     let x: Double?
@@ -818,6 +819,30 @@ func postMouseMove(x: Double, y: Double) {
     event?.post(tap: .cghidEventTap)
 }
 
+func postClickEvent(x: Double, y: Double, button: String?, clickCount: Int?) {
+    let point = CGPoint(x: x, y: y)
+    postMouseMove(x: x, y: y)
+    let count = max(1, min(3, clickCount ?? 1))
+    for _ in 0..<count {
+        let down = CGEvent(
+            mouseEventSource: source,
+            mouseType: mouseType(phase: "down", button: button, buttons: 1),
+            mouseCursorPosition: point,
+            mouseButton: mouseButton(button)
+        )
+        down?.post(tap: .cghidEventTap)
+        usleep(18000)
+        let up = CGEvent(
+            mouseEventSource: source,
+            mouseType: mouseType(phase: "up", button: button, buttons: 0),
+            mouseCursorPosition: point,
+            mouseButton: mouseButton(button)
+        )
+        up?.post(tap: .cghidEventTap)
+        usleep(18000)
+    }
+}
+
 func postScrollEvent(x: Double, y: Double, deltaX: Double, deltaY: Double, unit: String?) {
     let units: CGScrollEventUnit = unit == "pixel" ? .pixel : .line
     let point = CGPoint(x: x, y: y)
@@ -897,6 +922,11 @@ func handleConfig(_ config: InputConfig) throws {
 
     if config.event.kind == "focus" {
         return
+    } else if config.event.kind == "click" {
+        guard let x = config.event.x, let y = config.event.y else {
+            throw inputError("remote click input missing coordinates")
+        }
+        postClickEvent(x: x, y: y, button: config.event.button, clickCount: config.event.clickCount)
     } else if config.event.kind == "pointer" {
         guard let phase = config.event.phase else {
             throw inputError("remote pointer input missing phase")
@@ -1715,6 +1745,7 @@ interface PendingRemoteWindowInputHelperRequest {
   pairGraceTimer: ReturnType<typeof setTimeout> | null;
   pairGraceExpired: boolean;
   refreshReceivedAtAfterFocusConfig: RemoteWindowInputConfig | null;
+  refreshReceivedAtAfterRealInputConfig: RemoteWindowInputConfig | null;
 }
 
 interface PendingRemoteWindowInputHelperWarm {
@@ -1727,10 +1758,21 @@ export function isRemoteWindowFocusInputConfig(config: Pick<RemoteWindowInputCon
   return config.event.kind === 'focus';
 }
 
+function isRemoteWindowRealInputConfig(config: Pick<RemoteWindowInputConfig, 'event'>) {
+  return config.event.kind !== 'focus'
+    && config.event.kind !== 'window-resize';
+}
+
 export function resolveRemoteWindowInputHelperTimeoutMs(config: Pick<RemoteWindowInputConfig, 'event'>) {
-  return isRemoteWindowFocusInputConfig(config)
+  return isRemoteWindowFocusInputConfig(config) || isRemoteWindowRealInputConfig(config)
     ? REMOTE_WINDOW_INPUT_FOCUS_TIMEOUT_MS
     : REMOTE_WINDOW_INPUT_STALE_MS;
+}
+
+export function resolveRemoteWindowInputConfigStaleMs(config: Pick<RemoteWindowInputConfig, 'event'>) {
+  return isRemoteWindowRealInputConfig(config)
+    ? REMOTE_WINDOW_INPUT_STALE_MS
+    : resolveRemoteWindowInputHelperTimeoutMs(config);
 }
 
 function remoteWindowInputConfigsShareTarget(
@@ -1752,11 +1794,6 @@ export function shouldRefreshRemoteWindowQueuedInputAfterFocus(
     && remoteWindowInputConfigsShareTarget(focusConfig, queuedConfig);
 }
 
-function isRemoteWindowRealInputConfig(config: Pick<RemoteWindowInputConfig, 'event'>) {
-  return config.event.kind !== 'focus'
-    && config.event.kind !== 'window-resize';
-}
-
 export function shouldCoalesceRemoteWindowQueuedFocusBeforeInput(
   focusConfig: RemoteWindowInputConfig,
   queuedConfig: RemoteWindowInputConfig,
@@ -1764,6 +1801,15 @@ export function shouldCoalesceRemoteWindowQueuedFocusBeforeInput(
   return isRemoteWindowFocusInputConfig(focusConfig)
     && (isRemoteWindowFocusInputConfig(queuedConfig) || isRemoteWindowRealInputConfig(queuedConfig))
     && remoteWindowInputConfigsShareTarget(focusConfig, queuedConfig);
+}
+
+export function shouldRefreshRemoteWindowQueuedInputAfterRealInput(
+  completedConfig: RemoteWindowInputConfig,
+  queuedConfig: RemoteWindowInputConfig,
+) {
+  return isRemoteWindowRealInputConfig(completedConfig)
+    && isRemoteWindowRealInputConfig(queuedConfig)
+    && remoteWindowInputConfigsShareTarget(completedConfig, queuedConfig);
 }
 
 type RemoteWindowInputHelperProcessFactory = (
@@ -1814,7 +1860,7 @@ export function createDefaultRemoteWindowInputHelper(options: {
     if (isRemoteWindowInputConfigStale(
       request.config,
       Date.now(),
-      resolveRemoteWindowInputHelperTimeoutMs(request.config),
+      resolveRemoteWindowInputConfigStaleMs(request.config),
     )) {
       rejectRequest(request, new Error('remote window input stale'));
       return true;
@@ -1873,6 +1919,22 @@ export function createDefaultRemoteWindowInputHelper(options: {
     }
   };
 
+  const refreshQueueAfterSuccessfulRealInput = (completedConfig: RemoteWindowInputConfig) => {
+    if (!isRemoteWindowRealInputConfig(completedConfig)) {
+      return;
+    }
+    const receivedAtMs = Date.now();
+    for (const request of queue) {
+      if (
+        request.refreshReceivedAtAfterRealInputConfig === completedConfig
+        && shouldRefreshRemoteWindowQueuedInputAfterRealInput(completedConfig, request.config)
+      ) {
+        request.config.daemonReceivedAtMs = receivedAtMs;
+        request.refreshReceivedAtAfterRealInputConfig = null;
+      }
+    }
+  };
+
   const startChild = () => {
     if (child && !child.killed) {
       return child;
@@ -1915,6 +1977,7 @@ export function createDefaultRemoteWindowInputHelper(options: {
               }
               if (response.ok === true) {
                 refreshQueueAfterSuccessfulFocus(request.config);
+                refreshQueueAfterSuccessfulRealInput(request.config);
                 resolveRequest(request);
               } else {
                 request.reject(new Error(String(response.error || 'remote window input event failed')));
@@ -2107,6 +2170,25 @@ export function createDefaultRemoteWindowInputHelper(options: {
     return null;
   };
 
+  const findRealInputConfigForQueuedInput = (config: RemoteWindowInputConfig) => {
+    if (!isRemoteWindowRealInputConfig(config)) {
+      return null;
+    }
+    for (let index = queue.length - 1; index >= 0; index -= 1) {
+      const queuedConfig = queue[index]!.config;
+      if (!remoteWindowInputConfigsShareTarget(queuedConfig, config)) {
+        continue;
+      }
+      return shouldRefreshRemoteWindowQueuedInputAfterRealInput(queuedConfig, config)
+        ? queuedConfig
+        : null;
+    }
+    if (active && shouldRefreshRemoteWindowQueuedInputAfterRealInput(active.config, config)) {
+      return active.config;
+    }
+    return null;
+  };
+
   return {
     warm() {
       return waitUntilReady();
@@ -2124,6 +2206,7 @@ export function createDefaultRemoteWindowInputHelper(options: {
           pairGraceTimer: null,
           pairGraceExpired: false,
           refreshReceivedAtAfterFocusConfig: findFocusConfigForQueuedInput(config),
+          refreshReceivedAtAfterRealInputConfig: findRealInputConfigForQueuedInput(config),
         });
         pump();
       });
@@ -2901,6 +2984,33 @@ export function createRemoteWindowStreamDaemonRuntime(
         throw new Error('remote window resize dimensions are invalid');
       }
       return;
+    }
+    if (payload.event.kind === 'click') {
+      const values = [
+        payload.event.x,
+        payload.event.y,
+        payload.event.normalizedX,
+        payload.event.normalizedY,
+      ];
+      if (!values.every((value) => Number.isFinite(value))) {
+        throw new Error('remote window click input coordinates are invalid');
+      }
+      if (payload.event.normalizedX < 0 || payload.event.normalizedX > 1 || payload.event.normalizedY < 0 || payload.event.normalizedY > 1) {
+        throw new Error('remote window click input normalized coordinates are out of range');
+      }
+      if (payload.event.button !== 'left' && payload.event.button !== 'middle' && payload.event.button !== 'right') {
+        throw new Error('remote window click input button is invalid');
+      }
+      if (
+        payload.event.clickCount !== undefined
+        && (
+          !Number.isInteger(payload.event.clickCount)
+          || payload.event.clickCount < 1
+          || payload.event.clickCount > 3
+        )
+      ) {
+        throw new Error('remote window click input click count is invalid');
+      }
     }
     if (payload.event.kind === 'pointer') {
       const values = [

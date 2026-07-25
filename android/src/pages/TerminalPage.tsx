@@ -151,6 +151,7 @@ type RemoteWindowInputDebugSnapshot = {
     pointerDown: number;
     pointerMove: number;
     pointerUp: number;
+    click: number;
     scroll: number;
     key: number;
     text: number;
@@ -184,6 +185,7 @@ function createRemoteWindowInputDebugCounts(): RemoteWindowInputDebugSnapshot['c
     pointerDown: 0,
     pointerMove: 0,
     pointerUp: 0,
+    click: 0,
     scroll: 0,
     key: 0,
     text: 0,
@@ -229,6 +231,8 @@ function formatRemoteWindowInputDebugEvent(event: RemoteWindowInputEventPayload[
       return 'focus';
     case 'pointer':
       return `ptr:${event.phase} #${event.pointerId} b${event.buttons}`;
+    case 'click':
+      return `click #${event.pointerId} ${event.button}`;
     case 'scroll':
       return `scroll ${Math.round(event.deltaX)},${Math.round(event.deltaY)}`;
     case 'gesture':
@@ -247,7 +251,7 @@ function formatRemoteWindowInputDebugEvent(event: RemoteWindowInputEventPayload[
 }
 
 function formatRemoteWindowInputDebugPoint(event: RemoteWindowInputEventPayload['event']) {
-  if (event.kind === 'pointer' || event.kind === 'scroll') {
+  if (event.kind === 'pointer' || event.kind === 'scroll' || event.kind === 'click') {
     return `${Math.round(event.x)},${Math.round(event.y)} n=${event.normalizedX.toFixed(2)},${event.normalizedY.toFixed(2)}`;
   }
   if (event.kind === 'gesture') {
@@ -317,6 +321,8 @@ function incrementRemoteWindowInputDebugCounts(
     }
   } else if (event.kind === 'scroll') {
     next.scroll += 1;
+  } else if (event.kind === 'click') {
+    next.click += 1;
   } else if (event.kind === 'key') {
     next.key += 1;
     if (event.text) {
@@ -1332,6 +1338,8 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
               M {remoteWindowInputDebug.counts.pointerMove}
               {' · '}
               U {remoteWindowInputDebug.counts.pointerUp}
+              {' · '}
+              C {remoteWindowInputDebug.counts.click}
               {' · '}
               S {remoteWindowInputDebug.counts.scroll}
               {' · '}
@@ -2560,19 +2568,11 @@ function TerminalPageComponent({
     };
     if (!onSendRemoteWindowInput) {
       events.forEach((event) => {
-        recordDebug({ kind: 'focus' }, false);
         recordDebug(event, false);
       });
       return true;
     }
     events.forEach((event) => {
-      const focusEvent = { kind: 'focus' } as const;
-      onSendRemoteWindowInput(context.sessionId, {
-        streamId: context.streamId,
-        targetId: context.targetId,
-        event: focusEvent,
-      });
-      recordDebug(focusEvent, true);
       onSendRemoteWindowInput(context.sessionId, {
         streamId: context.streamId,
         targetId: context.targetId,

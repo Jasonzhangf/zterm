@@ -19,9 +19,11 @@ import {
   MACOS_REMOTE_WINDOW_INPUT_SWIFT,
   SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT,
   parseTmuxClientTargets,
+  resolveRemoteWindowInputConfigStaleMs,
   resolveRemoteWindowInputHelperTimeoutMs,
   shouldCoalesceRemoteWindowQueuedFocusBeforeInput,
   shouldRefreshRemoteWindowQueuedInputAfterFocus,
+  shouldRefreshRemoteWindowQueuedInputAfterRealInput,
   startScreenCaptureKitFrameSource,
   summarizeRemoteWindowCatalogError,
   type Iterm2RawCatalog,
@@ -399,7 +401,7 @@ describe('remote window stream daemon owner', () => {
     }, 20_001)).toBe(true);
   });
 
-  it('keeps focus as a bounded control action while real input keeps the one-second realtime budget', () => {
+  it('keeps action execution bounded while real input keeps the one-second queued realtime budget', () => {
     const target = makeAppStreamTarget();
     const focusConfig = buildRemoteWindowInputConfig({
       requestId: 'rw-focus-timeout-policy',
@@ -434,7 +436,8 @@ describe('remote window stream daemon owner', () => {
     };
 
     expect(resolveRemoteWindowInputHelperTimeoutMs(focusConfig)).toBe(3_000);
-    expect(resolveRemoteWindowInputHelperTimeoutMs(pointerConfig)).toBe(1_000);
+    expect(resolveRemoteWindowInputHelperTimeoutMs(pointerConfig)).toBe(3_000);
+    expect(resolveRemoteWindowInputConfigStaleMs(pointerConfig)).toBe(1_000);
     expect(isRemoteWindowInputConfigStale(
       focusConfig,
       22_500,
@@ -443,7 +446,7 @@ describe('remote window stream daemon owner', () => {
     expect(isRemoteWindowInputConfigStale(
       pointerConfig,
       21_001,
-      resolveRemoteWindowInputHelperTimeoutMs(pointerConfig),
+      resolveRemoteWindowInputConfigStaleMs(pointerConfig),
     )).toBe(true);
     expect(shouldRefreshRemoteWindowQueuedInputAfterFocus(focusConfig, pointerConfig)).toBe(true);
     expect(shouldRefreshRemoteWindowQueuedInputAfterFocus(focusConfig, otherWindowPointerConfig)).toBe(false);
@@ -451,6 +454,9 @@ describe('remote window stream daemon owner', () => {
     expect(shouldCoalesceRemoteWindowQueuedFocusBeforeInput(focusConfig, pointerConfig)).toBe(true);
     expect(shouldCoalesceRemoteWindowQueuedFocusBeforeInput(focusConfig, otherWindowPointerConfig)).toBe(false);
     expect(shouldCoalesceRemoteWindowQueuedFocusBeforeInput(pointerConfig, focusConfig)).toBe(false);
+    expect(shouldRefreshRemoteWindowQueuedInputAfterRealInput(pointerConfig, pointerConfig)).toBe(true);
+    expect(shouldRefreshRemoteWindowQueuedInputAfterRealInput(pointerConfig, otherWindowPointerConfig)).toBe(false);
+    expect(shouldRefreshRemoteWindowQueuedInputAfterRealInput(focusConfig, pointerConfig)).toBe(false);
   });
 
   it('keeps an explicit standalone focus while refreshing a later same-target input after success', async () => {
@@ -534,6 +540,79 @@ describe('remote window stream daemon owner', () => {
       const pointerPromise = helper.send(pointerConfig);
       await expect(Promise.all([focusPromise, pointerPromise])).resolves.toEqual([undefined, undefined]);
       expect(writtenKinds).toEqual(['focus', 'pointer']);
+    } finally {
+      helper.dispose();
+    }
+  }, 10_000);
+
+  it('allows a real action to spend its focus budget after passing the queued stale gate', async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const childEvents = new EventEmitter();
+    const fakeChild = {
+      stdin,
+      stdout,
+      stderr,
+      killed: false,
+      kill: vi.fn((signal?: NodeJS.Signals) => {
+        fakeChild.killed = true;
+        childEvents.emit('exit', null, signal || null);
+        return true;
+      }),
+      on: childEvents.on.bind(childEvents),
+    };
+    const processFactory = vi.fn(() => {
+      process.nextTick(() => stdout.write(`${JSON.stringify({ ready: true })}\n`));
+      return fakeChild as any;
+    });
+    const writtenKinds: string[] = [];
+    let inputBuffer = '';
+    stdin.setEncoding('utf8');
+    stdin.on('data', (chunk) => {
+      inputBuffer += String(chunk);
+      let index = inputBuffer.indexOf('\n');
+      while (index >= 0) {
+        const raw = inputBuffer.slice(0, index).trim();
+        inputBuffer = inputBuffer.slice(index + 1);
+        if (raw) {
+          const config = JSON.parse(raw) as { event?: { kind?: string } };
+          writtenKinds.push(String(config.event?.kind || 'unknown'));
+          setTimeout(() => {
+            stdout.write(`${JSON.stringify({ ok: true })}\n`);
+          }, 1200);
+        }
+        index = inputBuffer.indexOf('\n');
+      }
+    });
+    const helper = createDefaultRemoteWindowInputHelper({
+      swiftBinary: 'fake-swift',
+      processFactory,
+    });
+    const target = makeAppStreamTarget();
+
+    try {
+      await helper.warm();
+      const daemonReceivedAtMs = Date.now();
+      const clickConfig = buildRemoteWindowInputConfig({
+        requestId: 'rw-click-focus-budget',
+        streamId: 'stream-click-focus-budget',
+        targetId: target.streamTargetId,
+        clientSentAt: daemonReceivedAtMs,
+        event: {
+          kind: 'click',
+          pointerId: 1,
+          button: 'left',
+          clickCount: 1,
+          x: 120,
+          y: 140,
+          normalizedX: 0.5,
+          normalizedY: 0.5,
+        },
+      }, target, { daemonReceivedAtMs });
+
+      await expect(helper.send(clickConfig)).resolves.toBeUndefined();
+      expect(writtenKinds).toEqual(['click']);
     } finally {
       helper.dispose();
     }
@@ -624,6 +703,255 @@ describe('remote window stream daemon owner', () => {
       await expect(Promise.all(configs.map((config) => helper.send(config)))).resolves.toHaveLength(6);
       expect(writtenPointerIds).toEqual([1, 2, 3]);
       expect(writtenKinds).toEqual(['pointer', 'pointer', 'pointer']);
+    } finally {
+      helper.dispose();
+    }
+  }, 10_000);
+
+  it('keeps same-target action-only bursts fresh behind inline focus work', async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const childEvents = new EventEmitter();
+    const fakeChild = {
+      stdin,
+      stdout,
+      stderr,
+      killed: false,
+      kill: vi.fn((signal?: NodeJS.Signals) => {
+        fakeChild.killed = true;
+        childEvents.emit('exit', null, signal || null);
+        return true;
+      }),
+      on: childEvents.on.bind(childEvents),
+    };
+    const processFactory = vi.fn(() => {
+      process.nextTick(() => stdout.write(`${JSON.stringify({ ready: true })}\n`));
+      return fakeChild as any;
+    });
+    let inputBuffer = '';
+    const writtenKinds: string[] = [];
+    stdin.setEncoding('utf8');
+    stdin.on('data', (chunk) => {
+      inputBuffer += String(chunk);
+      let index = inputBuffer.indexOf('\n');
+      while (index >= 0) {
+        const raw = inputBuffer.slice(0, index).trim();
+        inputBuffer = inputBuffer.slice(index + 1);
+        if (raw) {
+          const config = JSON.parse(raw) as { event?: { kind?: string; phase?: string } };
+          writtenKinds.push(
+            config.event?.kind === 'key'
+              ? `key:${config.event.phase || 'unknown'}`
+              : String(config.event?.kind || 'unknown'),
+          );
+          setTimeout(() => {
+            stdout.write(`${JSON.stringify({ ok: true })}\n`);
+          }, 1200);
+        }
+        index = inputBuffer.indexOf('\n');
+      }
+    });
+    const helper = createDefaultRemoteWindowInputHelper({
+      swiftBinary: 'fake-swift',
+      processFactory,
+    });
+    const target = makeAppStreamTarget();
+
+    try {
+      await helper.warm();
+      const daemonReceivedAtMs = Date.now();
+      const configs = [
+        buildRemoteWindowInputConfig({
+          requestId: 'rw-action-burst-click',
+          streamId: 'stream-action-burst',
+          targetId: target.streamTargetId,
+          clientSentAt: daemonReceivedAtMs,
+          event: {
+            kind: 'click',
+            pointerId: 1,
+            button: 'left',
+            clickCount: 1,
+            x: 120,
+            y: 140,
+            normalizedX: 0.5,
+            normalizedY: 0.5,
+          },
+        }, target, { daemonReceivedAtMs }),
+        buildRemoteWindowInputConfig({
+          requestId: 'rw-action-burst-gesture',
+          streamId: 'stream-action-burst',
+          targetId: target.streamTargetId,
+          clientSentAt: daemonReceivedAtMs,
+          event: {
+            kind: 'gesture',
+            gesture: 'swipe',
+            phase: 'end',
+            unit: 'pixel',
+            pointerId: 2,
+            startX: 120,
+            startY: 220,
+            x: 120,
+            y: 80,
+            startNormalizedX: 0.5,
+            startNormalizedY: 0.7,
+            normalizedX: 0.5,
+            normalizedY: 0.3,
+            deltaX: 0,
+            deltaY: -140,
+            durationMs: 420,
+            velocityX: 0,
+            velocityY: -140 / 420,
+          },
+        }, target, { daemonReceivedAtMs }),
+        buildRemoteWindowInputConfig({
+          requestId: 'rw-action-burst-scroll',
+          streamId: 'stream-action-burst',
+          targetId: target.streamTargetId,
+          clientSentAt: daemonReceivedAtMs,
+          event: {
+            kind: 'scroll',
+            unit: 'pixel',
+            deltaX: 0,
+            deltaY: 96,
+            x: 120,
+            y: 140,
+            normalizedX: 0.5,
+            normalizedY: 0.5,
+          },
+        }, target, { daemonReceivedAtMs }),
+        buildRemoteWindowInputConfig({
+          requestId: 'rw-action-burst-key-down',
+          streamId: 'stream-action-burst',
+          targetId: target.streamTargetId,
+          clientSentAt: daemonReceivedAtMs,
+          event: {
+            kind: 'key',
+            phase: 'down',
+            key: 'z',
+            code: 'KeyZ',
+            text: 'z',
+          },
+        }, target, { daemonReceivedAtMs }),
+        buildRemoteWindowInputConfig({
+          requestId: 'rw-action-burst-key-up',
+          streamId: 'stream-action-burst',
+          targetId: target.streamTargetId,
+          clientSentAt: daemonReceivedAtMs,
+          event: {
+            kind: 'key',
+            phase: 'up',
+            key: 'z',
+            code: 'KeyZ',
+            text: 'z',
+          },
+        }, target, { daemonReceivedAtMs }),
+      ];
+
+      const settled = await Promise.allSettled(configs.map((config) => helper.send(config)));
+      expect(settled).toEqual(configs.map(() => ({ status: 'fulfilled', value: undefined })));
+      expect(writtenKinds).toEqual(['click', 'gesture', 'scroll', 'key:down', 'key:up']);
+    } finally {
+      helper.dispose();
+    }
+  }, 12_000);
+
+  it('still drops stale queued action-only input for a different target', async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const childEvents = new EventEmitter();
+    const fakeChild = {
+      stdin,
+      stdout,
+      stderr,
+      killed: false,
+      kill: vi.fn((signal?: NodeJS.Signals) => {
+        fakeChild.killed = true;
+        childEvents.emit('exit', null, signal || null);
+        return true;
+      }),
+      on: childEvents.on.bind(childEvents),
+    };
+    const processFactory = vi.fn(() => {
+      process.nextTick(() => stdout.write(`${JSON.stringify({ ready: true })}\n`));
+      return fakeChild as any;
+    });
+    let inputBuffer = '';
+    const writtenKinds: string[] = [];
+    stdin.setEncoding('utf8');
+    stdin.on('data', (chunk) => {
+      inputBuffer += String(chunk);
+      let index = inputBuffer.indexOf('\n');
+      while (index >= 0) {
+        const raw = inputBuffer.slice(0, index).trim();
+        inputBuffer = inputBuffer.slice(index + 1);
+        if (raw) {
+          const config = JSON.parse(raw) as { event?: { kind?: string } };
+          writtenKinds.push(String(config.event?.kind || 'unknown'));
+          setTimeout(() => {
+            stdout.write(`${JSON.stringify({ ok: true })}\n`);
+          }, 1200);
+        }
+        index = inputBuffer.indexOf('\n');
+      }
+    });
+    const helper = createDefaultRemoteWindowInputHelper({
+      swiftBinary: 'fake-swift',
+      processFactory,
+    });
+    const target = makeAppStreamTarget();
+    const otherTarget = {
+      ...target,
+      streamTargetId: 'app-window:123:999',
+      videoTarget: {
+        ...target.videoTarget,
+        windowId: '999',
+        title: 'Other TextEdit',
+      },
+    };
+
+    try {
+      await helper.warm();
+      const daemonReceivedAtMs = Date.now();
+      const clickConfig = buildRemoteWindowInputConfig({
+        requestId: 'rw-stale-other-click',
+        streamId: 'stream-stale-other',
+        targetId: target.streamTargetId,
+        clientSentAt: daemonReceivedAtMs,
+        event: {
+          kind: 'click',
+          pointerId: 1,
+          button: 'left',
+          clickCount: 1,
+          x: 120,
+          y: 140,
+          normalizedX: 0.5,
+          normalizedY: 0.5,
+        },
+      }, target, { daemonReceivedAtMs });
+      const otherScrollConfig = buildRemoteWindowInputConfig({
+        requestId: 'rw-stale-other-scroll',
+        streamId: 'stream-stale-other',
+        targetId: otherTarget.streamTargetId,
+        clientSentAt: daemonReceivedAtMs,
+        event: {
+          kind: 'scroll',
+          unit: 'pixel',
+          deltaX: 0,
+          deltaY: 96,
+          x: 120,
+          y: 140,
+          normalizedX: 0.5,
+          normalizedY: 0.5,
+        },
+      }, otherTarget, { daemonReceivedAtMs });
+
+      await expect(Promise.all([
+        helper.send(clickConfig),
+        helper.send(otherScrollConfig),
+      ])).rejects.toThrow('remote window input stale');
+      expect(writtenKinds).toEqual(['click']);
     } finally {
       helper.dispose();
     }
@@ -2224,16 +2552,15 @@ sleep 2
     });
 
     await runtime.injectInput({
-      requestId: 'rw-input-helper-pointer',
+      requestId: 'rw-input-helper-click',
       streamId: 'stream-input-helper',
       targetId: target.streamTargetId,
       clientSentAt: Date.now(),
       event: {
-        kind: 'pointer',
-        phase: 'down',
+        kind: 'click',
         pointerId: 1,
         button: 'left',
-        buttons: 1,
+        clickCount: 1,
         x: 100,
         y: 120,
         normalizedX: 0.5,
@@ -2301,7 +2628,7 @@ sleep 2
     expect(inputHelper.send).toHaveBeenCalledTimes(4);
     expect(inputHelper.send).toHaveBeenNthCalledWith(1, expect.objectContaining({
       daemonReceivedAtMs: 88_000,
-      event: expect.objectContaining({ kind: 'pointer' }),
+      event: expect.objectContaining({ kind: 'click' }),
       window: expect.objectContaining({ bounds: target.videoTarget.windowBoundsTopLeftPx }),
     }));
     expect(inputHelper.send).toHaveBeenNthCalledWith(2, expect.objectContaining({

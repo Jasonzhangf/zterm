@@ -204,24 +204,15 @@ function makeItermTarget(): RemoteWindowStreamTargetManifest {
   };
 }
 
-function expectEveryRemoteWindowInputFocusFirst(sendInput: ReturnType<typeof vi.fn>) {
+function expectNoRemoteWindowInputFocus(sendInput: ReturnType<typeof vi.fn>) {
   const payloads = sendInput.mock.calls.map((call) => call[1]);
-  payloads.forEach((payload, index) => {
-    if (payload?.event?.kind === 'focus') {
-      return;
-    }
-    expect(payloads[index - 1]).toMatchObject({
-      streamId: payload.streamId,
-      targetId: payload.targetId,
-      event: { kind: 'focus' },
-    });
-  });
+  expect(payloads.some((payload) => payload?.event?.kind === 'focus')).toBe(false);
 }
 
-function remoteWindowNonFocusPayloads(sendInput: ReturnType<typeof vi.fn>) {
+function remoteWindowPayloads(sendInput: ReturnType<typeof vi.fn>) {
   return sendInput.mock.calls
     .map((call) => call[1])
-    .filter((payload) => payload?.event?.kind !== 'focus');
+    .filter(Boolean);
 }
 
 describe('TerminalPage remote window overlay', () => {
@@ -368,12 +359,10 @@ describe('TerminalPage remote window overlay', () => {
       expect(onQuickActionInput).not.toHaveBeenCalled();
     });
     expect(onSendRemoteWindowInput.mock.calls.map((call) => call[1].event.kind)).toEqual([
-      'focus',
       'key',
-      'focus',
       'key',
     ]);
-    expectEveryRemoteWindowInputFocusFirst(onSendRemoteWindowInput);
+    expectNoRemoteWindowInputFocus(onSendRemoteWindowInput);
 
     onSendRemoteWindowInput.mockClear();
     fireEvent.click(screen.getByText('quickbar-send-draft'));
@@ -398,7 +387,7 @@ describe('TerminalPage remote window overlay', () => {
       }));
       expect(onSessionDraftSend).not.toHaveBeenCalled();
     });
-    expectEveryRemoteWindowInputFocusFirst(onSendRemoteWindowInput);
+    expectNoRemoteWindowInputFocus(onSendRemoteWindowInput);
 
     fireEvent.click(screen.getByRole('button', { name: '调起远程窗口键盘' }));
     await waitFor(() => {
@@ -526,23 +515,19 @@ describe('TerminalPage remote window overlay', () => {
     });
 
     await waitFor(() => {
-      expect(remoteWindowNonFocusPayloads(onSendRemoteWindowInput)).toHaveLength(2);
+      expect(remoteWindowPayloads(onSendRemoteWindowInput)).toHaveLength(1);
     });
-    expectEveryRemoteWindowInputFocusFirst(onSendRemoteWindowInput);
+    expectNoRemoteWindowInputFocus(onSendRemoteWindowInput);
     expect(onSendRemoteWindowInput.mock.calls.map((call) => call[1].event.kind)).toEqual([
-      'focus',
-      'focus',
-      'pointer',
-      'focus',
-      'pointer',
+      'click',
     ]);
-    expect(remoteWindowNonFocusPayloads(onSendRemoteWindowInput)[0]).toMatchObject({
+    expect(remoteWindowPayloads(onSendRemoteWindowInput)[0]).toMatchObject({
       streamId: expect.stringMatching(/^rw-stream-/),
       targetId: 'app-1',
       event: {
-        kind: 'pointer',
-        phase: 'down',
+        kind: 'click',
         pointerId: 31,
+        button: 'left',
         normalizedX: 0.5,
         normalizedY: 0.5,
         x: 410,
@@ -554,14 +539,14 @@ describe('TerminalPage remote window overlay', () => {
     fireEvent.click(screen.getByRole('button', { name: '状态' }));
     await waitFor(() => {
       expect(screen.getByTestId('terminal-debug-remote-window-context').textContent).toContain('CTX Y');
-      expect(screen.getByTestId('terminal-debug-remote-window-event').textContent).toContain('overlay · SEND Y · ptr:up #31 b0');
+      expect(screen.getByTestId('terminal-debug-remote-window-event').textContent).toContain('overlay · SEND Y · click #31 left');
       expect(screen.getByTestId('terminal-debug-remote-window-point').textContent).toContain('410,320 n=0.50,0.50');
-      expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('F 3 · D 1 · M 0 · U 1');
+      expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('F 0 · D 0 · M 0 · U 0 · C 1');
       expect(screen.getByTestId('terminal-debug-remote-window-video').textContent).toContain('aY');
       expect(screen.getByTestId('terminal-debug-remote-window-video').textContent).toContain('vN');
     });
 
-    const firstPayload = remoteWindowNonFocusPayloads(onSendRemoteWindowInput)[0];
+    const firstPayload = remoteWindowPayloads(onSendRemoteWindowInput)[0];
     act(() => {
       remoteWindowMessageHandler?.({
         type: 'remote-window-input-result',
@@ -624,14 +609,13 @@ describe('TerminalPage remote window overlay', () => {
     });
 
     await waitFor(() => {
-      expect(remoteWindowNonFocusPayloads(onSendRemoteWindowInput)).toHaveLength(1);
+      expect(remoteWindowPayloads(onSendRemoteWindowInput)).toHaveLength(1);
     });
-    expectEveryRemoteWindowInputFocusFirst(onSendRemoteWindowInput);
+    expectNoRemoteWindowInputFocus(onSendRemoteWindowInput);
     expect(onSendRemoteWindowInput.mock.calls.map((call) => call[1].event.kind)).toEqual([
-      'focus',
       'gesture',
     ]);
-    expect(remoteWindowNonFocusPayloads(onSendRemoteWindowInput).map((payload) => payload.event)).toEqual([
+    expect(remoteWindowPayloads(onSendRemoteWindowInput).map((payload) => payload.event)).toEqual([
       expect.objectContaining({
         kind: 'gesture',
         gesture: 'swipe',
@@ -649,7 +633,7 @@ describe('TerminalPage remote window overlay', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('terminal-debug-remote-window-event').textContent).toContain('overlay · SEND Y · gesture:swipe/end');
-      expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('F 4 · D 1 · M 0 · U 1');
+      expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('F 0 · D 0 · M 0 · U 0 · C 1 · S 0 · K 0 · T 0 · A 1');
     });
   });
 

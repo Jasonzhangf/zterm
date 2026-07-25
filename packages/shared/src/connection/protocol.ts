@@ -306,6 +306,16 @@ export interface RemoteWindowInputEventPayload {
         normalizedY: number;
       }
     | {
+        kind: 'click';
+        pointerId: number;
+        button: 'left' | 'middle' | 'right';
+        x: number;
+        y: number;
+        normalizedX: number;
+        normalizedY: number;
+        clickCount?: number;
+      }
+    | {
         kind: 'scroll';
         unit: 'pixel';
         deltaX: number;

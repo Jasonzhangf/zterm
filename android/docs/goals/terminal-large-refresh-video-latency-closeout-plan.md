@@ -89,7 +89,7 @@ P3 allowed mainline:
 ```text
 RemoteWindowOverlay local touch classification
 -> remote-window-touch-action-runtime
--> focus-first remote-window input dispatch
+-> action-only remote-window input dispatch
 -> daemon input owner
 ```
 
@@ -190,7 +190,7 @@ Daemon rules:
   - `1 screen`
 - Compute delta pixels from the actual remote content rect visible height.
 - Direction inversion flips only the sign.
-- Preserve coordinate mapping and focus-first dispatch.
+- Preserve coordinate mapping and action-only dispatch.
 - One-finger zoomed fullscreen pan remains local; remote scroll is explicit two-finger scroll or wheel path.
 
 ## Verification Matrix

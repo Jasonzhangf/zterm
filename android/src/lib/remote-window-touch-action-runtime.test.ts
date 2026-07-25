@@ -128,11 +128,10 @@ describe('remote-window-touch-action-runtime', () => {
     const onDebug = vi.fn();
     const target = makeTarget();
     const event = {
-      kind: 'pointer' as const,
-      phase: 'down' as const,
+      kind: 'click' as const,
       pointerId: 7,
       button: 'left' as const,
-      buttons: 1,
+      clickCount: 1,
       x: 500,
       y: 420,
       normalizedX: 0.5,
@@ -167,7 +166,7 @@ describe('remote-window-touch-action-runtime', () => {
     }));
   });
 
-  it('maps an unzoomed touch tap to focus-first absolute pointer down/up actions without React or WebView state', () => {
+  it('maps an unzoomed touch tap to one click action without React or WebView state', () => {
     const down = resolveRemoteWindowTouchPointerDownRuntime({
       state: createRemoteWindowTouchPointerState(),
       pointer: pointer({ clientX: 110, clientY: 70 }),
@@ -175,7 +174,7 @@ describe('remote-window-touch-action-runtime', () => {
       zoomedProjection: false,
     });
     expect(down.remoteEvents).toEqual([]);
-    expect(down.nextState.mode).toBe('touchPending');
+    expect(down.nextState.mode).toBe('actionPending');
 
     const up = resolveRemoteWindowTouchPointerUpRuntime({
       state: down.nextState,
@@ -185,23 +184,11 @@ describe('remote-window-touch-action-runtime', () => {
 
     expect(up.nextState.mode).toBe('idle');
     expect(up.remoteEvents).toEqual([
-      { kind: 'focus' },
       expect.objectContaining({
-        kind: 'pointer',
-        phase: 'down',
+        kind: 'click',
         pointerId: 7,
-        buttons: 1,
-        x: 500,
-        y: 420,
-        normalizedX: 0.5,
-        normalizedY: 0.5,
-      }),
-      { kind: 'focus' },
-      expect.objectContaining({
-        kind: 'pointer',
-        phase: 'up',
-        pointerId: 7,
-        buttons: 0,
+        button: 'left',
+        clickCount: 1,
         x: 500,
         y: 420,
         normalizedX: 0.5,
@@ -210,7 +197,103 @@ describe('remote-window-touch-action-runtime', () => {
     ]);
   });
 
-  it('maps an unzoomed touch drag to one focus-first gesture action on release without streaming moves', () => {
+  it('maps mouse click and drag to action records instead of pointer streams', () => {
+    const down = resolveRemoteWindowTouchPointerDownRuntime({
+      state: createRemoteWindowTouchPointerState(),
+      pointer: pointer({
+        pointerId: 20,
+        pointerType: 'mouse',
+        clientX: 110,
+        clientY: 70,
+        button: 0,
+        buttons: 1,
+        timeMs: 1_000,
+      }),
+      geometry,
+      zoomedProjection: false,
+    });
+    expect(down.remoteEvents).toEqual([]);
+    expect(down.nextState.mode).toBe('actionPending');
+
+    const click = resolveRemoteWindowTouchPointerUpRuntime({
+      state: down.nextState,
+      pointer: pointer({
+        pointerId: 20,
+        pointerType: 'mouse',
+        clientX: 110,
+        clientY: 70,
+        button: 0,
+        buttons: 0,
+        timeMs: 1_020,
+      }),
+      geometry,
+    });
+    expect(click.remoteEvents).toEqual([
+      expect.objectContaining({
+        kind: 'click',
+        pointerId: 20,
+        button: 'left',
+        x: 500,
+        y: 420,
+      }),
+    ]);
+
+    const dragDown = resolveRemoteWindowTouchPointerDownRuntime({
+      state: createRemoteWindowTouchPointerState(),
+      pointer: pointer({
+        pointerId: 21,
+        pointerType: 'mouse',
+        clientX: 110,
+        clientY: 70,
+        button: 0,
+        buttons: 1,
+        timeMs: 2_000,
+      }),
+      geometry,
+      zoomedProjection: false,
+    });
+    const dragMove = resolveRemoteWindowTouchPointerMoveRuntime({
+      state: dragDown.nextState,
+      pointer: pointer({
+        pointerId: 21,
+        pointerType: 'mouse',
+        clientX: 110,
+        clientY: 40,
+        button: 0,
+        buttons: 1,
+        timeMs: 2_020,
+      }),
+      geometry,
+    });
+    expect(dragMove.remoteEvents).toEqual([]);
+    expect(dragMove.nextState.mode).toBe('actionDrag');
+    const dragUp = resolveRemoteWindowTouchPointerUpRuntime({
+      state: dragMove.nextState,
+      pointer: pointer({
+        pointerId: 21,
+        pointerType: 'mouse',
+        clientX: 110,
+        clientY: 40,
+        button: 0,
+        buttons: 0,
+        timeMs: 2_040,
+      }),
+      geometry,
+    });
+    expect(dragUp.remoteEvents).toEqual([
+      expect.objectContaining({
+        kind: 'gesture',
+        gesture: 'swipe',
+        phase: 'end',
+        pointerId: 21,
+        deltaX: 0,
+        deltaY: -150,
+      }),
+    ]);
+    expect([...click.remoteEvents, ...dragUp.remoteEvents].some((remoteEvent) => remoteEvent.kind === 'pointer')).toBe(false);
+  });
+
+  it('maps an unzoomed touch drag to one gesture action on release without streaming moves', () => {
     const down = resolveRemoteWindowTouchPointerDownRuntime({
       state: createRemoteWindowTouchPointerState(),
       pointer: pointer({ pointerId: 8, clientX: 130, clientY: 90 }),
@@ -222,7 +305,7 @@ describe('remote-window-touch-action-runtime', () => {
       pointer: pointer({ pointerId: 8, clientX: 130, clientY: 72 }),
       geometry,
     });
-    expect(firstMove.nextState.mode).toBe('touchDrag');
+    expect(firstMove.nextState.mode).toBe('actionDrag');
     expect(firstMove.remoteEvents).toEqual([]);
 
     const secondMove = resolveRemoteWindowTouchPointerMoveRuntime({
@@ -238,7 +321,6 @@ describe('remote-window-touch-action-runtime', () => {
 
     expect(secondMove.remoteEvents).toEqual([]);
     expect(up.remoteEvents).toEqual([
-      { kind: 'focus' },
       expect.objectContaining({
         kind: 'gesture',
         gesture: 'swipe',
@@ -276,7 +358,6 @@ describe('remote-window-touch-action-runtime', () => {
     });
 
     expect(up.remoteEvents).toEqual([
-      { kind: 'focus' },
       expect.objectContaining({
         kind: 'gesture',
         gesture: 'swipe',
@@ -370,7 +451,7 @@ describe('remote-window-touch-action-runtime', () => {
       pointer: pointer({ pointerId: 10, clientX: 110, clientY: 70, buttons: 0 }),
       geometry,
     });
-    expect(tapUp.remoteEvents.map((event) => event.kind)).toEqual(['focus', 'pointer', 'focus', 'pointer']);
+    expect(tapUp.remoteEvents.map((event) => event.kind)).toEqual(['click']);
   });
 
   it('releases a remote drag on cancel without producing delayed gesture actions', () => {

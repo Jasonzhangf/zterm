@@ -295,20 +295,6 @@ function makeRemoteWindowTarget(): RemoteWindowStreamTargetManifest {
   };
 }
 
-function expectEveryRemoteWindowInputFocusFirst(sendInput: ReturnType<typeof vi.fn>) {
-  const payloads = sendInput.mock.calls.map((call) => call[1]);
-  payloads.forEach((payload, index) => {
-    if (payload?.event?.kind === "focus") {
-      return;
-    }
-    expect(payloads[index - 1]).toMatchObject({
-      streamId: payload.streamId,
-      targetId: payload.targetId,
-      event: { kind: "focus" },
-    });
-  });
-}
-
 async function flushAndroidImeFocusTimer() {
   await act(async () => {
     await new Promise((resolve) => setTimeout(resolve, 80));
@@ -465,18 +451,13 @@ describe("TerminalPage Android IME bridge", () => {
 
     await waitFor(() => {
       expect(onSendRemoteWindowInput.mock.calls.map((call) => call[1].event.kind)).toEqual([
-        "focus",
         "key",
-        "focus",
         "key",
-        "focus",
         "key",
-        "focus",
         "key",
-        "focus",
         "key",
       ]);
-      expectEveryRemoteWindowInputFocusFirst(onSendRemoteWindowInput);
+      expect(onSendRemoteWindowInput.mock.calls.some((call) => call[1].event.kind === "focus")).toBe(false);
       expect(onSendRemoteWindowInput).toHaveBeenCalledWith("s1", expect.objectContaining({
         targetId: "app-1",
         event: expect.objectContaining({
