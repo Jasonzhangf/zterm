@@ -120,6 +120,74 @@ describe('TerminalPreviewGrid', () => {
     expect(screen.getByTestId('terminal-preview-tile-s2').dataset.previewVariant).toBe('primary');
   });
 
+  it('clicking inside a child preview body promotes it without activating', () => {
+    const onActivateSession = vi.fn();
+    render(
+      <TerminalPreviewGrid
+        sessions={sessions.slice(0, 3)}
+        sessionBufferStore={null}
+        landscape={false}
+        fontSize={10}
+        onActivateSession={onActivateSession}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-preview-tile-s1').dataset.previewVariant).toBe('primary');
+    fireEvent.click(screen.getByTestId('terminal-preview-body-s2'));
+    expect(onActivateSession).not.toHaveBeenCalled();
+    expect(screen.getByTestId('terminal-preview-tile-s2').dataset.previewVariant).toBe('primary');
+  });
+
+  it('keeps order metadata but does not render order badges in tile titlebars', () => {
+    const namedSessions = [
+      { ...sessions[0], title: 'alpha', sessionName: 'alpha' },
+      { ...sessions[1], title: 'beta', sessionName: 'beta' },
+    ] as Session[];
+    render(
+      <TerminalPreviewGrid
+        sessions={namedSessions}
+        sessionBufferStore={null}
+        landscape={false}
+        fontSize={10}
+        onActivateSession={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const firstTile = screen.getByTestId('terminal-preview-tile-s1');
+    const titlebar = firstTile.querySelector('[data-preview-titlebar="true"]');
+    expect(firstTile.dataset.previewOrder).toBe('1');
+    expect(titlebar?.textContent).toContain('alpha');
+    expect(titlebar?.textContent).not.toContain('1');
+  });
+
+  it('renders secondary preview tiles with a compact local font without resize callbacks', () => {
+    render(
+      <TerminalPreviewGrid
+        sessions={sessions.slice(0, 3)}
+        sessionBufferStore={null}
+        landscape={false}
+        fontSize={14}
+        onActivateSession={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const terminalProps = terminalViewSpy.mock.calls.map(([props]) => props as Record<string, unknown>);
+    expect(terminalProps.map((props) => [props.sessionId, props.fontSize, props.rowHeight])).toEqual([
+      ['s1', 7, '10px'],
+      ['s2', 4, '6px'],
+      ['s3', 4, '6px'],
+    ]);
+    for (const props of terminalProps) {
+      expect(props.widthMode).toBe('mirror-fixed');
+      expect(props.onResize).toBeUndefined();
+      expect(props.onWidthModeChange).toBeUndefined();
+      expect(props.onViewportChange).toBeUndefined();
+    }
+  });
+
   it('removes a preview tile without activating or closing its Session', () => {
     const onActivateSession = vi.fn();
     const onRemoveSession = vi.fn();

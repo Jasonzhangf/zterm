@@ -1,4 +1,4 @@
-import { memo, useEffect, useRef, useState } from 'react';
+import { memo, useEffect, useRef, useState, type PointerEvent, type TouchEvent } from 'react';
 import { TerminalView } from '../TerminalView';
 import type { SessionRenderBufferStore } from '../../lib/session-render-buffer-store';
 import type { Session } from '../../lib/types';
@@ -41,6 +41,8 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
   const longPressTimerRef = useRef<number | null>(null);
   const longPressStartRef = useRef<{ x: number; y: number } | null>(null);
   const suppressActivationClickRef = useRef<string | null>(null);
+  const suppressActivationClickTimerRef = useRef<number | null>(null);
+  const bodyGestureStartRef = useRef<{ sessionId: string; x: number; y: number } | null>(null);
   const [replacementSourceSessionId, setReplacementSourceSessionId] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [moveSourceSessionId, setMoveSourceSessionId] = useState<string | null>(null);
@@ -57,8 +59,84 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
     longPressStartRef.current = null;
   };
 
+  const clearSuppressedActivationClick = () => {
+    if (suppressActivationClickTimerRef.current !== null) {
+      window.clearTimeout(suppressActivationClickTimerRef.current);
+    }
+    suppressActivationClickTimerRef.current = null;
+    suppressActivationClickRef.current = null;
+  };
+
+  const suppressNextActivationClick = (sessionId: string) => {
+    if (suppressActivationClickTimerRef.current !== null) {
+      window.clearTimeout(suppressActivationClickTimerRef.current);
+    }
+    suppressActivationClickRef.current = sessionId;
+    suppressActivationClickTimerRef.current = window.setTimeout(() => {
+      if (suppressActivationClickRef.current === sessionId) {
+        suppressActivationClickRef.current = null;
+      }
+      suppressActivationClickTimerRef.current = null;
+    }, 500);
+  };
+
+  const consumeSuppressedActivationClick = (sessionId: string) => {
+    if (suppressActivationClickRef.current !== sessionId) {
+      return false;
+    }
+    clearSuppressedActivationClick();
+    return true;
+  };
+
+  const beginBodyGesture = (sessionId: string, x: number, y: number) => {
+    clearLongPress();
+    bodyGestureStartRef.current = { sessionId, x, y };
+  };
+
+  const updateBodyGesture = (sessionId: string, x: number, y: number) => {
+    const start = bodyGestureStartRef.current;
+    if (!start || start.sessionId !== sessionId) {
+      return;
+    }
+    if (Math.hypot(x - start.x, y - start.y) > 8) {
+      suppressNextActivationClick(sessionId);
+    }
+  };
+
+  const finishBodyGesture = () => {
+    bodyGestureStartRef.current = null;
+    clearLongPress();
+  };
+
+  const beginBodyPointerGesture = (sessionId: string, event: PointerEvent<HTMLElement>) => {
+    beginBodyGesture(sessionId, event.clientX, event.clientY);
+  };
+
+  const updateBodyPointerGesture = (sessionId: string, event: PointerEvent<HTMLElement>) => {
+    updateBodyGesture(sessionId, event.clientX, event.clientY);
+  };
+
+  const beginBodyTouchGesture = (sessionId: string, event: TouchEvent<HTMLElement>) => {
+    const touch = event.touches[0] || event.changedTouches[0];
+    if (!touch) {
+      return;
+    }
+    beginBodyGesture(sessionId, touch.clientX, touch.clientY);
+  };
+
+  const updateBodyTouchGesture = (sessionId: string, event: TouchEvent<HTMLElement>) => {
+    const touch = event.touches[0] || event.changedTouches[0];
+    if (!touch) {
+      return;
+    }
+    updateBodyGesture(sessionId, touch.clientX, touch.clientY);
+  };
+
   useEffect(() => () => {
     if (longPressTimerRef.current !== null) window.clearTimeout(longPressTimerRef.current);
+    if (suppressActivationClickTimerRef.current !== null) {
+      window.clearTimeout(suppressActivationClickTimerRef.current);
+    }
   }, []);
 
   useEffect(() => {
@@ -73,10 +151,10 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
     const title = session.customName || session.title || session.sessionName || session.id;
     const compact = variant === 'secondary';
     const previewFontSize = compact
-      ? Math.max(4, Math.min(5, fontSize - 5))
+      ? 4
       : Math.max(5, Math.min(7, fontSize - 3));
     const previewRowHeight = compact
-      ? `${Math.max(6, Math.min(8, fontSize - 2))}px`
+      ? '6px'
       : `${Math.max(7, Math.min(10, fontSize))}px`;
     return (
       <div
@@ -102,14 +180,14 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
             longPressTimerRef.current = window.setTimeout(() => {
               longPressTimerRef.current = null;
               longPressStartRef.current = null;
-              suppressActivationClickRef.current = session.id;
+              suppressNextActivationClick(session.id);
               setReplacementSourceSessionId(session.id);
             }, PREVIEW_TILE_LONG_PRESS_MS);
           }}
           onPointerMove={(event) => {
             const start = longPressStartRef.current;
             if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) {
-              suppressActivationClickRef.current = session.id;
+              suppressNextActivationClick(session.id);
               clearLongPress();
             }
           }}
@@ -119,14 +197,13 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
           onContextMenu={(event) => {
             event.preventDefault();
             event.stopPropagation();
-            suppressActivationClickRef.current = session.id;
+            suppressNextActivationClick(session.id);
             setReplacementSourceSessionId(session.id);
           }}
           onClick={(event) => {
-            if (suppressActivationClickRef.current === session.id) {
+            if (consumeSuppressedActivationClick(session.id)) {
               event.preventDefault();
               event.stopPropagation();
-              suppressActivationClickRef.current = null;
               return;
             }
             if (variant === 'secondary') {
@@ -162,7 +239,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
               longPressTimerRef.current = window.setTimeout(() => {
                 longPressTimerRef.current = null;
                 longPressStartRef.current = null;
-                suppressActivationClickRef.current = session.id;
+                suppressNextActivationClick(session.id);
                 setMoveSourceSessionId(session.id);
                 setReplacementSourceSessionId(null);
                 setAddMenuOpen(false);
@@ -172,7 +249,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
               event.stopPropagation();
               const start = longPressStartRef.current;
               if (start && Math.hypot(event.clientX - start.x, event.clientY - start.y) > 8) {
-                suppressActivationClickRef.current = session.id;
+                suppressNextActivationClick(session.id);
                 clearLongPress();
               }
             }}
@@ -186,12 +263,11 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
             }}
             style={{
               height: compact ? '22px' : '24px', flexShrink: 0, display: 'grid',
-              gridTemplateColumns: compact ? '16px minmax(0, 1fr) 20px' : '18px minmax(0, 1fr) 54px 20px',
+              gridTemplateColumns: compact ? 'minmax(0, 1fr) 20px' : 'minmax(0, 1fr) 54px 20px',
               alignItems: 'center', gap: '4px',
-              padding: '0 4px 0 6px', background: tone.previewBackground, boxSizing: 'border-box',
+              padding: '0 4px 0 8px', background: tone.previewBackground, boxSizing: 'border-box',
             }}
           >
-            <span style={{ color: tone.previewText, fontSize: compact ? '9px' : '10px', fontWeight: 900 }}>{index + 1}</span>
             <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: compact ? '9px' : '10px', fontWeight: 800 }}>
               {title}
             </span>
@@ -207,17 +283,35 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
             data-preview-scroll-surface="true"
             onPointerDown={(event) => {
               event.stopPropagation();
-              clearLongPress();
+              beginBodyPointerGesture(session.id, event);
             }}
-            onPointerMove={(event) => event.stopPropagation()}
-            onPointerUp={(event) => event.stopPropagation()}
-            onPointerCancel={(event) => event.stopPropagation()}
-            onTouchStart={(event) => event.stopPropagation()}
-            onTouchMove={(event) => event.stopPropagation()}
-            onTouchEnd={(event) => event.stopPropagation()}
-            onClick={(event) => {
-              event.preventDefault();
+            onPointerMove={(event) => {
               event.stopPropagation();
+              updateBodyPointerGesture(session.id, event);
+            }}
+            onPointerUp={(event) => {
+              event.stopPropagation();
+              finishBodyGesture();
+            }}
+            onPointerCancel={(event) => {
+              event.stopPropagation();
+              finishBodyGesture();
+            }}
+            onTouchStart={(event) => {
+              event.stopPropagation();
+              beginBodyTouchGesture(session.id, event);
+            }}
+            onTouchMove={(event) => {
+              event.stopPropagation();
+              updateBodyTouchGesture(session.id, event);
+            }}
+            onTouchEnd={(event) => {
+              event.stopPropagation();
+              finishBodyGesture();
+            }}
+            onTouchCancel={(event) => {
+              event.stopPropagation();
+              finishBodyGesture();
             }}
             style={{ flex: 1, minHeight: 0, width: '100%', overflow: 'hidden', pointerEvents: 'auto' }}
           >

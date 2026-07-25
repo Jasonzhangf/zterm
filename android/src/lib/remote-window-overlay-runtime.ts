@@ -20,6 +20,7 @@ export type RemoteWindowOverlayState =
       phase: 'targetLocked';
       requestEpoch: number;
       target: RemoteWindowStreamTargetManifest;
+      targets: RemoteWindowStreamTargetManifest[];
       mode: RemoteWindowOverlayMode;
       streamStarted: boolean;
       streamStatus: 'idle' | 'starting' | 'streaming' | 'error';
@@ -93,20 +94,38 @@ export function selectRemoteWindowTarget(
   state: RemoteWindowOverlayState,
   targetId: string,
 ): RemoteWindowOverlayState {
-  if (state.phase !== 'pickerOpen') {
+  if (state.phase !== 'pickerOpen' && state.phase !== 'targetLocked') {
     return state;
   }
   const target = state.targets.find((item) => item.streamTargetId === targetId) || null;
   if (!target) {
+    if (state.phase === 'targetLocked') {
+      return {
+        ...state,
+        streamStatus: 'error',
+        streamErrorMessage: 'Selected remote window target is no longer in the catalog',
+      };
+    }
     return {
       ...state,
       errorMessage: 'Selected remote window target is no longer in the catalog',
+    };
+  }
+  if (state.phase === 'targetLocked') {
+    return {
+      ...state,
+      target,
+      streamStarted: false,
+      streamStatus: 'idle',
+      streamId: undefined,
+      streamErrorMessage: null,
     };
   }
   return {
     phase: 'targetLocked',
     requestEpoch: state.requestEpoch,
     target,
+    targets: state.targets,
     mode: 'floating',
     streamStarted: false,
     streamStatus: 'idle',

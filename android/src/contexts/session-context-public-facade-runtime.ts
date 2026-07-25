@@ -330,6 +330,10 @@ export function buildSessionContextValueRuntime(options: {
     sessionId: string,
     payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
   ) => void;
+  resizeRemoteWindowTarget: (
+    sessionId: string,
+    payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
+  ) => void;
   updateSessionViewport: (sessionId: string, visibleRange: TerminalVisibleRange | TerminalViewportState) => void;
   requestScheduleList: (sessionId: string) => void;
   manageTmuxSessionsOnOpenTransport: (
@@ -376,6 +380,7 @@ export function buildSessionContextValueRuntime(options: {
     updateRemoteWindowStreamQuality: options.updateRemoteWindowStreamQuality,
     stopRemoteWindowStream: options.stopRemoteWindowStream,
     sendRemoteWindowInput: options.sendRemoteWindowInput,
+    resizeRemoteWindowTarget: options.resizeRemoteWindowTarget,
     updateSessionViewport: options.updateSessionViewport,
     requestScheduleList: options.requestScheduleList,
     manageTmuxSessionsOnOpenTransport: options.manageTmuxSessionsOnOpenTransport,

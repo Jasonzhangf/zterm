@@ -71,6 +71,14 @@ interface RemoteWindowStreamMessageRuntimeLike extends RemoteWindowCatalogMessag
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     },
   ) => void;
+  sendWindowResizeEvent?: (
+    sessionId: string,
+    options: {
+      ws: BridgeTransportSocket;
+      payload: Omit<RemoteWindowInputEventPayload, 'requestId'>;
+      sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+    },
+  ) => void;
 }
 
 interface RemoteWindowReceiverRuntimeLike {
@@ -407,6 +415,34 @@ export function sendRemoteWindowInputRuntime(options: {
     readSessionTransportSocket: options.readSessionTransportSocket,
   });
   options.remoteWindowMessageRuntime.sendInputEvent(targetSessionId, {
+    ws,
+    payload: options.payload,
+    sendSocketPayload: options.sendSocketPayload,
+  });
+}
+
+export function resizeRemoteWindowTargetRuntime(options: {
+  sessionId: string;
+  payload: Omit<RemoteWindowInputEventPayload, 'requestId'>;
+  sessions: Session[];
+  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
+  remoteWindowMessageRuntime: RemoteWindowStreamMessageRuntimeLike;
+  sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+}) {
+  const targetSessionId = options.sessionId.trim();
+  if (!targetSessionId || options.payload.event.kind !== 'window-resize') {
+    throw new Error('Remote window target resize requires sessionId and window-resize event');
+  }
+  const ws = resolveRemoteWindowStreamTransport({
+    sessionId: targetSessionId,
+    sessions: options.sessions,
+    readSessionTransportResource: options.readSessionTransportResource,
+    readSessionTransportSocket: options.readSessionTransportSocket,
+  });
+  const sendWindowResizeEvent = options.remoteWindowMessageRuntime.sendWindowResizeEvent
+    || options.remoteWindowMessageRuntime.sendInputEvent;
+  sendWindowResizeEvent(targetSessionId, {
     ws,
     payload: options.payload,
     sendSocketPayload: options.sendSocketPayload,

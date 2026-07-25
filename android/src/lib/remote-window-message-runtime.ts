@@ -332,6 +332,33 @@ export function createRemoteWindowMessageRuntime(input?: {
       });
     },
 
+    sendWindowResizeEvent(sessionId: string, options: {
+      ws: BridgeTransportSocket;
+      payload: Omit<RemoteWindowInputEventPayload, 'requestId'>;
+      sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+    }) {
+      const targetSessionId = sessionId.trim();
+      const streamId = options.payload.streamId.trim();
+      if (
+        !targetSessionId
+        || !streamId
+        || !options.payload.targetId.trim()
+        || options.payload.event.kind !== 'window-resize'
+      ) {
+        throw new Error('Remote window resize requires sessionId, streamId, targetId, and window-resize event');
+      }
+      sendClientMessage(targetSessionId, options.ws, options.sendSocketPayload, {
+        type: 'remote-window-input',
+        payload: {
+          ...options.payload,
+          clientSentAt: Number.isFinite(options.payload.clientSentAt)
+            ? options.payload.clientSentAt
+            : now(),
+          requestId: `rw-resize-${now()}-${Math.random().toString(36).slice(2, 8)}`,
+        },
+      });
+    },
+
     handleTargetsResponse(payload: RemoteWindowStreamTargetsResponsePayload) {
       const pending = pendingRequests.get(payload.requestId);
       if (!pending) {

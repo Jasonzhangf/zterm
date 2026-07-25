@@ -263,11 +263,15 @@ export function createRemoteWindowTouchPointerState(): RemoteWindowTouchPointerS
 export function buildRemoteWindowFocusFirstInputEvents(
   events: Array<RemoteWindowInputEventPayload['event']>,
 ): Array<RemoteWindowInputEventPayload['event']> {
-  return events.flatMap((event) => (
-    event.kind === 'focus'
-      ? [event]
-      : [{ kind: 'focus' } as const, event]
-  ));
+  const result: Array<RemoteWindowInputEventPayload['event']> = [];
+  for (const event of events) {
+    if (event.kind === 'focus' || event.kind === 'window-resize') {
+      result.push(event);
+      continue;
+    }
+    result.push({ kind: 'focus' }, event);
+  }
+  return result;
 }
 
 export function resolveRemoteWindowTouchSurfacePointRuntime(

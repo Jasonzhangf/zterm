@@ -528,6 +528,8 @@ struct RemoteInputEvent: Decodable {
     let durationMs: Double?
     let velocityX: Double?
     let velocityY: Double?
+    let width: Double?
+    let height: Double?
     let key: String?
     let code: String?
     let text: String?
@@ -695,6 +697,56 @@ func focusTargetWindow(_ config: InputConfig) throws {
     }
 }
 
+func findTargetWindow(_ config: InputConfig) throws -> AXUIElement {
+    guard AXIsProcessTrusted() else {
+        throw NSError(domain: "RemoteWindowInput", code: 2, userInfo: [NSLocalizedDescriptionKey: "macOS Accessibility permission is required for remote window input"])
+    }
+    guard waitForRunningApplication(config.pid) != nil else {
+        throw NSError(domain: "RemoteWindowInput", code: 3, userInfo: [NSLocalizedDescriptionKey: "remote input target app is not running pid=" + String(config.pid)])
+    }
+    let appElement = AXUIElementCreateApplication(config.pid)
+    let windows = copyAttribute(appElement, kAXWindowsAttribute) as? [AXUIElement] ?? []
+    var bestWindow: AXUIElement?
+    var bestScore = Double.greatestFiniteMagnitude
+    for window in windows {
+        guard
+            let position = axPoint(copyAttribute(window, kAXPositionAttribute)),
+            let size = axSize(copyAttribute(window, kAXSizeAttribute))
+        else {
+            continue
+        }
+        let score = rectScore(position, size, config.window.bounds)
+        if score < bestScore {
+            bestScore = score
+            bestWindow = window
+        }
+    }
+    guard let window = bestWindow, bestScore <= 96.0 else {
+        throw NSError(domain: "RemoteWindowInput", code: 4, userInfo: [NSLocalizedDescriptionKey: "remote input target window could not be matched"])
+    }
+    return window
+}
+
+func resizeTargetWindow(_ config: InputConfig) throws {
+    guard
+        let width = config.event.width,
+        let height = config.event.height,
+        width >= 120,
+        height >= 120
+    else {
+        throw inputError("remote window resize dimensions are invalid")
+    }
+    let window = try findTargetWindow(config)
+    var size = CGSize(width: width, height: height)
+    guard let sizeValue = AXValueCreate(.cgSize, &size) else {
+        throw inputError("remote window resize size value could not be created")
+    }
+    let result = AXUIElementSetAttributeValue(window, kAXSizeAttribute as CFString, sizeValue)
+    if result != .success {
+        throw inputError("remote window resize failed")
+    }
+}
+
 let source = CGEventSource(stateID: .hidSystemState)
 
 func flags(_ event: RemoteInputEvent) -> CGEventFlags {
@@ -809,6 +861,10 @@ let keyCodes: [String: CGKeyCode] = [
 ]
 
 func handleConfig(_ config: InputConfig) throws {
+    if config.event.kind == "window-resize" {
+        try resizeTargetWindow(config)
+        return
+    }
     try focusTargetWindow(config)
 
     if config.event.kind == "focus" {
@@ -2741,6 +2797,17 @@ export function createRemoteWindowStreamDaemonRuntime(
       throw new Error(`remote window input route is not implemented: ${entry.target.inputRoute}`);
     }
     if (payload.event.kind === 'focus') {
+      return;
+    }
+    if (payload.event.kind === 'window-resize') {
+      if (
+        !Number.isFinite(payload.event.width)
+        || !Number.isFinite(payload.event.height)
+        || payload.event.width < 120
+        || payload.event.height < 120
+      ) {
+        throw new Error('remote window resize dimensions are invalid');
+      }
       return;
     }
     if (payload.event.kind === 'pointer') {

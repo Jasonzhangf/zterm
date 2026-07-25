@@ -245,6 +245,9 @@ describe('TerminalPage session preview integration', () => {
     fireEvent.touchEnd(stage, { changedTouches: [{ clientX: 270, clientY: 404 }] });
 
     fireEvent.click(await screen.findByTestId('terminal-preview-tile-s2'));
+    expect(screen.getByTestId('terminal-preview-tile-s2').dataset.previewVariant).toBe('primary');
+    expect(onSwitchSession).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId('terminal-preview-tile-s2'));
     await waitFor(() => expect(screen.queryByTestId('terminal-preview-grid')).toBeNull());
     expect(onSwitchSession).toHaveBeenCalledTimes(1);
     expect(onSwitchSession).toHaveBeenCalledWith('s2');
@@ -252,8 +255,8 @@ describe('TerminalPage session preview integration', () => {
     expect(screen.queryByTestId('terminal-view-s1')).toBeNull();
   });
 
-  it('removes selected preview sessions from live body demand while app foreground truth is false', async () => {
-    const sessions = [makeSession('s1'), makeSession('s2')];
+  it('keeps every selected preview child in live body demand while foreground is true', async () => {
+    const sessions = [makeSession('s1'), makeSession('s2'), makeSession('s3'), makeSession('s4')];
     localStorage.setItem(SESSION_PREVIEW_SELECTION_STORAGE_KEY, JSON.stringify({
       version: 1,
       orderedTargets: sessions.map((item) => ({
@@ -294,14 +297,14 @@ describe('TerminalPage session preview integration', () => {
     fireEvent.touchMove(stage, { touches: [{ clientX: 270, clientY: 404 }], cancelable: true });
     fireEvent.touchEnd(stage, { changedTouches: [{ clientX: 270, clientY: 404 }] });
     await waitFor(() => expect(screen.getByTestId('terminal-preview-grid')).toBeTruthy());
-    await waitFor(() => expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s1', 's2']));
+    await waitFor(() => expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s1', 's2', 's3', 's4']));
 
     view.rerender(renderPage(false));
     await waitFor(() => expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s1']));
     expect(screen.getByTestId('terminal-preview-grid')).toBeTruthy();
 
     view.rerender(renderPage(true));
-    await waitFor(() => expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s1', 's2']));
+    await waitFor(() => expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s1', 's2', 's3', 's4']));
   });
 
   it('materializes a remote-only drawer row before adding it to preview selection', async () => {
@@ -526,7 +529,7 @@ describe('TerminalPage session preview integration', () => {
 
     fireEvent.click(screen.getByLabelText('从预览移除 Session s2'));
     await waitFor(() => expect(screen.queryByTestId('terminal-preview-tile-s2')).toBeNull());
-    expect(screen.getByTestId('terminal-preview-grid').dataset.columns).toBe('1');
+    expect(screen.getAllByTestId(/terminal-preview-tile-/)).toHaveLength(1);
     expect(JSON.parse(localStorage.getItem(SESSION_PREVIEW_SELECTION_STORAGE_KEY) || '{}').orderedTargets)
       .toHaveLength(1);
 

@@ -254,6 +254,7 @@ export function useSessionProviderFacadeAssemblies(
     updateRemoteWindowStreamQuality,
     stopRemoteWindowStream,
     sendRemoteWindowInput,
+    resizeRemoteWindowTarget,
   } = sessionInteractionRuntime;
 
   useSessionContextLifecycle({
@@ -314,6 +315,7 @@ export function useSessionProviderFacadeAssemblies(
     updateRemoteWindowStreamQuality,
     stopRemoteWindowStream,
     sendRemoteWindowInput,
+    resizeRemoteWindowTarget,
     updateSessionViewport,
     requestScheduleList,
     upsertScheduleJob,
@@ -351,6 +353,7 @@ export function useSessionProviderFacadeAssemblies(
     sendImagePaste,
     sendInput,
     sendRemoteWindowInput,
+    resizeRemoteWindowTarget,
     sendMessage,
     sendMessageRaw,
     setLiveSessionIds,

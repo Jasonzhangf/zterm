@@ -249,6 +249,7 @@ export function AppContent({
     updateRemoteWindowStreamQuality,
     stopRemoteWindowStream,
     sendRemoteWindowInput,
+    resizeRemoteWindowTarget,
     sendMessageRaw,
     manageTmuxSessionsOnOpenTransport,
     onFileTransferMessage,
@@ -931,6 +932,7 @@ export function AppContent({
             onUpdateRemoteWindowStreamQuality={updateRemoteWindowStreamQuality}
             onStopRemoteWindowStream={stopRemoteWindowStream}
             onSendRemoteWindowInput={sendRemoteWindowInput}
+            onResizeRemoteWindowTarget={resizeRemoteWindowTarget}
             quickActions={quickActions}
             shortcutActions={shortcutActions}
             onQuickActionInput={handleQuickActionInput}

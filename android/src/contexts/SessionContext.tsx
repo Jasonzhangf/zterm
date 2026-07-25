@@ -117,6 +117,7 @@ export function SessionProvider({
     updateRemoteWindowStreamQuality,
     stopRemoteWindowStream,
     sendRemoteWindowInput,
+    resizeRemoteWindowTarget,
     updateSessionViewport,
     requestScheduleList,
     manageTmuxSessionsOnOpenTransport,
@@ -207,6 +208,7 @@ export function SessionProvider({
     updateRemoteWindowStreamQuality,
     stopRemoteWindowStream,
     sendRemoteWindowInput,
+    resizeRemoteWindowTarget,
     updateSessionViewport,
     requestScheduleList,
     manageTmuxSessionsOnOpenTransport,
@@ -250,6 +252,7 @@ export function SessionProvider({
     updateRemoteWindowStreamQuality,
     stopRemoteWindowStream,
     sendRemoteWindowInput,
+    resizeRemoteWindowTarget,
     updateSessionViewport,
     requestScheduleList,
     manageTmuxSessionsOnOpenTransport,
@@ -317,6 +320,9 @@ export function SessionProvider({
     ),
     sendRemoteWindowInput: (...args: Parameters<typeof sendRemoteWindowInput>) => (
       contextRuntimeRef.current.sendRemoteWindowInput(...args)
+    ),
+    resizeRemoteWindowTarget: (...args: Parameters<typeof resizeRemoteWindowTarget>) => (
+      contextRuntimeRef.current.resizeRemoteWindowTarget(...args)
     ),
     updateSessionViewport: (
       sessionId: string,

@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render, waitFor } from '@testing-library/react';
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { createSessionRenderBufferStore } from '../../lib/session-render-buffer-store';
 import type { Session, SessionRenderBufferSnapshot, TerminalCell } from '../../lib/types';
 import { TerminalStageShell } from '../../pages/TerminalPageStageShell';
@@ -121,6 +121,49 @@ describe('TerminalPreviewGrid render truth', () => {
 
     const allRows = sessions.flatMap((session) => renderedRows(view.getByTestId(`terminal-preview-tile-${session.id}`)));
     expect(new Set(allRows).size).toBe(18);
+  });
+
+  it('keeps child preview DOM refreshing after a body tap promotes another child to primary', async () => {
+    const store = createSessionRenderBufferStore();
+    const previewSessions = sessions.slice(0, 4);
+    for (let index = 0; index < previewSessions.length; index += 1) {
+      store.setBuffer(previewSessions[index].id, snapshot(index + 1, 1, 'INITIAL'));
+    }
+    const onActivateSession = vi.fn();
+
+    const view = render(
+      <div style={{ width: '720px', height: '960px' }}>
+        <TerminalPreviewGrid
+          sessions={previewSessions}
+          sessionBufferStore={store}
+          landscape={false}
+          fontSize={10}
+          onActivateSession={onActivateSession}
+          onClose={() => undefined}
+        />
+      </div>,
+    );
+
+    fireEvent.click(view.getByTestId(`terminal-preview-body-${previewSessions[1].id}`));
+    expect(onActivateSession).not.toHaveBeenCalled();
+    expect(view.getByTestId(`terminal-preview-tile-${previewSessions[1].id}`).dataset.previewVariant).toBe('primary');
+
+    act(() => {
+      for (let index = 0; index < previewSessions.length; index += 1) {
+        store.setBuffer(previewSessions[index].id, snapshot(index + 1, 2, 'REFRESH'));
+      }
+    });
+
+    await waitFor(() => {
+      for (let index = 0; index < previewSessions.length; index += 1) {
+        const tile = view.getByTestId(`terminal-preview-tile-${previewSessions[index].id}`);
+        expect(renderedRows(tile)).toEqual([
+          `S${index + 1}-REFRESH-R2-HEAD`,
+          `S${index + 1}-REFRESH-R2-TUI`,
+          `S${index + 1}-REFRESH-R2-INPUT`,
+        ]);
+      }
+    });
   });
 
   it('continues rendering the selected session after preview is replaced by the real shell', async () => {

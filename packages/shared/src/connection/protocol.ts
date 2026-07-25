@@ -336,6 +336,11 @@ export interface RemoteWindowInputEventPayload {
         velocityY: number;
       }
     | {
+        kind: 'window-resize';
+        width: number;
+        height: number;
+      }
+    | {
         kind: 'key';
         phase: 'down' | 'up';
         key: string;

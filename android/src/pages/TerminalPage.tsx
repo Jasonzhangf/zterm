@@ -233,6 +233,8 @@ function formatRemoteWindowInputDebugEvent(event: RemoteWindowInputEventPayload[
       return `scroll ${Math.round(event.deltaX)},${Math.round(event.deltaY)}`;
     case 'gesture':
       return `gesture:${event.gesture}/${event.phase}`;
+    case 'window-resize':
+      return `resize ${Math.round(event.width)}x${Math.round(event.height)}`;
     case 'key': {
       const keyLabel = event.text
         ? `text:${event.text.length}`
@@ -250,6 +252,9 @@ function formatRemoteWindowInputDebugPoint(event: RemoteWindowInputEventPayload[
   }
   if (event.kind === 'gesture') {
     return `${Math.round(event.startX)},${Math.round(event.startY)} -> ${Math.round(event.x)},${Math.round(event.y)}`;
+  }
+  if (event.kind === 'window-resize') {
+    return `${Math.round(event.width)}x${Math.round(event.height)}`;
   }
   return '-';
 }
@@ -713,6 +718,10 @@ interface TerminalPageProps {
   ) => void;
   onStopRemoteWindowStream?: (sessionId: string, streamId: string) => boolean;
   onSendRemoteWindowInput?: (
+    sessionId: string,
+    payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
+  ) => void;
+  onResizeRemoteWindowTarget?: (
     sessionId: string,
     payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
   ) => void;
@@ -1502,6 +1511,7 @@ function TerminalPageComponent({
   onUpdateRemoteWindowStreamQuality,
   onStopRemoteWindowStream,
   onSendRemoteWindowInput,
+  onResizeRemoteWindowTarget,
   onRemoteWindowMessage,
   quickActions,
   shortcutActions,
@@ -4168,6 +4178,7 @@ function TerminalPageComponent({
           stopStream={onStopRemoteWindowStream}
           requestScreenshot={handleRequestRemoteWindowScreenshot}
           sendInput={onSendRemoteWindowInput}
+          resizeTargetWindow={onResizeRemoteWindowTarget}
           onInputDebug={recordRemoteWindowInputDebug}
           bottomInsetPx={
             quickBarShellKeyboardLiftPx
@@ -4303,6 +4314,7 @@ function terminalPagePropsEqual(
     && prev.onUpdateRemoteWindowStreamQuality === next.onUpdateRemoteWindowStreamQuality
     && prev.onStopRemoteWindowStream === next.onStopRemoteWindowStream
     && prev.onSendRemoteWindowInput === next.onSendRemoteWindowInput
+    && prev.onResizeRemoteWindowTarget === next.onResizeRemoteWindowTarget
     && prev.onRemoteWindowMessage === next.onRemoteWindowMessage
     && prev.quickActions === next.quickActions
     && prev.shortcutActions === next.shortcutActions

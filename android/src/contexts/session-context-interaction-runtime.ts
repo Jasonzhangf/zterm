@@ -9,6 +9,7 @@ import {
   type RemoteWindowTargetCatalogCacheStore,
   requestRemoteWindowStreamStartRuntime,
   requestRemoteWindowTargetsRuntime,
+  resizeRemoteWindowTargetRuntime,
   sendRemoteWindowInputRuntime,
   stopRemoteWindowStreamRuntime,
   updateRemoteWindowStreamQualityRuntime,
@@ -249,6 +250,21 @@ export function createSessionInteractionRuntime(options: {
     });
   };
 
+  const resizeRemoteWindowTarget = (
+    sessionId: string,
+    payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,
+  ) => {
+    return resizeRemoteWindowTargetRuntime({
+      sessionId,
+      payload,
+      sessions: options.refs.stateRef.current.sessions,
+      readSessionTransportResource: options.readSessionTransportResource,
+      readSessionTransportSocket: options.readSessionTransportSocket,
+      remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
+      sendSocketPayload: options.sendSocketPayload,
+    });
+  };
+
   return {
     sendInput,
     ensureSessionReadyForPaste,
@@ -260,5 +276,6 @@ export function createSessionInteractionRuntime(options: {
     updateRemoteWindowStreamQuality,
     stopRemoteWindowStream,
     sendRemoteWindowInput,
+    resizeRemoteWindowTarget,
   };
 }
