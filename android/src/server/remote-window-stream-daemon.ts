@@ -27,6 +27,7 @@ const DEFAULT_REMOTE_WINDOW_FRAME_RATE = 30;
 const DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 60_000;
 const REMOTE_WINDOW_INPUT_STALE_MS = 1_000;
 const REMOTE_WINDOW_INPUT_FOCUS_TIMEOUT_MS = 3_000;
+const REMOTE_WINDOW_INPUT_FOCUS_PAIR_GRACE_MS = 25;
 const REMOTE_WINDOW_INPUT_HELPER_READY_TIMEOUT_MS = 15_000;
 const ITERM2_APP_BUNDLE_ID = 'com.googlecode.iterm2';
 const ITERM2_PANE_GAP_PX = 1;
@@ -590,11 +591,38 @@ func axSize(_ value: AnyObject?) -> CGSize? {
     return size
 }
 
-func frontmostPidMatches(_ pid: Int32) -> Bool {
-    guard let frontmost = NSWorkspace.shared.frontmostApplication else {
-        return false
+func frontmostProcessPidFromSystemEvents() -> Int32? {
+    let process = Process()
+    let output = Pipe()
+    let error = Pipe()
+    process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+    process.arguments = [
+        "-e",
+        "tell application \"System Events\" to get unix id of first application process whose frontmost is true"
+    ]
+    process.standardOutput = output
+    process.standardError = error
+    do {
+        try process.run()
+        process.waitUntilExit()
+    } catch {
+        return nil
     }
-    return frontmost.processIdentifier == pid
+    guard process.terminationStatus == 0 else {
+        return nil
+    }
+    let data = output.fileHandleForReading.readDataToEndOfFile()
+    guard
+        let raw = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+        let frontmostPid = Int32(raw)
+    else {
+        return nil
+    }
+    return frontmostPid
+}
+
+func frontmostPidMatches(_ pid: Int32) -> Bool {
+    return frontmostProcessPidFromSystemEvents() == pid
 }
 
 func waitForRunningApplication(_ pid: Int32) -> NSRunningApplication? {
@@ -1684,6 +1712,8 @@ interface PendingRemoteWindowInputHelperRequest {
   resolve: () => void;
   reject: (error: Error) => void;
   timeout: ReturnType<typeof setTimeout> | null;
+  pairGraceTimer: ReturnType<typeof setTimeout> | null;
+  pairGraceExpired: boolean;
   refreshReceivedAtAfterFocusConfig: RemoteWindowInputConfig | null;
 }
 
@@ -1719,6 +1749,20 @@ export function shouldRefreshRemoteWindowQueuedInputAfterFocus(
 ) {
   return isRemoteWindowFocusInputConfig(focusConfig)
     && !isRemoteWindowFocusInputConfig(queuedConfig)
+    && remoteWindowInputConfigsShareTarget(focusConfig, queuedConfig);
+}
+
+function isRemoteWindowRealInputConfig(config: Pick<RemoteWindowInputConfig, 'event'>) {
+  return config.event.kind !== 'focus'
+    && config.event.kind !== 'window-resize';
+}
+
+export function shouldCoalesceRemoteWindowQueuedFocusBeforeInput(
+  focusConfig: RemoteWindowInputConfig,
+  queuedConfig: RemoteWindowInputConfig,
+) {
+  return isRemoteWindowFocusInputConfig(focusConfig)
+    && (isRemoteWindowFocusInputConfig(queuedConfig) || isRemoteWindowRealInputConfig(queuedConfig))
     && remoteWindowInputConfigsShareTarget(focusConfig, queuedConfig);
 }
 
@@ -1786,7 +1830,23 @@ export function createDefaultRemoteWindowInputHelper(options: {
       clearTimeout(request.timeout);
       request.timeout = null;
     }
+    if (request.pairGraceTimer) {
+      clearTimeout(request.pairGraceTimer);
+      request.pairGraceTimer = null;
+    }
     request.reject(error);
+  };
+
+  const resolveRequest = (request: PendingRemoteWindowInputHelperRequest) => {
+    if (request.timeout) {
+      clearTimeout(request.timeout);
+      request.timeout = null;
+    }
+    if (request.pairGraceTimer) {
+      clearTimeout(request.pairGraceTimer);
+      request.pairGraceTimer = null;
+    }
+    request.resolve();
   };
 
   const rejectAll = (error: Error) => {
@@ -1855,7 +1915,7 @@ export function createDefaultRemoteWindowInputHelper(options: {
               }
               if (response.ok === true) {
                 refreshQueueAfterSuccessfulFocus(request.config);
-                request.resolve();
+                resolveRequest(request);
               } else {
                 request.reject(new Error(String(response.error || 'remote window input event failed')));
               }
@@ -1961,6 +2021,36 @@ export function createDefaultRemoteWindowInputHelper(options: {
     if (disposed || active || queue.length === 0) {
       return;
     }
+    const nextRequest = queue[0];
+    if (
+      nextRequest
+      && isRemoteWindowFocusInputConfig(nextRequest.config)
+    ) {
+      const followingRequest = queue[1] || null;
+      if (
+        followingRequest
+        && shouldCoalesceRemoteWindowQueuedFocusBeforeInput(nextRequest.config, followingRequest.config)
+      ) {
+        queue.shift();
+        if (shouldRefreshRemoteWindowQueuedInputAfterFocus(nextRequest.config, followingRequest.config)) {
+          followingRequest.config.daemonReceivedAtMs = Date.now();
+          followingRequest.refreshReceivedAtAfterFocusConfig = null;
+        }
+        resolveRequest(nextRequest);
+        pump();
+        return;
+      }
+      if (!nextRequest.pairGraceExpired && !nextRequest.pairGraceTimer) {
+        nextRequest.pairGraceTimer = setTimeout(() => {
+          nextRequest.pairGraceTimer = null;
+          nextRequest.pairGraceExpired = true;
+          pump();
+        }, REMOTE_WINDOW_INPUT_FOCUS_PAIR_GRACE_MS);
+      }
+      if (!nextRequest.pairGraceExpired) {
+        return;
+      }
+    }
     const request = queue.shift();
     if (!request) {
       return;
@@ -2031,6 +2121,8 @@ export function createDefaultRemoteWindowInputHelper(options: {
           resolve,
           reject,
           timeout: null,
+          pairGraceTimer: null,
+          pairGraceExpired: false,
           refreshReceivedAtAfterFocusConfig: findFocusConfigForQueuedInput(config),
         });
         pump();

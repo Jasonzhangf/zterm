@@ -20,6 +20,7 @@ import {
   SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT,
   parseTmuxClientTargets,
   resolveRemoteWindowInputHelperTimeoutMs,
+  shouldCoalesceRemoteWindowQueuedFocusBeforeInput,
   shouldRefreshRemoteWindowQueuedInputAfterFocus,
   startScreenCaptureKitFrameSource,
   summarizeRemoteWindowCatalogError,
@@ -447,9 +448,12 @@ describe('remote window stream daemon owner', () => {
     expect(shouldRefreshRemoteWindowQueuedInputAfterFocus(focusConfig, pointerConfig)).toBe(true);
     expect(shouldRefreshRemoteWindowQueuedInputAfterFocus(focusConfig, otherWindowPointerConfig)).toBe(false);
     expect(shouldRefreshRemoteWindowQueuedInputAfterFocus(pointerConfig, focusConfig)).toBe(false);
+    expect(shouldCoalesceRemoteWindowQueuedFocusBeforeInput(focusConfig, pointerConfig)).toBe(true);
+    expect(shouldCoalesceRemoteWindowQueuedFocusBeforeInput(focusConfig, otherWindowPointerConfig)).toBe(false);
+    expect(shouldCoalesceRemoteWindowQueuedFocusBeforeInput(pointerConfig, focusConfig)).toBe(false);
   });
 
-  it('lets same-target input wait behind a slow successful focus without becoming stale', async () => {
+  it('keeps an explicit standalone focus while refreshing a later same-target input after success', async () => {
     const stdin = new PassThrough();
     const stdout = new PassThrough();
     const stderr = new PassThrough();
@@ -471,6 +475,7 @@ describe('remote window stream daemon owner', () => {
       return fakeChild as any;
     });
     let inputBuffer = '';
+    const writtenKinds: string[] = [];
     stdin.setEncoding('utf8');
     stdin.on('data', (chunk) => {
       inputBuffer += String(chunk);
@@ -480,6 +485,7 @@ describe('remote window stream daemon owner', () => {
         inputBuffer = inputBuffer.slice(index + 1);
         if (raw) {
           const config = JSON.parse(raw) as { event?: { kind?: string } };
+          writtenKinds.push(String(config.event?.kind || 'unknown'));
           const delay = config.event?.kind === 'focus' ? 1200 : 0;
           setTimeout(() => {
             stdout.write(`${JSON.stringify({ ok: true, kind: config.event?.kind })}\n`);
@@ -523,10 +529,101 @@ describe('remote window stream daemon owner', () => {
       }, target, { daemonReceivedAtMs });
       const focusPromise = helper.send(focusConfig);
       await new Promise((resolve) => {
-        setTimeout(resolve, 20);
+        setTimeout(resolve, 40);
       });
       const pointerPromise = helper.send(pointerConfig);
       await expect(Promise.all([focusPromise, pointerPromise])).resolves.toEqual([undefined, undefined]);
+      expect(writtenKinds).toEqual(['focus', 'pointer']);
+    } finally {
+      helper.dispose();
+    }
+  }, 10_000);
+
+  it('coalesces redundant same-target focus bursts so real actions do not stale behind focus work', async () => {
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const childEvents = new EventEmitter();
+    const fakeChild = {
+      stdin,
+      stdout,
+      stderr,
+      killed: false,
+      kill: vi.fn((signal?: NodeJS.Signals) => {
+        fakeChild.killed = true;
+        childEvents.emit('exit', null, signal || null);
+        return true;
+      }),
+      on: childEvents.on.bind(childEvents),
+    };
+    const processFactory = vi.fn(() => {
+      process.nextTick(() => stdout.write(`${JSON.stringify({ ready: true })}\n`));
+      return fakeChild as any;
+    });
+    let inputBuffer = '';
+    const writtenPointerIds: number[] = [];
+    const writtenKinds: string[] = [];
+    stdin.setEncoding('utf8');
+    stdin.on('data', (chunk) => {
+      inputBuffer += String(chunk);
+      let index = inputBuffer.indexOf('\n');
+      while (index >= 0) {
+        const raw = inputBuffer.slice(0, index).trim();
+        inputBuffer = inputBuffer.slice(index + 1);
+        if (raw) {
+          const config = JSON.parse(raw) as { event?: { kind?: string; pointerId?: number } };
+          if (typeof config.event?.pointerId === 'number') {
+            writtenPointerIds.push(config.event.pointerId);
+          }
+          writtenKinds.push(String(config.event?.kind || 'unknown'));
+          setTimeout(() => {
+            stdout.write(`${JSON.stringify({ ok: true })}\n`);
+          }, 650);
+        }
+        index = inputBuffer.indexOf('\n');
+      }
+    });
+    const helper = createDefaultRemoteWindowInputHelper({
+      swiftBinary: 'fake-swift',
+      processFactory,
+    });
+    const target = makeAppStreamTarget();
+
+    const makeConfigPair = (index: number) => {
+      const daemonReceivedAtMs = Date.now();
+      const focusConfig = buildRemoteWindowInputConfig({
+        requestId: `rw-burst-focus-${index}`,
+        streamId: 'stream-burst-focus',
+        targetId: target.streamTargetId,
+        clientSentAt: daemonReceivedAtMs,
+        event: { kind: 'focus' },
+      }, target, { daemonReceivedAtMs });
+      const pointerConfig = buildRemoteWindowInputConfig({
+        requestId: `rw-burst-pointer-${index}`,
+        streamId: 'stream-burst-focus',
+        targetId: target.streamTargetId,
+        clientSentAt: daemonReceivedAtMs,
+        event: {
+          kind: 'pointer',
+          phase: 'down',
+          pointerId: index,
+          button: 'left',
+          buttons: 1,
+          x: 120,
+          y: 140,
+          normalizedX: 0.5,
+          normalizedY: 0.5,
+        },
+      }, target, { daemonReceivedAtMs });
+      return [focusConfig, pointerConfig] as const;
+    };
+
+    try {
+      await helper.warm();
+      const configs = [1, 2, 3].flatMap((index) => [...makeConfigPair(index)]);
+      await expect(Promise.all(configs.map((config) => helper.send(config)))).resolves.toHaveLength(6);
+      expect(writtenPointerIds).toEqual([1, 2, 3]);
+      expect(writtenKinds).toEqual(['pointer', 'pointer', 'pointer']);
     } finally {
       helper.dispose();
     }
@@ -563,8 +660,10 @@ describe('remote window stream daemon owner', () => {
 
   it('requires macOS helper focus verification before reporting input success', () => {
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func activateTargetApplication(_ config: InputConfig, _ app: NSRunningApplication)');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func frontmostProcessPidFromSystemEvents() -> Int32?');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('func waitForRunningApplication(_ pid: Int32) -> NSRunningApplication?');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('usleep(50000)');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('tell application \\"System Events\\" to get unix id of first application process whose frontmost is true');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('System Events\\" to set frontmost of first process whose unix id is');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('/usr/bin/osascript');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('kAXFrontmostAttribute');
@@ -575,6 +674,7 @@ describe('remote window stream daemon owner', () => {
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('remote input target app did not become frontmost');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).toContain('remote input target window did not become focused');
     expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('NSAppleScript');
+    expect(MACOS_REMOTE_WINDOW_INPUT_SWIFT).not.toContain('NSWorkspace.shared.frontmostApplication');
   });
 
   it('short-circuits repeated focus when the target window is already focused', () => {
