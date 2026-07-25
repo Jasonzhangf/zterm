@@ -32,19 +32,10 @@ const sessions = Array.from({ length: 6 }, (_, index) => ({
 
 describe('TerminalPreviewGrid', () => {
   it.each([
-    [false, 1, 1, 1],
-    [false, 2, 2, 1],
-    [false, 3, 2, 2],
-    [false, 4, 2, 2],
-    [false, 5, 2, 3],
-    [false, 6, 2, 3],
-    [true, 1, 1, 1],
-    [true, 2, 2, 1],
-    [true, 3, 3, 1],
-    [true, 4, 3, 2],
-    [true, 5, 3, 2],
-    [true, 6, 3, 2],
-  ])('derives %s orientation layout for %i selected sessions as %ix%i', (landscape, count, columns, rows) => {
+    [false, 1, 'row', 'row'],
+    [false, 4, 'column', 'row'],
+    [true, 4, 'row', 'column'],
+  ])('derives grouped %s orientation layout for %i selected sessions', (landscape, count, primaryAxis, secondaryAxis) => {
     render(
       <TerminalPreviewGrid
         sessions={sessions.slice(0, count)}
@@ -57,12 +48,12 @@ describe('TerminalPreviewGrid', () => {
     );
 
     const grid = screen.getByTestId('terminal-preview-grid');
-    expect(grid.dataset.columns).toBe(String(columns));
-    expect(grid.dataset.rows).toBe(String(rows));
+    expect(grid.dataset.windowGroupPrimaryAxis).toBe(primaryAxis);
+    expect(grid.dataset.windowGroupSecondaryAxis).toBe(secondaryAxis);
     expect(screen.getAllByTestId(/terminal-preview-tile-/)).toHaveLength(count);
   });
 
-  it('renders six ordered read-only terminals in portrait 2x3 layout', () => {
+  it('renders six ordered read-only terminals in a primary-plus-children layout', () => {
     const onActivateSession = vi.fn();
     render(
       <TerminalPreviewGrid
@@ -77,8 +68,8 @@ describe('TerminalPreviewGrid', () => {
     );
 
     const grid = screen.getByTestId('terminal-preview-grid');
-    expect(grid.dataset.columns).toBe('2');
-    expect(grid.dataset.rows).toBe('3');
+    expect(grid.dataset.windowGroupPrimaryAxis).toBe('column');
+    expect(grid.dataset.windowGroupSecondaryAxis).toBe('row');
     expect(screen.getAllByTestId(/terminal-preview-tile-/)).toHaveLength(6);
     expect(terminalViewSpy).toHaveBeenCalledTimes(6);
     for (const [props] of terminalViewSpy.mock.calls) {
@@ -88,11 +79,11 @@ describe('TerminalPreviewGrid', () => {
       expect((props as Record<string, unknown>).onViewportChange).toBeUndefined();
     }
 
-    fireEvent.click(screen.getByTestId('terminal-preview-tile-s4'));
-    expect(onActivateSession).toHaveBeenCalledWith('s4');
+    fireEvent.click(screen.getByTestId('terminal-preview-tile-s1'));
+    expect(onActivateSession).toHaveBeenCalledWith('s1');
   });
 
-  it('uses landscape 3x2 layout and exposes close command', () => {
+  it('uses landscape side-rail layout and exposes close command', () => {
     const onClose = vi.fn();
     render(
       <TerminalPreviewGrid
@@ -105,10 +96,28 @@ describe('TerminalPreviewGrid', () => {
         onClose={onClose}
       />,
     );
-    expect(screen.getByTestId('terminal-preview-grid').dataset.columns).toBe('2');
-    expect(screen.getByTestId('terminal-preview-grid').dataset.rows).toBe('1');
+    expect(screen.getByTestId('terminal-preview-grid').dataset.windowGroupPrimaryAxis).toBe('row');
     fireEvent.click(screen.getByLabelText('退出终端预览'));
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('clicking a child preview promotes it to the large primary preview without activating', () => {
+    const onActivateSession = vi.fn();
+    render(
+      <TerminalPreviewGrid
+        sessions={sessions.slice(0, 3)}
+        sessionBufferStore={null}
+        landscape={false}
+        fontSize={10}
+        onActivateSession={onActivateSession}
+        onClose={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-preview-tile-s1').dataset.previewVariant).toBe('primary');
+    fireEvent.click(screen.getByTestId('terminal-preview-secondary-s2'));
+    expect(onActivateSession).not.toHaveBeenCalled();
+    expect(screen.getByTestId('terminal-preview-tile-s2').dataset.previewVariant).toBe('primary');
   });
 
   it('removes a preview tile without activating or closing its Session', () => {
@@ -207,8 +216,8 @@ describe('TerminalPreviewGrid', () => {
     expect(onActivateSession).not.toHaveBeenCalled();
     expect(screen.queryByTestId('terminal-preview-replacement-menu')).toBeNull();
     expect(terminalViewSpy).toHaveBeenLastCalledWith(expect.objectContaining({
-      fontSize: 6,
-      rowHeight: '9px',
+      fontSize: 7,
+      rowHeight: '10px',
       widthMode: 'mirror-fixed',
       active: false,
       live: true,

@@ -70,6 +70,7 @@ import {
   type RemoteWindowTouchSurfaceGeometry,
   type RemoteWindowTouchSurfacePoint,
 } from '../../lib/remote-window-touch-action-runtime';
+import { WindowGroupLayout } from './WindowGroupLayout';
 
 interface RemoteWindowOverlayProps {
   activeSessionId?: string | null;
@@ -767,6 +768,53 @@ function formatTargetSubtitle(target: RemoteWindowStreamTargetManifest) {
   return [tmux, `${geometry.width}x${geometry.height}`, route, inputMode].filter(Boolean).join(' · ');
 }
 
+interface RemoteWindowAppTargetGroup {
+  groupId: string;
+  appBundleId: string;
+  pid: number;
+  title: string;
+  targets: RemoteWindowStreamTargetManifest[];
+}
+
+function remoteWindowTargetArea(target: RemoteWindowStreamTargetManifest) {
+  const rect = target.videoTarget.cropRectTopLeftPx || target.videoTarget.windowBoundsTopLeftPx;
+  return Math.max(0, rect.width) * Math.max(0, rect.height);
+}
+
+function buildRemoteWindowAppTargetGroups(
+  targets: RemoteWindowStreamTargetManifest[],
+): RemoteWindowAppTargetGroup[] {
+  const groups = new Map<string, RemoteWindowAppTargetGroup>();
+  for (const target of targets) {
+    if (target.videoTarget.kind !== 'app-window') {
+      continue;
+    }
+    const appBundleId = target.videoTarget.appBundleId || 'unknown-app';
+    const pid = target.videoTarget.pid || 0;
+    const groupId = `${appBundleId}:${pid}`;
+    const existing = groups.get(groupId);
+    if (existing) {
+      existing.targets.push(target);
+      continue;
+    }
+    groups.set(groupId, {
+      groupId,
+      appBundleId,
+      pid,
+      title: target.videoTarget.title || appBundleId,
+      targets: [target],
+    });
+  }
+  return Array.from(groups.values()).map((group) => ({
+    ...group,
+    targets: group.targets.slice().sort((left, right) => remoteWindowTargetArea(right) - remoteWindowTargetArea(left)),
+  }));
+}
+
+function safeRemoteWindowGroupId(groupId: string) {
+  return groupId.replace(/[^a-zA-Z0-9_-]+/g, '-');
+}
+
 function renderErrors(errors: RemoteWindowStreamErrorPayload[]) {
   if (errors.length === 0) {
     return null;
@@ -817,6 +865,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const [receiverMediaStream, setReceiverMediaStream] = useState<MediaStream | null>(null);
   const [receiverFrameSize, setReceiverFrameSize] = useState<SurfaceSize | null>(null);
   const [itermPaneTargetsExpanded, setItermPaneTargetsExpanded] = useState(false);
+  const [appGroupPrimaryTargets, setAppGroupPrimaryTargets] = useState<Record<string, string>>({});
   const [catalogRefreshing, setCatalogRefreshing] = useState(false);
   const [screenshotStatus, setScreenshotStatus] = useState<RemoteWindowScreenshotStatus>({ phase: 'idle' });
   const floatingOffsetRef = useRef(floatingOffset);
@@ -2758,8 +2807,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     if (state.phase !== 'targetEnumerating' && state.phase !== 'pickerOpen') {
       return null;
     }
-    const appTargets = state.phase === 'pickerOpen'
-      ? state.targets.filter((target) => target.videoTarget.kind === 'app-window')
+    const appGroups = state.phase === 'pickerOpen'
+      ? buildRemoteWindowAppTargetGroups(state.targets)
       : [];
     const itermPaneTargets = state.phase === 'pickerOpen'
       ? state.targets.filter((target) => target.videoTarget.kind === 'iterm2-pane')
@@ -2777,6 +2826,63 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         <span style={styles.targetMeta}>{formatTargetSubtitle(target)}</span>
       </button>
     );
+    const renderAppTargetGroup = (group: RemoteWindowAppTargetGroup) => {
+      if (group.targets.length <= 1) {
+        return renderTargetRow(group.targets[0]);
+      }
+      const groupPrimaryId = appGroupPrimaryTargets[group.groupId] || group.targets[0].streamTargetId;
+      const groupSafeId = safeRemoteWindowGroupId(group.groupId);
+      return (
+        <div
+          key={group.groupId}
+          data-testid={`remote-window-app-group-${groupSafeId}`}
+          data-primary-target-id={groupPrimaryId}
+          style={styles.targetWindowGroup}
+        >
+          <div style={styles.targetWindowGroupHeader}>
+            <span style={styles.targetKind}>App Group</span>
+            <span style={styles.targetMain}>{group.title || group.appBundleId}</span>
+            <span style={styles.targetMeta}>{group.targets.length} 个窗口 · 点击小窗口切换主窗口</span>
+          </div>
+          <WindowGroupLayout
+            items={group.targets.map((target) => ({
+              id: target.streamTargetId,
+              node: (
+                <button
+                  type="button"
+                  data-testid={`remote-window-target-${target.streamTargetId}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    if (target.streamTargetId !== groupPrimaryId) {
+                      setAppGroupPrimaryTargets((current) => ({
+                        ...current,
+                        [group.groupId]: target.streamTargetId,
+                      }));
+                      return;
+                    }
+                    handleSelectTarget(target);
+                  }}
+                  style={target.streamTargetId === groupPrimaryId ? styles.targetGroupPrimaryItem : styles.targetGroupSecondaryItem}
+                >
+                  <span style={styles.targetMain}>{target.videoTarget.title || target.videoTarget.windowId}</span>
+                  <span style={styles.targetMeta}>{formatTargetSubtitle(target)}</span>
+                </button>
+              ),
+              testId: `remote-window-app-group-child-${target.streamTargetId}`,
+              roleLabel: `切换主窗口 ${target.videoTarget.title || target.videoTarget.windowId}`,
+            }))}
+            primaryItemId={groupPrimaryId}
+            onPrimaryItemChange={(targetId) => setAppGroupPrimaryTargets((current) => ({
+              ...current,
+              [group.groupId]: targetId,
+            }))}
+            landscape
+            style={{ minHeight: 144 }}
+          />
+        </div>
+      );
+    };
     return (
       <div data-testid="remote-window-picker" style={styles.pickerPanel}>
         <div style={styles.panelHeader}>
@@ -2813,7 +2919,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
             <div data-testid="remote-window-picker-empty" style={styles.emptyState}>没有可选窗口</div>
           ) : (
             <>
-              {appTargets.map(renderTargetRow)}
+              {appGroups.map(renderAppTargetGroup)}
               {itermPaneTargets.length > 0 ? (
                 <button
                   type="button"
@@ -2835,7 +2941,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         </div>
       </div>
     );
-  }, [catalogRefreshing, handleClose, handleOpenPicker, handleSelectTarget, itermPaneTargetsExpanded, state]);
+  }, [appGroupPrimaryTargets, catalogRefreshing, handleClose, handleOpenPicker, handleSelectTarget, itermPaneTargetsExpanded, state]);
 
 	  const lockedSurfaceLayout = useMemo(() => {
 	    if (state.phase !== 'targetLocked' || !surfaceSize) {
@@ -3545,6 +3651,51 @@ const styles: Record<string, CSSProperties> = {
     borderRadius: 12,
     border: '1px solid rgba(151, 164, 186, 0.18)',
     background: 'rgba(20, 31, 49, 0.92)',
+    color: '#edf4ff',
+  },
+  targetWindowGroup: {
+    display: 'grid',
+    gap: 8,
+    padding: '10px 11px',
+    textAlign: 'left',
+    borderRadius: 12,
+    border: '1px solid rgba(151, 164, 186, 0.18)',
+    background: 'rgba(20, 31, 49, 0.92)',
+    color: '#edf4ff',
+  },
+  targetWindowGroupHeader: {
+    display: 'grid',
+    gridTemplateColumns: '86px minmax(0, 1fr)',
+    gap: '4px 10px',
+  },
+  targetGroupPrimaryItem: {
+    width: '100%',
+    height: '100%',
+    minWidth: 0,
+    minHeight: 0,
+    display: 'grid',
+    alignContent: 'end',
+    gap: 4,
+    padding: 10,
+    textAlign: 'left',
+    borderRadius: 10,
+    border: '1px solid rgba(125, 255, 163, 0.36)',
+    background: 'rgba(35, 51, 76, 0.92)',
+    color: '#edf4ff',
+  },
+  targetGroupSecondaryItem: {
+    width: '100%',
+    height: '100%',
+    minWidth: 0,
+    minHeight: 0,
+    display: 'grid',
+    alignContent: 'end',
+    gap: 3,
+    padding: 8,
+    textAlign: 'left',
+    borderRadius: 8,
+    border: '1px solid rgba(151, 164, 186, 0.14)',
+    background: 'rgba(15, 22, 34, 0.92)',
     color: '#edf4ff',
   },
   targetKind: {

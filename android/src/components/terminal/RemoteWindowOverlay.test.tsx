@@ -146,6 +146,39 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.getByTestId('remote-window-target-pane-1')).toBeTruthy();
   });
 
+  it('groups multiple windows from the same app into one picker container', async () => {
+    const mainWindow = makeTarget('app-main', 'WeChat', 'app-window');
+    const childWindow: RemoteWindowStreamTargetManifest = {
+      ...makeTarget('app-child', 'WeChat Image', 'app-window'),
+      videoTarget: {
+        ...mainWindow.videoTarget,
+        windowId: 'window-2',
+        title: 'WeChat Image',
+        windowBoundsTopLeftPx: { x: 120, y: 90, width: 320, height: 240 },
+        cropRectTopLeftPx: { x: 120, y: 90, width: 320, height: 240 },
+      },
+    };
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [childWindow, mainWindow],
+    }));
+
+    render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} />);
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-app-group-com-apple-TextEdit-123')).toBeTruthy();
+    });
+
+    const group = screen.getByTestId('remote-window-app-group-com-apple-TextEdit-123');
+    expect(group.dataset.primaryTargetId).toBe('app-main');
+    fireEvent.click(screen.getByTestId('remote-window-target-app-child'));
+    expect(screen.getByTestId('remote-window-app-group-com-apple-TextEdit-123').dataset.primaryTargetId).toBe('app-child');
+    expect(screen.getByTestId('remote-window-picker')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('remote-window-target-app-child'));
+    expect(screen.queryByTestId('remote-window-picker')).toBeNull();
+  });
+
   it('fails the picker locally when the daemon catalog promise never settles', async () => {
     vi.useFakeTimers();
     const requestTargets = vi.fn(() => new Promise<never>(() => undefined));

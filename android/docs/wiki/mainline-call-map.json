@@ -111,6 +111,10 @@
           "label": "src/components/terminal/RemoteWindowOverlay.tsx#RemoteWindowOverlay"
         },
         {
+          "id": "WindowGroupLayout",
+          "label": "src/components/terminal/WindowGroupLayout.tsx#WindowGroupLayout"
+        },
+        {
           "id": "RemoteWindowTouchAction",
           "label": "src/lib/remote-window-touch-action-runtime.ts#dispatchRemoteWindowTouchInputActionRuntime"
         },
@@ -560,6 +564,19 @@
         },
         {
           "from": "RemoteWindowOverlay",
+          "to": "WindowGroupLayout",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "same-app remote app-window targets plus selected primary target id",
+          "semantic_output": "one picker group container with one large primary window and independent child window containers; child click only changes primary, primary click selects that concrete target",
+          "status": "anchored",
+          "edge_id": "android_mainline:RemoteWindowOverlay->WindowGroupLayout",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.remote_window_overlay",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "RemoteWindowOverlay",
           "to": "RemoteScreenshotRuntime",
           "owner_feature": "terminal.remote_screenshot",
           "semantic_input": "selected remote-window target manifest plus active session id from floating/fullscreen screenshot button",
@@ -980,6 +997,10 @@
           "label": "src/components/terminal/TerminalPreviewGrid.tsx#TerminalPreviewGrid"
         },
         {
+          "id": "WindowGroupLayout",
+          "label": "src/components/terminal/WindowGroupLayout.tsx#WindowGroupLayout"
+        },
+        {
           "id": "TerminalPreviewTile",
           "label": "src/components/terminal/TerminalPreviewGrid.tsx#preview-tile"
         },
@@ -1115,7 +1136,7 @@
           "to": "TerminalPreviewGrid",
           "owner_feature": "terminal.session_preview",
           "semantic_input": "open preview projection and ordered resolved sessions",
-          "semantic_output": "selection-count-derived preview grid capped at two portrait or three landscape columns",
+          "semantic_output": "primary-plus-children preview projection intent",
           "status": "anchored",
           "edge_id": "android_preview:PreviewModeOwner->TerminalPreviewGrid",
           "resource_from": "resource.session_preview_mode",
@@ -1125,12 +1146,27 @@
         },
         {
           "from": "TerminalPreviewGrid",
+          "to": "WindowGroupLayout",
+          "owner_feature": "terminal.session_preview",
+          "semantic_input": "ordered one-to-six open sessions, current primary preview id, and orientation",
+          "semantic_output": "one large primary container and independent child containers with portrait top rail or landscape side rail",
+          "status": "anchored",
+          "edge_id": "android_preview:TerminalPreviewGrid->WindowGroupLayout",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.ui_projection",
+          "via_resources": [
+            "resource.session_preview_mode"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "WindowGroupLayout",
           "to": "TerminalPreviewTile",
           "owner_feature": "terminal.session_preview",
-          "semantic_input": "ordered one-to-six open sessions and current orientation",
-          "semantic_output": "one read-only tile projection per session",
+          "semantic_input": "primary or child container slot for one selected open session",
+          "semantic_output": "one read-only tile projection per session; child click promotes to primary without activation",
           "status": "anchored",
-          "edge_id": "android_preview:TerminalPreviewGrid->TerminalPreviewTile",
+          "edge_id": "android_preview:WindowGroupLayout->TerminalPreviewTile",
           "resource_from": "resource.ui_projection",
           "resource_to": "resource.ui_projection",
           "via_resources": [

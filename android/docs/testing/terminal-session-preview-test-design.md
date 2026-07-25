@@ -11,7 +11,7 @@
 - Tile activation first projects the target into the focused session-group viewport, emits one explicit active-session intent, then exits. The visible shell session and input/live session must never diverge.
 - Preview entry captures the current active session plus focused session-group projection. System Back is a cancel intent: it closes preview and restores that exact entry projection without selecting a preview tile.
 - Long-pressing one preview tile opens a replacement menu containing only currently open, unselected sessions. Replacement preserves the selected tile's order and persists through the selection owner.
-- Grid geometry is a pure projection of orientation plus the resolved 1-6 selection count: portrait caps each row at two tiles, landscape caps each row at three, and no empty row is reserved.
+- Preview geometry is a pure projection through the shared `WindowGroupLayout` module: portrait uses a child rail above a large primary pane, landscape uses a child rail beside a large primary pane, every selected Session remains in its own preview container, child click only promotes the primary preview, and primary click is the only activation path.
 - Tile close removes only that preview selection; the underlying open Session remains untouched. The final removal cancels preview and restores its entry projection.
 - Preview bodies accept local vertical scroll and horizontal fixed-width crop while remaining input/resize/viewport inert.
 
@@ -25,7 +25,7 @@
 - After tile activation, mount the real shell on the selected session and prove subsequent render-store publications continue updating that shell.
 - Replace one selected target in place with an unselected open-session target and preserve all other target order.
 - Android system Back closes preview and restores the entry active session and session-group projection.
-- Resolve portrait and landscape columns/rows for every supported selection count from one through six.
+- Resolve portrait and landscape primary-plus-children layout for every supported selection count from one through six.
 - Remove one preview target, persist the remaining order, and recompute geometry; removing the final target cancels preview.
 
 ## White-Box Negative
@@ -40,7 +40,7 @@
 - Reject replacement when the source target is absent or the replacement target is already selected.
 - Long-press replacement must not also emit tile activation; ordinary tap must not open the replacement menu.
 - System Back outside preview must not be consumed by the preview owner.
-- Never exceed two portrait columns or three landscape columns; a partial selection must not be padded to six visual slots or fixed full-grid rows.
+- Never pad a partial selection to six visual slots or fixed rows; group layout may change primary/child arrangement but must keep every selected Session as exactly one child container.
 - Tile close must not activate or close the Session. Body pan/scroll must not activate the tile, trigger preview exit, or emit terminal mutation callbacks.
 
 ## Module Black-Box
@@ -50,7 +50,7 @@
 - Drawer preview mode accepts remote catalog rows by calling the existing remote-open owner in background materialize mode, then toggling the returned local open-session target.
 - Long-press slot assignment and close controls do not toggle preview selection.
 - Left-edge right swipe opens drawer, middle horizontal swipe remains fixed crop, right-edge left swipe opens preview.
-- Portrait uses at most two columns and landscape at most three, with rows derived from the selected count; tile tap updates the focused shell projection and switches once; close removes only the preview target; body touch scrolls/pans locally; long press opens an unselected-session replacement menu; Back/right swipe cancels and restores the entry shell projection.
+- Portrait uses a top child rail plus large primary preview and landscape uses a side child rail plus large primary preview; child tile tap promotes only the preview primary, primary tile tap updates the focused shell projection and switches once; close removes only the preview target; body touch scrolls/pans locally; long press opens an unselected-session replacement menu; Back/right swipe cancels and restores the entry shell projection.
 - After removing any preview tiles, the inline add command lists every currently open, eligible Session absent from the preview, excludes every still-selected Session, and can append one back without closing or switching a Session.
 
 ## Project Black-Box

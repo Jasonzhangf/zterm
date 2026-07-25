@@ -43,6 +43,7 @@ flowchart TD
   TerminalPage --> QuickBar["src/components/terminal/TerminalQuickBar.tsx"]
   TerminalPage --> RemoteWindowOverlay["src/components/terminal/RemoteWindowOverlay.tsx#RemoteWindowOverlay"]
   TerminalPage --> RemoteWindowInputRuntime["src/contexts/session-context-remote-window-runtime.ts#sendRemoteWindowInputRuntime"]
+  RemoteWindowOverlay --> WindowGroupLayout["src/components/terminal/WindowGroupLayout.tsx#WindowGroupLayout"]
   RemoteWindowOverlay --> RemoteScreenshotRuntime["src/lib/remote-screenshot-runtime.ts#createRemoteScreenshotRuntime"]
   RemoteWindowOverlay --> RemoteWindowMessageRuntime["src/lib/remote-window-message-runtime.ts#createRemoteWindowMessageRuntime"]
   RemoteWindowOverlay --> RemoteWindowStreamQualityRuntime["src/contexts/session-context-remote-window-runtime.ts#updateRemoteWindowStreamQualityRuntime"]
@@ -75,7 +76,8 @@ flowchart TD
   PreviewModeOwner --> PreviewLiveSetProjector["src/lib/session-preview-selection.ts#projectSessionPreviewLiveIds"]
   PreviewLiveSetProjector --> SessionBodySubscriptionIntent["src/pages/TerminalPage.tsx#onLiveSessionIdsChange"]
   PreviewModeOwner --> TerminalPreviewGrid["src/components/terminal/TerminalPreviewGrid.tsx#TerminalPreviewGrid"]
-  TerminalPreviewGrid --> TerminalPreviewTile["src/components/terminal/TerminalPreviewGrid.tsx#preview-tile"]
+  TerminalPreviewGrid --> WindowGroupLayout["src/components/terminal/WindowGroupLayout.tsx#WindowGroupLayout"]
+  WindowGroupLayout --> TerminalPreviewTile["src/components/terminal/TerminalPreviewGrid.tsx#preview-tile"]
   TerminalPreviewTile --> SharedRenderSurface["src/components/TerminalView.tsx#TerminalView"]
   TerminalPreviewTile --> PreviewReplacementMenu["src/components/terminal/TerminalPreviewGrid.tsx#preview-replacement-menu"]
   PreviewReplacementMenu --> PreviewSelectionOwner
