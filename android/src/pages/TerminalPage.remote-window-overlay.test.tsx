@@ -531,6 +531,7 @@ describe('TerminalPage remote window overlay', () => {
     expectEveryRemoteWindowInputFocusFirst(onSendRemoteWindowInput);
     expect(onSendRemoteWindowInput.mock.calls.map((call) => call[1].event.kind)).toEqual([
       'focus',
+      'focus',
       'pointer',
       'focus',
       'pointer',
@@ -555,7 +556,7 @@ describe('TerminalPage remote window overlay', () => {
       expect(screen.getByTestId('terminal-debug-remote-window-context').textContent).toContain('CTX Y');
       expect(screen.getByTestId('terminal-debug-remote-window-event').textContent).toContain('overlay · SEND Y · ptr:up #31 b0');
       expect(screen.getByTestId('terminal-debug-remote-window-point').textContent).toContain('410,320 n=0.50,0.50');
-      expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('F 2 · D 1 · M 0 · U 1');
+      expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('F 3 · D 1 · M 0 · U 1');
       expect(screen.getByTestId('terminal-debug-remote-window-video').textContent).toContain('aY');
       expect(screen.getByTestId('terminal-debug-remote-window-video').textContent).toContain('vN');
     });
@@ -648,7 +649,7 @@ describe('TerminalPage remote window overlay', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('terminal-debug-remote-window-event').textContent).toContain('overlay · SEND Y · gesture:swipe/end');
-      expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('F 3 · D 1 · M 0 · U 1');
+      expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('F 4 · D 1 · M 0 · U 1');
     });
   });
 

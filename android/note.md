@@ -3832,3 +3832,9 @@ Need runtime debug to confirm:
 - Follow-up red evidence: simply removing the potential-pinch hold makes a true pinch's first moving finger emit a stray horizontal `scroll` before the second finger confirms pinch. That is also wrong.
 - Final owner rule: hold potential pinch only when the midpoint movement is not clearly vertical. If midpoint movement is vertical and the two fingers do not satisfy fullscreen pinch start-axis intent, emit continuous pixel `scroll` even when the two-finger distance changed a lot.
 - Added `RemoteWindowOverlay.test.tsx` gate: diagonal vertical two-finger movement with large distance change but no pinch-axis intent stays scroll; active scroll can still become pinch after clear axis/distance confirmation. Focused overlay gate PASS `55/55`.
+# 2026-07-25 remote window selection must focus target app before input
+
+- Symptom reported by Jason: selecting an interactive remote app-window produced correct coordinate math, but input/gesture landed on the still-frontmost app (typically iTerm2) because the target app was not actually brought to the foreground.
+- Root cause: overlay selection started the stream but did not emit an explicit focus intent for interactive app-window targets before later pointer/wheel/gesture events.
+- Fix scope: `src/components/terminal/RemoteWindowOverlay.tsx` only. Add an immediate `focus` remote-window input event after successful stream start for interactive app-window targets; keep iTerm2 pane / read-only routes unchanged.
+- Verification: focused overlay and page tests plus `tsc --noEmit` are green locally.
