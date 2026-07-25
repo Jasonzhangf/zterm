@@ -2208,14 +2208,6 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     setState(startingState);
     void startStream(targetSessionId, target, streamId, { videoBitrate })
       .then((result) => {
-        if (isRemoteWindowInputSupported(target)) {
-          sendRemoteWindowInputEventsForTarget({
-            sessionId: targetSessionId,
-            streamId: result.streamId,
-            target,
-            events: [{ kind: 'focus' }],
-          });
-        }
         setState((current) => {
           return attachRemoteWindowStreamReceiver(startingState(current), result.streamId);
         });

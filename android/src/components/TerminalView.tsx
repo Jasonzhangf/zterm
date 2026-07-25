@@ -934,7 +934,11 @@ function TerminalViewComponent({
         followDemandAnchorEndIndex,
         viewportEndIndexOverride: options?.viewportEndIndex,
       });
-      const key = buildTerminalViewportDemandKey(demand);
+      const missingRanges = (demand as { missingRanges?: unknown }).missingRanges;
+      const repairFreshnessKey = Array.isArray(missingRanges) && missingRanges.length > 0
+        ? `:fresh:${renderBuffer.revision}:${renderBuffer.daemonHeadRevision}:${renderBuffer.startIndex}:${renderBuffer.endIndex}`
+        : "";
+      const key = `${buildTerminalViewportDemandKey(demand)}${repairFreshnessKey}`;
       if (lastReportedViewportRef.current === key) {
         return;
       }
@@ -947,6 +951,8 @@ function TerminalViewComponent({
       refreshActive,
       renderBuffer.endIndex,
       renderBuffer.gapRanges,
+      renderBuffer.daemonHeadRevision,
+      renderBuffer.revision,
       renderBuffer.startIndex,
       sessionId,
       viewportRows,

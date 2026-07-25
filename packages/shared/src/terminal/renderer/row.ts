@@ -332,7 +332,7 @@ export function renderGapMarker(options: {
       whiteSpace: 'pre',
       color: options.theme.foreground,
       opacity: 1,
-      background: 'transparent',
+      background: options.theme.background,
       borderTop: 'none',
       borderBottom: 'none',
     } satisfies CSSProperties,
@@ -343,7 +343,7 @@ export function renderGapMarker(options: {
         minWidth: 0,
         flex: 1,
         height: '100%',
-        background: 'transparent',
+        background: options.theme.background,
       } satisfies CSSProperties,
     },
   };
@@ -447,6 +447,7 @@ export function buildTerminalVisibleRowViewModel(options: {
       height: options.rowHeight,
       lineHeight: options.rowHeight,
       whiteSpace: 'pre',
+      background: options.theme.background,
     } satisfies CSSProperties,
     lineNumber,
     cellWrapProps: {

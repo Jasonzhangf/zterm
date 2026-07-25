@@ -293,6 +293,14 @@ function buildLargeBufferSyncPayload(rows: string[], revision: number): Terminal
   };
 }
 
+function styledTextRow(text: string, cols = 24, bg = 8): TerminalCell[] {
+  const chars = Array.from(text);
+  return Array.from({ length: cols }, (_, index) => {
+    const char = chars[index] ?? ' ';
+    return cell(char, { bg });
+  });
+}
+
 function splitLargeBufferSyncPayload(payload: TerminalBufferPayload, chunkRows: number) {
   const safeChunkRows = Math.max(1, Math.floor(chunkRows));
   const chunks: TerminalBufferPayload[] = [];
@@ -596,6 +604,147 @@ describe('TerminalView minimal mirror render', () => {
       expect(rows).not.toContain('stream-loading');
       expect(rows).not.toContain('echo hi');
     });
+  });
+
+  it('black-box refreshes same-revision terminal input area text and multi-line backgrounds', async () => {
+    const sessionId = 's-input-area-refresh';
+    const liveBufferStore = createSessionBufferStore();
+    const liveHeadStore = createSessionHeadStore();
+    const renderGate = createSessionRenderGate({
+      liveBufferStore,
+      liveHeadStore,
+      recordSessionRenderCommit: vi.fn(),
+    });
+    const renderStore = renderGate.getRenderStore();
+    const initialBuffer = createSessionBufferState({
+      lines: [
+        'stable-output-100',
+        'stable-output-101',
+        styledTextRow('draft input line one'),
+        styledTextRow('draft input line two'),
+      ],
+      startIndex: 100,
+      endIndex: 104,
+      bufferHeadStartIndex: 100,
+      bufferTailEndIndex: 104,
+      rows: 24,
+      cols: 24,
+      revision: 10,
+      cacheLines: 500,
+    });
+    liveBufferStore.commitBuffer(sessionId, initialBuffer);
+    liveHeadStore.setHead(sessionId, {
+      daemonHeadRevision: 10,
+      daemonHeadEndIndex: 104,
+    });
+
+    const refs = {
+      stateRef: { current: { sessions: [{ ...makeSession({ revision: 10, lines: [], bufferTailEndIndex: 104 }), id: sessionId }], activeSessionId: sessionId } },
+      sessionRevisionResetRef: { current: new Map() },
+      sessionBufferHeadsRef: {
+        current: new Map([[sessionId, {
+          revision: 10,
+          latestEndIndex: 104,
+          availableStartIndex: 100,
+          availableEndIndex: 104,
+          seenAt: Date.now(),
+        }]]),
+      },
+      pendingInputTailRefreshRef: { current: new Map() },
+      pendingConnectTailRefreshRef: { current: new Set<string>() },
+      pendingResumeTailRefreshRef: { current: new Set<string>([sessionId]) },
+      lastSyncRequestAtRef: {
+        current: new Map([[`${sessionId}:tail-refresh`, {
+          sentAt: Date.now(),
+          requestStartIndex: 100,
+          requestEndIndex: 104,
+          knownRevision: 10,
+          localStartIndex: 100,
+          localEndIndex: 104,
+          targetHeadRevision: 10,
+          repairSignature: '',
+        }]]),
+      },
+      sessionVisibleRangeRef: {
+        current: new Map([[sessionId, { startIndex: 100, endIndex: 104, viewportRows: 4 }]]),
+      },
+    };
+
+    renderGate.scheduleCommit(sessionId);
+    await flushRenderGate();
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <BaseTerminalView
+          sessionId={sessionId}
+          sessionBufferStore={renderStore}
+          active
+          allowDomFocus
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+          themeId="classic-dark"
+        />
+      </div>,
+    );
+
+    await waitFor(() => expect(readRenderedRows(view.container)).toContain('draft input line two'));
+
+    applyIncomingBufferSyncRuntime({
+      sessionId,
+      payload: {
+        revision: 10,
+        startIndex: 100,
+        endIndex: 104,
+        availableStartIndex: 100,
+        availableEndIndex: 104,
+        cols: 24,
+        rows: 24,
+        cursorKeysApp: false,
+        cursor: null,
+        lines: [
+          { index: 100, cells: Array.from('stable-output-100').map((char) => cell(char)) },
+          { index: 101, cells: Array.from('stable-output-101').map((char) => cell(char)) },
+          { index: 102, cells: styledTextRow('accepted prompt ready') },
+          { index: 103, cells: styledTextRow('') },
+        ],
+      },
+      refs,
+      readSessionBufferSnapshot: () => liveBufferStore.getSnapshot(sessionId).buffer,
+      resolveSessionCacheLines: () => 500,
+      summarizeBufferPayload: (incoming) => ({
+        revision: incoming.revision,
+        startIndex: incoming.startIndex,
+        endIndex: incoming.endIndex,
+        lineCount: incoming.lines.length,
+      }),
+      runtimeDebug: vi.fn(),
+      commitSessionBufferUpdate: (_sessionId: string, nextBuffer: SessionBufferState) =>
+        liveBufferStore.commitBuffer(_sessionId, nextBuffer),
+      scheduleSessionRenderCommit: (_sessionId: string) => renderGate.scheduleCommit(_sessionId),
+      isSessionTransportActive: () => true,
+      requestSessionBufferSync: vi.fn(() => true),
+    });
+    await flushRenderGate();
+
+    await waitFor(() => {
+      const rows = readRenderedRows(view.container);
+      expect(rows).toContain('accepted prompt ready');
+      expect(rows).not.toContain('draft input line one');
+      expect(rows).not.toContain('draft input line two');
+    });
+
+    const inputRows = [102, 103].map((absoluteIndex) => (
+      view.container.querySelector(`[data-terminal-index="${absoluteIndex}"]`) as HTMLElement
+    ));
+    for (const row of inputRows) {
+      expect(row).toBeTruthy();
+      const cells = Array.from(row.querySelectorAll('span > span')) as HTMLSpanElement[];
+      expect(cells.length).toBeGreaterThanOrEqual(24);
+      const backgrounds = cells.slice(0, 24).map((node) => node.style.backgroundColor || node.style.background);
+      expect(new Set(backgrounds).size).toBe(1);
+      expect(backgrounds[0]).not.toBe('');
+    }
   });
 
   it('keeps source, buffer, render store, and DOM coherent after more-than-screen body refreshes', async () => {
@@ -1262,6 +1411,159 @@ describe('TerminalView minimal mirror render', () => {
     await waitFor(() => expect(readRenderedRows(view.container)).toContain('row-120'));
     await waitFor(() => {
       expect(onViewportChange).toHaveBeenLastCalledWith(session.id, {
+        mode: 'follow',
+        viewportEndIndex: 120,
+        viewportRows: 24,
+        missingRanges: [{ startIndex: 110, endIndex: 111 }],
+      });
+    });
+    expect(view.container.querySelector('[data-terminal-gap="true"]')).toBeTruthy();
+  });
+
+  it('re-reports visible follow gaps when gapRanges change without a geometry revision change', async () => {
+    const onViewportChange = vi.fn();
+    const session = makeSession({
+      revision: 1,
+      lines: buildRows(120),
+      bufferTailEndIndex: 120,
+    });
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          initialBufferLines={session.buffer.lines}
+          bufferStartIndex={session.buffer.startIndex}
+          bufferEndIndex={session.buffer.endIndex}
+          bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+          bufferGapRanges={[]}
+          cursorKeysApp={session.buffer.cursorKeysApp}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          onViewportChange={onViewportChange}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => expect(readRenderedRows(view.container)).toContain('row-120'));
+    await waitFor(() => {
+      expect(onViewportChange).toHaveBeenLastCalledWith(session.id, {
+        mode: 'follow',
+        viewportEndIndex: 120,
+        viewportRows: 24,
+      });
+    });
+    onViewportChange.mockClear();
+
+    const nextLines = session.buffer.lines.slice();
+    nextLines[110] = [];
+    await act(async () => {
+      view.rerender(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId={session.id}
+            initialBufferLines={nextLines}
+            bufferStartIndex={session.buffer.startIndex}
+            bufferEndIndex={session.buffer.endIndex}
+            bufferTailEndIndex={session.buffer.bufferTailEndIndex}
+            bufferGapRanges={[{ startIndex: 110, endIndex: 111 }]}
+            cursorKeysApp={session.buffer.cursorKeysApp}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            onViewportChange={onViewportChange}
+            fontSize={5}
+          />
+        </div>,
+      );
+    });
+
+    await waitFor(() => {
+      expect(onViewportChange).toHaveBeenLastCalledWith(session.id, {
+        mode: 'follow',
+        viewportEndIndex: 120,
+        viewportRows: 24,
+        missingRanges: [{ startIndex: 110, endIndex: 111 }],
+      });
+    });
+    expect(view.container.querySelector('[data-terminal-gap="true"]')).toBeTruthy();
+  });
+
+  it('re-reports the same visible follow gap after a newer buffer revision leaves it unrepaired', async () => {
+    const onViewportChange = vi.fn();
+    const rows = buildRows(120);
+    const baseSnapshot = makeRenderSnapshotFromTextRows({
+      rows,
+      revision: 1,
+      startIndex: 0,
+      bufferTailEndIndex: 120,
+    });
+    const gapRows = baseSnapshot.lines.slice();
+    gapRows[110] = [];
+    const gapSnapshot = toRenderBufferSnapshot({
+      initialBufferLines: gapRows,
+      bufferStartIndex: 0,
+      bufferEndIndex: 120,
+      bufferTailEndIndex: 120,
+      bufferGapRanges: [{ startIndex: 110, endIndex: 111 }],
+      revision: 1,
+    });
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId="s-gap-repeat"
+          renderBufferSnapshot={gapSnapshot}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          onViewportChange={onViewportChange}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(onViewportChange).toHaveBeenLastCalledWith('s-gap-repeat', {
+        mode: 'follow',
+        viewportEndIndex: 120,
+        viewportRows: 24,
+        missingRanges: [{ startIndex: 110, endIndex: 111 }],
+      });
+    });
+    onViewportChange.mockClear();
+
+    const newerGapRows = gapRows.slice();
+    newerGapRows[119] = Array.from('newer-tail-row').map((char) => cell(char));
+    const newerGapSnapshot = toRenderBufferSnapshot({
+      initialBufferLines: newerGapRows,
+      bufferStartIndex: 0,
+      bufferEndIndex: 120,
+      bufferTailEndIndex: 120,
+      bufferGapRanges: [{ startIndex: 110, endIndex: 111 }],
+      revision: 2,
+    });
+
+    await act(async () => {
+      view.rerender(
+        <div style={{ width: '640px', height: '408px' }}>
+          <TerminalView
+            sessionId="s-gap-repeat"
+            renderBufferSnapshot={newerGapSnapshot}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            onViewportChange={onViewportChange}
+            fontSize={5}
+          />
+        </div>,
+      );
+    });
+
+    await waitFor(() => {
+      expect(onViewportChange).toHaveBeenLastCalledWith('s-gap-repeat', {
         mode: 'follow',
         viewportEndIndex: 120,
         viewportRows: 24,

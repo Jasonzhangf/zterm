@@ -407,6 +407,21 @@ describe('shared terminal renderer pure helpers', () => {
     expect(viewModel.cellWrapProps.style.whiteSpace).toBe('pre');
   });
 
+  it('paints ordinary rows with the terminal surface so trimmed empty rows cannot become transparent holes', () => {
+    const viewModel = buildTerminalVisibleRowViewModel({
+      absoluteIndex: 43,
+      row: [],
+      rowHeight: '17px',
+      cellWidthPx: 8,
+      isGap: false,
+      theme,
+      cursorColumn: -1,
+    });
+
+    expect(viewModel.kind).toBe('row');
+    expect(viewModel.rowStyle.background).toBe(theme.background);
+  });
+
   it('resolves cursor overlay only for matching visible cursor row', () => {
     const row = [
       { char: 65, fg: 256, bg: 256, flags: 0, width: 1 },
