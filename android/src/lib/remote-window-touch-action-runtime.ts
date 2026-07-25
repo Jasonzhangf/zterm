@@ -185,6 +185,28 @@ export function resolveRemoteWindowTouchScrollDeltaRuntime(
     * direction;
 }
 
+export function resolveRemoteWindowTouchWheelDeltaRuntime(
+  sourceDelta: number,
+  surfaceSizePx: number,
+  visibleSizePx: number,
+  tuning: RemoteWindowTouchGestureTuning = {},
+) {
+  if (
+    !Number.isFinite(sourceDelta)
+    || sourceDelta === 0
+    || !Number.isFinite(surfaceSizePx)
+    || surfaceSizePx <= 0
+    || !Number.isFinite(visibleSizePx)
+    || visibleSizePx <= 0
+  ) {
+    return 0;
+  }
+  const direction = tuning.inverted ? -1 : 1;
+  const maxDelta = visibleSizePx * resolveRemoteWindowTouchScrollFractionRuntime(tuning.fraction);
+  const proportionalDelta = (sourceDelta / surfaceSizePx) * visibleSizePx * direction;
+  return clampNumber(proportionalDelta, -maxDelta, maxDelta);
+}
+
 function emptyResult(
   nextState: RemoteWindowTouchPointerState,
   consumed = false,

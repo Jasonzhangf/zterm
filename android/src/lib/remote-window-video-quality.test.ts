@@ -58,13 +58,13 @@ function makeStorage() {
 }
 
 describe('remote-window-video-quality', () => {
-  it('derives default bitrate presets from desktop display area coverage', () => {
+  it('keeps untouched default bitrate conservative at 2mbps while preserving coverage telemetry', () => {
     expect(resolveDefaultRemoteWindowVideoBitratePreset(makeTarget(320, 240))).toBe('2mbps');
     expect(resolveDefaultRemoteWindowVideoBitratePreset(makeTarget(640, 360))).toBe('2mbps');
-    expect(resolveDefaultRemoteWindowVideoBitratePreset(makeTarget(960, 540))).toBe('5mbps');
-    expect(resolveDefaultRemoteWindowVideoBitratePreset(makeTarget(1200, 780))).toBe('10mbps');
-    expect(resolveDefaultRemoteWindowVideoBitratePreset(makeTarget(1800, 980))).toBe('20mbps');
-    expect(resolveDefaultRemoteWindowVideoBitratePreset(makeTarget(1920, 1080))).toBe('fullscreen');
+    expect(resolveDefaultRemoteWindowVideoBitratePreset(makeTarget(960, 540))).toBe('2mbps');
+    expect(resolveDefaultRemoteWindowVideoBitratePreset(makeTarget(1200, 780))).toBe('2mbps');
+    expect(resolveDefaultRemoteWindowVideoBitratePreset(makeTarget(1800, 980))).toBe('2mbps');
+    expect(resolveDefaultRemoteWindowVideoBitratePreset(makeTarget(1920, 1080))).toBe('2mbps');
     expect(resolveRemoteWindowDesktopCoverageRatio(makeTarget(960, 540))).toBe(0.25);
     expect(buildRemoteWindowVideoBitrateConfig('fullscreen')).toEqual({
       preset: 'fullscreen',
@@ -107,7 +107,7 @@ describe('remote-window-video-quality', () => {
     expect(writeRemoteWindowVideoBitratePreset(initialWindow, '5mbps', storage)).toBe(true);
 
     expect(readRemoteWindowVideoBitratePreset(resizedWindow, storage)).toBe('5mbps');
-    expect(readRemoteWindowVideoBitratePreset(otherWindowSameNewResolution, storage)).toBe('10mbps');
+    expect(readRemoteWindowVideoBitratePreset(otherWindowSameNewResolution, storage)).toBe('2mbps');
   });
 
   it('uses floating preview bitrate separately from the fullscreen selected preset', () => {

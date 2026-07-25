@@ -689,6 +689,104 @@ describe('session-context-buffer-runtime inactive gating', () => {
     );
   });
 
+  it('applies requested same-revision tail repaint when the daemon response is a larger stable superset', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const localBuffer = createSessionBufferState({
+      lines: ['stable-096', 'stable-097', 'stable-098', 'stable-099', 'stale-input-100', 'stale-input-101', 'stable-tail-102', 'stable-tail-103'],
+      startIndex: 96,
+      endIndex: 104,
+      bufferHeadStartIndex: 96,
+      bufferTailEndIndex: 104,
+      cols: 80,
+      rows: 24,
+      revision: 10,
+      cacheLines: 1000,
+    });
+    const committedBuffers: SessionBufferState[] = [];
+    const commitSessionBufferUpdate = vi.fn((_sessionId: string, nextBuffer: SessionBufferState) => {
+      committedBuffers.push(nextBuffer);
+      return true;
+    });
+    const scheduleSessionRenderCommit = vi.fn();
+    const runtimeDebug = vi.fn();
+    const lastSyncRequestAtRef = {
+      current: new Map([[`${sessionId}:tail-refresh`, {
+        sentAt: 10,
+        requestStartIndex: 100,
+        requestEndIndex: 104,
+        knownRevision: 10,
+        localStartIndex: 96,
+        localEndIndex: 104,
+        targetHeadRevision: 10,
+        repairSignature: '',
+      }]]),
+    };
+
+    applyIncomingBufferSyncRuntime({
+      sessionId,
+      payload: {
+        revision: 10,
+        startIndex: 96,
+        endIndex: 104,
+        availableStartIndex: 96,
+        availableEndIndex: 104,
+        cols: 80,
+        rows: 24,
+        cursorKeysApp: false,
+        lines: [
+          { ...makeLine('stable-096'), index: 96 },
+          { ...makeLine('stable-097'), index: 97 },
+          { ...makeLine('stable-098'), index: 98 },
+          { ...makeLine('stable-099'), index: 99 },
+          { ...makeLine('fresh-input-100'), index: 100 },
+          { ...makeLine('fresh-input-101'), index: 101 },
+          { ...makeLine('stable-tail-102'), index: 102 },
+          { ...makeLine('stable-tail-103'), index: 103 },
+        ],
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionBufferHeadsRef: {
+          current: new Map([[sessionId, {
+            revision: 10,
+            latestEndIndex: 104,
+            availableStartIndex: 96,
+            availableEndIndex: 104,
+            seenAt: 10,
+          }]]),
+        },
+        pendingInputTailRefreshRef: { current: new Map() },
+        pendingConnectTailRefreshRef: { current: new Set() },
+        pendingResumeTailRefreshRef: { current: new Set([sessionId]) },
+        lastSyncRequestAtRef,
+        sessionVisibleRangeRef: {
+          current: new Map([[sessionId, { startIndex: 96, endIndex: 104, viewportRows: 8 }]]),
+        },
+      },
+      readSessionBufferSnapshot: () => localBuffer,
+      resolveSessionCacheLines: () => 1000,
+      summarizeBufferPayload: (payload) => ({
+        revision: payload.revision,
+        startIndex: payload.startIndex,
+        endIndex: payload.endIndex,
+        lineCount: payload.lines.length,
+      }),
+      runtimeDebug,
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit,
+      isSessionTransportActive: () => true,
+      requestSessionBufferSync: vi.fn(() => true),
+    });
+
+    expect(commitSessionBufferUpdate).toHaveBeenCalledOnce();
+    expect(cellsToText(committedBuffers[0]!.lines[4])).toBe('fresh-input-100');
+    expect(cellsToText(committedBuffers[0]!.lines[5])).toBe('fresh-input-101');
+    expect(scheduleSessionRenderCommit).toHaveBeenCalledWith(sessionId);
+    expect(lastSyncRequestAtRef.current.has(`${sessionId}:tail-refresh`)).toBe(false);
+  });
+
   it('keeps pending tail-refresh authority when buffer-head arrives before the same-revision body response', () => {
     const sessionId = 'session-1';
     const baseSession = makeSession(sessionId);

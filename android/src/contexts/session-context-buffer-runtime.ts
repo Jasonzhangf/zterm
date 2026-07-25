@@ -133,6 +133,7 @@ function detectSameRevisionNonGapOverwrite(options: {
 
   let conflictCount = 0;
   let firstConflictIndex: number | null = null;
+  let lastConflictIndex: number | null = null;
   for (const line of normalizeWireLines(options.payload.lines || [], options.payload.cols || options.localBuffer.cols || 80)) {
     if (line.index < options.localBuffer.startIndex || line.index >= options.localBuffer.endIndex) {
       continue;
@@ -146,6 +147,7 @@ function detectSameRevisionNonGapOverwrite(options: {
       if (firstConflictIndex === null) {
         firstConflictIndex = line.index;
       }
+      lastConflictIndex = line.index;
     }
   }
 
@@ -155,6 +157,7 @@ function detectSameRevisionNonGapOverwrite(options: {
   return {
     conflictCount,
     firstConflictIndex,
+    lastConflictIndex,
     incomingStartIndex: startIndex,
     incomingEndIndex: endIndex,
   };
@@ -164,6 +167,7 @@ function resolvePendingSameRevisionRefreshKey(options: {
   sessionId: string;
   payload: TerminalBufferPayload;
   localBuffer: SessionBufferState;
+  conflictRange?: { startIndex: number; endIndex: number } | null;
   refs: {
     lastSyncRequestAtRef?: MutableRefObject<Map<string, SessionSyncRequestDebounceState>>;
   };
@@ -175,6 +179,12 @@ function resolvePendingSameRevisionRefreshKey(options: {
   const incomingRevision = Math.max(0, Math.floor(options.payload.revision || 0));
   const incomingStartIndex = Math.max(0, Math.floor(options.payload.startIndex || 0));
   const incomingEndIndex = Math.max(incomingStartIndex, Math.floor(options.payload.endIndex || incomingStartIndex));
+  const effectiveStartIndex = options.conflictRange
+    ? Math.max(0, Math.floor(options.conflictRange.startIndex || 0))
+    : incomingStartIndex;
+  const effectiveEndIndex = options.conflictRange
+    ? Math.max(effectiveStartIndex, Math.floor(options.conflictRange.endIndex || effectiveStartIndex))
+    : incomingEndIndex;
   const localRevision = Math.max(0, Math.floor(options.localBuffer.revision || 0));
   for (const purpose of ['tail-refresh', 'reading-repair'] as const) {
     const pending = requests.get(`${options.sessionId}:${purpose}`);
@@ -183,7 +193,7 @@ function resolvePendingSameRevisionRefreshKey(options: {
     }
     const pendingStart = Math.max(0, Math.floor(pending.requestStartIndex || 0));
     const pendingEnd = Math.max(pendingStart, Math.floor(pending.requestEndIndex || pendingStart));
-    const isWithinPendingWindow = incomingStartIndex >= pendingStart && incomingEndIndex <= pendingEnd;
+    const isWithinPendingWindow = effectiveStartIndex >= pendingStart && effectiveEndIndex <= pendingEnd;
     if (
       isWithinPendingWindow
       && Math.max(0, Math.floor(pending.targetHeadRevision || 0)) === incomingRevision
@@ -976,6 +986,10 @@ export function applyIncomingBufferSyncRuntime(options: {
         payload: options.payload,
         localBuffer,
         refs: options.refs,
+        conflictRange: {
+          startIndex: sameRevisionOverwrite.firstConflictIndex ?? sameRevisionOverwrite.incomingStartIndex,
+          endIndex: (sameRevisionOverwrite.lastConflictIndex ?? (sameRevisionOverwrite.incomingEndIndex - 1)) + 1,
+        },
       })
     : null;
   if (sameRevisionOverwrite && !pendingSameRevisionRefreshKey) {

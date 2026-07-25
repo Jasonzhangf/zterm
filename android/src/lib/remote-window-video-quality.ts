@@ -14,8 +14,6 @@ export const REMOTE_WINDOW_VIDEO_BITRATE_PRESETS: RemoteWindowVideoBitratePreset
   'fullscreen',
 ];
 
-const REMOTE_WINDOW_DESKTOP_FULLSCREEN_COVERAGE_RATIO = 0.95;
-
 export interface RemoteWindowNetworkQualityInput {
   effectiveType?: string | null;
   downlinkMbps?: number | null;
@@ -144,26 +142,9 @@ export function resolveRemoteWindowVideoTargetKey(target: RemoteWindowStreamTarg
 }
 
 export function resolveDefaultRemoteWindowVideoBitratePreset(
-  target: RemoteWindowStreamTargetManifest,
+  _target: RemoteWindowStreamTargetManifest,
 ): RemoteWindowVideoBitratePreset {
-  const coverageRatio = resolveRemoteWindowDesktopCoverageRatio(target);
-  if (coverageRatio === null) {
-    return '2mbps';
-  }
-  if (coverageRatio >= REMOTE_WINDOW_DESKTOP_FULLSCREEN_COVERAGE_RATIO) {
-    return 'fullscreen';
-  }
-  const proportionalMbps = 20 * coverageRatio;
-  if (proportionalMbps <= 3.5) {
-    return '2mbps';
-  }
-  if (proportionalMbps <= 7.5) {
-    return '5mbps';
-  }
-  if (proportionalMbps <= 15) {
-    return '10mbps';
-  }
-  return '20mbps';
+  return '2mbps';
 }
 
 export function buildRemoteWindowVideoBitrateConfig(

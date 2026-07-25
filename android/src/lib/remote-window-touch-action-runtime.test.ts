@@ -6,6 +6,7 @@ import {
   isRemoteWindowInputSupportedTarget,
   resolveRemoteWindowTouchScrollDeltaRuntime,
   resolveRemoteWindowTouchScrollFractionRuntime,
+  resolveRemoteWindowTouchWheelDeltaRuntime,
   resolveRemoteWindowTouchPointerCancelRuntime,
   resolveRemoteWindowTouchPointerDownRuntime,
   resolveRemoteWindowTouchPointerMoveRuntime,
@@ -295,6 +296,9 @@ describe('remote-window-touch-action-runtime', () => {
     expect(resolveRemoteWindowTouchScrollFractionRuntime(10)).toBe(1);
     expect(resolveRemoteWindowTouchScrollDeltaRuntime(-10, 600, { fraction: 0.25 })).toBe(-150);
     expect(resolveRemoteWindowTouchScrollDeltaRuntime(-10, 600, { fraction: 0.25, inverted: true })).toBe(150);
+    expect(resolveRemoteWindowTouchWheelDeltaRuntime(-10, 200, 600, { fraction: 0.25 })).toBe(-30);
+    expect(resolveRemoteWindowTouchWheelDeltaRuntime(-10, 200, 600, { fraction: 0.25, inverted: true })).toBe(30);
+    expect(resolveRemoteWindowTouchWheelDeltaRuntime(-500, 200, 600, { fraction: 0.25, inverted: true })).toBe(150);
   });
 
   it('drops stale unzoomed touch drag actions instead of replaying delayed gestures', () => {

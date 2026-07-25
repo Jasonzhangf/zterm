@@ -3787,3 +3787,18 @@ Need runtime debug to confirm:
 
 - Foreground resume freeze can be caused by remote-window fullscreen body suppression, even when the terminal transport stays green and head/body refresh code is correct. The owner is `desktop.remote_window_stream.overlay.project` plus `terminal.transport_lifecycle` body-subscription projection: when app foreground becomes false, overlay close must immediately release `onBodySubscriptionSuppressedChange(false)` before/while stopping the stream, so the active terminal body subscription cannot remain suppressed across background -> foreground.
 - Regression gates: `TerminalPage.remote-window-overlay.test.tsx` must prove backgrounding a locked remote-window stream stops the stream, removes the overlay, restores QuickBar, and last reports body suppression `false`; `SessionContext.ws-refresh.test.tsx` must prove foreground resume applies same-socket head + body to render output without adding a physical socket.
+
+# 2026-07-25 remote-window two-finger gesture lock
+
+- Jason verified foreground resume usable and requested locking that area, then optimizing remote-window gestures: all cases should use two-finger up/down as remote scroll, and pinch threshold should be tighter to reduce scroll misclassification as zoom.
+- Owner: `desktop.remote_window_stream.client.touch_action` / `resource.remote_window_overlay -> resource.remote_window_touch_action -> resource.remote_window_stream`. Edit scope is Android overlay touch classifier plus tests/docs only; daemon input injection, terminal renderer, and transport remain unchanged.
+- Implemented draft: second touch on any target-locked remote-window surface enters two-finger candidate, not only fullscreen. Two-finger vertical movement emits focus-first pixel `scroll` in floating/fullscreen/zoomed fullscreen. Pinch is fullscreen-only and requires scale change plus at least 18px distance change with both fingers moving along the start axis; near-parallel vertical two-finger movement with slight spread remains scroll.
+
+# 2026-07-25 remote scroll / bitrate / input-tail refresh closeout
+
+- Jason's screenshot shows terminal bottom/input rows can still split-refresh: live lower text changes while a visible input/tail row remains stale. Owner is `terminal.buffer_render` / `resource.client_sparse_buffer -> resource.renderer_window`, not transport reconnect or remote-window.
+- Root cause found in same-revision overwrite gate: pending visible refresh authority was checked against the whole incoming body window. If daemon answered a requested input-tail refresh with a larger stable superset body, the payload could be dropped as stale even when the only conflicting rows were inside the requested pending window.
+- Fix: same-revision pending authority now checks the actual conflicting non-gap row range against the pending request window. Superset body is accepted only when conflicts are within pending; conflicts outside pending still drop as stale.
+- Remote-window scroll fix: two-finger vertical scroll now maps midpoint movement proportionally to source pixels, emits continuous wheel-like scroll events, caps each event by the selected fraction, and defaults direction to inverted. Single-finger release-time gesture keeps its legacy bounded action direction.
+- Remote-window bitrate fix: untouched default is now always `2mbps`; manual selector choices still persist by target/resolution and may raise fullscreen baseline.
+- Verification so far: remote-window focused gate PASS `3 files / 68`; terminal buffer/ws-refresh gate PASS `2 files / 170`. Full build/package still pending in this run.

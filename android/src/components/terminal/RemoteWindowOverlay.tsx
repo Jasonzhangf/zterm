@@ -60,8 +60,8 @@ import {
   resolveRemoteWindowTouchPointerDownRuntime,
   resolveRemoteWindowTouchPointerMoveRuntime,
   resolveRemoteWindowTouchPointerUpRuntime,
-  resolveRemoteWindowTouchScrollDeltaRuntime,
   resolveRemoteWindowTouchSurfacePointRuntime,
+  resolveRemoteWindowTouchWheelDeltaRuntime,
   REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION,
   type RemoteWindowTouchInputDebugEvent,
   type RemoteWindowTouchLocalEffect,
@@ -298,7 +298,8 @@ const FLOATING_OVERLAY_TOOLBAR_ESTIMATE_PX = 50;
 const REMOTE_WINDOW_FULLSCREEN_MIN_SCALE = 1;
 const REMOTE_WINDOW_FULLSCREEN_MAX_SCALE = 4;
 const REMOTE_WINDOW_FULLSCREEN_PAN_TAP_THRESHOLD_PX = 8;
-const REMOTE_WINDOW_FULLSCREEN_PINCH_SCALE_THRESHOLD = 0.08;
+const REMOTE_WINDOW_FULLSCREEN_PINCH_SCALE_THRESHOLD = 0.16;
+const REMOTE_WINDOW_FULLSCREEN_PINCH_DISTANCE_THRESHOLD_PX = 18;
 const REMOTE_WINDOW_FULLSCREEN_TWO_FINGER_SCROLL_THRESHOLD_PX = 8;
 const REMOTE_WINDOW_CATALOG_UI_TIMEOUT_MS = 20_000;
 const REMOTE_WINDOW_CATALOG_PROJECTION_CACHE_TTL_MS = 60_000;
@@ -457,6 +458,37 @@ function isPointerMovementAlongAxis(
   const projection = Math.abs((deltaX * axisX + deltaY * axisY) / axisLength);
   const perpendicular = Math.abs((deltaX * -axisY + deltaY * axisX) / axisLength);
   return projection >= 4 && projection >= perpendicular;
+}
+
+function isRemoteWindowPinchIntent(options: {
+  firstStart: SurfacePointerPosition;
+  firstCurrent: SurfacePointerPosition;
+  secondStart: SurfacePointerPosition;
+  secondCurrent: SurfacePointerPosition;
+  startDistance: number;
+  currentDistance: number;
+  scaleRatio: number;
+}) {
+  const distanceDelta = Math.abs(options.currentDistance - options.startDistance);
+  if (
+    Math.abs(options.scaleRatio - 1) < REMOTE_WINDOW_FULLSCREEN_PINCH_SCALE_THRESHOLD
+    || distanceDelta < REMOTE_WINDOW_FULLSCREEN_PINCH_DISTANCE_THRESHOLD_PX
+  ) {
+    return false;
+  }
+  const firstMovedAlongStartAxis = isPointerMovementAlongAxis(
+    options.firstStart,
+    options.firstCurrent,
+    options.firstStart,
+    options.secondStart,
+  );
+  const secondMovedAlongStartAxis = isPointerMovementAlongAxis(
+    options.secondStart,
+    options.secondCurrent,
+    options.firstStart,
+    options.secondStart,
+  );
+  return firstMovedAlongStartAxis && secondMovedAlongStartAxis;
 }
 
 function isSurfacePointerPairGesture(
@@ -712,9 +744,10 @@ function writeRemoteWindowTouchScrollFraction(fraction: RemoteWindowTouchScrollF
 
 function readRemoteWindowTouchScrollInverted() {
   if (typeof window === 'undefined') {
-    return false;
+    return true;
   }
-  return window.localStorage.getItem(REMOTE_WINDOW_TOUCH_SCROLL_INVERTED_STORAGE_KEY) === 'true';
+  const raw = window.localStorage.getItem(REMOTE_WINDOW_TOUCH_SCROLL_INVERTED_STORAGE_KEY);
+  return raw === null ? true : raw === 'true';
 }
 
 function writeRemoteWindowTouchScrollInverted(inverted: boolean) {
@@ -2265,7 +2298,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     });
 
     const pointers = Array.from(surfacePointersRef.current.entries());
-    if (state.mode === 'fullscreen' && pointers.length >= 2) {
+    if (pointers.length >= 2 && event.pointerType === 'touch') {
       const [first, second] = pointers.slice(-2) as [
         [number, SurfacePointerPosition],
         [number, SurfacePointerPosition],
@@ -2362,11 +2395,11 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           ? resolveScrollInputEvent(
               midpoint.clientX,
               midpoint.clientY,
-              resolveRemoteWindowTouchScrollDeltaRuntime(midpointDeltaX, geometry.sourceRect.width, {
+              resolveRemoteWindowTouchWheelDeltaRuntime(midpointDeltaX, geometry.surfaceRect.width, geometry.sourceRect.width, {
                 fraction: touchScrollFractionRef.current,
                 inverted: touchScrollInvertedRef.current,
               }),
-              resolveRemoteWindowTouchScrollDeltaRuntime(midpointDeltaY, geometry.sourceRect.height, {
+              resolveRemoteWindowTouchWheelDeltaRuntime(midpointDeltaY, geometry.surfaceRect.height, geometry.sourceRect.height, {
                 fraction: touchScrollFractionRef.current,
                 inverted: touchScrollInvertedRef.current,
               }),
@@ -2401,20 +2434,17 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
 
       const firstMoved = hasPointerPositionMoved(gesture.firstStart, first);
       const secondMoved = hasPointerPositionMoved(gesture.secondStart, second);
-      const isPinchAxisMotion = isPointerMovementAlongAxis(
-        gesture.firstStart,
-        first,
-        gesture.firstStart,
-        gesture.secondStart,
-      ) || isPointerMovementAlongAxis(
-        gesture.secondStart,
-        second,
-        gesture.firstStart,
-        gesture.secondStart,
-      );
       if (
-        Math.abs(scaleRatio - 1) >= REMOTE_WINDOW_FULLSCREEN_PINCH_SCALE_THRESHOLD
-        && ((firstMoved && secondMoved) || isPinchAxisMotion)
+        state.mode === 'fullscreen'
+        && isRemoteWindowPinchIntent({
+          firstStart: gesture.firstStart,
+          firstCurrent: first,
+          secondStart: gesture.secondStart,
+          secondCurrent: second,
+          startDistance: gesture.startDistance,
+          currentDistance: distance,
+          scaleRatio,
+        })
       ) {
         surfaceGestureRef.current = {
           mode: 'pinch',
@@ -2453,11 +2483,11 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         ? resolveScrollInputEvent(
             midpoint.clientX,
             midpoint.clientY,
-            resolveRemoteWindowTouchScrollDeltaRuntime(midpointDeltaX, geometry.sourceRect.width, {
+            resolveRemoteWindowTouchWheelDeltaRuntime(midpointDeltaX, geometry.surfaceRect.width, geometry.sourceRect.width, {
               fraction: touchScrollFractionRef.current,
               inverted: touchScrollInvertedRef.current,
             }),
-            resolveRemoteWindowTouchScrollDeltaRuntime(midpointDeltaY, geometry.sourceRect.height, {
+            resolveRemoteWindowTouchWheelDeltaRuntime(midpointDeltaY, geometry.surfaceRect.height, geometry.sourceRect.height, {
               fraction: touchScrollFractionRef.current,
               inverted: touchScrollInvertedRef.current,
             }),
@@ -2546,7 +2576,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           pointer: pointerSampleFromReactEvent(event),
           geometry,
           scrollFraction: touchScrollFractionRef.current,
-          invertGestureDirection: touchScrollInvertedRef.current,
+          invertGestureDirection: false,
         });
         applyRemoteWindowTouchPointerResult(result);
         if (result.consumed) {
