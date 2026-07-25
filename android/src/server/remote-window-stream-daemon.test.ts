@@ -1526,13 +1526,77 @@ sleep 2
       queueDepth: 3,
       cropRect: { x: 10, y: 20, width: 800, height: 600 },
     });
-    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('streamConfiguration.queueDepth = max(3, min(3, config.queueDepth))');
-    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('streamConfiguration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, config.frameRate)))');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('streamConfiguration.queueDepth = max(3, min(3, queueDepth))');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('streamConfiguration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, frameRate)))');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('try await stream.updateConfiguration(nextConfig)');
 
     expect(buildScreenCaptureKitConfig(makeAppStreamTarget(), 60)).toMatchObject({
       frameRate: 60,
       queueDepth: 3,
     });
+  });
+
+  it('keeps the ScreenCaptureKit command channel open and updates capture dimensions', async () => {
+    const runner = makeTempExecutable('zterm-remote-window-capture-update-', `#!/usr/bin/env node
+function writeFrame(width, height) {
+  const rgba = Buffer.alloc(width * height * 4, 12);
+  const header = Buffer.alloc(16);
+  header.write('ZRW1', 0, 'ascii');
+  header.writeUInt32LE(width, 4);
+  header.writeUInt32LE(height, 8);
+  header.writeUInt32LE(rgba.length, 12);
+  process.stdout.write(Buffer.concat([header, rgba]));
+}
+writeFrame(2, 2);
+process.stdin.setEncoding('utf8');
+let buffer = '';
+process.stdin.on('data', (chunk) => {
+  buffer += chunk;
+  let newline = buffer.indexOf('\\n');
+  while (newline >= 0) {
+    const line = buffer.slice(0, newline).trim();
+    buffer = buffer.slice(newline + 1);
+    if (line) {
+      const command = JSON.parse(line);
+      const width = Math.max(1, Math.round(command.cropRect.width));
+      const height = Math.max(1, Math.round(command.cropRect.height));
+      process.stderr.write('ZTERM_REMOTE_WINDOW_CAPTURE_UPDATE ' + JSON.stringify({ seq: command.seq, ok: true, width, height }) + '\\n');
+      writeFrame(width, height);
+    }
+    newline = buffer.indexOf('\\n');
+  }
+});
+setInterval(() => {}, 1000);
+`);
+    const frames: Array<{ width: number; height: number }> = [];
+    try {
+      const source = await startScreenCaptureKitFrameSource(makeAppStreamTarget(), {
+        frameRate: 30,
+        startupTimeoutMs: 10_000,
+        swiftBinary: runner.executablePath,
+        onFrame: (frame) => frames.push({ width: frame.width, height: frame.height }),
+        onError: vi.fn(),
+      });
+      const nextTarget = makeAppStreamTarget();
+      nextTarget.videoTarget.windowBoundsTopLeftPx = { x: 10, y: 20, width: 800, height: 1477 };
+      nextTarget.videoTarget.cropRectTopLeftPx = { x: 10, y: 20, width: 800, height: 1477 };
+
+      if (!source.updateTarget) {
+        throw new Error('expected updateTarget to be available');
+      }
+      await source.updateTarget(nextTarget);
+
+      expect(source.width).toBe(800);
+      expect(source.height).toBe(1477);
+      expect(frames).toContainEqual({ width: 2, height: 2 });
+      await vi.waitFor(() => {
+        expect(frames).toContainEqual({ width: 800, height: 1477 });
+      });
+      expect(frames).toContainEqual({ width: 800, height: 1477 });
+      source.stop();
+    } finally {
+      runner.cleanup();
+    }
   });
 
   it('surfaces iTerm2 API failures explicitly instead of falling back to screenshot or terminal buffer truth', async () => {
@@ -2425,6 +2489,143 @@ sleep 2
 	      expect.objectContaining({ swiftBinary: 'swift' }),
 	    );
 	  });
+
+  it('applies app-window resize to the active capture source and returns target/capture truth', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const target = makeAppStreamTarget();
+    let captureWidth = 800;
+    let captureHeight = 600;
+    const updateTarget = vi.fn(async (nextTarget) => {
+      captureWidth = nextTarget.videoTarget.cropRectTopLeftPx?.width || 0;
+      captureHeight = nextTarget.videoTarget.cropRectTopLeftPx?.height || 0;
+    });
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      now: () => '2026-07-25T00:00:00.000Z',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({ width: captureWidth, height: captureHeight, rgba: new Uint8Array(captureWidth * captureHeight * 4).fill(1) });
+        return {
+          get width() {
+            return captureWidth;
+          },
+          get height() {
+            return captureHeight;
+          },
+          frameRate: 30,
+          updateTarget,
+          stop: vi.fn(),
+        };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      runRemoteWindowInputEvent: vi.fn(async () => undefined),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await runtime.startStream({
+      requestId: 'rw-resize-start',
+      streamId: 'stream-resize',
+      target,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    const result = await runtime.injectInput({
+      requestId: 'rw-resize',
+      streamId: 'stream-resize',
+      targetId: target.streamTargetId,
+      clientSentAt: Date.now(),
+      event: {
+        kind: 'window-resize',
+        width: 800,
+        height: 1477,
+      },
+    });
+
+    expect(updateTarget).toHaveBeenCalledWith(expect.objectContaining({
+      streamTargetId: target.streamTargetId,
+      videoTarget: expect.objectContaining({
+        windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 1477 },
+        cropRectTopLeftPx: { x: 10, y: 20, width: 800, height: 1477 },
+      }),
+    }));
+    expect(result).toEqual({
+      requestId: 'rw-resize',
+      streamId: 'stream-resize',
+      targetId: target.streamTargetId,
+      accepted: true,
+      target: expect.objectContaining({
+        videoTarget: expect.objectContaining({
+          windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 1477 },
+          cropRectTopLeftPx: { x: 10, y: 20, width: 800, height: 1477 },
+        }),
+      }),
+      capture: {
+        source: 'ScreenCaptureKit',
+        frameWidth: 800,
+        frameHeight: 1477,
+        frameRate: 30,
+        targetKind: 'app-window',
+      },
+    });
+  });
+
+  it('rejects app-window resize when the active capture source cannot update target truth', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const target = makeAppStreamTarget();
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async (_target, options) => {
+        options.onFrame({ width: 2, height: 2, rgba: new Uint8Array(16).fill(1) });
+        return { width: 2, height: 2, frameRate: 12, stop: vi.fn() };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      runRemoteWindowInputEvent: vi.fn(async () => undefined),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await runtime.startStream({
+      requestId: 'rw-resize-missing-start',
+      streamId: 'stream-resize-missing',
+      target,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    const result = await runtime.injectInput({
+      requestId: 'rw-resize-missing',
+      streamId: 'stream-resize-missing',
+      targetId: target.streamTargetId,
+      clientSentAt: Date.now(),
+      event: {
+        kind: 'window-resize',
+        width: 800,
+        height: 1477,
+      },
+    });
+
+    expect(result).toEqual({
+      requestId: 'rw-resize-missing',
+      streamId: 'stream-resize-missing',
+      code: 'remote_window_input_failed',
+      message: 'remote window active capture source cannot update target resize',
+    });
+  });
 
   it('accepts remote-window input without trusting Android client wall-clock timestamps', async () => {
     const fakePeer = new FakeRemoteWindowPeerConnection();

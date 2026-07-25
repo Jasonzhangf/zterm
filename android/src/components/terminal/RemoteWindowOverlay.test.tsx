@@ -24,6 +24,24 @@ vi.mock('@capacitor/app', () => ({
   },
 }));
 
+const originalWindowInnerWidth = Object.getOwnPropertyDescriptor(window, 'innerWidth');
+const originalWindowInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+const originalWindowVisualViewport = Object.getOwnPropertyDescriptor(window, 'visualViewport');
+
+function restoreWindowViewport() {
+  if (originalWindowInnerWidth) {
+    Object.defineProperty(window, 'innerWidth', originalWindowInnerWidth);
+  }
+  if (originalWindowInnerHeight) {
+    Object.defineProperty(window, 'innerHeight', originalWindowInnerHeight);
+  }
+  if (originalWindowVisualViewport) {
+    Object.defineProperty(window, 'visualViewport', originalWindowVisualViewport);
+  } else {
+    Reflect.deleteProperty(window, 'visualViewport');
+  }
+}
+
 function makeTarget(id: string, title: string, kind: 'app-window' | 'iterm2-pane'): RemoteWindowStreamTargetManifest {
   return {
     streamTargetId: id,
@@ -103,6 +121,7 @@ async function waitForActionRemoteInputCount(sendInput: ReturnType<typeof vi.fn>
 describe('RemoteWindowOverlay', () => {
   afterEach(() => {
     cleanup();
+    restoreWindowViewport();
     backListeners.splice(0, backListeners.length);
     window.localStorage.clear();
     Reflect.deleteProperty(navigator, 'connection');
@@ -136,6 +155,12 @@ describe('RemoteWindowOverlay', () => {
   });
 
   it('lists an app group as one picker row and switches sibling windows inside the video surface', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: { width: 390, height: 844, addEventListener: vi.fn(), removeEventListener: vi.fn() },
+    });
     const mainWindow = makeTarget('app-main', 'WeChat', 'app-window');
     const childWindow: RemoteWindowStreamTargetManifest = {
       ...makeTarget('app-child', 'WeChat Image', 'app-window'),
@@ -151,8 +176,14 @@ describe('RemoteWindowOverlay', () => {
       requestId: 'rw-1',
       targets: [childWindow, mainWindow],
     }));
+    const requestScreenshot = vi.fn(async (_sessionId: string, target: RemoteWindowStreamTargetManifest, options?: { persist?: boolean }) => ({
+      fileName: `${target.streamTargetId}.png`,
+      savedPath: '',
+      dataUrl: `data:image/png;base64,${target.streamTargetId}`,
+      options,
+    }));
 
-    render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} />);
+    render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} requestScreenshot={requestScreenshot} />);
 
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
     await waitFor(() => {
@@ -164,13 +195,26 @@ describe('RemoteWindowOverlay', () => {
     expect(screen.queryByTestId('remote-window-target-app-child')).toBeNull();
     fireEvent.click(group);
     expect(screen.queryByTestId('remote-window-picker')).toBeNull();
-    expect(screen.getByTestId('remote-window-video-window-switcher')).toBeTruthy();
-    expect(screen.getByTestId('remote-window-video-window-option-app-main').getAttribute('aria-pressed')).toBe('true');
+    const videoGroup = screen.getByTestId('remote-window-video-window-switcher');
+    expect(videoGroup).toBeTruthy();
+    expect(videoGroup.getAttribute('data-window-group-secondary-placement')).toBe('before');
+    expect(videoGroup.firstElementChild?.contains(screen.getByTestId('remote-window-video-window-option-app-child'))).toBe(true);
+    expect(videoGroup.lastElementChild?.contains(screen.getByTestId('remote-window-video-surface'))).toBe(true);
+    expect(videoGroup.contains(screen.getByTestId('remote-window-video-surface'))).toBe(true);
+    expect(screen.queryByTestId('remote-window-video-window-option-app-main')).toBeNull();
+    expect(screen.getByTestId('remote-window-video-window-option-app-child')).toBeTruthy();
+    await waitFor(() => {
+      expect(requestScreenshot).toHaveBeenCalledWith('session-1', expect.objectContaining({
+        streamTargetId: 'app-child',
+      }), { persist: false });
+      expect(screen.getByTestId('remote-window-video-window-thumbnail-app-child')).toBeTruthy();
+    });
 
     fireEvent.click(screen.getByTestId('remote-window-video-window-option-app-child'));
 
     await waitFor(() => {
-      expect(screen.getByTestId('remote-window-video-window-option-app-child').getAttribute('aria-pressed')).toBe('true');
+      expect(screen.queryByTestId('remote-window-video-window-option-app-child')).toBeNull();
+      expect(screen.getByTestId('remote-window-video-window-option-app-main')).toBeTruthy();
     });
   });
 
@@ -1200,7 +1244,7 @@ describe('RemoteWindowOverlay', () => {
     await waitFor(() => {
       expect(requestScreenshot).toHaveBeenCalledWith('session-1', expect.objectContaining({
         streamTargetId: 'app-1',
-      }));
+      }), { persist: true });
       expect(screen.getByTestId('remote-window-screenshot-status').getAttribute('data-phase')).toBe('saved');
       expect(screen.getByTestId('remote-window-screenshot-status').textContent).toContain('原始截图已保存');
     });
@@ -1998,6 +2042,12 @@ describe('RemoteWindowOverlay', () => {
   });
 
   it('keeps fullscreen drawing in complete fit and sends an explicit remote target resize request', async () => {
+    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
+    Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: { width: 390, height: 844, addEventListener: vi.fn(), removeEventListener: vi.fn() },
+    });
     const target = makeTarget('app-1', 'TextEdit', 'app-window');
     target.videoTarget.cropRectTopLeftPx = { x: 10, y: 40, width: 800, height: 600 };
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
@@ -2010,6 +2060,15 @@ describe('RemoteWindowOverlay', () => {
       mediaStream,
     }));
     const resizeTargetWindow = vi.fn();
+    let remoteWindowMessageHandler: ((msg: any) => void) | null = null;
+    const onRemoteWindowMessage = vi.fn((handler: (msg: any) => void) => {
+      remoteWindowMessageHandler = handler;
+      return () => {
+        if (remoteWindowMessageHandler === handler) {
+          remoteWindowMessageHandler = null;
+        }
+      };
+    });
 
     render(
       <RemoteWindowOverlay
@@ -2017,6 +2076,7 @@ describe('RemoteWindowOverlay', () => {
         requestTargets={requestTargets}
         startStream={startStream}
         resizeTargetWindow={resizeTargetWindow}
+        onRemoteWindowMessage={onRemoteWindowMessage}
       />,
     );
 
@@ -2027,7 +2087,36 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
 
     const overlay = screen.getByTestId('remote-window-locked-overlay');
+    const toolbar = screen.getByTestId('remote-window-locked-toolbar');
     const surface = screen.getByTestId('remote-window-video-surface');
+    Object.defineProperty(overlay, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 0,
+        left: 0,
+        top: 0,
+        right: 390,
+        bottom: 844,
+        width: 390,
+        height: 844,
+        toJSON: () => ({}),
+      }),
+    });
+    Object.defineProperty(toolbar, 'getBoundingClientRect', {
+      configurable: true,
+      value: () => ({
+        x: 0,
+        y: 16,
+        left: 0,
+        top: 16,
+        right: 390,
+        bottom: 124,
+        width: 390,
+        height: 108,
+        toJSON: () => ({}),
+      }),
+    });
     Object.defineProperty(surface, 'getBoundingClientRect', {
       configurable: true,
       value: () => ({
@@ -2065,15 +2154,45 @@ describe('RemoteWindowOverlay', () => {
         event: {
           kind: 'window-resize',
           width: 800,
-          height: 533,
+          height: 1477,
         },
       }));
     });
+    const resizePayload = resizeTargetWindow.mock.calls[0]?.[1];
+    const resizedTarget = {
+      ...target,
+      videoTarget: {
+        ...target.videoTarget,
+        windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 1477 },
+        cropRectTopLeftPx: { x: 10, y: 20, width: 800, height: 1477 },
+      },
+    };
+    act(() => {
+      remoteWindowMessageHandler?.({
+        type: 'remote-window-input-result',
+        payload: {
+          requestId: 'rw-resize-ack',
+          streamId: resizePayload.streamId,
+          targetId: 'app-1',
+          accepted: true,
+          target: resizedTarget,
+          capture: {
+            source: 'ScreenCaptureKit',
+            frameWidth: 800,
+            frameHeight: 1477,
+            frameRate: 30,
+            targetKind: 'app-window',
+          },
+        },
+      });
+    });
+    await waitFor(() => {
+      expect(Number.parseFloat(content.style.left)).toBeCloseTo(95.8, 1);
+      expect(Number.parseFloat(content.style.top)).toBeCloseTo(0, 1);
+      expect(Number.parseFloat(content.style.width)).toBeCloseTo(108.3, 1);
+      expect(Number.parseFloat(content.style.height)).toBeCloseTo(200, 1);
+    });
     expect(overlay.getAttribute('data-display-mode')).toBe('fit');
-    expect(Number.parseFloat(content.style.left)).toBeCloseTo(16.67, 1);
-    expect(Number.parseFloat(content.style.top)).toBeCloseTo(0, 1);
-    expect(Number.parseFloat(content.style.width)).toBeCloseTo(266.67, 1);
-    expect(Number.parseFloat(content.style.height)).toBeCloseTo(200, 1);
     expect(screen.getByRole('button', { name: '按手机全屏尺寸调整远程窗口' })).toBeTruthy();
   });
 
@@ -2153,7 +2272,7 @@ describe('RemoteWindowOverlay', () => {
     expect(event.y).toBeCloseTo(40, 1);
   });
 
-  it('supports fullscreen pinch zoom, single-finger local pan, and minimap viewport after zoom', async () => {
+  it('supports fullscreen pinch zoom, single-finger local pan, and never shrinks below fit', async () => {
     const mediaStream = { id: 'media-stream-1' } as MediaStream;
     const sendInput = vi.fn();
     const requestTargets = vi.fn(async () => ({
@@ -2204,22 +2323,25 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.pointerDown(surface, { pointerId: 2, pointerType: 'touch', clientX: 200, clientY: 100, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 1, pointerType: 'touch', clientX: 70, clientY: 100, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 2, pointerType: 'touch', clientX: 260, clientY: 100, button: 0, buttons: 1 });
-
-    await waitFor(() => {
-      expect(screen.getByTestId('remote-window-minimap')).toBeTruthy();
-    });
     const content = screen.getByTestId('remote-window-video-content');
+    const initialWidth = Number.parseFloat(content.style.width || '0');
     const leftAfterPinch = Number.parseFloat(content.style.left || '0');
+    const fitWidth = Math.min(300 / 800, 200 / 560) * 800;
+    expect(initialWidth).toBeGreaterThan(0);
 
     fireEvent.pointerUp(surface, { pointerId: 1, pointerType: 'touch', clientX: 70, clientY: 100, button: 0, buttons: 0 });
     fireEvent.pointerUp(surface, { pointerId: 2, pointerType: 'touch', clientX: 260, clientY: 100, button: 0, buttons: 0 });
     fireEvent.pointerDown(surface, { pointerId: 3, pointerType: 'touch', clientX: 150, clientY: 110, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 3, pointerType: 'touch', clientX: 100, clientY: 90, button: 0, buttons: 1 });
+    fireEvent.pointerDown(surface, { pointerId: 4, pointerType: 'touch', clientX: 180, clientY: 110, button: 0, buttons: 1 });
+    fireEvent.pointerMove(surface, { pointerId: 3, pointerType: 'touch', clientX: 120, clientY: 110, button: 0, buttons: 1 });
+    fireEvent.pointerMove(surface, { pointerId: 4, pointerType: 'touch', clientX: 170, clientY: 110, button: 0, buttons: 1 });
 
     await waitFor(() => {
       expect(Number.parseFloat(content.style.left || '0')).not.toBe(leftAfterPinch);
-      expect(screen.getByTestId('remote-window-minimap-viewport')).toBeTruthy();
+      expect(Number.parseFloat(content.style.width || '0')).toBeGreaterThanOrEqual(fitWidth);
     });
+    expect(screen.queryByTestId('remote-window-minimap')).toBeNull();
     expect(sendInput).not.toHaveBeenCalled();
   });
 
@@ -2473,9 +2595,7 @@ describe('RemoteWindowOverlay', () => {
     expect(sendInput).not.toHaveBeenCalled();
     fireEvent.pointerMove(surface, { pointerId: 82, pointerType: 'touch', clientX: 230, clientY: 90, button: 0, buttons: 1 });
 
-    await waitFor(() => {
-      expect(screen.getByTestId('remote-window-minimap')).toBeTruthy();
-    });
+    expect(screen.queryByTestId('remote-window-minimap')).toBeNull();
     expect(sendInput).not.toHaveBeenCalled();
   });
 
@@ -2526,7 +2646,7 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.pointerDown(surface, { pointerId: 62, pointerType: 'touch', clientX: 200, clientY: 100, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 61, pointerType: 'touch', clientX: 70, clientY: 100, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 62, pointerType: 'touch', clientX: 260, clientY: 100, button: 0, buttons: 1 });
-    await screen.findByTestId('remote-window-minimap');
+    expect(screen.queryByTestId('remote-window-minimap')).toBeNull();
     fireEvent.pointerUp(surface, { pointerId: 61, pointerType: 'touch', clientX: 70, clientY: 100, button: 0, buttons: 0 });
     fireEvent.pointerUp(surface, { pointerId: 62, pointerType: 'touch', clientX: 260, clientY: 100, button: 0, buttons: 0 });
 

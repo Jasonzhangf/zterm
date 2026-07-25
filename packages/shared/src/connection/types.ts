@@ -83,6 +83,10 @@ export interface TerminalBufferPayload {
   revision: number;
   startIndex: number;
   endIndex: number;
+  frameStartIndex?: number;
+  frameEndIndex?: number;
+  frameChunkIndex?: number;
+  frameChunkCount?: number;
   generatedAt?: number;
   requestSentAt?: number;
   availableStartIndex?: number;

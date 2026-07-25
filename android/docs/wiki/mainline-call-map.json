@@ -554,13 +554,26 @@
           "to": "RemoteWindowOverlay",
           "owner_feature": "desktop.remote_window_stream",
           "semantic_input": "active session id plus remote-window catalog/start/stop/input/screenshot callbacks",
-          "semantic_output": "picker, stream setup, floating/fullscreen video overlay, collapsed same-app picker rows plus in-video sibling window switcher, source-aspect pre-start and daemon-frame-aspect post-start projection, floating resize, fullscreen button, screenshot button, aspect-fit projection plus explicit remote target window-resize fill request, IME bottom-inset fullscreen padding plus auto lift, Back/minimize projection, zoom/pan/minimap projection where local single-finger pan is only enabled after fullscreen zoom, unzoomed remote tap, release-time drag gesture, target-locked two-finger scroll, and wheel input context, separate QuickBar/body suppression state, active remote-window input context, and close intent",
+          "semantic_output": "picker, stream setup, floating/fullscreen video overlay, collapsed same-app picker rows plus in-video primary-plus-children sibling window switcher inside the same locked video container, portrait child rail above primary video and landscape child rail beside it, TerminalPage-measured QuickBar plus IME bottom chrome avoidance, source-aspect pre-start and daemon-frame-aspect post-start projection, floating resize, fullscreen button, screenshot button, aspect-fit projection plus explicit remote target window-resize fill request, IME bottom-inset fullscreen padding plus auto lift, Back/minimize projection, zoom/pan projection without minimap and without shrink below fit where local single-finger pan is only enabled after fullscreen zoom, unzoomed remote tap, release-time drag gesture, target-locked two-finger scroll, and wheel input context, separate QuickBar/body suppression state, active remote-window input context, and close intent",
           "status": "anchored",
           "edge_id": "android_mainline:TerminalPage->RemoteWindowOverlay",
           "resource_from": "resource.ui_projection",
           "resource_to": "resource.remote_window_overlay",
           "via_resources": [],
           "relation_status": "direct"
+        },
+        {
+          "from": "RemoteWindowOverlay",
+          "to": "WindowGroupLayout",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "same-app remote-window target group and active target id",
+          "semantic_output": "active video-layer primary-plus-children layout with portrait top rail or landscape side rail inside the locked remote-window container",
+          "status": "anchored",
+          "edge_id": "android_mainline:RemoteWindowOverlay->WindowGroupLayout",
+          "resource_from": "resource.remote_window_overlay",
+          "resource_to": "resource.remote_window_overlay",
+          "via_resources": [],
+          "relation_status": "observer"
         },
         {
           "from": "RemoteWindowOverlay",

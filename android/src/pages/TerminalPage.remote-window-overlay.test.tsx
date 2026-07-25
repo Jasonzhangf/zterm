@@ -303,7 +303,9 @@ describe('TerminalPage remote window overlay', () => {
     fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
 
     await waitFor(() => {
-      expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('floating');
+      const lockedOverlay = screen.getByTestId('remote-window-locked-overlay');
+      expect(lockedOverlay.getAttribute('data-mode')).toBe('floating');
+      expect(parseFloat(lockedOverlay.style.bottom || '0')).toBeGreaterThan(200);
       expect(onRequestRemoteWindowStreamStart).toHaveBeenCalledWith('s1', expect.objectContaining({
         streamTargetId: 'app-1',
       }), expect.stringMatching(/^rw-stream-/), {
@@ -895,6 +897,71 @@ describe('TerminalPage remote window overlay', () => {
     expect(canvasToDataUrl).not.toHaveBeenCalled();
     canvasToDataUrl.mockRestore();
     expect(onSendRemoteWindowInput).not.toHaveBeenCalled();
+  });
+
+  it('loads same-app child thumbnails from remote screenshots without persisting them', async () => {
+    vi.mocked(Filesystem.writeFile).mockClear();
+    vi.mocked(Filesystem.mkdir).mockClear();
+    const session = makeSession('s1');
+    const mainTarget = makeTarget();
+    const childTarget: RemoteWindowStreamTargetManifest = {
+      ...makeTarget(),
+      streamTargetId: 'app-child',
+      videoTarget: {
+        ...mainTarget.videoTarget,
+        windowId: 'window-2',
+        title: 'TextEdit Preview',
+        windowBoundsTopLeftPx: { x: 80, y: 90, width: 300, height: 220 },
+        cropRectTopLeftPx: { x: 80, y: 90, width: 300, height: 220 },
+      },
+    };
+    const onRequestRemoteWindowTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [childTarget, mainTarget],
+      errors: [],
+    }));
+    const onRequestRemoteScreenshot = vi.fn(async () => ({
+      fileName: 'remote-window-child.png',
+      mimeType: 'image/png' as const,
+      dataBase64: 'dGh1bWI=',
+      totalBytes: 5,
+    }));
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        onRequestRemoteScreenshot={onRequestRemoteScreenshot}
+        onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await screen.findByTestId('remote-window-app-group-com-apple-TextEdit-123');
+    fireEvent.click(screen.getByTestId('remote-window-app-group-com-apple-TextEdit-123'));
+
+    await waitFor(() => {
+      expect(onRequestRemoteScreenshot).toHaveBeenCalledWith('s1', undefined, {
+        target: {
+          kind: 'remote-window',
+          target: expect.objectContaining({ streamTargetId: 'app-child' }),
+        },
+      });
+      expect(screen.getByTestId('remote-window-video-window-thumbnail-app-child')).toBeTruthy();
+    });
+    expect(Filesystem.writeFile).not.toHaveBeenCalled();
   });
 
   it('does not route quickbar input through unsupported iTerm pane remote-window targets', async () => {

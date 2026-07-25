@@ -369,6 +369,14 @@ export interface RemoteWindowInputResultPayload {
   streamId: string;
   targetId: string;
   accepted: boolean;
+  target?: RemoteWindowStreamTargetManifest;
+  capture?: {
+    source: 'ScreenCaptureKit';
+    frameWidth: number;
+    frameHeight: number;
+    frameRate?: number;
+    targetKind: 'app-window' | 'iterm2-pane';
+  };
 }
 
 export interface TerminalReliableInputPayload {

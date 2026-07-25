@@ -173,6 +173,29 @@ export function attachRemoteWindowStreamReceiver(
   };
 }
 
+export function applyRemoteWindowInputResultTarget(
+  state: RemoteWindowOverlayState,
+  streamId: string,
+  targetId: string,
+  target: RemoteWindowStreamTargetManifest,
+): RemoteWindowOverlayState {
+  if (
+    state.phase !== 'targetLocked'
+    || state.streamId !== streamId
+    || state.target.streamTargetId !== targetId
+    || target.streamTargetId !== targetId
+  ) {
+    return state;
+  }
+  return {
+    ...state,
+    target,
+    targets: state.targets.map((item) => (
+      item.streamTargetId === targetId ? target : item
+    )),
+  };
+}
+
 export function failRemoteWindowStream(
   state: RemoteWindowOverlayState,
   streamId: string,

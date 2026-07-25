@@ -43,6 +43,7 @@ flowchart TD
   TerminalPage --> QuickBar["src/components/terminal/TerminalQuickBar.tsx"]
   TerminalPage --> RemoteWindowOverlay["src/components/terminal/RemoteWindowOverlay.tsx#RemoteWindowOverlay"]
   TerminalPage --> RemoteWindowInputRuntime["src/contexts/session-context-remote-window-runtime.ts#sendRemoteWindowInputRuntime"]
+  RemoteWindowOverlay --> WindowGroupLayout["src/components/terminal/WindowGroupLayout.tsx#WindowGroupLayout"]
   RemoteWindowOverlay --> RemoteScreenshotRuntime["src/lib/remote-screenshot-runtime.ts#createRemoteScreenshotRuntime"]
   RemoteWindowOverlay --> RemoteWindowMessageRuntime["src/lib/remote-window-message-runtime.ts#createRemoteWindowMessageRuntime"]
   RemoteWindowOverlay --> RemoteWindowStreamQualityRuntime["src/contexts/session-context-remote-window-runtime.ts#updateRemoteWindowStreamQualityRuntime"]

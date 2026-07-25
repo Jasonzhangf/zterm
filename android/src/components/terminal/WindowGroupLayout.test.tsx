@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
 
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WindowGroupLayout, resolveWindowGroupLayoutPlan } from './WindowGroupLayout';
 
 describe('WindowGroupLayout', () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   it('uses a bottom primary pane in portrait and a side rail in landscape', () => {
     expect(resolveWindowGroupLayoutPlan(4, false)).toEqual({
       primaryAxis: 'column',
@@ -25,6 +29,7 @@ describe('WindowGroupLayout', () => {
     render(
       <WindowGroupLayout
         landscape
+        testId="window-group"
         primaryItemId="a"
         onPrimaryItemChange={onPrimaryItemChange}
         items={[
@@ -35,10 +40,30 @@ describe('WindowGroupLayout', () => {
       />,
     );
 
+    expect(screen.getByTestId('window-group').getAttribute('data-window-group-secondary-placement')).toBe('after');
     fireEvent.click(screen.getByTestId('child-b'));
     expect(onPrimaryItemChange).toHaveBeenCalledWith('b');
     expect(screen.getByTestId('window-a')).toBeTruthy();
     expect(screen.getByTestId('window-b')).toBeTruthy();
     expect(screen.getByTestId('window-c')).toBeTruthy();
+  });
+
+  it('can place the secondary rail before the primary pane for top preview rows', () => {
+    render(
+      <WindowGroupLayout
+        testId="window-group"
+        landscape={false}
+        primaryItemId="a"
+        secondaryPlacement="before"
+        items={[
+          { id: 'a', node: <div data-testid="window-a">a</div> },
+          { id: 'b', testId: 'child-b', node: <div data-testid="window-b">b</div> },
+        ]}
+      />,
+    );
+
+    const root = screen.getByTestId('window-group');
+    expect(root.getAttribute('data-window-group-secondary-placement')).toBe('before');
+    expect(root.firstElementChild?.contains(screen.getByTestId('child-b'))).toBe(true);
   });
 });

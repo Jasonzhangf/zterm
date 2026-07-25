@@ -324,6 +324,7 @@ export function resetSessionTransportPullBookkeepingInfraRuntime(options: {
   activeSessionId: string | null;
   sessionPullStateRef: { current: Map<string, unknown> };
   pendingInputTailRefreshRef?: { current: Map<string, { requestedAt: number; localRevision: number }> };
+  sameRevisionChunkFrameRef?: { current: Map<string, unknown> };
   lastSyncRequestAtRef: { current: Map<string, unknown> };
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
 }) {
@@ -471,6 +472,7 @@ export function clearTailRefreshRuntimeInfra(options: {
   pendingInputTailRefreshRef?: { current: Map<string, { requestedAt: number; localRevision: number }> };
   pendingConnectTailRefreshRef?: { current: Set<string> };
   pendingResumeTailRefreshRef?: { current: Set<string> };
+  sameRevisionChunkFrameRef?: { current: Map<string, unknown> };
 }) {
   clearTailRefreshRuntimeRuntime(options);
 }

@@ -2502,6 +2502,7 @@ function TerminalPageComponent({
   const handleRequestRemoteWindowScreenshot = useCallback(async (
     sessionId: string,
     target: RemoteWindowStreamTargetManifest,
+    options?: { persist?: boolean },
   ) => {
     if (!onRequestRemoteScreenshot) {
       throw new Error('当前没有可用的截图通道');
@@ -2512,6 +2513,13 @@ function TerminalPageComponent({
         target,
       },
     });
+    if (options?.persist === false) {
+      return {
+        fileName: capture.fileName,
+        savedPath: '',
+        dataUrl: `data:${capture.mimeType || 'image/png'};base64,${capture.dataBase64}`,
+      };
+    }
     const savedPath = await persistRemoteScreenshotCaptureRuntime({
       fileName: capture.fileName,
       dataBase64: capture.dataBase64,
@@ -2522,6 +2530,7 @@ function TerminalPageComponent({
     return {
       fileName: capture.fileName,
       savedPath,
+      dataUrl: `data:${capture.mimeType || 'image/png'};base64,${capture.dataBase64}`,
     };
   }, [onRequestRemoteScreenshot]);
 
@@ -4180,17 +4189,14 @@ function TerminalPageComponent({
           sendInput={onSendRemoteWindowInput}
           resizeTargetWindow={onResizeRemoteWindowTarget}
           onInputDebug={recordRemoteWindowInputDebug}
-          bottomInsetPx={
-            quickBarShellKeyboardLiftPx
-            + layoutProfile.quickBar.touchSafeOffsetPx
-            + terminalBottomChromeLiftPx
-          }
+          bottomInsetPx={terminalChromeBottomPx + terminalImeLiftPx}
           bottomChromeInsetPx={terminalChromeBottomPx}
           onOpenStateChange={handleRemoteWindowOverlayOpenStateChange}
           onBodySubscriptionSuppressedChange={handleRemoteWindowBodySubscriptionSuppressedChange}
           onInputContextChange={handleRemoteWindowInputContextChange}
           onRequestKeyboard={handleRemoteWindowRequestKeyboard}
           onVideoDebug={recordRemoteWindowVideoDebug}
+          onRemoteWindowMessage={onRemoteWindowMessage}
         />
         {!remoteWindowOverlayOpen ? (
           <TerminalQuickBarShell

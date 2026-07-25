@@ -7203,16 +7203,23 @@ function splitBufferSyncPayloadMessages(payload, maxBytes) {
   let chunkLines = [];
   let chunkStartIndex = null;
   let chunkEndIndex = null;
+  const frameStartIndex = Math.max(0, Math.floor(payload.startIndex || 0));
+  const frameEndIndex = Math.max(frameStartIndex, Math.floor(payload.endIndex || frameStartIndex));
+  const buildChunkPayload = (startIndex, endIndex, nextLines, chunkIndex, chunkCount) => ({
+    ...payload,
+    startIndex,
+    endIndex,
+    frameStartIndex,
+    frameEndIndex,
+    frameChunkIndex: chunkIndex,
+    frameChunkCount: chunkCount,
+    lines: nextLines
+  });
   const flushChunk = () => {
     if (chunkLines.length === 0 || chunkStartIndex === null || chunkEndIndex === null) {
       return;
     }
-    const chunkPayload = {
-      ...payload,
-      startIndex: chunkStartIndex,
-      endIndex: chunkEndIndex,
-      lines: chunkLines
-    };
+    const chunkPayload = buildChunkPayload(chunkStartIndex, chunkEndIndex, chunkLines, messages.length, 9999);
     messages.push({ payload: chunkPayload, text: buildBufferSyncMessageText(chunkPayload) });
     chunkLines = [];
     chunkStartIndex = null;
@@ -7226,12 +7233,7 @@ function splitBufferSyncPayloadMessages(payload, maxBytes) {
     const candidateStartIndex = chunkStartIndex === null ? lineIndex : chunkStartIndex;
     const candidateEndIndex = Math.max(chunkEndIndex === null ? lineIndex + 1 : chunkEndIndex, lineIndex + 1);
     const candidateLines = [...chunkLines, line];
-    const candidatePayload = {
-      ...payload,
-      startIndex: candidateStartIndex,
-      endIndex: candidateEndIndex,
-      lines: candidateLines
-    };
+    const candidatePayload = buildChunkPayload(candidateStartIndex, candidateEndIndex, candidateLines, messages.length, 9999);
     const candidateText = buildBufferSyncMessageText(candidatePayload);
     if (chunkLines.length > 0 && Buffer.byteLength(candidateText, "utf8") > maxBytes) {
       flushChunk();
@@ -7245,7 +7247,19 @@ function splitBufferSyncPayloadMessages(payload, maxBytes) {
     chunkLines = candidateLines;
   }
   flushChunk();
-  return messages.length > 0 ? messages : [{ payload, text: fullText }];
+  if (messages.length <= 1) {
+    return messages.length > 0 ? messages : [{ payload, text: fullText }];
+  }
+  return messages.map((message, index) => {
+    const chunkPayload = buildChunkPayload(
+      message.payload.startIndex,
+      message.payload.endIndex,
+      message.payload.lines,
+      index,
+      messages.length
+    );
+    return { payload: chunkPayload, text: buildBufferSyncMessageText(chunkPayload) };
+  });
 }
 function resolvePerSubscriberTransportSnapshot(sessions2, sessionId) {
   const session = sessions2.get(sessionId);
@@ -13299,6 +13313,8 @@ var REMOTE_WINDOW_INPUT_STALE_MS = 1e3;
 var REMOTE_WINDOW_INPUT_FOCUS_TIMEOUT_MS = 3e3;
 var REMOTE_WINDOW_INPUT_FOCUS_PAIR_GRACE_MS = 25;
 var REMOTE_WINDOW_INPUT_HELPER_READY_TIMEOUT_MS = 15e3;
+var REMOTE_WINDOW_CAPTURE_UPDATE_TIMEOUT_MS = 3e3;
+var REMOTE_WINDOW_CAPTURE_UPDATE_STDERR_PREFIX = "ZTERM_REMOTE_WINDOW_CAPTURE_UPDATE ";
 var ITERM2_APP_BUNDLE_ID = "com.googlecode.iterm2";
 var ITERM2_PANE_GAP_PX = 1;
 var REMOTE_WINDOW_ERROR_MESSAGE_MAX_CHARS = 220;
@@ -14094,6 +14110,15 @@ struct CaptureConfig: Decodable {
     let queueDepth: Int
 }
 
+struct CaptureCommand: Decodable {
+    let kind: String
+    let seq: Int
+    let windowBounds: Rect
+    let cropRect: Rect
+    let frameRate: Int
+    let queueDepth: Int
+}
+
 struct Rect: Decodable {
     let x: Double
     let y: Double
@@ -14123,6 +14148,34 @@ func rectMatches(_ frame: CGRect, _ rect: Rect) -> Bool {
         && closeEnough(frame.origin.y, rect.y)
         && closeEnough(frame.size.width, rect.width)
         && closeEnough(frame.size.height, rect.height)
+}
+
+func makeStreamConfiguration(windowBounds: Rect, cropRect: Rect, frameRate: Int, queueDepth: Int) -> SCStreamConfiguration {
+    let streamConfiguration = SCStreamConfiguration()
+    streamConfiguration.capturesAudio = false
+    streamConfiguration.pixelFormat = kCVPixelFormatType_32BGRA
+    streamConfiguration.queueDepth = max(3, min(3, queueDepth))
+    streamConfiguration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, frameRate)))
+    streamConfiguration.width = max(1, Int(cropRect.width.rounded()))
+    streamConfiguration.height = max(1, Int(cropRect.height.rounded()))
+    streamConfiguration.sourceRect = CGRect(
+        x: max(0, cropRect.x - windowBounds.x),
+        y: max(0, cropRect.y - windowBounds.y),
+        width: max(1, cropRect.width),
+        height: max(1, cropRect.height)
+    )
+    return streamConfiguration
+}
+
+func writeCaptureUpdate(seq: Int, ok: Bool, width: Int? = nil, height: Int? = nil, error: String? = nil) {
+    var result: [String: Any] = ["seq": seq, "ok": ok]
+    if let width = width { result["width"] = width }
+    if let height = height { result["height"] = height }
+    if let error = error { result["error"] = error }
+    if let data = try? JSONSerialization.data(withJSONObject: result, options: []),
+       let json = String(data: data, encoding: .utf8) {
+        stderrLine("ZTERM_REMOTE_WINDOW_CAPTURE_UPDATE " + json)
+    }
 }
 
 final class FrameOutput: NSObject, SCStreamOutput {
@@ -14216,18 +14269,11 @@ Task { @MainActor in
         }
 
         let filter = SCContentFilter(desktopIndependentWindow: targetWindow)
-        let streamConfiguration = SCStreamConfiguration()
-        streamConfiguration.capturesAudio = false
-        streamConfiguration.pixelFormat = kCVPixelFormatType_32BGRA
-        streamConfiguration.queueDepth = max(3, min(3, config.queueDepth))
-        streamConfiguration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, config.frameRate)))
-        streamConfiguration.width = max(1, Int(config.cropRect.width.rounded()))
-        streamConfiguration.height = max(1, Int(config.cropRect.height.rounded()))
-        streamConfiguration.sourceRect = CGRect(
-            x: max(0, config.cropRect.x - config.windowBounds.x),
-            y: max(0, config.cropRect.y - config.windowBounds.y),
-            width: max(1, config.cropRect.width),
-            height: max(1, config.cropRect.height)
+        let streamConfiguration = makeStreamConfiguration(
+            windowBounds: config.windowBounds,
+            cropRect: config.cropRect,
+            frameRate: config.frameRate,
+            queueDepth: config.queueDepth
         )
 
         let stream = SCStream(filter: filter, configuration: streamConfiguration, delegate: nil)
@@ -14238,6 +14284,49 @@ Task { @MainActor in
     } catch {
         stderrLine("ScreenCaptureKit capture start failed: " + String(describing: error))
         exit(4)
+    }
+}
+
+DispatchQueue.global(qos: .utility).async {
+    while let line = readLine(strippingNewline: true) {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            continue
+        }
+        guard let data = trimmed.data(using: .utf8) else {
+            continue
+        }
+        do {
+            let command = try JSONDecoder().decode(CaptureCommand.self, from: data)
+            guard command.kind == "update-config" else {
+                writeCaptureUpdate(seq: command.seq, ok: false, error: "unsupported capture command")
+                continue
+            }
+            Task { @MainActor in
+                do {
+                    guard let stream = activeStream else {
+                        throw NSError(domain: "RemoteWindowCapture", code: 1, userInfo: [NSLocalizedDescriptionKey: "capture stream is not active"])
+                    }
+                    let nextConfig = makeStreamConfiguration(
+                        windowBounds: command.windowBounds,
+                        cropRect: command.cropRect,
+                        frameRate: command.frameRate,
+                        queueDepth: command.queueDepth
+                    )
+                    try await stream.updateConfiguration(nextConfig)
+                    writeCaptureUpdate(
+                        seq: command.seq,
+                        ok: true,
+                        width: max(1, Int(command.cropRect.width.rounded())),
+                        height: max(1, Int(command.cropRect.height.rounded()))
+                    )
+                } catch {
+                    writeCaptureUpdate(seq: command.seq, ok: false, error: error.localizedDescription)
+                }
+            }
+        } catch {
+            stderrLine("ZTERM_REMOTE_WINDOW_CAPTURE_UPDATE invalid command: " + error.localizedDescription)
+        }
     }
 }
 
@@ -15163,6 +15252,56 @@ function validateStreamTargetForCapture(target) {
     cropRect
   };
 }
+function buildResizedRemoteWindowTarget(target, event, createdAt) {
+  if (target.videoTarget.kind !== "app-window") {
+    throw new Error("remote window resize is only supported for app-window targets");
+  }
+  const currentWindow = validateRect(
+    target.videoTarget.windowBoundsTopLeftPx,
+    "remote-window.windowBoundsTopLeftPx"
+  );
+  const width = Math.max(120, Math.round(event.width));
+  const height = Math.max(120, Math.round(event.height));
+  const nextWindowBounds = {
+    ...currentWindow,
+    width,
+    height
+  };
+  const nextTarget = {
+    ...target,
+    videoTarget: {
+      ...target.videoTarget,
+      windowBoundsTopLeftPx: nextWindowBounds,
+      cropRectTopLeftPx: nextWindowBounds
+    },
+    capture: {
+      ...target.capture,
+      createdAt
+    }
+  };
+  validateStreamTargetForCapture(nextTarget);
+  return nextTarget;
+}
+async function applyRemoteWindowTargetResize(entry, event, createdAt) {
+  const captureSource = entry.captureSource;
+  if (!captureSource?.updateTarget) {
+    throw new Error("remote window active capture source cannot update target resize");
+  }
+  const nextTarget = buildResizedRemoteWindowTarget(entry.target, event, createdAt);
+  await captureSource.updateTarget(nextTarget);
+  entry.target = nextTarget;
+  entry.targetId = nextTarget.streamTargetId;
+  return {
+    target: nextTarget,
+    capture: {
+      source: "ScreenCaptureKit",
+      frameWidth: captureSource.width,
+      frameHeight: captureSource.height,
+      frameRate: captureSource.frameRate,
+      targetKind: nextTarget.videoTarget.kind
+    }
+  };
+}
 function convertRgbaToI420Frame(frame, convert) {
   const width = Math.max(1, Math.floor(frame.width));
   const height = Math.max(1, Math.floor(frame.height));
@@ -15199,7 +15338,7 @@ function stopChildProcess(child) {
   child.kill("SIGTERM");
 }
 function startScreenCaptureKitFrameSource(target, options) {
-  const captureConfig = buildScreenCaptureKitConfig(target, options.frameRate);
+  let captureConfig = buildScreenCaptureKitConfig(target, options.frameRate);
   const child = (0, import_node_child_process2.spawn)(options.swiftBinary, ["-e", SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT], {
     env: {
       ...process.env,
@@ -15207,13 +15346,22 @@ function startScreenCaptureKitFrameSource(target, options) {
     },
     stdio: ["pipe", "pipe", "pipe"]
   });
-  child.stdin.end();
   let stdoutBuffer = Buffer.alloc(0);
   let stderrBuffer = "";
+  let stderrLineBuffer = "";
   let firstFrameResolved = false;
   let stopped = false;
   let frameWidth = Math.max(1, Math.floor(captureConfig.cropRect.width));
   let frameHeight = Math.max(1, Math.floor(captureConfig.cropRect.height));
+  let captureUpdateSeq = 0;
+  const pendingCaptureUpdates = /* @__PURE__ */ new Map();
+  const rejectPendingCaptureUpdates = (error) => {
+    for (const [seq, pending] of pendingCaptureUpdates) {
+      clearTimeout(pending.timer);
+      pending.reject(error);
+      pendingCaptureUpdates.delete(seq);
+    }
+  };
   const cleanupListeners = () => {
     child.stdout.removeListener("data", onStdout);
     child.stderr.removeListener("data", onStderr);
@@ -15234,8 +15382,59 @@ function startScreenCaptureKitFrameSource(target, options) {
       }
       stopped = true;
       cleanupListeners();
+      rejectPendingCaptureUpdates(new Error("ScreenCaptureKit capture source stopped"));
       stopChildProcess(child);
     }
+  };
+  frameSource.updateTarget = async (nextTarget) => {
+    if (stopped) {
+      throw new Error("ScreenCaptureKit capture source is stopped");
+    }
+    if (!child.stdin.writable || child.stdin.destroyed) {
+      throw new Error("ScreenCaptureKit capture command channel is closed");
+    }
+    const nextConfig = buildScreenCaptureKitConfig(nextTarget, frameSource.frameRate);
+    const seq = captureUpdateSeq + 1;
+    captureUpdateSeq = seq;
+    const command = {
+      kind: "update-config",
+      seq,
+      windowBounds: nextConfig.windowBounds,
+      cropRect: nextConfig.cropRect,
+      frameRate: nextConfig.frameRate,
+      queueDepth: nextConfig.queueDepth
+    };
+    const ack = await new Promise((resolve4, reject) => {
+      const timer = setTimeout(() => {
+        pendingCaptureUpdates.delete(seq);
+        reject(new Error(`ScreenCaptureKit capture update timed out after ${REMOTE_WINDOW_CAPTURE_UPDATE_TIMEOUT_MS}ms`));
+      }, REMOTE_WINDOW_CAPTURE_UPDATE_TIMEOUT_MS);
+      pendingCaptureUpdates.set(seq, {
+        target: nextTarget,
+        timer,
+        resolve: resolve4,
+        reject
+      });
+      child.stdin.write(`${JSON.stringify(command)}
+`, (error) => {
+        if (!error) {
+          return;
+        }
+        const pending = pendingCaptureUpdates.get(seq);
+        if (!pending) {
+          return;
+        }
+        pendingCaptureUpdates.delete(seq);
+        clearTimeout(pending.timer);
+        pending.reject(new Error(`ScreenCaptureKit capture command write failed: ${error.message}`));
+      });
+    });
+    if (!ack.ok) {
+      throw new Error(ack.error || "ScreenCaptureKit capture update failed");
+    }
+    captureConfig = nextConfig;
+    frameWidth = Math.max(1, Math.floor(ack.width ?? nextConfig.cropRect.width));
+    frameHeight = Math.max(1, Math.floor(ack.height ?? nextConfig.cropRect.height));
   };
   let resolveStart = () => void 0;
   let rejectStart = () => void 0;
@@ -15302,17 +15501,59 @@ function startScreenCaptureKitFrameSource(target, options) {
       }
     }
   }
+  function handleCaptureUpdateAckLine(line) {
+    if (!line.startsWith(REMOTE_WINDOW_CAPTURE_UPDATE_STDERR_PREFIX)) {
+      return false;
+    }
+    const rawJson = line.slice(REMOTE_WINDOW_CAPTURE_UPDATE_STDERR_PREFIX.length).trim();
+    try {
+      const parsed = JSON.parse(rawJson);
+      if (!Number.isInteger(parsed.seq)) {
+        return true;
+      }
+      const seq = Number(parsed.seq);
+      const pending = pendingCaptureUpdates.get(seq);
+      if (!pending) {
+        return true;
+      }
+      pendingCaptureUpdates.delete(seq);
+      clearTimeout(pending.timer);
+      const ack = {
+        seq,
+        ok: Boolean(parsed.ok),
+        ...Number.isFinite(parsed.width) ? { width: Number(parsed.width) } : {},
+        ...Number.isFinite(parsed.height) ? { height: Number(parsed.height) } : {},
+        ...typeof parsed.error === "string" && parsed.error.trim() ? { error: parsed.error } : {}
+      };
+      pending.resolve(ack);
+    } catch (error) {
+      options.onError(new Error(`ScreenCaptureKit capture update ack parse failed: ${error instanceof Error ? error.message : String(error)}`));
+    }
+    return true;
+  }
   function onStderr(chunk) {
-    stderrBuffer = `${stderrBuffer}${chunk.toString("utf8")}`;
+    const text = chunk.toString("utf8");
+    stderrLineBuffer = `${stderrLineBuffer}${text}`;
+    const lines = stderrLineBuffer.split(/\r?\n/);
+    stderrLineBuffer = lines.pop() || "";
+    for (const line of lines) {
+      if (!line) {
+        continue;
+      }
+      handleCaptureUpdateAckLine(line);
+    }
+    stderrBuffer = `${stderrBuffer}${text}`;
     stderrBuffer = stderrBuffer.slice(-1200);
   }
   function onChildError(error) {
+    rejectPendingCaptureUpdates(new Error(`ScreenCaptureKit capture process failed: ${error.message}`));
     fail(new Error(`ScreenCaptureKit capture process failed: ${error.message}`));
   }
   function onChildExit(code, signal) {
     if (stopped) {
       return;
     }
+    rejectPendingCaptureUpdates(new Error(`ScreenCaptureKit capture process exited code=${code ?? "null"} signal=${signal ?? "null"}`));
     const detail = truncateRemoteWindowErrorMessage(stderrBuffer || `capture process exited code=${code ?? "null"} signal=${signal ?? "null"}`);
     fail(new Error(`ScreenCaptureKit capture process exited: ${detail}`));
   }
@@ -15977,6 +16218,17 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
         runTmux: deps.runTmux,
         daemonReceivedAtMs
       });
+      if (payload.event.kind === "window-resize") {
+        const resized = await applyRemoteWindowTargetResize(entry, payload.event, now());
+        return {
+          requestId: payload.requestId,
+          streamId: payload.streamId,
+          targetId: payload.targetId,
+          accepted: true,
+          target: resized.target,
+          capture: resized.capture
+        };
+      }
       return {
         requestId: payload.requestId,
         streamId: payload.streamId,

@@ -170,6 +170,7 @@ export function resetSessionTransportPullBookkeeping(options: {
   activeSessionId: string | null;
   sessionPullStateRef: MutableRefObject<Map<string, SessionPullStates>>;
   pendingInputTailRefreshRef?: MutableRefObject<Map<string, { requestedAt: number; localRevision: number }>>;
+  sameRevisionChunkFrameRef?: MutableRefObject<Map<string, unknown>>;
   lastSyncRequestAtRef: MutableRefObject<Map<string, unknown>>;
   runtimeDebug: RuntimeDebugFn;
 }) {
@@ -179,8 +180,9 @@ export function resetSessionTransportPullBookkeeping(options: {
   const hadPendingInputTailRefresh = Boolean(options.pendingInputTailRefreshRef?.current.has(options.sessionId));
   const hadTailRefreshDebounce = options.lastSyncRequestAtRef.current.has(tailRefreshDebounceKey);
   const hadReadingRepairDebounce = options.lastSyncRequestAtRef.current.has(readingRepairDebounceKey);
+  const hadSameRevisionChunkFrame = Boolean(options.sameRevisionChunkFrameRef?.current.has(options.sessionId));
   const hasLivePullBookkeeping = Boolean(pullStates && hasActiveSessionPullState(pullStates));
-  if (!hasLivePullBookkeeping && !hadPendingInputTailRefresh && !hadTailRefreshDebounce && !hadReadingRepairDebounce) {
+  if (!hasLivePullBookkeeping && !hadPendingInputTailRefresh && !hadTailRefreshDebounce && !hadReadingRepairDebounce && !hadSameRevisionChunkFrame) {
     return;
   }
   options.runtimeDebug('session.buffer.pull.reset', {
@@ -191,6 +193,7 @@ export function resetSessionTransportPullBookkeeping(options: {
     hadPendingInputTailRefresh,
     hadTailRefreshDebounce,
     hadReadingRepairDebounce,
+    hadSameRevisionChunkFrame,
   });
   if (hasLivePullBookkeeping) {
     clearSessionPullState({
@@ -199,6 +202,7 @@ export function resetSessionTransportPullBookkeeping(options: {
     });
   }
   options.pendingInputTailRefreshRef?.current.delete(options.sessionId);
+  options.sameRevisionChunkFrameRef?.current.delete(options.sessionId);
   options.lastSyncRequestAtRef.current.delete(tailRefreshDebounceKey);
   options.lastSyncRequestAtRef.current.delete(readingRepairDebounceKey);
 }

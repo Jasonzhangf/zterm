@@ -67,6 +67,16 @@ interface RevisionResetExpectation {
   seenAt: number;
 }
 
+interface SameRevisionChunkFrameState {
+  frameKey: string;
+  revision: number;
+  frameStartIndex: number;
+  frameEndIndex: number;
+  frameChunkCount: number;
+  generatedAt: number;
+  appliedChunkIndexes: Set<number>;
+}
+
 function getWireLineIndex(line: TerminalBufferPayload['lines'][number]) {
   if (!line) {
     return null;
@@ -161,6 +171,91 @@ function detectSameRevisionNonGapOverwrite(options: {
     incomingStartIndex: startIndex,
     incomingEndIndex: endIndex,
   };
+}
+
+function resolveBufferSyncChunkFrame(payload: TerminalBufferPayload) {
+  const frameChunkCount = Math.max(0, Math.floor(payload.frameChunkCount ?? 0));
+  if (frameChunkCount <= 1) {
+    return null;
+  }
+  const frameChunkIndex = Math.floor(payload.frameChunkIndex ?? -1);
+  const frameStartIndex = Math.max(0, Math.floor(payload.frameStartIndex ?? -1));
+  const frameEndIndex = Math.max(frameStartIndex, Math.floor(payload.frameEndIndex ?? -1));
+  const startIndex = Math.max(0, Math.floor(payload.startIndex || 0));
+  const endIndex = Math.max(startIndex, Math.floor(payload.endIndex || startIndex));
+  const revision = Math.max(0, Math.floor(payload.revision || 0));
+  const generatedAt = Math.max(0, Math.floor(payload.generatedAt ?? 0));
+  if (
+    revision <= 0
+    || generatedAt <= 0
+    || frameChunkIndex < 0
+    || frameChunkIndex >= frameChunkCount
+    || frameEndIndex <= frameStartIndex
+    || startIndex < frameStartIndex
+    || endIndex > frameEndIndex
+    || endIndex <= startIndex
+  ) {
+    return null;
+  }
+  return {
+    frameKey: `${revision}:${frameStartIndex}:${frameEndIndex}:${generatedAt}:${frameChunkCount}`,
+    revision,
+    frameStartIndex,
+    frameEndIndex,
+    frameChunkIndex,
+    frameChunkCount,
+    generatedAt,
+  };
+}
+
+function sameRevisionChunkFrameAuthorizesOverwrite(options: {
+  sessionId: string;
+  payload: TerminalBufferPayload;
+  refs: {
+    sameRevisionChunkFrameRef?: MutableRefObject<Map<string, SameRevisionChunkFrameState>>;
+  };
+}) {
+  const frame = resolveBufferSyncChunkFrame(options.payload);
+  const state = options.refs.sameRevisionChunkFrameRef?.current.get(options.sessionId) || null;
+  if (!frame || !state || state.frameKey !== frame.frameKey) {
+    return null;
+  }
+  if (state.appliedChunkIndexes.size <= 0 || state.appliedChunkIndexes.has(frame.frameChunkIndex)) {
+    return null;
+  }
+  return frame;
+}
+
+function recordAppliedBufferSyncChunkFrame(options: {
+  sessionId: string;
+  payload: TerminalBufferPayload;
+  refs: {
+    sameRevisionChunkFrameRef?: MutableRefObject<Map<string, SameRevisionChunkFrameState>>;
+  };
+}) {
+  const frame = resolveBufferSyncChunkFrame(options.payload);
+  const states = options.refs.sameRevisionChunkFrameRef?.current;
+  if (!frame || !states) {
+    return;
+  }
+  const previous = states.get(options.sessionId) || null;
+  const next: SameRevisionChunkFrameState = previous?.frameKey === frame.frameKey
+    ? previous
+    : {
+        frameKey: frame.frameKey,
+        revision: frame.revision,
+        frameStartIndex: frame.frameStartIndex,
+        frameEndIndex: frame.frameEndIndex,
+        frameChunkCount: frame.frameChunkCount,
+        generatedAt: frame.generatedAt,
+        appliedChunkIndexes: new Set<number>(),
+      };
+  next.appliedChunkIndexes.add(frame.frameChunkIndex);
+  if (next.appliedChunkIndexes.size >= frame.frameChunkCount) {
+    states.delete(options.sessionId);
+    return;
+  }
+  states.set(options.sessionId, next);
 }
 
 function resolvePendingSameRevisionRefreshKey(options: {
@@ -819,6 +914,7 @@ export function applyIncomingBufferSyncRuntime(options: {
     pendingConnectTailRefreshRef: MutableRefObject<Set<string>>;
     pendingResumeTailRefreshRef: MutableRefObject<Set<string>>;
     lastSyncRequestAtRef?: MutableRefObject<Map<string, SessionSyncRequestDebounceState>>;
+    sameRevisionChunkFrameRef?: MutableRefObject<Map<string, SameRevisionChunkFrameState>>;
     sessionVisibleRangeRef: MutableRefObject<Map<string, TerminalVisibleRange>>;
   };
   readSessionBufferSnapshot: (sessionId: string) => SessionBufferState;
@@ -854,6 +950,7 @@ export function applyIncomingBufferSyncRuntime(options: {
     options.refs.pendingInputTailRefreshRef.current.delete(options.sessionId);
     options.refs.pendingConnectTailRefreshRef.current.delete(options.sessionId);
     options.refs.pendingResumeTailRefreshRef.current.delete(options.sessionId);
+    options.refs.sameRevisionChunkFrameRef?.current.delete(options.sessionId);
     options.runtimeDebug('session.buffer.sync.inactive-drop', {
       sessionId: options.sessionId,
       activeSessionId: options.refs.stateRef.current.activeSessionId,
@@ -992,7 +1089,14 @@ export function applyIncomingBufferSyncRuntime(options: {
         },
       })
     : null;
-  if (sameRevisionOverwrite && !pendingSameRevisionRefreshKey) {
+  const authorizedSameRevisionChunkFrame = sameRevisionOverwrite && !pendingSameRevisionRefreshKey
+    ? sameRevisionChunkFrameAuthorizesOverwrite({
+        sessionId: options.sessionId,
+        payload: options.payload,
+        refs: options.refs,
+      })
+    : null;
+  if (sameRevisionOverwrite && !pendingSameRevisionRefreshKey && !authorizedSameRevisionChunkFrame) {
     options.runtimeDebug('session.buffer.sync.stale-same-revision-drop', {
       sessionId: options.sessionId,
       activeSessionId: options.refs.stateRef.current.activeSessionId,
@@ -1022,6 +1126,22 @@ export function applyIncomingBufferSyncRuntime(options: {
       conflictCount: sameRevisionOverwrite.conflictCount,
       firstConflictIndex: sameRevisionOverwrite.firstConflictIndex,
       incoming: options.summarizeBufferPayload(options.payload),
+    });
+  }
+  if (sameRevisionOverwrite && authorizedSameRevisionChunkFrame) {
+    options.runtimeDebug('session.buffer.sync.same-revision-frame-chunk-apply', {
+      sessionId: options.sessionId,
+      activeSessionId: options.refs.stateRef.current.activeSessionId,
+      localRevision,
+      incomingRevision,
+      frameStartIndex: authorizedSameRevisionChunkFrame.frameStartIndex,
+      frameEndIndex: authorizedSameRevisionChunkFrame.frameEndIndex,
+      frameChunkIndex: authorizedSameRevisionChunkFrame.frameChunkIndex,
+      frameChunkCount: authorizedSameRevisionChunkFrame.frameChunkCount,
+      incomingStartIndex: sameRevisionOverwrite.incomingStartIndex,
+      incomingEndIndex: sameRevisionOverwrite.incomingEndIndex,
+      conflictCount: sameRevisionOverwrite.conflictCount,
+      firstConflictIndex: sameRevisionOverwrite.firstConflictIndex,
     });
   }
   if (
@@ -1134,6 +1254,13 @@ export function applyIncomingBufferSyncRuntime(options: {
   }
 
   const changed = options.commitSessionBufferUpdate(options.sessionId, nextBuffer);
+  if (changed) {
+    recordAppliedBufferSyncChunkFrame({
+      sessionId: options.sessionId,
+      payload: options.payload,
+      refs: options.refs,
+    });
+  }
   if (!changed) {
     return;
   }

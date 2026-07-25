@@ -161,17 +161,30 @@ function splitBufferSyncPayloadMessages(payload: TerminalBufferPayload, maxBytes
   let chunkLines: TerminalBufferPayload['lines'] = [];
   let chunkStartIndex: number | null = null;
   let chunkEndIndex: number | null = null;
+  const frameStartIndex = Math.max(0, Math.floor(payload.startIndex || 0));
+  const frameEndIndex = Math.max(frameStartIndex, Math.floor(payload.endIndex || frameStartIndex));
+  const buildChunkPayload = (
+    startIndex: number,
+    endIndex: number,
+    nextLines: TerminalBufferPayload['lines'],
+    chunkIndex: number,
+    chunkCount: number,
+  ): TerminalBufferPayload => ({
+    ...payload,
+    startIndex,
+    endIndex,
+    frameStartIndex,
+    frameEndIndex,
+    frameChunkIndex: chunkIndex,
+    frameChunkCount: chunkCount,
+    lines: nextLines,
+  });
 
   const flushChunk = () => {
     if (chunkLines.length === 0 || chunkStartIndex === null || chunkEndIndex === null) {
       return;
     }
-    const chunkPayload: TerminalBufferPayload = {
-      ...payload,
-      startIndex: chunkStartIndex,
-      endIndex: chunkEndIndex,
-      lines: chunkLines,
-    };
+    const chunkPayload = buildChunkPayload(chunkStartIndex, chunkEndIndex, chunkLines, messages.length, 9999);
     messages.push({ payload: chunkPayload, text: buildBufferSyncMessageText(chunkPayload) });
     chunkLines = [];
     chunkStartIndex = null;
@@ -186,12 +199,7 @@ function splitBufferSyncPayloadMessages(payload: TerminalBufferPayload, maxBytes
     const candidateStartIndex: number = chunkStartIndex === null ? lineIndex : chunkStartIndex;
     const candidateEndIndex: number = Math.max(chunkEndIndex === null ? lineIndex + 1 : chunkEndIndex, lineIndex + 1);
     const candidateLines: TerminalBufferPayload['lines'] = [...chunkLines, line];
-    const candidatePayload: TerminalBufferPayload = {
-      ...payload,
-      startIndex: candidateStartIndex,
-      endIndex: candidateEndIndex,
-      lines: candidateLines,
-    };
+    const candidatePayload = buildChunkPayload(candidateStartIndex, candidateEndIndex, candidateLines, messages.length, 9999);
     const candidateText = buildBufferSyncMessageText(candidatePayload);
     if (chunkLines.length > 0 && Buffer.byteLength(candidateText, 'utf8') > maxBytes) {
       flushChunk();
@@ -206,7 +214,20 @@ function splitBufferSyncPayloadMessages(payload: TerminalBufferPayload, maxBytes
   }
   flushChunk();
 
-  return messages.length > 0 ? messages : [{ payload, text: fullText }];
+  if (messages.length <= 1) {
+    return messages.length > 0 ? messages : [{ payload, text: fullText }];
+  }
+
+  return messages.map((message, index) => {
+    const chunkPayload = buildChunkPayload(
+      message.payload.startIndex,
+      message.payload.endIndex,
+      message.payload.lines,
+      index,
+      messages.length,
+    );
+    return { payload: chunkPayload, text: buildBufferSyncMessageText(chunkPayload) };
+  });
 }
 
 export function resolvePerSubscriberTransportSnapshot(

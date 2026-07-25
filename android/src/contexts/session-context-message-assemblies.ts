@@ -22,6 +22,10 @@ export function summarizeBufferPayload(payload: TerminalBufferPayload) {
     endIndex: payload.endIndex,
     generatedAt: payload.generatedAt ?? null,
     requestSentAt: payload.requestSentAt ?? null,
+    frameStartIndex: payload.frameStartIndex ?? null,
+    frameEndIndex: payload.frameEndIndex ?? null,
+    frameChunkIndex: payload.frameChunkIndex ?? null,
+    frameChunkCount: payload.frameChunkCount ?? null,
     cols: payload.cols,
     rows: payload.rows,
     lineCount: payload.lines.length,
@@ -56,6 +60,7 @@ export interface SessionMessageAssembliesOptions {
   pendingInputTailRefreshRef: MutableRefObject<any>;
   pendingConnectTailRefreshRef: MutableRefObject<any>;
   pendingResumeTailRefreshRef: MutableRefObject<any>;
+  sameRevisionChunkFrameRef?: MutableRefObject<any>;
   pendingSessionTransportOpenIntentsRef: MutableRefObject<any>;
   manualCloseRef: MutableRefObject<any>;
   fileTransferMessageRuntimeRef: MutableRefObject<any>;
@@ -207,6 +212,7 @@ export function createSessionMessageAssemblies(
         pendingConnectTailRefreshRef: options.pendingConnectTailRefreshRef,
         pendingResumeTailRefreshRef: options.pendingResumeTailRefreshRef,
         lastSyncRequestAtRef: options.lastSyncRequestAtRef,
+        sameRevisionChunkFrameRef: options.sameRevisionChunkFrameRef,
         sessionVisibleRangeRef: options.sessionVisibleRangeRef,
       },
       readSessionBufferSnapshot: options.readSessionBufferSnapshot,

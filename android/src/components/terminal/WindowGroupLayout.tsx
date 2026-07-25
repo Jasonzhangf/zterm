@@ -52,6 +52,7 @@ export interface WindowGroupLayoutProps {
   landscape: boolean;
   primaryItemId?: string | null;
   onPrimaryItemChange?: (itemId: string) => void;
+  secondaryPlacement?: 'before' | 'after';
   className?: string;
   testId?: string;
   style?: CSSProperties;
@@ -64,6 +65,7 @@ export function WindowGroupLayout({
   landscape,
   primaryItemId = null,
   onPrimaryItemChange,
+  secondaryPlacement = 'after',
   className,
   testId,
   style,
@@ -107,71 +109,79 @@ export function WindowGroupLayout({
     justifyContent: 'stretch',
   };
 
+  const primaryPane = (
+    <div style={primaryPaneStyle}>
+      {primaryLabel ? (
+        <div style={{ flexShrink: 0 }}>
+          {primaryLabel}
+        </div>
+      ) : null}
+      <div style={{ minWidth: 0, minHeight: 0, flex: 1, display: 'flex' }}>
+        {primaryItem.node}
+      </div>
+    </div>
+  );
+
+  const secondaryPane = secondaryItems.length > 0 ? (
+    <div style={secondaryRailStyle}>
+      {secondaryLabel ? (
+        <div style={{ width: '100%', flexShrink: 0 }}>
+          {secondaryLabel}
+        </div>
+      ) : null}
+      {secondaryItems.map((item) => (
+        <div
+          key={item.id}
+          data-testid={item.testId}
+          aria-label={item.roleLabel}
+          role="button"
+          tabIndex={0}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            onPrimaryItemChange?.(item.id);
+            item.onPress?.();
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== 'Enter' && event.key !== ' ') {
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            onPrimaryItemChange?.(item.id);
+            item.onPress?.();
+          }}
+          style={{
+            minWidth: 0,
+            minHeight: 0,
+            flex: plan.secondaryAxis === 'row' ? '1 1 0' : '0 0 auto',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            padding: 0,
+            border: 0,
+            background: 'transparent',
+            outline: 'none',
+          }}
+        >
+          {item.node}
+        </div>
+      ))}
+    </div>
+  ) : null;
+
   return (
     <div
       className={className}
       data-testid={testId}
       data-window-group-primary-axis={plan.primaryAxis}
       data-window-group-secondary-axis={plan.secondaryAxis}
+      data-window-group-secondary-placement={secondaryPlacement}
       style={rootStyle}
     >
-      <div style={primaryPaneStyle}>
-        {primaryLabel ? (
-          <div style={{ flexShrink: 0 }}>
-            {primaryLabel}
-          </div>
-        ) : null}
-        <div style={{ minWidth: 0, minHeight: 0, flex: 1, display: 'flex' }}>
-          {primaryItem.node}
-        </div>
-      </div>
-      {secondaryItems.length > 0 ? (
-        <div style={secondaryRailStyle}>
-          {secondaryLabel ? (
-            <div style={{ width: '100%', flexShrink: 0 }}>
-              {secondaryLabel}
-            </div>
-          ) : null}
-          {secondaryItems.map((item) => (
-            <div
-              key={item.id}
-              data-testid={item.testId}
-              aria-label={item.roleLabel}
-              role="button"
-              tabIndex={0}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                onPrimaryItemChange?.(item.id);
-                item.onPress?.();
-              }}
-              onKeyDown={(event) => {
-                if (event.key !== 'Enter' && event.key !== ' ') {
-                  return;
-                }
-                event.preventDefault();
-                event.stopPropagation();
-                onPrimaryItemChange?.(item.id);
-                item.onPress?.();
-              }}
-              style={{
-                minWidth: 0,
-                minHeight: 0,
-                flex: plan.secondaryAxis === 'row' ? '1 1 0' : '0 0 auto',
-                display: 'flex',
-                flexDirection: 'column',
-                overflow: 'hidden',
-                padding: 0,
-                border: 0,
-                background: 'transparent',
-                outline: 'none',
-              }}
-            >
-              {item.node}
-            </div>
-          ))}
-        </div>
-      ) : null}
+      {secondaryPlacement === 'before' ? secondaryPane : null}
+      {primaryPane}
+      {secondaryPlacement === 'after' ? secondaryPane : null}
     </div>
   );
 }

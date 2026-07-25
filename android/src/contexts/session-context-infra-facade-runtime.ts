@@ -186,6 +186,7 @@ export function createSessionInfraFacadeRuntime(options: {
   pendingInputTailRefreshRef: { current: Map<string, { requestedAt: number; localRevision: number }> };
   pendingConnectTailRefreshRef: { current: Set<string> };
   pendingResumeTailRefreshRef: { current: Set<string> };
+  sameRevisionChunkFrameRef?: { current: Map<string, unknown> };
   sessionPullStateRef: { current: Map<string, unknown> };
   lastServerActivityAtRef: { current: Map<string, number> };
   lastTerminalActivityAtRef: { current: Map<string, number> };
@@ -474,6 +475,7 @@ export function createSessionInfraFacadeRuntime(options: {
       activeSessionId: options.stateRef.current.activeSessionId,
       sessionPullStateRef: options.sessionPullStateRef,
       pendingInputTailRefreshRef: options.pendingInputTailRefreshRef,
+      sameRevisionChunkFrameRef: options.sameRevisionChunkFrameRef,
       lastSyncRequestAtRef: options.lastSyncRequestAtRef,
       runtimeDebug: options.runtimeDebug,
     });
@@ -576,6 +578,7 @@ export function createSessionInfraFacadeRuntime(options: {
       pendingInputTailRefreshRef: options.pendingInputTailRefreshRef,
       pendingConnectTailRefreshRef: options.pendingConnectTailRefreshRef,
       pendingResumeTailRefreshRef: options.pendingResumeTailRefreshRef,
+      sameRevisionChunkFrameRef: options.sameRevisionChunkFrameRef,
     });
   };
 

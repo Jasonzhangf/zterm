@@ -1096,7 +1096,7 @@
     {
       "resource_id": "resource.remote_window_overlay",
       "resource_type": "projection_resource",
-      "identity": "Android remote window picker, floating stream overlay, in-video sibling window switcher, fullscreen aspect-fit zoom/pan/minimap projection, explicit remote target resize fill intent, and Back/minimize/close/touch-action/screenshot intent",
+      "identity": "Android remote window picker, floating stream overlay, in-video primary-plus-children sibling window switcher, locked container QuickBar/IME lift projection, fullscreen aspect-fit zoom/pan without minimap, explicit remote target resize fill intent, and Back/minimize/close/touch-action/screenshot intent",
       "owner_feature": "desktop.remote_window_stream",
       "truth_store": "docs/decisions/2026-07-19-remote-window-stream-truth.md",
       "allowed_operations": [
@@ -1109,7 +1109,6 @@
         "zoom_fullscreen",
         "pan_zoomed_fullscreen",
         "pan_keyboard_open_fullscreen",
-        "show_minimap",
         "select_effective_video_quality",
         "configure_touch_scroll_tuning",
         "shrink_to_floating",

@@ -59,6 +59,7 @@ export function clearTailRefreshRuntime(options: {
   pendingInputTailRefreshRef?: MutableRefObject<Map<string, { requestedAt: number; localRevision: number }>>;
   pendingConnectTailRefreshRef?: MutableRefObject<Set<string>>;
   pendingResumeTailRefreshRef?: MutableRefObject<Set<string>>;
+  sameRevisionChunkFrameRef?: MutableRefObject<Map<string, unknown>>;
 }) {
   options.sessionBufferHeadsRef.current.delete(options.sessionId);
   options.sessionRevisionResetRef.current.delete(options.sessionId);
@@ -66,6 +67,7 @@ export function clearTailRefreshRuntime(options: {
   options.pendingInputTailRefreshRef?.current.delete(options.sessionId);
   options.pendingConnectTailRefreshRef?.current.delete(options.sessionId);
   options.pendingResumeTailRefreshRef?.current.delete(options.sessionId);
+  options.sameRevisionChunkFrameRef?.current.delete(options.sessionId);
 }
 
 export function startSocketHeartbeat(options: {

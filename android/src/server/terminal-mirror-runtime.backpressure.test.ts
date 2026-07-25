@@ -347,6 +347,12 @@ describe('terminal mirror per-subscriber latest-authoritative backpressure', () 
     expect(messages.every((message) => message.payload.revision === 1)).toBe(true);
     expect(messages.every((message) => message.payload.availableStartIndex === 0)).toBe(true);
     expect(messages.every((message) => message.payload.availableEndIndex === lines.length)).toBe(true);
+    expect(messages.every((message) => message.payload.frameStartIndex === 0)).toBe(true);
+    expect(messages.every((message) => message.payload.frameEndIndex === lines.length)).toBe(true);
+    expect(messages.every((message) => message.payload.frameChunkCount === messages.length)).toBe(true);
+    expect(messages.map((message) => message.payload.frameChunkIndex)).toEqual(
+      messages.map((_, index) => index),
+    );
 
     const sentIndexes = messages.flatMap((message) => (
       message.payload.lines.map((line: { i?: number; index?: number }) => line.i ?? line.index)

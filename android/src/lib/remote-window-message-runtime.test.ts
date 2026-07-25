@@ -481,6 +481,9 @@ describe('remote window message runtime', () => {
     const runtime = createRemoteWindowMessageRuntime();
     const listener = vi.fn();
     const unsubscribe = runtime.subscribe(listener);
+    const resizedTarget = makeTarget('target-1');
+    resizedTarget.videoTarget.windowBoundsTopLeftPx = { x: 0, y: 80, width: 1000, height: 1800 };
+    resizedTarget.videoTarget.cropRectTopLeftPx = { x: 0, y: 80, width: 1000, height: 1800 };
 
     expect(runtime.dispatch({
       type: 'remote-window-input-result',
@@ -489,6 +492,14 @@ describe('remote window message runtime', () => {
         streamId: 'stream-1',
         targetId: 'target-1',
         accepted: true,
+        target: resizedTarget,
+        capture: {
+          source: 'ScreenCaptureKit',
+          frameWidth: 1000,
+          frameHeight: 1800,
+          frameRate: 30,
+          targetKind: 'iterm2-pane',
+        },
       },
     })).toBe(true);
     expect(runtime.dispatch({
@@ -508,6 +519,14 @@ describe('remote window message runtime', () => {
         streamId: 'stream-1',
         targetId: 'target-1',
         accepted: true,
+        target: resizedTarget,
+        capture: {
+          source: 'ScreenCaptureKit',
+          frameWidth: 1000,
+          frameHeight: 1800,
+          frameRate: 30,
+          targetKind: 'iterm2-pane',
+        },
       },
     });
     expect(listener).toHaveBeenNthCalledWith(2, {
