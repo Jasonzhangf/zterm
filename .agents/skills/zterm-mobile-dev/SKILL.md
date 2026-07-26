@@ -384,6 +384,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 文件排序只属于 UI projection：按名称/修改时间、正序/倒序可以在列表投影层切换；不得把排序/过滤状态写回本地 storage owner 或 daemon 文件真源。
 - 远端文件列表若协议仍带 `showHidden`，客户端必须请求完整列表；禁止用默认隐藏文件过滤制造“目录成功但文件消失”的假状态。
 - File Sync 的上传语义只负责把本地文件写入远端目标目录并回报 `file-upload-complete`；禁止把上传后的远端路径写入 tmux、quick input、composer 或任何对话输入框。
+- File Sync 上传和本地文件预览不得先用 native `readFile()` 把整文件转成单个 base64 送进 WebView；上传必须从 native storage owner 逐块 `readFileChunk(path, offset, length)` 读取，再发送既有 `file-upload-start/chunk/end`；本地 Markdown 预览也必须 bounded chunk 读取并截断显示。Native 纯读 helper 返回 bytes/bytesRead/eof，Capacitor plugin 才用 `android.util.Base64.NO_WRAP` 编码，避免大文件 OOM/WebView crash，也避免 minSdk 24 依赖 `java.util.Base64`。
 - File Sync 下载保存不得把整文件 base64 合并后一次性跨 JS/native bridge 写盘；必须按 `file-download-chunk` 分块写入 native storage，并在完成后用 `stat` 校验本地字节数等于远端 `totalBytes`，失败必须显式进入 transfer error。
 - Session resume/switch 入口必须先提交 open-tab active truth，再由同一 `switchRuntime: 'explicit-resume'` 推进 transport；禁止 `resumeActiveSessionTransport()` 成功后提前 return，否则首次点击只开连接不切 UI，必须二次点击才可见。
 

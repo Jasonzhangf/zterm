@@ -578,6 +578,61 @@ describe("FileTransferSheet", () => {
     ).toBe(true);
   });
 
+  it("previews local markdown through bounded native chunks instead of whole-file reads", async () => {
+    vi.mocked(StoragePermissionPlugin.readdir).mockResolvedValue({
+      files: [
+        {
+          name: "LOCAL.md",
+          type: "file",
+          size: 700 * 1024,
+          modified: 1,
+          uri: "file:///storage/emulated/0/Download/zterm/LOCAL.md",
+        },
+      ],
+    } as any);
+    storagePermissionPluginMock.readFileChunk
+      .mockResolvedValueOnce({
+        data: "IyBwYXJ0LTEK",
+        bytesRead: 256 * 1024,
+        eof: false,
+      })
+      .mockResolvedValueOnce({
+        data: "IyBwYXJ0LTIK",
+        bytesRead: 256 * 1024,
+        eof: false,
+      });
+
+    render(
+      <FileTransferSheet
+        open
+        remoteCwd="/remote/home"
+        onClose={vi.fn()}
+        sendJson={vi.fn()}
+        onFileTransferMessage={vi.fn(() => () => {})}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("LOCAL.md")).toBeTruthy());
+    fireEvent.click(screen.getByText("LOCAL.md"));
+
+    await waitFor(() => {
+      expect(StoragePermissionPlugin.readFile).not.toHaveBeenCalled();
+      expect(storagePermissionPluginMock.readFileChunk).toHaveBeenNthCalledWith(1, {
+        path: "/storage/emulated/0/Download/zterm/LOCAL.md",
+        offset: 0,
+        length: 256 * 1024,
+      });
+      expect(storagePermissionPluginMock.readFileChunk).toHaveBeenNthCalledWith(2, {
+        path: "/storage/emulated/0/Download/zterm/LOCAL.md",
+        offset: 256 * 1024,
+        length: 256 * 1024,
+      });
+    });
+    expect(screen.getByTestId("file-transfer-md-preview").textContent).toContain(
+      "预览已截断",
+    );
+  });
+
   it("shows an explicit local directory read error instead of pretending the directory is empty", async () => {
     vi.mocked(StoragePermissionPlugin.readdir).mockRejectedValue(
       new Error("EACCES"),

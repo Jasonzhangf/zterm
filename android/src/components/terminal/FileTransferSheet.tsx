@@ -13,6 +13,7 @@ import type {
 } from "../../lib/types";
 
 const FILE_CHUNK_SIZE = 256 * 1024; // 256KB per chunk (must match daemon)
+const LOCAL_MARKDOWN_PREVIEW_MAX_BYTES = 512 * 1024;
 const EXTERNAL_STORAGE_ROOT = "/storage/emulated/0";
 const DEFAULT_LOCAL_DOWNLOAD_DIR = `${EXTERNAL_STORAGE_ROOT}/Download/zterm`;
 
@@ -90,13 +91,13 @@ function renderMarkdownPreview(text: string) {
   });
 }
 
-function decodeBase64Utf8(data: string) {
+function decodeBase64Bytes(data: string) {
   const binary = atob(data);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) {
     bytes[index] = binary.charCodeAt(index);
   }
-  return new TextDecoder().decode(bytes);
+  return bytes;
 }
 
 function normalizeLocalDisplayPath(path: string) {
@@ -621,11 +622,38 @@ export function FileTransferSheet({
         if (!permissionGranted) {
           return true;
         }
-        const readResult = await StoragePermissionPlugin.readFile({
-          path: joinLocalDisplayPath(localPath, entry.name),
-        });
-        const data = typeof readResult.data === "string" ? readResult.data : "";
-        const text = decodeBase64Utf8(data);
+        const sourcePath = joinLocalDisplayPath(localPath, entry.name);
+        const maxPreviewBytes = Math.min(
+          entry.size,
+          LOCAL_MARKDOWN_PREVIEW_MAX_BYTES,
+        );
+        const decoder = new TextDecoder();
+        let offset = 0;
+        let text = "";
+        while (offset < maxPreviewBytes) {
+          const length = Math.min(FILE_CHUNK_SIZE, maxPreviewBytes - offset);
+          const readResult = await StoragePermissionPlugin.readFileChunk({
+            path: sourcePath,
+            offset,
+            length,
+          });
+          const bytesRead =
+            typeof readResult.bytesRead === "number"
+              ? readResult.bytesRead
+              : 0;
+          const data = typeof readResult.data === "string" ? readResult.data : "";
+          text += decoder.decode(decodeBase64Bytes(data), {
+            stream: !readResult.eof && offset + bytesRead < maxPreviewBytes,
+          });
+          if (bytesRead <= 0 || readResult.eof) {
+            break;
+          }
+          offset += bytesRead;
+        }
+        text += decoder.decode();
+        if (entry.size > LOCAL_MARKDOWN_PREVIEW_MAX_BYTES) {
+          text += "\n\n（预览已截断，上传仍会传输完整文件。）";
+        }
         fileTransferRuntimeRef.current.setPreviewText(entry.name, text);
         forceRuntimeTick((value) => value + 1);
       } catch (error) {
