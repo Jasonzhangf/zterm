@@ -57,6 +57,20 @@ describe('architecture boundary truth gate', () => {
     expect(source).not.toMatch(/closeSession\(sessionId\)[\s\S]*createSession\([\s\S]*switchSession\(sessionId\)/);
   });
 
+  it('keeps App from owning relay device stream sockets or reconnect timers', () => {
+    const source = stripComments(read('src/App.tsx'));
+
+    expect(source).toContain("from './hooks/useRelayDeviceStream'");
+    expect(source).toContain('useRelayDeviceStream(');
+    expect(source).not.toContain('new WebSocket');
+    expect(source).not.toContain('relayDeviceSocketRef');
+    expect(source).not.toContain('relayDeviceReconnectTimerRef');
+    expect(source).not.toContain('computeRelayDeviceStreamReconnectDelay');
+    expect(source).not.toContain('mergeRelayPresenceWithDirectoryTruth');
+    expect(source).not.toContain('connectTraversalRelayDevicesStream');
+    expect(source).not.toMatch(/\bsetTimeout\s*\(/);
+  });
+
   it('keeps page and terminal UI components from owning session lifecycle primitives', () => {
     const surfaces = [
       'src/App.tsx',

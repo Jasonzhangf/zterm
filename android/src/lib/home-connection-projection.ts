@@ -5,6 +5,12 @@ import { isOnlineTraversalRelayDaemonDevice } from './traversal-relay-devices';
 import type { Host, TraversalRelayDeviceSnapshot } from './types';
 import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
 
+export {
+  hasRelayDirectoryTruth,
+  listRelayDirectoryTruthDevices,
+  mergeRelayPresenceWithDirectoryTruth,
+} from './relay-device-stream-runtime';
+
 function getHomeConnectionEndpointKey(input: Pick<Host, 'bridgeHost' | 'bridgePort'>) {
   return `${input.bridgeHost.trim()}:${input.bridgePort || DEFAULT_BRIDGE_PORT}`;
 }

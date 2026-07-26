@@ -689,7 +689,10 @@
     "docs/function-map.md"
    ],
    "required_gates": [
+    "src/App.relay-stream-lifecycle.test.tsx",
+    "src/lib/architecture-boundary-truth.test.ts",
     "src/lib/module-registry-truth.test.ts",
+    "src/lib/relay-device-stream-runtime.test.ts",
     "src/pages/ConnectionsPage.test.tsx"
    ],
    "status": "active",
@@ -700,11 +703,13 @@
     "src/components/tmux/",
     "src/hooks/useBridgeSettingsStorage.ts",
     "src/hooks/useHostStorage.ts",
+    "src/hooks/useRelayDeviceStream.ts",
     "src/hooks/useTraversalRelayAccount.ts",
     "src/hooks/useTraversalRelayDaemonDevices.ts",
     "src/lib/bridge-server-presets-view.ts",
     "src/lib/home-connection-projection.ts",
     "src/lib/relay-account-directory.ts",
+    "src/lib/relay-device-stream-runtime.ts",
     "src/lib/traversal-relay-client.ts",
     "src/lib/traversal-relay-devices.ts",
     "src/lib/traversal-relay-diagnostics.ts",
