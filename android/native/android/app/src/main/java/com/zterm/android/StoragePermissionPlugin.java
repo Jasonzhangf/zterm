@@ -70,6 +70,32 @@ public class StoragePermissionPlugin extends Plugin {
         return false;
     }
 
+    private long readLongOption(PluginCall call, String name, long defaultValue) throws IOException {
+        Object value = call.getData().opt(name);
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Number) {
+            return ((Number) value).longValue();
+        }
+        if (value instanceof String) {
+            try {
+                return Long.parseLong((String) value);
+            } catch (NumberFormatException error) {
+                throw new IOException(name + " must be a number");
+            }
+        }
+        throw new IOException(name + " must be a number");
+    }
+
+    private int readIntOption(PluginCall call, String name, int defaultValue) throws IOException {
+        long value = readLongOption(call, name, defaultValue);
+        if (value < Integer.MIN_VALUE || value > Integer.MAX_VALUE) {
+            throw new IOException(name + " is outside integer range");
+        }
+        return (int) value;
+    }
+
     private JSObject buildFileEntry(File file) {
         JSObject data = new JSObject();
         data.put("name", file.getName());
@@ -187,6 +213,28 @@ public class StoragePermissionPlugin extends Plugin {
             }
             JSObject result = new JSObject();
             result.put("data", Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP));
+            call.resolve(result);
+        } catch (Exception error) {
+            call.reject(error.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void readFileChunk(PluginCall call) {
+        if (!ensureStoragePermission(call)) {
+            return;
+        }
+        try {
+            File target = resolveExternalStoragePath(call.getString("path", ""));
+            StorageFileReadLogic.Chunk chunk = StorageFileReadLogic.readChunk(
+                target,
+                readLongOption(call, "offset", 0L),
+                readIntOption(call, "length", StorageFileReadLogic.MAX_CHUNK_BYTES)
+            );
+            JSObject result = new JSObject();
+            result.put("data", Base64.encodeToString(chunk.bytes, Base64.NO_WRAP));
+            result.put("bytesRead", chunk.bytesRead);
+            result.put("eof", chunk.eof);
             call.resolve(result);
         } catch (Exception error) {
             call.reject(error.getMessage());

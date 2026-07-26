@@ -29,9 +29,18 @@ vi.mock("../../plugins/StoragePermissionPlugin", () => ({
     mkdir: vi.fn().mockResolvedValue(undefined),
     writeFile: vi.fn().mockResolvedValue(undefined),
     writeFileChunk: vi.fn().mockResolvedValue({ bytesWritten: 0 }),
+    readFileChunk: vi.fn().mockResolvedValue({
+      data: "",
+      bytesRead: 0,
+      eof: true,
+    }),
     readFile: vi.fn().mockResolvedValue({ data: "IyBMb2NhbA==" }),
   },
 }));
+
+const storagePermissionPluginMock = StoragePermissionPlugin as typeof StoragePermissionPlugin & {
+  readFileChunk: ReturnType<typeof vi.fn>;
+};
 
 afterEach(() => {
   cleanup();
@@ -56,6 +65,12 @@ afterEach(() => {
   vi.mocked(StoragePermissionPlugin.readFile).mockResolvedValue({
     data: "IyBMb2NhbA==",
   } as any);
+  storagePermissionPluginMock.readFileChunk.mockClear();
+  storagePermissionPluginMock.readFileChunk.mockResolvedValue({
+    data: "",
+    bytesRead: 0,
+    eof: true,
+  });
   vi.mocked(StoragePermissionPlugin.mkdir).mockClear();
   vi.mocked(StoragePermissionPlugin.mkdir).mockResolvedValue(undefined as any);
   vi.mocked(StoragePermissionPlugin.writeFile).mockClear();
@@ -470,6 +485,97 @@ describe("FileTransferSheet", () => {
         path: "/storage/emulated/0/Download/zterm/photo.png",
       });
     });
+  });
+
+  it("uploads local files by reading native file chunks without materializing the whole file in WebView", async () => {
+    const sendJson = vi.fn();
+    vi.mocked(StoragePermissionPlugin.readdir).mockResolvedValue({
+      files: [
+        {
+          name: "large.bin",
+          type: "file",
+          size: 256 * 1024 + 10,
+          modified: 1,
+          uri: "file:///storage/emulated/0/Download/zterm/large.bin",
+        },
+      ],
+    } as any);
+    storagePermissionPluginMock.readFileChunk
+      .mockResolvedValueOnce({
+        data: "Y2h1bmsw",
+        bytesRead: 256 * 1024,
+        eof: false,
+      })
+      .mockResolvedValueOnce({
+        data: "MTA=",
+        bytesRead: 10,
+        eof: true,
+      });
+
+    render(
+      <FileTransferSheet
+        open
+        remoteCwd="/remote/home"
+        onClose={vi.fn()}
+        sendJson={sendJson}
+        onFileTransferMessage={vi.fn(() => () => {})}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("large.bin")).toBeTruthy());
+
+    fireEvent.click(screen.getByText("⬆ 上传到远程"));
+    fireEvent.click(screen.getByRole("button", { name: "选择本地 large.bin" }));
+    fireEvent.click(screen.getByText("上传 1 项"));
+
+    await waitFor(() => {
+      expect(StoragePermissionPlugin.readFile).not.toHaveBeenCalled();
+      expect(storagePermissionPluginMock.readFileChunk).toHaveBeenNthCalledWith(1, {
+        path: "/storage/emulated/0/Download/zterm/large.bin",
+        offset: 0,
+        length: 256 * 1024,
+      });
+      expect(storagePermissionPluginMock.readFileChunk).toHaveBeenNthCalledWith(2, {
+        path: "/storage/emulated/0/Download/zterm/large.bin",
+        offset: 256 * 1024,
+        length: 10,
+      });
+    });
+
+    const uploadStart = sendJson.mock.calls.find(
+      (call) => call[0]?.type === "file-upload-start",
+    )?.[0];
+    expect(uploadStart).toMatchObject({
+      type: "file-upload-start",
+      payload: expect.objectContaining({
+        targetDir: "/remote/home",
+        fileName: "large.bin",
+        fileSize: 256 * 1024 + 10,
+        chunkCount: 2,
+      }),
+    });
+    const uploadChunks = sendJson.mock.calls
+      .map((call) => call[0])
+      .filter((message) => message?.type === "file-upload-chunk");
+    expect(uploadChunks).toEqual([
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          requestId: uploadStart.payload.requestId,
+          chunkIndex: 0,
+          dataBase64: "Y2h1bmsw",
+        }),
+      }),
+      expect.objectContaining({
+        payload: expect.objectContaining({
+          requestId: uploadStart.payload.requestId,
+          chunkIndex: 1,
+          dataBase64: "MTA=",
+        }),
+      }),
+    ]);
+    expect(
+      sendJson.mock.calls.some((call) => call[0]?.type === "file-upload-end"),
+    ).toBe(true);
   });
 
   it("shows an explicit local directory read error instead of pretending the directory is empty", async () => {

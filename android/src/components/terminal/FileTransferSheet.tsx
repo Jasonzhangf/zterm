@@ -13,7 +13,6 @@ import type {
 } from "../../lib/types";
 
 const FILE_CHUNK_SIZE = 256 * 1024; // 256KB per chunk (must match daemon)
-const BASE64_CHUNK_SIZE = Math.floor(FILE_CHUNK_SIZE / 3) * 4;
 const EXTERNAL_STORAGE_ROOT = "/storage/emulated/0";
 const DEFAULT_LOCAL_DOWNLOAD_DIR = `${EXTERNAL_STORAGE_ROOT}/Download/zterm`;
 
@@ -668,47 +667,62 @@ export function FileTransferSheet({
       for (const name of selectedLocal) {
         const entry = localEntries.find((e) => e.name === name);
         if (!entry || entry.type !== "file") continue;
+        let uploadRequest: ReturnType<
+          ReturnType<typeof createFileTransferSessionRuntime>["startUpload"]
+        > | null = null;
         try {
-          const readResult = await StoragePermissionPlugin.readFile({
-            path: joinLocalDisplayPath(localPath, name),
-          });
-          const base64 =
-            typeof readResult.data === "string" ? readResult.data : "";
-          const chunkCount = Math.max(
-            1,
-            Math.ceil(base64.length / BASE64_CHUNK_SIZE),
-          );
           const targetDir = remotePath.trim();
           if (!targetDir) {
             throw new Error("remote path unavailable");
           }
-          const request = fileTransferRuntimeRef.current.startUpload(
+          const sourcePath = joinLocalDisplayPath(localPath, name);
+          const chunkCount = Math.max(1, Math.ceil(entry.size / FILE_CHUNK_SIZE));
+          uploadRequest = fileTransferRuntimeRef.current.startUpload(
             { name, size: entry.size },
             targetDir,
             chunkCount,
           );
           forceRuntimeTick((value) => value + 1);
-          sendJson?.(request.startMessage);
+          sendJson?.(uploadRequest.startMessage);
 
-          // Split base64 into chunks and send
           for (let i = 0; i < chunkCount; i++) {
-            const start = i * BASE64_CHUNK_SIZE;
-            const end = Math.min(start + BASE64_CHUNK_SIZE, base64.length);
-            const chunk = base64.slice(start, end);
-            sendJson?.(request.buildChunkMessage(i, chunk));
+            const offset = i * FILE_CHUNK_SIZE;
+            const length =
+              entry.size === 0
+                ? 0
+                : Math.min(FILE_CHUNK_SIZE, Math.max(0, entry.size - offset));
+            const readResult = await StoragePermissionPlugin.readFileChunk({
+              path: sourcePath,
+              offset,
+              length,
+            });
+            if (length > 0 && readResult.bytesRead <= 0) {
+              throw new Error(`local upload chunk ${i} returned no bytes`);
+            }
+            const dataBase64 =
+              typeof readResult.data === "string" ? readResult.data : "";
+            sendJson?.(uploadRequest.buildChunkMessage(i, dataBase64));
           }
-          sendJson?.(request.endMessage);
+          sendJson?.(uploadRequest.endMessage);
         } catch (err) {
-          const requestId = `ful-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
-          fileTransferRuntimeRef.current.appendTransferError({
-            id: requestId,
-            fileName: name,
-            direction: "upload",
-            totalBytes: entry.size,
-            transferredBytes: 0,
-            status: "error",
-            error: String(err),
-          });
+          if (uploadRequest) {
+            sendJson?.(uploadRequest.endMessage);
+            fileTransferRuntimeRef.current.markTransferError(
+              uploadRequest.requestId,
+              err instanceof Error ? err.message : String(err),
+            );
+          } else {
+            const requestId = `ful-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+            fileTransferRuntimeRef.current.appendTransferError({
+              id: requestId,
+              fileName: name,
+              direction: "upload",
+              totalBytes: entry.size,
+              transferredBytes: 0,
+              status: "error",
+              error: String(err),
+            });
+          }
           forceRuntimeTick((value) => value + 1);
         }
       }

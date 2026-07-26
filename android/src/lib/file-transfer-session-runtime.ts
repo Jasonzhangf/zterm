@@ -419,6 +419,19 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
       return state;
     },
 
+    markTransferError(requestId: string, error: string) {
+      state = {
+        ...state,
+        transfers: updateTransfer(state.transfers, requestId, (current) => ({
+          ...current,
+          status: 'error',
+          error,
+        })),
+      };
+      settleWaiter(requestId);
+      return state;
+    },
+
     setPreviewText(fileName: string, text: string) {
       state = {
         ...state,
