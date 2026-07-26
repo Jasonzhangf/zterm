@@ -607,22 +607,8 @@ export interface AppState {
 // 存储键名
 // ============================================
 
-export const STORAGE_KEYS = {
-  HOSTS: 'zterm:hosts',
-  BRIDGE_SETTINGS: 'zterm:bridge-settings',
-  SESSION_GROUPS: 'zterm:session-groups',
-  OPEN_TABS: 'zterm:open-tabs',
-  SAVED_TAB_LISTS: 'zterm:saved-tab-lists',
-  QUICK_ACTIONS: 'zterm:quick-actions',
-  SHORTCUT_ACTIONS: 'zterm:shortcut-actions',
-  SESSION_DRAFTS: 'zterm:session-drafts',
-  WEBDAV_CONFIG: 'zterm:webdav-config',
-  COMMAND_HISTORY: 'zterm:command-history',
-  ACTIVE_SESSION: 'zterm:active-session',
-  ACTIVE_PAGE: 'zterm:active-page',
-  TERMINAL_LAYOUT: 'zterm:terminal-layout',
-  SHORTCUT_FREQUENCY: 'zterm:shortcut-frequency',
-} as const;
+// Persisted storage key truth lives in @zterm/shared (single source across android/mac/win).
+export { STORAGE_KEYS } from '@zterm/shared/types';
 
 // ============================================
 // 默认值
