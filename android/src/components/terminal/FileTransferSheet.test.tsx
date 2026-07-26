@@ -494,7 +494,7 @@ describe("FileTransferSheet", () => {
         {
           name: "large.bin",
           type: "file",
-          size: 256 * 1024 + 10,
+          size: 16 * 1024 + 10,
           modified: 1,
           uri: "file:///storage/emulated/0/Download/zterm/large.bin",
         },
@@ -503,7 +503,7 @@ describe("FileTransferSheet", () => {
     storagePermissionPluginMock.readFileChunk
       .mockResolvedValueOnce({
         data: "Y2h1bmsw",
-        bytesRead: 256 * 1024,
+        bytesRead: 16 * 1024,
         eof: false,
       })
       .mockResolvedValueOnce({
@@ -533,11 +533,11 @@ describe("FileTransferSheet", () => {
       expect(storagePermissionPluginMock.readFileChunk).toHaveBeenNthCalledWith(1, {
         path: "/storage/emulated/0/Download/zterm/large.bin",
         offset: 0,
-        length: 256 * 1024,
+        length: 16 * 1024,
       });
       expect(storagePermissionPluginMock.readFileChunk).toHaveBeenNthCalledWith(2, {
         path: "/storage/emulated/0/Download/zterm/large.bin",
-        offset: 256 * 1024,
+        offset: 16 * 1024,
         length: 10,
       });
     });
@@ -550,7 +550,7 @@ describe("FileTransferSheet", () => {
       payload: expect.objectContaining({
         targetDir: "/remote/home",
         fileName: "large.bin",
-        fileSize: 256 * 1024 + 10,
+        fileSize: 16 * 1024 + 10,
         chunkCount: 2,
       }),
     });
@@ -578,6 +578,57 @@ describe("FileTransferSheet", () => {
     ).toBe(true);
   });
 
+  it("keeps each upload wire frame under the RTC-safe character budget", async () => {
+    const sendJson = vi.fn();
+    const rawChunk = "x".repeat(16 * 1024);
+    const dataBase64 = btoa(rawChunk);
+    vi.mocked(StoragePermissionPlugin.readdir).mockResolvedValue({
+      files: [
+        {
+          name: "wire.bin",
+          type: "file",
+          size: 16 * 1024,
+          modified: 1,
+          uri: "file:///storage/emulated/0/Download/zterm/wire.bin",
+        },
+      ],
+    } as any);
+    storagePermissionPluginMock.readFileChunk.mockResolvedValueOnce({
+      data: dataBase64,
+      bytesRead: 16 * 1024,
+      eof: true,
+    });
+
+    render(
+      <FileTransferSheet
+        open
+        remoteCwd="/remote/home"
+        onClose={vi.fn()}
+        sendJson={sendJson}
+        onFileTransferMessage={vi.fn(() => () => {})}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByText("wire.bin")).toBeTruthy());
+    fireEvent.click(screen.getByText("⬆ 上传到远程"));
+    fireEvent.click(screen.getByRole("button", { name: "选择本地 wire.bin" }));
+    fireEvent.click(screen.getByText("上传 1 项"));
+
+    await waitFor(() => {
+      expect(
+        sendJson.mock.calls.some((call) => call[0]?.type === "file-upload-chunk"),
+      ).toBe(true);
+    });
+
+    const uploadChunks = sendJson.mock.calls
+      .map((call) => call[0])
+      .filter((message) => message?.type === "file-upload-chunk");
+    expect(uploadChunks).toHaveLength(1);
+    for (const message of uploadChunks) {
+      expect(JSON.stringify(message).length).toBeLessThanOrEqual(48 * 1024);
+    }
+  });
+
   it("previews local markdown through bounded native chunks instead of whole-file reads", async () => {
     vi.mocked(StoragePermissionPlugin.readdir).mockResolvedValue({
       files: [
@@ -590,17 +641,17 @@ describe("FileTransferSheet", () => {
         },
       ],
     } as any);
-    storagePermissionPluginMock.readFileChunk
-      .mockResolvedValueOnce({
-        data: "IyBwYXJ0LTEK",
-        bytesRead: 256 * 1024,
-        eof: false,
-      })
-      .mockResolvedValueOnce({
-        data: "IyBwYXJ0LTIK",
-        bytesRead: 256 * 1024,
-        eof: false,
-      });
+    storagePermissionPluginMock.readFileChunk.mockImplementation(async (args: {
+      offset: number;
+      length: number;
+    }) => {
+      const nextOffset = args.offset + args.length;
+      return {
+        data: args.offset === 0 ? "IyBwYXJ0LTEK" : "IyBwYXJ0LTIK",
+        bytesRead: args.length,
+        eof: nextOffset >= 512 * 1024,
+      };
+    });
 
     render(
       <FileTransferSheet
@@ -617,16 +668,17 @@ describe("FileTransferSheet", () => {
 
     await waitFor(() => {
       expect(StoragePermissionPlugin.readFile).not.toHaveBeenCalled();
+      expect(storagePermissionPluginMock.readFileChunk).toHaveBeenCalled();
       expect(storagePermissionPluginMock.readFileChunk).toHaveBeenNthCalledWith(1, {
         path: "/storage/emulated/0/Download/zterm/LOCAL.md",
         offset: 0,
-        length: 256 * 1024,
+        length: 16 * 1024,
       });
-      expect(storagePermissionPluginMock.readFileChunk).toHaveBeenNthCalledWith(2, {
-        path: "/storage/emulated/0/Download/zterm/LOCAL.md",
-        offset: 256 * 1024,
-        length: 256 * 1024,
-      });
+      const lengths = storagePermissionPluginMock.readFileChunk.mock.calls.map(
+        (call) => call[0]?.length,
+      );
+      expect(lengths.every((length) => length <= 16 * 1024)).toBe(true);
+      expect(lengths.some((length) => length > 256 * 1024)).toBe(false);
     });
     expect(screen.getByTestId("file-transfer-md-preview").textContent).toContain(
       "预览已截断",

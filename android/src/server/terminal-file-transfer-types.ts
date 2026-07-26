@@ -1,19 +1,20 @@
-import type {
-  FileCreateDirectoryRequestPayload,
-  FileDownloadRequestPayload,
-  FileListRequestPayload,
-  FileUploadChunkPayload,
-  FileUploadEndPayload,
-  FileUploadStartPayload,
-  PasteImagePayload,
-  PasteImageStartPayload,
-  RemoteScreenshotRequestPayload,
-  RemoteWindowStreamRect,
-  ServerMessage,
-} from '../lib/types';
+import {
+  FILE_TRANSFER_WIRE_CHUNK_BYTES,
+  type BridgeServerMessage as ServerMessage,
+  type FileCreateDirectoryRequestPayload,
+  type FileDownloadRequestPayload,
+  type FileListRequestPayload,
+  type FileUploadChunkPayload,
+  type FileUploadEndPayload,
+  type FileUploadStartPayload,
+  type PasteImagePayload,
+  type PasteImageStartPayload,
+  type RemoteScreenshotRequestPayload,
+  type RemoteWindowStreamRect,
+} from '@zterm/shared/protocol';
 import type { TerminalSession, SessionMirror } from './terminal-runtime-types';
 
-export const FILE_CHUNK_SIZE = 256 * 1024;
+export const FILE_CHUNK_SIZE = FILE_TRANSFER_WIRE_CHUNK_BYTES;
 export const REMOTE_SCREENSHOT_CAPTURE_TIMEOUT_MS = 15000;
 
 export interface RemoteScreenshotCaptureOptions {

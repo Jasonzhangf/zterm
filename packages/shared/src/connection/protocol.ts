@@ -27,6 +27,19 @@ export interface TransferProgress {
   error?: string;
 }
 
+export interface RuntimeDebugLogEntry {
+  seq: number;
+  ts: string;
+  scope: string;
+  payload?: string;
+}
+
+export interface FileCreateDirectoryRequestPayload {
+  requestId: string;
+  path: string;
+  name: string;
+}
+
 export interface FileListRequestPayload {
   requestId: string;
   path: string;
@@ -60,6 +73,16 @@ export interface FileUploadStartPayload {
   chunkCount: number;
 }
 
+/**
+ * Wire chunk size for file-upload/download base64 JSON frames.
+ * Must stay well under RTC data-channel maxMessageSize after base64 + mux envelope.
+ * Native local reads may use the same size for simplicity.
+ */
+export const FILE_TRANSFER_WIRE_CHUNK_BYTES = 16 * 1024;
+
+/** Soft upper bound for a single base64 file-transfer frame after mux wrapping. */
+export const FILE_TRANSFER_WIRE_FRAME_MAX_CHARS = 48 * 1024;
+
 export interface FileUploadChunkPayload {
   requestId: string;
   chunkIndex: number;
@@ -73,13 +96,13 @@ export interface FileUploadEndPayload {
 export interface FileUploadProgressPayload {
   requestId: string;
   chunkIndex: number;
-  totalChunks?: number;
+  totalChunks: number;
 }
 
 export interface FileUploadCompletePayload {
   requestId: string;
-  filePath?: string;
-  bytes?: number;
+  filePath: string;
+  bytes: number;
 }
 
 export interface FileUploadErrorPayload {
@@ -463,7 +486,7 @@ export type BridgeClientMessage =
   | { type: 'body-subscription'; payload: { version: 1; subscribed: boolean } }
   | { type: 'buffer-head-request' }
   | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
-  | { type: 'debug-log'; payload: { entries: Array<{ seq: number; ts: string; scope: string; payload?: string }> } }
+  | { type: 'debug-log'; payload: { entries: Array<RuntimeDebugLogEntry> } }
   | { type: 'debug-snapshot'; payload: { snapshot: unknown } }
   | { type: 'list-sessions' }
   | { type: 'schedule-list'; payload: { sessionName: string } }
@@ -486,7 +509,7 @@ export type BridgeClientMessage =
   | { type: 'remote-window-stream-quality-request'; payload: RemoteWindowStreamQualityRequestPayload }
   | { type: 'remote-window-input'; payload: RemoteWindowInputEventPayload }
   | { type: 'file-list-request'; payload: FileListRequestPayload }
-  | { type: 'file-create-directory-request'; payload: { requestId: string; path: string; name: string } }
+  | { type: 'file-create-directory-request'; payload: FileCreateDirectoryRequestPayload }
   | { type: 'file-download-request'; payload: FileDownloadRequestPayload }
   | { type: 'file-upload-start'; payload: FileUploadStartPayload }
   | { type: 'file-upload-chunk'; payload: FileUploadChunkPayload }

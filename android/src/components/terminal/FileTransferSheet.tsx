@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { mobileTheme } from "../../lib/mobile-ui";
 import { createFileTransferSessionRuntime } from "../../lib/file-transfer-session-runtime";
 import { StoragePermissionPlugin } from "../../plugins/StoragePermissionPlugin";
+import { FILE_TRANSFER_WIRE_CHUNK_BYTES, FILE_TRANSFER_WIRE_FRAME_MAX_CHARS } from "@zterm/shared/protocol";
 import {
   buildTransferSheetContainerStyle,
   buildTransferSheetOverlayStyle,
@@ -12,7 +13,7 @@ import type {
   TransferProgress,
 } from "../../lib/types";
 
-const FILE_CHUNK_SIZE = 256 * 1024; // 256KB per chunk (must match daemon)
+const FILE_CHUNK_SIZE = FILE_TRANSFER_WIRE_CHUNK_BYTES; // must match daemon wire chunk
 const LOCAL_MARKDOWN_PREVIEW_MAX_BYTES = 512 * 1024;
 const EXTERNAL_STORAGE_ROOT = "/storage/emulated/0";
 const DEFAULT_LOCAL_DOWNLOAD_DIR = `${EXTERNAL_STORAGE_ROOT}/Download/zterm`;
@@ -729,7 +730,14 @@ export function FileTransferSheet({
             }
             const dataBase64 =
               typeof readResult.data === "string" ? readResult.data : "";
-            sendJson?.(uploadRequest.buildChunkMessage(i, dataBase64));
+            const chunkMessage = uploadRequest.buildChunkMessage(i, dataBase64);
+            const encodedFrameChars = JSON.stringify(chunkMessage).length;
+            if (encodedFrameChars > FILE_TRANSFER_WIRE_FRAME_MAX_CHARS) {
+              throw new Error(
+                `upload chunk ${i} wire frame too large: ${encodedFrameChars} chars`,
+              );
+            }
+            sendJson?.(chunkMessage);
           }
           sendJson?.(uploadRequest.endMessage);
         } catch (err) {

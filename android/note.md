@@ -3692,6 +3692,15 @@ Need runtime debug to confirm:
 - Verified gates: focused remote-window suite `5 files / 118 PASS`; typecheck PASS; feature/resource/function/mainline gates `48 PASS`; `git diff --check` PASS; terminal contracts `49 files / 625 PASS`; daemon mirror close-loop PASS all 9 cases with evidence `android/evidence/daemon-mirror/2026-07-24/summary.json`; raw local, mux local, and mux Tailscale remote-window live probes PASS with `trackSeen=true` and AppKit input markers.
 - Delivery evidence: daemon prepared/installed/restarted with `/health` PID `90113` and installed/release runtime SHA `8e18204544b37d43583e3699966cef9b4240398f868fc96bdad389dd93b3027e`; Android build produced APK `0.1.3.2230` / versionCode `1032230` / sha256 `8a9c3ef3d6b0a11b55f057836fe16d1cc7ff6f3d3c5973a70f4db370f5ea835b` / size `4792586` at `android/update-dist/zterm-0.1.3.2230.apk` and `/Users/fanzhang/.zterm/updates/zterm-0.1.3.2230.apk`. Local `127.0.0.1`, Tailscale `100.66.1.82`, and public Relay `https://relay.codewhisper.cc:18443/relay/updates/latest.json` all serve matching manifest/APK sha. No online ADB device was attached, so installed-phone L5 remains unclaimed.
 
+# 2026-07-26 terminal input-row stale refresh root-cause audit
+
+- Scope: Jason reports the terminal bottom/input rows still show already-submitted text while the command is running. This remains `terminal.buffer_render`, not QuickBar/chrome/status overlay.
+- Header truth confirmed in code: `buildBufferHeadPayload()` computes `latestEndIndex = availableEndIndex = mirror.bufferStartIndex + mirror.bufferLines.length`. This is only the authoritative tail absolute index; it is not row-level freshness and it cannot repaint body rows.
+- Client freshness gap found in code: `applyBufferSyncToSessionBuffer()` writes the incoming payload `revision` onto the whole local sparse buffer after applying a sparse body patch, even if that payload only contains one changed row. The planner later compares only global `localRevision`, `daemonHeadRevision`, and tail/end indexes. A non-gap visible row that missed its repaint can therefore look "fresh" once any later sparse row advances the whole buffer revision.
+- Live daemon evidence from `~/.zterm/logs/launchd-stdout.log`: current `zterm` mirror repeatedly held `buffer=5255-6346` / visible `6295-6346`, while revisions `7382+` only sent `changedRanges=[6340,6341)`. In that shape, a stale visible/input row outside `6340` will never be repaired by header calculation; later one-row updates keep advancing revision while preserving the old local row.
+- Why prior fixes did not close it: prior fixes covered same-revision requested overwrite, head-before-body pending authority, visible gap repair, oversized chunk frame identity, and renderer same-text/style repaint. They did not add a black-box gate for "source row changed/cleared once, client missed that non-gap row, then later tiny sparse patches advance global revision and suppress visible repair".
+- Required next fix direction: add source-to-payload-to-client-to-DOM gate for this stale non-gap visible-row case. Then fix the unique owner by either making sparse apply track row-level revision/authority or requiring a visible-window authoritative repaint when a same-end sparse live patch advances global revision without covering the whole visible/input window. Do not use header/body clear/UI reset as compensation.
+
 # 2026-07-24 Remote-window WeChat video start diagnosis
 
 - Symptom: installed Android floating remote-window preview for WeChat showed `正在建立视频流` and never displayed video.
@@ -3925,6 +3934,128 @@ Need runtime debug to confirm:
 - Verification: focused status/buffer/source gates PASS `5 files / 128 tests`; terminal buffer/render mainline PASS `4 files / 127 tests`; render isolation/scope/remote-window overlay PASS `3 files / 33 tests`; typecheck PASS; feature/resource/function/mainline gate PASS `7 files / 49 tests`; `git diff --check` PASS; `daemon:mirror:close-loop` PASS all 9 cases.
 - Delivery: Android APK `0.1.3.2251` / versionCode `1032251` / sha256 `5c3c77ab73aa098cda44466e62c99d6ed7a1fc0bd5d3ede65db4a7250fc6d9a6` published to local update channel, `/Users/fanzhang/.zterm/updates`, Tailscale daemon route `http://100.66.1.82:3333/updates/latest.json`, and public Relay `https://relay.codewhisper.cc:18443/relay/updates/latest.json`; public APK HEAD length `4808707`, streamed public APK sha matched manifest. `adb devices` had no online device, so installed-phone L5 visual proof remains Jason-side.
 
+# 2026-07-26 project module/resource/edge registry landing
+
+- Scope: Jason asked to start landing the whole project module split before connection/runtime refactor. Correction accepted: modules are not just the connection module; first list daemon/client/shared/relay/release/observability top modules, then internal modules, resource lists, edge registry, function/mainline maps, gate, SOP.
+- Existing truth before edit: `docs/resource-registry.json`, `docs/resource-map.md`, `docs/function-map.md`, and `docs/wiki/mainline-call-map.json` existed; no `docs/module-registry.json`, `docs/edge-registry.json`, or `docs/modules/project-modules.md` existed.
+- Implementation: added `docs/module-registry.json`, `docs/edge-registry.json`, `docs/modules/project-modules.md`, `docs/testing/module-edge-registry-test-design.md`, `src/lib/module-registry-truth.test.ts`, and `src/lib/edge-registry-truth.test.ts`; wired both gates into `test:feature-registry`.
+- Architecture lock: `client.daemon_connection` owns one physical connection per daemon target; `client.terminal_channel_mux` owns terminal session channels; daemon side stays client-agnostic under `daemon.connection_gateway` / `daemon.transport_subscriber`; Relay peer lease is route/signaling truth only.
+- Verification: focused module/resource/edge/function/mainline gate passed `5 files / 24 tests`; `pnpm --dir android run test:feature-registry -- --reporter dot` passed `9 files / 59 tests`.
+- Known gap: this is docs/static architecture lock only. It does not prove live daemon/client connection reuse or buffer correctness. Runtime refactor still must add feature-specific black-box/live tests before code changes.
+
+# 2026-07-26 connection module gap inspection
+
+- Evidence: MemoryPalace search for `client.daemon_connection physical connection owner terminal channel mux gap`; static module/resource/mainline gates passed `27/27`; full `test:feature-registry` passed `59/59`; focused transport/mux tests passed `224/224`.
+- Confirmed current lock: resource/module/edge registries exist and make `client.daemon_connection` / `client.terminal_channel_mux` / `daemon.connection_gateway` / `daemon.transport_subscriber` explicit.
+- Gap 1: runtime target identity is still route-shaped. `buildTransportTargetKey()` includes `transportMode`, `tailscale/ipv4/ipv6`, `signalUrl`, and relay endpoint candidates; tests still assert direct websocket and relay-aware targets for the same daemon are different target runtimes. Desired design needs stable `DaemonTargetId` separate from `RouteCandidateId`.
+- Gap 2: app-facing daemon connection interface is not unique yet. Remote-window, screenshot/file/input/tmux management mostly use `readSessionTransportResource(sessionId).socket` or `sendMessageRaw`; `tmux-sessions.ts` still owns a legacy direct `TraversalSocket` pool.
+- Gap 3: target runtime still has separate `controlTransport` and `terminalTransport` plus legacy per-session `activeSocket` fields. The mux path works, but the data model has not physically removed the old control/session socket semantics.
+- Gap 4: target failure currently fans out into per-session reconnect scheduling. It should become one target-level route rebuild with channel demand replay.
+- Gap 5: human docs still contain stale pending/binding wording (`project-modules.md`, `module-edge-registry-test-design.md`, parts of `function-map.md`) even though machine gates are green. Need sync before runtime refactor.
+
+# 2026-07-26 daemon connection phase1 implementation slice
+
+- Scope: `terminal.transport_lifecycle` / `client.daemon_connection` first runtime identity slice. Allowed owner paths: `android/src/lib/session-transport-runtime.ts`, `android/src/lib/session-transport-runtime.test.ts`, module docs/gates. Goal remains full phase1; this slice only locks stable daemon target identity and docs stale gap.
+- Docs/map fix: `project-modules.md` no longer lists `resource.daemon_connection_gateway`, `resource.client_file_browser`, or `resource.client_settings_update` as pending because all three are already in `docs/resource-registry.json`. `module-edge-registry-test-design.md` now says runtime pending resources are forbidden. `module-registry-truth.test.ts` adds a human-doc gate so pending resource wording cannot re-enter module docs.
+- Function map fix: mux protocol/channel/target/relay peer rows now bind to real existing symbols (`TerminalMuxClientFrame`, `buildTerminalMuxHello`, `ensureTargetTransportRuntime`, `wrapSessionPayloadForTargetMuxRuntime`, `handleTargetMuxServerFrameRuntime`, `registerClient`, etc.) instead of generic binding-pending placeholders.
+- Runtime fix: `buildTransportTargetKey()` now returns stable `DaemonTargetId`: uses `daemonHostId || relayHostId` when available and otherwise endpoint host+port. It no longer includes transport mode, auth token, route candidates, signal URL, Tailscale/IP variants, relay device, or session name. New `buildTransportRouteCandidateKey()` carries route/auth/candidate identity separately. `TargetTransportRuntime` stores `daemonTargetId`, `routeCandidateKey`, and `routeGeneration`; same daemon route updates increment generation without creating a second target runtime.
+- Focused evidence: `pnpm --dir android exec vitest run src/lib/session-transport-runtime.test.ts src/lib/module-registry-truth.test.ts --reporter dot` PASS, 2 files / 26 tests. Tests lock same daemon direct-vs-relay route candidate sharing one target key, route generation updates, active socket preservation across route candidate update, and channel preservation across route update.
+- Remaining gaps: full phase1 still needs migration of all feature callers to a unique daemon connection interface, physical removal of legacy per-session sockets/direct `TraversalSocket` feature paths, target-level failure/reconnect replay, broader focused transport gates, live daemon/tmux source-output gate, network matrix, APK build/publish, commit and push.
+
+# 2026-07-26 daemon connection gap plan after phase1 slice
+
+- Gap check source: `project-modules.md`, `resource-registry.json`, `edge-registry.json`, `function-map.md`, `mainline-call-map.json`, MemoryPalace search, and runtime reads of `session-transport-runtime.ts`, `session-context-transport-open-runtime.ts`, `session-context-transport-orchestration-runtime.ts`, `session-context-infra-facade-runtime.ts`, `session-context-public-runtime.ts`, `session-context-remote-window-runtime.ts`, `session-context-tmux-management-runtime.ts`, and `tmux-sessions.ts`.
+- Confirmed closed gap: target identity is now stable daemon identity, and route candidate changes no longer create a second `TargetTransportRuntime`.
+- Remaining implementation gaps: no app-facing `client.daemon_connection` interface yet; feature paths still read raw session socket/resource; `tmux-sessions.ts` still creates legacy `TraversalSocket`; target runtime still exposes `controlTransport`, `terminalTransport`, and session `activeSocket`; target physical failure still fans out into per-session reconnect; live/network/APK gates not yet run for this refactor phase.
+
+# 2026-07-26 daemon connection session-open owner slice
+
+- Scope: `terminal.transport_lifecycle` / `client.daemon_connection`. This slice targets the session-open mux path only; it does not claim the full phase1 closeout.
+- Change: `ClientDaemonConnection` now exposes target transport read/open owner hooks. `openSessionMuxChannelByIntentRuntime()` no longer receives or calls `buildTraversalSocketForHost`; when no reusable target transport exists it delegates to `client.daemon_connection.openSessionTargetTransport()`. The orchestration layer wires that hook to the existing target socket prime + mux lifecycle bind, so the physical creation point is now behind the daemon-connection interface.
+- Change: when a `daemonConnection` is present, input, deferred input head refresh, buffer head/sync requests, paste readiness, terminal resize, and runtime debug flush now read only through daemon connection instead of falling back to raw session socket accessors.
+- Verified: `pnpm --dir android exec tsc --noEmit --pretty false` PASS; focused daemon-connection/open/input/buffer/transfer/debug gate PASS `7 files / 79 tests`; broader transport/mux/session/tmux focused gate PASS `10 files / 236 tests`; feature registry gate PASS `9 files / 62 tests`; `git diff --check` PASS.
+- Remaining gaps: legacy `openSessionTransportByIntentRuntime()` still owns the old session-ticket socket path; `session-context-socket-runtime.ts`, `session-context-session-runtime.ts`, `session-context-transport-runtime.ts`, `session-context-activity-runtime.ts`, and remote-window fallback paths still have raw accessors for migration/legacy; `tmux-sessions.ts` still has a direct management socket pool; target heartbeat/failure replay is not yet fully target-level; no live daemon/network/APK/commit/push closeout yet.
+
+# 2026-07-26 daemon connection tmux management slice
+
+- Scope: `terminal.transport_lifecycle` / `client.daemon_connection` for drawer/catalog tmux management. This closes part of the "drawer/catalog must not create physical sockets when an open daemon target exists" requirement.
+- Change: `manageTmuxSessionsOnOpenTransportRuntime()` now accepts `daemonConnection` and reads the mux target resource through it before raw resource access. `session-context-public-facade-runtime` passes the shared daemon connection into that owner.
+- Static lock: `module-registry-truth.test.ts` now forbids `daemonConnection.read* || readSessionTransport*` fallback patterns in product source. This keeps daemon connection from becoming a cosmetic wrapper over old raw socket paths.
+- Verified: `pnpm --dir android exec tsc --noEmit --pretty false` PASS; `session-context-tmux-management-runtime.test.ts + SessionContext.ws-refresh.test.tsx` PASS `2 files / 141 tests`; `module-registry-truth.test.ts` PASS `9 tests`; `test:feature-registry` PASS `9 files / 63 tests`.
+- Remaining gap remains substantial: `tmux-sessions.ts` is still the allowed legacy path when no matching open target session exists. Full phase1 still needs target-level physical connection owner API, removal of per-session `activeSocket`/heartbeat legacy, route failure replay at target level, live/network matrix, APK, commit, push.
+
+# 2026-07-26 daemon connection gap plan checkpoint
+
+- Gap check evidence: read current goal prompt, USER/AGENTS, architecture, module/resource/edge/function/mainline maps, note/MEMORY/skills; MemoryPalace returned current module/transport/heartbeat/tmux-management truth; `test:feature-registry` passed `9 files / 63 tests`.
+- Confirmed closed: docs/module/edge registry is parseable; stable `DaemonTargetId` exists; `client.daemon_connection` wrapper exists; mux session-open delegates target physical open through that wrapper; tmux management can use existing mux target transport; static grep found no `daemonConnection.read* || raw` fallback pattern.
+- Confirmed open gaps: legacy per-session `activeSocket` still exists in `SessionTransportRuntime`; `controlTransport` and `terminalTransport` are still split inside `TargetTransportRuntime`; legacy `openSessionTransportByIntentRuntime()` still calls `buildTraversalSocketForHost`; `tmux-sessions.ts` still owns a direct `TraversalSocket` pool; several migration branches still read raw session socket when no daemonConnection is provided; target failure still schedules reconnect per affected session instead of a single target route rebuild plus channel replay; live/network/APK/commit/push are not closed.
+
+# 2026-07-26 daemon connection target-owned read slice
+
+- Scope: `terminal.transport_lifecycle` / `client.daemon_connection` read-side truth. This is not full phase1 closeout; it removes one bad precedence where legacy per-session `activeSocket` could mask the ready mux target transport.
+- Change: `getSessionTransportResource()` now prefers `targetRuntime.terminalTransport` when a session has a mux channel and the target mux is ready; `runtime.activeSocket` remains only a legacy fallback when the mux target is not ready/available. Added a regression proving a leftover `activeSocket` does not override the target physical transport.
+- Verified: owner gate `session-transport-runtime.test.ts + client-daemon-connection.test.ts` PASS `24 tests`; broader transport/mux/session/tmux gate PASS `10 files / 249 tests`; input/buffer/transfer/debug gate PASS `4 files / 64 tests`; `tsc --noEmit` PASS; `test:feature-registry` PASS `9 files / 63 tests`; `git diff --check` PASS.
+- Remaining gaps unchanged: `activeSocket` is still physically present as migration truth, target `controlTransport/terminalTransport` still split, legacy session-ticket open path and `tmux-sessions.ts` direct pool still exist, target route rebuild + channel replay is still not implemented, and no live/network/APK/commit/push closeout exists.
+
+# 2026-07-26 lifecycle effective-socket read follow-up
+
+- Change: `session-context-lifecycle` now reads transport health and cadence from `getSessionTransportResource(...).socket`, so passive visible refresh and debug metrics follow the mux-ready target transport instead of the raw session `activeSocket`.
+- Test repair: lifecycle passive-fast-lane tests now use a real `SessionTransportRuntimeStore`, and the regression set proves a ready target transport overrides a leftover per-session `activeSocket` for both buffered-byte cadence and transport-health reads.
+- Verified: `session-context-lifecycle.passive-fast-lane.test.ts + session-context-lifecycle.test.tsx + runtime-debug-flush.test.ts` PASS `28 tests`; `tsc --noEmit` PASS.
+- Remaining gaps unchanged: this only fixes read-side truth. The runtime still contains legacy session socket fields and legacy open/tmux-management paths, so the physical connection refactor is not done yet.
+
+# 2026-07-26 target-level rebuild gap inspection
+
+- Scope: next `terminal.transport_lifecycle` / `client.daemon_connection` implementation step after target-owned read slice. Read architecture, remediation, resource map, function map, mainline source/call map, current transport runtime/open/orchestration/session/reconnect code, and existing focused tests.
+- Confirmed current good state: `buildTransportTargetKey()` is stable daemon identity; `buildTransportRouteCandidateKey()` is separate route identity; mux open path delegates physical target creation through `client.daemon_connection.openSessionTargetTransport()`; read-side resource prefers ready target mux transport over leftover session `activeSocket`; focused tests already lock those.
+- Gap A: `handleTargetMuxTransportFailureRuntime()` still closes channels then calls `scheduleReconnect(sessionId, ...)` per same-target logical session. This violates the desired model: one target physical failure should perform one target route rebuild, then replay all affected channel opens/body demand on that rebuilt target.
+- Gap B: reconnect owner remains session-shaped (`scheduleReconnectRuntime` / `startReconnectAttemptRuntime` / `reconnectRuntimesRef` keyed by session id). It can still create duplicate target rebuild attempts when several same-target sessions fail together.
+- Gap C: pending channel opens are finalized individually during target failure, but there is no target-level pending/rebuild state that preserves channel demand and replays it once the new mux transport is ready.
+- Gap D: legacy paths remain: `openSessionTransportByIntentRuntime()` still builds a per-session `TraversalSocket`; `tmux-sessions.ts` still owns direct tmux management socket pool; raw socket branches remain only acceptable as migration/compat, not final phase1.
+- Implementation implication: next code slice should add red tests around target failure fanout first, then introduce a target rebuild coordinator rather than patching session reconnect loops.
+
+# 2026-07-26 target-level rebuild/replay implementation slice
+
+- Scope: `terminal.transport_lifecycle.target_transport.open` / `client.daemon_connection`. This slice closes Gap A for physical target failure semantics; it does not claim full phase1 closeout because legacy per-session open/direct paths still exist.
+- Change: `handleTargetMuxTransportFailureRuntime()` now treats `rtc data channel error` / `terminal mux transport closed` as target-level failure. It clears target mux ready/socket/heartbeat once, turns every recoverable same-target logical channel into `opening` replay demand, projects affected sessions as reconnecting, clears stale pending open timers/intents without per-session failure fanout, and schedules exactly one immediate/reset rebuild through a single anchor session with `force: true`.
+- Replay path: existing `bindTargetMuxTransportSocketLifecycleRuntime()` already flushes all `opening` channels on target `mux-ready`, so the rebuilt target transport replays sibling channel opens without creating additional physical sockets.
+- Docs/skill update: `websocket-transport-reuse-test-design.md`, `function-map.md`, and `.agents/skills/zterm-mobile-dev/SKILL.md` now state the single target rebuild + channel replay rule.
+- Verified: `pnpm --dir android exec vitest run src/contexts/session-context-transport-orchestration-runtime.test.ts src/contexts/session-context-transport-runtime.test.ts --reporter dot` PASS `20 tests`; focused transport/mux/session runtime gate PASS `5 files / 77 tests`; `pnpm --dir android exec tsc --noEmit --pretty false` PASS; `pnpm --dir android run test:feature-registry -- --reporter dot` PASS `10 files / 67 tests`; scoped `git diff --check` PASS for this slice. Full `git diff --check` still reports pre-existing unrelated `android/src/lib/terminal-buffer-debug.ts:93 new blank line at EOF`.
+- Remaining gaps: legacy `openSessionTransportByIntentRuntime()` still exists and can build a per-session `TraversalSocket`; `tmux-sessions.ts` still owns the no-open-target legacy direct pool; `SessionTransportRuntime.activeSocket` remains migration truth; no live daemon/network/APK/commit/push closeout yet.
+
+# 2026-07-26 daemon_connection phase1 open-intent fallback removal
+
+- 架构映射：feature_id=terminal.transport_lifecycle；resources=resource.session_transport -> resource.daemon_target_transport -> resource.terminal_channel；owner=client.daemon_connection / client.terminal_channel_mux。
+- 本切片物理移除 queueSessionTransportOpenIntentRuntime 的 legacy session-ticket fallback：缺少 openSessionMuxChannelByIntent 时删除 pending intent 并显式失败 client.daemon_connection mux opener unavailable，不再调用 ensureControlTransportForSessionOpen。
+- 红测/gate：session-context-transport-open-runtime.test 新增 missing mux opener 显式失败；module-registry-truth.test 新增静态 gate 禁 queueSessionTransportOpenIntentRuntime 重新引用 ensureControlTransportForSessionOpen 并要求失败文案与 pending cleanup。
+- 验证：transport/mux/session focused suite 9 files / 88 tests PASS；test:feature-registry 10 files / 68 tests PASS；tsc --noEmit PASS；scoped git diff --check PASS。
+- 未完成：activeSocket 迁移、feature raw socket fallback 收口、legacy tmux-sessions 管理 socket 最终限制、live daemon/tmux gate、network matrix、APK build/publish/download sha、commit/push 仍未闭环。
+
+# 2026-07-26 daemon_connection effective-socket fallback narrowing
+
+- 架构映射：feature_id=terminal.transport_lifecycle；owner=client.daemon_connection / session transport runtime；资源边界为 session_transport 只通过 daemon_target_transport + terminal_channel 暴露有效 socket。
+- 本切片收窄 getSessionTransportResource：一旦 session 已有 mux channel，effective socket 只允许来自 ready mux target terminal transport；legacy runtime.activeSocket 仍保留为迁移字段，但不能在 channel 未 ready/closed/opening 时冒充可用连接。纯 legacy 无 mux channel 时暂保兼容。
+- 红测：session-transport-runtime.test 增加 legacy activeSocket + mux channel exists + mux not ready 时 resource.socket 必须为 null，防止 connected-but-stale/no-refresh 被 activeSocket 隐藏。
+- 验证：session-transport-runtime 22 PASS；transport/open/orchestration/client-daemon focused 35 PASS；transport stack 9 files / 89 PASS；test:feature-registry 68 PASS；tsc --noEmit PASS；scoped git diff --check PASS。
+- 未完成：feature direct socket fallback 全面收口、legacy tmux management socket 最终限制、live daemon/tmux gate、network matrix、APK build/publish/download sha、commit/push 仍未闭环。
+
+# 2026-07-26 daemon_connection remaining gap inspection
+
+- Gap check evidence: current goal prompt, architecture/module/resource/edge/function/mainline maps, `websocket-transport-reuse-test-design.md`, runtime grep for `ensureControlTransportForSessionOpen` / `createClientDaemonTraversalSocket` / raw socket fallbacks, and focused gates.
+- Verified current static state: focused transport stack passed `9 files / 89 tests`; `test:feature-registry` passed `10 files / 69 tests`; `tsc --noEmit` passed; scoped diff-check passed.
+- Remaining Gap 1: `createSessionControlTransportOrchestrationRuntime()` still constructs and exports the old control transport opener, although current open queue no longer reaches it; this is dead legacy and should be physically removed or demoted to explicit compat-only with a static no-reach gate.
+- Remaining Gap 2: feature runtimes still carry optional `daemonConnection` plus raw socket fallback branches (`public`, `buffer`, `input`, `transfer`, `remote-window`, `activity`, `session`, `runtime-debug`). Production wiring passes `daemonConnection`, but the API still permits bypass.
+- Remaining Gap 3: `tmux-sessions.ts` still owns a direct `createClientDaemonTraversalSocket()` pool for no-open-target management; it needs a stricter gate proving matching open target failure never falls back to this pool.
+- Remaining Gap 4: store shape still exposes legacy `SessionTransportRuntime.activeSocket` and target `controlTransport`/`terminalTransport` split. Effective socket is narrowed, but physical model is not fully singular yet.
+
+# 2026-07-26 daemon_connection raw fallback gate slice
+
+- Scope: `terminal.transport_lifecycle` / `client.daemon_connection` owner tightening. This slice does not close full phase1; it reduces wrapper drift and one feature raw fallback path.
+- Change: `SessionProviderCoreAssembliesResult` now exposes the shared `daemonConnection` built by infra. Public facade, interaction runtime, lifecycle runtime, and message assemblies consume that owner instead of constructing their own cosmetic wrapper. Static gate now allows `createClientDaemonConnection()` only in `session-context-infra-facade-runtime.ts`, `session-context-transport-orchestration-runtime.ts`, and the owner lib.
+- Change: schedule/public message sending no longer accepts raw session socket accessors. Paste readiness also no longer falls back to raw socket/resource; it reads only through `daemonConnection.readSessionSocket()`.
+- Verification: focused public/transfer/message/remote-window/module gate PASS `5 files / 36 tests`; feature registry/module/resource/edge/function/mainline gate PASS `10 files / 70 tests`. Full `tsc --noEmit` remains blocked by existing broad `Session.buffer` / `daemonHeadRevision` test type migration errors, so type closeout for the whole branch remains unclaimed.
+- Remaining gaps: remote-window runtime APIs still retain optional daemonConnection/raw socket branches in tests and function signatures; input/session/activity/buffer legacy accessors remain migration paths; `tmux-sessions.ts` direct pool and `activeSocket`/control-vs-terminal store split still need removal or stricter compat gating; live daemon/network/APK/commit/push are not closed.
+
 # 2026-07-26 sync upload crash diagnosis
 - Jason reported: choosing sync/upload crashes the Android app.
 - Flow classification: `daemon.file_transfer` / `client.file_browser`: QuickBar sync -> `FileTransferSheet` local file browser -> `StoragePermissionPlugin.readFile` -> `file-upload-*` mux messages -> daemon file transfer runtime. Resources: `resource.client_file_browser -> resource.file_transfer -> resource.backend_session`. Forbidden as fix points: terminal buffer/render, remote-window stream, transport reconnect fallback.
@@ -3933,6 +4064,22 @@ Need runtime debug to confirm:
 - Closeout: `FileTransferSheet` upload now computes chunk count from file size and calls `StoragePermissionPlugin.readFileChunk(path, offset, length)` for each 256 KiB span; it no longer calls whole-file `readFile()` on upload. Native `StorageFileReadLogic` returns only bytes/bytesRead/eof, and `StoragePermissionPlugin` performs `android.util.Base64.NO_WRAP` encoding at the bridge boundary so minSdk 24 does not depend on `java.util.Base64`.
 - Verification: file-transfer component/runtime gate `21 PASS`; native `StorageFileReadLogicTest` PASS; server file-transfer truth gate `13 PASS`; QuickBar/split gate `74 PASS`; `tsc --noEmit` PASS; feature/module/resource/mainline gate `71 PASS`; full `build:android` PASS with terminal regression/core gates; installed APK `0.1.3.2254` on ADB device `100.104.163.65:5555`; WebView CDP live bridge probe read a 614400-byte file in native chunks `262144 + 262144 + 90112` with `eof=true`; post-probe logcat had no `FATAL EXCEPTION`, `AndroidRuntime`, `OutOfMemory`, or `RenderProcessGone`.
 - Delivery: Android APK `0.1.3.2254` / versionCode `1032254` / sha256 `ad31d10afc340ffb850e26a2e04a71aaf7befde92c12fb47ca0976f2b0903619` is published to local update route, Tailscale update route, and public Relay `https://relay.codewhisper.cc:18443/relay/updates/latest.json`; downloaded public APK sha matched. Temporary ADB smoke file and devtools forward were removed.
+
+# 2026-07-26 architecture gap T2c/T9 reconnect store mapping
+
+- Scope: `terminal.transport_lifecycle`; resources `resource.active_session -> resource.session_transport -> resource.daemon_target_transport -> resource.terminal_channel`.
+- Unique owner/edit class: `client.daemon_connection` / SessionContext transport lifecycle runtime; category is separate/downstream store convergence, not protocol/UI/daemon behavior change.
+- Current evidence: `session-reconnect-store.ts` already defines `idle | scheduled | connecting`, but product runtime still passes `reconnectRuntimesRef`, `manualCloseRef`, and `staleTransportProbeAtRef` through provider/core/facade/session/open/activity/socket/buffer runtimes.
+- Planned fix: make `SessionReconnectStore` own reconnect phase, manual-close markers, and stale head-probe markers; provider creates one store ref; runtimes consume store methods instead of direct Map/Set refs. This keeps illegal `connecting + timer` unrepresentable and removes the scattered ref bag.
+- Forbidden paths for this slice: `TerminalPage.tsx`, `TerminalView.tsx`, `src/server/**`, and shared wire protocol. Required gates: reconnect store unit tests, focused transport/session/lifecycle/ws-refresh tests, `tsc --noEmit`, and `test:feature-registry`.
+
+# 2026-07-26 architecture gap T2c/T9 reconnect closeout
+
+- Closeout: `SessionReconnectStore` now owns reconnect runtime phase, manual-close markers, and stale transport probe markers. Product paths no longer reference `reconnectRuntimesRef`, `manualCloseRef`, or `staleTransportProbeAtRef`.
+- T9 invariant: phase union is `idle | scheduled | connecting`; only `scheduled` carries a timer. `startReconnectAttemptRuntime` uses `globalThis.setTimeout` and writes a scheduled phase, then timer fire marks connecting before queueing the open intent.
+- New red/green coverage: store unit tests lock manual close cleanup and stale probe no-replace behavior; session runtime tests lock manual close suppressing retryable reconnect, scheduled -> connecting without timer, and no duplicate queue while scheduled/connecting.
+- Verification evidence: reconnect store 8/8, focused reconnect/context 77/77, lifecycle/ws-refresh 158/158, contexts all 451/451, `type-check` PASS, `test:feature-registry` 71/71, `test:terminal:regression:core` PASS (terminal contracts 49 files/638, common flows 83, relay smoke ok), scoped diff-check PASS.
+- Remaining T2 gap: `session-context-provider-assembly-types.ts` still has `refs: any` and typed-any surfaces; `session-context-message-assemblies.ts` still has local `any` signatures. This is T2d, separate from reconnect phase truth.
 
 # 2026-07-26 sync upload crash 2255 follow-up
 
@@ -3952,3 +4099,11 @@ Need runtime debug to confirm:
 - Red/green: added `useOpenTabLifecycleEffects.test.tsx`, which first failed because callback-only rerender registered `appStateChange` twice. Fix stores latest callbacks in a ref and keeps the native listener effect bound only to stable refs; the test now passes and proves events dispatch to the latest callback without re-registering.
 - Delivery: Android APK `0.1.3.2256` / versionCode `1032256` / sha256 `37c16592324382eaf62f8e5c00556d19f06b1b09c83df1eeb00be39f0e41fcb5` built and served by local `127.0.0.1:3333`, Tailscale `100.66.1.82:3333`, and public Relay `https://relay.codewhisper.cc:18443/relay/updates/latest.json`; public APK HEAD length `4809399`, downloaded public/local/Tailscale APK sha matched.
 - L5 smoke: installed on ADB `100.104.163.65:5555` as `com.zterm.android` version `0.1.3.2256` / `1032256`. Cold launch pid `29962`. post-install/start logcat showed no `addListener`/`removeListener` flood and no `FATAL EXCEPTION`/`OutOfMemory`/`RenderProcessGone`. Jason still needs to manually open sync sheet and upload to close the crash L5.
+
+# 2026-07-27 file sync upload crash wire-frame diagnosis
+
+- Jason: 选择同步按钮时上传会出现 app crash。
+- feature_id=`daemon.file_transfer`; resource path `resource.client_file_browser -> resource.file_transfer -> resource.backend_session`.
+- 已完成 native `readFileChunk` 流式上传后，剩余风险是 wire 帧过大：`FILE_CHUNK_SIZE=256KiB` raw -> base64 ~341KiB -> 再经 `mux-channel-message` JSON 包装，超过常见 RTC DataChannel `maxMessageSize`（常为 256KiB），上传时会直接炸 channel/WebView。
+- 唯一修改点：shared `FILE_TRANSFER_WIRE_CHUNK_BYTES=16KiB` 作为 client/daemon 同一真源；`FileTransferSheet` 与 daemon download/upload chunk 共用；新增 frame size 门禁。
+- Forbidden: transport reconnect、buffer/render、TerminalView。

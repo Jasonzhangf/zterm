@@ -17,6 +17,8 @@ import {
   validateTerminalMuxChannelEnvelope,
   type TerminalMuxChannelClientMessage,
   type TerminalMuxTargetClientMessage,
+  FILE_TRANSFER_WIRE_CHUNK_BYTES,
+  FILE_TRANSFER_WIRE_FRAME_MAX_CHARS,
 } from './protocol';
 
 describe('terminal mux protocol contract', () => {
@@ -218,5 +220,28 @@ describe('terminal mux protocol contract', () => {
       type: 'sessions',
       payload: { sessions: ['a', 'b'] },
     }))).toBe(true);
+  });
+});
+
+describe('file transfer wire chunk contract', () => {
+  it('keeps base64 file-transfer frames under the RTC-safe budget', () => {
+    const raw = 'a'.repeat(FILE_TRANSFER_WIRE_CHUNK_BYTES);
+    const dataBase64 = Buffer.from(raw, 'utf8').toString('base64');
+    const frame = JSON.stringify({
+      type: 'mux-channel-message',
+      payload: {
+        channelId: 'ch-1',
+        message: {
+          type: 'file-upload-chunk',
+          payload: {
+            requestId: 'ful-1',
+            chunkIndex: 0,
+            dataBase64,
+          },
+        },
+      },
+    });
+    expect(FILE_TRANSFER_WIRE_CHUNK_BYTES).toBe(16 * 1024);
+    expect(frame.length).toBeLessThanOrEqual(FILE_TRANSFER_WIRE_FRAME_MAX_CHARS);
   });
 });
