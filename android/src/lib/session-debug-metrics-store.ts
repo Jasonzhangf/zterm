@@ -203,3 +203,5 @@ export function createSessionDebugMetricsStore() {
     },
   };
 }
+
+export type SessionDebugMetricsStore = ReturnType<typeof createSessionDebugMetricsStore>;

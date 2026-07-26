@@ -164,6 +164,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
       rawFrameBytes?: number;
       onConnected: () => void;
       onFailure: (message: string, retryable: boolean) => void;
+      onClosed: (reason?: string) => void;
     }, msg: ServerMessage) => void) | null>;
     handleSocketConnectedBaselineRef: MutableRefObject<((options: {
       sessionId: string;

@@ -1,13 +1,104 @@
-import type { Host } from "../lib/types";
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
-import type { SessionScheduleState } from '../lib/types';
+import type { FileTransferMessageRuntime } from '../lib/file-transfer-message-runtime';
+import type { RemoteScreenshotRuntime } from '../lib/remote-screenshot-runtime';
+import type { RemoteWindowMessageRuntime } from '../lib/remote-window-message-runtime';
+import type { RemoteWindowReceiverRuntime } from '../lib/remote-window-receiver-runtime';
+import type { SessionBufferStore } from '../lib/session-buffer-store';
+import type { SessionDebugMetricsStore } from '../lib/session-debug-metrics-store';
+import type { SessionHeadStore } from '../lib/session-head-store';
+import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
+import type { SessionReconnectStore } from '../lib/session-reconnect-store';
+import type { SessionRenderGate } from '../lib/session-render-gate';
+import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import type {
+  SessionTerminalChannelRuntime,
+  SessionTransportResource,
+  SessionTransportRuntime,
+  SessionTransportRuntimeStore,
+  TargetTransportRuntime,
+} from '../lib/session-transport-runtime';
+import type { BridgeTransportSocket } from '../lib/traversal/types';
+import type {
+  Host,
+  Session,
+  SessionBufferState,
+  SessionScheduleState,
+  ServerMessage,
+} from '../lib/types';
+import type { SameRevisionChunkFrameState } from './session-context-buffer-runtime';
+import type {
+  RevisionResetExpectation,
   SessionAction,
   SessionContextValue,
   SessionManagerState,
 } from './session-context-core';
+import type {
+  SessionMessageAssembliesResult,
+  SessionSocketConnectedBaselineOptions,
+  SessionSocketFailureBaselineOptions,
+  SessionSocketFailureBaselineResult,
+  SessionSocketServerMessageOptions,
+} from './session-context-message-assemblies';
+import type { RemoteWindowTargetCatalogCacheStore } from './session-context-remote-window-runtime';
+import type { SessionTmuxTargetRequestStore } from './session-context-tmux-management-runtime';
+import type { SessionPullStates } from './session-pull-state-helpers';
+import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
+import type { SessionVisibleRangeState } from './session-visible-range-helpers';
+
+export type HandleSocketConnectedBaselineFn = (
+  options: SessionSocketConnectedBaselineOptions,
+) => void;
+
+export type FinalizeSocketFailureBaselineFn = (
+  options: SessionSocketFailureBaselineOptions,
+) => SessionSocketFailureBaselineResult;
+
+export type HandleSocketServerMessageFn = (
+  params: SessionSocketServerMessageOptions,
+  msg: ServerMessage,
+) => void;
+
+export type SessionRequestedTerminalGeometry = {
+  cols?: number | null;
+  rows?: number | null;
+  widthMode?: 'adaptive-phone' | 'mirror-fixed';
+} | null;
+
+export interface SessionProviderRuntimeRefs {
+  sessionDebugMetricsStoreRef: MutableRefObject<SessionDebugMetricsStore>;
+  transportRuntimeStoreRef: MutableRefObject<SessionTransportRuntimeStore>;
+  sessionBufferStoreRef: MutableRefObject<SessionBufferStore>;
+  sessionRenderGateRef: MutableRefObject<SessionRenderGate>;
+  sessionHeadStoreRef: MutableRefObject<SessionHeadStore>;
+  sessionHeartbeatStoreRef: MutableRefObject<SessionHeartbeatStore>;
+  sessionReconnectStoreRef: MutableRefObject<SessionReconnectStore>;
+  handshakeTimeoutsRef: MutableRefObject<Map<string, number>>;
+  sessionVisibleRangeRef: MutableRefObject<Map<string, SessionVisibleRangeState>>;
+  lastActivatedSessionIdRef: MutableRefObject<string | null>;
+  lastActiveReentryAtRef: MutableRefObject<Map<string, number>>;
+  lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
+  connectedBaselineBurstGuardRef: MutableRefObject<Set<string>>;
+  sessionRevisionResetRef: MutableRefObject<Map<string, RevisionResetExpectation>>;
+  sessionTailRefreshStoreRef: MutableRefObject<SessionTailRefreshStore>;
+  lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
+  sameRevisionChunkFrameRef: MutableRefObject<Map<string, SameRevisionChunkFrameState>>;
+  sessionPullStateRef: MutableRefObject<Map<string, SessionPullStates>>;
+  sessionAttachTokensRef: MutableRefObject<Map<string, string>>;
+  pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, PendingSessionTransportOpenIntent>>;
+  tmuxTargetRequestsRef: MutableRefObject<SessionTmuxTargetRequestStore>;
+  activeBodySubscriptionSuppressedRef: MutableRefObject<boolean>;
+  remoteScreenshotRuntimeRef: MutableRefObject<RemoteScreenshotRuntime>;
+  remoteWindowTargetCatalogCacheRef: MutableRefObject<RemoteWindowTargetCatalogCacheStore>;
+  remoteWindowMessageRuntimeRef: MutableRefObject<RemoteWindowMessageRuntime>;
+  remoteWindowReceiverRuntimeRef: MutableRefObject<RemoteWindowReceiverRuntime>;
+  fileTransferMessageRuntimeRef: MutableRefObject<FileTransferMessageRuntime>;
+  foregroundActiveRef: MutableRefObject<boolean>;
+  handleSocketConnectedBaselineRef: MutableRefObject<HandleSocketConnectedBaselineFn | null>;
+  finalizeSocketFailureBaselineRef: MutableRefObject<FinalizeSocketFailureBaselineFn | null>;
+  handleSocketServerMessageRef: MutableRefObject<HandleSocketServerMessageFn | null>;
+}
 
 export interface SessionProviderAssembliesSharedOptions {
   appForegroundActive?: boolean;
@@ -21,7 +112,7 @@ export interface SessionProviderAssembliesSharedOptions {
   bridgeSettings: BridgeSettings;
   terminalCacheLines: number;
   wsUrl?: string;
-  refs: any;
+  refs: SessionProviderRuntimeRefs;
 }
 
 export interface SessionProviderCoreAssembliesResult {
@@ -31,7 +122,7 @@ export interface SessionProviderCoreAssembliesResult {
   getSessionHeadStore: SessionContextValue['getSessionHeadStore'];
   flushRuntimeDebugLogs: () => void;
   clearReconnectForSession: (sessionId: string) => void;
-  writeSessionTransportHost: (sessionId: string, host: any) => unknown;
+  writeSessionTransportHost: (sessionId: string, host: Host) => SessionTransportRuntime | null | undefined | unknown;
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
   scheduleReconnect: (
     sessionId: string,
@@ -39,14 +130,14 @@ export interface SessionProviderCoreAssembliesResult {
     retryable?: boolean,
     options?: { immediate?: boolean; resetAttempt?: boolean; force?: boolean },
   ) => void;
-  readSessionBufferSnapshot: (sessionId: string) => any;
+  readSessionBufferSnapshot: (sessionId: string) => SessionBufferState;
   setActiveSessionSync: (id: string) => void;
   setLiveSessionIdsSync: (ids: string[]) => void;
   setActiveBodySubscriptionSuppressedSync: (suppressed: boolean, reason?: string) => void;
-  createSessionSync: (session: any) => void;
+  createSessionSync: (session: Session) => void;
   deleteSessionSync: (id: string) => void;
   moveSessionSync: (id: string, toIndex: number) => void;
-  updateSessionSync: (id: string, updates: any) => void;
+  updateSessionSync: (id: string, updates: Partial<Session>) => void;
   setSessionTitleSync: (id: string, title: string) => void;
   isSessionTransportActive: (sessionId: string) => boolean;
   shouldAcceptSessionLiveBuffer: (sessionId: string) => boolean;
@@ -58,30 +149,42 @@ export interface SessionProviderCoreAssembliesResult {
   markPendingInputTailRefresh: (sessionId: string, localRevision: number) => boolean;
   resetSessionTransportPullBookkeeping: (sessionId: string, reason: string) => void;
   isSessionTransportActivityStale: (sessionId: string) => boolean;
-  sendSocketPayload: (sessionId: string, ws: any, data: string | ArrayBuffer) => void;
-  setScheduleStateForSession: (sessionId: string, nextState: any) => void;
+  sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+  setScheduleStateForSession: (
+    sessionId: string,
+    nextState: SessionScheduleState | ((current: SessionScheduleState) => SessionScheduleState),
+  ) => void;
   clearSessionHandshakeTimeout: (sessionId: string) => void;
   cleanupControlSocket: (sessionId: string, shouldClose?: boolean) => void;
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
   queueConnectTransportOpenIntent: (sessionId: string, host: Host) => void;
-  sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: 'adaptive-phone' | 'mirror-fixed') => boolean;
-  readSessionTransportResource: (sessionId: string) => any;
-  readSessionTransportSocket: (sessionId: string) => any;
-  readSessionTransportHost: (sessionId: string) => any;
-  readSessionTransportRuntime: (sessionId: string) => any;
-  readSessionTargetRuntime: (sessionId: string) => any;
-  readSessionTerminalChannel: (sessionId: string) => any;
-  readSessionTargetKey: (sessionId: string) => any;
-  readSessionRequestedTerminalGeometry: (sessionId: string) => any;
-  writeSessionRequestedTerminalGeometry: (sessionId: string, geometry: any) => any;
-  clearSessionTransportRuntime: (sessionId: string) => any;
-  readSessionBufferHead?: (sessionId: string) => any;
-  requestSessionBufferSync: (sessionId: string, options?: any) => boolean;
-  requestSessionBufferHead: (
+  sendTerminalResize: (
     sessionId: string,
-    ws?: any,
-    options?: { force?: boolean; trackProbe?: boolean },
+    cols?: number | null,
+    rows?: number | null,
+    widthMode?: 'adaptive-phone' | 'mirror-fixed',
   ) => boolean;
-  resolveTerminalRefreshCadence: (sessionId?: string | null) => { headTickMs: number; headStalePingMs: number; pullRequestStaleMs: number };
+  readSessionTransportResource: (sessionId: string) => SessionTransportResource;
+  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportHost: (sessionId: string) => Host | null;
+  readSessionTransportRuntime: (sessionId: string) => SessionTransportRuntime | null;
+  readSessionTargetRuntime: (sessionId: string) => TargetTransportRuntime | null;
+  readSessionTerminalChannel: (sessionId: string) => SessionTerminalChannelRuntime | null;
+  readSessionTargetKey: (sessionId: string) => string | null;
+  readSessionRequestedTerminalGeometry: (sessionId: string) => SessionRequestedTerminalGeometry;
+  writeSessionRequestedTerminalGeometry: (
+    sessionId: string,
+    geometry: SessionRequestedTerminalGeometry,
+  ) => SessionRequestedTerminalGeometry | SessionTransportRuntime['requestedTerminalGeometry'] | null | undefined;
+  clearSessionTransportRuntime: (sessionId: string) => SessionTransportRuntime | null | undefined;
+  requestSessionBufferSync: SessionMessageAssembliesResult['requestSessionBufferSync'];
+  requestSessionBufferHead: SessionMessageAssembliesResult['requestSessionBufferHead'];
+  resolveTerminalRefreshCadence: (sessionId?: string | null) => {
+    headTickMs: number;
+    headStalePingMs: number;
+    pullRequestStaleMs: number;
+    minTailRefreshGapMs?: number;
+    readingSyncDelayMs?: number;
+  };
   daemonConnection: ClientDaemonConnection;
 }

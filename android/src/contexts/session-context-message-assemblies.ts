@@ -1,21 +1,71 @@
 import { runtimeDebug } from '../lib/runtime-debug';
 import type { MutableRefObject } from 'react';
-import type { TerminalBufferPayload } from '../lib/types';
+import type {
+  Host,
+  ServerMessage,
+  Session,
+  SessionBufferState,
+  SessionScheduleState,
+  TerminalBufferPayload,
+  TerminalCursorState,
+} from '../lib/types';
 import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
+import type { SessionTransportResource } from '../lib/session-transport-runtime';
+import type { BridgeTransportSocket } from '../lib/traversal/types';
+import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
+import type { RevisionResetExpectation } from './session-context-core';
+import type { SessionBufferHeadState } from './session-buffer-planner-helpers';
 import {
   applyIncomingBufferSyncRuntime,
   handleBufferHeadRuntime,
   requestSessionBufferHeadRuntime,
   requestSessionBufferSyncRuntime,
+  type SameRevisionChunkFrameState,
 } from './session-context-buffer-runtime';
 import {
   finalizeSocketFailureBaselineRuntime,
   handleSocketConnectedBaselineRuntime,
   handleSocketServerMessageRuntime,
 } from './session-context-socket-message-runtime';
+import type { SessionPullPurpose, SessionPullStates } from './session-pull-state-helpers';
+import type { SessionVisibleRangeState, SessionDaemonHeadView } from './session-visible-range-helpers';
+import type { RemoteWindowMessageRuntime } from '../lib/remote-window-message-runtime';
+import type { FileTransferMessageRuntime } from '../lib/file-transfer-message-runtime';
+
+interface MessageAssemblyState {
+  sessions: Session[];
+  activeSessionId: string | null;
+}
+
+interface MessageAssemblyBufferStore {
+  commitBuffer: (sessionId: string, buffer: SessionBufferState) => boolean;
+}
+
+interface MessageAssemblyHeadStore {
+  setHead?: (sessionId: string, head: { daemonHeadRevision: number; daemonHeadEndIndex: number }) => boolean;
+  setLiveHead: (
+    sessionId: string,
+    head: SessionBufferHeadState,
+    options?: { publishRenderer?: boolean },
+  ) => boolean;
+  getLiveHead: (sessionId: string) => SessionBufferHeadState | null;
+  clearLiveHead?: (sessionId: string) => void;
+}
+
+interface MessageAssemblyDebugMetricsStore {
+  recordRefreshRequest: (sessionId: string) => void;
+}
+
+interface MessageAssemblyFileTransferRuntime {
+  dispatch: FileTransferMessageRuntime['dispatch'];
+}
+
+interface MessageAssemblyRemoteWindowRuntime {
+  dispatch: RemoteWindowMessageRuntime['dispatch'];
+}
 
 export function summarizeBufferPayload(payload: TerminalBufferPayload) {
   const firstLine = payload.lines[0];
@@ -46,31 +96,31 @@ export function summarizeBufferPayload(payload: TerminalBufferPayload) {
 }
 
 export interface SessionMessageAssembliesOptions {
-  stateRef: MutableRefObject<any>;
-  scheduleStatesRef: MutableRefObject<any>;
-  sessionVisibleRangeRef: MutableRefObject<any>;
-  sessionPullStateRef: MutableRefObject<any>;
-  sessionRevisionResetRef: MutableRefObject<any>;
-  sessionBufferStoreRef: MutableRefObject<any>;
-  sessionHeadStoreRef: MutableRefObject<any>;
-  sessionDebugMetricsStoreRef: MutableRefObject<any>;
+  stateRef: MutableRefObject<MessageAssemblyState>;
+  scheduleStatesRef: MutableRefObject<Record<string, SessionScheduleState>>;
+  sessionVisibleRangeRef: MutableRefObject<Map<string, SessionVisibleRangeState>>;
+  sessionPullStateRef: MutableRefObject<Map<string, SessionPullStates>>;
+  sessionRevisionResetRef: MutableRefObject<Map<string, RevisionResetExpectation>>;
+  sessionBufferStoreRef: MutableRefObject<MessageAssemblyBufferStore>;
+  sessionHeadStoreRef: MutableRefObject<MessageAssemblyHeadStore>;
+  sessionDebugMetricsStoreRef: MutableRefObject<MessageAssemblyDebugMetricsStore>;
   tailRefreshStore: SessionTailRefreshStore;
-  lastHeadRequestAtRef: MutableRefObject<any>;
+  lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
   reconnectStore: SessionReconnectStore;
   heartbeatStore: SessionHeartbeatStore;
-  lastConnectedBaselineAtRef: MutableRefObject<any>;
-  connectedBaselineBurstGuardRef: MutableRefObject<any>;
-  sameRevisionChunkFrameRef?: MutableRefObject<any>;
-  pendingSessionTransportOpenIntentsRef: MutableRefObject<any>;
-  fileTransferMessageRuntimeRef: MutableRefObject<any>;
-  remoteWindowMessageRuntimeRef: MutableRefObject<any>;
-  readSessionTransportSocket: (sessionId: string) => any;
-  readSessionTransportResource?: (sessionId: string) => any;
+  lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
+  connectedBaselineBurstGuardRef: MutableRefObject<Set<string>>;
+  sameRevisionChunkFrameRef?: MutableRefObject<Map<string, SameRevisionChunkFrameState>>;
+  pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, PendingSessionTransportOpenIntent>>;
+  fileTransferMessageRuntimeRef: MutableRefObject<MessageAssemblyFileTransferRuntime>;
+  remoteWindowMessageRuntimeRef: MutableRefObject<MessageAssemblyRemoteWindowRuntime>;
+  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
   daemonConnection: ClientDaemonConnection;
-  readSessionBufferSnapshot: (sessionId: string) => any;
-  sendSocketPayload: (sessionId: string, ws: any, data: string | ArrayBuffer) => void;
-  clearSessionPullState: (sessionId: string) => void;
-  settleSessionPullState: (...args: any[]) => void;
+  readSessionBufferSnapshot: (sessionId: string) => SessionBufferState;
+  sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer, options?: SessionSocketPayloadOptions) => void;
+  clearSessionPullState: (sessionId: string, purpose?: SessionPullPurpose) => void;
+  settleSessionPullState: (sessionId: string, payload: TerminalBufferPayload) => void;
   scheduleSessionRenderCommit: (sessionId: string) => void;
   isSessionTransportActive: (sessionId: string) => boolean;
   shouldAcceptSessionLiveBuffer: (sessionId: string) => boolean;
@@ -81,25 +131,75 @@ export interface SessionMessageAssembliesOptions {
     minTailRefreshGapMs: number;
     readingSyncDelayMs: number;
   };
-  setScheduleStateForSession: (sessionId: string, nextState: any) => void;
+  setScheduleStateForSession: (sessionId: string, nextState: SessionScheduleState | ((current: SessionScheduleState) => SessionScheduleState)) => void;
   setSessionTitleSync: (id: string, title: string) => void;
-  updateSessionSync: (id: string, updates: any) => void;
+  updateSessionSync: (id: string, updates: Partial<Session>) => void;
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
-  applyTransportDiagnostics: (...args: any[]) => void;
+  applyTransportDiagnostics: (sessionId: string, socket: BridgeTransportSocket) => void;
   incrementConnectedSync: () => void;
 }
 
+export interface SessionSocketPayloadOptions {
+  pullPurpose?: SessionPullPurpose;
+  targetHeadRevision?: number;
+  targetStartIndex?: number;
+  targetEndIndex?: number;
+  requestKnownRevision?: number;
+  requestLocalStartIndex?: number;
+  requestLocalEndIndex?: number;
+  repairSignature?: string;
+}
+
+export interface SessionBufferSyncRequestOptions {
+  ws?: BridgeTransportSocket | null;
+  reason?: string;
+  purpose?: SessionPullPurpose;
+  headOverride?: SessionDaemonHeadView | null;
+  liveHead?: SessionBufferHeadState | null;
+  invalidLocalWindow?: boolean;
+  requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
+  requestMissingRangesOverride?: Array<{ startIndex: number; endIndex: number }> | null;
+}
+
+export interface SessionSocketServerMessageOptions {
+  sessionId: string;
+  host: Host;
+  ws: BridgeTransportSocket;
+  debugScope: 'connect' | 'reconnect';
+  rawFrameBytes?: number;
+  onConnected: () => void;
+  onFailure: (message: string, retryable: boolean) => void;
+  onClosed: (reason?: string) => void;
+}
+
+export interface SessionSocketConnectedBaselineOptions {
+  sessionId: string;
+  sessionName: string;
+  ws: BridgeTransportSocket;
+}
+
+export interface SessionSocketFailureBaselineOptions {
+  sessionId: string;
+  message: string;
+  markCompleted: () => boolean;
+}
+
+export interface SessionSocketFailureBaselineResult {
+  shouldContinue: boolean;
+  manualClosed: boolean;
+}
+
 export interface SessionMessageAssembliesResult {
-  requestSessionBufferSync: (sessionId: string, requestOptions?: any) => boolean;
+  requestSessionBufferSync: (sessionId: string, requestOptions?: SessionBufferSyncRequestOptions) => boolean;
   requestSessionBufferHead: (
     sessionId: string,
-    ws?: any,
+    ws?: BridgeTransportSocket | null,
     headOptions?: { force?: boolean; trackProbe?: boolean },
   ) => boolean;
-  handleSocketServerMessage: (messageOptions: any, msg: any) => void;
-  handleSocketConnectedBaseline: (connectedOptions: any) => void;
-  finalizeSocketFailureBaseline: (baselineOptions: any) => any;
+  handleSocketServerMessage: (messageOptions: SessionSocketServerMessageOptions, msg: ServerMessage) => void;
+  handleSocketConnectedBaseline: (connectedOptions: SessionSocketConnectedBaselineOptions) => void;
+  finalizeSocketFailureBaseline: (baselineOptions: SessionSocketFailureBaselineOptions) => SessionSocketFailureBaselineResult;
 }
 
 export function createSessionMessageAssemblies(
@@ -108,20 +208,11 @@ export function createSessionMessageAssemblies(
   const daemonConnection = options.daemonConnection;
   const tailRefreshStoreRef = { current: options.tailRefreshStore };
 
-  const commitSessionBufferUpdate = (sessionId: string, nextBuffer: any) => {
+  const commitSessionBufferUpdate = (sessionId: string, nextBuffer: SessionBufferState) => {
     return options.sessionBufferStoreRef.current.commitBuffer(sessionId, nextBuffer);
   };
 
-  const requestSessionBufferSync = (sessionId: string, requestOptions?: {
-    ws?: any;
-    reason?: string;
-    purpose?: any;
-    sessionOverride?: any;
-    liveHead?: any;
-    invalidLocalWindow?: boolean;
-    requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
-    requestMissingRangesOverride?: Array<{ startIndex: number; endIndex: number }> | null;
-  }) => requestSessionBufferSyncRuntime({
+  const requestSessionBufferSync = (sessionId: string, requestOptions?: SessionBufferSyncRequestOptions) => requestSessionBufferSyncRuntime({
     sessionId,
     requestOptions,
     refs: {
@@ -143,7 +234,7 @@ export function createSessionMessageAssemblies(
 
   const requestSessionBufferHead = (
     sessionId: string,
-    ws?: any,
+    ws?: BridgeTransportSocket | null,
     headOptions?: { force?: boolean; trackProbe?: boolean },
   ) => requestSessionBufferHeadRuntime({
     sessionId,
@@ -169,7 +260,7 @@ export function createSessionMessageAssemblies(
     latestEndIndex: number,
     availableStartIndex?: number,
     availableEndIndex?: number,
-    cursor?: any,
+    cursor?: TerminalCursorState | null,
     cursorKeysApp?: boolean,
   ) => {
     handleBufferHeadRuntime({
@@ -226,16 +317,10 @@ export function createSessionMessageAssemblies(
     });
   };
 
-  const handleSocketServerMessage = (messageOptions: {
-    sessionId: string;
-    host: any;
-    ws: any;
-    debugScope: 'connect' | 'reconnect';
-    rawFrameBytes?: number;
-    onConnected: () => void;
-    onFailure: (message: string, retryable: boolean) => void;
-    onClosed: (reason?: string) => void;
-  }, msg: any) => {
+  const handleSocketServerMessage = (
+    messageOptions: SessionSocketServerMessageOptions,
+    msg: ServerMessage,
+  ) => {
     handleSocketServerMessageRuntime({
       params: messageOptions,
       msg,
@@ -260,11 +345,7 @@ export function createSessionMessageAssemblies(
     });
   };
 
-  const handleSocketConnectedBaseline = (connectedOptions: {
-    sessionId: string;
-    sessionName: string;
-    ws: any;
-  }) => {
+  const handleSocketConnectedBaseline = (connectedOptions: SessionSocketConnectedBaselineOptions) => {
     handleSocketConnectedBaselineRuntime({
       sessionId: connectedOptions.sessionId,
       sessionName: connectedOptions.sessionName,
@@ -286,11 +367,7 @@ export function createSessionMessageAssemblies(
     });
   };
 
-  const finalizeSocketFailureBaseline = (baselineOptions: {
-    sessionId: string;
-    message: string;
-    markCompleted: () => boolean;
-  }) => {
+  const finalizeSocketFailureBaseline = (baselineOptions: SessionSocketFailureBaselineOptions) => {
     return finalizeSocketFailureBaselineRuntime({
       sessionId: baselineOptions.sessionId,
       message: baselineOptions.message,

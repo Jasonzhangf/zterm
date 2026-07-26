@@ -349,3 +349,5 @@ export function createRemoteWindowReceiverRuntime(input?: {
 
   return runtime;
 }
+
+export type RemoteWindowReceiverRuntime = ReturnType<typeof createRemoteWindowReceiverRuntime>;

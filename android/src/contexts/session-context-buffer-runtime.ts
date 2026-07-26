@@ -77,7 +77,7 @@ interface RevisionResetExpectation {
   seenAt: number;
 }
 
-interface SameRevisionChunkFrameState {
+export interface SameRevisionChunkFrameState {
   frameKey: string;
   revision: number;
   frameStartIndex: number;

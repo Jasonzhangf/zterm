@@ -91,3 +91,5 @@ export function createFileTransferMessageRuntime(input: {
     },
   };
 }
+
+export type FileTransferMessageRuntime = ReturnType<typeof createFileTransferMessageRuntime>;

@@ -457,3 +457,5 @@ export function createRemoteWindowMessageRuntime(input?: {
 
   return runtime;
 }
+
+export type RemoteWindowMessageRuntime = ReturnType<typeof createRemoteWindowMessageRuntime>;

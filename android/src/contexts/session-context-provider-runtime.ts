@@ -1,5 +1,5 @@
 import { useRef, useState } from 'react';
-import type { Host, ServerMessage, SessionScheduleState } from '../lib/types';
+import type { SessionScheduleState } from '../lib/types';
 import { createFileTransferMessageRuntime } from '../lib/file-transfer-message-runtime';
 import { createRemoteScreenshotRuntime } from '../lib/remote-screenshot-runtime';
 import { createRemoteWindowMessageRuntime } from '../lib/remote-window-message-runtime';
@@ -9,7 +9,6 @@ import { createSessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import { createSessionReconnectStore } from '../lib/session-reconnect-store';
 import { createSessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import { createSessionTransportRuntimeStore } from '../lib/session-transport-runtime';
-import type { BridgeTransportSocket } from '../lib/traversal/types';
 import { createSessionBufferStore } from '../lib/session-buffer-store';
 import { createSessionRenderGate } from '../lib/session-render-gate';
 import { createSessionHeadStore } from '../lib/session-head-store';
@@ -19,27 +18,13 @@ import type { SessionTmuxTargetRequestStore } from './session-context-tmux-manag
 import type { SessionVisibleRangeState } from './session-visible-range-helpers';
 import type { SessionPullStates } from './session-pull-state-helpers';
 import type { RevisionResetExpectation } from './session-context-core';
-
-type HandleSocketConnectedBaselineFn = (options: {
-  sessionId: string;
-  sessionName: string;
-  ws: BridgeTransportSocket;
-}) => void;
-
-type FinalizeSocketFailureBaselineFn = (options: {
-  sessionId: string;
-  message: string;
-  markCompleted: () => boolean;
-}) => { shouldContinue: boolean; manualClosed: boolean };
-
-type HandleSocketServerMessageFn = (params: {
-  sessionId: string;
-  host: Host;
-  ws: BridgeTransportSocket;
-  debugScope: 'connect' | 'reconnect';
-  onConnected: () => void;
-  onFailure: (message: string, retryable: boolean) => void;
-}, msg: ServerMessage) => void;
+import type { SameRevisionChunkFrameState } from './session-context-buffer-runtime';
+import type {
+  FinalizeSocketFailureBaselineFn,
+  HandleSocketConnectedBaselineFn,
+  HandleSocketServerMessageFn,
+} from './session-context-provider-assembly-types';
+import type { RemoteWindowTargetCatalogCacheStore } from './session-context-remote-window-runtime';
 
 export function useSessionProviderRuntime(options: {
   appForegroundActive?: boolean;
@@ -69,14 +54,14 @@ export function useSessionProviderRuntime(options: {
   const sessionRevisionResetRef = useRef<Map<string, RevisionResetExpectation>>(new Map());
   const sessionTailRefreshStoreRef = useRef(createSessionTailRefreshStore());
   const lastHeadRequestAtRef = useRef<Map<string, number>>(new Map());
-  const sameRevisionChunkFrameRef = useRef<Map<string, any>>(new Map());
+  const sameRevisionChunkFrameRef = useRef<Map<string, SameRevisionChunkFrameState>>(new Map());
   const sessionPullStateRef = useRef<Map<string, SessionPullStates>>(new Map());
   const sessionAttachTokensRef = useRef<Map<string, string>>(new Map());
   const pendingSessionTransportOpenIntentsRef = useRef<Map<string, PendingSessionTransportOpenIntent>>(new Map());
   const tmuxTargetRequestsRef = useRef<SessionTmuxTargetRequestStore>(new Map());
   const activeBodySubscriptionSuppressedRef = useRef(false);
   const remoteScreenshotRuntimeRef = useRef(createRemoteScreenshotRuntime());
-  const remoteWindowTargetCatalogCacheRef = useRef(new Map());
+  const remoteWindowTargetCatalogCacheRef = useRef<RemoteWindowTargetCatalogCacheStore>(new Map());
   const remoteWindowReceiverRuntimeRef = useRef(createRemoteWindowReceiverRuntime());
   const remoteWindowMessageRuntimeRef = useRef(createRemoteWindowMessageRuntime({
     onStreamIceCandidate: (payload) => remoteWindowReceiverRuntimeRef.current.addIceCandidate(payload),

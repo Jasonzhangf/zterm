@@ -13,7 +13,7 @@ export interface PendingRemoteScreenshotRequest {
   fileName: string | null;
   chunks: Map<number, string>;
   totalBytes: number;
-  phase: 'request-sent' | 'capturing' | 'transferring';
+  phase: 'request-sent' | 'capturing' | 'transferring' | 'failed';
   timeoutId: number | null;
   onProgress?: (progress: RemoteScreenshotStatusPayload) => void;
   resolve: (capture: RemoteScreenshotCapture) => void;
@@ -239,3 +239,5 @@ export function createRemoteScreenshotRuntime(input?: {
     },
   };
 }
+
+export type RemoteScreenshotRuntime = ReturnType<typeof createRemoteScreenshotRuntime>;
