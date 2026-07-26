@@ -8,10 +8,12 @@ const requiredDocs = [
   'docs/wiki/daemon.md',
   'docs/wiki/cli.md',
   'docs/wiki/mainline-source.md',
+  'docs/wiki/modules.md',
   'docs/wiki/mainline-call-map.json',
   'docs/wiki/generated/daemon.html',
   'docs/wiki/generated/cli.html',
   'docs/wiki/generated/mainline-source.html',
+  'docs/wiki/generated/modules.html',
 ] as const;
 
 const requiredFunctionMapIds = [
@@ -63,6 +65,7 @@ describe('function wiki truth gate', () => {
       'docs/wiki/daemon.md',
       'docs/wiki/cli.md',
       'docs/wiki/mainline-source.md',
+      'docs/wiki/modules.md',
     ]) {
       expect(architecture).toContain(path);
       expect(workflow).toContain(path);
@@ -142,14 +145,15 @@ describe('function wiki truth gate', () => {
         expect(nodeIds.has(edge.from), `${lifecycle.lifecycle_id}:${edge.from}`).toBe(true);
         expect(nodeIds.has(edge.to), `${lifecycle.lifecycle_id}:${edge.to}`).toBe(true);
         expect(featureIds.has(edge.owner_feature), edge.owner_feature).toBe(true);
-        expect(['anchored', 'partial', 'binding pending']).toContain(edge.status);
+        expect(['anchored', 'partial']).toContain(edge.status);
+        expect(edge.status, edge.edge_id).not.toBe('binding pending');
         expect(edge.edge_id).toBe(expectedEdgeId);
       }
     }
   });
 
   it('keeps generated html offline and sourced from mermaid diagrams', () => {
-    for (const file of ['daemon', 'cli', 'mainline-source']) {
+    for (const file of ['daemon', 'cli', 'mainline-source', 'modules']) {
       const md = read(`docs/wiki/${file}.md`);
       const html = read(`docs/wiki/generated/${file}.html`);
       expect(md).toContain('```mermaid');

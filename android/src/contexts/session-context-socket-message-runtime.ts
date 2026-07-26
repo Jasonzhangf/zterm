@@ -10,16 +10,20 @@ import { runtimeDebugPrechecked, setRuntimeDebugEnabled } from '../lib/runtime-d
 import { isFileTransferMessage } from '../lib/file-transfer-message-runtime';
 import { isRemoteWindowControlMessage, type RemoteWindowControlMessage } from '../lib/remote-window-message-runtime';
 import { handleTerminalInputAck } from './session-context-input-runtime';
+import type { SessionReconnectStore } from '../lib/session-reconnect-store';
 import type {
   ClientMessage,
   Host,
   ServerMessage,
   Session,
+  SessionBufferState,
   SessionScheduleState,
   TerminalBufferPayload,
   TerminalCursorState,
 } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
+import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
+import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import { deletePendingSessionTransportOpenIntent } from './session-context-open-intent-store';
 
 interface MutableRefObject<T> {
@@ -72,7 +76,7 @@ export function handleSocketServerMessageRuntime(options: {
     stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null }>;
     scheduleStatesRef: MutableRefObject<Record<string, SessionScheduleState>>;
     lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
-    lastPongAtRef: MutableRefObject<Map<string, number>>;
+    heartbeatStore: SessionHeartbeatStore;
   };
   settleSessionPullState: (sessionId: string, payload: TerminalBufferPayload) => void;
   runtimeDebug: RuntimeDebugFn;
@@ -277,7 +281,7 @@ export function handleSocketServerMessageRuntime(options: {
     case 'sessions':
       break;
     case 'pong':
-      options.refs.lastPongAtRef.current.set(params.sessionId, Date.now());
+      options.refs.heartbeatStore.recordPong(params.sessionId, Date.now());
       break;
   }
 }
@@ -288,11 +292,11 @@ export function handleSocketConnectedBaselineRuntime(options: {
   ws: BridgeTransportSocket;
   refs: {
     stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null }>;
-    pendingConnectTailRefreshRef: MutableRefObject<Set<string>>;
+    tailRefreshStore: SessionTailRefreshStore;
     lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
     connectedBaselineBurstGuardRef: MutableRefObject<Set<string>>;
   };
-  readSessionBufferSnapshot: (sessionId: string) => Session['buffer'];
+  readSessionBufferSnapshot: (sessionId: string) => SessionBufferState;
   applyTransportDiagnostics: (sessionId: string, socket: BridgeTransportSocket) => void;
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
   setScheduleStateForSession: (
@@ -310,9 +314,7 @@ export function handleSocketConnectedBaselineRuntime(options: {
   ) => boolean;
   incrementConnectedSync: () => void;
 }) {
-  const currentSession = options.refs.stateRef.current.sessions.find((item) => item.id === options.sessionId) || null;
   const hadLocalWindowBeforeConnected = hasSessionLocalWindow(
-    currentSession,
     options.readSessionBufferSnapshot(options.sessionId),
   );
   options.applyTransportDiagnostics(options.sessionId, options.ws);
@@ -329,7 +331,7 @@ export function handleSocketConnectedBaselineRuntime(options: {
     hadLocalWindowBeforeConnected,
   });
   if (connectedHeadRefreshPlan.shouldMarkPendingConnectTailRefresh) {
-    options.refs.pendingConnectTailRefreshRef.current.add(options.sessionId);
+    options.refs.tailRefreshStore.markPendingConnectTailRefresh(options.sessionId);
   }
   if (connectedHeadRefreshPlan.shouldRequestHead) {
     options.requestSessionBufferHead(options.sessionId, options.ws, {
@@ -351,7 +353,7 @@ export function finalizeSocketFailureBaselineRuntime(options: {
   markCompleted: () => boolean;
   refs: {
     pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, unknown>>;
-    manualCloseRef: MutableRefObject<Set<string>>;
+    reconnectStore: SessionReconnectStore;
   };
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
@@ -386,7 +388,7 @@ export function finalizeSocketFailureBaselineRuntime(options: {
     error: options.message,
   }));
 
-  const manualClosed = options.refs.manualCloseRef.current.has(options.sessionId);
+  const manualClosed = options.refs.reconnectStore.isManualClosed(options.sessionId);
   return {
     shouldContinue: !manualClosed,
     manualClosed,

@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createSessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import { handleSocketServerMessageRuntime } from './session-context-socket-message-runtime';
 import { reduceSessionAction, type SessionManagerState } from './session-context-core';
 import { createSessionBufferState } from '../lib/terminal-buffer';
@@ -22,7 +23,13 @@ function makeHost(): Host {
   };
 }
 
-function makeSession(): Session {
+type TestSession = Session & {
+  buffer: import('../lib/types').SessionBufferState;
+  daemonHeadRevision?: number;
+  daemonHeadEndIndex?: number;
+};
+
+function makeSession(): TestSession {
   return {
     id: 'session-1',
     hostId: 'host-1',
@@ -95,7 +102,7 @@ describe('session-context-socket-message-runtime connected truth', () => {
           } },
         scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
         lastHeadRequestAtRef: { current: new Map() },
-        lastPongAtRef: { current: new Map() },
+        heartbeatStore: createSessionHeartbeatStore(),
       },
       settleSessionPullState: vi.fn(),
       runtimeDebug: vi.fn(),
@@ -166,7 +173,7 @@ describe('session-context-socket-message-runtime connected truth', () => {
         stateRef,
         scheduleStatesRef,
         lastHeadRequestAtRef: { current: new Map() },
-        lastPongAtRef: { current: new Map() },
+        heartbeatStore: createSessionHeartbeatStore(),
       },
       settleSessionPullState: vi.fn(),
       runtimeDebug: vi.fn(),
@@ -224,7 +231,7 @@ describe('session-context-socket-message-runtime connected truth', () => {
         stateRef,
         scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
         lastHeadRequestAtRef: { current: new Map() },
-        lastPongAtRef: { current: new Map() },
+        heartbeatStore: createSessionHeartbeatStore(),
       },
       settleSessionPullState: vi.fn(),
       runtimeDebug: vi.fn(),
@@ -284,7 +291,7 @@ describe('session-context-socket-message-runtime connected truth', () => {
         stateRef,
         scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
         lastHeadRequestAtRef: { current: new Map() },
-        lastPongAtRef: { current: new Map() },
+        heartbeatStore: createSessionHeartbeatStore(),
       },
       settleSessionPullState: vi.fn(),
       runtimeDebug: vi.fn(),
@@ -343,7 +350,7 @@ describe('session-context-socket-message-runtime connected truth', () => {
         stateRef: { current: state },
         scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
         lastHeadRequestAtRef,
-        lastPongAtRef: { current: new Map() },
+        heartbeatStore: createSessionHeartbeatStore(),
       },
       settleSessionPullState: vi.fn(),
       runtimeDebug: vi.fn(),
@@ -392,7 +399,7 @@ describe('session-context-socket-message-runtime connected truth', () => {
         },
         scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
         lastHeadRequestAtRef: { current: new Map() },
-        lastPongAtRef: { current: new Map() },
+        heartbeatStore: createSessionHeartbeatStore(),
       },
       settleSessionPullState: vi.fn(),
       runtimeDebug: vi.fn(),
@@ -451,7 +458,7 @@ describe('session-context-socket-message-runtime connected truth', () => {
         },
         scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
         lastHeadRequestAtRef: { current: new Map() },
-        lastPongAtRef: { current: new Map() },
+        heartbeatStore: createSessionHeartbeatStore(),
       },
       settleSessionPullState: vi.fn(),
       runtimeDebug: vi.fn(),
@@ -509,7 +516,7 @@ describe('session-context-socket-message-runtime connected truth', () => {
         },
         scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
         lastHeadRequestAtRef: { current: new Map() },
-        lastPongAtRef: { current: new Map() },
+        heartbeatStore: createSessionHeartbeatStore(),
       },
       settleSessionPullState: vi.fn(),
       runtimeDebug: vi.fn(),
@@ -565,7 +572,7 @@ describe('session-context-socket-message-runtime connected truth', () => {
         },
         scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
         lastHeadRequestAtRef: { current: new Map() },
-        lastPongAtRef: { current: new Map() },
+        heartbeatStore: createSessionHeartbeatStore(),
       },
       settleSessionPullState: vi.fn(),
       runtimeDebug: vi.fn(),
@@ -614,7 +621,7 @@ describe('session-context-socket-message-runtime remote window messages', () => 
         stateRef: { current: { sessions: [makeSession()], activeSessionId: 'session-1' } },
         scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
         lastHeadRequestAtRef: { current: new Map() },
-        lastPongAtRef: { current: new Map() },
+        heartbeatStore: createSessionHeartbeatStore(),
       },
       settleSessionPullState: vi.fn(),
       runtimeDebug: vi.fn(),
@@ -657,7 +664,7 @@ describe('session-context-socket-message-runtime remote window messages', () => 
         stateRef: { current: { sessions: [makeSession()], activeSessionId: 'session-1' } },
         scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
         lastHeadRequestAtRef: { current: new Map() },
-        lastPongAtRef: { current: new Map() },
+        heartbeatStore: createSessionHeartbeatStore(),
       },
       settleSessionPullState: vi.fn(),
       runtimeDebug: vi.fn(),
@@ -777,7 +784,7 @@ describe('session-context-socket-message-runtime inactive live buffer gate', () 
         },
         scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
         lastHeadRequestAtRef: { current: new Map() },
-        lastPongAtRef: { current: new Map() },
+        heartbeatStore: createSessionHeartbeatStore(),
       },
       settleSessionPullState,
       runtimeDebug,
@@ -842,7 +849,7 @@ describe('session-context-socket-message-runtime inactive live buffer gate', () 
         },
         scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
         lastHeadRequestAtRef: { current: new Map() },
-        lastPongAtRef: { current: new Map() },
+        heartbeatStore: createSessionHeartbeatStore(),
       },
       settleSessionPullState: vi.fn(),
       runtimeDebug,
@@ -911,7 +918,7 @@ describe('session-context-socket-message-runtime inactive live buffer gate', () 
         },
         scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
         lastHeadRequestAtRef: { current: new Map() },
-        lastPongAtRef: { current: new Map() },
+        heartbeatStore: createSessionHeartbeatStore(),
       },
       settleSessionPullState,
       runtimeDebug: vi.fn(),

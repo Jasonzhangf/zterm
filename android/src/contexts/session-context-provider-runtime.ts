@@ -5,6 +5,9 @@ import { createRemoteScreenshotRuntime } from '../lib/remote-screenshot-runtime'
 import { createRemoteWindowMessageRuntime } from '../lib/remote-window-message-runtime';
 import { createRemoteWindowReceiverRuntime } from '../lib/remote-window-receiver-runtime';
 import { createSessionDebugMetricsStore } from '../lib/session-debug-metrics-store';
+import { createSessionHeartbeatStore } from '../lib/session-heartbeat-store';
+import { createSessionReconnectStore } from '../lib/session-reconnect-store';
+import { createSessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import { createSessionTransportRuntimeStore } from '../lib/session-transport-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import { createSessionBufferStore } from '../lib/session-buffer-store';
@@ -14,12 +17,8 @@ import { runtimeDebug } from '../lib/runtime-debug';
 import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
 import type { SessionTmuxTargetRequestStore } from './session-context-tmux-management-runtime';
 import type { SessionVisibleRangeState } from './session-visible-range-helpers';
-import type { SessionBufferHeadState } from './session-buffer-planner-helpers';
 import type { SessionPullStates } from './session-pull-state-helpers';
-import type {
-  RevisionResetExpectation,
-  SessionReconnectRuntime,
-} from './session-context-core';
+import type { RevisionResetExpectation } from './session-context-core';
 
 type HandleSocketConnectedBaselineFn = (options: {
   sessionId: string;
@@ -59,26 +58,17 @@ export function useSessionProviderRuntime(options: {
     },
     runtimeDebug,
   }));
-  const pingIntervalsRef = useRef<Map<string, ReturnType<typeof setInterval>>>(new Map());
+  const sessionHeartbeatStoreRef = useRef(createSessionHeartbeatStore());
+  const sessionReconnectStoreRef = useRef(createSessionReconnectStore());
   const handshakeTimeoutsRef = useRef<Map<string, number>>(new Map());
   const sessionVisibleRangeRef = useRef<Map<string, SessionVisibleRangeState>>(new Map());
-  const lastPongAtRef = useRef<Map<string, number>>(new Map());
-  const lastServerActivityAtRef = useRef<Map<string, number>>(new Map());
-  const lastTerminalActivityAtRef = useRef<Map<string, number>>(new Map());
-  const staleTransportProbeAtRef = useRef<Map<string, number>>(new Map());
-  const reconnectRuntimesRef = useRef<Map<string, SessionReconnectRuntime>>(new Map());
-  const manualCloseRef = useRef<Set<string>>(new Set());
   const lastActivatedSessionIdRef = useRef<string | null>(null);
   const lastActiveReentryAtRef = useRef<Map<string, number>>(new Map());
   const lastConnectedBaselineAtRef = useRef<Map<string, number>>(new Map());
   const connectedBaselineBurstGuardRef = useRef<Set<string>>(new Set());
-  const sessionBufferHeadsRef = useRef<Map<string, SessionBufferHeadState>>(new Map());
   const sessionRevisionResetRef = useRef<Map<string, RevisionResetExpectation>>(new Map());
-  const pendingInputTailRefreshRef = useRef<Map<string, { requestedAt: number; localRevision: number }>>(new Map());
-  const pendingConnectTailRefreshRef = useRef<Set<string>>(new Set());
-  const pendingResumeTailRefreshRef = useRef<Set<string>>(new Set());
+  const sessionTailRefreshStoreRef = useRef(createSessionTailRefreshStore());
   const lastHeadRequestAtRef = useRef<Map<string, number>>(new Map());
-  const lastSyncRequestAtRef = useRef<Map<string, any>>(new Map());
   const sameRevisionChunkFrameRef = useRef<Map<string, any>>(new Map());
   const sessionPullStateRef = useRef<Map<string, SessionPullStates>>(new Map());
   const sessionAttachTokensRef = useRef<Map<string, string>>(new Map());
@@ -128,26 +118,17 @@ export function useSessionProviderRuntime(options: {
       sessionBufferStoreRef,
       sessionRenderGateRef,
       sessionHeadStoreRef,
-      pingIntervalsRef,
+      sessionHeartbeatStoreRef,
+      sessionReconnectStoreRef,
       handshakeTimeoutsRef,
       sessionVisibleRangeRef,
-      lastPongAtRef,
-      lastServerActivityAtRef,
-      lastTerminalActivityAtRef,
-      staleTransportProbeAtRef,
-      reconnectRuntimesRef,
-      manualCloseRef,
       lastActivatedSessionIdRef,
       lastActiveReentryAtRef,
       lastConnectedBaselineAtRef,
       connectedBaselineBurstGuardRef,
-      sessionBufferHeadsRef,
       sessionRevisionResetRef,
-      pendingInputTailRefreshRef,
-      pendingConnectTailRefreshRef,
-      pendingResumeTailRefreshRef,
+      sessionTailRefreshStoreRef,
       lastHeadRequestAtRef,
-      lastSyncRequestAtRef,
       sameRevisionChunkFrameRef,
       sessionPullStateRef,
       sessionAttachTokensRef,

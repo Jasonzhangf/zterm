@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TerminalView as BaseTerminalView } from './TerminalView';
 import { TerminalTabSwipeSurface } from './terminal/TerminalTabSwipeSurface';
 import { createSessionBufferState } from '../lib/terminal-buffer';
+import { createSessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import { createSessionBufferStore } from '../lib/session-buffer-store';
 import { createSessionHeadStore } from '../lib/session-head-store';
 import { createSessionRenderGate } from '../lib/session-render-gate';
@@ -44,6 +45,22 @@ class ResizeObserverMock {
   }
 }
 
+function makeLiveHeadStoreRef(entries?: Array<[string, any]>) {
+  const liveHeads = new Map<string, any>(entries || []);
+  return {
+    current: {
+      getLiveHead: (sessionId: string) => liveHeads.get(sessionId) || null,
+      setLiveHead: (sessionId: string, head: any) => {
+        liveHeads.set(sessionId, head);
+        return true;
+      },
+      clearLiveHead: (sessionId: string) => {
+        liveHeads.delete(sessionId);
+      },
+    },
+  };
+}
+
 function buildRows(count: number, prefix = 'row') {
   return Array.from({ length: count }, (_, index) => `${prefix}-${String(index + 1).padStart(3, '0')}`);
 }
@@ -59,13 +76,19 @@ function cell(char: string, options?: Partial<TerminalCell>): TerminalCell {
   };
 }
 
+type TestSession = Session & {
+  buffer: SessionBufferState;
+  daemonHeadRevision?: number;
+  daemonHeadEndIndex?: number;
+};
+
 function makeSession(options: {
   revision: number;
   lines: string[];
   bufferTailEndIndex: number;
   startIndex?: number;
   bufferHeadStartIndex?: number;
-}) {
+}): TestSession {
   const buffer = createSessionBufferState({
     lines: options.lines,
     startIndex: options.startIndex ?? 0,
@@ -78,7 +101,7 @@ function makeSession(options: {
     cacheLines: 500,
   });
 
-  const session: Session = {
+  const session: TestSession = {
     id: 's1',
     hostId: 'host-s1',
     connectionName: 'conn-s1',
@@ -641,29 +664,29 @@ describe('TerminalView minimal mirror render', () => {
     const refs = {
       stateRef: { current: { sessions: [{ ...makeSession({ revision: 10, lines: [], bufferTailEndIndex: 104 }), id: sessionId }], activeSessionId: sessionId } },
       sessionRevisionResetRef: { current: new Map() },
-      sessionBufferHeadsRef: {
-        current: new Map([[sessionId, {
+      sessionHeadStoreRef: makeLiveHeadStoreRef([[sessionId, {
           revision: 10,
           latestEndIndex: 104,
           availableStartIndex: 100,
           availableEndIndex: 104,
           seenAt: Date.now(),
         }]]),
-      },
-      pendingInputTailRefreshRef: { current: new Map() },
-      pendingConnectTailRefreshRef: { current: new Set<string>() },
-      pendingResumeTailRefreshRef: { current: new Set<string>([sessionId]) },
-      lastSyncRequestAtRef: {
-        current: new Map([[`${sessionId}:tail-refresh`, {
-          sentAt: Date.now(),
-          requestStartIndex: 100,
-          requestEndIndex: 104,
-          knownRevision: 10,
-          localStartIndex: 100,
-          localEndIndex: 104,
-          targetHeadRevision: 10,
-          repairSignature: '',
-        }]]),
+      tailRefreshStoreRef: {
+        current: (() => {
+          const store = createSessionTailRefreshStore();
+          store.markPendingResumeTailRefresh(sessionId);
+          store.recordSyncRequest(sessionId, 'tail-refresh', {
+            sentAt: Date.now(),
+            requestStartIndex: 100,
+            requestEndIndex: 104,
+            knownRevision: 10,
+            localStartIndex: 100,
+            localEndIndex: 104,
+            targetHeadRevision: 10,
+            repairSignature: '',
+          });
+          return store;
+        })(),
       },
       sessionVisibleRangeRef: {
         current: new Map([[sessionId, { startIndex: 100, endIndex: 104, viewportRows: 4 }]]),
@@ -747,6 +770,190 @@ describe('TerminalView minimal mirror render', () => {
     }
   });
 
+  it('black-box repairs a missed non-gap input row after a later sparse same-tail patch', async () => {
+    const sessionId = 's-missed-non-gap-repair';
+    const liveBufferStore = createSessionBufferStore();
+    const liveHeadStore = createSessionHeadStore();
+    const renderGate = createSessionRenderGate({
+      liveBufferStore,
+      liveHeadStore,
+      recordSessionRenderCommit: vi.fn(),
+    });
+    const renderStore = renderGate.getRenderStore();
+    const sourceStartIndex = 100;
+    const initialRows = [
+      'stable-output-100',
+      'stable-output-101',
+      styledTextRow('draft input line one'),
+      styledTextRow('draft input line two'),
+      'old-status-104',
+    ];
+    const finalSourceRows = [
+      'stable-output-100',
+      'stable-output-101',
+      'accepted prompt ready',
+      '',
+      'new-status-104',
+    ];
+    const initialBuffer = createSessionBufferState({
+      lines: initialRows,
+      startIndex: sourceStartIndex,
+      endIndex: sourceStartIndex + initialRows.length,
+      bufferHeadStartIndex: sourceStartIndex,
+      bufferTailEndIndex: sourceStartIndex + initialRows.length,
+      rows: 24,
+      cols: 24,
+      revision: 10,
+      cacheLines: 500,
+    });
+    liveBufferStore.commitBuffer(sessionId, initialBuffer);
+    liveHeadStore.setHead(sessionId, {
+      daemonHeadRevision: 10,
+      daemonHeadEndIndex: 105,
+    });
+
+    const session = makeSession({ revision: 10, lines: [], bufferTailEndIndex: 105 });
+    session.id = sessionId;
+    session.buffer = initialBuffer;
+    session.daemonHeadRevision = 11;
+    session.daemonHeadEndIndex = 105;
+    const refs = {
+      stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+      sessionRevisionResetRef: { current: new Map() },
+      sessionHeadStoreRef: makeLiveHeadStoreRef([[sessionId, {
+          revision: 11,
+          latestEndIndex: 105,
+          availableStartIndex: 100,
+          availableEndIndex: 105,
+          seenAt: Date.now(),
+        }]]),
+      tailRefreshStoreRef: { current: createSessionTailRefreshStore() },
+      sessionVisibleRangeRef: {
+        current: new Map([[sessionId, { startIndex: 100, endIndex: 105, viewportRows: 5 }]]),
+      },
+    };
+    const requestSessionBufferSync = vi.fn((_sessionId: string, requestOptions?: any) => {
+      const local = liveBufferStore.getSnapshot(sessionId).buffer;
+      const requestWindow = requestOptions?.requestWindowOverride || { requestStartIndex: 100, requestEndIndex: 105 };
+      refs.tailRefreshStoreRef.current.recordSyncRequest(sessionId, 'reading-repair', {
+        sentAt: Date.now(),
+        requestStartIndex: requestWindow.requestStartIndex,
+        requestEndIndex: requestWindow.requestEndIndex,
+        knownRevision: local.revision,
+        localStartIndex: local.startIndex,
+        localEndIndex: local.endIndex,
+        targetHeadRevision: 11,
+        repairSignature: '',
+      });
+      return true;
+    });
+    const applyPayload = (payload: TerminalBufferPayload) => {
+      refs.sessionHeadStoreRef.current.setLiveHead(sessionId, {
+        revision: payload.revision,
+        latestEndIndex: payload.availableEndIndex ?? payload.endIndex,
+        availableStartIndex: payload.availableStartIndex ?? payload.startIndex,
+        availableEndIndex: payload.availableEndIndex ?? payload.endIndex,
+        seenAt: Date.now(),
+      });
+      liveHeadStore.setHead(sessionId, {
+        daemonHeadRevision: payload.revision,
+        daemonHeadEndIndex: payload.availableEndIndex ?? payload.endIndex,
+      });
+      applyIncomingBufferSyncRuntime({
+        sessionId,
+        payload,
+        refs,
+        readSessionBufferSnapshot: () => liveBufferStore.getSnapshot(sessionId).buffer,
+        resolveSessionCacheLines: () => 500,
+        summarizeBufferPayload: (incoming) => ({
+          revision: incoming.revision,
+          startIndex: incoming.startIndex,
+          endIndex: incoming.endIndex,
+          lineCount: incoming.lines.length,
+        }),
+        runtimeDebug: vi.fn(),
+        commitSessionBufferUpdate: (_sessionId: string, nextBuffer: SessionBufferState) =>
+          liveBufferStore.commitBuffer(_sessionId, nextBuffer),
+        scheduleSessionRenderCommit: (_sessionId: string) => renderGate.scheduleCommit(_sessionId),
+        isSessionTransportActive: () => true,
+        requestSessionBufferSync,
+      });
+    };
+
+    renderGate.scheduleCommit(sessionId);
+    await flushRenderGate();
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <BaseTerminalView
+          sessionId={sessionId}
+          sessionBufferStore={renderStore}
+          active
+          allowDomFocus
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+          themeId="classic-dark"
+        />
+      </div>,
+    );
+
+    await waitFor(() => expect(readRenderedRows(view.container)).toContain('draft input line two'));
+
+    applyPayload({
+      revision: 11,
+      startIndex: 104,
+      endIndex: 105,
+      availableStartIndex: 100,
+      availableEndIndex: 105,
+      cols: 24,
+      rows: 24,
+      cursorKeysApp: false,
+      cursor: null,
+      lines: [
+        { index: 104, cells: Array.from('new-status-104').map((char) => cell(char)) },
+      ],
+    });
+    await flushRenderGate();
+
+    await waitFor(() => {
+      const rows = readRenderedRows(view.container);
+      expect(rows).toContain('new-status-104');
+      expect(rows).toContain('draft input line two');
+    });
+    expect(requestSessionBufferSync).toHaveBeenCalledWith(sessionId, expect.objectContaining({
+      reason: 'buffer-sync-visible-stale-non-gap-repair',
+      purpose: 'reading-repair',
+      requestWindowOverride: { requestStartIndex: 100, requestEndIndex: 105 },
+      requestMissingRangesOverride: [{ startIndex: 100, endIndex: 105 }],
+    }));
+
+    applyPayload({
+      revision: 11,
+      startIndex: 100,
+      endIndex: 105,
+      availableStartIndex: 100,
+      availableEndIndex: 105,
+      cols: 24,
+      rows: 24,
+      cursorKeysApp: false,
+      cursor: null,
+      lines: finalSourceRows.map((line, offset) => ({
+        index: sourceStartIndex + offset,
+        cells: Array.from(line).map((char) => cell(char)),
+      })),
+    });
+    await flushRenderGate();
+
+    await waitFor(() => {
+      const rows = readRenderedRows(view.container);
+      expect(rows).toContain('accepted prompt ready');
+      expect(rows).toContain('new-status-104');
+      expect(rows).not.toContain('draft input line one');
+      expect(rows).not.toContain('draft input line two');
+    });
+    expectRenderedRowsMatchSource(view.container, finalSourceRows, sourceStartIndex);
+  });
+
   it('keeps source, buffer, render store, and DOM coherent after more-than-screen body refreshes', async () => {
     const sessionId = 's-large-refresh';
     const liveBufferStore = createSessionBufferStore();
@@ -769,18 +976,15 @@ describe('TerminalView minimal mirror render', () => {
     const refs = {
       stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
       sessionRevisionResetRef: { current: new Map() },
-      sessionBufferHeadsRef: { current: new Map<string, any>() },
-      pendingInputTailRefreshRef: { current: new Map() },
-      pendingConnectTailRefreshRef: { current: new Set<string>() },
-      pendingResumeTailRefreshRef: { current: new Set<string>() },
-      lastSyncRequestAtRef: { current: new Map() },
+      sessionHeadStoreRef: makeLiveHeadStoreRef(),
+      tailRefreshStoreRef: { current: createSessionTailRefreshStore() },
       sessionVisibleRangeRef: {
         current: new Map([[sessionId, { startIndex: 0, endIndex: 24, viewportRows: 24 }]]),
       },
     };
     const requestSessionBufferSync = vi.fn(() => true);
     const applyPayload = (payload: TerminalBufferPayload) => {
-      refs.sessionBufferHeadsRef.current.set(sessionId, {
+      refs.sessionHeadStoreRef.current.setLiveHead(sessionId, {
         revision: payload.revision,
         latestEndIndex: payload.availableEndIndex ?? payload.endIndex,
         availableStartIndex: payload.availableStartIndex,
@@ -3255,7 +3459,7 @@ describe('TerminalView minimal mirror render', () => {
       },
       cacheLines: 500,
     });
-    const session: Session = {
+    const session: TestSession = {
       id: 's1',
       hostId: 'host-s1',
       connectionName: 'conn-s1',

@@ -1,6 +1,9 @@
 import { useEffect, useRef } from 'react';
+import { getSessionTransportResource, type SessionTransportRuntimeStore } from '../lib/session-transport-runtime';
+import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionDebugOverlayMetrics, SessionScheduleState, SessionState } from '../lib/types';
-import type { SessionManagerState, SessionReconnectRuntime } from './session-context-core';
+import type { SessionManagerState } from './session-context-core';
+import type { SessionReconnectStore } from '../lib/session-reconnect-store';
 import { getPrimarySessionPullState, hasActiveSessionPullState } from './session-pull-state-helpers';
 
 
@@ -111,10 +114,9 @@ export function resolvePassiveVisibleRefreshTickMs(
 export function resolvePassiveTickTransportHealth(
   sessionId: string,
   sessionState: string,
-  transportRuntimeStoreRef: { current: { sessions: Map<string, { activeSocket?: { bufferedAmount?: number } | null }> } },
+  transportRuntimeStoreRef: { current: SessionTransportRuntimeStore },
 ): TransportHealth {
-  const transport = transportRuntimeStoreRef.current.sessions.get(sessionId);
-  const socket = transport?.activeSocket;
+  const socket = getSessionTransportResource(transportRuntimeStoreRef.current, sessionId).socket;
   const bufferedBytes = Number.isFinite(socket?.bufferedAmount)
     ? Math.max(0, Math.floor(socket?.bufferedAmount ?? 0))
     : 0;
@@ -128,8 +130,7 @@ export function resolvePassiveTickTransportHealth(
 export function shouldScheduleActiveTickRefresh(options: {
   state: Pick<SessionManagerState, 'sessions' | 'activeSessionId' | 'liveSessionIds'>;
   sessionId: string;
-  lastServerActivityAtRef: { current: Map<string, number> };
-  lastTerminalActivityAtRef?: { current: Map<string, number> };
+  heartbeatStore: SessionHeartbeatStore;
   lastConnectedBaselineAtRef?: { current: Map<string, number> };
   headStalePingMs: number;
   now?: number;
@@ -143,8 +144,7 @@ export function shouldScheduleActiveTickRefresh(options: {
   }
   const lastTerminalActivityAt = resolveTerminalActivityAt({
     sessionId: options.sessionId,
-    lastServerActivityAtRef: options.lastServerActivityAtRef,
-    lastTerminalActivityAtRef: options.lastTerminalActivityAtRef,
+    heartbeatStore: options.heartbeatStore,
     lastConnectedBaselineAtRef: options.lastConnectedBaselineAtRef,
   });
   if (lastTerminalActivityAt <= 0) {
@@ -157,8 +157,7 @@ export function shouldScheduleActiveTickRefresh(options: {
 export function shouldSchedulePassiveVisibleTickRefresh(options: {
   state: Pick<SessionManagerState, 'sessions' | 'activeSessionId' | 'liveSessionIds'>;
   sessionId: string;
-  lastServerActivityAtRef: { current: Map<string, number> };
-  lastTerminalActivityAtRef?: { current: Map<string, number> };
+  heartbeatStore: SessionHeartbeatStore;
   lastConnectedBaselineAtRef?: { current: Map<string, number> };
   headStalePingMs: number;
   now?: number;
@@ -175,8 +174,7 @@ export function shouldSchedulePassiveVisibleTickRefresh(options: {
   }
   const lastTerminalActivityAt = resolveTerminalActivityAt({
     sessionId: options.sessionId,
-    lastServerActivityAtRef: options.lastServerActivityAtRef,
-    lastTerminalActivityAtRef: options.lastTerminalActivityAtRef,
+    heartbeatStore: options.heartbeatStore,
     lastConnectedBaselineAtRef: options.lastConnectedBaselineAtRef,
   });
   if (lastTerminalActivityAt <= 0) {
@@ -188,17 +186,13 @@ export function shouldSchedulePassiveVisibleTickRefresh(options: {
 
 function resolveTerminalActivityAt(options: {
   sessionId: string;
-  lastServerActivityAtRef: { current: Map<string, number> };
-  lastTerminalActivityAtRef?: { current: Map<string, number> };
+  heartbeatStore: SessionHeartbeatStore;
   lastConnectedBaselineAtRef?: { current: Map<string, number> };
 }) {
-  if (options.lastTerminalActivityAtRef) {
-    return Math.max(
-      options.lastTerminalActivityAtRef.current.get(options.sessionId) || 0,
-      options.lastConnectedBaselineAtRef?.current.get(options.sessionId) || 0,
-    );
-  }
-  return options.lastServerActivityAtRef.current.get(options.sessionId) || 0;
+  return Math.max(
+    options.heartbeatStore.readLastTerminalActivityAt(options.sessionId),
+    options.lastConnectedBaselineAtRef?.current.get(options.sessionId) || 0,
+  );
 }
 
 export function useSessionContextLifecycle(options: {
@@ -211,20 +205,17 @@ export function useSessionContextLifecycle(options: {
     stateRef: { current: SessionManagerState };
     scheduleStatesRef: { current: Record<string, SessionScheduleState> };
     sessionDebugMetricsStoreRef: { current: SessionDebugMetricsStoreLike };
-    transportRuntimeStoreRef: { current: { sessions: Map<string, { activeSocket?: { bufferedAmount?: number } | null }> } };
+    transportRuntimeStoreRef: { current: SessionTransportRuntimeStore };
     sessionPullStateRef: { current: Map<string, unknown> };
     lastActivatedSessionIdRef: { current: string | null };
     lastActiveReentryAtRef: { current: Map<string, number> };
     lastConnectedBaselineAtRef: { current: Map<string, number> };
-    lastServerActivityAtRef: { current: Map<string, number> };
-    lastTerminalActivityAtRef?: { current: Map<string, number> };
+    heartbeatStore: SessionHeartbeatStore;
     remoteScreenshotRuntimeRef: { current: RemoteScreenshotRuntimeLike };
     remoteWindowMessageRuntimeRef: { current: RemoteWindowMessageRuntimeLike };
     remoteWindowReceiverRuntimeRef?: { current: RemoteWindowReceiverRuntimeLike };
-    pingIntervalsRef: { current: Map<string, ReturnType<typeof setInterval>> };
     handshakeTimeoutsRef: { current: Map<string, number> };
-    reconnectRuntimesRef: { current: Map<string, SessionReconnectRuntime> };
-    manualCloseRef: { current: Set<string> };
+    reconnectStore: SessionReconnectStore;
   };
   flushRuntimeDebugLogs: () => void;
   clientRuntimeDebugFlushIntervalMs: number;
@@ -305,9 +296,9 @@ export function useSessionContextLifecycle(options: {
         options.refs.stateRef.current.sessions.map((session) => {
           const pullStates = options.refs.sessionPullStateRef.current.get(session.id) || null;
           const pullState = getPrimarySessionPullState(pullStates as any);
-          const activeSocket = options.refs.transportRuntimeStoreRef.current.sessions.get(session.id)?.activeSocket || null;
-          const transportBufferedBytes = Number.isFinite(activeSocket?.bufferedAmount)
-            ? Math.max(0, Math.floor(activeSocket?.bufferedAmount || 0))
+          const effectiveSocket = getSessionTransportResource(options.refs.transportRuntimeStoreRef.current, session.id).socket;
+          const transportBufferedBytes = Number.isFinite(effectiveSocket?.bufferedAmount)
+            ? Math.max(0, Math.floor(effectiveSocket?.bufferedAmount || 0))
             : 0;
           return {
             sessionId: session.id,
@@ -418,8 +409,7 @@ export function useSessionContextLifecycle(options: {
         if (shouldScheduleActiveTickRefresh({
           state: options.refs.stateRef.current,
           sessionId: activeSessionId,
-          lastServerActivityAtRef: options.refs.lastServerActivityAtRef,
-          lastTerminalActivityAtRef: options.refs.lastTerminalActivityAtRef,
+          heartbeatStore: options.refs.heartbeatStore,
           lastConnectedBaselineAtRef: options.refs.lastConnectedBaselineAtRef,
           headStalePingMs,
           now,
@@ -489,8 +479,7 @@ export function useSessionContextLifecycle(options: {
           if (!shouldSchedulePassiveVisibleTickRefresh({
             state: options.refs.stateRef.current,
             sessionId,
-            lastServerActivityAtRef: options.refs.lastServerActivityAtRef,
-            lastTerminalActivityAtRef: options.refs.lastTerminalActivityAtRef,
+            heartbeatStore: options.refs.heartbeatStore,
             lastConnectedBaselineAtRef: options.refs.lastConnectedBaselineAtRef,
             headStalePingMs,
             now,
@@ -527,19 +516,13 @@ export function useSessionContextLifecycle(options: {
     options.refs.remoteWindowReceiverRuntimeRef?.current.dispose(
       'Session provider disposed before remote window receiver completed',
     );
-    for (const timer of options.refs.pingIntervalsRef.current.values()) {
-      clearInterval(timer);
-    }
+    options.refs.heartbeatStore.clearAllPingIntervals();
     for (const sessionId of options.refs.handshakeTimeoutsRef.current.keys()) {
       options.clearSessionHandshakeTimeout(sessionId);
     }
-    for (const reconnectRuntime of options.refs.reconnectRuntimesRef.current.values()) {
-      if (reconnectRuntime.timer) {
-        clearTimeout(reconnectRuntime.timer);
-      }
-    }
+    options.refs.reconnectStore.clearAllReconnectRuntimes();
     for (const session of options.refs.stateRef.current.sessions) {
-      options.refs.manualCloseRef.current.add(session.id);
+      options.refs.reconnectStore.markManualClosed(session.id);
       options.cleanupSocket(session.id, true);
       options.cleanupControlSocket(session.id, true);
     }

@@ -1,9 +1,11 @@
-import type { Host, ServerMessage, Session, SessionScheduleState, TerminalWidthMode } from '../lib/types';
+import type { Host, ServerMessage, Session, SessionBufferState, SessionScheduleState, TerminalWidthMode } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
+import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
+import type { SessionReconnectStore } from '../lib/session-reconnect-store';
+import { createClientDaemonConnection } from '../lib/client-daemon-connection';
 import { getResolvedSessionName } from '../lib/connection-target';
 import type {
   QueueSessionTransportOpenIntentOptions,
-  SessionReconnectRuntime,
 } from './session-context-core';
 import type {
   PendingSessionTransportOpenIntent,
@@ -12,6 +14,10 @@ import {
   buildTargetTransportHeartbeatKey,
 } from './session-context-socket-runtime';
 import {
+  buildSessionReconnectingFailureUpdates,
+} from './session-transport-open-helpers';
+import {
+  cleanupControlSocketOrchestrationRuntime,
   bindSessionTransportSocketLifecycleOrchestrationRuntime,
   primeSessionTransportSocketRuntime,
   sendTerminalResizeRuntime,
@@ -21,7 +27,6 @@ import {
   handleTargetMuxServerFrameRuntime,
 } from './session-context-transport-runtime';
 import type { TerminalMuxTargetServerMessage } from '@zterm/shared/protocol';
-import { createSessionControlTransportOrchestrationRuntime } from './session-context-transport-control-orchestration-runtime';
 import {
   applyTransportOpenConnectedEffectsRuntime,
   applyTransportOpenLiveFailureEffectsRuntime,
@@ -33,13 +38,11 @@ import {
   handleReconnectBeforeConnectSendRuntime,
   handleReconnectHandshakeFailureRuntime,
   openSessionMuxChannelByIntentRuntime,
-  openSessionTransportByIntentRuntime,
   queueSessionTransportOpenIntentRuntime,
   queueTransportOpenIntentRuntime,
 } from './session-context-transport-open-runtime';
 import {
   computeReconnectDelay,
-  createSessionReconnectRuntime,
 } from './session-context-core';
 import {
   hasSessionLocalWindow,
@@ -67,12 +70,13 @@ export function handleTargetMuxTransportFailureRuntime(options: {
   readSessionTerminalChannel: (sessionId: string) => {
     state: 'opening' | 'open' | 'closing' | 'closed';
   } | null;
-  writeSessionTerminalChannelState: (sessionId: string, state: 'closed') => unknown;
+  writeSessionTerminalChannelState: (sessionId: string, state: 'opening' | 'open' | 'closing' | 'closed') => unknown;
   writeSessionTargetTerminalSocket: (sessionId: string, socket: BridgeTransportSocket | null) => unknown;
   writeSessionTargetTerminalMuxReady: (sessionId: string, ready: boolean) => unknown;
   clearHeartbeat?: (sessionId: string, heartbeatOptions?: { heartbeatKey?: string }) => void;
   clearSessionHandshakeTimeout: (sessionId: string) => void;
   pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, PendingSessionTransportOpenIntent>>;
+  updateSessionSync: (id: string, updates: Partial<Session>) => void;
   scheduleReconnect: (
     sessionId: string,
     message: string,
@@ -95,49 +99,60 @@ export function handleTargetMuxTransportFailureRuntime(options: {
     });
   }
 
+  const replaySessionIds: string[] = [];
   for (const sessionId of targetSessionIds) {
     const channel = options.readSessionTerminalChannel(sessionId);
-    if (channel && channel.state !== 'closed') {
-      options.writeSessionTerminalChannelState(sessionId, 'closed');
-    }
-
     const pending = getPendingSessionTransportOpenIntent(
       options.pendingSessionTransportOpenIntentsRef.current,
       sessionId,
     );
-    if (pending) {
-      options.clearSessionHandshakeTimeout(sessionId);
-      deletePendingSessionTransportOpenIntent(options.pendingSessionTransportOpenIntentsRef.current, sessionId);
-      pending.finalizeFailure(options.message, true);
+    if (!channel || channel.state === 'closed') {
+      if (pending) {
+        options.clearSessionHandshakeTimeout(sessionId);
+        deletePendingSessionTransportOpenIntent(options.pendingSessionTransportOpenIntentsRef.current, sessionId);
+      }
       continue;
     }
 
-    options.scheduleReconnect(sessionId, options.message, true, {
+    options.writeSessionTerminalChannelState(sessionId, 'closed');
+    if (pending) {
+      options.clearSessionHandshakeTimeout(sessionId);
+      deletePendingSessionTransportOpenIntent(options.pendingSessionTransportOpenIntentsRef.current, sessionId);
+    }
+    options.updateSessionSync(sessionId, buildSessionReconnectingFailureUpdates(options.message, 0));
+    options.writeSessionTerminalChannelState(sessionId, 'opening');
+    replaySessionIds.push(sessionId);
+  }
+
+  if (replaySessionIds.length > 0) {
+    const replayAnchorSessionId = replaySessionIds.includes(options.anchorSessionId)
+      ? options.anchorSessionId
+      : replaySessionIds[0];
+    options.scheduleReconnect(replayAnchorSessionId, options.message, true, {
       immediate: true,
       resetAttempt: true,
+      force: true,
     });
   }
 
   options.runtimeDebug('session.mux.target-transport-failed', {
     anchorSessionId: options.anchorSessionId,
     message: options.message,
-    affectedSessionCount: targetSessionIds.length,
+    affectedSessionCount: replaySessionIds.length,
+    replaySessionIds,
   });
 }
 
 export function createSessionTransportOrchestrationRuntime(options: {
   stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null; liveSessionIds?: string[] }>;
-  readSessionBufferSnapshot: (sessionId: string) => Session['buffer'];
+  readSessionBufferSnapshot: (sessionId: string) => SessionBufferState;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
   sessionHandshakeTimeoutMs: number;
   sessionTerminalReadyTimeoutMs?: number;
   refs: {
     pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, PendingSessionTransportOpenIntent>>;
-    reconnectRuntimesRef: MutableRefObject<Map<string, SessionReconnectRuntime>>;
-    manualCloseRef: MutableRefObject<Set<string>>;
-    lastPongAtRef: MutableRefObject<Map<string, number>>;
-    lastServerActivityAtRef: MutableRefObject<Map<string, number>>;
-    staleTransportProbeAtRef: MutableRefObject<Map<string, number>>;
+    reconnectStore: SessionReconnectStore;
+    heartbeatStore: SessionHeartbeatStore;
     sessionDebugMetricsStoreRef: MutableRefObject<{
       recordRxBytes: (sessionId: string, data: string | ArrayBuffer) => void;
     }>;
@@ -225,7 +240,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
   clearTailRefreshRuntime: (sessionId: string) => void;
   clearSessionPullState: (sessionId: string) => void;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
-  buildTraversalSocketForHost: (host: Host, transportRole?: 'control' | 'session') => BridgeTransportSocket;
+  openDaemonTargetTransportSocket: (host: Host) => BridgeTransportSocket;
   applyTransportDiagnostics: (sessionId: string, socket: BridgeTransportSocket) => void;
   recordControlTransportRxBytes: (sessionId: string, data: string | ArrayBuffer) => void;
   recordSessionRx: (sessionId: string, data: string | ArrayBuffer) => void;
@@ -244,27 +259,14 @@ export function createSessionTransportOrchestrationRuntime(options: {
   writeSessionRequestedTerminalGeometry: (sessionId: string, geometry: { cols?: number | null; rows?: number | null; widthMode?: TerminalWidthMode } | null) => unknown;
   handleTargetMuxMessage?: (payload: { requestId?: string; message: TerminalMuxTargetServerMessage }) => boolean;
 }) {
-  let openSessionTransportByIntentRef: ((intent: PendingSessionTransportOpenIntent) => void) | null = null;
-  const controlTransportRuntime = createSessionControlTransportOrchestrationRuntime({
-    refs: {
-      pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
-    },
-    readSessionTargetControlSocket: options.readSessionTargetControlSocket,
-    readSessionTargetRuntime: options.readSessionTargetRuntime,
-    readSessionTargetKey: options.readSessionTargetKey,
-    writeSessionTransportToken: options.writeSessionTransportToken,
-    writeSessionTargetControlSocket: options.writeSessionTargetControlSocket,
-    clearSessionHandshakeTimeout: options.clearSessionHandshakeTimeout,
-    setSessionHandshakeTimeout: options.setSessionHandshakeTimeout,
-    sendSocketPayload: options.sendSocketPayload,
-    buildTraversalSocketForHost: options.buildTraversalSocketForHost,
-    applyTransportDiagnostics: options.applyTransportDiagnostics,
-    runtimeDebug: options.runtimeDebug,
-    recordControlTransportRxBytes: options.recordControlTransportRxBytes,
-    openSessionTransportByIntent: (intent) => openSessionTransportByIntentRef?.(intent) || null,
-    sessionHandshakeTimeoutMs: options.sessionHandshakeTimeoutMs,
-  });
-  const { cleanupControlSocket, ensureControlTransportForSessionOpen } = controlTransportRuntime;
+  const cleanupControlSocket = (sessionId: string, shouldClose = false) => {
+    cleanupControlSocketOrchestrationRuntime({
+      sessionId,
+      shouldClose,
+      readSessionTargetControlSocket: options.readSessionTargetControlSocket,
+      writeSessionTargetControlSocket: options.writeSessionTargetControlSocket,
+    });
+  };
 
   const primeSessionTransportSocket = (sessionId: string, ws: BridgeTransportSocket) => {
     primeSessionTransportSocketRuntime({
@@ -272,7 +274,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
       ws,
       writeSessionTransportSocket: options.writeSessionTransportSocket,
       updateSessionSync: options.updateSessionSync,
-      lastPongAtRef: options.refs.lastPongAtRef,
+      heartbeatStore: options.refs.heartbeatStore,
     });
   };
 
@@ -282,7 +284,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
     options.updateSessionSync(sessionId, { ws: null });
     const targetKey = options.readSessionTargetKey(sessionId);
     if (targetKey) {
-      options.refs.lastPongAtRef.current.set(
+      options.refs.heartbeatStore.recordPong(
         buildTargetTransportHeartbeatKey(targetKey),
         Date.now(),
       );
@@ -292,7 +294,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
   const clearReconnectForSession = (sessionId: string) => {
     clearReconnectForSessionRuntime({
       sessionId,
-      reconnectRuntimesRef: options.refs.reconnectRuntimesRef,
+      reconnectStore: options.refs.reconnectStore,
     });
   };
 
@@ -316,7 +318,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
       clearSessionHandshakeTimeout: options.clearSessionHandshakeTimeout,
       clearTailRefreshRuntime: options.clearTailRefreshRuntime,
       clearSessionPullState: options.clearSessionPullState,
-      staleTransportProbeAtRef: options.refs.staleTransportProbeAtRef,
+      reconnectStore: options.refs.reconnectStore,
     });
   };
 
@@ -377,7 +379,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
         if (!session) {
           return false;
         }
-        return !hasSessionLocalWindow(session, options.readSessionBufferSnapshot(sessionId));
+        return !hasSessionLocalWindow(options.readSessionBufferSnapshot(sessionId));
       },
       handleSocketServerMessage: (params, msg) => {
         options.refs.handleSocketServerMessageRef.current?.(params, msg);
@@ -390,6 +392,8 @@ export function createSessionTransportOrchestrationRuntime(options: {
       readRequestedTerminalGeometry: options.readRequestedTerminalGeometry,
     });
   };
+  // Retained for direct (non-mux) transport binding; current WIP flow routes through the mux lifecycle.
+  void bindSessionTransportSocketLifecycle;
 
   const buildMuxChannelCallbacks = (sessionId: string, ws: BridgeTransportSocket) => {
     const pending = getPendingSessionTransportOpenIntent(
@@ -456,10 +460,10 @@ export function createSessionTransportOrchestrationRuntime(options: {
       applyTransportDiagnostics: options.applyTransportDiagnostics,
       startSocketHeartbeat: options.startSocketHeartbeat,
       recordTargetServerActivity: (heartbeatKey) => {
-        options.refs.lastServerActivityAtRef.current.set(heartbeatKey, Date.now());
+        options.refs.heartbeatStore.recordServerActivity(heartbeatKey, Date.now());
       },
       recordTargetPong: (heartbeatKey) => {
-        options.refs.lastPongAtRef.current.set(heartbeatKey, Date.now());
+        options.refs.heartbeatStore.recordPong(heartbeatKey, Date.now());
       },
       runtimeDebug: options.runtimeDebug,
       finalizeFailure: (message) => {
@@ -474,6 +478,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
           clearHeartbeat: options.clearHeartbeat,
           clearSessionHandshakeTimeout: options.clearSessionHandshakeTimeout,
           pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
+          updateSessionSync: options.updateSessionSync,
           scheduleReconnect,
           runtimeDebug: options.runtimeDebug,
         });
@@ -505,21 +510,22 @@ export function createSessionTransportOrchestrationRuntime(options: {
     });
   };
 
-  function openSessionTransportByIntent(intent: PendingSessionTransportOpenIntent) {
-    openSessionTransportByIntentRuntime({
-      intent,
-      readSessionTransportToken: options.readSessionTransportToken,
-      readSessionTransportSocket: options.readSessionTransportSocket,
-      readSessionTargetKey: options.readSessionTargetKey,
-      cleanupSocket,
-      buildTraversalSocketForHost: options.buildTraversalSocketForHost,
-      runtimeDebug: options.runtimeDebug,
-      primeSessionTransportSocket,
-      bindSessionTransportSocketLifecycle,
-      writeSessionTransportToken: options.writeSessionTransportToken,
-    });
-  }
-  openSessionTransportByIntentRef = openSessionTransportByIntent;
+  const daemonConnection = createClientDaemonConnection({
+    readSessionTransportResource: options.readSessionTransportResource as any,
+    sendSocketPayload: options.sendSocketPayload,
+    openSessionTargetTransport: ({ sessionId, host, debugScope, finalizeFailure }) => {
+      const ws = options.openDaemonTargetTransportSocket(host);
+      primeTargetTerminalTransportSocket(sessionId, ws);
+      bindTargetMuxTransportSocketLifecycle({
+        sessionId,
+        host,
+        ws,
+        debugScope,
+        finalizeFailure,
+      });
+      return ws;
+    },
+  });
 
   function openSessionMuxChannelByIntent(intent: PendingSessionTransportOpenIntent) {
     options.clearSessionHandshakeTimeout(intent.sessionId);
@@ -538,9 +544,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
       updateSessionTerminalChannelState: options.writeSessionTerminalChannelState,
       readRequestedTerminalGeometry: options.readRequestedTerminalGeometry,
       sendSocketPayload: options.sendSocketPayload,
-      buildTraversalSocketForHost: options.buildTraversalSocketForHost,
-      primeTargetTerminalTransportSocket,
-      bindTargetMuxTransportSocketLifecycle,
+      daemonConnection,
       runtimeDebug: options.runtimeDebug,
     });
   }
@@ -549,8 +553,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
     startReconnectAttemptRuntime({
       sessionId,
       refs: {
-        manualCloseRef: options.refs.manualCloseRef,
-        reconnectRuntimesRef: options.refs.reconnectRuntimesRef,
+        reconnectStore: options.refs.reconnectStore,
       },
       readSessionTransportHost: options.readSessionTransportHost,
       computeReconnectDelay,
@@ -572,13 +575,11 @@ export function createSessionTransportOrchestrationRuntime(options: {
       retryable,
       reconnectOptions,
       refs: {
-        manualCloseRef: options.refs.manualCloseRef,
-        reconnectRuntimesRef: options.refs.reconnectRuntimesRef,
+        reconnectStore: options.refs.reconnectStore,
         stateRef: options.stateRef as MutableRefObject<{ sessions: Session[]; activeSessionId: string | null; liveSessionIds?: string[] }>,
       },
       readSessionTransportHost: options.readSessionTransportHost,
       shouldAutoReconnectSessionFn: shouldAutoReconnectSession,
-      createSessionReconnectRuntime,
       updateSessionSync: options.updateSessionSync,
       emitSessionStatus,
       startReconnectAttempt,
@@ -610,7 +611,6 @@ export function createSessionTransportOrchestrationRuntime(options: {
         return result;
       },
       pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
-      ensureControlTransportForSessionOpen,
       openSessionMuxChannelByIntent,
     });
   };
@@ -666,11 +666,10 @@ export function createSessionTransportOrchestrationRuntime(options: {
   }) => {
     handleReconnectHandshakeFailureRuntime({
       ...failureOptions,
-      reconnectRuntimesRef: options.refs.reconnectRuntimesRef,
+      reconnectStore: options.refs.reconnectStore,
       clearSupersededSockets,
       updateSessionSync: options.updateSessionSync,
       emitSessionStatus,
-      createSessionReconnectRuntime,
       shouldContinueRetryableReconnect: (sessionId) => shouldAutoReconnectSession({
         sessionId,
         activeSessionId: options.stateRef.current.activeSessionId,
@@ -690,7 +689,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
       handleReconnectBeforeConnectSend,
       handleReconnectHandshakeFailure,
       applyTransportOpenLiveFailureEffects,
-      reconnectRuntimesRef: options.refs.reconnectRuntimesRef,
+      reconnectStore: options.refs.reconnectStore,
       applyTransportOpenConnectedEffects,
       emitSessionStatus,
       updateSessionSync: (_id, updates) => {
@@ -742,7 +741,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
   const sendTerminalResize = (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: TerminalWidthMode) => {
     return sendTerminalResizeRuntime({
       sessionId,
-      ws: options.readSessionTransportResource(sessionId).socket || options.readSessionTransportSocket(sessionId),
+      ws: daemonConnection.readSessionSocket(sessionId),
       sendSocketPayload: options.sendSocketPayload,
       writeRequestedTerminalGeometry: options.writeSessionRequestedTerminalGeometry,
       cols,

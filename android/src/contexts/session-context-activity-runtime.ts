@@ -1,5 +1,9 @@
 import type { Session } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
+import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
+import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
+import type { SessionReconnectStore } from '../lib/session-reconnect-store';
+import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import {
   buildSessionTransportWaitUpdates,
   buildActiveSessionRefreshPlan,
@@ -32,14 +36,14 @@ export function resolveSessionTransportKeepaliveGrace(options: {
   sessionId: string;
   refs: {
     lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
-    lastServerActivityAtRef: MutableRefObject<Map<string, number>>;
+    heartbeatStore: SessionHeartbeatStore;
   };
   now?: number;
   graceMs?: number;
 }) {
   const now = options.now ?? Date.now();
   const graceMs = Math.max(0, Math.floor(options.graceMs ?? SESSION_TRANSPORT_KEEPALIVE_GRACE_MS));
-  const lastServerActivityAt = options.refs.lastServerActivityAtRef.current.get(options.sessionId) || 0;
+  const lastServerActivityAt = options.refs.heartbeatStore.readLastServerActivityAt(options.sessionId);
   const lastConnectedBaselineAt = options.refs.lastConnectedBaselineAtRef.current.get(options.sessionId) || 0;
   const lastAliveAt = Math.max(lastServerActivityAt, lastConnectedBaselineAt);
   const ageMs = lastAliveAt > 0 ? now - lastAliveAt : Number.POSITIVE_INFINITY;
@@ -61,20 +65,17 @@ export function ensureActiveSessionFreshRuntime(options: {
   };
   refs: {
     stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null; liveSessionIds?: string[] }>;
-    pendingResumeTailRefreshRef: MutableRefObject<Set<string>>;
+    tailRefreshStore: SessionTailRefreshStore;
     lastActiveReentryAtRef: MutableRefObject<Map<string, number>>;
     lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
     connectedBaselineBurstGuardRef: MutableRefObject<Set<string>>;
-    lastServerActivityAtRef: MutableRefObject<Map<string, number>>;
-    lastTerminalActivityAtRef?: MutableRefObject<Map<string, number>>;
+    heartbeatStore: SessionHeartbeatStore;
     lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
-    staleTransportProbeAtRef: MutableRefObject<Map<string, number>>;
-    reconnectRuntimesRef: MutableRefObject<Map<string, { connecting: boolean; timer: number | null }>>;
+    reconnectStore: SessionReconnectStore;
   };
   readSessionTransportRuntime: (sessionId: string) => SessionTransportRuntimeLike | null;
   readSessionTargetRuntime: (sessionId: string) => SessionTargetRuntimeLike | null;
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => { socket?: BridgeTransportSocket | null } | null;
+  daemonConnection: ClientDaemonConnection;
   readSessionTerminalChannel?: (sessionId: string) => SessionTerminalChannelLike | null;
   isReconnectInFlight: (sessionId: string) => boolean;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
@@ -92,9 +93,7 @@ export function ensureActiveSessionFreshRuntime(options: {
   const session = options.refs.stateRef.current.sessions.find((item) => item.id === options.refreshOptions.sessionId) || null;
   const transportRuntime = options.readSessionTransportRuntime(options.refreshOptions.sessionId);
   const targetRuntime = options.readSessionTargetRuntime(options.refreshOptions.sessionId);
-  const ws = options.readSessionTransportResource?.(options.refreshOptions.sessionId)?.socket
-    || options.readSessionTransportSocket(options.refreshOptions.sessionId)
-    || null;
+  const ws = options.daemonConnection.readSessionSocket(options.refreshOptions.sessionId);
   const terminalChannel = options.readSessionTerminalChannel?.(options.refreshOptions.sessionId) || null;
   const muxChannelUnavailableOnOpenTarget = Boolean(
     targetRuntime
@@ -125,7 +124,7 @@ export function ensureActiveSessionFreshRuntime(options: {
       targetSessionCount: targetRuntime?.sessionIds.length || 0,
     });
     if (options.refreshOptions.markResumeTail) {
-      options.refs.pendingResumeTailRefreshRef.current.add(options.refreshOptions.sessionId);
+      options.refs.tailRefreshStore.markPendingResumeTailRefresh(options.refreshOptions.sessionId);
     }
     if (options.refreshOptions.source === 'active-reentry') {
       options.refs.lastActiveReentryAtRef.current.set(options.refreshOptions.sessionId, Date.now());
@@ -158,7 +157,7 @@ export function ensureActiveSessionFreshRuntime(options: {
     sessionId: options.refreshOptions.sessionId,
     refs: {
       lastConnectedBaselineAtRef: options.refs.lastConnectedBaselineAtRef,
-      lastServerActivityAtRef: options.refs.lastServerActivityAtRef,
+      heartbeatStore: options.refs.heartbeatStore,
     },
     now,
   });
@@ -222,7 +221,7 @@ export function ensureActiveSessionFreshRuntime(options: {
 
   const localBuffer = options.readSessionBufferSnapshot(options.refreshOptions.sessionId);
   const cadence = options.resolveTerminalRefreshCadence(options.refreshOptions.sessionId);
-  const pendingProbeStartedAt = options.refs.staleTransportProbeAtRef.current.get(options.refreshOptions.sessionId) || 0;
+  const pendingProbeStartedAt = options.refs.reconnectStore.readStaleTransportProbeAt(options.refreshOptions.sessionId);
   const pendingProbeAgeMs = pendingProbeStartedAt > 0 ? now - pendingProbeStartedAt : 0;
   const staleProbeTimedOut = Boolean(
     ws?.readyState === WebSocket.OPEN
@@ -269,7 +268,7 @@ export function ensureActiveSessionFreshRuntime(options: {
       pendingProbeAgeMs,
       wsReadyState: ws?.readyState ?? null,
     });
-    options.refs.staleTransportProbeAtRef.current.delete(options.refreshOptions.sessionId);
+    options.refs.reconnectStore.clearStaleTransportProbe(options.refreshOptions.sessionId);
   }
 
   if (refreshPlan.action === 'request-head') {
@@ -293,7 +292,7 @@ export function ensureActiveSessionFreshRuntime(options: {
     );
 
     if (options.refreshOptions.markResumeTail) {
-      options.refs.pendingResumeTailRefreshRef.current.add(options.refreshOptions.sessionId);
+      options.refs.tailRefreshStore.markPendingResumeTailRefresh(options.refreshOptions.sessionId);
     }
 
     if (
@@ -321,8 +320,8 @@ export function ensureActiveSessionFreshRuntime(options: {
       ws,
       { force: options.refreshOptions.forceHead },
     );
-    if (requested && !options.refs.staleTransportProbeAtRef.current.has(options.refreshOptions.sessionId)) {
-      options.refs.staleTransportProbeAtRef.current.set(options.refreshOptions.sessionId, now);
+    if (requested) {
+      options.refs.reconnectStore.markStaleTransportProbeIfAbsent(options.refreshOptions.sessionId, now);
     }
     if (requested && options.refreshOptions.source === 'active-reentry') {
       options.refs.lastActiveReentryAtRef.current.set(options.refreshOptions.sessionId, now);

@@ -16,8 +16,11 @@ import type {
   TerminalVisibleRange,
 } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
+import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
+import type { SessionReconnectStore } from '../lib/session-reconnect-store';
 import {
   buildDefaultSessionVisibleRange,
+  type SessionDaemonHeadView,
 } from './session-visible-range-helpers';
 import {
   buildSessionBufferSyncRequestPayload,
@@ -34,6 +37,7 @@ import {
   type SessionPullStates,
 } from './session-pull-state-helpers';
 import { normalizeTerminalCursorState } from './session-wire-helpers';
+import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import { buildBufferSyncRepairSignature } from '@zterm/shared/terminal/pull-state-planner';
 
 interface MutableRefObject<T> {
@@ -48,15 +52,21 @@ interface SessionDebugMetricsRecorder {
   recordRefreshRequest: (sessionId: string) => void;
 }
 
-interface SessionSyncRequestDebounceState {
-  sentAt: number;
-  requestStartIndex: number;
-  requestEndIndex: number;
-  knownRevision: number;
-  localStartIndex: number;
-  localEndIndex: number;
-  targetHeadRevision: number;
-  repairSignature: string;
+interface BufferRuntimeTransportAccessors {
+  daemonConnection?: ClientDaemonConnection;
+  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readSessionTransportResource?: (sessionId: string) => { socket?: BridgeTransportSocket | null } | null;
+}
+
+function readBufferRuntimeSocket(
+  options: BufferRuntimeTransportAccessors,
+  sessionId: string,
+) {
+  if (options.daemonConnection) {
+    return options.daemonConnection.readSessionSocket(sessionId);
+  }
+  return options.readSessionTransportResource?.(sessionId)?.socket
+    || options.readSessionTransportSocket(sessionId);
 }
 
 const SESSION_SYNC_REQUEST_DEBOUNCE_MS = 33;
@@ -258,17 +268,17 @@ function recordAppliedBufferSyncChunkFrame(options: {
   states.set(options.sessionId, next);
 }
 
-function resolvePendingSameRevisionRefreshKey(options: {
+function resolvePendingSameRevisionRefreshPurpose(options: {
   sessionId: string;
   payload: TerminalBufferPayload;
   localBuffer: SessionBufferState;
   conflictRange?: { startIndex: number; endIndex: number } | null;
   refs: {
-    lastSyncRequestAtRef?: MutableRefObject<Map<string, SessionSyncRequestDebounceState>>;
+    tailRefreshStoreRef?: MutableRefObject<SessionTailRefreshStore>;
   };
-}) {
-  const requests = options.refs.lastSyncRequestAtRef?.current;
-  if (!requests) {
+}): SessionPullPurpose | null {
+  const tailRefreshStore = options.refs.tailRefreshStoreRef?.current;
+  if (!tailRefreshStore) {
     return null;
   }
   const incomingRevision = Math.max(0, Math.floor(options.payload.revision || 0));
@@ -282,7 +292,7 @@ function resolvePendingSameRevisionRefreshKey(options: {
     : incomingEndIndex;
   const localRevision = Math.max(0, Math.floor(options.localBuffer.revision || 0));
   for (const purpose of ['tail-refresh', 'reading-repair'] as const) {
-    const pending = requests.get(`${options.sessionId}:${purpose}`);
+    const pending = tailRefreshStore.readSyncRequest(options.sessionId, purpose);
     if (!pending) {
       continue;
     }
@@ -294,21 +304,21 @@ function resolvePendingSameRevisionRefreshKey(options: {
       && Math.max(0, Math.floor(pending.targetHeadRevision || 0)) === incomingRevision
       && Math.max(0, Math.floor(pending.knownRevision || 0)) === localRevision
     ) {
-      return `${options.sessionId}:${purpose}`;
+      return purpose;
     }
   }
   return null;
 }
 
 function resolvePostApplyVisibleRange(options: {
-  session: Session;
+  head: SessionDaemonHeadView;
   previousBuffer: SessionBufferState;
   nextBuffer: SessionBufferState;
   visibleRange: TerminalVisibleRange | null;
 }) {
   const visibleRange = options.visibleRange;
   if (!visibleRange) {
-    return buildDefaultSessionVisibleRange(options.session, undefined, options.nextBuffer);
+    return buildDefaultSessionVisibleRange(options.head, undefined, options.nextBuffer);
   }
   const previousTailEndIndex = Math.max(
     0,
@@ -327,7 +337,88 @@ function resolvePostApplyVisibleRange(options: {
   if (!wasFollowingPreviousTail || nextTailEndIndex === previousTailEndIndex) {
     return visibleRange;
   }
-  return buildDefaultSessionVisibleRange(options.session, visibleRange, options.nextBuffer);
+  return buildDefaultSessionVisibleRange(options.head, visibleRange, options.nextBuffer);
+}
+
+function resolveVisibleNonGapRepairRequestAfterSparseAdvance(options: {
+  payload: TerminalBufferPayload;
+  previousBuffer: SessionBufferState;
+  nextBuffer: SessionBufferState;
+  visibleRange: TerminalVisibleRange | null;
+}) {
+  const visibleRange = options.visibleRange;
+  if (!visibleRange) {
+    return null;
+  }
+  const previousRevision = Math.max(0, Math.floor(options.previousBuffer.revision || 0));
+  const nextRevision = Math.max(0, Math.floor(options.nextBuffer.revision || 0));
+  const incomingRevision = Math.max(0, Math.floor(options.payload.revision || 0));
+  if (incomingRevision <= previousRevision || nextRevision <= previousRevision) {
+    return null;
+  }
+
+  const previousTailEndIndex = Math.max(
+    0,
+    Math.floor(options.previousBuffer.bufferTailEndIndex || options.previousBuffer.endIndex || 0),
+  );
+  const nextTailEndIndex = Math.max(
+    0,
+    Math.floor(options.nextBuffer.bufferTailEndIndex || options.nextBuffer.endIndex || 0),
+  );
+  if (nextTailEndIndex !== previousTailEndIndex) {
+    return null;
+  }
+
+  const visibleEndIndex = Math.max(0, Math.floor(visibleRange.endIndex || 0));
+  const viewportRows = Math.max(1, Math.floor(visibleRange.viewportRows || options.nextBuffer.rows || 1));
+  const visibleStartIndex = Math.max(
+    0,
+    Math.min(
+      Math.floor(visibleRange.startIndex || 0),
+      Math.max(0, visibleEndIndex - viewportRows),
+    ),
+  );
+  if (visibleEndIndex <= visibleStartIndex || visibleEndIndex < nextTailEndIndex - 1) {
+    return null;
+  }
+
+  const frame = resolveBufferSyncChunkFrame(options.payload);
+  if (
+    frame
+    && frame.frameStartIndex <= visibleStartIndex
+    && frame.frameEndIndex >= visibleEndIndex
+  ) {
+    return null;
+  }
+
+  const availableStartIndex = Number.isFinite(options.payload.availableStartIndex)
+    ? Math.max(0, Math.floor(options.payload.availableStartIndex || 0))
+    : Math.max(0, Math.floor(options.nextBuffer.bufferHeadStartIndex || options.nextBuffer.startIndex || 0));
+  const availableEndIndex = Number.isFinite(options.payload.availableEndIndex)
+    ? Math.max(availableStartIndex, Math.floor(options.payload.availableEndIndex || availableStartIndex))
+    : Math.max(availableStartIndex, Math.floor(options.nextBuffer.bufferTailEndIndex || options.nextBuffer.endIndex || availableStartIndex));
+  const requestStartIndex = Math.max(availableStartIndex, visibleStartIndex);
+  const requestEndIndex = Math.min(availableEndIndex, visibleEndIndex);
+  if (requestEndIndex <= requestStartIndex) {
+    return null;
+  }
+
+  const coveredLineIndexes = new Set<number>();
+  for (const line of options.payload.lines || []) {
+    const index = getWireLineIndex(line);
+    if (index !== null && index >= requestStartIndex && index < requestEndIndex) {
+      coveredLineIndexes.add(index);
+    }
+  }
+  for (let index = requestStartIndex; index < requestEndIndex; index += 1) {
+    if (!coveredLineIndexes.has(index)) {
+      return {
+        requestStartIndex,
+        requestEndIndex,
+      };
+    }
+  }
+  return null;
 }
 
 export function handleBufferHeadRuntime(options: {
@@ -340,16 +431,23 @@ export function handleBufferHeadRuntime(options: {
   cursorKeysApp?: boolean;
   refs: {
     stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null }>;
-    sessionBufferHeadsRef: MutableRefObject<Map<string, SessionBufferHeadState>>;
     lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
     sessionRevisionResetRef: MutableRefObject<Map<string, RevisionResetExpectation>>;
-    lastSyncRequestAtRef: MutableRefObject<Map<string, SessionSyncRequestDebounceState>>;
+    tailRefreshStoreRef: MutableRefObject<SessionTailRefreshStore>;
     sessionVisibleRangeRef: MutableRefObject<Map<string, TerminalVisibleRange>>;
     sessionBufferStoreRef: MutableRefObject<{ commitBuffer: (sessionId: string, buffer: SessionBufferState) => boolean }>;
-    sessionHeadStoreRef: MutableRefObject<{ setHead: (sessionId: string, head: { daemonHeadRevision: number; daemonHeadEndIndex: number }) => boolean }>;
+    sessionHeadStoreRef: MutableRefObject<{
+      setLiveHead: (
+        sessionId: string,
+        head: SessionBufferHeadState,
+        setOptions?: { publishRenderer?: boolean },
+      ) => boolean;
+      getLiveHead: (sessionId: string) => SessionBufferHeadState | null;
+    }>;
   };
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   readSessionTransportResource?: (sessionId: string) => { socket?: BridgeTransportSocket | null } | null;
+  daemonConnection?: ClientDaemonConnection;
   readSessionBufferSnapshot: (sessionId: string) => SessionBufferState;
   commitSessionBufferUpdate: (sessionId: string, nextBuffer: SessionBufferState) => boolean;
   scheduleSessionRenderCommit: (sessionId: string) => void;
@@ -361,16 +459,15 @@ export function handleBufferHeadRuntime(options: {
     requestOptions?: {
       reason?: string;
       purpose?: SessionPullPurpose;
-      sessionOverride?: Session | null;
+      headOverride?: SessionDaemonHeadView | null;
       liveHead?: SessionBufferHeadState | null;
       invalidLocalWindow?: boolean;
       requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
     },
   ) => boolean;
 }) {
-  let session = options.refs.stateRef.current.sessions.find((item) => item.id === options.sessionId) || null;
-  const ws = options.readSessionTransportResource?.(options.sessionId)?.socket
-    || options.readSessionTransportSocket(options.sessionId);
+  const session = options.refs.stateRef.current.sessions.find((item) => item.id === options.sessionId) || null;
+  const ws = readBufferRuntimeSocket(options, options.sessionId);
   if (
     !session
     || (session.state !== 'connected' && session.state !== 'connecting' && session.state !== 'reconnecting')
@@ -380,7 +477,7 @@ export function handleBufferHeadRuntime(options: {
     return;
   }
 
-  options.refs.sessionBufferHeadsRef.current.set(options.sessionId, {
+  const incomingHead: SessionBufferHeadState = {
     revision: options.latestRevision,
     latestEndIndex: options.latestEndIndex,
     availableStartIndex: Number.isFinite(options.availableStartIndex)
@@ -390,7 +487,7 @@ export function handleBufferHeadRuntime(options: {
       ? Math.max(0, Math.floor(options.availableEndIndex || 0))
       : undefined,
     seenAt: Date.now(),
-  });
+  };
   options.refs.lastHeadRequestAtRef.current.set(options.sessionId, Date.now());
 
 
@@ -398,6 +495,9 @@ export function handleBufferHeadRuntime(options: {
   const shouldAcceptLiveBuffer = activeTransport
     || Boolean(options.shouldAcceptSessionLiveBuffer?.(options.sessionId));
   if (!shouldAcceptLiveBuffer) {
+    options.refs.sessionHeadStoreRef.current.setLiveHead(options.sessionId, incomingHead, {
+      publishRenderer: false,
+    });
     options.runtimeDebug('session.buffer.head.inactive-drop', {
       sessionId: options.sessionId,
       activeSessionId: options.refs.stateRef.current.activeSessionId,
@@ -434,19 +534,12 @@ export function handleBufferHeadRuntime(options: {
         latestRevision: options.latestRevision,
         latestEndIndex: options.latestEndIndex,
       });
-      session = {
-        ...session,
-        buffer: nextBuffer,
-      };
     }
   }
 
-  const headChanged = options.refs.sessionHeadStoreRef.current.setHead(options.sessionId, {
-    daemonHeadRevision: options.latestRevision,
-    daemonHeadEndIndex: options.latestEndIndex,
-  });
+  const headChanged = options.refs.sessionHeadStoreRef.current.setLiveHead(options.sessionId, incomingHead);
   void headChanged;
-  const liveHead = options.refs.sessionBufferHeadsRef.current.get(options.sessionId) || null;
+  const liveHead = options.refs.sessionHeadStoreRef.current.getLiveHead(options.sessionId);
 
   const plannerBuffer = cursorChanged
     ? {
@@ -457,7 +550,7 @@ export function handleBufferHeadRuntime(options: {
     : localBuffer;
   const localRevision = Math.max(0, Math.floor(plannerBuffer.revision || 0));
   const localEndIndex = Math.max(0, Math.floor(plannerBuffer.endIndex || 0));
-  const localWindowInvalid = hasImpossibleLocalWindow(session, liveHead, plannerBuffer);
+  const localWindowInvalid = hasImpossibleLocalWindow(liveHead, plannerBuffer);
   const revisionResetDetected = options.latestRevision < localRevision;
   if (revisionResetDetected) {
     options.refs.sessionRevisionResetRef.current.set(options.sessionId, {
@@ -492,8 +585,7 @@ export function handleBufferHeadRuntime(options: {
     visibleRange: options.refs.sessionVisibleRangeRef.current.get(options.sessionId) || null,
   });
 
-  const demandSession: Session = {
-    ...session,
+  const demandHead: SessionDaemonHeadView = {
     daemonHeadRevision: options.latestRevision,
     daemonHeadEndIndex: options.latestEndIndex,
   };
@@ -515,7 +607,7 @@ export function handleBufferHeadRuntime(options: {
   if (!visibleRange) {
     const isActiveSession = options.refs.stateRef.current.activeSessionId === options.sessionId;
     if (isActiveSession && liveHead) {
-      const viewportRows = Math.max(1, Math.floor(plannerBuffer.rows || session.buffer?.rows || 24));
+      const viewportRows = Math.max(1, Math.floor(plannerBuffer.rows || 24));
       const requestEndIndex = Math.max(0, Math.floor(options.latestEndIndex || liveHead.latestEndIndex || 0));
       const requestStartIndex = Math.max(
         Math.max(0, Math.floor(liveHead.availableStartIndex || 0)),
@@ -536,7 +628,7 @@ export function handleBufferHeadRuntime(options: {
       options.requestSessionBufferSync(options.sessionId, {
         reason: 'buffer-head-no-visible-range-active-bootstrap',
         purpose: 'tail-refresh',
-        sessionOverride: demandSession,
+        headOverride: demandHead,
         liveHead,
         requestWindowOverride: {
           requestStartIndex,
@@ -559,7 +651,7 @@ export function handleBufferHeadRuntime(options: {
   const needsTailRefresh = (
     revisionResetDetected
     || localWindowInvalid
-    || shouldPullFollowBuffer(demandSession, visibleRange, plannerBuffer)
+    || shouldPullFollowBuffer(demandHead, visibleRange, plannerBuffer)
   );
   if (needsTailRefresh) {
     options.requestSessionBufferSync(options.sessionId, {
@@ -568,14 +660,14 @@ export function handleBufferHeadRuntime(options: {
           : localWindowInvalid ? 'buffer-head-invalid-local-window'
             : 'buffer-head-update',
       purpose: 'tail-refresh',
-      sessionOverride: demandSession,
+      headOverride: demandHead,
       liveHead,
       invalidLocalWindow: localWindowInvalid,
     });
     return;
   }
 
-  const needsReadingRepair = shouldPullVisibleRangeBuffer(demandSession, visibleRange, liveHead, plannerBuffer);
+  const needsReadingRepair = shouldPullVisibleRangeBuffer(demandHead, visibleRange, liveHead, plannerBuffer);
   if (!needsReadingRepair) {
     return;
   }
@@ -583,7 +675,7 @@ export function handleBufferHeadRuntime(options: {
   options.requestSessionBufferSync(options.sessionId, {
     reason: 'buffer-head-visible-range-repair',
     purpose: 'reading-repair',
-    sessionOverride: demandSession,
+    headOverride: demandHead,
   });
 }
 
@@ -593,7 +685,7 @@ export function requestSessionBufferSyncRuntime(options: {
     ws?: BridgeTransportSocket | null;
     reason?: string;
     purpose?: SessionPullPurpose;
-    sessionOverride?: Session | null;
+    headOverride?: SessionDaemonHeadView | null;
     liveHead?: SessionBufferHeadState | null;
     invalidLocalWindow?: boolean;
     requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
@@ -602,15 +694,13 @@ export function requestSessionBufferSyncRuntime(options: {
   refs: {
     stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null }>;
     sessionVisibleRangeRef: MutableRefObject<Map<string, TerminalVisibleRange>>;
-    sessionBufferHeadsRef: MutableRefObject<Map<string, SessionBufferHeadState>>;
+    sessionHeadStoreRef: MutableRefObject<{ getLiveHead: (sessionId: string) => SessionBufferHeadState | null }>;
     sessionPullStateRef: MutableRefObject<Map<string, SessionPullStates>>;
-    lastSyncRequestAtRef: MutableRefObject<Map<string, SessionSyncRequestDebounceState>>;
-    pendingInputTailRefreshRef: MutableRefObject<Map<string, { requestedAt: number; localRevision: number }>>;
-    pendingConnectTailRefreshRef: MutableRefObject<Set<string>>;
-    pendingResumeTailRefreshRef: MutableRefObject<Set<string>>;
+    tailRefreshStoreRef: MutableRefObject<SessionTailRefreshStore>;
   };
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   readSessionTransportResource?: (sessionId: string) => { socket?: BridgeTransportSocket | null } | null;
+  daemonConnection?: ClientDaemonConnection;
   readSessionBufferSnapshot: (sessionId: string) => SessionBufferState;
   clearSessionPullState: (sessionId: string, purpose?: SessionPullPurpose) => void;
   sendSocketPayload: (
@@ -635,11 +725,8 @@ export function requestSessionBufferSyncRuntime(options: {
     readingSyncDelayMs: number;
   };
 }) {
-  const session = options.requestOptions?.sessionOverride
-    || options.refs.stateRef.current.sessions.find((item) => item.id === options.sessionId)
-    || null;
-  const activeWs = options.readSessionTransportResource?.(options.sessionId)?.socket
-    || options.readSessionTransportSocket(options.sessionId);
+  const session = options.refs.stateRef.current.sessions.find((item) => item.id === options.sessionId) || null;
+  const activeWs = readBufferRuntimeSocket(options, options.sessionId);
   const requestedWs = options.requestOptions?.ws || null;
   if (requestedWs && activeWs && activeWs !== requestedWs) {
     return false;
@@ -651,7 +738,7 @@ export function requestSessionBufferSyncRuntime(options: {
   const localBuffer = options.readSessionBufferSnapshot(options.sessionId);
   const visibleRange = options.refs.sessionVisibleRangeRef.current.get(options.sessionId);
   const requestPurpose = options.requestOptions?.purpose || 'tail-refresh';
-  const liveHead = options.refs.sessionBufferHeadsRef.current.get(options.sessionId) || null;
+  const liveHead = options.refs.sessionHeadStoreRef.current.getLiveHead(options.sessionId);
   const explicitWindowOverride = options.requestOptions?.requestWindowOverride || null;
   const explicitMissingRangesOverride = options.requestOptions?.requestMissingRangesOverride || null;
   if (!visibleRange && !explicitWindowOverride && !explicitMissingRangesOverride) {
@@ -663,23 +750,26 @@ export function requestSessionBufferSyncRuntime(options: {
     });
     return false;
   }
-  const effectiveSession = liveHead
+  const effectiveHead: SessionDaemonHeadView = liveHead
     ? {
-        ...session,
         daemonHeadRevision: liveHead.revision,
         daemonHeadEndIndex: liveHead.latestEndIndex,
       }
-    : session;
+    : options.requestOptions?.headOverride || {
+        daemonHeadRevision: 0,
+        daemonHeadEndIndex: 0,
+      };
   const payload = buildSessionBufferSyncRequestPayload(
-    effectiveSession,
+    effectiveHead,
+    localBuffer,
     visibleRange,
     {
       purpose: options.requestOptions?.purpose,
       sameEndRefreshMode:
-        options.refs.pendingConnectTailRefreshRef.current.has(options.sessionId)
-        || options.refs.pendingResumeTailRefreshRef.current.has(options.sessionId)
+        options.refs.tailRefreshStoreRef.current.hasPendingConnectTailRefresh(options.sessionId)
+        || options.refs.tailRefreshStoreRef.current.hasPendingResumeTailRefresh(options.sessionId)
           ? 'visible-window'
-          : options.refs.pendingInputTailRefreshRef.current.has(options.sessionId)
+          : options.refs.tailRefreshStoreRef.current.hasPendingInputTailRefresh(options.sessionId)
             ? 'visible-window'
             : 'auto',
       forceSameEndRefresh: false,
@@ -687,7 +777,6 @@ export function requestSessionBufferSyncRuntime(options: {
       invalidLocalWindow: Boolean(options.requestOptions?.invalidLocalWindow),
       requestWindowOverride: explicitWindowOverride,
       requestMissingRangesOverride: explicitMissingRangesOverride,
-      bufferOverride: localBuffer,
     },
   );
   const inFlightPull = (options.refs.sessionPullStateRef.current.get(options.sessionId) || null)?.[requestPurpose] || null;
@@ -709,13 +798,13 @@ export function requestSessionBufferSyncRuntime(options: {
     } else {
     const authoritativeHeadKnown = Boolean(
       (options.requestOptions?.liveHead && Number.isFinite(options.requestOptions.liveHead.latestEndIndex))
-      || Math.max(0, Math.floor(effectiveSession.daemonHeadRevision || 0)) > 0
-      || Math.max(0, Math.floor(effectiveSession.daemonHeadEndIndex || 0)) > 0
+      || Math.max(0, Math.floor(effectiveHead.daemonHeadRevision || 0)) > 0
+      || Math.max(0, Math.floor(effectiveHead.daemonHeadEndIndex || 0)) > 0
     );
     if (doesSessionPullStateMatchExactLocalSnapshot(
       inFlightPull,
       payload,
-      Math.max(0, Math.floor(effectiveSession.daemonHeadRevision || 0)),
+      Math.max(0, Math.floor(effectiveHead.daemonHeadRevision || 0)),
     )) {
       return false;
     }
@@ -738,7 +827,7 @@ export function requestSessionBufferSyncRuntime(options: {
       purpose: requestPurpose,
       previous: inFlightPull,
       next: {
-        targetHeadRevision: Math.max(0, Math.floor(effectiveSession.daemonHeadRevision || 0)),
+        targetHeadRevision: Math.max(0, Math.floor(effectiveHead.daemonHeadRevision || 0)),
         requestStartIndex: payload.requestStartIndex,
         requestEndIndex: payload.requestEndIndex,
       },
@@ -748,9 +837,8 @@ export function requestSessionBufferSyncRuntime(options: {
   }
 
   const now = Date.now();
-  const debounceKey = `${options.sessionId}:${requestPurpose}`;
-  const previousSyncRequest = options.refs.lastSyncRequestAtRef.current.get(debounceKey) || null;
-  const targetHeadRevision = Math.max(0, Math.floor(effectiveSession.daemonHeadRevision || 0));
+  const previousSyncRequest = options.refs.tailRefreshStoreRef.current.readSyncRequest(options.sessionId, requestPurpose);
+  const targetHeadRevision = Math.max(0, Math.floor(effectiveHead.daemonHeadRevision || 0));
   const requestKnownRevision = Math.max(0, Math.floor(payload.knownRevision || 0));
   const requestLocalStartIndex = Math.max(0, Math.floor(payload.localStartIndex || 0));
   const requestLocalEndIndex = Math.max(0, Math.floor(payload.localEndIndex || 0));
@@ -776,7 +864,7 @@ export function requestSessionBufferSyncRuntime(options: {
     requestPurpose === 'reading-repair'
       ? (repairTargetEndIndex ?? payload.requestEndIndex ?? 0)
       : (
-        effectiveSession.daemonHeadEndIndex
+        effectiveHead.daemonHeadEndIndex
         || payload.requestEndIndex
         || localBuffer.bufferTailEndIndex
         || localBuffer.endIndex
@@ -822,7 +910,7 @@ export function requestSessionBufferSyncRuntime(options: {
     purpose: requestPurpose,
     payload,
   });
-  options.refs.lastSyncRequestAtRef.current.set(debounceKey, {
+  options.refs.tailRefreshStoreRef.current.recordSyncRequest(options.sessionId, requestPurpose, {
     sentAt: now,
     requestStartIndex: requestTargetStartIndex,
     requestEndIndex: requestTargetEndIndex,
@@ -859,17 +947,16 @@ export function requestSessionBufferHeadRuntime(options: {
   refs: {
     stateRef: MutableRefObject<{ sessions: Session[] }>;
     lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
-    staleTransportProbeAtRef?: MutableRefObject<Map<string, number>>;
+    reconnectStore?: SessionReconnectStore;
     sessionDebugMetricsStoreRef: MutableRefObject<SessionDebugMetricsRecorder>;
   };
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   readSessionTransportResource?: (sessionId: string) => { socket?: BridgeTransportSocket | null } | null;
+  daemonConnection?: ClientDaemonConnection;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   resolveTerminalRefreshCadence: () => { headTickMs: number };
 }) {
-  const activeWs = options.readSessionTransportResource?.(options.sessionId)?.socket
-    || options.readSessionTransportSocket(options.sessionId)
-    || null;
+  const activeWs = readBufferRuntimeSocket(options, options.sessionId) || null;
   if (options.ws && activeWs && activeWs !== options.ws) {
     return false;
   }
@@ -890,11 +977,8 @@ export function requestSessionBufferHeadRuntime(options: {
     return false;
   }
   options.refs.lastHeadRequestAtRef.current.set(options.sessionId, now);
-  if (
-    options.trackProbe !== false
-    && !options.refs.staleTransportProbeAtRef?.current.has(options.sessionId)
-  ) {
-    options.refs.staleTransportProbeAtRef?.current.set(options.sessionId, now);
+  if (options.trackProbe !== false) {
+    options.refs.reconnectStore?.markStaleTransportProbeIfAbsent(options.sessionId, now);
   }
   options.refs.sessionDebugMetricsStoreRef.current.recordRefreshRequest(options.sessionId);
   options.sendSocketPayload(options.sessionId, targetWs, JSON.stringify({
@@ -909,11 +993,8 @@ export function applyIncomingBufferSyncRuntime(options: {
   refs: {
     stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null }>;
     sessionRevisionResetRef: MutableRefObject<Map<string, RevisionResetExpectation>>;
-    sessionBufferHeadsRef: MutableRefObject<Map<string, SessionBufferHeadState>>;
-    pendingInputTailRefreshRef: MutableRefObject<Map<string, { requestedAt: number; localRevision: number }>>;
-    pendingConnectTailRefreshRef: MutableRefObject<Set<string>>;
-    pendingResumeTailRefreshRef: MutableRefObject<Set<string>>;
-    lastSyncRequestAtRef?: MutableRefObject<Map<string, SessionSyncRequestDebounceState>>;
+    sessionHeadStoreRef: MutableRefObject<{ getLiveHead: (sessionId: string) => SessionBufferHeadState | null }>;
+    tailRefreshStoreRef: MutableRefObject<SessionTailRefreshStore>;
     sameRevisionChunkFrameRef?: MutableRefObject<Map<string, SameRevisionChunkFrameState>>;
     sessionVisibleRangeRef: MutableRefObject<Map<string, TerminalVisibleRange>>;
   };
@@ -930,7 +1011,7 @@ export function applyIncomingBufferSyncRuntime(options: {
     requestOptions?: {
       reason?: string;
       purpose?: SessionPullPurpose;
-      sessionOverride?: Session | null;
+      headOverride?: SessionDaemonHeadView | null;
       liveHead?: SessionBufferHeadState | null;
       invalidLocalWindow?: boolean;
       requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
@@ -947,9 +1028,7 @@ export function applyIncomingBufferSyncRuntime(options: {
   const shouldAcceptLiveBuffer = activeTransport
     || Boolean(options.shouldAcceptSessionLiveBuffer?.(options.sessionId));
   if (!shouldAcceptLiveBuffer) {
-    options.refs.pendingInputTailRefreshRef.current.delete(options.sessionId);
-    options.refs.pendingConnectTailRefreshRef.current.delete(options.sessionId);
-    options.refs.pendingResumeTailRefreshRef.current.delete(options.sessionId);
+    options.refs.tailRefreshStoreRef.current.clearPendingTailRefreshMarks(options.sessionId);
     options.refs.sameRevisionChunkFrameRef?.current.delete(options.sessionId);
     options.runtimeDebug('session.buffer.sync.inactive-drop', {
       sessionId: options.sessionId,
@@ -985,16 +1064,15 @@ export function applyIncomingBufferSyncRuntime(options: {
       incomingEndIndex: lowerRevisionPayload.endIndex,
       incomingLineCount: lowerRevisionPayload.lines.length,
     });
-    options.refs.lastSyncRequestAtRef?.current.delete(`${options.sessionId}:tail-refresh`);
+    options.refs.tailRefreshStoreRef.current.clearSyncRequest(options.sessionId, 'tail-refresh');
     options.requestSessionBufferSync(options.sessionId, {
       reason: 'revision-reset-empty-payload-retry',
       purpose: 'tail-refresh',
-      sessionOverride: {
-        ...session,
+      headOverride: {
         daemonHeadRevision: revisionResetExpectation.revision,
         daemonHeadEndIndex: revisionResetExpectation.latestEndIndex,
       },
-      liveHead: options.refs.sessionBufferHeadsRef.current.get(options.sessionId) || {
+      liveHead: options.refs.sessionHeadStoreRef.current.getLiveHead(options.sessionId) || {
         revision: revisionResetExpectation.revision,
         latestEndIndex: revisionResetExpectation.latestEndIndex,
         seenAt: revisionResetExpectation.seenAt,
@@ -1038,14 +1116,14 @@ export function applyIncomingBufferSyncRuntime(options: {
     && localRevision > 0
     && incomingRevision < localRevision
   ) {
-    const liveHead = options.refs.sessionBufferHeadsRef.current.get(options.sessionId) || {
+    const liveHead = options.refs.sessionHeadStoreRef.current.getLiveHead(options.sessionId) || {
       revision: localRevision,
       latestEndIndex: Math.max(0, Math.floor(localBuffer.bufferTailEndIndex || localBuffer.endIndex || 0)),
       availableStartIndex: Math.max(0, Math.floor(localBuffer.bufferHeadStartIndex || localBuffer.startIndex || 0)),
       availableEndIndex: Math.max(0, Math.floor(localBuffer.bufferTailEndIndex || localBuffer.endIndex || 0)),
       seenAt: Date.now(),
     };
-    options.refs.lastSyncRequestAtRef?.current.delete(`${options.sessionId}:tail-refresh`);
+    options.refs.tailRefreshStoreRef.current.clearSyncRequest(options.sessionId, 'tail-refresh');
     options.runtimeDebug('session.buffer.sync.stale-lower-revision-drop', {
       sessionId: options.sessionId,
       activeSessionId: options.refs.stateRef.current.activeSessionId,
@@ -1058,8 +1136,7 @@ export function applyIncomingBufferSyncRuntime(options: {
     options.requestSessionBufferSync(options.sessionId, {
       reason: 'buffer-sync-stale-lower-revision-drop',
       purpose: 'tail-refresh',
-      sessionOverride: {
-        ...session,
+      headOverride: {
         daemonHeadRevision: liveHead.revision,
         daemonHeadEndIndex: liveHead.latestEndIndex,
       },
@@ -1077,8 +1154,8 @@ export function applyIncomingBufferSyncRuntime(options: {
         })
       : null
   );
-  const pendingSameRevisionRefreshKey = sameRevisionOverwrite
-    ? resolvePendingSameRevisionRefreshKey({
+  const pendingSameRevisionRefreshPurpose = sameRevisionOverwrite
+    ? resolvePendingSameRevisionRefreshPurpose({
         sessionId: options.sessionId,
         payload: options.payload,
         localBuffer,
@@ -1089,14 +1166,14 @@ export function applyIncomingBufferSyncRuntime(options: {
         },
       })
     : null;
-  const authorizedSameRevisionChunkFrame = sameRevisionOverwrite && !pendingSameRevisionRefreshKey
+  const authorizedSameRevisionChunkFrame = sameRevisionOverwrite && !pendingSameRevisionRefreshPurpose
     ? sameRevisionChunkFrameAuthorizesOverwrite({
         sessionId: options.sessionId,
         payload: options.payload,
         refs: options.refs,
       })
     : null;
-  if (sameRevisionOverwrite && !pendingSameRevisionRefreshKey && !authorizedSameRevisionChunkFrame) {
+  if (sameRevisionOverwrite && !pendingSameRevisionRefreshPurpose && !authorizedSameRevisionChunkFrame) {
     options.runtimeDebug('session.buffer.sync.stale-same-revision-drop', {
       sessionId: options.sessionId,
       activeSessionId: options.refs.stateRef.current.activeSessionId,
@@ -1112,8 +1189,8 @@ export function applyIncomingBufferSyncRuntime(options: {
     });
     return;
   }
-  if (sameRevisionOverwrite && pendingSameRevisionRefreshKey) {
-    options.refs.lastSyncRequestAtRef?.current.delete(pendingSameRevisionRefreshKey);
+  if (sameRevisionOverwrite && pendingSameRevisionRefreshPurpose) {
+    options.refs.tailRefreshStoreRef.current.clearSyncRequest(options.sessionId, pendingSameRevisionRefreshPurpose);
     options.runtimeDebug('session.buffer.sync.same-revision-requested-overwrite-apply', {
       sessionId: options.sessionId,
       activeSessionId: options.refs.stateRef.current.activeSessionId,
@@ -1149,7 +1226,7 @@ export function applyIncomingBufferSyncRuntime(options: {
     && incomingRevision > localRevision + 1
     && isSparsePayloadWindow(options.payload)
   ) {
-    const liveHead = options.refs.sessionBufferHeadsRef.current.get(options.sessionId) || {
+    const liveHead = options.refs.sessionHeadStoreRef.current.getLiveHead(options.sessionId) || {
       revision: incomingRevision,
       latestEndIndex: Number.isFinite(options.payload.availableEndIndex)
         ? Math.max(0, Math.floor(options.payload.availableEndIndex || 0))
@@ -1164,7 +1241,7 @@ export function applyIncomingBufferSyncRuntime(options: {
     };
     const incomingStartIndex = Math.max(0, Math.floor(options.payload.startIndex || 0));
     const incomingEndIndex = Math.max(incomingStartIndex, Math.floor(options.payload.endIndex || incomingStartIndex));
-    options.refs.lastSyncRequestAtRef?.current.delete(`${options.sessionId}:tail-refresh`);
+    options.refs.tailRefreshStoreRef.current.clearSyncRequest(options.sessionId, 'tail-refresh');
     options.runtimeDebug('session.buffer.sync.revision-gap-sparse-payload', {
       sessionId: options.sessionId,
       activeSessionId: options.refs.stateRef.current.activeSessionId,
@@ -1179,8 +1256,7 @@ export function applyIncomingBufferSyncRuntime(options: {
     options.requestSessionBufferSync(options.sessionId, {
       reason: 'buffer-sync-revision-gap-sparse-payload',
       purpose: 'tail-refresh',
-      sessionOverride: {
-        ...session,
+      headOverride: {
         daemonHeadRevision: liveHead.revision,
         daemonHeadEndIndex: liveHead.latestEndIndex,
       },
@@ -1209,8 +1285,8 @@ export function applyIncomingBufferSyncRuntime(options: {
     options.refs.sessionRevisionResetRef.current.delete(options.sessionId);
   }
 
-  const liveHead = options.refs.sessionBufferHeadsRef.current.get(options.sessionId) || null;
-  const inputTailRefresh = options.refs.pendingInputTailRefreshRef.current.get(options.sessionId) || null;
+  const liveHead = options.refs.sessionHeadStoreRef.current.getLiveHead(options.sessionId);
+  const inputTailRefresh = options.refs.tailRefreshStoreRef.current.readPendingInputTailRefresh(options.sessionId);
   if (
     inputTailRefresh
     && (
@@ -1218,27 +1294,27 @@ export function applyIncomingBufferSyncRuntime(options: {
       && (!liveHead || nextBuffer.revision >= Math.max(0, Math.floor(liveHead.revision || 0)))
     )
   ) {
-    options.refs.pendingInputTailRefreshRef.current.delete(options.sessionId);
+    options.refs.tailRefreshStoreRef.current.clearPendingInputTailRefresh(options.sessionId);
   }
   if (
-    options.refs.pendingConnectTailRefreshRef.current.has(options.sessionId)
+    options.refs.tailRefreshStoreRef.current.hasPendingConnectTailRefresh(options.sessionId)
     && (
       nextBuffer.endIndex !== localBuffer.endIndex
       || nextBuffer.revision > Math.max(0, Math.floor(localBuffer.revision || 0))
       || (liveHead && nextBuffer.revision >= Math.max(0, Math.floor(liveHead.revision || 0)))
     )
   ) {
-    options.refs.pendingConnectTailRefreshRef.current.delete(options.sessionId);
+    options.refs.tailRefreshStoreRef.current.clearPendingConnectTailRefresh(options.sessionId);
   }
   if (
-    options.refs.pendingResumeTailRefreshRef.current.has(options.sessionId)
+    options.refs.tailRefreshStoreRef.current.hasPendingResumeTailRefresh(options.sessionId)
     && (
       nextBuffer.endIndex !== localBuffer.endIndex
       || nextBuffer.revision > Math.max(0, Math.floor(localBuffer.revision || 0))
       || (liveHead && nextBuffer.revision >= Math.max(0, Math.floor(liveHead.revision || 0)))
     )
   ) {
-    options.refs.pendingResumeTailRefreshRef.current.delete(options.sessionId);
+    options.refs.tailRefreshStoreRef.current.clearPendingResumeTailRefresh(options.sessionId);
   }
 
   if (sessionBuffersEqual(localBuffer, nextBuffer)) {
@@ -1290,29 +1366,26 @@ export function applyIncomingBufferSyncRuntime(options: {
   });
   options.scheduleSessionRenderCommit(options.sessionId);
 
-  const nextSession: Session = {
-    ...session,
-    buffer: nextBuffer,
-    daemonHeadRevision: liveHead?.revision ?? session.daemonHeadRevision,
-    daemonHeadEndIndex: liveHead?.latestEndIndex ?? session.daemonHeadEndIndex,
+  const nextHead: SessionDaemonHeadView = {
+    daemonHeadRevision: liveHead?.revision ?? 0,
+    daemonHeadEndIndex: liveHead?.latestEndIndex ?? 0,
   };
   const visibleRange = resolvePostApplyVisibleRange({
-    session: nextSession,
+    head: nextHead,
     previousBuffer: localBuffer,
     nextBuffer,
     visibleRange: options.refs.sessionVisibleRangeRef.current.get(options.sessionId) || null,
   });
 
-  if (shouldCatchUpFollowTailAfterBufferApply(nextSession, visibleRange, {
+  if (shouldCatchUpFollowTailAfterBufferApply(nextHead, nextBuffer, visibleRange, {
     forceSameEndRefresh:
-      options.refs.pendingConnectTailRefreshRef.current.has(options.sessionId)
-      || options.refs.pendingResumeTailRefreshRef.current.has(options.sessionId),
-    bufferOverride: nextBuffer,
+      options.refs.tailRefreshStoreRef.current.hasPendingConnectTailRefresh(options.sessionId)
+      || options.refs.tailRefreshStoreRef.current.hasPendingResumeTailRefresh(options.sessionId),
   })) {
     options.requestSessionBufferSync(options.sessionId, {
       reason: 'buffer-sync-catchup',
       purpose: 'tail-refresh',
-      sessionOverride: nextSession,
+      headOverride: nextHead,
       requestWindowOverride:
         liveHead
         && nextBuffer.revision < Math.max(0, Math.floor(liveHead.revision || 0))
@@ -1326,13 +1399,48 @@ export function applyIncomingBufferSyncRuntime(options: {
     return;
   }
 
-  if (!shouldPullVisibleRangeBuffer(nextSession, visibleRange, liveHead, nextBuffer)) {
+  const visibleNonGapRepairRequest = resolveVisibleNonGapRepairRequestAfterSparseAdvance({
+    payload: options.payload,
+    previousBuffer: localBuffer,
+    nextBuffer,
+    visibleRange,
+  });
+  if (visibleNonGapRepairRequest) {
+    const repairRange = {
+      startIndex: visibleNonGapRepairRequest.requestStartIndex,
+      endIndex: visibleNonGapRepairRequest.requestEndIndex,
+    };
+    options.runtimeDebug('session.buffer.sync.visible-stale-non-gap-repair-request', {
+      sessionId: options.sessionId,
+      activeSessionId: options.refs.stateRef.current.activeSessionId,
+      previousRevision: localBuffer.revision,
+      nextRevision: nextBuffer.revision,
+      tailEndIndex: nextBuffer.bufferTailEndIndex,
+      incoming: options.summarizeBufferPayload(options.payload),
+      requestStartIndex: repairRange.startIndex,
+      requestEndIndex: repairRange.endIndex,
+    });
+    options.requestSessionBufferSync(options.sessionId, {
+      reason: 'buffer-sync-visible-stale-non-gap-repair',
+      purpose: 'reading-repair',
+      headOverride: nextHead,
+      liveHead,
+      requestWindowOverride: {
+        requestStartIndex: repairRange.startIndex,
+        requestEndIndex: repairRange.endIndex,
+      },
+      requestMissingRangesOverride: [repairRange],
+    });
+    return;
+  }
+
+  if (!shouldPullVisibleRangeBuffer(nextHead, visibleRange, liveHead, nextBuffer)) {
     return;
   }
 
   options.requestSessionBufferSync(options.sessionId, {
     reason: 'buffer-sync-visible-range-repair-catchup',
     purpose: 'reading-repair',
-    sessionOverride: nextSession,
+    headOverride: nextHead,
   });
 }

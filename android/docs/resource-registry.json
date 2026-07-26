@@ -78,7 +78,8 @@
       ],
       "direct_relations": [
         "resource.terminal_backend",
-        "resource.debug_channel"
+        "resource.debug_channel",
+        "resource.daemon_connection_gateway"
       ],
       "indirect_relations": [],
       "via_resources": [
@@ -263,14 +264,18 @@
       "direct_relations": [
         "resource.transport_target",
         "resource.pending_open_intent",
-        "resource.daemon_target_transport"
+        "resource.daemon_target_transport",
+        "resource.route_policy",
+        "resource.connection_diagnostics",
+        "resource.target_mux_request"
       ],
       "indirect_relations": [
         "resource.terminal_channel",
         "resource.transport_subscriber",
         "resource.mirror_store",
         "resource.client_sparse_buffer",
-        "resource.backend_session"
+        "resource.backend_session",
+        "resource.terminal_body_subscription"
       ],
       "via_resources": [
         "resource.daemon_target_transport",
@@ -297,7 +302,7 @@
     {
       "resource_id": "resource.daemon_target_transport",
       "resource_type": "platform_client_truth",
-      "identity": "One physical WebSocket or RTC data channel per daemon target route",
+      "identity": "One physical WebSocket or RTC data channel per stable daemon target, independent of terminal session names",
       "owner_feature": "terminal.transport_lifecycle",
       "truth_store": "src/lib/session-transport-runtime.ts target runtime and src/lib/traversal/socket.ts",
       "allowed_operations": [
@@ -312,12 +317,16 @@
       "direct_relations": [
         "resource.transport_target",
         "resource.terminal_channel",
-        "resource.relay_peer_lease"
+        "resource.relay_peer_lease",
+        "resource.route_policy",
+        "resource.connection_diagnostics",
+        "resource.target_mux_request"
       ],
       "indirect_relations": [
         "resource.transport_subscriber",
         "resource.mirror_store",
-        "resource.client_sparse_buffer"
+        "resource.client_sparse_buffer",
+        "resource.terminal_body_subscription"
       ],
       "via_resources": [
         "resource.terminal_channel",
@@ -359,7 +368,8 @@
         "release_channel_subscriber"
       ],
       "direct_relations": [
-        "resource.transport_subscriber"
+        "resource.transport_subscriber",
+        "resource.terminal_body_subscription"
       ],
       "indirect_relations": [
         "resource.mirror_store",
@@ -394,19 +404,27 @@
     {
       "resource_id": "resource.transport_target",
       "resource_type": "platform_client_truth",
-      "identity": "bridgeHost + bridgePort + authToken target key",
+      "identity": "Stable daemon target identity plus named server profile and route candidates; not a terminal session identity",
       "owner_feature": "terminal.transport_lifecycle",
       "truth_store": "bridge settings and SessionContext target resolver",
       "allowed_operations": [
         "resolve_target",
-        "compare_target_key"
+        "compare_target_key",
+        "resolve_daemon_target_id",
+        "resolve_route_candidates"
       ],
-      "direct_relations": [],
+      "direct_relations": [
+        "resource.daemon_target_transport",
+        "resource.route_policy",
+        "resource.relay_peer_lease"
+      ],
       "indirect_relations": [
-        "resource.session_transport"
+        "resource.session_transport",
+        "resource.terminal_channel"
       ],
       "via_resources": [
-        "resource.session_transport"
+        "resource.session_transport",
+        "resource.daemon_target_transport"
       ],
       "forbidden_direct_relations": [
         "resource.backend_session",
@@ -440,7 +458,8 @@
         "resource.transport_target"
       ],
       "indirect_relations": [
-        "resource.daemon_target_transport"
+        "resource.daemon_target_transport",
+        "resource.route_policy"
       ],
       "via_resources": [
         "resource.transport_target"
@@ -1096,7 +1115,7 @@
     {
       "resource_id": "resource.remote_window_overlay",
       "resource_type": "projection_resource",
-      "identity": "Android remote window picker, floating stream overlay, in-video primary-plus-children sibling window switcher, locked container QuickBar/IME lift projection, fullscreen aspect-fit zoom/pan without minimap, explicit remote target resize fill intent, and Back/minimize/close/touch-action/screenshot intent",
+      "identity": "Android remote window picker, floating stream overlay, in-video primary-plus-children sibling window switcher, locked container QuickBar/IME lift projection, fullscreen aspect-fit zoom/pan without minimap, default remote target resize fill intent, and Back/minimize/close/touch-action/screenshot intent",
       "owner_feature": "desktop.remote_window_stream",
       "truth_store": "docs/decisions/2026-07-19-remote-window-stream-truth.md",
       "allowed_operations": [
@@ -1272,6 +1291,552 @@
         "docs/resource-map.md",
         "docs/goals/terminal-session-preview-plan.md"
       ]
+    },
+    {
+      "resource_id": "resource.daemon_connection_gateway",
+      "resource_type": "daemon_runtime_truth",
+      "identity": "Daemon external connection ingress for direct WebSocket, Tailscale WebSocket, RTC data channel, and Relay-resumed physical peers",
+      "owner_feature": "terminal.transport_lifecycle",
+      "truth_store": "src/server/terminal-message-runtime.ts and src/server/terminal-transport-runtime.ts",
+      "allowed_operations": [
+        "accept_physical_peer",
+        "validate_mux_handshake",
+        "route_target_message",
+        "route_channel_open",
+        "reject_invalid_protocol",
+        "close_physical_peer"
+      ],
+      "direct_relations": [
+        "resource.daemon_target_transport"
+      ],
+      "indirect_relations": [
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store"
+      ],
+      "via_resources": [
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber"
+      ],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.ui_projection",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/server/terminal-message-runtime.test.ts",
+        "src/server/terminal-transport-runtime.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/modules/project-modules.md",
+        "docs/wiki/mainline-source.md"
+      ]
+    },
+    {
+      "resource_id": "resource.client_server_profile",
+      "resource_type": "projection_resource",
+      "identity": "Client-visible named server profile with one stable daemon target and multiple route candidates",
+      "owner_feature": "connections.history_projection",
+      "truth_store": "src/pages/ConnectionsPage.tsx and src/hooks/useSessionHistoryStorage.ts",
+      "allowed_operations": [
+        "project_named_server",
+        "merge_saved_routes",
+        "merge_relay_directory_candidates",
+        "emit_open_intent"
+      ],
+      "direct_relations": [
+        "resource.transport_target",
+        "resource.ui_projection"
+      ],
+      "indirect_relations": [
+        "resource.session_transport"
+      ],
+      "via_resources": [
+        "resource.transport_target"
+      ],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.tmux_session",
+        "resource.mirror_store"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/pages/ConnectionsPage.test.tsx"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/architecture.md",
+        "docs/modules/project-modules.md"
+      ]
+    },
+    {
+      "resource_id": "resource.route_policy",
+      "resource_type": "platform_client_truth",
+      "identity": "Route candidate priority, manual override, health, and selected route policy for one daemon target",
+      "owner_feature": "relay.route_selection",
+      "truth_store": "src/lib/traversal/route-selector.ts and src/lib/traversal/route-health-cache.ts",
+      "allowed_operations": [
+        "rank_route_candidates",
+        "apply_manual_override",
+        "record_route_failure",
+        "record_route_success",
+        "select_next_candidate"
+      ],
+      "direct_relations": [
+        "resource.transport_target",
+        "resource.daemon_target_transport"
+      ],
+      "indirect_relations": [
+        "resource.terminal_channel",
+        "resource.transport_subscriber"
+      ],
+      "via_resources": [
+        "resource.daemon_target_transport"
+      ],
+      "forbidden_direct_relations": [
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.tmux_session",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/traversal/route-selector.test.ts",
+        "src/lib/traversal/route-health-cache.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/modules/project-modules.md"
+      ]
+    },
+    {
+      "resource_id": "resource.connection_diagnostics",
+      "resource_type": "debug_side_channel",
+      "identity": "Metadata-only client connection diagnostics for physical route, RTT, up/down byte rates, and failure reason",
+      "owner_feature": "terminal.transport_lifecycle",
+      "truth_store": "src/lib/traversal/route-diagnostics.ts and SessionContext transport diagnostics store",
+      "allowed_operations": [
+        "record_selected_route",
+        "record_transport_bytes",
+        "record_rtt",
+        "record_failure_reason",
+        "project_status_snapshot"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [
+        "resource.daemon_target_transport",
+        "resource.debug_channel"
+      ],
+      "via_resources": [
+        "resource.daemon_target_transport"
+      ],
+      "forbidden_direct_relations": [
+        "resource.tmux_session",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/contexts/session-context-transport-runtime.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/modules/project-modules.md"
+      ]
+    },
+    {
+      "resource_id": "resource.target_mux_request",
+      "resource_type": "platform_client_truth",
+      "identity": "Target-scoped mux request/response interface for catalog, management, file, screenshot, and remote-window control frames over the daemon-target transport",
+      "owner_feature": "terminal.transport_lifecycle",
+      "truth_store": "src/contexts/session-context-tmux-management-runtime.ts and src/lib/remote-window-message-runtime.ts",
+      "allowed_operations": [
+        "send_target_request",
+        "match_target_response",
+        "serialize_target_frame",
+        "reject_closed_transport"
+      ],
+      "direct_relations": [
+        "resource.daemon_target_transport"
+      ],
+      "indirect_relations": [
+        "resource.terminal_channel",
+        "resource.transport_subscriber"
+      ],
+      "via_resources": [
+        "resource.daemon_target_transport"
+      ],
+      "forbidden_direct_relations": [
+        "resource.tmux_session",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/contexts/session-context-tmux-management-runtime.test.ts",
+        "src/lib/remote-window-message-runtime.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/modules/project-modules.md"
+      ]
+    },
+    {
+      "resource_id": "resource.terminal_body_subscription",
+      "resource_type": "platform_client_truth",
+      "identity": "Per terminal-channel body push subscription intent and daemon subscriber body eligibility fact",
+      "owner_feature": "terminal.transport_lifecycle",
+      "truth_store": "src/lib/session-transport-runtime.ts and src/server/terminal-runtime.ts",
+      "allowed_operations": [
+        "enable_body_subscription",
+        "disable_body_subscription",
+        "reconcile_body_subscription",
+        "read_subscription_state"
+      ],
+      "direct_relations": [
+        "resource.terminal_channel",
+        "resource.transport_subscriber"
+      ],
+      "indirect_relations": [
+        "resource.mirror_store",
+        "resource.client_sparse_buffer"
+      ],
+      "via_resources": [
+        "resource.transport_subscriber",
+        "resource.mirror_store"
+      ],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.tmux_session",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/session-transport-runtime.test.ts",
+        "src/server/terminal-runtime.detached-session.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/modules/project-modules.md"
+      ]
+    },
+    {
+      "resource_id": "resource.client_file_browser",
+      "resource_type": "projection_resource",
+      "identity": "Client file browser projection, preview selection, and upload/download intent boundary",
+      "owner_feature": "daemon.file_transfer",
+      "truth_store": "src/lib/file-transfer-message-runtime.ts and file browser UI projection",
+      "allowed_operations": [
+        "project_file_rows",
+        "select_file",
+        "request_preview",
+        "request_upload",
+        "request_download"
+      ],
+      "direct_relations": [
+        "resource.ui_projection",
+        "resource.file_transfer"
+      ],
+      "indirect_relations": [
+        "resource.backend_session"
+      ],
+      "via_resources": [
+        "resource.file_transfer"
+      ],
+      "forbidden_direct_relations": [
+        "resource.tmux_session",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/file-transfer-message-runtime.test.ts",
+        "src/components/terminal/FileTransferSheet.test.tsx"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/modules/project-modules.md",
+        "docs/testing/file-transfer-test-design.md"
+      ]
+    },
+    {
+      "resource_id": "resource.client_settings_update",
+      "resource_type": "projection_resource",
+      "identity": "Settings/config/update client projection and install intent boundary",
+      "owner_feature": "settings.config_transfer",
+      "truth_store": "src/pages/SettingsPage.tsx and src/lib/app-update-runtime.ts",
+      "allowed_operations": [
+        "project_settings",
+        "edit_server_profile",
+        "check_update_manifest",
+        "request_install",
+        "export_config",
+        "import_config"
+      ],
+      "direct_relations": [
+        "resource.ui_projection",
+        "resource.release_update_artifact",
+        "resource.runtime_home"
+      ],
+      "indirect_relations": [
+        "resource.daemon_runtime_artifact",
+        "resource.daemon_process"
+      ],
+      "via_resources": [
+        "resource.release_update_artifact",
+        "resource.daemon_runtime_artifact"
+      ],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.tmux_session",
+        "resource.mirror_store"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/app-update-runtime.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/testing/config-transfer-test-design.md"
+      ]
+    },
+    {
+      "resource_id": "resource.shared_wire_protocol",
+      "resource_type": "shared_contract_truth",
+      "identity": "Shared request/response/error wire protocol contract for daemon and clients",
+      "owner_feature": "terminal.transport_lifecycle",
+      "truth_store": "packages/shared/src/connection/protocol.ts and packages/shared/src/connection/types.ts",
+      "allowed_operations": [
+        "define_wire_frame",
+        "validate_protocol_version",
+        "define_error_frame",
+        "classify_mux_message"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel"
+      ],
+      "via_resources": [
+        "resource.session_transport"
+      ],
+      "forbidden_direct_relations": [
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "../packages/shared/src/connection/protocol.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/dev-workflow.md",
+        "docs/modules/project-modules.md"
+      ]
+    },
+    {
+      "resource_id": "resource.shared_resource_contract",
+      "resource_type": "shared_contract_truth",
+      "identity": "Machine-readable resource/module/edge/function/mainline contract surface",
+      "owner_feature": "mainline_source.android",
+      "truth_store": "docs/resource-registry.json, docs/module-registry.json, docs/edge-registry.json, and registry truth tests",
+      "allowed_operations": [
+        "declare_resource",
+        "declare_module",
+        "declare_edge",
+        "validate_registry",
+        "render_review_surface"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.debug_channel",
+        "resource.tmux_session",
+        "resource.mirror_store"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/modules/project-modules.md",
+        "docs/testing/module-edge-registry-test-design.md"
+      ]
+    },
+    {
+      "resource_id": "resource.shared_terminal_types",
+      "resource_type": "shared_contract_truth",
+      "identity": "Shared terminal geometry, cell, row, buffer, and renderer-facing type contract",
+      "owner_feature": "terminal.buffer_render",
+      "truth_store": "packages/shared/src/connection/terminal-buffer.ts and packages/shared/src/terminal",
+      "allowed_operations": [
+        "define_terminal_cell",
+        "define_buffer_payload",
+        "define_geometry",
+        "validate_renderer_contract"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window"
+      ],
+      "via_resources": [
+        "resource.mirror_store"
+      ],
+      "forbidden_direct_relations": [
+        "resource.ui_projection",
+        "resource.session_transport"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "../packages/shared/src/connection/terminal-buffer.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md",
+        "docs/modules/project-modules.md"
+      ]
+    },
+    {
+      "resource_id": "resource.shared_connection_types",
+      "resource_type": "shared_contract_truth",
+      "identity": "Shared daemon target, route candidate, route health, and selected route metadata contract",
+      "owner_feature": "relay.route_selection",
+      "truth_store": "packages/shared/src/connection/bridge-settings.ts and packages/shared/src/connection/relay-directory.ts",
+      "allowed_operations": [
+        "define_daemon_target_id",
+        "define_route_candidate",
+        "define_route_health",
+        "define_selected_route"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [
+        "resource.transport_target",
+        "resource.route_policy",
+        "resource.daemon_target_transport",
+        "resource.relay_peer_lease"
+      ],
+      "via_resources": [
+        "resource.transport_target"
+      ],
+      "forbidden_direct_relations": [
+        "resource.terminal_channel",
+        "resource.mirror_store",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "../packages/shared/src/connection/connection-config-share.test.ts",
+        "src/lib/traversal/route-selector.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/modules/project-modules.md"
+      ]
+    },
+    {
+      "resource_id": "resource.shared_test_contracts",
+      "resource_type": "shared_contract_truth",
+      "identity": "Reusable static and black-box test contract declarations for resource/module/edge/function/mainline gates",
+      "owner_feature": "mainline_source.android",
+      "truth_store": "src/lib/*truth.test.ts and docs/testing/*test-design.md",
+      "allowed_operations": [
+        "define_gate_contract",
+        "validate_gate_coverage",
+        "reject_forbidden_owner_path"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.tmux_session",
+        "resource.mirror_store",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/testing/module-edge-registry-test-design.md",
+        "docs/modules/project-modules.md"
+      ]
+    },
+    {
+      "resource_id": "resource.relay_account_directory",
+      "resource_type": "relay_runtime_truth",
+      "identity": "Account-scoped daemon/device/endpoint/session directory and public update route facts",
+      "owner_feature": "relay.account_directory",
+      "truth_store": "src/traversal-relay/store.ts, src/traversal-relay/server.ts, and src/lib/relay-account-directory.ts",
+      "allowed_operations": [
+        "publish_daemon_directory",
+        "read_account_directory",
+        "project_endpoint_candidates",
+        "serve_public_update_assets"
+      ],
+      "direct_relations": [
+        "resource.transport_target",
+        "resource.relay_peer_lease",
+        "resource.debug_channel"
+      ],
+      "indirect_relations": [
+        "resource.daemon_target_transport"
+      ],
+      "via_resources": [
+        "resource.transport_target"
+      ],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.tmux_session",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/traversal-relay/server.test.ts",
+        "src/lib/relay-account-directory.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/testing/relay-account-directory-test-design.md"
+      ]
     }
   ],
   "required_indirect_relations": [
@@ -1389,6 +1954,56 @@
       "via_resources": [
         "resource.transport_target"
       ]
+    },
+    {
+      "from": "resource.client_server_profile",
+      "to": "resource.session_transport",
+      "via_resources": [
+        "resource.transport_target"
+      ]
+    },
+    {
+      "from": "resource.route_policy",
+      "to": "resource.terminal_channel",
+      "via_resources": [
+        "resource.daemon_target_transport"
+      ]
+    },
+    {
+      "from": "resource.target_mux_request",
+      "to": "resource.terminal_channel",
+      "via_resources": [
+        "resource.daemon_target_transport"
+      ]
+    },
+    {
+      "from": "resource.terminal_body_subscription",
+      "to": "resource.mirror_store",
+      "via_resources": [
+        "resource.transport_subscriber"
+      ]
+    },
+    {
+      "from": "resource.client_file_browser",
+      "to": "resource.backend_session",
+      "via_resources": [
+        "resource.file_transfer"
+      ]
+    },
+    {
+      "from": "resource.client_settings_update",
+      "to": "resource.daemon_process",
+      "via_resources": [
+        "resource.release_update_artifact",
+        "resource.daemon_runtime_artifact"
+      ]
+    },
+    {
+      "from": "resource.relay_account_directory",
+      "to": "resource.daemon_target_transport",
+      "via_resources": [
+        "resource.transport_target"
+      ]
     }
   ],
   "forbidden_direct_relations": [
@@ -1471,6 +2086,81 @@
       "from": "resource.daemon_target_transport",
       "to": "resource.client_sparse_buffer",
       "reason": "Physical target transport cannot write client buffer without channel demux and buffer runtime."
+    },
+    {
+      "from": "resource.route_policy",
+      "to": "resource.terminal_channel",
+      "reason": "Route policy can select physical route candidates only, never terminal channel or content truth."
+    },
+    {
+      "from": "resource.route_policy",
+      "to": "resource.transport_subscriber",
+      "reason": "Route policy can select physical route candidates only, never terminal channel or content truth."
+    },
+    {
+      "from": "resource.route_policy",
+      "to": "resource.tmux_session",
+      "reason": "Route policy can select physical route candidates only, never terminal channel or content truth."
+    },
+    {
+      "from": "resource.route_policy",
+      "to": "resource.mirror_store",
+      "reason": "Route policy can select physical route candidates only, never terminal channel or content truth."
+    },
+    {
+      "from": "resource.relay_account_directory",
+      "to": "resource.terminal_channel",
+      "reason": "Relay account directory is endpoint/session directory truth only and cannot own terminal or UI runtime truth."
+    },
+    {
+      "from": "resource.relay_account_directory",
+      "to": "resource.transport_subscriber",
+      "reason": "Relay account directory is endpoint/session directory truth only and cannot own terminal or UI runtime truth."
+    },
+    {
+      "from": "resource.relay_account_directory",
+      "to": "resource.tmux_session",
+      "reason": "Relay account directory is endpoint/session directory truth only and cannot own terminal or UI runtime truth."
+    },
+    {
+      "from": "resource.relay_account_directory",
+      "to": "resource.mirror_store",
+      "reason": "Relay account directory is endpoint/session directory truth only and cannot own terminal or UI runtime truth."
+    },
+    {
+      "from": "resource.relay_account_directory",
+      "to": "resource.ui_projection",
+      "reason": "Relay account directory is endpoint/session directory truth only and cannot own terminal or UI runtime truth."
+    },
+    {
+      "from": "resource.target_mux_request",
+      "to": "resource.tmux_session",
+      "reason": "Target-scoped request frames must pass through daemon target transport and owning feature handlers, not terminal content truth."
+    },
+    {
+      "from": "resource.target_mux_request",
+      "to": "resource.mirror_store",
+      "reason": "Target-scoped request frames must pass through daemon target transport and owning feature handlers, not terminal content truth."
+    },
+    {
+      "from": "resource.target_mux_request",
+      "to": "resource.client_sparse_buffer",
+      "reason": "Target-scoped request frames must pass through daemon target transport and owning feature handlers, not terminal content truth."
+    },
+    {
+      "from": "resource.target_mux_request",
+      "to": "resource.renderer_window",
+      "reason": "Target-scoped request frames must pass through daemon target transport and owning feature handlers, not terminal content truth."
+    },
+    {
+      "from": "resource.daemon_connection_gateway",
+      "to": "resource.active_session",
+      "reason": "Daemon gateway cannot store client active tab/session state."
+    },
+    {
+      "from": "resource.daemon_connection_gateway",
+      "to": "resource.ui_projection",
+      "reason": "Daemon gateway cannot own client UI projection truth."
     }
   ]
 }

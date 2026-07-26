@@ -1,6 +1,5 @@
 import type {
   BufferSyncRequestPayload,
-  Session,
   SessionBufferState,
   TerminalGapRange,
 } from '../lib/types';
@@ -11,9 +10,9 @@ import { resolveTailTargetEndIndex as sharedResolveTailTargetEndIndex } from '@z
 import { shouldPullFollowBuffer as sharedShouldPullFollowBuffer, shouldCatchUpFollowTailAfterBufferApply as sharedShouldCatchUpFollowTailAfterBufferApply } from '@zterm/shared/terminal/buffer-sync-planner';
 import { computeVisibleRangeRepairRanges as sharedComputeVisibleRangeRepairRanges } from '@zterm/shared/terminal/gap-repair-planner';
 import {
-  resolveSessionBufferView,
   resolveVisibleRangeEndIndex,
   resolveVisibleRangeViewportRows,
+  type SessionDaemonHeadView,
   type SessionVisibleRangeState,
 } from './session-visible-range-helpers';
 import { resolveTailRefreshWindow as sharedResolveTailRefreshWindow } from '@zterm/shared/terminal/buffer-sync-request-planner';
@@ -27,13 +26,11 @@ export interface SessionBufferHeadState {
 }
 
 export function hasSessionLocalWindow(
-  session: Session | null | undefined,
-  bufferOverride?: SessionBufferState | null,
+  buffer: SessionBufferState | null | undefined,
 ): boolean {
-  if (!session) {
+  if (!buffer) {
     return false;
   }
-  const buffer = resolveSessionBufferView(session, bufferOverride);
   return sharedHasLocalWindow(
     buffer.startIndex ?? 0,
     buffer.endIndex ?? 0,
@@ -42,15 +39,14 @@ export function hasSessionLocalWindow(
 }
 
 function buildBaseBufferSyncRequestPayload(
-  session: Session,
-  bufferOverride?: SessionBufferState | null,
+  head: SessionDaemonHeadView,
+  buffer: SessionBufferState,
 ): Pick<BufferSyncRequestPayload, 'knownRevision' | 'localStartIndex' | 'localEndIndex' | 'targetHeadRevision'> {
-  const buffer = resolveSessionBufferView(session, bufferOverride);
   return {
     knownRevision: Math.max(0, Math.floor(buffer.revision || 0)),
     localStartIndex: Math.max(0, Math.floor(buffer.startIndex || 0)),
     localEndIndex: Math.max(0, Math.floor(buffer.endIndex || 0)),
-    targetHeadRevision: Math.max(0, Math.floor(session.daemonHeadRevision || 0)),
+    targetHeadRevision: Math.max(0, Math.floor(head.daemonHeadRevision || 0)),
   };
 }
 
@@ -64,46 +60,44 @@ function resolveRequestedBufferWindow(
 }
 
 function resolveAuthoritativeAvailableEndIndex(
-  session: Session,
-  liveHead?: SessionBufferHeadState | null,
-  bufferOverride?: SessionBufferState | null,
+  head: SessionDaemonHeadView,
+  liveHead: SessionBufferHeadState | null | undefined,
+  buffer: SessionBufferState,
 ): number | null {
-  const buffer = resolveSessionBufferView(session, bufferOverride);
   return sharedResolveAuthoritativeAvailableEndIndex(
     liveHead?.availableEndIndex,
     liveHead?.latestEndIndex ?? 0,
-    Math.max(0, Math.floor(session.daemonHeadRevision || 0)),
-    Math.max(0, Math.floor(session.daemonHeadEndIndex || 0)),
+    Math.max(0, Math.floor(head.daemonHeadRevision || 0)),
+    Math.max(0, Math.floor(head.daemonHeadEndIndex || 0)),
     Math.max(0, Math.floor(buffer.bufferTailEndIndex || 0)),
     Math.max(0, Math.floor(buffer.endIndex || 0)),
   );
 }
 
 function resolveTailTargetEndIndex(
-  session: Session,
-  visibleRange?: SessionVisibleRangeState,
-  bufferOverride?: SessionBufferState | null,
+  head: SessionDaemonHeadView,
+  visibleRange: SessionVisibleRangeState | undefined,
+  buffer: SessionBufferState,
 ): number {
-  const fallbackEndIndex = resolveVisibleRangeEndIndex(session, visibleRange, bufferOverride);
-  return sharedResolveTailTargetEndIndex(session.daemonHeadEndIndex, fallbackEndIndex);
+  const fallbackEndIndex = resolveVisibleRangeEndIndex(head, visibleRange, buffer);
+  return sharedResolveTailTargetEndIndex(head.daemonHeadEndIndex, fallbackEndIndex);
 }
 
 
 
 function collectVisibleRangeRepairRanges(
-  session: Session,
-  visibleRange?: SessionVisibleRangeState,
-  liveHead?: SessionBufferHeadState | null,
-  bufferOverride?: SessionBufferState | null,
+  head: SessionDaemonHeadView,
+  visibleRange: SessionVisibleRangeState | undefined,
+  liveHead: SessionBufferHeadState | null | undefined,
+  buffer: SessionBufferState,
 ): TerminalGapRange[] {
   if (!visibleRange) {
     return [] as TerminalGapRange[];
   }
-  const buffer = resolveSessionBufferView(session, bufferOverride);
-  const viewportRows = resolveVisibleRangeViewportRows(session, visibleRange, buffer);
-  const viewportEndIndex = resolveVisibleRangeEndIndex(session, visibleRange, buffer);
-  const { availableStartIndex } = resolveHeadAvailableBounds(session, liveHead, buffer);
-  const authoritativeAvailableEndIndex = resolveAuthoritativeAvailableEndIndex(session, liveHead, buffer);
+  const viewportRows = resolveVisibleRangeViewportRows(visibleRange, buffer);
+  const viewportEndIndex = resolveVisibleRangeEndIndex(head, visibleRange, buffer);
+  const { availableStartIndex } = resolveHeadAvailableBounds(liveHead, buffer);
+  const authoritativeAvailableEndIndex = resolveAuthoritativeAvailableEndIndex(head, liveHead, buffer);
   const requestWindow = resolveRequestedBufferWindow(
     viewportEndIndex,
     viewportRows,
@@ -128,7 +122,8 @@ function collectVisibleRangeRepairRanges(
 }
 
 function buildTailRefreshBufferSyncRequestPayload(
-  session: Session,
+  head: SessionDaemonHeadView,
+  buffer: SessionBufferState,
   visibleRange?: SessionVisibleRangeState,
   options?: {
     liveHead?: SessionBufferHeadState | null;
@@ -136,30 +131,28 @@ function buildTailRefreshBufferSyncRequestPayload(
     sameEndRefreshMode?: 'auto' | 'visible-window' | 'full-cache';
     invalidLocalWindow?: boolean;
     requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
-    bufferOverride?: SessionBufferState | null;
   },
 ): BufferSyncRequestPayload {
-  const buffer = resolveSessionBufferView(session, options?.bufferOverride);
-  const viewportRows = resolveVisibleRangeViewportRows(session, visibleRange, buffer);
+  const viewportRows = resolveVisibleRangeViewportRows(visibleRange, buffer);
   const authoritativeAvailableEndIndex = resolveAuthoritativeAvailableEndIndex(
-    session,
+    head,
     options?.liveHead,
     buffer,
   );
   const viewportEndIndex = (
     authoritativeAvailableEndIndex === null
-      ? resolveTailTargetEndIndex(session, visibleRange, buffer)
+      ? resolveTailTargetEndIndex(head, visibleRange, buffer)
       : Math.min(
-          resolveTailTargetEndIndex(session, visibleRange, buffer),
+          resolveTailTargetEndIndex(head, visibleRange, buffer),
           authoritativeAvailableEndIndex,
         )
   );
   const cacheLines = viewportRows;
-  const { availableStartIndex } = resolveHeadAvailableBounds(session, options?.liveHead, buffer);
+  const { availableStartIndex } = resolveHeadAvailableBounds(options?.liveHead, buffer);
   const authoritativeHeadStartIndex = availableStartIndex;
   const localStartIndex = Math.max(0, Math.floor(buffer.startIndex || 0));
   const localEndIndex = Math.max(localStartIndex, Math.floor(buffer.endIndex || 0));
-  const daemonRevision = Math.max(0, Math.floor(session.daemonHeadRevision || 0));
+  const daemonRevision = Math.max(0, Math.floor(head.daemonHeadRevision || 0));
   const localRevision = Math.max(0, Math.floor(buffer.revision || 0));
   const localHasWindow = localEndIndex > localStartIndex;
   const distanceToHead = Math.max(0, viewportEndIndex - localEndIndex);
@@ -192,26 +185,25 @@ function buildTailRefreshBufferSyncRequestPayload(
     requestWindowOverride: options?.requestWindowOverride ?? null,
   });
   return {
-    ...buildBaseBufferSyncRequestPayload(session, buffer),
+    ...buildBaseBufferSyncRequestPayload(head, buffer),
     requestStartIndex: window.requestStartIndex,
     requestEndIndex: window.requestEndIndex,
   };
 }
 
 function buildReadingBufferSyncRequestPayload(
-  session: Session,
+  head: SessionDaemonHeadView,
+  buffer: SessionBufferState,
   visibleRange?: SessionVisibleRangeState,
   options?: {
     liveHead?: SessionBufferHeadState | null;
     missingRangesOverride?: TerminalGapRange[] | null;
     requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
-    bufferOverride?: SessionBufferState | null;
   },
 ): BufferSyncRequestPayload {
-  const buffer = resolveSessionBufferView(session, options?.bufferOverride);
-  const viewportRows = resolveVisibleRangeViewportRows(session, visibleRange, buffer);
-  const viewportEndIndex = resolveVisibleRangeEndIndex(session, visibleRange, buffer);
-  const { availableStartIndex } = resolveHeadAvailableBounds(session, options?.liveHead, buffer);
+  const viewportRows = resolveVisibleRangeViewportRows(visibleRange, buffer);
+  const viewportEndIndex = resolveVisibleRangeEndIndex(head, visibleRange, buffer);
+  const { availableStartIndex } = resolveHeadAvailableBounds(options?.liveHead, buffer);
   const window = options?.requestWindowOverride
     ? {
         requestStartIndex: Math.max(
@@ -229,17 +221,18 @@ function buildReadingBufferSyncRequestPayload(
         availableStartIndex,
       );
   return {
-    ...buildBaseBufferSyncRequestPayload(session, buffer),
+    ...buildBaseBufferSyncRequestPayload(head, buffer),
     requestStartIndex: window.requestStartIndex,
     requestEndIndex: window.requestEndIndex,
     missingRanges: options?.missingRangesOverride
       ? options.missingRangesOverride.map((range) => ({ ...range }))
-      : collectVisibleRangeRepairRanges(session, visibleRange, options?.liveHead, buffer),
+      : collectVisibleRangeRepairRanges(head, visibleRange, options?.liveHead, buffer),
   };
 }
 
 export function buildSessionBufferSyncRequestPayload(
-  session: Session,
+  head: SessionDaemonHeadView,
+  buffer: SessionBufferState,
   visibleRange?: SessionVisibleRangeState,
   options?: {
     purpose?: SessionPullPurpose;
@@ -249,33 +242,31 @@ export function buildSessionBufferSyncRequestPayload(
     invalidLocalWindow?: boolean;
     requestWindowOverride?: { requestStartIndex: number; requestEndIndex: number } | null;
     requestMissingRangesOverride?: TerminalGapRange[] | null;
-    bufferOverride?: SessionBufferState | null;
   },
 ): BufferSyncRequestPayload {
   const purpose = options?.purpose || 'tail-refresh';
   return purpose === 'reading-repair'
     ? buildReadingBufferSyncRequestPayload(
-        session,
+        head,
+        buffer,
         visibleRange,
         {
           liveHead: options?.liveHead,
           missingRangesOverride: options?.requestMissingRangesOverride ?? null,
           requestWindowOverride: options?.requestWindowOverride ?? null,
-          bufferOverride: options?.bufferOverride,
         },
       )
-    : buildTailRefreshBufferSyncRequestPayload(session, visibleRange, options);
+    : buildTailRefreshBufferSyncRequestPayload(head, buffer, visibleRange, options);
 }
 
 export function shouldPullFollowBuffer(
-  session: Session,
-  visibleRange?: SessionVisibleRangeState,
-  bufferOverride?: SessionBufferState | null,
+  head: SessionDaemonHeadView,
+  visibleRange: SessionVisibleRangeState | undefined,
+  buffer: SessionBufferState,
 ) {
-  const buffer = resolveSessionBufferView(session, bufferOverride);
-  const viewportRows = resolveVisibleRangeViewportRows(session, visibleRange, buffer);
-  const desiredEndIndex = resolveTailTargetEndIndex(session, visibleRange, buffer);
-  const daemonRevision = Math.max(0, Math.floor(session.daemonHeadRevision || 0));
+  const viewportRows = resolveVisibleRangeViewportRows(visibleRange, buffer);
+  const desiredEndIndex = resolveTailTargetEndIndex(head, visibleRange, buffer);
+  const daemonRevision = Math.max(0, Math.floor(head.daemonHeadRevision || 0));
   const localRevision = Math.max(0, Math.floor(buffer.revision || 0));
   const localStartIndex = Math.max(0, Math.floor(buffer.startIndex || 0));
   const localEndIndex = Math.max(localStartIndex, Math.floor(buffer.endIndex || 0));
@@ -294,17 +285,16 @@ export function shouldPullFollowBuffer(
 }
 
 export function shouldCatchUpFollowTailAfterBufferApply(
-  session: Session,
+  head: SessionDaemonHeadView,
+  buffer: SessionBufferState,
   visibleRange?: SessionVisibleRangeState,
   options?: {
     forceSameEndRefresh?: boolean;
-    bufferOverride?: SessionBufferState | null;
   },
 ) {
-  const buffer = resolveSessionBufferView(session, options?.bufferOverride);
-  const viewportRows = resolveVisibleRangeViewportRows(session, visibleRange, buffer);
-  const desiredEndIndex = resolveTailTargetEndIndex(session, visibleRange, buffer);
-  const daemonRevision = Math.max(0, Math.floor(session.daemonHeadRevision || 0));
+  const viewportRows = resolveVisibleRangeViewportRows(visibleRange, buffer);
+  const desiredEndIndex = resolveTailTargetEndIndex(head, visibleRange, buffer);
+  const daemonRevision = Math.max(0, Math.floor(head.daemonHeadRevision || 0));
   const localRevision = Math.max(0, Math.floor(buffer.revision || 0));
   const localStartIndex = Math.max(0, Math.floor(buffer.startIndex || 0));
   const localEndIndex = Math.max(localStartIndex, Math.floor(buffer.endIndex || 0));
@@ -324,20 +314,18 @@ export function shouldCatchUpFollowTailAfterBufferApply(
 }
 
 export function shouldPullVisibleRangeBuffer(
-  session: Session,
-  visibleRange?: SessionVisibleRangeState,
-  liveHead?: SessionBufferHeadState | null,
-  bufferOverride?: SessionBufferState | null,
+  head: SessionDaemonHeadView,
+  visibleRange: SessionVisibleRangeState | undefined,
+  liveHead: SessionBufferHeadState | null | undefined,
+  buffer: SessionBufferState,
 ) {
-  return collectVisibleRangeRepairRanges(session, visibleRange, liveHead, bufferOverride).length > 0;
+  return collectVisibleRangeRepairRanges(head, visibleRange, liveHead, buffer).length > 0;
 }
 
 export function resolveHeadAvailableBounds(
-  session: Session,
-  liveHead?: SessionBufferHeadState | null,
-  bufferOverride?: SessionBufferState | null,
+  liveHead: SessionBufferHeadState | null | undefined,
+  buffer: SessionBufferState,
 ): { availableStartIndex: number; availableEndIndex: number } {
-  const buffer = resolveSessionBufferView(session, bufferOverride);
   const result = sharedResolveHeadAvailableBounds(liveHead, buffer);
   return {
     availableStartIndex: result.availableStartIndex ?? 0,
@@ -346,10 +334,8 @@ export function resolveHeadAvailableBounds(
 }
 
 export function hasImpossibleLocalWindow(
-  session: Session,
-  liveHead?: SessionBufferHeadState | null,
-  bufferOverride?: SessionBufferState | null,
+  liveHead: SessionBufferHeadState | null | undefined,
+  buffer: SessionBufferState,
 ): boolean {
-  const buffer = resolveSessionBufferView(session, bufferOverride);
   return sharedHasImpossibleLocalWindow(liveHead, buffer);
 }

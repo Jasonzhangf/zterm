@@ -1,17 +1,17 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createSessionTailRefreshStore } from '../lib/session-tail-refresh-store';
+import { createSessionReconnectStore } from '../lib/session-reconnect-store';
 import {
   closeSessionRuntime,
   connectSessionRuntime,
   createSessionRuntime,
   reconnectSessionRuntime,
   scheduleReconnectRuntime,
+  startReconnectAttemptRuntime,
 } from './session-context-session-runtime';
-import {
-  openSessionTransportByIntentRuntime,
-} from './session-context-transport-open-runtime';
-import { createSessionBufferState } from '../lib/terminal-buffer';
 import { buildTransportTargetKey } from '../lib/session-transport-runtime';
 import type { Session } from '../lib/types';
+import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 
 const host = {
   id: 'host-1',
@@ -27,6 +27,27 @@ const host = {
 
 const targetKey = buildTransportTargetKey(host);
 
+function makeDaemonConnection(options: {
+  socket?: any;
+  terminalSocket?: any;
+  channelState?: 'opening' | 'open' | 'closing' | 'closed' | null;
+} = {}) {
+  const socket = 'socket' in options ? options.socket : { readyState: WebSocket.OPEN };
+  return {
+    readSessionResource: vi.fn((sessionId: string) => ({
+      sessionId,
+      socket,
+      terminalSocket: 'terminalSocket' in options ? options.terminalSocket : null,
+      channel: options.channelState ? { state: options.channelState } : null,
+    })),
+    readSessionSocket: vi.fn(() => socket),
+    readSessionTargetSocket: vi.fn(() => socket),
+    readOpenSessionSocket: vi.fn(() => socket),
+    sendSessionRaw: vi.fn(),
+    sendSessionMessage: vi.fn(),
+  } as unknown as ClientDaemonConnection;
+}
+
 describe('closeSessionRuntime', () => {
   it('closes the session socket instead of parking it as superseded', () => {
     const sendSocketPayload = vi.fn();
@@ -40,11 +61,15 @@ describe('closeSessionRuntime', () => {
     closeSessionRuntime({
       sessionId: 'session-1',
       refs: {
-        manualCloseRef: { current: new Set() },
+        reconnectStore: createSessionReconnectStore(),
         pendingSessionTransportOpenIntentsRef: { current: new Map() },
-        pendingInputTailRefreshRef: { current: new Map([['session-1', { requestedAt: 1, localRevision: 1 }]]) },
-        pendingConnectTailRefreshRef: { current: new Set(['session-1']) },
-        pendingResumeTailRefreshRef: { current: new Set(['session-1']) },
+        tailRefreshStore: (() => {
+          const store = createSessionTailRefreshStore();
+          store.markPendingInputTailRefresh('session-1', 1, 1);
+          store.markPendingConnectTailRefresh('session-1');
+          store.markPendingResumeTailRefresh('session-1');
+          return store;
+        })(),
         lastActiveReentryAtRef: { current: new Map([['session-1', 1]]) },
         lastConnectedBaselineAtRef: { current: new Map([['session-1', 1]]) },
         sessionVisibleRangeRef: { current: new Map([['session-1', { startIndex: 0, endIndex: 1 }]]) },
@@ -56,7 +81,7 @@ describe('closeSessionRuntime', () => {
       clearReconnectForSession: vi.fn(),
       readSessionTransportRuntime: () => ({ targetKey: 'target-a' }),
       readSessionTargetRuntime: () => ({ sessionIds: ['session-1', 'session-2'] }),
-      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
+      daemonConnection: makeDaemonConnection({ socket: { readyState: WebSocket.OPEN } as any }),
       sendSocketPayload,
       runtimeDebug: vi.fn(),
       cleanupSocket,
@@ -86,11 +111,9 @@ describe('closeSessionRuntime', () => {
     closeSessionRuntime({
       sessionId: 'session-1',
       refs: {
-        manualCloseRef: { current: new Set() },
+        reconnectStore: createSessionReconnectStore(),
         pendingSessionTransportOpenIntentsRef: { current: new Map() },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set() },
+        tailRefreshStore: createSessionTailRefreshStore(),
         lastActiveReentryAtRef: { current: new Map() },
         lastConnectedBaselineAtRef: { current: new Map() },
         sessionVisibleRangeRef: { current: new Map() },
@@ -102,7 +125,7 @@ describe('closeSessionRuntime', () => {
       clearReconnectForSession: vi.fn(),
       readSessionTransportRuntime: () => ({ targetKey: 'target-a' }),
       readSessionTargetRuntime: () => ({ sessionIds: ['session-1'] }),
-      readSessionTransportSocket: () => null,
+      daemonConnection: makeDaemonConnection({ socket: null }),
       sendSocketPayload: vi.fn(),
       runtimeDebug: vi.fn(),
       cleanupSocket,
@@ -123,40 +146,30 @@ describe('scheduleReconnectRuntime', () => {
     vi.useFakeTimers();
     const timer = setTimeout(() => undefined, 10_000) as unknown as number;
     const reconnectRuntime = {
+      phase: 'scheduled' as const,
       attempt: 2,
       timer,
       nextDelayMs: null,
-      connecting: false,
     };
-    const reconnectRuntimesRef = {
-      current: new Map([
-        ['session-1', reconnectRuntime],
-      ]),
-    };
+    const reconnectStore = createSessionReconnectStore();
+    reconnectStore.write('session-1', reconnectRuntime);
 
     scheduleReconnectRuntime({
       sessionId: 'session-1',
       message: 'missing-host',
       retryable: true,
       refs: {
-        manualCloseRef: { current: new Set() },
-        reconnectRuntimesRef,
+        reconnectStore,
         stateRef: { current: { sessions: [], activeSessionId: 'session-1' } },
       },
       readSessionTransportHost: () => null,
       shouldAutoReconnectSessionFn: () => true,
-      createSessionReconnectRuntime: () => ({
-        attempt: 0,
-        timer: null,
-        nextDelayMs: null,
-        connecting: false,
-      }),
       updateSessionSync: vi.fn(),
       emitSessionStatus: vi.fn(),
       startReconnectAttempt: vi.fn(),
     });
 
-    expect(reconnectRuntimesRef.current.has('session-1')).toBe(false);
+    expect(reconnectStore.read('session-1')).toBeNull();
     expect(vi.getTimerCount()).toBe(0);
     vi.useRealTimers();
   });
@@ -164,16 +177,13 @@ describe('scheduleReconnectRuntime', () => {
   it('clears queued reconnect timer without projecting terminal error when auto reconnect is blocked for inactive session', () => {
     vi.useFakeTimers();
     const timer = setTimeout(() => undefined, 10_000) as unknown as number;
-    const reconnectRuntimesRef = {
-      current: new Map([
-        ['session-1', {
-          attempt: 1,
-          timer,
-          nextDelayMs: null,
-          connecting: false,
-        }],
-      ]),
-    };
+    const reconnectStore = createSessionReconnectStore();
+    reconnectStore.write('session-1', {
+      phase: 'scheduled' as const,
+      attempt: 1,
+      timer,
+      nextDelayMs: null,
+    });
     const updateSessionSync = vi.fn();
     const emitSessionStatus = vi.fn();
 
@@ -182,8 +192,7 @@ describe('scheduleReconnectRuntime', () => {
       message: 'inactive-blocked',
       retryable: true,
       refs: {
-        manualCloseRef: { current: new Set() },
-        reconnectRuntimesRef,
+        reconnectStore,
         stateRef: { current: { sessions: [], activeSessionId: 'session-2', liveSessionIds: [] } },
       },
       readSessionTransportHost: () => ({
@@ -198,18 +207,12 @@ describe('scheduleReconnectRuntime', () => {
         pinned: false,
       }),
       shouldAutoReconnectSessionFn: () => false,
-      createSessionReconnectRuntime: () => ({
-        attempt: 0,
-        timer: null,
-        nextDelayMs: null,
-        connecting: false,
-      }),
       updateSessionSync,
       emitSessionStatus,
       startReconnectAttempt: vi.fn(),
     });
 
-    expect(reconnectRuntimesRef.current.has('session-1')).toBe(false);
+    expect(reconnectStore.read('session-1')).toBeNull();
     expect(vi.getTimerCount()).toBe(0);
     expect(updateSessionSync).toHaveBeenCalled();
     expect(emitSessionStatus).not.toHaveBeenCalled();
@@ -218,9 +221,7 @@ describe('scheduleReconnectRuntime', () => {
 
   it('keeps retryable reconnect out of terminal error projection for a visible live pane', () => {
     vi.useFakeTimers();
-    const reconnectRuntimesRef = {
-      current: new Map<string, any>(),
-    };
+    const reconnectStore = createSessionReconnectStore();
     const updateSessionSync = vi.fn();
     const emitSessionStatus = vi.fn();
     const startReconnectAttempt = vi.fn();
@@ -230,8 +231,7 @@ describe('scheduleReconnectRuntime', () => {
       message: 'visible-pane-stale',
       retryable: true,
       refs: {
-        manualCloseRef: { current: new Set() },
-        reconnectRuntimesRef,
+        reconnectStore,
         stateRef: { current: { sessions: [], activeSessionId: 'session-1', liveSessionIds: ['session-2'] } },
       },
       readSessionTransportHost: () => ({
@@ -249,21 +249,128 @@ describe('scheduleReconnectRuntime', () => {
         options.sessionId === options.activeSessionId
         || Boolean(options.liveSessionIds?.includes(options.sessionId))
       ),
-      createSessionReconnectRuntime: () => ({
-        attempt: 0,
-        timer: null,
-        nextDelayMs: null,
-        connecting: false,
-      }),
       updateSessionSync,
       emitSessionStatus,
       startReconnectAttempt,
     });
 
-    expect(reconnectRuntimesRef.current.has('session-2')).toBe(true);
+    expect(reconnectStore.read('session-2')).not.toBeNull();
     expect(updateSessionSync).toHaveBeenCalled();
     expect(emitSessionStatus).not.toHaveBeenCalled();
     expect(startReconnectAttempt).toHaveBeenCalledWith('session-2');
+    vi.useRealTimers();
+  });
+
+  it('manual close suppresses retryable reconnect and clears scheduled phase', () => {
+    vi.useFakeTimers();
+    const reconnectStore = createSessionReconnectStore();
+    const timer = setTimeout(() => undefined, 10_000) as unknown as number;
+    reconnectStore.schedule('session-1', { attempt: 4, timer });
+    reconnectStore.markManualClosed('session-1');
+    const updateSessionSync = vi.fn();
+    const emitSessionStatus = vi.fn();
+    const startReconnectAttempt = vi.fn();
+
+    scheduleReconnectRuntime({
+      sessionId: 'session-1',
+      message: 'manual-close',
+      retryable: true,
+      refs: {
+        reconnectStore,
+        stateRef: { current: { sessions: [], activeSessionId: 'session-1', liveSessionIds: [] } },
+      },
+      readSessionTransportHost: () => host,
+      shouldAutoReconnectSessionFn: () => true,
+      updateSessionSync,
+      emitSessionStatus,
+      startReconnectAttempt,
+    });
+
+    expect(reconnectStore.read('session-1')).toBeNull();
+    expect(reconnectStore.isManualClosed('session-1')).toBe(true);
+    expect(vi.getTimerCount()).toBe(0);
+    expect(updateSessionSync).not.toHaveBeenCalled();
+    expect(emitSessionStatus).not.toHaveBeenCalled();
+    expect(startReconnectAttempt).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+});
+
+describe('startReconnectAttemptRuntime', () => {
+  it('transitions idle into scheduled and then connecting without carrying the timer', () => {
+    vi.useFakeTimers();
+    const reconnectStore = createSessionReconnectStore();
+    reconnectStore.write('session-1', {
+      phase: 'idle',
+      attempt: 2,
+      nextDelayMs: 50,
+    });
+    const updateSessionSync = vi.fn();
+    const queueReconnectTransportOpenIntent = vi.fn();
+
+    startReconnectAttemptRuntime({
+      sessionId: 'session-1',
+      refs: { reconnectStore },
+      readSessionTransportHost: () => host,
+      computeReconnectDelay: vi.fn(() => 1000),
+      updateSessionSync,
+      writeSessionTransportToken: vi.fn(() => null),
+      queueReconnectTransportOpenIntent,
+    });
+
+    expect(reconnectStore.read('session-1')).toEqual(expect.objectContaining({
+      phase: 'scheduled',
+      attempt: 2,
+      nextDelayMs: null,
+    }));
+
+    vi.advanceTimersByTime(50);
+
+    const runtime = reconnectStore.read('session-1');
+    expect(runtime).toEqual({
+      phase: 'connecting',
+      attempt: 2,
+      nextDelayMs: null,
+    });
+    if (runtime?.phase === 'connecting') {
+      expect('timer' in runtime).toBe(false);
+    }
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', expect.objectContaining({
+      state: 'reconnecting',
+    }));
+    expect(queueReconnectTransportOpenIntent).toHaveBeenCalledWith('session-1', host);
+    vi.useRealTimers();
+  });
+
+  it('does not queue a duplicate reconnect while phase is scheduled or connecting', () => {
+    vi.useFakeTimers();
+    const reconnectStore = createSessionReconnectStore();
+    reconnectStore.schedule('session-1', {
+      attempt: 1,
+      timer: setTimeout(() => undefined, 10_000) as unknown as number,
+    });
+    reconnectStore.write('session-2', {
+      phase: 'connecting',
+      attempt: 3,
+      nextDelayMs: null,
+    });
+    const queueReconnectTransportOpenIntent = vi.fn();
+
+    for (const sessionId of ['session-1', 'session-2']) {
+      startReconnectAttemptRuntime({
+        sessionId,
+        refs: { reconnectStore },
+        readSessionTransportHost: () => host,
+        computeReconnectDelay: vi.fn(() => 1000),
+        updateSessionSync: vi.fn(),
+        writeSessionTransportToken: vi.fn(() => null),
+        queueReconnectTransportOpenIntent,
+      });
+    }
+
+    expect(queueReconnectTransportOpenIntent).not.toHaveBeenCalled();
+    expect(reconnectStore.read('session-1')).toEqual(expect.objectContaining({ phase: 'scheduled' }));
+    expect(reconnectStore.read('session-2')).toEqual(expect.objectContaining({ phase: 'connecting' }));
     vi.useRealTimers();
   });
 });
@@ -287,13 +394,13 @@ describe('active truth ownership gates', () => {
         pinned: false,
       },
       refs: {
-        manualCloseRef: { current: new Set() },
+        reconnectStore: createSessionReconnectStore(),
       },
       clearReconnectForSession: vi.fn(),
       cleanupSocket: vi.fn(),
       writeSessionTransportHost: vi.fn(),
       writeSessionTransportToken: vi.fn(),
-      readSessionTransportSocket: vi.fn(() => null),
+      daemonConnection: makeDaemonConnection({ socket: null }),
       readSessionTargetKey: vi.fn(() => null),
       hasPendingSessionTransportOpen: vi.fn(() => false),
       isPendingSessionTransportOpenStale: vi.fn(() => false),
@@ -329,9 +436,6 @@ describe('active truth ownership gates', () => {
       state: 'connected',
       hasUnread: false,
       customName: undefined,
-      buffer: createSessionBufferState({ cols: 80, rows: 24, cacheLines: 1000 }),
-      daemonHeadRevision: 0,
-      daemonHeadEndIndex: 0,
       reconnectAttempt: 0,
       createdAt: 1,
     };
@@ -367,7 +471,7 @@ describe('active truth ownership gates', () => {
       createSessionSync: vi.fn(),
       updateSessionSync: vi.fn(),
       writeSessionTransportHost,
-      readSessionTransportSocket: vi.fn(() => null),
+      daemonConnection: makeDaemonConnection({ socket: null }),
       connectSession,
       defaultViewport: { cols: 80, rows: 24 },
     });
@@ -404,9 +508,6 @@ describe('active truth ownership gates', () => {
       state: 'connected',
       hasUnread: false,
       customName: undefined,
-      buffer: createSessionBufferState({ cols: 80, rows: 24, cacheLines: 1000 }),
-      daemonHeadRevision: 0,
-      daemonHeadEndIndex: 0,
       reconnectAttempt: 0,
       createdAt: 1,
     };
@@ -453,7 +554,7 @@ describe('active truth ownership gates', () => {
       createSessionSync: vi.fn(),
       updateSessionSync,
       writeSessionTransportHost,
-      readSessionTransportSocket: vi.fn(() => null),
+      daemonConnection: makeDaemonConnection({ socket: null }),
       connectSession,
       defaultViewport: { cols: 80, rows: 24 },
     });
@@ -521,7 +622,7 @@ describe('active truth ownership gates', () => {
       createSessionSync: vi.fn(),
       updateSessionSync: vi.fn(),
       writeSessionTransportHost,
-      readSessionTransportSocket: vi.fn(() => null),
+      daemonConnection: makeDaemonConnection({ socket: null }),
       connectSession,
       defaultViewport: { cols: 80, rows: 24 },
     });
@@ -556,9 +657,6 @@ describe('active truth ownership gates', () => {
       state: 'connected',
       hasUnread: false,
       customName: undefined,
-      buffer: createSessionBufferState({ cols: 80, rows: 24, cacheLines: 1000 }),
-      daemonHeadRevision: 0,
-      daemonHeadEndIndex: 0,
       reconnectAttempt: 0,
       createdAt: 1,
     };
@@ -593,7 +691,7 @@ describe('active truth ownership gates', () => {
       resolveSessionCacheLines: vi.fn(() => 1000),
       createSessionSync: vi.fn(),
       updateSessionSync: vi.fn(),
-      readSessionTransportSocket: vi.fn(() => null),
+      daemonConnection: makeDaemonConnection({ socket: null }),
       connectSession,
       defaultViewport: { cols: 80, rows: 24 },
     });
@@ -628,9 +726,6 @@ describe('active truth ownership gates', () => {
       state: 'connected',
       hasUnread: false,
       customName: undefined,
-      buffer: createSessionBufferState({ cols: 80, rows: 24, cacheLines: 1000 }),
-      daemonHeadRevision: 0,
-      daemonHeadEndIndex: 0,
       reconnectAttempt: 0,
       createdAt: 1,
     };
@@ -665,11 +760,7 @@ describe('active truth ownership gates', () => {
       resolveSessionCacheLines: vi.fn(() => 1000),
       createSessionSync: vi.fn(),
       updateSessionSync: vi.fn(),
-      readSessionTransportSocket: vi.fn(() => null),
-      readSessionTransportResource: () => ({
-        socket: targetSocket,
-        channel: { state: 'open' },
-      }),
+      daemonConnection: makeDaemonConnection({ socket: targetSocket, channelState: 'open' }),
       connectSession,
       defaultViewport: { cols: 80, rows: 24 },
     } as any);
@@ -696,9 +787,6 @@ describe('active truth ownership gates', () => {
       state: 'idle',
       hasUnread: false,
       customName: undefined,
-      buffer: createSessionBufferState({ cols: 80, rows: 24, cacheLines: 1000 }),
-      daemonHeadRevision: 0,
-      daemonHeadEndIndex: 0,
       reconnectAttempt: 0,
       createdAt: 1,
     };
@@ -733,11 +821,7 @@ describe('active truth ownership gates', () => {
       resolveSessionCacheLines: vi.fn(() => 1000),
       createSessionSync: vi.fn(),
       updateSessionSync: vi.fn(),
-      readSessionTransportSocket: vi.fn(() => null),
-      readSessionTransportResource: () => ({
-        socket: targetSocket,
-        channel: { state: 'closed' },
-      }),
+      daemonConnection: makeDaemonConnection({ socket: targetSocket, channelState: 'closed' }),
       connectSession,
       defaultViewport: { cols: 80, rows: 24 },
     } as any);
@@ -758,7 +842,7 @@ describe('session transport reuse runtime gates', () => {
       sessionId: 'session-1',
       host,
       refs: {
-        manualCloseRef: { current: new Set() },
+        reconnectStore: createSessionReconnectStore(),
       },
       clearReconnectForSession: vi.fn(),
       cleanupSocket,
@@ -767,7 +851,7 @@ describe('session transport reuse runtime gates', () => {
       updateSessionSync: vi.fn(),
       setScheduleStateForSession: vi.fn(),
       queueConnectTransportOpenIntent,
-      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
+      daemonConnection: makeDaemonConnection({ socket: { readyState: WebSocket.OPEN } as any }),
       readSessionTargetKey: () => targetKey,
       hasPendingSessionTransportOpen: () => false,
       isPendingSessionTransportOpenStale: () => false,
@@ -786,7 +870,7 @@ describe('session transport reuse runtime gates', () => {
       sessionId: 'session-1',
       host,
       refs: {
-        manualCloseRef: { current: new Set() },
+        reconnectStore: createSessionReconnectStore(),
       },
       clearReconnectForSession: vi.fn(),
       cleanupSocket,
@@ -795,11 +879,7 @@ describe('session transport reuse runtime gates', () => {
       updateSessionSync: vi.fn(),
       setScheduleStateForSession: vi.fn(),
       queueConnectTransportOpenIntent,
-      readSessionTransportSocket: () => null,
-      readSessionTransportResource: () => ({
-        socket: targetSocket,
-        channel: { state: 'open' },
-      }),
+      daemonConnection: makeDaemonConnection({ socket: targetSocket, channelState: 'open' }),
       readSessionTargetKey: () => targetKey,
       hasPendingSessionTransportOpen: () => false,
       isPendingSessionTransportOpenStale: () => false,
@@ -818,7 +898,7 @@ describe('session transport reuse runtime gates', () => {
       sessionId: 'session-1',
       host,
       refs: {
-        manualCloseRef: { current: new Set() },
+        reconnectStore: createSessionReconnectStore(),
       },
       clearReconnectForSession: vi.fn(),
       cleanupSocket,
@@ -827,11 +907,7 @@ describe('session transport reuse runtime gates', () => {
       updateSessionSync: vi.fn(),
       setScheduleStateForSession: vi.fn(),
       queueConnectTransportOpenIntent,
-      readSessionTransportSocket: () => null,
-      readSessionTransportResource: () => ({
-        socket: targetSocket,
-        channel: { state: 'closed' },
-      }),
+      daemonConnection: makeDaemonConnection({ socket: targetSocket, channelState: 'closed' }),
       readSessionTargetKey: () => targetKey,
       hasPendingSessionTransportOpen: () => false,
       isPendingSessionTransportOpenStale: () => false,
@@ -849,7 +925,7 @@ describe('session transport reuse runtime gates', () => {
       sessionId: 'session-1',
       host,
       refs: {
-        manualCloseRef: { current: new Set() },
+        reconnectStore: createSessionReconnectStore(),
       },
       clearReconnectForSession: vi.fn(),
       cleanupSocket,
@@ -858,7 +934,7 @@ describe('session transport reuse runtime gates', () => {
       updateSessionSync: vi.fn(),
       setScheduleStateForSession: vi.fn(),
       queueConnectTransportOpenIntent,
-      readSessionTransportSocket: () => ({ readyState: WebSocket.CONNECTING } as any),
+      daemonConnection: makeDaemonConnection({ socket: { readyState: WebSocket.CONNECTING } as any }),
       readSessionTargetKey: () => targetKey,
       hasPendingSessionTransportOpen: () => true,
       isPendingSessionTransportOpenStale: () => false,
@@ -891,13 +967,13 @@ describe('session transport reuse runtime gates', () => {
             activeSessionId: 'session-1',
           },
         },
-        manualCloseRef: { current: new Set() },
+        reconnectStore: createSessionReconnectStore(),
       },
       clearReconnectForSession: vi.fn(),
       readSessionTransportHost: () => host,
       readSessionTargetKey: () => targetKey,
       readSessionTargetRuntime: () => ({ sessionIds: ['session-1'] }),
-      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
+      daemonConnection: makeDaemonConnection({ socket: { readyState: WebSocket.OPEN } as any }),
       hasPendingSessionTransportOpen: () => false,
       isPendingSessionTransportOpenStale: () => false,
       runtimeDebug: vi.fn(),
@@ -935,17 +1011,13 @@ describe('session transport reuse runtime gates', () => {
             activeSessionId: 'session-1',
           },
         },
-        manualCloseRef: { current: new Set() },
+        reconnectStore: createSessionReconnectStore(),
       },
       clearReconnectForSession: vi.fn(),
       readSessionTransportHost: () => host,
       readSessionTargetKey: () => targetKey,
       readSessionTargetRuntime: () => ({ sessionIds: ['session-1', 'session-2'] }),
-      readSessionTransportSocket: () => null,
-      readSessionTransportResource: () => ({
-        socket: targetSocket,
-        channel: { state: 'open' },
-      }),
+      daemonConnection: makeDaemonConnection({ socket: targetSocket, channelState: 'open' }),
       hasPendingSessionTransportOpen: () => false,
       isPendingSessionTransportOpenStale: () => false,
       runtimeDebug: vi.fn(),
@@ -983,17 +1055,13 @@ describe('session transport reuse runtime gates', () => {
             activeSessionId: 'session-1',
           },
         },
-        manualCloseRef: { current: new Set() },
+        reconnectStore: createSessionReconnectStore(),
       },
       clearReconnectForSession: vi.fn(),
       readSessionTransportHost: () => host,
       readSessionTargetKey: () => targetKey,
       readSessionTargetRuntime: () => ({ sessionIds: ['session-1', 'session-2'] }),
-      readSessionTransportSocket: () => null,
-      readSessionTransportResource: () => ({
-        socket: targetSocket,
-        channel: { state: 'closed' },
-      }),
+      daemonConnection: makeDaemonConnection({ socket: targetSocket, channelState: 'closed' }),
       hasPendingSessionTransportOpen: () => false,
       isPendingSessionTransportOpenStale: () => false,
       runtimeDebug: vi.fn(),
@@ -1038,14 +1106,14 @@ describe('session transport reuse runtime gates', () => {
             activeSessionId: 'session-1',
           },
         },
-        manualCloseRef: { current: new Set() },
+        reconnectStore: createSessionReconnectStore(),
         pendingSessionTransportOpenIntentsRef: { current: pendingStore },
       },
       clearReconnectForSession: vi.fn(),
       readSessionTransportHost: () => host,
       readSessionTargetKey: () => targetKey,
       readSessionTargetRuntime: () => ({ sessionIds: ['session-1'] }),
-      readSessionTransportSocket: () => ({ readyState: WebSocket.CONNECTING } as any),
+      daemonConnection: makeDaemonConnection({ socket: { readyState: WebSocket.CONNECTING } as any }),
       hasPendingSessionTransportOpen: () => true,
       isPendingSessionTransportOpenStale: () => true,
       runtimeDebug: vi.fn(),
@@ -1089,13 +1157,13 @@ describe('session transport reuse runtime gates', () => {
             activeSessionId: 'session-1',
           },
         },
-        manualCloseRef: { current: new Set() },
+        reconnectStore: createSessionReconnectStore(),
       },
       clearReconnectForSession: vi.fn(),
       readSessionTransportHost: () => host,
       readSessionTargetKey: () => targetKey,
       readSessionTargetRuntime: () => ({ sessionIds: ['session-1'] }),
-      readSessionTransportSocket: () => ({ readyState: WebSocket.CLOSED } as any),
+      daemonConnection: makeDaemonConnection({ socket: { readyState: WebSocket.CLOSED } as any }),
       hasPendingSessionTransportOpen: () => false,
       isPendingSessionTransportOpenStale: () => false,
       runtimeDebug: vi.fn(),
@@ -1113,167 +1181,51 @@ describe('session transport reuse runtime gates', () => {
     });
   });
 
-  it('openSessionTransportByIntentRuntime reuses an open same-target socket instead of creating another session socket', () => {
-    const existingSocket = { readyState: WebSocket.OPEN } as any;
+  it('reconnectSessionRuntime rebuilds an opening mux channel when the physical target socket is gone', () => {
     const cleanupSocket = vi.fn();
-    const buildTraversalSocketForHost = vi.fn();
-    const onConnected = vi.fn();
-    const writeSessionTransportToken = vi.fn();
+    const scheduleReconnect = vi.fn();
 
-    openSessionTransportByIntentRuntime({
-      intent: {
-        sessionId: 'session-1',
-        openRequestId: 'open-1',
-        host,
-        resolvedSessionName: 'tmux-1',
-        debugScope: 'reconnect',
-        finalizeFailure: vi.fn(),
-        onConnected,
+    reconnectSessionRuntime({
+      sessionId: 'session-1',
+      refs: {
+        stateRef: {
+          current: {
+            sessions: [{
+              id: 'session-1',
+              hostId: 'host-1',
+              connectionName: 'conn',
+              bridgeHost: '127.0.0.1',
+              bridgePort: 3333,
+              sessionName: 'tmux-1',
+              authToken: undefined,
+              autoCommand: undefined,
+              createdAt: 1,
+            } as Session],
+            activeSessionId: 'session-1',
+          },
+        },
+        reconnectStore: createSessionReconnectStore(),
       },
-      readSessionTransportToken: () => 'ticket-1',
-      readSessionTransportSocket: () => existingSocket,
+      clearReconnectForSession: vi.fn(),
+      readSessionTransportHost: () => host,
       readSessionTargetKey: () => targetKey,
-      cleanupSocket,
-      buildTraversalSocketForHost,
+      readSessionTargetRuntime: () => ({ sessionIds: ['session-1'] }),
+      daemonConnection: makeDaemonConnection({ socket: null, terminalSocket: null, channelState: 'opening' }),
+      hasPendingSessionTransportOpen: () => false,
+      isPendingSessionTransportOpenStale: () => false,
       runtimeDebug: vi.fn(),
-      primeSessionTransportSocket: vi.fn(),
-      bindSessionTransportSocketLifecycle: vi.fn(),
-      writeSessionTransportToken,
-    } as any);
-
-    expect(cleanupSocket).not.toHaveBeenCalled();
-    expect(buildTraversalSocketForHost).not.toHaveBeenCalled();
-    expect(writeSessionTransportToken).toHaveBeenCalledWith('session-1', null);
-    expect(onConnected).toHaveBeenCalledWith(existingSocket);
-  });
-
-  it('openSessionTransportByIntentRuntime waits for an existing connecting same-target socket without clearing its token', () => {
-    const existingSocket = { readyState: WebSocket.CONNECTING } as any;
-    const cleanupSocket = vi.fn();
-    const buildTraversalSocketForHost = vi.fn();
-    const onConnected = vi.fn();
-    const writeSessionTransportToken = vi.fn();
-
-    openSessionTransportByIntentRuntime({
-      intent: {
-        sessionId: 'session-1',
-        openRequestId: 'open-1',
-        host,
-        resolvedSessionName: 'tmux-1',
-        debugScope: 'reconnect',
-        finalizeFailure: vi.fn(),
-        onConnected,
-      },
-      readSessionTransportToken: () => 'ticket-1',
-      readSessionTransportSocket: () => existingSocket,
-      readSessionTargetKey: () => targetKey,
       cleanupSocket,
-      buildTraversalSocketForHost,
-      runtimeDebug: vi.fn(),
-      primeSessionTransportSocket: vi.fn(),
-      bindSessionTransportSocketLifecycle: vi.fn(),
-      writeSessionTransportToken,
-    } as any);
-
-    expect(cleanupSocket).not.toHaveBeenCalled();
-    expect(buildTraversalSocketForHost).not.toHaveBeenCalled();
-    expect(writeSessionTransportToken).not.toHaveBeenCalled();
-    expect(onConnected).not.toHaveBeenCalled();
-  });
-
-  it('openSessionTransportByIntentRuntime still rebuilds when the current socket is closed', () => {
-    const cleanupSocket = vi.fn();
-    const builtSocket = { readyState: WebSocket.CONNECTING } as any;
-    const buildTraversalSocketForHost = vi.fn(() => builtSocket);
-    const primeSessionTransportSocket = vi.fn();
-
-    openSessionTransportByIntentRuntime({
-      intent: {
-        sessionId: 'session-1',
-        openRequestId: 'open-1',
-        host,
-        resolvedSessionName: 'tmux-1',
-        debugScope: 'reconnect',
-        finalizeFailure: vi.fn(),
-        onConnected: vi.fn(),
-      },
-      readSessionTransportToken: () => 'ticket-1',
-      readSessionTransportSocket: () => ({ readyState: WebSocket.CLOSED } as any),
-      readSessionTargetKey: () => targetKey,
-      cleanupSocket,
-      buildTraversalSocketForHost,
-      runtimeDebug: vi.fn(),
-      primeSessionTransportSocket,
-      bindSessionTransportSocketLifecycle: vi.fn(),
-      writeSessionTransportToken: vi.fn(),
+      writeSessionTransportHost: vi.fn(),
+      updateSessionSync: vi.fn(),
+      scheduleReconnect,
     } as any);
 
     expect(cleanupSocket).toHaveBeenCalledWith('session-1', false);
-    expect(buildTraversalSocketForHost).toHaveBeenCalledWith(host, 'session');
-    expect(primeSessionTransportSocket).toHaveBeenCalledWith('session-1', builtSocket);
+    expect(scheduleReconnect).toHaveBeenCalledWith('session-1', 'manual reconnect', true, {
+      immediate: true,
+      resetAttempt: true,
+      force: true,
+    });
   });
 
-  it('openSessionTransportByIntentRuntime rebuilds when route-aware host identity differs from an open direct socket', () => {
-    const directHost = {
-      ...host,
-      transportMode: 'websocket' as const,
-      tailscaleHost: '100.66.1.82',
-      bridgeHost: '100.66.1.82',
-    };
-    const relayAwareHost = {
-      ...directHost,
-      transportMode: 'auto' as const,
-      daemonHostId: 'mac-studio',
-      relayHostId: 'mac-studio',
-      relayEndpointCandidates: [
-        {
-          id: 'direct:tailscale:mac-studio',
-          kind: 'tailscale' as const,
-          host: '100.66.1.82',
-          port: 3333,
-          authRequired: true,
-          lastSeenAt: '2026-07-20T00:00:00.000Z',
-        },
-        {
-          id: 'relay-rtc:mac-studio',
-          kind: 'relay-rtc' as const,
-          relayHostId: 'mac-studio',
-          authRequired: true,
-          lastSeenAt: '2026-07-20T00:00:00.000Z',
-        },
-      ],
-    };
-    const existingSocket = { readyState: WebSocket.OPEN } as any;
-    const builtSocket = { readyState: WebSocket.CONNECTING } as any;
-    const cleanupSocket = vi.fn();
-    const buildTraversalSocketForHost = vi.fn(() => builtSocket);
-    const primeSessionTransportSocket = vi.fn();
-    const onConnected = vi.fn();
-
-    openSessionTransportByIntentRuntime({
-      intent: {
-        sessionId: 'session-1',
-        openRequestId: 'open-1',
-        host: relayAwareHost,
-        resolvedSessionName: 'tmux-1',
-        debugScope: 'reconnect',
-        finalizeFailure: vi.fn(),
-        onConnected,
-      },
-      readSessionTransportToken: () => 'ticket-1',
-      readSessionTransportSocket: () => existingSocket,
-      readSessionTargetKey: () => buildTransportTargetKey(directHost),
-      cleanupSocket,
-      buildTraversalSocketForHost,
-      runtimeDebug: vi.fn(),
-      primeSessionTransportSocket,
-      bindSessionTransportSocketLifecycle: vi.fn(),
-      writeSessionTransportToken: vi.fn(),
-    } as any);
-
-    expect(onConnected).not.toHaveBeenCalled();
-    expect(cleanupSocket).toHaveBeenCalledWith('session-1', false);
-    expect(buildTraversalSocketForHost).toHaveBeenCalledWith(relayAwareHost, 'session');
-    expect(primeSessionTransportSocket).toHaveBeenCalledWith('session-1', builtSocket);
-  });
 });

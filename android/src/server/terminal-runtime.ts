@@ -1,77 +1,28 @@
 import { WebSocket } from 'ws';
 import { buildTerminalMuxServerChannelMessage } from '@zterm/shared/protocol';
-import type { ServerMessage } from '../lib/types';
-import type { TerminalPerformanceTraceRecord } from '../lib/terminal-performance-trace';
+import type {
+  BridgeServerMessage as ServerMessage,
+} from '@zterm/shared/protocol';
 import { detachMirrorSubscriber } from './mirror-lifecycle';
-import { createTerminalMirrorRuntime } from './terminal-mirror-runtime';
+import { createTerminalMirrorRuntime, type TerminalMirrorRuntimeDeps } from './terminal-mirror-runtime';
 import type {
   TerminalTransportSubscriber,
   SessionMirror,
   TerminalAttachPayload,
-  TerminalGeometry,
   TerminalTransportConnection,
   TerminalSessionTransport,
-  TmuxPaneMetrics,
 } from './terminal-runtime-types';
 
-interface TerminalRuntimeDeps {
+// Single deps truth: mirror runtime owns the field list; this runtime only adds
+// what the subscriber lifecycle itself needs. closeTransportSubscriber /
+// getSessionMirror are provided internally when wiring the mirror runtime.
+type TerminalRuntimeDeps = Omit<
+  TerminalMirrorRuntimeDeps,
+  'closeTransportSubscriber' | 'getSessionMirror'
+> & {
   defaultSessionName: string;
-  defaultViewport: { cols: number; rows: number };
-  sessions: Map<string, TerminalTransportSubscriber>;
-  mirrors: Map<string, SessionMirror>;
-  sendMessage: (session: TerminalTransportSubscriber, message: ServerMessage) => void;
-  sendText: (transport: TerminalSessionTransport | null | undefined, text: string) => void;
-  sendScheduleStateToSession: (session: TerminalTransportSubscriber, sessionName?: string) => void;
-  buildConnectedPayload: (
-    sessionId: string,
-    requestOrigin?: string,
-  ) => Extract<ServerMessage, { type: 'connected' }>['payload'];
-  buildBufferHeadPayload: (
-    sessionId: string,
-    mirror: SessionMirror,
-  ) => Extract<ServerMessage, { type: 'buffer-head' }>['payload'];
-  buildChangedRangesBufferSyncPayload: (
-    mirror: SessionMirror,
-    changedRanges: Array<{ startIndex: number; endIndex: number }>,
-  ) => Extract<ServerMessage, { type: 'buffer-sync' }>['payload'] | null;
-  sanitizeSessionName: (input?: string) => string;
-  getMirrorKey: (sessionName: string) => string;
-  normalizeTerminalCols: (cols: number | undefined) => number;
-  normalizeTerminalRows: (rows: number | undefined) => number;
-  resolveAttachGeometry: (options: {
-    requestedGeometry: TerminalGeometry | null;
-    currentMirrorGeometry: TerminalGeometry | null;
-    existingTmuxGeometry: TerminalGeometry | null;
-    previousSessionGeometry: TerminalGeometry;
-  }) => TerminalGeometry;
-  readTmuxPaneMetrics: (sessionName: string) => TmuxPaneMetrics;
-  assertTmuxSessionExists: (sessionName: string) => void;
-  captureMirrorAuthoritativeBufferFromTmux: (mirror: SessionMirror) => Promise<boolean>;
-  mirrorBufferChanged: (
-    mirror: SessionMirror,
-    previousStartIndex: number,
-    previousLines: import('../lib/types').TerminalCell[][],
-  ) => Array<{ startIndex: number; endIndex: number }>;
-  mirrorCursorEqual: (
-    left: import('../lib/types').TerminalCursorState | null | undefined,
-    right: import('../lib/types').TerminalCursorState | null | undefined,
-  ) => boolean;
-  writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean) => boolean;
-  enqueueLiveMirrorInput: (
-    sessionName: string,
-    payload: string,
-    appendEnter: boolean,
-    shouldWrite?: () => boolean,
-  ) => Promise<boolean>;
-  disposeLiveMirrorInputBatch: (sessionName: string, reason: string) => number;
-  writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean) => void;
-  autoCommandDelayMs: number;
-  waitMs: (delayMs: number) => Promise<void>;
-  runTmux: (args: string[]) => { ok: true; stdout: string };
   daemonRuntimeDebug: (scope: string, payload?: unknown) => void;
-  recordPerformanceTrace?: (record: TerminalPerformanceTraceRecord) => void;
-  logTimePrefix: () => string;
-}
+};
 
 export interface TerminalRuntime {
   sessions: () => Map<string, TerminalTransportSubscriber>;
@@ -360,35 +311,9 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     sessions.delete(subscriber.id);
   }
 
+  const { defaultSessionName: _defaultSessionName, daemonRuntimeDebug: _debug, ...mirrorDeps } = deps;
   const mirrorRuntime = createTerminalMirrorRuntime({
-    defaultViewport: deps.defaultViewport,
-    sessions,
-    mirrors,
-    sendMessage: deps.sendMessage,
-    sendText: deps.sendText,
-    recordPerformanceTrace: deps.recordPerformanceTrace,
-    sendScheduleStateToSession: deps.sendScheduleStateToSession,
-    buildConnectedPayload: deps.buildConnectedPayload,
-    buildBufferHeadPayload: deps.buildBufferHeadPayload,
-    buildChangedRangesBufferSyncPayload: deps.buildChangedRangesBufferSyncPayload,
-    sanitizeSessionName: deps.sanitizeSessionName,
-    getMirrorKey: deps.getMirrorKey,
-    normalizeTerminalCols: deps.normalizeTerminalCols,
-    normalizeTerminalRows: deps.normalizeTerminalRows,
-    resolveAttachGeometry: deps.resolveAttachGeometry,
-    readTmuxPaneMetrics: deps.readTmuxPaneMetrics,
-    assertTmuxSessionExists: deps.assertTmuxSessionExists,
-    captureMirrorAuthoritativeBufferFromTmux: deps.captureMirrorAuthoritativeBufferFromTmux,
-    mirrorBufferChanged: deps.mirrorBufferChanged,
-    mirrorCursorEqual: deps.mirrorCursorEqual,
-    writeToLiveMirror: deps.writeToLiveMirror,
-    enqueueLiveMirrorInput: deps.enqueueLiveMirrorInput,
-    disposeLiveMirrorInputBatch: deps.disposeLiveMirrorInputBatch,
-    writeToTmuxSession: deps.writeToTmuxSession,
-    autoCommandDelayMs: deps.autoCommandDelayMs,
-    waitMs: deps.waitMs,
-    logTimePrefix: deps.logTimePrefix,
-    runTmux: deps.runTmux,
+    ...mirrorDeps,
     closeTransportSubscriber,
     getSessionMirror: getSubscriberMirror,
   });

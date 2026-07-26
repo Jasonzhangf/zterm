@@ -1,5 +1,7 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
+import { createSessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import { clearTailRefreshRuntime, startSocketHeartbeat } from './session-context-socket-runtime';
+import { createSessionHeartbeatStore } from '../lib/session-heartbeat-store';
 
 describe('session-context-socket-runtime heartbeat lifecycle', () => {
   afterEach(() => {
@@ -9,15 +11,15 @@ describe('session-context-socket-runtime heartbeat lifecycle', () => {
   it('clears any existing heartbeat interval before starting a replacement heartbeat for the same session', () => {
     vi.useFakeTimers();
     const sessionId = 'session-1';
-    const pingIntervalsRef = { current: new Map<string, ReturnType<typeof setInterval>>() };
-    const lastPongAtRef = { current: new Map<string, number>([[sessionId, Date.now()]]) };
-    const lastServerActivityAtRef = { current: new Map<string, number>([[sessionId, Date.now()]]) };
+    const heartbeatStore = createSessionHeartbeatStore();
+    heartbeatStore.recordPong(sessionId, Date.now());
+    heartbeatStore.recordServerActivity(sessionId, Date.now());
     const sendSocketPayload = vi.fn();
     const finalizeFailure = vi.fn();
 
     const staleHandle = setInterval(() => undefined, 9999);
     const clearIntervalSpy = vi.spyOn(globalThis, 'clearInterval');
-    pingIntervalsRef.current.set(sessionId, staleHandle);
+    heartbeatStore.setPingInterval(sessionId, staleHandle);
 
     const ws = {
       readyState: WebSocket.OPEN,
@@ -28,25 +30,23 @@ describe('session-context-socket-runtime heartbeat lifecycle', () => {
       sessionId,
       ws: ws as any,
       finalizeFailure,
-      pingIntervalsRef,
-      lastPongAtRef,
-      lastServerActivityAtRef,
+      heartbeatStore,
       clientPingIntervalMs: 2000,
       maxConsecutiveMisses: 3,
       sendSocketPayload,
     });
 
     expect(clearIntervalSpy).toHaveBeenCalledWith(staleHandle);
-    expect(pingIntervalsRef.current.get(sessionId)).not.toBe(staleHandle);
-    expect(pingIntervalsRef.current.has(sessionId)).toBe(true);
+    expect(heartbeatStore.readPingInterval(sessionId)).not.toBe(staleHandle);
+    expect(heartbeatStore.readPingInterval(sessionId)).not.toBeNull();
   });
 
   it('fails and closes an OPEN socket once after three consecutive server-activity misses', () => {
     vi.useFakeTimers();
     const sessionId = 'session-1';
-    const pingIntervalsRef = { current: new Map<string, ReturnType<typeof setInterval>>() };
-    const lastPongAtRef = { current: new Map<string, number>([[sessionId, Date.now()]]) };
-    const lastServerActivityAtRef = { current: new Map<string, number>([[sessionId, Date.now()]]) };
+    const heartbeatStore = createSessionHeartbeatStore();
+    heartbeatStore.recordPong(sessionId, Date.now());
+    heartbeatStore.recordServerActivity(sessionId, Date.now());
     const sendSocketPayload = vi.fn();
     const finalizeFailure = vi.fn();
     const ws = {
@@ -58,9 +58,7 @@ describe('session-context-socket-runtime heartbeat lifecycle', () => {
       sessionId,
       ws: ws as any,
       finalizeFailure,
-      pingIntervalsRef,
-      lastPongAtRef,
-      lastServerActivityAtRef,
+      heartbeatStore,
       clientPingIntervalMs: 2000,
       maxConsecutiveMisses: 3,
       sendSocketPayload,
@@ -85,9 +83,9 @@ describe('session-context-socket-runtime heartbeat lifecycle', () => {
   it('reports route failure before client-closing a stale heartbeat socket', () => {
     vi.useFakeTimers();
     const sessionId = 'session-1';
-    const pingIntervalsRef = { current: new Map<string, ReturnType<typeof setInterval>>() };
-    const lastPongAtRef = { current: new Map<string, number>([[sessionId, Date.now()]]) };
-    const lastServerActivityAtRef = { current: new Map<string, number>([[sessionId, Date.now()]]) };
+    const heartbeatStore = createSessionHeartbeatStore();
+    heartbeatStore.recordPong(sessionId, Date.now());
+    heartbeatStore.recordServerActivity(sessionId, Date.now());
     const sendSocketPayload = vi.fn();
     const finalizeFailure = vi.fn();
     const reportFailure = vi.fn();
@@ -101,9 +99,7 @@ describe('session-context-socket-runtime heartbeat lifecycle', () => {
       sessionId,
       ws: ws as any,
       finalizeFailure,
-      pingIntervalsRef,
-      lastPongAtRef,
-      lastServerActivityAtRef,
+      heartbeatStore,
       clientPingIntervalMs: 2000,
       maxConsecutiveMisses: 3,
       sendSocketPayload,
@@ -120,20 +116,20 @@ describe('session-context-socket-runtime heartbeat lifecycle', () => {
   it('resets consecutive misses when any server activity advances without a pong', () => {
     vi.useFakeTimers();
     const sessionId = 'session-1';
-    const pingIntervalsRef = { current: new Map<string, ReturnType<typeof setInterval>>() };
-    const lastPongAtRef = { current: new Map<string, number>([[sessionId, Date.now()]]) };
-    const lastServerActivityAtRef = { current: new Map<string, number>([[sessionId, Date.now()]]) };
+    const heartbeatStore = createSessionHeartbeatStore();
+    heartbeatStore.recordPong(sessionId, Date.now());
+    heartbeatStore.recordServerActivity(sessionId, Date.now());
     const sendSocketPayload = vi.fn();
     const finalizeFailure = vi.fn();
     const ws = { readyState: WebSocket.OPEN, close: vi.fn() } as any;
 
     startSocketHeartbeat({
-      sessionId, ws, finalizeFailure, pingIntervalsRef, lastPongAtRef, lastServerActivityAtRef,
+      sessionId, ws, finalizeFailure, heartbeatStore,
       clientPingIntervalMs: 2000, maxConsecutiveMisses: 3, sendSocketPayload,
     });
 
     vi.advanceTimersByTime(4000);
-    lastServerActivityAtRef.current.set(sessionId, Date.now());
+    heartbeatStore.recordServerActivity(sessionId, Date.now());
     vi.advanceTimersByTime(4000);
 
     expect(sendSocketPayload).toHaveBeenCalledTimes(4);
@@ -144,20 +140,19 @@ describe('session-context-socket-runtime heartbeat lifecycle', () => {
   it('resets consecutive misses when pong truth advances on an idle terminal', () => {
     vi.useFakeTimers();
     const sessionId = 'session-1';
-    const pingIntervalsRef = { current: new Map<string, ReturnType<typeof setInterval>>() };
-    const lastPongAtRef = { current: new Map<string, number>([[sessionId, Date.now()]]) };
-    const lastServerActivityAtRef = { current: new Map<string, number>() };
+    const heartbeatStore = createSessionHeartbeatStore();
+    heartbeatStore.recordPong(sessionId, Date.now());
     const sendSocketPayload = vi.fn();
     const finalizeFailure = vi.fn();
     const ws = { readyState: WebSocket.OPEN, close: vi.fn() } as any;
 
     startSocketHeartbeat({
-      sessionId, ws, finalizeFailure, pingIntervalsRef, lastPongAtRef, lastServerActivityAtRef,
+      sessionId, ws, finalizeFailure, heartbeatStore,
       clientPingIntervalMs: 2000, maxConsecutiveMisses: 3, sendSocketPayload,
     });
 
     vi.advanceTimersByTime(4000);
-    lastPongAtRef.current.set(sessionId, Date.now());
+    heartbeatStore.recordPong(sessionId, Date.now());
     vi.advanceTimersByTime(4000);
 
     expect(sendSocketPayload).toHaveBeenCalledTimes(4);
@@ -171,12 +166,13 @@ describe('session-context-socket-runtime heartbeat lifecycle', () => {
     const sendSocketPayload = vi.fn();
     const finalizeFailure = vi.fn();
     const ws = { readyState: WebSocket.CLOSING, close: vi.fn() } as any;
+    const heartbeatStore = createSessionHeartbeatStore();
+    heartbeatStore.recordPong(sessionId, Date.now());
+    heartbeatStore.recordServerActivity(sessionId, Date.now());
 
     startSocketHeartbeat({
       sessionId, ws, finalizeFailure,
-      pingIntervalsRef: { current: new Map() },
-      lastPongAtRef: { current: new Map([[sessionId, Date.now()]]) },
-      lastServerActivityAtRef: { current: new Map([[sessionId, Date.now()]]) },
+      heartbeatStore,
       clientPingIntervalMs: 2000, maxConsecutiveMisses: 3, sendSocketPayload,
     });
 
@@ -191,9 +187,7 @@ describe('session-context-socket-runtime heartbeat lifecycle', () => {
     vi.setSystemTime(0);
     const sessionId = 'session-anchor';
     const heartbeatKey = 'target:mac-studio';
-    const pingIntervalsRef = { current: new Map<string, ReturnType<typeof setInterval>>() };
-    const lastPongAtRef = { current: new Map<string, number>() };
-    const lastServerActivityAtRef = { current: new Map<string, number>() };
+    const heartbeatStore = createSessionHeartbeatStore();
     const sendSocketPayload = vi.fn();
     const finalizeFailure = vi.fn();
     const ws = { readyState: WebSocket.OPEN, close: vi.fn(), reportFailure: vi.fn() } as any;
@@ -203,34 +197,27 @@ describe('session-context-socket-runtime heartbeat lifecycle', () => {
       heartbeatKey,
       ws,
       finalizeFailure,
-      pingIntervalsRef,
-      lastPongAtRef,
-      lastServerActivityAtRef,
+      heartbeatStore,
       clientPingIntervalMs: 1000,
       maxConsecutiveMisses: 3,
       sendSocketPayload,
-    } as any);
+    });
 
     vi.advanceTimersByTime(2000);
     vi.setSystemTime(2500);
-    lastServerActivityAtRef.current.set(heartbeatKey, Date.now());
+    heartbeatStore.recordServerActivity(heartbeatKey, Date.now());
     vi.advanceTimersByTime(3000);
 
     expect(finalizeFailure).not.toHaveBeenCalled();
     expect(ws.close).not.toHaveBeenCalled();
-    expect(pingIntervalsRef.current.has(heartbeatKey)).toBe(true);
-    expect(pingIntervalsRef.current.has(sessionId)).toBe(false);
+    expect(heartbeatStore.readPingInterval(heartbeatKey)).not.toBeNull();
+    expect(heartbeatStore.readPingInterval(sessionId)).toBeNull();
   });
 
   it('keeps only one heartbeat timer when multiple logical sessions share the same physical target', () => {
     vi.useFakeTimers();
     const heartbeatKey = 'target:mac-studio';
-    const pingIntervalsRef = { current: new Map<string, ReturnType<typeof setInterval>>() };
-    const refs = {
-      pingIntervalsRef,
-      lastPongAtRef: { current: new Map<string, number>() },
-      lastServerActivityAtRef: { current: new Map<string, number>() },
-    };
+    const heartbeatStore = createSessionHeartbeatStore();
     const sendSocketPayload = vi.fn();
     const finalizeFailure = vi.fn();
     const ws = { readyState: WebSocket.OPEN, close: vi.fn() } as any;
@@ -240,54 +227,59 @@ describe('session-context-socket-runtime heartbeat lifecycle', () => {
       heartbeatKey,
       ws,
       finalizeFailure,
-      ...refs,
+      heartbeatStore,
       clientPingIntervalMs: 1000,
       maxConsecutiveMisses: 3,
       sendSocketPayload,
-    } as any);
-    const firstTimer = pingIntervalsRef.current.get(heartbeatKey);
+    });
+    const firstTimer = heartbeatStore.readPingInterval(heartbeatKey);
     startSocketHeartbeat({
       sessionId: 'session-b',
       heartbeatKey,
       ws,
       finalizeFailure,
-      ...refs,
+      heartbeatStore,
       clientPingIntervalMs: 1000,
       maxConsecutiveMisses: 3,
       sendSocketPayload,
-    } as any);
+    });
 
-    expect(pingIntervalsRef.current.size).toBe(1);
-    expect(pingIntervalsRef.current.has(heartbeatKey)).toBe(true);
-    expect(pingIntervalsRef.current.get(heartbeatKey)).not.toBe(firstTimer);
-    expect(pingIntervalsRef.current.has('session-a')).toBe(false);
-    expect(pingIntervalsRef.current.has('session-b')).toBe(false);
+    expect(heartbeatStore.pingIntervalKeys()).toEqual([heartbeatKey]);
+    expect(heartbeatStore.readPingInterval(heartbeatKey)).not.toBe(firstTimer);
+    expect(heartbeatStore.readPingInterval('session-a')).toBeNull();
+    expect(heartbeatStore.readPingInterval('session-b')).toBeNull();
   });
 
   it('clears stale tail-refresh markers together with head throttle state during socket cleanup prep', () => {
     const sessionId = 'session-1';
-    const sessionBufferHeadsRef = { current: new Map([[sessionId, { revision: 5, latestEndIndex: 88, seenAt: 1 }]]) };
+    const liveHeads = new Map([[sessionId, { revision: 5, latestEndIndex: 88, seenAt: 1 }]]);
+    const sessionHeadStoreRef = {
+      current: {
+        clearLiveHead: (id: string) => {
+          liveHeads.delete(id);
+        },
+      },
+    };
     const sessionRevisionResetRef = { current: new Map([[sessionId, { revision: 4, latestEndIndex: 77, seenAt: 1 }]]) };
     const lastHeadRequestAtRef = { current: new Map([[sessionId, 123]]) };
-    const pendingInputTailRefreshRef = { current: new Map([[sessionId, { requestedAt: 5, localRevision: 3 }]]) };
-    const pendingConnectTailRefreshRef = { current: new Set([sessionId]) };
-    const pendingResumeTailRefreshRef = { current: new Set([sessionId]) };
+    const tailRefreshStore = createSessionTailRefreshStore();
+    tailRefreshStore.markPendingInputTailRefresh(sessionId, 3, 5);
+    tailRefreshStore.markPendingConnectTailRefresh(sessionId);
+    tailRefreshStore.markPendingResumeTailRefresh(sessionId);
 
     clearTailRefreshRuntime({
       sessionId,
-      sessionBufferHeadsRef,
+      sessionHeadStoreRef,
       sessionRevisionResetRef,
       lastHeadRequestAtRef,
-      pendingInputTailRefreshRef,
-      pendingConnectTailRefreshRef,
-      pendingResumeTailRefreshRef,
+      tailRefreshStore,
     });
 
-    expect(sessionBufferHeadsRef.current.has(sessionId)).toBe(false);
+    expect(liveHeads.has(sessionId)).toBe(false);
     expect(sessionRevisionResetRef.current.has(sessionId)).toBe(false);
     expect(lastHeadRequestAtRef.current.has(sessionId)).toBe(false);
-    expect(pendingInputTailRefreshRef.current.has(sessionId)).toBe(false);
-    expect(pendingConnectTailRefreshRef.current.has(sessionId)).toBe(false);
-    expect(pendingResumeTailRefreshRef.current.has(sessionId)).toBe(false);
+    expect(tailRefreshStore.hasPendingInputTailRefresh(sessionId)).toBe(false);
+    expect(tailRefreshStore.hasPendingConnectTailRefresh(sessionId)).toBe(false);
+    expect(tailRefreshStore.hasPendingResumeTailRefresh(sessionId)).toBe(false);
   });
 });

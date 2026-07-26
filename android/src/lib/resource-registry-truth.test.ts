@@ -47,7 +47,11 @@ describe('resource registry truth gate', () => {
   it('keeps global resource registry and review docs present', () => {
     expect(existsSync(join(root, 'docs/resource-registry.json'))).toBe(true);
     expect(existsSync(join(root, 'docs/resource-map.md'))).toBe(true);
+    expect(existsSync(join(root, 'docs/module-registry.json'))).toBe(true);
+    expect(existsSync(join(root, 'docs/edge-registry.json'))).toBe(true);
+    expect(existsSync(join(root, 'docs/modules/project-modules.md'))).toBe(true);
     expect(existsSync(join(root, 'docs/testing/resource-truth-test-design.md'))).toBe(true);
+    expect(existsSync(join(root, 'docs/testing/module-edge-registry-test-design.md'))).toBe(true);
   });
 
   it('keeps resources unique, owned, and locally reviewable', () => {

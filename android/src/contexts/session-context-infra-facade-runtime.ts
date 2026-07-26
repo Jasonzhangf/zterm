@@ -1,4 +1,5 @@
 import { flushRuntimeDebugLogsToSessionTransport } from '../lib/runtime-debug-flush';
+import { createClientDaemonConnection } from '../lib/client-daemon-connection';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import {
   getSessionTargetTerminalTransport,
@@ -7,10 +8,12 @@ import {
   type SessionTransportRuntimeStore,
 } from '../lib/session-transport-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
+import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
+import type { SessionReconnectStore } from '../lib/session-reconnect-store';
+import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import type { Host, Session, SessionBufferState, SessionRenderBufferSnapshot, SessionScheduleState, TerminalBufferPayload } from '../lib/types';
 import type { RecordSessionTxOptions } from './session-context-pull-runtime';
-import type { RevisionResetExpectation, SessionAction, SessionManagerState, SessionReconnectRuntime } from './session-context-core';
-import type { SessionBufferHeadState } from './session-buffer-planner-helpers';
+import type { RevisionResetExpectation, SessionAction, SessionManagerState } from './session-context-core';
 import type { SessionPullPurpose } from './session-pull-state-helpers';
 import {
   buildTerminalMuxChannelBinary,
@@ -182,22 +185,14 @@ export function createSessionInfraFacadeRuntime(options: {
   sessionAttachTokensRef: { current: Map<string, string> };
   pendingSessionTransportOpenIntentsRef: { current: Map<string, unknown> };
   activeBodySubscriptionSuppressedRef: { current: boolean };
-  reconnectRuntimesRef: { current: Map<string, SessionReconnectRuntime> };
-  pendingInputTailRefreshRef: { current: Map<string, { requestedAt: number; localRevision: number }> };
-  pendingConnectTailRefreshRef: { current: Set<string> };
-  pendingResumeTailRefreshRef: { current: Set<string> };
+  reconnectStore: SessionReconnectStore;
+  tailRefreshStore: SessionTailRefreshStore;
   sameRevisionChunkFrameRef?: { current: Map<string, unknown> };
   sessionPullStateRef: { current: Map<string, unknown> };
-  lastServerActivityAtRef: { current: Map<string, number> };
-  lastTerminalActivityAtRef: { current: Map<string, number> };
-  staleTransportProbeAtRef: { current: Map<string, number> };
-  lastPongAtRef: { current: Map<string, number> };
-  pingIntervalsRef: { current: Map<string, ReturnType<typeof setInterval>> };
+  heartbeatStore: SessionHeartbeatStore;
   handshakeTimeoutsRef: { current: Map<string, number> };
-  sessionBufferHeadsRef: { current: Map<string, SessionBufferHeadState> };
   sessionRevisionResetRef: { current: Map<string, RevisionResetExpectation> };
   lastHeadRequestAtRef: { current: Map<string, number> };
-  lastSyncRequestAtRef: { current: Map<string, unknown> };
   terminalCacheLines: number;
   defaultRows: number;
   bridgeSettings: BridgeSettings;
@@ -305,10 +300,10 @@ export function createSessionInfraFacadeRuntime(options: {
       const ws = channel
         ? (
           channel.state === 'open'
-            ? transportAccessors.readSessionTransportResource(session.id).socket
+            ? daemonConnection.readSessionSocket(session.id)
             : null
         )
-        : transportAccessors.readSessionTransportSocket(session.id);
+        : daemonConnection.readSessionSocket(session.id);
       if (!ws || ws.readyState !== WebSocket.OPEN) {
         continue;
       }
@@ -376,7 +371,7 @@ export function createSessionInfraFacadeRuntime(options: {
   const isReconnectInFlight = (sessionId: string) => {
     return isReconnectInFlightRuntime({
       sessionId,
-      reconnectRuntimesRef: options.reconnectRuntimesRef,
+      reconnectStore: options.reconnectStore,
     });
   };
 
@@ -427,9 +422,8 @@ export function createSessionInfraFacadeRuntime(options: {
       data,
       refs: {
         sessionDebugMetricsStoreRef: options.sessionDebugMetricsStoreRef,
-        lastServerActivityAtRef: options.lastServerActivityAtRef,
-        lastTerminalActivityAtRef: options.lastTerminalActivityAtRef,
-        staleTransportProbeAtRef: options.staleTransportProbeAtRef,
+        heartbeatStore: options.heartbeatStore,
+        reconnectStore: options.reconnectStore,
       },
     });
   };
@@ -448,7 +442,7 @@ export function createSessionInfraFacadeRuntime(options: {
     return markPendingInputTailRefreshInfraRuntime({
       sessionId,
       localRevision,
-      pendingInputTailRefreshRef: options.pendingInputTailRefreshRef,
+      tailRefreshStore: options.tailRefreshStore,
     });
   };
 
@@ -474,9 +468,8 @@ export function createSessionInfraFacadeRuntime(options: {
       reason,
       activeSessionId: options.stateRef.current.activeSessionId,
       sessionPullStateRef: options.sessionPullStateRef,
-      pendingInputTailRefreshRef: options.pendingInputTailRefreshRef,
+      tailRefreshStore: options.tailRefreshStore,
       sameRevisionChunkFrameRef: options.sameRevisionChunkFrameRef,
-      lastSyncRequestAtRef: options.lastSyncRequestAtRef,
       runtimeDebug: options.runtimeDebug,
     });
   };
@@ -484,7 +477,7 @@ export function createSessionInfraFacadeRuntime(options: {
   const isSessionTransportActivityStale = (sessionId: string) => {
     return isSessionTransportActivityStaleInfraRuntime({
       sessionId,
-      lastServerActivityAtRef: options.lastServerActivityAtRef,
+      heartbeatStore: options.heartbeatStore,
       staleActivityMs: options.staleActivityMs,
     });
   };
@@ -505,12 +498,26 @@ export function createSessionInfraFacadeRuntime(options: {
     });
   };
 
+  const daemonConnection = createClientDaemonConnection({
+    readSessionTransportResource: transportAccessors.readSessionTransportResource,
+    sendSocketPayload,
+  });
+
   const buildTraversalSocketForHost = (host: Host, transportRole: 'control' | 'session' = 'session') => {
     return buildTraversalSocketForHostRuntime({
       host,
       bridgeSettings: options.bridgeSettings,
       wsUrl: options.wsUrl,
       transportRole,
+    });
+  };
+
+  const openDaemonTargetTransportSocket = (host: Host) => {
+    return buildTraversalSocketForHostRuntime({
+      host,
+      bridgeSettings: options.bridgeSettings,
+      wsUrl: options.wsUrl,
+      transportRole: 'session',
     });
   };
 
@@ -526,6 +533,7 @@ export function createSessionInfraFacadeRuntime(options: {
   const flushRuntimeDebugLogs = () => {
     flushRuntimeDebugLogsToSessionTransport({
       activeSessionId: options.stateRef.current.activeSessionId,
+      daemonConnection,
       readSessionTransportSocket: transportAccessors.readSessionTransportSocket,
       sendSocketPayload,
     });
@@ -547,9 +555,7 @@ export function createSessionInfraFacadeRuntime(options: {
     clearHeartbeatRuntime({
       sessionId,
       heartbeatKey: heartbeatOptions?.heartbeatKey,
-      pingIntervalsRef: options.pingIntervalsRef,
-      lastPongAtRef: options.lastPongAtRef,
-      lastServerActivityAtRef: options.lastServerActivityAtRef,
+      heartbeatStore: options.heartbeatStore,
     });
   };
 
@@ -572,12 +578,10 @@ export function createSessionInfraFacadeRuntime(options: {
   const clearTailRefreshRuntime = (sessionId: string) => {
     clearTailRefreshRuntimeInfra({
       sessionId,
-      sessionBufferHeadsRef: options.sessionBufferHeadsRef,
+      sessionHeadStoreRef: options.sessionHeadStoreRef,
       sessionRevisionResetRef: options.sessionRevisionResetRef,
       lastHeadRequestAtRef: options.lastHeadRequestAtRef,
-      pendingInputTailRefreshRef: options.pendingInputTailRefreshRef,
-      pendingConnectTailRefreshRef: options.pendingConnectTailRefreshRef,
-      pendingResumeTailRefreshRef: options.pendingResumeTailRefreshRef,
+      tailRefreshStore: options.tailRefreshStore,
       sameRevisionChunkFrameRef: options.sameRevisionChunkFrameRef,
     });
   };
@@ -593,9 +597,7 @@ export function createSessionInfraFacadeRuntime(options: {
       heartbeatKey: heartbeatOptions?.heartbeatKey,
       ws,
       finalizeFailure,
-      pingIntervalsRef: options.pingIntervalsRef,
-      lastPongAtRef: options.lastPongAtRef,
-      lastServerActivityAtRef: options.lastServerActivityAtRef,
+      heartbeatStore: options.heartbeatStore,
       clientPingIntervalMs: 60_000,
       maxConsecutiveMisses: 3,
       sendSocketPayload,
@@ -637,7 +639,9 @@ export function createSessionInfraFacadeRuntime(options: {
     resetSessionTransportPullBookkeeping,
     isSessionTransportActivityStale,
     sendSocketPayload,
+    daemonConnection,
     buildTraversalSocketForHost,
+    openDaemonTargetTransportSocket,
     applyTransportDiagnostics,
     flushRuntimeDebugLogs,
     setScheduleStateForSession,

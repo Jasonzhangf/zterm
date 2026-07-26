@@ -1,6 +1,10 @@
 import type { MutableRefObject } from 'react';
 import type { Host, Session, SessionBufferState, SessionScheduleState } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
+import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
+import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
+import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
+import type { SessionReconnectStore } from '../lib/session-reconnect-store';
 import type { CreateSessionOptions } from './session-context-core';
 import {
   closeSessionRuntime,
@@ -29,15 +33,12 @@ interface SessionStateRef {
 interface SessionLifecycleRuntimeOptions {
   refs: {
     stateRef: SessionStateRef;
-    manualCloseRef: MutableRefObject<Set<string>>;
+    reconnectStore: SessionReconnectStore;
     pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, unknown>>;
-    pendingInputTailRefreshRef: MutableRefObject<Map<string, { requestedAt: number; localRevision: number }>>;
-    pendingConnectTailRefreshRef: MutableRefObject<Set<string>>;
-    pendingResumeTailRefreshRef: MutableRefObject<Set<string>>;
+    tailRefreshStore: SessionTailRefreshStore;
     lastActiveReentryAtRef: MutableRefObject<Map<string, number>>;
     lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
     connectedBaselineBurstGuardRef: MutableRefObject<Set<string>>;
-    reconnectRuntimesRef: MutableRefObject<Map<string, { connecting: boolean; timer: number | null }>>;
     sessionVisibleRangeRef: MutableRefObject<Map<string, unknown>>;
     sessionBufferStoreRef: MutableRefObject<{
       commitBuffer: (sessionId: string, buffer: SessionBufferState) => boolean;
@@ -54,11 +55,8 @@ interface SessionLifecycleRuntimeOptions {
     sessionDebugMetricsStoreRef: MutableRefObject<{
       clearSession: (sessionId: string) => void;
     }>;
-    lastServerActivityAtRef: MutableRefObject<Map<string, number>>;
-    lastTerminalActivityAtRef?: MutableRefObject<Map<string, number>>;
+    heartbeatStore: SessionHeartbeatStore;
     lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
-    lastPongAtRef: MutableRefObject<Map<string, number>>;
-    staleTransportProbeAtRef: MutableRefObject<Map<string, number>>;
   };
   runtimeDebug: RuntimeDebugFn;
   defaultViewport: {
@@ -81,8 +79,7 @@ interface SessionLifecycleRuntimeOptions {
   cleanupControlSocket: (sessionId: string, shouldClose?: boolean) => void;
   writeSessionTransportHost: (sessionId: string, host: Host) => unknown;
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => { socket?: BridgeTransportSocket | null } | null;
+  daemonConnection: ClientDaemonConnection;
   readSessionTransportHost: (sessionId: string) => Host | null;
   readSessionTransportRuntime: (sessionId: string) => { targetKey: string | null } | null;
   readSessionTargetRuntime: (sessionId: string) => { sessionIds: string[] } | null;
@@ -109,19 +106,20 @@ interface SessionLifecycleRuntimeOptions {
 }
 
 export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOptions) {
+  const daemonConnection = options.daemonConnection;
+
   const connectSession = (sessionId: string, host: Host) => {
     connectSessionRuntime({
       sessionId,
       host,
       refs: {
-        manualCloseRef: options.refs.manualCloseRef,
+        reconnectStore: options.refs.reconnectStore,
       },
       clearReconnectForSession: options.clearReconnectForSession,
       cleanupSocket: options.cleanupSocket,
       writeSessionTransportHost: options.writeSessionTransportHost,
       writeSessionTransportToken: options.writeSessionTransportToken,
-      readSessionTransportSocket: options.readSessionTransportSocket,
-      readSessionTransportResource: options.readSessionTransportResource,
+      daemonConnection,
       readSessionTargetKey: options.readSessionTargetKey,
       hasPendingSessionTransportOpen: options.hasPendingSessionTransportOpen,
       isPendingSessionTransportOpenStale: options.isPendingSessionTransportOpenStale,
@@ -146,8 +144,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       createSessionSync: options.createSessionSync,
       updateSessionSync: options.updateSessionSync,
       writeSessionTransportHost: options.writeSessionTransportHost,
-      readSessionTransportSocket: options.readSessionTransportSocket,
-      readSessionTransportResource: options.readSessionTransportResource,
+      daemonConnection,
       connectSession,
       defaultViewport: options.defaultViewport,
     });
@@ -157,11 +154,9 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
     closeSessionRuntime({
       sessionId,
       refs: {
-        manualCloseRef: options.refs.manualCloseRef,
+        reconnectStore: options.refs.reconnectStore,
         pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
-        pendingInputTailRefreshRef: options.refs.pendingInputTailRefreshRef,
-        pendingConnectTailRefreshRef: options.refs.pendingConnectTailRefreshRef,
-        pendingResumeTailRefreshRef: options.refs.pendingResumeTailRefreshRef,
+        tailRefreshStore: options.refs.tailRefreshStore,
         lastActiveReentryAtRef: options.refs.lastActiveReentryAtRef,
         lastConnectedBaselineAtRef: options.refs.lastConnectedBaselineAtRef,
         sessionVisibleRangeRef: options.refs.sessionVisibleRangeRef,
@@ -173,7 +168,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       clearReconnectForSession: options.clearReconnectForSession,
       readSessionTransportRuntime: options.readSessionTransportRuntime,
       readSessionTargetRuntime: options.readSessionTargetRuntime,
-      readSessionTransportSocket: options.readSessionTransportSocket,
+      daemonConnection,
       sendSocketPayload: options.sendSocketPayload,
       runtimeDebug: options.runtimeDebug,
       cleanupSocket: options.cleanupSocket,
@@ -204,15 +199,14 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       reconnectOptions,
       refs: {
         stateRef: options.refs.stateRef,
-        manualCloseRef: options.refs.manualCloseRef,
+        reconnectStore: options.refs.reconnectStore,
         pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
       },
       clearReconnectForSession: options.clearReconnectForSession,
       readSessionTransportHost: options.readSessionTransportHost,
       readSessionTargetKey: options.readSessionTargetKey,
       readSessionTargetRuntime: options.readSessionTargetRuntime,
-      readSessionTransportSocket: options.readSessionTransportSocket,
-      readSessionTransportResource: options.readSessionTransportResource,
+      daemonConnection,
       hasPendingSessionTransportOpen: options.hasPendingSessionTransportOpen,
       isPendingSessionTransportOpenStale: options.isPendingSessionTransportOpenStale,
       runtimeDebug: options.runtimeDebug,
@@ -254,20 +248,17 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       refreshOptions,
       refs: {
         stateRef: options.refs.stateRef,
-        pendingResumeTailRefreshRef: options.refs.pendingResumeTailRefreshRef,
+        tailRefreshStore: options.refs.tailRefreshStore,
         lastActiveReentryAtRef: options.refs.lastActiveReentryAtRef,
         lastConnectedBaselineAtRef: options.refs.lastConnectedBaselineAtRef,
         connectedBaselineBurstGuardRef: options.refs.connectedBaselineBurstGuardRef,
-        lastServerActivityAtRef: options.refs.lastServerActivityAtRef,
-        lastTerminalActivityAtRef: options.refs.lastTerminalActivityAtRef,
+        heartbeatStore: options.refs.heartbeatStore,
         lastHeadRequestAtRef: options.refs.lastHeadRequestAtRef,
-        staleTransportProbeAtRef: options.refs.staleTransportProbeAtRef,
-        reconnectRuntimesRef: options.refs.reconnectRuntimesRef,
+        reconnectStore: options.refs.reconnectStore,
       },
       readSessionTransportRuntime: options.readSessionTransportRuntime,
       readSessionTargetRuntime: options.readSessionTargetRuntime,
-      readSessionTransportSocket: options.readSessionTransportSocket,
-      readSessionTransportResource: options.readSessionTransportResource,
+      daemonConnection,
       readSessionTerminalChannel: options.readSessionTerminalChannel,
       isReconnectInFlight: options.isReconnectInFlight,
       hasPendingSessionTransportOpen: options.hasPendingSessionTransportOpen,

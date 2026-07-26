@@ -5,6 +5,7 @@ import {
   queueSessionTransportOpenIntentRuntime,
 } from './session-context-transport-open-runtime';
 import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
+import { createSessionReconnectStore } from '../lib/session-reconnect-store';
 
 function makeHost() {
   return {
@@ -33,13 +34,26 @@ function makeIntent(sessionId: string, openRequestId: string): PendingSessionTra
   };
 }
 
+function makeDaemonConnection(overrides: Record<string, any> = {}) {
+  return {
+    readSessionResource: vi.fn(),
+    readSessionSocket: vi.fn(() => null),
+    readSessionTargetSocket: vi.fn(() => null),
+    readOpenSessionSocket: vi.fn(),
+    openSessionTargetTransport: vi.fn(),
+    sendSessionMessage: vi.fn(() => false),
+    sendSessionRaw: vi.fn(() => false),
+    ...overrides,
+  } as any;
+}
+
 describe('queueSessionTransportOpenIntentRuntime', () => {
   it('clears any stale handshake timeout before replacing the pending open intent for the same session', () => {
     const pendingSessionTransportOpenIntentsRef = {
       current: new Map<string, PendingSessionTransportOpenIntent>(),
     };
     const clearSessionHandshakeTimeout = vi.fn();
-    const ensureControlTransportForSessionOpen = vi.fn();
+    const openSessionMuxChannelByIntent = vi.fn();
     const finalizeSocketFailureBaseline = vi.fn().mockReturnValue({ shouldContinue: true, manualClosed: false });
 
     queueSessionTransportOpenIntentRuntime({
@@ -52,7 +66,7 @@ describe('queueSessionTransportOpenIntentRuntime', () => {
       clearSessionHandshakeTimeout,
       finalizeSocketFailureBaseline,
       pendingSessionTransportOpenIntentsRef,
-      ensureControlTransportForSessionOpen,
+      openSessionMuxChannelByIntent,
     });
 
     queueSessionTransportOpenIntentRuntime({
@@ -65,7 +79,7 @@ describe('queueSessionTransportOpenIntentRuntime', () => {
       clearSessionHandshakeTimeout,
       finalizeSocketFailureBaseline,
       pendingSessionTransportOpenIntentsRef,
-      ensureControlTransportForSessionOpen,
+      openSessionMuxChannelByIntent,
     });
 
     expect(clearSessionHandshakeTimeout).toHaveBeenCalledTimes(2);
@@ -73,14 +87,13 @@ describe('queueSessionTransportOpenIntentRuntime', () => {
     expect(clearSessionHandshakeTimeout).toHaveBeenNthCalledWith(2, 'session-1');
     expect(pendingSessionTransportOpenIntentsRef.current.size).toBe(1);
     expect(pendingSessionTransportOpenIntentsRef.current.get('session-1')?.debugScope).toBe('reconnect');
-    expect(ensureControlTransportForSessionOpen).toHaveBeenCalledTimes(2);
+    expect(openSessionMuxChannelByIntent).toHaveBeenCalledTimes(2);
   });
 
-  it('uses the mux opener when provided instead of the legacy control/session-ticket opener', () => {
+  it('uses the mux opener instead of the legacy control/session-ticket opener', () => {
     const pendingSessionTransportOpenIntentsRef = {
       current: new Map<string, PendingSessionTransportOpenIntent>(),
     };
-    const ensureControlTransportForSessionOpen = vi.fn();
     const openSessionMuxChannelByIntent = vi.fn();
 
     queueSessionTransportOpenIntentRuntime({
@@ -93,14 +106,43 @@ describe('queueSessionTransportOpenIntentRuntime', () => {
       clearSessionHandshakeTimeout: vi.fn(),
       finalizeSocketFailureBaseline: vi.fn().mockReturnValue({ shouldContinue: true, manualClosed: false }),
       pendingSessionTransportOpenIntentsRef,
-      ensureControlTransportForSessionOpen,
       openSessionMuxChannelByIntent,
     });
 
     expect(openSessionMuxChannelByIntent).toHaveBeenCalledWith(
       expect.objectContaining({ sessionId: 'session-1' }),
     );
-    expect(ensureControlTransportForSessionOpen).not.toHaveBeenCalled();
+  });
+
+  it('fails explicitly when the mux opener is unavailable instead of falling back to legacy session sockets', () => {
+    const pendingSessionTransportOpenIntentsRef = {
+      current: new Map<string, PendingSessionTransportOpenIntent>(),
+    };
+    const onHandshakeFailure = vi.fn();
+    const finalizeSocketFailureBaseline = vi.fn().mockReturnValue({ shouldContinue: true, manualClosed: false });
+
+    queueSessionTransportOpenIntentRuntime({
+      intentOptions: {
+        sessionId: 'session-1',
+        host: makeHost(),
+        debugScope: 'connect',
+        onHandshakeFailure,
+      },
+      clearSessionHandshakeTimeout: vi.fn(),
+      finalizeSocketFailureBaseline,
+      pendingSessionTransportOpenIntentsRef,
+    });
+
+    expect(pendingSessionTransportOpenIntentsRef.current.has('session-1')).toBe(false);
+    expect(finalizeSocketFailureBaseline).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-1',
+      message: 'client.daemon_connection mux opener unavailable',
+    }));
+    expect(onHandshakeFailure).toHaveBeenCalledWith(
+      'client.daemon_connection mux opener unavailable',
+      true,
+      'handshake',
+    );
   });
 
   it('preserves mux channel allocation hooks on the pending open intent', () => {
@@ -119,7 +161,6 @@ describe('queueSessionTransportOpenIntentRuntime', () => {
       clearSessionHandshakeTimeout: vi.fn(),
       finalizeSocketFailureBaseline: vi.fn().mockReturnValue({ shouldContinue: true, manualClosed: false }),
       pendingSessionTransportOpenIntentsRef,
-      ensureControlTransportForSessionOpen: vi.fn(),
       openSessionMuxChannelByIntent: vi.fn(),
     });
 
@@ -133,9 +174,6 @@ describe('openSessionMuxChannelByIntentRuntime', () => {
   it('opens a channel over an existing ready target transport instead of creating a session socket', () => {
     const targetSocket = { readyState: WebSocket.OPEN } as any;
     const sendSocketPayload = vi.fn();
-    const buildTraversalSocketForHost = vi.fn();
-    const primeTargetTerminalTransportSocket = vi.fn();
-    const bindTargetMuxTransportSocketLifecycle = vi.fn();
     const ensureSessionTerminalChannel = vi.fn(() => ({
       channelId: 'channel-a',
       sessionId: 'session-1',
@@ -153,6 +191,9 @@ describe('openSessionMuxChannelByIntentRuntime', () => {
 
     openSessionMuxChannelByIntentRuntime({
       intent,
+      daemonConnection: makeDaemonConnection({
+        readSessionTargetSocket: () => targetSocket,
+      }),
       readSessionTargetTerminalSocket: () => targetSocket,
       isSessionTargetMuxReady: () => true,
       ensureSessionTerminalChannel,
@@ -160,16 +201,10 @@ describe('openSessionMuxChannelByIntentRuntime', () => {
       updateSessionTerminalChannelState: vi.fn(),
       readRequestedTerminalGeometry: () => ({ cols: 88, widthMode: 'adaptive-phone' }),
       sendSocketPayload,
-      buildTraversalSocketForHost,
-      primeTargetTerminalTransportSocket,
-      bindTargetMuxTransportSocketLifecycle,
       runtimeDebug: vi.fn(),
     });
 
-    expect(buildTraversalSocketForHost).not.toHaveBeenCalled();
     expect(ensureSessionTerminalChannel).toHaveBeenCalledWith('session-1', { bodySubscribed: false });
-    expect(primeTargetTerminalTransportSocket).not.toHaveBeenCalled();
-    expect(bindTargetMuxTransportSocketLifecycle).not.toHaveBeenCalled();
     expect(sendSocketPayload).toHaveBeenCalledWith(
       'session-1',
       targetSocket,
@@ -186,16 +221,17 @@ describe('openSessionMuxChannelByIntentRuntime', () => {
     );
   });
 
-  it('creates one target transport when no reusable target transport exists', () => {
+  it('opens one target transport through client.daemon_connection when no reusable target transport exists', () => {
     const builtSocket = { readyState: WebSocket.CONNECTING } as any;
-    const buildTraversalSocketForHost = vi.fn(() => builtSocket);
-    const primeTargetTerminalTransportSocket = vi.fn();
-    const bindTargetMuxTransportSocketLifecycle = vi.fn();
+    const daemonConnection = makeDaemonConnection({
+      openSessionTargetTransport: vi.fn(() => builtSocket),
+    });
     const sendSocketPayload = vi.fn();
     const intent = makeIntent('session-1', 'open-1');
 
     openSessionMuxChannelByIntentRuntime({
       intent,
+      daemonConnection,
       readSessionTargetTerminalSocket: () => null,
       isSessionTargetMuxReady: () => false,
       ensureSessionTerminalChannel: vi.fn(() => ({
@@ -211,19 +247,14 @@ describe('openSessionMuxChannelByIntentRuntime', () => {
       updateSessionTerminalChannelState: vi.fn(),
       readRequestedTerminalGeometry: () => null,
       sendSocketPayload,
-      buildTraversalSocketForHost,
-      primeTargetTerminalTransportSocket,
-      bindTargetMuxTransportSocketLifecycle,
       runtimeDebug: vi.fn(),
     });
 
-    expect(buildTraversalSocketForHost).toHaveBeenCalledWith(intent.host, 'session');
-    expect(primeTargetTerminalTransportSocket).toHaveBeenCalledWith('session-1', builtSocket);
-    expect(bindTargetMuxTransportSocketLifecycle).toHaveBeenCalledWith(expect.objectContaining({
+    expect(daemonConnection.openSessionTargetTransport).toHaveBeenCalledWith(expect.objectContaining({
       sessionId: 'session-1',
       host: intent.host,
-      ws: builtSocket,
       debugScope: 'connect',
+      finalizeFailure: intent.finalizeFailure,
     }));
     expect(sendSocketPayload).not.toHaveBeenCalled();
   });
@@ -235,6 +266,9 @@ describe('openSessionMuxChannelByIntentRuntime', () => {
 
     openSessionMuxChannelByIntentRuntime({
       intent: makeIntent('session-1', 'open-1'),
+      daemonConnection: makeDaemonConnection({
+        readSessionTargetSocket: () => targetSocket,
+      }),
       readSessionTargetTerminalSocket: () => targetSocket,
       isSessionTargetMuxReady: () => false,
       ensureSessionTerminalChannel: vi.fn(() => ({
@@ -250,9 +284,6 @@ describe('openSessionMuxChannelByIntentRuntime', () => {
       updateSessionTerminalChannelState,
       readRequestedTerminalGeometry: () => null,
       sendSocketPayload,
-      buildTraversalSocketForHost: vi.fn(),
-      primeTargetTerminalTransportSocket: vi.fn(),
-      bindTargetMuxTransportSocketLifecycle: vi.fn(),
       runtimeDebug: vi.fn(),
     });
 
@@ -263,13 +294,13 @@ describe('openSessionMuxChannelByIntentRuntime', () => {
   it('queues a stale channel while the shared target transport is connecting without creating another socket', () => {
     const targetSocket = { readyState: WebSocket.CONNECTING } as any;
     const updateSessionTerminalChannelState = vi.fn();
-    const buildTraversalSocketForHost = vi.fn();
-    const primeTargetTerminalTransportSocket = vi.fn();
-    const bindTargetMuxTransportSocketLifecycle = vi.fn();
     const sendSocketPayload = vi.fn();
 
     openSessionMuxChannelByIntentRuntime({
       intent: makeIntent('session-2', 'open-2'),
+      daemonConnection: makeDaemonConnection({
+        readSessionTargetSocket: () => targetSocket,
+      }),
       readSessionTargetTerminalSocket: () => targetSocket,
       isSessionTargetMuxReady: () => false,
       ensureSessionTerminalChannel: vi.fn(() => ({
@@ -285,16 +316,10 @@ describe('openSessionMuxChannelByIntentRuntime', () => {
       updateSessionTerminalChannelState,
       readRequestedTerminalGeometry: () => null,
       sendSocketPayload,
-      buildTraversalSocketForHost,
-      primeTargetTerminalTransportSocket,
-      bindTargetMuxTransportSocketLifecycle,
       runtimeDebug: vi.fn(),
     });
 
     expect(updateSessionTerminalChannelState).toHaveBeenCalledWith('session-2', 'opening');
-    expect(buildTraversalSocketForHost).not.toHaveBeenCalled();
-    expect(primeTargetTerminalTransportSocket).not.toHaveBeenCalled();
-    expect(bindTargetMuxTransportSocketLifecycle).not.toHaveBeenCalled();
     expect(sendSocketPayload).not.toHaveBeenCalled();
   });
 
@@ -305,6 +330,9 @@ describe('openSessionMuxChannelByIntentRuntime', () => {
 
     openSessionMuxChannelByIntentRuntime({
       intent,
+      daemonConnection: makeDaemonConnection({
+        readSessionTargetSocket: () => targetSocket,
+      }),
       readSessionTargetTerminalSocket: () => targetSocket,
       isSessionTargetMuxReady: () => true,
       ensureSessionTerminalChannel: vi.fn(() => ({
@@ -320,9 +348,6 @@ describe('openSessionMuxChannelByIntentRuntime', () => {
       updateSessionTerminalChannelState,
       readRequestedTerminalGeometry: () => null,
       sendSocketPayload: vi.fn(),
-      buildTraversalSocketForHost: vi.fn(),
-      primeTargetTerminalTransportSocket: vi.fn(),
-      bindTargetMuxTransportSocketLifecycle: vi.fn(),
       runtimeDebug: vi.fn(),
     });
 
@@ -333,16 +358,12 @@ describe('openSessionMuxChannelByIntentRuntime', () => {
 
 describe('handleReconnectHandshakeFailureRuntime', () => {
   it('keeps retryable reconnect handshake failures out of terminal error projection', () => {
-    const reconnectRuntimesRef = {
-      current: new Map([
-        ['session-1', {
-          attempt: 1,
-          timer: null,
-          nextDelayMs: null,
-          connecting: true,
-        }],
-      ]),
-    };
+    const reconnectStore = createSessionReconnectStore();
+    reconnectStore.write('session-1', {
+      phase: 'connecting' as const,
+      attempt: 1,
+      nextDelayMs: null,
+    });
     const updateSessionSync = vi.fn();
     const emitSessionStatus = vi.fn();
     const startReconnectAttempt = vi.fn();
@@ -351,22 +372,16 @@ describe('handleReconnectHandshakeFailureRuntime', () => {
       sessionId: 'session-1',
       message: 'control socket closed before attach',
       retryable: true,
-      reconnectRuntimesRef,
+      reconnectStore,
       clearSupersededSockets: vi.fn(),
       updateSessionSync,
       emitSessionStatus,
-      createSessionReconnectRuntime: () => ({
-        attempt: 0,
-        timer: null,
-        nextDelayMs: null,
-        connecting: false,
-      }),
       startReconnectAttempt,
     });
 
-    expect(reconnectRuntimesRef.current.get('session-1')).toEqual(expect.objectContaining({
+    expect(reconnectStore.read('session-1')).toEqual(expect.objectContaining({
+      phase: 'idle',
       attempt: 2,
-      connecting: false,
     }));
     expect(updateSessionSync).toHaveBeenCalledWith('session-1', {
       state: 'reconnecting',
@@ -379,16 +394,12 @@ describe('handleReconnectHandshakeFailureRuntime', () => {
   });
 
   it('projects terminal error only for nonretryable reconnect handshake failures', () => {
-    const reconnectRuntimesRef = {
-      current: new Map([
-        ['session-1', {
-          attempt: 1,
-          timer: null,
-          nextDelayMs: null,
-          connecting: true,
-        }],
-      ]),
-    };
+    const reconnectStore = createSessionReconnectStore();
+    reconnectStore.write('session-1', {
+      phase: 'connecting' as const,
+      attempt: 1,
+      nextDelayMs: null,
+    });
     const updateSessionSync = vi.fn();
     const emitSessionStatus = vi.fn();
     const startReconnectAttempt = vi.fn();
@@ -397,20 +408,14 @@ describe('handleReconnectHandshakeFailureRuntime', () => {
       sessionId: 'session-1',
       message: 'auth rejected',
       retryable: false,
-      reconnectRuntimesRef,
+      reconnectStore,
       clearSupersededSockets: vi.fn(),
       updateSessionSync,
       emitSessionStatus,
-      createSessionReconnectRuntime: () => ({
-        attempt: 0,
-        timer: null,
-        nextDelayMs: null,
-        connecting: false,
-      }),
       startReconnectAttempt,
     });
 
-    expect(reconnectRuntimesRef.current.has('session-1')).toBe(false);
+    expect(reconnectStore.read('session-1')).toBeNull();
     expect(updateSessionSync).toHaveBeenCalledWith('session-1', {
       state: 'error',
       lastError: 'auth rejected',
@@ -420,16 +425,12 @@ describe('handleReconnectHandshakeFailureRuntime', () => {
   });
 
   it('stops retryable reconnect without terminal error projection after the session becomes inactive', () => {
-    const reconnectRuntimesRef = {
-      current: new Map([
-        ['session-1', {
-          attempt: 1,
-          timer: null,
-          nextDelayMs: null,
-          connecting: true,
-        }],
-      ]),
-    };
+    const reconnectStore = createSessionReconnectStore();
+    reconnectStore.write('session-1', {
+      phase: 'connecting' as const,
+      attempt: 1,
+      nextDelayMs: null,
+    });
     const updateSessionSync = vi.fn();
     const emitSessionStatus = vi.fn();
     const startReconnectAttempt = vi.fn();
@@ -438,21 +439,15 @@ describe('handleReconnectHandshakeFailureRuntime', () => {
       sessionId: 'session-1',
       message: "Tmux session unavailable: can't find session: routecodex",
       retryable: true,
-      reconnectRuntimesRef,
+      reconnectStore,
       clearSupersededSockets: vi.fn(),
       updateSessionSync,
       emitSessionStatus,
-      createSessionReconnectRuntime: () => ({
-        attempt: 0,
-        timer: null,
-        nextDelayMs: null,
-        connecting: false,
-      }),
       shouldContinueRetryableReconnect: () => false,
       startReconnectAttempt,
     });
 
-    expect(reconnectRuntimesRef.current.has('session-1')).toBe(false);
+    expect(reconnectStore.read('session-1')).toBeNull();
     expect(updateSessionSync).toHaveBeenCalledWith('session-1', {
       state: 'idle',
       lastError: "Tmux session unavailable: can't find session: routecodex",

@@ -3,15 +3,17 @@ import {
   recordSessionRx,
   resetSessionTransportPullBookkeeping,
 } from './session-context-pull-runtime';
+import { createSessionHeartbeatStore } from '../lib/session-heartbeat-store';
+import { createSessionReconnectStore } from '../lib/session-reconnect-store';
+import { createSessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 
 describe('session-context-pull-runtime', () => {
   it('keeps a head probe pending when only non-render server activity arrives', () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(10_000);
     const refs = {
       sessionDebugMetricsStoreRef: { current: { recordRxBytes: vi.fn() } },
-      lastServerActivityAtRef: { current: new Map<string, number>() },
-      lastTerminalActivityAtRef: { current: new Map<string, number>() },
-      staleTransportProbeAtRef: { current: new Map<string, number>([['session-1', 9_000]]) },
+      heartbeatStore: createSessionHeartbeatStore(),
+      reconnectStore: (() => { const store = createSessionReconnectStore(); store.markStaleTransportProbe('session-1', 9_000); return store; })(),
     };
 
     try {
@@ -21,9 +23,9 @@ describe('session-context-pull-runtime', () => {
         refs: refs as any,
       });
 
-      expect(refs.lastServerActivityAtRef.current.get('session-1')).toBe(10_000);
-      expect(refs.lastTerminalActivityAtRef.current.has('session-1')).toBe(false);
-      expect(refs.staleTransportProbeAtRef.current.get('session-1')).toBe(9_000);
+      expect(refs.heartbeatStore.readLastServerActivityAt('session-1')).toBe(10_000);
+      expect(refs.heartbeatStore.readLastTerminalActivityAt('session-1')).toBe(0);
+      expect(refs.reconnectStore.readStaleTransportProbeAt('session-1')).toBe(9_000);
     } finally {
       nowSpy.mockRestore();
     }
@@ -33,9 +35,8 @@ describe('session-context-pull-runtime', () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(10_000);
     const refs = {
       sessionDebugMetricsStoreRef: { current: { recordRxBytes: vi.fn() } },
-      lastServerActivityAtRef: { current: new Map<string, number>() },
-      lastTerminalActivityAtRef: { current: new Map<string, number>() },
-      staleTransportProbeAtRef: { current: new Map<string, number>([['session-1', 9_000]]) },
+      heartbeatStore: createSessionHeartbeatStore(),
+      reconnectStore: (() => { const store = createSessionReconnectStore(); store.markStaleTransportProbe('session-1', 9_000); return store; })(),
     };
 
     try {
@@ -54,9 +55,9 @@ describe('session-context-pull-runtime', () => {
         refs: refs as any,
       });
 
-      expect(refs.lastServerActivityAtRef.current.get('session-1')).toBe(10_000);
-      expect(refs.lastTerminalActivityAtRef.current.get('session-1')).toBe(10_000);
-      expect(refs.staleTransportProbeAtRef.current.has('session-1')).toBe(false);
+      expect(refs.heartbeatStore.readLastServerActivityAt('session-1')).toBe(10_000);
+      expect(refs.heartbeatStore.readLastTerminalActivityAt('session-1')).toBe(10_000);
+      expect(refs.reconnectStore.readStaleTransportProbeAt('session-1')).toBe(0);
     } finally {
       nowSpy.mockRestore();
     }
@@ -80,33 +81,28 @@ describe('session-context-pull-runtime', () => {
         }],
       ]),
     };
-    const lastSyncRequestAtRef = {
-      current: new Map([
-        [`${sessionId}:tail-refresh`, {
-          sentAt: 120,
-          requestStartIndex: 120,
-          requestEndIndex: 121,
-          knownRevision: 5,
-          localStartIndex: 0,
-          localEndIndex: 120,
-          targetHeadRevision: 6,
-        }],
-        [`${sessionId}:reading-repair`, {
-          sentAt: 121,
-          requestStartIndex: 40,
-          requestEndIndex: 60,
-          knownRevision: 5,
-          localStartIndex: 40,
-          localEndIndex: 60,
-          targetHeadRevision: 6,
-        }],
-      ]),
-    };
-    const pendingInputTailRefreshRef = {
-      current: new Map([
-        [sessionId, { requestedAt: 122, localRevision: 5 }],
-      ]),
-    };
+    const tailRefreshStore = createSessionTailRefreshStore();
+    tailRefreshStore.recordSyncRequest(sessionId, 'tail-refresh', {
+      sentAt: 120,
+      requestStartIndex: 120,
+      requestEndIndex: 121,
+      knownRevision: 5,
+      localStartIndex: 0,
+      localEndIndex: 120,
+      targetHeadRevision: 6,
+      repairSignature: '',
+    });
+    tailRefreshStore.recordSyncRequest(sessionId, 'reading-repair', {
+      sentAt: 121,
+      requestStartIndex: 40,
+      requestEndIndex: 60,
+      knownRevision: 5,
+      localStartIndex: 40,
+      localEndIndex: 60,
+      targetHeadRevision: 6,
+      repairSignature: '',
+    });
+    tailRefreshStore.markPendingInputTailRefresh(sessionId, 5, 122);
     const runtimeDebug = vi.fn();
 
     resetSessionTransportPullBookkeeping({
@@ -114,15 +110,14 @@ describe('session-context-pull-runtime', () => {
       reason: 'active-reentry',
       activeSessionId: sessionId,
       sessionPullStateRef: sessionPullStateRef as any,
-      pendingInputTailRefreshRef: pendingInputTailRefreshRef as any,
-      lastSyncRequestAtRef: lastSyncRequestAtRef as any,
+      tailRefreshStore,
       runtimeDebug,
     });
 
     expect(sessionPullStateRef.current.has(sessionId)).toBe(false);
-    expect(pendingInputTailRefreshRef.current.has(sessionId)).toBe(false);
-    expect(lastSyncRequestAtRef.current.has(`${sessionId}:tail-refresh`)).toBe(false);
-    expect(lastSyncRequestAtRef.current.has(`${sessionId}:reading-repair`)).toBe(false);
+    expect(tailRefreshStore.hasPendingInputTailRefresh(sessionId)).toBe(false);
+    expect(tailRefreshStore.hasSyncRequest(sessionId, 'tail-refresh')).toBe(false);
+    expect(tailRefreshStore.hasSyncRequest(sessionId, 'reading-repair')).toBe(false);
     expect(runtimeDebug).toHaveBeenCalledWith(
       'session.buffer.pull.reset',
       expect.objectContaining({
@@ -137,11 +132,8 @@ describe('session-context-pull-runtime', () => {
 
   it('also clears pending input tail refresh bookkeeping on bookkeeping reset', () => {
     const sessionId = 'session-3';
-    const pendingInputTailRefreshRef = {
-      current: new Map([
-        [sessionId, { requestedAt: 122, localRevision: 5 }],
-      ]),
-    };
+    const tailRefreshStore = createSessionTailRefreshStore();
+    tailRefreshStore.markPendingInputTailRefresh(sessionId, 5, 122);
     const runtimeDebug = vi.fn();
 
     resetSessionTransportPullBookkeeping({
@@ -149,12 +141,11 @@ describe('session-context-pull-runtime', () => {
       reason: 'tab-switch-in',
       activeSessionId: sessionId,
       sessionPullStateRef: { current: new Map() } as any,
-      pendingInputTailRefreshRef: pendingInputTailRefreshRef as any,
-      lastSyncRequestAtRef: { current: new Map() } as any,
+      tailRefreshStore,
       runtimeDebug,
     });
 
-    expect(pendingInputTailRefreshRef.current.has(sessionId)).toBe(false);
+    expect(tailRefreshStore.hasPendingInputTailRefresh(sessionId)).toBe(false);
     expect(runtimeDebug).toHaveBeenCalledWith(
       'session.buffer.pull.reset',
       expect.objectContaining({

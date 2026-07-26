@@ -1,4 +1,7 @@
 import type { TerminalBufferPayload } from '../lib/types';
+import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
+import type { SessionReconnectStore } from '../lib/session-reconnect-store';
+import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import {
   clearSessionPullStateEntry,
   hasActiveSessionPullState,
@@ -72,17 +75,16 @@ export function recordSessionRx(options: {
   data: string | ArrayBuffer;
   refs: {
     sessionDebugMetricsStoreRef: MutableRefObject<SessionDebugMetricsRecorder>;
-    lastServerActivityAtRef: MutableRefObject<Map<string, number>>;
-    lastTerminalActivityAtRef?: MutableRefObject<Map<string, number>>;
-    staleTransportProbeAtRef: MutableRefObject<Map<string, number>>;
+    heartbeatStore: SessionHeartbeatStore;
+    reconnectStore: SessionReconnectStore;
   };
 }) {
   const now = Date.now();
   options.refs.sessionDebugMetricsStoreRef.current.recordRxBytes(options.sessionId, options.data);
-  options.refs.lastServerActivityAtRef.current.set(options.sessionId, now);
+  options.refs.heartbeatStore.recordServerActivity(options.sessionId, now);
   if (isTerminalRenderActivityFrame(options.data)) {
-    options.refs.lastTerminalActivityAtRef?.current.set(options.sessionId, now);
-    options.refs.staleTransportProbeAtRef.current.delete(options.sessionId);
+    options.refs.heartbeatStore.recordTerminalActivity(options.sessionId, now);
+    options.refs.reconnectStore.clearStaleTransportProbe(options.sessionId);
   }
 }
 
@@ -118,14 +120,12 @@ export function isTerminalRenderActivityFrame(data: string | ArrayBuffer): boole
 export function markPendingInputTailRefresh(options: {
   sessionId: string;
   localRevision: number;
-  pendingInputTailRefreshRef: MutableRefObject<Map<string, { requestedAt: number; localRevision: number }>>;
+  tailRefreshStore: SessionTailRefreshStore;
 }) {
-  const wasPending = options.pendingInputTailRefreshRef.current.has(options.sessionId);
-  options.pendingInputTailRefreshRef.current.set(options.sessionId, {
-    requestedAt: Date.now(),
-    localRevision: Math.max(0, Math.floor(options.localRevision || 0)),
-  });
-  return !wasPending;
+  return options.tailRefreshStore.markPendingInputTailRefresh(
+    options.sessionId,
+    options.localRevision,
+  );
 }
 
 export function clearSessionPullState(options: {
@@ -169,17 +169,14 @@ export function resetSessionTransportPullBookkeeping(options: {
   reason: string;
   activeSessionId: string | null;
   sessionPullStateRef: MutableRefObject<Map<string, SessionPullStates>>;
-  pendingInputTailRefreshRef?: MutableRefObject<Map<string, { requestedAt: number; localRevision: number }>>;
+  tailRefreshStore: SessionTailRefreshStore;
   sameRevisionChunkFrameRef?: MutableRefObject<Map<string, unknown>>;
-  lastSyncRequestAtRef: MutableRefObject<Map<string, unknown>>;
   runtimeDebug: RuntimeDebugFn;
 }) {
   const pullStates = options.sessionPullStateRef.current.get(options.sessionId) || null;
-  const tailRefreshDebounceKey = `${options.sessionId}:tail-refresh`;
-  const readingRepairDebounceKey = `${options.sessionId}:reading-repair`;
-  const hadPendingInputTailRefresh = Boolean(options.pendingInputTailRefreshRef?.current.has(options.sessionId));
-  const hadTailRefreshDebounce = options.lastSyncRequestAtRef.current.has(tailRefreshDebounceKey);
-  const hadReadingRepairDebounce = options.lastSyncRequestAtRef.current.has(readingRepairDebounceKey);
+  const hadPendingInputTailRefresh = options.tailRefreshStore.hasPendingInputTailRefresh(options.sessionId);
+  const hadTailRefreshDebounce = options.tailRefreshStore.hasSyncRequest(options.sessionId, 'tail-refresh');
+  const hadReadingRepairDebounce = options.tailRefreshStore.hasSyncRequest(options.sessionId, 'reading-repair');
   const hadSameRevisionChunkFrame = Boolean(options.sameRevisionChunkFrameRef?.current.has(options.sessionId));
   const hasLivePullBookkeeping = Boolean(pullStates && hasActiveSessionPullState(pullStates));
   if (!hasLivePullBookkeeping && !hadPendingInputTailRefresh && !hadTailRefreshDebounce && !hadReadingRepairDebounce && !hadSameRevisionChunkFrame) {
@@ -201,18 +198,18 @@ export function resetSessionTransportPullBookkeeping(options: {
       sessionPullStateRef: options.sessionPullStateRef,
     });
   }
-  options.pendingInputTailRefreshRef?.current.delete(options.sessionId);
+  options.tailRefreshStore.clearPendingInputTailRefresh(options.sessionId);
   options.sameRevisionChunkFrameRef?.current.delete(options.sessionId);
-  options.lastSyncRequestAtRef.current.delete(tailRefreshDebounceKey);
-  options.lastSyncRequestAtRef.current.delete(readingRepairDebounceKey);
+  options.tailRefreshStore.clearSyncRequest(options.sessionId, 'tail-refresh');
+  options.tailRefreshStore.clearSyncRequest(options.sessionId, 'reading-repair');
 }
 
 export function isSessionTransportActivityStale(options: {
   sessionId: string;
-  lastServerActivityAtRef: MutableRefObject<Map<string, number>>;
+  heartbeatStore: SessionHeartbeatStore;
   staleActivityMs: number;
 }) {
-  const lastServerActivityAt = options.lastServerActivityAtRef.current.get(options.sessionId) || 0;
+  const lastServerActivityAt = options.heartbeatStore.readLastServerActivityAt(options.sessionId);
   if (lastServerActivityAt <= 0) {
     return false;
   }

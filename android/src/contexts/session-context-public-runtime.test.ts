@@ -4,7 +4,6 @@ import {
   runScheduleJobNowRuntime,
   sendMessageRuntime,
 } from './session-context-public-runtime';
-import { createSessionBufferState } from '../lib/terminal-buffer';
 import type { Session, SessionScheduleState } from '../lib/types';
 
 function makeSession(overrides?: Partial<Session>): Session {
@@ -20,17 +19,6 @@ function makeSession(overrides?: Partial<Session>): Session {
     state: 'connected',
     hasUnread: false,
     createdAt: 1,
-    buffer: createSessionBufferState({
-      lines: [],
-      startIndex: 0,
-      endIndex: 0,
-      bufferHeadStartIndex: 0,
-      bufferTailEndIndex: 0,
-      cols: 80,
-      rows: 24,
-      revision: 0,
-      cacheLines: 1000,
-    }),
     ...overrides,
   };
 }
@@ -47,46 +35,20 @@ function reduceScheduleCall(
 }
 
 describe('session-context-public-runtime schedule send lifecycle', () => {
-  it('sendMessageRuntime reports whether a socket payload was actually sent', () => {
-    const sendSocketPayload = vi.fn();
-    const openSocket = { readyState: WebSocket.OPEN } as any;
-    const closedSocket = { readyState: WebSocket.CLOSED } as any;
+  it('sendMessageRuntime delegates to client.daemon_connection', () => {
+    const daemonConnection = {
+      sendSessionMessage: vi.fn(() => true),
+    } as any;
 
     expect(sendMessageRuntime({
       sessionId: 'session-1',
       msg: { type: 'ping' },
-      readSessionTransportSocket: () => openSocket,
-      sendSocketPayload,
-    })).toBe(true);
-    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
-
-    expect(sendMessageRuntime({
-      sessionId: 'session-1',
-      msg: { type: 'ping' },
-      readSessionTransportSocket: () => closedSocket,
-      sendSocketPayload,
-    })).toBe(false);
-    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
-  });
-
-  it('sendMessageRuntime uses the mux effective socket from the transport resource when legacy socket is missing', () => {
-    const sendSocketPayload = vi.fn();
-    const muxSocket = { readyState: WebSocket.OPEN } as any;
-
-    expect(sendMessageRuntime({
-      sessionId: 'session-1',
-      msg: { type: 'schedule-list', payload: { sessionName: 'tmux-1' } },
-      readSessionTransportResource: () => ({
-        socket: muxSocket,
-      } as any),
-      readSessionTransportSocket: () => null,
-      sendSocketPayload,
+      daemonConnection,
     })).toBe(true);
 
-    expect(sendSocketPayload).toHaveBeenCalledWith(
+    expect(daemonConnection.sendSessionMessage).toHaveBeenCalledWith(
       'session-1',
-      muxSocket,
-      JSON.stringify({ type: 'schedule-list', payload: { sessionName: 'tmux-1' } }),
+      { type: 'ping' },
     );
   });
 

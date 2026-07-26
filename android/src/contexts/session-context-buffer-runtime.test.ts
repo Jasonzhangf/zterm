@@ -10,8 +10,37 @@ import {
   requestSessionBufferSyncRuntime,
 } from './session-context-buffer-runtime';
 import { buildDefaultSessionVisibleRange } from './session-visible-range-helpers';
+import { createSessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 
-function makeSession(sessionId: string): Session {
+function makeTailRefreshStoreRef(seed?: {
+  input?: Array<[string, { requestedAt: number; localRevision: number }]>;
+  connect?: string[];
+  resume?: string[];
+  syncRequests?: Array<[string, 'tail-refresh' | 'reading-repair', any]>;
+}) {
+  const store = createSessionTailRefreshStore();
+  for (const [sid, state] of seed?.input || []) {
+    store.markPendingInputTailRefresh(sid, state.localRevision, state.requestedAt);
+  }
+  for (const sid of seed?.connect || []) {
+    store.markPendingConnectTailRefresh(sid);
+  }
+  for (const sid of seed?.resume || []) {
+    store.markPendingResumeTailRefresh(sid);
+  }
+  for (const [sid, purpose, state] of seed?.syncRequests || []) {
+    store.recordSyncRequest(sid, purpose, state);
+  }
+  return { current: store };
+}
+
+type TestSession = Session & {
+  buffer: SessionBufferState;
+  daemonHeadRevision: number;
+  daemonHeadEndIndex: number;
+};
+
+function makeSession(sessionId: string): TestSession {
   return {
     id: sessionId,
     hostId: `host-${sessionId}`,
@@ -23,6 +52,8 @@ function makeSession(sessionId: string): Session {
     ws: null,
     state: 'connected',
     hasUnread: false,
+    daemonHeadRevision: 0,
+    daemonHeadEndIndex: 0,
     buffer: createSessionBufferState({
       lines: ['alpha'],
       startIndex: 0,
@@ -91,6 +122,22 @@ function cellsToText(cells: Array<{ char?: number; width?: number }>) {
     .join('');
 }
 
+function makeLiveHeadStoreRef(entries?: Array<[string, any]>) {
+  const liveHeads = new Map<string, any>(entries || []);
+  return {
+    current: {
+      getLiveHead: (sessionId: string) => liveHeads.get(sessionId) || null,
+      clearLiveHead: (sessionId: string) => {
+        liveHeads.delete(sessionId);
+      },
+      setLiveHead: (sessionId: string, head: any) => {
+        liveHeads.set(sessionId, head);
+        return true;
+      },
+    },
+  };
+}
+
 function makeHeadRuntimeRefs(options: {
   sessions: Session[];
   activeSessionId: string;
@@ -98,15 +145,34 @@ function makeHeadRuntimeRefs(options: {
   visibleRangeEntries?: Array<[string, ReturnType<typeof buildDefaultSessionVisibleRange>]>;
   sessionBufferHeadsEntries?: Array<[string, any]>;
 }) {
+  const liveHeads = new Map<string, any>(options.sessionBufferHeadsEntries || []);
+  const setHead = options.setHead || vi.fn(() => true);
   return {
     stateRef: { current: { sessions: options.sessions, activeSessionId: options.activeSessionId } },
-    sessionBufferHeadsRef: { current: new Map<string, any>(options.sessionBufferHeadsEntries || []) },
     lastHeadRequestAtRef: { current: new Map<string, number>() },
-    lastSyncRequestAtRef: { current: new Map<string, any>() },
+    tailRefreshStoreRef: makeTailRefreshStoreRef(),
     sessionRevisionResetRef: { current: new Map() },
     sessionVisibleRangeRef: { current: new Map(options.visibleRangeEntries || []) },
     sessionBufferStoreRef: { current: { commitBuffer: vi.fn(() => false) } },
-    sessionHeadStoreRef: { current: { setHead: options.setHead || vi.fn(() => true) } },
+    sessionHeadStoreRef: {
+      current: {
+        setLiveHead: (
+          sessionId: string,
+          head: any,
+          setOptions?: { publishRenderer?: boolean },
+        ) => {
+          liveHeads.set(sessionId, head);
+          if (setOptions?.publishRenderer === false) {
+            return false;
+          }
+          return setHead(sessionId, {
+            daemonHeadRevision: head.revision,
+            daemonHeadEndIndex: head.latestEndIndex,
+          });
+        },
+        getLiveHead: (sessionId: string) => liveHeads.get(sessionId) || null,
+      },
+    },
   };
 }
 
@@ -145,7 +211,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
       requestSessionBufferSync: vi.fn(() => true),
     });
 
-    expect(refs.sessionBufferHeadsRef.current.get(sessionId)).toMatchObject({
+    expect(refs.sessionHeadStoreRef.current.getLiveHead(sessionId)).toMatchObject({
       revision: 5,
       latestEndIndex: 20,
       availableStartIndex: 0,
@@ -172,13 +238,11 @@ describe('session-context-buffer-runtime inactive gating', () => {
     const commitSessionBufferUpdate = vi.fn(() => true);
     const scheduleSessionRenderCommit = vi.fn();
     const runtimeDebug = vi.fn();
-    const pendingInputTailRefreshRef = {
-      current: new Map<string, { requestedAt: number; localRevision: number }>([
-        [sessionId, { requestedAt: 1, localRevision: 1 }],
-      ]),
-    };
-    const pendingConnectTailRefreshRef = { current: new Set<string>([sessionId]) };
-    const pendingResumeTailRefreshRef = { current: new Set<string>([sessionId]) };
+    const tailRefreshStoreRef = makeTailRefreshStoreRef({
+      input: [[sessionId, { requestedAt: 1, localRevision: 1 }]],
+      connect: [sessionId],
+      resume: [sessionId],
+    });
 
     applyIncomingBufferSyncRuntime({
       sessionId,
@@ -186,10 +250,8 @@ describe('session-context-buffer-runtime inactive gating', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: 'other-session' } },
         sessionRevisionResetRef: { current: new Map() },
-        sessionBufferHeadsRef: { current: new Map() },
-        pendingInputTailRefreshRef,
-        pendingConnectTailRefreshRef,
-        pendingResumeTailRefreshRef,
+        sessionHeadStoreRef: makeLiveHeadStoreRef(),
+        tailRefreshStoreRef,
         sessionVisibleRangeRef: { current: new Map() },
       },
       readSessionBufferSnapshot: () => session.buffer,
@@ -208,9 +270,9 @@ describe('session-context-buffer-runtime inactive gating', () => {
 
     expect(commitSessionBufferUpdate).not.toHaveBeenCalled();
     expect(scheduleSessionRenderCommit).not.toHaveBeenCalled();
-    expect(pendingInputTailRefreshRef.current.has(sessionId)).toBe(false);
-    expect(pendingConnectTailRefreshRef.current.has(sessionId)).toBe(false);
-    expect(pendingResumeTailRefreshRef.current.has(sessionId)).toBe(false);
+    expect(tailRefreshStoreRef.current.hasPendingInputTailRefresh(sessionId)).toBe(false);
+    expect(tailRefreshStoreRef.current.hasPendingConnectTailRefresh(sessionId)).toBe(false);
+    expect(tailRefreshStoreRef.current.hasPendingResumeTailRefresh(sessionId)).toBe(false);
     expect(runtimeDebug).toHaveBeenCalledWith(
       'session.buffer.sync.inactive-drop',
       expect.objectContaining({
@@ -261,8 +323,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionRevisionResetRef: { current: new Map() },
-        sessionBufferHeadsRef: {
-          current: new Map([
+        sessionHeadStoreRef: makeLiveHeadStoreRef([
             [sessionId, {
               revision: 8,
               latestEndIndex: 110,
@@ -271,11 +332,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
               seenAt: 1,
             }],
           ]),
-        },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set() },
-        lastSyncRequestAtRef: { current: new Map() },
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
         sessionVisibleRangeRef: {
           current: new Map([[sessionId, { startIndex: 0, endIndex: 1, viewportRows: 24 }]]),
         },
@@ -357,8 +414,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionRevisionResetRef: { current: new Map() },
-        sessionBufferHeadsRef: {
-          current: new Map([
+        sessionHeadStoreRef: makeLiveHeadStoreRef([
             [sessionId, {
               revision: 8,
               latestEndIndex: 110,
@@ -367,11 +423,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
               seenAt: 1,
             }],
           ]),
-        },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set() },
-        lastSyncRequestAtRef: { current: new Map() },
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
         sessionVisibleRangeRef: {
           current: new Map([[sessionId, { startIndex: 0, endIndex: 1, viewportRows: 24 }]]),
         },
@@ -445,8 +497,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionRevisionResetRef: { current: new Map() },
-        sessionBufferHeadsRef: {
-          current: new Map([
+        sessionHeadStoreRef: makeLiveHeadStoreRef([
             [sessionId, {
               revision: 21,
               latestEndIndex: 200,
@@ -455,11 +506,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
               seenAt: 1,
             }],
           ]),
-        },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set() },
-        lastSyncRequestAtRef: { current: new Map() },
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
         sessionVisibleRangeRef: {
           current: new Map([[sessionId, { startIndex: 0, endIndex: 1, viewportRows: 24 }]]),
         },
@@ -536,12 +583,9 @@ describe('session-context-buffer-runtime inactive gating', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionRevisionResetRef: { current: new Map() },
-        sessionBufferHeadsRef: { current: new Map() },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set() },
-        lastSyncRequestAtRef: {
-          current: new Map([[`${sessionId}:tail-refresh`, {
+        sessionHeadStoreRef: makeLiveHeadStoreRef(),
+        tailRefreshStoreRef: makeTailRefreshStoreRef({
+          syncRequests: [[sessionId, 'tail-refresh', {
             sentAt: 10,
             requestStartIndex: 102,
             requestEndIndex: 104,
@@ -550,8 +594,8 @@ describe('session-context-buffer-runtime inactive gating', () => {
             localEndIndex: 104,
             targetHeadRevision: 10,
             repairSignature: '',
-          }]]),
-        },
+          }]],
+        }),
         sessionVisibleRangeRef: {
           current: new Map([[sessionId, { startIndex: 0, endIndex: 1, viewportRows: 24 }]]),
         },
@@ -606,8 +650,8 @@ describe('session-context-buffer-runtime inactive gating', () => {
     });
     const scheduleSessionRenderCommit = vi.fn();
     const runtimeDebug = vi.fn();
-    const lastSyncRequestAtRef = {
-      current: new Map([[`${sessionId}:tail-refresh`, {
+    const tailRefreshStoreRef = makeTailRefreshStoreRef({
+      syncRequests: [[sessionId, 'tail-refresh', {
         sentAt: 10,
         requestStartIndex: 100,
         requestEndIndex: 104,
@@ -616,8 +660,8 @@ describe('session-context-buffer-runtime inactive gating', () => {
         localEndIndex: 104,
         targetHeadRevision: 10,
         repairSignature: '',
-      }]]),
-    };
+      }]],
+    });
 
     applyIncomingBufferSyncRuntime({
       sessionId,
@@ -640,19 +684,14 @@ describe('session-context-buffer-runtime inactive gating', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionRevisionResetRef: { current: new Map() },
-        sessionBufferHeadsRef: {
-          current: new Map([[sessionId, {
+        sessionHeadStoreRef: makeLiveHeadStoreRef([[sessionId, {
             revision: 10,
             latestEndIndex: 104,
             availableStartIndex: 100,
             availableEndIndex: 104,
             seenAt: 10,
           }]]),
-        },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set([sessionId]) },
-        lastSyncRequestAtRef,
+        tailRefreshStoreRef,
         sessionVisibleRangeRef: {
           current: new Map([[sessionId, { startIndex: 100, endIndex: 104, viewportRows: 4 }]]),
         },
@@ -677,7 +716,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
     expect(cellsToText(committedBuffers[0]!.lines[1])).toBe('fresh-top-101');
     expect(cellsToText(committedBuffers[0]!.lines[2])).toBe('live-bottom-102');
     expect(scheduleSessionRenderCommit).toHaveBeenCalledWith(sessionId);
-    expect(lastSyncRequestAtRef.current.has(`${sessionId}:tail-refresh`)).toBe(false);
+    expect(tailRefreshStoreRef.current.hasSyncRequest(sessionId, 'tail-refresh')).toBe(false);
     expect(runtimeDebug).toHaveBeenCalledWith(
       'session.buffer.sync.same-revision-requested-overwrite-apply',
       expect.objectContaining({
@@ -710,8 +749,8 @@ describe('session-context-buffer-runtime inactive gating', () => {
     });
     const scheduleSessionRenderCommit = vi.fn();
     const runtimeDebug = vi.fn();
-    const lastSyncRequestAtRef = {
-      current: new Map([[`${sessionId}:tail-refresh`, {
+    const tailRefreshStoreRef = makeTailRefreshStoreRef({
+      syncRequests: [[sessionId, 'tail-refresh', {
         sentAt: 10,
         requestStartIndex: 100,
         requestEndIndex: 104,
@@ -720,8 +759,8 @@ describe('session-context-buffer-runtime inactive gating', () => {
         localEndIndex: 104,
         targetHeadRevision: 10,
         repairSignature: '',
-      }]]),
-    };
+      }]],
+    });
 
     applyIncomingBufferSyncRuntime({
       sessionId,
@@ -748,19 +787,14 @@ describe('session-context-buffer-runtime inactive gating', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionRevisionResetRef: { current: new Map() },
-        sessionBufferHeadsRef: {
-          current: new Map([[sessionId, {
+        sessionHeadStoreRef: makeLiveHeadStoreRef([[sessionId, {
             revision: 10,
             latestEndIndex: 104,
             availableStartIndex: 96,
             availableEndIndex: 104,
             seenAt: 10,
           }]]),
-        },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set([sessionId]) },
-        lastSyncRequestAtRef,
+        tailRefreshStoreRef,
         sessionVisibleRangeRef: {
           current: new Map([[sessionId, { startIndex: 96, endIndex: 104, viewportRows: 8 }]]),
         },
@@ -784,7 +818,89 @@ describe('session-context-buffer-runtime inactive gating', () => {
     expect(cellsToText(committedBuffers[0]!.lines[4])).toBe('fresh-input-100');
     expect(cellsToText(committedBuffers[0]!.lines[5])).toBe('fresh-input-101');
     expect(scheduleSessionRenderCommit).toHaveBeenCalledWith(sessionId);
-    expect(lastSyncRequestAtRef.current.has(`${sessionId}:tail-refresh`)).toBe(false);
+    expect(tailRefreshStoreRef.current.hasSyncRequest(sessionId, 'tail-refresh')).toBe(false);
+  });
+
+  it('requests an authoritative visible repaint when a sparse revision advance could mask stale non-gap rows', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const localBuffer = createSessionBufferState({
+      lines: ['stable-100', 'stable-101', 'stale-input-102', 'stale-input-103', 'old-status-104'],
+      startIndex: 100,
+      endIndex: 105,
+      bufferHeadStartIndex: 100,
+      bufferTailEndIndex: 105,
+      cols: 80,
+      rows: 24,
+      revision: 10,
+      cacheLines: 1000,
+    });
+    session.buffer = localBuffer;
+    session.daemonHeadRevision = 11;
+    session.daemonHeadEndIndex = 105;
+    const committedBuffers: SessionBufferState[] = [];
+    const commitSessionBufferUpdate = vi.fn((_sessionId: string, nextBuffer: SessionBufferState) => {
+      committedBuffers.push(nextBuffer);
+      return true;
+    });
+    const scheduleSessionRenderCommit = vi.fn();
+    const requestSessionBufferSync = vi.fn(() => true);
+
+    applyIncomingBufferSyncRuntime({
+      sessionId,
+      payload: {
+        revision: 11,
+        startIndex: 104,
+        endIndex: 105,
+        availableStartIndex: 100,
+        availableEndIndex: 105,
+        cols: 80,
+        rows: 24,
+        cursorKeysApp: false,
+        lines: [
+          { ...makeLine('new-status-104'), index: 104 },
+        ],
+      },
+      refs: {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionHeadStoreRef: makeLiveHeadStoreRef([[sessionId, {
+            revision: 11,
+            latestEndIndex: 105,
+            availableStartIndex: 100,
+            availableEndIndex: 105,
+            seenAt: 10,
+          }]]),
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
+        sessionVisibleRangeRef: {
+          current: new Map([[sessionId, { startIndex: 100, endIndex: 105, viewportRows: 5 }]]),
+        },
+      },
+      readSessionBufferSnapshot: () => localBuffer,
+      resolveSessionCacheLines: () => 1000,
+      summarizeBufferPayload: (payload) => ({
+        revision: payload.revision,
+        startIndex: payload.startIndex,
+        endIndex: payload.endIndex,
+        lineCount: payload.lines.length,
+      }),
+      runtimeDebug: vi.fn(),
+      commitSessionBufferUpdate,
+      scheduleSessionRenderCommit,
+      isSessionTransportActive: () => true,
+      requestSessionBufferSync,
+    });
+
+    expect(commitSessionBufferUpdate).toHaveBeenCalledOnce();
+    expect(cellsToText(committedBuffers[0]!.lines[2])).toBe('stale-input-102');
+    expect(cellsToText(committedBuffers[0]!.lines[4])).toBe('new-status-104');
+    expect(scheduleSessionRenderCommit).toHaveBeenCalledWith(sessionId);
+    expect(requestSessionBufferSync).toHaveBeenCalledWith(sessionId, expect.objectContaining({
+      reason: 'buffer-sync-visible-stale-non-gap-repair',
+      purpose: 'reading-repair',
+      requestWindowOverride: { requestStartIndex: 100, requestEndIndex: 105 },
+      requestMissingRangesOverride: [{ startIndex: 100, endIndex: 105 }],
+    }));
   });
 
   it('applies later chunks from the same authoritative revision frame instead of treating them as stale', () => {
@@ -812,19 +928,14 @@ describe('session-context-buffer-runtime inactive gating', () => {
     const refs = {
       stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
       sessionRevisionResetRef: { current: new Map() },
-      sessionBufferHeadsRef: {
-        current: new Map([[sessionId, {
+      sessionHeadStoreRef: makeLiveHeadStoreRef([[sessionId, {
           revision: 11,
           latestEndIndex: 104,
           availableStartIndex: 100,
           availableEndIndex: 104,
           seenAt: 10,
         }]]),
-      },
-      pendingInputTailRefreshRef: { current: new Map() },
-      pendingConnectTailRefreshRef: { current: new Set<string>() },
-      pendingResumeTailRefreshRef: { current: new Set<string>() },
-      lastSyncRequestAtRef: { current: new Map() },
+      tailRefreshStoreRef: makeTailRefreshStoreRef(),
       sameRevisionChunkFrameRef: { current: new Map<string, any>() },
       sessionVisibleRangeRef: {
         current: new Map([[sessionId, { startIndex: 100, endIndex: 104, viewportRows: 4 }]]),
@@ -942,11 +1053,8 @@ describe('session-context-buffer-runtime inactive gating', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionRevisionResetRef: { current: new Map() },
-        sessionBufferHeadsRef: { current: new Map() },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set() },
-        lastSyncRequestAtRef: { current: new Map() },
+        sessionHeadStoreRef: makeLiveHeadStoreRef(),
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
         sameRevisionChunkFrameRef: { current: new Map<string, any>() },
         sessionVisibleRangeRef: { current: new Map() },
       },
@@ -991,7 +1099,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
       revision: 10,
       cacheLines: 1000,
     });
-    const session: Session = {
+    const session: TestSession = {
       ...baseSession,
       buffer: localBuffer,
       daemonHeadRevision: 10,
@@ -1004,8 +1112,8 @@ describe('session-context-buffer-runtime inactive gating', () => {
     });
     const scheduleSessionRenderCommit = vi.fn();
     const runtimeDebug = vi.fn();
-    const lastSyncRequestAtRef = {
-      current: new Map([[`${sessionId}:tail-refresh`, {
+    const tailRefreshStoreRef = makeTailRefreshStoreRef({
+      syncRequests: [[sessionId, 'tail-refresh', {
         sentAt: 10,
         requestStartIndex: 100,
         requestEndIndex: 104,
@@ -1014,8 +1122,8 @@ describe('session-context-buffer-runtime inactive gating', () => {
         localEndIndex: 104,
         targetHeadRevision: 10,
         repairSignature: '',
-      }]]),
-    };
+      }]],
+    });
     const headRefs = makeHeadRuntimeRefs({
       sessions: [session],
       activeSessionId: sessionId,
@@ -1028,7 +1136,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
         seenAt: 10,
       }]],
     });
-    headRefs.lastSyncRequestAtRef = lastSyncRequestAtRef;
+    headRefs.tailRefreshStoreRef = tailRefreshStoreRef;
 
     handleBufferHeadRuntime({
       sessionId,
@@ -1046,7 +1154,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
       requestSessionBufferSync: vi.fn(() => false),
     });
 
-    expect(lastSyncRequestAtRef.current.has(`${sessionId}:tail-refresh`)).toBe(true);
+    expect(tailRefreshStoreRef.current.hasSyncRequest(sessionId, 'tail-refresh')).toBe(true);
 
     applyIncomingBufferSyncRuntime({
       sessionId,
@@ -1069,11 +1177,8 @@ describe('session-context-buffer-runtime inactive gating', () => {
       refs: {
         stateRef: headRefs.stateRef,
         sessionRevisionResetRef: headRefs.sessionRevisionResetRef,
-        sessionBufferHeadsRef: headRefs.sessionBufferHeadsRef,
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set([sessionId]) },
-        lastSyncRequestAtRef,
+        sessionHeadStoreRef: headRefs.sessionHeadStoreRef,
+        tailRefreshStoreRef,
         sessionVisibleRangeRef: headRefs.sessionVisibleRangeRef,
       },
       readSessionBufferSnapshot: () => localBuffer,
@@ -1095,7 +1200,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
     expect(cellsToText(committedBuffers[0]!.lines[0])).toBe('fresh-input-100');
     expect(cellsToText(committedBuffers[0]!.lines[1])).toBe('fresh-input-101');
     expect(scheduleSessionRenderCommit).toHaveBeenCalledWith(sessionId);
-    expect(lastSyncRequestAtRef.current.has(`${sessionId}:tail-refresh`)).toBe(false);
+    expect(tailRefreshStoreRef.current.hasSyncRequest(sessionId, 'tail-refresh')).toBe(false);
   });
 
   it('drops lower-revision buffer-sync instead of repainting older rows over newer rows', () => {
@@ -1138,8 +1243,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionRevisionResetRef: { current: new Map() },
-        sessionBufferHeadsRef: {
-          current: new Map([
+        sessionHeadStoreRef: makeLiveHeadStoreRef([
             [sessionId, {
               revision: 12,
               latestEndIndex: 104,
@@ -1148,11 +1252,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
               seenAt: 1,
             }],
           ]),
-        },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set() },
-        lastSyncRequestAtRef: { current: new Map() },
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
         sessionVisibleRangeRef: { current: new Map() },
       },
       readSessionBufferSnapshot: () => localBuffer,
@@ -1236,11 +1336,8 @@ describe('session-context-buffer-runtime inactive gating', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionRevisionResetRef: { current: new Map() },
-        sessionBufferHeadsRef: { current: new Map() },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set() },
-        lastSyncRequestAtRef: { current: new Map() },
+        sessionHeadStoreRef: makeLiveHeadStoreRef(),
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
         sessionVisibleRangeRef: { current: new Map() },
       },
       readSessionBufferSnapshot: () => localBuffer,
@@ -1308,7 +1405,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
   it('requests tail refresh after head arrives when an active tab has no local window yet', () => {
     const sessionId = 'session-2';
     const baseSession = makeSession(sessionId);
-    const session: Session = {
+    const session: TestSession = {
       ...baseSession,
       buffer: createSessionBufferState({
         lines: [],
@@ -1373,10 +1470,8 @@ describe('session-context-buffer-runtime inactive gating', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: 'other-session' } },
         sessionRevisionResetRef: { current: new Map() },
-        sessionBufferHeadsRef: { current: new Map() },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set() },
+        sessionHeadStoreRef: makeLiveHeadStoreRef(),
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
         sessionVisibleRangeRef: { current: new Map() },
       },
       readSessionBufferSnapshot: () => session.buffer,
@@ -1409,26 +1504,22 @@ describe('session-context-buffer-runtime inactive gating', () => {
     const scheduleSessionRenderCommit = vi.fn();
     const runtimeDebug = vi.fn();
     const requestSessionBufferSync = vi.fn(() => true);
-    const lastSyncRequestAtRef = {
-      current: new Map<string, any>([
-        [`${sessionId}:tail-refresh`, {
-          sentAt: 10,
-          requestStartIndex: 0,
-          requestEndIndex: 30,
-          knownRevision: 1,
-          localStartIndex: 0,
-          localEndIndex: 1,
-          targetHeadRevision: 3,
-          repairSignature: '',
-        }],
-      ]),
-    };
+    const tailRefreshStoreRef = makeTailRefreshStoreRef({
+      syncRequests: [[sessionId, 'tail-refresh', {
+        sentAt: 10,
+        requestStartIndex: 0,
+        requestEndIndex: 30,
+        knownRevision: 1,
+        localStartIndex: 0,
+        localEndIndex: 1,
+        targetHeadRevision: 3,
+        repairSignature: '',
+      }]],
+    });
     const sessionRevisionResetRef = {
       current: new Map([[sessionId, { revision: 3, latestEndIndex: 30, seenAt: 1 }]]),
     };
-    const sessionBufferHeadsRef = {
-      current: new Map([[sessionId, { revision: 3, latestEndIndex: 30, seenAt: 1 }]]),
-    };
+    const sessionHeadStoreRef = makeLiveHeadStoreRef([[sessionId, { revision: 3, latestEndIndex: 30, seenAt: 1 }]]);
 
     applyIncomingBufferSyncRuntime({
       sessionId,
@@ -1444,11 +1535,8 @@ describe('session-context-buffer-runtime inactive gating', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionRevisionResetRef,
-        sessionBufferHeadsRef,
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set() },
-        lastSyncRequestAtRef,
+        sessionHeadStoreRef,
+        tailRefreshStoreRef,
         sessionVisibleRangeRef: { current: new Map() },
       },
       readSessionBufferSnapshot: () => session.buffer,
@@ -1469,11 +1557,11 @@ describe('session-context-buffer-runtime inactive gating', () => {
     expect(commitSessionBufferUpdate).not.toHaveBeenCalled();
     expect(scheduleSessionRenderCommit).not.toHaveBeenCalled();
     expect(sessionRevisionResetRef.current.has(sessionId)).toBe(true);
-    expect(lastSyncRequestAtRef.current.has(`${sessionId}:tail-refresh`)).toBe(false);
+    expect(tailRefreshStoreRef.current.hasSyncRequest(sessionId, 'tail-refresh')).toBe(false);
     expect(requestSessionBufferSync).toHaveBeenCalledWith(sessionId, {
       reason: 'revision-reset-empty-payload-retry',
       purpose: 'tail-refresh',
-      sessionOverride: expect.objectContaining({
+      headOverride: expect.objectContaining({
         daemonHeadRevision: 3,
         daemonHeadEndIndex: 30,
       }),
@@ -1533,12 +1621,9 @@ describe('session-context-buffer-runtime inactive gating', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionVisibleRangeRef: { current: new Map() },
-        sessionBufferHeadsRef: { current: new Map() },
+        sessionHeadStoreRef: makeLiveHeadStoreRef(),
         sessionPullStateRef: { current: new Map() },
-        lastSyncRequestAtRef: { current: new Map() },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set() },
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
       },
       readSessionTransportSocket: () => activeWs,
       readSessionBufferSnapshot: () => session.buffer,
@@ -1559,7 +1644,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
       const session = makeSession(sessionId);
       const ws = { readyState: WebSocket.OPEN } as any;
       const sendSocketPayload = vi.fn();
-      const lastSyncRequestAtRef = { current: new Map() };
+      const tailRefreshStoreRef = makeTailRefreshStoreRef();
 
       const requested = requestSessionBufferSyncRuntime({
         sessionId,
@@ -1572,12 +1657,9 @@ describe('session-context-buffer-runtime inactive gating', () => {
           sessionVisibleRangeRef: {
             current: new Map([[sessionId, { startIndex: 0, endIndex: 1, viewportRows: 24 }]]),
           },
-          sessionBufferHeadsRef: { current: new Map() },
+          sessionHeadStoreRef: makeLiveHeadStoreRef(),
           sessionPullStateRef: { current: new Map() },
-          lastSyncRequestAtRef,
-          pendingInputTailRefreshRef: { current: new Map() },
-          pendingConnectTailRefreshRef: { current: new Set() },
-          pendingResumeTailRefreshRef: { current: new Set() },
+          tailRefreshStoreRef,
         },
         readSessionTransportSocket: () => ws,
         readSessionBufferSnapshot: () => session.buffer,
@@ -1595,7 +1677,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
           requestedAt: 4444,
         }),
       });
-      expect(lastSyncRequestAtRef.current.get(`${sessionId}:tail-refresh`)).toMatchObject({
+      expect(tailRefreshStoreRef.current.readSyncRequest(sessionId, 'tail-refresh')).toMatchObject({
         sentAt: 4444,
       });
     } finally {
@@ -1626,7 +1708,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
           sessionVisibleRangeRef: {
             current: new Map([[sessionId, { startIndex: 0, endIndex: 1, viewportRows: 24 }]]),
           },
-          sessionBufferHeadsRef: { current: new Map() },
+          sessionHeadStoreRef: makeLiveHeadStoreRef(),
           sessionPullStateRef: {
             current: new Map([
               [sessionId, {
@@ -1643,10 +1725,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
               }],
             ]),
           },
-          lastSyncRequestAtRef: { current: new Map() },
-          pendingInputTailRefreshRef: { current: new Map() },
-          pendingConnectTailRefreshRef: { current: new Set() },
-          pendingResumeTailRefreshRef: { current: new Set() },
+          tailRefreshStoreRef: makeTailRefreshStoreRef(),
         },
         readSessionTransportSocket: () => ws,
         readSessionBufferSnapshot: () => session.buffer,
@@ -1703,7 +1782,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionVisibleRangeRef: { current: new Map() },
-        sessionBufferHeadsRef: { current: new Map() },
+        sessionHeadStoreRef: makeLiveHeadStoreRef(),
         sessionPullStateRef: {
           current: new Map([
             [sessionId, {
@@ -1720,10 +1799,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
             }],
           ]),
         },
-        lastSyncRequestAtRef: { current: new Map() },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set() },
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
       },
       readSessionTransportSocket: () => ws,
       readSessionBufferSnapshot: () => session.buffer,
@@ -1817,7 +1893,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
         sessionVisibleRangeRef: {
           current: new Map([[sessionId, { startIndex: 96, endIndex: 120, viewportRows: 24 }]]),
         },
-        sessionBufferHeadsRef: { current: new Map() },
+        sessionHeadStoreRef: makeLiveHeadStoreRef([[sessionId, { revision: 7, latestEndIndex: 120, seenAt: 1 }]]),
         sessionPullStateRef: {
           current: new Map([
             [sessionId, {
@@ -1834,10 +1910,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
             }],
           ]),
         },
-        lastSyncRequestAtRef: { current: new Map() },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set() },
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
       },
       readSessionTransportSocket: () => ws,
       readSessionBufferSnapshot: () => session.buffer,
@@ -1873,12 +1946,9 @@ describe('session-context-buffer-runtime inactive gating', () => {
         sessionVisibleRangeRef: {
           current: new Map([[sessionId, { startIndex: 0, endIndex: 1, viewportRows: 24 }]]),
         },
-        sessionBufferHeadsRef: { current: new Map() },
+        sessionHeadStoreRef: makeLiveHeadStoreRef(),
         sessionPullStateRef: { current: new Map() },
-        lastSyncRequestAtRef: { current: new Map() },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set<string>() },
-        pendingResumeTailRefreshRef: { current: new Set<string>() },
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
       };
 
       const first = requestSessionBufferSyncRuntime({
@@ -1920,7 +1990,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
 
   it('keeps same-end resume tail-refresh scoped to the visible tail window', () => {
     const sessionId = 'session-1';
-    const session: Session = {
+    const session: TestSession = {
       ...makeSession(sessionId),
       daemonHeadRevision: 6,
       daemonHeadEndIndex: 80,
@@ -1949,12 +2019,9 @@ describe('session-context-buffer-runtime inactive gating', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionVisibleRangeRef: { current: new Map([[sessionId, { startIndex: 56, endIndex: 80, viewportRows: 24 }]]) },
-        sessionBufferHeadsRef: { current: new Map() },
+        sessionHeadStoreRef: makeLiveHeadStoreRef([[sessionId, { revision: 6, latestEndIndex: 80, seenAt: 1 }]]),
         sessionPullStateRef: { current: new Map() },
-        lastSyncRequestAtRef: { current: new Map() },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set<string>() },
-        pendingResumeTailRefreshRef: { current: new Set<string>([sessionId]) },
+        tailRefreshStoreRef: makeTailRefreshStoreRef({ resume: [sessionId] }),
       },
       readSessionTransportSocket: () => ws,
       readSessionBufferSnapshot: () => session.buffer,
@@ -1979,7 +2046,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
 
   it('keeps input-driven same-end tail refresh scoped to the current visible tail screen instead of hidden cache rows', () => {
     const sessionId = 'session-1';
-    const session: Session = {
+    const session: TestSession = {
       ...makeSession(sessionId),
       daemonHeadRevision: 6,
       daemonHeadEndIndex: 80,
@@ -2008,12 +2075,11 @@ describe('session-context-buffer-runtime inactive gating', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionVisibleRangeRef: { current: new Map([[sessionId, { startIndex: 56, endIndex: 80, viewportRows: 24 }]]) },
-        sessionBufferHeadsRef: { current: new Map() },
+        sessionHeadStoreRef: makeLiveHeadStoreRef([[sessionId, { revision: 6, latestEndIndex: 80, seenAt: 1 }]]),
         sessionPullStateRef: { current: new Map() },
-        lastSyncRequestAtRef: { current: new Map() },
-        pendingInputTailRefreshRef: { current: new Map([[sessionId, { requestedAt: 1, localRevision: 5 }]]) },
-        pendingConnectTailRefreshRef: { current: new Set<string>() },
-        pendingResumeTailRefreshRef: { current: new Set<string>() },
+        tailRefreshStoreRef: makeTailRefreshStoreRef({
+          input: [[sessionId, { requestedAt: 1, localRevision: 5 }]],
+        }),
       },
       readSessionTransportSocket: () => ws,
       readSessionBufferSnapshot: () => session.buffer,
@@ -2052,7 +2118,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
     });
     buffer.gapRanges = [{ startIndex: 60, endIndex: 61 }];
 
-    const session: Session = {
+    const session: TestSession = {
       ...makeSession(sessionId),
       buffer,
       daemonHeadRevision: 5,
@@ -2065,12 +2131,9 @@ describe('session-context-buffer-runtime inactive gating', () => {
     const refs = {
       stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
       sessionVisibleRangeRef: { current: new Map([[sessionId, { startIndex: 56, endIndex: 80, viewportRows: 24 }]]) },
-      sessionBufferHeadsRef: { current: new Map() },
+      sessionHeadStoreRef: makeLiveHeadStoreRef([[sessionId, { revision: 5, latestEndIndex: 120, seenAt: 1 }]]),
       sessionPullStateRef: { current: new Map() },
-      lastSyncRequestAtRef: { current: new Map() },
-      pendingInputTailRefreshRef: { current: new Map() },
-      pendingConnectTailRefreshRef: { current: new Set<string>() },
-      pendingResumeTailRefreshRef: { current: new Set<string>() },
+      tailRefreshStoreRef: makeTailRefreshStoreRef(),
     };
 
     const first = requestSessionBufferSyncRuntime({
@@ -2149,12 +2212,9 @@ describe('session-context-buffer-runtime inactive gating', () => {
         sessionVisibleRangeRef: {
           current: new Map([[sessionId, { startIndex: 0, endIndex: 1, viewportRows: 24 }]]),
         },
-        sessionBufferHeadsRef: { current: new Map() },
+        sessionHeadStoreRef: makeLiveHeadStoreRef(),
         sessionPullStateRef: { current: new Map() },
-        lastSyncRequestAtRef: { current: new Map() },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set<string>() },
-        pendingResumeTailRefreshRef: { current: new Set<string>() },
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
       };
 
       const runtimeDebug = vi.fn();
@@ -2361,18 +2421,15 @@ describe('P5 post-apply catchup trimming', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionRevisionResetRef: { current: new Map() },
-        sessionBufferHeadsRef: { current: new Map([[sessionId, {
+        sessionHeadStoreRef: makeLiveHeadStoreRef([[sessionId, {
           revision: 2,
           latestEndIndex: 2,
           availableStartIndex: 0,
           availableEndIndex: 2,
           seenAt: 100,
-        }]]) },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set() },
-        lastSyncRequestAtRef: { current: new Map() },
-        sessionVisibleRangeRef: { current: new Map([[sessionId, buildDefaultSessionVisibleRange(session)]]) },
+        }]]),
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
+        sessionVisibleRangeRef: { current: new Map([[sessionId, buildDefaultSessionVisibleRange(session, undefined, session.buffer)]]) },
       },
       readSessionBufferSnapshot: () => session.buffer,
       resolveSessionCacheLines: () => 1000,
@@ -2422,17 +2479,14 @@ describe('P5 post-apply catchup trimming', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionRevisionResetRef: { current: new Map() },
-        sessionBufferHeadsRef: { current: new Map([[sessionId, {
+        sessionHeadStoreRef: makeLiveHeadStoreRef([[sessionId, {
           revision: 3,
           latestEndIndex: 3,
           availableStartIndex: 0,
           availableEndIndex: 3,
           seenAt: 100,
-        }]]) },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set() },
-        lastSyncRequestAtRef: { current: new Map() },
+        }]]),
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
         sessionVisibleRangeRef: { current: new Map([[sessionId, {
           startIndex: 0,
           endIndex: 3,
@@ -2504,17 +2558,14 @@ describe('P5 post-apply catchup trimming', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionRevisionResetRef: { current: new Map() },
-        sessionBufferHeadsRef: { current: new Map([[sessionId, {
+        sessionHeadStoreRef: makeLiveHeadStoreRef([[sessionId, {
           revision: 6,
           latestEndIndex: 240,
           availableStartIndex: 0,
           availableEndIndex: 240,
           seenAt: 100,
-        }]]) },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set() },
-        lastSyncRequestAtRef: { current: new Map() },
+        }]]),
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
         sessionVisibleRangeRef: { current: new Map([[sessionId, {
           startIndex: 96,
           endIndex: 120,
@@ -2582,17 +2633,14 @@ describe('P5 post-apply catchup trimming', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionRevisionResetRef: { current: new Map() },
-        sessionBufferHeadsRef: { current: new Map([[sessionId, {
+        sessionHeadStoreRef: makeLiveHeadStoreRef([[sessionId, {
           revision: 6,
           latestEndIndex: 240,
           availableStartIndex: 0,
           availableEndIndex: 240,
           seenAt: 100,
-        }]]) },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set() },
-        lastSyncRequestAtRef: { current: new Map() },
+        }]]),
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
         sessionVisibleRangeRef: { current: new Map([[sessionId, {
           startIndex: 40,
           endIndex: 64,
@@ -2649,18 +2697,15 @@ describe('P5 post-apply catchup trimming', () => {
       refs: {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         sessionRevisionResetRef: { current: new Map() },
-        sessionBufferHeadsRef: { current: new Map([[sessionId, {
+        sessionHeadStoreRef: makeLiveHeadStoreRef([[sessionId, {
           revision: 5,
           latestEndIndex: 5,
           availableStartIndex: 0,
           availableEndIndex: 5,
           seenAt: 100,
-        }]]) },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set() },
-        lastSyncRequestAtRef: { current: new Map() },
-        sessionVisibleRangeRef: { current: new Map([[sessionId, buildDefaultSessionVisibleRange(session)]]) },
+        }]]),
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
+        sessionVisibleRangeRef: { current: new Map([[sessionId, buildDefaultSessionVisibleRange(session, undefined, session.buffer)]]) },
       },
       readSessionBufferSnapshot: () => session.buffer,
       resolveSessionCacheLines: () => 1000,

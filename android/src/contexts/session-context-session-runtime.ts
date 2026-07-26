@@ -3,6 +3,9 @@ import { buildTransportTargetKey } from '../lib/session-transport-runtime';
 import { createSessionBufferState } from '../lib/terminal-buffer';
 import type { Host, Session, SessionBufferState, SessionScheduleState } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
+import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
+import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
+import type { SessionReconnectRuntime, SessionReconnectStore } from '../lib/session-reconnect-store';
 import {
   buildSessionConnectionFields,
   buildSessionErrorUpdates,
@@ -29,13 +32,6 @@ interface MutableRefObject<T> {
   current: T;
 }
 
-interface SessionTransportResourceLike {
-  socket?: BridgeTransportSocket | null;
-  channel?: {
-    state?: 'opening' | 'open' | 'closing' | 'closed';
-  } | null;
-}
-
 interface RuntimeDebugFn {
   (event: string, payload?: Record<string, unknown>): void;
 }
@@ -53,56 +49,50 @@ interface CreateSessionOptions {
   sessionId?: string;
 }
 
-interface SessionReconnectRuntime {
-  attempt: number;
-  timer: number | null;
-  nextDelayMs: number | null;
-  connecting: boolean;
-}
-
 export type ReconnectSessionRuntimeOptions = Record<string, never>;
 
 function readEffectiveSessionTransportReadyState(options: {
   sessionId: string;
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => SessionTransportResourceLike | null;
+  daemonConnection: ClientDaemonConnection;
 }) {
-  const resource = options.readSessionTransportResource?.(options.sessionId) || null;
+  const resource = options.daemonConnection.readSessionResource(options.sessionId) || null;
   const channelState = resource?.channel?.state || null;
   if (channelState === 'closed' || channelState === 'closing') {
     return WebSocket.CLOSED;
   }
+  if (!channelState) {
+    return resource?.socket?.readyState
+      ?? options.daemonConnection.readSessionSocket(options.sessionId)?.readyState
+      ?? null;
+  }
+  const physicalReadyState = resource?.terminalSocket?.readyState
+    ?? resource?.socket?.readyState
+    ?? options.daemonConnection.readSessionSocket(options.sessionId)?.readyState
+    ?? null;
   if (channelState === 'opening') {
+    if (
+      physicalReadyState === WebSocket.CLOSING
+      || physicalReadyState === WebSocket.CLOSED
+      || physicalReadyState === null
+    ) {
+      return physicalReadyState;
+    }
     return WebSocket.CONNECTING;
   }
-  return resource?.socket?.readyState
-    ?? options.readSessionTransportSocket(options.sessionId)?.readyState
-    ?? null;
-}
-
-function clearReconnectRuntimeEntry(
-  reconnectRuntimes: Map<string, SessionReconnectRuntime>,
-  sessionId: string,
-) {
-  const reconnectRuntime = reconnectRuntimes.get(sessionId) || null;
-  if (reconnectRuntime?.timer) {
-    clearTimeout(reconnectRuntime.timer);
-  }
-  reconnectRuntimes.delete(sessionId);
+  return physicalReadyState;
 }
 
 export function connectSessionRuntime(options: {
   sessionId: string;
   host: Host;
   refs: {
-    manualCloseRef: MutableRefObject<Set<string>>;
+    reconnectStore: SessionReconnectStore;
   };
   clearReconnectForSession: (sessionId: string) => void;
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
   writeSessionTransportHost: (sessionId: string, host: Host) => unknown;
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => SessionTransportResourceLike | null;
+  daemonConnection: ClientDaemonConnection;
   readSessionTargetKey: (sessionId: string) => string | null;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
   isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
@@ -127,7 +117,7 @@ export function connectSessionRuntime(options: {
   });
   if (reusePlan.action === 'reuse-open') {
     options.clearReconnectForSession(options.sessionId);
-    options.refs.manualCloseRef.current.delete(options.sessionId);
+    options.refs.reconnectStore.clearManualClosed(options.sessionId);
     options.writeSessionTransportHost(options.sessionId, primeState.transportHost);
     options.writeSessionTransportToken(options.sessionId, null);
     return;
@@ -138,7 +128,7 @@ export function connectSessionRuntime(options: {
 
   options.clearReconnectForSession(options.sessionId);
   options.cleanupSocket(options.sessionId, false);
-  options.refs.manualCloseRef.current.delete(options.sessionId);
+  options.refs.reconnectStore.clearManualClosed(options.sessionId);
   options.writeSessionTransportHost(options.sessionId, primeState.transportHost);
   options.writeSessionTransportToken(options.sessionId, null);
   options.updateSessionSync(options.sessionId, primeState.sessionUpdates);
@@ -168,8 +158,7 @@ export function createSessionRuntime(options: {
   createSessionSync: (session: Session) => void;
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
   writeSessionTransportHost?: (sessionId: string, host: Host) => unknown;
-  readSessionTransportSocket: (sessionId: string) => { readyState: number } | null;
-  readSessionTransportResource?: (sessionId: string) => SessionTransportResourceLike | null;
+  daemonConnection: ClientDaemonConnection;
   connectSession: (sessionId: string, host: Host) => void;
   defaultViewport: {
     cols: number;
@@ -216,8 +205,7 @@ export function createSessionRuntime(options: {
     if (shouldConnect) {
       const currentTransportReadyState = readEffectiveSessionTransportReadyState({
         sessionId: existingSession.id,
-        readSessionTransportSocket: options.readSessionTransportSocket as (sessionId: string) => BridgeTransportSocket | null,
-        readSessionTransportResource: options.readSessionTransportResource,
+        daemonConnection: options.daemonConnection,
       });
       const shouldReconnectExisting = shouldOpenManagedSessionTransport({
         readyState: currentTransportReadyState,
@@ -259,22 +247,20 @@ export function createSessionRuntime(options: {
     state: shouldConnect ? 'connecting' : 'closed',
     hasUnread: false,
     customName: options.createOptions?.customName?.trim() || undefined,
-    buffer: options.createOptions?.buffer || createSessionBufferState({
-      lines: [],
-      cols: options.defaultViewport.cols,
-      rows: options.defaultViewport.rows,
-      cacheLines: options.resolveSessionCacheLines(options.defaultViewport.rows),
-    }),
-    daemonHeadRevision: 0,
-    daemonHeadEndIndex: 0,
     reconnectAttempt: 0,
     createdAt: options.createOptions?.createdAt || Date.now(),
   };
 
-  options.refs.sessionBufferStoreRef.current.commitBuffer(sessionId, session.buffer);
+  const initialBuffer = options.createOptions?.buffer || createSessionBufferState({
+    lines: [],
+    cols: options.defaultViewport.cols,
+    rows: options.defaultViewport.rows,
+    cacheLines: options.resolveSessionCacheLines(options.defaultViewport.rows),
+  });
+  options.refs.sessionBufferStoreRef.current.commitBuffer(sessionId, initialBuffer);
   options.refs.sessionHeadStoreRef.current.setHead(sessionId, {
-    daemonHeadRevision: session.daemonHeadRevision || 0,
-    daemonHeadEndIndex: session.daemonHeadEndIndex || 0,
+    daemonHeadRevision: 0,
+    daemonHeadEndIndex: 0,
   });
   options.runtimeDebug('session.create.new', {
     sessionId,
@@ -299,11 +285,9 @@ export function createSessionRuntime(options: {
 export function closeSessionRuntime(options: {
   sessionId: string;
   refs: {
-    manualCloseRef: MutableRefObject<Set<string>>;
+    reconnectStore: SessionReconnectStore;
     pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, unknown>>;
-    pendingInputTailRefreshRef: MutableRefObject<Map<string, { requestedAt: number; localRevision: number }>>;
-    pendingConnectTailRefreshRef: MutableRefObject<Set<string>>;
-    pendingResumeTailRefreshRef: MutableRefObject<Set<string>>;
+    tailRefreshStore: SessionTailRefreshStore;
     lastActiveReentryAtRef: MutableRefObject<Map<string, number>>;
     lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
     sessionVisibleRangeRef: MutableRefObject<Map<string, unknown>>;
@@ -315,7 +299,7 @@ export function closeSessionRuntime(options: {
   clearReconnectForSession: (sessionId: string) => void;
   readSessionTransportRuntime: (sessionId: string) => { targetKey: string | null } | null;
   readSessionTargetRuntime: (sessionId: string) => { sessionIds: string[] } | null;
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  daemonConnection: ClientDaemonConnection;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   runtimeDebug: RuntimeDebugFn;
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
@@ -325,7 +309,7 @@ export function closeSessionRuntime(options: {
   setScheduleStates: React.Dispatch<React.SetStateAction<Record<string, SessionScheduleState>>>;
   deleteSessionSync: (id: string) => void;
 }) {
-  options.refs.manualCloseRef.current.add(options.sessionId);
+  options.refs.reconnectStore.markManualClosed(options.sessionId);
   deletePendingSessionTransportOpenIntent(
     options.refs.pendingSessionTransportOpenIntentsRef.current as Parameters<typeof deletePendingSessionTransportOpenIntent>[0],
     options.sessionId,
@@ -334,7 +318,7 @@ export function closeSessionRuntime(options: {
   const transportRuntime = options.readSessionTransportRuntime(options.sessionId);
   const targetRuntime = options.readSessionTargetRuntime(options.sessionId);
 
-  const ws = options.readSessionTransportSocket(options.sessionId);
+  const ws = options.daemonConnection.readSessionSocket(options.sessionId);
   if (ws && ws.readyState === WebSocket.OPEN) {
     options.sendSocketPayload(options.sessionId, ws, JSON.stringify({ type: 'close' }));
   }
@@ -349,9 +333,7 @@ export function closeSessionRuntime(options: {
   }
   options.writeSessionTransportToken(options.sessionId, null);
   options.clearSessionTransportRuntime(options.sessionId);
-  options.refs.pendingInputTailRefreshRef.current.delete(options.sessionId);
-  options.refs.pendingConnectTailRefreshRef.current.delete(options.sessionId);
-  options.refs.pendingResumeTailRefreshRef.current.delete(options.sessionId);
+  options.refs.tailRefreshStore.deleteSession(options.sessionId);
   options.refs.lastActiveReentryAtRef.current.delete(options.sessionId);
   options.refs.lastConnectedBaselineAtRef.current.delete(options.sessionId);
   options.refs.sessionVisibleRangeRef.current.delete(options.sessionId);
@@ -392,15 +374,14 @@ export function reconnectSessionRuntime(options: {
   reconnectOptions?: ReconnectSessionRuntimeOptions;
   refs: {
     stateRef: MutableRefObject<SessionLikeState>;
-    manualCloseRef: MutableRefObject<Set<string>>;
+    reconnectStore: SessionReconnectStore;
     pendingSessionTransportOpenIntentsRef?: MutableRefObject<Map<string, unknown>>;
   };
   clearReconnectForSession: (sessionId: string) => void;
   readSessionTransportHost: (sessionId: string) => Host | null;
   readSessionTargetKey: (sessionId: string) => string | null;
   readSessionTargetRuntime: (sessionId: string) => { sessionIds: string[] } | null;
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => SessionTransportResourceLike | null;
+  daemonConnection: ClientDaemonConnection;
   hasPendingSessionTransportOpen: (sessionId: string) => boolean;
   isPendingSessionTransportOpenStale: (sessionId: string) => boolean;
   runtimeDebug: RuntimeDebugFn;
@@ -469,7 +450,7 @@ export function reconnectSessionRuntime(options: {
   });
   if (reusePlan.action === 'reuse-open') {
     options.clearReconnectForSession(options.sessionId);
-    options.refs.manualCloseRef.current.delete(options.sessionId);
+    options.refs.reconnectStore.clearManualClosed(options.sessionId);
     options.writeSessionTransportHost(options.sessionId, primeState.transportHost);
     return;
   }
@@ -495,7 +476,7 @@ export function reconnectSessionRuntime(options: {
     options.cleanupControlSocket?.(options.sessionId, true);
   }
   options.cleanupSocket(options.sessionId, false);
-  options.refs.manualCloseRef.current.delete(options.sessionId);
+  options.refs.reconnectStore.clearManualClosed(options.sessionId);
   options.writeSessionTransportHost(options.sessionId, primeState.transportHost);
   options.updateSessionSync(options.sessionId, primeState.sessionUpdates);
   options.scheduleReconnect(options.sessionId, 'manual reconnect', true, {
@@ -535,28 +516,26 @@ export function scheduleReconnectRuntime(options: {
   retryable?: boolean;
   reconnectOptions?: { immediate?: boolean; resetAttempt?: boolean; force?: boolean };
   refs: {
-    manualCloseRef: MutableRefObject<Set<string>>;
-    reconnectRuntimesRef: MutableRefObject<Map<string, SessionReconnectRuntime>>;
+    reconnectStore: SessionReconnectStore;
     stateRef: MutableRefObject<SessionLikeState & { liveSessionIds?: string[] }>;
   };
   readSessionTransportHost: (sessionId: string) => Host | null;
   shouldAutoReconnectSessionFn: typeof shouldAutoReconnectSession;
-  createSessionReconnectRuntime: () => SessionReconnectRuntime;
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
   emitSessionStatus: (sessionId: string, type: 'closed' | 'error', message?: string) => void;
   startReconnectAttempt: (sessionId: string) => void;
 }) {
-  if (options.refs.manualCloseRef.current.has(options.sessionId)) {
-    clearReconnectRuntimeEntry(options.refs.reconnectRuntimesRef.current, options.sessionId);
+  if (options.refs.reconnectStore.isManualClosed(options.sessionId)) {
+    options.refs.reconnectStore.deleteRuntime(options.sessionId);
     return;
   }
   if (!options.readSessionTransportHost(options.sessionId)) {
-    clearReconnectRuntimeEntry(options.refs.reconnectRuntimesRef.current, options.sessionId);
+    options.refs.reconnectStore.deleteRuntime(options.sessionId);
     return;
   }
 
   if (!options.retryable) {
-    clearReconnectRuntimeEntry(options.refs.reconnectRuntimesRef.current, options.sessionId);
+    options.refs.reconnectStore.deleteRuntime(options.sessionId);
     options.updateSessionSync(options.sessionId, buildSessionErrorUpdates(options.message, { includeWsNull: true }));
     options.emitSessionStatus(options.sessionId, 'error', options.message);
     return;
@@ -568,20 +547,20 @@ export function scheduleReconnectRuntime(options: {
     liveSessionIds: options.refs.stateRef.current.liveSessionIds,
     force: options.reconnectOptions?.force,
   })) {
-    clearReconnectRuntimeEntry(options.refs.reconnectRuntimesRef.current, options.sessionId);
+    options.refs.reconnectStore.deleteRuntime(options.sessionId);
     options.updateSessionSync(options.sessionId, buildSessionIdleAfterReconnectBlockedUpdates(options.message));
     return;
   }
 
-  const reconnectRuntime = options.refs.reconnectRuntimesRef.current.get(options.sessionId)
-    || options.createSessionReconnectRuntime();
-  if (options.reconnectOptions?.resetAttempt) {
-    reconnectRuntime.attempt = 0;
-  }
-  if (options.reconnectOptions?.immediate) {
-    reconnectRuntime.nextDelayMs = 0;
-  }
-  options.refs.reconnectRuntimesRef.current.set(options.sessionId, reconnectRuntime);
+  const existingReconnectRuntime = options.refs.reconnectStore.read(options.sessionId)
+    || options.refs.reconnectStore.createRuntime();
+  options.refs.reconnectStore.clearTimer(options.sessionId);
+  const reconnectRuntime: SessionReconnectRuntime = {
+    phase: 'idle',
+    attempt: options.reconnectOptions?.resetAttempt ? 0 : existingReconnectRuntime.attempt,
+    nextDelayMs: options.reconnectOptions?.immediate ? 0 : existingReconnectRuntime.nextDelayMs,
+  };
+  options.refs.reconnectStore.write(options.sessionId, reconnectRuntime);
 
   options.updateSessionSync(
     options.sessionId,
@@ -593,8 +572,7 @@ export function scheduleReconnectRuntime(options: {
 export function startReconnectAttemptRuntime(options: {
   sessionId: string;
   refs: {
-    manualCloseRef: MutableRefObject<Set<string>>;
-    reconnectRuntimesRef: MutableRefObject<Map<string, SessionReconnectRuntime>>;
+    reconnectStore: SessionReconnectStore;
   };
   readSessionTransportHost: (sessionId: string) => Host | null;
   computeReconnectDelay: (attempt: number) => number;
@@ -602,38 +580,35 @@ export function startReconnectAttemptRuntime(options: {
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
   queueReconnectTransportOpenIntent: (sessionId: string, host: Host) => void;
 }) {
-  if (options.refs.manualCloseRef.current.has(options.sessionId)) {
-    options.refs.reconnectRuntimesRef.current.delete(options.sessionId);
+  if (options.refs.reconnectStore.isManualClosed(options.sessionId)) {
+    options.refs.reconnectStore.deleteRuntime(options.sessionId);
     return;
   }
-  const reconnectRuntime = options.refs.reconnectRuntimesRef.current.get(options.sessionId);
+  const reconnectRuntime = options.refs.reconnectStore.read(options.sessionId);
   const targetHost = options.readSessionTransportHost(options.sessionId);
   if (!reconnectRuntime || !targetHost) {
-    options.refs.reconnectRuntimesRef.current.delete(options.sessionId);
+    options.refs.reconnectStore.deleteRuntime(options.sessionId);
     return;
   }
-  if (reconnectRuntime.timer || reconnectRuntime.connecting) {
+  if (reconnectRuntime.phase === 'scheduled' || reconnectRuntime.phase === 'connecting') {
     return;
   }
 
   const delay = reconnectRuntime.nextDelayMs ?? options.computeReconnectDelay(reconnectRuntime.attempt);
-  reconnectRuntime.nextDelayMs = null;
-  reconnectRuntime.timer = window.setTimeout(() => {
-    if (options.refs.manualCloseRef.current.has(options.sessionId)) {
-      options.refs.reconnectRuntimesRef.current.delete(options.sessionId);
+  const timer = globalThis.setTimeout(() => {
+    if (options.refs.reconnectStore.isManualClosed(options.sessionId)) {
+      options.refs.reconnectStore.deleteRuntime(options.sessionId);
       return;
     }
-    const liveRuntime = options.refs.reconnectRuntimesRef.current.get(options.sessionId);
+    const liveRuntime = options.refs.reconnectStore.read(options.sessionId);
     if (!liveRuntime) {
       return;
     }
-    liveRuntime.timer = null;
-    liveRuntime.connecting = true;
+    options.refs.reconnectStore.markConnecting(options.sessionId);
 
     const liveHost = options.readSessionTransportHost(options.sessionId);
     if (!liveHost) {
-      liveRuntime.connecting = false;
-      options.refs.reconnectRuntimesRef.current.delete(options.sessionId);
+      options.refs.reconnectStore.deleteRuntime(options.sessionId);
       return;
     }
 
@@ -643,5 +618,10 @@ export function startReconnectAttemptRuntime(options: {
     );
     options.writeSessionTransportToken(options.sessionId, null);
     options.queueReconnectTransportOpenIntent(options.sessionId, liveHost);
-  }, delay);
+  }, delay) as unknown as number;
+  options.refs.reconnectStore.schedule(options.sessionId, {
+    attempt: reconnectRuntime.attempt,
+    nextDelayMs: null,
+    timer,
+  });
 }

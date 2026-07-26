@@ -1,4 +1,4 @@
-import type { Session, SessionBufferState, TerminalVisibleRange } from '../lib/types';
+import type { SessionBufferState, TerminalVisibleRange } from '../lib/types';
 import {
   resolveVisibleRangeViewportRows as sharedResolveViewportRows,
   resolveVisibleRangeEndIndex as sharedResolveEndIndex,
@@ -9,43 +9,43 @@ import {
 
 export type SessionVisibleRangeState = TerminalVisibleRange;
 
-export function resolveSessionBufferView(
-  session: Session,
-  bufferOverride?: SessionBufferState | null,
-): SessionBufferState {
-  return bufferOverride || session.buffer;
+/** Daemon head truth view read from the session head store (single truth source). */
+export interface SessionDaemonHeadView {
+  daemonHeadRevision: number;
+  daemonHeadEndIndex: number;
 }
 
+export const EMPTY_SESSION_DAEMON_HEAD_VIEW: SessionDaemonHeadView = {
+  daemonHeadRevision: 0,
+  daemonHeadEndIndex: 0,
+};
+
 export function resolveVisibleRangeViewportRows(
-  session: Session,
-  visibleRange?: SessionVisibleRangeState,
-  bufferOverride?: SessionBufferState | null,
+  visibleRange: SessionVisibleRangeState | undefined,
+  buffer: SessionBufferState,
 ): number {
-  const buffer = resolveSessionBufferView(session, bufferOverride);
   const bufferRows = buffer.rows;
   return sharedResolveViewportRows(bufferRows, visibleRange);
 }
 
 export function resolveVisibleRangeEndIndex(
-  session: Session,
-  visibleRange?: SessionVisibleRangeState,
-  bufferOverride?: SessionBufferState | null,
+  head: SessionDaemonHeadView,
+  visibleRange: SessionVisibleRangeState | undefined,
+  buffer: SessionBufferState,
 ): number {
-  const buffer = resolveSessionBufferView(session, bufferOverride);
-  const daemonHeadEndIndex = session.daemonHeadEndIndex ?? 0;
+  const daemonHeadEndIndex = head.daemonHeadEndIndex ?? 0;
   const bufferTailEndIndex = buffer.bufferTailEndIndex ?? 0;
   const bufferEndIndex = buffer.endIndex ?? 0;
   return sharedResolveEndIndex(daemonHeadEndIndex, bufferTailEndIndex, bufferEndIndex, visibleRange);
 }
 
 export function buildDefaultSessionVisibleRange(
-  session: Session,
-  previousVisibleRange?: SessionVisibleRangeState,
-  bufferOverride?: SessionBufferState | null,
+  head: SessionDaemonHeadView,
+  previousVisibleRange: SessionVisibleRangeState | undefined,
+  buffer: SessionBufferState,
 ): SessionVisibleRangeState {
-  const buffer = resolveSessionBufferView(session, bufferOverride);
   const bufferRows = buffer.rows;
-  const daemonHeadEndIndex = session.daemonHeadEndIndex ?? 0;
+  const daemonHeadEndIndex = head.daemonHeadEndIndex ?? 0;
   const bufferTailEndIndex = buffer.bufferTailEndIndex ?? 0;
   const bufferEndIndex = buffer.endIndex ?? 0;
   return sharedBuildDefaultRange(

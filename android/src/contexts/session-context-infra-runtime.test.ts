@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_BRIDGE_SETTINGS, type BridgeSettings } from '../lib/bridge-settings';
-import { createSessionBufferState } from '../lib/terminal-buffer';
 import { buildTraversalPlan } from '../lib/traversal/config';
 import { TraversalSocket } from '../lib/traversal/socket';
 import type { Host, Session } from '../lib/types';
@@ -44,11 +43,6 @@ function buildSession(id: string): Session {
     ws: null,
     state: 'connected',
     hasUnread: false,
-    buffer: createSessionBufferState({
-      cols: 80,
-      rows: 24,
-      cacheLines: 1000,
-    }),
     createdAt: 1,
   };
 }

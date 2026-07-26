@@ -1,5 +1,6 @@
 import { getResolvedSessionName } from '../lib/connection-target';
-import { buildTransportTargetKey } from '../lib/session-transport-runtime';
+import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
+import type { SessionReconnectStore } from '../lib/session-reconnect-store';
 import type { SessionTerminalChannelRuntime, SessionTerminalChannelState } from '../lib/session-transport-runtime';
 import type { Host, Session, SessionScheduleState } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
@@ -7,7 +8,6 @@ import { sendSessionMuxChannelOpenRuntime } from './session-context-transport-ru
 import type {
   QueueSessionTransportOpenIntent,
   QueueSessionTransportOpenIntentOptions,
-  SessionReconnectRuntime,
 } from './session-context-core';
 import {
   buildReconnectHandshakeFailurePlan,
@@ -18,7 +18,6 @@ import {
   buildSessionReconnectingFailureUpdates,
   buildSessionScheduleErrorState,
   buildSessionScheduleLoadingState,
-  buildSessionTransportReusePlan,
   buildTransportOpenConnectedEffectPlan,
   buildTransportOpenLiveFailureEffectPlan,
   createPendingSessionTransportOpenIntent,
@@ -35,16 +34,9 @@ interface MutableRefObject<T> {
 
 export function clearReconnectForSessionRuntime(options: {
   sessionId: string;
-  reconnectRuntimesRef: MutableRefObject<Map<string, SessionReconnectRuntime>>;
+  reconnectStore: SessionReconnectStore;
 }) {
-  const reconnectRuntime = options.reconnectRuntimesRef.current.get(options.sessionId);
-  if (!reconnectRuntime) {
-    return;
-  }
-  if (reconnectRuntime.timer) {
-    clearTimeout(reconnectRuntime.timer);
-  }
-  options.reconnectRuntimesRef.current.delete(options.sessionId);
+  options.reconnectStore.deleteRuntime(options.sessionId);
 }
 
 export function clearSupersededSocketsRuntime(options: {
@@ -80,7 +72,7 @@ export function cleanupSocketRuntime(options: {
   clearSessionHandshakeTimeout: (sessionId: string) => void;
   clearTailRefreshRuntime: (sessionId: string) => void;
   clearSessionPullState: (sessionId: string) => void;
-  staleTransportProbeAtRef: MutableRefObject<Map<string, number>>;
+  reconnectStore: SessionReconnectStore;
 }) {
   const ws = options.readSessionTransportSocket(options.sessionId);
   if (ws) {
@@ -104,90 +96,12 @@ export function cleanupSocketRuntime(options: {
   options.clearSessionHandshakeTimeout(options.sessionId);
   options.clearTailRefreshRuntime(options.sessionId);
   options.clearSessionPullState(options.sessionId);
-  options.staleTransportProbeAtRef.current.delete(options.sessionId);
-}
-
-export function openSessionTransportByIntentRuntime(options: {
-  intent: PendingSessionTransportOpenIntent;
-  readSessionTransportToken: (sessionId: string) => string | null;
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTargetKey: (sessionId: string) => string | null;
-  cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
-  buildTraversalSocketForHost: (host: Host, transportRole?: 'control' | 'session') => BridgeTransportSocket;
-  runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
-  primeSessionTransportSocket: (sessionId: string, ws: BridgeTransportSocket) => void;
-  bindSessionTransportSocketLifecycle: (options: {
-    sessionId: string;
-    openRequestId: string;
-    host: Host;
-    resolvedSessionName: string;
-    ws: BridgeTransportSocket;
-    debugScope: 'connect' | 'reconnect';
-    finalizeFailure: (message: string, retryable: boolean) => void;
-    onBeforeConnectSend?: (ctx: { sessionName: string }) => void;
-    onConnected: () => void;
-    onClosed?: (reason?: string) => void;
-  }) => void;
-  writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
-}) {
-  const { sessionId, host, debugScope, finalizeFailure, onBeforeConnectSend, onConnected, onClosed } = options.intent;
-  const sessionTransportToken = options.readSessionTransportToken(sessionId);
-  if (!sessionTransportToken) {
-    finalizeFailure('missing session transport token', true);
-    return;
-  }
-
-  const currentSocket = options.readSessionTransportSocket(sessionId);
-  const reusePlan = buildSessionTransportReusePlan({
-    currentTargetKey: options.readSessionTargetKey(sessionId),
-    requestedTargetKey: buildTransportTargetKey(host),
-    wsReadyState: currentSocket?.readyState ?? null,
-    pendingTransportOpen: false,
-    source: 'open-intent',
-  });
-  options.runtimeDebug(`session.ws.${debugScope}.reuse-plan`, {
-    sessionId,
-    action: reusePlan.action,
-    reason: reusePlan.reason,
-  });
-  if (reusePlan.action === 'reuse-open' && currentSocket) {
-    options.writeSessionTransportToken(sessionId, null);
-    onConnected(currentSocket);
-    return;
-  }
-  if (reusePlan.action === 'wait-existing-open' || reusePlan.action === 'skip') {
-    return;
-  }
-
-  options.cleanupSocket(sessionId, false);
-  const ws = options.buildTraversalSocketForHost(host, 'session');
-  options.runtimeDebug(`session.ws.${debugScope}.opening`, {
-    sessionId,
-    host: host.bridgeHost,
-    port: host.bridgePort,
-    sessionName: getResolvedSessionName(host),
-  });
-  options.primeSessionTransportSocket(sessionId, ws);
-
-  options.bindSessionTransportSocketLifecycle({
-    sessionId,
-    openRequestId: options.intent.openRequestId,
-    host,
-    resolvedSessionName: options.intent.resolvedSessionName,
-    ws,
-    debugScope,
-    finalizeFailure,
-    onBeforeConnectSend,
-    onConnected: () => {
-      options.writeSessionTransportToken(sessionId, null);
-      onConnected(ws);
-    },
-    onClosed,
-  });
+  options.reconnectStore.clearStaleTransportProbe(options.sessionId);
 }
 
 export function openSessionMuxChannelByIntentRuntime(options: {
   intent: PendingSessionTransportOpenIntent;
+  daemonConnection: ClientDaemonConnection;
   readSessionTargetTerminalSocket: (sessionId: string) => BridgeTransportSocket | null;
   isSessionTargetMuxReady: (sessionId: string) => boolean;
   ensureSessionTerminalChannel: (
@@ -203,15 +117,6 @@ export function openSessionMuxChannelByIntentRuntime(options: {
     sessionId: string,
   ) => { cols?: number | null; rows?: number | null; widthMode?: 'adaptive-phone' | 'mirror-fixed' } | null;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
-  buildTraversalSocketForHost: (host: Host, transportRole?: 'control' | 'session') => BridgeTransportSocket;
-  primeTargetTerminalTransportSocket: (sessionId: string, ws: BridgeTransportSocket) => void;
-  bindTargetMuxTransportSocketLifecycle: (options: {
-    sessionId: string;
-    host: Host;
-    ws: BridgeTransportSocket;
-    debugScope: 'connect' | 'reconnect';
-    finalizeFailure: (message: string, retryable: boolean) => void;
-  }) => void;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
 }) {
   const { sessionId, host, debugScope, finalizeFailure } = options.intent;
@@ -246,7 +151,8 @@ export function openSessionMuxChannelByIntentRuntime(options: {
     });
   };
 
-  const currentTargetSocket = options.readSessionTargetTerminalSocket(sessionId);
+  const currentTargetSocket = options.daemonConnection.readSessionTargetSocket?.(sessionId)
+    || options.readSessionTargetTerminalSocket(sessionId);
   if (currentTargetSocket?.readyState === WebSocket.OPEN) {
     if (options.isSessionTargetMuxReady(sessionId)) {
       if (channel.state === 'open') {
@@ -278,21 +184,23 @@ export function openSessionMuxChannelByIntentRuntime(options: {
   }
 
   markChannelOpening();
-  const ws = options.buildTraversalSocketForHost(host, 'session');
-  options.primeTargetTerminalTransportSocket(sessionId, ws);
+  if (!options.daemonConnection.openSessionTargetTransport) {
+    finalizeFailure('client.daemon_connection target transport opener unavailable', true);
+    return;
+  }
+  const ws = options.daemonConnection.openSessionTargetTransport({
+    sessionId,
+    host,
+    debugScope,
+    finalizeFailure,
+  });
   options.runtimeDebug(`session.mux.${debugScope}.opening`, {
     sessionId,
     channelId: channel.channelId,
     host: host.bridgeHost,
     port: host.bridgePort,
     sessionName: getResolvedSessionName(host),
-  });
-  options.bindTargetMuxTransportSocketLifecycle({
-    sessionId,
-    host,
-    ws,
-    debugScope,
-    finalizeFailure,
+    readyState: ws.readyState,
   });
 }
 
@@ -305,7 +213,6 @@ export function queueSessionTransportOpenIntentRuntime(options: {
     markCompleted: () => boolean;
   }) => { shouldContinue: boolean; manualClosed: boolean } | null | undefined;
   pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, PendingSessionTransportOpenIntent>>;
-  ensureControlTransportForSessionOpen: (intent: PendingSessionTransportOpenIntent) => void;
   openSessionMuxChannelByIntent?: (intent: PendingSessionTransportOpenIntent) => void;
 }) {
   options.clearSessionHandshakeTimeout(options.intentOptions.sessionId);
@@ -319,11 +226,15 @@ export function queueSessionTransportOpenIntentRuntime(options: {
   });
 
   setPendingSessionTransportOpenIntent(options.pendingSessionTransportOpenIntentsRef.current, pendingIntent);
-  if (options.openSessionMuxChannelByIntent) {
-    options.openSessionMuxChannelByIntent(pendingIntent);
+  if (!options.openSessionMuxChannelByIntent) {
+    deletePendingSessionTransportOpenIntent(
+      options.pendingSessionTransportOpenIntentsRef.current,
+      pendingIntent.sessionId,
+    );
+    pendingIntent.finalizeFailure('client.daemon_connection mux opener unavailable', true);
     return;
   }
-  options.ensureControlTransportForSessionOpen(pendingIntent);
+  options.openSessionMuxChannelByIntent(pendingIntent);
 }
 
 export function applyTransportOpenConnectedEffectsRuntime(options: {
@@ -409,45 +320,42 @@ export function handleReconnectHandshakeFailureRuntime(options: {
   sessionId: string;
   message: string;
   retryable: boolean;
-  reconnectRuntimesRef: MutableRefObject<Map<string, SessionReconnectRuntime>>;
+  reconnectStore: SessionReconnectStore;
   clearSupersededSockets: (sessionId: string, shouldClose?: boolean) => void;
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
   emitSessionStatus: (sessionId: string, type: 'closed' | 'error', message?: string) => void;
-  createSessionReconnectRuntime: () => SessionReconnectRuntime;
   shouldContinueRetryableReconnect?: (sessionId: string) => boolean;
   startReconnectAttempt: (sessionId: string) => void;
 }) {
-  const currentReconnectRuntime = options.reconnectRuntimesRef.current.get(options.sessionId) || null;
-  if (currentReconnectRuntime) {
-    currentReconnectRuntime.connecting = false;
-  }
+  const currentReconnectRuntime = options.reconnectStore.read(options.sessionId);
+  options.reconnectStore.clearTimer(options.sessionId);
   options.clearSupersededSockets(options.sessionId, true);
   const reconnectHandshakeFailurePlan = buildReconnectHandshakeFailurePlan({
     retryable: options.retryable,
     currentAttempt: currentReconnectRuntime?.attempt || 0,
   });
   if (reconnectHandshakeFailurePlan.action === 'terminal-error') {
-    options.reconnectRuntimesRef.current.delete(options.sessionId);
+    options.reconnectStore.deleteRuntime(options.sessionId);
     options.updateSessionSync(options.sessionId, buildSessionErrorUpdates(options.message));
     options.emitSessionStatus(options.sessionId, 'error', options.message);
     return;
   }
   if (options.shouldContinueRetryableReconnect && !options.shouldContinueRetryableReconnect(options.sessionId)) {
-    if (currentReconnectRuntime?.timer) {
-      clearTimeout(currentReconnectRuntime.timer);
-    }
-    options.reconnectRuntimesRef.current.delete(options.sessionId);
+    options.reconnectStore.deleteRuntime(options.sessionId);
     options.updateSessionSync(options.sessionId, buildSessionIdleAfterReconnectBlockedUpdates(options.message));
     return;
   }
-  const nextReconnectRuntime = options.reconnectRuntimesRef.current.get(options.sessionId) || options.createSessionReconnectRuntime();
-  nextReconnectRuntime.attempt = reconnectHandshakeFailurePlan.nextAttempt;
-  nextReconnectRuntime.connecting = false;
-  options.reconnectRuntimesRef.current.set(options.sessionId, nextReconnectRuntime);
+  const idleRuntime = {
+    ...options.reconnectStore.createRuntime(),
+    attempt: reconnectHandshakeFailurePlan.nextAttempt,
+    phase: 'idle' as const,
+    nextDelayMs: null,
+  };
   options.updateSessionSync(
     options.sessionId,
-    buildSessionReconnectingFailureUpdates(options.message, nextReconnectRuntime.attempt),
+    buildSessionReconnectingFailureUpdates(options.message, idleRuntime.attempt),
   );
+  options.reconnectStore.write(options.sessionId, idleRuntime);
   options.startReconnectAttempt(options.sessionId);
 }
 
@@ -466,7 +374,7 @@ export function buildReconnectTransportOpenIntentOptionsRuntime(options: {
     message: string;
     retryable: boolean;
   }) => void;
-  reconnectRuntimesRef: MutableRefObject<Map<string, SessionReconnectRuntime>>;
+  reconnectStore: SessionReconnectStore;
   applyTransportOpenConnectedEffects: (options: {
     sessionId: string;
     debugScope: 'connect' | 'reconnect';
@@ -500,7 +408,7 @@ export function buildReconnectTransportOpenIntentOptionsRuntime(options: {
       });
     },
     onHandshakeConnected: (ws, connectedSessionName) => {
-      options.reconnectRuntimesRef.current.delete(options.sessionId);
+      options.reconnectStore.deleteRuntime(options.sessionId);
       options.applyTransportOpenConnectedEffects({
         sessionId: options.sessionId,
         debugScope: 'reconnect',
@@ -509,7 +417,7 @@ export function buildReconnectTransportOpenIntentOptionsRuntime(options: {
       });
     },
     onClosed: (reason) => {
-      options.reconnectRuntimesRef.current.delete(options.sessionId);
+      options.reconnectStore.deleteRuntime(options.sessionId);
       options.updateSessionSync(options.sessionId, buildSessionClosedUpdates(reason));
       options.emitSessionStatus(options.sessionId, 'closed', reason);
     },

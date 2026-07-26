@@ -5,7 +5,7 @@ Feature: `terminal.transport_lifecycle`
 
 ## Objective
 
-Lock the Android client transport rule that a same-session, same-target usable WebSocket is reused across foreground resume, tab switch, explicit resume, connect, and reconnect paths. Rebuild is allowed only when transport truth says it is necessary.
+Lock the Android client transport rule that a same-target usable daemon-target physical transport is reused across foreground resume, tab switch, explicit resume, connect, and reconnect paths. Rebuild is allowed only when target transport truth says it is necessary.
 
 Next architecture step: replace per-session physical body sockets with one daemon-target physical transport plus per-session logical channels. Relay/WebRTC recovery must be target-scoped and client-device-scoped too: a valid 30-minute idle-timeout Relay peer lease may resume a physical daemon-target route for the same phone, but missing device identity is rejected, leases cannot be shared across phones, and leases cannot preserve or infer terminal channel/session/tmux/UI truth.
 
@@ -64,8 +64,8 @@ Relay peer lease is route/signaling truth only. It is keyed by account, daemon h
 open-tab intent / foreground lifecycle / input
 -> SessionContext freshness or session primitive
 -> transport reuse planner
--> reuse existing session WebSocket OR queue one rebuild
--> request head / explicit resume session-open only when no usable socket exists
+-> reuse existing daemon-target physical transport OR queue one rebuild
+-> request head / explicit resume session-open only when no usable target transport exists
 ```
 
 Drawer refresh and open-tab audit ride on the same transport owner:
@@ -108,6 +108,13 @@ Negative:
 
 ## L1 Runtime Cases
 
+`SessionReconnectStore` / reconnect phase owner:
+- Positive: empty reconnect truth is `phase='idle'` with no timer; scheduled reconnect stores exactly one timer and reports in-flight; scheduled timer fire transitions to `phase='connecting'` before queueing the target open.
+- Positive: manual close markers and stale head-probe markers live in the same reconnect owner and are cleared by per-session delete/close cleanup.
+- Negative: replacing a scheduled reconnect clears the old timer; deleting a session or clearing all runtimes clears every scheduled timer before dropping state.
+- Negative: `phase='connecting'` cannot carry a timer field; start-reconnect must not queue another timer or another target open while the runtime is already `scheduled` or `connecting`.
+- Negative: manual close suppresses retryable reconnect and must not project a terminal error, emit a closed/error status, or start a reconnect attempt.
+
 `connectSessionRuntime()`:
 - Given same target and `OPEN` socket, it must not call `cleanupSocket` or `queueConnectTransportOpenIntent`.
 - Given same target and `CONNECTING` plus fresh pending open, it must not call `cleanupSocket` or queue another open.
@@ -119,7 +126,7 @@ Negative:
 - Given same target and `CONNECTING` plus fresh pending open, it must not call `cleanupSocket` or `scheduleReconnect`.
 - Given same target and `CONNECTING` plus fresh pending open, it must update visible session state to `reconnecting` with a waiting message.
 - Given explicit resume marks a pending open as stale under the active wait budget, `ensureActiveSessionFreshRuntime()` must keep waiting on the same socket and must not call `reconnectSession`.
-- Given explicit resume sees an over-budget `WebSocket.CONNECTING` session socket after `session-ticket` cleared the pending open, `ensureActiveSessionFreshRuntime()` must keep waiting on the same socket and must not call `reconnectSession`.
+- Given explicit resume sees an over-budget `WebSocket.CONNECTING` target transport after the target-open intent cleared the pending open, `ensureActiveSessionFreshRuntime()` must keep waiting on the same socket and must not call `reconnectSession`.
 - Given explicit resume sees stale reconnect runtime bookkeeping but no current socket/pending open, `ensureActiveSessionFreshRuntime()` may call the unique reconnect owner; stale bookkeeping alone must not create a second socket while a current socket exists.
 - Force replacement is not a lifecycle/probe/input/foreground/online recovery API.
 - Given an `OPEN` socket with an expired head probe marker, `ensureActiveSessionFreshRuntime()` must request head again on the same socket and must not call `reconnectSession`.
@@ -129,10 +136,10 @@ Negative:
 - Given reconnect already in flight inside the grace window, it must keep the existing in-flight behavior and must not queue a duplicate reconnect.
 - Given manual close, it must skip reconnect.
 
-`openSessionTransportByIntentRuntime()`:
-- Given current same-target session socket is `OPEN`, it must not cleanup or build a second session socket.
-- Given current same-target session socket is `CONNECTING`, it must not cleanup or build a second session socket.
-- Given target mismatch, closed socket, or missing socket, it may cleanup and build a new session socket.
+`client.daemon_connection.openSessionTargetTransport()`:
+- Given current same-target daemon-target transport is `OPEN`, it must not cleanup or build a second physical socket.
+- Given current same-target daemon-target transport is `CONNECTING`, it must not cleanup or build a second physical socket.
+- Given target mismatch, closed socket, or missing socket, it may cleanup and build a new daemon-target physical socket.
 - Same-target must be route-aware: a Tailscale/direct WebSocket target and a Relay/WebRTC-capable target for the same daemon/bridge host must produce different target keys, so restore/reconnect cannot reuse the wrong control/session transport merely because `bridgeHost:bridgePort:authToken` matches.
 - When Home/Relay reopens an already-open session through a route-aware target, the session-open owner must rebind the session by calling `createSession(..., { sessionId: existingId, activate: false })` before explicit-resume. UI-only reuse is not enough.
 - Route-aware target keys must ignore volatile directory timestamps such as `lastSeenAt`; endpoint kind/host/port/wsUrl/relay identity and transport mode are semantic, timestamp freshness is not.
@@ -170,9 +177,9 @@ Daemon channel registry:
 - Positive: if body demand changes while a channel is opening, Android records the latest channel-local value and sends that value as a channel-bound `body-subscription` immediately after `mux-channel-opened`.
 - Positive: if body demand changes after a mux channel is open, Android sends the channel-bound `body-subscription` over `readSessionTransportResource(sessionId).socket` / the existing target mux transport; mux mode must not depend on legacy per-session `activeSocket` truth.
 - Positive: `body-subscription=false` for inactive channels removes live body push eligibility while explicit head/range remains valid.
-- Positive: a physical target WebRTC/WebSocket datachannel error is target-level failure truth. Android must mark target mux ready false, clear the one failed target socket, close every non-closed logical channel on that target, settle pending channel opens with the original retryable failure, and schedule immediate reconnect for every affected non-pending logical session through the unique reconnect owner.
+- Positive: a physical target WebRTC/WebSocket datachannel error is target-level failure truth. Android must mark target mux ready false, clear the one failed target socket and heartbeat, close every non-closed logical channel on that target, clear stale pending open timers/intents without spawning per-session reconnects, mark recoverable channel demand as `opening`, project the affected sessions as reconnecting, and schedule exactly one immediate/reset target rebuild through a single anchor session. When the rebuilt target emits `mux-ready`, the mux owner replays all opening channel opens over that one physical transport.
 - Negative: switching an initially inactive mux channel to active must not allocate another WebSocket/RTC connection and must not leave the daemon subscriber body-suppressed because `readSessionTransportSocket(sessionId)` is null.
-- Negative: target datachannel failure must not be handled only by the anchor session that created the physical socket; no same-target logical channel may remain projected as open on a dead target transport, and no UI/renderer/buffer fallback may hide the failure.
+- Negative: target datachannel failure must not be handled only by the anchor session that created the physical socket; no same-target logical channel may remain projected as open on a dead target transport, no same-target sibling may schedule its own physical rebuild, and no UI/renderer/buffer fallback may hide the failure.
 - Negative: a channel that has emitted only `mux-channel-opened`/`title` cannot settle terminal connected, delete the pending open intent, become UI-connected truth, or accept user-visible readiness.
 - Negative: initial inactive channel open must not rely on a later global subscription sweep to suppress body traffic; the open frame itself carries the subscription truth.
 - Negative: physical target close detaches every channel subscriber and releases adaptive leases through the existing owner, but does not kill tmux or destroy mirror truth.

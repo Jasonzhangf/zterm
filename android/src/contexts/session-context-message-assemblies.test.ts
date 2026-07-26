@@ -1,6 +1,9 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from 'vitest';
+import { createSessionHeartbeatStore } from '../lib/session-heartbeat-store';
+import { createSessionReconnectStore } from '../lib/session-reconnect-store';
+import { createSessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import { createSessionBufferState } from '../lib/terminal-buffer';
 import type { Session } from '../lib/types';
 import { createSessionMessageAssemblies } from './session-context-message-assemblies';
@@ -17,7 +20,15 @@ function makeSession(sessionId: string): Session {
     ws: null,
     state: 'connected',
     hasUnread: false,
-    buffer: createSessionBufferState({
+    createdAt: 1,
+  };
+}
+
+describe('session-context-message-assemblies cadence', () => {
+  it('uses session-aware cadence for repeated head refresh requests', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const buffer = createSessionBufferState({
       lines: ['alpha'],
       startIndex: 0,
       endIndex: 1,
@@ -27,15 +38,7 @@ function makeSession(sessionId: string): Session {
       rows: 24,
       revision: 1,
       cacheLines: 1000,
-    }),
-    createdAt: 1,
-  };
-}
-
-describe('session-context-message-assemblies cadence', () => {
-  it('uses session-aware cadence for repeated head refresh requests', () => {
-    const sessionId = 'session-1';
-    const session = makeSession(sessionId);
+    });
     const ws = { readyState: WebSocket.OPEN } as any;
     const sendSocketPayload = vi.fn();
     const resolveTerminalRefreshCadence = vi.fn(() => ({
@@ -52,27 +55,29 @@ describe('session-context-message-assemblies cadence', () => {
         stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
         scheduleStatesRef: { current: {} },
         sessionVisibleRangeRef: { current: new Map() },
-        sessionBufferHeadsRef: { current: new Map() },
         sessionPullStateRef: { current: new Map() },
         sessionRevisionResetRef: { current: new Map() },
         sessionBufferStoreRef: { current: { commitBuffer: vi.fn(() => false) } },
-        sessionHeadStoreRef: { current: { setHead: vi.fn(() => false) } },
+        sessionHeadStoreRef: { current: { setHead: vi.fn(() => false), setLiveHead: vi.fn(() => false), getLiveHead: vi.fn(() => null), clearLiveHead: vi.fn() } },
         sessionDebugMetricsStoreRef: { current: { recordRefreshRequest: vi.fn() } },
-        lastSyncRequestAtRef: { current: new Map() },
+        tailRefreshStore: createSessionTailRefreshStore(),
         lastHeadRequestAtRef: { current: new Map() },
-        staleTransportProbeAtRef: { current: new Map() },
-        lastPongAtRef: { current: new Map() },
+        reconnectStore: createSessionReconnectStore(),
+        heartbeatStore: createSessionHeartbeatStore(),
         lastConnectedBaselineAtRef: { current: new Map() },
         connectedBaselineBurstGuardRef: { current: new Set() },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set() },
-        pendingResumeTailRefreshRef: { current: new Set() },
         pendingSessionTransportOpenIntentsRef: { current: new Map() },
-        manualCloseRef: { current: new Set() },
         fileTransferMessageRuntimeRef: { current: { dispatch: vi.fn() } },
         remoteWindowMessageRuntimeRef: { current: { dispatch: vi.fn() } },
         readSessionTransportSocket: () => ws,
-        readSessionBufferSnapshot: () => session.buffer,
+        daemonConnection: {
+          readSessionResource: vi.fn(() => ({ socket: ws } as any)),
+          readSessionSocket: vi.fn(() => ws),
+          readOpenSessionSocket: vi.fn(() => ws),
+          sendSessionMessage: vi.fn(() => true),
+          sendSessionRaw: vi.fn(() => true),
+        } as any,
+        readSessionBufferSnapshot: () => buffer,
         sendSocketPayload,
         clearSessionPullState: vi.fn(),
         settleSessionPullState: vi.fn(),

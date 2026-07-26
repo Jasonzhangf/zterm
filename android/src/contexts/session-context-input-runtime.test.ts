@@ -11,6 +11,7 @@ import {
   sendInputThroughSessionTransport,
   TERMINAL_RELIABLE_INPUT_RETRY_MS,
 } from './session-context-input-runtime';
+import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 
 function createSocket(readyState: number, bufferedAmount = 0) {
   return {
@@ -24,7 +25,7 @@ function createSocket(readyState: number, bufferedAmount = 0) {
 function createResource(
   sessionId: string,
   socket: any = null,
-  channel: ReturnType<Parameters<typeof sendInputThroughSessionTransport>[0]['readSessionTransportResource']>['channel'] = null,
+  channel: any = null,
 ) {
   return {
     sessionId,
@@ -44,8 +45,28 @@ function createResource(
   } as const;
 }
 
+function createDaemonConnection(
+  resourceFactory: (sessionId: string) => ReturnType<typeof createResource>,
+) {
+  return {
+    readSessionResource: vi.fn((sessionId: string) => resourceFactory(sessionId)),
+    readSessionSocket: vi.fn((sessionId: string) => resourceFactory(sessionId).socket || null),
+    readSessionTargetSocket: vi.fn((sessionId: string) => resourceFactory(sessionId).terminalSocket || resourceFactory(sessionId).socket || null),
+    readOpenSessionSocket: vi.fn((sessionId: string) => resourceFactory(sessionId).socket || null),
+    sendSessionRaw: vi.fn(),
+    sendSessionMessage: vi.fn(),
+  } as unknown as ClientDaemonConnection;
+}
+
+function createDaemonConnectionForSocket(
+  socket: any,
+  channel: any = null,
+) {
+  return createDaemonConnection((sessionId) => createResource(sessionId, socket, channel));
+}
+
 function sendInput(overrides: Partial<Parameters<typeof sendInputThroughSessionTransport>[0]> = {}) {
-  const ws = overrides.readSessionTransportSocket?.('session-2') ?? createSocket(WebSocket.OPEN);
+  const ws = createSocket(WebSocket.OPEN);
   const options: Parameters<typeof sendInputThroughSessionTransport>[0] = {
     sessionId: 'session-2',
     data: 'pwd\r',
@@ -54,8 +75,7 @@ function sendInput(overrides: Partial<Parameters<typeof sendInputThroughSessionT
       stateRef: { current: { activeSessionId: 'session-2' } },
     },
     runtimeDebug: vi.fn(),
-    readSessionTransportResource: (sessionId) => createResource(sessionId, ws),
-    readSessionTransportSocket: () => ws,
+    daemonConnection: createDaemonConnectionForSocket(ws),
     isReconnectInFlight: () => false,
     sendSocketPayload: vi.fn(),
     markPendingInputTailRefresh: vi.fn(() => true),
@@ -195,8 +215,7 @@ describe('session-context-input-runtime', () => {
         sessionsRef: { current: [{ id: 'session-2', reliableInputSupported: true } as any] },
         stateRef: { current: { activeSessionId: 'session-2' } },
       },
-      readSessionTransportResource: (sessionId) => createResource(sessionId, currentWs),
-      readSessionTransportSocket: () => currentWs,
+      daemonConnection: createDaemonConnection((sessionId) => createResource(sessionId, currentWs)),
       hasPendingSessionTransportOpen: () => true,
       sendSocketPayload,
     });
@@ -309,7 +328,7 @@ describe('session-context-input-runtime', () => {
     const requestSessionBufferHead = vi.fn();
     const ws = createSocket(WebSocket.OPEN);
     sendInput({
-      readSessionTransportSocket: () => ws,
+      daemonConnection: createDaemonConnectionForSocket(ws),
       requestSessionBufferHead,
     });
 
@@ -331,14 +350,14 @@ describe('session-context-input-runtime', () => {
 
     sendInput({
       data: 'a',
-      readSessionTransportSocket: () => ws,
+      daemonConnection: createDaemonConnectionForSocket(ws),
       sendSocketPayload,
       markPendingInputTailRefresh,
       requestSessionBufferHead,
     });
     sendInput({
       data: 'b',
-      readSessionTransportSocket: () => ws,
+      daemonConnection: createDaemonConnectionForSocket(ws),
       sendSocketPayload,
       markPendingInputTailRefresh,
       requestSessionBufferHead,
@@ -357,8 +376,7 @@ describe('session-context-input-runtime', () => {
     const requestSessionBufferHead = vi.fn();
 
     sendInput({
-      readSessionTransportResource: (sessionId) => createResource(sessionId, currentWs),
-      readSessionTransportSocket: () => currentWs,
+      daemonConnection: createDaemonConnection((sessionId) => createResource(sessionId, currentWs)),
       requestSessionBufferHead,
     });
     currentWs = newWs;
@@ -377,8 +395,7 @@ describe('session-context-input-runtime', () => {
         sessionsRef: { current: [{ id: 'session-2' } as any] },
         stateRef: { current: { activeSessionId: 'session-1' } },
       },
-      readSessionTransportResource: (sessionId) => createResource(sessionId, resourceWs),
-      readSessionTransportSocket: () => null,
+      daemonConnection: createDaemonConnectionForSocket(resourceWs),
       sendSocketPayload,
     });
 
@@ -389,6 +406,46 @@ describe('session-context-input-runtime', () => {
     );
   });
 
+  it('uses client.daemon_connection before raw socket accessors for terminal input', () => {
+    const daemonSocket = createSocket(WebSocket.OPEN);
+    const staleSocket = createSocket(WebSocket.OPEN);
+    const sendSocketPayload = vi.fn();
+    const readSessionResource = vi.fn((sessionId) => createResource(sessionId, staleSocket));
+    const readSessionSocket = vi.fn(() => daemonSocket);
+
+    sendInputThroughSessionTransport({
+      sessionId: 'session-2',
+      data: 'pwd\r',
+      refs: {
+        sessionsRef: { current: [{ id: 'session-2' } as any] },
+        stateRef: { current: { activeSessionId: 'session-2' } },
+      },
+      runtimeDebug: vi.fn(),
+      daemonConnection: {
+        readSessionResource,
+        readSessionSocket,
+        readOpenSessionSocket: () => daemonSocket,
+        sendSessionMessage: vi.fn(),
+        sendSessionRaw: vi.fn(),
+      } as any,
+      isReconnectInFlight: () => false,
+      sendSocketPayload,
+      markPendingInputTailRefresh: vi.fn(() => false),
+      readSessionBufferSnapshot: () => ({ revision: 3 }),
+      requestSessionBufferHead: vi.fn(),
+      hasPendingSessionTransportOpen: () => false,
+      isPendingSessionTransportOpenStale: () => false,
+    });
+
+    expect(sendSocketPayload).toHaveBeenCalledWith(
+      'session-2',
+      daemonSocket,
+      JSON.stringify({ type: 'input', payload: 'pwd\r' }),
+    );
+    expect(readSessionResource).toHaveBeenCalledWith('session-2');
+    expect(readSessionSocket).toHaveBeenCalledWith('session-2');
+  });
+
   it('does not send terminal input while a mux channel is still opening on an open target socket', () => {
     const resourceWs = createSocket(WebSocket.OPEN);
     const sendSocketPayload = vi.fn();
@@ -396,7 +453,7 @@ describe('session-context-input-runtime', () => {
 
     sendInput({
       runtimeDebug,
-      readSessionTransportResource: (sessionId) => createResource(sessionId, resourceWs, {
+      daemonConnection: createDaemonConnection((sessionId) => createResource(sessionId, resourceWs, {
         channelId: 'channel-b',
         sessionId,
         sessionName: 'tmux-b',
@@ -405,8 +462,7 @@ describe('session-context-input-runtime', () => {
         bodySubscribed: true,
         openedAt: 1,
         closedAt: null,
-      }),
-      readSessionTransportSocket: () => null,
+      })),
       sendSocketPayload,
       hasPendingSessionTransportOpen: () => true,
     });
@@ -431,7 +487,7 @@ describe('session-context-input-runtime', () => {
     sendInput({
       data: 'rm -rf should-not-flush-later\r',
       runtimeDebug,
-      readSessionTransportSocket: () => ws,
+      daemonConnection: createDaemonConnectionForSocket(ws),
       sendSocketPayload,
       markPendingInputTailRefresh,
       requestSessionBufferHead,
@@ -453,8 +509,7 @@ describe('session-context-input-runtime', () => {
 
     sendInput({
       runtimeDebug,
-      readSessionTransportResource: (sessionId) => createResource(sessionId, null),
-      readSessionTransportSocket: () => null,
+      daemonConnection: createDaemonConnection((sessionId) => createResource(sessionId, null)),
       sendSocketPayload,
       hasPendingSessionTransportOpen: () => true,
       isPendingSessionTransportOpenStale: () => true,
@@ -477,8 +532,7 @@ describe('session-context-input-runtime', () => {
 
     sendInput({
       runtimeDebug,
-      readSessionTransportResource: (sessionId) => createResource(sessionId, null),
-      readSessionTransportSocket: () => null,
+      daemonConnection: createDaemonConnection((sessionId) => createResource(sessionId, null)),
       sendSocketPayload,
     });
 

@@ -2,11 +2,14 @@ import { buildEmptyScheduleState } from '@zterm/shared';
 import { DEFAULT_TERMINAL_CACHE_LINES, resolveTerminalRequestWindowLines } from '../lib/mobile-config';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import { resolveTraversalConfigFromHost } from '../lib/traversal/config';
-import { TraversalSocket } from '../lib/traversal/socket';
+import { createClientDaemonTraversalSocket } from '../lib/client-daemon-connection';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
+import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
+import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import type { Host, Session, SessionBufferState, SessionScheduleState } from '../lib/types';
 import type { SessionRenderBufferSnapshot } from '../lib/types';
 import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
+import type { SessionReconnectStore } from '../lib/session-reconnect-store';
 import type { RecordSessionTxOptions } from './session-context-pull-runtime';
 import {
   clearSessionPullState as clearSessionPullStateRuntime,
@@ -28,8 +31,8 @@ import {
   cleanupControlTransportSocket as cleanupControlTransportSocketRuntime,
   createSessionContextTransportAccessors,
 } from './session-context-transport-runtime';
-import type { SessionAction, SessionManagerState, SessionReconnectRuntime } from './session-context-core';
-import { hasSessionLocalWindow, type SessionBufferHeadState } from './session-buffer-planner-helpers';
+import type { SessionAction, SessionManagerState } from './session-context-core';
+import { hasSessionLocalWindow } from './session-buffer-planner-helpers';
 import type { SessionPullPurpose } from './session-pull-state-helpers';
 import { hasPendingSessionTransportOpenIntent, isPendingSessionTransportOpenIntentStale } from './session-context-open-intent-store';
 
@@ -189,7 +192,7 @@ export function shouldAcceptSessionLiveBufferRuntime(options: {
   if (!session) {
     return false;
   }
-  return !hasSessionLocalWindow(session, options.readSessionBufferSnapshot(options.sessionId));
+  return !hasSessionLocalWindow(options.readSessionBufferSnapshot(options.sessionId));
 }
 
 export function hasPendingSessionTransportOpenRuntime(options: {
@@ -218,13 +221,9 @@ export function isPendingSessionTransportOpenStaleRuntime(options: {
 
 export function isReconnectInFlightRuntime(options: {
   sessionId: string;
-  reconnectRuntimesRef: { current: Map<string, SessionReconnectRuntime> };
+  reconnectStore: SessionReconnectStore;
 }) {
-  const reconnectRuntime = options.reconnectRuntimesRef.current.get(options.sessionId) || null;
-  if (!reconnectRuntime) {
-    return false;
-  }
-  return reconnectRuntime.connecting || reconnectRuntime.timer !== null;
+  return options.reconnectStore.isInFlight(options.sessionId);
 }
 
 export function resolveSessionCacheLinesRuntime(options: {
@@ -270,9 +269,8 @@ export function recordSessionRxInfraRuntime(options: {
   data: string | ArrayBuffer;
   refs: {
     sessionDebugMetricsStoreRef: { current: unknown };
-    lastServerActivityAtRef: { current: Map<string, number> };
-    lastTerminalActivityAtRef?: { current: Map<string, number> };
-    staleTransportProbeAtRef: { current: Map<string, number> };
+    heartbeatStore: SessionHeartbeatStore;
+    reconnectStore: SessionReconnectStore;
   };
 }) {
   recordSessionRxRuntime(options as Parameters<typeof recordSessionRxRuntime>[0]);
@@ -297,7 +295,7 @@ export function getSessionRenderBufferStoreRuntime(options: {
 export function markPendingInputTailRefreshInfraRuntime(options: {
   sessionId: string;
   localRevision: number;
-  pendingInputTailRefreshRef: { current: Map<string, { requestedAt: number; localRevision: number }> };
+  tailRefreshStore: SessionTailRefreshStore;
 }) {
   return markPendingInputTailRefreshRuntime(options);
 }
@@ -323,9 +321,8 @@ export function resetSessionTransportPullBookkeepingInfraRuntime(options: {
   reason: string;
   activeSessionId: string | null;
   sessionPullStateRef: { current: Map<string, unknown> };
-  pendingInputTailRefreshRef?: { current: Map<string, { requestedAt: number; localRevision: number }> };
+  tailRefreshStore: SessionTailRefreshStore;
   sameRevisionChunkFrameRef?: { current: Map<string, unknown> };
-  lastSyncRequestAtRef: { current: Map<string, unknown> };
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
 }) {
   resetSessionTransportPullBookkeepingRuntime(options as Parameters<typeof resetSessionTransportPullBookkeepingRuntime>[0]);
@@ -333,7 +330,7 @@ export function resetSessionTransportPullBookkeepingInfraRuntime(options: {
 
 export function isSessionTransportActivityStaleInfraRuntime(options: {
   sessionId: string;
-  lastServerActivityAtRef: { current: Map<string, number> };
+  heartbeatStore: SessionHeartbeatStore;
   staleActivityMs: number;
 }) {
   return isSessionTransportActivityStaleRuntime(options);
@@ -387,7 +384,7 @@ export function buildTraversalSocketForHostRuntime(options: {
       return options.wsUrl;
     }
   })();
-  return new TraversalSocket(traversal.target, traversal.settings, {
+  return createClientDaemonTraversalSocket(traversal.target, traversal.settings, {
     overrideUrl,
     autoReconnect: false,
   });
@@ -441,9 +438,7 @@ export function setScheduleStateForSessionRuntime(options: {
 export function clearHeartbeatRuntime(options: {
   sessionId: string;
   heartbeatKey?: string;
-  pingIntervalsRef: { current: Map<string, ReturnType<typeof setInterval>> };
-  lastPongAtRef: { current: Map<string, number> };
-  lastServerActivityAtRef: { current: Map<string, number> };
+  heartbeatStore: SessionHeartbeatStore;
 }) {
   clearSessionHeartbeatRuntime(options);
 }
@@ -466,12 +461,10 @@ export function setSessionHandshakeTimeoutInfraRuntime(options: {
 
 export function clearTailRefreshRuntimeInfra(options: {
   sessionId: string;
-  sessionBufferHeadsRef: { current: Map<string, SessionBufferHeadState> };
+  sessionHeadStoreRef: { current: { clearLiveHead: (sessionId: string) => void } };
   sessionRevisionResetRef: { current: Map<string, { revision: number; latestEndIndex: number; seenAt: number }> };
   lastHeadRequestAtRef: { current: Map<string, number> };
-  pendingInputTailRefreshRef?: { current: Map<string, { requestedAt: number; localRevision: number }> };
-  pendingConnectTailRefreshRef?: { current: Set<string> };
-  pendingResumeTailRefreshRef?: { current: Set<string> };
+  tailRefreshStore?: SessionTailRefreshStore;
   sameRevisionChunkFrameRef?: { current: Map<string, unknown> };
 }) {
   clearTailRefreshRuntimeRuntime(options);
@@ -482,9 +475,7 @@ export function startSocketHeartbeatInfraRuntime(options: {
   heartbeatKey?: string;
   ws: BridgeTransportSocket;
   finalizeFailure: (message: string, retryable: boolean) => void;
-  pingIntervalsRef: { current: Map<string, ReturnType<typeof setInterval>> };
-  lastPongAtRef: { current: Map<string, number> };
-  lastServerActivityAtRef: { current: Map<string, number> };
+  heartbeatStore: SessionHeartbeatStore;
   clientPingIntervalMs: number;
   maxConsecutiveMisses: number;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;

@@ -17,7 +17,7 @@ type MainlineManifest = {
       resource_from: string;
       resource_to: string;
       via_resources: string[];
-      relation_status: 'direct' | 'via' | 'observer' | 'binding pending';
+      relation_status: 'direct' | 'via' | 'observer';
     }>;
   }>;
 };
@@ -40,7 +40,8 @@ describe('mainline resource call map gate', () => {
         expect(edge.resource_to, edge.edge_id).toMatch(/^resource\./);
         expect(resourceIds.has(edge.resource_from), edge.edge_id).toBe(true);
         expect(resourceIds.has(edge.resource_to), edge.edge_id).toBe(true);
-        expect(['direct', 'via', 'observer', 'binding pending']).toContain(edge.relation_status);
+        expect(['direct', 'via', 'observer']).toContain(edge.relation_status);
+        expect(edge.relation_status, edge.edge_id).not.toBe('binding pending');
         expect(Array.isArray(edge.via_resources), edge.edge_id).toBe(true);
         for (const via of edge.via_resources) {
           expect(resourceIds.has(via), `${edge.edge_id}:${via}`).toBe(true);

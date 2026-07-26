@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { createSessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import { buildLifecycleRefreshTargets } from './session-context-lifecycle';
 import { requestSessionBufferHeadRuntime, requestSessionBufferSyncRuntime } from './session-context-buffer-runtime';
 import { createSessionBufferState } from '../lib/terminal-buffer';
@@ -8,7 +9,9 @@ import {
 } from '../lib/terminal-performance-trace';
 import type { Session } from '../lib/types';
 
-function makeSession(sessionId: string): Session {
+type TestSession = Session & { buffer: import('../lib/types').SessionBufferState };
+
+function makeSession(sessionId: string): TestSession {
   return {
     id: sessionId,
     hostId: `host-${sessionId}`,
@@ -62,12 +65,9 @@ describe('multi-pane refresh truth', () => {
         sessionVisibleRangeRef: {
           current: new Map([[sessionId, { startIndex: 0, endIndex: 1, viewportRows: 24 }]]),
         },
-        sessionBufferHeadsRef: { current: new Map() },
+        sessionHeadStoreRef: { current: { getLiveHead: () => null } },
         sessionPullStateRef: { current: new Map() },
-        lastSyncRequestAtRef: { current: new Map() },
-        pendingInputTailRefreshRef: { current: new Map() },
-        pendingConnectTailRefreshRef: { current: new Set<string>() },
-        pendingResumeTailRefreshRef: { current: new Set<string>() },
+        tailRefreshStoreRef: { current: createSessionTailRefreshStore() },
       };
 
       const first = requestSessionBufferSyncRuntime({

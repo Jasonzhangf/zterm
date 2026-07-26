@@ -31,6 +31,10 @@ import type { RemoteWindowControlMessage } from '../lib/remote-window-message-ru
 import type {
   QueueSessionTransportOpenIntentOptions as SessionTransportOpenIntentHelperOptions,
 } from './session-transport-open-helpers';
+import {
+  createSessionReconnectRuntime as createSessionReconnectRuntimeFromStore,
+  type SessionReconnectRuntime,
+} from '../lib/session-reconnect-store';
 
 const RECONNECT_BASE_DELAY_MS = 1200;
 const RECONNECT_MAX_DELAY_MS = 30000;
@@ -291,12 +295,7 @@ export interface CreateSessionOptions {
   sessionId?: string;
 }
 
-export interface SessionReconnectRuntime {
-  attempt: number;
-  timer: number | null;
-  nextDelayMs: number | null;
-  connecting: boolean;
-}
+export type { SessionReconnectRuntime };
 
 export interface RevisionResetExpectation {
   revision: number;
@@ -312,12 +311,7 @@ export type QueueSessionTransportOpenIntentOptions = Omit<
 export type QueueSessionTransportOpenIntent = (options: QueueSessionTransportOpenIntentOptions) => void;
 
 export function createSessionReconnectRuntime(): SessionReconnectRuntime {
-  return {
-    attempt: 0,
-    timer: null,
-    nextDelayMs: null,
-    connecting: false,
-  };
+  return createSessionReconnectRuntimeFromStore();
 }
 
 export function computeReconnectDelay(attempt: number) {

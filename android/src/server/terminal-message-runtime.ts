@@ -1,15 +1,8 @@
 import type { RawData } from 'ws';
 import {
-  buildTerminalMuxCapabilities,
   buildTerminalMuxError,
-  buildTerminalMuxReady,
-  buildTerminalMuxServerTargetMessage,
   buildTerminalMuxUnwrappedSessionMessageError,
   classifyTerminalMuxClientMessage,
-  isTerminalMuxClientFrame,
-  validateTerminalMuxChannelEnvelope,
-  type TerminalMuxClientFrame,
-  type TerminalMuxServerFrame,
 } from '@zterm/shared/protocol';
 import { buildRequestedRangeBufferPayload } from './buffer-sync-contract';
 import { TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES } from '@zterm/shared/terminal/input-chunking';
@@ -17,14 +10,16 @@ import { TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES } from '@zterm/shared/terminal/in
 // the client and resent as smaller `input` frames.
 const MAX_INPUT_PAYLOAD_BYTES = TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES;
 import type {
-  BufferSyncRequestPayload,
-  ClientMessage,
+  BridgeClientMessage as ClientMessage,
+  BridgeServerMessage as ServerMessage,
   HostConfigMessage,
   RuntimeDebugLogEntry,
-  ServerMessage,
   TerminalInputAckPayload,
   TerminalReliableInputPayload,
-} from '../lib/types';
+} from '@zterm/shared/protocol';
+import type {
+  BufferSyncRequestPayload,
+} from '@zterm/shared/types';
 import type {
   TerminalTransportSubscriber,
   TerminalSession,
@@ -42,6 +37,8 @@ import {
 } from './terminal-message-control-runtime';
 import type { TerminalMessageControlRuntimeDeps } from './terminal-message-control-runtime';
 import type { RemoteWindowStreamDaemonRuntime } from './remote-window-stream-daemon';
+import { createReliableInputAckCache } from './terminal-reliable-input-ack';
+import { createTerminalMuxChannelRuntime } from './terminal-mux-channel-runtime';
 
 export interface TerminalMessageRuntimeDeps {
   sessions: Map<string, TerminalTransportSubscriber>;
@@ -95,27 +92,7 @@ export function createTerminalMessageRuntime(
     return current;
   }
 
-  const reliableInputAckedSeqs = new Map<string, { accepted: true; bytes: number }>();
-  const RELIABLE_INPUT_ACKED_SEQ_MAX = 2048;
-
-  function reliableInputKey(sessionId: string, seq: string) {
-    return `${sessionId}\u0000${seq}`;
-  }
-
-  function rememberReliableInputAck(sessionId: string, seq: string, bytes: number) {
-    reliableInputAckedSeqs.set(reliableInputKey(sessionId, seq), { accepted: true, bytes });
-    while (reliableInputAckedSeqs.size > RELIABLE_INPUT_ACKED_SEQ_MAX) {
-      const oldestKey = reliableInputAckedSeqs.keys().next().value;
-      if (typeof oldestKey !== 'string') {
-        break;
-      }
-      reliableInputAckedSeqs.delete(oldestKey);
-    }
-  }
-
-  function readReliableInputAck(sessionId: string, seq: string) {
-    return reliableInputAckedSeqs.get(reliableInputKey(sessionId, seq)) || null;
-  }
+  const reliableInputAckCache = createReliableInputAckCache();
 
   function sendInputAck(connection: TerminalTransportConnection, payload: TerminalInputAckPayload) {
     deps.sendTransportMessage(connection.transport, {
@@ -124,238 +101,18 @@ export function createTerminalMessageRuntime(
     });
   }
 
-  function sendMuxFrame(connection: TerminalTransportConnection, frame: TerminalMuxServerFrame) {
-    deps.sendTransportMessage(connection.transport, frame as unknown as ServerMessage);
-  }
-
-  function resolveMuxChannelSubscriber(
-    connection: TerminalTransportConnection,
-    channelId: string,
-  ): TerminalSession | null {
-    const subscriberId = connection.muxChannels?.get(channelId) || '';
-    return subscriberId ? deps.sessions.get(subscriberId) || null : null;
-  }
-
-  function createMuxChannelMessageConnection(
-    connection: TerminalTransportConnection,
-    subscriber: TerminalSession,
-  ): TerminalTransportConnection {
-    return {
-      ...connection,
-      role: 'session',
-      boundSubscriberId: subscriber.id,
-      transport: subscriber.transport || connection.transport,
-      closeTransport: subscriber.closeTransport || (() => {}),
-      muxVersion: undefined,
-      muxClientInstanceId: null,
-      muxChannels: undefined,
-    };
-  }
-
-  function createMuxTargetMessageConnection(
-    connection: TerminalTransportConnection,
-    requestId?: string,
-  ): TerminalTransportConnection {
-    return {
-      ...connection,
-      boundSubscriberId: null,
-      transport: {
-        kind: connection.transport.kind,
-        requestOrigin: connection.requestOrigin,
-        connectedSent: false,
-        get readyState() {
-          return connection.transport.readyState;
-        },
-        get bufferedAmount() {
-          return Math.max(0, Math.floor(connection.transport.bufferedAmount || 0));
-        },
-        sendText(text: string) {
-          let message: ServerMessage;
-          try {
-            message = JSON.parse(text) as ServerMessage;
-          } catch {
-            sendMuxFrame(connection, buildTerminalMuxError(
-              'mux_protocol_invalid',
-              'mux target send requires a JSON server message',
-            ));
-            return;
-          }
-          sendMuxFrame(
-            connection,
-            buildTerminalMuxServerTargetMessage(
-              message as Parameters<typeof buildTerminalMuxServerTargetMessage>[0],
-              requestId,
-            ),
-          );
-        },
-        close: connection.transport.close,
-        ping: connection.transport.ping,
-      },
-      muxVersion: undefined,
-      muxClientInstanceId: null,
-      muxChannels: undefined,
-    };
-  }
-
-  function rejectMuxProtocol(connection: TerminalTransportConnection, message: string, channelId?: string) {
-    sendMuxFrame(connection, buildTerminalMuxError('mux_protocol_invalid', message, channelId));
-  }
-
-  async function handleMuxFrame(connection: TerminalTransportConnection, candidate: unknown) {
-    if (!isTerminalMuxClientFrame(candidate)) {
-      rejectMuxProtocol(connection, 'invalid terminal mux frame');
-      return;
-    }
-    const frame = candidate as TerminalMuxClientFrame;
-    switch (frame.type) {
-      case 'mux-hello':
-        connection.muxVersion = frame.payload.version;
-        connection.muxClientInstanceId = frame.payload.clientInstanceId;
-        if (!connection.muxChannels) {
-          connection.muxChannels = new Map();
-        }
-        sendMuxFrame(connection, buildTerminalMuxReady({
-          capabilities: buildTerminalMuxCapabilities({
-            reliableInput: { version: 1 },
-          }),
-        }));
-        return;
-      case 'mux-target-message': {
-        await handleMessage(
-          createMuxTargetMessageConnection(connection, frame.payload.requestId),
-          Buffer.from(JSON.stringify(frame.payload.message)),
-        );
-        return;
-      }
-      case 'mux-channel-open': {
-        if (!connection.muxVersion) {
-          sendMuxFrame(connection, buildTerminalMuxError(
-            'daemon_multiplex_upgrade_required',
-            'mux-channel-open requires mux-hello / mux-ready first',
-            frame.payload.channelId,
-          ));
-          return;
-        }
-        if (!connection.muxChannels) {
-          connection.muxChannels = new Map();
-        }
-        if (connection.muxChannels.has(frame.payload.channelId)) {
-          sendMuxFrame(connection, buildTerminalMuxError(
-            'mux_duplicate_channel',
-            `mux channel ${frame.payload.channelId} is already open`,
-            frame.payload.channelId,
-          ));
-          return;
-        }
-        const subscriber = deps.controlRuntimeDeps.createMuxChannelSubscriber(connection, frame.payload.channelId);
-        subscriber.sessionName = deps.controlRuntimeDeps.sanitizeSessionName(frame.payload.sessionName);
-        subscriber.bodySubscribed = frame.payload.bodySubscribed !== false;
-        sendMuxFrame(connection, {
-          type: 'mux-channel-opened',
-          payload: {
-            channelId: frame.payload.channelId,
-            sessionName: subscriber.sessionName,
-            capabilities: {
-              reliableInput: { version: 1 },
-            },
-          },
-        });
-        void deps.controlRuntimeDeps.attachTmux(subscriber, {
-          sessionName: frame.payload.sessionName,
-          cols: frame.payload.cols,
-          rows: frame.payload.rows,
-          widthMode: frame.payload.widthMode,
-          autoCommand: frame.payload.autoCommand,
-        }).catch((error: unknown) => {
-          sendMuxFrame(connection, {
-            type: 'mux-channel-message',
-            payload: {
-              channelId: frame.payload.channelId,
-              message: {
-                type: 'error',
-                payload: {
-                  message: error instanceof Error ? error.message : 'Invalid mux channel open payload',
-                  code: 'mux_channel_open_failed',
-                },
-              },
-            },
-          });
-        });
-        return;
-      }
-      case 'mux-channel-message': {
-        const envelope = validateTerminalMuxChannelEnvelope(frame, {
-          hasChannel: (channelId) => Boolean(resolveMuxChannelSubscriber(connection, channelId)),
-        });
-        if (!envelope.ok) {
-          sendMuxFrame(connection, envelope.error);
-          return;
-        }
-        const subscriber = resolveMuxChannelSubscriber(connection, envelope.channelId);
-        if (!subscriber) {
-          sendMuxFrame(connection, buildTerminalMuxError(
-            'mux_unknown_channel',
-            `mux channel ${envelope.channelId} is not open`,
-            envelope.channelId,
-          ));
-          return;
-        }
-        await handleMessage(
-          createMuxChannelMessageConnection(connection, subscriber),
-          Buffer.from(JSON.stringify(frame.payload.message)),
-        );
-        return;
-      }
-      case 'mux-channel-binary': {
-        const envelope = validateTerminalMuxChannelEnvelope(frame, {
-          hasChannel: (channelId) => Boolean(resolveMuxChannelSubscriber(connection, channelId)),
-        });
-        if (!envelope.ok) {
-          sendMuxFrame(connection, envelope.error);
-          return;
-        }
-        const subscriber = resolveMuxChannelSubscriber(connection, envelope.channelId);
-        if (!subscriber) {
-          sendMuxFrame(connection, buildTerminalMuxError(
-            'mux_unknown_channel',
-            `mux channel ${envelope.channelId} is not open`,
-            envelope.channelId,
-          ));
-          return;
-        }
-        await handleMessage(
-          createMuxChannelMessageConnection(connection, subscriber),
-          Buffer.from(frame.payload.dataBase64, 'base64'),
-          true,
-        );
-        return;
-      }
-      case 'mux-channel-close': {
-        const envelope = validateTerminalMuxChannelEnvelope(frame, {
-          hasChannel: (channelId) => Boolean(resolveMuxChannelSubscriber(connection, channelId)),
-        });
-        if (!envelope.ok) {
-          sendMuxFrame(connection, envelope.error);
-          return;
-        }
-        const subscriber = resolveMuxChannelSubscriber(connection, envelope.channelId);
-        if (subscriber) {
-          connection.muxChannels?.delete(envelope.channelId);
-          deps.closeSession(subscriber, frame.payload.reason || 'client requested channel close', false);
-        }
-        return;
-      }
-      case 'mux-ping':
-        sendMuxFrame(connection, {
-          type: 'mux-pong',
-          payload: {
-            sentAt: frame.payload.sentAt,
-            receivedAt: Date.now(),
-          },
-        });
-        return;
-    }
-  }
+  const muxRuntime = createTerminalMuxChannelRuntime({
+    sessions: deps.sessions,
+    sendTransportMessage: deps.sendTransportMessage,
+    createMuxChannelSubscriber: (connection, channelId) =>
+      deps.controlRuntimeDeps.createMuxChannelSubscriber(connection, channelId),
+    sanitizeSessionName: (input) => deps.controlRuntimeDeps.sanitizeSessionName(input),
+    attachTmux: (subscriber, payload) => deps.controlRuntimeDeps.attachTmux(subscriber, payload),
+    closeSession: deps.closeSession,
+    handleMessage: (connection, raw, isBinary) => handleMessage(connection, raw, isBinary),
+  });
+  const handleMuxFrame = muxRuntime.handleMuxFrame;
+  const sendMuxFrame = muxRuntime.sendMuxFrame;
 
   function normalizeReliableInputPayload(payload: unknown): TerminalReliableInputPayload | null {
     if (!payload || typeof payload !== 'object') {
@@ -470,7 +227,7 @@ export function createTerminalMessageRuntime(
       return;
     }
     if (ackSeq) {
-      const existingAck = readReliableInputAck(inputSession.id, ackSeq);
+      const existingAck = reliableInputAckCache.read(inputSession.id, ackSeq);
       if (existingAck) {
         sendInputAck(connection, {
           version: 1,
@@ -499,7 +256,7 @@ export function createTerminalMessageRuntime(
       return;
     }
     if (ackSeq) {
-      rememberReliableInputAck(inputSession.id, ackSeq, bytes);
+      reliableInputAckCache.remember(inputSession.id, ackSeq, bytes);
       sendInputAck(connection, {
         version: 1,
         seq: ackSeq,

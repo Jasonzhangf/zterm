@@ -11,7 +11,6 @@ import type {
 import type {
   BridgeClientMessage,
   BridgeServerMessage,
-  RemoteWindowStreamTargetManifest as SharedRemoteWindowStreamTargetManifest,
 } from '@zterm/shared/protocol';
 import type {
   SessionBufferState as SharedSessionBufferState,
@@ -28,37 +27,44 @@ import type {
 import { DEFAULT_BRIDGE_PORT } from './mobile-config';
 
 export { DEFAULT_BRIDGE_PORT } from './mobile-config';
+import type { Host, TerminalCell, TerminalIndexedLine } from '@zterm/shared/types';
+export type { Host, TerminalCell, TerminalIndexedLine };
+export type {
+  FileUploadCompletePayload,
+  FileUploadProgressPayload,
+  RemoteScreenshotRequestPayload,
+  RemoteScreenshotStatusPayload,
+} from '@zterm/shared/protocol';
+
+// Wire payload truth lives in @zterm/shared (Protocol freeze gate). Re-exports below keep legacy import paths working.
+export type {
+  AttachFileStartPayload,
+  FileCreateDirectoryRequestPayload,
+  FileDownloadChunkPayload,
+  FileDownloadCompletePayload,
+  FileDownloadErrorPayload,
+  FileDownloadRequestPayload,
+  FileEntry,
+  FileListErrorPayload,
+  FileListRequestPayload,
+  FileListResponsePayload,
+  FileUploadChunkPayload,
+  FileUploadEndPayload,
+  FileUploadErrorPayload,
+  FileUploadStartPayload,
+  PasteImagePayload,
+  PasteImageStartPayload,
+  RemoteScreenshotCapture,
+  RuntimeDebugLogEntry,
+  TransferDirection,
+  TransferProgress,
+} from '@zterm/shared/protocol';
+
 export type { ScheduleErrorPayload, ScheduleEventPayload, ScheduleJob, ScheduleJobDraft, ScheduleStatePayload, SessionScheduleState } from '@zterm/shared/schedule-types';
 
 // ============================================
 // Host 配置
 // ============================================
-
-export interface Host {
-  id: string;
-  createdAt: number;        // 创建时间戳
-  name: string;
-  bridgeHost: string;        // Bridge 主机地址（IP / Tailscale 域名 / ws URL）
-  bridgePort: number;        // Bridge 端口，默认取统一配置
-  daemonHostId?: string;     // daemon 稳定身份；同一 tmux daemon 不因 transport path 改变
-  sessionName: string;       // tmux session 名，留空时回退到 name
-  authToken?: string;        // daemon / websocket bridge 鉴权 token
-  relayHostId?: string;      // traversal relay daemon host identity
-  relayDeviceId?: string;    // traversal relay bound device identity
-  tailscaleHost?: string;
-  ipv6Host?: string;
-  ipv4Host?: string;
-  relayEndpointCandidates?: RelayEndpointCandidate[];
-  signalUrl?: string;
-  transportMode?: 'auto' | 'websocket' | 'webrtc';
-  authType: 'password' | 'key';
-  password?: string;         // 暂不加密存储
-  privateKey?: string;       // 暂不加密存储
-  tags: string[];            // 分组标签
-  pinned: boolean;           // 是否置顶首页
-  lastConnected?: number;    // 最后连接时间戳
-  autoCommand?: string;      // 连接后自动执行的命令
-}
 
 // ============================================
 // Session 状态
@@ -222,9 +228,6 @@ export interface Session {
   state: SessionState;
   hasUnread: boolean;        // 是否有未读输出
   customName?: string;       // 用户重命名的名称
-  buffer: SessionBufferState;
-  daemonHeadRevision?: number;
-  daemonHeadEndIndex?: number;
   reconnectAttempt?: number;
   lastError?: string;
   remoteMissing?: boolean;  // daemon confirms this tmux session no longer exists
@@ -245,19 +248,6 @@ export interface SessionDebugOverlayMetrics {
   updatedAt: number;
 }
 
-export interface TerminalCell {
-  char: number;
-  fg: number;
-  bg: number;
-  flags: number;
-  width: number; // 0=continuation, 1=single, 2=double-width lead
-}
-
-export interface TerminalIndexedLine {
-  index: number;
-  cells: TerminalCell[];
-}
-
 /**
  * Compact wire format for a single line.
  * Replaces TerminalIndexedLine on the wire to cut payload size ~95%.
@@ -268,64 +258,9 @@ export interface TerminalIndexedLine {
  *   s = optional sparse style spans [startCol, endCol, fg, bg, flags]
  *       absent or empty = all default (fg=256, bg=256, flags=0, width=1)
  */
-export interface PasteImagePayload {
-  name: string;
-  mimeType: string;
-  dataBase64: string;
-  pasteSequence?: string;
-  pasteTarget?: {
-    kind: 'remote-window';
-    streamId: string;
-    targetId: string;
-  };
-}
-
-export interface PasteImageStartPayload {
-  name: string;
-  mimeType: string;
-  byteLength: number;
-  pasteSequence?: string;
-  pasteTarget?: {
-    kind: 'remote-window';
-    streamId: string;
-    targetId: string;
-  };
-}
-
-export interface AttachFileStartPayload {
-  name: string;
-  mimeType: string;
-  byteLength: number;
-}
-
 // ============================================
 // File Transfer (Epic-007)
 // ============================================
-
-export interface FileEntry {
-  name: string;
-  type: 'file' | 'directory';
-  size: number;
-  modified: number;
-}
-
-export type TransferDirection = 'upload' | 'download';
-
-export interface TransferProgress {
-  id: string;
-  fileName: string;
-  direction: TransferDirection;
-  totalBytes: number;
-  transferredBytes: number;
-  status: 'pending' | 'transferring' | 'done' | 'error';
-  error?: string;
-}
-
-export interface FileCreateDirectoryRequestPayload {
-  requestId: string;
-  path: string;
-  name: string;
-}
 
 export interface FileCreateDirectoryCompletePayload {
   requestId: string;
@@ -336,117 +271,6 @@ export interface FileCreateDirectoryCompletePayload {
 export interface FileCreateDirectoryErrorPayload {
   requestId: string;
   error: string;
-}
-
-export interface FileListRequestPayload {
-  requestId: string;
-  path: string;
-  showHidden: boolean;
-}
-
-export interface FileListResponsePayload {
-  requestId: string;
-  path: string;
-  parentPath: string | null;
-  entries: FileEntry[];
-}
-
-export interface FileListErrorPayload {
-  requestId: string;
-  error: string;
-}
-
-export interface FileDownloadRequestPayload {
-  requestId: string;
-  remotePath: string;
-  fileName: string;
-  totalBytes: number;
-}
-
-export interface RemoteScreenshotRequestPayload {
-  requestId: string;
-  target?: {
-    kind: 'remote-window';
-    target: SharedRemoteWindowStreamTargetManifest;
-  };
-}
-
-export interface RemoteScreenshotStatusPayload {
-  requestId: string;
-  phase: 'capturing' | 'transferring';
-  fileName?: string;
-  receivedChunks?: number;
-  totalChunks?: number;
-  totalBytes?: number;
-}
-
-export interface RemoteScreenshotCapture {
-  fileName: string;
-  mimeType: 'image/png';
-  dataBase64: string;
-  dataBytes?: Uint8Array;
-  totalBytes: number;
-}
-
-export interface FileDownloadChunkPayload {
-  requestId: string;
-  chunkIndex: number;
-  totalChunks: number;
-  fileName: string;
-  dataBase64: string;
-}
-
-export interface FileDownloadCompletePayload {
-  requestId: string;
-  fileName: string;
-  totalBytes: number;
-}
-
-export interface FileDownloadErrorPayload {
-  requestId: string;
-  error: string;
-}
-
-export interface FileUploadStartPayload {
-  requestId: string;
-  targetDir: string;
-  fileName: string;
-  fileSize: number;
-  chunkCount: number;
-}
-
-export interface FileUploadChunkPayload {
-  requestId: string;
-  chunkIndex: number;
-  dataBase64: string;
-}
-
-export interface FileUploadEndPayload {
-  requestId: string;
-}
-
-export interface FileUploadProgressPayload {
-  requestId: string;
-  chunkIndex: number;
-  totalChunks: number;
-}
-
-export interface FileUploadCompletePayload {
-  requestId: string;
-  filePath: string;
-  bytes: number;
-}
-
-export interface FileUploadErrorPayload {
-  requestId: string;
-  error: string;
-}
-
-export interface RuntimeDebugLogEntry {
-  seq: number;
-  ts: string;
-  scope: string;
-  payload?: string;
 }
 
 export interface TraversalRelayUser {

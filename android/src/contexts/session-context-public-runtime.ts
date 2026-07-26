@@ -1,6 +1,5 @@
 import { buildEmptyScheduleState } from '@zterm/shared';
-import type { BridgeTransportSocket } from '../lib/traversal/types';
-import type { SessionTransportResource } from '../lib/session-transport-runtime';
+import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import type {
   ClientMessage,
   ScheduleJobDraft,
@@ -30,40 +29,19 @@ interface ScheduleStateSetter {
 interface SendMessageRuntimeOptions {
   sessionId: string;
   msg: ClientMessage;
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
-  sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
-}
-
-function readEffectiveSessionSocket(options: {
-  sessionId: string;
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
-}) {
-  return options.readSessionTransportResource?.(options.sessionId).socket
-    || options.readSessionTransportSocket(options.sessionId);
+  daemonConnection: ClientDaemonConnection;
 }
 
 export function sendMessageRuntime(options: SendMessageRuntimeOptions) {
-  const ws = readEffectiveSessionSocket(options);
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    options.sendSocketPayload(options.sessionId, ws, JSON.stringify(options.msg));
-    return true;
-  }
-  return false;
+  return options.daemonConnection.sendSessionMessage(options.sessionId, options.msg);
 }
 
 export function sendMessageRawRuntime(options: {
   sessionId: string;
   msg: unknown;
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
-  sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+  daemonConnection: ClientDaemonConnection;
 }) {
-  const ws = readEffectiveSessionSocket(options);
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    options.sendSocketPayload(options.sessionId, ws, JSON.stringify(options.msg));
-  }
+  options.daemonConnection.sendSessionRaw(options.sessionId, options.msg);
 }
 
 export function requestScheduleListRuntime(options: {
@@ -197,12 +175,12 @@ export function updateSessionViewportRuntime(options: {
   sessionVisibleRangeRef: { current: Map<string, SessionVisibleRangeState> };
   isSessionTransportActive: (sessionId: string) => boolean;
   sessions: Session[];
-  sessionBufferHeadsRef: { current: Map<string, SessionBufferHeadState> };
+  sessionHeadStoreRef: { current: { getLiveHead: (sessionId: string) => SessionBufferHeadState | null } };
   readSessionBufferSnapshot: (sessionId: string) => SessionBufferState;
   requestSessionBufferSync: (
     sessionId: string,
     requestOptions?: {
-      sessionOverride?: Session;
+      headOverride?: { daemonHeadRevision: number; daemonHeadEndIndex: number } | null;
       reason?: string;
       force?: boolean;
       purpose?: 'tail-refresh' | 'reading-repair';
@@ -238,7 +216,7 @@ export function updateSessionViewportRuntime(options: {
     return;
   }
   const session = options.sessions.find((item) => item.id === options.sessionId) || null;
-  const liveHead = options.sessionBufferHeadsRef.current.get(options.sessionId) || null;
+  const liveHead = options.sessionHeadStoreRef.current.getLiveHead(options.sessionId);
   const localBuffer = options.readSessionBufferSnapshot(options.sessionId);
   if (!session) {
     return;
@@ -249,7 +227,10 @@ export function updateSessionViewportRuntime(options: {
         endIndex: Math.min(normalized.endIndex, previous!.startIndex),
       }
     : null;
-  const shouldRepairVisibleRange = shouldPullVisibleRangeBuffer(session, normalized, liveHead, localBuffer);
+  const headView = liveHead
+    ? { daemonHeadRevision: liveHead.revision, daemonHeadEndIndex: liveHead.latestEndIndex }
+    : { daemonHeadRevision: 0, daemonHeadEndIndex: 0 };
+  const shouldRepairVisibleRange = shouldPullVisibleRangeBuffer(headView, normalized, liveHead, localBuffer);
   if (
     (
       !shouldRepairVisibleRange
@@ -262,7 +243,7 @@ export function updateSessionViewportRuntime(options: {
   options.requestSessionBufferSync(options.sessionId, {
     reason: 'viewport-visible-range-demand',
     purpose: 'reading-repair',
-    sessionOverride: session,
+    headOverride: headView,
     requestWindowOverride: expandedFollowRepairRange
       ? {
           requestStartIndex: normalized.startIndex,
@@ -285,31 +266,15 @@ export function updateSessionViewportRuntime(options: {
 export function getActiveSessionRuntime(options: {
   sessions: Session[];
   activeSessionId: string | null;
-  readSessionBufferSnapshot: (sessionId: string) => SessionBufferState;
 }): Session | null {
-  const activeSession = options.sessions.find((session) => session.id === options.activeSessionId) || null;
-  if (!activeSession) {
-    return null;
-  }
-  return {
-    ...activeSession,
-    buffer: options.readSessionBufferSnapshot(activeSession.id),
-  };
+  return options.sessions.find((session) => session.id === options.activeSessionId) || null;
 }
 
 export function getSessionRuntime(options: {
   sessions: Session[];
   sessionId: string;
-  readSessionBufferSnapshot: (sessionId: string) => SessionBufferState;
 }): Session | null {
-  const session = options.sessions.find((item) => item.id === options.sessionId) || null;
-  if (!session) {
-    return null;
-  }
-  return {
-    ...session,
-    buffer: options.readSessionBufferSnapshot(session.id),
-  };
+  return options.sessions.find((item) => item.id === options.sessionId) || null;
 }
 
 export function getSessionScheduleStateRuntime(options: {

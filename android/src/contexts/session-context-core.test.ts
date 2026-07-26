@@ -1,5 +1,4 @@
 import { describe, expect, it } from 'vitest';
-import { createSessionBufferState } from '../lib/terminal-buffer';
 import type { Session } from '../lib/types';
 import { initialSessionManagerState, reduceSessionAction, type SessionManagerState } from './session-context-core';
 
@@ -15,11 +14,6 @@ function buildSession(id: string): Session {
     ws: null,
     state: 'connected',
     hasUnread: false,
-    buffer: createSessionBufferState({
-      cols: 80,
-      rows: 24,
-      cacheLines: 1000,
-    }),
     createdAt: 1,
   };
 }

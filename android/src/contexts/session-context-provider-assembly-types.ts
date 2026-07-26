@@ -1,6 +1,7 @@
 import type { Host } from "../lib/types";
 import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type { BridgeSettings } from '../lib/bridge-settings';
+import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import type { SessionScheduleState } from '../lib/types';
 import type {
   SessionAction,
@@ -82,4 +83,5 @@ export interface SessionProviderCoreAssembliesResult {
     options?: { force?: boolean; trackProbe?: boolean },
   ) => boolean;
   resolveTerminalRefreshCadence: (sessionId?: string | null) => { headTickMs: number; headStalePingMs: number; pullRequestStaleMs: number };
+  daemonConnection: ClientDaemonConnection;
 }

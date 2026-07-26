@@ -1,4 +1,4 @@
-import type { Session, SessionRenderBufferSnapshot } from "../lib/types";
+import type { SessionRenderBufferSnapshot } from "../lib/types";
 import type { SessionRenderBufferStore } from "../lib/session-render-buffer-store";
 import { DeviceClipboardPlugin, isNativeClipboardSupported } from "../plugins/DeviceClipboardPlugin";
 
@@ -68,7 +68,6 @@ export function terminalBufferCoversRows(
 
 export function resolveCopySelectionBuffer(
   sessionBufferStore: SessionRenderBufferStore | null | undefined,
-  sessions: Session[],
   sessionId: string,
   startRowIndex: number,
   endRowIndex: number,
@@ -79,14 +78,6 @@ export function resolveCopySelectionBuffer(
     terminalBufferCoversRows(renderBuffer, startRowIndex, endRowIndex)
   ) {
     return renderBuffer;
-  }
-  const sessionBuffer = sessions.find((session) => session.id === sessionId)
-    ?.buffer as SessionRenderBufferSnapshot | undefined;
-  if (
-    sessionBuffer &&
-    terminalBufferCoversRows(sessionBuffer, startRowIndex, endRowIndex)
-  ) {
-    return sessionBuffer;
   }
   return null;
 }
@@ -113,14 +104,12 @@ export function logAsyncCleanupFailure(scope: string, error: unknown) {
  */
 export function resolveCopySelectionBufferOrWarn(
   sessionBufferStore: SessionRenderBufferStore | null | undefined,
-  sessions: Session[],
   sessionId: string,
   startRowIndex: number,
   endRowIndex: number,
 ): SessionRenderBufferSnapshot | null {
   const buffer = resolveCopySelectionBuffer(
     sessionBufferStore,
-    sessions,
     sessionId,
     startRowIndex,
     endRowIndex,

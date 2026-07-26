@@ -49,15 +49,17 @@ import {
 } from './session-context-public-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionBufferHeadState } from './session-buffer-planner-helpers';
+import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 
 export function createSessionPublicFacadeRuntime(options: {
   stateRef: { current: SessionManagerState };
   scheduleStatesRef: { current: Record<string, SessionScheduleState> };
   sessionVisibleRangeRef: { current: Map<string, any> };
-  sessionBufferHeadsRef: { current: Map<string, SessionBufferHeadState> };
+  sessionHeadStoreRef: { current: { getLiveHead: (sessionId: string) => SessionBufferHeadState | null } };
   readSessionTransportResource: (sessionId: string) => SessionTransportResource;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+  daemonConnection: ClientDaemonConnection;
   tmuxTargetRequestsRef: { current: SessionTmuxTargetRequestStore };
   setScheduleStateForSession: (
     sessionId: string,
@@ -67,7 +69,7 @@ export function createSessionPublicFacadeRuntime(options: {
   requestSessionBufferSync: (
     sessionId: string,
     requestOptions?: {
-      sessionOverride?: Session;
+      headOverride?: { daemonHeadRevision: number; daemonHeadEndIndex: number } | null;
       reason?: string;
       force?: boolean;
       purpose?: 'tail-refresh' | 'reading-repair';
@@ -96,13 +98,13 @@ export function createSessionPublicFacadeRuntime(options: {
   };
   runtimeDebug?: (event: string, payload?: Record<string, unknown>) => void;
 }) {
+  const daemonConnection = options.daemonConnection;
+
   const sendMessage = (sessionId: string, msg: ClientMessage) => {
     return sendMessageRuntime({
       sessionId,
       msg,
-      readSessionTransportResource: options.readSessionTransportResource,
-      readSessionTransportSocket: options.readSessionTransportSocket,
-      sendSocketPayload: options.sendSocketPayload,
+      daemonConnection,
     });
   };
 
@@ -123,6 +125,7 @@ export function createSessionPublicFacadeRuntime(options: {
     message,
     pendingRequestsRef: options.tmuxTargetRequestsRef,
     readSessionTransportResource: options.readSessionTransportResource,
+    daemonConnection,
     sendSocketPayload: options.sendSocketPayload,
     runtimeDebug: options.runtimeDebug,
   });
@@ -208,7 +211,7 @@ export function createSessionPublicFacadeRuntime(options: {
       sessionVisibleRangeRef: options.sessionVisibleRangeRef,
       isSessionTransportActive: options.isSessionTransportActive,
       sessions: options.stateRef.current.sessions,
-      sessionBufferHeadsRef: options.sessionBufferHeadsRef,
+      sessionHeadStoreRef: options.sessionHeadStoreRef,
       readSessionBufferSnapshot: options.readSessionBufferSnapshot,
       requestSessionBufferSync: options.requestSessionBufferSync,
       triggerRepair: !('mode' in visibleRange) || visibleRange.mode !== 'follow' || Boolean(declaredMissingRanges?.length),
@@ -220,7 +223,6 @@ export function createSessionPublicFacadeRuntime(options: {
     return getActiveSessionRuntime({
       sessions: options.stateRef.current.sessions,
       activeSessionId: options.stateRef.current.activeSessionId,
-      readSessionBufferSnapshot: options.readSessionBufferSnapshot,
     });
   };
 
@@ -228,7 +230,6 @@ export function createSessionPublicFacadeRuntime(options: {
     return getSessionRuntime({
       sessions: options.stateRef.current.sessions,
       sessionId,
-      readSessionBufferSnapshot: options.readSessionBufferSnapshot,
     });
   };
 
@@ -256,9 +257,7 @@ export function createSessionPublicFacadeRuntime(options: {
     sendMessageRawRuntime({
       sessionId,
       msg,
-      readSessionTransportResource: options.readSessionTransportResource,
-      readSessionTransportSocket: options.readSessionTransportSocket,
-      sendSocketPayload: options.sendSocketPayload,
+      daemonConnection,
     });
   };
 

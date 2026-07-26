@@ -29,16 +29,13 @@ describe("terminal-copy-selection", () => {
     const store = {
       getSnapshot: () => ({ buffer }),
     } as any;
-    const sessions = [{ id: "s1", buffer: null } as any];
-    expect(resolveCopySelectionBuffer(store, sessions, "s1", 10, 11)).toBe(buffer);
+    expect(resolveCopySelectionBuffer(store, "s1", 10, 11)).toBe(buffer);
   });
 
-  it("falls back to session buffer when render store does not cover rows", () => {
-    const sessionBuffer = { ...buffer, startIndex: 20 } as any;
+  it("returns null when render store does not cover rows (no session.buffer fallback)", () => {
     const store = {
       getSnapshot: () => ({ buffer: null }),
     } as any;
-    const sessions = [{ id: "s1", buffer: sessionBuffer } as any];
-    expect(resolveCopySelectionBuffer(store, sessions, "s1", 20, 21)).toBe(sessionBuffer);
+    expect(resolveCopySelectionBuffer(store, "s1", 20, 21)).toBeNull();
   });
 });

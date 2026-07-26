@@ -1,6 +1,10 @@
 import { runtimeDebug } from '../lib/runtime-debug';
 import type { MutableRefObject } from 'react';
 import type { TerminalBufferPayload } from '../lib/types';
+import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
+import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
+import type { SessionReconnectStore } from '../lib/session-reconnect-store';
+import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import {
   applyIncomingBufferSyncRuntime,
   handleBufferHeadRuntime,
@@ -45,28 +49,24 @@ export interface SessionMessageAssembliesOptions {
   stateRef: MutableRefObject<any>;
   scheduleStatesRef: MutableRefObject<any>;
   sessionVisibleRangeRef: MutableRefObject<any>;
-  sessionBufferHeadsRef: MutableRefObject<any>;
   sessionPullStateRef: MutableRefObject<any>;
   sessionRevisionResetRef: MutableRefObject<any>;
   sessionBufferStoreRef: MutableRefObject<any>;
   sessionHeadStoreRef: MutableRefObject<any>;
   sessionDebugMetricsStoreRef: MutableRefObject<any>;
-  lastSyncRequestAtRef: MutableRefObject<any>;
+  tailRefreshStore: SessionTailRefreshStore;
   lastHeadRequestAtRef: MutableRefObject<any>;
-  staleTransportProbeAtRef: MutableRefObject<any>;
-  lastPongAtRef: MutableRefObject<any>;
+  reconnectStore: SessionReconnectStore;
+  heartbeatStore: SessionHeartbeatStore;
   lastConnectedBaselineAtRef: MutableRefObject<any>;
   connectedBaselineBurstGuardRef: MutableRefObject<any>;
-  pendingInputTailRefreshRef: MutableRefObject<any>;
-  pendingConnectTailRefreshRef: MutableRefObject<any>;
-  pendingResumeTailRefreshRef: MutableRefObject<any>;
   sameRevisionChunkFrameRef?: MutableRefObject<any>;
   pendingSessionTransportOpenIntentsRef: MutableRefObject<any>;
-  manualCloseRef: MutableRefObject<any>;
   fileTransferMessageRuntimeRef: MutableRefObject<any>;
   remoteWindowMessageRuntimeRef: MutableRefObject<any>;
   readSessionTransportSocket: (sessionId: string) => any;
   readSessionTransportResource?: (sessionId: string) => any;
+  daemonConnection: ClientDaemonConnection;
   readSessionBufferSnapshot: (sessionId: string) => any;
   sendSocketPayload: (sessionId: string, ws: any, data: string | ArrayBuffer) => void;
   clearSessionPullState: (sessionId: string) => void;
@@ -105,6 +105,9 @@ export interface SessionMessageAssembliesResult {
 export function createSessionMessageAssemblies(
   options: SessionMessageAssembliesOptions,
 ): SessionMessageAssembliesResult {
+  const daemonConnection = options.daemonConnection;
+  const tailRefreshStoreRef = { current: options.tailRefreshStore };
+
   const commitSessionBufferUpdate = (sessionId: string, nextBuffer: any) => {
     return options.sessionBufferStoreRef.current.commitBuffer(sessionId, nextBuffer);
   };
@@ -124,13 +127,11 @@ export function createSessionMessageAssemblies(
     refs: {
       stateRef: options.stateRef,
       sessionVisibleRangeRef: options.sessionVisibleRangeRef,
-      sessionBufferHeadsRef: options.sessionBufferHeadsRef,
+      sessionHeadStoreRef: options.sessionHeadStoreRef,
       sessionPullStateRef: options.sessionPullStateRef,
-      lastSyncRequestAtRef: options.lastSyncRequestAtRef,
-      pendingInputTailRefreshRef: options.pendingInputTailRefreshRef,
-      pendingConnectTailRefreshRef: options.pendingConnectTailRefreshRef,
-      pendingResumeTailRefreshRef: options.pendingResumeTailRefreshRef,
+      tailRefreshStoreRef,
     },
+    daemonConnection,
     readSessionTransportSocket: options.readSessionTransportSocket,
     readSessionTransportResource: options.readSessionTransportResource,
     readSessionBufferSnapshot: options.readSessionBufferSnapshot,
@@ -152,9 +153,10 @@ export function createSessionMessageAssemblies(
     refs: {
       stateRef: options.stateRef,
       lastHeadRequestAtRef: options.lastHeadRequestAtRef,
-      staleTransportProbeAtRef: options.staleTransportProbeAtRef,
+      reconnectStore: options.reconnectStore,
       sessionDebugMetricsStoreRef: options.sessionDebugMetricsStoreRef,
     },
+    daemonConnection,
     readSessionTransportSocket: options.readSessionTransportSocket,
     readSessionTransportResource: options.readSessionTransportResource,
     sendSocketPayload: options.sendSocketPayload,
@@ -180,14 +182,14 @@ export function createSessionMessageAssemblies(
       cursorKeysApp,
       refs: {
         stateRef: options.stateRef,
-        sessionBufferHeadsRef: options.sessionBufferHeadsRef,
         lastHeadRequestAtRef: options.lastHeadRequestAtRef,
-        lastSyncRequestAtRef: options.lastSyncRequestAtRef,
+        tailRefreshStoreRef,
         sessionRevisionResetRef: options.sessionRevisionResetRef,
         sessionVisibleRangeRef: options.sessionVisibleRangeRef,
         sessionBufferStoreRef: options.sessionBufferStoreRef,
         sessionHeadStoreRef: options.sessionHeadStoreRef,
       },
+      daemonConnection,
       readSessionTransportSocket: options.readSessionTransportSocket,
       readSessionTransportResource: options.readSessionTransportResource,
       readSessionBufferSnapshot: options.readSessionBufferSnapshot,
@@ -207,11 +209,8 @@ export function createSessionMessageAssemblies(
       refs: {
         stateRef: options.stateRef,
         sessionRevisionResetRef: options.sessionRevisionResetRef,
-        sessionBufferHeadsRef: options.sessionBufferHeadsRef,
-        pendingInputTailRefreshRef: options.pendingInputTailRefreshRef,
-        pendingConnectTailRefreshRef: options.pendingConnectTailRefreshRef,
-        pendingResumeTailRefreshRef: options.pendingResumeTailRefreshRef,
-        lastSyncRequestAtRef: options.lastSyncRequestAtRef,
+        sessionHeadStoreRef: options.sessionHeadStoreRef,
+        tailRefreshStoreRef,
         sameRevisionChunkFrameRef: options.sameRevisionChunkFrameRef,
         sessionVisibleRangeRef: options.sessionVisibleRangeRef,
       },
@@ -244,7 +243,7 @@ export function createSessionMessageAssemblies(
         stateRef: options.stateRef,
         scheduleStatesRef: options.scheduleStatesRef,
         lastHeadRequestAtRef: options.lastHeadRequestAtRef,
-        lastPongAtRef: options.lastPongAtRef,
+        heartbeatStore: options.heartbeatStore,
       },
       settleSessionPullState: options.settleSessionPullState,
       runtimeDebug,
@@ -272,7 +271,7 @@ export function createSessionMessageAssemblies(
       ws: connectedOptions.ws,
       refs: {
         stateRef: options.stateRef,
-        pendingConnectTailRefreshRef: options.pendingConnectTailRefreshRef,
+        tailRefreshStore: options.tailRefreshStore,
         lastConnectedBaselineAtRef: options.lastConnectedBaselineAtRef,
         connectedBaselineBurstGuardRef: options.connectedBaselineBurstGuardRef,
       },
@@ -298,7 +297,7 @@ export function createSessionMessageAssemblies(
       markCompleted: baselineOptions.markCompleted,
       refs: {
         pendingSessionTransportOpenIntentsRef: options.pendingSessionTransportOpenIntentsRef,
-        manualCloseRef: options.manualCloseRef,
+        reconnectStore: options.reconnectStore,
       },
       cleanupSocket: options.cleanupSocket,
       writeSessionTransportToken: options.writeSessionTransportToken,

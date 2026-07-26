@@ -11,6 +11,8 @@ import {
   shouldSchedulePassiveVisibleTickRefresh,
   useSessionContextLifecycle,
 } from './session-context-lifecycle';
+import { createSessionHeartbeatStore } from '../lib/session-heartbeat-store';
+import { createSessionReconnectStore } from '../lib/session-reconnect-store';
 
 describe('session-context-lifecycle', () => {
   afterEach(() => {
@@ -45,10 +47,9 @@ describe('session-context-lifecycle', () => {
   });
 
   it('schedules active tick only for non-connected or stale-silent sessions', () => {
-    const lastServerActivityAtRef = { current: new Map<string, number>([
-      ['connected-fresh', 9_900],
-      ['connected-stale', 9_700],
-    ]) };
+    const heartbeatStore = createSessionHeartbeatStore();
+    heartbeatStore.recordTerminalActivity('connected-fresh', 9_900);
+    heartbeatStore.recordTerminalActivity('connected-stale', 9_700);
     const state = {
       sessions: [
         { id: 'connected-fresh', state: 'connected' },
@@ -60,7 +61,7 @@ describe('session-context-lifecycle', () => {
     expect(shouldScheduleActiveTickRefresh({
       state,
       sessionId: 'connected-fresh',
-      lastServerActivityAtRef,
+      heartbeatStore,
       headStalePingMs: 200,
       now: 10_000,
     })).toBe(false);
@@ -68,7 +69,7 @@ describe('session-context-lifecycle', () => {
     expect(shouldScheduleActiveTickRefresh({
       state,
       sessionId: 'connected-stale',
-      lastServerActivityAtRef,
+      heartbeatStore,
       headStalePingMs: 200,
       now: 10_000,
     })).toBe(true);
@@ -76,7 +77,7 @@ describe('session-context-lifecycle', () => {
     expect(shouldScheduleActiveTickRefresh({
       state,
       sessionId: 'connecting',
-      lastServerActivityAtRef,
+      heartbeatStore,
       headStalePingMs: 200,
       now: 10_000,
     })).toBe(true);
@@ -88,18 +89,14 @@ describe('session-context-lifecycle', () => {
       activeSessionId: 'session-1',
       liveSessionIds: ['session-1'],
     } as any;
-    const lastServerActivityAtRef = { current: new Map<string, number>([
-      ['session-1', 9_950],
-    ]) };
-    const lastTerminalActivityAtRef = { current: new Map<string, number>([
-      ['session-1', 9_000],
-    ]) };
+    const heartbeatStore = createSessionHeartbeatStore();
+    heartbeatStore.recordServerActivity('session-1', 9_950);
+    heartbeatStore.recordTerminalActivity('session-1', 9_000);
 
     expect(shouldScheduleActiveTickRefresh({
       state,
       sessionId: 'session-1',
-      lastServerActivityAtRef,
-      lastTerminalActivityAtRef,
+      heartbeatStore,
       headStalePingMs: 200,
       now: 10_000,
     } as any)).toBe(true);
@@ -111,10 +108,8 @@ describe('session-context-lifecycle', () => {
       activeSessionId: 'session-1',
       liveSessionIds: ['session-1'],
     } as any;
-    const lastServerActivityAtRef = { current: new Map<string, number>([
-      ['session-1', 9_990],
-    ]) };
-    const lastTerminalActivityAtRef = { current: new Map<string, number>() };
+    const heartbeatStore = createSessionHeartbeatStore();
+    heartbeatStore.recordServerActivity('session-1', 9_990);
     const lastConnectedBaselineAtRef = { current: new Map<string, number>([
       ['session-1', 9_900],
     ]) };
@@ -122,8 +117,7 @@ describe('session-context-lifecycle', () => {
     expect(shouldScheduleActiveTickRefresh({
       state,
       sessionId: 'session-1',
-      lastServerActivityAtRef,
-      lastTerminalActivityAtRef,
+      heartbeatStore,
       lastConnectedBaselineAtRef,
       headStalePingMs: 200,
       now: 10_000,
@@ -132,8 +126,7 @@ describe('session-context-lifecycle', () => {
     expect(shouldScheduleActiveTickRefresh({
       state,
       sessionId: 'session-1',
-      lastServerActivityAtRef,
-      lastTerminalActivityAtRef,
+      heartbeatStore,
       lastConnectedBaselineAtRef,
       headStalePingMs: 200,
       now: 10_101,
@@ -153,7 +146,7 @@ describe('session-context-lifecycle', () => {
     expect(shouldSchedulePassiveVisibleTickRefresh({
       state,
       sessionId: 'passive-pane',
-      lastServerActivityAtRef: { current: new Map() },
+      heartbeatStore: createSessionHeartbeatStore(),
       headStalePingMs: 200,
       now: 10_000,
     })).toBe(true);
@@ -172,7 +165,7 @@ describe('session-context-lifecycle', () => {
     expect(shouldScheduleActiveTickRefresh({
       state,
       sessionId: 'passive-pane',
-      lastServerActivityAtRef: { current: new Map() },
+      heartbeatStore: createSessionHeartbeatStore(),
       headStalePingMs: 200,
       now: 10_000,
     })).toBe(false);
@@ -180,7 +173,7 @@ describe('session-context-lifecycle', () => {
     expect(shouldSchedulePassiveVisibleTickRefresh({
       state,
       sessionId: 'passive-pane',
-      lastServerActivityAtRef: { current: new Map() },
+      heartbeatStore: createSessionHeartbeatStore(),
       headStalePingMs: 200,
       now: 10_000,
     })).toBe(true);
@@ -227,18 +220,16 @@ describe('session-context-lifecycle', () => {
           },
           scheduleStatesRef: { current: {} },
           sessionDebugMetricsStoreRef: { current: { refresh: () => ({}) } },
-          transportRuntimeStoreRef: { current: { sessions: new Map() } },
+          transportRuntimeStoreRef: { current: { targets: new Map(), sessions: new Map() } },
           sessionPullStateRef: { current: new Map() },
           lastActivatedSessionIdRef: { current: 's1' },
           lastActiveReentryAtRef: { current: new Map() },
           lastConnectedBaselineAtRef: { current: new Map() },
-          lastServerActivityAtRef: { current: new Map() },
+          heartbeatStore: createSessionHeartbeatStore(),
           remoteScreenshotRuntimeRef: { current: { dispose: () => undefined } },
           remoteWindowMessageRuntimeRef: { current: { dispose: () => undefined } },
-          pingIntervalsRef: { current: new Map() },
           handshakeTimeoutsRef: { current: new Map() },
-          reconnectRuntimesRef: { current: new Map() },
-          manualCloseRef: { current: new Set() },
+          reconnectStore: createSessionReconnectStore(),
         },
         flushRuntimeDebugLogs: () => undefined,
         clientRuntimeDebugFlushIntervalMs: 10_000,
@@ -302,18 +293,16 @@ describe('session-context-lifecycle', () => {
           },
           scheduleStatesRef: { current: {} },
           sessionDebugMetricsStoreRef: { current: { refresh: () => ({}) } },
-          transportRuntimeStoreRef: { current: { sessions: new Map() } },
+          transportRuntimeStoreRef: { current: { targets: new Map(), sessions: new Map() } },
           sessionPullStateRef: { current: new Map() },
           lastActivatedSessionIdRef: { current: 's1' },
           lastActiveReentryAtRef: { current: new Map() },
           lastConnectedBaselineAtRef: { current: new Map() },
-          lastServerActivityAtRef: { current: new Map() },
+          heartbeatStore: createSessionHeartbeatStore(),
           remoteScreenshotRuntimeRef: { current: { dispose: () => undefined } },
           remoteWindowMessageRuntimeRef: { current: { dispose: () => undefined } },
-          pingIntervalsRef: { current: new Map() },
           handshakeTimeoutsRef: { current: new Map() },
-          reconnectRuntimesRef: { current: new Map() },
-          manualCloseRef: { current: new Set() },
+          reconnectStore: createSessionReconnectStore(),
         },
         flushRuntimeDebugLogs: () => undefined,
         clientRuntimeDebugFlushIntervalMs: 10_000,
@@ -366,18 +355,16 @@ describe('session-context-lifecycle', () => {
       },
       scheduleStatesRef: { current: {} },
       sessionDebugMetricsStoreRef: { current: { refresh: () => ({}) } },
-      transportRuntimeStoreRef: { current: { sessions: new Map() } },
+      transportRuntimeStoreRef: { current: { targets: new Map(), sessions: new Map() } },
       sessionPullStateRef: { current: new Map() },
       lastActivatedSessionIdRef: { current: 's1' },
       lastActiveReentryAtRef: { current: new Map() },
       lastConnectedBaselineAtRef: { current: new Map() },
-      lastServerActivityAtRef: { current: new Map() },
+      heartbeatStore: createSessionHeartbeatStore(),
       remoteScreenshotRuntimeRef: { current: { dispose: () => undefined } },
       remoteWindowMessageRuntimeRef: { current: { dispose: () => undefined } },
-      pingIntervalsRef: { current: new Map() },
       handshakeTimeoutsRef: { current: new Map() },
-      reconnectRuntimesRef: { current: new Map() },
-      manualCloseRef: { current: new Set<string>() },
+      reconnectStore: createSessionReconnectStore(),
     };
 
     function Harness({ activeSessionId }: { activeSessionId: string }) {
@@ -447,18 +434,16 @@ describe('session-context-lifecycle', () => {
           },
           scheduleStatesRef: { current: {} },
           sessionDebugMetricsStoreRef: { current: { refresh: () => ({}) } },
-          transportRuntimeStoreRef: { current: { sessions: new Map() } },
+          transportRuntimeStoreRef: { current: { targets: new Map(), sessions: new Map() } },
           sessionPullStateRef: { current: new Map() },
           lastActivatedSessionIdRef: { current: 's1' },
           lastActiveReentryAtRef: { current: new Map() },
           lastConnectedBaselineAtRef: { current: new Map() },
-          lastServerActivityAtRef: { current: new Map() },
+          heartbeatStore: createSessionHeartbeatStore(),
           remoteScreenshotRuntimeRef: { current: { dispose: () => undefined } },
           remoteWindowMessageRuntimeRef: { current: { dispose: () => undefined } },
-          pingIntervalsRef: { current: new Map() },
           handshakeTimeoutsRef: { current: new Map() },
-          reconnectRuntimesRef: { current: new Map() },
-          manualCloseRef: { current: new Set() },
+          reconnectStore: createSessionReconnectStore(),
         },
         flushRuntimeDebugLogs: () => undefined,
         clientRuntimeDebugFlushIntervalMs: 10_000,

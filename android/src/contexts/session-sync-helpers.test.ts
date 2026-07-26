@@ -49,7 +49,13 @@ import {
 } from './session-pull-state-helpers';
 import { buildBufferSyncRepairSignature } from '@zterm/shared/terminal/pull-state-planner';
 
-function makeSession(overrides?: Partial<Session>): Session {
+type TestSession = Session & {
+  buffer: import('../lib/types').SessionBufferState;
+  daemonHeadRevision: number;
+  daemonHeadEndIndex: number;
+};
+
+function makeSession(overrides?: Partial<TestSession>): TestSession {
   return {
     id: 'session-1',
     hostId: 'host-1',
@@ -646,15 +652,17 @@ describe('session sync helper session connection config truth', () => {
   });
 
   it('detects whether a session already has a local buffer window', () => {
-    expect(hasSessionLocalWindow(makeSession())).toBe(true);
-    expect(hasSessionLocalWindow(makeSession({
+    const windowSession = makeSession();
+    expect(hasSessionLocalWindow(windowSession.buffer)).toBe(true);
+    const emptyWindowSession = makeSession({
       buffer: {
         ...makeSession().buffer,
         startIndex: 10,
         endIndex: 10,
         revision: 0,
       },
-    }))).toBe(false);
+    });
+    expect(hasSessionLocalWindow(emptyWindowSession.buffer)).toBe(false);
     expect(hasSessionLocalWindow(null)).toBe(false);
   });
 
@@ -938,7 +946,7 @@ describe('session sync helper visible-range truth', () => {
 
   it('builds default visible range from session tail truth', () => {
     const session = makeSession();
-    expect(buildDefaultSessionVisibleRange(session)).toEqual({
+    expect(buildDefaultSessionVisibleRange(session, undefined, session.buffer)).toEqual({
       startIndex: 96,
       endIndex: 120,
       viewportRows: 24,
@@ -959,7 +967,7 @@ describe('session sync helper visible-range truth', () => {
       startIndex: 56,
       endIndex: 80,
       viewportRows: 24,
-    })).toBe(true);
+    }, null, session.buffer)).toBe(true);
   });
 
   it('does not request visible-range repair for hidden history outside the declared visible range', () => {
@@ -975,7 +983,7 @@ describe('session sync helper visible-range truth', () => {
       startIndex: 56,
       endIndex: 80,
       viewportRows: 24,
-    })).toBe(false);
+    }, null, session.buffer)).toBe(false);
   });
 
   it('keeps tail refresh independent from visible-range repair mode', () => {
@@ -993,7 +1001,7 @@ describe('session sync helper visible-range truth', () => {
       startIndex: 96,
       endIndex: 120,
       viewportRows: 24,
-    })).toBe(true);
+    }, session.buffer)).toBe(true);
   });
 
   it('re-fetches the visible follow window when daemon revision advances without tail growth', () => {
@@ -1009,6 +1017,7 @@ describe('session sync helper visible-range truth', () => {
     });
     expect(buildSessionBufferSyncRequestPayload(
       session,
+      session.buffer,
       {
         startIndex: 96,
         endIndex: 120,
@@ -1037,6 +1046,7 @@ describe('session sync helper visible-range truth', () => {
     });
     expect(buildSessionBufferSyncRequestPayload(
       session,
+      session.buffer,
       { startIndex: 56, endIndex: 80, viewportRows: 24 },
       { purpose: 'reading-repair' },
     )).toMatchObject({
@@ -1065,6 +1075,7 @@ describe('session sync helper visible-range truth', () => {
     });
     expect(buildSessionBufferSyncRequestPayload(
       session,
+      session.buffer,
       { startIndex: 56, endIndex: 80, viewportRows: 24 },
       { purpose: 'tail-refresh' },
     )).toMatchObject({
@@ -1090,6 +1101,7 @@ describe('session sync helper visible-range truth', () => {
     });
     expect(buildSessionBufferSyncRequestPayload(
       session,
+      session.buffer,
       { startIndex: 56, endIndex: 80, viewportRows: 24 },
       { purpose: 'tail-refresh', forceSameEndRefresh: true },
     )).toMatchObject({
@@ -1115,6 +1127,7 @@ describe('session sync helper visible-range truth', () => {
     });
     expect(buildSessionBufferSyncRequestPayload(
       session,
+      session.buffer,
       { startIndex: 136454, endIndex: 136539, viewportRows: 30 },
       {
         purpose: 'tail-refresh',

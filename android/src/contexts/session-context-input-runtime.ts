@@ -1,6 +1,7 @@
 import type { Session, TerminalInputAckPayload, TerminalReliableInputPayload } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionTransportResource } from '../lib/session-transport-runtime';
+import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import {
   TERMINAL_INPUT_CHUNK_BYTES,
   getTerminalInputUtf8ByteLength,
@@ -26,8 +27,7 @@ interface SendInputTransportOptions {
     stateRef: { current: { activeSessionId: string | null } };
   };
   runtimeDebug: RuntimeDebugFn;
-  readSessionTransportResource: (sessionId: string) => SessionTransportResource;
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  daemonConnection: ClientDaemonConnection;
   isReconnectInFlight: (sessionId: string) => boolean;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   markPendingInputTailRefresh: (sessionId: string, localRevision: number) => boolean;
@@ -63,10 +63,21 @@ const reliableInputQueues = new Map<string, ReliableInputSessionQueue>();
 let reliableInputSequence = 0;
 
 const pendingInputHeadRefreshes = new Map<string, {
-  readSessionTransportResource: (sessionId: string) => SessionTransportResource;
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  daemonConnection: ClientDaemonConnection;
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
 }>();
+
+function readDaemonConnectionSessionResource(options: {
+  daemonConnection: ClientDaemonConnection;
+}, sessionId: string) {
+  return options.daemonConnection.readSessionResource(sessionId);
+}
+
+function readDaemonConnectionSessionSocket(options: {
+  daemonConnection: ClientDaemonConnection;
+}, sessionId: string) {
+  return options.daemonConnection.readSessionSocket(sessionId);
+}
 
 function isSessionMessageTransportReady(
   resource: SessionTransportResource,
@@ -83,14 +94,12 @@ function readSocketReadyState(ws: BridgeTransportSocket | null) {
 
 function scheduleInputHeadRefresh(options: {
   sessionId: string;
-  readSessionTransportResource: (sessionId: string) => SessionTransportResource;
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  daemonConnection: ClientDaemonConnection;
   requestSessionBufferHead: (sessionId: string, ws?: BridgeTransportSocket | null, options?: { force?: boolean }) => boolean;
 }) {
   const alreadyPending = pendingInputHeadRefreshes.has(options.sessionId);
   pendingInputHeadRefreshes.set(options.sessionId, {
-    readSessionTransportResource: options.readSessionTransportResource,
-    readSessionTransportSocket: options.readSessionTransportSocket,
+    daemonConnection: options.daemonConnection,
     requestSessionBufferHead: options.requestSessionBufferHead,
   });
   if (alreadyPending) {
@@ -102,8 +111,7 @@ function scheduleInputHeadRefresh(options: {
     if (!pending) {
       return;
     }
-    const currentResource = pending.readSessionTransportResource(options.sessionId);
-    const currentWs = currentResource.socket || pending.readSessionTransportSocket(options.sessionId);
+    const currentWs = readDaemonConnectionSessionSocket(pending, options.sessionId);
     pending.requestSessionBufferHead(
       options.sessionId,
       currentWs,
@@ -178,8 +186,7 @@ function sendReliableInputFrame(
     if (isFirstPendingInputTailRefresh) {
       scheduleInputHeadRefresh({
         sessionId: queue.sessionId,
-        readSessionTransportResource: queue.options.readSessionTransportResource,
-        readSessionTransportSocket: queue.options.readSessionTransportSocket,
+        daemonConnection: queue.options.daemonConnection,
         requestSessionBufferHead: queue.options.requestSessionBufferHead,
       });
     }
@@ -216,8 +223,8 @@ function flushReliableInputQueue(sessionId: string) {
     return;
   }
 
-  const resource = queue.options.readSessionTransportResource(sessionId);
-  const ws = resource.socket || queue.options.readSessionTransportSocket(sessionId);
+  const resource = readDaemonConnectionSessionResource(queue.options, sessionId);
+  const ws = readDaemonConnectionSessionSocket(queue.options, sessionId);
   const wsReadyState = readSocketReadyState(ws);
   const reconnectInFlight = queue.options.isReconnectInFlight(sessionId);
   if (!isSessionMessageTransportReady(resource, ws)) {
@@ -366,8 +373,8 @@ export function sendInputThroughSessionTransport(options: SendInputTransportOpti
     return;
   }
 
-  const resource = options.readSessionTransportResource(targetSessionId);
-  const ws = resource.socket;
+  const resource = readDaemonConnectionSessionResource(options, targetSessionId);
+  const ws = readDaemonConnectionSessionSocket(options, targetSessionId);
   const wsReadyState = readSocketReadyState(ws);
   const runtimeActiveSessionId = options.refs.stateRef.current.activeSessionId;
   const isActiveTarget = runtimeActiveSessionId === targetSessionId;
@@ -445,8 +452,7 @@ export function sendInputThroughSessionTransport(options: SendInputTransportOpti
     if (isFirstPendingInputTailRefresh) {
       scheduleInputHeadRefresh({
         sessionId: targetSessionId,
-        readSessionTransportResource: options.readSessionTransportResource,
-        readSessionTransportSocket: options.readSessionTransportSocket,
+        daemonConnection: options.daemonConnection,
         requestSessionBufferHead: options.requestSessionBufferHead,
       });
     }
@@ -499,11 +505,11 @@ export async function ensureSessionReadyForTransfer(options: {
   sessionId: string;
   timeoutMs: number;
   sessionsRef: MutableRefObject<Session[]>;
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  daemonConnection: ClientDaemonConnection;
 }) {
   const readReadyState = () => {
     const session = options.sessionsRef.current.find((item) => item.id === options.sessionId) || null;
-    const ws = options.readSessionTransportSocket(options.sessionId) || null;
+    const ws = options.daemonConnection.readSessionSocket(options.sessionId) || null;
     const ready =
       Boolean(session)
       && session?.state === 'connected'

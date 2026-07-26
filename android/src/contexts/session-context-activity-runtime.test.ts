@@ -4,6 +4,21 @@ import {
   ensureActiveSessionFreshRuntime,
   resolveSessionTransportKeepaliveGrace,
 } from './session-context-activity-runtime';
+import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
+import { createSessionHeartbeatStore } from '../lib/session-heartbeat-store';
+import { createSessionReconnectStore } from '../lib/session-reconnect-store';
+import { createSessionTailRefreshStore } from '../lib/session-tail-refresh-store';
+
+function makeDaemonConnection(ws: any = { readyState: WebSocket.OPEN }) {
+  return {
+    readSessionResource: vi.fn((sessionId: string) => ({ sessionId, socket: ws })),
+    readSessionSocket: vi.fn(() => ws),
+    readSessionTargetSocket: vi.fn(() => ws),
+    readOpenSessionSocket: vi.fn(() => ws),
+    sendSessionRaw: vi.fn(),
+    sendSessionMessage: vi.fn(),
+  } as unknown as ClientDaemonConnection & { readSessionSocket: ReturnType<typeof vi.fn> };
+}
 
 function createBaseOptions(overrides: Partial<Parameters<typeof ensureActiveSessionFreshRuntime>[0]> = {}) {
   const stateRef = {
@@ -24,18 +39,17 @@ function createBaseOptions(overrides: Partial<Parameters<typeof ensureActiveSess
     },
     refs: {
       stateRef,
-      pendingResumeTailRefreshRef: { current: new Set<string>() },
+      tailRefreshStore: createSessionTailRefreshStore(),
       lastActiveReentryAtRef: { current: new Map<string, number>() },
       lastConnectedBaselineAtRef: { current: new Map<string, number>() },
       connectedBaselineBurstGuardRef: { current: new Set<string>() },
-      lastServerActivityAtRef: { current: new Map<string, number>() },
+      heartbeatStore: createSessionHeartbeatStore(),
       lastHeadRequestAtRef: { current: new Map<string, number>() },
-      staleTransportProbeAtRef: { current: new Map<string, number>() },
-      reconnectRuntimesRef: { current: new Map<string, { connecting: boolean; timer: number | null }>() },
+      reconnectStore: createSessionReconnectStore(),
     },
     readSessionTransportRuntime: () => ({ targetKey: '127.0.0.1:3333:' }),
     readSessionTargetRuntime: () => ({ sessionIds: ['session-1'] }),
-    readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
+    daemonConnection: makeDaemonConnection(),
     isReconnectInFlight: () => false,
     hasPendingSessionTransportOpen: () => false,
     isPendingSessionTransportOpenStale: () => false,
@@ -55,7 +69,7 @@ function createBaseOptions(overrides: Partial<Parameters<typeof ensureActiveSess
 describe('ensureActiveSessionFreshRuntime', () => {
   it('resolves keepalive grace from recent server activity or connected baseline', () => {
     const refs = createBaseOptions().refs;
-    refs.lastServerActivityAtRef.current.set('session-1', 10_000);
+    refs.heartbeatStore.recordServerActivity('session-1', 10_000);
     refs.lastConnectedBaselineAtRef.current.set('session-1', 20_000);
 
     expect(resolveSessionTransportKeepaliveGrace({
@@ -81,7 +95,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
     const reconnectSession = vi.fn();
     const resetSessionTransportPullBookkeeping = vi.fn();
     const options = createBaseOptions({
-      readSessionTransportSocket: () => ws,
+      daemonConnection: makeDaemonConnection(ws),
       requestSessionBufferHead,
       reconnectSession,
       resetSessionTransportPullBookkeeping,
@@ -99,8 +113,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
     const reconnectSession = vi.fn();
     const reopenSessionTerminalChannel = vi.fn();
     const options = createBaseOptions({
-      readSessionTransportSocket: () => null,
-      readSessionTransportResource: () => ({ socket: targetSocket }),
+      daemonConnection: makeDaemonConnection(targetSocket),
       readSessionTerminalChannel: () => ({ state: 'closed' }),
       requestSessionBufferHead,
       reconnectSession,
@@ -118,8 +131,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
     const requestSessionBufferHead = vi.fn(() => true);
     const reconnectSession = vi.fn();
     const options = createBaseOptions({
-      readSessionTransportSocket: () => null,
-      readSessionTransportResource: () => ({ socket: targetSocket }),
+      daemonConnection: makeDaemonConnection(targetSocket),
       readSessionTerminalChannel: () => null,
       requestSessionBufferHead,
       reconnectSession,
@@ -142,13 +154,13 @@ describe('ensureActiveSessionFreshRuntime', () => {
         allowReconnectIfUnavailable: true,
       },
       refs,
-      readSessionTransportSocket: () => ws,
+      daemonConnection: makeDaemonConnection(ws),
       readSessionBufferSnapshot: () => ({ revision: 9, startIndex: 100, endIndex: 124 }),
       requestSessionBufferHead: vi.fn(() => true),
     });
 
     expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
-    expect(refs.pendingResumeTailRefreshRef.current.has('session-1')).toBe(true);
+    expect(refs.tailRefreshStore.hasPendingResumeTailRefresh('session-1')).toBe(true);
   });
 
   it('does not let active reentry guards suppress an explicit resume forced head request', () => {
@@ -169,7 +181,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
         allowReconnectIfUnavailable: true,
       },
       refs,
-      readSessionTransportSocket: () => ws,
+      daemonConnection: makeDaemonConnection(ws),
       requestSessionBufferHead,
       reconnectSession,
     });
@@ -177,7 +189,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
     try {
       expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
       expect(requestSessionBufferHead).toHaveBeenCalledWith('session-1', ws, { force: true });
-      expect(refs.pendingResumeTailRefreshRef.current.has('session-1')).toBe(true);
+      expect(refs.tailRefreshStore.hasPendingResumeTailRefresh('session-1')).toBe(true);
       expect(refs.connectedBaselineBurstGuardRef.current.has('session-1')).toBe(true);
       expect(reconnectSession).not.toHaveBeenCalled();
     } finally {
@@ -189,7 +201,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
     const reconnectSession = vi.fn();
     const requestSessionBufferHead = vi.fn();
     const options = createBaseOptions({
-      readSessionTransportSocket: () => ({ readyState: WebSocket.CONNECTING } as any),
+      daemonConnection: makeDaemonConnection({ readyState: WebSocket.CONNECTING }),
       reconnectSession,
       requestSessionBufferHead,
     });
@@ -208,7 +220,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
         source: 'explicit-resume',
         allowReconnectIfUnavailable: true,
       },
-      readSessionTransportSocket: () => null,
+      daemonConnection: makeDaemonConnection(null),
       hasPendingSessionTransportOpen: () => true,
       isPendingSessionTransportOpenStale: () => true,
       reconnectSession,
@@ -242,7 +254,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
         source: 'explicit-resume',
         allowReconnectIfUnavailable: true,
       },
-      readSessionTransportSocket: () => null,
+      daemonConnection: makeDaemonConnection(null),
       hasPendingSessionTransportOpen: () => true,
       isPendingSessionTransportOpenStale: () => false,
       reconnectSession,
@@ -270,7 +282,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
   it('does not reconnect closed sessions from passive active reentry', () => {
     const reconnectSession = vi.fn();
     const options = createBaseOptions({
-      readSessionTransportSocket: () => null,
+      daemonConnection: makeDaemonConnection(null),
       reconnectSession,
       refs: {
         ...createBaseOptions().refs,
@@ -296,7 +308,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
         source: 'explicit-resume',
         allowReconnectIfUnavailable: true,
       },
-      readSessionTransportSocket: () => null,
+      daemonConnection: makeDaemonConnection(null),
       reconnectSession,
       refs: {
         ...createBaseOptions().refs,
@@ -320,7 +332,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
     const reconnectSession = vi.fn();
     const runtimeDebug = vi.fn();
     const refs = createBaseOptions().refs;
-    refs.lastServerActivityAtRef.current.set('session-1', now - 5_000);
+    refs.heartbeatStore.recordServerActivity('session-1', now - 5_000);
     const options = createBaseOptions({
       refreshOptions: {
         sessionId: 'session-1',
@@ -328,7 +340,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
         allowReconnectIfUnavailable: true,
       },
       refs,
-      readSessionTransportSocket: () => ({ readyState: WebSocket.CLOSED } as any),
+      daemonConnection: makeDaemonConnection({ readyState: WebSocket.CLOSED }),
       reconnectSession,
       runtimeDebug,
     });
@@ -350,7 +362,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
     const reconnectSession = vi.fn();
     const refs = createBaseOptions().refs;
-    refs.lastServerActivityAtRef.current.set('session-1', now - 5_000);
+    refs.heartbeatStore.recordServerActivity('session-1', now - 5_000);
     const options = createBaseOptions({
       refreshOptions: {
         sessionId: 'session-1',
@@ -358,7 +370,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
         allowReconnectIfUnavailable: true,
       },
       refs,
-      readSessionTransportSocket: () => ({ readyState: WebSocket.CLOSED } as any),
+      daemonConnection: makeDaemonConnection({ readyState: WebSocket.CLOSED }),
       reconnectSession,
     });
 
@@ -383,7 +395,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
         allowReconnectIfUnavailable: true,
       },
       refs,
-      readSessionTransportSocket: () => null,
+      daemonConnection: makeDaemonConnection(null),
       reconnectSession,
     });
 
@@ -400,7 +412,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
     const reconnectSession = vi.fn();
     const refs = createBaseOptions().refs;
-    refs.lastServerActivityAtRef.current.set('session-1', now - 5_000);
+    refs.heartbeatStore.recordServerActivity('session-1', now - 5_000);
     const options = createBaseOptions({
       refreshOptions: {
         sessionId: 'session-1',
@@ -408,7 +420,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
         allowReconnectIfUnavailable: true,
       },
       refs,
-      readSessionTransportSocket: () => null,
+      daemonConnection: makeDaemonConnection(null),
       isReconnectInFlight: () => true,
       reconnectSession,
     });
@@ -429,7 +441,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
     const refs = createBaseOptions().refs;
     const options = createBaseOptions({
       refs,
-      readSessionTransportSocket: () => ws,
+      daemonConnection: makeDaemonConnection(ws),
       requestSessionBufferHead,
       reconnectSession,
       resolveTerminalRefreshCadence: () => ({ headTickMs: 500, headStalePingMs: 500, pullRequestStaleMs: 1200 }),
@@ -438,7 +450,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
     try {
       expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
       expect(requestSessionBufferHead).toHaveBeenCalledWith('session-1', ws, { force: undefined });
-      expect(refs.staleTransportProbeAtRef.current.get('session-1')).toBe(1000);
+      expect(refs.reconnectStore.readStaleTransportProbeAt('session-1')).toBe(1000);
       expect(reconnectSession).not.toHaveBeenCalled();
     } finally {
       nowSpy.mockRestore();
@@ -451,10 +463,10 @@ describe('ensureActiveSessionFreshRuntime', () => {
     const requestSessionBufferHead = vi.fn(() => true);
     const reconnectSession = vi.fn();
     const refs = createBaseOptions().refs;
-    refs.staleTransportProbeAtRef.current.set('session-1', 1000);
+    refs.reconnectStore.markStaleTransportProbe('session-1', 1000);
     const options = createBaseOptions({
       refs,
-      readSessionTransportSocket: () => ws,
+      daemonConnection: makeDaemonConnection(ws),
       requestSessionBufferHead,
       reconnectSession,
       resolveTerminalRefreshCadence: () => ({ headTickMs: 500, headStalePingMs: 500, pullRequestStaleMs: 1200 }),
@@ -464,7 +476,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
       expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
       expect(requestSessionBufferHead).toHaveBeenCalledWith('session-1', ws, { force: undefined });
       expect(reconnectSession).not.toHaveBeenCalled();
-      expect(refs.staleTransportProbeAtRef.current.get('session-1')).toBe(2500);
+      expect(refs.reconnectStore.readStaleTransportProbeAt('session-1')).toBe(2500);
     } finally {
       nowSpy.mockRestore();
     }
@@ -476,10 +488,10 @@ describe('ensureActiveSessionFreshRuntime', () => {
     const requestSessionBufferHead = vi.fn(() => true);
     const reconnectSession = vi.fn();
     const refs = createBaseOptions().refs;
-    refs.staleTransportProbeAtRef.current.set('session-1', 1000);
+    refs.reconnectStore.markStaleTransportProbe('session-1', 1000);
     const options = createBaseOptions({
       refs,
-      readSessionTransportSocket: () => ws,
+      daemonConnection: makeDaemonConnection(ws),
       requestSessionBufferHead,
       reconnectSession,
       resolveTerminalRefreshCadence: () => ({ headTickMs: 500, headStalePingMs: 500, pullRequestStaleMs: 1200 }),
@@ -489,7 +501,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
       expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
       expect(requestSessionBufferHead).toHaveBeenCalledWith('session-1', ws, { force: undefined });
       expect(reconnectSession).not.toHaveBeenCalled();
-      expect(refs.staleTransportProbeAtRef.current.get('session-1')).toBe(1000);
+      expect(refs.reconnectStore.readStaleTransportProbeAt('session-1')).toBe(1000);
     } finally {
       nowSpy.mockRestore();
     }
@@ -502,7 +514,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
     const reconnectSession = vi.fn();
     const runtimeDebug = vi.fn();
     const refs = createBaseOptions().refs;
-    refs.staleTransportProbeAtRef.current.set('session-1', 1000);
+    refs.reconnectStore.markStaleTransportProbe('session-1', 1000);
     const options = createBaseOptions({
       refreshOptions: {
         sessionId: 'session-1',
@@ -510,7 +522,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
         allowReconnectIfUnavailable: true,
       },
       refs,
-      readSessionTransportSocket: () => ws,
+      daemonConnection: makeDaemonConnection(ws),
       requestSessionBufferHead,
       reconnectSession,
       runtimeDebug,
@@ -521,7 +533,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
       expect(ensureActiveSessionFreshRuntime(options)).toBe(false);
       expect(requestSessionBufferHead).not.toHaveBeenCalled();
       expect(reconnectSession).not.toHaveBeenCalled();
-      expect(refs.staleTransportProbeAtRef.current.get('session-1')).toBe(1000);
+      expect(refs.reconnectStore.readStaleTransportProbeAt('session-1')).toBe(1000);
       expect(runtimeDebug).toHaveBeenCalledWith('session.transport.active-tick.head-probe.pending', expect.objectContaining({
         sessionId: 'session-1',
         pendingProbeAgeMs: 500,
