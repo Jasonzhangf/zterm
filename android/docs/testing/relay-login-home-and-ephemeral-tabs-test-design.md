@@ -40,6 +40,7 @@
 - Selecting a Relay daemon in Session Picker clears old rows and waits for live `fetchTmuxSessions()`; directory `daemon.sessions` must not render as final rows while that live refresh is pending.
 - Relay account persistence retains token/account/directory truth but never retains the plaintext login password.
 - Runtime open/close/switch still updates the in-memory open-tab projection during the current process.
+- Foreground/resume lifecycle callbacks may change across App/Terminal rerenders, including when opening the file sync sheet, but the open-tab lifecycle owner keeps a single Capacitor `appStateChange` native listener and dispatches to the latest callback refs.
 
 ## White-Box Negative
 
@@ -58,6 +59,7 @@
 - Disconnected/stale Relay daemon directory records must not be projected as connectable Home rows, drawer host rails, or relay target candidates even if they still carry stale endpoint/session snapshots.
 - Cold bootstrap ignores and removes legacy `OPEN_TABS`, `ACTIVE_SESSION`, and `SAVED_TAB_LISTS` storage.
 - Runtime tab changes do not write those storage keys.
+- Callback-only rerenders must not remove and re-add Capacitor `appStateChange`; native listener churn is forbidden because it can flood the WebView/native bridge during sync/upload UI state changes.
 
 ## Module Black-Box
 

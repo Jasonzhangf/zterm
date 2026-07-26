@@ -1,4 +1,4 @@
-import { useEffect, type MutableRefObject } from 'react';
+import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { shouldResumeForeground } from '@zterm/shared/terminal/foreground-resume';
 import { SESSION_STATUS_EVENT } from '../contexts/SessionContext';
@@ -45,7 +45,22 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     bumpFollowResetEpoch,
   } = options;
 
-  const maybeProjectForegroundResume = (reason: ForegroundResumeSignalReason) => {
+  const callbacksRef = useRef({
+    onForegroundActiveChange,
+    onForegroundResume,
+    auditOpenTabsAgainstRemoteSessions,
+    resumeActiveSessionTransport,
+    bumpFollowResetEpoch,
+  });
+  callbacksRef.current = {
+    onForegroundActiveChange,
+    onForegroundResume,
+    auditOpenTabsAgainstRemoteSessions,
+    resumeActiveSessionTransport,
+    bumpFollowResetEpoch,
+  };
+
+  const maybeProjectForegroundResume = useCallback((reason: ForegroundResumeSignalReason) => {
     const now = Date.now();
     const hasSessions = sessionsRef.current.length > 0;
     const hasActiveSession = Boolean(openTabStateRef.current.activeSessionId);
@@ -75,16 +90,16 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
       return;
     }
     foregroundRefreshRuntimeRef.current.lastResumeAt = now;
-    onForegroundResume?.(reason);
-    bumpFollowResetEpoch();
-    void auditOpenTabsAgainstRemoteSessions(reason).catch((error) => {
+    callbacksRef.current.onForegroundResume?.(reason);
+    callbacksRef.current.bumpFollowResetEpoch();
+    void callbacksRef.current.auditOpenTabsAgainstRemoteSessions(reason).catch((error) => {
       console.error('[App] Failed to audit remote session truth on foreground resume:', error);
     });
-  };
+  }, [foregroundRefreshRuntimeRef, openTabStateRef, sessionsRef]);
 
   useEffect(() => {
     const markHidden = () => {
-      onForegroundActiveChange?.(false);
+      callbacksRef.current.onForegroundActiveChange?.(false);
       markForegroundRuntimeHidden(foregroundRefreshRuntimeRef.current, document.visibilityState);
     };
 
@@ -99,13 +114,13 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
       }
 
       if (document.visibilityState === 'visible' && foregroundRefreshRuntimeRef.current.wasHidden) {
-        onForegroundActiveChange?.(true);
+        callbacksRef.current.onForegroundActiveChange?.(true);
         maybeProjectForegroundResume('visibilitychange');
       }
     };
 
     const onDocumentResume = () => {
-      onForegroundActiveChange?.(true);
+      callbacksRef.current.onForegroundActiveChange?.(true);
       runtimeDebug('app.document.resume', {});
       maybeProjectForegroundResume('resume');
     };
@@ -115,14 +130,14 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
         runtimeDebug('app.network.online.hidden', {});
         return;
       }
-      onForegroundActiveChange?.(true);
+      callbacksRef.current.onForegroundActiveChange?.(true);
       runtimeDebug('app.network.online', {});
       const activeSessionId = openTabStateRef.current.activeSessionId;
       if (activeSessionId) {
-        resumeActiveSessionTransport(activeSessionId);
+        callbacksRef.current.resumeActiveSessionTransport(activeSessionId);
       }
       foregroundRefreshRuntimeRef.current.wasHidden = false;
-      void auditOpenTabsAgainstRemoteSessions('online').catch((error) => {
+      void callbacksRef.current.auditOpenTabsAgainstRemoteSessions('online').catch((error) => {
         console.error('[App] Failed to audit remote session truth on online recovery:', error);
       });
     };
@@ -136,7 +151,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
         markHidden();
         return;
       }
-      onForegroundActiveChange?.(true);
+      callbacksRef.current.onForegroundActiveChange?.(true);
       maybeProjectForegroundResume('appStateChange');
     });
 
@@ -157,14 +172,9 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
       window.removeEventListener('online', onNetworkOnline);
     };
   }, [
-    auditOpenTabsAgainstRemoteSessions,
-    bumpFollowResetEpoch,
     foregroundRefreshRuntimeRef,
+    maybeProjectForegroundResume,
     openTabStateRef,
-    onForegroundActiveChange,
-    onForegroundResume,
-    resumeActiveSessionTransport,
-    sessionsRef,
   ]);
 
   useEffect(() => {
@@ -190,7 +200,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
         })),
       });
       if (detail?.type === 'closed') {
-        void auditOpenTabsAgainstRemoteSessions('session-status-closed').catch((error) => {
+        void callbacksRef.current.auditOpenTabsAgainstRemoteSessions('session-status-closed').catch((error) => {
           console.error('[App] Failed to audit remote session truth after session-status closed:', error);
         });
       }
@@ -200,5 +210,5 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     return () => {
       window.removeEventListener(SESSION_STATUS_EVENT, onSessionStatus as EventListener);
     };
-  }, [auditOpenTabsAgainstRemoteSessions, sessionsRef]);
+  }, [sessionsRef]);
 }

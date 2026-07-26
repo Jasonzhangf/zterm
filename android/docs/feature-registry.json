@@ -305,10 +305,12 @@
       "domain": "terminal-session",
       "owners": [
         "src/hooks/useOpenTabRuntime.ts",
+        "src/hooks/useOpenTabLifecycleEffects.ts",
         "src/lib/open-tab-persistence.ts"
       ],
       "allowed_paths": [
         "src/hooks/useOpenTabRuntime.ts",
+        "src/hooks/useOpenTabLifecycleEffects.ts",
         "src/hooks/useSessionOpenActions.ts",
         "src/lib/open-tab-persistence.ts",
         "src/lib/open-tab-intent.ts",
@@ -319,6 +321,7 @@
         "src/server/"
       ],
       "required_gates": [
+        "src/hooks/useOpenTabLifecycleEffects.test.tsx",
         "src/lib/open-tab-history-truth.test.ts",
         "src/lib/open-tab-persistence.test.ts",
         "src/lib/open-tab-intent.test.ts"
