@@ -1,10 +1,10 @@
-import { memo as ReactMemo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo as ReactMemo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Keyboard } from '@capacitor/keyboard';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { Directory, Filesystem } from '@capacitor/filesystem';
 import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
-import { createSessionViewportModeStore, useSessionViewportModeSnapshot, type SessionViewportModeStore } from '../lib/session-viewport-mode-store';
+import { createSessionViewportModeStore } from '../lib/session-viewport-mode-store';
 import { SessionScheduleSheet } from '../components/terminal/SessionScheduleSheet';
 import { FileTransferSheet } from '../components/terminal/FileTransferSheet';
 import { RemoteScreenshotSheet } from '../components/terminal/RemoteScreenshotSheet';
@@ -22,7 +22,9 @@ import {
   resolveTerminalKeyboardInput,
 } from '@zterm/shared/terminal/renderer';
 import { TerminalPageCopyMenu } from './TerminalPageCopyMenu';
-import type { CopySelectionState } from './terminal-copy-selection';
+import { TerminalDebugOverlay, type RemoteWindowInputDebugSnapshot } from './TerminalPageDebugOverlay';
+import { TerminalNetworkBanner, TerminalQuickBarShell } from './terminal-page-shell-ui';
+import { formatDebugRate, resolveDebugStatus } from './terminal-page-debug-helpers';
 import { useTerminalPageCopyRuntime } from './useTerminalPageCopyRuntime';
 import { getBrowserStorage } from '../lib/browser-storage';
 import { mobileTheme } from '../lib/mobile-ui';
@@ -119,6 +121,8 @@ import {
 import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
 import type { RemoteWindowControlMessage } from '../lib/remote-window-message-runtime';
 
+export { TerminalNetworkBanner } from './terminal-page-shell-ui';
+
 type DrawerRemoteSessionTarget = {
   name: string;
   bridgeHost: string;
@@ -129,36 +133,6 @@ type DrawerRemoteSessionTarget = {
   relayEndpointCandidates?: SessionGroupHistory['relayEndpointCandidates'];
   transportMode?: Host['transportMode'];
   sessionNames: string[];
-};
-
-type RemoteWindowInputDebugSnapshot = {
-  contextActive: boolean;
-  contextLabel: string;
-  sessionId: string;
-  streamId: string;
-  targetId: string;
-  inputRoute: string;
-  focusPolicy: string;
-  lastSource: string;
-  lastEvent: string;
-  lastSent: boolean | null;
-  lastAt: number | null;
-  lastPoint: string;
-  lastResult: string;
-  lastResultAt: number | null;
-  counts: {
-    focus: number;
-    pointerDown: number;
-    pointerMove: number;
-    pointerUp: number;
-    click: number;
-    scroll: number;
-    key: number;
-    text: number;
-    accepted: number;
-    error: number;
-  };
-  video: string;
 };
 
 type RemoteWindowInputDebugSource =
@@ -274,10 +248,6 @@ function formatRemoteWindowInputDebugAge(lastAt: number | null) {
   return `${Math.round(ageMs / 1000)}s`;
 }
 
-function formatRemoteWindowInputResultAge(lastAt: number | null) {
-  return formatRemoteWindowInputDebugAge(lastAt);
-}
-
 function truncateRemoteWindowInputResult(value: string) {
   if (value.length <= 44) {
     return value;
@@ -369,108 +339,6 @@ const NETWORK_BANNER_GRACE_MS = 3000;
 function logAsyncCleanupFailure(scope: string, error: unknown) {
   console.warn(`[TerminalPage] ${scope} failed:`, error);
 }
-
-const TerminalQuickBarShell = ReactMemo(function TerminalQuickBarShell({
-  bottomPx,
-  zIndex = 10,
-  centered = false,
-  children,
-}: {
-  bottomPx: number;
-  zIndex?: number;
-  centered?: boolean;
-  children: ReactNode;
-}) {
-  return (
-    <div
-      data-testid="terminal-quickbar-shell"
-      data-layout={centered ? 'remote-window-centered' : 'standard'}
-      style={{
-        position: 'absolute',
-        left: centered ? '50%' : 0,
-        right: centered ? 'auto' : 0,
-        bottom: `${bottomPx}px`,
-        zIndex,
-        width: centered ? 'min(calc(100vw - 24px), 720px)' : undefined,
-        transform: centered ? 'translateX(-50%)' : undefined,
-        pointerEvents: 'auto',
-      }}
-    >
-      {children}
-    </div>
-  );
-});
-
-export const TerminalNetworkBanner = ReactMemo(function TerminalNetworkBanner({
-  connectionIssueVisible,
-  networkOnline,
-  activeSessionState,
-  activeSessionLastError,
-}: {
-  connectionIssueVisible: boolean;
-  networkOnline: boolean;
-  activeSessionState: Session['state'] | null | undefined;
-  activeSessionLastError?: string;
-}) {
-  const networkBanner = !connectionIssueVisible
-    ? null
-    : !networkOnline
-      ? {
-          tone: '#ff6b6b',
-          background: 'rgba(109, 24, 33, 0.92)',
-          border: 'rgba(255, 107, 107, 0.42)',
-          title: '网络已断开',
-          detail: '当前网络不可用，终端不会继续刷新。',
-        }
-      : activeSessionState === 'reconnecting'
-        ? {
-            tone: '#ffb020',
-            background: 'rgba(97, 63, 13, 0.92)',
-            border: 'rgba(255, 176, 32, 0.42)',
-            title: '连接已断开，正在重连',
-            detail: activeSessionLastError || '网络或 daemon 连接已中断，正在指数退避重试。',
-          }
-        : activeSessionState === 'error'
-          ? {
-              tone: '#ff6b6b',
-              background: 'rgba(109, 24, 33, 0.92)',
-              border: 'rgba(255, 107, 107, 0.42)',
-              title: '连接失败',
-              detail: activeSessionLastError || '当前 tab 已断开，请检查网络或服务器状态。',
-            }
-          : null;
-
-  if (!networkBanner) {
-    return null;
-  }
-
-  return (
-    <div
-      data-testid="terminal-network-banner"
-      style={{
-        position: 'fixed',
-        top: 'calc(env(safe-area-inset-top, 0px) + 10px)',
-        left: 12,
-        right: 12,
-        zIndex: 140,
-        pointerEvents: 'none',
-        padding: '9px 12px',
-        borderRadius: '12px',
-        border: `1px solid ${networkBanner.border}`,
-        background: networkBanner.background,
-        color: '#fff',
-        boxShadow: '0 10px 24px rgba(0,0,0,0.18)',
-      }}
-    >
-      <div style={{ fontSize: '13px', fontWeight: 800, color: networkBanner.tone }}>
-        {networkBanner.title}
-      </div>
-      <div style={{ marginTop: '3px', fontSize: '12px', lineHeight: 1.35, color: 'rgba(255,255,255,0.9)' }}>
-        {networkBanner.detail}
-      </div>
-    </div>
-  );
-});
 
 const connectionRouteOptionStyle = {
   minHeight: '34px',
@@ -1082,354 +950,6 @@ function resolveTerminalSessionGroupActiveSessionProjection(options: {
   };
 }
 
-const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
-  visible,
-  session,
-  visiblePaneSessions,
-  sessionViewportModeStore,
-  getSessionDebugMetrics,
-  debugOverlayPos,
-  debugOverlayDragRef,
-  onClose,
-  onMove,
-  keyboardInset,
-  shellHeight,
-  rawShellHeight,
-  visualViewportHeight,
-  visualViewportWidth,
-  visualViewportOffsetTop,
-  currentLayoutViewportHeight,
-  terminalKeyboardRequested,
-  keyboardViewportAlreadyResized,
-  containerHeightPx,
-  viewportRows,
-  copyModeActive,
-  copyStartRowIndex,
-  effectiveKeyboardLiftPx,
-  terminalImeLiftPx,
-  quickBarShellKeyboardLiftPx,
-  quickBarHeight,
-  terminalChromeBottomPx,
-  layoutMode,
-  landscape,
-  splitVisible,
-  quickBarCollapsed,
-  copySelection,
-  sessionDrawerDebug,
-  getRemoteWindowInputDebug,
-}: {
-  visible: boolean;
-  session: Session | null;
-  visiblePaneSessions?: Session[];
-  sessionViewportModeStore: SessionViewportModeStore;
-  getSessionDebugMetrics?: (sessionId: string) => SessionDebugOverlayMetrics | null;
-  debugOverlayPos: { x: number; y: number };
-  debugOverlayDragRef: React.MutableRefObject<{
-    startX: number;
-    startY: number;
-    startPosX: number;
-    startPosY: number;
-    dragging: boolean;
-  }>;
-  onClose: () => void;
-  onMove: (next: { x: number; y: number }) => void;
-  keyboardInset?: number;
-  shellHeight?: number;
-  rawShellHeight?: number;
-  visualViewportHeight?: number;
-  visualViewportWidth?: number;
-  visualViewportOffsetTop?: number;
-  currentLayoutViewportHeight?: number;
-  terminalKeyboardRequested?: boolean;
-  keyboardViewportAlreadyResized?: boolean;
-  containerHeightPx?: number;
-  viewportRows?: number;
-  copyModeActive?: boolean;
-  copyStartRowIndex?: number | null;
-  effectiveKeyboardLiftPx?: number;
-  terminalImeLiftPx?: number;
-  quickBarShellKeyboardLiftPx?: number;
-  quickBarHeight?: number;
-  terminalChromeBottomPx?: number;
-  layoutMode?: string;
-  landscape?: boolean;
-  splitVisible?: boolean;
-  quickBarCollapsed?: boolean;
-  copySelection?: CopySelectionState | undefined;
-  sessionDrawerDebug?: {
-    open: boolean;
-    lastEvent: string;
-    eventSeq: number;
-    callbackSeq: number;
-    pageCallbackSeq: number;
-    pickerMode: string | null;
-  };
-  getRemoteWindowInputDebug?: () => RemoteWindowInputDebugSnapshot;
-}) {
-  const [tick, setTick] = useState(0);
-  const viewportModeSnapshot = useSessionViewportModeSnapshot(sessionViewportModeStore, session?.id || null);
-
-  useEffect(() => {
-    if (!visible || !session) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      setTick((value) => value + 1);
-    }, 500);
-    return () => window.clearInterval(timer);
-  }, [session, visible]);
-
-  void tick;
-
-  if (!visible || !session) {
-    return null;
-  }
-
-  const metrics = getSessionDebugMetrics ? (getSessionDebugMetrics(session.id) || undefined) : undefined;
-  const status = resolveDebugStatus(session, metrics);
-  const viewportMode = viewportModeSnapshot.mode;
-  const sessionLabel = session.customName?.trim() || session.title || session.sessionName;
-  const routeLabel = [
-    session.resolvedPath || '-',
-    session.resolvedRelayTransport || null,
-    session.lastConnectStage || null,
-  ].filter(Boolean).join(' / ');
-  const remoteWindowInputDebug = getRemoteWindowInputDebug?.();
-  const overlayStyle: React.CSSProperties = {
-    position: 'absolute',
-    top: debugOverlayPos.y >= 0 ? `${debugOverlayPos.y}px` : '10px',
-    left: debugOverlayPos.x >= 0 ? `${debugOverlayPos.x}px` : undefined,
-    right: debugOverlayPos.x >= 0 ? undefined : '10px',
-    zIndex: 120,
-    width: '192px',
-    padding: '6px 7px',
-    borderRadius: '10px',
-    border: `1.5px solid ${metrics?.bufferPullActive ? 'rgba(34, 197, 94, 0.6)' : 'rgba(83, 139, 255, 0.6)'}`,
-    background: 'rgba(10, 16, 26, 0.35)',
-    boxShadow: '0 8px 18px rgba(0, 0, 0, 0.10)',
-    color: 'rgba(231, 238, 252, 0.78)',
-    fontSize: '8px',
-    lineHeight: 1.25,
-    backdropFilter: 'blur(8px)',
-    pointerEvents: 'auto',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: '2px',
-    touchAction: 'none',
-    userSelect: 'none',
-    WebkitUserSelect: 'none',
-  };
-
-  return (
-    <div
-      style={overlayStyle}
-      onTouchStart={(e) => {
-        const touch = e.touches[0];
-        debugOverlayDragRef.current = {
-          startX: touch.clientX,
-          startY: touch.clientY,
-          startPosX: debugOverlayPos.x >= 0 ? debugOverlayPos.x : (window.innerWidth - 10 - 192),
-          startPosY: debugOverlayPos.y >= 0 ? debugOverlayPos.y : 10,
-          dragging: false,
-        };
-      }}
-      onTouchMove={(e) => {
-        const touch = e.touches[0];
-        const dx = touch.clientX - debugOverlayDragRef.current.startX;
-        const dy = touch.clientY - debugOverlayDragRef.current.startY;
-        if (!debugOverlayDragRef.current.dragging && Math.abs(dx) + Math.abs(dy) < 8) return;
-        debugOverlayDragRef.current.dragging = true;
-        e.preventDefault();
-        const newX = debugOverlayDragRef.current.startPosX + dx;
-        const newY = debugOverlayDragRef.current.startPosY + dy;
-        const clampedX = Math.max(0, Math.min(newX, window.innerWidth - 192));
-        const clampedY = Math.max(0, Math.min(newY, window.innerHeight - 132));
-        onMove({ x: clampedX, y: clampedY });
-      }}
-      onTouchEnd={() => {
-        debugOverlayDragRef.current.dragging = false;
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '4px', fontWeight: 700 }}>
-        <span>状态</span>
-        <button
-          type="button"
-          aria-label="关闭调试浮窗"
-          onClick={onClose}
-          style={{
-            width: '12px',
-            height: '12px',
-            padding: 0,
-            border: 'none',
-            borderRadius: '999px',
-            background: 'rgba(255,255,255,0.12)',
-            color: '#e7eefc',
-            fontSize: '9px',
-            lineHeight: '12px',
-            cursor: 'pointer',
-          }}
-        >
-          ×
-        </button>
-      </div>
-      <div
-        data-testid="terminal-debug-ime-metrics"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: '44px 1fr',
-          columnGap: '6px',
-          rowGap: '3px',
-          marginTop: '4px',
-          paddingTop: '4px',
-          borderTop: '1px solid rgba(255,255,255,0.10)',
-          color: 'rgba(231, 238, 252, 0.86)',
-          fontVariantNumeric: 'tabular-nums',
-          wordBreak: 'break-word',
-        }}
-      >
-        <span>会话</span><span>{sessionLabel} · {session.id}</span>
-        <span>状态</span>
-        <span
-          data-testid="terminal-debug-active-flag"
-          style={{ color: metrics?.bufferPullActive ? '#86efac' : '#93c5fd' }}
-        >
-          {session.state}{metrics ? ` / ${status}` : ''}{metrics?.active ? ' · A' : ''}
-        </span>
-        <span>渲染</span><span>{viewportMode}</span>
-        <span>路由</span><span>{routeLabel}</span>
-        {remoteWindowInputDebug ? (
-          <>
-            <span>远控</span>
-            <span data-testid="terminal-debug-remote-window-context">
-              CTX {remoteWindowInputDebug.contextActive ? 'Y' : 'N'}
-              {' · '}
-              {remoteWindowInputDebug.contextLabel}
-              {' · '}
-              {remoteWindowInputDebug.inputRoute}/{remoteWindowInputDebug.focusPolicy}
-            </span>
-            <span>RWID</span>
-            <span data-testid="terminal-debug-remote-window-id">
-              c={remoteWindowInputDebug.sessionId} · s={remoteWindowInputDebug.streamId} · t={remoteWindowInputDebug.targetId}
-            </span>
-            <span>RW事件</span>
-            <span data-testid="terminal-debug-remote-window-event">
-              {remoteWindowInputDebug.lastSource}
-              {' · '}
-              SEND {remoteWindowInputDebug.lastSent === null ? '-' : remoteWindowInputDebug.lastSent ? 'Y' : 'N'}
-              {' · '}
-              {remoteWindowInputDebug.lastEvent}
-              {' · '}
-              {formatRemoteWindowInputDebugAge(remoteWindowInputDebug.lastAt)}
-            </span>
-            <span>RW点</span>
-            <span data-testid="terminal-debug-remote-window-point">{remoteWindowInputDebug.lastPoint}</span>
-            <span>RW结果</span>
-            <span data-testid="terminal-debug-remote-window-result">
-              {remoteWindowInputDebug.lastResult}
-              {' · '}
-              {formatRemoteWindowInputResultAge(remoteWindowInputDebug.lastResultAt)}
-            </span>
-            <span>RW计数</span>
-            <span data-testid="terminal-debug-remote-window-counts">
-              F {remoteWindowInputDebug.counts.focus}
-              {' · '}
-              D {remoteWindowInputDebug.counts.pointerDown}
-              {' · '}
-              M {remoteWindowInputDebug.counts.pointerMove}
-              {' · '}
-              U {remoteWindowInputDebug.counts.pointerUp}
-              {' · '}
-              C {remoteWindowInputDebug.counts.click}
-              {' · '}
-              S {remoteWindowInputDebug.counts.scroll}
-              {' · '}
-              K {remoteWindowInputDebug.counts.key}
-              {' · '}
-              T {remoteWindowInputDebug.counts.text}
-              {' · '}
-              A {remoteWindowInputDebug.counts.accepted}
-              {' · '}
-              E {remoteWindowInputDebug.counts.error}
-            </span>
-            <span>视频</span>
-            <span data-testid="terminal-debug-remote-window-video">{remoteWindowInputDebug.video}</span>
-          </>
-        ) : null}
-        <span>窗格</span><span>x{visiblePaneSessions && visiblePaneSessions.length > 0 ? visiblePaneSessions.length : 1}</span>
-        <span>刷新</span><span>{formatDebugHz(metrics?.renderHz || 0)} / {formatDebugHz(metrics?.pullHz || 0)}</span>
-        <span>流量</span>
-        <span>
-          ↑ {formatDebugRate(metrics?.uplinkBps || 0)} ↓ {formatDebugRate(metrics?.downlinkBps || 0)}
-          {' · '}
-          buf {formatDebugBytes(metrics?.transportBufferedBytes || 0)}
-          {metrics?.transportBackpressured ? ' · BP' : ''}
-        </span>
-        <span>视图</span>
-        <span>
-          LP {layoutMode ?? '?'} · LS {landscape ? 'Y' : 'N'} · SP {splitVisible ? 'Y' : 'N'} · QC {quickBarCollapsed ? 'Y' : 'N'}
-        </span>
-        <span>IME</span>
-        <span>
-          KB {keyboardInset ?? 0} · RESZ {keyboardViewportAlreadyResized ? 'Y' : 'N'} · IME {terminalKeyboardRequested ? 'Y' : 'N'}
-          {' · '}
-          SH {shellHeight ?? '?'} / RAW {rawShellHeight ?? '?'}
-          {' · '}
-          VV {visualViewportHeight ?? '?'}x{visualViewportWidth ?? '?'}@{visualViewportOffsetTop ?? '?'}
-          {' · '}
-          CUR {currentLayoutViewportHeight ?? '?'} · CH {containerHeightPx ?? '?'} · VR {viewportRows ?? '?'}
-          {' · '}
-          IMEL {terminalImeLiftPx ?? 0} / QBL {quickBarShellKeyboardLiftPx ?? 0} / LIFT {effectiveKeyboardLiftPx ?? 0}
-          {' · '}
-          QB {quickBarHeight ?? '?'} · TB {terminalChromeBottomPx ?? '?'}
-        </span>
-        <span>复制</span>
-        <span>
-          {copyModeActive ? 'ON' : 'OFF'}
-          {' · '}
-          CS {copyStartRowIndex ?? '-'} · CE {copySelection?.endRowIndex ?? '-'}
-          {copySelection?.menu ? ` · MU ${copySelection.menu.rowIndex}` : ''}
-        </span>
-        {sessionDrawerDebug ? (
-          <>
-            <span>抽屉</span>
-            <span>
-              {sessionDrawerDebug.open ? 'OPEN' : 'CLOSED'}
-              {' · '}
-              EV {sessionDrawerDebug.eventSeq}:{sessionDrawerDebug.lastEvent}
-              {' · '}
-              CB {sessionDrawerDebug.callbackSeq}/{sessionDrawerDebug.pageCallbackSeq}
-              {' · '}
-              PM {sessionDrawerDebug.pickerMode || '-'}
-            </span>
-          </>
-        ) : null}
-      </div>
-    </div>
-  );
-});
-
-function formatDebugRate(bytesPerSecond: number) {
-  const safeValue = Math.max(0, Number.isFinite(bytesPerSecond) ? bytesPerSecond : 0);
-  if (safeValue >= 1024 * 1024) {
-    return `${(safeValue / (1024 * 1024)).toFixed(2)} MB/s`;
-  }
-  if (safeValue >= 1024) {
-    return `${(safeValue / 1024).toFixed(1)} KB/s`;
-  }
-  return `${Math.round(safeValue)} B/s`;
-}
-
-function formatDebugBytes(bytes: number) {
-  const safeValue = Math.max(0, Number.isFinite(bytes) ? bytes : 0);
-  if (safeValue >= 1024 * 1024) {
-    return `${(safeValue / (1024 * 1024)).toFixed(2)} MB`;
-  }
-  if (safeValue >= 1024) {
-    return `${(safeValue / 1024).toFixed(1)} KB`;
-  }
-  return `${Math.round(safeValue)} B`;
-}
-
 function formatConnectionRouteLabel(session: Session) {
   switch (session.resolvedPath) {
     case 'rtc-direct':
@@ -1446,36 +966,6 @@ function formatConnectionRouteLabel(session: Session) {
       return session.resolvedRelayTransport === 'turn' ? 'Relay/TURN' : 'Relay';
     default:
       return session.state === 'connected' ? '连接中' : '未连接';
-  }
-}
-
-function formatDebugHz(value: number) {
-  const safeValue = Math.max(0, Number.isFinite(value) ? value : 0);
-  return `${safeValue.toFixed(1)} Hz`;
-}
-
-function resolveDebugStatus(
-  session: Session | null,
-  metrics?: SessionDebugOverlayMetrics,
-): SessionDebugOverlayMetrics['status'] {
-  if (metrics?.status) {
-    return metrics.status;
-  }
-  if (!session) {
-    return 'waiting';
-  }
-  switch (session.state) {
-    case 'error':
-      return 'error';
-    case 'disconnected':
-    case 'closed':
-      return 'closed';
-    case 'reconnecting':
-      return 'reconnecting';
-    case 'connecting':
-      return 'connecting';
-    default:
-      return 'waiting';
   }
 }
 
@@ -1852,6 +1342,14 @@ function TerminalPageComponent({
   const availableSplitCount = splitAvailable
     ? Math.max(1, Math.min(currentMaxSplitCount, sessions.length))
     : 1;
+  const splitCountOptions = useMemo(
+    () => (
+      splitAvailable
+        ? Array.from({ length: availableSplitCount }, (_, index) => index + 1)
+        : []
+    ),
+    [availableSplitCount, splitAvailable],
+  );
   const workspacePanes = splitVisible ? workspace.panes : workspace.panes.slice(0, 1);
   const paneGroups = workspacePanes.map((pane) => ({
     paneId: pane.id,
@@ -1887,13 +1385,19 @@ function TerminalPageComponent({
   const uiSession = interactiveSession || activeSession || null;
 
   const keepTerminalInputFocusedRef = useRef<() => void>(() => {});
+  const handleCopyRuntimeSwitchSession = useCallback((sessionId: string) => {
+    onSwitchSession?.(sessionId);
+  }, [onSwitchSession]);
+  const handleCopyRuntimeSetActivePane = useCallback((paneId: string) => {
+    setActivePane(paneId);
+  }, [setActivePane]);
   const copyRuntime = useTerminalPageCopyRuntime({
     uiSessionId: uiSession?.id || null,
     activeSessionId: activeSession?.id || null,
     splitVisible,
     findPaneForSession,
-    onSwitchSession: (sessionId) => onSwitchSession?.(sessionId),
-    setActivePane: (paneId) => setActivePane(paneId),
+    onSwitchSession: handleCopyRuntimeSwitchSession,
+    setActivePane: handleCopyRuntimeSetActivePane,
     keepTerminalInputFocused: keepTerminalInputFocusedRef.current,
     sessionBufferStore,
     sessions,
@@ -2644,7 +2148,7 @@ function TerminalPageComponent({
     if (!targetSessionId) {
       return;
     }
-    const targetSession = sessions.find((session) => session.id === targetSessionId);
+    const targetSession = sessionsRef.current.find((session) => session.id === targetSessionId);
     if (!targetSession) {
       return;
     }
@@ -2655,7 +2159,7 @@ function TerminalPageComponent({
       nonce: Date.now(),
       seedText: text,
     });
-  }, [onRequestScheduleList, sessions, uiSessionId]);
+  }, [onRequestScheduleList, uiSessionId]);
 
   const handleQuickBarOpenFileTransfer = useCallback(() => {
     setFileTransferOpen(true);
@@ -3862,11 +3366,7 @@ function TerminalPageComponent({
       collapsed={quickBarCollapsed}
       onCollapsedChange={setQuickBarCollapsed}
       currentSplitCount={workspacePanes.length}
-      splitCountOptions={
-        splitAvailable
-          ? Array.from({ length: availableSplitCount }, (_, index) => index + 1)
-          : []
-      }
+      splitCountOptions={splitCountOptions}
       onSetSplitCount={handleSetSplitCount}
       onToggleSplitLayout={toggleSplitLayout}
       onCycleSplitPane={cycleSecondaryPane}
@@ -3919,10 +3419,10 @@ function TerminalPageComponent({
     shortcutActions,
     shortcutFrequencyMap,
     shortcutSmartSort,
+    splitCountOptions,
     splitAvailable,
     splitVisible,
     quickBarCollapsed,
-    currentMaxSplitCount,
     cycleSecondaryPane,
     terminalImeActive,
     keyboardInset,

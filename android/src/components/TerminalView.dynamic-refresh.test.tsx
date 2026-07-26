@@ -2011,6 +2011,69 @@ describe('TerminalView minimal mirror render', () => {
     expect(finalRows.some((row) => row.startsWith('frame-017-'))).toBe(false);
   });
 
+  it('repaints full-screen TUI status-row styles even when row text and absolute indexes stay the same', async () => {
+    const startIndex = 520;
+    const buildStyledFrame = (background: number) => Array.from({ length: 24 }, (_, index) => {
+      const text = index === 0
+        ? 'stable-fullscreen-status'
+        : `stable-fullscreen-row-${String(index).padStart(2, '0')}`;
+      return Array.from(text).map((char) => cell(char, { bg: background }));
+    });
+    const renderSnapshot = (rows: TerminalCell[][], revision: number) => toRenderBufferSnapshot({
+      initialBufferLines: rows,
+      bufferStartIndex: startIndex,
+      bufferEndIndex: startIndex + rows.length,
+      bufferHeadStartIndex: startIndex,
+      bufferTailEndIndex: startIndex + rows.length,
+      revision,
+    });
+    const readFirstCellBackground = (container: HTMLElement) => {
+      const row = container.querySelector(`[data-terminal-index="${startIndex}"]`) as HTMLElement | null;
+      expect(row).toBeTruthy();
+      const cellSpan = row!.querySelector('span > span') as HTMLSpanElement | null;
+      expect(cellSpan).toBeTruthy();
+      return cellSpan!.style.backgroundColor || cellSpan!.style.background;
+    };
+
+    const firstFrame = buildStyledFrame(1);
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId="s-fullscreen-style"
+          renderBufferSnapshot={renderSnapshot(firstFrame, 1)}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(readRenderedIndexedRows(view.container).map((row) => row.text)).toContain('stable-fullscreen-status');
+    });
+    const firstBackground = readFirstCellBackground(view.container);
+
+    view.rerender(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId="s-fullscreen-style"
+          renderBufferSnapshot={renderSnapshot(buildStyledFrame(2), 2)}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(readFirstCellBackground(view.container)).not.toBe(firstBackground);
+    });
+    expect(readRenderedIndexedRows(view.container).find((row) => row.absoluteIndex === startIndex)?.text)
+      .toBe('stable-fullscreen-status');
+  });
+
   it('black-box compares large same-window source refreshes with rendered tail output', async () => {
     let sourceRows = buildTuiFrameRows(0, 160);
     const startIndex = 1000;

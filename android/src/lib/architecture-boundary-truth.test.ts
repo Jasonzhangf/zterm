@@ -73,6 +73,25 @@ describe('architecture boundary truth gate', () => {
     }
   });
 
+  it('keeps TerminalPage status/debug chrome as imported projections instead of inline duplicate owners', () => {
+    const terminalPageSource = stripComments(read('src/pages/TerminalPage.tsx'));
+    const shellUiSource = stripComments(read('src/pages/terminal-page-shell-ui.tsx'));
+    const debugOverlaySource = stripComments(read('src/pages/TerminalPageDebugOverlay.tsx'));
+
+    expect(terminalPageSource).toContain("from './terminal-page-shell-ui'");
+    expect(terminalPageSource).toContain("from './TerminalPageDebugOverlay'");
+    expect(terminalPageSource).not.toMatch(/\bconst\s+TerminalQuickBarShell\s*=/);
+    expect(terminalPageSource).not.toMatch(/\bfunction\s+TerminalQuickBarShell\b/);
+    expect(terminalPageSource).not.toMatch(/\bexport\s+const\s+TerminalNetworkBanner\s*=/);
+    expect(terminalPageSource).not.toMatch(/\bconst\s+TerminalNetworkBanner\s*=/);
+    expect(terminalPageSource).not.toMatch(/\bconst\s+TerminalDebugOverlay\s*=/);
+    expect(terminalPageSource).not.toMatch(/\bfunction\s+TerminalDebugOverlay\b/);
+
+    expect(shellUiSource).toMatch(/\bconst\s+TerminalQuickBarShell\s*=/);
+    expect(shellUiSource).toMatch(/\bconst\s+TerminalNetworkBanner\s*=/);
+    expect(debugOverlaySource).toMatch(/\bconst\s+TerminalDebugOverlay\s*=/);
+  });
+
   it('keeps TerminalSessionDrawer from inventing host identity fallbacks', () => {
     const source = read('src/components/terminal/TerminalSessionDrawer.tsx');
 

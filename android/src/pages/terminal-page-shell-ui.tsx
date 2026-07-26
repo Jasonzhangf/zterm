@@ -24,20 +24,28 @@ export function copyMenuButtonStyle(disabled = false, subtle = false) {
 
 const TerminalQuickBarShell = ReactMemo(function TerminalQuickBarShell({
   bottomPx,
+  zIndex = 10,
+  centered = false,
   children,
 }: {
   bottomPx: number;
+  zIndex?: number;
+  centered?: boolean;
   children: ReactNode;
 }) {
   return (
     <div
       data-testid="terminal-quickbar-shell"
+      data-layout={centered ? 'remote-window-centered' : 'standard'}
       style={{
         position: "absolute",
-        left: 0,
-        right: 0,
+        left: centered ? "50%" : 0,
+        right: centered ? "auto" : 0,
         bottom: `${bottomPx}px`,
-        zIndex: 10,
+        zIndex,
+        width: centered ? "min(calc(100vw - 24px), 720px)" : undefined,
+        transform: centered ? "translateX(-50%)" : undefined,
+        pointerEvents: "auto",
       }}
     >
       {children}
@@ -98,7 +106,12 @@ const TerminalNetworkBanner = ReactMemo(function TerminalNetworkBanner({
     <div
       data-testid="terminal-network-banner"
       style={{
-        margin: "0 10px 8px",
+        position: "fixed",
+        top: "calc(env(safe-area-inset-top, 0px) + 10px)",
+        left: 12,
+        right: 12,
+        zIndex: 140,
+        pointerEvents: "none",
         padding: "9px 12px",
         borderRadius: "12px",
         border: `1px solid ${networkBanner.border}`,

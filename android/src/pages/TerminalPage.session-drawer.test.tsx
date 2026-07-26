@@ -319,6 +319,77 @@ describe('TerminalPage portrait session drawer', () => {
     expect(screen.getByTestId('terminal-connection-status-rates').textContent).toContain('↑ 1.0 KB/s ↓ 2.0 KB/s');
   });
 
+  it('keeps one portrait status strip bound to the active session after session switches', () => {
+    const first = makeSession('s1');
+    first.resolvedPath = 'ipv4';
+    first.resolvedEndpoint = '192.168.1.20:3333';
+    const second = makeSession('s2');
+    second.resolvedPath = 'tailscale';
+    second.resolvedEndpoint = '100.66.1.82:3333';
+    const getSessionDebugMetrics = vi.fn((sessionId: string) => ({
+      uplinkBps: sessionId === 's1' ? 1024 : 4096,
+      downlinkBps: sessionId === 's1' ? 2048 : 8192,
+      renderHz: 0,
+      pullHz: 0,
+      transportBufferedBytes: 0,
+      transportBackpressured: false,
+      lastRenderCommitAt: 0,
+      bufferPullActive: false,
+      status: 'waiting' as const,
+      active: sessionId === 's2',
+      updatedAt: 1,
+    }));
+
+    const view = render(
+      <TerminalPage
+        sessions={[first, second]}
+        activeSession={first}
+        getSessionDebugMetrics={getSessionDebugMetrics}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    expect(screen.getAllByTestId('terminal-connection-status-strip')).toHaveLength(1);
+    expect(screen.getByTestId('terminal-connection-status-route').textContent).toContain('局域网');
+    expect(screen.getByTestId('terminal-connection-status-rates').textContent).toContain('↑ 1.0 KB/s ↓ 2.0 KB/s');
+
+    view.rerender(
+      <TerminalPage
+        sessions={[first, second]}
+        activeSession={second}
+        getSessionDebugMetrics={getSessionDebugMetrics}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    expect(screen.getAllByTestId('terminal-connection-status-strip')).toHaveLength(1);
+    expect(screen.getByTestId('terminal-connection-status-route').textContent).toContain('Tailscale');
+    expect(screen.getByTestId('terminal-connection-status-rates').textContent).toContain('↑ 4.0 KB/s ↓ 8.0 KB/s');
+    expect(screen.getByTestId('terminal-connection-status-route').textContent).not.toContain('局域网');
+  });
+
   it('opens the portrait route selector and sends the manual websocket preference', () => {
     const sessions = [makeSession('s1')];
     sessions[0]!.resolvedPath = 'rtc-relay';

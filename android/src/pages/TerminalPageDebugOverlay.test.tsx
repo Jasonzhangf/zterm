@@ -123,6 +123,35 @@ describe('TerminalDebugOverlay', () => {
         quickBarCollapsed
         copySelection={{ active: true, sessionId: session.id, startRowIndex: 12, endRowIndex: 18, menu: null }}
         sessionDrawerDebug={{ open: true, lastEvent: 'switch', eventSeq: 7, callbackSeq: 2, pageCallbackSeq: 5, pickerMode: 'relay' }}
+        getRemoteWindowInputDebug={() => ({
+          contextActive: true,
+          contextLabel: 'app-window/os-event',
+          sessionId: 'session-1',
+          streamId: 'stream-1',
+          targetId: 'target-1',
+          inputRoute: 'os-event',
+          focusPolicy: 'bring-to-focus',
+          lastSource: 'overlay',
+          lastEvent: 'click #1 primary',
+          lastSent: true,
+          lastAt: Date.now(),
+          lastPoint: '10,20 n=0.10,0.20',
+          lastResult: 'accepted',
+          lastResultAt: Date.now(),
+          counts: {
+            focus: 0,
+            pointerDown: 0,
+            pointerMove: 0,
+            pointerUp: 0,
+            click: 1,
+            scroll: 0,
+            key: 0,
+            text: 0,
+            accepted: 1,
+            error: 0,
+          },
+          video: 'aY · vY · r4',
+        })}
       />,
     );
 
@@ -132,6 +161,9 @@ describe('TerminalDebugOverlay', () => {
     expect(screen.getByText('reading')).toBeTruthy();
     expect(screen.getByText('rtc-relay / turn / connect-sent')).toBeTruthy();
     expect(screen.getByText('L relay 159.75.134.56:49152 /udp / R srflx 120.229.11.244:52000 /udp · 91ms')).toBeTruthy();
+    expect(screen.getByTestId('terminal-debug-remote-window-context').textContent).toContain('app-window/os-event');
+    expect(screen.getByTestId('terminal-debug-remote-window-event').textContent).toContain('SEND Y');
+    expect(screen.getByTestId('terminal-debug-remote-window-result').textContent).toContain('accepted');
     expect(screen.getByText('3.0 Hz / 4.0 Hz')).toBeTruthy();
     expect(screen.getByText(/1\.0 KB\/s/)).toBeTruthy();
     expect(screen.getByText(/buf 512 B/)).toBeTruthy();

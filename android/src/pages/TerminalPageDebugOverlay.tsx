@@ -3,6 +3,36 @@ import { useSessionViewportModeSnapshot, type SessionViewportModeStore } from ".
 import type { Session, SessionDebugOverlayMetrics } from "../lib/types";
 import { formatDebugHz, formatDebugRate, resolveDebugStatus } from "./terminal-page-debug-helpers";
 
+export type RemoteWindowInputDebugSnapshot = {
+  contextActive: boolean;
+  contextLabel: string;
+  sessionId: string;
+  streamId: string;
+  targetId: string;
+  inputRoute: string;
+  focusPolicy: string;
+  lastSource: string;
+  lastEvent: string;
+  lastSent: boolean | null;
+  lastAt: number | null;
+  lastPoint: string;
+  lastResult: string;
+  lastResultAt: number | null;
+  counts: {
+    focus: number;
+    pointerDown: number;
+    pointerMove: number;
+    pointerUp: number;
+    click: number;
+    scroll: number;
+    key: number;
+    text: number;
+    accepted: number;
+    error: number;
+  };
+  video: string;
+};
+
 const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   visible,
   session,
@@ -37,6 +67,7 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   quickBarCollapsed,
   copySelection,
   sessionDrawerDebug,
+  getRemoteWindowInputDebug,
 }: {
   visible: boolean;
   session: Session | null;
@@ -86,6 +117,7 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
     pageCallbackSeq: number;
     pickerMode: string | null;
   };
+  getRemoteWindowInputDebug?: () => RemoteWindowInputDebugSnapshot;
 }) {
   const [tick, setTick] = useState(0);
   const viewportModeSnapshot = useSessionViewportModeSnapshot(
@@ -121,12 +153,13 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
     session.lastConnectStage || null,
   ].filter(Boolean).join(' / ');
   const icePairLabel = formatIcePairLabel(session.selectedIcePair);
+  const remoteWindowInputDebug = getRemoteWindowInputDebug?.();
   const overlayStyle: React.CSSProperties = {
     position: "absolute",
     top: debugOverlayPos.y >= 0 ? `${debugOverlayPos.y}px` : "10px",
     left: debugOverlayPos.x >= 0 ? `${debugOverlayPos.x}px` : undefined,
     right: debugOverlayPos.x >= 0 ? undefined : "10px",
-    zIndex: 12,
+    zIndex: 120,
     width: "192px",
     padding: "6px 7px",
     borderRadius: "10px",
@@ -230,6 +263,64 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
             <span>ICE</span><span>{icePairLabel}</span>
           </>
         ) : null}
+        {remoteWindowInputDebug ? (
+          <>
+            <span>远控</span>
+            <span data-testid="terminal-debug-remote-window-context">
+              CTX {remoteWindowInputDebug.contextActive ? "Y" : "N"}
+              {" · "}
+              {remoteWindowInputDebug.contextLabel}
+              {" · "}
+              {remoteWindowInputDebug.inputRoute}/{remoteWindowInputDebug.focusPolicy}
+            </span>
+            <span>RWID</span>
+            <span data-testid="terminal-debug-remote-window-id">
+              c={remoteWindowInputDebug.sessionId} · s={remoteWindowInputDebug.streamId} · t={remoteWindowInputDebug.targetId}
+            </span>
+            <span>RW事件</span>
+            <span data-testid="terminal-debug-remote-window-event">
+              {remoteWindowInputDebug.lastSource}
+              {" · "}
+              SEND {remoteWindowInputDebug.lastSent === null ? "-" : remoteWindowInputDebug.lastSent ? "Y" : "N"}
+              {" · "}
+              {remoteWindowInputDebug.lastEvent}
+              {" · "}
+              {formatRemoteWindowInputDebugAge(remoteWindowInputDebug.lastAt)}
+            </span>
+            <span>RW点</span>
+            <span data-testid="terminal-debug-remote-window-point">{remoteWindowInputDebug.lastPoint}</span>
+            <span>RW结果</span>
+            <span data-testid="terminal-debug-remote-window-result">
+              {remoteWindowInputDebug.lastResult}
+              {" · "}
+              {formatRemoteWindowInputResultAge(remoteWindowInputDebug.lastResultAt)}
+            </span>
+            <span>RW计数</span>
+            <span data-testid="terminal-debug-remote-window-counts">
+              F {remoteWindowInputDebug.counts.focus}
+              {" · "}
+              D {remoteWindowInputDebug.counts.pointerDown}
+              {" · "}
+              M {remoteWindowInputDebug.counts.pointerMove}
+              {" · "}
+              U {remoteWindowInputDebug.counts.pointerUp}
+              {" · "}
+              C {remoteWindowInputDebug.counts.click}
+              {" · "}
+              S {remoteWindowInputDebug.counts.scroll}
+              {" · "}
+              K {remoteWindowInputDebug.counts.key}
+              {" · "}
+              T {remoteWindowInputDebug.counts.text}
+              {" · "}
+              A {remoteWindowInputDebug.counts.accepted}
+              {" · "}
+              E {remoteWindowInputDebug.counts.error}
+            </span>
+            <span>视频</span>
+            <span data-testid="terminal-debug-remote-window-video">{remoteWindowInputDebug.video}</span>
+          </>
+        ) : null}
         <span>窗格</span><span>x{visiblePaneSessions && visiblePaneSessions.length > 0 ? visiblePaneSessions.length : 1}</span>
         <span>刷新</span><span>{formatDebugHz(metrics?.renderHz || 0)} / {formatDebugHz(metrics?.pullHz || 0)}</span>
         <span>流量</span>
@@ -292,6 +383,21 @@ function formatDebugBytes(bytes: number) {
     return `${(safeValue / 1024).toFixed(1)} KB`;
   }
   return `${Math.round(safeValue)} B`;
+}
+
+function formatRemoteWindowInputDebugAge(lastAt: number | null) {
+  if (!lastAt) {
+    return "-";
+  }
+  const ageMs = Math.max(0, Date.now() - lastAt);
+  if (ageMs < 1000) {
+    return `${Math.round(ageMs)}ms`;
+  }
+  return `${Math.round(ageMs / 1000)}s`;
+}
+
+function formatRemoteWindowInputResultAge(lastAt: number | null) {
+  return formatRemoteWindowInputDebugAge(lastAt);
 }
 
 function formatIceCandidateLabel(candidate?: Session['selectedIcePair'] extends infer T

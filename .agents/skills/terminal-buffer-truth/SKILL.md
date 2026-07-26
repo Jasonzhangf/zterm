@@ -213,6 +213,8 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
 - 弱网性能闭环必须使用主链外透明 TCP byte proxy：只允许延迟、限速、暂停读取、周期 stall、显式断连；禁止解析、重写、压缩或裁剪 WebSocket/terminal payload。代理测试必须证明双向字节完全等价，并用真实 control/session WebSocket 统计 inactive body bytes、slow/healthy cadence 和 final revision。
 - `buffer-head` 只允许更新 head metadata / cursor metadata / planner 输入
 - **只有 `buffer-sync apply` 可以触发正文 body repaint**
+- 全屏 TUI 刷新必须比较完整 cell truth，而不是只比较文本和 absolute index：同一行文字不变但背景色、flags、style、cursor 相关 cell metadata 变化时也必须 repaint。回归 gate 要包含 fullscreen/status-row 场景，证明同 `bufferStartIndex` / 同文本 / 新 revision / 新 cell style 会更新 DOM。
+- terminal body 问题禁止用页面 chrome 补偿：网络 banner、状态栏、debug overlay、quickbar 只能是 UI projection owner。若出现“两个状态栏、一个旧状态”或状态栏挤压导致布局变化，修 `terminal-page-shell-ui` / `TerminalPageDebugOverlay` 的单一投影与 fixed overlay，不得改 daemon/buffer/renderer truth 来迎合 chrome。
 - daemon **不得改写 buffer cells 本身**
   - 包括但不限于：cursor paint、reverse 注入、样式补丁、局部重写
   - 若需要传 cursor truth，必须走**独立元数据**，不能写回 `lines[].cells[].flags`
