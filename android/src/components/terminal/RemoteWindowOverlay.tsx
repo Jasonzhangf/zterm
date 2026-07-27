@@ -28,6 +28,7 @@ import type { RemoteWindowControlMessage } from '../../lib/remote-window-message
 import {
   applyRemoteWindowInputResultTarget,
   applyRemoteWindowTargetCatalog,
+  applyRemoteWindowTargetCatalogSnapshot,
   attachRemoteWindowStreamReceiver,
   beginRemoteWindowStreamSetup,
   beginRemoteWindowTargetEnumeration,
@@ -38,6 +39,7 @@ import {
   initialRemoteWindowOverlayState,
   selectRemoteWindowTarget,
   shrinkRemoteWindowOverlay,
+  upsertRemoteWindowCatalogTarget,
   type RemoteWindowOverlayState,
 } from '../../lib/remote-window-overlay-runtime';
 import {
@@ -323,6 +325,7 @@ const REMOTE_WINDOW_FULLSCREEN_PINCH_DISTANCE_THRESHOLD_PX = 18;
 const REMOTE_WINDOW_FULLSCREEN_TWO_FINGER_SCROLL_THRESHOLD_PX = 8;
 const REMOTE_WINDOW_CATALOG_UI_TIMEOUT_MS = 20_000;
 const REMOTE_WINDOW_CATALOG_PROJECTION_CACHE_TTL_MS = 60_000;
+const REMOTE_WINDOW_ACTIVE_CATALOG_SYNC_INTERVAL_MS = 1_000;
 const REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_STORAGE_KEY = 'zterm:remote-window:touch-scroll-fraction-v1';
 const REMOTE_WINDOW_TOUCH_SCROLL_INVERTED_STORAGE_KEY = 'zterm:remote-window:touch-scroll-inverted-v1';
 
@@ -332,7 +335,7 @@ const initialFullscreenViewport: FullscreenViewportState = {
   panY: 0,
 };
 
-const initialFullscreenDisplayMode: FullscreenDisplayMode = 'fit';
+const initialFullscreenDisplayMode: FullscreenDisplayMode = 'fill';
 
 function cloneRemoteWindowCatalogPayload(
   payload: RemoteWindowStreamTargetsResponsePayload,
@@ -908,6 +911,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const [receiverFrameSize, setReceiverFrameSize] = useState<SurfaceSize | null>(null);
   const [itermPaneTargetsExpanded, setItermPaneTargetsExpanded] = useState(false);
   const [catalogRefreshing, setCatalogRefreshing] = useState(false);
+  const [appSwitchOpen, setAppSwitchOpen] = useState(false);
+  const [activeCatalogSyncError, setActiveCatalogSyncError] = useState<string | null>(null);
   const [screenshotStatus, setScreenshotStatus] = useState<RemoteWindowScreenshotStatus>({ phase: 'idle' });
   const [windowThumbnails, setWindowThumbnailsState] = useState<Record<string, RemoteWindowThumbnailStatus>>({});
   const floatingOffsetRef = useRef(floatingOffset);
@@ -928,6 +933,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const videoSurfaceRef = useRef<HTMLDivElement | null>(null);
   const videoElementRef = useRef<HTMLVideoElement | null>(null);
   const activeStreamIdRef = useRef<string | null>(null);
+  const lastDefaultFullscreenFillKeyRef = useRef<string | null>(null);
   const videoPlaybackStatsRef = useRef({
     playAttempts: 0,
     playAccepted: 0,
@@ -1227,6 +1233,43 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     });
   }, []);
 
+  const rememberRemoteWindowCatalogPayload = useCallback((
+    sessionId: string,
+    payload: RemoteWindowStreamTargetsResponsePayload,
+  ) => {
+    const cachedPayload = cloneRemoteWindowCatalogPayload(payload);
+    lastCatalogPayloadRef.current = {
+      sessionId,
+      payload: cachedPayload,
+      updatedAt: Date.now(),
+    };
+    return cachedPayload;
+  }, []);
+
+  const rememberRemoteWindowCatalogTarget = useCallback((
+    sessionId: string,
+    target: RemoteWindowStreamTargetManifest,
+  ) => {
+    const current = lastCatalogPayloadRef.current;
+    const basePayload = current && current.sessionId === sessionId
+      ? current.payload
+      : { requestId: `rw-local-target-${Date.now()}`, targets: [] };
+    lastCatalogPayloadRef.current = {
+      sessionId,
+      payload: upsertRemoteWindowCatalogTarget(basePayload, target),
+      updatedAt: Date.now(),
+    };
+  }, []);
+
+  const applyRemoteWindowActiveCatalogPayload = useCallback((
+    sessionId: string,
+    payload: RemoteWindowStreamTargetsResponsePayload,
+  ) => {
+    const cachedPayload = rememberRemoteWindowCatalogPayload(sessionId, payload);
+    setActiveCatalogSyncError(null);
+    setState((current) => applyRemoteWindowTargetCatalogSnapshot(current, cachedPayload));
+  }, [rememberRemoteWindowCatalogPayload]);
+
   useLayoutEffect(() => {
     if (state.phase !== 'targetLocked') {
       setSurfaceSize(null);
@@ -1322,6 +1365,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const handleOpenPicker = useCallback((options?: { forceRefresh?: boolean }) => {
     clearCatalogWatchdog();
     setItermPaneTargetsExpanded(false);
+    setAppSwitchOpen(false);
+    setActiveCatalogSyncError(null);
     setReceiverFrameSize(null);
     const started = beginRemoteWindowTargetEnumeration(state);
     const targetSessionId = activeSessionId?.trim() || '';
@@ -1391,12 +1436,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       .then((payload) => {
         clearCatalogWatchdog(started.requestEpoch);
         setCatalogRefreshing(false);
-        const cachedPayload = cloneRemoteWindowCatalogPayload(payload);
-        lastCatalogPayloadRef.current = {
-          sessionId: targetSessionId,
-          payload: cachedPayload,
-          updatedAt: Date.now(),
-        };
+        const cachedPayload = rememberRemoteWindowCatalogPayload(targetSessionId, payload);
         setState((current) => applyRemoteWindowTargetCatalog(current, started.requestEpoch, cachedPayload));
       })
       .catch((error) => {
@@ -1413,12 +1453,15 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
             : failRemoteWindowTargetCatalog(current, started.requestEpoch, error)
         ));
       });
-  }, [activeSessionId, clearCatalogWatchdog, requestTargets, state]);
+  }, [activeSessionId, clearCatalogWatchdog, rememberRemoteWindowCatalogPayload, requestTargets, state]);
 
   const handleClose = useCallback(() => {
     clearCatalogWatchdog();
     setItermPaneTargetsExpanded(false);
+    setAppSwitchOpen(false);
+    setActiveCatalogSyncError(null);
     setCatalogRefreshing(false);
+    lastDefaultFullscreenFillKeyRef.current = null;
     floatingDragRef.current = null;
     floatingResizeRef.current = null;
     clearEntryLongPressTimer();
@@ -1501,12 +1544,14 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   }, [inputContext, inputContextKey, onInputContextChange]);
 
   const handleShrink = useCallback(() => {
+    lastDefaultFullscreenFillKeyRef.current = null;
     resetFullscreenViewport();
     setState((current) => shrinkRemoteWindowOverlay(current));
   }, [resetFullscreenViewport]);
 
   const handleFullscreen = useCallback(() => {
     publishRemoteWindowInputContext();
+    lastDefaultFullscreenFillKeyRef.current = null;
     resetFullscreenViewport();
     setState((current) => enterRemoteWindowFullscreen(current));
   }, [publishRemoteWindowInputContext, resetFullscreenViewport]);
@@ -1516,10 +1561,9 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     onRequestKeyboard?.();
   }, [onRequestKeyboard, publishRemoteWindowInputContext]);
 
-  const handleToggleFullscreenDisplayMode = useCallback(() => {
+  const requestFullscreenFillResize = useCallback(() => {
     if (
-      fullscreenDisplayMode === 'fit'
-      && state.phase === 'targetLocked'
+      state.phase === 'targetLocked'
       && state.streamId
       && activeSessionId
     ) {
@@ -1537,6 +1581,27 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           120,
           requestedWidth * (fillReferenceSize.height / fillReferenceSize.width),
         ));
+        const currentWindowHeight = state.target.videoTarget.windowBoundsTopLeftPx.height
+          || getRemoteWindowSourceRect(state.target).height;
+        if (
+          Math.abs(currentWindowWidth - requestedWidth) <= 1
+          && Math.abs(currentWindowHeight - requestedHeight) <= 1
+        ) {
+          onInputDebug?.({
+            source: 'overlay',
+            sent: false,
+            sessionId: activeSessionId,
+            streamId: state.streamId,
+            targetId: state.target.streamTargetId,
+            targetTitle: state.target.videoTarget.title || state.target.videoTarget.appBundleId || null,
+            event: {
+              kind: 'window-resize',
+              width: requestedWidth,
+              height: requestedHeight,
+            },
+          });
+          return true;
+        }
         const eventPayload: RemoteWindowInputEventPayload['event'] = {
           kind: 'window-resize',
           width: requestedWidth,
@@ -1556,18 +1621,57 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           targetTitle: state.target.videoTarget.title || state.target.videoTarget.appBundleId || null,
           event: eventPayload,
         });
+        return true;
       }
     }
+    return false;
+  }, [
+    activeSessionId,
+    onInputDebug,
+    resizeTargetWindow,
+    state,
+    surfaceSize,
+  ]);
+
+  const handleToggleFullscreenDisplayMode = useCallback(() => {
+    requestFullscreenFillResize();
     resetFullscreenViewport();
     setFullscreenDisplayMode(initialFullscreenDisplayMode);
   }, [
+    requestFullscreenFillResize,
+    resetFullscreenViewport,
+    setFullscreenDisplayMode,
+  ]);
+
+  useEffect(() => {
+    if (
+      state.phase !== 'targetLocked'
+      || state.mode !== 'fullscreen'
+      || !state.streamId
+      || !activeSessionId
+      || !surfaceSize
+      || fullscreenDisplayMode !== 'fill'
+    ) {
+      return;
+    }
+    const key = [
+      state.streamId,
+      state.target.streamTargetId,
+      Math.round(surfaceSize.width),
+      Math.round(surfaceSize.height),
+      Math.round(state.target.videoTarget.windowBoundsTopLeftPx.width || getRemoteWindowSourceRect(state.target).width),
+      Math.round(state.target.videoTarget.windowBoundsTopLeftPx.height || getRemoteWindowSourceRect(state.target).height),
+    ].join('|');
+    if (lastDefaultFullscreenFillKeyRef.current === key) {
+      return;
+    }
+    if (requestFullscreenFillResize()) {
+      lastDefaultFullscreenFillKeyRef.current = key;
+    }
+  }, [
     activeSessionId,
     fullscreenDisplayMode,
-    onInputDebug,
-    readVideoSurfaceSize,
-    resetFullscreenViewport,
-    resizeTargetWindow,
-    setFullscreenDisplayMode,
+    requestFullscreenFillResize,
     state,
     surfaceSize,
   ]);
@@ -2197,6 +2301,13 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         resetFullscreenViewport();
       }
       if (msg.payload.target) {
+        const targetSessionId = activeSessionId?.trim() || '';
+        if (targetSessionId) {
+          rememberRemoteWindowCatalogTarget(
+            targetSessionId,
+            msg.payload.target as RemoteWindowStreamTargetManifest,
+          );
+        }
         setState((current) => applyRemoteWindowInputResultTarget(
           current,
           msg.payload.streamId,
@@ -2205,7 +2316,62 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         ));
       }
     });
-  }, [onRemoteWindowMessage, resetFullscreenViewport]);
+  }, [activeSessionId, onRemoteWindowMessage, rememberRemoteWindowCatalogTarget, resetFullscreenViewport]);
+
+  useEffect(() => {
+    if (
+      state.phase !== 'targetLocked'
+      || !state.streamStarted
+      || !state.streamId
+      || !activeSessionId
+      || !requestTargets
+    ) {
+      return undefined;
+    }
+    const targetSessionId = activeSessionId.trim();
+    let disposed = false;
+    let inFlight = false;
+    const refreshActiveCatalog = () => {
+      if (disposed || inFlight) {
+        return;
+      }
+      inFlight = true;
+      void requestTargets(targetSessionId, { forceRefresh: true })
+        .then((payload) => {
+          if (disposed) {
+            return;
+          }
+          applyRemoteWindowActiveCatalogPayload(targetSessionId, payload);
+        })
+        .catch((error) => {
+          if (disposed) {
+            return;
+          }
+          const message = error instanceof Error ? error.message : String(error);
+          setActiveCatalogSyncError(message);
+          console.warn('[RemoteWindowOverlay] active remote window catalog sync failed:', error);
+        })
+        .finally(() => {
+          inFlight = false;
+        });
+    };
+    refreshActiveCatalog();
+    const intervalId = window.setInterval(
+      refreshActiveCatalog,
+      REMOTE_WINDOW_ACTIVE_CATALOG_SYNC_INTERVAL_MS,
+    );
+    return () => {
+      disposed = true;
+      window.clearInterval(intervalId);
+    };
+  }, [
+    activeSessionId,
+    applyRemoteWindowActiveCatalogPayload,
+    requestTargets,
+    state.phase,
+    state.phase === 'targetLocked' ? state.streamId : null,
+    state.phase === 'targetLocked' ? state.streamStarted : false,
+  ]);
 
   useEffect(() => () => {
     clearCatalogWatchdog();
@@ -2219,6 +2385,9 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
 
   const handleSelectTarget = useCallback((target: RemoteWindowStreamTargetManifest) => {
     const previousStreamId = state.phase === 'targetLocked' ? state.streamId || null : null;
+    setAppSwitchOpen(false);
+    setActiveCatalogSyncError(null);
+    lastDefaultFullscreenFillKeyRef.current = null;
     if (previousStreamId && activeSessionId && stopStream) {
       void Promise.resolve(stopStream(activeSessionId, previousStreamId)).catch((error) => {
         console.error('[RemoteWindowOverlay] previous remote stream stop failed before target switch:', error);
@@ -3166,6 +3335,20 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       .find((item) => item.groupId === groupId) || null;
     return group && group.targets.length > 1 ? group : null;
   }, [state]);
+  const lockedSwitchTargets = useMemo(() => {
+    if (state.phase !== 'targetLocked') {
+      return [] as RemoteWindowStreamTargetManifest[];
+    }
+    return state.targets.some((target) => target.streamTargetId === state.target.streamTargetId)
+      ? state.targets
+      : [state.target, ...state.targets];
+  }, [state]);
+  const lockedAppSwitchGroups = useMemo(() => (
+    buildRemoteWindowAppTargetGroups(lockedSwitchTargets)
+  ), [lockedSwitchTargets]);
+  const lockedItermSwitchTargets = useMemo(() => (
+    lockedSwitchTargets.filter((target) => target.videoTarget.kind === 'iterm2-pane')
+  ), [lockedSwitchTargets]);
 
   useEffect(() => {
     if (
@@ -3448,6 +3631,63 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       />
     );
   })() : null;
+  const lockedAppSwitchContent = state.phase === 'targetLocked' ? (() => {
+    const renderSwitchTargetRow = (target: RemoteWindowStreamTargetManifest) => {
+      const active = target.streamTargetId === state.target.streamTargetId;
+      return (
+        <button
+          key={target.streamTargetId}
+          type="button"
+          data-no-drag="true"
+          data-testid={`remote-window-active-app-switch-target-${target.streamTargetId}`}
+          aria-current={active ? 'true' : undefined}
+          onClick={() => {
+            if (!active) {
+              handleSelectTarget(target);
+              return;
+            }
+            setAppSwitchOpen(false);
+          }}
+          style={active ? styles.appSwitchTargetRowActive : styles.appSwitchTargetRow}
+        >
+          <span style={styles.appSwitchTargetTitle}>
+            {target.videoTarget.title || target.videoTarget.appBundleId || target.streamTargetId}
+          </span>
+          <span style={styles.appSwitchTargetMeta}>{formatTargetSubtitle(target)}</span>
+        </button>
+      );
+    };
+    return (
+      <div data-testid="remote-window-active-app-switch-list" data-no-drag="true" style={styles.appSwitchPopover}>
+        {activeCatalogSyncError ? (
+          <div data-testid="remote-window-active-catalog-sync-error" style={styles.appSwitchError}>
+            {activeCatalogSyncError}
+          </div>
+        ) : null}
+        {lockedAppSwitchGroups.map((group) => (
+          <div key={group.groupId} data-testid={`remote-window-active-app-switch-group-${safeRemoteWindowGroupId(group.groupId)}`} style={styles.appSwitchGroup}>
+            <div style={styles.appSwitchGroupTitle}>
+              <span>{group.title || group.appBundleId}</span>
+              <span style={styles.appSwitchGroupCount}>{group.targets.length}</span>
+            </div>
+            {group.targets.map(renderSwitchTargetRow)}
+          </div>
+        ))}
+        {lockedItermSwitchTargets.length > 0 ? (
+          <div data-testid="remote-window-active-app-switch-group-iterm2" style={styles.appSwitchGroup}>
+            <div style={styles.appSwitchGroupTitle}>
+              <span>iTerm2 Panes</span>
+              <span style={styles.appSwitchGroupCount}>{lockedItermSwitchTargets.length}</span>
+            </div>
+            {lockedItermSwitchTargets.map(renderSwitchTargetRow)}
+          </div>
+        ) : null}
+        {lockedSwitchTargets.length === 0 ? (
+          <div style={styles.appSwitchEmpty}>没有可切换窗口</div>
+        ) : null}
+      </div>
+    );
+  })() : null;
 
   const lockedContent = state.phase === 'targetLocked' ? (
     <div
@@ -3478,7 +3718,20 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
             <span data-testid="remote-window-input-mode" style={styles.inputModeBadge}>
               {isRemoteWindowInputSupported(state.target) ? '可操作' : '只读'}
             </span>
-            <span>{state.target.videoTarget.title || state.target.videoTarget.appBundleId}</span>
+            <span style={styles.activeAppSwitch}>
+              <button
+                type="button"
+                data-testid="remote-window-active-app-switch-button"
+                data-no-drag="true"
+                aria-haspopup="listbox"
+                aria-expanded={appSwitchOpen ? 'true' : 'false'}
+                onClick={() => setAppSwitchOpen((current) => !current)}
+                style={styles.activeAppSwitchButton}
+              >
+                {state.target.videoTarget.title || state.target.videoTarget.appBundleId}
+              </button>
+              {appSwitchOpen ? lockedAppSwitchContent : null}
+            </span>
           </div>
           <div data-testid="remote-window-primary-actions" style={styles.lockedPrimaryActions}>
             {state.mode === 'fullscreen' ? (
@@ -4023,6 +4276,120 @@ const styles: Record<string, CSSProperties> = {
     whiteSpace: 'nowrap',
     fontSize: 12,
     fontWeight: 850,
+  },
+  activeAppSwitch: {
+    position: 'relative',
+    minWidth: 0,
+    flex: '1 1 auto',
+  },
+  activeAppSwitchButton: {
+    width: '100%',
+    minWidth: 0,
+    display: 'block',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    padding: '3px 2px',
+    border: 0,
+    background: 'transparent',
+    color: '#edf4ff',
+    textAlign: 'left',
+    fontSize: 12,
+    fontWeight: 850,
+  },
+  appSwitchPopover: {
+    position: 'absolute',
+    top: 'calc(100% + 8px)',
+    left: 0,
+    width: 'min(78vw, 340px)',
+    maxHeight: 'min(52vh, 420px)',
+    overflowY: 'auto',
+    display: 'grid',
+    gap: 8,
+    padding: 8,
+    borderRadius: 12,
+    border: '1px solid rgba(151, 164, 186, 0.22)',
+    background: 'rgba(8, 13, 23, 0.98)',
+    boxShadow: '0 18px 46px rgba(0,0,0,0.52)',
+    zIndex: 4,
+  },
+  appSwitchGroup: {
+    display: 'grid',
+    gap: 5,
+  },
+  appSwitchGroupTitle: {
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+    padding: '2px 4px',
+    color: 'rgba(237,244,255,0.68)',
+    fontSize: 10,
+    fontWeight: 900,
+    textTransform: 'uppercase',
+    letterSpacing: 0,
+  },
+  appSwitchGroupCount: {
+    flex: '0 0 auto',
+    minWidth: 18,
+    padding: '1px 5px',
+    borderRadius: 8,
+    background: 'rgba(151, 164, 186, 0.14)',
+    color: mobileTheme.colors.accent,
+    textAlign: 'center',
+  },
+  appSwitchTargetRow: {
+    minWidth: 0,
+    display: 'grid',
+    gap: 2,
+    padding: '8px 9px',
+    borderRadius: 9,
+    border: '1px solid rgba(151, 164, 186, 0.14)',
+    background: 'rgba(22, 32, 50, 0.92)',
+    color: '#edf4ff',
+    textAlign: 'left',
+  },
+  appSwitchTargetRowActive: {
+    minWidth: 0,
+    display: 'grid',
+    gap: 2,
+    padding: '8px 9px',
+    borderRadius: 9,
+    border: `1px solid ${mobileTheme.colors.accent}`,
+    background: 'rgba(31, 214, 122, 0.12)',
+    color: '#edf4ff',
+    textAlign: 'left',
+  },
+  appSwitchTargetTitle: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    fontSize: 12,
+    fontWeight: 900,
+  },
+  appSwitchTargetMeta: {
+    minWidth: 0,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+    color: 'rgba(237,244,255,0.58)',
+    fontSize: 10,
+    fontWeight: 750,
+  },
+  appSwitchError: {
+    padding: '7px 8px',
+    borderRadius: 8,
+    background: 'rgba(97, 63, 13, 0.72)',
+    color: '#ffe2a8',
+    fontSize: 11,
+    lineHeight: 1.35,
+  },
+  appSwitchEmpty: {
+    padding: 10,
+    color: 'rgba(237,244,255,0.58)',
+    fontSize: 11,
+    textAlign: 'center',
   },
   inputModeBadge: {
     flex: '0 0 auto',

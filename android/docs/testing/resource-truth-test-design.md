@@ -6,6 +6,12 @@ Date: 2026-07-12
 
 Lock global resource ownership before code refactor. The first phase proves resource ids, owners, relations, mainline edges, and function map bindings are reviewable and enforceable.
 
+The second phase adds module and edge truth:
+
+```text
+resource registry -> module registry -> edge registry -> function map -> mainline call map
+```
+
 ## Lifecycle Paths
 
 | lifecycle | positive path | negative path |
@@ -23,6 +29,19 @@ Lock global resource ownership before code refactor. The first phase proves reso
   - every relation id exists.
   - forbidden direct relation is not declared as direct relation.
   - canonical docs and local gate files exist when they are file paths.
+- `src/lib/module-registry-truth.test.ts`
+  - every module id is unique and parented.
+  - every module owner feature exists.
+  - owned/consumed/forbidden resources exist in `docs/resource-registry.json`.
+  - pending resources are explicit and not silently added as concrete truth.
+  - one concrete resource has at most one module owner.
+- `src/lib/edge-registry-truth.test.ts`
+  - every edge module/resource/feature binding exists.
+  - direct edges exist in resource direct relations.
+  - via edges declare via resources.
+  - forbidden direct resource edges are rejected.
+  - every `mainline_call_id` exists in `docs/wiki/mainline-call-map.json`.
+  - request/response/error chains are explicitly numbered.
 - `src/lib/function-map-resource-truth.test.ts`
   - function map has a resource binding section.
   - every binding uses declared resource ids.
@@ -46,7 +65,7 @@ Lock global resource ownership before code refactor. The first phase proves reso
 ## Project Black-Box Gates
 
 - `pnpm --dir android run test:feature-registry -- --reporter dot`.
-- `pnpm --dir android exec vitest run src/lib/resource-registry-truth.test.ts src/lib/function-map-resource-truth.test.ts src/lib/mainline-resource-call-map.test.ts -- --reporter dot`.
+- `pnpm --dir android exec vitest run src/lib/resource-registry-truth.test.ts src/lib/module-registry-truth.test.ts src/lib/edge-registry-truth.test.ts src/lib/function-map-resource-truth.test.ts src/lib/mainline-resource-call-map.test.ts -- --reporter dot`.
 - If implementation touches daemon/mirror/backend resource code, run `pnpm --dir android run daemon:mirror:close-loop`.
 - If implementation touches Mac client resource code, run `pnpm --dir mac test -- --reporter dot` and `pnpm --dir mac run type-check`.
 - If implementation touches Android app behavior, run the mapped Android runtime/UI tests and build/device gate required by the changed layer.

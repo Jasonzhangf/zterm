@@ -9,6 +9,7 @@ import {
   buildTerminalViewportDemandWithRepair,
   buildTerminalViewportDemandKey,
   clearTerminalRecentViewportLayoutChange,
+  computeFollowRealignAfterBufferShift,
   flushTerminalFollowScrollSync,
   markTerminalFollowViewportRealignOnLayoutDrift,
   reconcileTerminalViewportAfterBufferShift,
@@ -234,6 +235,50 @@ describe('shared terminal renderer pure helpers', () => {
     expect(alignCalls).toEqual([]);
     expect(setRenderBottomIndexCalls).toEqual([]);
     expect(emitReadingDemandCalls).toEqual([132]);
+  });
+
+  it('detects large follow padding shifts that need same-frame scroll realignment', () => {
+    expect(computeFollowRealignAfterBufferShift({
+      refreshActive: true,
+      readingMode: false,
+      previousPaddingTopPx: 102,
+      nextPaddingTopPx: 15440,
+      viewportClientHeightPx: 497,
+      maxScrollTop: 15502,
+    })).toEqual({
+      needsImmediateRealign: true,
+      targetScrollTop: 15502,
+      paddingDeltaPx: 15338,
+    });
+  });
+
+  it('does not realign large padding shifts while reading or before a previous frame exists', () => {
+    expect(computeFollowRealignAfterBufferShift({
+      refreshActive: true,
+      readingMode: true,
+      previousPaddingTopPx: 102,
+      nextPaddingTopPx: 15440,
+      viewportClientHeightPx: 497,
+      maxScrollTop: 15502,
+    }).needsImmediateRealign).toBe(false);
+
+    expect(computeFollowRealignAfterBufferShift({
+      refreshActive: true,
+      readingMode: false,
+      previousPaddingTopPx: null,
+      nextPaddingTopPx: 15440,
+      viewportClientHeightPx: 497,
+      maxScrollTop: 15502,
+    }).needsImmediateRealign).toBe(false);
+
+    expect(computeFollowRealignAfterBufferShift({
+      refreshActive: true,
+      readingMode: false,
+      previousPaddingTopPx: 102,
+      nextPaddingTopPx: 300,
+      viewportClientHeightPx: 497,
+      maxScrollTop: 392,
+    }).needsImmediateRealign).toBe(false);
   });
 
   it('derives measured viewport state and layout-drift truth as pure state', () => {

@@ -1,10 +1,12 @@
 import { normalizeScheduleDraft } from '../../../packages/shared/src/schedule/next-fire.ts';
 import type { ScheduleJob } from '../../../packages/shared/src/schedule/types.ts';
 import type {
+  BridgeServerMessage as ServerMessage,
   HostConfigMessage,
+} from '@zterm/shared/protocol';
+import type {
   ScheduleJobDraft,
-  ServerMessage,
-} from '../lib/types';
+} from '@zterm/shared/schedule-types';
 import type {
   TerminalTransportSubscriber,
   TerminalSession,

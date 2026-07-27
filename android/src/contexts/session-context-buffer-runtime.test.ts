@@ -903,6 +903,130 @@ describe('session-context-buffer-runtime inactive gating', () => {
     }));
   });
 
+  it('does not amplify repeated same-tail sparse updates into visible repair requests every frame', () => {
+    const nowSpy = vi.spyOn(Date, 'now');
+    let now = 10_000;
+    nowSpy.mockImplementation(() => now);
+    try {
+      const sessionId = 'session-1';
+      const session = makeSession(sessionId);
+      let localBuffer = createSessionBufferState({
+        lines: ['stable-100', 'stable-101', 'stale-input-102', 'stale-input-103', 'old-status-104'],
+        startIndex: 100,
+        endIndex: 105,
+        bufferHeadStartIndex: 100,
+        bufferTailEndIndex: 105,
+        cols: 80,
+        rows: 24,
+        revision: 10,
+        cacheLines: 1000,
+      });
+      session.buffer = localBuffer;
+      session.daemonHeadRevision = 11;
+      session.daemonHeadEndIndex = 105;
+      const commitSessionBufferUpdate = vi.fn((_sessionId: string, nextBuffer: SessionBufferState) => {
+        localBuffer = nextBuffer;
+        session.buffer = nextBuffer;
+        return true;
+      });
+      const scheduleSessionRenderCommit = vi.fn();
+      const requestSessionBufferSync = vi.fn((_sessionId: string, requestOptions?: any) => {
+        const requestWindow = requestOptions?.requestWindowOverride || { requestStartIndex: 100, requestEndIndex: 105 };
+        refs.tailRefreshStoreRef.current.recordSyncRequest(sessionId, 'reading-repair', {
+          sentAt: now,
+          requestStartIndex: requestWindow.requestStartIndex,
+          requestEndIndex: requestWindow.requestEndIndex,
+          knownRevision: localBuffer.revision,
+          localStartIndex: localBuffer.startIndex,
+          localEndIndex: localBuffer.endIndex,
+          targetHeadRevision: Math.max(0, Math.floor(requestOptions?.headOverride?.daemonHeadRevision || 0)),
+          repairSignature: '',
+        });
+        return true;
+      });
+      const runtimeDebug = vi.fn();
+      const refs = {
+        stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+        sessionRevisionResetRef: { current: new Map() },
+        sessionHeadStoreRef: makeLiveHeadStoreRef([[sessionId, {
+          revision: 11,
+          latestEndIndex: 105,
+          availableStartIndex: 100,
+          availableEndIndex: 105,
+          seenAt: now,
+        }]]),
+        tailRefreshStoreRef: makeTailRefreshStoreRef(),
+        sessionVisibleRangeRef: {
+          current: new Map([[sessionId, { startIndex: 100, endIndex: 105, viewportRows: 5 }]]),
+        },
+      };
+
+      const applySparseStatus = (revision: number, text: string) => {
+        refs.sessionHeadStoreRef.current.setLiveHead(sessionId, {
+          revision,
+          latestEndIndex: 105,
+          availableStartIndex: 100,
+          availableEndIndex: 105,
+          seenAt: now,
+        });
+        applyIncomingBufferSyncRuntime({
+          sessionId,
+          payload: {
+            revision,
+            startIndex: 104,
+            endIndex: 105,
+            availableStartIndex: 100,
+            availableEndIndex: 105,
+            cols: 80,
+            rows: 24,
+            cursorKeysApp: false,
+            lines: [
+              { ...makeLine(text), index: 104 },
+            ],
+          },
+          refs,
+          readSessionBufferSnapshot: () => localBuffer,
+          resolveSessionCacheLines: () => 1000,
+          summarizeBufferPayload: (payload) => ({
+            revision: payload.revision,
+            startIndex: payload.startIndex,
+            endIndex: payload.endIndex,
+            lineCount: payload.lines.length,
+          }),
+          runtimeDebug,
+          commitSessionBufferUpdate,
+          scheduleSessionRenderCommit,
+          isSessionTransportActive: () => true,
+          requestSessionBufferSync,
+        });
+      };
+
+      applySparseStatus(11, 'new-status-104-a');
+      now += 200;
+      applySparseStatus(12, 'new-status-104-b');
+      now += 200;
+      applySparseStatus(13, 'new-status-104-c');
+
+      expect(commitSessionBufferUpdate).toHaveBeenCalledTimes(3);
+      expect(scheduleSessionRenderCommit).toHaveBeenCalledTimes(3);
+      expect(requestSessionBufferSync).toHaveBeenCalledTimes(1);
+      expect(requestSessionBufferSync).toHaveBeenCalledWith(sessionId, expect.objectContaining({
+        headOverride: { daemonHeadRevision: 11, daemonHeadEndIndex: 105 },
+      }));
+      expect(cellsToText(localBuffer.lines[4]!)).toBe('new-status-104-c');
+      expect(runtimeDebug).toHaveBeenCalledWith(
+        'session.buffer.sync.visible-stale-non-gap-repair-suppressed',
+        expect.objectContaining({
+          sessionId,
+          requestStartIndex: 100,
+          requestEndIndex: 105,
+        }),
+      );
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
   it('applies later chunks from the same authoritative revision frame instead of treating them as stale', () => {
     const sessionId = 'session-1';
     const session = makeSession(sessionId);
@@ -2254,6 +2378,60 @@ describe('session-context-buffer-runtime inactive gating', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('uses explicit headOverride for reading-repair even when live head store is stale', () => {
+    const sessionId = 'session-1';
+    const session = makeSession(sessionId);
+    const ws = { readyState: WebSocket.OPEN } as any;
+    const sendSocketPayload = vi.fn();
+    const refs = {
+      stateRef: { current: { sessions: [session], activeSessionId: sessionId } },
+      sessionVisibleRangeRef: {
+        current: new Map([[sessionId, { startIndex: 0, endIndex: 1, viewportRows: 24 }]]),
+      },
+      sessionHeadStoreRef: makeLiveHeadStoreRef([[sessionId, {
+        revision: 6,
+        latestEndIndex: 1,
+        seenAt: 1,
+      }]]),
+      sessionPullStateRef: { current: new Map() },
+      tailRefreshStoreRef: makeTailRefreshStoreRef(),
+    };
+
+    const requested = requestSessionBufferSyncRuntime({
+      sessionId,
+      requestOptions: {
+        reason: 'visible-non-gap-repair',
+        purpose: 'reading-repair',
+        headOverride: { daemonHeadRevision: 9, daemonHeadEndIndex: 1 },
+        requestWindowOverride: { requestStartIndex: 0, requestEndIndex: 1 },
+        requestMissingRangesOverride: [{ startIndex: 0, endIndex: 1 }],
+      },
+      refs,
+      readSessionTransportSocket: () => ws,
+      readSessionBufferSnapshot: () => session.buffer,
+      clearSessionPullState: vi.fn(),
+      sendSocketPayload,
+      runtimeDebug: vi.fn(),
+      resolveTerminalRefreshCadence: () => ({ pullRequestStaleMs: 1500, minTailRefreshGapMs: 33, readingSyncDelayMs: 24 }),
+    });
+
+    expect(requested).toBe(true);
+    expect(JSON.parse(sendSocketPayload.mock.calls[0][2])).toEqual({
+      type: 'buffer-sync-request',
+      payload: expect.objectContaining({
+        targetHeadRevision: 9,
+        requestStartIndex: 0,
+        requestEndIndex: 1,
+      }),
+    });
+    expect(sendSocketPayload.mock.calls[0][3]).toMatchObject({
+      pullPurpose: 'reading-repair',
+      targetHeadRevision: 9,
+      targetStartIndex: 0,
+      targetEndIndex: 1,
+    });
   });
 
   it('does not schedule a render commit when buffer-head repeats the same head and cursor truth', () => {

@@ -213,6 +213,8 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
 - 弱网性能闭环必须使用主链外透明 TCP byte proxy：只允许延迟、限速、暂停读取、周期 stall、显式断连；禁止解析、重写、压缩或裁剪 WebSocket/terminal payload。代理测试必须证明双向字节完全等价，并用真实 control/session WebSocket 统计 inactive body bytes、slow/healthy cadence 和 final revision。
 - `buffer-head` 只允许更新 head metadata / cursor metadata / planner 输入
 - **只有 `buffer-sync apply` 可以触发正文 body repaint**
+- `buffer-head.latestEndIndex` 只表示 daemon mirror 的 authoritative tail absolute index（`bufferStartIndex + bufferLines.length`），不是 row-level body freshness。诊断 input/tail 行旧内容时，禁止用 `latestEndIndex` 或全局 `localRevision == daemonHeadRevision` 直接证明可见非 gap 行已新鲜；必须比较 source row / payload row / client sparse row / DOM row。
+- 稀疏 `buffer-sync` 只覆盖 payload 中的 row/range。若一个可见非 gap 行曾漏刷，后续单行 status/footer sparse patch 可能推进全局 buffer revision 并掩盖该旧行。此类问题必须加“source row cleared once -> client missed non-gap row -> later tiny sparse patch -> DOM still stale”的黑盒 gate，再改 sparse apply / visible-window repaint authority；禁止用 QuickBar、reconnect、header repaint、DOM 清空补偿。
 - 全屏 TUI 刷新必须比较完整 cell truth，而不是只比较文本和 absolute index：同一行文字不变但背景色、flags、style、cursor 相关 cell metadata 变化时也必须 repaint。回归 gate 要包含 fullscreen/status-row 场景，证明同 `bufferStartIndex` / 同文本 / 新 revision / 新 cell style 会更新 DOM。
 - terminal body 问题禁止用页面 chrome 补偿：网络 banner、状态栏、debug overlay、quickbar 只能是 UI projection owner。若出现“两个状态栏、一个旧状态”或状态栏挤压导致布局变化，修 `terminal-page-shell-ui` / `TerminalPageDebugOverlay` 的单一投影与 fixed overlay，不得改 daemon/buffer/renderer truth 来迎合 chrome。
 - daemon **不得改写 buffer cells 本身**

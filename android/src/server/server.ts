@@ -12,15 +12,15 @@ import { createServer } from 'http';
 import { join } from 'path';
 import { homedir } from 'os';
 import type {
-  ServerMessage,
-} from '../lib/types';
+  BridgeServerMessage as ServerMessage,
+} from '@zterm/shared/protocol';
 import {
   buildDaemonSessionName,
   DEFAULT_BRIDGE_PORT,
   DEFAULT_DAEMON_HOST,
   DEFAULT_DAEMON_SESSION_NAME,
   WTERM_CONFIG_DISPLAY_PATH,
-} from '../lib/mobile-config';
+} from '@zterm/shared/mobile-config';
 import { getWtermHomeDir, getWtermUpdatesDir, resolveDaemonRuntimeConfig } from './daemon-config';
 import { createTraversalRelayHostClient } from './relay-client';
 import { findChangedIndexedRanges } from './canonical-buffer';
@@ -68,7 +68,7 @@ import {
   buildRemoteWindowImagePasteInputPayloads,
   createRemoteWindowStreamDaemonRuntime,
 } from './remote-window-stream-daemon';
-import { createTerminalPerformanceTraceStore } from '../lib/terminal-performance-trace';
+import { createTerminalPerformanceTraceStore } from '@zterm/shared/terminal/performance-trace';
 
 const DAEMON_CONFIG = resolveDaemonRuntimeConfig();
 const PORT = DAEMON_CONFIG.port || DEFAULT_BRIDGE_PORT;

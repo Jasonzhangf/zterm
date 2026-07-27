@@ -6,7 +6,7 @@ import {
   buildDaemonSessionName,
   DEFAULT_BRIDGE_PORT,
   DEFAULT_DAEMON_HOST,
-} from '../lib/mobile-config';
+} from '@zterm/shared/mobile-config';
 
 export const DEFAULT_DAEMON_TERMINAL_CACHE_LINES = 3000;
 

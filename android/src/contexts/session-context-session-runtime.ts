@@ -166,12 +166,17 @@ export function createSessionRuntime(options: {
   };
 }) {
   const resolvedSessionName = getResolvedSessionName(options.host);
-  const existingSession = findReusableManagedSession({
-    sessions: options.refs.stateRef.current.sessions,
-    host: options.host,
-    resolvedSessionName,
-    activeSessionId: options.refs.stateRef.current.activeSessionId,
-  });
+  // sessionId is the only authority for reusing an existing managed session. Two
+  // tmux sessions that happen to share host+sessionName (e.g. rcc and rcc2 after
+  // a rename) must NEVER collapse into one client-owned session.
+  const reuseSessionId = options.createOptions?.sessionId?.trim() || '';
+  const existingSession = reuseSessionId
+    ? findReusableManagedSession({
+        sessionId: reuseSessionId,
+        sessions: options.refs.stateRef.current.sessions,
+        activeSessionId: options.refs.stateRef.current.activeSessionId,
+      })
+    : null;
   const shouldConnect = options.createOptions?.connect !== false;
 
   if (existingSession) {

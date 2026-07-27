@@ -190,7 +190,6 @@ describe('copy mode long-press e2e', () => {
         setActivePane: vi.fn(),
         keepTerminalInputFocused,
         sessionBufferStore: { getSnapshot: () => ({ buffer: makeBuffer() }) } as any,
-        sessions: [{ id: 's1', buffer: null } as any],
       }),
     );
 
@@ -243,7 +242,6 @@ describe('copy mode long-press e2e', () => {
         setActivePane: vi.fn(),
         keepTerminalInputFocused,
         sessionBufferStore: { getSnapshot: () => ({ buffer: makeBuffer() }) } as any,
-        sessions: [{ id: 's1', buffer: null } as any],
       }),
     );
 
@@ -269,7 +267,6 @@ describe('copy mode long-press e2e', () => {
         setActivePane: vi.fn(),
         keepTerminalInputFocused,
         sessionBufferStore: { getSnapshot: () => ({ buffer: makeBuffer() }) } as any,
-        sessions: [{ id: 's1', buffer: null } as any],
       }),
     );
 

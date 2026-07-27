@@ -5048,7 +5048,7 @@ var import_http = require("http");
 var import_path6 = require("path");
 var import_os4 = require("os");
 
-// src/lib/mobile-config.ts
+// ../packages/shared/src/connection/mobile-config.ts
 var MOBILE_BRIDGE_CONFIG = {
   defaultBridgePort: 3333,
   daemonHost: "0.0.0.0",
@@ -6645,6 +6645,8 @@ function saveScheduleStore(jobs, storePath = getScheduleStorePath()) {
 }
 
 // ../packages/shared/src/connection/protocol.ts
+var FILE_TRANSFER_WIRE_CHUNK_BYTES = 16 * 1024;
+var FILE_TRANSFER_WIRE_FRAME_MAX_CHARS = 48 * 1024;
 var TERMINAL_MUX_PROTOCOL_VERSION = 1;
 var TERMINAL_MUX_TARGET_CLIENT_MESSAGE_TYPES = [
   "list-sessions",
@@ -6829,8 +6831,6 @@ function cellsToLine(cells) {
   }
   return line.replace(/\s+$/u, "");
 }
-
-// src/lib/terminal-buffer-debug.ts
 function summarizeIndexedLinesForDebug(lines) {
   const materialized = lines.map((line) => ({
     index: line.index,
@@ -8486,35 +8486,9 @@ function createTerminalRuntime(deps) {
     subscriber.mirrorKey = null;
     sessions2.delete(subscriber.id);
   }
+  const { defaultSessionName: _defaultSessionName, daemonRuntimeDebug: _debug, ...mirrorDeps } = deps;
   const mirrorRuntime = createTerminalMirrorRuntime({
-    defaultViewport: deps.defaultViewport,
-    sessions: sessions2,
-    mirrors: mirrors2,
-    sendMessage: deps.sendMessage,
-    sendText: deps.sendText,
-    recordPerformanceTrace: deps.recordPerformanceTrace,
-    sendScheduleStateToSession: deps.sendScheduleStateToSession,
-    buildConnectedPayload: deps.buildConnectedPayload,
-    buildBufferHeadPayload: deps.buildBufferHeadPayload,
-    buildChangedRangesBufferSyncPayload: deps.buildChangedRangesBufferSyncPayload,
-    sanitizeSessionName: deps.sanitizeSessionName,
-    getMirrorKey: deps.getMirrorKey,
-    normalizeTerminalCols: deps.normalizeTerminalCols,
-    normalizeTerminalRows: deps.normalizeTerminalRows,
-    resolveAttachGeometry: deps.resolveAttachGeometry,
-    readTmuxPaneMetrics: deps.readTmuxPaneMetrics,
-    assertTmuxSessionExists: deps.assertTmuxSessionExists,
-    captureMirrorAuthoritativeBufferFromTmux: deps.captureMirrorAuthoritativeBufferFromTmux,
-    mirrorBufferChanged: deps.mirrorBufferChanged,
-    mirrorCursorEqual: deps.mirrorCursorEqual,
-    writeToLiveMirror: deps.writeToLiveMirror,
-    enqueueLiveMirrorInput: deps.enqueueLiveMirrorInput,
-    disposeLiveMirrorInputBatch: deps.disposeLiveMirrorInputBatch,
-    writeToTmuxSession: deps.writeToTmuxSession,
-    autoCommandDelayMs: deps.autoCommandDelayMs,
-    waitMs: deps.waitMs,
-    logTimePrefix: deps.logTimePrefix,
-    runTmux: deps.runTmux,
+    ...mirrorDeps,
     closeTransportSubscriber,
     getSessionMirror: getSubscriberMirror
   });
@@ -8891,7 +8865,7 @@ function resolveRemoteScreenshotErrorMessage(error, timeoutMs) {
 }
 
 // src/server/terminal-file-transfer-types.ts
-var FILE_CHUNK_SIZE = 256 * 1024;
+var FILE_CHUNK_SIZE = FILE_TRANSFER_WIRE_CHUNK_BYTES;
 var REMOTE_SCREENSHOT_CAPTURE_TIMEOUT_MS = 15e3;
 
 // src/server/terminal-file-transfer-list-runtime.ts
@@ -9708,49 +9682,32 @@ function handleTmuxControlMessageRuntime(deps, connection, message) {
   }
 }
 
-// src/server/terminal-message-runtime.ts
-var MAX_INPUT_PAYLOAD_BYTES = TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES;
-function createTerminalMessageRuntime(deps) {
-  function debugInput(scope, payload) {
-    deps.daemonRuntimeDebug?.(`input-${scope}`, payload);
-  }
-  function resolveCurrentSessionForInput(connection) {
-    if (!connection.boundSubscriberId) {
-      return null;
-    }
-    const current = deps.sessions.get(connection.boundSubscriberId) || null;
-    if (!current) {
-      return null;
-    }
-    if (current.transportId !== connection.transportId || current.transport !== connection.transport) {
-      return null;
-    }
-    return current;
-  }
+// src/server/terminal-reliable-input-ack.ts
+var RELIABLE_INPUT_ACKED_SEQ_MAX = 2048;
+function createReliableInputAckCache() {
   const reliableInputAckedSeqs = /* @__PURE__ */ new Map();
-  const RELIABLE_INPUT_ACKED_SEQ_MAX = 2048;
   function reliableInputKey(sessionId, seq) {
     return `${sessionId}\0${seq}`;
   }
-  function rememberReliableInputAck(sessionId, seq, bytes) {
-    reliableInputAckedSeqs.set(reliableInputKey(sessionId, seq), { accepted: true, bytes });
-    while (reliableInputAckedSeqs.size > RELIABLE_INPUT_ACKED_SEQ_MAX) {
-      const oldestKey = reliableInputAckedSeqs.keys().next().value;
-      if (typeof oldestKey !== "string") {
-        break;
+  return {
+    remember(sessionId, seq, bytes) {
+      reliableInputAckedSeqs.set(reliableInputKey(sessionId, seq), { accepted: true, bytes });
+      while (reliableInputAckedSeqs.size > RELIABLE_INPUT_ACKED_SEQ_MAX) {
+        const oldestKey = reliableInputAckedSeqs.keys().next().value;
+        if (typeof oldestKey !== "string") {
+          break;
+        }
+        reliableInputAckedSeqs.delete(oldestKey);
       }
-      reliableInputAckedSeqs.delete(oldestKey);
+    },
+    read(sessionId, seq) {
+      return reliableInputAckedSeqs.get(reliableInputKey(sessionId, seq)) || null;
     }
-  }
-  function readReliableInputAck(sessionId, seq) {
-    return reliableInputAckedSeqs.get(reliableInputKey(sessionId, seq)) || null;
-  }
-  function sendInputAck(connection, payload) {
-    deps.sendTransportMessage(connection.transport, {
-      type: "input-ack",
-      payload
-    });
-  }
+  };
+}
+
+// src/server/terminal-mux-channel-runtime.ts
+function createTerminalMuxChannelRuntime(deps) {
   function sendMuxFrame(connection, frame) {
     deps.sendTransportMessage(connection.transport, frame);
   }
@@ -9835,7 +9792,7 @@ function createTerminalMessageRuntime(deps) {
         }));
         return;
       case "mux-target-message": {
-        await handleMessage(
+        await deps.handleMessage(
           createMuxTargetMessageConnection(connection, frame.payload.requestId),
           Buffer.from(JSON.stringify(frame.payload.message))
         );
@@ -9861,8 +9818,8 @@ function createTerminalMessageRuntime(deps) {
           ));
           return;
         }
-        const subscriber = deps.controlRuntimeDeps.createMuxChannelSubscriber(connection, frame.payload.channelId);
-        subscriber.sessionName = deps.controlRuntimeDeps.sanitizeSessionName(frame.payload.sessionName);
+        const subscriber = deps.createMuxChannelSubscriber(connection, frame.payload.channelId);
+        subscriber.sessionName = deps.sanitizeSessionName(frame.payload.sessionName);
         subscriber.bodySubscribed = frame.payload.bodySubscribed !== false;
         sendMuxFrame(connection, {
           type: "mux-channel-opened",
@@ -9874,7 +9831,7 @@ function createTerminalMessageRuntime(deps) {
             }
           }
         });
-        void deps.controlRuntimeDeps.attachTmux(subscriber, {
+        void deps.attachTmux(subscriber, {
           sessionName: frame.payload.sessionName,
           cols: frame.payload.cols,
           rows: frame.payload.rows,
@@ -9914,7 +9871,7 @@ function createTerminalMessageRuntime(deps) {
           ));
           return;
         }
-        await handleMessage(
+        await deps.handleMessage(
           createMuxChannelMessageConnection(connection, subscriber),
           Buffer.from(JSON.stringify(frame.payload.message))
         );
@@ -9937,7 +9894,7 @@ function createTerminalMessageRuntime(deps) {
           ));
           return;
         }
-        await handleMessage(
+        await deps.handleMessage(
           createMuxChannelMessageConnection(connection, subscriber),
           Buffer.from(frame.payload.dataBase64, "base64"),
           true
@@ -9970,6 +9927,46 @@ function createTerminalMessageRuntime(deps) {
         return;
     }
   }
+  return { sendMuxFrame, handleMuxFrame };
+}
+
+// src/server/terminal-message-runtime.ts
+var MAX_INPUT_PAYLOAD_BYTES = TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES;
+function createTerminalMessageRuntime(deps) {
+  function debugInput(scope, payload) {
+    deps.daemonRuntimeDebug?.(`input-${scope}`, payload);
+  }
+  function resolveCurrentSessionForInput(connection) {
+    if (!connection.boundSubscriberId) {
+      return null;
+    }
+    const current = deps.sessions.get(connection.boundSubscriberId) || null;
+    if (!current) {
+      return null;
+    }
+    if (current.transportId !== connection.transportId || current.transport !== connection.transport) {
+      return null;
+    }
+    return current;
+  }
+  const reliableInputAckCache = createReliableInputAckCache();
+  function sendInputAck(connection, payload) {
+    deps.sendTransportMessage(connection.transport, {
+      type: "input-ack",
+      payload
+    });
+  }
+  const muxRuntime = createTerminalMuxChannelRuntime({
+    sessions: deps.sessions,
+    sendTransportMessage: deps.sendTransportMessage,
+    createMuxChannelSubscriber: (connection, channelId) => deps.controlRuntimeDeps.createMuxChannelSubscriber(connection, channelId),
+    sanitizeSessionName: (input) => deps.controlRuntimeDeps.sanitizeSessionName(input),
+    attachTmux: (subscriber, payload) => deps.controlRuntimeDeps.attachTmux(subscriber, payload),
+    closeSession: deps.closeSession,
+    handleMessage: (connection, raw, isBinary) => handleMessage(connection, raw, isBinary)
+  });
+  const handleMuxFrame = muxRuntime.handleMuxFrame;
+  const sendMuxFrame = muxRuntime.sendMuxFrame;
   function normalizeReliableInputPayload(payload) {
     if (!payload || typeof payload !== "object") {
       return null;
@@ -10061,7 +10058,7 @@ function createTerminalMessageRuntime(deps) {
       return;
     }
     if (ackSeq) {
-      const existingAck = readReliableInputAck(inputSession.id, ackSeq);
+      const existingAck = reliableInputAckCache.read(inputSession.id, ackSeq);
       if (existingAck) {
         sendInputAck(connection, {
           version: 1,
@@ -10090,7 +10087,7 @@ function createTerminalMessageRuntime(deps) {
       return;
     }
     if (ackSeq) {
-      rememberReliableInputAck(inputSession.id, ackSeq, bytes);
+      reliableInputAckCache.remember(inputSession.id, ackSeq, bytes);
       sendInputAck(connection, {
         version: 1,
         seq: ackSeq,
@@ -10628,9 +10625,10 @@ function createTerminalMessageRuntime(deps) {
 var import_fs5 = require("fs");
 var import_path5 = require("path");
 
-// src/lib/terminal-performance-trace.ts
+// ../packages/shared/src/terminal/performance-trace.ts
 var FORBIDDEN_PAYLOAD_KEYS = /* @__PURE__ */ new Set(["payload", "text", "lines", "cells", "content", "data"]);
 var TRACE_DEBUG_SCOPE = "terminal.performance.trace";
+var MUX_CHANNEL_ID_MARKER = ":channel:";
 function assertMetadataOnly(record) {
   for (const key of FORBIDDEN_PAYLOAD_KEYS) {
     if (key in record) {
@@ -10729,15 +10727,32 @@ function percentile95(values) {
   const index = Math.min(sorted.length - 1, Math.ceil(sorted.length * 0.95) - 1);
   return sorted[index] ?? null;
 }
+function normalizeMuxChannelTraceIdentity(input) {
+  const value = typeof input === "string" ? input.trim() : "";
+  if (!value) {
+    return "";
+  }
+  const markerIndex = value.lastIndexOf(MUX_CHANNEL_ID_MARKER);
+  if (markerIndex < 0) {
+    return value;
+  }
+  return value.slice(markerIndex + MUX_CHANNEL_ID_MARKER.length).trim() || value;
+}
+function buildTraceSampleKey(record) {
+  const canonicalSessionId = normalizeMuxChannelTraceIdentity(record.sessionId);
+  const canonicalTraceId = normalizeMuxChannelTraceIdentity(record.traceId);
+  const canonicalSubscriberId = normalizeMuxChannelTraceIdentity(record.subscriberId || record.sessionId);
+  return [
+    canonicalSessionId,
+    canonicalTraceId || "__legacy_trace__",
+    Number.isFinite(record.mirrorRevision) ? String(record.mirrorRevision) : "__legacy_revision__",
+    canonicalSubscriberId || "__legacy_subscriber__"
+  ].join("\0");
+}
 function summarizeTerminalPerformanceTrace(records) {
   const bySample = /* @__PURE__ */ new Map();
   for (const record of records) {
-    const sampleKey = [
-      record.sessionId,
-      record.traceId || "__legacy_trace__",
-      Number.isFinite(record.mirrorRevision) ? String(record.mirrorRevision) : "__legacy_revision__",
-      record.subscriberId || "__legacy_subscriber__"
-    ].join("\0");
+    const sampleKey = buildTraceSampleKey(record);
     const current = bySample.get(sampleKey) || [];
     current.push(record);
     bySample.set(sampleKey, current);
@@ -13302,60 +13317,9 @@ async function captureRemoteScreenshotWithDaemon(options) {
 }
 
 // src/server/remote-window-stream-daemon.ts
-var import_node_child_process2 = require("node:child_process");
 var import_wrtc2 = __toESM(require_lib2(), 1);
-var DEFAULT_ITERM2_PYTHON_TIMEOUT_MS = 5e3;
-var DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS = 15e3;
-var DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS = 2e4;
-var DEFAULT_REMOTE_WINDOW_FRAME_RATE = 30;
-var DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 6e4;
-var REMOTE_WINDOW_INPUT_STALE_MS = 1e3;
-var REMOTE_WINDOW_INPUT_FOCUS_TIMEOUT_MS = 3e3;
-var REMOTE_WINDOW_INPUT_FOCUS_PAIR_GRACE_MS = 25;
-var REMOTE_WINDOW_INPUT_HELPER_READY_TIMEOUT_MS = 15e3;
-var REMOTE_WINDOW_CAPTURE_UPDATE_TIMEOUT_MS = 3e3;
-var REMOTE_WINDOW_CAPTURE_UPDATE_STDERR_PREFIX = "ZTERM_REMOTE_WINDOW_CAPTURE_UPDATE ";
-var ITERM2_APP_BUNDLE_ID = "com.googlecode.iterm2";
-var ITERM2_PANE_GAP_PX = 1;
-var REMOTE_WINDOW_ERROR_MESSAGE_MAX_CHARS = 220;
-var REMOTE_WINDOW_CAPTURE_FRAME_MAGIC = Buffer.from("ZRW1");
-var {
-  RTCPeerConnection: RTCPeerConnection2,
-  RTCSessionDescription: RTCSessionDescription2,
-  RTCIceCandidate: RTCIceCandidate2,
-  nonstandard
-} = import_wrtc2.default;
-function buildRemoteWindowImagePasteInputPayloads(options) {
-  const now = options.now ?? Date.now;
-  return [
-    {
-      requestId: `${options.requestPrefix}-0`,
-      streamId: options.streamId,
-      targetId: options.targetId,
-      clientSentAt: now(),
-      event: {
-        kind: "key",
-        phase: "down",
-        key: "v",
-        code: "KeyV",
-        metaKey: true
-      }
-    },
-    {
-      requestId: `${options.requestPrefix}-1`,
-      streamId: options.streamId,
-      targetId: options.targetId,
-      clientSentAt: now(),
-      event: {
-        kind: "key",
-        phase: "up",
-        key: "v",
-        code: "KeyV",
-        metaKey: true
-      }
-    }
-  ];
-}
+
+// src/server/remote-window-scripts.ts
 var ITERM2_CATALOG_PYTHON = String.raw`
 import json
 import iterm2
@@ -14332,38 +14296,14 @@ DispatchQueue.global(qos: .utility).async {
 
 dispatchMain()
 `;
+
+// src/server/remote-window-support.ts
+var REMOTE_WINDOW_ERROR_MESSAGE_MAX_CHARS = 220;
 function remoteWindowError(payload, code, message) {
   return {
     requestId: payload.requestId || "",
     code,
     message
-  };
-}
-function buildRemoteWindowTargetCatalogCacheKey(payload) {
-  return [
-    payload.includeAppWindows !== false ? "app" : "no-app",
-    payload.includeIterm2 !== false ? "iterm2" : "no-iterm2"
-  ].join("|");
-}
-function cloneRemoteWindowTargetCatalogResponse(response, requestId) {
-  return {
-    requestId,
-    targets: response.targets.slice(),
-    ...response.errors ? {
-      errors: response.errors.map((error) => ({
-        ...error,
-        requestId
-      }))
-    } : {}
-  };
-}
-function cloneRemoteWindowTargetCatalogResult(result, requestId) {
-  if ("targets" in result) {
-    return cloneRemoteWindowTargetCatalogResponse(result, requestId);
-  }
-  return {
-    ...result,
-    requestId
   };
 }
 function normalizeWhitespace(value) {
@@ -14429,6 +14369,13 @@ function rectWithOffset(rect, offset) {
     height: rect.height
   };
 }
+
+// src/server/remote-window-catalog.ts
+var import_node_child_process2 = require("node:child_process");
+var DEFAULT_ITERM2_PYTHON_TIMEOUT_MS = 5e3;
+var DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS = 15e3;
+var ITERM2_APP_BUNDLE_ID = "com.googlecode.iterm2";
+var ITERM2_PANE_GAP_PX = 1;
 function measureIterm2Node(node) {
   if (node.type === "session") {
     const frame = validateRect(node.frame, `session:${node.sessionId}`);
@@ -14733,6 +14680,58 @@ function runDefaultMacosAppWindowCatalog(script, options) {
     });
   });
 }
+function parseIterm2Catalog(stdout) {
+  const parsed = JSON.parse(stdout);
+  if (!parsed || !Array.isArray(parsed.windows)) {
+    throw new Error("iTerm2 catalog missing windows");
+  }
+  return parsed;
+}
+function parseMacosAppWindowCatalog(stdout) {
+  const parsed = JSON.parse(stdout);
+  if (!parsed || !Array.isArray(parsed.windows)) {
+    throw new Error("macOS app window catalog missing windows");
+  }
+  return parsed;
+}
+
+// src/server/remote-window-input-helper.ts
+var import_node_child_process3 = require("node:child_process");
+var REMOTE_WINDOW_INPUT_STALE_MS = 1e3;
+var REMOTE_WINDOW_INPUT_FOCUS_TIMEOUT_MS = 3e3;
+var REMOTE_WINDOW_INPUT_FOCUS_PAIR_GRACE_MS = 25;
+var REMOTE_WINDOW_INPUT_HELPER_READY_TIMEOUT_MS = 15e3;
+function buildRemoteWindowImagePasteInputPayloads(options) {
+  const now = options.now ?? Date.now;
+  return [
+    {
+      requestId: `${options.requestPrefix}-0`,
+      streamId: options.streamId,
+      targetId: options.targetId,
+      clientSentAt: now(),
+      event: {
+        kind: "key",
+        phase: "down",
+        key: "v",
+        code: "KeyV",
+        metaKey: true
+      }
+    },
+    {
+      requestId: `${options.requestPrefix}-1`,
+      streamId: options.streamId,
+      targetId: options.targetId,
+      clientSentAt: now(),
+      event: {
+        kind: "key",
+        phase: "up",
+        key: "v",
+        code: "KeyV",
+        metaKey: true
+      }
+    }
+  ];
+}
 function isRemoteWindowFocusInputConfig(config) {
   return config.event.kind === "focus";
 }
@@ -14861,7 +14860,7 @@ function createDefaultRemoteWindowInputHelper(options) {
     }
     stderrBuffer = "";
     stdoutBuffer = "";
-    const createProcess = options.processFactory || ((command, args, spawnOptions) => (0, import_node_child_process2.spawn)(command, args, spawnOptions));
+    const createProcess = options.processFactory || ((command, args, spawnOptions) => (0, import_node_child_process3.spawn)(command, args, spawnOptions));
     const currentChild = createProcess(options.swiftBinary, ["-e", MACOS_REMOTE_WINDOW_INPUT_SWIFT], {
       windowsHide: true,
       env: process.env
@@ -15144,96 +15143,13 @@ function isRemoteWindowInputConfigStale(config, nowMs = Date.now(), staleMs = RE
   }
   return nowMs - Number(config.daemonReceivedAtMs) > staleMs;
 }
-function normalizeRtcDescription(description, expectedType) {
-  if (!description || description.type !== expectedType || typeof description.sdp !== "string") {
-    throw new Error(`remote window daemon expected ${expectedType} description`);
-  }
-  return {
-    type: expectedType,
-    sdp: description.sdp
-  };
-}
-function normalizeIceCandidate(candidate) {
-  const candidateLike = typeof candidate.toJSON === "function" ? candidate.toJSON() : candidate;
-  return {
-    candidate: String(candidateLike.candidate || ""),
-    sdpMid: candidateLike.sdpMid ?? null,
-    sdpMLineIndex: candidateLike.sdpMLineIndex ?? null,
-    usernameFragment: candidateLike.usernameFragment ?? null
-  };
-}
-function normalizeRemoteWindowVideoBitrateConfig(input) {
-  if (!input) {
-    return null;
-  }
-  const defaults = (() => {
-    switch (input.preset) {
-      case "2mbps":
-        return { bitrateMbps: 2, maxFrameRateFps: 30 };
-      case "5mbps":
-        return { bitrateMbps: 5, maxFrameRateFps: 30 };
-      case "10mbps":
-        return { bitrateMbps: 10, maxFrameRateFps: 30 };
-      case "20mbps":
-        return { bitrateMbps: 20, maxFrameRateFps: 30 };
-      case "fullscreen":
-        return { bitrateMbps: 20, maxFrameRateFps: 60 };
-      default:
-        throw new Error(`remote window video bitrate preset is invalid: ${String(input.preset)}`);
-    }
-  })();
-  const bitrateMbps = defaults.bitrateMbps;
-  const maxBitrateBps = bitrateMbps * 1e6;
-  if (input.bitrateMbps !== bitrateMbps || !Number.isFinite(input.maxBitrateBps) || input.maxBitrateBps <= 0 || input.maxBitrateBps > maxBitrateBps) {
-    throw new Error("remote window video bitrate config does not match its preset");
-  }
-  const maxFrameRateFps = input.maxFrameRateFps ?? defaults.maxFrameRateFps;
-  if (!Number.isFinite(maxFrameRateFps) || maxFrameRateFps < 5 || maxFrameRateFps > defaults.maxFrameRateFps) {
-    throw new Error("remote window video frame-rate config does not match its preset");
-  }
-  return {
-    preset: input.preset,
-    bitrateMbps,
-    maxBitrateBps: Math.floor(input.maxBitrateBps),
-    maxFrameRateFps
-  };
-}
-async function applyRemoteWindowVideoBitrate(sender, config) {
-  if (!sender || typeof sender.getParameters !== "function" || typeof sender.setParameters !== "function") {
-    return {
-      applied: false,
-      reason: "remote window video bitrate control is not available on this WebRTC sender"
-    };
-  }
-  const currentParameters = sender.getParameters();
-  const currentEncodings = Array.isArray(currentParameters.encodings) ? currentParameters.encodings : [];
-  if (currentEncodings.length === 0) {
-    return {
-      applied: false,
-      reason: "remote window video bitrate sender has no encodings to update"
-    };
-  }
-  const nextParameters = {
-    ...currentParameters,
-    encodings: currentEncodings.map((encoding) => ({
-      ...encoding,
-      maxBitrate: config.maxBitrateBps,
-      maxFramerate: config.maxFrameRateFps
-    }))
-  };
-  await sender.setParameters(nextParameters);
-  return { applied: true, videoBitrate: config };
-}
-function formatRemoteWindowVideoBitrateError(error) {
-  if (error instanceof Error) {
-    return error.message || error.name || "remote window video bitrate could not be applied";
-  }
-  const message = String(error || "").trim();
-  return message || "remote window video bitrate could not be applied";
-}
-function addRemoteWindowVideoTrack(peerConnection, videoTrack) {
-  return peerConnection.addTrack(videoTrack);
-}
+
+// src/server/remote-window-capture.ts
+var import_node_child_process4 = require("node:child_process");
+var DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS = 2e4;
+var REMOTE_WINDOW_CAPTURE_UPDATE_TIMEOUT_MS = 3e3;
+var REMOTE_WINDOW_CAPTURE_UPDATE_STDERR_PREFIX = "ZTERM_REMOTE_WINDOW_CAPTURE_UPDATE ";
+var REMOTE_WINDOW_CAPTURE_FRAME_MAGIC = Buffer.from("ZRW1");
 function validateStreamTargetForCapture(target) {
   if (!target.streamTargetId.trim()) {
     throw new Error("remote window stream target id is required");
@@ -15282,43 +15198,6 @@ function buildResizedRemoteWindowTarget(target, event, createdAt) {
   validateStreamTargetForCapture(nextTarget);
   return nextTarget;
 }
-async function applyRemoteWindowTargetResize(entry, event, createdAt) {
-  const captureSource = entry.captureSource;
-  if (!captureSource?.updateTarget) {
-    throw new Error("remote window active capture source cannot update target resize");
-  }
-  const nextTarget = buildResizedRemoteWindowTarget(entry.target, event, createdAt);
-  await captureSource.updateTarget(nextTarget);
-  entry.target = nextTarget;
-  entry.targetId = nextTarget.streamTargetId;
-  return {
-    target: nextTarget,
-    capture: {
-      source: "ScreenCaptureKit",
-      frameWidth: captureSource.width,
-      frameHeight: captureSource.height,
-      frameRate: captureSource.frameRate,
-      targetKind: nextTarget.videoTarget.kind
-    }
-  };
-}
-function convertRgbaToI420Frame(frame, convert) {
-  const width = Math.max(1, Math.floor(frame.width));
-  const height = Math.max(1, Math.floor(frame.height));
-  const chromaWidth = Math.ceil(width / 2);
-  const chromaHeight = Math.ceil(height / 2);
-  const i420 = {
-    width,
-    height,
-    data: new Uint8Array(width * height + chromaWidth * chromaHeight * 2)
-  };
-  convert({
-    width,
-    height,
-    data: frame.rgba
-  }, i420);
-  return i420;
-}
 function buildScreenCaptureKitConfig(target, frameRate) {
   const { windowBounds, cropRect } = validateStreamTargetForCapture(target);
   return {
@@ -15339,7 +15218,7 @@ function stopChildProcess(child) {
 }
 function startScreenCaptureKitFrameSource(target, options) {
   let captureConfig = buildScreenCaptureKitConfig(target, options.frameRate);
-  const child = (0, import_node_child_process2.spawn)(options.swiftBinary, ["-e", SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT], {
+  const child = (0, import_node_child_process4.spawn)(options.swiftBinary, ["-e", SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT], {
     env: {
       ...process.env,
       ZTERM_REMOTE_WINDOW_CAPTURE_CONFIG: JSON.stringify(captureConfig)
@@ -15563,19 +15442,169 @@ function startScreenCaptureKitFrameSource(target, options) {
   child.on("exit", onChildExit);
   return startup;
 }
-function parseIterm2Catalog(stdout) {
-  const parsed = JSON.parse(stdout);
-  if (!parsed || !Array.isArray(parsed.windows)) {
-    throw new Error("iTerm2 catalog missing windows");
-  }
-  return parsed;
+
+// src/server/remote-window-stream-daemon.ts
+var DEFAULT_REMOTE_WINDOW_FRAME_RATE = 30;
+var DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 6e4;
+var {
+  RTCPeerConnection: RTCPeerConnection2,
+  RTCSessionDescription: RTCSessionDescription2,
+  RTCIceCandidate: RTCIceCandidate2,
+  nonstandard
+} = import_wrtc2.default;
+function buildRemoteWindowTargetCatalogCacheKey(payload) {
+  return [
+    payload.includeAppWindows !== false ? "app" : "no-app",
+    payload.includeIterm2 !== false ? "iterm2" : "no-iterm2"
+  ].join("|");
 }
-function parseMacosAppWindowCatalog(stdout) {
-  const parsed = JSON.parse(stdout);
-  if (!parsed || !Array.isArray(parsed.windows)) {
-    throw new Error("macOS app window catalog missing windows");
+function cloneRemoteWindowTargetCatalogResponse(response, requestId) {
+  return {
+    requestId,
+    targets: response.targets.slice(),
+    ...response.errors ? {
+      errors: response.errors.map((error) => ({
+        ...error,
+        requestId
+      }))
+    } : {}
+  };
+}
+function cloneRemoteWindowTargetCatalogResult(result, requestId) {
+  if ("targets" in result) {
+    return cloneRemoteWindowTargetCatalogResponse(result, requestId);
   }
-  return parsed;
+  return {
+    ...result,
+    requestId
+  };
+}
+function normalizeRtcDescription(description, expectedType) {
+  if (!description || description.type !== expectedType || typeof description.sdp !== "string") {
+    throw new Error(`remote window daemon expected ${expectedType} description`);
+  }
+  return {
+    type: expectedType,
+    sdp: description.sdp
+  };
+}
+function normalizeIceCandidate(candidate) {
+  const candidateLike = typeof candidate.toJSON === "function" ? candidate.toJSON() : candidate;
+  return {
+    candidate: String(candidateLike.candidate || ""),
+    sdpMid: candidateLike.sdpMid ?? null,
+    sdpMLineIndex: candidateLike.sdpMLineIndex ?? null,
+    usernameFragment: candidateLike.usernameFragment ?? null
+  };
+}
+function normalizeRemoteWindowVideoBitrateConfig(input) {
+  if (!input) {
+    return null;
+  }
+  const defaults = (() => {
+    switch (input.preset) {
+      case "2mbps":
+        return { bitrateMbps: 2, maxFrameRateFps: 30 };
+      case "5mbps":
+        return { bitrateMbps: 5, maxFrameRateFps: 30 };
+      case "10mbps":
+        return { bitrateMbps: 10, maxFrameRateFps: 30 };
+      case "20mbps":
+        return { bitrateMbps: 20, maxFrameRateFps: 30 };
+      case "fullscreen":
+        return { bitrateMbps: 20, maxFrameRateFps: 60 };
+      default:
+        throw new Error(`remote window video bitrate preset is invalid: ${String(input.preset)}`);
+    }
+  })();
+  const bitrateMbps = defaults.bitrateMbps;
+  const maxBitrateBps = bitrateMbps * 1e6;
+  if (input.bitrateMbps !== bitrateMbps || !Number.isFinite(input.maxBitrateBps) || input.maxBitrateBps <= 0 || input.maxBitrateBps > maxBitrateBps) {
+    throw new Error("remote window video bitrate config does not match its preset");
+  }
+  const maxFrameRateFps = input.maxFrameRateFps ?? defaults.maxFrameRateFps;
+  if (!Number.isFinite(maxFrameRateFps) || maxFrameRateFps < 5 || maxFrameRateFps > defaults.maxFrameRateFps) {
+    throw new Error("remote window video frame-rate config does not match its preset");
+  }
+  return {
+    preset: input.preset,
+    bitrateMbps,
+    maxBitrateBps: Math.floor(input.maxBitrateBps),
+    maxFrameRateFps
+  };
+}
+async function applyRemoteWindowVideoBitrate(sender, config) {
+  if (!sender || typeof sender.getParameters !== "function" || typeof sender.setParameters !== "function") {
+    return {
+      applied: false,
+      reason: "remote window video bitrate control is not available on this WebRTC sender"
+    };
+  }
+  const currentParameters = sender.getParameters();
+  const currentEncodings = Array.isArray(currentParameters.encodings) ? currentParameters.encodings : [];
+  if (currentEncodings.length === 0) {
+    return {
+      applied: false,
+      reason: "remote window video bitrate sender has no encodings to update"
+    };
+  }
+  const nextParameters = {
+    ...currentParameters,
+    encodings: currentEncodings.map((encoding) => ({
+      ...encoding,
+      maxBitrate: config.maxBitrateBps,
+      maxFramerate: config.maxFrameRateFps
+    }))
+  };
+  await sender.setParameters(nextParameters);
+  return { applied: true, videoBitrate: config };
+}
+function formatRemoteWindowVideoBitrateError(error) {
+  if (error instanceof Error) {
+    return error.message || error.name || "remote window video bitrate could not be applied";
+  }
+  const message = String(error || "").trim();
+  return message || "remote window video bitrate could not be applied";
+}
+function addRemoteWindowVideoTrack(peerConnection, videoTrack) {
+  return peerConnection.addTrack(videoTrack);
+}
+async function applyRemoteWindowTargetResize(entry, event, createdAt) {
+  const captureSource = entry.captureSource;
+  if (!captureSource?.updateTarget) {
+    throw new Error("remote window active capture source cannot update target resize");
+  }
+  const nextTarget = buildResizedRemoteWindowTarget(entry.target, event, createdAt);
+  await captureSource.updateTarget(nextTarget);
+  entry.target = nextTarget;
+  entry.targetId = nextTarget.streamTargetId;
+  return {
+    target: nextTarget,
+    capture: {
+      source: "ScreenCaptureKit",
+      frameWidth: captureSource.width,
+      frameHeight: captureSource.height,
+      frameRate: captureSource.frameRate,
+      targetKind: nextTarget.videoTarget.kind
+    }
+  };
+}
+function convertRgbaToI420Frame(frame, convert) {
+  const width = Math.max(1, Math.floor(frame.width));
+  const height = Math.max(1, Math.floor(frame.height));
+  const chromaWidth = Math.ceil(width / 2);
+  const chromaHeight = Math.ceil(height / 2);
+  const i420 = {
+    width,
+    height,
+    data: new Uint8Array(width * height + chromaWidth * chromaHeight * 2)
+  };
+  convert({
+    width,
+    height,
+    data: frame.rgba
+  }, i420);
+  return i420;
 }
 function createRemoteWindowStreamDaemonRuntime(deps) {
   const platform = deps.platform || process.platform;

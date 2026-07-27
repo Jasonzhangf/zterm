@@ -1,5 +1,4 @@
 import type { Host, HostConfigMessage, ServerMessage } from '../lib/types';
-import { getResolvedSessionName } from '../lib/connection-target';
 import type { SessionTerminalChannelRuntime } from '../lib/session-transport-runtime';
 import {
   clearSessionSupersededSockets,
@@ -29,7 +28,6 @@ import {
   type SessionTransportRuntimeStore,
 } from '../lib/session-transport-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
-import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
 import {
   buildTerminalMuxChannelMessage,
   buildTerminalMuxChannelOpen,
@@ -38,16 +36,6 @@ import {
   type TerminalMuxTargetServerMessage,
   type TerminalMuxServerFrame,
 } from '@zterm/shared/protocol';
-import {
-  deletePendingSessionTransportOpenIntent,
-  findPendingSessionTransportOpenIntentByRequestId,
-  getPendingSessionTransportOpenIntent,
-  setPendingSessionTransportOpenIntent,
-} from './session-context-open-intent-store';
-
-type PendingSessionTransportWireIntent = PendingSessionTransportOpenIntent & {
-  hostConfigPayload: HostConfigMessage;
-};
 
 function estimateIncomingFrameBytes(data: string | ArrayBuffer) {
   if (typeof data !== 'string') {
@@ -199,114 +187,6 @@ export function cleanupControlTransportSocket(options: {
     controlSocket.close();
   }
   options.writeSessionTargetControlSocket(options.sessionId, null);
-}
-
-export function failPendingControlTargetIntents(options: {
-  sessionId: string;
-  message: string;
-  retryable: boolean;
-  readSessionTargetRuntime: (sessionId: string) => { sessionIds: string[] } | null;
-  pendingSessionTransportOpenIntentsRef: { current: Map<string, PendingSessionTransportOpenIntent> };
-  clearSessionHandshakeTimeout: (sessionId: string) => void;
-  writeSessionTransportToken: (sessionId: string, token: string | null) => unknown;
-}) {
-  const targetRuntime = options.readSessionTargetRuntime(options.sessionId);
-  const targetSessionIds = targetRuntime?.sessionIds || [options.sessionId];
-  for (const targetSessionId of targetSessionIds) {
-    const pending = getPendingSessionTransportOpenIntent(
-      options.pendingSessionTransportOpenIntentsRef.current,
-      targetSessionId,
-    );
-    if (!pending) {
-      continue;
-    }
-    options.clearSessionHandshakeTimeout(targetSessionId);
-    deletePendingSessionTransportOpenIntent(options.pendingSessionTransportOpenIntentsRef.current, targetSessionId);
-    options.writeSessionTransportToken(targetSessionId, null);
-    pending.finalizeFailure(options.message, options.retryable);
-  }
-}
-
-export function handleControlTransportMessage(options: {
-  sessionId: string;
-  openSessionTransportByIntent: ((intent: PendingSessionTransportOpenIntent) => void) | null;
-  pendingSessionTransportOpenIntentsRef: { current: Map<string, PendingSessionTransportOpenIntent> };
-  clearSessionHandshakeTimeout: (sessionId: string) => void;
-  writeSessionTransportToken: (sessionId: string, token: string | null) => unknown;
-  failPendingControlTargetIntents?: (sessionId: string, message: string, retryable: boolean) => void;
-}, msg: ServerMessage) {
-  const findIntentByWireIdentity = (payload: { openRequestId?: string; clientSessionId?: string }) => {
-    const byOpenRequestId = typeof payload.openRequestId === 'string' && payload.openRequestId.trim()
-      ? findPendingSessionTransportOpenIntentByRequestId(
-        options.pendingSessionTransportOpenIntentsRef.current,
-        payload.openRequestId,
-      )
-      : null;
-    if (byOpenRequestId) {
-      return byOpenRequestId;
-    }
-    const legacySessionId = payload.clientSessionId?.trim() || '';
-    if (!legacySessionId) {
-      return null;
-    }
-    return getPendingSessionTransportOpenIntent(
-      options.pendingSessionTransportOpenIntentsRef.current,
-      legacySessionId,
-    );
-  };
-
-  switch (msg.type) {
-    case 'session-ticket': {
-      const payload = msg.payload;
-      const intent = findIntentByWireIdentity(payload);
-      if (!intent) {
-        return;
-      }
-      options.clearSessionHandshakeTimeout(intent.sessionId);
-      options.writeSessionTransportToken(intent.sessionId, payload.sessionTransportToken);
-      deletePendingSessionTransportOpenIntent(options.pendingSessionTransportOpenIntentsRef.current, intent.sessionId);
-      options.openSessionTransportByIntent?.(intent);
-      return;
-    }
-    case 'session-open-failed': {
-      const payload = msg.payload;
-      const intent = findIntentByWireIdentity(payload);
-      if (!intent) {
-        return;
-      }
-      options.clearSessionHandshakeTimeout(intent.sessionId);
-      deletePendingSessionTransportOpenIntent(options.pendingSessionTransportOpenIntentsRef.current, intent.sessionId);
-      options.writeSessionTransportToken(intent.sessionId, null);
-      intent.finalizeFailure(payload.message, false);
-      return;
-    }
-    case 'error': {
-      if (options.failPendingControlTargetIntents) {
-        options.failPendingControlTargetIntents(
-          options.sessionId,
-          msg.payload.message,
-          msg.payload.code !== 'unauthorized',
-        );
-        return;
-      }
-      const intent = getPendingSessionTransportOpenIntent(
-        options.pendingSessionTransportOpenIntentsRef.current,
-        options.sessionId,
-      );
-      if (!intent) {
-        return;
-      }
-      options.clearSessionHandshakeTimeout(options.sessionId);
-      deletePendingSessionTransportOpenIntent(options.pendingSessionTransportOpenIntentsRef.current, options.sessionId);
-      options.writeSessionTransportToken(options.sessionId, null);
-      intent.finalizeFailure(msg.payload.message, msg.payload.code !== 'unauthorized');
-      return;
-    }
-    case 'pong':
-      return;
-    default:
-      return;
-  }
 }
 
 export function handleTargetMuxServerFrameRuntime(options: {
@@ -580,130 +460,6 @@ export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
     }
     options.setSessionTargetMuxReady(options.sessionId, false);
     finalizeTargetFailure(options.ws.getDiagnostics().reason || 'terminal mux transport closed', true);
-  };
-}
-
-export function ensureControlTransportForSessionOpen(options: {
-  intent: PendingSessionTransportWireIntent;
-  readSessionTargetControlSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTargetRuntime: (sessionId: string) => { sessionIds: string[] } | null;
-  readSessionTargetKey: (sessionId: string) => string | null;
-  pendingSessionTransportOpenIntentsRef: { current: Map<string, PendingSessionTransportOpenIntent> };
-  sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
-  clearSessionHandshakeTimeout: (sessionId: string) => void;
-  setSessionHandshakeTimeout: (sessionId: string, callback: () => void, delayMs: number) => number;
-  failPendingControlTargetIntents: (sessionId: string, message: string, retryable: boolean) => void;
-  buildTraversalSocketForHost: (host: Host, transportRole?: 'control' | 'session') => BridgeTransportSocket;
-  writeSessionTargetControlSocket: (sessionId: string, socket: BridgeTransportSocket | null) => unknown;
-  applyTransportDiagnostics: (sessionId: string, socket: BridgeTransportSocket) => void;
-  runtimeDebug: RuntimeDebugFn;
-  recordControlTransportRxBytes: (sessionId: string, data: string | ArrayBuffer) => void;
-  handleControlTransportMessage: (options: { sessionId: string }, msg: ServerMessage) => void;
-  cleanupControlSocket: (sessionId: string, shouldClose?: boolean) => void;
-  sessionHandshakeTimeoutMs: number;
-}) {
-  const { sessionId, host } = options.intent;
-  setPendingSessionTransportOpenIntent(options.pendingSessionTransportOpenIntentsRef.current, options.intent);
-  const existingControlSocket = options.readSessionTargetControlSocket(sessionId);
-
-  const flushPendingSessionOpens = (anchorSessionId: string, socket: BridgeTransportSocket) => {
-    const targetRuntime = options.readSessionTargetRuntime(anchorSessionId);
-    const targetSessionIds = targetRuntime?.sessionIds || [anchorSessionId];
-    for (const targetSessionId of targetSessionIds) {
-      const pendingIntent = getPendingSessionTransportOpenIntent(
-        options.pendingSessionTransportOpenIntentsRef.current,
-        targetSessionId,
-      ) as PendingSessionTransportWireIntent | null;
-      if (!pendingIntent) {
-        continue;
-      }
-      options.sendSocketPayload(targetSessionId, socket, JSON.stringify({
-        type: 'session-open',
-        payload: pendingIntent.hostConfigPayload,
-      }));
-      options.runtimeDebug('session.control.session-open-sent', {
-        sessionId: targetSessionId,
-        targetKey: options.readSessionTargetKey(targetSessionId),
-        sessionName: pendingIntent.resolvedSessionName,
-      });
-      options.clearSessionHandshakeTimeout(targetSessionId);
-      options.setSessionHandshakeTimeout(targetSessionId, () => {
-        options.failPendingControlTargetIntents(targetSessionId, 'session open timeout', true);
-      }, options.sessionHandshakeTimeoutMs);
-    }
-  };
-
-  if (existingControlSocket && existingControlSocket.readyState === WebSocket.OPEN) {
-    flushPendingSessionOpens(sessionId, existingControlSocket);
-    return;
-  }
-
-  if (existingControlSocket && existingControlSocket.readyState === WebSocket.CONNECTING) {
-    options.clearSessionHandshakeTimeout(sessionId);
-    options.setSessionHandshakeTimeout(sessionId, () => {
-      const liveControlSocket = options.readSessionTargetControlSocket(sessionId);
-      if (!liveControlSocket || liveControlSocket.readyState !== WebSocket.CONNECTING) {
-        return;
-      }
-      options.runtimeDebug('session.control.connect-timeout-reopen', {
-        sessionId,
-        targetKey: options.readSessionTargetKey(sessionId),
-        reason: liveControlSocket.getDiagnostics().reason || 'control transport connect timeout',
-      });
-      options.cleanupControlSocket(sessionId, true);
-      ensureControlTransportForSessionOpen(options);
-    }, options.sessionHandshakeTimeoutMs);
-    return;
-  }
-
-  const controlSocket = options.buildTraversalSocketForHost(host, 'control');
-  options.writeSessionTargetControlSocket(sessionId, controlSocket);
-  options.runtimeDebug('session.control.opening', {
-    sessionId,
-    targetKey: options.readSessionTargetKey(sessionId),
-    host: host.bridgeHost,
-    port: host.bridgePort,
-    sessionName: getResolvedSessionName(host),
-  });
-  controlSocket.onopen = () => {
-    options.applyTransportDiagnostics(sessionId, controlSocket);
-    options.runtimeDebug('session.control.open', {
-      sessionId,
-      targetKey: options.readSessionTargetKey(sessionId),
-    });
-    flushPendingSessionOpens(sessionId, controlSocket);
-  };
-  controlSocket.onmessage = (event) => {
-    try {
-      options.recordControlTransportRxBytes(sessionId, event.data);
-      if (typeof event.data !== 'string') {
-        return;
-      }
-      const msg = JSON.parse(event.data) as ServerMessage;
-      options.handleControlTransportMessage({ sessionId }, msg);
-    } catch (error) {
-      options.failPendingControlTargetIntents(
-        sessionId,
-        error instanceof Error ? error.message : 'control transport parse error',
-        true,
-      );
-    }
-  };
-  controlSocket.onerror = () => {
-    options.cleanupControlSocket(sessionId);
-    options.failPendingControlTargetIntents(
-      sessionId,
-      controlSocket.getDiagnostics().reason || 'control transport error',
-      true,
-    );
-  };
-  controlSocket.onclose = () => {
-    options.cleanupControlSocket(sessionId);
-    options.failPendingControlTargetIntents(
-      sessionId,
-      controlSocket.getDiagnostics().reason || 'control transport closed',
-      true,
-    );
   };
 }
 

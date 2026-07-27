@@ -305,7 +305,7 @@ describe('App first paint regression', () => {
     globalThis.WebSocket = originalWebSocket;
   });
 
-  it('cold start clears legacy tab storage and does not restore a session transport', async () => {
+  it('cold start clears legacy tab storage and returns stale terminal route to connections', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'session-1',
@@ -323,22 +323,21 @@ describe('App first paint regression', () => {
 
     render(<App />);
 
-    await waitFor(() => expect(screen.getByTestId('terminal-page')).toBeTruthy());
-    expect(screen.getByTestId('active-session-id').textContent).toBe('missing');
-    expect(screen.getByTestId('active-session-lines').textContent).toBe('');
+    await waitFor(() => expect(screen.getByTestId('connections-page')).toBeTruthy());
+    expect(screen.queryByTestId('terminal-page')).toBeNull();
     expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).toBeNull();
     expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBeNull();
     expect(localStorage.getItem(STORAGE_KEYS.SAVED_TAB_LISTS)).toBeNull();
     expect(MockWebSocket.instances).toHaveLength(0);
   });
 
-  it('does not let stale ACTIVE_PAGE focus recreate a tab when tab storage is absent', async () => {
+  it('does not let stale ACTIVE_PAGE focus open an empty terminal shell when tab storage is absent', async () => {
     localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal', sessionId: 'session-2' }));
 
     render(<App />);
 
-    await waitFor(() => expect(screen.getByTestId('terminal-page')).toBeTruthy());
-    expect(screen.getByTestId('active-session-id').textContent).toBe('missing');
+    await waitFor(() => expect(screen.getByTestId('connections-page')).toBeTruthy());
+    expect(screen.queryByTestId('terminal-page')).toBeNull();
     expect(MockWebSocket.instances).toHaveLength(0);
     expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).toBeNull();
     expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBeNull();

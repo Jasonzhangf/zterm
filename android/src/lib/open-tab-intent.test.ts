@@ -9,6 +9,7 @@ import {
   derivePersistedOpenTabRestorePlan,
   deriveRuntimeOpenTabSyncDecision,
   materializeOpenTabRuntimeSessions,
+  buildBootstrapOpenTabIntentStateFromSessions,
   mergeRuntimeSessionsIntoOpenTabIntentState,
   moveOpenTabIntentSession,
   normalizeOpenTabIntentState,
@@ -31,22 +32,6 @@ function makeSession(id: string, overrides?: Partial<Session>): Session {
     state: 'connected',
     hasUnread: false,
     createdAt: 1,
-    daemonHeadRevision: 1,
-    daemonHeadEndIndex: 10,
-    buffer: {
-      lines: [],
-      gapRanges: [],
-      startIndex: 0,
-      endIndex: 10,
-      bufferHeadStartIndex: 0,
-      bufferTailEndIndex: 10,
-      cols: 80,
-      rows: 24,
-      cursorKeysApp: false,
-      cursor: null,
-      updateKind: 'replace',
-      revision: 1,
-    },
     ...overrides,
   };
 }
@@ -560,5 +545,38 @@ describe('open-tab intent truth', () => {
       makeTab('saved-a'),
       makeTab('saved-b'),
     ], 'missing')).toBe('saved-a');
+  });
+
+  // S3 red-test: two runtime sessions that happen to share host+sessionName
+  // (e.g. rcc and rcc2 after a rename) must NOT collapse onto one open tab.
+  it('keeps two runtime sessions that share host+sessionName as two distinct tabs', () => {
+    // Both sessions share host AND sessionName (rcc<->rcc2 cross-display case).
+    const sessions = [
+      makeSession('session-rcc', {
+        hostId: 'host-1',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'rcc',
+      }),
+      makeSession('session-rcc2', {
+        hostId: 'host-1',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'rcc',
+      }),
+    ];
+
+    const bootstrapped = buildBootstrapOpenTabIntentStateFromSessions(sessions, 'session-rcc');
+    expect(bootstrapped.tabs.map((tab) => tab.sessionId)).toEqual(['session-rcc', 'session-rcc2']);
+    expect(bootstrapped.activeSessionId).toBe('session-rcc');
+
+    // Once OPEN_TABS exists, runtime sessions must not push a second semantic peer
+    // for the same host+sessionName through mergeRuntimeSessionsIntoOpenTabIntentState.
+    const afterMerge = mergeRuntimeSessionsIntoOpenTabIntentState(
+      bootstrapped,
+      sessions,
+      new Set(),
+    );
+    expect(afterMerge.tabs.map((tab) => tab.sessionId)).toEqual(['session-rcc', 'session-rcc2']);
   });
 });

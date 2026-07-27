@@ -1,6 +1,8 @@
 import { WasmBridge } from '@jsonstudio/wtermmod-core';
 import { encodePackedTruecolorColor } from '@zterm/shared/terminal/color';
-import type { TerminalCell } from '../lib/types';
+import type {
+  TerminalCell,
+} from '@zterm/shared/types';
 import { trimTrailingDefaultCells } from './canonical-buffer';
 
 function serializeCell(cell: ReturnType<WasmBridge['getCell']>): TerminalCell {

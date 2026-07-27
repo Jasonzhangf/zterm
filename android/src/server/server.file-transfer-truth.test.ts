@@ -89,7 +89,7 @@ describe('server file-transfer truth gates', () => {
 
   it('keeps remote screenshot explicit capturing -> transferring flow in the dedicated runtime', () => {
     const source = readFileTransferListRuntimeSource();
-    const block = extractBlock(source, 'async function handleRemoteScreenshotRequest(', 2200);
+    const block = extractBlock(source, 'async function handleRemoteScreenshotRequest(', 3000);
 
     expect(block).toContain("type: 'remote-screenshot-status'");
     expect(block).toContain("phase: 'capturing'");

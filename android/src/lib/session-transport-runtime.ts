@@ -60,6 +60,9 @@ export interface SessionTerminalChannelRuntime {
 
 export interface TargetTransportRuntime {
   key: string;
+  daemonTargetId: string;
+  routeCandidateKey: string;
+  routeGeneration: number;
   bridgeHost: string;
   bridgePort: number;
   authToken: string;
@@ -136,6 +139,10 @@ function normalizeEndpointCandidatesForTargetKey(candidates: Host['relayEndpoint
     .join(';');
 }
 
+function normalizePort(port: number | undefined | null) {
+  return Math.max(1, Math.floor(port || 3333));
+}
+
 function normalizeHostForRuntime(host: Host): Host {
   return {
     ...host,
@@ -148,14 +155,24 @@ function normalizeHostForRuntime(host: Host): Host {
 
 export function buildTransportTargetKey(host: TransportTargetKeyHost) {
   const normalizedHost = host.bridgeHost.trim();
-  const normalizedPort = Math.max(1, Math.floor(host.bridgePort || 3333));
-  const normalizedAuthToken = normalizeAuthToken(host.authToken);
+  const stableDaemonId = normalizeKeyText(host.daemonHostId || host.relayHostId);
+  if (stableDaemonId) {
+    return [
+      `daemon=${encodeKeyPart(stableDaemonId)}`,
+    ].join('|');
+  }
   return [
     `host=${encodeKeyPart(normalizedHost)}`,
-    `port=${normalizedPort}`,
-    `auth=${encodeKeyPart(normalizedAuthToken)}`,
+    `port=${normalizePort(host.bridgePort)}`,
+  ].join('|');
+}
+
+export function buildTransportRouteCandidateKey(host: TransportTargetKeyHost) {
+  return [
+    `host=${encodeKeyPart(host.bridgeHost)}`,
+    `port=${normalizePort(host.bridgePort)}`,
+    `auth=${encodeKeyPart(normalizeAuthToken(host.authToken))}`,
     `mode=${encodeKeyPart(host.transportMode || 'auto')}`,
-    `daemon=${encodeKeyPart(host.daemonHostId)}`,
     `relayHost=${encodeKeyPart(host.relayHostId)}`,
     `relayDevice=${encodeKeyPart(host.relayDeviceId)}`,
     `tailscale=${encodeKeyPart(host.tailscaleHost)}`,
@@ -178,14 +195,25 @@ export function ensureTargetTransportRuntime(
   host: TransportTargetKeyHost,
 ) {
   const key = buildTransportTargetKey(host);
+  const routeCandidateKey = buildTransportRouteCandidateKey(host);
   const existing = store.targets.get(key);
   if (existing) {
+    if (existing.routeCandidateKey !== routeCandidateKey) {
+      existing.routeCandidateKey = routeCandidateKey;
+      existing.routeGeneration += 1;
+    }
+    existing.bridgeHost = host.bridgeHost.trim();
+    existing.bridgePort = normalizePort(host.bridgePort);
+    existing.authToken = normalizeAuthToken(host.authToken);
     return existing;
   }
   const created: TargetTransportRuntime = {
     key,
+    daemonTargetId: key,
+    routeCandidateKey,
+    routeGeneration: 0,
     bridgeHost: host.bridgeHost.trim(),
-    bridgePort: Math.max(1, Math.floor(host.bridgePort || 3333)),
+    bridgePort: normalizePort(host.bridgePort),
     authToken: normalizeAuthToken(host.authToken),
     controlTransport: null,
     terminalTransport: null,
@@ -314,9 +342,10 @@ export function getSessionTransportResource(
     ? targetRuntime.channels.get(runtime.channelId) || null
     : null;
   const terminalSocket = targetRuntime?.terminalTransport || null;
-  const socket = runtime?.activeSocket
-    || (channel && targetRuntime?.terminalMuxReady ? terminalSocket : null)
-    || null;
+  const hasMuxChannel = Boolean(runtime?.channelId || channel);
+  const socket = hasMuxChannel
+    ? (channel && targetRuntime?.terminalMuxReady ? terminalSocket : null)
+    : runtime?.activeSocket || null;
   return {
     sessionId,
     runtime,

@@ -1,4 +1,6 @@
-import type { RuntimeDebugLogEntry } from '../lib/types';
+import type {
+  RuntimeDebugLogEntry,
+} from '@zterm/shared/protocol';
 
 export interface RuntimeDebugSourceMeta {
   sessionId: string;

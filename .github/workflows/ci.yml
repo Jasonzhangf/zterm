@@ -32,6 +32,9 @@ jobs:
       - name: Type check
         run: pnpm --dir android run type-check
 
+      - name: Feature registry and architecture truth gates
+        run: pnpm --dir android run test:feature-registry
+
       - name: Fast redline regression
         run: pnpm --dir android run test:redline:fast
 

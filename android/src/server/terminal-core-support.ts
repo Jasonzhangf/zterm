@@ -1,7 +1,7 @@
 import type {
   BufferSyncRequestPayload,
   TerminalCursorState,
-} from '../lib/types';
+} from '@zterm/shared/types';
 import type { TerminalSession } from './terminal-runtime-types';
 
 export interface TerminalCoreSupportDeps {

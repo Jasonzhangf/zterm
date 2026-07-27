@@ -360,6 +360,12 @@ vi.mock('@capacitor/app', () => ({
   },
 }));
 
+vi.mock('@capacitor/network', () => ({
+  Network: {
+    addListener: vi.fn(async () => ({ remove: vi.fn() })),
+  },
+}));
+
 vi.mock('./contexts/SessionContext', () => ({
   SESSION_STATUS_EVENT: 'zterm:session-status',
   SessionProvider: ({
@@ -1792,7 +1798,7 @@ describe('App dynamic refresh matrix', () => {
     await waitFor(() => expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).toBeNull());
     expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBeNull();
     expect(localStorage.getItem(STORAGE_KEYS.SAVED_TAB_LISTS)).toBeNull();
-    expect(screen.getByTestId('terminal-session-ids').textContent).toBe('');
+    expect(screen.queryByTestId('terminal-session-ids')).toBeNull();
     expect(sessionHarness.createSession).not.toHaveBeenCalled();
   });
 

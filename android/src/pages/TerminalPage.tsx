@@ -1400,7 +1400,6 @@ function TerminalPageComponent({
     setActivePane: handleCopyRuntimeSetActivePane,
     keepTerminalInputFocused: keepTerminalInputFocusedRef.current,
     sessionBufferStore,
-    sessions,
   });
   const {
     copySelection,
@@ -1808,13 +1807,14 @@ function TerminalPageComponent({
       if (session.id === interactiveSession?.id) {
         return;
       }
+      const renderBuffer = sessionBufferStore?.getSnapshot(session.id).buffer;
       onTerminalViewportChange(session.id, {
         mode: 'follow',
-        viewportEndIndex: session.buffer?.endIndex ?? 0,
-        viewportRows: session.buffer?.rows ?? 24,
+        viewportEndIndex: renderBuffer?.endIndex ?? 0,
+        viewportRows: renderBuffer?.rows ?? 24,
       });
     });
-  }, [interactiveSession?.id, livePaneSessionIdsKey, onTerminalViewportChange, renderedPaneSessions, splitVisible]);
+  }, [interactiveSession?.id, livePaneSessionIdsKey, onTerminalViewportChange, renderedPaneSessions, sessionBufferStore, splitVisible]);
 
   useEffect(() => {
     return () => {

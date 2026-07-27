@@ -2082,6 +2082,7 @@ describe('TerminalView minimal mirror render', () => {
       </div>,
     );
 
+    expect(currentScrollTop).toBe(1122);
     await waitFor(() => expect(readRenderedRows(view.container)).toContain('new-090'));
     expect(readRenderedRows(view.container)).not.toContain('old-030');
     await waitFor(() => expect(currentScrollTop).toBe(1122));

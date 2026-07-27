@@ -5,7 +5,16 @@ import {
   getPendingRuntimeDebugEntryCount,
   isRuntimeDebugEnabled,
 } from './runtime-debug';
-import type { BridgeTransportSocket } from './traversal/types';
+
+// Debug channel observes only: it declares the minimal structural shape it
+// needs instead of importing connection-owner types (no debug -> connection edge).
+export interface RuntimeDebugFlushSocket {
+  readonly readyState: number;
+}
+
+export interface RuntimeDebugFlushConnection<TSocket extends RuntimeDebugFlushSocket = RuntimeDebugFlushSocket> {
+  readSessionSocket(sessionId: string): TSocket | null;
+}
 
 export const CLIENT_RUNTIME_DEBUG_FLUSH_INTERVAL_MS = 1200;
 export const CLIENT_RUNTIME_DEBUG_SNAPSHOT_INTERVAL_MS = 2500;
@@ -20,10 +29,11 @@ export function resetRuntimeDebugTransportFlushStateForTests() {
 // Enabling this continuously on hot paths can amplify input latency under weak network.
 function isForceFlushEnabled() { return false; }
 
-export function flushRuntimeDebugLogsToSessionTransport(input: {
+export function flushRuntimeDebugLogsToSessionTransport<TSocket extends RuntimeDebugFlushSocket>(input: {
   activeSessionId: string | null;
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+  daemonConnection?: RuntimeDebugFlushConnection<TSocket>;
+  readSessionTransportSocket: (sessionId: string) => TSocket | null;
+  sendSocketPayload: (sessionId: string, ws: TSocket, data: string | ArrayBuffer) => void;
 }) {
   const debugEnabled = isRuntimeDebugEnabled();
   const pendingEntryCount = getPendingRuntimeDebugEntryCount();
@@ -36,7 +46,9 @@ export function flushRuntimeDebugLogsToSessionTransport(input: {
     return false;
   }
 
-  const ws = input.readSessionTransportSocket(activeSessionId);
+  const ws = input.daemonConnection
+    ? input.daemonConnection.readSessionSocket(activeSessionId)
+    : input.readSessionTransportSocket(activeSessionId);
   if (!ws || ws.readyState !== WebSocket.OPEN) {
     return false;
   }

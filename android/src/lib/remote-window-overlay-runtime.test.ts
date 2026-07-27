@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   applyRemoteWindowTargetCatalog,
+  applyRemoteWindowTargetCatalogSnapshot,
   attachRemoteWindowStreamReceiver,
   beginRemoteWindowStreamSetup,
   beginRemoteWindowTargetEnumeration,
@@ -11,6 +12,7 @@ import {
   initialRemoteWindowOverlayState,
   selectRemoteWindowTarget,
   shrinkRemoteWindowOverlay,
+  upsertRemoteWindowCatalogTarget,
 } from './remote-window-overlay-runtime';
 import type { RemoteWindowStreamTargetManifest } from './types';
 
@@ -131,6 +133,67 @@ describe('remote window overlay runtime', () => {
     });
   });
 
+  it('updates the locked target from an active catalog snapshot without restarting the stream', () => {
+    const started = beginRemoteWindowTargetEnumeration(initialRemoteWindowOverlayState);
+    const target = makeTarget('app-1', 'app-window');
+    const picker = applyRemoteWindowTargetCatalog(started.state, started.requestEpoch, {
+      requestId: 'rw-1',
+      targets: [target],
+    });
+    const locked = attachRemoteWindowStreamReceiver(
+      beginRemoteWindowStreamSetup(selectRemoteWindowTarget(picker, 'app-1'), 'stream-1'),
+      'stream-1',
+    );
+    const resized = {
+      ...target,
+      videoTarget: {
+        ...target.videoTarget,
+        windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 1200 },
+        cropRectTopLeftPx: { x: 10, y: 20, width: 800, height: 1200 },
+      },
+    };
+
+    const synced = applyRemoteWindowTargetCatalogSnapshot(locked, {
+      requestId: 'rw-sync',
+      targets: [resized, makeTarget('app-2', 'app-window')],
+    });
+
+    expect(synced).toMatchObject({
+      phase: 'targetLocked',
+      streamId: 'stream-1',
+      streamStarted: true,
+      streamStatus: 'streaming',
+      target: resized,
+    });
+    expect(synced.phase === 'targetLocked' ? synced.targets.map((item) => item.streamTargetId) : []).toEqual(['app-1', 'app-2']);
+  });
+
+  it('keeps the active stream target when an active catalog snapshot no longer contains it', () => {
+    const started = beginRemoteWindowTargetEnumeration(initialRemoteWindowOverlayState);
+    const target = makeTarget('app-1', 'app-window');
+    const picker = applyRemoteWindowTargetCatalog(started.state, started.requestEpoch, {
+      requestId: 'rw-1',
+      targets: [target],
+    });
+    const locked = attachRemoteWindowStreamReceiver(
+      beginRemoteWindowStreamSetup(selectRemoteWindowTarget(picker, 'app-1'), 'stream-1'),
+      'stream-1',
+    );
+
+    const synced = applyRemoteWindowTargetCatalogSnapshot(locked, {
+      requestId: 'rw-sync',
+      targets: [makeTarget('app-2', 'app-window')],
+    });
+
+    expect(synced).toMatchObject({
+      phase: 'targetLocked',
+      streamId: 'stream-1',
+      streamStarted: true,
+      target,
+    });
+    expect(synced.phase === 'targetLocked' ? synced.targets.map((item) => item.streamTargetId) : []).toEqual(['app-2']);
+  });
+
   it('surfaces stream setup errors explicitly without falling back to screenshot or terminal buffer preview', () => {
     const started = beginRemoteWindowTargetEnumeration(initialRemoteWindowOverlayState);
     const picker = applyRemoteWindowTargetCatalog(started.state, started.requestEpoch, {
@@ -147,6 +210,17 @@ describe('remote window overlay runtime', () => {
       streamStatus: 'error',
       streamErrorMessage: 'ScreenCaptureKit capture start failure',
     });
+  });
+
+  it('upserts resize ACK targets into catalog snapshots when the previous catalog missed the target', () => {
+    const target = makeTarget('app-resized', 'app-window');
+    const payload = upsertRemoteWindowCatalogTarget({
+      requestId: 'rw-cached',
+      targets: [makeTarget('app-other', 'app-window')],
+    }, target);
+
+    expect(payload.targets.map((item) => item.streamTargetId)).toEqual(['app-resized', 'app-other']);
+    expect(payload.targets[0]).toBe(target);
   });
 
   it('ignores late stream events for closed or different stream ids', () => {

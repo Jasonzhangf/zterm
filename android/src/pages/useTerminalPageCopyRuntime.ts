@@ -19,7 +19,6 @@ export interface UseTerminalPageCopyRuntimeOptions {
   setActivePane: (paneId: string) => void;
   keepTerminalInputFocused: () => void;
   sessionBufferStore: import("../lib/session-render-buffer-store").SessionRenderBufferStore | null | undefined;
-  sessions: import("../lib/types").Session[];
 }
 
 export interface UseTerminalPageCopyRuntimeResult {
@@ -49,7 +48,6 @@ export function useTerminalPageCopyRuntime({
   setActivePane,
   keepTerminalInputFocused,
   sessionBufferStore,
-  sessions,
 }: UseTerminalPageCopyRuntimeOptions): UseTerminalPageCopyRuntimeResult {
   const [copySelection, setCopySelection] = React.useState<CopySelectionState>(
     EMPTY_COPY_SELECTION_STATE,
@@ -117,7 +115,6 @@ export function useTerminalPageCopyRuntime({
     if (pendingCopy?.sessionId) {
       const buffer = resolveCopySelectionBufferOrWarn(
         sessionBufferStore,
-        sessions,
         pendingCopy.sessionId,
         pendingCopy.startRowIndex,
         pendingCopy.endRowIndex,
@@ -138,7 +135,7 @@ export function useTerminalPageCopyRuntime({
       copyTextAndResetOnSuccess(text);
       keepTerminalInputFocused();
     }
-  }, [keepTerminalInputFocused, sessionBufferStore, sessions, copyTextAndResetOnSuccess]);
+  }, [keepTerminalInputFocused, sessionBufferStore, copyTextAndResetOnSuccess]);
 
   const handleCopySelectedText = React.useCallback(() => {
     const current = copySelectionRef.current;
@@ -149,7 +146,6 @@ export function useTerminalPageCopyRuntime({
     const endRowIndex = current.endRowIndex ?? current.startRowIndex;
     const buffer = resolveCopySelectionBufferOrWarn(
       sessionBufferStore,
-      sessions,
       sessionId,
       current.startRowIndex,
       endRowIndex,
@@ -164,7 +160,7 @@ export function useTerminalPageCopyRuntime({
     }
     copyTextAndResetOnSuccess(text);
     keepTerminalInputFocused();
-  }, [keepTerminalInputFocused, sessionBufferStore, sessions, copyTextAndResetOnSuccess]);
+  }, [keepTerminalInputFocused, sessionBufferStore, copyTextAndResetOnSuccess]);
 
   const handleCloseCopyMenu = React.useCallback(() => {
     setCopySelection(EMPTY_COPY_SELECTION_STATE);

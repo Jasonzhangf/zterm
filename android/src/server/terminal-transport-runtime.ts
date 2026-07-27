@@ -1,7 +1,9 @@
 import { v4 as uuidv4 } from 'uuid';
 import { WebSocket } from 'ws';
-import type { ServerMessage } from '../lib/types';
-import type { TerminalPerformanceTraceRecord } from '../lib/terminal-performance-trace';
+import type {
+  BridgeServerMessage as ServerMessage,
+} from '@zterm/shared/protocol';
+import type { TerminalPerformanceTraceRecord } from '@zterm/shared/terminal/performance-trace';
 import type {
   TerminalTransportSubscriber,
   TerminalSession,

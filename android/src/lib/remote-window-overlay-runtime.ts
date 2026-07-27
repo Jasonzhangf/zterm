@@ -42,6 +42,38 @@ function normalizeErrors(
     : [];
 }
 
+function normalizeTargets(
+  targets: RemoteWindowStreamTargetsResponsePayload['targets'] | undefined,
+): RemoteWindowStreamTargetManifest[] {
+  return Array.isArray(targets) ? targets : [];
+}
+
+function upsertRemoteWindowTarget(
+  targets: RemoteWindowStreamTargetManifest[],
+  target: RemoteWindowStreamTargetManifest,
+) {
+  let found = false;
+  const nextTargets = targets.map((item) => {
+    if (item.streamTargetId !== target.streamTargetId) {
+      return item;
+    }
+    found = true;
+    return target;
+  });
+  return found ? nextTargets : [target, ...nextTargets];
+}
+
+export function upsertRemoteWindowCatalogTarget(
+  payload: RemoteWindowStreamTargetsResponsePayload,
+  target: RemoteWindowStreamTargetManifest,
+): RemoteWindowStreamTargetsResponsePayload {
+  return {
+    requestId: payload.requestId,
+    targets: upsertRemoteWindowTarget(normalizeTargets(payload.targets), target),
+    ...(payload.errors ? { errors: normalizeErrors(payload.errors) } : {}),
+  };
+}
+
 export function beginRemoteWindowTargetEnumeration(
   state: RemoteWindowOverlayState,
 ): { state: RemoteWindowOverlayState; requestEpoch: number } {
@@ -67,9 +99,37 @@ export function applyRemoteWindowTargetCatalog(
   return {
     phase: 'pickerOpen',
     requestEpoch,
-    targets: Array.isArray(payload.targets) ? payload.targets : [],
+    targets: normalizeTargets(payload.targets),
     errors: normalizeErrors(payload.errors),
     errorMessage: null,
+  };
+}
+
+export function applyRemoteWindowTargetCatalogSnapshot(
+  state: RemoteWindowOverlayState,
+  payload: RemoteWindowStreamTargetsResponsePayload,
+): RemoteWindowOverlayState {
+  const targets = normalizeTargets(payload.targets);
+  const errors = normalizeErrors(payload.errors);
+  if (state.phase === 'pickerOpen') {
+    return {
+      ...state,
+      targets,
+      errors,
+      errorMessage: null,
+    };
+  }
+  if (state.phase !== 'targetLocked') {
+    return state;
+  }
+  const nextTarget = targets.find((item) => (
+    item.streamTargetId === state.target.streamTargetId
+  )) || state.target;
+  return {
+    ...state,
+    target: nextTarget,
+    targets,
+    errors,
   };
 }
 
@@ -190,9 +250,7 @@ export function applyRemoteWindowInputResultTarget(
   return {
     ...state,
     target,
-    targets: state.targets.map((item) => (
-      item.streamTargetId === targetId ? target : item
-    )),
+    targets: upsertRemoteWindowTarget(state.targets, target),
   };
 }
 

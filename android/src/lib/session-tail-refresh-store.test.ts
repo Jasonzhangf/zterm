@@ -117,4 +117,44 @@ describe('session tail refresh store', () => {
     expect(store.readSyncRequest('s1', 'tail-refresh')).toEqual(debounceState);
     expect(store.hasPendingConnectTailRefresh('s2')).toBe(true);
   });
+
+  it('tracks visible non-gap repair guard separately from sync request debounce', () => {
+    const store = createSessionTailRefreshStore();
+    store.recordVisibleNonGapRepairRequest('s1', {
+      requestedAt: 100,
+      requestStartIndex: 10,
+      requestEndIndex: 20,
+      tailEndIndex: 30,
+      targetRevision: 7,
+    });
+
+    expect(store.readVisibleNonGapRepairRequest('s1')).toEqual({
+      requestedAt: 100,
+      requestStartIndex: 10,
+      requestEndIndex: 20,
+      tailEndIndex: 30,
+      targetRevision: 7,
+    });
+    expect(store.readVisibleNonGapRepairRequest('s2')).toBeNull();
+
+    store.clearVisibleNonGapRepairRequest('s1');
+    expect(store.readVisibleNonGapRepairRequest('s1')).toBeNull();
+  });
+
+  it('deleteSession clears visible non-gap repair guard with pending marks', () => {
+    const store = createSessionTailRefreshStore();
+    store.markPendingResumeTailRefresh('s1');
+    store.recordVisibleNonGapRepairRequest('s1', {
+      requestedAt: 100,
+      requestStartIndex: 10,
+      requestEndIndex: 20,
+      tailEndIndex: 30,
+      targetRevision: 7,
+    });
+
+    store.deleteSession('s1');
+
+    expect(store.hasPendingResumeTailRefresh('s1')).toBe(false);
+    expect(store.readVisibleNonGapRepairRequest('s1')).toBeNull();
+  });
 });

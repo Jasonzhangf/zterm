@@ -403,23 +403,23 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
 
     render(<App />);
 
-    await waitFor(() => expect(screen.getByTestId('terminal-header')).toBeTruthy());
-    expect(screen.getByTestId('terminal-header').getAttribute('data-active-session-id')).toBe('');
-    expect(screen.getByTestId('terminal-stage-shell')).toBeTruthy();
-    expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
+    await waitFor(() => expect(screen.getByTestId('connections-page')).toBeTruthy());
+    expect(screen.queryByTestId('terminal-header')).toBeNull();
+    expect(screen.queryByTestId('terminal-stage-shell')).toBeNull();
     expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).toBeNull();
     expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBeNull();
     expect(localStorage.getItem(STORAGE_KEYS.SAVED_TAB_LISTS)).toBeNull();
     expect(MockWebSocket.instances).toHaveLength(0);
   });
 
-  it('renders the real terminal shell without reviving a stale ACTIVE_PAGE session focus', async () => {
+  it('routes stale ACTIVE_PAGE focus to connections without reviving a terminal shell', async () => {
     localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal', sessionId: 'session-2' }));
 
     render(<App />);
 
-    await waitFor(() => expect(screen.getByTestId('terminal-stage-shell')).toBeTruthy());
-    expect(screen.getByTestId('terminal-header').getAttribute('data-active-session-id')).toBe('');
+    await waitFor(() => expect(screen.getByTestId('connections-page')).toBeTruthy());
+    expect(screen.queryByTestId('terminal-stage-shell')).toBeNull();
+    expect(screen.queryByTestId('terminal-header')).toBeNull();
     expect(screen.queryByText('switch-session-2')).toBeNull();
     expect(MockWebSocket.instances).toHaveLength(0);
     expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).toBeNull();

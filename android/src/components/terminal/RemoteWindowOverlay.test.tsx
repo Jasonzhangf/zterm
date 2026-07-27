@@ -218,6 +218,124 @@ describe('RemoteWindowOverlay', () => {
     });
   });
 
+  it('opens an active app-title switch list and switches to another target without reopening the picker', async () => {
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const appOne = makeTarget('app-1', 'TextEdit', 'app-window');
+    const appTwo = {
+      ...makeTarget('app-2', 'Safari', 'app-window'),
+      videoTarget: {
+        ...makeTarget('app-2', 'Safari', 'app-window').videoTarget,
+        appBundleId: 'com.apple.Safari',
+        pid: 456,
+        windowId: 'window-2',
+      },
+    };
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [appOne, appTwo],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+    }));
+    const stopStream = vi.fn();
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        requestTargets={requestTargets}
+        startStream={startStream}
+        stopStream={stopStream}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
+    await screen.findByTestId('remote-window-video');
+
+    fireEvent.click(screen.getByTestId('remote-window-active-app-switch-button'));
+
+    expect(screen.getByTestId('remote-window-active-app-switch-list')).toBeTruthy();
+    expect(screen.getByTestId('remote-window-active-app-switch-target-app-1').getAttribute('aria-current')).toBe('true');
+
+    fireEvent.click(screen.getByTestId('remote-window-active-app-switch-target-app-2'));
+
+    await waitFor(() => {
+      expect(stopStream).toHaveBeenCalledWith('session-1', expect.stringMatching(/^rw-stream-/));
+      expect(startStream).toHaveBeenCalledTimes(2);
+      expect(startStream.mock.calls[1]?.[1]).toMatchObject({ streamTargetId: 'app-2' });
+    });
+    expect(screen.queryByTestId('remote-window-active-app-switch-list')).toBeNull();
+    expect(screen.getByTestId('remote-window-active-app-switch-button').textContent).toContain('Safari');
+  });
+
+  it('syncs the active stream catalog every second and applies the resized target truth', async () => {
+    vi.useFakeTimers();
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const target = makeTarget('app-main', 'WeChat', 'app-window');
+    const syncedTarget: RemoteWindowStreamTargetManifest = {
+      ...target,
+      videoTarget: {
+        ...target.videoTarget,
+        windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 1200 },
+        cropRectTopLeftPx: { x: 10, y: 20, width: 800, height: 1200 },
+      },
+    };
+    const childTarget: RemoteWindowStreamTargetManifest = {
+      ...makeTarget('app-child', 'WeChat Dialog', 'app-window'),
+      videoTarget: {
+        ...target.videoTarget,
+        windowId: 'window-dialog',
+        title: 'WeChat Dialog',
+        windowBoundsTopLeftPx: { x: 40, y: 80, width: 420, height: 280 },
+        cropRectTopLeftPx: { x: 40, y: 80, width: 420, height: 280 },
+      },
+    };
+    const requestTargets = vi.fn(async (_sessionId: string, options?: { forceRefresh?: boolean }) => ({
+      requestId: options?.forceRefresh ? 'rw-sync' : 'rw-1',
+      targets: options?.forceRefresh ? [syncedTarget, childTarget] : [target],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+    }));
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        requestTargets={requestTargets}
+        startStream={startStream}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    await act(async () => {
+      await Promise.resolve();
+    });
+    fireEvent.click(screen.getByTestId('remote-window-target-app-main'));
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(requestTargets).toHaveBeenCalledWith('session-1', { forceRefresh: true });
+    expect(screen.getByTestId('remote-window-video-window-option-app-child')).toBeTruthy();
+    expect(screen.getByTestId('remote-window-video-surface').style.aspectRatio).toBe('800 / 1200');
+
+    await act(async () => {
+      vi.advanceTimersByTime(1_000);
+      await Promise.resolve();
+    });
+
+    expect(requestTargets.mock.calls.filter((call) => call[1]?.forceRefresh === true)).toHaveLength(2);
+  });
+
   it('fails the picker locally when the daemon catalog promise never settles', async () => {
     vi.useFakeTimers();
     const requestTargets = vi.fn(() => new Promise<never>(() => undefined));
@@ -2041,7 +2159,7 @@ describe('RemoteWindowOverlay', () => {
     });
   });
 
-  it('keeps fullscreen drawing in complete fit and sends an explicit remote target resize request', async () => {
+  it('defaults fullscreen to remote fill resize while keeping drawing in complete fit', async () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 390 });
     Object.defineProperty(window, 'innerHeight', { configurable: true, value: 844 });
     Object.defineProperty(window, 'visualViewport', {
@@ -2138,14 +2256,12 @@ describe('RemoteWindowOverlay', () => {
 
     const content = screen.getByTestId('remote-window-video-content');
     await waitFor(() => {
-      expect(overlay.getAttribute('data-display-mode')).toBe('fit');
+      expect(overlay.getAttribute('data-display-mode')).toBe('fill');
       expect(Number.parseFloat(content.style.left)).toBeCloseTo(16.67, 1);
       expect(Number.parseFloat(content.style.top)).toBeCloseTo(0, 1);
       expect(Number.parseFloat(content.style.width)).toBeCloseTo(266.67, 1);
       expect(Number.parseFloat(content.style.height)).toBeCloseTo(200, 1);
     });
-
-    fireEvent.click(screen.getByTestId('remote-window-fullscreen-display-toggle'));
 
     await waitFor(() => {
       expect(resizeTargetWindow).toHaveBeenCalledWith('session-1', expect.objectContaining({
@@ -2192,8 +2308,82 @@ describe('RemoteWindowOverlay', () => {
       expect(Number.parseFloat(content.style.width)).toBeCloseTo(108.3, 1);
       expect(Number.parseFloat(content.style.height)).toBeCloseTo(200, 1);
     });
-    expect(overlay.getAttribute('data-display-mode')).toBe('fit');
+    expect(overlay.getAttribute('data-display-mode')).toBe('fill');
     expect(screen.getByRole('button', { name: '按手机全屏尺寸调整远程窗口' })).toBeTruthy();
+  });
+
+  it('keeps a resize ACK target in the cached picker catalog after the stream closes', async () => {
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const target = makeTarget('app-1', 'TextEdit', 'app-window');
+    const resizedTarget: RemoteWindowStreamTargetManifest = {
+      ...target,
+      videoTarget: {
+        ...target.videoTarget,
+        windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 1000 },
+        cropRectTopLeftPx: { x: 10, y: 20, width: 800, height: 1000 },
+      },
+    };
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [target],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+    }));
+    let remoteWindowMessageHandler: ((msg: any) => void) | null = null;
+    const onRemoteWindowMessage = vi.fn((handler: (msg: any) => void) => {
+      remoteWindowMessageHandler = handler;
+      return () => {
+        if (remoteWindowMessageHandler === handler) {
+          remoteWindowMessageHandler = null;
+        }
+      };
+    });
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        requestTargets={requestTargets}
+        startStream={startStream}
+        onRemoteWindowMessage={onRemoteWindowMessage}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
+    await screen.findByTestId('remote-window-video');
+    const streamId = startStream.mock.calls[0]?.[2] || '';
+
+    act(() => {
+      remoteWindowMessageHandler?.({
+        type: 'remote-window-input-result',
+        payload: {
+          requestId: 'rw-resize-ack',
+          streamId,
+          targetId: 'app-1',
+          accepted: true,
+          target: resizedTarget,
+          capture: {
+            source: 'ScreenCaptureKit',
+            frameWidth: 800,
+            frameHeight: 1000,
+            frameRate: 30,
+            targetKind: 'app-window',
+          },
+        },
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-video-surface').style.aspectRatio).toBe('800 / 1000');
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+
+    expect(screen.queryByTestId('remote-window-picker-loading')).toBeNull();
+    expect(screen.getByTestId('remote-window-target-app-1').textContent).toContain('800x1000');
   });
 
   it('maps fullscreen input through the same fitted content rect after a target resize request', async () => {

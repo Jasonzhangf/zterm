@@ -30,7 +30,7 @@ const capacitorAppHarness = vi.hoisted(() => {
       Object.keys(listenersByEventName).forEach((eventName) => {
         listenersByEventName[eventName] = [];
       });
-      this.addListener.mockReset();
+      this.addListener.mockClear();
     },
   };
 });
@@ -38,6 +38,40 @@ const capacitorAppHarness = vi.hoisted(() => {
 vi.mock('@capacitor/app', () => ({
   App: {
     addListener: capacitorAppHarness.addListener,
+  },
+}));
+
+// Capacitor Network harness
+const capacitorNetworkHarness = vi.hoisted(() => {
+  const listenersByEventName: Record<string, Array<(payload: any) => void>> = {};
+  return {
+    addListener: vi.fn((eventName: string, listener: (payload: any) => void) => {
+      listenersByEventName[eventName] = listenersByEventName[eventName] || [];
+      listenersByEventName[eventName]!.push(listener);
+      return {
+        remove: vi.fn(async () => {
+          listenersByEventName[eventName] = (listenersByEventName[eventName] || [])
+            .filter((candidate) => candidate !== listener);
+        }),
+      };
+    }),
+    emit(eventName: string, payload: any) {
+      (listenersByEventName[eventName] || []).forEach((listener) => listener(payload));
+    },
+    count(eventName: string) {
+      return this.addListener.mock.calls.filter((call) => call[0] === eventName).length;
+    },
+    reset() {
+      Object.keys(listenersByEventName).forEach((eventName) => {
+        listenersByEventName[eventName] = [];
+      });
+      this.addListener.mockClear();
+    },
+  };
+});
+vi.mock('@capacitor/network', () => ({
+  Network: {
+    addListener: capacitorNetworkHarness.addListener,
   },
 }));
 
@@ -78,6 +112,7 @@ function LifecycleHarness({
 afterEach(() => {
   cleanup();
   capacitorAppHarness.reset();
+  capacitorNetworkHarness.reset();
 });
 
 describe('useOpenTabLifecycleEffects', () => {
@@ -111,4 +146,121 @@ describe('useOpenTabLifecycleEffects', () => {
     expect(firstAudit).not.toHaveBeenCalled();
     expect(secondAudit).toHaveBeenCalledWith('appStateChange');
   });
+
+  it('keeps one Capacitor Network networkStatusChange listener across callback-only rerenders', async () => {
+    const view = render(
+      <LifecycleHarness
+        onForegroundResume={vi.fn()}
+        auditOpenTabsAgainstRemoteSessions={vi.fn(async () => undefined)}
+      />,
+    );
+    expect(capacitorNetworkHarness.count('networkStatusChange')).toBe(1);
+
+    view.rerender(
+      <LifecycleHarness
+        onForegroundResume={vi.fn()}
+        auditOpenTabsAgainstRemoteSessions={vi.fn(async () => undefined)}
+      />,
+    );
+
+    expect(capacitorNetworkHarness.count('networkStatusChange')).toBe(1);
+  });
+
+  it('resumes active session transport and audits tabs when network comes back online', async () => {
+    const resumeActiveSessionTransport = vi.fn(() => true);
+    const auditOpenTabs = vi.fn(async () => undefined);
+    const onForegroundActiveChange = vi.fn();
+
+    const HarnessWithMocks = () => {
+      const sessionsRef = useRef<Session[]>([baseSession]);
+      const openTabStateRef = useRef({
+        tabs: [{ sessionId: 's1' }],
+        activeSessionId: 's1',
+      });
+      const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
+
+      useOpenTabLifecycleEffects({
+        sessionsRef,
+        openTabStateRef,
+        foregroundRefreshRuntimeRef,
+        onForegroundActiveChange,
+        onForegroundResume: vi.fn(),
+        auditOpenTabsAgainstRemoteSessions: auditOpenTabs,
+        resumeActiveSessionTransport,
+        bumpFollowResetEpoch: vi.fn(),
+      });
+
+      return <div>mounted</div>;
+    };
+
+    render(<HarnessWithMocks />);
+
+    capacitorNetworkHarness.emit('networkStatusChange', {
+      connected: true,
+      connectionType: 'wifi',
+    });
+
+    expect(resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
+    expect(auditOpenTabs).toHaveBeenCalledWith('network-status-change');
+    expect(onForegroundActiveChange).toHaveBeenCalledWith(true);
+  });
+
+  it('marks foreground hidden when network disconnects', async () => {
+    const onForegroundActiveChange = vi.fn();
+
+    const HarnessWithMocks = () => {
+      const sessionsRef = useRef<Session[]>([baseSession]);
+      const openTabStateRef = useRef({
+        tabs: [{ sessionId: 's1' }],
+        activeSessionId: 's1',
+      });
+      const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
+
+      useOpenTabLifecycleEffects({
+        sessionsRef,
+        openTabStateRef,
+        foregroundRefreshRuntimeRef,
+        onForegroundActiveChange,
+        onForegroundResume: vi.fn(),
+        auditOpenTabsAgainstRemoteSessions: vi.fn(async () => undefined),
+        resumeActiveSessionTransport: vi.fn(() => true),
+        bumpFollowResetEpoch: vi.fn(),
+      });
+
+      return <div>mounted</div>;
+    };
+
+    render(<HarnessWithMocks />);
+
+    capacitorNetworkHarness.emit('networkStatusChange', {
+      connected: false,
+      connectionType: 'none',
+    });
+
+    expect(onForegroundActiveChange).toHaveBeenCalledWith(false);
+  });
+
+  it('does not resume transport when network event fires but no active session exists', async () => {
+    const resumeActiveSessionTransport = vi.fn(() => true);
+    const auditOpenTabs = vi.fn(async () => undefined);
+
+    const HarnessNoActiveSession = () => {
+      const sessionsRef = useRef<Session[]>([]);
+      const openTabStateRef = useRef({ tabs: [], activeSessionId: null });
+      const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
+
+      useOpenTabLifecycleEffects({
+        sessionsRef, openTabStateRef, foregroundRefreshRuntimeRef,
+        onForegroundResume: vi.fn(),
+        auditOpenTabsAgainstRemoteSessions: auditOpenTabs,
+        resumeActiveSessionTransport,
+        bumpFollowResetEpoch: vi.fn(),
+      });
+      return <div>mounted</div>;
+    };
+    render(<HarnessNoActiveSession />);
+    capacitorNetworkHarness.emit('networkStatusChange', { connected: true, connectionType: 'cellular' });
+    expect(resumeActiveSessionTransport).not.toHaveBeenCalled();
+  });
+
 });

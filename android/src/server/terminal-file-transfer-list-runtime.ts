@@ -13,7 +13,7 @@ import type {
   FileListRequestPayload,
   RemoteScreenshotRequestPayload,
   RemoteWindowStreamRect,
-} from '../lib/types';
+} from '@zterm/shared/protocol';
 import { resolveFileTransferListPath } from './file-transfer-path';
 import { resolveRemoteScreenshotErrorMessage } from './remote-screenshot';
 import type { TerminalSession } from './terminal-runtime-types';

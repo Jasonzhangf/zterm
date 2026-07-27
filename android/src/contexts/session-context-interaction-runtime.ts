@@ -15,7 +15,7 @@ import {
   updateRemoteWindowStreamQualityRuntime,
 } from './session-context-remote-window-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
-import type { SessionTransportResource } from '../lib/session-transport-runtime';
+import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import type {
   PasteImageStartPayload,
@@ -82,8 +82,7 @@ export function createSessionInteractionRuntime(options: {
   imagePasteReadyTimeoutMs: number;
   bridgeSettings: BridgeSettings;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
-  readSessionTransportResource: (sessionId: string) => SessionTransportResource;
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  daemonConnection: ClientDaemonConnection;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   markPendingInputTailRefresh: (sessionId: string, localRevision: number) => boolean;
   readSessionBufferSnapshot: (sessionId: string) => { revision: number };
@@ -98,6 +97,8 @@ export function createSessionInteractionRuntime(options: {
     options?: { immediate?: boolean; resetAttempt?: boolean; force?: boolean },
   ) => void;
 }) {
+  const daemonConnection = options.daemonConnection;
+
   const sendInput = (sessionId: string, data: string) => {
     sendInputRuntime({
       sessionId,
@@ -106,8 +107,7 @@ export function createSessionInteractionRuntime(options: {
         stateRef: options.refs.stateRef,
       },
       runtimeDebug: options.runtimeDebug,
-      readSessionTransportResource: options.readSessionTransportResource,
-      readSessionTransportSocket: options.readSessionTransportSocket,
+      daemonConnection,
       isReconnectInFlight: options.isReconnectInFlight,
       sendSocketPayload: options.sendSocketPayload,
       markPendingInputTailRefresh: options.markPendingInputTailRefresh,
@@ -127,8 +127,7 @@ export function createSessionInteractionRuntime(options: {
       sessionId,
       timeoutMs,
       sessions: options.refs.stateRef.current.sessions,
-      readSessionTransportResource: options.readSessionTransportResource,
-      readSessionTransportSocket: options.readSessionTransportSocket,
+      daemonConnection,
     });
   };
 
@@ -177,8 +176,7 @@ export function createSessionInteractionRuntime(options: {
     return requestRemoteWindowTargetsRuntime({
       sessionId,
       sessions: options.refs.stateRef.current.sessions,
-      readSessionTransportResource: options.readSessionTransportResource,
-      readSessionTransportSocket: options.readSessionTransportSocket,
+      daemonConnection,
       remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
       sendSocketPayload: options.sendSocketPayload,
       targetCatalogCache: options.refs.remoteWindowTargetCatalogCacheRef?.current,
@@ -199,8 +197,7 @@ export function createSessionInteractionRuntime(options: {
       videoBitrate: startOptions?.videoBitrate,
       bridgeSettings: options.bridgeSettings,
       sessions: options.refs.stateRef.current.sessions,
-      readSessionTransportResource: options.readSessionTransportResource,
-      readSessionTransportSocket: options.readSessionTransportSocket,
+      daemonConnection,
       remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
       remoteWindowReceiverRuntime: options.refs.remoteWindowReceiverRuntimeRef.current,
       sendSocketPayload: options.sendSocketPayload,
@@ -215,8 +212,7 @@ export function createSessionInteractionRuntime(options: {
       sessionId,
       payload,
       sessions: options.refs.stateRef.current.sessions,
-      readSessionTransportResource: options.readSessionTransportResource,
-      readSessionTransportSocket: options.readSessionTransportSocket,
+      daemonConnection,
       remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
       sendSocketPayload: options.sendSocketPayload,
     });
@@ -227,8 +223,7 @@ export function createSessionInteractionRuntime(options: {
       sessionId,
       streamId,
       sessions: options.refs.stateRef.current.sessions,
-      readSessionTransportResource: options.readSessionTransportResource,
-      readSessionTransportSocket: options.readSessionTransportSocket,
+      daemonConnection,
       remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
       remoteWindowReceiverRuntime: options.refs.remoteWindowReceiverRuntimeRef.current,
       sendSocketPayload: options.sendSocketPayload,
@@ -243,8 +238,7 @@ export function createSessionInteractionRuntime(options: {
       sessionId,
       payload,
       sessions: options.refs.stateRef.current.sessions,
-      readSessionTransportResource: options.readSessionTransportResource,
-      readSessionTransportSocket: options.readSessionTransportSocket,
+      daemonConnection,
       remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
       sendSocketPayload: options.sendSocketPayload,
     });
@@ -258,8 +252,7 @@ export function createSessionInteractionRuntime(options: {
       sessionId,
       payload,
       sessions: options.refs.stateRef.current.sessions,
-      readSessionTransportResource: options.readSessionTransportResource,
-      readSessionTransportSocket: options.readSessionTransportSocket,
+      daemonConnection,
       remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
       sendSocketPayload: options.sendSocketPayload,
     });

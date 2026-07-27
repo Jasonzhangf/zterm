@@ -12,7 +12,7 @@ import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import { buildTraversalPlan } from '../lib/traversal/config';
 import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
-import type { SessionTransportResource } from '../lib/session-transport-runtime';
+import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 
 interface RemoteWindowCatalogMessageRuntimeLike {
   requestTargets: (
@@ -102,24 +102,6 @@ export interface RemoteWindowTargetCatalogCacheEntry {
 
 export type RemoteWindowTargetCatalogCacheStore = Map<string, RemoteWindowTargetCatalogCacheEntry>;
 
-function formatSocketReadyState(ws: BridgeTransportSocket | null) {
-  if (!ws) {
-    return 'missing';
-  }
-  switch (ws.readyState) {
-    case WebSocket.CONNECTING:
-      return 'connecting';
-    case WebSocket.OPEN:
-      return 'open';
-    case WebSocket.CLOSING:
-      return 'closing';
-    case WebSocket.CLOSED:
-      return 'closed';
-    default:
-      return `unknown:${ws.readyState}`;
-  }
-}
-
 function buildRemoteWindowTargetCatalogCacheKey(session: Session) {
   return [
     session.daemonHostId || '',
@@ -140,8 +122,7 @@ function cloneRemoteWindowTargetsPayload(payload: RemoteWindowStreamTargetsRespo
 function resolveRemoteWindowTransport(options: {
   sessionId: string;
   sessions: Session[];
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
+  daemonConnection: ClientDaemonConnection;
   operationLabel: 'catalog' | 'stream';
 }) {
   const targetSessionId = options.sessionId.trim();
@@ -149,14 +130,9 @@ function resolveRemoteWindowTransport(options: {
   if (!session) {
     throw new Error(`Remote window ${options.operationLabel} session no longer exists`);
   }
-  const ws = options.readSessionTransportResource?.(targetSessionId).socket
-    || options.readSessionTransportSocket(targetSessionId)
-    || null;
-  if (ws && ws.readyState === WebSocket.OPEN) {
-    return ws;
-  }
-  throw new Error(
-    `Remote window ${options.operationLabel} transport is not open (session=${session.state || 'missing'}, socket=${formatSocketReadyState(ws)})`,
+  return options.daemonConnection.readOpenSessionSocket(
+    targetSessionId,
+    `Remote window ${options.operationLabel}`,
   );
 }
 
@@ -214,8 +190,7 @@ export function resolveRemoteWindowStreamIceServers(options: {
 export function resolveRemoteWindowCatalogTransport(options: {
   sessionId: string;
   sessions: Session[];
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
+  daemonConnection: ClientDaemonConnection;
 }) {
   return resolveRemoteWindowTransport({
     ...options,
@@ -226,8 +201,7 @@ export function resolveRemoteWindowCatalogTransport(options: {
 export function resolveRemoteWindowStreamTransport(options: {
   sessionId: string;
   sessions: Session[];
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
+  daemonConnection: ClientDaemonConnection;
 }) {
   return resolveRemoteWindowTransport({
     ...options,
@@ -238,8 +212,7 @@ export function resolveRemoteWindowStreamTransport(options: {
 export async function requestRemoteWindowTargetsRuntime(options: {
   sessionId: string;
   sessions: Session[];
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
+  daemonConnection: ClientDaemonConnection;
   remoteWindowMessageRuntime: RemoteWindowCatalogMessageRuntimeLike;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   targetCatalogCache?: RemoteWindowTargetCatalogCacheStore;
@@ -259,8 +232,7 @@ export async function requestRemoteWindowTargetsRuntime(options: {
   const ws = resolveRemoteWindowCatalogTransport({
     sessionId: targetSessionId,
     sessions: options.sessions,
-    readSessionTransportResource: options.readSessionTransportResource,
-    readSessionTransportSocket: options.readSessionTransportSocket,
+    daemonConnection: options.daemonConnection,
   });
   const cacheKey = buildRemoteWindowTargetCatalogCacheKey(session);
   const now = options.now?.() ?? Date.now();
@@ -290,8 +262,7 @@ export async function requestRemoteWindowStreamStartRuntime(options: {
   iceServers?: RTCIceServer[];
   bridgeSettings?: BridgeSettings | null;
   sessions: Session[];
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
+  daemonConnection: ClientDaemonConnection;
   remoteWindowMessageRuntime: RemoteWindowStreamMessageRuntimeLike;
   remoteWindowReceiverRuntime: RemoteWindowReceiverRuntimeLike;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
@@ -305,8 +276,7 @@ export async function requestRemoteWindowStreamStartRuntime(options: {
   const ws = resolveRemoteWindowStreamTransport({
     sessionId: targetSessionId,
     sessions: options.sessions,
-    readSessionTransportResource: options.readSessionTransportResource,
-    readSessionTransportSocket: options.readSessionTransportSocket,
+    daemonConnection: options.daemonConnection,
   });
   const session = options.sessions.find((item) => item.id === targetSessionId)!;
   const iceServers = options.iceServers
@@ -343,8 +313,7 @@ export function updateRemoteWindowStreamQualityRuntime(options: {
   sessionId: string;
   payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>;
   sessions: Session[];
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
+  daemonConnection: ClientDaemonConnection;
   remoteWindowMessageRuntime: RemoteWindowStreamMessageRuntimeLike;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
 }) {
@@ -355,8 +324,7 @@ export function updateRemoteWindowStreamQualityRuntime(options: {
   const ws = resolveRemoteWindowStreamTransport({
     sessionId: targetSessionId,
     sessions: options.sessions,
-    readSessionTransportResource: options.readSessionTransportResource,
-    readSessionTransportSocket: options.readSessionTransportSocket,
+    daemonConnection: options.daemonConnection,
   });
   options.remoteWindowMessageRuntime.sendStreamQuality(targetSessionId, {
     ws,
@@ -369,8 +337,7 @@ export function stopRemoteWindowStreamRuntime(options: {
   sessionId: string;
   streamId: string;
   sessions: Session[];
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
+  daemonConnection: ClientDaemonConnection;
   remoteWindowMessageRuntime: RemoteWindowStreamMessageRuntimeLike;
   remoteWindowReceiverRuntime: RemoteWindowReceiverRuntimeLike;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
@@ -384,8 +351,7 @@ export function stopRemoteWindowStreamRuntime(options: {
   const ws = resolveRemoteWindowStreamTransport({
     sessionId: targetSessionId,
     sessions: options.sessions,
-    readSessionTransportResource: options.readSessionTransportResource,
-    readSessionTransportSocket: options.readSessionTransportSocket,
+    daemonConnection: options.daemonConnection,
   });
   options.remoteWindowMessageRuntime.stopStream(targetSessionId, {
     ws,
@@ -399,8 +365,7 @@ export function sendRemoteWindowInputRuntime(options: {
   sessionId: string;
   payload: Omit<RemoteWindowInputEventPayload, 'requestId'>;
   sessions: Session[];
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
+  daemonConnection: ClientDaemonConnection;
   remoteWindowMessageRuntime: RemoteWindowStreamMessageRuntimeLike;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
 }) {
@@ -411,8 +376,7 @@ export function sendRemoteWindowInputRuntime(options: {
   const ws = resolveRemoteWindowStreamTransport({
     sessionId: targetSessionId,
     sessions: options.sessions,
-    readSessionTransportResource: options.readSessionTransportResource,
-    readSessionTransportSocket: options.readSessionTransportSocket,
+    daemonConnection: options.daemonConnection,
   });
   options.remoteWindowMessageRuntime.sendInputEvent(targetSessionId, {
     ws,
@@ -425,8 +389,7 @@ export function resizeRemoteWindowTargetRuntime(options: {
   sessionId: string;
   payload: Omit<RemoteWindowInputEventPayload, 'requestId'>;
   sessions: Session[];
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
+  daemonConnection: ClientDaemonConnection;
   remoteWindowMessageRuntime: RemoteWindowStreamMessageRuntimeLike;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
 }) {
@@ -437,8 +400,7 @@ export function resizeRemoteWindowTargetRuntime(options: {
   const ws = resolveRemoteWindowStreamTransport({
     sessionId: targetSessionId,
     sessions: options.sessions,
-    readSessionTransportResource: options.readSessionTransportResource,
-    readSessionTransportSocket: options.readSessionTransportSocket,
+    daemonConnection: options.daemonConnection,
   });
   const sendWindowResizeEvent = options.remoteWindowMessageRuntime.sendWindowResizeEvent
     || options.remoteWindowMessageRuntime.sendInputEvent;

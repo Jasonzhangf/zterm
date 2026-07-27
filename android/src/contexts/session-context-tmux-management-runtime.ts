@@ -5,6 +5,7 @@ import {
 } from '@zterm/shared/protocol';
 import type { SessionTransportResource } from '../lib/session-transport-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
+import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 
 const TRANSPORT_OPEN = 1;
 export const SESSION_TMUX_TARGET_REQUEST_TIMEOUT_MS = 10_000;
@@ -90,11 +91,14 @@ export function manageTmuxSessionsOnOpenTransportRuntime(options: {
   message: TerminalMuxTargetClientMessage;
   pendingRequestsRef: { current: SessionTmuxTargetRequestStore };
   readSessionTransportResource: (sessionId: string) => SessionTransportResource;
+  daemonConnection?: ClientDaemonConnection;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   timeoutMs?: number;
   runtimeDebug?: (event: string, payload?: Record<string, unknown>) => void;
 }): Promise<string[] | null> {
-  const resource = options.readSessionTransportResource(options.sessionId);
+  const resource = options.daemonConnection
+    ? options.daemonConnection.readSessionResource(options.sessionId)
+    : options.readSessionTransportResource(options.sessionId);
   const ws = resource.terminalSocket;
   if (!resource.targetRuntime?.terminalMuxReady || !ws || ws.readyState !== TRANSPORT_OPEN) {
     return Promise.resolve(null);

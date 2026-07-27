@@ -738,8 +738,10 @@ export function FileTransferSheet({
               );
             }
             sendJson?.(chunkMessage);
+            await uploadRequest.waitForProgress(i + 1);
           }
           sendJson?.(uploadRequest.endMessage);
+          await uploadRequest.waitForDone();
         } catch (err) {
           if (uploadRequest) {
             sendJson?.(uploadRequest.endMessage);

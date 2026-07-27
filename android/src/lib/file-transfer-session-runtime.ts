@@ -43,6 +43,13 @@ export interface FileTransferSessionRuntimeDeps {
   onDownloadComplete?: (payload: FileDownloadCompletePayload, orderedChunksBase64: string[]) => Promise<void> | void;
 }
 
+interface UploadProgressWaiter {
+  minTransferredChunks: number;
+  resolve: () => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
 function createDefaultState(): FileTransferSessionRuntimeState {
   return {
     remotePath: '',
@@ -85,12 +92,92 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
   let downloadChunks = new Map<number, string>();
   let previewChunks = new Map<number, string>();
   const waiters = new Map<string, () => void>();
+  const uploadProgressWaiters = new Map<string, Set<UploadProgressWaiter>>();
   const now = deps?.now ?? (() => Date.now());
   const randomId = deps?.randomId ?? (() => Math.random().toString(36).slice(2, 6));
 
   const settleWaiter = (requestId: string) => {
     waiters.get(requestId)?.();
     waiters.delete(requestId);
+  };
+
+  const findTransfer = (requestId: string) => state.transfers.find((item) => item.id === requestId);
+
+  const clearUploadProgressWaiters = (requestId: string, error?: Error) => {
+    const pending = uploadProgressWaiters.get(requestId);
+    if (!pending) {
+      return;
+    }
+    uploadProgressWaiters.delete(requestId);
+    for (const waiter of pending) {
+      clearTimeout(waiter.timer);
+      if (error) {
+        waiter.reject(error);
+      } else {
+        waiter.resolve();
+      }
+    }
+  };
+
+  const resolveSatisfiedUploadProgressWaiters = (requestId: string) => {
+    const pending = uploadProgressWaiters.get(requestId);
+    if (!pending) {
+      return;
+    }
+    const transfer = findTransfer(requestId);
+    if (!transfer) {
+      return;
+    }
+    if (transfer.status === 'error') {
+      clearUploadProgressWaiters(requestId, new Error(transfer.error || 'upload failed'));
+      return;
+    }
+    if (transfer.status === 'done') {
+      clearUploadProgressWaiters(requestId);
+      return;
+    }
+    for (const waiter of Array.from(pending)) {
+      if (transfer.transferredBytes >= waiter.minTransferredChunks) {
+        pending.delete(waiter);
+        clearTimeout(waiter.timer);
+        waiter.resolve();
+      }
+    }
+    if (pending.size === 0) {
+      uploadProgressWaiters.delete(requestId);
+    }
+  };
+
+  const waitForUploadProgress = (
+    requestId: string,
+    minTransferredChunks: number,
+    timeoutMs: number,
+  ) => {
+    const transfer = findTransfer(requestId);
+    if (transfer?.status === 'error') {
+      return Promise.reject(new Error(transfer.error || 'upload failed'));
+    }
+    if (transfer?.status === 'done' || (transfer?.transferredBytes ?? -1) >= minTransferredChunks) {
+      return Promise.resolve();
+    }
+    return new Promise<void>((resolve, reject) => {
+      const waiter: UploadProgressWaiter = {
+        minTransferredChunks,
+        resolve,
+        reject,
+        timer: setTimeout(() => {
+          const pending = uploadProgressWaiters.get(requestId);
+          pending?.delete(waiter);
+          if (pending?.size === 0) {
+            uploadProgressWaiters.delete(requestId);
+          }
+          reject(new Error(`upload progress timeout at chunk ${minTransferredChunks}`));
+        }, timeoutMs),
+      };
+      const pending = uploadProgressWaiters.get(requestId) ?? new Set<UploadProgressWaiter>();
+      pending.add(waiter);
+      uploadProgressWaiters.set(requestId, pending);
+    });
   };
 
   return {
@@ -105,6 +192,9 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
       downloadChunks = new Map();
       previewChunks = new Map();
       waiters.clear();
+      for (const [requestId] of uploadProgressWaiters) {
+        clearUploadProgressWaiters(requestId, new Error('file transfer sheet reopened'));
+      }
       state = {
         ...createDefaultState(),
         remotePath: initialRemotePath.trim(),
@@ -231,6 +321,33 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
           type: 'file-upload-end' as const,
           payload: { requestId } satisfies FileUploadEndPayload,
         },
+        waitForProgress: (minTransferredChunks: number, timeoutMs = 15000) => (
+          waitForUploadProgress(requestId, minTransferredChunks, timeoutMs)
+        ),
+        waitForDone: (timeoutMs = 60000) => new Promise<void>((resolve, reject) => {
+          const transfer = findTransfer(requestId);
+          if (transfer?.status === 'done') {
+            resolve();
+            return;
+          }
+          if (transfer?.status === 'error') {
+            reject(new Error(transfer.error || 'upload failed'));
+            return;
+          }
+          const timer = setTimeout(() => {
+            waiters.delete(requestId);
+            reject(new Error('upload complete timeout'));
+          }, timeoutMs);
+          waiters.set(requestId, () => {
+            clearTimeout(timer);
+            const settled = findTransfer(requestId);
+            if (settled?.status === 'error') {
+              reject(new Error(settled.error || 'upload failed'));
+              return;
+            }
+            resolve();
+          });
+        }),
       };
     },
 
@@ -373,6 +490,7 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
               status: 'transferring',
             })),
           };
+          resolveSatisfiedUploadProgressWaiters(msg.payload.requestId);
           return true;
         case 'file-upload-complete':
           settleWaiter(msg.payload.requestId);
@@ -384,6 +502,7 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
               transferredBytes: current.totalBytes,
             })),
           };
+          clearUploadProgressWaiters(msg.payload.requestId);
           return true;
         case 'file-upload-error':
           settleWaiter(msg.payload.requestId);
@@ -395,6 +514,10 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
               error: msg.payload.error,
             })),
           };
+          clearUploadProgressWaiters(
+            msg.payload.requestId,
+            new Error(msg.payload.error || 'upload failed'),
+          );
           return true;
       }
     },

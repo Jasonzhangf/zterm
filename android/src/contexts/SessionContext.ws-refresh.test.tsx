@@ -7494,7 +7494,10 @@ describe('SessionContext websocket dynamic refresh', () => {
     }
   });
 
-  it('deduplicates semantic duplicate createSession requests onto one managed session truth', async () => {
+  it('keeps two distinct client sessionIds as two managed sessions even when host identity overlaps', async () => {
+    // Regression for the rcc<->rcc2 cross-display bug: two createSession calls
+    // with overlapping host identity must NOT collapse onto one managed session
+    // because they carry different client-owned sessionIds.
     function DuplicateSessionHarness() {
       const { state, createSession, switchSession } = useSession();
 
@@ -7519,10 +7522,36 @@ describe('SessionContext websocket dynamic refresh', () => {
       </SessionProvider>,
     );
 
-    await waitFor(() => expect(screen.getByTestId('session-count').textContent).toBe('1'));
-    await waitForMockSessionInstances(1);
+    await waitFor(() => expect(screen.getByTestId('session-count').textContent).toBe('2'));
     expect(screen.getByTestId('active-session').textContent).toBe('session-1');
-    expect(screen.getByTestId('session-ids').textContent).toBe('session-1');
+    expect(screen.getByTestId('session-ids').textContent).toBe('session-1|session-dup');
+  });
+
+  it('reuses a managed session when two createSession calls share the same client sessionId', async () => {
+    function ReuseSessionHarness() {
+      const { state, createSession } = useSession();
+
+      useEffect(() => {
+        createSession(host, { sessionId: 'session-shared' });
+        createSession({ ...host, id: 'host-other' }, { sessionId: 'session-shared' });
+      }, [createSession]);
+
+      return (
+        <div>
+          <div data-testid="shared-session-count">{state.sessions.length}</div>
+          <div data-testid="shared-session-ids">{state.sessions.map((session) => session.id).join('|')}</div>
+        </div>
+      );
+    }
+
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <ReuseSessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('shared-session-count').textContent).toBe('1'));
+    expect(screen.getByTestId('shared-session-ids').textContent).toBe('session-shared');
   });
 
   it('reopens the mux channel after a plain websocket closed message instead of treating it as terminal session close', async () => {

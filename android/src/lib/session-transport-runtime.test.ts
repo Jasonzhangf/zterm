@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Host } from './types';
 import {
+  buildTransportRouteCandidateKey,
   buildTransportTargetKey,
   clearSessionSupersededSockets,
   createSessionTransportRuntimeStore,
@@ -66,17 +67,17 @@ function makeSocket(name: string) {
 }
 
 describe('session transport runtime store', () => {
-  it('keeps bridgeHost + bridgePort + authToken in the target key truth', () => {
+  it('keeps host endpoint in stable target key truth when no daemon identity exists', () => {
     expect(buildTransportTargetKey(makeHost())).toContain('host=100.64.0.1');
     expect(buildTransportTargetKey(makeHost())).toContain('port=3333');
-    expect(buildTransportTargetKey(makeHost())).toContain('auth=token-a');
-    expect(buildTransportTargetKey(makeHost({ authToken: 'token-b' }))).not.toBe(buildTransportTargetKey(makeHost()));
     expect(buildTransportTargetKey(makeHost({ bridgePort: 4444 }))).not.toBe(buildTransportTargetKey(makeHost()));
+    expect(buildTransportTargetKey(makeHost({ authToken: 'token-b' }))).toBe(buildTransportTargetKey(makeHost()));
   });
 
-  it('treats direct websocket and relay/webrtc route identities as different transport targets', () => {
+  it('separates stable daemon target identity from route candidate identity', () => {
     const directOnly = makeHost({
       transportMode: 'websocket',
+      daemonHostId: 'mac-studio',
       tailscaleHost: '100.66.1.82',
       relayHostId: undefined,
       relayEndpointCandidates: [],
@@ -105,7 +106,8 @@ describe('session transport runtime store', () => {
       ],
     });
 
-    expect(buildTransportTargetKey(relayAware)).not.toBe(buildTransportTargetKey(directOnly));
+    expect(buildTransportTargetKey(relayAware)).toBe(buildTransportTargetKey(directOnly));
+    expect(buildTransportRouteCandidateKey(relayAware)).not.toBe(buildTransportRouteCandidateKey(directOnly));
   });
 
   it('does not churn target keys when only relay directory lastSeenAt changes', () => {
@@ -133,6 +135,50 @@ describe('session transport runtime store', () => {
         },
       ],
     }));
+    expect(buildTransportRouteCandidateKey(base)).toBe(buildTransportRouteCandidateKey({
+      ...base,
+      relayEndpointCandidates: [
+        {
+          ...base.relayEndpointCandidates![0],
+          lastSeenAt: '2026-07-20T00:10:00.000Z',
+        },
+      ],
+    }));
+  });
+
+  it('updates route generation without creating another physical target runtime', () => {
+    const store = createSessionTransportRuntimeStore();
+    const directHost = makeHost({
+      sessionName: 'alpha',
+      transportMode: 'websocket',
+      daemonHostId: 'mac-studio',
+      tailscaleHost: '100.66.1.82',
+    });
+    const relayAwareHost = makeHost({
+      sessionName: 'alpha',
+      transportMode: 'auto',
+      daemonHostId: 'mac-studio',
+      relayHostId: 'mac-studio',
+      tailscaleHost: '100.66.1.82',
+      relayEndpointCandidates: [{
+        id: 'relay-rtc:mac-studio',
+        kind: 'relay-rtc',
+        relayHostId: 'mac-studio',
+        authRequired: true,
+        lastSeenAt: '2026-07-20T00:00:00.000Z',
+      }],
+    });
+
+    upsertSessionTransportRuntime(store, 'session-1', directHost);
+    const targetKey = getSessionTransportTargetKey(store, 'session-1')!;
+    const routeKey = getTargetTransportRuntime(store, targetKey)?.routeCandidateKey;
+
+    upsertSessionTransportRuntime(store, 'session-1', relayAwareHost);
+
+    expect(store.targets.size).toBe(1);
+    expect(getSessionTransportTargetKey(store, 'session-1')).toBe(targetKey);
+    expect(getTargetTransportRuntime(store, targetKey)?.routeCandidateKey).not.toBe(routeKey);
+    expect(getTargetTransportRuntime(store, targetKey)?.routeGeneration).toBe(1);
   });
 
   it('groups same-target sessions under one target runtime while keeping per-session runtime truth', () => {
@@ -271,11 +317,12 @@ describe('session transport runtime store', () => {
     expect(getTargetTransportRuntime(store, newTargetKey)?.sessionIds).toEqual(['session-1']);
   });
 
-  it('does not carry an active socket across a route target retarget', () => {
+  it('preserves the active socket across a route candidate update for the same daemon target', () => {
     const store = createSessionTransportRuntimeStore();
     const directHost = makeHost({
       sessionName: 'alpha',
       transportMode: 'websocket',
+      daemonHostId: 'mac-studio',
       tailscaleHost: '100.66.1.82',
     });
     const relayAwareHost = makeHost({
@@ -302,11 +349,10 @@ describe('session transport runtime store', () => {
 
     const runtime = getSessionTransportRuntime(store, 'session-1');
     const newTargetKey = getSessionTransportTargetKey(store, 'session-1');
-    expect(newTargetKey).not.toBe(oldTargetKey);
-    expect(runtime?.activeSocket).toBeNull();
-    expect(runtime?.supersededSockets).toEqual([directSocket]);
-    expect(getSessionTransportSocket(store, 'session-1')).toBeNull();
-    expect(getTargetTransportRuntime(store, oldTargetKey!)?.sessionIds || []).not.toContain('session-1');
+    expect(newTargetKey).toBe(oldTargetKey);
+    expect(runtime?.activeSocket).toBe(directSocket);
+    expect(runtime?.supersededSockets).toEqual([]);
+    expect(getSessionTransportSocket(store, 'session-1')).toBe(directSocket);
     expect(getTargetTransportRuntime(store, newTargetKey!)?.sessionIds).toEqual(['session-1']);
   });
 
@@ -379,6 +425,44 @@ describe('session transport runtime store', () => {
     expect(getSessionTransportSocket(store, 'session-1')).toBeNull();
   });
 
+  it('prefers the ready mux target transport over a legacy per-session active socket', () => {
+    const store = createSessionTransportRuntimeStore();
+    upsertSessionTransportRuntime(store, 'session-1', makeHost({ sessionName: 'alpha' }));
+    const targetKey = getSessionTransportRuntime(store, 'session-1')!.targetKey;
+    const legacySessionSocket = makeSocket('legacy-session');
+    const targetSocket = makeSocket('target-terminal');
+
+    setSessionTransportSocket(store, 'session-1', legacySessionSocket as any);
+    setTargetTerminalTransport(store, targetKey, targetSocket as any);
+    ensureSessionTerminalChannel(store, 'session-1', { channelId: 'channel-a' });
+    setSessionTargetTerminalMuxReady(store, 'session-1', true);
+
+    const resource = getSessionTransportResource(store, 'session-1');
+    expect(resource.socket).toBe(targetSocket);
+    expect(resource.terminalSocket).toBe(targetSocket);
+    expect(resource.runtime?.activeSocket).toBe(legacySessionSocket);
+    expect(getSessionTransportSocket(store, 'session-1')).toBe(legacySessionSocket);
+  });
+
+  it('does not expose a legacy per-session active socket as effective truth once a mux channel exists but is not ready', () => {
+    const store = createSessionTransportRuntimeStore();
+    upsertSessionTransportRuntime(store, 'session-1', makeHost({ sessionName: 'alpha' }));
+    const targetKey = getSessionTransportRuntime(store, 'session-1')!.targetKey;
+    const legacySessionSocket = makeSocket('legacy-session');
+    const targetSocket = makeSocket('target-terminal');
+
+    setSessionTransportSocket(store, 'session-1', legacySessionSocket as any);
+    setTargetTerminalTransport(store, targetKey, targetSocket as any);
+    ensureSessionTerminalChannel(store, 'session-1', { channelId: 'channel-a' });
+    setSessionTargetTerminalMuxReady(store, 'session-1', false);
+
+    const resource = getSessionTransportResource(store, 'session-1');
+    expect(resource.socket).toBeNull();
+    expect(resource.socketState).toBe('missing');
+    expect(resource.terminalSocket).toBe(targetSocket);
+    expect(resource.runtime?.activeSocket).toBe(legacySessionSocket);
+  });
+
   it('keeps channel state and body subscription isolated per session', () => {
     const store = createSessionTransportRuntimeStore();
     upsertSessionTransportRuntime(store, 'session-1', makeHost({ sessionName: 'alpha' }));
@@ -439,9 +523,9 @@ describe('session transport runtime store', () => {
     expect(getTargetTerminalTransport(store, targetKey)).toBe(targetSocket);
   });
 
-  it('drops a session channel on route retarget without deleting the old target transport', () => {
+  it('keeps a session channel on route update for the same daemon target', () => {
     const store = createSessionTransportRuntimeStore();
-    const oldHost = makeHost({ sessionName: 'alpha', transportMode: 'websocket' });
+    const oldHost = makeHost({ sessionName: 'alpha', transportMode: 'websocket', daemonHostId: 'mac-studio' });
     const newHost = makeHost({
       sessionName: 'alpha',
       transportMode: 'auto',
@@ -458,10 +542,10 @@ describe('session transport runtime store', () => {
     upsertSessionTransportRuntime(store, 'session-1', newHost);
 
     const newTargetKey = getSessionTransportRuntime(store, 'session-1')!.targetKey;
-    expect(newTargetKey).not.toBe(oldTargetKey);
-    expect(getTargetTransportRuntime(store, oldTargetKey)?.channels.size).toBe(0);
+    expect(newTargetKey).toBe(oldTargetKey);
+    expect(getTargetTransportRuntime(store, oldTargetKey)?.channels.size).toBe(1);
     expect(getTargetTerminalTransport(store, oldTargetKey)).toBe(oldTargetSocket);
-    expect(getSessionTerminalChannel(store, 'session-1')).toBeNull();
+    expect(getSessionTerminalChannel(store, 'session-1')?.channelId).toBe('old-channel');
     expect(getTargetTransportRuntime(store, newTargetKey)?.sessionIds).toEqual(['session-1']);
   });
 

@@ -134,7 +134,13 @@ vi.mock('../components/TerminalView', () => ({
   }),
 }));
 
-function makeSession(id: string): Session {
+type TestSession = Session & {
+  buffer: import('../lib/types').SessionBufferState;
+  daemonHeadRevision?: number;
+  daemonHeadEndIndex?: number;
+};
+
+function makeSession(id: string): TestSession {
   return {
     id,
     hostId: `host-${id}`,

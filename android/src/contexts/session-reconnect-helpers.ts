@@ -1,5 +1,11 @@
-import type { Host, Session, SessionState } from '../lib/types';
-import { buildSessionSemanticReuseKey, sessionSemanticReuseMatch } from '../lib/session-semantic-identity';
+import { buildSessionSemanticReuseKey } from '../lib/session-semantic-identity';
+// NOTE: findReusableManagedSession switched to exact client-owned sessionId lookup.
+// session-semantic-identity is intentionally not used for *reuse*; host-aggregate
+// matching (useSessionHistoryStorage / useSessionOpenActions) keeps that module
+// as its truth. We still import buildSessionSemanticReuseKey here because
+// buildManagedSessionReuseKey is a UI projection helper consumed by the picker /
+// open-tab persistence for stable display keys, not for session reuse authority.
+import type { Session, SessionState } from '../lib/types';
 
 export function orderSessionsForReconnect(sessions: Session[], activeSessionId: string | null) {
   if (!activeSessionId) {
@@ -40,29 +46,40 @@ export function scoreReusableManagedSession(session: Session, activeSessionId: s
   );
 }
 
-export function findReusableManagedSession(options: {
+export interface FindReusableManagedSessionOptions {
+  /**
+   * client-owned session identity. Required: sessionId is the only authority for
+   * reusing an existing session. Reusing by host/sessionName would collapse two
+   * distinct tmux sessions (e.g. rcc vs rcc2-rename) into one buffer store entry
+   * and cause session identity cross-display bugs.
+   */
+  sessionId: string;
   sessions: Session[];
-  host: Host;
-  resolvedSessionName: string;
   activeSessionId: string | null;
-}) {
-  return options.sessions
-    .filter((session) => sessionSemanticReuseMatch({
-      daemonHostId: session.daemonHostId,
-      bridgeHost: session.bridgeHost,
-      bridgePort: session.bridgePort,
-      sessionName: session.sessionName,
-    }, {
-      daemonHostId: options.host.daemonHostId,
-      relayHostId: options.host.relayHostId,
-      bridgeHost: options.host.bridgeHost,
-      bridgePort: options.host.bridgePort,
-      sessionName: options.resolvedSessionName,
-    }))
-    .sort((left, right) => (
-      scoreReusableManagedSession(right, options.activeSessionId)
-      - scoreReusableManagedSession(left, options.activeSessionId)
-    ))[0] || null;
+}
+
+/**
+ * Look up a managed session by exact client-owned sessionId. Returns null when the
+ * caller did not supply a sessionId or no session matches. Callers that have only
+ * host + sessionName must mint a sessionId via SessionContext.createSession and
+ * then re-enter with that id; never collapse two tmux sessions by host name.
+ */
+export function findReusableManagedSession(options: FindReusableManagedSessionOptions) {
+  const sessionId = options.sessionId?.trim();
+  if (!sessionId) {
+    return null;
+  }
+  const matches = options.sessions.filter((session) => session.id === sessionId);
+  if (matches.length === 0) {
+    return null;
+  }
+  // Tie-break by score (active/connected recency) so duplicate ids (defensive only)
+  // collapse deterministically to one winner.
+  matches.sort((left, right) => (
+    scoreReusableManagedSession(right, options.activeSessionId)
+    - scoreReusableManagedSession(left, options.activeSessionId)
+  ));
+  return matches[0] || null;
 }
 
 export function shouldOpenManagedSessionTransport(options: {

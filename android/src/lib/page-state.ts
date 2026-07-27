@@ -26,10 +26,13 @@ export const openTerminalPage = (): AppPageState => ({
 
 export const resolvePersistedPageStateTruth = (
   pageState: AppPageState,
-  _activeSessionId: string | null,
+  activeSessionId: string | null,
 ): AppPageState => {
   if (pageState.kind !== 'terminal') {
     return pageState;
+  }
+  if (!activeSessionId) {
+    return openConnectionsPage();
   }
   return openTerminalPage();
 };

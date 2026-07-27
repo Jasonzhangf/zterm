@@ -47,6 +47,14 @@ export interface SessionSyncRequestDebounceState {
   repairSignature: string;
 }
 
+export interface VisibleNonGapRepairRequestState {
+  requestedAt: number;
+  requestStartIndex: number;
+  requestEndIndex: number;
+  tailEndIndex: number;
+  targetRevision: number;
+}
+
 export interface SessionTailRefreshStore {
   /**
    * Mark that local input was sent and a tail refresh is expected.
@@ -85,6 +93,12 @@ export interface SessionTailRefreshStore {
   hasSyncRequest: (sessionId: string, purpose: SessionPullPurpose) => boolean;
   /** Drop the recorded buffer-sync request for (sessionId, purpose). */
   clearSyncRequest: (sessionId: string, purpose: SessionPullPurpose) => void;
+  /** Record the last defensive visible-window repair request for sparse non-gap refresh. */
+  recordVisibleNonGapRepairRequest: (sessionId: string, state: VisibleNonGapRepairRequestState) => void;
+  /** Last defensive visible-window repair request, or null when none is held. */
+  readVisibleNonGapRepairRequest: (sessionId: string) => VisibleNonGapRepairRequestState | null;
+  /** Drop defensive visible-window repair guard state for this session. */
+  clearVisibleNonGapRepairRequest: (sessionId: string) => void;
   /**
    * Session-close teardown: drop the three pending marks. Intentionally leaves
    * debounce entries untouched (pre-store close semantics — see module doc).
@@ -101,6 +115,7 @@ export function createSessionTailRefreshStore(): SessionTailRefreshStore {
   const pendingConnectTailRefresh = new Set<string>();
   const pendingResumeTailRefresh = new Set<string>();
   const syncRequests = new Map<string, SessionSyncRequestDebounceState>();
+  const visibleNonGapRepairRequests = new Map<string, VisibleNonGapRepairRequestState>();
 
   const clearPendingTailRefreshMarks = (sessionId: string) => {
     pendingInputTailRefresh.delete(sessionId);
@@ -145,8 +160,24 @@ export function createSessionTailRefreshStore(): SessionTailRefreshStore {
     clearSyncRequest: (sessionId, purpose) => {
       syncRequests.delete(syncRequestKey(sessionId, purpose));
     },
+    recordVisibleNonGapRepairRequest: (sessionId, state) => {
+      const requestStartIndex = Math.max(0, Math.floor(state.requestStartIndex || 0));
+      const requestEndIndex = Math.max(requestStartIndex, Math.floor(state.requestEndIndex || requestStartIndex));
+      visibleNonGapRepairRequests.set(sessionId, {
+        requestedAt: Math.max(0, Math.floor(state.requestedAt || 0)),
+        requestStartIndex,
+        requestEndIndex,
+        tailEndIndex: Math.max(0, Math.floor(state.tailEndIndex || 0)),
+        targetRevision: Math.max(0, Math.floor(state.targetRevision || 0)),
+      });
+    },
+    readVisibleNonGapRepairRequest: (sessionId) => visibleNonGapRepairRequests.get(sessionId) || null,
+    clearVisibleNonGapRepairRequest: (sessionId) => {
+      visibleNonGapRepairRequests.delete(sessionId);
+    },
     deleteSession: (sessionId) => {
       clearPendingTailRefreshMarks(sessionId);
+      visibleNonGapRepairRequests.delete(sessionId);
     },
   };
 }

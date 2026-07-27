@@ -39,18 +39,25 @@ export function buildTmuxSessionPickerRows(input: {
   const openTabsForTarget = input.includeOpenTabs
     ? input.openTabs.filter((tab) => tabMatchesTarget(tab, input.target))
     : [];
-  const openTabBySessionName = new Map<string, PickerOpenTab>();
+  // Pick rows must key open tabs by client-owned sessionId (tab.id), not by
+  // tmux sessionName. Two open tabs sharing sessionName (e.g. rcc vs rcc2 after
+  // rename) must render as two distinct picker rows; otherwise the picker would
+  // collapse them and the second tab would never be reachable.
+  const openTabBySessionId = new Map<string, PickerOpenTab>();
   openTabsForTarget.forEach((tab) => {
-    if (!openTabBySessionName.has(tab.sessionName)) {
-      openTabBySessionName.set(tab.sessionName, tab);
+    if (!openTabBySessionId.has(tab.id)) {
+      openTabBySessionId.set(tab.id, tab);
     }
   });
 
   const remoteNames = new Set(input.availableSessions);
   const daemonRows = input.availableSessions.map((sessionName) => {
-    const openTab = openTabBySessionName.get(sessionName) || null;
+    // Match daemon-side sessionName to open tabs by (sessionName, target) — this
+    // is the only place a sessionName match is allowed, and even here we must
+    // tolerate multiple open tabs sharing the same sessionName.
+    const openTab = openTabsForTarget.find((tab) => tab.sessionName === sessionName) || null;
     return {
-      key: `daemon:${sessionName}`,
+      key: `daemon:${sessionName}:${openTab?.id || 'no-open'}`,
       sessionName,
       displayName: openTab?.customName || sessionName,
       remotePresent: true,

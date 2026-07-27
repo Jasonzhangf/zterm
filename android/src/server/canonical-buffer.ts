@@ -1,4 +1,7 @@
-import type { TerminalCell, TerminalIndexedLine } from '../lib/types';
+import type {
+  TerminalCell,
+  TerminalIndexedLine,
+} from '@zterm/shared/types';
 
 const DEFAULT_COLOR = 256;
 

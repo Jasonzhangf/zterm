@@ -31,22 +31,6 @@ function makeSession(overrides?: Partial<Session>): Session {
     state: 'connected',
     hasUnread: false,
     createdAt: 1,
-    daemonHeadRevision: 1,
-    daemonHeadEndIndex: 10,
-    buffer: {
-      lines: [],
-      gapRanges: [],
-      startIndex: 0,
-      endIndex: 10,
-      bufferHeadStartIndex: 0,
-      bufferTailEndIndex: 10,
-      cols: 80,
-      rows: 24,
-      cursorKeysApp: false,
-      cursor: null,
-      updateKind: 'replace',
-      revision: 1,
-    },
     ...overrides,
   };
 }
@@ -233,7 +217,7 @@ describe('open-tab persistence truth', () => {
     ]);
   });
 
-  it('reuses the same live session truth with the same semantic rule as SessionContext managed-session reuse', () => {
+  it('only reuses an open tab when the persisted sessionId matches a managed session exactly', () => {
     const active = makeSession({
       id: 'active',
       bridgeHost: '100.127.23.27',
@@ -253,20 +237,23 @@ describe('open-tab persistence truth', () => {
       state: 'idle',
     });
 
+    // exact match: persisted sessionId maps to the connected session
     expect(findReusableOpenTabSession({
+      sessionId: 'active',
       sessions: [stale, active],
-      host: {
-        bridgeHost: '100.127.23.27',
-        bridgePort: 3333,
-        daemonHostId: 'daemon-host-1',
-        sessionName: 'zterm',
-        authToken: 'token-z',
-      },
       activeSessionId: 'active',
     })?.id).toBe('active');
+
+    // persisted sessionId does NOT match any managed session; host+sessionName
+    // must NOT be used as a fallback. This is the rcc<->rcc2 cross-display guard.
+    expect(findReusableOpenTabSession({
+      sessionId: 'persisted-but-missing',
+      sessions: [stale, active],
+      activeSessionId: 'active',
+    })).toBeNull();
   });
 
-  it('reuses by daemonHostId + sessionName even if bridge endpoint changed', () => {
+  it('does NOT reuse by daemonHostId + sessionName when bridge endpoint changed (the rcc/rcc2 case)', () => {
     const active = makeSession({
       id: 'active',
       bridgeHost: '100.127.23.27',
@@ -278,17 +265,14 @@ describe('open-tab persistence truth', () => {
       state: 'connected',
     });
 
+    // Persisted tab carries no sessionId (legacy fallback) — must NOT auto-reuse
+    // the wrong session just because host+sessionName match. Caller must mint a new
+    // sessionId via SessionContext.createSession.
     expect(findReusableOpenTabSession({
+      sessionId: '',
       sessions: [active],
-      host: {
-        bridgeHost: '100.64.0.10',
-        bridgePort: 4444,
-        daemonHostId: 'daemon-host-1',
-        sessionName: 'zterm',
-        authToken: 'token-z',
-      },
       activeSessionId: 'active',
-    })?.id).toBe('active');
+    })).toBeNull();
   });
 
   it('resolves a persisted tab into a restorable host with a single shared mapping rule', () => {
@@ -415,4 +399,55 @@ describe('open-tab persistence truth', () => {
 
     expect(Array.from(keys)).toEqual(['daemon:daemon-b::session:other']);
   });
+  // S1 red-test: session identity must be looked up by client-owned sessionId only.
+  // Two sessions with the same sessionName must NOT collapse into the same session
+  // when no explicit sessionId is provided; that is the rcc<->rcc2 cross-display bug.
+  it('refuses to reuse a session by host+sessionName alone when no client sessionId is provided', () => {
+    const active = makeSession({
+      id: 'session-active',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-host-1',
+      sessionName: 'rcc',
+      authToken: 'token-rcc',
+      createdAt: 2,
+      state: 'connected',
+    });
+
+    expect(findReusableOpenTabSession({
+      sessions: [active],
+      sessionId: '',
+      activeSessionId: 'session-active',
+    })).toBeNull();
+  });
+
+  it('only returns a session when the caller supplies an exact client sessionId that matches', () => {
+    const active = makeSession({
+      id: 'session-active',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-host-1',
+      sessionName: 'rcc',
+      authToken: 'token-rcc',
+      createdAt: 2,
+      state: 'connected',
+    });
+    const other = makeSession({
+      id: 'session-other',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-host-1',
+      sessionName: 'rcc2',
+      authToken: 'token-rcc',
+      createdAt: 3,
+      state: 'connected',
+    });
+
+    expect(findReusableOpenTabSession({
+      sessions: [active, other],
+      sessionId: '',
+      activeSessionId: 'session-other',
+    })).toBeNull();
+  });
+
 });

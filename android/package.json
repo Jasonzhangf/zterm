@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "predev": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper ../node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null; command -v portless >/dev/null 2>&1 || (echo '\\nportless is required but not installed. Run: npm i -g portless\\n' && exit 1)",
-    "prebuild": "bash ./scripts/ensure-pnpm-install.sh && pnpm run test:terminal:regression:core",
+    "prebuild": "bash ./scripts/ensure-pnpm-install.sh && pnpm run test:feature-registry && pnpm run test:terminal:regression:core",
     "test:terminal:regression:core": "pnpm exec vitest run src/server/terminal-message-runtime.test.ts && pnpm run test:terminal:contracts && pnpm run test:common-user-flows && pnpm run test:relay:smoke",
     "dev": "portless android.zterm vite",
     "build": "node ./scripts/bump-build-version.mjs && pnpm run type-check && vite build",
@@ -53,7 +53,7 @@
     "release:github": "bash ./scripts/publish-github-release.sh",
     "deps:ensure": "bash ./scripts/ensure-pnpm-install.sh",
     "deps:check-wterm-published": "node ./scripts/check-wterm-runtime-published.mjs",
-    "test:feature-registry": "pnpm exec vitest run src/lib/feature-registry-truth.test.ts src/lib/function-wiki-truth.test.ts src/lib/architecture-boundary-truth.test.ts src/lib/loop-governance-truth.test.ts src/lib/resource-registry-truth.test.ts src/lib/function-map-resource-truth.test.ts src/lib/mainline-resource-call-map.test.ts"
+    "test:feature-registry": "pnpm exec vitest run src/lib/feature-registry-truth.test.ts src/lib/function-wiki-truth.test.ts src/lib/architecture-boundary-truth.test.ts src/lib/loop-governance-truth.test.ts src/lib/resource-registry-truth.test.ts src/lib/module-registry-truth.test.ts src/lib/edge-registry-truth.test.ts src/lib/module-import-graph-truth.test.ts src/lib/function-map-resource-truth.test.ts src/lib/mainline-resource-call-map.test.ts"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",
@@ -62,6 +62,7 @@
     "@capacitor/filesystem": "^6.0.0",
     "@capacitor/keyboard": "^6.0.4",
     "@capacitor/local-notifications": "^6.0.0",
+    "@capacitor/network": "6.0.0",
     "@capacitor/preferences": "^6.0.0",
     "@jsonstudio/wtermmod-core": "^0.1.9",
     "@jsonstudio/wtermmod-dom": "^0.1.9",

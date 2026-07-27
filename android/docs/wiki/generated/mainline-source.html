@@ -10,7 +10,7 @@ h1 { font-size: 24px; margin-bottom: 18px; }
 .source { margin-top: 18px; white-space: pre-wrap; color: #5a635f; font-size: 12px; }
 </style></head><body>
 <h1>Mainline Source Wiki</h1>
-<svg class="wiki-graph" viewBox="0 0 5020 1204" role="img" aria-label="Mainline graph">
+<svg class="wiki-graph" viewBox="0 0 5020 1384" role="img" aria-label="Mainline graph">
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
       <path d="M 0 0 L 10 5 L 0 10 z" class="arrow" />
@@ -56,17 +56,19 @@ h1 { font-size: 24px; margin-bottom: 18px; }
 <path d="M 330 332 C 354 332, 354 512, 70 512" class="edge" marker-end="url(#arrow)" />
 <path d="M 330 332 C 354 332, 354 602, 70 602" class="edge" marker-end="url(#arrow)" />
 <path d="M 330 332 C 354 332, 354 692, 70 692" class="edge" marker-end="url(#arrow)" />
-<path d="M 330 332 C 354 332, 354 422, 70 422" class="edge" marker-end="url(#arrow)" />
-<path d="M 330 422 C 354 422, 354 602, 70 602" class="edge" marker-end="url(#arrow)" />
-<path d="M 330 692 C 354 692, 354 602, 70 602" class="edge" marker-end="url(#arrow)" />
-<path d="M 330 602 C 354 602, 354 782, 70 782" class="edge" marker-end="url(#arrow)" />
-<path d="M 1980 152 C 2004 152, 2004 872, 70 872" class="edge" marker-end="url(#arrow)" />
-<path d="M 1980 152 C 2004 152, 2004 962, 70 962" class="edge" marker-end="url(#arrow)" />
-<path d="M 330 962 C 354 962, 354 872, 70 872" class="edge" marker-end="url(#arrow)" />
+<path d="M 330 332 C 354 332, 354 782, 70 782" class="edge" marker-end="url(#arrow)" />
+<path d="M 330 332 C 354 332, 354 872, 70 872" class="edge" marker-end="url(#arrow)" />
+<path d="M 330 872 C 354 872, 354 422, 70 422" class="edge" marker-end="url(#arrow)" />
+<path d="M 330 422 C 354 422, 354 692, 70 692" class="edge" marker-end="url(#arrow)" />
+<path d="M 330 782 C 354 782, 354 692, 70 692" class="edge" marker-end="url(#arrow)" />
+<path d="M 330 692 C 354 692, 354 962, 70 962" class="edge" marker-end="url(#arrow)" />
 <path d="M 1980 152 C 2004 152, 2004 1052, 70 1052" class="edge" marker-end="url(#arrow)" />
-<path d="M 330 1052 C 1025 1052, 1025 152, 1720 152" class="edge" marker-end="url(#arrow)" />
-<path d="M 330 152 C 354 152, 354 1142, 70 1142" class="edge" marker-end="url(#arrow)" />
-<path d="M 330 1142 C 2015 1142, 2015 332, 3700 332" class="edge" marker-end="url(#arrow)" />
+<path d="M 1980 152 C 2004 152, 2004 1142, 70 1142" class="edge" marker-end="url(#arrow)" />
+<path d="M 330 1142 C 354 1142, 354 1052, 70 1052" class="edge" marker-end="url(#arrow)" />
+<path d="M 1980 152 C 2004 152, 2004 1232, 70 1232" class="edge" marker-end="url(#arrow)" />
+<path d="M 330 1232 C 1025 1232, 1025 152, 1720 152" class="edge" marker-end="url(#arrow)" />
+<path d="M 330 152 C 354 152, 354 1322, 70 1322" class="edge" marker-end="url(#arrow)" />
+<path d="M 330 1322 C 2015 1322, 2015 332, 3700 332" class="edge" marker-end="url(#arrow)" />
   <g class="node" data-node-id="Native">
   <rect x="70" y="34" width="260" height="56" rx="12" />
   <text x="86" y="68">native/android/app/src/main</text>
@@ -191,37 +193,45 @@ h1 { font-size: 24px; margin-bottom: 18px; }
   <rect x="70" y="394" width="260" height="56" rx="12" />
   <text x="86" y="428">src/contexts/session-context-remote-window-runtime.ts#sendRemoteWindowInputRuntime</text>
 </g>
-<g class="node" data-node-id="RemoteScreenshotRuntime">
+<g class="node" data-node-id="WindowGroupLayout">
   <rect x="70" y="484" width="260" height="56" rx="12" />
-  <text x="86" y="518">src/lib/remote-screenshot-runtime.ts#createRemoteScreenshotRuntime</text>
+  <text x="86" y="518">src/components/terminal/WindowGroupLayout.tsx#WindowGroupLayout</text>
+</g>
+<g class="node" data-node-id="RemoteScreenshotRuntime">
+  <rect x="70" y="574" width="260" height="56" rx="12" />
+  <text x="86" y="608">src/lib/remote-screenshot-runtime.ts#createRemoteScreenshotRuntime</text>
 </g>
 <g class="node" data-node-id="RemoteWindowMessageRuntime">
-  <rect x="70" y="574" width="260" height="56" rx="12" />
-  <text x="86" y="608">src/lib/remote-window-message-runtime.ts#createRemoteWindowMessageRuntime</text>
+  <rect x="70" y="664" width="260" height="56" rx="12" />
+  <text x="86" y="698">src/lib/remote-window-message-runtime.ts#createRemoteWindowMessageRuntime</text>
 </g>
 <g class="node" data-node-id="RemoteWindowStreamQualityRuntime">
-  <rect x="70" y="664" width="260" height="56" rx="12" />
-  <text x="86" y="698">src/contexts/session-context-remote-window-runtime.ts#updateRemoteWindowStreamQualityRuntime</text>
+  <rect x="70" y="754" width="260" height="56" rx="12" />
+  <text x="86" y="788">src/contexts/session-context-remote-window-runtime.ts#updateRemoteWindowStreamQualityRuntime</text>
+</g>
+<g class="node" data-node-id="RemoteWindowTouchAction">
+  <rect x="70" y="844" width="260" height="56" rx="12" />
+  <text x="86" y="878">src/lib/remote-window-touch-action-runtime.ts#dispatchRemoteWindowTouchInputActionRuntime</text>
 </g>
 <g class="node" data-node-id="RemoteWindowReceiver">
-  <rect x="70" y="754" width="260" height="56" rx="12" />
-  <text x="86" y="788">src/contexts/session-context-remote-window-runtime.ts#requestRemoteWindowStreamStartRuntime</text>
+  <rect x="70" y="934" width="260" height="56" rx="12" />
+  <text x="86" y="968">src/contexts/session-context-remote-window-runtime.ts#requestRemoteWindowStreamStartRuntime</text>
 </g>
 <g class="node" data-node-id="StageShell">
-  <rect x="70" y="844" width="260" height="56" rx="12" />
-  <text x="86" y="878">src/pages/TerminalPageStageShell.tsx</text>
+  <rect x="70" y="1024" width="260" height="56" rx="12" />
+  <text x="86" y="1058">src/pages/TerminalPageStageShell.tsx</text>
 </g>
 <g class="node" data-node-id="LayoutProfile">
-  <rect x="70" y="934" width="260" height="56" rx="12" />
-  <text x="86" y="968">src/lib/terminal-layout-profile.ts</text>
+  <rect x="70" y="1114" width="260" height="56" rx="12" />
+  <text x="86" y="1148">src/lib/terminal-layout-profile.ts</text>
 </g>
 <g class="node" data-node-id="SessionDrawer">
-  <rect x="70" y="1024" width="260" height="56" rx="12" />
-  <text x="86" y="1058">src/components/terminal/TerminalSessionDrawer.tsx</text>
+  <rect x="70" y="1204" width="260" height="56" rx="12" />
+  <text x="86" y="1238">src/components/terminal/TerminalSessionDrawer.tsx</text>
 </g>
 <g class="node" data-node-id="Renderer">
-  <rect x="70" y="1114" width="260" height="56" rx="12" />
-  <text x="86" y="1148">src/lib/session-render-buffer-store.ts</text>
+  <rect x="70" y="1294" width="260" height="56" rx="12" />
+  <text x="86" y="1328">src/lib/session-render-buffer-store.ts</text>
 </g>
 </svg>
 <pre class="source">flowchart TD
@@ -262,10 +272,12 @@ h1 { font-size: 24px; margin-bottom: 18px; }
   TerminalPage --&gt; QuickBar[&quot;src/components/terminal/TerminalQuickBar.tsx&quot;]
   TerminalPage --&gt; RemoteWindowOverlay[&quot;src/components/terminal/RemoteWindowOverlay.tsx#RemoteWindowOverlay&quot;]
   TerminalPage --&gt; RemoteWindowInputRuntime[&quot;src/contexts/session-context-remote-window-runtime.ts#sendRemoteWindowInputRuntime&quot;]
+  RemoteWindowOverlay --&gt; WindowGroupLayout[&quot;src/components/terminal/WindowGroupLayout.tsx#WindowGroupLayout&quot;]
   RemoteWindowOverlay --&gt; RemoteScreenshotRuntime[&quot;src/lib/remote-screenshot-runtime.ts#createRemoteScreenshotRuntime&quot;]
   RemoteWindowOverlay --&gt; RemoteWindowMessageRuntime[&quot;src/lib/remote-window-message-runtime.ts#createRemoteWindowMessageRuntime&quot;]
   RemoteWindowOverlay --&gt; RemoteWindowStreamQualityRuntime[&quot;src/contexts/session-context-remote-window-runtime.ts#updateRemoteWindowStreamQualityRuntime&quot;]
-  RemoteWindowOverlay --&gt; RemoteWindowInputRuntime[&quot;src/contexts/session-context-remote-window-runtime.ts#sendRemoteWindowInputRuntime&quot;]
+  RemoteWindowOverlay --&gt; RemoteWindowTouchAction[&quot;src/lib/remote-window-touch-action-runtime.ts#dispatchRemoteWindowTouchInputActionRuntime&quot;]
+  RemoteWindowTouchAction --&gt; RemoteWindowInputRuntime[&quot;src/contexts/session-context-remote-window-runtime.ts#sendRemoteWindowInputRuntime&quot;]
   RemoteWindowInputRuntime --&gt; RemoteWindowMessageRuntime
   RemoteWindowStreamQualityRuntime --&gt; RemoteWindowMessageRuntime
   RemoteWindowMessageRuntime --&gt; RemoteWindowReceiver[&quot;src/contexts/session-context-remote-window-runtime.ts#requestRemoteWindowStreamStartRuntime&quot;]

@@ -1,8 +1,8 @@
 import type { BridgeSettings } from './bridge-settings';
 import type { ClientMessage } from './types';
-import { TraversalSocket } from './traversal/socket';
 import type { TraversalTargetSource } from './traversal/types';
 import type { BridgeTarget } from './session-picker';
+import { createClientDaemonTraversalSocket } from './client-daemon-connection';
 
 export type { BridgeTarget } from './session-picker';
 
@@ -25,7 +25,7 @@ interface PendingTmuxRequest {
 
 interface TmuxControlTransportEntry {
   key: string;
-  ws: TraversalSocket;
+  ws: ReturnType<typeof createClientDaemonTraversalSocket>;
   active: PendingTmuxRequest | null;
   queue: PendingTmuxRequest[];
   closed: boolean;
@@ -95,7 +95,7 @@ function buildTmuxControlTransportKey(
   });
 }
 
-function isUsableTmuxControlTransport(ws: TraversalSocket) {
+function isUsableTmuxControlTransport(ws: ReturnType<typeof createClientDaemonTraversalSocket>) {
   return ws.readyState === TRANSPORT_OPEN || ws.readyState === TRANSPORT_CONNECTING;
 }
 
@@ -205,7 +205,7 @@ function createTmuxControlTransportEntry(
   traversalSettings: TmuxSessionTraversalSettings,
   overrideUrl?: string,
 ) {
-  const ws = new TraversalSocket(target satisfies TraversalTargetSource, traversalSettings, { overrideUrl });
+  const ws = createClientDaemonTraversalSocket(target satisfies TraversalTargetSource, traversalSettings, { overrideUrl });
   const entry: TmuxControlTransportEntry = {
     key,
     ws,

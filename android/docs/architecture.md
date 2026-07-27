@@ -16,8 +16,14 @@
 12. `MEMORY.md`：长期经验
 13. `evidence/`：运行证据
 14. `.agents/skills/terminal-buffer-truth/SKILL.md`：terminal buffer / render / scroll 真源规则
+15. `docs/resource-registry.json` / `docs/resource-map.md`：全局资源真源与人读面
+16. `docs/module-registry.json` / `docs/modules/project-modules.md`：daemon/client/shared/relay/release/observability 模块真源
+17. `docs/edge-registry.json`：跨模块资源边真源
+18. `docs/wiki/modules.md`：模块/边 wiki review 面
 
 ## 模块边界
+
+跨模块长期边界先看 `docs/modules/project-modules.md`。机器门禁是 `docs/module-registry.json` 和 `docs/edge-registry.json`。任何跨 daemon/client/shared/relay/release/observability 的重构，必须先补资源、模块、边，再补 function map / mainline call map，最后改 runtime。代码级 import 边界由 `src/lib/module-import-graph-truth.test.ts` 强制：每个 src 源文件必须恰好归属一个模块（`owned_paths`），每条跨模块 import 必须命中 `edge-registry.json` 的 `import_edges`；该 gate 已接入 `test:feature-registry`、CI 与 `prebuild`。
 
 - UI/App：页面、表单、列表、终端布局
 - Layout/Presentation Shell：layout profile、pane 编排、safe-area / density token

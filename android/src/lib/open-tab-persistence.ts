@@ -283,28 +283,27 @@ export function clearClosedTabReuseKeysForOwner(
   return deletedAny;
 }
 
-export function findReusableOpenTabSession(options: {
+export interface FindReusableOpenTabSessionOptions {
+  /**
+   * client-owned sessionId from the persisted open tab. Required. Two persisted
+   * tabs that share host + sessionName (because the underlying tmux session got
+   * renamed) must not collapse; each sessionId is its own authority.
+   */
+  sessionId: string;
   sessions: Session[];
-  host: Pick<Host, 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'relayHostId' | 'sessionName' | 'authToken'>;
   activeSessionId: string | null;
-}) {
+}
+
+/**
+ * Look up a persisted open tab by exact client-owned sessionId. Callers must
+ * read `sessionId` from the persisted tab record (not derive it from host or
+ * sessionName) and pass it here. Returning null forces the caller to mint a new
+ * sessionId via SessionContext.createSession rather than reusing a stale one.
+ */
+export function findReusableOpenTabSession(options: FindReusableOpenTabSessionOptions) {
   return findReusableManagedSession({
+    sessionId: options.sessionId,
     sessions: options.sessions,
-    host: {
-      id: 'open-tab-persistence',
-      createdAt: 0,
-      name: options.host.sessionName.trim() || options.host.bridgeHost.trim(),
-      bridgeHost: options.host.bridgeHost,
-      bridgePort: options.host.bridgePort,
-      daemonHostId: options.host.daemonHostId || options.host.relayHostId,
-      relayHostId: options.host.relayHostId || options.host.daemonHostId,
-      sessionName: options.host.sessionName,
-      authToken: options.host.authToken,
-      authType: 'password',
-      tags: [],
-      pinned: false,
-    },
-    resolvedSessionName: options.host.sessionName.trim() || options.host.bridgeHost.trim(),
     activeSessionId: options.activeSessionId,
   });
 }

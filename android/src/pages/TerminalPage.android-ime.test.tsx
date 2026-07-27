@@ -238,7 +238,9 @@ vi.mock("../components/TerminalView", () => ({
   ),
 }));
 
-function makeSession(id: string): Session {
+type TestSession = Session & { buffer: import("../lib/types").SessionBufferState };
+
+function makeSession(id: string): TestSession {
   return {
     id,
     hostId: `host-${id}`,
@@ -2501,7 +2503,7 @@ describe("TerminalPage Android IME bridge", () => {
     const addListenerCallsBeforeRerender = vi.mocked(ImeAnchor.addListener).mock
       .calls.length;
 
-    const updatedSession: Session = {
+    const updatedSession: TestSession = {
       ...session,
       buffer: {
         ...session.buffer,
@@ -2712,7 +2714,7 @@ describe("TerminalPage Android IME bridge", () => {
 
     imeListeners.get("input")?.({ text: "语音识别结果" });
 
-    const updatedSession: Session = {
+    const updatedSession: TestSession = {
       ...session,
       buffer: {
         ...session.buffer,

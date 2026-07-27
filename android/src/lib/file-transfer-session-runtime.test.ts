@@ -119,6 +119,18 @@ describe('file-transfer-session-runtime', () => {
     expect(upload.startMessage.payload.requestId).toBe('ful-300-zzzz');
     expect(runtime.getState().transfers[0]?.status).toBe('transferring');
 
+    const firstProgress = upload.waitForProgress(1);
+    await runtime.applyMessage({
+      type: 'file-upload-progress',
+      payload: {
+        requestId: upload.requestId,
+        chunkIndex: 1,
+        totalChunks: 3,
+      },
+    });
+    await expect(firstProgress).resolves.toBeUndefined();
+
+    const secondProgress = upload.waitForProgress(2);
     await runtime.applyMessage({
       type: 'file-upload-progress',
       payload: {
@@ -127,13 +139,38 @@ describe('file-transfer-session-runtime', () => {
         totalChunks: 3,
       },
     });
+    await expect(secondProgress).resolves.toBeUndefined();
     expect(runtime.getState().transfers[0]?.transferredBytes).toBe(2);
 
+    const done = upload.waitForDone();
     await runtime.applyMessage({
       type: 'file-upload-complete',
       payload: { requestId: upload.requestId, filePath: '/remote/home/c.txt', bytes: 8192 },
     });
+    await expect(done).resolves.toBeUndefined();
     expect(runtime.getState().transfers[0]?.status).toBe('done');
+  });
+
+  it('fails upload progress waiters when daemon returns an explicit upload error', async () => {
+    const runtime = createFileTransferSessionRuntime({
+      now: () => 310,
+      randomId: () => 'err1',
+    });
+
+    runtime.open('/remote/home');
+    const upload = runtime.startUpload({ name: 'broken.bin', size: 4096 }, '/remote/home', 2);
+    const progress = upload.waitForProgress(1);
+
+    await runtime.applyMessage({
+      type: 'file-upload-error',
+      payload: {
+        requestId: upload.requestId,
+        error: 'disk full',
+      },
+    });
+
+    await expect(progress).rejects.toThrow(/disk full/);
+    expect(runtime.getState().transfers[0]?.status).toBe('error');
   });
 
   it('owns markdown preview download independently from normal transfer progress', async () => {

@@ -1,13 +1,15 @@
 import type {
   TerminalPerformanceTraceRecord,
-} from '../lib/terminal-performance-trace';
+} from '@zterm/shared/terminal/performance-trace';
 import type {
-  ServerMessage,
+  BridgeServerMessage as ServerMessage,
+} from '@zterm/shared/protocol';
+import type {
   TerminalBufferPayload,
   TerminalCell,
   TerminalCursorState,
-} from '../lib/types';
-import { summarizeIndexedLinesForDebug } from '../lib/terminal-buffer-debug';
+} from '@zterm/shared/types';
+import { summarizeIndexedLinesForDebug } from '@zterm/shared/terminal-buffer';
 import { buildLiveTailBufferSyncPayload } from './buffer-sync-contract';
 import { sliceIndexedLines } from './canonical-buffer';
 import { detachMirrorSubscriber, releaseMirrorSubscribers } from './mirror-lifecycle';

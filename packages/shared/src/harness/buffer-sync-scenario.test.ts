@@ -121,9 +121,11 @@ describe('buffer-sync-scenario: input → head → sync → render chain', () =>
       sameEndRevisionAdvanced: sameEnd, sameEndWindowHasLocalGaps: false,
       invalidLocalWindow: false, requestWindowOverride: null,
     });
-    // Branch 5: same-end revision, no gaps → full window
+    // Branch 5: same-end revision, no gaps → visible-window refresh only
+    // (planner truth changed from full-cache to visible window: buffer patches
+    // repaint by row/range, never whole-screen — see buffer-sync-request-planner.test.ts Branch 5)
     expect(window.requestEndIndex).toBe(200);
-    expect(window.requestStartIndex).toBe(Math.max(0, 200 - cacheLines));
+    expect(window.requestStartIndex).toBe(Math.max(0, 200 - viewportRows));
   });
 
   it('Scenario 4: reading-repair with gaps in visible range', () => {

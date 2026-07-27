@@ -28,7 +28,7 @@ function makePendingIntent(sessionId: string): PendingSessionTransportOpenIntent
 }
 
 describe('handleTargetMuxTransportFailureRuntime', () => {
-  it('clears one failed physical target and invalidates every same-target mux channel', () => {
+  it('clears one failed physical target and replays every recoverable same-target mux channel through one rebuild', () => {
     const pendingSession2 = makePendingIntent('session-2');
     const pendingSessionTransportOpenIntentsRef = {
       current: new Map<string, PendingSessionTransportOpenIntent>([
@@ -40,6 +40,7 @@ describe('handleTargetMuxTransportFailureRuntime', () => {
     const writeSessionTargetTerminalMuxReady = vi.fn();
     const scheduleReconnect = vi.fn();
     const clearHeartbeat = vi.fn();
+    const updateSessionSync = vi.fn();
 
     handleTargetMuxTransportFailureRuntime({
       anchorSessionId: 'session-1',
@@ -61,6 +62,7 @@ describe('handleTargetMuxTransportFailureRuntime', () => {
       clearHeartbeat,
       clearSessionHandshakeTimeout: vi.fn(),
       pendingSessionTransportOpenIntentsRef,
+      updateSessionSync,
       scheduleReconnect,
       runtimeDebug: vi.fn(),
     });
@@ -71,17 +73,75 @@ describe('handleTargetMuxTransportFailureRuntime', () => {
       heartbeatKey: 'target:target-a',
     });
     expect(writeSessionTerminalChannelState).toHaveBeenCalledWith('session-1', 'closed');
+    expect(writeSessionTerminalChannelState).toHaveBeenCalledWith('session-1', 'opening');
     expect(writeSessionTerminalChannelState).toHaveBeenCalledWith('session-2', 'closed');
+    expect(writeSessionTerminalChannelState).toHaveBeenCalledWith('session-2', 'opening');
     expect(writeSessionTerminalChannelState).not.toHaveBeenCalledWith('session-3', 'closed');
-    expect(pendingSession2.finalizeFailure).toHaveBeenCalledWith('rtc data channel error', true);
     expect(pendingSessionTransportOpenIntentsRef.current.has('session-2')).toBe(false);
     expect(scheduleReconnect).toHaveBeenCalledWith('session-1', 'rtc data channel error', true, {
       immediate: true,
       resetAttempt: true,
+      force: true,
     });
-    expect(scheduleReconnect).toHaveBeenCalledWith('session-3', 'rtc data channel error', true, {
+    expect(scheduleReconnect).toHaveBeenCalledTimes(1);
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', expect.objectContaining({
+      state: 'reconnecting',
+      ws: null,
+      lastError: 'rtc data channel error',
+    }));
+    expect(updateSessionSync).toHaveBeenCalledWith('session-2', expect.objectContaining({
+      state: 'reconnecting',
+      ws: null,
+      lastError: 'rtc data channel error',
+    }));
+    expect(pendingSession2.finalizeFailure).not.toHaveBeenCalled();
+  });
+
+  it('does not schedule duplicate reconnects when multiple recoverable channels share the same failed target', () => {
+    const pendingSessionTransportOpenIntentsRef = {
+      current: new Map<string, PendingSessionTransportOpenIntent>(),
+    };
+    const writeSessionTerminalChannelState = vi.fn();
+    const writeSessionTargetTerminalSocket = vi.fn();
+    const writeSessionTargetTerminalMuxReady = vi.fn();
+    const scheduleReconnect = vi.fn();
+    const clearHeartbeat = vi.fn();
+    const updateSessionSync = vi.fn();
+
+    handleTargetMuxTransportFailureRuntime({
+      anchorSessionId: 'session-1',
+      message: 'terminal mux transport closed',
+      readSessionTargetRuntime: () => ({ key: 'target-a', sessionIds: ['session-1', 'session-2'] }),
+      readSessionTerminalChannel: (sessionId) => ({
+        channelId: `channel-${sessionId}`,
+        sessionId,
+        sessionName: sessionId,
+        targetKey: 'target-a',
+        state: 'open',
+        bodySubscribed: sessionId === 'session-1',
+        openedAt: 1,
+        closedAt: null,
+      }),
+      writeSessionTerminalChannelState,
+      writeSessionTargetTerminalSocket,
+      writeSessionTargetTerminalMuxReady,
+      clearHeartbeat,
+      clearSessionHandshakeTimeout: vi.fn(),
+      pendingSessionTransportOpenIntentsRef,
+      updateSessionSync,
+      scheduleReconnect,
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(scheduleReconnect).toHaveBeenCalledTimes(1);
+    expect(scheduleReconnect).toHaveBeenCalledWith('session-1', 'terminal mux transport closed', true, {
       immediate: true,
       resetAttempt: true,
+      force: true,
     });
+    expect(writeSessionTerminalChannelState).toHaveBeenCalledWith('session-1', 'opening');
+    expect(writeSessionTerminalChannelState).toHaveBeenCalledWith('session-2', 'opening');
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', expect.objectContaining({ state: 'reconnecting' }));
+    expect(updateSessionSync).toHaveBeenCalledWith('session-2', expect.objectContaining({ state: 'reconnecting' }));
   });
 });

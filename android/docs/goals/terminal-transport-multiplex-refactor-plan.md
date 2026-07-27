@@ -5,7 +5,7 @@ Feature: `terminal.transport_lifecycle`
 
 ## 1. Goal And Acceptance
 
-Goal: replace the current per-session physical terminal WebSocket model with one long-lived daemon-target transport that multiplexes multiple terminal session channels.
+Goal: replace the current per-session physical terminal WebSocket model with one long-lived daemon-target transport owned by `client.daemon_connection`, with terminal sessions multiplexed as logical channels on that transport.
 
 Acceptance:
 - Opening 10 terminal sessions on the same daemon target creates one terminal physical transport, not 10 session transports.
@@ -36,7 +36,7 @@ Entry:
 Raw evidence:
 - `android/src/lib/session-transport-runtime.ts`: `SessionTransportRuntime` stores `activeSocket` per `sessionId`; target runtime stores only `controlTransport`.
 - `android/src/contexts/session-context-transport-runtime.ts`: same-target control transport is reused for `session-open`, but session bodies are still opened as separate session transports.
-- `android/src/contexts/session-context-transport-open-runtime.ts`: after `session-ticket`, `openSessionTransportByIntentRuntime()` builds a new session transport socket.
+- `android/src/contexts/session-context-transport-open-runtime.ts` and `client.daemon_connection`: after target-open intent, the client opens or reuses one daemon-target physical transport and then materializes a terminal channel. No per-session physical socket may be created.
 - `android/src/server/terminal-runtime.ts`: `createTransportSubscriber()` binds one `connection.transportId` to one subscriber and writes `connection.boundSubscriberId`.
 - `android/src/server/terminal-message-runtime.ts`: input/buffer/schedule/file handlers resolve session from `connection.boundSubscriberId`.
 - `packages/shared/src/connection/protocol.ts`: session-bound messages are not wrapped in a channel envelope.
@@ -64,8 +64,9 @@ Current lifecycle nodes:
 OpenTab / foreground / explicit resume intent
 -> SessionContext lifecycle primitive
 -> target control transport reuse
--> session-open / session-ticket
--> per-session physical session transport open
+-> session-open / target-open intent
+-> daemon-target physical transport open
+-> terminal channel open
 -> daemon create one transport subscriber
 -> daemon attach subscriber to tmux mirror
 -> mirror push / explicit head/range
@@ -91,7 +92,7 @@ Forbidden edges:
 
 H1 confirmed: Physical transport and terminal subscriber are currently coupled one-to-one.
 - Supporting evidence: daemon `TerminalTransportConnection.boundSubscriberId` is a single value; message handlers derive session from that value.
-- First divergence: `openSessionTransportByIntentRuntime()` after ticket opens a per-session socket instead of adding a channel on a target-level socket.
+- First divergence: `client.daemon_connection.openSessionTargetTransport()` after target-open intent still materializes a physical socket at the wrong layer instead of remaining a unique daemon-target owner that later opens channels.
 - Confidence: 95.
 
 H2 ruled out as primary root cause: control socket is not reused.

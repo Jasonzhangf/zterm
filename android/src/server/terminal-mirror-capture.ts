@@ -1,5 +1,8 @@
 import { WasmBridge } from '@jsonstudio/wtermmod-core';
-import type { TerminalCell, TerminalCursorState } from '../lib/types';
+import type {
+  TerminalCell,
+  TerminalCursorState,
+} from '@zterm/shared/types';
 // R8: module-level bridge promise so multiple mirrors share a single WASM
 // instance. WasmBridge.load() is expensive (compile + bind) and previously
 // each mirror paid the cost on first capture.

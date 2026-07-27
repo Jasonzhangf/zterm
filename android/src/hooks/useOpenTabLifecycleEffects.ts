@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, type MutableRefObject } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
+import { Network } from '@capacitor/network';
 import { shouldResumeForeground } from '@zterm/shared/terminal/foreground-resume';
 import { SESSION_STATUS_EVENT } from '../contexts/SessionContext';
 import { createForegroundRefreshRuntime, markForegroundRuntimeHidden } from '../lib/app-foreground-refresh';
@@ -9,6 +10,7 @@ import type { Session } from '../lib/types';
 export type OpenTabAuditReason =
   | 'visibilitychange'
   | 'resume'
+  | 'network-status-change'
   | 'appStateChange'
   | 'online'
   | 'connect'
@@ -142,6 +144,27 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
       });
     };
 
+    const capacitorNetworkListenerHandle = Network.addListener('networkStatusChange', (status) => {
+      runtimeDebug('app.capacitor.networkStatusChange', {
+        connected: status.connected,
+        connectionType: status.connectionType,
+      });
+      if (status.connected) {
+        callbacksRef.current.onForegroundActiveChange?.(true);
+        const activeSessionId = openTabStateRef.current.activeSessionId;
+        if (activeSessionId) {
+          callbacksRef.current.resumeActiveSessionTransport(activeSessionId);
+        }
+        foregroundRefreshRuntimeRef.current.wasHidden = false;
+        void callbacksRef.current.auditOpenTabsAgainstRemoteSessions('network-status-change').catch((error) => {
+          console.error('[App] Failed to audit remote session truth on network status change:', error);
+        });
+      } else {
+        callbacksRef.current.onForegroundActiveChange?.(false);
+        markForegroundRuntimeHidden(foregroundRefreshRuntimeRef.current, document.visibilityState);
+      }
+    });
+
     const appStateListenerHandle = CapacitorApp.addListener('appStateChange', ({ isActive }) => {
       runtimeDebug('app.capacitor.appStateChange', {
         isActive,
@@ -170,6 +193,11 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
       document.removeEventListener('resume', onDocumentResume as EventListener);
       document.removeEventListener('pause', markHidden as EventListener);
       window.removeEventListener('online', onNetworkOnline);
+      void Promise.resolve(capacitorNetworkListenerHandle)
+        .then((listener) => listener?.remove?.())
+        .catch((error) => {
+          console.warn('[App] Failed to remove capacitor network listener:', error);
+        });
     };
   }, [
     foregroundRefreshRuntimeRef,

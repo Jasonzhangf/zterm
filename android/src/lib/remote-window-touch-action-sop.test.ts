@@ -24,7 +24,7 @@ describe('remote window touch action sop truth', () => {
 
     expect(featureGates).toContain('The fullscreen video surface must never advertise a minimap/viewport overlay or allow shrinking below fit once the remote target is fullscreen.');
     expect(functionMap).toContain('screenshot thumbnail');
-    expect(functionMap).toContain('fullscreen aspect-fit default plus explicit remote target resize fill request');
+    expect(functionMap).toContain('fullscreen aspect-fit drawing with default remote target resize fill request on fullscreen entry');
     expect(resourceMap).toContain('fullscreen zoom/pan state');
     expect(resourceMap).toContain('screenshot intent');
     expect(decision).not.toContain('top-right minimap projects the current viewport');

@@ -184,20 +184,6 @@ function makeSession(id: string): Session {
     state: 'connected',
     hasUnread: false,
     createdAt: 1,
-    buffer: {
-      lines: [],
-      gapRanges: [],
-      startIndex: 0,
-      endIndex: 0,
-      bufferHeadStartIndex: 0,
-      bufferTailEndIndex: 0,
-      cols: 80,
-      rows: 24,
-      cursorKeysApp: false,
-      cursor: null,
-      updateKind: 'replace',
-      revision: 1,
-    },
   };
 }
 

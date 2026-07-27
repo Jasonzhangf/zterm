@@ -421,6 +421,38 @@ function resolveVisibleNonGapRepairRequestAfterSparseAdvance(options: {
   return null;
 }
 
+const VISIBLE_NON_GAP_REPAIR_COOLDOWN_MS = 5000;
+
+function shouldSuppressRecentVisibleNonGapRepair(options: {
+  sessionId: string;
+  requestStartIndex: number;
+  requestEndIndex: number;
+  tailEndIndex: number;
+  tailRefreshStore: SessionTailRefreshStore;
+  now?: number;
+}) {
+  const previous = options.tailRefreshStore.readVisibleNonGapRepairRequest(options.sessionId);
+  if (!previous) {
+    return false;
+  }
+  const previousStart = Math.max(0, Math.floor(previous.requestStartIndex || 0));
+  const previousEnd = Math.max(previousStart, Math.floor(previous.requestEndIndex || previousStart));
+  const nextStart = Math.max(0, Math.floor(options.requestStartIndex || 0));
+  const nextEnd = Math.max(nextStart, Math.floor(options.requestEndIndex || nextStart));
+  const sameWindow = previousStart === nextStart && previousEnd === nextEnd;
+  if (!sameWindow) {
+    return false;
+  }
+  const previousTailEndIndex = Math.max(0, Math.floor(previous.tailEndIndex || 0));
+  const nextTailEndIndex = Math.max(0, Math.floor(options.tailEndIndex || 0));
+  if (previousTailEndIndex !== nextTailEndIndex) {
+    return false;
+  }
+  const now = options.now ?? Date.now();
+  const ageMs = now - Math.max(0, Math.floor(previous.requestedAt || 0));
+  return ageMs >= 0 && ageMs < VISIBLE_NON_GAP_REPAIR_COOLDOWN_MS;
+}
+
 export function handleBufferHeadRuntime(options: {
   sessionId: string;
   latestRevision: number;
@@ -750,15 +782,17 @@ export function requestSessionBufferSyncRuntime(options: {
     });
     return false;
   }
-  const effectiveHead: SessionDaemonHeadView = liveHead
-    ? {
-        daemonHeadRevision: liveHead.revision,
-        daemonHeadEndIndex: liveHead.latestEndIndex,
-      }
-    : options.requestOptions?.headOverride || {
-        daemonHeadRevision: 0,
-        daemonHeadEndIndex: 0,
-      };
+  const effectiveHead: SessionDaemonHeadView = options.requestOptions?.headOverride
+    ? options.requestOptions.headOverride
+    : liveHead
+      ? {
+          daemonHeadRevision: liveHead.revision,
+          daemonHeadEndIndex: liveHead.latestEndIndex,
+        }
+      : {
+          daemonHeadRevision: 0,
+          daemonHeadEndIndex: 0,
+        };
   const payload = buildSessionBufferSyncRequestPayload(
     effectiveHead,
     localBuffer,
@@ -1366,9 +1400,21 @@ export function applyIncomingBufferSyncRuntime(options: {
   });
   options.scheduleSessionRenderCommit(options.sessionId);
 
+  const payloadRevision = Math.max(0, Math.floor(options.payload.revision || 0));
+  const payloadAvailableEndIndex = Number.isFinite(options.payload.availableEndIndex)
+    ? Math.max(0, Math.floor(options.payload.availableEndIndex || 0))
+    : 0;
   const nextHead: SessionDaemonHeadView = {
-    daemonHeadRevision: liveHead?.revision ?? 0,
-    daemonHeadEndIndex: liveHead?.latestEndIndex ?? 0,
+    daemonHeadRevision: Math.max(
+      liveHead?.revision ?? 0,
+      payloadRevision,
+      Math.max(0, Math.floor(nextBuffer.revision || 0)),
+    ),
+    daemonHeadEndIndex: Math.max(
+      liveHead?.latestEndIndex ?? 0,
+      payloadAvailableEndIndex,
+      Math.max(0, Math.floor(nextBuffer.bufferTailEndIndex || nextBuffer.endIndex || 0)),
+    ),
   };
   const visibleRange = resolvePostApplyVisibleRange({
     head: nextHead,
@@ -1410,6 +1456,25 @@ export function applyIncomingBufferSyncRuntime(options: {
       startIndex: visibleNonGapRepairRequest.requestStartIndex,
       endIndex: visibleNonGapRepairRequest.requestEndIndex,
     };
+    if (shouldSuppressRecentVisibleNonGapRepair({
+      sessionId: options.sessionId,
+      requestStartIndex: repairRange.startIndex,
+      requestEndIndex: repairRange.endIndex,
+      tailEndIndex: nextBuffer.bufferTailEndIndex,
+      tailRefreshStore: options.refs.tailRefreshStoreRef.current,
+    })) {
+      options.runtimeDebug('session.buffer.sync.visible-stale-non-gap-repair-suppressed', {
+        sessionId: options.sessionId,
+        activeSessionId: options.refs.stateRef.current.activeSessionId,
+        previousRevision: localBuffer.revision,
+        nextRevision: nextBuffer.revision,
+        requestStartIndex: repairRange.startIndex,
+        requestEndIndex: repairRange.endIndex,
+        tailEndIndex: nextBuffer.bufferTailEndIndex,
+        cooldownMs: VISIBLE_NON_GAP_REPAIR_COOLDOWN_MS,
+      });
+      return;
+    }
     options.runtimeDebug('session.buffer.sync.visible-stale-non-gap-repair-request', {
       sessionId: options.sessionId,
       activeSessionId: options.refs.stateRef.current.activeSessionId,
@@ -1420,7 +1485,7 @@ export function applyIncomingBufferSyncRuntime(options: {
       requestStartIndex: repairRange.startIndex,
       requestEndIndex: repairRange.endIndex,
     });
-    options.requestSessionBufferSync(options.sessionId, {
+    const requested = options.requestSessionBufferSync(options.sessionId, {
       reason: 'buffer-sync-visible-stale-non-gap-repair',
       purpose: 'reading-repair',
       headOverride: nextHead,
@@ -1431,6 +1496,15 @@ export function applyIncomingBufferSyncRuntime(options: {
       },
       requestMissingRangesOverride: [repairRange],
     });
+    if (requested) {
+      options.refs.tailRefreshStoreRef.current.recordVisibleNonGapRepairRequest(options.sessionId, {
+        requestedAt: Date.now(),
+        requestStartIndex: repairRange.startIndex,
+        requestEndIndex: repairRange.endIndex,
+        tailEndIndex: nextBuffer.bufferTailEndIndex,
+        targetRevision: nextBuffer.revision,
+      });
+    }
     return;
   }
 

@@ -9,7 +9,7 @@ import {
 } from '../lib/page-state';
 import { STORAGE_KEYS, type Host, type Session } from '../lib/types';
 
-function readPersistedPageState(): AppPageState {
+function readPersistedPageState(options?: { allowTerminal?: boolean }): AppPageState {
   if (typeof window === 'undefined') {
     return openConnectionsPage();
   }
@@ -23,7 +23,7 @@ function readPersistedPageState(): AppPageState {
     if (!parsed || typeof parsed !== 'object') {
       return openConnectionsPage();
     }
-    if (parsed.kind === 'terminal') {
+    if (parsed.kind === 'terminal' && options?.allowTerminal) {
       return openTerminalPage();
     }
     if (parsed.kind === 'settings') {
@@ -92,7 +92,7 @@ export function useAppPageState(options: UseAppPageStateOptions): AppPageStateRe
     }
 
     restoredRouteHandledRef.current = true;
-    const persistedPage = readPersistedPageState();
+    const persistedPage = readPersistedPageState({ allowTerminal: true });
     if (persistedPage.kind === 'terminal') {
       ensureTerminalPageVisible();
       return;

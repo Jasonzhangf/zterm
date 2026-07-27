@@ -7,7 +7,7 @@ import {
   type CompactIndexedLine,
   type TerminalIndexedLine,
   type WireIndexedLine,
-} from '../lib/types';
+} from '@zterm/shared/types';
 import { sliceIndexedLines } from './canonical-buffer';
 
 export interface BufferSyncMirrorSnapshot {

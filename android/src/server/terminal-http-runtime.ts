@@ -7,7 +7,7 @@ import {
   parseRuntimeDebugPerformanceTraceRecords,
   summarizeTerminalPerformanceTrace,
   type createTerminalPerformanceTraceStore,
-} from '../lib/terminal-performance-trace';
+} from '@zterm/shared/terminal/performance-trace';
 
 export interface TerminalHttpRuntimeDeps {
   host: string;

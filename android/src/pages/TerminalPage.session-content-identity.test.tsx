@@ -143,7 +143,9 @@ function makeRenderSnapshot(rows: string[], revision: number): SessionRenderBuff
   };
 }
 
-function makeSession(id: string, name: string): Session {
+type TestSession = Session & { buffer: import('../lib/types').SessionBufferState };
+
+function makeSession(id: string, name: string): TestSession {
   return {
     id,
     hostId: `host-${id}`,

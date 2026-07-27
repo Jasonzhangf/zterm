@@ -1351,3 +1351,9 @@ debug overlay 现在显示 MU（菜单位置）和 CE（结束行），长按后
 - Rule: file-upload/download wire chunk must be shared `FILE_TRANSFER_WIRE_CHUNK_BYTES` (16 KiB). Base64 + mux JSON frame must stay under `FILE_TRANSFER_WIRE_FRAME_MAX_CHARS`.
 - Anti-pattern: 256 KiB raw base64 JSON chunks on RTC DataChannel.
 - Marker: `file transfer wire chunk 16kib rtc frame budget`
+
+## File transfer upload progress ack
+- Trigger: sync upload still crashes after native `readFileChunk` streaming and 16KiB wire budget.
+- Rule: after each `file-upload-chunk`, wait for daemon `file-upload-progress` before the next chunk; wait for `file-upload-complete` before treating upload as finished.
+- Anti-pattern: burst-send all chunks into RTC DataChannel without progress acknowledgment.
+- Marker: `file transfer upload progress ack between chunks`

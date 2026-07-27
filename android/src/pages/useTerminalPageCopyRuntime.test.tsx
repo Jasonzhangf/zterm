@@ -52,7 +52,6 @@ describe('useTerminalPageCopyRuntime', () => {
         setActivePane: vi.fn(),
         keepTerminalInputFocused,
         sessionBufferStore: { getSnapshot: () => ({ buffer }) } as any,
-        sessions: [{ id: 's1', buffer: null } as any],
       }),
     );
 
@@ -83,7 +82,6 @@ describe('useTerminalPageCopyRuntime', () => {
           setActivePane: vi.fn(),
           keepTerminalInputFocused: vi.fn(),
           sessionBufferStore: { getSnapshot: () => ({ buffer: makeBuffer() }) } as any,
-          sessions: [{ id: 's1', buffer: null } as any],
         }),
       { initialProps: { uiSessionId: 's1' as string | null } },
     );
@@ -111,7 +109,6 @@ describe('useTerminalPageCopyRuntime', () => {
         setActivePane: vi.fn(),
         keepTerminalInputFocused,
         sessionBufferStore: { getSnapshot: () => ({ buffer }) } as any,
-        sessions: [{ id: 's1', buffer: null } as any],
       }),
     );
 
@@ -149,7 +146,6 @@ describe('useTerminalPageCopyRuntime', () => {
         setActivePane: vi.fn(),
         keepTerminalInputFocused,
         sessionBufferStore: { getSnapshot: () => ({ buffer }) } as any,
-        sessions: [{ id: 's1', buffer: null } as any],
       }),
     );
 
@@ -191,7 +187,6 @@ describe('useTerminalPageCopyRuntime', () => {
         setActivePane: vi.fn(),
         keepTerminalInputFocused,
         sessionBufferStore: { getSnapshot: () => ({ buffer }) } as any,
-        sessions: [{ id: 's1', buffer: null } as any],
       }),
     );
 
@@ -227,7 +222,6 @@ describe('useTerminalPageCopyRuntime', () => {
         setActivePane: vi.fn(),
         keepTerminalInputFocused,
         sessionBufferStore: { getSnapshot: () => ({ buffer }) } as any,
-        sessions: [{ id: 's1', buffer: null } as any],
       }),
     );
 
@@ -262,7 +256,6 @@ describe('useTerminalPageCopyRuntime', () => {
         setActivePane: vi.fn(),
         keepTerminalInputFocused,
         sessionBufferStore: { getSnapshot: () => ({ buffer }) } as any,
-        sessions: [{ id: 's1', buffer: null } as any],
       }),
     );
 
@@ -298,7 +291,6 @@ describe('useTerminalPageCopyRuntime', () => {
         setActivePane: vi.fn(),
         keepTerminalInputFocused,
         sessionBufferStore: { getSnapshot: () => ({ buffer }) } as any,
-        sessions: [{ id: 's1', buffer: null } as any],
       }),
     );
 
@@ -334,7 +326,6 @@ describe('useTerminalPageCopyRuntime', () => {
         setActivePane: vi.fn(),
         keepTerminalInputFocused,
         sessionBufferStore: { getSnapshot: () => ({ buffer }) } as any,
-        sessions: [{ id: 's1', buffer: null } as any],
       }),
     );
 
@@ -373,7 +364,6 @@ describe('useTerminalPageCopyRuntime', () => {
         setActivePane: vi.fn(),
         keepTerminalInputFocused,
         sessionBufferStore: { getSnapshot: () => ({ buffer }) } as any,
-        sessions: [{ id: 's1', buffer: null } as any],
       }),
     );
 

@@ -2,9 +2,11 @@ import type { WasmBridge } from '@jsonstudio/wtermmod-core';
 import type {
   AttachFileStartPayload,
   PasteImageStartPayload,
+} from '@zterm/shared/protocol';
+import type {
   TerminalCell,
   TerminalCursorState,
-} from '../lib/types';
+} from '@zterm/shared/types';
 
 export interface TerminalSessionTransport {
   kind: 'ws' | 'rtc';

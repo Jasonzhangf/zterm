@@ -9,4 +9,5 @@ export {
   replayBufferSyncHistory,
   sessionBufferToHistory,
   sessionBuffersEqual,
+  summarizeIndexedLinesForDebug,
 } from '@zterm/shared/terminal-buffer';

@@ -4107,3 +4107,47 @@ Need runtime debug to confirm:
 - 已完成 native `readFileChunk` 流式上传后，剩余风险是 wire 帧过大：`FILE_CHUNK_SIZE=256KiB` raw -> base64 ~341KiB -> 再经 `mux-channel-message` JSON 包装，超过常见 RTC DataChannel `maxMessageSize`（常为 256KiB），上传时会直接炸 channel/WebView。
 - 唯一修改点：shared `FILE_TRANSFER_WIRE_CHUNK_BYTES=16KiB` 作为 client/daemon 同一真源；`FileTransferSheet` 与 daemon download/upload chunk 共用；新增 frame size 门禁。
 - Forbidden: transport reconnect、buffer/render、TerminalView。
+- Verification: `FileTransferSheet` / file-transfer runtime / transfer context / daemon file-transfer gates PASS `5 files / 35 tests`; shared protocol contract PASS `8 tests`; `tsc --noEmit` PASS; `test:feature-registry` PASS `10 files / 71 tests`.
+- Clean detached HEAD build was attempted to avoid unrelated dirty WIP, but failed before APK because committed `HEAD=6f967e8` is incomplete without current untracked architecture files such as `android/src/lib/client-daemon-connection.ts`; this is a separate repository hygiene gap, not a file-transfer behavior failure.
+- Delivery: built from the current verified working tree. Android APK `0.1.3.2257` / versionCode `1032257` / sha256 `b8ef040341adc9253589fb09d542fcc40d22956b695241be526c848975f1a4b4` published to local update route, Tailscale `100.66.1.82:3333`, and public Relay `https://relay.codewhisper.cc:18443/relay/updates/latest.json`. Public Relay APK HEAD returned `Content-Length: 4809751`; downloaded public and Tailscale APK sha matched the manifest.
+- L5 gap: `adb devices -l` returned no online devices after build, so installed-phone sync button/upload replay remains Jason-side pending for `2257`.
+
+# 2026-07-27 architecture gap T2d any clear
+
+- Scope: `terminal.transport_lifecycle` / `terminal.buffer_render` SessionContext assembly boundary only. Forbidden: protocol behavior, daemon runtime, TerminalView/TerminalPage compensation.
+- Change: `SessionProviderRuntimeRefs` now types the provider ref bag; message assemblies expose typed socket/buffer/server-message options and structural minimal store/runtime interfaces instead of `MutableRefObject<any>` / callback `any`.
+- Hidden mismatch surfaced by types: transport orchestration's `handleSocketServerMessageRef` callback needed `onClosed`; the real runtime already consumed it, but the old `any` boundary hid the missing signature.
+- Verification: `tsc --noEmit` PASS; contexts `MutableRefObject<any>|refs:any` grep 0; target file `any` grep 0; focused message/session/ws-refresh 161/161; contexts all 451/451; `test:feature-registry` 71/71; `test:terminal:regression:core` terminal-message 37/37 + contracts 49 files/639 + common flows 83/83 + relay smoke PASS.
+- Remaining architecture closeout: T7 App relay stream downshift and T8 TerminalView follow-scroll state machine remain pending; T8 still requires test design first and real terminal-buffer truth loop.
+
+# 2026-07-27 architecture gap T7 App relay stream downshift
+
+- Scope: `relay.directory_ui` / `client.connection_home` only. Forbidden: terminal transport reconnect, buffer/render, TerminalView, daemon protocol.
+- Change: App.tsx no longer owns relay device WebSocket reconnect timers/generation/socket refs. Owner is `relay-device-stream-runtime` + `useRelayDeviceStream`; presence/directory merge re-exported from home-connection projection.
+- Verification: runtime unit 4/4; App.relay-stream-lifecycle 7/7; architecture-boundary 14/14; home-connection/traversal/account 20/20; type-check; feature-registry; App.tsx 844 lines.
+- Remaining architecture closeout: T8 TerminalView follow-scroll state machine only.
+
+# 2026-07-27 architecture gap T8 TerminalView follow scroll closeout
+
+- Scope: `terminal.buffer_render` / `client.renderer_window`. Resource path remains `resource.client_sparse_buffer -> resource.renderer_window -> resource.ui_projection`; forbidden paths were daemon mirror, transport reconnect, SessionContext buffer planner, TerminalPage/QuickBar/IME compensation.
+- Change: added `src/lib/terminal-follow-scroll-runtime.ts` as the pure discriminated-union owner for follow/reading scroll truth. TerminalView no longer has independent `pendingFollow*`, `recentViewportLayoutChangeRef`, `ignoredProgrammaticScrollTopRef`, `lastSettledScrollTopRef`, `hasSettledFollowFrameRef`, `suppressProgrammaticScrollRef`, `userScrollIntentDeadlineRef`, or `readingModeRef`; it keeps only timer/function refs as effect handles and applies runtime effects to DOM/React state.
+- Tests/maps: added `docs/testing/terminal-follow-scroll-state-test-design.md`; bound `terminal-follow-scroll-runtime` into `client.renderer_window` module registry and `terminal.buffer_render` function map. Runtime tests cover pending dedupe, reading no pending, flush/no-flush, programmatic one-shot suppress, user intent reading, layout drift negative, selectors, reset, and cancel.
+- Verification: `terminal-follow-scroll-runtime.test.ts` 10/10 PASS; TerminalView focused 85/85 PASS; TerminalPage render/session identity 28/28 PASS; `tsc --noEmit` PASS; `test:feature-registry` 72/72 PASS; `daemon:mirror:close-loop` all 9 cases PASS; scoped `git diff --check` PASS; old follow ref names in `TerminalView.tsx` 0.
+- Known non-T8 gate failure: `TerminalView.theme.test.tsx` currently fails 2 theme preset assertions (`DEFAULT_TERMINAL_CELL_COLOR` bg resolves transparent and `classic-dark.background` is `#000000`). This is shared theme/cell-render truth, not the follow-scroll owner touched here; do not claim full TerminalView.* suite until that separate owner is repaired or baseline is documented.
+
+# 2026-07-27 sync upload crash progress-ack diagnosis
+
+- Jason: 选择同步按钮时上传会出现 app crash。
+- feature_id=`daemon.file_transfer`; resource path `resource.client_file_browser -> resource.file_transfer -> resource.backend_session`.
+- Prior closeouts already fixed whole-file native `readFile()`, local markdown preview, appStateChange listener churn, and 16KiB wire chunk budget. Current source still burst-sent all `file-upload-chunk` frames without waiting for daemon progress.
+- First remaining divergence: upload owner in `FileTransferSheet`/`file-transfer-session-runtime` could flood RTC DataChannel even under frame budget. Unique fix: wait for `file-upload-progress` after each chunk and `file-upload-complete` before finish; no transport reconnect fallback.
+- Forbidden: buffer/render, TerminalView, transport reconnect, daemon mirror.
+
+# 2026-07-27 connected green but terminal body not refreshing diagnosis
+
+- Symptom: Jason confirmed upload no longer crashes, but online device can show connected/green while terminal body does not refresh.
+- SOP/model flow: known `terminal.buffer_render` plus metadata-only `daemon.cli_node` observability. Main chain is `tmux truth -> daemon mirror store -> transport subscriber buffer-sync -> client sparse buffer -> renderer window -> TerminalView DOM`. Resource path is `resource.mirror_store -> resource.transport_subscriber -> resource.client_sparse_buffer -> resource.renderer_window`; debug path is `resource.daemon_process -> resource.debug_channel`.
+- Live handoff evidence: `/debug/runtime/logs` showed active `freehand` receiving `session.ws.reconnect.buffer-sync`, applying `session.buffer.applied`, and emitting `terminal.performance.trace` client stages. Daemon mirror revision was advancing, often as one changed status row. Repeated sparse one-row same-tail updates triggered `session.buffer.sync.visible-stale-non-gap-repair-request` repeatedly, causing large authoritative reading-repair responses and debug drop summaries. `/debug/runtime` latency summary stayed null because daemon trace ids used mux channel ids while client trace ids used local session ids.
+- Active hypotheses: H1 repeated visible non-gap repair amplification overloads client/transport/render enough to appear connected but stale; H2 trace identity mismatch hides the real first stopped stage during live diagnosis. Both are inside existing owner graph; no WebSocket reconnect/UI chrome compensation allowed.
+- First divergence nodes: H1 `BufferApply -> reading-repair request planner`; H2 `PerformanceTrace sample grouping`. Unique owner paths: `src/contexts/session-context-buffer-runtime.ts` / test and `packages/shared/src/terminal/performance-trace.ts` / `src/lib/terminal-performance-trace.test.ts` / HTTP summary test. Forbidden: `TerminalPage.tsx`, `TerminalView.tsx`, route selection, daemon tmux mirror truth, reconnect loops.
+- Required verification: focused buffer runtime red/green, trace identity red/green, `/debug/runtime` live check with non-null send-to-rx/rx-to-render, and L5 APK only after source gates pass.

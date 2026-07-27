@@ -8,7 +8,7 @@ import type {
   Session,
 } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
-import type { SessionTransportResource } from '../lib/session-transport-runtime';
+import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import {
   ensureSessionReadyForTransfer,
   sendInputThroughSessionTransport,
@@ -58,8 +58,7 @@ export function sendInputRuntime(options: {
     stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null }>;
   };
   runtimeDebug: RuntimeDebugFn;
-  readSessionTransportResource: (sessionId: string) => SessionTransportResource;
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  daemonConnection: ClientDaemonConnection;
   isReconnectInFlight: (sessionId: string) => boolean;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   markPendingInputTailRefresh: (sessionId: string, localRevision: number) => boolean;
@@ -89,8 +88,7 @@ export function sendInputRuntime(options: {
       },
     },
     runtimeDebug: options.runtimeDebug,
-    readSessionTransportResource: options.readSessionTransportResource,
-    readSessionTransportSocket: options.readSessionTransportSocket,
+    daemonConnection: options.daemonConnection,
     isReconnectInFlight: options.isReconnectInFlight,
     sendSocketPayload: options.sendSocketPayload,
     markPendingInputTailRefresh: options.markPendingInputTailRefresh,
@@ -106,8 +104,7 @@ export async function ensureSessionReadyForPasteRuntime(options: {
   sessionId: string;
   timeoutMs: number;
   sessions: Session[];
-  readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
+  daemonConnection: ClientDaemonConnection;
 }) {
   return ensureSessionReadyForTransfer({
     sessionId: options.sessionId,
@@ -115,10 +112,7 @@ export async function ensureSessionReadyForPasteRuntime(options: {
     sessionsRef: {
       current: options.sessions,
     },
-    readSessionTransportSocket: (sessionId) => (
-      options.readSessionTransportResource?.(sessionId).socket
-      || options.readSessionTransportSocket(sessionId)
-    ),
+    daemonConnection: options.daemonConnection,
   });
 }
 

@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { flushRuntimeDebugLogsToSessionTransport } from './runtime-debug-flush';
 import {
   drainRuntimeDebugEntries,
@@ -50,6 +50,31 @@ describe('runtime-debug-flush', () => {
     expect(sent.length).toBeGreaterThanOrEqual(1);
     expect(sent.some((frame) => frame.includes('"type":"debug-log"'))).toBe(true);
     expect(sent.some((frame) => frame.includes('"scope":"session.input.send"'))).toBe(true);
+  });
+
+  it('flushes through client.daemon_connection before raw socket accessors', () => {
+    setRuntimeDebugEnabled(true);
+    runtimeDebug('session.input.send', { sessionId: 's1' });
+    const daemonSocket = { readyState: WebSocket.OPEN } as any;
+    const readSessionTransportSocket = vi.fn(() => {
+      throw new Error('raw socket accessor should not be used');
+    });
+    const sent: string[] = [];
+
+    const flushed = flushRuntimeDebugLogsToSessionTransport({
+      activeSessionId: 's1',
+      daemonConnection: {
+        readSessionSocket: vi.fn(() => daemonSocket),
+      },
+      readSessionTransportSocket,
+      sendSocketPayload: (_sessionId, _ws, data) => {
+        sent.push(String(data));
+      },
+    });
+
+    expect(flushed).toBe(true);
+    expect(sent.some((frame) => frame.includes('"type":"debug-log"'))).toBe(true);
+    expect(readSessionTransportSocket).not.toHaveBeenCalled();
   });
 
   it('also flushes a client snapshot through the active session transport when debug is enabled', () => {

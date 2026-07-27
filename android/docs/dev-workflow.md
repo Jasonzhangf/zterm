@@ -31,6 +31,14 @@ Review -> Freeze -> Implement -> Verify -> Evidence -> Distill
 - runtime 改动不凭编译通过结论收口
 - 页面级重构先按 `docs/ui-slices.md` 切片，不跨页混改
 - 改动前必须先按 `docs/feature-registry.json` 选定 `feature_id`，确认 owner、allowed paths、forbidden paths、required gates；找不到 feature registry 条目时，不得宣称功能闭环完成
+- 跨模块或长期 runtime 重构必须先查并同步：
+  - `docs/resource-registry.json`
+  - `docs/module-registry.json`
+  - `docs/edge-registry.json`
+  - `docs/function-map.md`
+  - `docs/wiki/mainline-call-map.json`
+  - `docs/wiki/mainline-source.md`
+  找不到唯一 module/edge owner 时，先补 registry 和 gate，不直接改 runtime。
 
 ## Feature Registry 门禁
 
@@ -41,12 +49,21 @@ Review -> Freeze -> Implement -> Verify -> Evidence -> Distill
   - `docs/wiki/daemon.md` — daemon runtime owner walkthrough for new features touching server
   - `docs/wiki/cli.md` — CLI command contract for new public subcommands
   - `docs/wiki/mainline-source.md` — source ownership for Android / daemon / CLI
+  - `docs/wiki/modules.md` — module / edge review surface
   - `docs/wiki/mainline-call-map.json` — machine-readable mainline call map for Android / daemon / CLI wiki nodes
+  - `docs/module-registry.json` — machine-readable daemon/client/shared/relay/release/observability module ownership
+  - `docs/edge-registry.json` — machine-readable allowed cross-module resource edges
+- import 级机器门禁：`src/lib/module-import-graph-truth.test.ts`
+  - module registry `owned_paths` 必须覆盖 src 全部非测试源文件，每个文件恰好一个 owner
+  - 真实 import 图的每条跨模块边必须命中 edge registry `import_edges`，双向 lockstep（代码里没有的声明边必须删除）
+  - `pending_removal` 是显式违规清单，只允许减少
+  - 新增源文件或新增跨模块 import 时，必须在同一变更集里补 `owned_paths` / `import_edges`，否则 gate 红
 - 任何功能修复或重构必须先完成：
   1. 定位 `feature_id`
   2. 确认唯一 owner
   3. 确认变更文件位于 `allowed_paths`
-  4. 补齐或运行 `required_gates`
+  4. 若跨模块，确认 `module_id` 和 `edge_id`
+  5. 补齐或运行 `required_gates`
 - 若实现需要越过当前 owner 边界，先改 registry 与 truth gate，再改行为代码；禁止直接在 forbidden path 打补丁
 
 ## 设计参考使用规则

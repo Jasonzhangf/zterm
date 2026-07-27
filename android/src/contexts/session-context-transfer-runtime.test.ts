@@ -1,7 +1,11 @@
 // @vitest-environment jsdom
 
 import { describe, expect, it, vi } from 'vitest';
-import { sendFileAttachRuntime, sendImagePasteRuntime } from './session-context-transfer-runtime';
+import {
+  ensureSessionReadyForPasteRuntime,
+  sendFileAttachRuntime,
+  sendImagePasteRuntime,
+} from './session-context-transfer-runtime';
 
 function makeFile(name: string, size: number, type = 'image/png') {
   const bytes = new Uint8Array(size);
@@ -12,6 +16,23 @@ function makeFile(name: string, size: number, type = 'image/png') {
 }
 
 describe('session-context-transfer-runtime', () => {
+  it('waits for paste readiness through client.daemon_connection without raw socket fallback', async () => {
+    const ws = { readyState: WebSocket.OPEN } as any;
+
+    await expect(ensureSessionReadyForPasteRuntime({
+      sessionId: 'session-1',
+      timeoutMs: 10,
+      sessions: [{ id: 'session-1', state: 'connected' } as any],
+      daemonConnection: {
+        readSessionResource: vi.fn(() => ({ socket: ws } as any)),
+        readSessionSocket: vi.fn(() => ws),
+        readOpenSessionSocket: vi.fn(() => ws),
+        sendSessionMessage: vi.fn(),
+        sendSessionRaw: vi.fn(),
+      },
+    })).resolves.toBe(ws);
+  });
+
   it('chunks image paste binary payloads so RTC relay does not send one oversized datachannel frame', async () => {
     const ws = { readyState: WebSocket.OPEN } as any;
     const sendSocketPayload = vi.fn();

@@ -971,6 +971,7 @@
    ],
    "required_gates": [
     "src/lib/module-registry-truth.test.ts",
+    "src/lib/terminal-follow-scroll-runtime.test.ts",
     "src/components/TerminalView.dynamic-refresh.test.tsx"
    ],
    "status": "active",
@@ -980,6 +981,8 @@
     "src/lib/default-terminal-viewport.ts",
     "src/lib/session-render-gate.ts",
     "src/lib/session-viewport-mode-store.ts",
+    "src/lib/terminal-follow-scroll-runtime.ts",
+    "src/lib/terminal-follow-scroll-runtime.test.ts",
     "src/lib/terminal-viewport-metrics.ts",
     "src/lib/terminal-width-mode-manager.ts"
    ]

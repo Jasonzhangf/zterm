@@ -489,6 +489,11 @@ describe("FileTransferSheet", () => {
 
   it("uploads local files by reading native file chunks without materializing the whole file in WebView", async () => {
     const sendJson = vi.fn();
+    const handlerRef: { current: ((msg: any) => void) | null } = { current: null };
+    const onFileTransferMessage = vi.fn((nextHandler: (msg: any) => void) => {
+      handlerRef.current = nextHandler;
+      return () => {};
+    });
     vi.mocked(StoragePermissionPlugin.readdir).mockResolvedValue({
       files: [
         {
@@ -518,11 +523,12 @@ describe("FileTransferSheet", () => {
         remoteCwd="/remote/home"
         onClose={vi.fn()}
         sendJson={sendJson}
-        onFileTransferMessage={vi.fn(() => () => {})}
+        onFileTransferMessage={onFileTransferMessage}
       />,
     );
 
     await waitFor(() => expect(screen.getByText("large.bin")).toBeTruthy());
+    await waitFor(() => expect(handlerRef.current).toBeTruthy());
 
     fireEvent.click(screen.getByText("⬆ 上传到远程"));
     fireEvent.click(screen.getByRole("button", { name: "选择本地 large.bin" }));
@@ -535,11 +541,9 @@ describe("FileTransferSheet", () => {
         offset: 0,
         length: 16 * 1024,
       });
-      expect(storagePermissionPluginMock.readFileChunk).toHaveBeenNthCalledWith(2, {
-        path: "/storage/emulated/0/Download/zterm/large.bin",
-        offset: 16 * 1024,
-        length: 10,
-      });
+      expect(
+        sendJson.mock.calls.some((call) => call[0]?.type === "file-upload-chunk"),
+      ).toBe(true);
     });
 
     const uploadStart = sendJson.mock.calls.find(
@@ -554,6 +558,50 @@ describe("FileTransferSheet", () => {
         chunkCount: 2,
       }),
     });
+
+    handlerRef.current?.({
+      type: "file-upload-progress",
+      payload: {
+        requestId: uploadStart.payload.requestId,
+        chunkIndex: 1,
+        totalChunks: 2,
+      },
+    });
+
+    await waitFor(() => {
+      expect(storagePermissionPluginMock.readFileChunk).toHaveBeenNthCalledWith(2, {
+        path: "/storage/emulated/0/Download/zterm/large.bin",
+        offset: 16 * 1024,
+        length: 10,
+      });
+      expect(
+        sendJson.mock.calls.filter((call) => call[0]?.type === "file-upload-chunk"),
+      ).toHaveLength(2);
+    });
+
+    handlerRef.current?.({
+      type: "file-upload-progress",
+      payload: {
+        requestId: uploadStart.payload.requestId,
+        chunkIndex: 2,
+        totalChunks: 2,
+      },
+    });
+    handlerRef.current?.({
+      type: "file-upload-complete",
+      payload: {
+        requestId: uploadStart.payload.requestId,
+        filePath: "/remote/home/large.bin",
+        bytes: 16 * 1024 + 10,
+      },
+    });
+
+    await waitFor(() => {
+      expect(
+        sendJson.mock.calls.some((call) => call[0]?.type === "file-upload-end"),
+      ).toBe(true);
+    });
+
     const uploadChunks = sendJson.mock.calls
       .map((call) => call[0])
       .filter((message) => message?.type === "file-upload-chunk");
@@ -573,13 +621,15 @@ describe("FileTransferSheet", () => {
         }),
       }),
     ]);
-    expect(
-      sendJson.mock.calls.some((call) => call[0]?.type === "file-upload-end"),
-    ).toBe(true);
   });
 
   it("keeps each upload wire frame under the RTC-safe character budget", async () => {
     const sendJson = vi.fn();
+    const handlerRef: { current: ((msg: any) => void) | null } = { current: null };
+    const onFileTransferMessage = vi.fn((nextHandler: (msg: any) => void) => {
+      handlerRef.current = nextHandler;
+      return () => {};
+    });
     const rawChunk = "x".repeat(16 * 1024);
     const dataBase64 = btoa(rawChunk);
     vi.mocked(StoragePermissionPlugin.readdir).mockResolvedValue({
@@ -605,11 +655,12 @@ describe("FileTransferSheet", () => {
         remoteCwd="/remote/home"
         onClose={vi.fn()}
         sendJson={sendJson}
-        onFileTransferMessage={vi.fn(() => () => {})}
+        onFileTransferMessage={onFileTransferMessage}
       />,
     );
 
     await waitFor(() => expect(screen.getByText("wire.bin")).toBeTruthy());
+    await waitFor(() => expect(handlerRef.current).toBeTruthy());
     fireEvent.click(screen.getByText("⬆ 上传到远程"));
     fireEvent.click(screen.getByRole("button", { name: "选择本地 wire.bin" }));
     fireEvent.click(screen.getByText("上传 1 项"));
@@ -617,6 +668,32 @@ describe("FileTransferSheet", () => {
     await waitFor(() => {
       expect(
         sendJson.mock.calls.some((call) => call[0]?.type === "file-upload-chunk"),
+      ).toBe(true);
+    });
+
+    const uploadStart = sendJson.mock.calls.find(
+      (call) => call[0]?.type === "file-upload-start",
+    )?.[0];
+    handlerRef.current?.({
+      type: "file-upload-progress",
+      payload: {
+        requestId: uploadStart.payload.requestId,
+        chunkIndex: 1,
+        totalChunks: 1,
+      },
+    });
+    handlerRef.current?.({
+      type: "file-upload-complete",
+      payload: {
+        requestId: uploadStart.payload.requestId,
+        filePath: "/remote/home/wire.bin",
+        bytes: 16 * 1024,
+      },
+    });
+
+    await waitFor(() => {
+      expect(
+        sendJson.mock.calls.some((call) => call[0]?.type === "file-upload-end"),
       ).toBe(true);
     });
 

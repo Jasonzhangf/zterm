@@ -1,4 +1,6 @@
-import { cellsToLine } from './terminal-buffer';
+import { cellsToLine, summarizeIndexedLinesForDebug } from './terminal-buffer';
+
+export { summarizeIndexedLinesForDebug };
 import type {
   SessionBufferState,
   SessionRenderBufferSnapshot,
@@ -89,17 +91,3 @@ export function summarizeWireIndexedLinesForDebug(lines: WireIndexedLine[] | Ter
   return summarizeIndexedLinesForDebug(normalized);
 }
 
-export function summarizeIndexedLinesForDebug(lines: TerminalIndexedLine[]) {
-  const materialized = lines.map((line) => ({
-    index: line.index,
-    text: cellsToLine(line.cells),
-  }));
-  if (materialized.length <= 6) {
-    return materialized;
-  }
-  return [
-    ...materialized.slice(0, 3),
-    { index: -1, text: `… ${materialized.length - 6} omitted …` },
-    ...materialized.slice(-3),
-  ];
-}

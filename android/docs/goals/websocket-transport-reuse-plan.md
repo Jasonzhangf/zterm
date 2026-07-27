@@ -4,7 +4,7 @@ Date: 2026-07-07
 
 ## Goal And Acceptance
 
-Goal: implement Android terminal WebSocket reuse so foreground resume, tab switch, explicit resume, and reconnect requests reuse the existing per-session transport when it is still valid, instead of rebuilding sockets.
+Goal: implement Android terminal WebSocket reuse so foreground resume, tab switch, explicit resume, and reconnect requests reuse the existing daemon-target physical transport when it is still valid, instead of rebuilding sockets.
 
 Acceptance:
 - Same session + same bridge target + usable session WebSocket does not create a second session WebSocket.
@@ -76,7 +76,7 @@ cleanup old socket
 
 - `connectSessionRuntime()` currently clears reconnect, calls `cleanupSocket(sessionId, false)`, then queues a connect open intent. This can rebuild even when the same target session transport is already open or connecting.
 - `reconnectSessionRuntime()` currently clears reconnect, calls `cleanupSocket(sessionId, false)`, updates state to reconnecting, then schedules forced reconnect. This can rebuild even when the socket is still open and usable.
-- `openSessionTransportByIntentRuntime()` currently calls `cleanupSocket(sessionId, false)` after receiving a session ticket and before creating a new session socket. This is correct only when rebuild is required.
+- `client.daemon_connection.openSessionTargetTransport()` currently calls `cleanupSocket(sessionId, false)` only when the target transport is genuinely dead or mismatched. It must not be used to recreate an already-usable daemon-target transport.
 - `buildActiveSessionRefreshPlan()` already handles open sockets well for freshness paths, but explicit connect/reconnect primitives do not yet share the same reuse guard.
 
 ### Implementation Shape
@@ -172,7 +172,7 @@ Add or update runtime tests:
 - `connectSessionRuntime()` does not cleanup or queue a new open when the same target socket is `OPEN`.
 - `connectSessionRuntime()` waits when the same target has `CONNECTING` plus fresh pending open.
 - `reconnectSessionRuntime()` does not cleanup or schedule forced reconnect when the same target socket is `OPEN`.
-- `openSessionTransportByIntentRuntime()` does not replace a still-usable current session socket.
+- `client.daemon_connection.openSessionTargetTransport()` does not replace a still-usable current daemon-target transport.
 - closed/stale/target-mismatch cases still rebuild.
 
 ### L3 SessionContext Integration
@@ -207,7 +207,7 @@ Device validation remains Jason-side unless a connected Android device is availa
 2. Create `android/docs/testing/websocket-transport-reuse-test-design.md`.
 3. Add failing tests for pure planner and runtime duplicate-rebuild cases.
 4. Implement the pure reuse planner.
-5. Wire the planner into `connectSessionRuntime`, `reconnectSessionRuntime`, and `openSessionTransportByIntentRuntime` without touching UI.
+5. Wire the planner into `connectSessionRuntime`, `reconnectSessionRuntime`, and `client.daemon_connection.openSessionTargetTransport` without touching UI.
 6. Run targeted tests until green.
 7. Run feature registry, typecheck, and diff check.
 8. Build Android debug APK.

@@ -13,6 +13,9 @@ function createResource(readyState = 1, terminalMuxReady = true): SessionTranspo
     runtime: null,
     targetRuntime: {
       key: 'target-1',
+      daemonTargetId: 'target-1',
+      routeCandidateKey: 'route-1',
+      routeGeneration: 0,
       bridgeHost: '127.0.0.1',
       bridgePort: 3333,
       authToken: '',
@@ -90,6 +93,46 @@ describe('session tmux target management runtime', () => {
       },
     })).toBe(true);
     await expect(harness.request).resolves.toEqual(['zterm', 'alpha']);
+  });
+
+  it('reads target transport through client.daemon_connection before raw resource access', async () => {
+    const resource = createResource();
+    const pendingRequestsRef = {
+      current: new Map() as SessionTmuxTargetRequestStore,
+    };
+    const readSessionTransportResource = vi.fn(() => {
+      throw new Error('raw session transport resource should not be used');
+    });
+    const sendSocketPayload = vi.fn();
+
+    const request = manageTmuxSessionsOnOpenTransportRuntime({
+      sessionId: 'session-1',
+      message: { type: 'list-sessions' },
+      pendingRequestsRef,
+      daemonConnection: {
+        readSessionResource: vi.fn(() => resource),
+        readSessionSocket: vi.fn(() => resource.socket),
+        readOpenSessionSocket: vi.fn(() => resource.socket as any),
+        sendSessionMessage: vi.fn(),
+        sendSessionRaw: vi.fn(),
+      },
+      readSessionTransportResource,
+      sendSocketPayload,
+      timeoutMs: 50,
+    });
+    const wireFrame = JSON.parse(sendSocketPayload.mock.calls[0][2] as string);
+
+    settleSessionTmuxTargetRequestRuntime({
+      pendingRequestsRef,
+      requestId: wireFrame.payload.requestId,
+      message: {
+        type: 'sessions',
+        payload: { sessions: ['alpha'] },
+      },
+    });
+
+    await expect(request).resolves.toEqual(['alpha']);
+    expect(readSessionTransportResource).not.toHaveBeenCalled();
   });
 
   it('rejects malformed sessions truth instead of projecting it as an empty success', async () => {

@@ -9,6 +9,7 @@ const pages = [
   ['daemon.md', 'Daemon Wiki'],
   ['cli.md', 'CLI Wiki'],
   ['mainline-source.md', 'Mainline Source Wiki'],
+  ['modules.md', 'Project Modules Wiki'],
 ];
 
 function extractFirstMermaid(source) {

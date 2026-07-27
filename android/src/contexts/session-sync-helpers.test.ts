@@ -1169,31 +1169,45 @@ describe('session sync helper managed session reuse truth', () => {
     })).toBe('bridge:100.127.23.27::3333::session:tmux-a');
   });
 
-  it('prefers active/connected managed session when multiple candidates match', () => {
+  it('returns null when caller does not supply a client sessionId (no host+sessionName fallback)', () => {
+    // Two managed sessions happen to share host+sessionName (e.g. rcc and rcc2-rename).
+    // The previous semantic-key matcher would pick the active one and silently
+    // collapse them. The new owner must refuse to do so without an explicit sessionId.
     const winner = findReusableManagedSession({
+      sessionId: '',
+      sessions: [
+        makeSession({ id: 's-older', state: 'connected', createdAt: 1 }),
+        makeSession({ id: 's-active', state: 'connected', createdAt: 2 }),
+      ],
+      activeSessionId: 's-active',
+    });
+    expect(winner).toBeNull();
+  });
+
+  it('returns the exact session when caller supplies a matching client sessionId', () => {
+    const active = findReusableManagedSession({
+      sessionId: 's-active',
       sessions: [
         makeSession({ id: 's-older', state: 'connected', createdAt: 1 }),
         makeSession({ id: 's-active', state: 'connected', createdAt: 2 }),
         makeSession({ id: 's-newer', state: 'reconnecting', createdAt: 3 }),
       ],
-      host: {
-        id: 'host-1',
-        createdAt: 1,
-        name: 'conn-1',
-        bridgeHost: '100.127.23.27',
-        bridgePort: 3333,
-        sessionName: 'tmux-1',
-        authType: 'password',
-        tags: [],
-        pinned: false,
-      },
-      resolvedSessionName: 'tmux-1',
       activeSessionId: 's-active',
     });
-    expect(winner?.id).toBe('s-active');
-    expect(scoreReusableManagedSession(winner!, 's-active')).toBeGreaterThan(
+    expect(active?.id).toBe('s-active');
+    expect(scoreReusableManagedSession(active!, 's-active')).toBeGreaterThan(
       scoreReusableManagedSession(makeSession({ id: 's-older', state: 'connected', createdAt: 1 }), 's-active'),
     );
+
+    // sessionId that does not match any managed session returns null, even when
+    // host+sessionName would have matched under the old semantic-key matcher.
+    expect(findReusableManagedSession({
+      sessionId: 's-missing',
+      sessions: [
+        makeSession({ id: 's-older', state: 'connected', createdAt: 1 }),
+      ],
+      activeSessionId: 's-older',
+    })).toBeNull();
   });
 
   it('opens managed session transport only when there is no usable/opening transport truth', () => {

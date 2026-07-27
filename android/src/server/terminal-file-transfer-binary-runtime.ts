@@ -7,7 +7,7 @@ import type {
   FileUploadStartPayload,
   PasteImagePayload,
   PasteImageStartPayload,
-} from '../lib/types';
+} from '@zterm/shared/protocol';
 import type { TerminalSession, PendingBinaryTransfer } from './terminal-runtime-types';
 import type {
   PendingUploadState,

@@ -1,5 +1,8 @@
-import type { ScheduleEventPayload, ScheduleStatePayload } from '../lib/types';
-import type { ServerMessage } from '../lib/types';
+import type {
+  ScheduleEventPayload,
+  ScheduleStatePayload,
+} from '@zterm/shared/schedule-types';
+import type { BridgeServerMessage as ServerMessage } from '@zterm/shared/protocol';
 import { ScheduleEngine, type ScheduleExecutionResult } from './schedule-engine';
 import type { TerminalSession } from './terminal-runtime-types';
 import type { ScheduleJob } from '../../../packages/shared/src/schedule/types.ts';

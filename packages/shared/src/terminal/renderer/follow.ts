@@ -279,3 +279,42 @@ export function reconcileTerminalViewportAfterBufferShift(options: {
   }
   options.emitReadingRenderDemand(nextRenderBottomIndex);
 }
+
+export function computeFollowRealignAfterBufferShift(options: {
+  refreshActive: boolean;
+  readingMode: boolean;
+  previousPaddingTopPx: number | null;
+  nextPaddingTopPx: number;
+  viewportClientHeightPx: number;
+  maxScrollTop: number;
+}) {
+  const previousPaddingTopPx = typeof options.previousPaddingTopPx === 'number'
+    && Number.isFinite(options.previousPaddingTopPx)
+    ? Math.max(0, options.previousPaddingTopPx)
+    : null;
+  const nextPaddingTopPx = Number.isFinite(options.nextPaddingTopPx)
+    ? Math.max(0, options.nextPaddingTopPx)
+    : 0;
+  const viewportClientHeightPx = Number.isFinite(options.viewportClientHeightPx)
+    ? Math.max(0, options.viewportClientHeightPx)
+    : 0;
+  const targetScrollTop = Number.isFinite(options.maxScrollTop)
+    ? Math.max(0, options.maxScrollTop)
+    : 0;
+  const paddingDeltaPx = previousPaddingTopPx === null
+    ? 0
+    : Math.abs(nextPaddingTopPx - previousPaddingTopPx);
+  const needsImmediateRealign = Boolean(
+    options.refreshActive
+    && !options.readingMode
+    && previousPaddingTopPx !== null
+    && viewportClientHeightPx > 0
+    && paddingDeltaPx > viewportClientHeightPx
+  );
+
+  return {
+    needsImmediateRealign,
+    targetScrollTop,
+    paddingDeltaPx,
+  };
+}

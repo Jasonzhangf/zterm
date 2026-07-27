@@ -1,3 +1,4 @@
+import type { RelayEndpointCandidate } from './relay-directory';
 import { DEFAULT_BRIDGE_PORT } from './mobile-config';
 
 export interface Host {
@@ -14,6 +15,7 @@ export interface Host {
   tailscaleHost?: string;
   ipv6Host?: string;
   ipv4Host?: string;
+  relayEndpointCandidates?: RelayEndpointCandidate[];
   signalUrl?: string;
   transportMode?: 'auto' | 'websocket' | 'webrtc';
   authType: 'password' | 'key';

@@ -24,20 +24,6 @@ function buildSession(id: string, sessionName: string): Session {
     ws: null,
     hasUnread: false,
     createdAt: Date.now(),
-    buffer: {
-      revision: 0,
-      startIndex: 0,
-      endIndex: 0,
-      bufferHeadStartIndex: 0,
-      bufferTailEndIndex: 0,
-      cols: 80,
-      rows: 24,
-      lines: [],
-      gapRanges: [],
-      cursorKeysApp: false,
-      cursor: null,
-      updateKind: 'replace',
-    },
   };
 }
 

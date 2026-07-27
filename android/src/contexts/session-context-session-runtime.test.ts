@@ -454,6 +454,7 @@ describe('active truth ownership gates', () => {
       },
       createOptions: {
         connect: false,
+        sessionId: 'session-existing',
       },
       refs: {
         stateRef: {
@@ -537,6 +538,7 @@ describe('active truth ownership gates', () => {
       },
       createOptions: {
         connect: false,
+        sessionId: 'session-existing',
       },
       refs: {
         stateRef: {
@@ -675,6 +677,7 @@ describe('active truth ownership gates', () => {
       },
       createOptions: {
         connect: true,
+        sessionId: 'session-existing',
       },
       refs: {
         stateRef: {
@@ -744,6 +747,7 @@ describe('active truth ownership gates', () => {
       },
       createOptions: {
         connect: true,
+        sessionId: 'session-existing',
       },
       refs: {
         stateRef: {
@@ -805,6 +809,7 @@ describe('active truth ownership gates', () => {
       },
       createOptions: {
         connect: true,
+        sessionId: 'session-existing',
       },
       refs: {
         stateRef: {

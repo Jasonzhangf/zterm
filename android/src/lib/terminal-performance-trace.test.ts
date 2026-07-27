@@ -59,6 +59,51 @@ describe('terminal performance trace', () => {
     expect(summary.p95CaptureToRenderMs).toBeNull();
   });
 
+  it('joins daemon mux-channel trace ids with client local session trace ids', () => {
+    const store = createTerminalPerformanceTraceStore({ limit: 20 });
+    store.record({
+      sessionId: 'target-1:channel:session-abc',
+      traceId: 'target-1:channel:session-abc:77',
+      mirrorRevision: 77,
+      subscriberId: 'target-1:channel:session-abc',
+      stage: 'send-done',
+      at: 100,
+      bytes: 900,
+      lineCount: 12,
+    });
+    store.record({
+      sessionId: 'session-abc',
+      traceId: 'session-abc:77',
+      mirrorRevision: 77,
+      subscriberId: 'session-abc',
+      stage: 'client-rx',
+      at: 112,
+      bytes: 900,
+    });
+    store.record({
+      sessionId: 'session-abc',
+      traceId: 'session-abc:77',
+      mirrorRevision: 77,
+      subscriberId: 'session-abc',
+      stage: 'render-commit',
+      at: 145,
+      lineCount: 12,
+    });
+
+    const summary = summarizeTerminalPerformanceTrace(store.snapshot());
+
+    expect(summary.sessions).toHaveLength(1);
+    expect(summary.sessions[0]).toMatchObject({
+      traceId: 'target-1:channel:session-abc:77',
+      mirrorRevision: 77,
+      subscriberId: 'target-1:channel:session-abc',
+      sendToRxMs: 12,
+      rxToRenderMs: 33,
+      bytes: 1800,
+      lineCount: 12,
+    });
+  });
+
   it('stores metadata only and rejects terminal payload content', () => {
     const store = createTerminalPerformanceTraceStore({ limit: 20 });
 

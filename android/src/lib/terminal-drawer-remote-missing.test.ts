@@ -2,7 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { resolveSessionRemoteMissing } from './terminal-drawer-remote-missing';
 import type { Session, SessionGroupHistory } from './types';
 
-function makeSession(overrides: Partial<Session> = {}): Session {
+type TestSession = Session & { buffer: import('./types').SessionBufferState };
+
+function makeSession(overrides: Partial<TestSession> = {}): TestSession {
   return {
     id: overrides.id || 'session-1',
     hostId: overrides.hostId || 'host-1',

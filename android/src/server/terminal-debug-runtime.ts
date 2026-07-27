@@ -1,4 +1,7 @@
-import type { RuntimeDebugLogEntry, ServerMessage } from '../lib/types';
+import type {
+  BridgeServerMessage as ServerMessage,
+  RuntimeDebugLogEntry,
+} from '@zterm/shared/protocol';
 import type { RuntimeDebugStore } from './runtime-debug-store';
 import type { TerminalSession } from './terminal-runtime-types';
 

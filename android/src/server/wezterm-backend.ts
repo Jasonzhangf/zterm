@@ -1,4 +1,6 @@
-import type { TerminalCell } from '../lib/types';
+import type {
+  TerminalCell,
+} from '@zterm/shared/types';
 import { spawnSync } from 'child_process';
 import { normalizeCapturedLineBlock, trimCanonicalBufferWindow } from './canonical-buffer';
 import { canonicalizeCapturedMirrorLines } from './mirror-line-canonicalizer';

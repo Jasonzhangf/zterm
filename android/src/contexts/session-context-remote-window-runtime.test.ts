@@ -10,6 +10,7 @@ import {
 } from './session-context-remote-window-runtime';
 import type { RemoteWindowStreamTargetManifest } from '../lib/types';
 import { DEFAULT_BRIDGE_SETTINGS } from '../lib/bridge-settings';
+import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 
 function makeSocket() {
   return {
@@ -19,6 +20,45 @@ function makeSocket() {
     addEventListener: vi.fn(),
     removeEventListener: vi.fn(),
   } as any;
+}
+
+function formatSocketReadyState(ws: { readyState?: number } | null) {
+  if (!ws) {
+    return 'missing';
+  }
+  switch (ws.readyState) {
+    case WebSocket.CONNECTING:
+      return 'connecting';
+    case WebSocket.OPEN:
+      return 'open';
+    case WebSocket.CLOSING:
+      return 'closing';
+    case WebSocket.CLOSED:
+      return 'closed';
+    default:
+      return `unknown:${ws.readyState}`;
+  }
+}
+
+function makeDaemonConnection(wsOrFactory: any = makeSocket()) {
+  const readSocket = (sessionId: string, purpose?: string) => (
+    typeof wsOrFactory === 'function' ? wsOrFactory(sessionId, purpose) : wsOrFactory
+  );
+  const readOpenSessionSocket = vi.fn((sessionId: string, purpose: string) => {
+    const ws = readSocket(sessionId, purpose) || null;
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      return ws;
+    }
+    throw new Error(`${purpose} requires an open daemon connection (socket=${formatSocketReadyState(ws)}, target=daemon=mac-studio, channel=missing)`);
+  });
+  return {
+    readSessionResource: vi.fn((sessionId: string) => ({ sessionId, socket: readSocket(sessionId) || null })),
+    readSessionSocket: vi.fn((sessionId: string) => readSocket(sessionId) || null),
+    readSessionTargetSocket: vi.fn((sessionId: string) => readSocket(sessionId) || null),
+    readOpenSessionSocket,
+    sendSessionRaw: vi.fn(),
+    sendSessionMessage: vi.fn(),
+  } as unknown as ClientDaemonConnection & { readOpenSessionSocket: ReturnType<typeof vi.fn> };
 }
 
 function makeTarget(): RemoteWindowStreamTargetManifest {
@@ -59,9 +99,9 @@ describe('session context remote window runtime', () => {
     state: 'connected',
   } as any;
 
-  it('reuses the open session transport owner before requesting the target catalog', async () => {
+  it('reuses the daemon connection owner before requesting the target catalog', async () => {
     const ws = makeSocket();
-    const readSessionTransportSocket = vi.fn(() => ws);
+    const daemonConnection = makeDaemonConnection(ws);
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-1',
       targets: [],
@@ -72,12 +112,12 @@ describe('session context remote window runtime', () => {
     await expect(requestRemoteWindowTargetsRuntime({
       sessionId: ' session-1 ',
       sessions: [baseSession],
-      readSessionTransportSocket,
+      daemonConnection,
       remoteWindowMessageRuntime: { requestTargets },
       sendSocketPayload,
     })).resolves.toMatchObject({ requestId: 'rw-1' });
 
-    expect(readSessionTransportSocket).toHaveBeenCalledWith('session-1');
+    expect(daemonConnection.readOpenSessionSocket).toHaveBeenCalledWith('session-1', 'Remote window catalog');
     expect(requestTargets).toHaveBeenCalledWith('session-1', {
       ws,
       sendSocketPayload,
@@ -95,7 +135,7 @@ describe('session context remote window runtime', () => {
     await expect(requestRemoteWindowTargetsRuntime({
       sessionId: 'session-1',
       sessions: [{ ...baseSession, state: 'connecting' }],
-      readSessionTransportSocket: () => ws,
+      daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: { requestTargets },
       sendSocketPayload: vi.fn(),
     })).resolves.toMatchObject({ requestId: 'rw-connecting' });
@@ -117,7 +157,7 @@ describe('session context remote window runtime', () => {
     await expect(requestRemoteWindowTargetsRuntime({
       sessionId: 'session-1',
       sessions: [{ ...baseSession, bridgeHost: '100.66.1.82', bridgePort: 3333 }],
-      readSessionTransportSocket: () => ws,
+      daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: { requestTargets },
       sendSocketPayload,
       targetCatalogCache,
@@ -128,7 +168,7 @@ describe('session context remote window runtime', () => {
     await expect(requestRemoteWindowTargetsRuntime({
       sessionId: 'session-1',
       sessions: [{ ...baseSession, bridgeHost: '100.66.1.82', bridgePort: 3333 }],
-      readSessionTransportSocket: () => ws,
+      daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: { requestTargets },
       sendSocketPayload,
       targetCatalogCache,
@@ -148,7 +188,7 @@ describe('session context remote window runtime', () => {
     await requestRemoteWindowTargetsRuntime({
       sessionId: 'session-1',
       sessions: [{ ...baseSession, bridgeHost: '100.66.1.82', bridgePort: 3333 }],
-      readSessionTransportSocket: () => ws,
+      daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: { requestTargets },
       sendSocketPayload: vi.fn(),
       targetCatalogCache,
@@ -158,7 +198,7 @@ describe('session context remote window runtime', () => {
     await expect(requestRemoteWindowTargetsRuntime({
       sessionId: 'session-1',
       sessions: [{ ...baseSession, bridgeHost: '100.66.1.82', bridgePort: 3333 }],
-      readSessionTransportSocket: () => ws,
+      daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: { requestTargets },
       sendSocketPayload: vi.fn(),
       targetCatalogCache,
@@ -194,7 +234,7 @@ describe('session context remote window runtime', () => {
     await requestRemoteWindowTargetsRuntime({
       sessionId: 'session-1',
       sessions: [{ ...baseSession, ...daemon }],
-      readSessionTransportSocket: () => ws,
+      daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: { requestTargets },
       sendSocketPayload: vi.fn(),
       targetCatalogCache,
@@ -204,7 +244,7 @@ describe('session context remote window runtime', () => {
     await expect(requestRemoteWindowTargetsRuntime({
       sessionId: 'session-2',
       sessions: [{ ...baseSession, id: 'session-2', ...daemon }],
-      readSessionTransportSocket: () => ws,
+      daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: { requestTargets },
       sendSocketPayload: vi.fn(),
       targetCatalogCache,
@@ -225,7 +265,7 @@ describe('session context remote window runtime', () => {
     await requestRemoteWindowTargetsRuntime({
       sessionId: 'session-1',
       sessions: [{ ...baseSession, bridgeHost: '100.66.1.82', bridgePort: 3333 }],
-      readSessionTransportSocket: () => ws,
+      daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: { requestTargets },
       sendSocketPayload: vi.fn(),
       targetCatalogCache,
@@ -237,7 +277,7 @@ describe('session context remote window runtime', () => {
     await expect(requestRemoteWindowTargetsRuntime({
       sessionId: 'session-1',
       sessions: [{ ...baseSession, bridgeHost: '100.66.1.82', bridgePort: 3333 }],
-      readSessionTransportSocket: () => ws,
+      daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: { requestTargets },
       sendSocketPayload: vi.fn(),
       targetCatalogCache,
@@ -253,7 +293,7 @@ describe('session context remote window runtime', () => {
     await requestRemoteWindowTargetsRuntime({
       sessionId: 'session-1',
       sessions: [{ ...baseSession, bridgeHost: '100.66.1.82', bridgePort: 3333 }],
-      readSessionTransportSocket: () => makeSocket(),
+      daemonConnection: makeDaemonConnection(),
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(async () => ({ requestId: 'rw-cached', targets: [makeTarget()], errors: [] })),
       },
@@ -265,36 +305,36 @@ describe('session context remote window runtime', () => {
     await expect(requestRemoteWindowTargetsRuntime({
       sessionId: 'session-1',
       sessions: [{ ...baseSession, state: 'connecting', bridgeHost: '100.66.1.82', bridgePort: 3333 }],
-      readSessionTransportSocket: () => ({ ...makeSocket(), readyState: WebSocket.CLOSED }),
+      daemonConnection: makeDaemonConnection({ ...makeSocket(), readyState: WebSocket.CLOSED }),
       remoteWindowMessageRuntime: { requestTargets: vi.fn() },
       sendSocketPayload: vi.fn(),
       targetCatalogCache,
       now: () => 2,
-    })).rejects.toThrow('Remote window catalog transport is not open (session=connecting, socket=closed)');
+    })).rejects.toThrow('Remote window catalog requires an open daemon connection (socket=closed');
   });
 
   it('rejects a missing session id before touching transport state', async () => {
-    const readSessionTransportSocket = vi.fn();
+    const daemonConnection = makeDaemonConnection();
     const requestTargets = vi.fn();
 
     await expect(requestRemoteWindowTargetsRuntime({
       sessionId: '   ',
       sessions: [baseSession],
-      readSessionTransportSocket,
+      daemonConnection,
       remoteWindowMessageRuntime: { requestTargets },
       sendSocketPayload: vi.fn(),
     })).rejects.toThrow('No target session for remote window catalog');
 
-    expect(readSessionTransportSocket).not.toHaveBeenCalled();
+    expect(daemonConnection.readOpenSessionSocket).not.toHaveBeenCalled();
     expect(requestTargets).not.toHaveBeenCalled();
   });
 
-  it('rejects catalog requests without reusing the paste ready error when no socket is open', () => {
+  it('rejects catalog requests through daemon connection when no socket is open', () => {
     expect(() => resolveRemoteWindowCatalogTransport({
       sessionId: 'session-1',
       sessions: [{ ...baseSession, state: 'connecting' }],
-      readSessionTransportSocket: () => ({ ...makeSocket(), readyState: WebSocket.CLOSED }),
-    })).toThrow('Remote window catalog transport is not open (session=connecting, socket=closed)');
+      daemonConnection: makeDaemonConnection({ ...makeSocket(), readyState: WebSocket.CLOSED }),
+    })).toThrow('Remote window catalog requires an open daemon connection (socket=closed');
   });
 
   it('starts a receiver-backed stream over the existing open session transport', async () => {
@@ -335,7 +375,7 @@ describe('session context remote window runtime', () => {
       target,
       videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
       sessions: [baseSession],
-      readSessionTransportSocket: () => ws,
+      daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart,
@@ -460,7 +500,7 @@ describe('session context remote window runtime', () => {
       target,
       bridgeSettings,
       sessions: [session],
-      readSessionTransportSocket: () => ws,
+      daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart,
@@ -497,7 +537,7 @@ describe('session context remote window runtime', () => {
       streamId: 'stream-1',
       target: makeTarget(),
       sessions: [{ ...baseSession, state: 'connecting' }],
-      readSessionTransportSocket: () => ({ ...makeSocket(), readyState: WebSocket.CLOSED }),
+      daemonConnection: makeDaemonConnection({ ...makeSocket(), readyState: WebSocket.CLOSED }),
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart: vi.fn(),
@@ -511,7 +551,7 @@ describe('session context remote window runtime', () => {
         stopStream: vi.fn(),
       },
       sendSocketPayload: vi.fn(),
-    })).rejects.toThrow('Remote window stream transport is not open (session=connecting, socket=closed)');
+    })).rejects.toThrow('Remote window stream requires an open daemon connection (socket=closed');
 
     expect(startStream).not.toHaveBeenCalled();
   });
@@ -526,7 +566,7 @@ describe('session context remote window runtime', () => {
       sessionId: 'session-1',
       streamId: 'stream-1',
       sessions: [baseSession],
-      readSessionTransportSocket: () => ws,
+      daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart: vi.fn(),
@@ -563,7 +603,7 @@ describe('session context remote window runtime', () => {
         videoBitrate: { preset: '10mbps', bitrateMbps: 10, maxBitrateBps: 10_000_000 },
       },
       sessions: [baseSession],
-      readSessionTransportSocket: () => ws,
+      daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart: vi.fn(),
@@ -609,7 +649,7 @@ describe('session context remote window runtime', () => {
         },
       },
       sessions: [baseSession],
-      readSessionTransportSocket: () => ws,
+      daemonConnection: makeDaemonConnection(ws),
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart: vi.fn(),
@@ -650,7 +690,7 @@ describe('session context remote window runtime', () => {
         },
       },
       sessions: [{ ...baseSession, state: 'connecting' }],
-      readSessionTransportSocket: () => ({ ...makeSocket(), readyState: WebSocket.CLOSED }),
+      daemonConnection: makeDaemonConnection({ ...makeSocket(), readyState: WebSocket.CLOSED }),
       remoteWindowMessageRuntime: {
         requestTargets: vi.fn(),
         requestStreamStart: vi.fn(),
@@ -660,6 +700,6 @@ describe('session context remote window runtime', () => {
         sendInputEvent: vi.fn(),
       },
       sendSocketPayload: vi.fn(),
-    })).toThrow('Remote window stream transport is not open (session=connecting, socket=closed)');
+    })).toThrow('Remote window stream requires an open daemon connection (socket=closed');
   });
 });
