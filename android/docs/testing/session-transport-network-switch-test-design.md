@@ -36,10 +36,19 @@ Negative:
 - Repeated timer ticks after terminal failure cannot finalize the same physical socket generation again.
 - `CLOSING` or `CLOSED` sockets cannot send ping or create a second reconnect path.
 - A logical channel close/open does not create another physical heartbeat timer.
+- An ordinary route failure enters a short circuit-breaker cooldown, then becomes probe-eligible again without an app restart.
+- An authentication failure remains quarantined for the full route-health TTL and cannot be mistaken for a transient network failure.
+- One `TraversalSocket` generation attempts each candidate at most once even after a candidate becomes probe-eligible in the shared cache.
 
 ## Module Black-Box Gate
 
 Replay an OPEN WebSocket whose server frames stop while its target IP remains reachable. Advance three heartbeat ticks, prove one retryable failure, one pending open intent, one replacement socket, unchanged session id/buffer, and rejection of late frames from the superseded socket.
+
+Replay an OPEN physical route that then fails before `mux-ready` or channel-ready. The target failure owner must report the protocol failure into route health, remove that exact physical generation from target truth, close it once, and schedule exactly one target rebuild. The replacement route plan must not continue treating the failed route as a recent success. Multiple logical channels must not multiply retirement or reconnect calls.
+
+Replay a transient Tailscale failure while Relay metadata remains available. During the short cooldown the failed route is unavailable to the next physical generation; after cooldown the same Tailscale endpoint must be probed again without clearing process state. A five-minute ordinary-failure blacklist is forbidden. The shared health cache may retain successful-route history for five minutes, but ordinary connectivity failures and authentication failures require different expiry policies.
+
+Negative: if the failed physical socket is already `CLOSING` or `CLOSED`, the owner still records route failure and rebuilds recoverable channels, but must not call `close()` again. A target failure must not close or recreate any control/directory socket.
 
 ## Real-Device Black-Box Gate
 

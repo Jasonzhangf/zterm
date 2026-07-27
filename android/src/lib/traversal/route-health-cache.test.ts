@@ -46,6 +46,45 @@ describe('TraversalRouteHealthCache', () => {
     });
   });
 
+  it('expires an ordinary transient failure after the short reprobe cooldown', () => {
+    let now = 1000;
+    const cache = new TraversalRouteHealthCache({
+      ttlMs: 5 * 60_000,
+      now: () => now,
+    });
+    cache.recordFailure({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidate, 'network changed');
+
+    expect(cache.get({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidate)).toMatchObject({
+      status: 'failure',
+    });
+
+    now = 2001;
+    expect(cache.get({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidate)).toBeNull();
+  });
+
+  it('keeps authentication failures quarantined for the full health TTL', () => {
+    let now = 1000;
+    const cache = new TraversalRouteHealthCache({
+      ttlMs: 5 * 60_000,
+      now: () => now,
+    });
+    cache.recordFailure(
+      { accountId: 'u1', daemonHostId: 'daemon-a' },
+      candidate,
+      '401 unauthorized',
+      { authFailure: true },
+    );
+
+    now = 2001;
+    expect(cache.get({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidate)).toMatchObject({
+      status: 'auth-failure',
+      error: '401 unauthorized',
+    });
+
+    now = 301_001;
+    expect(cache.get({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidate)).toBeNull();
+  });
+
   it('lists and snapshots only live records for the requested scope', () => {
     let now = 1000;
     const cache = new TraversalRouteHealthCache({ ttlMs: 100, now: () => now });

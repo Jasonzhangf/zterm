@@ -3,6 +3,26 @@ import {
   handleTargetMuxTransportFailureRuntime,
 } from './session-context-transport-orchestration-runtime';
 import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
+import type { BridgeTransportSocket } from '../lib/traversal/types';
+
+interface FailedSocket extends BridgeTransportSocket {
+  reportFailure: ReturnType<typeof vi.fn>;
+  close: ReturnType<typeof vi.fn>;
+}
+
+function makeFailedSocket(readyState: number): FailedSocket {
+  return {
+    readyState,
+    onopen: null,
+    onmessage: null,
+    onerror: null,
+    onclose: null,
+    send: vi.fn(),
+    reportFailure: vi.fn(),
+    close: vi.fn(),
+    getDiagnostics: vi.fn(() => ({} as ReturnType<BridgeTransportSocket['getDiagnostics']>)),
+  };
+}
 
 function makePendingIntent(sessionId: string): PendingSessionTransportOpenIntent {
   return {
@@ -29,6 +49,7 @@ function makePendingIntent(sessionId: string): PendingSessionTransportOpenIntent
 
 describe('handleTargetMuxTransportFailureRuntime', () => {
   it('clears one failed physical target and replays every recoverable same-target mux channel through one rebuild', () => {
+    const failedSocket = makeFailedSocket(WebSocket.OPEN);
     const pendingSession2 = makePendingIntent('session-2');
     const pendingSessionTransportOpenIntentsRef = {
       current: new Map<string, PendingSessionTransportOpenIntent>([
@@ -45,6 +66,7 @@ describe('handleTargetMuxTransportFailureRuntime', () => {
     handleTargetMuxTransportFailureRuntime({
       anchorSessionId: 'session-1',
       message: 'rtc data channel error',
+      failedSocket,
       readSessionTargetRuntime: () => ({ key: 'target-a', sessionIds: ['session-1', 'session-2', 'session-3'] }),
       readSessionTerminalChannel: (sessionId) => ({
         channelId: `channel-${sessionId}`,
@@ -69,6 +91,12 @@ describe('handleTargetMuxTransportFailureRuntime', () => {
 
     expect(writeSessionTargetTerminalMuxReady).toHaveBeenCalledWith('session-1', false);
     expect(writeSessionTargetTerminalSocket).toHaveBeenCalledWith('session-1', null);
+    expect(failedSocket.reportFailure).toHaveBeenCalledWith('rtc data channel error');
+    expect(failedSocket.reportFailure).toHaveBeenCalledTimes(1);
+    expect(failedSocket.close).toHaveBeenCalledWith(4000, 'terminal mux target failed');
+    expect(writeSessionTargetTerminalSocket.mock.invocationCallOrder[0]).toBeLessThan(
+      failedSocket.close.mock.invocationCallOrder[0],
+    );
     expect(clearHeartbeat).toHaveBeenCalledWith('session-1', {
       heartbeatKey: 'target:target-a',
     });
@@ -98,6 +126,7 @@ describe('handleTargetMuxTransportFailureRuntime', () => {
   });
 
   it('does not schedule duplicate reconnects when multiple recoverable channels share the same failed target', () => {
+    const failedSocket = makeFailedSocket(WebSocket.CLOSING);
     const pendingSessionTransportOpenIntentsRef = {
       current: new Map<string, PendingSessionTransportOpenIntent>(),
     };
@@ -111,6 +140,7 @@ describe('handleTargetMuxTransportFailureRuntime', () => {
     handleTargetMuxTransportFailureRuntime({
       anchorSessionId: 'session-1',
       message: 'terminal mux transport closed',
+      failedSocket,
       readSessionTargetRuntime: () => ({ key: 'target-a', sessionIds: ['session-1', 'session-2'] }),
       readSessionTerminalChannel: (sessionId) => ({
         channelId: `channel-${sessionId}`,
@@ -134,6 +164,9 @@ describe('handleTargetMuxTransportFailureRuntime', () => {
     });
 
     expect(scheduleReconnect).toHaveBeenCalledTimes(1);
+    expect(failedSocket.reportFailure).toHaveBeenCalledWith('terminal mux transport closed');
+    expect(failedSocket.reportFailure).toHaveBeenCalledTimes(1);
+    expect(failedSocket.close).not.toHaveBeenCalled();
     expect(scheduleReconnect).toHaveBeenCalledWith('session-1', 'terminal mux transport closed', true, {
       immediate: true,
       resetAttempt: true,

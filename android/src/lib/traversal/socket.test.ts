@@ -461,7 +461,7 @@ describe('TraversalSocket reconnect', () => {
 
     expect(MockWebSocket.instances[0].url).toContain('240e:1234::10');
     MockWebSocket.instances[0].triggerOpen();
-    firstSocket.reportFailure?.('heartbeat server activity timeout');
+    firstSocket.reportFailure('heartbeat server activity timeout');
     firstSocket.close(4000, 'heartbeat server activity timeout');
 
     expect(routeHealthCache.get(scope, {

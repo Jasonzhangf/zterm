@@ -75,6 +75,10 @@
           "label": "src/lib/traversal/socket.ts#TraversalSocket"
         },
         {
+          "id": "TerminalTransportOut01RouteSelection",
+          "label": "src/lib/traversal/route-selector.ts#selectBestTraversalRoute"
+        },
+        {
           "id": "SocketMessage",
           "label": "src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime"
         },
@@ -169,6 +173,10 @@
         {
           "id": "MuxHandshake",
           "label": "src/contexts/session-context-transport-runtime.ts#bindTargetMuxTransportSocketLifecycleRuntime"
+        },
+        {
+          "id": "TerminalTransportError01TargetFailure",
+          "label": "src/contexts/session-context-transport-orchestration-runtime.ts#handleTargetMuxTransportFailureRuntime"
         },
         {
           "id": "ChannelRuntime",
@@ -376,6 +384,19 @@
           "edge_id": "android_mainline:TraversalSocketFactory->TraversalSocket",
           "resource_from": "resource.session_transport",
           "resource_to": "resource.transport_target",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "TraversalSocket",
+          "to": "TerminalTransportOut01RouteSelection",
+          "owner_feature": "relay.route_selection",
+          "semantic_input": "remaining route candidates plus daemon-scoped health records",
+          "semantic_output": "one route candidate eligible for this physical attempt generation",
+          "status": "anchored",
+          "edge_id": "android_mainline:TraversalSocket->TerminalTransportOut01RouteSelection",
+          "resource_from": "resource.transport_target",
+          "resource_to": "resource.route_policy",
           "via_resources": [],
           "relation_status": "direct"
         },
@@ -843,6 +864,47 @@
           "via_resources": [],
           "relation_status": "observer",
           "edge_id": "android_mainline:TargetTransportRuntime->MuxHandshake"
+        },
+        {
+          "from": "MuxHandshake",
+          "to": "TerminalTransportError01TargetFailure",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "opened physical daemon-target transport that fails mux hello or channel-ready protocol",
+          "semantic_output": "one target-level physical failure event with recoverable logical channel identities",
+          "status": "anchored",
+          "resource_from": "resource.daemon_target_transport",
+          "resource_to": "resource.route_policy",
+          "via_resources": [],
+          "relation_status": "direct",
+          "edge_id": "android_mainline:MuxHandshake->TerminalTransportError01TargetFailure"
+        },
+        {
+          "from": "TerminalTransportError01TargetFailure",
+          "to": "TraversalSocket",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "full mux protocol failure plus exact failed physical generation",
+          "semantic_output": "failed route health record and one close of the exact non-closing socket generation",
+          "status": "anchored",
+          "resource_from": "resource.route_policy",
+          "resource_to": "resource.transport_target",
+          "via_resources": [],
+          "relation_status": "direct",
+          "edge_id": "android_mainline:TerminalTransportError01TargetFailure->TraversalSocket"
+        },
+        {
+          "from": "TerminalTransportError01TargetFailure",
+          "to": "SessionRuntime",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "retired physical generation plus recoverable target channel set",
+          "semantic_output": "one immediate target rebuild schedule while logical channel identities remain opening",
+          "status": "anchored",
+          "resource_from": "resource.daemon_target_transport",
+          "resource_to": "resource.session_transport",
+          "via_resources": [
+            "resource.terminal_channel"
+          ],
+          "relation_status": "via",
+          "edge_id": "android_mainline:TerminalTransportError01TargetFailure->SessionRuntime"
         },
         {
           "from": "TargetTransportRuntime",
@@ -1921,7 +1983,8 @@
         "docs/function-map.md"
       ],
       "verification_gates": [
-        "src/lib/function-wiki-truth.test.ts"
+        "src/lib/function-wiki-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts"
       ],
       "nodes": [
         {
@@ -1959,6 +2022,22 @@
         {
           "id": "Release",
           "label": "scripts/prepare-global-daemon-release.sh"
+        },
+        {
+          "id": "DaemonReleaseOut01StageRuntime",
+          "label": "scripts/prepare-global-daemon-release.sh#stage_runtime"
+        },
+        {
+          "id": "DaemonReleaseOut02VerifyDeterminism",
+          "label": "scripts/prepare-global-daemon-release.sh#verify_deterministic_archive"
+        },
+        {
+          "id": "DaemonReleaseOut03ArchiveArtifact",
+          "label": "scripts/prepare-global-daemon-release.sh#create_deterministic_archive"
+        },
+        {
+          "id": "DaemonReleaseOut04NormalizeMetadata",
+          "label": "scripts/prepare-global-daemon-release.sh#normalize_release_tree_metadata"
         },
         {
           "id": "Install",
@@ -2071,12 +2150,64 @@
         },
         {
           "from": "Release",
+          "to": "DaemonReleaseOut01StageRuntime",
+          "owner_feature": "daemon.cli_shell",
+          "semantic_input": "validated release source and target tuple",
+          "semantic_output": "one staged daemon runtime tree",
+          "status": "anchored",
+          "edge_id": "cli_mainline:Release->DaemonReleaseOut01StageRuntime",
+          "resource_from": "resource.release_update_artifact",
+          "resource_to": "resource.daemon_runtime_artifact",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "DaemonReleaseOut01StageRuntime",
+          "to": "DaemonReleaseOut02VerifyDeterminism",
+          "owner_feature": "daemon.cli_shell",
+          "semantic_input": "staged runtime tree plus release metadata",
+          "semantic_output": "determinism verification request over independent trees",
+          "status": "anchored",
+          "edge_id": "cli_mainline:DaemonReleaseOut01StageRuntime->DaemonReleaseOut02VerifyDeterminism",
+          "resource_from": "resource.daemon_runtime_artifact",
+          "resource_to": "resource.release_update_artifact",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "DaemonReleaseOut02VerifyDeterminism",
+          "to": "DaemonReleaseOut03ArchiveArtifact",
+          "owner_feature": "daemon.cli_shell",
+          "semantic_input": "main and restrictive-umask staging roots",
+          "semantic_output": "two candidate daemon archives",
+          "status": "anchored",
+          "edge_id": "cli_mainline:DaemonReleaseOut02VerifyDeterminism->DaemonReleaseOut03ArchiveArtifact",
+          "resource_from": "resource.release_update_artifact",
+          "resource_to": "resource.release_update_artifact",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "DaemonReleaseOut03ArchiveArtifact",
+          "to": "DaemonReleaseOut04NormalizeMetadata",
+          "owner_feature": "daemon.cli_shell",
+          "semantic_input": "one staged release tree",
+          "semantic_output": "fixed mode, time, owner, order, and compression metadata",
+          "status": "anchored",
+          "edge_id": "cli_mainline:DaemonReleaseOut03ArchiveArtifact->DaemonReleaseOut04NormalizeMetadata",
+          "resource_from": "resource.release_update_artifact",
+          "resource_to": "resource.release_update_artifact",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "DaemonReleaseOut02VerifyDeterminism",
           "to": "Runtime",
           "owner_feature": "daemon.cli_shell",
-          "semantic_input": "release staging",
-          "semantic_output": "runtime bundle",
+          "semantic_input": "byte-identical verified daemon archive",
+          "semantic_output": "publishable deterministic runtime bundle",
           "status": "anchored",
-          "edge_id": "cli_mainline:Release->Runtime",
+          "edge_id": "cli_mainline:DaemonReleaseOut02VerifyDeterminism->Runtime",
           "resource_from": "resource.daemon_runtime_artifact",
           "resource_to": "resource.daemon_process",
           "via_resources": [],

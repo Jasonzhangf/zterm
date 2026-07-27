@@ -80,7 +80,7 @@ describe('session-context-socket-runtime heartbeat lifecycle', () => {
     expect(ws.close).toHaveBeenCalledTimes(1);
   });
 
-  it('reports route failure before client-closing a stale heartbeat socket', () => {
+  it('delegates stale-heartbeat failure without mutating route health in the heartbeat observer', () => {
     vi.useFakeTimers();
     const sessionId = 'session-1';
     const heartbeatStore = createSessionHeartbeatStore();
@@ -107,8 +107,7 @@ describe('session-context-socket-runtime heartbeat lifecycle', () => {
 
     vi.advanceTimersByTime(6000);
 
-    expect(reportFailure).toHaveBeenCalledWith('heartbeat server activity timeout');
-    expect(reportFailure.mock.invocationCallOrder[0]).toBeLessThan(finalizeFailure.mock.invocationCallOrder[0]);
+    expect(reportFailure).not.toHaveBeenCalled();
     expect(finalizeFailure).toHaveBeenCalledWith('heartbeat server activity timeout', true);
     expect(ws.close).toHaveBeenCalledTimes(1);
   });

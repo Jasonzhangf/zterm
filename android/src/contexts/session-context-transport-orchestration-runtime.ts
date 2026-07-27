@@ -66,6 +66,7 @@ interface MutableRefObject<T> {
 export function handleTargetMuxTransportFailureRuntime(options: {
   anchorSessionId: string;
   message: string;
+  failedSocket: BridgeTransportSocket;
   readSessionTargetRuntime: (sessionId: string) => { key?: string; sessionIds: string[] } | null;
   readSessionTerminalChannel: (sessionId: string) => {
     state: 'opening' | 'open' | 'closing' | 'closed';
@@ -90,6 +91,7 @@ export function handleTargetMuxTransportFailureRuntime(options: {
     ? targetRuntime.sessionIds
     : [options.anchorSessionId];
 
+  options.failedSocket.reportFailure(options.message);
   options.writeSessionTargetTerminalMuxReady(options.anchorSessionId, false);
   options.writeSessionTargetTerminalSocket(options.anchorSessionId, null);
   const targetKey = typeof targetRuntime?.key === 'string' ? targetRuntime.key : '';
@@ -97,6 +99,9 @@ export function handleTargetMuxTransportFailureRuntime(options: {
     options.clearHeartbeat(options.anchorSessionId, {
       heartbeatKey: buildTargetTransportHeartbeatKey(targetKey),
     });
+  }
+  if (options.failedSocket.readyState < WebSocket.CLOSING) {
+    options.failedSocket.close(4000, 'terminal mux target failed');
   }
 
   const replaySessionIds: string[] = [];
@@ -471,6 +476,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
         handleTargetMuxTransportFailureRuntime({
           anchorSessionId: bindOptions.sessionId,
           message,
+          failedSocket: bindOptions.ws,
           readSessionTargetRuntime: options.readSessionTargetRuntime,
           readSessionTerminalChannel: options.readSessionTerminalChannel,
           writeSessionTerminalChannelState: options.writeSessionTerminalChannelState,

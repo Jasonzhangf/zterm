@@ -1386,6 +1386,7 @@
         "apply_manual_override",
         "record_route_failure",
         "record_route_success",
+        "expire_transient_failure_for_reprobe",
         "select_next_candidate"
       ],
       "direct_relations": [
@@ -1410,7 +1411,8 @@
       "required_gates": [
         "src/lib/resource-registry-truth.test.ts",
         "src/lib/traversal/route-selector.test.ts",
-        "src/lib/traversal/route-health-cache.test.ts"
+        "src/lib/traversal/route-health-cache.test.ts",
+        "src/lib/traversal/socket.test.ts"
       ],
       "canonical_docs": [
         "docs/resource-map.md",

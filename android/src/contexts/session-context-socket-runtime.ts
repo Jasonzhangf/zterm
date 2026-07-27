@@ -98,7 +98,6 @@ export function startSocketHeartbeat(options: {
     if (consecutiveMisses >= options.maxConsecutiveMisses) {
       if (!failureFinalized) {
         failureFinalized = true;
-        options.ws.reportFailure?.('heartbeat server activity timeout');
         options.finalizeFailure('heartbeat server activity timeout', true);
         options.heartbeatStore.clearPingInterval(heartbeatKey);
         if (options.ws.readyState < WebSocket.CLOSING) {

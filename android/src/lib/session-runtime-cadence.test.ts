@@ -13,6 +13,7 @@ function socket(bufferedAmount: number): BridgeTransportSocket {
     onclose: null,
     send: () => {},
     close: () => {},
+    reportFailure: () => {},
     getDiagnostics: () => ({ stage: 'open', mode: 'websocket', attempts: [] }),
   };
 }

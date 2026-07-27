@@ -21,10 +21,14 @@ flowchart TD
   TransportOpen --> TransportReusePlan
   TransportOpen --> TraversalSocketFactory["src/contexts/session-context-infra-runtime.ts#buildTraversalSocketForHostRuntime"]
   TraversalSocketFactory --> TraversalSocket["src/lib/traversal/socket.ts#TraversalSocket"]
+  TraversalSocket --> TerminalTransportOut01RouteSelection["src/lib/traversal/route-selector.ts#selectBestTraversalRoute"]
   TransportOpen --> TargetTransportRuntime["src/lib/session-transport-runtime.ts#target transport runtime"]
   TraversalSocket --> TargetTransportRuntime
   TargetTransportRuntime --> TargetHeartbeat["src/contexts/session-context-socket-runtime.ts#startSocketHeartbeat (target-keyed)"]
   TargetTransportRuntime --> MuxHandshake["packages/shared/src/connection/protocol.ts#TerminalMuxClientFrame"]
+  MuxHandshake --> TerminalTransportError01TargetFailure["src/contexts/session-context-transport-orchestration-runtime.ts#handleTargetMuxTransportFailureRuntime"]
+  TerminalTransportError01TargetFailure --> TraversalSocket
+  TerminalTransportError01TargetFailure --> SessionRuntime
   TargetTransportRuntime --> ChannelRuntime["src/lib/session-transport-runtime.ts#terminal channel runtime"]
   ChannelRuntime --> ChannelMessageSend["src/contexts/session-context-transport-wire-runtime.ts#mux channel send"]
   SessionContext --> SocketMessage["src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime"]
@@ -141,7 +145,11 @@ flowchart TD
   Shell --> Native["scripts/native/zterm-daemon.swift"]
   WinShell["scripts/windows/zterm-daemon.ps1"] --> WinTask["Windows Scheduled Task: ZTermDaemon"]
   WinTask --> Runtime
-  Release["scripts/prepare-global-daemon-release.sh"] --> Runtime
+  Release["scripts/prepare-global-daemon-release.sh"] --> DaemonReleaseOut01StageRuntime["scripts/prepare-global-daemon-release.sh#stage_runtime"]
+  DaemonReleaseOut01StageRuntime --> DaemonReleaseOut02VerifyDeterminism["scripts/prepare-global-daemon-release.sh#verify_deterministic_archive"]
+  DaemonReleaseOut02VerifyDeterminism --> DaemonReleaseOut03ArchiveArtifact["scripts/prepare-global-daemon-release.sh#create_deterministic_archive"]
+  DaemonReleaseOut03ArchiveArtifact --> DaemonReleaseOut04NormalizeMetadata["scripts/prepare-global-daemon-release.sh#normalize_release_tree_metadata"]
+  DaemonReleaseOut02VerifyDeterminism --> Runtime
   Release --> Install["scripts/install-global-daemon-cli.sh"]
   Install --> GlobalBin["~/.local/bin/zterm-daemon"]
   Npm["scripts/prepare-daemon-npm-package.mjs"] --> PackageBin["package/bin/zterm-daemon"]
@@ -196,7 +204,7 @@ flowchart TD
 | surface | files |
 | --- | --- |
 | Android app entry | `src/main.tsx`, `src/App.tsx`, `src/pages/ConnectionsPage.tsx`, `src/pages/TerminalPage.tsx` |
-| Client transport lifecycle | `packages/shared/src/connection/protocol.ts`, `src/contexts/SessionContext.tsx`, `src/contexts/session-context-session-orchestration-runtime.ts`, `src/contexts/session-context-session-runtime.ts`, `src/contexts/session-context-activity-runtime.ts`, `src/contexts/session-context-transport-orchestration-runtime.ts`, `src/contexts/session-context-transport-open-runtime.ts`, `src/contexts/session-context-socket-message-runtime.ts`, `src/contexts/session-transport-open-helpers.ts`, `src/lib/session-transport-runtime.ts`; target mux nodes are `TargetTransportRuntime`, `MuxHandshake`, `ChannelRuntime`, `ChannelMessageSend`, and `ChannelDemux`; WebRTC route diagnostics include metadata-only selected ICE pair projection through `src/lib/traversal/socket.ts` and `src/pages/TerminalPageDebugOverlay.tsx` |
+| Client transport lifecycle | `packages/shared/src/connection/protocol.ts`, `src/contexts/SessionContext.tsx`, `src/contexts/session-context-session-orchestration-runtime.ts`, `src/contexts/session-context-session-runtime.ts`, `src/contexts/session-context-activity-runtime.ts`, `src/contexts/session-context-transport-orchestration-runtime.ts`, `src/contexts/session-context-transport-open-runtime.ts`, `src/contexts/session-context-socket-message-runtime.ts`, `src/contexts/session-transport-open-helpers.ts`, `src/lib/session-transport-runtime.ts`; target mux nodes are `TargetTransportRuntime`, `MuxHandshake`, `TerminalTransportError01TargetFailure`, `ChannelRuntime`, `ChannelMessageSend`, and `ChannelDemux`; mux readiness failure records route health exactly once, retires the exact physical generation, then schedules one target rebuild; WebRTC route diagnostics include metadata-only selected ICE pair projection through `src/lib/traversal/socket.ts` and `src/pages/TerminalPageDebugOverlay.tsx` |
 | Terminal body receive/apply/render | `src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime`, `src/contexts/session-context-buffer-runtime.ts#applyIncomingBufferSyncRuntime`, `src/lib/session-render-gate.ts#scheduleCommit`, `src/lib/session-render-buffer-store.ts` |
 | Terminal performance observer | `src/lib/terminal-performance-trace.ts`, `src/server/terminal-debug-runtime.ts`, `src/lib/runtime-debug.ts`; metadata only, no terminal text/cells |
 | Terminal shell and panes | `src/pages/TerminalPageStageShell.tsx`, `src/hooks/useTerminalWorkspace.ts`, `src/components/terminal/TerminalQuickBar.tsx` |

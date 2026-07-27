@@ -32,6 +32,7 @@
    ],
    "mainline_call_ids": [
     "cli_mainline:DevCLI->Shell",
+    "cli_mainline:Release->DaemonReleaseOut01StageRuntime",
     "cli_mainline:Release->Install",
     "cli_mainline:Npm->PackageBin"
    ],
@@ -71,7 +72,7 @@
    "mainline_call_ids": [
     "cli_mainline:Shell->Runtime",
     "cli_mainline:WinTask->Runtime",
-    "cli_mainline:Release->Runtime"
+    "cli_mainline:DaemonReleaseOut02VerifyDeterminism->Runtime"
    ],
    "required_gates": [
     "src/lib/edge-registry-truth.test.ts",

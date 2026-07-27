@@ -174,6 +174,16 @@ describe('resource registry truth gate', () => {
     expect(releaseBuilder).toContain('STAGED_DAEMON_ENTRY="${RUNTIME_DIR}/server.cjs"');
     expect(releaseBuilder).toContain('--outfile="${RUNTIME_DIR}/server.cjs"');
     expect(releaseBuilder).toContain('"$NODE_BIN" "$STAGED_DAEMON_ENTRY"');
+    expect(releaseBuilder).toContain('normalize_release_tree_metadata()');
+    expect(releaseBuilder).toContain('find "${release_tree}" -type d -exec chmod 0755 {} +');
+    expect(releaseBuilder).toContain('find "${release_tree}" -type f -exec chmod 0644 {} +');
+    expect(releaseBuilder).toContain('umask 077');
+    expect(releaseBuilder).toContain('verify_deterministic_archive()');
+    expect(releaseBuilder).toContain('create_deterministic_archive "${RELEASE_DIST_DIR}" "${ARCHIVE_PATH}"');
+    expect(releaseBuilder).toContain('create_deterministic_archive "${check_root}" "${check_path}"');
+    expect(releaseBuilder).toContain('COPYFILE_DISABLE=1 tar');
+    expect(releaseBuilder).toContain('| gzip -n > "${output_path}"');
+    expect(releaseBuilder).toContain('cmp -s "${ARCHIVE_PATH}" "${check_path}"');
     expect(releaseBuilder).not.toContain('"$NODE_BIN" "${ROOT_DIR}/src/server/server.ts"');
     expect(releaseBuilder).not.toContain('tsx src/server/server.ts');
 

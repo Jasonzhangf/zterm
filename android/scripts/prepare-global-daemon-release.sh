@@ -966,6 +966,59 @@ EOF
   printf '%s\n' "${PACKAGE_VERSION}" > "${RELEASE_DIR}/VERSION"
 }
 
+normalize_release_tree_metadata() {
+  local release_tree="$1"
+  find "${release_tree}" -type d -exec chmod 0755 {} +
+  find "${release_tree}" -type f -exec chmod 0644 {} +
+  find "${release_tree}/runtime/node_modules" -type f \( -name 'spawn-helper' -o -name '*.node' \) -exec chmod 0755 {} +
+  chmod 0755 \
+    "${release_tree}/bin/install-global.sh" \
+    "${release_tree}/support/zterm-daemon" \
+    "${release_tree}/support/zterm-daemon.sh"
+  find "${release_tree}" -exec touch -h -t 200001010000 {} +
+}
+
+create_deterministic_archive() {
+  local release_parent="$1"
+  local output_path="$2"
+  local release_tree="${release_parent}/${RELEASE_NAME}"
+  normalize_release_tree_metadata "${release_tree}"
+  (
+    cd "${release_parent}"
+    find "${RELEASE_NAME}" -print0 \
+      | LC_ALL=C sort -z \
+      | COPYFILE_DISABLE=1 tar \
+          --null \
+          --no-recursion \
+          --format ustar \
+          --uid 0 \
+          --gid 0 \
+          --uname root \
+          --gname root \
+          -cf - \
+          -T -
+  ) | gzip -n > "${output_path}"
+}
+
+verify_deterministic_archive() {
+  local check_root="${RELEASE_DIST_DIR}/.daemon-release-determinism-check"
+  local check_path="${check_root}/${RELEASE_NAME}.tar.gz"
+  rm -rf "${check_root}"
+  mkdir -p "${check_root}/${RELEASE_NAME}"
+  (
+    umask 077
+    cp -RL "${RELEASE_DIR}/." "${check_root}/${RELEASE_NAME}/"
+  )
+  chmod -R go-rwx "${check_root}/${RELEASE_NAME}"
+  create_deterministic_archive "${RELEASE_DIST_DIR}" "${ARCHIVE_PATH}"
+  create_deterministic_archive "${check_root}" "${check_path}"
+  if ! cmp -s "${ARCHIVE_PATH}" "${check_path}"; then
+    echo "[prepare-global-daemon-release] nondeterministic archive output" >&2
+    exit 1
+  fi
+  rm -rf "${check_root}"
+}
+
 mkdir -p "${RELEASE_DIST_DIR}"
 rm -rf "${RELEASE_DIR}" "${ARCHIVE_PATH}" "${SHA_PATH}"
 mkdir -p "${RUNTIME_DIR}" "${SUPPORT_DIR}" "${BIN_DIR}"
@@ -976,7 +1029,7 @@ write_support_script
 write_installer
 write_readme
 
-tar -C "${RELEASE_DIST_DIR}" -czf "${ARCHIVE_PATH}" "${RELEASE_NAME}"
+verify_deterministic_archive
 shasum -a 256 "${ARCHIVE_PATH}" > "${SHA_PATH}"
 
 echo "[prepare-global-daemon-release] ready"

@@ -145,6 +145,37 @@ describe('selectBestTraversalRoute', () => {
     expect(selection.diagnostics.find((item) => item.candidateId === 'direct:tailscale')?.reasons).toContain('health:unknown');
   });
 
+  it('reprobes a recovered Tailscale route after transient failure cooldown without process reset', () => {
+    let now = 1000;
+    const cache = new TraversalRouteHealthCache({
+      ttlMs: 5 * 60_000,
+      now: () => now,
+    });
+    const tailscale = candidates[2]!;
+    const relay = candidates[4]!;
+    const scope = { accountId: 'u1', daemonHostId: 'daemon-a' };
+    cache.recordFailure(scope, tailscale, 'network changed');
+    cache.recordSuccess(scope, relay, 150);
+
+    expect(selectBestTraversalRoute({
+      candidates: [tailscale, relay],
+      healthCache: cache,
+      scope,
+    }).selected).toMatchObject({ id: 'relay-rtc:daemon-a' });
+
+    now = 2001;
+    const recoveredSelection = selectBestTraversalRoute({
+      candidates: [tailscale, relay],
+      healthCache: cache,
+      scope,
+    });
+
+    expect(recoveredSelection.selected).toMatchObject({ id: 'direct:tailscale' });
+    expect(recoveredSelection.diagnostics.find((item) => item.candidateId === 'direct:tailscale')).toMatchObject({
+      selectable: true,
+    });
+  });
+
   it('reprobes the least-bad candidate when every route is currently unhealthy', () => {
     const cache = new TraversalRouteHealthCache({ now: () => 1000 });
     const nonLanCandidates = candidates.filter((candidate) => candidate.id !== 'direct:lan');

@@ -3,6 +3,57 @@ import { DEFAULT_BRIDGE_SETTINGS } from '../bridge-settings';
 import { buildTraversalPlan, resolveTraversalConfigFromHost } from './config';
 
 describe('buildTraversalPlan', () => {
+  it('keeps the reachable Mac Studio Tailscale endpoint ahead of Relay on a merged daemon target', () => {
+    const plan = buildTraversalPlan(
+      {
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        authToken: 'wterm-token',
+        daemonHostId: 'mac-studio',
+        relayHostId: 'mac-studio',
+        transportMode: 'auto',
+        relayEndpointCandidates: [{
+          id: 'relay-rtc:mac-studio',
+          kind: 'relay-rtc',
+          relayHostId: 'mac-studio',
+          authRequired: true,
+          lastSeenAt: '2026-07-27T02:25:21.247Z',
+        }],
+      },
+      {
+        ...DEFAULT_BRIDGE_SETTINGS,
+        traversalRelay: {
+          relayBaseUrl: 'https://relay.example.test/relay/',
+          accessToken: 'access-1',
+          userId: 'user-1',
+          username: 'jason',
+          deviceId: 'android-1',
+          deviceName: 'Android',
+          platform: 'android',
+          wsDevicesUrl: 'wss://relay.example.test/relay/ws/devices',
+          wsHostUrl: 'wss://relay.example.test/relay/ws/host',
+          wsClientUrl: 'wss://relay.example.test/relay/ws/client',
+          turnUrl: 'turn:relay.example.test:3478?transport=udp',
+          turnUsername: 'turn-user',
+          turnCredential: 'turn-secret',
+          updatedAt: 1,
+        },
+      },
+    );
+
+    expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
+      'tailscale',
+      'rtc-direct',
+      'rtc-relay',
+    ]);
+    expect(plan.candidates[0]).toMatchObject({
+      kind: 'ws',
+      path: 'tailscale',
+      endpoint: '100.66.1.82:3333',
+      url: 'ws://100.66.1.82:3333/?token=wterm-token',
+    });
+  });
+
   it('orders logged-in auto candidates as Tailscale -> UDP direct -> TURN relay without user choice', () => {
     const plan = buildTraversalPlan(
       {

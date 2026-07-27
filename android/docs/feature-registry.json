@@ -364,6 +364,7 @@
         "src/contexts/session-context-transport-open-runtime.ts",
         "src/contexts/session-context-transport-open-runtime.test.ts",
         "src/contexts/session-context-transport-orchestration-runtime.ts",
+        "src/contexts/session-context-transport-orchestration-runtime.test.ts",
         "src/contexts/session-context-transport-runtime.ts",
         "src/contexts/session-context-tmux-management-runtime.ts",
         "src/contexts/session-context-tmux-management-runtime.test.ts",
@@ -401,6 +402,7 @@
         "src/contexts/session-context-infra-runtime.test.ts",
         "src/contexts/session-context-session-runtime.test.ts",
         "src/contexts/session-context-socket-runtime.test.ts",
+        "src/contexts/session-context-transport-orchestration-runtime.test.ts",
         "src/contexts/session-context-activity-runtime.test.ts",
         "src/contexts/SessionContext.ws-refresh.test.tsx",
         "src/server/server.daemon-runtime-truth.test.ts",
@@ -870,6 +872,7 @@
       "truth_sources": [
         "docs/goals/relay-account-directory-and-route-plan.md",
         "docs/testing/relay-account-directory-test-design.md",
+        "docs/testing/session-transport-network-switch-test-design.md",
         "docs/feature-gates.md"
       ]
     },
@@ -1084,6 +1087,7 @@
       "forbidden_paths": [],
       "required_gates": [
         "src/lib/function-wiki-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
         "src/server/launch-agent-plist.test.ts",
         "src/server/daemon-config.test.ts"
       ],
@@ -1140,7 +1144,8 @@
       ],
       "forbidden_paths": [],
       "required_gates": [
-        "src/lib/function-wiki-truth.test.ts"
+        "src/lib/function-wiki-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts"
       ],
       "truth_sources": [
         "docs/wiki/cli.md",

@@ -758,7 +758,8 @@
    "required_gates": [
     "src/lib/module-registry-truth.test.ts",
     "src/lib/session-transport-runtime.test.ts",
-    "src/contexts/session-context-transport-runtime.test.ts"
+    "src/contexts/session-context-transport-runtime.test.ts",
+    "src/contexts/session-context-transport-orchestration-runtime.test.ts"
    ],
    "status": "active",
    "owned_paths": [

@@ -14,6 +14,7 @@ export interface TraversalRouteHealthCacheOptions {
 }
 
 const DEFAULT_ROUTE_HEALTH_TTL_MS = 5 * 60_000;
+const DEFAULT_ROUTE_FAILURE_TTL_MS = 1000;
 
 function sanitizeKeyPart(value?: string | null) {
   return (value || '').trim() || '-';
@@ -125,7 +126,10 @@ export class TraversalRouteHealthCache {
     if (!record) {
       return true;
     }
-    if (this.now() - record.updatedAt > this.ttlMs) {
+    const ttlMs = record.status === 'failure'
+      ? Math.min(this.ttlMs, DEFAULT_ROUTE_FAILURE_TTL_MS)
+      : this.ttlMs;
+    if (this.now() - record.updatedAt > ttlMs) {
       return true;
     }
     return false;
