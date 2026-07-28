@@ -102,7 +102,7 @@ function LifecycleHarness({
     onForegroundActiveChange: vi.fn(),
     onForegroundResume,
     auditOpenTabsAgainstRemoteSessions,
-    resumeActiveSessionTransport: vi.fn(() => true),
+    notifyTargetNetworkSignal: vi.fn(),
     bumpFollowResetEpoch: vi.fn(),
   });
 
@@ -166,10 +166,10 @@ describe('useOpenTabLifecycleEffects', () => {
     expect(capacitorNetworkHarness.count('networkStatusChange')).toBe(1);
   });
 
-  it('resumes active session transport and audits tabs when network comes back online', async () => {
-    const resumeActiveSessionTransport = vi.fn(() => true);
+  it('routes network change only to the target probe without changing foreground truth', async () => {
     const auditOpenTabs = vi.fn(async () => undefined);
     const onForegroundActiveChange = vi.fn();
+    const notifyTargetNetworkSignal = vi.fn();
 
     const HarnessWithMocks = () => {
       const sessionsRef = useRef<Session[]>([baseSession]);
@@ -186,7 +186,7 @@ describe('useOpenTabLifecycleEffects', () => {
         onForegroundActiveChange,
         onForegroundResume: vi.fn(),
         auditOpenTabsAgainstRemoteSessions: auditOpenTabs,
-        resumeActiveSessionTransport,
+        notifyTargetNetworkSignal,
         bumpFollowResetEpoch: vi.fn(),
       });
 
@@ -200,13 +200,18 @@ describe('useOpenTabLifecycleEffects', () => {
       connectionType: 'wifi',
     });
 
-    expect(resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
-    expect(auditOpenTabs).toHaveBeenCalledWith('network-status-change');
-    expect(onForegroundActiveChange).toHaveBeenCalledWith(true);
+    expect(notifyTargetNetworkSignal).toHaveBeenCalledWith({
+      connected: true,
+      connectionType: 'wifi',
+      source: 'capacitor',
+    });
+    expect(auditOpenTabs).not.toHaveBeenCalled();
+    expect(onForegroundActiveChange).not.toHaveBeenCalled();
   });
 
-  it('marks foreground hidden when network disconnects', async () => {
+  it('keeps foreground truth unchanged when platform network reports disconnected', async () => {
     const onForegroundActiveChange = vi.fn();
+    const notifyTargetNetworkSignal = vi.fn();
 
     const HarnessWithMocks = () => {
       const sessionsRef = useRef<Session[]>([baseSession]);
@@ -223,7 +228,7 @@ describe('useOpenTabLifecycleEffects', () => {
         onForegroundActiveChange,
         onForegroundResume: vi.fn(),
         auditOpenTabsAgainstRemoteSessions: vi.fn(async () => undefined),
-        resumeActiveSessionTransport: vi.fn(() => true),
+        notifyTargetNetworkSignal,
         bumpFollowResetEpoch: vi.fn(),
       });
 
@@ -237,12 +242,17 @@ describe('useOpenTabLifecycleEffects', () => {
       connectionType: 'none',
     });
 
-    expect(onForegroundActiveChange).toHaveBeenCalledWith(false);
+    expect(notifyTargetNetworkSignal).toHaveBeenCalledWith({
+      connected: false,
+      connectionType: 'none',
+      source: 'capacitor',
+    });
+    expect(onForegroundActiveChange).not.toHaveBeenCalled();
   });
 
-  it('does not resume transport when network event fires but no active session exists', async () => {
-    const resumeActiveSessionTransport = vi.fn(() => true);
+  it('still routes a network generation to the target owner when no tab is active', async () => {
     const auditOpenTabs = vi.fn(async () => undefined);
+    const notifyTargetNetworkSignal = vi.fn();
 
     const HarnessNoActiveSession = () => {
       const sessionsRef = useRef<Session[]>([]);
@@ -253,14 +263,49 @@ describe('useOpenTabLifecycleEffects', () => {
         sessionsRef, openTabStateRef, foregroundRefreshRuntimeRef,
         onForegroundResume: vi.fn(),
         auditOpenTabsAgainstRemoteSessions: auditOpenTabs,
-        resumeActiveSessionTransport,
+        notifyTargetNetworkSignal,
         bumpFollowResetEpoch: vi.fn(),
       });
       return <div>mounted</div>;
     };
     render(<HarnessNoActiveSession />);
     capacitorNetworkHarness.emit('networkStatusChange', { connected: true, connectionType: 'cellular' });
-    expect(resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(notifyTargetNetworkSignal).toHaveBeenCalledWith({
+      connected: true,
+      connectionType: 'cellular',
+      source: 'capacitor',
+    });
+    expect(auditOpenTabs).not.toHaveBeenCalled();
+  });
+
+  it('probes retained daemon targets on foreground resume even without an active tab', () => {
+    const auditOpenTabs = vi.fn(async () => undefined);
+    const notifyTargetNetworkSignal = vi.fn();
+
+    const HarnessNoActiveSession = () => {
+      const sessionsRef = useRef<Session[]>([]);
+      const openTabStateRef = useRef({ tabs: [], activeSessionId: null });
+      const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
+
+      useOpenTabLifecycleEffects({
+        sessionsRef,
+        openTabStateRef,
+        foregroundRefreshRuntimeRef,
+        onForegroundResume: vi.fn(),
+        auditOpenTabsAgainstRemoteSessions: auditOpenTabs,
+        notifyTargetNetworkSignal,
+        bumpFollowResetEpoch: vi.fn(),
+      });
+      return <div>mounted</div>;
+    };
+
+    render(<HarnessNoActiveSession />);
+    capacitorAppHarness.emit('appStateChange', { isActive: true });
+
+    expect(notifyTargetNetworkSignal).toHaveBeenCalledWith({
+      source: 'foreground-resume',
+    });
+    expect(auditOpenTabs).not.toHaveBeenCalled();
   });
 
 });

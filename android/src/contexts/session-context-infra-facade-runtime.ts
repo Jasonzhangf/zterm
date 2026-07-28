@@ -104,7 +104,6 @@ export function wrapSessionPayloadForTargetMuxRuntime(options: {
   sessionId: string;
   ws: BridgeTransportSocket;
   data: string | ArrayBuffer;
-  now?: number;
 }): string | ArrayBuffer {
   const targetSocket = getSessionTargetTerminalTransport(options.store, options.sessionId);
   if (!targetSocket || targetSocket !== options.ws) {
@@ -134,15 +133,6 @@ export function wrapSessionPayloadForTargetMuxRuntime(options: {
   }
   if (parsed.type.startsWith('mux-')) {
     return options.data;
-  }
-  if (parsed.type === 'ping') {
-    const frame: TerminalMuxClientFrame = {
-      type: 'mux-ping',
-      payload: {
-        sentAt: Number.isFinite(options.now) ? Math.max(0, Math.floor(options.now || 0)) : Date.now(),
-      },
-    };
-    return JSON.stringify(frame);
   }
   if (parsed.type === 'close') {
     const channel = requireTerminalMuxChannel(options.store, options.sessionId);

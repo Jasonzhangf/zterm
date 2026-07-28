@@ -25,7 +25,26 @@ flowchart TD
   TransportOpen --> TargetTransportRuntime["src/lib/session-transport-runtime.ts#target transport runtime"]
   TraversalSocket --> TargetTransportRuntime
   TargetTransportRuntime --> TargetHeartbeat["src/contexts/session-context-socket-runtime.ts#startSocketHeartbeat (target-keyed)"]
+  PlatformNetworkSignal["src/hooks/useOpenTabLifecycleEffects.ts#useOpenTabLifecycleEffects (signal-only)"] --> OpenTabNetworkBinding["src/hooks/useOpenTabRuntime.ts#useOpenTabRuntime"]
+  OpenTabNetworkBinding --> AppNetworkBinding["src/App.tsx#AppContent"]
+  AppNetworkBinding --> SessionContextNetworkFacade["src/contexts/SessionContext.tsx#SessionProvider"]
+  SessionContextNetworkFacade --> SessionProviderNetworkBinding["src/contexts/session-context-provider-facade-assemblies.ts#useSessionProviderFacadeAssemblies"]
+  SessionProviderNetworkBinding --> SessionPublicFacadeBinding["src/contexts/session-context-public-facade-runtime.ts#createSessionPublicFacadeRuntime"]
+  SessionPublicFacadeBinding --> SessionProviderCoreBinding["src/contexts/session-context-provider-core-assemblies.ts#useSessionProviderCoreAssemblies"]
+  SessionProviderCoreBinding --> TargetNetworkSignalOrchestration["src/contexts/session-context-transport-orchestration-runtime.ts#createSessionTransportOrchestrationRuntime"]
+  TargetHeartbeat --> TerminalMuxPingBuilder["packages/shared/src/connection/protocol.ts#buildTerminalMuxPing"]
+  TargetNetworkSignalOrchestration --> TerminalMuxPingBuilder
+  TargetNetworkSignalOrchestration --> TargetTransportAccessors["src/contexts/session-context-transport-runtime.ts#createSessionContextTransportAccessors"]
+  TargetTransportAccessors --> TargetTransportStoreEnumeration["src/lib/session-transport-runtime.ts#listTargetTransportRuntimes"]
+  TargetTransportStoreEnumeration --> TargetNetworkProbeDispatch["src/contexts/session-context-transport-orchestration-runtime.ts#notifyTargetNetworkSignalRuntime"]
+  TargetNetworkProbeDispatch --> TargetNetworkProbe["src/contexts/session-context-target-network-probe-runtime.ts#createSessionTargetNetworkProbeRuntime"]
+  TargetNetworkProbe --> TargetFailureRouter["src/contexts/session-context-transport-orchestration-runtime.ts#routeTargetSocketFailureRuntime"]
+  TargetFailureRouter --> TerminalTransportError01TargetFailure
+  TargetFailureRouter --> IdleTargetRetirement["zero-session exact-generation retirement"]
   TargetTransportRuntime --> MuxHandshake["packages/shared/src/connection/protocol.ts#TerminalMuxClientFrame"]
+  MuxHandshake --> TargetMuxFrameLifecycle["src/contexts/session-context-transport-runtime.ts#bindTargetMuxTransportSocketLifecycleRuntime"]
+  TargetMuxFrameLifecycle --> TargetNetworkActivityBinding["src/contexts/session-context-transport-orchestration-runtime.ts#createSessionTransportOrchestrationRuntime recordTargetServerActivity binding"]
+  TargetNetworkActivityBinding --> TargetNetworkProbe
   MuxHandshake --> TerminalTransportError01TargetFailure["src/contexts/session-context-transport-orchestration-runtime.ts#handleTargetMuxTransportFailureRuntime"]
   TerminalTransportError01TargetFailure --> TraversalSocket
   TerminalTransportError01TargetFailure --> SessionRuntime
@@ -204,7 +223,7 @@ flowchart TD
 | surface | files |
 | --- | --- |
 | Android app entry | `src/main.tsx`, `src/App.tsx`, `src/pages/ConnectionsPage.tsx`, `src/pages/TerminalPage.tsx` |
-| Client transport lifecycle | `packages/shared/src/connection/protocol.ts`, `src/contexts/SessionContext.tsx`, `src/contexts/session-context-session-orchestration-runtime.ts`, `src/contexts/session-context-session-runtime.ts`, `src/contexts/session-context-activity-runtime.ts`, `src/contexts/session-context-transport-orchestration-runtime.ts`, `src/contexts/session-context-transport-open-runtime.ts`, `src/contexts/session-context-socket-message-runtime.ts`, `src/contexts/session-transport-open-helpers.ts`, `src/lib/session-transport-runtime.ts`; target mux nodes are `TargetTransportRuntime`, `MuxHandshake`, `TerminalTransportError01TargetFailure`, `ChannelRuntime`, `ChannelMessageSend`, and `ChannelDemux`; mux readiness failure records route health exactly once, retires the exact physical generation, then schedules one target rebuild; WebRTC route diagnostics include metadata-only selected ICE pair projection through `src/lib/traversal/socket.ts` and `src/pages/TerminalPageDebugOverlay.tsx` |
+| Client transport lifecycle | `packages/shared/src/connection/protocol.ts`, `src/contexts/SessionContext.tsx`, `src/contexts/session-context-session-orchestration-runtime.ts`, `src/contexts/session-context-session-runtime.ts`, `src/contexts/session-context-activity-runtime.ts`, `src/contexts/session-context-transport-runtime.ts`, `src/contexts/session-context-transport-orchestration-runtime.ts`, `src/contexts/session-context-transport-open-runtime.ts`, `src/contexts/session-context-socket-message-runtime.ts`, `src/contexts/session-transport-open-helpers.ts`, `src/lib/session-transport-runtime.ts`; network-generation probes enumerate physical targets through `TargetTransportAccessors -> TargetTransportStoreEnumeration`, while valid inbound frames settle only their exact socket generation through `TargetMuxFrameLifecycle -> TargetNetworkActivityBinding -> TargetNetworkProbe`; target mux nodes are `TargetTransportRuntime`, `MuxHandshake`, `TerminalTransportError01TargetFailure`, `ChannelRuntime`, `ChannelMessageSend`, and `ChannelDemux`; mux readiness failure records route health exactly once, retires the exact physical generation, then schedules one target rebuild; WebRTC route diagnostics include metadata-only selected ICE pair projection through `src/lib/traversal/socket.ts` and `src/pages/TerminalPageDebugOverlay.tsx` |
 | Terminal body receive/apply/render | `src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime`, `src/contexts/session-context-buffer-runtime.ts#applyIncomingBufferSyncRuntime`, `src/lib/session-render-gate.ts#scheduleCommit`, `src/lib/session-render-buffer-store.ts` |
 | Terminal performance observer | `src/lib/terminal-performance-trace.ts`, `src/server/terminal-debug-runtime.ts`, `src/lib/runtime-debug.ts`; metadata only, no terminal text/cells |
 | Terminal shell and panes | `src/pages/TerminalPageStageShell.tsx`, `src/hooks/useTerminalWorkspace.ts`, `src/components/terminal/TerminalQuickBar.tsx` |

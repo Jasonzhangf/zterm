@@ -9,6 +9,14 @@ import {
   buildSessionConnectPayload,
   buildSessionResizePayload,
 } from './session-context-transport-wire-runtime';
+import {
+  createSessionTransportRuntimeStore,
+  getTargetTerminalTransport,
+  getSessionTransportTargetKey,
+  removeSessionTransportRuntime,
+  setSessionTargetTerminalTransport,
+  upsertSessionTransportRuntime,
+} from '../lib/session-transport-runtime';
 
 function makeHost() {
   return {
@@ -541,17 +549,18 @@ describe('bindTargetMuxTransportSocketLifecycleRuntime', () => {
 
     bindTargetMuxTransportSocketLifecycleRuntime({
       sessionId: 'session-anchor',
+      targetKey: 'mac-studio',
       targetHeartbeatKey: 'target:mac-studio',
       host: makeHost(),
       ws,
       debugScope: 'connect',
-      readSessionTargetTerminalSocket: () => ws,
+      readTargetTerminalSocket: () => ws,
       readRequestedTerminalGeometry: (sessionId) => (
         sessionId === 'session-1'
           ? { cols: 90, widthMode: 'adaptive-phone' }
           : { widthMode: 'mirror-fixed' }
       ),
-      getOpeningSessionTerminalChannelsForTarget: () => [
+      getOpeningTerminalChannelsForTarget: () => [
         {
           channelId: 'channel-a',
           sessionId: 'session-1',
@@ -573,7 +582,7 @@ describe('bindTargetMuxTransportSocketLifecycleRuntime', () => {
           closedAt: null,
         },
       ],
-      setSessionTargetMuxReady: vi.fn(),
+      setTargetMuxReady: vi.fn(),
       sendSocketPayload,
       handleTargetMuxServerFrame: vi.fn(),
       applyTransportDiagnostics: vi.fn(),
@@ -646,14 +655,15 @@ describe('bindTargetMuxTransportSocketLifecycleRuntime', () => {
 
     bindTargetMuxTransportSocketLifecycleRuntime({
       sessionId: 'session-anchor',
+      targetKey: 'mac-studio',
       targetHeartbeatKey: 'target:mac-studio',
       host: makeHost(),
       ws,
       debugScope: 'connect',
-      readSessionTargetTerminalSocket: () => ws,
+      readTargetTerminalSocket: () => ws,
       readRequestedTerminalGeometry: () => null,
-      getOpeningSessionTerminalChannelsForTarget: () => [],
-      setSessionTargetMuxReady: vi.fn(),
+      getOpeningTerminalChannelsForTarget: () => [],
+      setTargetMuxReady: vi.fn(),
       sendSocketPayload,
       handleTargetMuxServerFrame: vi.fn(),
       applyTransportDiagnostics: vi.fn(),
@@ -704,6 +714,61 @@ describe('bindTargetMuxTransportSocketLifecycleRuntime', () => {
     expect(recordTargetPong).toHaveBeenCalledWith('target:mac-studio');
   });
 
+  it('accepts target probe activity after the original anchor session is removed', () => {
+    const store = createSessionTransportRuntimeStore();
+    const host = makeHost();
+    const ws = {
+      readyState: WebSocket.OPEN,
+      onopen: null,
+      onmessage: null,
+      onerror: null,
+      onclose: null,
+      send: vi.fn(),
+      close: vi.fn(),
+      reportFailure: vi.fn(),
+      getDiagnostics: () => ({ reason: '' }),
+    } as any;
+    upsertSessionTransportRuntime(store, 'session-anchor', host);
+    const targetKey = getSessionTransportTargetKey(store, 'session-anchor')!;
+    setSessionTargetTerminalTransport(store, 'session-anchor', ws);
+    const recordTargetServerActivity = vi.fn();
+    const recordTargetPong = vi.fn();
+    const finalizeFailure = vi.fn();
+
+    bindTargetMuxTransportSocketLifecycleRuntime({
+      sessionId: 'session-anchor',
+      targetKey,
+      targetHeartbeatKey: `target:${targetKey}`,
+      host,
+      ws,
+      debugScope: 'connect',
+      readTargetTerminalSocket: (key) => getTargetTerminalTransport(store, key),
+      readRequestedTerminalGeometry: () => null,
+      getOpeningTerminalChannelsForTarget: () => [],
+      setTargetMuxReady: vi.fn(),
+      sendSocketPayload: vi.fn(),
+      handleTargetMuxServerFrame: vi.fn(),
+      applyTransportDiagnostics: vi.fn(),
+      runtimeDebug: vi.fn(),
+      finalizeFailure,
+      recordTargetServerActivity,
+      recordTargetPong,
+    });
+    removeSessionTransportRuntime(store, 'session-anchor');
+
+    ws.onmessage?.({
+      data: JSON.stringify({
+        type: 'mux-pong',
+        payload: { sentAt: 1000, receivedAt: 1001 },
+      }),
+    });
+
+    expect(getTargetTerminalTransport(store, targetKey)).toBe(ws);
+    expect(recordTargetServerActivity).toHaveBeenCalledWith(`target:${targetKey}`);
+    expect(recordTargetPong).toHaveBeenCalledWith(`target:${targetKey}`);
+    expect(finalizeFailure).not.toHaveBeenCalled();
+  });
+
   it('rejects invalid mux frames without routing them into session handlers', () => {
     const ws = {
       readyState: WebSocket.OPEN,
@@ -718,14 +783,15 @@ describe('bindTargetMuxTransportSocketLifecycleRuntime', () => {
 
     bindTargetMuxTransportSocketLifecycleRuntime({
       sessionId: 'session-anchor',
+      targetKey: 'mac-studio',
       targetHeartbeatKey: 'target:mac-studio',
       host: makeHost(),
       ws,
       debugScope: 'connect',
-      readSessionTargetTerminalSocket: () => ws,
+      readTargetTerminalSocket: () => ws,
       readRequestedTerminalGeometry: () => null,
-      getOpeningSessionTerminalChannelsForTarget: () => [],
-      setSessionTargetMuxReady: vi.fn(),
+      getOpeningTerminalChannelsForTarget: () => [],
+      setTargetMuxReady: vi.fn(),
       sendSocketPayload: vi.fn(),
       handleTargetMuxServerFrame,
       applyTransportDiagnostics: vi.fn(),

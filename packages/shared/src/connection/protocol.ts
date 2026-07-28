@@ -844,6 +844,18 @@ export function buildTerminalMuxChannelBinary(
   };
 }
 
+export function buildTerminalMuxPing(sentAt: number): TerminalMuxClientFrame {
+  if (!Number.isSafeInteger(sentAt) || sentAt < 0) {
+    throw new Error('terminal mux ping sentAt must be a non-negative safe integer');
+  }
+  return {
+    type: 'mux-ping',
+    payload: {
+      sentAt,
+    },
+  };
+}
+
 export function buildTerminalMuxServerChannelMessage(
   channelId: string,
   message: TerminalMuxChannelServerMessage,

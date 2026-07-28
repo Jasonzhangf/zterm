@@ -17,6 +17,7 @@ import {
   getTargetTerminalTransport,
   getTargetControlTransport,
   getTargetTransportRuntime,
+  listTargetTransportRuntimes,
   getSessionTransportHost,
   getSessionTransportResource,
   getSessionTransportRuntime,
@@ -193,6 +194,9 @@ describe('session transport runtime store', () => {
     expect(getSessionTransportTargetKey(store, 'session-1')).toBe(getSessionTransportRuntime(store, 'session-1')?.targetKey);
     expect(getSessionTransportHost(store, 'session-2')?.sessionName).toBe('beta');
     expect(getSessionTargetTransportRuntime(store, 'session-1')).toBe(getSessionTargetTransportRuntime(store, 'session-2'));
+    expect(listTargetTransportRuntimes(store)).toEqual([
+      getSessionTargetTransportRuntime(store, 'session-1'),
+    ]);
   });
 
   it('keeps one target-level control transport truth shared by same-target sessions', () => {

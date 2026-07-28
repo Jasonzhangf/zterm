@@ -27,6 +27,7 @@ import { useOpenTabRestoreRuntimeSync } from './useOpenTabRestoreRuntimeSync';
 import { useOpenTabSessionActions } from './useOpenTabSessionActions';
 import { auditOpenTabsAgainstRemoteSessions as auditOpenTabsAgainstRemoteSessionsLib } from '../lib/remote-tab-audit';
 import type { TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
+import type { SessionTargetNetworkSignal } from '../contexts/session-context-target-network-probe-runtime';
 
 function buildSessionStructureSignature(
   sessions: Array<Pick<
@@ -73,6 +74,9 @@ interface UseOpenTabRuntimeOptions {
   renameSession: (sessionId: string, name: string) => void;
   reconnectSession: (sessionId: string) => void;
   resumeActiveSessionTransport: (sessionId: string) => boolean;
+  notifyTargetNetworkSignal: (
+    signal: SessionTargetNetworkSignal,
+  ) => void;
   manageTmuxSessionsOnOpenTransport?: (
     sessionId: string,
     message: TerminalMuxTargetClientMessage,
@@ -139,6 +143,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     moveSession,
     renameSession,
     resumeActiveSessionTransport,
+    notifyTargetNetworkSignal,
     manageTmuxSessionsOnOpenTransport,
     clearSessionDraft,
     ensureTerminalPageVisible,
@@ -491,7 +496,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     onForegroundActiveChange,
     onForegroundResume,
     auditOpenTabsAgainstRemoteSessions,
-    resumeActiveSessionTransport,
+    notifyTargetNetworkSignal,
     bumpFollowResetEpoch,
   });
 

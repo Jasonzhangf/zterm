@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { SessionScheduleState } from '../lib/types';
 import { createFileTransferMessageRuntime } from '../lib/file-transfer-message-runtime';
 import { createRemoteScreenshotRuntime } from '../lib/remote-screenshot-runtime';
@@ -9,6 +9,7 @@ import { createSessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import { createSessionReconnectStore } from '../lib/session-reconnect-store';
 import { createSessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import { createSessionTransportRuntimeStore } from '../lib/session-transport-runtime';
+import { createSessionTargetNetworkProbeRuntime } from './session-context-target-network-probe-runtime';
 import { createSessionBufferStore } from '../lib/session-buffer-store';
 import { createSessionRenderGate } from '../lib/session-render-gate';
 import { createSessionHeadStore } from '../lib/session-head-store';
@@ -45,6 +46,10 @@ export function useSessionProviderRuntime(options: {
   }));
   const sessionHeartbeatStoreRef = useRef(createSessionHeartbeatStore());
   const sessionReconnectStoreRef = useRef(createSessionReconnectStore());
+  const targetNetworkProbeRuntimeRef = useRef(createSessionTargetNetworkProbeRuntime({
+    probeTimeoutMs: 2_500,
+    now: Date.now,
+  }));
   const handshakeTimeoutsRef = useRef<Map<string, number>>(new Map());
   const sessionVisibleRangeRef = useRef<Map<string, SessionVisibleRangeState>>(new Map());
   const lastActivatedSessionIdRef = useRef<string | null>(null);
@@ -94,6 +99,10 @@ export function useSessionProviderRuntime(options: {
   const finalizeSocketFailureBaselineRef = useRef<FinalizeSocketFailureBaselineFn | null>(null);
   const handleSocketServerMessageRef = useRef<HandleSocketServerMessageFn | null>(null);
 
+  useEffect(() => () => {
+    targetNetworkProbeRuntimeRef.current.dispose();
+  }, []);
+
   return {
     scheduleStates,
     setScheduleStates,
@@ -105,6 +114,7 @@ export function useSessionProviderRuntime(options: {
       sessionHeadStoreRef,
       sessionHeartbeatStoreRef,
       sessionReconnectStoreRef,
+      targetNetworkProbeRuntimeRef,
       handshakeTimeoutsRef,
       sessionVisibleRangeRef,
       lastActivatedSessionIdRef,

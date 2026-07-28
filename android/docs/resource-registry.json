@@ -309,6 +309,7 @@
         "negotiate_mux_capability",
         "open_physical_transport",
         "reuse_physical_transport",
+        "probe_exact_physical_generation",
         "send_mux_frame",
         "receive_mux_frame",
         "close_physical_transport",
@@ -326,7 +327,8 @@
         "resource.transport_subscriber",
         "resource.mirror_store",
         "resource.client_sparse_buffer",
-        "resource.terminal_body_subscription"
+        "resource.terminal_body_subscription",
+        "resource.platform_network_signal"
       ],
       "via_resources": [
         "resource.terminal_channel",
@@ -350,6 +352,43 @@
         "docs/resource-map.md",
         "docs/function-map.md",
         "docs/goals/terminal-transport-multiplex-refactor-plan.md"
+      ]
+    },
+    {
+      "resource_id": "resource.platform_network_signal",
+      "resource_type": "platform_signal",
+      "identity": "Ephemeral Android network-generation notification used only to trigger bounded daemon-target health probing",
+      "owner_feature": "terminal.transport_lifecycle",
+      "truth_store": "client.daemon_connection consumes ephemeral platform events and probes each current daemon-target transport generation; no persisted reachability or foreground truth",
+      "allowed_operations": [
+        "notify_network_generation",
+        "trigger_target_health_probe"
+      ],
+      "direct_relations": [
+        "resource.session_transport"
+      ],
+      "indirect_relations": [
+        "resource.daemon_target_transport"
+      ],
+      "via_resources": [
+        "resource.session_transport"
+      ],
+      "forbidden_direct_relations": [
+        "resource.active_session",
+        "resource.open_tab",
+        "resource.terminal_body_subscription",
+        "resource.ui_projection",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer"
+      ],
+      "required_gates": [
+        "src/hooks/useOpenTabLifecycleEffects.test.tsx",
+        "src/contexts/session-context-target-network-probe-runtime.test.ts",
+        "src/contexts/session-context-transport-orchestration-runtime.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/testing/session-transport-network-switch-test-design.md",
+        "docs/decisions/2026-04-28-terminal-transport-session-lifecycle-truth.md"
       ]
     },
     {

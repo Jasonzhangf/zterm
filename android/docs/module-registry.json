@@ -729,7 +729,8 @@
     "resource.daemon_target_transport",
     "resource.pending_open_intent",
     "resource.connection_diagnostics",
-    "resource.target_mux_request"
+    "resource.target_mux_request",
+    "resource.platform_network_signal"
    ],
    "consumed_resources": [
     "resource.transport_target",
@@ -765,6 +766,7 @@
    "owned_paths": [
     "src/contexts/session-context-socket-message-runtime.ts",
     "src/contexts/session-context-socket-runtime.ts",
+    "src/contexts/session-context-target-network-probe-runtime.ts",
     "src/contexts/session-context-transport-lifecycle-runtime.ts",
     "src/contexts/session-context-transport-open-runtime.ts",
     "src/contexts/session-context-transport-orchestration-runtime.ts",

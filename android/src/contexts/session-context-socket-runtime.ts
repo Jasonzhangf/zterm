@@ -2,6 +2,7 @@ import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
+import { buildTerminalMuxPing } from '@zterm/shared/protocol';
 
 interface MutableRefObject<T> {
   current: T;
@@ -107,7 +108,10 @@ export function startSocketHeartbeat(options: {
       return;
     }
 
-    options.sendSocketPayload(options.sessionId, options.ws, JSON.stringify({ type: 'ping' }));
+    const pingFrame = heartbeatKey.startsWith('target:')
+      ? buildTerminalMuxPing(Date.now())
+      : { type: 'ping' as const };
+    options.sendSocketPayload(options.sessionId, options.ws, JSON.stringify(pingFrame));
   }, options.clientPingIntervalMs);
   options.heartbeatStore.setPingInterval(heartbeatKey, pingInterval);
 }

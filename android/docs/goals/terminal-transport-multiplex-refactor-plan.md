@@ -511,7 +511,22 @@ Risk: remote-window/file-transfer/schedule regress because they used active sess
 Risk: adaptive width leaks after app exit.
 - Control: physical close/stale cleanup releases all channel subscriber leases through existing mirror owner.
 
-## 10. Implementation Steps
+## 10. Rust Migration Register
+
+The current target-network probe policy is implemented in TypeScript, but its identity, dedupe, and failure-transition semantics are core transport policy and therefore have an explicit Rust migration target.
+
+- `migration_id`: `terminal.transport_lifecycle.target_network_probe.rust`
+- `status`: `planned`
+- `current_owner`: `android/src/contexts/session-context-target-network-probe-runtime.ts#createSessionTargetNetworkProbeRuntime`
+- `planned_target`: `crates/zterm-transport-core/src/target_network_probe.rs`
+- `planned_rust_semantics`: target/socket-generation identity, pending-probe dedupe state, probe outcome, and target failure-transition policy
+- `post_migration_ts_boundary`: platform event adapter, WebSocket IO, and timer scheduling only
+- `activation`: create the Rust crate and target path, pass TS/Rust parity tests, wire the bridge, change this registry entry to active, then physically remove the old TS policy owner
+- `gate`: `android/src/lib/function-wiki-truth.test.ts`
+
+This entry is a target-state plan, not active architecture truth. Until activation is complete, the TypeScript symbol above remains the only runtime owner.
+
+## 11. Implementation Steps
 
 1. Commit or explicitly isolate current unrelated dirty work before starting this refactor.
 2. Add the resource/function/mainline/test-design docs and source gates.
@@ -528,7 +543,7 @@ Risk: adaptive width leaks after app exit.
 13. Update `note.md`, promote verified durable facts to `MEMORY.md`, update local skill with the new guard, re-mine MemoryPalace, and verify search.
 14. Commit scoped changes and report evidence plus remaining L5 gaps.
 
-## 11. Definition Of Done
+## 12. Definition Of Done
 
 - One daemon target uses one physical terminal transport for all terminal sessions.
 - Logical channels fully replace per-session body sockets in the new Android path.

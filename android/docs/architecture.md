@@ -445,6 +445,7 @@ daemon server
 - client 侧按服务器维度记住 `bridgeHost + bridgePort + authToken`，并在 picker / connection form / reconnect 时复用
 - 连通性探测必须显式触发；未填写 token 时禁止自动探测 / 自动重试 tmux 列表
 - websocket mux 采用物理 target 级保活观测：一个 daemon target 的物理 WebSocket/RTC transport 只有一个 app-level `mux-ping` timer，logical tmux session/channel 不得各自发 heartbeat；正常周期为低频 60 秒级。合法 mux frame 更新 target activity，channel 切换、foreground resume、body-subscription 变化不得新建 heartbeat 或物理 transport。只有物理 `close/error`、send 抛错、daemon 不可达，或 target health owner 明确确认物理 transport 失效，才允许进入 target 重建；单个 channel 错误只能重开该 channel。
+- 核心 transport policy 的 Rust 迁移登记在 `docs/goals/terminal-transport-multiplex-refactor-plan.md#10-rust-migration-register`。`status: planned` 只表示目标态：当前 target network probe 的唯一 runtime owner 仍是 `src/contexts/session-context-target-network-probe-runtime.ts#createSessionTargetNetworkProbeRuntime`；Rust crate、parity gate、bridge 和旧 TS owner 物理删除全部完成前，禁止把计划路径声明成 active truth。
 - daemon 初始化 / attach 阶段任何 `tmux capture-pane` 失败都只能记录错误并继续提供 `head + range` 能力；禁止再降级成第二套 snapshot 语义，也不允许因此让 daemon 进程退出
 
 ## 当前实现与目标差距

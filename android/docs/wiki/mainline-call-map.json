@@ -167,8 +167,76 @@
           "label": "src/lib/session-transport-runtime.ts#ensureTargetTransportRuntime"
         },
         {
+          "id": "TargetTransportAccessors",
+          "label": "src/contexts/session-context-transport-runtime.ts#createSessionContextTransportAccessors"
+        },
+        {
+          "id": "TargetTransportStoreEnumeration",
+          "label": "src/lib/session-transport-runtime.ts#listTargetTransportRuntimes"
+        },
+        {
           "id": "TargetHeartbeat",
           "label": "src/contexts/session-context-socket-runtime.ts#startSocketHeartbeat (target-keyed)"
+        },
+        {
+          "id": "TerminalMuxPingBuilder",
+          "label": "packages/shared/src/connection/protocol.ts#buildTerminalMuxPing"
+        },
+        {
+          "id": "PlatformNetworkSignal",
+          "label": "src/hooks/useOpenTabLifecycleEffects.ts#useOpenTabLifecycleEffects (signal-only)"
+        },
+        {
+          "id": "OpenTabNetworkBinding",
+          "label": "src/hooks/useOpenTabRuntime.ts#useOpenTabRuntime"
+        },
+        {
+          "id": "AppNetworkBinding",
+          "label": "src/App.tsx#AppContent"
+        },
+        {
+          "id": "SessionContextNetworkFacade",
+          "label": "src/contexts/SessionContext.tsx#SessionProvider (stable notifyTargetNetworkSignal facade)"
+        },
+        {
+          "id": "SessionProviderNetworkBinding",
+          "label": "src/contexts/session-context-provider-facade-assemblies.ts#useSessionProviderFacadeAssemblies"
+        },
+        {
+          "id": "SessionPublicFacadeBinding",
+          "label": "src/contexts/session-context-public-facade-runtime.ts#createSessionPublicFacadeRuntime"
+        },
+        {
+          "id": "SessionProviderCoreBinding",
+          "label": "src/contexts/session-context-provider-core-assemblies.ts#useSessionProviderCoreAssemblies"
+        },
+        {
+          "id": "TargetNetworkSignalOrchestration",
+          "label": "src/contexts/session-context-transport-orchestration-runtime.ts#createSessionTransportOrchestrationRuntime"
+        },
+        {
+          "id": "TargetNetworkProbeDispatch",
+          "label": "src/contexts/session-context-transport-orchestration-runtime.ts#notifyTargetNetworkSignalRuntime"
+        },
+        {
+          "id": "TargetNetworkProbe",
+          "label": "src/contexts/session-context-target-network-probe-runtime.ts#createSessionTargetNetworkProbeRuntime"
+        },
+        {
+          "id": "TargetMuxFrameLifecycle",
+          "label": "src/contexts/session-context-transport-runtime.ts#bindTargetMuxTransportSocketLifecycleRuntime"
+        },
+        {
+          "id": "TargetNetworkActivityBinding",
+          "label": "src/contexts/session-context-transport-orchestration-runtime.ts#createSessionTransportOrchestrationRuntime (recordTargetServerActivity binding)"
+        },
+        {
+          "id": "TargetFailureRouter",
+          "label": "src/contexts/session-context-transport-orchestration-runtime.ts#routeTargetSocketFailureRuntime"
+        },
+        {
+          "id": "IdleTargetRetirement",
+          "label": "src/contexts/session-context-transport-orchestration-runtime.ts#routeTargetSocketFailureRuntime (zero-session branch)"
         },
         {
           "id": "MuxHandshake",
@@ -851,6 +919,255 @@
           "via_resources": [],
           "relation_status": "observer",
           "edge_id": "android_mainline:TargetTransportRuntime->TargetHeartbeat"
+        },
+        {
+          "from": "TargetHeartbeat",
+          "to": "TerminalMuxPingBuilder",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "one target-keyed heartbeat timestamp from the physical transport health owner",
+          "semantic_output": "one shared terminal mux ping frame",
+          "status": "anchored",
+          "resource_from": "resource.daemon_target_transport",
+          "resource_to": "resource.daemon_target_transport",
+          "via_resources": [],
+          "relation_status": "observer",
+          "edge_id": "android_mainline:TargetHeartbeat->TerminalMuxPingBuilder"
+        },
+        {
+          "from": "PlatformNetworkSignal",
+          "to": "OpenTabNetworkBinding",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "ephemeral Android network-generation notification",
+          "semantic_output": "one signal-only callback through the open-tab lifecycle binding",
+          "status": "anchored",
+          "resource_from": "resource.platform_network_signal",
+          "resource_to": "resource.platform_network_signal",
+          "via_resources": [],
+          "relation_status": "observer",
+          "edge_id": "android_mainline:PlatformNetworkSignal->OpenTabNetworkBinding"
+        },
+        {
+          "from": "OpenTabNetworkBinding",
+          "to": "AppNetworkBinding",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "target-network signal callback received by useOpenTabRuntime",
+          "semantic_output": "the App-owned SessionContext callback binding",
+          "status": "anchored",
+          "resource_from": "resource.platform_network_signal",
+          "resource_to": "resource.platform_network_signal",
+          "via_resources": [],
+          "relation_status": "observer",
+          "edge_id": "android_mainline:OpenTabNetworkBinding->AppNetworkBinding"
+        },
+        {
+          "from": "AppNetworkBinding",
+          "to": "SessionContextNetworkFacade",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "App-bound target-network signal callback",
+          "semantic_output": "one call into the stable SessionContext facade",
+          "status": "anchored",
+          "resource_from": "resource.platform_network_signal",
+          "resource_to": "resource.platform_network_signal",
+          "via_resources": [],
+          "relation_status": "observer",
+          "edge_id": "android_mainline:AppNetworkBinding->SessionContextNetworkFacade"
+        },
+        {
+          "from": "SessionContextNetworkFacade",
+          "to": "SessionProviderNetworkBinding",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "platform network signal received by the stable public context function",
+          "semantic_output": "the provider-bound target-network signal owner",
+          "status": "anchored",
+          "resource_from": "resource.platform_network_signal",
+          "resource_to": "resource.platform_network_signal",
+          "via_resources": [],
+          "relation_status": "observer",
+          "edge_id": "android_mainline:SessionContextNetworkFacade->SessionProviderNetworkBinding"
+        },
+        {
+          "from": "SessionProviderNetworkBinding",
+          "to": "SessionPublicFacadeBinding",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "provider-bound platform network signal",
+          "semantic_output": "one public-facade binding to the core target-network owner",
+          "status": "anchored",
+          "resource_from": "resource.platform_network_signal",
+          "resource_to": "resource.platform_network_signal",
+          "via_resources": [],
+          "relation_status": "observer",
+          "edge_id": "android_mainline:SessionProviderNetworkBinding->SessionPublicFacadeBinding"
+        },
+        {
+          "from": "SessionPublicFacadeBinding",
+          "to": "SessionProviderCoreBinding",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "public-facade target-network signal binding",
+          "semantic_output": "the core-assembly target-network owner reference",
+          "status": "anchored",
+          "resource_from": "resource.platform_network_signal",
+          "resource_to": "resource.platform_network_signal",
+          "via_resources": [],
+          "relation_status": "observer",
+          "edge_id": "android_mainline:SessionPublicFacadeBinding->SessionProviderCoreBinding"
+        },
+        {
+          "from": "SessionProviderCoreBinding",
+          "to": "TargetNetworkSignalOrchestration",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "core-assembly target-network signal binding",
+          "semantic_output": "one invocation of the daemon-connection transport orchestration owner",
+          "status": "anchored",
+          "resource_from": "resource.platform_network_signal",
+          "resource_to": "resource.platform_network_signal",
+          "via_resources": [],
+          "relation_status": "observer",
+          "edge_id": "android_mainline:SessionProviderCoreBinding->TargetNetworkSignalOrchestration"
+        },
+        {
+          "from": "TargetNetworkSignalOrchestration",
+          "to": "TargetTransportAccessors",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "one platform generation requiring physical-target health observation",
+          "semantic_output": "read the complete daemon-target runtime truth through the transport accessor owner",
+          "status": "anchored",
+          "resource_from": "resource.platform_network_signal",
+          "resource_to": "resource.session_transport",
+          "via_resources": [],
+          "relation_status": "observer",
+          "edge_id": "android_mainline:TargetNetworkSignalOrchestration->TargetTransportAccessors"
+        },
+        {
+          "from": "TargetNetworkSignalOrchestration",
+          "to": "TerminalMuxPingBuilder",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "one bounded network-generation probe timestamp for an exact physical target socket",
+          "semantic_output": "one shared terminal mux ping frame",
+          "status": "anchored",
+          "resource_from": "resource.platform_network_signal",
+          "resource_to": "resource.daemon_target_transport",
+          "via_resources": [
+            "resource.session_transport"
+          ],
+          "relation_status": "via",
+          "edge_id": "android_mainline:TargetNetworkSignalOrchestration->TerminalMuxPingBuilder"
+        },
+        {
+          "from": "TargetTransportAccessors",
+          "to": "TargetTransportStoreEnumeration",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "transport-owner read request independent of active tab or logical session",
+          "semantic_output": "the current complete list of retained daemon-target runtimes",
+          "status": "anchored",
+          "resource_from": "resource.session_transport",
+          "resource_to": "resource.daemon_target_transport",
+          "via_resources": [],
+          "relation_status": "direct",
+          "edge_id": "android_mainline:TargetTransportAccessors->TargetTransportStoreEnumeration"
+        },
+        {
+          "from": "TargetTransportStoreEnumeration",
+          "to": "TargetNetworkProbeDispatch",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "the complete current daemon-target runtime list, including retained zero-session targets",
+          "semantic_output": "enumerate each exact current physical socket generation for bounded probe dispatch",
+          "status": "anchored",
+          "resource_from": "resource.daemon_target_transport",
+          "resource_to": "resource.daemon_target_transport",
+          "via_resources": [],
+          "relation_status": "observer",
+          "edge_id": "android_mainline:TargetTransportStoreEnumeration->TargetNetworkProbeDispatch"
+        },
+        {
+          "from": "TargetNetworkProbeDispatch",
+          "to": "TargetNetworkProbe",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "one daemon target key plus exact current physical socket generation",
+          "semantic_output": "one deduplicated bounded ping and timeout owned by the target probe runtime",
+          "status": "anchored",
+          "resource_from": "resource.daemon_target_transport",
+          "resource_to": "resource.daemon_target_transport",
+          "via_resources": [],
+          "relation_status": "observer",
+          "edge_id": "android_mainline:TargetNetworkProbeDispatch->TargetNetworkProbe"
+        },
+        {
+          "from": "TargetNetworkProbe",
+          "to": "TargetFailureRouter",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "probe timeout or synchronous probe-send failure for one exact current physical generation",
+          "semantic_output": "one exact target-key plus socket-generation failure submission",
+          "status": "anchored",
+          "resource_from": "resource.daemon_target_transport",
+          "resource_to": "resource.daemon_target_transport",
+          "via_resources": [],
+          "relation_status": "observer",
+          "edge_id": "android_mainline:TargetNetworkProbe->TargetFailureRouter"
+        },
+        {
+          "from": "MuxHandshake",
+          "to": "TargetMuxFrameLifecycle",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "one mux-capable target socket bound to the shared protocol contract",
+          "semantic_output": "install the exact-generation inbound frame lifecycle callbacks",
+          "status": "anchored",
+          "resource_from": "resource.daemon_target_transport",
+          "resource_to": "resource.daemon_target_transport",
+          "via_resources": [],
+          "relation_status": "observer",
+          "edge_id": "android_mainline:MuxHandshake->TargetMuxFrameLifecycle"
+        },
+        {
+          "from": "TargetMuxFrameLifecycle",
+          "to": "TargetNetworkActivityBinding",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "one valid inbound frame from the exact current daemon-target socket generation",
+          "semantic_output": "one target-key plus socket-generation activity notification",
+          "status": "anchored",
+          "resource_from": "resource.daemon_target_transport",
+          "resource_to": "resource.daemon_target_transport",
+          "via_resources": [],
+          "relation_status": "observer",
+          "edge_id": "android_mainline:TargetMuxFrameLifecycle->TargetNetworkActivityBinding"
+        },
+        {
+          "from": "TargetNetworkActivityBinding",
+          "to": "TargetNetworkProbe",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "target-key plus exact current socket activity after frame validation",
+          "semantic_output": "settle only the matching pending probe as generation healthy",
+          "status": "anchored",
+          "resource_from": "resource.daemon_target_transport",
+          "resource_to": "resource.daemon_target_transport",
+          "via_resources": [],
+          "relation_status": "observer",
+          "edge_id": "android_mainline:TargetNetworkActivityBinding->TargetNetworkProbe"
+        },
+        {
+          "from": "TargetFailureRouter",
+          "to": "TerminalTransportError01TargetFailure",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "current failed target generation with at least one logical channel",
+          "semantic_output": "one retirement and channel-rebuild submission through the existing target failure owner",
+          "status": "anchored",
+          "resource_from": "resource.daemon_target_transport",
+          "resource_to": "resource.daemon_target_transport",
+          "via_resources": [],
+          "relation_status": "observer",
+          "edge_id": "android_mainline:TargetFailureRouter->TerminalTransportError01TargetFailure"
+        },
+        {
+          "from": "TargetFailureRouter",
+          "to": "IdleTargetRetirement",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "current failed target generation with zero logical sessions",
+          "semantic_output": "retire only that physical socket without inventing a session or reconnect job",
+          "status": "anchored",
+          "resource_from": "resource.daemon_target_transport",
+          "resource_to": "resource.daemon_target_transport",
+          "via_resources": [],
+          "relation_status": "observer",
+          "edge_id": "android_mainline:TargetFailureRouter->IdleTargetRetirement"
         },
         {
           "from": "TargetTransportRuntime",

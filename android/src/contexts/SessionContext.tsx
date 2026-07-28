@@ -7,6 +7,7 @@ import type {
   SessionScheduleState,
 } from '../lib/types';
 import type { RemoteWindowControlMessage } from '../lib/remote-window-message-runtime';
+import type { SessionTargetNetworkSignal } from './session-context-target-network-probe-runtime';
 import { DEFAULT_BRIDGE_SETTINGS } from '../lib/bridge-settings';
 import {
   DEFAULT_TERMINAL_CACHE_LINES,
@@ -54,6 +55,7 @@ export function SessionProvider({
       sessionHeadStoreRef,
       sessionHeartbeatStoreRef,
       sessionReconnectStoreRef,
+      targetNetworkProbeRuntimeRef,
       handshakeTimeoutsRef,
       sessionVisibleRangeRef,
       lastActivatedSessionIdRef,
@@ -98,6 +100,7 @@ export function SessionProvider({
     setLiveSessionIds,
     setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport,
+    notifyTargetNetworkSignal,
     sendTerminalResize,
     sendMessage,
     sendInput,
@@ -142,6 +145,7 @@ export function SessionProvider({
       sessionHeadStoreRef,
       sessionHeartbeatStoreRef,
       sessionReconnectStoreRef,
+      targetNetworkProbeRuntimeRef,
       handshakeTimeoutsRef,
       sessionVisibleRangeRef,
       lastActivatedSessionIdRef,
@@ -181,6 +185,7 @@ export function SessionProvider({
     setLiveSessionIds,
     setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport,
+    notifyTargetNetworkSignal,
     sendTerminalResize,
     sendMessage,
     sendInput,
@@ -225,6 +230,7 @@ export function SessionProvider({
     setLiveSessionIds,
     setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport,
+    notifyTargetNetworkSignal,
     sendTerminalResize,
     sendMessage,
     sendInput,
@@ -273,6 +279,9 @@ export function SessionProvider({
       contextRuntimeRef.current.setActiveBodySubscriptionSuppressed(suppressed)
     ),
     resumeActiveSessionTransport: (id: string) => contextRuntimeRef.current.resumeActiveSessionTransport(id),
+    notifyTargetNetworkSignal: (
+      signal: SessionTargetNetworkSignal,
+    ) => contextRuntimeRef.current.notifyTargetNetworkSignal(signal),
     sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: 'adaptive-phone' | 'mirror-fixed') => (
       contextRuntimeRef.current.sendTerminalResize(sessionId, cols, rows, widthMode)
     ),

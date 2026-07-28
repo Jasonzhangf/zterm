@@ -121,6 +121,12 @@ describe('edge registry truth gate', () => {
         }
       }
 
+      for (const caller of edge.allowed_callers) {
+        if (isFilePath(caller) && !caller.includes('*')) {
+          expect(resolvePath(caller), `${edge.edge_id}:allowed_caller:${caller}`).not.toBeNull();
+        }
+      }
+
       assertPipelineChain(edge.edge_id, 'request_chain', edge.request_chain);
       assertPipelineChain(edge.edge_id, 'response_chain', edge.response_chain);
       assertPipelineChain(edge.edge_id, 'error_chain', edge.error_chain);
@@ -170,6 +176,7 @@ describe('edge registry truth gate', () => {
     for (const edgeId of [
       'edge.client.active_session_to_session_transport',
       'edge.client.session_transport_to_daemon_target_transport',
+      'edge.client.daemon_target_transport_health',
       'edge.client.daemon_target_transport_to_terminal_channel',
       'edge.daemon.terminal_channel_to_subscriber',
       'edge.daemon.mirror_store_to_client_sparse_buffer',
@@ -179,5 +186,85 @@ describe('edge registry truth gate', () => {
     ]) {
       expect(edgeIds.has(edgeId), edgeId).toBe(true);
     }
+  });
+
+  it('binds the platform network edge to the real signal and target-probe callers', () => {
+    const registry = JSON.parse(read('docs/edge-registry.json')) as EdgeRegistry;
+    const edge = registry.edges.find((candidate) => (
+      candidate.edge_id === 'edge.client.platform_network_signal_to_daemon_target_transport'
+    ));
+
+    expect(edge?.allowed_callers).toEqual([
+      'src/hooks/useOpenTabLifecycleEffects.ts',
+      'src/hooks/useOpenTabRuntime.ts',
+      'src/App.tsx',
+      'src/contexts/SessionContext.tsx',
+      'src/contexts/session-context-provider-facade-assemblies.ts',
+      'src/contexts/session-context-public-facade-runtime.ts',
+      'src/contexts/session-context-provider-core-assemblies.ts',
+      'src/contexts/session-context-transport-orchestration-runtime.ts',
+      'src/contexts/session-context-transport-runtime.ts',
+      'src/lib/session-transport-runtime.ts',
+    ]);
+    expect(edge?.error_chain).toEqual([
+      'TargetNetworkProbeError01GenerationTimeout',
+      'TargetNetworkProbeError02SendFailure',
+    ]);
+    expect(edge?.mainline_call_ids).toEqual([
+      'android_mainline:PlatformNetworkSignal->OpenTabNetworkBinding',
+      'android_mainline:OpenTabNetworkBinding->AppNetworkBinding',
+      'android_mainline:AppNetworkBinding->SessionContextNetworkFacade',
+      'android_mainline:SessionContextNetworkFacade->SessionProviderNetworkBinding',
+      'android_mainline:SessionProviderNetworkBinding->SessionPublicFacadeBinding',
+      'android_mainline:SessionPublicFacadeBinding->SessionProviderCoreBinding',
+      'android_mainline:SessionProviderCoreBinding->TargetNetworkSignalOrchestration',
+      'android_mainline:TargetNetworkSignalOrchestration->TargetTransportAccessors',
+      'android_mainline:TargetNetworkSignalOrchestration->TerminalMuxPingBuilder',
+      'android_mainline:TargetTransportAccessors->TargetTransportStoreEnumeration',
+      'android_mainline:TargetTransportStoreEnumeration->TargetNetworkProbeDispatch',
+      'android_mainline:TargetNetworkProbeDispatch->TargetNetworkProbe',
+      'android_mainline:MuxHandshake->TargetMuxFrameLifecycle',
+      'android_mainline:TargetMuxFrameLifecycle->TargetNetworkActivityBinding',
+      'android_mainline:TargetNetworkActivityBinding->TargetNetworkProbe',
+      'android_mainline:TargetNetworkProbe->TargetFailureRouter',
+      'android_mainline:TargetFailureRouter->TerminalTransportError01TargetFailure',
+      'android_mainline:TargetFailureRouter->IdleTargetRetirement',
+    ]);
+    expect(read('src/hooks/useOpenTabLifecycleEffects.ts')).toContain('notifyTargetNetworkSignal');
+    expect(read('src/hooks/useOpenTabRuntime.ts')).toContain('notifyTargetNetworkSignal,');
+    expect(read('src/App.tsx')).toContain('notifyTargetNetworkSignal,');
+    expect(read('src/contexts/session-context-public-facade-runtime.ts')).toContain(
+      'notifyTargetNetworkSignal: options.notifyTargetNetworkSignal',
+    );
+    expect(read('src/contexts/session-context-provider-core-assemblies.ts')).toContain(
+      'notifyTargetNetworkSignal,',
+    );
+    expect(read('src/contexts/session-context-transport-orchestration-runtime.ts')).toContain(
+      'export function notifyTargetNetworkSignalRuntime',
+    );
+    expect(read('src/contexts/session-context-transport-runtime.ts')).toContain(
+      'export function createSessionContextTransportAccessors',
+    );
+    expect(read('src/lib/session-transport-runtime.ts')).toContain(
+      'export function listTargetTransportRuntimes',
+    );
+    expect(read('src/contexts/session-context-transport-runtime.ts')).toContain(
+      'options.recordTargetServerActivity?.(options.targetHeartbeatKey)',
+    );
+    const targetProbeTests = read('src/contexts/session-context-target-network-probe-runtime.test.ts');
+    expect(targetProbeTests).toContain(
+      'keeps the exact socket generation when any valid target activity arrives',
+    );
+    expect(targetProbeTests).toContain(
+      'rejects late activity from a superseded socket generation',
+    );
+
+    const targetHealthEdge = registry.edges.find((candidate) => (
+      candidate.edge_id === 'edge.client.daemon_target_transport_health'
+    ));
+    expect(targetHealthEdge?.mainline_call_ids).toEqual([
+      'android_mainline:TargetTransportRuntime->TargetHeartbeat',
+      'android_mainline:TargetHeartbeat->TerminalMuxPingBuilder',
+    ]);
   });
 });

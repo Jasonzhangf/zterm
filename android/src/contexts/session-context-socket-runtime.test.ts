@@ -203,6 +203,12 @@ describe('session-context-socket-runtime heartbeat lifecycle', () => {
     });
 
     vi.advanceTimersByTime(2000);
+    expect(sendSocketPayload).toHaveBeenNthCalledWith(
+      1,
+      sessionId,
+      ws,
+      JSON.stringify({ type: 'mux-ping', payload: { sentAt: 1000 } }),
+    );
     vi.setSystemTime(2500);
     heartbeatStore.recordServerActivity(heartbeatKey, Date.now());
     vi.advanceTimersByTime(3000);

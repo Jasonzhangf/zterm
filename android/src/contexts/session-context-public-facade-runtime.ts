@@ -50,6 +50,7 @@ import {
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionBufferHeadState } from './session-buffer-planner-helpers';
 import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
+import type { SessionTargetNetworkSignal } from './session-context-target-network-probe-runtime';
 
 export function createSessionPublicFacadeRuntime(options: {
   stateRef: { current: SessionManagerState };
@@ -87,6 +88,9 @@ export function createSessionPublicFacadeRuntime(options: {
     markResumeTail?: boolean;
     allowReconnectIfUnavailable?: boolean;
   }) => boolean;
+  notifyTargetNetworkSignal: (
+    signal: SessionTargetNetworkSignal,
+  ) => void;
   sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: 'adaptive-phone' | 'mirror-fixed') => boolean;
   setLiveSessionIdsSync: (ids: string[]) => void;
   setActiveBodySubscriptionSuppressedSync: (suppressed: boolean, reason?: string) => void;
@@ -271,6 +275,7 @@ export function createSessionPublicFacadeRuntime(options: {
     setLiveSessionIds,
     setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport,
+    notifyTargetNetworkSignal: options.notifyTargetNetworkSignal,
     sendTerminalResize,
     updateSessionViewport,
     getActiveSession,
@@ -296,6 +301,9 @@ export function buildSessionContextValueRuntime(options: {
   setLiveSessionIds: (ids: string[]) => void;
   setActiveBodySubscriptionSuppressed: (suppressed: boolean) => void;
   resumeActiveSessionTransport: (id: string) => boolean;
+  notifyTargetNetworkSignal: (
+    signal: SessionTargetNetworkSignal,
+  ) => void;
   sendTerminalResize: (sessionId: string, cols?: number | null, rows?: number | null, widthMode?: 'adaptive-phone' | 'mirror-fixed') => boolean;
   sendMessage: (sessionId: string, msg: ClientMessage) => void;
   sendInput: (sessionId: string, data: string) => void;
@@ -368,6 +376,7 @@ export function buildSessionContextValueRuntime(options: {
     setLiveSessionIds: options.setLiveSessionIds,
     setActiveBodySubscriptionSuppressed: options.setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport: options.resumeActiveSessionTransport,
+    notifyTargetNetworkSignal: options.notifyTargetNetworkSignal,
     sendTerminalResize: options.sendTerminalResize,
     sendMessage: options.sendMessage,
     sendInput: options.sendInput,

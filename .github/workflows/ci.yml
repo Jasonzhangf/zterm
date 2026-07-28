@@ -35,6 +35,9 @@ jobs:
       - name: Feature registry and architecture truth gates
         run: pnpm --dir android run test:feature-registry
 
+      - name: Transport network lifecycle gate
+        run: pnpm --dir android run test:transport-network-lifecycle
+
       - name: Fast redline regression
         run: pnpm --dir android run test:redline:fast
 

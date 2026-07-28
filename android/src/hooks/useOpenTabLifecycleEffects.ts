@@ -6,6 +6,7 @@ import { SESSION_STATUS_EVENT } from '../contexts/SessionContext';
 import { createForegroundRefreshRuntime, markForegroundRuntimeHidden } from '../lib/app-foreground-refresh';
 import { runtimeDebug } from '../lib/runtime-debug';
 import type { Session } from '../lib/types';
+import type { SessionTargetNetworkSignal } from '../contexts/session-context-target-network-probe-runtime';
 
 export type OpenTabAuditReason =
   | 'visibilitychange'
@@ -31,7 +32,9 @@ interface UseOpenTabLifecycleEffectsOptions {
   onForegroundActiveChange?: (active: boolean) => void;
   onForegroundResume?: (reason: ForegroundResumeSignalReason) => void;
   auditOpenTabsAgainstRemoteSessions: (reason: OpenTabAuditReason) => Promise<void>;
-  resumeActiveSessionTransport: (sessionId: string) => boolean;
+  notifyTargetNetworkSignal: (
+    signal: SessionTargetNetworkSignal,
+  ) => void;
   bumpFollowResetEpoch: () => void;
 }
 
@@ -43,7 +46,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     onForegroundActiveChange,
     onForegroundResume,
     auditOpenTabsAgainstRemoteSessions,
-    resumeActiveSessionTransport,
+    notifyTargetNetworkSignal,
     bumpFollowResetEpoch,
   } = options;
 
@@ -51,19 +54,22 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     onForegroundActiveChange,
     onForegroundResume,
     auditOpenTabsAgainstRemoteSessions,
-    resumeActiveSessionTransport,
+    notifyTargetNetworkSignal,
     bumpFollowResetEpoch,
   });
   callbacksRef.current = {
     onForegroundActiveChange,
     onForegroundResume,
     auditOpenTabsAgainstRemoteSessions,
-    resumeActiveSessionTransport,
+    notifyTargetNetworkSignal,
     bumpFollowResetEpoch,
   };
 
   const maybeProjectForegroundResume = useCallback((reason: ForegroundResumeSignalReason) => {
     const now = Date.now();
+    callbacksRef.current.notifyTargetNetworkSignal({
+      source: 'foreground-resume',
+    });
     const hasSessions = sessionsRef.current.length > 0;
     const hasActiveSession = Boolean(openTabStateRef.current.activeSessionId);
     const wasHiddenForDecision = (
@@ -132,15 +138,11 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
         runtimeDebug('app.network.online.hidden', {});
         return;
       }
-      callbacksRef.current.onForegroundActiveChange?.(true);
       runtimeDebug('app.network.online', {});
-      const activeSessionId = openTabStateRef.current.activeSessionId;
-      if (activeSessionId) {
-        callbacksRef.current.resumeActiveSessionTransport(activeSessionId);
-      }
-      foregroundRefreshRuntimeRef.current.wasHidden = false;
-      void callbacksRef.current.auditOpenTabsAgainstRemoteSessions('online').catch((error) => {
-        console.error('[App] Failed to audit remote session truth on online recovery:', error);
+      callbacksRef.current.notifyTargetNetworkSignal({
+        connected: true,
+        connectionType: 'unknown',
+        source: 'window-online',
       });
     };
 
@@ -149,20 +151,18 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
         connected: status.connected,
         connectionType: status.connectionType,
       });
-      if (status.connected) {
-        callbacksRef.current.onForegroundActiveChange?.(true);
-        const activeSessionId = openTabStateRef.current.activeSessionId;
-        if (activeSessionId) {
-          callbacksRef.current.resumeActiveSessionTransport(activeSessionId);
-        }
-        foregroundRefreshRuntimeRef.current.wasHidden = false;
-        void callbacksRef.current.auditOpenTabsAgainstRemoteSessions('network-status-change').catch((error) => {
-          console.error('[App] Failed to audit remote session truth on network status change:', error);
+      if (document.visibilityState === 'hidden') {
+        runtimeDebug('app.capacitor.networkStatusChange.hidden', {
+          connected: status.connected,
+          connectionType: status.connectionType,
         });
-      } else {
-        callbacksRef.current.onForegroundActiveChange?.(false);
-        markForegroundRuntimeHidden(foregroundRefreshRuntimeRef.current, document.visibilityState);
+        return;
       }
+      callbacksRef.current.notifyTargetNetworkSignal({
+        connected: status.connected,
+        connectionType: status.connectionType,
+        source: 'capacitor',
+      });
     });
 
     const appStateListenerHandle = CapacitorApp.addListener('appStateChange', ({ isActive }) => {

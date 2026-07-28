@@ -92,6 +92,7 @@ const sessionHarness = vi.hoisted(() => {
   const reconnectAllSessions = vi.fn();
   const reconnectSession = vi.fn();
   const resumeActiveSessionTransport = vi.fn(() => true);
+  const notifyTargetNetworkSignal = vi.fn();
   const setLiveSessionIds = vi.fn();
   const createSession = vi.fn();
   const closeSession = vi.fn();
@@ -139,6 +140,7 @@ const sessionHarness = vi.hoisted(() => {
     reconnectAllSessions,
     reconnectSession,
     resumeActiveSessionTransport,
+    notifyTargetNetworkSignal,
     setLiveSessionIds,
     createSession,
     closeSession,
@@ -183,6 +185,7 @@ const sessionHarness = vi.hoisted(() => {
       reconnectSession.mockReset();
       resumeActiveSessionTransport.mockReset();
       resumeActiveSessionTransport.mockReturnValue(true);
+      notifyTargetNetworkSignal.mockReset();
       setLiveSessionIds.mockReset();
       createSession.mockReset();
       closeSession.mockReset();
@@ -396,6 +399,7 @@ vi.mock('./contexts/SessionContext', () => ({
     reconnectAllSessions: sessionHarness.reconnectAllSessions,
     setLiveSessionIds: sessionHarness.setLiveSessionIds,
     resumeActiveSessionTransport: sessionHarness.resumeActiveSessionTransport,
+    notifyTargetNetworkSignal: sessionHarness.notifyTargetNetworkSignal,
     getActiveSession: () => sessionHarness.readStaleActiveSession(),
     getSession: sessionHarness.getSession,
     getSessionRenderBufferSnapshot: sessionHarness.getSessionRenderBufferSnapshot,
@@ -1417,8 +1421,13 @@ describe('App dynamic refresh matrix', () => {
 
     expect(sessionHarness.reconnectAllSessions).not.toHaveBeenCalled();
     expect(sessionHarness.reconnectSession).not.toHaveBeenCalled();
-    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledTimes(1);
-    expect(sessionHarness.resumeActiveSessionTransport).toHaveBeenCalledWith('s1');
+    expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
+    expect(sessionHarness.notifyTargetNetworkSignal).toHaveBeenCalledTimes(1);
+    expect(sessionHarness.notifyTargetNetworkSignal).toHaveBeenCalledWith({
+      connected: true,
+      connectionType: 'unknown',
+      source: 'window-online',
+    });
   });
 
   it('does not resume transports for online events while the app is hidden', async () => {

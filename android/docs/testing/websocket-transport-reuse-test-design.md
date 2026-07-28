@@ -147,6 +147,18 @@ Negative:
 - Given a legacy non-relay Host plus a provider `wsUrl`, the same factory may pass the role-scoped override for compatibility.
 - Given an opened WebRTC transport, `applyTransportDiagnosticsRuntime()` must project the actual selected ICE pair metadata from `TraversalSocket.getDiagnostics()` without reading daemon/client target metadata as route truth.
 
+`client.daemon_connection.notifyTargetNetworkSignal()`:
+- Positive: one platform network-generation signal enumerates every current daemon-target runtime and sends one `mux-ping` per OPEN physical target; any valid mux response keeps the exact socket, route generation, and every logical channel.
+- Positive: one target with multiple channels still owns one pending probe and one timeout.
+- Positive: inactive-tab targets are probed in the same pass; active-session identity is not a network-generation filter.
+- Positive: a retained target transport with no current logical sessions is still probed and can be retired by target key plus exact socket generation.
+- Positive: after the original anchor session is removed, a valid mux response is still accepted by the target-keyed socket listener and settles the pending generation probe.
+- Positive: probe timeout submits the exact socket generation once to `TerminalTransportError01TargetFailure`, which performs the only retirement and target rebuild.
+- Negative: a synchronous send failure returns `send-failed` and enters the same error owner, never `started`.
+- Negative: network status cannot call `onForegroundActiveChange`, mutate foreground refresh truth, change body subscription, or invoke `resumeActiveSessionTransport`.
+- Negative: repeated signals cannot multiply probes/rebuilds; late responses from a retired socket cannot settle a newer generation.
+- Negative: the Relay `/ws/devices` control stream is a distinct WebSocket and its close cannot close or replace a healthy terminal target transport.
+
 `createTerminalDaemonRuntime().startHeartbeatLoop()`:
 - Positive: a quiet bound RTC/Relay session transport remains attached and open at 11 seconds because the Android physical heartbeat is not due until 60 seconds; daemon cleanup cannot create server-detached/client-open split truth before the client liveness policy can run.
 - Positive: a bound RTC/Relay session transport with no inbound heartbeat/message for more than the server stale window is closed, removed from `connections`, and detached through `detachSubscriberTransportOnly`.

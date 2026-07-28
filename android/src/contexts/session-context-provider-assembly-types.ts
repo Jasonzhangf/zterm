@@ -43,6 +43,10 @@ import type {
 } from './session-context-message-assemblies';
 import type { RemoteWindowTargetCatalogCacheStore } from './session-context-remote-window-runtime';
 import type { SessionTmuxTargetRequestStore } from './session-context-tmux-management-runtime';
+import type {
+  SessionTargetNetworkProbeRuntime,
+  SessionTargetNetworkSignal,
+} from './session-context-target-network-probe-runtime';
 import type { SessionPullStates } from './session-pull-state-helpers';
 import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
 import type { SessionVisibleRangeState } from './session-visible-range-helpers';
@@ -74,6 +78,7 @@ export interface SessionProviderRuntimeRefs {
   sessionHeadStoreRef: MutableRefObject<SessionHeadStore>;
   sessionHeartbeatStoreRef: MutableRefObject<SessionHeartbeatStore>;
   sessionReconnectStoreRef: MutableRefObject<SessionReconnectStore>;
+  targetNetworkProbeRuntimeRef: MutableRefObject<SessionTargetNetworkProbeRuntime>;
   handshakeTimeoutsRef: MutableRefObject<Map<string, number>>;
   sessionVisibleRangeRef: MutableRefObject<Map<string, SessionVisibleRangeState>>;
   lastActivatedSessionIdRef: MutableRefObject<string | null>;
@@ -164,6 +169,10 @@ export interface SessionProviderCoreAssembliesResult {
     rows?: number | null,
     widthMode?: 'adaptive-phone' | 'mirror-fixed',
   ) => boolean;
+  notifyTargetNetworkSignal: (
+    signal: SessionTargetNetworkSignal,
+  ) => void;
+  readTargetTransportRuntimes: () => TargetTransportRuntime[];
   readSessionTransportResource: (sessionId: string) => SessionTransportResource;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   readSessionTransportHost: (sessionId: string) => Host | null;

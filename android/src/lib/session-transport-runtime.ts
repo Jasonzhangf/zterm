@@ -249,6 +249,10 @@ export function getTargetTransportRuntime(
   return store.targets.get(targetKey) || null;
 }
 
+export function listTargetTransportRuntimes(store: SessionTransportRuntimeStore) {
+  return Array.from(store.targets.values());
+}
+
 export function getSessionTargetTransportRuntime(
   store: SessionTransportRuntimeStore,
   sessionId: string,
@@ -441,6 +445,19 @@ export function setSessionTargetTerminalMuxReady(
   ready: boolean,
 ) {
   const targetRuntime = getSessionTargetTransportRuntime(store, sessionId);
+  if (!targetRuntime) {
+    return null;
+  }
+  targetRuntime.terminalMuxReady = Boolean(ready);
+  return targetRuntime;
+}
+
+export function setTargetTerminalMuxReady(
+  store: SessionTransportRuntimeStore,
+  targetKey: string,
+  ready: boolean,
+) {
+  const targetRuntime = store.targets.get(targetKey) || null;
   if (!targetRuntime) {
     return null;
   }

@@ -3,9 +3,9 @@
 ## Architecture Binding
 
 - Feature: `terminal.transport_lifecycle`
-- Resource: `resource.session_transport`
-- Unique health owner: `src/contexts/session-context-socket-runtime.ts`
-- Mainline: `android_mainline:TransportOrchestration->TransportHealth`
+- Resources: `resource.platform_network_signal`, `resource.daemon_target_transport`
+- Unique health owner: `src/contexts/session-context-target-network-probe-runtime.ts`
+- Mainline chain: `android_mainline:PlatformNetworkSignal->OpenTabNetworkBinding` -> `android_mainline:OpenTabNetworkBinding->AppNetworkBinding` -> `android_mainline:AppNetworkBinding->SessionContextNetworkFacade` -> `android_mainline:SessionContextNetworkFacade->SessionProviderNetworkBinding` -> `android_mainline:SessionProviderNetworkBinding->SessionPublicFacadeBinding` -> `android_mainline:SessionPublicFacadeBinding->SessionProviderCoreBinding` -> `android_mainline:SessionProviderCoreBinding->TargetNetworkSignalOrchestration` -> `android_mainline:TargetNetworkSignalOrchestration->TargetTransportAccessors` -> `android_mainline:TargetTransportAccessors->TargetTransportStoreEnumeration` -> `android_mainline:TargetTransportStoreEnumeration->TargetNetworkProbeDispatch` -> `android_mainline:TargetNetworkProbeDispatch->TargetNetworkProbe`
 - Recovery return: `TransportHealth -> SessionRuntime -> TransportReusePlan -> TransportOpen`
 - Allowed behavior: retain the logical session and cached buffer while replacing only a stale physical WebSocket.
 - Forbidden behavior: UI/page reconnect loops, daemon client-network state, fallback endpoints, parallel replacement sockets, or treating `readyState === OPEN` as sufficient health truth.
@@ -18,6 +18,9 @@
 4. The target health owner may finalize one physical socket generation only after its configured consecutive health policy is exhausted; the target failure fanout then preserves logical session/channel ids and routes recovery through the existing reconnect owner.
 5. The existing reconnect owner replaces only that physical target socket while retaining logical session/channel ids, active-session truth, and local buffers.
 6. A valid target frame resets the consecutive-miss count. A non-open socket does not emit heartbeat traffic. A channel error must not poison the target heartbeat or rebuild the physical socket.
+7. App visibility and platform network availability are independent resources. A network callback cannot write foreground/background truth, stop body subscription, or stop foreground freshness timers.
+8. A platform network-generation signal starts at most one bounded probe for each affected daemon target and exact physical socket generation. Capacitor/window network signals carry observed connectivity metadata; foreground-resume carries generation only and must not invent endpoint reachability. Any valid mux server frame proves that generation healthy.
+9. Probe success retains the exact socket and all channels. Probe timeout submits the exact generation once to `TerminalTransportError01TargetFailure`; late frames from that retired generation are ignored.
 
 ## White-Box Gates
 
@@ -28,6 +31,16 @@ Positive:
 - Any valid target activity between ticks resets the physical miss counter.
 - Three consecutive target health misses call the physical failure owner exactly once.
 - Stale failure enters the existing reconnect owner and preserves logical session state.
+- A connected or disconnected platform network event leaves foreground truth unchanged and sends one `mux-ping` for one target even when six logical channels share it.
+- Foreground entry sends the target-level generation signal even when no tab/session is active; the independent session-audit decision may still skip.
+- One platform event enumerates every current daemon-target transport generation, including targets with no active tab; two targets produce two probes while six channels on one target still produce one.
+- A valid frame during the bounded probe keeps the same socket and route generation.
+- A synchronous probe send failure returns `send-failed` and enters `TerminalTransportError01TargetFailure`; it cannot be projected as `started`.
+- Probe timeout retires the exact socket once and schedules one target rebuild through the existing failure owner.
+- A retained physical target with zero logical sessions is still probed; failure retires that exact idle generation without inventing a logical session or reconnect job.
+- The target socket listener validates inbound activity by `targetKey + exact socket`, not by the session that originally opened it; deleting the last logical session followed by a valid `mux-pong` keeps the idle target generation alive.
+- Heartbeat and network-generation probes both serialize through the shared `buildTerminalMuxPing` contract builder.
+- Probe construction rejects a missing, non-finite, fractional, non-positive, or unsafe-integer timeout and rejects a missing/non-callable clock; the runtime cannot default, round, or clamp owner configuration. The shared mux-ping builder likewise rejects negative, fractional, non-finite, or unsafe-integer timestamps instead of repairing wire payloads.
 
 Negative:
 
@@ -39,6 +52,10 @@ Negative:
 - An ordinary route failure enters a short circuit-breaker cooldown, then becomes probe-eligible again without an app restart.
 - An authentication failure remains quarantined for the full route-health TTL and cannot be mistaken for a transient network failure.
 - One `TraversalSocket` generation attempts each candidate at most once even after a candidate becomes probe-eligible in the shared cache.
+- Network events cannot call the session resume/reconnect API, cannot alter body-subscription truth, and cannot create per-session heartbeat or reconnect work.
+- Active-session/open-tab truth cannot scope the platform signal; inactive daemon targets remain part of the same target-owner probe pass.
+- Repeated network events while one target probe is pending cannot send another probe or schedule another rebuild.
+- A late frame from a superseded socket cannot settle the current generation's probe.
 
 ## Module Black-Box Gate
 
@@ -49,6 +66,8 @@ Replay an OPEN physical route that then fails before `mux-ready` or channel-read
 Replay a transient Tailscale failure while Relay metadata remains available. During the short cooldown the failed route is unavailable to the next physical generation; after cooldown the same Tailscale endpoint must be probed again without clearing process state. A five-minute ordinary-failure blacklist is forbidden. The shared health cache may retain successful-route history for five minutes, but ordinary connectivity failures and authentication failures require different expiry policies.
 
 Negative: if the failed physical socket is already `CLOSING` or `CLOSED`, the owner still records route failure and rebuilds recoverable channels, but must not call `close()` again. A target failure must not close or recreate any control/directory socket.
+
+Replay a false or transient `NetworkStatus.connected` value while `document.visibilityState` and Capacitor App state remain active. Foreground truth, refresh timers, and body subscriptions must remain active. This is a red gate because platform network status is a probe signal, not endpoint reachability or app-lifecycle truth.
 
 ## Real-Device Black-Box Gate
 

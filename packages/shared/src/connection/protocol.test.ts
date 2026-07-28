@@ -6,6 +6,7 @@ import {
   buildTerminalMuxChannelMessage,
   buildTerminalMuxError,
   buildTerminalMuxHello,
+  buildTerminalMuxPing,
   buildTerminalMuxReady,
   buildTerminalMuxServerChannelMessage,
   buildTerminalMuxServerTargetMessage,
@@ -22,6 +23,26 @@ import {
 } from './protocol';
 
 describe('terminal mux protocol contract', () => {
+  it('builds the only target-level mux ping envelope', () => {
+    expect(buildTerminalMuxPing(1234)).toEqual({
+      type: 'mux-ping',
+      payload: { sentAt: 1234 },
+    });
+    expect(isTerminalMuxClientFrame(buildTerminalMuxPing(1234))).toBe(true);
+    expect(() => buildTerminalMuxPing(Number.NaN)).toThrow(
+      'terminal mux ping sentAt must be a non-negative safe integer',
+    );
+    expect(() => buildTerminalMuxPing(1234.9)).toThrow(
+      'terminal mux ping sentAt must be a non-negative safe integer',
+    );
+    expect(() => buildTerminalMuxPing(-1)).toThrow(
+      'terminal mux ping sentAt must be a non-negative safe integer',
+    );
+    expect(() => buildTerminalMuxPing(Number.MAX_SAFE_INTEGER + 1)).toThrow(
+      'terminal mux ping sentAt must be a non-negative safe integer',
+    );
+  });
+
   it('builds and validates hello / ready frames with explicit version and capabilities', () => {
     const hello = buildTerminalMuxHello('android-client-1');
     expect(hello).toEqual({

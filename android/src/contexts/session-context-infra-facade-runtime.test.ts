@@ -108,7 +108,7 @@ describe('wrapSessionPayloadForTargetMuxRuntime', () => {
     });
   });
 
-  it('maps target, ping, and close messages to mux target-level frames without rebuilding sockets', () => {
+  it('maps target and close messages to mux target-level frames without rebuilding sockets', () => {
     const { store, targetSocket } = createMuxStore();
 
     expect(unwrap(wrapSessionPayloadForTargetMuxRuntime({
@@ -121,17 +121,6 @@ describe('wrapSessionPayloadForTargetMuxRuntime', () => {
       payload: {
         message: { type: 'list-sessions' },
       },
-    });
-
-    expect(unwrap(wrapSessionPayloadForTargetMuxRuntime({
-      store,
-      sessionId: 'session-1',
-      ws: targetSocket as any,
-      data: JSON.stringify({ type: 'ping' }),
-      now: 1234,
-    }))).toEqual({
-      type: 'mux-ping',
-      payload: { sentAt: 1234 },
     });
 
     expect(unwrap(wrapSessionPayloadForTargetMuxRuntime({

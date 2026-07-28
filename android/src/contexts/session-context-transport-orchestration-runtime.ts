@@ -26,7 +26,16 @@ import {
   bindTargetMuxTransportSocketLifecycleRuntime,
   handleTargetMuxServerFrameRuntime,
 } from './session-context-transport-runtime';
-import type { TerminalMuxTargetServerMessage } from '@zterm/shared/protocol';
+import {
+  buildTerminalMuxPing,
+  type TerminalMuxTargetServerMessage,
+} from '@zterm/shared/protocol';
+import type {
+  SessionTargetNetworkProbeFailure,
+  SessionTargetNetworkProbeRuntime,
+  SessionTargetNetworkProbeResult,
+  SessionTargetNetworkSignal,
+} from './session-context-target-network-probe-runtime';
 import {
   applyTransportOpenConnectedEffectsRuntime,
   applyTransportOpenLiveFailureEffectsRuntime,
@@ -148,6 +157,130 @@ export function handleTargetMuxTransportFailureRuntime(options: {
   });
 }
 
+export function routeTargetSocketFailureRuntime(options: {
+  targetKey: string;
+  failedSocket: BridgeTransportSocket;
+  message: string;
+  readTargetTransportRuntime: (targetKey: string) => NetworkProbeTargetRuntime | null;
+  writeTargetTerminalSocket: (targetKey: string, socket: BridgeTransportSocket | null) => unknown;
+  writeTargetTerminalMuxReady: (targetKey: string, ready: boolean) => unknown;
+  clearHeartbeat: (sessionId: string, heartbeatOptions?: { heartbeatKey?: string }) => void;
+  handleAnchoredFailure: (anchorSessionId: string) => void;
+  runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
+}) {
+  const targetRuntime = options.readTargetTransportRuntime(options.targetKey);
+  if (!targetRuntime || targetRuntime.terminalTransport !== options.failedSocket) {
+    options.runtimeDebug('session.mux.target-transport-failure.stale-generation', {
+      targetKey: options.targetKey,
+      message: options.message,
+    });
+    return 'stale' as const;
+  }
+  const anchorSessionId = targetRuntime.sessionIds.find((sessionId) => sessionId.trim()) || null;
+  if (anchorSessionId) {
+    options.handleAnchoredFailure(anchorSessionId);
+    return 'anchored' as const;
+  }
+
+  options.failedSocket.reportFailure(options.message);
+  options.writeTargetTerminalMuxReady(options.targetKey, false);
+  options.writeTargetTerminalSocket(options.targetKey, null);
+  options.clearHeartbeat(options.targetKey, {
+    heartbeatKey: buildTargetTransportHeartbeatKey(options.targetKey),
+  });
+  if (options.failedSocket.readyState < WebSocket.CLOSING) {
+    options.failedSocket.close(4000, 'terminal mux target failed');
+  }
+  options.runtimeDebug('session.mux.target-transport-failed', {
+    targetKey: options.targetKey,
+    message: options.message,
+    affectedSessionCount: 0,
+    replaySessionIds: [],
+  });
+  return 'idle-retired' as const;
+}
+
+interface NetworkProbeTargetRuntime {
+  key: string;
+  sessionIds: string[];
+  terminalTransport: BridgeTransportSocket | null;
+}
+
+export interface TargetNetworkProbeOutcome {
+  targetKey: string;
+  result: SessionTargetNetworkProbeResult;
+}
+
+function projectTargetNetworkProbeFailureMessage(failure: SessionTargetNetworkProbeFailure): string {
+  switch (failure.type) {
+    case 'TargetNetworkProbeError01GenerationTimeout':
+      return 'network generation target probe timeout';
+    case 'TargetNetworkProbeError02SendFailure':
+      return 'network generation target probe send failed';
+    default: {
+      const unreachableFailure: never = failure;
+      throw new Error(`unhandled target network probe failure: ${String(unreachableFailure)}`);
+    }
+  }
+}
+
+export function notifyTargetNetworkSignalRuntime(options: {
+  signal: SessionTargetNetworkSignal;
+  targetRuntimes: NetworkProbeTargetRuntime[];
+  targetNetworkProbeRuntime: SessionTargetNetworkProbeRuntime;
+  sendTargetProbe: (
+    targetKey: string,
+    socket: BridgeTransportSocket,
+    sentAt: number,
+  ) => void;
+  submitTargetSocketFailure: (
+    targetKey: string,
+    socket: BridgeTransportSocket,
+    message: string,
+  ) => void;
+  runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
+}) {
+  const outcomes: TargetNetworkProbeOutcome[] = [];
+  for (const targetRuntime of options.targetRuntimes) {
+    const socket = targetRuntime.terminalTransport;
+    if (!socket) {
+      continue;
+    }
+
+    const result = options.targetNetworkProbeRuntime.probe({
+      targetKey: targetRuntime.key,
+      socket,
+      sendProbe: (probeSocket, sentAt) => {
+        options.sendTargetProbe(targetRuntime.key, probeSocket, sentAt);
+      },
+      onFailure: (failure) => {
+        options.submitTargetSocketFailure(
+          failure.targetKey,
+          failure.socket,
+          projectTargetNetworkProbeFailureMessage(failure),
+        );
+      },
+    });
+    const outcome: TargetNetworkProbeOutcome = {
+      targetKey: targetRuntime.key,
+      result,
+    };
+    outcomes.push(outcome);
+    const signalMetadata = options.signal.source === 'foreground-resume'
+      ? { source: options.signal.source }
+      : {
+        source: options.signal.source,
+        connected: options.signal.connected,
+        connectionType: options.signal.connectionType,
+      };
+    options.runtimeDebug('session.target-network-probe.signal', {
+      ...outcome,
+      ...signalMetadata,
+    });
+  }
+  return outcomes;
+}
+
 export function createSessionTransportOrchestrationRuntime(options: {
   stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null; liveSessionIds?: string[] }>;
   readSessionBufferSnapshot: (sessionId: string) => SessionBufferState;
@@ -158,6 +291,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
     pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, PendingSessionTransportOpenIntent>>;
     reconnectStore: SessionReconnectStore;
     heartbeatStore: SessionHeartbeatStore;
+    targetNetworkProbeRuntime: SessionTargetNetworkProbeRuntime;
     sessionDebugMetricsStoreRef: MutableRefObject<{
       recordRxBytes: (sessionId: string, data: string | ArrayBuffer) => void;
     }>;
@@ -182,6 +316,9 @@ export function createSessionTransportOrchestrationRuntime(options: {
       markCompleted: () => boolean;
     }) => { shouldContinue: boolean; manualClosed: boolean }) | null>;
   };
+  readTargetTransportRuntimes: () => NetworkProbeTargetRuntime[];
+  readTargetTransportRuntime: (targetKey: string) => NetworkProbeTargetRuntime | null;
+  readTargetTerminalSocket: (targetKey: string) => BridgeTransportSocket | null;
   readSessionTargetControlSocket: (sessionId: string) => BridgeTransportSocket | null;
   readSessionTargetTerminalSocket: (sessionId: string) => BridgeTransportSocket | null;
   readSessionTargetTerminalMuxReady: (sessionId: string) => boolean;
@@ -198,7 +335,18 @@ export function createSessionTransportOrchestrationRuntime(options: {
     closedAt: number | null;
   } | null;
   readSessionIdForTerminalChannel: (anchorSessionId: string, channelId: string) => string | null;
+  readTargetSessionIdForTerminalChannel: (targetKey: string, channelId: string) => string | null;
   readOpeningSessionTerminalChannelsForTarget: (anchorSessionId: string) => Array<{
+    channelId: string;
+    sessionId: string;
+    sessionName: string;
+    targetKey: string;
+    state: 'opening' | 'open' | 'closing' | 'closed';
+    bodySubscribed: boolean;
+    openedAt: number;
+    closedAt: number | null;
+  }>;
+  readOpeningTerminalChannelsForTarget: (targetKey: string) => Array<{
     channelId: string;
     sessionId: string;
     sessionName: string;
@@ -216,6 +364,8 @@ export function createSessionTransportOrchestrationRuntime(options: {
   writeSessionTargetControlSocket: (sessionId: string, socket: BridgeTransportSocket | null) => unknown;
   writeSessionTargetTerminalSocket: (sessionId: string, socket: BridgeTransportSocket | null) => unknown;
   writeSessionTargetTerminalMuxReady: (sessionId: string, ready: boolean) => unknown;
+  writeTargetTerminalSocket: (targetKey: string, socket: BridgeTransportSocket | null) => unknown;
+  writeTargetTerminalMuxReady: (targetKey: string, ready: boolean) => unknown;
   writeSessionTransportSocket: (sessionId: string, socket: BridgeTransportSocket | null) => unknown;
   ensureSessionTerminalChannel: (sessionId: string, options?: { channelId?: string; now?: number; bodySubscribed?: boolean }) => {
     channelId: string;
@@ -443,6 +593,39 @@ export function createSessionTransportOrchestrationRuntime(options: {
     };
   };
 
+  const submitTargetSocketFailure = (
+    targetKey: string,
+    failedSocket: BridgeTransportSocket,
+    message: string,
+  ) => {
+    routeTargetSocketFailureRuntime({
+      targetKey,
+      failedSocket,
+      message,
+      readTargetTransportRuntime: options.readTargetTransportRuntime,
+      writeTargetTerminalSocket: options.writeTargetTerminalSocket,
+      writeTargetTerminalMuxReady: options.writeTargetTerminalMuxReady,
+      clearHeartbeat: options.clearHeartbeat,
+      runtimeDebug: options.runtimeDebug,
+      handleAnchoredFailure: (anchorSessionId) => handleTargetMuxTransportFailureRuntime({
+        anchorSessionId,
+        message,
+        failedSocket,
+        readSessionTargetRuntime: options.readSessionTargetRuntime,
+        readSessionTerminalChannel: options.readSessionTerminalChannel,
+        writeSessionTerminalChannelState: options.writeSessionTerminalChannelState,
+        writeSessionTargetTerminalSocket: options.writeSessionTargetTerminalSocket,
+        writeSessionTargetTerminalMuxReady: options.writeSessionTargetTerminalMuxReady,
+        clearHeartbeat: options.clearHeartbeat,
+        clearSessionHandshakeTimeout: options.clearSessionHandshakeTimeout,
+        pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
+        updateSessionSync: options.updateSessionSync,
+        scheduleReconnect,
+        runtimeDebug: options.runtimeDebug,
+      }),
+    });
+  };
+
   const bindTargetMuxTransportSocketLifecycle = (bindOptions: {
     sessionId: string;
     host: Host;
@@ -454,41 +637,30 @@ export function createSessionTransportOrchestrationRuntime(options: {
     const targetHeartbeatKey = targetKey ? buildTargetTransportHeartbeatKey(targetKey) : '';
     bindTargetMuxTransportSocketLifecycleRuntime({
       sessionId: bindOptions.sessionId,
+      targetKey,
       targetHeartbeatKey,
       host: bindOptions.host,
       ws: bindOptions.ws,
       debugScope: bindOptions.debugScope,
-      readSessionTargetTerminalSocket: options.readSessionTargetTerminalSocket,
+      readTargetTerminalSocket: options.readTargetTerminalSocket,
       readRequestedTerminalGeometry: options.readRequestedTerminalGeometry,
-      getOpeningSessionTerminalChannelsForTarget: options.readOpeningSessionTerminalChannelsForTarget,
-      setSessionTargetMuxReady: options.writeSessionTargetTerminalMuxReady,
+      getOpeningTerminalChannelsForTarget: options.readOpeningTerminalChannelsForTarget,
+      setTargetMuxReady: options.writeTargetTerminalMuxReady,
       sendSocketPayload: options.sendSocketPayload,
       applyTransportDiagnostics: options.applyTransportDiagnostics,
       startSocketHeartbeat: options.startSocketHeartbeat,
       recordTargetServerActivity: (heartbeatKey) => {
         options.refs.heartbeatStore.recordServerActivity(heartbeatKey, Date.now());
+        if (targetKey) {
+          options.refs.targetNetworkProbeRuntime.recordTargetActivity(targetKey, bindOptions.ws);
+        }
       },
       recordTargetPong: (heartbeatKey) => {
         options.refs.heartbeatStore.recordPong(heartbeatKey, Date.now());
       },
       runtimeDebug: options.runtimeDebug,
       finalizeFailure: (message) => {
-        handleTargetMuxTransportFailureRuntime({
-          anchorSessionId: bindOptions.sessionId,
-          message,
-          failedSocket: bindOptions.ws,
-          readSessionTargetRuntime: options.readSessionTargetRuntime,
-          readSessionTerminalChannel: options.readSessionTerminalChannel,
-          writeSessionTerminalChannelState: options.writeSessionTerminalChannelState,
-          writeSessionTargetTerminalSocket: options.writeSessionTargetTerminalSocket,
-          writeSessionTargetTerminalMuxReady: options.writeSessionTargetTerminalMuxReady,
-          clearHeartbeat: options.clearHeartbeat,
-          clearSessionHandshakeTimeout: options.clearSessionHandshakeTimeout,
-          pendingSessionTransportOpenIntentsRef: options.refs.pendingSessionTransportOpenIntentsRef,
-          updateSessionSync: options.updateSessionSync,
-          scheduleReconnect,
-          runtimeDebug: options.runtimeDebug,
-        });
+        submitTargetSocketFailure(targetKey, bindOptions.ws, message);
       },
       handleTargetMuxServerFrame: (frame, rawFrameBytes, rawFrameData) => {
         handleTargetMuxServerFrameRuntime({
@@ -499,7 +671,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
           rawFrameBytes,
           rawFrameData,
           frame,
-          resolveSessionIdForChannel: (channelId) => options.readSessionIdForTerminalChannel(bindOptions.sessionId, channelId),
+          resolveSessionIdForChannel: (channelId) => options.readTargetSessionIdForTerminalChannel(targetKey, channelId),
           readSessionTerminalChannelBodySubscribed: (sessionId) => (
             options.readSessionTerminalChannel(sessionId)?.bodySubscribed ?? null
           ),
@@ -533,6 +705,19 @@ export function createSessionTransportOrchestrationRuntime(options: {
       return ws;
     },
   });
+
+  const notifyTargetNetworkSignal = (signal: SessionTargetNetworkSignal) => (
+    notifyTargetNetworkSignalRuntime({
+      signal,
+      targetRuntimes: options.readTargetTransportRuntimes(),
+      targetNetworkProbeRuntime: options.refs.targetNetworkProbeRuntime,
+      sendTargetProbe: (_targetKey, probeSocket, sentAt) => {
+        probeSocket.send(JSON.stringify(buildTerminalMuxPing(sentAt)));
+      },
+      submitTargetSocketFailure,
+      runtimeDebug: options.runtimeDebug,
+    })
+  );
 
   function openSessionMuxChannelByIntent(intent: PendingSessionTransportOpenIntent) {
     options.clearSessionHandshakeTimeout(intent.sessionId);
@@ -765,6 +950,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
     cleanupSocket,
     scheduleReconnect,
     queueConnectTransportOpenIntent,
+    notifyTargetNetworkSignal,
     sendTerminalResize,
   };
 }
