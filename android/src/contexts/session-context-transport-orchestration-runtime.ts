@@ -346,7 +346,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
     openedAt: number;
     closedAt: number | null;
   }>;
-  readOpeningTerminalChannelsForTarget: (targetKey: string) => Array<{
+  readOpeningTerminalChannelsForTarget: (targetKey: string, prioritySessionId?: string | null) => Array<{
     channelId: string;
     sessionId: string;
     sessionName: string;
@@ -645,6 +645,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
       readTargetTerminalSocket: options.readTargetTerminalSocket,
       readRequestedTerminalGeometry: options.readRequestedTerminalGeometry,
       getOpeningTerminalChannelsForTarget: options.readOpeningTerminalChannelsForTarget,
+      readPrioritySessionId: () => options.stateRef.current.activeSessionId,
       setTargetMuxReady: options.writeTargetTerminalMuxReady,
       sendSocketPayload: options.sendSocketPayload,
       applyTransportDiagnostics: options.applyTransportDiagnostics,

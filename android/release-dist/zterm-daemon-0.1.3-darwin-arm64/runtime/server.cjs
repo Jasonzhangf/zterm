@@ -5046,7 +5046,7 @@ var import_websocket_server = __toESM(require_websocket_server(), 1);
 // src/server/server.ts
 var import_http = require("http");
 var import_path6 = require("path");
-var import_os4 = require("os");
+var import_os5 = require("os");
 
 // ../packages/shared/src/connection/mobile-config.ts
 var MOBILE_BRIDGE_CONFIG = {
@@ -5215,6 +5215,125 @@ function resolveDaemonRuntimeConfig(options) {
   };
 }
 
+// src/server/daemon-connection-endpoint-runtime.ts
+var import_net = require("net");
+var import_os2 = require("os");
+function parseIpv4Octets(address) {
+  if ((0, import_net.isIP)(address) !== 4) {
+    return null;
+  }
+  const octets = address.split(".").map((part) => Number.parseInt(part, 10));
+  return octets.length === 4 && octets.every((part) => Number.isInteger(part) && part >= 0 && part <= 255) ? octets : null;
+}
+function isTailscaleIpv4(address) {
+  const octets = parseIpv4Octets(address);
+  return Boolean(octets && octets[0] === 100 && octets[1] >= 64 && octets[1] <= 127);
+}
+function isPrivateLanIpv4(address) {
+  const octets = parseIpv4Octets(address);
+  if (!octets) {
+    return false;
+  }
+  const [first, second] = octets;
+  if (first === 10 || first === 172 && second >= 16 && second <= 31 || first === 192 && second === 168) {
+    return true;
+  }
+  return false;
+}
+function normalizePort(value) {
+  if (!Number.isFinite(value)) {
+    throw new Error("daemon endpoint port must be finite");
+  }
+  const port = Math.floor(value);
+  if (port < 1 || port > 65535) {
+    throw new Error(`daemon endpoint port out of range: ${value}`);
+  }
+  return port;
+}
+function normalizePublicUdpEndpoint(input) {
+  if (!input) {
+    return null;
+  }
+  const host = input.host.trim();
+  if (!host || (0, import_net.isIP)(host) === 0) {
+    throw new Error("daemon public UDP endpoint host must be an IP address");
+  }
+  return {
+    host,
+    port: normalizePort(input.port)
+  };
+}
+function listInterfaceAddresses(interfaces) {
+  const addresses = [];
+  for (const entries of Object.values(interfaces)) {
+    for (const entry of entries || []) {
+      const family = entry.family === 4 ? "IPv4" : entry.family === 6 ? "IPv6" : entry.family;
+      const address = entry.address.trim();
+      if (entry.internal || family !== "IPv4" || !address || address === "0.0.0.0") {
+        continue;
+      }
+      addresses.push(address);
+    }
+  }
+  return [...new Set(addresses)].sort((left, right) => left.localeCompare(right));
+}
+function buildDaemonConnectionEndpointCandidates(options) {
+  const hostId = options.hostId.trim();
+  if (!hostId) {
+    throw new Error("daemon endpoint publication requires hostId");
+  }
+  const bridgePort = normalizePort(options.bridgePort);
+  const now = options.now.trim();
+  if (!now) {
+    throw new Error("daemon endpoint publication requires timestamp");
+  }
+  const addresses = listInterfaceAddresses(
+    options.interfaces || (0, import_os2.networkInterfaces)()
+  );
+  const lanAddresses = addresses.filter((address) => isPrivateLanIpv4(address) && !isTailscaleIpv4(address));
+  const tailscaleAddresses = addresses.filter(isTailscaleIpv4);
+  const publicUdpEndpoint = normalizePublicUdpEndpoint(options.publicUdpEndpoint);
+  const candidates = lanAddresses.map((host) => ({
+    id: `lan:${host}:${bridgePort}`,
+    kind: "lan",
+    host,
+    port: bridgePort,
+    authRequired: true,
+    lastSeenAt: now
+  }));
+  candidates.push(publicUdpEndpoint ? {
+    id: `rtc-direct:${publicUdpEndpoint.host}:${publicUdpEndpoint.port}`,
+    kind: "rtc-direct",
+    host: publicUdpEndpoint.host,
+    port: publicUdpEndpoint.port,
+    relayHostId: hostId,
+    authRequired: true,
+    lastSeenAt: now
+  } : {
+    id: `rtc-direct:${hostId}`,
+    kind: "rtc-direct",
+    relayHostId: hostId,
+    authRequired: true,
+    lastSeenAt: now
+  });
+  candidates.push(...tailscaleAddresses.map((host) => ({
+    id: `tailscale:${host}:${bridgePort}`,
+    kind: "tailscale",
+    host,
+    port: bridgePort,
+    authRequired: true,
+    lastSeenAt: now
+  })));
+  candidates.push({
+    id: `relay-rtc:${hostId}`,
+    kind: "relay-rtc",
+    relayHostId: hostId,
+    authRequired: true,
+    lastSeenAt: now
+  });
+  return candidates;
+}
+
 // src/server/relay-client.ts
 function asString2(value) {
   return typeof value === "string" ? value.trim() : "";
@@ -5238,17 +5357,6 @@ function buildWsUrl(base, relativePath) {
   }
   return url;
 }
-function buildRelayEndpointCandidates(config, now) {
-  return [
-    {
-      id: `relay-rtc:${config.hostId}`,
-      kind: "relay-rtc",
-      relayHostId: config.hostId,
-      authRequired: true,
-      lastSeenAt: now
-    }
-  ];
-}
 function buildRelayTmuxSessionSnapshots(sessionNames, now) {
   const seen = /* @__PURE__ */ new Set();
   const sessions2 = [];
@@ -5269,7 +5377,7 @@ function buildRelayDirectoryUpdateEnvelope(options) {
   return {
     type: "directory-update",
     directory: {
-      endpoints: buildRelayEndpointCandidates(options.config, options.now),
+      endpoints: options.endpoints,
       sessions: buildRelayTmuxSessionSnapshots(options.sessionNames, options.now),
       publishedAt: options.now
     }
@@ -5279,7 +5387,7 @@ function publishRelayDirectoryUpdate(options) {
   try {
     const now = options.now();
     const envelope = buildRelayDirectoryUpdateEnvelope({
-      config: options.config,
+      endpoints: options.listEndpointCandidates(now),
       sessionNames: options.listTmuxSessions(),
       now
     });
@@ -5377,7 +5485,7 @@ function createTraversalRelayHostClient(options) {
             console.log(`[${(/* @__PURE__ */ new Date()).toISOString()}] traversal relay ready for host ${envelope.hostId || config.hostId}`);
             const publishResult = publishRelayDirectoryUpdate({
               socket: nextSocket,
-              config,
+              listEndpointCandidates: options.listEndpointCandidates,
               listTmuxSessions: options.listTmuxSessions,
               now: options.now || (() => (/* @__PURE__ */ new Date()).toISOString())
             });
@@ -6607,9 +6715,9 @@ function resolveDebugRouteLimit(input) {
 // src/server/schedule-store.ts
 var import_fs2 = require("fs");
 var import_path2 = require("path");
-var import_os2 = require("os");
+var import_os3 = require("os");
 var CURRENT_SCHEMA_VERSION = 1;
-function getScheduleStorePath(homeDir = (0, import_os2.homedir)()) {
+function getScheduleStorePath(homeDir = (0, import_os3.homedir)()) {
   return (0, import_path2.join)(getWtermHomeDir(homeDir), "schedules.json");
 }
 function loadScheduleStore(storePath = getScheduleStorePath()) {
@@ -6819,6 +6927,11 @@ function releaseMirrorSubscribers(sessions2, subscriberIds) {
   }
   return releasedSessionIds;
 }
+
+// ../packages/shared/src/connection/types.ts
+var TERMINAL_BUFFER_SYNC_MESSAGE_MAX_BYTES = 128e3;
+var TERMINAL_BUFFER_SYNC_FRAME_MAX_SPAN_LINES = 4096;
+var TERMINAL_BUFFER_SYNC_FRAME_MAX_RETAINED_BYTES = 64 * 1024 * 1024;
 
 // ../packages/shared/src/connection/terminal-buffer.ts
 function cellsToLine(cells) {
@@ -7175,9 +7288,9 @@ var MIRROR_LIVE_SYNC_ACTIVE_MS = 33;
 var MIRROR_LIVE_SYNC_IDLE_MS = 120;
 var ADAPTIVE_WIDTH_LEASE_TTL_MS = 65e3;
 var SUBSCRIBER_PENDING_RANGE_LIMIT = 64;
-var SUBSCRIBER_PENDING_SPAN_LINE_LIMIT = 4096;
+var SUBSCRIBER_PENDING_SPAN_LINE_LIMIT = TERMINAL_BUFFER_SYNC_FRAME_MAX_SPAN_LINES;
 var SUBSCRIBER_PENDING_AGE_LIMIT_MS = 15e3;
-var SUBSCRIBER_BUFFER_SYNC_MAX_BYTES = 128e3;
+var SUBSCRIBER_BUFFER_SYNC_MAX_BYTES = TERMINAL_BUFFER_SYNC_MESSAGE_MAX_BYTES;
 function getWireLineAbsoluteIndex(line) {
   if (!line) {
     return null;
@@ -8688,8 +8801,30 @@ function createTerminalFileTransferBinaryRuntime(deps) {
       deps.sendMessage(session, { type: "file-upload-error", payload: { requestId, error: "No pending upload" } });
       return;
     }
-    upload.chunks.set(chunkIndex, Buffer.from(dataBase64, "base64"));
-    upload.receivedChunks += 1;
+    if (!Number.isInteger(chunkIndex) || chunkIndex < 0 || chunkIndex >= upload.totalChunks) {
+      pendingUploads.delete(requestId);
+      deps.sendMessage(session, {
+        type: "file-upload-error",
+        payload: { requestId, error: `Invalid chunk index ${chunkIndex} for ${upload.totalChunks} chunks` }
+      });
+      return;
+    }
+    const chunk = Buffer.from(dataBase64, "base64");
+    const existing = upload.chunks.get(chunkIndex);
+    if (existing && !existing.equals(chunk)) {
+      pendingUploads.delete(requestId);
+      deps.sendMessage(session, {
+        type: "file-upload-error",
+        payload: { requestId, error: `Conflicting duplicate chunk ${chunkIndex}` }
+      });
+      return;
+    }
+    if (!existing) {
+      upload.chunks.set(chunkIndex, chunk);
+    }
+    while (upload.chunks.has(upload.receivedChunks)) {
+      upload.receivedChunks += 1;
+    }
     deps.sendMessage(session, {
       type: "file-upload-progress",
       payload: { requestId, chunkIndex: upload.receivedChunks, totalChunks: upload.totalChunks }
@@ -8703,6 +8838,11 @@ function createTerminalFileTransferBinaryRuntime(deps) {
       return;
     }
     try {
+      if (upload.receivedChunks !== upload.totalChunks || upload.chunks.size !== upload.totalChunks) {
+        throw new Error(
+          `Upload incomplete: acknowledged ${upload.receivedChunks} of ${upload.totalChunks} chunks`
+        );
+      }
       const sortedChunks = [];
       for (let i = 0; i < upload.totalChunks; i += 1) {
         const chunk = upload.chunks.get(i);
@@ -8713,10 +8853,21 @@ function createTerminalFileTransferBinaryRuntime(deps) {
       }
       const filePath = (0, import_path3.join)(upload.targetDir, upload.fileName);
       const fileBuffer = Buffer.concat(sortedChunks);
+      if (fileBuffer.length !== upload.fileSize) {
+        throw new Error(
+          `Upload size mismatch: received ${fileBuffer.length} bytes, expected ${upload.fileSize}`
+        );
+      }
       (0, import_fs3.writeFileSync)(filePath, fileBuffer);
+      const persistedBytes = (0, import_fs3.statSync)(filePath).size;
+      if (persistedBytes !== upload.fileSize) {
+        throw new Error(
+          `Upload persisted size mismatch: wrote ${persistedBytes} bytes, expected ${upload.fileSize}`
+        );
+      }
       deps.sendMessage(session, {
         type: "file-upload-complete",
-        payload: { requestId, filePath, bytes: fileBuffer.length }
+        payload: { requestId, filePath, bytes: persistedBytes }
       });
     } catch (error) {
       deps.sendMessage(session, {
@@ -11455,7 +11606,7 @@ function createTerminalScheduleRuntime(deps) {
 
 // src/server/terminal-control-runtime.ts
 var import_child_process = require("child_process");
-var import_os3 = require("os");
+var import_os4 = require("os");
 function createTerminalControlRuntime(deps) {
   const liveMirrorInputBatches = /* @__PURE__ */ new Map();
   function cleanEnv() {
@@ -11491,7 +11642,7 @@ function createTerminalControlRuntime(deps) {
     }
     const result = (0, import_child_process.spawnSync)(deps.tmuxBinary, args, {
       encoding: "utf-8",
-      cwd: process.env.HOME || (0, import_os3.homedir)(),
+      cwd: process.env.HOME || (0, import_os4.homedir)(),
       env: cleanEnv()
     });
     if (result.error) {
@@ -11509,7 +11660,7 @@ function createTerminalControlRuntime(deps) {
   function runCommand(command, args) {
     const result = (0, import_child_process.spawnSync)(command, args, {
       encoding: "utf-8",
-      cwd: process.env.HOME || (0, import_os3.homedir)(),
+      cwd: process.env.HOME || (0, import_os4.homedir)(),
       env: cleanEnv()
     });
     if (result.error) {
@@ -11526,7 +11677,7 @@ function createTerminalControlRuntime(deps) {
     }
     return new Promise((resolve4, reject) => {
       const child = (0, import_child_process.spawn)(deps.tmuxBinary, args, {
-        cwd: process.env.HOME || (0, import_os3.homedir)(),
+        cwd: process.env.HOME || (0, import_os4.homedir)(),
         env: cleanEnv(),
         stdio: ["ignore", "pipe", "pipe"]
       });
@@ -16311,10 +16462,10 @@ var HIDDEN_TMUX_SESSIONS = /* @__PURE__ */ new Set([DAEMON_SESSION_NAME, DEFAULT
 var AUTO_COMMAND_DELAY_MS = 180;
 var REQUIRED_AUTH_TOKEN = DAEMON_CONFIG.authToken;
 var MAX_CAPTURED_SCROLLBACK_LINES = DAEMON_CONFIG.terminalCacheLines;
-var WTERM_HOME_DIR = getWtermHomeDir((0, import_os4.homedir)());
-var UPDATES_DIR = getWtermUpdatesDir((0, import_os4.homedir)());
+var WTERM_HOME_DIR = getWtermHomeDir((0, import_os5.homedir)());
+var UPDATES_DIR = getWtermUpdatesDir((0, import_os5.homedir)());
 var UPLOAD_DIR = (0, import_path6.join)(WTERM_HOME_DIR, "uploads");
-var DOWNLOADS_DIR = (0, import_path6.join)((0, import_os4.homedir)(), "Downloads", "zterm");
+var DOWNLOADS_DIR = (0, import_path6.join)((0, import_os5.homedir)(), "Downloads", "zterm");
 var LOG_DIR = (0, import_path6.join)(WTERM_HOME_DIR, "logs");
 var APP_UPDATE_VERSION_CODE = Number.parseInt(process.env.ZTERM_APP_UPDATE_VERSION_CODE || "", 10);
 var APP_UPDATE_VERSION_NAME = (process.env.ZTERM_APP_UPDATE_VERSION_NAME || "").trim();
@@ -16652,6 +16803,11 @@ var relayHostClient = createTraversalRelayHostClient({
   config: DAEMON_CONFIG.relay,
   handleRelaySignal,
   closeRelayPeer,
+  listEndpointCandidates: (now) => buildDaemonConnectionEndpointCandidates({
+    hostId: DAEMON_CONFIG.daemonHostId,
+    bridgePort: PORT,
+    now
+  }),
   listTmuxSessions
 });
 wss.on("connection", handleWebSocketConnection);

@@ -69,7 +69,10 @@ export interface SessionContextTransportAccessors {
   readSessionIdForTerminalChannel: (anchorSessionId: string, channelId: string) => string | null;
   readTargetSessionIdForTerminalChannel: (targetKey: string, channelId: string) => string | null;
   readOpeningSessionTerminalChannelsForTarget: (anchorSessionId: string) => ReturnType<typeof getOpeningSessionTerminalChannelsForTarget>;
-  readOpeningTerminalChannelsForTarget: (targetKey: string) => ReturnType<typeof getOpeningSessionTerminalChannelsForTarget>;
+  readOpeningTerminalChannelsForTarget: (
+    targetKey: string,
+    prioritySessionId?: string | null,
+  ) => ReturnType<typeof getOpeningSessionTerminalChannelsForTarget>;
   readSessionRequestedTerminalGeometry: (sessionId: string) => ReturnType<typeof getSessionRequestedTerminalGeometry>;
   writeSessionTransportHost: (sessionId: string, host: Host) => ReturnType<typeof upsertSessionTransportRuntime>;
   writeSessionTransportSocket: (sessionId: string, socket: BridgeTransportSocket | null) => ReturnType<typeof setSessionTransportSocket>;
@@ -172,8 +175,8 @@ export function createSessionContextTransportAccessors(
       const targetKey = getSessionTransportTargetKey(storeRef.current, anchorSessionId);
       return targetKey ? getOpeningSessionTerminalChannelsForTarget(storeRef.current, targetKey, anchorSessionId) : [];
     },
-    readOpeningTerminalChannelsForTarget: (targetKey) => (
-      getOpeningSessionTerminalChannelsForTarget(storeRef.current, targetKey)
+    readOpeningTerminalChannelsForTarget: (targetKey, prioritySessionId) => (
+      getOpeningSessionTerminalChannelsForTarget(storeRef.current, targetKey, prioritySessionId)
     ),
     readSessionRequestedTerminalGeometry: (sessionId) => getSessionRequestedTerminalGeometry(storeRef.current, sessionId),
     writeSessionTransportHost: (sessionId, host) => upsertSessionTransportRuntime(storeRef.current, sessionId, host),
@@ -376,7 +379,11 @@ export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
   readRequestedTerminalGeometry: (
     sessionId: string,
   ) => { cols?: number | null; rows?: number | null; widthMode?: 'adaptive-phone' | 'mirror-fixed' } | null;
-  getOpeningTerminalChannelsForTarget: (targetKey: string) => SessionTerminalChannelRuntime[];
+  getOpeningTerminalChannelsForTarget: (
+    targetKey: string,
+    prioritySessionId: string,
+  ) => SessionTerminalChannelRuntime[];
+  readPrioritySessionId: () => string | null;
   setTargetMuxReady: (targetKey: string, ready: boolean) => unknown;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   handleTargetMuxServerFrame: (
@@ -448,11 +455,21 @@ export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
         options.recordTargetPong?.(options.targetHeartbeatKey);
       }
       if (parsed.type === 'mux-ready') {
+        const prioritySessionId = options.readPrioritySessionId();
+        if (!prioritySessionId?.trim()) {
+          finalizeTargetFailure('missing active session for terminal mux channel priority', true);
+          return;
+        }
+        const openingChannels = options.getOpeningTerminalChannelsForTarget(options.targetKey, prioritySessionId);
+        if (!openingChannels.some((channel) => channel.sessionId === prioritySessionId)) {
+          finalizeTargetFailure('active session is not opening on terminal mux target', true);
+          return;
+        }
         options.setTargetMuxReady(options.targetKey, true);
         options.runtimeDebug(`session.mux.${options.debugScope}.ready`, {
           sessionId: options.sessionId,
         });
-        for (const channel of options.getOpeningTerminalChannelsForTarget(options.targetKey)) {
+        for (const channel of openingChannels) {
           sendSessionMuxChannelOpenRuntime({
             sessionId: channel.sessionId,
             ws: options.ws,

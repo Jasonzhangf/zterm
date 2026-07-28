@@ -28,7 +28,7 @@ vi.mock("../../plugins/StoragePermissionPlugin", () => ({
     }),
     mkdir: vi.fn().mockResolvedValue(undefined),
     writeFile: vi.fn().mockResolvedValue(undefined),
-    writeFileChunk: vi.fn().mockResolvedValue({ bytesWritten: 0 }),
+    writeFileChunks: vi.fn().mockResolvedValue({ bytesWritten: 0 }),
     readFileChunk: vi.fn().mockResolvedValue({
       data: "",
       bytesRead: 0,
@@ -77,8 +77,8 @@ afterEach(() => {
   vi.mocked(StoragePermissionPlugin.writeFile).mockResolvedValue(
     undefined as any,
   );
-  vi.mocked(StoragePermissionPlugin.writeFileChunk).mockClear();
-  vi.mocked(StoragePermissionPlugin.writeFileChunk).mockResolvedValue({
+  vi.mocked(StoragePermissionPlugin.writeFileChunks).mockClear();
+  vi.mocked(StoragePermissionPlugin.writeFileChunks).mockResolvedValue({
     bytesWritten: 0,
   } as any);
 });
@@ -470,15 +470,10 @@ describe("FileTransferSheet", () => {
     });
 
     await waitFor(() => {
-      expect(StoragePermissionPlugin.writeFileChunk).toHaveBeenNthCalledWith(1, {
+      expect(StoragePermissionPlugin.writeFileChunks).toHaveBeenNthCalledWith(1, {
         path: "/storage/emulated/0/Download/zterm/photo.png",
-        data: "aW1h",
+        chunks: ["aW1h", "Z2U="],
         append: false,
-      });
-      expect(StoragePermissionPlugin.writeFileChunk).toHaveBeenNthCalledWith(2, {
-        path: "/storage/emulated/0/Download/zterm/photo.png",
-        data: "Z2U=",
-        append: true,
       });
       expect(StoragePermissionPlugin.writeFile).not.toHaveBeenCalled();
       expect(StoragePermissionPlugin.stat).toHaveBeenCalledWith({

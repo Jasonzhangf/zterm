@@ -1,4 +1,4 @@
-import { mkdirSync, unlinkSync, writeFileSync } from 'fs';
+import { mkdirSync, statSync, unlinkSync, writeFileSync } from 'fs';
 import { extname, join } from 'path';
 import type {
   AttachFileStartPayload,
@@ -238,8 +238,31 @@ export function createTerminalFileTransferBinaryRuntime(
       return;
     }
 
-    upload.chunks.set(chunkIndex, Buffer.from(dataBase64, 'base64'));
-    upload.receivedChunks += 1;
+    if (!Number.isInteger(chunkIndex) || chunkIndex < 0 || chunkIndex >= upload.totalChunks) {
+      pendingUploads.delete(requestId);
+      deps.sendMessage(session, {
+        type: 'file-upload-error',
+        payload: { requestId, error: `Invalid chunk index ${chunkIndex} for ${upload.totalChunks} chunks` },
+      });
+      return;
+    }
+
+    const chunk = Buffer.from(dataBase64, 'base64');
+    const existing = upload.chunks.get(chunkIndex);
+    if (existing && !existing.equals(chunk)) {
+      pendingUploads.delete(requestId);
+      deps.sendMessage(session, {
+        type: 'file-upload-error',
+        payload: { requestId, error: `Conflicting duplicate chunk ${chunkIndex}` },
+      });
+      return;
+    }
+    if (!existing) {
+      upload.chunks.set(chunkIndex, chunk);
+    }
+    while (upload.chunks.has(upload.receivedChunks)) {
+      upload.receivedChunks += 1;
+    }
 
     deps.sendMessage(session, {
       type: 'file-upload-progress',
@@ -257,6 +280,11 @@ export function createTerminalFileTransferBinaryRuntime(
     }
 
     try {
+      if (upload.receivedChunks !== upload.totalChunks || upload.chunks.size !== upload.totalChunks) {
+        throw new Error(
+          `Upload incomplete: acknowledged ${upload.receivedChunks} of ${upload.totalChunks} chunks`,
+        );
+      }
       const sortedChunks: Buffer[] = [];
       for (let i = 0; i < upload.totalChunks; i += 1) {
         const chunk = upload.chunks.get(i);
@@ -268,11 +296,22 @@ export function createTerminalFileTransferBinaryRuntime(
 
       const filePath = join(upload.targetDir, upload.fileName);
       const fileBuffer = Buffer.concat(sortedChunks);
+      if (fileBuffer.length !== upload.fileSize) {
+        throw new Error(
+          `Upload size mismatch: received ${fileBuffer.length} bytes, expected ${upload.fileSize}`,
+        );
+      }
       writeFileSync(filePath, fileBuffer);
+      const persistedBytes = statSync(filePath).size;
+      if (persistedBytes !== upload.fileSize) {
+        throw new Error(
+          `Upload persisted size mismatch: wrote ${persistedBytes} bytes, expected ${upload.fileSize}`,
+        );
+      }
 
       deps.sendMessage(session, {
         type: 'file-upload-complete',
-        payload: { requestId, filePath, bytes: fileBuffer.length },
+        payload: { requestId, filePath, bytes: persistedBytes },
       });
     } catch (error) {
       deps.sendMessage(session, {

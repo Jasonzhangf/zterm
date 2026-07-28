@@ -1,0 +1,5 @@
+{
+  "schema_version": 1,
+  "upload_window_chunks": 8,
+  "native_write_batch_chunks": 8
+}

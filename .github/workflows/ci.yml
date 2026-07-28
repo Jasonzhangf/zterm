@@ -23,6 +23,11 @@ jobs:
           node-version: 20
           cache: pnpm
 
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -34,6 +39,12 @@ jobs:
 
       - name: Feature registry and architecture truth gates
         run: pnpm --dir android run test:feature-registry
+
+      - name: File-transfer throughput gate
+        run: pnpm --dir android run test:file-transfer:throughput
+
+      - name: Terminal atomic frame assembly gate
+        run: pnpm --dir android run test:terminal:frame-assembly
 
       - name: Transport network lifecycle gate
         run: pnpm --dir android run test:transport-network-lifecycle

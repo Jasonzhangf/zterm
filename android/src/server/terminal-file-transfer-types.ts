@@ -30,6 +30,7 @@ export interface PendingUploadState {
   fileSize: number;
   chunks: Map<number, Buffer>;
   totalChunks: number;
+  /** Number of unique chunks in the contiguous prefix [0, receivedChunks). */
   receivedChunks: number;
 }
 

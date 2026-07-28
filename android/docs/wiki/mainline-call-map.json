@@ -6,7 +6,7 @@
       "lifecycle_id": "android_mainline",
       "title": "Android Mainline",
       "entrypoint": "Native",
-      "return_path": "SocketMessage -> BufferApply -> RenderGate -> TerminalView",
+      "return_path": "SocketMessage -> BufferWireNormalize -> BufferSyncIngress -> BufferFrameAssembly -> BufferSparseApply -> RenderGate -> TerminalView",
       "owner_feature": "mainline_source.android",
       "canonical_docs": [
         "docs/wiki/mainline-source.md",
@@ -37,6 +37,22 @@
         {
           "id": "App",
           "label": "src/App.tsx"
+        },
+        {
+          "id": "RelayControlRuntime",
+          "label": "src/hooks/useRelayDeviceStream.ts#useRelayDeviceStream"
+        },
+        {
+          "id": "RelayControlSocket",
+          "label": "src/lib/traversal-relay-client.ts#connectTraversalRelayDevicesStream"
+        },
+        {
+          "id": "RelayDirectoryProjection",
+          "label": "src/lib/client-control-directory-runtime.ts#ClientControlDirectoryRuntime.applyConfirmedDirectoryDevices"
+        },
+        {
+          "id": "TransportTargetResolver",
+          "label": "src/lib/client-control-directory-runtime.ts#mergeHostWithClientControlDirectory"
         },
         {
           "id": "SessionContext",
@@ -83,8 +99,24 @@
           "label": "src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime"
         },
         {
-          "id": "BufferApply",
+          "id": "BufferWireNormalize",
+          "label": "src/contexts/session-wire-helpers.ts#normalizeIncomingBufferPayload"
+        },
+        {
+          "id": "BufferFrameAssembly",
+          "label": "src/contexts/session-buffer-frame-assembly.ts#assembleBufferSyncFrameChunk"
+        },
+        {
+          "id": "BufferHeadFrameExpiry",
+          "label": "src/contexts/session-context-buffer-runtime.ts#handleBufferHeadRuntime"
+        },
+        {
+          "id": "BufferSyncIngress",
           "label": "src/contexts/session-context-buffer-runtime.ts#applyIncomingBufferSyncRuntime"
+        },
+        {
+          "id": "BufferSparseApply",
+          "label": "src/contexts/session-context-buffer-runtime.ts#applyResolvedBufferSyncPayloadRuntime"
         },
         {
           "id": "PerformanceTrace",
@@ -109,6 +141,82 @@
         {
           "id": "QuickBar",
           "label": "src/components/terminal/TerminalQuickBar.tsx"
+        },
+        {
+          "id": "ClientFileTransferUploadOut01SheetIntent",
+          "label": "src/components/terminal/FileTransferSheet.tsx#FileTransferSheet"
+        },
+        {
+          "id": "ClientFileTransferUploadOut02BoundedWindow",
+          "label": "src/lib/file-transfer-throughput-runtime.ts#sendBoundedFileUploadChunks"
+        },
+        {
+          "id": "ClientFileTransferUploadOut03ChunkDispatch",
+          "label": "src/components/terminal/FileTransferSheet.tsx#dispatchUploadChunk"
+        },
+        {
+          "id": "ClientFileTransferUploadOut04MuxSend",
+          "label": "src/pages/TerminalPage.tsx#sendFileTransferMessage"
+        },
+        {
+          "id": "ClientFileTransferUploadAckIn01SocketDispatch",
+          "label": "src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime"
+        },
+        {
+          "id": "ClientFileTransferUploadAckIn02SessionProjection",
+          "label": "src/lib/file-transfer-session-runtime.ts#createFileTransferSessionRuntime"
+        },
+        {
+          "id": "ClientFileTransferDownloadIn01SocketDispatch",
+          "label": "src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime"
+        },
+        {
+          "id": "ClientFileTransferDownloadIn02SessionProjection",
+          "label": "src/lib/file-transfer-session-runtime.ts#createFileTransferSessionRuntime"
+        },
+        {
+          "id": "ClientFileTransferDownloadIn03SheetPersistence",
+          "label": "src/components/terminal/FileTransferSheet.tsx#FileTransferSheet"
+        },
+        {
+          "id": "ClientFileTransferDownloadIn04NativeWriteBatch",
+          "label": "src/lib/file-transfer-throughput-runtime.ts#writeFileTransferChunkBatches"
+        },
+        {
+          "id": "ClientFileTransferDownloadIn05NativeWriteDispatch",
+          "label": "src/components/terminal/FileTransferSheet.tsx#writeDownloadChunkBatch"
+        },
+        {
+          "id": "ClientFileTransferDownloadIn06NativeStore",
+          "label": "native/android/app/src/main/java/com/zterm/android/StoragePermissionPlugin.java#writeFileChunks"
+        },
+        {
+          "id": "ClientFileTransferDownloadPersistOut01BytesWritten",
+          "label": "native/android/app/src/main/java/com/zterm/android/StorageFileWriteLogic.java#writeChunks"
+        },
+        {
+          "id": "ClientFileTransferDownloadPersistOut02VerifiedStat",
+          "label": "src/components/terminal/FileTransferSheet.tsx#onDownloadComplete"
+        },
+        {
+          "id": "ClientFileTransferUploadErrorOut01WireFrameLimit",
+          "label": "src/components/terminal/FileTransferSheet.tsx#dispatchUploadChunk"
+        },
+        {
+          "id": "ClientFileTransferUploadErrorIn01ProgressTimeout",
+          "label": "src/lib/file-transfer-session-runtime.ts#waitForUploadProgress"
+        },
+        {
+          "id": "ClientFileTransferDownloadErrorIn01StaleRequest",
+          "label": "src/lib/file-transfer-session-runtime.ts#createFileTransferSessionRuntime"
+        },
+        {
+          "id": "ClientFileTransferDownloadErrorIn02NativeWriteFailure",
+          "label": "src/components/terminal/FileTransferSheet.tsx#onDownloadComplete"
+        },
+        {
+          "id": "ClientFileTransferDownloadErrorIn03SizeMismatch",
+          "label": "src/components/terminal/FileTransferSheet.tsx#onDownloadComplete"
         },
         {
           "id": "RemoteWindowOverlay",
@@ -227,6 +335,10 @@
           "label": "src/contexts/session-context-transport-runtime.ts#bindTargetMuxTransportSocketLifecycleRuntime"
         },
         {
+          "id": "ActiveSessionPriority",
+          "label": "src/contexts/session-context-transport-orchestration-runtime.ts#createSessionTransportOrchestrationRuntime (activeSessionId priority binding)"
+        },
+        {
           "id": "TargetNetworkActivityBinding",
           "label": "src/contexts/session-context-transport-orchestration-runtime.ts#createSessionTransportOrchestrationRuntime (recordTargetServerActivity binding)"
         },
@@ -260,6 +372,73 @@
         }
       ],
       "edges": [
+        {
+          "from": "App",
+          "to": "RelayControlRuntime",
+          "owner_feature": "relay.account_directory",
+          "semantic_input": "enabled authenticated Relay account state",
+          "semantic_output": "one process-lifetime Android Relay control runtime",
+          "status": "anchored",
+          "edge_id": "android_mainline:App->RelayControlRuntime",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.relay_control_connection",
+          "via_resources": [
+            "resource.relay_account_directory"
+          ],
+          "relation_status": "observer"
+        },
+        {
+          "from": "RelayControlRuntime",
+          "to": "RelayControlSocket",
+          "owner_feature": "relay.account_directory",
+          "semantic_input": "account control URL, token, and stable device identity",
+          "semantic_output": "role-scoped persistent control WebSocket",
+          "status": "anchored",
+          "edge_id": "android_mainline:RelayControlRuntime->RelayControlSocket",
+          "resource_from": "resource.relay_control_connection",
+          "resource_to": "resource.relay_control_connection",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "RelayControlSocket",
+          "to": "RelayDirectoryProjection",
+          "owner_feature": "relay.account_directory",
+          "semantic_input": "validated account directory snapshot or pushed endpoint update",
+          "semantic_output": "last confirmed per-daemon endpoint directory generation",
+          "status": "anchored",
+          "edge_id": "android_mainline:RelayControlSocket->RelayDirectoryProjection",
+          "resource_from": "resource.relay_control_connection",
+          "resource_to": "resource.relay_account_directory",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "RelayDirectoryProjection",
+          "to": "TransportTargetResolver",
+          "owner_feature": "relay.account_directory",
+          "semantic_input": "stable daemon id plus confirmed endpoint generation",
+          "semantic_output": "future transport target with current route candidates",
+          "status": "anchored",
+          "edge_id": "android_mainline:RelayDirectoryProjection->TransportTargetResolver",
+          "resource_from": "resource.relay_account_directory",
+          "resource_to": "resource.transport_target",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "TransportTargetResolver",
+          "to": "TraversalSocketFactory",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "resolved daemon target candidates for a new physical generation",
+          "semantic_output": "one traversal socket construction request without touching an existing healthy transport",
+          "status": "anchored",
+          "edge_id": "android_mainline:TransportTargetResolver->TraversalSocketFactory",
+          "resource_from": "resource.transport_target",
+          "resource_to": "resource.transport_target",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
         {
           "from": "Native",
           "to": "Capacitor",
@@ -486,14 +665,14 @@
         },
         {
           "from": "SocketMessage",
-          "to": "BufferApply",
+          "to": "BufferWireNormalize",
           "owner_feature": "terminal.buffer_render",
           "semantic_input": "accepted revisioned buffer-sync body",
-          "semantic_output": "absolute sparse buffer update",
+          "semantic_output": "validated canonical buffer payload with authoritative frame identity preserved",
           "status": "anchored",
-          "edge_id": "android_mainline:SocketMessage->BufferApply",
+          "edge_id": "android_mainline:SocketMessage->BufferWireNormalize",
           "resource_from": "resource.session_transport",
-          "resource_to": "resource.client_sparse_buffer",
+          "resource_to": "resource.mirror_store",
           "via_resources": [
             "resource.transport_subscriber",
             "resource.mirror_store"
@@ -501,13 +680,81 @@
           "relation_status": "via"
         },
         {
-          "from": "BufferApply",
+          "from": "BufferWireNormalize",
+          "to": "BufferSyncIngress",
+          "owner_feature": "terminal.buffer_render",
+          "semantic_input": "canonical buffer payload with explicit valid or invalid frame metadata",
+          "semantic_output": "session admission plus frame assembly ingress without identity loss",
+          "status": "anchored",
+          "edge_id": "android_mainline:BufferWireNormalize->BufferSyncIngress",
+          "resource_from": "resource.mirror_store",
+          "resource_to": "resource.mirror_store",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "BufferSyncIngress",
+          "to": "BufferFrameAssembly",
+          "owner_feature": "terminal.buffer_render",
+          "semantic_input": "single buffer-sync payload or one chunk with authoritative frame identity",
+          "semantic_output": "passthrough payload, bounded pending frame, explicit frame error, or complete continuous frame",
+          "status": "anchored",
+          "edge_id": "android_mainline:BufferSyncIngress->BufferFrameAssembly",
+          "resource_from": "resource.mirror_store",
+          "resource_to": "resource.client_buffer_frame_assembly",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "SocketMessage",
+          "to": "BufferHeadFrameExpiry",
+          "owner_feature": "terminal.buffer_render",
+          "semantic_input": "accepted authoritative buffer-head cadence",
+          "semantic_output": "head-owned frame lifetime inspection for the same local session",
+          "status": "anchored",
+          "edge_id": "android_mainline:SocketMessage->BufferHeadFrameExpiry",
+          "resource_from": "resource.session_transport",
+          "resource_to": "resource.mirror_store",
+          "via_resources": [
+            "resource.transport_subscriber",
+            "resource.mirror_store"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "BufferHeadFrameExpiry",
+          "to": "BufferFrameAssembly",
+          "owner_feature": "terminal.buffer_render",
+          "semantic_input": "current head observation time plus retained incomplete frame truth",
+          "semantic_output": "unchanged pending truth or explicit expired-frame exact-range repair truth",
+          "status": "anchored",
+          "edge_id": "android_mainline:BufferHeadFrameExpiry->BufferFrameAssembly",
+          "resource_from": "resource.mirror_store",
+          "resource_to": "resource.client_buffer_frame_assembly",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "BufferFrameAssembly",
+          "to": "BufferSparseApply",
+          "owner_feature": "terminal.buffer_render",
+          "semantic_input": "frame-owner validated passthrough payload or complete exact continuous authoritative frame",
+          "semantic_output": "one resolved absolute sparse buffer apply",
+          "status": "anchored",
+          "edge_id": "android_mainline:BufferFrameAssembly->BufferSparseApply",
+          "resource_from": "resource.client_buffer_frame_assembly",
+          "resource_to": "resource.client_sparse_buffer",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "BufferSparseApply",
           "to": "RenderGate",
           "owner_feature": "terminal.buffer_render",
           "semantic_input": "committed sparse buffer revision",
           "semantic_output": "next-RAF render commit request",
           "status": "anchored",
-          "edge_id": "android_mainline:BufferApply->RenderGate",
+          "edge_id": "android_mainline:BufferSparseApply->RenderGate",
           "resource_from": "resource.client_sparse_buffer",
           "resource_to": "resource.renderer_window",
           "via_resources": [],
@@ -527,13 +774,13 @@
           "relation_status": "observer"
         },
         {
-          "from": "BufferApply",
+          "from": "BufferSparseApply",
           "to": "PerformanceTrace",
           "owner_feature": "daemon.cli_node",
           "semantic_input": "buffer apply revision and duration metadata",
           "semantic_output": "bounded metadata-only trace record",
           "status": "anchored",
-          "edge_id": "android_mainline:BufferApply->PerformanceTrace",
+          "edge_id": "android_mainline:BufferSparseApply->PerformanceTrace",
           "resource_from": "resource.client_sparse_buffer",
           "resource_to": "resource.debug_channel",
           "via_resources": [],
@@ -1119,6 +1366,21 @@
         },
         {
           "from": "TargetMuxFrameLifecycle",
+          "to": "ActiveSessionPriority",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "mux-ready on the exact current daemon-target socket generation",
+          "semantic_output": "current active session id required for same-target opening-channel priority",
+          "status": "anchored",
+          "resource_from": "resource.daemon_target_transport",
+          "resource_to": "resource.active_session",
+          "via_resources": [
+            "resource.session_transport"
+          ],
+          "relation_status": "observer",
+          "edge_id": "android_mainline:TargetMuxFrameLifecycle->ActiveSessionPriority"
+        },
+        {
+          "from": "TargetMuxFrameLifecycle",
           "to": "TargetNetworkActivityBinding",
           "owner_feature": "terminal.transport_lifecycle",
           "semantic_input": "one valid inbound frame from the exact current daemon-target socket generation",
@@ -1224,6 +1486,22 @@
           "edge_id": "android_mainline:TerminalTransportError01TargetFailure->SessionRuntime"
         },
         {
+          "from": "ActiveSessionPriority",
+          "to": "ChannelRuntime",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "current active session id plus target opening-channel set",
+          "semantic_output": "opening terminal channels ordered with active session first for mux-channel-open replay",
+          "status": "anchored",
+          "resource_from": "resource.active_session",
+          "resource_to": "resource.terminal_channel",
+          "via_resources": [
+            "resource.session_transport",
+            "resource.daemon_target_transport"
+          ],
+          "relation_status": "via",
+          "edge_id": "android_mainline:ActiveSessionPriority->ChannelRuntime"
+        },
+        {
           "from": "TargetTransportRuntime",
           "to": "ChannelRuntime",
           "owner_feature": "terminal.transport_lifecycle",
@@ -1266,19 +1544,19 @@
         },
         {
           "from": "ChannelDemux",
-          "to": "BufferApply",
+          "to": "BufferWireNormalize",
           "owner_feature": "terminal.buffer_render",
           "semantic_input": "accepted channel-bound buffer/head message",
-          "semantic_output": "absolute sparse buffer update for the owning local session only",
+          "semantic_output": "owning local session payload admitted to the unique wire normalizer",
           "status": "anchored",
           "resource_from": "resource.terminal_channel",
-          "resource_to": "resource.client_sparse_buffer",
+          "resource_to": "resource.mirror_store",
           "via_resources": [
             "resource.transport_subscriber",
             "resource.mirror_store"
           ],
           "relation_status": "via",
-          "edge_id": "android_mainline:ChannelDemux->BufferApply"
+          "edge_id": "android_mainline:ChannelDemux->BufferWireNormalize"
         },
         {
           "from": "TraversalSocket",
@@ -1318,6 +1596,223 @@
           "via_resources": [],
           "relation_status": "direct",
           "edge_id": "android_mainline:TraversalSocket->ChannelRuntime"
+        },
+        {
+          "from": "ClientFileTransferUploadOut01SheetIntent",
+          "to": "ClientFileTransferUploadOut02BoundedWindow",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "selected local file metadata plus bounded native chunk reader",
+          "semantic_output": "at most eight unacknowledged 16 KiB upload chunks",
+          "status": "anchored",
+          "edge_id": "android_mainline:ClientFileTransferUploadOut01SheetIntent->ClientFileTransferUploadOut02BoundedWindow",
+          "resource_from": "resource.client_file_browser",
+          "resource_to": "resource.client_file_browser",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "ClientFileTransferUploadOut02BoundedWindow",
+          "to": "ClientFileTransferUploadOut03ChunkDispatch",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "one bounded upload chunk",
+          "semantic_output": "invocation of the sheet-owned dispatch callback",
+          "status": "anchored",
+          "edge_id": "android_mainline:ClientFileTransferUploadOut02BoundedWindow->ClientFileTransferUploadOut03ChunkDispatch",
+          "resource_from": "resource.client_file_browser",
+          "resource_to": "resource.client_file_browser",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "ClientFileTransferUploadOut03ChunkDispatch",
+          "to": "ClientFileTransferUploadOut04MuxSend",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "one wire-size-validated chunk from the named sheet callback",
+          "semantic_output": "mux-wrapped file-upload-chunk on the existing daemon-target transport",
+          "status": "anchored",
+          "edge_id": "android_mainline:ClientFileTransferUploadOut03ChunkDispatch->ClientFileTransferUploadOut04MuxSend",
+          "resource_from": "resource.client_file_browser",
+          "resource_to": "resource.target_mux_request",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "ClientFileTransferUploadAckIn01SocketDispatch",
+          "to": "ClientFileTransferUploadAckIn02SessionProjection",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "request-id-bound cumulative upload ACK, completion, or explicit error",
+          "semantic_output": "upload progress waiter and transfer projection for the exact request",
+          "status": "anchored",
+          "edge_id": "android_mainline:ClientFileTransferUploadAckIn01SocketDispatch->ClientFileTransferUploadAckIn02SessionProjection",
+          "resource_from": "resource.target_mux_request",
+          "resource_to": "resource.client_file_browser",
+          "via_resources": [
+            "resource.daemon_target_transport",
+            "resource.terminal_channel"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "ClientFileTransferDownloadIn01SocketDispatch",
+          "to": "ClientFileTransferDownloadIn02SessionProjection",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "request-id-bound ordered download chunk, completion, or explicit error",
+          "semantic_output": "download chunk set and exact request progression",
+          "status": "anchored",
+          "edge_id": "android_mainline:ClientFileTransferDownloadIn01SocketDispatch->ClientFileTransferDownloadIn02SessionProjection",
+          "resource_from": "resource.target_mux_request",
+          "resource_to": "resource.client_file_browser",
+          "via_resources": [
+            "resource.daemon_target_transport",
+            "resource.terminal_channel"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "ClientFileTransferDownloadIn02SessionProjection",
+          "to": "ClientFileTransferDownloadIn03SheetPersistence",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "complete ordered download chunk set and exact byte count",
+          "semantic_output": "native persistence callback invocation",
+          "status": "anchored",
+          "edge_id": "android_mainline:ClientFileTransferDownloadIn02SessionProjection->ClientFileTransferDownloadIn03SheetPersistence",
+          "resource_from": "resource.client_file_browser",
+          "resource_to": "resource.client_file_browser",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "ClientFileTransferDownloadIn03SheetPersistence",
+          "to": "ClientFileTransferDownloadIn04NativeWriteBatch",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "ordered 16 KiB base64 chunks",
+          "semantic_output": "ordered groups of at most eight chunks",
+          "status": "anchored",
+          "edge_id": "android_mainline:ClientFileTransferDownloadIn03SheetPersistence->ClientFileTransferDownloadIn04NativeWriteBatch",
+          "resource_from": "resource.client_file_browser",
+          "resource_to": "resource.client_file_browser",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "ClientFileTransferDownloadIn04NativeWriteBatch",
+          "to": "ClientFileTransferDownloadIn05NativeWriteDispatch",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "one bounded ordered chunk batch",
+          "semantic_output": "invocation of the sheet-owned native-write callback",
+          "status": "anchored",
+          "edge_id": "android_mainline:ClientFileTransferDownloadIn04NativeWriteBatch->ClientFileTransferDownloadIn05NativeWriteDispatch",
+          "resource_from": "resource.client_file_browser",
+          "resource_to": "resource.client_file_browser",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "ClientFileTransferDownloadIn05NativeWriteDispatch",
+          "to": "ClientFileTransferDownloadIn06NativeStore",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "one bounded chunk batch from the named sheet callback",
+          "semantic_output": "exact ordered bytes persisted through one native output stream",
+          "status": "anchored",
+          "edge_id": "android_mainline:ClientFileTransferDownloadIn05NativeWriteDispatch->ClientFileTransferDownloadIn06NativeStore",
+          "resource_from": "resource.client_file_browser",
+          "resource_to": "resource.client_native_file_store",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "ClientFileTransferDownloadIn06NativeStore",
+          "to": "ClientFileTransferDownloadPersistOut01BytesWritten",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "exact bytes persisted by one bounded native batch",
+          "semantic_output": "native bytes-written result for the exact batch",
+          "status": "anchored",
+          "edge_id": "android_mainline:ClientFileTransferDownloadIn06NativeStore->ClientFileTransferDownloadPersistOut01BytesWritten",
+          "resource_from": "resource.client_native_file_store",
+          "resource_to": "resource.client_native_file_store",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "ClientFileTransferDownloadPersistOut01BytesWritten",
+          "to": "ClientFileTransferDownloadPersistOut02VerifiedStat",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "all bounded native batch results",
+          "semantic_output": "exact final on-disk size verification",
+          "status": "anchored",
+          "edge_id": "android_mainline:ClientFileTransferDownloadPersistOut01BytesWritten->ClientFileTransferDownloadPersistOut02VerifiedStat",
+          "resource_from": "resource.client_native_file_store",
+          "resource_to": "resource.client_file_browser",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "ClientFileTransferUploadOut03ChunkDispatch",
+          "to": "ClientFileTransferUploadErrorOut01WireFrameLimit",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "serialized upload chunk larger than the shared wire frame limit",
+          "semantic_output": "explicit local transfer error before transport dispatch",
+          "status": "anchored",
+          "edge_id": "android_mainline:ClientFileTransferUploadOut03ChunkDispatch->ClientFileTransferUploadErrorOut01WireFrameLimit",
+          "resource_from": "resource.client_file_browser",
+          "resource_to": "resource.client_file_browser",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "ClientFileTransferUploadAckIn02SessionProjection",
+          "to": "ClientFileTransferUploadErrorIn01ProgressTimeout",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "missing cumulative ACK before the bounded wait deadline",
+          "semantic_output": "explicit upload progress timeout",
+          "status": "anchored",
+          "edge_id": "android_mainline:ClientFileTransferUploadAckIn02SessionProjection->ClientFileTransferUploadErrorIn01ProgressTimeout",
+          "resource_from": "resource.client_file_browser",
+          "resource_to": "resource.client_file_browser",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "ClientFileTransferDownloadIn01SocketDispatch",
+          "to": "ClientFileTransferDownloadErrorIn01StaleRequest",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "download frame whose request id is not the active download",
+          "semantic_output": "explicit stale-request rejection without persistence",
+          "status": "anchored",
+          "edge_id": "android_mainline:ClientFileTransferDownloadIn01SocketDispatch->ClientFileTransferDownloadErrorIn01StaleRequest",
+          "resource_from": "resource.target_mux_request",
+          "resource_to": "resource.client_file_browser",
+          "via_resources": [
+            "resource.daemon_target_transport",
+            "resource.terminal_channel"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "ClientFileTransferDownloadIn06NativeStore",
+          "to": "ClientFileTransferDownloadErrorIn02NativeWriteFailure",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "native batch write rejection",
+          "semantic_output": "explicit download persistence error",
+          "status": "anchored",
+          "edge_id": "android_mainline:ClientFileTransferDownloadIn06NativeStore->ClientFileTransferDownloadErrorIn02NativeWriteFailure",
+          "resource_from": "resource.client_native_file_store",
+          "resource_to": "resource.client_file_browser",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "ClientFileTransferDownloadPersistOut02VerifiedStat",
+          "to": "ClientFileTransferDownloadErrorIn03SizeMismatch",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "on-disk byte count different from authoritative download total",
+          "semantic_output": "explicit size-mismatch transfer error",
+          "status": "anchored",
+          "edge_id": "android_mainline:ClientFileTransferDownloadPersistOut02VerifiedStat->ClientFileTransferDownloadErrorIn03SizeMismatch",
+          "resource_from": "resource.client_file_browser",
+          "resource_to": "resource.client_file_browser",
+          "via_resources": [],
+          "relation_status": "observer"
         }
       ]
     },
@@ -1760,8 +2255,40 @@
           "label": "src/server/terminal-schedule-runtime.ts"
         },
         {
-          "id": "Transfer",
-          "label": "src/server/terminal-file-transfer-runtime.ts"
+          "id": "DaemonFileTransferUploadIn01MessageDispatch",
+          "label": "src/server/terminal-message-runtime.ts#createTerminalMessageRuntime"
+        },
+        {
+          "id": "DaemonFileTransferUploadIn02RuntimeFacade",
+          "label": "src/server/terminal-file-transfer-runtime.ts#createTerminalFileTransferRuntime"
+        },
+        {
+          "id": "DaemonFileTransferUploadIn03CumulativeAckOwner",
+          "label": "src/server/terminal-file-transfer-binary-runtime.ts#handleFileUploadChunk"
+        },
+        {
+          "id": "DaemonFileTransferUploadEndIn04ExactCompletionOwner",
+          "label": "src/server/terminal-file-transfer-binary-runtime.ts#handleFileUploadEnd"
+        },
+        {
+          "id": "DaemonFileTransferUploadProgressOut01CumulativeAck",
+          "label": "src/server/terminal-file-transfer-binary-runtime.ts#handleFileUploadChunk"
+        },
+        {
+          "id": "DaemonFileTransferUploadSuccessOut01Complete",
+          "label": "src/server/terminal-file-transfer-binary-runtime.ts#handleFileUploadEnd"
+        },
+        {
+          "id": "DaemonFileTransferUploadErrorOut01ChunkRejected",
+          "label": "src/server/terminal-file-transfer-binary-runtime.ts#handleFileUploadChunk"
+        },
+        {
+          "id": "DaemonFileTransferUploadErrorOut02CompletionRejected",
+          "label": "src/server/terminal-file-transfer-binary-runtime.ts#handleFileUploadEnd"
+        },
+        {
+          "id": "DaemonFileTransferTransportOut01Send",
+          "label": "src/server/terminal-transport-runtime.ts#sendMessage"
         },
         {
           "id": "Screenshot",
@@ -1812,6 +2339,18 @@
           "label": "src/server/relay-client.ts"
         },
         {
+          "id": "RelayHostControl",
+          "label": "src/server/relay-client.ts#createTraversalRelayHostClient"
+        },
+        {
+          "id": "DaemonEndpointDirectory",
+          "label": "src/server/daemon-connection-endpoint-runtime.ts#buildDaemonConnectionEndpointCandidates"
+        },
+        {
+          "id": "RelayDirectoryPublish",
+          "label": "src/server/relay-client.ts#publishRelayDirectoryUpdate"
+        },
+        {
           "id": "MuxHandshake",
           "label": "src/server/terminal-message-runtime.ts#handleMuxFrame"
         },
@@ -1829,6 +2368,62 @@
         }
       ],
       "edges": [
+        {
+          "from": "Server",
+          "to": "RelayHostControl",
+          "owner_feature": "relay.account_directory",
+          "semantic_input": "daemon process relay credentials and stable host identity",
+          "semantic_output": "one persistent daemon-role Relay control WebSocket",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:Server->RelayHostControl",
+          "resource_from": "resource.daemon_process",
+          "resource_to": "resource.relay_control_connection",
+          "via_resources": [
+            "resource.daemon_connection_gateway"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "RelayHostControl",
+          "to": "DaemonEndpointDirectory",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "relay-ready publication request plus current daemon network truth",
+          "semantic_output": "ordered LAN, honest RTC-direct, Tailscale, and TURN candidate set",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:RelayHostControl->DaemonEndpointDirectory",
+          "resource_from": "resource.relay_control_connection",
+          "resource_to": "resource.daemon_connection_gateway",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "DaemonEndpointDirectory",
+          "to": "RelayDirectoryPublish",
+          "owner_feature": "relay.account_directory",
+          "semantic_input": "validated endpoint candidates and exact tmux session snapshots",
+          "semantic_output": "directory-update on the existing host control WebSocket",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:DaemonEndpointDirectory->RelayDirectoryPublish",
+          "resource_from": "resource.daemon_connection_gateway",
+          "resource_to": "resource.relay_account_directory",
+          "via_resources": [
+            "resource.relay_control_connection"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "RelayDirectoryPublish",
+          "to": "Relay",
+          "owner_feature": "relay.account_directory",
+          "semantic_input": "accepted account-scoped directory update",
+          "semantic_output": "stored and broadcast directory generation",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:RelayDirectoryPublish->Relay",
+          "resource_from": "resource.relay_account_directory",
+          "resource_to": "resource.relay_account_directory",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
         {
           "from": "CLI",
           "to": "Server",
@@ -2032,17 +2627,56 @@
           "relation_status": "direct"
         },
         {
-          "from": "Control",
-          "to": "Transfer",
+          "from": "DaemonFileTransferUploadIn01MessageDispatch",
+          "to": "DaemonFileTransferUploadIn02RuntimeFacade",
           "owner_feature": "daemon.file_transfer",
-          "semantic_input": "file transfer control operation",
-          "semantic_output": "file transfer event",
+          "semantic_input": "validated file-upload-start, file-upload-chunk, or file-upload-end message for an attached subscriber",
+          "semantic_output": "exact daemon file-transfer handler invocation",
           "status": "anchored",
-          "edge_id": "daemon_mainline:Control->Transfer",
+          "edge_id": "daemon_mainline:DaemonFileTransferUploadIn01MessageDispatch->DaemonFileTransferUploadIn02RuntimeFacade",
           "resource_from": "resource.file_transfer",
-          "resource_to": "resource.backend_session",
+          "resource_to": "resource.file_transfer",
           "via_resources": [],
-          "relation_status": "direct"
+          "relation_status": "observer"
+        },
+        {
+          "from": "DaemonFileTransferUploadIn02RuntimeFacade",
+          "to": "DaemonFileTransferUploadIn03CumulativeAckOwner",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "request-bound upload chunk index and bytes",
+          "semantic_output": "duplicate-safe contiguous upload prefix and exact completion truth",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:DaemonFileTransferUploadIn02RuntimeFacade->DaemonFileTransferUploadIn03CumulativeAckOwner",
+          "resource_from": "resource.file_transfer",
+          "resource_to": "resource.file_transfer",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "DaemonFileTransferUploadIn03CumulativeAckOwner",
+          "to": "DaemonFileTransferUploadProgressOut01CumulativeAck",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "validated contiguous upload prefix",
+          "semantic_output": "request-bound cumulative ACK progress frame",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:DaemonFileTransferUploadIn03CumulativeAckOwner->DaemonFileTransferUploadProgressOut01CumulativeAck",
+          "resource_from": "resource.file_transfer",
+          "resource_to": "resource.file_transfer",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "DaemonFileTransferUploadIn02RuntimeFacade",
+          "to": "DaemonFileTransferUploadEndIn04ExactCompletionOwner",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "request-bound file-upload-end for the accumulated upload",
+          "semantic_output": "exact chunk-count, byte-count, and persisted-file completion truth",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:DaemonFileTransferUploadIn02RuntimeFacade->DaemonFileTransferUploadEndIn04ExactCompletionOwner",
+          "resource_from": "resource.file_transfer",
+          "resource_to": "resource.file_transfer",
+          "via_resources": [],
+          "relation_status": "observer"
         },
         {
           "from": "Control",
@@ -2285,6 +2919,110 @@
           ],
           "relation_status": "via",
           "edge_id": "daemon_mainline:RelayPeerLease->MuxHandshake"
+        },
+        {
+          "from": "DaemonFileTransferUploadProgressOut01CumulativeAck",
+          "to": "DaemonFileTransferTransportOut01Send",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "request-bound cumulative ACK progress frame",
+          "semantic_output": "progress frame selected for the exact subscriber",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:DaemonFileTransferUploadProgressOut01CumulativeAck->DaemonFileTransferTransportOut01Send",
+          "resource_from": "resource.file_transfer",
+          "resource_to": "resource.transport_subscriber",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "DaemonFileTransferUploadEndIn04ExactCompletionOwner",
+          "to": "DaemonFileTransferUploadSuccessOut01Complete",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "validated exact completion and persisted remote file",
+          "semantic_output": "request-bound file-upload-complete frame",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:DaemonFileTransferUploadEndIn04ExactCompletionOwner->DaemonFileTransferUploadSuccessOut01Complete",
+          "resource_from": "resource.file_transfer",
+          "resource_to": "resource.file_transfer",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "DaemonFileTransferUploadSuccessOut01Complete",
+          "to": "DaemonFileTransferTransportOut01Send",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "request-bound file-upload-complete frame",
+          "semantic_output": "completion frame selected for the exact subscriber",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:DaemonFileTransferUploadSuccessOut01Complete->DaemonFileTransferTransportOut01Send",
+          "resource_from": "resource.file_transfer",
+          "resource_to": "resource.transport_subscriber",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "DaemonFileTransferTransportOut01Send",
+          "to": "TransportSend",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "file-transfer response selected for the exact subscriber",
+          "semantic_output": "serialized response bytes on the existing physical target transport",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:DaemonFileTransferTransportOut01Send->TransportSend",
+          "resource_from": "resource.transport_subscriber",
+          "resource_to": "resource.transport_subscriber",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "DaemonFileTransferUploadIn03CumulativeAckOwner",
+          "to": "DaemonFileTransferUploadErrorOut01ChunkRejected",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "missing upload, invalid chunk index, or conflicting duplicate chunk",
+          "semantic_output": "explicit request-bound chunk rejection",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:DaemonFileTransferUploadIn03CumulativeAckOwner->DaemonFileTransferUploadErrorOut01ChunkRejected",
+          "resource_from": "resource.file_transfer",
+          "resource_to": "resource.file_transfer",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "DaemonFileTransferUploadErrorOut01ChunkRejected",
+          "to": "DaemonFileTransferTransportOut01Send",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "request-bound chunk rejection",
+          "semantic_output": "chunk error frame selected for the exact subscriber",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:DaemonFileTransferUploadErrorOut01ChunkRejected->DaemonFileTransferTransportOut01Send",
+          "resource_from": "resource.file_transfer",
+          "resource_to": "resource.transport_subscriber",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "DaemonFileTransferUploadEndIn04ExactCompletionOwner",
+          "to": "DaemonFileTransferUploadErrorOut02CompletionRejected",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "missing upload, incomplete chunk set, missing chunk, byte-count mismatch, or persistence failure",
+          "semantic_output": "explicit request-bound completion rejection",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:DaemonFileTransferUploadEndIn04ExactCompletionOwner->DaemonFileTransferUploadErrorOut02CompletionRejected",
+          "resource_from": "resource.file_transfer",
+          "resource_to": "resource.file_transfer",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "DaemonFileTransferUploadErrorOut02CompletionRejected",
+          "to": "DaemonFileTransferTransportOut01Send",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "request-bound completion rejection",
+          "semantic_output": "completion error frame selected for the exact subscriber",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:DaemonFileTransferUploadErrorOut02CompletionRejected->DaemonFileTransferTransportOut01Send",
+          "resource_from": "resource.file_transfer",
+          "resource_to": "resource.transport_subscriber",
+          "via_resources": [],
+          "relation_status": "direct"
         }
       ]
     },

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "predev": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper ../node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null; command -v portless >/dev/null 2>&1 || (echo '\\nportless is required but not installed. Run: npm i -g portless\\n' && exit 1)",
-    "prebuild": "bash ./scripts/ensure-pnpm-install.sh && pnpm run test:feature-registry && pnpm run test:transport-network-lifecycle && pnpm run test:terminal:regression:core",
+    "prebuild": "bash ./scripts/ensure-pnpm-install.sh && pnpm run test:feature-registry && pnpm run test:file-transfer:throughput && pnpm run test:transport-network-lifecycle && pnpm run test:terminal:regression:core",
     "test:terminal:regression:core": "pnpm exec vitest run src/server/terminal-message-runtime.test.ts && pnpm run test:terminal:contracts && pnpm run test:common-user-flows && pnpm run test:relay:smoke",
     "test:transport-network-lifecycle": "pnpm exec vitest run src/hooks/useOpenTabLifecycleEffects.test.tsx src/contexts/session-context-target-network-probe-runtime.test.ts src/contexts/session-context-transport-orchestration-runtime.test.ts src/contexts/session-context-socket-runtime.test.ts && pnpm --dir ../packages/shared exec vitest run src/connection/protocol.test.ts",
     "dev": "portless android.zterm vite",
@@ -13,6 +13,7 @@
     "preview": "vite preview",
     "type-check": "pnpm run check:no-source-js-pollution && tsc --noEmit",
     "test:terminal:contracts": "node ./scripts/run-terminal-contracts.mjs",
+    "test:terminal:frame-assembly": "pnpm exec vitest run src/contexts/session-buffer-frame-assembly.test.ts src/contexts/session-context-buffer-runtime.test.ts src/contexts/session-context-socket-message-runtime.test.ts --no-file-parallelism",
     "test:terminal:regression": "pnpm exec vitest run src/server/terminal-message-runtime.test.ts && pnpm run test:terminal:contracts && pnpm run test:common-user-flows && pnpm run test:relay:smoke",
     "serve:server": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper ../node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null; tsx src/server/server.ts",
     "daemon": "bash ./scripts/zterm-daemon.sh",
@@ -54,7 +55,8 @@
     "release:github": "bash ./scripts/publish-github-release.sh",
     "deps:ensure": "bash ./scripts/ensure-pnpm-install.sh",
     "deps:check-wterm-published": "node ./scripts/check-wterm-runtime-published.mjs",
-    "test:feature-registry": "pnpm exec vitest run src/lib/feature-registry-truth.test.ts src/lib/function-wiki-truth.test.ts src/lib/architecture-boundary-truth.test.ts src/lib/loop-governance-truth.test.ts src/lib/resource-registry-truth.test.ts src/lib/module-registry-truth.test.ts src/lib/edge-registry-truth.test.ts src/lib/module-import-graph-truth.test.ts src/lib/function-map-resource-truth.test.ts src/lib/mainline-resource-call-map.test.ts"
+    "test:feature-registry": "pnpm exec vitest run src/lib/feature-registry-truth.test.ts src/lib/function-wiki-truth.test.ts src/lib/architecture-boundary-truth.test.ts src/lib/loop-governance-truth.test.ts src/lib/resource-registry-truth.test.ts src/lib/module-registry-truth.test.ts src/lib/edge-registry-truth.test.ts src/lib/module-import-graph-truth.test.ts src/lib/function-map-resource-truth.test.ts src/lib/mainline-resource-call-map.test.ts",
+    "test:file-transfer:throughput": "bash ./scripts/run-file-transfer-throughput-gate.sh"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",

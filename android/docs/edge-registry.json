@@ -397,7 +397,7 @@
    ]
   },
   {
-    "edge_id": "edge.client.session_transport_to_daemon_target_transport",
+   "edge_id": "edge.client.session_transport_to_daemon_target_transport",
    "from_module": "client.daemon_connection",
    "to_module": "client.daemon_connection",
    "resource_from": "resource.session_transport",
@@ -432,111 +432,149 @@
     "src/lib/edge-registry-truth.test.ts",
     "src/lib/session-transport-runtime.test.ts"
    ],
-    "status": "active"
+   "status": "active"
   },
-    {
-      "edge_id": "edge.client.platform_network_signal_to_daemon_target_transport",
-    "from_module": "client.session_runtime",
-    "to_module": "client.daemon_connection",
-    "resource_from": "resource.platform_network_signal",
-    "resource_to": "resource.daemon_target_transport",
-    "via_resources": [
-      "resource.session_transport"
-    ],
-    "relation_status": "via",
-    "owner_feature": "terminal.transport_lifecycle",
-    "allowed_callers": [
-      "src/hooks/useOpenTabLifecycleEffects.ts",
-      "src/hooks/useOpenTabRuntime.ts",
-      "src/App.tsx",
-      "src/contexts/SessionContext.tsx",
-      "src/contexts/session-context-provider-facade-assemblies.ts",
-      "src/contexts/session-context-public-facade-runtime.ts",
-      "src/contexts/session-context-provider-core-assemblies.ts",
-      "src/contexts/session-context-transport-orchestration-runtime.ts",
-      "src/contexts/session-context-transport-runtime.ts",
-      "src/lib/session-transport-runtime.ts"
-    ],
-    "forbidden_callers": [
-      "src/components/**",
-      "src/pages/**"
-    ],
-    "request_chain": [
-      "TargetNetworkProbeIn01PlatformGeneration",
-      "TargetNetworkProbeIn02ExactSocketPing"
-    ],
-    "response_chain": [
-      "TargetNetworkProbeOut01GenerationHealthy"
-    ],
-    "error_chain": [
-      "TargetNetworkProbeError01GenerationTimeout",
-      "TargetNetworkProbeError02SendFailure"
-    ],
-    "mainline_call_ids": [
-      "android_mainline:PlatformNetworkSignal->OpenTabNetworkBinding",
-      "android_mainline:OpenTabNetworkBinding->AppNetworkBinding",
-      "android_mainline:AppNetworkBinding->SessionContextNetworkFacade",
-      "android_mainline:SessionContextNetworkFacade->SessionProviderNetworkBinding",
-      "android_mainline:SessionProviderNetworkBinding->SessionPublicFacadeBinding",
-      "android_mainline:SessionPublicFacadeBinding->SessionProviderCoreBinding",
-      "android_mainline:SessionProviderCoreBinding->TargetNetworkSignalOrchestration",
-      "android_mainline:TargetNetworkSignalOrchestration->TargetTransportAccessors",
-      "android_mainline:TargetNetworkSignalOrchestration->TerminalMuxPingBuilder",
-      "android_mainline:TargetTransportAccessors->TargetTransportStoreEnumeration",
-      "android_mainline:TargetTransportStoreEnumeration->TargetNetworkProbeDispatch",
-      "android_mainline:TargetNetworkProbeDispatch->TargetNetworkProbe",
-      "android_mainline:MuxHandshake->TargetMuxFrameLifecycle",
-      "android_mainline:TargetMuxFrameLifecycle->TargetNetworkActivityBinding",
-      "android_mainline:TargetNetworkActivityBinding->TargetNetworkProbe",
-      "android_mainline:TargetNetworkProbe->TargetFailureRouter",
-      "android_mainline:TargetFailureRouter->TerminalTransportError01TargetFailure",
-      "android_mainline:TargetFailureRouter->IdleTargetRetirement"
-    ],
-    "required_gates": [
-      "src/lib/edge-registry-truth.test.ts",
-      "src/hooks/useOpenTabLifecycleEffects.test.tsx",
-      "src/contexts/session-context-target-network-probe-runtime.test.ts",
-      "src/contexts/session-context-transport-orchestration-runtime.test.ts"
-    ],
-      "status": "active"
-    },
-    {
-      "edge_id": "edge.client.daemon_target_transport_health",
-      "from_module": "client.daemon_connection",
-      "to_module": "client.daemon_connection",
-      "resource_from": "resource.daemon_target_transport",
-      "resource_to": "resource.daemon_target_transport",
-      "via_resources": [],
-      "relation_status": "observer",
-      "owner_feature": "terminal.transport_lifecycle",
-      "allowed_callers": [
-        "src/contexts/session-context-socket-runtime.ts",
-        "packages/shared/src/connection/protocol.ts"
-      ],
-      "forbidden_callers": [
-        "src/components/**",
-        "src/pages/**"
-      ],
-      "request_chain": [
-        "TargetTransportHealthIn01HeartbeatTimestamp"
-      ],
-      "response_chain": [
-        "TargetTransportHealthOut01MuxPing"
-      ],
-      "error_chain": [
-        "TargetTransportHealthError01InvalidTimestamp"
-      ],
-      "mainline_call_ids": [
-        "android_mainline:TargetTransportRuntime->TargetHeartbeat",
-        "android_mainline:TargetHeartbeat->TerminalMuxPingBuilder"
-      ],
-      "required_gates": [
-        "src/lib/edge-registry-truth.test.ts",
-        "src/contexts/session-context-socket-runtime.test.ts",
-        "packages/shared/src/connection/protocol.test.ts"
-      ],
-      "status": "active"
-    },
+  {
+   "edge_id": "edge.client.platform_network_signal_to_daemon_target_transport",
+   "from_module": "client.session_runtime",
+   "to_module": "client.daemon_connection",
+   "resource_from": "resource.platform_network_signal",
+   "resource_to": "resource.daemon_target_transport",
+   "via_resources": [
+    "resource.session_transport"
+   ],
+   "relation_status": "via",
+   "owner_feature": "terminal.transport_lifecycle",
+   "allowed_callers": [
+    "src/hooks/useOpenTabLifecycleEffects.ts",
+    "src/hooks/useOpenTabRuntime.ts",
+    "src/App.tsx",
+    "src/contexts/SessionContext.tsx",
+    "src/contexts/session-context-provider-facade-assemblies.ts",
+    "src/contexts/session-context-public-facade-runtime.ts",
+    "src/contexts/session-context-provider-core-assemblies.ts",
+    "src/contexts/session-context-transport-orchestration-runtime.ts",
+    "src/contexts/session-context-transport-runtime.ts",
+    "src/lib/session-transport-runtime.ts"
+   ],
+   "forbidden_callers": [
+    "src/components/**",
+    "src/pages/**"
+   ],
+   "request_chain": [
+    "TargetNetworkProbeIn01PlatformGeneration",
+    "TargetNetworkProbeIn02ExactSocketPing"
+   ],
+   "response_chain": [
+    "TargetNetworkProbeOut01GenerationHealthy"
+   ],
+   "error_chain": [
+    "TargetNetworkProbeError01GenerationTimeout",
+    "TargetNetworkProbeError02SendFailure"
+   ],
+   "mainline_call_ids": [
+    "android_mainline:PlatformNetworkSignal->OpenTabNetworkBinding",
+    "android_mainline:OpenTabNetworkBinding->AppNetworkBinding",
+    "android_mainline:AppNetworkBinding->SessionContextNetworkFacade",
+    "android_mainline:SessionContextNetworkFacade->SessionProviderNetworkBinding",
+    "android_mainline:SessionProviderNetworkBinding->SessionPublicFacadeBinding",
+    "android_mainline:SessionPublicFacadeBinding->SessionProviderCoreBinding",
+    "android_mainline:SessionProviderCoreBinding->TargetNetworkSignalOrchestration",
+    "android_mainline:TargetNetworkSignalOrchestration->TargetTransportAccessors",
+    "android_mainline:TargetNetworkSignalOrchestration->TerminalMuxPingBuilder",
+    "android_mainline:TargetTransportAccessors->TargetTransportStoreEnumeration",
+    "android_mainline:TargetTransportStoreEnumeration->TargetNetworkProbeDispatch",
+    "android_mainline:TargetNetworkProbeDispatch->TargetNetworkProbe",
+    "android_mainline:MuxHandshake->TargetMuxFrameLifecycle",
+    "android_mainline:TargetMuxFrameLifecycle->TargetNetworkActivityBinding",
+    "android_mainline:TargetNetworkActivityBinding->TargetNetworkProbe",
+    "android_mainline:TargetNetworkProbe->TargetFailureRouter",
+    "android_mainline:TargetFailureRouter->TerminalTransportError01TargetFailure",
+    "android_mainline:TargetFailureRouter->IdleTargetRetirement"
+   ],
+   "required_gates": [
+    "src/lib/edge-registry-truth.test.ts",
+    "src/hooks/useOpenTabLifecycleEffects.test.tsx",
+    "src/contexts/session-context-target-network-probe-runtime.test.ts",
+    "src/contexts/session-context-transport-orchestration-runtime.test.ts"
+   ],
+   "status": "active"
+  },
+  {
+   "edge_id": "edge.client.daemon_target_transport_health",
+   "from_module": "client.daemon_connection",
+   "to_module": "client.daemon_connection",
+   "resource_from": "resource.daemon_target_transport",
+   "resource_to": "resource.daemon_target_transport",
+   "via_resources": [],
+   "relation_status": "observer",
+   "owner_feature": "terminal.transport_lifecycle",
+   "allowed_callers": [
+    "src/contexts/session-context-socket-runtime.ts",
+    "packages/shared/src/connection/protocol.ts"
+   ],
+   "forbidden_callers": [
+    "src/components/**",
+    "src/pages/**"
+   ],
+   "request_chain": [
+    "TargetTransportHealthIn01HeartbeatTimestamp"
+   ],
+   "response_chain": [
+    "TargetTransportHealthOut01MuxPing"
+   ],
+   "error_chain": [
+    "TargetTransportHealthError01InvalidTimestamp"
+   ],
+   "mainline_call_ids": [
+    "android_mainline:TargetTransportRuntime->TargetHeartbeat",
+    "android_mainline:TargetHeartbeat->TerminalMuxPingBuilder"
+   ],
+   "required_gates": [
+    "src/lib/edge-registry-truth.test.ts",
+    "src/contexts/session-context-socket-runtime.test.ts",
+    "packages/shared/src/connection/protocol.test.ts"
+   ],
+   "status": "active"
+  },
+  {
+   "edge_id": "edge.client.target_mux_ready_to_active_session_priority",
+   "from_module": "client.daemon_connection",
+   "to_module": "client.session_runtime",
+   "resource_from": "resource.daemon_target_transport",
+   "resource_to": "resource.active_session",
+   "via_resources": [
+    "resource.session_transport"
+   ],
+   "relation_status": "observer",
+   "owner_feature": "terminal.transport_lifecycle",
+   "allowed_callers": [
+    "src/contexts/session-context-transport-runtime.ts",
+    "src/contexts/session-context-transport-orchestration-runtime.ts"
+   ],
+   "forbidden_callers": [
+    "src/components/**",
+    "src/pages/**"
+   ],
+   "request_chain": [
+    "MuxReadyIn01TargetReady"
+   ],
+   "response_chain": [
+    "MuxReadyOut01ActiveSessionPriority"
+   ],
+   "error_chain": [
+    "TerminalTransportError01TargetFailure"
+   ],
+   "mainline_call_ids": [
+    "android_mainline:TargetMuxFrameLifecycle->ActiveSessionPriority"
+   ],
+   "required_gates": [
+    "src/lib/edge-registry-truth.test.ts",
+    "src/contexts/session-context-transport-runtime.test.ts",
+    "src/contexts/SessionContext.ws-refresh.test.tsx"
+   ],
+   "status": "active"
+  },
   {
    "edge_id": "edge.client.daemon_target_transport_to_terminal_channel",
    "from_module": "client.daemon_connection",
@@ -548,7 +586,9 @@
    "owner_feature": "terminal.transport_lifecycle",
    "allowed_callers": [
     "src/lib/session-transport-runtime.ts",
-    "packages/shared/src/connection/protocol.ts"
+    "packages/shared/src/connection/protocol.ts",
+    "src/contexts/session-context-transport-runtime.ts",
+    "src/contexts/session-context-transport-orchestration-runtime.ts"
    ],
    "forbidden_callers": [
     "src/components/**",
@@ -567,11 +607,14 @@
    ],
    "mainline_call_ids": [
     "android_mainline:TargetTransportRuntime->MuxHandshake",
+    "android_mainline:ActiveSessionPriority->ChannelRuntime",
     "android_mainline:TargetTransportRuntime->ChannelRuntime"
    ],
    "required_gates": [
     "src/lib/edge-registry-truth.test.ts",
-    "src/lib/session-transport-runtime.test.ts"
+    "src/lib/session-transport-runtime.test.ts",
+    "src/contexts/session-context-transport-runtime.test.ts",
+    "src/contexts/SessionContext.ws-refresh.test.tsx"
    ],
    "status": "active"
   },
@@ -655,44 +698,87 @@
    "status": "active"
   },
   {
-   "edge_id": "edge.daemon.mirror_store_to_client_sparse_buffer",
+   "edge_id": "edge.daemon.mirror_store_to_client_buffer_frame_assembly",
    "from_module": "daemon.mirror_store",
    "to_module": "client.buffer_store",
    "resource_from": "resource.mirror_store",
-   "resource_to": "resource.client_sparse_buffer",
+   "resource_to": "resource.client_buffer_frame_assembly",
    "via_resources": [],
    "relation_status": "direct",
    "owner_feature": "terminal.buffer_render",
    "allowed_callers": [
     "src/server/terminal-mirror-runtime.ts",
-    "src/contexts/session-context-buffer-runtime.ts"
+    "src/contexts/session-context-buffer-runtime.ts",
+    "src/contexts/session-buffer-frame-assembly.ts"
    ],
    "forbidden_callers": [
     "src/components/TerminalView.tsx"
    ],
    "request_chain": [
     "BufferSyncIn01MirrorPatch",
-    "BufferSyncIn02SparseApply"
+    "BufferSyncIn02FrameAssembly"
    ],
    "response_chain": [
-    "BufferSyncOut01SparseRevision"
+    "BufferSyncOut01AssembledFrame"
    ],
    "error_chain": [
-    "BufferSyncError01StaleRevision",
-    "BufferSyncError02GapRequestRequired"
+    "BufferSyncError01InvalidFrame"
    ],
    "mainline_call_ids": [
-    "android_mainline:SocketMessage->BufferApply",
-    "android_mainline:ChannelDemux->BufferApply"
+    "android_mainline:SocketMessage->BufferWireNormalize",
+    "android_mainline:ChannelDemux->BufferWireNormalize",
+    "android_mainline:BufferWireNormalize->BufferSyncIngress",
+    "android_mainline:BufferSyncIngress->BufferFrameAssembly",
+    "android_mainline:SocketMessage->BufferHeadFrameExpiry",
+    "android_mainline:BufferHeadFrameExpiry->BufferFrameAssembly"
    ],
    "required_gates": [
     "src/lib/edge-registry-truth.test.ts",
+    "src/contexts/session-buffer-frame-assembly.test.ts",
     "src/contexts/session-context-buffer-runtime.test.ts"
    ],
    "status": "active",
    "forbidden_caller_notes": [
     "src/components/TerminalView.tsx direct daemon read"
    ]
+  },
+  {
+   "edge_id": "edge.client_buffer_frame_assembly_to_client_sparse_buffer",
+   "from_module": "client.buffer_store",
+   "to_module": "client.buffer_store",
+   "resource_from": "resource.client_buffer_frame_assembly",
+   "resource_to": "resource.client_sparse_buffer",
+   "via_resources": [],
+   "relation_status": "direct",
+   "owner_feature": "terminal.buffer_render",
+   "allowed_callers": [
+    "src/contexts/session-buffer-frame-assembly.ts",
+    "src/contexts/session-context-buffer-runtime.ts"
+   ],
+   "forbidden_callers": [
+    "src/components/TerminalView.tsx",
+    "src/server/**"
+   ],
+   "request_chain": [
+    "BufferSyncIn02FrameAssembly",
+    "BufferSyncIn03SparseApply"
+   ],
+   "response_chain": [
+    "BufferSyncOut02SparseRevision"
+   ],
+   "error_chain": [
+    "BufferSyncError02StaleRevision",
+    "BufferSyncError03GapRequestRequired"
+   ],
+   "mainline_call_ids": [
+    "android_mainline:BufferFrameAssembly->BufferSparseApply"
+   ],
+   "required_gates": [
+    "src/lib/edge-registry-truth.test.ts",
+    "src/contexts/session-buffer-frame-assembly.test.ts",
+    "src/contexts/session-context-buffer-runtime.test.ts"
+   ],
+   "status": "active"
   },
   {
    "edge_id": "edge.client_sparse_buffer_to_renderer",
@@ -722,7 +808,7 @@
     "RenderError01MissingVisibleRange"
    ],
    "mainline_call_ids": [
-    "android_mainline:BufferApply->RenderGate",
+    "android_mainline:BufferSparseApply->RenderGate",
     "android_mainline:TerminalView->Renderer",
     "android_mainline:Renderer->RenderGate"
    ],
@@ -962,6 +1048,170 @@
    "status": "active"
   },
   {
+   "edge_id": "edge.daemon_process_to_connection_gateway",
+   "from_module": "daemon.runtime_entry",
+   "to_module": "daemon.connection_gateway",
+   "resource_from": "resource.daemon_process",
+   "resource_to": "resource.daemon_connection_gateway",
+   "via_resources": [],
+   "relation_status": "direct",
+   "owner_feature": "terminal.transport_lifecycle",
+   "allowed_callers": [
+    "src/server/server.ts"
+   ],
+   "forbidden_callers": [
+    "src/components/**",
+    "src/pages/**"
+   ],
+   "request_chain": [
+    "DaemonGatewayIn01ProcessConfig",
+    "DaemonGatewayIn02PhysicalIngress"
+   ],
+   "response_chain": [
+    "DaemonGatewayOut01Ready"
+   ],
+   "error_chain": [
+    "DaemonGatewayError01EndpointDiscovery",
+    "DaemonGatewayError02IngressInit"
+   ],
+   "mainline_call_ids": [
+    "daemon_mainline:Server->RelayHostControl",
+    "daemon_mainline:Server->Transport"
+   ],
+   "required_gates": [
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/module-import-graph-truth.test.ts",
+    "src/server/daemon-connection-endpoint-runtime.test.ts"
+   ],
+   "status": "active"
+  },
+  {
+   "edge_id": "edge.daemon_connection_gateway_to_relay_account_directory",
+   "from_module": "daemon.connection_gateway",
+   "to_module": "relay.account_directory",
+   "resource_from": "resource.daemon_connection_gateway",
+   "resource_to": "resource.relay_account_directory",
+   "via_resources": [
+    "resource.relay_control_connection"
+   ],
+   "relation_status": "via",
+   "owner_feature": "relay.account_directory",
+   "allowed_callers": [
+    "src/server/relay-client.ts",
+    "src/traversal-relay/server.ts"
+   ],
+   "forbidden_callers": [
+    "src/server/terminal-message-runtime.ts",
+    "src/components/**",
+    "src/pages/**"
+   ],
+   "request_chain": [
+    "RelayControlIn01DaemonEndpointTruth",
+    "RelayControlIn02DirectoryUpdate"
+   ],
+   "response_chain": [
+    "RelayControlOut01AccountDirectoryGeneration"
+   ],
+   "error_chain": [
+    "RelayControlError01InvalidDirectoryPayload",
+    "RelayControlError02ControlUnavailable"
+   ],
+   "mainline_call_ids": [
+    "daemon_mainline:RelayHostControl->DaemonEndpointDirectory",
+    "daemon_mainline:DaemonEndpointDirectory->RelayDirectoryPublish"
+   ],
+   "required_gates": [
+    "src/lib/edge-registry-truth.test.ts",
+    "src/server/relay-client.test.ts",
+    "packages/shared/src/connection/relay-directory.test.ts"
+   ],
+   "status": "active"
+  },
+  {
+   "edge_id": "edge.relay_account_directory_to_transport_target",
+   "from_module": "relay.account_directory",
+   "to_module": "client.connection_home",
+   "resource_from": "resource.relay_account_directory",
+   "resource_to": "resource.transport_target",
+   "via_resources": [],
+   "relation_status": "direct",
+   "owner_feature": "relay.account_directory",
+   "allowed_callers": [
+    "src/hooks/useRelayDeviceStream.ts",
+    "src/lib/client-control-directory-runtime.ts",
+    "src/lib/relay-device-stream-runtime.ts",
+    "src/lib/traversal-relay-client.ts"
+   ],
+   "forbidden_callers": [
+    "src/components/TerminalView.tsx",
+    "src/contexts/session-context-buffer-runtime.ts",
+    "src/server/terminal-mirror-runtime.ts"
+   ],
+   "request_chain": [
+    "RelayDirectoryIn01ValidatedSnapshot",
+    "RelayDirectoryIn02StableDaemonProjection"
+   ],
+   "response_chain": [
+    "RelayDirectoryOut01TransportTargetCandidates"
+   ],
+   "error_chain": [
+    "RelayDirectoryError01InvalidEndpoint",
+    "RelayDirectoryError02UnknownDaemon"
+   ],
+   "mainline_call_ids": [
+    "android_mainline:RelayControlSocket->RelayDirectoryProjection",
+    "android_mainline:RelayDirectoryProjection->TransportTargetResolver"
+   ],
+   "required_gates": [
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/client-control-directory-runtime.test.ts"
+   ],
+   "status": "active"
+  },
+  {
+   "edge_id": "edge.daemon_connection_gateway_to_transport_subscriber",
+   "from_module": "daemon.connection_gateway",
+   "to_module": "daemon.transport_subscriber",
+   "resource_from": "resource.daemon_target_transport",
+   "resource_to": "resource.transport_subscriber",
+   "via_resources": [
+    "resource.terminal_channel"
+   ],
+   "relation_status": "via",
+   "owner_feature": "terminal.transport_lifecycle",
+   "allowed_callers": [
+    "src/server/terminal-bridge-runtime.ts",
+    "src/server/terminal-transport-runtime.ts"
+   ],
+   "forbidden_callers": [
+    "src/server/relay-client.ts",
+    "src/traversal-relay/server.ts",
+    "src/pages/**"
+   ],
+   "request_chain": [
+    "DaemonTransportIn01PhysicalPeer",
+    "DaemonTransportIn02MuxHandshake",
+    "DaemonTransportIn03ChannelSubscriber"
+   ],
+   "response_chain": [
+    "DaemonTransportOut01ChannelReady"
+   ],
+   "error_chain": [
+    "DaemonTransportError01HandshakeRejected",
+    "DaemonTransportError02ChannelOpenRejected"
+   ],
+   "mainline_call_ids": [
+    "daemon_mainline:Bridge->MuxHandshake",
+    "daemon_mainline:MuxHandshake->ChannelRegistry"
+   ],
+   "required_gates": [
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/module-import-graph-truth.test.ts",
+    "src/server/terminal-transport-runtime.test.ts"
+   ],
+   "status": "active"
+  },
+  {
    "edge_id": "edge.relay_peer_lease_to_transport_target",
    "from_module": "relay.peer_lease",
    "to_module": "client.connection_home",
@@ -1083,6 +1333,249 @@
     "src/components/** business truth",
     "src/pages/** business truth"
    ]
+  },
+  {
+   "edge_id": "edge.client_file_upload_window_to_dispatch",
+   "from_module": "client.file_browser",
+   "to_module": "client.file_browser",
+   "resource_from": "resource.client_file_browser",
+   "resource_to": "resource.client_file_browser",
+   "via_resources": [],
+   "relation_status": "observer",
+   "owner_feature": "daemon.file_transfer",
+   "allowed_callers": [
+    "src/lib/file-transfer-throughput-runtime.ts",
+    "src/components/terminal/FileTransferSheet.tsx"
+   ],
+   "forbidden_callers": [
+    "src/server/**",
+    "src/components/TerminalView.tsx"
+   ],
+   "request_chain": [
+    "ClientFileTransferUploadOut02BoundedWindow",
+    "ClientFileTransferUploadOut03ChunkDispatch"
+   ],
+   "response_chain": [
+    "ClientFileTransferUploadAckIn01SocketDispatch",
+    "ClientFileTransferUploadAckIn02SessionProjection"
+   ],
+   "error_chain": [
+    "ClientFileTransferUploadErrorIn01ProgressTimeout"
+   ],
+   "mainline_call_ids": [
+    "android_mainline:ClientFileTransferUploadOut02BoundedWindow->ClientFileTransferUploadOut03ChunkDispatch"
+   ],
+   "required_gates": [
+    "scripts/run-file-transfer-throughput-gate.sh",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/file-transfer-throughput-runtime.test.ts"
+   ],
+   "status": "active"
+  },
+  {
+   "edge_id": "edge.client_file_browser_to_target_mux_request",
+   "from_module": "client.file_browser",
+   "to_module": "client.daemon_connection",
+   "resource_from": "resource.client_file_browser",
+   "resource_to": "resource.target_mux_request",
+   "via_resources": [],
+   "relation_status": "direct",
+   "owner_feature": "daemon.file_transfer",
+   "allowed_callers": [
+    "src/components/terminal/FileTransferSheet.tsx",
+    "src/contexts/session-context-transfer-runtime.ts",
+    "src/lib/file-transfer-throughput-runtime.ts"
+   ],
+   "forbidden_callers": [
+    "src/components/TerminalView.tsx",
+    "src/server/**"
+   ],
+   "request_chain": [
+    "ClientFileTransferUploadOut03ChunkDispatch",
+    "ClientFileTransferUploadOut04MuxSend"
+   ],
+   "response_chain": [
+    "ClientFileTransferUploadAckIn01SocketDispatch",
+    "ClientFileTransferUploadAckIn02SessionProjection"
+   ],
+   "error_chain": [
+    "ClientFileTransferUploadErrorOut01WireFrameLimit",
+    "ClientFileTransferUploadErrorIn01ProgressTimeout"
+   ],
+   "mainline_call_ids": [
+    "android_mainline:ClientFileTransferUploadOut03ChunkDispatch->ClientFileTransferUploadOut04MuxSend"
+   ],
+   "required_gates": [
+    "scripts/run-file-transfer-throughput-gate.sh",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/file-transfer-throughput-runtime.test.ts",
+    "src/components/terminal/FileTransferSheet.test.tsx"
+   ],
+   "status": "active"
+  },
+  {
+   "edge_id": "edge.client_file_native_batch_to_write_dispatch",
+   "from_module": "client.file_browser",
+   "to_module": "client.file_browser",
+   "resource_from": "resource.client_file_browser",
+   "resource_to": "resource.client_file_browser",
+   "via_resources": [],
+   "relation_status": "observer",
+   "owner_feature": "daemon.file_transfer",
+   "allowed_callers": [
+    "src/lib/file-transfer-throughput-runtime.ts",
+    "src/components/terminal/FileTransferSheet.tsx"
+   ],
+   "forbidden_callers": [
+    "src/server/**",
+    "src/components/TerminalView.tsx"
+   ],
+   "request_chain": [
+    "ClientFileTransferDownloadIn04NativeWriteBatch",
+    "ClientFileTransferDownloadIn05NativeWriteDispatch"
+   ],
+   "response_chain": [
+    "ClientFileTransferDownloadPersistOut01BytesWritten"
+   ],
+   "error_chain": [
+    "ClientFileTransferDownloadErrorIn02NativeWriteFailure"
+   ],
+   "mainline_call_ids": [
+    "android_mainline:ClientFileTransferDownloadIn04NativeWriteBatch->ClientFileTransferDownloadIn05NativeWriteDispatch"
+   ],
+   "required_gates": [
+    "scripts/run-file-transfer-throughput-gate.sh",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/file-transfer-throughput-runtime.test.ts"
+   ],
+   "status": "active"
+  },
+  {
+   "edge_id": "edge.client_file_browser_to_native_file_store",
+   "from_module": "client.file_browser",
+   "to_module": "client.runtime",
+   "resource_from": "resource.client_file_browser",
+   "resource_to": "resource.client_native_file_store",
+   "via_resources": [],
+   "relation_status": "direct",
+   "owner_feature": "daemon.file_transfer",
+   "allowed_callers": [
+    "src/components/terminal/FileTransferSheet.tsx",
+    "src/lib/file-transfer-throughput-runtime.ts",
+    "src/plugins/StoragePermissionPlugin.ts",
+    "native/android/app/src/main/java/com/zterm/android/StoragePermissionPlugin.java"
+   ],
+   "forbidden_callers": [
+    "src/server/**",
+    "src/components/TerminalView.tsx"
+   ],
+   "request_chain": [
+    "ClientFileTransferDownloadIn05NativeWriteDispatch",
+    "ClientFileTransferDownloadIn06NativeStore"
+   ],
+   "response_chain": [
+    "ClientFileTransferDownloadPersistOut01BytesWritten",
+    "ClientFileTransferDownloadPersistOut02VerifiedStat"
+   ],
+   "error_chain": [
+    "ClientFileTransferDownloadErrorIn02NativeWriteFailure",
+    "ClientFileTransferDownloadErrorIn03SizeMismatch"
+   ],
+   "mainline_call_ids": [
+    "android_mainline:ClientFileTransferDownloadIn05NativeWriteDispatch->ClientFileTransferDownloadIn06NativeStore"
+   ],
+   "required_gates": [
+    "scripts/run-file-transfer-throughput-gate.sh",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/file-transfer-throughput-runtime.test.ts",
+    "native/android/app/src/test/java/com/zterm/android/StorageFileWriteLogicTest.java"
+   ],
+   "status": "active"
+  },
+  {
+   "edge_id": "edge.client_target_mux_request_to_file_browser",
+   "from_module": "client.daemon_connection",
+   "to_module": "client.file_browser",
+   "resource_from": "resource.target_mux_request",
+   "resource_to": "resource.client_file_browser",
+   "via_resources": [
+    "resource.daemon_target_transport",
+    "resource.terminal_channel"
+   ],
+   "relation_status": "via",
+   "owner_feature": "daemon.file_transfer",
+   "allowed_callers": [
+    "src/contexts/session-context-socket-message-runtime.ts",
+    "src/lib/file-transfer-message-runtime.ts",
+    "src/lib/file-transfer-session-runtime.ts"
+   ],
+   "forbidden_callers": [
+    "src/components/TerminalView.tsx",
+    "src/server/**"
+   ],
+   "request_chain": [
+    "ClientFileTransferDownloadIn01SocketDispatch",
+    "ClientFileTransferDownloadIn02SessionProjection"
+   ],
+   "response_chain": [
+    "ClientFileTransferDownloadIn03SheetPersistence"
+   ],
+   "error_chain": [
+    "ClientFileTransferDownloadErrorIn01StaleRequest"
+   ],
+   "mainline_call_ids": [
+    "android_mainline:ClientFileTransferUploadAckIn01SocketDispatch->ClientFileTransferUploadAckIn02SessionProjection",
+    "android_mainline:ClientFileTransferDownloadIn01SocketDispatch->ClientFileTransferDownloadIn02SessionProjection"
+   ],
+   "required_gates": [
+    "scripts/run-file-transfer-throughput-gate.sh",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/lib/file-transfer-session-runtime.test.ts"
+   ],
+   "status": "active"
+  },
+  {
+   "edge_id": "edge.daemon_file_transfer_to_transport_subscriber",
+   "from_module": "daemon.file_transfer",
+   "to_module": "daemon.transport_subscriber",
+   "resource_from": "resource.file_transfer",
+   "resource_to": "resource.transport_subscriber",
+   "via_resources": [],
+   "relation_status": "direct",
+   "owner_feature": "daemon.file_transfer",
+   "allowed_callers": [
+    "src/server/terminal-file-transfer-binary-runtime.ts",
+    "src/server/terminal-file-transfer-list-runtime.ts",
+    "src/server/terminal-file-transfer-runtime.ts"
+   ],
+   "forbidden_callers": [
+    "src/components/**",
+    "src/pages/**"
+   ],
+   "request_chain": [
+    "DaemonFileTransferUploadProgressOut01CumulativeAck",
+    "DaemonFileTransferTransportOut01Send"
+   ],
+   "response_chain": [
+    "DaemonFileTransferUploadProgressOut01CumulativeAck",
+    "DaemonFileTransferUploadSuccessOut01Complete"
+   ],
+   "error_chain": [
+    "DaemonFileTransferUploadErrorOut01ChunkRejected",
+    "DaemonFileTransferUploadErrorOut02CompletionRejected"
+   ],
+   "mainline_call_ids": [
+    "daemon_mainline:DaemonFileTransferUploadProgressOut01CumulativeAck->DaemonFileTransferTransportOut01Send",
+    "daemon_mainline:DaemonFileTransferUploadSuccessOut01Complete->DaemonFileTransferTransportOut01Send",
+    "daemon_mainline:DaemonFileTransferUploadErrorOut01ChunkRejected->DaemonFileTransferTransportOut01Send",
+    "daemon_mainline:DaemonFileTransferUploadErrorOut02CompletionRejected->DaemonFileTransferTransportOut01Send"
+   ],
+   "required_gates": [
+    "scripts/run-file-transfer-throughput-gate.sh",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/server/terminal-file-transfer-binary-runtime.test.ts"
+   ],
+   "status": "active"
   }
  ],
  "import_edges_description": "Module-level import allowlist derived from the real src import graph. Gate: src/lib/module-import-graph-truth.test.ts. Every cross-module import edge in code must appear here, and every entry here must exist in code (lockstep both directions). status=pending_removal marks a known violation that must trend to zero; adding new pending_removal entries requires an explicit decision doc.",
@@ -1443,6 +1936,16 @@
    "status": "active"
   },
   {
+   "from_module": "daemon.connection_gateway",
+   "to_module": "daemon.mirror_store",
+   "status": "active"
+  },
+  {
+   "from_module": "daemon.connection_gateway",
+   "to_module": "daemon.transport_subscriber",
+   "status": "active"
+  },
+  {
    "from_module": "daemon.mirror_store",
    "to_module": "daemon.runtime_entry",
    "status": "active"
@@ -1455,6 +1958,11 @@
   {
    "from_module": "daemon.mirror_store",
    "to_module": "daemon.transport_subscriber",
+   "status": "active"
+  },
+  {
+   "from_module": "daemon.runtime_entry",
+   "to_module": "daemon.connection_gateway",
    "status": "active"
   },
   {
@@ -1505,6 +2013,11 @@
   {
    "from_module": "daemon.terminal_backend",
    "to_module": "daemon.runtime_entry",
+   "status": "active"
+  },
+  {
+   "from_module": "daemon.transport_subscriber",
+   "to_module": "daemon.connection_gateway",
    "status": "active"
   },
   {

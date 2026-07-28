@@ -3,6 +3,15 @@ apply plugin: 'com.android.application'
 import groovy.json.JsonSlurper
 
 def packageJson = new JsonSlurper().parse(file('../../../package.json'))
+def fileTransferThroughputContract = new JsonSlurper().parse(
+    file('../../../contracts/file-transfer-throughput.json')
+)
+def nativeFileWriteBatchChunks = Integer.parseInt(
+    String.valueOf(fileTransferThroughputContract.native_write_batch_chunks)
+)
+if (nativeFileWriteBatchChunks < 1) {
+    throw new GradleException('native_write_batch_chunks must be a positive integer')
+}
 def buildMetaFile = file('../../../.build-meta.json')
 def buildMeta = buildMetaFile.exists() ? new JsonSlurper().parse(buildMetaFile) : [buildNumber: 1000]
 def semverParts = String.valueOf(packageJson.version).tokenize('.').collect { part ->
@@ -23,6 +32,9 @@ def appVersionCode = (semverParts[0] * 100000000) + (semverParts[1] * 1000000) +
 android {
     namespace = "com.zterm.android"
     compileSdk = rootProject.ext.compileSdkVersion
+    buildFeatures {
+        buildConfig = true
+    }
     
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
@@ -35,6 +47,7 @@ android {
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode appVersionCode
         versionName appDisplayVersion
+        buildConfigField 'int', 'FILE_TRANSFER_NATIVE_WRITE_BATCH_CHUNKS', String.valueOf(nativeFileWriteBatchChunks)
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.

@@ -10,6 +10,11 @@ flowchart TD
   Capacitor --> Vite["vite.config.ts"]
   Vite --> Main["src/main.tsx"]
   Main --> App["src/App.tsx"]
+  App --> RelayControlRuntime["src/hooks/useRelayDeviceStream.ts#useRelayDeviceStream"]
+  RelayControlRuntime --> RelayControlSocket["src/lib/traversal-relay-client.ts#connectTraversalRelayDevicesStream"]
+  RelayControlSocket --> RelayDirectoryProjection["src/lib/client-control-directory-runtime.ts#ClientControlDirectoryRuntime.applyConfirmedDirectoryDevices"]
+  RelayDirectoryProjection --> TransportTargetResolver["src/lib/client-control-directory-runtime.ts#mergeHostWithClientControlDirectory"]
+  TransportTargetResolver --> TraversalSocketFactory
   App --> SessionContext["src/contexts/SessionContext.tsx"]
   SessionContext --> SessionLifecycle["src/contexts/session-context-session-orchestration-runtime.ts"]
   SessionLifecycle --> ActivityFreshness["src/contexts/session-context-activity-runtime.ts"]
@@ -43,6 +48,8 @@ flowchart TD
   TargetFailureRouter --> IdleTargetRetirement["zero-session exact-generation retirement"]
   TargetTransportRuntime --> MuxHandshake["packages/shared/src/connection/protocol.ts#TerminalMuxClientFrame"]
   MuxHandshake --> TargetMuxFrameLifecycle["src/contexts/session-context-transport-runtime.ts#bindTargetMuxTransportSocketLifecycleRuntime"]
+  TargetMuxFrameLifecycle --> ActiveSessionPriority["src/contexts/session-context-transport-orchestration-runtime.ts#createSessionTransportOrchestrationRuntime activeSessionId binding"]
+  ActiveSessionPriority --> ChannelRuntime
   TargetMuxFrameLifecycle --> TargetNetworkActivityBinding["src/contexts/session-context-transport-orchestration-runtime.ts#createSessionTransportOrchestrationRuntime recordTargetServerActivity binding"]
   TargetNetworkActivityBinding --> TargetNetworkProbe
   MuxHandshake --> TerminalTransportError01TargetFailure["src/contexts/session-context-transport-orchestration-runtime.ts#handleTargetMuxTransportFailureRuntime"]
@@ -52,11 +59,16 @@ flowchart TD
   ChannelRuntime --> ChannelMessageSend["src/contexts/session-context-transport-wire-runtime.ts#mux channel send"]
   SessionContext --> SocketMessage["src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime"]
   SocketMessage --> ChannelDemux["src/contexts/session-context-socket-message-runtime.ts#mux channel demux"]
-  ChannelDemux --> BufferApply
-  SocketMessage --> BufferApply["src/contexts/session-context-buffer-runtime.ts#applyIncomingBufferSyncRuntime"]
-  BufferApply --> RenderGate["src/lib/session-render-gate.ts#scheduleCommit"]
+  ChannelDemux --> BufferWireNormalize
+  SocketMessage --> BufferWireNormalize["src/contexts/session-wire-helpers.ts#normalizeIncomingBufferPayload"]
+  BufferWireNormalize --> BufferSyncIngress["src/contexts/session-context-buffer-runtime.ts#applyIncomingBufferSyncRuntime"]
+  SocketMessage --> BufferHeadFrameExpiry["src/contexts/session-context-buffer-runtime.ts#handleBufferHeadRuntime"]
+  BufferSyncIngress --> BufferFrameAssembly["src/contexts/session-buffer-frame-assembly.ts#assembleBufferSyncFrameChunk"]
+  BufferHeadFrameExpiry --> BufferFrameAssembly["src/contexts/session-buffer-frame-assembly.ts#expireBufferSyncFrameAssembly"]
+  BufferFrameAssembly --> BufferSparseApply["src/contexts/session-context-buffer-runtime.ts#applyResolvedBufferSyncPayloadRuntime"]
+  BufferSparseApply --> RenderGate["src/lib/session-render-gate.ts#scheduleCommit"]
   SocketMessage --> PerformanceTrace["src/lib/terminal-performance-trace.ts"]
-  BufferApply --> PerformanceTrace
+  BufferSparseApply --> PerformanceTrace
   RenderGate --> PerformanceTrace
   App --> Connections["src/pages/ConnectionsPage.tsx"]
   Connections --> SessionOpenOwner["src/hooks/useSessionOpenActions.ts#handleOpenSavedConnection"]
@@ -64,6 +76,23 @@ flowchart TD
   App --> TerminalPage["src/pages/TerminalPage.tsx"]
   TerminalPage --> TerminalView["src/components/TerminalView.tsx"]
   TerminalPage --> QuickBar["src/components/terminal/TerminalQuickBar.tsx"]
+  QuickBar --> ClientFileTransferUploadOut01SheetIntent["src/components/terminal/FileTransferSheet.tsx#FileTransferSheet"]
+  ClientFileTransferUploadOut01SheetIntent --> ClientFileTransferUploadOut02BoundedWindow["src/lib/file-transfer-throughput-runtime.ts#sendBoundedFileUploadChunks"]
+  ClientFileTransferUploadOut02BoundedWindow --> ClientFileTransferUploadOut03ChunkDispatch["src/components/terminal/FileTransferSheet.tsx#dispatchUploadChunk"]
+  ClientFileTransferUploadOut03ChunkDispatch --> ClientFileTransferUploadOut04MuxSend["src/pages/TerminalPage.tsx#sendFileTransferMessage"]
+  ClientFileTransferUploadAckIn01SocketDispatch["src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime"] --> ClientFileTransferUploadAckIn02SessionProjection["src/lib/file-transfer-session-runtime.ts#createFileTransferSessionRuntime"]
+  ClientFileTransferDownloadIn01SocketDispatch["src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime"] --> ClientFileTransferDownloadIn02SessionProjection["src/lib/file-transfer-session-runtime.ts#createFileTransferSessionRuntime"]
+  ClientFileTransferDownloadIn02SessionProjection --> ClientFileTransferDownloadIn03SheetPersistence["src/components/terminal/FileTransferSheet.tsx#FileTransferSheet"]
+  ClientFileTransferDownloadIn03SheetPersistence --> ClientFileTransferDownloadIn04NativeWriteBatch["src/lib/file-transfer-throughput-runtime.ts#writeFileTransferChunkBatches"]
+  ClientFileTransferDownloadIn04NativeWriteBatch --> ClientFileTransferDownloadIn05NativeWriteDispatch["src/components/terminal/FileTransferSheet.tsx#writeDownloadChunkBatch"]
+  ClientFileTransferDownloadIn05NativeWriteDispatch --> ClientFileTransferDownloadIn06NativeStore["native/android/app/src/main/java/com/zterm/android/StoragePermissionPlugin.java#writeFileChunks"]
+  ClientFileTransferDownloadIn06NativeStore --> ClientFileTransferDownloadPersistOut01BytesWritten["native/android/app/src/main/java/com/zterm/android/StorageFileWriteLogic.java#writeChunks"]
+  ClientFileTransferDownloadPersistOut01BytesWritten --> ClientFileTransferDownloadPersistOut02VerifiedStat["src/components/terminal/FileTransferSheet.tsx#onDownloadComplete"]
+  ClientFileTransferUploadOut03ChunkDispatch --> ClientFileTransferUploadErrorOut01WireFrameLimit["src/components/terminal/FileTransferSheet.tsx#dispatchUploadChunk"]
+  ClientFileTransferUploadAckIn02SessionProjection --> ClientFileTransferUploadErrorIn01ProgressTimeout["src/lib/file-transfer-session-runtime.ts#waitForUploadProgress"]
+  ClientFileTransferDownloadIn01SocketDispatch --> ClientFileTransferDownloadErrorIn01StaleRequest["src/lib/file-transfer-session-runtime.ts#createFileTransferSessionRuntime"]
+  ClientFileTransferDownloadIn06NativeStore --> ClientFileTransferDownloadErrorIn02NativeWriteFailure["src/components/terminal/FileTransferSheet.tsx#onDownloadComplete"]
+  ClientFileTransferDownloadPersistOut02VerifiedStat --> ClientFileTransferDownloadErrorIn03SizeMismatch["src/components/terminal/FileTransferSheet.tsx#onDownloadComplete"]
   TerminalPage --> RemoteWindowOverlay["src/components/terminal/RemoteWindowOverlay.tsx#RemoteWindowOverlay"]
   TerminalPage --> RemoteWindowInputRuntime["src/contexts/session-context-remote-window-runtime.ts#sendRemoteWindowInputRuntime"]
   RemoteWindowOverlay --> WindowGroupLayout["src/components/terminal/WindowGroupLayout.tsx#WindowGroupLayout"]
@@ -138,7 +167,18 @@ flowchart TD
   Message --> Control["src/server/terminal-message-control-runtime.ts"]
   Control --> Tmux["src/server/terminal-control-runtime.ts"]
   Control --> Schedule["src/server/terminal-schedule-runtime.ts"]
-  Control --> Transfer["src/server/terminal-file-transfer-runtime.ts"]
+  DaemonFileTransferUploadIn01MessageDispatch["src/server/terminal-message-runtime.ts#createTerminalMessageRuntime"] --> DaemonFileTransferUploadIn02RuntimeFacade["src/server/terminal-file-transfer-runtime.ts#createTerminalFileTransferRuntime"]
+  DaemonFileTransferUploadIn02RuntimeFacade --> DaemonFileTransferUploadIn03CumulativeAckOwner["src/server/terminal-file-transfer-binary-runtime.ts#handleFileUploadChunk"]
+  DaemonFileTransferUploadIn02RuntimeFacade --> DaemonFileTransferUploadEndIn04ExactCompletionOwner["src/server/terminal-file-transfer-binary-runtime.ts#handleFileUploadEnd"]
+  DaemonFileTransferUploadIn03CumulativeAckOwner --> DaemonFileTransferUploadProgressOut01CumulativeAck
+  DaemonFileTransferUploadIn03CumulativeAckOwner --> DaemonFileTransferUploadErrorOut01ChunkRejected
+  DaemonFileTransferUploadEndIn04ExactCompletionOwner --> DaemonFileTransferUploadSuccessOut01Complete
+  DaemonFileTransferUploadEndIn04ExactCompletionOwner --> DaemonFileTransferUploadErrorOut02CompletionRejected
+  DaemonFileTransferUploadProgressOut01CumulativeAck --> DaemonFileTransferTransportOut01Send["src/server/terminal-transport-runtime.ts#sendMessage"]
+  DaemonFileTransferUploadSuccessOut01Complete --> DaemonFileTransferTransportOut01Send
+  DaemonFileTransferUploadErrorOut01ChunkRejected --> DaemonFileTransferTransportOut01Send
+  DaemonFileTransferUploadErrorOut02CompletionRejected --> DaemonFileTransferTransportOut01Send
+  DaemonFileTransferTransportOut01Send --> TransportSend
   Control --> Screenshot["src/server/remote-screenshot-daemon.ts"]
   Control --> RemoteWindowStream["src/server/remote-window-stream-daemon.ts#createRemoteWindowStreamDaemonRuntime"]
   RemoteWindowStream --> RemoteWindowCapture["src/server/remote-window-stream-daemon.ts#startScreenCaptureKitFrameSource"]
@@ -149,6 +189,10 @@ flowchart TD
   Server --> Debug["src/server/terminal-debug-runtime.ts"]
   Server --> Transport["src/server/terminal-transport-runtime.ts"]
   Server --> Relay["src/server/relay-client.ts"]
+  Server --> RelayHostControl["src/server/relay-client.ts#createTraversalRelayHostClient"]
+  RelayHostControl --> DaemonEndpointDirectory["src/server/daemon-connection-endpoint-runtime.ts#buildDaemonConnectionEndpointCandidates"]
+  DaemonEndpointDirectory --> RelayDirectoryPublish["src/server/relay-client.ts#publishRelayDirectoryUpdate"]
+  RelayDirectoryPublish --> Relay
   Relay --> RelayPeerLease["src/traversal-relay/server.ts#relay peer lease"]
   RelayPeerLease --> MuxHandshake
 ```
@@ -183,6 +227,10 @@ The executable resource graph is declared in `docs/resource-registry.json`; the 
 flowchart TD
   RuntimeHome["resource.runtime_home"] --> DaemonArtifact["resource.daemon_runtime_artifact"]
   DaemonArtifact --> DaemonProcess["resource.daemon_process"]
+  DaemonProcess --> DaemonConnectionGateway["resource.daemon_connection_gateway"]
+  DaemonConnectionGateway --> RelayControlConnection["resource.relay_control_connection"]
+  RelayControlConnection --> RelayAccountDirectory["resource.relay_account_directory"]
+  RelayAccountDirectory --> TransportTarget
   DaemonProcess --> TerminalBackend["resource.terminal_backend"]
   TerminalBackend --> BackendSession["resource.backend_session"]
   BackendSession --> TmuxSession["resource.tmux_session"]
@@ -209,6 +257,10 @@ flowchart TD
   OpenTab["resource.open_tab"] --> ActiveSession["resource.active_session"]
   ActiveSession --> SessionTransport
   PlatformInput["resource.platform_input_channel"] --> SessionTransport
+  ClientFileBrowser["resource.client_file_browser"] --> TargetMuxRequest["resource.target_mux_request"]
+  TargetMuxRequest --> DaemonTargetTransport
+  ClientFileBrowser --> ClientNativeFileStore["resource.client_native_file_store"]
+  TransportSubscriber --> FileTransfer["resource.file_transfer"]
   DaemonInputQueue["resource.daemon_input_queue"] --> BackendSession
   ReleaseArtifact["resource.release_update_artifact"] --> DaemonArtifact
   DebugChannel["resource.debug_channel"] --> DaemonProcess
@@ -224,7 +276,7 @@ flowchart TD
 | --- | --- |
 | Android app entry | `src/main.tsx`, `src/App.tsx`, `src/pages/ConnectionsPage.tsx`, `src/pages/TerminalPage.tsx` |
 | Client transport lifecycle | `packages/shared/src/connection/protocol.ts`, `src/contexts/SessionContext.tsx`, `src/contexts/session-context-session-orchestration-runtime.ts`, `src/contexts/session-context-session-runtime.ts`, `src/contexts/session-context-activity-runtime.ts`, `src/contexts/session-context-transport-runtime.ts`, `src/contexts/session-context-transport-orchestration-runtime.ts`, `src/contexts/session-context-transport-open-runtime.ts`, `src/contexts/session-context-socket-message-runtime.ts`, `src/contexts/session-transport-open-helpers.ts`, `src/lib/session-transport-runtime.ts`; network-generation probes enumerate physical targets through `TargetTransportAccessors -> TargetTransportStoreEnumeration`, while valid inbound frames settle only their exact socket generation through `TargetMuxFrameLifecycle -> TargetNetworkActivityBinding -> TargetNetworkProbe`; target mux nodes are `TargetTransportRuntime`, `MuxHandshake`, `TerminalTransportError01TargetFailure`, `ChannelRuntime`, `ChannelMessageSend`, and `ChannelDemux`; mux readiness failure records route health exactly once, retires the exact physical generation, then schedules one target rebuild; WebRTC route diagnostics include metadata-only selected ICE pair projection through `src/lib/traversal/socket.ts` and `src/pages/TerminalPageDebugOverlay.tsx` |
-| Terminal body receive/apply/render | `src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime`, `src/contexts/session-context-buffer-runtime.ts#applyIncomingBufferSyncRuntime`, `src/lib/session-render-gate.ts#scheduleCommit`, `src/lib/session-render-buffer-store.ts` |
+| Terminal body receive/apply/render | `src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime`, `src/contexts/session-context-buffer-runtime.ts#applyIncomingBufferSyncRuntime`, `src/contexts/session-buffer-frame-assembly.ts#assembleBufferSyncFrameChunk`, `src/contexts/session-context-buffer-runtime.ts#applyResolvedBufferSyncPayloadRuntime`, `src/lib/session-render-gate.ts#scheduleCommit`, `src/lib/session-render-buffer-store.ts` |
 | Terminal performance observer | `src/lib/terminal-performance-trace.ts`, `src/server/terminal-debug-runtime.ts`, `src/lib/runtime-debug.ts`; metadata only, no terminal text/cells |
 | Terminal shell and panes | `src/pages/TerminalPageStageShell.tsx`, `src/hooks/useTerminalWorkspace.ts`, `src/components/terminal/TerminalQuickBar.tsx` |
 | Remote window stream projection | `packages/shared/src/connection/protocol.ts`, `src/server/remote-window-stream-daemon.ts`, `src/server/terminal-message-runtime.ts`, `src/server/server.ts`, `src/server/terminal-file-transfer-binary-runtime.ts`, `src/components/terminal/RemoteWindowOverlay.tsx`, `src/lib/remote-window-overlay-runtime.ts`, `src/lib/remote-window-touch-action-runtime.ts`, `src/lib/remote-window-message-runtime.ts`, `src/lib/remote-window-receiver-runtime.ts`, `src/lib/remote-window-video-quality.ts`, `src/contexts/session-context-remote-window-runtime.ts`, `src/contexts/session-context-transfer-runtime.ts`, `docs/decisions/2026-07-19-remote-window-stream-truth.md`; ScreenCaptureKit/WebRTC bindings are anchored under `RemoteWindowMessageRuntime`, `RemoteWindowReceiver`, `RemoteWindowStreamQualityRuntime`, `RemoteWindowTouchAction`, `RemoteWindowCapture`, `RemoteWindowMedia`, `RemoteWindowInput`, and `RemoteWindowCleanup`; Android fullscreen projection now owns collapsed same-app picker rows plus in-video sibling window switcher, default-collapsed iTerm2 picker grouping, daemon-wide 60-second target catalog cache keyed by daemon identity, aspect-fit drawing plus default remote target `window-resize` fill request on fullscreen entry, source-aspect floating resize with toolbar reachability cap, daemon-frame-aspect receiver projection after stream start, IME bottom-inset fullscreen padding plus QuickBar chrome auto-pan, unzoomed touch tap-to-pointer and tuning-scaled release-time gesture input plus wheel pixel-scroll input even while IME inset is present, zoomed-only local single-finger pan, target-locked two-finger tuning-scaled remote scroll with optional direction inversion, supported app-window-only input context through the touch/action dispatch boundary, ready-checked persistent macOS input helper warmup during interactive stream start without focus/input, focus-aware image paste routing, floating-preview low bitrate, desktop-area-proportional stream quality defaults, adaptive network quality caps, and explicit max frame-rate request values; remaining live gates are Android physical-send trace and iTerm2-pane stream/input proof |

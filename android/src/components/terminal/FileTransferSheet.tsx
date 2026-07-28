@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { mobileTheme } from "../../lib/mobile-ui";
 import { createFileTransferSessionRuntime } from "../../lib/file-transfer-session-runtime";
+import {
+  sendBoundedFileUploadChunks,
+  writeFileTransferChunkBatches,
+} from "../../lib/file-transfer-throughput-runtime";
 import { StoragePermissionPlugin } from "../../plugins/StoragePermissionPlugin";
 import { FILE_TRANSFER_WIRE_CHUNK_BYTES, FILE_TRANSFER_WIRE_FRAME_MAX_CHARS } from "@zterm/shared/protocol";
 import {
@@ -306,13 +310,20 @@ export function FileTransferSheet({
               data: "",
             });
           } else {
-            for (let index = 0; index < orderedChunksBase64.length; index += 1) {
-              await StoragePermissionPlugin.writeFileChunk({
+            const writeDownloadChunkBatch = async (
+              chunks: string[],
+              append: boolean,
+            ) => {
+              await StoragePermissionPlugin.writeFileChunks({
                 path: targetPath,
-                data: orderedChunksBase64[index] || "",
-                append: index > 0,
+                chunks,
+                append,
               });
-            }
+            };
+            await writeFileTransferChunkBatches({
+              chunksBase64: orderedChunksBase64,
+              writeBatch: writeDownloadChunkBatch,
+            });
           }
 
           const written = await StoragePermissionPlugin.stat({ path: targetPath });
@@ -711,37 +722,49 @@ export function FileTransferSheet({
             targetDir,
             chunkCount,
           );
+          const currentUploadRequest = uploadRequest;
           forceRuntimeTick((value) => value + 1);
-          sendJson?.(uploadRequest.startMessage);
+          sendJson?.(currentUploadRequest.startMessage);
 
-          for (let i = 0; i < chunkCount; i++) {
-            const offset = i * FILE_CHUNK_SIZE;
-            const length =
-              entry.size === 0
-                ? 0
-                : Math.min(FILE_CHUNK_SIZE, Math.max(0, entry.size - offset));
-            const readResult = await StoragePermissionPlugin.readFileChunk({
-              path: sourcePath,
-              offset,
-              length,
-            });
-            if (length > 0 && readResult.bytesRead <= 0) {
-              throw new Error(`local upload chunk ${i} returned no bytes`);
-            }
-            const dataBase64 =
-              typeof readResult.data === "string" ? readResult.data : "";
-            const chunkMessage = uploadRequest.buildChunkMessage(i, dataBase64);
+          const dispatchUploadChunk = (
+            chunkIndex: number,
+            dataBase64: string,
+          ) => {
+            const chunkMessage = currentUploadRequest.buildChunkMessage(
+              chunkIndex,
+              dataBase64,
+            );
             const encodedFrameChars = JSON.stringify(chunkMessage).length;
             if (encodedFrameChars > FILE_TRANSFER_WIRE_FRAME_MAX_CHARS) {
               throw new Error(
-                `upload chunk ${i} wire frame too large: ${encodedFrameChars} chars`,
+                `upload chunk ${chunkIndex} wire frame too large: ${encodedFrameChars} chars`,
               );
             }
             sendJson?.(chunkMessage);
-            await uploadRequest.waitForProgress(i + 1);
-          }
-          sendJson?.(uploadRequest.endMessage);
-          await uploadRequest.waitForDone();
+          };
+          await sendBoundedFileUploadChunks({
+            totalChunks: chunkCount,
+            waitForProgress: currentUploadRequest.waitForProgress,
+            readChunk: async (chunkIndex) => {
+              const offset = chunkIndex * FILE_CHUNK_SIZE;
+              const length =
+                entry.size === 0
+                  ? 0
+                  : Math.min(FILE_CHUNK_SIZE, Math.max(0, entry.size - offset));
+              const readResult = await StoragePermissionPlugin.readFileChunk({
+                path: sourcePath,
+                offset,
+                length,
+              });
+              if (length > 0 && readResult.bytesRead <= 0) {
+                throw new Error(`local upload chunk ${chunkIndex} returned no bytes`);
+              }
+              return typeof readResult.data === "string" ? readResult.data : "";
+            },
+            sendChunk: dispatchUploadChunk,
+          });
+          sendJson?.(currentUploadRequest.endMessage);
+          await currentUploadRequest.waitForDone();
         } catch (err) {
           if (uploadRequest) {
             sendJson?.(uploadRequest.endMessage);

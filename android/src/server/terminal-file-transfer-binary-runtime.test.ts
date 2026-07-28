@@ -1,10 +1,18 @@
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTerminalFileTransferBinaryRuntime } from './terminal-file-transfer-binary-runtime';
 import type { SessionMirror, TerminalSession } from './terminal-runtime-types';
 import type { ServerMessage } from '../lib/types';
+
+const { statSyncMock } = vi.hoisted(() => ({ statSyncMock: vi.fn() }));
+
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  statSyncMock.mockImplementation(actual.statSync);
+  return { ...actual, statSync: statSyncMock };
+});
 
 function makeSession(): TerminalSession {
   return {
@@ -59,6 +67,7 @@ describe('terminal-file-transfer-binary-runtime', () => {
   let uploadDir: string | null = null;
 
   afterEach(() => {
+    statSyncMock.mockClear();
     if (uploadDir) {
       rmSync(uploadDir, { recursive: true, force: true });
       uploadDir = null;
@@ -110,6 +119,162 @@ describe('terminal-file-transfer-binary-runtime', () => {
       type: 'file-upload-complete',
       payload: { requestId: 'upload-1', filePath, bytes: 5 },
     });
+  });
+
+  it('acknowledges only the unique contiguous upload prefix and rejects invalid completion', () => {
+    uploadDir = mkdtempSync(join(tmpdir(), 'zterm-upload-window-'));
+    const session = makeSession();
+    const sentMessages: ServerMessage[] = [];
+    const runtime = createTerminalFileTransferBinaryRuntime({
+      uploadDir,
+      downloadsDir: uploadDir,
+      wtermHomeDir: uploadDir,
+      platform: 'darwin',
+      sendMessage: (_session, message) => sentMessages.push(message),
+      getSessionMirror: () => makeReadyMirror(),
+      scheduleMirrorLiveSync: vi.fn(),
+      writeToTmuxSession: vi.fn(),
+      writeToLiveMirror: vi.fn(() => true),
+      readTmuxPaneCurrentPath: vi.fn(() => uploadDir!),
+      runCommand: vi.fn(),
+      captureRemoteScreenshot: vi.fn(async ({ outputPath }) => ({ outputPath })),
+      logTimePrefix: () => '2026-07-28 00:00:00',
+    });
+
+    runtime.handleFileUploadStart(session, {
+      requestId: 'upload-window',
+      targetDir: uploadDir,
+      fileName: 'ordered.bin',
+      fileSize: 3,
+      chunkCount: 3,
+    });
+    runtime.handleFileUploadChunk(session, {
+      requestId: 'upload-window',
+      chunkIndex: 2,
+      dataBase64: Buffer.from('c').toString('base64'),
+    });
+    runtime.handleFileUploadChunk(session, {
+      requestId: 'upload-window',
+      chunkIndex: 0,
+      dataBase64: Buffer.from('a').toString('base64'),
+    });
+    runtime.handleFileUploadChunk(session, {
+      requestId: 'upload-window',
+      chunkIndex: 0,
+      dataBase64: Buffer.from('a').toString('base64'),
+    });
+    runtime.handleFileUploadChunk(session, {
+      requestId: 'upload-window',
+      chunkIndex: 1,
+      dataBase64: Buffer.from('b').toString('base64'),
+    });
+
+    const progress = sentMessages
+      .filter((message) => message.type === 'file-upload-progress')
+      .map((message) => message.payload.chunkIndex);
+    expect(progress).toEqual([0, 0, 1, 1, 3]);
+
+    runtime.handleFileUploadEnd(session, { requestId: 'upload-window' });
+    expect(readFileSync(join(uploadDir, 'ordered.bin'), 'utf8')).toBe('abc');
+
+    runtime.handleFileUploadStart(session, {
+      requestId: 'upload-invalid',
+      targetDir: uploadDir,
+      fileName: 'invalid.bin',
+      fileSize: 2,
+      chunkCount: 2,
+    });
+    runtime.handleFileUploadChunk(session, {
+      requestId: 'upload-invalid',
+      chunkIndex: 2,
+      dataBase64: Buffer.from('x').toString('base64'),
+    });
+    runtime.handleFileUploadEnd(session, { requestId: 'upload-invalid' });
+
+    expect(sentMessages).toContainEqual({
+      type: 'file-upload-error',
+      payload: {
+        requestId: 'upload-invalid',
+        error: 'Invalid chunk index 2 for 2 chunks',
+      },
+    });
+    expect(sentMessages).not.toContainEqual(expect.objectContaining({
+      type: 'file-upload-complete',
+      payload: expect.objectContaining({ requestId: 'upload-invalid' }),
+    }));
+
+    runtime.handleFileUploadStart(session, {
+      requestId: 'upload-size-mismatch',
+      targetDir: uploadDir,
+      fileName: 'size-mismatch.bin',
+      fileSize: 2,
+      chunkCount: 1,
+    });
+    runtime.handleFileUploadChunk(session, {
+      requestId: 'upload-size-mismatch',
+      chunkIndex: 0,
+      dataBase64: Buffer.from('x').toString('base64'),
+    });
+    runtime.handleFileUploadEnd(session, { requestId: 'upload-size-mismatch' });
+    expect(sentMessages).toContainEqual({
+      type: 'file-upload-error',
+      payload: {
+        requestId: 'upload-size-mismatch',
+        error: 'Upload size mismatch: received 1 bytes, expected 2',
+      },
+    });
+    expect(sentMessages).not.toContainEqual(expect.objectContaining({
+      type: 'file-upload-complete',
+      payload: expect.objectContaining({ requestId: 'upload-size-mismatch' }),
+    }));
+  });
+
+  it('rejects completion when persisted file size differs from the exact upload truth', () => {
+    uploadDir = mkdtempSync(join(tmpdir(), 'zterm-upload-persisted-size-'));
+    const session = makeSession();
+    const sentMessages: ServerMessage[] = [];
+    const runtime = createTerminalFileTransferBinaryRuntime({
+      uploadDir,
+      downloadsDir: uploadDir,
+      wtermHomeDir: uploadDir,
+      platform: 'darwin',
+      sendMessage: (_session, message) => sentMessages.push(message),
+      getSessionMirror: () => makeReadyMirror(),
+      scheduleMirrorLiveSync: vi.fn(),
+      writeToTmuxSession: vi.fn(),
+      writeToLiveMirror: vi.fn(() => true),
+      readTmuxPaneCurrentPath: vi.fn(() => uploadDir!),
+      runCommand: vi.fn(),
+      captureRemoteScreenshot: vi.fn(async ({ outputPath }) => ({ outputPath })),
+      logTimePrefix: () => '2026-07-28 00:00:00',
+    });
+
+    runtime.handleFileUploadStart(session, {
+      requestId: 'upload-persisted-size-mismatch',
+      targetDir: uploadDir,
+      fileName: 'persisted-size.bin',
+      fileSize: 1,
+      chunkCount: 1,
+    });
+    runtime.handleFileUploadChunk(session, {
+      requestId: 'upload-persisted-size-mismatch',
+      chunkIndex: 0,
+      dataBase64: Buffer.from('x').toString('base64'),
+    });
+    statSyncMock.mockReturnValueOnce({ ...statSync(uploadDir), size: 0 });
+    runtime.handleFileUploadEnd(session, { requestId: 'upload-persisted-size-mismatch' });
+
+    expect(sentMessages).toContainEqual({
+      type: 'file-upload-error',
+      payload: {
+        requestId: 'upload-persisted-size-mismatch',
+        error: 'Upload persisted size mismatch: wrote 0 bytes, expected 1',
+      },
+    });
+    expect(sentMessages).not.toContainEqual(expect.objectContaining({
+      type: 'file-upload-complete',
+      payload: expect.objectContaining({ requestId: 'upload-persisted-size-mismatch' }),
+    }));
   });
 
   it('routes remote-window image paste through macOS clipboard plus Command+V input without requiring tmux mirror readiness', async () => {

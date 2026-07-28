@@ -21,8 +21,10 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
+import java.util.List;
 
 @CapacitorPlugin(name = "StoragePermission")
 public class StoragePermissionPlugin extends Plugin {
@@ -265,25 +267,29 @@ public class StoragePermissionPlugin extends Plugin {
     }
 
     @PluginMethod
-    public void writeFileChunk(PluginCall call) {
+    public void writeFileChunks(PluginCall call) {
         if (!ensureStoragePermission(call)) {
             return;
         }
         try {
             File target = resolveExternalStoragePath(call.getString("path", ""));
-            File parent = target.getParentFile();
-            if (parent == null || (!parent.exists() && !parent.mkdirs())) {
-                call.reject("Unable to create parent directory: " + target.getPath());
+            JSArray encodedChunks = call.getArray("chunks");
+            if (encodedChunks == null) {
+                call.reject("write batch requires chunks");
                 return;
             }
-            String data = call.getString("data", "");
-            byte[] bytes = Base64.decode(data, Base64.DEFAULT);
-            boolean append = Boolean.TRUE.equals(call.getBoolean("append", false));
-            try (FileOutputStream output = new FileOutputStream(target, append)) {
-                output.write(bytes);
+            List<byte[]> chunks = new ArrayList<>();
+            for (int index = 0; index < encodedChunks.length(); index += 1) {
+                chunks.add(Base64.decode(encodedChunks.getString(index), Base64.DEFAULT));
             }
+            Boolean append = call.getBoolean("append");
+            if (append == null) {
+                call.reject("write batch requires append truth");
+                return;
+            }
+            long bytesWritten = StorageFileWriteLogic.writeChunks(target, chunks, append);
             JSObject result = new JSObject();
-            result.put("bytesWritten", bytes.length);
+            result.put("bytesWritten", bytesWritten);
             call.resolve(result);
         } catch (Exception error) {
             call.reject(error.getMessage());

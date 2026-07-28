@@ -21,7 +21,7 @@ interface StoragePermissionPluginApi {
   readFile(options: { path: string }): Promise<{ data: string }>;
   readFileChunk(options: { path: string; offset: number; length: number }): Promise<{ data: string; bytesRead: number; eof: boolean }>;
   writeFile(options: { path: string; data: string }): Promise<void>;
-  writeFileChunk(options: { path: string; data: string; append?: boolean }): Promise<{ bytesWritten: number }>;
+  writeFileChunks(options: { path: string; chunks: string[]; append: boolean }): Promise<{ bytesWritten: number }>;
   mkdir(options: { path: string; recursive?: boolean }): Promise<void>;
 }
 
