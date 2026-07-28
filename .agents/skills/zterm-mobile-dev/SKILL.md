@@ -80,6 +80,12 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - Relay 只走 `relay.peer_lease` 和 `resource.transport_target`；不得保存 terminal channel、transport subscriber、tmux、mirror、active tab、UI truth。
 - 这类变更必须跑 `pnpm --dir android run test:feature-registry -- --reporter dot`，其中包含 `src/lib/module-registry-truth.test.ts` 和 `src/lib/edge-registry-truth.test.ts`。
 
+### 2.2.1b File-transfer 吞吐与字节真相
+- 文件同步 wire frame 保持 16 KiB；上传只能由 `sendBoundedFileUploadChunks` 使用 cumulative ACK 的固定窗口推进，禁止 UI stop-and-wait、无界 burst 或 caller 自定义窗口。下载 native bridge 只能由 `writeFileTransferChunkBatches` 聚合写入，禁止恢复逐 wire chunk bridge 调用。
+- `android/contracts/file-transfer-throughput.json` 是上传窗口和 native batch 上限的唯一机器真源。TypeScript 直接导入，Android Gradle 从同一 JSON 生成 `BuildConfig`；禁止 TS/Java 分别维护数字。`pnpm --dir android run test:file-transfer:throughput` 必须同时跑 TS/module loopback 与 `StorageFileWriteLogicTest`，并真实接入 prebuild 和 CI。
+- module loopback 的 SHA-256 只证明算法与字节顺序，不是产品速度闭环。声称上下行提速前必须在真实 transport + online ADB 上复用已有 daemon/session，对同一确定性文件记录双向 bytes/duration/throughput 和两端 SHA-256；资源用完精确清理。没有 online ADB 时明确保留缺口，不重启含其他未审查 worktree 改动的生产 daemon。
+- 已安装 APK 的 native plugin 面必须单独实测：通过 WebView CDP 调用 `StoragePermission.writeFileChunks({ path, chunks, append })` 并 `stat` 校验落盘字节后，才允许跑下载持久化测速；源码/Gradle 单测绿但设备返回 `UNIMPLEMENTED` 时，下载产品 E2E 仍为红。
+
 ### 2.2.2 Remote-window 输入 / 粘贴 / 码率规则
 - Remote-window image paste 的路由真源只能是 Android active focus context：remote-window context active 才允许发送 `pasteTarget.kind=remote-window`；terminal surface focus 必须清掉 context；否则同一 QuickBar image action 保持 terminal Ctrl+V paste path。daemon 不猜焦点，不按 app title/window list 自行决定投递目标。
 - Remote-window 粘贴执行必须复用 file-transfer paste-image owner 写 macOS clipboard；remote-window target 只追加 Command+V 注入，terminal target 只追加 terminal Ctrl+V。禁止新增第二套图片上传或 clipboard 流水线。
@@ -141,7 +147,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 ### 2.9 连接模型拆分规则
 - mobile 的连接真源必须显式区分 `bridgeHost / bridgePort / sessionName`；禁止再用 `host/username` 混装 server 与 tmux session 语义
 - Android Home 必须把三类入口独立投影：current-process active Sessions、saved direct/Tailscale Hosts、optional Relay account/directory。Relay 未登录、登录失败或退出登录不得隐藏、禁用或删除前两类；Relay directory 只补 route/device candidates，不得成为 saved Host/Tailscale truth owner。
-- Android Home 的 Relay 路由必须显式可见：同 daemon 的 saved direct/Tailscale row 要合并 Relay directory `relayEndpointCandidates/relayHostId/relayDeviceId`，但保留 saved row 身份和显示端点；有 `relay-rtc` 时显示 Relay route 入口。Relay action 构造 `transportMode='auto'` 的 route-aware Host 交给 session-open owner，默认顺序必须是 `private LAN IPv4 -> Tailscale/direct websocket -> WebRTC direct/hole-punch -> rtc-relay(TURN)`；Relay 是最终中继，不是默认首选。禁止让 Relay directory 替换 saved Host truth，也禁止把 TURN-only 成功冒充 UDP/P2P 成功。
+- Android Home 的 Relay 路由必须作为自动线路候选可见但不能成为独立按钮：同 daemon 的 saved direct/Tailscale row 要合并 Relay directory `relayEndpointCandidates/relayHostId/relayDeviceId`，但保留 saved row 身份和显示端点；有 `relay-rtc` 时显示“自动线路”提示，点击 server row 直接把原 route-aware Host 交给 session-open owner。默认顺序必须是 `private LAN IPv4 -> Tailscale/direct websocket -> WebRTC direct/hole-punch -> rtc-relay(TURN)`；Relay 是最终中继，不是默认首选。禁止让 Relay directory 替换 saved Host truth，也禁止把 TURN-only 成功冒充 UDP/P2P 成功。
 - Relay directory 投影到 Home / drawer / picker target 时只允许 online daemon device：`daemon.connected=true` 且 `daemon.hostId` 非空。`rtc-device-*`、client-only、disconnected/stale daemon records 即使携带旧 endpoint/session snapshots，也只能作为 account directory fact，禁止出现在 connectable server rows、drawer host rail 或 target lookup。
 - Relay 登录态不能成为 Session Picker 的全局模式开关：即使账号下有在线 daemon，直接 Tailscale/bridge target 仍必须能输入、选择 saved server、用 `bridgeHost + authToken` live fetch sessions。只有当前 target 自身带 `relay-rtc` candidates / relay identity 时，才允许按 Relay target 处理；显式 `transportMode='webrtc'` / `relay-route` target 禁止在 `buildBridgeTargetFromHost()` 中自动解析 direct endpoint 填入 `bridgeHost`。
 - Relay directory 的 direct endpoints 也是 daemon identity alias：drawer host rail / side peek / server identity projection 必须把 `100.x:3333`、IPv4/IPv6/wsUrl direct rows canonicalize 到同一 `daemon.hostId`，否则同一 daemon 会显示成“名字 0 sessions + IP 有 sessions”。alias 只能用于 UI 分组身份，不能替代 transport route truth。
@@ -169,7 +175,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - Android Relay client identity migration 必须在打开任何 Relay socket 前完成：旧安装持久化的固定 id（如 `zterm-android`）视为无效，必须迁移成稳定 per-install id，并同步 top-level account、nested `relaySettings`、startup `BridgeSettings`。否则升级后的两台手机仍会用同一个 `/ws/client?deviceId=zterm-android` 抢同一 peer lease。验证至少覆盖 legacy id 持久迁移、device stream URL/meta 使用迁移后 id、显式非 legacy id 不被覆盖、startup BridgeSettings 同步。
 - Relay 网络切换后若 daemon 日志出现 `Failed to set local answer sdp: Called in wrong state: stable` 或 `Failed to set ICE candidate`，先查 `rtc-bridge` 信令顺序，不要去 UI/renderer/tmux 补偿。daemon RTC bridge 必须按 `peerId` 串行处理 relay signals；同一 `rtc-init` generation 只接受一次 offer；candidate 早于 offer/remoteDescription 时先缓冲，等 offer 应用后再 addIceCandidate。回归 gate 至少要有真实 WebRTC reorder 测试：candidate-before-offer 仍能打开 datachannel，且 duplicate offer 不触发 `stable` state error。
 - Android relay account directory 的 client 真源是 `account.directory`；旧 `TraversalRelayDeviceSnapshot[]` 只能作为现有 UI 的 adapter projection，禁止在 Connections / Picker / Settings 各自从 legacy devices 反向补 endpoint/session 目录语义。
-- Relay 登录态的默认 route 策略是 fast-path-first，不是 WebRTC 优先也不是 TURN-only：同一 daemon target 必须按 `private LAN IPv4 -> Tailscale/direct websocket -> rtc-direct(WebRTC hole-punch) -> rtc-relay(TURN)` 排序。`rtc-direct` 使用 `iceTransportPolicy=all` 且不得携带 TURN credentials；`rtc-relay` 使用 `iceTransportPolicy=relay` 且只在 LAN/Tailscale/WebRTC direct 都失败/不可用后承担中继。运行中 socket 因心跳/物理关闭失败时必须把当前 route 记入 health cache，让下一次尝试换路。验证时要分别报告 `resolvedPath=ipv4/tailscale/rtc-direct` 或 `resolvedPath=rtc-relay + resolvedRelayTransport=turn`，禁止把 Tailscale/局域网直连冒充 Relay，也禁止把 TURN-only 成功说成 UDP 打洞成功。
+- Relay 登录态的默认 route 策略是 fast-path-first，不是 WebRTC 优先也不是 TURN-only：同一 daemon target 必须按 `private LAN IPv4 -> Tailscale/direct websocket -> rtc-direct(WebRTC hole-punch) -> rtc-relay(TURN)` 排序。`rtc-direct` 使用 `iceTransportPolicy=all` 且不得携带 TURN credentials；`rtc-relay` 使用 `iceTransportPolicy=relay` 且只在 LAN/Tailscale/WebRTC direct 都失败/不可用后承担中继。运行中 socket 因心跳/物理关闭失败时必须把当前 route 记入 health cache，让下一次尝试换路；目标级 mux heartbeat 是周期更新线路健康的 owner。验证时要分别报告 `resolvedPath=ipv4/tailscale/rtc-direct` 或 `resolvedPath=rtc-relay + resolvedRelayTransport=turn`，禁止把 Tailscale/局域网直连冒充 Relay，也禁止把 TURN-only 成功说成 UDP 打洞成功。
 - WebRTC `connectionState=disconnected` 只能视为 transient ICE interruption，不能立刻投成 route failure；先在 `TraversalSocket` 内给 10s grace 并尝试 `restartIce()`，恢复到 `connected` 必须继续复用同一 data channel。只有 grace 超时、`failed/closed`、或 data channel 实际 close 才能记录 route failure / rebuild target transport。
 - terminal 输入协议必须按 capability 分叉：旧 daemon 未声明 `connected.capabilities.reliableInput.version=1` 时继续 string-only；新 daemon 声明后，client 发送 `{version, seq, data, sentAt, attempt}`，daemon ack/dedupe，retryable `input_stale_transport/session_required` nack 不出队并同 seq 重发，`input_invalid/input_too_large` 才停止。daemon 永远不能把 object payload 写成 `[object Object]`。
 - Relay account device stream 打开前必须先刷新 `/api/auth/me` 控制面真源并覆盖本地 `TraversalRelayClientSettings`；旧固定域名 `claw.codewhisper.cc` 只能作为历史别名迁移到 `relay.codewhisper.cc`，不得继续用于 TURN/WS。刷新失败时禁止打开 `/ws/devices` 或继续使用 stale TURN/WS 配置冒充 Relay 可用。
@@ -261,7 +267,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - `rtc data channel error` / `terminal mux transport closed` 是 physical target failure，不是某个 tmux session 的 channel error。Android 必须在 `terminal.transport_lifecycle` owner 中清 target mux socket/ready 和 target heartbeat，把同 target 下所有 recoverable logical channel 统一从当前状态转成 `opening` replay demand，只选择一个 anchor session 触发 immediate/reset target rebuild；pending open intent 只清 timer/intent，不能再各自 fanout reconnect。`mux-ready` 后由 opening channel flush 统一重发 channel-open。禁止只让创建 physical socket 的 anchor session fail，也禁止每个 sibling session 各自创建/调度物理重连，否则会出现“同一条连接里有些 session 好、有些 session data channel error/空屏”的分裂投影。
 - daemon 初始 buffer sync 不能发送无限全量大帧。若第一次 live sync 超过有界阈值，必须降成当前 live tail payload，让 renderer 先拿到可用尾窗；这属于 daemon mirror reader 输出有界化，不允许改 tmux truth、client renderer 或 route fallback 补偿。
 - 若 Android 端启用新的 terminal mux 协议，Mac daemon release artifact 也必须同步包含 `mux-hello` / `mux-ready` / `mux-channel-open`。只跑 `build:android` 但没有重新 `daemon:prepare-release` 会导致 APK 新、daemon 旧，现场表现为 `terminal mux channel open timeout`。修复顺序：`daemon:prepare-release` -> install-global -> service-scoped restart -> `/health` 新 PID/uptime -> live mux smoke。
-- Auto route selection 不再消费旧的 saved `traversalPathPriority`。默认顺序是 `Tailscale/direct websocket -> WebRTC UDP direct -> TURN/Relay`；用户只在状态条里做显式 manual override，manual override 不改全局 Auto order，也不让 session 拥有 route truth。
+- Auto route selection 不再消费旧的 saved `traversalPathPriority`。默认顺序是 `private LAN IPv4 -> Tailscale/direct websocket -> WebRTC UDP direct -> TURN/Relay`；用户只在状态条里做显式 manual override，manual override 不改全局 Auto order，也不让 session 拥有 route truth。
 - 若 daemon 代码已更新但 `~/.wterm/daemon-runtime/server.cjs` 仍残留旧符号（如 `scheduleMirrorFlush`、旧 planner/active-push 逻辑）或 `/debug/runtime` 仍 404，先判定为 **staged runtime 未切新**；必要时本地执行 `prepare-global-daemon-release.sh`，覆盖 `~/.wterm/daemon-runtime/` 后只对 `com.zterm.android.zterm-daemon` 做单服务 `launchctl bootstrap/kickstart`
 - buffer manager 不允许直接把 renderer 切回 follow；它只能更新本地 buffer/head 并通知 renderer。renderer 只允许因 **重新进入 / 下滚到底 / 用户输入** 退出 reading
 - Android renderer 新冻结：唯一状态是 `renderBottomIndex`；`renderTopIndex` 只能派生，reading/follow 都只改 bottom pointer，renderer 不得参与 buffer 生产或把 producer bottom 写回 source
@@ -376,6 +382,8 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - future Mac 复用 shared app-layer 的页面、会话、存储和 layout primitives；平台壳只补窗口 / 菜单 / 快捷键 / 原生输入差异
 - 触发信号：一旦需求里出现 pad / foldable / split-screen / Mac / 多 pane / 多 active tab，就先回到 `0001-cross-platform-layout-profile.md` 冻结设计，再进入实现
 - Jason 当前新增冻结：统一布局默认是一行多列，不以上下堆叠多 pane 作为主方案
+- 多 pane 性能规则：active pane 走 active freshness lane；passive visible panes 只能由 lifecycle owner 按 round-robin 一次 tick 刷一个 stale pane，禁止同一 tick 对所有 passive panes 同时 `ensureActiveSessionFresh()` 造成刷新风暴。
+- 多 session split 规则：从单个 session 开 split 时允许生成编号明确的 empty pane；empty pane 点击只打开 scoped session picker，不伪造 session / transport / buffer truth。已有 pane/tab 的长按或右键菜单必须提供 `更改 Pn Session` 和显式 `移到 Pn`，移动只改 workspace projection，不能关闭 session 或新建 transport。
 - 桌面 packaged/dev 验证若需要重开 `ZTerm.app`，必须先退出旧实例，再打开新实例；不要直接 `open -n` 叠多个 app 进程污染证据
 - 若参考 Tabby 一类桌面终端，借用的是紧凑 chrome / 顶部状态 tab strip / 左侧 profile rail / 右侧 inspector 的壳层组织；tab strip 至少要承载真实 target / inspector 状态，不能只是静态装饰
 - 若桌面端继续推进多 tab，当前最小真边界应优先写成 `single runtime · multi tabs`：可以维护多个 open target tab，但同一时刻只允许一个 live websocket/runtime；不要把“可切换 tabs”误报成“并发多 live sessions”
@@ -972,8 +980,8 @@ android/
 - **边界条件**: 最多重试 3 次（可配置）
 
 ### 模式: transport 自动连接顺序必须固定
-- **真源**: 自动模式只允许 `Tailscale -> IPv6 -> IPv4 -> Relay`
-- **动作**: 先试 Tailscale，再试 IPv6，再试 IPv4，最后才进 Relay；不要再额外发明 “fallback/补偿/第二套 transport 顺序”
+- **真源**: 自动模式只允许 `private LAN IPv4 -> Tailscale/direct websocket -> rtc-direct(WebRTC hole-punch) -> rtc-relay(TURN)`
+- **动作**: Home / drawer / picker 只发一个 connect/open intent；route owner 按固定顺序递进检测，运行中心跳/物理失败写 route health 后让下一代 transport 换路
 - **边界**: Relay 是最后一段显式路径，不是伪 direct，不允许再把 relay 阶段标回别的 resolvedPath
 
 ### 问题: Android APK 能打开但连不上本地 tmux bridge
@@ -1365,6 +1373,6 @@ debug overlay 现在显示 MU（菜单位置）和 CE（结束行），长按后
 
 ## File transfer upload progress ack
 - Trigger: sync upload still crashes after native `readFileChunk` streaming and 16KiB wire budget.
-- Rule: after each `file-upload-chunk`, wait for daemon `file-upload-progress` before the next chunk; wait for `file-upload-complete` before treating upload as finished.
-- Anti-pattern: burst-send all chunks into RTC DataChannel without progress acknowledgment.
-- Marker: `file transfer upload progress ack between chunks`
+- Rule: upload uses the contract-sized cumulative-ACK sliding window. Fill at most the registered window, and let each contiguous-prefix ACK open only the newly acknowledged slots. `file-upload-complete` is valid only after exact chunk count, assembled byte count, and persisted file stat agree.
+- Anti-pattern: per-chunk stop-and-wait, unbounded DataChannel burst, ACK advancement across a gap, or completion from in-memory bytes without verifying the persisted file.
+- Marker: `file transfer cumulative ack bounded window persisted stat`

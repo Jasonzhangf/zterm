@@ -68,6 +68,7 @@ interface ScheduleEventWaiter {
 
 interface CaseStepResult {
   label: string;
+  verificationMode: 'source-only' | 'source-and-client-render';
   ok: boolean;
   reason?: string;
   oracle: OracleSnapshot;
@@ -613,6 +614,7 @@ function buildStepResult(
   const ok = compare.ok && clientMirrorCompare.ok;
   return {
     label,
+    verificationMode: 'source-and-client-render',
     ok,
     reason: !compare.ok
       ? reasonWhenFailed
@@ -652,6 +654,7 @@ function buildLongInputDigestStep(options: {
   };
   return {
     label: 'long-input-source-target-digest',
+    verificationMode: 'source-only',
     ok,
     reason: ok ? undefined : 'daemon long-input source digest was not reproduced by tmux target file',
     oracle: options.oracle,
@@ -1332,6 +1335,7 @@ async function runLongInputCase(probe: DaemonProbe): Promise<CaseResult> {
   } catch (error) {
     steps.push({
       label: 'long-input-mirror-recovered',
+      verificationMode: 'source-and-client-render',
       ok: false,
       reason: `daemon mirror did not recover after byte-exact long input: ${error instanceof Error ? error.message : String(error)}`,
       oracle: settledOracle,
@@ -1870,20 +1874,18 @@ async function runScheduleFireCase(probe: DaemonProbe): Promise<CaseResult> {
   const fireOracle = captureOracleSnapshot();
   const markerInTmux = fireOracle.lines.some((line) => line.includes(marker));
 
-  steps.push({
-    label: 'schedule-fire-marker-in-daemon-buffer',
-    ok: true,
-    oracle: fireOracle,
-    daemonPayload: firePayload,
-    compare: { ok: true, mismatchIndex: null, expected: fireOracle.lines, actual: fireOracle.lines },
-    clientMirrorCompare: replayClientMirrorCompare(fireOracle, probe.history),
-    historyLength: probe.history.length,
-  });
-
+  const scheduleFireStep = buildStepResult(
+    'schedule-fire-marker-in-daemon-buffer',
+    fireOracle,
+    firePayload,
+    probe.history,
+    'scheduled marker source/client render diverged from tmux truth',
+  );
   if (!markerInTmux) {
-    steps[steps.length - 1].ok = false;
-    steps[steps.length - 1].reason = `marker "${marker}" not found in tmux capture-pane after schedule fire`;
+    scheduleFireStep.ok = false;
+    scheduleFireStep.reason = `marker "${marker}" not found in tmux capture-pane after schedule fire`;
   }
+  steps.push(scheduleFireStep);
 
   // 3. Wait for schedule-event from daemon
   try {
@@ -1893,6 +1895,7 @@ async function runScheduleFireCase(probe: DaemonProbe): Promise<CaseResult> {
     );
     steps.push({
       label: 'schedule-event-received',
+      verificationMode: 'source-only',
       ok: true,
       oracle: captureOracleSnapshot(),
       daemonPayload: firePayload,
@@ -1903,6 +1906,7 @@ async function runScheduleFireCase(probe: DaemonProbe): Promise<CaseResult> {
   } catch (error) {
     steps.push({
       label: 'schedule-event-received',
+      verificationMode: 'source-only',
       ok: false,
       reason: error instanceof Error ? error.message : String(error),
       oracle: captureOracleSnapshot(),

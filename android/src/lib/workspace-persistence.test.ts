@@ -58,6 +58,107 @@ describe('workspace-persistence', () => {
     ]);
   });
 
+  it('preserves a well-formed empty pane without manufacturing pane identity', () => {
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [
+        { id: 'pane-1', size: 0.5, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
+        { id: 'pane-empty-explicit', size: 0.5, activeTabId: '', tabs: [] },
+      ],
+      activePaneId: 'pane-empty-explicit',
+    }));
+
+    const workspace = readPersistedWorkspace(['s1'], 's1');
+
+    expect(workspace.activePaneId).toBe('pane-empty-explicit');
+    expect(workspace.panes.map((pane) => pane.id)).toEqual(['pane-1', 'pane-empty-explicit']);
+    expect(workspace.panes[1]).toEqual({
+      id: 'pane-empty-explicit',
+      size: 0.5,
+      activeTabId: '',
+      tabs: [],
+    });
+  });
+
+  it('rejects malformed empty panes instead of inventing an id, size, or active tab', () => {
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [
+        { id: 'pane-1', size: 0.5, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
+        { tabs: [] },
+        { id: 'pane-empty-bad-active', size: 0.5, tabs: [] },
+      ],
+      activePaneId: 'pane-empty-bad-active',
+    }));
+
+    expect(() => readPersistedWorkspace(['s1'], 's1')).toThrow(
+      /workspace pane 1 must declare explicit id and positive size/,
+    );
+  });
+
+  it('rejects persisted panes whose activeTabId does not point at a declared tab', () => {
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [
+        { id: 'pane-1', size: 1, activeTabId: 'tab-missing', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
+      ],
+      activePaneId: 'pane-1',
+    }));
+
+    expect(() => readPersistedWorkspace(['s1'], 's1')).toThrow(
+      /workspace pane 0 activeTabId must reference a declared tab/,
+    );
+  });
+
+  it('rejects persisted workspace states with no panes instead of manufacturing a default pane', () => {
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [],
+      activePaneId: '',
+    }));
+
+    expect(() => readPersistedWorkspace(['s1'], 's1')).toThrow(
+      /workspace state must declare at least one pane/,
+    );
+  });
+
+  it('rejects persisted panes with any malformed tab instead of truncating to the valid tabs', () => {
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [
+        {
+          id: 'pane-1',
+          size: 1,
+          activeTabId: 'tab-s1',
+          tabs: [
+            { id: 'tab-s1', sessionId: 's1' },
+            { id: 'tab-bad' },
+          ],
+        },
+      ],
+      activePaneId: 'pane-1',
+    }));
+
+    expect(() => readPersistedWorkspace(['s1'], 's1')).toThrow(
+      /workspace pane 0 tab 1 must declare explicit id and sessionId/,
+    );
+  });
+
+  it('rejects invalid workspace JSON instead of replacing persisted truth with a generated workspace', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, '{bad-json');
+
+    expect(() => readPersistedWorkspace(['s1'], 's1')).toThrow(SyntaxError);
+    expect(errorSpy).toHaveBeenCalledWith(
+      '[workspace-persistence] Failed to parse workspace:',
+      expect.any(SyntaxError),
+    );
+    errorSpy.mockRestore();
+  });
+
+  it('rejects unknown persisted workspace schema instead of replacing it with a generated workspace', () => {
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({ unexpected: true }));
+
+    expect(() => readPersistedWorkspace(['s1'], 's1')).toThrow(
+      /persisted workspace must match the workspace or legacy terminal layout schema/,
+    );
+  });
+
   it('does not log or throw when browser storage is unavailable in local harness mode', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     vi.stubGlobal('localStorage', {} as Storage);

@@ -66,6 +66,7 @@ describe('session-context-message-assemblies cadence', () => {
         heartbeatStore: createSessionHeartbeatStore(),
         lastConnectedBaselineAtRef: { current: new Map() },
         connectedBaselineBurstGuardRef: { current: new Set() },
+        bufferFrameAssemblyRef: { current: new Map() },
         pendingSessionTransportOpenIntentsRef: { current: new Map() },
         fileTransferMessageRuntimeRef: { current: { dispatch: vi.fn() } },
         remoteWindowMessageRuntimeRef: { current: { dispatch: vi.fn() } },

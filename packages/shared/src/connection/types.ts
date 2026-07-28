@@ -1,6 +1,12 @@
 import type { RelayEndpointCandidate } from './relay-directory';
 import { DEFAULT_BRIDGE_PORT } from './mobile-config';
 
+export const TERMINAL_BUFFER_SYNC_MESSAGE_MAX_BYTES = 128_000;
+export const TERMINAL_BUFFER_SYNC_FRAME_MAX_SPAN_LINES = 4096;
+export const TERMINAL_BUFFER_SYNC_FRAME_MAX_CHUNKS = 512;
+export const TERMINAL_BUFFER_SYNC_FRAME_MAX_RETAINED_BYTES = 64 * 1024 * 1024;
+export const TERMINAL_BUFFER_SYNC_FRAME_MAX_AGE_MS = 15_000;
+
 export interface Host {
   id: string;
   createdAt: number;

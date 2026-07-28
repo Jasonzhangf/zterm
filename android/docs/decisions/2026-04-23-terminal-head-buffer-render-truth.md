@@ -298,6 +298,32 @@ buffer manager 是客户端唯一 buffer worker。
 3. **head 对不上不等于 buffer 作废**
 4. buffer manager **没有权利**因为“当前工作窗口理解错了”，就把已有本地 buffer truth 清空、重置成空窗、假装丢失
 
+### 2.2.2 分块 authoritative frame 原子提交
+
+- `frameChunkCount > 1` 的 `buffer-sync` 只是一帧正文真相的 wire 分片，不是多个可见 patch。
+- `resource.client_buffer_frame_assembly` 是独立于 `resource.client_sparse_buffer` 的唯一 frame assembly owner：按 `revision + frameStartIndex + frameEndIndex + generatedAt + frameChunkCount` 隔离暂存；`generatedAt` 只参与 frame identity，不参与新旧排序。
+- 只有全部 chunk 到齐，且 chunk index 唯一、chunk window 无重叠无洞、所有 absolute row 精确连续覆盖 `[frameStartIndex, frameEndIndex)`，才允许合成一个 continuous payload。
+- frame assembly 的资源边界由 shared protocol 唯一声明：最多 `4096` 行 span、`512` chunks、`64 MiB` retained serialized bytes、`15s` incomplete lifetime。client ingress 在写入 retained map 前拒绝越界；buffer-head cadence 到期后必须释放 incomplete chunks、写入 `frame-assembly-expired` error truth，并只通过既有 exact-range repair owner 请求一次。禁止依赖 session close 或下一次 chunk 才释放过期 frame。
+- 完整 frame 只允许一次 `applyBufferSyncToSessionBuffer`、一次 local buffer commit、一次 renderer commit。
+- 未完成、重复冲突、跨 frame 混入、低 revision 迟到的 chunk 不得改变 local revision，不得污染已发布 body，不得触发 renderer；错误必须显式进入 per-session frame resource 的 `BufferSyncError01InvalidFrame` truth，debug 只做观察而不是错误真源。
+- same revision、不同 frame identity 混入时，本次 interleave 必须显式拒绝，同时清除旧 incomplete assembly；repairable error 必须保存原 pending frame 的 exact range，并通过既有 head/range 主线请求 authoritative repair。wire revision 非法时禁止伪造 `revision=0`：若有 pending frame，使用其 revision；否则保持 repair pending，直到 authoritative live head 提供 revision。请求未实际写入 wire 时保持 `pending`，下一次合法 head 再尝试；只有实际 dispatch 后才改为 `dispatched`。独立且有界的 per-session `repairDispatchedRevisions` ledger 必须跨后续 revision 成功 apply 保留，防止迟到 malformed payload 对旧 revision 二次发送 repair；只有显式 session cleanup 才整体退休。更高 revision frame 替换 incomplete 旧 frame 时，必须原子清除旧 pending repair error，同时保留 dispatch ledger。低 revision stale frame 只记录错误并保留当前较新 assembly，不触发 repair。
+- per-session frame assembly ref 是 client buffer manager 的必需资源，所有生产 ingress/reset/cleanup caller 必须显式持有；socket generation cleanup、reconnect、inactive drop 与 tab switch 只清 incomplete `pending` chunks，必须保留 revision-reset expectation 以及同一 daemon revision epoch 的 frame error truth 与 bounded repair ledger。首次 authoritative lower head 进入 revision-reset epoch 时必须先由 assembly owner 清空旧 epoch pending/error/ledger，再允许任何 repair；同一 epoch 的重复 lower head 不得再次清 ledger。explicit local session destruction 删除 revision-reset 与 frame resource。禁止 optional 注入或在 UI/renderer 层复制 assembly state。
+- `normalizeIncomingBufferPayload` 是 socket body 的唯一 wire normalization owner，必须保留 `frameStartIndex/frameEndIndex/frameChunkIndex/frameChunkCount/generatedAt`；已出现但非法的 frame 字段必须保持显式 invalid 并由 assembly 拒绝，禁止丢字段后降成 unchunked passthrough。
+- 禁止逐 chunk apply 后依赖 RAF 碰巧合并。每个 WebSocket message 是独立事件任务，RAF 可以在 chunk 之间运行；逐 chunk 发布会把新 frame 的部分行与旧 frame 的其余行同时投影，表现为中间洞、旧新 buffer 交替和闪屏。
+
+### 2.2.3 Rust migration register
+
+- `migration_id`: `terminal.buffer_render.frame_assembly.rust`
+- `status`: `planned`
+- `current_owner`: `android/src/contexts/session-buffer-frame-assembly.ts#assembleBufferSyncFrameChunk`
+- `planned_target`: `crates/zterm-terminal-core/src/buffer_frame_assembly.rs`
+- `planned_rust_semantics`: frame identity validation, bounded chunk assembly, exact absolute-row coverage, stale/interleave rejection, and one complete-frame output
+- `post_migration_ts_boundary`: WebSocket payload IO, per-session resource wiring, sparse-buffer commit, and renderer scheduling only
+- `activation`: create the Rust crate and target path, pass TS/Rust parity plus source-to-DOM atomicity gates, wire the bridge, change this entry to active, then physically remove the TS policy owner
+- `gate`: `android/src/lib/function-wiki-truth.test.ts` and `android/src/contexts/session-buffer-frame-assembly.test.ts`
+
+This is a target-state plan, not current runtime truth. Until every activation condition passes, the TypeScript symbol above remains the only frame-assembly owner.
+
 正确语义只能是：
 
 ```text

@@ -5,6 +5,7 @@ import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
+import type { BufferFrameAssemblyResourceState } from './session-buffer-frame-assembly';
 import type { CreateSessionOptions } from './session-context-core';
 import {
   closeSessionRuntime,
@@ -40,6 +41,12 @@ interface SessionLifecycleRuntimeOptions {
     lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
     connectedBaselineBurstGuardRef: MutableRefObject<Set<string>>;
     sessionVisibleRangeRef: MutableRefObject<Map<string, unknown>>;
+    sessionRevisionResetRef: MutableRefObject<Map<string, {
+      revision: number;
+      latestEndIndex: number;
+      seenAt: number;
+    }>>;
+    bufferFrameAssemblyRef: MutableRefObject<Map<string, BufferFrameAssemblyResourceState>>;
     sessionBufferStoreRef: MutableRefObject<{
       commitBuffer: (sessionId: string, buffer: SessionBufferState) => boolean;
       setBuffer: (sessionId: string, buffer: SessionBufferState) => void;
@@ -160,6 +167,8 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
         lastActiveReentryAtRef: options.refs.lastActiveReentryAtRef,
         lastConnectedBaselineAtRef: options.refs.lastConnectedBaselineAtRef,
         sessionVisibleRangeRef: options.refs.sessionVisibleRangeRef,
+        sessionRevisionResetRef: options.refs.sessionRevisionResetRef,
+        bufferFrameAssemblyRef: options.refs.bufferFrameAssemblyRef,
         sessionBufferStoreRef: options.refs.sessionBufferStoreRef,
         sessionRenderGateRef: options.refs.sessionRenderGateRef,
         sessionHeadStoreRef: options.refs.sessionHeadStoreRef,

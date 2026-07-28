@@ -45,6 +45,7 @@ resource registry -> module registry -> edge registry -> function map -> mainlin
 - `src/lib/module-import-graph-truth.test.ts` (code-vs-registry gate; the gates above only prove the registries are self-consistent)
   - every `owned_paths` pattern in `docs/module-registry.json` resolves to a real file or directory.
   - every non-test source file under `src/` is owned by exactly one module through `owned_paths`; unowned and multi-owned files are red.
+  - every active edge connects two active modules; an active runtime edge pointing at a `design` or `pending` module is red.
   - the real cross-module import graph (parsed from source `import`/`export from`/`require`) matches `docs/edge-registry.json` `import_edges` in both directions: an import edge in code that is not declared is red; a declared entry with no import left in code is red (stale entries must be removed).
   - `pending_removal` entries are known violations: each needs a removal note, and the count may only go down (currently 1: `observability.debug_channel -> client.daemon_connection`).
 

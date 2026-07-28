@@ -184,6 +184,30 @@ export function shouldSchedulePassiveVisibleTickRefresh(options: {
   return now - lastTerminalActivityAt >= Math.max(0, Math.floor(options.headStalePingMs || 0));
 }
 
+export function selectNextPassiveVisibleRefreshCandidate<TSessionId extends string>(
+  refreshTargets: TSessionId[],
+  cursor: number,
+  shouldRefresh: (sessionId: TSessionId) => boolean,
+): { sessionId: TSessionId | null; nextCursor: number } {
+  if (refreshTargets.length === 0) {
+    return { sessionId: null, nextCursor: 0 };
+  }
+  if (!Number.isFinite(cursor) || !Number.isInteger(cursor) || cursor < 0) {
+    throw new Error('[session-context-lifecycle] passive visible refresh cursor must be a non-negative integer.');
+  }
+  const safeCursor = cursor % refreshTargets.length;
+  const orderedRefreshTargets = [
+    ...refreshTargets.slice(safeCursor),
+    ...refreshTargets.slice(0, safeCursor),
+  ];
+  const selectedSessionId = orderedRefreshTargets.find((candidateSessionId) => shouldRefresh(candidateSessionId)) || null;
+  const selectedIndex = selectedSessionId === null ? -1 : refreshTargets.indexOf(selectedSessionId);
+  return {
+    sessionId: selectedSessionId,
+    nextCursor: selectedIndex >= 0 ? (selectedIndex + 1) % refreshTargets.length : safeCursor,
+  };
+}
+
 function resolveTerminalActivityAt(options: {
   sessionId: string;
   heartbeatStore: SessionHeartbeatStore;
@@ -235,6 +259,7 @@ export function useSessionContextLifecycle(options: {
   const flushRuntimeDebugLogsRef = useRef(options.flushRuntimeDebugLogs);
   const lastLiveSessionIdsRef = useRef<string[]>([]);
   const lastRuntimeSessionIdsRef = useRef<string[]>([]);
+  const passiveVisibleRefreshCursorRef = useRef(0);
   const lastForegroundActiveRef = useRef(options.appForegroundActive !== false);
   const lastForegroundResumeEpochRef = useRef<number | null>(
     Number.isFinite(options.foregroundResumeEpoch)
@@ -474,24 +499,30 @@ export function useSessionContextLifecycle(options: {
           return;
         }
         const now = Date.now();
-        refreshTargets.forEach((sessionId) => {
-          const headStalePingMs = options.resolveHeadStalePingMs(sessionId);
-          if (!shouldSchedulePassiveVisibleTickRefresh({
-            state: options.refs.stateRef.current,
-            sessionId,
-            heartbeatStore: options.refs.heartbeatStore,
-            lastConnectedBaselineAtRef: options.refs.lastConnectedBaselineAtRef,
-            headStalePingMs,
-            now,
-          })) {
-            return;
-          }
+        const candidate = selectNextPassiveVisibleRefreshCandidate(
+          refreshTargets,
+          passiveVisibleRefreshCursorRef.current,
+          (candidateSessionId) => {
+            const headStalePingMs = options.resolveHeadStalePingMs(candidateSessionId);
+            return shouldSchedulePassiveVisibleTickRefresh({
+              state: options.refs.stateRef.current,
+              sessionId: candidateSessionId,
+              heartbeatStore: options.refs.heartbeatStore,
+              lastConnectedBaselineAtRef: options.refs.lastConnectedBaselineAtRef,
+              headStalePingMs,
+              now,
+            });
+          },
+        );
+        passiveVisibleRefreshCursorRef.current = candidate.nextCursor;
+        const sessionId = candidate.sessionId;
+        if (sessionId) {
           options.ensureActiveSessionFresh({
             sessionId,
             source: 'active-tick',
             allowReconnectIfUnavailable: options.refs.foregroundActiveRef.current,
           });
-        });
+        }
         scheduleNext();
       }, nextDelay);
     };

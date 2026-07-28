@@ -161,23 +161,34 @@ function addDirectoryDirectCandidate(
   endpoint: RelayEndpointCandidate,
   target: TraversalTargetSource,
 ) {
-  if (endpoint.kind !== 'tailscale' && endpoint.kind !== 'ipv6' && endpoint.kind !== 'ipv4') {
+  if (endpoint.kind !== 'lan' && endpoint.kind !== 'tailscale' && endpoint.kind !== 'ipv6' && endpoint.kind !== 'ipv4') {
     return;
   }
   const host = endpoint.host?.trim()
     || (endpoint.wsUrl ? resolveWsUrlHost(endpoint.wsUrl) : '')
     || '';
   const port = endpoint.port || target.bridgePort;
+  const path = endpoint.kind === 'lan'
+    ? inferDirectPath(host)
+    : endpoint.kind;
+  if (!path) {
+    return;
+  }
   addDirectCandidate(
     candidates,
     seenUrls,
-    endpoint.kind,
+    path,
     host,
     port,
     target.authToken,
     endpoint.wsUrl,
     endpoint.id,
   );
+}
+
+function resolveDirectoryRtcDirectEndpoint(target: TraversalTargetSource) {
+  return target.relayEndpointCandidates
+    ?.find((endpoint) => endpoint.kind === 'rtc-direct' && endpoint.relayHostId?.trim()) || null;
 }
 
 function resolveDirectoryRelayEndpoint(target: TraversalTargetSource) {
@@ -227,7 +238,10 @@ export function buildTraversalPlan(
       }
       addDirectCandidate(wsCandidates, seenWsUrls, path, directCandidates[path], target.bridgePort, target.authToken);
       for (const endpoint of target.relayEndpointCandidates || []) {
-        if (endpoint.kind === path) {
+        if (
+          endpoint.kind === path
+          || (endpoint.kind === 'lan' && inferDirectPath(endpoint.host) === path)
+        ) {
           addDirectoryDirectCandidate(wsCandidates, seenWsUrls, endpoint, target);
         }
       }
@@ -243,8 +257,13 @@ export function buildTraversalPlan(
     const relaySignalUrl = settings.traversalRelay?.wsClientUrl?.trim() || '';
     const relayAccessToken = settings.traversalRelay?.accessToken?.trim() || '';
     const relayDeviceId = settings.traversalRelay?.deviceId?.trim() || '';
+    const directoryRtcDirectEndpoint = resolveDirectoryRtcDirectEndpoint(target);
     const directoryRelayEndpoint = resolveDirectoryRelayEndpoint(target);
-    const relayHostId = target.relayHostId?.trim() || target.daemonHostId?.trim() || directoryRelayEndpoint?.relayHostId?.trim() || '';
+    const relayHostId = target.relayHostId?.trim()
+      || target.daemonHostId?.trim()
+      || directoryRtcDirectEndpoint?.relayHostId?.trim()
+      || directoryRelayEndpoint?.relayHostId?.trim()
+      || '';
     const relayIceServers = buildIceServers(settings);
     const directIceServers = buildDirectIceServers(settings);
     const signalUrl = normalizeSignalUrl(
@@ -263,10 +282,14 @@ export function buildTraversalPlan(
         parsedSignalUrl.searchParams.set('deviceId', relayDeviceId);
       }
       rtcCandidates.push({
-        id: relayHostId ? `rtc-direct:${relayHostId}` : `rtc-direct:${parsedSignalUrl.toString()}`,
+        id: directoryRtcDirectEndpoint?.id || (relayHostId ? `rtc-direct:${relayHostId}` : `rtc-direct:${parsedSignalUrl.toString()}`),
         kind: 'rtc',
         path: 'rtc-direct',
-        endpoint: relayHostId ? `rtc-direct:${relayHostId}` : 'rtc-direct',
+        endpoint: directoryRtcDirectEndpoint?.host && directoryRtcDirectEndpoint.port
+          ? `${directoryRtcDirectEndpoint.host}:${directoryRtcDirectEndpoint.port}`
+          : relayHostId
+            ? `rtc-direct:${relayHostId}`
+            : 'rtc-direct',
         signalUrl: parsedSignalUrl.toString(),
         iceServers: directIceServers,
         iceTransportPolicy: 'all',

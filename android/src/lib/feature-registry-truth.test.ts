@@ -121,6 +121,32 @@ describe('feature registry truth gate', () => {
     }
   });
 
+  it('keeps the canonical file-transfer throughput gate wired into prebuild and CI', () => {
+    const packageJson = JSON.parse(
+      readFileSync(join(androidRoot, 'package.json'), 'utf8'),
+    ) as { scripts?: Record<string, string> };
+    const ciWorkflow = readFileSync(
+      join(repoRoot, '.github', 'workflows', 'ci.yml'),
+      'utf8',
+    );
+    const fileTransferFeature = readRegistry().features.find(
+      (feature) => feature.feature_id === 'daemon.file_transfer',
+    );
+
+    expect(packageJson.scripts?.['test:file-transfer:throughput']).toBe(
+      'bash ./scripts/run-file-transfer-throughput-gate.sh',
+    );
+    expect(packageJson.scripts?.prebuild).toContain(
+      'pnpm run test:file-transfer:throughput',
+    );
+    expect(ciWorkflow).toContain(
+      'pnpm --dir android run test:file-transfer:throughput',
+    );
+    expect(fileTransferFeature?.required_gates).toContain(
+      'scripts/run-file-transfer-throughput-gate.sh',
+    );
+  });
+
   it('covers required high-risk feature ids and owner paths', () => {
     const registry = readRegistry();
     const featureIds = new Set(registry.features.map((feature) => feature.feature_id));
@@ -139,6 +165,18 @@ describe('feature registry truth gate', () => {
     for (const relativePath of requiredCoveragePaths) {
       expect(coveredPaths.has(relativePath)).toBe(true);
     }
+
+    const bufferFeature = registry.features.find((feature) => feature.feature_id === 'terminal.buffer_render');
+    const bufferContractOwners = [
+      'packages/shared/src/connection/types.ts',
+      'src/contexts/session-wire-helpers.ts',
+      'src/contexts/session-buffer-frame-assembly-state.ts',
+      'src/contexts/session-buffer-frame-assembly.ts',
+      'src/contexts/session-context-buffer-runtime.ts',
+      'src/lib/session-render-gate.ts',
+    ];
+    expect(bufferFeature?.owners).toEqual(expect.arrayContaining(bufferContractOwners));
+    expect(bufferFeature?.allowed_paths).toEqual(expect.arrayContaining(bufferContractOwners));
   });
 
   it('keeps the human function map in lockstep with the machine registry feature ids', () => {

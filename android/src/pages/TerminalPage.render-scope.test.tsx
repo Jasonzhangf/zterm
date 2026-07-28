@@ -716,6 +716,44 @@ describe('TerminalPage renderer scope', () => {
     expect(screen.getByTestId('terminal-header').getAttribute('data-show-back-button')).toBe('true');
   });
 
+  it('keeps an empty split pane visible and opens the scoped session picker when tapped', () => {
+    localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
+      panes: [
+        { id: 'pane-1', size: 0.5, activeTabId: 'tab-s1', tabs: [{ id: 'tab-s1', sessionId: 's1' }] },
+        { id: 'pane-2', size: 0.5, activeTabId: '', tabs: [] },
+      ],
+      activePaneId: 'pane-1',
+    }));
+    const session1 = makeSession('s1');
+    const onOpenQuickTabPicker = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session1]}
+        activeSession={session1}
+        getSessionDebugMetrics={(sessionId) => makeDebugMetrics(sessionId === 's1')}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={onOpenQuickTabPicker}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('terminal-empty-pane-pane-2'));
+
+    expect(onOpenQuickTabPicker).toHaveBeenCalledWith('pane-2', undefined, undefined);
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-live')).toBe('true');
+    expect(screen.getByTestId('terminal-view-s1').getAttribute('data-active')).toBe('false');
+  });
+
   it('does not reregister terminal-page snapshot source when keyboardInset changes', async () => {
     const originalVirtualKeyboard = (navigator as Navigator & { virtualKeyboard?: unknown }).virtualKeyboard;
     const geometryListeners = new Set<() => void>();

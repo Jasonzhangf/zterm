@@ -111,6 +111,7 @@ export interface RelayDeviceStreamRuntimeDeps {
       | TraversalRelayDeviceSnapshot[]
       | ((current: TraversalRelayDeviceSnapshot[]) => TraversalRelayDeviceSnapshot[]),
   ) => void;
+  publishDirectoryTruth?: (devices: TraversalRelayDeviceSnapshot[]) => void;
   applyRelaySettings?: (settings: TraversalRelayClientSettings) => void;
   runtimeDebug?: (event: string, payload?: Record<string, unknown>) => void;
   onDebugRequest?: (payload: {
@@ -147,6 +148,7 @@ export function createRelayDeviceStreamRuntime(deps: RelayDeviceStreamRuntimeDep
 
   const replaceDirectoryTruth = (devices: TraversalRelayDeviceSnapshot[]) => {
     directoryTruthDevices = listRelayDirectoryTruthDevices(devices);
+    deps.publishDirectoryTruth?.(directoryTruthDevices);
   };
 
   const scheduleReconnect = (reason: string) => {
@@ -243,8 +245,6 @@ export function createRelayDeviceStreamRuntime(deps: RelayDeviceStreamRuntimeDep
       }
       const message = error instanceof Error ? error.message : String(error);
       deps.runtimeDebug?.('relay.device-stream.account-refresh.error', { message });
-      replaceDirectoryTruth([]);
-      deps.setDevices([]);
       scheduleReconnect(message);
     });
   };

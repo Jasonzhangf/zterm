@@ -8,6 +8,15 @@ import type {
 } from '../lib/types';
 import { normalizeWireLines } from '../lib/terminal-buffer';
 
+function normalizeOptionalFrameInteger(value: unknown): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return typeof value === 'number' && Number.isSafeInteger(value)
+    ? value
+    : Number.NaN;
+}
+
 function normalizeTerminalCellRow(input: unknown): TerminalCell[] {
   if (typeof input === 'string') {
     return Array.from(input).map((char) => ({
@@ -75,6 +84,10 @@ export function normalizeIncomingBufferPayload(input: TerminalBufferPayload): Te
         : 0,
     startIndex,
     endIndex,
+    frameStartIndex: normalizeOptionalFrameInteger(input.frameStartIndex),
+    frameEndIndex: normalizeOptionalFrameInteger(input.frameEndIndex),
+    frameChunkIndex: normalizeOptionalFrameInteger(input.frameChunkIndex),
+    frameChunkCount: normalizeOptionalFrameInteger(input.frameChunkCount),
     generatedAt:
       typeof input.generatedAt === 'number' && Number.isFinite(input.generatedAt)
         ? Math.max(0, Math.floor(input.generatedAt))

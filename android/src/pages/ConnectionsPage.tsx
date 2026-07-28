@@ -24,7 +24,6 @@ interface ConnectionsPageProps {
   activeSessionId?: string | null;
   onResumeSession?: (sessionId: string) => void;
   onOpenSavedConnection?: (host: Host) => void;
-  onOpenSavedConnectionViaRelay?: (host: Host) => void;
   onOpenSettings: () => void;
 }
 
@@ -89,7 +88,7 @@ function getHostBadge(host: Host) {
   const tagText = (host.tags || []).join(' ').toLowerCase();
   const endpoint = getHostEndpoint(host).toLowerCase();
   if (hasRelayRtcCandidate(host) && !host.bridgeHost.trim()) {
-    return 'Relay';
+    return 'Auto';
   }
   if (tagText.includes('tailscale') || endpoint.includes('100.') || endpoint.includes('.ts.net')) {
     return 'Tailscale';
@@ -155,7 +154,6 @@ export function ConnectionsPage({
   activeSessionId = null,
   onResumeSession,
   onOpenSavedConnection,
-  onOpenSavedConnectionViaRelay,
   onOpenSettings,
 }: ConnectionsPageProps) {
   const orderedActiveSessions = useMemo(() => [...activeSessions].sort((left, right) => {
@@ -389,7 +387,7 @@ export function ConnectionsPage({
                       backgroundColor: '#ffffff',
                       color: mobileTheme.colors.lightText,
                       display: 'grid',
-                      gridTemplateColumns: relayAvailable ? '1fr auto' : '1fr',
+                      gridTemplateColumns: '1fr',
                       alignItems: 'center',
                       textAlign: 'left',
                       boxShadow: mobileTheme.shadow.soft,
@@ -426,7 +424,7 @@ export function ConnectionsPage({
                         </span>
                         <span style={{ marginTop: '8px', display: 'flex', gap: '6px', minWidth: 0, flexWrap: 'wrap' }}>
                           <HomeBadge>{hostBadge}</HomeBadge>
-                          {relayAvailable && hostBadge !== 'Relay' ? <HomeBadge>Relay 路由</HomeBadge> : null}
+                          {relayAvailable ? <HomeBadge>自动线路</HomeBadge> : null}
                           {host.pinned ? <HomeBadge>Pinned</HomeBadge> : null}
                         </span>
                       </span>
@@ -447,27 +445,6 @@ export function ConnectionsPage({
                         ›
                       </span>
                     </button>
-                    {relayAvailable ? (
-                      <button
-                        type="button"
-                        data-testid="saved-connection-relay-button"
-                        aria-label={`Open ${host.name} with Relay`}
-                        onClick={() => onOpenSavedConnectionViaRelay?.(host)}
-                        style={{
-                          alignSelf: 'stretch',
-                          minWidth: '68px',
-                          padding: '0 12px',
-                          border: 'none',
-                          borderLeft: `1px solid ${mobileTheme.colors.lightBorder}`,
-                          backgroundColor: '#f4f8fb',
-                          color: mobileTheme.colors.lightText,
-                          fontSize: '12px',
-                          fontWeight: 950,
-                        }}
-                      >
-                        Relay
-                      </button>
-                    ) : null}
                   </div>
                 );
               })}

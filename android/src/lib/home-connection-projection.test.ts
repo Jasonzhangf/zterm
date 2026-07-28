@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  buildHomeRelayConnectionHost,
   hasRelayRtcCandidate,
   projectHomeSavedConnections,
 } from './home-connection-projection';
@@ -71,17 +70,6 @@ function makeRelayDevice(): TraversalRelayDeviceSnapshot {
   };
 }
 
-function makeRelayOnlyDevice(): TraversalRelayDeviceSnapshot {
-  const device = makeRelayDevice();
-  return {
-    ...device,
-    daemon: {
-      ...device.daemon,
-      endpoints: (device.daemon.endpoints || []).filter((endpoint) => endpoint.kind === 'relay-rtc'),
-    },
-  };
-}
-
 function makeDisconnectedStaleRelayDevice(): TraversalRelayDeviceSnapshot {
   return {
     ...makeRelayDevice(),
@@ -139,29 +127,28 @@ describe('home connection projection relay route visibility', () => {
     expect(hasRelayRtcCandidate(projected[0])).toBe(true);
   });
 
-  it('keeps the saved direct identity when building a Home Relay target', () => {
+  it('opens the merged Home server target through the automatic route order', () => {
     const projected = projectHomeSavedConnections(
       [makeSavedHost()],
       bridgeSettings,
-      [makeRelayOnlyDevice()],
+      [makeRelayDevice()],
     );
-    const relayHost = buildHomeRelayConnectionHost(projected[0]);
 
-    expect(relayHost).toEqual(expect.objectContaining({
-      id: 'relay-route:saved-mac',
+    expect(projected[0]).toEqual(expect.objectContaining({
+      id: 'saved-mac',
       name: 'Mac Studio',
       bridgeHost: '100.66.1.82',
       bridgePort: 3333,
       daemonHostId: 'mac-studio',
       relayHostId: 'mac-studio',
       relayDeviceId: 'device-mac',
-      transportMode: 'auto',
     }));
-    expect(relayHost?.relayEndpointCandidates).toEqual([
+    expect(projected[0].relayEndpointCandidates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'tailscale', host: 'mac-studio.tailnet.ts.net' }),
       expect.objectContaining({ kind: 'relay-rtc', relayHostId: 'mac-studio' }),
-    ]);
-    expect(buildTraversalPlan(
-      buildBridgeTargetFromHost(relayHost as Host),
+    ]));
+    const routePaths = buildTraversalPlan(
+      buildBridgeTargetFromHost(projected[0] as Host),
       {
         ...DEFAULT_BRIDGE_SETTINGS,
         signalUrl: 'wss://relay.example.test/relay/ws/client',
@@ -186,11 +173,9 @@ describe('home connection projection relay route visibility', () => {
           updatedAt: 1,
         },
       },
-    ).candidates.map((candidate) => candidate.path)).toEqual([
-      'tailscale',
-      'rtc-direct',
-      'rtc-relay',
-    ]);
+    ).candidates.map((candidate) => candidate.path);
+    expect(routePaths.slice(0, 2)).toEqual(['tailscale', 'tailscale']);
+    expect(routePaths.slice(2)).toEqual(['rtc-direct', 'rtc-relay']);
   });
 
   it('does not expose a Relay target when the row has no relay-rtc route', () => {
@@ -206,7 +191,6 @@ describe('home connection projection relay route visibility', () => {
     });
 
     expect(hasRelayRtcCandidate(host)).toBe(false);
-    expect(buildHomeRelayConnectionHost(host)).toBeNull();
   });
 
   it('does not project disconnected stale relay daemon devices as Home server rows', () => {

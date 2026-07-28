@@ -80,11 +80,19 @@ describe('edge registry truth gate', () => {
 
   it('keeps every edge module, feature, resource, mainline id, and gate bound', () => {
     const registry = JSON.parse(read('docs/edge-registry.json')) as EdgeRegistry;
-    const moduleRegistry = JSON.parse(read('docs/module-registry.json')) as { modules: Array<{ module_id: string }> };
+    const moduleRegistry = JSON.parse(read('docs/module-registry.json')) as {
+      modules: Array<{
+        module_id: string;
+        status: 'active' | 'design' | 'pending' | 'deprecated';
+      }>;
+    };
     const featureRegistry = JSON.parse(read('docs/feature-registry.json')) as { features: Array<{ feature_id: string }> };
     const resourceRegistry = JSON.parse(read('docs/resource-registry.json')) as ResourceRegistry;
     const mainlineManifest = JSON.parse(read('docs/wiki/mainline-call-map.json')) as MainlineManifest;
     const moduleIds = new Set(moduleRegistry.modules.map((module) => module.module_id));
+    const moduleStatusById = new Map(
+      moduleRegistry.modules.map((module) => [module.module_id, module.status]),
+    );
     const featureIds = new Set(featureRegistry.features.map((feature) => feature.feature_id));
     const resourceIds = new Set(resourceRegistry.resources.map((resource) => resource.resource_id));
     const mainlineIds = new Set(mainlineManifest.lifecycles.flatMap((lifecycle) => lifecycle.edges.map((edge) => edge.edge_id)));
@@ -99,6 +107,16 @@ describe('edge registry truth gate', () => {
       edgeIds.add(edge.edge_id);
       expect(moduleIds.has(edge.from_module), `${edge.edge_id}:from_module`).toBe(true);
       expect(moduleIds.has(edge.to_module), `${edge.edge_id}:to_module`).toBe(true);
+      if (edge.status === 'active') {
+        expect(
+          moduleStatusById.get(edge.from_module),
+          `${edge.edge_id}:active from_module must be active`,
+        ).toBe('active');
+        expect(
+          moduleStatusById.get(edge.to_module),
+          `${edge.edge_id}:active to_module must be active`,
+        ).toBe('active');
+      }
       expect(featureIds.has(edge.owner_feature), `${edge.edge_id}:owner_feature`).toBe(true);
       expect(resourceIds.has(edge.resource_from), `${edge.edge_id}:resource_from`).toBe(true);
       expect(resourceIds.has(edge.resource_to), `${edge.edge_id}:resource_to`).toBe(true);
@@ -179,7 +197,8 @@ describe('edge registry truth gate', () => {
       'edge.client.daemon_target_transport_health',
       'edge.client.daemon_target_transport_to_terminal_channel',
       'edge.daemon.terminal_channel_to_subscriber',
-      'edge.daemon.mirror_store_to_client_sparse_buffer',
+      'edge.daemon.mirror_store_to_client_buffer_frame_assembly',
+      'edge.client_buffer_frame_assembly_to_client_sparse_buffer',
       'edge.client_sparse_buffer_to_renderer',
       'edge.client_touch_action_to_daemon_remote_window_stream',
       'edge.relay_peer_lease_to_daemon_target_transport_via_target',
@@ -266,5 +285,37 @@ describe('edge registry truth gate', () => {
       'android_mainline:TargetTransportRuntime->TargetHeartbeat',
       'android_mainline:TargetHeartbeat->TerminalMuxPingBuilder',
     ]);
+  });
+
+  it('binds terminal frame assembly, explicit error, and sparse apply as adjacent stages', () => {
+    const registry = JSON.parse(read('docs/edge-registry.json')) as EdgeRegistry;
+    const assemblyEdge = registry.edges.find((candidate) => (
+      candidate.edge_id === 'edge.daemon.mirror_store_to_client_buffer_frame_assembly'
+    ));
+    const sparseApplyEdge = registry.edges.find((candidate) => (
+      candidate.edge_id === 'edge.client_buffer_frame_assembly_to_client_sparse_buffer'
+    ));
+
+    expect(assemblyEdge?.request_chain).toEqual([
+      'BufferSyncIn01MirrorPatch',
+      'BufferSyncIn02FrameAssembly',
+    ]);
+    expect(assemblyEdge?.error_chain).toEqual(['BufferSyncError01InvalidFrame']);
+    expect(assemblyEdge?.mainline_call_ids).toContain(
+      'android_mainline:BufferSyncIngress->BufferFrameAssembly',
+    );
+    expect(assemblyEdge?.mainline_call_ids).toContain(
+      'android_mainline:SocketMessage->BufferHeadFrameExpiry',
+    );
+    expect(assemblyEdge?.mainline_call_ids).toContain(
+      'android_mainline:BufferHeadFrameExpiry->BufferFrameAssembly',
+    );
+    expect(sparseApplyEdge?.request_chain).toEqual([
+      'BufferSyncIn02FrameAssembly',
+      'BufferSyncIn03SparseApply',
+    ]);
+    expect(sparseApplyEdge?.mainline_call_ids).toContain(
+      'android_mainline:BufferFrameAssembly->BufferSparseApply',
+    );
   });
 });

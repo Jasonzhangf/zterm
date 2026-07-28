@@ -4329,3 +4329,26 @@ Need runtime debug to confirm:
 - Verification after final fix: `session-context-transport-runtime.test.ts` 19 PASS, `test:feature-registry` 78 PASS, `type-check` PASS, `build:android` PASS including prebuild file-transfer throughput 40 PASS, transport-network lifecycle 30+9 PASS, terminal contracts 715 PASS, common flows 83 PASS, relay smoke PASS, Vite, daemon release, Gradle, and update bundle verification.
 - Delivery: APK `0.1.3.2267` / versionCode `1032267` / sha256 `d9ba6e08481eac2a7aba593fa71a0622111071ce03160863c9717d3caa16b0c6` published to local update dir and `~/.zterm/updates`; local `127.0.0.1:3333` and Tailscale `100.66.1.82:3333` manifests and APK downloads match sha. Installed on ADB `100.104.163.65:5555`; cold launch pid `29465`; fatal-only logcat check found no crash.
 - Public Relay update route remains stale at `0.1.3.2263`; external public publishing was not performed because publish requires explicit authorization.
+
+# 2026-07-28 Home auto-route UI and priority alignment
+
+- Scope: align Home UI with automatic route selection. Server row tap remains the only Home connect action; the separate Relay button was removed. Relay directory candidates are still visible as an `自动线路` badge and stay merged into the saved server Host without replacing saved direct/Tailscale identity.
+- Route policy: Auto ignores stale saved traversal priority and ranks private LAN IPv4 first via the LAN cost override, then Tailscale/direct websocket, then WebRTC UDP direct/hole-punch, then TURN Relay. Public/non-LAN IPv4 remains selectable only after higher route classes are unavailable.
+- Health cadence: existing target-level mux heartbeat/physical close/mux failure remains the route-health update owner; ordinary failures use the one-second circuit-breaker and are probe-eligible on the next target generation.
+- Verification: `ConnectionsPage.test.tsx`, `home-connection-projection.test.ts`, `traversal/config.test.ts`, and `traversal/route-selector.test.ts` passed 30/30; `App.dynamic-refresh.test.tsx` passed 35/35; `pnpm --dir android run type-check` passed with source-js-pollution clean.
+- MemoryPalace remains unavailable because `/Users/fanzhang/.local/bin/mempalace` points to the removed pipx interpreter; no re-mine/search claim was made.
+
+# 2026-07-29 multi-pane refresh and session placement review
+
+- Scope: `terminal.workspace_panes` / `terminal.session_group_layout` / `terminal.transport_lifecycle` only. Forbidden: daemon mirror, buffer text truth, route selection, file transfer, and reconnect fallback.
+- Performance finding: passive split panes were all eligible on the same passive visible refresh tick. Even with separate active/passive lanes, this can burst `ensureActiveSessionFresh()` across every visible pane at once when multiple panes are stale.
+- Fix: passive visible pane refresh now selects one stale passive pane per tick in round-robin order. Active pane keeps its active tick owner; passive panes keep the slower target-level freshness lane and body subscription truth.
+- Multi-session UI fix: split can now create an empty pane from a single open session; empty panes remain persisted/rendered, show their explicit Pane number, and tapping the empty pane opens the session picker scoped to that pane. Existing split pane tab context menu now exposes `更改 Pn Session` plus explicit `移到 Pn` targets.
+- Verification: `session-context-lifecycle.test.tsx`, `TerminalPage.render-scope.test.tsx`, and `TerminalHeader.test.tsx` passed 46/46; `multi-pane-refresh.test.ts`, `workspace-persistence.test.ts`, and `useTerminalWorkspace.test.tsx` passed 16/16; `pnpm --dir android run type-check` passed.
+- MemoryPalace remains unavailable with the same removed pipx interpreter, so no re-mine/search claim is made.
+
+# 2026-07-29 multi-pane final review/resource closeout
+
+- Codex review initially found three blocking gaps: empty pane/split fallback paths, passive cursor coercion, and passive refresh mapped as active-session truth. Final shape: malformed workspace state throws, passive cursor must be a non-negative integer, split growth uses one authoritative splitter, and `resource.visible_pane_session` separates visible passive pane truth from `resource.active_session`.
+- Maps synced: feature registry keeps `useTerminalWorkspace.ts` as the sole workspace mutation owner; function map marks TerminalPage/Header/StageShell as projection/intent callers; resource map/registry add `resource.visible_pane_session`; mainline call map records `SessionLifecycle -> PassiveVisibleRefreshScheduler -> ActivityFreshness`.
+- Verification after final map fix: JSON parse PASS; focused lifecycle/workspace/persistence 38 PASS; `test:feature-registry` 78 PASS; `test:terminal:contracts` 54 files / 754 PASS; codex review final `VERDICT: PASS`.

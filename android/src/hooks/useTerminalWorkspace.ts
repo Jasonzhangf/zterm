@@ -5,6 +5,7 @@ import {
   DEFAULT_MAX_SPLIT_COUNT,
   distributeEvenPaneSizes,
   findPaneContainingTab,
+  generateWorkspaceId,
   moveTabBetweenPanes,
   resolveActivePane,
   resolveActiveTab,
@@ -23,6 +24,15 @@ function sessionToWorkspaceTab(sessionId: string): AndroidWorkspaceTab {
   return {
     id: `tab-${sessionId}`,
     sessionId,
+  };
+}
+
+function createEmptyWorkspacePane(size = 1): AndroidWorkspacePane {
+  return {
+    id: generateWorkspaceId('pane-empty'),
+    size,
+    tabs: [],
+    activeTabId: '',
   };
 }
 
@@ -73,23 +83,22 @@ function syncWorkspaceWithSessions(
   const sessionIds = new Set(openTabSessionIds);
   let next = cloneWorkspaceState(current);
 
-  next.panes = next.panes
-    .map((pane) => ({
-      ...pane,
-      tabs: pane.tabs.filter((tab) => sessionIds.has(tab.sessionId)),
-    }))
-    .filter((pane) => pane.tabs.length > 0);
+  next.panes = next.panes.map((pane) => {
+    const tabs = pane.tabs.filter((tab) => sessionIds.has(tab.sessionId));
+    const activeTabId = tabs.some((tab) => tab.id === pane.activeTabId)
+      ? pane.activeTabId
+      : (tabs[0]?.id ?? '');
+    return { ...pane, tabs, activeTabId };
+  });
 
   if (next.panes.length === 0) {
-    const firstSessionId = activeSessionId || sessions[0]?.id || '';
-    const tab = sessionToWorkspaceTab(firstSessionId);
-    return {
-      panes: [{ id: 'pane-main', size: 1, tabs: [tab], activeTabId: tab.id }],
-      activePaneId: 'pane-main',
-    };
+    throw new Error('[useTerminalWorkspace] workspace invariant violated: session sync requires at least one pane.');
   }
 
   next.panes = next.panes.map((pane) => {
+    if (pane.tabs.length === 0) {
+      return { ...pane, activeTabId: '' };
+    }
     const hasActive = pane.tabs.some((tab) => tab.id === pane.activeTabId);
     return hasActive ? pane : { ...pane, activeTabId: pane.tabs[0].id };
   });
@@ -136,14 +145,15 @@ function cleanupWorkspaceAfterMove(
   current: AndroidWorkspaceState,
   paneSizes?: number[] | null,
 ): AndroidWorkspaceState {
-  const panes = current.panes
-    .filter((pane) => pane.tabs.length > 0)
-    .map((pane) => {
-      const hasActive = pane.tabs.some((tab) => tab.id === pane.activeTabId);
-      return hasActive ? pane : { ...pane, activeTabId: pane.tabs[0].id };
-    });
+  const panes = current.panes.map((pane) => {
+    if (pane.tabs.length === 0) {
+      return { ...pane, activeTabId: '' };
+    }
+    const hasActive = pane.tabs.some((tab) => tab.id === pane.activeTabId);
+    return hasActive ? pane : { ...pane, activeTabId: pane.tabs[0].id };
+  });
   if (panes.length === 0) {
-    return current;
+    throw new Error('[useTerminalWorkspace] workspace invariant violated: cleanup requires at least one pane.');
   }
   const normalizedPanes = distributeEvenPaneSizes(panes).map((pane, index) => ({
     ...pane,
@@ -157,15 +167,33 @@ function cleanupWorkspaceAfterMove(
   };
 }
 
+function collapseWorkspaceToFirstPane(current: AndroidWorkspaceState): AndroidWorkspaceState {
+  const allTabs = current.panes.flatMap((pane) => pane.tabs);
+  const firstPane = current.panes[0];
+  if (!firstPane) {
+    throw new Error('[useTerminalWorkspace] workspace invariant violated: collapse requires at least one pane.');
+  }
+  const activeTab = resolveActiveTab(current) as AndroidWorkspaceTab | null;
+  const activeTabId = activeTab && allTabs.some((tab) => tab.id === activeTab.id)
+    ? activeTab.id
+    : (allTabs[0]?.id ?? '');
+  return {
+    panes: [{ ...firstPane, tabs: allTabs, activeTabId }],
+    activePaneId: firstPane.id,
+  };
+}
+
 function splitOutTabToNewPane(
   current: AndroidWorkspaceState,
   _activeSessionId: string | null,
-): AndroidWorkspaceState | null {
+): AndroidWorkspaceState {
   const next = cloneWorkspaceState(current);
+  if (next.panes.length === 0) {
+    throw new Error('[useTerminalWorkspace] workspace invariant violated: split requires at least one pane.');
+  }
 
   if (next.panes.length === 1 && next.panes[0]?.tabs.length === 1) {
-    const pane = next.panes[0];
-    next.panes.push(createWorkspacePane(pane.tabs[0], 1));
+    next.panes.push(createEmptyWorkspacePane(1));
     next.panes = distributeEvenPaneSizes(next.panes);
     return next;
   }
@@ -193,7 +221,9 @@ function splitOutTabToNewPane(
     return next;
   }
 
-  return null;
+  next.panes.push(createEmptyWorkspacePane(1));
+  next.panes = distributeEvenPaneSizes(next.panes);
+  return next;
 }
 
 export interface UseTerminalWorkspaceOptions {
@@ -310,12 +340,7 @@ export function useTerminalWorkspace({
         return current;
       }
       if (safeCount === 1) {
-        const allTabs = current.panes.flatMap((pane) => pane.tabs);
-        const firstPane = current.panes[0];
-        return {
-          panes: [{ ...firstPane, tabs: allTabs, activeTabId: firstPane.activeTabId }],
-          activePaneId: firstPane.id,
-        };
+        return collapseWorkspaceToFirstPane(current);
       }
       let next = cloneWorkspaceState(current);
       while (next.panes.length > safeCount) {
@@ -342,8 +367,8 @@ export function useTerminalWorkspace({
     });
   }, [currentMaxSplitCount, layoutSnapshot.paneRatios, workspace.panes.length]);
 
-  const splitAvailable = sessions.length > 1 && viewportWidth > (layoutSnapshot.baselineHeightPx * MOBILE_SPLIT_CONTROL_MIN_WIDTH_HEIGHT_RATIO);
-  const splitVisible = workspace.panes.length >= 2 && workspace.panes.every((pane) => pane.tabs.length >= 1);
+  const splitAvailable = sessions.length > 0 && viewportWidth > (layoutSnapshot.baselineHeightPx * MOBILE_SPLIT_CONTROL_MIN_WIDTH_HEIGHT_RATIO);
+  const splitVisible = workspace.panes.length >= 2;
   const activePane = resolveActivePane(workspace) as AndroidWorkspacePane | null;
   const activeTab = resolveActiveTab(workspace) as AndroidWorkspaceTab | null;
   const activePaneSessionId = activeTab?.sessionId || null;
@@ -361,17 +386,9 @@ export function useTerminalWorkspace({
   const toggleSplit = useCallback(() => {
     setWorkspace((current) => {
       if (current.panes.length >= 2) {
-        const allTabs = current.panes.flatMap((pane) => pane.tabs);
-        const firstPane = current.panes[0];
-        return {
-          panes: [{ ...firstPane, tabs: allTabs, activeTabId: firstPane.activeTabId }],
-          activePaneId: firstPane.id,
-        };
+        return collapseWorkspaceToFirstPane(current);
       }
       const expanded = splitOutTabToNewPane(current, activeSessionId);
-      if (!expanded) {
-        return current;
-      }
       return {
         ...expanded,
         activePaneId: current.activePaneId,
@@ -386,23 +403,12 @@ export function useTerminalWorkspace({
         return current;
       }
       if (safeCount === 1) {
-        const allTabs = current.panes.flatMap((pane) => pane.tabs);
-        const firstPane = current.panes[0];
-        return {
-          panes: [{ ...firstPane, tabs: allTabs, activeTabId: firstPane.activeTabId }],
-          activePaneId: firstPane.id,
-        };
+        return collapseWorkspaceToFirstPane(current);
       }
       let next = cloneWorkspaceState(current);
       while (next.panes.length < safeCount) {
         const expanded = splitOutTabToNewPane(next, activeSessionId);
-        if (!expanded) {
-          break;
-        }
-        next = {
-          ...expanded,
-          activePaneId: next.activePaneId,
-        };
+        next = { ...expanded, activePaneId: next.activePaneId };
       }
       while (next.panes.length > safeCount) {
         const removedPane = next.panes[next.panes.length - 1];

@@ -13,6 +13,16 @@ const candidate = {
 } satisfies TraversalPlanCandidate;
 
 describe('TraversalRouteHealthCache', () => {
+  function createStorage() {
+    const values = new Map<string, string>();
+    return {
+      values,
+      getItem: (key: string) => values.get(key) || null,
+      setItem: (key: string, value: string) => values.set(key, value),
+      removeItem: (key: string) => values.delete(key),
+    };
+  }
+
   it('keys route health by account, daemon, and endpoint candidate id', () => {
     expect(buildTraversalRouteHealthKey(
       { accountId: 'account-a', daemonHostId: 'daemon-a' },
@@ -32,6 +42,41 @@ describe('TraversalRouteHealthCache', () => {
 
     now = 1101;
     expect(cache.get({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidate)).toBeNull();
+  });
+
+  it('restores a selected successful route in a new cache instance', () => {
+    const storage = createStorage();
+    const scope = { accountId: 'u1', daemonHostId: 'daemon-a' };
+    const first = new TraversalRouteHealthCache({
+      ttlMs: 5000,
+      now: () => 1000,
+      storage,
+    });
+    first.recordSuccess(scope, candidate, 42);
+
+    const restored = new TraversalRouteHealthCache({
+      ttlMs: 5000,
+      now: () => 1200,
+      storage,
+    });
+    expect(restored.get(scope, candidate)).toMatchObject({
+      status: 'success',
+      rttMs: 42,
+      updatedAt: 1000,
+    });
+  });
+
+  it('removes malformed persisted route truth instead of treating it as selected', () => {
+    const storage = createStorage();
+    storage.values.set('zterm:traversal-route-health:v1', '{bad-json');
+
+    const cache = new TraversalRouteHealthCache({
+      now: () => 1000,
+      storage,
+    });
+
+    expect(cache.list()).toEqual([]);
+    expect(storage.values.has('zterm:traversal-route-health:v1')).toBe(false);
   });
 
   it('does not leak route health across users or daemon hostIds', () => {

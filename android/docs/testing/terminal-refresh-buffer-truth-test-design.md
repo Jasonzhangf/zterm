@@ -10,6 +10,7 @@ The gate must automatically compare source buffer truth with the rendered target
 
 ```text
 daemon buffer-sync body payload
+-> unique wire normalization with frame identity preserved
 -> client sparse buffer apply
 -> session render gate projection
 -> TerminalView visible rows
@@ -21,6 +22,10 @@ Mainline call ids:
 - `android_mainline:TerminalPage->TerminalView`
 - `android_mainline:TerminalView->Renderer`
 - `android_mainline:Renderer->RenderGate`
+- `android_mainline:SocketMessage->BufferWireNormalize`
+- `android_mainline:BufferWireNormalize->BufferSyncIngress`
+- `android_mainline:BufferSyncIngress->BufferFrameAssembly`
+- `android_mainline:BufferFrameAssembly->BufferSparseApply`
 
 Owner feature: `terminal.buffer_render`.
 
@@ -35,6 +40,14 @@ Owner feature: `terminal.buffer_render`.
 - `terminal-mirror-capture.test.ts` proves daemon capture does not publish a transient half frame and does not let a live mirror tail anchor regress when tmux/TUI reports a shorter alternate-screen window.
 - `session-context-buffer-runtime.test.ts` and `TerminalView.dynamic-refresh.test.tsx` prove a missed non-gap visible row cannot be hidden by a later same-tail sparse revision advance; the client must request one authoritative visible-window body repaint from the buffer owner instead of treating global revision equality as row freshness.
 - Negative path: `buffer-head` / cursor metadata must not become a body repaint source.
+- Chunked-frame positive path: two or more chunks from one authoritative frame may arrive out of order, but the client buffer owner must publish exactly once after exact contiguous coverage is complete; local sparse truth and renderer truth remain on the previous complete frame before completion.
+- Wire-normalization positive path: real socket dispatch preserves `frameStartIndex`, `frameEndIndex`, `frameChunkIndex`, `frameChunkCount`, and `generatedAt` before frame assembly. Malformed present frame fields remain explicitly invalid and cannot be normalized into an unchunked passthrough payload.
+- Chunked-frame negative paths: a missing chunk, duplicate conflicting chunk, overlapping chunk window, internal absolute-row hole, lower-revision late chunk or unchunked payload, or same-revision different-frame interleave must not mutate local truth, advance local revision, discard the newer pending frame, or schedule a renderer commit.
+- Resource-bound negative paths: a declared span over 4096 rows, more than 512 chunks, retained serialized payload over 64 MiB, or an incomplete frame older than 15 seconds must release retained chunk state and enter explicit frame error truth. Head cadence must expire idle incomplete frames and dispatch at most one exact-range repair; it must not require another body chunk to trigger cleanup.
+- Same-revision repair path: rejecting a different frame identity must clear the poisoned incomplete assembly; the next authoritative repair with one consistent identity must then publish once, while the rejected interleave never becomes local/render truth.
+- Explicit error path: every rejection remains in the independent per-session `resource.client_buffer_frame_assembly` as `BufferSyncError01InvalidFrame`; same-revision interleave repairs the original pending frame range rather than the incoming conflicting range. Repairable failures stay `pending` when the request cannot enter the wire, retry on the next legal head, and become `dispatched` only after one actual wire dispatch per revision. Invalid wire revision must never become a fabricated revision `0`: retain the pending frame revision when one exists, otherwise wait for an authoritative live-head revision. A bounded per-session `repairDispatchedRevisions` ledger survives later successful revisions, so a delayed malformed message cannot dispatch a second repair for an older revision; explicit session cleanup retires the ledger. When a newer frame supersedes an incomplete older frame, its pending state must atomically clear the older pending repair error while preserving the dispatch ledger. Non-repairable stale frames must not dispatch repair.
+- Lifecycle path: tab switch, inactive body drop, socket generation cleanup, and reconnect may clear only the incomplete `pending` chunk state. They retain revision-reset expectation, frame error truth, and the bounded repair ledger for the same daemon revision epoch. The first authoritative lower daemon head starts a new revision epoch and atomically clears pending/error/ledger before any repair dispatch; repeated heads in that same reset epoch cannot clear a newly dispatched repair. Explicit local session destruction deletes both revision-reset and frame-assembly resources.
+- Atomicity assertion: tests must inspect every intermediate commit/render observation, not only the final buffer. No observation may contain new middle/tail markers mixed with old markers from the previous frame.
 
 ## Module Black-Box Plan
 
@@ -49,6 +62,8 @@ Owner feature: `terminal.buffer_render`.
   - head-only metadata interleaved with body updates without repainting stale body text.
   - source row changed or cleared once, the client missed that non-gap body row, then a later same-tail sparse patch arrives; output DOM must converge to source only through an authoritative visible-window repaint.
   - lower-revision late payloads and same-revision late payload conflicts against non-gap rows must be explicit drops, not silent overwrites or UI clears.
+  - oversized source frames split into multiple wire messages, with middle and tail markers in different chunks; DOM stays on the previous complete source frame until assembly completes, then changes once to the new complete source frame with no old marker flashback.
+  - incomplete or invalid chunk sets never appear in DOM and do not hide the visible-range gap/repair demand behind a globally advanced revision.
 
 ## Project Black-Box Impact
 
@@ -63,6 +78,26 @@ Owner feature: `terminal.buffer_render`.
 - No real APK/WebView screenshot comparison yet.
 - No live tmux `top` / `vim` run in this local unit gate.
 - Daemon/tmux oracle comparison remains covered by `daemon:mirror:close-loop`; this design adds the Android client source-to-target DOM gate.
+
+## Close-Loop Intermediate Verification Modes
+
+Every daemon mirror replay step must declare one mode:
+
+- `source-only`: checks source/target semantics such as byte-exact long-input delivery; that intermediate instant is not asserted to be a published client render frame.
+- `source-and-client-render`: checks a client-visible observation; any intermediate source/client mismatch fails the process even when the final frame later converges.
+
+Unknown or missing modes fail. A final match cannot hide an earlier mixed client frame. The executable gate is `scripts/client-mirror-replay.ts`, covered by `src/server/daemon-mirror-lab-script.test.ts`.
+
+Frame error-truth settlement is commit-gated:
+
+- A structurally valid payload that is later rejected by sparse freshness rules must retain the existing exact repair range and dispatch ledger.
+- A replacement that reaches sparse apply but is not accepted by `commitSessionBufferUpdate` must retain frame error truth.
+- Only an accepted no-op or committed sparse-buffer replacement may clear frame error truth.
+- Resource-limit rejection retains the validated authoritative frame range while marking repair `unavailable`; it must not dispatch an oversized repair request.
+
+## Rust Migration Register
+
+`terminal.buffer_render.frame_assembly.rust` is `planned`; the current active owner remains `src/contexts/session-buffer-frame-assembly.ts#assembleBufferSyncFrameChunk`. The target is `crates/zterm-terminal-core/src/buffer_frame_assembly.rs`. Activation requires TS/Rust parity, all white-box positive/negative cases above, source-to-DOM atomicity, bridge wiring, and physical removal of the TS policy owner. A planned entry is not active architecture truth.
 
 ## 2026-07-13 Performance Lifecycle Extension
 
@@ -88,10 +123,11 @@ Mainline call ids:
 - `daemon_mainline:Mirror->PerformanceTrace`
 - `daemon_mainline:TransportSend->PerformanceTrace`
 - `android_mainline:SessionContext->SocketMessage`
-- `android_mainline:SocketMessage->BufferApply`
-- `android_mainline:BufferApply->RenderGate`
+- `android_mainline:SocketMessage->BufferWireNormalize`
+- `android_mainline:BufferWireNormalize->BufferSyncIngress`
+- `android_mainline:BufferSparseApply->RenderGate`
 - `android_mainline:SocketMessage->PerformanceTrace`
-- `android_mainline:BufferApply->PerformanceTrace`
+- `android_mainline:BufferSparseApply->PerformanceTrace`
 - `android_mainline:RenderGate->PerformanceTrace`
 
 Trace edges move from `binding pending` to `anchored` only after the production owner emits current-version metadata and `/debug/runtime.performanceTrace` proves capture/send/rx/apply/render correlation without terminal payload.

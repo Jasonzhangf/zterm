@@ -95,7 +95,6 @@ import {
 } from '../lib/remote-screenshot-preview-runtime';
 import {
   DEFAULT_BRIDGE_PORT,
-  type AndroidWorkspacePane,
   type QuickAction,
   type Host,
   type RemoteScreenshotCapture,
@@ -701,7 +700,7 @@ function resolveRelayDeviceEndpointAliasInput(
   device: TraversalRelayDeviceSnapshot,
   endpoint: NonNullable<TraversalRelayDeviceSnapshot['daemon']['endpoints']>[number],
 ) {
-  if (endpoint.kind !== 'tailscale' && endpoint.kind !== 'ipv6' && endpoint.kind !== 'ipv4') {
+  if (endpoint.kind !== 'lan' && endpoint.kind !== 'tailscale' && endpoint.kind !== 'ipv6' && endpoint.kind !== 'ipv4') {
     return null;
   }
   const daemonHostId = device.daemon.hostId.trim();
@@ -1340,7 +1339,7 @@ function TerminalPageComponent({
     maxSplitCount: 4,
   });
   const availableSplitCount = splitAvailable
-    ? Math.max(1, Math.min(currentMaxSplitCount, sessions.length))
+    ? Math.max(1, currentMaxSplitCount)
     : 1;
   const splitCountOptions = useMemo(
     () => (
@@ -1362,27 +1361,22 @@ function TerminalPageComponent({
     isActivePane: pane.id === workspace.activePaneId,
   }));
   const visiblePaneEntries = splitVisible
-    ? workspacePanes
-        .map((pane, paneIndex) => {
+    ? workspacePanes.map((pane, paneIndex) => {
           const sessionId = pane.tabs.find((tab) => tab.id === pane.activeTabId)?.sessionId || null;
-          if (!sessionId) {
-            return null;
-          }
-          const session = sessions.find((candidate) => candidate.id === sessionId) || null;
-          if (!session) {
-            return null;
-          }
+          const session = sessionId ? sessions.find((candidate) => candidate.id === sessionId) || null : null;
           return { pane, paneIndex, session };
         })
-        .filter((entry): entry is { pane: AndroidWorkspacePane; paneIndex: number; session: Session } => Boolean(entry))
     : [];
+  const activePaneGroup = splitVisible
+    ? paneGroups.find((group) => group.paneId === workspace.activePaneId) || null
+    : null;
   const interactiveSessionId = splitVisible
-    ? (paneGroups.find((group) => group.paneId === workspace.activePaneId)?.activeSessionId || activePaneSessionId)
+    ? (activePaneGroup?.activeSessionId || null)
     : (activeSession?.id || activePaneSessionId);
   const interactiveSession = interactiveSessionId
-    ? sessions.find((session) => session.id === interactiveSessionId) || activeSession || null
-    : activeSession || null;
-  const uiSession = interactiveSession || activeSession || null;
+    ? sessions.find((session) => session.id === interactiveSessionId) || null
+    : null;
+  const uiSession = splitVisible ? interactiveSession : (interactiveSession || activeSession || null);
 
   const keepTerminalInputFocusedRef = useRef<() => void>(() => {});
   const handleCopyRuntimeSwitchSession = useCallback((sessionId: string) => {
@@ -1467,7 +1461,9 @@ function TerminalPageComponent({
     visible: sessionGroupViewportProjection.visible,
   }), [sessionGroupViewportProjection, sessions]);
   const renderedPaneSessions = splitVisible
-    ? visiblePaneEntries.map((entry) => entry.session)
+    ? visiblePaneEntries
+        .map((entry) => entry.session)
+        .filter((session): session is Session => Boolean(session))
     : (interactiveSession ? [interactiveSession] : []);
   const sessionPreviewSessions = useMemo(
     () => resolveSessionPreviewTargets(sessionPreviewSelection, sessions),
@@ -1492,7 +1488,7 @@ function TerminalPageComponent({
     [livePaneSessionIds],
   );
   const headerSessionsUiKey = useMemo(() => terminalPageHeaderSessionsUiKey(sessions), [sessions]);
-  const activeHeaderSessionUiKey = useMemo(() => terminalPageHeaderSessionUiKey(activeSession), [activeSession]);
+  const activeHeaderSessionUiKey = useMemo(() => terminalPageHeaderSessionUiKey(interactiveSession), [interactiveSession]);
   const chromeSessions = useMemo(() => sessions.map(toTerminalTabChromeItem), [headerSessionsUiKey]);
   const activeChromeSession = useMemo(() => (
     interactiveSession ? toTerminalTabChromeItem(interactiveSession) : null
@@ -3603,6 +3599,7 @@ function TerminalPageComponent({
           handleSwipeTab={handleSwipeTab}
           handleActiveTerminalActivateInput={handleActiveTerminalActivateInput}
           onActivatePane={activatePaneAndSession}
+          onOpenPaneSessionPicker={handleOpenQuickTabPickerForPane}
           onActivateSession={handleActivateSessionGroupSlot}
           onTerminalFocusOwnerActivate={handleTerminalFocusOwnerActivate}
           focusNonce={focusNonce}

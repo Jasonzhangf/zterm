@@ -7,6 +7,7 @@ import {
   buildPassiveVisibleRefreshTargets,
   collectNewlyMaterializedLiveSessionIds,
   collectNewlyVisibleLiveSessionIds,
+  selectNextPassiveVisibleRefreshCandidate,
   shouldScheduleActiveTickRefresh,
   shouldSchedulePassiveVisibleTickRefresh,
   useSessionContextLifecycle,
@@ -44,6 +45,49 @@ describe('session-context-lifecycle', () => {
       activeSessionId: null,
       liveSessionIds: ['s2'],
     } as any)).toEqual(['s2']);
+  });
+
+  it('selects one passive visible pane refresh per tick in round-robin order', () => {
+    const first = selectNextPassiveVisibleRefreshCandidate(['s2', 's3', 's4'], 0, () => true);
+    expect(first).toEqual({ sessionId: 's2', nextCursor: 1 });
+
+    const second = selectNextPassiveVisibleRefreshCandidate(['s2', 's3', 's4'], first.nextCursor, () => true);
+    expect(second).toEqual({ sessionId: 's3', nextCursor: 2 });
+
+    const skipped = selectNextPassiveVisibleRefreshCandidate(
+      ['s2', 's3', 's4'],
+      second.nextCursor,
+      (sessionId) => sessionId !== 's4',
+    );
+    expect(skipped).toEqual({ sessionId: 's2', nextCursor: 1 });
+  });
+
+  it('advances the passive visible cursor past the selected stale pane after skipping fresh panes', () => {
+    const first = selectNextPassiveVisibleRefreshCandidate(
+      ['fresh-a', 'stale-b', 'stale-c'],
+      0,
+      (sessionId) => sessionId !== 'fresh-a',
+    );
+    expect(first).toEqual({ sessionId: 'stale-b', nextCursor: 2 });
+
+    const second = selectNextPassiveVisibleRefreshCandidate(
+      ['fresh-a', 'stale-b', 'stale-c'],
+      first.nextCursor,
+      (sessionId) => sessionId !== 'fresh-a',
+    );
+    expect(second).toEqual({ sessionId: 'stale-c', nextCursor: 0 });
+  });
+
+  it('rejects invalid passive visible refresh cursors instead of coercing them to the first pane', () => {
+    expect(() => selectNextPassiveVisibleRefreshCandidate(['s2'], Number.NaN, () => true)).toThrow(
+      '[session-context-lifecycle] passive visible refresh cursor must be a non-negative integer.',
+    );
+    expect(() => selectNextPassiveVisibleRefreshCandidate(['s2'], -1, () => true)).toThrow(
+      '[session-context-lifecycle] passive visible refresh cursor must be a non-negative integer.',
+    );
+    expect(() => selectNextPassiveVisibleRefreshCandidate(['s2'], 0.5, () => true)).toThrow(
+      '[session-context-lifecycle] passive visible refresh cursor must be a non-negative integer.',
+    );
   });
 
   it('schedules active tick only for non-connected or stale-silent sessions', () => {

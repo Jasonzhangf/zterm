@@ -4,7 +4,11 @@ import { homedir } from 'os';
 import { basename, dirname, join, resolve } from 'path';
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'crypto';
-import type { RelayEndpointCandidate, RelayTmuxSessionSnapshot } from '@zterm/shared/relay-directory';
+import {
+  validateRelayDirectoryUpdatePayload,
+  type RelayEndpointCandidate,
+  type RelayTmuxSessionSnapshot,
+} from '@zterm/shared/relay-directory';
 import { TraversalRelayClientDebugStore } from './client-debug-store';
 import { TraversalRelayStore, type TraversalRelayPublicUser } from './store';
 
@@ -1097,6 +1101,7 @@ function registerHost(ws: WebSocket, request: IncomingMessage, url: URL) {
     try {
       const envelope = JSON.parse(String(raw)) as RelayHostEnvelope;
       if (envelope.type === 'directory-update') {
+        validateRelayDirectoryUpdatePayload(envelope.directory);
         store.publishDaemonDirectory({
           userId: user.id,
           deviceId,

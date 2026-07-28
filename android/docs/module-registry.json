@@ -64,7 +64,9 @@
    "parent_module_id": null,
    "owner_feature": "mainline_source.android",
    "responsibility": "Android client app shell, connection, session, channel, buffer, renderer, input, drawer, preview, remote-window overlay, and settings projection boundary.",
-   "owned_resources": [],
+   "owned_resources": [
+    "resource.client_native_file_store"
+   ],
    "consumed_resources": [],
    "pending_resources": [],
    "public_interfaces": [
@@ -232,6 +234,7 @@
    ],
    "consumed_resources": [
     "resource.daemon_runtime_artifact",
+    "resource.daemon_connection_gateway",
     "resource.terminal_backend",
     "resource.debug_channel"
    ],
@@ -259,7 +262,6 @@
    "owned_paths": [
     "src/server/daemon-config.ts",
     "src/server/launch-agent-plist.ts",
-    "src/server/relay-client.ts",
     "src/server/server.ts",
     "src/server/terminal-core-support.ts",
     "src/server/terminal-daemon-runtime.ts",
@@ -273,7 +275,7 @@
    "level": 1,
    "parent_module_id": "daemon.runtime",
    "owner_feature": "terminal.transport_lifecycle",
-   "responsibility": "Accept physical client transports from direct, Tailscale, WebRTC, and Relay routes, then expose only terminal-channel subscriber interfaces inward.",
+   "responsibility": "Own daemon endpoint discovery/publication, the persistent Relay host control connection, and physical client ingress from direct, Tailscale, WebRTC, and Relay routes; expose only terminal-channel subscriber interfaces inward.",
    "owned_resources": [
     "resource.daemon_connection_gateway"
    ],
@@ -282,11 +284,15 @@
     "resource.daemon_target_transport",
     "resource.terminal_channel",
     "resource.transport_subscriber",
-    "resource.relay_peer_lease"
+    "resource.relay_peer_lease",
+    "resource.relay_control_connection",
+    "resource.relay_account_directory"
    ],
    "pending_resources": [],
    "public_interfaces": [
-    "src/server/terminal-transport-runtime.ts",
+    "src/server/daemon-connection-endpoint-runtime.ts",
+    "src/server/relay-client.ts",
+    "src/server/terminal-bridge-runtime.ts",
     "src/server/rtc-bridge.ts"
    ],
    "forbidden_resources": [
@@ -303,10 +309,17 @@
    "required_gates": [
     "src/lib/module-registry-truth.test.ts",
     "src/lib/edge-registry-truth.test.ts",
+    "src/server/daemon-connection-endpoint-runtime.test.ts",
+    "src/server/relay-client.test.ts",
     "src/server/terminal-transport-runtime.test.ts"
    ],
-   "status": "design",
-   "owned_paths": []
+   "status": "active",
+   "owned_paths": [
+    "src/server/daemon-connection-endpoint-runtime.ts",
+    "src/server/relay-client.ts",
+    "src/server/rtc-bridge.ts",
+    "src/server/terminal-bridge-runtime.ts"
+   ]
   },
   {
    "module_id": "daemon.terminal_backend",
@@ -432,9 +445,7 @@
    ],
    "status": "active",
    "owned_paths": [
-    "src/server/rtc-bridge.ts",
     "src/server/terminal-attach-token-runtime.ts",
-    "src/server/terminal-bridge-runtime.ts",
     "src/server/terminal-message-runtime.ts",
     "src/server/terminal-mux-channel-runtime.ts",
     "src/server/terminal-reliable-input-ack.ts",
@@ -669,6 +680,7 @@
    ],
    "consumed_resources": [
     "resource.relay_peer_lease",
+    "resource.relay_control_connection",
     "resource.ui_projection",
     "resource.relay_account_directory",
     "resource.route_policy"
@@ -676,7 +688,10 @@
    "pending_resources": [],
    "public_interfaces": [
     "src/pages/ConnectionsPage.tsx",
-    "src/hooks/useTraversalRelayAccount.ts"
+    "src/hooks/useTraversalRelayAccount.ts",
+    "src/hooks/useRelayDeviceStream.ts",
+    "src/lib/client-control-directory-runtime.ts",
+    "src/lib/relay-device-stream-runtime.ts"
    ],
    "forbidden_resources": [
     "resource.open_tab",
@@ -692,6 +707,7 @@
     "src/App.relay-stream-lifecycle.test.tsx",
     "src/lib/architecture-boundary-truth.test.ts",
     "src/lib/module-registry-truth.test.ts",
+    "src/lib/client-control-directory-runtime.test.ts",
     "src/lib/relay-device-stream-runtime.test.ts",
     "src/pages/ConnectionsPage.test.tsx"
    ],
@@ -707,6 +723,7 @@
     "src/hooks/useTraversalRelayAccount.ts",
     "src/hooks/useTraversalRelayDaemonDevices.ts",
     "src/lib/bridge-server-presets-view.ts",
+    "src/lib/client-control-directory-runtime.ts",
     "src/lib/home-connection-projection.ts",
     "src/lib/relay-account-directory.ts",
     "src/lib/relay-device-stream-runtime.ts",
@@ -902,8 +919,9 @@
    "level": 1,
    "parent_module_id": "client.runtime",
    "owner_feature": "terminal.buffer_render",
-   "responsibility": "Own local sparse buffer apply by absolute row and visible-range gap repair planning.",
+   "responsibility": "Own bounded authoritative frame assembly, local sparse buffer apply by absolute row, and visible-range gap repair planning.",
    "owned_resources": [
+    "resource.client_buffer_frame_assembly",
     "resource.client_sparse_buffer"
    ],
    "consumed_resources": [
@@ -912,6 +930,7 @@
    ],
    "pending_resources": [],
    "public_interfaces": [
+    "src/contexts/session-buffer-frame-assembly.ts",
     "src/contexts/session-context-buffer-runtime.ts",
     "src/lib/session-render-buffer-store.ts"
    ],
@@ -927,11 +946,14 @@
    ],
    "required_gates": [
     "src/lib/module-registry-truth.test.ts",
+    "src/contexts/session-buffer-frame-assembly.test.ts",
     "src/contexts/session-context-buffer-runtime.test.ts",
     "src/components/TerminalView.dynamic-refresh.test.tsx"
    ],
    "status": "active",
    "owned_paths": [
+    "src/contexts/session-buffer-frame-assembly-state.ts",
+    "src/contexts/session-buffer-frame-assembly.ts",
     "src/contexts/session-buffer-planner-helpers.ts",
     "src/contexts/session-context-buffer-runtime.ts",
     "src/contexts/session-context-pull-runtime.ts",
@@ -1149,6 +1171,8 @@
    ],
    "consumed_resources": [
     "resource.file_transfer",
+    "resource.target_mux_request",
+    "resource.client_native_file_store",
     "resource.ui_projection"
    ],
    "pending_resources": [],
@@ -1168,10 +1192,12 @@
    ],
    "required_gates": [
     "src/lib/module-registry-truth.test.ts",
+    "scripts/run-file-transfer-throughput-gate.sh",
+    "src/lib/file-transfer-throughput-contract.test.ts",
     "src/server/server.file-transfer-truth.test.ts",
     "src/components/terminal/FileTransferSheet.test.tsx"
    ],
-   "status": "design",
+   "status": "active",
    "owned_paths": [
     "src/components/terminal/FileTransferSheet.tsx",
     "src/components/terminal/RemoteScreenshotSheet.tsx",
@@ -1179,6 +1205,7 @@
     "src/contexts/session-context-transfer-runtime.ts",
     "src/lib/file-transfer-message-runtime.ts",
     "src/lib/file-transfer-session-runtime.ts",
+    "src/lib/file-transfer-throughput-runtime.ts",
     "src/lib/remote-screenshot-preview-runtime.ts",
     "src/lib/remote-screenshot-runtime.ts"
    ]
@@ -1426,8 +1453,9 @@
    "level": 1,
    "parent_module_id": "relay.runtime",
    "owner_feature": "relay.account_directory",
-   "responsibility": "Own account-scoped machine, daemon, endpoint, tmux-session directory, and public update route facts.",
+   "responsibility": "Own role-scoped Relay control connection presence plus account-scoped machine, daemon, endpoint, tmux-session directory, and public update route facts.",
    "owned_resources": [
+    "resource.relay_control_connection",
     "resource.relay_account_directory"
    ],
    "consumed_resources": [
@@ -1453,6 +1481,7 @@
    ],
    "required_gates": [
     "src/lib/module-registry-truth.test.ts",
+    "packages/shared/src/connection/relay-directory.test.ts",
     "src/traversal-relay/server.test.ts",
     "src/lib/relay-account-directory.test.ts"
    ],

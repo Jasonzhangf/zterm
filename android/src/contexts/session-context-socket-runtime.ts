@@ -3,6 +3,10 @@ import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import { buildTerminalMuxPing } from '@zterm/shared/protocol';
+import {
+  clearPendingBufferSyncFrameAssembly,
+  type BufferFrameAssemblyResourceState,
+} from './session-buffer-frame-assembly';
 
 interface MutableRefObject<T> {
   current: T;
@@ -52,13 +56,17 @@ export function clearTailRefreshRuntime(options: {
   sessionRevisionResetRef: MutableRefObject<Map<string, { revision: number; latestEndIndex: number; seenAt: number }>>;
   lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
   tailRefreshStore?: SessionTailRefreshStore;
-  sameRevisionChunkFrameRef?: MutableRefObject<Map<string, unknown>>;
+  bufferFrameAssemblyRef: MutableRefObject<Map<string, BufferFrameAssemblyResourceState>>;
 }) {
   options.sessionHeadStoreRef.current.clearLiveHead(options.sessionId);
-  options.sessionRevisionResetRef.current.delete(options.sessionId);
   options.lastHeadRequestAtRef.current.delete(options.sessionId);
   options.tailRefreshStore?.clearPendingTailRefreshMarks(options.sessionId);
-  options.sameRevisionChunkFrameRef?.current.delete(options.sessionId);
+  const retainedFrameResource = clearPendingBufferSyncFrameAssembly(
+    options.bufferFrameAssemblyRef.current.get(options.sessionId) || null,
+  );
+  if (retainedFrameResource) {
+    options.bufferFrameAssemblyRef.current.set(options.sessionId, retainedFrameResource);
+  }
 }
 
 export function startSocketHeartbeat(options: {

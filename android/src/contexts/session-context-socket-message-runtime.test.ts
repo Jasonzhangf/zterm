@@ -368,6 +368,136 @@ describe('session-context-socket-message-runtime connected truth', () => {
     expect(lastHeadRequestAtRef.current.get('session-1')).toBe(1234);
   });
 
+  it('preserves authoritative frame identity through socket wire normalization', () => {
+    const applyIncomingBufferSync = vi.fn();
+    const payload = {
+      revision: 12,
+      startIndex: 120,
+      endIndex: 122,
+      frameStartIndex: 120,
+      frameEndIndex: 124,
+      frameChunkIndex: 0,
+      frameChunkCount: 2,
+      generatedAt: 1200,
+      cols: 80,
+      rows: 24,
+      cursorKeysApp: false,
+      lines: [
+        { i: 120, t: 'row-120' },
+        { i: 121, t: 'row-121' },
+      ],
+    };
+
+    handleSocketServerMessageRuntime({
+      params: {
+        sessionId: 'session-1',
+        host: makeHost(),
+        ws: {} as any,
+        debugScope: 'connect',
+        onConnected: vi.fn(),
+        onFailure: vi.fn(),
+        onClosed: vi.fn(),
+      },
+      msg: { type: 'buffer-sync', payload } as ServerMessage,
+      refs: {
+        stateRef: {
+          current: {
+            sessions: [{ ...makeSession(), state: 'connected' }],
+            activeSessionId: 'session-1',
+          },
+        },
+        scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
+        lastHeadRequestAtRef: { current: new Map() },
+        heartbeatStore: createSessionHeartbeatStore(),
+      },
+      settleSessionPullState: vi.fn(),
+      runtimeDebug: vi.fn(),
+      isSessionTransportActive: vi.fn(() => true),
+      shouldAcceptSessionLiveBuffer: vi.fn(() => true),
+      summarizeBufferPayload: vi.fn(() => ({})),
+      applyIncomingBufferSync,
+      handleBufferHead: vi.fn(),
+      setScheduleStateForSession: vi.fn(),
+      setSessionTitleSync: vi.fn(),
+      fileTransferMessageRuntime: { dispatch: vi.fn() },
+      updateSessionSync: vi.fn(),
+    });
+
+    expect(applyIncomingBufferSync).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({
+        frameStartIndex: 120,
+        frameEndIndex: 124,
+        frameChunkIndex: 0,
+        frameChunkCount: 2,
+        generatedAt: 1200,
+      }),
+    );
+  });
+
+  it('keeps malformed present frame metadata explicit instead of degrading it to unchunked passthrough', () => {
+    const applyIncomingBufferSync = vi.fn();
+
+    handleSocketServerMessageRuntime({
+      params: {
+        sessionId: 'session-1',
+        host: makeHost(),
+        ws: {} as any,
+        debugScope: 'connect',
+        onConnected: vi.fn(),
+        onFailure: vi.fn(),
+        onClosed: vi.fn(),
+      },
+      msg: {
+        type: 'buffer-sync',
+        payload: {
+          revision: 12,
+          startIndex: 120,
+          endIndex: 122,
+          frameStartIndex: 120,
+          frameEndIndex: 124,
+          frameChunkIndex: 0,
+          frameChunkCount: 'two',
+          generatedAt: 1200,
+          cols: 80,
+          rows: 24,
+          cursorKeysApp: false,
+          lines: [
+            { i: 120, t: 'row-120' },
+            { i: 121, t: 'row-121' },
+          ],
+        },
+      } as unknown as ServerMessage,
+      refs: {
+        stateRef: {
+          current: {
+            sessions: [{ ...makeSession(), state: 'connected' }],
+            activeSessionId: 'session-1',
+          },
+        },
+        scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
+        lastHeadRequestAtRef: { current: new Map() },
+        heartbeatStore: createSessionHeartbeatStore(),
+      },
+      settleSessionPullState: vi.fn(),
+      runtimeDebug: vi.fn(),
+      isSessionTransportActive: vi.fn(() => true),
+      shouldAcceptSessionLiveBuffer: vi.fn(() => true),
+      summarizeBufferPayload: vi.fn(() => ({})),
+      applyIncomingBufferSync,
+      handleBufferHead: vi.fn(),
+      setScheduleStateForSession: vi.fn(),
+      setSessionTitleSync: vi.fn(),
+      fileTransferMessageRuntime: { dispatch: vi.fn() },
+      updateSessionSync: vi.fn(),
+    });
+
+    const normalizedPayload = applyIncomingBufferSync.mock.calls[0]?.[1];
+    expect(normalizedPayload).toBeDefined();
+    expect(Object.prototype.hasOwnProperty.call(normalizedPayload, 'frameChunkCount')).toBe(true);
+    expect(Number.isNaN(normalizedPayload?.frameChunkCount)).toBe(true);
+  });
+
   it('treats tmux_session_killed as a terminal closed event instead of scheduling reconnect', () => {
     const onFailure = vi.fn();
     const onClosed = vi.fn();

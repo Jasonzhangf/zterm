@@ -19,7 +19,7 @@ import type { SessionTmuxTargetRequestStore } from './session-context-tmux-manag
 import type { SessionVisibleRangeState } from './session-visible-range-helpers';
 import type { SessionPullStates } from './session-pull-state-helpers';
 import type { RevisionResetExpectation } from './session-context-core';
-import type { SameRevisionChunkFrameState } from './session-context-buffer-runtime';
+import type { BufferFrameAssemblyResourceState } from './session-context-buffer-runtime';
 import type {
   FinalizeSocketFailureBaselineFn,
   HandleSocketConnectedBaselineFn,
@@ -59,7 +59,7 @@ export function useSessionProviderRuntime(options: {
   const sessionRevisionResetRef = useRef<Map<string, RevisionResetExpectation>>(new Map());
   const sessionTailRefreshStoreRef = useRef(createSessionTailRefreshStore());
   const lastHeadRequestAtRef = useRef<Map<string, number>>(new Map());
-  const sameRevisionChunkFrameRef = useRef<Map<string, SameRevisionChunkFrameState>>(new Map());
+  const bufferFrameAssemblyRef = useRef<Map<string, BufferFrameAssemblyResourceState>>(new Map());
   const sessionPullStateRef = useRef<Map<string, SessionPullStates>>(new Map());
   const sessionAttachTokensRef = useRef<Map<string, string>>(new Map());
   const pendingSessionTransportOpenIntentsRef = useRef<Map<string, PendingSessionTransportOpenIntent>>(new Map());
@@ -124,7 +124,7 @@ export function useSessionProviderRuntime(options: {
       sessionRevisionResetRef,
       sessionTailRefreshStoreRef,
       lastHeadRequestAtRef,
-      sameRevisionChunkFrameRef,
+      bufferFrameAssemblyRef,
       sessionPullStateRef,
       sessionAttachTokensRef,
       pendingSessionTransportOpenIntentsRef,

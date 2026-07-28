@@ -15,6 +15,7 @@ interface ProbeHistoryEntry {
 
 interface ReplayStepResult {
   label: string;
+  verificationMode: 'source-only' | 'source-and-client-render';
   historyLength: number;
   oracle: {
     paneRows: number;
@@ -143,9 +144,13 @@ function replay(caseDir: string) {
         break;
       }
     }
+    const validVerificationMode = step.verificationMode === 'source-only'
+      || step.verificationMode === 'source-and-client-render';
+    const clientRenderRequired = step.verificationMode === 'source-and-client-render';
     return {
       label: step.label,
-      ok: stepMismatchIndex === null,
+      verificationMode: step.verificationMode,
+      ok: validVerificationMode && (!clientRenderRequired || stepMismatchIndex === null),
       mismatchIndex: stepMismatchIndex,
       historyLength: step.historyLength,
       expected: stepExpected,
@@ -153,8 +158,13 @@ function replay(caseDir: string) {
     };
   });
 
+  const finalCheck = {
+    verificationMode: 'source-and-client-render' as const,
+    ok: mismatchIndex === null,
+    mismatchIndex,
+  };
   const result = {
-    ok: mismatchIndex === null && stepChecks.every((step) => step.ok),
+    ok: finalCheck.ok && stepChecks.every((step) => step.ok),
     mismatchIndex,
     paneRows,
     paneCols,
@@ -162,11 +172,12 @@ function replay(caseDir: string) {
     viewportBottomIndex: renderWindow.viewportBottomIndex,
     expected: tmuxCapture,
     actual,
+    finalCheck,
     stepChecks,
   };
 
   process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
-  if (mismatchIndex !== null) {
+  if (!result.ok) {
     process.exitCode = 1;
   }
 }

@@ -9,6 +9,10 @@ import type {
   TerminalCell,
   TerminalCursorState,
 } from '@zterm/shared/types';
+import {
+  TERMINAL_BUFFER_SYNC_FRAME_MAX_SPAN_LINES,
+  TERMINAL_BUFFER_SYNC_MESSAGE_MAX_BYTES,
+} from '@zterm/shared/types';
 import { summarizeIndexedLinesForDebug } from '@zterm/shared/terminal-buffer';
 import { buildLiveTailBufferSyncPayload } from './buffer-sync-contract';
 import { sliceIndexedLines } from './canonical-buffer';
@@ -131,9 +135,9 @@ const MIRROR_LIVE_SYNC_ACTIVE_MS = 33;
 const MIRROR_LIVE_SYNC_IDLE_MS = 120;
 const ADAPTIVE_WIDTH_LEASE_TTL_MS = 65000;
 const SUBSCRIBER_PENDING_RANGE_LIMIT = 64;
-const SUBSCRIBER_PENDING_SPAN_LINE_LIMIT = 4096;
+const SUBSCRIBER_PENDING_SPAN_LINE_LIMIT = TERMINAL_BUFFER_SYNC_FRAME_MAX_SPAN_LINES;
 const SUBSCRIBER_PENDING_AGE_LIMIT_MS = 15_000;
-const SUBSCRIBER_BUFFER_SYNC_MAX_BYTES = 128_000;
+const SUBSCRIBER_BUFFER_SYNC_MAX_BYTES = TERMINAL_BUFFER_SYNC_MESSAGE_MAX_BYTES;
 
 function getWireLineAbsoluteIndex(line: TerminalBufferPayload['lines'][number]) {
   if (!line) {

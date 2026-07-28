@@ -9,6 +9,10 @@ import {
   type SessionPullPurpose,
   type SessionPullStates,
 } from './session-pull-state-helpers';
+import {
+  clearPendingBufferSyncFrameAssembly,
+  type BufferFrameAssemblyResourceState,
+} from './session-buffer-frame-assembly';
 
 interface MutableRefObject<T> {
   current: T;
@@ -170,16 +174,17 @@ export function resetSessionTransportPullBookkeeping(options: {
   activeSessionId: string | null;
   sessionPullStateRef: MutableRefObject<Map<string, SessionPullStates>>;
   tailRefreshStore: SessionTailRefreshStore;
-  sameRevisionChunkFrameRef?: MutableRefObject<Map<string, unknown>>;
+  bufferFrameAssemblyRef: MutableRefObject<Map<string, BufferFrameAssemblyResourceState>>;
   runtimeDebug: RuntimeDebugFn;
 }) {
   const pullStates = options.sessionPullStateRef.current.get(options.sessionId) || null;
   const hadPendingInputTailRefresh = options.tailRefreshStore.hasPendingInputTailRefresh(options.sessionId);
   const hadTailRefreshDebounce = options.tailRefreshStore.hasSyncRequest(options.sessionId, 'tail-refresh');
   const hadReadingRepairDebounce = options.tailRefreshStore.hasSyncRequest(options.sessionId, 'reading-repair');
-  const hadSameRevisionChunkFrame = Boolean(options.sameRevisionChunkFrameRef?.current.has(options.sessionId));
+  const frameResource = options.bufferFrameAssemblyRef.current.get(options.sessionId) || null;
+  const hadPendingBufferFrame = frameResource?.pending !== null && frameResource?.pending !== undefined;
   const hasLivePullBookkeeping = Boolean(pullStates && hasActiveSessionPullState(pullStates));
-  if (!hasLivePullBookkeeping && !hadPendingInputTailRefresh && !hadTailRefreshDebounce && !hadReadingRepairDebounce && !hadSameRevisionChunkFrame) {
+  if (!hasLivePullBookkeeping && !hadPendingInputTailRefresh && !hadTailRefreshDebounce && !hadReadingRepairDebounce && !hadPendingBufferFrame) {
     return;
   }
   options.runtimeDebug('session.buffer.pull.reset', {
@@ -190,7 +195,7 @@ export function resetSessionTransportPullBookkeeping(options: {
     hadPendingInputTailRefresh,
     hadTailRefreshDebounce,
     hadReadingRepairDebounce,
-    hadSameRevisionChunkFrame,
+    hadPendingBufferFrame,
   });
   if (hasLivePullBookkeeping) {
     clearSessionPullState({
@@ -199,7 +204,10 @@ export function resetSessionTransportPullBookkeeping(options: {
     });
   }
   options.tailRefreshStore.clearPendingInputTailRefresh(options.sessionId);
-  options.sameRevisionChunkFrameRef?.current.delete(options.sessionId);
+  const retainedFrameResource = clearPendingBufferSyncFrameAssembly(frameResource);
+  if (retainedFrameResource) {
+    options.bufferFrameAssemblyRef.current.set(options.sessionId, retainedFrameResource);
+  }
   options.tailRefreshStore.clearSyncRequest(options.sessionId, 'tail-refresh');
   options.tailRefreshStore.clearSyncRequest(options.sessionId, 'reading-repair');
 }

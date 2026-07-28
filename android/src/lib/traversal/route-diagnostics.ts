@@ -74,17 +74,24 @@ function buildTraversalRouteCandidates(endpointCandidates: RelayEndpointCandidat
     }
     seen.add(id);
 
-    if (endpoint.kind === 'relay-rtc') {
+    if (endpoint.kind === 'rtc-direct') {
       const relayHostId = asString(endpoint.relayHostId) || id;
       candidates.push({
-        id: `rtc-direct:${relayHostId}`,
+        id,
         kind: 'rtc',
         path: 'rtc-direct',
-        endpoint: relayHostId,
+        endpoint: asString(endpoint.host) && endpoint.port
+          ? `${asString(endpoint.host)}:${endpoint.port}`
+          : relayHostId,
         signalUrl: asString(endpoint.wsUrl) || `wss://${relayHostId || 'relay.invalid'}`,
         iceServers: [],
         iceTransportPolicy: 'all',
       });
+      continue;
+    }
+
+    if (endpoint.kind === 'relay-rtc') {
+      const relayHostId = asString(endpoint.relayHostId) || id;
       candidates.push({
         id,
         kind: 'rtc',
@@ -97,12 +104,13 @@ function buildTraversalRouteCandidates(endpointCandidates: RelayEndpointCandidat
       continue;
     }
 
-    if (endpoint.kind === 'tailscale' || endpoint.kind === 'ipv6' || endpoint.kind === 'ipv4') {
+    if (endpoint.kind === 'lan' || endpoint.kind === 'tailscale' || endpoint.kind === 'ipv6' || endpoint.kind === 'ipv4') {
       const endpointLabel = asString(endpoint.host) || asString(endpoint.wsUrl) || asString(endpoint.relayHostId) || id;
+      const path = endpoint.kind === 'lan' ? 'ipv4' : endpoint.kind;
       candidates.push({
         id,
         kind: 'ws',
-        path: endpoint.kind,
+        path,
         endpoint: endpointLabel,
         url: asString(endpoint.wsUrl) || `ws://${endpointLabel}`,
       });

@@ -92,6 +92,21 @@ describe('function wiki truth gate', () => {
     );
   });
 
+  it('keeps terminal frame assembly Rust migration explicitly planned', () => {
+    const decision = read('docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md');
+
+    expect(decision).toContain(
+      '`migration_id`: `terminal.buffer_render.frame_assembly.rust`',
+    );
+    expect(decision).toContain('`status`: `planned`');
+    expect(decision).toContain(
+      '`current_owner`: `android/src/contexts/session-buffer-frame-assembly.ts#assembleBufferSyncFrameChunk`',
+    );
+    expect(decision).toContain(
+      '`planned_target`: `crates/zterm-terminal-core/src/buffer_frame_assembly.rs`',
+    );
+  });
+
   it('keeps wiki pages aligned with daemon and cli mainline source owners', () => {
     const daemon = read('docs/wiki/daemon.md');
     const cli = read('docs/wiki/cli.md');
@@ -187,6 +202,15 @@ describe('function wiki truth gate', () => {
     );
     expect(testDesignMainlineIds.length).toBeGreaterThan(0);
     for (const mainlineId of testDesignMainlineIds) {
+      expect(manifestEdgeIds.has(mainlineId), mainlineId).toBe(true);
+    }
+    const bufferTestDesign = read('docs/testing/terminal-refresh-buffer-truth-test-design.md');
+    const bufferMainlineIds = Array.from(
+      bufferTestDesign.matchAll(/`((?:android|daemon|cli)_mainline:[^`]+)`/g),
+      (match) => match[1],
+    );
+    expect(bufferMainlineIds.length).toBeGreaterThan(0);
+    for (const mainlineId of bufferMainlineIds) {
       expect(manifestEdgeIds.has(mainlineId), mainlineId).toBe(true);
     }
 

@@ -267,6 +267,29 @@ describe('session-context-socket-runtime heartbeat lifecycle', () => {
     };
     const sessionRevisionResetRef = { current: new Map([[sessionId, { revision: 4, latestEndIndex: 77, seenAt: 1 }]]) };
     const lastHeadRequestAtRef = { current: new Map([[sessionId, 123]]) };
+    const retainedError = {
+      error: 'invalid-frame-metadata' as const,
+      revision: 11,
+      repair: {
+        status: 'dispatched' as const,
+        range: { startIndex: 0, endIndex: 2 },
+      },
+    };
+    const bufferFrameAssemblyRef = { current: new Map([[sessionId, {
+      pending: {
+        frameKey: '12:0:2:100:2',
+        revision: 12,
+        frameStartIndex: 0,
+        frameEndIndex: 2,
+        frameChunkCount: 2,
+        generatedAt: 100,
+        firstReceivedAt: 100,
+        retainedBytes: 10,
+        chunks: new Map(),
+      },
+      error: retainedError,
+      repairDispatchedRevisions: [11],
+    }]]) };
     const tailRefreshStore = createSessionTailRefreshStore();
     tailRefreshStore.markPendingInputTailRefresh(sessionId, 3, 5);
     tailRefreshStore.markPendingConnectTailRefresh(sessionId);
@@ -278,11 +301,21 @@ describe('session-context-socket-runtime heartbeat lifecycle', () => {
       sessionRevisionResetRef,
       lastHeadRequestAtRef,
       tailRefreshStore,
+      bufferFrameAssemblyRef,
     });
 
     expect(liveHeads.has(sessionId)).toBe(false);
-    expect(sessionRevisionResetRef.current.has(sessionId)).toBe(false);
+    expect(sessionRevisionResetRef.current.get(sessionId)).toEqual({
+      revision: 4,
+      latestEndIndex: 77,
+      seenAt: 1,
+    });
     expect(lastHeadRequestAtRef.current.has(sessionId)).toBe(false);
+    expect(bufferFrameAssemblyRef.current.get(sessionId)).toEqual({
+      pending: null,
+      error: retainedError,
+      repairDispatchedRevisions: [11],
+    });
     expect(tailRefreshStore.hasPendingInputTailRefresh(sessionId)).toBe(false);
     expect(tailRefreshStore.hasPendingConnectTailRefresh(sessionId)).toBe(false);
     expect(tailRefreshStore.hasPendingResumeTailRefresh(sessionId)).toBe(false);

@@ -80,6 +80,24 @@ describe('useTerminalWorkspace explicit pane truth', () => {
     consoleErrorSpy.mockRestore();
   });
 
+  it('rejects an empty restore snapshot instead of inventing a pane identity', () => {
+    const { result } = renderHook(() => useTerminalWorkspace({
+      sessions: [makeSession('s1'), makeSession('s2')],
+      activeSessionId: 's1',
+      viewportWidth: 1200,
+      viewportHeight: 900,
+      maxSplitCount: 4,
+    }));
+
+    expect(() => {
+      act(() => {
+        result.current.attachSessionToPane('s2', 'pane-missing', {
+          restoreSnapshot: { panes: [], activePaneId: 'pane-missing' },
+        });
+      });
+    }).toThrow('[useTerminalWorkspace] workspace invariant violated: session sync requires at least one pane.');
+  });
+
   it('does not resurrect a runtime session into workspace tabs when it was never in explicit open-tab truth', () => {
     localStorage.setItem(STORAGE_KEYS.TERMINAL_LAYOUT, JSON.stringify({
       panes: [
@@ -295,5 +313,62 @@ describe('useTerminalWorkspace explicit pane truth', () => {
     });
 
     expect(result.current.workspace.panes).toHaveLength(2);
+  });
+
+  it('keeps the source pane slot when moving the only session into an empty numbered pane', () => {
+    const { result } = renderHook(() => useTerminalWorkspace({
+      sessions: [makeSession('s1')],
+      activeSessionId: 's1',
+      viewportWidth: 900,
+      viewportHeight: 844,
+      maxSplitCount: 4,
+    }));
+
+    act(() => {
+      result.current.setSplitCount(2);
+    });
+
+    expect(result.current.workspace.panes).toHaveLength(2);
+    const sourcePaneId = result.current.workspace.panes[0]!.id;
+    const emptyPaneId = result.current.workspace.panes[1]!.id;
+    expect(result.current.workspace.panes[0]!.tabs.map((tab) => tab.sessionId)).toEqual(['s1']);
+    expect(result.current.workspace.panes[1]!.tabs).toEqual([]);
+
+    act(() => {
+      result.current.assignSessionToPane('s1', emptyPaneId);
+    });
+
+    expect(result.current.workspace.panes.map((pane) => pane.id)).toEqual([sourcePaneId, emptyPaneId]);
+    expect(result.current.workspace.panes[0]!.tabs).toEqual([]);
+    expect(result.current.workspace.panes[0]!.activeTabId).toBe('');
+    expect(result.current.workspace.panes[1]!.tabs.map((tab) => tab.sessionId)).toEqual(['s1']);
+    expect(result.current.workspace.activePaneId).toBe(emptyPaneId);
+    expect(result.current.splitVisible).toBe(true);
+  });
+
+  it('keeps a valid active tab when collapsing after the only session moved into an empty pane', () => {
+    const { result } = renderHook(() => useTerminalWorkspace({
+      sessions: [makeSession('s1')],
+      activeSessionId: 's1',
+      viewportWidth: 900,
+      viewportHeight: 844,
+      maxSplitCount: 4,
+    }));
+
+    act(() => {
+      result.current.setSplitCount(2);
+    });
+    const targetPaneId = result.current.workspace.panes[1]!.id;
+    act(() => {
+      result.current.assignSessionToPane('s1', targetPaneId);
+    });
+    act(() => {
+      result.current.setSplitCount(1);
+    });
+
+    expect(result.current.workspace.panes).toHaveLength(1);
+    expect(result.current.workspace.panes[0]!.tabs.map((tab) => tab.sessionId)).toEqual(['s1']);
+    expect(result.current.workspace.panes[0]!.activeTabId).toBe('tab-s1');
+    expect(result.current.activePaneSessionId).toBe('s1');
   });
 });

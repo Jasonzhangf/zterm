@@ -27,7 +27,7 @@ import type {
   SessionScheduleState,
   ServerMessage,
 } from '../lib/types';
-import type { SameRevisionChunkFrameState } from './session-context-buffer-runtime';
+import type { BufferFrameAssemblyResourceState } from './session-context-buffer-runtime';
 import type {
   RevisionResetExpectation,
   SessionAction,
@@ -88,7 +88,7 @@ export interface SessionProviderRuntimeRefs {
   sessionRevisionResetRef: MutableRefObject<Map<string, RevisionResetExpectation>>;
   sessionTailRefreshStoreRef: MutableRefObject<SessionTailRefreshStore>;
   lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
-  sameRevisionChunkFrameRef: MutableRefObject<Map<string, SameRevisionChunkFrameState>>;
+  bufferFrameAssemblyRef: MutableRefObject<Map<string, BufferFrameAssemblyResourceState>>;
   sessionPullStateRef: MutableRefObject<Map<string, SessionPullStates>>;
   sessionAttachTokensRef: MutableRefObject<Map<string, string>>;
   pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, PendingSessionTransportOpenIntent>>;

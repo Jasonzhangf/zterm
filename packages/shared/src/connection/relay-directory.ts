@@ -3,7 +3,13 @@ export interface RelayPresence {
   lastSeenAt: string;
 }
 
-export type RelayEndpointCandidateKind = 'tailscale' | 'ipv6' | 'ipv4' | 'relay-rtc';
+export type RelayEndpointCandidateKind =
+  | 'lan'
+  | 'rtc-direct'
+  | 'tailscale'
+  | 'ipv6'
+  | 'ipv4'
+  | 'relay-rtc';
 
 export interface RelayEndpointCandidate {
   id: string;
@@ -51,6 +57,114 @@ export interface RelayAccountDirectory {
   updatedAt: string;
 }
 
+export interface RelayDirectoryUpdatePayload {
+  endpoints?: RelayEndpointCandidate[];
+  sessions?: RelayTmuxSessionSnapshot[];
+  publishedAt?: string;
+}
+
+const RELAY_ENDPOINT_KINDS = new Set<RelayEndpointCandidateKind>([
+  'lan',
+  'rtc-direct',
+  'tailscale',
+  'ipv6',
+  'ipv4',
+  'relay-rtc',
+]);
+
+function requireControlObject(value: unknown, label: string) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function rejectUnknownFields(
+  object: Record<string, unknown>,
+  allowed: ReadonlySet<string>,
+  label: string,
+) {
+  for (const key of Object.keys(object)) {
+    if (!allowed.has(key)) {
+      throw new Error(`unknown ${label ? `${label} ` : ''}control field: ${key}`);
+    }
+  }
+}
+
+function validateEndpointCandidate(value: unknown) {
+  const endpoint = requireControlObject(value, 'endpoint candidate');
+  rejectUnknownFields(
+    endpoint,
+    new Set(['id', 'kind', 'host', 'port', 'wsUrl', 'relayHostId', 'authRequired', 'lastSeenAt']),
+    'endpoint',
+  );
+  if (typeof endpoint.id !== 'string' || !endpoint.id.trim()) {
+    throw new Error('endpoint candidate id is required');
+  }
+  if (typeof endpoint.kind !== 'string' || !RELAY_ENDPOINT_KINDS.has(endpoint.kind as RelayEndpointCandidateKind)) {
+    throw new Error(`unsupported endpoint candidate kind: ${String(endpoint.kind || '')}`);
+  }
+  if (typeof endpoint.authRequired !== 'boolean') {
+    throw new Error('endpoint candidate authRequired must be boolean');
+  }
+  if (typeof endpoint.lastSeenAt !== 'string' || !endpoint.lastSeenAt.trim()) {
+    throw new Error('endpoint candidate lastSeenAt is required');
+  }
+  for (const field of ['host', 'wsUrl', 'relayHostId'] as const) {
+    if (endpoint[field] !== undefined && typeof endpoint[field] !== 'string') {
+      throw new Error(`endpoint candidate ${field} must be string`);
+    }
+  }
+  if (
+    endpoint.port !== undefined
+    && (typeof endpoint.port !== 'number'
+      || !Number.isInteger(endpoint.port)
+      || endpoint.port < 1
+      || endpoint.port > 65_535)
+  ) {
+    throw new Error('endpoint candidate port is invalid');
+  }
+}
+
+function validateSessionSnapshot(value: unknown) {
+  const session = requireControlObject(value, 'session snapshot');
+  rejectUnknownFields(session, new Set(['name', 'cwd', 'title', 'updatedAt']), 'session');
+  if (typeof session.name !== 'string' || !session.name.trim()) {
+    throw new Error('session snapshot name is required');
+  }
+  if (typeof session.updatedAt !== 'string' || !session.updatedAt.trim()) {
+    throw new Error('session snapshot updatedAt is required');
+  }
+  for (const field of ['cwd', 'title'] as const) {
+    if (session[field] !== undefined && typeof session[field] !== 'string') {
+      throw new Error(`session snapshot ${field} must be string`);
+    }
+  }
+}
+
+export function validateRelayDirectoryUpdatePayload(
+  value: unknown,
+): value is RelayDirectoryUpdatePayload {
+  const payload = requireControlObject(value, 'relay directory update');
+  rejectUnknownFields(payload, new Set(['endpoints', 'sessions', 'publishedAt']), '');
+  if (payload.endpoints !== undefined) {
+    if (!Array.isArray(payload.endpoints)) {
+      throw new Error('relay directory endpoints must be an array');
+    }
+    payload.endpoints.forEach(validateEndpointCandidate);
+  }
+  if (payload.sessions !== undefined) {
+    if (!Array.isArray(payload.sessions)) {
+      throw new Error('relay directory sessions must be an array');
+    }
+    payload.sessions.forEach(validateSessionSnapshot);
+  }
+  if (payload.publishedAt !== undefined && (typeof payload.publishedAt !== 'string' || !payload.publishedAt.trim())) {
+    throw new Error('relay directory publishedAt must be a non-empty string');
+  }
+  return true;
+}
+
 function asString(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -77,7 +191,9 @@ export function normalizeRelayEndpointCandidates(input: unknown, now: string): R
     }
     const candidate = item as Partial<RelayEndpointCandidate>;
     if (
-      candidate.kind !== 'tailscale'
+      candidate.kind !== 'lan'
+      && candidate.kind !== 'rtc-direct'
+      && candidate.kind !== 'tailscale'
       && candidate.kind !== 'ipv6'
       && candidate.kind !== 'ipv4'
       && candidate.kind !== 'relay-rtc'

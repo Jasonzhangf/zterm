@@ -22,6 +22,7 @@ import {
   WTERM_CONFIG_DISPLAY_PATH,
 } from '@zterm/shared/mobile-config';
 import { getWtermHomeDir, getWtermUpdatesDir, resolveDaemonRuntimeConfig } from './daemon-config';
+import { buildDaemonConnectionEndpointCandidates } from './daemon-connection-endpoint-runtime';
 import { createTraversalRelayHostClient } from './relay-client';
 import { findChangedIndexedRanges } from './canonical-buffer';
 import { buildBufferHeadPayload, buildChangedRangesBufferSyncPayload } from './buffer-sync-contract';
@@ -452,6 +453,11 @@ const relayHostClient = createTraversalRelayHostClient({
   config: DAEMON_CONFIG.relay,
   handleRelaySignal,
   closeRelayPeer,
+  listEndpointCandidates: (now) => buildDaemonConnectionEndpointCandidates({
+    hostId: DAEMON_CONFIG.daemonHostId,
+    bridgePort: PORT,
+    now,
+  }),
   listTmuxSessions,
 });
 wss.on('connection', handleWebSocketConnection);

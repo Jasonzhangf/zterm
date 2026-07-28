@@ -116,11 +116,9 @@ function TerminalHeaderComponent({
     ? resolvedPaneGroups.filter((group) => renderedPaneIdSet.has(group.paneId))
     : resolvedPaneGroups;
   const renderedPaneGroups = visiblePaneGroups.length > 0 ? visiblePaneGroups : resolvedPaneGroups;
-  const sessionPaneMap = new Map<string, { paneId: string; paneIndex: number }>();
   const sessionById = new Map<string, TerminalHeaderSessionItem>();
-  resolvedPaneGroups.forEach((group, index) => {
+  resolvedPaneGroups.forEach((group) => {
     group.sessions.forEach((session) => {
-      sessionPaneMap.set(session.id, { paneId: group.paneId, paneIndex: index });
       sessionById.set(session.id, session);
     });
   });
@@ -216,12 +214,11 @@ function TerminalHeaderComponent({
         const paneIndex = resolvedGroupIndex >= 0 ? resolvedGroupIndex : groupIndex;
         const tabs: PaneTabDescriptor[] = group.sessions.map((session) => {
           const active = splitVisible ? session.id === group.activeSessionId : session.id === activeSession?.id;
-          const paneMeta = sessionPaneMap.get(session.id);
           return {
             id: session.id,
             title: session.sessionName,
             customName: session.customName,
-            badge: `P${(paneMeta?.paneIndex ?? paneIndex) + 1}`,
+            badge: `P${paneIndex + 1}`,
             isActive: active,
             isResolvedRelay: session.resolvedPath === 'rtc-relay',
           };
@@ -290,14 +287,15 @@ function TerminalHeaderComponent({
           </div>
         );
       })}
-      {renderedPaneGroups.flatMap((group, groupIndex) => {
-        const resolvedGroupIndex = resolvedPaneGroups.findIndex((candidate) => candidate.paneId === group.paneId);
-        void groupIndex;
-        void resolvedGroupIndex;
+      {renderedPaneGroups.flatMap((group) => {
+        const currentPaneIndex = resolvedPaneGroups.findIndex((candidate) => candidate.paneId === group.paneId);
+        if (currentPaneIndex < 0) {
+          throw new Error(`[TerminalHeader] Pane group missing from resolved pane projection: ${group.paneId}`);
+        }
         return group.sessions.map((session) => {
           const active = splitVisible ? session.id === group.activeSessionId : session.id === activeSession?.id;
-          const paneMeta = sessionPaneMap.get(session.id);
           const menuOpen = paneMenuState?.sessionId === session.id;
+          const currentPaneId = group.paneId;
           if (!menuOpen) {
             return null;
           }
@@ -322,8 +320,17 @@ function TerminalHeaderComponent({
             >
               {resolvedPaneGroups.length > 0 ? (
                 <div style={{ display: 'grid', gap: '6px' }}>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onOpenTabManager(currentPaneId);
+                      closePaneMenu();
+                    }}
+                    style={paneMenuButtonStyle(false)}
+                  >
+                    更改 P{currentPaneIndex + 1} Session
+                  </button>
                   {resolvedPaneGroups.map((targetGroup, targetIndex) => {
-                    const currentPaneId = paneMeta?.paneId || group.paneId;
                     const targetActive = targetGroup.paneId === currentPaneId;
                     return (
                       <button

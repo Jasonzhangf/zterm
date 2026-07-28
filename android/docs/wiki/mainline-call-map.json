@@ -63,6 +63,10 @@
           "label": "src/contexts/session-context-session-orchestration-runtime.ts"
         },
         {
+          "id": "PassiveVisibleRefreshScheduler",
+          "label": "src/contexts/session-context-lifecycle.ts#selectNextPassiveVisibleRefreshCandidate"
+        },
+        {
           "id": "ActivityFreshness",
           "label": "src/contexts/session-context-activity-runtime.ts"
         },
@@ -253,6 +257,10 @@
         {
           "id": "StageShell",
           "label": "src/pages/TerminalPageStageShell.tsx"
+        },
+        {
+          "id": "TerminalHeader",
+          "label": "src/components/terminal/TerminalHeader.tsx#TerminalHeader"
         },
         {
           "id": "LayoutProfile",
@@ -526,6 +534,32 @@
           "status": "anchored",
           "edge_id": "android_mainline:SessionLifecycle->ActivityFreshness",
           "resource_from": "resource.active_session",
+          "resource_to": "resource.session_transport",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "SessionLifecycle",
+          "to": "PassiveVisibleRefreshScheduler",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "visible non-active pane session ids, freshness cursor, and terminal activity timestamps",
+          "semantic_output": "at most one stale passive visible pane session selected per lifecycle tick",
+          "status": "anchored",
+          "edge_id": "android_mainline:SessionLifecycle->PassiveVisibleRefreshScheduler",
+          "resource_from": "resource.visible_pane_session",
+          "resource_to": "resource.visible_pane_session",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "PassiveVisibleRefreshScheduler",
+          "to": "ActivityFreshness",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "scheduler-selected passive visible pane session id",
+          "semantic_output": "bounded same-socket head request through that visible session transport without rewriting active-session truth",
+          "status": "anchored",
+          "edge_id": "android_mainline:PassiveVisibleRefreshScheduler->ActivityFreshness",
+          "resource_from": "resource.visible_pane_session",
           "resource_to": "resource.session_transport",
           "via_resources": [],
           "relation_status": "direct"
@@ -1048,14 +1082,40 @@
           "from": "TerminalPage",
           "to": "StageShell",
           "owner_feature": "terminal.workspace_panes",
-          "semantic_input": "pane layout state plus active session-group slot projection",
-          "semantic_output": "stage slots whose live terminal body source matches the active session projection",
+          "semantic_input": "pane layout state, active session-group slot projection, empty-pane slot identity, and scoped picker callback",
+          "semantic_output": "stage slots whose live terminal body source matches the active session projection, plus empty numbered panes that emit scoped session-picker intent",
           "status": "anchored",
           "edge_id": "android_mainline:TerminalPage->StageShell",
           "resource_from": "resource.platform_terminal_surface",
           "resource_to": "resource.ui_projection",
           "via_resources": [],
           "relation_status": "direct"
+        },
+        {
+          "from": "TerminalPage",
+          "to": "TerminalHeader",
+          "owner_feature": "terminal.workspace_panes",
+          "semantic_input": "resolved pane groups, pane ids, active pane/session, and pane context callbacks",
+          "semantic_output": "numbered split tab groups and pane context menu actions without deriving a second session-to-pane owner",
+          "status": "anchored",
+          "edge_id": "android_mainline:TerminalPage->TerminalHeader",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.ui_projection",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "TerminalHeader",
+          "to": "TerminalPage",
+          "owner_feature": "terminal.workspace_panes",
+          "semantic_input": "explicit header action for change-session picker or move-session-to-pane with target pane id",
+          "semantic_output": "scoped tab manager open or workspace assignment delegated to useTerminalWorkspace",
+          "status": "anchored",
+          "edge_id": "android_mainline:TerminalHeader->TerminalPage",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.ui_projection",
+          "via_resources": [],
+          "relation_status": "observer"
         },
         {
           "from": "TerminalPage",

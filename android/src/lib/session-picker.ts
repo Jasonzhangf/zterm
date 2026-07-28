@@ -25,7 +25,7 @@ export type HostDraft = Omit<Host, 'id' | 'createdAt'>;
 
 function resolvePreferredRelayDirectEndpoint(candidates: RelayEndpointCandidate[]) {
   return candidates.find((endpoint) =>
-    (endpoint.kind === 'tailscale' || endpoint.kind === 'ipv6' || endpoint.kind === 'ipv4')
+    (endpoint.kind === 'lan' || endpoint.kind === 'tailscale' || endpoint.kind === 'ipv6' || endpoint.kind === 'ipv4')
     && (endpoint.host?.trim() || endpoint.wsUrl?.trim())) || null;
 }
 
@@ -75,7 +75,7 @@ export function buildBridgeTargetFromHost(host: Host): BridgeTarget {
     authToken: host.authToken,
     tailscaleHost: host.tailscaleHost || (preferredDirectEndpoint?.kind === 'tailscale' ? directoryBridgeHost : ''),
     ipv6Host: host.ipv6Host || (preferredDirectEndpoint?.kind === 'ipv6' ? directoryBridgeHost : ''),
-    ipv4Host: host.ipv4Host || (preferredDirectEndpoint?.kind === 'ipv4' ? directoryBridgeHost : ''),
+    ipv4Host: host.ipv4Host || (preferredDirectEndpoint?.kind === 'ipv4' || preferredDirectEndpoint?.kind === 'lan' ? directoryBridgeHost : ''),
     signalUrl: host.signalUrl,
     transportMode: host.transportMode,
     relayEndpointCandidates,

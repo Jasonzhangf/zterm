@@ -23,7 +23,7 @@ import {
   handleBufferHeadRuntime,
   requestSessionBufferHeadRuntime,
   requestSessionBufferSyncRuntime,
-  type SameRevisionChunkFrameState,
+  type BufferFrameAssemblyResourceState,
 } from './session-context-buffer-runtime';
 import {
   finalizeSocketFailureBaselineRuntime,
@@ -110,7 +110,7 @@ export interface SessionMessageAssembliesOptions {
   heartbeatStore: SessionHeartbeatStore;
   lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
   connectedBaselineBurstGuardRef: MutableRefObject<Set<string>>;
-  sameRevisionChunkFrameRef?: MutableRefObject<Map<string, SameRevisionChunkFrameState>>;
+  bufferFrameAssemblyRef: MutableRefObject<Map<string, BufferFrameAssemblyResourceState>>;
   pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, PendingSessionTransportOpenIntent>>;
   fileTransferMessageRuntimeRef: MutableRefObject<MessageAssemblyFileTransferRuntime>;
   remoteWindowMessageRuntimeRef: MutableRefObject<MessageAssemblyRemoteWindowRuntime>;
@@ -278,6 +278,7 @@ export function createSessionMessageAssemblies(
         sessionRevisionResetRef: options.sessionRevisionResetRef,
         sessionVisibleRangeRef: options.sessionVisibleRangeRef,
         sessionBufferStoreRef: options.sessionBufferStoreRef,
+        bufferFrameAssemblyRef: options.bufferFrameAssemblyRef,
         sessionHeadStoreRef: options.sessionHeadStoreRef,
       },
       daemonConnection,
@@ -302,7 +303,7 @@ export function createSessionMessageAssemblies(
         sessionRevisionResetRef: options.sessionRevisionResetRef,
         sessionHeadStoreRef: options.sessionHeadStoreRef,
         tailRefreshStoreRef,
-        sameRevisionChunkFrameRef: options.sameRevisionChunkFrameRef,
+        bufferFrameAssemblyRef: options.bufferFrameAssemblyRef,
         sessionVisibleRangeRef: options.sessionVisibleRangeRef,
       },
       readSessionBufferSnapshot: options.readSessionBufferSnapshot,

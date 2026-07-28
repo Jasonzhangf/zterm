@@ -32,8 +32,8 @@ import { ConnectionsPage } from './pages/ConnectionsPage';
 import { ConnectionPropertiesPage } from './pages/ConnectionPropertiesPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TerminalPage } from './pages/TerminalPage';
-import { buildHomeRelayConnectionHost, projectHomeSavedConnections } from './lib/home-connection-projection';
-import type { Host, TerminalWidthMode } from './lib/types';
+import { projectHomeSavedConnections } from './lib/home-connection-projection';
+import type { TerminalWidthMode } from './lib/types';
 
 interface AppContentProps {
   bridgeSettings: ReturnType<typeof useBridgeSettingsStorage>['settings'];
@@ -458,16 +458,6 @@ export function AppContent({
     ensureTerminalPageVisible();
   }, [ensureTerminalPageVisible, handleSwitchSessionWithHistory]);
 
-  const handleOpenSavedConnectionViaRelay = useCallback((host: Host) => {
-    const relayHost = buildHomeRelayConnectionHost(host);
-    if (!relayHost) {
-      window.alert?.('当前服务器没有可用 Relay 路由。');
-      return;
-    }
-    handleOpenSavedConnection(relayHost);
-  }, [handleOpenSavedConnection]);
-
-  
   return (
     <div
       style={{
@@ -488,7 +478,6 @@ export function AppContent({
             activeSessionId={terminalActiveSession?.id || null}
             onResumeSession={handleResumeHomeSession}
             onOpenSavedConnection={handleOpenSavedConnection}
-            onOpenSavedConnectionViaRelay={handleOpenSavedConnectionViaRelay}
             onOpenSettings={handleOpenSettingsPage}
           />
         )}

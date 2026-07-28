@@ -25,33 +25,32 @@ interface SelectTraversalRouteOptions {
   traversalPathPriority?: TraversalResolvedPath[];
 }
 
-const PATH_COST: Record<TraversalResolvedPath, number> = {
-  'rtc-direct': 35,
-  tailscale: 10,
-  ipv6: 30,
-  ipv4: 55,
-  'rtc-relay': 80,
-};
-
 const FAILURE_ROUTE_PENALTY = 500;
 const AUTH_FAILURE_ROUTE_PENALTY = 900;
+const ROUTE_TIER_SPAN = 100;
+const LAN_ROUTE_COST = -ROUTE_TIER_SPAN;
 
 function priorityCost(path: TraversalResolvedPath, priority: TraversalResolvedPath[]) {
   const index = priority.indexOf(path);
-  return index >= 0 ? index * 5 : 50;
+  return (index >= 0 ? index : priority.length) * ROUTE_TIER_SPAN;
 }
 
-function pathCost(candidate: TraversalPlanCandidate, reasons: string[]) {
+function pathCost(
+  candidate: TraversalPlanCandidate,
+  priority: TraversalResolvedPath[],
+  reasons: string[],
+) {
+  const tierCost = priorityCost(candidate.path, priority);
   if (candidate.path !== 'ipv4') {
-    return PATH_COST[candidate.path];
+    return tierCost;
   }
   const host = parseEndpointHost(candidate.endpoint);
   if (isPrivateLanIpv4Host(host)) {
     reasons.push('ipv4:private-lan');
-    return 0;
+    return LAN_ROUTE_COST;
   }
   reasons.push('ipv4:non-lan');
-  return PATH_COST.ipv4;
+  return tierCost;
 }
 
 function healthScore(record: TraversalRouteHealthRecord | null, reasons: string[]) {
@@ -84,9 +83,8 @@ export function selectBestTraversalRoute(options: SelectTraversalRouteOptions): 
   const diagnostics: TraversalRouteSelectionDiagnostic[] = options.candidates.map((candidate) => {
     const reasons: string[] = [];
     const health = options.healthCache?.get(scope, candidate) || null;
-    const basePathCost = pathCost(candidate, reasons);
+    const basePathCost = pathCost(candidate, priority, reasons);
     const score = basePathCost
-      + priorityCost(candidate.path, priority)
       + healthScore(health, reasons);
     const selectable = !health || health.status === 'success';
     reasons.unshift(`path-cost:${basePathCost}`, `priority:${priority.indexOf(candidate.path)}`);

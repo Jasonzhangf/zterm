@@ -4,18 +4,6 @@ import {
   publishRelayDirectoryUpdate,
 } from './relay-client';
 
-const relayConfig = {
-  relayUrl: 'https://relay.example.com/relay/',
-  username: 'jason',
-  password: 'secret',
-  hostId: 'daemon-host-1',
-  deviceId: 'device-1',
-  deviceName: 'Jason Mac',
-  platform: 'darwin',
-  appVersion: '0.1.3',
-  daemonVersion: '0.1.3-daemon',
-};
-
 function createOpenSocket() {
   const sent: string[] = [];
   return {
@@ -28,9 +16,26 @@ function createOpenSocket() {
 }
 
 describe('traversal relay daemon directory publisher', () => {
-  it('builds a directory-update with relay endpoint candidates and tmux sessions', () => {
+  it('builds a directory-update with gateway endpoint candidates and tmux sessions', () => {
+    const endpoints = [
+      {
+        id: 'lan:192.168.50.20:3333',
+        kind: 'lan' as const,
+        host: '192.168.50.20',
+        port: 3333,
+        authRequired: true,
+        lastSeenAt: '2026-06-28T10:00:00.000Z',
+      },
+      {
+        id: 'relay-rtc:daemon-host-1',
+        kind: 'relay-rtc' as const,
+        relayHostId: 'daemon-host-1',
+        authRequired: true,
+        lastSeenAt: '2026-06-28T10:00:00.000Z',
+      },
+    ];
     const envelope = buildRelayDirectoryUpdateEnvelope({
-      config: relayConfig,
+      endpoints,
       sessionNames: ['main', 'work', 'main', '  '],
       now: '2026-06-28T10:00:00.000Z',
     });
@@ -38,15 +43,7 @@ describe('traversal relay daemon directory publisher', () => {
     expect(envelope).toEqual({
       type: 'directory-update',
       directory: {
-        endpoints: [
-          {
-            id: 'relay-rtc:daemon-host-1',
-            kind: 'relay-rtc',
-            relayHostId: 'daemon-host-1',
-            authRequired: true,
-            lastSeenAt: '2026-06-28T10:00:00.000Z',
-          },
-        ],
+        endpoints,
         sessions: [
           { name: 'main', updatedAt: '2026-06-28T10:00:00.000Z' },
           { name: 'work', updatedAt: '2026-06-28T10:00:00.000Z' },
@@ -60,7 +57,13 @@ describe('traversal relay daemon directory publisher', () => {
     const { socket, sent } = createOpenSocket();
     const result = publishRelayDirectoryUpdate({
       socket,
-      config: relayConfig,
+      listEndpointCandidates: () => [{
+        id: 'relay-rtc:daemon-host-1',
+        kind: 'relay-rtc',
+        relayHostId: 'daemon-host-1',
+        authRequired: true,
+        lastSeenAt: '2026-06-28T10:01:00.000Z',
+      }],
       listTmuxSessions: () => ['main'],
       now: () => '2026-06-28T10:01:00.000Z',
     });
@@ -80,7 +83,13 @@ describe('traversal relay daemon directory publisher', () => {
     const { socket, sent } = createOpenSocket();
     const result = publishRelayDirectoryUpdate({
       socket,
-      config: relayConfig,
+      listEndpointCandidates: () => [{
+        id: 'relay-rtc:daemon-host-1',
+        kind: 'relay-rtc',
+        relayHostId: 'daemon-host-1',
+        authRequired: true,
+        lastSeenAt: '2026-06-28T10:02:00.000Z',
+      }],
       listTmuxSessions: () => {
         throw new Error('tmux unavailable');
       },
@@ -92,6 +101,24 @@ describe('traversal relay daemon directory publisher', () => {
     expect(JSON.parse(sent[0])).toEqual({
       type: 'relay-error',
       reason: 'directory-update failed: tmux unavailable',
+    });
+  });
+
+  it('reports endpoint discovery failure explicitly instead of publishing Relay-only fallback truth', () => {
+    const { socket, sent } = createOpenSocket();
+    const result = publishRelayDirectoryUpdate({
+      socket,
+      listEndpointCandidates: () => {
+        throw new Error('network endpoint discovery failed');
+      },
+      listTmuxSessions: () => ['main'],
+      now: () => '2026-06-28T10:03:00.000Z',
+    });
+
+    expect(result).toEqual({ ok: false, reason: 'network endpoint discovery failed' });
+    expect(JSON.parse(sent[0])).toEqual({
+      type: 'relay-error',
+      reason: 'directory-update failed: network endpoint discovery failed',
     });
   });
 });

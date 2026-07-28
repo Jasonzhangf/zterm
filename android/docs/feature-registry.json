@@ -372,6 +372,7 @@
         "src/contexts/session-transport-open-helpers.ts",
         "src/contexts/session-reconnect-helpers.ts",
         "src/contexts/session-context-socket-message-runtime.ts",
+        "src/contexts/session-context-lifecycle.ts",
         "src/lib/tmux-sessions.ts",
         "src/lib/tmux-sessions.test.ts",
         "src/lib/session-transport-runtime.ts",
@@ -402,6 +403,7 @@
         "src/contexts/session-context-infra-runtime.test.ts",
         "src/contexts/session-context-session-runtime.test.ts",
         "src/contexts/session-context-socket-runtime.test.ts",
+        "src/contexts/session-context-lifecycle.test.tsx",
         "src/contexts/session-context-transport-orchestration-runtime.test.ts",
         "src/contexts/session-context-activity-runtime.test.ts",
         "src/contexts/SessionContext.ws-refresh.test.tsx",
@@ -472,13 +474,20 @@
       "title": "Daemon mirror, client buffer manager, and renderer commit path",
       "domain": "terminal-render",
       "owners": [
+        "packages/shared/src/connection/types.ts",
+        "src/contexts/session-wire-helpers.ts",
+        "src/contexts/session-buffer-frame-assembly-state.ts",
+        "src/contexts/session-buffer-frame-assembly.ts",
         "src/contexts/session-context-buffer-runtime.ts",
         "src/lib/session-render-gate.ts"
       ],
       "allowed_paths": [
+        "packages/shared/src/connection/types.ts",
+        "src/contexts/session-wire-helpers.ts",
+        "src/contexts/session-buffer-frame-assembly-state.ts",
+        "src/contexts/session-buffer-frame-assembly.ts",
         "src/contexts/session-context-buffer-runtime.ts",
         "src/contexts/session-context-pull-runtime.ts",
-        "src/contexts/session-context-lifecycle.ts",
         "src/lib/session-render-gate.ts",
         "src/lib/session-render-buffer-store.ts",
         "src/lib/session-render-gate.tui-content.test.ts",
@@ -495,6 +504,7 @@
         "src/components/terminal/TerminalQuickBar.tsx"
       ],
       "required_gates": [
+        "src/contexts/session-buffer-frame-assembly.test.ts",
         "src/lib/session-render-gate.test.ts",
         "src/lib/session-render-gate.tui-content.test.ts",
         "src/lib/session-render-buffer-store.test.ts",
@@ -516,18 +526,21 @@
       "title": "Workspace pane ownership, split layout, and pane-stage truth",
       "domain": "terminal-workspace",
       "owners": [
-        "src/hooks/useTerminalWorkspace.ts",
-        "src/pages/TerminalPageStageShell.tsx"
+        "src/hooks/useTerminalWorkspace.ts"
       ],
       "allowed_paths": [
         "src/hooks/useTerminalWorkspace.ts",
         "src/hooks/useTerminalWorkspace.test.tsx",
+        "src/lib/workspace-persistence.ts",
+        "src/lib/workspace-persistence.test.ts",
+        "src/components/terminal/TerminalHeader.tsx",
+        "src/components/terminal/TerminalHeader.test.tsx",
         "src/pages/TerminalPage.tsx",
         "src/pages/TerminalPageStageShell.tsx",
         "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
+        "src/pages/TerminalPage.render-scope.test.tsx",
         "src/pages/TerminalPage.multi-pane-decouple.test.tsx",
         "src/pages/TerminalPage.real-quickbar-split.test.tsx",
-        "src/lib/workspace-persistence.ts",
         "packages/shared/src/workspace/workspace-model.ts",
         "packages/shared/src/workspace/workspace-model.test.ts",
         "packages/shared/src/workspace/workspace-model.actions.test.ts",
@@ -540,7 +553,10 @@
       ],
       "required_gates": [
         "src/hooks/useTerminalWorkspace.test.tsx",
+        "src/lib/workspace-persistence.test.ts",
+        "src/components/terminal/TerminalHeader.test.tsx",
         "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
+        "src/pages/TerminalPage.render-scope.test.tsx",
         "src/pages/TerminalPage.multi-pane-decouple.test.tsx",
         "src/pages/TerminalPage.real-quickbar-split.test.tsx",
         "packages/shared/src/workspace/workspace-model.test.ts",
@@ -941,28 +957,65 @@
     },
     {
       "feature_id": "daemon.file_transfer",
-      "title": "Daemon file transfer and client transfer message runtime",
-      "domain": "daemon-file-transfer",
+      "title": "Cross-side file transfer synchronization",
+      "domain": "file-transfer-sync",
       "owners": [
+        "src/components/terminal/FileTransferSheet.tsx",
         "src/lib/file-transfer-message-runtime.ts",
-        "src/server/terminal-message-control-runtime.ts"
+        "src/lib/file-transfer-throughput-runtime.ts",
+        "src/plugins/StoragePermissionPlugin.ts",
+        "src/server/terminal-file-transfer-binary-runtime.ts",
+        "src/server/terminal-file-transfer-list-runtime.ts",
+        "native/android/app/src/main/java/com/zterm/android/StoragePermissionPlugin.java",
+        "native/android/app/src/main/java/com/zterm/android/StorageFileWriteLogic.java"
       ],
       "allowed_paths": [
+        "src/components/terminal/FileTransferSheet.test.tsx",
         "src/lib/file-transfer-message-runtime.ts",
+        "src/lib/file-transfer-session-runtime.ts",
+        "src/lib/file-transfer-throughput-contract.test.ts",
+        "src/lib/file-transfer-throughput-runtime.ts",
+        "src/plugins/StoragePermissionPlugin.ts",
         "src/components/terminal/FileTransferSheet.tsx",
         "src/server/terminal-message-control-runtime.ts",
-        "src/server/terminal-file-transfer-runtime.ts"
+        "src/server/terminal-file-transfer-runtime.ts",
+        "src/server/terminal-file-transfer-binary-runtime.ts",
+        "src/server/terminal-file-transfer-list-runtime.ts",
+        "src/server/terminal-file-transfer-types.ts",
+        "src/server/terminal-file-transfer-binary-runtime.test.ts",
+        "src/server/file-transfer-throughput-loopback.test.ts",
+        "native/android/app/src/main/java/com/zterm/android/StoragePermissionPlugin.java",
+        "native/android/app/src/main/java/com/zterm/android/StorageFileReadLogic.java",
+        "native/android/app/src/main/java/com/zterm/android/StorageFileWriteLogic.java",
+        "native/android/app/src/test/java/com/zterm/android/StorageFileReadLogicTest.java",
+        "native/android/app/src/test/java/com/zterm/android/StorageFileWriteLogicTest.java",
+        "native/android/app/build.gradle",
+        "contracts/file-transfer-throughput.json",
+        "scripts/run-file-transfer-throughput-gate.sh",
+        "docs/testing/file-transfer-test-design.md"
       ],
       "forbidden_paths": [
         "src/components/TerminalView.tsx"
       ],
       "required_gates": [
+        "scripts/run-file-transfer-throughput-gate.sh",
         "src/components/terminal/FileTransferSheet.test.tsx",
-        "src/server/server.file-transfer-truth.test.ts"
+        "src/lib/file-transfer-session-runtime.test.ts",
+        "src/lib/file-transfer-throughput-contract.test.ts",
+        "src/lib/file-transfer-throughput-runtime.test.ts",
+        "src/server/terminal-file-transfer-binary-runtime.test.ts",
+        "src/server/file-transfer-throughput-loopback.test.ts",
+        "src/server/server.file-transfer-truth.test.ts",
+        "native/android/app/src/test/java/com/zterm/android/StorageFileWriteLogicTest.java",
+        "docs/testing/file-transfer-test-design.md"
       ],
       "truth_sources": [
         "docs/architecture.md",
-        "docs/feature-gates.md"
+        "docs/feature-gates.md",
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/wiki/mainline-call-map.json",
+        "docs/testing/file-transfer-test-design.md"
       ]
     },
     {

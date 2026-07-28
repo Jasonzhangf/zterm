@@ -111,6 +111,7 @@ describe('session-context-pull-runtime', () => {
       activeSessionId: sessionId,
       sessionPullStateRef: sessionPullStateRef as any,
       tailRefreshStore,
+      bufferFrameAssemblyRef: { current: new Map() },
       runtimeDebug,
     });
 
@@ -142,6 +143,7 @@ describe('session-context-pull-runtime', () => {
       activeSessionId: sessionId,
       sessionPullStateRef: { current: new Map() } as any,
       tailRefreshStore,
+      bufferFrameAssemblyRef: { current: new Map() },
       runtimeDebug,
     });
 
@@ -154,5 +156,48 @@ describe('session-context-pull-runtime', () => {
         hadPendingInputTailRefresh: true,
       }),
     );
+  });
+
+  it('clears only pending frame assembly while retaining repair error and dispatch ledger across tab switch', () => {
+    const sessionId = 'session-ledger';
+    const frameResource = {
+      pending: {
+        frameKey: '12:0:2:100:2',
+        revision: 12,
+        frameStartIndex: 0,
+        frameEndIndex: 2,
+        frameChunkCount: 2,
+        generatedAt: 100,
+        firstReceivedAt: 100,
+        retainedBytes: 10,
+        chunks: new Map(),
+      },
+      error: {
+        error: 'invalid-frame-metadata' as const,
+        revision: 11,
+        repair: {
+          status: 'dispatched' as const,
+          range: { startIndex: 0, endIndex: 2 },
+        },
+      },
+      repairDispatchedRevisions: [11],
+    };
+    const bufferFrameAssemblyRef = { current: new Map([[sessionId, frameResource]]) };
+
+    resetSessionTransportPullBookkeeping({
+      sessionId,
+      reason: 'tab-switch-out',
+      activeSessionId: 'session-other',
+      sessionPullStateRef: { current: new Map() } as any,
+      tailRefreshStore: createSessionTailRefreshStore(),
+      bufferFrameAssemblyRef,
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(bufferFrameAssemblyRef.current.get(sessionId)).toEqual({
+      pending: null,
+      error: frameResource.error,
+      repairDispatchedRevisions: [11],
+    });
   });
 });

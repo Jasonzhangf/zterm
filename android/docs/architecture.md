@@ -39,6 +39,15 @@
   - active / inactive 只影响客户端取数频率，不影响客户端 session / transport 身份
   - foreground / background / tab switch 不得成为客户端 fresh recreate transport 的理由
 - Schedule/Automation：per-session 定时任务定义、下次触发时间计算、启停与结果状态
+- File Transfer：`client.file_browser` 只拥有文件浏览投影、请求和有界流控；`client.runtime` 的 native storage plugin 只拥有本地文件字节；`daemon.file_transfer` 只拥有远端文件状态和累计 ACK。文件同步必须走现有 target mux/physical transport，不得新建 session 或 WebSocket。
+- 上述三个名称是 `module_id`，其资源唯一 owner 由 `docs/module-registry.json#owned_resources` 机器锁定：`resource.client_file_browser -> client.file_browser`、`resource.client_native_file_store -> client.runtime`、`resource.file_transfer -> daemon.file_transfer`。跨端产品能力沿用 `feature_id=daemon.file_transfer`，但该 feature id 不是资源的 daemon-side module owner；不得据此把客户端文件字节或 UI 投影下放到 daemon。
+- File Transfer 不变量：
+  - `contracts/file-transfer-throughput.json` 是上传窗口和 native 批量上限的唯一机器真源；TypeScript 直接导入，Android Gradle 绑定为 `BuildConfig`，禁止 TS/Java 各自维护数字常量
+  - wire chunk 固定 16 KiB，不以增大单帧突破 RTC DataChannel 上限
+  - 上传由 `sendBoundedFileUploadChunks` 唯一维护最大 8 chunk 的 cumulative-ACK sliding window；UI 不得 per-chunk stop-and-wait，也不得无界 burst
+  - daemon `file-upload-progress.chunkIndex` 表示从 0 开始连续收到的 chunk 数；重复或乱序 chunk 不得越过 gap 推进 ACK
+  - 下载按原始 chunk 顺序交给 native storage；每次 native bridge 最多批量写 8 chunk，禁止逐 16 KiB bridge roundtrip 和 padded-base64 字符串直接拼接
+  - 成功 truth 必须由精确 chunk count、总字节数和落盘 stat 一致共同确认；错误不得投影成 complete
 - Client Mirror Buffer：只按绝对行号合并 daemon canonical buffer；只持有本地 sparse buffer / gap ranges / visible-range repair plan
 - Client Mirror Buffer 不变量：
   - 窗口错 / anchor 错 / head mismatch 只影响请求规划，不影响已有 absolute-index 内容真相
@@ -79,12 +88,12 @@
 ### Screen 1: Connections Home
 
 - 首页承载两个独立入口：当前进程 active Sessions、已配置且可进入的 server rows（direct/Tailscale saved Host、bridge presets、online Relay directory daemon device 投影；disconnected/stale Relay daemon records 不进入可点击 server 枚举）。
-- Home 的 server row 是服务器级入口，不展示/管理 Session group、saved tab list 或 Relay 登录表单；点击 server row 必须通过 session-open owner 直接进入 Terminal/session 主界面。
+- Home 的 server row 是服务器级入口，不展示/管理 Session group、saved tab list、Relay 登录表单或单独 Relay 按钮；点击 server row 必须通过 session-open owner 直接进入 Terminal/session 主界面。
 - 无 saved `sessionName` 的 server row 进入时，session-open owner 必须按同一 server owner 选择：先进入上次真实进入过且远端仍存在的 tmux session；没有历史时 live fetch 远端 tmux truth 并进入第一项；只有远端列表为空时才创建显式生成名的 clean tmux session；不得把 server display name 当 tmux session name fallback，也不得每次进入都创建新的 `zterm-*`。
 - Settings 是配置入口：新增/修改 server preset、固定 relay 服务 `relay.codewhisper.cc` 的账号鉴权、更新/备份等设置均在 Settings 完成。
 - Relay 是连接保障和同步增强，不是进入终端的 gate；未登录、登录失败或退出登录时，已保存 direct/Tailscale connections 与当前 active Sessions 仍必须可见可用。
 - 用户只输入 relay 账号和密码；relay base URL、WS、TURN 与 signal 地址不进入用户配置面。
-- Relay 登录成功后可以同步/补充所有连接候选，包括 Tailscale/local/direct endpoint，但不得删除、替换或隐藏 saved Host truth。
+- Relay 登录成功后可以同步/补充所有连接候选，包括 Tailscale/local/direct endpoint，但不得删除、替换或隐藏 saved Host truth；Auto 连接顺序固定为 private LAN IPv4、Tailscale/direct websocket、WebRTC UDP direct/hole-punch、TURN Relay，并由目标级 heartbeat / route health 周期更新下一代 transport 的线路选择。
 - 首页禁止投影或管理 Session group、Session 子列表、tab 列表与 tab 保存；实时 Session 列表、切换、关闭和预览只属于 Terminal drawer / picker。
 - relay 登录密码只用于当次认证，不持久化明文；持久化真相是 token、account directory 与 relay client settings。
 
@@ -114,6 +123,7 @@
 
 - 顶部连接栏：返回、当前连接胶囊、加号新建
 - 中部终端区：终端输出主画布
+- 多 pane split 是 workspace projection：可以从单个 session 建立带编号的空 pane；空 pane 点击只打开对应 pane 的 session picker；已有 pane/tab 菜单只允许更改该 pane 的 session 或把 session 移到显式编号 pane。
 - 底部快捷栏：方向键、回车、键盘切换、图片按钮
 - 悬浮球快捷菜单：点击展开文本快捷输入列表，支持直接注入保存好的字符串、+添加、排序、编辑修改
 - 扩展输入层：ESC/TAB/CTRL/ALT/符号/编辑/更多/命令输入条
@@ -121,6 +131,7 @@
 ## UI ownership
 
 - Layout shell 负责单行多列编排、垂直分屏与 profile 到页面槽位的映射
+- Layout shell 只安排 pane / tab / empty-pane projection；terminal freshness 仍由 active lane + passive visible round-robin lane 驱动，不得让多个 passive pane 在同一 tick 同时刷新形成风暴
 - `Connections` 页负责连接入口与主机卡片管理
 - Host form 负责新增/编辑，不直接承载终端操作
 - Connection Properties 页负责连接配置编辑

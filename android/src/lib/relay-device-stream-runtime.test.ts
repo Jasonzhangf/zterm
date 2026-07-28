@@ -202,4 +202,46 @@ describe('relay device stream runtime', () => {
     await vi.advanceTimersByTimeAsync(5000);
     expect(sockets).toHaveLength(1);
   });
+
+  it('retains last confirmed endpoint truth when account refresh fails', async () => {
+    vi.useFakeTimers();
+    const directoryDevice = makeDevice({
+      daemon: {
+        connected: true,
+        lastSeenAt: '2026-07-27T00:00:00.000Z',
+        hostId: 'mac-studio',
+        version: '0.1.3',
+        endpoints: [{
+          id: 'lan:192.168.1.20:3333',
+          kind: 'lan',
+          host: '192.168.1.20',
+          port: 3333,
+          authRequired: true,
+          lastSeenAt: '2026-07-27T00:00:00.000Z',
+        }],
+        sessions: [],
+      },
+    });
+    const setDevices = vi.fn();
+    const publishDirectoryTruth = vi.fn();
+    const runtime = createRelayDeviceStreamRuntime({
+      readEnabledAccount: () => ({ accessToken: 'token-1' }),
+      refreshAccount: async () => {
+        throw new Error('relay temporarily unavailable');
+      },
+      projectDevicesFromAccount: () => [directoryDevice],
+      connectDevicesStream: () => new FakeSocket() as unknown as WebSocket,
+      projectDirectoryDevices: () => [],
+      setDevices,
+      publishDirectoryTruth,
+    });
+
+    runtime.start();
+    await vi.waitFor(() => expect(setDevices).toHaveBeenCalled());
+    await vi.waitFor(() => expect(publishDirectoryTruth).toHaveBeenCalledWith([directoryDevice]));
+
+    expect(runtime.getDirectoryTruthDevices()).toEqual([directoryDevice]);
+    expect(setDevices).not.toHaveBeenCalledWith([]);
+    runtime.stop();
+  });
 });

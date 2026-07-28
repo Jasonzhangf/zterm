@@ -722,6 +722,18 @@ tmux truth
   1. `SessionBufferState -> SessionRenderBufferSnapshot` 必须产出 **immutable render snapshot**
   2. `lines / gapRanges / cursor` 不得把 live buffer 引用直接交给 renderer/store
   3. render store 读取到的只能是独立 render truth；否则后续 patch/merge 复用 row/object 时，会把已准备绘制的上一帧污染成“短暂错帧”
+- 若 wire payload 带 `frameChunkCount > 1`，还必须先审 client buffer owner 是否逐 chunk publish：
+  1. frame chunk 只允许进入 bounded assembly state，不得直接 commit local buffer 或 schedule renderer
+  2. 全部 chunk 必须按 absolute row 验证无洞、无重叠、无冲突，完整覆盖 frame window 后一次 apply/commit/render
+  3. 红测必须在每个 chunk 到达后读取 local/render truth，证明完成前始终保持上一完整帧，完成后直接切到新完整帧；禁止只断言最终结果正确
+  4. `generatedAt` 只作为 frame identity，不得替代 revision/absolute index 做 freshness 排序
+  5. same revision 不同 frame identity 混入时，必须拒绝本次 interleave、清除 poisoned incomplete assembly，并把错误与 exact frame repair range 写入独立 `resource.client_buffer_frame_assembly` truth；repair 未实际写入 wire 时保持 `pending`，只有 dispatch 成功才改为 `dispatched`，每个 revision 最多 dispatch 一次
+  6. frame assembly ref 是独立于 sparse buffer 的 client 必需资源；生产 caller 漏注入必须在类型/构建期失败，禁止 optional ref 让 chunk 永久 pending，禁止用 same-resource edge 掩盖 assembly 到 sparse apply 的真实资源边
+  7. 较新 frame 尚未完整时，迟到的较低 revision payload 无论是 chunked 还是 unchunked 都必须拒绝且保留较新 pending frame；禁止 passthrough 清掉 assembly 或发布旧 body
+  8. frame repair 禁止把非法 revision 修成 `0`；same-revision interleave 只修原 pending frame range。无合法 revision 时等 authoritative live head；成功 repair 后用有界 per-session revision ledger 跨后续成功 revision 保留 dispatch 事实，迟到 malformed payload 不得对旧 revision 二次 dispatch；新 frame supersede 旧 pending frame 时清掉旧 repair error，但保留 ledger
+  9. frame assembly 必须服从 shared protocol 的 span/chunk/retained-byte/lifetime 硬上限；body ingress 写 map 前拦截容量越界，buffer-head cadence 主动到期并释放 incomplete frame。禁止把“等下一 chunk/等 session close 清理”当生命周期边界
+  10. 查真实 socket 路径中的 wire normalizer；它必须原样保留 authoritative frame identity。新增 frame 字段后只改 protocol/assembly 而漏改 normalizer，会让所有 chunk 被误判成 passthrough，是“单测绿、真机仍闪”的首查项
+  11. tab switch、inactive drop、socket generation cleanup、reconnect 只清 incomplete pending chunks；revision-reset expectation、frame error truth 和 bounded repair ledger 在同一 daemon revision epoch 内跨这些生命周期保留。首次 authoritative lower head 是 epoch 边界，必须在任何 repair dispatch 前清 pending/error/ledger；同一 epoch 重复 lower head 不得再次清 ledger；explicit local session destruction 删除两类 resource
 - 若现场表现为“**底部固定灰条/固定行在内容更新时持续上移，旧内容没有被当前位置正确替换**”，必须先补 renderer 红测再修：构造同一 absolute row index / 同一 viewport bottom 下行内容发生变化的 case，先证明当前 DOM 复用了旧行或错位上移；红测变绿后把该测试纳入 `TerminalView.dynamic-refresh` / renderer 回归。禁止先凭截图改代码、再补测试。
 - 若 renderer/client gate 过了但真机仍出现 **TUI/input 旧行漏刷或上移**，下一步必须测 daemon capture 主入口而不是只测 helper：`captureMirrorAuthoritativeBufferFromTmux()` 必须实际调用稳定化主线，覆盖 transient half-frame 不发布；同一 mirror 的 `totalAvailableLines` 必须以当前 mirror end 为单调下界，避免 alternate-screen 短可见窗口把 absolute tail 拉回 pane height。
 - 若现场表现为“**临时错误/短暂不可用导致 tab 自动关闭**”，必须先补 session lifecycle 红测再修：`tmux_session_unavailable` / 网络短断 / handshake 临时失败只能进入 retryable error/reconnect，禁止发 `SESSION_STATUS_EVENT(type='closed')`，也禁止触发 open-tab prune；只有明确 terminal close 语义才允许进入 tab close 链。

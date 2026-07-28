@@ -1206,7 +1206,7 @@ describe('App dynamic refresh matrix', () => {
     expect(tmuxPickerHarness.readProps()).toEqual(expect.objectContaining({ open: false }));
   });
 
-  it('opens a relay-derived Home server entry without dropping the saved direct Tailscale identity', async () => {
+  it('opens a route-aware Home server entry without dropping the saved direct Tailscale identity', async () => {
     localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'connections' }));
     hostHarness.setHosts([{
       id: 'saved-mac',
@@ -1253,7 +1253,7 @@ describe('App dynamic refresh matrix', () => {
     fetchTmuxSessionsMock.mockClear();
     sessionHarness.createSession.mockClear();
     await act(async () => {
-      props.onOpenSavedConnectionViaRelay(relayHost);
+      props.onOpenSavedConnection(relayHost);
       await Promise.resolve();
       await Promise.resolve();
     });

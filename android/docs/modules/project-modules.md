@@ -63,7 +63,7 @@ Rules:
 | `daemon.transport_subscriber` | `resource.transport_subscriber` | terminal channel, mirror store | client active/foreground/viewport/follow truth |
 | `daemon.input_queue` | `resource.daemon_input_queue` | backend session, tmux session | UI/renderer direct writes |
 | `daemon.schedule_runtime` | `resource.schedule_job` | backend session | UI/renderer timers |
-| `daemon.file_transfer` | `resource.file_transfer`, `resource.remote_screenshot` | backend session | UI guesses |
+| `daemon.file_transfer` | `resource.file_transfer`, `resource.remote_screenshot` | backend session, transport subscriber | UI guesses, client window state |
 | `daemon.remote_window_stream` | `resource.remote_window_stream` | daemon process, transport target, tmux reverse lookup | terminal mirror/buffer/render truth |
 
 Daemon hard boundary:
@@ -86,7 +86,7 @@ Daemon hard boundary:
 | `client.input_runtime` | `resource.platform_input_channel` | session transport, remote-window overlay | backend/tmux direct write |
 | `client.session_drawer_preview` | `resource.session_preview_selection`, `resource.session_preview_mode` | UI, open tabs, active session, renderer | transport/backend/mirror ownership |
 | `client.remote_window_overlay` | `resource.remote_window_overlay`, `resource.remote_window_touch_action` | UI, remote-window stream, transport target | terminal mirror/buffer/tmux truth |
-| `client.file_browser` | `resource.client_file_browser` | file transfer, UI | tmux/mirror |
+| `client.file_browser` | `resource.client_file_browser` | target mux request, native file store, file transfer, UI | tmux/mirror, new physical transport |
 | `client.settings_update` | `resource.client_settings_update` | release artifact, runtime home, UI | open-tab/session/tmux truth |
 
 Client connection boundary:
@@ -214,7 +214,7 @@ Buffer audit target after module split:
 | `daemon.transport_subscriber` | terminal-channel subscriber attach, body-subscription intent, mirror changed spans | channel-scoped body frames, send accounting, backpressure state | body push eligibility and bounded pending-latest | session-level heartbeat, UI active state, sparse-buffer ownership |
 | `daemon.input_queue` | input frames from terminal channel, reliable input seq/ack metadata | stale/drop/write result, backend write queue, ack/nack | daemon input ordering, dedupe, stale/drop policy | object-to-tmux coercion, UI filtering, renderer-side input compensation |
 | `daemon.schedule_runtime` | schedule job definitions and ticks | nextFireAt, dispatch result, explicit job status | daemon timer execution truth | page-owned timers, hidden local retries |
-| `daemon.file_transfer` | file upload/download/screenshot transfer request | file chunks, remote path facts, transfer error | daemon file-transfer and screenshot handoff state | local cwd guesses, UI fake preview success |
+| `daemon.file_transfer` | file upload/download/screenshot transfer request | cumulative contiguous upload ACK, file chunks, remote path facts, transfer error | daemon file-transfer and screenshot handoff state | local cwd guesses, UI fake preview success, duplicate/out-of-order ACK inflation |
 | `daemon.remote_window_stream` | target catalog request, stream start/stop, window resize, action input, screenshot target manifest | app/window/iTerm2 target manifest, WebRTC sender state, capture metadata, input result | desktop media/capture/input truth | terminal mirror rows as video truth, Android coordinate guesses, client focus queue truth |
 
 Daemon design rules:
@@ -238,7 +238,7 @@ Daemon design rules:
 | `client.input_runtime` | IME, QuickBar, hardware key, image/text paste, active input context | terminal input frame or remote-window action/text/key intent | platform input channel | backend direct write, terminal normalization for remote-window raw text |
 | `client.session_drawer_preview` | drawer open, live sessions, selected preview ids, gestures | drawer projection, preview selection, preview mode layout | session list/preview projection | transport open, backend kill outside explicit owner, mirror mutation |
 | `client.remote_window_overlay` | target catalog projection, stream state, touch/keyboard/screenshot/quality/fill UI | overlay state, action records, stream/screenshot/quality intents | remote-window UI/action classification | daemon focus truth, capture truth, terminal mirror reuse |
-| `client.file_browser` | file-transfer catalog, preview/download/upload intent | file browser rows, preview intent, selection intent | client file browser projection design | remote cwd guesses, direct filesystem truth |
+| `client.file_browser` | file-transfer catalog, preview/download/upload intent plus `contracts/file-transfer-throughput.json` | file browser rows, preview intent, selection intent, bounded upload window, bounded native write batches | client file browser projection and transfer flow-control policy; TypeScript and Android native limits bind to one machine contract | remote cwd guesses, direct daemon filesystem truth, per-chunk stop-and-wait, unbounded burst, independently edited TS/Java limits |
 | `client.settings_update` | settings form, update route candidates, config import/export | settings projection, update check/install intent | Settings/config/update UI projection | tab/session restore, forced Relay gate |
 
 Client design rules:

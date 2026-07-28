@@ -46,6 +46,7 @@ const TerminalStageShell = ReactMemo(
     handleSwipeTab,
     handleActiveTerminalActivateInput,
     onActivatePane,
+    onOpenPaneSessionPicker,
     onActivateSession,
     onTerminalFocusOwnerActivate,
     focusNonce,
@@ -97,6 +98,7 @@ const TerminalStageShell = ReactMemo(
     handleSwipeTab: (sessionId: string, direction: "previous" | "next") => void;
     handleActiveTerminalActivateInput: () => void;
     onActivatePane?: (paneId: string) => void;
+    onOpenPaneSessionPicker?: (paneId: string) => void;
     onActivateSession?: (sessionId: string, sourceSlot?: TerminalSessionGroupSlotName) => void;
     onTerminalFocusOwnerActivate?: () => void;
     focusNonce: number;
@@ -278,7 +280,39 @@ const TerminalStageShell = ReactMemo(
           tabIds: session ? [session.id] : [],
           render: () => {
             if (!session) {
-              return <div style={{ flex: 1, minHeight: 0, backgroundColor: mobileTheme.colors.canvas }} />;
+              return (
+                <button
+                  type="button"
+                  data-testid={`terminal-empty-pane-${pane.id}`}
+                  aria-label={`选择 Pane ${paneIndex + 1} 的 session`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    onTerminalFocusOwnerActivate?.();
+                    onActivatePane?.(pane.id);
+                    onOpenPaneSessionPicker?.(pane.id);
+                  }}
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    width: "100%",
+                    border: "1px dashed rgba(220,232,255,0.24)",
+                    borderRadius: paneProfile.stage.paneRadius,
+                    backgroundColor: mobileTheme.colors.canvas,
+                    color: mobileTheme.colors.textSecondary,
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "6px",
+                    fontSize: "13px",
+                    fontWeight: 800,
+                  }}
+                >
+                  <span style={{ color: mobileTheme.colors.textPrimary }}>Pane {paneIndex + 1}</span>
+                  <span>选择 session</span>
+                </button>
+              );
             }
             return (
               <div
@@ -306,7 +340,7 @@ const TerminalStageShell = ReactMemo(
           },
         };
       });
-    }, [activePaneId, interactiveSession?.id, onActivatePane, onTerminalFocusOwnerActivate, renderedPaneSessions, renderTerminal, splitVisible, visiblePaneEntries]);
+    }, [activePaneId, interactiveSession?.id, onActivatePane, onOpenPaneSessionPicker, onTerminalFocusOwnerActivate, paneProfile.stage.paneRadius, renderedPaneSessions, renderTerminal, splitVisible, visiblePaneEntries]);
 
     const activateSessionGroupSlot = useCallback((session: Session, slot: TerminalSessionGroupSlotName) => {
       if (slot === "center") {
@@ -691,7 +725,8 @@ const TerminalStageShell = ReactMemo(
       next.visiblePaneEntries
         .map((entry) => `${entry.pane.id}:${entry.session?.id || ""}`)
         .join("||") &&
-    prev.onActivatePane === next.onActivatePane,
+    prev.onActivatePane === next.onActivatePane &&
+    prev.onOpenPaneSessionPicker === next.onOpenPaneSessionPicker,
 );
 
 export { TerminalStageShell };

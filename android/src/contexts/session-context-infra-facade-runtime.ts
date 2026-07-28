@@ -11,6 +11,7 @@ import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
+import type { BufferFrameAssemblyResourceState } from './session-buffer-frame-assembly';
 import type { Host, Session, SessionBufferState, SessionRenderBufferSnapshot, SessionScheduleState, TerminalBufferPayload } from '../lib/types';
 import type { RecordSessionTxOptions } from './session-context-pull-runtime';
 import type { RevisionResetExpectation, SessionAction, SessionManagerState } from './session-context-core';
@@ -177,7 +178,7 @@ export function createSessionInfraFacadeRuntime(options: {
   activeBodySubscriptionSuppressedRef: { current: boolean };
   reconnectStore: SessionReconnectStore;
   tailRefreshStore: SessionTailRefreshStore;
-  sameRevisionChunkFrameRef?: { current: Map<string, unknown> };
+  bufferFrameAssemblyRef: { current: Map<string, BufferFrameAssemblyResourceState> };
   sessionPullStateRef: { current: Map<string, unknown> };
   heartbeatStore: SessionHeartbeatStore;
   handshakeTimeoutsRef: { current: Map<string, number> };
@@ -459,7 +460,7 @@ export function createSessionInfraFacadeRuntime(options: {
       activeSessionId: options.stateRef.current.activeSessionId,
       sessionPullStateRef: options.sessionPullStateRef,
       tailRefreshStore: options.tailRefreshStore,
-      sameRevisionChunkFrameRef: options.sameRevisionChunkFrameRef,
+      bufferFrameAssemblyRef: options.bufferFrameAssemblyRef,
       runtimeDebug: options.runtimeDebug,
     });
   };
@@ -572,7 +573,7 @@ export function createSessionInfraFacadeRuntime(options: {
       sessionRevisionResetRef: options.sessionRevisionResetRef,
       lastHeadRequestAtRef: options.lastHeadRequestAtRef,
       tailRefreshStore: options.tailRefreshStore,
-      sameRevisionChunkFrameRef: options.sameRevisionChunkFrameRef,
+      bufferFrameAssemblyRef: options.bufferFrameAssemblyRef,
     });
   };
 

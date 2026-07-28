@@ -3,9 +3,14 @@ import { DEFAULT_TERMINAL_CACHE_LINES, resolveTerminalRequestWindowLines } from 
 import type { BridgeSettings } from '../lib/bridge-settings';
 import { resolveTraversalConfigFromHost } from '../lib/traversal/config';
 import { createClientDaemonTraversalSocket } from '../lib/client-daemon-connection';
+import {
+  defaultClientControlDirectoryRuntime,
+  mergeHostWithClientControlDirectory,
+} from '../lib/client-control-directory-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
+import type { BufferFrameAssemblyResourceState } from './session-buffer-frame-assembly';
 import type { Host, Session, SessionBufferState, SessionScheduleState } from '../lib/types';
 import type { SessionRenderBufferSnapshot } from '../lib/types';
 import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
@@ -322,7 +327,7 @@ export function resetSessionTransportPullBookkeepingInfraRuntime(options: {
   activeSessionId: string | null;
   sessionPullStateRef: { current: Map<string, unknown> };
   tailRefreshStore: SessionTailRefreshStore;
-  sameRevisionChunkFrameRef?: { current: Map<string, unknown> };
+  bufferFrameAssemblyRef: { current: Map<string, BufferFrameAssemblyResourceState> };
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
 }) {
   resetSessionTransportPullBookkeepingRuntime(options as Parameters<typeof resetSessionTransportPullBookkeepingRuntime>[0]);
@@ -371,9 +376,13 @@ export function buildTraversalSocketForHostRuntime(options: {
   wsUrl?: string;
   transportRole?: 'control' | 'session';
 }) {
-  const traversal = resolveTraversalConfigFromHost(options.host, options.bridgeSettings);
+  const resolvedHost = mergeHostWithClientControlDirectory(
+    options.host,
+    defaultClientControlDirectoryRuntime,
+  );
+  const traversal = resolveTraversalConfigFromHost(resolvedHost, options.bridgeSettings);
   const overrideUrl = (() => {
-    if (!options.wsUrl || !shouldUseLegacyWsOverrideForHostRuntime(options.host)) {
+    if (!options.wsUrl || !shouldUseLegacyWsOverrideForHostRuntime(resolvedHost)) {
       return undefined;
     }
     try {
@@ -465,7 +474,7 @@ export function clearTailRefreshRuntimeInfra(options: {
   sessionRevisionResetRef: { current: Map<string, { revision: number; latestEndIndex: number; seenAt: number }> };
   lastHeadRequestAtRef: { current: Map<string, number> };
   tailRefreshStore?: SessionTailRefreshStore;
-  sameRevisionChunkFrameRef?: { current: Map<string, unknown> };
+  bufferFrameAssemblyRef: { current: Map<string, BufferFrameAssemblyResourceState> };
 }) {
   clearTailRefreshRuntimeRuntime(options);
 }

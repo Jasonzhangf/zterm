@@ -447,6 +447,7 @@ describe('TerminalHeader', () => {
       title: 'zterm-2',
     };
     const onAssignSessionToPane = vi.fn();
+    const onOpenTabManager = vi.fn();
 
     render(
       <TerminalHeader
@@ -455,7 +456,7 @@ describe('TerminalHeader', () => {
         topInsetPx={0}
         onBack={vi.fn()}
         onOpenQuickTabPicker={vi.fn()}
-        onOpenTabManager={vi.fn()}
+        onOpenTabManager={onOpenTabManager}
         onSwitchSession={vi.fn()}
         onCloseSession={vi.fn()}
         splitVisible
@@ -487,6 +488,16 @@ describe('TerminalHeader', () => {
     fireEvent.mouseUp(tabButton);
 
     expect(screen.getByText('当前在 P1')).toBeTruthy();
+    const changeButton = screen.getByText('更改 P1 Session');
+    fireEvent.click(changeButton);
+    expect(onOpenTabManager).toHaveBeenCalledWith('pane-1');
+
+    fireEvent.mouseDown(tabButton);
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    fireEvent.mouseUp(tabButton);
+
     const moveButton = screen.getByText('移到 P2');
     fireEvent.click(moveButton);
     expect(onAssignSessionToPane).toHaveBeenCalledWith('session-1', 'pane-2');

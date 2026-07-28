@@ -327,6 +327,7 @@ function styledTextRow(text: string, cols = 24, bg = 8): TerminalCell[] {
 function splitLargeBufferSyncPayload(payload: TerminalBufferPayload, chunkRows: number) {
   const safeChunkRows = Math.max(1, Math.floor(chunkRows));
   const chunks: TerminalBufferPayload[] = [];
+  const chunkCount = Math.ceil(payload.lines.length / safeChunkRows);
   for (let offset = 0; offset < payload.lines.length; offset += safeChunkRows) {
     const lines = payload.lines.slice(offset, offset + safeChunkRows);
     const first = lines[0];
@@ -337,6 +338,11 @@ function splitLargeBufferSyncPayload(payload: TerminalBufferPayload, chunkRows: 
       ...payload,
       startIndex,
       endIndex: lastIndex + 1,
+      frameStartIndex: payload.startIndex,
+      frameEndIndex: payload.endIndex,
+      frameChunkIndex: chunks.length,
+      frameChunkCount: chunkCount,
+      generatedAt: payload.revision * 1000,
       lines,
     });
   }
@@ -688,6 +694,7 @@ describe('TerminalView minimal mirror render', () => {
           return store;
         })(),
       },
+      bufferFrameAssemblyRef: { current: new Map() },
       sessionVisibleRangeRef: {
         current: new Map([[sessionId, { startIndex: 100, endIndex: 104, viewportRows: 4 }]]),
       },
@@ -828,6 +835,7 @@ describe('TerminalView minimal mirror render', () => {
           seenAt: Date.now(),
         }]]),
       tailRefreshStoreRef: { current: createSessionTailRefreshStore() },
+      bufferFrameAssemblyRef: { current: new Map() },
       sessionVisibleRangeRef: {
         current: new Map([[sessionId, { startIndex: 100, endIndex: 105, viewportRows: 5 }]]),
       },
@@ -978,6 +986,7 @@ describe('TerminalView minimal mirror render', () => {
       sessionRevisionResetRef: { current: new Map() },
       sessionHeadStoreRef: makeLiveHeadStoreRef(),
       tailRefreshStoreRef: { current: createSessionTailRefreshStore() },
+      bufferFrameAssemblyRef: { current: new Map() },
       sessionVisibleRangeRef: {
         current: new Map([[sessionId, { startIndex: 0, endIndex: 24, viewportRows: 24 }]]),
       },
@@ -1034,8 +1043,15 @@ describe('TerminalView minimal mirror render', () => {
       `large-source-a-${String(index).padStart(3, '0')}-${'A'.repeat(20)}`
     ));
     const payloadOne = buildLargeBufferSyncPayload(sourceOne, 1);
-    for (const chunk of splitLargeBufferSyncPayload(payloadOne, 48)) {
-      applyPayload(chunk);
+    const chunksOne = splitLargeBufferSyncPayload(payloadOne, 48);
+    for (let index = 0; index < chunksOne.length; index += 1) {
+      applyPayload(chunksOne[index]!);
+      if (index < chunksOne.length - 1) {
+        await flushRenderGate();
+        expect(liveBufferStore.getSnapshot(sessionId).buffer.revision).toBe(0);
+        expect(renderStore.getSnapshot(sessionId).buffer.revision).toBe(0);
+        expect(readRenderedRows(view.container).some((row) => row.startsWith('large-source-a-'))).toBe(false);
+      }
     }
     await flushRenderGate();
 
@@ -1051,8 +1067,17 @@ describe('TerminalView minimal mirror render', () => {
       `large-source-b-${String(index).padStart(3, '0')}-${'B'.repeat(20)}`
     ));
     const payloadTwo = buildLargeBufferSyncPayload(sourceTwo, 2);
-    for (const chunk of splitLargeBufferSyncPayload(payloadTwo, 40)) {
-      applyPayload(chunk);
+    const chunksTwo = splitLargeBufferSyncPayload(payloadTwo, 40);
+    for (let index = 0; index < chunksTwo.length; index += 1) {
+      applyPayload(chunksTwo[index]!);
+      if (index < chunksTwo.length - 1) {
+        await flushRenderGate();
+        expect(liveBufferStore.getSnapshot(sessionId).buffer.revision).toBe(1);
+        expect(renderStore.getSnapshot(sessionId).buffer.revision).toBe(1);
+        const intermediateRows = readRenderedRows(view.container);
+        expect(intermediateRows).toContain(sourceOne[sourceOne.length - 1]);
+        expect(intermediateRows.some((row) => row.startsWith('large-source-b-'))).toBe(false);
+      }
     }
     await flushRenderGate();
 

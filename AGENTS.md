@@ -46,6 +46,7 @@
 - daemon / buffer manager / renderer 都必须遵守 **读写解耦**：写侧只维护本层真相，读侧只读取当前真相；**请求不得触发上游同步策略**
 - daemon 只关心 `tmux -> mirror store`，**不关心也不能关心任何客户端逻辑/状态**；client buffer manager 只关心 `daemon -> local sparse buffer + visible-range gap repair`，**不持有 renderer follow/reading/renderBottomIndex**
 - renderer 是唯一可见窗口真相：只负责 `follow / reading / renderBottomIndex / visible range`；有 gap 先画空白，占位后等 buffer patch 按行/区间重刷
+- 一个带 `frameChunkCount > 1` 的 `buffer-sync` 是一个不可分割的 authoritative frame；`resource.client_buffer_frame_assembly` 是独立于 `resource.client_sparse_buffer` 的必需 per-session resource，先按 frame identity 暂存并验证 `[frameStartIndex, frameEndIndex)` 完整连续覆盖，再经唯一注册 edge 一次性 apply 和触发一次 renderer commit。frame rejection 必须保存 exact frame repair range；只有 repair 请求实际写入 wire 才把 `pending` 改为 `dispatched`，每个 revision 最多 dispatch 一次。禁止把 assembly resource 设为 optional，禁止逐 chunk 发布新旧混合 body、禁止缺 chunk 时提升 local revision、禁止旧/冲突 frame 覆盖已发布 truth
 - terminal transport/session 也必须解耦：**client session / active tab / foreground-background / viewport / reconnect 心智只属于客户端**；daemon 只允许持有物理 transport、自身 mirror、自身 tmux truth；inactive tab 只停取数，不得关闭客户端 session / transport 真相；foreground/background/tab switch 不得 fresh recreate transport
 - daemon/server 禁止持有任何客户端状态机或客户端身份真相：
   - 禁止 `logical client session`

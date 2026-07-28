@@ -21,6 +21,7 @@ import {
 import { runtimeDebug } from '../lib/runtime-debug';
 import { projectOnlineTraversalRelayDaemonDevicesFromAccount } from '../lib/traversal-relay-devices';
 import type { TraversalRelayDeviceSnapshot } from '../lib/types';
+import { defaultClientControlDirectoryRuntime } from '../lib/client-control-directory-runtime';
 
 function projectRelayDevicesFromAccountState(account: TraversalRelayAccountState | null | undefined) {
   return projectOnlineTraversalRelayDaemonDevicesFromAccount(account);
@@ -97,6 +98,9 @@ export function useRelayDeviceStream(options: {
         directory as RelayAccountDirectory | null | undefined,
       ),
       setDevices: setRelayDevices,
+      publishDirectoryTruth: (devices) => {
+        defaultClientControlDirectoryRuntime.replaceFromDevices(devices);
+      },
       applyRelaySettings: (settings: TraversalRelayClientSettings) => {
         options.setBridgeSettings((current) => (
           areTraversalRelaySettingsEqual(current.traversalRelay, settings)

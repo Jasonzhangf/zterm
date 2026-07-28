@@ -1,7 +1,6 @@
 import {
   createDefaultWorkspaceState,
   distributeEvenPaneSizes,
-  generateWorkspaceId,
 } from '@zterm/shared';
 import {
   STORAGE_KEYS,
@@ -12,9 +11,9 @@ import {
 } from './types';
 import { getBrowserStorage } from './browser-storage';
 
-function normalizeAndroidWorkspaceTab(input: unknown): AndroidWorkspaceTab | null {
+function normalizeAndroidWorkspaceTab(input: unknown, paneIndex: number, tabIndex: number): AndroidWorkspaceTab {
   if (!input || typeof input !== 'object') {
-    return null;
+    throw new Error(`workspace pane ${paneIndex} tab ${tabIndex} must be an object`);
   }
   const candidate = input as Partial<AndroidWorkspaceTab>;
   const id = typeof candidate.id === 'string' && candidate.id.trim() ? candidate.id.trim() : '';
@@ -22,50 +21,54 @@ function normalizeAndroidWorkspaceTab(input: unknown): AndroidWorkspaceTab | nul
     ? candidate.sessionId.trim()
     : '';
   if (!id || !sessionId) {
-    return null;
+    throw new Error(`workspace pane ${paneIndex} tab ${tabIndex} must declare explicit id and sessionId`);
   }
   return { id, sessionId };
 }
 
-function normalizeAndroidWorkspacePane(input: unknown): AndroidWorkspacePane | null {
+function normalizeAndroidWorkspacePane(input: unknown, index: number): AndroidWorkspacePane {
   if (!input || typeof input !== 'object') {
-    return null;
+    throw new Error(`workspace pane ${index} must be an object`);
   }
   const candidate = input as Partial<AndroidWorkspacePane>;
-  if (!Array.isArray(candidate.tabs) || candidate.tabs.length === 0) {
-    return null;
+  if (!Array.isArray(candidate.tabs)) {
+    throw new Error(`workspace pane ${index} must declare tabs`);
   }
-  const tabs = candidate.tabs
-    .map(normalizeAndroidWorkspaceTab)
-    .filter((tab): tab is AndroidWorkspaceTab => tab !== null);
-  if (tabs.length === 0) {
-    return null;
-  }
+  const tabs = candidate.tabs.map((tab, tabIndex) => normalizeAndroidWorkspaceTab(tab, index, tabIndex));
   const id = typeof candidate.id === 'string' && candidate.id.trim()
     ? candidate.id.trim()
-    : generateWorkspaceId('pane');
-  const size = typeof candidate.size === 'number' && Number.isFinite(candidate.size) && candidate.size > 0
-    ? candidate.size
-    : 1;
-  const activeTabId = typeof candidate.activeTabId === 'string' && tabs.some((tab) => tab.id === candidate.activeTabId)
-    ? candidate.activeTabId
-    : tabs[0].id;
+    : '';
+  if (!id || typeof candidate.size !== 'number' || !Number.isFinite(candidate.size) || candidate.size <= 0) {
+    throw new Error(`workspace pane ${index} must declare explicit id and positive size`);
+  }
+  const size = candidate.size;
+  if (tabs.length === 0) {
+    if (candidate.tabs.length > 0) {
+      throw new Error(`workspace pane ${index} contains no valid tabs`);
+    }
+    if (typeof candidate.activeTabId !== 'string' || candidate.activeTabId !== '') {
+      throw new Error(`empty workspace pane ${index} must declare activeTabId as empty string`);
+    }
+    return { id, size, tabs, activeTabId: '' };
+  }
+  if (typeof candidate.activeTabId !== 'string' || !tabs.some((tab) => tab.id === candidate.activeTabId)) {
+    throw new Error(`workspace pane ${index} activeTabId must reference a declared tab`);
+  }
+  const activeTabId = candidate.activeTabId;
   return { id, size, tabs, activeTabId };
 }
 
 export function normalizeAndroidWorkspaceState(input: unknown): AndroidWorkspaceState {
   if (!input || typeof input !== 'object') {
-    return createDefaultWorkspaceState<AndroidWorkspaceTab>({ id: 'tab-init', sessionId: '' });
+    throw new Error('workspace state must be an object');
   }
   const candidate = input as Partial<AndroidWorkspaceState>;
   if (!Array.isArray(candidate.panes) || candidate.panes.length === 0) {
-    return createDefaultWorkspaceState<AndroidWorkspaceTab>({ id: 'tab-init', sessionId: '' });
+    throw new Error('workspace state must declare at least one pane');
   }
-  const panes = candidate.panes
-    .map(normalizeAndroidWorkspacePane)
-    .filter((pane): pane is AndroidWorkspacePane => pane !== null);
+  const panes = candidate.panes.map(normalizeAndroidWorkspacePane);
   if (panes.length === 0) {
-    return createDefaultWorkspaceState<AndroidWorkspaceTab>({ id: 'tab-init', sessionId: '' });
+    throw new Error('workspace state must declare at least one valid pane');
   }
   const normalizedPanes = distributeEvenPaneSizes(panes);
   const activePaneId = typeof candidate.activePaneId === 'string'
@@ -80,6 +83,13 @@ function normalizeLegacyTerminalLayout(input: unknown): TerminalLayoutState | nu
     return null;
   }
   const candidate = input as Partial<TerminalLayoutState>;
+  if (
+    !('splitEnabled' in candidate)
+    && !('splitSecondarySessionId' in candidate)
+    && !('splitPaneAssignments' in candidate)
+  ) {
+    return null;
+  }
   const assignmentsInput = candidate.splitPaneAssignments;
   const splitPaneAssignments: TerminalLayoutState['splitPaneAssignments'] = {};
   if (assignmentsInput && typeof assignmentsInput === 'object') {
@@ -211,21 +221,25 @@ export function readPersistedWorkspace(
   if (!storage) {
     return createWorkspaceFromSessions(sessionIds, activeSessionId);
   }
-  try {
-    const raw = storage.getItem(STORAGE_KEYS.TERMINAL_LAYOUT);
-    const parsed = raw ? JSON.parse(raw) : null;
-    if (parsed && typeof parsed === 'object' && Array.isArray((parsed as Partial<AndroidWorkspaceState>).panes)) {
-      return normalizeAndroidWorkspaceState(parsed);
-    }
-    const legacyLayout = normalizeLegacyTerminalLayout(parsed);
-    if (legacyLayout) {
-      return migrateLegacyTerminalLayout(legacyLayout, sessionIds, activeSessionId);
-    }
-    return createWorkspaceFromSessions(sessionIds, activeSessionId);
-  } catch (error) {
-    console.error('[workspace-persistence] Failed to read workspace:', error);
+  const raw = storage.getItem(STORAGE_KEYS.TERMINAL_LAYOUT);
+  if (raw === null) {
     return createWorkspaceFromSessions(sessionIds, activeSessionId);
   }
+  let parsed: unknown = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    console.error('[workspace-persistence] Failed to parse workspace:', error);
+    throw error;
+  }
+  if (parsed && typeof parsed === 'object' && Array.isArray((parsed as Partial<AndroidWorkspaceState>).panes)) {
+    return normalizeAndroidWorkspaceState(parsed);
+  }
+  const legacyLayout = normalizeLegacyTerminalLayout(parsed);
+  if (legacyLayout) {
+    return migrateLegacyTerminalLayout(legacyLayout, sessionIds, activeSessionId);
+  }
+  throw new Error('persisted workspace must match the workspace or legacy terminal layout schema');
 }
 
 export function persistWorkspace(workspace: AndroidWorkspaceState): void {

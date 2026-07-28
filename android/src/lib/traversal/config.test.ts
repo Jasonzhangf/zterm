@@ -3,7 +3,7 @@ import { DEFAULT_BRIDGE_SETTINGS } from '../bridge-settings';
 import { buildTraversalPlan, resolveTraversalConfigFromHost } from './config';
 
 describe('buildTraversalPlan', () => {
-  it('keeps the reachable Mac Studio Tailscale endpoint ahead of Relay on a merged daemon target', () => {
+  it('keeps Tailscale ahead of UDP direct and TURN Relay on a merged daemon target', () => {
     const plan = buildTraversalPlan(
       {
         bridgeHost: '100.66.1.82',
@@ -54,7 +54,7 @@ describe('buildTraversalPlan', () => {
     });
   });
 
-  it('orders logged-in auto candidates as Tailscale -> UDP direct -> TURN relay without user choice', () => {
+  it('orders logged-in auto candidates as Tailscale -> UDP direct -> direct IP -> TURN Relay', () => {
     const plan = buildTraversalPlan(
       {
         bridgeHost: '203.0.113.10',
@@ -91,9 +91,9 @@ describe('buildTraversalPlan', () => {
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
       'tailscale',
       'rtc-direct',
-      'rtc-relay',
       'ipv4',
       'ipv6',
+      'rtc-relay',
     ]);
     expect(plan.candidates[1]).toMatchObject({
       kind: 'rtc',
@@ -147,9 +147,9 @@ describe('buildTraversalPlan', () => {
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
       'tailscale',
       'rtc-direct',
-      'rtc-relay',
       'ipv4',
       'ipv6',
+      'rtc-relay',
     ]);
   });
 
@@ -382,6 +382,21 @@ describe('buildTraversalPlan', () => {
         transportMode: 'auto',
         relayEndpointCandidates: [
           {
+            id: 'lan:192.168.50.20:3333',
+            kind: 'lan',
+            host: '192.168.50.20',
+            port: 3333,
+            authRequired: true,
+            lastSeenAt: '2026-06-28T10:00:00.000Z',
+          },
+          {
+            id: 'rtc-direct:daemon-host-a',
+            kind: 'rtc-direct',
+            relayHostId: 'daemon-host-a',
+            authRequired: true,
+            lastSeenAt: '2026-06-28T10:00:00.000Z',
+          },
+          {
             id: 'direct:tailscale:daemon-host-a',
             kind: 'tailscale',
             host: 'mac.tailnet.ts.net',
@@ -424,6 +439,13 @@ describe('buildTraversalPlan', () => {
       },
     );
 
+    expect(plan.candidates).toContainEqual(expect.objectContaining({
+      id: 'lan:192.168.50.20:3333',
+      kind: 'ws',
+      path: 'ipv4',
+      endpoint: '192.168.50.20:3333',
+      url: 'ws://192.168.50.20:3333/?token=token-a',
+    }));
     expect(plan.candidates).toContainEqual(expect.objectContaining({
       id: 'direct:tailscale:daemon-host-a',
       kind: 'ws',

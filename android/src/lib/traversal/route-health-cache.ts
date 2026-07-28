@@ -11,10 +11,39 @@ export interface TraversalRouteHealthScope {
 export interface TraversalRouteHealthCacheOptions {
   ttlMs?: number;
   now?: () => number;
+  storage?: TraversalRouteHealthStorage | null;
+}
+
+export interface TraversalRouteHealthStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): unknown;
+  removeItem(key: string): unknown;
 }
 
 const DEFAULT_ROUTE_HEALTH_TTL_MS = 5 * 60_000;
 const DEFAULT_ROUTE_FAILURE_TTL_MS = 1000;
+const ROUTE_HEALTH_STORAGE_KEY = 'zterm:traversal-route-health:v1';
+
+function resolveDefaultStorage(): TraversalRouteHealthStorage | null {
+  try {
+    return typeof globalThis.localStorage === 'undefined' ? null : globalThis.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function isRouteHealthRecord(value: unknown): value is TraversalRouteHealthRecord {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return false;
+  }
+  const candidate = value as Partial<TraversalRouteHealthRecord>;
+  return typeof candidate.key === 'string'
+    && typeof candidate.path === 'string'
+    && typeof candidate.endpoint === 'string'
+    && (candidate.status === 'success' || candidate.status === 'failure' || candidate.status === 'auth-failure')
+    && typeof candidate.updatedAt === 'number'
+    && Number.isFinite(candidate.updatedAt);
+}
 
 function sanitizeKeyPart(value?: string | null) {
   return (value || '').trim() || '-';
@@ -38,9 +67,52 @@ export class TraversalRouteHealthCache {
 
   private readonly now: () => number;
 
+  private readonly storage: TraversalRouteHealthStorage | null;
+
   public constructor(options: TraversalRouteHealthCacheOptions = {}) {
     this.ttlMs = Math.max(1, Math.floor(options.ttlMs || DEFAULT_ROUTE_HEALTH_TTL_MS));
     this.now = options.now || (() => Date.now());
+    this.storage = options.storage === undefined ? resolveDefaultStorage() : options.storage;
+    this.restore();
+  }
+
+  private restore() {
+    if (!this.storage) {
+      return;
+    }
+    try {
+      const raw = this.storage.getItem(ROUTE_HEALTH_STORAGE_KEY);
+      if (!raw) {
+        return;
+      }
+      const parsed = JSON.parse(raw) as unknown;
+      if (!Array.isArray(parsed) || !parsed.every(isRouteHealthRecord)) {
+        throw new Error('invalid route-health persistence payload');
+      }
+      for (const record of parsed) {
+        if (!this.isExpired(record)) {
+          this.entries.set(record.key, record);
+        }
+      }
+      this.persist();
+    } catch {
+      this.entries.clear();
+      this.storage.removeItem(ROUTE_HEALTH_STORAGE_KEY);
+    }
+  }
+
+  private persist() {
+    if (!this.storage) {
+      return;
+    }
+    if (this.entries.size === 0) {
+      this.storage.removeItem(ROUTE_HEALTH_STORAGE_KEY);
+      return;
+    }
+    this.storage.setItem(
+      ROUTE_HEALTH_STORAGE_KEY,
+      JSON.stringify(Array.from(this.entries.values()).sort((left, right) => left.key.localeCompare(right.key))),
+    );
   }
 
   public recordSuccess(
@@ -59,6 +131,7 @@ export class TraversalRouteHealthCache {
       ...(typeof rttMs === 'number' && Number.isFinite(rttMs) ? { rttMs: Math.max(0, Math.floor(rttMs)) } : {}),
     };
     this.entries.set(key, record);
+    this.persist();
     return record;
   }
 
@@ -79,6 +152,7 @@ export class TraversalRouteHealthCache {
       error: error.trim() || 'route failed',
     };
     this.entries.set(key, record);
+    this.persist();
     return record;
   }
 
@@ -92,6 +166,7 @@ export class TraversalRouteHealthCache {
     }
     if (this.isExpired(record)) {
       this.entries.delete(record.key);
+      this.persist();
       return null;
     }
     return record;
@@ -99,14 +174,19 @@ export class TraversalRouteHealthCache {
 
   public list(scope: TraversalRouteHealthScope = {}) {
     const records: TraversalRouteHealthRecord[] = [];
+    let changed = false;
     for (const record of this.entries.values()) {
       if (this.isExpired(record)) {
         this.entries.delete(record.key);
+        changed = true;
         continue;
       }
       if (this.matchesScope(scope, record)) {
         records.push(record);
       }
+    }
+    if (changed) {
+      this.persist();
     }
     return records.sort((left, right) => right.updatedAt - left.updatedAt || left.key.localeCompare(right.key));
   }
@@ -137,6 +217,7 @@ export class TraversalRouteHealthCache {
 
   public clear() {
     this.entries.clear();
+    this.persist();
   }
 }
 

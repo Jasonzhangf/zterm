@@ -6,6 +6,7 @@ import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import type { SessionReconnectRuntime, SessionReconnectStore } from '../lib/session-reconnect-store';
+import type { BufferFrameAssemblyResourceState } from './session-buffer-frame-assembly';
 import {
   buildSessionConnectionFields,
   buildSessionErrorUpdates,
@@ -296,6 +297,12 @@ export function closeSessionRuntime(options: {
     lastActiveReentryAtRef: MutableRefObject<Map<string, number>>;
     lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
     sessionVisibleRangeRef: MutableRefObject<Map<string, unknown>>;
+    sessionRevisionResetRef: MutableRefObject<Map<string, {
+      revision: number;
+      latestEndIndex: number;
+      seenAt: number;
+    }>>;
+    bufferFrameAssemblyRef: MutableRefObject<Map<string, BufferFrameAssemblyResourceState>>;
     sessionBufferStoreRef: MutableRefObject<{ deleteSession: (sessionId: string) => void }>;
     sessionRenderGateRef: MutableRefObject<{ deleteSession: (sessionId: string) => void }>;
     sessionHeadStoreRef: MutableRefObject<{ deleteSession: (sessionId: string) => void }>;
@@ -342,6 +349,8 @@ export function closeSessionRuntime(options: {
   options.refs.lastActiveReentryAtRef.current.delete(options.sessionId);
   options.refs.lastConnectedBaselineAtRef.current.delete(options.sessionId);
   options.refs.sessionVisibleRangeRef.current.delete(options.sessionId);
+  options.refs.sessionRevisionResetRef.current.delete(options.sessionId);
+  options.refs.bufferFrameAssemblyRef.current.delete(options.sessionId);
   options.refs.sessionBufferStoreRef.current.deleteSession(options.sessionId);
   options.refs.sessionRenderGateRef.current.deleteSession(options.sessionId);
   options.refs.sessionHeadStoreRef.current.deleteSession(options.sessionId);

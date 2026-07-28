@@ -18,6 +18,7 @@ interface CreateTraversalRelayHostClientOptions {
   config: TraversalRelayRuntimeConfig | null;
   handleRelaySignal: (peerId: string, message: SignalMessage, emitSignal: (message: SignalMessage) => void) => Promise<void>;
   closeRelayPeer: (peerId: string, reason: string) => void;
+  listEndpointCandidates: (now: string) => RelayEndpointCandidate[];
   listTmuxSessions: () => string[];
   now?: () => string;
 }
@@ -66,21 +67,6 @@ function buildWsUrl(base: string, relativePath: string) {
   return url;
 }
 
-export function buildRelayEndpointCandidates(
-  config: TraversalRelayRuntimeConfig,
-  now: string,
-): RelayEndpointCandidate[] {
-  return [
-    {
-      id: `relay-rtc:${config.hostId}`,
-      kind: 'relay-rtc',
-      relayHostId: config.hostId,
-      authRequired: true,
-      lastSeenAt: now,
-    },
-  ];
-}
-
 export function buildRelayTmuxSessionSnapshots(
   sessionNames: string[],
   now: string,
@@ -102,14 +88,14 @@ export function buildRelayTmuxSessionSnapshots(
 }
 
 export function buildRelayDirectoryUpdateEnvelope(options: {
-  config: TraversalRelayRuntimeConfig;
+  endpoints: RelayEndpointCandidate[];
   sessionNames: string[];
   now: string;
 }): RelayHostEnvelope {
   return {
     type: 'directory-update',
     directory: {
-      endpoints: buildRelayEndpointCandidates(options.config, options.now),
+      endpoints: options.endpoints,
       sessions: buildRelayTmuxSessionSnapshots(options.sessionNames, options.now),
       publishedAt: options.now,
     },
@@ -118,14 +104,14 @@ export function buildRelayDirectoryUpdateEnvelope(options: {
 
 export function publishRelayDirectoryUpdate(options: {
   socket: RelayDirectoryPublisherSocket;
-  config: TraversalRelayRuntimeConfig;
+  listEndpointCandidates: (now: string) => RelayEndpointCandidate[];
   listTmuxSessions: () => string[];
   now: () => string;
 }) {
   try {
     const now = options.now();
     const envelope = buildRelayDirectoryUpdateEnvelope({
-      config: options.config,
+      endpoints: options.listEndpointCandidates(now),
       sessionNames: options.listTmuxSessions(),
       now,
     });
@@ -230,7 +216,7 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
             console.log(`[${new Date().toISOString()}] traversal relay ready for host ${envelope.hostId || config.hostId}`);
             const publishResult = publishRelayDirectoryUpdate({
               socket: nextSocket,
-              config,
+              listEndpointCandidates: options.listEndpointCandidates,
               listTmuxSessions: options.listTmuxSessions,
               now: options.now || (() => new Date().toISOString()),
             });

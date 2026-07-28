@@ -57,6 +57,16 @@ describe('closeSessionRuntime', () => {
     const writeSessionTransportToken = vi.fn();
     const deleteSessionSync = vi.fn();
     const setScheduleStates = vi.fn();
+    const bufferFrameAssemblyRef = { current: new Map([['session-1', {
+      pending: null,
+      error: null,
+      repairDispatchedRevisions: [11],
+    }]]) };
+    const sessionRevisionResetRef = { current: new Map([['session-1', {
+      revision: 11,
+      latestEndIndex: 2,
+      seenAt: 100,
+    }]]) };
 
     closeSessionRuntime({
       sessionId: 'session-1',
@@ -73,6 +83,8 @@ describe('closeSessionRuntime', () => {
         lastActiveReentryAtRef: { current: new Map([['session-1', 1]]) },
         lastConnectedBaselineAtRef: { current: new Map([['session-1', 1]]) },
         sessionVisibleRangeRef: { current: new Map([['session-1', { startIndex: 0, endIndex: 1 }]]) },
+        sessionRevisionResetRef,
+        bufferFrameAssemblyRef,
         sessionBufferStoreRef: { current: { deleteSession: vi.fn() } },
         sessionRenderGateRef: { current: { deleteSession: vi.fn() } },
         sessionHeadStoreRef: { current: { deleteSession: vi.fn() } },
@@ -101,6 +113,8 @@ describe('closeSessionRuntime', () => {
     expect(cleanupControlSocket).not.toHaveBeenCalled();
     expect(writeSessionTransportToken).toHaveBeenCalledWith('session-1', null);
     expect(clearSessionTransportRuntime).toHaveBeenCalledWith('session-1');
+    expect(bufferFrameAssemblyRef.current.has('session-1')).toBe(false);
+    expect(sessionRevisionResetRef.current.has('session-1')).toBe(false);
     expect(deleteSessionSync).toHaveBeenCalledWith('session-1');
   });
 
@@ -117,6 +131,8 @@ describe('closeSessionRuntime', () => {
         lastActiveReentryAtRef: { current: new Map() },
         lastConnectedBaselineAtRef: { current: new Map() },
         sessionVisibleRangeRef: { current: new Map() },
+        sessionRevisionResetRef: { current: new Map() },
+        bufferFrameAssemblyRef: { current: new Map() },
         sessionBufferStoreRef: { current: { deleteSession: vi.fn() } },
         sessionRenderGateRef: { current: { deleteSession: vi.fn() } },
         sessionHeadStoreRef: { current: { deleteSession: vi.fn() } },
