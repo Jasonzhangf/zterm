@@ -225,3 +225,15 @@
 - 架构映射：本片只属于 `mac.terminal_pane` / shared `PaneStage` presentation token；不改 `MacRuntimeRegistry`、local tmux provider、buffer/render truth、server rail projection。
 - 唯一 owner：shared `packages/shared/src/react/pane-profile.ts` 输出 desktop split spacing/token；`packages/shared/src/react/pane-stage.tsx` 渲染 divider；`mac/src/styles.css` 只做 Mac shell chrome 外观。
 - 验证方向：白盒锁 desktop split token（outerMargin 0、paneGap 3px、paneRadius 7px、dividerHitPx 6）；静态 gate 跑 Mac targeted pane tests + type-check/build。视觉截图/packaged smoke 若未跑，不能宣称最终视觉闭环。
+
+# 2026-07-29 Mac iTerm2 pane/session UX workbench pass
+
+- Scope: `mac.workspace_store` and `mac.terminal_pane` projection only. No runtime registry, local tmux provider, daemon mirror, buffer, or renderer truth changed.
+- Owner mapping: blank pane click activates the pane and opens the launcher; tab context `Change session` uses a pending scoped replacement intent; `Move to Pn` uses `moveTabToPane`.
+- Current evidence: focused Mac workbench/pane tests passed earlier in the run; full Mac type-check/build and packaged target-machine smoke are still pending.
+
+# 2026-07-29 Mac scoped replacement review closeout
+
+- Review found `Change session` removed the live Mac tab before the user selected a replacement, so launcher cancel or pane switch could dispose the current runtime.
+- Fix: `beginPendingSessionReplacement` now stores `{paneId, tabId}` without changing tabs; `openConnectionInWorkbench` / `openLocalTmuxInWorkbench` consume that scoped intent only when a new session is confirmed, and `setLauncherOpen(false)` cancels it without tab mutation.
+- Verification: `pnpm --dir mac test -- MacPaneWorkbench.test.tsx workbench.test.ts --reporter dot` passed 35/35; `pnpm --dir mac run type-check` passed. Marker: `mac pending session replacement preserves live tab until confirmed`.

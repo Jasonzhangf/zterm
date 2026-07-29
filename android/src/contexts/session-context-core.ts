@@ -8,6 +8,7 @@ import type {
   RemoteScreenshotStatusPayload,
   RemoteWindowInputEventPayload,
   RemoteWindowStreamQualityRequestPayload,
+  RemoteWindowStreamPurpose,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
   RemoteWindowVideoBitrateConfig,
@@ -244,13 +245,13 @@ export interface SessionContextValue {
     sessionId: string,
     target: RemoteWindowStreamTargetManifest,
     streamId: string,
-    options?: { videoBitrate?: RemoteWindowVideoBitrateConfig },
+    options?: { videoBitrate?: RemoteWindowVideoBitrateConfig; purpose?: RemoteWindowStreamPurpose },
   ) => Promise<RemoteWindowReceiverStartResult>;
   updateRemoteWindowStreamQuality: (
     sessionId: string,
     payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>,
   ) => void;
-  stopRemoteWindowStream: (sessionId: string, streamId: string) => boolean;
+  stopRemoteWindowStream: (sessionId: string, streamId: string) => Promise<boolean>;
   sendRemoteWindowInput: (
     sessionId: string,
     payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,

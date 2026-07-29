@@ -10,7 +10,6 @@ import {
   addPaneToWorkspace,
   cloneWorkspaceState,
   createWorkspacePane,
-  moveTabBetweenPanes,
   removePaneFromWorkspace,
   resolveActiveTab as resolveActiveWorkspaceTab,
   setActivePane,
@@ -47,6 +46,10 @@ export interface MacWorkbenchTab extends WorkspaceTab {
 export interface MacWorkbenchState {
   workspace: WorkspaceState<MacWorkbenchTab>;
   launcherOpen: boolean;
+  pendingSessionReplacement?: {
+    paneId: string;
+    tabId: string;
+  };
 }
 
 function createId(prefix: string) {
@@ -110,7 +113,11 @@ export function createInitialWorkbenchState(): MacWorkbenchState {
 }
 
 export function setLauncherOpen(state: MacWorkbenchState, launcherOpen: boolean): MacWorkbenchState {
-  return { ...state, launcherOpen };
+  return {
+    ...state,
+    launcherOpen,
+    ...(launcherOpen ? {} : { pendingSessionReplacement: undefined }),
+  };
 }
 
 export function activateTab(state: MacWorkbenchState, tabId: string): MacWorkbenchState {
@@ -138,7 +145,32 @@ export function appendEmptyTab(state: MacWorkbenchState): MacWorkbenchState {
     tabs: [...pane.tabs, empty],
     activeTabId: empty.id,
   }));
-  return { ...state, workspace: next, launcherOpen: true };
+  return { ...state, workspace: next, launcherOpen: true, pendingSessionReplacement: undefined };
+}
+
+function replacePendingSessionTab(
+  state: MacWorkbenchState,
+  newTab: MacWorkbenchTab,
+): MacWorkbenchState | null {
+  const pending = state.pendingSessionReplacement;
+  if (!pending) {
+    return null;
+  }
+  const pendingPane = state.workspace.panes.find((pane) => pane.id === pending.paneId);
+  if (!pendingPane?.tabs.some((tab) => tab.id === pending.tabId)) {
+    return { ...state, launcherOpen: false, pendingSessionReplacement: undefined };
+  }
+  const next = updateWorkspacePane(state.workspace, pending.paneId, (pane) => ({
+    ...pane,
+    tabs: pane.tabs.map((tab) => (tab.id === pending.tabId ? newTab : tab)),
+    activeTabId: newTab.id,
+  }));
+  return {
+    ...state,
+    workspace: setActivePane(next, pending.paneId),
+    launcherOpen: false,
+    pendingSessionReplacement: undefined,
+  };
 }
 
 export function closeTab(state: MacWorkbenchState, tabId: string): MacWorkbenchState {
@@ -173,22 +205,29 @@ export function closeTab(state: MacWorkbenchState, tabId: string): MacWorkbenchS
 export function openConnectionInWorkbench(
   state: MacWorkbenchState,
   target: EditableHost,
-  options?: { persistedHostId?: string; append?: boolean },
+  options?: { persistedHostId?: string; append?: boolean; paneId?: string },
 ): MacWorkbenchState {
   const newTab = createConnectionTab(target, options?.persistedHostId);
-  const activePane = state.workspace.panes.find((pane) => pane.id === state.workspace.activePaneId)
+  if (!options?.append) {
+    const replaced = replacePendingSessionTab(state, newTab);
+    if (replaced) {
+      return replaced;
+    }
+  }
+  const activePane = state.workspace.panes.find((pane) => pane.id === (options?.paneId ?? state.workspace.activePaneId))
     ?? state.workspace.panes[0];
   if (!activePane) {
     return state;
   }
 
-  if (!options?.append && activePane.tabs.length === 1 && activePane.tabs[0].kind === 'empty') {
+  const activeTab = activePane.tabs.find((tab) => tab.id === activePane.activeTabId);
+  if (!options?.append && activeTab?.kind === 'empty') {
     const next = updateWorkspacePane(state.workspace, activePane.id, (pane) => ({
       ...pane,
-      tabs: [newTab],
+      tabs: pane.tabs.map((tab) => (tab.id === activeTab.id ? newTab : tab)),
       activeTabId: newTab.id,
     }));
-    return { ...state, workspace: next, launcherOpen: false };
+    return { ...state, workspace: next, launcherOpen: false, pendingSessionReplacement: undefined };
   }
 
   const next = updateWorkspacePane(state.workspace, activePane.id, (pane) => ({
@@ -196,32 +235,39 @@ export function openConnectionInWorkbench(
     tabs: [...pane.tabs, newTab],
     activeTabId: newTab.id,
   }));
-  return { ...state, workspace: next, launcherOpen: false };
+  return { ...state, workspace: next, launcherOpen: false, pendingSessionReplacement: undefined };
 }
 
 export function openLocalTmuxInWorkbench(
   state: MacWorkbenchState,
   sessionName: string,
-  options?: { append?: boolean },
+  options?: { append?: boolean; paneId?: string },
 ): MacWorkbenchState {
   const normalizedSessionName = sessionName.trim();
   if (!normalizedSessionName) {
     return state;
   }
   const newTab = createLocalTmuxTab(normalizedSessionName);
-  const activePane = state.workspace.panes.find((pane) => pane.id === state.workspace.activePaneId)
+  if (!options?.append) {
+    const replaced = replacePendingSessionTab(state, newTab);
+    if (replaced) {
+      return replaced;
+    }
+  }
+  const activePane = state.workspace.panes.find((pane) => pane.id === (options?.paneId ?? state.workspace.activePaneId))
     ?? state.workspace.panes[0];
   if (!activePane) {
     return state;
   }
 
-  if (!options?.append && activePane.tabs.length === 1 && activePane.tabs[0].kind === 'empty') {
+  const activeTab = activePane.tabs.find((tab) => tab.id === activePane.activeTabId);
+  if (!options?.append && activeTab?.kind === 'empty') {
     const next = updateWorkspacePane(state.workspace, activePane.id, (pane) => ({
       ...pane,
-      tabs: [newTab],
+      tabs: pane.tabs.map((tab) => (tab.id === activeTab.id ? newTab : tab)),
       activeTabId: newTab.id,
     }));
-    return { ...state, workspace: next, launcherOpen: false };
+    return { ...state, workspace: next, launcherOpen: false, pendingSessionReplacement: undefined };
   }
 
   const next = updateWorkspacePane(state.workspace, activePane.id, (pane) => ({
@@ -229,7 +275,24 @@ export function openLocalTmuxInWorkbench(
     tabs: [...pane.tabs, newTab],
     activeTabId: newTab.id,
   }));
-  return { ...state, workspace: next, launcherOpen: false };
+  return { ...state, workspace: next, launcherOpen: false, pendingSessionReplacement: undefined };
+}
+
+export function beginPendingSessionReplacement(
+  state: MacWorkbenchState,
+  paneId: string,
+  tabId: string,
+): MacWorkbenchState {
+  const pane = state.workspace.panes.find((candidate) => candidate.id === paneId);
+  if (!pane?.tabs.some((tab) => tab.id === tabId)) {
+    return state;
+  }
+  return {
+    ...state,
+    workspace: setActivePane(state.workspace, paneId),
+    launcherOpen: true,
+    pendingSessionReplacement: { paneId, tabId },
+  };
 }
 
 export function splitActivePaneRight(state: MacWorkbenchState): MacWorkbenchState {
@@ -255,9 +318,36 @@ export function moveTabToPane(
   if (sourcePaneId === targetPaneId) {
     return state;
   }
+  const sourcePane = state.workspace.panes.find((candidate) => candidate.id === sourcePaneId);
+  const targetPane = state.workspace.panes.find((candidate) => candidate.id === targetPaneId);
+  const tab = sourcePane?.tabs.find((candidate) => candidate.id === tabId);
+  if (!sourcePane || !targetPane || !tab || tab.kind === 'empty') {
+    return state;
+  }
+  let next = updateWorkspacePane(state.workspace, sourcePaneId, (currentPane) => {
+    const remaining = currentPane.tabs.filter((candidate) => candidate.id !== tabId);
+    if (remaining.length === 0) {
+      const empty = createEmptyTab();
+      return { ...currentPane, tabs: [empty], activeTabId: empty.id };
+    }
+    return {
+      ...currentPane,
+      tabs: remaining,
+      activeTabId: currentPane.activeTabId === tabId ? remaining[0].id : currentPane.activeTabId,
+    };
+  });
+  next = updateWorkspacePane(next, targetPaneId, (currentPane) => {
+    const replacementIndex = currentPane.tabs.length === 1 && currentPane.tabs[0].kind === 'empty'
+      ? 0
+      : -1;
+    const tabs = replacementIndex >= 0
+      ? currentPane.tabs.map((candidate, index) => (index === replacementIndex ? tab : candidate))
+      : [...currentPane.tabs, tab];
+    return { ...currentPane, tabs, activeTabId: tab.id };
+  });
   return {
     ...state,
-    workspace: moveTabBetweenPanes(state.workspace, sourcePaneId, tabId, targetPaneId),
+    workspace: setActivePane(next, targetPaneId),
   };
 }
 
@@ -327,7 +417,11 @@ export function listWorkbenchRuntimeKeys(state: MacWorkbenchState, hosts: Host[]
 }
 
 export function cloneWorkbenchState(state: MacWorkbenchState): MacWorkbenchState {
-  return { ...state, workspace: cloneWorkspaceState(state.workspace) };
+  return {
+    ...state,
+    workspace: cloneWorkspaceState(state.workspace),
+    pendingSessionReplacement: state.pendingSessionReplacement ? { ...state.pendingSessionReplacement } : undefined,
+  };
 }
 
 function endpointServerId(target: EditableHost) {
@@ -413,6 +507,7 @@ export function createWorkbenchStateFromWorkspaceRecord(
       activePaneId: record.activePaneId,
     },
     launcherOpen: false,
+    pendingSessionReplacement: undefined,
   };
 }
 

@@ -9,6 +9,7 @@ import type {
   RemoteWindowStreamRtcDescription,
   RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamQualityResultPayload,
+  RemoteWindowStreamPurpose,
   RemoteWindowStreamStartedPayload,
   RemoteWindowStreamStartRequestPayload,
   RemoteWindowStreamStatusPayload,
@@ -150,6 +151,7 @@ export interface RemoteWindowStreamDaemonHandlers {
 
 interface ActiveRemoteWindowStream {
   streamId: string;
+  purpose: RemoteWindowStreamPurpose;
   requestId: string;
   targetId: string;
   target: RemoteWindowStreamTargetManifest;
@@ -662,6 +664,7 @@ export function createRemoteWindowStreamDaemonRuntime(
     entry.handlers.sendStatus?.({
       requestId: entry.requestId,
       streamId: entry.streamId,
+      purpose: entry.purpose,
       phase: 'stopped',
       framesSent: entry.framesSent,
       message: reason,
@@ -688,6 +691,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       entry.handlers.sendStatus?.({
         requestId: entry.requestId,
         streamId: entry.streamId,
+        purpose: entry.purpose,
         phase: 'streaming',
         framesSent: entry.framesSent,
         frameWidth: captureFrame.width,
@@ -885,6 +889,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       return buildStreamError(payload, 'remote_window_stream_exists', `remote window stream already exists: ${payload.streamId}`);
     }
 
+    const purpose: RemoteWindowStreamPurpose = payload.purpose ?? 'focus';
     let entry: ActiveRemoteWindowStream | null = null;
     try {
       validateStreamTargetForCapture(payload.target);
@@ -908,6 +913,7 @@ export function createRemoteWindowStreamDaemonRuntime(
 
       entry = {
         streamId: payload.streamId,
+        purpose,
         requestId: payload.requestId,
         targetId: payload.target.streamTargetId,
         target: payload.target,
@@ -931,6 +937,7 @@ export function createRemoteWindowStreamDaemonRuntime(
         handlers.sendIceCandidate?.({
           requestId: payload.requestId,
           streamId: payload.streamId,
+          purpose,
           candidate: normalizeIceCandidate(event.candidate),
         });
       };
@@ -950,6 +957,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       handlers.sendStatus?.({
         requestId: payload.requestId,
         streamId: payload.streamId,
+        purpose,
         phase: 'starting',
         ...(videoBitrateWarning
           ? { message: `video bitrate not applied: ${videoBitrateWarning}` }
@@ -1010,6 +1018,7 @@ export function createRemoteWindowStreamDaemonRuntime(
           handlers.sendStatus?.({
             requestId: payload.requestId,
             streamId: payload.streamId,
+            purpose,
             phase: 'starting',
             message: `video bitrate not applied: ${videoBitrateWarning}`,
           });
@@ -1019,6 +1028,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       return {
         requestId: payload.requestId,
         streamId: payload.streamId,
+        purpose,
         targetId: payload.target.streamTargetId,
         answer: normalizeRtcDescription(peerConnection.localDescription || answer, 'answer'),
         capture: {
@@ -1071,6 +1081,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       return {
         requestId: payload.requestId,
         streamId: payload.streamId,
+        ...(payload.purpose ? { purpose: payload.purpose } : {}),
         phase: 'stopped',
         framesSent: 0,
         message: 'remote window stream already stopped',
@@ -1081,6 +1092,7 @@ export function createRemoteWindowStreamDaemonRuntime(
     return {
       requestId: payload.requestId,
       streamId: payload.streamId,
+      purpose: entry.purpose,
       phase: 'stopped',
       framesSent,
       message: 'remote window stream stopped',
@@ -1113,6 +1125,7 @@ export function createRemoteWindowStreamDaemonRuntime(
       return {
         requestId: payload.requestId,
         streamId: payload.streamId,
+        purpose: entry.purpose,
         targetId: payload.targetId,
         accepted: true,
         videoBitrate: applyResult.videoBitrate,

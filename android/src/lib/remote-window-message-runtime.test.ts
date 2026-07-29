@@ -249,6 +249,7 @@ describe('remote window message runtime', () => {
     const request = runtime.requestStreamStart('session-1', {
       ws: makeSocket(),
       streamId: 'stream-1',
+      purpose: 'preview',
       target: makeTarget(),
       offer: { type: 'offer', sdp: 'offer-sdp' },
       iceServers: [{ urls: 'stun:relay.codewhisper.cc:3478' }],
@@ -262,6 +263,7 @@ describe('remote window message runtime', () => {
       payload: {
         requestId: expect.stringMatching(/^rw-start-45-/),
         streamId: 'stream-1',
+        purpose: 'preview',
         target: { streamTargetId: 'pane-1' },
         offer: { type: 'offer', sdp: 'offer-sdp' },
         videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
@@ -271,6 +273,7 @@ describe('remote window message runtime', () => {
     runtime.handleStreamStarted({
       requestId: sent.payload.requestId,
       streamId: 'stream-1',
+      purpose: 'preview',
       targetId: 'pane-1',
       answer: { type: 'answer', sdp: 'answer-sdp' },
       capture: {
@@ -330,7 +333,7 @@ describe('remote window message runtime', () => {
     expect(runtime.getPendingCount()).toBe(0);
   });
 
-  it('sends candidate and stop messages tied to the stream id', () => {
+  it('sends candidate and stop messages tied to the stream id', async () => {
     const sendSocketPayload = vi.fn();
     const runtime = createRemoteWindowMessageRuntime({ now: () => 47 });
     const ws = makeSocket();
@@ -338,12 +341,14 @@ describe('remote window message runtime', () => {
     runtime.sendStreamIceCandidate('session-1', {
       ws,
       streamId: 'stream-3',
+      purpose: 'focus',
       candidate: { candidate: 'candidate:1', sdpMid: '0', sdpMLineIndex: 0 },
       sendSocketPayload,
     });
-    runtime.stopStream('session-1', {
+    const stopRequest = runtime.stopStream('session-1', {
       ws,
       streamId: 'stream-3',
+      purpose: 'focus',
       sendSocketPayload,
     });
 
@@ -351,6 +356,7 @@ describe('remote window message runtime', () => {
       type: 'remote-window-stream-ice-candidate',
       payload: {
         streamId: 'stream-3',
+        purpose: 'focus',
         candidate: { candidate: 'candidate:1' },
       },
     });
@@ -359,8 +365,56 @@ describe('remote window message runtime', () => {
       payload: {
         requestId: expect.stringMatching(/^rw-stop-47-/),
         streamId: 'stream-3',
+        purpose: 'focus',
       },
     });
+    const requestId = JSON.parse(sendSocketPayload.mock.calls[1][2] as string).payload.requestId;
+    expect(runtime.getPendingRequestIds()).toContain(requestId);
+    expect(runtime.dispatch({
+      type: 'remote-window-stream-status',
+      payload: {
+        requestId,
+        streamId: 'stream-3',
+        purpose: 'focus',
+        phase: 'stopped',
+        framesSent: 1,
+      },
+    })).toBe(true);
+    await expect(stopRequest).resolves.toMatchObject({
+      requestId,
+      streamId: 'stream-3',
+      purpose: 'focus',
+      phase: 'stopped',
+    });
+    expect(runtime.getPendingCount()).toBe(0);
+  });
+
+  it('rejects stop requests from daemon stop errors by request id', async () => {
+    const sendSocketPayload = vi.fn();
+    const runtime = createRemoteWindowMessageRuntime({ now: () => 47 });
+    const ws = makeSocket();
+
+    const stopRequest = runtime.stopStream('session-1', {
+      ws,
+      streamId: 'stream-3',
+      sendSocketPayload,
+    });
+    const requestId = JSON.parse(sendSocketPayload.mock.calls[0][2] as string).payload.requestId;
+
+    expect(runtime.dispatch({
+      type: 'remote-window-error',
+      payload: {
+        requestId,
+        streamId: 'stream-3',
+        code: 'remote_window_stream_stop_failed',
+        message: 'daemon stop failed',
+      },
+    })).toBe(true);
+    await expect(stopRequest).rejects.toMatchObject({
+      name: 'remote_window_stream_stop_failed',
+      message: 'daemon stop failed',
+    });
+    expect(runtime.getPendingCount()).toBe(0);
   });
 
   it('sends stream quality requests and classifies the daemon result as remote-window control', () => {
@@ -372,6 +426,7 @@ describe('remote window message runtime', () => {
       ws,
       payload: {
         streamId: 'stream-3',
+        purpose: 'focus',
         targetId: 'target-3',
         videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
       },
@@ -383,6 +438,7 @@ describe('remote window message runtime', () => {
       payload: {
         requestId: expect.stringMatching(/^rw-quality-471-/),
         streamId: 'stream-3',
+        purpose: 'focus',
         targetId: 'target-3',
         videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
       },
@@ -392,6 +448,7 @@ describe('remote window message runtime', () => {
       payload: {
         requestId: 'rw-quality-1',
         streamId: 'stream-3',
+        purpose: 'focus',
         targetId: 'target-3',
         accepted: true,
         videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },

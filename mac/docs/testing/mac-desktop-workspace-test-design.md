@@ -150,6 +150,9 @@ Slice 5 hard checks now active:
 - split right/down updates pane tree only.
 - resize ratios remain normalized and deterministic.
 - move tab across panes preserves tab identity.
+- empty pane click activates that pane and opens the session chooser without creating runtime.
+- change-session context action opens a scoped pending replacement without removing the selected tab until a new session is confirmed; chooser cancel leaves the original tab/runtime identity intact.
+- move-to-numbered-pane context action moves the tab to the chosen pane and leaves runtime truth owned by `MacRuntimeRegistry`.
 - close tab/pane never stores runtime state.
 - invalid persisted workspace fails explicitly.
 - renderer bootstrap loads/saves by `windowId`.
@@ -247,6 +250,8 @@ Renderer/app black-box:
 - App boots to one desktop workspace shell.
 - Empty workspace shows terminal-first open affordance.
 - Split creates independent visual pane containers.
+- Blank split panes are clickable chooser targets and display explicit pane numbering.
+- Existing pane tabs expose context actions to change session or move the tab to an explicit `Pn`.
 - Opening two local tmux sessions creates two tabs/panes with distinct status surfaces.
 - Switching tabs does not clear previous render projection.
 - Server rail shows saved servers and live sessions.

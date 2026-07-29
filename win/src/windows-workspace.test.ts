@@ -1,13 +1,17 @@
 import { describe, expect, it } from 'vitest';
 import {
   activateWindowsWorkspaceTab,
+  changeWindowsWorkspaceTabSession,
   closeWindowsWorkspaceTab,
   closeWindowsWorkspaceTarget,
   createWindowsWorkspaceState,
   listWindowsWorkspaceRuntimeTabs,
+  moveWindowsWorkspaceTab,
   openWindowsWorkspaceTab,
+  openWindowsWorkspaceTabInPane,
   resizeWindowsWorkspacePanes,
   splitWindowsWorkspace,
+  splitWindowsWorkspaceEmpty,
 } from './windows-workspace';
 
 const target = (sessionName: string) => ({ bridgeHost: '127.0.0.1', bridgePort: 3333, sessionName });
@@ -53,5 +57,58 @@ describe('windows workspace shared composition', () => {
     const closed = closeWindowsWorkspaceTarget(workspace, target('alpha'));
     expect(listWindowsWorkspaceRuntimeTabs(closed).map((tab) => tab.title)).toEqual(['beta']);
     expect(closed.panes).toHaveLength(1);
+  });
+
+  it('opens a selected session directly into an empty numbered pane', () => {
+    let workspace = openWindowsWorkspaceTab(createWindowsWorkspaceState(), target('alpha'));
+    workspace = splitWindowsWorkspaceEmpty(workspace);
+    const emptyPane = workspace.panes[1]!;
+
+    workspace = openWindowsWorkspaceTabInPane(workspace, emptyPane.id, target('beta'));
+
+    expect(workspace.activePaneId).toBe(emptyPane.id);
+    expect(workspace.panes[1]!.tabs).toHaveLength(1);
+    expect(workspace.panes[1]!.tabs[0]!.title).toBe('beta');
+    expect(listWindowsWorkspaceRuntimeTabs(workspace).map((tab) => tab.title)).toEqual(['alpha', 'beta']);
+  });
+
+  it('changes one pane tab session without mutating sibling pane identity', () => {
+    let workspace = openWindowsWorkspaceTab(createWindowsWorkspaceState(), target('alpha'));
+    workspace = splitWindowsWorkspace(workspace, target('beta'));
+    const firstPane = workspace.panes[0]!;
+    const secondPane = workspace.panes[1]!;
+
+    workspace = changeWindowsWorkspaceTabSession(workspace, firstPane.id, firstPane.activeTabId, target('gamma'));
+
+    expect(workspace.activePaneId).toBe(firstPane.id);
+    expect(workspace.panes[0]!.tabs.map((tab) => tab.title)).toEqual(['gamma']);
+    expect(workspace.panes[1]!.id).toBe(secondPane.id);
+    expect(workspace.panes[1]!.tabs.map((tab) => tab.title)).toEqual(['beta']);
+  });
+
+  it('moves a runtime tab to an explicitly selected pane', () => {
+    let workspace = openWindowsWorkspaceTab(createWindowsWorkspaceState(), target('alpha'));
+    workspace = openWindowsWorkspaceTab(workspace, target('beta'));
+    workspace = splitWindowsWorkspaceEmpty(workspace);
+    const firstPane = workspace.panes[0]!;
+    const secondPane = workspace.panes[1]!;
+
+    workspace = moveWindowsWorkspaceTab(workspace, firstPane.id, firstPane.tabs[1]!.id, secondPane.id);
+
+    expect(workspace.panes[0]!.tabs.map((tab) => tab.title)).toEqual(['alpha']);
+    expect(workspace.panes[1]!.tabs.map((tab) => tab.title)).toContain('beta');
+  });
+
+  it('does not move empty placeholder tabs between panes', () => {
+    let workspace = openWindowsWorkspaceTab(createWindowsWorkspaceState(), target('alpha'));
+    workspace = splitWindowsWorkspaceEmpty(workspace);
+    const emptyPane = workspace.panes[1]!;
+    const firstPane = workspace.panes[0]!;
+
+    const moved = moveWindowsWorkspaceTab(workspace, emptyPane.id, emptyPane.activeTabId, firstPane.id);
+
+    expect(moved).toBe(workspace);
+    expect(listWindowsWorkspaceRuntimeTabs(moved).map((tab) => tab.title)).toEqual(['alpha']);
+    expect(moved.panes[1]!.tabs[0]!.target).toBeNull();
   });
 });

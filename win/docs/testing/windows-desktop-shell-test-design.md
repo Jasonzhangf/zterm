@@ -37,10 +37,11 @@ The Windows shell must not own:
 
 - Lifecycle: a workspace tab owns terminal identity; a runtime registry owns exactly one live terminal session per tab id; pane/tab selection changes projection only and must not reconnect that runtime.
 - White-box: Windows workspace operations delegate pane add/remove/activate/resize to `@zterm/shared`; Windows code must not copy pane algorithms or import Mac workspace/IPC modules.
-- Module black-box positive: opening two daemon sessions creates two stable tab runtimes, tab switching reuses both instances, split/resize/close updates the shared pane projection, and closing a tab disposes only that tab runtime.
+- Module black-box positive: opening two daemon sessions creates two stable tab runtimes, tab switching reuses both instances, empty pane selection opens the session panel scoped to that pane, split/resize/close updates the shared pane projection, and closing a tab disposes only that tab runtime.
 - Module black-box negative: selecting an unknown pane/tab, splitting beyond the shared pane cap, or closing the last empty tab must not create a runtime or corrupt workspace identity.
 - Project black-box: the packaged Windows app opens two real daemon sessions in separate panes, both receive independent source markers, switching focus does not increase physical client transport count, and closing one tab leaves the sibling updating.
 - Packaged proof requires daemon health counts before/after focus switch and tab close, plus per-pane source markers and a new sibling marker after close.
+- Context-menu coverage: existing pane tabs expose `Change session` and `Move to Pn`; `Move to Pn` preserves tab identity, and `Change session` changes only the selected workspace tab target without mutating sibling pane identity.
 
 ## Windows local file browser test design
 
@@ -76,6 +77,7 @@ The Windows shell must not own:
 - Shell can list, create, select, and close daemon sessions through the existing control protocol, with no Windows-only daemon protocol fork.
 - Visible-range requests are blocked until the first daemon `buffer-sync` has made the mirror ready; connecting state must not emit `buffer-sync-request`.
 - Pane/tab operations preserve shared workspace identity and do not create another runtime per projection.
+- Session list selection opens into the current active pane; blank panes are valid active targets and do not create runtime until a session is chosen.
 - Filesystem/window bridge errors surface explicitly; missing bridge capability is not converted to success.
 - Closing the app window removes bridge subscriptions and renderer observers.
 

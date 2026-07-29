@@ -5,6 +5,7 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
 import type { RemoteWindowStreamStatusPayload } from '@zterm/shared/protocol';
+import type { RemoteWindowCaptureSourceFactory } from './remote-window-capture';
 import {
   buildScreenCaptureKitStartupTimeoutMessage,
   buildScreenCaptureKitConfig,
@@ -1698,10 +1699,11 @@ setInterval(() => {}, 1000);
       data: new Uint8Array(6).fill(7),
     });
     expect(statuses).toEqual([
-      { requestId: 'rw-start', streamId: 'stream-1', phase: 'starting' },
+      { requestId: 'rw-start', streamId: 'stream-1', purpose: 'focus', phase: 'starting' },
       {
         requestId: 'rw-start',
         streamId: 'stream-1',
+        purpose: 'focus',
         phase: 'streaming',
         framesSent: 1,
         frameWidth: 2,
@@ -1711,6 +1713,7 @@ setInterval(() => {}, 1000);
     expect(candidates).toEqual([{
       requestId: 'rw-start',
       streamId: 'stream-1',
+      purpose: 'focus',
       candidate: {
         candidate: 'candidate:daemon',
         sdpMid: '0',
@@ -1718,6 +1721,88 @@ setInterval(() => {}, 1000);
         usernameFragment: 'daemon',
       },
     }]);
+  });
+
+  it('keeps low-rate preview and high-quality focus streams independent in daemon lifecycle', async () => {
+    const canvasPeer = new FakeRemoteWindowPeerConnection();
+    const focusPeer = new FakeRemoteWindowPeerConnection();
+    canvasPeer.addTrack.mockReturnValue(makeFakeRtpSender());
+    focusPeer.addTrack.mockReturnValue(makeFakeRtpSender());
+    const peers = [canvasPeer, focusPeer];
+    const tracks = [makeFakeMediaStreamTrack(), makeFakeMediaStreamTrack()];
+    const videoSources = tracks.map((track) => ({
+      createTrack: vi.fn(() => track),
+      onFrame: vi.fn(),
+    }));
+    const captureStops = [vi.fn(), vi.fn()];
+    let captureIndex = 0;
+    const captureSourceFactory: RemoteWindowCaptureSourceFactory = vi.fn(async (_target, options) => {
+      options.onFrame({
+        width: 2,
+        height: 2,
+        rgba: new Uint8Array(16).fill(12),
+      });
+      const index = captureIndex;
+      captureIndex += 1;
+      return {
+        width: 2,
+        height: 2,
+        frameRate: options.frameRate,
+        stop: captureStops[index]!,
+      };
+    });
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory,
+      peerConnectionFactory: vi.fn(() => peers.shift() as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => videoSources.shift() as any),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(7);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await expect(runtime.startStream({
+      requestId: 'rw-canvas',
+      streamId: 'canvas-stream',
+      purpose: 'preview',
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'canvas-offer' },
+      videoBitrate: { preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000 },
+    })).resolves.toMatchObject({
+      streamId: 'canvas-stream',
+      purpose: 'preview',
+      capture: { maxBitrateBps: 2_000_000 },
+    });
+    await expect(runtime.startStream({
+      requestId: 'rw-focus',
+      streamId: 'focus-stream',
+      purpose: 'focus',
+      target: makeStreamTarget(),
+      offer: { type: 'offer', sdp: 'focus-offer' },
+      videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
+    })).resolves.toMatchObject({
+      streamId: 'focus-stream',
+      purpose: 'focus',
+      capture: { maxBitrateBps: 20_000_000 },
+    });
+
+    await expect(runtime.stopStream({
+      requestId: 'rw-stop-focus',
+      streamId: 'focus-stream',
+      purpose: 'focus',
+    })).resolves.toMatchObject({
+      streamId: 'focus-stream',
+      purpose: 'focus',
+      phase: 'stopped',
+    });
+    await expect(runtime.addIceCandidate({
+      streamId: 'canvas-stream',
+      candidate: { candidate: 'candidate:canvas' },
+    })).resolves.toBe(true);
+    expect(captureStops[0]).not.toHaveBeenCalled();
+    expect(captureStops[1]).toHaveBeenCalledTimes(1);
   });
 
   it('defers the first capture frame only until the sender local description is ready', async () => {
@@ -1780,10 +1865,11 @@ setInterval(() => {}, 1000);
     });
     expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(2);
     expect(statuses).toEqual([
-      { requestId: 'rw-early-frame', streamId: 'stream-early-frame', phase: 'starting' },
+      { requestId: 'rw-early-frame', streamId: 'stream-early-frame', purpose: 'focus', phase: 'starting' },
       {
         requestId: 'rw-early-frame',
         streamId: 'stream-early-frame',
+        purpose: 'focus',
         phase: 'streaming',
         framesSent: 1,
         frameWidth: 2,
@@ -1854,10 +1940,11 @@ setInterval(() => {}, 1000);
     expect(captureStop).toHaveBeenCalledTimes(1);
     expect(fakeVideoSource.onFrame).toHaveBeenCalledTimes(1);
     expect(statuses).toEqual([
-      { requestId: 'rw-early-frame-stop', streamId: 'stream-early-frame-stop', phase: 'starting' },
+      { requestId: 'rw-early-frame-stop', streamId: 'stream-early-frame-stop', purpose: 'focus', phase: 'starting' },
       {
         requestId: 'rw-early-frame-stop',
         streamId: 'stream-early-frame-stop',
+        purpose: 'focus',
         phase: 'streaming',
         framesSent: 1,
         frameWidth: 2,
@@ -1866,6 +1953,7 @@ setInterval(() => {}, 1000);
       {
         requestId: 'rw-early-frame-stop',
         streamId: 'stream-early-frame-stop',
+        purpose: 'focus',
         phase: 'stopped',
         framesSent: 1,
         message: 'remote window stream stopped',
@@ -1934,6 +2022,7 @@ setInterval(() => {}, 1000);
     expect(updated).toEqual({
       requestId: 'rw-bitrate-update',
       streamId: 'stream-bitrate',
+      purpose: 'focus',
       targetId: 'iterm2-pane:window-1:tab-1:left',
       accepted: true,
       videoBitrate: { preset: 'fullscreen', bitrateMbps: 20, maxBitrateBps: 20_000_000, maxFrameRateFps: 60 },
@@ -1988,6 +2077,7 @@ setInterval(() => {}, 1000);
     expect(statuses).toContainEqual({
       requestId: 'rw-bitrate-empty-start',
       streamId: 'stream-bitrate-empty',
+      purpose: 'focus',
       phase: 'starting',
       message: 'video bitrate not applied: remote window video bitrate sender has no encodings to update',
     });
@@ -2300,6 +2390,7 @@ setInterval(() => {}, 1000);
     expect(stopped).toMatchObject({
       requestId: 'rw-stop',
       streamId: 'stream-stop',
+      purpose: 'focus',
       phase: 'stopped',
       framesSent: 1,
     });
@@ -2320,6 +2411,7 @@ setInterval(() => {}, 1000);
     expect(statuses).toContainEqual(expect.objectContaining({
       requestId: 'rw-start-stop',
       streamId: 'stream-stop',
+      purpose: 'focus',
       phase: 'stopped',
       framesSent: 1,
     }));

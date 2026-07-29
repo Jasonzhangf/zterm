@@ -15984,6 +15984,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
     entry.handlers.sendStatus?.({
       requestId: entry.requestId,
       streamId: entry.streamId,
+      purpose: entry.purpose,
       phase: "stopped",
       framesSent: entry.framesSent,
       message: reason
@@ -16004,6 +16005,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
       entry.handlers.sendStatus?.({
         requestId: entry.requestId,
         streamId: entry.streamId,
+        purpose: entry.purpose,
         phase: "streaming",
         framesSent: entry.framesSent,
         frameWidth: captureFrame.width,
@@ -16164,6 +16166,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
     if (activeStreams.has(payload.streamId)) {
       return buildStreamError(payload, "remote_window_stream_exists", `remote window stream already exists: ${payload.streamId}`);
     }
+    const purpose = payload.purpose ?? "focus";
     let entry = null;
     try {
       validateStreamTargetForCapture(payload.target);
@@ -16183,6 +16186,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
       let videoBitrateWarning = null;
       entry = {
         streamId: payload.streamId,
+        purpose,
         requestId: payload.requestId,
         targetId: payload.target.streamTargetId,
         target: payload.target,
@@ -16205,6 +16209,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
         handlers.sendIceCandidate?.({
           requestId: payload.requestId,
           streamId: payload.streamId,
+          purpose,
           candidate: normalizeIceCandidate(event.candidate)
         });
       };
@@ -16223,6 +16228,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
       handlers.sendStatus?.({
         requestId: payload.requestId,
         streamId: payload.streamId,
+        purpose,
         phase: "starting",
         ...videoBitrateWarning ? { message: `video bitrate not applied: ${videoBitrateWarning}` } : {}
       });
@@ -16278,6 +16284,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
           handlers.sendStatus?.({
             requestId: payload.requestId,
             streamId: payload.streamId,
+            purpose,
             phase: "starting",
             message: `video bitrate not applied: ${videoBitrateWarning}`
           });
@@ -16286,6 +16293,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
       return {
         requestId: payload.requestId,
         streamId: payload.streamId,
+        purpose,
         targetId: payload.target.streamTargetId,
         answer: normalizeRtcDescription(peerConnection.localDescription || answer, "answer"),
         capture: {
@@ -16334,6 +16342,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
       return {
         requestId: payload.requestId,
         streamId: payload.streamId,
+        ...payload.purpose ? { purpose: payload.purpose } : {},
         phase: "stopped",
         framesSent: 0,
         message: "remote window stream already stopped"
@@ -16344,6 +16353,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
     return {
       requestId: payload.requestId,
       streamId: payload.streamId,
+      purpose: entry.purpose,
       phase: "stopped",
       framesSent,
       message: "remote window stream stopped"
@@ -16373,6 +16383,7 @@ function createRemoteWindowStreamDaemonRuntime(deps) {
       return {
         requestId: payload.requestId,
         streamId: payload.streamId,
+        purpose: entry.purpose,
         targetId: payload.targetId,
         accepted: true,
         videoBitrate: applyResult.videoBitrate

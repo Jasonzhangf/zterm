@@ -89,6 +89,7 @@ export type {
   RemoteWindowStreamErrorPayload,
   RemoteWindowStreamIceCandidate,
   RemoteWindowStreamIceCandidatePayload,
+  RemoteWindowStreamPurpose,
   RemoteWindowStreamRect,
   RemoteWindowStreamRequestPayload,
   RemoteWindowStreamRtcDescription,

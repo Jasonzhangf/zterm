@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAppPageState } from './useAppPageState';
 import { STORAGE_KEYS } from '../lib/types';
@@ -9,6 +9,20 @@ describe('useAppPageState', () => {
   beforeEach(() => {
     localStorage.clear();
   });
+
+  const sessionS1 = {
+    id: 's1',
+    hostId: 'host-s1',
+    connectionName: 'Mac Studio',
+    bridgeHost: '100.66.1.82',
+    bridgePort: 3333,
+    sessionName: 'freehand',
+    title: 'freehand',
+    ws: null,
+    state: 'connected',
+    hasUnread: false,
+    createdAt: 1,
+  } as any;
 
   it('does not cold-restore the terminal page when no runtime session exists', () => {
     localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
@@ -33,21 +47,9 @@ describe('useAppPageState', () => {
     localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
     const ensureTerminalPageVisible = vi.fn();
 
-    renderHook(() => useAppPageState({
+    const { result } = renderHook(() => useAppPageState({
       hosts: [],
-      sessions: [{
-        id: 's1',
-        hostId: 'host-s1',
-        connectionName: 'Mac Studio',
-        bridgeHost: '100.66.1.82',
-        bridgePort: 3333,
-        sessionName: 'freehand',
-        title: 'freehand',
-        ws: null,
-        state: 'connected',
-        hasUnread: false,
-        createdAt: 1,
-      } as any],
+      sessions: [sessionS1],
       runtimeActiveSessionId: 's1',
       addHost: vi.fn(),
       updateHost: vi.fn(),
@@ -55,11 +57,78 @@ describe('useAppPageState', () => {
       ensureTerminalPageVisible,
     }));
 
+    expect(result.current.pageState.kind).toBe('terminal');
     expect(ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
-    // The hook has no direct page setter in this test; App's
-    // ensureTerminalPageVisible callback owns the in-memory route transition.
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE) || '{}')).toEqual({
+      kind: 'terminal',
+    });
+  });
+
+  it('does not restore terminal when the active runtime id is stale', () => {
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
+    const ensureTerminalPageVisible = vi.fn();
+
+    const { result } = renderHook(() => useAppPageState({
+      hosts: [],
+      sessions: [sessionS1],
+      runtimeActiveSessionId: 'stale-session',
+      addHost: vi.fn(),
+      updateHost: vi.fn(),
+      deleteHost: vi.fn(),
+      ensureTerminalPageVisible,
+    }));
+
+    expect(result.current.pageState.kind).toBe('connections');
+    expect(ensureTerminalPageVisible).not.toHaveBeenCalled();
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE) || '{}')).toEqual({
       kind: 'connections',
+    });
+  });
+
+  it('preserves a pending terminal route while persisted tabs hydrate into a runtime session', async () => {
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([{
+      sessionId: 's1',
+      hostId: 'host-s1',
+      connectionName: 'Mac Studio',
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+      sessionName: 'freehand',
+      createdAt: 1,
+    }]));
+    const ensureTerminalPageVisible = vi.fn();
+
+    const { result, rerender } = renderHook(
+      ({ sessions, runtimeActiveSessionId }) => useAppPageState({
+        hosts: [],
+        sessions,
+        runtimeActiveSessionId,
+        addHost: vi.fn(),
+        updateHost: vi.fn(),
+        deleteHost: vi.fn(),
+        ensureTerminalPageVisible,
+      }),
+      {
+        initialProps: {
+          sessions: [] as any[],
+          runtimeActiveSessionId: null as string | null,
+        },
+      },
+    );
+
+    expect(result.current.pageState.kind).toBe('connections');
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE) || '{}')).toEqual({
+      kind: 'terminal',
+    });
+
+    rerender({ sessions: [sessionS1], runtimeActiveSessionId: 's1' });
+
+    await waitFor(() => {
+      expect(result.current.pageState.kind).toBe('terminal');
+      expect(ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
+    });
+    expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE) || '{}')).toEqual({
+      kind: 'terminal',
     });
   });
 

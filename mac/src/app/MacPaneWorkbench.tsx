@@ -14,6 +14,7 @@
  * - pane 数量/比例由 shared workspace-model 唯一真源管
  */
 
+import { useEffect, useRef, useState } from 'react';
 import { MacTerminalView, PaneStage, PaneTabs, resolvePaneProfile, resizePaneRatio } from '@zterm/shared';
 import type {
   BridgeSettings,
@@ -29,6 +30,9 @@ import {
   resolveTabRuntimeKey,
   resolveTabTarget,
   closeTab,
+  moveTabToPane,
+  beginPendingSessionReplacement,
+  setLauncherOpen,
   type MacWorkbenchTab,
   type MacWorkbenchState,
 } from './workbench';
@@ -57,6 +61,7 @@ function MacTerminalPane({
   onActivatePane,
   onContextMenuTab,
   onRenameTab,
+  onEmptyPaneClick,
 }: {
   pane: WorkspacePane<MacWorkbenchTab>;
   paneIndex: number;
@@ -70,6 +75,7 @@ function MacTerminalPane({
   onActivatePane: (paneId: string) => void;
   onContextMenuTab: (paneId: string, tabId: string, anchor: { left: number; top: number }) => void;
   onRenameTab: (paneId: string, tabId: string) => void;
+  onEmptyPaneClick: (paneId: string) => void;
 }) {
   const activeTab = pane.tabs.find((t) => t.id === pane.activeTabId) ?? pane.tabs[0] ?? null;
   const activeTarget = resolveTabTarget(activeTab, hosts);
@@ -150,13 +156,25 @@ function MacTerminalPane({
             </div>
           </>
         ) : (
-          <div className="mac-terminal-empty">
-            <span>No session</span>
-          </div>
+          <button
+            className="mac-terminal-empty"
+            type="button"
+            data-testid={`mac-empty-pane-select-${pane.id}`}
+            onClick={() => onEmptyPaneClick(pane.id)}
+          >
+            <span>Choose session</span>
+          </button>
         )}
       </div>
     </div>
   );
+}
+
+interface MacPaneContextMenuState {
+  paneId: string;
+  tabId: string;
+  left: number;
+  top: number;
 }
 
 export function MacPaneWorkbench({
@@ -168,6 +186,40 @@ export function MacPaneWorkbench({
   runtimeRegistry,
 }: MacPaneWorkbenchProps) {
   const profile = resolvePaneProfile({ platform, splitVisible });
+  const [contextMenu, setContextMenu] = useState<MacPaneContextMenuState | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const dismissOnPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && contextMenuRef.current?.contains(target)) {
+        return;
+      }
+      setContextMenu(null);
+    };
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setContextMenu(null);
+      }
+    };
+    window.addEventListener('pointerdown', dismissOnPointerDown, true);
+    window.addEventListener('keydown', dismissOnEscape);
+    return () => {
+      window.removeEventListener('pointerdown', dismissOnPointerDown, true);
+      window.removeEventListener('keydown', dismissOnEscape);
+    };
+  }, [contextMenu]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const stillExists = workbench.workspace.panes.some((pane) => (
+      pane.id === contextMenu.paneId && pane.tabs.some((tab) => tab.id === contextMenu.tabId)
+    ));
+    if (!stillExists) {
+      setContextMenu(null);
+    }
+  }, [contextMenu, workbench.workspace.panes]);
 
   const handleSelectTab = (paneId: string, tabId: string) => {
     setWorkbench((prev) => {
@@ -203,17 +255,36 @@ export function MacPaneWorkbench({
     }));
   };
 
-  const handleContextMenuTab = (paneId: string, tabId: string, _anchor: { left: number; top: number }) => {
-    // desktop right-click 当前阶段不弹菜单 — 后续切片 (mac-5) 接 PaneTabs context menu
-    // 此处不修改状态，但保留 callback 让红测可观察 event 路由
-    void paneId;
-    void tabId;
+  const handleContextMenuTab = (paneId: string, tabId: string, anchor: { left: number; top: number }) => {
+    setContextMenu({ paneId, tabId, left: anchor.left, top: anchor.top });
   };
 
   const handleRenameTab = (paneId: string, tabId: string) => {
     // desktop double-click rename — 后续切片 (mac-5) 接 inline rename editor
     void paneId;
     void tabId;
+  };
+
+  const handleEmptyPaneClick = (paneId: string) => {
+    setContextMenu(null);
+    setWorkbench((prev) => ({
+      ...setLauncherOpen(prev, true),
+      workspace: { ...prev.workspace, activePaneId: paneId },
+    }));
+  };
+
+  const handleChangeContextSession = () => {
+    const current = contextMenu;
+    if (!current) return;
+    setContextMenu(null);
+    setWorkbench((prev) => beginPendingSessionReplacement(prev, current.paneId, current.tabId));
+  };
+
+  const handleMoveContextTab = (targetPaneId: string) => {
+    const current = contextMenu;
+    if (!current) return;
+    setContextMenu(null);
+    setWorkbench((prev) => moveTabToPane(prev, current.paneId, current.tabId, targetPaneId));
   };
 
   const slots: PaneSlotDefinition[] = workbench.workspace.panes.map((pane, index) => ({
@@ -237,22 +308,50 @@ export function MacPaneWorkbench({
         onActivatePane={handleActivatePane}
         onContextMenuTab={handleContextMenuTab}
         onRenameTab={handleRenameTab}
+        onEmptyPaneClick={handleEmptyPaneClick}
       />
     ),
   }));
 
   return (
-    <PaneStage
-      platform={platform}
-      splitVisible={splitVisible}
-      slots={slots}
-      onActivatePane={handleActivatePane}
-      onPaneRatioChange={(event) => {
-        setWorkbench((prev) => ({
-          ...prev,
-          workspace: resizePaneRatio(prev.workspace, event.sourcePaneId, event.targetPaneId, event.ratio),
-        }));
-      }}
-    />
+    <>
+      <PaneStage
+        platform={platform}
+        splitVisible={splitVisible}
+        slots={slots}
+        onActivatePane={handleActivatePane}
+        onPaneRatioChange={(event) => {
+          setWorkbench((prev) => ({
+            ...prev,
+            workspace: resizePaneRatio(prev.workspace, event.sourcePaneId, event.targetPaneId, event.ratio),
+          }));
+        }}
+      />
+      {contextMenu ? (
+        <div
+          ref={contextMenuRef}
+          className="mac-pane-context-menu"
+          data-testid="mac-pane-context-menu"
+          style={{ left: contextMenu.left, top: contextMenu.top }}
+          role="menu"
+        >
+          <button type="button" role="menuitem" onClick={handleChangeContextSession}>
+            Change session
+          </button>
+          {workbench.workspace.panes
+            .filter((pane) => pane.id !== contextMenu.paneId)
+            .map((pane, index) => (
+              <button
+                key={pane.id}
+                type="button"
+                role="menuitem"
+                onClick={() => handleMoveContextTab(pane.id)}
+              >
+                Move to P{workbench.workspace.panes.findIndex((candidate) => candidate.id === pane.id) + 1 || index + 1}
+              </button>
+            ))}
+        </div>
+      ) : null}
+    </>
   );
 }

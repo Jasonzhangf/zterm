@@ -6,6 +6,15 @@ import type {
 
 export type RemoteWindowOverlayMode = 'floating' | 'fullscreen';
 
+export interface RemoteWindowStreamHandoffState {
+  epoch: number;
+  previousStreamId: string;
+  pendingStreamId: string;
+  acceptedStreamIds?: string[];
+  targetId: string;
+  status: 'starting';
+}
+
 export type RemoteWindowOverlayState =
   | { phase: 'closed'; requestEpoch: number }
   | { phase: 'targetEnumerating'; requestEpoch: number; errorMessage?: string | null }
@@ -26,6 +35,10 @@ export type RemoteWindowOverlayState =
       streamStatus: 'idle' | 'starting' | 'streaming' | 'error';
       streamId?: string;
       streamErrorMessage?: string | null;
+      streamDegradedMessage?: string | null;
+      streamHandoff?: RemoteWindowStreamHandoffState | null;
+      streamHandoffErrorMessage?: string | null;
+      streamCleanupErrorMessage?: string | null;
       errors: RemoteWindowStreamErrorPayload[];
     };
 
@@ -179,6 +192,7 @@ export function selectRemoteWindowTarget(
       streamStatus: 'idle',
       streamId: undefined,
       streamErrorMessage: null,
+      streamDegradedMessage: null,
     };
   }
   return {
@@ -215,6 +229,28 @@ export function beginRemoteWindowStreamSetup(
     streamStarted: false,
     streamStatus: 'starting',
     streamErrorMessage: null,
+    streamDegradedMessage: null,
+    streamHandoff: null,
+    streamHandoffErrorMessage: null,
+    streamCleanupErrorMessage: null,
+  };
+}
+
+export function beginRemoteWindowStreamHandoff(
+  state: RemoteWindowOverlayState,
+  handoff: RemoteWindowStreamHandoffState,
+): RemoteWindowOverlayState {
+  if (
+    state.phase !== 'targetLocked'
+    || !state.streamId
+    || state.streamId !== handoff.previousStreamId
+  ) {
+    return state;
+  }
+  return {
+    ...state,
+    streamHandoff: handoff,
+    streamHandoffErrorMessage: null,
   };
 }
 
@@ -230,6 +266,90 @@ export function attachRemoteWindowStreamReceiver(
     streamStarted: true,
     streamStatus: 'streaming',
     streamErrorMessage: null,
+  };
+}
+
+export function degradeRemoteWindowStream(
+  state: RemoteWindowOverlayState,
+  streamId: string,
+  error: unknown,
+): RemoteWindowOverlayState {
+  if (state.phase !== 'targetLocked' || state.streamId !== streamId) {
+    return state;
+  }
+  return {
+    ...state,
+    streamDegradedMessage: error instanceof Error ? error.message : String(error),
+  };
+}
+
+export function commitRemoteWindowStreamHandoff(
+  state: RemoteWindowOverlayState,
+  handoff: RemoteWindowStreamHandoffState,
+  committedStreamId: string,
+): RemoteWindowOverlayState {
+  const acceptedStreamIds = handoff.acceptedStreamIds && handoff.acceptedStreamIds.length > 0
+    ? handoff.acceptedStreamIds
+    : [handoff.pendingStreamId];
+  if (
+    state.phase !== 'targetLocked'
+    || !state.streamHandoff
+    || state.streamHandoff.epoch !== handoff.epoch
+    || state.streamHandoff.pendingStreamId !== handoff.pendingStreamId
+    || state.streamHandoff.targetId !== handoff.targetId
+    || !acceptedStreamIds.includes(committedStreamId)
+  ) {
+    return state;
+  }
+  const committed = attachRemoteWindowStreamReceiver(
+    beginRemoteWindowStreamSetup(
+      selectRemoteWindowTarget(state, handoff.targetId),
+      committedStreamId,
+    ),
+    committedStreamId,
+  );
+  if (committed.phase !== 'targetLocked') {
+    return committed;
+  }
+  return {
+    ...committed,
+    streamHandoff: null,
+    streamHandoffErrorMessage: null,
+  };
+}
+
+export function failRemoteWindowStreamHandoff(
+  state: RemoteWindowOverlayState,
+  handoff: RemoteWindowStreamHandoffState,
+  error: unknown,
+): RemoteWindowOverlayState {
+  if (
+    state.phase !== 'targetLocked'
+    || !state.streamHandoff
+    || state.streamHandoff.epoch !== handoff.epoch
+    || state.streamHandoff.pendingStreamId !== handoff.pendingStreamId
+  ) {
+    return state;
+  }
+  return {
+    ...state,
+    streamHandoff: null,
+    streamHandoffErrorMessage: error instanceof Error ? error.message : String(error),
+  };
+}
+
+export function failRemoteWindowStreamCleanup(
+  state: RemoteWindowOverlayState,
+  previousStreamId: string,
+  nextStreamId: string,
+  error: unknown,
+): RemoteWindowOverlayState {
+  if (state.phase !== 'targetLocked' || state.streamId !== nextStreamId) {
+    return state;
+  }
+  return {
+    ...state,
+    streamCleanupErrorMessage: `旧远程窗口流 ${previousStreamId} 清理失败: ${error instanceof Error ? error.message : String(error)}`,
   };
 }
 

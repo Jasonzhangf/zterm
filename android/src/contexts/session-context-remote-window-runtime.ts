@@ -1,8 +1,10 @@
 import type {
   RemoteWindowStreamIceCandidate,
   RemoteWindowInputEventPayload,
+  RemoteWindowStreamStatusPayload,
   RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamStartedPayload,
+  RemoteWindowStreamPurpose,
   RemoteWindowStreamTargetManifest,
   RemoteWindowVideoBitrateConfig,
   Session,
@@ -31,6 +33,7 @@ interface RemoteWindowStreamMessageRuntimeLike extends RemoteWindowCatalogMessag
     options: {
       ws: BridgeTransportSocket;
       streamId: string;
+      purpose?: RemoteWindowStreamPurpose;
       target: RemoteWindowStreamTargetManifest;
       offer: { type: 'offer'; sdp: string };
       iceServers?: Array<Record<string, unknown>>;
@@ -51,6 +54,7 @@ interface RemoteWindowStreamMessageRuntimeLike extends RemoteWindowCatalogMessag
     options: {
       ws: BridgeTransportSocket;
       streamId: string;
+      purpose?: RemoteWindowStreamPurpose;
       candidate: RemoteWindowStreamIceCandidate;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     },
@@ -60,9 +64,10 @@ interface RemoteWindowStreamMessageRuntimeLike extends RemoteWindowCatalogMessag
     options: {
       ws: BridgeTransportSocket;
       streamId: string;
+      purpose?: RemoteWindowStreamPurpose;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     },
-  ) => void;
+  ) => Promise<RemoteWindowStreamStatusPayload>;
   sendInputEvent: (
     sessionId: string,
     options: {
@@ -84,6 +89,7 @@ interface RemoteWindowStreamMessageRuntimeLike extends RemoteWindowCatalogMessag
 interface RemoteWindowReceiverRuntimeLike {
   startStream: (options: {
     streamId: string;
+    purpose?: RemoteWindowStreamPurpose;
     target: RemoteWindowStreamTargetManifest;
     iceServers?: RTCIceServer[];
     sendIceCandidate: (candidate: RemoteWindowStreamIceCandidate) => void;
@@ -257,6 +263,7 @@ export async function requestRemoteWindowTargetsRuntime(options: {
 export async function requestRemoteWindowStreamStartRuntime(options: {
   sessionId: string;
   streamId: string;
+  purpose?: RemoteWindowStreamPurpose;
   target: RemoteWindowStreamTargetManifest;
   videoBitrate?: RemoteWindowVideoBitrateConfig;
   iceServers?: RTCIceServer[];
@@ -287,12 +294,14 @@ export async function requestRemoteWindowStreamStartRuntime(options: {
     });
   return options.remoteWindowReceiverRuntime.startStream({
     streamId,
+    purpose: options.purpose,
     target: options.target,
     iceServers,
     sendIceCandidate: (candidate) => {
       options.remoteWindowMessageRuntime.sendStreamIceCandidate(targetSessionId, {
         ws,
         streamId,
+        purpose: options.purpose,
         candidate,
         sendSocketPayload: options.sendSocketPayload,
       });
@@ -300,6 +309,7 @@ export async function requestRemoteWindowStreamStartRuntime(options: {
     startRemote: (offer) => options.remoteWindowMessageRuntime.requestStreamStart(targetSessionId, {
       ws,
       streamId,
+      purpose: options.purpose,
       target: options.target,
       offer,
       iceServers: iceServers?.map((server) => ({ ...server })) as Array<Record<string, unknown>> | undefined,
@@ -333,9 +343,10 @@ export function updateRemoteWindowStreamQualityRuntime(options: {
   });
 }
 
-export function stopRemoteWindowStreamRuntime(options: {
+export async function stopRemoteWindowStreamRuntime(options: {
   sessionId: string;
   streamId: string;
+  purpose?: RemoteWindowStreamPurpose;
   sessions: Session[];
   daemonConnection: ClientDaemonConnection;
   remoteWindowMessageRuntime: RemoteWindowStreamMessageRuntimeLike;
@@ -353,9 +364,10 @@ export function stopRemoteWindowStreamRuntime(options: {
     sessions: options.sessions,
     daemonConnection: options.daemonConnection,
   });
-  options.remoteWindowMessageRuntime.stopStream(targetSessionId, {
+  await options.remoteWindowMessageRuntime.stopStream(targetSessionId, {
     ws,
     streamId,
+    purpose: options.purpose,
     sendSocketPayload: options.sendSocketPayload,
   });
   return localStopped;

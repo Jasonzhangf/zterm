@@ -103,6 +103,7 @@ import {
   type PasteImageStartPayload,
   type RemoteWindowInputEventPayload,
   type RemoteWindowStreamQualityRequestPayload,
+  type RemoteWindowStreamPurpose,
   type RemoteWindowStreamTargetManifest,
   type RemoteWindowStreamTargetsResponsePayload,
   type RemoteWindowVideoBitrateConfig,
@@ -583,13 +584,13 @@ interface TerminalPageProps {
     sessionId: string,
     target: RemoteWindowStreamTargetManifest,
     streamId: string,
-    options?: { videoBitrate?: RemoteWindowVideoBitrateConfig },
+    options?: { videoBitrate?: RemoteWindowVideoBitrateConfig; purpose?: RemoteWindowStreamPurpose },
   ) => Promise<RemoteWindowReceiverStartResult>;
   onUpdateRemoteWindowStreamQuality?: (
     sessionId: string,
     payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>,
   ) => void;
-  onStopRemoteWindowStream?: (sessionId: string, streamId: string) => boolean;
+  onStopRemoteWindowStream?: (sessionId: string, streamId: string) => unknown;
   onSendRemoteWindowInput?: (
     sessionId: string,
     payload: Omit<RemoteWindowInputEventPayload, 'requestId'>,

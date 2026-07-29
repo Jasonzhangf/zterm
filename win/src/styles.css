@@ -18,8 +18,13 @@ button, input { font: inherit; letter-spacing: 0; }
 .windows-pane { width: 100%; height: 100%; display: flex; flex-direction: column; min-width: 0; min-height: 0; background: #111318; }
 .terminal-stage { position: relative; flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
 .terminal-stage > [data-terminal-viewport], .terminal-stage > div { width: 100%; height: 100%; }
-.terminal-empty { display: grid; place-items: center; color: #777f8b; font-size: 12px; }
+.terminal-empty { display: grid; place-items: center; width: 100%; height: 100%; border: 0; background: transparent; color: #777f8b; font-size: 12px; cursor: pointer; }
+.terminal-empty:hover { color: #e7e9ec; background: rgba(94, 142, 215, .08); }
 .error-banner { position: absolute; z-index: 3; top: 10px; left: 50%; transform: translateX(-50%); width: min(680px, calc(100% - 28px)); height: auto !important; padding: 9px 12px; border: 1px solid #713d3d; background: #3b2325; color: #ffd9d9; font-size: 12px; }
+.windows-pane-context-menu { position: fixed; z-index: 8; min-width: 150px; padding: 5px; border: 1px solid #3a404a; border-radius: 8px; background: #151922; box-shadow: 0 14px 36px rgba(0,0,0,.42); }
+.windows-pane-context-menu button { display: block; width: 100%; min-height: 28px; border: 0; border-radius: 6px; background: transparent; color: #e7e9ec; text-align: left; padding: 0 9px; cursor: pointer; }
+.windows-pane-context-menu button:hover:not(:disabled) { background: #242d3d; }
+.windows-pane-context-menu button:disabled { color: #69717d; cursor: default; }
 .connection-panel { position: absolute; z-index: 5; top: 54px; right: 12px; width: min(380px, calc(100% - 24px)); max-height: calc(100% - 66px); overflow: auto; padding: 16px; border: 1px solid #343942; background: #1b1f26; box-shadow: 0 14px 36px rgba(0,0,0,.42); }
 .panel-title { margin-bottom: 14px; font-size: 14px; font-weight: 650; }
 .connection-panel label { display: grid; grid-template-columns: 72px 1fr; align-items: center; gap: 8px; margin: 9px 0; color: #aeb4be; font-size: 12px; }

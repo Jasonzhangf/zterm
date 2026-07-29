@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import {
   MacTerminalView,
   PaneStage,
@@ -21,19 +21,39 @@ import { WindowsFileBrowserPanel } from './WindowsFileBrowserPanel';
 import {
   activateWindowsWorkspacePane,
   activateWindowsWorkspaceTab,
+  changeWindowsWorkspaceTabSession,
   closeWindowsWorkspaceTarget,
   closeWindowsWorkspaceTab,
   createWindowsWorkspaceState,
   listWindowsWorkspaceRuntimeTabs,
+  moveWindowsWorkspaceTab,
   openWindowsWorkspaceTab,
+  openWindowsWorkspaceTabInPane,
   resizeWindowsWorkspacePanes,
   splitWindowsWorkspace,
+  splitWindowsWorkspaceEmpty,
   type WindowsWorkspaceState,
   type WindowsWorkspaceTab,
 } from './windows-workspace';
 
 const STORAGE_KEY = 'zterm:windows:target.v1';
 const DEFAULT_TARGET: WindowsTerminalTarget = { bridgeHost: '127.0.0.1', bridgePort: 3333, sessionName: 'zterm' };
+
+interface WindowsPaneContextMenuState {
+  paneId: string;
+  tabId: string;
+  left: number;
+  top: number;
+}
+
+function hasWindowsWorkspaceTab(
+  workspace: WindowsWorkspaceState,
+  replacement: { paneId: string; tabId: string } | null,
+) {
+  return Boolean(replacement && workspace.panes.some((pane) => (
+    pane.id === replacement.paneId && pane.tabs.some((tab) => tab.id === replacement.tabId)
+  )));
+}
 
 function readTarget() {
   try {
@@ -54,6 +74,8 @@ function WindowsTerminalPane({
   onSelectTab,
   onCloseTab,
   onActivatePane,
+  onEmptyPaneClick,
+  onContextMenuTab,
 }: {
   pane: WorkspacePane<WindowsWorkspaceTab>;
   paneIndex: number;
@@ -63,6 +85,8 @@ function WindowsTerminalPane({
   onSelectTab: (tabId: string) => void;
   onCloseTab: (tabId: string) => void;
   onActivatePane: () => void;
+  onEmptyPaneClick: () => void;
+  onContextMenuTab: (tabId: string, anchor: { left: number; top: number }) => void;
 }) {
   const profile = resolvePaneProfile({ platform: 'desktop', splitVisible });
   const snapshot = useSyncExternalStore(
@@ -89,6 +113,7 @@ function WindowsTerminalPane({
         onSelectTab={onSelectTab}
         onCloseTab={onCloseTab}
         onActivatePane={onActivatePane}
+        onContextMenuTab={onContextMenuTab}
       />
       <div className="terminal-stage">
         {snapshot?.error ? <div className="error-banner">{snapshot.error}</div> : null}
@@ -102,7 +127,9 @@ function WindowsTerminalPane({
             onViewportChange={(value) => session.requestVisibleRange(value as { startIndex?: number; endIndex?: number })}
           />
         ) : (
-          <div className="terminal-empty">Choose a session to open a terminal</div>
+          <button className="terminal-empty" type="button" data-testid={`windows-empty-pane-select-${pane.id}`} onClick={onEmptyPaneClick}>
+            Choose a session
+          </button>
         )}
       </div>
     </div>
@@ -113,10 +140,14 @@ export function WindowsWorkspaceStage({
   workspace,
   registry,
   onChange,
+  onEmptyPaneSelect,
+  onTabContextMenu,
 }: {
   workspace: WindowsWorkspaceState;
   registry: ReturnType<typeof createWindowsTerminalRegistry>;
   onChange: (next: WindowsWorkspaceState) => void;
+  onEmptyPaneSelect: (paneId: string) => void;
+  onTabContextMenu: (paneId: string, tabId: string, anchor: { left: number; top: number }) => void;
 }) {
   const slots: PaneSlotDefinition[] = workspace.panes.map((pane, paneIndex) => {
     const activeTab = pane.tabs.find((tab) => tab.id === pane.activeTabId) ?? pane.tabs[0]!;
@@ -137,6 +168,8 @@ export function WindowsWorkspaceStage({
           onSelectTab={(tabId) => onChange(activateWindowsWorkspaceTab(workspace, pane.id, tabId))}
           onCloseTab={(tabId) => onChange(closeWindowsWorkspaceTab(workspace, pane.id, tabId))}
           onActivatePane={() => onChange(activateWindowsWorkspacePane(workspace, pane.id))}
+          onEmptyPaneClick={() => onEmptyPaneSelect(pane.id)}
+          onContextMenuTab={(tabId, anchor) => onTabContextMenu(pane.id, tabId, anchor)}
         />
       ),
     };
@@ -163,6 +196,21 @@ export function WindowsDesktopApp() {
   const [newSessionName, setNewSessionName] = useState('');
   const [settingsOpen, setSettingsOpen] = useState(true);
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState<WindowsPaneContextMenuState | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement | null>(null);
+  const [pendingSessionReplacement, setPendingSessionReplacement] = useState<{ paneId: string; tabId: string } | null>(null);
+  const closeSettingsPanel = () => {
+    setPendingSessionReplacement(null);
+    setSettingsOpen(false);
+  };
+  const toggleSettingsPanel = () => {
+    setSettingsOpen((open) => {
+      if (open) {
+        setPendingSessionReplacement(null);
+      }
+      return !open;
+    });
+  };
 
   useEffect(() => {
     const tabs = listWindowsWorkspaceRuntimeTabs(workspace);
@@ -173,14 +221,102 @@ export function WindowsDesktopApp() {
   useEffect(() => () => registry.dispose(), [registry]);
   void registryRevision;
 
+  useEffect(() => {
+    if (!contextMenu) return;
+    const dismissOnPointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && contextMenuRef.current?.contains(target)) {
+        return;
+      }
+      setContextMenu(null);
+    };
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setContextMenu(null);
+      }
+    };
+    window.addEventListener('pointerdown', dismissOnPointerDown, true);
+    window.addEventListener('keydown', dismissOnEscape);
+    return () => {
+      window.removeEventListener('pointerdown', dismissOnPointerDown, true);
+      window.removeEventListener('keydown', dismissOnEscape);
+    };
+  }, [contextMenu]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const stillExists = workspace.panes.some((pane) => (
+      pane.id === contextMenu.paneId && pane.tabs.some((tab) => tab.id === contextMenu.tabId)
+    ));
+    if (!stillExists) {
+      setContextMenu(null);
+    }
+  }, [contextMenu, workspace.panes]);
+
+  useEffect(() => {
+    if (!pendingSessionReplacement) return;
+    if (!hasWindowsWorkspaceTab(workspace, pendingSessionReplacement)) {
+      setPendingSessionReplacement(null);
+    }
+  }, [pendingSessionReplacement, workspace]);
+
   const activeTab = resolveActiveTab(workspace);
   const controlTarget = { bridgeHost: target.bridgeHost, bridgePort: target.bridgePort, authToken: target.authToken };
   const validTarget = Boolean(target.bridgeHost.trim() && target.sessionName.trim() && target.bridgePort > 0);
+  const targetForSession = (sessionName: string): WindowsTerminalTarget => ({ ...target, sessionName });
   const openTarget = (split: boolean) => {
     if (!validTarget) return;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(target));
-    setWorkspace((current) => split ? splitWindowsWorkspace(current, target) : openWindowsWorkspaceTab(current, target));
+    setWorkspace((current) => {
+      if (!split && hasWindowsWorkspaceTab(current, pendingSessionReplacement)) {
+        return changeWindowsWorkspaceTabSession(
+          current,
+          pendingSessionReplacement!.paneId,
+          pendingSessionReplacement!.tabId,
+          target,
+        );
+      }
+      return split ? splitWindowsWorkspace(current, target) : openWindowsWorkspaceTab(current, target);
+    });
+    setPendingSessionReplacement(null);
     setSettingsOpen(false);
+  };
+  const openSessionInActivePane = (sessionName: string) => {
+    const nextTarget = targetForSession(sessionName);
+    setTarget(nextTarget);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(nextTarget));
+    setWorkspace((current) => {
+      if (hasWindowsWorkspaceTab(current, pendingSessionReplacement)) {
+        return changeWindowsWorkspaceTabSession(
+          current,
+          pendingSessionReplacement!.paneId,
+          pendingSessionReplacement!.tabId,
+          nextTarget,
+        );
+      }
+      return openWindowsWorkspaceTabInPane(current, current.activePaneId, nextTarget);
+    });
+    setPendingSessionReplacement(null);
+    setSettingsOpen(false);
+  };
+  const handleEmptyPaneSelect = (paneId: string) => {
+    setPendingSessionReplacement(null);
+    setWorkspace((current) => activateWindowsWorkspacePane(current, paneId));
+    setSettingsOpen(true);
+  };
+  const handleChangeContextSession = () => {
+    const current = contextMenu;
+    if (!current) return;
+    setPendingSessionReplacement({ paneId: current.paneId, tabId: current.tabId });
+    setWorkspace((workspace) => activateWindowsWorkspacePane(workspace, current.paneId));
+    setContextMenu(null);
+    setSettingsOpen(true);
+  };
+  const handleMoveContextTab = (targetPaneId: string) => {
+    const current = contextMenu;
+    if (!current) return;
+    setWorkspace((workspace) => moveWindowsWorkspaceTab(workspace, current.paneId, current.tabId, targetPaneId));
+    setContextMenu(null);
   };
   const refreshSessions = () => void sessionControl.refresh(controlTarget);
   const createSession = () => {
@@ -207,10 +343,30 @@ export function WindowsDesktopApp() {
         </div>
         <div className="titlebar-actions">
           <button className="title-command" onClick={() => setFileBrowserOpen((open) => !open)}>Files</button>
-          <button className="icon-button" title="连接设置" aria-label="连接设置" onClick={() => setSettingsOpen((open) => !open)}>⚙</button>
+          <button className="icon-button" title="连接设置" aria-label="连接设置" onClick={toggleSettingsPanel}>⚙</button>
         </div>
       </header>
-      <WindowsWorkspaceStage workspace={workspace} registry={registry} onChange={setWorkspace} />
+      <WindowsWorkspaceStage
+        workspace={workspace}
+        registry={registry}
+        onChange={setWorkspace}
+        onEmptyPaneSelect={handleEmptyPaneSelect}
+        onTabContextMenu={(paneId, tabId, anchor) => setContextMenu({ paneId, tabId, left: anchor.left, top: anchor.top })}
+      />
+      {contextMenu ? (
+        <div ref={contextMenuRef} className="windows-pane-context-menu" data-testid="windows-pane-context-menu" role="menu" style={{ left: contextMenu.left, top: contextMenu.top }}>
+          <button type="button" role="menuitem" onClick={handleChangeContextSession}>
+            Change session
+          </button>
+          {workspace.panes
+            .filter((pane) => pane.id !== contextMenu.paneId)
+            .map((pane) => (
+              <button key={pane.id} type="button" role="menuitem" onClick={() => handleMoveContextTab(pane.id)}>
+                Move to P{workspace.panes.findIndex((candidate) => candidate.id === pane.id) + 1}
+              </button>
+            ))}
+        </div>
+      ) : null}
       <WindowsFileBrowserPanel open={fileBrowserOpen} onClose={() => setFileBrowserOpen(false)} />
       {settingsOpen ? (
         <aside className="connection-panel" aria-label="连接设置">
@@ -230,15 +386,17 @@ export function WindowsDesktopApp() {
               {controlSnapshot.sessions.length === 0 ? <div className="session-empty">{controlSnapshot.status === 'loading' ? '加载中' : '未加载'}</div> : null}
               {controlSnapshot.sessions.map((sessionName) => (
                 <div className="session-row" key={sessionName}>
-                  <button className="session-name" onClick={() => setTarget((current) => ({ ...current, sessionName }))}>{sessionName}</button>
+                  <button className="session-name" onClick={() => openSessionInActivePane(sessionName)}>{sessionName}</button>
                   <button className="session-close" aria-label={`关闭 ${sessionName}`} onClick={() => closeSession(sessionName)}>×</button>
                 </div>
               ))}
             </div>
           </div>
           <div className="panel-actions">
-            <button className="secondary" disabled={!validTarget} onClick={() => openTarget(true)}>分屏打开</button>
-            <button className="primary" disabled={!validTarget} onClick={() => openTarget(false)}>新 Tab</button>
+            <button className="secondary" type="button" onClick={() => setWorkspace((current) => splitWindowsWorkspaceEmpty(current))}>空分屏</button>
+            <button className="secondary" disabled={!validTarget} onClick={() => openTarget(true)}>分屏连接</button>
+            <button className="secondary" type="button" onClick={closeSettingsPanel}>取消</button>
+            <button className="primary" disabled={!validTarget} onClick={() => openTarget(false)}>连接</button>
           </div>
         </aside>
       ) : null}

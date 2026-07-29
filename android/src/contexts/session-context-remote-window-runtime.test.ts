@@ -8,7 +8,11 @@ import {
   stopRemoteWindowStreamRuntime,
   updateRemoteWindowStreamQualityRuntime,
 } from './session-context-remote-window-runtime';
-import type { RemoteWindowStreamTargetManifest } from '../lib/types';
+import type {
+  RemoteWindowStreamPurpose,
+  RemoteWindowStreamTargetManifest,
+  RemoteWindowVideoBitrateConfig,
+} from '../lib/types';
 import { DEFAULT_BRIDGE_SETTINGS } from '../lib/bridge-settings';
 import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 
@@ -372,6 +376,7 @@ describe('session context remote window runtime', () => {
     await expect(requestRemoteWindowStreamStartRuntime({
       sessionId: ' session-1 ',
       streamId: 'stream-1',
+      purpose: 'focus',
       target,
       videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
       sessions: [baseSession],
@@ -397,6 +402,7 @@ describe('session context remote window runtime', () => {
 
     expect(startStream).toHaveBeenCalledWith(expect.objectContaining({
       streamId: 'stream-1',
+      purpose: 'focus',
       target,
       sendIceCandidate: expect.any(Function),
       startRemote: expect.any(Function),
@@ -404,18 +410,111 @@ describe('session context remote window runtime', () => {
     expect(sendStreamIceCandidate).toHaveBeenCalledWith('session-1', {
       ws,
       streamId: 'stream-1',
+      purpose: 'focus',
       candidate: { candidate: 'candidate:local' },
       sendSocketPayload,
     });
     expect(requestStreamStart).toHaveBeenCalledWith('session-1', {
       ws,
       streamId: 'stream-1',
+      purpose: 'focus',
       target,
       offer: { type: 'offer', sdp: 'offer-sdp' },
       iceServers: undefined,
       videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
       sendSocketPayload,
     });
+  });
+
+  it('can start a low-rate preview stream before a high-quality focus stream on one daemon transport', async () => {
+    const ws = makeSocket();
+    const target = makeTarget();
+    const sendSocketPayload = vi.fn();
+    const requestStreamStart = vi.fn(async (_sessionId: string, options: {
+      streamId: string;
+      purpose?: RemoteWindowStreamPurpose;
+      videoBitrate?: RemoteWindowVideoBitrateConfig;
+    }) => ({
+      requestId: `rw-start-${options.streamId}`,
+      streamId: options.streamId,
+      purpose: options.purpose,
+      targetId: 'pane-1',
+      answer: { type: 'answer' as const, sdp: `answer-${options.streamId}` },
+      capture: {
+        source: 'ScreenCaptureKit' as const,
+        frameWidth: 640,
+        frameHeight: 360,
+        frameRate: 30,
+        targetKind: 'iterm2-pane' as const,
+      },
+      transport: { kind: 'webrtc-video' as const },
+    }));
+    const startStream = vi.fn(async (receiverOptions: {
+      streamId: string;
+      purpose?: 'preview' | 'focus';
+      startRemote: (offer: { type: 'offer'; sdp: string }) => Promise<any>;
+    }) => {
+      const started = await receiverOptions.startRemote({ type: 'offer', sdp: `offer-${receiverOptions.streamId}` });
+      return {
+        streamId: receiverOptions.streamId,
+        purpose: receiverOptions.purpose,
+        mediaStream: { id: `media-${receiverOptions.streamId}` } as MediaStream,
+        started,
+      };
+    });
+    const remoteWindowMessageRuntime = {
+      requestTargets: vi.fn(),
+      requestStreamStart,
+      sendStreamQuality: vi.fn(),
+      sendStreamIceCandidate: vi.fn(),
+      stopStream: vi.fn(),
+      sendInputEvent: vi.fn(),
+    };
+    const remoteWindowReceiverRuntime = {
+      startStream,
+      stopStream: vi.fn(),
+    };
+
+    await requestRemoteWindowStreamStartRuntime({
+      sessionId: 'session-1',
+      streamId: 'canvas-stream',
+      purpose: 'preview',
+      target,
+      videoBitrate: { preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000 },
+      sessions: [baseSession],
+      daemonConnection: makeDaemonConnection(ws),
+      remoteWindowMessageRuntime,
+      remoteWindowReceiverRuntime,
+      sendSocketPayload,
+    });
+    await requestRemoteWindowStreamStartRuntime({
+      sessionId: 'session-1',
+      streamId: 'focus-stream',
+      purpose: 'focus',
+      target,
+      videoBitrate: { preset: '20mbps', bitrateMbps: 20, maxBitrateBps: 20_000_000 },
+      sessions: [baseSession],
+      daemonConnection: makeDaemonConnection(ws),
+      remoteWindowMessageRuntime,
+      remoteWindowReceiverRuntime,
+      sendSocketPayload,
+    });
+
+    expect(startStream.mock.calls.map(([options]) => ({
+      streamId: options.streamId,
+      purpose: options.purpose,
+    }))).toEqual([
+      { streamId: 'canvas-stream', purpose: 'preview' },
+      { streamId: 'focus-stream', purpose: 'focus' },
+    ]);
+    expect(requestStreamStart.mock.calls.map(([, options]) => ({
+      streamId: options.streamId,
+      purpose: options.purpose,
+      bitrate: options.videoBitrate!.maxBitrateBps,
+    }))).toEqual([
+      { streamId: 'canvas-stream', purpose: 'preview', bitrate: 2_000_000 },
+      { streamId: 'focus-stream', purpose: 'focus', bitrate: 20_000_000 },
+    ]);
   });
 
   it('inherits Relay TURN ice servers from the active session traversal route for remote video', async () => {
@@ -556,13 +655,17 @@ describe('session context remote window runtime', () => {
     expect(startStream).not.toHaveBeenCalled();
   });
 
-  it('stops the local receiver before sending daemon stop over the stream transport', () => {
+  it('stops the local receiver before sending daemon stop over the stream transport', async () => {
     const ws = makeSocket();
     const stopReceiver = vi.fn(() => true);
-    const stopMessage = vi.fn();
+    const stopMessage = vi.fn(async () => ({
+      requestId: 'rw-stop-1',
+      streamId: 'stream-1',
+      phase: 'stopped' as const,
+    }));
     const sendSocketPayload = vi.fn();
 
-    expect(stopRemoteWindowStreamRuntime({
+    await expect(stopRemoteWindowStreamRuntime({
       sessionId: 'session-1',
       streamId: 'stream-1',
       sessions: [baseSession],
@@ -580,7 +683,7 @@ describe('session context remote window runtime', () => {
         stopStream: stopReceiver,
       },
       sendSocketPayload,
-    })).toBe(true);
+    })).resolves.toBe(true);
 
     expect(stopReceiver).toHaveBeenCalledWith('stream-1');
     expect(stopMessage).toHaveBeenCalledWith('session-1', {
@@ -588,6 +691,36 @@ describe('session context remote window runtime', () => {
       streamId: 'stream-1',
       sendSocketPayload,
     });
+  });
+
+  it('rejects stop when daemon stop acknowledgement fails', async () => {
+    const ws = makeSocket();
+    const stopReceiver = vi.fn(() => true);
+    const stopMessage = vi.fn(async () => {
+      throw new Error('daemon stop failed');
+    });
+
+    await expect(stopRemoteWindowStreamRuntime({
+      sessionId: 'session-1',
+      streamId: 'stream-1',
+      sessions: [baseSession],
+      daemonConnection: makeDaemonConnection(ws),
+      remoteWindowMessageRuntime: {
+        requestTargets: vi.fn(),
+        requestStreamStart: vi.fn(),
+        sendStreamQuality: vi.fn(),
+        sendStreamIceCandidate: vi.fn(),
+        stopStream: stopMessage,
+        sendInputEvent: vi.fn(),
+      },
+      remoteWindowReceiverRuntime: {
+        startStream: vi.fn(),
+        stopStream: stopReceiver,
+      },
+      sendSocketPayload: vi.fn(),
+    })).rejects.toThrow('daemon stop failed');
+
+    expect(stopReceiver).toHaveBeenCalledWith('stream-1');
   });
 
   it('sends stream quality updates over the existing stream transport', () => {

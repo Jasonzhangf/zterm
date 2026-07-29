@@ -64,7 +64,7 @@ Rules:
 | `daemon.input_queue` | `resource.daemon_input_queue` | backend session, tmux session | UI/renderer direct writes |
 | `daemon.schedule_runtime` | `resource.schedule_job` | backend session | UI/renderer timers |
 | `daemon.file_transfer` | `resource.file_transfer`, `resource.remote_screenshot` | backend session, transport subscriber | UI guesses, client window state |
-| `daemon.remote_window_stream` | `resource.remote_window_stream` | daemon process, transport target, tmux reverse lookup | terminal mirror/buffer/render truth |
+| `daemon.remote_window_stream` | `resource.remote_window_stream`; pending resources: canvas raw/layout/encode/focus | daemon process, transport target, tmux reverse lookup | terminal mirror/buffer/render truth |
 
 Daemon hard boundary:
 
@@ -85,7 +85,7 @@ Daemon hard boundary:
 | `client.renderer_window` | `resource.renderer_window` | sparse buffer, UI projection | tmux/subscriber/mirror ownership |
 | `client.input_runtime` | `resource.platform_input_channel` | session transport, remote-window overlay | backend/tmux direct write |
 | `client.session_drawer_preview` | `resource.session_preview_selection`, `resource.session_preview_mode` | UI, open tabs, active session, renderer | transport/backend/mirror ownership |
-| `client.remote_window_overlay` | `resource.remote_window_overlay`, `resource.remote_window_touch_action` | UI, remote-window stream, transport target | terminal mirror/buffer/tmux truth |
+| `client.remote_window_overlay` | `resource.remote_window_overlay`, `resource.remote_window_touch_action`; pending resources: canvas layout/encode/focus | UI, remote-window stream, transport target | terminal mirror/buffer/tmux truth |
 | `client.file_browser` | `resource.client_file_browser` | target mux request, native file store, file transfer, UI | tmux/mirror, new physical transport |
 | `client.settings_update` | `resource.client_settings_update` | release artifact, runtime home, UI | open-tab/session/tmux truth |
 
@@ -223,6 +223,7 @@ Daemon design rules:
 - `daemon.transport_subscriber` is channel-scoped body delivery. It does not decide which app tab is active.
 - `daemon.mirror_store` may broadcast to subscribers; it must not know why a client wants a range.
 - `daemon.remote_window_stream` may reverse-map iTerm2 tty to tmux metadata, but terminal mirror/buffer/render resources remain forbidden video/control truth.
+- Remote-window canvas raw/layout/encode/focus are pending design resources in `docs/module-registry.json`; active modules must not list them as owned or consumed until their resource status is active.
 
 ### Client Runtime
 

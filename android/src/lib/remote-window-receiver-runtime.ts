@@ -1,5 +1,6 @@
 import type {
   RemoteWindowStreamIceCandidatePayload,
+  RemoteWindowStreamPurpose,
   RemoteWindowStreamRtcDescription,
   RemoteWindowStreamStartedPayload,
   RemoteWindowStreamTargetManifest,
@@ -8,6 +9,7 @@ import type { RemoteWindowVideoStatsSample } from './remote-window-video-quality
 
 export interface RemoteWindowReceiverStartResult {
   streamId: string;
+  purpose?: RemoteWindowStreamPurpose;
   mediaStream: MediaStream;
   started: RemoteWindowStreamStartedPayload;
   collectStats?: () => Promise<RemoteWindowVideoStatsSample | null>;
@@ -17,6 +19,7 @@ export const REMOTE_WINDOW_RECEIVER_TRACK_TIMEOUT_MS = 25_000;
 
 interface ActiveRemoteWindowReceiverStream {
   streamId: string;
+  purpose?: RemoteWindowStreamPurpose;
   peerConnection: RTCPeerConnection;
   mediaStream: MediaStream;
   cleanupDone: boolean;
@@ -186,6 +189,7 @@ export function createRemoteWindowReceiverRuntime(input?: {
   const runtime = {
     async startStream(options: {
       streamId: string;
+      purpose?: RemoteWindowStreamPurpose;
       target: RemoteWindowStreamTargetManifest;
       iceServers?: RTCIceServer[];
       sendIceCandidate: (candidate: RemoteWindowStreamIceCandidatePayload['candidate']) => void;
@@ -202,6 +206,7 @@ export function createRemoteWindowReceiverRuntime(input?: {
       const mediaStream = createMediaStream()();
       const entry: ActiveRemoteWindowReceiverStream = {
         streamId,
+        purpose: options.purpose,
         peerConnection,
         mediaStream,
         cleanupDone: false,
@@ -244,6 +249,7 @@ export function createRemoteWindowReceiverRuntime(input?: {
         assertCurrent(entry);
         return {
           streamId,
+          ...(options.purpose ? { purpose: options.purpose } : {}),
           mediaStream: attachedMediaStream,
           started,
           collectStats: () => runtime.getStatsSample(streamId),

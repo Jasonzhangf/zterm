@@ -19,6 +19,7 @@ import type {
   RemoteWindowInputEventPayload,
   RemoteWindowStreamQualityRequestPayload,
   RemoteWindowStreamStartedPayload,
+  RemoteWindowStreamPurpose,
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
   RemoteWindowVideoBitrateConfig,
@@ -30,16 +31,22 @@ import {
   applyRemoteWindowTargetCatalog,
   applyRemoteWindowTargetCatalogSnapshot,
   attachRemoteWindowStreamReceiver,
+  beginRemoteWindowStreamHandoff,
   beginRemoteWindowStreamSetup,
   beginRemoteWindowTargetEnumeration,
   closeRemoteWindowOverlay,
+  commitRemoteWindowStreamHandoff,
+  degradeRemoteWindowStream,
   enterRemoteWindowFullscreen,
+  failRemoteWindowStreamCleanup,
+  failRemoteWindowStreamHandoff,
   failRemoteWindowStream,
   failRemoteWindowTargetCatalog,
   initialRemoteWindowOverlayState,
   selectRemoteWindowTarget,
   shrinkRemoteWindowOverlay,
   upsertRemoteWindowCatalogTarget,
+  type RemoteWindowStreamHandoffState,
   type RemoteWindowOverlayState,
 } from '../../lib/remote-window-overlay-runtime';
 import {
@@ -91,7 +98,7 @@ interface RemoteWindowOverlayProps {
     sessionId: string,
     target: RemoteWindowStreamTargetManifest,
     streamId: string,
-    options?: { videoBitrate?: RemoteWindowVideoBitrateConfig },
+    options?: { videoBitrate?: RemoteWindowVideoBitrateConfig; purpose?: RemoteWindowStreamPurpose },
   ) => Promise<RemoteWindowStreamStartResult>;
   updateStreamQuality?: (
     sessionId: string,
@@ -124,6 +131,7 @@ interface RemoteWindowOverlayProps {
 
 interface RemoteWindowStreamStartResult {
   streamId: string;
+  purpose?: RemoteWindowStreamPurpose;
   mediaStream?: MediaStream | null;
   started?: RemoteWindowStreamStartedPayload;
   collectStats?: () => Promise<RemoteWindowVideoStatsSample | null>;
@@ -142,9 +150,16 @@ type RemoteWindowScreenshotStatus =
   | { phase: 'failed'; message: string };
 
 type RemoteWindowThumbnailStatus =
-  | { phase: 'loading' }
-  | { phase: 'ready'; dataUrl: string; fileName: string }
-  | { phase: 'failed'; message: string };
+  | { phase: 'loading'; requestId: string; sessionId: string; targetId: string; updatedAt: number }
+  | { phase: 'ready'; dataUrl: string; fileName: string; updatedAt: number }
+  | { phase: 'failed'; message: string; updatedAt: number };
+
+interface RemoteWindowThumbnailRequestToken {
+  requestId: string;
+  sessionId: string;
+  targetId: string;
+  startedAt: number;
+}
 
 export interface RemoteWindowInputContext {
   sessionId: string;
@@ -325,7 +340,9 @@ const REMOTE_WINDOW_FULLSCREEN_PINCH_DISTANCE_THRESHOLD_PX = 18;
 const REMOTE_WINDOW_FULLSCREEN_TWO_FINGER_SCROLL_THRESHOLD_PX = 8;
 const REMOTE_WINDOW_CATALOG_UI_TIMEOUT_MS = 20_000;
 const REMOTE_WINDOW_CATALOG_PROJECTION_CACHE_TTL_MS = 60_000;
-const REMOTE_WINDOW_ACTIVE_CATALOG_SYNC_INTERVAL_MS = 1_000;
+const REMOTE_WINDOW_ACTIVE_CATALOG_SYNC_INTERVAL_MS = 5_000;
+const REMOTE_WINDOW_THUMBNAIL_REFRESH_INTERVAL_MS = 15_000;
+const REMOTE_WINDOW_THUMBNAIL_MAX_REQUESTS_PER_TICK = 1;
 const REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_STORAGE_KEY = 'zterm:remote-window:touch-scroll-fraction-v1';
 const REMOTE_WINDOW_TOUCH_SCROLL_INVERTED_STORAGE_KEY = 'zterm:remote-window:touch-scroll-inverted-v1';
 
@@ -465,14 +482,37 @@ function isPointerMovementAlongAxis(
   axisStart: SurfacePointerPosition,
   axisEnd: SurfacePointerPosition,
 ) {
+  const projection = resolvePointerAxisProjection(start, current, axisStart, axisEnd);
+  const perpendicular = resolvePointerAxisPerpendicular(start, current, axisStart, axisEnd);
+  return Math.abs(projection) >= 4 && Math.abs(projection) >= Math.abs(perpendicular);
+}
+
+function resolvePointerAxisProjection(
+  start: SurfacePointerPosition,
+  current: SurfacePointerPosition,
+  axisStart: SurfacePointerPosition,
+  axisEnd: SurfacePointerPosition,
+) {
   const axisX = axisEnd.clientX - axisStart.clientX;
   const axisY = axisEnd.clientY - axisStart.clientY;
   const axisLength = Math.max(1, Math.hypot(axisX, axisY));
   const deltaX = current.clientX - start.clientX;
   const deltaY = current.clientY - start.clientY;
-  const projection = Math.abs((deltaX * axisX + deltaY * axisY) / axisLength);
-  const perpendicular = Math.abs((deltaX * -axisY + deltaY * axisX) / axisLength);
-  return projection >= 4 && projection >= perpendicular;
+  return (deltaX * axisX + deltaY * axisY) / axisLength;
+}
+
+function resolvePointerAxisPerpendicular(
+  start: SurfacePointerPosition,
+  current: SurfacePointerPosition,
+  axisStart: SurfacePointerPosition,
+  axisEnd: SurfacePointerPosition,
+) {
+  const axisX = axisEnd.clientX - axisStart.clientX;
+  const axisY = axisEnd.clientY - axisStart.clientY;
+  const axisLength = Math.max(1, Math.hypot(axisX, axisY));
+  const deltaX = current.clientX - start.clientX;
+  const deltaY = current.clientY - start.clientY;
+  return (deltaX * -axisY + deltaY * axisX) / axisLength;
 }
 
 function isRemoteWindowPinchIntent(options: {
@@ -503,7 +543,24 @@ function isRemoteWindowPinchIntent(options: {
     options.firstStart,
     options.secondStart,
   );
-  return firstMovedAlongStartAxis && secondMovedAlongStartAxis;
+  if (firstMovedAlongStartAxis && secondMovedAlongStartAxis) {
+    return true;
+  }
+  const firstProjection = resolvePointerAxisProjection(
+    options.firstStart,
+    options.firstCurrent,
+    options.firstStart,
+    options.secondStart,
+  );
+  const secondProjection = resolvePointerAxisProjection(
+    options.secondStart,
+    options.secondCurrent,
+    options.firstStart,
+    options.secondStart,
+  );
+  return Math.abs(firstProjection) >= 4
+    && Math.abs(secondProjection) >= 4
+    && Math.sign(firstProjection) !== Math.sign(secondProjection);
 }
 
 function shouldHoldRemoteWindowPotentialPinch(options: {
@@ -933,6 +990,13 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const videoSurfaceRef = useRef<HTMLDivElement | null>(null);
   const videoElementRef = useRef<HTMLVideoElement | null>(null);
   const activeStreamIdRef = useRef<string | null>(null);
+  const activeCanvasStreamIdRef = useRef<string | null>(null);
+  const activeFocusStreamIdRef = useRef<string | null>(null);
+  const pendingFocusStreamIdRef = useRef<string | null>(null);
+  const streamRequestEpochRef = useRef(0);
+  const handoffEpochRef = useRef(0);
+  const activeHandoffRef = useRef<RemoteWindowStreamHandoffState | null>(null);
+  const thumbnailInFlightTargetIdsRef = useRef<Map<string, RemoteWindowThumbnailRequestToken>>(new Map());
   const lastDefaultFullscreenFillKeyRef = useRef<string | null>(null);
   const videoPlaybackStatsRef = useRef({
     playAttempts: 0,
@@ -1470,12 +1534,33 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     bitratePresetTouchedRef.current = false;
     setScreenshotStatus({ phase: 'idle' });
     lastAutoFullscreenImePanRef.current = null;
-    if (state.phase === 'targetLocked' && state.streamId && activeSessionId && stopStream) {
-      void Promise.resolve(stopStream(activeSessionId, state.streamId)).catch((error) => {
-        console.error('[RemoteWindowOverlay] remote stream stop failed:', error);
+    activeHandoffRef.current = null;
+    streamRequestEpochRef.current += 1;
+    thumbnailInFlightTargetIdsRef.current.clear();
+    if (activeSessionId && stopStream) {
+      const streamIdsToStop = new Set<string>();
+      if (state.phase === 'targetLocked' && state.streamId) {
+        streamIdsToStop.add(state.streamId);
+      }
+      if (activeCanvasStreamIdRef.current) {
+        streamIdsToStop.add(activeCanvasStreamIdRef.current);
+      }
+      if (activeFocusStreamIdRef.current) {
+        streamIdsToStop.add(activeFocusStreamIdRef.current);
+      }
+      if (pendingFocusStreamIdRef.current) {
+        streamIdsToStop.add(pendingFocusStreamIdRef.current);
+      }
+      streamIdsToStop.forEach((streamId) => {
+        void Promise.resolve(stopStream(activeSessionId, streamId)).catch((error) => {
+          console.error('[RemoteWindowOverlay] remote stream stop failed:', error);
+        });
       });
     }
     activeStreamIdRef.current = null;
+    activeCanvasStreamIdRef.current = null;
+    activeFocusStreamIdRef.current = null;
+    pendingFocusStreamIdRef.current = null;
     collectStreamStatsRef.current = null;
     adaptiveVideoStateRef.current = null;
     lastAppliedStreamQualityKeyRef.current = null;
@@ -1521,6 +1606,15 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       return;
     }
     activeStreamIdRef.current = null;
+    if (streamInvalidation.streamId === activeCanvasStreamIdRef.current) {
+      activeCanvasStreamIdRef.current = null;
+    }
+    if (streamInvalidation.streamId === activeFocusStreamIdRef.current) {
+      activeFocusStreamIdRef.current = null;
+    }
+    if (streamInvalidation.streamId === pendingFocusStreamIdRef.current) {
+      pendingFocusStreamIdRef.current = null;
+    }
     collectStreamStatsRef.current = null;
     adaptiveVideoStateRef.current = null;
     lastAppliedStreamQualityKeyRef.current = null;
@@ -1728,6 +1822,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       || !activeSessionId
       || !updateStreamQuality
       || !adaptiveBitratePreset
+      || activeFocusStreamIdRef.current !== state.streamId
     ) {
       return;
     }
@@ -1763,6 +1858,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       || !activeSessionId
       || !updateStreamQuality
       || !adaptiveBitratePreset
+      || activeFocusStreamIdRef.current !== state.streamId
     ) {
       return;
     }
@@ -2325,6 +2421,10 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       || !state.streamId
       || !activeSessionId
       || !requestTargets
+      || (
+        state.streamId === activeCanvasStreamIdRef.current
+        && pendingFocusStreamIdRef.current !== null
+      )
     ) {
       return undefined;
     }
@@ -2384,27 +2484,28 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   }, [clearCatalogWatchdog, onBodySubscriptionSuppressedChange, onInputContextChange, onOpenStateChange]);
 
   const handleSelectTarget = useCallback((target: RemoteWindowStreamTargetManifest) => {
-    const previousStreamId = state.phase === 'targetLocked' ? state.streamId || null : null;
+    const streamRequestEpoch = ++streamRequestEpochRef.current;
+    const previousStreamId = state.phase === 'targetLocked' && state.streamStarted ? state.streamId || null : null;
+    const previousHadStream = Boolean(previousStreamId);
     setAppSwitchOpen(false);
     setActiveCatalogSyncError(null);
-    lastDefaultFullscreenFillKeyRef.current = null;
-    if (previousStreamId && activeSessionId && stopStream) {
-      void Promise.resolve(stopStream(activeSessionId, previousStreamId)).catch((error) => {
-        console.error('[RemoteWindowOverlay] previous remote stream stop failed before target switch:', error);
-      });
+    if (!previousHadStream) {
+      lastDefaultFullscreenFillKeyRef.current = null;
+      setFloatingOffset({ x: 0, y: 0 });
+      setFloatingOverlayWidthPx(null);
+      lastAppliedStreamQualityKeyRef.current = null;
+      bitratePresetTouchedRef.current = false;
+      lastAutoFullscreenImePanRef.current = null;
+      setScreenshotStatus({ phase: 'idle' });
+      resetFullscreenViewport();
+      setFullscreenDisplayMode(initialFullscreenDisplayMode);
+      setReceiverMediaStream(null);
+      setReceiverFrameSize(null);
     }
-    setFloatingOffset({ x: 0, y: 0 });
-    setFloatingOverlayWidthPx(null);
-    lastAppliedStreamQualityKeyRef.current = null;
-    bitratePresetTouchedRef.current = false;
-    lastAutoFullscreenImePanRef.current = null;
-    setScreenshotStatus({ phase: 'idle' });
-    resetFullscreenViewport();
-    setFullscreenDisplayMode(initialFullscreenDisplayMode);
-    setReceiverMediaStream(null);
-    setReceiverFrameSize(null);
     const selectedBitratePreset = readRemoteWindowVideoBitratePreset(target);
-    setBitratePreset(selectedBitratePreset);
+    if (!previousHadStream) {
+      setBitratePreset(selectedBitratePreset);
+    }
     const effectiveStartBitratePreset = resolveEffectiveRemoteWindowVideoBitratePreset(selectedBitratePreset, {
       mode: 'floating',
       fullscreenScale: 1,
@@ -2418,50 +2519,261 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     }
 
     const targetSessionId = activeSessionId?.trim() || '';
-    const streamId = `rw-stream-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    activeStreamIdRef.current = streamId;
-    lastAppliedStreamQualityKeyRef.current = [
-      targetSessionId,
-      streamId,
-      target.streamTargetId,
-      adaptiveStartBitratePreset,
-      videoBitrate.maxBitrateBps,
-      videoBitrate.maxFrameRateFps ?? '',
-    ].join('|');
+    const requestSuffix = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const canvasStreamId = `rw-stream-canvas-${requestSuffix}`;
+    const focusStreamId = `rw-stream-focus-${requestSuffix}`;
+    pendingFocusStreamIdRef.current = focusStreamId;
+    const previousCanvasStreamId = activeCanvasStreamIdRef.current;
+    const previousFocusStreamId = activeFocusStreamIdRef.current;
+    const canvasBitrate = buildRemoteWindowVideoBitrateConfig('2mbps');
     const startingState = (current: RemoteWindowOverlayState) => beginRemoteWindowStreamSetup(
       selectRemoteWindowTarget(current, target.streamTargetId),
-      streamId,
+      canvasStreamId,
     );
+    const stopStaleStream = (streamIdToStop: string, replacementStreamId: string) => {
+      if (!stopStream || streamIdToStop === replacementStreamId) {
+        return;
+      }
+      void Promise.resolve(stopStream(targetSessionId, streamIdToStop)).catch((error) => {
+        setState((current) => failRemoteWindowStreamCleanup(
+          current,
+          streamIdToStop,
+          replacementStreamId,
+          error,
+        ));
+      });
+    };
+    const stopInactiveStartedStream = (streamIdToStop: string) => {
+      stopStaleStream(streamIdToStop, activeStreamIdRef.current || '');
+    };
 
     if (!targetSessionId) {
-      setState((current) => failRemoteWindowStream(
-        startingState(current),
-        streamId,
-        new Error('当前没有可用的 daemon session'),
-      ));
+      if (pendingFocusStreamIdRef.current === focusStreamId) {
+        pendingFocusStreamIdRef.current = null;
+      }
+      const error = new Error('当前没有可用的 daemon session');
+      if (previousStreamId) {
+        const handoff: RemoteWindowStreamHandoffState = {
+          epoch: ++handoffEpochRef.current,
+          previousStreamId,
+          pendingStreamId: focusStreamId,
+          acceptedStreamIds: [canvasStreamId, focusStreamId],
+          targetId: target.streamTargetId,
+          status: 'starting',
+        };
+        setState((current) => failRemoteWindowStreamHandoff(
+          beginRemoteWindowStreamHandoff(current, handoff),
+          handoff,
+          error,
+        ));
+      } else {
+        activeStreamIdRef.current = canvasStreamId;
+        setState((current) => failRemoteWindowStream(startingState(current), canvasStreamId, error));
+      }
       return;
     }
 
-    setState(startingState);
-    void startStream(targetSessionId, target, streamId, { videoBitrate })
-      .then((result) => {
-        setState((current) => {
-          return attachRemoteWindowStreamReceiver(startingState(current), result.streamId);
-        });
-        if (activeStreamIdRef.current === result.streamId) {
-          setReceiverMediaStream(result.mediaStream || null);
-          setReceiverFrameSize(resolveStartedCaptureFrameSize(result.started));
-          collectStreamStatsRef.current = typeof result.collectStats === 'function' ? result.collectStats : null;
+    const handoff = previousStreamId
+      ? {
+          epoch: ++handoffEpochRef.current,
+          previousStreamId,
+          pendingStreamId: focusStreamId,
+          acceptedStreamIds: [canvasStreamId, focusStreamId],
+          targetId: target.streamTargetId,
+          status: 'starting' as const,
+        }
+      : null;
+    if (handoff) {
+      activeHandoffRef.current = handoff;
+      setState((current) => beginRemoteWindowStreamHandoff(current, handoff));
+    } else {
+      activeStreamIdRef.current = canvasStreamId;
+      activeCanvasStreamIdRef.current = canvasStreamId;
+      activeFocusStreamIdRef.current = null;
+      lastAppliedStreamQualityKeyRef.current = [
+        targetSessionId,
+        canvasStreamId,
+        target.streamTargetId,
+        'preview',
+        canvasBitrate.maxBitrateBps,
+        canvasBitrate.maxFrameRateFps ?? '',
+      ].join('|');
+      setState(startingState);
+    }
+    void startStream(targetSessionId, target, canvasStreamId, {
+      videoBitrate: canvasBitrate,
+      purpose: 'preview',
+    })
+      .then(async (canvasResult) => {
+        if (handoff) {
+          if (
+            activeHandoffRef.current?.epoch !== handoff.epoch
+            || activeHandoffRef.current.pendingStreamId !== handoff.pendingStreamId
+          ) {
+            stopInactiveStartedStream(canvasResult.streamId);
+            return null;
+          }
+          activeCanvasStreamIdRef.current = canvasResult.streamId;
+        } else {
+          if (
+            streamRequestEpochRef.current !== streamRequestEpoch
+            || activeStreamIdRef.current !== canvasResult.streamId
+            || activeCanvasStreamIdRef.current !== canvasResult.streamId
+          ) {
+            if (pendingFocusStreamIdRef.current === focusStreamId) {
+              pendingFocusStreamIdRef.current = null;
+            }
+            stopInactiveStartedStream(canvasResult.streamId);
+            return null;
+          }
+          activeCanvasStreamIdRef.current = canvasResult.streamId;
+          activeStreamIdRef.current = canvasResult.streamId;
+          setReceiverMediaStream(canvasResult.mediaStream || null);
+          setReceiverFrameSize(resolveStartedCaptureFrameSize(canvasResult.started));
+          collectStreamStatsRef.current = typeof canvasResult.collectStats === 'function' ? canvasResult.collectStats : null;
+          setState((current) => attachRemoteWindowStreamReceiver(startingState(current), canvasResult.streamId));
+        }
+
+        try {
+          const focusResult = await startStream(targetSessionId, target, focusStreamId, {
+            videoBitrate,
+            purpose: 'focus',
+          });
+          return { canvasResult, focusResult, focusError: null };
+        } catch (error) {
+          return { canvasResult, focusResult: null, focusError: error };
+        }
+      })
+      .then((dualResult) => {
+        if (!dualResult) {
+          return;
+        }
+        const { canvasResult, focusResult, focusError } = dualResult;
+        const committedStreamId = focusResult?.streamId || canvasResult.streamId;
+        const committedResult = focusResult || canvasResult;
+        if (pendingFocusStreamIdRef.current === focusStreamId) {
+          pendingFocusStreamIdRef.current = null;
+        }
+        if (handoff) {
+          if (
+            activeHandoffRef.current?.epoch !== handoff.epoch
+            || activeHandoffRef.current.pendingStreamId !== handoff.pendingStreamId
+          ) {
+            stopInactiveStartedStream(canvasResult.streamId);
+            if (focusResult) {
+              stopInactiveStartedStream(focusResult.streamId);
+            }
+            return;
+          }
+          activeHandoffRef.current = null;
+          activeStreamIdRef.current = committedStreamId;
+          activeCanvasStreamIdRef.current = focusResult ? null : canvasResult.streamId;
+          activeFocusStreamIdRef.current = focusResult?.streamId || null;
+          lastDefaultFullscreenFillKeyRef.current = null;
+          lastAppliedStreamQualityKeyRef.current = [
+            targetSessionId,
+            committedStreamId,
+            target.streamTargetId,
+            focusResult ? adaptiveStartBitratePreset : 'preview',
+            focusResult ? videoBitrate.maxBitrateBps : canvasBitrate.maxBitrateBps,
+            (focusResult ? videoBitrate.maxFrameRateFps : canvasBitrate.maxFrameRateFps) ?? '',
+          ].join('|');
+          bitratePresetTouchedRef.current = false;
+          lastAutoFullscreenImePanRef.current = null;
+          setScreenshotStatus({ phase: 'idle' });
+          resetFullscreenViewport();
+          setFullscreenDisplayMode(initialFullscreenDisplayMode);
+          setBitratePreset(selectedBitratePreset);
+          setState((current) => commitRemoteWindowStreamHandoff(current, handoff, committedStreamId));
+        } else {
+          if (
+            streamRequestEpochRef.current !== streamRequestEpoch
+            || activeCanvasStreamIdRef.current !== canvasResult.streamId
+            || (
+              focusResult
+              && pendingFocusStreamIdRef.current !== null
+              && pendingFocusStreamIdRef.current !== focusResult.streamId
+            )
+          ) {
+            stopInactiveStartedStream(canvasResult.streamId);
+            if (focusResult) {
+              stopInactiveStartedStream(focusResult.streamId);
+            }
+            return;
+          }
+          activeStreamIdRef.current = committedStreamId;
+          activeCanvasStreamIdRef.current = focusResult ? null : canvasResult.streamId;
+          activeFocusStreamIdRef.current = focusResult?.streamId || null;
+          if (focusResult) {
+            lastAppliedStreamQualityKeyRef.current = [
+              targetSessionId,
+              focusResult.streamId,
+              target.streamTargetId,
+              adaptiveStartBitratePreset,
+              videoBitrate.maxBitrateBps,
+              videoBitrate.maxFrameRateFps ?? '',
+            ].join('|');
+            setState((current) => attachRemoteWindowStreamReceiver(
+              beginRemoteWindowStreamSetup(current, focusResult.streamId),
+              focusResult.streamId,
+            ));
+          } else {
+            setState((current) => (
+              current.phase === 'targetLocked' && current.streamId === canvasResult.streamId
+                ? { ...current }
+                : current
+            ));
+          }
+        }
+        if (activeStreamIdRef.current === committedStreamId) {
+          setReceiverMediaStream(committedResult.mediaStream || null);
+          setReceiverFrameSize(resolveStartedCaptureFrameSize(committedResult.started));
+          collectStreamStatsRef.current = typeof committedResult.collectStats === 'function' ? committedResult.collectStats : null;
+        }
+        if (focusResult) {
+          stopStaleStream(canvasResult.streamId, committedStreamId);
+        }
+        if (handoff) {
+          stopStaleStream(handoff.previousStreamId, committedStreamId);
+          if (previousCanvasStreamId) {
+            stopStaleStream(previousCanvasStreamId, committedStreamId);
+          }
+          if (previousFocusStreamId) {
+            stopStaleStream(previousFocusStreamId, committedStreamId);
+          }
+        }
+        if (focusError) {
+          stopStaleStream(focusStreamId, canvasResult.streamId);
+          setState((current) => degradeRemoteWindowStream(current, canvasResult.streamId, focusError));
         }
       })
       .catch((error) => {
-        if (activeStreamIdRef.current === streamId) {
+        if (handoff) {
+          if (
+            activeHandoffRef.current?.epoch === handoff.epoch
+            && activeHandoffRef.current.pendingStreamId === handoff.pendingStreamId
+          ) {
+            activeHandoffRef.current = null;
+            activeStreamIdRef.current = handoff.previousStreamId;
+            if (pendingFocusStreamIdRef.current === focusStreamId) {
+              pendingFocusStreamIdRef.current = null;
+            }
+            setState((current) => failRemoteWindowStreamHandoff(current, handoff, error));
+          }
+          return;
+        }
+        if (activeStreamIdRef.current === canvasStreamId) {
           setReceiverMediaStream(null);
           setReceiverFrameSize(null);
           collectStreamStatsRef.current = null;
           adaptiveVideoStateRef.current = null;
+          activeCanvasStreamIdRef.current = null;
+          activeFocusStreamIdRef.current = null;
+          if (pendingFocusStreamIdRef.current === focusStreamId) {
+            pendingFocusStreamIdRef.current = null;
+          }
         }
-        setState((current) => failRemoteWindowStream(startingState(current), streamId, error));
+        setState((current) => failRemoteWindowStream(startingState(current), canvasStreamId, error));
       });
   }, [
     activeSessionId,
@@ -2471,7 +2783,6 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     setFloatingOverlayWidthPx,
     setFullscreenDisplayMode,
     startStream,
-    sendRemoteWindowInputEventsForTarget,
     state,
     stopStream,
   ]);
@@ -3359,62 +3670,145 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     ) {
       return;
     }
-    const currentSnapshots = windowThumbnailsRef.current;
     const groupTargetIds = new Set(lockedAppWindowGroup.targets.map((target) => target.streamTargetId));
     const siblingTargets = lockedAppWindowGroup.targets
       .filter((target) => target.streamTargetId !== state.target.streamTargetId);
-    const targetsToLoad = siblingTargets.filter((target) => !currentSnapshots[target.streamTargetId]);
-    setWindowThumbnails((current) => {
-      let changed = false;
-      const next: Record<string, RemoteWindowThumbnailStatus> = {};
-      for (const [targetId, snapshot] of Object.entries(current)) {
-        if (groupTargetIds.has(targetId)) {
-          next[targetId] = snapshot;
-        } else {
-          changed = true;
-        }
-      }
-      for (const target of targetsToLoad) {
-        if (!next[target.streamTargetId]) {
-          next[target.streamTargetId] = { phase: 'loading' };
-          changed = true;
-        }
-      }
-      return changed ? next : current;
-    });
 
-    for (const target of targetsToLoad) {
-      void requestScreenshot(activeSessionId, target, { persist: false })
-        .then((result) => {
-          const dataUrl = result.dataUrl || '';
-          setWindowThumbnails((current) => {
-            if (!current[target.streamTargetId] || current[target.streamTargetId].phase !== 'loading') {
-              return current;
-            }
-            return {
-              ...current,
-              [target.streamTargetId]: dataUrl
-                ? { phase: 'ready', dataUrl, fileName: result.fileName }
-                : { phase: 'failed', message: 'remote window thumbnail did not return image data' },
-            };
-          });
+    const refreshThumbnails = () => {
+      const now = Date.now();
+      const currentSnapshots = windowThumbnailsRef.current;
+      if (thumbnailInFlightTargetIdsRef.current.size > 0) {
+        return;
+      }
+      const targetsToLoad = siblingTargets
+        .map((target) => {
+          const snapshot = currentSnapshots[target.streamTargetId];
+          if (!snapshot) {
+            return { target, priority: 0 };
+          }
+          if (snapshot.phase === 'loading') {
+            return null;
+          }
+          if (snapshot.phase === 'failed') {
+            return null;
+          }
+          return now - snapshot.updatedAt >= REMOTE_WINDOW_THUMBNAIL_REFRESH_INTERVAL_MS
+            ? { target, priority: 1 }
+            : null;
         })
-        .catch((error) => {
-          setWindowThumbnails((current) => {
-            if (!current[target.streamTargetId] || current[target.streamTargetId].phase !== 'loading') {
-              return current;
+        .filter((entry): entry is { target: RemoteWindowStreamTargetManifest; priority: number } => Boolean(entry))
+        .sort((left, right) => left.priority - right.priority)
+        .slice(0, REMOTE_WINDOW_THUMBNAIL_MAX_REQUESTS_PER_TICK)
+        .map((entry) => entry.target);
+      const thumbnailRequests = targetsToLoad.map((target) => ({
+        target,
+        token: {
+          requestId: `rw-thumb-${now}-${Math.random().toString(36).slice(2, 8)}`,
+          sessionId: activeSessionId,
+          targetId: target.streamTargetId,
+          startedAt: now,
+        } satisfies RemoteWindowThumbnailRequestToken,
+      }));
+
+      setWindowThumbnails((current) => {
+        let changed = false;
+        const next: Record<string, RemoteWindowThumbnailStatus> = {};
+        for (const [targetId, snapshot] of Object.entries(current)) {
+          if (groupTargetIds.has(targetId)) {
+            next[targetId] = snapshot;
+          } else {
+            changed = true;
+          }
+        }
+        for (const { target, token } of thumbnailRequests) {
+          next[target.streamTargetId] = {
+            phase: 'loading',
+            requestId: token.requestId,
+            sessionId: token.sessionId,
+            targetId: token.targetId,
+            updatedAt: token.startedAt,
+          };
+          changed = true;
+        }
+        return changed ? next : current;
+      });
+
+      for (const { target, token } of thumbnailRequests) {
+        thumbnailInFlightTargetIdsRef.current.set(target.streamTargetId, token);
+        void requestScreenshot(activeSessionId, target, { persist: false })
+          .then((result) => {
+            const activeToken = thumbnailInFlightTargetIdsRef.current.get(target.streamTargetId);
+            if (activeToken?.requestId === token.requestId) {
+              thumbnailInFlightTargetIdsRef.current.delete(target.streamTargetId);
             }
-            return {
-              ...current,
-              [target.streamTargetId]: {
-                phase: 'failed',
-                message: error instanceof Error ? error.message : String(error),
-              },
-            };
+            const dataUrl = result.dataUrl || '';
+            setWindowThumbnails((current) => {
+              const currentSnapshot = current[target.streamTargetId];
+              if (
+                currentSnapshot?.phase !== 'loading'
+                || currentSnapshot.requestId !== token.requestId
+                || currentSnapshot.sessionId !== token.sessionId
+                || currentSnapshot.targetId !== token.targetId
+              ) {
+                return current;
+              }
+              return {
+                ...current,
+                [target.streamTargetId]: dataUrl
+                  ? {
+                      phase: 'ready',
+                      dataUrl,
+                      fileName: result.fileName,
+                      updatedAt: Date.now(),
+                    }
+                  : {
+                      phase: 'failed',
+                      message: 'remote window thumbnail did not return image data',
+                      updatedAt: Date.now(),
+                    },
+              };
+            });
+          })
+          .catch((error) => {
+            const activeToken = thumbnailInFlightTargetIdsRef.current.get(target.streamTargetId);
+            if (activeToken?.requestId === token.requestId) {
+              thumbnailInFlightTargetIdsRef.current.delete(target.streamTargetId);
+            }
+            setWindowThumbnails((current) => {
+              const currentSnapshot = current[target.streamTargetId];
+              if (
+                currentSnapshot?.phase !== 'loading'
+                || currentSnapshot.requestId !== token.requestId
+                || currentSnapshot.sessionId !== token.sessionId
+                || currentSnapshot.targetId !== token.targetId
+              ) {
+                return current;
+              }
+              return {
+                ...current,
+                [target.streamTargetId]: {
+                  phase: 'failed',
+                  message: error instanceof Error ? error.message : String(error),
+                  updatedAt: Date.now(),
+                },
+              };
+            });
           });
-        });
-    }
+      }
+    };
+
+    refreshThumbnails();
+    const intervalId = window.setInterval(refreshThumbnails, REMOTE_WINDOW_THUMBNAIL_REFRESH_INTERVAL_MS);
+    return () => {
+      window.clearInterval(intervalId);
+    };
   }, [activeSessionId, lockedAppWindowGroup, requestScreenshot, setWindowThumbnails, state]);
+  useEffect(() => {
+    if (state.phase !== 'targetLocked' || lockedAppWindowGroup) {
+      return;
+    }
+    setWindowThumbnails((current) => (Object.keys(current).length === 0 ? current : {}));
+  }, [lockedAppWindowGroup, setWindowThumbnails, state.phase]);
   const floatingVideoHeightPx = lockedDisplaySourceSize && floatingOverlayWidthPx
     ? Math.round(floatingOverlayWidthPx / Math.max(0.2, Math.min(5, lockedDisplaySourceSize.width / Math.max(1, lockedDisplaySourceSize.height))))
     : null;
@@ -3496,6 +3890,33 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     : screenshotFeedback?.tone === 'error'
       ? styles.screenshotToastError
       : styles.screenshotToastProgress;
+  const streamFeedback = state.phase === 'targetLocked'
+    ? state.streamCleanupErrorMessage
+      ? {
+          testId: 'remote-window-stream-cleanup-error',
+          title: '旧窗口流清理失败',
+          detail: state.streamCleanupErrorMessage,
+        }
+      : state.streamDegradedMessage
+        ? {
+            testId: 'remote-window-stream-degraded',
+            title: '高质量窗口流失败',
+            detail: state.streamDegradedMessage,
+          }
+      : state.streamHandoffErrorMessage
+        ? {
+            testId: 'remote-window-stream-handoff-error',
+            title: '窗口切换失败',
+            detail: state.streamHandoffErrorMessage,
+          }
+        : state.streamHandoff
+          ? {
+              testId: 'remote-window-stream-handoff-pending',
+              title: '正在切换窗口',
+              detail: '当前视频保持连接，新窗口接通后再切换',
+            }
+          : null
+    : null;
   const lockedVideoSurfaceNode = state.phase === 'targetLocked' ? (
     <div
       data-testid="remote-window-video-surface"
@@ -3561,6 +3982,17 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           </span>
         </div>
       ) : null}
+      {streamFeedback ? (
+        <div
+          data-testid={streamFeedback.testId}
+          role={streamFeedback.testId.endsWith('error') ? 'alert' : 'status'}
+          aria-live={streamFeedback.testId.endsWith('error') ? 'assertive' : 'polite'}
+          style={styles.streamFeedbackToast}
+        >
+          <span style={styles.screenshotToastTitle}>{streamFeedback.title}</span>
+          <span style={styles.screenshotToastDetail}>{streamFeedback.detail}</span>
+        </div>
+      ) : null}
     </div>
   ) : null;
   const lockedVideoGroupContent = state.phase === 'targetLocked' && lockedVideoSurfaceNode ? (() => {
@@ -3583,6 +4015,20 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
               data-remote-window-child-tile="true"
               style={styles.videoWindowGroupTile}
             >
+              <button
+                type="button"
+                data-no-drag="true"
+                data-testid={`remote-window-video-window-close-${target.streamTargetId}`}
+                aria-label="关闭远程窗口"
+                onClick={(event) => {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  handleClose();
+                }}
+                style={styles.videoWindowGroupCloseButton}
+              >
+                x
+              </button>
               <div style={styles.videoWindowGroupThumb}>
                 {thumbnail?.phase === 'ready' ? (
                   <img
@@ -4191,6 +4637,7 @@ const styles: Record<string, CSSProperties> = {
     bottom: REMOTE_WINDOW_FLOATING_BOTTOM_BASE_PX,
     zIndex: 32,
     width: 'min(78vw, 360px)',
+    maxHeight: 'calc(100dvh - 164px - env(safe-area-inset-top, 0px))',
     display: 'flex',
     flexDirection: 'column',
     borderRadius: 16,
@@ -4229,7 +4676,9 @@ const styles: Record<string, CSSProperties> = {
     display: 'flex',
     flexDirection: 'column',
     boxSizing: 'border-box',
-    paddingTop: 'calc(16px + env(safe-area-inset-top, 0px))',
+    paddingTop: 'calc(44px + env(safe-area-inset-top, 0px))',
+    paddingLeft: 'max(8px, env(safe-area-inset-left, 0px))',
+    paddingRight: 'max(8px, env(safe-area-inset-right, 0px))',
     background: '#02050a',
     color: '#edf4ff',
   },
@@ -4509,6 +4958,7 @@ const styles: Record<string, CSSProperties> = {
     boxSizing: 'border-box',
   },
   videoWindowGroupTile: {
+    position: 'relative',
     width: '100%',
     height: '100%',
     minHeight: 58,
@@ -4521,6 +4971,21 @@ const styles: Record<string, CSSProperties> = {
     background: 'rgba(20, 31, 49, 0.88)',
     color: '#edf4ff',
     boxSizing: 'border-box',
+  },
+  videoWindowGroupCloseButton: {
+    position: 'absolute',
+    top: 6,
+    right: 6,
+    zIndex: 2,
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    border: '1px solid rgba(151, 164, 186, 0.28)',
+    background: 'rgba(5, 9, 16, 0.78)',
+    color: '#edf4ff',
+    fontSize: 12,
+    fontWeight: 950,
+    lineHeight: 1,
   },
   videoWindowGroupThumb: {
     minWidth: 0,
@@ -4570,5 +5035,21 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 9,
     fontWeight: 800,
     lineHeight: 1.1,
+  },
+  streamFeedbackToast: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 12,
+    zIndex: 5,
+    display: 'grid',
+    gap: 2,
+    padding: '8px 10px',
+    borderRadius: 12,
+    border: '1px solid rgba(255, 198, 92, 0.42)',
+    background: 'rgba(48, 31, 9, 0.9)',
+    color: '#ffe2a8',
+    boxShadow: '0 14px 36px rgba(0,0,0,0.36)',
+    pointerEvents: 'none',
   },
 };

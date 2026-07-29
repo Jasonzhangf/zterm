@@ -23,7 +23,9 @@ import type {
   RemoteScreenshotRequestPayload,
   RemoteScreenshotStatusPayload,
   RemoteWindowInputEventPayload,
+  RemoteWindowStreamPurpose,
   RemoteWindowStreamQualityRequestPayload,
+  RemoteWindowStreamStatusPayload,
   RemoteWindowStreamTargetsResponsePayload,
   RemoteWindowStreamTargetManifest,
   RemoteWindowVideoBitrateConfig,
@@ -62,7 +64,7 @@ interface RemoteWindowMessageRuntimeLike {
   requestStreamStart: (...args: any[]) => Promise<any>;
   sendStreamQuality: (...args: any[]) => void;
   sendStreamIceCandidate: (...args: any[]) => void;
-  stopStream: (...args: any[]) => void;
+  stopStream: (...args: any[]) => Promise<RemoteWindowStreamStatusPayload>;
   sendInputEvent: (...args: any[]) => void;
 }
 
@@ -188,11 +190,12 @@ export function createSessionInteractionRuntime(options: {
     sessionId: string,
     target: RemoteWindowStreamTargetManifest,
     streamId: string,
-    startOptions?: { videoBitrate?: RemoteWindowVideoBitrateConfig },
+    startOptions?: { videoBitrate?: RemoteWindowVideoBitrateConfig; purpose?: RemoteWindowStreamPurpose },
   ) => {
     return requestRemoteWindowStreamStartRuntime({
       sessionId,
       streamId,
+      purpose: startOptions?.purpose,
       target,
       videoBitrate: startOptions?.videoBitrate,
       bridgeSettings: options.bridgeSettings,

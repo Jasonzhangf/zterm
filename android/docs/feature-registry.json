@@ -206,7 +206,9 @@
       ],
       "allowed_paths": [
         "docs/decisions/2026-07-19-remote-window-stream-truth.md",
+        "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md",
         "docs/testing/remote-window-stream-test-design.md",
+        "docs/testing/remote-window-canvas-pipeline-test-design.md",
         "docs/testing/remote-window-touch-action-sop.md",
         "docs/resource-registry.json",
         "docs/resource-map.md",
@@ -291,12 +293,14 @@
         "src/server/terminal-file-transfer-binary-runtime.test.ts",
         "src/server/remote-window-stream-daemon.test.ts",
         "src/server/terminal-message-runtime.test.ts",
-        "docs/testing/remote-window-stream-test-design.md"
+        "docs/testing/remote-window-stream-test-design.md",
+        "docs/testing/remote-window-canvas-pipeline-test-design.md"
       ],
       "truth_sources": [
         "docs/architecture.md",
         "docs/dev-workflow.md",
-        "docs/decisions/2026-07-19-remote-window-stream-truth.md"
+        "docs/decisions/2026-07-19-remote-window-stream-truth.md",
+        "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md"
       ]
     },
     {

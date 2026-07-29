@@ -3,9 +3,11 @@ import {
   applyRemoteWindowTargetCatalog,
   applyRemoteWindowTargetCatalogSnapshot,
   attachRemoteWindowStreamReceiver,
+  beginRemoteWindowStreamHandoff,
   beginRemoteWindowStreamSetup,
   beginRemoteWindowTargetEnumeration,
   closeRemoteWindowOverlay,
+  commitRemoteWindowStreamHandoff,
   enterRemoteWindowFullscreen,
   failRemoteWindowStream,
   failRemoteWindowTargetCatalog,
@@ -130,6 +132,40 @@ describe('remote window overlay runtime', () => {
       mode: 'floating',
       streamId: 'stream-1',
       streamStarted: true,
+    });
+  });
+
+  it('allows a handoff canvas stream to commit when focus startup fails', () => {
+    const started = beginRemoteWindowTargetEnumeration(initialRemoteWindowOverlayState);
+    const currentTarget = makeTarget('app-1', 'app-window');
+    const nextTarget = makeTarget('app-2', 'app-window');
+    const picker = applyRemoteWindowTargetCatalog(started.state, started.requestEpoch, {
+      requestId: 'rw-1',
+      targets: [currentTarget, nextTarget],
+    });
+    const locked = attachRemoteWindowStreamReceiver(
+      beginRemoteWindowStreamSetup(selectRemoteWindowTarget(picker, 'app-1'), 'current-focus'),
+      'current-focus',
+    );
+    const handoff = {
+      epoch: 1,
+      previousStreamId: 'current-focus',
+      pendingStreamId: 'next-focus',
+      acceptedStreamIds: ['next-canvas', 'next-focus'],
+      targetId: 'app-2',
+      status: 'starting' as const,
+    };
+
+    const pending = beginRemoteWindowStreamHandoff(locked, handoff);
+    const committed = commitRemoteWindowStreamHandoff(pending, handoff, 'next-canvas');
+
+    expect(committed).toMatchObject({
+      phase: 'targetLocked',
+      target: nextTarget,
+      streamId: 'next-canvas',
+      streamStarted: true,
+      streamStatus: 'streaming',
+      streamHandoff: null,
     });
   });
 

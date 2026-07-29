@@ -230,6 +230,8 @@ export interface RemoteWindowStreamIceCandidate {
   usernameFragment?: string | null;
 }
 
+export type RemoteWindowStreamPurpose = 'preview' | 'focus';
+
 export type RemoteWindowVideoBitratePreset =
   | '2mbps'
   | '5mbps'
@@ -247,6 +249,7 @@ export interface RemoteWindowVideoBitrateConfig {
 export interface RemoteWindowStreamStartRequestPayload {
   requestId: string;
   streamId: string;
+  purpose?: RemoteWindowStreamPurpose;
   target: RemoteWindowStreamTargetManifest;
   offer: RemoteWindowStreamRtcDescription;
   iceServers?: Array<Record<string, unknown>>;
@@ -256,6 +259,7 @@ export interface RemoteWindowStreamStartRequestPayload {
 export interface RemoteWindowStreamStartedPayload {
   requestId: string;
   streamId: string;
+  purpose?: RemoteWindowStreamPurpose;
   targetId: string;
   answer: RemoteWindowStreamRtcDescription;
   capture: {
@@ -275,12 +279,14 @@ export interface RemoteWindowStreamStartedPayload {
 export interface RemoteWindowStreamIceCandidatePayload {
   requestId?: string;
   streamId: string;
+  purpose?: RemoteWindowStreamPurpose;
   candidate: RemoteWindowStreamIceCandidate;
 }
 
 export interface RemoteWindowStreamStatusPayload {
   requestId?: string;
   streamId: string;
+  purpose?: RemoteWindowStreamPurpose;
   phase: 'starting' | 'streaming' | 'stopped';
   framesSent?: number;
   frameWidth?: number;
@@ -291,11 +297,13 @@ export interface RemoteWindowStreamStatusPayload {
 export interface RemoteWindowStreamStopRequestPayload {
   requestId: string;
   streamId: string;
+  purpose?: RemoteWindowStreamPurpose;
 }
 
 export interface RemoteWindowStreamQualityRequestPayload {
   requestId: string;
   streamId: string;
+  purpose?: RemoteWindowStreamPurpose;
   targetId: string;
   videoBitrate: RemoteWindowVideoBitrateConfig;
 }
@@ -303,6 +311,7 @@ export interface RemoteWindowStreamQualityRequestPayload {
 export interface RemoteWindowStreamQualityResultPayload {
   requestId: string;
   streamId: string;
+  purpose?: RemoteWindowStreamPurpose;
   targetId: string;
   accepted: boolean;
   videoBitrate: RemoteWindowVideoBitrateConfig;

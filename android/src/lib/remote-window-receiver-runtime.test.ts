@@ -3,7 +3,10 @@ import {
   createRemoteWindowReceiverRuntime,
   REMOTE_WINDOW_RECEIVER_TRACK_TIMEOUT_MS,
 } from './remote-window-receiver-runtime';
-import type { RemoteWindowStreamTargetManifest } from './types';
+import type {
+  RemoteWindowStreamRtcDescription,
+  RemoteWindowStreamTargetManifest,
+} from './types';
 
 class MockMediaTrack {
   kind = 'video';
@@ -347,6 +350,55 @@ describe('remote window receiver runtime', () => {
       streamId: 'stream-1',
       candidate: { candidate: 'candidate:late' },
     })).resolves.toBe(false);
+  });
+
+  it('keeps preview and focus receiver streams independent', async () => {
+    const runtime = createRuntime();
+    const startRemote = vi.fn(async (offer: RemoteWindowStreamRtcDescription, streamId: string, purpose: 'preview' | 'focus') => ({
+      requestId: `rw-start-${streamId}`,
+      streamId,
+      purpose,
+      targetId: 'pane-1',
+      answer: { type: 'answer' as const, sdp: `answer-${offer.sdp}` },
+      capture: {
+        source: 'ScreenCaptureKit' as const,
+        frameWidth: 640,
+        frameHeight: 360,
+        frameRate: purpose === 'preview' ? 12 : 30,
+        targetKind: 'iterm2-pane' as const,
+      },
+      transport: { kind: 'webrtc-video' as const },
+    }));
+
+    const canvasStarted = runtime.startStream({
+      streamId: 'canvas-stream',
+      purpose: 'preview',
+      target: makeTarget(),
+      sendIceCandidate: vi.fn(),
+      startRemote: (offer) => startRemote(offer, 'canvas-stream', 'preview'),
+    });
+    const focusStarted = runtime.startStream({
+      streamId: 'focus-stream',
+      purpose: 'focus',
+      target: makeTarget(),
+      sendIceCandidate: vi.fn(),
+      startRemote: (offer) => startRemote(offer, 'focus-stream', 'focus'),
+    });
+
+    await flushMicrotasks();
+    const canvasPeer = MockRTCPeerConnection.instances[0]!;
+    const focusPeer = MockRTCPeerConnection.instances[1]!;
+    canvasPeer.emitVideoTrack();
+    focusPeer.emitVideoTrack();
+
+    await expect(canvasStarted).resolves.toMatchObject({ streamId: 'canvas-stream', purpose: 'preview' });
+    await expect(focusStarted).resolves.toMatchObject({ streamId: 'focus-stream', purpose: 'focus' });
+    expect(runtime.getActiveStreamIds().sort()).toEqual(['canvas-stream', 'focus-stream']);
+
+    expect(runtime.stopStream('focus-stream')).toBe(true);
+    expect(canvasPeer.close).not.toHaveBeenCalled();
+    expect(focusPeer.close).toHaveBeenCalledTimes(1);
+    expect(runtime.getActiveStreamIds()).toEqual(['canvas-stream']);
   });
 
   it('rejects stream setup failures and closes the peer without rendering a fake stream', async () => {

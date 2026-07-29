@@ -243,6 +243,10 @@
           "label": "src/lib/remote-window-message-runtime.ts#createRemoteWindowMessageRuntime"
         },
         {
+          "id": "RemoteWindowOverlayRuntime",
+          "label": "src/lib/remote-window-overlay-runtime.ts#beginRemoteWindowStreamHandoff"
+        },
+        {
           "id": "RemoteWindowStreamQualityRuntime",
           "label": "src/contexts/session-context-remote-window-runtime.ts#updateRemoteWindowStreamQualityRuntime"
         },
@@ -966,7 +970,7 @@
           "to": "RemoteWindowMessageRuntime",
           "owner_feature": "desktop.remote_window_stream",
           "semantic_input": "selected daemon target manifest, receiver offer, stop intent, ICE candidate, quality update, or mapped input event",
-          "semantic_output": "remote-window stream start/stop/candidate/quality/input control messages over the existing active session transport",
+          "semantic_output": "remote-window stream start/stop/candidate/quality/input control messages over the existing active session transport with request-id matched start and stop promises",
           "status": "anchored",
           "edge_id": "android_mainline:RemoteWindowOverlay->RemoteWindowMessageRuntime",
           "resource_from": "resource.remote_window_overlay",
@@ -992,11 +996,24 @@
           "relation_status": "via"
         },
         {
+          "from": "RemoteWindowOverlay",
+          "to": "RemoteWindowOverlayRuntime",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "same-app sibling target selection, current stream id, pending stream id, and handoff epoch",
+          "semantic_output": "overlay-only begin/commit/fail handoff projection plus separate cleanup error projection; it does not send daemon control messages",
+          "status": "anchored",
+          "edge_id": "android_mainline:RemoteWindowOverlay->RemoteWindowOverlayRuntime",
+          "resource_from": "resource.remote_window_overlay",
+          "resource_to": "resource.remote_window_overlay",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
           "from": "SocketMessage",
           "to": "RemoteWindowMessageRuntime",
           "owner_feature": "desktop.remote_window_stream",
           "semantic_input": "remote-window stream answer/status/error/candidate/input-result server messages",
-          "semantic_output": "matched stream lifecycle promise or explicit error without catalog/terminal fallback",
+          "semantic_output": "matched target catalog, stream start, and stream stop lifecycle promises, subscriber-visible input/quality/status messages, or explicit error without catalog/terminal fallback",
           "status": "anchored",
           "edge_id": "android_mainline:SocketMessage->RemoteWindowMessageRuntime",
           "resource_from": "resource.session_transport",

@@ -578,7 +578,7 @@
    "level": 1,
    "parent_module_id": "daemon.runtime",
    "owner_feature": "desktop.remote_window_stream",
-   "responsibility": "Own desktop app/window/iTerm2 catalog, coordinate manifests, ScreenCaptureKit capture, WebRTC sender, input helper, action injection, screenshot target manifests, and cleanup.",
+   "responsibility": "Own desktop app/window/iTerm2 catalog, coordinate manifests, ScreenCaptureKit capture, WebRTC sender, input helper, action injection, screenshot target manifests, cleanup, and design tracking for future remote-window canvas raw/layout/encode/focus resources.",
    "owned_resources": [
     "resource.remote_window_stream"
    ],
@@ -587,7 +587,12 @@
     "resource.transport_target",
     "resource.tmux_session"
    ],
-   "pending_resources": [],
+   "pending_resources": [
+    "resource.remote_window_canvas_raw",
+    "resource.remote_window_canvas_layout",
+    "resource.remote_window_canvas_encode",
+    "resource.remote_window_focus_stream"
+   ],
    "public_interfaces": [
     "src/server/remote-window-stream-daemon.ts"
    ],
@@ -600,7 +605,9 @@
    "canonical_docs": [
     "docs/modules/project-modules.md",
     "docs/decisions/2026-07-19-remote-window-stream-truth.md",
-    "docs/testing/remote-window-stream-test-design.md"
+    "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md",
+    "docs/testing/remote-window-stream-test-design.md",
+    "docs/testing/remote-window-canvas-pipeline-test-design.md"
    ],
    "required_gates": [
     "src/lib/module-registry-truth.test.ts",
@@ -1126,7 +1133,11 @@
     "resource.remote_window_stream",
     "resource.transport_target"
    ],
-   "pending_resources": [],
+   "pending_resources": [
+    "resource.remote_window_canvas_layout",
+    "resource.remote_window_canvas_encode",
+    "resource.remote_window_focus_stream"
+   ],
    "public_interfaces": [
     "src/components/terminal/RemoteWindowOverlay.tsx",
     "src/lib/remote-window-overlay-runtime.ts",
@@ -1140,7 +1151,9 @@
    "canonical_docs": [
     "docs/modules/project-modules.md",
     "docs/decisions/2026-07-19-remote-window-stream-truth.md",
-    "docs/testing/remote-window-stream-test-design.md"
+    "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md",
+    "docs/testing/remote-window-stream-test-design.md",
+    "docs/testing/remote-window-canvas-pipeline-test-design.md"
    ],
    "required_gates": [
     "src/lib/module-registry-truth.test.ts",

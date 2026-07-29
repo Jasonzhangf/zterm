@@ -18,6 +18,7 @@ import {
   splitActivePaneRight,
   resolveActiveTab,
   moveTabToPane,
+  beginPendingSessionReplacement,
   type MacWorkbenchState,
 } from './workbench';
 import type { EditableHost } from '@zterm/shared';
@@ -129,8 +130,70 @@ describe('Mac workbench pane state', () => {
     state = moveTabToPane(state, paneA.id, paneA.tabs[1].id, paneB.id);
     expect(state.workspace.panes[0].tabs.length).toBe(1);
     expect(state.workspace.panes[0].tabs[0].title).toBe('a');
-    expect(state.workspace.panes[1].tabs.length).toBe(2);
-    expect(state.workspace.panes[1].tabs.some((t) => t.title === 'b')).toBe(true);
+    expect(state.workspace.panes[1].tabs.length).toBe(1);
+    expect(state.workspace.panes[1].tabs[0].title).toBe('b');
+  });
+
+  it('moveTabToPane leaves a source sentinel when moving the only live tab', () => {
+    let state: MacWorkbenchState = createInitialWorkbenchState();
+    state = openConnectionInWorkbench(state, makeTarget('a'));
+    state = splitActivePaneRight(state);
+    const paneA = state.workspace.panes[0];
+    const paneB = state.workspace.panes[1];
+
+    state = moveTabToPane(state, paneA.id, paneA.tabs[0].id, paneB.id);
+
+    expect(state.workspace.panes[0].tabs).toHaveLength(1);
+    expect(state.workspace.panes[0].tabs[0].kind).toBe('empty');
+    expect(state.workspace.panes[1].tabs).toHaveLength(1);
+    expect(state.workspace.panes[1].tabs[0].title).toBe('a');
+  });
+
+  it('beginPendingSessionReplacement opens the chooser without removing the selected tab', () => {
+    let state: MacWorkbenchState = createInitialWorkbenchState();
+    state = openConnectionInWorkbench(state, makeTarget('a'));
+    state = splitActivePaneRight(state);
+    state = openConnectionInWorkbench(state, makeTarget('b'));
+    const activePane = state.workspace.panes.find((pane) => pane.id === state.workspace.activePaneId)!;
+    const oldTabId = activePane.activeTabId;
+
+    state = beginPendingSessionReplacement(state, activePane.id, oldTabId);
+
+    const nextPane = state.workspace.panes.find((pane) => pane.id === activePane.id)!;
+    expect(state.workspace.activePaneId).toBe(activePane.id);
+    expect(state.launcherOpen).toBe(true);
+    expect(state.pendingSessionReplacement).toEqual({ paneId: activePane.id, tabId: oldTabId });
+    expect(nextPane.tabs).toHaveLength(1);
+    expect(nextPane.tabs[0].kind).toBe('connection');
+    expect(nextPane.activeTabId).toBe(oldTabId);
+    expect(nextPane.tabs[0].id).toBe(oldTabId);
+  });
+
+  it('openConnectionInWorkbench consumes a pending replacement in its original pane', () => {
+    let state: MacWorkbenchState = createInitialWorkbenchState();
+    state = openConnectionInWorkbench(state, makeTarget('a'));
+    state = openConnectionInWorkbench(state, makeTarget('b'), { append: true });
+    const pane = state.workspace.panes[0];
+    state = beginPendingSessionReplacement(state, pane.id, pane.tabs[0].id);
+    state = splitActivePaneRight(state);
+    state = openConnectionInWorkbench(state, makeTarget('c'));
+
+    expect(state.workspace.panes.find((candidate) => candidate.id === pane.id)?.tabs.map((tab) => tab.title)).toEqual(['c', 'b']);
+    expect(state.workspace.panes[0].tabs.every((tab) => tab.kind !== 'empty')).toBe(true);
+    expect(state.pendingSessionReplacement).toBeUndefined();
+    expect(state.launcherOpen).toBe(false);
+  });
+
+  it('setLauncherOpen cancels pending replacement without mutating the tab', () => {
+    let state: MacWorkbenchState = createInitialWorkbenchState();
+    state = openConnectionInWorkbench(state, makeTarget('a'));
+    const pane = state.workspace.panes[0];
+    state = beginPendingSessionReplacement(state, pane.id, pane.activeTabId);
+    state = setLauncherOpen(state, false);
+
+    expect(state.pendingSessionReplacement).toBeUndefined();
+    expect(state.workspace.panes[0].tabs.map((tab) => tab.title)).toEqual(['a']);
+    expect(state.workspace.panes[0].tabs[0].kind).toBe('connection');
   });
 
   it('resolveActiveTab returns connection tab when active', () => {

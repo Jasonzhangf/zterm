@@ -28,7 +28,7 @@ resource registry -> module registry -> edge registry -> function map -> mainlin
   - module ids are unique and follow side-qualified naming.
   - parent module ids exist.
   - owner features exist.
-  - owned/consumed/forbidden resources exist in `docs/resource-registry.json`; runtime pending resources are forbidden.
+  - owned/consumed/forbidden/pending resources exist in `docs/resource-registry.json`; active owned/consumed resources must have `status: active`; design/pending resources are tracked only through `pending_resources` in `docs/module-registry.json`.
   - one concrete resource has at most one owning module.
   - canonical docs and file-like required gates exist.
   - every module forbidden resource is not also owned by the same module.
@@ -99,5 +99,5 @@ Runtime refactor later:
 ## Known Gaps
 
 - This gate locks architecture manifests and docs. It does not prove live client/daemon behavior.
-- Runtime `pending_resources` are not allowed. Future resources must first be added to `docs/resource-registry.json`, then owned/consumed by a module and connected through `docs/edge-registry.json` before code uses them.
+- Runtime use of `pending_resources` is not allowed. Future resources may be listed in module `pending_resources` only while their resource-registry status is `design` or `pending`; before code uses them, the resource must become `active`, move into module owned/consumed resources, and connect through `docs/edge-registry.json`.
 - Existing mainline call ids are reused only where code already exists. New runtime edges must first land in `docs/edge-registry.json`, then in the mainline call map with real caller/callee bindings.

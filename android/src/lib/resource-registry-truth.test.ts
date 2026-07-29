@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 
 type Resource = {
   resource_id: string;
+  status?: 'active' | 'design' | 'pending';
   resource_type: string;
   identity: string;
   owner_feature: string;
@@ -65,6 +66,7 @@ describe('resource registry truth gate', () => {
 
     for (const resource of registry.resources) {
       expect(resource.resource_id).toMatch(/^resource\.[a-z0-9_]+$/);
+      expect(['active', 'design', 'pending']).toContain(resource.status ?? 'active');
       expect(resourceIds.has(resource.resource_id), resource.resource_id).toBe(false);
       resourceIds.add(resource.resource_id);
       expect(resource.resource_type).toBeTruthy();
@@ -84,6 +86,23 @@ describe('resource registry truth gate', () => {
           expect(resolvePath(gate), `${resource.resource_id}:${gate}`).not.toBeNull();
         }
       }
+    }
+  });
+
+  it('keeps not-yet-implemented canvas truth resources marked as design or pending', () => {
+    const registry = JSON.parse(read('docs/resource-registry.json')) as ResourceRegistry;
+    const byId = new Map(registry.resources.map((resource) => [resource.resource_id, resource]));
+
+    for (const resourceId of [
+      'resource.remote_window_canvas_raw',
+      'resource.remote_window_canvas_layout',
+      'resource.remote_window_canvas_encode',
+      'resource.remote_window_focus_stream',
+    ]) {
+      const resource = byId.get(resourceId);
+      expect(resource, resourceId).toBeTruthy();
+      expect(resource?.status, resourceId).toMatch(/^(design|pending)$/);
+      expect(resource?.required_gates, resourceId).toContain('docs/testing/remote-window-canvas-pipeline-test-design.md');
     }
   });
 

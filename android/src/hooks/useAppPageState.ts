@@ -42,6 +42,42 @@ function readPersistedPageState(options?: { allowTerminal?: boolean }): AppPageS
   return openConnectionsPage();
 }
 
+function hasPersistedOpenTabRestoreCandidate(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  try {
+    const rawTabs = localStorage.getItem(STORAGE_KEYS.OPEN_TABS);
+    if (!rawTabs) {
+      return false;
+    }
+    const parsedTabs = JSON.parse(rawTabs) as unknown;
+    return Array.isArray(parsedTabs) && parsedTabs.length > 0;
+  } catch (error) {
+    console.error('[App] Failed to inspect persisted open-tab restore truth:', error);
+    return false;
+  }
+}
+
+function hasPersistedTerminalRouteIntent(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE);
+    if (!raw) {
+      return false;
+    }
+    const parsed = JSON.parse(raw) as Partial<AppPageState> | null;
+    return Boolean(parsed && typeof parsed === 'object' && parsed.kind === 'terminal');
+  } catch (error) {
+    console.error('[App] Failed to inspect persisted terminal route intent:', error);
+    return false;
+  }
+}
+
 interface UseAppPageStateOptions {
   hosts: Host[];
   sessions: Session[];
@@ -78,8 +114,16 @@ export function useAppPageState(options: UseAppPageStateOptions): AppPageStateRe
     syncSavedHostToServerPreset,
   } = options;
 
-  const [pageState, setPageState] = useState<AppPageState>(() => readPersistedPageState());
+  const initialActiveSessionOwnsTerminal = sessions.some((session) => session.id === runtimeActiveSessionId);
+  const [pageState, setPageState] = useState<AppPageState>(() => (
+    readPersistedPageState({ allowTerminal: initialActiveSessionOwnsTerminal })
+  ));
   const restoredRouteHandledRef = useRef(false);
+  const pendingTerminalRestoreIntentRef = useRef(
+    !initialActiveSessionOwnsTerminal
+    && hasPersistedTerminalRouteIntent()
+    && hasPersistedOpenTabRestoreCandidate(),
+  );
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === runtimeActiveSessionId) || null,
@@ -87,13 +131,14 @@ export function useAppPageState(options: UseAppPageStateOptions): AppPageStateRe
   );
 
   useEffect(() => {
-    if (restoredRouteHandledRef.current || sessions.length === 0) {
+    if (restoredRouteHandledRef.current || !activeSession) {
       return;
     }
 
     restoredRouteHandledRef.current = true;
     const persistedPage = readPersistedPageState({ allowTerminal: true });
     if (persistedPage.kind === 'terminal') {
+      setPageState(openTerminalPage());
       ensureTerminalPageVisible();
       return;
     }
@@ -101,6 +146,14 @@ export function useAppPageState(options: UseAppPageStateOptions): AppPageStateRe
   }, [activeSession?.id, ensureTerminalPageVisible, runtimeActiveSessionId, sessions]);
 
   useEffect(() => {
+    if (
+      pendingTerminalRestoreIntentRef.current
+      && pageState.kind === 'connections'
+      && hasPersistedOpenTabRestoreCandidate()
+    ) {
+      return;
+    }
+    pendingTerminalRestoreIntentRef.current = false;
     try {
       localStorage.setItem(
         STORAGE_KEYS.ACTIVE_PAGE,
@@ -109,7 +162,7 @@ export function useAppPageState(options: UseAppPageStateOptions): AppPageStateRe
     } catch (error) {
       console.error('[App] Failed to persist page state:', error);
     }
-  }, [pageState, runtimeActiveSessionId]);
+  }, [activeSession, pageState, runtimeActiveSessionId]);
 
   const editingHost = useMemo(() => {
     if (pageState.kind !== 'connection-properties' || !pageState.hostId) {

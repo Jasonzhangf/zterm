@@ -128,17 +128,29 @@ describe('module registry truth gate', () => {
     }
   });
 
-  it('keeps module resource references bound to registry resources with no runtime pending ids', () => {
+  it('keeps module resource references bound to active truth and design resources pending', () => {
     const registry = JSON.parse(read('docs/module-registry.json')) as ModuleRegistry;
-    const resourceRegistry = JSON.parse(read('docs/resource-registry.json')) as { resources: Array<{ resource_id: string }> };
+    const resourceRegistry = JSON.parse(read('docs/resource-registry.json')) as {
+      resources: Array<{ resource_id: string; status?: 'active' | 'design' | 'pending' | 'deprecated' }>;
+    };
     const resourceIds = new Set(resourceRegistry.resources.map((resource) => resource.resource_id));
+    const statusByResource = new Map(resourceRegistry.resources.map((resource) => [resource.resource_id, resource.status ?? 'active']));
 
     for (const module of registry.modules) {
-      for (const resourceId of [...module.owned_resources, ...module.consumed_resources, ...module.forbidden_resources]) {
+      for (const resourceId of [...module.owned_resources, ...module.consumed_resources, ...module.pending_resources, ...module.forbidden_resources]) {
         expect(resourceIds.has(resourceId), `${module.module_id}:${resourceId}`).toBe(true);
       }
 
-      expect(module.pending_resources, module.module_id).toEqual([]);
+      for (const resourceId of [...module.owned_resources, ...module.consumed_resources]) {
+        expect(statusByResource.get(resourceId), `${module.module_id}:${resourceId}`).toBe('active');
+      }
+
+      for (const resourceId of module.pending_resources) {
+        expect(statusByResource.get(resourceId), `${module.module_id}:${resourceId}`).not.toBe('active');
+        expect(module.owned_resources, `${module.module_id}:${resourceId}`).not.toContain(resourceId);
+        expect(module.consumed_resources, `${module.module_id}:${resourceId}`).not.toContain(resourceId);
+        expect(module.forbidden_resources, `${module.module_id}:${resourceId}`).not.toContain(resourceId);
+      }
 
       for (const owned of module.owned_resources) {
         expect(module.forbidden_resources, `${module.module_id}:${owned}`).not.toContain(owned);
@@ -146,14 +158,13 @@ describe('module registry truth gate', () => {
     }
   });
 
-  it('keeps human module docs from reintroducing pending resource references', () => {
+  it('documents pending module resources as design target state', () => {
     const moduleReview = read('docs/modules/project-modules.md');
     const testDesign = read('docs/testing/module-edge-registry-test-design.md');
 
-    expect(moduleReview).not.toMatch(/pending\s+`resource\./);
-    expect(moduleReview).not.toMatch(/pending\s+resource\./);
-    expect(testDesign).not.toMatch(/pending resources are explicit/);
-    expect(testDesign).not.toMatch(/pending_resources` in `docs\/module-registry\.json`/);
+    expect(moduleReview).toMatch(/pending resources/i);
+    expect(testDesign).toMatch(/design\/pending resources/i);
+    expect(testDesign).toMatch(/pending_resources` in `docs\/module-registry\.json`/);
   });
 
   it('keeps concrete resources owned by at most one module', () => {

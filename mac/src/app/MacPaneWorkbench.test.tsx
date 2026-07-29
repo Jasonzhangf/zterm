@@ -18,6 +18,7 @@ import { cleanup, fireEvent, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MacPaneWorkbench } from './MacPaneWorkbench';
 import {
+  closeTab,
   createInitialWorkbenchState,
   openConnectionInWorkbench,
   openLocalTmuxInWorkbench,
@@ -346,5 +347,157 @@ describe('MacPaneWorkbench pane rendering (red baseline)', () => {
     expect(tab).toBeTruthy();
     // desktop 上 right-click 不应被 prevent
     fireEvent.contextMenu(tab!, { clientX: 100, clientY: 200 });
+    expect(container.querySelector('[data-testid="mac-pane-context-menu"]')).toBeTruthy();
+  });
+
+  it('dismisses the pane context menu on Escape and outside pointer down', () => {
+    let workbench: MacWorkbenchState = createInitialWorkbenchState();
+    workbench = openConnectionInWorkbench(workbench, makeTarget('dev'));
+    const { container } = render(
+      <MacPaneWorkbench
+        workbench={workbench}
+        setWorkbench={vi.fn()}
+        hosts={[]}
+        platform="desktop"
+        splitVisible={false}
+        runtimeRegistry={makeRuntimeRegistryStub()}
+        bridgeSettings={makeBridgeSettings()}
+      />,
+    );
+    const tab = container.querySelector('[data-tab-id]') as HTMLElement;
+
+    fireEvent.contextMenu(tab, { clientX: 100, clientY: 200 });
+    expect(container.querySelector('[data-testid="mac-pane-context-menu"]')).toBeTruthy();
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(container.querySelector('[data-testid="mac-pane-context-menu"]')).toBeNull();
+
+    fireEvent.contextMenu(tab, { clientX: 100, clientY: 200 });
+    expect(container.querySelector('[data-testid="mac-pane-context-menu"]')).toBeTruthy();
+    fireEvent.pointerDown(document.body);
+    expect(container.querySelector('[data-testid="mac-pane-context-menu"]')).toBeNull();
+  });
+
+  it('dismisses the pane context menu when the referenced tab disappears', () => {
+    let workbench: MacWorkbenchState = createInitialWorkbenchState();
+    workbench = openConnectionInWorkbench(workbench, makeTarget('dev'));
+    const pane = workbench.workspace.panes[0]!;
+    const { container, rerender } = render(
+      <MacPaneWorkbench
+        workbench={workbench}
+        setWorkbench={vi.fn()}
+        hosts={[]}
+        platform="desktop"
+        splitVisible={false}
+        runtimeRegistry={makeRuntimeRegistryStub()}
+        bridgeSettings={makeBridgeSettings()}
+      />,
+    );
+
+    fireEvent.contextMenu(container.querySelector('[data-tab-id]')!, { clientX: 100, clientY: 200 });
+    expect(container.querySelector('[data-testid="mac-pane-context-menu"]')).toBeTruthy();
+
+    workbench = closeTab(workbench, pane.activeTabId);
+    rerender(
+      <MacPaneWorkbench
+        workbench={workbench}
+        setWorkbench={vi.fn()}
+        hosts={[]}
+        platform="desktop"
+        splitVisible={false}
+        runtimeRegistry={makeRuntimeRegistryStub()}
+        bridgeSettings={makeBridgeSettings()}
+      />,
+    );
+    expect(container.querySelector('[data-testid="mac-pane-context-menu"]')).toBeNull();
+  });
+
+  it('clicking an empty pane activates that pane and opens the session chooser', () => {
+    let workbench: MacWorkbenchState = createInitialWorkbenchState();
+    workbench = openConnectionInWorkbench(workbench, makeTarget('dev'));
+    workbench = splitActivePaneRight(workbench);
+    const emptyPane = workbench.workspace.panes.find((pane) => pane.tabs[0].kind === 'empty')!;
+    let nextWorkbench = workbench;
+    const setWorkbench = (updater: any) => {
+      nextWorkbench = typeof updater === 'function' ? updater(nextWorkbench) : updater;
+    };
+    const { container } = render(
+      <MacPaneWorkbench
+        workbench={workbench}
+        setWorkbench={setWorkbench as any}
+        hosts={[]}
+        platform="desktop"
+        splitVisible
+        runtimeRegistry={makeRuntimeRegistryStub()}
+        bridgeSettings={makeBridgeSettings()}
+      />,
+    );
+
+    fireEvent.click(container.querySelector(`[data-testid="mac-empty-pane-select-${emptyPane.id}"]`)!);
+
+    expect(nextWorkbench.workspace.activePaneId).toBe(emptyPane.id);
+    expect(nextWorkbench.launcherOpen).toBe(true);
+  });
+
+  it('right-click menu opens a scoped replacement chooser without removing the live tab', () => {
+    let workbench: MacWorkbenchState = createInitialWorkbenchState();
+    workbench = openLocalTmuxInWorkbench(workbench, 'zterm_mac_goal_a');
+    const pane = workbench.workspace.panes[0];
+    const tabId = pane.activeTabId;
+    let nextWorkbench = workbench;
+    const setWorkbench = (updater: any) => {
+      nextWorkbench = typeof updater === 'function' ? updater(nextWorkbench) : updater;
+    };
+    const { container } = render(
+      <MacPaneWorkbench
+        workbench={workbench}
+        setWorkbench={setWorkbench as any}
+        hosts={[]}
+        platform="desktop"
+        splitVisible={false}
+        runtimeRegistry={makeRuntimeRegistryStub()}
+        bridgeSettings={makeBridgeSettings()}
+      />,
+    );
+
+    fireEvent.contextMenu(container.querySelector('[data-tab-id]')!, { clientX: 100, clientY: 200 });
+    fireEvent.click(container.querySelector('[data-testid="mac-pane-context-menu"] button')!);
+
+    expect(nextWorkbench.workspace.activePaneId).toBe(pane.id);
+    expect(nextWorkbench.launcherOpen).toBe(true);
+    expect(nextWorkbench.pendingSessionReplacement).toEqual({ paneId: pane.id, tabId });
+    expect(nextWorkbench.workspace.panes[0].tabs[0].kind).toBe('local-tmux');
+    expect(nextWorkbench.workspace.panes[0].tabs[0].id).toBe(tabId);
+  });
+
+  it('right-click menu moves a tab to an explicitly numbered pane', () => {
+    let workbench: MacWorkbenchState = createInitialWorkbenchState();
+    workbench = openConnectionInWorkbench(workbench, makeTarget('a'));
+    workbench = openConnectionInWorkbench(workbench, makeTarget('b'), { append: true });
+    workbench = splitActivePaneRight(workbench);
+    const firstPane = workbench.workspace.panes[0];
+    const secondPane = workbench.workspace.panes[1];
+    let nextWorkbench = workbench;
+    const setWorkbench = (updater: any) => {
+      nextWorkbench = typeof updater === 'function' ? updater(nextWorkbench) : updater;
+    };
+    const { container } = render(
+      <MacPaneWorkbench
+        workbench={workbench}
+        setWorkbench={setWorkbench as any}
+        hosts={[]}
+        platform="desktop"
+        splitVisible
+        runtimeRegistry={makeRuntimeRegistryStub()}
+        bridgeSettings={makeBridgeSettings()}
+      />,
+    );
+
+    fireEvent.contextMenu(container.querySelector(`[data-tab-id="${firstPane.tabs[1].id}"]`)!, { clientX: 100, clientY: 200 });
+    fireEvent.click(Array.from(container.querySelectorAll('[data-testid="mac-pane-context-menu"] button')).find((button) =>
+      button.textContent?.includes('Move to P2'),
+    )!);
+
+    expect(nextWorkbench.workspace.panes.find((pane) => pane.id === firstPane.id)?.tabs.map((tab) => tab.title)).toEqual(['a']);
+    expect(nextWorkbench.workspace.panes.find((pane) => pane.id === secondPane.id)?.tabs.map((tab) => tab.title)).toContain('b');
   });
 });

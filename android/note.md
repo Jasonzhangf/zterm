@@ -1,3 +1,13 @@
+# 2026-07-29 remote-window sibling switch / screenshot / fullscreen gesture diagnosis
+
+- Symptom from live screenshot/user report: remote-window overlay can show `截图失败`; after tapping a secondary/sibling remote window, the active connection/video loses usability; fullscreen pinch-to-zoom is misclassified as scroll; remote scroll feels choppy.
+- SOP/model flow: known `desktop.remote_window_stream` plus screenshot subflow `terminal.remote_screenshot`. Resource path is `resource.remote_window_overlay -> resource.remote_window_touch_action -> resource.remote_window_stream`; screenshot path is `resource.remote_window_overlay -> resource.remote_screenshot`. Forbidden: terminal buffer/render, daemon tmux mirror, route fallback, or transport reconnect compensation.
+- MemoryPalace search gap: `scripts/mempalace-mine-zterm.sh search "remote-window sibling screenshot pinch scroll"` failed because `/Users/fanzhang/.local/pipx/venvs/mempalace/bin/python` is missing. Diagnosis therefore used project docs/registry/note/source directly and does not claim MP coverage.
+- Confirmed first divergence H1: `RemoteWindowOverlay.handleSelectTarget()` stops the previous stream and clears receiver media before the new sibling target stream is confirmed. If the new stream or screenshot-adjacent target handoff fails, the currently usable stream is already gone. Unique owner: `desktop.remote_window_stream.overlay.project`; allowed paths `RemoteWindowOverlay.tsx` and its overlay tests.
+- Confirmed first divergence H2: fullscreen pair gesture classification requires each finger's axis projection to dominate perpendicular movement. A real pinch with vertical drift can have clear opposite-distance expansion but enough midpoint movement to fall through into `twoFingerScroll`, so zoom is emitted as a remote scroll. Unique owner: client overlay/touch-action classifier in `RemoteWindowOverlay.tsx` tests.
+- Screenshot failure itself is downstream explicit error projection: existing screenshot handler sets `screenshotStatus=failed` and does not focus or clear stream state. The fix should keep screenshot non-input and avoid treating thumbnail/screenshot failure as stream truth.
+- Required verification: red/green overlay tests for sibling switch failed handoff, overlapping sibling handoff stale result cleanup, old-stream cleanup failure projection, clear-pinch-no-scroll, default safe boundary, and thumbnail refresh; focused remote-window tests; typecheck. L5 phone replay remains needed for final tactile smoothness proof.
+
 # 2026-07-25 session preview child refresh / body tap diagnosis
 
 - Jason reported two regressions in the multi-session preview group UI: secondary preview bodies appear black / not refreshing, and tapping inside the child window body does not promote it; only the top title area works. The visible order badges `1/2/3/4` also consume too much header space.
@@ -4352,3 +4362,74 @@ Need runtime debug to confirm:
 - Codex review initially found three blocking gaps: empty pane/split fallback paths, passive cursor coercion, and passive refresh mapped as active-session truth. Final shape: malformed workspace state throws, passive cursor must be a non-negative integer, split growth uses one authoritative splitter, and `resource.visible_pane_session` separates visible passive pane truth from `resource.active_session`.
 - Maps synced: feature registry keeps `useTerminalWorkspace.ts` as the sole workspace mutation owner; function map marks TerminalPage/Header/StageShell as projection/intent callers; resource map/registry add `resource.visible_pane_session`; mainline call map records `SessionLifecycle -> PassiveVisibleRefreshScheduler -> ActivityFreshness`.
 - Verification after final map fix: JSON parse PASS; focused lifecycle/workspace/persistence 38 PASS; `test:feature-registry` 78 PASS; `test:terminal:contracts` 54 files / 754 PASS; codex review final `VERDICT: PASS`.
+
+# 2026-07-29 TerminalPage v2/v3 alignment audit
+
+- Scope: audit current TerminalPage/page runtime state against `2026-05-24-shared-blocks-orchestration-audit-v2.md` and v3. Output written to `android/docs/audits/2026-07-29-terminal-page-v2-v3-alignment-audit.md`.
+- Finding: v3 interaction runtime completion does not hold in current code. `useTerminalPageInteractionRuntime()` and `useTerminalPageShellActionsRuntime()` are only definitions/tests; no product caller. `TerminalPage.tsx` still owns swipe, chrome session switch, pane activation, quick-tab/tab-manager open, and viewport change handlers.
+- Evidence: current `TerminalPage.tsx` is 3849 lines versus v3's 2586-line record. `pnpm --dir android run type-check` PASS. v2/v3-style targeted suite fails 1 stale render-key expectation; workspace split suite fails 1 stale expectation that contradicts latest empty-pane rule.
+- Next owner path: first fix stale test semantics, then connect or delete the orphan page runtimes, and add a gate that function-map/runtime owner files must be product-callsite-bound, not merely present.
+- MemoryPalace search remains blocked by missing pipx interpreter, so this audit used docs/source/tests only and makes no re-mine claim.
+
+# 2026-07-29 startup terminal route flash fix
+
+- Scope: App page-state restore only. Feature/resource mapping stays in Android app shell / `terminal.open_tabs` current-process projection; no terminal transport, renderer, daemon, or open-tab persistence resurrection.
+- Root cause: `useAppPageState()` initialized `ACTIVE_PAGE=terminal` with `allowTerminal=false`, so a live current-process runtime session first painted Connections/light home and only later called `ensureTerminalPageVisible()` from the restore effect. That visible route flip appeared as a white screen then refresh.
+- Fix: initial page-state restore now allows terminal only when a runtime session and active runtime session id already exist in the same render. Stale terminal page without runtime ownership still returns Connections and clears legacy open-tab storage.
+- Verification: `useAppPageState.test.tsx`, `App.first-paint.test.tsx`, and `App.first-paint.real-terminal.test.tsx` passed 7/7; `useOpenTabRuntime.test.tsx`, `open-tab-intent.test.ts`, and `App.dynamic-refresh.test.tsx` passed 60/60; `open-tab-history-truth`, `feature-registry-truth`, and `function-wiki-truth` passed 23/23; `pnpm --dir android run type-check` passed.
+- MemoryPalace remains blocked by missing pipx interpreter (`~/.local/pipx/venvs/mempalace/bin/python`), so no MemoryPalace search/re-mine claim is made.
+
+# 2026-07-29 remote-window multi-window preview performance fix
+
+- Scope: `desktop.remote_window_stream` Android overlay projection only. Owner is `RemoteWindowOverlay`; daemon stream/capture, terminal renderer, buffer truth, route selection, and QuickBar owners are not modified.
+- Root cause: same-app sibling projection added two periodic foreground work sources while video is active: active catalog `forceRefresh` every 1s and per-sibling screenshot thumbnails every 5s with a 4s stale cutoff. Effect rebuilds could clear or discard in-flight thumbnail truth, causing duplicate screenshot requests or permanent `截图中` cards. This can occupy the WebView/daemon control path and make the multi-window preview look frozen although the stream truth is still connected.
+- Review fix: failed thumbnails are terminal for the current request identity, the single in-flight lock is held until the real screenshot promise settles, thumbnail completion must match `{sessionId,targetId,requestId}`, and daemon stream stop now resolves/rejects from request-id matched `remote-window-stream-status` / `remote-window-error` instead of fire-and-forget cleanup.
+- Map fix: handoff projection is bound to `RemoteWindowOverlay -> RemoteWindowOverlayRuntime`; daemon control messages stay on `RemoteWindowOverlay -> RemoteWindowMessageRuntime`, and stop ACK/error returns through `SocketMessage -> RemoteWindowMessageRuntime`.
+- Verification: focused overlay/message/session `96 PASS`; remote-window stack `171 PASS`; `tsc --noEmit` PASS; `test:feature-registry` `78 PASS`; full `build:android` PASS. APK `0.1.3.2273` / versionCode `1032273` / sha256 `2d6aac8a35d67db08bdefc7c8a837c284e9e0faa32d4b75fd8322e3b9c545fc1` published to local, Tailscale, and public Relay routes; ADB install/launch passed and awake screenshot confirmed Home rendered.
+- MemoryPalace search remains blocked by missing pipx interpreter; no re-mine/search claim is made.
+# 2026-07-29 remote-window canvas/focus dual-stream closeout
+
+- Scope: `desktop.remote_window_stream` only. Owners touched: shared protocol, Android message/receiver/session runtime, `RemoteWindowOverlay`, daemon stream lifecycle, and matching docs/tests. Network realtime/bandwidth strategy remains out of scope.
+- Root cause found during focused gate: focus stream attach used `attachRemoteWindowStreamReceiver(current, focusId)` while `current.streamId` still pointed at canvas, so focus never became the active overlay stream; quality/resize ACK paths either stayed on canvas or skipped focus. Canvas attach also started active catalog force-refresh before focus had committed.
+- Fix: non-handoff focus success now first runs `beginRemoteWindowStreamSetup(current, focusId)` then attaches focus; active media/stats/input/resize/quality truth moves to focus. `pendingFocusStreamIdRef` suppresses canvas catalog cadence while focus is pending, clears on focus success/failure, and focus start seeds `lastAppliedStreamQualityKeyRef` to avoid duplicate no-op quality requests.
+- Review closeout: canvas/focus startup is intentionally sequential, but the current Android overlay projects only one `<video>`; after focus commits the startup canvas stream must be stopped, not retained as an unprojected duplicate capture. If focus fails, handoff commit must accept the already-started canvas stream id, not only the focus pending id. Late focus completion is guarded by `streamRequestEpochRef` and close stops the pending focus id so stale promises cannot resurrect media or leak daemon capture.
+- Verification: focused remote-window message/receiver/overlay/session/daemon gate passed 6 files / 179 tests; Android `tsc --noEmit`, `test:feature-registry` 78/78, and `git diff --check` passed after P1 review fixes.
+- MemoryPalace: project-safe mine now succeeded and `mempalace search --wing zterm "remote window dual stream canvas focus"` returns the new canvas pipeline decision/resource map.
+
+# 2026-07-29 dual-stream review fix closeout
+
+- Codex cc review found one P1 and two P2 issues after dual-stream implementation: focus receiver startup failure could leave the daemon-side focus stream alive, Windows scoped `Change session` intent survived chooser dismissal, and future canvas compositor/layout resources were recorded as active truth before implementation.
+- Fix: focus startup catch now explicitly stops the known focus stream id before committing canvas-only display; Windows settings close/cancel clears `pendingSessionReplacement`; `resource.remote_window_canvas_raw`, `resource.remote_window_canvas_layout`, `resource.remote_window_canvas_encode`, and `resource.remote_window_focus_stream` are marked `status: design` and resource registry gate now locks that state until implementation.
+- Verification after fixes: `RemoteWindowOverlay.test.tsx` + `resource-registry-truth.test.ts` passed 77/77; focused remote-window/useAppPageState gate passed 7 files / 183 tests; Android `tsc --noEmit`, `test:feature-registry` 79/79, Windows full 7 files / 24 tests, Windows type-check, Mac focused 32/32, Mac type-check, and `git diff --check` passed.
+
+# 2026-07-29 desktop pane/session review closeout
+
+- Mac scope: workspace model only. `Change session` creates an active empty replacement slot in the selected tab; opening a connection/local tmux with `append=false` consumes that active empty tab even inside a multi-tab pane. `Move to Pn` consumes a target empty-pane sentinel and leaves a source sentinel when moving the only live tab.
+- Windows scope: desktop shell workspace only. `Change session` is now a scoped chooser intent: context menu stores `{paneId,tabId}`, activates that pane, opens the session list, and only a session-list row click calls `changeWindowsWorkspaceTabSession`. Marker: `windows change session scoped chooser before replacement`.
+- Verification: `pnpm --dir mac test -- --reporter dot` passed 22 files / 155 tests; Mac type-check passed; `pnpm --dir win test -- --reporter dot` passed 7 files / 23 tests; Windows type-check passed; `git diff --check` passed.
+
+# 2026-07-29 dual-stream review second closeout
+
+- Second codex review identified that active `purpose=canvas` advertised a persistent canvas pipeline that does not exist yet. Current code now uses `purpose=preview` for the startup low-rate stream and keeps app-group canvas docs/resources as design/future only.
+- Focus receiver startup failure no longer hides behind `console.warn`; Android keeps the preview stream visible and projects `remote-window-stream-degraded` with the focus failure message.
+- Desktop pane UX review fixes: Windows rejects moving empty placeholder tabs; Mac and Windows pane context menus dismiss on outside pointer, Escape, and stale tab removal.
+- Verification this round: Android focused remote-window 6 files / 180 PASS; Android tsc PASS; Android feature registry 10 files / 79 PASS; Mac focused 2 files / 34 PASS; Mac type-check PASS; Windows focused 2 files / 14 PASS; Windows type-check PASS; git diff --check PASS.
+
+# 2026-07-29 dual-stream review third closeout
+
+- Review found two remaining P2 issues: Windows primary `连接` ignored a pending scoped replacement, and Android focus-stream cleanup errors could be lost when the preview stream became the committed fallback.
+- Windows fix stays in `windows.desktop_shell.workspace`: `openTarget(false)` now consumes `pendingSessionReplacement` through `changeWindowsWorkspaceTabSession`, matching the session-list replacement path; split still opens a new split target.
+- Android fix stays in `desktop.remote_window_stream.overlay.project`: focus startup failure stops the known focus stream only after the preview stream is committed as the active replacement, so `failRemoteWindowStreamCleanup()` can bind the cleanup failure to the displayed preview stream instead of the previous stream.
+- Verification so far: Windows focused 2 files / 15 PASS; Android overlay/runtime 2 files / 80 PASS; Android remote-window stack 6 files / 181 PASS; Android tsc PASS; Windows type-check PASS; Mac focused 2 files / 34 PASS; Mac type-check PASS; feature-registry 10 files / 79 PASS; `build:android` PASS and regenerated APK `0.1.3.2274`.
+
+# 2026-07-29 module registry design-resource review closeout
+
+- Review found one remaining P2 registry truth issue: future remote-window canvas/layout/encode/focus resources were `status: design` in `resource-registry.json` but appeared as active owned/consumed bindings in `module-registry.json`.
+- Fix: `daemon.remote_window_stream` and `client.remote_window_overlay` now list those design resources only under `pending_resources`; `module-registry-truth.test.ts` now rejects non-active resources in active owned/consumed bindings and requires pending resources to stay non-active.
+- Verification: focused `module-registry-truth.test.ts` passed 13/13. Marker: `module registry pending design resources not active bindings`.
+
+# 2026-07-29 final review fixes before commit
+
+- Codex review found three remaining issues before commit: pending terminal route persistence could overwrite ACTIVE_PAGE before open-tab hydration, RemoteWindowOverlay could handoff from an unattached starting stream, and Windows Change session was incorrectly gated by invalid connection form values.
+- Fixes: useAppPageState preserves terminal route intent while persisted open tabs are still hydrate candidates and sets terminal page on owned restore; RemoteWindowOverlay handoff now requires state.streamStarted; Windows Change session opens the scoped chooser regardless of current form validity while keeping connection buttons gated.
+- Verification: Android useAppPageState/RemoteWindowOverlay/runtime focused gate passed 85/85; Android type-check passed; WindowsDesktopApp focused gate passed 10/10; Windows type-check passed; Mac type-check passed; git diff --check passed.

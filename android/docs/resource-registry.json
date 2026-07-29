@@ -1067,9 +1067,13 @@
         "enumerate_targets",
         "resolve_iterm2_pane",
         "normalize_coordinates",
+        "select_canvas_mode",
+        "publish_canvas_layout",
         "start_stream",
         "negotiate_media_transport",
         "emit_capture_frame",
+        "emit_canvas_frame",
+        "emit_focus_frame",
         "attach_receiver",
         "shrink_stream_projection",
         "stop_stream",
@@ -1078,7 +1082,11 @@
       ],
       "direct_relations": [
         "resource.daemon_process",
-        "resource.transport_target"
+        "resource.transport_target",
+        "resource.remote_window_canvas_raw",
+        "resource.remote_window_canvas_layout",
+        "resource.remote_window_canvas_encode",
+        "resource.remote_window_focus_stream"
       ],
       "indirect_relations": [
         "resource.tmux_session",
@@ -1096,12 +1104,163 @@
       ],
       "required_gates": [
         "src/lib/resource-registry-truth.test.ts",
-        "docs/testing/remote-window-stream-test-design.md"
+        "docs/testing/remote-window-stream-test-design.md",
+        "docs/testing/remote-window-canvas-pipeline-test-design.md"
       ],
       "canonical_docs": [
         "docs/resource-map.md",
         "docs/function-map.md",
-        "docs/decisions/2026-07-19-remote-window-stream-truth.md"
+        "docs/decisions/2026-07-19-remote-window-stream-truth.md",
+        "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md"
+      ]
+    },
+    {
+      "resource_id": "resource.remote_window_canvas_raw",
+      "status": "design",
+      "resource_type": "daemon_backend_truth",
+      "identity": "Daemon-owned raw remote-window canvas bitmap layer at desktop-pixel truth, either full-display or reflowed app-group canvas",
+      "owner_feature": "desktop.remote_window_stream",
+      "truth_store": "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md",
+      "allowed_operations": [
+        "capture_source_windows",
+        "compose_reflowed_canvas",
+        "compose_full_display_canvas",
+        "publish_raw_canvas_frame",
+        "drop_invalid_canvas_frame"
+      ],
+      "direct_relations": [
+        "resource.remote_window_canvas_layout",
+        "resource.remote_window_canvas_encode"
+      ],
+      "indirect_relations": [
+        "resource.transport_target"
+      ],
+      "via_resources": [
+        "resource.remote_window_canvas_encode"
+      ],
+      "forbidden_direct_relations": [
+        "resource.ui_projection",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.mirror_store"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "docs/testing/remote-window-canvas-pipeline-test-design.md"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md"
+      ]
+    },
+    {
+      "resource_id": "resource.remote_window_canvas_layout",
+      "status": "design",
+      "resource_type": "daemon_backend_truth",
+      "identity": "Daemon-owned source-window-to-canvas layout generation, source rects, canvas rects, z-order, and focus target",
+      "owner_feature": "desktop.remote_window_stream",
+      "truth_store": "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md",
+      "allowed_operations": [
+        "compute_layout_generation",
+        "publish_source_to_canvas_rects",
+        "publish_focus_target",
+        "reject_stale_layout_generation"
+      ],
+      "direct_relations": [
+        "resource.remote_window_canvas_encode"
+      ],
+      "indirect_relations": [
+        "resource.transport_target",
+        "resource.remote_window_overlay"
+      ],
+      "via_resources": [
+        "resource.remote_window_canvas_encode",
+        "resource.transport_target"
+      ],
+      "forbidden_direct_relations": [
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "docs/testing/remote-window-canvas-pipeline-test-design.md"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md"
+      ]
+    },
+    {
+      "resource_id": "resource.remote_window_canvas_encode",
+      "status": "design",
+      "resource_type": "daemon_backend_truth",
+      "identity": "Daemon-owned encoded canvas stream configuration, sender state, bitrate, frame cadence, and ROI capability result",
+      "owner_feature": "desktop.remote_window_stream",
+      "truth_store": "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md",
+      "allowed_operations": [
+        "probe_encoder_capability",
+        "encode_low_rate_canvas",
+        "apply_canvas_bitrate_policy",
+        "publish_canvas_stream_status",
+        "reject_unsupported_roi"
+      ],
+      "direct_relations": [
+        "resource.transport_target",
+        "resource.remote_window_focus_stream"
+      ],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "docs/testing/remote-window-canvas-pipeline-test-design.md"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md"
+      ]
+    },
+    {
+      "resource_id": "resource.remote_window_focus_stream",
+      "status": "design",
+      "resource_type": "daemon_backend_truth",
+      "identity": "Daemon-owned optional high-quality focus stream used when verified ROI encoding is unavailable or disabled",
+      "owner_feature": "desktop.remote_window_stream",
+      "truth_store": "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md",
+      "allowed_operations": [
+        "select_focus_target",
+        "encode_focus_stream",
+        "switch_focus_binding",
+        "stop_focus_stream"
+      ],
+      "direct_relations": [
+        "resource.transport_target"
+      ],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "docs/testing/remote-window-canvas-pipeline-test-design.md"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/decisions/2026-07-29-remote-window-canvas-pipeline.md"
       ]
     },
     {
