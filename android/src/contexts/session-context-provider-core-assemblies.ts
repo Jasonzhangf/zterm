@@ -261,12 +261,6 @@ export function useSessionProviderCoreAssemblies(
       ) {
         return requestedGeometry;
       }
-      if (options.bridgeSettings.terminalWidthMode === 'adaptive-phone') {
-        return {
-          widthMode: 'adaptive-phone',
-          cols: DEFAULT_TERMINAL_SESSION_VIEWPORT.cols,
-        };
-      }
       return { widthMode: 'mirror-fixed' };
     },
   }), [

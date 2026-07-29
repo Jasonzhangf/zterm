@@ -202,6 +202,9 @@ Jason，已完成本轮自闭环：
 - 本地 `pnpm --filter @zterm/mac package` 必须默认跳过 macOS code signing：`CSC_IDENTITY_AUTO_DISCOVERY=false` + `build.mac.identity=null`。
 - 禁止让 `electron-builder` 自动发现 distribution identity；否则每次 package 都可能触发 Keychain 授权弹窗。
 - 只有正式发布/分发签名任务才允许显式启用签名 identity，并必须单独说明签名和 notarization 验证。
+- 本机安装 unsigned package 前，先对 `.app` 做 ad-hoc 重签：`codesign --force --deep --sign - <ZTerm.app>`，再复制到实际目标路径并对目标再签一次。目标路径必须从运行中进程或 Jason 实际点击入口确认，优先检查 `/Applications/ZTerm.app`、`$HOME/Applications/ZTerm.app`、`~/Downloads`、`~/Desktop`、`~/.Trash`；不要只修 `/Applications` 后宣称完成。
+- 不要使用 `xattr -cr` 处理 `.app` bundle；它可能生成 `._*` AppleDouble 文件并破坏 sealed resources。若误生成，只能在该 `.app` 内精确删除 `._*` 后重新签名。可精确删除 `com.apple.quarantine`；不要把 `spctl --assess rejected` 当作 unsigned internal alpha 的启动失败证据，真实判定必须用 Finder/open 启动和进程路径。
+- 若 Finder 提示“恶意软件并移到废纸篓”，先查实际入口包的 `codesign --verify --deep --strict` 与 `spctl --assess --type execute --verbose=4`。若输出 `notarization indicates this code has been revoked`，根因是旧 revoked 包仍在实际路径，必须退出该路径的运行中明确 PID、把旧包改名备份、安装当前构建、重签、再从同一路径启动验证；`osascript tell application "ZTerm" to quit` 可能被 revoked app 挂住，卡住时只结束该明确 `osascript` PID，再用旧 ZTerm 明确 PID 关闭。
 
 ### 3.5 状态 / Alpha 汇报对账门禁
 - 触发：Jason 问“今天完成了什么”“Mac 版本状态”“离 alpha 多远”“能不能手测/alpha 测试”，或上下文压缩/恢复后需要汇报 Mac 进度。

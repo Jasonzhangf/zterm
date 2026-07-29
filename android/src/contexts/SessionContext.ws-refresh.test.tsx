@@ -4201,7 +4201,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     }
   });
 
-  it('sends adaptive-phone cols but never rows in connect or reconnect handshakes after explicit resize truth exists', async () => {
+  it('does not request adaptive-phone cols in connect handshakes until explicit resize truth exists', async () => {
     const originalInnerHeight = window.innerHeight;
     try {
       render(
@@ -4223,8 +4223,8 @@ describe('SessionContext websocket dynamic refresh', () => {
         const connectMessage = readSentMessages(ws).find((item) => item.type === 'connect');
         expect(typeof connectMessage?.payload?.channelId).toBe('string');
         expect(connectMessage?.payload?.channelId).not.toBe('session-1');
-        expect(connectMessage?.payload?.widthMode).toBe('adaptive-phone');
-        expect(connectMessage?.payload?.cols).toBe(80);
+        expect(connectMessage?.payload?.widthMode).toBe('mirror-fixed');
+        expect(connectMessage?.payload?.cols).toBeUndefined();
         expect(connectMessage?.payload?.rows).toBeUndefined();
       });
 
@@ -4255,7 +4255,8 @@ describe('SessionContext websocket dynamic refresh', () => {
         const reconnectMessage = readSentMessages(reconnectWs).find((item) => item.type === 'connect');
         expect(typeof reconnectMessage?.payload?.channelId).toBe('string');
         expect(reconnectMessage?.payload?.channelId).not.toBe('session-1');
-        expect(typeof reconnectMessage?.payload?.cols).toBe('number');
+        expect(reconnectMessage?.payload?.widthMode).toBe('adaptive-phone');
+        expect(reconnectMessage?.payload?.cols).toBe(91);
         expect(reconnectMessage?.payload?.rows).toBeUndefined();
       });
     } finally {
@@ -4288,7 +4289,7 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
   });
 
-  it('uses current bridge width mode instead of stale session geometry on reconnect', async () => {
+  it('does not synthesize adaptive reconnect geometry from settings without explicit adaptive cols', async () => {
     function WidthModeHarness() {
       const [terminalWidthMode, setTerminalWidthMode] = useState<'adaptive-phone' | 'mirror-fixed'>('mirror-fixed');
       return (
@@ -4335,7 +4336,8 @@ describe('SessionContext websocket dynamic refresh', () => {
 
     await waitFor(() => {
       const reconnectMessage = readSentMessages(reconnectWs).find((item) => item.type === 'connect');
-      expect(reconnectMessage?.payload?.widthMode).toBe('adaptive-phone');
+      expect(reconnectMessage?.payload?.widthMode).toBe('mirror-fixed');
+      expect(reconnectMessage?.payload?.cols).toBeUndefined();
       expect(reconnectMessage?.payload?.rows).toBeUndefined();
     });
   });
