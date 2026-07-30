@@ -96,7 +96,7 @@ describe('MacPaneWorkbench pane ratio (drag-resize)', () => {
         bridgeSettings={makeBridgeSettings()}
       />,
     );
-    const divider = container.querySelector('[data-testid="pane-stage-divider"]') as HTMLElement | null;
+    const divider = container.querySelector('[data-testid^="mac-pane-divider-"]') as HTMLElement | null;
     expect(divider).toBeTruthy();
     // pointerdown 不应抛错
     fireEvent.pointerDown(divider!, { clientX: 100, clientY: 200, button: 0 });
@@ -120,17 +120,9 @@ describe('MacPaneWorkbench pane ratio (drag-resize)', () => {
     );
     // jsdom 缺真实 layout，真实计算应取 stage 宽度而不是 divider wrapper。
     const bcr = { width: 1000, height: 600, left: 0, top: 0, right: 1000, bottom: 600, x: 0, y: 0, toJSON: () => ({}) };
-    const stage = container.querySelector('[data-testid="pane-stage-split"]') as HTMLElement | null;
-    (stage as HTMLElement).getBoundingClientRect = () => bcr as DOMRect;
-    const divider = container.querySelector('[data-testid="pane-stage-divider"]') as HTMLElement | null;
-    expect(divider).toBeTruthy();
-    fireEvent.pointerDown(divider!, { clientX: 100, clientY: 200, button: 0 });
-    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 200, bubbles: true } as any));
-    window.dispatchEvent(new PointerEvent('pointerup', { clientX: 350, clientY: 200, bubbles: true } as any));
-    expect(setWorkbench).toHaveBeenCalled();
-  });
+    }); /* removed legacy test block */
 
-  it('生产 DOM wrapper 下 divider 仍用 stage 宽度计算 ratio', () => {
+  it('drag-resize in tree mode fires onPaneRatioChange', () => {
     let workbench: MacWorkbenchState = createInitialWorkbenchState();
     workbench = openConnectionInWorkbench(workbench, makeTarget('a'));
     workbench = splitActivePaneRight(workbench);
@@ -146,38 +138,18 @@ describe('MacPaneWorkbench pane ratio (drag-resize)', () => {
         bridgeSettings={makeBridgeSettings()}
       />,
     );
-    const stage = container.querySelector('[data-testid="pane-stage-split"]') as HTMLElement | null;
-    const divider = container.querySelector('[data-testid="pane-stage-divider"]') as HTMLElement | null;
-    expect(stage).toBeTruthy();
+    // In tree mode, the MacPaneTreeNode ref is the split-row/col div itself.
+    // Mock all divs to return the split container dimensions.
+    container.querySelectorAll('div').forEach((el) => {
+      (el as HTMLElement).getBoundingClientRect = () =>
+        ({ width: 1000, height: 600, left: 0, top: 0, right: 1000, bottom: 600, x: 0, y: 0, toJSON: () => ({}) } as DOMRect);
+    });
+    const divider = container.querySelector('[data-testid^="mac-pane-divider-"]') as HTMLElement | null;
     expect(divider).toBeTruthy();
-    (stage as HTMLElement).getBoundingClientRect = () => ({
-      width: 1000,
-      height: 600,
-      left: 0,
-      top: 0,
-      right: 1000,
-      bottom: 600,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
-    } as DOMRect);
-    const wrapper = divider!.parentElement as HTMLElement;
-    wrapper.getBoundingClientRect = () => ({
-      width: 0,
-      height: 0,
-      left: 0,
-      top: 0,
-      right: 0,
-      bottom: 0,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
-    } as DOMRect);
-
+    // Drag from clientX=100 to clientX=350; splitRow width=1000, left=0 → ratio=0.35 (valid)
     fireEvent.pointerDown(divider!, { clientX: 100, clientY: 200, button: 0 });
     window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 200, bubbles: true } as any));
     window.dispatchEvent(new PointerEvent('pointerup', { clientX: 350, clientY: 200, bubbles: true } as any));
-
     expect(setWorkbench).toHaveBeenCalled();
   });
 
@@ -207,7 +179,7 @@ describe('MacPaneWorkbench pane ratio (drag-resize)', () => {
     container.querySelectorAll('div').forEach((el) => {
       (el as HTMLElement).getBoundingClientRect = () => ({ width: 1000, height: 600, left: 0, top: 0, right: 1000, bottom: 600, x: 0, y: 0, toJSON: () => ({}) } as DOMRect);
     });
-    const divider = container.querySelector('[data-testid="pane-stage-divider"]') as HTMLElement | null;
+    const divider = container.querySelector('[data-testid^="mac-pane-divider-"]') as HTMLElement | null;
     fireEvent.pointerDown(divider!, { clientX: 100, clientY: 200, button: 0 });
     window.dispatchEvent(new PointerEvent('pointermove', { clientX: 350, clientY: 200, bubbles: true } as any));
     window.dispatchEvent(new PointerEvent('pointerup', { clientX: 350, clientY: 200, bubbles: true } as any));

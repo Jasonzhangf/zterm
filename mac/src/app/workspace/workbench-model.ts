@@ -8,16 +8,24 @@
 
 import {
   addPaneToWorkspace,
+  buildSplitTreeFromPanes,
+  closeSplitTreePane,
   cloneWorkspaceState,
   createWorkspacePane,
+  findSplitTreeLeaf,
+  listSplitTreePaneIds,
   removePaneFromWorkspace,
+  resizeSplitTreeNode,
   resolveActiveTab as resolveActiveWorkspaceTab,
   setActivePane,
+  splitTreePane,
   updateWorkspacePane,
+  type SplitTreeNode,
   type WorkspacePane,
   type WorkspaceState,
   type WorkspaceTab,
 } from '@zterm/shared';
+import { MAX_WORKSPACE_PANES } from '@zterm/shared';
 import type { EditableHost, Host } from '@zterm/shared';
 import {
   buildLocalTmuxMacRuntimeKey,
@@ -27,6 +35,7 @@ import {
   createMacWorkspacePane,
   createRemoteMacTab,
   parseMacWorkspaceRecord,
+  type MacPaneTreeNode,
   type MacPaneRecord,
   type MacRuntimeKey,
   type MacTabRecord,
@@ -45,10 +54,61 @@ export interface MacWorkbenchTab extends WorkspaceTab {
 
 export interface MacWorkbenchState {
   workspace: WorkspaceState<MacWorkbenchTab>;
+  paneTreeRoot?: SplitTreeNode<MacWorkbenchTab>;
   launcherOpen: boolean;
   pendingSessionReplacement?: {
     paneId: string;
     tabId: string;
+  };
+}
+
+function convertPaneTreeRecordToWorkbenchTree(
+  node: MacPaneTreeNode,
+  panes: MacPaneRecord[],
+  hosts: Host[],
+): SplitTreeNode<MacWorkbenchTab> {
+  if (node.type === 'leaf') {
+    const pane = panes.find((candidate) => candidate.id === node.pane.id) ?? node.pane;
+    return {
+      id: node.id,
+      type: 'leaf',
+      pane: {
+        id: pane.id,
+        tabs: pane.tabs.map((tab) => tabRecordToWorkbenchTab(tab, hosts)),
+        activeTabId: pane.activeTabId,
+      },
+    };
+  }
+  return {
+    ...node,
+    first: convertPaneTreeRecordToWorkbenchTree(node.first, panes, hosts),
+    second: convertPaneTreeRecordToWorkbenchTree(node.second, panes, hosts),
+  };
+}
+
+function materializeWorkbenchTree(
+  node: SplitTreeNode<MacWorkbenchTab>,
+  panes: MacPaneRecord[],
+): MacPaneTreeNode {
+  if (node.type === 'leaf') {
+    const pane = panes.find((candidate) => candidate.id === node.pane.id);
+    if (!pane) {
+      throw new Error(`Mac workbench tree leaf ${node.pane.id} is missing from workspace panes`);
+    }
+    return {
+      id: node.id,
+      type: 'leaf',
+      pane: {
+        id: pane.id,
+        tabs: pane.tabs,
+        activeTabId: pane.activeTabId,
+      },
+    };
+  }
+  return {
+    ...node,
+    first: materializeWorkbenchTree(node.first, panes),
+    second: materializeWorkbenchTree(node.second, panes),
   };
 }
 
@@ -57,6 +117,38 @@ function createId(prefix: string) {
     return `${prefix}-${crypto.randomUUID()}`;
   }
   return `${prefix}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/**
+ * Projects flat workspace pane tabs/activeTabId into the tree leaf payloads.
+ * Keeps paneTreeRoot in sync with the authoritative workspace.panes.
+ */
+function projectWorkspacePanesIntoTree(
+  node: SplitTreeNode<MacWorkbenchTab>,
+  workspace: WorkspaceState<MacWorkbenchTab>,
+): SplitTreeNode<MacWorkbenchTab> {
+  if (node.type === 'leaf') {
+    const pane = workspace.panes.find((p) => p.id === node.pane.id);
+    if (!pane) return node;
+    return { ...node, pane: { id: pane.id, tabs: pane.tabs, activeTabId: pane.activeTabId } };
+  }
+  return {
+    ...node,
+    first: projectWorkspacePanesIntoTree(node.first, workspace),
+    second: projectWorkspacePanesIntoTree(node.second, workspace),
+  };
+}
+
+/**
+ * Returns state with workspace and paneTreeRoot synchronized.
+ * Call after every workspace mutation to keep both projections aligned.
+ */
+function withWorkspaceProjection(
+  state: MacWorkbenchState,
+  workspace: WorkspaceState<MacWorkbenchTab>,
+): MacWorkbenchState {
+  if (!state.paneTreeRoot) return { ...state, workspace };
+  return { ...state, workspace, paneTreeRoot: projectWorkspacePanesIntoTree(state.paneTreeRoot, workspace) };
 }
 
 function buildConnectionTitle(target: EditableHost) {
@@ -127,7 +219,7 @@ export function activateTab(state: MacWorkbenchState, tabId: string): MacWorkben
         ...currentPane,
         activeTabId: tabId,
       }));
-      return { ...state, workspace: setActivePane(next, pane.id) };
+      return withWorkspaceProjection(state, setActivePane(next, pane.id));
     }
   }
   return state;
@@ -145,7 +237,10 @@ export function appendEmptyTab(state: MacWorkbenchState): MacWorkbenchState {
     tabs: [...pane.tabs, empty],
     activeTabId: empty.id,
   }));
-  return { ...state, workspace: next, launcherOpen: true, pendingSessionReplacement: undefined };
+  return withWorkspaceProjection(
+    { ...state, launcherOpen: true, pendingSessionReplacement: undefined },
+    next,
+  );
 }
 
 function replacePendingSessionTab(
@@ -165,12 +260,10 @@ function replacePendingSessionTab(
     tabs: pane.tabs.map((tab) => (tab.id === pending.tabId ? newTab : tab)),
     activeTabId: newTab.id,
   }));
-  return {
-    ...state,
-    workspace: setActivePane(next, pending.paneId),
-    launcherOpen: false,
-    pendingSessionReplacement: undefined,
-  };
+  return withWorkspaceProjection(
+    { ...state, launcherOpen: false, pendingSessionReplacement: undefined },
+    setActivePane(next, pending.paneId),
+  );
 }
 
 export function closeTab(state: MacWorkbenchState, tabId: string): MacWorkbenchState {
@@ -182,12 +275,36 @@ export function closeTab(state: MacWorkbenchState, tabId: string): MacWorkbenchS
     if (pane.tabs.length === 1) {
       if (state.workspace.panes.length === 1) {
         const replacement = createPaneWith(createEmptyTab());
+        const workspace = { panes: [replacement], activePaneId: replacement.id };
+        const paneTreeRoot = state.paneTreeRoot
+          ? { ...state.paneTreeRoot, type: 'leaf' as const, pane: {
+            id: replacement.id,
+            tabs: replacement.tabs,
+            activeTabId: replacement.activeTabId,
+          } }
+          : undefined;
         return {
           ...state,
-          workspace: { panes: [replacement], activePaneId: replacement.id },
+          workspace,
+          paneTreeRoot,
         };
       }
-      return { ...state, workspace: removePaneFromWorkspace(state.workspace, pane.id) };
+      const workspace = removePaneFromWorkspace(state.workspace, pane.id);
+      if (!state.paneTreeRoot) return { ...state, workspace };
+      const treeWorkspace = closeSplitTreePane(
+        { tree: state.paneTreeRoot, activePaneId: state.workspace.activePaneId },
+        pane.id,
+        { fallbackPaneId: workspace.activePaneId },
+      );
+      const nextState = {
+        ...state,
+        paneTreeRoot: treeWorkspace.tree,
+        workspace,
+      };
+      return withWorkspaceProjection(
+        nextState,
+        setActivePane(workspace, treeWorkspace.activePaneId),
+      );
     }
     const nextActive = pane.activeTabId === tabId
       ? (remaining[Math.max(0, remaining.length - 1)]?.id ?? remaining[0].id)
@@ -197,7 +314,7 @@ export function closeTab(state: MacWorkbenchState, tabId: string): MacWorkbenchS
       tabs: remaining,
       activeTabId: nextActive,
     }));
-    return { ...state, workspace: updated };
+    return withWorkspaceProjection(state, updated);
   }
   return state;
 }
@@ -227,7 +344,10 @@ export function openConnectionInWorkbench(
       tabs: pane.tabs.map((tab) => (tab.id === activeTab.id ? newTab : tab)),
       activeTabId: newTab.id,
     }));
-    return { ...state, workspace: next, launcherOpen: false, pendingSessionReplacement: undefined };
+    return withWorkspaceProjection(
+      { ...state, launcherOpen: false, pendingSessionReplacement: undefined },
+      next,
+    );
   }
 
   const next = updateWorkspacePane(state.workspace, activePane.id, (pane) => ({
@@ -235,7 +355,10 @@ export function openConnectionInWorkbench(
     tabs: [...pane.tabs, newTab],
     activeTabId: newTab.id,
   }));
-  return { ...state, workspace: next, launcherOpen: false, pendingSessionReplacement: undefined };
+  return withWorkspaceProjection(
+    { ...state, launcherOpen: false, pendingSessionReplacement: undefined },
+    next,
+  );
 }
 
 export function openLocalTmuxInWorkbench(
@@ -267,7 +390,10 @@ export function openLocalTmuxInWorkbench(
       tabs: pane.tabs.map((tab) => (tab.id === activeTab.id ? newTab : tab)),
       activeTabId: newTab.id,
     }));
-    return { ...state, workspace: next, launcherOpen: false, pendingSessionReplacement: undefined };
+    return withWorkspaceProjection(
+      { ...state, launcherOpen: false, pendingSessionReplacement: undefined },
+      next,
+    );
   }
 
   const next = updateWorkspacePane(state.workspace, activePane.id, (pane) => ({
@@ -275,7 +401,10 @@ export function openLocalTmuxInWorkbench(
     tabs: [...pane.tabs, newTab],
     activeTabId: newTab.id,
   }));
-  return { ...state, workspace: next, launcherOpen: false, pendingSessionReplacement: undefined };
+  return withWorkspaceProjection(
+    { ...state, launcherOpen: false, pendingSessionReplacement: undefined },
+    next,
+  );
 }
 
 export function beginPendingSessionReplacement(
@@ -296,17 +425,70 @@ export function beginPendingSessionReplacement(
 }
 
 export function splitActivePaneRight(state: MacWorkbenchState): MacWorkbenchState {
-  const activePaneId = state.workspace.activePaneId;
-  const activePane = state.workspace.panes.find((pane) => pane.id === activePaneId);
-  if (!activePane) {
-    return state;
+  // Ensure paneTreeRoot exists (migrate from flat panes on first split)
+  let { paneTreeRoot } = state;
+  if (!paneTreeRoot) {
+    paneTreeRoot = buildSplitTreeFromPanes(
+      state.workspace.panes.map((p) => p.tabs[0]!),
+      state.workspace.panes.map((p) => p.id),
+      (i) => state.workspace.panes[i]?.activeTabId ?? '',
+      createEmptyTab,
+    )?.tree;
+    if (!paneTreeRoot) return state;
   }
-  const newPane = createPaneWith(createEmptyTab());
-  return { ...state, workspace: addPaneToWorkspace(state.workspace, newPane) };
+  const newTab = createEmptyTab();
+  const ws = splitTreePane(
+    { tree: paneTreeRoot, activePaneId: state.workspace.activePaneId },
+    state.workspace.activePaneId,
+    'right',
+    newTab,
+  );
+  if (ws.activePaneId === state.workspace.activePaneId) return state;
+  if (state.workspace.panes.length >= MAX_WORKSPACE_PANES) return state;
+  const newPane: WorkspacePane<MacWorkbenchTab> = {
+    id: ws.activePaneId,
+    size: 1,
+    tabs: [newTab],
+    activeTabId: newTab.id,
+  };
+  const workspace = addPaneToWorkspace(state.workspace, newPane);
+  return withWorkspaceProjection(
+    { ...state, paneTreeRoot: ws.tree },
+    setActivePane(workspace, ws.activePaneId),
+  );
 }
 
 export function splitActivePaneDown(state: MacWorkbenchState): MacWorkbenchState {
-  return splitActivePaneRight(state);
+  let { paneTreeRoot } = state;
+  if (!paneTreeRoot) {
+    paneTreeRoot = buildSplitTreeFromPanes(
+      state.workspace.panes.map((p) => p.tabs[0]!),
+      state.workspace.panes.map((p) => p.id),
+      (i) => state.workspace.panes[i]?.activeTabId ?? '',
+      createEmptyTab,
+    )?.tree;
+    if (!paneTreeRoot) return state;
+  }
+  const newTab = createEmptyTab();
+  const ws = splitTreePane(
+    { tree: paneTreeRoot, activePaneId: state.workspace.activePaneId },
+    state.workspace.activePaneId,
+    'down',
+    newTab,
+  );
+  if (ws.activePaneId === state.workspace.activePaneId) return state;
+  if (state.workspace.panes.length >= MAX_WORKSPACE_PANES) return state;
+  const newPane: WorkspacePane<MacWorkbenchTab> = {
+    id: ws.activePaneId,
+    size: 1,
+    tabs: [newTab],
+    activeTabId: newTab.id,
+  };
+  const workspace = addPaneToWorkspace(state.workspace, newPane);
+  return withWorkspaceProjection(
+    { ...state, paneTreeRoot: ws.tree },
+    setActivePane(workspace, ws.activePaneId),
+  );
 }
 
 export function moveTabToPane(
@@ -345,10 +527,7 @@ export function moveTabToPane(
       : [...currentPane.tabs, tab];
     return { ...currentPane, tabs, activeTabId: tab.id };
   });
-  return {
-    ...state,
-    workspace: setActivePane(next, targetPaneId),
-  };
+  return withWorkspaceProjection(state, setActivePane(next, targetPaneId));
 }
 
 export function resolveActiveTab(state: MacWorkbenchState): MacWorkbenchTab | null {
@@ -420,6 +599,9 @@ export function cloneWorkbenchState(state: MacWorkbenchState): MacWorkbenchState
   return {
     ...state,
     workspace: cloneWorkspaceState(state.workspace),
+    paneTreeRoot: state.paneTreeRoot
+      ? JSON.parse(JSON.stringify(state.paneTreeRoot)) as SplitTreeNode<MacWorkbenchTab>
+      : undefined,
     pendingSessionReplacement: state.pendingSessionReplacement ? { ...state.pendingSessionReplacement } : undefined,
   };
 }
@@ -506,6 +688,9 @@ export function createWorkbenchStateFromWorkspaceRecord(
       })),
       activePaneId: record.activePaneId,
     },
+    paneTreeRoot: record.paneTreeRoot
+      ? convertPaneTreeRecordToWorkbenchTree(record.paneTreeRoot, record.panes, hosts)
+      : undefined,
     launcherOpen: false,
     pendingSessionReplacement: undefined,
   };
@@ -535,7 +720,9 @@ export function createWorkspaceRecordFromWorkbenchState(
     paneTree: options.previousRecord
       ? { kind: 'row', paneIds: panes.map((pane) => pane.id), lastSplit: options.previousRecord.paneTree.lastSplit }
       : { kind: 'row', paneIds: panes.map((pane) => pane.id) },
-    paneTreeRoot: options.previousRecord?.paneTreeRoot,
+    paneTreeRoot: state.paneTreeRoot
+      ? materializeWorkbenchTree(state.paneTreeRoot, panes)
+      : options.previousRecord?.paneTreeRoot,
     panes,
     activePaneId: state.workspace.activePaneId,
     updatedAt: options.updatedAt ?? Date.now(),

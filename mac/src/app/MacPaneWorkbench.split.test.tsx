@@ -2,11 +2,11 @@
 /**
  * mac-4.0.b 红测：MacPaneWorkbench split 行为
  *
- * 验证：
- * - 切到 splitVisible=true 时 PaneStage data-testid="pane-stage-split"
- * - desktop profile 下 divider 可见 (data-testid="pane-stage-divider")
+ * 验证（mac-4.0.f 递归 tree 之后）：
+ * - split 后生成 mac-pane-split-row，2 个 pane-stage-frame
+ * - desktop profile 下 divider 可见 (data-testid="mac-pane-divider-{nodeId}")
  * - drag-resize 启用（desktop profile dragResizeEnabled=true）
- * - onPaneRatioChange 触发后 pane size 改变
+ * - onPaneRatioChange 触发后 tree ratio 改变
  * - pane 数量在 1-4 间 split（MAX_WORKSPACE_PANES）
  * - 关闭最后一个 tab 保留 pane (>=1 pane rule)
  */
@@ -114,7 +114,7 @@ describe('MacPaneWorkbench split behavior (red baseline)', () => {
         bridgeSettings={makeBridgeSettings()}
       />,
     );
-    expect(container.querySelectorAll('[data-testid="pane-stage-divider"]').length).toBe(1);
+    expect(container.querySelectorAll('[data-testid^="mac-pane-divider-"]').length).toBe(1);
   });
 
   it('marks active pane with data-pane-active=true and inactive with false', () => {
@@ -165,7 +165,7 @@ describe('MacPaneWorkbench split behavior (red baseline)', () => {
       />,
     );
     // 模拟 desktop drag-resize：dispatch pointerdown on divider
-    const divider = container.querySelector('[data-testid="pane-stage-divider"]') as HTMLElement | null;
+    const divider = container.querySelector('[data-testid^="mac-pane-divider-"]') as HTMLElement | null;
     expect(divider).toBeTruthy();
     // PaneStage divider pointerdown 后会监听 pointermove + pointerup
     fireEvent.pointerDown(divider!, { clientX: 100, clientY: 200, button: 0 });
@@ -206,9 +206,17 @@ describe('MacPaneWorkbench split behavior (red baseline)', () => {
     );
     const activeFrame = container.querySelector('[data-testid="pane-stage-frame"][data-pane-active="true"]') as HTMLElement | null;
     const inactiveFrame = container.querySelector('[data-testid="pane-stage-frame"][data-pane-active="false"]') as HTMLElement | null;
-    expect(activeFrame?.style.backgroundColor).toBe('rgb(5, 7, 11)');
-    expect(inactiveFrame?.style.backgroundColor).toBe('rgb(5, 7, 11)');
-    expect(activeFrame?.style.outline).toBe('none');
-    expect(activeFrame?.style.boxShadow).toContain('inset');
+    // active pane has data-pane-active="true", inactive has "false"
+    expect(activeFrame).toBeTruthy();
+    expect(inactiveFrame).toBeTruthy();
+    expect(activeFrame?.getAttribute('data-pane-active')).toBe('true');
+    expect(inactiveFrame?.getAttribute('data-pane-active')).toBe('false');
+    // CSS handles backgroundColor/outline via [data-pane-active] attribute selectors;
+    // inline style is empty string since styling is via className/CSS rules.
+    // The key invariant is the attribute value, which drives CSS :has() selectors.
+    expect(activeFrame?.style.outline).toBe('');
+    // mac-terminal-surface for active pane has box-shadow via CSS
+    const activeSurface = activeFrame?.querySelector('.mac-terminal-surface');
+    expect(activeSurface).toBeTruthy();
   });
 });

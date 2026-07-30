@@ -126,7 +126,7 @@ describe('MacPaneWorkbench pane rendering (red baseline)', () => {
         bridgeSettings={makeBridgeSettings()}
       />,
     );
-    expect(container.querySelector('[data-testid="pane-stage-split"]')).toBeTruthy();
+    expect(container.querySelector('[data-testid="mac-pane-workbench-tree"]')).toBeTruthy();
     expect(container.querySelectorAll('[data-testid="pane-stage-frame"]').length).toBe(2);
   });
 
