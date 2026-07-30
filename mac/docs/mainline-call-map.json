@@ -612,8 +612,16 @@
           "semantic_input": "platform and split visible state from pane workbench",
           "semantic_output": "desktop split pane profile (zero gap, square frames, 3px divider hit band)",
           "status": "anchored",
-          "edge_id": "mac_desktop_mainline:TerminalProjection->SharedPaneProfile",
-          "relation_status": "observer"
+          "edge_id": "MAC-EDGE-0028",
+          "relation_status": "observer",
+          "caller": "MacPaneWorkbench (TerminalProjection consumer)",
+          "callee": "resolvePaneProfile (SharedPaneProfile producer)",
+          "verification_gates": [
+            "mac/src/app/MacPaneWorkbench.test.tsx",
+            "mac/src/app/MacPaneWorkbench.split.test.tsx",
+            "type-check",
+            "build"
+          ]
         },
         {
           "from": "SharedPaneProfile",
@@ -622,8 +630,16 @@
           "semantic_input": "resolved pane profile",
           "semantic_output": "pane frame visual with terminal canvas background and 1px active inset",
           "status": "anchored",
-          "edge_id": "mac_desktop_mainline:SharedPaneProfile->SharedPaneStage",
-          "relation_status": "direct"
+          "edge_id": "MAC-EDGE-0029",
+          "relation_status": "direct",
+          "caller": "resolvePaneProfile (SharedPaneProfile producer)",
+          "callee": "PaneStage (SharedPaneStage consumer)",
+          "verification_gates": [
+            "shared/src/react/pane-stage.test.tsx",
+            "mac/src/app/MacPaneWorkbench.split.test.tsx",
+            "type-check",
+            "build"
+          ]
         },
         {
           "from": "SharedPaneStage",
@@ -632,8 +648,16 @@
           "semantic_input": "desktop split profile and per-pane active state",
           "semantic_output": "pane tab strip without extra border/background in desktop split mode",
           "status": "anchored",
-          "edge_id": "mac_desktop_mainline:SharedPaneStage->SharedPaneTabs",
-          "relation_status": "direct"
+          "edge_id": "MAC-EDGE-0030",
+          "relation_status": "direct",
+          "caller": "PaneStage (SharedPaneStage producer)",
+          "callee": "PaneTabs (SharedPaneTabs consumer)",
+          "verification_gates": [
+            "shared/src/react/pane-stage.test.tsx",
+            "shared/src/react/pane-tabs.test.tsx",
+            "type-check",
+            "build"
+          ]
         }
       ]
     }
