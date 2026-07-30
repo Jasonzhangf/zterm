@@ -237,3 +237,12 @@
 - Review found `Change session` removed the live Mac tab before the user selected a replacement, so launcher cancel or pane switch could dispose the current runtime.
 - Fix: `beginPendingSessionReplacement` now stores `{paneId, tabId}` without changing tabs; `openConnectionInWorkbench` / `openLocalTmuxInWorkbench` consume that scoped intent only when a new session is confirmed, and `setLauncherOpen(false)` cancels it without tab mutation.
 - Verification: `pnpm --dir mac test -- MacPaneWorkbench.test.tsx workbench.test.ts --reporter dot` passed 35/35; `pnpm --dir mac run type-check` passed. Marker: `mac pending session replacement preserves live tab until confirmed`.
+
+# 2026-07-30 Mac iTerm2 split-tree UX implementation mapping
+
+- Feature owner: `mac.workspace_store`; runtime and terminal buffer behavior remain outside this change.
+- Global resource graph: pane visibility projects `resource.visible_pane_session`; open tabs remain `resource.open_tab`; pane chrome is `resource.ui_projection`. No new resource relation is introduced.
+- Current verified root issue: production `MacPaneTreeRecord` is still a flat `kind:'row' + paneIds + lastSplit` record, and `splitActivePaneDown` aliases `splitActivePaneRight`; shared `PaneStage` renders one horizontal flex row only. That cannot represent nested iTerm2 right/down splits.
+- Unique modification path: promote `MacWorkspaceStore` paneTree to recursive row/column split truth, keep pane/tab records as leaf payload projection, render the recursive tree through shared PaneStage, and route resize by split node id. Do not add orientation to shared flat `WorkspaceState`, and do not modify `MacRuntimeRegistry`/terminal renderer cadence as a layout workaround.
+- Performance review evidence so far: `MacRuntimeRegistry` subscriptions are runtime-key scoped and `MacTerminalPane` consumes only its assigned runtime; sibling runtime emissions are isolated by existing positive/negative tests. Remaining UI render work is to memoize pane leaf projection and stabilize callback/slot identities so parent workspace updates do not remount every terminal surface.
+- Required positive/negative gates: right split row; down split nested column; resize target split only; close collapses parent; persisted tree leaves match panes exactly; invalid/missing/duplicate tree leaves reject; sibling runtime emit does not rerender sibling pane; existing runtime input/viewport/resize isolation remains green; packaged split/right/down/resize/session move smoke.

@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+ import { describe, expect, it } from 'vitest';
+ import { findSplitTreeSplit } from '@zterm/shared';
 import {
   LEGACY_SHELL_WORKSPACE_STORAGE_KEY,
   MAC_WORKSPACE_STORAGE_PREFIX,
@@ -93,12 +94,14 @@ describe('MacWorkspaceStore pure owner', () => {
   it('resizes pane ratios while preserving normalized total size', () => {
     let record = createInitialMacWorkspaceRecord({ windowId: 'window-1', workspaceId: 'workspace-1', updatedAt: 1 });
     record = splitMacWorkspacePane(record, { direction: 'right', updatedAt: 2 });
-    const [source, target] = record.panes;
+    const [source] = record.panes;
+    const split = findSplitTreeSplit(record.paneTreeRoot, record.paneTreeRoot.id);
+    expect(split).not.toBeNull();
 
-    record = resizeMacWorkspacePanes(record, source.id, target.id, 0.8, 3);
+    record = resizeMacWorkspacePanes(record, split!.id, 0.8, 3);
 
-    expect(sumPaneSizes(record)).toBeCloseTo(1);
-    expect(record.panes.find((pane) => pane.id === source.id)?.size).toBeCloseTo(0.8);
+    expect(record.paneTreeRoot).toMatchObject({ type: 'split', ratio: 0.8 });
+    expect(record.panes.find((pane) => pane.id === source.id)?.size).toBeCloseTo(0.5);
   });
 
   it('moves a tab across panes and preserves tab identity', () => {

@@ -532,11 +532,10 @@ export function createWorkspaceRecordFromWorkbenchState(
   return parseMacWorkspaceRecord({
     workspaceId: options.previousRecord?.workspaceId || `workspace:${options.windowId}`,
     windowId: options.windowId,
-    paneTree: {
-      kind: 'row',
-      paneIds: panes.map((pane) => pane.id),
-      lastSplit: options.previousRecord?.paneTree.lastSplit,
-    },
+    paneTree: options.previousRecord
+      ? { kind: 'row', paneIds: panes.map((pane) => pane.id), lastSplit: options.previousRecord.paneTree.lastSplit }
+      : { kind: 'row', paneIds: panes.map((pane) => pane.id) },
+    paneTreeRoot: options.previousRecord?.paneTreeRoot,
     panes,
     activePaneId: state.workspace.activePaneId,
     updatedAt: options.updatedAt ?? Date.now(),

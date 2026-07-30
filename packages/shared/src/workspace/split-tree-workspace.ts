@@ -44,7 +44,10 @@ function generateSplitTreeId(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
 }
 
-function createLeaf<TTab extends SplitTreeTab>(tab: TTab, paneId = generateSplitTreeId('pane')): SplitTreeLeafNode<TTab> {
+export function createSplitTreeLeaf<TTab extends SplitTreeTab>(
+  tab: TTab,
+  paneId = generateSplitTreeId('pane'),
+): SplitTreeLeafNode<TTab> {
   return {
     id: generateSplitTreeId('leaf'),
     type: 'leaf',
@@ -66,8 +69,15 @@ function clampRatio(ratio: number) {
 }
 
 export function createSplitTreeWorkspace<TTab extends SplitTreeTab>(tab: TTab): SplitTreeWorkspace<TTab> {
-  const leaf = createLeaf(tab);
+  const leaf = createSplitTreeLeaf(tab);
   return { tree: leaf, activePaneId: leaf.pane.id };
+}
+
+export function listSplitTreeLeaves<TTab extends SplitTreeTab>(
+  node: SplitTreeNode<TTab>,
+): SplitTreeLeafNode<TTab>[] {
+  if (node.type === 'leaf') return [node];
+  return [...listSplitTreeLeaves(node.first), ...listSplitTreeLeaves(node.second)];
 }
 
 export function listSplitTreePaneIds<TTab extends SplitTreeTab>(node: SplitTreeNode<TTab>): string[] {
@@ -89,7 +99,7 @@ function splitNode<TTab extends SplitTreeTab>(
 ): { node: SplitTreeNode<TTab>; newPaneId: string | null; changed: boolean } {
   if (node.type === 'leaf') {
     if (node.pane.id !== paneId) return { node, newPaneId: null, changed: false };
-    const newLeaf = createLeaf(newTab, newPaneId);
+    const newLeaf = createSplitTreeLeaf(newTab, newPaneId);
     const direction: SplitTreeDirection = placement === 'right' || placement === 'left' ? 'row' : 'column';
     const first = placement === 'left' || placement === 'up' ? newLeaf : node;
     const second = first === newLeaf ? node : newLeaf;
@@ -132,6 +142,15 @@ function resizeNode<TTab extends SplitTreeTab>(node: SplitTreeNode<TTab>, splitN
   return { ...node, first: resizeNode(node.first, splitNodeId, ratio), second: resizeNode(node.second, splitNodeId, ratio) };
 }
 
+export function findSplitTreeSplit<TTab extends SplitTreeTab>(
+  node: SplitTreeNode<TTab>,
+  splitNodeId: string,
+): SplitTreeSplitNode<TTab> | null {
+  if (node.type === 'leaf') return null;
+  if (node.id === splitNodeId) return node;
+  return findSplitTreeSplit(node.first, splitNodeId) ?? findSplitTreeSplit(node.second, splitNodeId);
+}
+
 export function resizeSplitTreeNode<TTab extends SplitTreeTab>(
   current: SplitTreeWorkspace<TTab>,
   splitNodeId: string,
@@ -155,14 +174,120 @@ function closeNode<TTab extends SplitTreeTab>(node: SplitTreeNode<TTab>, paneId:
   return { node, removed: false };
 }
 
-export function closeSplitTreePane<TTab extends SplitTreeTab>(current: SplitTreeWorkspace<TTab>, paneId: string): SplitTreeWorkspace<TTab> {
+/**
+ * Move a tab between two panes inside a split tree. The source pane becomes
+ * empty if the moved tab was its only tab; the target pane replaces an empty
+ * tab if present.
+ */
+export function moveTabBetweenTreePanes<TTab extends SplitTreeTab>(
+  current: SplitTreeWorkspace<TTab>,
+  sourcePaneId: string,
+  tabId: string,
+  targetPaneId: string,
+  emptyTabIdFactory: () => string,
+): SplitTreeWorkspace<TTab> {
+  if (sourcePaneId === targetPaneId) return current;
+  const sourceLeaf = findSplitTreeLeaf(current.tree, sourcePaneId);
+  const targetLeaf = findSplitTreeLeaf(current.tree, targetPaneId);
+  const tab = sourceLeaf?.pane.tabs.find((candidate) => candidate.id === tabId);
+  if (!sourceLeaf || !targetLeaf || !tab) return current;
+  const tree = cloneNode(current.tree);
+  const sourceClone = findSplitTreeLeaf(tree, sourcePaneId);
+  const targetClone = findSplitTreeLeaf(tree, targetPaneId);
+  if (!sourceClone || !targetClone) return current;
+  const sourceAfter = sourceClone.pane.tabs.filter((candidate) => candidate.id !== tabId);
+  const nextTabs = sourceAfter.length === 0
+    ? [{ id: emptyTabIdFactory() } as TTab]
+    : sourceAfter;
+  sourceClone.pane = {
+    ...sourceClone.pane,
+    tabs: nextTabs,
+    activeTabId: sourceClone.pane.activeTabId === tabId
+      ? (nextTabs[0]?.id ?? sourceClone.pane.activeTabId)
+      : sourceClone.pane.activeTabId,
+  };
+  const targetTabs = targetClone.pane.tabs.length === 1 && targetClone.pane.tabs[0].id === (nextTabs[0]?.id ?? null)
+    ? [tab as TTab]
+    : [...targetClone.pane.tabs, tab as TTab];
+  targetClone.pane = { ...targetClone.pane, tabs: targetTabs, activeTabId: tab.id };
+  return { tree, activePaneId: targetPaneId };
+}
+
+/**
+ * Active pane id helpers used by PaneStage recursive renderer and pane context
+ * menu number projection. `resolveSplitTreePaneNumbers` returns the visible
+ * ordering of every leaf pane id as an explicit index.
+ */
+export function resolveSplitTreePaneNumbers<TTab extends SplitTreeTab>(
+  workspace: SplitTreeWorkspace<TTab>,
+): { paneId: string; index: number }[] {
+  const ids = listSplitTreePaneIds(workspace.tree);
+  return ids.map((paneId, index) => ({ paneId, index: index + 1 }));
+}
+
+export function findSplitTreePaneIndex<TTab extends SplitTreeTab>(
+  workspace: SplitTreeWorkspace<TTab>,
+  paneId: string,
+): number {
+  const ids = listSplitTreePaneIds(workspace.tree);
+  return ids.indexOf(paneId) + 1;
+}
+
+/**
+ * Derive a split tree from a flat ordered pane list. Used to migrate the
+ * legacy `kind:'row' + paneIds` records into the recursive split tree truth
+ * without losing pane identity.
+ */
+export function buildSplitTreeFromPanes<TTab extends SplitTreeTab>(
+  panes: TTab[],
+  paneIds: string[],
+  activeTabIdForPane: (index: number) => string,
+  createEmptyTab: () => TTab,
+): SplitTreeWorkspace<TTab> | null {
+  if (panes.length === 0 || paneIds.length === 0) return null;
+  const leafLookup = new Map<string, SplitTreeLeafNode<TTab>>();
+  const firstTab = panes[0];
+  if (!firstTab) return null;
+  const leaves: SplitTreeLeafNode<TTab>[] = panes.map((firstTabOfPane, index) => {
+    const paneId = paneIds[index];
+    if (!paneId) return null as unknown as SplitTreeLeafNode<TTab>;
+    const leaf = createSplitTreeLeaf<TTab>(firstTabOfPane, paneId);
+    leaf.pane.activeTabId = activeTabIdForPane(index) || firstTabOfPane.id;
+    leafLookup.set(paneId, leaf);
+    return leaf;
+  });
+  let current: SplitTreeNode<TTab> = leaves[0]!;
+  for (let i = 1; i < leaves.length; i++) {
+    const nextLeaf = leaves[i]!;
+    current = {
+      id: generateSplitTreeId('split'),
+      type: 'split',
+      direction: 'row',
+      ratio: 1 / (i + 1),
+      first: current,
+      second: nextLeaf,
+    };
+  }
+  return {
+    tree: current,
+    activePaneId: paneIds[0]!,
+  };
+}
+
+export function closeSplitTreePane<TTab extends SplitTreeTab>(
+  current: SplitTreeWorkspace<TTab>,
+  paneId: string,
+  options?: { fallbackPaneId?: string },
+): SplitTreeWorkspace<TTab> {
   const paneIds = listSplitTreePaneIds(current.tree);
   if (paneIds.length <= 1 || !paneIds.includes(paneId)) return current;
   const result = closeNode(cloneNode(current.tree), paneId);
   if (!result.removed || !result.node) return current;
   const nextPaneIds = listSplitTreePaneIds(result.node);
+  const fallbackId = options?.fallbackPaneId ?? nextPaneIds[0];
+  const safeFallback = nextPaneIds.includes(fallbackId) ? fallbackId : nextPaneIds[0] ?? '';
   return {
     tree: result.node,
-    activePaneId: current.activePaneId === paneId ? nextPaneIds[0] : current.activePaneId,
+    activePaneId: current.activePaneId === paneId ? safeFallback : current.activePaneId,
   };
 }

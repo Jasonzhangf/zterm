@@ -4448,3 +4448,19 @@ Need runtime debug to confirm:
 - Fix: stream message writes now re-read the current stored account for the same token/base URL before updating `devices` or `directory`, so latest daemon directory truth survives legacy presence snapshots and still keeps devices presence current. Added a regression with two daemon hosts proving a later client-only devices snapshot cannot roll back the fresh directory.
 - iTerm2 split UI fix: desktop split profile now uses zero pane gap, 3px divider hit band with only a 1px visual divider, square pane frames, no pane-tab wrapper border/background, Mac terminal stage/surface no longer adds rounded padded containers, and Windows pane background matches the terminal canvas. Empty pane/session chooser and numbered move/change actions stay in the existing workspace owners.
 - Verification: relay focused gate `3 files / 22 PASS`; Android header/stage/home projection `31 PASS`; Android type-check PASS; Mac full tests `22 files / 158 PASS`; Mac type-check PASS; Windows full tests `7 files / 30 PASS` with pre-existing "Port is already in use" test-server warning but no failure; Windows type-check PASS; architecture/registry gate `10 files / 79 PASS`; `git diff --check` PASS. Shared package full `tsc --noEmit` remains blocked by pre-existing test type errors unrelated to this change.
+
+## 2026-07-30: APK versionCode binary patch 根因
+
+**问题**：原 `patch-apk-version.py` 用 `[0x10][0x08][uint32]` 模式搜索 versionCode，定位错误导致 manifest 损坏。
+
+**发现**：
+- `aapt2 dump badging` 报告的 `versionCode` 属性 ID 是 `0x0101021b`，但这个值**不在 AndroidManifest.xml 源码里**。
+- versionCode 存在 `resources.arsc` 字符串池 + `AndroidManifest.xml` 二进制 attribute 值中。
+- manifest 二进制里的 pattern 是 `[0x08][0x00][0x00][0x10][value_uint32_LE]` — **TYPE_INT_HEX (0x08)** 不是 TYPE_INT_DEC (0x10)。
+- 在当前 zterm APK 里，这个 8 字节 pattern 只出现一次，偏移 5732，绝对安全。
+
+**修复方案**：用 `aapt2 dump badging` 获取当前 versionCode 数值，用 `TYPE_INT_HEX pattern + value` 精确定位替换。
+
+**versionName**：存在 `resources.arsc` 里，长度固定偏移。长度变化会破坏二进制结构，不做修改 — Android 安装只用 versionCode。
+
+**验证**：aapt2 dump badging + apksigner verify 都通过。

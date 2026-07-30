@@ -1,6 +1,21 @@
 import {
   addPaneToWorkspace,
   createWorkspacePane,
+  buildSplitTreeFromPanes,
+  closeSplitTreePane,
+  createSplitTreeLeaf,
+  findSplitTreeLeaf,
+  listSplitTreePaneIds,
+  moveTabBetweenTreePanes,
+  resizeSplitTreeNode,
+  splitTreePane,
+  type SplitTreeDirection,
+  type SplitTreeLeafNode,
+  type SplitTreePane,
+  type SplitTreeNode,
+  type SplitTreePlacement,
+  type SplitTreeSplitNode,
+  type SplitTreeTab,
   moveTabBetweenPanes,
   normalizePaneSizes,
   removePaneFromWorkspace,
@@ -18,6 +33,7 @@ export type MacRuntimeKey =
 
 export type MacWorkspaceTabKind = 'empty' | 'remote' | 'local-tmux';
 export type MacPaneSplitDirection = 'right' | 'down';
+export type { SplitTreeDirection, SplitTreePlacement };
 
 export interface MacWindowBounds {
   x: number;
@@ -46,6 +62,20 @@ export interface MacTabRecord extends WorkspaceTab {
 
 export type MacPaneRecord = WorkspacePane<MacTabRecord>;
 
+/**
+ * Recursive pane tree node. Each leaf wraps a MacPaneRecord (the payload),
+ * each split describes how two children are arranged (row = horizontal,
+ * column = vertical) and how their width/height is shared.
+ */
+export type MacPaneTreeNode =
+  | { id: string; type: 'leaf'; pane: SplitTreePane<MacTabRecord> }
+  | { id: string; type: 'split'; direction: SplitTreeDirection; ratio: number; first: MacPaneTreeNode; second: MacPaneTreeNode };
+
+/**
+ * Legacy flat `row + paneIds` shape. Kept only so existing persisted
+ * `zterm:mac:workspace:v1:*` records can be upgraded through
+ * `parseMacWorkspaceRecord`; production code consumes `paneTreeRoot`.
+ */
 export interface MacPaneTreeRecord {
   kind: 'row';
   paneIds: string[];
@@ -56,11 +86,16 @@ export interface MacPaneTreeRecord {
   };
 }
 
-export type MacPaneTree = MacPaneTreeRecord;
+export type MacPaneTree = MacPaneTreeNode;
 
 export interface MacWorkspaceRecord {
   workspaceId: string;
   windowId: string;
+  paneTreeRoot: MacPaneTreeNode;
+  /**
+   * @deprecated kept for legacy `row + paneIds` UI breadcrumbs only;
+   * production consumers must read `paneTreeRoot`.
+   */
   paneTree: MacPaneTreeRecord;
   panes: MacPaneRecord[];
   activePaneId: string;
@@ -218,9 +253,11 @@ export function createInitialMacWorkspaceRecord(options: {
   assertNonEmptyString(options.windowId, 'windowId');
   const emptyTab = createEmptyMacTab();
   const pane = createMacWorkspacePane(emptyTab, 1);
+  const tree = createSplitTreeLeaf<MacTabRecord>(emptyTab, pane.id);
   return assertMacWorkspaceRecordBoundary({
     workspaceId: options.workspaceId ?? createId('workspace'),
     windowId: options.windowId,
+    paneTreeRoot: tree,
     paneTree: {
       kind: 'row',
       paneIds: [pane.id],
@@ -238,13 +275,14 @@ function asWorkspaceState(record: MacWorkspaceRecord): WorkspaceState<MacTabReco
   };
 }
 
-function normalizePaneTree(
-  current: MacPaneTreeRecord | null | undefined,
+function projectPaneTreeBreadcrumb(
+  tree: MacPaneTreeNode,
   panes: MacPaneRecord[],
+  previous: MacPaneTreeRecord | null | undefined,
 ): MacPaneTreeRecord {
-  const paneIds = panes.map((pane) => pane.id);
-  const lastSplit = current?.lastSplit && paneIds.includes(current.lastSplit.newPaneId)
-    ? current.lastSplit
+  const paneIds = listSplitTreePaneIds(tree as SplitTreeNode<MacTabRecord>);
+  const lastSplit = previous?.lastSplit && paneIds.includes(previous.lastSplit.newPaneId)
+    ? previous.lastSplit
     : undefined;
   return {
     kind: 'row',
@@ -253,22 +291,64 @@ function normalizePaneTree(
   };
 }
 
+/**
+ * Build a split tree from a flat ordered list of panes. Used by the parse
+ * path to upgrade legacy `paneTree: { kind: 'row', paneIds }` records into
+ * the recursive tree truth on load.
+ */
+function buildPaneTreeRoot(
+  panes: MacPaneRecord[],
+  fallbackPaneIds: string[],
+  previousTree?: MacPaneTreeNode,
+): MacPaneTreeNode {
+  if (panes.length === 0) {
+    throw new MacWorkspaceStoreInvalidRecordError('Invalid Mac workspace record: at least one pane is required');
+  }
+  // Reuse previous tree shape if pane ids line up (preserves split ratios).
+  if (previousTree) {
+    const previousIds = listSplitTreePaneIds(previousTree as SplitTreeNode<MacTabRecord>);
+    const currentIds = panes.map((pane) => pane.id);
+    if (previousIds.length === currentIds.length && previousIds.every((id, i) => id === currentIds[i])) {
+      return previousTree;
+    }
+  }
+  const built = buildSplitTreeFromPanes<MacTabRecord>(
+    panes.map((pane) => pane.tabs[0]!).filter((tab): tab is MacTabRecord => Boolean(tab)),
+    fallbackPaneIds,
+    (index) => panes[index]?.activeTabId ?? panes[index]?.tabs[0]?.id ?? '',
+    () => createEmptyMacTab(),
+  );
+  if (built) {
+    return materializeTree(built.tree, panes);
+  }
+  throw new MacWorkspaceStoreInvalidRecordError(
+    'Invalid Mac workspace record: pane tree cannot be built from pane payloads',
+  );
+}
+
 function withWorkspaceState(
   record: MacWorkspaceRecord,
   workspace: WorkspaceState<MacTabRecord>,
   options?: {
     updatedAt?: number;
+    paneTreeRoot?: MacPaneTreeNode;
     paneTree?: MacPaneTreeRecord;
+    activePaneIdOverride?: string;
   },
 ): MacWorkspaceRecord {
   const panes = normalizePaneSizes(workspace.panes) as MacPaneRecord[];
+  const paneTreeRoot = options?.paneTreeRoot ?? record.paneTreeRoot;
+  const activePaneId = options?.activePaneIdOverride ?? (
+    panes.some((pane) => pane.id === workspace.activePaneId)
+      ? workspace.activePaneId
+      : panes[0]?.id ?? ''
+  );
   const next: MacWorkspaceRecord = {
     ...record,
     panes,
-    activePaneId: panes.some((pane) => pane.id === workspace.activePaneId)
-      ? workspace.activePaneId
-      : panes[0]?.id ?? '',
-    paneTree: normalizePaneTree(options?.paneTree ?? record.paneTree, panes),
+    paneTreeRoot,
+    activePaneId,
+    paneTree: projectPaneTreeBreadcrumb(paneTreeRoot, panes, options?.paneTree ?? record.paneTree),
     updatedAt: options?.updatedAt ?? defaultNow(),
   };
   return parseMacWorkspaceRecord(next);
@@ -312,10 +392,18 @@ export function parseMacWorkspaceRecord(input: unknown): MacWorkspaceRecord {
     ? candidate.updatedAt
     : defaultNow();
   const normalizedPanes = normalizePaneSizes(candidate.panes as MacPaneRecord[]) as MacPaneRecord[];
+  const fallbackPaneIds = normalizedPanes.map((pane) => pane.id);
+  // paneTreeRoot comes from the record (new format) or is built from legacy paneTree
+  const paneTreeRoot = buildPaneTreeRoot(normalizedPanes, fallbackPaneIds, candidate.paneTreeRoot);
+  const paneIdsInTree = listSplitTreePaneIds(paneTreeRoot as SplitTreeNode<MacTabRecord>);
+  if (paneIdsInTree.length !== fallbackPaneIds.length) {
+    throw new MacWorkspaceStoreInvalidRecordError('Invalid Mac workspace record: paneTreeRoot leaves do not match panes');
+  }
   const parsed: MacWorkspaceRecord = {
     workspaceId,
     windowId,
-    paneTree: normalizePaneTree(candidate.paneTree, normalizedPanes),
+    paneTreeRoot,
+    paneTree: projectPaneTreeBreadcrumb(paneTreeRoot, normalizedPanes, candidate.paneTree),
     panes: normalizedPanes,
     activePaneId,
     updatedAt,
@@ -405,17 +493,53 @@ export function splitMacWorkspacePane(
   if (!sourcePane) {
     return record;
   }
-  const newPane = createMacWorkspacePane(options.initialTab ?? createEmptyMacTab(), 1);
+  const initialTab = options.initialTab ?? createEmptyMacTab();
+  const newPane = createMacWorkspacePane(initialTab, 1);
+  const nextWorkspacePanes = workspace.panes.concat(newPane);
+  // Mutate the source pane's leaf to include all existing tabs plus we just leave its tabs intact;
+  // the new leaf is created fresh with the initial tab. Build a tree workspace from current tree shape.
+  const tree = withNewPaneInserted(record, sourcePaneId, newPane, initialTab, options.direction);
+  if (!tree) {
+    return record;
+  }
   const nextWorkspace = addPaneToWorkspace(setActivePane(workspace, sourcePane.id), newPane);
-  const paneTree: MacPaneTreeRecord = normalizePaneTree({
-    ...record.paneTree,
+  const breadcrumb: MacPaneTreeRecord = {
+    kind: 'row',
+    paneIds: nextWorkspacePanes.map((pane) => pane.id),
     lastSplit: {
       sourcePaneId: sourcePane.id,
       newPaneId: newPane.id,
       direction: options.direction,
     },
-  }, nextWorkspace.panes as MacPaneRecord[]);
-  return withWorkspaceState(record, nextWorkspace, { paneTree, updatedAt: options.updatedAt });
+  };
+  return withWorkspaceState(record, nextWorkspace, {
+    paneTreeRoot: tree,
+    paneTree: breadcrumb,
+    updatedAt: options.updatedAt,
+    activePaneIdOverride: newPane.id,
+  });
+}
+
+function withNewPaneInserted(
+  record: MacWorkspaceRecord,
+  sourcePaneId: string,
+  newPane: MacPaneRecord,
+  initialTab: MacTabRecord,
+  direction: MacPaneSplitDirection,
+): MacPaneTreeNode | null {
+  const sourceLeaf = findSplitTreeLeaf(record.paneTreeRoot as SplitTreeNode<MacTabRecord>, sourcePaneId);
+  if (!sourceLeaf) return null;
+  const placement: SplitTreePlacement = direction === 'down' ? 'down' : 'right';
+  // Build a workspace view by hydrating existing leaves from record.panes.
+  const hydrated = hydrateWorkspaceFromTree(record.paneTreeRoot, record.panes);
+  const result = splitTreePane<MacTabRecord>(
+    { tree: hydrated, activePaneId: record.activePaneId },
+    sourcePaneId,
+    placement,
+    initialTab,
+    newPane.id,
+  );
+  return materializeTree(result.tree, record.panes.concat(newPane));
 }
 
 export function activateMacWorkspacePane(
@@ -458,12 +582,29 @@ export function closeMacWorkspaceTab(
     if (pane.tabs.length === 1) {
       if (workspace.panes.length === 1) {
         const replacement = createMacWorkspacePane(createEmptyMacTab(), 1);
+        const replacementTree = createSplitTreeLeaf<MacTabRecord>(
+          replacement.tabs[0]!,
+          replacement.id,
+        );
         return withWorkspaceState(record, {
           panes: [replacement],
           activePaneId: replacement.id,
-        }, { updatedAt });
+        }, {
+          paneTreeRoot: materializeTree(replacementTree, [replacement]),
+          activePaneIdOverride: replacement.id,
+          updatedAt,
+        });
       }
-      return withWorkspaceState(record, removePaneFromWorkspace(workspace, pane.id), { updatedAt });
+      const nextWorkspace = removePaneFromWorkspace(workspace, pane.id);
+      const hydrated = hydrateWorkspaceFromTree(record.paneTreeRoot, record.panes);
+      const closed = closeSplitTreePane<MacTabRecord>({ tree: hydrated, activePaneId: record.activePaneId }, pane.id, {
+        fallbackPaneId: nextWorkspace.activePaneId,
+      });
+      return withWorkspaceState(record, nextWorkspace, {
+        paneTreeRoot: materializeTree(closed.tree, record.panes.filter((p) => p.id !== pane.id)),
+        activePaneIdOverride: nextWorkspace.activePaneId,
+        updatedAt,
+      });
     }
     const remaining = pane.tabs.filter((tab) => tab.id !== tabId);
     const activeTabId = pane.activeTabId === tabId
@@ -486,25 +627,38 @@ export function moveMacWorkspaceTab(
   targetPaneId: string,
   updatedAt?: number,
 ): MacWorkspaceRecord {
-  return withWorkspaceState(
-    record,
-    moveTabBetweenPanes(asWorkspaceState(record), sourcePaneId, tabId, targetPaneId),
-    { updatedAt },
+  const sourcePane = record.panes.find((pane) => pane.id === sourcePaneId);
+  const tab = sourcePane?.tabs.find((candidate) => candidate.id === tabId);
+  if (!sourcePane || !tab) return record;
+  const hydrated = hydrateWorkspaceFromTree(record.paneTreeRoot, record.panes);
+  const moved = moveTabBetweenTreePanes<MacTabRecord>(
+    { tree: hydrated, activePaneId: record.activePaneId },
+    sourcePaneId,
+    tabId,
+    targetPaneId,
+    () => createEmptyMacTab().id,
   );
+  // Hydrate moved tree with updated panes payload
+  const nextWorkspace = moveTabBetweenPanes(asWorkspaceState(record), sourcePaneId, tabId, targetPaneId);
+  return withWorkspaceState(record, nextWorkspace, {
+    paneTreeRoot: materializeTree(moved.tree, record.panes),
+    activePaneIdOverride: moved.activePaneId,
+    updatedAt,
+  });
 }
 
 export function resizeMacWorkspacePanes(
   record: MacWorkspaceRecord,
-  sourcePaneId: string,
-  targetPaneId: string,
+  splitNodeId: string,
   sourceRatio: number,
   updatedAt?: number,
 ): MacWorkspaceRecord {
-  return withWorkspaceState(
-    record,
-    resizePaneRatio(asWorkspaceState(record), sourcePaneId, targetPaneId, sourceRatio),
-    { updatedAt },
-  );
+  const hydrated = hydrateWorkspaceFromTree(record.paneTreeRoot, record.panes);
+  const resized = resizeSplitTreeNode<MacTabRecord>({ tree: hydrated, activePaneId: record.activePaneId }, splitNodeId, sourceRatio);
+  return withWorkspaceState(record, asWorkspaceState(record), {
+    paneTreeRoot: materializeTree(resized.tree, record.panes),
+    updatedAt,
+  });
 }
 
 export function createMemoryMacWorkspaceStorage(initial?: Record<string, string>): MacWorkspaceStoreStorage & {
@@ -521,4 +675,83 @@ export function createMemoryMacWorkspaceStorage(initial?: Record<string, string>
     },
     dump: () => Object.fromEntries(values.entries()),
   };
+}
+
+/**
+ * Reconstruct a SplitTreeWorkspace view by hydrating every leaf with the
+ * matching MacPaneRecord payload (tabs + activeTabId). The pane tree keeps
+ * structure while tabs live in the leaf payload.
+ */
+function hydrateWorkspaceFromTree(
+  tree: MacPaneTreeNode,
+  panes: MacPaneRecord[],
+): SplitTreeNode<MacTabRecord> {
+  const paneById = new Map(panes.map((pane) => [pane.id, pane]));
+  function walk(node: MacPaneTreeNode): SplitTreeNode<MacTabRecord> {
+    if (node.type === 'leaf') {
+      const payload = paneById.get(node.pane.id);
+      if (!payload) {
+        throw new MacWorkspaceStoreInvalidRecordError(
+          `Mac workspace record: tree leaf pane ${node.pane.id} is missing from panes`,
+        );
+      }
+      return {
+        id: node.id,
+        type: 'leaf',
+        pane: {
+          id: payload.id,
+          tabs: payload.tabs,
+          activeTabId: payload.activeTabId,
+        },
+      } as SplitTreeLeafNode<MacTabRecord>;
+    }
+    return {
+      id: node.id,
+      type: 'split',
+      direction: node.direction,
+      ratio: node.ratio,
+      first: walk(node.first),
+      second: walk(node.second),
+    } as SplitTreeSplitNode<MacTabRecord>;
+  }
+  return walk(tree);
+}
+
+/**
+ * Strip leaf tab payloads and keep only pane ids. The split tree is then
+ * paired with the next panes[] payload as authoritative tab source.
+ */
+function materializeTree(
+  tree: SplitTreeNode<MacTabRecord>,
+  panes: MacPaneRecord[],
+): MacPaneTreeNode {
+  const paneById = new Map(panes.map((pane) => [pane.id, pane]));
+  function walk(node: SplitTreeNode<MacTabRecord>): MacPaneTreeNode {
+    if (node.type === 'leaf') {
+      const payload = paneById.get(node.pane.id);
+      if (!payload) {
+        throw new MacWorkspaceStoreInvalidRecordError(
+          `Mac workspace record: tree leaf pane ${node.pane.id} is missing from panes`,
+        );
+      }
+      return {
+        id: node.id,
+        type: 'leaf',
+        pane: {
+          id: payload.id,
+          tabs: payload.tabs,
+          activeTabId: payload.activeTabId,
+        },
+      };
+    }
+    return {
+      id: node.id,
+      type: 'split',
+      direction: node.direction,
+      ratio: node.ratio,
+      first: walk(node.first),
+      second: walk(node.second),
+    };
+  }
+  return walk(tree);
 }
