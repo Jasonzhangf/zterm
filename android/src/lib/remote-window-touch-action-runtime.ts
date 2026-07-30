@@ -66,6 +66,49 @@ export type RemoteWindowTouchPointerState =
       startAtMs: number;
     }
   | {
+      mode: 'twoFingerCandidate';
+      firstPointerId: number;
+      secondPointerId: number;
+      firstStart: { clientX: number; clientY: number };
+      secondStart: { clientX: number; clientY: number };
+      startDistance: number;
+      startMidX: number;
+      startMidY: number;
+      lastMidX: number;
+      lastMidY: number;
+      startedAtMs: number;
+      committed: false;
+    }
+  | {
+      mode: 'twoFingerScroll';
+      firstPointerId: number;
+      secondPointerId: number;
+      firstStart: { clientX: number; clientY: number };
+      secondStart: { clientX: number; clientY: number };
+      startDistance: number;
+      startMidX: number;
+      startMidY: number;
+      lastMidX: number;
+      lastMidY: number;
+      startedAtMs: number;
+      committed: true;
+    }
+  | {
+      mode: 'pinch';
+      firstPointerId: number;
+      secondPointerId: number;
+      firstStart: { clientX: number; clientY: number };
+      secondStart: { clientX: number; clientY: number };
+      startDistance: number;
+      startMidX: number;
+      startMidY: number;
+      startedAtMs: number;
+      lastMidX: number;
+      lastMidY: number;
+      lastScaleRatio: number;
+      committed: true;
+    }
+  | {
       mode: 'localPan';
       pointerId: number;
       startClientX: number;
@@ -94,7 +137,72 @@ export type RemoteWindowTouchLocalEffect =
       kind: 'local-pan-end';
       pointerId: number;
       moved: boolean;
+    }
+  | {
+      kind: 'two-finger-scroll-start';
+      pointerId: number;
+    }
+  | {
+      kind: 'two-finger-scroll-move';
+      pointerId: number;
+      deltaX: number;
+      deltaY: number;
+      commit: boolean;
+    }
+  | {
+      kind: 'two-finger-scroll-end';
+      pointerId: number;
+      deltaX: number;
+      deltaY: number;
+    }
+  | {
+      kind: 'pinch-start';
+      pointerId: number;
+    }
+  | {
+      kind: 'pinch-move';
+      pointerId: number;
+      scaleRatio: number;
+      anchorClientX: number;
+      anchorClientY: number;
+      commit: boolean;
+    }
+  | {
+      kind: 'pinch-end';
+      pointerId: number;
+      scaleRatio: number;
     };
+
+export interface RemoteWindowTouchPairPointerSample {
+  pointerId: number;
+  pointerType: 'mouse' | 'pen' | 'touch' | string;
+  clientX: number;
+  clientY: number;
+  timeMs: number;
+}
+
+export interface RemoteWindowTouchPairPointerState {
+  first: RemoteWindowTouchPairPointerSample;
+  second: RemoteWindowTouchPairPointerSample;
+}
+
+export interface RemoteWindowTouchPairRuntimeOptions {
+  state: RemoteWindowTouchPointerState;
+  pair: RemoteWindowTouchPairPointerState;
+  geometry: RemoteWindowTouchSurfaceGeometry;
+  timeMs: number;
+  scrollFraction?: number;
+  invertGestureDirection?: boolean;
+  pinchEnabled: boolean;
+  scrollEnabled: boolean;
+}
+
+export interface RemoteWindowTouchPairRuntimeResult {
+  nextState: RemoteWindowTouchPointerState;
+  remoteEvents: Array<RemoteWindowInputEventPayload['event']>;
+  localEffect: RemoteWindowTouchLocalEffect;
+  consumed: boolean;
+}
 
 export interface RemoteWindowTouchPointerRuntimeResult {
   nextState: RemoteWindowTouchPointerState;
@@ -106,9 +214,14 @@ export interface RemoteWindowTouchPointerRuntimeResult {
 const REMOTE_WINDOW_TOUCH_DRAG_THRESHOLD_PX = 8;
 const REMOTE_WINDOW_LOCAL_PAN_TAP_THRESHOLD_PX = 8;
 const REMOTE_WINDOW_INPUT_STALE_MS = 1_000;
+const REMOTE_WINDOW_TWO_FINGER_SCROLL_DEADZONE_PX = 4;
 export const REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION = 0.25;
 export const REMOTE_WINDOW_TOUCH_SCROLL_MIN_FRACTION = 0.125;
 export const REMOTE_WINDOW_TOUCH_SCROLL_MAX_FRACTION = 1;
+export const REMOTE_WINDOW_TWO_FINGER_PINCH_DETECT_THRESHOLD = 0.12;
+export const REMOTE_WINDOW_TWO_FINGER_PINCH_COMMIT_THRESHOLD = 0.18;
+export const REMOTE_WINDOW_TWO_FINGER_SCROLL_COMMIT_MIDPOINT_PX = 12;
+export const REMOTE_WINDOW_TWO_FINGER_SCROLL_DEADZONE_FALLBACK_PX = 4;
 
 export interface RemoteWindowTouchGestureTuning {
   fraction?: number;
@@ -630,6 +743,537 @@ export function resolveRemoteWindowTouchPointerUpRuntime(options: {
   return emptyResult(state, false);
 }
 
+function resolveRemoteWindowPairPointerGeometry(options: {
+  geometry: RemoteWindowTouchSurfaceGeometry;
+  clientX: number;
+  clientY: number;
+}) {
+  const point = resolveRemoteWindowTouchSurfacePointRuntime(
+    options.geometry,
+    options.clientX,
+    options.clientY,
+  );
+  if (!point) {
+    return null;
+  }
+  return point;
+}
+
+function resolveRemoteWindowPairScrollDeltaRuntime(options: {
+  rawDeltaX: number;
+  rawDeltaY: number;
+  sourceRect: { width: number; height: number };
+  scrollFraction: number;
+  inverted: boolean;
+}) {
+  const { rawDeltaX, rawDeltaY, sourceRect } = options;
+  if (rawDeltaX === 0 && rawDeltaY === 0) {
+    return { deltaX: 0, deltaY: 0 };
+  }
+  const fraction = resolveRemoteWindowTouchScrollFractionRuntime(options.scrollFraction);
+  const directionX = options.inverted ? -1 : 1;
+  const directionY = options.inverted ? -1 : 1;
+  const deltaX = rawDeltaX === 0
+    ? 0
+    : Math.sign(rawDeltaX)
+      * sourceRect.width
+      * fraction
+      * directionX;
+  const deltaY = rawDeltaY === 0
+    ? 0
+    : Math.sign(rawDeltaY)
+      * sourceRect.height
+      * fraction
+      * directionY;
+  return { deltaX, deltaY };
+}
+
+function buildRemoteWindowTwoFingerScrollEventsRuntime(options: {
+  geometry: RemoteWindowTouchSurfaceGeometry;
+  midClientX: number;
+  midClientY: number;
+  rawDeltaX: number;
+  rawDeltaY: number;
+  scrollFraction: number;
+  inverted: boolean;
+}): Array<RemoteWindowInputEventPayload['event']> {
+  const { deltaX, deltaY } = resolveRemoteWindowPairScrollDeltaRuntime({
+    rawDeltaX: options.rawDeltaX,
+    rawDeltaY: options.rawDeltaY,
+    sourceRect: {
+      width: options.geometry.sourceRect.width,
+      height: options.geometry.sourceRect.height,
+    },
+    scrollFraction: options.scrollFraction,
+    inverted: options.inverted,
+  });
+  if (deltaX === 0 && deltaY === 0) {
+    return [];
+  }
+  const point = resolveRemoteWindowPairPointerGeometry({
+    geometry: options.geometry,
+    clientX: options.midClientX,
+    clientY: options.midClientY,
+  });
+  if (!point) {
+    return [];
+  }
+  return [{
+    kind: 'scroll',
+    unit: 'pixel',
+    deltaX,
+    deltaY,
+    x: point.x,
+    y: point.y,
+    normalizedX: point.normalizedX,
+    normalizedY: point.normalizedY,
+  }];
+}
+
+function resolvePointerProjectionRatio(options: {
+  start: { clientX: number; clientY: number };
+  current: { clientX: number; clientY: number };
+  axisStart: { clientX: number; clientY: number };
+  axisEnd: { clientX: number; clientY: number };
+}) {
+  const axisX = options.axisEnd.clientX - options.axisStart.clientX;
+  const axisY = options.axisEnd.clientY - options.axisStart.clientY;
+  const axisLength = Math.max(1, Math.hypot(axisX, axisY));
+  const deltaX = options.current.clientX - options.start.clientX;
+  const deltaY = options.current.clientY - options.start.clientY;
+  return (deltaX * axisX + deltaY * axisY) / axisLength;
+}
+
+function isPinchIntentPair(options: {
+  firstStart: { clientX: number; clientY: number };
+  firstCurrent: { clientX: number; clientY: number };
+  secondStart: { clientX: number; clientY: number };
+  secondCurrent: { clientX: number; clientY: number };
+  scaleRatio: number;
+}) {
+  if (Math.abs(options.scaleRatio - 1) < REMOTE_WINDOW_TWO_FINGER_PINCH_DETECT_THRESHOLD) {
+    return false;
+  }
+  const firstProjection = resolvePointerProjectionRatio({
+    start: options.firstStart,
+    current: options.firstCurrent,
+    axisStart: options.firstStart,
+    axisEnd: options.secondStart,
+  });
+  const secondProjection = resolvePointerProjectionRatio({
+    start: options.secondStart,
+    current: options.secondCurrent,
+    axisStart: options.firstStart,
+    axisEnd: options.secondStart,
+  });
+  if (Math.abs(firstProjection) < 4 || Math.abs(secondProjection) < 4) {
+    return false;
+  }
+  return Math.sign(firstProjection) !== Math.sign(secondProjection);
+}
+
+export function resolveRemoteWindowTouchPairPointerDownRuntime(options: {
+  firstPointer: RemoteWindowTouchPairPointerSample;
+  secondPointer: RemoteWindowTouchPairPointerSample;
+  timeMs: number;
+  pinchEnabled: boolean;
+  scrollEnabled: boolean;
+}): RemoteWindowTouchPairRuntimeResult {
+  if (!options.pinchEnabled && !options.scrollEnabled) {
+    return {
+      nextState: createRemoteWindowTouchPointerState(),
+      remoteEvents: [],
+      localEffect: { kind: 'none' },
+      consumed: false,
+    };
+  }
+  const distance = Math.max(1, Math.hypot(
+    options.firstPointer.clientX - options.secondPointer.clientX,
+    options.firstPointer.clientY - options.secondPointer.clientY,
+  ));
+  const midpoint = {
+    clientX: (options.firstPointer.clientX + options.secondPointer.clientX) / 2,
+    clientY: (options.firstPointer.clientY + options.secondPointer.clientY) / 2,
+  };
+  const nextState: RemoteWindowTouchPointerState = {
+    mode: 'twoFingerCandidate',
+    firstPointerId: options.firstPointer.pointerId,
+    secondPointerId: options.secondPointer.pointerId,
+    firstStart: { clientX: options.firstPointer.clientX, clientY: options.firstPointer.clientY },
+    secondStart: { clientX: options.secondPointer.clientX, clientY: options.secondPointer.clientY },
+    startDistance: distance,
+    startMidX: midpoint.clientX,
+    startMidY: midpoint.clientY,
+    lastMidX: midpoint.clientX,
+    lastMidY: midpoint.clientY,
+    startedAtMs: options.timeMs,
+    committed: false,
+  };
+  return {
+    nextState,
+    remoteEvents: [],
+    localEffect: { kind: 'none' },
+    consumed: true,
+  };
+}
+
+export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWindowTouchPairRuntimeOptions): RemoteWindowTouchPairRuntimeResult {
+  const { state, pair, geometry, scrollFraction, invertGestureDirection } = options;
+  const idle = createRemoteWindowTouchPointerState();
+  // Workaround for TypeScript control flow analysis narrowing: preserve original state
+  const originalState = state;
+  if (
+    state.mode !== 'twoFingerCandidate'
+    && state.mode !== 'twoFingerScroll'
+    && state.mode !== 'pinch'
+  ) {
+    return {
+      nextState: state,
+      remoteEvents: [],
+      localEffect: { kind: 'none' },
+      consumed: false,
+    };
+  }
+  if (
+    pair.first.pointerId !== state.firstPointerId
+    || pair.second.pointerId !== state.secondPointerId
+  ) {
+    return {
+      nextState: idle,
+      remoteEvents: [],
+      localEffect: { kind: 'none' },
+      consumed: true,
+    };
+  }
+
+  const firstCurrent = { clientX: pair.first.clientX, clientY: pair.first.clientY };
+  const secondCurrent = { clientX: pair.second.clientX, clientY: pair.second.clientY };
+  const distance = Math.max(1, Math.hypot(
+    firstCurrent.clientX - secondCurrent.clientX,
+    firstCurrent.clientY - secondCurrent.clientY,
+  ));
+  const midpoint = {
+    clientX: (firstCurrent.clientX + secondCurrent.clientX) / 2,
+    clientY: (firstCurrent.clientY + secondCurrent.clientY) / 2,
+  };
+  const scaleRatio = distance / Math.max(1, state.startDistance);
+  const midpointDeltaX = midpoint.clientX - state.lastMidX;
+  const midpointDeltaY = midpoint.clientY - state.lastMidY;
+  const midpointShift = Math.hypot(midpointDeltaX, midpointDeltaY);
+
+  if (state.mode === 'twoFingerScroll') {
+    if (
+      options.pinchEnabled
+      && scaleRatio >= 1 + REMOTE_WINDOW_TWO_FINGER_PINCH_COMMIT_THRESHOLD
+      || scaleRatio <= 1 - REMOTE_WINDOW_TWO_FINGER_PINCH_COMMIT_THRESHOLD
+    ) {
+      const pinchMoveEffect: RemoteWindowTouchLocalEffect = {
+        kind: 'pinch-move',
+        pointerId: state.firstPointerId,
+        scaleRatio,
+        anchorClientX: midpoint.clientX,
+        anchorClientY: midpoint.clientY,
+        commit: true,
+      };
+      return {
+        nextState: {
+          mode: 'pinch',
+          firstPointerId: state.firstPointerId,
+          secondPointerId: state.secondPointerId,
+          firstStart: state.firstStart,
+          secondStart: state.secondStart,
+          startDistance: state.startDistance,
+          startMidX: state.startMidX,
+          startMidY: state.startMidY,
+          startedAtMs: state.startedAtMs,
+          lastMidX: midpoint.clientX,
+          lastMidY: midpoint.clientY,
+          lastScaleRatio: scaleRatio,
+          committed: true,
+        },
+        remoteEvents: [],
+        localEffect: pinchMoveEffect,
+        consumed: true,
+      };
+    }
+    if (
+      midpointShift < REMOTE_WINDOW_TWO_FINGER_SCROLL_DEADZONE_PX
+      && Math.abs(scaleRatio - 1) < REMOTE_WINDOW_TWO_FINGER_PINCH_DETECT_THRESHOLD
+    ) {
+      // Neither scroll nor pinch - just update mid tracking
+      if (originalState.mode === 'twoFingerScroll' || originalState.mode === 'twoFingerCandidate') {
+        return {
+          nextState: { ...state, lastMidX: midpoint.clientX, lastMidY: midpoint.clientY },
+          remoteEvents: [],
+          localEffect: { kind: 'none' },
+          consumed: true,
+        };
+      }
+      return { nextState: state, remoteEvents: [], localEffect: { kind: 'none' }, consumed: true };
+    }
+    const events = buildRemoteWindowTwoFingerScrollEventsRuntime({
+      geometry,
+      midClientX: midpoint.clientX,
+      midClientY: midpoint.clientY,
+      rawDeltaX: midpointDeltaX,
+      rawDeltaY: midpointDeltaY,
+      scrollFraction: scrollFraction ?? REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION,
+      inverted: invertGestureDirection ?? false,
+    });
+    const scrollEffect: RemoteWindowTouchLocalEffect = events.length > 0
+      ? {
+          kind: 'two-finger-scroll-move',
+          pointerId: state.firstPointerId,
+          deltaX: events[0].kind === 'scroll' ? events[0].deltaX : 0,
+          deltaY: events[0].kind === 'scroll' ? events[0].deltaY : 0,
+          commit: false,
+        }
+      : { kind: 'none' };
+    // Both twoFingerScroll and twoFingerCandidate can produce scroll events
+    return {
+      nextState: { ...state, lastMidX: midpoint.clientX, lastMidY: midpoint.clientY },
+      remoteEvents: events,
+      localEffect: scrollEffect,
+      consumed: true,
+    };
+  }
+
+  if (state.mode === 'pinch') {
+    const pinchMoveEffect: RemoteWindowTouchLocalEffect = {
+      kind: 'pinch-move',
+      pointerId: state.firstPointerId,
+      scaleRatio,
+      anchorClientX: midpoint.clientX,
+      anchorClientY: midpoint.clientY,
+      commit: false,
+    };
+    return {
+      nextState: {
+        ...state,
+        lastScaleRatio: scaleRatio,
+      },
+      remoteEvents: [],
+      localEffect: pinchMoveEffect,
+      consumed: true,
+    };
+  }
+
+  if (
+    options.pinchEnabled
+    && isPinchIntentPair({
+      firstStart: state.firstStart,
+      firstCurrent,
+      secondStart: state.secondStart,
+      secondCurrent,
+      scaleRatio,
+    })
+    && Math.abs(scaleRatio - 1) >= REMOTE_WINDOW_TWO_FINGER_PINCH_COMMIT_THRESHOLD
+  ) {
+    const pinchMoveEffect: RemoteWindowTouchLocalEffect = {
+      kind: 'pinch-move',
+      pointerId: state.firstPointerId,
+      scaleRatio,
+      anchorClientX: midpoint.clientX,
+      anchorClientY: midpoint.clientY,
+      commit: true,
+    };
+    return {
+      nextState: {
+        mode: 'pinch',
+        firstPointerId: state.firstPointerId,
+        secondPointerId: state.secondPointerId,
+        firstStart: state.firstStart,
+        secondStart: state.secondStart,
+        startDistance: state.startDistance,
+        startMidX: state.startMidX,
+        startMidY: state.startMidY,
+        startedAtMs: state.startedAtMs,
+        lastMidX: midpoint.clientX,
+        lastMidY: midpoint.clientY,
+        lastScaleRatio: scaleRatio,
+        committed: true,
+      },
+      remoteEvents: [],
+      localEffect: pinchMoveEffect,
+      consumed: true,
+    };
+  }
+
+  if (
+    options.scrollEnabled
+    && midpointShift >= REMOTE_WINDOW_TWO_FINGER_SCROLL_COMMIT_MIDPOINT_PX
+  ) {
+    const firstCommitDeltaX = state.lastMidX - state.startMidX;
+    const firstCommitDeltaY = state.lastMidY - state.startMidY;
+    const events = buildRemoteWindowTwoFingerScrollEventsRuntime({
+      geometry,
+      midClientX: midpoint.clientX,
+      midClientY: midpoint.clientY,
+      rawDeltaX: firstCommitDeltaX,
+      rawDeltaY: firstCommitDeltaY,
+      scrollFraction: scrollFraction ?? REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION,
+      inverted: invertGestureDirection ?? false,
+    });
+    return {
+      nextState: {
+        mode: 'twoFingerScroll',
+        firstPointerId: state.firstPointerId,
+        secondPointerId: state.secondPointerId,
+        firstStart: state.firstStart,
+        secondStart: state.secondStart,
+        startDistance: state.startDistance,
+        startMidX: state.startMidX,
+        startMidY: state.startMidY,
+        lastMidX: midpoint.clientX,
+        lastMidY: midpoint.clientY,
+        startedAtMs: state.startedAtMs,
+        committed: true,
+      },
+      remoteEvents: events,
+      localEffect: {
+        kind: 'two-finger-scroll-start',
+        pointerId: state.firstPointerId,
+      },
+      consumed: true,
+    };
+  }
+
+  if (
+    midpointShift < REMOTE_WINDOW_TWO_FINGER_SCROLL_DEADZONE_PX
+    && Math.abs(scaleRatio - 1) < REMOTE_WINDOW_TWO_FINGER_PINCH_DETECT_THRESHOLD
+  ) {
+    return {
+      nextState: {
+        ...state,
+        lastMidX: midpoint.clientX,
+        lastMidY: midpoint.clientY,
+      },
+      remoteEvents: [],
+      localEffect: { kind: 'none' },
+      consumed: true,
+    };
+  }
+
+  // Final fallback: should not reach here if all above branches return
+  if (originalState.mode === 'twoFingerScroll' || originalState.mode === 'twoFingerCandidate') {
+    return {
+      nextState: { ...originalState, lastMidX: midpoint.clientX, lastMidY: midpoint.clientY },
+      remoteEvents: [],
+      localEffect: { kind: 'none' },
+      consumed: true,
+    };
+  }
+  return {
+    nextState: originalState,
+    remoteEvents: [],
+    localEffect: { kind: 'none' },
+    consumed: true,
+  };
+}
+
+export function resolveRemoteWindowTouchPairPointerUpRuntime(options: {
+  state: RemoteWindowTouchPointerState;
+  pair: RemoteWindowTouchPairPointerState;
+  geometry: RemoteWindowTouchSurfaceGeometry;
+  remainingPointer: RemoteWindowTouchPairPointerSample | null;
+  timeMs: number;
+  scrollFraction?: number;
+  invertGestureDirection?: boolean;
+}): RemoteWindowTouchPairRuntimeResult {
+  const { state, pair, geometry, remainingPointer, scrollFraction, invertGestureDirection } = options;
+  const idle = createRemoteWindowTouchPointerState();
+  if (
+    state.mode !== 'twoFingerCandidate'
+    && state.mode !== 'twoFingerScroll'
+    && state.mode !== 'pinch'
+  ) {
+    return {
+      nextState: idle,
+      remoteEvents: [],
+      localEffect: { kind: 'none' },
+      consumed: false,
+    };
+  }
+  const liftedId = pair.first.pointerId === state.firstPointerId
+    ? pair.first.pointerId
+    : pair.second.pointerId === state.secondPointerId
+      ? pair.second.pointerId
+      : null;
+  if (liftedId === null) {
+    return {
+      nextState: idle,
+      remoteEvents: [],
+      localEffect: { kind: 'none' },
+      consumed: true,
+    };
+  }
+  const lastMidX = state.mode === 'twoFingerScroll' || state.mode === 'twoFingerCandidate'
+    ? state.lastMidX : state.startMidX;
+  const lastMidY = state.mode === 'twoFingerScroll' || state.mode === 'twoFingerCandidate'
+    ? state.lastMidY : state.startMidY;
+  const finalMidpoint = liftedId === state.firstPointerId
+    ? {
+        clientX: (pair.first.clientX + state.secondStart.clientX) / 2,
+        clientY: (pair.first.clientY + state.secondStart.clientY) / 2,
+      }
+    : liftedId === state.secondPointerId
+      ? {
+          clientX: (state.firstStart.clientX + pair.second.clientX) / 2,
+          clientY: (state.firstStart.clientY + pair.second.clientY) / 2,
+        }
+      : { clientX: lastMidX, clientY: lastMidY };
+  const midDeltaX = finalMidpoint.clientX - state.lastMidX;
+  const midDeltaY = finalMidpoint.clientY - state.lastMidY;
+  const events = state.mode === 'twoFingerScroll'
+    ? buildRemoteWindowTwoFingerScrollEventsRuntime({
+        geometry,
+        midClientX: finalMidpoint.clientX,
+        midClientY: finalMidpoint.clientY,
+        rawDeltaX: midDeltaX,
+        rawDeltaY: midDeltaY,
+        scrollFraction: scrollFraction ?? REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION,
+        inverted: invertGestureDirection ?? false,
+      })
+    : [];
+  const localEffect: RemoteWindowTouchLocalEffect = state.mode === 'twoFingerScroll'
+    ? {
+        kind: 'two-finger-scroll-end',
+        pointerId: state.firstPointerId,
+        deltaX: events[0]?.kind === 'scroll' ? events[0].deltaX : 0,
+        deltaY: events[0]?.kind === 'scroll' ? events[0].deltaY : 0,
+      }
+    : state.mode === 'pinch'
+      ? {
+          kind: 'pinch-end',
+          pointerId: state.firstPointerId,
+          scaleRatio: state.lastScaleRatio,
+        }
+      : { kind: 'none' };
+  if (remainingPointer) {
+    const remainingGesture: RemoteWindowTouchPointerState = remainingPointer.pointerType === 'touch'
+      ? {
+          mode: 'localPan',
+          pointerId: remainingPointer.pointerId,
+          startClientX: remainingPointer.clientX,
+          startClientY: remainingPointer.clientY,
+          moved: true,
+        }
+      : idle;
+    return {
+      nextState: remainingGesture,
+      remoteEvents: events,
+      localEffect,
+      consumed: true,
+    };
+  }
+  return {
+    nextState: idle,
+    remoteEvents: events,
+    localEffect,
+    consumed: true,
+  };
+}
+
 export function resolveRemoteWindowTouchPointerCancelRuntime(options: {
   state: RemoteWindowTouchPointerState;
   pointer: RemoteWindowTouchPointerSample;
@@ -637,12 +1281,13 @@ export function resolveRemoteWindowTouchPointerCancelRuntime(options: {
 }): RemoteWindowTouchPointerRuntimeResult {
   const { state, pointer } = options;
   const idle = createRemoteWindowTouchPointerState();
-  if (state.mode === 'actionDrag' && state.pointerId === pointer.pointerId) {
+  const statePointerId = 'pointerId' in state ? (state as any).pointerId : undefined;
+  if (state.mode === 'actionDrag' && statePointerId === pointer.pointerId) {
     return emptyResult(idle, true);
   }
   if (
     state.mode !== 'idle'
-    && state.pointerId === pointer.pointerId
+    && statePointerId === pointer.pointerId
   ) {
     return emptyResult(idle, true);
   }

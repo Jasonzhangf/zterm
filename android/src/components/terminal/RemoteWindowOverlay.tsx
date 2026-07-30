@@ -64,10 +64,13 @@ import {
 } from '../../lib/remote-window-video-quality';
 import {
   buildRemoteWindowClickInputEventRuntime,
-  buildRemoteWindowTouchGestureSwipeEventRuntime,
+
   createRemoteWindowTouchPointerState,
   dispatchRemoteWindowTouchInputActionsRuntime,
   isRemoteWindowInputSupportedTarget,
+  resolveRemoteWindowTouchPairPointerDownRuntime,
+  resolveRemoteWindowTouchPairPointerMoveRuntime,
+  resolveRemoteWindowTouchPairPointerUpRuntime,
   resolveRemoteWindowTouchPointerCancelRuntime,
   resolveRemoteWindowTouchPointerDownRuntime,
   resolveRemoteWindowTouchPointerMoveRuntime,
@@ -76,6 +79,8 @@ import {
   REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION,
   type RemoteWindowTouchInputDebugEvent,
   type RemoteWindowTouchLocalEffect,
+  type RemoteWindowTouchPairPointerSample,
+
   type RemoteWindowTouchPointerSample,
   type RemoteWindowTouchPointerState,
   type RemoteWindowTouchSurfaceGeometry,
@@ -242,46 +247,6 @@ type SurfacePointerGesture =
       startPanX: number;
       startPanY: number;
       moved: boolean;
-    }
-  | {
-      mode: 'pinch';
-      pointerIds: [number, number];
-      startDistance: number;
-      startMidX: number;
-      startMidY: number;
-      startScale: number;
-      startPanX: number;
-      startPanY: number;
-    }
-  | {
-      mode: 'twoFingerCandidate';
-      pointerIds: [number, number];
-      firstStart: SurfacePointerPosition;
-      secondStart: SurfacePointerPosition;
-      startDistance: number;
-      startMidX: number;
-      startMidY: number;
-      startAtMs: number;
-      lastMidX: number;
-      lastMidY: number;
-      startScale: number;
-      startPanX: number;
-      startPanY: number;
-    }
-  | {
-      mode: 'twoFingerScroll';
-      pointerIds: [number, number];
-      firstStart: SurfacePointerPosition;
-      secondStart: SurfacePointerPosition;
-      startDistance: number;
-      startMidX: number;
-      startMidY: number;
-      startAtMs: number;
-      startScale: number;
-      startPanX: number;
-      startPanY: number;
-      lastMidX: number;
-      lastMidY: number;
     };
 
 interface FloatingOverlayDrag {
@@ -335,9 +300,7 @@ const FLOATING_OVERLAY_TOOLBAR_ESTIMATE_PX = 50;
 const REMOTE_WINDOW_FULLSCREEN_MIN_SCALE = 1;
 const REMOTE_WINDOW_FULLSCREEN_MAX_SCALE = 4;
 const REMOTE_WINDOW_FULLSCREEN_PAN_TAP_THRESHOLD_PX = 8;
-const REMOTE_WINDOW_FULLSCREEN_PINCH_SCALE_THRESHOLD = 0.16;
-const REMOTE_WINDOW_FULLSCREEN_PINCH_DISTANCE_THRESHOLD_PX = 18;
-const REMOTE_WINDOW_FULLSCREEN_TWO_FINGER_SCROLL_THRESHOLD_PX = 8;
+
 const REMOTE_WINDOW_CATALOG_UI_TIMEOUT_MS = 20_000;
 const REMOTE_WINDOW_CATALOG_PROJECTION_CACHE_TTL_MS = 60_000;
 const REMOTE_WINDOW_ACTIVE_CATALOG_SYNC_INTERVAL_MS = 5_000;
@@ -461,135 +424,21 @@ function resolveZoomedContentRect(
   };
 }
 
-function resolvePointerDistance(a: SurfacePointerPosition, b: SurfacePointerPosition) {
-  return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
-}
 
-function resolvePointerMidpoint(a: SurfacePointerPosition, b: SurfacePointerPosition) {
-  return {
-    clientX: (a.clientX + b.clientX) / 2,
-    clientY: (a.clientY + b.clientY) / 2,
-  };
-}
 
-function hasPointerPositionMoved(start: SurfacePointerPosition, current: SurfacePointerPosition) {
-  return resolvePointerDistance(start, current) >= 2;
-}
 
-function isPointerMovementAlongAxis(
-  start: SurfacePointerPosition,
-  current: SurfacePointerPosition,
-  axisStart: SurfacePointerPosition,
-  axisEnd: SurfacePointerPosition,
-) {
-  const projection = resolvePointerAxisProjection(start, current, axisStart, axisEnd);
-  const perpendicular = resolvePointerAxisPerpendicular(start, current, axisStart, axisEnd);
-  return Math.abs(projection) >= 4 && Math.abs(projection) >= Math.abs(perpendicular);
-}
 
-function resolvePointerAxisProjection(
-  start: SurfacePointerPosition,
-  current: SurfacePointerPosition,
-  axisStart: SurfacePointerPosition,
-  axisEnd: SurfacePointerPosition,
-) {
-  const axisX = axisEnd.clientX - axisStart.clientX;
-  const axisY = axisEnd.clientY - axisStart.clientY;
-  const axisLength = Math.max(1, Math.hypot(axisX, axisY));
-  const deltaX = current.clientX - start.clientX;
-  const deltaY = current.clientY - start.clientY;
-  return (deltaX * axisX + deltaY * axisY) / axisLength;
-}
 
-function resolvePointerAxisPerpendicular(
-  start: SurfacePointerPosition,
-  current: SurfacePointerPosition,
-  axisStart: SurfacePointerPosition,
-  axisEnd: SurfacePointerPosition,
-) {
-  const axisX = axisEnd.clientX - axisStart.clientX;
-  const axisY = axisEnd.clientY - axisStart.clientY;
-  const axisLength = Math.max(1, Math.hypot(axisX, axisY));
-  const deltaX = current.clientX - start.clientX;
-  const deltaY = current.clientY - start.clientY;
-  return (deltaX * -axisY + deltaY * axisX) / axisLength;
-}
 
-function isRemoteWindowPinchIntent(options: {
-  firstStart: SurfacePointerPosition;
-  firstCurrent: SurfacePointerPosition;
-  secondStart: SurfacePointerPosition;
-  secondCurrent: SurfacePointerPosition;
-  startDistance: number;
-  currentDistance: number;
-  scaleRatio: number;
-}) {
-  const distanceDelta = Math.abs(options.currentDistance - options.startDistance);
-  if (
-    Math.abs(options.scaleRatio - 1) < REMOTE_WINDOW_FULLSCREEN_PINCH_SCALE_THRESHOLD
-    || distanceDelta < REMOTE_WINDOW_FULLSCREEN_PINCH_DISTANCE_THRESHOLD_PX
-  ) {
-    return false;
-  }
-  const firstMovedAlongStartAxis = isPointerMovementAlongAxis(
-    options.firstStart,
-    options.firstCurrent,
-    options.firstStart,
-    options.secondStart,
-  );
-  const secondMovedAlongStartAxis = isPointerMovementAlongAxis(
-    options.secondStart,
-    options.secondCurrent,
-    options.firstStart,
-    options.secondStart,
-  );
-  if (firstMovedAlongStartAxis && secondMovedAlongStartAxis) {
-    return true;
-  }
-  const firstProjection = resolvePointerAxisProjection(
-    options.firstStart,
-    options.firstCurrent,
-    options.firstStart,
-    options.secondStart,
-  );
-  const secondProjection = resolvePointerAxisProjection(
-    options.secondStart,
-    options.secondCurrent,
-    options.firstStart,
-    options.secondStart,
-  );
-  return Math.abs(firstProjection) >= 4
-    && Math.abs(secondProjection) >= 4
-    && Math.sign(firstProjection) !== Math.sign(secondProjection);
-}
 
-function shouldHoldRemoteWindowPotentialPinch(options: {
-  startDistance: number;
-  currentDistance: number;
-  scaleRatio: number;
-  midpointDeltaX: number;
-  midpointDeltaY: number;
-}) {
-  const potentialPinch = Math.abs(options.scaleRatio - 1) >= REMOTE_WINDOW_FULLSCREEN_PINCH_SCALE_THRESHOLD
-    && Math.abs(options.currentDistance - options.startDistance) >= REMOTE_WINDOW_FULLSCREEN_PINCH_DISTANCE_THRESHOLD_PX;
-  if (!potentialPinch) {
-    return false;
-  }
-  const verticalDelta = Math.abs(options.midpointDeltaY);
-  const horizontalDelta = Math.abs(options.midpointDeltaX);
-  return verticalDelta < REMOTE_WINDOW_FULLSCREEN_TWO_FINGER_SCROLL_THRESHOLD_PX
-    || verticalDelta < horizontalDelta;
-}
 
-function isSurfacePointerPairGesture(
-  gesture: SurfacePointerGesture,
-): gesture is Extract<SurfacePointerGesture, {
-  mode: 'pinch' | 'twoFingerCandidate' | 'twoFingerScroll';
-}> {
-  return gesture.mode === 'pinch'
-    || gesture.mode === 'twoFingerCandidate'
-    || gesture.mode === 'twoFingerScroll';
-}
+
+
+
+
+
+
+
 
 function resolveTouchScrollFractionPreset(value: unknown): RemoteWindowTouchScrollFraction {
   const parsed = typeof value === 'number' ? value : Number(value);
@@ -2942,26 +2791,35 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
 
     const pointers = Array.from(surfacePointersRef.current.entries());
     if (pointers.length >= 2 && event.pointerType === 'touch') {
-      const [first, second] = pointers.slice(-2) as [
+      const [firstEntry, secondEntry] = pointers.slice(-2) as [
         [number, SurfacePointerPosition],
         [number, SurfacePointerPosition],
       ];
-      const midpoint = resolvePointerMidpoint(first[1], second[1]);
-      surfaceGestureRef.current = {
-        mode: 'twoFingerCandidate',
-        pointerIds: [first[0], second[0]],
-        firstStart: { ...first[1] },
-        secondStart: { ...second[1] },
-        startDistance: Math.max(1, resolvePointerDistance(first[1], second[1])),
-        startMidX: midpoint.clientX,
-        startMidY: midpoint.clientY,
-        startAtMs: event.timeStamp,
-        lastMidX: midpoint.clientX,
-        lastMidY: midpoint.clientY,
-        startScale: fullscreenViewportRef.current.scale,
-        startPanX: fullscreenViewportRef.current.panX,
-        startPanY: fullscreenViewportRef.current.panY,
+      const firstSample: RemoteWindowTouchPairPointerSample = {
+        pointerId: firstEntry[0],
+        pointerType: 'touch',
+        clientX: firstEntry[1].clientX,
+        clientY: firstEntry[1].clientY,
+        timeMs: Date.now(),
       };
+      const secondSample: RemoteWindowTouchPairPointerSample = {
+        pointerId: secondEntry[0],
+        pointerType: 'touch',
+        clientX: secondEntry[1].clientX,
+        clientY: secondEntry[1].clientY,
+        timeMs: Date.now(),
+      };
+      const pairResult = resolveRemoteWindowTouchPairPointerDownRuntime({
+        firstPointer: firstSample,
+        secondPointer: secondSample,
+        timeMs: event.timeStamp,
+        pinchEnabled: state.mode === 'fullscreen',
+        scrollEnabled: true,
+      });
+      surfaceGestureRef.current = pairResult.nextState;
+      if (pairResult.localEffect.kind !== 'none') {
+        applyRemoteWindowTouchLocalEffect(pairResult.localEffect);
+      }
       event.preventDefault();
       event.stopPropagation();
       return;
@@ -3009,181 +2867,54 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       return;
     }
 
-    if (isSurfacePointerPairGesture(gesture)) {
-      const first = surfacePointersRef.current.get(gesture.pointerIds[0]);
-      const second = surfacePointersRef.current.get(gesture.pointerIds[1]);
+    const runtimeGesture = toRemoteWindowTouchGestureState(gesture);
+    if (runtimeGesture.mode === 'twoFingerCandidate' || runtimeGesture.mode === 'twoFingerScroll' || runtimeGesture.mode === 'pinch') {
+      const first = surfacePointersRef.current.get(runtimeGesture.firstPointerId);
+      const second = surfacePointersRef.current.get(runtimeGesture.secondPointerId);
       if (!first || !second) {
         return;
       }
-      const midpoint = resolvePointerMidpoint(first, second);
-      if (gesture.mode === 'twoFingerScroll') {
-        const distance = Math.max(1, resolvePointerDistance(first, second));
-        const scaleRatio = distance / Math.max(1, gesture.startDistance);
-        const midpointDeltaX = midpoint.clientX - gesture.lastMidX;
-        const midpointDeltaY = midpoint.clientY - gesture.lastMidY;
-        if (
-          state.mode === 'fullscreen'
-          && isRemoteWindowPinchIntent({
-            firstStart: gesture.firstStart,
-            firstCurrent: first,
-            secondStart: gesture.secondStart,
-            secondCurrent: second,
-            startDistance: gesture.startDistance,
-            currentDistance: distance,
-            scaleRatio,
-          })
-        ) {
-          surfaceGestureRef.current = {
-            mode: 'pinch',
-            pointerIds: gesture.pointerIds,
-            startDistance: gesture.startDistance,
-            startMidX: gesture.startMidX,
-            startMidY: gesture.startMidY,
-            startScale: gesture.startScale,
-            startPanX: gesture.startPanX,
-            startPanY: gesture.startPanY,
-          };
-          setFullscreenViewport({
-            scale: gesture.startScale * scaleRatio,
-            panX: gesture.startPanX + midpoint.clientX - gesture.startMidX,
-            panY: gesture.startPanY + midpoint.clientY - gesture.startMidY,
-          });
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
-        if (
-          state.mode === 'fullscreen'
-          && shouldHoldRemoteWindowPotentialPinch({
-            startDistance: gesture.startDistance,
-            currentDistance: distance,
-            scaleRatio,
-            midpointDeltaX,
-            midpointDeltaY,
-          })
-        ) {
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
-        if (Math.hypot(midpointDeltaX, midpointDeltaY) < REMOTE_WINDOW_FULLSCREEN_TWO_FINGER_SCROLL_THRESHOLD_PX) {
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
-        surfaceGestureRef.current = {
-          mode: 'twoFingerScroll',
-          pointerIds: gesture.pointerIds,
-          firstStart: gesture.firstStart,
-          secondStart: gesture.secondStart,
-          startDistance: gesture.startDistance,
-          startMidX: gesture.startMidX,
-          startMidY: gesture.startMidY,
-          startAtMs: gesture.startAtMs,
-          startScale: gesture.startScale,
-          startPanX: gesture.startPanX,
-          startPanY: gesture.startPanY,
-          lastMidX: midpoint.clientX,
-          lastMidY: midpoint.clientY,
-        };
+      const geometry = resolveSurfaceInputGeometry();
+      if (!geometry) {
         event.preventDefault();
         event.stopPropagation();
         return;
       }
-
-      const distance = Math.max(1, resolvePointerDistance(first, second));
-      const scaleRatio = distance / Math.max(1, gesture.startDistance);
-      if (gesture.mode === 'pinch') {
-        setFullscreenViewport({
-          scale: gesture.startScale * scaleRatio,
-          panX: gesture.startPanX + midpoint.clientX - gesture.startMidX,
-          panY: gesture.startPanY + midpoint.clientY - gesture.startMidY,
-        });
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
-
-      const firstMoved = hasPointerPositionMoved(gesture.firstStart, first);
-      const secondMoved = hasPointerPositionMoved(gesture.secondStart, second);
-      const midpointDeltaX = midpoint.clientX - gesture.lastMidX;
-      const midpointDeltaY = midpoint.clientY - gesture.lastMidY;
-      if (
-        state.mode === 'fullscreen'
-        && isRemoteWindowPinchIntent({
-          firstStart: gesture.firstStart,
-          firstCurrent: first,
-          secondStart: gesture.secondStart,
-          secondCurrent: second,
-          startDistance: gesture.startDistance,
-          currentDistance: distance,
-          scaleRatio,
-        })
-      ) {
-        surfaceGestureRef.current = {
-          mode: 'pinch',
-          pointerIds: gesture.pointerIds,
-          startDistance: gesture.startDistance,
-          startMidX: gesture.startMidX,
-          startMidY: gesture.startMidY,
-          startScale: gesture.startScale,
-          startPanX: gesture.startPanX,
-          startPanY: gesture.startPanY,
-        };
-        setFullscreenViewport({
-          scale: gesture.startScale * scaleRatio,
-          panX: gesture.startPanX + midpoint.clientX - gesture.startMidX,
-          panY: gesture.startPanY + midpoint.clientY - gesture.startMidY,
-        });
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
-      if (
-        state.mode === 'fullscreen'
-        && shouldHoldRemoteWindowPotentialPinch({
-          startDistance: gesture.startDistance,
-          currentDistance: distance,
-          scaleRatio,
-          midpointDeltaX,
-          midpointDeltaY,
-        })
-      ) {
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
-      if (
-        !firstMoved
-        || !secondMoved
-        || Math.hypot(midpointDeltaX, midpointDeltaY) < REMOTE_WINDOW_FULLSCREEN_TWO_FINGER_SCROLL_THRESHOLD_PX
-      ) {
-        event.preventDefault();
-        event.stopPropagation();
-        return;
-      }
-
-      surfaceGestureRef.current = {
-        mode: 'twoFingerScroll',
-        pointerIds: gesture.pointerIds,
-        firstStart: gesture.firstStart,
-        secondStart: gesture.secondStart,
-        startDistance: gesture.startDistance,
-        startMidX: gesture.startMidX,
-        startMidY: gesture.startMidY,
-        startAtMs: gesture.startAtMs,
-        startScale: gesture.startScale,
-        startPanX: gesture.startPanX,
-        startPanY: gesture.startPanY,
-        lastMidX: midpoint.clientX,
-        lastMidY: midpoint.clientY,
+      const pairFirst: RemoteWindowTouchPairPointerSample = {
+        pointerId: runtimeGesture.firstPointerId,
+        pointerType: 'touch',
+        clientX: first.clientX,
+        clientY: first.clientY,
+        timeMs: Date.now(),
       };
+      const pairSecond: RemoteWindowTouchPairPointerSample = {
+        pointerId: runtimeGesture.secondPointerId,
+        pointerType: 'touch',
+        clientX: second.clientX,
+        clientY: second.clientY,
+        timeMs: Date.now(),
+      };
+      const pairResult = resolveRemoteWindowTouchPairPointerMoveRuntime({
+        state: runtimeGesture,
+        pair: { first: pairFirst, second: pairSecond },
+        geometry,
+        timeMs: event.timeStamp,
+        scrollFraction: touchScrollFractionRef.current,
+        invertGestureDirection: touchScrollInvertedRef.current,
+        pinchEnabled: state.mode === 'fullscreen',
+        scrollEnabled: true,
+      });
+      surfaceGestureRef.current = pairResult.nextState;
+      if (pairResult.remoteEvents.length > 0) {
+        dispatchRemoteWindowInputEvents(pairResult.remoteEvents);
+      }
+      if (pairResult.localEffect.kind !== 'none') {
+        applyRemoteWindowTouchLocalEffect(pairResult.localEffect);
+      }
       event.preventDefault();
       event.stopPropagation();
       return;
     }
-
-    const runtimeGesture = toRemoteWindowTouchGestureState(gesture);
     if (runtimeGesture.mode !== 'idle') {
       const geometry = resolveSurfaceInputGeometry();
       if (geometry) {
@@ -3279,54 +3010,65 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       event.stopPropagation();
       return;
     }
-    if (isSurfacePointerPairGesture(gesture) && gesture.pointerIds.includes(event.pointerId)) {
-      if (gesture.mode === 'twoFingerScroll') {
-        const first = surfacePointersRef.current.get(gesture.pointerIds[0]);
-        const second = surfacePointersRef.current.get(gesture.pointerIds[1]);
-        const midpoint = first && second
-          ? resolvePointerMidpoint(first, second)
-          : { clientX: gesture.lastMidX, clientY: gesture.lastMidY };
-        const geometry = resolveSurfaceInputGeometry();
-        const gesturePayload = geometry
-          ? buildRemoteWindowTouchGestureSwipeEventRuntime({
-              pointerId: gesture.pointerIds[0],
-              startClientX: gesture.startMidX,
-              startClientY: gesture.startMidY,
-              endClientX: midpoint.clientX,
-              endClientY: midpoint.clientY,
-              startTimeMs: gesture.startAtMs,
-              endTimeMs: event.timeStamp,
-              geometry,
-              scrollFraction: touchScrollFractionRef.current,
-              invertGestureDirection: touchScrollInvertedRef.current,
-              deltaMode: 'proportional',
-            })
-          : null;
-        if (gesturePayload) {
-          emitRemoteWindowActionInput(gesturePayload);
-        }
+    if (runtimeGesture.mode === 'twoFingerCandidate' || runtimeGesture.mode === 'twoFingerScroll' || runtimeGesture.mode === 'pinch') {
+      const first = surfacePointersRef.current.get(runtimeGesture.firstPointerId);
+      const second = surfacePointersRef.current.get(runtimeGesture.secondPointerId);
+      if (!first || !second) {
+        surfacePointersRef.current.delete(event.pointerId);
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      const geometry = resolveSurfaceInputGeometry();
+      if (!geometry) {
+        surfacePointersRef.current.delete(event.pointerId);
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      const pairFirst: RemoteWindowTouchPairPointerSample = {
+        pointerId: runtimeGesture.firstPointerId,
+        pointerType: 'touch',
+        clientX: first.clientX,
+        clientY: first.clientY,
+        timeMs: Date.now(),
+      };
+      const pairSecond: RemoteWindowTouchPairPointerSample = {
+        pointerId: runtimeGesture.secondPointerId,
+        pointerType: 'touch',
+        clientX: second.clientX,
+        clientY: second.clientY,
+        timeMs: Date.now(),
+      };
+      const remainingEntry = Array.from(surfacePointersRef.current.entries()).find(
+        (entry) => entry[0] !== event.pointerId,
+      ) || null;
+      const remainingSample = remainingEntry
+        ? {
+            pointerId: remainingEntry[0],
+            pointerType: 'touch' as const,
+            clientX: remainingEntry[1].clientX,
+            clientY: remainingEntry[1].clientY,
+            timeMs: Date.now(),
+          }
+        : null;
+      const pairResult = resolveRemoteWindowTouchPairPointerUpRuntime({
+        state: runtimeGesture,
+        pair: { first: pairFirst, second: pairSecond },
+        geometry,
+        remainingPointer: remainingSample,
+        timeMs: event.timeStamp,
+        scrollFraction: touchScrollFractionRef.current,
+        invertGestureDirection: touchScrollInvertedRef.current,
+      });
+      surfaceGestureRef.current = pairResult.nextState;
+      if (pairResult.remoteEvents.length > 0) {
+        dispatchRemoteWindowInputEvents(pairResult.remoteEvents);
+      }
+      if (pairResult.localEffect.kind !== 'none') {
+        applyRemoteWindowTouchLocalEffect(pairResult.localEffect);
       }
       surfacePointersRef.current.delete(event.pointerId);
-      const remaining = Array.from(surfacePointersRef.current.entries())[0] || null;
-      if (
-        gesture.mode === 'pinch'
-        && remaining
-        && state.phase === 'targetLocked'
-        && state.mode === 'fullscreen'
-        && fullscreenViewportRef.current.scale > 1.01
-      ) {
-        surfaceGestureRef.current = {
-          mode: 'pan',
-          pointerId: remaining[0],
-          startClientX: remaining[1].clientX,
-          startClientY: remaining[1].clientY,
-          startPanX: fullscreenViewportRef.current.panX,
-          startPanY: fullscreenViewportRef.current.panY,
-          moved: true,
-        };
-      } else {
-        surfaceGestureRef.current = null;
-      }
       event.preventDefault();
       event.stopPropagation();
     }
@@ -3341,15 +3083,15 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     const gesture = surfaceGestureRef.current;
     surfacePointersRef.current.delete(event.pointerId);
     event.currentTarget.releasePointerCapture?.(event.pointerId);
+    const runtimeGesture = gesture ? toRemoteWindowTouchGestureState(gesture) : createRemoteWindowTouchPointerState();
     if (
       gesture
       && (
         ('pointerId' in gesture && gesture.pointerId === event.pointerId)
-        || (isSurfacePointerPairGesture(gesture) && gesture.pointerIds.includes(event.pointerId))
+        || (runtimeGesture.mode === 'twoFingerCandidate' || runtimeGesture.mode === 'twoFingerScroll' || runtimeGesture.mode === 'pinch')
       )
     ) {
-      const runtimeGesture = toRemoteWindowTouchGestureState(gesture);
-      if (runtimeGesture.mode !== 'idle' && gesture.mode !== 'pinch' && gesture.mode !== 'twoFingerCandidate' && gesture.mode !== 'twoFingerScroll') {
+      if (runtimeGesture.mode !== 'idle' && runtimeGesture.mode !== 'twoFingerCandidate' && runtimeGesture.mode !== 'twoFingerScroll' && runtimeGesture.mode !== 'pinch') {
         const geometry = resolveSurfaceInputGeometry();
         if (geometry) {
           const result = resolveRemoteWindowTouchPointerCancelRuntime({

@@ -218,6 +218,33 @@ export function createRtcBridgeServer(options: CreateRtcBridgeServerOptions) {
         peer.transport.attach(peer.peerConnection, channel, handlers);
       };
     };
+    // ICE connection timeout: fail after 15 seconds if not connected
+    const connectionTimeoutMs = 15000;
+    const connectionTimeout = globalThis.setTimeout(() => {
+      if (!peer.ready && peer.peerConnection === peerConnection) {
+        peer.emitSignal({
+          type: 'rtc-error',
+          payload: { message: 'rtc ice connection timeout' },
+        });
+        peer.transport.close('rtc ice connection timeout');
+      }
+    }, connectionTimeoutMs);
+    peerConnection.oniceconnectionstatechange = () => {
+      const state = peerConnection.iceConnectionState;
+      // Clear timeout once we have any state (connected, failed, closed, etc.)
+      if (state !== 'new' && state !== 'checking') {
+        globalThis.clearTimeout(connectionTimeout);
+      }
+      if (state === 'failed' || state === 'closed' || state === 'disconnected') {
+        if (!peer.ready) {
+          peer.emitSignal({
+            type: 'rtc-error',
+            payload: { message: `rtc ice connection ${state}` },
+          });
+          peer.transport.close(`rtc ice connection ${state}`);
+        }
+      }
+    };
   }
 
   async function flushPendingIceCandidates(peer: PeerState) {
