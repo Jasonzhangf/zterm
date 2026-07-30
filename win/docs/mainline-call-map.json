@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "description": "Mainline call map for win",
+  "lifecycles": [
+    {
+      "lifecycle_id": "windows_desktop_mainline",
+      "title": "Windows desktop mainline",
+      "entrypoint": "WinElectronMain",
+      "return_path": "WinSharedRenderer",
+      "canonical_docs": [
+        "win/docs/spec.md",
+        "win/docs/architecture.md",
+        "win/docs/function-map.md",
+        "win/docs/testing/windows-desktop-shell-test-design.md"
+      ],
+      "nodes": [
+        {
+          "id": "WinElectronMain",
+          "label": "win/electron/main.ts#createMainWindow"
+        },
+        {
+          "id": "WinDesktopShell",
+          "label": "win/src/WindowsDesktopApp.tsx#WindowsDesktopApp"
+        },
+        {
+          "id": "WinWorkspaceModel",
+          "label": "win/src/windows-workspace.ts#createWindowsWorkspaceState"
+        },
+        {
+          "id": "WinSharedRenderer",
+          "label": "packages/shared/src/terminal/mac-terminal-view.tsx#MacTerminalView"
+        },
+        {
+          "id": "SharedPaneProfile",
+          "label": "packages/shared/src/react/pane-profile.ts#resolvePaneProfile"
+        },
+        {
+          "id": "SharedPaneStage",
+          "label": "packages/shared/src/react/pane-stage.tsx#PaneStage"
+        },
+        {
+          "id": "SharedPaneTabs",
+          "label": "packages/shared/src/react/pane-tabs.tsx#PaneTabs"
+        }
+      ],
+      "edges": [
+        {
+          "from": "WinWorkspaceModel",
+          "to": "SharedPaneProfile",
+          "owner_feature": "windows.desktop_shell.workspace",
+          "semantic_input": "platform desktop and split visible state",
+          "semantic_output": "desktop split pane profile (zero gap, square frames, 3px divider hit band)",
+          "status": "anchored",
+          "edge_id": "windows_desktop_mainline:WinWorkspaceModel->SharedPaneProfile",
+          "relation_status": "observer"
+        },
+        {
+          "from": "SharedPaneProfile",
+          "to": "SharedPaneStage",
+          "owner_feature": "windows.desktop_shell.workspace",
+          "semantic_input": "resolved pane profile",
+          "semantic_output": "pane frame visual with terminal canvas background and 1px active inset",
+          "status": "anchored",
+          "edge_id": "windows_desktop_mainline:SharedPaneProfile->SharedPaneStage",
+          "relation_status": "direct"
+        },
+        {
+          "from": "SharedPaneStage",
+          "to": "SharedPaneTabs",
+          "owner_feature": "windows.desktop_shell.workspace",
+          "semantic_input": "desktop split profile and per-pane active state",
+          "semantic_output": "pane tab strip without extra border/background in desktop split mode",
+          "status": "anchored",
+          "edge_id": "windows_desktop_mainline:SharedPaneStage->SharedPaneTabs",
+          "relation_status": "direct"
+        }
+      ]
+    }
+  ]
+}

@@ -174,6 +174,18 @@
           "owner_feature": "mac.local_tmux_provider",
           "entrypoint": "LocalTmuxManager.forceCloseForSmoke(clientId) in mac/electron/local-tmux.ts",
           "status": "anchored smoke-only"
+        },
+        {
+          "id": "SharedPaneProfile",
+          "label": "packages/shared/src/react/pane-profile.ts#resolvePaneProfile"
+        },
+        {
+          "id": "SharedPaneStage",
+          "label": "packages/shared/src/react/pane-stage.tsx#PaneStage"
+        },
+        {
+          "id": "SharedPaneTabs",
+          "label": "packages/shared/src/react/pane-tabs.tsx#PaneTabs"
         }
       ],
       "edges": [
@@ -187,7 +199,10 @@
           "semantic_input": "renderer root render",
           "semantic_output": "desktop bootstrap component",
           "status": "anchored",
-          "verification_gates": ["mac/src/App.test.tsx", "pnpm --dir mac test -- --reporter dot"]
+          "verification_gates": [
+            "mac/src/App.test.tsx",
+            "pnpm --dir mac test -- --reporter dot"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0002",
@@ -199,7 +214,10 @@
           "semantic_input": "renderer bootstrap needs current windowId",
           "semantic_output": "stable BrowserWindow record and renderer URL query windowId",
           "status": "anchored",
-          "verification_gates": ["mac/src/electron/window-manager.test.ts", "packaged multi-window restore smoke"]
+          "verification_gates": [
+            "mac/src/electron/window-manager.test.ts",
+            "packaged multi-window restore smoke"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0003",
@@ -211,7 +229,12 @@
           "semantic_input": "renderer windowId query",
           "semantic_output": "window-scoped workspace record in zterm:mac:workspace:v1:<windowId>, including cold-restored active and hidden tab identity",
           "status": "anchored",
-          "verification_gates": ["mac/src/app/window/window-id.test.ts", "mac/src/app/MacDesktopApp.test.tsx", "mac/src/app/MacAppShell.layout.test.tsx", "pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore"]
+          "verification_gates": [
+            "mac/src/app/window/window-id.test.ts",
+            "mac/src/app/MacDesktopApp.test.tsx",
+            "mac/src/app/MacAppShell.layout.test.tsx",
+            "pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0004",
@@ -223,7 +246,9 @@
           "semantic_input": "workspace record",
           "semantic_output": "workspace shell view model",
           "status": "binding pending",
-          "verification_gates": ["future workspace shell tests"]
+          "verification_gates": [
+            "future workspace shell tests"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0005",
@@ -235,7 +260,9 @@
           "semantic_input": "shared host and bridge settings storage",
           "semantic_output": "current transitional workspace shell props",
           "status": "anchored",
-          "verification_gates": ["mac/src/app/MacDesktopApp.test.tsx"]
+          "verification_gates": [
+            "mac/src/app/MacDesktopApp.test.tsx"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0006",
@@ -263,7 +290,11 @@
           "semantic_input": "explicit refresh intent for one server with bridge host, port, and token",
           "semantic_output": "live tmux session snapshot or explicit refresh error for that server",
           "status": "anchored",
-          "verification_gates": ["mac/src/app/server-directory/MacServerDirectory.test.ts", "mac/src/app/MacAppShell.layout.test.tsx", "read-only remote daemon refresh smoke"]
+          "verification_gates": [
+            "mac/src/app/server-directory/MacServerDirectory.test.ts",
+            "mac/src/app/MacAppShell.layout.test.tsx",
+            "read-only remote daemon refresh smoke"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0019",
@@ -275,7 +306,10 @@
           "semantic_input": "saved servers, open session keys, live session snapshots, and refresh state records",
           "semantic_output": "server rail projection with live sessions and refresh status/error labels only",
           "status": "anchored",
-          "verification_gates": ["mac/src/app/server-directory/MacServerDirectory.test.ts", "mac/src/app/MacAppShell.layout.test.tsx"]
+          "verification_gates": [
+            "mac/src/app/server-directory/MacServerDirectory.test.ts",
+            "mac/src/app/MacAppShell.layout.test.tsx"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0007",
@@ -303,7 +337,11 @@
           "semantic_input": "manual bridge host, port, token, and saved host history",
           "semantic_output": "explicit remote discovery state with useful session preselection",
           "status": "anchored",
-          "verification_gates": ["mac/src/components/ConnectionLauncher.test.tsx", "mac/src/app/MacAppShell.layout.test.tsx", "packaged QuickConnect/session discovery smoke"]
+          "verification_gates": [
+            "mac/src/components/ConnectionLauncher.test.tsx",
+            "mac/src/app/MacAppShell.layout.test.tsx",
+            "packaged QuickConnect/session discovery smoke"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0023",
@@ -315,7 +353,11 @@
           "semantic_input": "selected discovered session or typed session target",
           "semantic_output": "save/open request emitted only after explicit user command",
           "status": "anchored",
-          "verification_gates": ["mac/src/components/ConnectionLauncher.test.tsx", "mac/src/app/MacAppShell.layout.test.tsx", "packaged QuickConnect/session discovery smoke"]
+          "verification_gates": [
+            "mac/src/components/ConnectionLauncher.test.tsx",
+            "mac/src/app/MacAppShell.layout.test.tsx",
+            "packaged QuickConnect/session discovery smoke"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0024",
@@ -327,7 +369,11 @@
           "semantic_input": "validated editable host from QuickConnect open command",
           "semantic_output": "active workspace tab identity for selected remote session",
           "status": "anchored",
-          "verification_gates": ["mac/src/app/MacAppShell.layout.test.tsx", "mac/src/app/workbench.test.ts", "packaged QuickConnect/session discovery smoke"]
+          "verification_gates": [
+            "mac/src/app/MacAppShell.layout.test.tsx",
+            "mac/src/app/workbench.test.ts",
+            "packaged QuickConnect/session discovery smoke"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0008",
@@ -339,7 +385,9 @@
           "semantic_input": "workspace pane operation over a MacWorkspaceRecord",
           "semantic_output": "updated pane tree/workspace identity record without runtime state",
           "status": "anchored",
-          "verification_gates": ["mac/src/app/workspace/workspace-store.test.ts"]
+          "verification_gates": [
+            "mac/src/app/workspace/workspace-store.test.ts"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0009",
@@ -351,7 +399,11 @@
           "semantic_input": "live workbench tab target with runtimeKey and active/hidden restore intent",
           "semantic_output": "runtime controller connected once per key/signature; hidden restored tabs prepared with connect:false",
           "status": "anchored",
-          "verification_gates": ["mac/src/app/runtime/MacRuntimeRegistry.test.ts", "mac/src/app/MacAppShell.layout.test.tsx", "pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore"]
+          "verification_gates": [
+            "mac/src/app/runtime/MacRuntimeRegistry.test.ts",
+            "mac/src/app/MacAppShell.layout.test.tsx",
+            "pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0010",
@@ -363,7 +415,11 @@
           "semantic_input": "active tab runtimeKey or null",
           "semantic_output": "previous runtime idle, next runtime active, hidden runtimes retained",
           "status": "anchored",
-          "verification_gates": ["mac/src/app/runtime/MacRuntimeRegistry.test.ts", "mac/src/app/MacAppShell.layout.test.tsx", "pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore"]
+          "verification_gates": [
+            "mac/src/app/runtime/MacRuntimeRegistry.test.ts",
+            "mac/src/app/MacAppShell.layout.test.tsx",
+            "pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0020",
@@ -375,7 +431,10 @@
           "semantic_input": "local tmux connect/head/sync/input/resize intent for one clientId",
           "semantic_output": "Electron local tmux provider request with explicit clientId and target session",
           "status": "anchored",
-          "verification_gates": ["mac/src/lib/local-tmux-transport.test.ts", "mac/src/lib/mac-architecture-truth.test.ts"]
+          "verification_gates": [
+            "mac/src/lib/local-tmux-transport.test.ts",
+            "mac/src/lib/mac-architecture-truth.test.ts"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0021",
@@ -387,7 +446,10 @@
           "semantic_input": "tmux session capture and provider response payload",
           "semantic_output": "buffer-head or buffer-sync event for the active local tmux runtime",
           "status": "anchored",
-          "verification_gates": ["mac/src/lib/mac-architecture-truth.test.ts", "pnpm --dir mac run blackbox:terminal-buffer -- --case=all"]
+          "verification_gates": [
+            "mac/src/lib/mac-architecture-truth.test.ts",
+            "pnpm --dir mac run blackbox:terminal-buffer -- --case=all"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0011",
@@ -399,7 +461,11 @@
           "semantic_input": "assigned runtime render state",
           "semantic_output": "terminal pane projection props, header status/session/size controls, and runtime-scoped input/viewport/resize/reconnect/disconnect callbacks",
           "status": "anchored",
-          "verification_gates": ["mac/src/app/MacPaneWorkbench.test.tsx", "mac/src/app/runtime/MacRuntimeRegistry.test.ts", "pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore"]
+          "verification_gates": [
+            "mac/src/app/MacPaneWorkbench.test.tsx",
+            "mac/src/app/runtime/MacRuntimeRegistry.test.ts",
+            "pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0025",
@@ -411,7 +477,11 @@
           "semantic_input": "explicit reconnect click for the pane's assigned runtimeKey",
           "semantic_output": "target-scoped reconnect request using the stored runtime target",
           "status": "anchored",
-          "verification_gates": ["mac/src/app/MacPaneWorkbench.test.tsx", "mac/src/app/runtime/MacRuntimeRegistry.test.ts", "pnpm --dir mac run smoke:alpha-p0 -- --case=disconnect-reconnect"]
+          "verification_gates": [
+            "mac/src/app/MacPaneWorkbench.test.tsx",
+            "mac/src/app/runtime/MacRuntimeRegistry.test.ts",
+            "pnpm --dir mac run smoke:alpha-p0 -- --case=disconnect-reconnect"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0026",
@@ -423,7 +493,10 @@
           "semantic_input": "stored runtime target for the requested key after explicit error or disconnect state",
           "semantic_output": "new local or remote runtime connect for that target only; unrelated runtime entries are not recreated",
           "status": "anchored",
-          "verification_gates": ["mac/src/app/runtime/MacRuntimeRegistry.test.ts", "pnpm --dir mac run smoke:alpha-p0 -- --case=disconnect-reconnect"]
+          "verification_gates": [
+            "mac/src/app/runtime/MacRuntimeRegistry.test.ts",
+            "pnpm --dir mac run smoke:alpha-p0 -- --case=disconnect-reconnect"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0027",
@@ -435,7 +508,10 @@
           "semantic_input": "alpha-smoke-only forced close request for one recorded local tmux clientId",
           "semantic_output": "transport owner emits local tmux closed event, allowing runtime to project explicit error before official reconnect",
           "status": "anchored smoke-only",
-          "verification_gates": ["mac/src/lib/local-tmux-transport.test.ts", "pnpm --dir mac run smoke:alpha-p0 -- --case=disconnect-reconnect"]
+          "verification_gates": [
+            "mac/src/lib/local-tmux-transport.test.ts",
+            "pnpm --dir mac run smoke:alpha-p0 -- --case=disconnect-reconnect"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0012",
@@ -447,7 +523,11 @@
           "semantic_input": "render projection and input callback",
           "semantic_output": "visible terminal, user input events, and renderer-owned viewport demand including visible missingRanges",
           "status": "anchored",
-          "verification_gates": ["mac/src/app/MacPaneWorkbench.test.tsx", "pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore", "pnpm --dir mac run blackbox:terminal-buffer -- --case=all"]
+          "verification_gates": [
+            "mac/src/app/MacPaneWorkbench.test.tsx",
+            "pnpm --dir mac run smoke:alpha-p0 -- --case=header-restore",
+            "pnpm --dir mac run blackbox:terminal-buffer -- --case=all"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0013",
@@ -459,7 +539,10 @@
           "semantic_input": "explicit local file browser command",
           "semantic_output": "file browser panel opened without terminal runtime mutation",
           "status": "anchored",
-          "verification_gates": ["mac/src/app/MacAppShell.layout.test.tsx", "packaged fs smoke"]
+          "verification_gates": [
+            "mac/src/app/MacAppShell.layout.test.tsx",
+            "packaged fs smoke"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0014",
@@ -471,7 +554,11 @@
           "semantic_input": "directory select/list or file read request",
           "semantic_output": "raw file provider result or explicit error",
           "status": "anchored",
-          "verification_gates": ["mac/src/electron/file-system.test.ts", "mac/src/app/file-browser/MacFileBrowserPanel.test.tsx", "packaged fs smoke"]
+          "verification_gates": [
+            "mac/src/electron/file-system.test.ts",
+            "mac/src/app/file-browser/MacFileBrowserPanel.test.tsx",
+            "packaged fs smoke"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0015",
@@ -483,7 +570,10 @@
           "semantic_input": "file facts and preview bytes",
           "semantic_output": "text preview, large-file confirm, or binary-disabled projection",
           "status": "anchored",
-          "verification_gates": ["packages/shared/src/files/file-browser-core.test.ts", "mac/src/app/file-browser/MacFileBrowserPanel.test.tsx"]
+          "verification_gates": [
+            "packages/shared/src/files/file-browser-core.test.ts",
+            "mac/src/app/file-browser/MacFileBrowserPanel.test.tsx"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0016",
@@ -495,7 +585,10 @@
           "semantic_input": "app launch restore records, macOS activate, or explicit New Window intent",
           "semantic_output": "restore persisted open windows by stable windowId, focus last managed window, or create a fresh BrowserWindow",
           "status": "anchored",
-          "verification_gates": ["mac/src/electron/window-manager.test.ts", "packaged multi-window restore smoke"]
+          "verification_gates": [
+            "mac/src/electron/window-manager.test.ts",
+            "packaged multi-window restore smoke"
+          ]
         },
         {
           "edge_id": "MAC-EDGE-0017",
@@ -507,7 +600,40 @@
           "semantic_input": "legacy production path scan",
           "semantic_output": "ShellWorkspace source files absent and no production imports remain after cleanup slice",
           "status": "anchored",
-          "verification_gates": ["mac/src/lib/mac-architecture-truth.test.ts", "full Mac tests"]
+          "verification_gates": [
+            "mac/src/lib/mac-architecture-truth.test.ts",
+            "full Mac tests"
+          ]
+        },
+        {
+          "from": "MAC-10-TerminalProjection",
+          "to": "SharedPaneProfile",
+          "owner_feature": "mac.workspace_store",
+          "semantic_input": "platform and split visible state from pane workbench",
+          "semantic_output": "desktop split pane profile (zero gap, square frames, 3px divider hit band)",
+          "status": "anchored",
+          "edge_id": "mac_desktop_mainline:TerminalProjection->SharedPaneProfile",
+          "relation_status": "observer"
+        },
+        {
+          "from": "SharedPaneProfile",
+          "to": "SharedPaneStage",
+          "owner_feature": "mac.workspace_store",
+          "semantic_input": "resolved pane profile",
+          "semantic_output": "pane frame visual with terminal canvas background and 1px active inset",
+          "status": "anchored",
+          "edge_id": "mac_desktop_mainline:SharedPaneProfile->SharedPaneStage",
+          "relation_status": "direct"
+        },
+        {
+          "from": "SharedPaneStage",
+          "to": "SharedPaneTabs",
+          "owner_feature": "mac.workspace_store",
+          "semantic_input": "desktop split profile and per-pane active state",
+          "semantic_output": "pane tab strip without extra border/background in desktop split mode",
+          "status": "anchored",
+          "edge_id": "mac_desktop_mainline:SharedPaneStage->SharedPaneTabs",
+          "relation_status": "direct"
         }
       ]
     }

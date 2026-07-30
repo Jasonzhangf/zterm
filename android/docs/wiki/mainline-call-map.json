@@ -19,6 +19,10 @@
       ],
       "nodes": [
         {
+          "id": "RelayAccountStore",
+          "label": "src/lib/traversal-relay-client.ts#readCurrentTraversalRelayStreamAccount + readTraversalRelayAccountState + writeTraversalRelayAccountState"
+        },
+        {
           "id": "Native",
           "label": "native/android/app/src/main"
         },
@@ -411,19 +415,6 @@
           "resource_to": "resource.relay_control_connection",
           "via_resources": [],
           "relation_status": "observer"
-        },
-        {
-          "from": "RelayControlSocket",
-          "to": "RelayDirectoryProjection",
-          "owner_feature": "relay.account_directory",
-          "semantic_input": "validated account directory snapshot or pushed endpoint update",
-          "semantic_output": "last confirmed per-daemon endpoint directory generation",
-          "status": "anchored",
-          "edge_id": "android_mainline:RelayControlSocket->RelayDirectoryProjection",
-          "resource_from": "resource.relay_control_connection",
-          "resource_to": "resource.relay_account_directory",
-          "via_resources": [],
-          "relation_status": "direct"
         },
         {
           "from": "RelayDirectoryProjection",
@@ -1890,6 +1881,32 @@
           "resource_to": "resource.client_file_browser",
           "via_resources": [],
           "relation_status": "observer"
+        },
+        {
+          "from": "RelayControlSocket",
+          "to": "RelayAccountStore",
+          "owner_feature": "relay.account_directory",
+          "semantic_input": "validated devices-snapshot or directory-snapshot message on the open control socket",
+          "semantic_output": "merge against the current stored account for the same token and base URL; reject mismatched account identity",
+          "status": "anchored",
+          "edge_id": "android_mainline:RelayControlSocket->RelayAccountStore",
+          "resource_from": "resource.relay_control_connection",
+          "resource_to": "resource.relay_account_directory",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "RelayAccountStore",
+          "to": "RelayDirectoryProjection",
+          "owner_feature": "relay.account_directory",
+          "semantic_input": "fresh devices snapshot or directory snapshot that passed identity check",
+          "semantic_output": "updated last confirmed per-daemon endpoint directory generation and presence list",
+          "status": "anchored",
+          "edge_id": "android_mainline:RelayAccountStore->RelayDirectoryProjection",
+          "resource_from": "resource.relay_account_directory",
+          "resource_to": "resource.relay_account_directory",
+          "via_resources": [],
+          "relation_status": "direct"
         }
       ]
     },

@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "predev": "chmod +x node_modules/node-pty/prebuilds/darwin-*/spawn-helper ../node_modules/node-pty/prebuilds/darwin-*/spawn-helper 2>/dev/null; command -v portless >/dev/null 2>&1 || (echo '\\nportless is required but not installed. Run: npm i -g portless\\n' && exit 1)",
-    "prebuild": "bash ./scripts/ensure-pnpm-install.sh && pnpm run test:feature-registry && pnpm run test:file-transfer:throughput && pnpm run test:transport-network-lifecycle && pnpm run test:terminal:regression:core",
+    "prebuild": "bash ./scripts/ensure-pnpm-install.sh && pnpm run test:feature-registry && pnpm run test:file-transfer:throughput && pnpm run test:transport-network-lifecycle && pnpm run test:terminal:regression:core && pnpm run test:relay:account-directory && pnpm run test:workspace:panes",
     "test:terminal:regression:core": "pnpm exec vitest run src/server/terminal-message-runtime.test.ts && pnpm run test:terminal:contracts && pnpm run test:common-user-flows && pnpm run test:relay:smoke",
     "test:transport-network-lifecycle": "pnpm exec vitest run src/hooks/useOpenTabLifecycleEffects.test.tsx src/contexts/session-context-target-network-probe-runtime.test.ts src/contexts/session-context-transport-orchestration-runtime.test.ts src/contexts/session-context-socket-runtime.test.ts && pnpm --dir ../packages/shared exec vitest run src/connection/protocol.test.ts",
     "dev": "portless android.zterm vite",
@@ -56,7 +56,9 @@
     "deps:ensure": "bash ./scripts/ensure-pnpm-install.sh",
     "deps:check-wterm-published": "node ./scripts/check-wterm-runtime-published.mjs",
     "test:feature-registry": "pnpm exec vitest run src/lib/feature-registry-truth.test.ts src/lib/function-wiki-truth.test.ts src/lib/architecture-boundary-truth.test.ts src/lib/loop-governance-truth.test.ts src/lib/resource-registry-truth.test.ts src/lib/module-registry-truth.test.ts src/lib/edge-registry-truth.test.ts src/lib/module-import-graph-truth.test.ts src/lib/function-map-resource-truth.test.ts src/lib/mainline-resource-call-map.test.ts",
-    "test:file-transfer:throughput": "bash ./scripts/run-file-transfer-throughput-gate.sh"
+    "test:file-transfer:throughput": "bash ./scripts/run-file-transfer-throughput-gate.sh",
+    "test:relay:account-directory": "pnpm exec vitest run src/lib/traversal-relay-client.test.ts src/lib/relay-account-directory.test.ts src/lib/relay-device-stream-runtime.test.ts",
+    "test:workspace:panes": "pnpm exec vitest run src/components/terminal/TerminalHeader.test.tsx src/pages/TerminalPageStageShell.pane-stage.test.tsx src/lib/home-connection-projection.test.ts && pnpm --dir ../packages/shared exec vitest run src/react/pane-profile.test.ts"
   },
   "dependencies": {
     "@capacitor/android": "^6.2.1",

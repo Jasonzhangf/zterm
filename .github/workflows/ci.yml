@@ -39,6 +39,12 @@ jobs:
 
       - name: Feature registry and architecture truth gates
         run: pnpm --dir android run test:feature-registry
+      - name: Relay account directory gate
+        run: pnpm --dir android run test:relay:account-directory
+
+      - name: Workspace panes gate
+        run: pnpm --dir android run test:workspace:panes
+
 
       - name: File-transfer throughput gate
         run: pnpm --dir android run test:file-transfer:throughput
@@ -86,3 +92,33 @@ jobs:
 
       - name: npm pack dry-run
         run: npm pack --dry-run android/release-dist/npm/@jsonstudio__zterm-daemon
+
+  mac-desktop-split:
+    name: Mac desktop split gate
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Mac desktop split tests
+        run: pnpm --dir mac exec vitest run mac/src/app/MacPaneWorkbench.split.test.tsx --reporter dot
+
+  win-desktop-split:
+    name: Windows desktop split gate
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Windows desktop tests
+        run: pnpm --dir win test --reporter dot

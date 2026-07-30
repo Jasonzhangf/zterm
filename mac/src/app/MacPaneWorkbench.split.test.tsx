@@ -183,13 +183,13 @@ describe('MacPaneWorkbench split behavior (red baseline)', () => {
   it('uses compact desktop split spacing for Mac multi-pane layout', () => {
     const profile: PaneProfile = resolvePaneProfile({ platform: 'desktop', splitVisible: true, topInsetPx: 0 });
     expect(profile.stage.outerMargin).toBe('0');
-    expect(profile.stage.paneGap).toBe('3px');
-    expect(profile.stage.paneRadius).toBe('7px');
-    expect(profile.gesture.dividerHitPx).toBe(6);
-    expect(profile.header.paneScrollerMinHeight).toBe('26px');
+    expect(profile.stage.paneGap).toBe('0');
+    expect(profile.stage.paneRadius).toBe('0');
+    expect(profile.gesture.dividerHitPx).toBe(3);
+    expect(profile.header.paneScrollerMinHeight).toBe('22px');
   });
 
-  it('renders active pane black and inactive pane gray without focus outline', () => {
+  it('renders split panes terminal-first with only a one-pixel active inset', () => {
     let workbench: MacWorkbenchState = createInitialWorkbenchState();
     workbench = openConnectionInWorkbench(workbench, makeTarget('a'));
     workbench = splitActivePaneRight(workbench);
@@ -207,7 +207,8 @@ describe('MacPaneWorkbench split behavior (red baseline)', () => {
     const activeFrame = container.querySelector('[data-testid="pane-stage-frame"][data-pane-active="true"]') as HTMLElement | null;
     const inactiveFrame = container.querySelector('[data-testid="pane-stage-frame"][data-pane-active="false"]') as HTMLElement | null;
     expect(activeFrame?.style.backgroundColor).toBe('rgb(5, 7, 11)');
-    expect(inactiveFrame?.style.backgroundColor).toBe('rgb(37, 42, 49)');
+    expect(inactiveFrame?.style.backgroundColor).toBe('rgb(5, 7, 11)');
     expect(activeFrame?.style.outline).toBe('none');
+    expect(activeFrame?.style.boxShadow).toContain('inset');
   });
 });

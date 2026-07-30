@@ -42,6 +42,8 @@ export function useAppUpdate() {
     backupCurrentApk: () => AppUpdatePlugin.backupCurrentApk(),
     rollbackToBackup: (options) => AppUpdatePlugin.rollbackToBackup(options),
     getRollbackBackupInfo: () => AppUpdatePlugin.getRollbackBackupInfo(),
+    downloadRollbackApk: (options) => AppUpdatePlugin.downloadRollbackApk(options),
+    getRollbackApkBaseInfo: () => AppUpdatePlugin.getRollbackApkBaseInfo(),
     onError: (phase, error) => {
       const prefix = phase === 'restore-preferences'
         ? '[useAppUpdate] Failed to restore preferences:'
@@ -143,6 +145,7 @@ export function useAppUpdate() {
     rollbackBackup: snapshot.rollbackBackup,
     isBackingUp: snapshot.isBackingUp,
     isRollingBack: snapshot.isRollingBack,
+    rollbackToPreviousEntry: snapshot.rollbackToPreviousEntry,
     hasNewVersion: projection.hasNewVersion,
     hasUpdateIgnorePolicy: projection.hasUpdateIgnorePolicy,
     updateManifestUrlConfigured: projection.updateManifestUrlConfigured,
@@ -178,6 +181,7 @@ export function useAppUpdate() {
     snapshot.rollbackBackup,
     snapshot.isBackingUp,
     snapshot.isRollingBack,
+    snapshot.rollbackToPreviousEntry,
     rollbackToPreviousVersion,
   ]);
 }

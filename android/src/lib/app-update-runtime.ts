@@ -11,6 +11,7 @@ import {
   type AppUpdateManifest,
   type AppUpdatePreferences,
   type AppUpdateRollbackBackup,
+  type AppUpdateRollbackEntry,
 } from './app-update';
 import { buildRelayInjectedAppUpdatePreferences } from './app-update-relay-manifest';
 import type { DownloadAndInstallOptions } from '../plugins/AppUpdatePlugin';
@@ -37,6 +38,7 @@ export interface AppUpdateRuntimeSnapshot {
   updateStage: AppUpdateStage;
   runtimeVersionCode: number;
   rollbackBackup: AppUpdateRollbackBackup | null;
+  rollbackToPreviousEntry: AppUpdateRollbackEntry | null;
   isBackingUp: boolean;
   isRollingBack: boolean;
   lastInstallContext: AppUpdateInstallContext | null;
@@ -55,6 +57,14 @@ export interface AppUpdateRuntimeDeps {
   backupCurrentApk: () => Promise<AppUpdateRollbackBackup>;
   rollbackToBackup: (options: { filePath: string; sha256?: string }) => Promise<void>;
   getRollbackBackupInfo: () => Promise<AppUpdateRollbackBackup | null>;
+  downloadRollbackApk: (options: DownloadAndInstallOptions) => Promise<{
+    filePath: string;
+    sha256: string;
+    versionCode: number;
+    versionName: string;
+    packageName?: string;
+  }>;
+  getRollbackApkBaseInfo: () => Promise<{ baseVersionCode: number; baseVersionName: string } | null>;
   onError?: (phase: 'restore-preferences' | 'persist-preferences', error: unknown) => void;
 }
 
@@ -69,6 +79,7 @@ function createDefaultSnapshot(runtimeVersionCode: number): AppUpdateRuntimeSnap
     updateStage: 'idle',
     runtimeVersionCode,
     rollbackBackup: null,
+    rollbackToPreviousEntry: null,
     isBackingUp: false,
     isRollingBack: false,
     lastInstallContext: null,
@@ -203,6 +214,10 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
           ? shouldSuppressUpdatePrompt(resolvedManifest, snapshot.preferences, options)
           : 'none';
 
+        const rollbackEntry = resolvedManifest.rollbackToPrevious && resolvedManifest.rollbackToPrevious.sourceVersionCode === snapshot.runtimeVersionCode
+          ? resolvedManifest.rollbackToPrevious
+          : null;
+
         const nextPreferences = normalizeAppUpdatePreferences({
           ...snapshot.preferences,
           lastCheckedAt: deps.now(),
@@ -219,6 +234,7 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
             updateAvailable && suppressedReason === 'none'
               ? resolvedManifest
               : (!updateAvailable || options?.manual ? null : current.availableManifest),
+          rollbackToPreviousEntry: rollbackEntry,
           checking: false,
           updateStage: 'idle',
         }));
@@ -292,6 +308,60 @@ export function createAppUpdateRuntime(deps: AppUpdateRuntimeDeps) {
     },
 
     async rollbackToPreviousVersion() {
+      const entry = snapshot.rollbackToPreviousEntry;
+      if (!entry) {
+        setSnapshot((current) => ({
+          ...current,
+          lastError: '当前没有可用的回退版本',
+          updateStage: 'failed',
+          lastInstallContext: DEFAULT_APP_UPDATE_INSTALL_CONTEXT,
+        }));
+        return false;
+      }
+
+      setSnapshot((current) => ({
+        ...current,
+        isRollingBack: true,
+        lastError: null,
+        updateStage: 'downloading-and-installing',
+      }));
+
+      try {
+        const apkUrl = new URL(entry.apkUrl, snapshot.preferences.manifestUrl || entry.apkUrl).toString();
+        const result = await deps.downloadRollbackApk({
+          url: apkUrl,
+          sha256: entry.sha256,
+          expectedPackageName: deps.packageName,
+        });
+
+        setSnapshot((current) => ({
+          ...current,
+          isRollingBack: false,
+          updateStage: 'completed',
+          rollbackToPreviousEntry: null,
+        }));
+        return Boolean(result);
+      } catch (error) {
+        setSnapshot((current) => ({
+          ...current,
+          isRollingBack: false,
+          lastError: error instanceof Error ? error.message : '回退到上一版本失败',
+          updateStage: 'failed',
+          lastInstallContext: {
+            manifestUrl: snapshot.preferences.manifestUrl,
+            apkUrl: entry.apkUrl,
+            versionCode: entry.versionCode,
+            versionName: entry.versionName,
+            sha256Expected: entry.sha256,
+            capturedAt: deps.now(),
+            reason: error instanceof Error ? error.message : '回退到上一版本失败',
+          },
+        }));
+        return false;
+      }
+    },
+
+    async rollbackToLocalBackup() {
       const backup = snapshot.rollbackBackup;
       if (!backup) {
         setSnapshot((current) => ({

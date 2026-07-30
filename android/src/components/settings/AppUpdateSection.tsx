@@ -4,6 +4,7 @@ import type {
   AppUpdateManifestSource,
   AppUpdatePreferences,
   AppUpdateRollbackBackup,
+  AppUpdateRollbackEntry,
 } from '../../lib/app-update';
 import { SettingsSectionTitle, settingsInputStyle, settingsSectionStyle } from './SettingsSection';
 
@@ -41,6 +42,8 @@ interface AppUpdateSectionProps {
   rollbackBackup?: AppUpdateRollbackBackup | null;
   isRollingBack?: boolean;
   onRollback?: () => void;
+  rollbackToPreviousEntry?: AppUpdateRollbackEntry | null;
+  onRollbackToPrevious?: () => void;
 }
 
 export function AppUpdateSection({
@@ -66,6 +69,8 @@ export function AppUpdateSection({
   rollbackBackup,
   isRollingBack = false,
   onRollback,
+  rollbackToPreviousEntry,
+  onRollbackToPrevious,
 }: AppUpdateSectionProps) {
   const routeCandidates = manifestCandidates?.length
     ? manifestCandidates
@@ -251,6 +256,27 @@ export function AppUpdateSection({
             }}
           >
             {isRollingBack ? '正在回滚…' : `回退到 ${rollbackBackup.versionName}`}
+          </button>
+        ) : null}
+        {rollbackToPreviousEntry ? (
+          <button
+            onClick={onRollbackToPrevious}
+            disabled={isRollingBack}
+            style={{
+              minHeight: '44px',
+              padding: '0 16px',
+              borderRadius: '14px',
+              border: 'none',
+              backgroundColor: 'rgba(239,68,68,0.16)',
+              color: '#b91c1c',
+              fontWeight: 800,
+              cursor: isRollingBack ? 'wait' : 'pointer',
+              opacity: isRollingBack ? 0.55 : 1,
+            }}
+          >
+            {isRollingBack
+              ? '正在回退到上一版本…'
+              : `回退到上一版本 ${rollbackToPreviousEntry.sourceVersionName}`}
           </button>
         ) : null}
         {hasUpdateIgnorePolicy ? (

@@ -23,6 +23,8 @@ describe('app-update-runtime', () => {
   const backupCurrentApk = vi.fn();
   const rollbackToBackup = vi.fn();
   const getRollbackBackupInfo = vi.fn();
+  const downloadRollbackApk = vi.fn();
+  const getRollbackApkBaseInfo = vi.fn();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -42,6 +44,8 @@ describe('app-update-runtime', () => {
       backupCurrentApk,
       rollbackToBackup,
       getRollbackBackupInfo,
+      downloadRollbackApk,
+      getRollbackApkBaseInfo,
     });
   }
 

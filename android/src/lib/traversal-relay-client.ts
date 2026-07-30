@@ -349,6 +349,18 @@ function emitTraversalRelayAccountChange(state: TraversalRelayAccountState | nul
   }
 }
 
+function readCurrentTraversalRelayStreamAccount(base: TraversalRelayAccountState) {
+  const current = readTraversalRelayAccountState();
+  if (
+    current
+    && current.accessToken === base.accessToken
+    && normalizeTraversalRelayBaseUrl(current.relayBaseUrl) === normalizeTraversalRelayBaseUrl(base.relayBaseUrl)
+  ) {
+    return current;
+  }
+  throw new Error('relay device stream identity mismatch: account logged out, replaced, or token rotated');
+}
+
 export function deriveTraversalRelayClientSettings(
   payload: TraversalRelayAuthPayload,
   deviceMetaInput?: Partial<TraversalRelayDeviceMeta> | null,
@@ -524,8 +536,9 @@ export function connectTraversalRelayDevicesStream(options: {
     try {
       const payload = JSON.parse(String(event.data)) as RelayDeviceStreamMessage;
       if ((payload.type === 'devices-snapshot' || payload.type === 'device-updated') && Array.isArray(payload.payload?.devices)) {
+        const currentAccount = readCurrentTraversalRelayStreamAccount(options.account);
         const nextState: TraversalRelayAccountState = {
-          ...options.account,
+          ...currentAccount,
           devices: payload.payload.devices,
           updatedAt: Date.now(),
         };
@@ -539,8 +552,9 @@ export function connectTraversalRelayDevicesStream(options: {
           options.onError?.('relay directory snapshot missing or invalid');
           return;
         }
+        const currentAccount = readCurrentTraversalRelayStreamAccount(options.account);
         writeTraversalRelayAccountState({
-          ...options.account,
+          ...currentAccount,
           directory,
           updatedAt: Date.now(),
         });
@@ -555,7 +569,11 @@ export function connectTraversalRelayDevicesStream(options: {
         options.onDebugRequest?.(payload.payload || {}, socket);
       }
     } catch (error) {
-      options.onError?.(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      options.onError?.(message);
+      if (message.startsWith('relay device stream identity mismatch')) {
+        socket.close();
+      }
     }
   };
   socket.onerror = () => {

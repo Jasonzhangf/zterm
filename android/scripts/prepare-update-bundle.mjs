@@ -3,6 +3,18 @@ import { createHash } from 'crypto';
 import { basename, dirname, resolve } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
+import { spawnSync } from 'child_process';
+
+function exec(command, options = {}) {
+  const result = spawnSync(
+    command.shift(), command,
+    { encoding: 'utf-8', stdio: 'pipe', ...options }
+  );
+  if (result.status !== 0) {
+    throw new Error(`Command failed: ${command.join(' ')}\n${result.stderr}`);
+  }
+  return result.stdout;
+}
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(scriptDir, '..');
@@ -32,6 +44,15 @@ function computeVersionCode(version, buildNumber) {
     semver.push(0);
   }
   return (semver[0] * 100000000) + (semver[1] * 1000000) + (semver[2] * 10000) + buildNumber;
+}
+
+function computeRollbackVersionCode(versionCode) {
+  // Android versionCode is uint32 (max 4294967295). Reserve bit 30 as a
+  // rollback marker so the rollback anchor stays above any future normal
+  // build while leaving the low 30 bits free for normal versionCode growth.
+  // The rollback APK ships the current normal APK bytes but re-signed with
+  // this elevated versionCode so PackageManager accepts the install.
+  return (1 << 30) + Number(versionCode);
 }
 
 function hashFile(filePath) {
@@ -76,7 +97,12 @@ const manifest = {
   publishedAt: new Date().toISOString(),
   channel: 'stable',
   sourceApk: basename(apkPath),
+  rollbackToPrevious: null,
 };
+
+// Generate rollback APK so we can fill rollbackToPrevious
+const rollbackResult = generateRollbackApk(apkPath, outputDir, versionName, versionCode);
+if (rollbackResult) manifest.rollbackToPrevious = rollbackResult;
 
 writeFileSync(resolve(outputDir, 'latest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 writeFileSync(resolve(releaseDistDir, 'latest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -84,6 +110,9 @@ writeFileSync(resolve(releaseDistDir, 'latest.json'), `${JSON.stringify(manifest
 mkdirSync(daemonUpdatesDir, { recursive: true });
 copyFileSync(targetApkPath, resolve(daemonUpdatesDir, targetApkName));
 copyFileSync(targetApkPath, resolve(daemonUpdatesDir, latestAliasName));
+if (rollbackResult) {
+  copyFileSync(resolve(outputDir, rollbackResult.apkUrl), resolve(daemonUpdatesDir, rollbackResult.apkUrl));
+}
 writeFileSync(resolve(daemonUpdatesDir, 'latest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 
 console.log('[prepare-update-bundle] ready');
@@ -94,3 +123,37 @@ console.log(`- manifest: ${resolve(outputDir, 'latest.json')}`);
 console.log(`- daemon updates dir: ${daemonUpdatesDir}`);
 console.log(`- versionName: ${versionName}`);
 console.log(`- versionCode: ${versionCode}`);
+/**
+ * Generate a rollback APK by patching the versionCode in AndroidManifest.xml.
+ * The rollback APK has the same bytes as the normal APK but a higher versionCode
+ * (bit 30 set) so Android PackageManager accepts the install.
+ */
+function generateRollbackApk(inputApkPath, outputDir, baseVersionName, baseVersionCode) {
+  const rollbackVersionName = `${baseVersionName}.1`;
+  const rollbackVersionCode = computeRollbackVersionCode(baseVersionCode);
+  const rollbackApkName = `zterm-${rollbackVersionName}.apk`;
+  const rollbackApkPath = resolve(outputDir, rollbackApkName);
+
+  const patchScript = resolve(scriptDir, 'tools', 'patch-apk-version.py');
+  if (!existsSync(patchScript)) {
+    console.warn(`[prepare-update-bundle] Rollback tool not found: ${patchScript}`);
+    return null;
+  }
+
+  try {
+    exec(['python3', patchScript, inputApkPath, rollbackApkPath, String(rollbackVersionCode), rollbackVersionName]);
+    console.log(`[prepare-update-bundle] Rollback APK: ${rollbackApkPath}`);
+    return {
+      versionCode: rollbackVersionCode,
+      versionName: rollbackVersionName,
+      apkUrl: rollbackApkName,
+      sha256: hashFile(rollbackApkPath),
+      size: statSync(rollbackApkPath).size,
+      sourceVersionCode: baseVersionCode,
+      sourceVersionName: baseVersionName,
+    };
+  } catch (error) {
+    console.warn(`[prepare-update-bundle] Rollback APK generation failed: ${error.message}`);
+    return null;
+  }
+}

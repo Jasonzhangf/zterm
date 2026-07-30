@@ -78,6 +78,7 @@ export function AppContent({
     rollbackBackup,
     isRollingBack,
     rollbackToPreviousVersion,
+    rollbackToPreviousEntry,
   } = useAppUpdate();
 
   const {
@@ -555,6 +556,10 @@ export function AppContent({
             rollbackBackup={rollbackBackup}
             isRollingBack={isRollingBack}
             onRollback={() => {
+              void rollbackToPreviousVersion();
+            }}
+            rollbackToPreviousEntry={rollbackToPreviousEntry}
+            onRollbackToPrevious={() => {
               void rollbackToPreviousVersion();
             }}
             onTerminalThemeChange={(themeId) => {

@@ -112,6 +112,7 @@ export function PaneTabs(props: PaneTabsProps) {
   } = props;
   const header = profile.header;
   const splitVisible = profile.splitVisible;
+  const isDesktopSplit = profile.mode === 'desktop-split';
 
   return (
     <div
@@ -168,10 +169,10 @@ export function PaneTabs(props: PaneTabsProps) {
             gap: header.paneGap,
             padding: header.panePadding,
             borderRadius: header.paneRadius,
-            border: splitVisible
+            border: splitVisible && !isDesktopSplit
               ? `1px solid ${isActivePane ? 'rgba(83, 139, 255, 0.38)' : 'rgba(255,255,255,0.06)'}`
               : 'none',
-            backgroundColor: splitVisible
+            backgroundColor: splitVisible && !isDesktopSplit
               ? (isActivePane ? 'rgba(19, 28, 43, 0.92)' : 'rgba(16, 21, 31, 0.82)')
               : 'transparent',
           }}

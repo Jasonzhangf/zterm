@@ -44,6 +44,8 @@ interface SettingsPageProps {
   rollbackBackup?: AppUpdateRollbackBackup | null;
   isRollingBack?: boolean;
   onRollback?: () => void;
+  rollbackToPreviousEntry?: import('../lib/app-update').AppUpdateRollbackEntry | null;
+  onRollbackToPrevious?: () => void;
   onExportConfig?: () => void;
   onImportConfig?: () => void;
   configExporting?: boolean;
@@ -154,6 +156,8 @@ export function SettingsPage({
   rollbackBackup,
   isRollingBack = false,
   onRollback,
+  rollbackToPreviousEntry,
+  onRollbackToPrevious,
   onExportConfig,
   onImportConfig,
   configExporting = false,
@@ -276,6 +280,8 @@ export function SettingsPage({
           rollbackBackup={rollbackBackup}
           isRollingBack={isRollingBack}
           onRollback={onRollback}
+          rollbackToPreviousEntry={rollbackToPreviousEntry}
+          onRollbackToPrevious={onRollbackToPrevious}
         />
 
         <RememberedServersSection

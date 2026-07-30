@@ -2218,7 +2218,8 @@
         "resource.relay_control_connection",
         "resource.transport_target",
         "resource.relay_peer_lease",
-        "resource.debug_channel"
+        "resource.debug_channel",
+        "resource.relay_account_directory"
       ],
       "indirect_relations": [
         "resource.daemon_target_transport"
@@ -2625,6 +2626,16 @@
       "from": "resource.daemon_connection_gateway",
       "to": "resource.ui_projection",
       "reason": "Daemon gateway cannot own client UI projection truth."
+    }
+  ],
+  "direct_relations": [
+    {
+      "from": "resource.relay_control_connection",
+      "to": "resource.relay_account_directory"
+    },
+    {
+      "from": "resource.relay_account_directory",
+      "to": "resource.relay_account_directory"
     }
   ]
 }

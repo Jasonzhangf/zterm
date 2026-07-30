@@ -85,13 +85,15 @@ function PaneFrame<TTabId extends string>({
   onActivate?: (paneId: string) => void;
 }) {
   const stageTokens: PaneStageTokens = profile.stage;
+  const isDesktopSplit = profile.mode === 'desktop-split';
   const frameStyle: CSSProperties = {
     ...PANE_BASE_STYLE,
     flex: `${Math.max(0.01, slot.size)} 1 0%`,
     borderRadius: stageTokens.paneRadius,
     overflow: 'hidden',
     outline: 'none',
-    backgroundColor: slot.isActive ? '#05070b' : '#252a31',
+    backgroundColor: isDesktopSplit ? '#05070b' : slot.isActive ? '#05070b' : '#252a31',
+    boxShadow: isDesktopSplit && slot.isActive ? 'inset 0 0 0 1px rgba(125, 162, 224, 0.28)' : undefined,
     cursor: profile.gesture.dragResizeEnabled && !slot.isActive ? 'pointer' : undefined,
   };
 
@@ -130,7 +132,7 @@ function PaneDivider<TTabId extends string>({
     alignSelf: 'stretch',
     position: 'relative',
     cursor: visible ? 'col-resize' : 'default',
-    backgroundColor: 'rgba(255, 255, 255, 0.05)',
+    backgroundColor: 'transparent',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',

@@ -33,6 +33,10 @@ class MockWebSocket {
     this.sent.push(payload);
   }
 
+  close() {
+    this.readyState = 3;
+  }
+
   emitOpen() {
     this.onopen?.();
   }
@@ -524,5 +528,190 @@ describe('traversal relay client truth', () => {
     }));
     expect(onError).not.toHaveBeenCalled();
     expect(readTraversalRelayAccountState()?.directory?.devices[0]?.daemon?.endpoints[0]?.kind).toBe('relay-rtc');
+  });
+
+  it('keeps the latest daemon directory when a later legacy devices snapshot arrives', () => {
+    const staleDirectory = {
+      ...directoryPayload,
+      devices: [
+        {
+          ...directoryPayload.devices[0],
+          daemon: {
+            ...directoryPayload.devices[0].daemon,
+            sessions: [{ name: 'stale', updatedAt: '2026-06-28T09:59:00.000Z' }],
+          },
+        },
+      ],
+    };
+    const freshDirectory = {
+      ...directoryPayload,
+      updatedAt: '2026-06-28T10:05:00.000Z',
+      devices: [
+        directoryPayload.devices[0],
+        {
+          ...directoryPayload.devices[0],
+          deviceId: 'daemon-device-2',
+          deviceName: 'Jason Windows',
+          platform: 'windows',
+          daemon: {
+            ...directoryPayload.devices[0].daemon,
+            hostId: 'daemon-host-2',
+            sessions: [{ name: 'windows-main', updatedAt: '2026-06-28T10:05:00.000Z' }],
+          },
+        },
+      ],
+    };
+    writeTraversalRelayAccountState({
+      username: 'jason',
+      password: '',
+      relayBaseUrl: 'https://relay.example.com/relay/',
+      accessToken: 'token-1',
+      user: { id: 'u1', username: 'jason', createdAt: 'now' },
+      deviceId: 'android-1',
+      deviceName: 'ZTerm Android',
+      platform: 'android',
+      devices: [],
+      directory: staleDirectory as any,
+      updatedAt: 1,
+      relaySettings: {
+        relayBaseUrl: 'https://relay.example.com/relay/',
+        accessToken: 'token-1',
+        userId: 'u1',
+        username: 'jason',
+        deviceId: 'android-1',
+        deviceName: 'ZTerm Android',
+        platform: 'android',
+        wsDevicesUrl: 'wss://relay.example.com/relay/ws/devices',
+        wsHostUrl: 'wss://relay.example.com/relay/ws/host',
+        wsClientUrl: 'wss://relay.example.com/relay/ws/client',
+        turnUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        updatedAt: 1,
+      },
+    });
+    const socket = connectTraversalRelayDevicesStream({
+      account: readTraversalRelayAccountState()!,
+      onDevices: vi.fn(),
+      onDirectory: vi.fn(),
+    }) as unknown as MockWebSocket;
+
+    socket.emitMessage({ type: 'directory-snapshot', payload: { directory: freshDirectory } });
+    socket.emitMessage({
+      type: 'devices-snapshot',
+      payload: {
+        devices: [{
+          deviceId: 'android-1',
+          deviceName: 'ZTerm Android',
+          platform: 'android',
+          appVersion: '0.1.3',
+          client: { connected: true, lastSeenAt: '2026-06-28T10:06:00.000Z' },
+          daemon: { connected: false, lastSeenAt: '', hostId: '', version: '' },
+        }],
+      },
+    });
+
+    const account = readTraversalRelayAccountState();
+    expect(account?.devices).toHaveLength(1);
+    expect(account?.directory?.devices.map((device) => device.daemon?.hostId).sort()).toEqual([
+      'daemon-host',
+      'daemon-host-2',
+    ]);
+   expect(account?.directory?.devices[1]?.daemon?.sessions[0]?.name).toBe('windows-main');
+  });
+
+  it('throws when a stale device stream tries to write to a logged-out account', () => {
+    writeTraversalRelayAccountState(null);
+    const onError = vi.fn();
+    let socket: MockWebSocket;
+    expect(() => {
+      socket = connectTraversalRelayDevicesStream({
+        account: {
+          username: 'jason',
+          password: '',
+          relayBaseUrl: 'https://relay.example.com/relay/',
+          accessToken: 'token-old',
+          user: { id: 'u1', username: 'jason', createdAt: 'now' },
+          deviceId: 'android-1',
+          deviceName: 'ZTerm Android',
+          platform: 'android',
+          devices: [],
+          directory: null,
+          updatedAt: 1,
+          relaySettings: {
+            relayBaseUrl: 'https://relay.example.com/relay/',
+            accessToken: 'token-old',
+            userId: 'u1',
+            username: 'jason',
+            deviceId: 'android-1',
+            deviceName: 'ZTerm Android',
+            platform: 'android',
+            wsDevicesUrl: 'wss://relay.example.com/relay/ws/devices',
+            wsHostUrl: 'wss://relay.example.com/relay/ws/host',
+            wsClientUrl: 'wss://relay.example.com/relay/ws/client',
+            turnUrl: '',
+            turnUsername: '',
+            turnCredential: '',
+            updatedAt: 1,
+          },
+        },
+        onDevices: vi.fn(),
+        onError,
+      }) as unknown as MockWebSocket;
+      socket.emitMessage({ type: 'devices-snapshot', payload: { devices: [] } });
+    }).not.toThrow();
+    expect(onError).toHaveBeenCalledWith('relay device stream identity mismatch: account logged out, replaced, or token rotated');
+    expect(socket!.readyState).toBe(3);
+  });
+
+  it('throws when a stale device stream tries to write to a different-account directory', () => {
+    const staleAccount = {
+      ...directoryPayload,
+      accessToken: 'token-old',
+    } as any;
+    writeTraversalRelayAccountState({
+      username: 'jason',
+      password: '',
+      relayBaseUrl: 'https://relay.example.com/relay/',
+      accessToken: 'token-different',
+      user: { id: 'u2', username: 'other', createdAt: 'now' },
+      deviceId: 'android-2',
+      deviceName: 'Other Android',
+      platform: 'android',
+      devices: [],
+      directory: null,
+      updatedAt: 2,
+      relaySettings: undefined,
+    });
+    const onError = vi.fn();
+    let socket: MockWebSocket;
+    expect(() => {
+      socket = connectTraversalRelayDevicesStream({
+        account: {
+          ...staleAccount,
+          relaySettings: {
+            relayBaseUrl: 'https://relay.example.com/relay/',
+            accessToken: 'token-old',
+            userId: 'u1',
+            username: 'jason',
+            deviceId: 'android-1',
+            deviceName: 'ZTerm Android',
+            platform: 'android',
+            wsDevicesUrl: 'wss://relay.example.com/relay/ws/devices',
+            wsHostUrl: 'wss://relay.example.com/relay/ws/host',
+            wsClientUrl: 'wss://relay.example.com/relay/ws/client',
+            turnUrl: '',
+            turnUsername: '',
+            turnCredential: '',
+            updatedAt: 1,
+          },
+        },
+        onDevices: vi.fn(),
+        onError,
+      }) as unknown as MockWebSocket;
+      socket.emitMessage({ type: 'devices-snapshot', payload: { devices: [] } });
+    }).not.toThrow();
+    expect(onError).toHaveBeenCalledWith('relay device stream identity mismatch: account logged out, replaced, or token rotated');
+    expect(socket!.readyState).toBe(3);
   });
 });

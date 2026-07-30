@@ -10,6 +10,7 @@ export interface AppUpdateManifest {
   notes: string[];
   publishedAt?: string;
   channel?: string;
+  rollbackToPrevious?: AppUpdateRollbackEntry | null;
 }
 
 export interface AppUpdateRollbackBackup {
@@ -18,6 +19,16 @@ export interface AppUpdateRollbackBackup {
   filePath: string;
   sha256: string;
   backedUpAt: number;
+}
+
+export interface AppUpdateRollbackEntry {
+  versionCode: number;
+  versionName: string;
+  apkUrl: string;
+  sha256: string;
+  size?: number;
+  sourceVersionCode: number;
+  sourceVersionName: string;
 }
 
 export type AppUpdateManifestSource =
@@ -196,8 +207,43 @@ export function normalizeAppUpdateManifest(input: unknown): AppUpdateManifest | 
     sha256,
     size,
     notes,
-    publishedAt: typeof candidate.publishedAt === 'string' ? candidate.publishedAt : undefined,
+  publishedAt: typeof candidate.publishedAt === 'string' ? candidate.publishedAt : undefined,
     channel: typeof candidate.channel === 'string' ? candidate.channel : undefined,
+    rollbackToPrevious: normalizeAppUpdateRollbackEntry(candidate.rollbackToPrevious),
+  };
+}
+
+export function normalizeAppUpdateRollbackEntry(input: unknown): AppUpdateRollbackEntry | null {
+  if (!input || typeof input !== 'object') {
+    return null;
+  }
+  const candidate = input as Partial<AppUpdateRollbackEntry>;
+  const versionCode = toFiniteNumber(candidate.versionCode);
+  const versionName = typeof candidate.versionName === 'string' ? candidate.versionName.trim() : '';
+  const apkUrl = typeof candidate.apkUrl === 'string' ? candidate.apkUrl.trim() : '';
+  const sha256 = typeof candidate.sha256 === 'string' ? candidate.sha256.trim().toLowerCase() : '';
+  const sourceVersionCode = toFiniteNumber(candidate.sourceVersionCode);
+  const sourceVersionName = typeof candidate.sourceVersionName === 'string' ? candidate.sourceVersionName.trim() : '';
+  const size = toFiniteNumber(candidate.size) || undefined;
+
+  if (!versionCode || versionCode <= 0 || !versionName || !apkUrl || !sha256) {
+    return null;
+  }
+  if (!sourceVersionCode || sourceVersionCode <= 0 || !sourceVersionName) {
+    return null;
+  }
+  if (versionCode <= sourceVersionCode) {
+    return null;
+  }
+
+  return {
+    versionCode,
+    versionName,
+    apkUrl,
+    sha256,
+    size,
+    sourceVersionCode,
+    sourceVersionName,
   };
 }
 

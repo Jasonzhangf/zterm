@@ -57,14 +57,17 @@ describe('pane-profile', () => {
     expect(profile.quickBar.shellMode).toBe('floating-collapsed');
   });
 
-  it('desktop split uses tightened 3px paneGap and drag handle on divider', () => {
+  it('desktop split uses iTerm2-like zero pane gap and a thin divider hit band', () => {
     const profile = resolvePaneProfile({
       platform: 'desktop',
       splitVisible: true,
       topInsetPx: 0,
     });
     expect(profile.mode).toBe('desktop-split');
-    expect(profile.stage.paneGap).toBe('3px');
+    expect(profile.stage.paneGap).toBe('0');
+    expect(profile.stage.paneRadius).toBe('0');
+    expect(profile.header.panePadding).toBe('0');
+    expect(profile.gesture.dividerHitPx).toBe(3);
     expect(profile.gesture.dragResizeEnabled).toBe(true);
     expect(profile.gesture.contextMenuTrigger).toBe('right-click');
   });

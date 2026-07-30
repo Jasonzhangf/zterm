@@ -25,6 +25,17 @@ export interface AppUpdatePlugin {
   backupCurrentApk(): Promise<RollbackBackupInfo>;
   rollbackToBackup(options: { filePath: string; sha256?: string }): Promise<void>;
   getRollbackBackupInfo(): Promise<RollbackBackupInfo | null>;
+  downloadRollbackApk(options: DownloadAndInstallOptions): Promise<{
+    filePath: string;
+    sha256: string;
+    versionCode: number;
+    versionName: string;
+    packageName?: string;
+  }>;
+  getRollbackApkBaseInfo(): Promise<{
+    baseVersionCode: number;
+    baseVersionName: string;
+  } | null>;
 }
 
 const AppUpdateNative = registerPlugin<AppUpdatePlugin>('AppUpdate');
@@ -34,4 +45,3 @@ export function isNativeAppUpdateSupported() {
 }
 
 export const AppUpdatePlugin = AppUpdateNative;
-

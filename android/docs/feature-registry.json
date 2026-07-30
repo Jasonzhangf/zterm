@@ -550,7 +550,8 @@
         "packages/shared/src/workspace/workspace-model.actions.test.ts",
         "packages/shared/src/react/pane-stage.tsx",
         "packages/shared/src/react/pane-profile.ts",
-        "packages/shared/src/react/pane-profile.test.ts"
+        "packages/shared/src/react/pane-profile.test.ts",
+        "packages/shared/src/react/pane-tabs.tsx"
       ],
       "forbidden_paths": [
         "src/server/"
@@ -565,7 +566,9 @@
         "src/pages/TerminalPage.real-quickbar-split.test.tsx",
         "packages/shared/src/workspace/workspace-model.test.ts",
         "packages/shared/src/workspace/workspace-model.actions.test.ts",
-        "packages/shared/src/react/pane-profile.test.ts"
+        "packages/shared/src/react/pane-profile.test.ts",
+        "mac/src/app/MacPaneWorkbench.split.test.tsx",
+        "pnpm --dir win test --reporter dot"
       ],
       "truth_sources": [
         "docs/ui-slices.md",

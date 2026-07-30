@@ -112,6 +112,95 @@ public class AppUpdatePlugin extends Plugin {
     }
 
     @PluginMethod
+    public void downloadRollbackApk(PluginCall call) {
+        String url = call.getString("url", "").trim();
+        String sha256 = call.getString("sha256", "").trim().toLowerCase(Locale.US);
+        String expectedPackageName = call.getString("expectedPackageName", "").trim();
+
+        if (url.isEmpty()) {
+            call.reject("回退 APK URL 不能为空");
+            return;
+        }
+
+        new Thread(() -> {
+            File targetFile = null;
+            try {
+                targetFile = downloadApk(url, sha256);
+                String resolvedPackageName = resolvePackageName(targetFile);
+
+                if (!expectedPackageName.isEmpty() && !expectedPackageName.equals(resolvedPackageName)) {
+                    throw new IllegalStateException("回退 APK 包名校验失败");
+                }
+
+                PackageInfo packageInfo = readPackageArchiveInfo(targetFile);
+                if (packageInfo == null) {
+                    throw new IllegalStateException("无法解析回退 APK 元信息");
+                }
+                long resolvedVersionCode = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                    ? packageInfo.getLongVersionCode()
+                    : packageInfo.versionCode;
+                String resolvedVersionName = packageInfo.versionName != null
+                    ? packageInfo.versionName
+                    : String.valueOf(resolvedVersionCode);
+
+                if (!canInstallPackages()) {
+                    getActivity().runOnUiThread(() -> {
+                        try {
+                            Intent intent = new Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES);
+                            intent.setData(Uri.parse("package:" + getContext().getPackageName()));
+                            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                            getActivity().startActivity(intent);
+                            call.reject("需要先允许安装未知来源应用");
+                        } catch (Exception error) {
+                            call.reject("无法打开安装权限设置", error);
+                        }
+                    });
+                    return;
+                }
+
+                File finalTargetFile = targetFile;
+                long finalVersionCode = resolvedVersionCode;
+                String finalVersionName = resolvedVersionName;
+                getActivity().runOnUiThread(() -> {
+                    try {
+                        installApk(finalTargetFile);
+                        JSObject result = new JSObject();
+                        result.put("filePath", finalTargetFile.getAbsolutePath());
+                        result.put("sha256", computeSha256(finalTargetFile));
+                        result.put("versionCode", finalVersionCode);
+                        result.put("versionName", finalVersionName);
+                        result.put("packageName", resolvedPackageName);
+                        call.resolve(result);
+                    } catch (Exception error) {
+                        call.reject("调起回退安装失败", error);
+                    }
+                });
+            } catch (Exception error) {
+                Log.e(TAG, "downloadRollbackApk failed", error);
+                if (targetFile != null && targetFile.exists()) {
+                    //noinspection ResultOfMethodCallIgnored
+                    targetFile.delete();
+                }
+                call.reject(error.getMessage(), error);
+            }
+        }).start();
+    }
+
+    @PluginMethod
+    public void getRollbackApkBaseInfo(PluginCall call) {
+        try {
+            JSObject result = resolveRollbackApkBaseInfo();
+            if (result == null) {
+                call.resolve();
+                return;
+            }
+            call.resolve(result);
+        } catch (Exception error) {
+            call.reject("读取回退 APK 基线信息失败", error);
+        }
+    }
+
+    @PluginMethod
     public void downloadAndInstall(PluginCall call) {
         String url = call.getString("url", "").trim();
         String sha256 = call.getString("sha256", "").trim().toLowerCase(Locale.US);
@@ -416,6 +505,47 @@ public class AppUpdatePlugin extends Plugin {
         }
 
         return packageInfo.packageName;
+    }
+
+    private PackageInfo readPackageArchiveInfo(File apkFile) {
+        PackageManager packageManager = getContext().getPackageManager();
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            return packageManager.getPackageArchiveInfo(
+                apkFile.getAbsolutePath(),
+                PackageManager.PackageInfoFlags.of(0)
+            );
+        }
+        //noinspection deprecation
+        return packageManager.getPackageArchiveInfo(apkFile.getAbsolutePath(), 0);
+    }
+
+    private JSObject resolveRollbackApkBaseInfo() {
+        File updatesDir = new File(getContext().getCacheDir(), "updates");
+        if (!updatesDir.exists() || !updatesDir.isDirectory()) {
+            return null;
+        }
+        File[] files = updatesDir.listFiles((dir, name) -> name.startsWith("rollback-") && name.endsWith(".apk"));
+        if (files == null || files.length == 0) {
+            return null;
+        }
+        File latest = files[0];
+        for (File file : files) {
+            if (file.lastModified() > latest.lastModified()) {
+                latest = file;
+            }
+        }
+        PackageInfo packageInfo = readPackageArchiveInfo(latest);
+        if (packageInfo == null) {
+            return null;
+        }
+        long versionCode = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+            ? packageInfo.getLongVersionCode()
+            : packageInfo.versionCode;
+        String versionName = packageInfo.versionName != null ? packageInfo.versionName : String.valueOf(versionCode);
+        JSObject result = new JSObject();
+        result.put("baseVersionCode", versionCode);
+        result.put("baseVersionName", versionName);
+        return result;
     }
 
     private String computeSha256(File file) throws Exception {
