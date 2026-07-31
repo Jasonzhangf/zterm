@@ -2,6 +2,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { WebSocket } from 'ws';
 import type {
   BridgeServerMessage as ServerMessage,
+  TerminalTransportServerFrame,
 } from '@zterm/shared/protocol';
 import type { TerminalPerformanceTraceRecord } from '@zterm/shared/terminal/performance-trace';
 import type {
@@ -42,7 +43,7 @@ export interface TerminalTransportRuntimeDeps {
 export interface TerminalTransportRuntime {
   createWebSocketSessionTransport: (ws: WebSocket) => TerminalSessionTransport;
   createRtcSessionTransport: (transport: RtcServerTransport) => TerminalSessionTransport;
-  sendTransportMessage: (transport: TerminalSessionTransport | null | undefined, message: ServerMessage) => void;
+  sendTransportMessage: (transport: TerminalSessionTransport | null | undefined, message: TerminalTransportServerFrame) => void;
   sendText: (transport: TerminalSessionTransport | null | undefined, text: string) => void;
   sendMessage: (session: TerminalTransportSubscriber, message: ServerMessage) => void;
   broadcastRuntimeDebugControl: (enabled: boolean, reason: string, sessionId?: string) => void;
@@ -144,7 +145,7 @@ export function createTerminalTransportRuntime(
     };
   }
 
-  function sendTransportMessage(transport: TerminalSessionTransport | null | undefined, message: ServerMessage) {
+  function sendTransportMessage(transport: TerminalSessionTransport | null | undefined, message: TerminalTransportServerFrame) {
     if (!transport || transport.readyState !== WebSocket.OPEN) {
       return;
     }

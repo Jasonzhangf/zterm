@@ -40,6 +40,15 @@ export interface TerminalControlRuntime {
   createDetachedTmuxSession: (input?: string, cwd?: string) => string;
   closeDetachedTerminalSession: (sessionName: string) => void;
   renameTmuxSession: (currentName?: string, nextName?: string) => string;
+  buildExactTmuxSessionTarget: (sessionName: string) => string;
+}
+
+export function buildExactTmuxSessionTarget(sessionName: string) {
+  const normalized = sessionName.trim();
+  if (!normalized) {
+    throw new Error('tmux exact session target requires a session name');
+  }
+  return `=${normalized}`;
 }
 
 export function createTerminalControlRuntime(
@@ -203,12 +212,13 @@ export function createTerminalControlRuntime(
   }
 
   function writeTmuxLiteralChunksSync(sessionName: string, payload: string) {
+    const target = buildExactTmuxSessionTarget(sessionName);
     const chunks = splitTerminalInputUtf8Chunks(
       payload,
       TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES,
     );
     for (let index = 0; index < chunks.length; index += 1) {
-      runTmux(['send-keys', '-t', sessionName, '-l', '--', chunks[index]!]);
+      runTmux(['send-keys', '-t', target, '-l', '--', chunks[index]!]);
       if (index < chunks.length - 1) {
         sleepTmuxWriteSettleSync();
       }
@@ -226,7 +236,7 @@ export function createTerminalControlRuntime(
     const keepalive = 'zterm-daemon-keepalive';
     // If server is already running (user's or ours), just ensure keepalive exists
     try {
-      runTmux(['has-session', '-t', keepalive]);
+      runTmux(['has-session', '-t', buildExactTmuxSessionTarget(keepalive)]);
       return; // server + keepalive alive
     } catch {
       // server or session missing — continue
@@ -261,7 +271,7 @@ export function createTerminalControlRuntime(
     }
     writeTmuxLiteralChunksSync(sessionName, payload);
     if (appendEnter) {
-      runTmux(['send-keys', '-t', sessionName, 'Enter']);
+      runTmux(['send-keys', '-t', buildExactTmuxSessionTarget(sessionName), 'Enter']);
     }
   }
 
@@ -286,7 +296,7 @@ export function createTerminalControlRuntime(
     }
     writeTmuxLiteralChunksSync(sessionName, payload);
     if (appendEnter) {
-      runTmux(['send-keys', '-t', sessionName, 'Enter']);
+      runTmux(['send-keys', '-t', buildExactTmuxSessionTarget(sessionName), 'Enter']);
     }
     return true;
   }
@@ -468,14 +478,14 @@ export function createTerminalControlRuntime(
           continue;
         }
         if (group.payload) {
-          await runTmuxAsync(['send-keys', '-t', mirror.sessionName, '-l', '--', group.payload]);
+          await runTmuxAsync(['send-keys', '-t', buildExactTmuxSessionTarget(mirror.sessionName), '-l', '--', group.payload]);
         }
         if (group.appendEnter) {
           if (!isGroupWritable(group)) {
             settleGroup(group, false);
             continue;
           }
-          await runTmuxAsync(['send-keys', '-t', mirror.sessionName, 'Enter']);
+          await runTmuxAsync(['send-keys', '-t', buildExactTmuxSessionTarget(mirror.sessionName), 'Enter']);
         }
         settleGroup(group, true);
         if (groupIndex < groups.length - 1) {
@@ -601,7 +611,7 @@ export function createTerminalControlRuntime(
       deps.wezTermBackend.closeSession(sessionName);
       return;
     }
-    runTmux(['kill-session', '-t', sessionName]);
+    runTmux(['kill-session', '-t', buildExactTmuxSessionTarget(sessionName)]);
   }
 
   function renameTmuxSession(currentName?: string, nextName?: string) {
@@ -610,7 +620,7 @@ export function createTerminalControlRuntime(
     }
     const sessionName = deps.sanitizeSessionName(currentName);
     const nextSessionName = deps.sanitizeSessionName(nextName);
-    runTmux(['rename-session', '-t', sessionName, nextSessionName]);
+    runTmux(['rename-session', '-t', buildExactTmuxSessionTarget(sessionName), nextSessionName]);
     return nextSessionName;
   }
 
@@ -627,5 +637,6 @@ export function createTerminalControlRuntime(
     createDetachedTmuxSession,
     closeDetachedTerminalSession,
     renameTmuxSession,
+    buildExactTmuxSessionTarget,
   };
 }

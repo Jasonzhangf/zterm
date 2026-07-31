@@ -4,8 +4,16 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
 APK_PATH="$ROOT_DIR/native/android/app/build/outputs/apk/debug/app-debug.apk"
+APK_WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/zterm-apk.XXXXXX")"
+NORMAL_APK_PATH="$APK_WORK_DIR/app-normal-debug.apk"
+ROLLBACK_APK_PATH="$APK_WORK_DIR/app-rollback-debug.apk"
 UPDATES_DIR_DEFAULT="$HOME/.zterm/updates"
 UPDATES_DIR="${WTERM_UPDATES_DIR:-$UPDATES_DIR_DEFAULT}"
+
+cleanup() {
+  rm -rf "$APK_WORK_DIR"
+}
+trap cleanup EXIT
 
 source "$SCRIPT_DIR/setup-android-java.sh"
 
@@ -19,9 +27,13 @@ npx cap sync android
 cd "$ROOT_DIR/native/android"
 ./gradlew :capacitor-cordova-android-plugins:parseDebugLocalResources
 ./gradlew :capacitor-cordova-android-plugins:processDebugManifest assembleDebug
+cp "$APK_PATH" "$NORMAL_APK_PATH"
+./gradlew :app:assembleDebug -PztermRollbackVariant=true
+cp "$APK_PATH" "$ROLLBACK_APK_PATH"
+cp "$NORMAL_APK_PATH" "$APK_PATH"
 
 cd "$ROOT_DIR"
-WTERM_UPDATES_DIR="$UPDATES_DIR" node ./scripts/prepare-update-bundle.mjs "$APK_PATH"
+WTERM_UPDATES_DIR="$UPDATES_DIR" node ./scripts/prepare-update-bundle.mjs "$APK_PATH" "$ROLLBACK_APK_PATH"
 node ./scripts/check-relay-default-address-leak.mjs "$ROOT_DIR/dist" "$ROOT_DIR/native/android/app/src/main/assets/public" "$APK_PATH"
 
 echo "[build-android-debug] verify manifests"

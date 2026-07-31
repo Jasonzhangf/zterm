@@ -48,6 +48,8 @@
 - renderer 是唯一可见窗口真相：只负责 `follow / reading / renderBottomIndex / visible range`；有 gap 先画空白，占位后等 buffer patch 按行/区间重刷
 - 一个带 `frameChunkCount > 1` 的 `buffer-sync` 是一个不可分割的 authoritative frame；`resource.client_buffer_frame_assembly` 是独立于 `resource.client_sparse_buffer` 的必需 per-session resource，先按 frame identity 暂存并验证 `[frameStartIndex, frameEndIndex)` 完整连续覆盖，再经唯一注册 edge 一次性 apply 和触发一次 renderer commit。frame rejection 必须保存 exact frame repair range；只有 repair 请求实际写入 wire 才把 `pending` 改为 `dispatched`，每个 revision 最多 dispatch 一次。禁止把 assembly resource 设为 optional，禁止逐 chunk 发布新旧混合 body、禁止缺 chunk 时提升 local revision、禁止旧/冲突 frame 覆盖已发布 truth
 - terminal transport/session 也必须解耦：**client session / active tab / foreground-background / viewport / reconnect 心智只属于客户端**；daemon 只允许持有物理 transport、自身 mirror、自身 tmux truth；inactive tab 只停取数，不得关闭客户端 session / transport 真相；foreground/background/tab switch 不得 fresh recreate transport
+- mux 物理 transport 完成 `mux-hello` 后只允许 `TerminalMuxServerFrame` / `TerminalMuxClientFrame`：target 控制事实只能走 `mux-target-message`，session 业务只能走 `mux-channel-message` / `mux-channel-binary`。禁止任何 owner 向已协商 mux 的物理 transport 裸发 `BridgeServerMessage`；物理 sender 类型必须显式接受协议 wire-frame union，禁止 `as unknown as` 绕过类型锁。
+- mux channel open 必须原子：target 控制事实发布失败时，mux lifecycle owner 必须删除 channel registry、关闭 subscriber、发送显式 `mux-channel-closed` error，并禁止进入 attach。禁止空 catch、保留未 attach 的 phantom channel、或让业务 channel 错误污染控制线。
 - daemon/server 禁止持有任何客户端状态机或客户端身份真相：
   - 禁止 `logical client session`
   - 禁止 `clientSessionId` 成为 daemon 内部真源

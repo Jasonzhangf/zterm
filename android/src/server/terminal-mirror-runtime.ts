@@ -85,6 +85,7 @@ export interface TerminalMirrorRuntimeDeps {
   waitMs: (delayMs: number) => Promise<void>;
   logTimePrefix: () => string;
   runTmux: (args: string[]) => { ok: true; stdout: string };
+  buildExactTmuxSessionTarget: (sessionName: string) => string;
   closeTransportSubscriber: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
   getSessionMirror: (session: TerminalSession) => SessionMirror | null;
 }
@@ -1074,7 +1075,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     if (mirror.adaptiveWidthAppliedCols === cols) {
       return;
     }
-    deps.runTmux(['resize-window', '-t', mirror.sessionName, '-x', String(cols)]);
+    deps.runTmux(['resize-window', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), '-x', String(cols)]);
     mirror.adaptiveWidthAppliedCols = cols;
     console.log(`[${deps.logTimePrefix()}] adaptive width applied`, {
       sessionName: mirror.sessionName,
@@ -1086,9 +1087,9 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
   function releaseAdaptiveTmuxWidth(mirror: SessionMirror, reason: string) {
     const baseline = mirror.adaptiveWidthBaselineGeometry;
     if (baseline) {
-      deps.runTmux(['resize-window', '-t', mirror.sessionName, '-x', String(deps.normalizeTerminalCols(baseline.cols))]);
+      deps.runTmux(['resize-window', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), '-x', String(deps.normalizeTerminalCols(baseline.cols))]);
     }
-    deps.runTmux(['set-window-option', '-u', '-t', mirror.sessionName, 'window-size']);
+    deps.runTmux(['set-window-option', '-u', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), 'window-size']);
     console.log(`[${deps.logTimePrefix()}] adaptive width released`, {
       sessionName: mirror.sessionName,
       restoredCols: baseline?.cols ?? null,

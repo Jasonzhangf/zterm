@@ -70,6 +70,7 @@ function createRuntime(overrides: {
     }),
     buildChangedRangesBufferSyncPayload: (mirror, changedRanges) => buildChangedRangesBufferSyncPayload(mirror, changedRanges),
     sanitizeSessionName: (input?: string) => input?.trim() || 'demo',
+    buildExactTmuxSessionTarget: (sessionName) => `=${sessionName}`,
     getMirrorKey: (sessionName: string) => sessionName,
     normalizeTerminalCols: overrides.normalizeTerminalCols || ((cols?: number) => cols || 120),
     normalizeTerminalRows: overrides.normalizeTerminalRows || ((rows?: number) => rows || 40),
@@ -368,6 +369,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       }),
       buildChangedRangesBufferSyncPayload: (mirror, changedRanges) => buildChangedRangesBufferSyncPayload(mirror, changedRanges),
       sanitizeSessionName: (input?: string) => input?.trim() || 'demo',
+      buildExactTmuxSessionTarget: (sessionName) => `=${sessionName}`,
       getMirrorKey: (sessionName: string) => sessionName,
       normalizeTerminalCols: (cols?: number) => cols || 120,
       normalizeTerminalRows: (rows?: number) => rows || 40,
@@ -559,8 +561,8 @@ describe('terminal mirror runtime lifecycle truth', () => {
     expect(firstSession.adaptiveWidthCols).toBe(120);
     expect(secondSession.adaptiveWidthCols).toBe(80);
     expect(mirror?.adaptiveWidthAppliedCols).toBe(80);
-    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '120']);
-    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '80']);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '80']);
     expectOnlyAdaptiveWidthTmuxMutation(runTmux);
     expect(mirror).not.toHaveProperty('adaptiveCols');
   });
@@ -605,7 +607,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     expect(mirror?.subscribers).toEqual(new Set(['session-1']));
     expect(mirror?.cols).toBe(120);
     expect(session.adaptiveWidthCols).toBeNull();
-    expect(runTmux).not.toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '120']);
+    expect(runTmux).not.toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
     expect(sendMessage).toHaveBeenCalledWith(session, {
       type: 'error',
       payload: {
@@ -640,8 +642,8 @@ describe('terminal mirror runtime lifecycle truth', () => {
     });
     expect(session.adaptiveWidthCols).toBeNull();
     expect(mirrors.get('demo')?.cols).toBe(120);
-    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '120']);
-    expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', 'demo', 'window-size']);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+    expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
     expectOnlyAdaptiveWidthTmuxMutation(runTmux);
   });
 
@@ -657,7 +659,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     } as any);
 
     expect(session.adaptiveWidthCols).toBe(88);
-    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '88']);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '88']);
     expectOnlyAdaptiveWidthTmuxMutation(runTmux);
   });
 
@@ -683,7 +685,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     });
 
     expect(result).toEqual({ ok: true });
-    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '72']);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '72']);
     expectOnlyAdaptiveWidthTmuxMutation(runTmux);
     expect(mirror?.cols).toBe(120);
     expect(session.adaptiveWidthCols).toBe(72);
@@ -709,8 +711,8 @@ describe('terminal mirror runtime lifecycle truth', () => {
     });
 
     expect(result).toEqual({ ok: true });
-    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '120']);
-    expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', 'demo', 'window-size']);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+    expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
     expectOnlyAdaptiveWidthTmuxMutation(runTmux);
     expect(mirrors.get('demo')?.cols).toBe(120);
     expect(session.adaptiveWidthCols).toBeNull();
@@ -742,7 +744,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
 
     expect(mirrors.get('demo')?.cols).toBe(120);
     expect(mirrors.get('demo')?.adaptiveWidthAppliedCols).toBe(100);
-    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '100']);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '100']);
     expectOnlyAdaptiveWidthTmuxMutation(runTmux);
   });
 
@@ -766,8 +768,8 @@ describe('terminal mirror runtime lifecycle truth', () => {
 
       expect(mirrors.get('demo')?.cols).toBe(120);
       expect(mirrors.get('demo')?.adaptiveWidthAppliedCols).toBeNull();
-      expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '120']);
-      expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', 'demo', 'window-size']);
+      expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+      expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
       expectOnlyAdaptiveWidthTmuxMutation(runTmux);
       expect(session.adaptiveWidthCols).toBeNull();
     } finally {
@@ -953,7 +955,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     expect(mirror?.cols).toBe(120);
     expect(fixedSession).not.toHaveProperty('widthMode');
     expect(mirror).not.toHaveProperty('adaptiveCols');
-    expect(runTmux).not.toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '60']);
+    expect(runTmux).not.toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '60']);
   });
 
   it('stops recurring live sync once the last subscriber detaches, then resumes on reattach', async () => {
@@ -1055,6 +1057,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       }),
       buildChangedRangesBufferSyncPayload: (mirror, changedRanges) => buildChangedRangesBufferSyncPayload(mirror, changedRanges),
       sanitizeSessionName: (input?: string) => input?.trim() || 'demo',
+      buildExactTmuxSessionTarget: (sessionName) => `=${sessionName}`,
       getMirrorKey: (sessionName: string) => sessionName,
       normalizeTerminalCols: (cols?: number) => cols || 120,
       normalizeTerminalRows: (rows?: number) => rows || 40,
@@ -1145,6 +1148,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       }),
       buildChangedRangesBufferSyncPayload: (targetMirror, changedRanges) => buildChangedRangesBufferSyncPayload(targetMirror, changedRanges),
       sanitizeSessionName: (input?: string) => input?.trim() || 'demo',
+      buildExactTmuxSessionTarget: (sessionName) => `=${sessionName}`,
       getMirrorKey: (sessionName: string) => sessionName,
       normalizeTerminalCols: (cols?: number) => cols || 120,
       normalizeTerminalRows: (rows?: number) => rows || 40,
@@ -1238,6 +1242,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
       }),
       buildChangedRangesBufferSyncPayload: (targetMirror, changedRanges) => buildChangedRangesBufferSyncPayload(targetMirror, changedRanges),
       sanitizeSessionName: (input?: string) => input?.trim() || 'demo-zterm',
+      buildExactTmuxSessionTarget: (sessionName) => `=${sessionName}`,
       getMirrorKey: (sessionName: string) => sessionName,
       normalizeTerminalCols: (cols?: number) => cols || 120,
       normalizeTerminalRows: (rows?: number) => rows || 40,
@@ -1361,6 +1366,7 @@ it('skips buffer-head broadcast for a backpressured subscriber while healthy pee
     }),
     buildChangedRangesBufferSyncPayload: (targetMirror, changedRanges) => buildChangedRangesBufferSyncPayload(targetMirror, changedRanges),
     sanitizeSessionName: (input?: string) => input?.trim() || 'demo-head',
+    buildExactTmuxSessionTarget: (sessionName) => `=${sessionName}`,
     getMirrorKey: (sessionName: string) => sessionName,
     normalizeTerminalCols: (cols?: number) => cols || 120,
     normalizeTerminalRows: (rows?: number) => rows || 40,
@@ -1437,6 +1443,7 @@ it('skips buffer-head broadcast for a backpressured subscriber while healthy pee
       }),
       buildChangedRangesBufferSyncPayload: (targetMirror, changedRanges) => buildChangedRangesBufferSyncPayload(targetMirror, changedRanges),
       sanitizeSessionName: (input?: string) => input?.trim() || 'demo',
+      buildExactTmuxSessionTarget: (sessionName) => `=${sessionName}`,
       getMirrorKey: (sessionName: string) => sessionName,
       normalizeTerminalCols: (cols?: number) => cols || 120,
       normalizeTerminalRows: (rows?: number) => rows || 40,
@@ -1512,6 +1519,7 @@ it('skips buffer-head broadcast for a backpressured subscriber while healthy pee
       }),
       buildChangedRangesBufferSyncPayload: (targetMirror, changedRanges) => buildChangedRangesBufferSyncPayload(targetMirror, changedRanges),
       sanitizeSessionName: (input?: string) => input?.trim() || 'demo',
+      buildExactTmuxSessionTarget: (sessionName) => `=${sessionName}`,
       getMirrorKey: (sessionName: string) => sessionName,
       normalizeTerminalCols: (cols?: number) => cols || 120,
       normalizeTerminalRows: (rows?: number) => rows || 40,

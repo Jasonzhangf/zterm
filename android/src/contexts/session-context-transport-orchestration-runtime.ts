@@ -2,6 +2,7 @@ import type { Host, ServerMessage, Session, SessionBufferState, SessionScheduleS
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
+import type { SessionTransportResource } from '../lib/session-transport-runtime';
 import { createClientDaemonConnection } from '../lib/client-daemon-connection';
 import { getResolvedSessionName } from '../lib/connection-target';
 import type {
@@ -15,6 +16,8 @@ import {
 } from './session-context-socket-runtime';
 import {
   buildSessionReconnectingFailureUpdates,
+  buildSessionClosedUpdates,
+  buildSessionIdleAfterReconnectBlockedUpdates,
 } from './session-transport-open-helpers';
 import {
   cleanupControlSocketOrchestrationRuntime,
@@ -67,9 +70,98 @@ import {
   deletePendingSessionTransportOpenIntent,
   getPendingSessionTransportOpenIntent,
 } from './session-context-open-intent-store';
+import {
+  manageTmuxSessionsOnOpenTransportRuntime,
+  type SessionTmuxTargetRequestStore,
+} from './session-context-tmux-management-runtime';
 
 interface MutableRefObject<T> {
   current: T;
+}
+
+export function resolveMuxChannelClosedWithControlStatusRuntime(options: {
+  sessionId: string;
+  sessionName: string;
+  channelId: string;
+  reason: string;
+  shouldReconnectNow: boolean;
+  queryTargetSessions: () => Promise<string[] | null>;
+  readSessionTerminalChannel: (sessionId: string) => {
+    channelId: string;
+    state: 'opening' | 'open' | 'closing' | 'closed';
+  } | null;
+  scheduleReconnect: (sessionId: string, message: string, retryable?: boolean) => void;
+  updateSessionSync: (id: string, updates: Partial<Session>) => void;
+  emitSessionStatus: (sessionId: string, type: 'closed' | 'error', message?: string) => void;
+  runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
+}) {
+  if (!options.shouldReconnectNow) {
+    options.updateSessionSync(
+      options.sessionId,
+      buildSessionIdleAfterReconnectBlockedUpdates(options.reason),
+    );
+  }
+
+  void options.queryTargetSessions()
+    .then((sessionNames) => {
+      const channel = options.readSessionTerminalChannel(options.sessionId);
+      if (!channel || channel.channelId !== options.channelId || channel.state !== 'closed') {
+        options.runtimeDebug('session.mux.channel-closed.control-status.stale', {
+          sessionId: options.sessionId,
+          channelId: options.channelId,
+        });
+        return;
+      }
+
+      if (sessionNames === null) {
+        const message = `control status unavailable after data channel closed: ${options.reason}`;
+        options.updateSessionSync(
+          options.sessionId,
+          buildSessionIdleAfterReconnectBlockedUpdates(message),
+        );
+        options.emitSessionStatus(options.sessionId, 'error', message);
+        options.runtimeDebug('session.mux.channel-closed.control-status.unavailable', {
+          sessionId: options.sessionId,
+          sessionName: options.sessionName,
+          reconnectNow: options.shouldReconnectNow,
+        });
+        return;
+      }
+
+      if (sessionNames && !sessionNames.includes(options.sessionName)) {
+        options.updateSessionSync(options.sessionId, buildSessionClosedUpdates(options.reason));
+        options.emitSessionStatus(options.sessionId, 'closed', options.reason);
+        options.runtimeDebug('session.mux.channel-closed.control-status.session-missing', {
+          sessionId: options.sessionId,
+          sessionName: options.sessionName,
+        });
+        return;
+      }
+
+      if (options.shouldReconnectNow) {
+        options.scheduleReconnect(options.sessionId, options.reason, true);
+      }
+      options.runtimeDebug('session.mux.channel-closed.control-status.session-present', {
+        sessionId: options.sessionId,
+        sessionName: options.sessionName,
+        controlStatus: 'session-present',
+        reconnectNow: options.shouldReconnectNow,
+      });
+    })
+    .catch((error) => {
+      const message = `control status failed after data channel closed: ${
+        error instanceof Error ? error.message : String(error)
+      }`;
+      options.runtimeDebug('session.mux.channel-closed.control-status.failed', {
+        sessionId: options.sessionId,
+        error: message,
+      });
+      options.updateSessionSync(
+        options.sessionId,
+        buildSessionIdleAfterReconnectBlockedUpdates(message),
+      );
+      options.emitSessionStatus(options.sessionId, 'error', message);
+    });
 }
 
 export function handleTargetMuxTransportFailureRuntime(options: {
@@ -292,6 +384,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
     reconnectStore: SessionReconnectStore;
     heartbeatStore: SessionHeartbeatStore;
     targetNetworkProbeRuntime: SessionTargetNetworkProbeRuntime;
+    tmuxTargetRequestsRef: MutableRefObject<SessionTmuxTargetRequestStore>;
     sessionDebugMetricsStoreRef: MutableRefObject<{
       recordRxBytes: (sessionId: string, data: string | ArrayBuffer) => void;
     }>;
@@ -357,7 +450,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
     closedAt: number | null;
   }>;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
-  readSessionTransportResource: (sessionId: string) => { socket: BridgeTransportSocket | null };
+  readSessionTransportResource: (sessionId: string) => SessionTransportResource;
   readSessionTransportToken: (sessionId: string) => string | null;
   readSessionTransportHost: (sessionId: string) => Host | null;
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
@@ -587,7 +680,33 @@ export function createSessionTransportOrchestrationRuntime(options: {
           return;
         }
         if (reason) {
-          scheduleReconnect(sessionId, reason, true);
+          const channel = options.readSessionTerminalChannel(sessionId);
+          const host = options.readSessionTransportHost(sessionId);
+          const sessionName = channel?.sessionName || host?.sessionName || host?.name || sessionId;
+          resolveMuxChannelClosedWithControlStatusRuntime({
+            sessionId,
+            sessionName,
+            channelId: channel?.channelId || '',
+            reason,
+            shouldReconnectNow: (
+              options.stateRef.current.activeSessionId === sessionId
+              || Boolean(options.stateRef.current.liveSessionIds?.includes(sessionId))
+            ),
+            queryTargetSessions: () => manageTmuxSessionsOnOpenTransportRuntime({
+              sessionId,
+              message: { type: 'list-sessions' },
+              pendingRequestsRef: options.refs.tmuxTargetRequestsRef,
+              readSessionTransportResource: options.readSessionTransportResource,
+              daemonConnection,
+              sendSocketPayload: options.sendSocketPayload,
+              runtimeDebug: options.runtimeDebug,
+            }),
+            readSessionTerminalChannel: options.readSessionTerminalChannel,
+            scheduleReconnect,
+            updateSessionSync: options.updateSessionSync,
+            emitSessionStatus,
+            runtimeDebug: options.runtimeDebug,
+          });
         }
       },
     };
@@ -691,7 +810,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
   };
 
   const daemonConnection = createClientDaemonConnection({
-    readSessionTransportResource: options.readSessionTransportResource as any,
+    readSessionTransportResource: options.readSessionTransportResource,
     sendSocketPayload: options.sendSocketPayload,
     openSessionTargetTransport: ({ sessionId, host, debugScope, finalizeFailure }) => {
       const ws = options.openDaemonTargetTransportSocket(host);

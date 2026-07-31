@@ -7,6 +7,7 @@ import {
   validateTerminalMuxChannelEnvelope,
   type TerminalMuxClientFrame,
   type TerminalMuxServerFrame,
+  type TerminalTransportServerFrame,
 } from '@zterm/shared/protocol';
 import type { BridgeServerMessage as ServerMessage } from '@zterm/shared/protocol';
 import type { SessionMirror } from './terminal-runtime-types';
@@ -27,7 +28,7 @@ export interface TerminalMuxChannelRuntimeDeps {
   mirrors: ReadonlyMap<string, SessionMirror>;
   sendTransportMessage: (
     transport: TerminalSessionTransport | null | undefined,
-    message: ServerMessage,
+    message: TerminalTransportServerFrame,
   ) => void;
   createMuxChannelSubscriber: (
     connection: TerminalTransportConnection,
@@ -52,7 +53,7 @@ export function createTerminalMuxChannelRuntime(
   deps: TerminalMuxChannelRuntimeDeps,
 ): TerminalMuxChannelRuntime {
   function sendMuxFrame(connection: TerminalTransportConnection, frame: TerminalMuxServerFrame) {
-    deps.sendTransportMessage(connection.transport, frame as unknown as ServerMessage);
+    deps.sendTransportMessage(connection.transport, frame);
   }
 
   function resolveMuxChannelSubscriber(
@@ -177,6 +178,28 @@ export function createTerminalMuxChannelRuntime(
         const subscriber = deps.createMuxChannelSubscriber(connection, frame.payload.channelId);
         subscriber.sessionName = deps.sanitizeSessionName(frame.payload.sessionName);
         subscriber.bodySubscribed = frame.payload.bodySubscribed !== false;
+        try {
+          handleMuxChannelOpenedMessageRuntime(
+            { mirrors: deps.mirrors, sendTransportMessage: deps.sendTransportMessage } as Parameters<typeof handleMuxChannelOpenedMessageRuntime>[0],
+            connection,
+          );
+        } catch (error) {
+          const reason = `session activity control publish failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`;
+          connection.muxChannels.delete(frame.payload.channelId);
+          subscriber.transport = null;
+          deps.closeSession(subscriber, reason, false);
+          sendMuxFrame(connection, {
+            type: 'mux-channel-closed',
+            payload: {
+              channelId: frame.payload.channelId,
+              reason,
+              code: 'session_activity_failed',
+            },
+          });
+          return;
+        }
         sendMuxFrame(connection, {
           type: 'mux-channel-opened',
           payload: {
@@ -187,13 +210,6 @@ export function createTerminalMuxChannelRuntime(
             },
           },
         });
-        // Publish session-activity after mux-channel-opened so client knows all session states
-        try {
-          handleMuxChannelOpenedMessageRuntime(
-            { mirrors: deps.mirrors, sendTransportMessage: deps.sendTransportMessage } as Parameters<typeof handleMuxChannelOpenedMessageRuntime>[0],
-            connection,
-          );
-        } catch (_err) { /* silent */ }
         void deps.attachTmux(subscriber, {
           sessionName: frame.payload.sessionName,
           cols: frame.payload.cols,

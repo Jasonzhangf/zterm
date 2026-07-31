@@ -1,9 +1,9 @@
 import { Buffer } from 'node:buffer';
 import { describe, expect, it, vi } from 'vitest';
 import { TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES } from '@zterm/shared/terminal/input-chunking';
+import type { TerminalTransportServerFrame } from '@zterm/shared/protocol';
 import { createTerminalMessageRuntime } from './terminal-message-runtime';
 import type { TerminalMessageRuntimeDeps } from './terminal-message-runtime';
-import type { ServerMessage } from '../lib/types';
 import type {
   TerminalSession,
   TerminalSessionTransport,
@@ -141,6 +141,8 @@ function flushAsyncHandlers() {
 function createRuntime(options?: {
   mirror?: SessionMirror | null;
   passThroughTransportSend?: boolean;
+  failSessionActivityPublish?: boolean;
+  failAttachTmux?: boolean;
 }) {
   type RemoteWindowListTargetsResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['listTargets']>>;
       type RemoteWindowStartStreamResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['startStream']>>;
@@ -148,7 +150,14 @@ function createRuntime(options?: {
       type RemoteWindowQualityResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['updateStreamQuality']>>;
       type RemoteWindowInputResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['injectInput']>>;
   const sessions = new Map<string, TerminalSession>();
-  const sendTransportMessage = vi.fn((transport: TerminalSessionTransport | null | undefined, message: ServerMessage) => {
+  const sendTransportMessage = vi.fn((transport: TerminalSessionTransport | null | undefined, message: TerminalTransportServerFrame) => {
+    if (
+      options?.failSessionActivityPublish
+      && message.type === 'mux-target-message'
+      && message.payload.message.type === 'session-activity'
+    ) {
+      throw new Error('forced session activity send failure');
+    }
     if (options?.passThroughTransportSend && transport?.sendText) {
       transport.sendText(JSON.stringify(message));
     }
@@ -264,7 +273,11 @@ function createRuntime(options?: {
       createMuxChannelSubscriber,
       bindConnectionToSubscriber: vi.fn(),
       getMirrorKey: vi.fn((sessionName: string) => sessionName),
-      attachTmux: vi.fn(async () => {}),
+      attachTmux: vi.fn(async () => {
+        if (options?.failAttachTmux) {
+          throw new Error('forced attach failure');
+        }
+      }),
       handleAdaptiveResize,
       destroyMirror: vi.fn(),
     },
@@ -323,6 +336,144 @@ describe('terminal message runtime explicit error truth', () => {
         message: {
           type: 'sessions',
           payload: { sessions: [] },
+        },
+      },
+    });
+    expect(sentFrames).toContainEqual({
+      type: 'mux-target-message',
+      payload: {
+        requestId: 'list-1',
+        message: {
+          type: 'session-activity',
+          payload: { activities: [] },
+        },
+      },
+    });
+    expect(sentFrames.every((frame) => frame.type.startsWith('mux-'))).toBe(true);
+  });
+
+  it('publishes attach-time session activity only through the mux target control envelope', async () => {
+    const { runtime } = createRuntime({ passThroughTransportSend: true });
+    const connection = createConnection(null);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-hello',
+      payload: {
+        version: 1,
+        clientInstanceId: 'android-client-1',
+      },
+    })));
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-channel-open',
+      payload: {
+        channelId: 'channel-a',
+        sessionName: 'alpha',
+      },
+    })));
+
+    const sentFrames = (connection.transport.sendText as ReturnType<typeof vi.fn>).mock.calls
+      .map((call) => JSON.parse(String(call[0])) as { type: string; payload?: unknown });
+    expect(sentFrames).toContainEqual(expect.objectContaining({
+      type: 'mux-channel-opened',
+      payload: expect.objectContaining({
+        channelId: 'channel-a',
+      }),
+    }));
+    expect(sentFrames).toContainEqual({
+      type: 'mux-target-message',
+      payload: {
+        message: {
+          type: 'session-activity',
+          payload: { activities: [] },
+        },
+      },
+    });
+    expect(sentFrames.every((frame) => frame.type.startsWith('mux-'))).toBe(true);
+  });
+
+  it('rolls back mux channel open when target control publication fails', async () => {
+    const { runtime, sessions, closeSession } = createRuntime({
+      failSessionActivityPublish: true,
+      passThroughTransportSend: true,
+    });
+    const connection = createConnection(null);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-hello',
+      payload: {
+        version: 1,
+        clientInstanceId: 'android-client-1',
+      },
+    })));
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-channel-open',
+      payload: {
+        channelId: 'channel-failed',
+        sessionName: 'alpha',
+      },
+    })));
+
+    const subscriber = sessions.get('transport-1:channel-failed');
+    expect(connection.muxChannels?.has('channel-failed')).toBe(false);
+    expect(subscriber?.transport).toBeNull();
+    expect(closeSession).toHaveBeenCalledWith(
+      subscriber,
+      'session activity control publish failed: forced session activity send failure',
+      false,
+    );
+    const sentFrames = (connection.transport.sendText as ReturnType<typeof vi.fn>).mock.calls
+      .map((call) => JSON.parse(String(call[0])) as { type: string; payload?: unknown });
+    expect(sentFrames).toContainEqual({
+      type: 'mux-channel-closed',
+      payload: {
+        channelId: 'channel-failed',
+        reason: 'session activity control publish failed: forced session activity send failure',
+        code: 'session_activity_failed',
+      },
+    });
+  });
+
+  it('reports attach failure through the opened mux channel error path', async () => {
+    const { runtime } = createRuntime({
+      failAttachTmux: true,
+      passThroughTransportSend: true,
+    });
+    const connection = createConnection(null);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-hello',
+      payload: {
+        version: 1,
+        clientInstanceId: 'android-client-1',
+      },
+    })));
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-channel-open',
+      payload: {
+        channelId: 'channel-attach-failed',
+        sessionName: 'alpha',
+      },
+    })));
+    await flushAsyncHandlers();
+
+    const sentFrames = (connection.transport.sendText as ReturnType<typeof vi.fn>).mock.calls
+      .map((call) => JSON.parse(String(call[0])) as { type: string; payload?: unknown });
+    expect(sentFrames).toContainEqual(expect.objectContaining({
+      type: 'mux-channel-opened',
+      payload: expect.objectContaining({
+        channelId: 'channel-attach-failed',
+      }),
+    }));
+    expect(sentFrames).toContainEqual({
+      type: 'mux-channel-message',
+      payload: {
+        channelId: 'channel-attach-failed',
+        message: {
+          type: 'error',
+          payload: {
+            message: 'forced attach failure',
+            code: 'mux_channel_open_failed',
+          },
         },
       },
     });

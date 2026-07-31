@@ -305,6 +305,49 @@ describe('TerminalPage portrait session drawer', () => {
     expect(screen.getByTestId('terminal-connection-status-rates').textContent).toContain('↑ 1.0 KB/s ↓ 2.0 KB/s');
   });
 
+  it('keeps reconnect UI quiet in the portrait status strip during the reconnect grace window', () => {
+    const sessions = [makeSession('s1')];
+    sessions[0]!.state = 'reconnecting';
+    sessions[0]!.lastError = 'rtc data channel closed';
+    sessions[0]!.resolvedPath = 'ipv4';
+    sessions[0]!.resolvedEndpoint = '192.168.1.20:3333';
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        getSessionDebugMetrics={() => ({
+          uplinkBps: 0,
+          downlinkBps: 0,
+          renderHz: 0,
+          pullHz: 0,
+          transportBufferedBytes: 0,
+          transportBackpressured: false,
+          lastRenderCommitAt: 0,
+          bufferPullActive: false,
+          status: 'reconnecting',
+          active: true,
+          updatedAt: 1,
+        })}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    expect(screen.queryByTestId('terminal-network-banner')).toBeNull();
+    expect(screen.getByTestId('terminal-connection-status-route').style.color).toBe('rgb(140, 230, 181)');
+  });
+
   it('keeps one portrait status strip bound to the active session after session switches', () => {
     const first = makeSession('s1');
     first.resolvedPath = 'ipv4';

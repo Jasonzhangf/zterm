@@ -303,7 +303,7 @@ describe('server transport/session lifecycle truth gates', () => {
     const createBlock = extractBlock(controlRuntimeSource, "case 'tmux-create-session':", 420);
 
     expect(source).toContain('assertTmuxSessionExists: (sessionName) => {');
-    expect(source).toContain("terminalControlRuntime.runTmux(['has-session', '-t', sessionName])");
+    expect(source).toContain("'has-session', '-t', terminalControlRuntime.buildExactTmuxSessionTarget(sessionName)");
     expect(source).not.toContain("runTmux(['new-session', '-d', '-s', sessionName");
     expect(startMirrorBlock).toContain('deps.assertTmuxSessionExists(mirror.sessionName);');
     expect(startMirrorBlock).not.toContain('new-session');

@@ -16,6 +16,7 @@ import type {
   RuntimeDebugLogEntry,
   TerminalInputAckPayload,
   TerminalReliableInputPayload,
+  TerminalTransportServerFrame,
 } from '@zterm/shared/protocol';
 import type {
   BufferSyncRequestPayload,
@@ -42,7 +43,7 @@ import { createTerminalMuxChannelRuntime } from './terminal-mux-channel-runtime'
 
 export interface TerminalMessageRuntimeDeps {
   sessions: Map<string, TerminalTransportSubscriber>;
-  sendTransportMessage: (transport: TerminalSessionTransport | null | undefined, message: ServerMessage) => void;
+  sendTransportMessage: (transport: TerminalSessionTransport | null | undefined, message: TerminalTransportServerFrame) => void;
   sendMessage: (session: TerminalSession, message: ServerMessage) => void;
   normalizeBufferSyncRequestPayload: (
     session: TerminalSession,

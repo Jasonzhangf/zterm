@@ -1,12 +1,12 @@
 import { existsSync } from 'fs';
 import type { Server } from 'http';
 import { WebSocket, WebSocketServer } from 'ws';
-import type { BridgeServerMessage } from '@zterm/shared/protocol';
+import type { TerminalTransportServerFrame } from '@zterm/shared/protocol';
 import type { TerminalSessionTransport } from './terminal-runtime-types';
 import type { TerminalSession, SessionMirror } from './terminal-runtime';
 import type { DaemonTransportConnection } from './terminal-transport-runtime';
 import { TERMINAL_TRANSPORT_STALE_INBOUND_MS } from './terminal-transport-runtime';
-import { classifySessionActivities } from './terminal-session-activity-runtime';
+import { publishSessionActivitiesRuntime } from './terminal-session-activity-runtime';
 
 export interface DestroyMirrorOptions {
   closeTransportSubscribers?: boolean;
@@ -37,7 +37,7 @@ export interface TerminalDaemonRuntimeDeps {
   server: Server;
   sendTransportMessage: (
     transport: TerminalSessionTransport | null | undefined,
-    message: BridgeServerMessage,
+    message: TerminalTransportServerFrame,
   ) => void;
   wss: WebSocketServer;
   logTimePrefix: () => string;
@@ -164,9 +164,11 @@ export function createTerminalDaemonRuntime(
         }
 
         if (boundSubscriberIds.size > 0) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'session-activity',
-            payload: { activities: classifySessionActivities(deps.mirrors, now) },
+          publishSessionActivitiesRuntime({
+            connection,
+            mirrors: deps.mirrors,
+            now,
+            sendTransportMessage: deps.sendTransportMessage,
           });
         }
 

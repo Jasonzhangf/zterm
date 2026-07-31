@@ -59,6 +59,7 @@ function createRuntimeHarness() {
   connections.set(connection.id, connection);
   const detachSubscriberTransportOnly = vi.fn();
   const destroyMirror = vi.fn();
+  const sendTransportMessage = vi.fn();
   const runtime = createTerminalDaemonRuntime({
     host: '127.0.0.1',
     port: 3333,
@@ -89,7 +90,7 @@ function createRuntimeHarness() {
     disposeRelayHostClient: vi.fn(),
     disposeRtcBridgeServer: vi.fn(),
     detachSubscriberTransportOnly,
-    sendTransportMessage: vi.fn(),
+    sendTransportMessage,
   } as Parameters<typeof createTerminalDaemonRuntime>[0]);
 
   return {
@@ -98,6 +99,7 @@ function createRuntimeHarness() {
     detachSubscriberTransportOnly,
     destroyMirror,
     runtime,
+    sendTransportMessage,
     sessions,
     subscriber,
   };
@@ -194,5 +196,49 @@ describe('terminal daemon runtime transport liveness', () => {
     expect(connection.muxChannels.size).toBe(0);
     expect(connections.has(connection.id)).toBe(false);
   });
-}
-);
+
+  it('publishes heartbeat session activity through the target control envelope for mux transports', () => {
+    const { connection, runtime, sendTransportMessage, subscriber } = createRuntimeHarness();
+    connection.boundSubscriberId = null;
+    connection.muxVersion = 1;
+    connection.muxClientInstanceId = 'android-client-1';
+    connection.muxChannels = new Map([['channel-a', subscriber.id]]);
+
+    runtime.startHeartbeatLoop();
+    vi.advanceTimersByTime(1000);
+
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'mux-target-message',
+      payload: {
+        message: {
+          type: 'session-activity',
+          payload: { activities: [] },
+        },
+      },
+    });
+    expect(sendTransportMessage).not.toHaveBeenCalledWith(
+      connection.transport,
+      expect.objectContaining({ type: 'session-activity' }),
+    );
+    expect(sendTransportMessage).not.toHaveBeenCalledWith(
+      connection.transport,
+      expect.objectContaining({ type: 'mux-channel-message' }),
+    );
+  });
+
+  it('keeps heartbeat session activity raw for legacy pre-mux transports', () => {
+    const { connection, runtime, sendTransportMessage } = createRuntimeHarness();
+
+    runtime.startHeartbeatLoop();
+    vi.advanceTimersByTime(1000);
+
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'session-activity',
+      payload: { activities: [] },
+    });
+    expect(sendTransportMessage).not.toHaveBeenCalledWith(
+      connection.transport,
+      expect.objectContaining({ type: 'mux-target-message' }),
+    );
+  });
+});

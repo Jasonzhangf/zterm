@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   handleTargetMuxTransportFailureRuntime,
   notifyTargetNetworkSignalRuntime,
+  resolveMuxChannelClosedWithControlStatusRuntime,
   routeTargetSocketFailureRuntime,
 } from './session-context-transport-orchestration-runtime';
 import { createSessionTargetNetworkProbeRuntime } from './session-context-target-network-probe-runtime';
@@ -47,6 +48,19 @@ function makePendingIntent(sessionId: string): PendingSessionTransportOpenIntent
     debugScope: 'connect',
     finalizeFailure: vi.fn(),
     onConnected: vi.fn(),
+  };
+}
+
+function makeClosedChannel(sessionName = 'demo') {
+  return {
+    channelId: 'channel-1',
+    sessionId: 'session-1',
+    sessionName,
+    targetKey: 'target-a',
+    state: 'closed' as const,
+    bodySubscribed: true,
+    openedAt: 1,
+    closedAt: 2,
   };
 }
 
@@ -357,5 +371,190 @@ describe('handleTargetMuxTransportFailureRuntime', () => {
     expect(writeSessionTerminalChannelState).toHaveBeenCalledWith('session-2', 'opening');
     expect(updateSessionSync).toHaveBeenCalledWith('session-1', expect.objectContaining({ state: 'reconnecting' }));
     expect(updateSessionSync).toHaveBeenCalledWith('session-2', expect.objectContaining({ state: 'reconnecting' }));
+  });
+});
+
+describe('resolveMuxChannelClosedWithControlStatusRuntime', () => {
+  it('queries target control status before reopening a closed data channel when tmux session still exists', async () => {
+    const queryTargetSessions = vi.fn(async () => ['demo', 'other']);
+    const scheduleReconnect = vi.fn();
+    const updateSessionSync = vi.fn();
+    const emitSessionStatus = vi.fn();
+
+    resolveMuxChannelClosedWithControlStatusRuntime({
+      sessionId: 'session-1',
+      sessionName: 'demo',
+      channelId: 'channel-1',
+      reason: 'mux data channel closed',
+      shouldReconnectNow: true,
+      queryTargetSessions,
+      readSessionTerminalChannel: () => makeClosedChannel('demo'),
+      scheduleReconnect,
+      updateSessionSync,
+      emitSessionStatus,
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(queryTargetSessions).toHaveBeenCalledTimes(1);
+    expect(scheduleReconnect).not.toHaveBeenCalled();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(scheduleReconnect).toHaveBeenCalledWith('session-1', 'mux data channel closed', true);
+    expect(updateSessionSync).not.toHaveBeenCalled();
+    expect(emitSessionStatus).not.toHaveBeenCalled();
+  });
+
+  it('does not reopen a closed data channel when control status says the tmux session is gone', async () => {
+    const scheduleReconnect = vi.fn();
+    const updateSessionSync = vi.fn();
+    const emitSessionStatus = vi.fn();
+
+    resolveMuxChannelClosedWithControlStatusRuntime({
+      sessionId: 'session-1',
+      sessionName: 'demo',
+      channelId: 'channel-1',
+      reason: 'tmux session closed',
+      shouldReconnectNow: true,
+      queryTargetSessions: vi.fn(async () => ['other']),
+      readSessionTerminalChannel: () => makeClosedChannel('demo'),
+      scheduleReconnect,
+      updateSessionSync,
+      emitSessionStatus,
+      runtimeDebug: vi.fn(),
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(scheduleReconnect).not.toHaveBeenCalled();
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', expect.objectContaining({
+      state: 'disconnected',
+      ws: null,
+      lastError: 'tmux session closed',
+    }));
+    expect(emitSessionStatus).toHaveBeenCalledWith('session-1', 'closed', 'tmux session closed');
+  });
+
+  it('ignores stale control status if the data channel was already reopened', async () => {
+    const scheduleReconnect = vi.fn();
+
+    resolveMuxChannelClosedWithControlStatusRuntime({
+      sessionId: 'session-1',
+      sessionName: 'demo',
+      channelId: 'channel-1',
+      reason: 'mux data channel closed',
+      shouldReconnectNow: true,
+      queryTargetSessions: vi.fn(async () => ['demo']),
+      readSessionTerminalChannel: () => ({
+        ...makeClosedChannel('demo'),
+        channelId: 'channel-2',
+        state: 'open',
+      }),
+      scheduleReconnect,
+      updateSessionSync: vi.fn(),
+      emitSessionStatus: vi.fn(),
+      runtimeDebug: vi.fn(),
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(scheduleReconnect).not.toHaveBeenCalled();
+  });
+
+  it('keeps an inactive data channel idle after control says the tmux session still exists', async () => {
+    const scheduleReconnect = vi.fn();
+    const updateSessionSync = vi.fn();
+
+    resolveMuxChannelClosedWithControlStatusRuntime({
+      sessionId: 'session-1',
+      sessionName: 'demo',
+      channelId: 'channel-1',
+      reason: 'inactive channel closed',
+      shouldReconnectNow: false,
+      queryTargetSessions: vi.fn(async () => ['demo']),
+      readSessionTerminalChannel: () => makeClosedChannel('demo'),
+      scheduleReconnect,
+      updateSessionSync,
+      emitSessionStatus: vi.fn(),
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', expect.objectContaining({
+      state: 'idle',
+      ws: null,
+      lastError: 'inactive channel closed',
+    }));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(scheduleReconnect).not.toHaveBeenCalled();
+  });
+
+  it('does not fallback reconnect when target control status is unavailable', async () => {
+    const scheduleReconnect = vi.fn();
+    const updateSessionSync = vi.fn();
+    const emitSessionStatus = vi.fn();
+
+    resolveMuxChannelClosedWithControlStatusRuntime({
+      sessionId: 'session-1',
+      sessionName: 'demo',
+      channelId: 'channel-1',
+      reason: 'data channel closed',
+      shouldReconnectNow: true,
+      queryTargetSessions: vi.fn(async () => null),
+      readSessionTerminalChannel: () => makeClosedChannel('demo'),
+      scheduleReconnect,
+      updateSessionSync,
+      emitSessionStatus,
+      runtimeDebug: vi.fn(),
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(scheduleReconnect).not.toHaveBeenCalled();
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', expect.objectContaining({
+      state: 'idle',
+      ws: null,
+      lastError: 'control status unavailable after data channel closed: data channel closed',
+    }));
+    expect(emitSessionStatus).toHaveBeenCalledWith(
+      'session-1',
+      'error',
+      'control status unavailable after data channel closed: data channel closed',
+    );
+  });
+
+  it('does not fallback reconnect when target control status request fails', async () => {
+    const scheduleReconnect = vi.fn();
+    const updateSessionSync = vi.fn();
+    const emitSessionStatus = vi.fn();
+
+    resolveMuxChannelClosedWithControlStatusRuntime({
+      sessionId: 'session-1',
+      sessionName: 'demo',
+      channelId: 'channel-1',
+      reason: 'data channel closed',
+      shouldReconnectNow: true,
+      queryTargetSessions: vi.fn(async () => {
+        throw new Error('control timeout');
+      }),
+      readSessionTerminalChannel: () => makeClosedChannel('demo'),
+      scheduleReconnect,
+      updateSessionSync,
+      emitSessionStatus,
+      runtimeDebug: vi.fn(),
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(scheduleReconnect).not.toHaveBeenCalled();
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', expect.objectContaining({
+      state: 'idle',
+      ws: null,
+      lastError: 'control status failed after data channel closed: control timeout',
+    }));
+    expect(emitSessionStatus).toHaveBeenCalledWith(
+      'session-1',
+      'error',
+      'control status failed after data channel closed: control timeout',
+    );
   });
 });

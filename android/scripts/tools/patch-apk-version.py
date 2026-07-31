@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Patch APK versionCode by replacing the specific versionCode value in binary AndroidManifest.xml."""
 
-import sys, struct, zipfile, os, shutil, subprocess
+import sys, struct, zipfile, os, shutil, subprocess, re
 
 ANDROID_HOME = os.environ.get("ANDROID_HOME", "/Users/fanzhang/Library/Android/sdk")
 BUILD_TOOLS = os.path.join(ANDROID_HOME, "build-tools/36.0.0")
@@ -56,32 +56,67 @@ def patch_manifest_value(data, old_val, new_val):
     return count
 
 
-def patch_and_sign(input_apk, output_apk, new_version_code):
+def rebuild_manifest_with_apktool(input_apk, work_dir, new_version_code, new_version_name):
+    apktool = shutil.which('apktool')
+    if not apktool:
+        raise RuntimeError('apktool is required to rewrite versionName')
+    decoded_dir = os.path.join(work_dir, 'decoded')
+    rebuilt_apk = os.path.join(work_dir, 'rebuilt.apk')
+    subprocess.run([apktool, 'd', '-f', input_apk, '-o', decoded_dir], check=True)
+    metadata_path = os.path.join(decoded_dir, 'apktool.yml')
+    with open(metadata_path, 'r', encoding='utf-8') as f:
+        metadata = f.read()
+    metadata, code_count = re.subn(
+        r'(?m)^(\s*versionCode:\s*).+$',
+        rf'\g<1>{new_version_code}',
+        metadata,
+        count=1,
+    )
+    metadata, name_count = re.subn(
+        r'(?m)^(\s*versionName:\s*).+$',
+        rf'\g<1>{new_version_name}',
+        metadata,
+        count=1,
+    )
+    if code_count != 1 or name_count != 1:
+        raise RuntimeError('apktool metadata has no unique versionInfo fields')
+    with open(metadata_path, 'w', encoding='utf-8') as f:
+        f.write(metadata)
+    subprocess.run([apktool, 'b', decoded_dir, '-o', rebuilt_apk], check=True)
+    return rebuilt_apk
+
+
+def patch_and_sign(input_apk, output_apk, new_version_code, new_version_name=None):
     work_dir = f"/tmp/apk-work-{os.getpid()}-{os.urandom(4).hex()}"
     os.makedirs(work_dir, exist_ok=True)
     env = {**os.environ, "JAVA_HOME": JAVA_HOME, "PATH": f"{JAVA_HOME}/bin:" + os.environ.get("PATH", "")}
     try:
-        with zipfile.ZipFile(input_apk, 'r') as zf:
-            zf.extractall(work_dir)
         old_vc = get_current_version_code(input_apk)
         print(f"Current versionCode: {old_vc} (0x{old_vc:08x})")
-        manifest_path = os.path.join(work_dir, "AndroidManifest.xml")
-        with open(manifest_path, 'rb') as f:
-            data = bytearray(f.read())
-        cnt = patch_manifest_value(data, old_vc, new_version_code)
-        if cnt == 0:
-            print("ERROR: Could not locate versionCode pattern in manifest"); return False
-        print(f"Replacements: {cnt}")
-        with open(manifest_path, 'wb') as f:
-            f.write(data)
         unsigned_apk = os.path.join(work_dir, "unsigned.apk")
-        with zipfile.ZipFile(unsigned_apk, 'w', zipfile.ZIP_STORED) as zf:
-            for root, dirs, files in os.walk(work_dir):
-                dirs[:] = [d for d in dirs if d not in ('unsigned.apk', 'aligned.apk')]
-                for file in files:
-                    if file in ('unsigned.apk', 'aligned.apk'): continue
-                    fp = os.path.join(root, file)
-                    zf.write(fp, os.path.relpath(fp, work_dir))
+        if new_version_name:
+            unsigned_apk = rebuild_manifest_with_apktool(
+                input_apk, work_dir, new_version_code, new_version_name,
+            )
+        else:
+            with zipfile.ZipFile(input_apk, 'r') as zf:
+                zf.extractall(work_dir)
+            manifest_path = os.path.join(work_dir, "AndroidManifest.xml")
+            with open(manifest_path, 'rb') as f:
+                data = bytearray(f.read())
+            cnt = patch_manifest_value(data, old_vc, new_version_code)
+            if cnt == 0:
+                print("ERROR: Could not locate versionCode pattern in manifest"); return False
+            print(f"Replacements: {cnt}")
+            with open(manifest_path, 'wb') as f:
+                f.write(data)
+            with zipfile.ZipFile(unsigned_apk, 'w', zipfile.ZIP_STORED) as zf:
+                for root, dirs, files in os.walk(work_dir):
+                    dirs[:] = [d for d in dirs if d not in ('unsigned.apk', 'aligned.apk')]
+                    for file in files:
+                        if file in ('unsigned.apk', 'aligned.apk'): continue
+                        fp = os.path.join(root, file)
+                        zf.write(fp, os.path.relpath(fp, work_dir))
         aligned_apk = os.path.join(work_dir, "aligned.apk")
         r = subprocess.run([ZIPALIGN, "-p", "4", unsigned_apk, aligned_apk], capture_output=True, text=True, env=env)
         if r.returncode != 0: print(f"zipalign failed: {r.stderr}"); return False
@@ -112,5 +147,6 @@ if __name__ == '__main__':
     print(f"Input:  {input_apk}")
     print(f"Output: {output_apk}")
     print(f"New versionCode: {new_version_code} (0x{new_version_code:08x})")
-    ok = patch_and_sign(input_apk, output_apk, new_version_code)
+    new_version_name = sys.argv[4] if len(sys.argv) > 4 else None
+    ok = patch_and_sign(input_apk, output_apk, new_version_code, new_version_name)
     sys.exit(0 if ok else 1)

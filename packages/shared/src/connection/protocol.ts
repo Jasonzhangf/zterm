@@ -700,6 +700,8 @@ export type TerminalMuxServerFrame =
   | { type: 'mux-pong'; payload: { sentAt: number; receivedAt: number } }
   | { type: 'mux-error'; payload: { code: TerminalMuxErrorCode; message: string; channelId?: string } };
 
+export type TerminalTransportServerFrame = BridgeServerMessage | TerminalMuxServerFrame;
+
 export const TERMINAL_MUX_TARGET_CLIENT_MESSAGE_TYPES: readonly TerminalMuxTargetClientMessageType[] = [
   'list-sessions',
   'tmux-create-session',

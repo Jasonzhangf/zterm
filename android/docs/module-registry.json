@@ -1630,8 +1630,12 @@
    ],
    "pending_resources": [],
    "public_interfaces": [
+    "contracts/app-version.json",
+    "native/android/app/build.gradle",
+    "scripts/app-version.mjs",
     "scripts/build-android-debug.sh",
     "scripts/prepare-update-bundle.mjs",
+    "scripts/verify-update-bundle.mjs",
     "scripts/verify-release-assets.mjs"
    ],
    "forbidden_resources": [
@@ -1641,9 +1645,12 @@
    "canonical_docs": [
     "docs/modules/project-modules.md",
     "docs/resource-map.md",
+    "docs/testing/app-update-version-test-design.md",
     "docs/wiki/mainline-source.md"
    ],
    "required_gates": [
+    "scripts/app-version.test.ts",
+    "scripts/verify-update-bundle.mjs",
     "src/lib/module-registry-truth.test.ts",
     "src/lib/resource-registry-truth.test.ts"
    ],

@@ -1,0 +1,6 @@
+{
+  "version_code_epoch": 1100000000,
+  "normal_slot_stride": 10,
+  "rollback_offset": 1,
+  "android_version_code_max": 2100000000
+}

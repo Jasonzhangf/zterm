@@ -143,7 +143,7 @@ describe('terminal control runtime input queue', () => {
     expect(spawnMock.mock.calls[0]?.[1]).toEqual([
       'send-keys',
       '-t',
-      'demo',
+      '=demo',
       '-l',
       '--',
       'abc',
@@ -187,7 +187,7 @@ describe('terminal control runtime input queue', () => {
     expect(spawnMock.mock.calls[0]?.[1]).toEqual([
       'send-keys',
       '-t',
-      'demo',
+      '=demo',
       '-l',
       '--',
       'new',
@@ -208,16 +208,16 @@ describe('terminal control runtime input queue', () => {
     expect(spawnMock.mock.calls[0]?.[1]).toEqual([
       'send-keys',
       '-t',
-      'demo',
+      '=demo',
       '-l',
       '--',
       'echo ok',
     ]);
-    expect(spawnMock.mock.calls[1]?.[1]).toEqual(['send-keys', '-t', 'demo', 'Enter']);
+    expect(spawnMock.mock.calls[1]?.[1]).toEqual(['send-keys', '-t', '=demo', 'Enter']);
     expect(spawnMock.mock.calls[2]?.[1]).toEqual([
       'send-keys',
       '-t',
-      'demo',
+      '=demo',
       '-l',
       '--',
       'next',
@@ -299,7 +299,7 @@ describe('terminal control runtime input queue', () => {
     expect(spawnMock.mock.calls[1]?.[1]).toEqual([
       'send-keys',
       '-t',
-      'demo',
+      '=demo',
       '-l',
       '--',
       'second',
@@ -328,7 +328,7 @@ describe('terminal control runtime input queue', () => {
         TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES,
       );
     }
-    expect(sendKeyCalls[sendKeyCalls.length - 1]).toEqual(['send-keys', '-t', 'demo', 'Enter']);
+    expect(sendKeyCalls[sendKeyCalls.length - 1]).toEqual(['send-keys', '-t', '=demo', 'Enter']);
   });
 
   // R3 reverse tests: close/destroy must NOT leak input into a future attach.
@@ -374,7 +374,7 @@ describe('terminal control runtime input queue', () => {
     expect(spawnMock.mock.calls[0]?.[1]).toEqual([
       'send-keys',
       '-t',
-      'demo',
+      '=demo',
       '-l',
       '--',
       'fresh',
@@ -406,7 +406,7 @@ describe('terminal control runtime input queue', () => {
 
     expect(spawnSyncMock.mock.calls[0]?.slice(0, 2)).toEqual([
       'tmux',
-      ['kill-session', '-t', 'demo'],
+      ['kill-session', '-t', '=demo'],
     ]);
   });
 

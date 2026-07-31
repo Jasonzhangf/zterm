@@ -334,7 +334,7 @@ type VirtualKeyboardApi = {
   removeEventListener: (type: 'geometrychange', listener: EventListenerOrEventListenerObject) => void;
 };
 
-const NETWORK_BANNER_GRACE_MS = 3000;
+export const NETWORK_BANNER_GRACE_MS = 10_000;
 
 function logAsyncCleanupFailure(scope: string, error: unknown) {
   console.warn(`[TerminalPage] ${scope} failed:`, error);
@@ -359,6 +359,7 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
   onForceRelaySession,
   onUseAutoSession,
   onUseWebSocketSession,
+  suppressReconnectUi,
 }: {
   session: Session | null;
   getSessionDebugMetrics?: (sessionId: string) => SessionDebugOverlayMetrics | null;
@@ -366,6 +367,7 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
   onForceRelaySession?: (id: string) => void;
   onUseAutoSession?: (id: string) => void;
   onUseWebSocketSession?: (id: string) => void;
+  suppressReconnectUi?: boolean;
 }) {
   const [tick, setTick] = useState(0);
   const [routeMenuOpen, setRouteMenuOpen] = useState(false);
@@ -390,7 +392,9 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
   const uplinkBps = metrics?.uplinkBps || 0;
   const downlinkBps = metrics?.downlinkBps || 0;
   const routeLabel = formatConnectionRouteLabel(session);
-  const status = resolveDebugStatus(session, metrics || undefined);
+  const status = suppressReconnectUi && session.state === 'reconnecting'
+    ? 'waiting'
+    : resolveDebugStatus(session, metrics || undefined);
   const statusTone = status === 'error' || status === 'closed'
     ? '#ff8a8a'
     : status === 'reconnecting' || status === 'connecting'
@@ -2472,6 +2476,9 @@ function TerminalPageComponent({
     };
   }, [connectionIssueVisible, networkOnline, uiSession?.state]);
 
+  const suppressReconnectUi = networkOnline
+    && uiSession?.state === 'reconnecting'
+    && !connectionIssueVisible;
 
   useEffect(() => {
     updateTerminalKeyboardRequested(false);
@@ -3496,6 +3503,7 @@ function TerminalPageComponent({
               onForceRelaySession={onForceRelaySession}
               onUseAutoSession={onUseAutoSession}
               onUseWebSocketSession={onUseWebSocketSession}
+              suppressReconnectUi={suppressReconnectUi}
             />
             <button
               type="button"

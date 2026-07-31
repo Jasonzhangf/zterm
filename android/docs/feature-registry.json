@@ -1193,11 +1193,23 @@
       "owners": [
         "scripts/setup-android-java.sh",
         "scripts/ensure-pnpm-install.sh",
-        "scripts/verify-release-assets.mjs"
+        "scripts/app-version.mjs",
+        "scripts/build-android-debug.sh",
+        "scripts/prepare-update-bundle.mjs",
+        "scripts/verify-update-bundle.mjs"
       ],
       "allowed_paths": [
+        "contracts/app-version.json",
+        "native/android/app/build.gradle",
+        "scripts/app-version.d.mts",
+        "scripts/app-version.mjs",
+        "scripts/app-version.test.ts",
+        "scripts/build-android-debug.sh",
         "scripts/setup-android-java.sh",
         "scripts/ensure-pnpm-install.sh",
+        "scripts/prepare-update-bundle.mjs",
+        "scripts/tools/patch-apk-version.py",
+        "scripts/verify-update-bundle.mjs",
         "scripts/verify-release-assets.mjs",
         "scripts/verify-relay-server-package.mjs",
         "scripts/check-wterm-runtime-published.mjs",
@@ -1205,12 +1217,15 @@
       ],
       "forbidden_paths": [],
       "required_gates": [
+        "scripts/app-version.test.ts",
+        "scripts/verify-update-bundle.mjs",
         "src/lib/function-wiki-truth.test.ts",
         "src/lib/resource-registry-truth.test.ts"
       ],
       "truth_sources": [
         "docs/wiki/cli.md",
-        "docs/function-map.md"
+        "docs/function-map.md",
+        "docs/testing/app-update-version-test-design.md"
       ]
     },
     {

@@ -152,6 +152,7 @@ const terminalMirrorCapture = createTerminalMirrorCaptureRuntime({
   resolveMirrorCacheLines,
   runTmux: (args) => terminalControlRuntime.runTmux(args),
   runTmuxAsync: (args) => terminalControlRuntime.runTmuxAsync(args),
+  buildExactTmuxSessionTarget: (sessionName) => terminalControlRuntime.buildExactTmuxSessionTarget(sessionName),
   logTimePrefix,
   wezTermBackend: WEZTERM_BACKEND,
 });
@@ -181,7 +182,9 @@ const terminalRuntime = createTerminalRuntime({
       }
       return;
     }
-    terminalControlRuntime.runTmux(['has-session', '-t', sessionName]);
+    terminalControlRuntime.runTmux([
+      'has-session', '-t', terminalControlRuntime.buildExactTmuxSessionTarget(sessionName),
+    ]);
   },
   captureMirrorAuthoritativeBufferFromTmux: terminalMirrorCapture.captureMirrorAuthoritativeBufferFromTmux,
   mirrorBufferChanged: (mirror, previousStartIndex, previousLines) => findChangedIndexedRanges({
@@ -202,6 +205,7 @@ const terminalRuntime = createTerminalRuntime({
   autoCommandDelayMs: AUTO_COMMAND_DELAY_MS,
   waitMs: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
   runTmux: (args) => terminalControlRuntime.runTmux(args),
+  buildExactTmuxSessionTarget: (sessionName) => terminalControlRuntime.buildExactTmuxSessionTarget(sessionName),
   daemonRuntimeDebug,
   logTimePrefix,
 });

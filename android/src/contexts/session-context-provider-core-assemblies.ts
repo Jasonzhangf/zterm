@@ -198,6 +198,7 @@ export function useSessionProviderCoreAssemblies(
     sessionTerminalReadyTimeoutMs: SESSION_TERMINAL_READY_TIMEOUT_MS,
     refs: {
       pendingSessionTransportOpenIntentsRef,
+      tmuxTargetRequestsRef,
       reconnectStore: sessionReconnectStoreRef.current,
       heartbeatStore: sessionHeartbeatStoreRef.current,
       targetNetworkProbeRuntime: targetNetworkProbeRuntimeRef.current,

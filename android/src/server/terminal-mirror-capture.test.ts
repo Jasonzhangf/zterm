@@ -63,6 +63,7 @@ describe('terminal mirror capture runtime', () => {
 
     const runtime = createTerminalMirrorCaptureRuntime({
       resolveMirrorCacheLines: (rows) => rows,
+      buildExactTmuxSessionTarget: (sessionName) => `=${sessionName}`,
       runTmux,
       runTmuxAsync: async (args) => runTmux(args),
       logTimePrefix: () => '2026-05-02 00:00:00',
@@ -87,6 +88,7 @@ describe('terminal mirror capture runtime', () => {
 
     const runtime = createTerminalMirrorCaptureRuntime({
       resolveMirrorCacheLines: (rows) => rows,
+      buildExactTmuxSessionTarget: (sessionName) => `=${sessionName}`,
       runTmux,
       runTmuxAsync: async (args) => runTmux(args),
       logTimePrefix: () => '2026-05-02 00:00:00',
@@ -111,6 +113,7 @@ describe('terminal mirror capture runtime', () => {
 
     const runtime = createTerminalMirrorCaptureRuntime({
       resolveMirrorCacheLines: (rows) => rows,
+      buildExactTmuxSessionTarget: (sessionName) => `=${sessionName}`,
       runTmux,
       runTmuxAsync: async (args) => runTmux(args),
       logTimePrefix: () => '2026-05-12 23:55:00',
@@ -282,6 +285,7 @@ describe('terminal mirror capture runtime', () => {
 
     const runtime = createTerminalMirrorCaptureRuntime({
       resolveMirrorCacheLines: () => 20,
+      buildExactTmuxSessionTarget: (sessionName) => `=${sessionName}`,
       runTmux,
       runTmuxAsync: async (args) => runTmux(args),
       logTimePrefix: () => '2026-05-06 21:22:00',
@@ -348,6 +352,7 @@ describe('terminal mirror capture runtime', () => {
 
     const runtime = createTerminalMirrorCaptureRuntime({
       resolveMirrorCacheLines: (rows) => rows,
+      buildExactTmuxSessionTarget: (sessionName) => `=${sessionName}`,
       runTmux,
       runTmuxAsync: async (args) => runTmux(args),
       logTimePrefix: () => '2026-07-08 00:00:00',

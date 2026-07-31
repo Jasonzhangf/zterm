@@ -385,6 +385,18 @@
         {
           "id": "ChannelDemux",
           "label": "src/contexts/session-context-transport-runtime.ts#handleTargetMuxServerFrameRuntime"
+        },
+        {
+          "id": "TerminalChannelClosedIn01CloseSignal",
+          "label": "src/contexts/session-context-transport-orchestration-runtime.ts#buildMuxChannelCallbacks.onClosed"
+        },
+        {
+          "id": "TerminalChannelClosedIn02ControlStatusDecision",
+          "label": "src/contexts/session-context-transport-orchestration-runtime.ts#resolveMuxChannelClosedWithControlStatusRuntime"
+        },
+        {
+          "id": "TerminalTargetControlOut01ListSessions",
+          "label": "src/contexts/session-context-tmux-management-runtime.ts#manageTmuxSessionsOnOpenTransportRuntime"
         }
       ],
       "edges": [
@@ -1907,6 +1919,47 @@
           "resource_to": "resource.relay_account_directory",
           "via_resources": [],
           "relation_status": "direct"
+        },
+        {
+          "from": "TransportOrchestration",
+          "to": "TerminalChannelClosedIn01CloseSignal",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "mux data channel closed callback for one logical terminal channel",
+          "semantic_output": "closed-channel identity and current active/live policy captured for control-status decision",
+          "status": "anchored",
+          "edge_id": "android_mainline:TransportOrchestration->TerminalChannelClosedIn01CloseSignal",
+          "resource_from": "resource.terminal_channel",
+          "resource_to": "resource.terminal_channel",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "TerminalChannelClosedIn01CloseSignal",
+          "to": "TerminalChannelClosedIn02ControlStatusDecision",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "closed channel id, session name, and active/live reconnect eligibility",
+          "semantic_output": "explicit decision to reconnect only on control-confirmed existing tmux session, close on missing tmux truth, or idle/error on control-unreachable truth",
+          "status": "anchored",
+          "edge_id": "android_mainline:TerminalChannelClosedIn01CloseSignal->TerminalChannelClosedIn02ControlStatusDecision",
+          "resource_from": "resource.terminal_channel",
+          "resource_to": "resource.session_transport",
+          "via_resources": [
+            "resource.daemon_target_transport"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "TerminalChannelClosedIn02ControlStatusDecision",
+          "to": "TerminalTargetControlOut01ListSessions",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "target-level status query required before data-channel reconnect/closed projection",
+          "semantic_output": "mux-target-message list-sessions request over the existing daemon target transport",
+          "status": "anchored",
+          "edge_id": "android_mainline:TerminalChannelClosedIn02ControlStatusDecision->TerminalTargetControlOut01ListSessions",
+          "resource_from": "resource.session_transport",
+          "resource_to": "resource.daemon_target_transport",
+          "via_resources": [],
+          "relation_status": "observer"
         }
       ]
     },
@@ -2461,6 +2514,18 @@
           "label": "src/traversal-relay/server.ts#clientPeerLeaseKey/resumeIdleClientPeer"
         },
         {
+          "id": "IdleSessionListIn01ControlTrigger",
+          "label": "src/server/terminal-message-control-runtime.ts#handleListSessionsMessageRuntime"
+        },
+        {
+          "id": "IdleSessionMuxOpenIn01ControlTrigger",
+          "label": "src/server/terminal-message-control-runtime.ts#handleMuxChannelOpenedMessageRuntime"
+        },
+        {
+          "id": "IdleSessionPublishIn01Request",
+          "label": "src/server/terminal-session-activity-runtime.ts#publishSessionActivitiesRuntime"
+        },
+        {
           "id": "IdleActivityClassifierIn01MirrorWalk",
           "label": "src/server/terminal-session-activity-runtime.ts#classifySessionActivities"
         },
@@ -2470,7 +2535,7 @@
         },
         {
           "id": "IdleSessionBroadcastOut01TransportPublish",
-          "label": "src/server/terminal-session-activity-runtime.ts#publishSessionActivitiesRuntime"
+          "label": "src/server/terminal-transport-runtime.ts#sendTransportMessage"
         }
       ],
       "edges": [
@@ -3132,12 +3197,77 @@
         },
         {
           "from": "DaemonRuntime",
-          "to": "IdleActivityClassifierIn01MirrorWalk",
+          "to": "IdleSessionPublishIn01Request",
           "owner_feature": "daemon.session_idle_detection",
           "semantic_input": "heartbeat tick trigger",
-          "semantic_output": "mirror idle/stopped classification per session",
+          "semantic_output": "one target control publication request per open physical transport",
           "status": "anchored",
-          "edge_id": "daemon_mainline:DaemonRuntime->IdleActivityClassifierIn01MirrorWalk",
+          "edge_id": "daemon_mainline:DaemonRuntime->IdleSessionPublishIn01Request",
+          "resource_from": "resource.mirror_store",
+          "resource_to": "resource.session_idle_facts",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "Message",
+          "to": "IdleSessionListIn01ControlTrigger",
+          "owner_feature": "daemon.session_idle_detection",
+          "semantic_input": "list-sessions target control request",
+          "semantic_output": "list-time idle fact publication trigger",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:Message->IdleSessionListIn01ControlTrigger",
+          "resource_from": "resource.mirror_store",
+          "resource_to": "resource.session_idle_facts",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "MuxHandshake",
+          "to": "IdleSessionMuxOpenIn01ControlTrigger",
+          "owner_feature": "daemon.session_idle_detection",
+          "semantic_input": "validated mux-channel-open",
+          "semantic_output": "open-time idle fact publication trigger",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:MuxHandshake->IdleSessionMuxOpenIn01ControlTrigger",
+          "resource_from": "resource.mirror_store",
+          "resource_to": "resource.session_idle_facts",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "IdleSessionListIn01ControlTrigger",
+          "to": "IdleSessionPublishIn01Request",
+          "owner_feature": "daemon.session_idle_detection",
+          "semantic_input": "list-time publish intent",
+          "semantic_output": "target control publisher invocation",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:IdleSessionListIn01ControlTrigger->IdleSessionPublishIn01Request",
+          "resource_from": "resource.session_idle_facts",
+          "resource_to": "resource.session_idle_facts",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "IdleSessionMuxOpenIn01ControlTrigger",
+          "to": "IdleSessionPublishIn01Request",
+          "owner_feature": "daemon.session_idle_detection",
+          "semantic_input": "open-time publish intent",
+          "semantic_output": "target control publisher invocation",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:IdleSessionMuxOpenIn01ControlTrigger->IdleSessionPublishIn01Request",
+          "resource_from": "resource.session_idle_facts",
+          "resource_to": "resource.session_idle_facts",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "IdleSessionPublishIn01Request",
+          "to": "IdleActivityClassifierIn01MirrorWalk",
+          "owner_feature": "daemon.session_idle_detection",
+          "semantic_input": "mirror map and publication timestamp",
+          "semantic_output": "idle classifier invocation",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:IdleSessionPublishIn01Request->IdleActivityClassifierIn01MirrorWalk",
           "resource_from": "resource.mirror_store",
           "resource_to": "resource.session_idle_facts",
           "via_resources": [],

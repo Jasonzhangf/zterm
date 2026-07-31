@@ -4,6 +4,12 @@ import { basename, dirname, resolve } from 'path';
 import { homedir } from 'os';
 import { fileURLToPath } from 'url';
 import { spawnSync } from 'child_process';
+import {
+  appVersionContract,
+  buildDisplayVersion,
+  computeNormalVersionCode,
+  computeRollbackVersionCode,
+} from './app-version.mjs';
 
 function exec(command, options = {}) {
   const result = spawnSync(
@@ -25,35 +31,15 @@ const buildMeta = existsSync(buildMetaPath)
   : { buildNumber: 1000 };
 
 const DEFAULT_APK_PATH = resolve(projectRoot, 'native/android/app/build/outputs/apk/debug/app-debug.apk');
+const DEFAULT_ROLLBACK_APK_PATH = resolve(projectRoot, 'native/android/app/build/outputs/apk/debug/app-rollback-debug.apk');
 const apkPath = process.argv[2] ? resolve(process.cwd(), process.argv[2]) : DEFAULT_APK_PATH;
+const rollbackApkPath = process.argv[3] ? resolve(process.cwd(), process.argv[3]) : DEFAULT_ROLLBACK_APK_PATH;
 const outputDir = resolve(projectRoot, 'update-dist');
 const releaseDistDir = resolve(projectRoot, 'release-dist');
 const daemonUpdatesDir = process.env.WTERM_UPDATES_DIR
   ? resolve(process.env.WTERM_UPDATES_DIR)
   : resolve(homedir(), '.zterm/updates');
 const latestAliasName = 'zterm-latest-debug.apk';
-
-function computeVersionCode(version, buildNumber) {
-  const semver = String(version)
-    .split('.')
-    .map((part) => {
-      const matched = part.match(/^\d+/);
-      return matched ? Number.parseInt(matched[0], 10) : 0;
-    });
-  while (semver.length < 3) {
-    semver.push(0);
-  }
-  return (semver[0] * 100000000) + (semver[1] * 1000000) + (semver[2] * 10000) + buildNumber;
-}
-
-function computeRollbackVersionCode(versionCode) {
-  // Android versionCode is uint32 (max 4294967295). Reserve bit 30 as a
-  // rollback marker so the rollback anchor stays above any future normal
-  // build while leaving the low 30 bits free for normal versionCode growth.
-  // The rollback APK ships the current normal APK bytes but re-signed with
-  // this elevated versionCode so PackageManager accepts the install.
-  return (1 << 30) + Number(versionCode);
-}
 
 function hashFile(filePath) {
   const hash = createHash('sha256');
@@ -65,6 +51,15 @@ if (!existsSync(apkPath)) {
   console.error(`[prepare-update-bundle] APK not found: ${apkPath}`);
   process.exit(1);
 }
+if (!existsSync(rollbackApkPath)) {
+  console.error(`[prepare-update-bundle] Rollback APK not found: ${rollbackApkPath}`);
+  process.exit(1);
+}
+
+const previousManifestPath = resolve(outputDir, 'latest.json');
+const previousManifest = existsSync(previousManifestPath)
+  ? JSON.parse(readFileSync(previousManifestPath, 'utf8'))
+  : null;
 
 mkdirSync(outputDir, { recursive: true });
 mkdirSync(releaseDistDir, { recursive: true });
@@ -73,18 +68,36 @@ rmSync(resolve(releaseDistDir, latestAliasName), { force: true });
 rmSync(resolve(daemonUpdatesDir, latestAliasName), { force: true });
 
 const buildNumber = Math.max(1000, Number.parseInt(String(buildMeta.buildNumber || 1000), 10));
-const versionName = `${packageJson.version}.${String(buildNumber).padStart(4, '0')}`;
-const versionCode = computeVersionCode(packageJson.version, buildNumber);
+const versionName = buildDisplayVersion(packageJson.version, buildNumber);
+const versionCode = computeNormalVersionCode(buildNumber);
 const targetApkName = `zterm-${versionName}.apk`;
 const targetApkPath = resolve(outputDir, targetApkName);
 const latestAliasPath = resolve(outputDir, latestAliasName);
 const releaseVersionedApkPath = resolve(releaseDistDir, targetApkName);
 const releaseLatestAliasPath = resolve(releaseDistDir, latestAliasName);
+const rollbackVersionName = buildDisplayVersion(packageJson.version, buildNumber, true);
+const rollbackVersionCode = computeRollbackVersionCode(versionCode);
+const rollbackApkName = `zterm-${rollbackVersionName}.apk`;
+const publishedRollbackApkPath = resolve(outputDir, rollbackApkName);
+const releaseRollbackApkPath = resolve(releaseDistDir, rollbackApkName);
 
 copyFileSync(apkPath, targetApkPath);
 copyFileSync(apkPath, latestAliasPath);
 copyFileSync(apkPath, releaseVersionedApkPath);
 copyFileSync(apkPath, releaseLatestAliasPath);
+copyFileSync(rollbackApkPath, publishedRollbackApkPath);
+copyFileSync(rollbackApkPath, releaseRollbackApkPath);
+
+const preparedRollback = {
+  versionCode: rollbackVersionCode,
+  versionName: rollbackVersionName,
+  apkUrl: rollbackApkName,
+  sha256: hashFile(publishedRollbackApkPath),
+  size: statSync(publishedRollbackApkPath).size,
+  sourceVersionCode: versionCode,
+  sourceVersionName: versionName,
+};
+const rollbackToPrevious = resolvePreviousRollback(previousManifest);
 
 const manifest = {
   versionName,
@@ -97,12 +110,22 @@ const manifest = {
   publishedAt: new Date().toISOString(),
   channel: 'stable',
   sourceApk: basename(apkPath),
-  rollbackToPrevious: null,
+  preparedRollback,
+  rollbackToPrevious,
 };
 
-// Generate rollback APK so we can fill rollbackToPrevious
-const rollbackResult = generateRollbackApk(apkPath, outputDir, versionName, versionCode);
-if (rollbackResult) manifest.rollbackToPrevious = rollbackResult;
+const nextNormalVersionCode = computeNormalVersionCode(buildNumber + 1);
+if (!(versionCode < rollbackVersionCode && rollbackVersionCode < nextNormalVersionCode)) {
+  throw new Error(
+    `invalid app version ordering: normal=${versionCode}, rollback=${rollbackVersionCode}, nextNormal=${nextNormalVersionCode}`,
+  );
+}
+if (
+  (nextNormalVersionCode - versionCode) !== appVersionContract.normal_slot_stride
+  || (rollbackVersionCode - versionCode) !== appVersionContract.rollback_offset
+) {
+  throw new Error('app version contract stride/rollback offset mismatch');
+}
 
 writeFileSync(resolve(outputDir, 'latest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 writeFileSync(resolve(releaseDistDir, 'latest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
@@ -110,8 +133,10 @@ writeFileSync(resolve(releaseDistDir, 'latest.json'), `${JSON.stringify(manifest
 mkdirSync(daemonUpdatesDir, { recursive: true });
 copyFileSync(targetApkPath, resolve(daemonUpdatesDir, targetApkName));
 copyFileSync(targetApkPath, resolve(daemonUpdatesDir, latestAliasName));
-if (rollbackResult) {
-  copyFileSync(resolve(outputDir, rollbackResult.apkUrl), resolve(daemonUpdatesDir, rollbackResult.apkUrl));
+copyFileSync(publishedRollbackApkPath, resolve(daemonUpdatesDir, rollbackApkName));
+if (rollbackToPrevious) {
+  copyFileSync(resolve(outputDir, rollbackToPrevious.apkUrl), resolve(daemonUpdatesDir, rollbackToPrevious.apkUrl));
+  copyFileSync(resolve(outputDir, rollbackToPrevious.apkUrl), resolve(releaseDistDir, rollbackToPrevious.apkUrl));
 }
 writeFileSync(resolve(daemonUpdatesDir, 'latest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 
@@ -123,37 +148,41 @@ console.log(`- manifest: ${resolve(outputDir, 'latest.json')}`);
 console.log(`- daemon updates dir: ${daemonUpdatesDir}`);
 console.log(`- versionName: ${versionName}`);
 console.log(`- versionCode: ${versionCode}`);
-/**
- * Generate a rollback APK by patching the versionCode in AndroidManifest.xml.
- * The rollback APK has the same bytes as the normal APK but a higher versionCode
- * (bit 30 set) so Android PackageManager accepts the install.
- */
-function generateRollbackApk(inputApkPath, outputDir, baseVersionName, baseVersionCode) {
-  const rollbackVersionName = `${baseVersionName}.1`;
-  const rollbackVersionCode = computeRollbackVersionCode(baseVersionCode);
-  const rollbackApkName = `zterm-${rollbackVersionName}.apk`;
-  const rollbackApkPath = resolve(outputDir, rollbackApkName);
 
+function resolvePreviousRollback(candidate) {
+  if (!candidate || candidate.versionName === versionName) {
+    return null;
+  }
+  const prepared = candidate.preparedRollback;
+  if (prepared && existsSync(resolve(outputDir, basename(prepared.apkUrl)))) {
+    return prepared;
+  }
+  const previousBuildNumber = Number.parseInt(String(candidate.buildNumber || ''), 10);
+  if (!Number.isFinite(previousBuildNumber)) {
+    throw new Error('previous update manifest has no prepared rollback or build number');
+  }
+  const previousNormalApk = resolve(outputDir, basename(candidate.apkUrl));
+  if (!existsSync(previousNormalApk)) {
+    throw new Error(`previous normal APK is missing: ${previousNormalApk}`);
+  }
+  const previousRollbackVersionName = buildDisplayVersion(packageJson.version, previousBuildNumber, true);
+  const previousRollbackVersionCode = computeRollbackVersionCode(
+    computeNormalVersionCode(previousBuildNumber),
+  );
+  const previousRollbackApkName = `zterm-${previousRollbackVersionName}.apk`;
+  const previousRollbackApk = resolve(outputDir, previousRollbackApkName);
   const patchScript = resolve(scriptDir, 'tools', 'patch-apk-version.py');
-  if (!existsSync(patchScript)) {
-    console.warn(`[prepare-update-bundle] Rollback tool not found: ${patchScript}`);
-    return null;
-  }
-
-  try {
-    exec(['python3', patchScript, inputApkPath, rollbackApkPath, String(rollbackVersionCode), rollbackVersionName]);
-    console.log(`[prepare-update-bundle] Rollback APK: ${rollbackApkPath}`);
-    return {
-      versionCode: rollbackVersionCode,
-      versionName: rollbackVersionName,
-      apkUrl: rollbackApkName,
-      sha256: hashFile(rollbackApkPath),
-      size: statSync(rollbackApkPath).size,
-      sourceVersionCode: baseVersionCode,
-      sourceVersionName: baseVersionName,
-    };
-  } catch (error) {
-    console.warn(`[prepare-update-bundle] Rollback APK generation failed: ${error.message}`);
-    return null;
-  }
+  exec([
+    'python3', patchScript, previousNormalApk, previousRollbackApk,
+    String(previousRollbackVersionCode), previousRollbackVersionName,
+  ]);
+  return {
+    versionCode: previousRollbackVersionCode,
+    versionName: previousRollbackVersionName,
+    apkUrl: previousRollbackApkName,
+    sha256: hashFile(previousRollbackApk),
+    size: statSync(previousRollbackApk).size,
+    sourceVersionCode: candidate.versionCode,
+    sourceVersionName: candidate.versionName,
+  };
 }

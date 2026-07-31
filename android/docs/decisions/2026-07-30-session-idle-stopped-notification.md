@@ -83,6 +83,25 @@ The heartbeat loop already iterates over all connections and their bound subscri
 
 Rationale: reusing the heartbeat tick avoids a second timer. A stopped session is reported at most once per heartbeat interval — fine for "job finished" notifications.
 
+### 2.1 Control/data plane envelope invariant
+
+Once a physical terminal transport has completed `mux-hello`, every frame on
+that transport must be a `TerminalMuxServerFrame`.
+
+- Target-level control facts such as `sessions` and `session-activity` use
+  `mux-target-message`.
+- Session-bound terminal business messages use `mux-channel-message`.
+- Legacy/pre-mux transports continue to receive the raw bridge message.
+- A target control publisher must never write raw `session-activity` to a
+  mux-negotiated physical transport.
+- If attach-time target control publication fails after channel registration,
+  the mux lifecycle owner removes the channel, closes the subscriber, emits
+  `mux-channel-closed` with `session_activity_failed`, and does not start attach.
+
+The invariant is owned by `terminal-session-activity-runtime.ts` for this
+feature. Heartbeat and attach/list orchestration call that publisher and do not
+construct their own wire envelopes.
+
 ### 3. Constant
 
 ```typescript
@@ -174,6 +193,9 @@ New edges:
 
 ### L1 — Unit tests
 - `terminal-session-activity-runtime.test.ts`: idle classification positive/negative, threshold boundary, resume from stopped
+- `terminal-session-activity-runtime.test.ts`: raw legacy publication, mux target-envelope publication, and negative no-raw/no-channel publication
+- `terminal-message-runtime.test.ts`: list/open target-control replies remain valid mux server frames
+- `terminal-daemon-runtime.test.ts`: heartbeat sends a target envelope on mux connections and a raw control message only on legacy connections
 - `server.daemon-runtime-truth.test.ts`: heartbeat loop idle broadcast coverage
 
 ### L2 — Daemon close-loop

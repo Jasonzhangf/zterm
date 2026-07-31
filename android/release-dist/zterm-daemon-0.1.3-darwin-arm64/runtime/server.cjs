@@ -6353,7 +6353,7 @@ function createTerminalMirrorCaptureRuntime(deps) {
       "display-message",
       "-p",
       "-t",
-      sessionName,
+      deps.buildExactTmuxSessionTarget(sessionName),
       "#{pane_id}	#{history_size}	#{pane_height}	#{pane_width}	#{alternate_on}	#{pane_dead}"
     ]);
     const [paneIdRaw, tmuxHistorySizeRaw, rowsRaw, colsRaw, alternateOnRaw, paneDeadRaw] = result.stdout.trim().split("	");
@@ -6381,7 +6381,13 @@ function createTerminalMirrorCaptureRuntime(deps) {
     if (deps.wezTermBackend) {
       return deps.wezTermBackend.readCurrentPath(sessionName);
     }
-    const result = deps.runTmux(["display-message", "-p", "-t", sessionName, "#{pane_current_path}"]);
+    const result = deps.runTmux([
+      "display-message",
+      "-p",
+      "-t",
+      deps.buildExactTmuxSessionTarget(sessionName),
+      "#{pane_current_path}"
+    ]);
     const currentPath = result.stdout.trim();
     if (!currentPath) {
       throw new Error(`tmux returned empty pane_current_path for ${sessionName}`);
@@ -6433,7 +6439,7 @@ function createTerminalMirrorCaptureRuntime(deps) {
       "display-message",
       "-p",
       "-t",
-      sessionName,
+      deps.buildExactTmuxSessionTarget(sessionName),
       "#{pane_id}	#{history_size}	#{pane_height}	#{pane_width}	#{alternate_on}	#{pane_dead}"
     ]);
     const [paneIdRaw, tmuxHistorySizeRaw, rowsRaw, colsRaw, alternateOnRaw, paneDeadRaw] = result.stdout.trim().split("	");
@@ -8093,7 +8099,7 @@ function createTerminalMirrorRuntime(deps) {
     if (mirror.adaptiveWidthAppliedCols === cols) {
       return;
     }
-    deps.runTmux(["resize-window", "-t", mirror.sessionName, "-x", String(cols)]);
+    deps.runTmux(["resize-window", "-t", deps.buildExactTmuxSessionTarget(mirror.sessionName), "-x", String(cols)]);
     mirror.adaptiveWidthAppliedCols = cols;
     console.log(`[${deps.logTimePrefix()}] adaptive width applied`, {
       sessionName: mirror.sessionName,
@@ -8104,9 +8110,9 @@ function createTerminalMirrorRuntime(deps) {
   function releaseAdaptiveTmuxWidth(mirror, reason) {
     const baseline = mirror.adaptiveWidthBaselineGeometry;
     if (baseline) {
-      deps.runTmux(["resize-window", "-t", mirror.sessionName, "-x", String(deps.normalizeTerminalCols(baseline.cols))]);
+      deps.runTmux(["resize-window", "-t", deps.buildExactTmuxSessionTarget(mirror.sessionName), "-x", String(deps.normalizeTerminalCols(baseline.cols))]);
     }
-    deps.runTmux(["set-window-option", "-u", "-t", mirror.sessionName, "window-size"]);
+    deps.runTmux(["set-window-option", "-u", "-t", deps.buildExactTmuxSessionTarget(mirror.sessionName), "window-size"]);
     console.log(`[${deps.logTimePrefix()}] adaptive width released`, {
       sessionName: mirror.sessionName,
       restoredCols: baseline?.cols ?? null,
@@ -9617,6 +9623,16 @@ function classifySessionActivities(mirrors2, now, thresholdMs = SESSION_IDLE_STO
     stopped: now - mirror.lastLiveActivityAt >= thresholdMs
   })).sort((left, right) => left.name.localeCompare(right.name));
 }
+function publishSessionActivitiesRuntime(options) {
+  const message = {
+    type: "session-activity",
+    payload: {
+      activities: classifySessionActivities(options.mirrors, options.now)
+    }
+  };
+  const transportMessage = typeof options.connection.muxVersion === "number" ? buildTerminalMuxServerTargetMessage(message) : message;
+  options.sendTransportMessage(options.connection.transport, transportMessage);
+}
 
 // src/server/terminal-message-control-runtime.ts
 function handleSessionOpenMessageRuntime(deps, connection, payload) {
@@ -9662,9 +9678,11 @@ function handleSessionTransportConnectRuntime(deps, connection, payload) {
 function handleListSessionsMessageRuntime(deps, connection) {
   try {
     deps.sendTransportMessage(connection.transport, { type: "sessions", payload: { sessions: deps.listTmuxSessions() } });
-    deps.sendTransportMessage(connection.transport, {
-      type: "session-activity",
-      payload: { activities: classifySessionActivities(deps.mirrors, Date.now()) }
+    publishSessionActivitiesRuntime({
+      connection,
+      mirrors: deps.mirrors,
+      now: Date.now(),
+      sendTransportMessage: deps.sendTransportMessage
     });
   } catch (error) {
     const err = error instanceof Error ? error.message : String(error);
@@ -9847,18 +9865,12 @@ function handleTmuxControlMessageRuntime(deps, connection, message) {
   }
 }
 function handleMuxChannelOpenedMessageRuntime(deps, connection) {
-  try {
-    deps.sendTransportMessage(connection.transport, {
-      type: "session-activity",
-      payload: { activities: classifySessionActivities(deps.mirrors, Date.now()) }
-    });
-  } catch (error) {
-    const err = error instanceof Error ? error.message : String(error);
-    deps.sendTransportMessage(connection.transport, {
-      type: "error",
-      payload: { message: `Failed to broadcast session-activity: ${err}`, code: "session_activity_failed" }
-    });
-  }
+  publishSessionActivitiesRuntime({
+    connection,
+    mirrors: deps.mirrors,
+    now: Date.now(),
+    sendTransportMessage: deps.sendTransportMessage
+  });
 }
 
 // src/server/terminal-reliable-input-ack.ts
@@ -10000,6 +10012,26 @@ function createTerminalMuxChannelRuntime(deps) {
         const subscriber = deps.createMuxChannelSubscriber(connection, frame.payload.channelId);
         subscriber.sessionName = deps.sanitizeSessionName(frame.payload.sessionName);
         subscriber.bodySubscribed = frame.payload.bodySubscribed !== false;
+        try {
+          handleMuxChannelOpenedMessageRuntime(
+            { mirrors: deps.mirrors, sendTransportMessage: deps.sendTransportMessage },
+            connection
+          );
+        } catch (error) {
+          const reason = `session activity control publish failed: ${error instanceof Error ? error.message : String(error)}`;
+          connection.muxChannels.delete(frame.payload.channelId);
+          subscriber.transport = null;
+          deps.closeSession(subscriber, reason, false);
+          sendMuxFrame(connection, {
+            type: "mux-channel-closed",
+            payload: {
+              channelId: frame.payload.channelId,
+              reason,
+              code: "session_activity_failed"
+            }
+          });
+          return;
+        }
         sendMuxFrame(connection, {
           type: "mux-channel-opened",
           payload: {
@@ -10010,13 +10042,6 @@ function createTerminalMuxChannelRuntime(deps) {
             }
           }
         });
-        try {
-          handleMuxChannelOpenedMessageRuntime(
-            { mirrors: deps.mirrors, sendTransportMessage: deps.sendTransportMessage },
-            connection
-          );
-        } catch (_err) {
-        }
         void deps.attachTmux(subscriber, {
           sessionName: frame.payload.sessionName,
           cols: frame.payload.cols,
@@ -11643,6 +11668,13 @@ function createTerminalScheduleRuntime(deps) {
 // src/server/terminal-control-runtime.ts
 var import_child_process = require("child_process");
 var import_os4 = require("os");
+function buildExactTmuxSessionTarget(sessionName) {
+  const normalized = sessionName.trim();
+  if (!normalized) {
+    throw new Error("tmux exact session target requires a session name");
+  }
+  return `=${normalized}`;
+}
 function createTerminalControlRuntime(deps) {
   const liveMirrorInputBatches = /* @__PURE__ */ new Map();
   function cleanEnv() {
@@ -11764,12 +11796,13 @@ function createTerminalControlRuntime(deps) {
     });
   }
   function writeTmuxLiteralChunksSync(sessionName, payload) {
+    const target = buildExactTmuxSessionTarget(sessionName);
     const chunks = splitTerminalInputUtf8Chunks(
       payload,
       TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES
     );
     for (let index = 0; index < chunks.length; index += 1) {
-      runTmux2(["send-keys", "-t", sessionName, "-l", "--", chunks[index]]);
+      runTmux2(["send-keys", "-t", target, "-l", "--", chunks[index]]);
       if (index < chunks.length - 1) {
         sleepTmuxWriteSettleSync();
       }
@@ -11781,7 +11814,7 @@ function createTerminalControlRuntime(deps) {
     }
     const keepalive = "zterm-daemon-keepalive";
     try {
-      runTmux2(["has-session", "-t", keepalive]);
+      runTmux2(["has-session", "-t", buildExactTmuxSessionTarget(keepalive)]);
       return;
     } catch {
     }
@@ -11811,7 +11844,7 @@ function createTerminalControlRuntime(deps) {
     }
     writeTmuxLiteralChunksSync(sessionName, payload);
     if (appendEnter2) {
-      runTmux2(["send-keys", "-t", sessionName, "Enter"]);
+      runTmux2(["send-keys", "-t", buildExactTmuxSessionTarget(sessionName), "Enter"]);
     }
   }
   function writeToLiveMirror2(sessionName, payload, appendEnter2) {
@@ -11835,7 +11868,7 @@ function createTerminalControlRuntime(deps) {
     }
     writeTmuxLiteralChunksSync(sessionName, payload);
     if (appendEnter2) {
-      runTmux2(["send-keys", "-t", sessionName, "Enter"]);
+      runTmux2(["send-keys", "-t", buildExactTmuxSessionTarget(sessionName), "Enter"]);
     }
     return true;
   }
@@ -12001,14 +12034,14 @@ function createTerminalControlRuntime(deps) {
           continue;
         }
         if (group.payload) {
-          await runTmuxAsync(["send-keys", "-t", mirror.sessionName, "-l", "--", group.payload]);
+          await runTmuxAsync(["send-keys", "-t", buildExactTmuxSessionTarget(mirror.sessionName), "-l", "--", group.payload]);
         }
         if (group.appendEnter) {
           if (!isGroupWritable(group)) {
             settleGroup(group, false);
             continue;
           }
-          await runTmuxAsync(["send-keys", "-t", mirror.sessionName, "Enter"]);
+          await runTmuxAsync(["send-keys", "-t", buildExactTmuxSessionTarget(mirror.sessionName), "Enter"]);
         }
         settleGroup(group, true);
         if (groupIndex < groups.length - 1) {
@@ -12112,7 +12145,7 @@ function createTerminalControlRuntime(deps) {
       deps.wezTermBackend.closeSession(sessionName);
       return;
     }
-    runTmux2(["kill-session", "-t", sessionName]);
+    runTmux2(["kill-session", "-t", buildExactTmuxSessionTarget(sessionName)]);
   }
   function renameTmuxSession2(currentName, nextName) {
     if (deps.wezTermBackend) {
@@ -12120,7 +12153,7 @@ function createTerminalControlRuntime(deps) {
     }
     const sessionName = deps.sanitizeSessionName(currentName);
     const nextSessionName = deps.sanitizeSessionName(nextName);
-    runTmux2(["rename-session", "-t", sessionName, nextSessionName]);
+    runTmux2(["rename-session", "-t", buildExactTmuxSessionTarget(sessionName), nextSessionName]);
     return nextSessionName;
   }
   return {
@@ -12135,7 +12168,8 @@ function createTerminalControlRuntime(deps) {
     listTmuxSessions: listTmuxSessions2,
     createDetachedTmuxSession: createDetachedTmuxSession2,
     closeDetachedTerminalSession: closeDetachedTerminalSession2,
-    renameTmuxSession: renameTmuxSession2
+    renameTmuxSession: renameTmuxSession2,
+    buildExactTmuxSessionTarget
   };
 }
 
@@ -12831,9 +12865,11 @@ function createTerminalDaemonRuntime(deps) {
           continue;
         }
         if (boundSubscriberIds.size > 0) {
-          deps.sendTransportMessage(connection.transport, {
-            type: "session-activity",
-            payload: { activities: classifySessionActivities(deps.mirrors, now) }
+          publishSessionActivitiesRuntime({
+            connection,
+            mirrors: deps.mirrors,
+            now,
+            sendTransportMessage: deps.sendTransportMessage
           });
         }
         if (connection.transport.kind === "ws") {
@@ -16604,6 +16640,7 @@ var terminalMirrorCapture = createTerminalMirrorCaptureRuntime({
   resolveMirrorCacheLines,
   runTmux: (args) => terminalControlRuntime.runTmux(args),
   runTmuxAsync: (args) => terminalControlRuntime.runTmuxAsync(args),
+  buildExactTmuxSessionTarget: (sessionName) => terminalControlRuntime.buildExactTmuxSessionTarget(sessionName),
   logTimePrefix,
   wezTermBackend: WEZTERM_BACKEND
 });
@@ -16632,7 +16669,11 @@ var terminalRuntime = createTerminalRuntime({
       }
       return;
     }
-    terminalControlRuntime.runTmux(["has-session", "-t", sessionName]);
+    terminalControlRuntime.runTmux([
+      "has-session",
+      "-t",
+      terminalControlRuntime.buildExactTmuxSessionTarget(sessionName)
+    ]);
   },
   captureMirrorAuthoritativeBufferFromTmux: terminalMirrorCapture.captureMirrorAuthoritativeBufferFromTmux,
   mirrorBufferChanged: (mirror, previousStartIndex, previousLines) => findChangedIndexedRanges({
@@ -16649,6 +16690,7 @@ var terminalRuntime = createTerminalRuntime({
   autoCommandDelayMs: AUTO_COMMAND_DELAY_MS,
   waitMs: (delayMs) => new Promise((resolve4) => setTimeout(resolve4, delayMs)),
   runTmux: (args) => terminalControlRuntime.runTmux(args),
+  buildExactTmuxSessionTarget: (sessionName) => terminalControlRuntime.buildExactTmuxSessionTarget(sessionName),
   daemonRuntimeDebug,
   logTimePrefix
 });

@@ -39,6 +39,15 @@ description: "terminal buffer / render / daemon mirror 真源与门禁"
 - 禁止用 fallback / 默认值 / catch 后继续成功 来掩盖真源缺失
 - 禁止 UI / App / daemon 任一层替其它层维护第二份状态机
 
+## Mux 控制线与业务线
+
+- 物理 transport 完成 `mux-hello` 后，wire 上只允许 `TerminalMuxServerFrame` / `TerminalMuxClientFrame`。
+- target 控制事实（例如 `sessions`、`session-activity`、target error/pong）只走 `mux-target-message`；session terminal 业务只走 `mux-channel-message` / `mux-channel-binary`。
+- 已协商 mux 的物理 transport 禁止裸发 `BridgeServerMessage`。唯一物理 sender contract 必须使用 shared protocol 的 wire-frame union，禁止 `as unknown as` 绕过类型锁。
+- mux channel open 必须原子。控制事实 publish 失败时，`terminal-mux-channel-runtime.ts` 必须删除 channel registry、关闭 subscriber、投影显式 `mux-channel-closed` error，并停止 attach。
+- 正向 gate：legacy/pre-mux 允许 raw control；mux transport 必须 target envelope；list/open/heartbeat 均通过 `isTerminalMuxServerFrame`。
+- 反向 gate：mux transport 不得出现 raw `session-activity` 或错误的 `mux-channel-message`；publish throw 后不得留下 channel、subscriber transport 或继续 attach。
+
 ## 冻结角色边界
 
 ```text

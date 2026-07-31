@@ -1,7 +1,9 @@
 import { createHash } from 'crypto';
+import { execFileSync } from 'child_process';
 import { existsSync, readFileSync, statSync } from 'fs';
 import { basename, resolve } from 'path';
 import { homedir } from 'os';
+import { computeNormalVersionCode } from './app-version.mjs';
 
 const projectRoot = resolve(import.meta.dirname, '..');
 const updateDistDir = resolve(projectRoot, 'update-dist');
@@ -26,6 +28,19 @@ function requireFile(path) {
   return path;
 }
 
+const apkAnalyzer = process.env.APKANALYZER
+  || resolve(homedir(), 'Library/Android/sdk/cmdline-tools/latest/bin/apkanalyzer');
+
+function readApkVersion(path) {
+  return {
+    versionName: execFileSync(apkAnalyzer, ['manifest', 'version-name', path], { encoding: 'utf8' }).trim(),
+    versionCode: Number.parseInt(
+      execFileSync(apkAnalyzer, ['manifest', 'version-code', path], { encoding: 'utf8' }).trim(),
+      10,
+    ),
+  };
+}
+
 const updateManifestPath = requireFile(resolve(updateDistDir, 'latest.json'));
 const daemonManifestPath = requireFile(resolve(daemonUpdatesDir, 'latest.json'));
 const updateManifest = readJson(updateManifestPath);
@@ -44,6 +59,15 @@ const updateApkPath = requireFile(resolve(updateDistDir, basename(updateManifest
 const daemonApkPath = requireFile(resolve(daemonUpdatesDir, basename(daemonManifest.apkUrl)));
 const updateLatestAliasPath = requireFile(resolve(updateDistDir, 'zterm-latest-debug.apk'));
 const daemonLatestAliasPath = requireFile(resolve(daemonUpdatesDir, 'zterm-latest-debug.apk'));
+const updateApkVersion = readApkVersion(updateApkPath);
+const preparedRollback = updateManifest.preparedRollback;
+const preparedRollbackPath = requireFile(resolve(updateDistDir, basename(preparedRollback.apkUrl)));
+const preparedRollbackVersion = readApkVersion(preparedRollbackPath);
+const previousRollback = updateManifest.rollbackToPrevious || null;
+const previousRollbackPath = previousRollback
+  ? requireFile(resolve(updateDistDir, basename(previousRollback.apkUrl)))
+  : null;
+const previousRollbackVersion = previousRollbackPath ? readApkVersion(previousRollbackPath) : null;
 
 const checks = {
   manifestVersionAligned:
@@ -57,6 +81,25 @@ const checks = {
   daemonApkSizeMatchesManifest: statSync(daemonApkPath).size === daemonManifest.size,
   updateLatestAliasMatchesVersioned: sha256(updateLatestAliasPath) === sha256(updateApkPath),
   daemonLatestAliasMatchesVersioned: sha256(daemonLatestAliasPath) === sha256(daemonApkPath),
+  normalManifestMatchesApk:
+    updateApkVersion.versionName === updateManifest.versionName
+    && updateApkVersion.versionCode === updateManifest.versionCode,
+  preparedRollbackManifestMatchesApk:
+    preparedRollbackVersion.versionName === preparedRollback.versionName
+    && preparedRollbackVersion.versionCode === preparedRollback.versionCode
+    && sha256(preparedRollbackPath) === preparedRollback.sha256,
+  preparedRollbackOccupiesCurrentSubversion:
+    preparedRollback.versionName === `${updateManifest.versionName}.1`
+    && preparedRollback.versionCode > updateManifest.versionCode,
+  nextNormalCanReplacePreparedRollback:
+    computeNormalVersionCode(Number(updateManifest.buildNumber) + 1) > preparedRollback.versionCode,
+  previousRollbackManifestMatchesApk: !previousRollback || (
+    previousRollbackVersion.versionName === previousRollback.versionName
+    && previousRollbackVersion.versionCode === previousRollback.versionCode
+    && sha256(previousRollbackPath) === previousRollback.sha256
+  ),
+  previousRollbackIsOlderPayload: !previousRollback
+    || previousRollback.sourceVersionName !== updateManifest.versionName,
 };
 
 const ok = Object.values(checks).every(Boolean);

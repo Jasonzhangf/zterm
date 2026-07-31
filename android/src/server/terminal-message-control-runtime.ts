@@ -1,9 +1,10 @@
 import { normalizeScheduleDraft } from '../../../packages/shared/src/schedule/next-fire.ts';
-import { classifySessionActivities } from './terminal-session-activity-runtime';
+import { publishSessionActivitiesRuntime } from './terminal-session-activity-runtime';
 import type { ScheduleJob } from '../../../packages/shared/src/schedule/types.ts';
 import type {
   BridgeServerMessage as ServerMessage,
   HostConfigMessage,
+  TerminalTransportServerFrame,
 } from '@zterm/shared/protocol';
 import type {
   ScheduleJobDraft,
@@ -31,7 +32,7 @@ export interface TerminalMessageControlRuntimeDeps {
     renameSession: (currentName: string, nextName: string) => void;
     markSessionMissing: (sessionName: string, reason: string) => void;
   };
-  sendTransportMessage: (transport: TerminalSessionTransport | null | undefined, message: ServerMessage) => void;
+  sendTransportMessage: (transport: TerminalSessionTransport | null | undefined, message: TerminalTransportServerFrame) => void;
   sendMessage: (session: TerminalTransportSubscriber, message: ServerMessage) => void;
   sendScheduleStateToSession: (session: TerminalTransportSubscriber, sessionName?: string) => void;
   listTmuxSessions: () => string[];
@@ -123,9 +124,11 @@ export function handleListSessionsMessageRuntime(
 ) {
   try {
     deps.sendTransportMessage(connection.transport, { type: 'sessions', payload: { sessions: deps.listTmuxSessions() } });
-    deps.sendTransportMessage(connection.transport, {
-      type: 'session-activity',
-      payload: { activities: classifySessionActivities(deps.mirrors, Date.now()) },
+    publishSessionActivitiesRuntime({
+      connection,
+      mirrors: deps.mirrors,
+      now: Date.now(),
+      sendTransportMessage: deps.sendTransportMessage,
     });
   } catch (error) {
     const err = error instanceof Error ? error.message : String(error);
@@ -343,16 +346,10 @@ export function handleMuxChannelOpenedMessageRuntime(
   deps: TerminalMessageControlRuntimeDeps,
   connection: TerminalTransportConnection,
 ) {
-  try {
-    deps.sendTransportMessage(connection.transport, {
-      type: 'session-activity',
-      payload: { activities: classifySessionActivities(deps.mirrors, Date.now()) },
-    });
-  } catch (error) {
-    const err = error instanceof Error ? error.message : String(error);
-    deps.sendTransportMessage(connection.transport, {
-      type: 'error',
-      payload: { message: `Failed to broadcast session-activity: ${err}`, code: 'session_activity_failed' },
-    });
-  }
+  publishSessionActivitiesRuntime({
+    connection,
+    mirrors: deps.mirrors,
+    now: Date.now(),
+    sendTransportMessage: deps.sendTransportMessage,
+  });
 }

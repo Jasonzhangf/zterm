@@ -1,6 +1,15 @@
-import { describe, expect, it } from 'vitest';
-import { classifySessionActivities, SESSION_IDLE_STOPPED_THRESHOLD_MS } from './terminal-session-activity-runtime';
-import type { SessionMirror } from './terminal-runtime-types';
+import { describe, expect, it, vi } from 'vitest';
+import { isTerminalMuxServerFrame } from '@zterm/shared/protocol';
+import {
+  classifySessionActivities,
+  publishSessionActivitiesRuntime,
+  SESSION_IDLE_STOPPED_THRESHOLD_MS,
+} from './terminal-session-activity-runtime';
+import type {
+  SessionMirror,
+  TerminalSessionTransport,
+  TerminalTransportConnection,
+} from './terminal-runtime-types';
 
 function makeMirror(sessionName: string, lastLiveActivityAt: number): SessionMirror {
   const base: SessionMirror = {
@@ -27,6 +36,32 @@ function makeMirror(sessionName: string, lastLiveActivityAt: number): SessionMir
     subscribers: new Set(),
   };
   return base;
+}
+
+function makeConnection(mux = false): TerminalTransportConnection {
+  const transport: TerminalSessionTransport = {
+    kind: 'rtc',
+    readyState: 1,
+    requestOrigin: 'relay-host',
+    connectedSent: true,
+    sendText: vi.fn(),
+    close: vi.fn(),
+  };
+  return {
+    transportId: 'transport-1',
+    transport,
+    closeTransport: vi.fn(),
+    requestOrigin: 'relay-host',
+    role: 'session',
+    boundSubscriberId: null,
+    ...(mux
+      ? {
+          muxVersion: 1,
+          muxClientInstanceId: 'android-client-1',
+          muxChannels: new Map<string, string>(),
+        }
+      : {}),
+  };
 }
 
 describe('classifySessionActivities', () => {
@@ -108,5 +143,69 @@ describe('classifySessionActivities', () => {
     ]);
     const result = classifySessionActivities(mirrors, now, threshold);
     expect(result.map((r) => r.name)).toEqual(['a', 'z']);
+  });
+});
+
+describe('publishSessionActivitiesRuntime', () => {
+  const now = 100_000;
+  const mirrors = new Map<string, SessionMirror>([
+    ['demo', makeMirror('demo', now - 1_000)],
+  ]);
+
+  it('publishes a raw control message only for a legacy pre-mux connection', () => {
+    const connection = makeConnection(false);
+    const sendTransportMessage = vi.fn();
+
+    publishSessionActivitiesRuntime({
+      connection,
+      mirrors,
+      now,
+      sendTransportMessage,
+    });
+
+    expect(sendTransportMessage).toHaveBeenCalledTimes(1);
+    expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
+      type: 'session-activity',
+      payload: {
+        activities: [{
+          name: 'demo',
+          lastLiveActivityAt: now - 1_000,
+          stopped: false,
+        }],
+      },
+    });
+  });
+
+  it('publishes session activity through the target control envelope after mux negotiation', () => {
+    const connection = makeConnection(true);
+    const sendTransportMessage = vi.fn();
+
+    publishSessionActivitiesRuntime({
+      connection,
+      mirrors,
+      now,
+      sendTransportMessage,
+    });
+
+    expect(sendTransportMessage).toHaveBeenCalledTimes(1);
+    const frame = sendTransportMessage.mock.calls[0]?.[1];
+    expect(frame).toEqual({
+      type: 'mux-target-message',
+      payload: {
+        message: {
+          type: 'session-activity',
+          payload: {
+            activities: [{
+              name: 'demo',
+              lastLiveActivityAt: now - 1_000,
+              stopped: false,
+            }],
+          },
+        },
+      },
+    });
+    expect(isTerminalMuxServerFrame(frame)).toBe(true);
+    expect(frame).not.toMatchObject({ type: 'session-activity' });
+    expect(frame).not.toMatchObject({ type: 'mux-channel-message' });
   });
 });

@@ -90,6 +90,7 @@ function createHarness(options?: {
   const recordPerformanceTrace = vi.fn();
 
   const runtime = createTerminalMirrorRuntime({
+    buildExactTmuxSessionTarget: (sessionName) => `=${sessionName}`,
     defaultViewport: { cols: 120, rows: 40 },
     sessions,
     mirrors,

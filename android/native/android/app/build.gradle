@@ -14,6 +14,7 @@ if (nativeFileWriteBatchChunks < 1) {
 }
 def buildMetaFile = file('../../../.build-meta.json')
 def buildMeta = buildMetaFile.exists() ? new JsonSlurper().parse(buildMetaFile) : [buildNumber: 1000]
+def appVersionContract = new JsonSlurper().parse(file('../../../contracts/app-version.json'))
 def semverParts = String.valueOf(packageJson.version).tokenize('.').collect { part ->
     try {
         return Integer.parseInt(part.replaceAll(/[^0-9].*$/, ''))
@@ -26,8 +27,16 @@ while (semverParts.size() < 3) {
 }
 def appVersionName = String.valueOf(packageJson.version)
 def buildNumber = Math.max(1000, Integer.parseInt(String.valueOf(buildMeta.buildNumber)))
-def appDisplayVersion = "${appVersionName}.${String.format('%04d', buildNumber)}"
-def appVersionCode = (semverParts[0] * 100000000) + (semverParts[1] * 1000000) + (semverParts[2] * 10000) + buildNumber
+def rollbackVariant = providers.gradleProperty('ztermRollbackVariant').orNull == 'true'
+def appDisplayVersion = "${appVersionName}.${String.format('%04d', buildNumber)}${rollbackVariant ? '.1' : ''}"
+def normalVersionCode = Integer.parseInt(String.valueOf(appVersionContract.version_code_epoch)) +
+    (buildNumber * Integer.parseInt(String.valueOf(appVersionContract.normal_slot_stride)))
+def appVersionCode = normalVersionCode + (rollbackVariant
+    ? Integer.parseInt(String.valueOf(appVersionContract.rollback_offset))
+    : 0)
+if (appVersionCode > Integer.parseInt(String.valueOf(appVersionContract.android_version_code_max))) {
+    throw new GradleException("versionCode ${appVersionCode} exceeds app-version contract limit")
+}
 
 android {
     namespace = "com.zterm.android"

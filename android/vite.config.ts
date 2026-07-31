@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'fs';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import { resolve } from 'path';
+import { buildDisplayVersion, computeNormalVersionCode } from './scripts/app-version.mjs';
 
 const pkg = JSON.parse(readFileSync(resolve(__dirname, 'package.json'), 'utf-8')) as { version: string };
 const appPackageName = 'com.zterm.android';
@@ -10,21 +11,9 @@ const buildMeta = existsSync(buildMetaPath)
   ? (JSON.parse(readFileSync(buildMetaPath, 'utf-8')) as { buildNumber?: number })
   : { buildNumber: 1000 };
 const appBuildNumber = String(Math.max(1000, Math.floor(buildMeta.buildNumber || 1000))).padStart(4, '0');
-const appDisplayVersion = `${pkg.version}.${appBuildNumber}`;
+const appDisplayVersion = buildDisplayVersion(pkg.version, Number.parseInt(appBuildNumber, 10));
 const isVitest = process.env.VITEST === 'true';
-
-function computeVersionCode(version: string, buildNumber: number) {
-  const semverParts = version.split('.').map((part) => {
-    const matched = part.match(/^\d+/);
-    return matched ? Number.parseInt(matched[0], 10) : 0;
-  });
-  while (semverParts.length < 3) {
-    semverParts.push(0);
-  }
-  return (semverParts[0] * 100000000) + (semverParts[1] * 1000000) + (semverParts[2] * 10000) + buildNumber;
-}
-
-const appVersionCode = computeVersionCode(pkg.version, Number.parseInt(appBuildNumber, 10));
+const appVersionCode = computeNormalVersionCode(Number.parseInt(appBuildNumber, 10));
 const enableSourcemap = process.env.ZTERM_BUILD_SOURCEMAP === 'true';
 
 export default defineConfig({

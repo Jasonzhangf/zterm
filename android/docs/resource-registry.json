@@ -125,12 +125,15 @@
         "resource.debug_channel"
       ],
       "required_gates": [
+        "scripts/app-version.test.ts",
+        "scripts/verify-update-bundle.mjs",
         "src/lib/resource-registry-truth.test.ts",
         "release:verify"
       ],
       "canonical_docs": [
         "docs/resource-map.md",
-        "docs/function-map.md"
+        "docs/function-map.md",
+        "docs/testing/app-update-version-test-design.md"
       ]
     },
     {

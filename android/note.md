@@ -4472,3 +4472,52 @@ Need runtime debug to confirm:
 - Allowed idle paths: shared protocol, classifier/publisher, daemon heartbeat, target mux/control send, registries/maps/docs/tests. Forbidden: client UI notification, renderer, open-tab, active-session, and daemon client lifecycle truth.
 - Publication contract: preserve legacy `sessions` payload byte semantics; independently emit target-level `session-activity` after list, successful mux attach, and once per open physical transport on the existing heartbeat tick. Closed/stale transports receive none; multiple mux channels on one physical connection must not duplicate heartbeat publication. Publication failure is logged/projected explicitly and must not be converted into a successful attach or a transport close.
 - Required gates: paired classifier threshold/resume tests, list legacy-shape + activity/error tests, mux attach success/failure tests, heartbeat open/multi-channel/closed/stale tests, protocol tests, feature/resource/module/import/mainline gates, type-check, daemon close-loop, packaged APK, installed-device foreground replay.
+# 2026-07-31 session-activity invalid terminal mux frame diagnosis
+
+- Symptom: Android reports `invalid terminal mux frame`, then the target transport is finalized as retryable and later surfaces as `rtc connection timeout`.
+- SOP/model flow: existing multiplex transport control path. `resource.session_idle_facts -> resource.daemon_target_transport` must use target-level mux control frames; session-bound business data must use `resource.terminal_channel`.
+- Confirmed first divergence: commit `2a5d5a6` added raw `{ type: 'session-activity' }` writes in `terminal-daemon-runtime.ts#startHeartbeatLoop` and after `mux-channel-opened`. After `mux-hello`, the physical transport accepts only `TerminalMuxServerFrame`; Android rejects the raw message in `session-context-transport-runtime.ts#bindTargetMuxTransportSocketLifecycleRuntime` before any RTC recovery logic runs.
+- Unique owner: `feature_id=daemon.session_idle_detection`; `terminal-session-activity-runtime.ts` must own classification plus target-control publication. The publisher must emit raw `session-activity` only for legacy/pre-mux connections and `mux-target-message` for a mux-negotiated physical transport.
+- Change category: separate transport envelope projection into the existing session-idle owner and physically remove the duplicate raw publishers. Allowed paths are the feature registry paths under `src/server/**`, shared mux protocol tests, and mapped docs. Forbidden paths are client contexts, UI, renderer, open-tab, and notification owners.
+- Test design:
+  - White-box positive: legacy/pre-mux connection gets exactly one raw `session-activity`.
+  - White-box positive: mux-negotiated connection gets exactly one `mux-target-message` carrying `session-activity`.
+  - White-box negative: mux-negotiated connection never gets a raw `session-activity` or `mux-channel-message`.
+  - Module black-box positive: mux `list-sessions` reply carries both `sessions` and `session-activity` as target envelopes with the request id.
+  - Module black-box positive: `mux-channel-open` emits `mux-channel-opened`, then target-level `session-activity`.
+  - Module black-box negative: no frame written to the physical mux transport fails `isTerminalMuxServerFrame`.
+  - Heartbeat positive/negative: mux heartbeat publishes one target envelope per physical transport, while a legacy attached transport keeps the raw control message.
+- Exact replay after implementation: start installed daemon, negotiate `mux-hello`, open a channel, and assert every received frame passes `isTerminalMuxServerFrame`; then wait through a heartbeat publication and assert `session-activity` is inside `mux-target-message`.
+
+# 2026-07-31 rcc / rccstart session identity collision diagnosis
+
+- Live symptom at 21:55: the Android drawer selected `rcc`, while the rendered route log belonged to `rccstart`.
+- Root-source proof: tmux accepts prefix targets. With only `<probe>start` present, `tmux display-message -p -t <probe> '#{session_name}'` returned `<probe>start`, while `-t =<probe>` failed because the exact session was absent. The daemon currently passes bare session names to `has-session`, initial mirror `display-message`, input, resize, rename, and close operations.
+- Historical daemon proof: at `2026-07-31 21:55:20`, `[mirror:rcc]` opened with `total=200448` and route-log lines even though the current `rcc` pane contains no route-log marker; the same marker occurs 2623 times in `rccstart`. This is the first authoritative divergence, before client mux demux or renderer projection.
+- Architecture mapping: `terminal.buffer_render` consumes `resource.tmux_session` into `resource.mirror_store`; `terminal.daemon_input` consumes `resource.backend_session -> resource.tmux_session`. The unique backend target builder belongs in `src/server/terminal-control-runtime.ts`; mirror capture/runtime receive that builder through dependency injection. This is separation/downward normalization, not a client fallback. UI, channel mapping, sparse buffer, and renderer remain unchanged.
+- Test design: positive exact target `rcc` stays `=rcc`; negative prefix collision `rcc` must not resolve `rccstart`; module tests lock existence, capture, resize, input, rename, and close commands to exact targets. Live closeout must start an isolated `<name>start` session, prove daemon open of absent `<name>` creates/captures `<name>` rather than the prefix session, then replay Android `rcc` / `rccstart` switching against distinct pane content.
+
+# 2026-07-31 rollback version ordering correction
+
+- Jason reconfirmed the contract: normal `0.1.3.N`; rollback of that release `0.1.3.N.1`; next normal `0.1.3.N+1`, with Android `versionCode(N) < versionCode(N.1) < versionCode(N+1)`.
+- The shipped implementation violated it by setting bit 30 on rollback codes, making every later normal build lower forever. It also only patched `versionCode`; the APK manifest kept the base `versionName`, despite manifest metadata claiming `.1`.
+- Owner is `release.update_artifact` / `resource.release_update_artifact`. Correct implementation uses one machine contract for epoch/stride/rollback offset, real Gradle normal and rollback variants, and the previous release's retained `.1` artifact as `rollbackToPrevious`.
+# 2026-07-31 Android rollback subversion correction
+
+- Jason 再次确认唯一版本合同：正常版 `0.1.3.N`，回退版 `0.1.3.N.1`，下一正常版 `0.1.3.N+1`。旧实现把回退 `versionCode` 放进 bit-30 高位，导致后续正常包被 Android 判定为低版本，属于 release/update artifact owner 的排序真源错误。
+- 本次修复 owner：`release.update_artifact` / `resource.release_update_artifact` / `daemon.support`。修改点只应落在 app version contract、Gradle APK manifest 构建、update bundle builder/verifier 和其测试；客户端 updater 只消费 manifest，不得补降级安装或 `adb install -d` fallback。
+- 必跑正向：`N < N.1 < N+1`、新 epoch 高于已发布 bit-30 rollback、normal/rollback APK 内 manifest 与 latest.json 对齐。必跑反向：rollback 不能占用跨 build 的永久高位、previous rollback payload 不能指向当前 normal、自称 `.1` 但 APK 内 versionName 未变必须红灯。最终必须真机无 `-d` 依次覆盖安装。
+
+# 2026-07-31 mux channel closed control-status stopgap + reconnect UI grace
+
+- User-facing issue: data/session channel close could present as black-box `rtc connection timeout`/disconnect before the app used the still-alive target control line to decide whether the tmux session still existed. This made control/data separation opaque during recovery.
+- Root owner: client `terminal.transport_lifecycle` / mux orchestration. Existing protocol separation was already locked by shared mux tests: target/control uses `mux-target-message`, session body uses `mux-channel-message`, and raw frames after `mux-hello` are invalid.
+- Fix: `resolveMuxChannelClosedWithControlStatusRuntime()` now handles closed mux data channels by sending target-control `list-sessions` through the existing open target mux transport before deciding outcome. If the tmux session still exists and the session is active/live, it schedules the same session reconnect; if tmux truth says the session is gone, it marks closed; if the channel has already reopened, it ignores stale control results; inactive sessions become idle instead of auto reconnecting.
+- UI grace: `NETWORK_BANNER_GRACE_MS` is now 10s. During that grace, when network is online and the active session is `reconnecting`, the network banner stays hidden and the portrait status strip projects `waiting`/green instead of visibly flashing reconnect.
+- Verification: focused transport/UI gate `52/52 PASS`; `tsc --noEmit` PASS; `git diff --check` PASS; full `pnpm --dir android run build:android` PASS; built APK `0.1.3.2284` / `versionCode=1100022840`; rollback APK `0.1.3.2284.1` / `versionCode=1100022841`; ADB install and launch on `100.104.163.65:5555` PASS; local `127.0.0.1:3333`, Tailscale `100.66.1.82:3333`, and public Relay update routes all serve `0.1.3.2284` with sha `7bba4871557ae47620030f65c8cc946207a82a6f8ccef53eff26aed26e217377`.
+
+# 2026-07-31 mux/control release closeout correction
+
+- Final release supersedes the intermediate `2284` evidence above. Current update artifact is APK `0.1.3.2285` / `versionCode=1100022850`, sha256 `d5365cda25b635ff9c3d4cf120c4617ea1054b85a5dc43ff5bc539a3810c6aa7`; prepared rollback is `0.1.3.2285.1` / `1100022851`, sha256 `1c499b9c76d48e57501c7563d028b4694047f64e1a559588a4d7771b9e64ca70`; previous rollback retained as `0.1.3.2284.1` / `1100022841`, sha256 `a4a96239d29b546ad3b256723c26acc5845eb21d2231166a99ad0b4607b5de02`.
+- Verified after the final attachTmux negative test addition: `terminal-message-runtime.test.ts` 40/40 PASS; combined transport/UI/server gate 110/110 PASS; `tsc --noEmit` PASS; `git diff --check` PASS; `test:feature-registry` 79/79 PASS; codex review final verdict `VERDICT: PASS`.
+- Public Relay route `https://relay.codewhisper.cc:18443/relay/updates/latest.json` serves `0.1.3.2285`; downloaded public normal, rollback, and previous rollback APK sha256 values match manifest. Online ADB device `100.104.163.65:5555` reports installed package `versionCode=1100022850`, `versionName=0.1.3.2285`.

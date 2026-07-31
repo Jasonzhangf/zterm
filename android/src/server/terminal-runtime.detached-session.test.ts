@@ -43,6 +43,7 @@ function createDeps() {
       };
     },
     runtime: createTerminalRuntime({
+      buildExactTmuxSessionTarget: (sessionName) => `=${sessionName}`,
       defaultSessionName: 'default',
       defaultViewport: { cols: 120, rows: 40 },
       sessions,
@@ -234,7 +235,7 @@ describe('terminal runtime detached transport cleanup', () => {
 
     runtime.detachSubscriberTransportOnly(session, 'websocket closed', connection.transportId);
 
-    expect(runTmux).not.toHaveBeenCalledWith(['set-window-option', '-u', '-t', 'demo', 'window-size']);
+    expect(runTmux).not.toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
     expect(mirror.cols).toBe(56);
     expect(mirror.rows).toBe(24);
     expect(mirror.baselineCols).toBe(56);
@@ -282,8 +283,8 @@ describe('terminal runtime detached transport cleanup', () => {
 
     runtime.detachSubscriberTransportOnly(session, 'websocket closed', connection.transportId);
 
-    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', 'demo', '-x', '120']);
-    expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', 'demo', 'window-size']);
+    expect(runTmux).toHaveBeenCalledWith(['resize-window', '-t', '=demo', '-x', '120']);
+    expect(runTmux).toHaveBeenCalledWith(['set-window-option', '-u', '-t', '=demo', 'window-size']);
     expect(mirror.cols).toBe(55);
     expect(mirror.rows).toBe(24);
     expect(session.adaptiveWidthCols).toBeNull();

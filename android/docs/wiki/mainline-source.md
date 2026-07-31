@@ -26,6 +26,9 @@ flowchart TD
   SessionRuntime --> TransportReusePlan["src/contexts/session-transport-open-helpers.ts"]
   SessionContext --> TransportOrchestration["src/contexts/session-context-transport-orchestration-runtime.ts"]
   TransportOrchestration --> TransportOpen["src/contexts/session-context-transport-open-runtime.ts"]
+  TransportOrchestration --> TerminalChannelClosedIn01CloseSignal["src/contexts/session-context-transport-orchestration-runtime.ts#buildMuxChannelCallbacks.onClosed"]
+  TerminalChannelClosedIn01CloseSignal --> TerminalChannelClosedIn02ControlStatusDecision["src/contexts/session-context-transport-orchestration-runtime.ts#resolveMuxChannelClosedWithControlStatusRuntime"]
+  TerminalChannelClosedIn02ControlStatusDecision --> TerminalTargetControlOut01ListSessions["src/contexts/session-context-tmux-management-runtime.ts#manageTmuxSessionsOnOpenTransportRuntime"]
   TransportOpen --> TransportReusePlan
   TransportOpen --> TraversalSocketFactory["src/contexts/session-context-infra-runtime.ts#buildTraversalSocketForHostRuntime"]
   TraversalSocketFactory --> TraversalSocket["src/lib/traversal/socket.ts#TraversalSocket"]
@@ -156,10 +159,15 @@ flowchart TD
   Server --> DaemonRuntime["src/server/terminal-daemon-runtime.ts"]
   Server --> Runtime["src/server/terminal-runtime.ts"]
   DaemonRuntime --> Runtime
-  DaemonRuntime --> IdleActivityClassifierIn01MirrorWalk["src/server/terminal-session-activity-runtime.ts#classifySessionActivities"]
-  Mirror --> IdleActivityClassifierIn01MirrorWalk
+  DaemonRuntime --> IdleSessionPublishIn01Request["src/server/terminal-session-activity-runtime.ts#publishSessionActivitiesRuntime"]
+  Message --> IdleSessionListIn01ControlTrigger["src/server/terminal-message-control-runtime.ts#handleListSessionsMessageRuntime"]
+  MuxHandshake --> IdleSessionMuxOpenIn01ControlTrigger["src/server/terminal-message-control-runtime.ts#handleMuxChannelOpenedMessageRuntime"]
+  IdleSessionListIn01ControlTrigger --> IdleSessionPublishIn01Request
+  IdleSessionMuxOpenIn01ControlTrigger --> IdleSessionPublishIn01Request
+  IdleSessionPublishIn01Request --> IdleActivityClassifierIn01MirrorWalk["src/server/terminal-session-activity-runtime.ts#classifySessionActivities"]
+  Mirror --> IdleSessionPublishIn01Request
   IdleActivityClassifierIn01MirrorWalk --> IdleActivityClassifierOut01ClassifiedFacts["src/server/terminal-session-activity-runtime.ts#classifySessionActivities"]
-  IdleActivityClassifierOut01ClassifiedFacts --> IdleSessionBroadcastOut01TransportPublish["src/server/terminal-session-activity-runtime.ts#publishSessionActivitiesRuntime"]
+  IdleActivityClassifierOut01ClassifiedFacts --> IdleSessionBroadcastOut01TransportPublish["src/server/terminal-transport-runtime.ts#sendTransportMessage"]
   IdleSessionBroadcastOut01TransportPublish --> TransportSend
   Runtime --> Bridge["src/server/terminal-bridge-runtime.ts"]
   Bridge --> MuxHandshake["packages/shared/src/connection/protocol.ts#TerminalMuxServerFrame"]
@@ -286,7 +294,7 @@ flowchart TD
 | surface | files |
 | --- | --- |
 | Android app entry | `src/main.tsx`, `src/App.tsx`, `src/pages/ConnectionsPage.tsx`, `src/pages/TerminalPage.tsx` |
-| Client transport lifecycle | `packages/shared/src/connection/protocol.ts`, `src/contexts/SessionContext.tsx`, `src/contexts/session-context-session-orchestration-runtime.ts`, `src/contexts/session-context-session-runtime.ts`, `src/contexts/session-context-activity-runtime.ts`, `src/contexts/session-context-transport-runtime.ts`, `src/contexts/session-context-transport-orchestration-runtime.ts`, `src/contexts/session-context-transport-open-runtime.ts`, `src/contexts/session-context-socket-message-runtime.ts`, `src/contexts/session-context-lifecycle.ts#selectNextPassiveVisibleRefreshCandidate`, `src/contexts/session-transport-open-helpers.ts`, `src/lib/session-transport-runtime.ts`; network-generation probes enumerate physical targets through `TargetTransportAccessors -> TargetTransportStoreEnumeration`, while valid inbound frames settle only their exact socket generation through `TargetMuxFrameLifecycle -> TargetNetworkActivityBinding -> TargetNetworkProbe`; target mux nodes are `TargetTransportRuntime`, `MuxHandshake`, `TerminalTransportError01TargetFailure`, `ChannelRuntime`, `ChannelMessageSend`, and `ChannelDemux`; mux readiness failure records route health exactly once, retires the exact physical generation, then schedules one target rebuild; WebRTC route diagnostics include metadata-only selected ICE pair projection through `src/lib/traversal/socket.ts` and `src/pages/TerminalPageDebugOverlay.tsx` |
+| Client transport lifecycle | `packages/shared/src/connection/protocol.ts`, `src/contexts/SessionContext.tsx`, `src/contexts/session-context-session-orchestration-runtime.ts`, `src/contexts/session-context-session-runtime.ts`, `src/contexts/session-context-activity-runtime.ts`, `src/contexts/session-context-transport-runtime.ts`, `src/contexts/session-context-transport-orchestration-runtime.ts`, `src/contexts/session-context-transport-open-runtime.ts`, `src/contexts/session-context-socket-message-runtime.ts`, `src/contexts/session-context-lifecycle.ts#selectNextPassiveVisibleRefreshCandidate`, `src/contexts/session-transport-open-helpers.ts`, `src/lib/session-transport-runtime.ts`; network-generation probes enumerate physical targets through `TargetTransportAccessors -> TargetTransportStoreEnumeration`, while valid inbound frames settle only their exact socket generation through `TargetMuxFrameLifecycle -> TargetNetworkActivityBinding -> TargetNetworkProbe`; target mux nodes are `TargetTransportRuntime`, `MuxHandshake`, `TerminalTransportError01TargetFailure`, `ChannelRuntime`, `ChannelMessageSend`, `ChannelDemux`, `TerminalChannelClosedIn01CloseSignal`, `TerminalChannelClosedIn02ControlStatusDecision`, and `TerminalTargetControlOut01ListSessions`; mux readiness failure records route health exactly once, retires the exact physical generation, then schedules one target rebuild; WebRTC route diagnostics include metadata-only selected ICE pair projection through `src/lib/traversal/socket.ts` and `src/pages/TerminalPageDebugOverlay.tsx` |
 | Terminal body receive/apply/render | `src/contexts/session-context-socket-message-runtime.ts#handleSocketServerMessageRuntime`, `src/contexts/session-context-buffer-runtime.ts#applyIncomingBufferSyncRuntime`, `src/contexts/session-buffer-frame-assembly.ts#assembleBufferSyncFrameChunk`, `src/contexts/session-context-buffer-runtime.ts#applyResolvedBufferSyncPayloadRuntime`, `src/lib/session-render-gate.ts#scheduleCommit`, `src/lib/session-render-buffer-store.ts` |
 | Terminal performance observer | `src/lib/terminal-performance-trace.ts`, `src/server/terminal-debug-runtime.ts`, `src/lib/runtime-debug.ts`; metadata only, no terminal text/cells |
 | Terminal shell and panes | `src/pages/TerminalPageStageShell.tsx`, `src/hooks/useTerminalWorkspace.ts`, `src/lib/workspace-persistence.ts`, `src/components/terminal/TerminalHeader.tsx`, `src/components/terminal/TerminalQuickBar.tsx` |
@@ -297,7 +305,7 @@ flowchart TD
 | Daemon runtime | `src/server/server.ts`, `src/server/terminal-daemon-runtime.ts`, `src/server/terminal-runtime.ts`, `src/server/terminal-message-runtime.ts`, `src/server/terminal-mirror-runtime.ts`, `src/server/terminal-message-control-runtime.ts`, `src/server/terminal-transport-runtime.ts`, `src/server/remote-window-stream-daemon.ts` |
 | Daemon control edges | `src/server/terminal-control-runtime.ts`, `src/server/terminal-file-transfer-runtime.ts`, `src/server/terminal-schedule-runtime.ts`, `src/server/remote-screenshot-daemon.ts`, `src/server/remote-window-stream-daemon.ts`, `src/server/terminal-http-runtime.ts` |
 | Daemon CLI | `scripts/zterm-daemon.sh`, `scripts/windows/zterm-daemon.ps1`, `scripts/install-global-daemon-cli.sh`, `scripts/prepare-global-daemon-release.sh`, `scripts/prepare-daemon-npm-package.mjs` |
-| Release/update | `scripts/build-android-debug.sh`, `scripts/prepare-update-bundle.mjs`, `scripts/verify-release-assets.mjs`; Relay public update route and future `RelayPeerLease` idle-resume resource are authored in `src/traversal-relay/server.ts` and packaged by `scripts/prepare-relay-server-npm-package.mjs` with `ZTERM_TRAVERSAL_UPDATES_DIR` |
+| Release/update | `contracts/app-version.json`, `scripts/app-version.mjs`, `native/android/app/build.gradle`, `scripts/build-android-debug.sh`, `scripts/prepare-update-bundle.mjs`, `scripts/verify-update-bundle.mjs`, `scripts/verify-release-assets.mjs`; normal `N`, rollback `N.1`, and next normal `N+1` occupy strictly increasing Android version-code slots; Relay public update route and future `RelayPeerLease` idle-resume resource are authored in `src/traversal-relay/server.ts` and packaged by `scripts/prepare-relay-server-npm-package.mjs` with `ZTERM_TRAVERSAL_UPDATES_DIR` |
 | Worker wiki generator | `scripts/build-function-wiki.mjs`, `docs/wiki/daemon.md`, `docs/wiki/cli.md`, `docs/wiki/mainline-source.md` |
 | Global resource truth | `docs/resource-registry.json`, `docs/resource-map.md`, `docs/testing/resource-truth-test-design.md` |
 | Project module and edge truth | `docs/module-registry.json`, `docs/edge-registry.json`, `docs/modules/project-modules.md`, `docs/testing/module-edge-registry-test-design.md` |
