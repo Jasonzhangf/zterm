@@ -1,9 +1,12 @@
 import { existsSync } from 'fs';
 import type { Server } from 'http';
 import { WebSocket, WebSocketServer } from 'ws';
+import type { BridgeServerMessage } from '@zterm/shared/protocol';
+import type { TerminalSessionTransport } from './terminal-runtime-types';
 import type { TerminalSession, SessionMirror } from './terminal-runtime';
 import type { DaemonTransportConnection } from './terminal-transport-runtime';
 import { TERMINAL_TRANSPORT_STALE_INBOUND_MS } from './terminal-transport-runtime';
+import { classifySessionActivities } from './terminal-session-activity-runtime';
 
 export interface DestroyMirrorOptions {
   closeTransportSubscribers?: boolean;
@@ -32,6 +35,10 @@ export interface TerminalDaemonRuntimeDeps {
   connections: Map<string, DaemonTransportConnection>;
   mirrors: Map<string, SessionMirror>;
   server: Server;
+  sendTransportMessage: (
+    transport: TerminalSessionTransport | null | undefined,
+    message: BridgeServerMessage,
+  ) => void;
   wss: WebSocketServer;
   logTimePrefix: () => string;
   shutdownTerminalSessions: (sessions: Map<string, TerminalSession>, reason: string) => void;
@@ -152,23 +159,32 @@ export function createTerminalDaemonRuntime(
           }
         }
 
-        if (connection.transport.kind !== 'ws' || connection.transport.readyState !== WebSocket.OPEN) {
+        if (connection.transport.readyState !== WebSocket.OPEN) {
           continue;
         }
 
-        if (!connection.wsAlive) {
-          console.warn(`[${deps.logTimePrefix()}] transport ${connection.id} heartbeat missed pong`);
+        if (boundSubscriberIds.size > 0) {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'session-activity',
+            payload: { activities: classifySessionActivities(deps.mirrors, now) },
+          });
         }
-        connection.wsAlive = false;
-        try {
-          connection.transport.ping?.();
-        } catch (error) {
-          console.warn(
-            `[${deps.logTimePrefix()}] transport ${connection.id} heartbeat ping failed: ${
-              error instanceof Error ? error.message : String(error)
-            }`,
-          );
-          connection.transport.close('heartbeat ping failed');
+
+        if (connection.transport.kind === 'ws') {
+          if (!connection.wsAlive) {
+            console.warn(`[${deps.logTimePrefix()}] transport ${connection.id} heartbeat missed pong`);
+          }
+          connection.wsAlive = false;
+          try {
+            connection.transport.ping?.();
+          } catch (error) {
+            console.warn(
+              `[${deps.logTimePrefix()}] transport ${connection.id} heartbeat ping failed: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+            connection.transport.close('heartbeat ping failed');
+          }
         }
       }
     }, deps.wsHeartbeatIntervalMs);

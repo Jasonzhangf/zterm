@@ -422,7 +422,12 @@ class WebRtcBackend implements Backend {
       }
     };
 
-    signalSocket.onerror = () => handlers.onerror('rtc signaling websocket error');
+    signalSocket.onerror = () => {
+      if (this.dataChannel?.readyState === 'open') {
+        return;
+      }
+      handlers.onerror('rtc signaling websocket error');
+    };
     signalSocket.onclose = (event) => {
       if (this.dataChannel?.readyState === 'open') {
         return;

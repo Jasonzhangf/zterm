@@ -2459,6 +2459,18 @@
         {
           "id": "RelayPeerLease",
           "label": "src/traversal-relay/server.ts#clientPeerLeaseKey/resumeIdleClientPeer"
+        },
+        {
+          "id": "IdleActivityClassifierIn01MirrorWalk",
+          "label": "src/server/terminal-session-activity-runtime.ts#classifySessionActivities"
+        },
+        {
+          "id": "IdleActivityClassifierOut01ClassifiedFacts",
+          "label": "src/server/terminal-session-activity-runtime.ts#classifySessionActivities"
+        },
+        {
+          "id": "IdleSessionBroadcastOut01TransportPublish",
+          "label": "src/server/terminal-session-activity-runtime.ts#publishSessionActivitiesRuntime"
         }
       ],
       "edges": [
@@ -3114,6 +3126,45 @@
           "status": "anchored",
           "edge_id": "daemon_mainline:DaemonFileTransferUploadErrorOut02CompletionRejected->DaemonFileTransferTransportOut01Send",
           "resource_from": "resource.file_transfer",
+          "resource_to": "resource.transport_subscriber",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "DaemonRuntime",
+          "to": "IdleActivityClassifierIn01MirrorWalk",
+          "owner_feature": "daemon.session_idle_detection",
+          "semantic_input": "heartbeat tick trigger",
+          "semantic_output": "mirror idle/stopped classification per session",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:DaemonRuntime->IdleActivityClassifierIn01MirrorWalk",
+          "resource_from": "resource.mirror_store",
+          "resource_to": "resource.session_idle_facts",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "IdleActivityClassifierIn01MirrorWalk",
+          "to": "IdleActivityClassifierOut01ClassifiedFacts",
+          "owner_feature": "daemon.session_idle_detection",
+          "semantic_input": "classified idle/stopped facts per session",
+          "semantic_output": "session-activity message sent to each open physical transport",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:IdleActivityClassifierIn01MirrorWalk->IdleActivityClassifierOut01ClassifiedFacts",
+          "resource_from": "resource.mirror_store",
+          "resource_to": "resource.session_idle_facts",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "IdleActivityClassifierOut01ClassifiedFacts",
+          "to": "IdleSessionBroadcastOut01TransportPublish",
+          "owner_feature": "daemon.session_idle_detection",
+          "semantic_input": "classified idle/stopped facts per session",
+          "semantic_output": "session-activity message sent to each open physical transport",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:IdleActivityClassifierOut01ClassifiedFacts->IdleSessionBroadcastOut01TransportPublish",
+          "resource_from": "resource.session_idle_facts",
           "resource_to": "resource.transport_subscriber",
           "via_resources": [],
           "relation_status": "direct"

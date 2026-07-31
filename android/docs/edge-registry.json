@@ -1601,9 +1601,91 @@
       "mainline_call_ids": [
         "android_mainline:RelayControlSocket->RelayAccountStore"
       ],
+      "allowed_callers": [
+        "src/lib/traversal-relay-client.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/server/**"
+      ],
       "required_gates": [
         "src/lib/edge-registry-truth.test.ts",
         "src/lib/traversal-relay-client.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon.mirror_store_to_session_idle_facts",
+      "from_module": "daemon.mirror_store",
+      "to_module": "daemon.session_idle_detection",
+      "resource_from": "resource.mirror_store",
+      "resource_to": "resource.session_idle_facts",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.session_idle_detection",
+      "allowed_callers": [
+        "src/server/terminal-session-activity-runtime.ts",
+        "src/server/terminal-message-control-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/hooks/**",
+        "src/contexts/**"
+      ],
+      "request_chain": [
+        "IdleActivityClassifierIn01MirrorWalk"
+      ],
+      "response_chain": [
+        "IdleActivityClassifierOut01ClassifiedFacts"
+      ],
+      "error_chain": [
+        "IdleActivityClassifierError00InvalidMirrorData"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:IdleActivityClassifierIn01MirrorWalk->IdleActivityClassifierOut01ClassifiedFacts",
+        "daemon_mainline:IdleActivityClassifierOut01ClassifiedFacts->IdleSessionBroadcastOut01TransportPublish"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/terminal-session-activity-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.daemon.session_idle_facts_to_daemon_target_transport",
+      "from_module": "daemon.session_idle_detection",
+      "to_module": "daemon.transport_subscriber",
+      "resource_from": "resource.session_idle_facts",
+      "resource_to": "resource.transport_subscriber",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "daemon.session_idle_detection",
+      "allowed_callers": [
+        "src/server/terminal-daemon-runtime.ts",
+        "src/server/terminal-message-control-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/**",
+        "src/pages/**",
+        "src/hooks/**",
+        "src/contexts/**"
+      ],
+      "request_chain": [
+        "IdleSessionBroadcastOut01TransportPublish"
+      ],
+      "response_chain": [
+        "IdleSessionBroadcastOut01TransportPublish"
+      ],
+      "error_chain": [
+        "IdleSessionBroadcastError01TransportWrite"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:IdleActivityClassifierOut01ClassifiedFacts->IdleSessionBroadcastOut01TransportPublish"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts"
       ],
       "status": "active"
     }
@@ -2098,6 +2180,21 @@
     {
       "from_module": "shared.terminal_types",
       "to_module": "shared.connection_types",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.schedule_runtime",
+      "to_module": "daemon.session_idle_detection",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.session_idle_detection",
+      "to_module": "daemon.runtime_entry",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.runtime_entry",
+      "to_module": "daemon.session_idle_detection",
       "status": "active"
     }
   ]

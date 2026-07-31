@@ -571,6 +571,7 @@ export type BridgeServerControlMessage =
     }
   | { type: 'buffer-head'; payload: BufferHeadPayload }
   | { type: 'sessions'; payload: { sessions: string[] } }
+  | { type: 'session-activity'; payload: { activities: SessionActivity[] } }
   | { type: 'schedule-state'; payload: ScheduleStatePayload }
   | { type: 'schedule-event'; payload: ScheduleEventPayload }
   | { type: 'schedule-error'; payload: ScheduleErrorPayload }
@@ -605,6 +606,15 @@ export type BridgeServerMessage = BridgeBufferMessage | BridgeServerControlMessa
 
 export function isBridgeBufferMessage(message: BridgeServerMessage): message is BridgeBufferMessage {
   return message.type === 'buffer-sync';
+}
+
+export interface SessionActivity {
+  /** tmux session name */
+  name: string;
+  /** unix ms timestamp of last live screen activity, 0 means never updated */
+  lastLiveActivityAt: number;
+  /** true if no activity for SESSION_IDLE_STOPPED_THRESHOLD_MS (10s) */
+  stopped: boolean;
 }
 
 export const TERMINAL_MUX_PROTOCOL_VERSION = 1 as const;
@@ -662,7 +672,8 @@ export type TerminalMuxTargetServerMessageType =
   | 'sessions'
   | 'debug-control'
   | 'error'
-  | 'pong';
+  | 'pong'
+  | 'session-activity';
 
 export type TerminalMuxTargetServerMessage = Extract<
   BridgeServerMessage,

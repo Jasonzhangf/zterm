@@ -9,6 +9,8 @@ import {
   type TerminalMuxServerFrame,
 } from '@zterm/shared/protocol';
 import type { BridgeServerMessage as ServerMessage } from '@zterm/shared/protocol';
+import type { SessionMirror } from './terminal-runtime-types';
+import { handleMuxChannelOpenedMessageRuntime } from './terminal-message-control-runtime';
 import type {
   TerminalAttachPayload,
   TerminalSession,
@@ -22,6 +24,7 @@ import type {
 // terminal-message-runtime so the message switch stays routing-only.
 export interface TerminalMuxChannelRuntimeDeps {
   sessions: Map<string, TerminalTransportSubscriber>;
+  mirrors: ReadonlyMap<string, SessionMirror>;
   sendTransportMessage: (
     transport: TerminalSessionTransport | null | undefined,
     message: ServerMessage,
@@ -184,6 +187,13 @@ export function createTerminalMuxChannelRuntime(
             },
           },
         });
+        // Publish session-activity after mux-channel-opened so client knows all session states
+        try {
+          handleMuxChannelOpenedMessageRuntime(
+            { mirrors: deps.mirrors, sendTransportMessage: deps.sendTransportMessage } as Parameters<typeof handleMuxChannelOpenedMessageRuntime>[0],
+            connection,
+          );
+        } catch (_err) { /* silent */ }
         void deps.attachTmux(subscriber, {
           sessionName: frame.payload.sessionName,
           cols: frame.payload.cols,

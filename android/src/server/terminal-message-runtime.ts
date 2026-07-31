@@ -103,6 +103,7 @@ export function createTerminalMessageRuntime(
 
   const muxRuntime = createTerminalMuxChannelRuntime({
     sessions: deps.sessions,
+    mirrors: deps.controlRuntimeDeps.mirrors,
     sendTransportMessage: deps.sendTransportMessage,
     createMuxChannelSubscriber: (connection, channelId) =>
       deps.controlRuntimeDeps.createMuxChannelSubscriber(connection, channelId),

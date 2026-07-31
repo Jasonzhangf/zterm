@@ -9608,6 +9608,16 @@ function normalizeScheduleDraft(draft, options) {
   };
 }
 
+// src/server/terminal-session-activity-runtime.ts
+var SESSION_IDLE_STOPPED_THRESHOLD_MS = 1e4;
+function classifySessionActivities(mirrors2, now, thresholdMs = SESSION_IDLE_STOPPED_THRESHOLD_MS) {
+  return Array.from(mirrors2.values()).filter((mirror) => mirror.lastLiveActivityAt > 0).map((mirror) => ({
+    name: mirror.sessionName,
+    lastLiveActivityAt: mirror.lastLiveActivityAt,
+    stopped: now - mirror.lastLiveActivityAt >= thresholdMs
+  })).sort((left, right) => left.name.localeCompare(right.name));
+}
+
 // src/server/terminal-message-control-runtime.ts
 function handleSessionOpenMessageRuntime(deps, connection, payload) {
   connection.role = "control";
@@ -9652,6 +9662,10 @@ function handleSessionTransportConnectRuntime(deps, connection, payload) {
 function handleListSessionsMessageRuntime(deps, connection) {
   try {
     deps.sendTransportMessage(connection.transport, { type: "sessions", payload: { sessions: deps.listTmuxSessions() } });
+    deps.sendTransportMessage(connection.transport, {
+      type: "session-activity",
+      payload: { activities: classifySessionActivities(deps.mirrors, Date.now()) }
+    });
   } catch (error) {
     const err = error instanceof Error ? error.message : String(error);
     deps.sendTransportMessage(connection.transport, {
@@ -9832,6 +9846,20 @@ function handleTmuxControlMessageRuntime(deps, connection, message) {
       return;
   }
 }
+function handleMuxChannelOpenedMessageRuntime(deps, connection) {
+  try {
+    deps.sendTransportMessage(connection.transport, {
+      type: "session-activity",
+      payload: { activities: classifySessionActivities(deps.mirrors, Date.now()) }
+    });
+  } catch (error) {
+    const err = error instanceof Error ? error.message : String(error);
+    deps.sendTransportMessage(connection.transport, {
+      type: "error",
+      payload: { message: `Failed to broadcast session-activity: ${err}`, code: "session_activity_failed" }
+    });
+  }
+}
 
 // src/server/terminal-reliable-input-ack.ts
 var RELIABLE_INPUT_ACKED_SEQ_MAX = 2048;
@@ -9982,6 +10010,13 @@ function createTerminalMuxChannelRuntime(deps) {
             }
           }
         });
+        try {
+          handleMuxChannelOpenedMessageRuntime(
+            { mirrors: deps.mirrors, sendTransportMessage: deps.sendTransportMessage },
+            connection
+          );
+        } catch (_err) {
+        }
         void deps.attachTmux(subscriber, {
           sessionName: frame.payload.sessionName,
           cols: frame.payload.cols,
@@ -10109,6 +10144,7 @@ function createTerminalMessageRuntime(deps) {
   }
   const muxRuntime = createTerminalMuxChannelRuntime({
     sessions: deps.sessions,
+    mirrors: deps.controlRuntimeDeps.mirrors,
     sendTransportMessage: deps.sendTransportMessage,
     createMuxChannelSubscriber: (connection, channelId) => deps.controlRuntimeDeps.createMuxChannelSubscriber(connection, channelId),
     sanitizeSessionName: (input) => deps.controlRuntimeDeps.sanitizeSessionName(input),
@@ -12791,20 +12827,28 @@ function createTerminalDaemonRuntime(deps) {
             continue;
           }
         }
-        if (connection.transport.kind !== "ws" || connection.transport.readyState !== import_websocket.default.OPEN) {
+        if (connection.transport.readyState !== import_websocket.default.OPEN) {
           continue;
         }
-        if (!connection.wsAlive) {
-          console.warn(`[${deps.logTimePrefix()}] transport ${connection.id} heartbeat missed pong`);
+        if (boundSubscriberIds.size > 0) {
+          deps.sendTransportMessage(connection.transport, {
+            type: "session-activity",
+            payload: { activities: classifySessionActivities(deps.mirrors, now) }
+          });
         }
-        connection.wsAlive = false;
-        try {
-          connection.transport.ping?.();
-        } catch (error) {
-          console.warn(
-            `[${deps.logTimePrefix()}] transport ${connection.id} heartbeat ping failed: ${error instanceof Error ? error.message : String(error)}`
-          );
-          connection.transport.close("heartbeat ping failed");
+        if (connection.transport.kind === "ws") {
+          if (!connection.wsAlive) {
+            console.warn(`[${deps.logTimePrefix()}] transport ${connection.id} heartbeat missed pong`);
+          }
+          connection.wsAlive = false;
+          try {
+            connection.transport.ping?.();
+          } catch (error) {
+            console.warn(
+              `[${deps.logTimePrefix()}] transport ${connection.id} heartbeat ping failed: ${error instanceof Error ? error.message : String(error)}`
+            );
+            connection.transport.close("heartbeat ping failed");
+          }
         }
       }
     }, deps.wsHeartbeatIntervalMs);
@@ -13073,6 +13117,31 @@ function createRtcBridgeServer(options) {
         const handlers = options.onTransportOpen(peer.transport);
         peer.transport.attach(peer.peerConnection, channel, handlers);
       };
+    };
+    const connectionTimeoutMs = 15e3;
+    const connectionTimeout = globalThis.setTimeout(() => {
+      if (!peer.ready && peer.peerConnection === peerConnection) {
+        peer.emitSignal({
+          type: "rtc-error",
+          payload: { message: "rtc ice connection timeout" }
+        });
+        peer.transport.close("rtc ice connection timeout");
+      }
+    }, connectionTimeoutMs);
+    peerConnection.oniceconnectionstatechange = () => {
+      const state = peerConnection.iceConnectionState;
+      if (state !== "new" && state !== "checking") {
+        globalThis.clearTimeout(connectionTimeout);
+      }
+      if (state === "failed" || state === "closed" || state === "disconnected") {
+        if (!peer.ready) {
+          peer.emitSignal({
+            type: "rtc-error",
+            payload: { message: `rtc ice connection ${state}` }
+          });
+          peer.transport.close(`rtc ice connection ${state}`);
+        }
+      }
     };
   }
   async function flushPendingIceCandidates(peer) {
@@ -16777,7 +16846,8 @@ var terminalDaemonRuntime = createTerminalDaemonRuntime({
   disposeScheduleRuntime: () => terminalScheduleRuntime.dispose(),
   startRelayHostClient: () => relayHostClient.start(),
   disposeRelayHostClient: () => relayHostClient.dispose(),
-  disposeRtcBridgeServer: () => rtcBridgeServer.dispose()
+  disposeRtcBridgeServer: () => rtcBridgeServer.dispose(),
+  sendTransportMessage
 });
 var {
   extractAuthToken,

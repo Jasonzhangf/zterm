@@ -568,7 +568,8 @@
         "packages/shared/src/workspace/workspace-model.actions.test.ts",
         "packages/shared/src/react/pane-profile.test.ts",
         "mac/src/app/MacPaneWorkbench.split.test.tsx",
-        "pnpm --dir win test --reporter dot"
+        "win/src/windows-workspace.test.ts",
+        "win/src/WindowsDesktopApp.test.tsx"
       ],
       "truth_sources": [
         "docs/ui-slices.md",
@@ -1490,6 +1491,60 @@
         "docs/resource-map.md",
         "docs/function-map.md",
         ".agents/skills/terminal-buffer-truth/SKILL.md"
+      ]
+    },
+    {
+      "feature_id": "daemon.session_idle_detection",
+      "title": "Daemon tmux session idle/stopped detection via control channel",
+      "domain": "daemon",
+      "owners": [
+        "src/server/terminal-session-activity-runtime.ts",
+        "src/server/terminal-daemon-runtime.ts"
+      ],
+      "allowed_paths": [
+        "src/server/terminal-session-activity-runtime.ts",
+        "src/server/terminal-session-activity-runtime.test.ts",
+        "src/server/terminal-message-control-runtime.ts",
+        "src/server/terminal-daemon-runtime.ts",
+        "src/server/terminal-daemon-runtime.test.ts",
+        "src/server/terminal-mux-channel-runtime.ts",
+        "src/server/terminal-message-runtime.ts",
+        "src/server/server.ts",
+        "packages/shared/src/connection/protocol.ts",
+        "packages/shared/src/connection/protocol.test.ts",
+        "docs/decisions/2026-07-30-session-idle-stopped-notification.md",
+        "docs/goals/session-idle-detection-plan.md",
+        "docs/resource-registry.json",
+        "docs/resource-map.md",
+        "docs/module-registry.json",
+        "docs/edge-registry.json",
+        "docs/function-map.md",
+        "docs/feature-registry.json",
+        "docs/feature-gates.md",
+        "docs/wiki/mainline-call-map.json",
+        "docs/wiki/mainline-source.md"
+      ],
+      "forbidden_paths": [
+        "src/components",
+        "src/pages",
+        "src/contexts",
+        "src/hooks",
+        "src/contexts/session-context-tmux-management-runtime.ts"
+      ],
+      "required_gates": [
+        "src/lib/feature-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/function-wiki-truth.test.ts",
+        "src/server/terminal-session-activity-runtime.test.ts",
+        "src/server/terminal-daemon-runtime.test.ts",
+        "packages/shared/src/connection/protocol.test.ts"
+      ],
+      "truth_sources": [
+        "docs/decisions/2026-07-30-session-idle-stopped-notification.md",
+        "docs/goals/session-idle-detection-plan.md"
       ]
     }
   ]

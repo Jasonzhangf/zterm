@@ -12,7 +12,8 @@ flowchart TD
   Main --> App["src/App.tsx"]
   App --> RelayControlRuntime["src/hooks/useRelayDeviceStream.ts#useRelayDeviceStream"]
   RelayControlRuntime --> RelayControlSocket["src/lib/traversal-relay-client.ts#connectTraversalRelayDevicesStream"]
-  RelayControlSocket --> RelayDirectoryProjection["src/lib/client-control-directory-runtime.ts#ClientControlDirectoryRuntime.applyConfirmedDirectoryDevices"]
+  RelayControlSocket --> RelayAccountStore["src/lib/traversal-relay-client.ts#connectTraversalRelayDevicesStream"]
+  RelayAccountStore --> RelayDirectoryProjection["src/lib/client-control-directory-runtime.ts#ClientControlDirectoryRuntime.applyConfirmedDirectoryDevices"]
   RelayDirectoryProjection --> TransportTargetResolver["src/lib/client-control-directory-runtime.ts#mergeHostWithClientControlDirectory"]
   TransportTargetResolver --> TraversalSocketFactory
   App --> SessionContext["src/contexts/SessionContext.tsx"]
@@ -155,6 +156,11 @@ flowchart TD
   Server --> DaemonRuntime["src/server/terminal-daemon-runtime.ts"]
   Server --> Runtime["src/server/terminal-runtime.ts"]
   DaemonRuntime --> Runtime
+  DaemonRuntime --> IdleActivityClassifierIn01MirrorWalk["src/server/terminal-session-activity-runtime.ts#classifySessionActivities"]
+  Mirror --> IdleActivityClassifierIn01MirrorWalk
+  IdleActivityClassifierIn01MirrorWalk --> IdleActivityClassifierOut01ClassifiedFacts["src/server/terminal-session-activity-runtime.ts#classifySessionActivities"]
+  IdleActivityClassifierOut01ClassifiedFacts --> IdleSessionBroadcastOut01TransportPublish["src/server/terminal-session-activity-runtime.ts#publishSessionActivitiesRuntime"]
+  IdleSessionBroadcastOut01TransportPublish --> TransportSend
   Runtime --> Bridge["src/server/terminal-bridge-runtime.ts"]
   Bridge --> MuxHandshake["packages/shared/src/connection/protocol.ts#TerminalMuxServerFrame"]
   MuxHandshake --> ChannelRegistry["src/server/terminal-runtime.ts#mux channel registry"]

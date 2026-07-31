@@ -850,7 +850,8 @@
         "resource.tmux_session",
         "resource.wezterm_pane",
         "resource.transport_subscriber",
-        "resource.client_buffer_frame_assembly"
+        "resource.client_buffer_frame_assembly",
+        "resource.session_idle_facts"
       ],
       "indirect_relations": [
         "resource.renderer_window",
@@ -2249,6 +2250,40 @@
         "docs/function-map.md",
         "docs/testing/relay-account-directory-test-design.md",
         "docs/testing/control-chain-transport-separation-test-design.md"
+      ]
+    },
+    {
+      "resource_id": "resource.session_idle_facts",
+      "resource_type": "daemon_runtime_fact",
+      "identity": "Daemon-derived tmux session idle/stopped facts derived from mirror lastLiveActivityAt timestamps; not client notification truth",
+      "owner_feature": "daemon.session_idle_detection",
+      "truth_store": "src/server/terminal-session-activity-runtime.ts (pure function classifier)",
+      "allowed_operations": [
+        "derive_from_mirror",
+        "publish_to_transport"
+      ],
+      "direct_relations": [
+        "resource.mirror_store",
+        "resource.transport_subscriber"
+      ],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.ui_projection",
+        "resource.active_session",
+        "resource.open_tab",
+        "resource.renderer_window",
+        "resource.client_sparse_buffer",
+        "resource.client_buffer_frame_assembly"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/server/terminal-session-activity-runtime.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/decisions/2026-07-30-session-idle-stopped-notification.md",
+        "docs/resource-map.md",
+        "docs/function-map.md"
       ]
     }
   ],

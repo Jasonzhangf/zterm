@@ -1,4 +1,5 @@
 import { normalizeScheduleDraft } from '../../../packages/shared/src/schedule/next-fire.ts';
+import { classifySessionActivities } from './terminal-session-activity-runtime';
 import type { ScheduleJob } from '../../../packages/shared/src/schedule/types.ts';
 import type {
   BridgeServerMessage as ServerMessage,
@@ -122,6 +123,10 @@ export function handleListSessionsMessageRuntime(
 ) {
   try {
     deps.sendTransportMessage(connection.transport, { type: 'sessions', payload: { sessions: deps.listTmuxSessions() } });
+    deps.sendTransportMessage(connection.transport, {
+      type: 'session-activity',
+      payload: { activities: classifySessionActivities(deps.mirrors, Date.now()) },
+    });
   } catch (error) {
     const err = error instanceof Error ? error.message : String(error);
     deps.sendTransportMessage(connection.transport, {
@@ -332,5 +337,22 @@ export function handleTmuxControlMessageRuntime(
         });
       }
       return;
+  }
+}
+export function handleMuxChannelOpenedMessageRuntime(
+  deps: TerminalMessageControlRuntimeDeps,
+  connection: TerminalTransportConnection,
+) {
+  try {
+    deps.sendTransportMessage(connection.transport, {
+      type: 'session-activity',
+      payload: { activities: classifySessionActivities(deps.mirrors, Date.now()) },
+    });
+  } catch (error) {
+    const err = error instanceof Error ? error.message : String(error);
+    deps.sendTransportMessage(connection.transport, {
+      type: 'error',
+      payload: { message: `Failed to broadcast session-activity: ${err}`, code: 'session_activity_failed' },
+    });
   }
 }

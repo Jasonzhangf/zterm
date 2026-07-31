@@ -4464,3 +4464,11 @@ Need runtime debug to confirm:
 **versionName**：存在 `resources.arsc` 里，长度固定偏移。长度变化会破坏二进制结构，不做修改 — Android 安装只用 versionCode。
 
 **验证**：aapt2 dump badging + apksigner verify 都通过。
+
+# 2026-07-31 foreground resume + daemon session idle execution contract
+
+- Foreground symptom: returning from Android background leaves the active session disconnected until another session is selected. Existing planner evidence shows a physically `CLOSED` socket already produces `action=reconnect`; the new `shouldBypassKeepaliveGrace` guard in `session-context-activity-runtime.ts` is therefore a no-op, not a valid root-cause fix. Owner remains `terminal.transport_lifecycle` / SessionContext activity runtime. Positive gate: explicit resume reconnects a closed socket. Negative gates: OPEN socket requests head and reconnect-in-flight does not create a second transport.
+- Idle block: daemon truth/control projection. Feature `daemon.session_idle_detection`; unique derived owner is `resource.session_idle_facts` in `terminal-session-activity-runtime.ts`. This is a separation downward from `resource.mirror_store`, then direct publication to `resource.transport_subscriber`.
+- Allowed idle paths: shared protocol, classifier/publisher, daemon heartbeat, target mux/control send, registries/maps/docs/tests. Forbidden: client UI notification, renderer, open-tab, active-session, and daemon client lifecycle truth.
+- Publication contract: preserve legacy `sessions` payload byte semantics; independently emit target-level `session-activity` after list, successful mux attach, and once per open physical transport on the existing heartbeat tick. Closed/stale transports receive none; multiple mux channels on one physical connection must not duplicate heartbeat publication. Publication failure is logged/projected explicitly and must not be converted into a successful attach or a transport close.
+- Required gates: paired classifier threshold/resume tests, list legacy-shape + activity/error tests, mux attach success/failure tests, heartbeat open/multi-channel/closed/stale tests, protocol tests, feature/resource/module/import/mainline gates, type-check, daemon close-loop, packaged APK, installed-device foreground replay.

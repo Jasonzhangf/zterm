@@ -182,7 +182,12 @@ export function ensureActiveSessionFreshRuntime(options: {
     source: options.refreshOptions.source,
   });
 
-  if (refreshPlan.action === 'skip') {
+  const shouldBypassKeepaliveGrace = (
+    refreshPlan.action === 'reconnect'
+    && keepaliveGraceActiveForLifecycle
+    && effectiveWsReadyState !== WebSocket.OPEN
+  );
+  if (refreshPlan.action === 'skip' && !shouldBypassKeepaliveGrace) {
     if (
       refreshPlan.reason === 'transport-open-pending'
       && (sessionState === 'reconnecting' || reconnectInFlight)

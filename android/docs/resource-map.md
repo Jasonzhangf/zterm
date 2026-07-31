@@ -173,6 +173,9 @@ flowchart TD
 - `resource.debug_channel` can observe and diagnose through bounded metadata-only trace records, but cannot become request/response business truth or contain terminal text/cells.
 - `resource.release_update_artifact` must promote through `resource.daemon_runtime_artifact`; runtime cannot scan authoring directories as capability truth.
 
+
+- `resource.session_idle_facts` owns daemon-derived tmux session idle/stopped facts derived from mirror `lastLiveActivityAt` timestamps. It is the only write path for idle classification; renderer, UI projection, open-tab, active-session, and notification truth are all forbidden as direct relations. Publishes through `session-activity` message over the control channel.
+
 ## Gate Contract
 
 - `src/lib/resource-registry-truth.test.ts` validates schema, resource id uniqueness, owner feature existence, doc/gate references, relation ids, and forbidden direct edges.

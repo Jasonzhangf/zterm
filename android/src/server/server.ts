@@ -415,6 +415,7 @@ const terminalDaemonRuntime = createTerminalDaemonRuntime({
   startRelayHostClient: () => relayHostClient.start(),
   disposeRelayHostClient: () => relayHostClient.dispose(),
   disposeRtcBridgeServer: () => rtcBridgeServer.dispose(),
+  sendTransportMessage,
 });
 const {
   extractAuthToken,

@@ -192,3 +192,14 @@ Rules:
 | `mainline_source.android` | `resource.platform_terminal_surface`, `resource.ui_projection`, `resource.active_session`, `resource.session_transport`, `resource.client_buffer_frame_assembly`, `resource.client_sparse_buffer`, `resource.renderer_window` | Android mainline edges are resource-bound in `docs/wiki/mainline-call-map.json`. |
 | `mainline_source.daemon` | `resource.daemon_process`, `resource.terminal_backend`, `resource.backend_session`, `resource.mirror_store`, `resource.daemon_input_queue`, `resource.transport_subscriber`, `resource.debug_channel` | Daemon mainline edges are resource-bound in `docs/wiki/mainline-call-map.json`. |
 | `mainline_source.cli` | `resource.release_update_artifact`, `resource.daemon_runtime_artifact`, `resource.daemon_process`, `resource.runtime_home` | CLI mainline edges are resource-bound in `docs/wiki/mainline-call-map.json`. |
+### daemon.session_idle_detection
+
+| command / entry | owner | allowed change surface | required gate source |
+| --- | --- | --- | --- |
+| `session-activity idle classification` | `src/server/terminal-session-activity-runtime.ts#classifySessionActivities` | derive stopped status from mirror.lastLiveActivityAt, threshold `SESSION_IDLE_STOPPED_THRESHOLD_MS = 10_000`, guard `lastLiveActivityAt > 0` | `src/server/terminal-session-activity-runtime.test.ts` |
+| `session-activity heartbeat broadcast` | `src/server/terminal-daemon-runtime.ts#startHeartbeatLoop` | walk all mirrors, classify, send `session-activity` to each open transport | `src/server/server.daemon-runtime-truth.test.ts` |
+| `session-activity attach-time send` | `src/server/terminal-message-control-runtime.ts#handleListSessionsMessageRuntime` | send `session-activity` for all mirrors on mux-channel-open/attach | `src/server/terminal-message-control-runtime.test.ts` |
+
+| feature_id | resource_ids | relation notes |
+| --- | --- | --- |
+| `daemon.session_idle_detection` | `resource.mirror_store`, `resource.session_idle_facts`, `resource.transport_subscriber` | Idle facts are derived from mirror activity timestamps and published over the control channel. Daemon does not own client notification truth. |

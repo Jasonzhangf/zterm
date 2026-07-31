@@ -530,6 +530,45 @@
    ]
   },
   {
+   "module_id": "daemon.session_idle_detection",
+   "runtime_side": "daemon",
+   "level": 1,
+   "parent_module_id": "daemon.runtime",
+   "owner_feature": "daemon.session_idle_detection",
+   "responsibility": "Own daemon-derived tmux session idle/stopped classification and control-channel publication.",
+   "owned_resources": [
+    "resource.session_idle_facts"
+   ],
+   "consumed_resources": [
+    "resource.mirror_store",
+    "resource.transport_subscriber"
+   ],
+   "pending_resources": [],
+   "public_interfaces": [
+    "src/server/terminal-session-activity-runtime.ts"
+   ],
+   "forbidden_resources": [
+    "resource.open_tab",
+    "resource.active_session",
+    "resource.renderer_window",
+    "resource.ui_projection"
+   ],
+   "canonical_docs": [
+    "docs/decisions/2026-07-30-session-idle-stopped-notification.md",
+    "docs/resource-map.md",
+    "docs/function-map.md"
+   ],
+   "required_gates": [
+    "src/lib/module-registry-truth.test.ts",
+    "src/lib/edge-registry-truth.test.ts",
+    "src/server/terminal-session-activity-runtime.test.ts"
+   ],
+   "status": "active",
+   "owned_paths": [
+    "src/server/terminal-session-activity-runtime.ts"
+   ]
+  },
+  {
    "module_id": "daemon.file_transfer",
    "runtime_side": "daemon",
    "level": 1,

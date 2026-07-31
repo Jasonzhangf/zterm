@@ -89,6 +89,7 @@ function createRuntimeHarness() {
     disposeRelayHostClient: vi.fn(),
     disposeRtcBridgeServer: vi.fn(),
     detachSubscriberTransportOnly,
+    sendTransportMessage: vi.fn(),
   } as Parameters<typeof createTerminalDaemonRuntime>[0]);
 
   return {
