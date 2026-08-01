@@ -194,23 +194,26 @@ export function resolveDaemonRuntimeConfig(options?: {
   const env = options?.env || process.env;
   const homeDir = options?.homeDir || homedir();
   const { config, found, path } = readWtermConfigFile(homeDir);
-  const daemonConfig = config.zterm?.android?.daemon || config.mobile?.daemon || {};
+  const ztermDaemonConfig = config.zterm?.android?.daemon || {};
+  const mobileDaemonConfig = config.mobile?.daemon || {};
   const relayConfig = config.zterm?.android?.relay || config.mobile?.relay || {};
 
   const host =
     asString(env.ZTERM_HOST) ||
     asString(env.HOST) ||
-    asString(daemonConfig.host) ||
+    asString(ztermDaemonConfig.host) ||
+    asString(mobileDaemonConfig.host) ||
     DEFAULT_DAEMON_HOST;
 
   const port =
     asPositiveInteger(env.ZTERM_PORT) ||
     asPositiveInteger(env.PORT) ||
-    asPositiveInteger(daemonConfig.port) ||
+    asPositiveInteger(ztermDaemonConfig.port) ||
+    asPositiveInteger(mobileDaemonConfig.port) ||
     DEFAULT_BRIDGE_PORT;
 
   const authTokenFromEnv = asString(env.ZTERM_AUTH_TOKEN);
-  const authTokenFromConfig = asString(daemonConfig.authToken);
+  const authTokenFromConfig = asString(ztermDaemonConfig.authToken) || asString(mobileDaemonConfig.authToken);
   const authToken = authTokenFromEnv || authTokenFromConfig || '';
   const authSource: DaemonRuntimeConfig['authSource'] = authTokenFromEnv
     ? 'env'
@@ -220,12 +223,14 @@ export function resolveDaemonRuntimeConfig(options?: {
 
   const terminalCacheLines =
     asPositiveInteger(env.ZTERM_TERMINAL_CACHE_LINES) ||
-    asPositiveInteger(daemonConfig.terminalCacheLines) ||
+    asPositiveInteger(ztermDaemonConfig.terminalCacheLines) ||
+    asPositiveInteger(mobileDaemonConfig.terminalCacheLines) ||
     DEFAULT_DAEMON_TERMINAL_CACHE_LINES;
 
   const sessionName =
     asString(env.ZTERM_DAEMON_SESSION) ||
-    asString(daemonConfig.sessionName) ||
+    asString(ztermDaemonConfig.sessionName) ||
+    asString(mobileDaemonConfig.sessionName) ||
     buildDaemonSessionName(port);
 
   const relayUrl = asString(env.ZTERM_TRAVERSAL_RELAY_URL) || asString(relayConfig.relayUrl);

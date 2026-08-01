@@ -5169,16 +5169,17 @@ function resolveDaemonRuntimeConfig(options) {
   const env = options?.env || process.env;
   const homeDir = options?.homeDir || (0, import_os.homedir)();
   const { config, found, path } = readWtermConfigFile(homeDir);
-  const daemonConfig = config.zterm?.android?.daemon || config.mobile?.daemon || {};
+  const ztermDaemonConfig = config.zterm?.android?.daemon || {};
+  const mobileDaemonConfig = config.mobile?.daemon || {};
   const relayConfig = config.zterm?.android?.relay || config.mobile?.relay || {};
-  const host = asString(env.ZTERM_HOST) || asString(env.HOST) || asString(daemonConfig.host) || DEFAULT_DAEMON_HOST;
-  const port = asPositiveInteger(env.ZTERM_PORT) || asPositiveInteger(env.PORT) || asPositiveInteger(daemonConfig.port) || DEFAULT_BRIDGE_PORT;
+  const host = asString(env.ZTERM_HOST) || asString(env.HOST) || asString(ztermDaemonConfig.host) || asString(mobileDaemonConfig.host) || DEFAULT_DAEMON_HOST;
+  const port = asPositiveInteger(env.ZTERM_PORT) || asPositiveInteger(env.PORT) || asPositiveInteger(ztermDaemonConfig.port) || asPositiveInteger(mobileDaemonConfig.port) || DEFAULT_BRIDGE_PORT;
   const authTokenFromEnv = asString(env.ZTERM_AUTH_TOKEN);
-  const authTokenFromConfig = asString(daemonConfig.authToken);
+  const authTokenFromConfig = asString(ztermDaemonConfig.authToken) || asString(mobileDaemonConfig.authToken);
   const authToken = authTokenFromEnv || authTokenFromConfig || "";
   const authSource = authTokenFromEnv ? "env" : authTokenFromConfig ? "config" : "default";
-  const terminalCacheLines = asPositiveInteger(env.ZTERM_TERMINAL_CACHE_LINES) || asPositiveInteger(daemonConfig.terminalCacheLines) || DEFAULT_DAEMON_TERMINAL_CACHE_LINES;
-  const sessionName = asString(env.ZTERM_DAEMON_SESSION) || asString(daemonConfig.sessionName) || buildDaemonSessionName(port);
+  const terminalCacheLines = asPositiveInteger(env.ZTERM_TERMINAL_CACHE_LINES) || asPositiveInteger(ztermDaemonConfig.terminalCacheLines) || asPositiveInteger(mobileDaemonConfig.terminalCacheLines) || DEFAULT_DAEMON_TERMINAL_CACHE_LINES;
+  const sessionName = asString(env.ZTERM_DAEMON_SESSION) || asString(ztermDaemonConfig.sessionName) || asString(mobileDaemonConfig.sessionName) || buildDaemonSessionName(port);
   const relayUrl = asString(env.ZTERM_TRAVERSAL_RELAY_URL) || asString(relayConfig.relayUrl);
   const relayUsername = asString(env.ZTERM_TRAVERSAL_USERNAME) || asString(relayConfig.username);
   const relayPassword = asString(env.ZTERM_TRAVERSAL_PASSWORD) || asString(relayConfig.password);
@@ -5293,11 +5294,14 @@ function buildDaemonConnectionEndpointCandidates(options) {
   const lanAddresses = addresses.filter((address) => isPrivateLanIpv4(address) && !isTailscaleIpv4(address));
   const tailscaleAddresses = addresses.filter(isTailscaleIpv4);
   const publicUdpEndpoint = normalizePublicUdpEndpoint(options.publicUdpEndpoint);
+  const authToken = options.authToken?.trim() || "";
+  const authFields = authToken ? { authToken } : {};
   const candidates = lanAddresses.map((host) => ({
     id: `lan:${host}:${bridgePort}`,
     kind: "lan",
     host,
     port: bridgePort,
+    ...authFields,
     authRequired: true,
     lastSeenAt: now
   }));
@@ -5307,12 +5311,14 @@ function buildDaemonConnectionEndpointCandidates(options) {
     host: publicUdpEndpoint.host,
     port: publicUdpEndpoint.port,
     relayHostId: hostId,
+    ...authFields,
     authRequired: true,
     lastSeenAt: now
   } : {
     id: `rtc-direct:${hostId}`,
     kind: "rtc-direct",
     relayHostId: hostId,
+    ...authFields,
     authRequired: true,
     lastSeenAt: now
   });
@@ -5321,6 +5327,7 @@ function buildDaemonConnectionEndpointCandidates(options) {
     kind: "tailscale",
     host,
     port: bridgePort,
+    ...authFields,
     authRequired: true,
     lastSeenAt: now
   })));
@@ -5328,6 +5335,7 @@ function buildDaemonConnectionEndpointCandidates(options) {
     id: `relay-rtc:${hostId}`,
     kind: "relay-rtc",
     relayHostId: hostId,
+    ...authFields,
     authRequired: true,
     lastSeenAt: now
   });
@@ -6353,7 +6361,7 @@ function createTerminalMirrorCaptureRuntime(deps) {
       "display-message",
       "-p",
       "-t",
-      deps.buildExactTmuxSessionTarget(sessionName),
+      deps.buildExactTmuxPaneTarget(sessionName),
       "#{pane_id}	#{history_size}	#{pane_height}	#{pane_width}	#{alternate_on}	#{pane_dead}"
     ]);
     const [paneIdRaw, tmuxHistorySizeRaw, rowsRaw, colsRaw, alternateOnRaw, paneDeadRaw] = result.stdout.trim().split("	");
@@ -6385,7 +6393,7 @@ function createTerminalMirrorCaptureRuntime(deps) {
       "display-message",
       "-p",
       "-t",
-      deps.buildExactTmuxSessionTarget(sessionName),
+      deps.buildExactTmuxPaneTarget(sessionName),
       "#{pane_current_path}"
     ]);
     const currentPath = result.stdout.trim();
@@ -6439,7 +6447,7 @@ function createTerminalMirrorCaptureRuntime(deps) {
       "display-message",
       "-p",
       "-t",
-      deps.buildExactTmuxSessionTarget(sessionName),
+      deps.buildExactTmuxPaneTarget(sessionName),
       "#{pane_id}	#{history_size}	#{pane_height}	#{pane_width}	#{alternate_on}	#{pane_dead}"
     ]);
     const [paneIdRaw, tmuxHistorySizeRaw, rowsRaw, colsRaw, alternateOnRaw, paneDeadRaw] = result.stdout.trim().split("	");
@@ -11675,6 +11683,9 @@ function buildExactTmuxSessionTarget(sessionName) {
   }
   return `=${normalized}`;
 }
+function buildExactTmuxPaneTarget(sessionName) {
+  return `${buildExactTmuxSessionTarget(sessionName)}:0.0`;
+}
 function createTerminalControlRuntime(deps) {
   const liveMirrorInputBatches = /* @__PURE__ */ new Map();
   function cleanEnv() {
@@ -11796,7 +11807,7 @@ function createTerminalControlRuntime(deps) {
     });
   }
   function writeTmuxLiteralChunksSync(sessionName, payload) {
-    const target = buildExactTmuxSessionTarget(sessionName);
+    const target = buildExactTmuxPaneTarget(sessionName);
     const chunks = splitTerminalInputUtf8Chunks(
       payload,
       TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES
@@ -11844,7 +11855,7 @@ function createTerminalControlRuntime(deps) {
     }
     writeTmuxLiteralChunksSync(sessionName, payload);
     if (appendEnter2) {
-      runTmux2(["send-keys", "-t", buildExactTmuxSessionTarget(sessionName), "Enter"]);
+      runTmux2(["send-keys", "-t", buildExactTmuxPaneTarget(sessionName), "Enter"]);
     }
   }
   function writeToLiveMirror2(sessionName, payload, appendEnter2) {
@@ -11868,7 +11879,7 @@ function createTerminalControlRuntime(deps) {
     }
     writeTmuxLiteralChunksSync(sessionName, payload);
     if (appendEnter2) {
-      runTmux2(["send-keys", "-t", buildExactTmuxSessionTarget(sessionName), "Enter"]);
+      runTmux2(["send-keys", "-t", buildExactTmuxPaneTarget(sessionName), "Enter"]);
     }
     return true;
   }
@@ -12034,14 +12045,14 @@ function createTerminalControlRuntime(deps) {
           continue;
         }
         if (group.payload) {
-          await runTmuxAsync(["send-keys", "-t", buildExactTmuxSessionTarget(mirror.sessionName), "-l", "--", group.payload]);
+          await runTmuxAsync(["send-keys", "-t", buildExactTmuxPaneTarget(mirror.sessionName), "-l", "--", group.payload]);
         }
         if (group.appendEnter) {
           if (!isGroupWritable(group)) {
             settleGroup(group, false);
             continue;
           }
-          await runTmuxAsync(["send-keys", "-t", buildExactTmuxSessionTarget(mirror.sessionName), "Enter"]);
+          await runTmuxAsync(["send-keys", "-t", buildExactTmuxPaneTarget(mirror.sessionName), "Enter"]);
         }
         settleGroup(group, true);
         if (groupIndex < groups.length - 1) {
@@ -12169,7 +12180,8 @@ function createTerminalControlRuntime(deps) {
     createDetachedTmuxSession: createDetachedTmuxSession2,
     closeDetachedTerminalSession: closeDetachedTerminalSession2,
     renameTmuxSession: renameTmuxSession2,
-    buildExactTmuxSessionTarget
+    buildExactTmuxSessionTarget,
+    buildExactTmuxPaneTarget
   };
 }
 
@@ -16640,7 +16652,7 @@ var terminalMirrorCapture = createTerminalMirrorCaptureRuntime({
   resolveMirrorCacheLines,
   runTmux: (args) => terminalControlRuntime.runTmux(args),
   runTmuxAsync: (args) => terminalControlRuntime.runTmuxAsync(args),
-  buildExactTmuxSessionTarget: (sessionName) => terminalControlRuntime.buildExactTmuxSessionTarget(sessionName),
+  buildExactTmuxPaneTarget: (sessionName) => terminalControlRuntime.buildExactTmuxPaneTarget(sessionName),
   logTimePrefix,
   wezTermBackend: WEZTERM_BACKEND
 });
@@ -16929,6 +16941,7 @@ var relayHostClient = createTraversalRelayHostClient({
   listEndpointCandidates: (now) => buildDaemonConnectionEndpointCandidates({
     hostId: DAEMON_CONFIG.daemonHostId,
     bridgePort: PORT,
+    authToken: REQUIRED_AUTH_TOKEN,
     now
   }),
   listTmuxSessions

@@ -86,6 +86,7 @@ export function resolveMuxChannelClosedWithControlStatusRuntime(options: {
   reason: string;
   shouldReconnectNow: boolean;
   queryTargetSessions: () => Promise<string[] | null>;
+  routeTargetControlUnavailable: (sessionId: string, message: string) => void;
   readSessionTerminalChannel: (sessionId: string) => {
     channelId: string;
     state: 'opening' | 'open' | 'closing' | 'closed';
@@ -95,6 +96,18 @@ export function resolveMuxChannelClosedWithControlStatusRuntime(options: {
   emitSessionStatus: (sessionId: string, type: 'closed' | 'error', message?: string) => void;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
 }) {
+  const readCurrentClosedChannel = () => {
+    const channel = options.readSessionTerminalChannel(options.sessionId);
+    if (!channel || channel.channelId !== options.channelId || channel.state !== 'closed') {
+      options.runtimeDebug('session.mux.channel-closed.control-status.stale', {
+        sessionId: options.sessionId,
+        channelId: options.channelId,
+      });
+      return null;
+    }
+    return channel;
+  };
+
   if (!options.shouldReconnectNow) {
     options.updateSessionSync(
       options.sessionId,
@@ -104,22 +117,15 @@ export function resolveMuxChannelClosedWithControlStatusRuntime(options: {
 
   void options.queryTargetSessions()
     .then((sessionNames) => {
-      const channel = options.readSessionTerminalChannel(options.sessionId);
-      if (!channel || channel.channelId !== options.channelId || channel.state !== 'closed') {
-        options.runtimeDebug('session.mux.channel-closed.control-status.stale', {
-          sessionId: options.sessionId,
-          channelId: options.channelId,
-        });
+      if (!readCurrentClosedChannel()) {
         return;
       }
 
       if (sessionNames === null) {
         const message = `control status unavailable after data channel closed: ${options.reason}`;
-        options.updateSessionSync(
-          options.sessionId,
-          buildSessionIdleAfterReconnectBlockedUpdates(message),
-        );
-        options.emitSessionStatus(options.sessionId, 'error', message);
+        if (options.shouldReconnectNow) {
+          options.routeTargetControlUnavailable(options.sessionId, message);
+        }
         options.runtimeDebug('session.mux.channel-closed.control-status.unavailable', {
           sessionId: options.sessionId,
           sessionName: options.sessionName,
@@ -149,6 +155,9 @@ export function resolveMuxChannelClosedWithControlStatusRuntime(options: {
       });
     })
     .catch((error) => {
+      if (!readCurrentClosedChannel()) {
+        return;
+      }
       const message = `control status failed after data channel closed: ${
         error instanceof Error ? error.message : String(error)
       }`;
@@ -156,11 +165,9 @@ export function resolveMuxChannelClosedWithControlStatusRuntime(options: {
         sessionId: options.sessionId,
         error: message,
       });
-      options.updateSessionSync(
-        options.sessionId,
-        buildSessionIdleAfterReconnectBlockedUpdates(message),
-      );
-      options.emitSessionStatus(options.sessionId, 'error', message);
+      if (options.shouldReconnectNow) {
+        options.routeTargetControlUnavailable(options.sessionId, message);
+      }
     });
 }
 
@@ -701,6 +708,10 @@ export function createSessionTransportOrchestrationRuntime(options: {
               sendSocketPayload: options.sendSocketPayload,
               runtimeDebug: options.runtimeDebug,
             }),
+            routeTargetControlUnavailable: (_failedSessionId, message) => {
+              const targetKey = options.readSessionTargetKey(sessionId) || '';
+              submitTargetSocketFailure(targetKey, ws, message);
+            },
             readSessionTerminalChannel: options.readSessionTerminalChannel,
             scheduleReconnect,
             updateSessionSync: options.updateSessionSync,

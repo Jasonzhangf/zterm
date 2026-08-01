@@ -142,6 +142,7 @@ describe('TraversalRelayStore', () => {
           kind: 'tailscale',
           host: 'mac-studio.tailnet.ts.net',
           port: 3333,
+          authToken: 'daemon-direct-token',
           authRequired: true,
           lastSeenAt: '2026-06-28T00:00:00.000Z',
         },
@@ -149,6 +150,7 @@ describe('TraversalRelayStore', () => {
           id: 'relay:daemon-mac-studio',
           kind: 'relay-rtc',
           relayHostId: 'daemon-mac-studio',
+          authToken: 'daemon-relay-token',
           authRequired: true,
           lastSeenAt: '2026-06-28T00:00:00.000Z',
         },
@@ -169,8 +171,8 @@ describe('TraversalRelayStore', () => {
           connected: true,
         },
         endpoints: [
-          { id: 'tailscale:mac-studio', kind: 'tailscale', host: 'mac-studio.tailnet.ts.net', port: 3333 },
-          { id: 'relay:daemon-mac-studio', kind: 'relay-rtc', relayHostId: 'daemon-mac-studio' },
+          { id: 'tailscale:mac-studio', kind: 'tailscale', host: 'mac-studio.tailnet.ts.net', port: 3333, authToken: 'daemon-direct-token' },
+          { id: 'relay:daemon-mac-studio', kind: 'relay-rtc', relayHostId: 'daemon-mac-studio', authToken: 'daemon-relay-token' },
         ],
         sessions: [
           { name: 'work', cwd: '/Users/jason/code', title: 'zterm' },
@@ -194,6 +196,10 @@ describe('TraversalRelayStore', () => {
           },
           daemon: {
             hostId: 'daemon-mac-studio',
+            endpoints: [
+              { id: 'tailscale:mac-studio', kind: 'tailscale', authToken: 'daemon-direct-token' },
+              { id: 'relay:daemon-mac-studio', kind: 'relay-rtc', authToken: 'daemon-relay-token' },
+            ],
             sessions: [
               { name: 'work' },
               { name: 'ops' },

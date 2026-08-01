@@ -41,6 +41,7 @@ export interface TerminalControlRuntime {
   closeDetachedTerminalSession: (sessionName: string) => void;
   renameTmuxSession: (currentName?: string, nextName?: string) => string;
   buildExactTmuxSessionTarget: (sessionName: string) => string;
+  buildExactTmuxPaneTarget: (sessionName: string) => string;
 }
 
 export function buildExactTmuxSessionTarget(sessionName: string) {
@@ -49,6 +50,10 @@ export function buildExactTmuxSessionTarget(sessionName: string) {
     throw new Error('tmux exact session target requires a session name');
   }
   return `=${normalized}`;
+}
+
+export function buildExactTmuxPaneTarget(sessionName: string) {
+  return `${buildExactTmuxSessionTarget(sessionName)}:.{top-left}`;
 }
 
 export function createTerminalControlRuntime(
@@ -211,8 +216,7 @@ export function createTerminalControlRuntime(
     });
   }
 
-  function writeTmuxLiteralChunksSync(sessionName: string, payload: string) {
-    const target = buildExactTmuxSessionTarget(sessionName);
+  function writeTmuxLiteralChunksSync(payload: string, target: string) {
     const chunks = splitTerminalInputUtf8Chunks(
       payload,
       TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES,
@@ -269,9 +273,10 @@ export function createTerminalControlRuntime(
       }
       return;
     }
-    writeTmuxLiteralChunksSync(sessionName, payload);
+    const target = buildExactTmuxPaneTarget(sessionName);
+    writeTmuxLiteralChunksSync(payload, target);
     if (appendEnter) {
-      runTmux(['send-keys', '-t', buildExactTmuxSessionTarget(sessionName), 'Enter']);
+      runTmux(['send-keys', '-t', target, 'Enter']);
     }
   }
 
@@ -294,9 +299,10 @@ export function createTerminalControlRuntime(
       }
       return true;
     }
-    writeTmuxLiteralChunksSync(sessionName, payload);
+    const target = buildExactTmuxPaneTarget(sessionName);
+    writeTmuxLiteralChunksSync(payload, target);
     if (appendEnter) {
-      runTmux(['send-keys', '-t', buildExactTmuxSessionTarget(sessionName), 'Enter']);
+      runTmux(['send-keys', '-t', target, 'Enter']);
     }
     return true;
   }
@@ -471,6 +477,7 @@ export function createTerminalControlRuntime(
     }
 
     try {
+      const target = buildExactTmuxPaneTarget(mirror.sessionName);
       for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
         const group = groups[groupIndex]!;
         if (!isGroupWritable(group)) {
@@ -478,14 +485,14 @@ export function createTerminalControlRuntime(
           continue;
         }
         if (group.payload) {
-          await runTmuxAsync(['send-keys', '-t', buildExactTmuxSessionTarget(mirror.sessionName), '-l', '--', group.payload]);
+          await runTmuxAsync(['send-keys', '-t', target, '-l', '--', group.payload]);
         }
         if (group.appendEnter) {
           if (!isGroupWritable(group)) {
             settleGroup(group, false);
             continue;
           }
-          await runTmuxAsync(['send-keys', '-t', buildExactTmuxSessionTarget(mirror.sessionName), 'Enter']);
+          await runTmuxAsync(['send-keys', '-t', target, 'Enter']);
         }
         settleGroup(group, true);
         if (groupIndex < groups.length - 1) {
@@ -638,5 +645,6 @@ export function createTerminalControlRuntime(
     closeDetachedTerminalSession,
     renameTmuxSession,
     buildExactTmuxSessionTarget,
+    buildExactTmuxPaneTarget,
   };
 }

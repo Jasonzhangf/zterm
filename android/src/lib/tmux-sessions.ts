@@ -51,6 +51,7 @@ function normalizeRelayEndpointCandidates(candidates: BridgeTarget['relayEndpoin
     port: normalizePort(candidate.port),
     wsUrl: normalizeString(candidate.wsUrl),
     relayHostId: normalizeString(candidate.relayHostId),
+    authToken: normalizeString(candidate.authToken),
     authRequired: Boolean(candidate.authRequired),
   }));
 }

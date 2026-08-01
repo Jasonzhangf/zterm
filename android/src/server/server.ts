@@ -152,7 +152,7 @@ const terminalMirrorCapture = createTerminalMirrorCaptureRuntime({
   resolveMirrorCacheLines,
   runTmux: (args) => terminalControlRuntime.runTmux(args),
   runTmuxAsync: (args) => terminalControlRuntime.runTmuxAsync(args),
-  buildExactTmuxSessionTarget: (sessionName) => terminalControlRuntime.buildExactTmuxSessionTarget(sessionName),
+  buildExactTmuxPaneTarget: (sessionName) => terminalControlRuntime.buildExactTmuxPaneTarget(sessionName),
   logTimePrefix,
   wezTermBackend: WEZTERM_BACKEND,
 });
@@ -461,6 +461,7 @@ const relayHostClient = createTraversalRelayHostClient({
   listEndpointCandidates: (now) => buildDaemonConnectionEndpointCandidates({
     hostId: DAEMON_CONFIG.daemonHostId,
     bridgePort: PORT,
+    authToken: REQUIRED_AUTH_TOKEN,
     now,
   }),
   listTmuxSessions,

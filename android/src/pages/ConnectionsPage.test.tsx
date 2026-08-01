@@ -120,7 +120,7 @@ describe('ConnectionsPage server home', () => {
       />,
     );
 
-    expect(screen.getByText('Tailscale')).toBeTruthy();
+    expect(screen.getByText('Auto')).toBeTruthy();
     expect(screen.queryByText('Relay 可用')).toBeNull();
     expect(screen.getByText('自动线路')).toBeTruthy();
     expect(screen.queryByTestId('saved-connection-relay-button')).toBeNull();

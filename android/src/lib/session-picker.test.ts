@@ -293,6 +293,7 @@ describe('session-picker relay truth', () => {
           kind: 'tailscale',
           host: 'mac.tailnet.ts.net',
           port: 3333,
+          authToken: 'daemon-token',
           authRequired: true,
           lastSeenAt: '2026-06-28T00:00:00.000Z',
         },
@@ -312,6 +313,53 @@ describe('session-picker relay truth', () => {
       daemonHostId: 'daemon-host-c',
       relayHostId: 'daemon-host-c',
       relayDeviceId: 'daemon-device-c',
+      authToken: 'daemon-token',
+      relayEndpointCandidates: expect.arrayContaining([
+        expect.objectContaining({ kind: 'tailscale', host: 'mac.tailnet.ts.net' }),
+        expect.objectContaining({ kind: 'relay-rtc', relayHostId: 'daemon-host-c' }),
+      ]),
+    }));
+  });
+
+  it('treats historical relay-route tags as Auto unless transportMode is explicitly WebRTC', () => {
+    const target = buildBridgeTargetFromHost({
+      id: 'relay-route:saved-mac',
+      createdAt: 1,
+      name: 'Mac Studio Auto',
+      bridgeHost: '',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-host-c',
+      relayHostId: 'daemon-host-c',
+      relayDeviceId: 'daemon-device-c',
+      sessionName: '',
+      authType: 'password',
+      tags: ['relay-directory', 'relay-route'],
+      pinned: false,
+      transportMode: 'auto',
+      relayEndpointCandidates: [
+        {
+          id: 'direct:tailscale:daemon-host-c',
+          kind: 'tailscale',
+          host: 'mac.tailnet.ts.net',
+          port: 3333,
+          authToken: 'daemon-token',
+          authRequired: true,
+          lastSeenAt: '2026-06-28T00:00:00.000Z',
+        },
+        {
+          id: 'relay-rtc:daemon-host-c',
+          kind: 'relay-rtc',
+          relayHostId: 'daemon-host-c',
+          authRequired: true,
+          lastSeenAt: '2026-06-28T00:00:00.000Z',
+        },
+      ],
+    });
+
+    expect(target).toEqual(expect.objectContaining({
+      bridgeHost: 'mac.tailnet.ts.net',
+      authToken: 'daemon-token',
+      transportMode: 'auto',
       relayEndpointCandidates: expect.arrayContaining([
         expect.objectContaining({ kind: 'tailscale', host: 'mac.tailnet.ts.net' }),
         expect.objectContaining({ kind: 'relay-rtc', relayHostId: 'daemon-host-c' }),

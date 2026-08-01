@@ -18,6 +18,7 @@ export interface RelayEndpointCandidate {
   port?: number;
   wsUrl?: string;
   relayHostId?: string;
+  authToken?: string;
   authRequired: boolean;
   lastSeenAt: string;
 }
@@ -95,7 +96,7 @@ function validateEndpointCandidate(value: unknown) {
   const endpoint = requireControlObject(value, 'endpoint candidate');
   rejectUnknownFields(
     endpoint,
-    new Set(['id', 'kind', 'host', 'port', 'wsUrl', 'relayHostId', 'authRequired', 'lastSeenAt']),
+    new Set(['id', 'kind', 'host', 'port', 'wsUrl', 'relayHostId', 'authToken', 'authRequired', 'lastSeenAt']),
     'endpoint',
   );
   if (typeof endpoint.id !== 'string' || !endpoint.id.trim()) {
@@ -110,7 +111,7 @@ function validateEndpointCandidate(value: unknown) {
   if (typeof endpoint.lastSeenAt !== 'string' || !endpoint.lastSeenAt.trim()) {
     throw new Error('endpoint candidate lastSeenAt is required');
   }
-  for (const field of ['host', 'wsUrl', 'relayHostId'] as const) {
+  for (const field of ['host', 'wsUrl', 'relayHostId', 'authToken'] as const) {
     if (endpoint[field] !== undefined && typeof endpoint[field] !== 'string') {
       throw new Error(`endpoint candidate ${field} must be string`);
     }
@@ -212,6 +213,7 @@ export function normalizeRelayEndpointCandidates(input: unknown, now: string): R
       ...(asPositiveInteger(candidate.port) ? { port: asPositiveInteger(candidate.port) } : {}),
       ...(asString(candidate.wsUrl) ? { wsUrl: asString(candidate.wsUrl) } : {}),
       ...(asString(candidate.relayHostId) ? { relayHostId: asString(candidate.relayHostId) } : {}),
+      ...(asString(candidate.authToken) ? { authToken: asString(candidate.authToken) } : {}),
       authRequired: asBoolean(candidate.authRequired, true),
       lastSeenAt: asString(candidate.lastSeenAt) || now,
     });

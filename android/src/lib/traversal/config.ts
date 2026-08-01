@@ -180,7 +180,7 @@ function addDirectoryDirectCandidate(
     path,
     host,
     port,
-    target.authToken,
+    endpoint.authToken || target.authToken,
     endpoint.wsUrl,
     endpoint.id,
   );

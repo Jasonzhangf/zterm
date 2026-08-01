@@ -71,17 +71,12 @@ function mergeRelayEndpointCandidates(
   left: RelayEndpointCandidate[] = [],
   right: RelayEndpointCandidate[] = [],
 ) {
-  const seen = new Set<string>();
-  const merged: RelayEndpointCandidate[] = [];
+  const merged = new Map<string, RelayEndpointCandidate>();
   for (const candidate of [...left, ...right]) {
     const key = buildRelayEndpointKey(candidate);
-    if (seen.has(key)) {
-      continue;
-    }
-    seen.add(key);
-    merged.push(candidate);
+    merged.set(key, candidate);
   }
-  return merged;
+  return [...merged.values()];
 }
 
 function mergeHomeConnectionRouteCandidates(base: Host, supplement: Host): Host {
@@ -95,6 +90,7 @@ function mergeHomeConnectionRouteCandidates(base: Host, supplement: Host): Host 
     daemonHostId: base.daemonHostId || supplement.daemonHostId,
     relayHostId: base.relayHostId || supplement.relayHostId || supplement.daemonHostId,
     relayDeviceId: base.relayDeviceId || supplement.relayDeviceId,
+    authToken: base.authToken || supplement.authToken,
     tailscaleHost: base.tailscaleHost || supplement.tailscaleHost,
     ipv6Host: base.ipv6Host || supplement.ipv6Host,
     ipv4Host: base.ipv4Host || supplement.ipv4Host,

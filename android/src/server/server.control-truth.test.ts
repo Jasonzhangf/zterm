@@ -72,9 +72,11 @@ describe('server control runtime truth gates', () => {
     expect(source).toContain("stderr.includes('error connecting to') && stderr.includes('No such file or directory')");
     expect(tmuxLiteralChunkBlock).toContain('splitTerminalInputUtf8Chunks(');
     expect(tmuxLiteralChunkBlock).toContain('TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES');
-    expect(tmuxLiteralChunkBlock).toContain('const target = buildExactTmuxSessionTarget(sessionName)');
+    expect(source).toContain('function buildExactTmuxPaneTarget(sessionName: string)');
+    expect(source).toContain(":.{top-left}");
+    expect(source).toContain('const target = buildExactTmuxPaneTarget(sessionName)');
     expect(tmuxLiteralChunkBlock).toContain("runTmux(['send-keys', '-t', target, '-l', '--', chunks[index]!])");
-    expect(mirrorWriteBlock).toContain('writeTmuxLiteralChunksSync(sessionName, payload)');
+    expect(mirrorWriteBlock).toContain('writeTmuxLiteralChunksSync(payload, target)');
     expect(mirrorWriteBlock).not.toContain("runTmux(['send-keys', '-t', sessionName, '-l', '--', payload])");
     expect(source).toContain('const liveMirrorInputBatches = new Map<string, {');
     expect(source).toContain('function buildLiveMirrorInputGroups(');

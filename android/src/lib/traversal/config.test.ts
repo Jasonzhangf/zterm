@@ -54,7 +54,70 @@ describe('buildTraversalPlan', () => {
     });
   });
 
-  it('orders logged-in auto candidates as Tailscale -> UDP direct -> direct IP -> TURN Relay', () => {
+  it('uses relay directory direct endpoint auth token for logged-in new devices', () => {
+    const plan = buildTraversalPlan(
+      {
+        bridgeHost: '',
+        bridgePort: 3333,
+        authToken: '',
+        daemonHostId: 'mac-studio',
+        relayHostId: 'mac-studio',
+        transportMode: 'auto',
+        relayEndpointCandidates: [
+          {
+            id: 'tailscale:100.66.1.82:3333',
+            kind: 'tailscale',
+            host: '100.66.1.82',
+            port: 3333,
+            authToken: 'daemon-token',
+            authRequired: true,
+            lastSeenAt: '2026-08-01T01:01:55.431Z',
+          },
+          {
+            id: 'relay-rtc:mac-studio',
+            kind: 'relay-rtc',
+            relayHostId: 'mac-studio',
+            authToken: 'daemon-token',
+            authRequired: true,
+            lastSeenAt: '2026-08-01T01:01:55.431Z',
+          },
+        ],
+      },
+      {
+        ...DEFAULT_BRIDGE_SETTINGS,
+        traversalRelay: {
+          relayBaseUrl: 'https://relay.example.test/relay/',
+          accessToken: 'access-1',
+          userId: 'user-1',
+          username: 'jason',
+          deviceId: 'android-1',
+          deviceName: 'Android',
+          platform: 'android',
+          wsDevicesUrl: 'wss://relay.example.test/relay/ws/devices',
+          wsHostUrl: 'wss://relay.example.test/relay/ws/host',
+          wsClientUrl: 'wss://relay.example.test/relay/ws/client',
+          turnUrl: 'turn:relay.example.test:3478?transport=udp',
+          turnUsername: 'turn-user',
+          turnCredential: 'turn-secret',
+          updatedAt: 1,
+        },
+      },
+    );
+
+    expect(plan.candidates[0]).toMatchObject({
+      id: 'tailscale:100.66.1.82:3333',
+      kind: 'ws',
+      path: 'tailscale',
+      url: 'ws://100.66.1.82:3333/?token=daemon-token',
+    });
+    expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
+      'tailscale',
+      'rtc-direct',
+      'rtc-relay',
+    ]);
+  });
+
+  it('orders logged-in auto candidates as Tailscale -> direct IPv6 -> UDP direct -> non-LAN IPv4 -> TURN Relay', () => {
     const plan = buildTraversalPlan(
       {
         bridgeHost: '203.0.113.10',
@@ -90,19 +153,19 @@ describe('buildTraversalPlan', () => {
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
       'tailscale',
+      'ipv6',
       'rtc-direct',
       'ipv4',
-      'ipv6',
       'rtc-relay',
     ]);
-    expect(plan.candidates[1]).toMatchObject({
+    expect(plan.candidates[2]).toMatchObject({
       kind: 'rtc',
       path: 'rtc-direct',
       endpoint: 'rtc-direct:daemon-host-a',
       iceTransportPolicy: 'all',
       iceServers: [{ urls: 'stun:turn.example.com:3478' }],
     });
-    expect(JSON.stringify(plan.candidates[1])).not.toContain('secret');
+    expect(JSON.stringify(plan.candidates[2])).not.toContain('secret');
   });
 
   it('ignores stale saved traversal priority in auto mode', () => {
@@ -146,9 +209,9 @@ describe('buildTraversalPlan', () => {
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
       'tailscale',
+      'ipv6',
       'rtc-direct',
       'ipv4',
-      'ipv6',
       'rtc-relay',
     ]);
   });

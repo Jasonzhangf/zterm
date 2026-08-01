@@ -34,8 +34,8 @@ export function getRelayRtcEndpointCandidates(candidates: RelayEndpointCandidate
     endpoint.kind === 'relay-rtc' && endpoint.relayHostId?.trim());
 }
 
-function isExplicitRelayRouteHost(host: Pick<Host, 'transportMode' | 'tags'>) {
-  return host.transportMode === 'webrtc' || (host.tags || []).includes('relay-route');
+function isExplicitRelayRouteHost(host: Pick<Host, 'transportMode'>) {
+  return host.transportMode === 'webrtc';
 }
 
 export function normalizeBridgeTarget(target?: Partial<BridgeTarget> | null): BridgeTarget {
@@ -72,7 +72,7 @@ export function buildBridgeTargetFromHost(host: Host): BridgeTarget {
     daemonHostId: host.daemonHostId,
     relayHostId: host.relayHostId || host.daemonHostId,
     relayDeviceId: host.relayDeviceId,
-    authToken: host.authToken,
+    authToken: host.authToken || preferredDirectEndpoint?.authToken,
     tailscaleHost: host.tailscaleHost || (preferredDirectEndpoint?.kind === 'tailscale' ? directoryBridgeHost : ''),
     ipv6Host: host.ipv6Host || (preferredDirectEndpoint?.kind === 'ipv6' ? directoryBridgeHost : ''),
     ipv4Host: host.ipv4Host || (preferredDirectEndpoint?.kind === 'ipv4' || preferredDirectEndpoint?.kind === 'lan' ? directoryBridgeHost : ''),
@@ -145,7 +145,7 @@ export function resolveRelayDeviceBridgeTarget(
     daemonHostId: device.daemon.hostId.trim(),
     relayHostId: device.daemon.hostId.trim(),
     relayDeviceId: device.deviceId.trim(),
-    authToken: '',
+    authToken: preferredDirectEndpoint?.authToken || '',
     transportMode: 'auto',
     relayEndpointCandidates,
     relayTmuxSessions,

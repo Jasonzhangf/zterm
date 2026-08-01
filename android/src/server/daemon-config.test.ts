@@ -89,6 +89,35 @@ describe('daemon config', () => {
     expect(config.authSource).toBe('env');
   });
 
+  it('does not let an empty zterm daemon auth field mask the legacy mobile daemon token', () => {
+    const homeDir = createTempHome();
+    writeConfig(homeDir, {
+      mobile: {
+        daemon: {
+          host: '0.0.0.0',
+          port: 3333,
+          authToken: 'legacy-mobile-token',
+          terminalCacheLines: 2048,
+        },
+      },
+      zterm: {
+        android: {
+          daemon: {
+            authToken: '',
+          },
+        },
+      },
+    });
+
+    const config = resolveDaemonRuntimeConfig({ env: {}, homeDir });
+
+    expect(config.authToken).toBe('legacy-mobile-token');
+    expect(config.authSource).toBe('config');
+    expect(config.host).toBe('0.0.0.0');
+    expect(config.port).toBe(3333);
+    expect(config.terminalCacheLines).toBe(2048);
+  });
+
   it('resolves traversal relay device binding metadata', () => {
     const homeDir = createTempHome();
     writeConfig(homeDir, {

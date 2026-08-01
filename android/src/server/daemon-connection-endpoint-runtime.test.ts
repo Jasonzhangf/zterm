@@ -60,6 +60,35 @@ describe('daemon connection endpoint runtime', () => {
     ]);
   });
 
+  it('publishes daemon auth token on account-scoped route candidates', () => {
+    const candidates = buildDaemonConnectionEndpointCandidates({
+      hostId: 'mac-studio',
+      bridgePort: 3333,
+      authToken: 'daemon-token',
+      now,
+      interfaces: {
+        utun7: [
+          { address: '100.66.1.82', family: 'IPv4', internal: false },
+        ],
+      },
+    });
+
+    expect(candidates).toEqual([
+      expect.objectContaining({
+        id: 'rtc-direct:mac-studio',
+        authToken: 'daemon-token',
+      }),
+      expect.objectContaining({
+        id: 'tailscale:100.66.1.82:3333',
+        authToken: 'daemon-token',
+      }),
+      expect.objectContaining({
+        id: 'relay-rtc:mac-studio',
+        authToken: 'daemon-token',
+      }),
+    ]);
+  });
+
   it('excludes loopback, link-local, unspecified, duplicate, and public TCP addresses', () => {
     const interfaces: DaemonNetworkInterfaceMap = {
       en0: [

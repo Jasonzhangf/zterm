@@ -88,6 +88,7 @@ function listInterfaceAddresses(interfaces: DaemonNetworkInterfaceMap) {
 export function buildDaemonConnectionEndpointCandidates(options: {
   hostId: string;
   bridgePort: number;
+  authToken?: string;
   now: string;
   interfaces?: DaemonNetworkInterfaceMap;
   publicUdpEndpoint?: DaemonPublicUdpEndpoint | null;
@@ -107,12 +108,15 @@ export function buildDaemonConnectionEndpointCandidates(options: {
   const lanAddresses = addresses.filter((address) => isPrivateLanIpv4(address) && !isTailscaleIpv4(address));
   const tailscaleAddresses = addresses.filter(isTailscaleIpv4);
   const publicUdpEndpoint = normalizePublicUdpEndpoint(options.publicUdpEndpoint);
+  const authToken = options.authToken?.trim() || '';
+  const authFields = authToken ? { authToken } : {};
 
   const candidates: RelayEndpointCandidate[] = lanAddresses.map((host) => ({
     id: `lan:${host}:${bridgePort}`,
     kind: 'lan',
     host,
     port: bridgePort,
+    ...authFields,
     authRequired: true,
     lastSeenAt: now,
   }));
@@ -124,6 +128,7 @@ export function buildDaemonConnectionEndpointCandidates(options: {
         host: publicUdpEndpoint.host,
         port: publicUdpEndpoint.port,
         relayHostId: hostId,
+        ...authFields,
         authRequired: true,
         lastSeenAt: now,
       }
@@ -131,6 +136,7 @@ export function buildDaemonConnectionEndpointCandidates(options: {
         id: `rtc-direct:${hostId}`,
         kind: 'rtc-direct',
         relayHostId: hostId,
+        ...authFields,
         authRequired: true,
         lastSeenAt: now,
       });
@@ -140,6 +146,7 @@ export function buildDaemonConnectionEndpointCandidates(options: {
     kind: 'tailscale' as const,
     host,
     port: bridgePort,
+    ...authFields,
     authRequired: true,
     lastSeenAt: now,
   })));
@@ -148,6 +155,7 @@ export function buildDaemonConnectionEndpointCandidates(options: {
     id: `relay-rtc:${hostId}`,
     kind: 'relay-rtc',
     relayHostId: hostId,
+    ...authFields,
     authRequired: true,
     lastSeenAt: now,
   });

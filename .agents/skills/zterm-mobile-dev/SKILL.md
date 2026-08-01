@@ -171,6 +171,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - relay/account 配置必须走全局发行包入口：先 `install-global.sh` 安装/升级 `~/.local/bin/zterm-daemon`，再用 `zterm-daemon configure-relay` 写 `~/.wterm/config.json -> mobile.relay`；daemon 只读取配置，不承载账号 UX，禁止把手工改散落配置当成最终交付。
 - daemon 全局安装的稳定入口必须由包内脚本自固化：npm postinstall / service runner 要自动生成 `~/.local/bin/zterm-daemon` 与 `~/.local/bin/wterm`，写入前先清旧 symlink/file，released runner 读 config 前要迁移旧 `~/.wterm -> ~/.zterm`。如果只靠手工修 PATH、手工挪目录或改已安装文件，视为未修真源。
 - relay account directory 发布必须来自 daemon truth：`relay-ready` 后由 daemon relay host client 发布 `directory-update`，session catalog 只能来自 tmux 枚举；枚举失败必须显式报错，禁止把失败伪造成空 sessions 的成功目录。
+- Relay directory direct endpoints 必须端到端保留 daemon `authToken`。若本机 daemon 日志显示 `auth=config` 且发布多条 endpoint，但生产 `/api/auth/me` 只回少量 endpoint 或 `hasAuthToken=false`，先查生产 `/usr/lib/node_modules/@jsonstudio/zterm-relay-server/runtime/server.cjs` 是否包含 `authToken`，再升级 `@jsonstudio/zterm-relay-server` 并 service-scoped restart `zterm-traversal-relay.service`。禁止先在 Android route/UI 层补第二套 token fallback。
 - relay smoke / 真实链路里 client device 与 daemon device 必须使用不同 `deviceId`；复用同一 id 会让 client metadata 覆盖 daemon directory identity，造成 account directory 假状态。
 - Relay WebRTC signaling peer lease 必须按 `account + hostId + concrete client deviceId` 独立维护。Android 每安装实例生成并持久化自己的 relay client `deviceId`，`/ws/client` 必须携带它；Relay server 缺 deviceId 要显式拒绝，不能把匿名客户端合并或共享。普通 signaling socket close 只让该 device peer idle 30 分钟，不立刻通知 daemon close；同 device 30 分钟内重连复用 peerId 并重新 `rtc-init` 协商，不同手机必须得到不同 peerId。超过 30 分钟、host 替换或显式 `rtc-close` 才关闭 peer。验证 gate 是 `pnpm --dir android run test:relay:peer-lease`，并且不能把 terminal channel/tmux/mirror/UI truth 放进 lease。
 - Android Relay client identity migration 必须在打开任何 Relay socket 前完成：旧安装持久化的固定 id（如 `zterm-android`）视为无效，必须迁移成稳定 per-install id，并同步 top-level account、nested `relaySettings`、startup `BridgeSettings`。否则升级后的两台手机仍会用同一个 `/ws/client?deviceId=zterm-android` 抢同一 peer lease。验证至少覆盖 legacy id 持久迁移、device stream URL/meta 使用迁移后 id、显式非 legacy id 不被覆盖、startup BridgeSettings 同步。
@@ -195,7 +196,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - terminal 排版真源在 daemon / tmux；client 只上报 viewport(`cols / rows`) 并渲染镜像，不能在 keyboard 显隐 / pinch / rotate 时自行 replay buffer
 - `wterm daemon start/restart/install-service` 不能只看 launchd loaded；必须至少等到 daemon 端口真正监听，再允许回报 ready，避免手机首连撞启动窗口
 - websocket mux bridge 的 heartbeat 只能由 `resource.daemon_target_transport` 持有：同一 daemon target 只有一个低频（60 秒级）`mux-ping` timer，logical tmux session/channel 禁止各自发 heartbeat。合法 mux frame / `mux-pong` 更新 physical target activity；channel switch、foreground resume、body-subscription 不得创建第二个 timer 或第二条 WebSocket。只有 physical close/error/send failure 或 target health owner 确认 physical transport 失效才进入 target reconnect；单 channel error 只重开 channel。
-- mux data channel close 必须先走 target control status：通过现有 mux target transport 发送 `mux-target-message(list-sessions)`，确认 tmux session 仍存在且 session active/live 后才重开 channel；tmux truth 缺失则投 closed，inactive 则 idle，channel 已重开则丢弃 stale control 结果。禁止把单个 channel close 直接冒充物理 target failure，也禁止绕过控制线直接给 UI 投 `rtc connection timeout`。
+- mux data channel close 必须先走 target control status：通过现有 mux target transport 发送 `mux-target-message(list-sessions)`，确认 tmux session 仍存在且 session active/live 后才重开 channel；tmux truth 缺失则投 closed，inactive 则 idle，channel 已重开则丢弃 stale control 结果。若 active/live channel 的 target control status 自身不可达或请求失败，说明控制线不可用，必须交给 target transport failure owner 退休当前物理 generation 并重建；禁止把它投成 idle/error 卡死，也禁止绕过控制线直接给 UI 投 `rtc connection timeout`。
 - reconnect 相位、manual close、stale head probe 必须统一由 `SessionReconnectStore` 持有；禁止重新传 `reconnectRuntimesRef` / `manualCloseRef` / `staleTransportProbeAtRef` 三个 ref 袋子。`SessionReconnectRuntime` 只能是 `idle | scheduled | connecting` 判别联合，只有 `scheduled` 可带 timer；manual close 必须抑制 retryable reconnect 且不投 terminal error，scheduled/connecting 不得重复排队 reconnect。
 - 短暂重连不要制造断连感：网络在线且 active session 处于 `reconnecting` 的前 10 秒，TerminalPage 应隐藏 network banner，并让 portrait status strip 投影 `waiting`/green；超过 grace 后才显示真实 reconnect/error UI。这个规则只属于 UI projection，不改变 transport/reconnect 真相。
 - websocket reconnect / 首次 connect 完成后，active tab 必须立刻恢复 **head-first** 主循环（先 `buffer-head-request`，再按本地 buffer 状态决定 diff / 三屏重锚 / reading gap repair）；不能再依赖第二套 active/idle 语义
@@ -1373,6 +1374,12 @@ debug overlay 现在显示 MU（菜单位置）和 CE（结束行），长按后
 - Rule: file-upload/download wire chunk must be shared `FILE_TRANSFER_WIRE_CHUNK_BYTES` (16 KiB). Base64 + mux JSON frame must stay under `FILE_TRANSFER_WIRE_FRAME_MAX_CHARS`.
 - Anti-pattern: 256 KiB raw base64 JSON chunks on RTC DataChannel.
 - Marker: `file transfer wire chunk 16kib rtc frame budget`
+
+## Exact tmux pane targets
+- Trigger: after fixing prefix collisions with exact tmux session targets, daemon initial canonical sync fails with empty pane metrics (`rows= cols=`), or input reports `can't find pane: =session`.
+- Rule: pane-level tmux commands (`display-message` for pane formats/current path, `capture-pane`, `send-keys`) must use the deterministic tmux pane token `=<session>:.{top-left}`; session/window commands (`has-session`, `kill-session`, `rename-session`, window options/resize) must keep exact session target `=<session>`. Keep separate central builders (`buildExactTmuxSessionTarget`, `buildExactTmuxPaneTarget`) so pane fixes do not corrupt session commands.
+- Anti-pattern: using bare `=<session>` as a universal target, hard-coding `=<session>:0.0`, or resolving the currently active pane; those break pane stability, nonzero base indexes, or deleted original panes.
+- Marker: `exact tmux pane target top-left token`
 
 ## File transfer upload progress ack
 - Trigger: sync upload still crashes after native `readFileChunk` streaming and 16KiB wire budget.

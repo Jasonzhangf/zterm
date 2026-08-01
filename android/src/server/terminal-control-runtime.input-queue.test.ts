@@ -143,7 +143,7 @@ describe('terminal control runtime input queue', () => {
     expect(spawnMock.mock.calls[0]?.[1]).toEqual([
       'send-keys',
       '-t',
-      '=demo',
+      '=demo:.{top-left}',
       '-l',
       '--',
       'abc',
@@ -187,7 +187,7 @@ describe('terminal control runtime input queue', () => {
     expect(spawnMock.mock.calls[0]?.[1]).toEqual([
       'send-keys',
       '-t',
-      '=demo',
+      '=demo:.{top-left}',
       '-l',
       '--',
       'new',
@@ -208,16 +208,16 @@ describe('terminal control runtime input queue', () => {
     expect(spawnMock.mock.calls[0]?.[1]).toEqual([
       'send-keys',
       '-t',
-      '=demo',
+      '=demo:.{top-left}',
       '-l',
       '--',
       'echo ok',
     ]);
-    expect(spawnMock.mock.calls[1]?.[1]).toEqual(['send-keys', '-t', '=demo', 'Enter']);
+    expect(spawnMock.mock.calls[1]?.[1]).toEqual(['send-keys', '-t', '=demo:.{top-left}', 'Enter']);
     expect(spawnMock.mock.calls[2]?.[1]).toEqual([
       'send-keys',
       '-t',
-      '=demo',
+      '=demo:.{top-left}',
       '-l',
       '--',
       'next',
@@ -299,7 +299,7 @@ describe('terminal control runtime input queue', () => {
     expect(spawnMock.mock.calls[1]?.[1]).toEqual([
       'send-keys',
       '-t',
-      '=demo',
+      '=demo:.{top-left}',
       '-l',
       '--',
       'second',
@@ -328,7 +328,7 @@ describe('terminal control runtime input queue', () => {
         TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES,
       );
     }
-    expect(sendKeyCalls[sendKeyCalls.length - 1]).toEqual(['send-keys', '-t', '=demo', 'Enter']);
+    expect(sendKeyCalls[sendKeyCalls.length - 1]).toEqual(['send-keys', '-t', '=demo:.{top-left}', 'Enter']);
   });
 
   // R3 reverse tests: close/destroy must NOT leak input into a future attach.
@@ -374,7 +374,7 @@ describe('terminal control runtime input queue', () => {
     expect(spawnMock.mock.calls[0]?.[1]).toEqual([
       'send-keys',
       '-t',
-      '=demo',
+      '=demo:.{top-left}',
       '-l',
       '--',
       'fresh',

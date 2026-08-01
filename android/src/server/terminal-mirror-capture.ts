@@ -27,7 +27,7 @@ export interface TerminalMirrorCaptureDeps {
   resolveMirrorCacheLines: (rows: number) => number;
   runTmux: (args: string[]) => { ok: true; stdout: string };
   runTmuxAsync: (args: string[]) => Promise<{ ok: true; stdout: string }>;
-  buildExactTmuxSessionTarget: (sessionName: string) => string;
+  buildExactTmuxPaneTarget: (sessionName: string) => string;
   logTimePrefix: () => string;
   wezTermBackend?: WezTermBackendRuntime | null;
 }
@@ -279,7 +279,7 @@ export function createTerminalMirrorCaptureRuntime(
       'display-message',
       '-p',
       '-t',
-      deps.buildExactTmuxSessionTarget(sessionName),
+      deps.buildExactTmuxPaneTarget(sessionName),
       '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{pane_dead}',
     ]);
     const [paneIdRaw, tmuxHistorySizeRaw, rowsRaw, colsRaw, alternateOnRaw, paneDeadRaw] = result.stdout.trim().split('\t');
@@ -309,7 +309,7 @@ export function createTerminalMirrorCaptureRuntime(
       return deps.wezTermBackend.readCurrentPath(sessionName);
     }
     const result = deps.runTmux([
-      'display-message', '-p', '-t', deps.buildExactTmuxSessionTarget(sessionName), '#{pane_current_path}',
+      'display-message', '-p', '-t', deps.buildExactTmuxPaneTarget(sessionName), '#{pane_current_path}',
     ]);
     const currentPath = result.stdout.trim();
     if (!currentPath) {
@@ -373,7 +373,7 @@ export function createTerminalMirrorCaptureRuntime(
       'display-message',
       '-p',
       '-t',
-      deps.buildExactTmuxSessionTarget(sessionName),
+      deps.buildExactTmuxPaneTarget(sessionName),
       '#{pane_id}\t#{history_size}\t#{pane_height}\t#{pane_width}\t#{alternate_on}\t#{pane_dead}',
     ]);
     const [paneIdRaw, tmuxHistorySizeRaw, rowsRaw, colsRaw, alternateOnRaw, paneDeadRaw] = result.stdout.trim().split('\t');

@@ -9,6 +9,7 @@ describe('relay directory control payload contract', () => {
         kind: 'lan',
         host: '192.168.1.20',
         port: 3333,
+        authToken: 'daemon-token',
         authRequired: true,
         lastSeenAt: '2026-07-28T07:00:00.000Z',
       }],

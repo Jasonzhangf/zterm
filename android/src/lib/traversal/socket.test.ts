@@ -281,6 +281,27 @@ describe('TraversalSocket reconnect', () => {
     vi.unstubAllGlobals();
   });
 
+  it('opens Tailscale before non-LAN IPv4 when no relay account settings are present', async () => {
+    new TraversalSocket({
+      bridgeHost: '203.0.113.10',
+      bridgePort: 3333,
+      authToken: 'token',
+      tailscaleHost: '100.66.1.82',
+      ipv4Host: '203.0.113.10',
+      transportMode: 'websocket',
+    }, settings, {
+      routeHealthCache: new TraversalRouteHealthCache(),
+      routeHealthScope: {
+        accountId: 'logged-out',
+        daemonHostId: 'daemon-1',
+      },
+    });
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(MockWebSocket.instances[0].url).toContain('100.66.1.82');
+  });
+
   it('reconnects quickly after an opened traversal backend closes', async () => {
     const socket = createSocket({}, { autoReconnect: true });
     await flushMicrotasks();

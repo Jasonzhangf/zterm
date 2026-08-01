@@ -3660,6 +3660,159 @@ var import_websocket_server = __toESM(require_websocket_server(), 1);
 // src/traversal-relay/server.ts
 var import_crypto2 = require("crypto");
 
+// ../packages/shared/src/connection/relay-directory.ts
+var RELAY_ENDPOINT_KINDS = /* @__PURE__ */ new Set([
+  "lan",
+  "rtc-direct",
+  "tailscale",
+  "ipv6",
+  "ipv4",
+  "relay-rtc"
+]);
+function requireControlObject(value, label) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  return value;
+}
+function rejectUnknownFields(object, allowed, label) {
+  for (const key of Object.keys(object)) {
+    if (!allowed.has(key)) {
+      throw new Error(`unknown ${label ? `${label} ` : ""}control field: ${key}`);
+    }
+  }
+}
+function validateEndpointCandidate(value) {
+  const endpoint = requireControlObject(value, "endpoint candidate");
+  rejectUnknownFields(
+    endpoint,
+    /* @__PURE__ */ new Set(["id", "kind", "host", "port", "wsUrl", "relayHostId", "authToken", "authRequired", "lastSeenAt"]),
+    "endpoint"
+  );
+  if (typeof endpoint.id !== "string" || !endpoint.id.trim()) {
+    throw new Error("endpoint candidate id is required");
+  }
+  if (typeof endpoint.kind !== "string" || !RELAY_ENDPOINT_KINDS.has(endpoint.kind)) {
+    throw new Error(`unsupported endpoint candidate kind: ${String(endpoint.kind || "")}`);
+  }
+  if (typeof endpoint.authRequired !== "boolean") {
+    throw new Error("endpoint candidate authRequired must be boolean");
+  }
+  if (typeof endpoint.lastSeenAt !== "string" || !endpoint.lastSeenAt.trim()) {
+    throw new Error("endpoint candidate lastSeenAt is required");
+  }
+  for (const field of ["host", "wsUrl", "relayHostId", "authToken"]) {
+    if (endpoint[field] !== void 0 && typeof endpoint[field] !== "string") {
+      throw new Error(`endpoint candidate ${field} must be string`);
+    }
+  }
+  if (endpoint.port !== void 0 && (typeof endpoint.port !== "number" || !Number.isInteger(endpoint.port) || endpoint.port < 1 || endpoint.port > 65535)) {
+    throw new Error("endpoint candidate port is invalid");
+  }
+}
+function validateSessionSnapshot(value) {
+  const session = requireControlObject(value, "session snapshot");
+  rejectUnknownFields(session, /* @__PURE__ */ new Set(["name", "cwd", "title", "updatedAt"]), "session");
+  if (typeof session.name !== "string" || !session.name.trim()) {
+    throw new Error("session snapshot name is required");
+  }
+  if (typeof session.updatedAt !== "string" || !session.updatedAt.trim()) {
+    throw new Error("session snapshot updatedAt is required");
+  }
+  for (const field of ["cwd", "title"]) {
+    if (session[field] !== void 0 && typeof session[field] !== "string") {
+      throw new Error(`session snapshot ${field} must be string`);
+    }
+  }
+}
+function validateRelayDirectoryUpdatePayload(value) {
+  const payload = requireControlObject(value, "relay directory update");
+  rejectUnknownFields(payload, /* @__PURE__ */ new Set(["endpoints", "sessions", "publishedAt"]), "");
+  if (payload.endpoints !== void 0) {
+    if (!Array.isArray(payload.endpoints)) {
+      throw new Error("relay directory endpoints must be an array");
+    }
+    payload.endpoints.forEach(validateEndpointCandidate);
+  }
+  if (payload.sessions !== void 0) {
+    if (!Array.isArray(payload.sessions)) {
+      throw new Error("relay directory sessions must be an array");
+    }
+    payload.sessions.forEach(validateSessionSnapshot);
+  }
+  if (payload.publishedAt !== void 0 && (typeof payload.publishedAt !== "string" || !payload.publishedAt.trim())) {
+    throw new Error("relay directory publishedAt must be a non-empty string");
+  }
+  return true;
+}
+function asString(value) {
+  return typeof value === "string" ? value.trim() : "";
+}
+function asBoolean(value, fallback = false) {
+  return typeof value === "boolean" ? value : fallback;
+}
+function asPositiveInteger(value) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : void 0;
+}
+function normalizeRelayEndpointCandidates(input, now) {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  const seen = /* @__PURE__ */ new Set();
+  const endpoints = [];
+  for (const item of input) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const candidate = item;
+    if (candidate.kind !== "lan" && candidate.kind !== "rtc-direct" && candidate.kind !== "tailscale" && candidate.kind !== "ipv6" && candidate.kind !== "ipv4" && candidate.kind !== "relay-rtc") {
+      continue;
+    }
+    const id = asString(candidate.id) || `${candidate.kind}:${asString(candidate.host) || asString(candidate.wsUrl) || asString(candidate.relayHostId)}`;
+    if (!id || seen.has(id)) {
+      continue;
+    }
+    seen.add(id);
+    endpoints.push({
+      id,
+      kind: candidate.kind,
+      ...asString(candidate.host) ? { host: asString(candidate.host) } : {},
+      ...asPositiveInteger(candidate.port) ? { port: asPositiveInteger(candidate.port) } : {},
+      ...asString(candidate.wsUrl) ? { wsUrl: asString(candidate.wsUrl) } : {},
+      ...asString(candidate.relayHostId) ? { relayHostId: asString(candidate.relayHostId) } : {},
+      ...asString(candidate.authToken) ? { authToken: asString(candidate.authToken) } : {},
+      authRequired: asBoolean(candidate.authRequired, true),
+      lastSeenAt: asString(candidate.lastSeenAt) || now
+    });
+  }
+  return endpoints;
+}
+function normalizeRelayTmuxSessionSnapshots(input, now) {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  const seen = /* @__PURE__ */ new Set();
+  const sessions = [];
+  for (const item of input) {
+    if (!item || typeof item !== "object") {
+      continue;
+    }
+    const candidate = item;
+    const name = asString(candidate.name);
+    if (!name || seen.has(name)) {
+      continue;
+    }
+    seen.add(name);
+    sessions.push({
+      name,
+      ...asString(candidate.cwd) ? { cwd: asString(candidate.cwd) } : {},
+      ...asString(candidate.title) ? { title: asString(candidate.title) } : {},
+      updatedAt: asString(candidate.updatedAt) || now
+    });
+  }
+  return sessions;
+}
+
 // src/traversal-relay/client-debug-store.ts
 var MAX_LOGS_PER_DEVICE = 500;
 var MAX_LOG_QUERY_LIMIT = 500;
@@ -3758,76 +3911,6 @@ var TraversalRelayClientDebugStore = class {
 var import_fs = require("fs");
 var import_path = require("path");
 var import_crypto = require("crypto");
-
-// ../packages/shared/src/connection/relay-directory.ts
-function asString(value) {
-  return typeof value === "string" ? value.trim() : "";
-}
-function asBoolean(value, fallback = false) {
-  return typeof value === "boolean" ? value : fallback;
-}
-function asPositiveInteger(value) {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? Math.floor(value) : void 0;
-}
-function normalizeRelayEndpointCandidates(input, now) {
-  if (!Array.isArray(input)) {
-    return [];
-  }
-  const seen = /* @__PURE__ */ new Set();
-  const endpoints = [];
-  for (const item of input) {
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-    const candidate = item;
-    if (candidate.kind !== "tailscale" && candidate.kind !== "ipv6" && candidate.kind !== "ipv4" && candidate.kind !== "relay-rtc") {
-      continue;
-    }
-    const id = asString(candidate.id) || `${candidate.kind}:${asString(candidate.host) || asString(candidate.wsUrl) || asString(candidate.relayHostId)}`;
-    if (!id || seen.has(id)) {
-      continue;
-    }
-    seen.add(id);
-    endpoints.push({
-      id,
-      kind: candidate.kind,
-      ...asString(candidate.host) ? { host: asString(candidate.host) } : {},
-      ...asPositiveInteger(candidate.port) ? { port: asPositiveInteger(candidate.port) } : {},
-      ...asString(candidate.wsUrl) ? { wsUrl: asString(candidate.wsUrl) } : {},
-      ...asString(candidate.relayHostId) ? { relayHostId: asString(candidate.relayHostId) } : {},
-      authRequired: asBoolean(candidate.authRequired, true),
-      lastSeenAt: asString(candidate.lastSeenAt) || now
-    });
-  }
-  return endpoints;
-}
-function normalizeRelayTmuxSessionSnapshots(input, now) {
-  if (!Array.isArray(input)) {
-    return [];
-  }
-  const seen = /* @__PURE__ */ new Set();
-  const sessions = [];
-  for (const item of input) {
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-    const candidate = item;
-    const name = asString(candidate.name);
-    if (!name || seen.has(name)) {
-      continue;
-    }
-    seen.add(name);
-    sessions.push({
-      name,
-      ...asString(candidate.cwd) ? { cwd: asString(candidate.cwd) } : {},
-      ...asString(candidate.title) ? { title: asString(candidate.title) } : {},
-      updatedAt: asString(candidate.updatedAt) || now
-    });
-  }
-  return sessions;
-}
-
-// src/traversal-relay/store.ts
 function createEmptyStore() {
   return {
     users: [],
@@ -5100,6 +5183,7 @@ function registerHost(ws, request, url) {
     try {
       const envelope = JSON.parse(String(raw));
       if (envelope.type === "directory-update") {
+        validateRelayDirectoryUpdatePayload(envelope.directory);
         store.publishDaemonDirectory({
           userId: user.id,
           deviceId,

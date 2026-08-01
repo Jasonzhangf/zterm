@@ -21,6 +21,7 @@ function endpointTruthKey(endpoints: RelayEndpointCandidate[]) {
       port: endpoint.port || 0,
       wsUrl: endpoint.wsUrl || '',
       relayHostId: endpoint.relayHostId || '',
+      authToken: endpoint.authToken || '',
       authRequired: endpoint.authRequired,
       lastSeenAt: endpoint.lastSeenAt,
     }))

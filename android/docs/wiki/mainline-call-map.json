@@ -432,8 +432,8 @@
           "from": "RelayDirectoryProjection",
           "to": "TransportTargetResolver",
           "owner_feature": "relay.account_directory",
-          "semantic_input": "stable daemon id plus confirmed endpoint generation",
-          "semantic_output": "future transport target with current route candidates",
+          "semantic_input": "stable daemon id plus confirmed endpoint generation and direct-route auth token truth",
+          "semantic_output": "future transport target with current route candidates and endpoint auth needed for direct WebSocket attempts",
           "status": "anchored",
           "edge_id": "android_mainline:RelayDirectoryProjection->TransportTargetResolver",
           "resource_from": "resource.relay_account_directory",
@@ -1938,7 +1938,7 @@
           "to": "TerminalChannelClosedIn02ControlStatusDecision",
           "owner_feature": "terminal.transport_lifecycle",
           "semantic_input": "closed channel id, session name, and active/live reconnect eligibility",
-          "semantic_output": "explicit decision to reconnect only on control-confirmed existing tmux session, close on missing tmux truth, or idle/error on control-unreachable truth",
+          "semantic_output": "explicit decision to reconnect only on control-confirmed existing tmux session, close on missing tmux truth, keep inactive channels idle, or route active/live control-unreachable truth to target failure",
           "status": "anchored",
           "edge_id": "android_mainline:TerminalChannelClosedIn01CloseSignal->TerminalChannelClosedIn02ControlStatusDecision",
           "resource_from": "resource.terminal_channel",
@@ -1960,6 +1960,21 @@
           "resource_to": "resource.daemon_target_transport",
           "via_resources": [],
           "relation_status": "observer"
+        },
+        {
+          "from": "TerminalChannelClosedIn02ControlStatusDecision",
+          "to": "TargetFailureRouter",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "active/live closed terminal channel whose target control status is unavailable or rejected before a stale channel replacement",
+          "semantic_output": "one exact daemon-target physical generation failure submission through the existing target failure owner",
+          "status": "anchored",
+          "edge_id": "android_mainline:TerminalChannelClosedIn02ControlStatusDecision->TargetFailureRouter",
+          "resource_from": "resource.terminal_channel",
+          "resource_to": "resource.daemon_target_transport",
+          "via_resources": [
+            "resource.session_transport"
+          ],
+          "relation_status": "via"
         }
       ]
     },
@@ -2557,9 +2572,9 @@
         {
           "from": "RelayHostControl",
           "to": "DaemonEndpointDirectory",
-          "owner_feature": "terminal.transport_lifecycle",
+          "owner_feature": "relay.account_directory",
           "semantic_input": "relay-ready publication request plus current daemon network truth",
-          "semantic_output": "ordered LAN, honest RTC-direct, Tailscale, and TURN candidate set",
+          "semantic_output": "ordered LAN, honest RTC-direct, Tailscale, and TURN candidate set with account-scoped daemon auth token",
           "status": "anchored",
           "edge_id": "daemon_mainline:RelayHostControl->DaemonEndpointDirectory",
           "resource_from": "resource.relay_control_connection",
@@ -2571,7 +2586,7 @@
           "from": "DaemonEndpointDirectory",
           "to": "RelayDirectoryPublish",
           "owner_feature": "relay.account_directory",
-          "semantic_input": "validated endpoint candidates and exact tmux session snapshots",
+          "semantic_input": "validated endpoint candidates including direct-route auth token and exact tmux session snapshots",
           "semantic_output": "directory-update on the existing host control WebSocket",
           "status": "anchored",
           "edge_id": "daemon_mainline:DaemonEndpointDirectory->RelayDirectoryPublish",

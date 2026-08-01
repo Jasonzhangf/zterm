@@ -87,7 +87,7 @@ function getHostEndpoint(host: Host) {
 function getHostBadge(host: Host) {
   const tagText = (host.tags || []).join(' ').toLowerCase();
   const endpoint = getHostEndpoint(host).toLowerCase();
-  if (hasRelayRtcCandidate(host) && !host.bridgeHost.trim()) {
+  if (hasRelayRtcCandidate(host)) {
     return 'Auto';
   }
   if (tagText.includes('tailscale') || endpoint.includes('100.') || endpoint.includes('.ts.net')) {
