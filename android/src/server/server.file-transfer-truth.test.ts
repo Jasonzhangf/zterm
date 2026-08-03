@@ -71,7 +71,9 @@ describe('server file-transfer truth gates', () => {
     expect(listBlock).toContain('deps.readTmuxPaneCurrentPath(session.sessionName)');
     expect(mkdirBlock).toContain('resolveFileTransferListPath');
     expect(mkdirBlock).toContain('deps.readTmuxPaneCurrentPath(session.sessionName)');
-    expect(listBlock).toContain("logFileTransferRuntimeError('stat entry failed'");
+    expect(source).toContain("logFileTransferRuntimeError('stat entry failed'");
+    expect(source).toContain('function getDirectoryCache(');
+    expect(source).toContain('function watchDirectoryCache(');
   });
 
   it('keeps binary handlers fail-fast and never falls back to raw terminal input', () => {

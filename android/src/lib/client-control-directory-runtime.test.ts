@@ -90,4 +90,32 @@ describe('client control directory runtime', () => {
 
     expect(runtime.read('mac-studio')).toBeNull();
   });
+
+  it('exposes confirmed generation and target presence for connection wait decisions', () => {
+    const runtime = new ClientControlDirectoryRuntime();
+    expect(runtime.readStatus('mac-studio')).toEqual({
+      confirmed: false,
+      generation: 0,
+      daemonHostId: 'mac-studio',
+      targetPresent: false,
+      knownDaemonHostIds: [],
+    });
+
+    runtime.replaceFromDevices([makeDevice('mac-studio', '192.168.1.20')]);
+
+    expect(runtime.readStatus('mac-studio')).toEqual({
+      confirmed: true,
+      generation: 1,
+      daemonHostId: 'mac-studio',
+      targetPresent: true,
+      knownDaemonHostIds: ['mac-studio'],
+    });
+    expect(runtime.readStatus('missing-host')).toEqual({
+      confirmed: true,
+      generation: 1,
+      daemonHostId: 'missing-host',
+      targetPresent: false,
+      knownDaemonHostIds: ['mac-studio'],
+    });
+  });
 });

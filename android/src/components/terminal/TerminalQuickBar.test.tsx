@@ -802,8 +802,7 @@ describe("TerminalQuickBar", () => {
     expect(screen.queryByRole("button", { name: "文件" })).toBeNull();
   });
 
-  it("lets landscape users collapse inline rows into the floating bubble", async () => {
-    const onCollapsedChange = vi.fn();
+  it("keeps the inline quickbar free of a dedicated collapse button", async () => {
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
       writable: true,
@@ -821,45 +820,17 @@ describe("TerminalQuickBar", () => {
       offsetLeft: 0,
     });
 
-    const view = renderQuickBar({
+    renderQuickBar({
       collapseAvailable: true,
       collapsed: false,
-      onCollapsedChange,
     });
 
     const toolRow = screen.getByTestId("quickbar-tool-row");
     expect(toolRow.textContent).not.toContain("收起");
-    expect(screen.getAllByRole("button", { name: "收起" })).toHaveLength(1);
-
-    fireEvent.click(screen.getByRole("button", { name: "收起" }));
-    expect(onCollapsedChange).toHaveBeenCalledWith(true);
-
-    view.rerender(
-      <TerminalQuickBar
-        activeSessionId="session-1"
-        quickActions={[]}
-        shortcutActions={[]}
-        sessionDraft=""
-        onSendSequence={vi.fn()}
-        onSessionDraftChange={vi.fn()}
-        onSessionDraftSend={vi.fn()}
-        onQuickActionsChange={vi.fn()}
-        onShortcutActionsChange={vi.fn()}
-        onOpenScheduleComposer={vi.fn()}
-        onMeasuredHeightChange={vi.fn()}
-        shellMode="inline"
-        collapseAvailable
-        collapsed
-        onCollapsedChange={onCollapsedChange}
-      />,
-    );
-
-    expect(screen.queryByTestId("terminal-quickbar-shell-rows")).toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "展开快捷栏" }));
-    expect(onCollapsedChange).toHaveBeenCalledWith(false);
+    expect(screen.queryByRole("button", { name: "收起" })).toBeNull();
   });
 
-  it("only reserves collapse-button width on the bottom tool row", () => {
+  it("does not reserve empty width after removing the collapse button", () => {
     Object.defineProperty(window, "innerWidth", {
       configurable: true,
       writable: true,
@@ -897,7 +868,7 @@ describe("TerminalQuickBar", () => {
     expect(topRowShell).not.toBeNull();
     expect(bottomRowShell).not.toBeNull();
     expect(topRowShell?.style.paddingRight).toBe("6px");
-    expect(bottomRowShell?.style.paddingRight).toBe("60px");
+    expect(bottomRowShell?.style.paddingRight).toBe("6px");
   });
 
   it("keeps a keyboard button available when collapsed in portrait", () => {
@@ -948,6 +919,23 @@ describe("TerminalQuickBar", () => {
     });
   });
 
+  it("marks collapsed and floating-menu quickbar surfaces as transparent", () => {
+    const collapsedView = renderQuickBar({
+      shellMode: "floating-collapsed",
+      collapsed: true,
+    });
+    expect(
+      collapsedView.container.querySelector(".zterm-neo-quickbar")?.getAttribute("data-quickbar-surface"),
+    ).toBe("transparent");
+    collapsedView.unmount();
+
+    const expandedView = renderQuickBar();
+    const root = expandedView.container.querySelector(".zterm-neo-quickbar");
+    expect(root?.getAttribute("data-quickbar-surface")).toBe("expanded");
+    fireEvent.click(screen.getByRole("button", { name: "Toggle floating quick menu" }));
+    expect(root?.getAttribute("data-quickbar-surface")).toBe("transparent");
+  });
+
   it("exposes real quick and clipboard tabs in the floating menu", async () => {
     renderQuickBar({
       shellMode: "floating-collapsed",
@@ -995,14 +983,13 @@ describe("TerminalQuickBar", () => {
       expect(onRequestRemoteScreenshot).toHaveBeenCalledTimes(1);
     });
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Toggle floating quick menu" }),
-    );
-    expect(screen.queryByText("文件")).toBeNull();
-    expect(screen.queryByText("图片")).toBeNull();
-    expect(screen.queryByText("同步")).toBeNull();
-    expect(screen.queryByText("截图")).toBeNull();
-    expect(screen.queryByText("行号")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "文件浏览" }));
+    expect(onOpenFileTransfer).toHaveBeenCalledTimes(2);
+    expect(onOpenFileTransfer).toHaveBeenNthCalledWith(2, "browser");
+    expect(screen.queryByText("快捷输入")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Toggle floating quick menu" }));
+    expect(screen.getByText("快捷输入")).not.toBeNull();
   });
 
   it("activates copy mode immediately from pointer press and suppresses the follow-up click", () => {

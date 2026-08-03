@@ -457,7 +457,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
     }
   });
 
-  it('keeps using the same open socket when a head probe gets no response', () => {
+  it('reconnects through the unique owner when an open-socket head probe gets no valid response', () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(2500);
     const ws = { readyState: WebSocket.OPEN } as any;
     const requestSessionBufferHead = vi.fn(() => true);
@@ -474,9 +474,9 @@ describe('ensureActiveSessionFreshRuntime', () => {
 
     try {
       expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
-      expect(requestSessionBufferHead).toHaveBeenCalledWith('session-1', ws, { force: undefined });
-      expect(reconnectSession).not.toHaveBeenCalled();
-      expect(refs.reconnectStore.readStaleTransportProbeAt('session-1')).toBe(2500);
+      expect(requestSessionBufferHead).not.toHaveBeenCalled();
+      expect(reconnectSession).toHaveBeenCalledWith('session-1');
+      expect(refs.reconnectStore.readStaleTransportProbeAt('session-1')).toBe(0);
     } finally {
       nowSpy.mockRestore();
     }

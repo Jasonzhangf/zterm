@@ -53,6 +53,45 @@ describe('TerminalSessionDrawer', () => {
 
     expect(screen.getByTestId('terminal-session-drawer').style.width).toBe('48vw');
     expect(screen.getByTestId('terminal-session-drawer').style.maxWidth).toBe('187px');
+    expect(Number(screen.getByTestId('terminal-session-drawer').style.zIndex)).toBeGreaterThan(140);
+    expect(Number(screen.getByTestId('terminal-session-drawer-overlay').style.zIndex)).toBeGreaterThan(140);
+  });
+
+  it.each(['light', 'blue', 'black'] as const)('projects the %s shell skin onto the drawer surface', (skin) => {
+    render(
+      <TerminalSessionDrawer
+        open
+        terminalShellSkin={skin}
+        sessions={sessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    const drawer = screen.getByTestId('terminal-session-drawer');
+    expect(drawer.getAttribute('data-terminal-shell-skin')).toBe(skin);
+    expect(drawer.classList.contains('zterm-neo-drawer')).toBe(true);
+  });
+
+  it('uses one compact header row without tutorial copy', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onPreviewSelectionModeChange={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-session-drawer-header').style.display).toBe('flex');
+    expect(screen.getByText('Sessions')).toBeTruthy();
+    expect(screen.queryByText('快速切换')).toBeNull();
+    expect(screen.queryByText('左滑收起，点击进入，上下滑动浏览。')).toBeNull();
   });
 
   it('renders a single-column session list and routes select/plus actions', () => {
@@ -566,7 +605,46 @@ describe('TerminalSessionDrawer', () => {
     });
   });
 
-  it('does not show host rail when all sessions share the same hostKey', () => {
+  it('defaults to an online daemon host instead of an active stale connecting host', () => {
+    render(
+      <TerminalSessionDrawer
+        open
+        hosts={[
+          { hostKey: 'mac-studio', hostLabel: 'Mac Studio', connected: true },
+          { hostKey: 'daemon-old', hostLabel: 'daemon-Macstudio-old', connected: false },
+        ]}
+        sessions={[
+          {
+            id: 'stale-active',
+            title: 'freehand',
+            subtitle: 'daemon-Macstudio-old · freehand',
+            status: 'connecting',
+            active: true,
+            hostKey: 'daemon-old',
+            hostLabel: 'daemon-Macstudio-old',
+          },
+          {
+            id: 'healthy-rcc',
+            title: 'rcc',
+            subtitle: 'Mac Studio · rcc',
+            status: 'connected',
+            active: false,
+            hostKey: 'mac-studio',
+            hostLabel: 'Mac Studio',
+          },
+        ]}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-session-drawer-row-healthy-rcc')).toBeTruthy();
+    expect(screen.queryByTestId('terminal-session-drawer-row-stale-active')).toBeNull();
+  });
+
+  it('keeps the daemon selector visible when all sessions share one hostKey', () => {
     const singleHostSessions = [
       {
         id: 's1',
@@ -599,7 +677,8 @@ describe('TerminalSessionDrawer', () => {
       />,
     );
 
-    expect(() => screen.getByTestId('terminal-session-drawer-host-rail')).toThrow();
+    expect(screen.getByTestId('terminal-session-drawer-host-rail')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-host-100.127.23.27:3333')).toBeTruthy();
     expect(screen.getByTestId('terminal-session-drawer-row-s1')).toBeTruthy();
     expect(screen.getByTestId('terminal-session-drawer-row-s2')).toBeTruthy();
   });

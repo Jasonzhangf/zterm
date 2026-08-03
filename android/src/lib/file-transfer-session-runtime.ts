@@ -17,6 +17,7 @@ export interface FileTransferSessionRuntimeState {
   remoteParentPath: string | null;
   remoteEntries: FileEntry[];
   remoteLoading: boolean;
+  remoteError: string | null;
   transfers: TransferProgress[];
   preview: {
     requestId: string | null;
@@ -50,12 +51,15 @@ interface UploadProgressWaiter {
   timer: ReturnType<typeof setTimeout>;
 }
 
+const TEXT_PREVIEW_MAX_BYTES = 512 * 1024;
+
 function createDefaultState(): FileTransferSessionRuntimeState {
   return {
     remotePath: '',
     remoteParentPath: null,
     remoteEntries: [],
     remoteLoading: false,
+    remoteError: null,
     transfers: [],
     preview: {
       requestId: null,
@@ -67,13 +71,62 @@ function createDefaultState(): FileTransferSessionRuntimeState {
   };
 }
 
-function decodeBase64Text(chunks: string[]) {
-  const binary = atob(chunks.join(''));
+function decodeBase64Bytes(data: string) {
+  const binary = atob(data);
   const bytes = new Uint8Array(binary.length);
   for (let index = 0; index < binary.length; index += 1) {
     bytes[index] = binary.charCodeAt(index);
   }
-  return new TextDecoder().decode(bytes);
+  return bytes;
+}
+
+function decodeBase64Text(chunks: string[]) {
+  const decoder = new TextDecoder('utf-8', {
+    fatal: true,
+    ignoreBOM: true,
+  });
+  let text = '';
+  chunks.forEach((chunk, index) => {
+    text += decoder.decode(decodeBase64Bytes(chunk), {
+      stream: index < chunks.length - 1,
+    });
+  });
+  text += decoder.decode();
+  return text;
+}
+
+function buildOrderedPreviewChunks(input: {
+  chunks: Map<number, string>;
+  expectedChunks: number | null;
+  expectedBytes: number;
+}) {
+  const expectedChunks =
+    input.expectedChunks ?? (input.expectedBytes === 0 ? 0 : input.chunks.size);
+  if (
+    !Number.isInteger(expectedChunks) ||
+    expectedChunks < 0 ||
+    input.chunks.size !== expectedChunks
+  ) {
+    throw new Error(
+      `incomplete text preview: received ${input.chunks.size} of ${expectedChunks} chunks`,
+    );
+  }
+  let observedBytes = 0;
+  const orderedChunks: string[] = [];
+  for (let index = 0; index < expectedChunks; index += 1) {
+    const chunk = input.chunks.get(index);
+    if (typeof chunk !== 'string') {
+      throw new Error(`incomplete text preview: missing chunk ${index}`);
+    }
+    observedBytes += decodeBase64Bytes(chunk).length;
+    orderedChunks.push(chunk);
+  }
+  if (observedBytes !== input.expectedBytes) {
+    throw new Error(
+      `text preview size mismatch: received ${observedBytes} bytes, expected ${input.expectedBytes}`,
+    );
+  }
+  return orderedChunks;
 }
 
 function updateTransfer(
@@ -91,10 +144,21 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
   let activePreviewRequestId: string | null = null;
   let downloadChunks = new Map<number, string>();
   let previewChunks = new Map<number, string>();
+  let previewChunkByteLengths = new Map<number, number>();
+  let previewReceivedBytes = 0;
+  let previewExpectedChunks: number | null = null;
   const waiters = new Map<string, () => void>();
   const uploadProgressWaiters = new Map<string, Set<UploadProgressWaiter>>();
   const now = deps?.now ?? (() => Date.now());
   const randomId = deps?.randomId ?? (() => Math.random().toString(36).slice(2, 6));
+
+  const clearPreviewAssembly = () => {
+    activePreviewRequestId = null;
+    previewChunks = new Map();
+    previewChunkByteLengths = new Map();
+    previewReceivedBytes = 0;
+    previewExpectedChunks = null;
+  };
 
   const settleWaiter = (requestId: string) => {
     waiters.get(requestId)?.();
@@ -188,9 +252,8 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
     open(initialRemotePath: string) {
       activeListRequestId = null;
       activeDownloadRequestId = null;
-      activePreviewRequestId = null;
       downloadChunks = new Map();
-      previewChunks = new Map();
+      clearPreviewAssembly();
       waiters.clear();
       for (const [requestId] of uploadProgressWaiters) {
         clearUploadProgressWaiters(requestId, new Error('file transfer sheet reopened'));
@@ -208,6 +271,7 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
       state = {
         ...state,
         remoteLoading: true,
+        remoteError: null,
       };
       return {
         requestId,
@@ -257,6 +321,9 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
       const requestId = `fpv-${now()}-${randomId()}`;
       activePreviewRequestId = requestId;
       previewChunks = new Map();
+      previewChunkByteLengths = new Map();
+      previewReceivedBytes = 0;
+      previewExpectedChunks = null;
       state = {
         ...state,
         preview: {
@@ -364,17 +431,96 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
             remoteParentPath: msg.payload.parentPath,
             remoteEntries: msg.payload.entries,
             remoteLoading: false,
+            remoteError: null,
           };
           return true;
         case 'file-list-error':
+          if (activeListRequestId !== msg.payload.requestId) {
+            return false;
+          }
           activeListRequestId = null;
           state = {
             ...state,
             remoteLoading: false,
+            remoteError: msg.payload.error,
           };
           return true;
         case 'file-download-chunk':
           if (activePreviewRequestId === msg.payload.requestId) {
+            if (
+              !Number.isInteger(msg.payload.chunkIndex) ||
+              msg.payload.chunkIndex < 0 ||
+              !Number.isInteger(msg.payload.totalChunks) ||
+              msg.payload.totalChunks < 0 ||
+              msg.payload.chunkIndex >= msg.payload.totalChunks
+            ) {
+              clearPreviewAssembly();
+              state = {
+                ...state,
+                preview: {
+                  requestId: msg.payload.requestId,
+                  fileName: msg.payload.fileName,
+                  loading: false,
+                  text: null,
+                  error: `invalid text preview chunk ${msg.payload.chunkIndex}`,
+                },
+              };
+              return true;
+            }
+            if (
+              previewExpectedChunks !== null &&
+              previewExpectedChunks !== msg.payload.totalChunks
+            ) {
+              clearPreviewAssembly();
+              state = {
+                ...state,
+                preview: {
+                  requestId: msg.payload.requestId,
+                  fileName: msg.payload.fileName,
+                  loading: false,
+                  text: null,
+                  error: 'conflicting text preview chunk count',
+                },
+              };
+              return true;
+            }
+            previewExpectedChunks = msg.payload.totalChunks;
+            let chunkBytes: Uint8Array;
+            try {
+              chunkBytes = decodeBase64Bytes(msg.payload.dataBase64);
+            } catch (error) {
+              clearPreviewAssembly();
+              state = {
+                ...state,
+                preview: {
+                  requestId: msg.payload.requestId,
+                  fileName: msg.payload.fileName,
+                  loading: false,
+                  text: null,
+                  error: `invalid text preview chunk ${msg.payload.chunkIndex}: ${
+                    error instanceof Error ? error.message : String(error)
+                  }`,
+                },
+              };
+              return true;
+            }
+            const previousChunkBytes = previewChunkByteLengths.get(msg.payload.chunkIndex) ?? 0;
+            previewReceivedBytes += chunkBytes.length - previousChunkBytes;
+            if (previewReceivedBytes > TEXT_PREVIEW_MAX_BYTES) {
+              clearPreviewAssembly();
+              state = {
+                ...state,
+                preview: {
+                  requestId: msg.payload.requestId,
+                  fileName: msg.payload.fileName,
+                  loading: false,
+                  text: null,
+                  error: 'text preview exceeds 512 KiB limit',
+                },
+              };
+              return true;
+            }
+            previewChunkByteLengths.set(msg.payload.chunkIndex, chunkBytes.length);
             previewChunks.set(msg.payload.chunkIndex, msg.payload.dataBase64);
             return true;
           }
@@ -393,9 +539,12 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
           return true;
         case 'file-download-complete':
           if (activePreviewRequestId === msg.payload.requestId) {
-            activePreviewRequestId = null;
-            const orderedChunks = Array.from({ length: previewChunks.size }, (_, index) => previewChunks.get(index) || '').filter(Boolean);
             try {
+              const orderedChunks = buildOrderedPreviewChunks({
+                chunks: previewChunks,
+                expectedChunks: previewExpectedChunks,
+                expectedBytes: msg.payload.totalBytes,
+              });
               state = {
                 ...state,
                 preview: {
@@ -418,7 +567,7 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
                 },
               };
             }
-            previewChunks = new Map();
+            clearPreviewAssembly();
             return true;
           }
           if (activeDownloadRequestId !== msg.payload.requestId) {
@@ -456,8 +605,7 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
           return true;
         case 'file-download-error':
           if (activePreviewRequestId === msg.payload.requestId) {
-            activePreviewRequestId = null;
-            previewChunks = new Map();
+            clearPreviewAssembly();
             state = {
               ...state,
               preview: {
@@ -556,6 +704,7 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
     },
 
     setPreviewText(fileName: string, text: string) {
+      clearPreviewAssembly();
       state = {
         ...state,
         preview: {
@@ -570,6 +719,7 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
     },
 
     setPreviewError(fileName: string, error: string) {
+      clearPreviewAssembly();
       state = {
         ...state,
         preview: {
@@ -584,6 +734,7 @@ export function createFileTransferSessionRuntime(deps?: FileTransferSessionRunti
     },
 
     clearPreview() {
+      clearPreviewAssembly();
       state = {
         ...state,
         preview: createDefaultState().preview,

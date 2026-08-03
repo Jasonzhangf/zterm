@@ -620,6 +620,53 @@ describe('TraversalSocket reconnect', () => {
     socket.close();
   });
 
+  it('disposes the failed rtc-direct generation before Auto starts TURN', async () => {
+    const socket = createRelayRtcSocket();
+    const onopen = vi.fn();
+    const onclose = vi.fn();
+    socket.onopen = onopen;
+    socket.onclose = onclose;
+    await flushMicrotasks();
+
+    MockWebSocket.instances[0].triggerOpen();
+    await flushMicrotasks();
+    await flushMicrotasks();
+    MockRTCPeerConnection.instances[0].channel.triggerOpen();
+    await flushMicrotasks();
+
+    expect(onopen).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(999);
+    MockRTCPeerConnection.instances[0].channel.close();
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    expect(onclose).not.toHaveBeenCalled();
+    expect(MockRTCPeerConnection.instances[0].connectionState).toBe('closed');
+    expect(MockWebSocket.instances[0].readyState).toBe(MockWebSocket.CLOSED);
+    expect(MockWebSocket.instances).toHaveLength(2);
+    expect(socket.getDiagnostics().attempts[0]).toMatchObject({
+      path: 'rtc-direct',
+      stage: 'closed',
+      ok: false,
+      reason: 'rtc data channel closed',
+    });
+
+    MockWebSocket.instances[1].triggerOpen();
+    await flushMicrotasks();
+    await flushMicrotasks();
+    MockRTCPeerConnection.instances[1].channel.triggerOpen();
+    await flushMicrotasks();
+
+    expect(onopen).toHaveBeenCalledTimes(1);
+    expect(socket.getDiagnostics()).toMatchObject({
+      stage: 'open',
+      resolvedPath: 'rtc-relay',
+      resolvedEndpoint: 'relay:daemon-host-a',
+    });
+
+    socket.close();
+  });
+
   it('keeps rtc-direct long enough for P2P before falling through to the next route', async () => {
     const socket = createRelayRtcSocket();
     await flushMicrotasks();
@@ -631,7 +678,7 @@ describe('TraversalSocket reconnect', () => {
     await flushMicrotasks();
 
     expect(MockRTCPeerConnection.instances).toHaveLength(1);
-    await vi.advanceTimersByTimeAsync(4999);
+    await vi.advanceTimersByTimeAsync(5999);
     expect(MockWebSocket.instances).toHaveLength(1);
     await vi.advanceTimersByTimeAsync(1);
     await flushMicrotasks();
@@ -640,6 +687,38 @@ describe('TraversalSocket reconnect', () => {
     expect(socket.getDiagnostics()).toMatchObject({
       stage: 'connecting',
       reason: expect.stringContaining('connect timeout'),
+    });
+
+    socket.close();
+  });
+
+  it('allows rtc-direct to publish open after the data channel opens near the candidate deadline', async () => {
+    const socket = createRelayRtcSocket();
+    const onopen = vi.fn();
+    socket.onopen = onopen;
+    await flushMicrotasks();
+
+    expect(socket.readyState).toBe(WebSocket.CONNECTING);
+    MockWebSocket.instances[0].triggerOpen();
+    await flushMicrotasks();
+    await flushMicrotasks();
+
+    await vi.advanceTimersByTimeAsync(4999);
+    MockRTCPeerConnection.instances[0].channel.triggerOpen();
+    await flushMicrotasks();
+    expect(socket.readyState).toBe(WebSocket.CONNECTING);
+
+    await vi.advanceTimersByTimeAsync(999);
+    expect(onopen).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await flushMicrotasks();
+
+    expect(onopen).toHaveBeenCalledTimes(1);
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(socket.getDiagnostics()).toMatchObject({
+      stage: 'open',
+      resolvedPath: 'rtc-direct',
     });
 
     socket.close();
@@ -668,6 +747,7 @@ describe('TraversalSocket reconnect', () => {
     await flushMicrotasks();
 
     expect(signalSocket.readyState).toBe(MockWebSocket.CLOSED);
+    expect(MockRTCPeerConnection.instances[0].connectionState).toBe('closed');
     const sentCountAfterError = signalSocket.sent.length;
     MockRTCPeerConnection.instances[0].onicecandidate?.({
       candidate: {
@@ -680,7 +760,7 @@ describe('TraversalSocket reconnect', () => {
       path: 'rtc-direct',
       stage: 'closed',
       ok: false,
-      reason: 'rtc data channel closed',
+      reason: 'host daemon-host-a is offline',
     });
   });
 
@@ -778,6 +858,8 @@ describe('TraversalSocket reconnect', () => {
     await flushMicrotasks();
     MockRTCPeerConnection.instances[0].channel.triggerOpen();
     await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushMicrotasks();
 
     expect(onopen).toHaveBeenCalledTimes(1);
     expect(socket.getDiagnostics()).toMatchObject({
@@ -817,6 +899,8 @@ describe('TraversalSocket reconnect', () => {
     await flushMicrotasks();
     MockRTCPeerConnection.instances[0].channel.triggerOpen();
     await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(1000);
+    await flushMicrotasks();
 
     MockRTCPeerConnection.instances[0].connectionState = 'disconnected';
     MockRTCPeerConnection.instances[0].onconnectionstatechange?.();
@@ -847,6 +931,8 @@ describe('TraversalSocket reconnect', () => {
     MockWebSocket.instances[0].triggerOpen();
     await flushMicrotasks();
     MockRTCPeerConnection.instances[0].channel.triggerOpen();
+    await flushMicrotasks();
+    await vi.advanceTimersByTimeAsync(1000);
     await flushMicrotasks();
 
     MockRTCPeerConnection.instances[0].connectionState = 'disconnected';

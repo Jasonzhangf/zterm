@@ -81,9 +81,9 @@ describe('selectBestTraversalRoute', () => {
     expect(selection.diagnostics.find((item) => item.candidateId === 'direct:ipv4')?.reasons).toContain('ipv4:non-lan');
   });
 
-  it('does not let a persisted lower-tier success override a healthy higher-tier route', () => {
+  it('uses a recent successful route lease before probing unknown higher-tier routes', () => {
     const cache = new TraversalRouteHealthCache({ now: () => 1000 });
-    cache.recordSuccess({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidates[2], 35);
+    cache.recordSuccess({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidates[1], 35);
 
     const selection = selectBestTraversalRoute({
       candidates: candidates.filter((candidate) => candidate.id !== 'direct:lan'),
@@ -91,8 +91,8 @@ describe('selectBestTraversalRoute', () => {
       scope: { accountId: 'u1', daemonHostId: 'daemon-a' },
     });
 
-    expect(selection.selected).toMatchObject({ id: 'direct:tailscale', path: 'tailscale' });
-    expect(selection.diagnostics.find((item) => item.candidateId === 'direct:tailscale')).toMatchObject({
+    expect(selection.selected).toMatchObject({ id: 'rtc-direct:daemon-a', path: 'rtc-direct' });
+    expect(selection.diagnostics.find((item) => item.candidateId === 'rtc-direct:daemon-a')).toMatchObject({
       selectable: true,
       health: { status: 'success', rttMs: 35 },
     });
@@ -140,7 +140,7 @@ describe('selectBestTraversalRoute', () => {
     expect(selection.diagnostics.find((item) => item.candidateId === 'direct:tailscale')?.reasons).toContain('health:unknown');
   });
 
-  it('reprobes a recovered Tailscale route after transient failure cooldown without process reset', () => {
+  it('keeps a successful relay lease until that lease receives an explicit failure signal', () => {
     let now = 1000;
     const cache = new TraversalRouteHealthCache({
       ttlMs: 5 * 60_000,
@@ -165,10 +165,18 @@ describe('selectBestTraversalRoute', () => {
       scope,
     });
 
-    expect(recoveredSelection.selected).toMatchObject({ id: 'direct:tailscale' });
+    expect(recoveredSelection.selected).toMatchObject({ id: 'relay-rtc:daemon-a' });
     expect(recoveredSelection.diagnostics.find((item) => item.candidateId === 'direct:tailscale')).toMatchObject({
       selectable: true,
     });
+
+    cache.recordFailure(scope, relay, 'relay lease closed');
+    const nextSelection = selectBestTraversalRoute({
+      candidates: [tailscale, relay],
+      healthCache: cache,
+      scope,
+    });
+    expect(nextSelection.selected).toMatchObject({ id: 'direct:tailscale' });
   });
 
   it('reprobes the least-bad candidate when every route is currently unhealthy', () => {
@@ -193,7 +201,15 @@ describe('selectBestTraversalRoute', () => {
     });
   });
 
-  it('keeps Tailscale ahead of UDP direct even when UDP has no failed health record', () => {
+  it('keeps Tailscale ahead of UDP direct when neither route has a reusable lease', () => {
+    const selection = selectBestTraversalRoute({
+      candidates: candidates.filter((candidate) => candidate.id !== 'direct:lan'),
+    });
+
+    expect(selection.selected).toMatchObject({ id: 'direct:tailscale', path: 'tailscale' });
+  });
+
+  it('uses a recent UDP direct lease before probing Tailscale again', () => {
     const cache = new TraversalRouteHealthCache({ now: () => 1000 });
     const nonLanCandidates = candidates.filter((candidate) => candidate.id !== 'direct:lan');
     cache.recordSuccess({ accountId: 'u1', daemonHostId: 'daemon-a' }, nonLanCandidates[0], 80);
@@ -204,7 +220,7 @@ describe('selectBestTraversalRoute', () => {
       scope: { accountId: 'u1', daemonHostId: 'daemon-a' },
     });
 
-    expect(selection.selected).toMatchObject({ id: 'direct:tailscale', path: 'tailscale' });
+    expect(selection.selected).toMatchObject({ id: 'rtc-direct:daemon-a', path: 'rtc-direct' });
     expect(selection.selected?.path).not.toBe('rtc-relay');
   });
 });

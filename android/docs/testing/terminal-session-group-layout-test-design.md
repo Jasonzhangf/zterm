@@ -18,6 +18,7 @@ sessions + workspace panes
 White-box plan:
 
 - `terminal-layout-profile.test.ts` keeps current single-pane and split profile tokens stable.
+- Phone stage profiles keep `outerMargin`, `containerRadius`, and active pane `paneRadius` at `0`, so the terminal container reaches the physical left and right edges without a decorative gutter or rounded-corner reveal; safe-area ownership remains limited to top/bottom chrome.
 - `TerminalPageStageShell.pane-stage.test.tsx` proves visible pane entries are the only mounted live terminal panes.
 - `TerminalSessionDrawer.test.tsx` proves explicit top / center / bottom slot labels, long-press slot assignment, and click suppression after menu open.
 - `useTerminalWorkspace.test.tsx` proves workspace pane ownership remains explicit and does not resurrect runtime-only sessions.
@@ -25,6 +26,7 @@ White-box plan:
 Module black-box plan:
 
 - Phone single active session still mounts one `TerminalView`.
+- Phone single and split stages expose no left/right outer margin while desktop profiles retain their own explicit stage tokens.
 - Existing visible split panes still mount live `TerminalView` instances.
 - Hidden/offscreen sessions are not mounted by stage shell.
 - Session-group peeks scroll into center with animation, but only the center slot remains live.

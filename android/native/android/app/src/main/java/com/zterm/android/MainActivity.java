@@ -29,6 +29,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(DeviceClipboardPlugin.class);
         registerPlugin(DebugInputPlugin.class);
         registerPlugin(StoragePermissionPlugin.class);
+        registerPlugin(BackgroundServicePlugin.class);
         super.onCreate(savedInstanceState);
         Log.i(TAG, "onCreate()");
         if (getBridge() != null && getBridge().getWebView() != null) {
@@ -103,7 +104,6 @@ public class MainActivity extends BridgeActivity {
     public void onStop() {
         super.onStop();
         Log.i(TAG, "onStop()");
-        stopBackgroundService();
     }
 
     @Override
@@ -118,32 +118,23 @@ public class MainActivity extends BridgeActivity {
         super.onResume();
         Log.i(TAG, "onResume()");
         if (getBridge() != null && getBridge().getWebView() != null) {
-            getBridge().getWebView().onResume();
-            getBridge().getWebView().resumeTimers();
             getBridge().getWebView().postInvalidateOnAnimation();
         }
     }
 
     @Override
-    public void onPause() {
-        Log.i(TAG, "onPause()");
-        if (getBridge() != null && getBridge().getWebView() != null) {
-            getBridge().getWebView().onPause();
-            getBridge().getWebView().pauseTimers();
-        }
-        super.onPause();
-    }
-
-    @Override
     public void onDestroy() {
-        stopBackgroundService();
         super.onDestroy();
     }
 
     public void startBackgroundService(int sessionCount) {
         Intent serviceIntent = new Intent(this, BackgroundService.class);
         serviceIntent.putExtra("sessionCount", sessionCount);
-        startForegroundService(serviceIntent);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent);
+        } else {
+            startService(serviceIntent);
+        }
     }
 
     public void stopBackgroundService() {

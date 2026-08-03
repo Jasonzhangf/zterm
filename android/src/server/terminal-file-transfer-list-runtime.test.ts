@@ -3,6 +3,7 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTerminalFileTransferListRuntime } from './terminal-file-transfer-list-runtime';
+import { createTerminalFileTransferRuntime } from './terminal-file-transfer-runtime';
 import type { ServerMessage } from '../lib/types';
 import type { TerminalSession } from './terminal-runtime-types';
 import type { RemoteScreenshotCaptureOptions } from './terminal-file-transfer-types';
@@ -54,8 +55,12 @@ async function flushFileTransferMessages() {
 
 describe('terminal-file-transfer-list-runtime remote screenshot target capture', () => {
   let tempDir: string | null = null;
+  const createdRuntimes: Array<{ dispose?: () => void }> = [];
 
   afterEach(() => {
+    for (const runtime of createdRuntimes.splice(0)) {
+      runtime.dispose?.();
+    }
     if (tempDir) {
       rmSync(tempDir, { recursive: true, force: true });
       tempDir = null;
@@ -67,8 +72,7 @@ describe('terminal-file-transfer-list-runtime remote screenshot target capture',
     return { outputPath };
   })) {
     tempDir = mkdtempSync(join(tmpdir(), 'zterm-shot-'));
-    return {
-      runtime: createTerminalFileTransferListRuntime({
+    const runtime = createTerminalFileTransferListRuntime({
         uploadDir: tempDir,
         downloadsDir: tempDir,
         wtermHomeDir: tempDir,
@@ -82,10 +86,161 @@ describe('terminal-file-transfer-list-runtime remote screenshot target capture',
         runCommand: vi.fn(),
         captureRemoteScreenshot,
         logTimePrefix: () => '2026-07-22 00:00:00',
-      }),
+      });
+    createdRuntimes.push(runtime);
+    return {
+      runtime,
       captureRemoteScreenshot,
     };
   }
+
+  it('serves repeated remote directory requests from daemon cache until the watcher refreshes it', async () => {
+    const sentMessages: ServerMessage[] = [];
+    const { runtime } = createRuntime(sentMessages);
+    writeFileSync(join(tempDir!, 'old.txt'), 'old');
+
+    runtime.handleFileListRequest(makeSession(), {
+      requestId: 'list-1',
+      path: tempDir!,
+      showHidden: true,
+    });
+
+    expect(sentMessages[sentMessages.length - 1]).toMatchObject({
+      type: 'file-list-response',
+      payload: {
+        requestId: 'list-1',
+        entries: [expect.objectContaining({ name: 'old.txt' })],
+      },
+    });
+
+    writeFileSync(join(tempDir!, 'fresh.txt'), 'fresh');
+    runtime.handleFileListRequest(makeSession(), {
+      requestId: 'list-2',
+      path: tempDir!,
+      showHidden: true,
+    });
+
+    expect(
+      (sentMessages[sentMessages.length - 1] as any).payload.entries.map((entry: { name: string }) => entry.name),
+    ).toEqual(['old.txt']);
+
+    await new Promise((resolve) => setTimeout(resolve, 150));
+    runtime.handleFileListRequest(makeSession(), {
+      requestId: 'list-3',
+      path: tempDir!,
+      showHidden: true,
+    });
+
+    expect(
+      (sentMessages[sentMessages.length - 1] as any).payload.entries.map((entry: { name: string }) => entry.name),
+    ).toEqual(['fresh.txt', 'old.txt']);
+  });
+
+  it('does not retain stale remote directory cache when watcher creation fails', async () => {
+    vi.resetModules();
+    vi.doMock('fs', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('fs')>();
+      return {
+        ...actual,
+        watch: vi.fn(() => {
+          throw new Error('watch unavailable');
+        }),
+      };
+    });
+    try {
+      const { createTerminalFileTransferListRuntime: createRuntimeWithFailingWatch } =
+        await import('./terminal-file-transfer-list-runtime');
+      const sentMessages: ServerMessage[] = [];
+      tempDir = mkdtempSync(join(tmpdir(), 'zterm-shot-'));
+      writeFileSync(join(tempDir, 'old.txt'), 'old');
+      const runtime = createRuntimeWithFailingWatch({
+        uploadDir: tempDir,
+        downloadsDir: tempDir,
+        wtermHomeDir: tempDir,
+        platform: 'darwin',
+        sendMessage: (_session, message) => sentMessages.push(message),
+        getSessionMirror: vi.fn(() => null),
+        scheduleMirrorLiveSync: vi.fn(),
+        writeToTmuxSession: vi.fn(),
+        writeToLiveMirror: vi.fn(() => false),
+        readTmuxPaneCurrentPath: vi.fn(() => tempDir!),
+        runCommand: vi.fn(),
+        captureRemoteScreenshot: vi.fn(async ({ outputPath }) => ({ outputPath })),
+        logTimePrefix: () => '2026-07-22 00:00:00',
+      });
+      createdRuntimes.push(runtime);
+
+      runtime.handleFileListRequest(makeSession(), {
+        requestId: 'list-1',
+        path: tempDir,
+        showHidden: true,
+      });
+      writeFileSync(join(tempDir, 'fresh.txt'), 'fresh');
+      runtime.handleFileListRequest(makeSession(), {
+        requestId: 'list-2',
+        path: tempDir,
+        showHidden: true,
+      });
+
+      expect(
+        (sentMessages[sentMessages.length - 1] as any).payload.entries.map((entry: { name: string }) => entry.name),
+      ).toEqual(['fresh.txt', 'old.txt']);
+    } finally {
+      vi.doUnmock('fs');
+      vi.resetModules();
+    }
+  });
+
+  it('refreshes a cached remote directory immediately after upload completion', () => {
+    const sentMessages: ServerMessage[] = [];
+    tempDir = mkdtempSync(join(tmpdir(), 'zterm-shot-'));
+    writeFileSync(join(tempDir, 'old.txt'), 'old');
+    const runtime = createTerminalFileTransferRuntime({
+      uploadDir: tempDir,
+      downloadsDir: tempDir,
+      wtermHomeDir: tempDir,
+      platform: 'darwin',
+      sendMessage: (_session, message) => sentMessages.push(message),
+      getSessionMirror: vi.fn(() => null),
+      scheduleMirrorLiveSync: vi.fn(),
+      writeToTmuxSession: vi.fn(),
+      writeToLiveMirror: vi.fn(() => false),
+      readTmuxPaneCurrentPath: vi.fn(() => tempDir!),
+      runCommand: vi.fn(),
+      captureRemoteScreenshot: vi.fn(async ({ outputPath }) => ({ outputPath })),
+      logTimePrefix: () => '2026-07-22 00:00:00',
+    });
+    createdRuntimes.push(runtime);
+    const session = makeSession();
+
+    runtime.handleFileListRequest(session, {
+      requestId: 'list-before-upload',
+      path: tempDir,
+      showHidden: true,
+    });
+    runtime.handleFileUploadStart(session, {
+      requestId: 'upload-1',
+      targetDir: tempDir,
+      fileName: 'fresh.txt',
+      fileSize: 5,
+      chunkCount: 1,
+    });
+    runtime.handleFileUploadChunk(session, {
+      requestId: 'upload-1',
+      chunkIndex: 0,
+      dataBase64: Buffer.from('fresh').toString('base64'),
+    });
+    runtime.handleFileUploadEnd(session, { requestId: 'upload-1' });
+    runtime.handleFileListRequest(session, {
+      requestId: 'list-after-upload',
+      path: tempDir,
+      showHidden: true,
+    });
+
+    expect(
+      (sentMessages[sentMessages.length - 1] as any).payload.entries.map((entry: { name: string }) => entry.name),
+    ).toEqual(['fresh.txt', 'old.txt']);
+  });
 
   it('captures a selected app-window screenshot by macOS window id without focusing input', async () => {
     const sentMessages: ServerMessage[] = [];

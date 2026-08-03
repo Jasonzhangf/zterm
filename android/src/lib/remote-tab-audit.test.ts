@@ -299,4 +299,100 @@ describe('auditOpenTabsAgainstRemoteSessions', () => {
       manageTmuxSessionsOnOpenTransport,
     }));
   });
+
+  it('does not audit persisted session groups on foreground resume', async () => {
+    const tab: PersistedOpenTab = {
+      sessionId: 'session-1',
+      hostId: 'host-1',
+      connectionName: 'test-host',
+      bridgeHost: '192.168.1.100',
+      bridgePort: 8080,
+      daemonHostId: 'daemon-1',
+      sessionName: 'my-session',
+      authToken: 'token',
+      createdAt: Date.now(),
+    };
+    deps.openTabStateRef.current.tabs = [tab];
+    deps.sessionGroups = [{
+      id: 'group-1',
+      name: 'group',
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-history',
+      authToken: 'token-history',
+      sessionNames: ['history-session'],
+      lastOpenedAt: Date.now(),
+      missingSessionNames: [],
+    }];
+    const fetchMock = vi.fn().mockResolvedValue(new Map([['daemon:daemon-1', ['my-session']]]));
+
+    vi.resetModules();
+    vi.doMock('./open-tab-restore', () => ({
+      fetchRemoteTmuxSessionNamesByOwner: fetchMock,
+    }));
+    vi.doMock('./runtime-debug', () => ({
+      runtimeDebug: vi.fn(),
+    }));
+
+    const { auditOpenTabsAgainstRemoteSessions: audit } = await import('./remote-tab-audit');
+    await audit('appStateChange', deps);
+
+    expect(fetchMock).toHaveBeenCalledWith(expect.objectContaining({
+      targets: [tab],
+    }));
+    expect(pruneSessionGroupSelectionToRemoteTruth).not.toHaveBeenCalledWith(
+      expect.objectContaining({ daemonHostId: 'daemon-history' }),
+      expect.anything(),
+    );
+  });
+
+  it('keeps session group audit for explicit picker refresh', async () => {
+    const tab: PersistedOpenTab = {
+      sessionId: 'session-1',
+      hostId: 'host-1',
+      connectionName: 'test-host',
+      bridgeHost: '192.168.1.100',
+      bridgePort: 8080,
+      daemonHostId: 'daemon-1',
+      sessionName: 'my-session',
+      authToken: 'token',
+      createdAt: Date.now(),
+    };
+    const group = {
+      id: 'group-1',
+      name: 'group',
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-history',
+      authToken: 'token-history',
+      sessionNames: ['history-session'],
+      lastOpenedAt: Date.now(),
+      missingSessionNames: [],
+    };
+    deps.openTabStateRef.current.tabs = [tab];
+    deps.sessionGroups = [group];
+    const fetchMock = vi.fn().mockResolvedValue(new Map([
+      ['daemon:daemon-1', ['my-session']],
+      ['daemon:daemon-history', ['history-session']],
+    ]));
+
+    vi.resetModules();
+    vi.doMock('./open-tab-restore', () => ({
+      fetchRemoteTmuxSessionNamesByOwner: fetchMock,
+    }));
+    vi.doMock('./runtime-debug', () => ({
+      runtimeDebug: vi.fn(),
+    }));
+
+    const { auditOpenTabsAgainstRemoteSessions: audit } = await import('./remote-tab-audit');
+    await audit('session-picker-refresh', deps);
+
+    expect(fetchMock).toHaveBeenCalledWith(expect.objectContaining({
+      targets: [tab, group],
+    }));
+    expect(pruneSessionGroupSelectionToRemoteTruth).toHaveBeenCalledWith(
+      expect.objectContaining({ daemonHostId: 'daemon-history' }),
+      ['history-session'],
+    );
+  });
 });

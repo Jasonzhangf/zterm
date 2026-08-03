@@ -53,6 +53,138 @@ function normalizeAnsiExtendedColorSeparators(line: string) {
   });
 }
 
+interface AnsiSgrContinuationState {
+  bold: boolean;
+  dim: boolean;
+  italic: boolean;
+  underline: boolean;
+  blink: boolean;
+  reverse: boolean;
+  hidden: boolean;
+  strike: boolean;
+  foreground: string | null;
+  background: string | null;
+}
+
+function createAnsiSgrContinuationState(): AnsiSgrContinuationState {
+  return {
+    bold: false,
+    dim: false,
+    italic: false,
+    underline: false,
+    blink: false,
+    reverse: false,
+    hidden: false,
+    strike: false,
+    foreground: null,
+    background: null,
+  };
+}
+
+function resetAnsiSgrContinuationState(state: AnsiSgrContinuationState) {
+  Object.assign(state, createAnsiSgrContinuationState());
+}
+
+function readExtendedColorParameter(tokens: string[], startIndex: number) {
+  const mode = tokens[startIndex + 1];
+  if (mode === '5' && /^\d+$/u.test(tokens[startIndex + 2] || '')) {
+    return {
+      value: `${tokens[startIndex]};5;${tokens[startIndex + 2]}`,
+      consumed: 3,
+    };
+  }
+  if (
+    mode === '2'
+    && tokens.slice(startIndex + 2, startIndex + 5).every((token) => /^\d+$/u.test(token || ''))
+  ) {
+    return {
+      value: `${tokens[startIndex]};2;${tokens[startIndex + 2]};${tokens[startIndex + 3]};${tokens[startIndex + 4]}`,
+      consumed: 5,
+    };
+  }
+  return { value: null, consumed: 1 };
+}
+
+function updateAnsiSgrContinuationState(line: string, state: AnsiSgrContinuationState) {
+  const sgrPattern = /\x1b\[([0-9;]*)m/gu;
+  let match: RegExpExecArray | null;
+  while ((match = sgrPattern.exec(line)) !== null) {
+    const tokens = match[1] === '' ? ['0'] : match[1]!.split(';');
+    for (let index = 0; index < tokens.length; index += 1) {
+      const code = Number.parseInt(tokens[index] || '0', 10);
+      if (!Number.isFinite(code)) {
+        continue;
+      }
+      if (code === 0) {
+        resetAnsiSgrContinuationState(state);
+      } else if (code === 1) {
+        state.bold = true;
+      } else if (code === 2) {
+        state.dim = true;
+      } else if (code === 3) {
+        state.italic = true;
+      } else if (code === 4 || code === 21) {
+        state.underline = true;
+      } else if (code === 5 || code === 6) {
+        state.blink = true;
+      } else if (code === 7) {
+        state.reverse = true;
+      } else if (code === 8) {
+        state.hidden = true;
+      } else if (code === 9) {
+        state.strike = true;
+      } else if (code === 22) {
+        state.bold = false;
+        state.dim = false;
+      } else if (code === 23) {
+        state.italic = false;
+      } else if (code === 24) {
+        state.underline = false;
+      } else if (code === 25) {
+        state.blink = false;
+      } else if (code === 27) {
+        state.reverse = false;
+      } else if (code === 28) {
+        state.hidden = false;
+      } else if (code === 29) {
+        state.strike = false;
+      } else if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) {
+        state.foreground = String(code);
+      } else if (code === 38) {
+        const extended = readExtendedColorParameter(tokens, index);
+        state.foreground = extended.value;
+        index += extended.consumed - 1;
+      } else if (code === 39) {
+        state.foreground = null;
+      } else if ((code >= 40 && code <= 47) || (code >= 100 && code <= 107)) {
+        state.background = String(code);
+      } else if (code === 48) {
+        const extended = readExtendedColorParameter(tokens, index);
+        state.background = extended.value;
+        index += extended.consumed - 1;
+      } else if (code === 49) {
+        state.background = null;
+      }
+    }
+  }
+}
+
+function buildAnsiSgrContinuationPrefix(state: AnsiSgrContinuationState) {
+  const params = [
+    state.bold ? '1' : null,
+    state.dim ? '2' : null,
+    state.italic ? '3' : null,
+    state.underline ? '4' : null,
+    state.blink ? '5' : null,
+    state.reverse ? '7' : null,
+    state.hidden ? '8' : null,
+    state.strike ? '9' : null,
+    state.foreground,
+    state.background,
+  ].filter((value): value is string => value !== null);
+  return params.length > 0 ? `\x1b[${params.join(';')}m` : '';
+}
+
 function normalizeAnsiTruecolorPayload(line: string) {
   if (!line.includes('\x1b[') || (!line.includes('38;2;') && !line.includes('48;2;') && !line.includes('38:2:') && !line.includes('48:2:'))) {
     return line;
@@ -171,14 +303,18 @@ export async function canonicalizeCapturedMirrorLines(
   const parserBridge = bridge ?? await WasmBridge.load();
   const safeCols = Math.max(1, Math.floor(cols) || 1);
   const canonicalLines: TerminalCell[][] = [];
+  const continuationState = createAnsiSgrContinuationState();
 
   for (const line of capturedLines) {
+    const normalizedLine = normalizeAnsiExtendedColorSeparators(line);
+    const lineWithContinuation = `${buildAnsiSgrContinuationPrefix(continuationState)}${normalizedLine}`;
     parserBridge.init(safeCols, 1);
-    if (line.length > 0) {
-      parserBridge.writeString(normalizeAnsiExtendedColorSeparators(line));
+    if (lineWithContinuation.length > 0) {
+      parserBridge.writeString(lineWithContinuation);
     }
-    const normalizedRawLine = normalizeAnsiTruecolorPayload(normalizeAnsiExtendedColorSeparators(line));
+    const normalizedRawLine = normalizeAnsiTruecolorPayload(lineWithContinuation);
     canonicalLines.push(applyPackedTruecolorHints(normalizedRawLine, readVisibleRow(parserBridge, 0)));
+    updateAnsiSgrContinuationState(normalizedLine, continuationState);
   }
 
   return canonicalLines;

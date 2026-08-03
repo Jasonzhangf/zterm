@@ -313,6 +313,7 @@ export function createTerminalFileTransferBinaryRuntime(
         type: 'file-upload-complete',
         payload: { requestId, filePath, bytes: persistedBytes },
       });
+      deps.onFileUploadPersisted?.(upload.targetDir);
     } catch (error) {
       deps.sendMessage(session, {
         type: 'file-upload-error',

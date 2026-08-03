@@ -1,9 +1,12 @@
 import type { TraversalRelayClientSettings } from './bridge-settings';
 import type { TraversalRelayDeviceSnapshot } from './types';
 import { listOnlineTraversalRelayDaemonDevices } from './traversal-relay-devices';
+import { isTraversalRelayAuthenticationError } from './traversal-relay-client';
 
 export const RELAY_DEVICE_STREAM_RECONNECT_BASE_DELAY_MS = 300;
 export const RELAY_DEVICE_STREAM_RECONNECT_MAX_DELAY_MS = 5000;
+export const RELAY_DEVICE_STREAM_HEARTBEAT_INTERVAL_MS = 30_000;
+export const RELAY_DEVICE_STREAM_HEARTBEAT_MAX_MISSES = 3;
 
 const TRAVERSAL_RELAY_SETTING_COMPARE_KEYS = [
   'relayBaseUrl',
@@ -95,6 +98,7 @@ export interface RelayDeviceStreamRuntimeDeps {
     onOpen?: () => void;
     onDevices?: (devices: TraversalRelayDeviceSnapshot[]) => void;
     onDirectory?: (directory: unknown) => void;
+    onControlPong?: (payload: { sentAt?: number; receivedAt?: number }) => void;
     onError?: (message: string) => void;
     onClose?: (event: CloseEvent) => void;
     onDebugRequest?: (payload: {
@@ -111,8 +115,13 @@ export interface RelayDeviceStreamRuntimeDeps {
       | TraversalRelayDeviceSnapshot[]
       | ((current: TraversalRelayDeviceSnapshot[]) => TraversalRelayDeviceSnapshot[]),
   ) => void;
-  publishDirectoryTruth?: (devices: TraversalRelayDeviceSnapshot[]) => void;
+  publishDirectoryTruth?: (
+    devices: TraversalRelayDeviceSnapshot[],
+    state: 'cached' | 'confirmed' | 'disconnected' | 'disabled',
+    relaySettings?: TraversalRelayClientSettings,
+  ) => void;
   applyRelaySettings?: (settings: TraversalRelayClientSettings) => void;
+  invalidateAuthentication?: (reason: string) => void;
   runtimeDebug?: (event: string, payload?: Record<string, unknown>) => void;
   onDebugRequest?: (payload: {
     requestId?: string;
@@ -130,8 +139,21 @@ export function createRelayDeviceStreamRuntime(deps: RelayDeviceStreamRuntimeDep
   let generation = 0;
   let reconnectAttempt = 0;
   let reconnectTimer: number | null = null;
+  let heartbeatTimer: number | null = null;
   let socket: WebSocket | null = null;
   let directoryTruthDevices: TraversalRelayDeviceSnapshot[] = [];
+  let confirmedRelaySettings: TraversalRelayClientSettings | undefined;
+  let lastControlPongAt = 0;
+  let lastObservedControlPongAt = 0;
+  let consecutiveHeartbeatMisses = 0;
+  let heartbeatFailureFinalized = false;
+  let controlRefreshPromise: {
+    generation: number;
+    promise: Promise<{
+      account: unknown;
+      relaySettings?: TraversalRelayClientSettings | null;
+    } | null>;
+  } | null = null;
 
   const setTimeoutFn = deps.setTimeoutFn || ((handler, delayMs) => globalThis.setTimeout(handler, delayMs) as unknown as number);
   const clearTimeoutFn = deps.clearTimeoutFn || ((timerId) => {
@@ -146,9 +168,79 @@ export function createRelayDeviceStreamRuntime(deps: RelayDeviceStreamRuntimeDep
     reconnectTimer = null;
   };
 
-  const replaceDirectoryTruth = (devices: TraversalRelayDeviceSnapshot[]) => {
+  const clearHeartbeatTimer = () => {
+    if (heartbeatTimer === null) {
+      return;
+    }
+    clearTimeoutFn(heartbeatTimer);
+    heartbeatTimer = null;
+  };
+
+  const replaceDirectoryTruth = (
+    devices: TraversalRelayDeviceSnapshot[],
+    state: 'cached' | 'confirmed' | 'disconnected' | 'disabled',
+    relaySettings?: TraversalRelayClientSettings,
+  ) => {
     directoryTruthDevices = listRelayDirectoryTruthDevices(devices);
-    deps.publishDirectoryTruth?.(directoryTruthDevices);
+    if (relaySettings) {
+      confirmedRelaySettings = relaySettings;
+    }
+    deps.publishDirectoryTruth?.(directoryTruthDevices, state, confirmedRelaySettings);
+  };
+
+  const refreshControlDirectory = (refreshGeneration: number) => {
+    if (disposed || generation !== refreshGeneration) {
+      return Promise.resolve(null);
+    }
+    if (controlRefreshPromise?.generation === refreshGeneration) {
+      return controlRefreshPromise.promise;
+    }
+    const account = deps.readEnabledAccount();
+    if (!account) {
+      return Promise.resolve(null);
+    }
+    const refreshPromise = deps.refreshAccount(account).then((refreshed) => {
+      if (disposed || generation !== refreshGeneration) {
+        return null;
+      }
+      const nextRelay = refreshed.relaySettings
+        || (refreshed.account as { relaySettings?: TraversalRelayClientSettings | null } | null | undefined)?.relaySettings
+        || null;
+      if (!nextRelay) {
+        throw new Error('relay control payload missing ws/control settings');
+      }
+      const refreshedDevices = deps.projectDevicesFromAccount(refreshed.account);
+      replaceDirectoryTruth(refreshedDevices, 'confirmed', nextRelay);
+      deps.setDevices(refreshedDevices);
+      deps.applyRelaySettings?.(nextRelay);
+      return refreshed;
+    }).finally(() => {
+      if (controlRefreshPromise?.promise === refreshPromise) {
+        controlRefreshPromise = null;
+      }
+    });
+    controlRefreshPromise = {
+      generation: refreshGeneration,
+      promise: refreshPromise,
+    };
+    return refreshPromise;
+  };
+
+  const handleControlRefreshFailure = (error: unknown, schedule: boolean) => {
+    const message = error instanceof Error ? error.message : String(error);
+    if (isTraversalRelayAuthenticationError(error)) {
+      directoryTruthDevices = [];
+      confirmedRelaySettings = undefined;
+      deps.setDevices([]);
+      deps.publishDirectoryTruth?.([], 'disabled');
+      deps.runtimeDebug?.('relay.device-stream.auth.invalid', { reason: message });
+      deps.invalidateAuthentication?.(message);
+      return;
+    }
+    deps.runtimeDebug?.('relay.device-stream.account-refresh.error', { message });
+    if (schedule) {
+      scheduleReconnect(message);
+    }
   };
 
   const scheduleReconnect = (reason: string) => {
@@ -168,34 +260,92 @@ export function createRelayDeviceStreamRuntime(deps: RelayDeviceStreamRuntimeDep
     }, delayMs);
   };
 
+  const closeCurrentSocketForHeartbeatFailure = (liveSocket: WebSocket, generationAtSchedule: number) => {
+    if (heartbeatFailureFinalized) {
+      return;
+    }
+    heartbeatFailureFinalized = true;
+    clearHeartbeatTimer();
+    deps.runtimeDebug?.('relay.device-stream.heartbeat.timeout', {
+      misses: consecutiveHeartbeatMisses,
+      intervalMs: RELAY_DEVICE_STREAM_HEARTBEAT_INTERVAL_MS,
+    });
+    if (disposed || generation !== generationAtSchedule || socket !== liveSocket) {
+      return;
+    }
+    if (liveSocket.readyState < WebSocket.CLOSING) {
+      liveSocket.close(4000, 'relay device stream heartbeat timeout');
+    }
+  };
+
+  const scheduleHeartbeat = (liveSocket: WebSocket, generationAtSchedule: number) => {
+    clearHeartbeatTimer();
+    heartbeatTimer = setTimeoutFn(() => {
+      heartbeatTimer = null;
+      if (disposed || generation !== generationAtSchedule || socket !== liveSocket) {
+        return;
+      }
+      if (liveSocket.readyState !== WebSocket.OPEN) {
+        scheduleHeartbeat(liveSocket, generationAtSchedule);
+        return;
+      }
+      if (lastControlPongAt > lastObservedControlPongAt) {
+        lastObservedControlPongAt = lastControlPongAt;
+        consecutiveHeartbeatMisses = 0;
+      } else {
+        consecutiveHeartbeatMisses += 1;
+      }
+      if (consecutiveHeartbeatMisses >= RELAY_DEVICE_STREAM_HEARTBEAT_MAX_MISSES) {
+        closeCurrentSocketForHeartbeatFailure(liveSocket, generationAtSchedule);
+        return;
+      }
+      try {
+        liveSocket.send(JSON.stringify({
+          type: 'control-ping',
+          payload: { sentAt: Date.now() },
+        }));
+      } catch (error) {
+        deps.runtimeDebug?.('relay.device-stream.heartbeat.send-failed', {
+          message: error instanceof Error ? error.message : String(error),
+        });
+        closeCurrentSocketForHeartbeatFailure(liveSocket, generationAtSchedule);
+        return;
+      }
+      scheduleHeartbeat(liveSocket, generationAtSchedule);
+    }, RELAY_DEVICE_STREAM_HEARTBEAT_INTERVAL_MS);
+  };
+
   const openDeviceStream = () => {
     if (disposed) {
       return;
     }
     const openGeneration = generation;
-    void deps.refreshAccount(deps.readEnabledAccount()).then((refreshed) => {
+    void refreshControlDirectory(openGeneration).then((refreshed) => {
+      if (!refreshed) {
+        return;
+      }
       if (disposed || generation !== openGeneration) {
         return;
       }
-      const nextRelay = refreshed.relaySettings
-        || (refreshed.account as { relaySettings?: TraversalRelayClientSettings | null } | null | undefined)?.relaySettings
-        || null;
-      if (!nextRelay) {
-        throw new Error('relay control payload missing ws/control settings');
-      }
-      const refreshedDevices = deps.projectDevicesFromAccount(refreshed.account);
-      replaceDirectoryTruth(refreshedDevices);
-      deps.setDevices(refreshedDevices);
-      deps.applyRelaySettings?.(nextRelay);
-
       const nextSocket = deps.connectDevicesStream({
         account: refreshed.account,
         onOpen: () => {
+          if (disposed || generation !== openGeneration || socket !== nextSocket) {
+            return;
+          }
           reconnectAttempt = 0;
+          lastControlPongAt = Date.now();
+          lastObservedControlPongAt = lastControlPongAt;
+          consecutiveHeartbeatMisses = 0;
+          heartbeatFailureFinalized = false;
+          scheduleHeartbeat(nextSocket, openGeneration);
           const deviceId = (refreshed.account as { deviceId?: string } | null | undefined)?.deviceId;
           deps.runtimeDebug?.('relay.device-stream.open', { deviceId: deviceId || null });
         },
         onDevices: (devices) => {
+          if (disposed || generation !== openGeneration || socket !== nextSocket) {
+            return;
+          }
           deps.setDevices((current) => {
             const currentDirectoryTruth = directoryTruthDevices.length > 0
               ? directoryTruthDevices
@@ -209,21 +359,46 @@ export function createRelayDeviceStreamRuntime(deps: RelayDeviceStreamRuntimeDep
           });
         },
         onDirectory: (directory) => {
-          const directoryDevices = deps.projectDirectoryDevices(directory);
-          if (directoryDevices.length > 0) {
-            const onlineDirectoryDevices = listOnlineTraversalRelayDaemonDevices(directoryDevices);
-            replaceDirectoryTruth(onlineDirectoryDevices);
-            deps.setDevices(onlineDirectoryDevices);
+          if (disposed || generation !== openGeneration || socket !== nextSocket) {
+            return;
           }
+          const directoryDevices = deps.projectDirectoryDevices(directory);
+          const onlineDirectoryDevices = listOnlineTraversalRelayDaemonDevices(directoryDevices);
+          replaceDirectoryTruth(onlineDirectoryDevices, 'confirmed');
+          deps.setDevices(onlineDirectoryDevices);
+        },
+        onControlPong: () => {
+          if (disposed || generation !== openGeneration || socket !== nextSocket) {
+            return;
+          }
+          lastControlPongAt = Date.now();
         },
         onError: (message) => {
           deps.runtimeDebug?.('relay.device-stream.error', { message });
         },
         onClose: (event) => {
-          if (socket === nextSocket) {
-            socket = null;
+          if (disposed || generation !== openGeneration || socket !== nextSocket) {
+            deps.runtimeDebug?.('relay.device-stream.close.stale', {
+              code: event.code,
+              reason: event.reason || null,
+              generation: openGeneration,
+              currentGeneration: generation,
+            });
+            return;
           }
+          clearHeartbeatTimer();
+          socket = null;
           const reason = event.reason || `relay device stream closed: ${event.code}`;
+          if (event.code === 4001) {
+            directoryTruthDevices = [];
+            confirmedRelaySettings = undefined;
+            deps.setDevices([]);
+            deps.publishDirectoryTruth?.([], 'disabled');
+            deps.runtimeDebug?.('relay.device-stream.auth.invalid', { code: event.code, reason });
+            deps.invalidateAuthentication?.(reason);
+            return;
+          }
+          deps.publishDirectoryTruth?.(directoryTruthDevices, 'disconnected');
           deps.runtimeDebug?.('relay.device-stream.close', { code: event.code, reason });
           scheduleReconnect(reason);
         },
@@ -243,9 +418,7 @@ export function createRelayDeviceStreamRuntime(deps: RelayDeviceStreamRuntimeDep
       if (disposed || generation !== openGeneration) {
         return;
       }
-      const message = error instanceof Error ? error.message : String(error);
-      deps.runtimeDebug?.('relay.device-stream.account-refresh.error', { message });
-      scheduleReconnect(message);
+      handleControlRefreshFailure(error, true);
     });
   };
 
@@ -255,6 +428,7 @@ export function createRelayDeviceStreamRuntime(deps: RelayDeviceStreamRuntimeDep
       generation += 1;
       reconnectAttempt = 0;
       clearReconnectTimer();
+      clearHeartbeatTimer();
       if (socket) {
         try {
           socket.close(1000, 'relay device stream restart');
@@ -266,13 +440,13 @@ export function createRelayDeviceStreamRuntime(deps: RelayDeviceStreamRuntimeDep
 
       const account = deps.readEnabledAccount();
       if (!account) {
-        replaceDirectoryTruth([]);
+        replaceDirectoryTruth([], 'disabled');
         deps.setDevices([]);
         return;
       }
 
       const initialDevices = deps.projectDevicesFromAccount(account);
-      replaceDirectoryTruth(initialDevices);
+      replaceDirectoryTruth(initialDevices, 'cached');
       deps.setDevices(initialDevices);
       openDeviceStream();
     },
@@ -281,6 +455,7 @@ export function createRelayDeviceStreamRuntime(deps: RelayDeviceStreamRuntimeDep
       disposed = true;
       generation += 1;
       clearReconnectTimer();
+      clearHeartbeatTimer();
       if (!socket) {
         return;
       }
@@ -300,8 +475,26 @@ export function createRelayDeviceStreamRuntime(deps: RelayDeviceStreamRuntimeDep
       return directoryTruthDevices;
     },
 
+    refreshNow(reason = 'explicit') {
+      if (disposed) {
+        return Promise.resolve(false);
+      }
+      const refreshGeneration = generation;
+      deps.runtimeDebug?.('relay.device-stream.control-refresh.requested', { reason });
+      deps.publishDirectoryTruth?.(directoryTruthDevices, 'disconnected', confirmedRelaySettings);
+      return refreshControlDirectory(refreshGeneration)
+        .then((refreshed) => Boolean(refreshed))
+        .catch((error) => {
+          if (disposed || generation !== refreshGeneration) {
+            return false;
+          }
+          handleControlRefreshFailure(error, false);
+          return false;
+        });
+    },
+
     replaceDirectoryTruthFromDevices(devices: TraversalRelayDeviceSnapshot[]) {
-      replaceDirectoryTruth(devices);
+      replaceDirectoryTruth(devices, 'confirmed');
     },
   };
 }

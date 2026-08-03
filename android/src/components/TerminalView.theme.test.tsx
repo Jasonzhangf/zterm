@@ -199,8 +199,38 @@ describe('TerminalView terminal themes', () => {
     const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
 
     expect(cellNode.style.color).toBe(hexToRgbString('#222222'));
-    expect(cellNode.style.background).toBe(hexToRgbString('#ffffff'));
+    expect(cellNode.style.background).toBe('transparent');
     expect(scroller.style.backgroundColor).toBe(hexToRgbString('#ffffff'));
+  });
+
+  it('uses the upstream Pencil Light surface and foreground for the light shell renderer preset', () => {
+    const cell = {
+      char: 'G'.codePointAt(0) || 71,
+      fg: 256,
+      bg: 256,
+      flags: 0,
+      width: 1,
+    };
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId="theme-pencil-light"
+          initialBufferLines={[[cell]]}
+          bufferStartIndex={0}
+          bufferEndIndex={1}
+          bufferTailEndIndex={1}
+          active
+          fontSize={11}
+          themeId="tabby-pencil-light"
+        />
+      </div>,
+    );
+
+    const cellNode = firstRenderedCell(view.container);
+    const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+    expect(cellNode.style.color).toBe(hexToRgbString('#424242'));
+    expect(cellNode.style.background).toBe('transparent');
+    expect(scroller.style.backgroundColor).toBe(hexToRgbString('#f1f1f1'));
   });
 
   it('uses the Classic Dark terminal surface for default background cells instead of pure black', () => {
@@ -227,8 +257,8 @@ describe('TerminalView terminal themes', () => {
     const cells = Array.from(view.container.querySelectorAll('[data-terminal-row="true"] > span > span')) as HTMLSpanElement[];
     const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
 
-    expect(scroller.style.backgroundColor).toBe(hexToRgbString('#1e1e1e'));
-    expect(cells[0]?.style.background).toBe(hexToRgbString('#1e1e1e'));
+    expect(scroller.style.backgroundColor).toBe(hexToRgbString('#000000'));
+    expect(cells[0]?.style.background).toBe('transparent');
     expect(cells[1]?.style.background).toBe(hexToRgbString('#1e1e1e'));
   });
 

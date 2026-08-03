@@ -316,6 +316,8 @@ function projectTargetNetworkProbeFailureMessage(failure: SessionTargetNetworkPr
       return 'network generation target probe timeout';
     case 'TargetNetworkProbeError02SendFailure':
       return 'network generation target probe send failed';
+    case 'TargetNetworkProbeError03TerminalSocketState':
+      return `network generation target transport terminal state ${failure.readyState}`;
     default: {
       const unreachableFailure: never = failure;
       throw new Error(`unhandled target network probe failure: ${String(unreachableFailure)}`);
@@ -345,7 +347,6 @@ export function notifyTargetNetworkSignalRuntime(options: {
     if (!socket) {
       continue;
     }
-
     const result = options.targetNetworkProbeRuntime.probe({
       targetKey: targetRuntime.key,
       socket,
@@ -825,6 +826,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
     sendSocketPayload: options.sendSocketPayload,
     openSessionTargetTransport: ({ sessionId, host, debugScope, finalizeFailure }) => {
       const ws = options.openDaemonTargetTransportSocket(host);
+      options.applyTransportDiagnostics(sessionId, ws);
       primeTargetTerminalTransportSocket(sessionId, ws);
       bindTargetMuxTransportSocketLifecycle({
         sessionId,

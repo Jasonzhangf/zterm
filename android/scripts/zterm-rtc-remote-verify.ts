@@ -65,11 +65,12 @@ async function waitForRelayDevice(accessToken: string, timeoutMs = 30000) {
   throw new Error('relay device not visible in api/devices');
 }
 
-async function rtcSmoke(accessToken: string, signalBase: string, iceServers: RTCIceServer[], relayOnly: boolean) {
+async function rtcSmoke(accessToken: string, signalBase: string, iceServers: RTCIceServer[], relayOnly: boolean, clientDeviceId: string) {
   return await new Promise<any>((resolve, reject) => {
     const signalUrl = new URL(signalBase);
     signalUrl.searchParams.set('token', accessToken);
     signalUrl.searchParams.set('hostId', relayHostId);
+    signalUrl.searchParams.set('deviceId', clientDeviceId);
     const signalSocket = new WebSocket(signalUrl.toString());
     const peerConnection = new RTCPeerConnection({
       iceServers,
@@ -193,9 +194,9 @@ async function main() {
     const auth = await login();
     const relayDevice = await waitForRelayDevice(auth.accessToken);
     const iceServers: RTCIceServer[] = auth.turn?.url ? [{ urls: auth.turn.url, username: auth.turn.username, credential: auth.turn.credential }] : [];
-    const p2p = await rtcSmoke(auth.accessToken, auth.ws.client, iceServers, false);
+    const p2p = await rtcSmoke(auth.accessToken, auth.ws.client, iceServers, false, `${relayDeviceId}-p2p-client`);
     console.log(JSON.stringify({ stage: 'p2p-ok', p2p }, null, 2));
-    const relay = await rtcSmoke(auth.accessToken, auth.ws.client, iceServers, true);
+    const relay = await rtcSmoke(auth.accessToken, auth.ws.client, iceServers, true, `${relayDeviceId}-turn-client`);
     console.log(JSON.stringify({
       ok: true,
       relayHostId,

@@ -1,11 +1,21 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
 import { createSessionTailRefreshStore } from '../lib/session-tail-refresh-store';
-import { clearTailRefreshRuntime, startSocketHeartbeat } from './session-context-socket-runtime';
+import {
+  CLIENT_TRANSPORT_HEARTBEAT_INTERVAL_MS,
+  CLIENT_TRANSPORT_HEARTBEAT_MAX_MISSES,
+  clearTailRefreshRuntime,
+  startSocketHeartbeat,
+} from './session-context-socket-runtime';
 import { createSessionHeartbeatStore } from '../lib/session-heartbeat-store';
 
 describe('session-context-socket-runtime heartbeat lifecycle', () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it('uses a thirty-second target transport heartbeat policy by default', () => {
+    expect(CLIENT_TRANSPORT_HEARTBEAT_INTERVAL_MS).toBe(30_000);
+    expect(CLIENT_TRANSPORT_HEARTBEAT_MAX_MISSES).toBe(3);
   });
 
   it('clears any existing heartbeat interval before starting a replacement heartbeat for the same session', () => {

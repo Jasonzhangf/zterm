@@ -151,6 +151,56 @@ describe('notifyTargetNetworkSignalRuntime', () => {
     targetNetworkProbeRuntime.dispose();
   });
 
+  it('routes a foreground-resume closed target through the typed probe failure owner', () => {
+    const socket = makeFailedSocket(WebSocket.CLOSED);
+    const targetNetworkProbeRuntime = createSessionTargetNetworkProbeRuntime({ probeTimeoutMs: 2_500, now: Date.now });
+    const sendTargetProbe = vi.fn();
+    const submitTargetSocketFailure = vi.fn();
+
+    expect(notifyTargetNetworkSignalRuntime({
+      signal: { source: 'foreground-resume' },
+      targetRuntimes: [
+        { key: 'daemon-a', sessionIds: ['session-a1'], terminalTransport: socket },
+      ],
+      targetNetworkProbeRuntime,
+      sendTargetProbe,
+      submitTargetSocketFailure,
+      runtimeDebug: vi.fn(),
+    })).toEqual([
+      { targetKey: 'daemon-a', result: 'terminal-socket' },
+    ]);
+    expect(sendTargetProbe).not.toHaveBeenCalled();
+    expect(submitTargetSocketFailure).toHaveBeenCalledWith(
+      'daemon-a',
+      socket,
+      `network generation target transport terminal state ${WebSocket.CLOSED}`,
+    );
+    targetNetworkProbeRuntime.dispose();
+  });
+
+  it('retains a foreground-resume target that is still connecting', () => {
+    const socket = makeFailedSocket(WebSocket.CONNECTING);
+    const targetNetworkProbeRuntime = createSessionTargetNetworkProbeRuntime({ probeTimeoutMs: 2_500, now: Date.now });
+    const sendTargetProbe = vi.fn();
+    const submitTargetSocketFailure = vi.fn();
+
+    expect(notifyTargetNetworkSignalRuntime({
+      signal: { source: 'foreground-resume' },
+      targetRuntimes: [
+        { key: 'daemon-a', sessionIds: ['session-a1'], terminalTransport: socket },
+      ],
+      targetNetworkProbeRuntime,
+      sendTargetProbe,
+      submitTargetSocketFailure,
+      runtimeDebug: vi.fn(),
+    })).toEqual([
+      { targetKey: 'daemon-a', result: 'still-connecting' },
+    ]);
+    expect(sendTargetProbe).not.toHaveBeenCalled();
+    expect(submitTargetSocketFailure).not.toHaveBeenCalled();
+    targetNetworkProbeRuntime.dispose();
+  });
+
   it('projects probe timeout explicitly into the one target failure owner', () => {
     vi.useFakeTimers();
     const socket = makeFailedSocket(WebSocket.OPEN);

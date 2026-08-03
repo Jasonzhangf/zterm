@@ -18,6 +18,7 @@ interface RuntimeDebugFn {
 
 const TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES = 128 * 1024;
 export const TERMINAL_RELIABLE_INPUT_RETRY_MS = 500;
+export const TERMINAL_RELIABLE_INPUT_ACK_TIMEOUT_MS = 5000;
 
 interface SendInputTransportOptions {
   sessionId: string;
@@ -49,6 +50,8 @@ interface ReliableInputQueueItem {
   bytes: number;
   attempt: number;
   sentAt: number | null;
+  sentTargetKey: string | null;
+  sentTransportSocket: BridgeTransportSocket | null;
   headRefreshMarked: boolean;
 }
 
@@ -132,12 +135,16 @@ function clearReliableInputTimer(queue: ReliableInputSessionQueue) {
   }
 }
 
-function scheduleReliableInputFlush(queue: ReliableInputSessionQueue) {
+function scheduleReliableInputFlush(queue: ReliableInputSessionQueue, delayMs = TERMINAL_RELIABLE_INPUT_RETRY_MS) {
   clearReliableInputTimer(queue);
   queue.timer = globalThis.setTimeout(() => {
     queue.timer = null;
     flushReliableInputQueue(queue.sessionId);
-  }, TERMINAL_RELIABLE_INPUT_RETRY_MS);
+  }, delayMs);
+}
+
+function isReliableInputInFlight(item: ReliableInputQueueItem) {
+  return item.sentAt !== null;
 }
 
 function getReliableInputQueue(sessionId: string, options: SendInputTransportOptions) {
@@ -165,6 +172,8 @@ function sendReliableInputFrame(
   const localRevision = queue.options.readSessionBufferSnapshot(queue.sessionId).revision;
   item.attempt += 1;
   item.sentAt = Date.now();
+  item.sentTargetKey = resource.targetKey;
+  item.sentTransportSocket = ws;
   const payload: TerminalReliableInputPayload = {
     version: 1,
     seq: item.seq,
@@ -265,6 +274,29 @@ function flushReliableInputQueue(sessionId: string) {
     reliableInputQueues.delete(sessionId);
     return;
   }
+  if (isReliableInputInFlight(item)) {
+    const retryDecision = shouldRetryReliableInputInFlight(item, resource);
+    if (!retryDecision.retry) {
+      queue.options.runtimeDebug('session.input.reliable-wait.ack', {
+        sessionId,
+        seq: item.seq,
+        attempt: item.attempt,
+        queueDepth: queue.items.length,
+      });
+      scheduleReliableInputFlush(queue, retryDecision.delayMs);
+      return;
+    }
+    queue.options.runtimeDebug('session.input.reliable-retry.in-flight', {
+      sessionId,
+      seq: item.seq,
+      attempt: item.attempt,
+      reason: retryDecision.reason,
+      queueDepth: queue.items.length,
+      resourceTargetKey: resource.targetKey,
+      transportSocketChanged: item.sentTransportSocket !== resource.socket,
+    });
+    item.sentAt = null;
+  }
   sendReliableInputFrame(queue, item, ws, resource);
   scheduleReliableInputFlush(queue);
 }
@@ -278,6 +310,8 @@ function enqueueReliableInputChunks(options: SendInputTransportOptions, sessionI
       bytes: getTerminalInputUtf8ByteLength(chunk),
       attempt: 0,
       sentAt: null,
+      sentTargetKey: null,
+      sentTransportSocket: null,
       headRefreshMarked: false,
     });
   }
@@ -296,6 +330,26 @@ function isRetryableReliableInputNack(payload: TerminalInputAckPayload) {
     || payload.error === 'transport_unavailable'
     || payload.error === 'input_transport_unavailable'
   );
+}
+
+function shouldRetryReliableInputInFlight(item: ReliableInputQueueItem, resource: SessionTransportResource) {
+  if (item.sentAt === null) {
+    return { retry: false, delayMs: TERMINAL_RELIABLE_INPUT_RETRY_MS, reason: null };
+  }
+  const ageMs = Math.max(0, Date.now() - item.sentAt);
+  const transportChanged = item.sentTargetKey !== resource.targetKey
+    || item.sentTransportSocket !== resource.socket;
+  if (transportChanged) {
+    return { retry: true, delayMs: TERMINAL_RELIABLE_INPUT_RETRY_MS, reason: 'transport-generation-changed' };
+  }
+  if (ageMs >= TERMINAL_RELIABLE_INPUT_ACK_TIMEOUT_MS) {
+    return { retry: true, delayMs: TERMINAL_RELIABLE_INPUT_RETRY_MS, reason: 'ack-timeout' };
+  }
+  return {
+    retry: false,
+    delayMs: TERMINAL_RELIABLE_INPUT_RETRY_MS,
+    reason: null,
+  };
 }
 
 export function handleTerminalInputAck(sessionId: string, payload: TerminalInputAckPayload) {
@@ -317,6 +371,10 @@ export function handleTerminalInputAck(sessionId: string, payload: TerminalInput
     return;
   }
   if (isRetryableReliableInputNack(payload)) {
+    const item = queue.items[index];
+    if (item) {
+      item.sentAt = null;
+    }
     queue.options.runtimeDebug('session.input.reliable-nack.retry', {
       sessionId,
       seq: payload.seq,

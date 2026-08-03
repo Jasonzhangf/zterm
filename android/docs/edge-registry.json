@@ -470,7 +470,8 @@
       ],
       "error_chain": [
         "TargetNetworkProbeError01GenerationTimeout",
-        "TargetNetworkProbeError02SendFailure"
+        "TargetNetworkProbeError02SendFailure",
+        "TargetNetworkProbeError03TerminalSocketState"
       ],
       "mainline_call_ids": [
         "android_mainline:PlatformNetworkSignal->OpenTabNetworkBinding",
@@ -1159,7 +1160,7 @@
         "RelayDirectoryError02UnknownDaemon"
       ],
       "mainline_call_ids": [
-        "android_mainline:RelayDirectoryProjection->TransportTargetResolver",
+        "android_mainline:RelayDirectoryProjection->ClientControlPlaneTransport",
         "android_mainline:RelayControlSocket->RelayAccountStore",
         "android_mainline:RelayAccountStore->RelayDirectoryProjection"
       ],
@@ -1814,11 +1815,6 @@
     },
     {
       "from_module": "client.daemon_connection",
-      "to_module": "client.input_runtime",
-      "status": "active"
-    },
-    {
-      "from_module": "client.daemon_connection",
       "to_module": "client.remote_window_overlay",
       "status": "active"
     },
@@ -1849,22 +1845,12 @@
     },
     {
       "from_module": "client.file_browser",
-      "to_module": "client.input_runtime",
-      "status": "active"
-    },
-    {
-      "from_module": "client.file_browser",
       "to_module": "client.runtime",
       "status": "active"
     },
     {
       "from_module": "client.file_browser",
       "to_module": "shared.terminal_types",
-      "status": "active"
-    },
-    {
-      "from_module": "client.input_runtime",
-      "to_module": "client.daemon_connection",
       "status": "active"
     },
     {
@@ -2195,6 +2181,31 @@
     {
       "from_module": "daemon.runtime_entry",
       "to_module": "daemon.session_idle_detection",
+      "status": "active"
+    },
+    {
+      "from_module": "client.reliable_input",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    },
+    {
+      "from_module": "client.reliable_input",
+      "to_module": "client.daemon_connection",
+      "status": "active"
+    },
+    {
+      "from_module": "client.daemon_connection",
+      "to_module": "client.reliable_input",
+      "status": "active"
+    },
+    {
+      "from_module": "client.file_browser",
+      "to_module": "client.reliable_input",
+      "status": "active"
+    },
+    {
+      "from_module": "client.daemon_connection",
+      "to_module": "client.connection_home",
       "status": "active"
     }
   ]

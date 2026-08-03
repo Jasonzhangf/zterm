@@ -12,6 +12,9 @@ interface MutableRefObject<T> {
   current: T;
 }
 
+export const CLIENT_TRANSPORT_HEARTBEAT_INTERVAL_MS = 30_000;
+export const CLIENT_TRANSPORT_HEARTBEAT_MAX_MISSES = 3;
+
 export function clearSessionHeartbeat(options: {
   sessionId: string;
   heartbeatKey?: string;

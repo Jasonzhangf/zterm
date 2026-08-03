@@ -688,14 +688,17 @@
     "resource.mirror_store",
     "resource.daemon_input_queue"
    ],
-   "canonical_docs": [
-    "docs/modules/project-modules.md",
-    "docs/architecture.md",
-    "docs/ui-slices.md"
-   ],
-   "required_gates": [
-    "src/lib/module-registry-truth.test.ts",
-    "src/lib/function-wiki-truth.test.ts"
+      "canonical_docs": [
+        "docs/modules/project-modules.md",
+        "docs/architecture.md",
+        "docs/ui-slices.md",
+        "docs/testing/terminal-shell-theme-test-design.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/function-wiki-truth.test.ts",
+        "src/lib/terminal-shell-skin.test.ts",
+        "src/hooks/useAppPageState.test.tsx"
    ],
    "status": "active",
    "owned_paths": [
@@ -708,9 +711,45 @@
     "src/hooks/useTerminalWorkspace.ts",
     "src/lib/session-group-viewport.ts",
     "src/lib/terminal-layout-profile.ts",
+    "src/lib/terminal-shell-skin.ts",
     "src/lib/workspace-persistence.ts",
+    "src/index.css",
     "src/main.tsx",
     "src/pages/"
+   ]
+  },
+  {
+   "module_id": "shared.pane_layout",
+   "runtime_side": "shared",
+   "level": 1,
+   "parent_module_id": "shared.contract",
+   "owner_feature": "terminal.session_group_layout",
+   "responsibility": "Own shared phone and desktop pane layout profiles consumed by platform shell projections.",
+   "owned_resources": [],
+   "consumed_resources": [
+    "resource.ui_projection"
+   ],
+   "pending_resources": [],
+   "public_interfaces": [
+    "packages/shared/src/react/pane-profile.ts"
+   ],
+   "forbidden_resources": [
+    "resource.tmux_session",
+    "resource.mirror_store",
+    "resource.session_transport"
+   ],
+   "canonical_docs": [
+    "docs/modules/project-modules.md",
+    "docs/testing/terminal-shell-theme-test-design.md",
+    "docs/testing/terminal-session-group-layout-test-design.md"
+   ],
+   "required_gates": [
+    "src/lib/module-registry-truth.test.ts",
+    "../packages/shared/src/react/pane-profile.test.ts"
+   ],
+   "status": "active",
+   "owned_paths": [
+    "packages/shared/src/react/pane-profile.ts"
    ]
   },
   {
@@ -838,6 +877,7 @@
     "src/contexts/session-transport-open-helpers.ts",
     "src/contexts/session-wire-helpers.ts",
     "src/hooks/useWebSocket.ts",
+    "src/lib/client-control-plane-transport.ts",
     "src/lib/client-daemon-connection.ts",
     "src/lib/session-heartbeat-store.ts",
     "src/lib/session-reconnect-store.ts",
@@ -1047,6 +1087,7 @@
    ],
    "status": "active",
    "owned_paths": [
+    "packages/shared/src/terminal/theme.ts",
     "src/components/TerminalView.tsx",
     "src/components/terminal/VisibleRow.tsx",
     "src/lib/default-terminal-viewport.ts",
@@ -1098,12 +1139,50 @@
     "src/components/terminal/terminal-copy-gesture.ts",
     "src/components/terminal/terminal-quickbar-helpers.tsx",
     "src/components/terminal/terminal-quickbar-shell-guards.ts",
-    "src/contexts/session-context-input-runtime.ts",
     "src/hooks/useQuickActionStorage.ts",
     "src/hooks/useShortcutActionStorage.ts",
     "src/hooks/useShortcutFrequencyStorage.ts",
     "src/lib/key-sequence.ts",
     "src/lib/terminal-input-normalization.ts"
+   ]
+  },
+  {
+   "module_id": "client.reliable_input",
+   "runtime_side": "client",
+   "level": 1,
+   "parent_module_id": "client.runtime",
+   "owner_feature": "terminal.daemon_input",
+   "responsibility": "Own reliable terminal input sequence allocation, ACK tracking, timeout retry, route-generation retry, and queue cleanup.",
+   "owned_resources": [
+    "resource.client_reliable_input_queue"
+   ],
+   "consumed_resources": [
+    "resource.platform_input_channel",
+    "resource.session_transport",
+    "resource.daemon_target_transport"
+   ],
+   "pending_resources": [],
+   "public_interfaces": [
+    "src/contexts/session-context-input-runtime.ts"
+   ],
+   "forbidden_resources": [
+    "resource.tmux_session",
+    "resource.mirror_store",
+    "resource.renderer_window",
+    "resource.ui_projection"
+   ],
+   "canonical_docs": [
+    "docs/resource-map.md",
+    "docs/function-map.md",
+    "docs/testing/terminal-long-input-delivery-test-design.md"
+   ],
+   "required_gates": [
+    "src/lib/module-registry-truth.test.ts",
+    "src/contexts/session-context-input-runtime.test.ts"
+   ],
+   "status": "active",
+   "owned_paths": [
+    "src/contexts/session-context-input-runtime.ts"
    ]
   },
   {
@@ -1505,7 +1584,7 @@
    "level": 1,
    "parent_module_id": "relay.runtime",
    "owner_feature": "relay.account_directory",
-   "responsibility": "Own role-scoped Relay control connection presence plus account-scoped machine, daemon, endpoint, tmux-session directory, and public update route facts.",
+      "responsibility": "Own independent per-login account tokens, role-scoped Relay control connection presence, account-scoped machine/daemon/endpoint/tmux-session directory, and public update route facts.",
    "owned_resources": [
     "resource.relay_control_connection",
     "resource.relay_account_directory"

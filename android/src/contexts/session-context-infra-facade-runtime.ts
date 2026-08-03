@@ -25,6 +25,8 @@ import {
   type TerminalMuxClientFrame,
 } from '@zterm/shared/protocol';
 import {
+  CLIENT_TRANSPORT_HEARTBEAT_INTERVAL_MS,
+  CLIENT_TRANSPORT_HEARTBEAT_MAX_MISSES,
   applySessionActionRuntime,
   applyTransportDiagnosticsRuntime,
   buildTraversalSocketForHostRuntime,
@@ -589,8 +591,8 @@ export function createSessionInfraFacadeRuntime(options: {
       ws,
       finalizeFailure,
       heartbeatStore: options.heartbeatStore,
-      clientPingIntervalMs: 60_000,
-      maxConsecutiveMisses: 3,
+      clientPingIntervalMs: CLIENT_TRANSPORT_HEARTBEAT_INTERVAL_MS,
+      maxConsecutiveMisses: CLIENT_TRANSPORT_HEARTBEAT_MAX_MISSES,
       sendSocketPayload,
     });
   };

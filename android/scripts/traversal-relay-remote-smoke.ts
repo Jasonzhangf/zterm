@@ -102,11 +102,13 @@ async function rtcClientSmoke(opts: {
   signalUrl: string;
   iceServers: RTCIceServer[];
   relayOnly: boolean;
+  clientDeviceId: string;
 }) {
   return await new Promise<Record<string, unknown>>((resolve, reject) => {
     const parsed = new URL(opts.signalUrl);
     parsed.searchParams.set('token', opts.accessToken);
     parsed.searchParams.set('hostId', relayHostId);
+    parsed.searchParams.set('deviceId', opts.clientDeviceId);
     const signalSocket = new WebSocket(parsed.toString());
     const peerConnection = new RTCPeerConnection({
       iceServers: opts.iceServers,
@@ -232,8 +234,20 @@ async function main() {
       credential: login.turn.credential,
     }] : [];
 
-    const p2pResult = await rtcClientSmoke({ accessToken: login.accessToken, signalUrl, iceServers, relayOnly: false });
-    const relayResult = await rtcClientSmoke({ accessToken: login.accessToken, signalUrl, iceServers, relayOnly: true });
+    const p2pResult = await rtcClientSmoke({
+      accessToken: login.accessToken,
+      signalUrl,
+      iceServers,
+      relayOnly: false,
+      clientDeviceId: `${relayDeviceId}-p2p-client`,
+    });
+    const relayResult = await rtcClientSmoke({
+      accessToken: login.accessToken,
+      signalUrl,
+      iceServers,
+      relayOnly: true,
+      clientDeviceId: `${relayDeviceId}-turn-client`,
+    });
 
     process.stdout.write(JSON.stringify({
       ok: true,

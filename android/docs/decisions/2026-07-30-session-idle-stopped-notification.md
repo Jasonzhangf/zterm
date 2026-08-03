@@ -77,7 +77,7 @@ Rationale: independent type means old clients silently ignore it (switch default
 
 ### 2. Trigger placement
 
-**Piggy-back on the existing mux heartbeat tick** (60s class interval) via `terminal-daemon-runtime.ts#startHeartbeatLoop`.
+**Piggy-back on the existing mux heartbeat tick** (30s interval) via `terminal-daemon-runtime.ts#startHeartbeatLoop`.
 
 The heartbeat loop already iterates over all connections and their bound subscribers. We extend it to also walk all mirrors, classify each by `lastLiveActivityAt`, and send `sessions` with activity data to each open physical transport.
 

@@ -359,6 +359,7 @@
       "truth_store": "src/lib/session-transport-runtime.ts target runtime and src/lib/traversal/socket.ts",
       "allowed_operations": [
         "negotiate_mux_capability",
+        "wait_for_confirmed_control_directory",
         "open_physical_transport",
         "reuse_physical_transport",
         "probe_exact_physical_generation",
@@ -381,7 +382,8 @@
         "resource.client_buffer_frame_assembly",
         "resource.client_sparse_buffer",
         "resource.terminal_body_subscription",
-        "resource.platform_network_signal"
+        "resource.platform_network_signal",
+        "resource.relay_account_directory"
       ],
       "via_resources": [
         "resource.terminal_channel",
@@ -693,6 +695,55 @@
       "canonical_docs": [
         "docs/resource-map.md",
         ".agents/skills/terminal-buffer-truth/SKILL.md"
+      ]
+    },
+    {
+      "resource_id": "resource.client_reliable_input_queue",
+      "resource_type": "platform_client_truth",
+      "identity": "Per-session reliable terminal input seq, in-flight ACK, and retry-generation queue",
+      "owner_feature": "terminal.daemon_input",
+      "truth_store": "src/contexts/session-context-input-runtime.ts",
+      "allowed_operations": [
+        "enqueue_input_seq",
+        "publish_one_in_flight_seq",
+        "apply_input_ack",
+        "retry_same_seq_after_ack_timeout",
+        "retry_same_seq_after_route_generation_change"
+      ],
+      "direct_relations": [
+        "resource.platform_input_channel",
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.debug_channel"
+      ],
+      "indirect_relations": [
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.daemon_input_queue",
+        "resource.backend_session"
+      ],
+      "via_resources": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.daemon_input_queue"
+      ],
+      "forbidden_direct_relations": [
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/contexts/session-context-input-runtime.test.ts",
+        "src/server/terminal-message-runtime.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/testing/terminal-long-input-delivery-test-design.md"
       ]
     },
     {
@@ -2209,10 +2260,12 @@
     {
       "resource_id": "resource.relay_account_directory",
       "resource_type": "relay_runtime_truth",
-      "identity": "Account-scoped daemon/device/endpoint/session directory and public update route facts",
+      "identity": "Account-scoped independent login tokens plus daemon/device/endpoint/session directory and public update route facts",
       "owner_feature": "relay.account_directory",
       "truth_store": "src/traversal-relay/store.ts, src/traversal-relay/server.ts, src/lib/relay-account-directory.ts, and src/lib/client-control-directory-runtime.ts",
       "allowed_operations": [
+        "issue_independent_login_token",
+        "authenticate_login_token",
         "publish_daemon_directory",
         "read_account_directory",
         "project_endpoint_candidates",
@@ -2667,6 +2720,18 @@
     }
   ],
   "direct_relations": [
+    {
+      "from": "resource.platform_input_channel",
+      "to": "resource.client_reliable_input_queue"
+    },
+    {
+      "from": "resource.client_reliable_input_queue",
+      "to": "resource.session_transport"
+    },
+    {
+      "from": "resource.client_reliable_input_queue",
+      "to": "resource.daemon_target_transport"
+    },
     {
       "from": "resource.relay_control_connection",
       "to": "resource.relay_account_directory"

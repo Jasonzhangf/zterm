@@ -34,6 +34,11 @@ describe('useTerminalPageOverlays', () => {
 
     act(() => result.current.handleQuickBarOpenFileTransfer());
     expect(result.current.fileTransferOpen).toBe(true);
+    expect(result.current.fileTransferMode).toBe('browser');
+
+    act(() => result.current.handleQuickBarOpenFileTransfer('sync'));
+    expect(result.current.fileTransferOpen).toBe(true);
+    expect(result.current.fileTransferMode).toBe('sync');
 
     act(() => result.current.handleQuickBarToggleDebugOverlay());
     expect(result.current.debugOverlayVisible).toBe(true);

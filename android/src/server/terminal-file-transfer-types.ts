@@ -53,6 +53,7 @@ export interface TerminalFileTransferRuntimeDeps {
   ) => Promise<void> | void;
   captureRemoteScreenshot: (options: RemoteScreenshotCaptureOptions) => Promise<{ outputPath: string }>;
   logTimePrefix: () => string;
+  onFileUploadPersisted?: (targetDir: string) => void;
 }
 
 export interface TerminalFileTransferRuntime {
@@ -65,4 +66,5 @@ export interface TerminalFileTransferRuntime {
   handleFileUploadChunk: (session: TerminalSession, payload: FileUploadChunkPayload) => void;
   handleFileUploadEnd: (session: TerminalSession, payload: FileUploadEndPayload) => void;
   handleBinaryPayload: (session: TerminalSession, buffer: Buffer) => void;
+  dispose?: () => void;
 }

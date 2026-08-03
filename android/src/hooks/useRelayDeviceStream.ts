@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { BridgeSettings, TraversalRelayClientSettings } from '../lib/bridge-settings';
 import { applyTraversalRelaySettings } from '../lib/traversal-relay-client';
 import {
@@ -7,6 +7,7 @@ import {
   sendTraversalRelayClientDebugLogs,
   sendTraversalRelayClientDebugSnapshot,
   traversalRelayRefreshMe,
+  writeTraversalRelayAccountState,
   type TraversalRelayAccountState,
 } from '../lib/traversal-relay-client';
 import { collectClientDebugSnapshot } from '../lib/client-debug-snapshot';
@@ -34,6 +35,10 @@ export function useRelayDeviceStream(options: {
   const [relayDevices, setRelayDevices] = useState<TraversalRelayDeviceSnapshot[]>(() => (
     projectRelayDevicesFromAccountState(readTraversalRelayAccountState())
   ));
+  const runtimeRef = useRef<ReturnType<typeof createRelayDeviceStreamRuntime> | null>(null);
+  const refreshControlDirectory = useCallback((reason: string) => (
+    runtimeRef.current?.refreshNow(reason) || Promise.resolve(false)
+  ), []);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -93,19 +98,35 @@ export function useRelayDeviceStream(options: {
         onError: streamOptions.onError,
         onClose: streamOptions.onClose,
         onDebugRequest: streamOptions.onDebugRequest,
+        onControlPong: streamOptions.onControlPong,
       }),
       projectDirectoryDevices: (directory) => projectRelayDirectoryDeviceSnapshots(
         directory as RelayAccountDirectory | null | undefined,
       ),
       setDevices: setRelayDevices,
-      publishDirectoryTruth: (devices) => {
-        defaultClientControlDirectoryRuntime.replaceFromDevices(devices);
+      publishDirectoryTruth: (devices, state, relaySettings) => {
+        if (state === 'confirmed') {
+          defaultClientControlDirectoryRuntime.replaceFromDevices(devices, relaySettings);
+          return;
+        }
+        defaultClientControlDirectoryRuntime.markUnconfirmed();
       },
       applyRelaySettings: (settings: TraversalRelayClientSettings) => {
         options.setBridgeSettings((current) => (
           areTraversalRelaySettingsEqual(current.traversalRelay, settings)
             ? current
             : applyTraversalRelaySettings(current, settings)
+        ));
+      },
+      invalidateAuthentication: (reason) => {
+        runtimeDebug('relay.account.invalidated', { reason });
+        writeTraversalRelayAccountState(null);
+        setRelayDevices([]);
+        defaultClientControlDirectoryRuntime.clear();
+        options.setBridgeSettings((current) => (
+          current.traversalRelay
+            ? applyTraversalRelaySettings(current, undefined)
+            : current
         ));
       },
       runtimeDebug: (event, payload) => {
@@ -135,9 +156,16 @@ export function useRelayDeviceStream(options: {
       },
     });
 
+    runtimeRef.current = runtime;
     runtime.start();
     return () => {
+      // Stop invalidates the generation before socket close callbacks run, so
+      // cleanup must explicitly revoke the last confirmed directory snapshot.
+      defaultClientControlDirectoryRuntime.markUnconfirmed();
       runtime.stop('app relay runtime disposed');
+      if (runtimeRef.current === runtime) {
+        runtimeRef.current = null;
+      }
     };
   }, [
     options.bridgeSettings.traversalRelay?.accessToken,
@@ -147,5 +175,6 @@ export function useRelayDeviceStream(options: {
 
   return {
     relayDevices,
+    refreshControlDirectory,
   };
 }

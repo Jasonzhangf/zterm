@@ -33,6 +33,7 @@ export interface UseTerminalPageOverlaysResult {
   setScheduleOpen: React.Dispatch<React.SetStateAction<boolean>>;
   fileTransferOpen: boolean;
   setFileTransferOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  fileTransferMode: "browser" | "sync";
   bumpFileTransferEntryOpenNonce: () => void;
   remoteScreenshotPreview: RemoteScreenshotPreviewState | null;
   debugOverlayVisible: boolean;
@@ -44,7 +45,7 @@ export interface UseTerminalPageOverlaysResult {
   scheduleComposerSeed: ScheduleComposerSeed;
   setScheduleComposerSeed: React.Dispatch<React.SetStateAction<ScheduleComposerSeed>>;
   handleQuickBarOpenScheduleComposer: (text: string) => void;
-  handleQuickBarOpenFileTransfer: () => void;
+  handleQuickBarOpenFileTransfer: (mode?: "browser" | "sync") => void;
   handleQuickBarToggleDebugOverlay: () => void;
   handleQuickBarToggleAbsoluteLineNumbers: () => void;
   handleQuickBarRequestRemoteScreenshot: () => void;
@@ -61,6 +62,7 @@ export function useTerminalPageOverlays({
   const [tabManagerScopePaneId, setTabManagerScopePaneId] = React.useState<string | null>(null);
   const [scheduleOpen, setScheduleOpen] = React.useState(false);
   const [fileTransferOpen, setFileTransferOpen] = React.useState(false);
+  const [fileTransferMode, setFileTransferMode] = React.useState<"browser" | "sync">("browser");
   const [, setFileTransferEntryOpenNonce] = React.useState(0);
   const [remoteScreenshotPreview, setRemoteScreenshotPreview] =
     React.useState<RemoteScreenshotPreviewState | null>(null);
@@ -152,10 +154,11 @@ export function useTerminalPageOverlays({
     [onRequestScheduleList, uiSessionId],
   );
 
-  const handleQuickBarOpenFileTransfer = React.useCallback(() => {
+  const handleQuickBarOpenFileTransfer = React.useCallback((mode: "browser" | "sync" = "browser") => {
     setFileTransferEntryOpenNonce((value) => value + 1);
-    setFileTransferOpen(true);
-  }, []);
+    setFileTransferMode(mode);
+    setFileTransferOpen((current) => (current && fileTransferMode === mode ? false : true));
+  }, [fileTransferMode]);
 
   const bumpFileTransferEntryOpenNonce = React.useCallback(() => {
     setFileTransferEntryOpenNonce((value) => value + 1);
@@ -212,6 +215,7 @@ export function useTerminalPageOverlays({
     setScheduleOpen,
     fileTransferOpen,
     setFileTransferOpen,
+    fileTransferMode,
     bumpFileTransferEntryOpenNonce,
     remoteScreenshotPreview,
     debugOverlayVisible,

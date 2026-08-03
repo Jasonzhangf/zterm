@@ -4,7 +4,10 @@ import { useRef } from 'react';
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createForegroundRefreshRuntime } from '../lib/app-foreground-refresh';
-import { useOpenTabLifecycleEffects } from './useOpenTabLifecycleEffects';
+import {
+  BACKGROUND_HANDOFF_WAKE_LOCK_MS,
+  useOpenTabLifecycleEffects,
+} from './useOpenTabLifecycleEffects';
 import type { Session } from '../lib/types';
 
 const capacitorAppHarness = vi.hoisted(() => {
@@ -75,6 +78,18 @@ vi.mock('@capacitor/network', () => ({
   },
 }));
 
+const backgroundServiceHarness = vi.hoisted(() => ({
+  startBackgroundService: vi.fn(),
+  stopBackgroundService: vi.fn(),
+  updateSessionCount: vi.fn(),
+}));
+
+vi.mock('../plugins/BackgroundServicePlugin', () => ({
+  startBackgroundService: backgroundServiceHarness.startBackgroundService,
+  stopBackgroundService: backgroundServiceHarness.stopBackgroundService,
+  updateSessionCount: backgroundServiceHarness.updateSessionCount,
+}));
+
 const baseSession = {
   id: 's1',
   title: 'session',
@@ -84,11 +99,15 @@ const baseSession = {
 function LifecycleHarness({
   onForegroundResume,
   auditOpenTabsAgainstRemoteSessions,
+  onForegroundActiveChange = vi.fn(),
+  sessions = [baseSession],
 }: {
   onForegroundResume: (reason: 'visibilitychange' | 'resume' | 'appStateChange') => void;
   auditOpenTabsAgainstRemoteSessions: (reason: any) => Promise<void>;
+  onForegroundActiveChange?: (active: boolean) => void;
+  sessions?: Session[];
 }) {
-  const sessionsRef = useRef<Session[]>([baseSession]);
+  const sessionsRef = useRef<Session[]>(sessions);
   const openTabStateRef = useRef({
     tabs: [{ sessionId: 's1' }],
     activeSessionId: 's1',
@@ -99,7 +118,8 @@ function LifecycleHarness({
     sessionsRef,
     openTabStateRef,
     foregroundRefreshRuntimeRef,
-    onForegroundActiveChange: vi.fn(),
+    retainedSessionCount: sessions.filter((session) => session.state !== 'closed').length,
+    onForegroundActiveChange,
     onForegroundResume,
     auditOpenTabsAgainstRemoteSessions,
     notifyTargetNetworkSignal: vi.fn(),
@@ -113,9 +133,72 @@ afterEach(() => {
   cleanup();
   capacitorAppHarness.reset();
   capacitorNetworkHarness.reset();
+  backgroundServiceHarness.startBackgroundService.mockClear();
+  backgroundServiceHarness.stopBackgroundService.mockClear();
+  backgroundServiceHarness.updateSessionCount.mockClear();
+  vi.useRealTimers();
 });
 
 describe('useOpenTabLifecycleEffects', () => {
+  it('projects inactive immediately in background and starts five-minute native keepalive only when a session exists', async () => {
+    expect(BACKGROUND_HANDOFF_WAKE_LOCK_MS).toBe(5 * 60 * 1000);
+    const onForegroundActiveChange = vi.fn();
+    render(<LifecycleHarness
+      onForegroundResume={vi.fn()}
+      auditOpenTabsAgainstRemoteSessions={vi.fn(async () => undefined)}
+      onForegroundActiveChange={onForegroundActiveChange}
+    />);
+
+    capacitorAppHarness.emit('appStateChange', { isActive: false });
+    expect(onForegroundActiveChange).toHaveBeenCalledTimes(1);
+    expect(onForegroundActiveChange).toHaveBeenCalledWith(false);
+    expect(backgroundServiceHarness.startBackgroundService).toHaveBeenCalledTimes(1);
+    expect(backgroundServiceHarness.startBackgroundService).toHaveBeenCalledWith(1);
+
+    capacitorAppHarness.emit('appStateChange', { isActive: true });
+    expect(onForegroundActiveChange).toHaveBeenCalledWith(true);
+    expect(backgroundServiceHarness.stopBackgroundService).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not start native background execution when no retained session exists', async () => {
+    const onForegroundActiveChange = vi.fn();
+    render(<LifecycleHarness
+      onForegroundResume={vi.fn()}
+      auditOpenTabsAgainstRemoteSessions={vi.fn(async () => undefined)}
+      onForegroundActiveChange={onForegroundActiveChange}
+      sessions={[]}
+    />);
+
+    capacitorAppHarness.emit('appStateChange', { isActive: false });
+    capacitorAppHarness.emit('appStateChange', { isActive: false });
+
+    expect(onForegroundActiveChange).toHaveBeenCalledTimes(1);
+    expect(onForegroundActiveChange).toHaveBeenCalledWith(false);
+    expect(backgroundServiceHarness.startBackgroundService).not.toHaveBeenCalled();
+  });
+
+  it('stops native background execution when the last retained session closes while hidden', async () => {
+    const onForegroundActiveChange = vi.fn();
+    const view = render(<LifecycleHarness
+      onForegroundResume={vi.fn()}
+      auditOpenTabsAgainstRemoteSessions={vi.fn(async () => undefined)}
+      onForegroundActiveChange={onForegroundActiveChange}
+    />);
+
+    capacitorAppHarness.emit('appStateChange', { isActive: false });
+    expect(backgroundServiceHarness.startBackgroundService).toHaveBeenCalledWith(1);
+
+    view.rerender(<LifecycleHarness
+      onForegroundResume={vi.fn()}
+      auditOpenTabsAgainstRemoteSessions={vi.fn(async () => undefined)}
+      onForegroundActiveChange={onForegroundActiveChange}
+      sessions={[{ ...baseSession, state: 'closed' } as Session]}
+    />);
+
+    expect(backgroundServiceHarness.stopBackgroundService).toHaveBeenCalledTimes(1);
+    expect(backgroundServiceHarness.updateSessionCount).not.toHaveBeenCalled();
+  });
+
   it('keeps one Capacitor appStateChange listener across callback-only rerenders', async () => {
     const firstResume = vi.fn();
     const secondResume = vi.fn();
@@ -183,6 +266,7 @@ describe('useOpenTabLifecycleEffects', () => {
         sessionsRef,
         openTabStateRef,
         foregroundRefreshRuntimeRef,
+        retainedSessionCount: 1,
         onForegroundActiveChange,
         onForegroundResume: vi.fn(),
         auditOpenTabsAgainstRemoteSessions: auditOpenTabs,
@@ -225,6 +309,7 @@ describe('useOpenTabLifecycleEffects', () => {
         sessionsRef,
         openTabStateRef,
         foregroundRefreshRuntimeRef,
+        retainedSessionCount: 1,
         onForegroundActiveChange,
         onForegroundResume: vi.fn(),
         auditOpenTabsAgainstRemoteSessions: vi.fn(async () => undefined),
@@ -260,7 +345,10 @@ describe('useOpenTabLifecycleEffects', () => {
       const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
 
       useOpenTabLifecycleEffects({
-        sessionsRef, openTabStateRef, foregroundRefreshRuntimeRef,
+        sessionsRef,
+        openTabStateRef,
+        foregroundRefreshRuntimeRef,
+        retainedSessionCount: 0,
         onForegroundResume: vi.fn(),
         auditOpenTabsAgainstRemoteSessions: auditOpenTabs,
         notifyTargetNetworkSignal,
@@ -291,6 +379,7 @@ describe('useOpenTabLifecycleEffects', () => {
         sessionsRef,
         openTabStateRef,
         foregroundRefreshRuntimeRef,
+        retainedSessionCount: 0,
         onForegroundResume: vi.fn(),
         auditOpenTabsAgainstRemoteSessions: auditOpenTabs,
         notifyTargetNetworkSignal,

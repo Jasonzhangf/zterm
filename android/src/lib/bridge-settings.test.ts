@@ -22,6 +22,7 @@ const baseSettings = {
   transportMode: 'auto' as const,
   terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
   terminalThemeId: 'classic-dark' as const,
+  terminalShellSkin: 'light' as const,
   terminalWidthMode: 'mirror-fixed' as const,
   terminalSessionGroupLayoutMode: 'auto' as const,
   shortcutSmartSort: true,
@@ -155,6 +156,36 @@ describe('bridge-settings helpers', () => {
       ...baseSettings,
       terminalThemeId: 'unknown-theme',
     }).terminalThemeId).toBe('classic-dark');
+  });
+
+  it('normalizes terminal shell skin and defaults old values to auto', () => {
+    expect(normalizeBridgeSettings({
+      ...baseSettings,
+      terminalShellSkin: 'auto',
+    }).terminalShellSkin).toBe('auto');
+
+    expect(normalizeBridgeSettings({
+      ...baseSettings,
+      terminalShellSkin: 'light',
+    }).terminalShellSkin).toBe('light');
+
+    expect(normalizeBridgeSettings({
+      ...baseSettings,
+      terminalShellSkin: 'black',
+    }).terminalShellSkin).toBe('black');
+
+    expect(normalizeBridgeSettings({
+      ...baseSettings,
+      terminalShellSkin: 'blue',
+    }).terminalShellSkin).toBe('blue');
+
+    expect(normalizeBridgeSettings({
+      ...baseSettings,
+      terminalShellSkin: 'unknown-skin' as any,
+    }).terminalShellSkin).toBe('auto');
+
+    const { terminalShellSkin: _terminalShellSkin, ...legacySettings } = baseSettings;
+    expect(normalizeBridgeSettings(legacySettings).terminalShellSkin).toBe('auto');
   });
 
   it('clamps terminal cache lines to the client max 1000', () => {

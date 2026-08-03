@@ -25,7 +25,8 @@ const CLOSING = 2;
 const CLOSED = 3;
 
 const WS_CANDIDATE_TIMEOUT_MS = 1800;
-const RTC_DIRECT_CANDIDATE_TIMEOUT_MS = 5000;
+const RTC_DIRECT_OPEN_STABILITY_MS = 1000;
+const RTC_DIRECT_CANDIDATE_TIMEOUT_MS = 5000 + RTC_DIRECT_OPEN_STABILITY_MS;
 const RTC_RELAY_CANDIDATE_TIMEOUT_MS = 2500;
 const RTC_DISCONNECTED_GRACE_MS = 10000;
 const RECONNECT_BASE_DELAY_MS = 300;
@@ -133,6 +134,12 @@ class WebRtcBackend implements Backend {
 
   private disconnectedTimer: number | null = null;
 
+  private openStabilityTimer: number | null = null;
+
+  private openPublished = false;
+
+  private disposed = false;
+
   private currentResolvedPath: TraversalResolvedPath;
   private currentResolvedRelayTransport: TraversalResolvedRelayTransport | undefined;
 
@@ -141,7 +148,10 @@ class WebRtcBackend implements Backend {
   }
 
   public get readyState() {
-    if (this.dataChannel?.readyState === 'open') {
+    if (this.disposed) {
+      return CLOSED;
+    }
+    if (this.openPublished && this.dataChannel?.readyState === 'open') {
       return OPEN;
     }
     if (this.dataChannel?.readyState === 'closing' || this.dataChannel?.readyState === 'closed') {
@@ -259,15 +269,60 @@ class WebRtcBackend implements Backend {
     this.disconnectedTimer = null;
   }
 
-  private closeRtcPeer(options?: { suppressChannelClose?: boolean }) {
+  private clearOpenStabilityTimer() {
+    if (this.openStabilityTimer === null) {
+      return;
+    }
+    window.clearTimeout(this.openStabilityTimer);
+    this.openStabilityTimer = null;
+  }
+
+  private dispose() {
+    if (this.disposed) {
+      return;
+    }
+    this.disposed = true;
     this.clearDisconnectedTimer();
-    try {
-      if (options?.suppressChannelClose && this.dataChannel) {
-        this.dataChannel.onclose = null;
+    this.clearOpenStabilityTimer();
+    this.openPublished = false;
+
+    const channel = this.dataChannel;
+    const peerConnection = this.peerConnection;
+    const signalSocket = this.signalSocket;
+    this.dataChannel = null;
+    this.peerConnection = null;
+    this.signalSocket = null;
+
+    if (channel) {
+      channel.onopen = null;
+      channel.onmessage = null;
+      channel.onerror = null;
+      channel.onclose = null;
+      try {
+        channel.close();
+      } catch (error) {
+        console.warn('[TraversalSocket] Failed to close RTC data channel:', error);
       }
-      this.peerConnection?.close();
-    } catch (error) {
-      console.warn('[TraversalSocket] Failed to close RTC peer connection:', error);
+    }
+    if (peerConnection) {
+      peerConnection.onicecandidate = null;
+      peerConnection.onconnectionstatechange = null;
+      try {
+        peerConnection.close();
+      } catch (error) {
+        console.warn('[TraversalSocket] Failed to close RTC peer connection:', error);
+      }
+    }
+    if (signalSocket) {
+      signalSocket.onopen = null;
+      signalSocket.onmessage = null;
+      signalSocket.onerror = null;
+      signalSocket.onclose = null;
+      try {
+        signalSocket.close();
+      } catch (error) {
+        console.warn('[TraversalSocket] Failed to close RTC signaling socket:', error);
+      }
     }
   }
 
@@ -290,8 +345,8 @@ class WebRtcBackend implements Backend {
       if (this.peerConnection !== peerConnection || peerConnection.connectionState !== 'disconnected') {
         return;
       }
+      this.dispose();
       handlers.onclose({ code: 1006, reason: 'rtc peer disconnected' });
-      this.closeRtcPeer({ suppressChannelClose: true });
     }, RTC_DISCONNECTED_GRACE_MS);
   }
 
@@ -307,9 +362,12 @@ class WebRtcBackend implements Backend {
     ) => void;
   }) {
     const signalSocket = new WebSocket(this.candidate.signalUrl);
+    this.signalSocket = signalSocket;
     signalSocket.onopen = async () => {
       try {
-        this.signalSocket = signalSocket;
+        if (this.disposed || this.signalSocket !== signalSocket) {
+          return;
+        }
         const peerConnection = new RTCPeerConnection({
           iceServers: this.candidate.iceServers,
           iceTransportPolicy: this.candidate.iceTransportPolicy,
@@ -319,19 +377,34 @@ class WebRtcBackend implements Backend {
           ordered: true,
         });
         this.dataChannel = channel;
-
-        channel.binaryType = 'arraybuffer';
-        channel.onopen = async () => {
+        const publishOpen = async () => {
+          if (this.disposed || this.openPublished || this.dataChannel !== channel || channel.readyState !== 'open') {
+            return;
+          }
+          this.openPublished = true;
           const nextRoute = await this.detectResolvedRoute();
           handlers.onpath?.(nextRoute.path, nextRoute.relayTransport, nextRoute.selectedIcePair);
           handlers.onopen();
+        };
+
+        channel.binaryType = 'arraybuffer';
+        channel.onopen = async () => {
+          if (this.candidate.path !== 'rtc-direct') {
+            await publishOpen();
+            return;
+          }
+          this.clearOpenStabilityTimer();
+          this.openStabilityTimer = window.setTimeout(() => {
+            this.openStabilityTimer = null;
+            void publishOpen();
+          }, RTC_DIRECT_OPEN_STABILITY_MS);
         };
         channel.onmessage = (event) => {
           handlers.onmessage({ data: event.data as string | ArrayBuffer });
         };
         channel.onerror = () => handlers.onerror('rtc data channel error');
         channel.onclose = () => {
-          this.clearDisconnectedTimer();
+          this.dispose();
           handlers.onclose({ code: 1000, reason: 'rtc data channel closed' });
         };
 
@@ -346,12 +419,12 @@ class WebRtcBackend implements Backend {
         };
         peerConnection.onconnectionstatechange = async () => {
           if (peerConnection.connectionState === 'failed') {
-            this.clearDisconnectedTimer();
-            handlers.onerror('rtc peer connection failed');
+            this.dispose();
+            handlers.onclose({ code: 1006, reason: 'rtc peer connection failed' });
             return;
           }
           if (peerConnection.connectionState === 'closed') {
-            this.clearDisconnectedTimer();
+            this.dispose();
             handlers.onclose({ code: 1000, reason: `rtc peer ${peerConnection.connectionState}` });
             return;
           }
@@ -396,11 +469,9 @@ class WebRtcBackend implements Backend {
           payload?: Record<string, unknown>;
         };
         if (message.type === 'rtc-error') {
-          handlers.onerror(typeof message.payload?.message === 'string' ? message.payload.message : 'rtc signaling error');
-          this.closeRtcPeer();
-          if (signalSocket.readyState === CONNECTING || signalSocket.readyState === OPEN) {
-            signalSocket.close(4004, 'rtc signaling error');
-          }
+          const reason = typeof message.payload?.message === 'string' ? message.payload.message : 'rtc signaling error';
+          this.dispose();
+          handlers.onclose({ code: 4004, reason });
           return;
         }
         if (message.type === 'rtc-answer') {
@@ -432,6 +503,7 @@ class WebRtcBackend implements Backend {
       if (this.dataChannel?.readyState === 'open') {
         return;
       }
+      this.dispose();
       handlers.onclose({ code: event.code, reason: event.reason || 'rtc signaling websocket closed' });
     };
   }
@@ -448,22 +520,7 @@ class WebRtcBackend implements Backend {
   }
 
   public close(_code?: number, _reason = 'rtc close') {
-    this.clearDisconnectedTimer();
-    try {
-      this.dataChannel?.close();
-    } catch (error) {
-      console.warn('[TraversalSocket] Failed to close RTC data channel:', error);
-    }
-    try {
-      this.closeRtcPeer();
-    } catch (error) {
-      console.warn('[TraversalSocket] Failed to close RTC peer connection:', error);
-    }
-    try {
-      this.signalSocket?.close();
-    } catch (error) {
-      console.warn('[TraversalSocket] Failed to close RTC signaling socket:', error);
-    }
+    this.dispose();
   }
 }
 

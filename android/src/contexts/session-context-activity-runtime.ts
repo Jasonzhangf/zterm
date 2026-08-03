@@ -273,7 +273,12 @@ export function ensureActiveSessionFreshRuntime(options: {
       pendingProbeAgeMs,
       wsReadyState: ws?.readyState ?? null,
     });
-    options.refs.reconnectStore.clearStaleTransportProbe(options.refreshOptions.sessionId);
+    if (options.refreshOptions.allowReconnectIfUnavailable) {
+      options.refs.reconnectStore.clearStaleTransportProbe(options.refreshOptions.sessionId);
+      options.reconnectSession(options.refreshOptions.sessionId);
+      return true;
+    }
+    return false;
   }
 
   if (refreshPlan.action === 'request-head') {

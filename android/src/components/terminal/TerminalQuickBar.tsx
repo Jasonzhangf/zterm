@@ -99,7 +99,7 @@ interface TerminalQuickBarProps {
   onCycleSplitPane?: () => void;
   onEditorDomFocusChange?: (active: boolean) => void;
   onMeasuredHeightChange?: (height: number) => void;
-  onOpenFileTransfer?: (mode?: "sync") => void;
+  onOpenFileTransfer?: (mode?: "browser" | "sync") => void;
   onToggleDebugOverlay?: () => void;
   debugOverlayVisible?: boolean;
   onToggleAbsoluteLineNumbers?: () => void;
@@ -529,11 +529,6 @@ function TerminalQuickBarComponent({
       if (isRemoteWindowTerminalOnlyAction(action.id)) {
         return;
       }
-      if (action.id === "quickbar-collapse") {
-        onCollapsedChange?.(true);
-        setFloatingMenuOpen(false);
-        return;
-      }
       if (action.id === "keyboard") {
         onToggleKeyboard?.();
         return;
@@ -945,11 +940,6 @@ function TerminalQuickBarComponent({
     ],
     [screenshotToolLabel],
   );
-  const collapseToolAction = useMemo(
-    () => ({ id: "quickbar-collapse", label: "收起", sequence: "" }),
-    [],
-  );
-
   const splitToolActions = useMemo(() => {
     if (!splitAvailable) {
       return [];
@@ -1098,9 +1088,7 @@ function TerminalQuickBarComponent({
     display: "flex",
     alignItems: "center",
     overflow: "hidden",
-    borderRadius: "12px",
-    backgroundColor: "rgba(255,255,255,0.04)",
-    border: "1px solid rgba(255,255,255,0.08)",
+    backgroundColor: "transparent",
   } as const;
 
   const fixedClusterStyle = {
@@ -1111,9 +1099,9 @@ function TerminalQuickBarComponent({
     alignItems: "center",
     padding: `2px ${FIXED_CLUSTER_PADDING_X}px`,
     borderRadius: "12px",
-    backgroundColor: "rgba(59, 74, 108, 0.95)",
-    border: "1px solid rgba(255,255,255,0.12)",
-    boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.03)",
+    backgroundColor: "var(--zterm-fixed-cluster-bg)",
+    border: "1px solid var(--zterm-fixed-cluster-border)",
+    boxShadow: "0 2px 5px var(--zterm-fixed-cluster-shadow)",
     width: `${QUICK_BAR_FIXED_COLUMNS * FIXED_BUTTON_MIN_WIDTH + (QUICK_BAR_FIXED_COLUMNS - 1) * QUICK_BAR_ROW_GAP + FIXED_CLUSTER_PADDING_X * 2}px`,
   } as const;
 
@@ -1612,7 +1600,7 @@ function TerminalQuickBarComponent({
         }}
         onFocus={(event) => event.currentTarget.blur()}
         aria-label={action.label}
-        aria-pressed={repeatActive}
+        aria-pressed={repeatActive || (action.id === "tmux-copy" && copyModeActive)}
         aria-disabled={disabled}
         style={{
           minHeight: compact ? "32px" : "34px",
@@ -1964,6 +1952,8 @@ function TerminalQuickBarComponent({
   return (
     <div
       ref={rootRef}
+      className="zterm-neo-quickbar"
+      data-quickbar-surface={shellCollapsed || floatingMenuOpen ? "transparent" : "expanded"}
       onFocusCapture={(event) => {
         const target = event.target as HTMLElement | null;
         if (!target) {
@@ -2019,11 +2009,11 @@ function TerminalQuickBarComponent({
         backgroundColor:
           shellCollapsed || floatingMenuOpen
             ? "transparent"
-            : "rgba(11, 15, 24, 0.88)",
+            : "var(--zterm-neo-quickbar-bg)",
         borderTop:
           shellCollapsed || floatingMenuOpen
             ? "none"
-            : "1px solid rgba(255,255,255,0.08)",
+            : "1px solid var(--zterm-neo-border)",
       }}
     >
       <input
@@ -3075,6 +3065,7 @@ function TerminalQuickBarComponent({
           />
           <div
             ref={floatingPanelRef}
+            className="zterm-quick-input-panel"
             data-quickbar-allow-pointer="true"
             style={{
               position: "fixed",
@@ -3149,6 +3140,7 @@ function TerminalQuickBarComponent({
               </div>
 
               <div
+                className="zterm-quick-input-editor-shell"
                 style={{
                   borderRadius: "18px",
                   border: "1px solid rgba(255,255,255,0.08)",
@@ -3557,6 +3549,47 @@ function TerminalQuickBarComponent({
       )}
 
       {!editorOpen && !shortcutEditorOpen && (
+        <>
+        {onOpenFileTransfer ? (
+          <button
+            data-quickbar-allow-pointer="true"
+            type="button"
+            tabIndex={-1}
+            onFocus={(event) => event.currentTarget.blur()}
+            onClick={() => {
+              setFloatingMenuOpen(false);
+              onOpenFileTransfer("browser");
+            }}
+            style={{
+              position: "fixed",
+              right: `${FLOATING_BUBBLE_MARGIN + FLOATING_BUBBLE_SIZE + 10}px`,
+              bottom: collapsed
+                ? `calc(${FLOATING_BUBBLE_MARGIN}px + env(safe-area-inset-bottom, 0px))`
+                : floatingBubblePosition.y === null
+                  ? `calc(${floatingBubbleBottomPx + Math.max(0, keyboardInsetPx)}px + env(safe-area-inset-bottom, 0px))`
+                  : "auto",
+              top:
+                collapsed || floatingBubblePosition.y === null
+                  ? "auto"
+                  : `${floatingBubblePosition.y}px`,
+              zIndex: 128,
+              width: `${FLOATING_BUBBLE_SIZE}px`,
+              height: `${FLOATING_BUBBLE_SIZE}px`,
+              borderRadius: "999px",
+              border: "1px solid rgba(255,255,255,0.12)",
+              background: "rgba(18, 24, 38, 0.72)",
+              color: "#fff",
+              fontSize: "20px",
+              fontWeight: 800,
+              boxShadow: "0 8px 18px rgba(0,0,0,0.24)",
+              transform: "none",
+              touchAction: "manipulation",
+            }}
+            aria-label="文件浏览"
+          >
+            📁
+          </button>
+        ) : null}
         <button
           ref={floatingBubbleRef}
           data-quickbar-allow-pointer="true"
@@ -3780,6 +3813,7 @@ function TerminalQuickBarComponent({
         >
           {collapsed ? "⌃" : "⌘"}
         </button>
+        </>
       )}
 
       {shellMode === "inline" && !shellCollapsed && !floatingMenuOpen && (
@@ -3807,6 +3841,7 @@ function TerminalQuickBarComponent({
               >
                 <div
                   data-testid="quickbar-fixed-cluster-top"
+                  data-quickbar-fixed-cluster="true"
                   style={fixedClusterStyle}
                 >
                   {topFixedActions.map((action) =>
@@ -3841,16 +3876,13 @@ function TerminalQuickBarComponent({
                   display: "flex",
                   alignItems: "stretch",
                   gap: `${QUICK_BAR_ROW_GAP}px`,
-                  padding: `2px ${
-                    collapseAvailable
-                      ? FLOATING_BUBBLE_SIZE + QUICK_BAR_SIDE_PADDING * 2
-                      : QUICK_BAR_SIDE_PADDING
-                  }px 4px ${QUICK_BAR_SIDE_PADDING}px`,
+                  padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
                   backgroundColor: "rgba(255,255,255,0.02)",
                 }}
               >
                 <div
                   data-testid="quickbar-fixed-cluster-bottom"
+                  data-quickbar-fixed-cluster="true"
                   style={fixedClusterStyle}
                 >
                   {bottomFixedActions.map((action) =>
@@ -3894,6 +3926,7 @@ function TerminalQuickBarComponent({
               >
                 <div
                   data-testid="quickbar-fixed-cluster-top"
+                  data-quickbar-fixed-cluster="true"
                   style={fixedClusterStyle}
                 >
                   {topFixedActions.map((action) =>
@@ -3931,6 +3964,7 @@ function TerminalQuickBarComponent({
               >
                 <div
                   data-testid="quickbar-fixed-cluster-bottom"
+                  data-quickbar-fixed-cluster="true"
                   style={fixedClusterStyle}
                 >
                   {bottomFixedActions.map((action) =>
@@ -3960,11 +3994,7 @@ function TerminalQuickBarComponent({
                 style={{
                   display: "flex",
                   alignItems: "stretch",
-                  padding: `2px ${
-                    collapseAvailable
-                      ? FLOATING_BUBBLE_SIZE + QUICK_BAR_SIDE_PADDING * 2
-                      : QUICK_BAR_SIDE_PADDING
-                  }px 4px ${QUICK_BAR_SIDE_PADDING}px`,
+                  padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
                 }}
               >
                 <div style={scrollTrackShellStyle}>
@@ -3987,22 +4017,6 @@ function TerminalQuickBarComponent({
               </div>
             </>
           )}
-          {collapseAvailable ? (
-            <div
-              style={{
-                position: "absolute",
-                right: `${QUICK_BAR_SIDE_PADDING}px`,
-                bottom: "4px",
-                width: `${FLOATING_BUBBLE_SIZE}px`,
-                height: "34px",
-              }}
-            >
-              {renderBaseActionButton(collapseToolAction, {
-                fixed: true,
-                compact: true,
-              })}
-            </div>
-          ) : null}
         </div>
       )}
       {shellMode === "inline" && shellCollapsed && !floatingMenuOpen ? (

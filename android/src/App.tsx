@@ -34,6 +34,7 @@ import { SettingsPage } from './pages/SettingsPage';
 import { TerminalPage } from './pages/TerminalPage';
 import { projectHomeSavedConnections } from './lib/home-connection-projection';
 import type { TerminalWidthMode } from './lib/types';
+import { useBackgroundLiveSessionHandoff } from './hooks/useOpenTabLifecycleEffects';
 
 interface AppContentProps {
   bridgeSettings: ReturnType<typeof useBridgeSettingsStorage>['settings'];
@@ -52,10 +53,14 @@ export function AppContent({
   onForegroundResume,
 }: AppContentProps) {
   const [pendingPaneAttachIntent, setPendingPaneAttachIntent] = useState<{ sessionIds: string[]; paneId: string; nonce: number } | null>(null);
-  const { relayDevices } = useRelayDeviceStream({
+  const { relayDevices, refreshControlDirectory } = useRelayDeviceStream({
     bridgeSettings,
     setBridgeSettings,
   });
+  const handleForegroundResumeAfterControlRefresh = useCallback((reason: 'visibilitychange' | 'resume' | 'appStateChange') => {
+    void refreshControlDirectory('foreground-resume');
+    onForegroundResume?.(reason);
+  }, [onForegroundResume, refreshControlDirectory]);
   const {
     preferences: appUpdatePreferences,
     latestManifest,
@@ -149,6 +154,13 @@ export function AppContent({
   const { drafts: sessionDrafts, setDraft: setSessionDraft, clearDraft: clearSessionDraft, pruneDrafts } = useSessionDraftStorage();
   const { sessionGroups, setSessionGroupSelection, markSessionGroupEntered, deleteSessionGroup, pruneSessionGroupSelectionToRemoteTruth } = useSessionHistoryStorage();
   const sessions = state.sessions;
+
+  useBackgroundLiveSessionHandoff({
+    appForegroundActive,
+    liveSessionIds: state.liveSessionIds || [],
+    setActiveBodySubscriptionSuppressed,
+    setLiveSessionIds,
+  });
 
   const ensureTerminalPageVisible = useCallback(() => {
     setPageState((current) => (
@@ -291,7 +303,7 @@ export function AppContent({
     setPageState,
     pruneSessionGroupSelectionToRemoteTruth,
     onForegroundActiveChange,
-    onForegroundResume,
+    onForegroundResume: handleForegroundResumeAfterControlRefresh,
   });
 
   const markRuntimeSessionEntered = useCallback((sessionId: string) => {
@@ -568,6 +580,12 @@ export function AppContent({
                 terminalThemeId: themeId,
               }));
             }}
+            onTerminalShellSkinChange={(skin) => {
+              setBridgeSettings((current) => ({
+                ...current,
+                terminalShellSkin: skin,
+              }));
+            }}
             onBack={handleOpenConnectionsPageWithAudit}
           />
         )}
@@ -640,6 +658,7 @@ export function AppContent({
             onToggleScheduleJob={toggleScheduleJob}
             onRunScheduleJobNow={runScheduleJobNow}
             terminalThemeId={bridgeSettings.terminalThemeId}
+            terminalShellSkin={bridgeSettings.terminalShellSkin}
             terminalWidthMode={bridgeSettings.terminalWidthMode}
             terminalSessionGroupLayoutMode={bridgeSettings.terminalSessionGroupLayoutMode}
             onSendMessage={sendMessageRaw}

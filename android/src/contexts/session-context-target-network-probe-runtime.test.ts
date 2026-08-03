@@ -136,7 +136,7 @@ describe('createSessionTargetNetworkProbeRuntime', () => {
     expect(newFailure).toHaveBeenCalledTimes(1);
   });
 
-  it('does not probe a non-open physical transport', () => {
+  it('keeps a connecting physical transport generation without probing or failing it', () => {
     const socket = createSocket(WebSocket.CONNECTING);
     const sendProbe = vi.fn();
     const onFailure = vi.fn();
@@ -147,9 +147,31 @@ describe('createSessionTargetNetworkProbeRuntime', () => {
       socket,
       sendProbe,
       onFailure,
-    })).toBe('not-open');
+    })).toBe('still-connecting');
     expect(sendProbe).not.toHaveBeenCalled();
     expect(onFailure).not.toHaveBeenCalled();
+  });
+
+  it('submits a terminal physical transport state once to the target failure owner', () => {
+    const socket = createSocket(WebSocket.CLOSED);
+    const sendProbe = vi.fn();
+    const onFailure = vi.fn();
+    const runtime = createSessionTargetNetworkProbeRuntime({ probeTimeoutMs: 2_500, now: Date.now });
+
+    expect(runtime.probe({
+      targetKey: 'daemon-a',
+      socket,
+      sendProbe,
+      onFailure,
+    })).toBe('terminal-socket');
+    expect(sendProbe).not.toHaveBeenCalled();
+    expect(onFailure).toHaveBeenCalledTimes(1);
+    expect(onFailure).toHaveBeenCalledWith({
+      type: 'TargetNetworkProbeError03TerminalSocketState',
+      targetKey: 'daemon-a',
+      socket,
+      readyState: WebSocket.CLOSED,
+    });
   });
 
   it('returns an explicit failure when the target probe cannot be sent', () => {

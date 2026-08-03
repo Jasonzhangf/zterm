@@ -365,6 +365,8 @@
         "src/contexts/session-context-infra-runtime.test.ts",
         "src/contexts/session-context-socket-runtime.ts",
         "src/contexts/session-context-socket-runtime.test.ts",
+        "src/contexts/session-context-target-network-probe-runtime.ts",
+        "src/contexts/session-context-target-network-probe-runtime.test.ts",
         "src/contexts/session-context-transport-open-runtime.ts",
         "src/contexts/session-context-transport-open-runtime.test.ts",
         "src/contexts/session-context-transport-orchestration-runtime.ts",
@@ -379,6 +381,8 @@
         "src/contexts/session-context-lifecycle.ts",
         "src/lib/tmux-sessions.ts",
         "src/lib/tmux-sessions.test.ts",
+        "src/lib/client-control-plane-transport.ts",
+        "src/lib/client-control-plane-transport.test.ts",
         "src/lib/session-transport-runtime.ts",
         "src/pages/TerminalPage.tsx",
         "src/pages/TerminalPage.network-banner.test.tsx",
@@ -407,6 +411,7 @@
         "src/contexts/session-context-infra-runtime.test.ts",
         "src/contexts/session-context-session-runtime.test.ts",
         "src/contexts/session-context-socket-runtime.test.ts",
+        "src/contexts/session-context-target-network-probe-runtime.test.ts",
         "src/contexts/session-context-lifecycle.test.tsx",
         "src/contexts/session-context-transport-orchestration-runtime.test.ts",
         "src/contexts/session-context-activity-runtime.test.ts",
@@ -419,6 +424,7 @@
         "src/server/terminal-message-runtime.test.ts",
         "src/server/terminal-transport-runtime.test.ts",
         "src/lib/session-transport-runtime.test.ts",
+        "src/lib/client-control-plane-transport.test.ts",
         "src/contexts/session-context-transport-runtime.test.ts",
         "src/contexts/session-context-tmux-management-runtime.test.ts",
         "src/lib/tmux-sessions.test.ts",
@@ -440,11 +446,14 @@
       "title": "Daemon input receive, stale drop, queue, and tmux write lifecycle",
       "domain": "daemon-input",
       "owners": [
+        "src/contexts/session-context-input-runtime.ts",
         "src/server/terminal-message-runtime.ts",
         "src/server/terminal-control-runtime.ts",
         "src/server/terminal-bridge-runtime.ts"
       ],
       "allowed_paths": [
+        "src/contexts/session-context-input-runtime.ts",
+        "src/contexts/session-context-input-runtime.test.ts",
         "src/server/terminal-message-runtime.ts",
         "src/server/terminal-message-control-runtime.ts",
         "src/server/terminal-bridge-runtime.ts",
@@ -459,6 +468,7 @@
         "src/pages/TerminalPage.tsx"
       ],
       "required_gates": [
+        "src/contexts/session-context-input-runtime.test.ts",
         "src/server/terminal-bridge-runtime.test.ts",
         "src/server/terminal-message-runtime.test.ts",
         "src/server/terminal-mirror-runtime.test.ts",
@@ -487,6 +497,7 @@
       ],
       "allowed_paths": [
         "packages/shared/src/connection/types.ts",
+        "packages/shared/src/terminal/theme.ts",
         "src/contexts/session-wire-helpers.ts",
         "src/contexts/session-buffer-frame-assembly-state.ts",
         "src/contexts/session-buffer-frame-assembly.ts",
@@ -498,7 +509,10 @@
         "src/lib/terminal-buffer-replay.evidence.test.ts",
         "src/components/TerminalView.dynamic-refresh.test.tsx",
         "src/components/TerminalView.bottom-stale.test.tsx",
+        "src/components/TerminalView.theme.test.tsx",
         "docs/testing/terminal-refresh-buffer-truth-test-design.md",
+        "src/server/mirror-line-canonicalizer.ts",
+        "src/server/mirror-line-canonicalizer.test.ts",
         "src/server/terminal-mirror-runtime.ts",
         "src/server/terminal-mirror-capture.ts",
         "src/server/terminal-control-runtime.ts"
@@ -514,8 +528,10 @@
         "src/lib/session-render-buffer-store.test.ts",
         "src/components/TerminalView.dynamic-refresh.test.tsx",
         "src/components/TerminalView.bottom-stale.test.tsx",
+        "src/components/TerminalView.theme.test.tsx",
         "src/contexts/session-context-buffer-runtime.test.ts",
         "src/contexts/multi-pane-refresh.test.ts",
+        "src/server/mirror-line-canonicalizer.test.ts",
         "src/server/terminal-mirror-runtime.test.ts",
         "src/server/terminal-mirror-capture.test.ts",
         "src/server/server.mirror-capture-truth.test.ts"
@@ -582,11 +598,14 @@
       "title": "App-layer session group layout, stage slots, and render policy",
       "domain": "terminal-ui",
       "owners": [
+        "packages/shared/src/react/pane-profile.ts",
         "src/lib/terminal-layout-profile.ts",
         "src/lib/session-group-viewport.ts",
         "src/pages/TerminalPageStageShell.tsx"
       ],
       "allowed_paths": [
+        "packages/shared/src/react/pane-profile.ts",
+        "packages/shared/src/react/pane-profile.test.ts",
         "src/lib/terminal-layout-profile.ts",
         "src/lib/terminal-layout-profile.test.ts",
         "src/lib/session-group-viewport.ts",
@@ -803,7 +822,7 @@
     },
     {
       "feature_id": "relay.account_directory",
-      "title": "Relay account-scoped machine, endpoint, and session directory",
+      "title": "Relay multi-device account authentication, machine, endpoint, and session directory",
       "domain": "relay",
       "owners": [
         "src/traversal-relay/store.ts",
@@ -1284,21 +1303,50 @@
     {
       "feature_id": "mainline_source.android",
       "owners": [
-        "native/android/app/src/main/AndroidManifest.xml"
+        "native/android/app/src/main/AndroidManifest.xml",
+        "src/lib/terminal-shell-skin.ts",
+        "src/hooks/useAppPageState.ts"
       ],
       "allowed_paths": [
         "native/android/app/src/main/AndroidManifest.xml",
-        "native/android/app/src/main/assets/"
+        "native/android/app/src/main/assets/",
+        "src/index.css",
+        "src/lib/terminal-shell-skin.ts",
+        "src/lib/terminal-shell-skin.test.ts",
+        "src/hooks/useAppPageState.ts",
+        "src/hooks/useAppPageState.test.tsx",
+        "src/App.tsx",
+        "src/pages/SettingsPage.tsx",
+        "src/pages/SettingsPage.theme.test.tsx",
+        "src/pages/TerminalPage.tsx",
+        "src/pages/TerminalPageStageShell.tsx",
+        "src/pages/TerminalPageCopyMenu.tsx",
+        "src/pages/terminal-page-shell-ui.tsx",
+        "src/components/terminal/FileTransferSheet.tsx",
+        "src/components/terminal/FileTransferSheet.test.tsx",
+        "src/components/terminal/TerminalHeader.tsx",
+        "src/components/terminal/TerminalQuickBar.tsx",
+        "src/components/terminal/TerminalQuickBar.test.tsx",
+        "src/components/terminal/TerminalSessionDrawer.tsx",
+        "src/components/terminal/TerminalSessionDrawer.test.tsx",
+        "src/components/terminal/transfer-sheet-layout.ts",
+        "packages/shared/src/connection/bridge-settings.ts",
+        "packages/shared/src/react/pane-profile.ts",
+        "packages/shared/src/react/pane-profile.test.ts",
+        "docs/testing/terminal-shell-theme-test-design.md"
       ],
       "forbidden_paths": [],
       "required_gates": [
         "src/lib/feature-registry-truth.test.ts",
-        "src/lib/function-wiki-truth.test.ts"
+        "src/lib/function-wiki-truth.test.ts",
+        "src/lib/terminal-shell-skin.test.ts",
+        "src/hooks/useAppPageState.test.tsx"
       ],
       "truth_sources": [
         "docs/wiki/mainline-source.md",
         "docs/architecture.md",
-        "docs/ui-slices.md"
+        "docs/ui-slices.md",
+        "docs/testing/terminal-shell-theme-test-design.md"
       ]
     },
     {

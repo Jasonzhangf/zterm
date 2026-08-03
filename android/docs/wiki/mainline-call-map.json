@@ -52,7 +52,11 @@
         },
         {
           "id": "RelayDirectoryProjection",
-          "label": "src/lib/client-control-directory-runtime.ts#ClientControlDirectoryRuntime.applyConfirmedDirectoryDevices"
+          "label": "src/lib/client-control-directory-runtime.ts#ClientControlDirectoryRuntime.replaceFromDevices"
+        },
+        {
+          "id": "ClientControlPlaneTransport",
+          "label": "src/lib/client-control-plane-transport.ts#ClientControlPlaneTransport"
         },
         {
           "id": "TransportTargetResolver",
@@ -141,6 +145,10 @@
         {
           "id": "TerminalPage",
           "label": "src/pages/TerminalPage.tsx"
+        },
+        {
+          "id": "TerminalShellSkinResolver",
+          "label": "src/lib/terminal-shell-skin.ts#resolveEffectiveTerminalShellSkin + resolveTerminalRendererThemeForSkin"
         },
         {
           "id": "TerminalView",
@@ -430,16 +438,29 @@
         },
         {
           "from": "RelayDirectoryProjection",
-          "to": "TransportTargetResolver",
-          "owner_feature": "relay.account_directory",
+          "to": "ClientControlPlaneTransport",
+          "owner_feature": "terminal.transport_lifecycle",
           "semantic_input": "stable daemon id plus confirmed endpoint generation and direct-route auth token truth",
-          "semantic_output": "future transport target with current route candidates and endpoint auth needed for direct WebSocket attempts",
+          "semantic_output": "release exactly one waiting physical transport generation only after fresh server confirmation",
           "status": "anchored",
-          "edge_id": "android_mainline:RelayDirectoryProjection->TransportTargetResolver",
+          "edge_id": "android_mainline:RelayDirectoryProjection->ClientControlPlaneTransport",
           "resource_from": "resource.relay_account_directory",
           "resource_to": "resource.transport_target",
           "via_resources": [],
           "relation_status": "direct"
+        },
+        {
+          "from": "ClientControlPlaneTransport",
+          "to": "TransportTargetResolver",
+          "owner_feature": "terminal.transport_lifecycle",
+          "semantic_input": "fresh confirmed daemon directory entry for the waiting generation",
+          "semantic_output": "future transport target with current route candidates and endpoint auth needed for direct WebSocket attempts",
+          "status": "anchored",
+          "edge_id": "android_mainline:ClientControlPlaneTransport->TransportTargetResolver",
+          "resource_from": "resource.transport_target",
+          "resource_to": "resource.transport_target",
+          "via_resources": [],
+          "relation_status": "observer"
         },
         {
           "from": "TransportTargetResolver",
@@ -897,6 +918,32 @@
           "relation_status": "direct"
         },
         {
+          "from": "App",
+          "to": "TerminalShellSkinResolver",
+          "owner_feature": "mainline_source.android",
+          "semantic_input": "persisted terminalShellSkin and independently persisted terminalThemeId",
+          "semantic_output": "explicit shell-skin setting passed to the terminal route",
+          "status": "anchored",
+          "edge_id": "android_mainline:App->TerminalShellSkinResolver",
+          "resource_from": "resource.platform_terminal_surface",
+          "resource_to": "resource.ui_projection",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "TerminalShellSkinResolver",
+          "to": "TerminalPage",
+          "owner_feature": "mainline_source.android",
+          "semantic_input": "persisted shell choice, local day/night boundary, and built-in/default renderer theme choice",
+          "semantic_output": "effective light/blue/black shell token selector plus Pencil Light/Cobalt2/Classic Dark default renderer preset; explicit non-default renderer themes remain unchanged",
+          "status": "anchored",
+          "edge_id": "android_mainline:TerminalShellSkinResolver->TerminalPage",
+          "resource_from": "resource.platform_terminal_surface",
+          "resource_to": "resource.ui_projection",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
           "from": "TerminalPage",
           "to": "TerminalView",
           "owner_feature": "terminal.buffer_render",
@@ -1167,7 +1214,7 @@
           "from": "TerminalPage",
           "to": "SessionDrawer",
           "owner_feature": "terminal.session_drawer",
-          "semantic_input": "sessions, session groups, saved/Home aliases, online Relay directory endpoint aliases, and unambiguous online rtc-only session-catalog aliases",
+          "semantic_input": "sessions, session groups including stale persisted daemon ids, saved/Home endpoint-to-daemon aliases, online Relay directory endpoint aliases, and Relay session catalogs used only as row truth",
           "semantic_output": "canonical daemon host rail plus drawer rows with local/remote session counts",
           "status": "anchored",
           "edge_id": "android_mainline:TerminalPage->SessionDrawer",
@@ -1410,7 +1457,7 @@
           "to": "TargetNetworkProbe",
           "owner_feature": "terminal.transport_lifecycle",
           "semantic_input": "one daemon target key plus exact current physical socket generation",
-          "semantic_output": "one deduplicated bounded ping and timeout owned by the target probe runtime",
+          "semantic_output": "one deduplicated bounded ping for OPEN, retained generation for CONNECTING, or typed terminal-state failure for CLOSING/CLOSED",
           "status": "anchored",
           "resource_from": "resource.daemon_target_transport",
           "resource_to": "resource.daemon_target_transport",
@@ -1422,7 +1469,7 @@
           "from": "TargetNetworkProbe",
           "to": "TargetFailureRouter",
           "owner_feature": "terminal.transport_lifecycle",
-          "semantic_input": "probe timeout or synchronous probe-send failure for one exact current physical generation",
+          "semantic_input": "probe timeout, synchronous probe-send failure, or typed terminal socket state for one exact current physical generation",
           "semantic_output": "one exact target-key plus socket-generation failure submission",
           "status": "anchored",
           "resource_from": "resource.daemon_target_transport",
@@ -2713,7 +2760,7 @@
           "to": "Capture",
           "owner_feature": "terminal.buffer_render",
           "semantic_input": "tmux capture request",
-          "semantic_output": "canonical mirror snapshot",
+          "semantic_output": "canonical mirror snapshot with tmux physical soft-wrap SGR continuation preserved",
           "status": "anchored",
           "edge_id": "daemon_mainline:Mirror->Capture",
           "resource_from": "resource.mirror_store",

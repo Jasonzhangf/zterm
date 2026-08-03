@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session } from '../lib/types';
 import { resolveSessionGroupBoundaryProjection } from '../lib/session-group-viewport';
@@ -173,6 +173,7 @@ describe('TerminalPage portrait session drawer', () => {
   });
 
   afterEach(() => {
+    vi.useRealTimers();
     cleanup();
     localStorage.clear();
   });
@@ -192,6 +193,7 @@ describe('TerminalPage portrait session drawer', () => {
       lastOpenedAt: 1,
     }];
     const onSwitchSession = vi.fn();
+    const onOpenSettings = vi.fn();
 
     render(
       <TerminalPage
@@ -204,6 +206,7 @@ describe('TerminalPage portrait session drawer', () => {
         onCloseSession={vi.fn()}
         onOpenConnections={vi.fn()}
         onOpenQuickTabPicker={vi.fn()}
+        onOpenSettings={onOpenSettings}
         onResize={vi.fn()}
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
@@ -214,6 +217,10 @@ describe('TerminalPage portrait session drawer', () => {
     );
 
     expect(screen.queryByTestId('terminal-header')).toBeNull();
+    expect(screen.getByTestId('terminal-connection-status-strip')).toBeTruthy();
+    expect(screen.getByTestId('terminal-portrait-back-button')).toBeTruthy();
+    expect(screen.getByTestId('terminal-portrait-settings-button')).toBeTruthy();
+    expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
 
     expect(screen.getByTestId('terminal-session-drawer').getAttribute('aria-hidden')).toBe('true');
 
@@ -230,6 +237,10 @@ describe('TerminalPage portrait session drawer', () => {
     fireEvent.touchEnd(resolvedSwipeSurface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
     expect(screen.getByTestId('terminal-session-drawer').getAttribute('aria-hidden')).toBe('false');
+    expect(screen.queryByTestId('terminal-connection-status-strip')).toBeNull();
+    expect(screen.queryByTestId('terminal-portrait-back-button')).toBeNull();
+    expect(screen.queryByTestId('terminal-portrait-settings-button')).toBeNull();
+    expect(screen.queryByTestId('terminal-quickbar')).toBeNull();
 
     fireEvent.click(await screen.findByTestId(`terminal-session-drawer-select-${targetSessionId}`));
     expect(onSwitchSession).toHaveBeenCalledWith(targetSessionId);
@@ -301,11 +312,13 @@ describe('TerminalPage portrait session drawer', () => {
     );
 
     expect(screen.getByTestId('terminal-connection-status-route').textContent).toContain('局域网');
+    expect(screen.getByTestId('terminal-connection-status-session').textContent).toBe('tmux-s1');
     expect(screen.queryByTestId('terminal-connection-status-bandwidth')).toBeNull();
-    expect(screen.getByTestId('terminal-connection-status-rates').textContent).toContain('↑ 1.0 KB/s ↓ 2.0 KB/s');
+    expect(screen.getByTestId('terminal-connection-status-uplink').textContent).toBe('↑ 1.0 KB/s');
+    expect(screen.getByTestId('terminal-connection-status-downlink').textContent).toBe('↓ 2.0 KB/s');
   });
 
-  it('keeps reconnect UI quiet in the portrait status strip during the reconnect grace window', () => {
+  it('keeps reconnect activity neutral in the portrait status strip during the banner grace window', () => {
     const sessions = [makeSession('s1')];
     sessions[0]!.state = 'reconnecting';
     sessions[0]!.lastError = 'rtc data channel closed';
@@ -344,8 +357,97 @@ describe('TerminalPage portrait session drawer', () => {
       />,
     );
 
+    expect(screen.getByTestId('terminal-network-banner').textContent).toContain('正在重连');
+    expect(screen.getByTestId('terminal-network-banner').textContent).toContain('正在按自动连接流程恢复');
+    expect(screen.getByTestId('terminal-network-banner').textContent).not.toContain('rtc data channel closed');
+    expect(screen.queryByTestId('terminal-connection-status-activity')).toBeNull();
+    expect(screen.getByTestId('terminal-connection-status-route').textContent).toBe('局域网');
+    expect(screen.getByTestId('terminal-connection-status-strip').style.background).toBe('transparent');
+    expect(screen.getByTestId('terminal-connection-status-strip').style.boxShadow).toBe('none');
+  });
+
+  it('does not show recovery banner when a stale reconnecting label still has live traffic', () => {
+    vi.useFakeTimers();
+    const sessions = [makeSession('s1')];
+    sessions[0]!.state = 'reconnecting';
+    sessions[0]!.lastError = 'rtc data channel closed';
+    sessions[0]!.resolvedPath = 'tailscale';
+    sessions[0]!.resolvedEndpoint = '100.66.1.82:3333';
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        getSessionDebugMetrics={() => ({
+          uplinkBps: 725,
+          downlinkBps: 6200,
+          renderHz: 0,
+          pullHz: 0,
+          transportBufferedBytes: 0,
+          transportBackpressured: false,
+          lastRenderCommitAt: 0,
+          bufferPullActive: false,
+          status: 'reconnecting',
+          active: true,
+          updatedAt: 1,
+        })}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
     expect(screen.queryByTestId('terminal-network-banner')).toBeNull();
-    expect(screen.getByTestId('terminal-connection-status-route').style.color).toBe('rgb(140, 230, 181)');
+    expect(screen.queryByTestId('terminal-connection-status-activity')).toBeNull();
+    expect(screen.getByTestId('terminal-connection-status-route').textContent).toBe('Tailscale');
+    expect(screen.getByTestId('terminal-connection-status-uplink').textContent).toBe('↑ 725 B/s');
+    expect(screen.getByTestId('terminal-connection-status-downlink').textContent).toBe('↓ 6.1 KB/s');
+
+    act(() => {
+      vi.advanceTimersByTime(10_500);
+    });
+
+    expect(screen.queryByTestId('terminal-network-banner')).toBeNull();
+    vi.useRealTimers();
+  });
+
+  it('shows the typed control-directory wait without highlighting the portrait status strip', () => {
+    const sessions = [makeSession('s1')];
+    sessions[0]!.state = 'reconnecting';
+    sessions[0]!.lastConnectStage = 'connecting';
+    sessions[0]!.lastError = 'waiting for confirmed control directory';
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    expect(screen.getByTestId('terminal-connection-status-activity').textContent).toBe('正在同步控制通道');
+    expect(screen.getByTestId('terminal-network-banner').textContent).toContain('正在同步控制通道');
+    expect(screen.getByTestId('terminal-connection-status-strip').className).not.toContain('zterm-neo-status-strip');
   });
 
   it('keeps one portrait status strip bound to the active session after session switches', () => {
@@ -391,7 +493,9 @@ describe('TerminalPage portrait session drawer', () => {
 
     expect(screen.getAllByTestId('terminal-connection-status-strip')).toHaveLength(1);
     expect(screen.getByTestId('terminal-connection-status-route').textContent).toContain('局域网');
-    expect(screen.getByTestId('terminal-connection-status-rates').textContent).toContain('↑ 1.0 KB/s ↓ 2.0 KB/s');
+    expect(screen.getByTestId('terminal-connection-status-session').textContent).toBe('tmux-s1');
+    expect(screen.getByTestId('terminal-connection-status-uplink').textContent).toBe('↑ 1.0 KB/s');
+    expect(screen.getByTestId('terminal-connection-status-downlink').textContent).toBe('↓ 2.0 KB/s');
 
     view.rerender(
       <TerminalPage
@@ -415,7 +519,9 @@ describe('TerminalPage portrait session drawer', () => {
 
     expect(screen.getAllByTestId('terminal-connection-status-strip')).toHaveLength(1);
     expect(screen.getByTestId('terminal-connection-status-route').textContent).toContain('Tailscale');
-    expect(screen.getByTestId('terminal-connection-status-rates').textContent).toContain('↑ 4.0 KB/s ↓ 8.0 KB/s');
+    expect(screen.getByTestId('terminal-connection-status-session').textContent).toBe('tmux-s2');
+    expect(screen.getByTestId('terminal-connection-status-uplink').textContent).toBe('↑ 4.0 KB/s');
+    expect(screen.getByTestId('terminal-connection-status-downlink').textContent).toBe('↓ 8.0 KB/s');
     expect(screen.getByTestId('terminal-connection-status-route').textContent).not.toContain('局域网');
   });
 
@@ -618,8 +724,9 @@ describe('TerminalPage portrait session drawer', () => {
     fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
     expect(await screen.findByTestId('terminal-session-drawer-row-direct-rcc')).toBeTruthy();
-    expect(screen.getAllByText('rcc')).toHaveLength(1);
-    expect(screen.getAllByText('freehand')).toHaveLength(1);
+    const drawerList = within(screen.getByTestId('terminal-session-drawer-list'));
+    expect(drawerList.getAllByText('rcc')).toHaveLength(1);
+    expect(drawerList.getAllByText('freehand')).toHaveLength(1);
   });
 
   it('uses saved server daemon identity aliases when Relay directory only exposes rtc endpoint', async () => {
@@ -686,7 +793,7 @@ describe('TerminalPage portrait session drawer', () => {
     expect(screen.getByTestId('terminal-session-drawer-row-direct-rcc')).toBeTruthy();
   });
 
-  it('uses an unambiguous Relay session catalog alias when rtc is the only published endpoint', async () => {
+  it('does not infer an rtc-only daemon identity from a unique common session catalog', async () => {
     const directSession = makeSession('direct-rcc');
     directSession.bridgeHost = '100.66.1.82';
     directSession.bridgePort = 3333;
@@ -739,8 +846,8 @@ describe('TerminalPage portrait session drawer', () => {
     fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
     fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
-    expect((await screen.findByTestId('terminal-session-drawer-host-mac-studio')).textContent).toContain('2');
-    expect(screen.queryByTestId('terminal-session-drawer-host-100.66.1.82:3333')).toBeNull();
+    expect((await screen.findByTestId('terminal-session-drawer-host-100.66.1.82:3333')).textContent).toContain('2');
+    expect(screen.getByTestId('terminal-session-drawer-host-mac-studio').textContent).toContain('0');
   });
 
   it('does not render an empty direct runtime host rail when the Relay catalog owns the drawer group', async () => {
@@ -784,6 +891,12 @@ describe('TerminalPage portrait session drawer', () => {
             sessions: ['server'],
           }),
         ]}
+        serverIdentityAliasInputs={[{
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          daemonHostId: 'mac-studio',
+          connectionName: 'Mac Studio',
+        }]}
         onSwitchSession={vi.fn()}
         onMoveSession={vi.fn()}
         onRenameSession={vi.fn()}
@@ -836,6 +949,12 @@ describe('TerminalPage portrait session drawer', () => {
             sessions: ['rcc', 'freehand', 'onestop'],
           }),
         ]}
+        serverIdentityAliasInputs={[{
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          daemonHostId: 'mac-studio',
+          connectionName: 'Mac Studio',
+        }]}
         onSwitchSession={vi.fn()}
         onMoveSession={vi.fn()}
         onRenameSession={vi.fn()}
@@ -858,7 +977,7 @@ describe('TerminalPage portrait session drawer', () => {
     fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
     fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
-    fireEvent.click(await screen.findByTestId('terminal-session-drawer-select-remote:bridge:100.66.1.82::3333::session:freehand'));
+    fireEvent.click(await screen.findByTestId('terminal-session-drawer-select-remote:daemon:mac-studio::session:freehand'));
 
     expect(onOpenDrawerRemoteSession).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -910,6 +1029,12 @@ describe('TerminalPage portrait session drawer', () => {
             sessions: ['zterm', 'rcc', 'freehand', 'onestop'],
           }),
         ]}
+        serverIdentityAliasInputs={[{
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          daemonHostId: 'mac-studio',
+          connectionName: 'Mac Studio',
+        }]}
         onSwitchSession={onSwitchSession}
         onMoveSession={vi.fn()}
         onRenameSession={vi.fn()}
@@ -986,6 +1111,12 @@ describe('TerminalPage portrait session drawer', () => {
             sessions: ['powershell'],
           }),
         ]}
+        serverIdentityAliasInputs={[{
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          daemonHostId: 'mac-studio',
+          connectionName: 'Mac Studio',
+        }]}
         {...handlers}
         quickActions={quickActions}
         shortcutActions={shortcutActions}
@@ -1012,6 +1143,12 @@ describe('TerminalPage portrait session drawer', () => {
             sessions: ['powershell'],
           }),
         ]}
+        serverIdentityAliasInputs={[{
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          daemonHostId: 'mac-studio',
+          connectionName: 'Mac Studio',
+        }]}
         {...handlers}
         quickActions={quickActions}
         shortcutActions={shortcutActions}
@@ -1098,6 +1235,78 @@ describe('TerminalPage portrait session drawer', () => {
     expect((await screen.findByTestId('terminal-session-drawer-host-mac-studio')).textContent).toContain('1');
     expect(screen.queryByTestId('terminal-session-drawer-host-rtc-verify-1784267569532')).toBeNull();
     expect(screen.queryByText('rtc-device-1784267569532')).toBeNull();
+  });
+
+  it('keeps a catalog row under its original daemon owner when the matched live session is still connecting', async () => {
+    const connectingSession = makeSession('freehand-live');
+    connectingSession.bridgeHost = '100.66.1.82';
+    connectingSession.bridgePort = 3333;
+    connectingSession.daemonHostId = 'mac-studio';
+    connectingSession.sessionName = 'freehand';
+    connectingSession.title = 'freehand';
+    connectingSession.state = 'connecting';
+
+    render(
+      <TerminalPage
+        sessions={[connectingSession]}
+        activeSession={connectingSession}
+        sessionGroups={[
+          {
+            id: 'group-old-daemon',
+            name: 'daemon-Macstudio-old',
+            bridgeHost: '100.66.1.82',
+            bridgePort: 3333,
+            daemonHostId: 'daemon-Macstudio-old',
+            sessionNames: ['freehand'],
+            lastOpenedAt: 1,
+          },
+          {
+            id: 'group-mac-studio',
+            name: 'Mac Studio',
+            bridgeHost: '100.66.1.82',
+            bridgePort: 3333,
+            daemonHostId: 'mac-studio',
+            sessionNames: ['rcc'],
+            lastOpenedAt: 2,
+          },
+        ]}
+        relayDevices={[
+          makeRelayDevice({
+            deviceId: 'mac-studio',
+            deviceName: 'Mac Studio',
+            hostId: 'mac-studio',
+            endpointHost: '100.66.1.82',
+            sessions: ['freehand', 'rcc'],
+          }),
+        ]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement | null;
+    expect(swipeSurface).toBeTruthy();
+    fireEvent.touchStart(swipeSurface!, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
+    fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    fireEvent.click(await screen.findByTestId('terminal-session-drawer-host-daemon-Macstudio-old'));
+    const staleRow = screen.getByTestId('terminal-session-drawer-row-remote:daemon:daemon-Macstudio-old::session:freehand');
+    expect(staleRow).toBeTruthy();
+    expect(staleRow.textContent).toContain('daemon-Macstudio-old');
+
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-host-mac-studio'));
+    expect(screen.queryByTestId('terminal-session-drawer-row-remote:daemon:daemon-Macstudio-old::session:freehand')).toBeNull();
   });
 
   it('does not merge an rtc-only direct group when multiple Relay catalogs match', async () => {
@@ -1226,6 +1435,95 @@ describe('TerminalPage portrait session drawer', () => {
 
     expect((await screen.findByTestId('terminal-session-drawer-host-mac-studio')).textContent).toContain('1');
     expect(screen.queryByTestId('terminal-session-drawer-host-100.66.1.82:3333')).toBeNull();
+  });
+
+  it('keeps an explicit stale daemon identity separate from the unique online Relay daemon', async () => {
+    render(
+      <TerminalPage
+        sessions={[makeSession('drawer-anchor')]}
+        activeSession={makeSession('drawer-anchor')}
+        sessionGroups={[{
+          id: 'stale-daemon-group',
+          name: 'Mac Studio',
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-Macstu-old',
+          sessionNames: ['rcc'],
+          lastOpenedAt: 1,
+        }]}
+        relayDevices={[makeRelayDevice({ sessions: ['rcc'] })]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement;
+    fireEvent.touchStart(swipeSurface, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface, {
+      touches: [{ clientX: 236, clientY: 206 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(swipeSurface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    fireEvent.click(await screen.findByTestId('terminal-session-drawer-host-daemon-Macstu-old'));
+    expect(screen.getByTestId('terminal-session-drawer-row-remote:daemon:daemon-Macstu-old::session:rcc')).toBeTruthy();
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-host-mac-studio'));
+    expect(screen.queryByTestId('terminal-session-drawer-row-remote:daemon:daemon-Macstu-old::session:rcc')).toBeNull();
+  });
+
+  it('keeps a stale daemon identity separate from one same-name Relay catalog without endpoint evidence', async () => {
+    render(
+      <TerminalPage
+        sessions={[makeSession('drawer-anchor')]}
+        activeSession={makeSession('drawer-anchor')}
+        sessionGroups={[{
+          id: 'ambiguous-stale-group',
+          name: '100.66.1.82',
+          bridgeHost: '10.0.0.9',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-ambiguous-old',
+          sessionNames: ['rcc'],
+          lastOpenedAt: 1,
+        }]}
+        relayDevices={[makeRelayDevice({ sessions: ['rcc'] })]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const swipeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement;
+    fireEvent.touchStart(swipeSurface, { touches: [{ clientX: 56, clientY: 200 }] });
+    fireEvent.touchMove(swipeSurface, {
+      touches: [{ clientX: 236, clientY: 206 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(swipeSurface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    const staleHost = await screen.findByTestId('terminal-session-drawer-host-daemon-ambiguous-old');
+    expect(staleHost).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-host-mac-studio').textContent).toContain('0');
+    fireEvent.click(staleHost);
+    expect(screen.getByTestId('terminal-session-drawer-row-remote:daemon:daemon-ambiguous-old::session:rcc')).toBeTruthy();
   });
 
   it('keeps mirror-fixed non-edge right pan from opening the session drawer', () => {

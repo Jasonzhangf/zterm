@@ -26,14 +26,22 @@ function buildAuditOwnerKey(target: Pick<PersistedOpenTab | SessionGroupHistory,
     : `bridge:${target.bridgeHost.trim()}::${Math.max(0, Math.floor(target.bridgePort || 0))}`;
 }
 
+function shouldAuditSessionGroups(reason: string) {
+  return reason !== 'visibilitychange'
+    && reason !== 'resume'
+    && reason !== 'appStateChange'
+    && reason !== 'online';
+}
+
 export async function auditOpenTabsAgainstRemoteSessions(
   reason: string,
   deps: RemoteTabAuditDeps,
 ) {
   const currentTabs = deps.openTabStateRef.current.tabs;
+  const includeSessionGroups = shouldAuditSessionGroups(reason);
   const auditTargets = [
     ...currentTabs,
-    ...deps.sessionGroups,
+    ...(includeSessionGroups ? deps.sessionGroups : []),
   ];
   if (auditTargets.length === 0) {
     return;

@@ -13,14 +13,17 @@
 ## Lifecycle Contract
 
 1. A mux target transport owns one heartbeat timer keyed by `targetKey`; logical tmux sessions/channels do not own heartbeat timers.
-2. Normal target keepalive is low-frequency (60 seconds). Session switch, channel open, foreground resume, and body-subscription changes do not start another heartbeat.
+2. Normal target keepalive is low-frequency (30 seconds). Session switch, channel open, foreground resume, and body-subscription changes do not start another heartbeat.
 3. Every valid mux server frame refreshes target physical activity; `mux-pong` also refreshes pong truth. Activity is recorded under the physical target key, not the anchor session id.
 4. The target health owner may finalize one physical socket generation only after its configured consecutive health policy is exhausted; the target failure fanout then preserves logical session/channel ids and routes recovery through the existing reconnect owner.
 5. The existing reconnect owner replaces only that physical target socket while retaining logical session/channel ids, active-session truth, and local buffers.
-6. A valid target frame resets the consecutive-miss count. A non-open socket does not emit heartbeat traffic. A channel error must not poison the target heartbeat or rebuild the physical socket.
+6. A valid target frame resets the consecutive-miss count. A `CONNECTING` socket is retained without probe traffic or failure submission; `CLOSING`/`CLOSED` becomes `TargetNetworkProbeError03TerminalSocketState` and enters the single target failure router. A channel error must not poison the target heartbeat or rebuild the physical socket.
 7. App visibility and platform network availability are independent resources. A network callback cannot write foreground/background truth, stop body subscription, or stop foreground freshness timers.
 8. A platform network-generation signal starts at most one bounded probe for each affected daemon target and exact physical socket generation. Capacitor/window network signals carry observed connectivity metadata; foreground-resume carries generation only and must not invent endpoint reachability. Any valid mux server frame proves that generation healthy.
 9. Probe success retains the exact socket and all channels. Probe timeout submits the exact generation once to `TerminalTransportError01TargetFailure`; late frames from that retired generation are ignored.
+10. Android Activity backgrounding must leave WebView timers running. A native foreground service may keep the process schedulable with one partial WakeLock, but it cannot create, close, replace, or evaluate control/data transports.
+11. Returning to foreground stops the native execution service and releases its WakeLock without touching the existing WebSocket/RTC generation. Android force-stop remains terminal and is not bypassed.
+12. Relay account login does not redefine saved direct/Tailscale target ownership. A persisted daemon id without Relay endpoint/signaling/WebRTC evidence opens through the explicit direct endpoint and does not wait for control-directory confirmation.
 
 ## White-Box Gates
 
@@ -41,6 +44,8 @@ Positive:
 - The target socket listener validates inbound activity by `targetKey + exact socket`, not by the session that originally opened it; deleting the last logical session followed by a valid `mux-pong` keeps the idle target generation alive.
 - Heartbeat and network-generation probes both serialize through the shared `buildTerminalMuxPing` contract builder.
 - Probe construction rejects a missing, non-finite, fractional, non-positive, or unsafe-integer timeout and rejects a missing/non-callable clock; the runtime cannot default, round, or clamp owner configuration. The shared mux-ping builder likewise rejects negative, fractional, non-finite, or unsafe-integer timestamps instead of repairing wire payloads.
+- Activity `onStop` starts the persistent-background foreground service; `onStart` stops it after the UI becomes foreground.
+- The service acquires exactly one non-reference-counted partial WakeLock and releases it in `onDestroy`.
 
 Negative:
 
@@ -56,6 +61,8 @@ Negative:
 - Active-session/open-tab truth cannot scope the platform signal; inactive daemon targets remain part of the same target-owner probe pass.
 - Repeated network events while one target probe is pending cannot send another probe or schedule another rebuild.
 - A late frame from a superseded socket cannot settle the current generation's probe.
+- Background entry never calls `WebView.pauseTimers()`, `WebView.onPause()`, or a transport close/reconnect API.
+- The native service does not request battery-optimization bypass and contains no socket, RTC, route, session, or control-directory implementation.
 
 ## Module Black-Box Gate
 
@@ -77,6 +84,8 @@ Replay a false or transient `NetworkStatus.connected` value while `document.visi
 4. Without killing the app, switching session, or reopening the page, prove output resumes through one replacement physical WebSocket within 10 seconds.
 5. Prove logical session id and tmux target are unchanged, buffer head is monotonic, input echoes, and no stale socket event overwrites the replacement.
 6. Repeat cellular-to-Wi-Fi.
+7. Send the app to background for two minutes while a tmux counter changes. Prove the same physical transport generation remains open, then foreground the app and prove the latest body arrives without a replacement socket.
+8. Keep the app backgrounded for ten minutes. Prove the foreground-service notification stays visible, the process WakeLock remains held, and control/target heartbeats continue while body/video subscriptions remain disabled.
 
 ## Known Gap Rule
 

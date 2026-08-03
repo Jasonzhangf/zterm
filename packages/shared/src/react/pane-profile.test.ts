@@ -15,6 +15,9 @@ describe('pane-profile', () => {
     expect(profile.mode).toBe('single-pane');
     expect(profile.header.backButtonSize).toBe('36px');
     expect(profile.header.outerPadding).toBe('20px 6px 6px');
+    expect(profile.stage.outerMargin).toBe('0');
+    expect(profile.stage.containerRadius).toBe('0');
+    expect(profile.stage.paneRadius).toBe('0');
     expect(profile.gesture.contextMenuTrigger).toBe('long-press');
     expect(profile.gesture.dragResizeEnabled).toBe(false);
   });
@@ -28,6 +31,7 @@ describe('pane-profile', () => {
     });
     expect(profile.mode).toBe('split-default');
     expect(profile.header.tabMinHeight).toBe('28px');
+    expect(profile.stage.outerMargin).toBe('0');
     expect(profile.gesture.tabSwitchTrigger).toBe('horizontal-swipe');
   });
 
@@ -41,6 +45,7 @@ describe('pane-profile', () => {
     expect(profile.mode).toBe('split-landscape');
     expect(profile.header.outerPadding).toBe('1px 4px 2px');
     expect(profile.header.tabMinHeight).toBe('22px');
+    expect(profile.stage.outerMargin).toBe('0');
     expect(profile.gesture.tabSwitchTrigger).toBe('horizontal-swipe');
   });
 

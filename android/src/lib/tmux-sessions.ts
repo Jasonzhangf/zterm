@@ -1,8 +1,13 @@
 import type { BridgeSettings } from './bridge-settings';
-import type { ClientMessage } from './types';
 import type { TraversalTargetSource } from './traversal/types';
 import type { BridgeTarget } from './session-picker';
 import { createClientDaemonTraversalSocket } from './client-daemon-connection';
+import {
+  buildTerminalMuxHello,
+  buildTerminalMuxTargetMessage,
+  isTerminalMuxServerFrame,
+  type TerminalMuxTargetClientMessage,
+} from '@zterm/shared/protocol';
 
 export type { BridgeTarget } from './session-picker';
 
@@ -12,12 +17,9 @@ const TMUX_CONTROL_REQUEST_TIMEOUT_MS = 10_000;
 
 type TmuxSessionTraversalSettings = Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode' | 'traversalRelay'>;
 
-type TmuxControlResponse =
-  | { type: 'sessions'; payload: { sessions?: string[] } }
-  | { type: 'error'; payload: { message?: string } };
-
 interface PendingTmuxRequest {
-  message: ClientMessage;
+  message: TerminalMuxTargetClientMessage;
+  requestId: string;
   resolve: (sessions: string[]) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout> | null;
@@ -28,10 +30,18 @@ interface TmuxControlTransportEntry {
   ws: ReturnType<typeof createClientDaemonTraversalSocket>;
   active: PendingTmuxRequest | null;
   queue: PendingTmuxRequest[];
+  negotiated: boolean;
+  negotiationTimer: ReturnType<typeof setTimeout> | null;
   closed: boolean;
 }
 
 const tmuxControlTransportPool = new Map<string, TmuxControlTransportEntry>();
+let tmuxControlIdentitySequence = 0;
+
+function createTmuxControlIdentity(prefix: 'client' | 'request') {
+  tmuxControlIdentitySequence += 1;
+  return `tmux-control-${prefix}-${Date.now()}-${tmuxControlIdentitySequence}`;
+}
 
 function normalizeString(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
@@ -124,6 +134,10 @@ function failTmuxControlTransport(entry: TmuxControlTransportEntry, error: Error
     return;
   }
   entry.closed = true;
+  if (entry.negotiationTimer) {
+    clearTimeout(entry.negotiationTimer);
+    entry.negotiationTimer = null;
+  }
   tmuxControlTransportPool.delete(entry.key);
   const active = entry.active;
   const queued = entry.queue.splice(0);
@@ -153,11 +167,50 @@ function finishActiveTmuxControlRequest(entry: TmuxControlTransportEntry, handle
 }
 
 function handleTmuxControlMessage(entry: TmuxControlTransportEntry, data: unknown) {
-  let response: TmuxControlResponse;
+  let frame: unknown;
   try {
-    response = JSON.parse(String(data)) as TmuxControlResponse;
+    frame = JSON.parse(String(data)) as unknown;
   } catch (error) {
     failTmuxControlTransport(entry, error instanceof Error ? error : new Error('Failed to parse tmux control response'), true);
+    return;
+  }
+
+  if (!isTerminalMuxServerFrame(frame)) {
+    failTmuxControlTransport(entry, new Error('Invalid tmux mux server frame'), true);
+    return;
+  }
+
+  if (frame.type === 'mux-ready') {
+    if (entry.negotiated) {
+      failTmuxControlTransport(entry, new Error('Unexpected duplicate tmux mux-ready'), true);
+      return;
+    }
+    entry.negotiated = true;
+    if (entry.negotiationTimer) {
+      clearTimeout(entry.negotiationTimer);
+      entry.negotiationTimer = null;
+    }
+    drainTmuxControlTransport(entry);
+    return;
+  }
+
+  if (!entry.negotiated || frame.type !== 'mux-target-message') {
+    failTmuxControlTransport(entry, new Error('Unexpected tmux mux server frame type'), true);
+    return;
+  }
+
+  const response = frame.payload.message;
+  if (response.type === 'session-activity') {
+    return;
+  }
+
+  const active = entry.active;
+  if (!active) {
+    failTmuxControlTransport(entry, new Error('Unexpected tmux control response without an active request'), true);
+    return;
+  }
+  if (frame.payload.requestId !== active.requestId) {
+    failTmuxControlTransport(entry, new Error('Mismatched tmux control request id'), true);
     return;
   }
 
@@ -175,11 +228,11 @@ function handleTmuxControlMessage(entry: TmuxControlTransportEntry, data: unknow
     return;
   }
 
-  failTmuxControlTransport(entry, new Error('Unexpected tmux control response type'), true);
+  failTmuxControlTransport(entry, new Error('Unexpected tmux target response type'), true);
 }
 
 function drainTmuxControlTransport(entry: TmuxControlTransportEntry) {
-  if (entry.closed || entry.active || entry.ws.readyState !== TRANSPORT_OPEN) {
+  if (entry.closed || !entry.negotiated || entry.active || entry.ws.readyState !== TRANSPORT_OPEN) {
     return;
   }
   const request = entry.queue.shift();
@@ -194,7 +247,7 @@ function drainTmuxControlTransport(entry: TmuxControlTransportEntry) {
   }, TMUX_CONTROL_REQUEST_TIMEOUT_MS);
 
   try {
-    entry.ws.send(JSON.stringify(request.message));
+    entry.ws.send(JSON.stringify(buildTerminalMuxTargetMessage(request.message, request.requestId)));
   } catch (error) {
     failTmuxControlTransport(entry, error instanceof Error ? error : new Error('Failed to send tmux control request'), true);
   }
@@ -212,11 +265,20 @@ function createTmuxControlTransportEntry(
     ws,
     active: null,
     queue: [],
+    negotiated: false,
+    negotiationTimer: null,
     closed: false,
   };
 
   ws.onopen = () => {
-    drainTmuxControlTransport(entry);
+    try {
+      ws.send(JSON.stringify(buildTerminalMuxHello(createTmuxControlIdentity('client'))));
+      entry.negotiationTimer = setTimeout(() => {
+        failTmuxControlTransport(entry, new Error('Timed out while negotiating tmux mux transport'), true);
+      }, TMUX_CONTROL_REQUEST_TIMEOUT_MS);
+    } catch (error) {
+      failTmuxControlTransport(entry, error instanceof Error ? error : new Error('Failed to negotiate tmux mux transport'), true);
+    }
   };
   ws.onmessage = (event) => {
     handleTmuxControlMessage(entry, event.data);
@@ -257,13 +319,14 @@ function getTmuxControlTransportEntry(
 function sendTmuxRequest(
   target: BridgeTarget,
   traversalSettings: TmuxSessionTraversalSettings,
-  message: ClientMessage,
+  message: TerminalMuxTargetClientMessage,
   overrideUrl?: string,
 ) {
   return new Promise<string[]>((resolve, reject) => {
     const entry = getTmuxControlTransportEntry(target, traversalSettings, overrideUrl);
     entry.queue.push({
       message,
+      requestId: createTmuxControlIdentity('request'),
       resolve,
       reject,
       timer: null,

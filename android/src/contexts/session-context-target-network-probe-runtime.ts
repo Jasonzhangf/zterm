@@ -1,6 +1,11 @@
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 
-export type SessionTargetNetworkProbeResult = 'started' | 'deduped' | 'not-open' | 'send-failed';
+export type SessionTargetNetworkProbeResult =
+  | 'started'
+  | 'deduped'
+  | 'still-connecting'
+  | 'terminal-socket'
+  | 'send-failed';
 
 export type SessionTargetNetworkSignal =
   | {
@@ -29,9 +34,17 @@ export interface TargetNetworkProbeError02SendFailure {
   socket: BridgeTransportSocket;
 }
 
+export interface TargetNetworkProbeError03TerminalSocketState {
+  type: 'TargetNetworkProbeError03TerminalSocketState';
+  targetKey: string;
+  socket: BridgeTransportSocket;
+  readyState: number;
+}
+
 export type SessionTargetNetworkProbeFailure =
   | TargetNetworkProbeError01GenerationTimeout
-  | TargetNetworkProbeError02SendFailure;
+  | TargetNetworkProbeError02SendFailure
+  | TargetNetworkProbeError03TerminalSocketState;
 
 interface PendingSessionTargetNetworkProbe {
   socket: BridgeTransportSocket;
@@ -69,11 +82,23 @@ export function createSessionTargetNetworkProbeRuntime(options: {
     sendProbe: (socket: BridgeTransportSocket, sentAt: number) => void;
     onFailure: (failure: SessionTargetNetworkProbeFailure) => void;
   }): SessionTargetNetworkProbeResult => {
+    const targetKey = request.targetKey.trim();
+    if (request.socket.readyState === WebSocket.CONNECTING) {
+      return 'still-connecting';
+    }
+    if (request.socket.readyState === WebSocket.CLOSING || request.socket.readyState === WebSocket.CLOSED) {
+      request.onFailure({
+        type: 'TargetNetworkProbeError03TerminalSocketState',
+        targetKey,
+        socket: request.socket,
+        readyState: request.socket.readyState,
+      });
+      return 'terminal-socket';
+    }
     if (request.socket.readyState !== WebSocket.OPEN) {
-      return 'not-open';
+      throw new Error(`unsupported target transport readyState: ${request.socket.readyState}`);
     }
 
-    const targetKey = request.targetKey.trim();
     const current = pendingByTarget.get(targetKey);
     if (current?.socket === request.socket) {
       return 'deduped';

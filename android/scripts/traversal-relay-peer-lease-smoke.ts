@@ -185,6 +185,25 @@ function waitForEnvelope(
   });
 }
 
+function waitForClose(socket: WebSocket, timeoutMs = 2_000) {
+  return new Promise<{ code: number; reason: string }>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      cleanup();
+      reject(new Error('relay websocket close timeout'));
+    }, timeoutMs);
+    timeout.unref?.();
+    const cleanup = () => {
+      clearTimeout(timeout);
+      socket.off('close', handleClose);
+    };
+    const handleClose = (code: number, reason: Buffer) => {
+      cleanup();
+      resolve({ code, reason: String(reason) });
+    };
+    socket.once('close', handleClose);
+  });
+}
+
 async function expectNoHostPeerClose(hostSocket: WebSocket, peerId: string, windowMs = 400) {
   await new Promise<void>((resolve, reject) => {
     const timeout = setTimeout(() => {
@@ -269,11 +288,22 @@ async function main() {
 
     const phoneA1 = await openClient(relayPort, accessToken, 'phone-a');
     const firstPeerId = await sendInitAndReadPeer(hostSocket, phoneA1);
-    phoneA1.close(1000, 'smoke idle');
+    const replacedClose = waitForClose(phoneA1);
+    const phoneA2 = await openClient(relayPort, accessToken, 'phone-a');
+    const replacementPeerId = await sendInitAndReadPeer(hostSocket, phoneA2);
+    const replacedSocketClose = await replacedClose;
+    if (replacementPeerId !== firstPeerId) {
+      throw new Error(`new same-device signaling did not replace peer lease: ${firstPeerId} -> ${replacementPeerId}`);
+    }
+    if (replacedSocketClose.reason !== 'relay client socket replaced') {
+      throw new Error(`old signaling socket close reason mismatch: ${JSON.stringify(replacedSocketClose)}`);
+    }
+
+    phoneA2.close(1000, 'smoke idle');
     await expectNoHostPeerClose(hostSocket, firstPeerId);
 
-    const phoneA2 = await openClient(relayPort, accessToken, 'phone-a');
-    const resumedPeerId = await sendInitAndReadPeer(hostSocket, phoneA2);
+    const phoneA3 = await openClient(relayPort, accessToken, 'phone-a');
+    const resumedPeerId = await sendInitAndReadPeer(hostSocket, phoneA3);
     const phoneB = await openClient(relayPort, accessToken, 'phone-b');
     const secondDevicePeerId = await sendInitAndReadPeer(hostSocket, phoneB);
     const missingDeviceError = await expectMissingDeviceRejected(
@@ -287,7 +317,7 @@ async function main() {
       throw new Error(`different phone reused peer lease ${firstPeerId}`);
     }
 
-    phoneA2.close(1000, 'smoke done');
+    phoneA3.close(1000, 'smoke done');
     phoneB.close(1000, 'smoke done');
     hostSocket.close(1000, 'smoke done');
 
@@ -296,6 +326,7 @@ async function main() {
       relayUrl,
       relayHostId,
       firstPeerId,
+      replacementPeerId,
       resumedPeerId,
       secondDevicePeerId,
       missingDeviceError,

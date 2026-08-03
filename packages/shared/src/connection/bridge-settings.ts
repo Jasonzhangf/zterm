@@ -22,6 +22,34 @@ export interface BridgeServerPreset {
 
 export type TerminalWidthMode = 'adaptive-phone' | 'mirror-fixed';
 export type TerminalSessionGroupLayoutMode = 'auto' | 'horizontal' | 'vertical';
+export type TerminalShellSkin = 'auto' | 'light' | 'blue' | 'black';
+
+export const TERMINAL_SHELL_SKIN_OPTIONS: Array<{
+  id: TerminalShellSkin;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: 'auto',
+    label: '自动',
+    description: '按本地日出日落时段自动切换白底和黑底。',
+  },
+  {
+    id: 'light',
+    label: '全白底',
+    description: '跟主页一致的白灰外壳，适合默认日常使用。',
+  },
+  {
+    id: 'blue',
+    label: '全蓝底',
+    description: '保留深蓝立体按钮，但整套 shell 统一深色。',
+  },
+  {
+    id: 'black',
+    label: '全黑底',
+    description: '更接近传统暗色终端，降低暗环境眩光。',
+  },
+];
 
 export interface TraversalRelayClientSettings {
   relayBaseUrl: string;
@@ -51,6 +79,7 @@ export interface BridgeSettings {
   transportMode: 'auto' | 'websocket' | 'webrtc';
   terminalCacheLines: number;
   terminalThemeId: TerminalThemeId;
+  terminalShellSkin?: TerminalShellSkin;
   terminalWidthMode: TerminalWidthMode;
   terminalSessionGroupLayoutMode?: TerminalSessionGroupLayoutMode;
   /** Working directory for new tmux sessions. Defaults to $HOME on the daemon. */
@@ -76,6 +105,7 @@ export const DEFAULT_BRIDGE_SETTINGS: BridgeSettings = {
   transportMode: 'auto',
   terminalCacheLines: DEFAULT_TERMINAL_CACHE_LINES,
   terminalThemeId: DEFAULT_TERMINAL_THEME_ID,
+  terminalShellSkin: 'auto',
   terminalWidthMode: 'adaptive-phone',
   terminalSessionGroupLayoutMode: 'auto',
   cwd: undefined,
@@ -359,6 +389,13 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
       ? candidate.transportMode
       : DEFAULT_BRIDGE_SETTINGS.transportMode;
   const terminalThemeId = normalizeTerminalThemeId(candidate.terminalThemeId);
+  const terminalShellSkin: TerminalShellSkin =
+    candidate.terminalShellSkin === 'auto'
+      || candidate.terminalShellSkin === 'light'
+      || candidate.terminalShellSkin === 'blue'
+      || candidate.terminalShellSkin === 'black'
+      ? candidate.terminalShellSkin
+      : 'auto';
   const terminalWidthMode: TerminalWidthMode =
     candidate.terminalWidthMode === 'mirror-fixed' ? 'mirror-fixed' : 'adaptive-phone';
   const terminalSessionGroupLayoutMode: TerminalSessionGroupLayoutMode =
@@ -413,6 +450,7 @@ export function normalizeBridgeSettings(input: unknown): BridgeSettings {
     transportMode,
     terminalCacheLines,
     terminalThemeId,
+    terminalShellSkin,
     terminalWidthMode,
     terminalSessionGroupLayoutMode,
     shortcutSmartSort: typeof (candidate as any).shortcutSmartSort === 'boolean' ? (candidate as any).shortcutSmartSort : DEFAULT_BRIDGE_SETTINGS.shortcutSmartSort,

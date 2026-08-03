@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   getDefaultBridgeServer,
   removeBridgeServer,
   sortBridgeServers,
+  TERMINAL_SHELL_SKIN_OPTIONS,
   type BridgeSettings,
 } from '../lib/bridge-settings';
 import { type AppUpdateManifest, type AppUpdatePreferences, type AppUpdateRollbackBackup } from '../lib/app-update';
@@ -51,6 +52,7 @@ interface SettingsPageProps {
   configExporting?: boolean;
   configImporting?: boolean;
   onTerminalThemeChange?: (themeId: BridgeSettings['terminalThemeId']) => void;
+  onTerminalShellSkinChange?: (skin: BridgeSettings['terminalShellSkin']) => void;
   onBack: () => void;
 }
 
@@ -163,11 +165,13 @@ export function SettingsPage({
   configExporting = false,
   configImporting = false,
   onTerminalThemeChange,
+  onTerminalShellSkinChange,
   onBack,
 }: SettingsPageProps) {
   const [draft, setDraft] = useState({ ...settings, servers: sortBridgeServers(settings.servers) });
   const [updateDraft, setUpdateDraft] = useState(updatePreferences);
   const [runtimeDebugEnabled, setRuntimeDebugEnabledState] = useState(() => isRuntimeDebugEnabled());
+  const livePreviewPatchRef = useRef<Partial<Pick<BridgeSettings, 'terminalThemeId' | 'terminalShellSkin'>> | null>(null);
   const defaultServer = useMemo(() => getDefaultBridgeServer(draft), [draft]);
   const manifestCandidates = useMemo(() => buildAppUpdateManifestCandidates(draft), [draft]);
   const suggestedManifestUrl = useMemo(
@@ -179,6 +183,16 @@ export function SettingsPage({
   }, [updatePreferences]);
 
   useEffect(() => {
+    const livePreviewPatch = livePreviewPatchRef.current;
+    if (livePreviewPatch) {
+      livePreviewPatchRef.current = null;
+      setDraft((current) => ({
+        ...current,
+        terminalThemeId: settings.terminalThemeId,
+        terminalShellSkin: settings.terminalShellSkin,
+      }));
+      return;
+    }
     setDraft({ ...settings, servers: sortBridgeServers(settings.servers) });
   }, [settings]);
 
@@ -449,10 +463,54 @@ export function SettingsPage({
         <TerminalThemeSection
           terminalThemeId={draft.terminalThemeId}
           onSelectTheme={(themeId) => {
+            if (onTerminalThemeChange) {
+              livePreviewPatchRef.current = { terminalThemeId: themeId };
+            }
             setDraft((current) => ({ ...current, terminalThemeId: themeId }));
             onTerminalThemeChange?.(themeId);
           }}
         />
+
+        <div style={settingsSectionStyle()}>
+          <SettingsSectionTitle>Shell Skin</SettingsSectionTitle>
+          <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
+            这里单独控制顶部栏、快捷栏和终端外壳，不改变终端 ANSI 颜色。默认跟主页保持白灰配色。
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(118px, 1fr))', gap: '10px' }}>
+            {TERMINAL_SHELL_SKIN_OPTIONS.map((option) => {
+              const active = draft.terminalShellSkin === option.id;
+              return (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => {
+                    if (onTerminalShellSkinChange) {
+                      livePreviewPatchRef.current = { terminalShellSkin: option.id };
+                    }
+                    setDraft((current) => ({ ...current, terminalShellSkin: option.id }));
+                    onTerminalShellSkinChange?.(option.id);
+                  }}
+                  style={{
+                    minHeight: '76px',
+                    borderRadius: '18px',
+                    border: active ? `2px solid ${mobileTheme.colors.accent}` : `1px solid ${mobileTheme.colors.lightBorder}`,
+                    backgroundColor: active ? '#ffffff' : '#f7f9fc',
+                    color: mobileTheme.colors.lightText,
+                    boxShadow: active ? '0 12px 26px rgba(31,214,122,0.14)' : 'none',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    padding: '12px',
+                  }}
+                >
+                  <div style={{ fontSize: '15px', fontWeight: 850 }}>{option.label}</div>
+                  <div style={{ marginTop: '5px', fontSize: '11px', lineHeight: 1.35, color: mobileTheme.colors.lightMuted }}>
+                    {option.description}
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
 
       </div>
     </div>

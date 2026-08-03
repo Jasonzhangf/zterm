@@ -206,6 +206,7 @@ describe('module registry truth gate', () => {
       'shared.resource_contract',
       'shared.terminal_types',
       'shared.connection_types',
+      'shared.pane_layout',
       'shared.test_contracts',
       'relay.account_directory',
       'relay.peer_lease',

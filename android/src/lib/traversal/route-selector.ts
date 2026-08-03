@@ -27,6 +27,7 @@ interface SelectTraversalRouteOptions {
 
 const FAILURE_ROUTE_PENALTY = 500;
 const AUTH_FAILURE_ROUTE_PENALTY = 900;
+const SUCCESS_ROUTE_LEASE_BONUS = -1000;
 const ROUTE_TIER_SPAN = 100;
 const LAN_ROUTE_COST = -ROUTE_TIER_SPAN;
 
@@ -69,9 +70,9 @@ function healthScore(record: TraversalRouteHealthRecord | null, reasons: string[
   reasons.push('health:recent-success');
   if (typeof record.rttMs === 'number' && Number.isFinite(record.rttMs)) {
     reasons.push(`rtt:${record.rttMs}`);
-    return Math.max(0, Math.min(100, record.rttMs / 10)) - 25;
+    return SUCCESS_ROUTE_LEASE_BONUS + Math.max(0, Math.min(100, record.rttMs / 10));
   }
-  return -10;
+  return SUCCESS_ROUTE_LEASE_BONUS;
 }
 
 export function selectBestTraversalRoute(options: SelectTraversalRouteOptions): TraversalRouteSelection {

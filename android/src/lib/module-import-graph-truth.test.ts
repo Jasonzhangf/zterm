@@ -57,6 +57,10 @@ function listSourceFiles(): string[] {
     }
   };
   visit('src');
+  const sharedPaneProfile = '../packages/shared/src/react/pane-profile.ts';
+  if (existsSync(join(root, sharedPaneProfile))) {
+    result.push('packages/shared/src/react/pane-profile.ts');
+  }
   return result.sort();
 }
 
@@ -135,6 +139,10 @@ describe('module import graph truth gate', () => {
     expect(multiOwned, `multi-owned files:\n${multiOwned.join('\n')}`).toEqual([]);
   });
 
+  it('keeps the terminal shell stylesheet under one module owner', () => {
+    expect(ownersOf('src/index.css', ownerIndex)).toEqual(['client.app_shell']);
+  });
+
   it('keeps the real cross-module import graph in lockstep with edge-registry import_edges', () => {
     expect(edgeRegistry.import_edges, 'edge-registry.json missing import_edges').toBeTruthy();
     const declared = new Map<string, ImportEdgeEntry>();
@@ -153,7 +161,9 @@ describe('module import graph truth gate', () => {
     for (const file of files) {
       const fromModule = owner.get(file);
       if (!fromModule) continue;
-      const source = read(file);
+      const source = file.startsWith('packages/')
+        ? readFileSync(join(root, '..', file), 'utf8')
+        : read(file);
       for (const match of source.matchAll(IMPORT_PATTERN)) {
         const spec = match[1] ?? match[2] ?? match[3];
         if (!spec) continue;

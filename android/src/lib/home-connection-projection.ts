@@ -178,6 +178,18 @@ export function projectHomeSavedConnections(
   const endpointIndex = new Map<string, number>();
   const daemonIndex = new Map<string, number>();
   const daemonOwnerIndex = new Map<string, number>();
+  const indexConnectionIdentity = (connection: Host, index: number) => {
+    const { endpointKey, daemonKey, daemonOwnerKey } = getHomeConnectionIdentityKeys(connection);
+    if (connection.bridgeHost.trim()) {
+      endpointIndex.set(endpointKey, index);
+    }
+    if (daemonKey) {
+      daemonIndex.set(daemonKey, index);
+    }
+    if (daemonOwnerKey) {
+      daemonOwnerIndex.set(daemonOwnerKey, index);
+    }
+  };
   const addConnection = (connection: Host) => {
     const { endpointKey, daemonKey, daemonOwnerKey } = getHomeConnectionIdentityKeys(connection);
     const hasEndpointKey = connection.bridgeHost.trim().length > 0;
@@ -193,21 +205,15 @@ export function projectHomeSavedConnections(
       if (current) {
         const base = shouldReplaceHomeConnection(current, connection) ? connection : current;
         const supplement = base === current ? connection : current;
-        projected[existingIndex] = mergeHomeConnectionRouteCandidates(base, supplement);
+        const merged = mergeHomeConnectionRouteCandidates(base, supplement);
+        projected[existingIndex] = merged;
+        indexConnectionIdentity(merged, existingIndex);
       }
       return;
     }
     const index = projected.length;
     projected.push(connection);
-    if (hasEndpointKey) {
-      endpointIndex.set(endpointKey, index);
-    }
-    if (daemonKey) {
-      daemonIndex.set(daemonKey, index);
-    }
-    if (daemonOwnerKey) {
-      daemonOwnerIndex.set(daemonOwnerKey, index);
-    }
+    indexConnectionIdentity(connection, index);
   };
 
   hosts.forEach(addConnection);

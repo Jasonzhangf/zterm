@@ -11,7 +11,13 @@ export function createTerminalFileTransferRuntime(
   deps: TerminalFileTransferRuntimeDeps,
 ): TerminalFileTransferRuntime {
   const listRuntime = createTerminalFileTransferListRuntime(deps);
-  const binaryRuntime = createTerminalFileTransferBinaryRuntime(deps);
+  const binaryRuntime = createTerminalFileTransferBinaryRuntime({
+    ...deps,
+    onFileUploadPersisted: (targetDir) => {
+      deps.onFileUploadPersisted?.(targetDir);
+      listRuntime.refreshDirectoryCache(targetDir);
+    },
+  });
 
   return {
     handlePasteImage: binaryRuntime.handlePasteImage,
@@ -23,5 +29,6 @@ export function createTerminalFileTransferRuntime(
     handleFileUploadChunk: binaryRuntime.handleFileUploadChunk,
     handleFileUploadEnd: binaryRuntime.handleFileUploadEnd,
     handleBinaryPayload: binaryRuntime.handleBinaryPayload,
+    dispose: listRuntime.dispose,
   };
 }

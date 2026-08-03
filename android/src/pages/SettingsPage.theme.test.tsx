@@ -172,6 +172,59 @@ describe('SettingsPage terminal theme selection', () => {
     }));
   });
 
+  it('persists terminal shell skin through settings save', () => {
+    const onSave = vi.fn();
+    const onTerminalShellSkinChange = vi.fn();
+    const renderSettingsPage = (settings: BridgeSettings) => (
+      <SettingsPage
+        settings={settings}
+        currentVersionName="0.1.1.1590"
+        currentVersionCode={1011590}
+        updatePreferences={{
+          manifestUrl: '',
+          autoCheckOnLaunch: false,
+          skippedVersionCode: undefined,
+          ignoreUntilManualCheck: false,
+          lastCheckedAt: undefined,
+          lastSeenVersionCode: undefined,
+        }}
+        latestManifest={null}
+        updateChecking={false}
+        updateInstalling={false}
+        updateError={null}
+        hasNewVersion={false}
+        hasUpdateIgnorePolicy={false}
+        onSave={onSave}
+        onUpdatePreferencesChange={vi.fn()}
+        onCheckForUpdate={vi.fn()}
+        onInstallUpdate={vi.fn()}
+        onResetUpdateIgnorePolicy={vi.fn()}
+        onTerminalThemeChange={vi.fn()}
+        onTerminalShellSkinChange={onTerminalShellSkinChange}
+        onBack={vi.fn()}
+      />
+    );
+
+    const view = render(renderSettingsPage(baseSettings));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Adaptive Phone' }));
+    const blackSkinButton = screen.getByText('全黑底').closest('button');
+    expect(blackSkinButton).toBeTruthy();
+    fireEvent.click(blackSkinButton!);
+    expect(onTerminalShellSkinChange).toHaveBeenCalledWith('black');
+
+    view.rerender(renderSettingsPage({
+      ...baseSettings,
+      terminalShellSkin: 'black',
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    expect(onSave).toHaveBeenCalledWith(expect.objectContaining({
+      terminalWidthMode: 'adaptive-phone',
+      terminalShellSkin: 'black',
+    }));
+  });
+
   it('persists session group layout mode through settings save', () => {
     const onSave = vi.fn();
 

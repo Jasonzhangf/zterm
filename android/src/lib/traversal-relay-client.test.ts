@@ -9,6 +9,7 @@ import {
   resolveTraversalRelayBaseUrl,
   traversalRelayLogin,
   traversalRelayRefreshMe,
+  TraversalRelayAuthenticationError,
   writeTraversalRelayAccountState,
 } from './traversal-relay-client';
 
@@ -422,6 +423,58 @@ describe('traversal relay client truth', () => {
     expect(readTraversalRelayAccountState()?.relaySettings?.turnUsername).toBe('fresh-turn-user');
   });
 
+  it('classifies an authoritative /me rejection without clearing account storage inside the HTTP client', async () => {
+    const account = {
+      username: 'jason', password: '', relayBaseUrl: 'https://relay.example.com/relay/', accessToken: 'expired-token',
+      user: { id: 'u1', username: 'jason', createdAt: 'now' }, deviceId: 'android-1', deviceName: 'Android', platform: 'android',
+      devices: [], directory: null, updatedAt: 1,
+      relaySettings: {
+        relayBaseUrl: 'https://relay.example.com/relay/', accessToken: 'expired-token', userId: 'u1', username: 'jason',
+        deviceId: 'android-1', deviceName: 'Android', platform: 'android', wsDevicesUrl: 'wss://relay.example.com/devices',
+        wsHostUrl: 'wss://relay.example.com/host', wsClientUrl: 'wss://relay.example.com/client', turnUrl: '', turnUsername: '', turnCredential: '', updatedAt: 1,
+      },
+    };
+    writeTraversalRelayAccountState(account);
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => ({ message: 'unauthorized' }),
+    } as Response);
+
+    await expect(traversalRelayRefreshMe(account)).rejects.toBeInstanceOf(TraversalRelayAuthenticationError);
+    expect(readTraversalRelayAccountState()?.accessToken).toBe('expired-token');
+  });
+
+  it('classifies a 401 /me rejection before parsing a non-json body', async () => {
+    const account = {
+      username: 'jason', password: '', relayBaseUrl: 'https://relay.example.com/relay/', accessToken: 'expired-token',
+      user: { id: 'u1', username: 'jason', createdAt: 'now' }, deviceId: 'android-1', deviceName: 'Android', platform: 'android',
+      devices: [], directory: null, updatedAt: 1,
+      relaySettings: {
+        relayBaseUrl: 'https://relay.example.com/relay/', accessToken: 'expired-token', userId: 'u1', username: 'jason',
+        deviceId: 'android-1', deviceName: 'Android', platform: 'android', wsDevicesUrl: 'wss://relay.example.com/devices',
+        wsHostUrl: 'wss://relay.example.com/host', wsClientUrl: 'wss://relay.example.com/client', turnUrl: '', turnUsername: '', turnCredential: '', updatedAt: 1,
+      },
+    };
+    writeTraversalRelayAccountState(account);
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: false,
+      status: 401,
+      json: async () => {
+        throw new SyntaxError('Unexpected end of JSON input');
+      },
+    } as unknown as Response);
+
+    let caught: unknown = null;
+    try {
+      await traversalRelayRefreshMe(account);
+    } catch (error) {
+      caught = error;
+    }
+    expect(caught).toBeInstanceOf(TraversalRelayAuthenticationError);
+    expect(caught).not.toBeInstanceOf(SyntaxError);
+  });
+
   it('migrates a directly supplied legacy account during control refresh', async () => {
     const legacyState = {
       username: 'jason',
@@ -528,6 +581,54 @@ describe('traversal relay client truth', () => {
     }));
     expect(onError).not.toHaveBeenCalled();
     expect(readTraversalRelayAccountState()?.directory?.devices[0]?.daemon?.endpoints[0]?.kind).toBe('relay-rtc');
+  });
+
+  it('routes relay device control pong through the control callback without rewriting account data', () => {
+    writeTraversalRelayAccountState({
+      username: 'jason',
+      password: '',
+      relayBaseUrl: 'https://relay.example.com/relay/',
+      accessToken: 'token-1',
+      user: { id: 'u1', username: 'jason', createdAt: 'now' },
+      deviceId: 'android-1',
+      deviceName: 'ZTerm Android',
+      platform: 'android',
+      devices: [],
+      directory: null,
+      updatedAt: 1,
+      relaySettings: {
+        relayBaseUrl: 'https://relay.example.com/relay/',
+        accessToken: 'token-1',
+        userId: 'u1',
+        username: 'jason',
+        deviceId: 'android-1',
+        deviceName: 'ZTerm Android',
+        platform: 'android',
+        wsDevicesUrl: 'wss://relay.example.com/relay/ws/devices',
+        wsHostUrl: 'wss://relay.example.com/relay/ws/host',
+        wsClientUrl: 'wss://relay.example.com/relay/ws/client',
+        turnUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        updatedAt: 1,
+      },
+    });
+    const onControlPong = vi.fn();
+    const onDevices = vi.fn();
+    const socket = connectTraversalRelayDevicesStream({
+      account: readTraversalRelayAccountState()!,
+      onDevices,
+      onControlPong,
+    }) as unknown as MockWebSocket;
+
+    socket.emitMessage({
+      type: 'control-pong',
+      payload: { sentAt: 30_000, receivedAt: 30_100 },
+    });
+
+    expect(onControlPong).toHaveBeenCalledWith({ sentAt: 30_000, receivedAt: 30_100 });
+    expect(onDevices).not.toHaveBeenCalled();
+    expect(readTraversalRelayAccountState()?.updatedAt).toBe(1);
   });
 
   it('keeps the latest daemon directory when a later legacy devices snapshot arrives', () => {

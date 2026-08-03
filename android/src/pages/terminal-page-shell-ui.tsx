@@ -6,13 +6,13 @@ export function copyMenuButtonStyle(disabled = false, subtle = false) {
     minHeight: "34px",
     padding: "0 12px",
     borderRadius: "12px",
-    border: "1px solid rgba(255,255,255,0.10)",
+    border: "1px solid var(--zterm-panel-border)",
     background: subtle
-      ? "rgba(255,255,255,0.06)"
+      ? "var(--zterm-panel-surface)"
       : disabled
-        ? "rgba(31, 38, 53, 0.50)"
-        : "rgba(31, 38, 53, 0.92)",
-    color: disabled ? "rgba(255,255,255,0.42)" : "#fff",
+        ? "var(--zterm-panel-surface)"
+        : "var(--zterm-panel-active)",
+    color: disabled ? "var(--zterm-panel-muted)" : "var(--zterm-panel-text)",
     fontSize: "13px",
     fontWeight: 800,
     cursor: disabled ? "not-allowed" : "pointer",
@@ -59,15 +59,24 @@ const TerminalNetworkBanner = ReactMemo(function TerminalNetworkBanner({
   connectionIssueVisible,
   networkOnline,
   activeSessionState,
-  activeSessionLastError,
+  connectionProgressLabel,
 }: {
   connectionIssueVisible: boolean;
   networkOnline: boolean;
   activeSessionState: Session["state"] | null | undefined;
   activeSessionLastError?: string;
+  connectionProgressLabel?: string | null;
 }) {
   const networkBanner = !connectionIssueVisible
-    ? null
+    ? connectionProgressLabel
+      ? {
+          tone: "#7cc7ff",
+          background: "rgba(18, 50, 83, 0.90)",
+          border: "rgba(124, 199, 255, 0.34)",
+          title: connectionProgressLabel,
+          detail: "正在按自动连接流程恢复，终端数据流暂时暂停。",
+        }
+      : null
     : !networkOnline
       ? {
           tone: "#ff6b6b",
@@ -82,9 +91,7 @@ const TerminalNetworkBanner = ReactMemo(function TerminalNetworkBanner({
             background: "rgba(97, 63, 13, 0.92)",
             border: "rgba(255, 176, 32, 0.42)",
             title: "连接已断开，正在重连",
-            detail:
-              activeSessionLastError ||
-              "网络或 daemon 连接已中断，正在指数退避重试。",
+            detail: "标准自动恢复流程仍未恢复，正在继续尝试可用链路。",
           }
         : activeSessionState === "error"
           ? {
@@ -92,9 +99,7 @@ const TerminalNetworkBanner = ReactMemo(function TerminalNetworkBanner({
               background: "rgba(109, 24, 33, 0.92)",
               border: "rgba(255, 107, 107, 0.42)",
               title: "连接失败",
-              detail:
-                activeSessionLastError ||
-                "当前 tab 已断开，请检查网络或服务器状态。",
+              detail: "标准自动恢复流程未能恢复连接，请检查网络或服务器状态。",
             }
           : null;
 

@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 
 import { beforeEach, describe, expect, it } from 'vitest';
-import { readOnlineTraversalRelayDaemonDevices } from './traversal-relay-devices';
+import {
+  projectOnlineTraversalRelayDaemonDevicesFromAccount,
+  readOnlineTraversalRelayDaemonDevices,
+} from './traversal-relay-devices';
 
 describe('traversal-relay-devices truth', () => {
   beforeEach(() => {
@@ -98,5 +101,75 @@ describe('traversal-relay-devices truth', () => {
         }),
       }),
     ]);
+  });
+
+  it('keeps an online daemon when an older partial directory only contains the client row', () => {
+    const daemon = {
+      deviceId: 'mac-studio',
+      deviceName: 'Mac Studio',
+      platform: 'darwin',
+      appVersion: '0.1.3',
+      updatedAt: '2026-08-01T00:00:00Z',
+      client: { connected: false, lastSeenAt: '2026-08-01T00:00:00Z' },
+      daemon: {
+        connected: true,
+        lastSeenAt: '2026-08-01T00:00:00Z',
+        hostId: 'mac-studio',
+        version: '0.1.3',
+      },
+    };
+    const projected = projectOnlineTraversalRelayDaemonDevicesFromAccount({
+      directory: {
+        version: 1,
+        devices: [{
+          deviceId: 'mac-studio',
+          deviceName: 'Mac Studio',
+          platform: 'darwin',
+          appVersion: '0.1.3',
+          client: { connected: false, lastSeenAt: '2026-08-01T00:00:00Z' },
+          daemon: null,
+        }],
+        updatedAt: '2026-08-01T00:00:00Z',
+      },
+      devices: [daemon],
+    } as any);
+
+    expect(projected).toHaveLength(1);
+    expect(projected[0]).toEqual(expect.objectContaining({ deviceId: 'mac-studio' }));
+    expect(projected[0].daemon.hostId).toBe('mac-studio');
+  });
+
+  it('does not resurrect a daemon when the confirmed directory says it is disconnected', () => {
+    const projected = projectOnlineTraversalRelayDaemonDevicesFromAccount({
+      directory: {
+        version: 1,
+        devices: [{
+          deviceId: 'mac-studio',
+          deviceName: 'Mac Studio',
+          platform: 'darwin',
+          appVersion: '0.1.3',
+          client: { connected: false, lastSeenAt: '2026-08-01T00:00:00Z' },
+          daemon: {
+            hostId: 'mac-studio',
+            version: '0.1.3',
+            presence: { connected: false, lastSeenAt: '2026-08-01T00:00:00Z' },
+            endpoints: [],
+            sessions: [],
+          },
+        }],
+        updatedAt: '2026-08-01T00:00:00Z',
+      },
+      devices: [{
+        deviceId: 'mac-studio',
+        deviceName: 'Mac Studio',
+        platform: 'darwin',
+        appVersion: '0.1.3',
+        updatedAt: '2026-08-01T00:00:01Z',
+        client: { connected: true, lastSeenAt: '2026-08-01T00:00:01Z' },
+        daemon: { connected: true, lastSeenAt: '2026-08-01T00:00:01Z', hostId: 'mac-studio', version: '0.1.3' },
+      }],
+    } as any);
+
+    expect(projected).toEqual([]);
   });
 });

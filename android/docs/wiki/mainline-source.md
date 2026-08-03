@@ -10,11 +10,14 @@ flowchart TD
   Capacitor --> Vite["vite.config.ts"]
   Vite --> Main["src/main.tsx"]
   Main --> App["src/App.tsx"]
+  App --> TerminalShellSkinResolver["src/lib/terminal-shell-skin.ts#resolveEffectiveTerminalShellSkin + resolveTerminalRendererThemeForSkin"]
+  TerminalShellSkinResolver --> TerminalPage["src/pages/TerminalPage.tsx"]
   App --> RelayControlRuntime["src/hooks/useRelayDeviceStream.ts#useRelayDeviceStream"]
   RelayControlRuntime --> RelayControlSocket["src/lib/traversal-relay-client.ts#connectTraversalRelayDevicesStream"]
   RelayControlSocket --> RelayAccountStore["src/lib/traversal-relay-client.ts#connectTraversalRelayDevicesStream"]
-  RelayAccountStore --> RelayDirectoryProjection["src/lib/client-control-directory-runtime.ts#ClientControlDirectoryRuntime.applyConfirmedDirectoryDevices"]
-  RelayDirectoryProjection --> TransportTargetResolver["src/lib/client-control-directory-runtime.ts#mergeHostWithClientControlDirectory"]
+  RelayAccountStore --> RelayDirectoryProjection["src/lib/client-control-directory-runtime.ts#ClientControlDirectoryRuntime.replaceFromDevices"]
+  RelayDirectoryProjection --> ClientControlPlaneTransport["src/lib/client-control-plane-transport.ts#ClientControlPlaneTransport"]
+  ClientControlPlaneTransport --> TransportTargetResolver["src/lib/client-control-directory-runtime.ts#mergeHostWithClientControlDirectory"]
   TransportTargetResolver --> TraversalSocketFactory
   App --> SessionContext["src/contexts/SessionContext.tsx"]
   SessionContext --> SessionLifecycle["src/contexts/session-context-session-orchestration-runtime.ts"]
@@ -114,6 +117,7 @@ flowchart TD
   RemoteWindowMessageRuntime --> RemoteWindowReceiver["src/contexts/session-context-remote-window-runtime.ts#requestRemoteWindowStreamStartRuntime"]
   TerminalPage --> StageShell["src/pages/TerminalPageStageShell.tsx"]
   TerminalPage --> TerminalHeader["src/components/terminal/TerminalHeader.tsx#TerminalHeader"]
+  TerminalPage --> QuickBar["src/components/terminal/TerminalQuickBar.tsx"]
   TerminalHeader --> TerminalPage
   TerminalPage --> LayoutProfile["src/lib/terminal-layout-profile.ts"]
   LayoutProfile --> StageShell
@@ -123,7 +127,7 @@ flowchart TD
   Renderer --> RenderGate["src/lib/session-render-gate.ts"]
 ```
 
-`App -> TerminalPage -> SessionDrawer` carries saved/Home server identity aliases alongside Relay endpoint and Session catalog facts. `TerminalPage` canonicalizes these into one daemon host rail; ambiguous rtc-only catalog matches remain separate and never guess identity.
+`App -> TerminalPage -> SessionDrawer` carries saved/Home server identity aliases alongside Relay endpoint and Session catalog facts. `TerminalPage` canonicalizes exact endpoint or saved/Home endpoint-to-online-daemon bindings into one host rail. Session catalogs supply rows only and never infer daemon identity, so rtc-only history without stable binding remains separate.
 `SessionOpenOwner` and the open-tab runtime audit path also reuse an existing open mux target transport for drawer refresh / session-picker refresh when a matching non-closed session exists; legacy tmux fetch is only the no-matching-open-target path.
 
 ## Android Session Preview Mainline

@@ -130,6 +130,19 @@ describe('zterm daemon service script truth gates', () => {
     expect(configBlock).toContain("const configPath = path.join(home, '.zterm', 'config.json');");
   });
 
+  it('merges released daemon config per field so empty zterm config cannot mask legacy mobile auth', () => {
+    const script = readReleaseScript();
+    const configBlock = extractBlock(script, 'read_config() {', 3600);
+
+    expect(configBlock).toContain('const ztermDaemonConfig = ((config.zterm || {}).android || {}).daemon || {};');
+    expect(configBlock).toContain('const mobileDaemonConfig = (config.mobile || {}).daemon || {};');
+    expect(configBlock).toContain('asString(ztermDaemonConfig.host) || asString(mobileDaemonConfig.host)');
+    expect(configBlock).toContain('asPositiveInteger(ztermDaemonConfig.port) || asPositiveInteger(mobileDaemonConfig.port)');
+    expect(configBlock).toContain('const authTokenFromConfig = asString(ztermDaemonConfig.authToken) || asString(mobileDaemonConfig.authToken);');
+    expect(configBlock).toContain('asString(ztermDaemonConfig.sessionName) || asString(mobileDaemonConfig.sessionName)');
+    expect(configBlock).not.toContain('const daemonConfig = ((config.zterm || {}).android || {}).daemon || ((config.mobile || {}).daemon || {});');
+  });
+
   it('keeps install-time native RTC dependencies inside the daemon npm package', () => {
     const script = readDaemonNpmPackageScript();
 
@@ -213,6 +226,70 @@ describe('zterm daemon service script truth gates', () => {
     expect(body.indexOf('write_launch_agent')).toBeLessThan(body.indexOf('bootstrap_service'));
     expect(body).toContain('wait_for_service_unloaded');
     expect(body.indexOf('wait_for_service_unloaded')).toBeLessThan(body.indexOf('bootstrap_service'));
+  });
+
+  it('requires HTTP health for service readiness, status, and launchd preflight', () => {
+    const script = readDaemonScript();
+    const releaseScript = readReleaseScript();
+    const waitBody = extractBlock(script, 'wait_for_service_ready() {', 500);
+    const statusBody = extractBlock(script, 'status_service() {', 1200);
+    const launchBody = extractBlock(script, 'write_launch_agent() {', 4200);
+    const releaseWaitBody = extractBlock(releaseScript, 'wait_for_service_ready() {', 500);
+    const releaseStatusBody = extractBlock(releaseScript, 'status_service() {', 1200);
+    const releaseLaunchBody = extractBlock(releaseScript, 'write_launch_agent() {', 4200);
+
+    expect(script).not.toContain('lsof -nP -iTCP');
+    expect(script).toContain('PROBE_SOCKET_HOST="$HOST"');
+    expect(script).toContain('PROBE_URL_HOST="$HOST"');
+    expect(script).toContain('PROBE_SOCKET_HOST="${PROBE_SOCKET_HOST#[}"');
+    expect(script).toContain('PROBE_URL_HOST="[${PROBE_SOCKET_HOST}]"');
+    expect(waitBody).toContain('local max_attempts=150');
+    expect(waitBody).toContain('daemon_health_ready');
+    expect(statusBody).toContain('daemon_health_ready');
+    expect(launchBody).toContain('health_ready()');
+    expect(launchBody).toContain('http://\\${PROBE_URL_HOST}:\\${PORT}/health');
+    expect(launchBody).not.toContain('launchd preflight: port $PORT already listening');
+    expect(script).not.toContain('nc -z 127.0.0.1 "${PORT}"');
+
+    expect(releaseScript).not.toContain('lsof -nP -iTCP');
+    expect(releaseScript).toContain('PROBE_SOCKET_HOST="$HOST"');
+    expect(releaseScript).toContain('PROBE_URL_HOST="$HOST"');
+    expect(releaseScript).toContain('PROBE_SOCKET_HOST="${PROBE_SOCKET_HOST#[}"');
+    expect(releaseScript).toContain('PROBE_URL_HOST="[${PROBE_SOCKET_HOST}]"');
+    expect(releaseWaitBody).toContain('local max_attempts=150');
+    expect(releaseWaitBody).toContain('daemon_health_ready');
+    expect(releaseStatusBody).toContain('daemon_health_ready');
+    expect(releaseLaunchBody).toContain('health_ready()');
+    expect(releaseLaunchBody).toContain('http://\\${PROBE_URL_HOST}:\\${PORT}/health');
+    expect(releaseLaunchBody).not.toContain('launchd preflight: port $PORT already listening');
+    expect(releaseScript).not.toContain('nc -z 127.0.0.1 "${PORT}"');
+  });
+
+  it('keeps launchd as a parent watchdog that restarts only its explicit daemon child pid', () => {
+    const script = readDaemonScript();
+    const releaseScript = readReleaseScript();
+    const launchBody = extractBlock(script, 'write_launch_agent() {', 5200);
+    const releaseLaunchBody = extractBlock(releaseScript, 'write_launch_agent() {', 5200);
+
+    expect(launchBody).toContain('child_pid="\\$!"');
+    expect(launchBody).toContain('STARTUP_HEALTH_GRACE_SECONDS=45');
+    expect(launchBody).toContain('waiting for startup health');
+    expect(launchBody).toContain('while kill -0 "\\${child_pid}"');
+    expect(launchBody).toContain('missed_health_checks');
+    expect(launchBody).toContain('kill "\\${child_pid}"');
+    expect(launchBody).not.toContain('pkill');
+    expect(launchBody).not.toContain('killall');
+    expect(launchBody).not.toContain('xargs kill');
+
+    expect(releaseLaunchBody).toContain('child_pid="\\$!"');
+    expect(releaseLaunchBody).toContain('STARTUP_HEALTH_GRACE_SECONDS=45');
+    expect(releaseLaunchBody).toContain('waiting for startup health');
+    expect(releaseLaunchBody).toContain('while kill -0 "\\${child_pid}"');
+    expect(releaseLaunchBody).toContain('missed_health_checks');
+    expect(releaseLaunchBody).toContain('kill "\\${child_pid}"');
+    expect(releaseLaunchBody).not.toContain('pkill');
+    expect(releaseLaunchBody).not.toContain('killall');
+    expect(releaseLaunchBody).not.toContain('xargs kill');
   });
 
   it('restages the current daemon runtime before bootstrapping launchd on service restart', () => {

@@ -7,6 +7,7 @@ import {
   defaultClientControlDirectoryRuntime,
   mergeHostWithClientControlDirectory,
 } from '../lib/client-control-directory-runtime';
+import { ClientControlPlaneTransport } from '../lib/client-control-plane-transport';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
@@ -26,6 +27,8 @@ import {
   settleSessionPullState as settleSessionPullStateRuntime,
 } from './session-context-pull-runtime';
 import {
+  CLIENT_TRANSPORT_HEARTBEAT_INTERVAL_MS,
+  CLIENT_TRANSPORT_HEARTBEAT_MAX_MISSES,
   clearSessionHandshakeTimeout as clearSessionHandshakeTimeoutRuntime,
   clearSessionHeartbeat as clearSessionHeartbeatRuntime,
   clearTailRefreshRuntime as clearTailRefreshRuntimeRuntime,
@@ -40,6 +43,8 @@ import type { SessionAction, SessionManagerState } from './session-context-core'
 import { hasSessionLocalWindow } from './session-buffer-planner-helpers';
 import type { SessionPullPurpose } from './session-pull-state-helpers';
 import { hasPendingSessionTransportOpenIntent, isPendingSessionTransportOpenIntentStale } from './session-context-open-intent-store';
+
+export { CLIENT_TRANSPORT_HEARTBEAT_INTERVAL_MS, CLIENT_TRANSPORT_HEARTBEAT_MAX_MISSES };
 
 export function applySessionActionRuntime(options: {
   stateRef: { current: SessionManagerState };
@@ -357,6 +362,15 @@ function hasRelayRtcEndpointCandidate(host: Host) {
     candidate.kind === 'relay-rtc' && candidate.relayHostId?.trim());
 }
 
+function hasRelayRouteEvidence(host: Host) {
+  return Boolean(
+    host.relayHostId?.trim()
+    || host.signalUrl?.trim()
+    || host.transportMode === 'webrtc'
+    || (host.relayEndpointCandidates || []).length > 0,
+  );
+}
+
 export function shouldUseLegacyWsOverrideForHostRuntime(host: Host) {
   if (host.transportMode === 'webrtc') {
     return false;
@@ -376,26 +390,59 @@ export function buildTraversalSocketForHostRuntime(options: {
   wsUrl?: string;
   transportRole?: 'control' | 'session';
 }) {
-  const resolvedHost = mergeHostWithClientControlDirectory(
-    options.host,
-    defaultClientControlDirectoryRuntime,
-  );
-  const traversal = resolveTraversalConfigFromHost(resolvedHost, options.bridgeSettings);
-  const overrideUrl = (() => {
-    if (!options.wsUrl || !shouldUseLegacyWsOverrideForHostRuntime(resolvedHost)) {
-      return undefined;
-    }
-    try {
-      const parsed = new URL(options.wsUrl);
-      parsed.searchParams.set('ztermTransport', options.transportRole || 'session');
-      return parsed.toString();
-    } catch {
-      return options.wsUrl;
-    }
-  })();
-  return createClientDaemonTraversalSocket(traversal.target, traversal.settings, {
-    overrideUrl,
-    autoReconnect: false,
+  const openConfirmedTransport = () => {
+    const resolvedDaemonHostId = options.host.daemonHostId?.trim() || options.host.relayHostId?.trim() || '';
+    const controlDirectoryEntry = resolvedDaemonHostId
+      ? defaultClientControlDirectoryRuntime.read(resolvedDaemonHostId)
+      : null;
+    const resolvedHost = mergeHostWithClientControlDirectory(
+      options.host,
+      defaultClientControlDirectoryRuntime,
+    );
+    const transportHost = controlDirectoryEntry
+      ? {
+        ...resolvedHost,
+        bridgeHost: '',
+        tailscaleHost: undefined,
+        ipv4Host: undefined,
+        ipv6Host: undefined,
+      }
+      : resolvedHost;
+    const confirmedRelaySettings = defaultClientControlDirectoryRuntime.readRelaySettings();
+    const traversal = resolveTraversalConfigFromHost(transportHost, confirmedRelaySettings
+      ? { ...options.bridgeSettings, traversalRelay: confirmedRelaySettings }
+      : options.bridgeSettings);
+    const overrideUrl = (() => {
+      if (!options.wsUrl || !shouldUseLegacyWsOverrideForHostRuntime(transportHost)) {
+        return undefined;
+      }
+      try {
+        const parsed = new URL(options.wsUrl);
+        parsed.searchParams.set('ztermTransport', options.transportRole || 'session');
+        return parsed.toString();
+      } catch {
+        return options.wsUrl;
+      }
+    })();
+    return createClientDaemonTraversalSocket(traversal.target, traversal.settings, {
+      overrideUrl,
+      autoReconnect: false,
+    });
+  };
+
+  const daemonHostId = options.host.daemonHostId?.trim() || options.host.relayHostId?.trim() || '';
+  if (
+    !daemonHostId
+    || !options.bridgeSettings.traversalRelay?.accessToken?.trim()
+    || !hasRelayRouteEvidence(options.host)
+  ) {
+    return openConfirmedTransport();
+  }
+  return new ClientControlPlaneTransport({
+    daemonHostId,
+    mode: options.bridgeSettings.transportMode,
+    directoryRuntime: defaultClientControlDirectoryRuntime,
+    openConfirmedTransport,
   });
 }
 

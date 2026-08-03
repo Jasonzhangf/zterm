@@ -27,9 +27,18 @@ import { TerminalNetworkBanner, TerminalQuickBarShell } from './terminal-page-sh
 import { formatDebugRate, resolveDebugStatus } from './terminal-page-debug-helpers';
 import { useTerminalPageCopyRuntime } from './useTerminalPageCopyRuntime';
 import { getBrowserStorage } from '../lib/browser-storage';
-import { mobileTheme } from '../lib/mobile-ui';
+import type { TerminalShellSkin } from '../lib/bridge-settings';
+import {
+  resolveEffectiveTerminalShellSkin,
+  resolveNextTerminalShellBoundaryDelayMs,
+  resolveTerminalRendererThemeForSkin,
+} from '../lib/terminal-shell-skin';
 import { isPrivateLanIpv4Host, parseEndpointHost } from '../lib/network-target';
-import { buildServerIdentityAliasMap, resolveServerIdentity, type ServerIdentityInput } from '../lib/server-identity';
+import {
+  buildServerIdentityAliasMap,
+  resolveServerIdentity,
+  type ServerIdentityInput,
+} from '../lib/server-identity';
 import { getRelayRtcEndpointCandidates } from '../lib/session-picker';
 import { buildSessionSemanticOwnerKey, buildSessionSemanticReuseKey } from '../lib/session-semantic-identity';
 import { listOnlineTraversalRelayDaemonDevices } from '../lib/traversal-relay-devices';
@@ -94,7 +103,6 @@ import {
   type RemoteScreenshotPreviewState,
 } from '../lib/remote-screenshot-preview-runtime';
 import {
-  DEFAULT_BRIDGE_PORT,
   type QuickAction,
   type Host,
   type RemoteScreenshotCapture,
@@ -335,6 +343,35 @@ type VirtualKeyboardApi = {
 };
 
 export const NETWORK_BANNER_GRACE_MS = 10_000;
+export const NETWORK_BANNER_ACTIONABLE_RECONNECT_ATTEMPT = 4;
+
+export function resolveConnectionIssueActionable(options: {
+  networkOnline: boolean;
+  sessionState: Session['state'] | SessionDebugOverlayMetrics['status'] | null | undefined;
+  reconnectAttempt: number | null | undefined;
+}) {
+  return resolveConnectionIssueActionableKey(options) !== null;
+}
+
+export function resolveConnectionIssueActionableKey(options: {
+  networkOnline: boolean;
+  sessionState: Session['state'] | SessionDebugOverlayMetrics['status'] | null | undefined;
+  reconnectAttempt: number | null | undefined;
+}) {
+  if (!options.networkOnline) {
+    return 'offline';
+  }
+  if (options.sessionState === 'error') {
+    return 'terminal-error';
+  }
+  if (
+    options.sessionState === 'reconnecting'
+    && (options.reconnectAttempt || 0) >= NETWORK_BANNER_ACTIONABLE_RECONNECT_ATTEMPT
+  ) {
+    return 'reconnect-exhausted';
+  }
+  return null;
+}
 
 function logAsyncCleanupFailure(scope: string, error: unknown) {
   console.warn(`[TerminalPage] ${scope} failed:`, error);
@@ -343,14 +380,51 @@ function logAsyncCleanupFailure(scope: string, error: unknown) {
 const connectionRouteOptionStyle = {
   minHeight: '34px',
   borderRadius: '10px',
-  border: '1px solid rgba(151, 164, 186, 0.16)',
-  background: 'rgba(28, 39, 59, 0.9)',
-  color: '#dce8ff',
+  border: '1px solid var(--zterm-panel-border)',
+  background: 'var(--zterm-panel-surface)',
+  color: 'var(--zterm-panel-text)',
   fontSize: '12px',
   fontWeight: 850,
   textAlign: 'left',
   padding: '0 10px',
 } as const;
+
+function resolveConnectionActivityLabel(
+  session: Session,
+  status: SessionDebugOverlayMetrics['status'],
+) {
+  if (
+    session.lastError === 'waiting for confirmed control directory'
+    || session.lastError === 'control directory confirmation timeout'
+  ) {
+    return '正在同步控制通道';
+  }
+  if (status === 'reconnecting') {
+    return '正在重连';
+  }
+  if (status === 'connecting') {
+    return '正在连接';
+  }
+  return null;
+}
+
+function hasLiveSessionTraffic(metrics: SessionDebugOverlayMetrics | null | undefined) {
+  if (!metrics?.active) {
+    return false;
+  }
+  return (metrics.uplinkBps || 0) > 0 || (metrics.downlinkBps || 0) > 0;
+}
+
+function resolveEffectiveConnectionStatus(
+  session: Session,
+  metrics: SessionDebugOverlayMetrics | null | undefined,
+) {
+  const status = resolveDebugStatus(session, metrics || undefined);
+  if ((status === 'reconnecting' || status === 'connecting') && hasLiveSessionTraffic(metrics)) {
+    return 'waiting';
+  }
+  return status;
+}
 
 const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatusStrip({
   session,
@@ -392,19 +466,23 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
   const uplinkBps = metrics?.uplinkBps || 0;
   const downlinkBps = metrics?.downlinkBps || 0;
   const routeLabel = formatConnectionRouteLabel(session);
+  const rawStatus = resolveEffectiveConnectionStatus(session, metrics);
   const status = suppressReconnectUi && session.state === 'reconnecting'
     ? 'waiting'
-    : resolveDebugStatus(session, metrics || undefined);
+    : rawStatus;
+  const activityLabel = resolveConnectionActivityLabel(session, status);
   const statusTone = status === 'error' || status === 'closed'
     ? '#ff8a8a'
-    : status === 'reconnecting' || status === 'connecting'
+    : activityLabel
       ? '#ffd27a'
-      : '#8ce6b5';
+      : 'var(--zterm-panel-muted)';
+  const visibleRouteLabel = activityLabel || routeLabel;
 
   return (
     <div
       data-testid="terminal-connection-status-strip"
-      aria-label={`连接状态 ${routeLabel} 上行 ${formatDebugRate(uplinkBps)} 下行 ${formatDebugRate(downlinkBps)}`}
+      className="zterm-connection-status-strip"
+      aria-label={`连接状态 ${visibleRouteLabel} session ${session.sessionName} 上行 ${formatDebugRate(uplinkBps)} 下行 ${formatDebugRate(downlinkBps)}`}
       role="button"
       tabIndex={0}
       onClick={() => setRouteMenuOpen((current) => !current)}
@@ -417,11 +495,10 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
         height: '34px',
         minWidth: 0,
         borderRadius: '12px',
-        border: '1px solid rgba(255,255,255,0.08)',
-        background: 'rgba(10, 16, 26, 0.58)',
-        color: '#dce8ff',
-        boxShadow: '0 8px 18px rgba(0,0,0,0.14)',
-        backdropFilter: 'blur(8px)',
+        border: '1px solid transparent',
+        background: 'transparent',
+        color: 'var(--zterm-panel-text)',
+        boxShadow: 'none',
         display: 'flex',
         alignItems: 'center',
         gap: '7px',
@@ -440,7 +517,7 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
           alignItems: 'center',
           gap: '4px',
           minWidth: 0,
-          flex: '1 1 auto',
+          flex: '0 1 auto',
           color: statusTone,
           fontSize: '11px',
           fontWeight: 900,
@@ -455,26 +532,51 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
             height: '6px',
             borderRadius: '999px',
             background: statusTone,
-            boxShadow: `0 0 10px ${statusTone}`,
+            boxShadow: 'none',
             flex: '0 0 auto',
           }}
         />
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{routeLabel}</span>
+        <span
+          data-testid={activityLabel ? 'terminal-connection-status-activity' : undefined}
+          style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}
+        >
+          {visibleRouteLabel}
+        </span>
+      </span>
+      <span
+        data-testid="terminal-connection-status-session"
+        style={{
+          flex: '1 1 auto',
+          minWidth: 0,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          color: 'var(--zterm-panel-text)',
+          fontSize: '11px',
+          fontWeight: 800,
+        }}
+      >
+        {session.sessionName}
       </span>
       <span
         data-testid="terminal-connection-status-rates"
         style={{
           flex: '0 0 auto',
-          color: 'rgba(220,232,255,0.74)',
-          fontSize: '10px',
+          display: 'grid',
+          gridTemplateRows: 'repeat(2, minmax(0, 1fr))',
+          alignItems: 'center',
+          color: 'var(--zterm-panel-muted)',
+          fontSize: '9px',
           fontWeight: 750,
+          lineHeight: 1.05,
         }}
       >
-        ↑ {formatDebugRate(uplinkBps)} ↓ {formatDebugRate(downlinkBps)}
+        <span data-testid="terminal-connection-status-uplink">↑ {formatDebugRate(uplinkBps)}</span>
+        <span data-testid="terminal-connection-status-downlink">↓ {formatDebugRate(downlinkBps)}</span>
       </span>
       {routeMenuOpen ? (
         <div
           data-testid="terminal-connection-route-menu"
+          className="zterm-connection-route-menu"
           style={{
             position: 'absolute',
             left: 0,
@@ -485,9 +587,9 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
             gap: '6px',
             padding: '8px',
             borderRadius: '12px',
-            border: '1px solid rgba(151, 164, 186, 0.22)',
-            background: 'rgba(13, 19, 31, 0.97)',
-            boxShadow: '0 18px 42px rgba(0,0,0,0.38)',
+            border: '1px solid var(--zterm-panel-border)',
+            background: 'var(--zterm-panel-bg)',
+            boxShadow: '0 18px 42px var(--zterm-panel-shadow)',
           }}
           onClick={(event) => event.stopPropagation()}
         >
@@ -620,6 +722,7 @@ interface TerminalPageProps {
   onToggleScheduleJob?: (sessionId: string, jobId: string, enabled: boolean) => void;
   onRunScheduleJobNow?: (sessionId: string, jobId: string) => void;
   terminalThemeId?: string;
+  terminalShellSkin?: TerminalShellSkin;
   terminalWidthMode?: TerminalWidthMode;
   terminalSessionGroupLayoutMode?: TerminalSessionGroupLayoutMode;
   onTerminalWidthModeChange?: (sessionId: string, mode: TerminalWidthMode, cols?: number | null) => void;
@@ -699,134 +802,6 @@ function terminalPageActiveRuntimeStatusKey(session: Session | null | undefined)
     session.state,
     session.lastError || '',
   ].join('::');
-}
-
-function resolveRelayDeviceEndpointAliasInput(
-  device: TraversalRelayDeviceSnapshot,
-  endpoint: NonNullable<TraversalRelayDeviceSnapshot['daemon']['endpoints']>[number],
-) {
-  if (endpoint.kind !== 'lan' && endpoint.kind !== 'tailscale' && endpoint.kind !== 'ipv6' && endpoint.kind !== 'ipv4') {
-    return null;
-  }
-  const daemonHostId = device.daemon.hostId.trim();
-  if (!daemonHostId) {
-    return null;
-  }
-  const directHost = endpoint.host?.trim();
-  if (directHost) {
-    return {
-      bridgeHost: directHost,
-      bridgePort: endpoint.port || DEFAULT_BRIDGE_PORT,
-      daemonHostId,
-      connectionName: device.deviceName,
-    };
-  }
-  const wsUrl = endpoint.wsUrl?.trim();
-  if (!wsUrl) {
-    return null;
-  }
-  try {
-    const parsed = new URL(wsUrl);
-    return {
-      bridgeHost: parsed.hostname || parsed.host,
-      bridgePort: endpoint.port || (parsed.port ? Number.parseInt(parsed.port, 10) : DEFAULT_BRIDGE_PORT),
-      daemonHostId,
-      connectionName: device.deviceName,
-    };
-  } catch {
-    return null;
-  }
-}
-
-function buildRelayDeviceServerIdentityAliasInputs(relayDevices: TraversalRelayDeviceSnapshot[]) {
-  return relayDevices.flatMap((device) =>
-    (device.daemon.endpoints || [])
-      .map((endpoint) => resolveRelayDeviceEndpointAliasInput(device, endpoint))
-      .filter((item): item is { bridgeHost: string; bridgePort: number; daemonHostId: string; connectionName: string } => item !== null),
-  );
-}
-
-function buildRelayDeviceSessionCatalogAliasInputs(
-  relayDevices: TraversalRelayDeviceSnapshot[],
-  sessionGroups: SessionGroupHistory[],
-): ServerIdentityInput[] {
-  const relayCatalogs = relayDevices
-    .map((device) => ({
-      device,
-      daemonHostId: device.daemon.hostId.trim(),
-      sessionNames: new Set((device.daemon.sessions || [])
-        .map((session) => session.name?.trim())
-        .filter((name): name is string => Boolean(name))),
-    }))
-    .filter((catalog) => catalog.daemonHostId && catalog.sessionNames.size > 0);
-
-  const aliases: ServerIdentityInput[] = [];
-  for (const group of sessionGroups) {
-    const bridgeHost = group.bridgeHost?.trim();
-    if (!bridgeHost || group.daemonHostId?.trim()) {
-      continue;
-    }
-    const missing = new Set((group.missingSessionNames || []).map((name) => name.trim()).filter(Boolean));
-    const groupSessionNames = group.sessionNames
-      .map((name) => name.trim())
-      .filter((name) => name && !missing.has(name));
-    if (groupSessionNames.length === 0) {
-      continue;
-    }
-    const matches = relayCatalogs.filter((catalog) =>
-      groupSessionNames.every((name) => catalog.sessionNames.has(name)),
-    );
-    if (matches.length !== 1) {
-      continue;
-    }
-    const match = matches[0];
-    aliases.push({
-      bridgeHost,
-      bridgePort: group.bridgePort || DEFAULT_BRIDGE_PORT,
-      daemonHostId: match.daemonHostId,
-      connectionName: match.device.deviceName.trim() || match.daemonHostId,
-    });
-  }
-  return aliases;
-}
-
-function buildRelayDeviceLiveSessionCatalogAliasInputs(
-  relayDevices: TraversalRelayDeviceSnapshot[],
-  sessions: Session[],
-): ServerIdentityInput[] {
-  const relayCatalogs = relayDevices
-    .map((device) => ({
-      device,
-      daemonHostId: device.daemon.hostId.trim(),
-      sessionNames: new Set((device.daemon.sessions || [])
-        .map((session) => session.name?.trim())
-        .filter((name): name is string => Boolean(name))),
-    }))
-    .filter((catalog) => catalog.daemonHostId && catalog.sessionNames.size > 0);
-
-  const aliases: ServerIdentityInput[] = [];
-  for (const session of sessions) {
-    const bridgeHost = session.bridgeHost?.trim();
-    if (!bridgeHost || session.daemonHostId?.trim()) {
-      continue;
-    }
-    const sessionName = session.sessionName.trim();
-    if (!sessionName) {
-      continue;
-    }
-    const matches = relayCatalogs.filter((catalog) => catalog.sessionNames.has(sessionName));
-    if (matches.length !== 1) {
-      continue;
-    }
-    const match = matches[0];
-    aliases.push({
-      bridgeHost,
-      bridgePort: session.bridgePort || DEFAULT_BRIDGE_PORT,
-      daemonHostId: match.daemonHostId,
-      connectionName: match.device.deviceName.trim() || match.daemonHostId,
-    });
-  }
-  return aliases;
 }
 
 function terminalPageRelayDevicesUiKey(relayDevices: readonly TraversalRelayDeviceSnapshot[] | undefined) {
@@ -1031,6 +1006,7 @@ function TerminalPageComponent({
   onToggleScheduleJob,
   onRunScheduleJobNow,
   terminalThemeId,
+  terminalShellSkin = 'auto',
   terminalWidthMode = 'adaptive-phone',
   terminalSessionGroupLayoutMode = 'auto',
   onTerminalWidthModeChange,
@@ -1041,6 +1017,32 @@ function TerminalPageComponent({
   onShortcutUse,
 }: TerminalPageProps) {
   const isAndroid = Capacitor.getPlatform() === 'android';
+  const [terminalShellNow, setTerminalShellNow] = useState(() => new Date());
+  const effectiveTerminalShellSkin = resolveEffectiveTerminalShellSkin(terminalShellSkin, terminalShellNow);
+  const effectiveTerminalThemeId = resolveTerminalRendererThemeForSkin(
+    terminalThemeId,
+    effectiveTerminalShellSkin,
+  );
+  useEffect(() => {
+    if (terminalShellSkin && terminalShellSkin !== 'auto') {
+      return;
+    }
+    let boundaryTimer: number | null = null;
+    const scheduleBoundary = () => {
+      const now = new Date();
+      setTerminalShellNow(now);
+      boundaryTimer = window.setTimeout(
+        scheduleBoundary,
+        resolveNextTerminalShellBoundaryDelayMs(now) + 50,
+      );
+    };
+    scheduleBoundary();
+    return () => {
+      if (boundaryTimer !== null) {
+        window.clearTimeout(boundaryTimer);
+      }
+    };
+  }, [terminalShellSkin]);
   const [focusNonce, setFocusNonce] = useState(0);
   const [inputIntentFollowResetEpoch, setInputIntentFollowResetEpoch] = useState(0);
   const terminalFontSize = 10;
@@ -1089,6 +1091,7 @@ function TerminalPageComponent({
   const [tabManagerScopePaneId, setTabManagerScopePaneId] = useState<string | null>(null);
   const [scheduleComposerTarget, setScheduleComposerTarget] = useState<ScheduleComposerTarget | null>(null);
   const [fileTransferOpen, setFileTransferOpen] = useState(false);
+  const [fileTransferMode, setFileTransferMode] = useState<"browser" | "sync">("browser");
   const [remoteScreenshotPreview, setRemoteScreenshotPreview] = useState<RemoteScreenshotPreviewState | null>(null);
   const [viewportWidth, setViewportWidth] = useState(() => resolveWindowWidth());
   const [currentLayoutViewportHeight, setCurrentLayoutViewportHeight] = useState(
@@ -1502,14 +1505,6 @@ function TerminalPageComponent({
     () => listOnlineTraversalRelayDaemonDevices(relayDevices),
     [relayDevices],
   );
-  const drawerServerIdentityAliases = useMemo(() => buildServerIdentityAliasMap([
-    ...sessions,
-    ...sessionGroups,
-    ...buildRelayDeviceSessionCatalogAliasInputs(onlineRelayDaemonDevices, sessionGroups),
-    ...buildRelayDeviceLiveSessionCatalogAliasInputs(onlineRelayDaemonDevices, sessions),
-    ...serverIdentityAliasInputs,
-    ...buildRelayDeviceServerIdentityAliasInputs(onlineRelayDaemonDevices),
-  ]), [onlineRelayDaemonDevices, serverIdentityAliasInputs, sessionGroups, sessions]);
   const relayDeviceByDaemonHostId = useMemo(() => {
     const devices = new Map<string, TraversalRelayDeviceSnapshot>();
     for (const device of onlineRelayDaemonDevices) {
@@ -1520,6 +1515,27 @@ function TerminalPageComponent({
     }
     return devices;
   }, [onlineRelayDaemonDevices]);
+  const drawerServerIdentityAliases = useMemo(() => {
+    const aliasInputs: ServerIdentityInput[] = [...(serverIdentityAliasInputs || [])];
+    for (const device of onlineRelayDaemonDevices) {
+      const daemonHostId = device.daemon.hostId.trim();
+      if (!daemonHostId) {
+        continue;
+      }
+      for (const endpoint of device.daemon.endpoints || []) {
+        if (!endpoint.host?.trim() || !endpoint.port) {
+          continue;
+        }
+        aliasInputs.push({
+          bridgeHost: endpoint.host,
+          bridgePort: endpoint.port,
+          daemonHostId,
+          connectionName: device.deviceName || daemonHostId,
+        });
+      }
+    }
+    return buildServerIdentityAliasMap(aliasInputs);
+  }, [onlineRelayDaemonDevices, serverIdentityAliasInputs]);
   const drawerRemoteSessions = useMemo(() => {
     const liveSessionByReuseKey = new Map<string, Session>();
     for (const session of sessions) {
@@ -1560,21 +1576,29 @@ function TerminalPageComponent({
     const items: TerminalSessionDrawerItem[] = [];
     for (const group of sessionGroups) {
       const missing = new Set(group.missingSessionNames || []);
-      const ownerKey = buildSessionSemanticOwnerKey(group);
+      const explicitDaemonHostId = group.daemonHostId?.trim() || '';
       const serverIdentity = resolveServerIdentity(group, drawerServerIdentityAliases);
+      const resolvedDaemonHostId = relayDeviceByDaemonHostId.has(serverIdentity.key)
+        ? serverIdentity.key
+        : explicitDaemonHostId;
+      const canonicalGroup = {
+        ...group,
+        ...(resolvedDaemonHostId ? { daemonHostId: resolvedDaemonHostId } : {}),
+      };
+      const ownerKey = buildSessionSemanticOwnerKey(canonicalGroup);
       for (const sessionName of group.sessionNames) {
         if (!sessionName || missing.has(sessionName)) {
           continue;
         }
         const reuseKey = buildSessionSemanticReuseKey({
-          daemonHostId: group.daemonHostId,
+          daemonHostId: resolvedDaemonHostId || group.daemonHostId,
           bridgeHost: group.bridgeHost,
           bridgePort: group.bridgePort,
           sessionName,
         });
         const liveSession = liveSessionByReuseKey.get(reuseKey) || null;
         const id = liveSession?.id || `remote:${ownerKey}::session:${sessionName}`;
-        const relayDevice = relayDeviceByDaemonHostId.get(serverIdentity.key) || null;
+        const relayDevice = resolvedDaemonHostId ? relayDeviceByDaemonHostId.get(resolvedDaemonHostId) || null : null;
         const relayRtcCandidates = getRelayRtcEndpointCandidates(relayDevice?.daemon.endpoints || []);
         const useRelayRouteTarget = Boolean(relayDevice && relayRtcCandidates.length > 0);
         const targetBridgeHost = useRelayRouteTarget && liveSession?.bridgeHost?.trim() && !group.bridgeHost.trim()
@@ -1586,8 +1610,7 @@ function TerminalPageComponent({
         const relayEndpointCandidates = relayDevice && relayRtcCandidates.length > 0
           ? relayDevice.daemon.endpoints || relayRtcCandidates
           : group.relayEndpointCandidates || [];
-        const canonicalDaemonHostId = group.daemonHostId?.trim()
-          || (relayDevice && relayRtcCandidates.length > 0 ? serverIdentity.key : '');
+        const canonicalDaemonHostId = resolvedDaemonHostId || group.daemonHostId?.trim() || '';
         const remoteCatalogTarget = {
           name: group.name,
           bridgeHost: targetBridgeHost,
@@ -1674,30 +1697,26 @@ function TerminalPageComponent({
   }, [drawerRemoteSessions.items, onlineRelayDaemonDevices]);
   const drawerSessions = useMemo(() => {
     const activeSessionIds = new Set(renderedPaneSessions.map((session) => session.id));
-    const resolveDrawerServerIdentity = (session: Session) => resolveServerIdentity(session, drawerServerIdentityAliases);
 
     const catalogItems = drawerRemoteSessions.items.map((item) => {
       const liveSession = sessions.find((session) => session.id === item.id) || null;
       if (!liveSession) {
         return item;
       }
-      const serverIdentity = resolveDrawerServerIdentity(liveSession);
       return {
         ...item,
         title: liveSession.customName || liveSession.title || liveSession.sessionName,
-        subtitle: `${serverIdentity.label} · ${liveSession.sessionName}`,
+        subtitle: `${item.hostLabel || item.hostKey || 'unknown server'} · ${liveSession.sessionName}`,
         status: normalizeDrawerStatus(liveSession.state),
         remoteMissing: resolveSessionRemoteMissing(liveSession, sessionGroups),
         paneLabel: undefined,
         sessionGroupSlot: resolveSessionGroupSlot(liveSession.id),
         active: activeSessionIds.has(liveSession.id),
-        hostKey: serverIdentity.key,
-        hostLabel: serverIdentity.label,
       };
     });
 
     return catalogItems;
-  }, [drawerRemoteSessions.items, drawerServerIdentityAliases, renderedPaneSessions, resolveSessionGroupSlot, sessionGroups, sessions]);
+  }, [drawerRemoteSessions.items, renderedPaneSessions, resolveSessionGroupSlot, sessionGroups, sessions]);
   useEffect(() => {
     if (!portraitSessionDrawerEnabled || sessionDrawerOpen || sessions.length > 0 || drawerHosts.length === 0) {
       return;
@@ -2162,9 +2181,10 @@ function TerminalPageComponent({
     });
   }, [onRequestScheduleList, uiSessionId]);
 
-  const handleQuickBarOpenFileTransfer = useCallback(() => {
-    setFileTransferOpen(true);
-  }, []);
+  const handleQuickBarOpenFileTransfer = useCallback((mode: "browser" | "sync" = "browser") => {
+    setFileTransferMode(mode);
+    setFileTransferOpen((current) => (current && fileTransferMode === mode ? false : true));
+  }, [fileTransferMode]);
 
   const handleQuickBarToggleDebugOverlay = useCallback(() => {
     setDebugOverlayVisible((v) => !v);
@@ -2447,10 +2467,18 @@ function TerminalPageComponent({
     };
   }, []);
 
-  useEffect(() => {
-    const hasIssue = !networkOnline || uiSession?.state === 'reconnecting' || uiSession?.state === 'error';
+  const uiSessionMetrics = uiSession ? getSessionDebugMetrics?.(uiSession.id) || null : null;
+  const uiSessionEffectiveStatus = uiSession
+    ? resolveEffectiveConnectionStatus(uiSession, uiSessionMetrics)
+    : null;
+  const connectionIssueActionableKey = resolveConnectionIssueActionableKey({
+    networkOnline,
+    sessionState: uiSessionEffectiveStatus,
+    reconnectAttempt: uiSession?.reconnectAttempt,
+  });
 
-    if (!hasIssue) {
+  useEffect(() => {
+    if (!connectionIssueActionableKey) {
       if (connectionIssueTimerRef.current !== null) {
         window.clearTimeout(connectionIssueTimerRef.current);
         connectionIssueTimerRef.current = null;
@@ -2474,11 +2502,17 @@ function TerminalPageComponent({
         connectionIssueTimerRef.current = null;
       }
     };
-  }, [connectionIssueVisible, networkOnline, uiSession?.state]);
+  }, [connectionIssueActionableKey, connectionIssueVisible]);
 
   const suppressReconnectUi = networkOnline
     && uiSession?.state === 'reconnecting'
     && !connectionIssueVisible;
+  const connectionProgressLabel = uiSession && networkOnline && !connectionIssueVisible
+    ? resolveConnectionActivityLabel(
+        uiSession,
+        uiSessionEffectiveStatus || 'waiting',
+      )
+    : null;
 
   useEffect(() => {
     updateTerminalKeyboardRequested(false);
@@ -3454,8 +3488,10 @@ function TerminalPageComponent({
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
-        backgroundColor: mobileTheme.colors.shell,
+        backgroundColor: 'var(--zterm-shell-bg)',
       }}
+      className="zterm-terminal-shell"
+      data-terminal-shell-skin={effectiveTerminalShellSkin}
     >
       {!portraitSessionDrawerEnabled ? (
         <div>
@@ -3485,6 +3521,7 @@ function TerminalPageComponent({
         networkOnline={networkOnline}
         activeSessionState={uiSession?.state}
         activeSessionLastError={uiSession?.lastError}
+        connectionProgressLabel={connectionProgressLabel}
       />
       <div
         style={{
@@ -3496,7 +3533,8 @@ function TerminalPageComponent({
       >
         {portraitSessionDrawerEnabled ? (
           <>
-            <TerminalConnectionStatusStrip
+            {!sessionDrawerOpen ? <>
+              <TerminalConnectionStatusStrip
               session={uiSession}
               getSessionDebugMetrics={getSessionDebugMetrics}
               topInsetPx={headerTopInsetPx}
@@ -3518,9 +3556,9 @@ function TerminalPageComponent({
                 width: '34px',
                 height: '34px',
                 borderRadius: '12px',
-                border: '1px solid rgba(255,255,255,0.08)',
-                background: 'rgba(10, 16, 26, 0.64)',
-                color: '#dce8ff',
+                border: '1px solid var(--zterm-panel-border)',
+                background: 'var(--zterm-panel-surface)',
+                color: 'var(--zterm-panel-text)',
                 fontSize: '18px',
                 lineHeight: 1,
                 boxShadow: '0 8px 18px rgba(0,0,0,0.18)',
@@ -3529,7 +3567,7 @@ function TerminalPageComponent({
             >
               ←
             </button>
-            {onOpenSettings ? (
+              {onOpenSettings ? (
               <button
                 type="button"
                 aria-label="设置和升级"
@@ -3544,9 +3582,9 @@ function TerminalPageComponent({
                   height: '34px',
                   padding: '0 10px',
                   borderRadius: '12px',
-                  border: '1px solid rgba(255,255,255,0.08)',
-                  background: 'rgba(10, 16, 26, 0.64)',
-                  color: '#dce8ff',
+                  border: '1px solid var(--zterm-panel-border)',
+                  background: 'var(--zterm-panel-surface)',
+                  color: 'var(--zterm-panel-text)',
                   fontSize: '13px',
                   fontWeight: 850,
                   lineHeight: 1,
@@ -3561,7 +3599,8 @@ function TerminalPageComponent({
                 <span aria-hidden="true" style={{ fontSize: '15px', lineHeight: 1 }}>⚙</span>
                 <span>设置</span>
               </button>
-            ) : null}
+              ) : null}
+            </> : null}
             <TerminalSessionDrawer
               open={sessionDrawerOpen}
               topInsetPx={headerTopInsetPx}
@@ -3582,6 +3621,7 @@ function TerminalPageComponent({
               onPreviewSelectionModeChange={handleSessionPreviewSelectionModeChange}
               onTogglePreviewSession={handleToggleSessionPreviewSelection}
               onClearPreviewSelection={() => persistSessionPreviewSelection({ version: 1, orderedTargets: [] })}
+              terminalShellSkin={effectiveTerminalShellSkin}
             />
           </>
         ) : null}
@@ -3612,9 +3652,10 @@ function TerminalPageComponent({
           onActivateSession={handleActivateSessionGroupSlot}
           onTerminalFocusOwnerActivate={handleTerminalFocusOwnerActivate}
           focusNonce={focusNonce}
-          terminalFontSize={terminalFontSize}
-          terminalThemeId={terminalThemeId}
-          terminalWidthMode={terminalWidthMode}
+            terminalFontSize={terminalFontSize}
+            terminalThemeId={effectiveTerminalThemeId}
+            terminalShellSkin={effectiveTerminalShellSkin}
+            terminalWidthMode={terminalWidthMode}
           allowSessionDrawerSwipe={portraitSessionDrawerEnabled}
           absoluteLineNumbersVisible={absoluteLineNumbersVisible}
           copySelection={copySelection}
@@ -3630,7 +3671,7 @@ function TerminalPageComponent({
           onMovePreviewSession={handleMoveSessionPreview}
           onReplacePreviewSession={handleReplaceSessionPreview}
         />
-        {copySelection.menu ? (
+        {copySelection.menu && !sessionDrawerOpen ? (
           <TerminalPageCopyMenu
             menu={copySelection.menu}
             viewportWidth={viewportWidth}
@@ -3642,7 +3683,7 @@ function TerminalPageComponent({
             onClose={handleCloseCopyMenu}
           />
         ) : null}
-        <TerminalDebugOverlay
+        {!sessionDrawerOpen ? <TerminalDebugOverlay
       visible={debugOverlayVisible}
       session={interactiveSession}
       visiblePaneSessions={renderedPaneSessions}
@@ -3682,7 +3723,7 @@ function TerminalPageComponent({
             pickerMode: sessionPickerDebugMode,
           }}
           getRemoteWindowInputDebug={getRemoteWindowInputDebug}
-        />
+        /> : null}
         <RemoteWindowOverlay
           activeSessionId={uiSessionId}
           appForegroundActive={appForegroundActive}
@@ -3704,7 +3745,7 @@ function TerminalPageComponent({
           onVideoDebug={recordRemoteWindowVideoDebug}
           onRemoteWindowMessage={onRemoteWindowMessage}
         />
-        {!remoteWindowOverlayOpen ? (
+        {!remoteWindowOverlayOpen && !sessionDrawerOpen ? (
           <TerminalQuickBarShell
             zIndex={remoteWindowInputContext ? 96 : 10}
             centered={Boolean(remoteWindowInputContext)}
@@ -3766,6 +3807,13 @@ function TerminalPageComponent({
         <FileTransferSheet
           open={fileTransferOpen}
           remoteCwd=""
+          mode={fileTransferMode}
+          daemonFileScopeId={
+            interactiveSession.daemonHostId
+              ? `daemon:${interactiveSession.daemonHostId}`
+              : `endpoint:${interactiveSession.bridgeHost}:${interactiveSession.bridgePort}`
+          }
+          terminalShellSkin={effectiveTerminalShellSkin}
           onClose={() => setFileTransferOpen(false)}
           sendJson={sendFileTransferMessage}
           onFileTransferMessage={onFileTransferMessage}
@@ -3844,6 +3892,7 @@ function terminalPagePropsEqual(
     && prev.onToggleScheduleJob === next.onToggleScheduleJob
     && prev.onRunScheduleJobNow === next.onRunScheduleJobNow
     && prev.terminalThemeId === next.terminalThemeId
+    && prev.terminalShellSkin === next.terminalShellSkin
     && prev.terminalWidthMode === next.terminalWidthMode
     && prev.terminalSessionGroupLayoutMode === next.terminalSessionGroupLayoutMode
     && prev.onTerminalWidthModeChange === next.onTerminalWidthModeChange

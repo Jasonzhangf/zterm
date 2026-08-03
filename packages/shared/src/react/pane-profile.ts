@@ -130,7 +130,7 @@ function buildPhoneSplitLandscapeProfile(): PanePlatformProfile {
       plusButtonFontSize: '15px',
     },
     stage: {
-      outerMargin: '0 3px',
+      outerMargin: '0',
       containerRadius: '0',
       paneGap: '6px',
       rowBottomPadding: '0 0 2px',
@@ -181,7 +181,7 @@ function buildPhoneSplitDefaultProfile(): PanePlatformProfile {
       plusButtonFontSize: '16px',
     },
     stage: {
-      outerMargin: '0 4px',
+      outerMargin: '0',
       containerRadius: '0',
       paneGap: '8px',
       rowBottomPadding: '0 0 2px',
@@ -232,11 +232,11 @@ function buildPhoneSinglePaneProfile(): PanePlatformProfile {
       plusButtonFontSize: '20px',
     },
     stage: {
-      outerMargin: '0 4px',
-      containerRadius: '14px',
+      outerMargin: '0',
+      containerRadius: '0',
       paneGap: '8px',
       rowBottomPadding: '0',
-      paneRadius: '14px',
+      paneRadius: '0',
     },
     gesture: {
       longPressMs: 920,

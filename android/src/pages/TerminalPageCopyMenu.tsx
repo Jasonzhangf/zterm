@@ -25,6 +25,7 @@ export function TerminalPageCopyMenu({
  return (
    <div
      data-testid="terminal-copy-menu"
+     className="zterm-copy-menu"
      style={{
        position: "fixed",
        left: `${Math.max(10, Math.min(menu.x - 16, viewportWidth - 236))}px`,
@@ -35,9 +36,9 @@ export function TerminalPageCopyMenu({
        gap: "8px",
        padding: "8px",
        borderRadius: "16px",
-       border: "1px solid rgba(255,255,255,0.10)",
-       background: "rgba(11, 15, 24, 0.94)",
-       boxShadow: "0 14px 32px rgba(0,0,0,0.38)",
+       border: "1px solid var(--zterm-panel-border)",
+       background: "var(--zterm-panel-bg)",
+       boxShadow: "0 14px 32px var(--zterm-panel-shadow)",
        backdropFilter: "blur(10px)",
      }}
      onPointerDown={(event) => {

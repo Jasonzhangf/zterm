@@ -281,4 +281,54 @@ describe('home connection projection relay route visibility', () => {
 
     expect(projected).toEqual([]);
   });
+
+  it('keeps one canonical daemon row when a direct preset gains daemon identity before an auxiliary preset', () => {
+    const projected = projectHomeSavedConnections(
+      [],
+      {
+        ...bridgeSettings,
+        targetHost: '100.66.1.82',
+        targetPort: 4333,
+        targetAuthToken: 'file-transfer-token',
+        defaultServerId: 'mac-file-transfer',
+        servers: [
+          {
+            id: 'mac-direct',
+            name: 'Mac Studio',
+            targetHost: '100.66.1.82',
+            targetPort: 3333,
+            authToken: 'daemon-token',
+          },
+          {
+            id: 'mac-daemon',
+            name: 'Mac Studio Auto',
+            targetHost: '100.66.1.82',
+            targetPort: 3333,
+            authToken: 'daemon-token',
+            relayHostId: 'mac-studio',
+          },
+          {
+            id: 'mac-file-transfer',
+            name: 'File Transfer',
+            targetHost: '100.66.1.82',
+            targetPort: 4333,
+            authToken: 'file-transfer-token',
+            relayHostId: 'mac-studio',
+          },
+        ],
+      },
+      [makeRelayDevice()],
+    );
+
+    const daemonRows = projected.filter((host) => host.daemonHostId === 'mac-studio');
+    expect(daemonRows).toHaveLength(1);
+    expect(daemonRows[0]).toEqual(expect.objectContaining({
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+      authToken: 'daemon-token',
+    }));
+    expect(daemonRows[0].relayEndpointCandidates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'relay-rtc', relayHostId: 'mac-studio' }),
+    ]));
+  });
 });

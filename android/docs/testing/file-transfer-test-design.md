@@ -51,6 +51,9 @@
 - Client download must batch native persistence without changing wire chunk semantics. Eight 16 KiB chunks are at most one 128 KiB native batch; a 100 MiB transfer therefore uses at most 800 native write calls instead of 6,400. Batch order, append semantics, empty-file behavior, and final size must be exact.
 - Native batch write must reject an empty batch and an oversized batch. It must not concatenate padded base64 strings before decoding.
 - Permission/list failures are explicit UI errors, never fake empty directories.
+- Remote browser mode is a current-cwd browser, not the sync sheet. It must not read/show local sync directories, must avoid fixed-height blank panels, and must route text/code preview through bounded download chunks.
+- Remote text preview must decode each base64 wire chunk independently before TextDecoder streaming. Padded base64 chunks must never be concatenated and decoded as one string.
+- Daemon remote directory listing is cached by resolved path. A list request reads the cache and applies only projection filtering; file-system changes are observed by a path-local watcher that refreshes the cache. Do not rescan whole trees or walk beyond the requested directory for each connection.
 
 ## Positive And Negative Matrix
 

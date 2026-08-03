@@ -94,6 +94,7 @@
 - Relay 是连接保障和同步增强，不是进入终端的 gate；未登录、登录失败或退出登录时，已保存 direct/Tailscale connections 与当前 active Sessions 仍必须可见可用。
 - 用户只输入 relay 账号和密码；relay base URL、WS、TURN 与 signal 地址不进入用户配置面。
 - Relay 登录成功后可以同步/补充所有连接候选，包括 Tailscale/local/direct endpoint，但不得删除、替换或隐藏 saved Host truth；Auto 连接顺序固定为 private LAN IPv4、Tailscale/direct websocket、WebRTC UDP direct/hole-punch、TURN Relay，并由目标级 heartbeat / route health 周期更新下一代 transport 的线路选择。
+- Relay 鉴权是 account-scoped、token-per-login：同一账号允许多台 client device 与多个 daemon device 同时在线，每次登录新增独立 token，不得替换或撤销其他设备 token。普通密码修改保留已有 token；只有显式“退出所有设备”安全动作才能全局撤销。
 - 首页禁止投影或管理 Session group、Session 子列表、tab 列表与 tab 保存；实时 Session 列表、切换、关闭和预览只属于 Terminal drawer / picker。
 - relay 登录密码只用于当次认证，不持久化明文；持久化真相是 token、account directory 与 relay client settings。
 
@@ -455,7 +456,7 @@ daemon server
 - daemon 的 host / port / auth token 真源在 `~/.wterm/config.json -> mobile.daemon`
 - client 侧按服务器维度记住 `bridgeHost + bridgePort + authToken`，并在 picker / connection form / reconnect 时复用
 - 连通性探测必须显式触发；未填写 token 时禁止自动探测 / 自动重试 tmux 列表
-- websocket mux 采用物理 target 级保活观测：一个 daemon target 的物理 WebSocket/RTC transport 只有一个 app-level `mux-ping` timer，logical tmux session/channel 不得各自发 heartbeat；正常周期为低频 60 秒级。合法 mux frame 更新 target activity，channel 切换、foreground resume、body-subscription 变化不得新建 heartbeat 或物理 transport。只有物理 `close/error`、send 抛错、daemon 不可达，或 target health owner 明确确认物理 transport 失效，才允许进入 target 重建；单个 channel 错误只能重开该 channel。
+- websocket mux 采用物理 target 级保活观测：一个 daemon target 的物理 WebSocket/RTC transport 只有一个 app-level `mux-ping` timer，logical tmux session/channel 不得各自发 heartbeat；正常周期为低频 30 秒。合法 mux frame 更新 target activity，channel 切换、foreground resume、body-subscription 变化不得新建 heartbeat 或物理 transport。只有物理 `close/error`、send 抛错、daemon 不可达，或 target health owner 明确确认物理 transport 失效，才允许进入 target 重建；单个 channel 错误只能重开该 channel。
 - 核心 transport policy 的 Rust 迁移登记在 `docs/goals/terminal-transport-multiplex-refactor-plan.md#10-rust-migration-register`。`status: planned` 只表示目标态：当前 target network probe 的唯一 runtime owner 仍是 `src/contexts/session-context-target-network-probe-runtime.ts#createSessionTargetNetworkProbeRuntime`；Rust crate、parity gate、bridge 和旧 TS owner 物理删除全部完成前，禁止把计划路径声明成 active truth。
 - daemon 初始化 / attach 阶段任何 `tmux capture-pane` 失败都只能记录错误并继续提供 `head + range` 能力；禁止再降级成第二套 snapshot 语义，也不允许因此让 daemon 进程退出
 

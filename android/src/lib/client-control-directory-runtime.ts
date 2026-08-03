@@ -1,4 +1,5 @@
 import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
+import type { TraversalRelayClientSettings } from './bridge-settings';
 import type { Host, TraversalRelayDeviceSnapshot } from './types';
 
 export interface ClientControlDirectoryEntry {
@@ -31,7 +32,18 @@ function endpointTruthKey(endpoints: RelayEndpointCandidate[]) {
 export class ClientControlDirectoryRuntime {
   private readonly entries = new Map<string, ClientControlDirectoryEntry>();
 
-  public replaceFromDevices(devices: TraversalRelayDeviceSnapshot[]) {
+  private readonly listeners = new Set<() => void>();
+
+  private confirmed = false;
+
+  private confirmationGeneration = 0;
+
+  private relaySettings: TraversalRelayClientSettings | null = null;
+
+  public replaceFromDevices(
+    devices: TraversalRelayDeviceSnapshot[],
+    relaySettings?: TraversalRelayClientSettings,
+  ) {
     const nextHostIds = new Set<string>();
     for (const device of devices) {
       const daemonHostId = device.daemon.hostId.trim();
@@ -57,6 +69,51 @@ export class ClientControlDirectoryRuntime {
         this.entries.delete(daemonHostId);
       }
     }
+    this.confirmed = true;
+    this.confirmationGeneration += 1;
+    if (relaySettings) {
+      this.relaySettings = { ...relaySettings };
+    }
+    this.notify();
+  }
+
+  public markUnconfirmed() {
+    this.confirmed = false;
+    this.entries.clear();
+    this.confirmationGeneration += 1;
+    this.notify();
+  }
+
+  public isConfirmed() {
+    return this.confirmed;
+  }
+
+  public readRelaySettings() {
+    return this.relaySettings ? { ...this.relaySettings } : null;
+  }
+
+  public readStatus(daemonHostId?: string | null) {
+    const normalizedDaemonHostId = daemonHostId?.trim() || '';
+    return {
+      confirmed: this.confirmed,
+      generation: this.confirmationGeneration,
+      daemonHostId: normalizedDaemonHostId || null,
+      targetPresent: normalizedDaemonHostId
+        ? this.entries.has(normalizedDaemonHostId)
+        : null,
+      knownDaemonHostIds: [...this.entries.keys()].sort(),
+    };
+  }
+
+  public subscribe(listener: () => void) {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private notify() {
+    for (const listener of this.listeners) {
+      listener();
+    }
   }
 
   public read(daemonHostId: string) {
@@ -71,6 +128,10 @@ export class ClientControlDirectoryRuntime {
 
   public clear() {
     this.entries.clear();
+    this.confirmed = false;
+    this.relaySettings = null;
+    this.confirmationGeneration += 1;
+    this.notify();
   }
 }
 

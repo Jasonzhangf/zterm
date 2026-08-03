@@ -3,13 +3,16 @@ package com.zterm.android;
 import android.Manifest;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.webkit.MimeTypeMap;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.provider.Settings;
+import android.system.Os;
 import android.util.Base64;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 import com.getcapacitor.JSArray;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
@@ -96,6 +99,40 @@ public class StoragePermissionPlugin extends Plugin {
             throw new IOException(name + " is outside integer range");
         }
         return (int) value;
+    }
+
+    private File createSiblingTempFile(File target) throws IOException {
+        File parent = target.getParentFile();
+        if (parent == null || (!parent.exists() && !parent.mkdirs())) {
+            throw new IOException("Unable to create parent directory: " + target.getPath());
+        }
+        String prefix = target.getName();
+        if (prefix.length() < 3) {
+            prefix = "zterm-" + prefix;
+        }
+        return File.createTempFile(prefix, ".tmp", parent);
+    }
+
+    private void publishTempFileAtomically(File temp, File target) throws Exception {
+        Os.rename(temp.getPath(), target.getPath());
+    }
+
+    private long copyFileToOutput(File source, FileOutputStream output) throws IOException {
+        long copiedBytes = 0L;
+        try (FileInputStream input = new FileInputStream(source)) {
+            byte[] buffer = new byte[64 * 1024];
+            int read;
+            while ((read = input.read(buffer)) != -1) {
+                output.write(buffer, 0, read);
+                copiedBytes += read;
+            }
+        }
+        output.getFD().sync();
+        return copiedBytes;
+    }
+
+    private boolean sameFileIdentity(File file, long size, long modified) {
+        return file.exists() && file.isFile() && file.length() == size && file.lastModified() == modified;
     }
 
     private JSObject buildFileEntry(File file) {
@@ -257,8 +294,17 @@ public class StoragePermissionPlugin extends Plugin {
             }
             String data = call.getString("data", "");
             byte[] bytes = Base64.decode(data, Base64.DEFAULT);
-            try (FileOutputStream output = new FileOutputStream(target)) {
+            File temp = createSiblingTempFile(target);
+            boolean published = false;
+            try (FileOutputStream output = new FileOutputStream(temp, false)) {
                 output.write(bytes);
+                output.getFD().sync();
+                publishTempFileAtomically(temp, target);
+                published = true;
+            } finally {
+                if (!published && temp.exists()) {
+                    temp.delete();
+                }
             }
             call.resolve();
         } catch (Exception error) {
@@ -294,6 +340,152 @@ public class StoragePermissionPlugin extends Plugin {
         } catch (Exception error) {
             call.reject(error.getMessage());
         }
+    }
+
+    @PluginMethod
+    public void copyFile(PluginCall call) {
+        if (!ensureStoragePermission(call)) {
+            return;
+        }
+        try {
+            File source = resolveExternalStoragePath(call.getString("sourcePath", ""));
+            File target = resolveExternalStoragePath(call.getString("targetPath", ""));
+            if (!source.exists() || !source.isFile()) {
+                call.reject("Source path is not a file: " + source.getPath());
+                return;
+            }
+            File parent = target.getParentFile();
+            if (parent == null || (!parent.exists() && !parent.mkdirs())) {
+                call.reject("Unable to create parent directory: " + target.getPath());
+                return;
+            }
+            File temp = createSiblingTempFile(target);
+            long copiedBytes = 0L;
+            boolean published = false;
+            try (FileOutputStream output = new FileOutputStream(temp, false)) {
+                copiedBytes = copyFileToOutput(source, output);
+                publishTempFileAtomically(temp, target);
+                published = true;
+            } finally {
+                if (!published && temp.exists()) {
+                    temp.delete();
+                }
+            }
+            JSObject result = new JSObject();
+            result.put("bytesWritten", copiedBytes);
+            call.resolve(result);
+        } catch (Exception error) {
+            call.reject(error.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void createStableFileSnapshot(PluginCall call) {
+        if (!ensureStoragePermission(call)) {
+            return;
+        }
+        try {
+            File source = resolveExternalStoragePath(call.getString("sourcePath", ""));
+            File snapshot = resolveExternalStoragePath(call.getString("snapshotPath", ""));
+            if (!source.exists() || !source.isFile()) {
+                call.reject("Source path is not a file: " + source.getPath());
+                return;
+            }
+            long sourceSize = source.length();
+            long sourceModified = source.lastModified();
+            File temp = createSiblingTempFile(snapshot);
+            long copiedBytes = 0L;
+            boolean published = false;
+            try (FileOutputStream output = new FileOutputStream(temp, false)) {
+                copiedBytes = copyFileToOutput(source, output);
+                if (copiedBytes != sourceSize || !sameFileIdentity(source, sourceSize, sourceModified)) {
+                    throw new IOException("Source file changed while creating snapshot");
+                }
+                publishTempFileAtomically(temp, snapshot);
+                published = true;
+            } finally {
+                if (!published && temp.exists()) {
+                    temp.delete();
+                }
+            }
+            JSObject result = new JSObject();
+            result.put("path", snapshot.getPath());
+            result.put("size", copiedBytes);
+            result.put("modified", snapshot.lastModified());
+            call.resolve(result);
+        } catch (Exception error) {
+            call.reject(error.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void deleteFile(PluginCall call) {
+        if (!ensureStoragePermission(call)) {
+            return;
+        }
+        try {
+            File target = resolveExternalStoragePath(call.getString("path", ""));
+            if (!target.exists()) {
+                call.resolve();
+                return;
+            }
+            if (!target.isFile()) {
+                call.reject("Path is not a file: " + target.getPath());
+                return;
+            }
+            if (!target.delete()) {
+                call.reject("Unable to delete file: " + target.getPath());
+                return;
+            }
+            call.resolve();
+        } catch (Exception error) {
+            call.reject(error.getMessage());
+        }
+    }
+
+    @PluginMethod
+    public void openFile(PluginCall call) {
+        if (!ensureStoragePermission(call)) {
+            return;
+        }
+        try {
+            File target = resolveExternalStoragePath(call.getString("path", ""));
+            if (!target.exists() || !target.isFile()) {
+                call.reject("Path is not a file: " + target.getPath());
+                return;
+            }
+            String explicitMime = call.getString("mimeType", "");
+            String mimeType = explicitMime == null || explicitMime.trim().isEmpty()
+                ? guessMimeType(target)
+                : explicitMime.trim();
+            Uri uri = FileProvider.getUriForFile(
+                getContext(),
+                getContext().getPackageName() + ".fileprovider",
+                target
+            );
+            Intent intent = new Intent(Intent.ACTION_EDIT);
+            intent.setDataAndType(uri, mimeType);
+            intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            intent.addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            getContext().startActivity(Intent.createChooser(intent, "Open file"));
+            call.resolve();
+        } catch (Exception error) {
+            call.reject(error.getMessage());
+        }
+    }
+
+    private String guessMimeType(File target) {
+        String name = target.getName();
+        int dotIndex = name.lastIndexOf('.');
+        if (dotIndex >= 0 && dotIndex + 1 < name.length()) {
+            String extension = name.substring(dotIndex + 1).toLowerCase();
+            String detected = MimeTypeMap.getSingleton().getMimeTypeFromExtension(extension);
+            if (detected != null && !detected.trim().isEmpty()) {
+                return detected;
+            }
+        }
+        return "text/plain";
     }
 
     @PluginMethod

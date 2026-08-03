@@ -9,6 +9,7 @@ import {
   handleTerminalInputAck,
   resetTerminalReliableInputRuntimeForTests,
   sendInputThroughSessionTransport,
+  TERMINAL_RELIABLE_INPUT_ACK_TIMEOUT_MS,
   TERMINAL_RELIABLE_INPUT_RETRY_MS,
 } from './session-context-input-runtime';
 import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
@@ -26,11 +27,12 @@ function createResource(
   sessionId: string,
   socket: any = null,
   channel: any = null,
+  targetRuntime: any = null,
 ) {
   return {
     sessionId,
     runtime: null,
-    targetRuntime: null,
+    targetRuntime,
     targetKey: '100.64.0.1:3333:',
     host: null,
     socket,
@@ -136,7 +138,7 @@ describe('session-context-input-runtime', () => {
     expect(options.requestSessionBufferHead).not.toHaveBeenCalled();
   });
 
-  it('uses reliable seq ack retry only after the connected daemon advertises support', () => {
+  it('waits for reliable input ack without timer-based duplicate sends', () => {
     vi.useFakeTimers();
     const sendSocketPayload = vi.fn();
 
@@ -155,14 +157,8 @@ describe('session-context-input-runtime', () => {
       attempt: 1,
     });
 
-    vi.advanceTimersByTime(TERMINAL_RELIABLE_INPUT_RETRY_MS);
-    expect(sendSocketPayload).toHaveBeenCalledTimes(2);
-    const retry = parseSentReliableInputPayload(sendSocketPayload, 1);
-    expect(retry).toMatchObject({
-      seq: first.seq,
-      data: 'pwd\r',
-      attempt: 2,
-    });
+    vi.advanceTimersByTime(TERMINAL_RELIABLE_INPUT_RETRY_MS * 5);
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
 
     handleTerminalInputAck('session-2', {
       version: 1,
@@ -171,7 +167,89 @@ describe('session-context-input-runtime', () => {
       bytes: 4,
     });
     vi.advanceTimersByTime(TERMINAL_RELIABLE_INPUT_RETRY_MS * 2);
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+  });
+
+  it('retries the same reliable input seq after the ack timeout', () => {
+    vi.useFakeTimers();
+    const sendSocketPayload = vi.fn();
+
+    sendInput({
+      refs: {
+        sessionsRef: { current: [{ id: 'session-2', reliableInputSupported: true } as any] },
+        stateRef: { current: { activeSessionId: 'session-2' } },
+      },
+      sendSocketPayload,
+    });
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    const first = parseSentReliableInputPayload(sendSocketPayload);
+    vi.advanceTimersByTime(TERMINAL_RELIABLE_INPUT_ACK_TIMEOUT_MS - 1);
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(1);
     expect(sendSocketPayload).toHaveBeenCalledTimes(2);
+    expect(parseSentReliableInputPayload(sendSocketPayload, 1)).toMatchObject({
+      seq: first.seq,
+      data: 'pwd\r',
+      attempt: 2,
+    });
+  });
+
+  it('retries the same reliable input seq when the physical transport changes on the same route', () => {
+    vi.useFakeTimers();
+    const sendSocketPayload = vi.fn();
+    const oldWs = createSocket(WebSocket.OPEN);
+    const newWs = createSocket(WebSocket.OPEN);
+    let currentWs = oldWs;
+
+    sendInput({
+      refs: {
+        sessionsRef: { current: [{ id: 'session-2', reliableInputSupported: true } as any] },
+        stateRef: { current: { activeSessionId: 'session-2' } },
+      },
+      daemonConnection: createDaemonConnection((sessionId) => createResource(sessionId, currentWs)),
+      sendSocketPayload,
+    });
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    const first = parseSentReliableInputPayload(sendSocketPayload);
+    currentWs = newWs;
+    vi.advanceTimersByTime(TERMINAL_RELIABLE_INPUT_RETRY_MS);
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(2);
+    expect(parseSentReliableInputPayload(sendSocketPayload, 1)).toMatchObject({
+      seq: first.seq,
+      data: 'pwd\r',
+      attempt: 2,
+    });
+  });
+
+  it('does not retry reliable input when only route configuration changes under the same socket', () => {
+    vi.useFakeTimers();
+    const sendSocketPayload = vi.fn();
+    const ws = createSocket(WebSocket.OPEN);
+    let routeGeneration = 0;
+
+    sendInput({
+      refs: {
+        sessionsRef: { current: [{ id: 'session-2', reliableInputSupported: true } as any] },
+        stateRef: { current: { activeSessionId: 'session-2' } },
+      },
+      daemonConnection: createDaemonConnection((sessionId) => createResource(
+        sessionId,
+        ws,
+        null,
+        { routeGeneration },
+      )),
+      sendSocketPayload,
+    });
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    routeGeneration = 1;
+    vi.advanceTimersByTime(TERMINAL_RELIABLE_INPUT_RETRY_MS);
+
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
   });
 
   it('does not send the next reliable chunk until the daemon acks the current chunk', () => {

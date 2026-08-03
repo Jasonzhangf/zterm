@@ -47,6 +47,7 @@ interface RelayDebugRequestPayload {
 type RelayDeviceStreamMessage =
   | { type?: 'devices-snapshot' | 'device-updated'; payload?: { devices?: TraversalRelayDeviceSnapshot[] } }
   | { type?: 'directory-snapshot'; payload?: { directory?: unknown } }
+  | { type?: 'control-pong'; payload?: { sentAt?: number; receivedAt?: number } }
   | { type?: 'relay-error'; reason?: string }
   | { type?: 'client-debug-request'; payload?: RelayDebugRequestPayload };
 
@@ -118,6 +119,32 @@ export function resolveTraversalRelayBaseUrl(input?: string | null) {
 
 function buildHttpUrl(baseUrl: string, path: string) {
   return new URL(path.replace(/^\//, ''), normalizeTraversalRelayBaseUrl(baseUrl)).toString();
+}
+
+export class TraversalRelayAuthenticationError extends Error {
+  readonly status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'TraversalRelayAuthenticationError';
+    this.status = status;
+  }
+}
+
+export function isTraversalRelayAuthenticationError(error: unknown): error is TraversalRelayAuthenticationError {
+  return error instanceof TraversalRelayAuthenticationError
+    || (error instanceof Error && error.name === 'TraversalRelayAuthenticationError');
+}
+
+async function readTraversalRelayAuthPayload(response: Response, allowInvalidJson: boolean) {
+  try {
+    return await response.json() as TraversalRelayAuthPayload;
+  } catch (error) {
+    if (allowInvalidJson) {
+      return {} as TraversalRelayAuthPayload;
+    }
+    throw error;
+  }
 }
 
 function resolvePlatform() {
@@ -466,7 +493,11 @@ export async function traversalRelayRefreshMe(state: TraversalRelayAccountState)
       authorization: `Bearer ${normalizedState.accessToken}`,
     },
   });
-  const payload = await response.json() as TraversalRelayAuthPayload;
+  if (!response.ok && (response.status === 401 || response.status === 403)) {
+    const payload = await readTraversalRelayAuthPayload(response, true);
+    throw new TraversalRelayAuthenticationError(payload.message || 'Relay 登录已失效', response.status);
+  }
+  const payload = await readTraversalRelayAuthPayload(response, !response.ok);
   if (!response.ok) {
     throw new Error(payload.message || `me failed: HTTP ${response.status}`);
   }
@@ -501,6 +532,7 @@ export function connectTraversalRelayDevicesStream(options: {
   account: TraversalRelayAccountState;
   onDevices: (devices: TraversalRelayDeviceSnapshot[]) => void;
   onDirectory?: (directory: RelayAccountDirectory) => void;
+  onControlPong?: (payload: { sentAt?: number; receivedAt?: number }) => void;
   onOpen?: () => void;
   onError?: (message: string) => void;
   onClose?: (event: CloseEvent) => void;
@@ -559,6 +591,10 @@ export function connectTraversalRelayDevicesStream(options: {
           updatedAt: Date.now(),
         });
         options.onDirectory?.(directory);
+        return;
+      }
+      if (payload.type === 'control-pong') {
+        options.onControlPong?.(payload.payload || {});
         return;
       }
       if (payload.type === 'relay-error') {

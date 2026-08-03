@@ -5,6 +5,7 @@ import { shouldResumeForeground } from '@zterm/shared/terminal/foreground-resume
 import { SESSION_STATUS_EVENT } from '../contexts/SessionContext';
 import { createForegroundRefreshRuntime, markForegroundRuntimeHidden } from '../lib/app-foreground-refresh';
 import { runtimeDebug } from '../lib/runtime-debug';
+import { startBackgroundService, stopBackgroundService, updateSessionCount } from '../plugins/BackgroundServicePlugin';
 import type { Session } from '../lib/types';
 import type { SessionTargetNetworkSignal } from '../contexts/session-context-target-network-probe-runtime';
 
@@ -21,6 +22,7 @@ export type OpenTabAuditReason =
 
 type ForegroundResumeReason = Extract<OpenTabAuditReason, 'visibilitychange' | 'resume' | 'appStateChange' | 'online'>;
 type ForegroundResumeSignalReason = Exclude<ForegroundResumeReason, 'online'>;
+export const BACKGROUND_HANDOFF_WAKE_LOCK_MS = 5 * 60 * 1000;
 
 interface UseOpenTabLifecycleEffectsOptions {
   sessionsRef: MutableRefObject<Session[]>;
@@ -29,6 +31,7 @@ interface UseOpenTabLifecycleEffectsOptions {
     activeSessionId: string | null;
   }>;
   foregroundRefreshRuntimeRef: MutableRefObject<ReturnType<typeof createForegroundRefreshRuntime>>;
+  retainedSessionCount: number;
   onForegroundActiveChange?: (active: boolean) => void;
   onForegroundResume?: (reason: ForegroundResumeSignalReason) => void;
   auditOpenTabsAgainstRemoteSessions: (reason: OpenTabAuditReason) => Promise<void>;
@@ -38,11 +41,59 @@ interface UseOpenTabLifecycleEffectsOptions {
   bumpFollowResetEpoch: () => void;
 }
 
+export function useBackgroundLiveSessionHandoff(options: {
+  appForegroundActive: boolean;
+  liveSessionIds?: string[];
+  setActiveBodySubscriptionSuppressed: (suppressed: boolean) => void;
+  setLiveSessionIds: (sessionIds: string[]) => void;
+}) {
+  const {
+    appForegroundActive,
+    liveSessionIds,
+    setActiveBodySubscriptionSuppressed,
+    setLiveSessionIds,
+  } = options;
+  const liveSessionClearTimerRef = useRef<number | null>(null);
+  const latestLiveSessionIdsRef = useRef<string[]>([]);
+  const clearedLiveSessionIdsRef = useRef<string[] | null>(null);
+
+  useEffect(() => {
+    latestLiveSessionIdsRef.current = (liveSessionIds || []).filter(Boolean);
+  }, [liveSessionIds]);
+
+  useEffect(() => {
+    const clearLiveSessionTimer = () => {
+      if (liveSessionClearTimerRef.current === null) {
+        return;
+      }
+      window.clearTimeout(liveSessionClearTimerRef.current);
+      liveSessionClearTimerRef.current = null;
+    };
+    clearLiveSessionTimer();
+    if (appForegroundActive === false) {
+      setActiveBodySubscriptionSuppressed(true);
+      liveSessionClearTimerRef.current = window.setTimeout(() => {
+        liveSessionClearTimerRef.current = null;
+        clearedLiveSessionIdsRef.current = latestLiveSessionIdsRef.current;
+        setLiveSessionIds([]);
+      }, BACKGROUND_HANDOFF_WAKE_LOCK_MS);
+      return clearLiveSessionTimer;
+    }
+    setActiveBodySubscriptionSuppressed(false);
+    if (clearedLiveSessionIdsRef.current && clearedLiveSessionIdsRef.current.length > 0) {
+      setLiveSessionIds(clearedLiveSessionIdsRef.current);
+    }
+    clearedLiveSessionIdsRef.current = null;
+    return clearLiveSessionTimer;
+  }, [appForegroundActive, setActiveBodySubscriptionSuppressed, setLiveSessionIds]);
+}
+
 export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOptions) {
   const {
     sessionsRef,
     openTabStateRef,
     foregroundRefreshRuntimeRef,
+    retainedSessionCount,
     onForegroundActiveChange,
     onForegroundResume,
     auditOpenTabsAgainstRemoteSessions,
@@ -64,6 +115,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     notifyTargetNetworkSignal,
     bumpFollowResetEpoch,
   };
+  const nativeBackgroundServiceRunningRef = useRef(false);
 
   const maybeProjectForegroundResume = useCallback((reason: ForegroundResumeSignalReason) => {
     const now = Date.now();
@@ -106,9 +158,50 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
   }, [foregroundRefreshRuntimeRef, openTabStateRef, sessionsRef]);
 
   useEffect(() => {
+    let foregroundProjectionActive = true;
+
+    const projectForegroundActive = (active: boolean) => {
+      if (foregroundProjectionActive === active) {
+        return;
+      }
+      foregroundProjectionActive = active;
+      callbacksRef.current.onForegroundActiveChange?.(active);
+    };
+
+    const countRetainedSessions = () => (
+      sessionsRef.current.filter((session) => session.state !== 'closed').length
+    );
+
+    const startNativeBackgroundService = () => {
+      const sessionCount = countRetainedSessions();
+      if (sessionCount <= 0) {
+        if (nativeBackgroundServiceRunningRef.current) {
+          stopBackgroundService();
+          nativeBackgroundServiceRunningRef.current = false;
+        }
+        return;
+      }
+      nativeBackgroundServiceRunningRef.current = true;
+      startBackgroundService(sessionCount);
+      runtimeDebug('app.background.service.start', {
+        sessionCount,
+        handoffWakeLockMs: BACKGROUND_HANDOFF_WAKE_LOCK_MS,
+      });
+    };
+
+    const stopNativeBackgroundService = () => {
+      if (!nativeBackgroundServiceRunningRef.current) {
+        return;
+      }
+      nativeBackgroundServiceRunningRef.current = false;
+      stopBackgroundService();
+      runtimeDebug('app.background.service.stop', {});
+    };
+
     const markHidden = () => {
-      callbacksRef.current.onForegroundActiveChange?.(false);
       markForegroundRuntimeHidden(foregroundRefreshRuntimeRef.current, document.visibilityState);
+      projectForegroundActive(false);
+      startNativeBackgroundService();
     };
 
     const onVisibilityChange = () => {
@@ -122,13 +215,15 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
       }
 
       if (document.visibilityState === 'visible' && foregroundRefreshRuntimeRef.current.wasHidden) {
-        callbacksRef.current.onForegroundActiveChange?.(true);
+        stopNativeBackgroundService();
+        projectForegroundActive(true);
         maybeProjectForegroundResume('visibilitychange');
       }
     };
 
     const onDocumentResume = () => {
-      callbacksRef.current.onForegroundActiveChange?.(true);
+      stopNativeBackgroundService();
+      projectForegroundActive(true);
       runtimeDebug('app.document.resume', {});
       maybeProjectForegroundResume('resume');
     };
@@ -174,7 +269,8 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
         markHidden();
         return;
       }
-      callbacksRef.current.onForegroundActiveChange?.(true);
+      stopNativeBackgroundService();
+      projectForegroundActive(true);
       maybeProjectForegroundResume('appStateChange');
     });
 
@@ -184,6 +280,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     window.addEventListener('online', onNetworkOnline);
 
     return () => {
+      stopNativeBackgroundService();
       void Promise.resolve(appStateListenerHandle)
         .then((listener) => listener?.remove?.())
         .catch((error) => {
@@ -204,6 +301,22 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     maybeProjectForegroundResume,
     openTabStateRef,
   ]);
+
+  useEffect(() => {
+    if (!nativeBackgroundServiceRunningRef.current) {
+      return;
+    }
+    if (retainedSessionCount <= 0) {
+      nativeBackgroundServiceRunningRef.current = false;
+      stopBackgroundService();
+      runtimeDebug('app.background.service.stop.empty', {});
+      return;
+    }
+    updateSessionCount(retainedSessionCount);
+    runtimeDebug('app.background.service.update', {
+      sessionCount: retainedSessionCount,
+    });
+  }, [retainedSessionCount]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {

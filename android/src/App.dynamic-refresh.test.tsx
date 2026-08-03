@@ -94,6 +94,7 @@ const sessionHarness = vi.hoisted(() => {
   const resumeActiveSessionTransport = vi.fn(() => true);
   const notifyTargetNetworkSignal = vi.fn();
   const setLiveSessionIds = vi.fn();
+  const setActiveBodySubscriptionSuppressed = vi.fn();
   const createSession = vi.fn();
   const closeSession = vi.fn();
   const switchSession = vi.fn();
@@ -142,6 +143,7 @@ const sessionHarness = vi.hoisted(() => {
     resumeActiveSessionTransport,
     notifyTargetNetworkSignal,
     setLiveSessionIds,
+    setActiveBodySubscriptionSuppressed,
     createSession,
     closeSession,
     switchSession,
@@ -187,6 +189,7 @@ const sessionHarness = vi.hoisted(() => {
       resumeActiveSessionTransport.mockReturnValue(true);
       notifyTargetNetworkSignal.mockReset();
       setLiveSessionIds.mockReset();
+      setActiveBodySubscriptionSuppressed.mockReset();
       createSession.mockReset();
       closeSession.mockReset();
       switchSession.mockReset();
@@ -352,7 +355,7 @@ const capacitorAppHarness = vi.hoisted(() => {
     },
     reset() {
       listenersByEventName = {};
-      this.addListener.mockReset();
+      this.addListener.mockClear();
     },
   };
 });
@@ -398,6 +401,7 @@ vi.mock('./contexts/SessionContext', () => ({
     reconnectSession: sessionHarness.reconnectSession,
     reconnectAllSessions: sessionHarness.reconnectAllSessions,
     setLiveSessionIds: sessionHarness.setLiveSessionIds,
+    setActiveBodySubscriptionSuppressed: sessionHarness.setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport: sessionHarness.resumeActiveSessionTransport,
     notifyTargetNetworkSignal: sessionHarness.notifyTargetNetworkSignal,
     getActiveSession: () => sessionHarness.readStaleActiveSession(),
@@ -1570,7 +1574,14 @@ describe('App dynamic refresh matrix', () => {
     }
   });
 
-  it('drives SessionProvider foreground truth from lifecycle events', async () => {
+  it('suppresses terminal body immediately but preserves live panes until the five-minute background grace expires', async () => {
+    vi.useFakeTimers();
+    sessionHarness.update({
+      sessions: [makeSession('s1', 1), makeSession('s2', 2)],
+      activeSessionId: 's1',
+      connectedCount: 2,
+      liveSessionIds: ['s1', 's2'],
+    } as any);
     const view = render(<App />);
 
     expect(screen.getByTestId('provider-foreground').textContent?.startsWith('1')).toBe(true);
@@ -1583,6 +1594,8 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
     expect(screen.getByTestId('provider-foreground').textContent?.startsWith('0')).toBe(true);
+    expect(sessionHarness.setLiveSessionIds).not.toHaveBeenCalledWith([]);
+    expect(sessionHarness.setActiveBodySubscriptionSuppressed).toHaveBeenCalledWith(true);
 
     act(() => {
       Object.defineProperty(document, 'visibilityState', {
@@ -1592,6 +1605,29 @@ describe('App dynamic refresh matrix', () => {
       document.dispatchEvent(new Event('visibilitychange'));
     });
     expect(screen.getByTestId('provider-foreground').textContent?.startsWith('1')).toBe(true);
+    expect(sessionHarness.setActiveBodySubscriptionSuppressed).toHaveBeenCalledWith(false);
+    expect(sessionHarness.setLiveSessionIds).not.toHaveBeenCalledWith([]);
+
+    act(() => {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'hidden',
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    act(() => {
+      vi.advanceTimersByTime(5 * 60 * 1000);
+    });
+    expect(sessionHarness.setLiveSessionIds).toHaveBeenCalledWith([]);
+
+    act(() => {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => 'visible',
+      });
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    expect(sessionHarness.setLiveSessionIds).toHaveBeenCalledWith(['s1', 's2']);
 
     view.unmount();
   });

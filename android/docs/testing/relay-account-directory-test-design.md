@@ -24,10 +24,10 @@ daemon tmux truth
 ## White-Box Plan
 
 - `src/traversal-relay/store.test.ts`
-  - persists directory endpoints and sessions per account.
+  - persists directory endpoints and sessions per account while the daemon is online.
   - migrates old device-only store into empty directory blocks.
   - rejects account cross-read and invalid daemon hostId.
-  - daemon disconnect changes presence but preserves last published directory facts as stale.
+  - daemon disconnect changes presence and preserves daemon identity/lastSeen, but output clears endpoints/sessions so old clients cannot connect to stale routes.
 - `src/traversal-relay/server.test.ts`
   - `GET /api/directory` requires auth and isolates users.
   - `/ws/host` accepts `directory-update` only from authenticated daemon.
@@ -101,10 +101,14 @@ daemon tmux truth
 
 ## Positive / Negative Pairing
 
+- Positive: two independent logins for one account issue two distinct access tokens; both tokens remain valid concurrently for `/api/auth/me`, `/api/directory`, and separate `/ws/devices` connections keyed by their concrete `deviceId`.
+- Negative: logging in from device B must not revoke, replace, disconnect, or overwrite device A's account token or device-presence identity.
+- Positive: one account may publish multiple daemon devices and each daemon remains independently addressable by stable `deviceId` plus `hostId`.
+- Negative: an unknown or explicitly revoked token is unauthorized and cannot read another account's directory; cached directory data must not be projected as live control truth after that rejection.
 - Positive: valid daemon update appears in directory.
 - Negative: invalid update does not overwrite existing directory with empty success.
 - Positive: online daemon without local preset is openable.
-- Negative: offline daemon with stale route is shown stale and cannot be silently treated as fresh.
+- Negative: offline daemon is shown stale without endpoint/session candidates and cannot be silently treated as connectable.
 - Positive: private LAN IPv4 wins before Tailscale, WebRTC direct, and TURN/Relay when no route has recent health.
 - Positive: Tailscale wins before public IPv4, WebRTC direct, and TURN/Relay by default.
 - Positive: slow Tailscale can lose to WebRTC direct when RTT health proves direct is faster, but it must not jump straight to TURN/Relay.

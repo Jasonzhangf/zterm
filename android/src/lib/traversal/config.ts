@@ -120,21 +120,30 @@ function buildDirectIceServers(settings: TraversalSettingsSource): TraversalIceS
 function addDirectCandidate(
   candidates: WebSocketTraversalCandidate[],
   seenUrls: Set<string>,
+  directoryEndpointLocations: Set<string>,
   path: TraversalResolvedPath,
   bridgeHost: string,
   bridgePort: number,
   authToken?: string,
   overrideUrl?: string,
   candidateId?: string,
+  isDirectoryCandidate = false,
 ) {
   const rawHost = bridgeHost.trim();
   if (!rawHost || (path !== 'tailscale' && path !== 'ipv6' && path !== 'ipv4')) {
     return;
   }
   const resolved = resolveBridgeEndpoint({ bridgeHost: rawHost, bridgePort });
+  const endpointLocation = `${path}:${resolved.displayEndpoint}`;
+  if (!isDirectoryCandidate && directoryEndpointLocations.has(endpointLocation)) {
+    return;
+  }
   const url = buildBridgeUrlFromTarget({ bridgeHost: rawHost, bridgePort, authToken }, overrideUrl);
   if (seenUrls.has(url)) {
     return;
+  }
+  if (isDirectoryCandidate) {
+    directoryEndpointLocations.add(endpointLocation);
   }
   seenUrls.add(url);
   candidates.push({
@@ -158,6 +167,7 @@ function resolveWsUrlHost(value: string) {
 function addDirectoryDirectCandidate(
   candidates: WebSocketTraversalCandidate[],
   seenUrls: Set<string>,
+  directoryEndpointLocations: Set<string>,
   endpoint: RelayEndpointCandidate,
   target: TraversalTargetSource,
 ) {
@@ -177,12 +187,14 @@ function addDirectoryDirectCandidate(
   addDirectCandidate(
     candidates,
     seenUrls,
+    directoryEndpointLocations,
     path,
     host,
     port,
     endpoint.authToken || target.authToken,
     endpoint.wsUrl,
     endpoint.id,
+    true,
   );
 }
 
@@ -225,6 +237,7 @@ export function buildTraversalPlan(
 
   const wsCandidates: WebSocketTraversalCandidate[] = [];
   const seenWsUrls = new Set<string>();
+  const directoryEndpointLocations = new Set<string>();
 
   if (mode !== 'webrtc') {
     const directCandidates = {
@@ -236,19 +249,19 @@ export function buildTraversalPlan(
       if (path === 'rtc-direct' || path === 'rtc-relay') {
         continue;
       }
-      addDirectCandidate(wsCandidates, seenWsUrls, path, directCandidates[path], target.bridgePort, target.authToken);
       for (const endpoint of target.relayEndpointCandidates || []) {
         if (
           endpoint.kind === path
           || (endpoint.kind === 'lan' && inferDirectPath(endpoint.host) === path)
         ) {
-          addDirectoryDirectCandidate(wsCandidates, seenWsUrls, endpoint, target);
+          addDirectoryDirectCandidate(wsCandidates, seenWsUrls, directoryEndpointLocations, endpoint, target);
         }
       }
+      addDirectCandidate(wsCandidates, seenWsUrls, directoryEndpointLocations, path, directCandidates[path], target.bridgePort, target.authToken);
     }
     const legacyPath = inferDirectPath(target.bridgeHost);
     if (legacyPath) {
-      addDirectCandidate(wsCandidates, seenWsUrls, legacyPath, target.bridgeHost, target.bridgePort, target.authToken);
+      addDirectCandidate(wsCandidates, seenWsUrls, directoryEndpointLocations, legacyPath, target.bridgeHost, target.bridgePort, target.authToken);
     }
   }
 

@@ -2,10 +2,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { DEFAULT_BRIDGE_SETTINGS, type BridgeSettings } from '../lib/bridge-settings';
 import { buildTraversalPlan } from '../lib/traversal/config';
 import { TraversalSocket } from '../lib/traversal/socket';
+import { defaultClientControlDirectoryRuntime } from '../lib/client-control-directory-runtime';
 import type { Host, Session } from '../lib/types';
 import { initialSessionManagerState, reduceSessionAction, type SessionAction, type SessionManagerState } from './session-context-core';
 import {
   applySessionActionRuntime,
+  applyTransportDiagnosticsRuntime,
   buildTraversalSocketForHostRuntime,
   isSessionTransportActiveRuntime,
   resolvePhysicalBodySubscribedSessionIdsRuntime,
@@ -105,9 +107,10 @@ function readTraversalSocketConstructorCall() {
 describe('applySessionActionRuntime', () => {
   beforeEach(() => {
     vi.mocked(TraversalSocket).mockClear();
+    defaultClientControlDirectoryRuntime.clear();
   });
 
-  it('does not let a legacy wsUrl override bypass route-aware relay candidates', () => {
+  it('waits for Relay control directory before using saved direct candidates on a route-aware daemon target', async () => {
     const host = buildHost({
       daemonHostId: 'mac-studio',
       relayHostId: 'mac-studio',
@@ -131,14 +134,58 @@ describe('applySessionActionRuntime', () => {
       ],
     });
 
-    buildTraversalSocketForHostRuntime({
+    const gatedSocket = buildTraversalSocketForHostRuntime({
       host,
       bridgeSettings: buildRelayBridgeSettings(),
       wsUrl: 'ws://100.66.1.82:3333/?token=legacy',
       transportRole: 'session',
     });
 
+    expect(gatedSocket.readyState).toBe(WebSocket.CONNECTING);
+    expect(vi.mocked(TraversalSocket)).not.toHaveBeenCalled();
+    const freshEndpoints = [
+      {
+        id: 'direct:tailscale:mac-studio:fresh',
+        kind: 'tailscale' as const,
+        host: '100.66.1.83',
+        port: 3333,
+        authRequired: true,
+        authToken: 'fresh-token',
+        lastSeenAt: '2026-08-01T00:00:00.000Z',
+      },
+      {
+        id: 'relay-rtc:mac-studio:fresh',
+        kind: 'relay-rtc' as const,
+        relayHostId: 'mac-studio',
+        authRequired: true,
+        authToken: 'fresh-token',
+        lastSeenAt: '2026-08-01T00:00:00.000Z',
+      },
+    ];
+    const confirmedRelaySettings = {
+      ...buildRelayBridgeSettings().traversalRelay!,
+      accessToken: 'access-2',
+    };
+    defaultClientControlDirectoryRuntime.replaceFromDevices([{
+      deviceId: 'mac-studio',
+      deviceName: 'Mac Studio',
+      platform: 'darwin',
+      appVersion: '0.1.3',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+      client: { connected: false, lastSeenAt: '' },
+      daemon: {
+        connected: true,
+        lastSeenAt: '2026-08-01T00:00:00.000Z',
+        hostId: 'mac-studio',
+        version: '0.1.3',
+        endpoints: freshEndpoints,
+        sessions: [],
+      },
+    }], confirmedRelaySettings);
+    await Promise.resolve();
+
     const [target, settings, options] = readTraversalSocketConstructorCall();
+    expect(settings.traversalRelay?.accessToken).toBe('access-2');
     expect(options).toMatchObject({
       overrideUrl: undefined,
       autoReconnect: false,
@@ -152,14 +199,97 @@ describe('applySessionActionRuntime', () => {
     expect(plan.candidates[0]).toMatchObject({
       kind: 'ws',
       path: 'tailscale',
-      endpoint: '100.66.1.82:3333',
+      endpoint: '100.66.1.83:3333',
     });
-    expect(plan.candidates[1]).toMatchObject({
+  });
+
+  it('waits for Relay control directory when the target has only relay route evidence', async () => {
+    const host = buildHost({
+      bridgeHost: '',
+      daemonHostId: 'mac-studio',
+      relayHostId: 'mac-studio',
+      transportMode: 'webrtc',
+      relayEndpointCandidates: [
+        {
+          id: 'relay-rtc:mac-studio',
+          kind: 'relay-rtc',
+          relayHostId: 'mac-studio',
+          authRequired: true,
+          lastSeenAt: '2026-07-18T00:00:00.000Z',
+        },
+      ],
+    });
+
+    const gatedSocket = buildTraversalSocketForHostRuntime({
+      host,
+      bridgeSettings: buildRelayBridgeSettings(),
+      transportRole: 'session',
+    });
+
+    expect(gatedSocket.readyState).toBe(WebSocket.CONNECTING);
+    expect(vi.mocked(TraversalSocket)).not.toHaveBeenCalled();
+    const confirmedRelaySettings = {
+      ...buildRelayBridgeSettings().traversalRelay!,
+      accessToken: 'access-2',
+    };
+    defaultClientControlDirectoryRuntime.replaceFromDevices([{
+      deviceId: 'mac-studio',
+      deviceName: 'Mac Studio',
+      platform: 'darwin',
+      appVersion: '0.1.3',
+      updatedAt: '2026-08-01T00:00:00.000Z',
+      client: { connected: false, lastSeenAt: '' },
+      daemon: {
+        connected: true,
+        lastSeenAt: '2026-08-01T00:00:00.000Z',
+        hostId: 'mac-studio',
+        version: '0.1.3',
+        endpoints: host.relayEndpointCandidates,
+        sessions: [],
+      },
+    }], confirmedRelaySettings);
+    await Promise.resolve();
+
+    const [target, settings, options] = readTraversalSocketConstructorCall();
+    expect(settings.traversalRelay?.accessToken).toBe('access-2');
+    expect(options).toMatchObject({
+      overrideUrl: undefined,
+      autoReconnect: false,
+    });
+    const plan = buildTraversalPlan(target, settings, options?.overrideUrl);
+    expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
+      'rtc-direct',
+      'rtc-relay',
+    ]);
+    expect(plan.candidates[0]).toMatchObject({
       kind: 'rtc',
       path: 'rtc-direct',
       endpoint: 'rtc-direct:mac-studio',
       iceTransportPolicy: 'all',
       iceServers: [{ urls: 'stun:relay.codewhisper.cc:3479' }],
+    });
+  });
+
+  it('opens a saved direct daemon immediately when identity has no Relay route evidence', () => {
+    buildTraversalSocketForHostRuntime({
+      host: buildHost({
+        daemonHostId: 'saved-mac-studio',
+        relayHostId: undefined,
+        relayEndpointCandidates: [],
+        signalUrl: undefined,
+        transportMode: 'auto',
+      }),
+      bridgeSettings: buildRelayBridgeSettings(),
+      wsUrl: 'ws://100.66.1.82:3333/?token=direct',
+      transportRole: 'session',
+    });
+
+    const [target, , options] = readTraversalSocketConstructorCall();
+    expect(target).toMatchObject({
+      bridgeHost: '100.66.1.82',
+    });
+    expect(options).toMatchObject({
+      autoReconnect: false,
     });
   });
 
@@ -281,5 +411,36 @@ describe('applySessionActionRuntime', () => {
       liveSessionIds: ['s2'],
       activeBodySubscriptionSuppressed: true,
     })]).toEqual(['s2']);
+  });
+});
+
+describe('applyTransportDiagnosticsRuntime', () => {
+  it('projects a control-directory wait into Session lifecycle truth before data transport opens', () => {
+    const updateSessionSync = vi.fn();
+    applyTransportDiagnosticsRuntime({
+      sessionId: 's1',
+      socket: {
+        readyState: WebSocket.CONNECTING,
+        onopen: null,
+        onmessage: null,
+        onerror: null,
+        onclose: null,
+        send: vi.fn(),
+        close: vi.fn(),
+        reportFailure: vi.fn(),
+        getDiagnostics: () => ({
+          mode: 'auto',
+          stage: 'connecting',
+          reason: 'waiting for confirmed control directory',
+          attempts: [],
+        }),
+      },
+      updateSessionSync,
+    });
+
+    expect(updateSessionSync).toHaveBeenCalledWith('s1', expect.objectContaining({
+      lastConnectStage: 'connecting',
+      lastError: 'waiting for confirmed control directory',
+    }));
   });
 });

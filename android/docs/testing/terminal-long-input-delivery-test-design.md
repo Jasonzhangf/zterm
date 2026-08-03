@@ -11,12 +11,15 @@ Long terminal input must preserve exact source text across the platform input ch
 | layer | owner feature | owner path | resource edge |
 | --- | --- | --- | --- |
 | Android native IME commit | `terminal.keyboard_ime` | `android/native/android/app/src/main/java/com/zterm/android/ImeAnchorInputLogic.java` | `resource.platform_input_channel -> resource.session_transport` |
-| Android session input send | `terminal.transport_lifecycle` | `android/src/contexts/session-context-input-runtime.ts` | `resource.session_transport -> resource.transport_subscriber` |
+| Android reliable input queue | `terminal.daemon_input` | `android/src/contexts/session-context-input-runtime.ts` | `resource.platform_input_channel -> resource.client_reliable_input_queue -> resource.session_transport` |
 | daemon input receive/drop | `terminal.daemon_input` | `android/src/server/terminal-message-runtime.ts` | `resource.transport_subscriber -> resource.daemon_input_queue` |
 | daemon backend write queue | `terminal.daemon_input` | `android/src/server/terminal-control-runtime.ts` | `resource.daemon_input_queue -> resource.backend_session -> resource.tmux_session` |
 
 Mainline call IDs:
 
+- `android_mainline:TerminalInputDispatch->ClientReliableInputQueue`
+- `android_mainline:ClientReliableInputQueue->ChannelSend`
+- `android_mainline:SocketMessage->ClientReliableInputAck`
 - `daemon_mainline:Runtime->Message`
 - `daemon_mainline:Message->Control`
 - `daemon_mainline:Control->Tmux`
@@ -40,6 +43,10 @@ Forbidden paths:
   - long input becomes multiple `{ type: 'input', payload: string }` frames.
   - every frame is under the daemon frame budget.
   - backpressured transport still sends zero chunks and closes explicitly.
+  - one sequence remains pending until a matching ACK, then is removed exactly once.
+  - the owner does not retry before the 5-second ACK timeout.
+  - ACK timeout or physical transport replacement retries the same sequence instead of allocating a duplicate.
+  - route-configuration generation changes under the same physical socket do not trigger a duplicate send.
 - daemon message runtime:
   - payload exactly at the frame max is accepted.
   - payload over the frame max returns `input_too_large` and never calls `handleInput`.

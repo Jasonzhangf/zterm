@@ -44,6 +44,20 @@ describe('traversal relay server directory contract', () => {
     expect(broadcastSource).toContain('store.getAccountDirectory(userId)');
   });
 
+  it('keeps relay device stream heartbeat on typed control envelopes', () => {
+    const source = readServerSource();
+    const deviceStart = source.indexOf('function registerDeviceStream');
+    const deviceSource = source.slice(deviceStart);
+
+    expect(source).toContain("'control-ping'");
+    expect(source).toContain("'control-pong'");
+    expect(deviceSource).toContain("message.type === 'control-ping'");
+    expect(deviceSource).toContain("type: 'control-pong'");
+    expect(deviceSource).toContain('receivedAt: Date.now()');
+    expect(deviceSource).not.toContain("type: 'ping'");
+    expect(deviceSource).not.toContain("type: 'pong'");
+  });
+
   it('lets authenticated daemon hosts publish directory updates without crossing signaling ownership', () => {
     const source = readServerSource();
 

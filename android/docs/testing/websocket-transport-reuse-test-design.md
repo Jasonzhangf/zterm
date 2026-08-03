@@ -34,7 +34,7 @@ The UI may trigger resume/switch intent, but tests must prove socket reuse is ow
 
 Tmux management requests are a separate control lane. Because the daemon response has no request id, one target-scoped `TraversalSocket` must serialize requests FIFO. Successful responses and request-level daemon errors keep that physical socket reusable; physical close/error, malformed protocol data, or request timeout removes and closes it. The pool caches no session-list result.
 
-Daemon stale physical transport cleanup is separate from client foreground/tab policy. It may close and detach only a session transport whose bound subscriber has no inbound heartbeat/message past the fixed transport liveness window. That daemon window must be strictly longer than the Android physical target heartbeat failure contract: the current client sends one target heartbeat every 60 seconds and declares failure after three consecutive misses, so the daemon stale bound is 190 seconds. It must not destroy the tmux session, destroy mirror truth, infer client active/background state, or close idle control transports.
+Daemon stale physical transport cleanup is separate from client foreground/tab policy. It may close and detach only a session transport whose bound subscriber has no inbound heartbeat/message past the fixed transport liveness window. That daemon window must be strictly longer than the Android physical target heartbeat failure contract: the current client sends one target heartbeat every 30 seconds and declares failure after three consecutive misses, so the daemon stale bound remains 190 seconds. It must not destroy the tmux session, destroy mirror truth, infer client active/background state, or close idle control transports.
 
 Multiplex resource path:
 
@@ -160,7 +160,7 @@ Negative:
 - Negative: the Relay `/ws/devices` control stream is a distinct WebSocket and its close cannot close or replace a healthy terminal target transport.
 
 `createTerminalDaemonRuntime().startHeartbeatLoop()`:
-- Positive: a quiet bound RTC/Relay session transport remains attached and open at 11 seconds because the Android physical heartbeat is not due until 60 seconds; daemon cleanup cannot create server-detached/client-open split truth before the client liveness policy can run.
+- Positive: a quiet bound RTC/Relay session transport remains attached and open at 11 seconds because the Android physical heartbeat is not due until 30 seconds; daemon cleanup cannot create server-detached/client-open split truth before the client liveness policy can run.
 - Positive: a bound RTC/Relay session transport with no inbound heartbeat/message for more than the server stale window is closed, removed from `connections`, and detached through `detachSubscriberTransportOnly`.
 - Positive: the detach path releases adaptive width ownership through the existing mirror owner, so `resize-window -x <baseline>` and `set-window-option -u window-size` happen only when the subscriber held a live adaptive lease.
 - Negative: a bound RTC/Relay session transport that keeps receiving client `ping`/message activity every 2 seconds is not closed or detached.
@@ -239,6 +239,8 @@ Daemon relay client / RTC bridge:
 - Negative: if a matching non-closed session exists but the mux target management facade cannot use it yet, drawer/session-open must surface that unavailable state and must not open a second legacy tmux management socket that could replace the phone's maintained Relay/RTC transport.
 - Negative: different target or Relay account identity must never share a control socket.
 - Negative: physical error/close, malformed response, unexpected response type, or timeout must reject pending work and evict the socket before a later request creates a new one.
+- Positive: when no matching open Session transport exists, the dedicated `tmux-sessions.ts` transport still negotiates `mux-hello -> mux-ready` before sending one request-id-scoped `mux-target-message`; it accepts only the matching target response envelope.
+- Negative: the dedicated management transport must reject and evict on a bare legacy `sessions/error`, a mismatched request id, or any channel frame. A legal `mux-ready` handshake must never be parsed as a tmux operation response.
 - Negative: no successful sessions payload is cached or returned without a fresh request/response exchange.
 - Negative: if an open mux-target management request returns daemon `error`, malformed target response, or timeout, the caller must surface that failure and must not fallback to a second legacy tmux management socket for the same target.
 

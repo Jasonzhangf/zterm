@@ -5,9 +5,34 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAppPageState } from './useAppPageState';
 import { STORAGE_KEYS } from '../lib/types';
 
+const appListenerMock = vi.hoisted(() => ({
+  backButton: null as null | (() => void),
+  exitApp: vi.fn(async () => undefined),
+}));
+
+vi.mock('@capacitor/app', () => ({
+  App: {
+    addListener: vi.fn(async (eventName: string, listener: () => void) => {
+      if (eventName === 'backButton') {
+        appListenerMock.backButton = listener;
+      }
+      return {
+        remove: vi.fn(async () => {
+          if (appListenerMock.backButton === listener) {
+            appListenerMock.backButton = null;
+          }
+        }),
+      };
+    }),
+    exitApp: appListenerMock.exitApp,
+  },
+}));
+
 describe('useAppPageState', () => {
   beforeEach(() => {
     localStorage.clear();
+    appListenerMock.backButton = null;
+    appListenerMock.exitApp.mockClear();
   });
 
   const sessionS1 = {
@@ -23,6 +48,64 @@ describe('useAppPageState', () => {
     hasUnread: false,
     createdAt: 1,
   } as any;
+
+  it('returns from settings to connections on the Android back gesture', async () => {
+    const { result } = renderHook(() => useAppPageState({
+      hosts: [],
+      sessions: [],
+      runtimeActiveSessionId: null,
+      addHost: vi.fn(),
+      updateHost: vi.fn(),
+      deleteHost: vi.fn(),
+      ensureTerminalPageVisible: vi.fn(),
+    }));
+
+    act(() => result.current.handleOpenSettingsPage());
+    expect(result.current.pageState.kind).toBe('settings');
+    await waitFor(() => expect(appListenerMock.backButton).not.toBeNull());
+
+    act(() => appListenerMock.backButton?.());
+
+    expect(result.current.pageState.kind).toBe('connections');
+    expect(appListenerMock.exitApp).not.toHaveBeenCalled();
+  });
+
+  it('preserves Android exit behavior when the current page does not own back navigation', async () => {
+    renderHook(() => useAppPageState({
+      hosts: [],
+      sessions: [],
+      runtimeActiveSessionId: null,
+      addHost: vi.fn(),
+      updateHost: vi.fn(),
+      deleteHost: vi.fn(),
+      ensureTerminalPageVisible: vi.fn(),
+    }));
+
+    await waitFor(() => expect(appListenerMock.backButton).not.toBeNull());
+    act(() => appListenerMock.backButton?.());
+
+    expect(appListenerMock.exitApp).toHaveBeenCalledTimes(1);
+  });
+
+  it('consumes Android system back on the terminal page so the drawer edge cannot exit the app', async () => {
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
+    const { result } = renderHook(() => useAppPageState({
+      hosts: [],
+      sessions: [sessionS1],
+      runtimeActiveSessionId: 's1',
+      addHost: vi.fn(),
+      updateHost: vi.fn(),
+      deleteHost: vi.fn(),
+      ensureTerminalPageVisible: vi.fn(),
+    }));
+
+    expect(result.current.pageState.kind).toBe('terminal');
+    await waitFor(() => expect(appListenerMock.backButton).not.toBeNull());
+    act(() => appListenerMock.backButton?.());
+
+    expect(result.current.pageState.kind).toBe('terminal');
+    expect(appListenerMock.exitApp).not.toHaveBeenCalled();
+  });
 
   it('does not cold-restore the terminal page when no runtime session exists', () => {
     localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));

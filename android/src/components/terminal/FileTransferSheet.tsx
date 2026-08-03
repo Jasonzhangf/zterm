@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { mobileTheme } from "../../lib/mobile-ui";
 import { createFileTransferSessionRuntime } from "../../lib/file-transfer-session-runtime";
 import {
   sendBoundedFileUploadChunks,
@@ -19,8 +18,18 @@ import type {
 
 const FILE_CHUNK_SIZE = FILE_TRANSFER_WIRE_CHUNK_BYTES; // must match daemon wire chunk
 const LOCAL_MARKDOWN_PREVIEW_MAX_BYTES = 512 * 1024;
+const REMOTE_TEXT_EDIT_MAX_BYTES = 512 * 1024;
 const EXTERNAL_STORAGE_ROOT = "/storage/emulated/0";
 const DEFAULT_LOCAL_DOWNLOAD_DIR = `${EXTERNAL_STORAGE_ROOT}/Download/zterm`;
+const BROWSER_LOCAL_EDIT_DIR = `${DEFAULT_LOCAL_DOWNLOAD_DIR}/remote-browser`;
+const LOCAL_EDIT_COPY_NAME_MAX_CHARS = 80;
+const LOCAL_EDIT_COPY_STATE_PREFIX = "zterm:file-browser-edit-copy:v1";
+const SHEET_TEXT = "var(--zterm-panel-text)";
+const SHEET_MUTED = "var(--zterm-panel-muted)";
+const SHEET_BORDER = "var(--zterm-panel-border)";
+const SHEET_SURFACE = "var(--zterm-panel-surface)";
+const SHEET_ACCENT = "var(--zterm-panel-accent)";
+const SHEET_DANGER = "var(--zterm-panel-danger)";
 
 interface FileTransferSheetProps {
   open: boolean;
@@ -29,6 +38,9 @@ interface FileTransferSheetProps {
   sendJson?: (msg: unknown) => void;
   onFileTransferMessage?: (handler: (msg: any) => void) => () => void;
   avoidSide?: "left" | "right" | null;
+  mode?: "browser" | "sync";
+  daemonFileScopeId?: string;
+  terminalShellSkin?: "light" | "blue" | "black";
 }
 
 interface RemoteFileEntry extends FileEntry {}
@@ -40,6 +52,19 @@ interface LocalFileEntry {
   mimeType?: string;
   uri?: string;
 }
+
+type PreviewSource =
+  | { kind: "remote"; sourceIdentity: string; truncated: false }
+  | { kind: "local"; sourcePath: string; sourceIdentity: string; truncated: boolean };
+
+type LocalEditCopyState = {
+  state: "unsynced" | "synced";
+  sourceIdentity: string;
+  path: string;
+  fileName: string;
+  size: number;
+  modified: number;
+};
 
 type FileSortField = "name" | "modified";
 type FileSortDirection = "asc" | "desc";
@@ -63,6 +88,142 @@ function isMarkdownFileName(name: string) {
   return /\.(md|markdown|mdown|mkdn)$/i.test(name.trim());
 }
 
+function isTextPreviewFileName(name: string) {
+  const trimmed = name.trim();
+  const lower = trimmed.toLowerCase();
+  if (
+    lower === "dockerfile" ||
+    lower === "makefile" ||
+    lower === "rakefile" ||
+    lower === ".gitignore" ||
+    lower === ".env"
+  ) {
+    return true;
+  }
+  return /\.(md|markdown|mdown|mkdn|txt|log|json|jsonl|ya?ml|toml|ini|env|sh|bash|zsh|fish|ts|tsx|js|jsx|mjs|cjs|css|scss|html|xml|rs|go|py|rb|java|kt|swift|c|cc|cpp|h|hpp|sql)$/i.test(
+    trimmed,
+  );
+}
+
+function encodeBytesToBase64(bytes: Uint8Array) {
+  let binary = "";
+  for (let index = 0; index < bytes.length; index += 1) {
+    binary += String.fromCharCode(bytes[index]);
+  }
+  return btoa(binary);
+}
+
+function resolveTextMimeType(name: string) {
+  if (isMarkdownFileName(name)) {
+    return "text/markdown";
+  }
+  if (/\.jsonl?$/i.test(name)) {
+    return "application/json";
+  }
+  if (/\.(ts|tsx|js|jsx|mjs|cjs|css|scss|html|xml|rs|go|py|rb|java|kt|swift|c|cc|cpp|h|hpp|sql|sh|bash|zsh|fish)$/i.test(name)) {
+    return "text/plain";
+  }
+  return "text/plain";
+}
+
+function buildBoundedLocalCopyIdentity(value: string) {
+  const source = value || "cwd";
+  let hashA = 0x811c9dc5;
+  let hashB = 0x9e3779b9;
+  for (let index = 0; index < source.length; index += 1) {
+    const code = source.charCodeAt(index);
+    hashA = Math.imul(hashA ^ code, 0x01000193) >>> 0;
+    hashB = Math.imul((hashB + code) >>> 0, 0x85ebca6b) >>> 0;
+    hashB = (hashB ^ (hashB >>> 13)) >>> 0;
+  }
+  return [
+    source.length.toString(36),
+    hashA.toString(36).padStart(7, "0"),
+    hashB.toString(36).padStart(7, "0"),
+  ].join("-");
+}
+
+function sanitizeLocalCopyFileName(fileName: string) {
+  const safeName = fileName.trim().replace(/[\/\\\0:]/g, "_") || "file";
+  if (safeName.length <= LOCAL_EDIT_COPY_NAME_MAX_CHARS) {
+    return safeName;
+  }
+  const dotIndex = safeName.lastIndexOf(".");
+  const extension =
+    dotIndex > 0 && safeName.length - dotIndex <= 24 ? safeName.slice(dotIndex) : "";
+  const baseLimit = LOCAL_EDIT_COPY_NAME_MAX_CHARS - extension.length - 2;
+  return `${safeName.slice(0, Math.max(16, baseLimit))}--${extension}`;
+}
+
+function joinRemoteCopyIdentity(
+  daemonFileScopeId: string,
+  remotePath: string,
+  fileName: string,
+) {
+  const base = remotePath.trim();
+  const remoteFilePath = !base || base === "/"
+    ? `/${fileName}`
+    : `${base.replace(/\/+$/g, "")}/${fileName}`;
+  const scope = daemonFileScopeId.trim();
+  return scope ? `target:${scope}\npath:${remoteFilePath}` : remoteFilePath;
+}
+
+function buildRemoteLocalEditCopyPath(sourceIdentity: string, fileName: string) {
+  return `${BROWSER_LOCAL_EDIT_DIR}/remote/${buildBoundedLocalCopyIdentity(sourceIdentity)}/${sanitizeLocalCopyFileName(fileName)}`;
+}
+
+function buildLocalPreviewEditCopyPath(sourcePath: string, fileName: string) {
+  return `${BROWSER_LOCAL_EDIT_DIR}/local/${buildBoundedLocalCopyIdentity(sourcePath)}/${sanitizeLocalCopyFileName(fileName)}`;
+}
+
+function buildLocalEditSnapshotPath(localCopyPath: string) {
+  return `${localCopyPath}.zterm-upload-snapshot`;
+}
+
+function buildLocalEditCopyStateKey(kind: PreviewSource["kind"], sourceIdentity: string) {
+  return `${LOCAL_EDIT_COPY_STATE_PREFIX}:${kind}:${buildBoundedLocalCopyIdentity(sourceIdentity)}`;
+}
+
+function readLocalEditCopyState(
+  kind: PreviewSource["kind"],
+  sourceIdentity: string,
+  targetPath: string,
+): LocalEditCopyState | null {
+  try {
+    const raw = window.localStorage.getItem(
+      buildLocalEditCopyStateKey(kind, sourceIdentity),
+    );
+    if (!raw) {
+      return null;
+    }
+    const parsed = JSON.parse(raw) as Partial<LocalEditCopyState>;
+    if (
+      (parsed.state === "unsynced" || parsed.state === "synced") &&
+      parsed.sourceIdentity === sourceIdentity &&
+      parsed.path === targetPath &&
+      typeof parsed.fileName === "string" &&
+      typeof parsed.size === "number" &&
+      typeof parsed.modified === "number"
+    ) {
+      return parsed as LocalEditCopyState;
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+function writeLocalEditCopyState(
+  kind: PreviewSource["kind"],
+  sourceIdentity: string,
+  state: Omit<LocalEditCopyState, "sourceIdentity">,
+) {
+  window.localStorage.setItem(
+    buildLocalEditCopyStateKey(kind, sourceIdentity),
+    JSON.stringify({ ...state, sourceIdentity }),
+  );
+}
+
 function renderMarkdownPreview(text: string) {
   return text.split("\n").map((line, index) => {
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
@@ -75,7 +236,7 @@ function renderMarkdownPreview(text: string) {
             fontWeight: 800,
             fontSize: `${Math.max(13, 22 - level * 2)}px`,
             margin: "10px 0 4px",
-            color: mobileTheme.colors.textPrimary,
+            color: SHEET_TEXT,
           }}
         >
           {heading[2]}
@@ -131,6 +292,41 @@ function joinLocalDisplayPath(parentPath: string, childName: string) {
     return `${EXTERNAL_STORAGE_ROOT}/${childName}`;
   }
   return `${normalizedParent}/${childName}`;
+}
+
+function isNativePathNotFound(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error);
+  return /does not exist|not found|enoent/i.test(message);
+}
+
+function fileUriMatchesPath(uri: string | undefined, targetPath: string) {
+  if (!uri) {
+    return true;
+  }
+  try {
+    const parsed = new URL(uri);
+    return parsed.protocol === "file:" && decodeURIComponent(parsed.pathname) === targetPath;
+  } catch {
+    return uri === `file://${targetPath}`;
+  }
+}
+
+async function resolveExistingLocalEditCopy(targetPath: string) {
+  try {
+    const stat = await StoragePermissionPlugin.stat({ path: targetPath });
+    if (!fileUriMatchesPath(stat.uri, targetPath)) {
+      return { exists: false as const };
+    }
+    if (stat.type !== "file") {
+      throw new Error("local edit copy path exists but is not the expected file");
+    }
+    return { exists: true as const, stat };
+  } catch (error) {
+    if (isNativePathNotFound(error)) {
+      return { exists: false as const };
+    }
+    throw error;
+  }
 }
 
 function getParentLocalDisplayPath(path: string) {
@@ -199,15 +395,15 @@ const fileCheckboxStyle = (checked: boolean) => ({
   height: "18px",
   borderRadius: "4px",
   border: checked
-    ? `2px solid ${mobileTheme.colors.accent}`
-    : "2px solid rgba(255,255,255,0.25)",
-  background: checked ? mobileTheme.colors.accent : "transparent",
+    ? `2px solid ${SHEET_ACCENT}`
+    : `2px solid ${SHEET_BORDER}`,
+  background: checked ? SHEET_ACCENT : "transparent",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
   padding: 0,
   flexShrink: 0,
-  color: "#000",
+  color: "var(--zterm-panel-active-text)",
   fontSize: "12px",
   fontWeight: 800,
   cursor: "pointer",
@@ -215,7 +411,7 @@ const fileCheckboxStyle = (checked: boolean) => ({
 
 const pathBreadcrumbStyle = {
   fontSize: "12px",
-  color: mobileTheme.colors.textSecondary,
+  color: SHEET_MUTED,
   padding: "2px 10px 6px",
   display: "flex",
   alignItems: "center",
@@ -241,7 +437,7 @@ const actionButtonStyle = (bg: string, color: string) => ({
 const sectionLabelStyle = {
   fontSize: "13px",
   fontWeight: 700,
-  color: mobileTheme.colors.textPrimary,
+  color: SHEET_TEXT,
   padding: "6px 10px 2px",
   flexShrink: 0,
   display: "flex",
@@ -255,7 +451,7 @@ const progressRowStyle = {
   gap: "8px",
   padding: "4px 10px",
   fontSize: "12px",
-  color: mobileTheme.colors.textSecondary,
+  color: SHEET_MUTED,
 };
 
 const sortControlStyle = {
@@ -272,8 +468,13 @@ export function FileTransferSheet({
   sendJson,
   onFileTransferMessage,
   avoidSide = null,
+  mode = "sync",
+  daemonFileScopeId = "",
+  terminalShellSkin = "light",
 }: FileTransferSheetProps) {
+  const browserMode = mode === "browser";
   const sendJsonRef = useRef(sendJson);
+  const previewEditorRef = useRef<HTMLTextAreaElement | null>(null);
   useEffect(() => {
     sendJsonRef.current = sendJson;
   }, [sendJson]);
@@ -349,6 +550,7 @@ export function FileTransferSheet({
   const remoteEntries = runtimeState.remoteEntries as RemoteFileEntry[];
   const remoteParentPath = runtimeState.remoteParentPath;
   const remoteLoading = runtimeState.remoteLoading;
+  const remoteError = runtimeState.remoteError;
   const [selectedRemote, setSelectedRemote] = useState<Set<string>>(new Set());
   const [remoteSortField, setRemoteSortField] =
     useState<FileSortField>("name");
@@ -370,6 +572,18 @@ export function FileTransferSheet({
   const [localSortField, setLocalSortField] = useState<FileSortField>("name");
   const [localSortDirection, setLocalSortDirection] =
     useState<FileSortDirection>("asc");
+  const [previewEditorText, setPreviewEditorText] = useState("");
+  const [previewEditorDirty, setPreviewEditorDirty] = useState(false);
+  const [previewSaveStatus, setPreviewSaveStatus] = useState<string | null>(
+    null,
+  );
+  const [previewSaving, setPreviewSaving] = useState(false);
+  const [externalEditCopy, setExternalEditCopy] = useState<{
+    fileName: string;
+    path: string;
+  } | null>(null);
+  const [previewSource, setPreviewSource] = useState<PreviewSource | null>(null);
+  const resetScopeKey = `${open ? "open" : "closed"}\u0000${remoteCwd}\u0000${daemonFileScopeId}`;
 
   useEffect(() => {
     localPathRef.current = localPath;
@@ -381,6 +595,15 @@ export function FileTransferSheet({
   // Transfers
   const transfers = runtimeState.transfers as TransferProgress[];
   const preview = runtimeState.preview;
+  const previewOpen = Boolean(preview.fileName);
+  const previewActionUnavailable = Boolean(preview.loading || preview.error);
+  const saveDisabledForPreview = Boolean(
+    previewActionUnavailable ||
+    previewSaving ||
+    (previewSource?.kind === "local" && previewSource.truncated),
+  );
+  const localOpenDisabledForPreview = previewActionUnavailable || previewSaving;
+  const syncCopyDisabledForPreview = previewActionUnavailable || previewSaving;
   const visibleRemoteEntries = [...remoteEntries].sort((a, b) =>
     compareFileEntries(a, b, remoteSortField, remoteSortDirection),
   );
@@ -401,7 +624,7 @@ export function FileTransferSheet({
           setSortField(sortField === "name" ? "modified" : "name")
         }
         style={{
-          ...actionButtonStyle("transparent", mobileTheme.colors.textSecondary),
+          ...actionButtonStyle("transparent", SHEET_MUTED),
           minHeight: "24px",
           padding: "0 8px",
           fontSize: "11px",
@@ -415,7 +638,7 @@ export function FileTransferSheet({
           setSortDirection(sortDirection === "asc" ? "desc" : "asc")
         }
         style={{
-          ...actionButtonStyle("transparent", mobileTheme.colors.textSecondary),
+          ...actionButtonStyle("transparent", SHEET_MUTED),
           minHeight: "24px",
           padding: "0 8px",
           fontSize: "11px",
@@ -446,10 +669,16 @@ export function FileTransferSheet({
     fileTransferRuntimeRef.current.open(initialRemotePath);
     setSelectedRemote(new Set());
     setSelectedLocal(new Set());
+    setPreviewEditorText("");
+    setPreviewEditorDirty(false);
+    setPreviewSaveStatus(null);
+    setPreviewSaving(false);
+    setExternalEditCopy(null);
+    setPreviewSource(null);
     setDirection("download");
     forceRuntimeTick((value) => value + 1);
     requestRemoteList(initialRemotePath);
-  }, [open, remoteCwd, requestRemoteList]);
+  }, [open, remoteCwd, resetScopeKey, requestRemoteList]);
 
   const checkLocalStoragePermission = useCallback(async () => {
     try {
@@ -544,13 +773,13 @@ export function FileTransferSheet({
   );
 
   useEffect(() => {
-    if (open && localPath) {
+    if (open && !browserMode && localPath) {
       loadLocalDir(localPath, { requestPermission: true });
     }
-  }, [open, localPath, loadLocalDir]);
+  }, [browserMode, open, localPath, loadLocalDir]);
 
   useEffect(() => {
-    if (!open) {
+    if (!open || browserMode) {
       return;
     }
     const refreshLocalAccess = () => {
@@ -567,7 +796,7 @@ export function FileTransferSheet({
       window.removeEventListener("focus", refreshLocalAccess);
       document.removeEventListener("visibilitychange", handleVisibilityChange);
     };
-  }, [open, localPath, loadLocalDir]);
+  }, [browserMode, open, localPath, loadLocalDir]);
 
   // Listen for daemon file-transfer messages
   useEffect(() => {
@@ -580,6 +809,16 @@ export function FileTransferSheet({
       });
     });
   }, [open, onFileTransferMessage]);
+
+  useEffect(() => {
+    if (!preview.fileName || preview.loading || preview.error) {
+      return;
+    }
+    setPreviewEditorText(preview.text || "");
+    setPreviewEditorDirty(false);
+    setPreviewSaveStatus(null);
+    setPreviewSaving(false);
+  }, [preview.error, preview.fileName, preview.loading, preview.text]);
 
   // Toggle selection
   const toggleRemote = useCallback((name: string) => {
@@ -608,25 +847,63 @@ export function FileTransferSheet({
     [requestRemoteList],
   );
 
-  const previewRemoteMarkdown = useCallback(
+  const previewRemoteTextFile = useCallback(
     (entry: RemoteFileEntry) => {
-      if (entry.type !== "file" || !isMarkdownFileName(entry.name)) {
+      if (
+        entry.type !== "file" ||
+        !isTextPreviewFileName(entry.name) ||
+        entry.size > REMOTE_TEXT_EDIT_MAX_BYTES
+      ) {
         return false;
       }
       const request = fileTransferRuntimeRef.current.startPreview(
         { name: entry.name, size: entry.size },
         remotePath,
       );
+      setPreviewSource({
+        kind: "remote",
+        sourceIdentity: joinRemoteCopyIdentity(
+          daemonFileScopeId,
+          remotePath,
+          entry.name,
+        ),
+        truncated: false,
+      });
+      setPreviewSaveStatus(null);
+      setExternalEditCopy(null);
       forceRuntimeTick((value) => value + 1);
       sendJsonRef.current?.(request.message);
       return true;
     },
-    [remotePath],
+    [daemonFileScopeId, remotePath],
   );
 
-  const previewLocalMarkdown = useCallback(
+  const closePreview = useCallback(() => {
+    if (previewSaving) {
+      return;
+    }
+    fileTransferRuntimeRef.current.clearPreview();
+    setPreviewEditorText("");
+    setPreviewEditorDirty(false);
+    setPreviewSaveStatus(null);
+    setExternalEditCopy(null);
+    setPreviewSource(null);
+    forceRuntimeTick((value) => value + 1);
+  }, [previewSaving]);
+
+  const openInlinePreviewEditor = useCallback(() => {
+    window.requestAnimationFrame(() => {
+      previewEditorRef.current?.scrollIntoView({
+        block: "center",
+        behavior: "smooth",
+      });
+      previewEditorRef.current?.focus();
+    });
+  }, []);
+
+  const previewLocalTextFile = useCallback(
     async (entry: LocalFileEntry) => {
-      if (entry.type !== "file" || !isMarkdownFileName(entry.name)) {
+      if (entry.type !== "file" || !isTextPreviewFileName(entry.name)) {
         return false;
       }
       try {
@@ -635,12 +912,22 @@ export function FileTransferSheet({
           return true;
         }
         const sourcePath = joinLocalDisplayPath(localPath, entry.name);
+        const sourceStat = await StoragePermissionPlugin.stat({ path: sourcePath });
+        if (sourceStat.type !== "file") {
+          throw new Error("local preview source is not a file");
+        }
+        const sourceSize = Math.max(0, sourceStat.size);
         const maxPreviewBytes = Math.min(
-          entry.size,
+          sourceSize,
           LOCAL_MARKDOWN_PREVIEW_MAX_BYTES,
         );
-        const decoder = new TextDecoder();
+        const decoder = new TextDecoder("utf-8", {
+          fatal: true,
+          ignoreBOM: true,
+        });
         let offset = 0;
+        let observedBytes = 0;
+        let reachedEof = sourceSize === 0;
         let text = "";
         while (offset < maxPreviewBytes) {
           const length = Math.min(FILE_CHUNK_SIZE, maxPreviewBytes - offset);
@@ -654,31 +941,374 @@ export function FileTransferSheet({
               ? readResult.bytesRead
               : 0;
           const data = typeof readResult.data === "string" ? readResult.data : "";
-          text += decoder.decode(decodeBase64Bytes(data), {
-            stream: !readResult.eof && offset + bytesRead < maxPreviewBytes,
-          });
-          if (bytesRead <= 0 || readResult.eof) {
+          if (bytesRead <= 0) {
+            reachedEof = Boolean(readResult.eof);
             break;
           }
+          text += decoder.decode(decodeBase64Bytes(data), {
+            stream: !readResult.eof,
+          });
+          observedBytes += bytesRead;
           offset += bytesRead;
+          if (readResult.eof) {
+            reachedEof = true;
+            break;
+          }
         }
-        text += decoder.decode();
-        if (entry.size > LOCAL_MARKDOWN_PREVIEW_MAX_BYTES) {
-          text += "\n\n（预览已截断，上传仍会传输完整文件。）";
+        if (reachedEof) {
+          text += decoder.decode();
         }
+        const truncated =
+          sourceSize > LOCAL_MARKDOWN_PREVIEW_MAX_BYTES ||
+          observedBytes < maxPreviewBytes ||
+          (!reachedEof && sourceSize <= LOCAL_MARKDOWN_PREVIEW_MAX_BYTES);
         fileTransferRuntimeRef.current.setPreviewText(entry.name, text);
+        setPreviewSource({
+          kind: "local",
+          sourcePath,
+          sourceIdentity: sourcePath,
+          truncated,
+        });
+        setPreviewSaveStatus(null);
+        setExternalEditCopy(null);
         forceRuntimeTick((value) => value + 1);
       } catch (error) {
         fileTransferRuntimeRef.current.setPreviewError(
           entry.name,
           error instanceof Error ? error.message : String(error),
         );
+        setPreviewSource({
+          kind: "local",
+          sourcePath: joinLocalDisplayPath(localPath, entry.name),
+          sourceIdentity: joinLocalDisplayPath(localPath, entry.name),
+          truncated: false,
+        });
         forceRuntimeTick((value) => value + 1);
       }
       return true;
     },
     [checkLocalStoragePermission, localPath],
   );
+
+  const uploadChunksToRemote = useCallback(async (options: {
+    fileName: string;
+    totalBytes: number;
+    totalChunks: number;
+    readChunk: (chunkIndex: number) => Promise<string>;
+    savingStatus: string;
+    successStatus: string;
+  }) => {
+    if (!sendJsonRef.current) {
+      setPreviewSaveStatus("保存失败：文件传输通道未就绪，请等待连接恢复后重试。");
+      return false;
+    }
+    let uploadRequest: ReturnType<
+      ReturnType<typeof createFileTransferSessionRuntime>["startUpload"]
+    > | null = null;
+    let endSent = false;
+    const sendUploadMessage = (message: unknown) => {
+      const sender = sendJsonRef.current;
+      if (!sender) {
+        throw new Error("文件传输通道已断开，请等待连接恢复后重试。");
+      }
+      sender(message);
+    };
+    try {
+      const targetDir = remotePath.trim();
+      if (!targetDir) {
+        throw new Error("remote path unavailable");
+      }
+      setPreviewSaveStatus(options.savingStatus);
+      uploadRequest = fileTransferRuntimeRef.current.startUpload(
+        { name: options.fileName, size: options.totalBytes },
+        targetDir,
+        options.totalChunks,
+      );
+      const currentUploadRequest = uploadRequest;
+      forceRuntimeTick((value) => value + 1);
+      sendUploadMessage(currentUploadRequest.startMessage);
+      await sendBoundedFileUploadChunks({
+        totalChunks: options.totalChunks,
+        waitForProgress: currentUploadRequest.waitForProgress,
+        readChunk: options.readChunk,
+        sendChunk: (chunkIndex, dataBase64) => {
+          const chunkMessage = currentUploadRequest.buildChunkMessage(
+            chunkIndex,
+            dataBase64,
+          );
+          const encodedFrameChars = JSON.stringify(chunkMessage).length;
+          if (encodedFrameChars > FILE_TRANSFER_WIRE_FRAME_MAX_CHARS) {
+            throw new Error(
+              `edited text chunk ${chunkIndex} wire frame too large: ${encodedFrameChars} chars`,
+            );
+          }
+          sendUploadMessage(chunkMessage);
+        },
+      });
+      sendUploadMessage(currentUploadRequest.endMessage);
+      endSent = true;
+      await currentUploadRequest.waitForDone();
+      setPreviewSaveStatus(options.successStatus);
+      requestRemoteList(remotePath);
+      return true;
+    } catch (error) {
+      if (uploadRequest) {
+        if (!endSent) {
+          sendJsonRef.current?.(uploadRequest.endMessage);
+        }
+        fileTransferRuntimeRef.current.markTransferError(
+          uploadRequest.requestId,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+      setPreviewSaveStatus(
+        `保存失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+      forceRuntimeTick((value) => value + 1);
+      return false;
+    }
+  }, [remotePath, requestRemoteList]);
+
+  const savePreviewToRemote = useCallback(async () => {
+    const fileName = preview.fileName;
+    if (!fileName || previewSaving) {
+      return;
+    }
+    if (previewSource?.kind === "local" && previewSource.truncated) {
+      setPreviewSaveStatus(
+        "保存失败：本地预览已截断，请先本地打开完整副本后再同步。",
+      );
+      return;
+    }
+    const textToSave = previewEditorDirty
+      ? previewEditorText
+      : preview.text ?? previewEditorText;
+    const encoded = new TextEncoder().encode(textToSave);
+    const chunkCount = Math.max(1, Math.ceil(encoded.length / FILE_CHUNK_SIZE));
+    setPreviewSaving(true);
+    try {
+      await uploadChunksToRemote({
+        fileName,
+        totalBytes: encoded.length,
+        totalChunks: chunkCount,
+        savingStatus: "保存到远端中…",
+        successStatus: "已保存到远端",
+        readChunk: async (chunkIndex) => {
+          const start = chunkIndex * FILE_CHUNK_SIZE;
+          const end = Math.min(start + FILE_CHUNK_SIZE, encoded.length);
+          return encodeBytesToBase64(encoded.subarray(start, end));
+        },
+      });
+    } finally {
+      setPreviewSaving(false);
+    }
+  }, [
+    preview.fileName,
+    preview.text,
+    previewSource,
+    previewEditorDirty,
+    previewEditorText,
+    previewSaving,
+    uploadChunksToRemote,
+  ]);
+
+  const openPreviewInLocalEditor = useCallback(async () => {
+    const fileName = preview.fileName;
+    if (!fileName) {
+      return;
+    }
+    try {
+      const permissionGranted = await ensureLocalStoragePermission(true);
+      if (!permissionGranted) {
+        setPreviewSaveStatus("本地打开失败：未获得本地存储权限。");
+        return;
+      }
+      const existingEditCopy =
+        externalEditCopy?.fileName === fileName ? externalEditCopy : null;
+      const sourceKind = previewSource?.kind || "remote";
+      const sourceIdentity =
+        previewSource?.sourceIdentity ||
+        joinRemoteCopyIdentity(daemonFileScopeId, remotePath || localPath, fileName);
+      const targetPath = existingEditCopy
+        ? existingEditCopy.path
+        : sourceKind === "local" && previewSource?.kind === "local"
+        ? buildLocalPreviewEditCopyPath(previewSource.sourcePath, fileName)
+        : buildRemoteLocalEditCopyPath(sourceIdentity, fileName);
+      const existingCopy = existingEditCopy
+        ? null
+        : await resolveExistingLocalEditCopy(targetPath);
+      const copyState = existingCopy?.exists
+        ? readLocalEditCopyState(sourceKind, sourceIdentity, targetPath)
+        : null;
+      const shouldReuseExistingCopy = Boolean(
+        existingEditCopy ||
+        (existingCopy?.exists &&
+          copyState &&
+          (copyState.state === "unsynced" ||
+            copyState.size !== existingCopy.stat.size ||
+            copyState.modified !== existingCopy.stat.modified)),
+      );
+      if (existingCopy?.exists && !copyState) {
+        throw new Error("本地编辑副本状态未知，已停止覆盖；请手动同步或删除该副本后重试。");
+      }
+      if (shouldReuseExistingCopy) {
+        // Preserve unsynced external-editor changes; this path only reopens the existing copy.
+      } else if (previewSource?.kind === "local" && previewSource.truncated) {
+        await StoragePermissionPlugin.copyFile({
+          sourcePath: previewSource.sourcePath,
+          targetPath,
+        });
+      } else {
+        const textToOpen = previewEditorDirty
+          ? previewEditorText
+          : preview.text ?? previewEditorText;
+        const encoded = new TextEncoder().encode(textToOpen);
+        await StoragePermissionPlugin.writeFile({
+          path: targetPath,
+          data: encodeBytesToBase64(encoded),
+        });
+      }
+      writeLocalEditCopyState(sourceKind, sourceIdentity, {
+        state: "unsynced",
+        path: targetPath,
+        fileName,
+        size: existingCopy?.exists ? existingCopy.stat.size : -1,
+        modified: existingCopy?.exists ? existingCopy.stat.modified : -1,
+      });
+      await StoragePermissionPlugin.openFile({
+        path: targetPath,
+        mimeType: resolveTextMimeType(fileName),
+      });
+      setExternalEditCopy({ fileName, path: targetPath });
+      setPreviewSaveStatus(
+        shouldReuseExistingCopy
+          ? "已重新打开本地副本，编辑后点“同步本地副本”"
+          : "已写入本地副本，编辑后点“同步本地副本”",
+      );
+      if (!browserMode) {
+        await loadLocalDir(localPath, { requestPermission: false });
+      }
+    } catch (error) {
+      setPreviewSaveStatus(
+        `本地打开失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }, [
+    ensureLocalStoragePermission,
+    browserMode,
+    loadLocalDir,
+    localPath,
+    preview.fileName,
+    preview.text,
+    previewSource,
+    externalEditCopy,
+    previewEditorDirty,
+    previewEditorText,
+    daemonFileScopeId,
+    remotePath,
+  ]);
+
+  const syncExternalEditCopyToRemote = useCallback(async () => {
+    const fileName = preview.fileName;
+    const localCopy = externalEditCopy;
+    if (!fileName || !localCopy || localCopy.fileName !== fileName || previewSaving) {
+      return;
+    }
+    setPreviewSaving(true);
+    try {
+      const permissionGranted = await ensureLocalStoragePermission(true);
+      if (!permissionGranted) {
+        setPreviewSaveStatus("同步失败：未获得本地存储权限。");
+        return;
+      }
+      const snapshotPath = buildLocalEditSnapshotPath(localCopy.path);
+      const snapshot = await StoragePermissionPlugin.createStableFileSnapshot({
+        sourcePath: localCopy.path,
+        snapshotPath,
+      });
+      const totalBytes = Math.max(0, snapshot.size);
+      const totalChunks = Math.max(1, Math.ceil(totalBytes / FILE_CHUNK_SIZE));
+      const uploaded = await uploadChunksToRemote({
+        fileName,
+        totalBytes,
+        totalChunks,
+        savingStatus: "同步本地副本到远端中…",
+        successStatus: "本地副本已同步到远端",
+        readChunk: async (chunkIndex) => {
+          const offset = chunkIndex * FILE_CHUNK_SIZE;
+          const length =
+            totalBytes === 0
+              ? 0
+              : Math.min(FILE_CHUNK_SIZE, Math.max(0, totalBytes - offset));
+          if (length === 0) {
+            return "";
+          }
+          const readResult = await StoragePermissionPlugin.readFileChunk({
+            path: snapshot.path,
+            offset,
+            length,
+          });
+          if (readResult.bytesRead !== length) {
+            throw new Error(
+              `local edit snapshot chunk ${chunkIndex} read ${readResult.bytesRead} bytes, expected ${length}`,
+            );
+          }
+          return typeof readResult.data === "string" ? readResult.data : "";
+        },
+      });
+      if (uploaded) {
+        const sourceKind = previewSource?.kind || "remote";
+        const sourceIdentity =
+          previewSource?.sourceIdentity ||
+          joinRemoteCopyIdentity(daemonFileScopeId, remotePath || localPath, fileName);
+        const sourceStat = await StoragePermissionPlugin.stat({ path: localCopy.path });
+        if (sourceStat.type !== "file") {
+          throw new Error("local edit copy path is no longer a file after sync");
+        }
+        writeLocalEditCopyState(sourceKind, sourceIdentity, {
+          state: "synced",
+          path: localCopy.path,
+          fileName,
+          size: sourceStat.size,
+          modified: sourceStat.modified,
+        });
+      }
+      try {
+        await StoragePermissionPlugin.deleteFile({ path: snapshot.path });
+      } catch (cleanupError) {
+        if (uploaded) {
+          setPreviewSaveStatus(
+            `本地副本已同步到远端；临时快照清理失败：${
+              cleanupError instanceof Error ? cleanupError.message : String(cleanupError)
+            }`,
+          );
+        } else {
+          throw cleanupError;
+        }
+      }
+      if (!browserMode) {
+        await loadLocalDir(localPath, { requestPermission: false });
+      }
+    } catch (error) {
+      setPreviewSaveStatus(
+        `同步失败：${error instanceof Error ? error.message : String(error)}`,
+      );
+    } finally {
+      setPreviewSaving(false);
+    }
+  }, [
+    ensureLocalStoragePermission,
+    browserMode,
+    externalEditCopy,
+    loadLocalDir,
+    localPath,
+    daemonFileScopeId,
+    preview.fileName,
+    previewSource,
+    previewSaving,
+    remotePath,
+    uploadChunksToRemote,
+  ]);
 
   // Start transfer
   const startTransfer = useCallback(async () => {
@@ -808,15 +1438,19 @@ export function FileTransferSheet({
 
   return (
     <div
+      className="zterm-terminal-shell zterm-file-sheet-overlay"
       data-testid="file-transfer-overlay"
       data-avoid-side={avoidSide || undefined}
+      data-terminal-shell-skin={terminalShellSkin}
       style={buildTransferSheetOverlayStyle(avoidSide)}
       onClick={onClose}
     >
       <div
+        className="zterm-file-sheet"
         data-testid="file-transfer-sheet"
         data-layout={avoidSide ? "side" : "bottom"}
-        style={buildTransferSheetContainerStyle(avoidSide)}
+        data-preview-open={previewOpen ? "true" : undefined}
+        style={buildTransferSheetContainerStyle(avoidSide, mode)}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
@@ -825,15 +1459,15 @@ export function FileTransferSheet({
             style={{
               fontSize: "17px",
               fontWeight: 800,
-              color: mobileTheme.colors.textPrimary,
+              color: SHEET_TEXT,
             }}
           >
-            文件同步
+            {browserMode ? "文件浏览" : "文件同步"}
           </div>
           <button
             type="button"
             onClick={onClose}
-            style={actionButtonStyle(mobileTheme.colors.shellMuted, "#fff")}
+            style={actionButtonStyle(SHEET_SURFACE, SHEET_TEXT)}
           >
             ✕
           </button>
@@ -847,14 +1481,16 @@ export function FileTransferSheet({
               margin: "0 10px 8px",
               padding: "10px 12px",
               borderRadius: "12px",
-              border: `1px solid ${mobileTheme.colors.cardBorder}`,
-              color: mobileTheme.colors.textSecondary,
-              background: "rgba(255,255,255,0.04)",
+              border: `1px solid ${SHEET_BORDER}`,
+              color: SHEET_MUTED,
+              background: SHEET_SURFACE,
               fontSize: "13px",
               lineHeight: 1.45,
             }}
           >
-            文件同步通道未就绪，请先等待当前 session 连接完成。
+            {browserMode
+              ? "文件浏览通道未就绪，请先等待当前 session 连接完成。"
+              : "文件同步通道未就绪，请先等待当前 session 连接完成。"}
           </div>
         ) : null}
 
@@ -875,7 +1511,7 @@ export function FileTransferSheet({
                 remoteParentPath && navigateRemotePath(remoteParentPath)
               }
               style={{
-                ...actionButtonStyle("transparent", mobileTheme.colors.accent),
+                ...actionButtonStyle("transparent", SHEET_ACCENT),
                 minHeight: "24px",
                 padding: "0 6px",
                 fontSize: "12px",
@@ -883,14 +1519,14 @@ export function FileTransferSheet({
             >
               ← 上级
             </button>
-            <span style={{ color: mobileTheme.colors.textMuted }}>
+            <span style={{ color: SHEET_MUTED }}>
               {remotePath}
             </span>
           </div>
           <div
             style={{
               ...fileListContainerStyle,
-              maxHeight: "28vh",
+              maxHeight: browserMode ? "60vh" : "28vh",
               flex: "none",
             }}
           >
@@ -899,17 +1535,29 @@ export function FileTransferSheet({
                 style={{
                   padding: "20px",
                   textAlign: "center",
-                  color: mobileTheme.colors.textMuted,
+                  color: SHEET_MUTED,
                 }}
               >
                 加载中…
+              </div>
+            ) : remoteError ? (
+              <div
+                data-testid="file-transfer-remote-error"
+                style={{
+                  padding: "20px",
+                  textAlign: "center",
+                  color: SHEET_DANGER,
+                  lineHeight: 1.5,
+                }}
+              >
+                远程目录读取失败：{remoteError}
               </div>
             ) : visibleRemoteEntries.length === 0 ? (
               <div
                 style={{
                   padding: "20px",
                   textAlign: "center",
-                  color: mobileTheme.colors.textMuted,
+                  color: SHEET_MUTED,
                 }}
               >
                 空目录
@@ -926,24 +1574,41 @@ export function FileTransferSheet({
                           ? `/${entry.name}`
                           : `${remotePath}/${entry.name}`,
                       );
-                    } else if (previewRemoteMarkdown(entry)) {
+                    } else if (previewRemoteTextFile(entry)) {
                       return;
+                    } else if (browserMode) {
+                      fileTransferRuntimeRef.current.setPreviewError(
+                        entry.name,
+                        entry.size > REMOTE_TEXT_EDIT_MAX_BYTES
+                          ? "文件超过 512KB，当前浏览器只支持轻量文本预览/编辑。"
+                          : "当前只支持文本和代码文件预览/编辑。",
+                      );
+                      setPreviewSource({
+                        kind: "remote",
+                        sourceIdentity: joinRemoteCopyIdentity(daemonFileScopeId, remotePath, entry.name),
+                        truncated: false,
+                      });
+                      setPreviewSaveStatus(null);
+                      setExternalEditCopy(null);
+                      forceRuntimeTick((value) => value + 1);
                     } else {
                       toggleRemote(entry.name);
                     }
                   }}
                 >
-                  <button
-                    type="button"
-                    aria-label={`选择远程 ${entry.name}`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      toggleRemote(entry.name);
-                    }}
-                    style={fileCheckboxStyle(selectedRemote.has(entry.name))}
-                  >
-                    {selectedRemote.has(entry.name) ? "✓" : ""}
-                  </button>
+                  {!browserMode ? (
+                    <button
+                      type="button"
+                      aria-label={`选择远程 ${entry.name}`}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleRemote(entry.name);
+                      }}
+                      style={fileCheckboxStyle(selectedRemote.has(entry.name))}
+                    >
+                      {selectedRemote.has(entry.name) ? "✓" : ""}
+                    </button>
+                  ) : null}
                   <span style={{ fontSize: "16px", flexShrink: 0 }}>
                     {entry.type === "directory" ? "📁" : "📄"}
                   </span>
@@ -951,7 +1616,7 @@ export function FileTransferSheet({
                     style={{
                       flex: 1,
                       fontSize: "13px",
-                      color: mobileTheme.colors.textPrimary,
+                      color: SHEET_TEXT,
                       overflow: "hidden",
                       textOverflow: "ellipsis",
                       whiteSpace: "nowrap",
@@ -963,7 +1628,7 @@ export function FileTransferSheet({
                     <span
                       style={{
                         fontSize: "11px",
-                        color: mobileTheme.colors.textMuted,
+                        color: SHEET_MUTED,
                         flexShrink: 0,
                       }}
                     >
@@ -979,13 +1644,16 @@ export function FileTransferSheet({
         {preview.fileName ? (
           <div
             data-testid="file-transfer-md-preview"
+            data-preview-open="fullscreen"
             style={{
-              flexShrink: 0,
-              maxHeight: avoidSide ? "32vh" : "24vh",
-              margin: "6px 10px",
-              borderRadius: "14px",
-              border: `1px solid ${mobileTheme.colors.cardBorder}`,
-              background: "rgba(10, 16, 26, 0.84)",
+              position: "fixed",
+              inset: 0,
+              zIndex: 96,
+              display: "flex",
+              flexDirection: "column",
+              padding:
+                "calc(12px + env(safe-area-inset-top, 0px)) 12px calc(12px + env(safe-area-inset-bottom, 0px))",
+              background: "var(--zterm-panel-bg)",
               overflow: "hidden",
             }}
           >
@@ -995,44 +1663,153 @@ export function FileTransferSheet({
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: "8px",
-                padding: "8px 10px",
-                borderBottom: `1px solid ${mobileTheme.colors.cardBorder}`,
+                flexWrap: "wrap",
+                padding: "0 0 10px",
+                borderBottom: `1px solid ${SHEET_BORDER}`,
+                flexShrink: 0,
               }}
             >
-              <span
-                style={{
-                  fontSize: "13px",
-                  fontWeight: 800,
-                  color: mobileTheme.colors.textPrimary,
-                }}
-              >
-                Markdown 预览：{truncateName(preview.fileName, 28)}
-              </span>
               <button
                 type="button"
-                onClick={() => {
-                  fileTransferRuntimeRef.current.clearPreview();
-                  forceRuntimeTick((value) => value + 1);
-                }}
+                onClick={closePreview}
+                disabled={previewSaving}
                 style={{
                   ...actionButtonStyle(
-                    "transparent",
-                    mobileTheme.colors.textSecondary,
+                    "rgba(255,255,255,0.06)",
+                    SHEET_TEXT,
                   ),
-                  minHeight: "24px",
-                  padding: "0 8px",
-                  fontSize: "12px",
+                  minHeight: "34px",
+                  padding: "0 10px",
+                  fontSize: "13px",
+                  opacity: previewSaving ? 0.5 : 1,
                 }}
               >
-                关闭
+                ← 返回
               </button>
+              <span
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  fontSize: "13px",
+                  fontWeight: 800,
+                  color: SHEET_TEXT,
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {preview.fileName}
+              </span>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "6px",
+                  flexWrap: "wrap",
+                  flex: "1 1 100%",
+                  minWidth: 0,
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={openInlinePreviewEditor}
+                  disabled={preview.loading || Boolean(preview.error) || previewSaving}
+                  style={{
+                    ...actionButtonStyle(
+                      "rgba(31,214,122,0.22)",
+                      SHEET_ACCENT,
+                    ),
+                    minHeight: "24px",
+                    padding: "0 8px",
+                    fontSize: "12px",
+                    opacity:
+                      preview.loading || preview.error || previewSaving ? 0.5 : 1,
+                  }}
+                >
+                  编辑
+                </button>
+                <button
+                  type="button"
+                  onClick={openPreviewInLocalEditor}
+                  disabled={localOpenDisabledForPreview}
+                  style={{
+                    ...actionButtonStyle(
+                      "transparent",
+                      SHEET_MUTED,
+                    ),
+                    minHeight: "24px",
+                    padding: "0 8px",
+                    fontSize: "12px",
+                    opacity: localOpenDisabledForPreview ? 0.5 : 1,
+                  }}
+                >
+                  本地打开
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    void savePreviewToRemote();
+                  }}
+                  disabled={saveDisabledForPreview}
+                  style={{
+                    ...actionButtonStyle(
+                      "rgba(31,214,122,0.22)",
+                      SHEET_ACCENT,
+                    ),
+                    minHeight: "24px",
+                    padding: "0 8px",
+                    fontSize: "12px",
+                    opacity: saveDisabledForPreview ? 0.5 : 1,
+                  }}
+                >
+                  保存
+                </button>
+                {externalEditCopy?.fileName === preview.fileName ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      void syncExternalEditCopyToRemote();
+                    }}
+                    disabled={syncCopyDisabledForPreview}
+                    style={{
+                      ...actionButtonStyle(
+                        "rgba(96, 149, 255, 0.18)",
+                        SHEET_TEXT,
+                      ),
+                      minHeight: "24px",
+                      padding: "0 8px",
+                      fontSize: "12px",
+                      opacity: syncCopyDisabledForPreview ? 0.5 : 1,
+                    }}
+                  >
+                    同步本地副本
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={onClose}
+                  disabled={previewSaving}
+                  style={{
+                    ...actionButtonStyle(
+                      "transparent",
+                      SHEET_MUTED,
+                    ),
+                    minHeight: "24px",
+                    padding: "0 8px",
+                    fontSize: "12px",
+                    opacity: previewSaving ? 0.5 : 1,
+                  }}
+                >
+                  关闭
+                </button>
+              </div>
             </div>
             <div
               style={{
-                maxHeight: avoidSide ? "26vh" : "18vh",
+                flex: 1,
+                minHeight: 0,
                 overflowY: "auto",
-                padding: "10px 12px",
-                color: mobileTheme.colors.textSecondary,
+                padding: "12px 0 0",
+                color: SHEET_MUTED,
                 fontSize: "13px",
                 lineHeight: 1.55,
                 whiteSpace: "pre-wrap",
@@ -1042,140 +1819,208 @@ export function FileTransferSheet({
                 ? "加载预览中…"
                 : preview.error
                   ? `预览失败：${preview.error}`
-                  : renderMarkdownPreview(preview.text || "")}
+                  : (
+                    <>
+                      {isMarkdownFileName(preview.fileName) ? (
+                        <div
+                          style={{
+                            padding: "0 0 10px",
+                            borderBottom: `1px solid ${SHEET_BORDER}`,
+                            marginBottom: "10px",
+                          }}
+                        >
+                          {renderMarkdownPreview(previewEditorText)}
+                        </div>
+                      ) : null}
+                      <textarea
+                        aria-label="编辑远程文本"
+                        ref={previewEditorRef}
+                        value={previewEditorText}
+                        disabled={previewSaving}
+                        onChange={(event) => {
+                          setPreviewEditorText(event.target.value);
+                          setPreviewEditorDirty(true);
+                          setPreviewSaveStatus(null);
+                        }}
+                        style={{
+                          width: "100%",
+                          minHeight: "58vh",
+                          resize: "none",
+                          borderRadius: "12px",
+                          border: `1px solid ${SHEET_BORDER}`,
+                          background: "rgba(255,255,255,0.04)",
+                          color: SHEET_TEXT,
+                          padding: "10px",
+                          fontFamily:
+                            "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                          fontSize: "12px",
+                          lineHeight: 1.45,
+                          opacity: previewSaving ? 0.72 : 1,
+                        }}
+                      />
+                      {previewSource?.kind === "local" && previewSource.truncated ? (
+                        <div
+                          style={{
+                            marginTop: "6px",
+                            color: SHEET_MUTED,
+                            fontSize: "12px",
+                          }}
+                        >
+                          预览已截断，请用本地打开编辑完整副本；当前预览不能直接保存到远端。
+                        </div>
+                      ) : null}
+                      {previewSaveStatus ? (
+                        <div
+                          style={{
+                            marginTop: "8px",
+                            color: previewSaveStatus.startsWith("保存失败") ||
+                              previewSaveStatus.startsWith("本地打开失败") ||
+                              previewSaveStatus.startsWith("同步失败")
+                              ? SHEET_DANGER
+                              : SHEET_MUTED,
+                            fontSize: "12px",
+                          }}
+                        >
+                          {previewSaveStatus}
+                        </div>
+                      ) : null}
+                    </>
+                  )}
             </div>
           </div>
         ) : null}
 
-        {/* Direction controls */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "12px",
-            padding: "8px 10px",
-            flexShrink: 0,
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => setDirection("download")}
-            style={actionButtonStyle(
-              direction === "download"
-                ? "rgba(31,214,122,0.22)"
-                : mobileTheme.colors.shellMuted,
-              direction === "download" ? mobileTheme.colors.accent : "#fff",
-            )}
-          >
-            ⬇ 下载到本地
-          </button>
-          <button
-            type="button"
-            onClick={startTransfer}
-            style={actionButtonStyle(
-              "linear-gradient(180deg, rgba(96, 149, 255, 0.92), rgba(72, 122, 230, 0.92))",
-              "#fff",
-            )}
-          >
-            {resolvePrimaryTransferLabel(
-              direction,
-              direction === "download"
-                ? selectedRemote.size
-                : selectedLocal.size,
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => setDirection("upload")}
-            style={actionButtonStyle(
-              direction === "upload"
-                ? "rgba(31,214,122,0.22)"
-                : mobileTheme.colors.shellMuted,
-              direction === "upload" ? mobileTheme.colors.accent : "#fff",
-            )}
-          >
-            ⬆ 上传到远程
-          </button>
-        </div>
+        {!browserMode ? (
+          <>
+            {/* Direction controls */}
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "12px",
+                padding: "8px 10px",
+                flexShrink: 0,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setDirection("download")}
+                style={actionButtonStyle(
+                  direction === "download"
+                    ? "rgba(31,214,122,0.22)"
+                    : SHEET_SURFACE,
+                  direction === "download" ? SHEET_ACCENT : SHEET_TEXT,
+                )}
+              >
+                ⬇ 下载到本地
+              </button>
+              <button
+                type="button"
+                onClick={startTransfer}
+                style={actionButtonStyle(
+                  "linear-gradient(180deg, rgba(96, 149, 255, 0.92), rgba(72, 122, 230, 0.92))",
+                  "#fff",
+                )}
+              >
+                {resolvePrimaryTransferLabel(
+                  direction,
+                  direction === "download"
+                    ? selectedRemote.size
+                    : selectedLocal.size,
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setDirection("upload")}
+                style={actionButtonStyle(
+                  direction === "upload"
+                    ? "rgba(31,214,122,0.22)"
+                    : SHEET_SURFACE,
+                  direction === "upload" ? SHEET_ACCENT : SHEET_TEXT,
+                )}
+              >
+                ⬆ 上传到远程
+              </button>
+            </div>
 
-        {/* Local panel */}
-        <div style={sectionLabelStyle}>
-          <span>📱 本地: {truncateName(localPath, 40)}</span>
-          {renderSortControls(
-            localSortField,
-            setLocalSortField,
-            localSortDirection,
-            setLocalSortDirection,
-          )}
-        </div>
-        <div style={pathBreadcrumbStyle}>
-          <button
-            type="button"
-            onClick={() => {
-              setLocalPath(getParentLocalDisplayPath(localPath));
-              setSelectedLocal(new Set());
-            }}
-            style={{
-              ...actionButtonStyle("transparent", mobileTheme.colors.accent),
-              minHeight: "24px",
-              padding: "0 6px",
-              fontSize: "12px",
-            }}
-          >
-            ← 上级
-          </button>
-          <span style={{ color: mobileTheme.colors.textMuted }}>
-            {localPath}
-          </span>
-        </div>
-        <div
-          style={{ ...fileListContainerStyle, maxHeight: "22vh", flex: "none" }}
-        >
-          {localLoading ? (
-            <div
-              style={{
-                padding: "20px",
-                textAlign: "center",
-                color: mobileTheme.colors.textMuted,
-              }}
-            >
-              加载中…
+            {/* Local panel */}
+            <div style={sectionLabelStyle}>
+              <span>📱 本地: {truncateName(localPath, 40)}</span>
+              {renderSortControls(
+                localSortField,
+                setLocalSortField,
+                localSortDirection,
+                setLocalSortDirection,
+              )}
             </div>
-          ) : localPermissionGranted === false ? (
-            <div
-              style={{
-                padding: "20px",
-                textAlign: "center",
-                color: mobileTheme.colors.textMuted,
-                lineHeight: 1.5,
-              }}
-            >
-              {localPermissionError || "本地文件同步需要先授权存储权限。"}
+            <div style={pathBreadcrumbStyle}>
+              <button
+                type="button"
+                onClick={() => {
+                  setLocalPath(getParentLocalDisplayPath(localPath));
+                  setSelectedLocal(new Set());
+                }}
+                style={{
+                  ...actionButtonStyle("transparent", SHEET_ACCENT),
+                  minHeight: "24px",
+                  padding: "0 6px",
+                  fontSize: "12px",
+                }}
+              >
+                ← 上级
+              </button>
+              <span style={{ color: SHEET_MUTED }}>
+                {localPath}
+              </span>
             </div>
-          ) : localListError ? (
             <div
-              style={{
-                padding: "20px",
-                textAlign: "center",
-                color: mobileTheme.colors.textMuted,
-                lineHeight: 1.5,
-              }}
+              style={{ ...fileListContainerStyle, maxHeight: "22vh", flex: "none" }}
             >
-              {localListError}
-            </div>
-          ) : visibleLocalEntries.length === 0 ? (
-            <div
-              style={{
-                padding: "20px",
-                textAlign: "center",
-                color: mobileTheme.colors.textMuted,
-              }}
-            >
-              空目录
-            </div>
-          ) : (
-            visibleLocalEntries.map((entry) => (
+              {localLoading ? (
+                <div
+                  style={{
+                    padding: "20px",
+                    textAlign: "center",
+                    color: SHEET_MUTED,
+                  }}
+                >
+                  加载中…
+                </div>
+              ) : localPermissionGranted === false ? (
+                <div
+                  style={{
+                    padding: "20px",
+                    textAlign: "center",
+                    color: SHEET_MUTED,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {localPermissionError || "本地文件同步需要先授权存储权限。"}
+                </div>
+              ) : localListError ? (
+                <div
+                  style={{
+                    padding: "20px",
+                    textAlign: "center",
+                    color: SHEET_MUTED,
+                    lineHeight: 1.5,
+                  }}
+                >
+                  {localListError}
+                </div>
+              ) : visibleLocalEntries.length === 0 ? (
+                <div
+                  style={{
+                    padding: "20px",
+                    textAlign: "center",
+                    color: SHEET_MUTED,
+                  }}
+                >
+                  空目录
+                </div>
+              ) : (
+                visibleLocalEntries.map((entry) => (
               <div
                 key={entry.name}
                 style={fileRowStyle}
@@ -1183,8 +2028,8 @@ export function FileTransferSheet({
                   if (entry.type === "directory") {
                     setLocalPath(joinLocalDisplayPath(localPath, entry.name));
                     setSelectedLocal(new Set());
-                  } else if (isMarkdownFileName(entry.name)) {
-                    void previewLocalMarkdown(entry);
+                  } else if (isTextPreviewFileName(entry.name)) {
+                    void previewLocalTextFile(entry);
                   } else {
                     toggleLocal(entry.name);
                   }
@@ -1208,7 +2053,7 @@ export function FileTransferSheet({
                   style={{
                     flex: 1,
                     fontSize: "13px",
-                    color: mobileTheme.colors.textPrimary,
+                    color: SHEET_TEXT,
                     overflow: "hidden",
                     textOverflow: "ellipsis",
                     whiteSpace: "nowrap",
@@ -1216,21 +2061,23 @@ export function FileTransferSheet({
                 >
                   {entry.name}
                 </span>
-                {entry.type === "file" && (
-                  <span
+                  {entry.type === "file" && (
+                    <span
                     style={{
                       fontSize: "11px",
-                      color: mobileTheme.colors.textMuted,
+                      color: SHEET_MUTED,
                       flexShrink: 0,
                     }}
                   >
                     {formatBytes(entry.size)}
                   </span>
-                )}
-              </div>
-            ))
-          )}
-        </div>
+                  )}
+                </div>
+                ))
+              )}
+            </div>
+          </>
+        ) : null}
 
         {/* Transfer progress */}
         {transfers.length > 0 && (
@@ -1238,14 +2085,14 @@ export function FileTransferSheet({
             style={{
               flexShrink: 0,
               padding: "6px 0",
-              borderTop: `1px solid ${mobileTheme.colors.cardBorder}`,
+              borderTop: `1px solid ${SHEET_BORDER}`,
             }}
           >
             <div
               style={{
                 fontSize: "12px",
                 fontWeight: 700,
-                color: mobileTheme.colors.textSecondary,
+                color: SHEET_MUTED,
                 padding: "2px 10px 4px",
               }}
             >
@@ -1271,10 +2118,10 @@ export function FileTransferSheet({
                     flexShrink: 0,
                     color:
                       t.status === "done"
-                        ? mobileTheme.colors.accent
+                        ? SHEET_ACCENT
                         : t.status === "error"
-                          ? mobileTheme.colors.danger
-                          : mobileTheme.colors.textMuted,
+                          ? SHEET_DANGER
+                          : SHEET_MUTED,
                   }}
                 >
                   {t.status === "done"

@@ -31,12 +31,13 @@ interface RelayHostEnvelope {
 }
 
 interface DevicePresenceInputEnvelope {
-  type: 'devices-request' | 'device-meta' | 'client-debug-log' | 'client-debug-snapshot';
+  type: 'devices-request' | 'device-meta' | 'control-ping' | 'client-debug-log' | 'client-debug-snapshot';
   payload?: {
     deviceId?: string;
     deviceName?: string;
     platform?: string;
     appVersion?: string;
+    sentAt?: number;
     entries?: Array<{ seq: number; ts: string; scope: string; payload?: string }>;
     requestId?: string;
     reason?: string;
@@ -45,7 +46,7 @@ interface DevicePresenceInputEnvelope {
 }
 
 interface DevicePresenceOutputEnvelope {
-  type: 'devices-snapshot' | 'device-updated' | 'directory-snapshot' | 'relay-error' | 'client-debug-request';
+  type: 'devices-snapshot' | 'device-updated' | 'directory-snapshot' | 'control-pong' | 'relay-error' | 'client-debug-request';
   payload?: Record<string, unknown>;
   reason?: string;
 }
@@ -1323,6 +1324,16 @@ function registerDeviceStream(ws: WebSocket, request: IncomingMessage, url: URL)
           connected: true,
         });
         broadcastDevices(user.id);
+        return;
+      }
+      if (message.type === 'control-ping') {
+        sendDeviceEnvelope(ws, {
+          type: 'control-pong',
+          payload: {
+            sentAt: typeof message.payload?.sentAt === 'number' ? message.payload.sentAt : undefined,
+            receivedAt: Date.now(),
+          },
+        });
         return;
       }
       if (message.type === 'client-debug-log') {

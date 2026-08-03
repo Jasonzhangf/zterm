@@ -1,10 +1,12 @@
 import {
   existsSync,
+  type FSWatcher,
   mkdirSync,
   readFileSync,
   readdirSync,
   statSync,
   unlinkSync,
+  watch,
 } from 'fs';
 import { join, resolve } from 'path';
 import type {
@@ -35,11 +37,204 @@ export interface TerminalFileTransferListRuntime {
   handleFileCreateDirectoryRequest: (session: TerminalSession, payload: FileCreateDirectoryRequestPayload) => void;
   handleFileDownloadRequest: (session: TerminalSession, payload: FileDownloadRequestPayload) => void;
   handleRemoteScreenshotRequest: (session: TerminalSession, payload: RemoteScreenshotRequestPayload) => Promise<void>;
+  refreshDirectoryCache: (path: string) => void;
+  dispose: () => void;
+}
+
+type RemoteDirectoryEntry = { name: string; type: 'file' | 'directory'; size: number; modified: number };
+const MAX_REMOTE_DIRECTORY_CACHE_ENTRIES = 32;
+
+interface RemoteDirectoryCacheEntry {
+  path: string;
+  parentPath: string | null;
+  entries: RemoteDirectoryEntry[];
+  watcher: FSWatcher | null;
+  refreshTimer: ReturnType<typeof setTimeout> | null;
+  lastAccessedAt: number;
 }
 
 export function createTerminalFileTransferListRuntime(
   deps: TerminalFileTransferRuntimeDeps,
 ): TerminalFileTransferListRuntime {
+  const directoryCache = new Map<string, RemoteDirectoryCacheEntry>();
+
+  function readDirectorySnapshot(resolvedPath: string) {
+    const entries = readdirSync(resolvedPath, { withFileTypes: true });
+    const fileEntries: RemoteDirectoryEntry[] = [];
+
+    for (const entry of entries) {
+      try {
+        const stats = statSync(join(resolvedPath, entry.name));
+        fileEntries.push({
+          name: entry.name,
+          type: entry.isDirectory() ? 'directory' : 'file',
+          size: entry.isDirectory() ? 0 : stats.size,
+          modified: stats.mtimeMs,
+        });
+      } catch (error) {
+        logFileTransferRuntimeError('stat entry failed', error, {
+          path: resolvedPath,
+          entryName: entry.name,
+        });
+      }
+    }
+
+    fileEntries.sort((a, b) => {
+      if (a.type !== b.type) {
+        return a.type === 'directory' ? -1 : 1;
+      }
+      return a.name.localeCompare(b.name);
+    });
+
+    return {
+      path: resolvedPath,
+      parentPath: resolvedPath === '/' ? null : resolve(resolvedPath, '..'),
+      entries: fileEntries,
+    };
+  }
+
+  function refreshDirectoryCache(resolvedPath: string) {
+    const previous = directoryCache.get(resolvedPath);
+    const snapshot = readDirectorySnapshot(resolvedPath);
+    const next: RemoteDirectoryCacheEntry = {
+      ...snapshot,
+      watcher: previous?.watcher ?? null,
+      refreshTimer: previous?.refreshTimer ?? null,
+      lastAccessedAt: Date.now(),
+    };
+    directoryCache.set(resolvedPath, next);
+    evictStaleDirectoryCacheEntries();
+    return next;
+  }
+
+  function closeDirectoryCacheEntry(entry: RemoteDirectoryCacheEntry) {
+    if (entry.refreshTimer) {
+      clearTimeout(entry.refreshTimer);
+      entry.refreshTimer = null;
+    }
+    if (entry.watcher) {
+      entry.watcher.close();
+      entry.watcher = null;
+    }
+  }
+
+  function evictStaleDirectoryCacheEntries() {
+    while (directoryCache.size > MAX_REMOTE_DIRECTORY_CACHE_ENTRIES) {
+      let oldestPath: string | null = null;
+      let oldestAccessedAt = Number.POSITIVE_INFINITY;
+      for (const [path, entry] of directoryCache.entries()) {
+        if (entry.lastAccessedAt < oldestAccessedAt) {
+          oldestPath = path;
+          oldestAccessedAt = entry.lastAccessedAt;
+        }
+      }
+      if (!oldestPath) {
+        return;
+      }
+      const oldest = directoryCache.get(oldestPath);
+      if (oldest) {
+        closeDirectoryCacheEntry(oldest);
+      }
+      directoryCache.delete(oldestPath);
+    }
+  }
+
+  function scheduleDirectoryCacheRefresh(resolvedPath: string) {
+    const current = directoryCache.get(resolvedPath);
+    if (!current || current.refreshTimer) {
+      return;
+    }
+    current.refreshTimer = setTimeout(() => {
+      const pending = directoryCache.get(resolvedPath);
+      if (pending) {
+        pending.refreshTimer = null;
+      }
+      try {
+        refreshDirectoryCache(resolvedPath);
+      } catch (error) {
+        const failed = directoryCache.get(resolvedPath);
+        if (failed) {
+          closeDirectoryCacheEntry(failed);
+        }
+        directoryCache.delete(resolvedPath);
+        logFileTransferRuntimeError('refresh cached directory failed', error, {
+          path: resolvedPath,
+        });
+      }
+    }, 50);
+  }
+
+  function watchDirectoryCache(resolvedPath: string) {
+    const current = directoryCache.get(resolvedPath);
+    if (!current || current.watcher) {
+      return true;
+    }
+    try {
+      const watcher = watch(resolvedPath, { persistent: false }, () => {
+        scheduleDirectoryCacheRefresh(resolvedPath);
+      });
+      watcher.on('error', (error) => {
+        const cached = directoryCache.get(resolvedPath);
+        if (cached?.watcher === watcher) {
+          closeDirectoryCacheEntry(cached);
+          directoryCache.delete(resolvedPath);
+        }
+        logFileTransferRuntimeError('directory watcher failed', error, {
+          path: resolvedPath,
+        });
+      });
+      current.watcher = watcher;
+      return true;
+    } catch (error) {
+      closeDirectoryCacheEntry(current);
+      directoryCache.delete(resolvedPath);
+      logFileTransferRuntimeError('watch cached directory failed', error, {
+        path: resolvedPath,
+      });
+      return false;
+    }
+  }
+
+  function getDirectoryCache(resolvedPath: string) {
+    const cached = directoryCache.get(resolvedPath) ?? refreshDirectoryCache(resolvedPath);
+    cached.lastAccessedAt = Date.now();
+    const watchReady = watchDirectoryCache(resolvedPath);
+    if (!watchReady) {
+      return cached;
+    }
+    return directoryCache.get(resolvedPath) ?? cached;
+  }
+
+  function refreshDirectoryCacheFromPath(path: string) {
+    const resolvedPath = resolveFileTransferListPath(path, () => path);
+    try {
+      refreshDirectoryCache(resolvedPath);
+      watchDirectoryCache(resolvedPath);
+    } catch (error) {
+      const failed = directoryCache.get(resolvedPath);
+      if (failed) {
+        closeDirectoryCacheEntry(failed);
+      }
+      directoryCache.delete(resolvedPath);
+      logFileTransferRuntimeError('refresh cached directory on demand failed', error, {
+        path: resolvedPath,
+      });
+    }
+  }
+
+  function dispose() {
+    for (const entry of directoryCache.values()) {
+      closeDirectoryCacheEntry(entry);
+    }
+    directoryCache.clear();
+  }
+
+  function projectDirectoryEntries(cacheEntry: RemoteDirectoryCacheEntry, showHidden: boolean) {
+    return showHidden
+      ? cacheEntry.entries
+      : cacheEntry.entries.filter((entry) => !entry.name.startsWith('.'));
+  }
+
   function sendFileDownloadBuffer(session: TerminalSession, requestId: string, fileName: string, fileBuffer: Buffer) {
     const totalChunks = Math.ceil(fileBuffer.length / FILE_CHUNK_SIZE);
     let index = 0;
@@ -149,43 +344,16 @@ export function createTerminalFileTransferListRuntime(
         requestedPath,
         () => deps.readTmuxPaneCurrentPath(session.sessionName),
       );
-      const entries = readdirSync(resolvedPath, { withFileTypes: true });
-      const fileEntries: Array<{ name: string; type: 'file' | 'directory'; size: number; modified: number }> = [];
-
-      for (const entry of entries) {
-        if (!showHidden && entry.name.startsWith('.')) {
-          continue;
-        }
-
-        try {
-          const stats = statSync(join(resolvedPath, entry.name));
-          fileEntries.push({
-            name: entry.name,
-            type: entry.isDirectory() ? 'directory' : 'file',
-            size: entry.isDirectory() ? 0 : stats.size,
-            modified: stats.mtimeMs,
-          });
-        } catch (error) {
-          logFileTransferRuntimeError('stat entry failed', error, {
-            sessionName: session.sessionName,
-            path: resolvedPath,
-            entryName: entry.name,
-          });
-        }
-      }
-
-      fileEntries.sort((a, b) => {
-        if (a.type !== b.type) {
-          return a.type === 'directory' ? -1 : 1;
-        }
-        return a.name.localeCompare(b.name);
-      });
-
-      const parentPath = resolvedPath === '/' ? null : resolve(resolvedPath, '..');
+      const cacheEntry = getDirectoryCache(resolvedPath);
 
       deps.sendMessage(session, {
         type: 'file-list-response',
-        payload: { requestId, path: resolvedPath, parentPath, entries: fileEntries },
+        payload: {
+          requestId,
+          path: cacheEntry.path,
+          parentPath: cacheEntry.parentPath,
+          entries: projectDirectoryEntries(cacheEntry, showHidden),
+        },
       });
     } catch (error) {
       deps.sendMessage(session, {
@@ -211,6 +379,14 @@ export function createTerminalFileTransferListRuntime(
         throw new Error('invalid directory name');
       }
       mkdirSync(join(resolvedPath, directoryName), { recursive: false });
+      try {
+        refreshDirectoryCache(resolvedPath);
+        watchDirectoryCache(resolvedPath);
+      } catch (error) {
+        logFileTransferRuntimeError('refresh cached directory after mkdir failed', error, {
+          path: resolvedPath,
+        });
+      }
       deps.sendMessage(session, {
         type: 'file-create-directory-complete',
         payload: { requestId, path: resolvedPath, name: directoryName },
@@ -331,5 +507,7 @@ export function createTerminalFileTransferListRuntime(
     handleFileCreateDirectoryRequest,
     handleFileDownloadRequest,
     handleRemoteScreenshotRequest,
+    refreshDirectoryCache: refreshDirectoryCacheFromPath,
+    dispose,
   };
 }

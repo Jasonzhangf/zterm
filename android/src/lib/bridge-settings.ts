@@ -1,6 +1,7 @@
 import {
   buildBridgeServerPresetIdentityId,
   DEFAULT_BRIDGE_SETTINGS,
+  TERMINAL_SHELL_SKIN_OPTIONS,
   buildDaemonStartCommand,
   buildServerPresetId,
   describeBridgePresetIdentity,
@@ -13,12 +14,14 @@ import {
   upsertBridgeServer,
   type BridgeServerPreset,
   type BridgeSettings,
+  type TerminalShellSkin,
   type TerminalSessionGroupLayoutMode,
   type TraversalRelayClientSettings,
 } from '@zterm/shared';
 
 export {
   DEFAULT_BRIDGE_SETTINGS,
+  TERMINAL_SHELL_SKIN_OPTIONS,
   buildBridgeServerPresetIdentityId,
   buildDaemonStartCommand,
   buildServerPresetId,
@@ -31,7 +34,7 @@ export {
   sortBridgeServers,
   upsertBridgeServer,
 };
-export type { BridgeServerPreset, BridgeSettings, TerminalSessionGroupLayoutMode, TraversalRelayClientSettings };
+export type { BridgeServerPreset, BridgeSettings, TerminalShellSkin, TerminalSessionGroupLayoutMode, TraversalRelayClientSettings };
 export type TraversalPath = 'rtc-direct' | 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
 
 export const DEFAULT_TRAVERSAL_PATH_PRIORITY: TraversalPath[] = ['tailscale', 'ipv6', 'rtc-direct', 'ipv4', 'rtc-relay'];

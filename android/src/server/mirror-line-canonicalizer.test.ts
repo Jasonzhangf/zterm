@@ -171,4 +171,41 @@ describe('canonicalizeCapturedMirrorLines', () => {
       expect.objectContaining({ char: '6'.codePointAt(0), fg: 256, bg: 52, width: 1 }),
     ]);
   });
+
+  it('continues tmux SGR background truth across physical soft-wrap rows until reset', async () => {
+    const bridge = await WasmBridge.load();
+    const rows = await canonicalizeCapturedMirrorLines(
+      [
+        '\u001b[48;5;22mFIRST',
+        'SECOND\u001b[49m default',
+      ],
+      40,
+      bridge,
+    );
+
+    expect(rows[0]?.slice(0, 5)).toEqual([
+      expect.objectContaining({ char: 'F'.codePointAt(0), bg: 22 }),
+      expect.objectContaining({ char: 'I'.codePointAt(0), bg: 22 }),
+      expect.objectContaining({ char: 'R'.codePointAt(0), bg: 22 }),
+      expect.objectContaining({ char: 'S'.codePointAt(0), bg: 22 }),
+      expect.objectContaining({ char: 'T'.codePointAt(0), bg: 22 }),
+    ]);
+    expect(rows[1]?.slice(0, 6).every((cell) => cell.bg === 22)).toBe(true);
+    expect(rows[1]?.slice(7).every((cell) => cell.bg === 256)).toBe(true);
+  });
+
+  it('does not leak a reset background into the next captured row', async () => {
+    const bridge = await WasmBridge.load();
+    const rows = await canonicalizeCapturedMirrorLines(
+      [
+        '\u001b[48;5;22mFIRST\u001b[0m',
+        'SECOND',
+      ],
+      40,
+      bridge,
+    );
+
+    expect(rows[0]?.slice(0, 5).every((cell) => cell.bg === 22)).toBe(true);
+    expect(rows[1]?.every((cell) => cell.bg === 256)).toBe(true);
+  });
 });

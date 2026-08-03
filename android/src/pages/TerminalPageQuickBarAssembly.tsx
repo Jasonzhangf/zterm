@@ -31,7 +31,7 @@ export interface TerminalPageQuickBarAssemblyProps {
   onToggleSplitLayout: () => void;
   onCycleSplitPane: () => void;
   onEditorDomFocusChange: (active: boolean) => void;
-  onOpenFileTransfer: () => void;
+  onOpenFileTransfer: (mode?: "browser" | "sync") => void;
   onToggleDebugOverlay: () => void;
   debugOverlayVisible: boolean;
   onToggleAbsoluteLineNumbers: () => void;
@@ -77,7 +77,7 @@ export function TerminalPageQuickBarAssembly(props: TerminalPageQuickBarAssembly
       onToggleSplitLayout={props.onToggleSplitLayout}
       onCycleSplitPane={props.onCycleSplitPane}
       onEditorDomFocusChange={props.onEditorDomFocusChange}
-      onOpenFileTransfer={() => props.onOpenFileTransfer()}
+      onOpenFileTransfer={(mode) => props.onOpenFileTransfer(mode)}
       onToggleDebugOverlay={props.onToggleDebugOverlay}
       copyModeActive={props.copyModeActive}
       onToggleCopyMode={props.onToggleCopyMode}

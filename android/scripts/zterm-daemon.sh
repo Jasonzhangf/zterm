@@ -55,6 +55,23 @@ EOF
 
 eval "$(read_config)"
 
+PROBE_SOCKET_HOST="$HOST"
+PROBE_URL_HOST="$HOST"
+case "$PROBE_SOCKET_HOST" in
+  0.0.0.0|::|\[::\])
+    PROBE_SOCKET_HOST="127.0.0.1"
+    PROBE_URL_HOST="127.0.0.1"
+    ;;
+  \[*\])
+    PROBE_SOCKET_HOST="${PROBE_SOCKET_HOST#[}"
+    PROBE_SOCKET_HOST="${PROBE_SOCKET_HOST%]}"
+    PROBE_URL_HOST="[${PROBE_SOCKET_HOST}]"
+    ;;
+  *:*)
+    PROBE_URL_HOST="[${PROBE_SOCKET_HOST}]"
+    ;;
+esac
+
 usage() {
   cat <<'EOF'
 Usage:
@@ -233,10 +250,10 @@ service_snapshot() {
 
 wait_for_service_ready() {
   local attempts=0
-  local max_attempts=30
+  local max_attempts=150
 
   while (( attempts < max_attempts )); do
-    if lsof -nP -iTCP:"${PORT}" -sTCP:LISTEN >/dev/null 2>&1; then
+    if daemon_health_ready; then
       return 0
     fi
     sleep 0.2
@@ -262,7 +279,11 @@ wait_for_service_unloaded() {
 }
 
 port_listening() {
-  nc -z 127.0.0.1 "${PORT}" >/dev/null 2>&1
+  nc -z "${PROBE_SOCKET_HOST}" "${PORT}" >/dev/null 2>&1
+}
+
+daemon_health_ready() {
+  curl --silent --show-error --fail --max-time 2 "http://${PROBE_URL_HOST}:${PORT}/health" >/dev/null 2>&1
 }
 
 wait_for_port_closed() {
@@ -465,7 +486,7 @@ status_service() {
   last_exit="$(printf '%s\n' "$snapshot" | awk '/last exit code =/ { print $5; exit }')"
   active_count="$(printf '%s\n' "$snapshot" | awk '/active count =/ { print $4; exit }')"
 
-  if [[ "${active_count:-0}" != "0" ]] && port_listening; then
+  if [[ "${active_count:-0}" != "0" ]] && daemon_health_ready; then
     echo "zterm autostart service running: label=${LAUNCH_AGENT_LABEL} host=${HOST} port=${PORT} auth=${AUTH_SOURCE}"
     echo "plist=${LAUNCH_AGENT_PATH}"
     echo "active_count=${active_count:-unknown} last_exit=${last_exit:-unknown}"
@@ -475,7 +496,7 @@ status_service() {
   echo "zterm autostart service installed but unhealthy: label=${LAUNCH_AGENT_LABEL}"
   echo "plist=${LAUNCH_AGENT_PATH}"
   echo "active_count=${active_count:-unknown} last_exit=${last_exit:-unknown}"
-  echo "listener=down port=${PORT}"
+  echo "health=down url=http://${PROBE_URL_HOST}:${PORT}/health"
   return 1
 }
 
@@ -614,12 +635,17 @@ cat > "$LAUNCH_RUNNER" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 PORT="${PORT}"
+PROBE_URL_HOST="${PROBE_URL_HOST}"
 STATE_DIR="${RUNTIME_STATE_DIR}"
 CRASH_FILE="${RUNTIME_STATE_DIR}/zterm-daemon-launch-crashes.log"
 mkdir -p "\$STATE_DIR"
 
-if lsof -nP -iTCP:"\$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
-  echo "[\$(date -u +%Y-%m-%dT%H:%M:%SZ)] launchd preflight: port \$PORT already listening, skip duplicate start" >> "${LOG_DIR}/launchd-stdout.log"
+health_ready() {
+  curl --silent --show-error --fail --max-time 2 "http://\${PROBE_URL_HOST}:\${PORT}/health" >/dev/null 2>&1
+}
+
+if health_ready; then
+  echo "[\$(date -u +%Y-%m-%dT%H:%M:%SZ)] launchd preflight: health ok on port \$PORT, skip duplicate start" >> "${LOG_DIR}/launchd-stdout.log"
   exit 0
 fi
 
@@ -656,7 +682,43 @@ fi
 
 cd "${HOME}"
 chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
-exec env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
+child_pid=""
+cleanup_child() {
+  if [[ -n "\${child_pid}" ]] && kill -0 "\${child_pid}" >/dev/null 2>&1; then
+    kill "\${child_pid}" >/dev/null 2>&1 || true
+    wait "\${child_pid}" >/dev/null 2>&1 || true
+  fi
+}
+trap cleanup_child TERM INT
+env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}" &
+child_pid="\$!"
+missed_health_checks=0
+child_start_epoch="\$(date +%s)"
+STARTUP_HEALTH_GRACE_SECONDS=45
+while kill -0 "\${child_pid}" >/dev/null 2>&1; do
+  if health_ready; then
+    missed_health_checks=0
+  else
+    now_epoch="\$(date +%s)"
+    child_age=\$((now_epoch - child_start_epoch))
+    if [[ "\${child_age}" -lt "\${STARTUP_HEALTH_GRACE_SECONDS}" ]]; then
+      echo "[\$(date -u +%Y-%m-%dT%H:%M:%SZ)] launchd watchdog: waiting for startup health child=\${child_pid} age=\${child_age}s" >> "${LOG_DIR}/launchd-stderr.log"
+      missed_health_checks=0
+    else
+      missed_health_checks=\$((missed_health_checks + 1))
+      echo "[\$(date -u +%Y-%m-%dT%H:%M:%SZ)] launchd watchdog: missed health check \${missed_health_checks}/3 for child \${child_pid}" >> "${LOG_DIR}/launchd-stderr.log"
+      if [[ "\${missed_health_checks}" -ge 3 ]]; then
+        echo "[\$(date -u +%Y-%m-%dT%H:%M:%SZ)] launchd watchdog: restarting unhealthy child \${child_pid}" >> "${LOG_DIR}/launchd-stderr.log"
+        kill "\${child_pid}" >/dev/null 2>&1 || true
+        wait "\${child_pid}" >/dev/null 2>&1 || true
+        exit 1
+      fi
+    fi
+  fi
+  sleep 10
+done
+wait "\${child_pid}"
+exit "\$?"
 EOF
   chmod +x "$LAUNCH_RUNNER"
   (

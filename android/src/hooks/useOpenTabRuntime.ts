@@ -198,6 +198,10 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     }
     return materializeOpenTabRuntimeSessions(openTabState.tabs, sessions);
   }, [openTabState.tabs, sessions]);
+  const retainedTerminalSessionCount = useMemo(
+    () => terminalSessions.filter((session) => session.state !== 'closed').length,
+    [terminalSessions],
+  );
 
   const terminalActiveSession = useMemo(() => {
     if (terminalSessions.length === 0) {
@@ -493,6 +497,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     sessionsRef,
     openTabStateRef,
     foregroundRefreshRuntimeRef,
+    retainedSessionCount: retainedTerminalSessionCount,
     onForegroundActiveChange,
     onForegroundResume,
     auditOpenTabsAgainstRemoteSessions,

@@ -198,6 +198,7 @@ function TerminalHeaderComponent({
   return (
     <div
       ref={headerRootRef}
+      className="zterm-neo-header"
         style={{
           padding: paneProfile.header.outerPadding,
           display: splitVisible ? 'flex' : undefined,
@@ -205,8 +206,8 @@ function TerminalHeaderComponent({
           gap: splitVisible ? paneProfile.stage.paneGap : undefined,
           width: splitVisible ? '100%' : undefined,
           boxSizing: splitVisible ? 'border-box' : undefined,
-          backgroundColor: splitVisible ? 'rgba(11, 15, 24, 0.94)' : undefined,
-          borderBottom: splitVisible ? '1px solid rgba(255,255,255,0.08)' : undefined,
+          backgroundColor: splitVisible ? 'var(--zterm-neo-header-bg)' : undefined,
+          borderBottom: splitVisible ? '1px solid var(--zterm-neo-border)' : undefined,
         }}
     >
       {renderedPaneGroups.map((group, groupIndex) => {

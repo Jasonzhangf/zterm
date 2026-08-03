@@ -39,6 +39,10 @@ jobs:
 
       - name: Feature registry and architecture truth gates
         run: pnpm --dir android run test:feature-registry
+
+      - name: Terminal shell theme gate
+        run: pnpm --dir android run test:terminal:shell-theme
+
       - name: Relay account directory gate
         run: pnpm --dir android run test:relay:account-directory
 

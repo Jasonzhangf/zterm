@@ -117,6 +117,107 @@ describe('buildTraversalPlan', () => {
     ]);
   });
 
+  it('keeps same-endpoint directory candidates when their auth tokens differ', () => {
+    const plan = buildTraversalPlan(
+      {
+        bridgeHost: '',
+        bridgePort: 3333,
+        authToken: '',
+        daemonHostId: 'mac-studio',
+        transportMode: 'auto',
+        relayEndpointCandidates: [
+          {
+            id: 'tailscale-stale',
+            kind: 'tailscale',
+            host: '100.66.1.82',
+            port: 3333,
+            authToken: 'stale-token',
+            authRequired: true,
+            lastSeenAt: '2026-08-01T01:01:55.431Z',
+          },
+          {
+            id: 'tailscale-fresh',
+            kind: 'tailscale',
+            host: '100.66.1.82',
+            port: 3333,
+            authToken: 'fresh-token',
+            authRequired: true,
+            lastSeenAt: '2026-08-01T01:02:55.431Z',
+          },
+        ],
+      },
+      { ...DEFAULT_BRIDGE_SETTINGS, traversalRelay: undefined },
+    );
+
+    expect(plan.candidates.filter((candidate) => candidate.path === 'tailscale')).toHaveLength(2);
+    expect(plan.candidates.map((candidate) => candidate.kind === 'ws' ? candidate.url : '')).toEqual([
+      'ws://100.66.1.82:3333/?token=stale-token',
+      'ws://100.66.1.82:3333/?token=fresh-token',
+    ]);
+  });
+
+  it('lets a fresh relay directory endpoint token replace a stale saved host token for the same direct URL', () => {
+    const plan = buildTraversalPlan(
+      {
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+        authToken: 'stale-saved-token',
+        daemonHostId: 'mac-studio',
+        relayHostId: 'mac-studio',
+        tailscaleHost: '100.66.1.82',
+        transportMode: 'auto',
+        relayEndpointCandidates: [
+          {
+            id: 'tailscale:100.66.1.82:3333',
+            kind: 'tailscale',
+            host: '100.66.1.82',
+            port: 3333,
+            authToken: 'fresh-directory-token',
+            authRequired: true,
+            lastSeenAt: '2026-08-01T04:20:00.000Z',
+          },
+          {
+            id: 'relay-rtc:mac-studio',
+            kind: 'relay-rtc',
+            relayHostId: 'mac-studio',
+            authToken: 'fresh-directory-token',
+            authRequired: true,
+            lastSeenAt: '2026-08-01T04:20:00.000Z',
+          },
+        ],
+      },
+      {
+        ...DEFAULT_BRIDGE_SETTINGS,
+        traversalRelay: {
+          relayBaseUrl: 'https://relay.example.test/relay/',
+          accessToken: 'access-1',
+          userId: 'user-1',
+          username: 'jason',
+          deviceId: 'android-1',
+          deviceName: 'Android',
+          platform: 'android',
+          wsDevicesUrl: 'wss://relay.example.test/relay/ws/devices',
+          wsHostUrl: 'wss://relay.example.test/relay/ws/host',
+          wsClientUrl: 'wss://relay.example.test/relay/ws/client',
+          turnUrl: 'turn:relay.example.test:3478?transport=udp',
+          turnUsername: 'turn-user',
+          turnCredential: 'turn-secret',
+          updatedAt: 1,
+        },
+      },
+    );
+
+    expect(plan.candidates[0]).toMatchObject({
+      id: 'tailscale:100.66.1.82:3333',
+      kind: 'ws',
+      path: 'tailscale',
+      endpoint: '100.66.1.82:3333',
+      url: 'ws://100.66.1.82:3333/?token=fresh-directory-token',
+    });
+    expect(plan.candidates.map((candidate) => candidate.kind === 'ws' ? candidate.url : candidate.endpoint))
+      .not.toContain('ws://100.66.1.82:3333/?token=stale-saved-token');
+  });
+
   it('orders logged-in auto candidates as Tailscale -> direct IPv6 -> UDP direct -> non-LAN IPv4 -> TURN Relay', () => {
     const plan = buildTraversalPlan(
       {

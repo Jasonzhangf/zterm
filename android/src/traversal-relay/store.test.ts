@@ -22,6 +22,80 @@ afterEach(() => {
 });
 
 describe('TraversalRelayStore', () => {
+  it('keeps independent tokens and device presence for concurrent logins to one account', () => {
+    const store = createStore();
+    const user = store.register('Jason', 'secret');
+    const phoneALogin = store.login('Jason', 'secret');
+    const phoneBLogin = store.login('Jason', 'secret');
+
+    expect(phoneALogin.token).not.toBe(phoneBLogin.token);
+    expect(store.authenticate(phoneALogin.token)).toMatchObject({ id: user.id });
+    expect(store.authenticate(phoneBLogin.token)).toMatchObject({ id: user.id });
+
+    store.setClientConnected({
+      userId: user.id,
+      deviceId: 'phone-a',
+      deviceName: 'Phone A',
+      connected: true,
+    });
+    store.setClientConnected({
+      userId: user.id,
+      deviceId: 'phone-b',
+      deviceName: 'Phone B',
+      connected: true,
+    });
+    store.publishDaemonDirectory({
+      userId: user.id,
+      deviceId: 'mac-studio-device',
+      hostId: 'mac-studio',
+      endpoints: [{
+        id: 'relay:mac-studio',
+        kind: 'relay-rtc',
+        relayHostId: 'mac-studio',
+        authRequired: true,
+        lastSeenAt: '2026-08-02T00:00:00.000Z',
+      }],
+    });
+    store.publishDaemonDirectory({
+      userId: user.id,
+      deviceId: 'windows-desktop-device',
+      hostId: 'windows-desktop',
+      endpoints: [{
+        id: 'relay:windows-desktop',
+        kind: 'relay-rtc',
+        relayHostId: 'windows-desktop',
+        authRequired: true,
+        lastSeenAt: '2026-08-02T00:00:00.000Z',
+      }],
+    });
+
+    expect(store.listDevices(user.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ deviceId: 'phone-a', client: expect.objectContaining({ connected: true }) }),
+      expect.objectContaining({ deviceId: 'phone-b', client: expect.objectContaining({ connected: true }) }),
+    ]));
+    expect(store.getAccountDirectory(user.id).devices).toEqual(expect.arrayContaining([
+      expect.objectContaining({ deviceId: 'mac-studio-device', daemon: expect.objectContaining({ hostId: 'mac-studio' }) }),
+      expect.objectContaining({ deviceId: 'windows-desktop-device', daemon: expect.objectContaining({ hostId: 'windows-desktop' }) }),
+    ]));
+  });
+
+  it('rejects an unknown token without affecting valid tokens or another account directory', () => {
+    const store = createStore();
+    const jason = store.register('Jason', 'secret');
+    const other = store.register('Other', 'other-secret');
+    const jasonLogin = store.login('Jason', 'secret');
+    const otherLogin = store.login('Other', 'other-secret');
+
+    store.setClientConnected({ userId: jason.id, deviceId: 'jason-phone', connected: true });
+    store.setClientConnected({ userId: other.id, deviceId: 'other-phone', connected: true });
+
+    expect(store.authenticate('unknown-token')).toBeNull();
+    expect(store.authenticate(jasonLogin.token)).toMatchObject({ id: jason.id });
+    expect(store.authenticate(otherLogin.token)).toMatchObject({ id: other.id });
+    expect(store.getAccountDirectory(jason.id).devices.map((device) => device.deviceId)).toEqual(['jason-phone']);
+    expect(store.getAccountDirectory(other.id).devices.map((device) => device.deviceId)).toEqual(['other-phone']);
+  });
+
   it('registers, logs in, authenticates, and records device presence', () => {
     const store = createStore();
     const user = store.register('Jason', 'secret');
@@ -210,7 +284,7 @@ describe('TraversalRelayStore', () => {
     });
   });
 
-  it('keeps last published directory facts when daemon disconnects', () => {
+  it('keeps daemon identity but hides route candidates when daemon disconnects', () => {
     const store = createStore();
     const user = store.register('Jason', 'secret');
 
@@ -236,8 +310,8 @@ describe('TraversalRelayStore', () => {
         presence: {
           connected: false,
         },
-        endpoints: [{ id: 'relay:daemon-mba', kind: 'relay-rtc' }],
-        sessions: [{ name: 'mobile-dev' }],
+        endpoints: [],
+        sessions: [],
       },
     });
   });

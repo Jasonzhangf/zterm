@@ -175,16 +175,17 @@ function toDeviceSnapshot(record: TraversalRelayDeviceRecord): TraversalRelayDev
 }
 
 function toDirectoryDevice(record: TraversalRelayDeviceRecord): RelayDirectoryDevice {
+  const daemonConnected = record.daemonConnected;
   const daemon: RelayDirectoryDaemon | null = record.daemonHostId
     ? {
         hostId: record.daemonHostId,
         version: record.daemonVersion,
         presence: {
-          connected: record.daemonConnected,
+          connected: daemonConnected,
           lastSeenAt: record.daemonLastSeenAt,
         },
-        endpoints: record.daemonEndpoints,
-        sessions: record.daemonSessions,
+        endpoints: daemonConnected ? record.daemonEndpoints : [],
+        sessions: daemonConnected ? record.daemonSessions : [],
         lastPublishedAt: record.daemonDirectoryPublishedAt || record.daemonLastSeenAt,
       }
     : null;

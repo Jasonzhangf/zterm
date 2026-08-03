@@ -63,6 +63,10 @@ vi.mock('./lib/traversal-relay-client', () => ({
   connectTraversalRelayDevicesStream: (...args: any[]) => (connectRelayDevicesStreamMock as any)(...args),
   readTraversalRelayAccountState: (...args: any[]) => (readRelayAccountStateMock as any)(...args),
   traversalRelayRefreshMe: (...args: any[]) => (traversalRelayRefreshMeMock as any)(...args),
+  isTraversalRelayAuthenticationError: (error: unknown) => (
+    error instanceof Error && error.name === 'TraversalRelayAuthenticationError'
+  ),
+  writeTraversalRelayAccountState: vi.fn(),
   sendTraversalRelayClientDebugSnapshot: (...args: any[]) => (sendDebugSnapshotMock as any)(...args),
   sendTraversalRelayClientDebugLogs: (...args: any[]) => (sendDebugLogsMock as any)(...args),
   applyTraversalRelaySettings: (base: any, relay: any) => ({ ...base, traversalRelay: relay }),
@@ -376,6 +380,7 @@ describe('App relay device stream reconnect lifecycle', () => {
     expect(traversalRelayRefreshMeMock.mock.invocationCallOrder[0]).toBeLessThan(
       connectRelayDevicesStreamMock.mock.invocationCallOrder[0],
     );
+    expect(connectRelayDevicesStreamMock.mock.calls[0]?.[0].onControlPong).toEqual(expect.any(Function));
     expect(MockRelayWebSocket.instances).toHaveLength(1);
   });
 

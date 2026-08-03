@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
 import {
   openConnectionPropertiesPage,
   openConnectionsPage,
@@ -124,6 +125,39 @@ export function useAppPageState(options: UseAppPageStateOptions): AppPageStateRe
     && hasPersistedTerminalRouteIntent()
     && hasPersistedOpenTabRestoreCandidate(),
   );
+  const pageStateRef = useRef(pageState);
+
+  useEffect(() => {
+    pageStateRef.current = pageState;
+  }, [pageState]);
+
+  useEffect(() => {
+    let removed = false;
+    let listener: { remove: () => Promise<void> } | null = null;
+    void Promise.resolve(CapacitorApp.addListener('backButton', () => {
+      const currentPage = pageStateRef.current;
+      if (currentPage.kind === 'settings' || currentPage.kind === 'connection-properties') {
+        setPageState(openConnectionsPage());
+        return;
+      }
+      if (currentPage.kind === 'terminal') {
+        return;
+      }
+      void CapacitorApp.exitApp();
+    })).then((registered) => {
+      if (removed) {
+        void registered.remove();
+        return;
+      }
+      listener = registered;
+    });
+    return () => {
+      removed = true;
+      if (listener) {
+        void listener.remove();
+      }
+    };
+  }, []);
 
   const activeSession = useMemo(
     () => sessions.find((session) => session.id === runtimeActiveSessionId) || null,

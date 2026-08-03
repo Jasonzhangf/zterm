@@ -15,7 +15,7 @@ import {
   resolveTerminalLayoutProfile,
   type TerminalSessionGroupLayoutAxis,
 } from "../lib/terminal-layout-profile";
-import { mobileTheme } from "../lib/mobile-ui";
+import type { TerminalShellSkin } from "../lib/bridge-settings";
 import { getServerIdentityTone, resolveServerDisplayName, resolveServerIdentityKey } from "../lib/server-identity";
 import type { TerminalSessionGroupSlotName, TerminalSessionGroupViewportProjection } from "../lib/session-group-viewport";
 import { terminalPageRenderedSessionUiKey, terminalPageRenderedSessionsUiKey, resolveRenderedSessionsInputEpochKey } from "./terminal-page-render-keys";
@@ -52,6 +52,7 @@ const TerminalStageShell = ReactMemo(
     focusNonce,
     terminalFontSize,
     terminalThemeId,
+    terminalShellSkin = "light",
     terminalWidthMode,
     allowSessionDrawerSwipe = false,
     absoluteLineNumbersVisible,
@@ -104,6 +105,7 @@ const TerminalStageShell = ReactMemo(
     focusNonce: number;
     terminalFontSize: number;
     terminalThemeId?: string;
+    terminalShellSkin?: TerminalShellSkin;
     terminalWidthMode: TerminalWidthMode;
     allowSessionDrawerSwipe?: boolean;
     absoluteLineNumbersVisible: boolean;
@@ -298,8 +300,8 @@ const TerminalStageShell = ReactMemo(
                     width: "100%",
                     border: "1px dashed rgba(220,232,255,0.24)",
                     borderRadius: paneProfile.stage.paneRadius,
-                    backgroundColor: mobileTheme.colors.canvas,
-                    color: mobileTheme.colors.textSecondary,
+                    backgroundColor: "var(--zterm-stage-bg)",
+                    color: "var(--zterm-stage-muted)",
                     display: "flex",
                     flexDirection: "column",
                     alignItems: "center",
@@ -309,7 +311,7 @@ const TerminalStageShell = ReactMemo(
                     fontWeight: 800,
                   }}
                 >
-                  <span style={{ color: mobileTheme.colors.textPrimary }}>Pane {paneIndex + 1}</span>
+                  <span style={{ color: "var(--zterm-stage-text)" }}>Pane {paneIndex + 1}</span>
                   <span>选择 session</span>
                 </button>
               );
@@ -328,7 +330,7 @@ const TerminalStageShell = ReactMemo(
                   height: "100%",
                   position: "relative",
                   overflow: "hidden",
-                  backgroundColor: mobileTheme.colors.canvas,
+                  backgroundColor: "var(--zterm-stage-bg)",
                   borderWidth: "0px",
                   borderStyle: "none",
                   boxSizing: "border-box",
@@ -397,7 +399,7 @@ const TerminalStageShell = ReactMemo(
             border: `1px solid ${serverTone.lightCardBorder}`,
             borderRadius: "14px",
             background: serverTone.previewBackground,
-            color: mobileTheme.colors.textPrimary,
+            color: "var(--zterm-stage-text)",
             display: "flex",
             flexDirection: "column",
             alignItems: "stretch",
@@ -437,7 +439,7 @@ const TerminalStageShell = ReactMemo(
                 minWidth: 0,
                 fontSize: sessionGroupLayoutAxis === "horizontal" ? "15px" : "13px",
                 fontWeight: 820,
-                color: mobileTheme.colors.textPrimary,
+                color: "var(--zterm-stage-text)",
                 whiteSpace: sessionGroupLayoutAxis === "horizontal" ? "normal" : "nowrap",
                 overflow: "hidden",
                 textOverflow: "ellipsis",
@@ -484,7 +486,7 @@ const TerminalStageShell = ReactMemo(
           <span
             style={{
               fontSize: sessionGroupLayoutAxis === "horizontal" ? "10.5px" : "9.5px",
-              color: mobileTheme.colors.textSecondary,
+              color: "var(--zterm-stage-muted)",
               whiteSpace: sessionGroupLayoutAxis === "horizontal" ? "normal" : "nowrap",
               overflow: "hidden",
               textOverflow: "ellipsis",
@@ -518,6 +520,7 @@ const TerminalStageShell = ReactMemo(
     return (
       <div
         data-testid="terminal-stage-shell"
+        data-terminal-shell-skin={terminalShellSkin}
         onTouchStartCapture={(event) => {
           if (sessionPreviewOpen || !onOpenSessionPreview || sessionPreviewSessions.length === 0) {
             previewGestureRef.current = createSessionPreviewGestureState();
@@ -568,7 +571,7 @@ const TerminalStageShell = ReactMemo(
             borderRadius: paneProfile.stage.containerRadius,
             backgroundColor: splitVisible
               ? "transparent"
-              : mobileTheme.colors.canvas,
+              : "var(--zterm-stage-bg)",
             overflow: "hidden",
             borderWidth: "0px",
             borderStyle: "none",
@@ -618,7 +621,7 @@ const TerminalStageShell = ReactMemo(
                   borderWidth: "0px",
                   borderStyle: "none",
                   borderRadius: paneProfile.stage.paneRadius,
-                  backgroundColor: mobileTheme.colors.canvas,
+                  backgroundColor: "var(--zterm-stage-bg)",
                 }}
               >
                 {renderTerminal(sessionGroup.center, true, `group-center:${sessionGroup.center.id}`)}
@@ -641,7 +644,7 @@ const TerminalStageShell = ReactMemo(
                 flexDirection: "column",
                 alignItems: "center",
                 justifyContent: "center",
-                color: mobileTheme.colors.textSecondary,
+                color: "var(--zterm-stage-muted)",
                 gap: "10px",
               }}
             >
@@ -702,6 +705,7 @@ const TerminalStageShell = ReactMemo(
     prev.focusNonce === next.focusNonce &&
     prev.terminalFontSize === next.terminalFontSize &&
     prev.terminalThemeId === next.terminalThemeId &&
+    prev.terminalShellSkin === next.terminalShellSkin &&
     prev.terminalWidthMode === next.terminalWidthMode &&
     prev.allowSessionDrawerSwipe === next.allowSessionDrawerSwipe &&
     prev.absoluteLineNumbersVisible === next.absoluteLineNumbersVisible &&

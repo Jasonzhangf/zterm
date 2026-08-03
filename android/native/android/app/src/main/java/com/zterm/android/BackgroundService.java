@@ -7,18 +7,33 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
+import android.os.PowerManager;
 import androidx.core.app.NotificationCompat;
 
 /**
- * BackgroundService - 前台服务通知面
- * 后台状态不得持有 WakeLock；连接保活归客户端 transport owner 管。
+ * BackgroundService - Android persistent-background execution surface.
+ * It keeps the process schedulable only; connection/session truth remains in
+ * the client transport runtime.
  */
 public class BackgroundService extends Service {
     private static final String CHANNEL_ID = "wterm_background";
     private static final int NOTIFICATION_ID = 1;
+    private static final long BACKGROUND_HANDOFF_WAKE_LOCK_MS = 5 * 60 * 1000;
 
     private int sessionCount = 0;
+    private final Handler backgroundHandoffHandler = new Handler(Looper.getMainLooper());
+    private final Runnable backgroundHandoffTimeoutRunnable = new Runnable() {
+        @Override
+        public void run() {
+            releaseWakeLock();
+            stopForeground(true);
+            stopSelf();
+        }
+    };
+    private PowerManager.WakeLock wakeLock;
 
     @Override
     public void onCreate() {
@@ -31,11 +46,20 @@ public class BackgroundService extends Service {
         if (intent != null && intent.hasExtra("sessionCount")) {
             sessionCount = intent.getIntExtra("sessionCount", 0);
         }
+
+        if (sessionCount <= 0) {
+            releaseWakeLock();
+            stopForeground(true);
+            stopSelf();
+            return START_NOT_STICKY;
+        }
         
         Notification notification = createNotification();
         startForeground(NOTIFICATION_ID, notification);
+        acquireWakeLock();
+        scheduleBackgroundHandoffTimeout();
         
-        return START_STICKY;
+        return START_NOT_STICKY;
     }
 
     @Override
@@ -45,7 +69,39 @@ public class BackgroundService extends Service {
 
     @Override
     public void onDestroy() {
+        releaseWakeLock();
         super.onDestroy();
+    }
+
+    private void acquireWakeLock() {
+        if (wakeLock == null) {
+            PowerManager powerManager = (PowerManager) getSystemService(Context.POWER_SERVICE);
+            if (powerManager == null) {
+                throw new IllegalStateException("power manager unavailable");
+            }
+            wakeLock = powerManager.newWakeLock(
+                PowerManager.PARTIAL_WAKE_LOCK,
+                getPackageName() + ":terminal-background"
+            );
+            wakeLock.setReferenceCounted(false);
+        }
+        wakeLock.acquire(BACKGROUND_HANDOFF_WAKE_LOCK_MS);
+    }
+
+    private void scheduleBackgroundHandoffTimeout() {
+        backgroundHandoffHandler.removeCallbacks(backgroundHandoffTimeoutRunnable);
+        backgroundHandoffHandler.postDelayed(
+            backgroundHandoffTimeoutRunnable,
+            BACKGROUND_HANDOFF_WAKE_LOCK_MS
+        );
+    }
+
+    private void releaseWakeLock() {
+        backgroundHandoffHandler.removeCallbacks(backgroundHandoffTimeoutRunnable);
+        if (wakeLock != null && wakeLock.isHeld()) {
+            wakeLock.release();
+        }
+        wakeLock = null;
     }
 
     /**
