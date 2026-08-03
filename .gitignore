@@ -1,4 +1,5 @@
 .DS_Store
+*.swp
 .agent-state/
 .agent-collab/
 .cursor/
@@ -12,6 +13,7 @@ dist/
 coverage/
 test-results/
 playwright-report/
+tmp/
 project-architecture-analysis.html
 docs/file_*.png
 android/node_modules/
