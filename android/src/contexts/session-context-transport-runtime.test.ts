@@ -778,7 +778,7 @@ describe('bindTargetMuxTransportSocketLifecycleRuntime', () => {
     expect(finalizeFailure).toHaveBeenCalledWith('missing active session for terminal mux channel priority', true);
   });
 
-  it('fails mux-ready instead of replaying channels when active priority is not opening on the target', () => {
+  it('replays opening channels when the active session is not the target reconnect anchor', () => {
     const ws = {
       readyState: WebSocket.OPEN,
       onopen: null,
@@ -838,9 +838,9 @@ describe('bindTargetMuxTransportSocketLifecycleRuntime', () => {
     });
 
     expect(getOpeningTerminalChannelsForTarget).toHaveBeenCalledWith('mac-studio', 'session-2');
-    expect(setTargetMuxReady).not.toHaveBeenCalled();
-    expect(sendSocketPayload).not.toHaveBeenCalled();
-    expect(finalizeFailure).toHaveBeenCalledWith('active session is not opening on terminal mux target', true);
+    expect(setTargetMuxReady).toHaveBeenCalledWith('mac-studio', true);
+    expect(sendSocketPayload).toHaveBeenCalledTimes(1);
+    expect(finalizeFailure).not.toHaveBeenCalled();
   });
 
   it('starts target heartbeat on mux target open and records target activity from mux frames', () => {

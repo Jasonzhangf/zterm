@@ -460,14 +460,21 @@ export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
           finalizeTargetFailure('missing active session for terminal mux channel priority', true);
           return;
         }
-        const openingChannels = options.getOpeningTerminalChannelsForTarget(options.targetKey, prioritySessionId);
-        if (!openingChannels.some((channel) => channel.sessionId === prioritySessionId)) {
+        const openingChannels = options.getOpeningTerminalChannelsForTarget(
+          options.targetKey,
+          prioritySessionId.trim(),
+        );
+        const priorityChannel = openingChannels.find(
+          (channel) => channel.sessionId === prioritySessionId,
+        );
+        if (!priorityChannel && openingChannels.length === 0) {
           finalizeTargetFailure('active session is not opening on terminal mux target', true);
           return;
         }
         options.setTargetMuxReady(options.targetKey, true);
         options.runtimeDebug(`session.mux.${options.debugScope}.ready`, {
           sessionId: options.sessionId,
+          prioritySessionId: priorityChannel?.sessionId || openingChannels[0]?.sessionId || null,
         });
         for (const channel of openingChannels) {
           sendSessionMuxChannelOpenRuntime({
