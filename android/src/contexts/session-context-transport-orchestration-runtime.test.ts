@@ -201,7 +201,7 @@ describe('notifyTargetNetworkSignalRuntime', () => {
     targetNetworkProbeRuntime.dispose();
   });
 
-  it('projects probe timeout explicitly into the one target failure owner', () => {
+  it('keeps an OPEN target after one inconclusive foreground probe timeout', () => {
     vi.useFakeTimers();
     const socket = makeFailedSocket(WebSocket.OPEN);
     const targetNetworkProbeRuntime = createSessionTargetNetworkProbeRuntime({
@@ -224,11 +224,7 @@ describe('notifyTargetNetworkSignalRuntime', () => {
     ]);
 
     vi.advanceTimersByTime(2_500);
-    expect(submitTargetSocketFailure).toHaveBeenCalledWith(
-      'daemon-a',
-      socket,
-      'network generation target probe timeout',
-    );
+    expect(submitTargetSocketFailure).not.toHaveBeenCalled();
     targetNetworkProbeRuntime.dispose();
     vi.useRealTimers();
   });

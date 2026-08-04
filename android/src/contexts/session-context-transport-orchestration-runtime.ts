@@ -354,6 +354,14 @@ export function notifyTargetNetworkSignalRuntime(options: {
         options.sendTargetProbe(targetRuntime.key, probeSocket, sentAt);
       },
       onFailure: (failure) => {
+        if (failure.type === 'TargetNetworkProbeError01GenerationTimeout') {
+          options.runtimeDebug('session.mux.target-network-probe.inconclusive', {
+            targetKey: failure.targetKey,
+            source: options.signal.source,
+            readyState: failure.socket.readyState,
+          });
+          return;
+        }
         options.submitTargetSocketFailure(
           failure.targetKey,
           failure.socket,
