@@ -145,6 +145,7 @@ function makeLiveHeadStoreRef(entries?: Array<[string, any]>) {
 function makeHeadRuntimeRefs(options: {
   sessions: Session[];
   activeSessionId: string;
+  liveSessionIds?: string[];
   setHead?: (sessionId: string, head: { daemonHeadRevision: number; daemonHeadEndIndex: number }) => boolean;
   visibleRangeEntries?: Array<[string, ReturnType<typeof buildDefaultSessionVisibleRange>]>;
   sessionBufferHeadsEntries?: Array<[string, any]>;
@@ -152,7 +153,13 @@ function makeHeadRuntimeRefs(options: {
   const liveHeads = new Map<string, any>(options.sessionBufferHeadsEntries || []);
   const setHead = options.setHead || vi.fn(() => true);
   return {
-    stateRef: { current: { sessions: options.sessions, activeSessionId: options.activeSessionId } },
+    stateRef: {
+      current: {
+        sessions: options.sessions,
+        activeSessionId: options.activeSessionId,
+        liveSessionIds: options.liveSessionIds || [],
+      },
+    },
     lastHeadRequestAtRef: { current: new Map<string, number>() },
     tailRefreshStoreRef: makeTailRefreshStoreRef(),
     sessionRevisionResetRef: { current: new Map() },
@@ -2823,8 +2830,324 @@ describe('session-context-buffer-runtime inactive gating', () => {
         reason: 'buffer-head-no-visible-range-active-bootstrap',
         purpose: 'tail-refresh',
         requestWindowOverride: {
+          requestStartIndex: 168,
+          requestEndIndex: 240,
+        },
+      }),
+    );
+  });
+
+  it('bootstraps a live passive preview tail when it has no interactive visible range', () => {
+    const sessionId = 'session-passive-preview';
+    const session = makeSession(sessionId);
+    session.buffer = createSessionBufferState({
+      lines: ['old-1', 'old-2'],
+      startIndex: 10,
+      endIndex: 12,
+      bufferHeadStartIndex: 10,
+      bufferTailEndIndex: 12,
+      cols: 80,
+      rows: 24,
+      revision: 2,
+      cacheLines: 1000,
+    });
+    const requestSessionBufferSync = vi.fn(() => true);
+
+    handleBufferHeadRuntime({
+      sessionId,
+      latestRevision: 9,
+      latestEndIndex: 240,
+      availableStartIndex: 0,
+      availableEndIndex: 240,
+      refs: makeHeadRuntimeRefs({
+        sessions: [session],
+        activeSessionId: 'other-session',
+        liveSessionIds: [sessionId],
+      }),
+      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN }) as any,
+      readSessionBufferSnapshot: () => session.buffer,
+      commitSessionBufferUpdate: vi.fn(() => false),
+      scheduleSessionRenderCommit: vi.fn(),
+      isSessionTransportActive: () => false,
+      shouldAcceptSessionLiveBuffer: () => true,
+      runtimeDebug: vi.fn(),
+      requestSessionBufferSync,
+    });
+
+    expect(requestSessionBufferSync).toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({
+        reason: 'buffer-head-no-visible-range-passive-bootstrap',
+        purpose: 'tail-refresh',
+        requestWindowOverride: {
           requestStartIndex: 216,
           requestEndIndex: 240,
+        },
+      }),
+    );
+  });
+
+  it('does not bootstrap a non-live passive session without an interactive visible range', () => {
+    const sessionId = 'session-passive-not-live';
+    const session = makeSession(sessionId);
+    const requestSessionBufferSync = vi.fn(() => true);
+
+    handleBufferHeadRuntime({
+      sessionId,
+      latestRevision: 9,
+      latestEndIndex: 240,
+      availableStartIndex: 0,
+      availableEndIndex: 240,
+      refs: makeHeadRuntimeRefs({
+        sessions: [session],
+        activeSessionId: 'other-session',
+      }),
+      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN }) as any,
+      readSessionBufferSnapshot: () => session.buffer,
+      commitSessionBufferUpdate: vi.fn(() => false),
+      scheduleSessionRenderCommit: vi.fn(),
+      isSessionTransportActive: () => false,
+      shouldAcceptSessionLiveBuffer: () => false,
+      runtimeDebug: vi.fn(),
+      requestSessionBufferSync,
+    });
+
+    expect(requestSessionBufferSync).not.toHaveBeenCalled();
+  });
+
+  it('does not re-pull an unchanged passive preview tail', () => {
+    const sessionId = 'session-passive-unchanged';
+    const session = makeSession(sessionId);
+    session.buffer = createSessionBufferState({
+      lines: Array.from({ length: 24 }, (_, index) => `row-${index}`),
+      startIndex: 216,
+      endIndex: 240,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 240,
+      cols: 80,
+      rows: 24,
+      revision: 9,
+      cacheLines: 1000,
+    });
+    const requestSessionBufferSync = vi.fn(() => true);
+
+    handleBufferHeadRuntime({
+      sessionId,
+      latestRevision: 9,
+      latestEndIndex: 240,
+      availableStartIndex: 0,
+      availableEndIndex: 240,
+      refs: makeHeadRuntimeRefs({
+        sessions: [session],
+        activeSessionId: 'other-session',
+        liveSessionIds: [sessionId],
+      }),
+      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN }) as any,
+      readSessionBufferSnapshot: () => session.buffer,
+      commitSessionBufferUpdate: vi.fn(() => false),
+      scheduleSessionRenderCommit: vi.fn(),
+      isSessionTransportActive: () => false,
+      shouldAcceptSessionLiveBuffer: () => true,
+      runtimeDebug: vi.fn(),
+      requestSessionBufferSync,
+    });
+
+    expect(requestSessionBufferSync).not.toHaveBeenCalled();
+  });
+
+  it('re-pulls an unchanged passive preview tail when its visible tail contains a gap', () => {
+    const sessionId = 'session-passive-tail-gap';
+    const session = makeSession(sessionId);
+    session.buffer = createSessionBufferState({
+      lines: Array.from({ length: 24 }, (_, index) => `row-${index}`),
+      startIndex: 216,
+      endIndex: 240,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 240,
+      cols: 80,
+      rows: 24,
+      revision: 9,
+      cacheLines: 1000,
+    });
+    session.buffer.gapRanges = [{ startIndex: 228, endIndex: 229 }];
+    const requestSessionBufferSync = vi.fn(() => true);
+
+    handleBufferHeadRuntime({
+      sessionId,
+      latestRevision: 9,
+      latestEndIndex: 240,
+      availableStartIndex: 0,
+      availableEndIndex: 240,
+      refs: makeHeadRuntimeRefs({
+        sessions: [session],
+        activeSessionId: 'other-session',
+        liveSessionIds: [sessionId],
+      }),
+      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN }) as any,
+      readSessionBufferSnapshot: () => session.buffer,
+      commitSessionBufferUpdate: vi.fn(() => false),
+      scheduleSessionRenderCommit: vi.fn(),
+      isSessionTransportActive: () => false,
+      shouldAcceptSessionLiveBuffer: () => true,
+      runtimeDebug: vi.fn(),
+      requestSessionBufferSync,
+    });
+
+    expect(requestSessionBufferSync).toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({
+        reason: 'buffer-head-no-visible-range-passive-bootstrap',
+        requestWindowOverride: {
+          requestStartIndex: 216,
+          requestEndIndex: 240,
+        },
+      }),
+    );
+  });
+
+  it('re-pulls a passive preview after a daemon revision reset', () => {
+    const sessionId = 'session-passive-revision-reset';
+    const session = makeSession(sessionId);
+    session.buffer = createSessionBufferState({
+      lines: Array.from({ length: 24 }, (_, index) => `old-row-${index}`),
+      startIndex: 216,
+      endIndex: 240,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 240,
+      cols: 80,
+      rows: 24,
+      revision: 9,
+      cacheLines: 1000,
+    });
+    const requestSessionBufferSync = vi.fn(() => true);
+
+    handleBufferHeadRuntime({
+      sessionId,
+      latestRevision: 1,
+      latestEndIndex: 120,
+      availableStartIndex: 0,
+      availableEndIndex: 120,
+      refs: makeHeadRuntimeRefs({
+        sessions: [session],
+        activeSessionId: 'other-session',
+        liveSessionIds: [sessionId],
+      }),
+      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN }) as any,
+      readSessionBufferSnapshot: () => session.buffer,
+      commitSessionBufferUpdate: vi.fn(() => false),
+      scheduleSessionRenderCommit: vi.fn(),
+      isSessionTransportActive: () => false,
+      shouldAcceptSessionLiveBuffer: () => true,
+      runtimeDebug: vi.fn(),
+      requestSessionBufferSync,
+    });
+
+    expect(requestSessionBufferSync).toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({
+        reason: 'buffer-head-no-visible-range-passive-bootstrap',
+        purpose: 'tail-refresh',
+        requestWindowOverride: {
+          requestStartIndex: 96,
+          requestEndIndex: 120,
+        },
+      }),
+    );
+  });
+
+  it('keeps the active session on the three-screen bootstrap even when it remains in the live preview set', () => {
+    const sessionId = 'session-active-secondary-preview';
+    const session = makeSession(sessionId);
+    session.buffer = createSessionBufferState({
+      lines: ['old-1', 'old-2'],
+      startIndex: 10,
+      endIndex: 12,
+      bufferHeadStartIndex: 10,
+      bufferTailEndIndex: 12,
+      cols: 80,
+      rows: 24,
+      revision: 2,
+      cacheLines: 1000,
+    });
+    const requestSessionBufferSync = vi.fn(() => true);
+
+    handleBufferHeadRuntime({
+      sessionId,
+      latestRevision: 9,
+      latestEndIndex: 240,
+      availableStartIndex: 0,
+      availableEndIndex: 240,
+      refs: makeHeadRuntimeRefs({
+        sessions: [session],
+        activeSessionId: sessionId,
+        liveSessionIds: [sessionId, 'session-promoted-primary'],
+      }),
+      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN }) as any,
+      readSessionBufferSnapshot: () => session.buffer,
+      commitSessionBufferUpdate: vi.fn(() => false),
+      scheduleSessionRenderCommit: vi.fn(),
+      isSessionTransportActive: () => true,
+      shouldAcceptSessionLiveBuffer: () => true,
+      runtimeDebug: vi.fn(),
+      requestSessionBufferSync,
+    });
+
+    expect(requestSessionBufferSync).toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({
+        reason: 'buffer-head-no-visible-range-active-bootstrap',
+        purpose: 'tail-refresh',
+        requestWindowOverride: {
+          requestStartIndex: 168,
+          requestEndIndex: 240,
+        },
+      }),
+    );
+  });
+
+  it('bootstraps from availableStart when the active daemon window is smaller than the three-screen tail', () => {
+    const sessionId = 'session-rcc3';
+    const session = makeSession(sessionId);
+    session.buffer = createSessionBufferState({
+      lines: [],
+      startIndex: 0,
+      endIndex: 0,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 0,
+      cols: 58,
+      rows: 24,
+      revision: 0,
+      cacheLines: 1000,
+    });
+    const requestSessionBufferSync = vi.fn(() => true);
+
+    handleBufferHeadRuntime({
+      sessionId,
+      latestRevision: 16,
+      latestEndIndex: 58,
+      availableStartIndex: 2,
+      availableEndIndex: 58,
+      refs: makeHeadRuntimeRefs({
+        sessions: [session],
+        activeSessionId: sessionId,
+      }),
+      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN }) as any,
+      readSessionBufferSnapshot: () => session.buffer,
+      commitSessionBufferUpdate: vi.fn(() => false),
+      scheduleSessionRenderCommit: vi.fn(),
+      isSessionTransportActive: () => true,
+      runtimeDebug: vi.fn(),
+      requestSessionBufferSync,
+    });
+
+    expect(requestSessionBufferSync).toHaveBeenCalledWith(
+      sessionId,
+      expect.objectContaining({
+        reason: 'buffer-head-no-visible-range-active-bootstrap',
+        purpose: 'tail-refresh',
+        requestWindowOverride: {
+          requestStartIndex: 2,
+          requestEndIndex: 58,
         },
       }),
     );

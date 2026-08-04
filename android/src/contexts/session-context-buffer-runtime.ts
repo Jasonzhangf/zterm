@@ -583,7 +583,11 @@ export function handleBufferHeadRuntime(options: {
   cursor?: TerminalCursorState | null;
   cursorKeysApp?: boolean;
   refs: {
-    stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null }>;
+    stateRef: MutableRefObject<{
+      sessions: Session[];
+      activeSessionId: string | null;
+      liveSessionIds?: string[];
+    }>;
     lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
     sessionRevisionResetRef: MutableRefObject<Map<string, RevisionResetExpectation>>;
     tailRefreshStoreRef: MutableRefObject<SessionTailRefreshStore>;
@@ -785,27 +789,70 @@ export function handleBufferHeadRuntime(options: {
   const visibleRange = options.refs.sessionVisibleRangeRef.current.get(options.sessionId) || null;
   if (!visibleRange) {
     const isActiveSession = options.refs.stateRef.current.activeSessionId === options.sessionId;
-    if (isActiveSession && liveHead) {
+    const isLiveSession = Boolean(
+      Array.isArray(options.refs.stateRef.current.liveSessionIds)
+      && options.refs.stateRef.current.liveSessionIds.includes(options.sessionId),
+    );
+    if ((isActiveSession || isLiveSession) && liveHead) {
+      const isPassiveLiveSession = isLiveSession && !isActiveSession;
       const viewportRows = Math.max(1, Math.floor(plannerBuffer.rows || 24));
+      const passiveTailEndIndex = Math.max(0, Math.floor(options.latestEndIndex || liveHead.latestEndIndex || 0));
+      const passiveTailStartIndex = Math.max(
+        Math.max(0, Math.floor(liveHead.availableStartIndex || 0)),
+        passiveTailEndIndex - viewportRows,
+      );
+      const passiveTailHasGap = isPassiveLiveSession && (plannerBuffer.gapRanges || []).some((range) => (
+        range.startIndex < passiveTailEndIndex && range.endIndex > passiveTailStartIndex
+      ));
+      const passiveHeadUnchanged = (
+        isPassiveLiveSession
+        && !revisionResetDetected
+        && !localWindowInvalid
+        && !passiveTailHasGap
+        && options.latestRevision <= localRevision
+        && options.latestEndIndex <= localEndIndex
+      );
+      if (passiveHeadUnchanged) {
+        options.runtimeDebug('session.buffer.head.no-visible-range-passive-unchanged-skip', {
+          sessionId: options.sessionId,
+          activeSessionId: options.refs.stateRef.current.activeSessionId,
+          latestRevision: options.latestRevision,
+          latestEndIndex: options.latestEndIndex,
+          localRevision,
+          localEndIndex,
+        });
+        return;
+      }
+      const bootstrapRows = isPassiveLiveSession ? viewportRows : viewportRows * 3;
       const requestEndIndex = Math.max(0, Math.floor(options.latestEndIndex || liveHead.latestEndIndex || 0));
       const requestStartIndex = Math.max(
         Math.max(0, Math.floor(liveHead.availableStartIndex || 0)),
-        requestEndIndex - viewportRows,
+        requestEndIndex - bootstrapRows,
       );
-      options.runtimeDebug('session.buffer.head.no-visible-range-active-tail-bootstrap', {
-        sessionId: options.sessionId,
-        activeSessionId: options.refs.stateRef.current.activeSessionId,
-        latestRevision: options.latestRevision,
-        latestEndIndex: options.latestEndIndex,
-        localRevision,
-        localStartIndex: plannerBuffer.startIndex,
-        localEndIndex: plannerBuffer.endIndex,
-        requestStartIndex,
-        requestEndIndex,
-        viewportRows,
-      });
+      options.runtimeDebug(
+        isPassiveLiveSession
+          ? 'session.buffer.head.no-visible-range-passive-tail-bootstrap'
+          : 'session.buffer.head.no-visible-range-active-tail-bootstrap',
+        {
+          sessionId: options.sessionId,
+          activeSessionId: options.refs.stateRef.current.activeSessionId,
+          isLiveSession,
+          isPassiveLiveSession,
+          latestRevision: options.latestRevision,
+          latestEndIndex: options.latestEndIndex,
+          localRevision,
+          localStartIndex: plannerBuffer.startIndex,
+          localEndIndex: plannerBuffer.endIndex,
+          requestStartIndex,
+          requestEndIndex,
+          viewportRows,
+          bootstrapRows,
+        },
+      );
       options.requestSessionBufferSync(options.sessionId, {
-        reason: 'buffer-head-no-visible-range-active-bootstrap',
+        reason: isPassiveLiveSession
+          ? 'buffer-head-no-visible-range-passive-bootstrap'
+          : 'buffer-head-no-visible-range-active-bootstrap',
         purpose: 'tail-refresh',
         headOverride: demandHead,
         liveHead,
