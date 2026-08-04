@@ -20,7 +20,7 @@
 6. A valid target frame resets the consecutive-miss count. A `CONNECTING` socket is retained without probe traffic or failure submission; `CLOSING`/`CLOSED` becomes `TargetNetworkProbeError03TerminalSocketState` and enters the single target failure router. A channel error must not poison the target heartbeat or rebuild the physical socket.
 7. App visibility and platform network availability are independent resources. A network callback cannot write foreground/background truth, stop body subscription, or stop foreground freshness timers.
 8. A platform network-generation signal starts at most one bounded probe for each affected daemon target and exact physical socket generation. Capacitor/window network signals carry observed connectivity metadata; foreground-resume carries generation only and must not invent endpoint reachability. Any valid mux server frame proves that generation healthy.
-9. Probe success retains the exact socket and all channels. Probe timeout submits the exact generation once to `TerminalTransportError01TargetFailure`; late frames from that retired generation are ignored.
+9. Probe success retains the exact socket and all channels. A single bounded probe timeout is inconclusive and only clears the pending probe; it must not retire an `OPEN` transport. Physical failure remains owned by terminal socket state, synchronous send failure, or the three-consecutive-miss heartbeat policy. Late frames from an actually retired generation are ignored.
 10. Android Activity backgrounding must leave WebView timers running. A native foreground service may keep the process schedulable with one partial WakeLock, but it cannot create, close, replace, or evaluate control/data transports.
 11. Returning to foreground stops the native execution service and releases its WakeLock without touching the existing WebSocket/RTC generation. Android force-stop remains terminal and is not bypassed.
 12. Relay account login does not redefine saved direct/Tailscale target ownership. A persisted daemon id without Relay endpoint/signaling/WebRTC evidence opens through the explicit direct endpoint and does not wait for control-directory confirmation.
@@ -60,6 +60,7 @@ Negative:
 - Network events cannot call the session resume/reconnect API, cannot alter body-subscription truth, and cannot create per-session heartbeat or reconnect work.
 - Active-session/open-tab truth cannot scope the platform signal; inactive daemon targets remain part of the same target-owner probe pass.
 - Repeated network events while one target probe is pending cannot send another probe or schedule another rebuild.
+- A foreground/network generation probe timeout cannot retire an `OPEN` target or schedule reconnect; the normal consecutive-miss heartbeat remains the failure owner.
 - A late frame from a superseded socket cannot settle the current generation's probe.
 - Background entry never calls `WebView.pauseTimers()`, `WebView.onPause()`, or a transport close/reconnect API.
 - The native service does not request battery-optimization bypass and contains no socket, RTC, route, session, or control-directory implementation.
