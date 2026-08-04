@@ -334,6 +334,21 @@ export function handleTmuxControlMessageRuntime(
         deps.sendTransportMessage(connection.transport, { type: 'sessions', payload: { sessions: deps.listTmuxSessions() } });
       } catch (error) {
         const err = error instanceof Error ? error.message : String(error);
+        if (/can't find session|no server running|session not found/i.test(err)) {
+          const sessionName = deps.sanitizeSessionName(message.payload.sessionName);
+          // Killing an already absent session is an idempotent terminal state.
+          // Publish the current daemon list so drawer projections remove stale rows.
+          deps.scheduleEngine.markSessionMissing(sessionName, 'session already absent');
+          const mirror = deps.mirrors.get(deps.getMirrorKey(sessionName));
+          if (mirror) {
+            deps.destroyMirror(mirror, 'tmux session already absent', {
+              closeTransportSubscribers: false,
+              releaseCode: 'tmux_session_killed',
+            });
+          }
+          deps.sendTransportMessage(connection.transport, { type: 'sessions', payload: { sessions: deps.listTmuxSessions() } });
+          return;
+        }
         deps.sendTransportMessage(connection.transport, {
           type: 'error',
           payload: { message: `Failed to kill tmux session: ${err}`, code: 'tmux_kill_failed' },

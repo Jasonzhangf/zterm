@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
-import { handleScheduleMessageRuntime, type TerminalMessageControlRuntimeDeps } from './terminal-message-control-runtime';
-import type { TerminalSession } from './terminal-runtime-types';
+import {
+  handleScheduleMessageRuntime,
+  handleTmuxControlMessageRuntime,
+  type TerminalMessageControlRuntimeDeps,
+} from './terminal-message-control-runtime';
+import type { TerminalSession, TerminalTransportConnection } from './terminal-runtime-types';
 
 function makeSession(): TerminalSession {
   return {
@@ -87,6 +91,52 @@ describe('terminal-message-control-runtime schedule errors', () => {
           message: 'Schedule job no longer exists',
         },
       });
+    });
+  });
+});
+
+describe('terminal-message-control-runtime tmux kill truth', () => {
+  const connection = { transport: null } as unknown as TerminalTransportConnection;
+
+  it('treats an already absent tmux session as idempotently closed and republishes the current list', () => {
+    const deps = makeDeps({
+      closeDetachedTerminalSession: vi.fn(() => {
+        throw new Error("can't find session: stale");
+      }),
+      listTmuxSessions: vi.fn(() => ['live']),
+    });
+
+    handleTmuxControlMessageRuntime(deps, connection, {
+      type: 'tmux-kill-session',
+      payload: { sessionName: 'stale' },
+    });
+
+    expect(deps.scheduleEngine.markSessionMissing).toHaveBeenCalledWith('stale', 'session already absent');
+    expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, {
+      type: 'sessions',
+      payload: { sessions: ['live'] },
+    });
+    expect(deps.sendTransportMessage).not.toHaveBeenCalledWith(null, expect.objectContaining({ type: 'error' }));
+  });
+
+  it('keeps a real tmux kill failure explicit', () => {
+    const deps = makeDeps({
+      closeDetachedTerminalSession: vi.fn(() => {
+        throw new Error('permission denied');
+      }),
+    });
+
+    handleTmuxControlMessageRuntime(deps, connection, {
+      type: 'tmux-kill-session',
+      payload: { sessionName: 'live' },
+    });
+
+    expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, {
+      type: 'error',
+      payload: {
+        message: 'Failed to kill tmux session: permission denied',
+        code: 'tmux_kill_failed',
+      },
     });
   });
 });
