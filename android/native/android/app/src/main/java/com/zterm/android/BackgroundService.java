@@ -7,9 +7,7 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
-import android.os.Handler;
 import android.os.IBinder;
-import android.os.Looper;
 import android.os.PowerManager;
 import androidx.core.app.NotificationCompat;
 
@@ -21,18 +19,8 @@ import androidx.core.app.NotificationCompat;
 public class BackgroundService extends Service {
     private static final String CHANNEL_ID = "wterm_background";
     private static final int NOTIFICATION_ID = 1;
-    private static final long BACKGROUND_HANDOFF_WAKE_LOCK_MS = 5 * 60 * 1000;
 
     private int sessionCount = 0;
-    private final Handler backgroundHandoffHandler = new Handler(Looper.getMainLooper());
-    private final Runnable backgroundHandoffTimeoutRunnable = new Runnable() {
-        @Override
-        public void run() {
-            releaseWakeLock();
-            stopForeground(true);
-            stopSelf();
-        }
-    };
     private PowerManager.WakeLock wakeLock;
 
     @Override
@@ -57,9 +45,8 @@ public class BackgroundService extends Service {
         Notification notification = createNotification();
         startForeground(NOTIFICATION_ID, notification);
         acquireWakeLock();
-        scheduleBackgroundHandoffTimeout();
-        
-        return START_NOT_STICKY;
+
+        return START_REDELIVER_INTENT;
     }
 
     @Override
@@ -85,19 +72,12 @@ public class BackgroundService extends Service {
             );
             wakeLock.setReferenceCounted(false);
         }
-        wakeLock.acquire(BACKGROUND_HANDOFF_WAKE_LOCK_MS);
-    }
-
-    private void scheduleBackgroundHandoffTimeout() {
-        backgroundHandoffHandler.removeCallbacks(backgroundHandoffTimeoutRunnable);
-        backgroundHandoffHandler.postDelayed(
-            backgroundHandoffTimeoutRunnable,
-            BACKGROUND_HANDOFF_WAKE_LOCK_MS
-        );
+        if (!wakeLock.isHeld()) {
+            wakeLock.acquire();
+        }
     }
 
     private void releaseWakeLock() {
-        backgroundHandoffHandler.removeCallbacks(backgroundHandoffTimeoutRunnable);
         if (wakeLock != null && wakeLock.isHeld()) {
             wakeLock.release();
         }

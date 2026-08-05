@@ -14,24 +14,22 @@ describe('Android background power policy', () => {
     expect(manifest).not.toContain('android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS');
   });
 
-  it('keeps one bounded process wake lock in the native service and releases it on destroy', () => {
+  it('keeps one persistent process wake lock while retained sessions need background protection', () => {
     const source = readFileSync(resolve(androidRoot, 'java/com/zterm/android/BackgroundService.java'), 'utf8');
 
-    expect(source).toContain('BACKGROUND_HANDOFF_WAKE_LOCK_MS = 5 * 60 * 1000');
     expect(source).toContain('PowerManager.PARTIAL_WAKE_LOCK');
     expect(source).toContain('setReferenceCounted(false)');
-    expect(source).toContain('wakeLock.acquire(BACKGROUND_HANDOFF_WAKE_LOCK_MS)');
-    expect(source).toContain('backgroundHandoffHandler.postDelayed(');
-    expect(source).toContain('BACKGROUND_HANDOFF_WAKE_LOCK_MS');
-    expect(source).toContain('backgroundHandoffHandler.removeCallbacks(backgroundHandoffTimeoutRunnable)');
+    expect(source).toContain('wakeLock.acquire()');
+    expect(source).not.toContain('BACKGROUND_HANDOFF_WAKE_LOCK_MS');
+    expect(source).not.toContain('backgroundHandoffHandler');
+    expect(source).not.toContain('backgroundHandoffTimeoutRunnable');
     expect(source).not.toContain('BACKGROUND_WAKE_LOCK_RENEW_MS');
     expect(source).not.toContain('scheduleWakeLockRenewal');
-    expect(source).not.toContain('wakeLock.acquire()');
     expect(source).toContain('wakeLock.release()');
     expect(source).toContain('if (sessionCount <= 0)');
     expect(source).toContain('stopForeground(true)');
     expect(source).toContain('stopSelf()');
-    expect(source).toContain('START_NOT_STICKY');
+    expect(source).toContain('START_REDELIVER_INTENT');
     expect(source).not.toContain('WebSocket');
     expect(source).not.toContain('PeerConnection');
   });

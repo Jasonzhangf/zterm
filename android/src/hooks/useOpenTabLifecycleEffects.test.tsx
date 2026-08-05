@@ -140,7 +140,7 @@ afterEach(() => {
 });
 
 describe('useOpenTabLifecycleEffects', () => {
-  it('projects inactive immediately in background and starts five-minute native keepalive only when a session exists', async () => {
+  it('projects inactive immediately and starts persistent native protection while a session remains open', async () => {
     expect(BACKGROUND_HANDOFF_WAKE_LOCK_MS).toBe(5 * 60 * 1000);
     const onForegroundActiveChange = vi.fn();
     render(<LifecycleHarness
