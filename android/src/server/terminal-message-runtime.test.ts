@@ -215,6 +215,12 @@ function createRuntime(options?: {
     dispose: vi.fn(),
   };
 
+  const attachmentDeliveryRuntime = {
+    listForDevice: vi.fn(async () => []),
+    readAsset: vi.fn(async () => ({ manifest: { attachmentId: 'test', kind: 'image' as const, mimeType: 'image/png', preview: { sha256: 'a', size: 1 }, original: { sha256: 'b', size: 2 } }, data: Buffer.from('') })),
+    acknowledge: vi.fn(async () => {}),
+  };
+
   const createMuxChannelSubscriber = vi.fn((connection: TerminalTransportConnection, channelId: string) => {
     const subscriber = createSession(`${connection.transportId}:${channelId}`);
     subscriber.transportId = connection.transportId;
@@ -242,6 +248,7 @@ function createRuntime(options?: {
     handleInput,
     closeSession,
     terminalFileTransferRuntime,
+    attachmentDeliveryRuntime,
     remoteWindowStreamRuntime,
     handleClientDebugLog,
     handleClientDebugSnapshot,

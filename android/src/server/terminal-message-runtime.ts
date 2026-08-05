@@ -13,6 +13,7 @@ import type {
   BridgeClientMessage as ClientMessage,
   BridgeServerMessage as ServerMessage,
   HostConfigMessage,
+  PendingAttachmentsPayload,
   RuntimeDebugLogEntry,
   TerminalInputAckPayload,
   TerminalReliableInputPayload,
@@ -56,6 +57,31 @@ export interface TerminalMessageRuntimeDeps {
   handleInput: (session: TerminalSession, data: string, shouldWrite?: () => boolean) => Promise<boolean>;
   closeSession: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
   terminalFileTransferRuntime: TerminalFileTransferRuntime;
+  attachmentDeliveryRuntime: {
+    listForDevice: (deviceId: string) => Promise<Array<{
+      attachmentId: string;
+      kind: 'image';
+      senderName: string;
+      fileName: string;
+      mimeType: string;
+      preview: { size: number };
+      original: { size: number };
+      message?: string;
+      createdAt: string;
+      expiresAt: string;
+    }>>;
+    readAsset: (attachmentId: string, asset: 'preview' | 'original', deviceId: string) => Promise<{
+      manifest: {
+        attachmentId: string;
+        kind: 'image';
+        mimeType: string;
+        preview: { sha256: string; size: number };
+        original: { sha256: string; size: number };
+      };
+      data: Buffer;
+    }>;
+    acknowledge: (attachmentId: string, deviceId: string, asset: 'preview' | 'original', sha256: string) => Promise<unknown>;
+  };
   remoteWindowStreamRuntime: RemoteWindowStreamDaemonRuntime;
   handleClientDebugLog: (session: TerminalSession, payload: { entries: RuntimeDebugLogEntry[] }) => void;
   handleClientDebugSnapshot: (session: TerminalSession, payload: { snapshot?: unknown }) => void;
@@ -377,6 +403,93 @@ export function createTerminalMessageRuntime(
       case 'list-sessions':
         handleListSessionsMessageRuntime(deps.controlRuntimeDeps, connection);
         break;
+      case 'pending-attachments-query': {
+        const { deviceId } = (message as { payload: { deviceId: string } }).payload || {};
+        if (!deviceId) {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'error',
+            payload: { message: 'pending-attachments-query requires deviceId', code: 'invalid_payload' },
+          });
+          break;
+        }
+        try {
+          const manifests = await deps.attachmentDeliveryRuntime.listForDevice(deviceId);
+          const pending: PendingAttachmentsPayload['pending'] = manifests.map((m) => ({
+            attachmentId: m.attachmentId,
+            kind: m.kind,
+            senderName: m.senderName,
+            fileName: m.fileName,
+            mimeType: m.mimeType,
+            previewSize: m.preview.size,
+            originalSize: m.original.size,
+            message: m.message,
+            createdAt: m.createdAt,
+            expiresAt: m.expiresAt,
+          }));
+          deps.sendTransportMessage(connection.transport, {
+            type: 'pending-attachments',
+            payload: { schemaVersion: 1, pending },
+          });
+        } catch (err) {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'error',
+            payload: { message: err instanceof Error ? err.message : 'attachment query failed', code: 'attachment_query_failed' },
+          });
+        }
+        break;
+      }
+      case 'attachment-asset-request': {
+        const { attachmentId, asset, deviceId } = (message as { payload: { attachmentId: string; asset: 'preview' | 'original'; deviceId: string } }).payload || {};
+        if (!attachmentId || !asset || !deviceId) {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'error',
+            payload: { message: 'attachment-asset-request requires attachmentId, asset, and deviceId', code: 'invalid_payload' },
+          });
+          break;
+        }
+        try {
+          const { manifest, data } = await deps.attachmentDeliveryRuntime.readAsset(attachmentId, asset, deviceId);
+          // Send asset data via mux target message
+          const base64 = data.toString('base64');
+          deps.sendTransportMessage(connection.transport, {
+            type: 'attachment-asset-data',
+            payload: {
+              attachmentId: manifest.attachmentId,
+              deviceId,
+              asset,
+              dataBase64: base64,
+              sha256: manifest[asset].sha256,
+              mimeType: manifest.mimeType,
+            },
+          });
+        } catch (err) {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'error',
+            payload: { message: err instanceof Error ? err.message : 'attachment read failed', code: 'attachment_read_failed' },
+          });
+        }
+        break;
+      }
+      case 'attachment-receipt': {
+        const { attachmentId, asset, sha256, deviceId } = (message as { payload: { attachmentId: string; asset: 'preview' | 'original'; sha256: string; deviceId: string } }).payload || {};
+        if (!attachmentId || !asset || !sha256 || !deviceId) {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'error',
+            payload: { message: 'attachment-receipt requires attachmentId, asset, sha256, and deviceId', code: 'invalid_payload' },
+          });
+          break;
+        }
+        try {
+          await deps.attachmentDeliveryRuntime.acknowledge(attachmentId, deviceId, asset, sha256);
+          // No response needed - receipt is acknowledged
+        } catch (err) {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'error',
+            payload: { message: err instanceof Error ? err.message : 'attachment acknowledge failed', code: 'attachment_acknowledge_failed' },
+          });
+        }
+        break;
+      }
       case 'schedule-list':
         handleScheduleMessageRuntime(deps.controlRuntimeDeps, session, message, connection.transport);
         break;
