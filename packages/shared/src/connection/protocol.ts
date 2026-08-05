@@ -383,6 +383,9 @@ export interface RemoteWindowInputEventPayload {
         height: number;
       }
     | {
+        kind: 'close-window';
+      }
+    | {
         kind: 'key';
         phase: 'down' | 'up';
         key: string;
@@ -488,6 +491,28 @@ export interface AttachFileStartPayload {
   byteLength: number;
 }
 
+export interface AttachmentAssetRequestPayload {
+  attachmentId: string;
+  deviceId: string;
+  asset: 'preview' | 'original';
+}
+
+export interface AttachmentReceiptPayload {
+  attachmentId: string;
+  deviceId: string;
+  asset: 'preview' | 'original';
+  sha256: string;
+}
+
+export interface AttachmentAssetDataPayload {
+  attachmentId: string;
+  deviceId: string;
+  asset: 'preview' | 'original';
+  dataBase64: string;
+  sha256: string;
+  mimeType: string;
+}
+
 export type BridgeClientMessage =
   | { type: 'session-open'; payload: HostConfigMessage }
   | { type: 'connect'; payload: HostConfigMessage }
@@ -523,6 +548,9 @@ export type BridgeClientMessage =
   | { type: 'file-upload-start'; payload: FileUploadStartPayload }
   | { type: 'file-upload-chunk'; payload: FileUploadChunkPayload }
   | { type: 'file-upload-end'; payload: FileUploadEndPayload }
+  | { type: 'pending-attachments-query'; payload: { deviceId: string } }
+  | { type: 'attachment-asset-request'; payload: AttachmentAssetRequestPayload }
+  | { type: 'attachment-receipt'; payload: AttachmentReceiptPayload }
   | { type: 'ping' }
   | { type: 'close' };
 
@@ -600,7 +628,9 @@ export type BridgeServerControlMessage =
   | { type: 'error'; payload: { message: string; code?: string } }
   | { type: 'title'; payload: string }
   | { type: 'closed'; payload: { reason: string } }
-  | { type: 'pong' };
+  | { type: 'pong' }
+  | { type: 'pending-attachments'; payload: PendingAttachmentsPayload }
+  | { type: 'attachment-asset-data'; payload: AttachmentAssetDataPayload };
 
 export type BridgeServerMessage = BridgeBufferMessage | BridgeServerControlMessage;
 
@@ -641,11 +671,30 @@ export interface TerminalMuxCapabilities {
   };
 }
 
+export interface PendingAttachmentsPayload {
+  schemaVersion: 1;
+  pending: Array<{
+    attachmentId: string;
+    kind: 'image';
+    senderName: string;
+    fileName: string;
+    mimeType: string;
+    previewSize: number;
+    originalSize: number;
+    message?: string;
+    createdAt: string;
+    expiresAt: string;
+  }>;
+}
+
 export type TerminalMuxTargetClientMessageType =
   | 'list-sessions'
   | 'tmux-create-session'
   | 'tmux-rename-session'
-  | 'tmux-kill-session';
+  | 'tmux-kill-session'
+  | 'pending-attachments-query'
+  | 'attachment-asset-request'
+  | 'attachment-receipt';
 
 export type TerminalMuxLegacyClientMessageType =
   | 'session-open'
@@ -673,7 +722,9 @@ export type TerminalMuxTargetServerMessageType =
   | 'debug-control'
   | 'error'
   | 'pong'
-  | 'session-activity';
+  | 'session-activity'
+  | 'pending-attachments'
+  | 'attachment-asset-data';
 
 export type TerminalMuxTargetServerMessage = Extract<
   BridgeServerMessage,
@@ -707,6 +758,9 @@ export const TERMINAL_MUX_TARGET_CLIENT_MESSAGE_TYPES: readonly TerminalMuxTarge
   'tmux-create-session',
   'tmux-rename-session',
   'tmux-kill-session',
+  'pending-attachments-query',
+  'attachment-asset-request',
+  'attachment-receipt',
 ] as const;
 
 export const TERMINAL_MUX_LEGACY_CLIENT_MESSAGE_TYPES: readonly TerminalMuxLegacyClientMessageType[] = [

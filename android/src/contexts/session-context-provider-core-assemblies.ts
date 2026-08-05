@@ -25,6 +25,7 @@ import type {
 } from "./session-context-provider-assembly-types";
 
 
+
 const SESSION_HANDSHAKE_TIMEOUT_MS = 4000;
 const SESSION_TERMINAL_READY_TIMEOUT_MS = 10000;
 const ACTIVE_TRANSPORT_STALE_ACTIVITY_MS = 2500;
@@ -247,12 +248,15 @@ export function useSessionProviderCoreAssemblies(
     startSocketHeartbeat,
     setScheduleStateForSession,
     writeSessionRequestedTerminalGeometry,
-    handleTargetMuxMessage: (payload) => settleSessionTmuxTargetRequestRuntime({
-      pendingRequestsRef: tmuxTargetRequestsRef,
-      requestId: payload.requestId,
-      message: payload.message,
-      runtimeDebug,
-    }),
+    handleTargetMuxMessage: (payload) => {
+      // Handle tmux target requests
+      return settleSessionTmuxTargetRequestRuntime({
+        pendingRequestsRef: tmuxTargetRequestsRef,
+        requestId: payload.requestId,
+        message: payload.message,
+        runtimeDebug,
+      }) ?? false;
+    },
     readRequestedTerminalGeometry: (sessionId: string) => {
       const requestedGeometry = readSessionRequestedTerminalGeometry(sessionId);
       if (

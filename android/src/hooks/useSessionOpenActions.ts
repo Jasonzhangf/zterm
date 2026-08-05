@@ -651,6 +651,8 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         );
       case 'tmux-kill-session':
         return killTmuxSession(target, settings, message.payload.sessionName);
+      default:
+        return Promise.resolve([]);
     }
   }, [
     bridgeSettingsRef,
@@ -677,7 +679,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       type: 'tmux-kill-session',
       payload: { sessionName },
     });
-    handleRemoteSessionsRefreshed(target, sessionNames);
+    handleRemoteSessionsRefreshed(target, sessionNames ?? []);
   }, [handleRemoteSessionsRefreshed, manageTmuxSessionsForTarget]);
 
   const handleSelectCleanSession = useCallback((target: BridgeTarget) => {
@@ -806,7 +808,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         const remoteSessionNames = normalizeRemoteTmuxSessionNames(
           await manageTmuxSessionsForTarget(target, { type: 'list-sessions' }),
         );
-        handleRemoteSessionsRefreshed(target, remoteSessionNames);
+        handleRemoteSessionsRefreshed(target, remoteSessionNames ?? []);
         const remoteSessionNameSet = new Set(remoteSessionNames);
         let sessionName = historySessionName && remoteSessionNameSet.has(historySessionName)
           ? historySessionName
@@ -961,7 +963,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       return;
     }
     const sessionNames = await manageTmuxSessionsForTarget(target, { type: 'list-sessions' });
-    handleRemoteSessionsRefreshed(target, sessionNames);
+    handleRemoteSessionsRefreshed(target, sessionNames ?? []);
   }, [handleRemoteSessionsRefreshed, manageTmuxSessionsForTarget, resolveTargetByHostKey]);
 
   const resolveCanonicalRelayHostId = useCallback((tab: PersistedOpenTab) => {
