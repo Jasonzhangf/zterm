@@ -104,7 +104,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - Remote-window floating resize 必须是 Android overlay projection：至少覆盖左下角和右下角拖拽，按 selected source aspect ratio 等比缩放，右下角扩缩时保持左边稳定并移动右边，左下角扩缩时保持右边稳定，并且放大时要 cap 到 toolbar 仍在 viewport 顶部安全边界内。测试不能只证明“有一个 handle”。
 - Remote-window floating toolbar 只能把标题、拖动 hit zone、fullscreen/shrink 和 close 放在固定顶栏；码率、滚动幅度、方向、截图、键盘等调参控件必须进独立横向滚动 control strip。手机宽度下若把所有控件塞进 drag row，会再次造成无法移动或关闭。
 - Remote-window unzoomed fullscreen / floating 的单指触控默认属于远端输入：点击发一个 `click` action；拖动本地识别成一个 release-time `gesture/swipe`，只在抬手时发送一次起点/终点/delta/duration/velocity，不流式发送 raw touch move，也不排队延迟旧手势；mouse/trackpad wheel 发一个 pixel `scroll` action。即使 `bottomInsetPx` 存在也不得被本地容器 pan 抢走。`bottomChromeInsetPx` 只负责键盘打开时的自动初始上抬，`scale > 1` 后单指拖动才属于本地 zoom pan；不得通过改 terminal renderer、daemon capture 或隐藏本地 pan 补偿远端输入。
-- Remote-window 滚动手感由 client touch/action owner 负责：release-time `gesture/swipe` 仍在抬手时发一个 bounded action；所有 target-locked 场景的双指上下滑必须本地识别完整动作后发送一个 release-time `gesture/swipe` action，禁止按 pointer move 连续发送 raw scroll/鼠标模拟事件。1/8、1/4（默认）、1/2、1 屏 preset 是单个 action 的最大 cap；默认方向为反向，手动 toggle 只翻转 delta sign，不改坐标映射。Zoomed fullscreen 单指始终是本地 pan，双指上下滑仍是远端 action。Pinch zoom 只在 fullscreen 且两根手指都有足够开合距离/比例变化和起始轴向意图时成立；两指沿起始轴相反方向开合是明确 pinch，即使 midpoint 同时有纵向漂移也不得投成 scroll；距离变化大但没有轴向开合意图时仍判为 gesture-scroll。修这类问题时必须跑 runtime delta 单测、overlay 浮窗双指 action、fullscreen 双指正/反向、弱/斜向 pinch 负测、page-level physical send 入口测试；禁止到 daemon 做幅度补偿。
+- Remote-window 滚动手感由 client touch/action owner 负责：release-time `gesture/swipe` 只保留给单指 drag；所有 target-locked 场景的双指上下滑必须在 pointer move 当下连续发送 bounded pixel `scroll` action，抬手不得再累计/补发 release-time 远端动作。双指 scroll 只允许纵向 `deltaY`，横向 midpoint 漂移不得注入 `deltaX`；默认方向为反向，手动 toggle 只翻转 delta sign，不改坐标映射。Zoomed fullscreen 单指始终是本地 pan，双指上下滑仍是远端 realtime scroll。Pinch zoom 只在 fullscreen 且两根手指都有足够开合距离/比例变化和起始轴向意图时成立；两指沿起始轴相反方向开合是明确 pinch，即使 midpoint 同时有纵向漂移也不得投成 scroll；距离变化大但没有轴向开合意图时仍判为 scroll。连续多轮 pinch 必须以当前 viewport scale 为 baseline，并围绕双指 midpoint anchor 同步更新 pan，禁止只改 scale 导致第二轮缩放从中心或旧触点跳变。修这类问题时必须跑 runtime delta 单测、overlay 浮窗双指 realtime scroll、fullscreen 双指正/反向、弱/斜向 pinch 负测、page-level physical send 入口测试；禁止到 daemon 做幅度补偿。
 - Remote-window 支持的 app-window 输入焦点真源在 daemon input owner：click / gesture / wheel / key / QuickBar / IME 每个真实动作进入 Swift helper 后，先按 System Events live frontmost PID + AX focused window 判断目标 app/window 是否已经前台；不是则 bring-to-front/AXRaise/focus 并验证，是则不做 focus 再直接注入。Android 真实输入只发送一个用户 action record，不得在 click/gesture/wheel/key/QuickBar/IME 前额外发送 client `focus` prelude。stream start、视频 attach、fullscreen 进入、IME 上抬、picker/catalog 刷新、pinch zoom、本地 zoom-pan 都不是远端操作，不得抢焦点。客户端 `focus` 只作为兼容/显式 bring-front intent，不能成为真实输入是否能工作依赖。unsupported iTerm/tmux read-only 目标仍不得发布 input context 或发送 focus/input。
 - Remote-window daemon helper 必须对“目标 app 已 frontmost 且目标 AX window 已 focused”的重复准备快速返回。修 `RW结果 ERR remote_window_input_failed remote window input stale` 这类真机问题时，禁止只跑串行 live probe；必须增加/运行 `ZTERM_REMOTE_WINDOW_PROBE_BURST=1` 的 raw WebSocket、mux-channel、本机 Tailscale mux 黑盒 gate，模拟 Android WebView 连续发送 click/gesture/key/text action records 的 burst。same-target action-only burst 只能在前一个同目标 action 成功后刷新下一个 queued action 的 daemon-local receive time；不同目标/无前序成功仍必须按 1 秒 stale gate 丢弃。串行“发一个等 ACK 一个”的 probe 只能证明协议通，不能证明真机输入不被 helper 队列拖成 stale。
 - Remote-window 首帧和 stale stream 有独立 gate：ScreenCaptureKit 第一帧早于 daemon `setLocalDescription` 时，只能作为 latest-only pending frame 保存，不能调用 `RTCVideoSource.onFrame`、不能计入 `framesSent`、不能发布 `streaming`；sender localDescription ready 后 flush，stop/cleanup 必须丢弃 pending。daemon 返回 `remote_window_input_stream_missing` 时，Android overlay 必须清 active stream / media stream / stats / pointer state 并显示显式失败，禁止继续显示旧 video surface 接受输入。
@@ -316,6 +316,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - daemon 运行日志路径以 launchd plist 为准；当前全局服务 stderr/stdout 在 `~/.wterm/logs/launchd-stderr.log` / `launchd-stdout.log`，不要只看旧 `~/.zterm/logs`。
 - remote-window catalog 的 partial source error 不是阻塞弹窗：只要 targets 非空，picker 不显示 iTerm2/source partial error 条；只在无可选目标或顶层失败时显式显示错误。
 - remote-window floating stream 不隐藏 QuickBar；只有 picker 和 fullscreen 抑制 QuickBar/IME/body-subscription。浮动预览必须按所选 manifest 的窗口/裁切 aspect ratio 定尺寸并允许边缘 resize 保持该 aspect ratio，不能固定 16:10；入口悬浮标可拖动且同一拖拽手势不能合成点击打开 picker，Android WebView 下必须支持长按先进入拖动语义再移动；若父级裁切导致入口只能移动几像素，入口坐标必须切到 fixed/viewport owner；浮窗本体拖动只属于 toolbar，必须 `setPointerCapture/releasePointerCapture` 并处理 toolbar-local `pointermove/up/cancel`，不能只依赖 `window.pointermove`；fullscreen 必须有显式按钮、Back/minimize 回浮窗、pinch zoom、zoom 后单指 pan，但最小只能回到 aspect-fit，不允许缩小到 fit 以下，也不再显示 minimap。
+- remote-window fullscreen zoom 后的单指拖动是本地容器 pan，不传递远端；单指 tap 仍在 release 时发送远端 `click`；双指纵向滑动继续实时发送远端 pixel `scroll`。如果 pinch/scroll 抬起一指后剩余一指继续拖动，overlay 必须先用当前 viewport `panX/panY` 初始化 local-pan baseline，再消费后续 move；否则会出现“手势被吃掉但容器不动”。Android native WebView 的 built-in zoom 必须保持关闭，避免抢走自定义 pinch。
 - remote-window fullscreen 默认 aspect-fit 完整显示；“填满”语义是向 daemon 发送所选远端目标窗口的 `window-resize` 请求，不是本地 aspect-fill cover/crop，也不是按手机绝对分辨率设置远端窗口。Android 必须用当前 fullscreen 可用显示容器 aspect ratio 和远端窗口当前 desktop width 计算目标 height；daemon 必须完成 AX window resize、原地 `ScreenCaptureKit.updateConfiguration`，并用 `target/capture` ACK 回写新 truth；Android 只能在 ACK 后更新本地 projection。禁止为了填满屏幕本地拉伸/裁切冒充 resize，也禁止改 tmux width、terminal mirror 或 renderer。
 - remote-window 视频是独立 WebRTC peer connection，但 ICE 配置必须从当前 session traversal route 派生：`rtc-direct` 用 STUN-only direct ICE，`rtc-relay` 用 Relay TURN ICE。5G/Relay 下禁止让 remote-window video 用空 ICE 启动，也禁止失败后假装截图/terminal buffer 视频成功。
 - remote-window `<video>` 在播放/帧证据前不得暴露 WebView/系统原生灰底播放占位；pending/unplayed 状态只显示 ZTERM engraved wallpaper，并在 `MediaStream` attach、metadata、canplay、用户 pointer 进入时重试 `play()`。`loadedmetadata` / `loadeddata` / `canplay` / readyState poll 只能做 retry/debug，不能 reveal。Reveal 只接受 `play()` resolve、`playing` 或 `requestVideoFrameCallback` 真帧回调。这只是 projection/播放启动修复，不能当成 ScreenCaptureKit/WebRTC 连接成功证据。
@@ -324,7 +325,7 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - remote-window 输入回传必须走 `remote-window-input` 显式协议和 daemon `injectInput` owner；Android 只按 manifest crop 归一化 click/gesture/key intent，不能在 UI 做 macOS 坐标真源或假注入成功。
 - remote-window target-locked 浮窗必须消费 Android IME 的 `bottomInsetPx`，不能只抬入口悬浮标；fullscreen 继续只服从 safe-area。远程 IME committed text 保持原始 CJK/特殊字符/换行，不走 terminal punctuation/newline normalization。
 - remote-window fullscreen 在 IME 打开时也要消费 `bottomInsetPx` 作为 overlay padding，并允许本地 letterbox pan 避开键盘遮挡；这只是 Android projection，不得改变 page shell layout、daemon capture/crop、Mac 坐标、tmux 宽度或 terminal renderer。
-- remote-window 未放大全屏和浮窗中的单指拖动语义是远端滚动手势：Android 本地识别完整 swipe 后在 release 发送一个 `gesture/swipe` action，daemon 把 DOM 正向 delta（down/right 为正）转换为 macOS `CGEvent` scroll，并在真实动作注入前自行完成前台/焦点检查；只有 fullscreen `scale > 1` 时单指拖动属于本地 pan。mouse/trackpad wheel 仍是一个 pixel `scroll` action。scroll/gesture delta 只在 daemon `CGEvent` 注入层取反，禁止 Android 和 daemon 双重取反。
+- remote-window 未放大全屏和浮窗中的单指拖动语义是远端滚动手势：Android 本地识别完整 swipe 后在 release 发送一个 `gesture/swipe` action，daemon 把 DOM 正向 delta（down/right 为正）转换为 macOS `CGEvent` scroll，并在真实动作注入前自行完成前台/焦点检查；只有 fullscreen `scale > 1` 时单指拖动属于本地 pan。双指上下滑不是 release gesture，而是在 pointer move 中连续发送 realtime pixel `scroll`，且只发送纵向 `deltaY`。mouse/trackpad wheel 仍是一个 pixel `scroll` action。scroll/gesture delta 只在 daemon `CGEvent` 注入层取反，禁止 Android 和 daemon 双重取反。
 - generic app `os-event` 输入必须有 Accessibility 权限并使用 `bring-to-focus`；只 `NSRunningApplication.activate` 不够，尤其是微信/被遮挡窗口。daemon input config 必须带目标 `windowId/title/bounds`，按 `CGWindowList` bounds 匹配 AX window；每个真实 click / gesture / wheel / key / QuickBar / IME 动作先用 concrete PID（`System Events` unix id）判断当前 frontmost，目标未前台时再执行 System Events frontmost + `AXRaise` / focused window，验证 frontmost + focused 后再发 Quartz event；目标已经前台/focused 时不要再排一次 focus。client `focus` intent 只作兼容/显式 bring-front，真实输入不得发送 focus prelude；stream start、视频 attach、fullscreen、IME lift、pinch/local pan 不得抢焦点。iTerm2 pane/read-only target 禁止发送这些 intent。`NSRunningApplication.activate()` 返回 true 不能当成功，必要时用 System Events 按 PID 置前台，并对同 PID `NSRunningApplication(processIdentifier:)` 做短重试后再显式报错。`CGWindowList` top-left 坐标可直接用于 `CGEvent` location，禁止再用 AppKit bottom-left 转换。`no-focus-steal + os-event` 必须显式报错，不能宣称输入成功；验证应使用“目标窗口被 cover window 遮住，未 AXRaise 不动，AXRaise 后真实滚动”的黑盒。
 - generic app `os-event` 输入不能每个事件启动一次 `swift -e`；点击、滚动、键盘是连续流，daemon 必须用唯一常驻 Swift helper。交互式 app-window stream start 必须先 warm 并等待 helper ready，且不得发 focus/input；Swift schema 必须匹配 wire union：scroll/click 没有 `phase`，daemon-only legacy gesture 要求 `phase=end`，legacy pointer/key 才要求 `phase`。黑盒必须通过运行中 daemon WebSocket 启动真实 app-window stream，对受控 AppKit 窗口发送 click/gesture/scroll/key 并读取目标 stdout，再把 iTerm2 切前台后用 harmless click 或 focus intent 验证目标 App 可被 AXRaise 到前台。
 - remote-window 截屏交付最低 gate：Android overlay/button 测试证明点击截图不发送 `remote-window-input`；TerminalPage 测试证明 selected target manifest 进入 `remote-screenshot-request` 并自动落盘；daemon file-transfer 测试证明 app-window 走 `--window-id`、iTerm pane 走 `--rect`、非法 target 不 fallback；native Swift 至少编译并通过 1x1 rect capture；若 daemon 已运行，必须 service-scoped restart 后验证 installed native 支持 `--window-id/--rect`。
@@ -542,7 +543,7 @@ Android / daemon / shared / Mac 任一 terminal 主链改动，都必须按影�
 | 一次改多个文件 | 违反最小切片原则 |
 | 添加未请求的功能 | 违反 Simplicity First |
 | 重构未要求的代码 | 违反 Surgical Changes |
-| 修改 @wterm 核心包 | 项目约束 |
+| 把 runtime 源码重新放回本仓库 | 项目约束：runtime 只通过发布后的 `@jsonstudio/wtermmod-*` 包消费 |
 
 ### 3.4 Phase 3: 测试阶段
 
@@ -619,22 +620,22 @@ pnpm daemon:runtime:remote logs --host 100.x.x.x --port 3333 --token <auth> --se
 
 ```bash
 # L1: Unit 验证
-pnpm --filter @wterm/mobile type-check
-pnpm --filter @wterm/mobile test  # vitest 单元测试（如脚本存在）
+pnpm --dir android run type-check
+pnpm --dir android run test:feature-registry
 
 # L2: Function 验证（本地开发）
-pnpm --filter @wterm/mobile dev
+pnpm --dir android run dev
 # 结构验证：浏览器访问 portless 输出的 *.localhost 地址
-# 真连通验证：pnpm --filter @wterm/mobile preview -- --host 127.0.0.1 --port 4173
+# 真连通验证：pnpm --dir android run preview -- --host 127.0.0.1 --port 4173
 # 手动操作：添加主机 → 连接 bridge → 验证终端显示
 
 # L3: Orchestration 验证
 # 多 Tab 操作：新建 Tab1 → 新建 Tab2 → 切换 → 关闭
 
 # L4: Runtime Smoke（Android）
-pnpm --filter @wterm/mobile build
-npx cap sync android     # 同步到 Android
-npx cap run android      # 启动模拟器/真机
+pnpm --dir android run build:android
+pnpm --dir android run sync:android
+pnpm --dir android run run:android
 ```
 
 #### 标准 APK 构建与发布流程（zterm Android，必须遵循）
@@ -725,14 +726,14 @@ feat: 添加 HostList 组件和 useHostStorage hook
 - 创建 src/hooks/useHostStorage.ts 实现本地存储
 - 创建 src/components/HostList.tsx 显示主机列表
 
-验证: pnpm --filter @wterm/mobile dev → 浏览器访问 → 添加主机成功
+验证: pnpm --dir android run dev → 浏览器访问 → 添加主机成功
 ```
 
 #### 提交前检查清单
 
 | 检查项 | 命令 |
 |--------|------|
-| 类型检查通过 | `pnpm --filter @wterm/mobile type-check` |
+| 类型检查通过 | `pnpm --dir android run type-check` |
 | 无未使用代码 | 手动检查 |
 | task.md 已更新 | `git diff android/task.md` |
 | CACHE/MEMORY 是否需要更新 | 检查是否有新约束 |
@@ -760,13 +761,13 @@ feat: 添加 HostList 组件和 useHostStorage hook
 git log --oneline -5
 
 # 2. 运行基础验证
-pnpm --filter @wterm/mobile type-check
+pnpm --dir android run type-check
 
 # 3. 本地启动验证
-pnpm --filter @wterm/mobile dev
+pnpm --dir android run dev
 
 # 4. 如有 Android 项目
-cd examples/mobile && npx cap run android --livereload
+pnpm --dir android run run:android
 ```
 
 ---
@@ -979,7 +980,6 @@ android/
 | 需求 | 来源 | 复用方式 |
 |------|------|---------|
 | WebSocket tmux 桥接 | `android/src/server/server.ts` | 当前真源 |
-| PTY 本地连接 | `examples/local/server.ts` | 参考 resize 协议 |
 | 终端渲染 | `@jsonstudio/wtermmod-react` | npm install |
 | WebSocket Transport | `@jsonstudio/wtermmod-core` | npm install |
 
@@ -1185,8 +1185,8 @@ android/
 ### 模式: 悬浮文件入口必须是远程 cwd 浏览器
 - **触发信号**: Jason 要求悬浮按钮打开文件管理/浏览/预览/编辑，或指出它只是接到“文件同步”目录。
 - **真源**: `client.file_browser` 拥有远程 cwd 文件浏览投影；`daemon.file_transfer` 只响应既有 `file-list-request` / `file-download-request` / `file-upload-*`；`client.runtime` 只负责本地外部编辑副本字节。
-- **动作**: 悬浮入口进入 `browser` 模式：不读取或展示本地同步目录、不显示远端选择框/批量下载上传；点击目录进入，点击文本/代码文件预览编辑，保存走 bounded upload，外部编辑副本写入独立 `Download/zterm/remote-browser` 后显式同步回远端。
-- **反模式**: 只把悬浮按钮参数改成打开同步 sheet；把远端 list error 投成空目录；在 browser 模式把不可预览文件选中为同步下载；把本地外部编辑副本混在同步目录根。
+- **动作**: 产品态 `TerminalQuickBar` 收到 `onOpenFileTransfer` 时，只渲染 `文件浏览` 这个浮标并进入 `browser` 模式：不读取或展示本地同步目录、不显示远端选择框/批量下载上传；点击目录进入，点击文本/代码文件预览编辑，保存走 bounded upload，外部编辑副本写入独立 `Download/zterm/remote-browser` 后显式同步回远端。
+- **反模式**: 同时渲染旧 `⌘` quick-input 浮标和 `文件浏览` 浮标；只把悬浮按钮参数改成打开同步 sheet；把远端 list error 投成空目录；在 browser 模式把不可预览文件选中为同步下载；把本地外部编辑副本混在同步目录根。
 
 ### 模式: 悬浮球拖动与点击分离
 - **适用场景**: terminal 悬浮球 / 浮动入口既要支持点按开关，又要支持拖动 reposition
@@ -1404,10 +1404,11 @@ debug overlay 现在显示 MU（菜单位置）和 CE（结束行），长按后
 
 ## Remote file browser cache and preview
 - Trigger: floating file browser shows a large blank bottom area, or text/code preview fails with `Failed to execute 'atob'`.
+- Rule: in product mode, `TerminalQuickBar` must expose only the `文件浏览` floating action when `onOpenFileTransfer` exists; the old quick-input `⌘` bubble is legacy-only when file browser is unavailable.
 - Rule: browser mode is remote-cwd only and should size to content with a viewport max, not reuse the fixed-height sync sheet. Remote preview chunks are separate base64 wire frames; decode each chunk independently and stream bytes through TextDecoder.
 - Rule: opening a text/code file enters a fullscreen file view with a top toolbar for Back, local open, save, and close. Do not keep the editor as a small bottom card below the file list; Back returns to the cached browser list without closing the file browser.
 - Rule: daemon file-list truth should be a resolved-path directory cache refreshed by fs watcher changes. Requests project the cached one-level directory entries; they must not synchronously rescan a whole tree on every open.
-- Anti-pattern: concatenating padded base64 chunks before `atob`, reading the local sync directory in browser mode, keeping previews as cramped inline cards, or recursively scanning/transmitting full project trees for a cwd browser.
+- Anti-pattern: showing both the legacy quick-input bubble and the file-browser bubble in product mode, concatenating padded base64 chunks before `atob`, reading the local sync directory in browser mode, keeping previews as cramped inline cards, or recursively scanning/transmitting full project trees for a cwd browser.
 - Marker: `remote browser fullscreen preview padded base64 chunk decode cached directory watcher`
 
 ## Remote-window sibling preview performance
@@ -1445,3 +1446,34 @@ debug overlay 现在显示 MU（菜单位置）和 CE（结束行），长按后
 - Anti-pattern: changing only shell/container CSS when the visible white area is `TerminalView` renderer background, darkening cell text without lowering the renderer background brightness, or inventing unrelated light palette values.
 - Required gate: `test:terminal:shell-theme` must assert the real renderer scroller background, default foreground, collapsed QuickBar transparency, file/quick-input panel tokens, and run from prebuild plus CI.
 - Marker: `github primer neutral light terminal engraved quickbar labels`
+
+## Drawer daemon identity canonicalization
+- Trigger: one physical daemon appears twice, with an old `daemonHostId` selected by default while the current Relay daemon is online.
+- Rule: `TerminalPage` may replace a persisted daemon identity only when the exact normalized `bridgeHost:bridgePort` endpoint maps to a confirmed online daemon; without exact endpoint evidence, retain the old identity and expose the ambiguity.
+- Rule: `open-tab-restore` and `open-tab-persistence` must preserve exact `daemonHostId` / persisted `hostId` before endpoint canonicalization. Endpoint rewrite is legal only when the normalized endpoint maps to one owner; shared Relay/proxy endpoints are route evidence, not owner truth.
+- Anti-pattern: letting any explicit `daemonHostId` bypass endpoint alias resolution, merging by device name/session name alone, or choosing the pinned/newest host from a multi-owner endpoint match.
+- Required gate: drawer tests cover exact endpoint stale-id collapse and mismatched/no-endpoint negative cases; identity resolver tests cover both branches; open-tab restore/persistence tests cover same-endpoint multi-daemon owners and exact host id priority.
+- Marker: `stale daemon exact endpoint canonical identity`
+
+## Light-theme dark-cell foreground
+- Trigger: light renderer shows ANSI/truecolor dark cells with gray default text, or a dark TUI block becomes unreadable.
+- Rule: shared `resolveTerminalCellColors` selects the theme's bright foreground for default text on explicit dark backgrounds; default foreground on transparent/default background remains unchanged.
+- Rule: neutral contrast projection must choose an anchor that actually satisfies the requested contrast; if theme foreground fails against an explicit background, pick a readable black/white anchor or preserve the original color.
+- Anti-pattern: changing page/shell CSS, replacing the selected theme to compensate for cell-level contrast, or mixing toward a theme foreground that is still below contrast and can equal the background.
+- Required gate: `TerminalView.theme.test.tsx` asserts both normal light-theme defaults and explicit dark-cell contrast; shared `cell-render.test.ts` covers low-contrast neutral text against explicit cell backgrounds.
+- Marker: `light theme explicit dark cell bright default foreground`
+
+## Foreground recovery UI and short background handoff
+- Trigger: returning from background shows a reconnect/error floating banner during every normal recovery, or the app looks like it recreated the connection immediately after a short background.
+- Rule: standard recovery labels (`正在重连`, `正在连接`, `正在同步控制通道`) belong in the flat top `TerminalConnectionStatusStrip`. `TerminalNetworkBanner` is reserved for offline or typed terminal `error`; reconnect attempt count, probe timeout, and transient RTC/data-channel close are not user-visible failure truth.
+- Rule: native `MainActivity.onStart()` must not stop `BackgroundService`. Foreground-service shutdown belongs to `useOpenTabLifecycleEffects` after JS receives foreground/resume, keeping the five-minute handoff window intact until WebView lifecycle has recovered.
+- Anti-pattern: feeding `connectionProgressLabel` back into the fixed banner, suppressing reconnect state to route label in the status strip, or stopping the service from native Activity lifecycle before JS owner observes foreground.
+- Required gate: `TerminalPage.network-banner.test.tsx`, `TerminalPage.session-drawer.test.tsx`, `TerminalPage.render-isolation.test.tsx`, `useOpenTabLifecycleEffects.test.tsx`, `android-power-policy.test.ts`, and `test:transport-network-lifecycle`.
+- Marker: `foreground recovery status strip no fixed banner native onStart no stop service`
+
+## Terminal preview input owner
+- Trigger: multi-window terminal preview shows one session in the large tile but QuickBar/typed input affects another session.
+- Rule: while preview is open, the resolved primary preview tile is the UI input owner. `TerminalPreviewGrid` publishes primary changes; `TerminalPage` routes QuickBar sequence, draft, screenshot, and schedule intents through that preview owner. Child promotion updates the owner without switching the real shell.
+- Anti-pattern: letting preview primary remain component-local state while QuickBar continues to use `uiSessionId`, or fixing this by activating/switching sessions on every child tap.
+- Required gate: `TerminalPage.session-preview.test.tsx` must prove child body promotion does not call `onSwitchSession` and QuickBar input is sent to the promoted preview primary; `terminal:preview:source-dom-gate` must keep six-session preview DOM under budget.
+- Marker: `terminal preview primary tile input owner not stale active session`
