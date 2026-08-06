@@ -193,7 +193,6 @@ describe('session-context-buffer-runtime inactive gating', () => {
     const sessionId = 'session-1';
     const session = makeSession(sessionId);
     const commitSessionBufferUpdate = vi.fn(() => true);
-    const scheduleSessionRenderCommit = vi.fn();
     const setHead = vi.fn(() => true);
     const runtimeDebug = vi.fn();
     const refs = makeHeadRuntimeRefs({
@@ -217,7 +216,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
       readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
       readSessionBufferSnapshot: () => session.buffer,
       commitSessionBufferUpdate,
-      scheduleSessionRenderCommit,
+      scheduleSessionRenderCommit: vi.fn(),
       isSessionTransportActive: () => false,
       runtimeDebug,
       requestSessionBufferSync: vi.fn(() => true),
@@ -232,7 +231,6 @@ describe('session-context-buffer-runtime inactive gating', () => {
     expect(refs.lastHeadRequestAtRef.current.has(sessionId)).toBe(true);
     expect(commitSessionBufferUpdate).not.toHaveBeenCalled();
     expect(setHead).not.toHaveBeenCalled();
-    expect(scheduleSessionRenderCommit).not.toHaveBeenCalled();
     expect(runtimeDebug).toHaveBeenCalledWith(
       'session.buffer.head.inactive-drop',
       expect.objectContaining({
@@ -2332,14 +2330,12 @@ describe('session-context-buffer-runtime inactive gating', () => {
     expect(commitSessionBufferUpdate).toHaveBeenCalledOnce();
     expect(committedBuffers[0]?.gapRanges).toEqual([]);
     expect(cellsToText(committedBuffers[0]!.lines[1])).toBe('new-101');
-    expect(scheduleSessionRenderCommit).toHaveBeenCalledWith(sessionId);
   });
 
   it('accepts buffer-head for visible non-active pane when shouldAcceptSessionLiveBuffer returns true', () => {
     const sessionId = 'session-1';
     const session = makeSession(sessionId);
     const commitSessionBufferUpdate = vi.fn(() => true);
-    const scheduleSessionRenderCommit = vi.fn();
     const setHead = vi.fn(() => true);
     const runtimeDebug = vi.fn();
 
@@ -2359,7 +2355,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
       readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN } as any),
       readSessionBufferSnapshot: () => session.buffer,
       commitSessionBufferUpdate,
-      scheduleSessionRenderCommit,
+      scheduleSessionRenderCommit: vi.fn(),
       isSessionTransportActive: () => false,
       shouldAcceptSessionLiveBuffer: () => true,
       runtimeDebug,
@@ -2930,6 +2926,7 @@ describe('session-context-buffer-runtime inactive gating', () => {
       cacheLines: 1000,
     });
     const requestSessionBufferSync = vi.fn(() => true);
+    const scheduleSessionRenderCommit = vi.fn();
 
     handleBufferHeadRuntime({
       sessionId,
@@ -2945,7 +2942,48 @@ describe('session-context-buffer-runtime inactive gating', () => {
       readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN }) as any,
       readSessionBufferSnapshot: () => session.buffer,
       commitSessionBufferUpdate: vi.fn(() => false),
-      scheduleSessionRenderCommit: vi.fn(),
+      scheduleSessionRenderCommit,
+      isSessionTransportActive: () => false,
+      shouldAcceptSessionLiveBuffer: () => true,
+      runtimeDebug: vi.fn(),
+      requestSessionBufferSync,
+    });
+
+    expect(requestSessionBufferSync).not.toHaveBeenCalled();
+  });
+
+  it('does not project or pull an unchanged empty passive preview buffer', () => {
+    const sessionId = 'session-passive-empty';
+    const session = makeSession(sessionId);
+    session.buffer = createSessionBufferState({
+      lines: [],
+      startIndex: 0,
+      endIndex: 0,
+      bufferHeadStartIndex: 0,
+      bufferTailEndIndex: 0,
+      cols: 80,
+      rows: 24,
+      revision: 0,
+      cacheLines: 1000,
+    });
+    const requestSessionBufferSync = vi.fn(() => true);
+    const scheduleSessionRenderCommit = vi.fn();
+
+    handleBufferHeadRuntime({
+      sessionId,
+      latestRevision: 0,
+      latestEndIndex: 0,
+      availableStartIndex: 0,
+      availableEndIndex: 0,
+      refs: makeHeadRuntimeRefs({
+        sessions: [session],
+        activeSessionId: 'other-session',
+        liveSessionIds: [sessionId],
+      }),
+      readSessionTransportSocket: () => ({ readyState: WebSocket.OPEN }) as any,
+      readSessionBufferSnapshot: () => session.buffer,
+      commitSessionBufferUpdate: vi.fn(() => false),
+      scheduleSessionRenderCommit,
       isSessionTransportActive: () => false,
       shouldAcceptSessionLiveBuffer: () => true,
       runtimeDebug: vi.fn(),

@@ -59,6 +59,7 @@ describe('open-tab / history / connections truth gates', () => {
   });
 
   it('keeps app-layer createSession reopen ownership limited to restore/runtime-sync and explicit user open actions', () => {
+    const appSource = readSource('App.tsx');
     const restoreRuntimeSource = readSource('hooks/useOpenTabRestoreRuntimeSync.ts');
     const sessionOpenActionsSource = readSource('hooks/useSessionOpenActions.ts');
     const openTabSessionActionsSource = readSource('hooks/useOpenTabSessionActions.ts');
@@ -72,6 +73,7 @@ describe('open-tab / history / connections truth gates', () => {
     expect(sessionOpenActionsSource).toContain('createSession(');
     expect(openTabOpenPolicySource).toContain('buildOpenTabSessionCreateOptions(');
     expect(openTabRuntimeSource).toContain('createSession,');
+    expect(appSource).toContain('hosts: homeSavedConnections,');
     expect(openTabSessionActionsSource).not.toContain('createSession(');
     expect(openTabOpenPolicySource).toContain("'cold-restore': {");
     expect(openTabOpenPolicySource).toContain('connectOnCreate: false');

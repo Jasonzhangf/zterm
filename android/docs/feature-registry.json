@@ -94,8 +94,10 @@
         "src/components/terminal/TerminalQuickBar.tsx",
         "src/components/terminal/TerminalQuickBar.test.tsx",
         "src/plugins/ImeAnchorPlugin.ts",
+        "src/plugins/ScreenOrientationPlugin.ts",
         "src/lib/android-ime-anchor-truth.test.ts",
         "native/android/app/src/main/java/com/zterm/android/ImeAnchorPlugin.java",
+        "native/android/app/src/main/java/com/zterm/android/ScreenOrientationPlugin.java",
         "native/android/app/src/main/java/com/zterm/android/ImeAnchorInputLogic.java",
         "native/android/app/src/test/java/com/zterm/android/ImeAnchorInputLogicTest.java",
         "native/android/app/src/test/java/com/zterm/android/ImeAnchorHardwareKeyMappingTest.java"
@@ -497,6 +499,8 @@
       ],
       "allowed_paths": [
         "packages/shared/src/connection/types.ts",
+        "packages/shared/src/terminal/cell-render.ts",
+        "packages/shared/src/terminal/cell-render.test.ts",
         "packages/shared/src/terminal/theme.ts",
         "src/contexts/session-wire-helpers.ts",
         "src/contexts/session-buffer-frame-assembly-state.ts",
@@ -529,6 +533,7 @@
         "src/components/TerminalView.dynamic-refresh.test.tsx",
         "src/components/TerminalView.bottom-stale.test.tsx",
         "src/components/TerminalView.theme.test.tsx",
+        "packages/shared/src/terminal/cell-render.test.ts",
         "src/contexts/session-context-buffer-runtime.test.ts",
         "src/contexts/multi-pane-refresh.test.ts",
         "src/server/mirror-line-canonicalizer.test.ts",
@@ -1612,6 +1617,49 @@
       "truth_sources": [
         "docs/decisions/2026-07-30-session-idle-stopped-notification.md",
         "docs/goals/session-idle-detection-plan.md"
+      ]
+    },
+    {
+      "feature_id": "daemon.attachment_delivery",
+      "title": "Daemon image attachment queue, per-device delivery, preview, and expiry",
+      "domain": "daemon-attachment-delivery",
+      "owners": [
+        "src/server/attachment-delivery-runtime.ts",
+        "src/server/terminal-http-runtime.ts",
+        ".agents/skills/zterm-send-image/SKILL.md"
+      ],
+      "allowed_paths": [
+        "src/server/attachment-delivery-runtime.ts",
+        "src/server/attachment-delivery-runtime.test.ts",
+        "src/server/terminal-http-runtime.ts",
+        "src/server/terminal-http-runtime.attachment.test.ts",
+        "src/server/server.ts",
+        "scripts/zterm-send-image.mjs",
+        "docs/testing/attachment-delivery-test-design.md",
+        "docs/feature-registry.json",
+        "docs/resource-registry.json",
+        "docs/module-registry.json",
+        "docs/function-map.md",
+        "docs/wiki/mainline-call-map.json",
+        "docs/wiki/mainline-source.md",
+        ".agents/skills/zterm-send-image/SKILL.md"
+      ],
+      "forbidden_paths": [
+        "src/components/TerminalView.tsx",
+        "src/contexts/session-context-transport-runtime.ts",
+        "packages/shared/src/connection/protocol.ts"
+      ],
+      "required_gates": [
+        "src/server/attachment-delivery-runtime.test.ts",
+        "src/lib/feature-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts"
+      ],
+      "truth_sources": [
+        "docs/testing/attachment-delivery-test-design.md",
+        "docs/resource-map.md",
+        "docs/function-map.md"
       ]
     }
   ]

@@ -43,6 +43,13 @@ describe('Android background power policy', () => {
     expect(source).not.toContain('getBridge().getWebView().onPause()');
   });
 
+  it('leaves foreground service shutdown to the JavaScript lifecycle owner', () => {
+    const source = readFileSync(resolve(androidRoot, 'java/com/zterm/android/MainActivity.java'), 'utf8');
+
+    expect(source).toContain('public void onStart()');
+    expect(source).not.toContain('Log.i(TAG, "onStart()");\n        stopBackgroundService();');
+  });
+
   it('exposes a Capacitor plugin as the only native background-service start owner', () => {
     const activity = readFileSync(resolve(androidRoot, 'java/com/zterm/android/MainActivity.java'), 'utf8');
     const plugin = readFileSync(resolve(androidRoot, 'java/com/zterm/android/BackgroundServicePlugin.java'), 'utf8');

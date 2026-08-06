@@ -14,11 +14,13 @@ coverage/
 test-results/
 playwright-report/
 tmp/
+/tmux
 project-architecture-analysis.html
 docs/file_*.png
 android/node_modules/
 android/dist/
 android/.turbo/
+/.build-meta.json
 android/.build-meta.json
 android/update-dist/
 android/note.md
@@ -55,6 +57,8 @@ packages/shared/src/**/*.js
 packages/shared/src/**/*.js.map
 android/vite.config.js
 CACHE.md
+tmp-daemon-probe.cjs
+android/tmp-daemon-probe.cjs
 
 # Build artifacts
 android/release-dist/

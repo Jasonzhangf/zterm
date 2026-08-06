@@ -2309,6 +2309,34 @@
       ]
     },
     {
+      "resource_id": "resource.attachment_store",
+      "resource_type": "daemon_business_store",
+      "identity": "Durable daemon image attachment original and preview files",
+      "owner_feature": "daemon.attachment_delivery",
+      "truth_store": "~/.zterm/attachments/outbox/<attachmentId>",
+      "allowed_operations": ["enqueue_atomic", "read_verified_asset", "expire", "delete_after_ttl"],
+      "direct_relations": ["resource.attachment_delivery"],
+      "indirect_relations": [],
+      "via_resources": ["resource.daemon_process"],
+      "forbidden_direct_relations": ["resource.ui_projection"],
+      "required_gates": ["src/server/attachment-delivery-runtime.test.ts", "src/lib/resource-registry-truth.test.ts"],
+      "canonical_docs": ["docs/testing/attachment-delivery-test-design.md", "docs/resource-map.md"]
+    },
+    {
+      "resource_id": "resource.attachment_delivery",
+      "resource_type": "daemon_control_projection",
+      "identity": "Per-device attachment delivery status and receipts",
+      "owner_feature": "daemon.attachment_delivery",
+      "truth_store": "attachment manifest deliveries[]",
+      "allowed_operations": ["list_pending_for_device", "record_receipt", "expire"],
+      "direct_relations": ["resource.attachment_store"],
+      "indirect_relations": [],
+      "via_resources": ["resource.daemon_process"],
+      "forbidden_direct_relations": ["resource.ui_projection"],
+      "required_gates": ["src/server/attachment-delivery-runtime.test.ts", "src/lib/resource-registry-truth.test.ts"],
+      "canonical_docs": ["docs/testing/attachment-delivery-test-design.md", "docs/resource-map.md"]
+    },
+    {
       "resource_id": "resource.session_idle_facts",
       "resource_type": "daemon_runtime_fact",
       "identity": "Daemon-derived tmux session idle/stopped facts derived from mirror lastLiveActivityAt timestamps; not client notification truth",

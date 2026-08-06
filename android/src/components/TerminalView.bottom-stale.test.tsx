@@ -213,6 +213,64 @@ describe('TerminalView bottom-row stale content regression', () => {
     });
   });
 
+  it('REGRESSION: reused row references repaint changed cell styling without repainting by identity', async () => {
+    const reusedRows = [
+      makeRow('stable-0'),
+      makeRow('same-status'),
+    ];
+    const snapshot = toRenderBuffer(reusedRows, 0, 2, 2, 1);
+
+    const { container, rerender } = render(
+      <div style={{ width: '640px', height: `${mockH}px` }}>
+        <BaseTerminalView
+          sessionId="s-reused-row"
+          renderBufferSnapshot={snapshot}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => expect(readRenderedTexts(container)).toContain('same-status'));
+    const unchangedRowBefore = Array.from(container.querySelectorAll('[data-terminal-row="true"]'))[0];
+    const statusRowBefore = Array.from(container.querySelectorAll('[data-terminal-row="true"]'))[1] as HTMLElement;
+    const statusCellBefore = statusRowBefore.querySelector('span > span') as HTMLElement;
+    const backgroundBefore = statusCellBefore.style.background;
+
+    // Some mirror producers reuse row arrays while changing only cell styling.
+    reusedRows[1]![0]!.bg = 1;
+    const updatedSnapshot = {
+      ...snapshot,
+      revision: 2,
+      daemonHeadRevision: 2,
+    };
+
+    await act(async () => {
+      rerender(
+        <div style={{ width: '640px', height: `${mockH}px` }}>
+          <BaseTerminalView
+            sessionId="s-reused-row"
+            renderBufferSnapshot={updatedSnapshot}
+            active
+            onResize={vi.fn()}
+            onInput={vi.fn()}
+            fontSize={5}
+          />
+        </div>,
+      );
+    });
+
+    await waitFor(() => {
+      expect(readRenderedTexts(container)).toContain('same-status');
+      const statusRowAfter = Array.from(container.querySelectorAll('[data-terminal-row="true"]'))[1] as HTMLElement;
+      const statusCellAfter = statusRowAfter.querySelector('span > span') as HTMLElement;
+      expect(statusCellAfter.style.background).not.toBe(backgroundBefore);
+      expect(Array.from(container.querySelectorAll('[data-terminal-row="true"]'))[0]).toBe(unchangedRowBefore);
+    });
+  });
+
   it('REGRESSION: same bottom absolute index with different tail end — must re-evaluate anchor', async () => {
     // Window stays [0, 5] but tailEndIndex advances → followVisualBottomIndex must follow
     const row0 = makeRow('aaaa');

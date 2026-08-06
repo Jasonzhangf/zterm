@@ -275,6 +275,111 @@ describe('open-tab persistence truth', () => {
     })).toBeNull();
   });
 
+  it('prefers the exact persisted host id over ambiguous endpoint projections', () => {
+    expect(resolveHostForPersistedOpenTab({
+      tab: {
+        sessionId: 'saved-zterm',
+        hostId: 'host-stale',
+        connectionName: 'Conn stale',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-old',
+        sessionName: 'zterm',
+        authToken: 'token-old',
+        createdAt: 1,
+      },
+      hosts: [
+        {
+          id: 'host-stale',
+          createdAt: 1,
+          name: 'Conn stale',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-old',
+          relayHostId: 'daemon-old',
+          sessionName: 'zterm',
+          authToken: 'token-old',
+          authType: 'password',
+          tags: [],
+          pinned: false,
+          lastConnected: 11,
+        },
+        {
+          id: 'host-fresh',
+          createdAt: 2,
+          name: 'Conn fresh',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-new',
+          relayHostId: 'daemon-new',
+          sessionName: '',
+          authToken: 'token-fresh',
+          authType: 'password',
+          tags: ['relay-directory'],
+          pinned: true,
+          lastConnected: 99,
+        },
+      ],
+      fallbackIdPrefix: 'saved',
+      fallbackLastConnected: 9,
+    })).toEqual(expect.objectContaining({
+      id: 'host-stale',
+      name: 'Conn stale',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-old',
+      relayHostId: 'daemon-old',
+      sessionName: 'zterm',
+      authToken: 'token-old',
+      lastConnected: 11,
+    }));
+  });
+
+  it('uses a unique endpoint projection when the persisted host id is gone', () => {
+    expect(resolveHostForPersistedOpenTab({
+      tab: {
+        sessionId: 'saved-zterm',
+        hostId: 'host-stale',
+        connectionName: 'Conn stale',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-old',
+        sessionName: 'zterm',
+        authToken: 'token-old',
+        createdAt: 1,
+      },
+      hosts: [
+        {
+          id: 'host-fresh',
+          createdAt: 2,
+          name: 'Conn fresh',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-new',
+          relayHostId: 'daemon-new',
+          sessionName: '',
+          authToken: 'token-fresh',
+          authType: 'password',
+          tags: ['relay-directory'],
+          pinned: true,
+          lastConnected: 99,
+        },
+      ],
+      fallbackIdPrefix: 'saved',
+      fallbackLastConnected: 9,
+    })).toEqual(expect.objectContaining({
+      id: 'host-fresh',
+      name: 'Conn fresh',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-new',
+      relayHostId: 'daemon-new',
+      sessionName: 'zterm',
+      authToken: 'token-fresh',
+      lastConnected: 99,
+    }));
+  });
+
   it('resolves a persisted tab into a restorable host with a single shared mapping rule', () => {
     expect(resolveHostForPersistedOpenTab({
       tab: {

@@ -105,6 +105,7 @@ Negative:
 - Active tick, explicit resume, and active reentry all must not force-replace a pending or `CONNECTING` socket solely because a wait budget elapsed.
 - Stale reconnect bookkeeping must not be treated as socket failure. The only allowed rebuild reasons are physical close/error, target mismatch, explicit user reconnect/open, or missing/closed socket in an explicit open/resume path.
 - Foreground resume and active reentry must reuse only real `OPEN` / `CONNECTING` transport truth. `SESSION_TRANSPORT_KEEPALIVE_GRACE_MS` is diagnostic context only; it must not convert missing/closed local transport truth into a fake reusable connection. Closed/missing socket still enters the unique reconnect owner. Active tick / explicit input recovery keeps the existing immediate recovery path.
+- A timed-out `buffer-head` response is business-stream freshness evidence only. While the physical target socket remains `OPEN`, the activity owner may clear and reissue that head request, but it must not infer transport failure or invoke reconnect. Physical transport failure remains owned by typed target probe/socket lifecycle signals.
 
 ## L1 Runtime Cases
 

@@ -129,6 +129,36 @@ describe('home connection projection relay route visibility', () => {
     expect(hasRelayRtcCandidate(projected[0])).toBe(true);
   });
 
+  it('replaces stale saved daemon identity and auth with current exact-endpoint Relay directory truth', () => {
+    const projected = projectHomeSavedConnections(
+      [makeSavedHost({
+        id: 'saved-stale-zterm',
+        bridgeHost: 'mac-studio.tailnet.ts.net',
+        daemonHostId: 'daemon-old',
+        relayHostId: 'daemon-old',
+        sessionName: 'zterm',
+        authToken: 'token-old',
+      })],
+      bridgeSettings,
+      [makeRelayDevice()],
+    );
+
+    expect(projected).toHaveLength(1);
+    expect(projected[0]).toEqual(expect.objectContaining({
+      id: 'saved-stale-zterm',
+      bridgeHost: 'mac-studio.tailnet.ts.net',
+      bridgePort: 3333,
+      daemonHostId: 'mac-studio',
+      relayHostId: 'mac-studio',
+      relayDeviceId: 'device-mac',
+      sessionName: 'zterm',
+      authToken: 'daemon-token',
+    }));
+    expect(projected[0].relayEndpointCandidates).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'relay-rtc', relayHostId: 'mac-studio' }),
+    ]));
+  });
+
   it('opens the merged Home server target through the automatic route order', () => {
     const projected = projectHomeSavedConnections(
       [makeSavedHost()],

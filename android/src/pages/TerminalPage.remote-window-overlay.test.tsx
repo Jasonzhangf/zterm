@@ -294,9 +294,10 @@ describe('TerminalPage remote window overlay', () => {
       expect(parseFloat(lockedOverlay.style.bottom || '0')).toBeGreaterThan(200);
       expect(onRequestRemoteWindowStreamStart).toHaveBeenCalledWith('s1', expect.objectContaining({
         streamTargetId: 'app-1',
-      }), expect.stringMatching(/^rw-stream-/), {
+      }), expect.stringMatching(/^rw-stream-/), expect.objectContaining({
+        purpose: 'preview',
         videoBitrate: { preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000, maxFrameRateFps: 30 },
-      });
+      }));
       expect(screen.getByTestId('remote-window-video')).toBeTruthy();
       expect(screen.queryByTestId('terminal-view-s1')).toBeTruthy();
       expect(screen.getByTestId('terminal-quickbar')).toBeTruthy();
@@ -696,7 +697,10 @@ describe('TerminalPage remote window overlay', () => {
     fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
     await screen.findByTestId('remote-window-video');
 
-    const streamId = onRequestRemoteWindowStreamStart.mock.calls[0]?.[2] || '';
+    await waitFor(() => {
+      expect(onRequestRemoteWindowStreamStart).toHaveBeenCalledTimes(2);
+    });
+    const streamId = onRequestRemoteWindowStreamStart.mock.calls[1]?.[2] || '';
     expect(streamId).toEqual(expect.stringMatching(/^rw-stream-/));
 
     act(() => {

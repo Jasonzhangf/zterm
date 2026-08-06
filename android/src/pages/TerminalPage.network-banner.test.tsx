@@ -2,8 +2,9 @@
 
 import { cleanup, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 import {
-  NETWORK_BANNER_ACTIONABLE_RECONNECT_ATTEMPT,
   NETWORK_BANNER_GRACE_MS,
   TerminalNetworkBanner,
   resolveConnectionIssueActionable,
@@ -15,50 +16,34 @@ describe('TerminalNetworkBanner', () => {
     cleanup();
   });
 
-  it('projects reconnect status as a top-level overlay without changing page layout flow', () => {
+  it('does not turn reconnecting into an error banner even if visibility is stale', () => {
     render(
       <TerminalNetworkBanner
         connectionIssueVisible
-        networkOnline
         activeSessionState="reconnecting"
         activeSessionLastError="network generation target transport terminal state 3"
       />,
     );
 
-    const banner = screen.getByTestId('terminal-network-banner');
-    expect(banner.textContent).toContain('连接已断开，正在重连');
-    expect(banner.textContent).toContain('标准自动恢复流程仍未恢复');
-    expect(banner.textContent).not.toContain('terminal state 3');
-    expect(banner.style.position).toBe('fixed');
-    expect(banner.style.margin).toBe('');
-    expect(banner.style.pointerEvents).toBe('none');
-    expect(Number.parseInt(banner.style.zIndex || '0', 10)).toBeGreaterThan(90);
+    expect(screen.queryByTestId('terminal-network-banner')).toBeNull();
   });
 
-  it('projects standard recovery progress before it becomes an error notification', () => {
+  it('keeps standard recovery progress out of the fixed error overlay', () => {
     render(
       <TerminalNetworkBanner
         connectionIssueVisible={false}
-        networkOnline
         activeSessionState="reconnecting"
         activeSessionLastError="rtc data channel closed"
-        connectionProgressLabel="正在重连"
       />,
     );
 
-    const banner = screen.getByTestId('terminal-network-banner');
-    expect(banner.textContent).toContain('正在重连');
-    expect(banner.textContent).toContain('正在按自动连接流程恢复');
-    expect(banner.textContent).not.toContain('rtc data channel closed');
-    expect(banner.style.position).toBe('fixed');
-    expect(banner.style.pointerEvents).toBe('none');
+    expect(screen.queryByTestId('terminal-network-banner')).toBeNull();
   });
 
   it('does not expose raw transport errors for terminal error notifications', () => {
     render(
       <TerminalNetworkBanner
         connectionIssueVisible
-        networkOnline
         activeSessionState="error"
         activeSessionLastError="rtc data channel closed"
       />,
@@ -72,49 +57,70 @@ describe('TerminalNetworkBanner', () => {
 
   it('keeps standard automatic recovery attempts non-actionable', () => {
     expect(resolveConnectionIssueActionable({
-      networkOnline: true,
       sessionState: 'reconnecting',
       reconnectAttempt: 0,
     })).toBe(false);
     expect(resolveConnectionIssueActionable({
-      networkOnline: true,
       sessionState: 'reconnecting',
       reconnectAttempt: 1,
     })).toBe(false);
     expect(resolveConnectionIssueActionable({
-      networkOnline: true,
       sessionState: 'reconnecting',
       reconnectAttempt: 2,
     })).toBe(false);
     expect(resolveConnectionIssueActionable({
-      networkOnline: true,
       sessionState: 'reconnecting',
       reconnectAttempt: 3,
     })).toBe(false);
   });
 
-  it('makes the notification actionable only after the standard recovery flow is exhausted', () => {
-    expect(NETWORK_BANNER_ACTIONABLE_RECONNECT_ATTEMPT).toBe(4);
-    expect(resolveConnectionIssueActionable({
-      networkOnline: true,
+  it('does not expose a second platform-network control input', () => {
+    expect(resolveConnectionIssueActionableKey({
+      sessionState: 'connected',
+      reconnectAttempt: 0,
+    })).toBeNull();
+    expect(resolveConnectionIssueActionableKey({
       sessionState: 'reconnecting',
-      reconnectAttempt: NETWORK_BANNER_ACTIONABLE_RECONNECT_ATTEMPT,
-    })).toBe(true);
+      reconnectAttempt: 1,
+    })).toBeNull();
+
+    render(
+      <TerminalNetworkBanner
+        connectionIssueVisible
+        activeSessionState="connected"
+      />,
+    );
+
+    expect(screen.queryByTestId('terminal-network-banner')).toBeNull();
+  });
+
+  it('forbids platform network hints from becoming terminal connection truth', () => {
+    const pageSource = readFileSync(join(process.cwd(), 'src', 'pages', 'TerminalPage.tsx'), 'utf8');
+    const bannerSource = readFileSync(join(process.cwd(), 'src', 'pages', 'terminal-page-shell-ui.tsx'), 'utf8');
+
+    expect(pageSource).not.toContain('navigator.onLine');
+    expect(pageSource).not.toContain('networkOnline');
+    expect(bannerSource).not.toContain('networkOnline');
+    expect(bannerSource).not.toContain('网络已断开');
+  });
+
+  it('does not use reconnect attempt count as user-visible failure truth', () => {
     expect(resolveConnectionIssueActionable({
-      networkOnline: true,
+      sessionState: 'reconnecting',
+      reconnectAttempt: 4,
+    })).toBe(false);
+    expect(resolveConnectionIssueActionable({
       sessionState: 'error',
       reconnectAttempt: 0,
     })).toBe(true);
     expect(resolveConnectionIssueActionableKey({
-      networkOnline: true,
       sessionState: 'reconnecting',
       reconnectAttempt: 4,
-    })).toBe('reconnect-exhausted');
+    })).toBeNull();
     expect(resolveConnectionIssueActionableKey({
-      networkOnline: true,
       sessionState: 'reconnecting',
       reconnectAttempt: 5,
-    })).toBe('reconnect-exhausted');
+    })).toBeNull();
   });
 
   it('keeps reconnect UI hidden for the first 10 seconds of reconnect grace', () => {
@@ -123,7 +129,6 @@ describe('TerminalNetworkBanner', () => {
     render(
       <TerminalNetworkBanner
         connectionIssueVisible={false}
-        networkOnline
         activeSessionState="reconnecting"
         activeSessionLastError="probe timeout"
       />,

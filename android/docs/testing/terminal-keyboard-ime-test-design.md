@@ -41,6 +41,7 @@ Owner feature: `terminal.keyboard_ime`.
 ## Module Black-Box Plan
 
 - `TerminalPage.android-ime.test.tsx` proves stage bottom reserve equals measured QuickBar chrome + safe offset + bottom chrome lift + IME lift.
+- It also proves a transiently short cold-start viewport cannot leave the terminal surface shorter than its app-owned parent, and a foreground projection remeasures the current viewport without depending on a browser `resize` event.
 - It also proves Android native `ImeAnchor input` committed text routes CJK/emoji/special symbols to the active session without converting voice-inserted line breaks into terminal Enter.
 - It also dispatches the real registered `visualViewport.resize` listener after a keyboard-first race and proves `TerminalPage` re-renders from over-lift to adjustResize geometry without a second keyboard event.
 - `TerminalPage.lifecycle-cleanup.test.tsx` proves Keyboard, visualViewport, and virtualKeyboard listeners are registered and removed from their original sources.
@@ -49,6 +50,7 @@ Owner feature: `terminal.keyboard_ime`.
 ## Project Black-Box Impact
 
 - The local gate simulates the Android field symptom where the IME is visible but the stage no longer reserves QuickBar height, producing bottom misalignment.
+- The startup/resume surface gate must keep the app surface pinned to the native content bounds and keep the terminal shell at least as tall as that surface; viewport metrics remain internal layout inputs and cannot become the painted surface boundary.
 - The installed-phone gate must also verify explicit remote-window `KB` opens a visible Android soft keyboard from the native `ImeAnchor.show()` path; native focus plus `showSoftInput()` returning true is not sufficient if `keyboardVisible=false` and the screenshot has no keyboard.
 - The fix must not change daemon, buffer manager, renderer repaint, or upstream terminal rows/cols.
 - If device screenshots still show drift after this gate passes, next evidence should come from client debug snapshot values for `keyboardInset`, `terminalImeLiftPx`, `quickBarHeight`, and `terminalChromeBottomPx`.
@@ -57,3 +59,8 @@ Owner feature: `terminal.keyboard_ime`.
 
 - This test design does not replace L5 APK / real WebView visual verification.
 - Automated device verification must repeat IME open/close transitions and record `KB/LIFT/SH/RESZ`; a single successful toggle is not evidence for this intermittent race.
+# Android orientation control and viewport coverage
+
+- The QuickBar may request explicit portrait or landscape orientation only through the Android `ScreenOrientationPlugin`; terminal/session payloads must not carry orientation control semantics.
+- Android `orientationchange` must schedule both immediate and next-frame viewport measurement because the first WebView frame may retain the previous layout dimensions.
+- The terminal shell may retain stable geometry for IME calculations, but its visual box must remain clipped to the current App/WebView viewport so rotation cannot expose the App root as a white region.

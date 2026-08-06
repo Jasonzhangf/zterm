@@ -10,8 +10,28 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  repo-layout:
+    name: App repo layout gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Repo layout gate
+        run: pnpm run test:repo-layout
+
   android:
     name: Android typecheck and regression
+    needs: repo-layout
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -30,6 +50,9 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Repo layout gate
+        run: pnpm run test:repo-layout
 
       - name: Check published wterm runtime versions
         run: pnpm --dir android run deps:check-wterm-published
@@ -110,7 +133,7 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
       - name: Mac desktop split tests
-        run: pnpm --dir mac exec vitest run mac/src/app/MacPaneWorkbench.split.test.tsx --reporter dot
+        run: pnpm --dir mac exec vitest run src/app/MacPaneWorkbench.split.test.tsx --reporter dot
 
   win-desktop-split:
     name: Windows desktop split gate

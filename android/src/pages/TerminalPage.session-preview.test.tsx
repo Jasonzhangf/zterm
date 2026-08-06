@@ -30,6 +30,7 @@ const appListenerMock = vi.hoisted(() => ({ backButton: null as null | (() => vo
 beforeEach(() => {
   localStorage.clear();
   appListenerMock.backButton = null;
+  Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
 });
 afterEach(() => {
   vi.useRealTimers();
@@ -89,7 +90,23 @@ vi.mock('../components/terminal/RemoteScreenshotSheet', () => ({
 }));
 
 vi.mock('../components/terminal/TerminalQuickBar', () => ({
-  TerminalQuickBar: () => null,
+  TerminalQuickBar: (props: {
+    activeSessionId?: string | null;
+    onSendSequence?: (sequence: string) => void;
+  }) => (
+    <div
+      data-testid="terminal-quickbar"
+      data-active-session-id={props.activeSessionId || ''}
+    >
+      <button
+        type="button"
+        data-testid="terminal-quickbar-send"
+        onClick={() => props.onSendSequence?.('PING')}
+      >
+        send
+      </button>
+    </div>
+  ),
 }));
 
 vi.mock('../components/TerminalView', () => ({
@@ -255,7 +272,58 @@ describe('TerminalPage session preview integration', () => {
     expect(screen.queryByTestId('terminal-view-s1')).toBeNull();
   });
 
-  it('keeps every selected preview child in live body demand while foreground is true', async () => {
+  it('routes quickbar input to the current preview primary instead of the previous active session', async () => {
+    const sessions = [makeSession('s1'), makeSession('s2')];
+    localStorage.setItem(SESSION_PREVIEW_SELECTION_STORAGE_KEY, JSON.stringify({
+      version: 1,
+      orderedTargets: sessions.map((item) => ({
+        sessionId: item.id,
+        bridgeHost: item.bridgeHost,
+        bridgePort: item.bridgePort,
+        sessionName: item.sessionName,
+      })),
+    }));
+    const onQuickActionInput = vi.fn();
+    const onSwitchSession = vi.fn();
+    const stableNoop = vi.fn();
+    const { TerminalPage } = await import('./TerminalPage');
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={onSwitchSession}
+        onMoveSession={stableNoop}
+        onRenameSession={stableNoop}
+        onCloseSession={stableNoop}
+        onOpenConnections={stableNoop}
+        onOpenQuickTabPicker={stableNoop}
+        onTerminalViewportChange={stableNoop}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onQuickActionInput={onQuickActionInput}
+      />,
+    );
+
+    const stage = screen.getByTestId('terminal-stage-shell');
+    fireEvent.touchStart(stage, { touches: [{ clientX: 338, clientY: 400 }] });
+    fireEvent.touchMove(stage, { touches: [{ clientX: 270, clientY: 404 }], cancelable: true });
+    fireEvent.touchEnd(stage, { changedTouches: [{ clientX: 270, clientY: 404 }] });
+    await waitFor(() => expect(screen.getByTestId('terminal-preview-grid')).toBeTruthy());
+
+    expect(screen.getByTestId('terminal-quickbar').dataset.activeSessionId).toBe('s1');
+    fireEvent.click(screen.getByTestId('terminal-preview-body-s2'));
+    await waitFor(() => expect(screen.getByTestId('terminal-preview-tile-s2').dataset.previewVariant).toBe('primary'));
+    expect(onSwitchSession).not.toHaveBeenCalled();
+    expect(screen.getByTestId('terminal-quickbar').dataset.activeSessionId).toBe('s2');
+
+    fireEvent.click(screen.getByTestId('terminal-quickbar-send'));
+    expect(onQuickActionInput).toHaveBeenCalledTimes(1);
+    expect(onQuickActionInput).toHaveBeenCalledWith('PING', 's2');
+  });
+
+  it('keeps preview mode and every selected live id stable across a short background round trip', async () => {
     const sessions = [makeSession('s1'), makeSession('s2'), makeSession('s3'), makeSession('s4')];
     localStorage.setItem(SESSION_PREVIEW_SELECTION_STORAGE_KEY, JSON.stringify({
       version: 1,
@@ -298,11 +366,19 @@ describe('TerminalPage session preview integration', () => {
     fireEvent.touchEnd(stage, { changedTouches: [{ clientX: 270, clientY: 404 }] });
     await waitFor(() => expect(screen.getByTestId('terminal-preview-grid')).toBeTruthy());
     await waitFor(() => expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s1', 's2', 's3', 's4']));
+    const foregroundProjectionCallCount = onLiveSessionIdsChange.mock.calls.length;
 
     view.rerender(renderPage(false));
-    await waitFor(() => expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s1']));
+    await waitFor(() => expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s1', 's2', 's3', 's4']));
+    expect(onLiveSessionIdsChange).toHaveBeenCalledTimes(foregroundProjectionCallCount);
     expect(screen.getByTestId('terminal-preview-grid')).toBeTruthy();
 
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+    fireEvent(document, new Event('visibilitychange'));
+    expect(screen.getByTestId('terminal-preview-grid')).toBeTruthy();
+    expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s1', 's2', 's3', 's4']);
+
+    Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
     view.rerender(renderPage(true));
     await waitFor(() => expect(onLiveSessionIdsChange).toHaveBeenLastCalledWith(['s1', 's2', 's3', 's4']));
   });

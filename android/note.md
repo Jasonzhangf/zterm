@@ -4673,7 +4673,7 @@ Need runtime debug to confirm:
 
 - Jason changed the floating quick button contract: the floating entry should open/close remote file management, not the old quick-input panel. The bottom quickbar rows can still expose keyboard/file/image/sync controls, but the floating entry in product mode must route directly to `FileTransferSheet`.
 - Architecture mapping: `client.file_browser` owns the file-browser projection and upload/download intents; `client.runtime` owns native local storage bytes; `daemon.file_transfer` owns remote list/download/upload truth. The implementation keeps remote list/read/save on existing `file-list-request`, `file-download-request`, and bounded `file-upload-*` ACK protocol; it does not invent a UI-to-daemon direct save path or mix file payloads into control truth.
-- Fix: `TerminalQuickBar` floating button calls `onOpenFileTransfer("sync")` when the app supplies the file manager callback and no longer opens the quick-input floating panel. `TerminalPage` / overlay state toggles the file sheet open/closed from that entry.
+- Superseded correction after latest product decision: `TerminalQuickBar` product mode must not show both floating entries. When `onOpenFileTransfer` is present, the only floating entry is `文件浏览`, which directly opens `client.file_browser`; the old quick-input `⌘` floating bubble is legacy-only when file browser is unavailable.
 - Fix: `FileTransferSheet` now opens text/code files (`md`, `ts`, `js`, `json`, shell/code/config extensions, etc.) into an editable preview. Saving writes back through `sendBoundedFileUploadChunks`; local external editing writes a bounded local copy through `StoragePermissionPlugin.writeFile()` and opens it with the native `openFile()` FileProvider path, then local focus refresh can pick up edits for upload.
 - Verification: `pnpm --dir android exec vitest run src/components/terminal/FileTransferSheet.test.tsx src/components/terminal/TerminalQuickBar.test.tsx --reporter dot` passed `90/90`; `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false` PASS; feature/architecture gate `79/79 PASS`; targeted `git diff --check` PASS; full `pnpm --dir android run build:android` PASS. APK/update channel produced `0.1.3.2328` (`versionCode=1100023280`, sha256 `4075ee82de703505ebe2bab2a539cf72ea0441e7c1648838524af7bd796c1850`, 4,838,572 bytes).
 - Remaining gap: no physical phone install or real external editor round-trip was run in this turn; product path is covered by JS/native compile and mocked native plugin tests, not L5 device evidence.
@@ -4722,3 +4722,215 @@ Need runtime debug to confirm:
 
 - User screenshot proved the first pass changed shell/text appearance but left the terminal body too bright. Root cause: the body is `TerminalView` renderer theme, while initial edits concentrated on shell CSS.
 - Corrected the established `tabby-github-light` preset to GitHub Primer neutrals (`#eaeef2` / `#57606a`) and added a real renderer DOM gate. Build `0.1.3.2360` installed on `100.104.163.65:5555`; package version verified. Live terminal screenshot is still blocked by target `WS connect timeout`, so current runtime evidence covers installation/Home only, not the connected terminal screen.
+
+# 2026-08-03 rcc3 first paint and floating file entry
+
+- Symptom: `rcc3` selected via Tailscale showed an empty/black terminal body, while the old floating `⌘` quick-input button reappeared beside the file browser entry.
+- Root cause evidence: daemon `/debug/runtime` and tmux truth showed `rcc3` subscriber connected, mirror ready, revision `16`, rows `55`, and available buffer `2..58`; captured tmux content was above a mostly blank tail. Client active bootstrap without renderer visible range requested only one viewport tail, which can be all blank for this session shape.
+- Owner fix: `terminal.buffer_render` no-visible-range active bootstrap now requests a three-screen tail bounded by `availableStartIndex/latestEndIndex`. `TerminalQuickBar` product mode renders only the file-folder floating action; old quick-input floating entry is disabled when file browser is available.
+- Review correction: collapsed quickbar taps must still expand before the file-browser route; the product file-browser callback must not steal the old reveal interaction. Added the collapsed + `onOpenFileTransfer` regression.
+- Follow-up correction after Jason: the folder floating action must remain visible, but the old quick-input `⌘` floating button must not appear beside it. Product mode shows only `文件浏览`; quick-input/saved text/schedule/clipboard stays out of the floating product entry.
+- Verification after correction: focused quickbar/buffer tests `122/122`, `SessionContext.ws-refresh` `136/136`, TypeScript, feature/architecture gate `80/80`, `git diff --check`, and full `build:android` passed before the follow-up recovery-banner fix. Intermediate local update APK was `0.1.3.2368`.
+
+# 2026-08-03 foreground recovery banner truth
+
+- Symptom: every foreground recovery round could briefly show an error floating banner and then continue connecting successfully. That proves the banner was tied to a normal recovery milestone rather than an unexpected failure.
+- Root cause: `TerminalPage` treated `reconnectAttempt >= 4` as `reconnect-exhausted`. In current route probing, attempt count and transient probe failures are standard recovery progress; successful rounds can still pass that count.
+- Owner fix: UI projection no longer turns `reconnecting` attempt count into an actionable error. `TerminalNetworkBanner` keeps neutral progress for standard recovery and only shows error banners for offline or typed terminal `error`.
+- Verification: network/banner + drawer + render-isolation UI gates `60/60`, focused quickbar/buffer/ws-refresh gates `258/258`, TypeScript, feature/architecture gate `80/80`, `git diff --check`, and full `build:android` passed. Final installed APK on `100.104.163.65:5555` is `0.1.3.2369` / `versionCode=1100023690`; local/Tailscale update manifests serve sha256 `98c26c023f7317cbd20f406d412d7c4350fc6ba266d977d308aac73747cb1bb0`.
+
+# 2026-08-03 stale daemon and light-theme contrast repair
+
+- Symptom: current Relay daemon and persisted `daemon-Macstu...` both appeared in the drawer; the stale row could be selected by default. Light renderer default text on explicit dark ANSI/truecolor cells was too gray.
+- Root cause: `resolveServerIdentity()` skipped endpoint aliases whenever input had any `daemonHostId`; shared `resolveTerminalCellColors()` always used light preset foreground for default foreground cells, even when the cell background was explicitly dark.
+- Owner fixes: exact normalized endpoint alias now canonicalizes stale daemon IDs in `TerminalPage` projection; absent/mismatched endpoint evidence remains separate. Shared cell resolver uses bright theme foreground only for default text on explicit dark backgrounds; transparent/default cells keep preset foreground.
+- Verification: identity + drawer + theme + QuickBar focused tests `135/135`; feature/architecture gate `80/80`; TypeScript; shared renderer `21/21`; full `build:android` and prebuild gates; installed APK `0.1.3.2373` / `1100023730` on `100.104.163.65:5555`; local/Tailscale/public update manifest and APK sha256 `a4ecc009819e30dfbb82763bec1dc080760eb729233827c8af7536923eb1510a` match.
+
+# 2026-08-03 duplicate daemon host binding repair
+
+- Symptom: one daemon host could remain unreachable while other sessions/devices worked; the relay directory could retain an older online device row for the same daemon host after a daemon restart regenerated its device id.
+- Root cause: relay store keyed persisted devices by `deviceId`, while routing/control truth is keyed by `daemonHostId`; `registerHost()` did not retire other online device rows carrying the same host identity. Client projections then received duplicate online host records and could resolve the wrong endpoint/device binding.
+- Owner fix: `TraversalRelayStore.clearOtherDaemonHostBindings()` is the sole relay-store mutation for retiring stale same-host daemon bindings; authenticated `registerHost()` invokes it before publishing the new host presence. Existing disconnected rows retain identity for audit but no longer expose endpoints/sessions.
+- Verification: relay store/server contract tests `16/16`, control-directory/session-open focused tests `67/67`, feature/resource/function/mainline gates `80/80`, TypeScript, full relay local smoke and full Android prebuild/build passed. APK `0.1.3.2374` / `1100023740`, sha256 `4fbd47f1bfac598a4d6e375f69b61044aa6b5a5166a0140781c47745f368b935`, installed on `100.104.163.65:5555`. Local/Tailscale update routes serve `2374`; public route still serves `2373` and relay server package is prepared/verified locally but not deployed.
+
+# 2026-08-03 wrapped terminal style deployment correction
+
+- Screenshot showed the first physical row of a wrapped TUI line using the intended background while the continuation row reverted to the default theme.
+- The current source already carries SGR continuation across captured physical rows. A real tmux sample with a long `48;5;22` background line proved `capture-pane -e` emitted one style opener and one reset after the continuation row; `canonicalizeCapturedMirrorLines()` produced background `22` on both rows.
+- Root cause was deployment drift: the running daemon PID `51172` had about 10.6 hours uptime and its installed runtime did not contain `buildAnsiSgrContinuationPrefix` or `continuationState`. Android build `2374` had been installed without globally installing/restarting the daemon runtime.
+- Corrected by running `daemon:install-global` and `daemon:install-service`. The live service now runs PID `68350`; `~/.zterm/daemon-runtime/server.cjs` contains the continuation owner and `/health` responds from the new process. No new runtime code change was required.
+
+# 2026-08-03 terminal neutral contrast correction
+
+- Screenshot evidence: Codex/TUI dim gray text on Pencil Light is nearly indistinguishable from `#f1f1f1`; the current fixed 50% foreground/background mix is the direct renderer cause. The symmetric dark-theme risk is ANSI black/dark-gray foreground on a near-black cell.
+- Architecture mapping: feature `terminal.buffer_render`, module `client.renderer_window`, resource `resource.renderer_window`; unique implementation point is `packages/shared/src/terminal/cell-render.ts`. This is renderer projection only. Stored cells, ANSI payload, daemon mirror, client sparse buffer, transport, and shell CSS remain unchanged.
+- Change class: separate projection policy inside the existing owner. Positive gates cover neutral foreground contrast and readable dim hierarchy on light/dark backgrounds. Negative gates preserve sufficient-contrast saturated ANSI/truecolor colors, reverse semantics, and explicit background truth.
+- Real-device follow-up on `0.1.3.2375`: terminal text contrast is visibly improved, but QuickBar labels show doubled edges because the shell CSS applies both dark-above and light-below text shadows. Black skin also loses button depth because its outer shadow merges into the near-black panel. This remains `client.app_shell` presentation truth; the renderer correction is not involved.
+## 2026-08-03 terminal multi-view preview performance correction
+
+- User evidence: the six-session preview becomes severely slow and can terminate shortly after entry; secondary terminal glyphs are visually too large; title/body promotion and primary full-shell activation must be deterministic.
+- Architecture mapping: `feature_id=terminal.session_preview`; owner module `client.session_drawer_preview`; renderer behavior is consumed from `client.renderer_window`. Allowed implementation paths are `src/components/terminal/TerminalPreviewGrid.tsx` and `src/components/TerminalView.tsx`; transport, daemon mirror, sparse-buffer writes, session lifecycle, and tmux geometry are forbidden.
+- Root implementation risk confirmed in source: all six preview tiles pass `live=true` into full `TerminalView`, so every child executes interactive follow/scroll and resize work; preview also passes `splitVisible=false`, selecting the unthrottled resize path. Tile body activation relies on bubbling through `TerminalView`, which runs its own follow alignment before the preview owner sees the click.
+- Planned correction category: separation/downstream projection. Keep one primary live renderer; make child previews passive real-time tail projections with compact non-autosized typography and explicit title/body promotion. Required gates: `TerminalPreviewGrid.test.tsx`, `TerminalPreviewGrid.render-truth.test.tsx`, `TerminalView.dynamic-refresh.test.tsx`, session preview page tests, type-check, feature/module gates, build, install, live-device proof, then Codex review.
+- Additional lifecycle root cause confirmed after user reproduction: `TerminalPage` owns a `visibilitychange -> setSessionPreviewOpen(false)` effect and passes foreground state into `projectSessionPreviewLiveIds`, dropping preview child ids immediately in background. This duplicates and bypasses `useBackgroundLiveSessionHandoff`, whose five-minute window is the established owner for body suppression/live-set handoff. On foreground return, every dropped child becomes "newly visible" and `useSessionContextLifecycle` schedules `ensureActiveSessionFresh`, explaining both vanished multi-view state and apparent all-session reconnect.
+- Lifecycle correction category: physical removal of duplicate owner. Preview mode/live projection stay stable across short background; only `useBackgroundLiveSessionHandoff` may suppress/clear/restore demand. Active transport validity remains decided by the transport lifecycle owner.
+- First online six-session source-to-DOM gate after passive follow separation passed data correctness and single-socket continuity, but measured `initialRenderMs=3034`, `domNodeCount=17765`, and about 3.87 CPU seconds during local render. The remaining dominant cost is confirmed as five secondary previews still mounting full per-cell `VisibleRow` DOM. Corrective projection remains inside `TerminalView` owner: secondary previews flatten each visible row to one text node while the primary keeps full ANSI/cursor DOM; add a deterministic DOM-node budget to the existing source-to-DOM gate.
+- After flattened secondary-row projection, the same six-session gate passed with `domNodeCount=825` (under the 8000 hard budget), `initialRenderMs=641`, `convergenceMs=46`, and local render CPU `user=961922us/system=17109us`. All six tmux-source, daemon-to-sparse, sparse-to-preview-DOM, cross-session isolation, subscriber cleanup, preview-to-shell continuation, and single physical session socket checks passed.
+- Android build completed as `0.1.3.2377` / `1100023770`; APK SHA-256 `828a802914dbae160cfaf366105667c109908acbd387edcbbd2ffd26274f4ef8`. Full prebuild/build passed. Local and Tailscale update manifests serve 2377 with the matching SHA. Public Relay remains at 2373 and was not overwritten without explicit publication authorization. The only ADB target went offline before install, so L5 device install/background reproduction remains open.
+
+# 2026-08-04 repository residue cleanup
+
+- User policy: keep `note.md`; evidence directories keep only `README.md`; non-code residue should be removed or ignored.
+- Removed tracked residue: root `.build-meta.json`, `.cursor/rules/avoid-useeffect.mdc`, `.reasonix/truncated-results/1781184229014-af1ccee4-run_command.txt`, `android/tmp-daemon-probe.cjs`, and `mac/CACHE.md`.
+- Removed local ignored residue: root `CACHE.md`, `android/CACHE.md`, evidence payloads under Android/Mac/examples, root `project-architecture-analysis.html`, `.agent-collab`, `.DS_Store`, and a root `tmux` socket.
+- `.gitignore` now ignores root `.build-meta.json`, root `tmux`, temp daemon probe scripts, and examples evidence payloads while preserving evidence README files.
+- Remaining root clutter is structural rather than temporary: `apps/`, `examples/`, root `src/`, `web/`, `e2e/`, `assets/`, `patches/`, and `docs/` need an approved reorganization plan because several are tracked source or referenced by code/config.
+
+# 2026-08-04 app repo layout convergence
+
+- User approved full app-repo convergence and CI rebuild. Physical deletes: legacy docs app, examples, root runtime/web/e2e trees, old `packages/@wterm/*`, old `packages/@internal`, root Zig build files, old wterm mobile skill, next-themes patch, and obsolete `scripts/sync-versions.mjs`.
+- Root `docs/goals/mac-*` moved under `mac/docs/goals/`; root old `mac-alpha-p0-closeout-plan.md` was removed because `mac/docs/goals/mac-alpha-p0-closeout-plan.md` is the newer Mac-owned plan.
+- Root workspace now has five projects: root, `android`, `mac`, `win`, and `packages/shared`; `pnpm install --lockfile-only` pruned old workspace package entries.
+- Added `scripts/check-repo-layout.mjs`, root `test:repo-layout`, and CI/release workflow wiring so banned legacy roots cannot be reintroduced silently.
+- Verification: `pnpm install --frozen-lockfile`, `pnpm run test:repo-layout`, `pnpm --dir android run type-check`, `pnpm --dir android run test:feature-registry -- --reporter dot`, Mac split gate, and Windows tests passed.
+
+# 2026-08-04 foreground resume UI / background handoff repair
+
+- User symptom: background -> foreground shows a fixed reconnect/error overlay on normal recovery, and short background appears to recreate the UI/connection immediately.
+- Root cause: `TerminalNetworkBanner` still projected ordinary `connectionProgressLabel` / reconnecting state as a fixed overlay; `TerminalConnectionStatusStrip` suppressed reconnect activity into `waiting`, so the top strip did not show the current phase. Native `MainActivity.onStart()` also called `stopBackgroundService()` before the JS lifecycle owner observed foreground/resume.
+- Owner fix: fixed banner now only shows offline or typed terminal `error`; standard recovery phases show in the flat top status strip. Removed `suppressReconnectUi` and removed native `onStart` service stop; JS lifecycle remains the only background-service shutdown owner.
+- Verification: focused UI/lifecycle tests `74/74`, `test:transport-network-lifecycle` `54/54`, `test:feature-registry` `80/80`, `test:terminal:shell-theme` `203/203`, TypeScript, `git diff --check`, full `build:android`, and public/local/Tailscale update SHA checks all passed. APK `0.1.3.2379` / `1100023790`, sha256 `bbc83a92eab532d0f11e7f423ac6003d2ccb2a0fef64302d4ff5875b0eb960e0`. No online ADB device was attached, so installed-phone background replay remains open.
+
+# 2026-08-04 remote-window top-safe overlay and realtime two-finger scroll
+
+- User symptom: opening apps such as WeChat could place remote-window chrome above the visible top/status boundary, and touch gestures mixed fullscreen pinch, local pan, and remote scrolling.
+- Architecture mapping: `desktop.remote_window_stream.client.touch_action` / `client.remote_window_overlay` only. Android overlay owns floating/fullscreen projection, touch classification, and remote input action records; daemon remains the only macOS focus/input injection owner; terminal renderer/transport are not touched.
+- Root cause: overlay preserved only single-pointer gesture state when converting between overlay/runtime state, so two-finger state could be lost; local-effect handling ignored `pinch-move`, so fullscreen pinch did not update viewport; old tests/docs locked two-finger scroll as release-time `gesture/swipe`; floating overlay drag/resize allowed top placement too close to the viewport top.
+- Fix: floating overlay clamps to a 48px top safe margin, two-finger states survive overlay conversion, coherent two-finger vertical motion emits realtime pixel `scroll` actions on pointer move with no release-time remote action, scroll is vertical-only, and fullscreen pinch updates local viewport scale without sending remote input.
+- Verification: focused remote-window/page gates passed `111/111`, TypeScript passed, feature/module gates passed `80/80`, `git diff --check` passed, and full `build:android` passed. APK `0.1.3.2381` / `1100023810`, sha256 `21e0b41e2eebf527be6531a46a9bff036ffb7ae9990335ae01274704ed24b406`; local `127.0.0.1`, Tailscale `100.66.1.82`, and public Relay update routes all serve matching 2381. Prepared rollback `0.1.3.2381.1` sha256 `784804e01ab1bf590e8d39056728a9b7f9a5d59dadc3c14a3410833bef6e4867` was also uploaded and verified from public Relay. No online ADB device was attached, so installed-phone gesture replay remains open.
+
+# 2026-08-04 review correction: endpoint identity is not daemon owner truth
+
+- Codex review found two P1 issues after the foreground UI/lifecycle work: `open-tab-restore` and `open-tab-persistence` were still willing to canonicalize by shared `bridgeHost:bridgePort` before preserving exact daemon/host identity.
+- Root risk: multiple daemons behind the same Relay/proxy endpoint could be collapsed into one pinned/newer host, causing tmux session audit and persisted tab restore to use the wrong daemon token/route. This is the same class as stale daemon/zombie row bugs: endpoint is route evidence, not owner truth unless it maps to exactly one confirmed owner.
+- Owner fix: `resolveRemoteSessionOwnerTargets()` now preserves exact daemon owner first and only endpoint-canonicalizes when the endpoint maps to one owner. `resolveHostForPersistedOpenTab()` now uses exact persisted `hostId`, then semantic daemon/session match, then unique endpoint projection only.
+- Renderer review correction: neutral contrast projection now selects a readable black/white anchor when theme foreground cannot meet the requested contrast; it no longer changes low-contrast neutral text into the same color as an explicit background.
+- Verification: review-red focused tests now pass (`open-tab-restore`/`open-tab-persistence` `31/31`, shared `cell-render` `6/6`), focused UI/lifecycle `74/74`, transport lifecycle `54/54`, feature gates `80/80`, shell-theme `204/204`, repo-layout, TypeScript, `git diff --check`, and full `build:android`. APK `0.1.3.2380` / `1100023800`, sha256 `654cfeba104c4daeb6b2028eef50850dc4175c017b600e838d58096dcc9f541d`; local, Tailscale, and public Relay update routes all serve matching 2380. Prepared rollback `0.1.3.2380.1` sha256 `8a513e2cfec92518087c835aec62658dd9c8903494c4c7dd2456d7d7c429f292` also verified from public Relay. No online ADB device was attached, so installed-phone background replay remains open.
+
+# 2026-08-04 remote-window pinch continuation / anchor repair 2383
+
+- User symptom: after fullscreen zoom, the next pinch did not continue naturally from the current zoomed projection and gestures could appear ineffective.
+- Architecture mapping: `desktop.remote_window_stream.client.touch_action` / `client.remote_window_overlay` only. Android overlay owns fullscreen local viewport scale/pan and touch classification; daemon input injection, terminal renderer, tmux, transport, and route logic were not changed.
+- Root cause: the overlay consumed runtime `pinch-move` scale ratios as local scale changes but did not preserve the pinch midpoint as the zoom anchor. A new pinch could multiply from the current scale but still expand around the fit center / previous pan, creating a visible jump that felt like recalculation from the wrong touch point.
+- Fix: `RemoteWindowOverlay` now records pinch baseline scale per gesture and applies `scale + pan` together through `resolveAnchoredFullscreenViewportScale()`, preserving the remote content point under the current two-finger midpoint while clamping to fullscreen fit/max bounds.
+- Verification: focused gesture gates `79/79`, remote-window/page gates `111/111`, TypeScript, feature/module gates `80/80`, `git diff --check`, and full `build:android` all passed. APK `0.1.3.2383` / `1100023830`, sha256 `7be00f0ffbedd6402cf2c5bea29a83d9f2bcb2609b89fb52b3f47c6512901efb`; local `127.0.0.1`, Tailscale `100.66.1.82`, and public Relay update routes serve matching 2383. Prepared rollback `0.1.3.2383.1` sha256 `8be22a4312a3773bbd11507f5e8d0c3e73c67ac806986be0caf2f5535369ac09` was also uploaded and verified from public Relay. No online ADB device was attached, so installed-phone gesture replay remains open.
+
+# 2026-08-04 remote-window post-pinch local pan / WebView zoom repair 2384
+
+- User symptom: after fullscreen zoom, the remaining one-finger drag could be consumed without moving the local container, while tap and two-finger gestures still needed to pass through as remote input.
+- Architecture mapping stays `desktop.remote_window_stream.client.touch_action` / `client.remote_window_overlay`. The fix is Android overlay gesture state plus native WebView touch ownership only; daemon focus/input injection remains action-owner truth.
+- Root cause: when a two-finger pinch/scroll ended with one finger still down, runtime returned `localPan`, but `RemoteWindowOverlay` did not seed `surfaceLocalPanStartRef` from the current fullscreen viewport pan before consuming following move events. Android WebView built-in zoom controls were also still enabled, so native WebView gesture handling could compete with the custom fullscreen pinch classifier.
+- Fix: pair pointer-up now seeds the remaining pointer's local pan baseline before converting runtime state back to overlay state, clears stale pan/pinch baselines on gesture resets, and native `MainActivity` disables WebView support zoom / built-in zoom controls / display zoom controls.
+- Verification: focused gesture/page gates `86/86`, TypeScript, feature/module gates `80/80`, `git diff --check`, and full `build:android` passed. APK `0.1.3.2384` / `1100023840`, sha256 `d20d7c2e777323e9ab373acac7dbeb16d60b0bd2a8a0803c68529c46337687be`; local `127.0.0.1`, Tailscale `100.66.1.82`, and public Relay update routes serve matching 2384. No online ADB device was attached, so installed-phone touch replay remains open.
+
+# 2026-08-04 terminal preview input owner correction
+
+- User symptom: in multi-window terminal preview, text input could go to a different session than the large visible preview window. This made the preview look non-interactive even though the real failure was input focus/target ownership.
+- Architecture mapping: `terminal.session_preview` / `client.session_drawer_preview` only. Preview selection/mode owns the visible primary tile; `TerminalPage` owns the UI input projection. Daemon, tmux, transport, sparse buffer, and renderer truth were not changed.
+- Root cause: `TerminalPreviewGrid` kept `primaryPreviewSessionId` as local component state, while `TerminalPage` and `TerminalQuickBar` kept sending quick actions/draft/screenshot/schedule intents to `uiSessionId`, the previous active shell session. The visible preview primary and input owner could therefore diverge.
+- Fix: `TerminalPreviewGrid` now publishes the resolved preview primary session through `onPrimarySessionChange`; `TerminalPage` stores `sessionPreviewInputSessionId` while preview is open and routes QuickBar sequence/draft/screenshot/schedule active session projection through that owner. Preview cancel/activation clears the owner.
+- Verification: focused preview tests `37/37`, TypeScript, feature/module/resource gates `80/80`, `git diff --check`, and six-session `terminal:preview:source-dom-gate` passed with `domNodeCount=825`, `initialRenderMs=664`, `convergenceMs=49`, all six tmux-source -> daemon -> client sparse -> preview DOM checks true, exact six subscribers added, and subscribers restored after close.
+
+# 2026-08-04 terminal preview child visibility and input target correction
+
+- Jason reported two concrete preview failures: the primary tile rendered while secondary tiles stayed visually empty, and QuickBar/IME input continued targeting the old interactive session after a preview child became primary.
+- First divergence in the client projection owner: `TerminalView` subscribed secondary previews to the session buffer, but its passive render frame retained the component's initial `renderBottomIndex`; when the buffer grew, the preview window could remain outside the new tail. Secondary previews now derive their render bottom from `effectiveBufferEndIndex` while retaining passive one-row text projection and no interactive demand loop.
+- Input owner correction stays in `TerminalPage`: preview primary selection is already published by `TerminalPreviewGrid`; `activeSessionIdRef`, textarea focus/blur, IME route keys, and QuickBar target paths now use `terminalActionSessionId` while preview is open. Clicking a secondary tile only promotes it; clicking the promoted primary tile still exits preview into the real shell.
+- Positive tests: passive preview buffer growth renders the new tail row; existing primary/secondary promotion and QuickBar target tests remain green. Negative behavior remains: secondary preview does not create hidden input or interactive geometry/viewport demand.
+- Verification: focused preview/TerminalPage gates `35/35`, TypeScript, feature/module/resource gates `80/80`, and `git diff --check` pass. The real six-session source-to-DOM gate is currently blocked by the existing runtime `Unauthorized bridge token` before preview assertions; this is a daemon/runtime credential state issue, not evidence that the UI path passed online.
+
+## 2026-08-04 terminal refresh residue investigation
+- Screenshot symptom is treated as stale row pixels after a refresh: terminal content advances but a row remains from the previous frame.
+- Owner mapping: `terminal.buffer_render`; renderer owner is `src/components/TerminalView.tsx` with row projection in `src/components/terminal/VisibleRow.tsx`. Daemon/mirror/buffer truth is out of scope.
+- Focused baseline: `TerminalView.bottom-stale.test.tsx` and `TerminalView.dynamic-refresh.test.tsx` passed 80/80, but existing regression only used new row references. The likely untested path is in-place row mutation: React memo plus `key=absoluteIndex` can preserve a stale row when cell arrays are reused.
+
+## 2026-08-04 terminal refresh residue fix
+- Root cause confirmed at renderer memo boundary: `VisibleRow` compared only row reference, so an in-place cell/style mutation could leave stale DOM pixels.
+- Fix: `TerminalView` memoizes a per-row signature over char/fg/bg/flags/width; `VisibleRow` compares that signature. Changed rows repaint; unchanged rows retain DOM identity.
+- Evidence: focused TerminalView refresh/selection tests 83/83, architecture gates 80/80, Android build `0.1.3.2388` completed before final signature memoization refinement; final build rerun required after this note.
+- Online device gate remains open: `adb devices` returned no connected devices.
+
+## 2026-08-04 remote-window startup stream and logo wallpaper repair
+- User symptom: app-window streaming did not establish, and the pre-frame surface exposed the WebView video element's native gray play placeholder instead of zterm branding.
+- Architecture mapping: `desktop.remote_window_stream` client receiver projection remains owned by `RemoteWindowOverlay`; daemon capture remains owned by the ScreenCaptureKit/WebRTC stream runtime. No terminal payload, route selection, or control-plane contract changed.
+- Root cause evidence: the running daemon predated the current remote-window stream runtime. After installing and restarting the built daemon, a token-authenticated mux probe completed `remote-window-stream-start`, observed the receiver track, captured a real WeChat window through ScreenCaptureKit, sent one frame, and stopped normally. Separately, receiver visibility was not reset at every target handoff, allowing a new frame-less `<video>` lifecycle to expose native browser UI.
+- Fix: every target receiver lifecycle and failed startup cleanup now resets video visibility; the video remains hidden behind the engraved zterm logo until playback/frame evidence reveals it, and the video `poster` is the same logo as a native-placeholder guard. Regression tests lock both target-switch hiding and poster branding.
+- Review found and the implementation fixed all negative handoff paths: failed replacement, superseding handoffs, and immediate missing-session rejection now restore the original receiver visibility instead of leaving a valid retained stream behind the logo. One handoff-scoped ref owns that original visibility until the replacement group commits or rolls back.
+- Verification: focused overlay/page tests `78/78`, TypeScript, architecture gates `80/80`, the complete Android prebuild/build chain, daemon global install/restart, and the real mux + ScreenCaptureKit + WebRTC probe passed. APK `0.1.3.2393` / `1100023930`, sha256 `ec8ac23571372f6dcd5fef87e5fc05c8c01f1a9d1ea4c0d77793159fe0b552fa`. No ADB device was attached, so installed-phone WebView pixel verification remains open.
+
+## 2026-08-04 stale tmux session drawer entry
+
+- User symptom: the drawer listed a tmux session that had already been closed elsewhere; pressing close returned `can't find session` and the stale row remained.
+- Root cause: the drawer consumed a previously published daemon `sessions` projection. The tmux close command reached the daemon, but an already-absent session was treated as an ordinary error, so no fresh authoritative session list was published.
+- Fix: `terminal-message-control-runtime.ts` now treats only explicit absent-session terminal errors (`can't find session`, `no server running`, `session not found`) as idempotent close. It marks the schedule/session missing, releases the matching mirror without closing unrelated subscribers, and republishes the current tmux session list. Permission and other failures remain explicit `tmux_kill_failed` errors.
+- Verification: targeted tests `99/99`, full Android prebuild/build chain passed, APK `0.1.3.2401` / `1100024010` manifest and rollback checks passed, daemon installed/restarted with health PID `97056`, and authenticated mux + ScreenCaptureKit video-only probe passed. No Android ADB device was attached. The isolated Codex review process produced no final output, so review is incomplete and is not reported as PASS.
+
+## 2026-08-05 startup/resume surface coverage and pane-menu cancellation
+
+- First visual divergence: `AppContent` and `TerminalPage` used transient `100dvh` / measured pixel heights as painted outer-surface bounds. A short cold-start or foreground WebView measurement therefore exposed the root background below the terminal until a later layout event.
+- Owner correction: `AppContent` now pins the app surface to native content bounds with `position: fixed; inset: 0`; `TerminalPage` keeps measured height for IME/layout calculations but has `minHeight: 100%` and no pixel `maxHeight`, so internal viewport metrics cannot crop the painted surface.
+- Session drawer slot assignment now has an explicit cancel action. Cancel closes only the menu and emits no workspace assignment.
+- Connection lifecycle audit: backgrounding does not intentionally close transport. Target heartbeat runs every 30 seconds and fails after three consecutive inactive ticks; foreground sends a typed mux probe. OPEN/CONNECTING and one 2.5-second inconclusive probe do not reconnect; only terminal socket state or direct send failure enters target transport failure/replay.
+- Verification: focused UI tests `121/121`, feature registry gates `80/80`, pane gates `44/44`, full Android prebuild/build passed. APK `0.1.3.2407` / `1100024070`, sha256 `ec6f23e16bb21ffa032637f3c0ddcbcb65f7463b3c17292f7fd25e3261ef28c7`. Local and Tailscale manifests serve 2407; public Relay remains 2385. No ADB device was attached, so cold-start/foreground pixel proof and exact field reconnect trigger remain open.
+
+## 2026-08-05 secondary preview blank-body diagnosis
+
+- Symptom: real-device six-window preview renders all six titles, but only the primary tile has terminal rows; five secondary bodies are empty.
+- Known flow: `terminal.session_preview` live-set intent -> `terminal.transport_lifecycle` body subscription -> daemon mirror head/body -> client frame assembly/sparse buffer -> render gate/store -> passive preview projection. Preview rendering against six pre-filled independent render-store snapshots passes, and the authenticated real daemon source-to-DOM gate passes all six streams, so layout/render isolation is not the first divergence.
+- Rejected hypothesis: `setLiveSessionIds` reading stale React state. `applySessionActionRuntime` synchronously advances `stateRef` before dispatch, so body subscription reconciliation reads the new live set.
+- Active hypothesis: the existing L3 gate bypasses the field transition from already-connected, initially body-unsubscribed mux channels into preview demand. A SessionProvider integration test must identify whether divergence occurs at subscription send, first head, bounded tail request, buffer apply, or render-store publish.
+- Owner/scope lock: feature `terminal.transport_lifecycle` for subscription/bootstrap and `terminal.buffer_render` only if evidence reaches the apply/commit edge. Allowed runtime paths are `src/contexts/session-context-*.ts`; preview UI is forbidden unless transport/render evidence reaches the DOM with non-empty per-session snapshots.
+- Device `PLZ110` on APK `0.1.3.2408` disproved the initial-render-only hypothesis: the primary tile rendered and all five secondary bodies remained empty. The screenshot's debug overlay `窗格 x1` describes normal pane projection, not preview live demand, so it cannot prove subscription count.
+- Field-equivalent divergence: the first six-session integration gate kept every logical mux channel open. Real inactive Sessions may retain UI/session records after their mux channel closes. `setLiveSessionIdsSync` updated body demand and sent subscriptions only to existing open channels; it did not ask the lifecycle owner to reopen newly-live closed channels.
+- Unique-owner fix: public `setLiveSessionIds` records the prior set, commits the new set, then sends only newly-live IDs through existing `ensureActiveSessionFresh`. A healthy shared target therefore reopens only the missing logical channel with `bodySubscribed=true`; it does not recreate the physical socket or change active-session truth. Positive integration proof covers inactive channel close -> preview live add -> same-target channel reopen; existing unchanged-live and inactive-close tests guard duplicate/open-idle behavior.
+# 2026-08-05 foreground resume business-probe boundary repair
+
+- Symptom: returning from Android background regularly projected reconnect and rebuilt the terminal transport even when the retained physical target socket was still open.
+- Confirmed root edge: `ensureActiveSessionFreshRuntime()` marked a forced `buffer-head` request pending, then treated its response timeout as transport death and called `reconnectSession()`. This reconstructed control truth from business payload silence even though foreground resume already sends a typed target mux probe through the physical transport owner.
+- Owner repair: `terminal.transport_lifecycle` now keeps `buffer-head` timeout inside the activity/business freshness path. It clears and reissues only that head request while an `OPEN` socket remains authoritative; only target probe/socket lifecycle failures may retire and rebuild the physical transport. Closed/missing socket reconnect behavior remains unchanged.
+- Test design: positive case locks open-socket head timeout to same-socket reissue with no reconnect; existing negative cases retain closed/missing-socket reconnect through the unique owner.
+# 2026-08-05 Android orientation and white-viewport repair
+
+- Symptom: after rotating or returning from background, the terminal surface could retain a stale pixel height and expose the light App root as a large white region; orientation followed the system switch only.
+- Root cause: `TerminalPage` sampled a monotonic layout height for IME geometry and used it as the visual shell height without a viewport clamp. Android also reports one stale metrics frame during `orientationchange`.
+- Owner repair: the terminal shell keeps the geometry height contract for keyboard/terminal calculations but is visually clamped by the shell CSS to the current parent viewport; viewport metrics are rescheduled on `orientationchange` and the following animation frame. Root/App keep a dark-safe viewport background so a transition cannot flash white.
+- Verification: Android IME + viewport tests `71/71` pass after the contract-preserving clamp.
+- Manual control: Android QuickBar now exposes the opposite orientation (`横屏` or `竖屏`) and delegates the explicit command to the native `ScreenOrientationPlugin`; the plugin is the single requested-orientation owner.
+
+# 2026-08-05 frequent reconnect and false offline banner diagnosis
+
+- Symptom: APK `0.1.3.2412` on `PLZ110` periodically lost an already-open Auto connection and recovered only after an explicit Tailscale selection; after transport recovery the terminal still showed `网络已断开` while rows continued refreshing.
+- Known flow: `resource.platform_network_signal` may trigger the typed target probe, but only `resource.daemon_target_transport` and its target failure owner may publish terminal connection truth. `TerminalPage` is a projection consumer and must not reconstruct control truth from browser state.
+- Live evidence: daemon transport `db8d06a5-de45-4613-9cac-2ecc1336d1ae` attached the `zterm` mux channel at `2026-08-05 23:02:24 +08:00`; after screen-off, that target transport plus two pending control transports all closed with `1006` at `23:03:26.630`. Android `dumpsys` then showed no `BackgroundService` and no `terminal-background` wake lock, so WebView background execution was not retained.
+- False-banner first divergence: `TerminalPage` independently sampled `navigator.onLine` and converted `false` directly into the user-visible control statement `网络已断开`. The screenshot and live terminal refresh prove this platform hint disagreed with the active mux transport. This is an unregistered reverse edge from browser projection to control truth.
+- Unique owner and edit scope: `terminal.transport_lifecycle`; remove the `navigator.onLine` control projection from `src/pages/TerminalPage.tsx` / `src/pages/terminal-page-shell-ui.tsx` and lock it in `src/pages/TerminalPage.network-banner.test.tsx`. Foreground-service retention remains a separate native lifecycle slice under `BackgroundService.java` and is not yet fixed by the banner change.
+- Positive/negative test design: platform `networkOnline=false` with a connected or reconnecting terminal must not manufacture an offline error banner; an explicit terminal `error` remains actionable after the existing 10-second grace and still renders the generic failure message.
+
+## 2026-08-06 后台心跳机制完成
+
+### 完成内容
+- 后台心跳机制实现完成
+- 30秒间隔心跳保持连接
+- 90秒超时检测
+- 与现有后台保活机制集成
+
+### 修复问题
+- SessionContext.tsx 缺少 lastBackgroundEnteredAtRef 解构
+- 测试 mock 缺少新的后台心跳函数
+- AttachmentDrawer.tsx 未加入 module-registry
+
+### 提交
+- commit 0b3a957: feat(android): add background heartbeat mechanism for connection preservation
+
+### APK
+- android/native/android/app/build/outputs/apk/debug/app-debug.apk (4.6MB)

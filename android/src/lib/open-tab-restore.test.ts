@@ -280,6 +280,126 @@ describe('open-tab restore truth', () => {
     );
   });
 
+  it('keeps separate daemon owners when multiple saved hosts share one endpoint', async () => {
+    fetchTmuxSessionsMock
+      .mockResolvedValueOnce(['alpha'])
+      .mockResolvedValueOnce(['beta']);
+
+    const { fetchRemoteTmuxSessionNamesByOwner } = await import('./open-tab-restore');
+
+    const result = await fetchRemoteTmuxSessionNamesByOwner({
+      targets: [
+        {
+          bridgeHost: 'relay.codewhisper.cc',
+          bridgePort: 18443,
+          daemonHostId: 'daemon-a',
+          authToken: 'token-a-old',
+        },
+        {
+          bridgeHost: 'relay.codewhisper.cc',
+          bridgePort: 18443,
+          daemonHostId: 'daemon-b',
+          authToken: 'token-b-old',
+        },
+      ],
+      hosts: [
+        {
+          daemonHostId: 'daemon-a',
+          bridgeHost: 'relay.codewhisper.cc',
+          bridgePort: 18443,
+          authToken: 'token-a',
+          pinned: false,
+          lastConnected: 1,
+          createdAt: 1,
+        },
+        {
+          daemonHostId: 'daemon-b',
+          bridgeHost: 'relay.codewhisper.cc',
+          bridgePort: 18443,
+          authToken: 'token-b',
+          pinned: true,
+          lastConnected: 99,
+          createdAt: 2,
+        },
+      ],
+      bridgeSettings: {
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'auto',
+        traversalRelay: undefined,
+      },
+    });
+
+    expect(result.get('daemon:daemon-a')).toEqual(['alpha']);
+    expect(result.get('daemon:daemon-b')).toEqual(['beta']);
+    expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(2);
+    expect(fetchTmuxSessionsMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        daemonHostId: 'daemon-a',
+        authToken: 'token-a',
+      }),
+      expect.any(Object),
+    );
+    expect(fetchTmuxSessionsMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        daemonHostId: 'daemon-b',
+        authToken: 'token-b',
+      }),
+      expect.any(Object),
+    );
+  });
+
+  it('canonicalizes a stale target to the current unique endpoint host before remote tmux audit', async () => {
+    fetchTmuxSessionsMock.mockResolvedValueOnce(['zterm']);
+
+    const { fetchRemoteTmuxSessionNamesByOwner } = await import('./open-tab-restore');
+
+    const result = await fetchRemoteTmuxSessionNamesByOwner({
+      targets: [{
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-old',
+        authToken: 'token-old',
+      }],
+      hosts: [
+        {
+          daemonHostId: 'daemon-new',
+          bridgeHost: '100.127.23.27',
+          bridgePort: 3333,
+          authToken: 'token-new',
+          pinned: true,
+          lastConnected: 99,
+          createdAt: 2,
+        },
+      ],
+      bridgeSettings: {
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'auto',
+        traversalRelay: undefined,
+      },
+    });
+
+    expect(result.get('daemon:daemon-new')).toEqual(['zterm']);
+    expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(1);
+    expect(fetchTmuxSessionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        daemonHostId: 'daemon-new',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        authToken: 'token-new',
+        relayHostId: 'daemon-new',
+      }),
+      expect.any(Object),
+    );
+  });
+
   it('uses an existing open mux target transport for remote tmux owner audit', async () => {
     const manageTmuxSessionsOnOpenTransport = vi.fn(async () => ['zterm', 'alpha']);
 

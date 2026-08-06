@@ -71,6 +71,18 @@ describe('traversal relay server directory contract', () => {
     expect(hostSource).toContain("envelope.type !== 'relay-signal'");
   });
 
+  it('retires stale persisted device bindings before accepting a new daemon registration', () => {
+    const source = readServerSource();
+    const hostStart = source.indexOf('function registerHost');
+    const hostEnd = source.indexOf('function registerClient');
+    const hostSource = source.slice(hostStart, hostEnd);
+
+    expect(hostSource).toContain('store.clearOtherDaemonHostBindings');
+    expect(hostSource.indexOf('store.clearOtherDaemonHostBindings')).toBeLessThan(
+      hostSource.indexOf('hosts.set(key, host)'),
+    );
+  });
+
   it('keeps client relay peers idle for 30 minutes after signaling close before notifying the daemon', () => {
     const source = readServerSource();
 

@@ -34,6 +34,8 @@ describe('terminal HTTP attachment API', () => {
       host: '127.0.0.1', port: 3333, requiredAuthToken: '', updatesDir: '/tmp/missing', appUpdateVersionCode: 0, appUpdateVersionName: '', appUpdateManifestUrl: '',
       sessions: new Map(), mirrors: new Map(), clientRuntimeDebugStore: {} as never, daemonRuntimeDebugStore: {} as never, performanceTraceStore: {} as never,
       resolveDebugRouteLimit: () => 100, broadcastRuntimeDebugControl: vi.fn(), setDaemonRuntimeDebugEnabled: vi.fn(), logTimePrefix: () => '',
+      connections: new Map(),
+      sendTransportMessage: vi.fn(),
       attachmentDeliveryRuntime: { enqueueImage, listForDevice: vi.fn(), readAsset: vi.fn(), acknowledge: vi.fn(), cleanup: vi.fn() },
     });
     const recorder = responseRecorder();
@@ -50,6 +52,8 @@ describe('terminal HTTP attachment API', () => {
       host: '127.0.0.1', port: 3333, requiredAuthToken: 'daemon-secret', updatesDir: '/tmp/missing', appUpdateVersionCode: 0, appUpdateVersionName: '', appUpdateManifestUrl: '',
       sessions: new Map(), mirrors: new Map(), clientRuntimeDebugStore: {} as never, daemonRuntimeDebugStore: {} as never, performanceTraceStore: {} as never,
       resolveDebugRouteLimit: () => 100, broadcastRuntimeDebugControl: vi.fn(), setDaemonRuntimeDebugEnabled: vi.fn(), logTimePrefix: () => '',
+      connections: new Map(),
+      sendTransportMessage: vi.fn(),
       attachmentDeliveryRuntime: { enqueueImage: vi.fn(), listForDevice, readAsset: vi.fn(), acknowledge: vi.fn(), cleanup: vi.fn() },
     });
     const unauthorized = responseRecorder();
@@ -69,6 +73,8 @@ describe('terminal HTTP attachment API', () => {
       host: '127.0.0.1', port: 3333, requiredAuthToken: '', updatesDir: '/tmp/missing', appUpdateVersionCode: 0, appUpdateVersionName: '', appUpdateManifestUrl: '',
       sessions: new Map(), mirrors: new Map(), clientRuntimeDebugStore: {} as never, daemonRuntimeDebugStore: {} as never, performanceTraceStore: {} as never,
       resolveDebugRouteLimit: () => 100, broadcastRuntimeDebugControl: vi.fn(), setDaemonRuntimeDebugEnabled: vi.fn(), logTimePrefix: () => '',
+      connections: new Map(),
+      sendTransportMessage: vi.fn(),
       attachmentDeliveryRuntime: { enqueueImage, listForDevice: vi.fn(), readAsset: vi.fn(), acknowledge: vi.fn(), cleanup: vi.fn() },
     });
     const recorder = responseRecorder();
@@ -86,6 +92,8 @@ describe('terminal HTTP attachment API', () => {
       host: '127.0.0.1', port: 3333, requiredAuthToken: '', updatesDir: '/tmp/missing', appUpdateVersionCode: 0, appUpdateVersionName: '', appUpdateManifestUrl: '',
       sessions: new Map(), mirrors: new Map(), clientRuntimeDebugStore: {} as never, daemonRuntimeDebugStore: {} as never, performanceTraceStore: {} as never,
       resolveDebugRouteLimit: () => 100, broadcastRuntimeDebugControl: vi.fn(), setDaemonRuntimeDebugEnabled: vi.fn(), logTimePrefix: () => '',
+      connections: new Map(),
+      sendTransportMessage: vi.fn(),
       attachmentDeliveryRuntime: { enqueueImage: vi.fn(), listForDevice: vi.fn(), readAsset: vi.fn(), acknowledge, cleanup: vi.fn() },
     });
     const recorder = responseRecorder();
@@ -103,6 +111,8 @@ describe('terminal HTTP attachment API', () => {
       host: '127.0.0.1', port: 3333, requiredAuthToken: '', updatesDir: '/tmp/missing', appUpdateVersionCode: 0, appUpdateVersionName: '', appUpdateManifestUrl: '',
       sessions: new Map(), mirrors: new Map(), clientRuntimeDebugStore: {} as never, daemonRuntimeDebugStore: {} as never, performanceTraceStore: {} as never,
       resolveDebugRouteLimit: () => 100, broadcastRuntimeDebugControl: vi.fn(), setDaemonRuntimeDebugEnabled: vi.fn(), logTimePrefix: () => '',
+      connections: new Map(),
+      sendTransportMessage: vi.fn(),
       attachmentDeliveryRuntime: { enqueueImage: vi.fn(), listForDevice, readAsset: vi.fn(), acknowledge: vi.fn(), cleanup: vi.fn() },
     });
     const recorder = responseRecorder();

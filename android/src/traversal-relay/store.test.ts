@@ -315,4 +315,57 @@ describe('TraversalRelayStore', () => {
       },
     });
   });
+
+  it('retires an older online device binding when the same daemon host registers with a new device id', () => {
+    const store = createStore();
+    const user = store.register('Jason', 'secret');
+
+    store.publishDaemonDirectory({
+      userId: user.id,
+      deviceId: 'old-device',
+      hostId: 'daemon-macbook-air',
+      endpoints: [{
+        id: 'relay:old',
+        kind: 'relay-rtc',
+        relayHostId: 'daemon-macbook-air',
+        authRequired: true,
+        lastSeenAt: '2026-08-03T00:00:00.000Z',
+      }],
+    });
+    store.publishDaemonDirectory({
+      userId: user.id,
+      deviceId: 'new-device',
+      hostId: 'daemon-macbook-air',
+      endpoints: [{
+        id: 'relay:new',
+        kind: 'relay-rtc',
+        relayHostId: 'daemon-macbook-air',
+        authRequired: true,
+        lastSeenAt: '2026-08-03T00:00:01.000Z',
+      }],
+    });
+
+    expect(store.clearOtherDaemonHostBindings({
+      userId: user.id,
+      deviceId: 'new-device',
+      hostId: 'daemon-macbook-air',
+    })).toBe(true);
+    expect(store.getAccountDirectory(user.id).devices).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        deviceId: 'old-device',
+        daemon: expect.objectContaining({
+          hostId: 'daemon-macbook-air',
+          presence: expect.objectContaining({ connected: false }),
+          endpoints: [],
+        }),
+      }),
+      expect.objectContaining({
+        deviceId: 'new-device',
+        daemon: expect.objectContaining({
+          hostId: 'daemon-macbook-air',
+          presence: expect.objectContaining({ connected: true }),
+        }),
+      }),
+    ]));
+  });
 });

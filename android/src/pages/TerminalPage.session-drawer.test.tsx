@@ -318,7 +318,7 @@ describe('TerminalPage portrait session drawer', () => {
     expect(screen.getByTestId('terminal-connection-status-downlink').textContent).toBe('↓ 2.0 KB/s');
   });
 
-  it('keeps reconnect activity neutral in the portrait status strip during the banner grace window', () => {
+  it('shows standard reconnect progress in the portrait status strip without an error overlay', () => {
     const sessions = [makeSession('s1')];
     sessions[0]!.state = 'reconnecting';
     sessions[0]!.lastError = 'rtc data channel closed';
@@ -357,11 +357,9 @@ describe('TerminalPage portrait session drawer', () => {
       />,
     );
 
-    expect(screen.getByTestId('terminal-network-banner').textContent).toContain('正在重连');
-    expect(screen.getByTestId('terminal-network-banner').textContent).toContain('正在按自动连接流程恢复');
-    expect(screen.getByTestId('terminal-network-banner').textContent).not.toContain('rtc data channel closed');
-    expect(screen.queryByTestId('terminal-connection-status-activity')).toBeNull();
-    expect(screen.getByTestId('terminal-connection-status-route').textContent).toBe('局域网');
+    expect(screen.queryByTestId('terminal-network-banner')).toBeNull();
+    expect(screen.getByTestId('terminal-connection-status-activity').textContent).toBe('正在重连');
+    expect(screen.getByTestId('terminal-connection-status-route').textContent).toBe('正在重连');
     expect(screen.getByTestId('terminal-connection-status-strip').style.background).toBe('transparent');
     expect(screen.getByTestId('terminal-connection-status-strip').style.boxShadow).toBe('none');
   });
@@ -446,7 +444,7 @@ describe('TerminalPage portrait session drawer', () => {
     );
 
     expect(screen.getByTestId('terminal-connection-status-activity').textContent).toBe('正在同步控制通道');
-    expect(screen.getByTestId('terminal-network-banner').textContent).toContain('正在同步控制通道');
+    expect(screen.queryByTestId('terminal-network-banner')).toBeNull();
     expect(screen.getByTestId('terminal-connection-status-strip').className).not.toContain('zterm-neo-status-strip');
   });
 
@@ -1237,7 +1235,7 @@ describe('TerminalPage portrait session drawer', () => {
     expect(screen.queryByText('rtc-device-1784267569532')).toBeNull();
   });
 
-  it('keeps a catalog row under its original daemon owner when the matched live session is still connecting', async () => {
+  it('canonicalizes a connecting catalog row when its endpoint matches the online daemon', async () => {
     const connectingSession = makeSession('freehand-live');
     connectingSession.bridgeHost = '100.66.1.82';
     connectingSession.bridgePort = 3333;
@@ -1300,13 +1298,9 @@ describe('TerminalPage portrait session drawer', () => {
     fireEvent.touchMove(swipeSurface!, { touches: [{ clientX: 236, clientY: 206 }], cancelable: true });
     fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
-    fireEvent.click(await screen.findByTestId('terminal-session-drawer-host-daemon-Macstudio-old'));
-    const staleRow = screen.getByTestId('terminal-session-drawer-row-remote:daemon:daemon-Macstudio-old::session:freehand');
-    expect(staleRow).toBeTruthy();
-    expect(staleRow.textContent).toContain('daemon-Macstudio-old');
-
-    fireEvent.click(screen.getByTestId('terminal-session-drawer-host-mac-studio'));
-    expect(screen.queryByTestId('terminal-session-drawer-row-remote:daemon:daemon-Macstudio-old::session:freehand')).toBeNull();
+    expect(screen.queryByTestId('terminal-session-drawer-host-daemon-Macstudio-old')).toBeNull();
+    expect((await screen.findByTestId('terminal-session-drawer-host-mac-studio')).textContent).toContain('2');
+    expect(screen.getByTestId('terminal-session-drawer-row-freehand-live')).toBeTruthy();
   });
 
   it('does not merge an rtc-only direct group when multiple Relay catalogs match', async () => {
@@ -1437,7 +1431,7 @@ describe('TerminalPage portrait session drawer', () => {
     expect(screen.queryByTestId('terminal-session-drawer-host-100.66.1.82:3333')).toBeNull();
   });
 
-  it('keeps an explicit stale daemon identity separate from the unique online Relay daemon', async () => {
+  it('canonicalizes an explicit stale daemon identity to the unique online Relay daemon', async () => {
     render(
       <TerminalPage
         sessions={[makeSession('drawer-anchor')]}
@@ -1475,10 +1469,9 @@ describe('TerminalPage portrait session drawer', () => {
     });
     fireEvent.touchEnd(swipeSurface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
-    fireEvent.click(await screen.findByTestId('terminal-session-drawer-host-daemon-Macstu-old'));
-    expect(screen.getByTestId('terminal-session-drawer-row-remote:daemon:daemon-Macstu-old::session:rcc')).toBeTruthy();
-    fireEvent.click(screen.getByTestId('terminal-session-drawer-host-mac-studio'));
-    expect(screen.queryByTestId('terminal-session-drawer-row-remote:daemon:daemon-Macstu-old::session:rcc')).toBeNull();
+    expect(screen.queryByTestId('terminal-session-drawer-host-daemon-Macstu-old')).toBeNull();
+    expect((await screen.findByTestId('terminal-session-drawer-host-mac-studio')).textContent).toContain('1');
+    expect(screen.getByTestId('terminal-session-drawer-row-remote:daemon:mac-studio::session:rcc')).toBeTruthy();
   });
 
   it('keeps a stale daemon identity separate from one same-name Relay catalog without endpoint evidence', async () => {

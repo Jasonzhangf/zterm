@@ -203,6 +203,33 @@ describe('TerminalView terminal themes', () => {
     expect(scroller.style.backgroundColor).toBe(hexToRgbString('#ffffff'));
   });
 
+  it('uses a light foreground for default text on explicit dark cells in a light theme', () => {
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId="theme-light-dark-cell"
+          initialBufferLines={[[{
+            char: 'D'.codePointAt(0) || 68,
+            fg: 256,
+            bg: 0,
+            flags: 0,
+            width: 1,
+          }]]}
+          bufferStartIndex={0}
+          bufferEndIndex={1}
+          bufferTailEndIndex={1}
+          active
+          fontSize={11}
+          themeId="tabby-github-light"
+        />
+      </div>,
+    );
+
+    const cellNode = firstRenderedCell(view.container);
+    expect(cellNode.style.color).toBe(hexToRgbString('#ffffff'));
+    expect(cellNode.style.background).toBe(hexToRgbString('#57606a'));
+  });
+
   it('uses the upstream Pencil Light surface and foreground for the light shell renderer preset', () => {
     const cell = {
       char: 'G'.codePointAt(0) || 71,
@@ -468,7 +495,7 @@ describe('TerminalView terminal themes', () => {
     const cells = Array.from(view.container.querySelectorAll('[data-terminal-row="true"] > span > span')) as HTMLSpanElement[];
     expect(cells[0]?.style.background).toBe('rgb(120, 80, 80)');
     expect(cells[0]?.style.opacity).toBe('');
-    expect(cells[0]?.style.color).toBe('rgb(166, 146, 146)');
+    expect(cells[0]?.style.color).toBe('rgb(188, 168, 168)');
   });
 
   it('keeps dimmed block and shade glyph backgrounds on the original red/green truth instead of mixing them to gray', () => {

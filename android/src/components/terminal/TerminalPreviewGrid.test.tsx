@@ -72,8 +72,10 @@ describe('TerminalPreviewGrid', () => {
     expect(grid.dataset.windowGroupSecondaryAxis).toBe('row');
     expect(screen.getAllByTestId(/terminal-preview-tile-/)).toHaveLength(6);
     expect(terminalViewSpy).toHaveBeenCalledTimes(6);
-    for (const [props] of terminalViewSpy.mock.calls) {
-      expect(props).toMatchObject({ active: false, live: true });
+    const terminalProps = terminalViewSpy.mock.calls.map(([props]) => props as Record<string, unknown>);
+    expect(terminalProps[0]).toMatchObject({ active: false, live: true, projectionMode: 'preview-primary', splitVisible: true });
+    for (const props of terminalProps.slice(1)) {
+      expect(props).toMatchObject({ active: false, live: false, projectionMode: 'preview-secondary', splitVisible: true });
       expect((props as Record<string, unknown>).onInput).toBeUndefined();
       expect((props as Record<string, unknown>).onResize).toBeUndefined();
       expect((props as Record<string, unknown>).onViewportChange).toBeUndefined();
@@ -139,6 +141,29 @@ describe('TerminalPreviewGrid', () => {
     expect(screen.getByTestId('terminal-preview-tile-s2').dataset.previewVariant).toBe('primary');
   });
 
+  it('promotes from the title bar and activates the full shell only after the promoted primary body is tapped', () => {
+    const onActivateSession = vi.fn();
+    render(
+      <TerminalPreviewGrid
+        sessions={sessions.slice(0, 3)}
+        sessionBufferStore={null}
+        landscape={false}
+        fontSize={10}
+        onActivateSession={onActivateSession}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const childTitlebar = screen.getByTestId('terminal-preview-tile-s2').querySelector('[data-preview-titlebar="true"]') as HTMLElement;
+    fireEvent.click(childTitlebar);
+    expect(onActivateSession).not.toHaveBeenCalled();
+    expect(screen.getByTestId('terminal-preview-tile-s2').dataset.previewVariant).toBe('primary');
+
+    fireEvent.click(screen.getByTestId('terminal-preview-body-s2'));
+    expect(onActivateSession).toHaveBeenCalledTimes(1);
+    expect(onActivateSession).toHaveBeenCalledWith('s2');
+  });
+
   it('keeps order metadata but does not render order badges in tile titlebars', () => {
     const namedSessions = [
       { ...sessions[0], title: 'alpha', sessionName: 'alpha' },
@@ -177,8 +202,8 @@ describe('TerminalPreviewGrid', () => {
     const terminalProps = terminalViewSpy.mock.calls.map(([props]) => props as Record<string, unknown>);
     expect(terminalProps.map((props) => [props.sessionId, props.fontSize, props.rowHeight])).toEqual([
       ['s1', 7, '10px'],
-      ['s2', 4, '6px'],
-      ['s3', 4, '6px'],
+      ['s2', 3, '4px'],
+      ['s3', 3, '4px'],
     ]);
     for (const props of terminalProps) {
       expect(props.widthMode).toBe('mirror-fixed');
@@ -275,6 +300,7 @@ describe('TerminalPreviewGrid', () => {
 
     const body = screen.getByTestId('terminal-preview-body-s1');
     expect(body.style.pointerEvents).toBe('auto');
+    expect(body.style.webkitTextSizeAdjust).toBe('none');
     expect(body.closest('button')).toBeNull();
     fireEvent.pointerDown(body, { clientX: 20, clientY: 70, pointerId: 1 });
     act(() => vi.advanceTimersByTime(450));
@@ -289,6 +315,8 @@ describe('TerminalPreviewGrid', () => {
       widthMode: 'mirror-fixed',
       active: false,
       live: true,
+      projectionMode: 'preview-primary',
+      splitVisible: true,
     }));
   });
 

@@ -535,7 +535,7 @@ describe('TerminalPage render isolation', () => {
       vi.advanceTimersByTime(3100);
     });
 
-    expect(screen.getByTestId('terminal-network-banner').textContent).toContain('连接已断开，正在重连');
+    expect(screen.queryByTestId('terminal-network-banner')).toBeNull();
     expect(readRenderCount('terminal-view-s1')).toBe(terminalRenderCountBefore);
     expect(readRenderCount('terminal-quickbar')).toBe(quickBarRenderCountBefore);
   });

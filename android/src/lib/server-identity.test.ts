@@ -55,4 +55,55 @@ describe('server identity projection', () => {
       label: 'mac-studio',
     });
   });
+
+  it('replaces a stale daemon id when an exact endpoint alias is confirmed', () => {
+    const aliases = buildServerIdentityAliasMap([
+      {
+        daemonHostId: 'mac-studio',
+        connectionName: 'Mac Studio',
+        bridgeHost: '100.66.1.82',
+        bridgePort: 3333,
+      },
+    ]);
+
+    expect(resolveServerIdentity({
+      daemonHostId: 'daemon-Macstu-old',
+      connectionName: 'Mac Studio',
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+    }, aliases)).toEqual({
+      key: 'mac-studio',
+      label: 'mac-studio',
+    });
+  });
+
+  it('keeps a stale daemon id when no exact endpoint alias exists', () => {
+    expect(resolveServerIdentity({
+      daemonHostId: 'daemon-Macstu-old',
+      bridgeHost: '10.0.0.9',
+      bridgePort: 3333,
+    }, buildServerIdentityAliasMap([{
+      daemonHostId: 'mac-studio',
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+    }]))).toEqual({
+      key: 'daemon-Macstu-old',
+      label: 'daemon-Macstu-old',
+    });
+  });
+
+  it('does not infer an identity when two aliases share one endpoint', () => {
+    const aliases = buildServerIdentityAliasMap([
+      { daemonHostId: 'mac-studio', bridgeHost: '100.66.1.82', bridgePort: 3333 },
+      { daemonHostId: 'macbook-air', bridgeHost: '100.66.1.82', bridgePort: 3333 },
+    ]);
+
+    expect(resolveServerIdentity({
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+    }, aliases)).toEqual({
+      key: '100.66.1.82:3333',
+      label: '100.66.1.82',
+    });
+  });
 });

@@ -120,11 +120,10 @@ describe('session preview selection truth', () => {
     expect(resolveSessionPreviewTargets(selection, sessions).map((item) => item.id)).toEqual([
       'session-1', 'session-3',
     ]);
-    expect(projectSessionPreviewLiveIds(['session-1'], ['session-1', 'session-3'], true, true)).toEqual([
+    expect(projectSessionPreviewLiveIds(['session-1'], ['session-1', 'session-3'], true)).toEqual([
       'session-1', 'session-3',
     ]);
-    expect(projectSessionPreviewLiveIds(['session-1'], ['session-3'], false, true)).toEqual(['session-1']);
-    expect(projectSessionPreviewLiveIds(['session-1'], ['session-3'], true, false)).toEqual(['session-1']);
+    expect(projectSessionPreviewLiveIds(['session-1'], ['session-3'], false)).toEqual(['session-1']);
   });
 
   it('rejects a reused session id whose host or tmux identity no longer matches the stored target', () => {

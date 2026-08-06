@@ -1,136 +1,107 @@
 # zterm
 
-移动端终端应用，通过 Tailscale / 局域网访问本地 Mac 上的 tmux bridge。
-Android 客户端 + macOS daemon。未来 Mac / Windows 客户端。
+zterm is the app-level repository for the Android, Mac, and Windows clients plus the zterm daemon release surface.
 
-## Layout
+The terminal runtime source is not vendored here. Runtime changes belong in the upstream runtime repository and are consumed here through published `@jsonstudio/wtermmod-*` npm packages.
 
-- `android/` — current Android app
-- `mac/` — future macOS client
-- `win/` — future Windows client
+## Repository Layout
 
-## 快速开始：macOS daemon
+```text
+zterm/
+├── android/              # Current Android client and daemon/release owner
+├── mac/                  # Mac desktop client
+├── win/                  # Windows desktop client
+├── packages/shared/      # zterm-owned shared contracts, projection helpers, and UI primitives
+├── assets/               # Shared product assets used by app clients
+├── scripts/              # Repository-level maintenance gates
+├── .agents/              # Project-local agent skills
+├── .github/              # CI and release workflows
+├── AGENTS.md             # Project execution rules
+├── package.json          # Root workspace commands
+├── pnpm-workspace.yaml   # Active app workspace only
+└── README.md
+```
 
-### 一键安装
+Legacy runtime and demo source trees are intentionally not part of this app repo. The root layout gate blocks those trees from being reintroduced.
+
+## Development
+
+Install dependencies:
 
 ```bash
-# 从 GitHub Release 下载并安装
+pnpm install
+```
+
+Common commands:
+
+```bash
+pnpm run test:repo-layout
+pnpm --dir android run type-check
+pnpm --dir android run test:feature-registry
+pnpm --dir mac run type-check
+pnpm --dir win run type-check
+```
+
+Android app and daemon work starts in `android/`. The canonical Android workflow is documented in `android/README.md`, `android/docs/architecture.md`, and `android/docs/dev-workflow.md`.
+
+Mac and Windows desktop work starts in `mac/` and `win/` respectively. Shared app contracts and reusable UI/runtime projection helpers live in `packages/shared/`.
+
+## Runtime Dependencies
+
+- Android client: Capacitor + React + `@jsonstudio/wtermmod-react`
+- Desktop clients: Electron + React + `@jsonstudio/wtermmod-react`
+- Daemon release: Node.js + tmux + node-pty
+- Shared contracts: `@zterm/shared`
+
+Do not copy runtime source into this repository. If runtime behavior needs to change, update the runtime repository, publish the package, then consume the new package version here.
+
+## macOS Daemon
+
+Install from release artifact:
+
+```bash
 curl -fsSL https://github.com/Jasonzhangf/zterm/releases/latest/download/zterm-daemon-<version>-darwin-arm64.tar.gz | tar xz
 cd zterm-daemon-<version>-darwin-arm64
 ./bin/install-global.sh
 ```
 
-或者从 npm：
+Or install from npm:
 
 ```bash
 npm install -g @jsonstudio/zterm-daemon
 ```
 
-安装后全局可用：
+Common daemon commands:
 
 ```bash
-zterm-daemon install-service   # 安装 launchd 自启服务 + 权限获取
-zterm-daemon service-status    # 查看服务状态
-zterm-daemon restart           # 重启 daemon
-zterm-daemon status            # 查看运行状态
+zterm-daemon install-service
+zterm-daemon service-status
+zterm-daemon restart
+zterm-daemon status
 ```
 
-### 配置
-
-配置文件 `~/.zterm/config.json`（自动创建）：
-
-```json
-{
-  "zterm": {
-    "android": {
-      "daemon": {
-        "host": "0.0.0.0",
-        "port": 3333,
-        "authToken": "your-secret-token"
-      }
-    }
-  }
-}
-```
-
-| 字段 | 默认值 | 说明 |
-|------|--------|------|
-| `host` | `0.0.0.0` | daemon 监听地址 |
-| `port` | `3333` | daemon 监听端口 |
-| `authToken` | 空（关闭鉴权） | WebSocket 鉴权 token |
-| `terminalCacheLines` | `3000` | 终端 scrollback 缓存行数 |
-
-### Relay（远程穿透）
-
-如果手机和 Mac 不在同一局域网，需要配置 relay 服务：
-
-```bash
-zterm-daemon configure-relay \
-  --relay-url https://your-relay-server/relay/ \
-  --username your-username \
-  --password your-password \
-  --host-id mac-studio \
-  --device-name "Mac Studio" \
-  --restart-service
-```
-
-Relay 会在 daemon 启动时自动注册，手机端在连接配置中可通过 relay 连上 Mac。
-
-### 目录结构
+Default daemon config path:
 
 ```text
-~/.zterm/
-├── config.json          # daemon 配置 + relay 配置
-├── daemon-id            # daemon 唯一标识
-├── schedules.json       # 定时发送任务
-├── logs/                # daemon + launchd 日志
-├── run/                 # PID 文件 + crash guard
-├── tmux/                # tmux socket 目录（如果 daemon 启动 tmux server）
-├── uploads/             # 文件上传缓存
-├── updates/             # APK 更新包 + latest.json
-└── releases/            # daemon 版本隔离目录（多版本共存）
-    └── <version>/
-        ├── runtime/     # bundled server.cjs + node_modules
-        ├── support/     # zterm-daemon.sh + native binary
-        └── bin/         # install-global.sh
+~/.zterm/config.json
 ```
 
-## Android APK
+## Android APK Updates
 
-从 GitHub Releases 下载最新 APK 直接安装，或通过 daemon 的 update channel 自动升级。
+APK update bundles are built from `android/` and served by the daemon update channel:
 
-### 连接配置
+```text
+http://<daemon-host>:3333/updates/latest.json
+http://<daemon-host>:3333/updates/zterm-<version>.apk
+```
 
-1. 打开 App → Connections
-2. 点击右下角 `+`
-3. 输入 Mac 的 Tailscale IP 或局域网 IP
-4. 输入 daemon 端口（默认 `3333`）和 authToken（如配置了鉴权）
-5. 点击 Connect → 选择 tmux session
-6. 保存主机
+Release and update verification commands live in `android/package.json`; use `pnpm --dir android run build:android` for the standard debug APK/update bundle path.
 
-### 升级链路
+## Source Of Truth
 
-APK 更新由 daemon 的 HTTP 服务提供：
-
-- `http://<daemon-host>:3333/updates/latest.json` — 升级清单
-- `http://<daemon-host>:3333/updates/zterm-<version>.apk` — APK 下载
-
-发布新 APK 后，更新 `android/update-dist/latest.json`，daemon 重启后自动对外提供最新版本。
-
-## 开发
-
-详见 `android/README.md`。
-
-### 依赖
-
-- Runtime: `@jsonstudio/wtermmod-core`, `@jsonstudio/wtermmod-dom`, `@jsonstudio/wtermmod-react`
-- Runtime 源码在 `../wterm`，本仓库只安装 npm 发布版本
-- Android 构建：Capacitor + `@jsonstudio/wtermmod-react`
-- macOS daemon：Node.js + tmux + node-pty
-
-### 真源文档
-
-- `android/docs/spec.md` — 产品范围
-- `android/docs/architecture.md` — 模块边界
-- `android/docs/decisions/` — 关键设计决策
-- `android/docs/dev-workflow.md` — 开发门禁
+- `AGENTS.md`: repository execution rules
+- `android/docs/architecture.md`: module and resource boundaries
+- `android/docs/feature-registry.json`: feature ownership and gates
+- `android/docs/module-registry.json`: module ownership
+- `android/docs/resource-registry.json`: resource ownership
+- `android/docs/wiki/mainline-call-map.json`: mainline call edges

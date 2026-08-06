@@ -108,6 +108,15 @@ fi
 mkdir -p "$CORPUS"
 printf 'owned-by=zterm-mempalace-mine\n' > "$MARKER"
 
+stale_corpus_files=(
+  "turbo.json"
+)
+for path in "${stale_corpus_files[@]}"; do
+  if [[ -e "$CORPUS/$path" ]]; then
+    rm "$CORPUS/$path"
+  fi
+done
+
 copy_file() {
   local src="$1"
   if [[ -f "$ROOT/$src" ]]; then
@@ -133,7 +142,6 @@ copy_file "note.md"
 copy_file "mempalace.yaml"
 copy_file "package.json"
 copy_file "pnpm-workspace.yaml"
-copy_file "turbo.json"
 copy_file "vitest.workspace.ts"
 
 copy_tree ".agents/skills"
@@ -188,7 +196,7 @@ if [[ -n "$forbidden_hits" ]]; then
   exit 2
 fi
 
-allowed_source_regex="^$CORPUS/(\\.zterm-mempalace-corpus|AGENTS\\.md|\\.ignore|README\\.md|CHANGELOG\\.md|mempalace\\.yaml|package\\.json|pnpm-workspace\\.yaml|turbo\\.json|vitest\\.workspace\\.ts|note\\.md|\\.agents/skills/[^/]+/SKILL\\.md|android/(AGENTS\\.md|README\\.md|MEMORY\\.md|CACHE\\.md|note\\.md|task\\.md|package\\.json|capacitor\\.config\\.ts|tsconfig\\.json|vite\\.config\\.ts|vitest\\.config\\.ts|docs/|src/|scripts/|native/android/(app/src/|app/(build\\.gradle|capacitor\\.build\\.gradle|proguard-rules\\.pro)|build\\.gradle|capacitor\\.settings\\.gradle|gradle\\.properties|settings\\.gradle|variables\\.gradle|capacitor-cordova-android-plugins/(build\\.gradle|cordova\\.variables\\.gradle)))|packages/shared/(package\\.json|src/|test/)|mac/(README\\.md|MEMORY\\.md|CACHE\\.md|note\\.md|task\\.md|package\\.json|tsconfig\\.json|tsconfig\\.node\\.json|vite\\.config\\.ts|vitest\\.config\\.ts|docs/|src/|electron/|scripts/))"
+allowed_source_regex="^$CORPUS/(\\.zterm-mempalace-corpus|AGENTS\\.md|\\.ignore|README\\.md|CHANGELOG\\.md|mempalace\\.yaml|package\\.json|pnpm-workspace\\.yaml|vitest\\.workspace\\.ts|note\\.md|\\.agents/skills/[^/]+/SKILL\\.md|android/(AGENTS\\.md|README\\.md|MEMORY\\.md|CACHE\\.md|note\\.md|task\\.md|package\\.json|capacitor\\.config\\.ts|tsconfig\\.json|vite\\.config\\.ts|vitest\\.config\\.ts|docs/|src/|scripts/|native/android/(app/src/|app/(build\\.gradle|capacitor\\.build\\.gradle|proguard-rules\\.pro)|build\\.gradle|capacitor\\.settings\\.gradle|gradle\\.properties|settings\\.gradle|variables\\.gradle|capacitor-cordova-android-plugins/(build\\.gradle|cordova\\.variables\\.gradle)))|packages/shared/(package\\.json|src/|test/)|mac/(README\\.md|MEMORY\\.md|CACHE\\.md|note\\.md|task\\.md|package\\.json|tsconfig\\.json|tsconfig\\.node\\.json|vite\\.config\\.ts|vitest\\.config\\.ts|docs/|src/|electron/|scripts/))"
 outside_hits="$(find "$CORPUS" -type f -print | LC_ALL=C grep -Ev "$allowed_source_regex" || true)"
 if [[ -n "$outside_hits" ]]; then
   printf '%s\n' "$outside_hits" >&2

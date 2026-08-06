@@ -20,7 +20,7 @@ White-box plan:
 - `terminal-layout-profile.test.ts` keeps current single-pane and split profile tokens stable.
 - Phone stage profiles keep `outerMargin`, `containerRadius`, and active pane `paneRadius` at `0`, so the terminal container reaches the physical left and right edges without a decorative gutter or rounded-corner reveal; safe-area ownership remains limited to top/bottom chrome.
 - `TerminalPageStageShell.pane-stage.test.tsx` proves visible pane entries are the only mounted live terminal panes.
-- `TerminalSessionDrawer.test.tsx` proves explicit top / center / bottom slot labels, long-press slot assignment, and click suppression after menu open.
+- `TerminalSessionDrawer.test.tsx` proves explicit top / center / bottom slot labels, long-press slot assignment, click suppression after menu open, and cancellation without mutating workspace assignment.
 - `useTerminalWorkspace.test.tsx` proves workspace pane ownership remains explicit and does not resurrect runtime-only sessions.
 
 Module black-box plan:

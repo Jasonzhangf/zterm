@@ -806,6 +806,31 @@ describe('TerminalSessionDrawer', () => {
     expect(onAssignSessionGroupSlot).toHaveBeenCalledWith('s2', 'top');
   });
 
+  it('cancels the slot menu without changing workspace assignment', () => {
+    const onAssignSessionGroupSlot = vi.fn();
+
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onAssignSessionGroupSlot={onAssignSessionGroupSlot}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    fireEvent.contextMenu(screen.getByTestId('terminal-session-drawer-row-s2'), {
+      clientX: 180,
+      clientY: 280,
+    });
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-slot-menu-cancel'));
+
+    expect(screen.queryByTestId('terminal-session-drawer-slot-menu')).toBeNull();
+    expect(onAssignSessionGroupSlot).not.toHaveBeenCalled();
+  });
+
   it('uses left and right slot labels in horizontal session-group mode', () => {
     const onAssignSessionGroupSlot = vi.fn();
 

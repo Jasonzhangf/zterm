@@ -855,6 +855,49 @@ describe('active truth ownership gates', () => {
 });
 
 describe('session transport reuse runtime gates', () => {
+  it('schedules the initial non-empty buffer for the shared render projection', () => {
+    const commitBuffer = vi.fn();
+    const scheduleSessionRenderCommit = vi.fn();
+    const sessionId = createSessionRuntime({
+      host,
+      createOptions: {
+        connect: false,
+        sessionId: 'session-cached-preview',
+        buffer: {
+          lines: [['cached-row'] as any],
+          startIndex: 0,
+          endIndex: 1,
+          bufferHeadStartIndex: 0,
+          bufferTailEndIndex: 1,
+          cols: 80,
+          rows: 24,
+          revision: 3,
+          cacheLines: 1000,
+          gapRanges: [],
+          cursor: null,
+        } as any,
+      },
+      refs: {
+        stateRef: { current: { sessions: [], activeSessionId: null } },
+        pendingSessionTransportOpenIntentsRef: { current: new Map() },
+        sessionBufferStoreRef: { current: { commitBuffer, setBuffer: vi.fn() } },
+        sessionHeadStoreRef: { current: { setHead: vi.fn() } },
+      },
+      runtimeDebug: vi.fn(),
+      resolveSessionCacheLines: vi.fn(() => 1000),
+      scheduleSessionRenderCommit,
+      createSessionSync: vi.fn(),
+      updateSessionSync: vi.fn(),
+      daemonConnection: makeDaemonConnection({ socket: null }),
+      connectSession: vi.fn(),
+      defaultViewport: { cols: 80, rows: 24 },
+    });
+
+    expect(sessionId).toBe('session-cached-preview');
+    expect(commitBuffer).toHaveBeenCalledWith(sessionId, expect.objectContaining({ revision: 3 }));
+    expect(scheduleSessionRenderCommit).toHaveBeenCalledWith(sessionId);
+  });
+
   it('connectSessionRuntime reuses an open same-target session transport without cleanup or new open intent', () => {
     const cleanupSocket = vi.fn();
     const queueConnectTransportOpenIntent = vi.fn();

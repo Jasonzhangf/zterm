@@ -48,9 +48,18 @@ describe('terminal shell skin resolution', () => {
       expect(block).toContain('--zterm-panel-text:');
       expect(block).toContain('--zterm-panel-muted:');
       expect(block).toContain('--zterm-panel-border:');
+      expect(block).toContain('--zterm-neo-raised-bg:');
+      expect(block).toContain('--zterm-neo-text-shadow:');
     }
+    const blackStart = css.indexOf('.zterm-terminal-shell[data-terminal-shell-skin="black"] {');
+    const blackEnd = css.indexOf('}', blackStart);
+    const blackBlock = css.slice(blackStart, blackEnd);
+    expect(blackBlock).toContain('--zterm-neo-raised-bg: linear-gradient(');
+    expect(blackBlock).toContain('--zterm-neo-highlight: rgba(255, 255, 255, 0.28);');
     expect(css).toContain('.zterm-neo-drawer');
     expect(css).toContain('.zterm-connection-route-menu');
     expect(css).toContain('.zterm-neo-quickbar[data-quickbar-surface="expanded"]');
+    expect(css).toContain('text-shadow: var(--zterm-neo-text-shadow);');
+    expect(css).not.toContain('0 -1px 0 rgba(31, 35, 40, 0.24),');
   });
 });

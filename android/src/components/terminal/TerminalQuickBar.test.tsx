@@ -38,6 +38,13 @@ vi.mock("../../plugins/DeviceClipboardPlugin", () => ({
   isNativeClipboardSupported: () => false,
 }));
 
+vi.mock("../../plugins/ScreenOrientationPlugin", () => ({
+  ScreenOrientationPlugin: {
+    setOrientation: vi.fn().mockResolvedValue({ orientation: "landscape" }),
+  },
+  isScreenOrientationSupported: () => false,
+}));
+
 class ResizeObserverMock {
   observe() {}
   disconnect() {}
@@ -987,9 +994,80 @@ describe("TerminalQuickBar", () => {
     expect(onOpenFileTransfer).toHaveBeenCalledTimes(2);
     expect(onOpenFileTransfer).toHaveBeenNthCalledWith(2, "browser");
     expect(screen.queryByText("快捷输入")).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Toggle floating quick menu" }),
+    ).toBeNull();
+  });
 
-    fireEvent.click(screen.getByRole("button", { name: "Toggle floating quick menu" }));
-    expect(screen.getByText("快捷输入")).not.toBeNull();
+  it("shows only the file browser floating entry when file browser is available", () => {
+    const onCollapsedChange = vi.fn();
+    const onOpenFileTransfer = vi.fn();
+
+    renderQuickBar({
+      collapseAvailable: true,
+      collapsed: true,
+      onCollapsedChange,
+      onOpenFileTransfer,
+    });
+
+    fireEvent.click(screen.getByRole("button", { name: "文件浏览" }));
+
+    expect(onOpenFileTransfer).toHaveBeenCalledWith("browser");
+    expect(onCollapsedChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "文件浏览" })).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "展开快捷栏" })).toBeNull();
+    expect(
+      screen.queryByRole("button", { name: "Toggle floating quick menu" }),
+    ).toBeNull();
+  });
+
+  it("keeps the file browser entry draggable without opening it", async () => {
+    const onOpenFileTransfer = vi.fn();
+
+    renderQuickBar({ onOpenFileTransfer });
+
+    const fileBrowserButton = screen.getByRole("button", { name: "文件浏览" });
+    Object.defineProperty(fileBrowserButton, "getBoundingClientRect", {
+      configurable: true,
+      value: () => ({
+        top: 100,
+        left: 40,
+        right: 88,
+        bottom: 148,
+        width: 48,
+        height: 48,
+        x: 40,
+        y: 100,
+        toJSON: () => ({}),
+      }),
+    });
+
+    fireEvent.pointerDown(fileBrowserButton, {
+      pointerId: 7,
+      pointerType: "mouse",
+      clientX: 48,
+      clientY: 108,
+    });
+    fireEvent.pointerMove(fileBrowserButton, {
+      pointerId: 7,
+      pointerType: "mouse",
+      clientX: 108,
+      clientY: 168,
+    });
+    fireEvent.pointerUp(fileBrowserButton, {
+      pointerId: 7,
+      pointerType: "mouse",
+      clientX: 108,
+      clientY: 168,
+    });
+    fireEvent.click(fileBrowserButton);
+
+    expect(onOpenFileTransfer).not.toHaveBeenCalled();
+    await waitFor(() => {
+      const position = JSON.parse(localStorage.getItem(FLOATING_BUBBLE_POSITION_STORAGE_KEY) || "{}");
+      expect(position.x).toBe(100);
+      expect(position.y).toBe(160);
+    });
   });
 
   it("activates copy mode immediately from pointer press and suppresses the follow-up click", () => {

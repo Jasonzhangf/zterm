@@ -89,6 +89,8 @@ describe('terminal http runtime performance trace summary', () => {
       broadcastRuntimeDebugControl: () => undefined,
       setDaemonRuntimeDebugEnabled: () => undefined,
       logTimePrefix: () => '2026-07-13 08:00:00.000 +00:00',
+      connections: new Map(),
+      sendTransportMessage: vi.fn(),
     });
     const recorder = createResponseRecorder();
 
@@ -179,6 +181,8 @@ describe('terminal http runtime performance trace summary', () => {
       broadcastRuntimeDebugControl: () => undefined,
       setDaemonRuntimeDebugEnabled: () => undefined,
       logTimePrefix: () => '2026-07-27 08:00:00.000 +00:00',
+      connections: new Map(),
+      sendTransportMessage: vi.fn(),
     });
     const recorder = createResponseRecorder();
 

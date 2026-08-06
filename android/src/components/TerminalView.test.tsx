@@ -219,4 +219,105 @@ describe('TerminalView RAF throttle', () => {
     expect(host.style.scrollbarWidth).toBe('none');
     expect(container.textContent).toContain('.wterm::-webkit-scrollbar');
   });
+
+  it('keeps preview projection read-only and removes the hidden input surface', () => {
+    const { container } = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId="s1"
+          renderBufferSnapshot={buildRenderBufferSnapshot()}
+          live={false}
+          projectionMode="preview-secondary"
+          fontSize={3}
+          rowHeight="4px"
+        />
+      </div>,
+    );
+
+    const host = container.querySelector('.wterm') as HTMLDivElement;
+    expect(host.dataset.projectionMode).toBe('preview-secondary');
+    expect(host.style.webkitTextSizeAdjust).toBe('none');
+    expect(container.querySelector('[data-wterm-input="true"]')).toBeNull();
+    expect(container.querySelectorAll('[data-terminal-preview-row="true"]')).toHaveLength(1);
+    expect(container.querySelector('[data-terminal-cursor="true"]')).toBeNull();
+  });
+
+  it('does not schedule interactive geometry frames for a passive preview buffer update', () => {
+    const requestAnimationFrameSpy = vi
+      .spyOn(window, 'requestAnimationFrame')
+      .mockImplementation(() => 1 as any);
+    const initialSnapshot = buildRenderBufferSnapshot();
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId="s1"
+          renderBufferSnapshot={initialSnapshot}
+          live={false}
+          projectionMode="preview-secondary"
+          fontSize={3}
+          rowHeight="4px"
+        />
+      </div>,
+    );
+
+    requestAnimationFrameSpy.mockClear();
+    view.rerender(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId="s1"
+          renderBufferSnapshot={{ ...initialSnapshot, revision: 2 }}
+          live={false}
+          projectionMode="preview-secondary"
+          fontSize={3}
+          rowHeight="4px"
+        />
+      </div>,
+    );
+
+    expect(requestAnimationFrameSpy).not.toHaveBeenCalled();
+    requestAnimationFrameSpy.mockRestore();
+  });
+
+  it('keeps a passive preview tail visible when its buffer grows', () => {
+    const initialSnapshot = buildRenderBufferSnapshot();
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId="s1"
+          renderBufferSnapshot={initialSnapshot}
+          live={false}
+          projectionMode="preview-secondary"
+          fontSize={3}
+          rowHeight="4px"
+        />
+      </div>,
+    );
+
+    expect(view.container.querySelectorAll('[data-terminal-preview-row="true"]')).toHaveLength(1);
+
+    view.rerender(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId="s1"
+          renderBufferSnapshot={{
+            ...initialSnapshot,
+            lines: [
+              ...initialSnapshot.lines,
+              [{ char: 66, fg: 256, bg: 256, flags: 0, width: 1 }],
+            ],
+            endIndex: 2,
+            bufferTailEndIndex: 2,
+            revision: 2,
+          }}
+          live={false}
+          projectionMode="preview-secondary"
+          fontSize={3}
+          rowHeight="4px"
+        />
+      </div>,
+    );
+
+    expect(view.container.querySelectorAll('[data-terminal-preview-row="true"]')).toHaveLength(2);
+    expect(view.container.textContent).toContain('B');
+  });
 });

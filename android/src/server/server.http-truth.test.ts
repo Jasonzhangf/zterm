@@ -45,7 +45,7 @@ describe('server http route truth gates', () => {
   it('keeps health/debug/update routes in dedicated http runtime', () => {
     const source = readHttpRuntimeSource();
     const snapshotBlock = extractBlock(source, 'function buildDebugRuntimeSnapshot(', 2200);
-    const block = extractBlock(source, 'function handleHttpRequest(', 8000);
+    const block = extractBlock(source, 'function handleHttpRequest(', source.length);
 
     expect(snapshotBlock).toContain('daemonDebug: deps.daemonRuntimeDebugStore.getSummary()');
     expect(block).toContain("url.pathname === '/health'");

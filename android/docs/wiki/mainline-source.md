@@ -115,6 +115,9 @@ flowchart TD
   RemoteWindowInputRuntime --> RemoteWindowMessageRuntime
   RemoteWindowStreamQualityRuntime --> RemoteWindowMessageRuntime
   RemoteWindowMessageRuntime --> RemoteWindowReceiver["src/contexts/session-context-remote-window-runtime.ts#requestRemoteWindowStreamStartRuntime"]
+  Http --> AttachmentHttpIn01AuthenticatedRequest
+  AttachmentHttpIn01AuthenticatedRequest --> AttachmentIn02DeliveryOwner
+  AttachmentIn02DeliveryOwner --> AttachmentOut03DurableManifestAndAssets
   TerminalPage --> StageShell["src/pages/TerminalPageStageShell.tsx"]
   TerminalPage --> TerminalHeader["src/components/terminal/TerminalHeader.tsx#TerminalHeader"]
   TerminalPage --> QuickBar["src/components/terminal/TerminalQuickBar.tsx"]
@@ -126,6 +129,8 @@ flowchart TD
   TerminalView --> Renderer["src/lib/session-render-buffer-store.ts"]
   Renderer --> RenderGate["src/lib/session-render-gate.ts"]
 ```
+
+`AttachmentHttpIn01AuthenticatedRequest` validates the daemon token and canonical attachment id before delegating to `AttachmentIn02DeliveryOwner`. The owner serializes mutations and verifies each asset before exposing `AttachmentOut03DurableManifestAndAssets`; client-specific pending state is retained in the manifest until that device acknowledges it.
 
 `App -> TerminalPage -> SessionDrawer` carries saved/Home server identity aliases alongside Relay endpoint and Session catalog facts. `TerminalPage` canonicalizes exact endpoint or saved/Home endpoint-to-online-daemon bindings into one host rail. Session catalogs supply rows only and never infer daemon identity, so rtc-only history without stable binding remains separate.
 `SessionOpenOwner` and the open-tab runtime audit path also reuse an existing open mux target transport for drawer refresh / session-picker refresh when a matching non-closed session exists; legacy tmux fetch is only the no-matching-open-target path.
@@ -309,6 +314,7 @@ flowchart TD
 | Session quick preview | `src/lib/session-preview-selection.ts`, `src/lib/session-preview-gesture.ts`, `src/components/terminal/TerminalPreviewGrid.tsx`, `src/pages/TerminalPageStageShell.tsx`; secondary title/body tap promotes primary through `WindowGroupLayout`, secondary previews use compact local typography, and body drag remains local preview scroll/pan |
 | Daemon runtime | `src/server/server.ts`, `src/server/terminal-daemon-runtime.ts`, `src/server/terminal-runtime.ts`, `src/server/terminal-message-runtime.ts`, `src/server/terminal-mirror-runtime.ts`, `src/server/terminal-message-control-runtime.ts`, `src/server/terminal-transport-runtime.ts`, `src/server/remote-window-stream-daemon.ts` |
 | Daemon control edges | `src/server/terminal-control-runtime.ts`, `src/server/terminal-file-transfer-runtime.ts`, `src/server/terminal-schedule-runtime.ts`, `src/server/remote-screenshot-daemon.ts`, `src/server/remote-window-stream-daemon.ts`, `src/server/terminal-http-runtime.ts` |
+| Daemon attachment delivery | `src/server/attachment-delivery-runtime.ts#createAttachmentDeliveryRuntime` -> `src/server/terminal-http-runtime.ts#createTerminalHttpRuntime` -> `scripts/zterm-send-image.mjs`; durable manifests provide per-device missed-push recovery, preview-first reads, receipts, and 48-hour cleanup. |
 | Daemon CLI | `scripts/zterm-daemon.sh`, `scripts/windows/zterm-daemon.ps1`, `scripts/install-global-daemon-cli.sh`, `scripts/prepare-global-daemon-release.sh`, `scripts/prepare-daemon-npm-package.mjs` |
 | Release/update | `contracts/app-version.json`, `scripts/app-version.mjs`, `native/android/app/build.gradle`, `scripts/build-android-debug.sh`, `scripts/prepare-update-bundle.mjs`, `scripts/verify-update-bundle.mjs`, `scripts/verify-release-assets.mjs`; normal `N`, rollback `N.1`, and next normal `N+1` occupy strictly increasing Android version-code slots; Relay public update route and future `RelayPeerLease` idle-resume resource are authored in `src/traversal-relay/server.ts` and packaged by `scripts/prepare-relay-server-npm-package.mjs` with `ZTERM_TRAVERSAL_UPDATES_DIR` |
 | Worker wiki generator | `scripts/build-function-wiki.mjs`, `docs/wiki/daemon.md`, `docs/wiki/cli.md`, `docs/wiki/mainline-source.md` |

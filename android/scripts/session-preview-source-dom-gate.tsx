@@ -22,6 +22,7 @@ const ROOT = resolve(import.meta.dirname, '..');
 const SESSION_COUNT = 6;
 const CACHE_LINES = 500;
 const SESSION_PREFIX = 'zterm-preview-gate';
+const MAX_PREVIEW_DOM_NODE_COUNT = 8_000;
 
 function sleep(ms: number) {
   return new Promise<void>((resolvePromise) => setTimeout(resolvePromise, ms));
@@ -397,6 +398,11 @@ async function main() {
       rows: previewGrid.getAttribute('data-rows'),
       domNodeCount: view.container.querySelectorAll('*').length,
     };
+    if (previewLayout.domNodeCount > MAX_PREVIEW_DOM_NODE_COUNT) {
+      throw new Error(
+        `preview DOM budget exceeded: nodes=${previewLayout.domNodeCount} max=${MAX_PREVIEW_DOM_NODE_COUNT}`,
+      );
+    }
 
     const shellTargetIndex = 1;
     const shellTargetClient = clients[shellTargetIndex];
@@ -489,6 +495,7 @@ async function main() {
       preview: {
         selectedCount: sessions.length,
         ...previewLayout,
+        maxDomNodeCount: MAX_PREVIEW_DOM_NODE_COUNT,
         transportBytes: comparisons.reduce((total, item) => total + item.metrics.receivedBytes, 0),
         localRenderPerformance: {
           initialRenderMs: Math.round(initialRenderMs),

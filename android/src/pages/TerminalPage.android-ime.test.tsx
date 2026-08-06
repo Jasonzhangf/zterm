@@ -1230,6 +1230,91 @@ describe("TerminalPage Android IME bridge", () => {
     expect(onResize).not.toHaveBeenCalled();
   });
 
+  it("keeps the terminal surface covering its parent when the first viewport measurement is short", () => {
+    const originalInnerWidth = window.innerWidth;
+    const originalInnerHeight = window.innerHeight;
+    const originalClientWidth = document.documentElement.clientWidth;
+    const originalClientHeight = document.documentElement.clientHeight;
+    const originalVisualViewport = window.visualViewport;
+    const session = makeSession("s1");
+
+    try {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: 393 });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: 540 });
+      Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, value: 393 });
+      Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: 540 });
+      Object.defineProperty(window, "visualViewport", {
+        configurable: true,
+        value: {
+          width: 393,
+          height: 540,
+          offsetTop: 0,
+          offsetLeft: 0,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        },
+      });
+
+      const { container, rerender } = render(
+        <TerminalPage
+          appForegroundActive={false}
+          sessions={[session]}
+          activeSession={session}
+          onSwitchSession={vi.fn()}
+          onMoveSession={vi.fn()}
+          onRenameSession={vi.fn()}
+          onCloseSession={vi.fn()}
+          onOpenConnections={vi.fn()}
+          onOpenQuickTabPicker={vi.fn()}
+          onResize={vi.fn()}
+          onTerminalInput={vi.fn()}
+          onTerminalViewportChange={vi.fn()}
+          quickActions={[]}
+          shortcutActions={[]}
+          sessionDraft=""
+        />,
+      );
+
+      const shell = container.querySelector(".zterm-terminal-shell") as HTMLElement;
+      expect(shell.style.height).toBe("540px");
+      expect(shell.style.minHeight).toBe("100%");
+      expect(shell.style.maxHeight).toBe("");
+
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: 852 });
+      Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: 852 });
+      Object.defineProperty(window, "visualViewport", {
+        configurable: true,
+        value: { width: 393, height: 852, offsetTop: 0, offsetLeft: 0, addEventListener: vi.fn(), removeEventListener: vi.fn() },
+      });
+      rerender(
+        <TerminalPage
+          appForegroundActive
+          sessions={[session]}
+          activeSession={session}
+          onSwitchSession={vi.fn()}
+          onMoveSession={vi.fn()}
+          onRenameSession={vi.fn()}
+          onCloseSession={vi.fn()}
+          onOpenConnections={vi.fn()}
+          onOpenQuickTabPicker={vi.fn()}
+          onResize={vi.fn()}
+          onTerminalInput={vi.fn()}
+          onTerminalViewportChange={vi.fn()}
+          quickActions={[]}
+          shortcutActions={[]}
+          sessionDraft=""
+        />,
+      );
+      expect(shell.style.height).toBe("852px");
+    } finally {
+      Object.defineProperty(window, "innerWidth", { configurable: true, value: originalInnerWidth });
+      Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });
+      Object.defineProperty(document.documentElement, "clientWidth", { configurable: true, value: originalClientWidth });
+      Object.defineProperty(document.documentElement, "clientHeight", { configurable: true, value: originalClientHeight });
+      Object.defineProperty(window, "visualViewport", { configurable: true, value: originalVisualViewport });
+    }
+  });
+
   it("reserves Android status-bar safe area for the portrait terminal stage", () => {
     const originalInnerWidth = window.innerWidth;
     const originalInnerHeight = window.innerHeight;

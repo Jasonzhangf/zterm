@@ -824,6 +824,17 @@ describe('App dynamic refresh matrix', () => {
     }
   });
 
+  it('pins the app surface to the native content bounds during first paint', () => {
+    const { container } = render(
+      <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
+    );
+
+    const appSurface = container.firstElementChild as HTMLElement;
+    expect(appSurface.style.position).toBe('fixed');
+    expect(appSurface.style.inset).toBe('0px');
+    expect(appSurface.style.height).toBe('');
+  });
+
   it('keeps terminal rendering in sync across sequential active-session buffer updates', async () => {
     const view = render(
       <AppContent bridgeSettings={{ servers: [] } as any} setBridgeSettings={vi.fn()} />,
