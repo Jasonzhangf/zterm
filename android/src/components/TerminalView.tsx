@@ -70,6 +70,10 @@ import {
 import { normalizeTerminalCommittedText } from "../lib/terminal-input-normalization";
 import { encodeTerminalSgrMouseWheel } from "../lib/terminal-mouse-wheel-sgr";
 import {
+  setTwoFingerWheelDebugSnapshot,
+  type TwoFingerWheelDebugSnapshot,
+} from "../lib/two-finger-wheel-debug-store";
+import {
   decideTwoFingerWheel,
   DEFAULT_TWO_FINGER_WHEEL_CONFIG,
 } from "../lib/two-finger-wheel-decision";
@@ -626,6 +630,15 @@ function TerminalViewComponent({
     lastSentDirection: "up" | "down" | null;
     lastSentTickAt: number;
     lockedDirection: "up" | "down" | null;
+    debug: {
+      startCalls: number;
+      moveCalls: number;
+      endCalls: number;
+      abortedCount: number;
+      sentCount: number;
+      lastReason: string;
+      lastEventAt: number;
+    };
   }>({
     active: false,
     pointerIds: null,
@@ -637,6 +650,15 @@ function TerminalViewComponent({
     lastSentDirection: null,
     lastSentTickAt: 0,
     lockedDirection: null,
+    debug: {
+      startCalls: 0,
+      moveCalls: 0,
+      endCalls: 0,
+      abortedCount: 0,
+      sentCount: 0,
+      lastReason: "init",
+      lastEventAt: 0,
+    },
   });
 
   const resolveScrollTopForRenderBottomIndex = useCallback(
@@ -1075,9 +1097,41 @@ function TerminalViewComponent({
   // unit-tested without DOM. See two-finger-wheel-decision.ts.
   const TWO_FINGER_WHEEL_CONFIG = DEFAULT_TWO_FINGER_WHEEL_CONFIG;
 
+  const publishTwoFingerWheelDebug = useCallback(
+    (state: typeof twoFingerWheelRef.current) => {
+      const snap: TwoFingerWheelDebugSnapshot = {
+        active: state.active,
+        lockedDirection: state.lockedDirection,
+        initialSpanPx: Math.round(state.initialSpanPx),
+        accumulatedDeltaPx: Math.round(state.accumulatedDeltaPx),
+        lastSentDirection: state.lastSentDirection,
+        lastSentAt: state.lastSentTickAt || null,
+        startCalls: state.debug.startCalls,
+        moveCalls: state.debug.moveCalls,
+        endCalls: state.debug.endCalls,
+        abortedCount: state.debug.abortedCount,
+        sentCount: state.debug.sentCount,
+        lastReason: state.debug.lastReason,
+        lastEventAt: state.debug.lastEventAt,
+      };
+      setTwoFingerWheelDebugSnapshot(snap);
+    },
+    [],
+  );
+
   const handleTwoFingerWheelTouchStart = useCallback(
     (event: TouchEvent<HTMLDivElement>) => {
-      if (event.touches.length !== 2 || previewProjection || copyModeActive) {
+      if (event.touches.length !== 2) {
+        return;
+      }
+      twoFingerWheelRef.current.debug.startCalls += 1;
+      twoFingerWheelRef.current.debug.lastEventAt = Date.now();
+      if (previewProjection) {
+        twoFingerWheelRef.current.debug.lastReason = "skip-preview-projection";
+        return;
+      }
+      if (copyModeActive) {
+        twoFingerWheelRef.current.debug.lastReason = "skip-copy-mode";
         return;
       }
       const [t0, t1] = [event.touches[0], event.touches[1]];
@@ -1086,8 +1140,10 @@ function TerminalViewComponent({
         t1.clientY - t0.clientY,
       );
       if (spanPx < TWO_FINGER_WHEEL_CONFIG.minInitialSpanPx) {
+        twoFingerWheelRef.current.debug.lastReason = "skip-min-span";
         return;
       }
+      twoFingerWheelRef.current.debug.lastReason = "started";
       const midY = (t0.clientY + t1.clientY) / 2;
       twoFingerWheelRef.current = {
         active: true,
@@ -1100,17 +1156,28 @@ function TerminalViewComponent({
         lastSentDirection: null,
         lastSentTickAt: 0,
         lockedDirection: null,
+        debug: { ...twoFingerWheelRef.current.debug, startCalls: twoFingerWheelRef.current.debug.startCalls },
       };
+      publishTwoFingerWheelDebug(twoFingerWheelRef.current);
       // Reserve the gesture so mirror-fixed panning does not also act on it.
       event.preventDefault();
     },
-    [previewProjection, copyModeActive],
+    [previewProjection, copyModeActive, publishTwoFingerWheelDebug],
   );
 
   const handleTwoFingerWheelTouchMove = useCallback(
     (event: TouchEvent<HTMLDivElement>) => {
       const wheel = twoFingerWheelRef.current;
-      if (!wheel.active || event.touches.length !== 2) {
+      wheel.debug.moveCalls += 1;
+      wheel.debug.lastEventAt = Date.now();
+      if (!wheel.active) {
+        wheel.debug.lastReason = "skip-inactive";
+        publishTwoFingerWheelDebug(wheel);
+        return;
+      }
+      if (event.touches.length !== 2) {
+        wheel.debug.lastReason = "skip-not-two-fingers";
+        publishTwoFingerWheelDebug(wheel);
         return;
       }
       const [t0, t1] = [event.touches[0], event.touches[1]];
@@ -1142,11 +1209,17 @@ function TerminalViewComponent({
         spanPx - wheel.lastSpanPx,
       );
 
-      if (decision.aborted || decision.direction === null || decision.steps < 1) {
-        if (decision.aborted) {
-          event.preventDefault();
-          event.stopPropagation();
-        }
+      if (decision.aborted) {
+        wheel.debug.abortedCount += 1;
+        wheel.debug.lastReason = "aborted-pinch";
+        event.preventDefault();
+        event.stopPropagation();
+        publishTwoFingerWheelDebug(wheel);
+        return;
+      }
+      if (decision.direction === null || decision.steps < 1) {
+        wheel.debug.lastReason = "no-step";
+        publishTwoFingerWheelDebug(wheel);
         return;
       }
       const host = containerRef.current;
@@ -1164,10 +1237,13 @@ function TerminalViewComponent({
       );
       wheel.lastSentDirection = decision.direction;
       wheel.lastSentTickAt = Date.now();
+      wheel.debug.sentCount += decision.steps;
+      wheel.debug.lastReason = `sent-${decision.direction}-x${decision.steps}`;
       const sequence = encodeTerminalSgrMouseWheel(decision.direction, col, row);
       onInputRef.current?.(sessionIdRef.current, sequence);
       event.preventDefault();
       event.stopPropagation();
+      publishTwoFingerWheelDebug(wheel);
     },
     [resolvedCellWidthPx, rowHeightPx],
   );
@@ -1175,13 +1251,20 @@ function TerminalViewComponent({
   const commitTwoFingerWheelTouchEnd = useCallback(
     (event: TouchEvent<HTMLDivElement>) => {
       const wheel = twoFingerWheelRef.current;
+      wheel.debug.endCalls += 1;
+      wheel.debug.lastEventAt = Date.now();
       if (!wheel.active) {
+        wheel.debug.lastReason = "end-inactive";
+        publishTwoFingerWheelDebug(wheel);
         return;
       }
       // Any touch change other than 2 active fingers ends the gesture.
       if (event.touches.length === 2) {
+        publishTwoFingerWheelDebug(wheel);
         return;
       }
+      wheel.debug.lastReason = "ended";
+      publishTwoFingerWheelDebug(wheel);
       twoFingerWheelRef.current = {
         active: false,
         pointerIds: null,
@@ -1193,9 +1276,11 @@ function TerminalViewComponent({
         lastSentDirection: null,
         lastSentTickAt: 0,
         lockedDirection: null,
+        debug: { ...twoFingerWheelRef.current.debug, endCalls: twoFingerWheelRef.current.debug.endCalls },
       };
+      publishTwoFingerWheelDebug(twoFingerWheelRef.current);
     },
-    [],
+    [publishTwoFingerWheelDebug],
   );
 
   const emitRenderDemand = useCallback(

@@ -2,6 +2,10 @@ import { memo as ReactMemo, useEffect, useState } from "react";
 import { useSessionViewportModeSnapshot, type SessionViewportModeStore } from "../lib/session-viewport-mode-store";
 import type { Session, SessionDebugOverlayMetrics } from "../lib/types";
 import { formatDebugHz, formatDebugRate, resolveDebugStatus } from "./terminal-page-debug-helpers";
+import {
+  getTwoFingerWheelDebugSnapshot,
+  type TwoFingerWheelDebugSnapshot,
+} from "../lib/two-finger-wheel-debug-store";
 
 export type RemoteWindowInputDebugSnapshot = {
   contextActive: boolean;
@@ -154,6 +158,7 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   ].filter(Boolean).join(' / ');
   const icePairLabel = formatIcePairLabel(session.selectedIcePair);
   const remoteWindowInputDebug = getRemoteWindowInputDebug?.();
+  const wheelDebug: TwoFingerWheelDebugSnapshot = getTwoFingerWheelDebugSnapshot();
   const overlayStyle: React.CSSProperties = {
     position: "absolute",
     top: debugOverlayPos.y >= 0 ? `${debugOverlayPos.y}px` : "10px",
@@ -369,6 +374,22 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
             </span>
           </>
         ) : null}
+        <span>双指滚轮</span>
+        <span>
+          ACT {wheelDebug.active ? "Y" : "N"} · LK {wheelDebug.lockedDirection || "-"}
+          {" · "}SP {wheelDebug.initialSpanPx} · AC {wheelDebug.accumulatedDeltaPx}
+          {" · "}LD {wheelDebug.lastSentDirection || "-"}
+          {wheelDebug.lastSentAt
+            ? ` (${formatRemoteWindowInputDebugAge(wheelDebug.lastSentAt)})`
+            : ""}
+        </span>
+        <span>
+          S {wheelDebug.startCalls} · M {wheelDebug.moveCalls} · E {wheelDebug.endCalls}
+          {" · "}AB {wheelDebug.abortedCount} · TX {wheelDebug.sentCount}
+        </span>
+        <span>
+          {wheelDebug.lastReason}
+        </span>
       </div>
     </div>
   );
