@@ -1075,6 +1075,16 @@ function registerHost(ws: WebSocket, request: IncomingMessage, url: URL) {
     return;
   }
 
+  // A daemon restart can generate a new device id while the old persisted
+  // device row still says the same host is online. Host identity is the
+  // routing key, so the new authenticated registration must retire the old
+  // device binding before publishing the directory snapshot.
+  store.clearOtherDaemonHostBindings({
+    userId: user.id,
+    deviceId,
+    hostId,
+  });
+
   const host: RelayHostConnection = {
     socket: ws,
     userId: user.id,

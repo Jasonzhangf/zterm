@@ -9,6 +9,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.util.Log;
 import android.view.View;
+import android.webkit.WebSettings;
 import android.webkit.WebView;
 import com.getcapacitor.BridgeActivity;
 import com.getcapacitor.BridgeWebChromeClient;
@@ -30,6 +31,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(DebugInputPlugin.class);
         registerPlugin(StoragePermissionPlugin.class);
         registerPlugin(BackgroundServicePlugin.class);
+        registerPlugin(ScreenOrientationPlugin.class);
         super.onCreate(savedInstanceState);
         Log.i(TAG, "onCreate()");
         if (getBridge() != null && getBridge().getWebView() != null) {
@@ -37,6 +39,10 @@ public class MainActivity extends BridgeActivity {
             wv.setOverScrollMode(View.OVER_SCROLL_NEVER);
             wv.setVerticalScrollBarEnabled(false);
             wv.setHorizontalScrollBarEnabled(false);
+            WebSettings settings = wv.getSettings();
+            settings.setSupportZoom(false);
+            settings.setBuiltInZoomControls(false);
+            settings.setDisplayZoomControls(false);
             // Use BridgeWebChromeClient (which implements onShowFileChooser)
             // so that <input type="file"> triggers the system file picker.
             // BridgeWebChromeClient already pipes JS console to Capacitor Logger,
@@ -110,7 +116,6 @@ public class MainActivity extends BridgeActivity {
     public void onStart() {
         super.onStart();
         Log.i(TAG, "onStart()");
-        stopBackgroundService();
     }
 
     @Override

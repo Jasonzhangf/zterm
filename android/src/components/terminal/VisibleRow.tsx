@@ -11,6 +11,7 @@ export interface VisibleRowProps {
   row: TerminalCell[];
   rowIndex: number;
   absoluteIndex: number;
+  renderSignature?: string;
   rowHeight: string;
   cellWidthPx: number;
   isGap: boolean;
@@ -35,6 +36,7 @@ export const VisibleRow = memo(function VisibleRow({
   row,
   rowIndex: _rowIndex,
   absoluteIndex,
+  renderSignature: _renderSignature = '',
   rowHeight,
   cellWidthPx,
   isGap,
@@ -155,6 +157,7 @@ export const VisibleRow = memo(function VisibleRow({
   && prev.cellWidthPx === next.cellWidthPx
   && prev.isGap === next.isGap
   && prev.absoluteIndex === next.absoluteIndex
+  && prev.renderSignature === next.renderSignature
   && prev.theme === next.theme
   && prev.cursorColumn === next.cursorColumn
   && prev.showAbsoluteLineNumbers === next.showAbsoluteLineNumbers

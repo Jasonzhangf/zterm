@@ -901,6 +901,26 @@ function TerminalSessionDrawerComponent({
                 </button>
               );
             })}
+            <button
+              type="button"
+              data-testid="terminal-session-drawer-slot-menu-cancel"
+              onClick={(event) => {
+                event.stopPropagation();
+                suppressNextClickRef.current = true;
+                setSlotMenu(null);
+              }}
+              style={{
+                height: '32px',
+                borderRadius: '10px',
+                border: '1px solid var(--zterm-panel-border)',
+                background: 'var(--zterm-panel-surface)',
+                color: 'var(--zterm-panel-muted)',
+                fontSize: '12px',
+                fontWeight: 750,
+              }}
+            >
+              取消
+            </button>
           </div>
         ) : null}
 

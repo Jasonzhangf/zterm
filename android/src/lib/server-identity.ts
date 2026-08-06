@@ -7,7 +7,7 @@ export type ServerIdentityInput = {
   connectionName?: string | null;
 };
 
-export type ServerIdentityAliasMap = Map<string, { key: string; label: string }>;
+export type ServerIdentityAliasMap = Map<string, { key: string; label: string } | null>;
 
 function trimOrEmpty(value?: string | null) {
   return typeof value === 'string' ? value.trim() : '';
@@ -84,10 +84,19 @@ export function buildServerIdentityAliasMap(inputs: readonly ServerIdentityInput
     if (!daemonHostId || !endpointKey) {
       continue;
     }
-    aliases.set(endpointKey, {
+    const nextAlias = {
       key: daemonHostId,
       label: resolveServerDisplayName(input),
-    });
+    };
+    const existingAlias = aliases.get(endpointKey);
+    if (existingAlias && existingAlias.key !== nextAlias.key) {
+      aliases.set(endpointKey, null);
+      continue;
+    }
+    if (existingAlias === null) {
+      continue;
+    }
+    aliases.set(endpointKey, nextAlias);
   }
   return aliases;
 }
@@ -96,9 +105,8 @@ export function resolveServerIdentity(
   input: ServerIdentityInput,
   aliases?: ServerIdentityAliasMap | null,
 ) {
-  const directDaemonHostId = trimOrEmpty(input.daemonHostId);
   const endpointKey = resolveServerEndpointKey(input);
-  const aliased = !directDaemonHostId && endpointKey ? aliases?.get(endpointKey) : null;
+  const aliased = endpointKey ? aliases?.get(endpointKey) : null;
   if (aliased) {
     return aliased;
   }

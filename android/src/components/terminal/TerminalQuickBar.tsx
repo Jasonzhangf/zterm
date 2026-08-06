@@ -68,6 +68,10 @@ import {
 import { shouldAllowQuickBarShellPointerEvent } from "./terminal-quickbar-shell-guards";
 import { buildTerminalShortcutSequence } from "../../../../packages/shared/src/shortcuts/terminal-shortcut-composer";
 import { resolveTerminalOrientation } from "../../lib/terminal-viewport-metrics";
+import {
+  isScreenOrientationSupported,
+  ScreenOrientationPlugin,
+} from "../../plugins/ScreenOrientationPlugin";
 
 interface TerminalQuickBarProps {
   activeSessionId?: string | null;
@@ -545,6 +549,15 @@ function TerminalQuickBarComponent({
         onToggleAbsoluteLineNumbers?.();
         return;
       }
+      if (action.id === "screen-orientation") {
+        const orientation = resolveTerminalOrientation() === "landscape"
+          ? "portrait"
+          : "landscape";
+        void ScreenOrientationPlugin.setOrientation({ orientation }).catch((error) => {
+          alert(error instanceof Error ? error.message : "屏幕方向切换失败");
+        });
+        return;
+      }
       if (action.id.startsWith("split-count-")) {
         const count = Number.parseInt(
           action.id.slice("split-count-".length),
@@ -907,6 +920,11 @@ function TerminalQuickBarComponent({
     onOpenFileTransfer?.("sync");
   }, [onOpenFileTransfer]);
 
+  const handleFileBrowserButtonClick = useCallback(() => {
+    setFloatingMenuOpen(false);
+    onOpenFileTransfer?.("browser");
+  }, [onOpenFileTransfer]);
+
   const transferToolActions = useMemo(
     () => [
       {
@@ -937,6 +955,13 @@ function TerminalQuickBarComponent({
       { id: "remote-screenshot", label: screenshotToolLabel, sequence: "" },
       { id: "line-numbers", label: "行号", sequence: "" },
       { id: "debug-overlay", label: "状态", sequence: "" },
+      ...(isScreenOrientationSupported()
+        ? [{
+            id: "screen-orientation",
+            label: resolveTerminalOrientation() === "landscape" ? "竖屏" : "横屏",
+            sequence: "",
+          }]
+        : []),
     ],
     [screenshotToolLabel],
   );
@@ -3118,25 +3143,53 @@ function TerminalQuickBarComponent({
                     </div>
                   ) : null}
                 </div>
-                <button
-                  type="button"
-                  onClick={() => setFloatingMenuOpen(false)}
+                <div
                   style={{
-                    width: "34px",
-                    height: "34px",
-                    borderRadius: "999px",
-                    border: "1px solid rgba(255,255,255,0.08)",
-                    backgroundColor: "rgba(255,255,255,0.08)",
-                    color: "#fff",
-                    fontSize: "18px",
-                    fontWeight: 800,
-                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
                     flexShrink: 0,
                   }}
-                  aria-label="关闭快捷输入"
                 >
-                  ×
-                </button>
+                  {onOpenFileTransfer ? (
+                    <button
+                      type="button"
+                      onClick={handleFileBrowserButtonClick}
+                      style={{
+                        minHeight: "34px",
+                        borderRadius: "999px",
+                        border: "1px solid rgba(113, 164, 255, 0.24)",
+                        backgroundColor: "rgba(113, 164, 255, 0.12)",
+                        color: "#8db7ff",
+                        fontSize: "12px",
+                        fontWeight: 800,
+                        cursor: "pointer",
+                        padding: "0 12px",
+                      }}
+                    >
+                      文件浏览
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => setFloatingMenuOpen(false)}
+                    style={{
+                      width: "34px",
+                      height: "34px",
+                      borderRadius: "999px",
+                      border: "1px solid rgba(255,255,255,0.08)",
+                      backgroundColor: "rgba(255,255,255,0.08)",
+                      color: "#fff",
+                      fontSize: "18px",
+                      fontWeight: 800,
+                      cursor: "pointer",
+                      flexShrink: 0,
+                    }}
+                    aria-label="关闭快捷输入"
+                  >
+                    ×
+                  </button>
+                </div>
               </div>
 
               <div
@@ -3552,22 +3605,179 @@ function TerminalQuickBarComponent({
         <>
         {onOpenFileTransfer ? (
           <button
+            ref={floatingBubbleRef}
             data-quickbar-allow-pointer="true"
             type="button"
             tabIndex={-1}
             onFocus={(event) => event.currentTarget.blur()}
+            onPointerDown={(event) => {
+              if (event.pointerType === "touch") {
+                return;
+              }
+              event.preventDefault();
+              blurCurrentTarget(event.currentTarget);
+              event.currentTarget.setPointerCapture(event.pointerId);
+              const rect = event.currentTarget.getBoundingClientRect();
+              floatingBubbleDragRef.current = {
+                pointerId: event.pointerId,
+                active: false,
+                startX: event.clientX,
+                startY: event.clientY,
+                originX: rect.left,
+                originY: rect.top,
+                width: rect.width || FLOATING_BUBBLE_SIZE,
+                height: rect.height || FLOATING_BUBBLE_SIZE,
+              };
+            }}
+            onPointerMove={(event) => {
+              if (event.pointerType === "touch") {
+                return;
+              }
+              const drag = floatingBubbleDragRef.current;
+              if (drag.pointerId !== event.pointerId) {
+                return;
+              }
+              const deltaX = event.clientX - drag.startX;
+              const deltaY = event.clientY - drag.startY;
+              if (
+                !drag.active &&
+                Math.hypot(deltaX, deltaY) >= FLOATING_BUBBLE_DRAG_THRESHOLD_PX
+              ) {
+                drag.active = true;
+                suppressBubbleClickRef.current = true;
+              }
+              if (!drag.active) {
+                return;
+              }
+              event.preventDefault();
+              setFloatingBubblePosition(
+                clampFloatingBubblePosition(
+                  drag.originX + deltaX,
+                  drag.originY + deltaY,
+                  drag.width,
+                  drag.height,
+                ),
+              );
+            }}
+            onPointerUp={(event) => {
+              if (event.pointerType === "touch") {
+                return;
+              }
+              if (floatingBubbleDragRef.current.pointerId === event.pointerId) {
+                if (floatingBubbleDragRef.current.active) {
+                  suppressBubbleClickRef.current = true;
+                  window.setTimeout(() => {
+                    suppressBubbleClickRef.current = false;
+                  }, 180);
+                }
+                floatingBubbleDragRef.current.active = false;
+                floatingBubbleDragRef.current.pointerId = -1;
+              }
+              event.currentTarget.releasePointerCapture(event.pointerId);
+            }}
+            onPointerCancel={(event) => {
+              if (event.pointerType === "touch") {
+                return;
+              }
+              floatingBubbleDragRef.current.active = false;
+              floatingBubbleDragRef.current.pointerId = -1;
+              try {
+                event.currentTarget.releasePointerCapture(event.pointerId);
+              } catch (error) {
+                console.warn(
+                  "[TerminalQuickBar] Failed to release file browser bubble pointer capture:",
+                  error,
+                );
+              }
+            }}
             onClick={() => {
-              setFloatingMenuOpen(false);
-              onOpenFileTransfer("browser");
+              if (suppressBubbleClickRef.current) {
+                return;
+              }
+              handleFileBrowserButtonClick();
+            }}
+            onTouchStart={(event) => {
+              event.stopPropagation();
+              const touch = event.touches[0];
+              if (!touch) {
+                return;
+              }
+              const rect = event.currentTarget.getBoundingClientRect();
+              floatingBubbleTouchDragRef.current = {
+                active: false,
+                moved: false,
+                startX: touch.clientX,
+                startY: touch.clientY,
+                lastX: touch.clientX,
+                lastY: touch.clientY,
+                originX: rect.left,
+                originY: rect.top,
+                width: rect.width || FLOATING_BUBBLE_SIZE,
+                height: rect.height || FLOATING_BUBBLE_SIZE,
+              };
+            }}
+            onTouchMove={(event) => {
+              const touch = event.touches[0];
+              const drag = floatingBubbleTouchDragRef.current;
+              if (!touch) {
+                return;
+              }
+              drag.lastX = touch.clientX;
+              drag.lastY = touch.clientY;
+              const deltaX = touch.clientX - drag.startX;
+              const deltaY = touch.clientY - drag.startY;
+              if (
+                !drag.active &&
+                Math.hypot(deltaX, deltaY) >= FLOATING_BUBBLE_DRAG_THRESHOLD_PX
+              ) {
+                drag.active = true;
+                suppressBubbleClickRef.current = true;
+              }
+              if (!drag.active) {
+                return;
+              }
+              event.preventDefault();
+              event.stopPropagation();
+              drag.moved = true;
+              setFloatingBubblePosition(
+                clampFloatingBubblePosition(
+                  drag.originX + deltaX,
+                  drag.originY + deltaY,
+                  drag.width,
+                  drag.height,
+                ),
+              );
+            }}
+            onTouchEnd={() => {
+              if (floatingBubbleTouchDragRef.current.active) {
+                suppressBubbleClickRef.current = true;
+                window.setTimeout(() => {
+                  suppressBubbleClickRef.current = false;
+                }, 180);
+              }
+              floatingBubbleTouchDragRef.current.active = false;
+              floatingBubbleTouchDragRef.current.moved = false;
+            }}
+            onTouchCancel={() => {
+              floatingBubbleTouchDragRef.current.active = false;
+              floatingBubbleTouchDragRef.current.moved = false;
             }}
             style={{
               position: "fixed",
-              right: `${FLOATING_BUBBLE_MARGIN + FLOATING_BUBBLE_SIZE + 10}px`,
+              right: collapsed
+                ? `${FLOATING_BUBBLE_MARGIN}px`
+                : floatingBubblePosition.x === null
+                  ? `${FLOATING_BUBBLE_MARGIN}px`
+                  : "auto",
               bottom: collapsed
                 ? `calc(${FLOATING_BUBBLE_MARGIN}px + env(safe-area-inset-bottom, 0px))`
                 : floatingBubblePosition.y === null
                   ? `calc(${floatingBubbleBottomPx + Math.max(0, keyboardInsetPx)}px + env(safe-area-inset-bottom, 0px))`
                   : "auto",
+              left:
+                collapsed || floatingBubblePosition.x === null
+                  ? "auto"
+                  : `${floatingBubblePosition.x}px`,
               top:
                 collapsed || floatingBubblePosition.y === null
                   ? "auto"
@@ -3583,13 +3793,14 @@ function TerminalQuickBarComponent({
               fontWeight: 800,
               boxShadow: "0 8px 18px rgba(0,0,0,0.24)",
               transform: "none",
-              touchAction: "manipulation",
+              touchAction: "none",
             }}
             aria-label="文件浏览"
           >
             📁
           </button>
         ) : null}
+        {!onOpenFileTransfer ? (
         <button
           ref={floatingBubbleRef}
           data-quickbar-allow-pointer="true"
@@ -3813,6 +4024,7 @@ function TerminalQuickBarComponent({
         >
           {collapsed ? "⌃" : "⌘"}
         </button>
+        ) : null}
         </>
       )}
 

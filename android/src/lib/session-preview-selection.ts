@@ -219,9 +219,8 @@ export function projectSessionPreviewLiveIds(
   normalVisibleIds: readonly string[],
   selectedIds: readonly string[],
   previewOpen: boolean,
-  foreground: boolean,
 ) {
-  const projected = previewOpen && foreground
+  const projected = previewOpen
     ? [...normalVisibleIds, ...selectedIds]
     : [...normalVisibleIds];
   return [...new Set(projected.filter(Boolean))];

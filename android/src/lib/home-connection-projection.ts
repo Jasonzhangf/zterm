@@ -80,6 +80,11 @@ function mergeRelayEndpointCandidates(
 }
 
 function mergeHomeConnectionRouteCandidates(base: Host, supplement: Host): Host {
+  const routeTruth = (supplement.tags || []).includes('relay-directory')
+    ? supplement
+    : (base.tags || []).includes('relay-directory')
+      ? base
+      : null;
   const relayEndpointCandidates = mergeRelayEndpointCandidates(
     base.relayEndpointCandidates || [],
     supplement.relayEndpointCandidates || [],
@@ -87,14 +92,15 @@ function mergeHomeConnectionRouteCandidates(base: Host, supplement: Host): Host 
   const tags = [...new Set([...(base.tags || []), ...(supplement.tags || []).filter((tag) => tag === 'relay-directory')])];
   return {
     ...base,
-    daemonHostId: base.daemonHostId || supplement.daemonHostId,
-    relayHostId: base.relayHostId || supplement.relayHostId || supplement.daemonHostId,
-    relayDeviceId: base.relayDeviceId || supplement.relayDeviceId,
-    authToken: base.authToken || supplement.authToken,
-    tailscaleHost: base.tailscaleHost || supplement.tailscaleHost,
-    ipv6Host: base.ipv6Host || supplement.ipv6Host,
-    ipv4Host: base.ipv4Host || supplement.ipv4Host,
-    signalUrl: base.signalUrl || supplement.signalUrl,
+    daemonHostId: routeTruth?.daemonHostId || routeTruth?.relayHostId || base.daemonHostId || supplement.daemonHostId,
+    relayHostId: routeTruth?.relayHostId || routeTruth?.daemonHostId || base.relayHostId || supplement.relayHostId || supplement.daemonHostId,
+    relayDeviceId: routeTruth?.relayDeviceId || base.relayDeviceId || supplement.relayDeviceId,
+    authToken: routeTruth?.authToken || base.authToken || supplement.authToken,
+    tailscaleHost: routeTruth?.tailscaleHost || base.tailscaleHost || supplement.tailscaleHost,
+    ipv6Host: routeTruth?.ipv6Host || base.ipv6Host || supplement.ipv6Host,
+    ipv4Host: routeTruth?.ipv4Host || base.ipv4Host || supplement.ipv4Host,
+    signalUrl: routeTruth?.signalUrl || base.signalUrl || supplement.signalUrl,
+    transportMode: routeTruth?.transportMode || base.transportMode || supplement.transportMode,
     relayEndpointCandidates,
     tags,
   };

@@ -39,6 +39,7 @@ import {
 import { createTerminalFileTransferRuntime } from './terminal-file-transfer-runtime';
 import { createTerminalMessageRuntime } from './terminal-message-runtime';
 import { createTerminalHttpRuntime } from './terminal-http-runtime';
+import { createAttachmentDeliveryRuntime } from './attachment-delivery-runtime';
 import {
   createTerminalScheduleRuntime,
   type TerminalScheduleRuntime,
@@ -94,6 +95,7 @@ const UPDATES_DIR = getWtermUpdatesDir(homedir());
 const UPLOAD_DIR = join(WTERM_HOME_DIR, 'uploads');
 const DOWNLOADS_DIR = join(homedir(), 'Downloads', 'zterm');
 const LOG_DIR = join(WTERM_HOME_DIR, 'logs');
+const ATTACHMENTS_DIR = join(WTERM_HOME_DIR, 'attachments');
 const APP_UPDATE_VERSION_CODE = Number.parseInt(process.env.ZTERM_APP_UPDATE_VERSION_CODE || '', 10);
 const APP_UPDATE_VERSION_NAME = (process.env.ZTERM_APP_UPDATE_VERSION_NAME || '').trim();
 const APP_UPDATE_MANIFEST_URL = (process.env.ZTERM_APP_UPDATE_MANIFEST_URL || '').trim();
@@ -113,6 +115,7 @@ const scheduleStore = loadScheduleStore();
 const clientRuntimeDebugStore = createRuntimeDebugStore();
 const daemonRuntimeDebugStore = createRuntimeDebugStore();
 const performanceTraceStore = createTerminalPerformanceTraceStore({ limit: 5000 });
+const attachmentDeliveryRuntime = createAttachmentDeliveryRuntime({ rootDir: ATTACHMENTS_DIR });
 const terminalAttachTokenRuntime = createTerminalAttachTokenRuntime();
 let terminalScheduleRuntime: TerminalScheduleRuntime;
 let terminalControlRuntime: TerminalControlRuntime;
@@ -325,6 +328,8 @@ const terminalHttpRuntime = createTerminalHttpRuntime({
   broadcastRuntimeDebugControl,
   setDaemonRuntimeDebugEnabled,
   logTimePrefix,
+  attachmentDeliveryRuntime,
+  connections,
 });
 
 const terminalMessageRuntime = createTerminalMessageRuntime({
@@ -339,6 +344,8 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
   handleInput: terminalRuntime.handleInput,
   closeSession: terminalRuntime.closeTransportSubscriber,
   terminalFileTransferRuntime,
+  attachmentDeliveryRuntime,
+  connections,
   remoteWindowStreamRuntime,
   handleClientDebugLog,
   handleClientDebugSnapshot,
@@ -469,6 +476,15 @@ const relayHostClient = createTraversalRelayHostClient({
 wss.on('connection', handleWebSocketConnection);
 startHeartbeatLoop();
 startMemoryGuardLoop();
+void attachmentDeliveryRuntime.cleanup().catch((error) => {
+  console.error(`[${logTimePrefix()}] attachment cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+});
+const attachmentCleanupTimer = setInterval(() => {
+  void attachmentDeliveryRuntime.cleanup().catch((error) => {
+    console.error(`[${logTimePrefix()}] attachment cleanup failed: ${error instanceof Error ? error.message : String(error)}`);
+  });
+}, 60 * 60 * 1000);
+attachmentCleanupTimer.unref?.();
 
 wss.on('close', () => {
   handleDaemonServerClosed();

@@ -57,51 +57,23 @@ const TerminalQuickBarShell = ReactMemo(function TerminalQuickBarShell({
 
 const TerminalNetworkBanner = ReactMemo(function TerminalNetworkBanner({
   connectionIssueVisible,
-  networkOnline,
   activeSessionState,
-  connectionProgressLabel,
 }: {
   connectionIssueVisible: boolean;
-  networkOnline: boolean;
   activeSessionState: Session["state"] | null | undefined;
   activeSessionLastError?: string;
-  connectionProgressLabel?: string | null;
 }) {
   const networkBanner = !connectionIssueVisible
-    ? connectionProgressLabel
-      ? {
-          tone: "#7cc7ff",
-          background: "rgba(18, 50, 83, 0.90)",
-          border: "rgba(124, 199, 255, 0.34)",
-          title: connectionProgressLabel,
-          detail: "正在按自动连接流程恢复，终端数据流暂时暂停。",
-        }
-      : null
-    : !networkOnline
+    ? null
+    : activeSessionState === "error"
       ? {
           tone: "#ff6b6b",
           background: "rgba(109, 24, 33, 0.92)",
           border: "rgba(255, 107, 107, 0.42)",
-          title: "网络已断开",
-          detail: "当前网络不可用，终端不会继续刷新。",
+          title: "连接失败",
+          detail: "标准自动恢复流程未能恢复连接，请检查网络或服务器状态。",
         }
-      : activeSessionState === "reconnecting"
-        ? {
-            tone: "#ffb020",
-            background: "rgba(97, 63, 13, 0.92)",
-            border: "rgba(255, 176, 32, 0.42)",
-            title: "连接已断开，正在重连",
-            detail: "标准自动恢复流程仍未恢复，正在继续尝试可用链路。",
-          }
-        : activeSessionState === "error"
-          ? {
-              tone: "#ff6b6b",
-              background: "rgba(109, 24, 33, 0.92)",
-              border: "rgba(255, 107, 107, 0.42)",
-              title: "连接失败",
-              detail: "标准自动恢复流程未能恢复连接，请检查网络或服务器状态。",
-            }
-          : null;
+      : null;
 
   if (!networkBanner) {
     return null;

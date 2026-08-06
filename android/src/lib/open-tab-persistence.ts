@@ -1,5 +1,6 @@
 import { findReusableManagedSession } from '../contexts/session-reconnect-helpers';
 import {
+  buildSessionSemanticOwnerKey,
   buildSessionSemanticReuseKey,
   buildSessionSemanticReuseKeyVariants,
   sessionSemanticReuseMatch,
@@ -269,6 +270,28 @@ function clearLegacyOpenTabPersistence() {
   localStorage.removeItem(CLOSED_TAB_REUSE_KEYS_STORAGE_KEY);
 }
 
+function pickPreferredPersistedHost(left: Host, right: Host) {
+  if (left.pinned !== right.pinned) {
+    return right.pinned ? right : left;
+  }
+  const leftRecency = Math.max(left.lastConnected || 0, left.createdAt || 0);
+  const rightRecency = Math.max(right.lastConnected || 0, right.createdAt || 0);
+  return rightRecency >= leftRecency ? right : left;
+}
+
+function resolveUniqueEndpointSessionHost(hosts: Host[]) {
+  if (hosts.length === 0) {
+    return null;
+  }
+  const ownerKeys = new Set(hosts.map((host) => buildSessionSemanticOwnerKey(host)));
+  if (ownerKeys.size !== 1) {
+    return null;
+  }
+  return hosts.reduce((current, candidate) => (
+    current ? pickPreferredPersistedHost(current, candidate) : candidate
+  ), null as Host | null);
+}
+
 export function clearClosedTabReuseKeysForOwner(
   keys: Set<string>,
   target: Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'sessionName'>,
@@ -316,9 +339,27 @@ export function resolveHostForPersistedOpenTab(options: {
   fallbackIdPrefix?: string;
 }) {
   const { tab, hosts } = options;
-  const existingHost = hosts.find((host) => host.id === tab.hostId)
-    || hosts.find((host) => persistedOpenTabsSemanticallyMatch(host, tab))
-    || null;
+  const exactPersistedHost = tab.hostId
+    ? hosts.find((host) => host.id === tab.hostId) || null
+    : null;
+  const semanticHost = hosts
+    .filter((host) => persistedOpenTabsSemanticallyMatch(host, tab))
+    .reduce((current, candidate) => (
+      current ? pickPreferredPersistedHost(current, candidate) : candidate
+    ), null as Host | null);
+  const endpointSessionMatches = hosts.filter((host) => (
+    host.bridgeHost.trim() === tab.bridgeHost.trim()
+    && host.bridgePort === tab.bridgePort
+    && (
+      host.sessionName.trim() === tab.sessionName.trim()
+      || host.sessionName.trim() === ''
+    )
+  ));
+  const existingHost = (
+    exactPersistedHost
+    || semanticHost
+    || resolveUniqueEndpointSessionHost(endpointSessionMatches)
+  );
   if (existingHost) {
     return {
       ...existingHost,

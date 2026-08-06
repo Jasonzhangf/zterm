@@ -450,6 +450,40 @@ export class TraversalRelayStore {
     return toDeviceSnapshot(device);
   }
 
+  public clearOtherDaemonHostBindings(options: {
+    userId: string;
+    deviceId: string;
+    hostId: string;
+  }) {
+    this.requireUserById(options.userId);
+    const deviceId = normalizeDeviceId(options.deviceId);
+    const hostId = options.hostId.trim();
+    if (!deviceId || !hostId) {
+      return false;
+    }
+    const now = stableNow();
+    let changed = false;
+    for (const device of this.data.devices) {
+      if (
+        device.userId !== options.userId
+        || device.deviceId === deviceId
+        || device.daemonHostId !== hostId
+        || !device.daemonConnected
+      ) {
+        continue;
+      }
+      device.daemonConnected = false;
+      device.daemonLastSeenAt = now;
+      device.updatedAt = now;
+      device.lastSeenAt = now;
+      changed = true;
+    }
+    if (changed) {
+      this.persist();
+    }
+    return changed;
+  }
+
   public listDevices(userId: string) {
     this.requireUserById(userId);
     return this.data.devices

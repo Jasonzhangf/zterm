@@ -11,6 +11,7 @@ import {
 } from '@zterm/shared/protocol';
 import type { BridgeServerMessage as ServerMessage } from '@zterm/shared/protocol';
 import type { SessionMirror } from './terminal-runtime-types';
+import type { DaemonTransportConnection } from './terminal-transport-runtime';
 import { handleMuxChannelOpenedMessageRuntime } from './terminal-message-control-runtime';
 import type {
   TerminalAttachPayload,
@@ -46,7 +47,7 @@ export interface TerminalMuxChannelRuntimeDeps {
 
 export interface TerminalMuxChannelRuntime {
   sendMuxFrame: (connection: TerminalTransportConnection, frame: TerminalMuxServerFrame) => void;
-  handleMuxFrame: (connection: TerminalTransportConnection, candidate: unknown) => Promise<void>;
+  handleMuxFrame: (connection: DaemonTransportConnection, candidate: unknown) => Promise<void>;
 }
 
 export function createTerminalMuxChannelRuntime(
@@ -129,7 +130,7 @@ export function createTerminalMuxChannelRuntime(
     sendMuxFrame(connection, buildTerminalMuxError('mux_protocol_invalid', message, channelId));
   }
 
-  async function handleMuxFrame(connection: TerminalTransportConnection, candidate: unknown) {
+  async function handleMuxFrame(connection: DaemonTransportConnection, candidate: unknown) {
     if (!isTerminalMuxClientFrame(candidate)) {
       rejectMuxProtocol(connection, 'invalid terminal mux frame');
       return;
@@ -139,6 +140,7 @@ export function createTerminalMuxChannelRuntime(
       case 'mux-hello':
         connection.muxVersion = frame.payload.version;
         connection.muxClientInstanceId = frame.payload.clientInstanceId;
+        connection.deviceId = frame.payload.deviceId;
         if (!connection.muxChannels) {
           connection.muxChannels = new Map();
         }

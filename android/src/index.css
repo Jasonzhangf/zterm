@@ -15,6 +15,13 @@ html, body, #root {
   overscroll-behavior: none;
 }
 
+html,
+body,
+#root,
+.app {
+  min-height: 100dvh;
+}
+
 body {
   position: fixed;
   inset: 0;
@@ -89,6 +96,9 @@ label:focus-visible {
 /* Shared tactile surface treatment for terminal chrome. Keep the terminal canvas
  * untouched so renderer colors and selection behavior remain authoritative. */
 .zterm-terminal-shell {
+  /* Keep cached terminal geometry for IME/layout calculations, but clip the
+   * visual shell to the current App/WebView viewport after rotation. */
+  max-height: 100%;
   /* GitHub Light / system grouped-background values keep the light shell off
    * pure white while preserving familiar neutral terminal contrast. */
   --zterm-shell-bg: #f0f2f4;
@@ -109,12 +119,14 @@ label:focus-visible {
   --zterm-neo-quickbar-bg: var(--zterm-panel-bg);
   --zterm-neo-border: rgba(23, 27, 45, 0.10);
   --zterm-neo-base: #f6f8fa;
+  --zterm-neo-raised-bg: linear-gradient(145deg, #ffffff 0%, #edf0f3 100%);
   --zterm-neo-active: #ffffff;
   --zterm-neo-pressed: #e9eef5;
   --zterm-neo-highlight: rgba(255, 255, 255, 0.86);
   --zterm-neo-inset: rgba(125, 139, 159, 0.22);
   --zterm-neo-shadow: rgba(14, 19, 33, 0.16);
   --zterm-neo-text: #626b75;
+  --zterm-neo-text-shadow: 0 1px 0 rgba(255, 255, 255, 0.82);
   --zterm-neo-active-text: #424a53;
   --zterm-neo-accent: #128354;
   --zterm-neo-focus: rgba(31, 214, 122, 0.58);
@@ -143,12 +155,14 @@ label:focus-visible {
   --zterm-neo-quickbar-bg: var(--zterm-panel-bg);
   --zterm-neo-border: rgba(190, 212, 244, 0.16);
   --zterm-neo-base: #252d40;
+  --zterm-neo-raised-bg: linear-gradient(145deg, #34425c 0%, #20283a 100%);
   --zterm-neo-active: #34425c;
   --zterm-neo-pressed: #3a4d6a;
   --zterm-neo-highlight: rgba(215, 232, 255, 0.22);
   --zterm-neo-inset: rgba(9, 14, 26, 0.30);
   --zterm-neo-shadow: rgba(5, 9, 18, 0.68);
   --zterm-neo-text: #d9e4f6;
+  --zterm-neo-text-shadow: 0 -1px 0 rgba(5, 9, 18, 0.72);
   --zterm-neo-active-text: #f1f7ff;
   --zterm-neo-accent: #7ddfff;
   --zterm-neo-focus: rgba(125, 223, 255, 0.72);
@@ -175,14 +189,16 @@ label:focus-visible {
   --zterm-panel-shadow: rgba(0, 0, 0, 0.70);
   --zterm-neo-header-bg: var(--zterm-panel-bg);
   --zterm-neo-quickbar-bg: var(--zterm-panel-bg);
-  --zterm-neo-border: rgba(245, 247, 251, 0.12);
+  --zterm-neo-border: rgba(245, 247, 251, 0.20);
   --zterm-neo-base: #171a21;
+  --zterm-neo-raised-bg: linear-gradient(145deg, #303640 0%, #171a21 100%);
   --zterm-neo-active: #232833;
   --zterm-neo-pressed: #2b313d;
-  --zterm-neo-highlight: rgba(255, 255, 255, 0.16);
+  --zterm-neo-highlight: rgba(255, 255, 255, 0.28);
   --zterm-neo-inset: rgba(0, 0, 0, 0.48);
   --zterm-neo-shadow: rgba(0, 0, 0, 0.82);
   --zterm-neo-text: #e5e7eb;
+  --zterm-neo-text-shadow: 0 -1px 0 rgba(0, 0, 0, 0.92);
   --zterm-neo-active-text: #ffffff;
   --zterm-neo-accent: #38d47d;
   --zterm-neo-focus: rgba(56, 212, 125, 0.64);
@@ -261,7 +277,7 @@ label:focus-visible {
 .zterm-neo-header button {
   border-color: var(--zterm-neo-border) !important;
   border-radius: 12px !important;
-  background: var(--neo-base) !important;
+  background: var(--zterm-neo-raised-bg) !important;
   color: var(--neo-text) !important;
   box-shadow:
     inset 1px 1px 0 var(--neo-highlight),
@@ -373,11 +389,9 @@ label:focus-visible {
 .zterm-neo-quickbar [data-quickbar-shell-row="true"] button {
   border: 1px solid var(--zterm-neo-border) !important;
   border-radius: 12px !important;
-  background: var(--neo-base) !important;
+  background: var(--zterm-neo-raised-bg) !important;
   color: var(--neo-text) !important;
-  text-shadow:
-    0 -1px 0 rgba(31, 35, 40, 0.24),
-    0 1px 0 var(--neo-highlight);
+  text-shadow: var(--zterm-neo-text-shadow);
   box-shadow:
     inset 1px 1px 1px var(--neo-highlight),
     inset -2px -3px 5px var(--zterm-neo-inset),

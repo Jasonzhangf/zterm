@@ -21,10 +21,11 @@ export interface ActiveSessionRefreshPlanOptions {
   keepaliveGraceActive?: boolean;
   transportStale: boolean;
   source: ActiveRefreshSource;
+  shouldSkipReconnectOnBackgroundResume?: boolean;
 }
 
 export type ActiveSessionRefreshPlan =
-  | { action: 'skip'; reason: 'inactive-or-missing-session' | 'tick-blocked-by-reconnect' | 'transport-unavailable' | 'transport-open-pending' | 'closed-session-requires-explicit-open' }
+  | { action: 'skip'; reason: 'inactive-or-missing-session' | 'tick-blocked-by-reconnect' | 'transport-unavailable' | 'transport-open-pending' | 'closed-session-requires-explicit-open' | 'keepalive-grace' | 'background-resume-grace' }
   | { action: 'request-head'; resetPullBookkeeping: boolean }
   | { action: 'reconnect' };
 
@@ -503,6 +504,19 @@ export function buildActiveSessionRefreshPlan(options: ActiveSessionRefreshPlanO
 
   if (!options.allowReconnectIfUnavailable) {
     return { action: 'skip', reason: 'transport-unavailable' };
+  }
+
+  if (options.keepaliveGraceActive) {
+    return { action: 'skip', reason: 'keepalive-grace' };
+  }
+
+  // Background resume: if socket is OPEN and we're within the grace window,
+  // don't reconnect - just request a fresh head
+  if (options.shouldSkipReconnectOnBackgroundResume && transportOpen) {
+    return {
+      action: 'request-head',
+      resetPullBookkeeping: true,
+    };
   }
 
   if (hasBlockingPendingTransportOpen) {

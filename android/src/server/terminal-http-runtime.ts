@@ -8,6 +8,9 @@ import {
   summarizeTerminalPerformanceTrace,
   type createTerminalPerformanceTraceStore,
 } from '@zterm/shared/terminal/performance-trace';
+import { validateAttachmentId, type AttachmentDeliveryRuntime, type AttachmentAsset } from './attachment-delivery-runtime';
+
+const ATTACHMENT_HTTP_BODY_MAX_BYTES = 44 * 1024 * 1024;
 
 export interface TerminalHttpRuntimeDeps {
   host: string;
@@ -27,6 +30,9 @@ export interface TerminalHttpRuntimeDeps {
   broadcastRuntimeDebugControl: (enabled: boolean, reason: string, sessionId?: string) => void;
   setDaemonRuntimeDebugEnabled: (enabled: boolean) => void;
   logTimePrefix: (date?: Date) => string;
+  attachmentDeliveryRuntime?: AttachmentDeliveryRuntime;
+  connections: Map<string, { deviceId?: string; transport: unknown }>;
+  sendTransportMessage: (transport: unknown, message: unknown) => void;
 }
 
 export interface TerminalHttpRuntime {
@@ -40,7 +46,7 @@ export interface TerminalHttpRuntime {
       manifestUrl: string;
     };
   };
-  handleHttpRequest: (request: IncomingMessage, response: ServerResponse) => void;
+  handleHttpRequest: (request: IncomingMessage, response: ServerResponse) => void | Promise<void>;
 }
 
 export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): TerminalHttpRuntime {
@@ -95,7 +101,7 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
 
   function writeCorsHeaders(response: ServerResponse) {
     response.setHeader('Access-Control-Allow-Origin', '*');
-    response.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    response.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
     response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-ZTerm-Token');
   }
 
@@ -176,6 +182,44 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
     return false;
   }
 
+  function ensureAttachmentAuthorized(request: IncomingMessage, response: ServerResponse, url: URL) {
+    if (!deps.requiredAuthToken) return true;
+    const providedToken = extractHttpDebugToken(request, url);
+    if (providedToken === deps.requiredAuthToken) return true;
+    serveJson(response, { message: 'unauthorized attachment access' }, 401);
+    return false;
+  }
+
+  function readRequestBody(request: IncomingMessage) {
+    return new Promise<Buffer>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      let receivedBytes = 0;
+      request.on('data', (chunk: Buffer | string) => {
+        const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        receivedBytes += data.byteLength;
+        if (receivedBytes > ATTACHMENT_HTTP_BODY_MAX_BYTES) {
+          reject(new Error('attachment request body exceeds limit'));
+          return;
+        }
+        chunks.push(data);
+      });
+      request.on('end', () => resolve(Buffer.concat(chunks)));
+      request.on('error', reject);
+    });
+  }
+
+  function decodeAttachmentBase64(input: string) {
+    const normalized = input.trim();
+    if (!normalized || normalized.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(normalized)) {
+      throw new Error('invalid attachment base64');
+    }
+    const decoded = Buffer.from(normalized, 'base64');
+    if (decoded.toString('base64') !== normalized) {
+      throw new Error('invalid attachment base64');
+    }
+    return decoded;
+  }
+
   function buildDebugRuntimeSnapshot(request: IncomingMessage) {
     const subscriberEntries = Array.from(deps.sessions.values());
     const mirrorEntries = Array.from(deps.mirrors.values());
@@ -239,7 +283,7 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
     };
   }
 
-  function handleHttpRequest(request: IncomingMessage, response: ServerResponse) {
+  async function handleHttpRequest(request: IncomingMessage, response: ServerResponse) {
     writeCorsHeaders(response);
 
     if (request.method === 'OPTIONS') {
@@ -250,6 +294,102 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
 
     const origin = resolveRequestOrigin(request);
     const url = new URL(request.url || '/', origin);
+
+    if (deps.attachmentDeliveryRuntime && (url.pathname === '/api/v1/attachments' || url.pathname === '/api/v1/attachments/images' || url.pathname.startsWith('/api/v1/attachments/'))) {
+      if (!ensureAttachmentAuthorized(request, response, url)) return;
+      try {
+        if (url.pathname === '/api/v1/attachments/images' && request.method === 'POST') {
+          const payload = JSON.parse((await readRequestBody(request)).toString('utf8')) as {
+            fileName?: string; mimeType?: string; dataBase64?: string; senderAgentId?: string; senderName?: string;
+            clientRequestId?: string; targetDeviceIds?: string[]; message?: string;
+          };
+          const required = [payload.fileName, payload.mimeType, payload.dataBase64, payload.senderAgentId, payload.senderName, payload.clientRequestId];
+          if (required.some((value) => typeof value !== 'string' || !value.trim()) || !Array.isArray(payload.targetDeviceIds)) throw new Error('invalid attachment create request');
+          const manifest = await deps.attachmentDeliveryRuntime.enqueueImage({
+            fileName: payload.fileName!, mimeType: payload.mimeType!, data: decodeAttachmentBase64(payload.dataBase64!),
+            senderAgentId: payload.senderAgentId!, senderName: payload.senderName!, clientRequestId: payload.clientRequestId!,
+            targetDeviceIds: payload.targetDeviceIds, message: payload.message,
+          });
+          serveJson(response, { ok: true, attachmentId: manifest.attachmentId, status: manifest.status, manifest });
+          // Push notification to target devices
+          void (async () => {
+            try {
+              for (const targetDeviceId of (manifest.deliveries || []).map(d => d.targetDeviceId)) {
+                for (const conn of deps.connections.values()) {
+                  if (conn.deviceId === targetDeviceId && conn.transport) {
+                    deps.sendTransportMessage(conn.transport, {
+                      type: 'pending-attachments',
+                      payload: {
+                        schemaVersion: 1,
+                        pending: [{
+                          attachmentId: manifest.attachmentId,
+                          kind: manifest.kind,
+                          senderName: manifest.senderName,
+                          fileName: manifest.fileName,
+                          mimeType: manifest.mimeType,
+                          previewSize: manifest.preview.size,
+                          originalSize: manifest.original.size,
+                          message: manifest.message,
+                          createdAt: manifest.createdAt,
+                          expiresAt: manifest.expiresAt,
+                        }],
+                      },
+                    });
+                  }
+                }
+              }
+            } catch (err) {
+              console.error(`[${deps.logTimePrefix()}] push attachment notification failed: ${err instanceof Error ? err.message : String(err)}`);
+            }
+          })();
+          return;
+        }
+        const receiptMatch = url.pathname.match(/^\/api\/v1\/attachments\/([^/]+)\/receipt$/);
+        if (receiptMatch && request.method === 'POST') {
+          const payload = JSON.parse((await readRequestBody(request)).toString('utf8')) as { deviceId?: string; asset?: AttachmentAsset; sha256?: string };
+          if (!payload.deviceId || (payload.asset !== 'preview' && payload.asset !== 'original') || !payload.sha256) throw new Error('invalid attachment receipt');
+          serveJson(response, { ok: true, manifest: await deps.attachmentDeliveryRuntime.acknowledge(decodeURIComponent(receiptMatch[1]), payload.deviceId, payload.asset, payload.sha256) });
+          return;
+        }
+        if (url.pathname === '/api/v1/attachments' && request.method === 'GET') {
+          const deviceId = url.searchParams.get('deviceId')?.trim() || '';
+          if (!deviceId) throw new Error('deviceId is required');
+          const asset = url.searchParams.get('asset') as AttachmentAsset;
+          if (asset && asset !== 'preview' && asset !== 'original') throw new Error('invalid attachment asset');
+          serveJson(response, {
+            ok: true,
+            items: await deps.attachmentDeliveryRuntime.listForDevice(deviceId, asset || 'preview'),
+          });
+          return;
+        }
+        const match = url.pathname.match(/^\/api\/v1\/attachments\/([^/]+)(?:\/(preview|original))?$/);
+        if (!match) { serveJson(response, { message: 'not found' }, 404); return; }
+        const attachmentId = validateAttachmentId(decodeURIComponent(match[1]));
+        if (match[2] && request.method === 'GET') {
+          const deviceId = url.searchParams.get('deviceId')?.trim() || '';
+          if (!deviceId) throw new Error('deviceId is required');
+          const asset = match[2] as AttachmentAsset;
+          const result = await deps.attachmentDeliveryRuntime.readAsset(attachmentId, asset, deviceId);
+          response.statusCode = 200;
+          response.setHeader('Content-Type', asset === 'preview' ? result.manifest.preview.mimeType : result.manifest.mimeType);
+          response.setHeader('Content-Length', result.data.byteLength);
+          response.end(result.data);
+          return;
+        }
+        if (request.method === 'GET') {
+          const deviceId = url.searchParams.get('deviceId')?.trim() || '';
+          if (!deviceId) throw new Error('deviceId is required');
+          const asset = url.searchParams.get('asset') as AttachmentAsset;
+          if (asset && asset !== 'preview' && asset !== 'original') throw new Error('invalid attachment asset');
+          serveJson(response, { ok: true, items: await deps.attachmentDeliveryRuntime.listForDevice(deviceId, asset || 'preview') });
+          return;
+        }
+        serveJson(response, { message: 'method not allowed' }, 405);
+      } catch (error) {
+        serveJson(response, { message: error instanceof Error ? error.message : String(error) }, 400);
+      }
+      return;
+    }
 
     if (url.pathname === '/health') {
       serveJson(response, buildRuntimeHealthSnapshot(request));

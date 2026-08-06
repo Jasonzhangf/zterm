@@ -202,6 +202,15 @@ interface RemoteWindowCatalogProjectionSnapshot {
   updatedAt: number;
 }
 
+interface RemoteWindowViewportDebugSnapshot {
+  event: string;
+  window: string;
+  visualViewport: string;
+  surface: string;
+  overlay: string;
+  updatedAt: number;
+}
+
 interface SurfaceSize {
   width: number;
   height: number;
@@ -289,6 +298,7 @@ interface FloatingEntryDrag {
 }
 
 const FLOATING_OVERLAY_VIEWPORT_MARGIN_PX = 8;
+const FLOATING_OVERLAY_TOP_SAFE_MARGIN_PX = 48;
 const REMOTE_WINDOW_FLOATING_BOTTOM_BASE_PX = 118;
 const FLOATING_ENTRY_VIEWPORT_MARGIN_PX = 10;
 const FLOATING_ENTRY_TOP_MARGIN_PX = 28;
@@ -422,6 +432,50 @@ function resolveZoomedContentRect(
       height,
     },
   };
+}
+
+function resolveAnchoredFullscreenViewportScale(options: {
+  surface: SurfaceSize;
+  source: { width: number; height: number };
+  current: FullscreenViewportState;
+  nextScale: number;
+  anchorClientX: number;
+  anchorClientY: number;
+  surfaceLeft: number;
+  surfaceTop: number;
+  displayMode: FullscreenDisplayMode;
+  keyboardPanAllowancePx: number;
+}): FullscreenViewportState {
+  const currentRect = resolveZoomedContentRect(
+    options.surface,
+    options.source,
+    options.current,
+    options.displayMode,
+  ).content;
+  const anchorX = options.anchorClientX - options.surfaceLeft;
+  const anchorY = options.anchorClientY - options.surfaceTop;
+  const normalizedAnchorX = currentRect.width > 0
+    ? clampNumber((anchorX - currentRect.left) / currentRect.width, 0, 1)
+    : 0.5;
+  const normalizedAnchorY = currentRect.height > 0
+    ? clampNumber((anchorY - currentRect.top) / currentRect.height, 0, 1)
+    : 0.5;
+  const base = resolveAspectRect(options.surface, options.source, options.displayMode);
+  const nextWidth = base.width * options.nextScale;
+  const nextHeight = base.height * options.nextScale;
+  const nextLeft = anchorX - normalizedAnchorX * nextWidth;
+  const nextTop = anchorY - normalizedAnchorY * nextHeight;
+  return clampFullscreenViewport(
+    {
+      scale: options.nextScale,
+      panX: nextLeft - (base.left + (base.width - nextWidth) / 2),
+      panY: nextTop - (base.top + (base.height - nextHeight) / 2),
+    },
+    options.surface,
+    options.source,
+    options.displayMode,
+    options.keyboardPanAllowancePx,
+  );
 }
 
 
@@ -627,7 +681,13 @@ function toRemoteWindowTouchGestureState(
       moved: gesture.moved,
     };
   }
-  if (gesture.mode === 'actionPending' || gesture.mode === 'actionDrag') {
+  if (
+    gesture.mode === 'actionPending'
+    || gesture.mode === 'actionDrag'
+    || gesture.mode === 'twoFingerCandidate'
+    || gesture.mode === 'twoFingerScroll'
+    || gesture.mode === 'pinch'
+  ) {
     return gesture;
   }
   return createRemoteWindowTouchPointerState();
@@ -818,6 +878,9 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const [itermPaneTargetsExpanded, setItermPaneTargetsExpanded] = useState(false);
   const [catalogRefreshing, setCatalogRefreshing] = useState(false);
   const [appSwitchOpen, setAppSwitchOpen] = useState(false);
+  const [streamStatusOpen, setStreamStatusOpen] = useState(false);
+  const [videoDebugSnapshot, setVideoDebugSnapshot] = useState<RemoteWindowVideoDebugSnapshot | null>(null);
+  const [viewportDebugSnapshot, setViewportDebugSnapshot] = useState<RemoteWindowViewportDebugSnapshot | null>(null);
   const [activeCatalogSyncError, setActiveCatalogSyncError] = useState<string | null>(null);
   const [screenshotStatus, setScreenshotStatus] = useState<RemoteWindowScreenshotStatus>({ phase: 'idle' });
   const [windowThumbnails, setWindowThumbnailsState] = useState<Record<string, RemoteWindowThumbnailStatus>>({});
@@ -845,6 +908,9 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const streamRequestEpochRef = useRef(0);
   const handoffEpochRef = useRef(0);
   const activeHandoffRef = useRef<RemoteWindowStreamHandoffState | null>(null);
+  const handoffVideoVisibilityRef = useRef<boolean | null>(null);
+  const receiverPlaybackEpochRef = useRef(0);
+  const receiverPlaybackBindingRef = useRef<{ epoch: number; stream: MediaStream } | null>(null);
   const thumbnailInFlightTargetIdsRef = useRef<Map<string, RemoteWindowThumbnailRequestToken>>(new Map());
   const lastDefaultFullscreenFillKeyRef = useRef<string | null>(null);
   const videoPlaybackStatsRef = useRef({
@@ -862,6 +928,10 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     pointerId: number;
     startPanX: number;
     startPanY: number;
+  } | null>(null);
+  const surfacePinchStartRef = useRef<{
+    pointerId: number;
+    startScale: number;
   } | null>(null);
   const catalogWatchdogRef = useRef<number | null>(null);
   const catalogWatchdogEpochRef = useRef<number | null>(null);
@@ -967,6 +1037,18 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     });
   }, [activeSessionId, currentLockedStreamId, currentLockedTarget, sendRemoteWindowInputEventsForTarget, state.phase]);
 
+  const handleCloseRemoteApp = useCallback((target: RemoteWindowStreamTargetManifest) => {
+    if (!activeSessionId || !currentLockedStreamId || !isRemoteWindowInputSupported(target)) {
+      return;
+    }
+    sendRemoteWindowInputEventsForTarget({
+      sessionId: activeSessionId,
+      streamId: currentLockedStreamId,
+      target,
+      events: [{ kind: 'close-window' }],
+    });
+  }, [activeSessionId, currentLockedStreamId, sendRemoteWindowInputEventsForTarget]);
+
   const setFloatingOffset = useCallback((next: FloatingOverlayOffset) => {
     floatingOffsetRef.current = next;
     setFloatingOffsetState(next);
@@ -1043,6 +1125,35 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     };
   }, []);
 
+  const clampFloatingOverlayOffsetToViewport = useCallback(() => {
+    const overlay = floatingOverlayRef.current;
+    if (!overlay) {
+      return;
+    }
+    const rect = overlay.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) {
+      return;
+    }
+    const viewport = window.visualViewport;
+    const viewportLeft = viewport?.offsetLeft || 0;
+    const viewportTop = viewport?.offsetTop || 0;
+    const viewportWidth = Math.round(viewport?.width || window.innerWidth || rect.width);
+    const viewportHeight = Math.round(viewport?.height || window.innerHeight || rect.height);
+    const minLeft = viewportLeft + FLOATING_OVERLAY_VIEWPORT_MARGIN_PX;
+    const minTop = viewportTop + FLOATING_OVERLAY_TOP_SAFE_MARGIN_PX;
+    const maxLeft = viewportLeft + viewportWidth - FLOATING_OVERLAY_VIEWPORT_MARGIN_PX - rect.width;
+    const maxTop = viewportTop + viewportHeight - FLOATING_OVERLAY_VIEWPORT_MARGIN_PX - rect.height;
+    const clampedLeft = clampFloatingOffset(rect.left, minLeft, Math.max(minLeft, maxLeft));
+    const clampedTop = clampFloatingOffset(rect.top, minTop, Math.max(minTop, maxTop));
+    if (Math.abs(clampedLeft - rect.left) < 0.5 && Math.abs(clampedTop - rect.top) < 0.5) {
+      return;
+    }
+    setFloatingOffset({
+      x: floatingOffsetRef.current.x + clampedLeft - rect.left,
+      y: floatingOffsetRef.current.y + clampedTop - rect.top,
+    });
+  }, [setFloatingOffset]);
+
   const clearCatalogWatchdog = useCallback((requestEpoch?: number) => {
     if (
       typeof requestEpoch === 'number'
@@ -1113,6 +1224,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     setFullscreenViewportState(initialFullscreenViewport);
     surfacePointersRef.current.clear();
     surfaceGestureRef.current = null;
+    surfacePinchStartRef.current = null;
   }, []);
 
   const setFullscreenDisplayMode = useCallback((next: FullscreenDisplayMode) => {
@@ -1192,8 +1304,22 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     if (!surface) {
       return;
     }
-    const update = () => {
+    const viewport = window.visualViewport;
+    const update = (event = 'layout') => {
       const rect = surface.getBoundingClientRect();
+      const formatRect = (value: { left: number; top: number; width: number; height: number } | null) => (
+        value ? `${Math.round(value.left)},${Math.round(value.top)} ${Math.round(value.width)}x${Math.round(value.height)}` : '-'
+      );
+      setViewportDebugSnapshot({
+        event,
+        window: `${window.innerWidth}x${window.innerHeight}`,
+        visualViewport: viewport
+          ? `${Math.round(viewport.offsetLeft)},${Math.round(viewport.offsetTop)} ${Math.round(viewport.width)}x${Math.round(viewport.height)} scale=${viewport.scale}`
+          : '-',
+        surface: formatRect(rect),
+        overlay: formatRect(floatingOverlayRef.current?.getBoundingClientRect() || null),
+        updatedAt: Date.now(),
+      });
       if (rect.width <= 0 || rect.height <= 0) {
         return;
       }
@@ -1211,16 +1337,46 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         return clamped;
       });
     };
-    update();
+    update('layout');
+    let repaintFrame = 0;
+    const scheduleStableUpdate = (event: string) => {
+      window.cancelAnimationFrame(repaintFrame);
+      repaintFrame = window.requestAnimationFrame(() => {
+        update(event);
+        repaintFrame = window.requestAnimationFrame(() => update(`${event}:settled`));
+      });
+    };
     const ResizeObserverCtor = typeof ResizeObserver === 'undefined' ? null : ResizeObserver;
-    const observer = ResizeObserverCtor ? new ResizeObserverCtor(update) : null;
+    const observer = ResizeObserverCtor ? new ResizeObserverCtor(() => scheduleStableUpdate('resize-observer')) : null;
     observer?.observe(surface);
-    window.addEventListener('resize', update);
+    const handleResize = () => scheduleStableUpdate('resize');
+    const handleOrientationChange = () => scheduleStableUpdate('orientationchange');
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleOrientationChange);
+    viewport?.addEventListener('resize', handleResize);
+    viewport?.addEventListener('scroll', handleResize);
     return () => {
+      window.cancelAnimationFrame(repaintFrame);
       observer?.disconnect();
-      window.removeEventListener('resize', update);
+      window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleOrientationChange);
+      viewport?.removeEventListener('resize', handleResize);
+      viewport?.removeEventListener('scroll', handleResize);
     };
   }, [bottomInsetPx, fullscreenDisplayMode, receiverFrameSize, state]);
+
+  useLayoutEffect(() => {
+    if (state.phase !== 'targetLocked' || state.mode !== 'floating') {
+      return;
+    }
+    clampFloatingOverlayOffsetToViewport();
+  }, [
+    bottomInsetPx,
+    clampFloatingOverlayOffsetToViewport,
+    floatingOverlayWidthPx,
+    receiverFrameSize,
+    state,
+  ]);
 
   useEffect(() => {
     if (
@@ -1380,10 +1536,12 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     clearEntryLongPressTimer();
     surfacePointersRef.current.clear();
     surfaceGestureRef.current = null;
+    surfacePinchStartRef.current = null;
     bitratePresetTouchedRef.current = false;
     setScreenshotStatus({ phase: 'idle' });
     lastAutoFullscreenImePanRef.current = null;
     activeHandoffRef.current = null;
+    handoffVideoVisibilityRef.current = null;
     streamRequestEpochRef.current += 1;
     thumbnailInFlightTargetIdsRef.current.clear();
     if (activeSessionId && stopStream) {
@@ -1469,6 +1627,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     lastAppliedStreamQualityKeyRef.current = null;
     surfacePointersRef.current.clear();
     surfaceGestureRef.current = null;
+    surfacePinchStartRef.current = null;
     setReceiverMediaStream(null);
     setReceiverFrameSize(null);
     setState((current) => failRemoteWindowStream(
@@ -1913,7 +2072,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       startOffset,
       minX: startOffset.x + FLOATING_OVERLAY_VIEWPORT_MARGIN_PX - rect.left,
       maxX: startOffset.x + viewportWidth - FLOATING_OVERLAY_VIEWPORT_MARGIN_PX - rect.right,
-      minY: startOffset.y + FLOATING_OVERLAY_VIEWPORT_MARGIN_PX - rect.top,
+      minY: startOffset.y + FLOATING_OVERLAY_TOP_SAFE_MARGIN_PX - rect.top,
       maxY: startOffset.y + viewportHeight - FLOATING_OVERLAY_VIEWPORT_MARGIN_PX - rect.bottom,
       captureElement: event.currentTarget,
     };
@@ -2056,7 +2215,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     if (options?.error) {
       stats.lastError = options.error;
     }
-    onVideoDebug?.({
+    const snapshot = {
       attached: Boolean(video && receiverMediaStream && video.srcObject === receiverMediaStream),
       visible: options?.visible ?? videoHasPlayedRef.current,
       readyState: video?.readyState ?? 0,
@@ -2069,15 +2228,36 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       lastEvent,
       lastError: stats.lastError,
       updatedAt: Date.now(),
-    });
+    };
+    setVideoDebugSnapshot(snapshot);
+    onVideoDebug?.(snapshot);
   }, [onVideoDebug, receiverMediaStream]);
 
-  const revealReceiverVideo = useCallback((lastEvent = 'playing') => {
+  const revealReceiverVideo = useCallback((
+    video: HTMLVideoElement,
+    stream: MediaStream,
+    playbackEpoch: number,
+    lastEvent = 'playing',
+  ) => {
+    const binding = receiverPlaybackBindingRef.current;
+    if (
+      receiverPlaybackEpochRef.current !== playbackEpoch
+      || binding?.epoch !== playbackEpoch
+      || binding.stream !== stream
+      || videoElementRef.current !== video
+      || video.srcObject !== stream
+    ) {
+      return;
+    }
     updateReceiverVideoVisibility(true);
     publishVideoDebugSnapshot(lastEvent, { visible: true });
   }, [publishVideoDebugSnapshot, updateReceiverVideoVisibility]);
 
-  const scheduleVideoFrameReveal = useCallback((video: HTMLVideoElement, stream: MediaStream) => {
+  const scheduleVideoFrameReveal = useCallback((
+    video: HTMLVideoElement,
+    stream: MediaStream,
+    playbackEpoch: number,
+  ) => {
     const videoWithFrameCallback = video as HTMLVideoElement & {
       requestVideoFrameCallback?: (callback: () => void) => number;
     };
@@ -2085,16 +2265,14 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       return false;
     }
     videoWithFrameCallback.requestVideoFrameCallback(() => {
-      if (videoElementRef.current === video && video.srcObject === stream) {
-        revealReceiverVideo('frame');
-      }
+      revealReceiverVideo(video, stream, playbackEpoch, 'frame');
     });
     return true;
   }, [revealReceiverVideo]);
 
-  const requestVideoPlayback = useCallback(() => {
+  const requestVideoPlayback = useCallback((stream: MediaStream, playbackEpoch: number) => {
     const video = videoElementRef.current;
-    if (!video || !receiverMediaStream) {
+    if (!video) {
       publishVideoDebugSnapshot('play-missing-video');
       return;
     }
@@ -2103,10 +2281,10 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     video.defaultMuted = true;
     video.playsInline = true;
     video.controls = false;
-    if (video.srcObject !== receiverMediaStream) {
-      video.srcObject = receiverMediaStream;
+    if (video.srcObject !== stream) {
+      video.srcObject = stream;
     }
-    scheduleVideoFrameReveal(video, receiverMediaStream);
+    scheduleVideoFrameReveal(video, stream, playbackEpoch);
     videoPlaybackStatsRef.current.playAttempts += 1;
     publishVideoDebugSnapshot('play-request');
     const playResult = typeof video.play === 'function' ? video.play() : null;
@@ -2114,7 +2292,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       playResult
         .then(() => {
           videoPlaybackStatsRef.current.playAccepted += 1;
-          revealReceiverVideo('play-resolved');
+          revealReceiverVideo(video, stream, playbackEpoch, 'play-resolved');
         })
         .catch((error) => {
           const message = error instanceof Error ? error.message : String(error || 'play rejected');
@@ -2124,7 +2302,27 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       return;
     }
     publishVideoDebugSnapshot('play-sync-pending');
-  }, [publishVideoDebugSnapshot, receiverMediaStream, revealReceiverVideo, scheduleVideoFrameReveal]);
+  }, [publishVideoDebugSnapshot, revealReceiverVideo, scheduleVideoFrameReveal]);
+
+  const requestBoundVideoPlayback = useCallback(() => {
+    const binding = receiverPlaybackBindingRef.current;
+    if (!binding) {
+      publishVideoDebugSnapshot('play-missing-binding');
+      return;
+    }
+    requestVideoPlayback(binding.stream, binding.epoch);
+  }, [publishVideoDebugSnapshot, requestVideoPlayback]);
+
+  const restoreRetainedReceiverPlayback = useCallback((visible: boolean) => {
+    const playbackEpoch = receiverPlaybackEpochRef.current;
+    receiverPlaybackBindingRef.current = receiverMediaStream
+      ? { epoch: playbackEpoch, stream: receiverMediaStream }
+      : null;
+    updateReceiverVideoVisibility(visible);
+    if (!visible && receiverMediaStream) {
+      requestVideoPlayback(receiverMediaStream, playbackEpoch);
+    }
+  }, [receiverMediaStream, requestVideoPlayback, updateReceiverVideoVisibility]);
 
   const handleEntryPointerCancel = useCallback((event: ReactPointerEvent<HTMLButtonElement>) => {
     if (finishEntryDrag(event.pointerId, { suppressClick: false })) {
@@ -2178,6 +2376,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     if (!video) {
       return;
     }
+    const playbackEpoch = ++receiverPlaybackEpochRef.current;
     updateReceiverVideoVisibility(false);
     videoPlaybackStatsRef.current = {
       playAttempts: 0,
@@ -2185,10 +2384,12 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       playRejected: 0,
       lastError: '-',
     };
-    requestVideoPlayback();
     if (!receiverMediaStream) {
+      receiverPlaybackBindingRef.current = null;
       return;
     }
+    receiverPlaybackBindingRef.current = { epoch: playbackEpoch, stream: receiverMediaStream };
+    requestVideoPlayback(receiverMediaStream, playbackEpoch);
     const fallbackTimer = window.setInterval(() => {
       if (videoElementRef.current?.srcObject === receiverMediaStream) {
         publishVideoDebugSnapshot('play-poll');
@@ -2334,8 +2535,12 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
 
   const handleSelectTarget = useCallback((target: RemoteWindowStreamTargetManifest) => {
     const streamRequestEpoch = ++streamRequestEpochRef.current;
+    receiverPlaybackEpochRef.current += 1;
     const previousStreamId = state.phase === 'targetLocked' && state.streamStarted ? state.streamId || null : null;
     const previousHadStream = Boolean(previousStreamId);
+    const previousVideoWasVisible = previousHadStream
+      ? handoffVideoVisibilityRef.current ?? videoHasPlayedRef.current
+      : videoHasPlayedRef.current;
     setAppSwitchOpen(false);
     setActiveCatalogSyncError(null);
     if (!previousHadStream) {
@@ -2351,6 +2556,9 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       setReceiverMediaStream(null);
       setReceiverFrameSize(null);
     }
+    // Every target change starts a new receiver lifecycle. Keep the browser's
+    // native video placeholder hidden until this receiver has a real frame.
+    updateReceiverVideoVisibility(false);
     const selectedBitratePreset = readRemoteWindowVideoBitratePreset(target);
     if (!previousHadStream) {
       setBitratePreset(selectedBitratePreset);
@@ -2415,6 +2623,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           handoff,
           error,
         ));
+        restoreRetainedReceiverPlayback(previousVideoWasVisible);
+        handoffVideoVisibilityRef.current = null;
       } else {
         activeStreamIdRef.current = canvasStreamId;
         setState((current) => failRemoteWindowStream(startingState(current), canvasStreamId, error));
@@ -2433,6 +2643,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         }
       : null;
     if (handoff) {
+      handoffVideoVisibilityRef.current = previousVideoWasVisible;
       activeHandoffRef.current = handoff;
       setState((current) => beginRemoteWindowStreamHandoff(current, handoff));
     } else {
@@ -2515,6 +2726,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
             return;
           }
           activeHandoffRef.current = null;
+          handoffVideoVisibilityRef.current = null;
           activeStreamIdRef.current = committedStreamId;
           activeCanvasStreamIdRef.current = focusResult ? null : canvasResult.streamId;
           activeFocusStreamIdRef.current = focusResult?.streamId || null;
@@ -2604,6 +2816,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           ) {
             activeHandoffRef.current = null;
             activeStreamIdRef.current = handoff.previousStreamId;
+            restoreRetainedReceiverPlayback(previousVideoWasVisible);
+            handoffVideoVisibilityRef.current = null;
             if (pendingFocusStreamIdRef.current === focusStreamId) {
               pendingFocusStreamIdRef.current = null;
             }
@@ -2614,6 +2828,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         if (activeStreamIdRef.current === canvasStreamId) {
           setReceiverMediaStream(null);
           setReceiverFrameSize(null);
+          updateReceiverVideoVisibility(false);
           collectStreamStatsRef.current = null;
           adaptiveVideoStateRef.current = null;
           activeCanvasStreamIdRef.current = null;
@@ -2634,6 +2849,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     startStream,
     state,
     stopStream,
+    restoreRetainedReceiverPlayback,
+    updateReceiverVideoVisibility,
   ]);
 
   const handleRemoteWindowScreenshot = useCallback(() => {
@@ -2752,8 +2969,59 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     }
     if (effect.kind === 'local-pan-end') {
       surfaceLocalPanStartRef.current = null;
+      return;
     }
-  }, [setFullscreenViewport]);
+    if (effect.kind === 'pinch-start') {
+      surfacePinchStartRef.current = {
+        pointerId: effect.pointerId,
+        startScale: fullscreenViewportRef.current.scale,
+      };
+      return;
+    }
+    if (effect.kind === 'pinch-move') {
+      const currentScale = fullscreenViewportRef.current.scale;
+      const start = effect.commit || surfacePinchStartRef.current?.pointerId !== effect.pointerId
+        ? { pointerId: effect.pointerId, startScale: currentScale }
+        : surfacePinchStartRef.current;
+      surfacePinchStartRef.current = start;
+      const nextScale = clampNumber(
+        start.startScale * effect.scaleRatio,
+        REMOTE_WINDOW_FULLSCREEN_MIN_SCALE,
+        REMOTE_WINDOW_FULLSCREEN_MAX_SCALE,
+      );
+      const surfaceRect = videoSurfaceRef.current?.getBoundingClientRect();
+      if (
+        state.phase === 'targetLocked'
+        && state.mode === 'fullscreen'
+        && surfaceRect
+        && surfaceRect.width > 0
+        && surfaceRect.height > 0
+      ) {
+        const displaySourceSize = resolveRemoteWindowDisplaySourceSize(state.target, receiverFrameSize);
+        setFullscreenViewport((current) => resolveAnchoredFullscreenViewportScale({
+          surface: { width: surfaceRect.width, height: surfaceRect.height },
+          source: displaySourceSize,
+          current,
+          nextScale,
+          anchorClientX: effect.anchorClientX,
+          anchorClientY: effect.anchorClientY,
+          surfaceLeft: surfaceRect.left,
+          surfaceTop: surfaceRect.top,
+          displayMode: fullscreenDisplayModeRef.current,
+          keyboardPanAllowancePx: Math.max(0, bottomInsetPx),
+        }));
+        return;
+      }
+      setFullscreenViewport((current) => ({
+        ...current,
+        scale: nextScale,
+      }));
+      return;
+    }
+    if (effect.kind === 'pinch-end') {
+      surfacePinchStartRef.current = null;
+    }
+  }, [bottomInsetPx, receiverFrameSize, setFullscreenViewport, state]);
 
   const applyRemoteWindowTouchPointerResult = useCallback((
     result: {
@@ -2777,7 +3045,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     if (state.phase !== 'targetLocked') {
       return;
     }
-    requestVideoPlayback();
+    requestBoundVideoPlayback();
     if (event.pointerType === 'mouse' && event.button > 2) {
       return;
     }
@@ -2816,6 +3084,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         pinchEnabled: state.mode === 'fullscreen',
         scrollEnabled: true,
       });
+      surfaceLocalPanStartRef.current = null;
       surfaceGestureRef.current = pairResult.nextState;
       if (pairResult.localEffect.kind !== 'none') {
         applyRemoteWindowTouchLocalEffect(pairResult.localEffect);
@@ -2845,7 +3114,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   }, [
     applyRemoteWindowTouchPointerResult,
     publishRemoteWindowInputContext,
-    requestVideoPlayback,
+    requestBoundVideoPlayback,
     resolveSurfaceInputGeometry,
     state,
   ]);
@@ -3061,7 +3330,20 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         scrollFraction: touchScrollFractionRef.current,
         invertGestureDirection: touchScrollInvertedRef.current,
       });
-      surfaceGestureRef.current = pairResult.nextState;
+      if (pairResult.nextState.mode === 'localPan') {
+        surfaceLocalPanStartRef.current = {
+          pointerId: pairResult.nextState.pointerId,
+          startPanX: fullscreenViewportRef.current.panX,
+          startPanY: fullscreenViewportRef.current.panY,
+        };
+      } else if (pairResult.nextState.mode === 'idle') {
+        surfaceLocalPanStartRef.current = null;
+      }
+      surfaceGestureRef.current = toOverlayTouchGesture(
+        pairResult.nextState,
+        fullscreenViewportRef.current,
+        surfaceLocalPanStartRef.current,
+      );
       if (pairResult.remoteEvents.length > 0) {
         dispatchRemoteWindowInputEvents(pairResult.remoteEvents);
       }
@@ -3108,6 +3390,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         }
       }
       surfaceGestureRef.current = null;
+      surfacePinchStartRef.current = null;
       event.preventDefault();
       event.stopPropagation();
     }
@@ -3199,6 +3482,23 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         <span style={styles.targetKind}>{formatTargetKind(target)}</span>
         <span style={styles.targetMain}>{target.videoTarget.title || target.videoTarget.appBundleId}</span>
         <span style={styles.targetMeta}>{formatTargetSubtitle(target)}</span>
+        {target.videoTarget.kind === 'app-window' ? (
+          <span
+            role="button"
+            tabIndex={0}
+            data-no-drag="true"
+            data-testid={`remote-window-close-app-${target.streamTargetId}`}
+            aria-label={`关闭 ${target.videoTarget.title || target.videoTarget.appBundleId}`}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              handleCloseRemoteApp(target);
+            }}
+            style={styles.targetClose}
+          >
+            x
+          </span>
+        ) : null}
       </button>
     );
     const renderAppTargetGroup = (group: RemoteWindowAppTargetGroup) => {
@@ -3280,7 +3580,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         </div>
       </div>
     );
-  }, [catalogRefreshing, handleClose, handleOpenPicker, handleSelectTarget, itermPaneTargetsExpanded, state]);
+  }, [catalogRefreshing, handleClose, handleCloseRemoteApp, handleOpenPicker, handleSelectTarget, itermPaneTargetsExpanded, state]);
 
 	  const lockedSurfaceLayout = useMemo(() => {
 	    if (state.phase !== 'targetLocked' || !surfaceSize) {
@@ -3323,19 +3623,19 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
             controls={false}
             disablePictureInPicture
             preload="auto"
+            poster={ztermRemoteWindowLogoUrl}
             playsInline
-            onPlaying={() => revealReceiverVideo('playing')}
             onLoadedMetadata={() => {
               publishVideoDebugSnapshot('loadedmetadata');
-              requestVideoPlayback();
+              requestBoundVideoPlayback();
             }}
             onLoadedData={() => {
               publishVideoDebugSnapshot('loadeddata');
-              requestVideoPlayback();
+              requestBoundVideoPlayback();
             }}
             onCanPlay={() => {
               publishVideoDebugSnapshot('canplay');
-              requestVideoPlayback();
+              requestBoundVideoPlayback();
             }}
             style={{
               ...styles.videoElement,
@@ -3842,6 +4142,23 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
             {target.videoTarget.title || target.videoTarget.appBundleId || target.streamTargetId}
           </span>
           <span style={styles.appSwitchTargetMeta}>{formatTargetSubtitle(target)}</span>
+          {target.videoTarget.kind === 'app-window' ? (
+            <span
+              role="button"
+              tabIndex={0}
+              data-no-drag="true"
+              data-testid={`remote-window-close-app-${target.streamTargetId}`}
+              aria-label={`关闭 ${target.videoTarget.title || target.videoTarget.appBundleId}`}
+              onClick={(event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                handleCloseRemoteApp(target);
+              }}
+              style={styles.appSwitchTargetClose}
+            >
+              x
+            </span>
+          ) : null}
         </button>
       );
     };
@@ -3991,6 +4308,17 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           >
             KB
           </button>
+          <button
+            type="button"
+            data-no-drag="true"
+            data-testid="remote-window-stream-status-toggle"
+            aria-label="远程窗口串流状态"
+            aria-expanded={streamStatusOpen ? 'true' : 'false'}
+            onClick={() => setStreamStatusOpen((current) => !current)}
+            style={streamStatusOpen ? styles.headerModeButtonActive : styles.headerModeButton}
+          >
+            状态
+          </button>
           {state.mode === 'fullscreen' ? (
             <button
               type="button"
@@ -4003,6 +4331,24 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
             </button>
           ) : null}
         </div>
+        {streamStatusOpen ? (
+          <div data-testid="remote-window-stream-status-panel" data-no-drag="true" style={styles.streamStatusPanel}>
+            <div>app: {appForegroundActive === false ? 'background' : 'foreground'}</div>
+            <div>phase: {state.phase} / {state.phase === 'targetLocked' ? state.streamStatus : '-'}</div>
+            <div>session: {activeSessionId || '-'}</div>
+            <div>stream: {state.phase === 'targetLocked' ? state.streamId || '-' : '-'}</div>
+            <div>target: {state.phase === 'targetLocked' ? state.target.streamTargetId : '-'}</div>
+            <div>receiver: {receiverMediaStream ? 'attached' : 'missing'} / played:{videoHasPlayed ? 'yes' : 'no'}</div>
+            <div>frame: {receiverFrameSize ? `${receiverFrameSize.width}x${receiverFrameSize.height}` : '-'}</div>
+            <div>video: {videoDebugSnapshot ? `${videoDebugSnapshot.videoWidth}x${videoDebugSnapshot.videoHeight} ready=${videoDebugSnapshot.readyState} paused=${videoDebugSnapshot.paused ? 'yes' : 'no'}` : '-'}</div>
+            <div>play: {videoDebugSnapshot ? `try=${videoDebugSnapshot.playAttempts} ok=${videoDebugSnapshot.playAccepted} reject=${videoDebugSnapshot.playRejected}` : '-'}</div>
+            <div>event: {videoDebugSnapshot?.lastEvent || '-'}</div>
+            <div>error: {videoDebugSnapshot?.lastError || (state.phase === 'targetLocked' ? state.streamErrorMessage || '-' : '-')}</div>
+            <div>invalid: {streamInvalidation ? `${streamInvalidation.streamId} ${streamInvalidation.message}` : '-'}</div>
+            <div>viewport: {viewportDebugSnapshot ? `${viewportDebugSnapshot.event} window=${viewportDebugSnapshot.window} vv=${viewportDebugSnapshot.visualViewport}` : '-'}</div>
+            <div>rects: {viewportDebugSnapshot ? `surface=${viewportDebugSnapshot.surface} overlay=${viewportDebugSnapshot.overlay}` : '-'}</div>
+          </div>
+        ) : null}
       </div>
       {lockedVideoGroupContent}
       {state.mode === 'floating' ? (
@@ -4414,6 +4760,9 @@ const styles: Record<string, CSSProperties> = {
   fullscreenOverlay: {
     position: 'fixed',
     inset: 0,
+    width: '100%',
+    height: '100%',
+    minHeight: '100%',
     zIndex: 90,
     display: 'flex',
     flexDirection: 'column',
@@ -4423,6 +4772,8 @@ const styles: Record<string, CSSProperties> = {
     paddingRight: 'max(8px, env(safe-area-inset-right, 0px))',
     background: '#02050a',
     color: '#edf4ff',
+    contain: 'layout paint',
+    isolation: 'isolate',
   },
   lockedToolbar: {
     minHeight: 42,
@@ -4568,6 +4919,44 @@ const styles: Record<string, CSSProperties> = {
     fontSize: 10,
     fontWeight: 750,
   },
+  appSwitchTargetClose: {
+    justifySelf: 'end',
+    marginTop: -18,
+    padding: '1px 6px',
+    borderRadius: 6,
+    color: '#ff9a9a',
+    background: 'rgba(255, 92, 92, 0.12)',
+    fontSize: 12,
+    fontWeight: 900,
+    cursor: 'pointer',
+  },
+  targetClose: {
+    position: 'absolute',
+    right: 10,
+    top: 10,
+    padding: '1px 6px',
+    borderRadius: 6,
+    color: '#ff9a9a',
+    background: 'rgba(255, 92, 92, 0.12)',
+    fontSize: 12,
+    fontWeight: 900,
+    cursor: 'pointer',
+  },
+  streamStatusPanel: {
+    display: 'grid',
+    gap: 3,
+    maxHeight: 220,
+    overflowY: 'auto',
+    padding: '8px 10px',
+    borderTop: '1px solid rgba(151, 164, 186, 0.2)',
+    background: 'rgba(5, 9, 15, 0.96)',
+    color: 'rgba(237,244,255,0.78)',
+    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+    fontSize: 10,
+    lineHeight: 1.35,
+    whiteSpace: 'pre-wrap',
+    wordBreak: 'break-word',
+  },
   appSwitchError: {
     padding: '7px 8px',
     borderRadius: 8,
@@ -4601,6 +4990,7 @@ const styles: Record<string, CSSProperties> = {
     position: 'relative',
     overflow: 'hidden',
     background: '#0a101b',
+    contain: 'paint',
     outline: 'none',
     touchAction: 'none',
   },
@@ -4631,6 +5021,7 @@ const styles: Record<string, CSSProperties> = {
     gap: 8,
     border: '1px solid rgba(151, 164, 186, 0.12)',
     background: '#0a101b',
+    contain: 'paint',
     overflow: 'hidden',
   },
   videoElement: {

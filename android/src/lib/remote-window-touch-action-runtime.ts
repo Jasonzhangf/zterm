@@ -762,29 +762,26 @@ function resolveRemoteWindowPairPointerGeometry(options: {
 function resolveRemoteWindowPairScrollDeltaRuntime(options: {
   rawDeltaX: number;
   rawDeltaY: number;
+  surfaceRect: { width: number; height: number };
   sourceRect: { width: number; height: number };
   scrollFraction: number;
   inverted: boolean;
 }) {
-  const { rawDeltaX, rawDeltaY, sourceRect } = options;
-  if (rawDeltaX === 0 && rawDeltaY === 0) {
+  const { rawDeltaY, surfaceRect, sourceRect } = options;
+  if (rawDeltaY === 0) {
     return { deltaX: 0, deltaY: 0 };
   }
-  const fraction = resolveRemoteWindowTouchScrollFractionRuntime(options.scrollFraction);
-  const directionX = options.inverted ? -1 : 1;
-  const directionY = options.inverted ? -1 : 1;
-  const deltaX = rawDeltaX === 0
-    ? 0
-    : Math.sign(rawDeltaX)
-      * sourceRect.width
-      * fraction
-      * directionX;
-  const deltaY = rawDeltaY === 0
-    ? 0
-    : Math.sign(rawDeltaY)
-      * sourceRect.height
-      * fraction
-      * directionY;
+  const tuning = {
+    fraction: options.scrollFraction,
+    inverted: options.inverted,
+  };
+  const deltaX = 0;
+  const deltaY = resolveRemoteWindowTouchWheelDeltaRuntime(
+    rawDeltaY,
+    surfaceRect.height,
+    sourceRect.height,
+    tuning,
+  );
   return { deltaX, deltaY };
 }
 
@@ -800,6 +797,10 @@ function buildRemoteWindowTwoFingerScrollEventsRuntime(options: {
   const { deltaX, deltaY } = resolveRemoteWindowPairScrollDeltaRuntime({
     rawDeltaX: options.rawDeltaX,
     rawDeltaY: options.rawDeltaY,
+    surfaceRect: {
+      width: options.geometry.surfaceRect.width,
+      height: options.geometry.surfaceRect.height,
+    },
     sourceRect: {
       width: options.geometry.sourceRect.width,
       height: options.geometry.sourceRect.height,
@@ -870,6 +871,29 @@ function isPinchIntentPair(options: {
     return false;
   }
   return Math.sign(firstProjection) !== Math.sign(secondProjection);
+}
+
+function hasCoherentTwoFingerScrollIntent(options: {
+  firstStart: { clientX: number; clientY: number };
+  firstCurrent: { clientX: number; clientY: number };
+  secondStart: { clientX: number; clientY: number };
+  secondCurrent: { clientX: number; clientY: number };
+}) {
+  const firstDeltaX = options.firstCurrent.clientX - options.firstStart.clientX;
+  const firstDeltaY = options.firstCurrent.clientY - options.firstStart.clientY;
+  const secondDeltaX = options.secondCurrent.clientX - options.secondStart.clientX;
+  const secondDeltaY = options.secondCurrent.clientY - options.secondStart.clientY;
+  if (
+    Math.abs(firstDeltaY) < REMOTE_WINDOW_TWO_FINGER_SCROLL_DEADZONE_FALLBACK_PX
+    || Math.abs(secondDeltaY) < REMOTE_WINDOW_TWO_FINGER_SCROLL_DEADZONE_FALLBACK_PX
+  ) {
+    return false;
+  }
+  if (Math.sign(firstDeltaY) !== Math.sign(secondDeltaY)) {
+    return false;
+  }
+  return Math.abs(firstDeltaY) >= Math.abs(firstDeltaX)
+    && Math.abs(secondDeltaY) >= Math.abs(secondDeltaX);
 }
 
 export function resolveRemoteWindowTouchPairPointerDownRuntime(options: {
@@ -964,8 +988,14 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
   if (state.mode === 'twoFingerScroll') {
     if (
       options.pinchEnabled
-      && scaleRatio >= 1 + REMOTE_WINDOW_TWO_FINGER_PINCH_COMMIT_THRESHOLD
-      || scaleRatio <= 1 - REMOTE_WINDOW_TWO_FINGER_PINCH_COMMIT_THRESHOLD
+      && Math.abs(scaleRatio - 1) >= REMOTE_WINDOW_TWO_FINGER_PINCH_COMMIT_THRESHOLD
+      && isPinchIntentPair({
+        firstStart: state.firstStart,
+        firstCurrent,
+        secondStart: state.secondStart,
+        secondCurrent,
+        scaleRatio,
+      })
     ) {
       const pinchMoveEffect: RemoteWindowTouchLocalEffect = {
         kind: 'pinch-move',
@@ -1010,6 +1040,19 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
         };
       }
       return { nextState: state, remoteEvents: [], localEffect: { kind: 'none' }, consumed: true };
+    }
+    if (!hasCoherentTwoFingerScrollIntent({
+      firstStart: state.firstStart,
+      firstCurrent,
+      secondStart: state.secondStart,
+      secondCurrent,
+    })) {
+      return {
+        nextState: state,
+        remoteEvents: [],
+        localEffect: { kind: 'none' },
+        consumed: true,
+      };
     }
     const events = buildRemoteWindowTwoFingerScrollEventsRuntime({
       geometry,
@@ -1102,15 +1145,19 @@ export function resolveRemoteWindowTouchPairPointerMoveRuntime(options: RemoteWi
   if (
     options.scrollEnabled
     && midpointShift >= REMOTE_WINDOW_TWO_FINGER_SCROLL_COMMIT_MIDPOINT_PX
+    && hasCoherentTwoFingerScrollIntent({
+      firstStart: state.firstStart,
+      firstCurrent,
+      secondStart: state.secondStart,
+      secondCurrent,
+    })
   ) {
-    const firstCommitDeltaX = state.lastMidX - state.startMidX;
-    const firstCommitDeltaY = state.lastMidY - state.startMidY;
     const events = buildRemoteWindowTwoFingerScrollEventsRuntime({
       geometry,
       midClientX: midpoint.clientX,
       midClientY: midpoint.clientY,
-      rawDeltaX: firstCommitDeltaX,
-      rawDeltaY: firstCommitDeltaY,
+      rawDeltaX: midpointDeltaX,
+      rawDeltaY: midpointDeltaY,
       scrollFraction: scrollFraction ?? REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION,
       inverted: invertGestureDirection ?? false,
     });
@@ -1207,34 +1254,10 @@ export function resolveRemoteWindowTouchPairPointerUpRuntime(options: {
       consumed: true,
     };
   }
-  const lastMidX = state.mode === 'twoFingerScroll' || state.mode === 'twoFingerCandidate'
-    ? state.lastMidX : state.startMidX;
-  const lastMidY = state.mode === 'twoFingerScroll' || state.mode === 'twoFingerCandidate'
-    ? state.lastMidY : state.startMidY;
-  const finalMidpoint = liftedId === state.firstPointerId
-    ? {
-        clientX: (pair.first.clientX + state.secondStart.clientX) / 2,
-        clientY: (pair.first.clientY + state.secondStart.clientY) / 2,
-      }
-    : liftedId === state.secondPointerId
-      ? {
-          clientX: (state.firstStart.clientX + pair.second.clientX) / 2,
-          clientY: (state.firstStart.clientY + pair.second.clientY) / 2,
-        }
-      : { clientX: lastMidX, clientY: lastMidY };
-  const midDeltaX = finalMidpoint.clientX - state.lastMidX;
-  const midDeltaY = finalMidpoint.clientY - state.lastMidY;
-  const events = state.mode === 'twoFingerScroll'
-    ? buildRemoteWindowTwoFingerScrollEventsRuntime({
-        geometry,
-        midClientX: finalMidpoint.clientX,
-        midClientY: finalMidpoint.clientY,
-        rawDeltaX: midDeltaX,
-        rawDeltaY: midDeltaY,
-        scrollFraction: scrollFraction ?? REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION,
-        inverted: invertGestureDirection ?? false,
-      })
-    : [];
+  void geometry;
+  void scrollFraction;
+  void invertGestureDirection;
+  const events: Array<RemoteWindowInputEventPayload['event']> = [];
   const localEffect: RemoteWindowTouchLocalEffect = state.mode === 'twoFingerScroll'
     ? {
         kind: 'two-finger-scroll-end',

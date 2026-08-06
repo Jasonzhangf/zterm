@@ -104,6 +104,45 @@ function pickPreferredOwnerHost(current: Host | null, candidate: Host) {
   return candidateRecency >= currentRecency ? candidate : current;
 }
 
+function resolveOwnerHostId(
+  host: Pick<Host, 'daemonHostId' | 'relayHostId'>,
+) {
+  return host.daemonHostId?.trim() || host.relayHostId?.trim() || '';
+}
+
+function resolveCanonicalRemoteSessionOwnerHost(
+  target: RemoteSessionOwnerTarget,
+  hosts: Array<Pick<Host, 'daemonHostId' | 'relayHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'pinned' | 'lastConnected' | 'createdAt'>>,
+) {
+  const endpointMatches = hosts.filter((host) => (
+    host.bridgeHost.trim() === target.bridgeHost.trim()
+    && host.bridgePort === target.bridgePort
+  ));
+  const targetOwnerId = target.daemonHostId?.trim() || '';
+  if (targetOwnerId) {
+    const exactOwnerMatches = endpointMatches.filter((host) => resolveOwnerHostId(host) === targetOwnerId);
+    if (exactOwnerMatches.length > 0) {
+      return exactOwnerMatches.reduce<Host | null>((current, candidate) => (
+        pickPreferredOwnerHost(current, candidate as Host)
+      ), null);
+    }
+  }
+
+  const endpointOwnerIds = new Set(
+    endpointMatches.map(resolveOwnerHostId).filter(Boolean),
+  );
+  if (endpointOwnerIds.size > 1) {
+    return null;
+  }
+  if (endpointOwnerIds.size === 0 && endpointMatches.length !== 1) {
+    return null;
+  }
+
+  return endpointMatches.reduce<Host | null>((current, candidate) => (
+    pickPreferredOwnerHost(current, candidate as Host)
+  ), null);
+}
+
 export function resolveRemoteSessionOwnerTargets(options: {
   targets: Array<Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'authToken'>>;
   hosts?: Array<Pick<Host, 'daemonHostId' | 'relayHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'pinned' | 'lastConnected' | 'createdAt'>>;
@@ -122,10 +161,17 @@ export function resolveRemoteSessionOwnerTargets(options: {
   }
 
   for (const target of options.targets) {
+    const canonicalHost = resolveCanonicalRemoteSessionOwnerHost(target, options.hosts || []);
+    const ownerTarget = canonicalHost ? {
+      daemonHostId: canonicalHost.daemonHostId || canonicalHost.relayHostId || target.daemonHostId,
+      bridgeHost: canonicalHost.bridgeHost,
+      bridgePort: canonicalHost.bridgePort,
+      authToken: canonicalHost.authToken || target.authToken,
+    } : target;
     const ownerKey = buildSessionSemanticOwnerKey({
-      daemonHostId: target.daemonHostId,
-      bridgeHost: target.bridgeHost,
-      bridgePort: target.bridgePort,
+      daemonHostId: ownerTarget.daemonHostId,
+      bridgeHost: ownerTarget.bridgeHost,
+      bridgePort: ownerTarget.bridgePort,
     });
     if (resolvedTargetsByOwner.has(ownerKey)) {
       continue;
@@ -136,15 +182,15 @@ export function resolveRemoteSessionOwnerTargets(options: {
         daemonHostId: preferredHost.daemonHostId || preferredHost.relayHostId || target.daemonHostId,
         bridgeHost: preferredHost.bridgeHost,
         bridgePort: preferredHost.bridgePort,
-        authToken: preferredHost.authToken || target.authToken,
+        authToken: preferredHost.authToken || ownerTarget.authToken,
       });
       continue;
     }
     resolvedTargetsByOwner.set(ownerKey, {
-      daemonHostId: target.daemonHostId,
-      bridgeHost: target.bridgeHost,
-      bridgePort: target.bridgePort,
-      authToken: target.authToken,
+      daemonHostId: ownerTarget.daemonHostId,
+      bridgeHost: ownerTarget.bridgeHost,
+      bridgePort: ownerTarget.bridgePort,
+      authToken: ownerTarget.authToken,
     });
   }
 

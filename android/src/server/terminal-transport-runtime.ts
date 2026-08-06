@@ -14,6 +14,7 @@ import type {
 import type { RtcServerTransport } from './rtc-bridge';
 
 export interface DaemonTransportConnection extends TerminalTransportConnection {
+  deviceId?: string;
   id: string;
   wsAlive: boolean;
   lastInboundAt: number;
