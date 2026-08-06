@@ -90,6 +90,7 @@ interface UseOpenTabRuntimeOptions {
 }
 
 export interface OpenTabRuntimeRefs {
+  lastBackgroundEnteredAtRef: MutableRefObject<Map<string, number>>;
   runtimeActiveSessionIdRef: MutableRefObject<string | null>;
   sessionsRef: MutableRefObject<Session[]>;
   hostsRef: MutableRefObject<Host[]>;
@@ -166,6 +167,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
   const restoredTabsHandledRef = useRef(false);
   const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
   const sessionsRef = useRef(sessions);
+  const lastBackgroundEnteredAtRef = useRef<Map<string, number>>(new Map());
   const runtimeActiveSessionIdRef = useRef<string | null>(runtimeActiveSessionId);
   const bridgeSettingsRef = useRef(bridgeSettings);
   const hostsRef = useRef(hosts);
@@ -503,6 +505,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     auditOpenTabsAgainstRemoteSessions,
     notifyTargetNetworkSignal,
     bumpFollowResetEpoch,
+    lastBackgroundEnteredAtRef,
   });
 
   const {
@@ -523,6 +526,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
   });
 
   const runtimeRefs = useMemo<OpenTabRuntimeRefs>(() => ({
+    lastBackgroundEnteredAtRef,
     runtimeActiveSessionIdRef,
     sessionsRef,
     hostsRef,

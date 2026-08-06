@@ -32,6 +32,10 @@ interface SessionTerminalChannelLike {
 export const ACTIVE_SESSION_PENDING_OPEN_STALE_MS = 1200;
 export const SESSION_TRANSPORT_KEEPALIVE_GRACE_MS = 2 * 60 * 1000;
 
+// Background resume grace: if we entered background within this window,
+// try to reuse the existing socket before reconnecting
+export const BACKGROUND_RESUME_GRACE_MS = 60 * 1000;
+
 export function resolveSessionTransportKeepaliveGrace(options: {
   sessionId: string;
   refs: {
@@ -55,6 +59,28 @@ export function resolveSessionTransportKeepaliveGrace(options: {
   };
 }
 
+export function resolveBackgroundResumeGrace(options: {
+  sessionId: string;
+  refs: {
+    lastBackgroundEnteredAtRef: MutableRefObject<Map<string, number>>;
+    lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
+  };
+  now?: number;
+}) {
+  const now = options.now ?? Date.now();
+  const lastBackgroundEnteredAt = options.refs.lastBackgroundEnteredAtRef.current.get(options.sessionId) || 0;
+  const lastConnectedBaselineAt = options.refs.lastConnectedBaselineAtRef.current.get(options.sessionId) || 0;
+  const lastAliveAt = Math.max(lastBackgroundEnteredAt, lastConnectedBaselineAt);
+  const ageMs = lastAliveAt > 0 ? now - lastAliveAt : Number.POSITIVE_INFINITY;
+  const graceActive = lastAliveAt > 0 && ageMs >= 0 && ageMs < BACKGROUND_RESUME_GRACE_MS;
+  return {
+    graceActive,
+    lastAliveAt: lastAliveAt || null,
+    ageMs: Number.isFinite(ageMs) ? ageMs : null,
+    graceMs: BACKGROUND_RESUME_GRACE_MS,
+  };
+}
+
 export function ensureActiveSessionFreshRuntime(options: {
   refreshOptions: {
     sessionId: string;
@@ -70,6 +96,7 @@ export function ensureActiveSessionFreshRuntime(options: {
     lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
     connectedBaselineBurstGuardRef: MutableRefObject<Set<string>>;
     heartbeatStore: SessionHeartbeatStore;
+    lastBackgroundEnteredAtRef: MutableRefObject<Map<string, number>>;
     lastHeadRequestAtRef: MutableRefObject<Map<string, number>>;
     reconnectStore: SessionReconnectStore;
   };
@@ -168,6 +195,23 @@ export function ensureActiveSessionFreshRuntime(options: {
       || options.refreshOptions.source === 'active-reentry'
     )
   );
+
+  // Background resume grace: if we entered background recently and socket is OPEN,
+  // don't reconnect - just request a fresh head
+  const backgroundResumeGrace = resolveBackgroundResumeGrace({
+    sessionId: options.refreshOptions.sessionId,
+    refs: {
+      lastBackgroundEnteredAtRef: options.refs.lastBackgroundEnteredAtRef,
+      lastConnectedBaselineAtRef: options.refs.lastConnectedBaselineAtRef,
+    },
+    now,
+  });
+
+  const shouldSkipReconnectOnBackgroundResume = (
+    options.refreshOptions.source === 'explicit-resume'
+    && backgroundResumeGrace.graceActive
+    && effectiveWsReadyState === WebSocket.OPEN
+  );
   const refreshPlan = buildActiveSessionRefreshPlan({
     hasSession: Boolean(session),
     isRefreshTarget,
@@ -180,6 +224,7 @@ export function ensureActiveSessionFreshRuntime(options: {
     keepaliveGraceActive: keepaliveGraceActiveForLifecycle,
     transportStale,
     source: options.refreshOptions.source,
+    shouldSkipReconnectOnBackgroundResume,
   });
 
   const shouldBypassKeepaliveGrace = (

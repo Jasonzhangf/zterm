@@ -34,6 +34,7 @@ interface UseOpenTabLifecycleEffectsOptions {
   retainedSessionCount: number;
   onForegroundActiveChange?: (active: boolean) => void;
   onForegroundResume?: (reason: ForegroundResumeSignalReason) => void;
+  lastBackgroundEnteredAtRef?: MutableRefObject<Map<string, number>>;
   auditOpenTabsAgainstRemoteSessions: (reason: OpenTabAuditReason) => Promise<void>;
   notifyTargetNetworkSignal: (
     signal: SessionTargetNetworkSignal,
@@ -201,6 +202,13 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     const markHidden = () => {
       markForegroundRuntimeHidden(foregroundRefreshRuntimeRef.current, document.visibilityState);
       projectForegroundActive(false);
+      // Record background entry time for all active sessions
+      if (options.lastBackgroundEnteredAtRef) {
+        const now = Date.now();
+        for (const session of options.sessionsRef.current) {
+          options.lastBackgroundEnteredAtRef.current.set(session.id, now);
+        }
+      }
       startNativeBackgroundService();
     };
 

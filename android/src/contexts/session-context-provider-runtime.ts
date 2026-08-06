@@ -63,6 +63,7 @@ export function useSessionProviderRuntime(options: {
   const lastActivatedSessionIdRef = useRef<string | null>(null);
   const lastActiveReentryAtRef = useRef<Map<string, number>>(new Map());
   const lastConnectedBaselineAtRef = useRef<Map<string, number>>(new Map());
+  const lastBackgroundEnteredAtRef = useRef<Map<string, number>>(new Map());
   const connectedBaselineBurstGuardRef = useRef<Set<string>>(new Set());
   const sessionRevisionResetRef = useRef<Map<string, RevisionResetExpectation>>(new Map());
   const sessionTailRefreshStoreRef = useRef(createSessionTailRefreshStore());
@@ -167,6 +168,7 @@ export function useSessionProviderRuntime(options: {
       lastActivatedSessionIdRef,
       lastActiveReentryAtRef,
       lastConnectedBaselineAtRef,
+      lastBackgroundEnteredAtRef,
       connectedBaselineBurstGuardRef,
       sessionRevisionResetRef,
       sessionTailRefreshStoreRef,

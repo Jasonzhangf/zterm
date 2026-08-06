@@ -39,6 +39,7 @@ interface SessionLifecycleRuntimeOptions {
     tailRefreshStore: SessionTailRefreshStore;
     lastActiveReentryAtRef: MutableRefObject<Map<string, number>>;
     lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
+    lastBackgroundEnteredAtRef: MutableRefObject<Map<string, number>>;
     connectedBaselineBurstGuardRef: MutableRefObject<Set<string>>;
     sessionVisibleRangeRef: MutableRefObject<Map<string, unknown>>;
     sessionRevisionResetRef: MutableRefObject<Map<string, {
@@ -264,6 +265,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
         heartbeatStore: options.refs.heartbeatStore,
         lastHeadRequestAtRef: options.refs.lastHeadRequestAtRef,
         reconnectStore: options.refs.reconnectStore,
+        lastBackgroundEnteredAtRef: options.refs.lastBackgroundEnteredAtRef,
       },
       readSessionTransportRuntime: options.readSessionTransportRuntime,
       readSessionTargetRuntime: options.readSessionTargetRuntime,

@@ -42,6 +42,7 @@ function createBaseOptions(overrides: Partial<Parameters<typeof ensureActiveSess
       tailRefreshStore: createSessionTailRefreshStore(),
       lastActiveReentryAtRef: { current: new Map<string, number>() },
       lastConnectedBaselineAtRef: { current: new Map<string, number>() },
+      lastBackgroundEnteredAtRef: { current: new Map<string, number>() },
       connectedBaselineBurstGuardRef: { current: new Set<string>() },
       heartbeatStore: createSessionHeartbeatStore(),
       lastHeadRequestAtRef: { current: new Map<string, number>() },
@@ -326,7 +327,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
     expect(reconnectSession).toHaveBeenCalledWith('session-1');
   });
 
-  it('reconnects a recently alive unavailable transport during explicit resume because there is no socket to reuse', () => {
+  it('keeps a recently alive unavailable transport in the keepalive grace window during explicit resume', () => {
     const now = 100_000;
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
     const reconnectSession = vi.fn();
@@ -346,11 +347,11 @@ describe('ensureActiveSessionFreshRuntime', () => {
     });
 
     try {
-      expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
-      expect(reconnectSession).toHaveBeenCalledWith('session-1');
-      expect(runtimeDebug).toHaveBeenCalledWith('session.transport.explicit-resume', expect.objectContaining({
-        plan: 'reconnect',
+      expect(ensureActiveSessionFreshRuntime(options)).toBe(false);
+      expect(reconnectSession).not.toHaveBeenCalled();
+      expect(runtimeDebug).toHaveBeenCalledWith('session.transport.explicit-resume.skip', expect.objectContaining({
         keepaliveGraceActive: true,
+        reason: 'keepalive-grace',
       }));
     } finally {
       nowSpy.mockRestore();
@@ -457,7 +458,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
     }
   });
 
-  it('reconnects through the unique owner when an open-socket head probe gets no valid response', () => {
+  it('reissues buffer head without rebuilding an open transport when its response times out', () => {
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(2500);
     const ws = { readyState: WebSocket.OPEN } as any;
     const requestSessionBufferHead = vi.fn(() => true);
@@ -474,9 +475,9 @@ describe('ensureActiveSessionFreshRuntime', () => {
 
     try {
       expect(ensureActiveSessionFreshRuntime(options)).toBe(true);
-      expect(requestSessionBufferHead).not.toHaveBeenCalled();
-      expect(reconnectSession).toHaveBeenCalledWith('session-1');
-      expect(refs.reconnectStore.readStaleTransportProbeAt('session-1')).toBe(0);
+      expect(requestSessionBufferHead).toHaveBeenCalledWith('session-1', ws, { force: undefined });
+      expect(reconnectSession).not.toHaveBeenCalled();
+      expect(refs.reconnectStore.readStaleTransportProbeAt('session-1')).toBe(2500);
     } finally {
       nowSpy.mockRestore();
     }

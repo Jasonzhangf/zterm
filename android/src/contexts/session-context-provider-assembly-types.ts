@@ -86,6 +86,7 @@ export interface SessionProviderRuntimeRefs {
   lastActivatedSessionIdRef: MutableRefObject<string | null>;
   lastActiveReentryAtRef: MutableRefObject<Map<string, number>>;
   lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
+  lastBackgroundEnteredAtRef: MutableRefObject<Map<string, number>>;
   connectedBaselineBurstGuardRef: MutableRefObject<Set<string>>;
   sessionRevisionResetRef: MutableRefObject<Map<string, RevisionResetExpectation>>;
   sessionTailRefreshStoreRef: MutableRefObject<SessionTailRefreshStore>;
