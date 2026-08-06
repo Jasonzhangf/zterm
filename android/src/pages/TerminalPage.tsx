@@ -645,6 +645,7 @@ interface TerminalPageProps {
   onOpenDrawerRemoteSession?: (target: DrawerRemoteSessionTarget, sessionName: string, options?: { activate?: boolean; navigate?: boolean }) => string | null | undefined | void;
   onCloseDrawerRemoteSession?: (target: DrawerRemoteSessionTarget, sessionName: string) => void | Promise<void>;
   onRefreshDrawerHostSessions?: (hostKey?: string) => void | Promise<void>;
+  onAuditOpenTabsAgainstRemoteSessions?: (reason: string) => void | Promise<void>;
   relayDevices?: TraversalRelayDeviceSnapshot[];
   serverIdentityAliasInputs?: ServerIdentityInput[];
   sessionPickerDebugMode?: string | null;
@@ -1050,6 +1051,13 @@ function TerminalPageComponent({
   } | null>(null);
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
   const [attachmentDrawerOpen, setAttachmentDrawerOpen] = useState(false);
+
+  // Trigger remote session audit when drawer opens to prune stale entries
+  useEffect(() => {
+    if (sessionDrawerOpen && onAuditOpenTabsAgainstRemoteSessions) {
+      void onAuditOpenTabsAgainstRemoteSessions('drawer-open');
+    }
+  }, [sessionDrawerOpen, onAuditOpenTabsAgainstRemoteSessions]);
   const { getPendingAttachmentCount, getPendingAttachments } = useSession();
   const initialSessionPreviewRead = useMemo(() => {
     const storage = getBrowserStorage();

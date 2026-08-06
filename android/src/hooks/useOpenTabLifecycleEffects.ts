@@ -23,6 +23,7 @@ export type OpenTabAuditReason =
   | 'online'
   | 'connect'
   | 'session-picker-refresh'
+  | 'drawer-open'
   | 'connections-page-open'
   | 'session-status-closed';
 
