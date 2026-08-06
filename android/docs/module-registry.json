@@ -1103,7 +1103,9 @@
         "src/lib/terminal-viewport-metrics.ts",
         "src/lib/terminal-width-mode-manager.ts",
         "src/lib/terminal-mouse-wheel-sgr.ts",
-        "src/lib/terminal-mouse-wheel-sgr.test.ts"
+        "src/lib/terminal-mouse-wheel-sgr.test.ts",
+        "src/lib/two-finger-wheel-decision.ts",
+        "src/lib/two-finger-wheel-decision.test.ts"
       ]
     },
     {

@@ -70,6 +70,10 @@ import {
 import { normalizeTerminalCommittedText } from "../lib/terminal-input-normalization";
 import { encodeTerminalSgrMouseWheel } from "../lib/terminal-mouse-wheel-sgr";
 import {
+  decideTwoFingerWheel,
+  DEFAULT_TWO_FINGER_WHEEL_CONFIG,
+} from "../lib/two-finger-wheel-decision";
+import {
   COPY_LONG_PRESS_DELAY_MS,
   hasCopyLongPressMovedTooFar,
 } from "./terminal/terminal-copy-gesture";
@@ -615,16 +619,24 @@ function TerminalViewComponent({
     active: boolean;
     pointerIds: [number, number] | null;
     lastClientY: number;
+    lastSpanPx: number;
+    initialSpanPx: number;
     accumulatedDeltaPx: number;
+    accumulatedPinchDeltaPx: number;
     lastSentDirection: "up" | "down" | null;
     lastSentTickAt: number;
+    lockedDirection: "up" | "down" | null;
   }>({
     active: false,
     pointerIds: null,
     lastClientY: 0,
+    lastSpanPx: 0,
+    initialSpanPx: 0,
     accumulatedDeltaPx: 0,
+    accumulatedPinchDeltaPx: 0,
     lastSentDirection: null,
     lastSentTickAt: 0,
+    lockedDirection: null,
   });
 
   const resolveScrollTopForRenderBottomIndex = useCallback(
@@ -1059,8 +1071,9 @@ function TerminalViewComponent({
   // (OpenCode / Codex) can scroll their internal history buffer. This bypasses
   // tmux alternate-screen limitations that prevent capture-pane from
   // preserving scrollback for full-screen TUIs.
-  const TWO_FINGER_WHEEL_STEP_PX = 24;
-  const TWO_FINGER_WHEEL_COALESCE_MS = 60;
+  // Configuration is centralized in the pure decision helper so it can be
+  // unit-tested without DOM. See two-finger-wheel-decision.ts.
+  const TWO_FINGER_WHEEL_CONFIG = DEFAULT_TWO_FINGER_WHEEL_CONFIG;
 
   const handleTwoFingerWheelTouchStart = useCallback(
     (event: TouchEvent<HTMLDivElement>) => {
@@ -1068,14 +1081,25 @@ function TerminalViewComponent({
         return;
       }
       const [t0, t1] = [event.touches[0], event.touches[1]];
+      const spanPx = Math.hypot(
+        t1.clientX - t0.clientX,
+        t1.clientY - t0.clientY,
+      );
+      if (spanPx < TWO_FINGER_WHEEL_CONFIG.minInitialSpanPx) {
+        return;
+      }
       const midY = (t0.clientY + t1.clientY) / 2;
       twoFingerWheelRef.current = {
         active: true,
         pointerIds: [t0.identifier, t1.identifier],
         lastClientY: midY,
+        lastSpanPx: spanPx,
+        initialSpanPx: spanPx,
         accumulatedDeltaPx: 0,
+        accumulatedPinchDeltaPx: 0,
         lastSentDirection: null,
         lastSentTickAt: 0,
+        lockedDirection: null,
       };
       // Reserve the gesture so mirror-fixed panning does not also act on it.
       event.preventDefault();
@@ -1091,26 +1115,40 @@ function TerminalViewComponent({
       }
       const [t0, t1] = [event.touches[0], event.touches[1]];
       const midY = (t0.clientY + t1.clientY) / 2;
-      const delta = midY - wheel.lastClientY;
+      const spanPx = Math.hypot(
+        t1.clientX - t0.clientX,
+        t1.clientY - t0.clientY,
+      );
+      const midYDelta = midY - wheel.lastClientY;
       wheel.lastClientY = midY;
-      wheel.accumulatedDeltaPx += delta;
-      if (Math.abs(wheel.accumulatedDeltaPx) < TWO_FINGER_WHEEL_STEP_PX) {
+      wheel.lastSpanPx = spanPx;
+
+      const decision = decideTwoFingerWheel(
+        {
+          active: wheel.active,
+          initialSpanPx: wheel.initialSpanPx,
+          accumulatedDeltaPx: wheel.accumulatedDeltaPx,
+          lockedDirection: wheel.lockedDirection,
+        },
+        { midYDeltaPx: midYDelta, liveSpanPx: spanPx },
+        TWO_FINGER_WHEEL_CONFIG,
+      );
+
+      wheel.active = decision.next.active;
+      wheel.initialSpanPx = decision.next.initialSpanPx;
+      wheel.accumulatedDeltaPx = decision.next.accumulatedDeltaPx;
+      wheel.lockedDirection = decision.next.lockedDirection;
+      wheel.accumulatedPinchDeltaPx += Math.abs(
+        spanPx - wheel.lastSpanPx,
+      );
+
+      if (decision.aborted || decision.direction === null || decision.steps < 1) {
+        if (decision.aborted) {
+          event.preventDefault();
+          event.stopPropagation();
+        }
         return;
       }
-      const now = Date.now();
-      if (
-        wheel.lastSentDirection !== null &&
-        now - wheel.lastSentTickAt < TWO_FINGER_WHEEL_COALESCE_MS
-      ) {
-        // Throttle rapid back-to-back events so the TUI does not get flooded.
-        wheel.accumulatedDeltaPx = 0;
-        return;
-      }
-      const direction: "up" | "down" =
-        wheel.accumulatedDeltaPx < 0 ? "up" : "down";
-      wheel.accumulatedDeltaPx = 0;
-      wheel.lastSentDirection = direction;
-      wheel.lastSentTickAt = now;
       const host = containerRef.current;
       if (!host || !sessionIdRef.current) {
         return;
@@ -1124,7 +1162,9 @@ function TerminalViewComponent({
         1,
         Math.floor((midY - rect.top) / Math.max(1, rowHeightPx)) + 1,
       );
-      const sequence = encodeTerminalSgrMouseWheel(direction, col, row);
+      wheel.lastSentDirection = decision.direction;
+      wheel.lastSentTickAt = Date.now();
+      const sequence = encodeTerminalSgrMouseWheel(decision.direction, col, row);
       onInputRef.current?.(sessionIdRef.current, sequence);
       event.preventDefault();
       event.stopPropagation();
@@ -1146,9 +1186,13 @@ function TerminalViewComponent({
         active: false,
         pointerIds: null,
         lastClientY: 0,
+        lastSpanPx: 0,
+        initialSpanPx: 0,
         accumulatedDeltaPx: 0,
+        accumulatedPinchDeltaPx: 0,
         lastSentDirection: null,
         lastSentTickAt: 0,
+        lockedDirection: null,
       };
     },
     [],
