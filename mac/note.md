@@ -37,7 +37,7 @@
 - 视觉 gap：全局仍使用 Inter/system 字体、圆角卡片、状态栏和每 pane 常驻 split/open 控件，终端主空间被 chrome 占用；缺 iTerm2/现代桌面终端的紧凑 tab strip、可隐藏 toolbar、profile/status/badge 体系。
 
 ## 2026-07-01 Mac desktop workspace Slice 1 entrypoint
-- 已按 `docs/goals/mac-desktop-workspace-slice1-plan.md` 做 Slice 1：`mac/src/App.tsx` 只渲染 `MacDesktopApp`，不再直接依赖 `ShellWorkspace`。
+- 已按 `mac/docs/goals/mac-desktop-workspace-slice1-plan.md` 做 Slice 1：`mac/src/App.tsx` 只渲染 `MacDesktopApp`，不再直接依赖 `ShellWorkspace`。
 - 旧 `ShellWorkspace` 暂时只通过 `MacWorkspaceTransitionalShell` 被生产入口消费，命名明确为 transitional；本轮不改 runtime、不接多窗口、不接 server rail。
 - `MacAppShell/MacPaneWorkbench` 未接入 production entrypoint，避免把单 runtime 多 pane 争用路径作为新主线。
 - targeted 验证：`pnpm --filter @zterm/mac test -- MacDesktopApp App.test` PASS（2 files / 2 tests）。

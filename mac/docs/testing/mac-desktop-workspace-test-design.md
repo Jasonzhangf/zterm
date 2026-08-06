@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This is the test design record for the Mac desktop workspace refactor in `docs/goals/mac-desktop-workspace-refactor-plan.md`.
+This is the test design record for the Mac desktop workspace refactor in `mac/docs/goals/mac-desktop-workspace-refactor-plan.md`.
 
 Use it with:
 
