@@ -68,6 +68,7 @@ import {
   type TerminalFollowScrollTransition,
 } from "../lib/terminal-follow-scroll-runtime";
 import { normalizeTerminalCommittedText } from "../lib/terminal-input-normalization";
+import { encodeTerminalSgrMouseWheel } from "../lib/terminal-mouse-wheel-sgr";
 import {
   COPY_LONG_PRESS_DELAY_MS,
   hasCopyLongPressMovedTooFar,
@@ -116,6 +117,7 @@ interface TerminalViewProps {
   ) => void;
   splitVisible?: boolean;
   reserveRightEdgeSwipe?: boolean;
+  projectionMode?: "terminal" | "preview-primary" | "preview-secondary";
 }
 
 function terminalCellToText(
@@ -138,6 +140,27 @@ function terminalRowToText(
     return "";
   }
   return row.map(terminalCellToText).join("").replace(/\s+$/u, "");
+}
+
+function terminalRowRenderSignature(
+  row: Array<{
+    char?: number;
+    fg?: number;
+    bg?: number;
+    flags?: number;
+    width?: number;
+  }> | null | undefined,
+) {
+  if (!Array.isArray(row)) {
+    return "";
+  }
+  return row
+    .map((cell) =>
+      cell
+        ? `${cell.char ?? 32}:${cell.fg ?? 256}:${cell.bg ?? 256}:${cell.flags ?? 0}:${cell.width ?? 1}`
+        : "32:256:256:0:1",
+    )
+    .join(";");
 }
 
 function isRowInCopySelection(
@@ -254,9 +277,12 @@ function TerminalViewComponent({
   onLongPressRow,
   splitVisible = false,
   reserveRightEdgeSwipe = false,
+  projectionMode = "terminal",
 }: TerminalViewProps) {
   const theme = getTerminalThemePreset(themeId);
-  const refreshActive = live ?? active;
+  const previewProjection = projectionMode !== "terminal";
+  const passivePreviewProjection = projectionMode === "preview-secondary";
+  const refreshActive = passivePreviewProjection ? false : (live ?? active);
   const sessionBufferSnapshot = useSessionRenderBufferSnapshot(
     sessionBufferStore,
     sessionBufferStore ? sessionId : null,
@@ -362,7 +388,12 @@ function TerminalViewComponent({
         bufferLinesLength: bufferLines.length,
         viewportRows,
         rowHeightPx,
-        renderBottomIndex,
+        // Secondary previews are passive tail projections. Their visible window
+        // must follow the latest buffer revision without starting interactive
+        // scroll/follow state or a per-tile viewport demand loop.
+        renderBottomIndex: passivePreviewProjection
+          ? effectiveBufferEndIndex
+          : renderBottomIndex,
         followDemandAnchorEndIndex,
         readingMode,
         overscanRows: OVERSCAN_ROWS,
@@ -371,6 +402,7 @@ function TerminalViewComponent({
       bufferLines.length,
       effectiveBufferEndIndex,
       followDemandAnchorEndIndex,
+      passivePreviewProjection,
       readingMode,
       renderBottomIndex,
       renderBuffer.startIndex,
@@ -410,6 +442,13 @@ function TerminalViewComponent({
     renderBuffer.revision,
     renderBuffer.startIndex,
   ]);
+  const renderRowsWithSignatures = useMemo(
+    () => renderRows.map((renderRow) => ({
+      ...renderRow,
+      renderSignature: terminalRowRenderSignature(renderRow.row),
+    })),
+    [renderRows],
+  );
   const longPressTimerRef = useRef<number | null>(null);
   const longPressStartRef = useRef<{
     x: number;
@@ -568,6 +607,25 @@ function TerminalViewComponent({
   onInputRef.current = onInput;
   focusTerminalRef.current = focusTerminal;
   cursorKeysAppRef.current = renderBuffer.cursorKeysApp;
+
+  // Two-finger drag tracks vertical motion to emit SGR mouse wheel events so
+  // TUI apps (e.g. OpenCode) can scroll their internal history without us
+  // touching tmux copy-mode.
+  const twoFingerWheelRef = useRef<{
+    active: boolean;
+    pointerIds: [number, number] | null;
+    lastClientY: number;
+    accumulatedDeltaPx: number;
+    lastSentDirection: "up" | "down" | null;
+    lastSentTickAt: number;
+  }>({
+    active: false,
+    pointerIds: null,
+    lastClientY: 0,
+    accumulatedDeltaPx: 0,
+    lastSentDirection: null,
+    lastSentTickAt: 0,
+  });
 
   const resolveScrollTopForRenderBottomIndex = useCallback(
     (nextRenderBottomIndex: number) => {
@@ -996,6 +1054,105 @@ function TerminalViewComponent({
       writeStoredHorizontalOffset(sessionId, mirrorFixedHorizontalOffsetRef.current);
     }
   }, [sessionId, widthMode]);
+
+  // Two-finger vertical drag is converted into SGR mouse wheel events so TUIs
+  // (OpenCode / Codex) can scroll their internal history buffer. This bypasses
+  // tmux alternate-screen limitations that prevent capture-pane from
+  // preserving scrollback for full-screen TUIs.
+  const TWO_FINGER_WHEEL_STEP_PX = 24;
+  const TWO_FINGER_WHEEL_COALESCE_MS = 60;
+
+  const handleTwoFingerWheelTouchStart = useCallback(
+    (event: TouchEvent<HTMLDivElement>) => {
+      if (event.touches.length !== 2 || previewProjection || copyModeActive) {
+        return;
+      }
+      const [t0, t1] = [event.touches[0], event.touches[1]];
+      const midY = (t0.clientY + t1.clientY) / 2;
+      twoFingerWheelRef.current = {
+        active: true,
+        pointerIds: [t0.identifier, t1.identifier],
+        lastClientY: midY,
+        accumulatedDeltaPx: 0,
+        lastSentDirection: null,
+        lastSentTickAt: 0,
+      };
+      // Reserve the gesture so mirror-fixed panning does not also act on it.
+      event.preventDefault();
+    },
+    [previewProjection, copyModeActive],
+  );
+
+  const handleTwoFingerWheelTouchMove = useCallback(
+    (event: TouchEvent<HTMLDivElement>) => {
+      const wheel = twoFingerWheelRef.current;
+      if (!wheel.active || event.touches.length !== 2) {
+        return;
+      }
+      const [t0, t1] = [event.touches[0], event.touches[1]];
+      const midY = (t0.clientY + t1.clientY) / 2;
+      const delta = midY - wheel.lastClientY;
+      wheel.lastClientY = midY;
+      wheel.accumulatedDeltaPx += delta;
+      if (Math.abs(wheel.accumulatedDeltaPx) < TWO_FINGER_WHEEL_STEP_PX) {
+        return;
+      }
+      const now = Date.now();
+      if (
+        wheel.lastSentDirection !== null &&
+        now - wheel.lastSentTickAt < TWO_FINGER_WHEEL_COALESCE_MS
+      ) {
+        // Throttle rapid back-to-back events so the TUI does not get flooded.
+        wheel.accumulatedDeltaPx = 0;
+        return;
+      }
+      const direction: "up" | "down" =
+        wheel.accumulatedDeltaPx < 0 ? "up" : "down";
+      wheel.accumulatedDeltaPx = 0;
+      wheel.lastSentDirection = direction;
+      wheel.lastSentTickAt = now;
+      const host = containerRef.current;
+      if (!host || !sessionIdRef.current) {
+        return;
+      }
+      const rect = host.getBoundingClientRect();
+      const col = Math.max(
+        1,
+        Math.floor(((t0.clientX + t1.clientX) / 2 - rect.left) / Math.max(1, resolvedCellWidthPx)) + 1,
+      );
+      const row = Math.max(
+        1,
+        Math.floor((midY - rect.top) / Math.max(1, rowHeightPx)) + 1,
+      );
+      const sequence = encodeTerminalSgrMouseWheel(direction, col, row);
+      onInputRef.current?.(sessionIdRef.current, sequence);
+      event.preventDefault();
+      event.stopPropagation();
+    },
+    [resolvedCellWidthPx, rowHeightPx],
+  );
+
+  const commitTwoFingerWheelTouchEnd = useCallback(
+    (event: TouchEvent<HTMLDivElement>) => {
+      const wheel = twoFingerWheelRef.current;
+      if (!wheel.active) {
+        return;
+      }
+      // Any touch change other than 2 active fingers ends the gesture.
+      if (event.touches.length === 2) {
+        return;
+      }
+      twoFingerWheelRef.current = {
+        active: false,
+        pointerIds: null,
+        lastClientY: 0,
+        accumulatedDeltaPx: 0,
+        lastSentDirection: null,
+        lastSentTickAt: 0,
+      };
+    },
+    [],
+  );
 
   const emitRenderDemand = useCallback(
     (
@@ -1436,6 +1593,13 @@ function TerminalViewComponent({
   ]);
 
   useLayoutEffect(() => {
+    if (!passivePreviewProjection || renderBottomIndex === followVisualBottomIndex) {
+      return;
+    }
+    setRenderBottomIndex(followVisualBottomIndex);
+  }, [followVisualBottomIndex, passivePreviewProjection, renderBottomIndex]);
+
+  useLayoutEffect(() => {
     if (!consumeFollowResetTrigger()) {
       return;
     }
@@ -1644,6 +1808,9 @@ function TerminalViewComponent({
   }, [splitVisible]);
 
   useEffect(() => {
+    if (!refreshActive) {
+      return;
+    }
     if (renderGeometryRevisionRafRef.current !== null) {
       return;
     }
@@ -1668,6 +1835,7 @@ function TerminalViewComponent({
   }, [
     emitRenderDemandSignalsForCurrentFrame,
     followVisualBottomIndex,
+    refreshActive,
     refreshActive,
     renderGeometryRevisionKey,
     syncScrollHostToRenderBottom,
@@ -1772,9 +1940,13 @@ function TerminalViewComponent({
       data-has-oninput={onInput ? "true" : "false"}
       data-has-onresize={onResize ? "true" : "false"}
       data-width-mode={widthMode}
+      data-projection-mode={projectionMode}
       data-copy-mode={copyModeActive ? "true" : undefined}
       onClick={() => {
         if (!sessionId) {
+          return;
+        }
+        if (previewProjection) {
           return;
         }
         alignRenderBottomToFollow({
@@ -1796,11 +1968,27 @@ function TerminalViewComponent({
         applyScrollState(host.scrollTop, host);
       }}
       onTouchMove={(event) => {
+        if (event.touches.length === 2) {
+          handleTwoFingerWheelTouchMove(event);
+          return;
+        }
         handleMirrorFixedTouchMove(event);
       }}
-      onTouchStart={handleMirrorFixedTouchStart}
-      onTouchEnd={commitMirrorFixedTouchEnd}
-      onTouchCancel={commitMirrorFixedTouchEnd}
+      onTouchStart={(event) => {
+        if (event.touches.length === 2) {
+          handleTwoFingerWheelTouchStart(event);
+          return;
+        }
+        handleMirrorFixedTouchStart(event);
+      }}
+      onTouchEnd={(event) => {
+        commitTwoFingerWheelTouchEnd(event);
+        commitMirrorFixedTouchEnd(event);
+      }}
+      onTouchCancel={(event) => {
+        commitTwoFingerWheelTouchEnd(event);
+        commitMirrorFixedTouchEnd(event);
+      }}
       onWheel={() => {
         markUserScrollIntentRuntime(250);
       }}
@@ -1825,6 +2013,8 @@ function TerminalViewComponent({
         ["--term-row-height" as string]: resolvedRowHeight || rowHeight,
         fontFamily: TERMINAL_FONT_STACK,
         fontSize: `${fontSize}px`,
+        WebkitTextSizeAdjust: previewProjection ? "none" : undefined,
+        textSizeAdjust: previewProjection ? "none" : undefined,
       }}
     >
       <div
@@ -1853,8 +2043,33 @@ function TerminalViewComponent({
           willChange: widthMode === "mirror-fixed" ? "transform" : undefined,
         }}
       >
-        {renderRows.map(({ absoluteIndex, row, isGap }, rowIndex) =>
-          (() => {
+        {passivePreviewProjection
+          ? renderRowsWithSignatures.map(({ absoluteIndex, row, isGap }) => {
+              const plainText = terminalRowToText(row);
+              return (
+                <div
+                  key={`preview-row-${absoluteIndex}`}
+                  data-terminal-row="true"
+                  data-terminal-preview-row="true"
+                  data-terminal-gap={isGap ? "true" : undefined}
+                  data-terminal-index={absoluteIndex}
+                  data-terminal-row-text={plainText}
+                  style={{
+                    height: resolvedRowHeight || rowHeight,
+                    minHeight: resolvedRowHeight || rowHeight,
+                    lineHeight: resolvedRowHeight || rowHeight,
+                    color: theme.foreground,
+                    whiteSpace: "pre",
+                    overflow: "hidden",
+                    textOverflow: "clip",
+                  }}
+                >
+                  {plainText || "\u00a0"}
+                </div>
+              );
+            })
+          : renderRowsWithSignatures.map(({ absoluteIndex, row, isGap, renderSignature }, rowIndex) =>
+            (() => {
             const cursorOverlay = resolveCursorOverlay({
               row,
               cursor: renderBuffer.cursor,
@@ -1864,6 +2079,7 @@ function TerminalViewComponent({
               <VisibleRow
                 key={`row-${absoluteIndex}`}
                 absoluteIndex={absoluteIndex}
+                renderSignature={renderSignature}
                 row={row}
                 rowIndex={rowIndex}
                 rowHeight={resolvedRowHeight || rowHeight}
@@ -1916,34 +2132,36 @@ function TerminalViewComponent({
               />
             );
           })(),
-        )}
+          )}
       </div>
-      <textarea
-        ref={inputRef}
-        data-wterm-input="true"
-        data-terminal-input-session-id={sessionId || undefined}
-        autoCapitalize="off"
-        autoCorrect="off"
-        autoComplete="off"
-        enterKeyHint="done"
-        inputMode="text"
-        spellCheck={false}
-        aria-hidden={domInputOffscreen ? "true" : undefined}
-        style={{
-          position: "absolute",
-          left: "-9999px",
-          top: 0,
-          opacity: 0,
-          width: "1px",
-          height: "1px",
-          border: "0",
-          padding: 0,
-          resize: "none",
-          background: "transparent",
-          color: "transparent",
-          caretColor: "transparent",
-        }}
-      />
+      {!previewProjection ? (
+        <textarea
+          ref={inputRef}
+          data-wterm-input="true"
+          data-terminal-input-session-id={sessionId || undefined}
+          autoCapitalize="off"
+          autoCorrect="off"
+          autoComplete="off"
+          enterKeyHint="done"
+          inputMode="text"
+          spellCheck={false}
+          aria-hidden={domInputOffscreen ? "true" : undefined}
+          style={{
+            position: "absolute",
+            left: "-9999px",
+            top: 0,
+            opacity: 0,
+            width: "1px",
+            height: "1px",
+            border: "0",
+            padding: 0,
+            resize: "none",
+            background: "transparent",
+            color: "transparent",
+            caretColor: "transparent",
+          }}
+        />
+      ) : null}
       <style>{`@keyframes zterm-history-spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}.wterm::-webkit-scrollbar{display:none;width:0;height:0}.wterm[data-copy-mode="true"],.wterm[data-copy-mode="true"] [data-terminal-row="true"]{-webkit-touch-callout:none;-webkit-user-select:none;user-select:none;}`}</style>
     </div>
   );

@@ -1101,7 +1101,9 @@
         "src/lib/terminal-follow-scroll-runtime.ts",
         "src/lib/terminal-follow-scroll-runtime.test.ts",
         "src/lib/terminal-viewport-metrics.ts",
-        "src/lib/terminal-width-mode-manager.ts"
+        "src/lib/terminal-width-mode-manager.ts",
+        "src/lib/terminal-mouse-wheel-sgr.ts",
+        "src/lib/terminal-mouse-wheel-sgr.test.ts"
       ]
     },
     {
