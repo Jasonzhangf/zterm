@@ -32,3 +32,27 @@ export function encodeTerminalSgrMouseWheel(
   return `\u001b[<${button};${cx};${cy}M`;
 }
 
+
+/**
+ * SGR mouse click events for syncing clicks from preview to remote terminal.
+ * Button codes: 0=left, 1=middle, 2=right, 3=release
+ */
+export const TERMINAL_MOUSE_LEFT_BUTTON = 0;
+export const TERMINAL_MOUSE_MIDDLE_BUTTON = 1;
+export const TERMINAL_MOUSE_RIGHT_BUTTON = 2;
+export const TERMINAL_MOUSE_RELEASE_BUTTON = 3;
+
+export function encodeTerminalSgrMouseClick(
+  button: number,
+  column: number,
+  row: number,
+): string {
+  const safeCol = Math.max(1, Math.floor(column) || 1);
+  const safeRow = Math.max(1, Math.floor(row) || 1);
+  // Cap values at 9999
+  const cx = Math.min(9999, safeCol);
+  const cy = Math.min(9999, safeRow);
+  // Button press: Cb = button (0=left, 1=middle, 2=right)
+  // Mouse release: Cb = 3
+  return `\u001b[<${button};${cx};${cy}M`;
+}

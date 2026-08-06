@@ -1,10 +1,11 @@
-import { memo, useEffect, useRef, useState, type PointerEvent, type TouchEvent } from 'react';
+import { memo, useEffect, useRef, useState, type MouseEvent, type PointerEvent, type TouchEvent } from 'react';
 import { TerminalView } from '../TerminalView';
 import type { SessionRenderBufferStore } from '../../lib/session-render-buffer-store';
 import type { Session } from '../../lib/types';
 import { getServerIdentityTone, resolveServerDisplayName } from '../../lib/server-identity';
 import { mobileTheme } from '../../lib/mobile-ui';
 import { WindowGroupLayout } from './WindowGroupLayout';
+import { encodeTerminalSgrMouseClick, TERMINAL_MOUSE_LEFT_BUTTON } from '../../lib/terminal-mouse-wheel-sgr';
 
 export interface TerminalPreviewGridProps {
   sessions: Session[];
@@ -18,10 +19,43 @@ export interface TerminalPreviewGridProps {
   onRemoveSession?: (sessionId: string) => void;
   onMoveSession?: (sourceSessionId: string, targetIndex: number) => void;
   onReplaceSession?: (sourceSessionId: string, replacementSessionId: string) => void;
+  onPrimarySessionChange?: (sessionId: string) => void;
+  onTerminalInput?: (sessionId: string, data: string) => void;
   onClose: () => void;
 }
 
 const PREVIEW_TILE_LONG_PRESS_MS = 420;
+
+// Approximate char width ratio for preview font calculation
+const PREVIEW_CHAR_WIDTH_RATIO = 0.55;
+
+// Compute terminal row/col from click position in preview body
+// titlebarHeight: non-compact=24px, compact=22px
+// previewFontSize: non-compact=5-7, compact=3
+// previewRows: estimated ~10 for non-compact, ~30 for compact
+function computePreviewClickPosition(
+  clientX: number,
+  clientY: number,
+  element: HTMLElement,
+  compact: boolean,
+): { row: number; col: number } {
+  const rect = element.getBoundingClientRect();
+  const titlebarHeight = compact ? 22 : 24;
+  const previewFontSize = compact ? 3 : 6;
+  const charHeight = previewFontSize;
+  const charWidth = previewFontSize * PREVIEW_CHAR_WIDTH_RATIO;
+  
+  // Relative position within the body (below titlebar)
+  const relY = clientY - rect.top - titlebarHeight;
+  const relX = clientX - rect.left;
+  
+  // Compute row/col (1-based for SGR protocol)
+  const row = Math.max(1, Math.floor(relY / charHeight) + 1);
+  const col = Math.max(1, Math.floor(relX / charWidth) + 1);
+  
+  return { row, col };
+}
+
 
 export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
   sessions,
@@ -35,6 +69,8 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
   onRemoveSession,
   onMoveSession,
   onReplaceSession,
+  onPrimarySessionChange,
+  onTerminalInput,
   onClose,
 }: TerminalPreviewGridProps) {
   const exitGestureRef = useRef<{ x: number; y: number } | null>(null);
@@ -47,6 +83,9 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
   const [addMenuOpen, setAddMenuOpen] = useState(false);
   const [moveSourceSessionId, setMoveSourceSessionId] = useState<string | null>(null);
   const [primaryPreviewSessionId, setPrimaryPreviewSessionId] = useState<string | null>(() => sessions[0]?.id || null);
+  const resolvedPrimaryPreviewSessionId = sessions.some((session) => session.id === primaryPreviewSessionId)
+    ? primaryPreviewSessionId
+    : (sessions[0]?.id || null);
   const replacementSourceSession = sessions.find((session) => session.id === replacementSourceSessionId) || null;
   const moveSourceSession = sessions.find((session) => session.id === moveSourceSessionId) || null;
   const canAddSession = sessions.length < 6 && replacementCandidates.length > 0;
@@ -146,16 +185,37 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
     setPrimaryPreviewSessionId(sessions[0]?.id || null);
   }, [primaryPreviewSessionId, sessions]);
 
+  useEffect(() => {
+    if (!resolvedPrimaryPreviewSessionId) {
+      return;
+    }
+    onPrimarySessionChange?.(resolvedPrimaryPreviewSessionId);
+  }, [onPrimarySessionChange, resolvedPrimaryPreviewSessionId]);
+
   const renderPreviewTile = (session: Session, index: number, variant: 'primary' | 'secondary') => {
     const tone = getServerIdentityTone(session);
     const title = session.customName || session.title || session.sessionName || session.id;
     const compact = variant === 'secondary';
     const previewFontSize = compact
-      ? 4
+      ? 3
       : Math.max(5, Math.min(7, fontSize - 3));
     const previewRowHeight = compact
-      ? '6px'
+      ? '4px'
       : `${Math.max(7, Math.min(10, fontSize))}px`;
+    const handlePreviewClick = (event: MouseEvent<HTMLElement>) => {
+      if (consumeSuppressedActivationClick(session.id)) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      if (compact) {
+        setPrimaryPreviewSessionId(session.id);
+        return;
+      }
+      onActivateSession(session.id);
+    };
     return (
       <div
         key={session.id}
@@ -200,20 +260,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
             suppressNextActivationClick(session.id);
             setReplacementSourceSessionId(session.id);
           }}
-          onClick={(event) => {
-            if (consumeSuppressedActivationClick(session.id)) {
-              event.preventDefault();
-              event.stopPropagation();
-              return;
-            }
-            if (variant === 'secondary') {
-              event.preventDefault();
-              event.stopPropagation();
-              setPrimaryPreviewSessionId(session.id);
-              return;
-            }
-            onActivateSession(session.id);
-          }}
+          onClick={handlePreviewClick}
           onKeyDown={(event) => {
             if (event.key !== 'Enter' && event.key !== ' ') return;
             event.preventDefault();
@@ -232,6 +279,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
         >
           <span
             data-preview-titlebar="true"
+            onClick={handlePreviewClick}
             onPointerDown={(event) => {
               event.stopPropagation();
               clearLongPress();
@@ -281,6 +329,23 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
           <span
             data-testid={`terminal-preview-body-${session.id}`}
             data-preview-scroll-surface="true"
+            onClick={(event) => {
+              handlePreviewClick(event);
+              // Sync click to remote terminal via SGR mouse click
+              const element = event.currentTarget as HTMLElement;
+              const { row, col } = computePreviewClickPosition(
+                event.clientX,
+                event.clientY,
+                element,
+                compact,
+              );
+              const clickSequence = encodeTerminalSgrMouseClick(
+                TERMINAL_MOUSE_LEFT_BUTTON,
+                col,
+                row,
+              );
+              onTerminalInput?.(session.id, clickSequence);
+            }}
             onPointerDown={(event) => {
               event.stopPropagation();
               beginBodyPointerGesture(session.id, event);
@@ -313,13 +378,22 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
               event.stopPropagation();
               finishBodyGesture();
             }}
-            style={{ flex: 1, minHeight: 0, width: '100%', overflow: 'hidden', pointerEvents: 'auto' }}
+            style={{
+              flex: 1,
+              minHeight: 0,
+              width: '100%',
+              overflow: 'hidden',
+              pointerEvents: 'auto',
+              WebkitTextSizeAdjust: 'none',
+              textSizeAdjust: 'none',
+            }}
           >
             <TerminalView
               sessionId={session.id}
               sessionBufferStore={sessionBufferStore}
               active={false}
-              live
+              live={!compact}
+              projectionMode={compact ? 'preview-secondary' : 'preview-primary'}
               allowDomFocus={false}
               domInputOffscreen
               focusNonce={0}
@@ -329,7 +403,7 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
               widthMode="mirror-fixed"
               showAbsoluteLineNumbers={false}
               copyModeActive={false}
-              splitVisible={false}
+              splitVisible
             />
           </span>
         </div>
@@ -430,12 +504,12 @@ export const TerminalPreviewGrid = memo(function TerminalPreviewGrid({
           node: renderPreviewTile(
             session,
             index,
-            session.id === (primaryPreviewSessionId || sessions[0]?.id) ? 'primary' : 'secondary',
+            session.id === resolvedPrimaryPreviewSessionId ? 'primary' : 'secondary',
           ),
           testId: `terminal-preview-secondary-${session.id}`,
           roleLabel: `切换预览主窗口 ${session.customName || session.title || session.sessionName || session.id}`,
         }))}
-        primaryItemId={primaryPreviewSessionId || sessions[0]?.id || null}
+        primaryItemId={resolvedPrimaryPreviewSessionId}
         onPrimaryItemChange={setPrimaryPreviewSessionId}
         landscape={landscape}
         style={{ flex: 1, minHeight: 0 }}

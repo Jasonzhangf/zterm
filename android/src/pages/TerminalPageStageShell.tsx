@@ -68,6 +68,7 @@ const TerminalStageShell = ReactMemo(
     onRemovePreviewSession,
     onMovePreviewSession,
     onReplacePreviewSession,
+    onPreviewPrimarySessionChange,
   }: {
     interactiveSession: Session | null;
     sessionBufferStore?: SessionRenderBufferStore | null;
@@ -126,6 +127,7 @@ const TerminalStageShell = ReactMemo(
     onRemovePreviewSession?: (sessionId: string) => void;
     onMovePreviewSession?: (sourceSessionId: string, targetIndex: number) => void;
     onReplacePreviewSession?: (sourceSessionId: string, replacementSessionId: string) => void;
+    onPreviewPrimarySessionChange?: (sessionId: string) => void;
   }) {
     const previewGestureRef = useRef(createSessionPreviewGestureState());
     const landscape =
@@ -592,6 +594,8 @@ const TerminalStageShell = ReactMemo(
               onRemoveSession={(sessionId) => onRemovePreviewSession?.(sessionId)}
               onMoveSession={(sourceSessionId, targetIndex) => onMovePreviewSession?.(sourceSessionId, targetIndex)}
               onReplaceSession={(sourceSessionId, replacementSessionId) => onReplacePreviewSession?.(sourceSessionId, replacementSessionId)}
+              onPrimarySessionChange={onPreviewPrimarySessionChange}
+              onTerminalInput={onTerminalInput}
               onClose={() => onCloseSessionPreview?.()}
             />
           ) : sessionGroup ? (
@@ -723,6 +727,7 @@ const TerminalStageShell = ReactMemo(
     prev.onRemovePreviewSession === next.onRemovePreviewSession &&
     prev.onMovePreviewSession === next.onMovePreviewSession &&
     prev.onReplacePreviewSession === next.onReplacePreviewSession &&
+    prev.onPreviewPrimarySessionChange === next.onPreviewPrimarySessionChange &&
     prev.visiblePaneEntries
       .map((entry) => `${entry.pane.id}:${entry.session?.id || ""}`)
       .join("||") ===
