@@ -17,6 +17,7 @@ const appVersionCode = computeNormalVersionCode(Number.parseInt(appBuildNumber, 
 const enableSourcemap = process.env.ZTERM_BUILD_SOURCEMAP === 'true';
 
 export default defineConfig({
+  root: __dirname,
   plugins: [react()],
   define: {
     __APP_VERSION__: JSON.stringify(appDisplayVersion),
@@ -39,5 +40,6 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: enableSourcemap,
+    emptyOutDir: true,
   },
 });

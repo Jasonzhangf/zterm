@@ -12,7 +12,6 @@ import android.view.View;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import com.getcapacitor.BridgeActivity;
-import com.getcapacitor.BridgeWebChromeClient;
 
 /**
  * MainActivity - Capacitor main Activity
@@ -33,6 +32,26 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(BackgroundServicePlugin.class);
         registerPlugin(ScreenOrientationPlugin.class);
         super.onCreate(savedInstanceState);
+        // Inject JS-to-Logcat bridge
+        if (getBridge() != null && getBridge().getWebView() != null) {
+            final android.webkit.WebView wv = getBridge().getWebView();
+            wv.addJavascriptInterface(new Object() {
+                @android.webkit.JavascriptInterface
+                public void log(String tag, String msg) {
+                    android.util.Log.i("zterm[" + tag + "]", msg);
+                }
+            }, "ZTermLog");
+            // Test the bridge
+            wv.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    wv.evaluateJavascript(
+                        "if(window.ZTermLog && window.ZTermLog.log) { window.ZTermLog.log('boot', 'evaluateJavascript bridge OK'); } else { console.error('[zterm:boot] ZTermLog missing in evaluateJavascript'); }",
+                        null
+                    );
+                }
+            }, 2000);
+        }
         Log.i(TAG, "onCreate()");
         if (getBridge() != null && getBridge().getWebView() != null) {
             final WebView wv = getBridge().getWebView();
@@ -43,11 +62,6 @@ public class MainActivity extends BridgeActivity {
             settings.setSupportZoom(false);
             settings.setBuiltInZoomControls(false);
             settings.setDisplayZoomControls(false);
-            // Use BridgeWebChromeClient (which implements onShowFileChooser)
-            // so that <input type="file"> triggers the system file picker.
-            // BridgeWebChromeClient already pipes JS console to Capacitor Logger,
-            // which appears in logcat with tag "Console".
-            wv.setWebChromeClient(new BridgeWebChromeClient(getBridge()));
             // Block Android WebView native long-press so its floating selection
             // ActionMode toolbar (全选 / 剪切 / 复制 / 分享) does NOT appear.
             // JS touch events are received in real-time BEFORE this listener
@@ -147,3 +161,4 @@ public class MainActivity extends BridgeActivity {
         stopService(serviceIntent);
     }
 }
+
