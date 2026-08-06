@@ -87,6 +87,8 @@ interface UseOpenTabRuntimeOptions {
   pruneSessionGroupSelectionToRemoteTruth: (target: { bridgeHost: string; bridgePort: number; daemonHostId?: string }, remoteSessionNames: string[]) => void;
   onForegroundActiveChange?: (active: boolean) => void;
   onForegroundResume?: (reason: 'visibilitychange' | 'resume' | 'appStateChange') => void;
+  /** 后台心跳发送函数 */
+  sendBackgroundHeartbeat?: () => void;
 }
 
 export interface OpenTabRuntimeRefs {
@@ -152,6 +154,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     pruneSessionGroupSelectionToRemoteTruth,
     onForegroundActiveChange,
     onForegroundResume,
+    sendBackgroundHeartbeat,
   } = options;
 
   const persistedOpenTabsBootstrapRef = useRef(readPersistedOpenTabsState());
@@ -502,6 +505,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     retainedSessionCount: retainedTerminalSessionCount,
     onForegroundActiveChange,
     onForegroundResume,
+    sendBackgroundHeartbeat,
     auditOpenTabsAgainstRemoteSessions,
     notifyTargetNetworkSignal,
     bumpFollowResetEpoch,

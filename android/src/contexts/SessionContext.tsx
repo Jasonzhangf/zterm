@@ -62,6 +62,7 @@ export function SessionProvider({
       lastActiveReentryAtRef,
       lastConnectedBaselineAtRef,
       connectedBaselineBurstGuardRef,
+      lastBackgroundEnteredAtRef,
       sessionRevisionResetRef,
       sessionTailRefreshStoreRef,
       lastHeadRequestAtRef,

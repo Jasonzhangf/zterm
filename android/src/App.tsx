@@ -283,7 +283,7 @@ export function AppContent({
     auditOpenTabsAgainstRemoteSessions,
   } = useOpenTabRuntime({
     bridgeSettings,
-    hosts,
+    hosts: homeSavedConnections,
     hostsLoaded,
     restoreSwitchReason: pageState.kind === 'terminal' ? 'explicit-resume' : 'restore-sync',
     sessions,
@@ -304,6 +304,13 @@ export function AppContent({
     pruneSessionGroupSelectionToRemoteTruth,
     onForegroundActiveChange,
     onForegroundResume: handleForegroundResumeAfterControlRefresh,
+    sendBackgroundHeartbeat: () => {
+      for (const session of sessions) {
+        if (session.state !== 'closed') {
+          sendMessageRaw(session.id, { type: 'ping' });
+        }
+      }
+    },
   });
 
   const markRuntimeSessionEntered = useCallback((sessionId: string) => {
@@ -474,8 +481,8 @@ export function AppContent({
   return (
     <div
       style={{
-        height: '100dvh',
-        width: '100vw',
+        position: 'fixed',
+        inset: 0,
         backgroundColor: '#edf2f6',
         display: 'flex',
         justifyContent: 'center',
@@ -483,7 +490,7 @@ export function AppContent({
         overscrollBehavior: 'none',
       }}
     >
-      <div style={{ width: '100%', height: '100dvh', overflow: 'hidden' }}>
+      <div style={{ width: '100%', height: '100%', overflow: 'hidden' }}>
         {pageState.kind === 'connections' && (
           <ConnectionsPage
             savedConnections={homeSavedConnections}
@@ -648,6 +655,7 @@ export function AppContent({
             onQuickActionsChange={setQuickActions}
             onShortcutActionsChange={setShortcutActions}
             sessionDraft={terminalActiveSession ? (sessionDrafts[terminalActiveSession.id] || '') : ''}
+            sessionDrafts={sessionDrafts}
             onSessionDraftChange={handleSessionDraftChange}
             onSessionDraftSend={handleSessionDraftSend}
             scheduleState={terminalActiveSession ? scheduleStates[terminalActiveSession.id] || null : null}

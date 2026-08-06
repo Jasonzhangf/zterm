@@ -82,12 +82,20 @@ const backgroundServiceHarness = vi.hoisted(() => ({
   startBackgroundService: vi.fn(),
   stopBackgroundService: vi.fn(),
   updateSessionCount: vi.fn(),
+  setBackgroundHeartbeatCallback: vi.fn(),
+  getBackgroundHeartbeatState: vi.fn(() => ({ isAlive: true, lastHeartbeatAt: Date.now() })),
+  isBackgroundHeartbeatAlive: vi.fn(() => true),
+  recordBackgroundHeartbeat: vi.fn(),
 }));
 
 vi.mock('../plugins/BackgroundServicePlugin', () => ({
   startBackgroundService: backgroundServiceHarness.startBackgroundService,
   stopBackgroundService: backgroundServiceHarness.stopBackgroundService,
   updateSessionCount: backgroundServiceHarness.updateSessionCount,
+  setBackgroundHeartbeatCallback: backgroundServiceHarness.setBackgroundHeartbeatCallback,
+  getBackgroundHeartbeatState: backgroundServiceHarness.getBackgroundHeartbeatState,
+  isBackgroundHeartbeatAlive: backgroundServiceHarness.isBackgroundHeartbeatAlive,
+  recordBackgroundHeartbeat: backgroundServiceHarness.recordBackgroundHeartbeat,
 }));
 
 const baseSession = {

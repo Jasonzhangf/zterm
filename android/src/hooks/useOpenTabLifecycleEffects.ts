@@ -5,7 +5,13 @@ import { shouldResumeForeground } from '@zterm/shared/terminal/foreground-resume
 import { SESSION_STATUS_EVENT } from '../contexts/SessionContext';
 import { createForegroundRefreshRuntime, markForegroundRuntimeHidden } from '../lib/app-foreground-refresh';
 import { runtimeDebug } from '../lib/runtime-debug';
-import { startBackgroundService, stopBackgroundService, updateSessionCount } from '../plugins/BackgroundServicePlugin';
+import {
+  startBackgroundService,
+  stopBackgroundService,
+  updateSessionCount,
+  setBackgroundHeartbeatCallback,
+  recordBackgroundHeartbeat,
+} from '../plugins/BackgroundServicePlugin';
 import type { Session } from '../lib/types';
 import type { SessionTargetNetworkSignal } from '../contexts/session-context-target-network-probe-runtime';
 
@@ -40,6 +46,8 @@ interface UseOpenTabLifecycleEffectsOptions {
     signal: SessionTargetNetworkSignal,
   ) => void;
   bumpFollowResetEpoch: () => void;
+  /** 后台心跳发送接口 */
+  sendBackgroundHeartbeat?: () => void;
 }
 
 export function useBackgroundLiveSessionHandoff(options: {
@@ -117,7 +125,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     bumpFollowResetEpoch,
   };
   const nativeBackgroundServiceRunningRef = useRef(false);
-
+  // sessionsRefForHeartbeatRef kept for potential future use
   const maybeProjectForegroundResume = useCallback((reason: ForegroundResumeSignalReason) => {
     const now = Date.now();
     callbacksRef.current.notifyTargetNetworkSignal({
@@ -173,17 +181,33 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
       sessionsRef.current.filter((session) => session.state !== 'closed').length
     );
 
+    /**
+     * 后台心跳回调 - 定期发送 ping 保持连接活跃
+     */
+    const sendBackgroundHeartbeat = () => {
+      if (!options.sendBackgroundHeartbeat) {
+        return;
+      }
+      options.sendBackgroundHeartbeat();
+      recordBackgroundHeartbeat();
+      runtimeDebug('app.background.heartbeat.sent', {});
+    };
     const startNativeBackgroundService = () => {
       const sessionCount = countRetainedSessions();
       if (sessionCount <= 0) {
         if (nativeBackgroundServiceRunningRef.current) {
           stopBackgroundService();
+          setBackgroundHeartbeatCallback(null);
           nativeBackgroundServiceRunningRef.current = false;
         }
         return;
       }
       nativeBackgroundServiceRunningRef.current = true;
       startBackgroundService(sessionCount);
+
+      // 设置后台心跳回调
+      setBackgroundHeartbeatCallback(sendBackgroundHeartbeat);
+
       runtimeDebug('app.background.service.start', {
         sessionCount,
         handoffWakeLockMs: BACKGROUND_HANDOFF_WAKE_LOCK_MS,
@@ -195,6 +219,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
         return;
       }
       nativeBackgroundServiceRunningRef.current = false;
+      setBackgroundHeartbeatCallback(null);
       stopBackgroundService();
       runtimeDebug('app.background.service.stop', {});
     };
@@ -316,6 +341,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     }
     if (retainedSessionCount <= 0) {
       nativeBackgroundServiceRunningRef.current = false;
+      setBackgroundHeartbeatCallback(null);
       stopBackgroundService();
       runtimeDebug('app.background.service.stop.empty', {});
       return;

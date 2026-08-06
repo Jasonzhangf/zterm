@@ -1,8 +1,25 @@
+import { Capacitor, registerPlugin } from '@capacitor/core';
+
 /**
  * BackgroundServicePlugin - 前端与 Android 后台服务的接口
+ *
+ * 后台心跳维持机制：
+ * - 进入后台时启动 BackgroundService (Android 原生保活)
+ * - Web 层维护一个轻量心跳定时器，每30秒发送 ping
+ * - 心跳状态记录，供恢复时判断连接是否仍然有效
  */
 
-import { Capacitor, registerPlugin } from '@capacitor/core';
+// 后台心跳间隔：30秒
+const BACKGROUND_HEARTBEAT_INTERVAL_MS = 30 * 1000;
+
+// 心跳超时：超过90秒没有心跳认为连接已断开
+const BACKGROUND_HEARTBEAT_TIMEOUT_MS = 3 * BACKGROUND_HEARTBEAT_INTERVAL_MS;
+
+export interface BackgroundHeartbeatState {
+  lastHeartbeatAt: number;
+  sessionCount: number;
+  isBackgroundActive: boolean;
+}
 
 interface BackgroundServiceOptions {
   sessionCount: number;
@@ -16,40 +33,132 @@ interface BackgroundServiceNativePlugin {
 
 const BackgroundService = registerPlugin<BackgroundServiceNativePlugin>('BackgroundService');
 
+// 后台心跳状态（单例）
+let heartbeatTimerId: ReturnType<typeof setInterval> | null = null;
+let heartbeatState: BackgroundHeartbeatState = {
+  lastHeartbeatAt: 0,
+  sessionCount: 0,
+  isBackgroundActive: false,
+};
+let backgroundHeartbeatCallback: (() => void) | null = null;
+
+/**
+ * 设置后台心跳回调 - 在后台时定期调用
+ */
+export function setBackgroundHeartbeatCallback(callback: (() => void) | null): void {
+  backgroundHeartbeatCallback = callback;
+}
+
+/**
+ * 获取后台心跳状态 - 用于恢复时判断连接是否仍然有效
+ */
+export function getBackgroundHeartbeatState(): BackgroundHeartbeatState {
+  return { ...heartbeatState };
+}
+
+/**
+ * 检查后台心跳是否有效
+ */
+export function isBackgroundHeartbeatAlive(): boolean {
+  if (!heartbeatState.isBackgroundActive) {
+    return false;
+  }
+  const now = Date.now();
+  const elapsed = now - heartbeatState.lastHeartbeatAt;
+  return elapsed < BACKGROUND_HEARTBEAT_TIMEOUT_MS;
+}
+
+/**
+ * 记录一次心跳成功
+ */
+export function recordBackgroundHeartbeat(): void {
+  heartbeatState.lastHeartbeatAt = Date.now();
+}
+
+/**
+ * 开始后台心跳定时器
+ */
+function startBackgroundHeartbeatTimer(sessionCount: number): void {
+  stopBackgroundHeartbeatTimer();
+
+  heartbeatState = {
+    lastHeartbeatAt: Date.now(),
+    sessionCount,
+    isBackgroundActive: true,
+  };
+
+  heartbeatTimerId = setInterval(() => {
+    if (backgroundHeartbeatCallback) {
+      heartbeatState.lastHeartbeatAt = Date.now();
+      backgroundHeartbeatCallback();
+    }
+  }, BACKGROUND_HEARTBEAT_INTERVAL_MS);
+}
+
+/**
+ * 停止后台心跳定时器
+ */
+function stopBackgroundHeartbeatTimer(): void {
+  if (heartbeatTimerId !== null) {
+    clearInterval(heartbeatTimerId);
+    heartbeatTimerId = null;
+  }
+  heartbeatState.isBackgroundActive = false;
+}
+
 /**
  * 启动后台服务
+ * 同时启动 Android 原生服务和 Web 层心跳定时器
  */
 export function startBackgroundService(sessionCount: number = 0): void {
   if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
+    if (sessionCount > 0) {
+      startBackgroundHeartbeatTimer(sessionCount);
+    }
     return;
   }
   void BackgroundService.start({ sessionCount }).catch((error) => {
     console.warn('[BackgroundService] start failed:', error);
   });
+  if (sessionCount > 0) {
+    startBackgroundHeartbeatTimer(sessionCount);
+  }
 }
 
 /**
  * 停止后台服务
+ * 同时停止 Android 原生服务和 Web 层心跳定时器
  */
 export function stopBackgroundService(): void {
   if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
+    stopBackgroundHeartbeatTimer();
     return;
   }
   void BackgroundService.stop().catch((error) => {
     console.warn('[BackgroundService] stop failed:', error);
   });
+  stopBackgroundHeartbeatTimer();
 }
 
 /**
  * 更新 Session 数量
+ * 同时更新 Android 通知和 Web 层心跳状态
  */
 export function updateSessionCount(count: number): void {
   if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
+    heartbeatState.sessionCount = count;
+    if (count <= 0) {
+      stopBackgroundHeartbeatTimer();
+    }
     return;
   }
   void BackgroundService.updateSessionCount({ sessionCount: count }).catch((error) => {
     console.warn('[BackgroundService] updateSessionCount failed:', error);
   });
+  heartbeatState.sessionCount = count;
+  if (count <= 0) {
+    stopBackgroundHeartbeatTimer();
+  }
 }
 
 /**

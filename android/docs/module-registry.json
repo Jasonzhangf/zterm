@@ -97,7 +97,8 @@
         "src/lib/page-state.ts",
         "src/plugins/",
         "src/lib/session-attachment-store.ts",
-        "src/lib/session-attachment-fetch-runtime.ts"
+        "src/lib/session-attachment-fetch-runtime.ts",
+        "src/components/terminal/AttachmentDrawer.tsx"
       ]
     },
     {
