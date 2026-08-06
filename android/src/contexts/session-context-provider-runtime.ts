@@ -26,6 +26,10 @@ import type {
   HandleSocketServerMessageFn,
 } from './session-context-provider-assembly-types';
 import type { RemoteWindowTargetCatalogCacheStore } from './session-context-remote-window-runtime';
+import { createSessionAttachmentStore } from '../lib/session-attachment-store';
+import { createSessionAttachmentFetchRuntime } from '../lib/session-attachment-fetch-runtime';
+import type { SessionAttachmentStore } from '../lib/session-attachment-store';
+import type { SessionAttachmentFetchRuntime } from '../lib/session-attachment-fetch-runtime';
 
 export function useSessionProviderRuntime(options: {
   appForegroundActive?: boolean;
@@ -97,6 +101,13 @@ export function useSessionProviderRuntime(options: {
   const foregroundActiveRef = useRef(options.appForegroundActive !== false);
   const handleSocketConnectedBaselineRef = useRef<HandleSocketConnectedBaselineFn | null>(null);
   const finalizeSocketFailureBaselineRef = useRef<FinalizeSocketFailureBaselineFn | null>(null);
+  const attachmentStoreRef = useRef<SessionAttachmentStore>(createSessionAttachmentStore());
+  const attachmentFetchRuntimeRef = useRef<SessionAttachmentFetchRuntime>(createSessionAttachmentFetchRuntime({
+    attachmentStore: attachmentStoreRef.current,
+    deviceId: '',
+    fetchDaemonHttpAsset: async () => { throw new Error('not initialized'); },
+    acknowledgeAsset: async () => {},
+  }));
   const handleSocketServerMessageRef = useRef<HandleSocketServerMessageFn | null>(null);
 
   useEffect(() => () => {
@@ -139,6 +150,8 @@ export function useSessionProviderRuntime(options: {
       handleSocketConnectedBaselineRef,
       finalizeSocketFailureBaselineRef,
       handleSocketServerMessageRef,
+      attachmentStoreRef,
+      attachmentFetchRuntimeRef,
     },
   };
 }

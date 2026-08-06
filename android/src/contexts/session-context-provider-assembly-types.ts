@@ -48,6 +48,8 @@ import type {
   SessionTargetNetworkSignal,
 } from './session-context-target-network-probe-runtime';
 import type { SessionPullStates } from './session-pull-state-helpers';
+import type { SessionAttachmentStore } from '../lib/session-attachment-store';
+import type { SessionAttachmentFetchRuntime } from '../lib/session-attachment-fetch-runtime';
 import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
 import type { SessionVisibleRangeState } from './session-visible-range-helpers';
 
@@ -103,6 +105,8 @@ export interface SessionProviderRuntimeRefs {
   handleSocketConnectedBaselineRef: MutableRefObject<HandleSocketConnectedBaselineFn | null>;
   finalizeSocketFailureBaselineRef: MutableRefObject<FinalizeSocketFailureBaselineFn | null>;
   handleSocketServerMessageRef: MutableRefObject<HandleSocketServerMessageFn | null>;
+  attachmentStoreRef: MutableRefObject<SessionAttachmentStore>;
+  attachmentFetchRuntimeRef: MutableRefObject<SessionAttachmentFetchRuntime>;
 }
 
 export interface SessionProviderAssembliesSharedOptions {

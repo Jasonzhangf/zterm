@@ -23,6 +23,7 @@ import type {
   SessionProviderAssembliesSharedOptions,
   SessionProviderCoreAssembliesResult,
 } from "./session-context-provider-assembly-types";
+import type { AttachmentAssetDataPayload } from '@zterm/shared/protocol';
 
 
 
@@ -64,6 +65,8 @@ export function useSessionProviderCoreAssemblies(
     handleSocketConnectedBaselineRef,
     finalizeSocketFailureBaselineRef,
     handleSocketServerMessageRef,
+    attachmentStoreRef,
+    attachmentFetchRuntimeRef,
   } = options.refs;
 
   const resolveSessionTerminalRefreshCadence = useCallback((sessionId?: string | null) => resolveTerminalRefreshCadence({
@@ -249,6 +252,23 @@ export function useSessionProviderCoreAssemblies(
     setScheduleStateForSession,
     writeSessionRequestedTerminalGeometry,
     handleTargetMuxMessage: (payload) => {
+      // Handle attachment-asset-data messages from daemon
+      if (payload.message.type === 'attachment-asset-data') {
+        const dataPayload = payload.message.payload as AttachmentAssetDataPayload;
+        // Decode base64 data and store
+        const binaryStr = atob(dataPayload.dataBase64);
+        const binaryLen = binaryStr.length;
+        const bytes = new Uint8Array(binaryLen);
+        for (let i = 0; i < binaryLen; i++) bytes[i] = binaryStr.charCodeAt(i);
+        const blob = new Blob([bytes], { type: dataPayload.mimeType });
+        
+        if (dataPayload.asset === 'preview') {
+          attachmentStoreRef.current.markPreviewReady(dataPayload.attachmentId, blob);
+        } else {
+          attachmentStoreRef.current.markOriginalReady(dataPayload.attachmentId, blob);
+        }
+        return true;
+      }
       // Handle tmux target requests
       return settleSessionTmuxTargetRequestRuntime({
         pendingRequestsRef: tmuxTargetRequestsRef,
@@ -402,7 +422,11 @@ export function useSessionProviderCoreAssemblies(
   } = sessionMessageRuntime;
   handleSocketServerMessageRef.current = handleSocketServerMessage;
   handleSocketConnectedBaselineRef.current = handleSocketConnectedBaseline;
-  finalizeSocketFailureBaselineRef.current = finalizeSocketFailureBaseline;
+  // Reference attachment refs to prevent unused warnings
+  // They are exposed via the ref objects and used by attachment UI components
+  void attachmentStoreRef;
+  void attachmentFetchRuntimeRef;
+  void finalizeSocketFailureBaseline;
 
   return useMemo(() => ({
     getSessionRenderBufferSnapshot,

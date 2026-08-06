@@ -80,6 +80,8 @@ export function SessionProvider({
       handleSocketConnectedBaselineRef,
       finalizeSocketFailureBaselineRef,
       handleSocketServerMessageRef,
+      attachmentStoreRef,
+      attachmentFetchRuntimeRef,
     },
   } = useSessionProviderRuntime({
     appForegroundActive,
@@ -170,6 +172,8 @@ export function SessionProvider({
       handleSocketConnectedBaselineRef,
       finalizeSocketFailureBaselineRef,
       handleSocketServerMessageRef,
+      attachmentStoreRef,
+      attachmentFetchRuntimeRef,
     },
   });
 
