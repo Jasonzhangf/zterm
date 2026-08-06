@@ -961,7 +961,9 @@
         "src/lib/session-runtime-cadence.ts",
         "src/lib/session-semantic-identity.ts",
         "src/lib/tmux-session-list.ts",
-        "src/lib/tmux-sessions.ts"
+        "src/lib/tmux-sessions.ts",
+        "src/lib/reconnect-host-fallback.ts",
+        "src/lib/reconnect-host-probe.ts"
       ]
     },
     {

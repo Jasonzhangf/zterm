@@ -267,6 +267,7 @@ export function useSessionProviderCoreAssemblies(
     writeTargetTerminalSocket,
     writeTargetTerminalMuxReady,
     writeSessionTransportSocket,
+    writeSessionTransportHost,
     ensureSessionTerminalChannel,
     writeSessionTerminalChannelState,
     moveSessionTransportSocketAside,
@@ -374,6 +375,7 @@ export function useSessionProviderCoreAssemblies(
     writeSessionTerminalChannelState,
     writeSessionRequestedTerminalGeometry,
     writeSessionTransportSocket,
+    writeSessionTransportHost,
     writeSessionTransportToken,
   ]);
 

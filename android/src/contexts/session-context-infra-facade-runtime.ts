@@ -12,6 +12,7 @@ import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import type { BufferFrameAssemblyResourceState } from './session-buffer-frame-assembly';
+import { probeHostReachable } from '../lib/reconnect-host-probe';
 import type { Host, Session, SessionBufferState, SessionRenderBufferSnapshot, SessionScheduleState, TerminalBufferPayload } from '../lib/types';
 import type { RecordSessionTxOptions } from './session-context-pull-runtime';
 import type { RevisionResetExpectation, SessionAction, SessionManagerState } from './session-context-core';
@@ -612,6 +613,10 @@ export function createSessionInfraFacadeRuntime(options: {
     ...transportAccessors,
     readSessionTransportToken,
     writeSessionTransportToken,
+    probeReconnectHost: async (bridgeHost: string, bridgePort: number) => {
+      const result = await probeHostReachable(bridgeHost, bridgePort, { timeoutMs: 1500 });
+      return result.reachable;
+    },
     isSessionTransportActive,
     shouldAcceptSessionLiveBuffer,
     hasPendingSessionTransportOpen,

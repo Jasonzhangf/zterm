@@ -470,12 +470,14 @@ export function createSessionTransportOrchestrationRuntime(options: {
   readSessionTransportToken: (sessionId: string) => string | null;
   readSessionTransportHost: (sessionId: string) => Host | null;
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
+  writeSessionTransportHost: (sessionId: string, host: Host) => unknown;
   writeSessionTargetControlSocket: (sessionId: string, socket: BridgeTransportSocket | null) => unknown;
   writeSessionTargetTerminalSocket: (sessionId: string, socket: BridgeTransportSocket | null) => unknown;
   writeSessionTargetTerminalMuxReady: (sessionId: string, ready: boolean) => unknown;
   writeTargetTerminalSocket: (targetKey: string, socket: BridgeTransportSocket | null) => unknown;
   writeTargetTerminalMuxReady: (targetKey: string, ready: boolean) => unknown;
   writeSessionTransportSocket: (sessionId: string, socket: BridgeTransportSocket | null) => unknown;
+  probeReconnectHost?: (bridgeHost: string, bridgePort: number) => Promise<boolean>;
   ensureSessionTerminalChannel: (sessionId: string, options?: { channelId?: string; now?: number; bodySubscribed?: boolean }) => {
     channelId: string;
     sessionId: string;
@@ -892,7 +894,9 @@ export function createSessionTransportOrchestrationRuntime(options: {
       computeReconnectDelay,
       updateSessionSync: options.updateSessionSync,
       writeSessionTransportToken: options.writeSessionTransportToken,
+      writeSessionTransportHost: options.writeSessionTransportHost,
       queueReconnectTransportOpenIntent,
+      probeReconnectHost: options.probeReconnectHost,
     });
   };
 

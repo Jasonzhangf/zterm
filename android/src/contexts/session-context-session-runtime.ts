@@ -1,4 +1,6 @@
 import { getResolvedSessionName } from '../lib/connection-target';
+import { buildReconnectHostFallback } from '../lib/reconnect-host-fallback';
+import { probeHostReachable } from '../lib/reconnect-host-probe';
 import { buildTransportTargetKey } from '../lib/session-transport-runtime';
 import { createSessionBufferState } from '../lib/terminal-buffer';
 import type { Host, Session, SessionBufferState, SessionScheduleState } from '../lib/types';
@@ -156,6 +158,7 @@ export function createSessionRuntime(options: {
   };
   runtimeDebug: RuntimeDebugFn;
   resolveSessionCacheLines: (rows?: number | null) => number;
+  scheduleSessionRenderCommit?: (sessionId: string) => void;
   createSessionSync: (session: Session) => void;
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
   writeSessionTransportHost?: (sessionId: string, host: Host) => unknown;
@@ -264,6 +267,9 @@ export function createSessionRuntime(options: {
     cacheLines: options.resolveSessionCacheLines(options.defaultViewport.rows),
   });
   options.refs.sessionBufferStoreRef.current.commitBuffer(sessionId, initialBuffer);
+  if (initialBuffer.lines.length > 0) {
+    options.scheduleSessionRenderCommit?.(sessionId);
+  }
   options.refs.sessionHeadStoreRef.current.setHead(sessionId, {
     daemonHeadRevision: 0,
     daemonHeadEndIndex: 0,
@@ -592,7 +598,9 @@ export function startReconnectAttemptRuntime(options: {
   computeReconnectDelay: (attempt: number) => number;
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
+  writeSessionTransportHost?: (sessionId: string, host: Host) => void;
   queueReconnectTransportOpenIntent: (sessionId: string, host: Host) => void;
+  probeReconnectHost?: (bridgeHost: string, bridgePort: number) => Promise<boolean>;
 }) {
   if (options.refs.reconnectStore.isManualClosed(options.sessionId)) {
     options.refs.reconnectStore.deleteRuntime(options.sessionId);
@@ -631,11 +639,103 @@ export function startReconnectAttemptRuntime(options: {
       buildSessionReconnectAttemptProgressUpdates(liveRuntime.attempt + 1),
     );
     options.writeSessionTransportToken(options.sessionId, null);
-    options.queueReconnectTransportOpenIntent(options.sessionId, liveHost);
+    // Probe the current host before opening the reconnect intent. If the
+    // cached bridgeHost is unreachable (e.g. switched networks, daemon moved
+    // IP) we fall through to the next candidate endpoint in priority order
+    // before queueing the open intent. This prevents a tight reconnect loop
+    // against a stale host.
+    void runReconnectHostProbeAndFallback({
+      sessionId: options.sessionId,
+      host: liveHost,
+      attempt: liveRuntime.attempt + 1,
+      probe: options.probeReconnectHost,
+      writeHost: options.writeSessionTransportHost,
+      updateSessionSync: options.updateSessionSync,
+      queueReconnectTransportOpenIntent: options.queueReconnectTransportOpenIntent,
+      refreshStore: options.refs.reconnectStore,
+      isManualClosed: () => options.refs.reconnectStore.isManualClosed(options.sessionId),
+      deleteRuntime: () => options.refs.reconnectStore.deleteRuntime(options.sessionId),
+    });
   }, delay) as unknown as number;
   options.refs.reconnectStore.schedule(options.sessionId, {
     attempt: reconnectRuntime.attempt,
     nextDelayMs: null,
     timer,
   });
+}
+
+type ReconnectHostProbeAndFallbackOptions = {
+  sessionId: string;
+  host: Host;
+  attempt: number;
+  probe?: (bridgeHost: string, bridgePort: number) => Promise<boolean>;
+  writeHost?: (sessionId: string, host: Host) => void;
+  updateSessionSync: (id: string, updates: Partial<Session>) => void;
+  queueReconnectTransportOpenIntent: (sessionId: string, host: Host) => void;
+  refreshStore: SessionReconnectStore;
+  isManualClosed: () => boolean;
+  deleteRuntime: () => void;
+};
+
+async function runReconnectHostProbeAndFallback(options: ReconnectHostProbeAndFallbackOptions) {
+  const fallback = buildReconnectHostFallback(options.host);
+  if (fallback.candidates.length === 0) {
+    options.queueReconnectTransportOpenIntent(options.sessionId, options.host);
+    return;
+  }
+
+  // Default probe implementation - keep tiny (1.5s) so a dead host does not
+  // delay the user-visible reconnect. The probe is skipped entirely if the
+  // host has fewer than 2 candidates (no fallback to choose).
+  const probe = options.probe ?? (async (bridgeHost: string, bridgePort: number) => {
+    const result = await probeHostReachable(bridgeHost, bridgePort, { timeoutMs: 1500 });
+    return result.reachable;
+  });
+
+  const candidates = fallback.candidates;
+  for (let index = 0; index < candidates.length; index += 1) {
+    const candidate = candidates[index]!;
+    if (options.isManualClosed()) {
+      options.deleteRuntime();
+      return;
+    }
+    let reachable = true;
+    if (index > 0) {
+      try {
+        reachable = await probe(candidate.bridgeHost, candidate.bridgePort);
+      } catch {
+        reachable = false;
+      }
+    }
+    if (!reachable) {
+      continue;
+    }
+
+    let nextHost: Host = options.host;
+    if (
+      candidate.bridgeHost.trim().toLowerCase() !== options.host.bridgeHost.trim().toLowerCase()
+      || candidate.bridgePort !== options.host.bridgePort
+    ) {
+      nextHost = {
+        ...options.host,
+        bridgeHost: candidate.bridgeHost,
+        bridgePort: candidate.bridgePort,
+      };
+      options.writeHost?.(options.sessionId, nextHost);
+      options.updateSessionSync(options.sessionId, {
+        bridgeHost: candidate.bridgeHost,
+        bridgePort: candidate.bridgePort,
+        lastError: `reconnect via ${candidate.label}`,
+      });
+    }
+    options.queueReconnectTransportOpenIntent(options.sessionId, nextHost);
+    return;
+  }
+
+  // All candidates unreachable. Surface this so the user can see we did try
+  // rather than silently re-queueing against a dead host.
+  options.updateSessionSync(options.sessionId, {
+    lastError: 'reconnect: all host candidates unreachable',
+  });
+  options.deleteRuntime();
 }
