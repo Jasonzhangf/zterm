@@ -44,6 +44,8 @@ export interface PaneTabsProps {
   tabs: PaneTabDescriptor[];
   backButton?: {
     onBack: () => void;
+    badge?: string;
+    onBadgeClick?: () => void;
   };
   plusButton?: {
     onQuickNew: () => void;
@@ -149,9 +151,38 @@ export function PaneTabs(props: PaneTabsProps) {
               fontSize: header.backButtonFontSize,
               cursor: 'pointer',
               flexShrink: 0,
+              position: 'relative',
             }}
           >
             ‹
+            {backButton.badge ? (
+              <span
+                onClick={(e) => {
+                  e.stopPropagation();
+                  backButton.onBadgeClick?.();
+                }}
+                style={{
+                  position: 'absolute',
+                  top: -4,
+                  right: -4,
+                  minWidth: 16,
+                  height: 16,
+                  borderRadius: 8,
+                  backgroundColor: '#ff4d4f',
+                  color: '#fff',
+                  fontSize: 10,
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  padding: '0 3px',
+                  cursor: 'pointer',
+                  zIndex: 10,
+                }}
+              >
+                {backButton.badge}
+              </span>
+            ) : null}
           </button>
         ) : null}
 

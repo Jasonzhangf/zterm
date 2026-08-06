@@ -22,6 +22,7 @@ import type { TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
 import type { SessionBufferStore } from '../lib/session-buffer-store';
 import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
 import type { SessionHeadStore } from '../lib/session-head-store';
+import type { SessionAttachmentStore } from '../lib/session-attachment-store';
 import type { SessionTransportResource } from '../lib/session-transport-runtime';
 import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
 import type { RemoteWindowControlMessage } from '../lib/remote-window-message-runtime';
@@ -177,7 +178,23 @@ export function createSessionPublicFacadeRuntime(options: {
   };
 
   const setLiveSessionIds = (ids: string[]) => {
+    const previousLiveSessionIds = new Set(options.stateRef.current.liveSessionIds || []);
     options.setLiveSessionIdsSync(ids);
+    for (const sessionId of options.stateRef.current.liveSessionIds || []) {
+      if (previousLiveSessionIds.has(sessionId)) {
+        continue;
+      }
+      const terminalChannel = options.daemonConnection.readSessionResource(sessionId).channel;
+      if (!terminalChannel || (terminalChannel.state !== 'closed' && terminalChannel.state !== 'closing')) {
+        continue;
+      }
+      options.ensureActiveSessionFresh({
+        sessionId,
+        source: 'active-tick',
+        forceHead: true,
+        allowReconnectIfUnavailable: true,
+      });
+    }
   };
 
   const setActiveBodySubscriptionSuppressed = (suppressed: boolean) => {
@@ -362,6 +379,8 @@ export function buildSessionContextValueRuntime(options: {
   onFileTransferMessage: (handler: (msg: any) => void) => () => void;
   onRemoteWindowMessage: (handler: (msg: RemoteWindowControlMessage) => void) => () => void;
   sendMessageRaw: (sessionId: string, msg: unknown) => void;
+  getPendingAttachmentCount: () => number;
+  getPendingAttachments: () => ReturnType<SessionAttachmentStore['getAll']>;
 }): SessionContextValue {
   return {
     state: options.state,
@@ -407,5 +426,7 @@ export function buildSessionContextValueRuntime(options: {
     onFileTransferMessage: options.onFileTransferMessage,
     onRemoteWindowMessage: options.onRemoteWindowMessage,
     sendMessageRaw: options.sendMessageRaw,
+    getPendingAttachmentCount: options.getPendingAttachmentCount,
+    getPendingAttachments: options.getPendingAttachments,
   };
 }

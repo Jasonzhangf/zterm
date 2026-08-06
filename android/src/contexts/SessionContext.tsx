@@ -222,6 +222,8 @@ export function SessionProvider({
       remoteWindowMessageRuntimeRef.current.subscribe(handler)
     ),
     sendMessageRaw,
+    getPendingAttachmentCount: () => attachmentStoreRef.current.getPendingCount(),
+    getPendingAttachments: () => attachmentStoreRef.current.getAll(),
   });
 
   contextRuntimeRef.current = {
@@ -267,6 +269,8 @@ export function SessionProvider({
       remoteWindowMessageRuntimeRef.current.subscribe(handler)
     ),
     sendMessageRaw,
+    getPendingAttachmentCount: () => attachmentStoreRef.current.getPendingCount(),
+    getPendingAttachments: () => attachmentStoreRef.current.getAll(),
   };
 
   const stableFacade = useMemo(() => ({
@@ -350,6 +354,8 @@ export function SessionProvider({
     onFileTransferMessage: (handler: (msg: any) => void) => {
       return fileTransferMessageRuntimeRef.current.subscribe(handler);
     },
+    getPendingAttachmentCount: () => attachmentStoreRef.current.getPendingCount(),
+    getPendingAttachments: () => attachmentStoreRef.current.getAll(),
     onRemoteWindowMessage: (handler: (msg: RemoteWindowControlMessage) => void) => {
       return remoteWindowMessageRuntimeRef.current.subscribe(handler);
     },

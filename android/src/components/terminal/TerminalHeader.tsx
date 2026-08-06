@@ -49,6 +49,8 @@ export interface TerminalHeaderProps {
   onAssignSessionToPane?: (id: string, paneId: string) => void;
   onMoveSessionToOtherPane?: (id: string) => void;
   onActivatePane?: (paneId: string) => void;
+  attachmentBadge?: string;
+  onAttachmentBadgeClick?: () => void;
 }
 
 function formatResolvedPath(
@@ -93,6 +95,8 @@ function TerminalHeaderComponent({
   onAssignSessionToPane,
   onMoveSessionToOtherPane,
   onActivatePane,
+  attachmentBadge,
+  onAttachmentBadgeClick,
 }: TerminalHeaderProps) {
   const headerRootRef = useRef<HTMLDivElement | null>(null);
   const paneMenuRef = useRef<HTMLDivElement | null>(null);
@@ -252,7 +256,11 @@ function TerminalHeaderComponent({
               paneIndex={paneIndex}
               isActivePane={group.isActivePane}
               tabs={tabs}
-              backButton={showBackButton && groupIndex === 0 ? { onBack } : undefined}
+              backButton={showBackButton && groupIndex === 0 ? {
+                onBack,
+                badge: attachmentBadge,
+                onBadgeClick: onAttachmentBadgeClick,
+              } : undefined}
               plusButton={{
                 onQuickNew: () => onOpenQuickTabPicker(splitVisible ? group.paneId : undefined),
                 onOpenTabManager: () => onOpenTabManager(splitVisible ? group.paneId : undefined),

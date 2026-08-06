@@ -1,4 +1,5 @@
 import { memo as ReactMemo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useSession } from '../contexts/SessionContext';
 import { Keyboard } from '@capacitor/keyboard';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
@@ -7,6 +8,7 @@ import type { SessionRenderBufferStore } from '../lib/session-render-buffer-stor
 import { createSessionViewportModeStore } from '../lib/session-viewport-mode-store';
 import { SessionScheduleSheet } from '../components/terminal/SessionScheduleSheet';
 import { FileTransferSheet } from '../components/terminal/FileTransferSheet';
+import { AttachmentDrawer } from '../components/terminal/AttachmentDrawer';
 import { RemoteScreenshotSheet } from '../components/terminal/RemoteScreenshotSheet';
 import {
   RemoteWindowOverlay,
@@ -343,10 +345,8 @@ type VirtualKeyboardApi = {
 };
 
 export const NETWORK_BANNER_GRACE_MS = 10_000;
-export const NETWORK_BANNER_ACTIONABLE_RECONNECT_ATTEMPT = 4;
 
 export function resolveConnectionIssueActionable(options: {
-  networkOnline: boolean;
   sessionState: Session['state'] | SessionDebugOverlayMetrics['status'] | null | undefined;
   reconnectAttempt: number | null | undefined;
 }) {
@@ -354,21 +354,11 @@ export function resolveConnectionIssueActionable(options: {
 }
 
 export function resolveConnectionIssueActionableKey(options: {
-  networkOnline: boolean;
   sessionState: Session['state'] | SessionDebugOverlayMetrics['status'] | null | undefined;
   reconnectAttempt: number | null | undefined;
 }) {
-  if (!options.networkOnline) {
-    return 'offline';
-  }
   if (options.sessionState === 'error') {
     return 'terminal-error';
-  }
-  if (
-    options.sessionState === 'reconnecting'
-    && (options.reconnectAttempt || 0) >= NETWORK_BANNER_ACTIONABLE_RECONNECT_ATTEMPT
-  ) {
-    return 'reconnect-exhausted';
   }
   return null;
 }
@@ -433,7 +423,6 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
   onForceRelaySession,
   onUseAutoSession,
   onUseWebSocketSession,
-  suppressReconnectUi,
 }: {
   session: Session | null;
   getSessionDebugMetrics?: (sessionId: string) => SessionDebugOverlayMetrics | null;
@@ -441,7 +430,6 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
   onForceRelaySession?: (id: string) => void;
   onUseAutoSession?: (id: string) => void;
   onUseWebSocketSession?: (id: string) => void;
-  suppressReconnectUi?: boolean;
 }) {
   const [tick, setTick] = useState(0);
   const [routeMenuOpen, setRouteMenuOpen] = useState(false);
@@ -466,10 +454,7 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
   const uplinkBps = metrics?.uplinkBps || 0;
   const downlinkBps = metrics?.downlinkBps || 0;
   const routeLabel = formatConnectionRouteLabel(session);
-  const rawStatus = resolveEffectiveConnectionStatus(session, metrics);
-  const status = suppressReconnectUi && session.state === 'reconnecting'
-    ? 'waiting'
-    : rawStatus;
+  const status = resolveEffectiveConnectionStatus(session, metrics);
   const activityLabel = resolveConnectionActivityLabel(session, status);
   const statusTone = status === 'error' || status === 'closed'
     ? '#ff8a8a'
@@ -712,6 +697,7 @@ interface TerminalPageProps {
   onQuickActionsChange?: (actions: QuickAction[]) => void;
   onShortcutActionsChange?: (actions: TerminalShortcutAction[]) => void;
   sessionDraft: string;
+  sessionDrafts?: Record<string, string>;
   onSessionDraftChange?: (value: string, sessionId?: string) => void;
   onSessionDraftSend?: (value: string, sessionId?: string) => void;
   scheduleState?: SessionScheduleState | null;
@@ -996,6 +982,7 @@ function TerminalPageComponent({
   onQuickActionsChange,
   onShortcutActionsChange,
   sessionDraft,
+  sessionDrafts,
   onSessionDraftChange,
   onSessionDraftSend,
   scheduleState,
@@ -1049,9 +1036,6 @@ function TerminalPageComponent({
   const [terminalKeyboardRequested, setTerminalKeyboardRequested] = useState(false);
   const terminalKeyboardRequestedRef = useRef(false);
   const [androidImeVisible, setAndroidImeVisible] = useState(false);
-  const [networkOnline, setNetworkOnline] = useState(() =>
-    typeof navigator === 'undefined' ? true : navigator.onLine,
-  );
   const [connectionIssueVisible, setConnectionIssueVisible] = useState(false);
   const [keyboardInset, setKeyboardInset] = useState(0);
   const [quickBarHeight, setQuickBarHeight] = useState(0);
@@ -1065,6 +1049,8 @@ function TerminalPageComponent({
     nonce: number;
   } | null>(null);
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
+  const [attachmentDrawerOpen, setAttachmentDrawerOpen] = useState(false);
+  const { getPendingAttachmentCount, getPendingAttachments } = useSession();
   const initialSessionPreviewRead = useMemo(() => {
     const storage = getBrowserStorage();
     return storage
@@ -1078,6 +1064,7 @@ function TerminalPageComponent({
   );
   const [sessionPreviewSelectionMode, setSessionPreviewSelectionMode] = useState(false);
   const [sessionPreviewOpen, setSessionPreviewOpen] = useState(false);
+  const [sessionPreviewInputSessionId, setSessionPreviewInputSessionId] = useState<string | null>(null);
   const [sessionPreviewError, setSessionPreviewError] = useState<string | null>(() =>
     initialSessionPreviewRead.status === 'invalid' ? '预览选择存储损坏，请重新选择。' : null,
   );
@@ -1148,8 +1135,9 @@ function TerminalPageComponent({
     }
   }, [isAndroid]);
 
+  const fileTransferMessageSessionIdRef = useRef<string | null>(null);
   const sendFileTransferMessage = useCallback((msg: any) => {
-    const sessionId = activeSessionIdRef.current;
+    const sessionId = fileTransferMessageSessionIdRef.current || activeSessionIdRef.current;
     if (!sessionId || !onSendMessage) {
       return;
     }
@@ -1477,6 +1465,33 @@ function TerminalPageComponent({
     () => resolveSessionPreviewTargets(sessionPreviewSelection, sessions),
     [sessionPreviewSelection, sessions],
   );
+  const sessionPreviewInputSessionValid = Boolean(
+    sessionPreviewInputSessionId
+      && sessionPreviewSessions.some((session) => session.id === sessionPreviewInputSessionId),
+  );
+  const terminalActionSessionId = sessionPreviewOpen && sessionPreviewInputSessionValid
+    ? sessionPreviewInputSessionId
+    : uiSessionId;
+  const terminalActionSession = terminalActionSessionId
+    ? sessions.find((session) => session.id === terminalActionSessionId) || null
+    : null;
+  useEffect(() => {
+    if (!sessionPreviewOpen) {
+      if (sessionPreviewInputSessionId !== null) {
+        setSessionPreviewInputSessionId(null);
+      }
+      return;
+    }
+    if (sessionPreviewInputSessionValid) {
+      return;
+    }
+    setSessionPreviewInputSessionId(sessionPreviewSessions[0]?.id || null);
+  }, [
+    sessionPreviewInputSessionId,
+    sessionPreviewInputSessionValid,
+    sessionPreviewOpen,
+    sessionPreviewSessions,
+  ]);
   const sessionPreviewReplacementCandidates = useMemo(() => {
     const selectedIds = new Set(sessionPreviewSessions.map((session) => session.id));
     return sessions.filter((session) =>
@@ -1489,8 +1504,7 @@ function TerminalPageComponent({
     renderedPaneSessions.map((session) => session.id),
     sessionPreviewSessions.map((session) => session.id),
     sessionPreviewOpen,
-    appForegroundActive !== false,
-  ), [appForegroundActive, renderedPaneSessions, sessionPreviewOpen, sessionPreviewSessions]);
+  ), [renderedPaneSessions, sessionPreviewOpen, sessionPreviewSessions]);
   const livePaneSessionIdsKey = useMemo(
     () => livePaneSessionIds.join('||'),
     [livePaneSessionIds],
@@ -1536,7 +1550,36 @@ function TerminalPageComponent({
     }
     return buildServerIdentityAliasMap(aliasInputs);
   }, [onlineRelayDaemonDevices, serverIdentityAliasInputs]);
+  const onlineDrawerServerIdentityAliases = useMemo(() => {
+    const aliasInputs: ServerIdentityInput[] = [];
+    for (const device of onlineRelayDaemonDevices) {
+      const daemonHostId = device.daemon.hostId.trim();
+      if (!daemonHostId) {
+        continue;
+      }
+      for (const endpoint of device.daemon.endpoints || []) {
+        if (!endpoint.host?.trim() || !endpoint.port) {
+          continue;
+        }
+        aliasInputs.push({
+          bridgeHost: endpoint.host,
+          bridgePort: endpoint.port,
+          daemonHostId,
+          connectionName: device.deviceName || daemonHostId,
+        });
+      }
+    }
+    return buildServerIdentityAliasMap(aliasInputs);
+  }, [onlineRelayDaemonDevices]);
   const drawerRemoteSessions = useMemo(() => {
+    const resolveDrawerIdentity = (input: ServerIdentityInput) => {
+      const rawIdentity = resolveServerIdentity(input);
+      const onlineIdentity = resolveServerIdentity(input, onlineDrawerServerIdentityAliases);
+      if (onlineIdentity.key !== rawIdentity.key || input.daemonHostId?.trim()) {
+        return onlineIdentity;
+      }
+      return resolveServerIdentity(input, drawerServerIdentityAliases);
+    };
     const liveSessionByReuseKey = new Map<string, Session>();
     for (const session of sessions) {
       liveSessionByReuseKey.set(
@@ -1549,7 +1592,7 @@ function TerminalPageComponent({
         session,
       );
       const rawIdentity = resolveServerIdentity(session);
-      const aliasedIdentity = resolveServerIdentity(session, drawerServerIdentityAliases);
+      const aliasedIdentity = resolveDrawerIdentity(session);
       if (aliasedIdentity.key && aliasedIdentity.key !== rawIdentity.key) {
         liveSessionByReuseKey.set(
           buildSessionSemanticReuseKey({
@@ -1577,7 +1620,7 @@ function TerminalPageComponent({
     for (const group of sessionGroups) {
       const missing = new Set(group.missingSessionNames || []);
       const explicitDaemonHostId = group.daemonHostId?.trim() || '';
-      const serverIdentity = resolveServerIdentity(group, drawerServerIdentityAliases);
+      const serverIdentity = resolveDrawerIdentity(group);
       const resolvedDaemonHostId = relayDeviceByDaemonHostId.has(serverIdentity.key)
         ? serverIdentity.key
         : explicitDaemonHostId;
@@ -1669,7 +1712,7 @@ function TerminalPageComponent({
       }
     }
     return { items, targets, closeTargets, catalogLiveSessionIds };
-  }, [drawerServerIdentityAliases, relayDeviceByDaemonHostId, sessionGroups, sessions]);
+  }, [drawerServerIdentityAliases, onlineDrawerServerIdentityAliases, relayDeviceByDaemonHostId, sessionGroups, sessions]);
   const drawerHosts = useMemo<TerminalSessionDrawerHost[]>(() => {
     const hosts = new Map<string, TerminalSessionDrawerHost>();
     for (const device of onlineRelayDaemonDevices) {
@@ -1723,7 +1766,10 @@ function TerminalPageComponent({
     }
     setSessionDrawerOpen(true);
   }, [drawerHosts.length, portraitSessionDrawerEnabled, sessionDrawerOpen, sessions.length]);
-  const activeDraft = sessionDraft;
+  const activeDraft = terminalActionSessionId
+    ? (sessionDrafts?.[terminalActionSessionId]
+      ?? (terminalActionSessionId === activeSession?.id ? sessionDraft : ''))
+    : sessionDraft;
   const activeScheduleState = scheduleState || null;
   const scheduleOpen = scheduleComposerTarget !== null;
   const frozenScheduleState = scheduleComposerTarget
@@ -1741,22 +1787,19 @@ function TerminalPageComponent({
   activePaneIdRef.current = workspace.activePaneId;
 
   useEffect(() => {
-    activeSessionIdRef.current = interactiveSession?.id || null;
-  }, [interactiveSession?.id]);
+    activeSessionIdRef.current = sessionPreviewOpen
+      ? terminalActionSessionId
+      : (interactiveSession?.id || null);
+  }, [interactiveSession?.id, sessionPreviewOpen, terminalActionSessionId]);
+  useEffect(() => {
+    fileTransferMessageSessionIdRef.current = terminalActionSessionId || null;
+  }, [terminalActionSessionId]);
 
   useEffect(() => {
     if (!portraitSessionDrawerEnabled && sessionDrawerOpen) {
       setSessionDrawerOpen(false);
     }
   }, [portraitSessionDrawerEnabled, sessionDrawerOpen]);
-
-  useEffect(() => {
-    const closePreviewWhenHidden = () => {
-      if (document.visibilityState !== 'visible') setSessionPreviewOpen(false);
-    };
-    document.addEventListener('visibilitychange', closePreviewWhenHidden);
-    return () => document.removeEventListener('visibilitychange', closePreviewWhenHidden);
-  }, []);
 
   useEffect(() => {
     if (sessions.length === 0) return;
@@ -1849,15 +1892,23 @@ function TerminalPageComponent({
     }
 
     const visualViewport = window.visualViewport;
+    const handleOrientationChange = () => {
+      // Android reports the old layout metrics for one frame after rotation.
+      // Re-read after the next frame so the shell never keeps the old height.
+      scheduleViewportMetricsSync();
+      window.requestAnimationFrame(scheduleViewportMetricsSync);
+    };
 
     updateViewportMetrics();
     window.addEventListener('resize', scheduleViewportMetricsSync);
+    window.addEventListener('orientationchange', handleOrientationChange);
     visualViewport?.addEventListener('resize', scheduleViewportMetricsSync);
     if (!isAndroid) {
       visualViewport?.addEventListener('scroll', scheduleViewportMetricsSync);
     }
     return () => {
       window.removeEventListener('resize', scheduleViewportMetricsSync);
+      window.removeEventListener('orientationchange', handleOrientationChange);
       visualViewport?.removeEventListener('resize', scheduleViewportMetricsSync);
       if (!isAndroid) {
         visualViewport?.removeEventListener('scroll', scheduleViewportMetricsSync);
@@ -1872,7 +1923,7 @@ function TerminalPageComponent({
   const focusTerminalInput = useCallback(() => {
     setFocusNonce((value) => value + 1);
 
-    const input = querySessionInput(uiSessionId);
+    const input = querySessionInput(terminalActionSessionId);
     if (!input) {
       return;
     }
@@ -1880,14 +1931,14 @@ function TerminalPageComponent({
     input.focus({ preventScroll: true });
     const end = input.value.length;
     input.setSelectionRange(end, end);
-  }, [uiSessionId]);
+  }, [terminalActionSessionId]);
 
   const alignActiveTerminalToFollowForInput = useCallback(() => {
-    if (!uiSessionId) {
+    if (!terminalActionSessionId) {
       return;
     }
     setInputIntentFollowResetEpoch((value) => value + 1);
-  }, [uiSessionId]);
+  }, [terminalActionSessionId]);
   const alignActiveTerminalToFollowForInputRef = useRef(alignActiveTerminalToFollowForInput);
 
   useEffect(() => {
@@ -1943,7 +1994,7 @@ function TerminalPageComponent({
       return;
     }
     captureStableLayoutViewportHeight();
-    const routeKey = uiSessionId || '__no-session__';
+    const routeKey = terminalActionSessionId || '__no-session__';
     if (!options?.force && androidImeFocusRouteKeyRef.current === routeKey) {
       return;
     }
@@ -1959,7 +2010,7 @@ function TerminalPageComponent({
         console.warn('[TerminalPage] ImeAnchor.show() failed:', error);
       });
     }, delayMs);
-  }, [captureStableLayoutViewportHeight, clearPendingAndroidImeFocus, isAndroid, uiSessionId]);
+  }, [captureStableLayoutViewportHeight, clearPendingAndroidImeFocus, isAndroid, terminalActionSessionId]);
 
   const keepTerminalInputFocused = useCallback(() => {
     if (quickBarEditorFocused) {
@@ -1987,7 +2038,7 @@ function TerminalPageComponent({
   }, []);
 
   const handleRequestRemoteScreenshot = useCallback(async () => {
-    const targetSessionId = uiSessionId;
+    const targetSessionId = terminalActionSessionId;
     if (!targetSessionId || !onRequestRemoteScreenshot) {
       alert('当前没有可用的目标 session');
       return;
@@ -2021,7 +2072,7 @@ function TerminalPageComponent({
         remoteScreenshotPreviewRuntimeRef.current.failCapture(current, requestEpoch, error)
       ));
     }
-  }, [onRequestRemoteScreenshot, uiSessionId]);
+  }, [onRequestRemoteScreenshot, terminalActionSessionId]);
 
   const handleRequestRemoteWindowScreenshot = useCallback(async (
     sessionId: string,
@@ -2140,15 +2191,15 @@ function TerminalPageComponent({
     )) {
       return;
     }
-    onQuickActionInput?.(sequence, uiSessionId || undefined);
+    onQuickActionInput?.(sequence, terminalActionSessionId || undefined);
     if (terminalKeyboardRequested) {
       keepTerminalInputFocused();
     }
-  }, [emitRemoteWindowInputEvents, keepTerminalInputFocused, onQuickActionInput, terminalKeyboardRequested, uiSessionId]);
+  }, [emitRemoteWindowInputEvents, keepTerminalInputFocused, onQuickActionInput, terminalActionSessionId, terminalKeyboardRequested]);
 
   const handleQuickBarSessionDraftChange = useCallback((value: string) => {
-    onSessionDraftChange?.(value, uiSessionId || undefined);
-  }, [onSessionDraftChange, uiSessionId]);
+    onSessionDraftChange?.(value, terminalActionSessionId || undefined);
+  }, [onSessionDraftChange, terminalActionSessionId]);
 
   const handleQuickBarSessionDraftSend = useCallback((value: string) => {
     if (emitRemoteWindowInputEvents(
@@ -2157,14 +2208,14 @@ function TerminalPageComponent({
     )) {
       return;
     }
-    onSessionDraftSend?.(value, uiSessionId || undefined);
+    onSessionDraftSend?.(value, terminalActionSessionId || undefined);
     if (terminalKeyboardRequested) {
       keepTerminalInputFocused();
     }
-  }, [emitRemoteWindowInputEvents, keepTerminalInputFocused, onSessionDraftSend, terminalKeyboardRequested, uiSessionId]);
+  }, [emitRemoteWindowInputEvents, keepTerminalInputFocused, onSessionDraftSend, terminalActionSessionId, terminalKeyboardRequested]);
 
   const handleQuickBarOpenScheduleComposer = useCallback((text: string) => {
-    const targetSessionId = uiSessionId;
+    const targetSessionId = terminalActionSessionId;
     if (!targetSessionId) {
       return;
     }
@@ -2179,7 +2230,7 @@ function TerminalPageComponent({
       nonce: Date.now(),
       seedText: text,
     });
-  }, [onRequestScheduleList, uiSessionId]);
+  }, [onRequestScheduleList, terminalActionSessionId]);
 
   const handleQuickBarOpenFileTransfer = useCallback((mode: "browser" | "sync" = "browser") => {
     setFileTransferMode(mode);
@@ -2309,7 +2360,7 @@ function TerminalPageComponent({
           console.warn('[TerminalPage] Keyboard.hide() failed:', error);
         }
       }
-      const input = querySessionInput(uiSessionId);
+      const input = querySessionInput(terminalActionSessionId);
       input?.blur();
       return;
     }
@@ -2329,7 +2380,7 @@ function TerminalPageComponent({
     }
 
     scheduleTerminalFocusRetries({ delaysMs: [32, 120], includeKeyboardShow: true });
-  }, [alignActiveTerminalToFollowForInput, clearPendingAndroidImeFocus, clearTerminalFocusRetries, focusTerminalInput, isAndroid, keyboardInset, quickBarEditorFocused, requestAndroidImeFocus, scheduleTerminalFocusRetries, setAndroidEditorActive, terminalKeyboardRequested, uiSessionId, updateAndroidImeVisible, updateKeyboardInset]);
+  }, [alignActiveTerminalToFollowForInput, clearPendingAndroidImeFocus, clearTerminalFocusRetries, focusTerminalInput, isAndroid, keyboardInset, quickBarEditorFocused, requestAndroidImeFocus, scheduleTerminalFocusRetries, setAndroidEditorActive, terminalActionSessionId, terminalKeyboardRequested, updateAndroidImeVisible, updateKeyboardInset]);
 
   const handleRemoteWindowRequestKeyboard = useCallback(() => {
     if (quickBarEditorFocusedRef.current && typeof document !== 'undefined') {
@@ -2383,7 +2434,7 @@ function TerminalPageComponent({
     clearPendingAndroidImeFocus();
     clearTerminalFocusRetries();
     androidImeFocusRouteKeyRef.current = null;
-    const input = querySessionInput(uiSessionId);
+    const input = querySessionInput(terminalActionSessionId);
     input?.blur();
 
     if (isAndroid) {
@@ -2452,27 +2503,11 @@ function TerminalPageComponent({
     }
   }, [clearTerminalFocusRetries, isAndroid, setAndroidEditorActive]);
 
-  useEffect(() => {
-    const syncOnlineState = () => {
-      setNetworkOnline(typeof navigator === 'undefined' ? true : navigator.onLine);
-    };
-
-    syncOnlineState();
-    window.addEventListener('online', syncOnlineState);
-    window.addEventListener('offline', syncOnlineState);
-
-    return () => {
-      window.removeEventListener('online', syncOnlineState);
-      window.removeEventListener('offline', syncOnlineState);
-    };
-  }, []);
-
   const uiSessionMetrics = uiSession ? getSessionDebugMetrics?.(uiSession.id) || null : null;
   const uiSessionEffectiveStatus = uiSession
     ? resolveEffectiveConnectionStatus(uiSession, uiSessionMetrics)
     : null;
   const connectionIssueActionableKey = resolveConnectionIssueActionableKey({
-    networkOnline,
     sessionState: uiSessionEffectiveStatus,
     reconnectAttempt: uiSession?.reconnectAttempt,
   });
@@ -2504,16 +2539,6 @@ function TerminalPageComponent({
     };
   }, [connectionIssueActionableKey, connectionIssueVisible]);
 
-  const suppressReconnectUi = networkOnline
-    && uiSession?.state === 'reconnecting'
-    && !connectionIssueVisible;
-  const connectionProgressLabel = uiSession && networkOnline && !connectionIssueVisible
-    ? resolveConnectionActivityLabel(
-        uiSession,
-        uiSessionEffectiveStatus || 'waiting',
-      )
-    : null;
-
   useEffect(() => {
     updateTerminalKeyboardRequested(false);
     setQuickBarEditorFocused(false);
@@ -2523,9 +2548,9 @@ function TerminalPageComponent({
     clearPendingAndroidImeFocus();
     clearTerminalFocusRetries();
 
-    const input = querySessionInput(uiSessionId);
+    const input = querySessionInput(terminalActionSessionId);
     input?.blur();
-  }, [clearPendingAndroidImeFocus, clearTerminalFocusRetries, isAndroid, uiSessionId, updateTerminalKeyboardRequested]);
+  }, [clearPendingAndroidImeFocus, clearTerminalFocusRetries, isAndroid, terminalActionSessionId, updateTerminalKeyboardRequested]);
 
   useEffect(() => {
     if (!isAndroid) {
@@ -2940,7 +2965,6 @@ function TerminalPageComponent({
     quickBarShellKeyboardLiftPx,
     terminalBottomChromeLiftPx,
     terminalStageBottomPx,
-    networkOnline,
     connectionIssueVisible,
     isAndroid,
     widthMode: terminalWidthMode,
@@ -3223,13 +3247,15 @@ function TerminalPageComponent({
       slotIds: { ...effectiveSessionGroupSlotIds },
       focusSlot: sessionGroupFocusSlot,
     };
+    setSessionPreviewInputSessionId(sessionPreviewSessions[0]?.id || null);
     setSessionPreviewOpen(true);
-  }, [activeSession?.id, effectiveSessionGroupSlotIds, keyboardInset, sessionGroupFocusSlot, sessionPreviewSessions.length]);
+  }, [activeSession?.id, effectiveSessionGroupSlotIds, keyboardInset, sessionGroupFocusSlot, sessionPreviewSessions]);
 
   const handleCancelSessionPreview = useCallback(() => {
     const entry = sessionPreviewEntryRef.current;
     sessionPreviewEntryRef.current = null;
     setSessionPreviewOpen(false);
+    setSessionPreviewInputSessionId(null);
     if (!entry) return;
     setSessionGroupSlotIds(entry.slotIds);
     setSessionGroupFocusSlot(entry.focusSlot);
@@ -3247,7 +3273,12 @@ function TerminalPageComponent({
     sessionPreviewEntryRef.current = null;
     handleActivateOpenSessionInViewport(sessionId);
     setSessionPreviewOpen(false);
+    setSessionPreviewInputSessionId(null);
   }, [handleActivateOpenSessionInViewport]);
+
+  const handleSessionPreviewPrimarySessionChange = useCallback((sessionId: string) => {
+    setSessionPreviewInputSessionId(sessionId);
+  }, []);
 
   const handleRemoveSessionFromPreview = useCallback((sessionId: string) => {
     const session = sessions.find((item) => item.id === sessionId);
@@ -3381,7 +3412,7 @@ function TerminalPageComponent({
 
   const quickBarNode = useMemo(() => (
     <TerminalQuickBar
-      activeSessionId={uiSessionId}
+      activeSessionId={terminalActionSessionId}
       quickActions={quickActions}
       shortcutActions={shortcutActions}
       onMeasuredHeightChange={handleQuickBarMeasuredHeightChange}
@@ -3427,7 +3458,7 @@ function TerminalPageComponent({
   ), [
     absoluteLineNumbersVisible,
     activeDraft,
-    uiSessionId,
+    terminalActionSessionId,
     debugOverlayVisible,
     effectiveKeyboardLiftPx,
     handleSetSplitCount,
@@ -3484,7 +3515,7 @@ function TerminalPageComponent({
     <div
       style={{
         height: shellHeight ? `${shellHeight}px` : '100dvh',
-        maxHeight: shellHeight ? `${shellHeight}px` : '100dvh',
+        minHeight: '100%',
         overflow: 'hidden',
         display: 'flex',
         flexDirection: 'column',
@@ -3513,15 +3544,15 @@ function TerminalPageComponent({
             onAssignSessionToPane={assignSessionToPane}
             onMoveSessionToOtherPane={moveSessionToOtherPane}
             onActivatePane={activatePaneAndSession}
+            attachmentBadge={getPendingAttachmentCount() > 0 ? String(getPendingAttachmentCount()) : undefined}
+            onAttachmentBadgeClick={() => setAttachmentDrawerOpen(true)}
           />
         </div>
       ) : null}
       <TerminalNetworkBanner
         connectionIssueVisible={connectionIssueVisible}
-        networkOnline={networkOnline}
         activeSessionState={uiSession?.state}
         activeSessionLastError={uiSession?.lastError}
-        connectionProgressLabel={connectionProgressLabel}
       />
       <div
         style={{
@@ -3541,7 +3572,6 @@ function TerminalPageComponent({
               onForceRelaySession={onForceRelaySession}
               onUseAutoSession={onUseAutoSession}
               onUseWebSocketSession={onUseWebSocketSession}
-              suppressReconnectUi={suppressReconnectUi}
             />
             <button
               type="button"
@@ -3670,6 +3700,7 @@ function TerminalPageComponent({
           onRemovePreviewSession={handleRemoveSessionFromPreview}
           onMovePreviewSession={handleMoveSessionPreview}
           onReplacePreviewSession={handleReplaceSessionPreview}
+          onPreviewPrimarySessionChange={handleSessionPreviewPrimarySessionChange}
         />
         {copySelection.menu && !sessionDrawerOpen ? (
           <TerminalPageCopyMenu
@@ -3803,15 +3834,15 @@ function TerminalPageComponent({
           onRunNow={(jobId) => onRunScheduleJobNow?.(scheduleComposerTarget.sessionId, jobId)}
         />
       ) : null}
-      {interactiveSession && onSendMessage && onFileTransferMessage ? (
+      {terminalActionSession && onSendMessage && onFileTransferMessage ? (
         <FileTransferSheet
           open={fileTransferOpen}
           remoteCwd=""
           mode={fileTransferMode}
           daemonFileScopeId={
-            interactiveSession.daemonHostId
-              ? `daemon:${interactiveSession.daemonHostId}`
-              : `endpoint:${interactiveSession.bridgeHost}:${interactiveSession.bridgePort}`
+            terminalActionSession.daemonHostId
+              ? `daemon:${terminalActionSession.daemonHostId}`
+              : `endpoint:${terminalActionSession.bridgeHost}:${terminalActionSession.bridgePort}`
           }
           terminalShellSkin={effectiveTerminalShellSkin}
           onClose={() => setFileTransferOpen(false)}
@@ -3819,6 +3850,14 @@ function TerminalPageComponent({
           onFileTransferMessage={onFileTransferMessage}
         />
       ) : null}
+      <AttachmentDrawer
+        open={attachmentDrawerOpen}
+        topInsetPx={headerTopInsetPx}
+        bottomInsetPx={keyboardInset}
+        getPendingAttachments={getPendingAttachments}
+        onClose={() => setAttachmentDrawerOpen(false)}
+        terminalShellSkin={effectiveTerminalShellSkin}
+      />
       <RemoteScreenshotSheet
         state={remoteScreenshotPreview}
         onSave={() => {
@@ -3882,6 +3921,7 @@ function terminalPagePropsEqual(
     && prev.onQuickActionsChange === next.onQuickActionsChange
     && prev.onShortcutActionsChange === next.onShortcutActionsChange
     && prev.sessionDraft === next.sessionDraft
+    && prev.sessionDrafts === next.sessionDrafts
     && prev.onSessionDraftChange === next.onSessionDraftChange
     && prev.onSessionDraftSend === next.onSessionDraftSend
     && prev.scheduleState === next.scheduleState

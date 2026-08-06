@@ -28,6 +28,7 @@ import type { SessionRenderBufferSnapshot } from '../lib/types';
 import type { SessionBufferStore } from '../lib/session-buffer-store';
 import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
 import type { SessionHeadStore } from '../lib/session-head-store';
+import type { SessionAttachmentStore } from '../lib/session-attachment-store';
 import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
 import type { RemoteWindowControlMessage } from '../lib/remote-window-message-runtime';
 import type {
@@ -281,6 +282,10 @@ export interface SessionContextValue {
   onFileTransferMessage: (handler: (msg: any) => void) => () => void;
   onRemoteWindowMessage: (handler: (msg: RemoteWindowControlMessage) => void) => () => void;
   sendMessageRaw: (sessionId: string, msg: unknown) => void;
+  /** Get count of attachments awaiting download. */
+  getPendingAttachmentCount: () => number;
+  /** Get pending attachments sorted newest first. */
+  getPendingAttachments: () => SessionAttachmentStore extends { getAll: () => infer T } ? T : never;
 }
 
 export interface SessionProviderProps {
