@@ -597,6 +597,7 @@ let keyCodes: [String: CGKeyCode] = [
     "ArrowDown": 125,
     "ArrowUp": 126,
     "KeyV": 9,
+    "KeyW": 13,
     "Delete": 117,
     "Home": 115,
     "End": 119,
@@ -605,6 +606,16 @@ let keyCodes: [String: CGKeyCode] = [
 ]
 
 func handleConfig(_ config: InputConfig) throws {
+    if config.event.kind == "close-window" {
+        try focusTargetWindow(config)
+        let commandDown = CGEvent(keyboardEventSource: source, virtualKey: keyCodes["KeyW"]!, keyDown: true)
+        commandDown?.flags = [.maskCommand]
+        commandDown?.post(tap: .cghidEventTap)
+        let commandUp = CGEvent(keyboardEventSource: source, virtualKey: keyCodes["KeyW"]!, keyDown: false)
+        commandUp?.flags = [.maskCommand]
+        commandUp?.post(tap: .cghidEventTap)
+        return
+    }
     if config.event.kind == "window-resize" {
         try resizeTargetWindow(config)
         return

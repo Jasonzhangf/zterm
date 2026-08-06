@@ -7,6 +7,10 @@ const FLAG_DIM = 0x02;
 const BLOCK_SHADE_CODEPOINT_MIN = 0x2580;
 const BLOCK_SHADE_CODEPOINT_MAX = 0x259f;
 const XTERM_6X6_STEPS = [0, 95, 135, 175, 215, 255] as const;
+const MIN_NEUTRAL_FOREGROUND_CONTRAST = 4.5;
+const MIN_DIMMED_FOREGROUND_CONTRAST = 3;
+const NEUTRAL_CHANNEL_SPREAD = 18;
+const CONTRAST_SEARCH_STEPS = 12;
 
 export const DEFAULT_TERMINAL_CELL_COLOR = DEFAULT_TERMINAL_COLOR;
 
@@ -93,6 +97,84 @@ export function mixCssColors(fg: string, bg: string, fgRatio: number, fallbackBg
   return `rgb(${mix(fr, br)},${mix(fgGreen, bgGreen)},${mix(fb, bb)})`;
 }
 
+function isDarkCssColor(color: string, fallback: string) {
+  const [red, green, blue] = parseCssColorToRgb(color, fallback);
+  return (red * 299 + green * 587 + blue * 114) < 145000;
+}
+
+function relativeLuminance(color: string, fallback: string) {
+  const channels = parseCssColorToRgb(color, fallback).map((channel) => {
+    const normalized = channel / 255;
+    return normalized <= 0.04045
+      ? normalized / 12.92
+      : ((normalized + 0.055) / 1.055) ** 2.4;
+  });
+  return (channels[0] * 0.2126) + (channels[1] * 0.7152) + (channels[2] * 0.0722);
+}
+
+function contrastRatio(foreground: string, background: string, fallbackBackground: string) {
+  const foregroundLuminance = relativeLuminance(foreground, fallbackBackground);
+  const backgroundLuminance = relativeLuminance(background, fallbackBackground);
+  const lighter = Math.max(foregroundLuminance, backgroundLuminance);
+  const darker = Math.min(foregroundLuminance, backgroundLuminance);
+  return (lighter + 0.05) / (darker + 0.05);
+}
+
+function isNeutralCssColor(color: string, fallback: string) {
+  const channels = parseCssColorToRgb(color, fallback);
+  return Math.max(...channels) - Math.min(...channels) <= NEUTRAL_CHANNEL_SPREAD;
+}
+
+function mixTowardMinimumContrast(
+  color: string,
+  contrastAnchor: string,
+  background: string,
+  fallbackBackground: string,
+  minimumContrast: number,
+) {
+  if (contrastRatio(color, background, fallbackBackground) >= minimumContrast) {
+    return color;
+  }
+  const anchorCandidates = [contrastAnchor, '#000000', '#ffffff'];
+  const readableAnchor = anchorCandidates.find((candidate) => (
+    contrastRatio(candidate, background, fallbackBackground) >= minimumContrast
+  ));
+  if (!readableAnchor) {
+    return color;
+  }
+
+  let lowerAnchorRatio = 0;
+  let upperAnchorRatio = 1;
+  for (let step = 0; step < CONTRAST_SEARCH_STEPS; step += 1) {
+    const anchorRatio = (lowerAnchorRatio + upperAnchorRatio) / 2;
+    const candidate = mixCssColors(readableAnchor, color, anchorRatio, fallbackBackground);
+    if (contrastRatio(candidate, background, fallbackBackground) >= minimumContrast) {
+      upperAnchorRatio = anchorRatio;
+    } else {
+      lowerAnchorRatio = anchorRatio;
+    }
+  }
+  return mixCssColors(readableAnchor, color, upperAnchorRatio, fallbackBackground);
+}
+
+function resolveReadableNeutralForeground(
+  foreground: string,
+  background: string,
+  theme: TerminalThemePreset,
+) {
+  const effectiveBackground = background === 'transparent' ? theme.background : background;
+  if (!isNeutralCssColor(foreground, theme.foreground)) {
+    return foreground;
+  }
+  return mixTowardMinimumContrast(
+    foreground,
+    theme.foreground,
+    effectiveBackground,
+    theme.background,
+    MIN_NEUTRAL_FOREGROUND_CONTRAST,
+  );
+}
+
 export function resolveTerminalCellColors(
   inputCell: TerminalCell,
   theme: TerminalThemePreset,
@@ -107,18 +189,34 @@ export function resolveTerminalCellColors(
     [fg, bg] = [bg, fg];
   }
 
+  const resolvedBackground = bg === DEFAULT_TERMINAL_CELL_COLOR
+    ? (reverse ? theme.foreground : 'transparent')
+    : terminalColorToCss(bg, theme) || 'transparent';
+  const rawForeground = fg === DEFAULT_TERMINAL_CELL_COLOR
+    ? (reverse
+      ? theme.background
+      : bg !== DEFAULT_TERMINAL_CELL_COLOR && isDarkCssColor(resolvedBackground, theme.background)
+        ? theme.colors[15]
+        : theme.foreground)
+    : terminalColorToCss(fg, theme) || theme.foreground;
+  const resolvedForeground = resolveReadableNeutralForeground(rawForeground, resolvedBackground, theme);
+
   return {
-    fg: fg === DEFAULT_TERMINAL_CELL_COLOR
-      ? (reverse ? theme.background : theme.foreground)
-      : terminalColorToCss(fg, theme) || theme.foreground,
-    bg: bg === DEFAULT_TERMINAL_CELL_COLOR
-      ? (reverse ? theme.foreground : 'transparent')
-      : terminalColorToCss(bg, theme) || 'transparent',
+    fg: resolvedForeground,
+    bg: resolvedBackground,
   };
 }
 
 export function resolveDimmedTerminalForeground(fg: string, bg: string, themeBackground: string) {
-  return mixCssColors(fg, bg, 0.5, themeBackground);
+  const effectiveBackground = bg === 'transparent' ? themeBackground : bg;
+  const dimmedForeground = mixCssColors(fg, effectiveBackground, 0.5, themeBackground);
+  return mixTowardMinimumContrast(
+    dimmedForeground,
+    fg,
+    effectiveBackground,
+    themeBackground,
+    MIN_DIMMED_FOREGROUND_CONTRAST,
+  );
 }
 
 export function resolveRenderedTerminalForeground(

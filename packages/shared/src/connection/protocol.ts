@@ -734,7 +734,7 @@ export type TerminalMuxTargetServerMessage = Extract<
 export type TerminalMuxChannelServerMessage = BridgeServerMessage;
 
 export type TerminalMuxClientFrame =
-  | { type: 'mux-hello'; payload: { version: typeof TERMINAL_MUX_PROTOCOL_VERSION; clientInstanceId: string } }
+  | { type: 'mux-hello'; payload: { version: typeof TERMINAL_MUX_PROTOCOL_VERSION; clientInstanceId: string; deviceId?: string } }
   | { type: 'mux-target-message'; payload: { requestId?: string; message: TerminalMuxTargetClientMessage } }
   | { type: 'mux-channel-open'; payload: { channelId: string; sessionName: string; cols?: number; rows?: number; widthMode?: TerminalWidthMode; autoCommand?: string; bodySubscribed?: boolean } }
   | { type: 'mux-channel-message'; payload: { channelId: string; message: TerminalMuxChannelClientMessage } }
@@ -815,7 +815,7 @@ export function buildTerminalMuxCapabilities(
   };
 }
 
-export function buildTerminalMuxHello(clientInstanceId: string): TerminalMuxClientFrame {
+export function buildTerminalMuxHello(clientInstanceId: string, deviceId?: string): TerminalMuxClientFrame {
   const normalizedClientInstanceId = asNonEmptyString(clientInstanceId);
   if (!normalizedClientInstanceId) {
     throw new Error('terminal mux clientInstanceId is required');
@@ -825,6 +825,7 @@ export function buildTerminalMuxHello(clientInstanceId: string): TerminalMuxClie
     payload: {
       version: TERMINAL_MUX_PROTOCOL_VERSION,
       clientInstanceId: normalizedClientInstanceId,
+      ...(asNonEmptyString(deviceId) ? { deviceId: asNonEmptyString(deviceId)! } : {}),
     },
   };
 }

@@ -806,6 +806,45 @@ function MultiSessionHarness() {
   );
 }
 
+const previewBootstrapSessionIds = ['preview-1', 'preview-2', 'preview-3', 'preview-4', 'preview-5', 'preview-6'];
+const previewBootstrapHosts = previewBootstrapSessionIds.map((_, index) => ({
+  ...host,
+  sessionName: `zterm_preview_${index + 1}`,
+}));
+
+function PreviewBootstrapRevision({ sessionId, index }: { sessionId: string; index: number }) {
+  const { getSessionRenderBufferStore } = useSession();
+  const snapshot = useSessionRenderBufferSnapshot(getSessionRenderBufferStore(), sessionId);
+  return (
+    <div data-testid={`preview-bootstrap-revision-${index + 1}`}>
+      {snapshot.buffer.revision ?? 0}
+    </div>
+  );
+}
+
+function SixSessionPreviewBootstrapHarness() {
+  const { state, createSession, switchSession, setLiveSessionIds } = useSession();
+
+  useEffect(() => {
+    previewBootstrapHosts.forEach((previewHost, index) => {
+      createSession(previewHost, { sessionId: previewBootstrapSessionIds[index] });
+    });
+    switchSession(previewBootstrapSessionIds[0]);
+    setLiveSessionIds([previewBootstrapSessionIds[0]]);
+  }, [createSession, setLiveSessionIds, switchSession]);
+
+  return (
+    <div>
+      <div data-testid="preview-bootstrap-active">{state.activeSessionId || 'missing'}</div>
+      {previewBootstrapSessionIds.map((sessionId, index) => (
+        <PreviewBootstrapRevision key={sessionId} sessionId={sessionId} index={index} />
+      ))}
+      <button type="button" onClick={() => setLiveSessionIds(previewBootstrapSessionIds)}>preview-live-all</button>
+      <button type="button" onClick={() => setLiveSessionIds([previewBootstrapSessionIds[0]])}>preview-live-primary-only</button>
+    </div>
+  );
+}
+
 function StaleFollowHarness() {
   const { state, createSession, switchSession, updateSessionViewport, getSessionBufferStore, getSessionHeadStore } = useSession();
 
@@ -2604,6 +2643,78 @@ describe('SessionContext websocket dynamic refresh', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('bootstraps all five passive preview channels from an already-connected primary-only live set', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws" appForegroundActive>
+        <SixSessionPreviewBootstrapHarness />
+      </SessionProvider>,
+    );
+
+    await openMockSessionChannels(6);
+    await waitFor(() => {
+      expect(screen.getByTestId('preview-bootstrap-active').textContent).toBe('preview-1');
+    });
+
+    for (const ws of MockWebSocket.instances.slice(1)) {
+      expect(readMuxChannelOpenMessages(ws).map((message) => ([
+        message.payload?.channelId,
+        message.payload?.bodySubscribed,
+      ]))).toContainEqual([ws.channelId, false]);
+    }
+
+    const sentBeforePreviewOpen = MockWebSocket.physicalInstances[0]!.sent.length;
+    fireEvent.click(screen.getByText('preview-live-all'));
+
+    for (const ws of MockWebSocket.instances.slice(1)) {
+      await waitFor(() => {
+        expect(readSentMessages(ws, sentBeforePreviewOpen).some((message) => (
+          message.type === 'body-subscription' && message.payload?.subscribed === true
+        ))).toBe(true);
+      });
+    }
+
+    for (let index = 1; index < MockWebSocket.instances.length; index += 1) {
+      const ws = MockWebSocket.instances[index]!;
+      const sentBeforeHead = MockWebSocket.physicalInstances[0]!.sent.length;
+      ws.triggerMessage({
+        type: 'buffer-head',
+        payload: {
+          sessionId: previewBootstrapSessionIds[index],
+          revision: 1,
+          latestEndIndex: 24,
+          availableStartIndex: 0,
+          availableEndIndex: 24,
+        },
+      });
+      await waitFor(() => {
+        expect(readSentMessages(ws, sentBeforeHead).some((message) => (
+          message.type === 'buffer-sync-request'
+          && message.payload?.requestStartIndex === 0
+          && message.payload?.requestEndIndex === 24
+        ))).toBe(true);
+      });
+      ws.triggerMessage({
+        type: 'buffer-sync',
+        payload: compactPayload({
+          startIndex: 0,
+          endIndex: 24,
+          revision: 1,
+          lines: Array.from({ length: 24 }, (_, rowIndex) => [
+            rowIndex,
+            `preview-${index + 1}-row-${rowIndex}`,
+          ] as const),
+        }),
+      });
+    }
+
+    for (let index = 1; index < previewBootstrapSessionIds.length; index += 1) {
+      await waitFor(() => {
+        expect(screen.getByTestId(`preview-bootstrap-revision-${index + 1}`).textContent).toBe('1');
+      });
+    }
+    expect(MockWebSocket.physicalInstances).toHaveLength(1);
   });
 
   it('visible non-active panes still refresh without requiring interactive activation, but no longer rely on same-frequency active-tick fan-out', async () => {
@@ -6722,6 +6833,42 @@ describe('SessionContext websocket dynamic refresh', () => {
     await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('connected'));
     expect(MockWebSocket.physicalInstances).toHaveLength(1);
     expect(MockWebSocket.instances).toHaveLength(2);
+  });
+
+  it('reopens a closed inactive mux channel when preview adds it to the live set', async () => {
+    render(
+      <SessionProvider wsUrl="ws://127.0.0.1:3333/ws">
+        <MultiSessionHarness />
+      </SessionProvider>,
+    );
+
+    await waitForMockSessionInstances(2);
+    const rootSocket = MockWebSocket.physicalInstances[0]!;
+    const ws1 = MockWebSocket.instances[0]!;
+    const ws2 = MockWebSocket.instances[1]!;
+    ws1.triggerOpen();
+    ws2.triggerOpen();
+    ws1.triggerMessage({ type: 'connected', payload: { sessionId: 'session-1' } });
+    ws2.triggerMessage({ type: 'connected', payload: { sessionId: 'session-2' } });
+
+    await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-1'));
+    await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('connected'));
+
+    const sentBeforeClose = rootSocket.sent.length;
+    const secondChannelId = ws2.channelId;
+    ws2.triggerChannelClosed('inactive channel closed', 'channel_closed');
+    await waitFor(() => expect(screen.getByTestId('session-2-state').textContent).toBe('idle'));
+
+    fireEvent.click(screen.getByText('live-both'));
+
+    await waitFor(() => {
+      expect(readMuxChannelOpenMessages(rootSocket, sentBeforeClose).some((item) => (
+        item.payload?.channelId === secondChannelId
+        && item.payload?.bodySubscribed === true
+      ))).toBe(true);
+    });
+    expect(MockWebSocket.physicalInstances).toHaveLength(1);
+    expect(screen.getByTestId('active-session').textContent).toBe('session-1');
   });
 
   it('lets the second tab continue scrolling deeper while an older reading repair is still in flight', async () => {
