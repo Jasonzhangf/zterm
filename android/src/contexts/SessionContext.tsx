@@ -83,8 +83,10 @@ export function SessionProvider({
       attachmentStoreRef,
       attachmentFetchRuntimeRef,
     },
-  } = useSessionProviderRuntime({
-    appForegroundActive,
+ } = useSessionProviderRuntime({
+   appForegroundActive,
+    bridgeSettings,
+    wsUrl,
   });
   const {
     scheduleStates: assembledScheduleStates,

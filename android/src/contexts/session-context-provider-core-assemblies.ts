@@ -1,4 +1,4 @@
-import { useCallback, useMemo } from "react";
+import { useCallback, useEffect, useMemo } from "react";
 import { runtimeDebug } from "../lib/runtime-debug";
 import { resolveTerminalRefreshCadence } from "../lib/mobile-config";
 import { resolveSessionRuntimeTransportCadenceInput } from "../lib/session-runtime-cadence";
@@ -23,7 +23,7 @@ import type {
   SessionProviderAssembliesSharedOptions,
   SessionProviderCoreAssembliesResult,
 } from "./session-context-provider-assembly-types";
-import type { AttachmentAssetDataPayload } from '@zterm/shared/protocol';
+import type { AttachmentAssetDataPayload, PendingAttachmentsPayload } from '@zterm/shared/protocol';
 
 
 
@@ -183,6 +183,41 @@ export function useSessionProviderCoreAssemblies(
     daemonConnection,
   } = sessionInfraRuntime;
 
+  // Start attachment fetch runtime when mux becomes ready
+  useEffect(() => {
+    const activeSessionId = options.stateRef.current.activeSessionId;
+    if (!activeSessionId || !attachmentFetchRuntimeRef.current) return;
+
+    const isMuxReady = readSessionTargetTerminalMuxReady(activeSessionId);
+    if (!isMuxReady) return;
+
+    // Get the target transport socket for sending mux messages
+    const targetSocket = readTargetTerminalSocket(activeSessionId);
+    if (!targetSocket) return;
+
+    // Start the fetch runtime with proper send/read capabilities
+    attachmentFetchRuntimeRef.current.start({
+      sendMuxTargetMessage: (msg) => {
+        const currentActiveId = options.stateRef.current.activeSessionId;
+        if (!currentActiveId) return false;
+        const currentSocket = readTargetTerminalSocket(currentActiveId);
+        if (!currentSocket || currentSocket.readyState !== WebSocket.OPEN) return false;
+        try {
+          currentSocket.send(JSON.stringify(msg));
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      readMuxReady: () => {
+        const currentActiveId = options.stateRef.current.activeSessionId;
+        if (!currentActiveId) return false;
+        return readSessionTargetTerminalMuxReady(currentActiveId);
+      },
+    });
+  }, [options.stateRef, readSessionTargetTerminalMuxReady, readTargetTerminalSocket]);
+
+
   const {
     cleanupControlSocket,
     clearReconnectForSession,
@@ -268,7 +303,13 @@ export function useSessionProviderCoreAssemblies(
           attachmentStoreRef.current.markOriginalReady(dataPayload.attachmentId, blob);
         }
         return true;
+      }      // Handle pending-attachments response from daemon
+      if (payload.message.type === 'pending-attachments') {
+        const pendingPayload = payload.message.payload as PendingAttachmentsPayload;
+        attachmentFetchRuntimeRef.current.processPendingAttachmentsResponse(pendingPayload);
+        return true;
       }
+      
       // Handle tmux target requests
       return settleSessionTmuxTargetRequestRuntime({
         pendingRequestsRef: tmuxTargetRequestsRef,

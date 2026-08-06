@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import type { SessionScheduleState } from '../lib/types';
 import { createFileTransferMessageRuntime } from '../lib/file-transfer-message-runtime';
 import { createRemoteScreenshotRuntime } from '../lib/remote-screenshot-runtime';
@@ -34,7 +34,11 @@ import type { SessionAttachmentFetchRuntime } from '../lib/session-attachment-fe
 export function useSessionProviderRuntime(options: {
   appForegroundActive?: boolean;
   foregroundResumeEpoch?: number;
+  bridgeSettings?: import('@zterm/shared').BridgeSettings;
+  wsUrl?: string;
 }) {
+  const { bridgeSettings, wsUrl } = options;
+
   const [scheduleStates, setScheduleStates] = useState<Record<string, SessionScheduleState>>({});
   const sessionDebugMetricsStoreRef = useRef(createSessionDebugMetricsStore());
   const transportRuntimeStoreRef = useRef(createSessionTransportRuntimeStore());
@@ -101,11 +105,43 @@ export function useSessionProviderRuntime(options: {
   const foregroundActiveRef = useRef(options.appForegroundActive !== false);
   const handleSocketConnectedBaselineRef = useRef<HandleSocketConnectedBaselineFn | null>(null);
   const finalizeSocketFailureBaselineRef = useRef<FinalizeSocketFailureBaselineFn | null>(null);
+
+  // Derive deviceId and base URL from settings
+  const deviceId = bridgeSettings?.traversalRelay?.deviceId?.trim() || '';
+  const daemonBaseUrl = wsUrl?.replace(/\/ws\/client$/, '') || '';
+  const authToken = bridgeSettings?.traversalRelay?.accessToken || '';
+
+  // Build HTTP fetch function for daemon attachment API
+  const fetchDaemonHttpAsset = React.useCallback(
+    async (attachmentId: string, asset: 'preview' | 'original'): Promise<{ blob: Blob; sha256: string }> => {
+      if (!daemonBaseUrl) {
+        throw new Error('daemon base URL not available');
+      }
+      const url = `${daemonBaseUrl}/attachment/${attachmentId}/${asset}`;
+      const response = await fetch(url, {
+        headers: {
+          ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}),
+        },
+      });
+      if (!response.ok) {
+        throw new Error(`fetch failed: ${response.status} ${response.statusText}`);
+      }
+      const blob = await response.blob();
+      // Compute SHA-256 for acknowledgment
+      const arrayBuffer = await blob.arrayBuffer();
+      const hashBuffer = await crypto.subtle.digest('SHA-256', arrayBuffer);
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const sha256 = hashArray.map((b: number) => b.toString(16).padStart(2, '0')).join('');
+      return { blob, sha256 };
+    },
+    [daemonBaseUrl, authToken],
+  );
+
   const attachmentStoreRef = useRef<SessionAttachmentStore>(createSessionAttachmentStore());
   const attachmentFetchRuntimeRef = useRef<SessionAttachmentFetchRuntime>(createSessionAttachmentFetchRuntime({
     attachmentStore: attachmentStoreRef.current,
-    deviceId: '',
-    fetchDaemonHttpAsset: async () => { throw new Error('not initialized'); },
+    deviceId,
+    fetchDaemonHttpAsset,
     acknowledgeAsset: async () => {},
   }));
   const handleSocketServerMessageRef = useRef<HandleSocketServerMessageFn | null>(null);
