@@ -28,6 +28,7 @@ import type {
 import type { RemoteWindowTargetCatalogCacheStore } from './session-context-remote-window-runtime';
 import { createSessionAttachmentStore } from '../lib/session-attachment-store';
 import { createSessionAttachmentFetchRuntime } from '../lib/session-attachment-fetch-runtime';
+import { buildDefaultDeviceId } from '../lib/traversal-relay-client';
 import type { SessionAttachmentStore } from '../lib/session-attachment-store';
 import type { SessionAttachmentFetchRuntime } from '../lib/session-attachment-fetch-runtime';
 
@@ -110,8 +111,10 @@ export function useSessionProviderRuntime(options: {
   const handleSocketConnectedBaselineRef = useRef<HandleSocketConnectedBaselineFn | null>(null);
   const finalizeSocketFailureBaselineRef = useRef<FinalizeSocketFailureBaselineFn | null>(null);
 
-  // Derive deviceId from settings (relay-assigned stable identity)
-  const deviceId = bridgeSettings?.traversalRelay?.deviceId?.trim() || '';
+  // Derive deviceId from settings (relay-assigned stable identity), falling
+  // back to the platform-stable relay device id so attachment deliveries can
+  // address this device even without a relay route configured.
+  const deviceId = bridgeSettings?.traversalRelay?.deviceId?.trim() || buildDefaultDeviceId('android');
 
   const attachmentStoreRef = useRef<SessionAttachmentStore>(createSessionAttachmentStore());
   const attachmentFetchRuntimeRef = useRef<SessionAttachmentFetchRuntime>(createSessionAttachmentFetchRuntime({

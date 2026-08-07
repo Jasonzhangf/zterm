@@ -98,6 +98,8 @@
         "src/plugins/",
         "src/lib/session-attachment-store.ts",
         "src/lib/session-attachment-fetch-runtime.ts",
+        "src/lib/notification-helper.ts",
+        "src/lib/session-activity-notify.ts",
         "src/components/terminal/AttachmentDrawer.tsx"
       ]
     },

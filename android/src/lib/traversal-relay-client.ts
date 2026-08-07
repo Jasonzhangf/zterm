@@ -182,7 +182,7 @@ function buildDefaultDeviceName(platform: string) {
   }
 }
 
-function buildDefaultDeviceId(platform: string) {
+export function buildDefaultDeviceId(platform: string) {
   const storage = getBrowserStorage();
   const storageKey = `zterm:relay-device-id:${platform}`;
   const stored = asString(storage?.getItem(storageKey)).trim();

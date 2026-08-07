@@ -25,6 +25,13 @@ export async function ensureNotificationPermission(): Promise<boolean> {
 /**
  * Schedule a notification if permission allows; failures are logged, never thrown.
  */
+let notificationSequence = 0;
+
+/** 返回自增的 Java int 通知 id（Android LocalNotifications 拒绝超出 int 范围的值） */
+export function nextNotificationId(): number {
+  return ++notificationSequence;
+}
+
 export async function scheduleNotification(options: {
   title: string;
   body: string;
@@ -38,7 +45,7 @@ export async function scheduleNotification(options: {
       notifications: [{
         title: options.title,
         body: options.body,
-        id: Date.now(),
+        id: nextNotificationId(),
       }],
     });
   } catch (err) {

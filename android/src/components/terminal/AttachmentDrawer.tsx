@@ -10,7 +10,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Filesystem, Directory } from '@capacitor/filesystem';
-import { ensureNotificationPermission } from '../../lib/notification-helper';
+import { ensureNotificationPermission, nextNotificationId } from '../../lib/notification-helper';
 import type { AttachmentEntry } from '../../lib/session-attachment-store';
 
 export interface AttachmentDrawerProps {
@@ -88,7 +88,7 @@ function AttachmentDrawerComponent({
         notifications: [{
           title: '下载完成',
           body: `${filename} 已保存`,
-          id: Date.now(),
+          id: nextNotificationId(),
         }],
       });
     } catch (err) {
@@ -122,7 +122,7 @@ function AttachmentDrawerComponent({
             body: newCount === 1
               ? `收到来自 ${attachments[0]?.senderName || '未知'} 的文件`
               : `收到 ${newCount} 个新附件`,
-            id: Date.now(),
+            id: nextNotificationId(),
           }],
         }).catch((err) => {
           console.warn('[AttachmentDrawer] schedule notification failed:', err);

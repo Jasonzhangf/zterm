@@ -189,39 +189,55 @@ export function useSessionProviderCoreAssemblies(
     daemonConnection,
   } = sessionInfraRuntime;
 
-  // Start attachment fetch runtime when mux becomes ready
+  // Start attachment fetch runtime when mux becomes ready.
+  // The startup can be missed when the provider mounts before an active session
+  // exists or before the mux channel is ready, so retry on a short interval until
+  // the fetch runtime is actually started (and only start it once).
+  const attachmentFetchStartedRef = useRef(false);
   useEffect(() => {
-    const activeSessionId = options.stateRef.current.activeSessionId;
-    if (!activeSessionId || !attachmentFetchRuntimeRef.current) return;
+    if (attachmentFetchStartedRef.current) return;
+    if (!attachmentFetchRuntimeRef.current) return;
 
-    const isMuxReady = readSessionTargetTerminalMuxReady(activeSessionId);
-    if (!isMuxReady) return;
+    const tryStartFetchRuntime = () => {
+      if (attachmentFetchStartedRef.current) return true;
+      const activeSessionId = options.stateRef.current.activeSessionId;
+      if (!activeSessionId) return false;
+      if (!readSessionTargetTerminalMuxReady(activeSessionId)) return false;
+      const targetSocket = readSessionTargetTerminalSocket(activeSessionId);
+      if (!targetSocket) return false;
 
-    // Get the target transport socket for sending mux messages
-    const targetSocket = readTargetTerminalSocket(activeSessionId);
-    if (!targetSocket) return;
+      // Start the fetch runtime with proper send/read capabilities
+      attachmentFetchRuntimeRef.current!.start({
+        sendMuxTargetMessage: (msg) => {
+          const currentActiveId = options.stateRef.current.activeSessionId;
+          if (!currentActiveId) return false;
+          const currentSocket = readSessionTargetTerminalSocket(currentActiveId);
+          if (!currentSocket || currentSocket.readyState !== WebSocket.OPEN) return false;
+          try {
+            currentSocket.send(JSON.stringify(msg));
+            return true;
+          } catch {
+            return false;
+          }
+        },
+        readMuxReady: () => {
+          const currentActiveId = options.stateRef.current.activeSessionId;
+          if (!currentActiveId) return false;
+          return readSessionTargetTerminalMuxReady(currentActiveId);
+        },
+      });
+      attachmentFetchStartedRef.current = true;
+      return true;
+    };
 
-    // Start the fetch runtime with proper send/read capabilities
-    attachmentFetchRuntimeRef.current.start({
-      sendMuxTargetMessage: (msg) => {
-        const currentActiveId = options.stateRef.current.activeSessionId;
-        if (!currentActiveId) return false;
-        const currentSocket = readTargetTerminalSocket(currentActiveId);
-        if (!currentSocket || currentSocket.readyState !== WebSocket.OPEN) return false;
-        try {
-          currentSocket.send(JSON.stringify(msg));
-          return true;
-        } catch {
-          return false;
-        }
-      },
-      readMuxReady: () => {
-        const currentActiveId = options.stateRef.current.activeSessionId;
-        if (!currentActiveId) return false;
-        return readSessionTargetTerminalMuxReady(currentActiveId);
-      },
-    });
-  }, [options.stateRef, readSessionTargetTerminalMuxReady, readTargetTerminalSocket]);
+    if (tryStartFetchRuntime()) return undefined;
+    const retryTimer = setInterval(() => {
+      if (tryStartFetchRuntime()) {
+        clearInterval(retryTimer);
+      }
+    }, 2000);
+    return () => clearInterval(retryTimer);
+  }, [options.stateRef, readSessionTargetTerminalMuxReady, readSessionTargetTerminalSocket]);
 
 
   const {
