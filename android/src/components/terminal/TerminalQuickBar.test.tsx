@@ -789,11 +789,11 @@ describe("TerminalQuickBar", () => {
       Array.from(topFixedClusterButtons).map((node) =>
         node.getAttribute("aria-label"),
       ),
-    ).toEqual(["拷贝", "↑滚", "↓滚", "↑", "键盘"]);
+    ).toEqual(["拷贝", "↑", "键盘"]);
     const topClusterStyle =
       screen.getByTestId("quickbar-fixed-cluster-top").getAttribute("style") ||
       "";
-    expect(topClusterStyle).toContain("width: 262px");
+    expect(topClusterStyle).toContain("width: 158px");
   });
 
   it("hides inline shell rows and keeps only the floating toggle when shellMode is floating-collapsed", async () => {
@@ -909,6 +909,43 @@ describe("TerminalQuickBar", () => {
     ).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "键盘" }));
     expect(onToggleKeyboard).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows terminal scroll up/down buttons at the start of the portrait third row", () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      writable: true,
+      value: 390,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      writable: true,
+      value: 840,
+    });
+    stubVisualViewport({
+      width: 390,
+      height: 840,
+      offsetTop: 0,
+      offsetLeft: 0,
+    });
+
+    renderQuickBar();
+
+    expect(
+      screen.getByTestId("terminal-quickbar-shell-rows"),
+    ).toBeTruthy();
+    const scrollButtons = screen.getByTestId("quickbar-scroll-buttons");
+    const labels = Array.from(scrollButtons.querySelectorAll("button")).map(
+      (node) => node.getAttribute("aria-label"),
+    );
+    expect(labels).toEqual(["↑滚", "↓滚"]);
+    // The scroll buttons sit at the start of the third shell row, ahead of
+    // the tool row; the first two fixed rows keep their original layout.
+    expect(screen.getByRole("button", { name: "↑滚" })).not.toBeNull();
+    expect(screen.getByRole("button", { name: "↓滚" })).not.toBeNull();
+    expect(screen.getByTestId("quickbar-fixed-cluster-top")).toBeTruthy();
+    expect(screen.getByTestId("quickbar-fixed-cluster-bottom")).toBeTruthy();
+    expect(screen.getByTestId("quickbar-tool-row")).toBeTruthy();
   });
 
   it("shows floating quick menu content after tapping the toggle in floating-collapsed shell mode", async () => {

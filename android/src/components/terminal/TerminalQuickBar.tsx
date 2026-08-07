@@ -995,8 +995,6 @@ function TerminalQuickBarComponent({
   const topFixedActions = useMemo(
     () => [
       { id: "tmux-copy", label: "拷贝", sequence: "" },
-      { id: "terminal-scroll-up", label: "↑滚", sequence: encodeTerminalSgrMouseWheel("up", 1, 1) },
-      { id: "terminal-scroll-down", label: "↓滚", sequence: encodeTerminalSgrMouseWheel("down", 1, 1) },
       { id: "arrow-up", label: "↑", sequence: "\x1b[A" },
       { id: "keyboard", label: "键盘", sequence: "" },
     ],
@@ -4216,6 +4214,25 @@ function TerminalQuickBarComponent({
                   padding: `2px ${QUICK_BAR_SIDE_PADDING}px 4px`,
                 }}
               >
+                <div
+                  data-testid="quickbar-scroll-buttons"
+                  style={{
+                    display: "flex",
+                    gap: `${QUICK_BAR_ROW_GAP}px`,
+                    flexShrink: 0,
+                    alignItems: "center",
+                    paddingRight: `${QUICK_BAR_ROW_GAP}px`,
+                  }}
+                >
+                  {renderBaseActionButton(
+                    { id: "terminal-scroll-up", label: "↑滚", sequence: encodeTerminalSgrMouseWheel("up", 1, 1) },
+                    { compact: true },
+                  )}
+                  {renderBaseActionButton(
+                    { id: "terminal-scroll-down", label: "↓滚", sequence: encodeTerminalSgrMouseWheel("down", 1, 1) },
+                    { compact: true },
+                  )}
+                </div>
                 <div style={scrollTrackShellStyle}>
                   <div
                     data-testid="quickbar-tool-row"
