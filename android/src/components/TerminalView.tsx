@@ -430,6 +430,15 @@ function TerminalViewComponent({
     1,
     parseInt(resolvedRowHeight, 10) || parseInt(rowHeight, 10) || 17,
   );
+  // zoom（布局级缩放）下行的实际布局高度 = 行高×zoom；滚动↔行的映射必须用布局行高，
+  // 否则放大/缩小后上下滑动会错位（CSS 渲染仍用 rowHeightPx，由 zoom 缩放视觉）
+  const layoutRowHeightPx = Math.max(
+    1,
+    rowHeightPx *
+      (widthMode === 'mirror-fixed' && mirrorFixedScaleRef.current < 1
+        ? mirrorFixedScaleRef.current
+        : 1),
+  );
   /** 缩放结束后按有效行高（行高×zoom）重算可视行数：缩小显示更多行填满容器，恢复 1 时回到默认行数 */
   const recomputeViewportRowsForZoom = useCallback(
     (zoom: number) => {
@@ -456,7 +465,7 @@ function TerminalViewComponent({
         effectiveBufferEndIndex,
         bufferLinesLength: bufferLines.length,
         viewportRows,
-        rowHeightPx,
+        rowHeightPx: layoutRowHeightPx,
         // Secondary previews are passive tail projections. Their visible window
         // must follow the latest buffer revision without starting interactive
         // scroll/follow state or a per-tile viewport demand loop.
@@ -475,7 +484,7 @@ function TerminalViewComponent({
       readingMode,
       renderBottomIndex,
       renderBuffer.startIndex,
-      rowHeightPx,
+      layoutRowHeightPx,
       viewportRows,
     ],
   );
@@ -617,7 +626,7 @@ function TerminalViewComponent({
     () =>
       buildTerminalGridPadding({
         renderRows,
-        rowHeightPx,
+        rowHeightPx: layoutRowHeightPx,
         totalRows,
       }),
     [renderRows, rowHeightPx, totalRows],
@@ -630,7 +639,7 @@ function TerminalViewComponent({
         effectiveBufferEndIndex,
         followVisualBottomIndex,
         viewportRows,
-        rowHeightPx,
+        rowHeightPx: layoutRowHeightPx,
         renderRowsLength: renderRows.length,
         termGridPaddingTopPx,
         termGridPaddingBottomPx,
@@ -641,7 +650,7 @@ function TerminalViewComponent({
       renderBuffer.revision,
       renderBuffer.startIndex,
       renderRows.length,
-      rowHeightPx,
+      layoutRowHeightPx,
       termGridPaddingBottomPx,
       termGridPaddingTopPx,
       viewportRows,
@@ -729,14 +738,14 @@ function TerminalViewComponent({
         totalRows,
         viewportRows,
         bufferStartIndex: renderBuffer.startIndex,
-        rowHeightPx,
+        rowHeightPx: layoutRowHeightPx,
         maxScrollTop,
       });
     },
     [
       maxScrollTop,
       renderBuffer.startIndex,
-      rowHeightPx,
+      layoutRowHeightPx,
       totalRows,
       viewportRows,
     ],
@@ -755,7 +764,7 @@ function TerminalViewComponent({
       return resolveTerminalRenderDemandFromScroll({
         nextScrollTop,
         maxScrollTop,
-        rowHeightPx,
+        rowHeightPx: layoutRowHeightPx,
         dataRowCount,
         viewportRows,
         effectiveBufferEndIndex,
@@ -780,7 +789,7 @@ function TerminalViewComponent({
       maxScrollTop,
       minimumRenderBottomIndex,
       resolveScrollTopForRenderBottomIndex,
-      rowHeightPx,
+      layoutRowHeightPx,
       viewportRows,
     ],
   );
@@ -1325,7 +1334,7 @@ function TerminalViewComponent({
       );
       const row = Math.max(
         1,
-        Math.floor((midY - rect.top) / Math.max(1, rowHeightPx)) + 1,
+        Math.floor((midY - rect.top) / Math.max(1, layoutRowHeightPx)) + 1,
       );
       wheel.lastSentDirection = decision.direction;
       wheel.lastSentTickAt = Date.now();
@@ -1941,7 +1950,7 @@ function TerminalViewComponent({
     refreshActive,
     renderBuffer.revision,
     renderBuffer.startIndex,
-    rowHeightPx,
+    layoutRowHeightPx,
     termGridPaddingTopPx,
     viewportClientHeightPx,
     viewportRows,
@@ -1977,7 +1986,7 @@ function TerminalViewComponent({
     const previousMetrics = previousFollowViewportMetricsRef.current;
     previousFollowViewportMetricsRef.current = {
       viewportRows,
-      rowHeightPx,
+      rowHeightPx: layoutRowHeightPx,
       clientHeightPx: viewportClientHeightPx,
     };
 
@@ -1988,7 +1997,7 @@ function TerminalViewComponent({
     if (
       !previousMetrics ||
       (previousMetrics.viewportRows === viewportRows &&
-        previousMetrics.rowHeightPx === rowHeightPx &&
+        previousMetrics.rowHeightPx === layoutRowHeightPx &&
         previousMetrics.clientHeightPx === viewportClientHeightPx)
     ) {
       return;
@@ -1996,7 +2005,7 @@ function TerminalViewComponent({
 
     syncFollowScrollToAnchor();
   }, [
-    rowHeightPx,
+    layoutRowHeightPx,
     syncFollowScrollToAnchor,
     viewportClientHeightPx,
     viewportRows,
