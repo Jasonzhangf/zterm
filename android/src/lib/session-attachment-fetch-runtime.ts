@@ -121,6 +121,17 @@ export function createSessionAttachmentFetchRuntime(options: {
       sendMuxTargetMessage = ctx.sendMuxTargetMessage;
       readMuxReady = ctx.readMuxReady;
       sendQuery();
+      // Restore the attachment list on cold start (Activity re-created / app
+      // re-launched) so previously delivered files reappear without waiting
+      // for the user to open the history section.
+      if (sendMuxTargetMessage && isMuxReady()) {
+        sendMuxTargetMessage(
+          buildTerminalMuxTargetMessage({
+            type: 'attachment-history-query',
+            payload: { deviceId },
+          }),
+        );
+      }
       pollTimer = setInterval(sendQuery, POLL_INTERVAL_MS);
     },
 

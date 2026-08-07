@@ -182,11 +182,22 @@ function AttachmentDrawerComponent({
       const entry = getPendingAttachments().find((a) => a.attachmentId === detail.attachmentId);
       if (entry) {
         setPreviewEntry(entry);
+        return;
       }
+      // Cold start: the store may not have this attachment yet (Activity was
+      // re-created). Pull the history list, then re-download + preview it.
+      queryAttachmentHistory?.();
+      window.setTimeout(() => {
+        const after = getPendingAttachments().find((a) => a.attachmentId === detail.attachmentId);
+        if (after) {
+          setPendingPreviewId(after.attachmentId);
+          fetchAttachmentAsset?.(after.attachmentId, 'preview');
+        }
+      }, 1200);
     };
     window.addEventListener('zterm:preview-attachment', handler);
     return () => window.removeEventListener('zterm:preview-attachment', handler);
-  }, [getPendingAttachments]);
+  }, [getPendingAttachments, queryAttachmentHistory, fetchAttachmentAsset]);
 
   // History: load once on demand, then auto-open the full-screen preview as
   // soon as the re-downloaded preview becomes available.
