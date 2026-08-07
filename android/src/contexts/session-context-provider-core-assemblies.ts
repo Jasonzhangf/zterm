@@ -23,7 +23,7 @@ import type {
   SessionProviderAssembliesSharedOptions,
   SessionProviderCoreAssembliesResult,
 } from "./session-context-provider-assembly-types";
-import type { AttachmentAssetDataPayload, PendingAttachmentsPayload, SessionActivity } from '@zterm/shared/protocol';
+import type { AttachmentAssetDataPayload, AttachmentHistoryPayload, PendingAttachmentsPayload, SessionActivity } from '@zterm/shared/protocol';
 import { createSessionActivityNotifier } from '../lib/session-activity-notify';
 
 
@@ -342,7 +342,12 @@ export function useSessionProviderCoreAssemblies(
           sessionActivityNotifierRef.current.handleActivity(activity);
         }
         return true;
-      }      // Handle pending-attachments response from daemon
+      }      // Handle attachment history response from daemon
+      if (payload.message.type === 'attachment-history') {
+        attachmentFetchRuntimeRef.current.processAttachmentHistoryPayload(payload.message.payload as AttachmentHistoryPayload);
+        return true;
+      }
+      // Handle pending-attachments response from daemon
       if (payload.message.type === 'pending-attachments') {
         const pendingPayload = payload.message.payload as PendingAttachmentsPayload;
         attachmentFetchRuntimeRef.current.processPendingAttachmentsResponse(pendingPayload);

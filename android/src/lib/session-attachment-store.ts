@@ -9,7 +9,7 @@
  * 48h TTL is handled server-side; client just polls on session connect.
  */
 
-import type { PendingAttachmentsPayload } from '@zterm/shared/protocol';
+import type { AttachmentHistoryPayload, PendingAttachmentsPayload } from '@zterm/shared/protocol';
 
 export type AttachmentStatus = 'pending-preview' | 'preview-ready' | 'pending-original' | 'complete' | 'error';
 
@@ -29,11 +29,18 @@ export interface AttachmentEntry {
   status: AttachmentStatus;
   receivedAt: number;    // Date.now() when we first learned about it
   error?: string;
+  /** 'pending' = newly delivered (drives the notification); 'history' = past delivery. */
+  origin?: 'pending' | 'history';
+  /** Delivery acknowledgement state reported by the daemon (history entries). */
+  acknowledgedPreview?: boolean;
+  acknowledgedOriginal?: boolean;
 }
 
 export interface SessionAttachmentStore {
   /** Upsert a batch of pending attachments from daemon. Returns count of new entries. */
   upsertPending: (batch: PendingAttachmentsPayload['pending']) => number;
+  /** Upsert a batch of history attachments (incl. acknowledged past deliveries). Returns count of new entries. */
+  upsertHistory: (batch: AttachmentHistoryPayload['items']) => number;
   /** Mark preview downloaded for an attachment. */
   markPreviewReady: (attachmentId: string, blob: Blob) => void;
   /** Mark original downloaded for an attachment. */
@@ -83,8 +90,43 @@ export function createSessionAttachmentStore(): SessionAttachmentStore {
             message: item.message,
             status: 'pending-preview',
             receivedAt: Date.now(),
+            origin: 'pending',
           });
           newCount++;
+        }
+      }
+      return newCount;
+    },
+
+    upsertHistory: (batch) => {
+      let newCount = 0;
+      for (const item of batch) {
+        const existing = attachments.get(item.attachmentId);
+        if (!existing) {
+          attachments.set(item.attachmentId, {
+            attachmentId: item.attachmentId,
+            kind: item.kind,
+            senderName: item.senderName,
+            sourceSession: item.sourceSession,
+            fileName: item.fileName,
+            mimeType: item.mimeType,
+            previewSize: item.previewSize,
+            originalSize: item.originalSize,
+            message: item.message,
+            status: 'pending-preview',
+            receivedAt: Date.parse(item.createdAt) || Date.now(),
+            origin: 'history',
+            acknowledgedPreview: item.previewStatus === 'acknowledged',
+            acknowledgedOriginal: item.originalStatus === 'acknowledged',
+          });
+          newCount++;
+        } else if (existing.origin !== 'history') {
+          // A pending entry that already arrived: upgrade it with the history state.
+          attachments.set(item.attachmentId, {
+            ...existing,
+            acknowledgedPreview: item.previewStatus === 'acknowledged',
+            acknowledgedOriginal: item.originalStatus === 'acknowledged',
+          });
         }
       }
       return newCount;

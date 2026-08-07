@@ -226,6 +226,12 @@ export function SessionProvider({
     sendMessageRaw,
     getPendingAttachmentCount: () => attachmentStoreRef.current.getPendingCount(),
     getPendingAttachments: () => attachmentStoreRef.current.getAll(),
+    queryAttachmentHistory: () => {
+      attachmentFetchRuntimeRef.current.queryAttachmentHistory(() => {});
+    },
+    fetchAttachmentAsset: (attachmentId: string, asset: 'preview' | 'original') => {
+      return attachmentFetchRuntimeRef.current.fetchAsset(attachmentId, asset);
+    },
   });
 
   contextRuntimeRef.current = {
@@ -273,6 +279,12 @@ export function SessionProvider({
     sendMessageRaw,
     getPendingAttachmentCount: () => attachmentStoreRef.current.getPendingCount(),
     getPendingAttachments: () => attachmentStoreRef.current.getAll(),
+    queryAttachmentHistory: () => {
+      attachmentFetchRuntimeRef.current.queryAttachmentHistory(() => {});
+    },
+    fetchAttachmentAsset: (attachmentId: string, asset: 'preview' | 'original') => {
+      return attachmentFetchRuntimeRef.current.fetchAsset(attachmentId, asset);
+    },
   };
 
   const stableFacade = useMemo(() => ({
@@ -364,6 +376,12 @@ export function SessionProvider({
     },
     getPendingAttachmentCount: () => attachmentStoreRef.current.getPendingCount(),
     getPendingAttachments: () => attachmentStoreRef.current.getAll(),
+    queryAttachmentHistory: () => {
+      return contextRuntimeRef.current.queryAttachmentHistory();
+    },
+    fetchAttachmentAsset: (attachmentId: string, asset: 'preview' | 'original') => {
+      return contextRuntimeRef.current.fetchAttachmentAsset(attachmentId, asset);
+    },
     onRemoteWindowMessage: (handler: (msg: RemoteWindowControlMessage) => void) => {
       return remoteWindowMessageRuntimeRef.current.subscribe(handler);
     },

@@ -288,6 +288,10 @@ export interface SessionContextValue {
   getPendingAttachmentCount: () => number;
   /** Get pending attachments sorted newest first. */
   getPendingAttachments: () => SessionAttachmentStore extends { getAll: () => infer T } ? T : never;
+  /** Query daemon for the full attachment history (incl. acknowledged items). */
+  queryAttachmentHistory: () => void;
+  /** Fetch a single asset (preview/original) for an attachment (history re-download). */
+  fetchAttachmentAsset: (attachmentId: string, asset: 'preview' | 'original') => boolean;
 }
 
 export interface SessionProviderProps {

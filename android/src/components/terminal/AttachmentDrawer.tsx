@@ -19,6 +19,10 @@ export interface AttachmentDrawerProps {
   bottomInsetPx?: number;
   /** 从 context 获取的附件列表 getter */
   getPendingAttachments: () => AttachmentEntry[];
+  /** 查询 daemon 附件历史（含已确认收过的） */
+  queryAttachmentHistory?: () => void;
+  /** 重新拉取某个附件的 preview/original（历史重下载） */
+  fetchAttachmentAsset?: (attachmentId: string, asset: 'preview' | 'original') => boolean;
   onClose: () => void;
   terminalShellSkin?: 'light' | 'blue' | 'black';
 }
@@ -75,6 +79,8 @@ function AttachmentDrawerComponent({
   topInsetPx = 0,
   bottomInsetPx = 0,
   getPendingAttachments,
+  queryAttachmentHistory,
+  fetchAttachmentAsset,
   onClose,
   terminalShellSkin = 'light',
 }: AttachmentDrawerProps) {
@@ -142,6 +148,7 @@ function AttachmentDrawerComponent({
     const attachments = getPendingAttachments();
     const notified = new Set(prevNotifiedRef.current);
     for (const entry of attachments) {
+      if (entry.origin === 'history') continue; // never notify for past deliveries
       if (notified.has(entry.attachmentId)) continue;
       if (!entry.previewUrl) continue; // wait until the preview thumbnail is downloaded
       notified.add(entry.attachmentId);
@@ -181,8 +188,39 @@ function AttachmentDrawerComponent({
     return () => window.removeEventListener('zterm:preview-attachment', handler);
   }, [getPendingAttachments]);
 
+  // History: load once on demand, then auto-open the full-screen preview as
+  // soon as the re-downloaded preview becomes available.
+  const [historyLoaded, setHistoryLoaded] = useState(false);
+  const [pendingPreviewId, setPendingPreviewId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!pendingPreviewId) return;
+    const entry = getPendingAttachments().find((a) => a.attachmentId === pendingPreviewId);
+    if (entry?.previewUrl) {
+      setPreviewEntry(entry);
+      setPendingPreviewId(null);
+    }
+  });
+
   const attachments = open ? getPendingAttachments() : [];
-  const isEmpty = attachments.length === 0;
+  const pendingItems = attachments.filter((a) => a.origin !== 'history');
+  const historyItems = attachments.filter((a) => a.origin === 'history');
+  const isEmpty = pendingItems.length === 0;
+
+  const handleLoadHistory = () => {
+    setHistoryLoaded(true);
+    queryAttachmentHistory?.();
+  };
+
+  const handleHistoryEntryClick = (entry: AttachmentEntry) => {
+    if (entry.previewUrl) {
+      setPreviewEntry(entry);
+      return;
+    }
+    if (fetchAttachmentAsset) {
+      setPendingPreviewId(entry.attachmentId);
+      fetchAttachmentAsset(entry.attachmentId, 'preview');
+    }
+  };
 
   // Shell skin theming
   const isDark = terminalShellSkin === 'black';
@@ -240,7 +278,7 @@ function AttachmentDrawerComponent({
           }}
         >
           <span style={{ fontSize: 17, fontWeight: 600, color: textColor }}>
-            附件 ({attachments.length})
+            附件 ({pendingItems.length})
           </span>
           <button
             onClick={onClose}
@@ -276,7 +314,7 @@ function AttachmentDrawerComponent({
             </div>
           ) : (
             <div style={{ padding: '8px 0' }}>
-              {attachments.map((entry) => (
+              {pendingItems.map((entry) => (
                 <div
                   key={entry.attachmentId}
                   style={{
@@ -366,20 +404,128 @@ function AttachmentDrawerComponent({
           )}
         </div>
 
-        {/* Footer hint */}
-        {!isEmpty && (
-          <div
-            style={{
-              padding: '10px 16px',
-              borderTop: `1px solid ${dividerColor}`,
-              textAlign: 'center',
-              fontSize: 12,
-              color: secondaryTextColor,
-            }}
-          >
-            附件保留 48 小时后自动删除
+        {/* History */}
+        {historyLoaded && historyItems.length > 0 && (
+          <div style={{ borderTop: `1px solid ${dividerColor}` }}>
+            <div
+              style={{
+                padding: '8px 16px',
+                fontSize: 13,
+                fontWeight: 600,
+                color: secondaryTextColor,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+              }}
+            >
+              <span>历史文件</span>
+              <span style={{ fontSize: 11, fontWeight: 400 }}>{historyItems.length} 个</span>
+            </div>
+            <div style={{ padding: '0 0 8px' }}>
+              {historyItems.map((entry) => (
+                <div
+                  key={entry.attachmentId}
+                  style={{
+                    display: 'flex',
+                    padding: '10px 16px',
+                    borderBottom: `1px solid ${dividerColor}`,
+                    backgroundColor: itemBg,
+                    cursor: 'pointer',
+                  }}
+                  onClick={() => handleHistoryEntryClick(entry)}
+                >
+                  <div
+                    style={{
+                      width: 56,
+                      height: 56,
+                      borderRadius: 6,
+                      backgroundColor: dividerColor,
+                      flexShrink: 0,
+                      overflow: 'hidden',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontSize: 24,
+                    }}
+                  >
+                    {entry.previewUrl ? (
+                      <img
+                        src={entry.previewUrl}
+                        alt={entry.fileName}
+                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                      />
+                    ) : (
+                      '🖼️'
+                    )}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0, marginLeft: 12 }}>
+                    <div
+                      style={{
+                        fontSize: 14,
+                        fontWeight: 500,
+                        color: textColor,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {entry.fileName}
+                    </div>
+                    <div style={{ fontSize: 12, color: secondaryTextColor, marginTop: 2 }}>
+                      {entry.senderName} · {formatRelativeTime(entry.receivedAt)}
+                    </div>
+                    <div style={{ fontSize: 11, color: secondaryTextColor }}>
+                      {entry.previewUrl ? '点击预览' : '点击重新下载'}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: entry.acknowledgedPreview ? '#2da44e' : secondaryTextColor,
+                      alignSelf: 'center',
+                      flexShrink: 0,
+                    }}
+                  >
+                    {entry.acknowledgedPreview ? '已接收' : '未接收'}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
+
+        {/* Footer */}
+        <div
+          style={{
+            padding: '8px 16px',
+            borderTop: `1px solid ${dividerColor}`,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+          }}
+        >
+          <button
+            onClick={handleLoadHistory}
+            disabled={historyLoaded}
+            style={{
+              background: 'none',
+              border: `1px solid ${dividerColor}`,
+              borderRadius: 8,
+              color: textColor,
+              fontSize: 12,
+              padding: '6px 12px',
+              cursor: historyLoaded ? 'default' : 'pointer',
+              opacity: historyLoaded ? 0.5 : 1,
+            }}
+          >
+            {historyLoaded ? '已加载历史' : '历史文件'}
+          </button>
+          {!isEmpty && (
+            <span style={{ fontSize: 11, color: secondaryTextColor }}>
+              附件保留 48 小时后自动删除
+            </span>
+          )}
+        </div>
       </div>
 
       {/* Preview overlay */}

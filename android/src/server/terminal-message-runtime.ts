@@ -12,6 +12,7 @@ const MAX_INPUT_PAYLOAD_BYTES = TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES;
 import type {
   BridgeClientMessage as ClientMessage,
   BridgeServerMessage as ServerMessage,
+  AttachmentHistoryPayload,
   HostConfigMessage,
   PendingAttachmentsPayload,
   RuntimeDebugLogEntry,
@@ -59,7 +60,7 @@ export interface TerminalMessageRuntimeDeps {
   closeSession: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
   terminalFileTransferRuntime: TerminalFileTransferRuntime;
   attachmentDeliveryRuntime: {
-    listForDevice: (deviceId: string) => Promise<Array<{
+    listForDevice: (deviceId: string, asset?: 'preview' | 'original', includeAcknowledged?: boolean) => Promise<Array<{
       attachmentId: string;
       kind: 'image';
       senderName: string;
@@ -71,6 +72,7 @@ export interface TerminalMessageRuntimeDeps {
       message?: string;
       createdAt: string;
       expiresAt: string;
+      deliveries: Array<{ targetDeviceId: string; previewStatus: string; originalStatus: string }>;
     }>>;
     readAsset: (attachmentId: string, asset: 'preview' | 'original', deviceId: string) => Promise<{
       manifest: {
@@ -439,6 +441,47 @@ export function createTerminalMessageRuntime(
           deps.sendTransportMessage(connection.transport, {
             type: 'error',
             payload: { message: err instanceof Error ? err.message : 'attachment query failed', code: 'attachment_query_failed' },
+          });
+        }
+        break;
+      }
+      case 'attachment-history-query': {
+        const { deviceId } = (message as { payload: { deviceId: string } }).payload || {};
+        if (!deviceId) {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'error',
+            payload: { message: 'attachment-history-query requires deviceId', code: 'invalid_payload' },
+          });
+          break;
+        }
+        try {
+          const manifests = await deps.attachmentDeliveryRuntime.listForDevice(deviceId, 'preview', true);
+          const items: AttachmentHistoryPayload['items'] = manifests.map((m) => {
+            const delivery = m.deliveries.find((item) => item.targetDeviceId === deviceId);
+            return {
+              attachmentId: m.attachmentId,
+              kind: m.kind,
+              senderName: m.senderName,
+              sourceSession: m.sourceSession,
+              fileName: m.fileName,
+              mimeType: m.mimeType,
+              previewSize: m.preview.size,
+              originalSize: m.original.size,
+              message: m.message,
+              createdAt: m.createdAt,
+              expiresAt: m.expiresAt,
+              previewStatus: delivery?.previewStatus === 'acknowledged' ? 'acknowledged' : 'pending',
+              originalStatus: delivery?.originalStatus === 'acknowledged' ? 'acknowledged' : 'pending',
+            };
+          });
+          deps.sendTransportMessage(connection.transport, {
+            type: 'attachment-history',
+            payload: { schemaVersion: 1, items },
+          });
+        } catch (err) {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'error',
+            payload: { message: err instanceof Error ? err.message : 'attachment history query failed', code: 'attachment_history_failed' },
           });
         }
         break;

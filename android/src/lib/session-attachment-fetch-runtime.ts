@@ -10,7 +10,7 @@
  * The runtime is session-agnostic — shares the attachment store across all sessions.
  */
 
-import type { PendingAttachmentsPayload } from '@zterm/shared/protocol';
+import type { AttachmentHistoryPayload, PendingAttachmentsPayload } from '@zterm/shared/protocol';
 import type {
   SessionAttachmentStore,
 } from './session-attachment-store';
@@ -29,8 +29,14 @@ export interface SessionAttachmentFetchRuntime {
   stop: () => void;
   /** Manually trigger a pending attachments poll. */
   pollPendingAttachments: () => void;
+  /** Request the full attachment history (incl. acknowledged items) for this device. */
+  queryAttachmentHistory: (onHistory: (payload: AttachmentHistoryPayload) => void) => void;
+  /** Fetch a single asset (preview/original) for an attachment (used by history re-download). */
+  fetchAsset: (attachmentId: string, asset: 'preview' | 'original') => boolean;
   /** Process an incoming `pending-attachments` mux target message. Returns new pending count. */
   processPendingAttachmentsResponse: (payload: PendingAttachmentsPayload) => number;
+  /** Process an incoming `attachment-history` mux target message. */
+  processAttachmentHistoryPayload: (payload: AttachmentHistoryPayload) => void;
   /** Called when `attachment-asset-data` arrives over the mux channel:
    *  sends the `attachment-receipt` ack back to the daemon. */
   onAssetDataReceived: (attachmentId: string, asset: 'preview' | 'original', sha256: string) => boolean;
@@ -108,12 +114,32 @@ export function createSessionAttachmentFetchRuntime(options: {
     }
   };
 
+  let historyCallback: ((payload: AttachmentHistoryPayload) => void) | null = null;
+
   return {
     start: (ctx) => {
       sendMuxTargetMessage = ctx.sendMuxTargetMessage;
       readMuxReady = ctx.readMuxReady;
       sendQuery();
       pollTimer = setInterval(sendQuery, POLL_INTERVAL_MS);
+    },
+
+    queryAttachmentHistory: (onHistory) => {
+      historyCallback = onHistory;
+      if (!sendMuxTargetMessage || !isMuxReady()) return;
+      sendMuxTargetMessage(
+        buildTerminalMuxTargetMessage({
+          type: 'attachment-history-query',
+          payload: { deviceId },
+        }),
+      );
+    },
+
+    fetchAsset: (attachmentId, asset) => requestAsset(attachmentId, asset),
+
+    processAttachmentHistoryPayload: (payload: AttachmentHistoryPayload) => {
+      attachmentStore.upsertHistory(payload.items);
+      historyCallback?.(payload);
     },
 
     stop: () => {

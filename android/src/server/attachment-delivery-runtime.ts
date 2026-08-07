@@ -52,7 +52,7 @@ export interface AttachmentDeliveryRuntime {
     targetDeviceIds: string[];
     message?: string;
   }) => Promise<AttachmentManifest>;
-  listForDevice: (deviceId: string, asset?: AttachmentAsset) => Promise<AttachmentManifest[]>;
+  listForDevice: (deviceId: string, asset?: AttachmentAsset, includeAcknowledged?: boolean) => Promise<AttachmentManifest[]>;
   readAsset: (attachmentId: string, asset: AttachmentAsset, deviceId: string) => Promise<{ manifest: AttachmentManifest; data: Buffer }>;
   acknowledge: (attachmentId: string, deviceId: string, asset: AttachmentAsset, sha256: string) => Promise<AttachmentManifest>;
   cleanup: () => Promise<{ expired: number; deleted: number }>;
@@ -183,9 +183,9 @@ export function createAttachmentDeliveryRuntime(options: {
         throw error;
       }
     }),
-    listForDevice: (deviceId, asset = 'preview') => runExclusive(async () => {
+    listForDevice: (deviceId, asset = 'preview', includeAcknowledged = false) => runExclusive(async () => {
       const manifests = await listManifests();
-      return manifests.filter((item) => item.status === 'available' && now() < Date.parse(item.expiresAt) && item.deliveries.some((delivery) => delivery.targetDeviceId === deviceId && delivery[asset === 'preview' ? 'previewStatus' : 'originalStatus'] !== 'acknowledged'));
+      return manifests.filter((item) => item.status === 'available' && now() < Date.parse(item.expiresAt) && item.deliveries.some((delivery) => delivery.targetDeviceId === deviceId && (includeAcknowledged || delivery[asset === 'preview' ? 'previewStatus' : 'originalStatus'] !== 'acknowledged')));
     }),
     readAsset: (attachmentId, asset, deviceId) => runExclusive(async () => {
       const manifest = await readManifest(attachmentId);

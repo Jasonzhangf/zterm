@@ -549,6 +549,7 @@ export type BridgeClientMessage =
   | { type: 'file-upload-chunk'; payload: FileUploadChunkPayload }
   | { type: 'file-upload-end'; payload: FileUploadEndPayload }
   | { type: 'pending-attachments-query'; payload: { deviceId: string } }
+  | { type: 'attachment-history-query'; payload: { deviceId: string } }
   | { type: 'attachment-asset-request'; payload: AttachmentAssetRequestPayload }
   | { type: 'attachment-receipt'; payload: AttachmentReceiptPayload }
   | { type: 'ping' }
@@ -630,6 +631,7 @@ export type BridgeServerControlMessage =
   | { type: 'closed'; payload: { reason: string } }
   | { type: 'pong' }
   | { type: 'pending-attachments'; payload: PendingAttachmentsPayload }
+  | { type: 'attachment-history'; payload: AttachmentHistoryPayload }
   | { type: 'attachment-asset-data'; payload: AttachmentAssetDataPayload };
 
 export type BridgeServerMessage = BridgeBufferMessage | BridgeServerControlMessage;
@@ -689,12 +691,33 @@ export interface PendingAttachmentsPayload {
   }>;
 }
 
+export interface AttachmentHistoryPayload {
+  schemaVersion: 1;
+  items: Array<{
+    attachmentId: string;
+    kind: 'image';
+    senderName: string;
+    /** Optional tmux session name the sender was working in. */
+    sourceSession?: string;
+    fileName: string;
+    mimeType: string;
+    previewSize: number;
+    originalSize: number;
+    message?: string;
+    createdAt: string;
+    expiresAt: string;
+    previewStatus: 'pending' | 'acknowledged';
+    originalStatus: 'pending' | 'acknowledged';
+  }>;
+}
+
 export type TerminalMuxTargetClientMessageType =
   | 'list-sessions'
   | 'tmux-create-session'
   | 'tmux-rename-session'
   | 'tmux-kill-session'
   | 'pending-attachments-query'
+  | 'attachment-history-query'
   | 'attachment-asset-request'
   | 'attachment-receipt';
 
@@ -726,6 +749,7 @@ export type TerminalMuxTargetServerMessageType =
   | 'pong'
   | 'session-activity'
   | 'pending-attachments'
+  | 'attachment-history'
   | 'attachment-asset-data';
 
 export type TerminalMuxTargetServerMessage = Extract<

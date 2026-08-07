@@ -1068,7 +1068,7 @@ function TerminalPageComponent({
       void onAuditOpenTabsAgainstRemoteSessions('drawer-open');
     }
   }, [sessionDrawerOpen, onAuditOpenTabsAgainstRemoteSessions]);
-  const { getPendingAttachmentCount, getPendingAttachments } = useSession();
+  const { getPendingAttachmentCount, getPendingAttachments, queryAttachmentHistory, fetchAttachmentAsset } = useSession();
   const initialSessionPreviewRead = useMemo(() => {
     const storage = getBrowserStorage();
     return storage
@@ -3873,6 +3873,8 @@ function TerminalPageComponent({
         topInsetPx={headerTopInsetPx}
         bottomInsetPx={keyboardInset}
         getPendingAttachments={getPendingAttachments}
+        queryAttachmentHistory={queryAttachmentHistory}
+        fetchAttachmentAsset={fetchAttachmentAsset}
         onClose={() => setAttachmentDrawerOpen(false)}
         terminalShellSkin={effectiveTerminalShellSkin}
       />

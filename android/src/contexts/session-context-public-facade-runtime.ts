@@ -382,6 +382,8 @@ export function buildSessionContextValueRuntime(options: {
   sendMessageRaw: (sessionId: string, msg: unknown) => void;
   getPendingAttachmentCount: () => number;
   getPendingAttachments: () => ReturnType<SessionAttachmentStore['getAll']>;
+  queryAttachmentHistory: () => void;
+  fetchAttachmentAsset: (attachmentId: string, asset: 'preview' | 'original') => boolean;
 }): SessionContextValue {
   return {
     state: options.state,
@@ -430,5 +432,7 @@ export function buildSessionContextValueRuntime(options: {
     sendMessageRaw: options.sendMessageRaw,
     getPendingAttachmentCount: options.getPendingAttachmentCount,
     getPendingAttachments: options.getPendingAttachments,
+    queryAttachmentHistory: options.queryAttachmentHistory,
+    fetchAttachmentAsset: options.fetchAttachmentAsset,
   };
 }
