@@ -177,6 +177,8 @@ export function createAttachmentDeliveryRuntime(options: {
           deliveries: targetDeviceIds.map((targetDeviceId) => ({ targetDeviceId, previewStatus: 'pending', originalStatus: 'pending', attemptCount: 0 })),
         };
         await writeManifest(manifest);
+        // eslint-disable-next-line no-console
+        console.log(`[zterm:attach] enqueue ok attachmentId=${attachmentId} file=${fileName} targets=${targetDeviceIds.join(',')} session=${input.sourceSession?.trim() || '-'} sender=${input.senderName || input.senderAgentId}`);
         return manifest;
       } catch (error) {
         await rm(dir, { recursive: true, force: true });

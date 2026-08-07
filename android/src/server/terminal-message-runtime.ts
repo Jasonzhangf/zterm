@@ -437,6 +437,8 @@ export function createTerminalMessageRuntime(
             type: 'pending-attachments',
             payload: { schemaVersion: 1, pending },
           });
+          // eslint-disable-next-line no-console
+          console.log(`[zterm:attach] pending-query device=${deviceId} -> ${pending.length} pending`);
         } catch (err) {
           deps.sendTransportMessage(connection.transport, {
             type: 'error',
@@ -510,6 +512,8 @@ export function createTerminalMessageRuntime(
               mimeType: manifest.mimeType,
             },
           });
+          // eslint-disable-next-line no-console
+          console.log(`[zterm:attach] asset-request attachment=${attachmentId} asset=${asset} device=${deviceId} bytes=${data.byteLength} -> delivered`);
         } catch (err) {
           deps.sendTransportMessage(connection.transport, {
             type: 'error',
@@ -529,6 +533,8 @@ export function createTerminalMessageRuntime(
         }
         try {
           await deps.attachmentDeliveryRuntime.acknowledge(attachmentId, deviceId, asset, sha256);
+          // eslint-disable-next-line no-console
+          console.log(`[zterm:attach] receipt attachment=${attachmentId} asset=${asset} device=${deviceId} sha256=${sha256.slice(0, 8)} -> ack`);
           // No response needed - receipt is acknowledged
         } catch (err) {
           deps.sendTransportMessage(connection.transport, {
