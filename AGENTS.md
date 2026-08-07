@@ -75,3 +75,8 @@
 - 根目录命令应代理到 `android/`
 - Android 原生工程路径：`android/native/android`
 - npm 依赖真源：发布后的 `@jsonstudio/wtermmod-*`
+- **每次 bump 版本构建出新 APK（buildNumber 变化）后，必须同步发布 OTA 升级通道**，否则设备无法自动升级：
+  1. `node scripts/tools/patch-apk-version.py` 生成当前版本的 rollback APK（`app-rollback-debug.apk`，versionCode+1、versionName 加 `.1`）
+  2. `node scripts/prepare-update-bundle.mjs`（生成 update-dist + 写入 `~/.zterm/updates/` + `latest.json`）
+  3. `node scripts/verify-update-bundle.mjs` 验证全绿后再交付/提交
+- 设备端 OTA 检查的是 daemon 的 `~/.zterm/updates/latest.json`；手工 `adb install` 只影响单台设备，不替代 OTA 发布
