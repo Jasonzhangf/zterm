@@ -87,6 +87,8 @@ interface UseOpenTabRuntimeOptions {
   pruneSessionGroupSelectionToRemoteTruth: (target: { bridgeHost: string; bridgePort: number; daemonHostId?: string }, remoteSessionNames: string[]) => void;
   onForegroundActiveChange?: (active: boolean) => void;
   onForegroundResume?: (reason: 'visibilitychange' | 'resume' | 'appStateChange') => void;
+  /** SessionProvider facade: records background entry time into the session context's own ref. */
+  recordBackgroundEnteredAt?: (sessionIds: string[], at: number) => void;
   /** 后台心跳发送函数 */
   sendBackgroundHeartbeat?: () => void;
 }
@@ -506,6 +508,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     onForegroundActiveChange,
     onForegroundResume,
     sendBackgroundHeartbeat,
+    recordBackgroundEnteredAt: options.recordBackgroundEnteredAt,
     auditOpenTabsAgainstRemoteSessions,
     notifyTargetNetworkSignal,
     bumpFollowResetEpoch,

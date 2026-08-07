@@ -4,6 +4,7 @@ import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
+import { buildTargetTransportHeartbeatKey } from './session-context-socket-runtime';
 import {
   buildSessionTransportWaitUpdates,
   buildActiveSessionRefreshPlan,
@@ -38,6 +39,9 @@ export const BACKGROUND_RESUME_GRACE_MS = 60 * 1000;
 
 export function resolveSessionTransportKeepaliveGrace(options: {
   sessionId: string;
+  /** Mux-mode target key; server activity is recorded under `target:<targetKey>` for
+   *  target-scoped heartbeats, while legacy session-scoped activity uses sessionId. */
+  targetKey?: string | null;
   refs: {
     lastConnectedBaselineAtRef: MutableRefObject<Map<string, number>>;
     heartbeatStore: SessionHeartbeatStore;
@@ -47,7 +51,11 @@ export function resolveSessionTransportKeepaliveGrace(options: {
 }) {
   const now = options.now ?? Date.now();
   const graceMs = Math.max(0, Math.floor(options.graceMs ?? SESSION_TRANSPORT_KEEPALIVE_GRACE_MS));
-  const lastServerActivityAt = options.refs.heartbeatStore.readLastServerActivityAt(options.sessionId);
+  const sessionActivityAt = options.refs.heartbeatStore.readLastServerActivityAt(options.sessionId);
+  const targetActivityAt = options.targetKey
+    ? options.refs.heartbeatStore.readLastServerActivityAt(buildTargetTransportHeartbeatKey(options.targetKey))
+    : 0;
+  const lastServerActivityAt = Math.max(sessionActivityAt, targetActivityAt);
   const lastConnectedBaselineAt = options.refs.lastConnectedBaselineAtRef.current.get(options.sessionId) || 0;
   const lastAliveAt = Math.max(lastServerActivityAt, lastConnectedBaselineAt);
   const ageMs = lastAliveAt > 0 ? now - lastAliveAt : Number.POSITIVE_INFINITY;
@@ -182,6 +190,7 @@ export function ensureActiveSessionFreshRuntime(options: {
   const now = Date.now();
   const keepaliveGrace = resolveSessionTransportKeepaliveGrace({
     sessionId: options.refreshOptions.sessionId,
+    targetKey: transportRuntime?.targetKey ?? null,
     refs: {
       lastConnectedBaselineAtRef: options.refs.lastConnectedBaselineAtRef,
       heartbeatStore: options.refs.heartbeatStore,
@@ -319,9 +328,20 @@ export function ensureActiveSessionFreshRuntime(options: {
       wsReadyState: ws?.readyState ?? null,
     });
     if (options.refreshOptions.allowReconnectIfUnavailable) {
+      // The physical socket is still OPEN — only the head probe did not answer
+      // in time. Re-issue the head request on the existing socket instead of
+      // rebuilding the transport (a healthy ws must not be torn down just
+      // because one head response was slow).
       options.refs.reconnectStore.clearStaleTransportProbe(options.refreshOptions.sessionId);
-      options.reconnectSession(options.refreshOptions.sessionId);
-      return true;
+      const requested = options.requestSessionBufferHead(
+        options.refreshOptions.sessionId,
+        ws,
+        { force: options.refreshOptions.forceHead },
+      );
+      if (requested) {
+        options.refs.reconnectStore.markStaleTransportProbeIfAbsent(options.refreshOptions.sessionId, now);
+      }
+      return requested;
     }
     return false;
   }

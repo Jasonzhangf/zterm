@@ -316,6 +316,7 @@ export function buildSessionContextValueRuntime(options: {
   renameSession: (id: string, name: string) => void;
   reconnectSession: (id: string) => void;
   reconnectAllSessions: () => void;
+  recordBackgroundEnteredAt: (sessionIds: string[], at: number) => void;
   setLiveSessionIds: (ids: string[]) => void;
   setActiveBodySubscriptionSuppressed: (suppressed: boolean) => void;
   resumeActiveSessionTransport: (id: string) => boolean;
@@ -393,6 +394,7 @@ export function buildSessionContextValueRuntime(options: {
     renameSession: options.renameSession,
     reconnectSession: options.reconnectSession,
     reconnectAllSessions: options.reconnectAllSessions,
+    recordBackgroundEnteredAt: options.recordBackgroundEnteredAt,
     setLiveSessionIds: options.setLiveSessionIds,
     setActiveBodySubscriptionSuppressed: options.setActiveBodySubscriptionSuppressed,
     resumeActiveSessionTransport: options.resumeActiveSessionTransport,

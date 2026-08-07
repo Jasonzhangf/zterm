@@ -140,6 +140,7 @@ export function AppContent({
     runScheduleJobNow,
     getSessionScheduleState,
     getSessionRenderBufferStore,
+    recordBackgroundEnteredAt,
   } = useSession();
   void sendMessageRaw;
   void onFileTransferMessage;
@@ -304,6 +305,7 @@ export function AppContent({
     pruneSessionGroupSelectionToRemoteTruth,
     onForegroundActiveChange,
     onForegroundResume: handleForegroundResumeAfterControlRefresh,
+    recordBackgroundEnteredAt,
     sendBackgroundHeartbeat: () => {
       for (const session of sessions) {
         if (session.state !== 'closed') {

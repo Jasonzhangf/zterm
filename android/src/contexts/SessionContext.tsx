@@ -286,6 +286,12 @@ export function SessionProvider({
     renameSession: (id: string, name: string) => contextRuntimeRef.current.renameSession(id, name),
     reconnectSession: (id: string) => contextRuntimeRef.current.reconnectSession(id),
     reconnectAllSessions: () => contextRuntimeRef.current.reconnectAllSessions(),
+    recordBackgroundEnteredAt: (sessionIds: string[], at: number) => {
+      const now = at > 0 ? at : Date.now();
+      for (const sessionId of sessionIds) {
+        lastBackgroundEnteredAtRef.current.set(sessionId, now);
+      }
+    },
     setLiveSessionIds: (ids: string[]) => contextRuntimeRef.current.setLiveSessionIds(ids),
     setActiveBodySubscriptionSuppressed: (suppressed: boolean) => (
       contextRuntimeRef.current.setActiveBodySubscriptionSuppressed(suppressed)

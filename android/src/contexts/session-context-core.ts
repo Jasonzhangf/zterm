@@ -221,6 +221,8 @@ export interface SessionContextValue {
   renameSession: (id: string, name: string) => void;
   reconnectSession: (id: string) => void;
   reconnectAllSessions: () => void;
+  /** Record when the app entered background for each session (resume grace decision). */
+  recordBackgroundEnteredAt: (sessionIds: string[], at: number) => void;
   resumeActiveSessionTransport: (id: string) => boolean;
   notifyTargetNetworkSignal: (
     signal: SessionTargetNetworkSignal,

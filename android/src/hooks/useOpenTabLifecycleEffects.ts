@@ -42,6 +42,9 @@ interface UseOpenTabLifecycleEffectsOptions {
   onForegroundActiveChange?: (active: boolean) => void;
   onForegroundResume?: (reason: ForegroundResumeSignalReason) => void;
   lastBackgroundEnteredAtRef?: MutableRefObject<Map<string, number>>;
+  /** SessionProvider facade: records background entry time into the session
+   *  context's own ref so the resume grace decision reads the same instance. */
+  recordBackgroundEnteredAt?: (sessionIds: string[], at: number) => void;
   auditOpenTabsAgainstRemoteSessions: (reason: OpenTabAuditReason) => Promise<void>;
   notifyTargetNetworkSignal: (
     signal: SessionTargetNetworkSignal,
@@ -228,8 +231,17 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     const markHidden = () => {
       markForegroundRuntimeHidden(foregroundRefreshRuntimeRef.current, document.visibilityState);
       projectForegroundActive(false);
-      // Record background entry time for all active sessions
-      if (options.lastBackgroundEnteredAtRef) {
+      // Record background entry time for all active sessions. Prefer the
+      // SessionProvider-owned facade so the resume grace decision reads the
+      // same map instance; fall back to the local ref for tests that render
+      // the lifecycle hook without a SessionProvider.
+      if (options.recordBackgroundEnteredAt) {
+        const now = Date.now();
+        options.recordBackgroundEnteredAt(
+          options.sessionsRef.current.map((session) => session.id),
+          now,
+        );
+      } else if (options.lastBackgroundEnteredAtRef) {
         const now = Date.now();
         for (const session of options.sessionsRef.current) {
           options.lastBackgroundEnteredAtRef.current.set(session.id, now);

@@ -234,7 +234,13 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       reconnectSession(sessionId);
       return;
     }
-    connectSession(sessionId, host);
+    // Reuse the already-open physical transport when possible: queue a mux
+    // channel-open intent that re-opens the terminal channel on the existing
+    // socket (openSessionMuxChannelByIntentRuntime reuses an OPEN + mux-ready
+    // socket and only opens a new physical transport when none is healthy).
+    // connectSession would tear the transport down and rebuild it even when
+    // the ws is healthy.
+    options.queueConnectTransportOpenIntent(sessionId, host);
   };
 
   const reconnectAllSessions = () => {
