@@ -372,7 +372,7 @@ describe('terminal mirror capture runtime', () => {
     expect(mirror.bufferLines.map(rowText)).toEqual(['new-top', 'new-middle', 'new-bottom']);
   });
 
-  it('fails explicitly when tmux capture never stabilizes within the capped attempts', async () => {
+  it('accepts the latest snapshot when tmux capture never stabilizes (live session)', async () => {
     const readSnapshot = vi
       .fn()
       .mockResolvedValueOnce({
@@ -415,9 +415,16 @@ describe('terminal mirror capture runtime', () => {
         visibleTopIndex: 102,
       });
 
-    await expect(resolveStableMirrorCaptureSnapshot({
+    const result = await resolveStableMirrorCaptureSnapshot({
       readSnapshot,
       maxAttempts: 3,
-    })).rejects.toThrow('tmux capture remained unstable after 3 attempts');
+    });
+    expect(readSnapshot).toHaveBeenCalledTimes(3);
+    expect(result.stabilized).toBe(false);
+    expect(result.stabilizedAgainst).toBe('unstable-accepted');
+    expect(result.snapshot).toMatchObject({
+      bufferStartIndex: 102,
+      bufferLines: [row('c')],
+    });
   });
 });

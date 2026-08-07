@@ -222,7 +222,18 @@ export async function resolveStableMirrorCaptureSnapshot(options: {
     previousSnapshot = nextSnapshot;
   }
 
-  throw new Error(`tmux capture remained unstable after ${maxAttempts} attempts`);
+  // The screen keeps changing every capture (e.g. a live status bar or input
+  // area at the bottom of the buffer). That is exactly a LIVE session, not a
+  // stopped one: accept the latest snapshot instead of failing. Failing here
+  // used to drive capture-failure streaks that misreported busy sessions as
+  // stopped (their buffer content changed every frame so stabilization never
+  // converged).
+  return {
+    snapshot: previousSnapshot,
+    attempts: maxAttempts,
+    stabilized: false,
+    stabilizedAgainst: 'unstable-accepted' as const,
+  };
 }
 
 export function resolveAuthoritativeMirrorCaptureWindow(options: {
