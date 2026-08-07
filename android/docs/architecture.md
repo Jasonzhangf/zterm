@@ -10,7 +10,8 @@
 6. `docs/decisions/2026-04-22-session-schedule-timed-send.md`：per-session 定时发送 / heartbeat 调度真源
 7. `docs/decisions/2026-04-28-remote-screenshot-helper-truth.md`：remote screenshot daemon 唯一真源（文件名沿用历史编号）
 8. `docs/decisions/2026-07-19-remote-window-stream-truth.md`：remote window stream / iTerm2 pane coordinate / input return 真源
-9. `dev-workflow.md`：执行门禁
+9. `docs/decisions/2026-08-07-opencode-transcript-mirror-truth.md`：opencode transcript 数据导出 / daemon 只读服务 / client 历史投影真源（独立于 mirror store）
+10. `dev-workflow.md`：执行门禁
 10. `task.md`：当前任务
 11. `CACHE.md`：短期上下文
 12. `MEMORY.md`：长期经验
@@ -368,6 +369,24 @@ Android floating entry
 - `mirror-fixed` 下若未接入独立 horizontal pan 手势链，左右滑切 tab 仍需保持可用并由 shell interaction owner 独占
 - 一次手势只能命中一个 shell 语义；若未来恢复 horizontal pan，必须与 tab swipe 重新做单一命中门禁，禁止并发共享
 - `mirror-fixed` 当前已有 horizontal pan：只要手势能真实改变 renderer horizontal offset，renderer 必须截断父级 drawer/tab swipe；只有 offset 已到左边界且本次右滑无法继续平移时，左缘热区才可把该手势交给 drawer
+
+## Opencode transcript 历史投影
+
+```text
+opencode 插件（opencode 进程内，数据导出）
+   → ~/.zterm/opencode-mirror/<tmux-pane-id>.txt（原子写全量快照）
+   → daemon 只读服务（HTTP GET /api/v1/transcript）
+   → client 投影（快捷栏开关 + 虚拟历史区）
+```
+
+规则（真源：`docs/decisions/2026-08-07-opencode-transcript-mirror-truth.md`）：
+
+- `resource.opencode_transcript` 是 daemon 侧只读数据服务：按 tmux pane id 读文件、报告 opencode pane 事实（`pane_current_command`）与文件新鲜度。纯只读、无 per-client 状态，不写 mirror store、不改 mirror head/index/revision/capture cadence、不驱动任何 tmux 操作。
+- `resource.client_opencode_transcript_projection` 是 client 侧投影：快捷栏开关（client truth）+ transcript 行序列 + renderer 虚拟历史区。transcript 行**不得**写入 `resource.client_sparse_buffer`，不改变 mirror absolute index 语义。
+- 数据面（opencode → 文件 → daemon 只读 → client 投影）与控制面（client 开关、daemon pane 物理事实）解耦：开关只改变 client 显示，不改变 daemon 数据产出；daemon 不因开关做任何决策。
+- 开关有效条件 = daemon 报告的 pane 物理事实（真 opencode + 文件存在且新鲜）；非 opencode pane / 文件缺失 / 文件过期必须显式不可用，禁止 fallback。
+- 插件是 opencode 进程内数据导出器，不 import zterm runtime；zterm runtime 不 import 插件。文件即 truth 快照（原子写），不是增量日志。
+- 要求 opencode >= 1.18（1.14.x TUI 模式插件事件不可用，已实测）。
 
 ## Terminal canonical buffer ownership
 
