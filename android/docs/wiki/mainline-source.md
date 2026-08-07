@@ -118,7 +118,6 @@ flowchart TD
   Http --> AttachmentHttpIn01AuthenticatedRequest
   AttachmentHttpIn01AuthenticatedRequest --> AttachmentIn02DeliveryOwner
   AttachmentIn02DeliveryOwner --> AttachmentOut03DurableManifestAndAssets
-  Http --> TranscriptReadIn01PaneRequest["src/server/opencode-transcript-reader.ts#readTranscriptForPane"]
   TerminalPage --> StageShell["src/pages/TerminalPageStageShell.tsx"]
   TerminalPage --> TerminalHeader["src/components/terminal/TerminalHeader.tsx#TerminalHeader"]
   TerminalPage --> QuickBar["src/components/terminal/TerminalQuickBar.tsx"]
@@ -316,7 +315,6 @@ flowchart TD
 | Daemon runtime | `src/server/server.ts`, `src/server/terminal-daemon-runtime.ts`, `src/server/terminal-runtime.ts`, `src/server/terminal-message-runtime.ts`, `src/server/terminal-mirror-runtime.ts`, `src/server/terminal-message-control-runtime.ts`, `src/server/terminal-transport-runtime.ts`, `src/server/remote-window-stream-daemon.ts` |
 | Daemon control edges | `src/server/terminal-control-runtime.ts`, `src/server/terminal-file-transfer-runtime.ts`, `src/server/terminal-schedule-runtime.ts`, `src/server/remote-screenshot-daemon.ts`, `src/server/remote-window-stream-daemon.ts`, `src/server/terminal-http-runtime.ts` |
 | Daemon attachment delivery | `src/server/attachment-delivery-runtime.ts#createAttachmentDeliveryRuntime` -> `src/server/terminal-http-runtime.ts#createTerminalHttpRuntime` -> `scripts/zterm-send-image.mjs`; durable manifests provide per-device missed-push recovery, preview-first reads, receipts, and 48-hour cleanup. |
-| Daemon opencode transcript | `src/server/opencode-transcript-reader.ts#readTranscriptForPane` -> `src/server/terminal-http-runtime.ts`; read-only snapshot file service keyed by tmux pane id with mtime version and freshness facts; never writes mirror store or tmux. |
 | Daemon CLI | `scripts/zterm-daemon.sh`, `scripts/windows/zterm-daemon.ps1`, `scripts/install-global-daemon-cli.sh`, `scripts/prepare-global-daemon-release.sh`, `scripts/prepare-daemon-npm-package.mjs` |
 | Release/update | `contracts/app-version.json`, `scripts/app-version.mjs`, `native/android/app/build.gradle`, `scripts/build-android-debug.sh`, `scripts/prepare-update-bundle.mjs`, `scripts/verify-update-bundle.mjs`, `scripts/verify-release-assets.mjs`; normal `N`, rollback `N.1`, and next normal `N+1` occupy strictly increasing Android version-code slots; Relay public update route and future `RelayPeerLease` idle-resume resource are authored in `src/traversal-relay/server.ts` and packaged by `scripts/prepare-relay-server-npm-package.mjs` with `ZTERM_TRAVERSAL_UPDATES_DIR` |
 | Worker wiki generator | `scripts/build-function-wiki.mjs`, `docs/wiki/daemon.md`, `docs/wiki/cli.md`, `docs/wiki/mainline-source.md` |

@@ -2192,8 +2192,8 @@
           "from": "PreviewModeOwner",
           "to": "PreviewLiveSetProjector",
           "owner_feature": "terminal.session_preview",
-          "semantic_input": "preview-open state and resolved selected ids independent of foreground lifecycle",
-          "semantic_output": "deduplicated stable live session id projection consumed by the dedicated background handoff owner",
+      "semantic_input": "preview-open state and resolved selected ids independent of foreground lifecycle",
+      "semantic_output": "deduplicated stable live session id projection consumed by the dedicated background handoff owner",
           "status": "anchored",
           "edge_id": "android_preview:PreviewModeOwner->PreviewLiveSetProjector",
           "resource_from": "resource.session_preview_mode",
@@ -2247,7 +2247,7 @@
           "to": "TerminalPreviewTile",
           "owner_feature": "terminal.session_preview",
           "semantic_input": "primary or child container slot for one selected open session",
-          "semantic_output": "one read-only tile projection per session; child title/body tap promotes to primary without activation, primary title/body tap activates the full shell, visual ordinal badges stay out of the titlebar, and secondary child previews use passive tail rendering with compact local typography without resize callbacks",
+      "semantic_output": "one read-only tile projection per session; child title/body tap promotes to primary without activation, primary title/body tap activates the full shell, visual ordinal badges stay out of the titlebar, and secondary child previews use passive tail rendering with compact local typography without resize callbacks",
           "status": "anchored",
           "edge_id": "android_preview:WindowGroupLayout->TerminalPreviewTile",
           "resource_from": "resource.ui_projection",
@@ -2610,10 +2610,6 @@
         {
           "id": "IdleSessionBroadcastOut01TransportPublish",
           "label": "src/server/terminal-transport-runtime.ts#sendTransportMessage"
-        },
-        {
-          "id": "TranscriptReadIn01PaneRequest",
-          "label": "src/server/opencode-transcript-reader.ts#readTranscriptForPane"
         }
       ],
       "edges": [
@@ -3028,9 +3024,7 @@
           "edge_id": "daemon_mainline:Http->AttachmentHttpIn01AuthenticatedRequest",
           "resource_from": "resource.daemon_process",
           "resource_to": "resource.attachment_delivery",
-          "via_resources": [
-            "resource.daemon_process"
-          ],
+          "via_resources": ["resource.daemon_process"],
           "relation_status": "via"
         },
         {
@@ -3415,19 +3409,6 @@
           "edge_id": "daemon_mainline:IdleActivityClassifierOut01ClassifiedFacts->IdleSessionBroadcastOut01TransportPublish",
           "resource_from": "resource.session_idle_facts",
           "resource_to": "resource.transport_subscriber",
-          "via_resources": [],
-          "relation_status": "direct"
-        },
-        {
-          "from": "Http",
-          "to": "TranscriptReadIn01PaneRequest",
-          "owner_feature": "terminal.opencode_transcript",
-          "semantic_input": "authenticated transcript pane request with since version",
-          "semantic_output": "read-only transcript lines plus freshness fact",
-          "status": "partial",
-          "edge_id": "daemon_mainline:Http->TranscriptReadIn01PaneRequest",
-          "resource_from": "resource.opencode_transcript",
-          "resource_to": "resource.opencode_transcript",
           "via_resources": [],
           "relation_status": "direct"
         }
