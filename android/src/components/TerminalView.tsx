@@ -343,11 +343,20 @@ function TerminalViewComponent({
   const [mirrorFixedHorizontalOffsetPx, setMirrorFixedHorizontalOffsetPx] =
     useState(0);
   const mirrorFixedHorizontalOffsetRef = useRef(0);
-  /** mirror-fixed 容器缩放（pinch）：范围 [minScale, 1]，minScale 使终端全宽对齐屏幕 */
-  const [mirrorFixedScale, setMirrorFixedScale] = useState(1);
+  /** mirror-fixed 容器缩放（pinch）：范围 [minScale, 1]，minScale 使终端全宽对齐屏幕；DOM 直改，仅存 ref */
   const mirrorFixedScaleRef = useRef(1);
   const mirrorFixedMinScaleRef = useRef(1);
   const pinchRef = useRef<{ startSpan: number; startScale: number } | null>(null);
+  const gridElRef = useRef<HTMLDivElement | null>(null);
+  /** pinch 缩放时直接改 DOM transform（不 setState，避免整个 term-grid 重渲染风暴导致黑屏/不跟手） */
+  const applyPinchScale = useCallback((next: number) => {
+    mirrorFixedScaleRef.current = next;
+    const gridEl = gridElRef.current;
+    if (gridEl) {
+      gridEl.style.transform =
+        next < 1 ? `translateX(0px) scale(${next})` : "";
+    }
+  }, []);
   const restoredHorizontalOffsetSessionRef = useRef<string | null>(null);
   const resizeThrottleTimerRef = useRef<number | null>(null);
   const resizeRafTokenRef = useRef<number | null>(null);
@@ -1201,9 +1210,7 @@ function TerminalViewComponent({
                 pinchRef.current.startScale * ratio,
               ),
             );
-            mirrorFixedScaleRef.current = next;
-            setMirrorFixedScale(next);
-            setMirrorFixedHorizontalOffsetPx(0);
+            applyPinchScale(next);
             event.preventDefault();
             event.stopPropagation();
           }
@@ -1261,9 +1268,7 @@ function TerminalViewComponent({
               pinchRef.current.startScale * ratio,
             ),
           );
-          mirrorFixedScaleRef.current = next;
-          setMirrorFixedScale(next);
-          setMirrorFixedHorizontalOffsetPx(0);
+          applyPinchScale(next);
         }
         event.preventDefault();
         event.stopPropagation();
@@ -1320,6 +1325,11 @@ function TerminalViewComponent({
       wheel.debug.lastReason = "ended";
       publishTwoFingerWheelDebug(wheel);
       pinchRef.current = null;
+      // commit pinch 缩放结果：横向平移归零（scale 已在 DOM 上，无需 setState 重渲染）
+      if (mirrorFixedScaleRef.current < 1) {
+        setMirrorFixedHorizontalOffsetPx(0);
+        mirrorFixedHorizontalOffsetRef.current = 0;
+      }
       twoFingerWheelRef.current = {
         active: false,
         pointerIds: null,
@@ -2215,6 +2225,7 @@ function TerminalViewComponent({
     >
       <div
         className="term-grid"
+        ref={gridElRef}
         data-cursor-source="cursor-metadata"
         data-horizontal-offset-px={
           widthMode === "mirror-fixed"
@@ -2234,8 +2245,9 @@ function TerminalViewComponent({
               : undefined,
           transform:
             widthMode === "mirror-fixed" &&
-            (mirrorFixedHorizontalOffsetPx > 0 || mirrorFixedScale < 1)
-              ? `translateX(-${mirrorFixedHorizontalOffsetPx}px) scale(${mirrorFixedScale})`
+            (mirrorFixedHorizontalOffsetPx > 0 ||
+              mirrorFixedScaleRef.current < 1)
+              ? `translateX(-${mirrorFixedHorizontalOffsetPx}px) scale(${mirrorFixedScaleRef.current})`
               : undefined,
           willChange: widthMode === "mirror-fixed" ? "transform" : undefined,
         }}
