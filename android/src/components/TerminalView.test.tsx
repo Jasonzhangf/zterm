@@ -336,6 +336,12 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
         return 200;
       },
     });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+      configurable: true,
+      get() {
+        return 408;
+      },
+    });
     HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
       return {
         x: 0, y: 0, top: 0, left: 0, right: 200, bottom: 408,
