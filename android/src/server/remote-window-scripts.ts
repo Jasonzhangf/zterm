@@ -371,7 +371,9 @@ func focusTargetWindow(_ config: InputConfig) throws {
         throw NSError(domain: "RemoteWindowInput", code: 3, userInfo: [NSLocalizedDescriptionKey: "remote input target app is not running pid=" + String(config.pid)])
     }
     let appElement = AXUIElementCreateApplication(config.pid)
-    if frontmostPidMatches(config.pid) && focusedWindowMatchesTarget(appElement, config.window.bounds) {
+    // 已在前台（frontmost pid 匹配）即视为已聚焦：bounds 比对在 retina/坐标差异下不可靠，
+    // 会导致每次手势都执行 bring-to-front 打断 ScreenCaptureKit 捕获并让其他窗口闪烁
+    if frontmostPidMatches(config.pid) {
         return
     }
     let windows = copyAttribute(appElement, kAXWindowsAttribute) as? [AXUIElement] ?? []

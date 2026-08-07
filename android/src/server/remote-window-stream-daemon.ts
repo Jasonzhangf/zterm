@@ -63,7 +63,7 @@ export * from './remote-window-capture';
 const DEFAULT_REMOTE_WINDOW_FRAME_RATE = 30;
 const DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 60_000;
 /** 远程窗口输入 bring-to-focus 防抖：该窗口内只每 3s 最多执行一次 focus 切换 */
-const REMOTE_WINDOW_FOCUS_DEBOUNCE_MS = 3_000;
+const REMOTE_WINDOW_FOCUS_DEBOUNCE_MS = 15_000;
 
 type RtcPeerConnectionCtor = typeof globalThis.RTCPeerConnection;
 type RtcSessionDescriptionCtor = typeof globalThis.RTCSessionDescription;
