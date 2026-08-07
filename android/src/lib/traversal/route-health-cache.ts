@@ -21,7 +21,10 @@ export interface TraversalRouteHealthStorage {
 }
 
 const DEFAULT_ROUTE_HEALTH_TTL_MS = 5 * 60_000;
-const DEFAULT_ROUTE_FAILURE_TTL_MS = 1000;
+// Transient failures are quarantined for 30s (not 1s) so a bad route is not
+// retried within the same window over and over; auth failures stay for the
+// full health TTL.
+const DEFAULT_ROUTE_FAILURE_TTL_MS = 30_000;
 const ROUTE_HEALTH_STORAGE_KEY = 'zterm:traversal-route-health:v1';
 
 function resolveDefaultStorage(): TraversalRouteHealthStorage | null {

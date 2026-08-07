@@ -794,8 +794,17 @@ describe('session sync helper session connection config truth', () => {
     })).toEqual({ action: 'retry-reconnect', nextAttempt: 3 });
     expect(buildReconnectHandshakeFailurePlan({
       retryable: true,
-      currentAttempt: 6,
+      currentAttempt: 5,
     })).toEqual({ action: 'retry-reconnect', nextAttempt: 6 });
+    // Cap reached: stop the endless retry loop instead of retrying forever.
+    expect(buildReconnectHandshakeFailurePlan({
+      retryable: true,
+      currentAttempt: 6,
+    })).toEqual({ action: 'terminal-error' });
+    expect(buildReconnectHandshakeFailurePlan({
+      retryable: true,
+      currentAttempt: 7,
+    })).toEqual({ action: 'terminal-error' });
   });
 });
 

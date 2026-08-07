@@ -159,6 +159,17 @@ describe('selectBestTraversalRoute', () => {
     }).selected).toMatchObject({ id: 'relay-rtc:daemon-a' });
 
     now = 2001;
+    const stillQuarantined = selectBestTraversalRoute({
+      candidates: [tailscale, relay],
+      healthCache: cache,
+      scope,
+    });
+    expect(stillQuarantined.selected).toMatchObject({ id: 'relay-rtc:daemon-a' });
+    expect(stillQuarantined.diagnostics.find((item) => item.candidateId === 'direct:tailscale')).toMatchObject({
+      selectable: false,
+    });
+
+    now = 31_001;
     const recoveredSelection = selectBestTraversalRoute({
       candidates: [tailscale, relay],
       healthCache: cache,

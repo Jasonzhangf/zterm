@@ -218,7 +218,7 @@ describe('buildTraversalPlan', () => {
       .not.toContain('ws://100.66.1.82:3333/?token=stale-saved-token');
   });
 
-  it('orders logged-in auto candidates as Tailscale -> direct IPv6 -> UDP direct -> non-LAN IPv4 -> TURN Relay', () => {
+  it('orders logged-in auto candidates as Tailscale -> UDP direct -> TURN Relay -> direct IPv6 -> non-LAN IPv4', () => {
     const plan = buildTraversalPlan(
       {
         bridgeHost: '203.0.113.10',
@@ -254,19 +254,19 @@ describe('buildTraversalPlan', () => {
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
       'tailscale',
-      'ipv6',
       'rtc-direct',
-      'ipv4',
       'rtc-relay',
+      'ipv6',
+      'ipv4',
     ]);
-    expect(plan.candidates[2]).toMatchObject({
+    expect(plan.candidates[1]).toMatchObject({
       kind: 'rtc',
       path: 'rtc-direct',
       endpoint: 'rtc-direct:daemon-host-a',
       iceTransportPolicy: 'all',
       iceServers: [{ urls: 'stun:turn.example.com:3478' }],
     });
-    expect(JSON.stringify(plan.candidates[2])).not.toContain('secret');
+    expect(JSON.stringify(plan.candidates[1])).not.toContain('secret');
   });
 
   it('ignores stale saved traversal priority in auto mode', () => {
@@ -310,10 +310,10 @@ describe('buildTraversalPlan', () => {
 
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
       'tailscale',
-      'ipv6',
       'rtc-direct',
-      'ipv4',
       'rtc-relay',
+      'ipv6',
+      'ipv4',
     ]);
   });
 

@@ -238,6 +238,8 @@ export function buildTransportOpenLiveFailureEffectPlan(
   };
 }
 
+export const MAX_RECONNECT_HANDSHAKE_ATTEMPTS = 6;
+
 export function buildReconnectHandshakeFailurePlan(options: {
   retryable: boolean;
   currentAttempt: number;
@@ -245,9 +247,14 @@ export function buildReconnectHandshakeFailurePlan(options: {
   if (!options.retryable) {
     return { action: 'terminal-error' };
   }
+  if (options.currentAttempt >= MAX_RECONNECT_HANDSHAKE_ATTEMPTS) {
+    // Reached the attempt cap: stop the endless 30s retry loop and surface
+    // the error to the UI instead of silently retrying forever.
+    return { action: 'terminal-error' };
+  }
   return {
     action: 'retry-reconnect',
-    nextAttempt: Math.min(options.currentAttempt + 1, 6),
+    nextAttempt: options.currentAttempt + 1,
   };
 }
 
@@ -506,7 +513,12 @@ export function buildActiveSessionRefreshPlan(options: ActiveSessionRefreshPlanO
     return { action: 'skip', reason: 'transport-unavailable' };
   }
 
-  if (options.keepaliveGraceActive) {
+  if (options.keepaliveGraceActive && (
+    options.wsReadyState === WebSocket.OPEN
+    || options.wsReadyState === WebSocket.CONNECTING
+  )) {
+    // Keepalive grace only protects a still-reusable physical transport. If
+    // the socket is already closed there is nothing to reuse, so reconnect.
     return { action: 'skip', reason: 'keepalive-grace' };
   }
 

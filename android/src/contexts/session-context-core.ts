@@ -328,5 +328,9 @@ export function createSessionReconnectRuntime(): SessionReconnectRuntime {
 
 export function computeReconnectDelay(attempt: number) {
   if (attempt <= 0) return 0;
-  return Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** Math.max(0, attempt - 1));
+  const base = Math.min(RECONNECT_MAX_DELAY_MS, RECONNECT_BASE_DELAY_MS * 2 ** Math.max(0, attempt - 1));
+  // ±20% jitter: synchronized exponential backoff across devices/tabs forms
+  // a reconnect storm, so scatter each attempt within the band.
+  const jitter = 0.8 + Math.random() * 0.4;
+  return Math.min(RECONNECT_MAX_DELAY_MS, Math.floor(base * jitter));
 }

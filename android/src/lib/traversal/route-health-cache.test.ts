@@ -91,7 +91,7 @@ describe('TraversalRouteHealthCache', () => {
     });
   });
 
-  it('expires an ordinary transient failure after the short reprobe cooldown', () => {
+  it('quarantines an ordinary transient failure for the reprobe cooldown', () => {
     let now = 1000;
     const cache = new TraversalRouteHealthCache({
       ttlMs: 5 * 60_000,
@@ -103,7 +103,13 @@ describe('TraversalRouteHealthCache', () => {
       status: 'failure',
     });
 
+    // Still quarantined inside the 30s cooldown.
     now = 2001;
+    expect(cache.get({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidate)).toMatchObject({
+      status: 'failure',
+    });
+
+    now = 31_001;
     expect(cache.get({ accountId: 'u1', daemonHostId: 'daemon-a' }, candidate)).toBeNull();
   });
 

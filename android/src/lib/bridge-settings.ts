@@ -37,7 +37,7 @@ export {
 export type { BridgeServerPreset, BridgeSettings, TerminalShellSkin, TerminalSessionGroupLayoutMode, TraversalRelayClientSettings };
 export type TraversalPath = 'rtc-direct' | 'tailscale' | 'ipv6' | 'ipv4' | 'rtc-relay';
 
-export const DEFAULT_TRAVERSAL_PATH_PRIORITY: TraversalPath[] = ['tailscale', 'ipv6', 'rtc-direct', 'ipv4', 'rtc-relay'];
+export const DEFAULT_TRAVERSAL_PATH_PRIORITY: TraversalPath[] = ['tailscale', 'rtc-direct', 'rtc-relay', 'ipv6', 'ipv4'];
 
 export function normalizeTraversalPathPriority(input: unknown): TraversalPath[] {
   const seen = new Set<TraversalPath>();
