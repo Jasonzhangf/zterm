@@ -32,7 +32,7 @@ export type TwoFingerWheelConfig = {
 
 export const DEFAULT_TWO_FINGER_WHEEL_CONFIG: TwoFingerWheelConfig = {
   stepPx: 24,
-  pinchRatio: 0.18,
+  pinchRatio: 0.35,
   directionLockPx: 48,
   minInitialSpanPx: 24,
 };

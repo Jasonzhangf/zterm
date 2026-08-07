@@ -3730,12 +3730,20 @@ function TerminalQuickBarComponent({
           }}
             style={{
               position: "fixed",
-              right: `${FLOATING_BUBBLE_MARGIN + FLOATING_BUBBLE_SIZE + 10}px`,
+              right: collapsed
+                ? `${FLOATING_BUBBLE_MARGIN}px`
+                : floatingBubblePosition.x === null
+                  ? `${FLOATING_BUBBLE_MARGIN}px`
+                  : "auto",
               bottom: collapsed
                 ? `calc(${FLOATING_BUBBLE_MARGIN}px + env(safe-area-inset-bottom, 0px))`
                 : floatingBubblePosition.y === null
                   ? `calc(${floatingBubbleBottomPx + Math.max(0, keyboardInsetPx)}px + env(safe-area-inset-bottom, 0px))`
                   : "auto",
+              left:
+                collapsed || floatingBubblePosition.x === null
+                  ? "auto"
+                  : `${floatingBubblePosition.x}px`,
               top:
                 collapsed || floatingBubblePosition.y === null
                   ? "auto"

@@ -73,11 +73,21 @@ describe("decideTwoFingerWheel", () => {
     expect(reverse.next.lockedDirection).toBe("down");
   });
 
+  it("keeps scrolling when finger span drifts modestly (below pinch ratio)", () => {
+    let state = { ...createTwoFingerWheelInitial(), initialSpanPx: 100 };
+    const result = decideTwoFingerWheel(state, {
+      midYDeltaPx: 40,
+      liveSpanPx: 125,
+    });
+    expect(result.aborted).toBe(false);
+    expect(result.direction).toBe("down");
+  });
+
   it("aborts the gesture when pinch ratio is exceeded", () => {
     let state = { ...createTwoFingerWheelInitial(), initialSpanPx: 100 };
     const result = decideTwoFingerWheel(state, {
       midYDeltaPx: 10,
-      liveSpanPx: 130,
+      liveSpanPx: 150,
     });
     expect(result.aborted).toBe(true);
     expect(result.direction).toBeNull();
