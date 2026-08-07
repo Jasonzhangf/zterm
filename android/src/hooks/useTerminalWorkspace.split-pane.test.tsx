@@ -101,9 +101,8 @@ describe('useTerminalWorkspace split-pane isolation', () => {
     expect(pane0.tabs.find(t => t.id === pane0.activeTabId)?.sessionId).toBe('s1');
     expect(pane0.tabs).toHaveLength(1);
 
-    // pane-1 should have empty tabs (no other session to split)
+    // pane-1 should be an empty placeholder (no other session to split)
     const pane1 = panes.find(p => p.id !== 'pane-main')!;
-    expect(pane1.tabs).toHaveLength(1); // Moved s1 here by splitOutTabToNewPane
-    expect(pane1.tabs.find(t => t.id === pane1.activeTabId)?.sessionId).toBe('s1');
+    expect(pane1.tabs).toHaveLength(0); // splitOutTabToNewPane pushes an empty pane
   });
 });

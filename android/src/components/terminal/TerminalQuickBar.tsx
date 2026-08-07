@@ -3770,9 +3770,9 @@ function TerminalQuickBarComponent({
                   ? `${FLOATING_BUBBLE_MARGIN}px`
                   : "auto",
               bottom: collapsed
-                ? `calc(${FLOATING_BUBBLE_MARGIN}px + env(safe-area-inset-bottom, 0px))`
+                ? `calc(${FLOATING_BUBBLE_MARGIN}px + env(safe-area-inset-bottom, 0px) + ${FLOATING_BUBBLE_SIZE + 8}px)`
                 : floatingBubblePosition.y === null
-                  ? `calc(${floatingBubbleBottomPx + Math.max(0, keyboardInsetPx)}px + env(safe-area-inset-bottom, 0px))`
+                  ? `calc(${floatingBubbleBottomPx + Math.max(0, keyboardInsetPx)}px + env(safe-area-inset-bottom, 0px) + ${FLOATING_BUBBLE_SIZE + 8}px)`
                   : "auto",
               left:
                 collapsed || floatingBubblePosition.x === null
@@ -3800,7 +3800,13 @@ function TerminalQuickBarComponent({
             📁
           </button>
         ) : null}
-        {!onOpenFileTransfer ? (
+        {/*
+          The floating quick-menu bubble must always render: it is the only
+          entry point for split actions and the quick input menu on phones.
+          7258482 accidentally replaced it with the file-browser button when
+          onOpenFileTransfer is set, hiding the split entry in the real app.
+          The file-browser button now sits above the bubble instead.
+        */}
         <button
           ref={floatingBubbleRef}
           data-quickbar-allow-pointer="true"
@@ -4024,7 +4030,6 @@ function TerminalQuickBarComponent({
         >
           {collapsed ? "⌃" : "⌘"}
         </button>
-        ) : null}
         </>
       )}
 

@@ -83,16 +83,41 @@ function syncWorkspaceWithSessions(
   const sessionIds = new Set(openTabSessionIds);
   let next = cloneWorkspaceState(current);
 
-  next.panes = next.panes.map((pane) => {
-    const tabs = pane.tabs.filter((tab) => sessionIds.has(tab.sessionId));
-    const activeTabId = tabs.some((tab) => tab.id === pane.activeTabId)
-      ? pane.activeTabId
-      : (tabs[0]?.id ?? '');
-    return { ...pane, tabs, activeTabId };
-  });
+  const sourcePaneCount = next.panes.length;
+  // Prune panes whose tabs were ALL closed by session removal (they are
+  // leftovers of a closed split), but keep panes that were already empty
+  // placeholders (fresh split slot / move target). Then collapse to a single
+  // pane when a pruning left at most one open session behind.
+  let prunedAny = false;
+  next.panes = next.panes
+    .map((pane) => {
+      const before = pane.tabs.length;
+      const tabs = pane.tabs.filter((tab) => sessionIds.has(tab.sessionId));
+      if (before > 0 && tabs.length === 0) {
+        prunedAny = true;
+        return null;
+      }
+      const activeTabId = tabs.some((tab) => tab.id === pane.activeTabId)
+        ? pane.activeTabId
+        : (tabs[0]?.id ?? '');
+      return { ...pane, tabs, activeTabId };
+    })
+    .filter((pane): pane is NonNullable<typeof pane> => pane !== null);
 
   if (next.panes.length === 0) {
-    throw new Error('[useTerminalWorkspace] workspace invariant violated: session sync requires at least one pane.');
+    if (sourcePaneCount === 0) {
+      // Empty restore snapshot: reject instead of inventing a pane identity.
+      throw new Error('[useTerminalWorkspace] workspace invariant violated: session sync requires at least one pane.');
+    }
+    // Every pane's tabs were pruned (restore/viewport race where the workspace
+    // layout predates the session set). Keep one empty pane so the
+    // missing-session attach logic below can re-populate it.
+    next.panes = [createEmptyWorkspacePane(1)];
+    next.activePaneId = next.panes[0].id;
+  }
+  const openTabCount = next.panes.reduce((sum, pane) => sum + pane.tabs.length, 0);
+  if (prunedAny && openTabCount <= 1 && next.panes.length > 1) {
+    next = collapseWorkspaceToFirstPane(next);
   }
 
   next.panes = next.panes.map((pane) => {

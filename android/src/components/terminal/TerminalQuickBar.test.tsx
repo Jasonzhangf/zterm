@@ -994,12 +994,13 @@ describe("TerminalQuickBar", () => {
     expect(onOpenFileTransfer).toHaveBeenCalledTimes(2);
     expect(onOpenFileTransfer).toHaveBeenNthCalledWith(2, "browser");
     expect(screen.queryByText("快捷输入")).toBeNull();
+    // The floating quick-menu bubble coexists with the file-browser entry.
     expect(
       screen.queryByRole("button", { name: "Toggle floating quick menu" }),
-    ).toBeNull();
+    ).not.toBeNull();
   });
 
-  it("shows only the file browser floating entry when file browser is available", () => {
+  it("shows the file browser entry above the floating quick menu bubble", () => {
     const onCollapsedChange = vi.fn();
     const onOpenFileTransfer = vi.fn();
 
@@ -1015,7 +1016,11 @@ describe("TerminalQuickBar", () => {
     expect(onOpenFileTransfer).toHaveBeenCalledWith("browser");
     expect(onCollapsedChange).not.toHaveBeenCalled();
     expect(screen.getByRole("button", { name: "文件浏览" })).not.toBeNull();
-    expect(screen.queryByRole("button", { name: "展开快捷栏" })).toBeNull();
+    // The quick-menu bubble stays available (split/quick-input entry) even
+    // when the file-browser entry is present; collapsed label is 展开快捷栏.
+    expect(
+      screen.queryByRole("button", { name: "展开快捷栏" }),
+    ).not.toBeNull();
     expect(
       screen.queryByRole("button", { name: "Toggle floating quick menu" }),
     ).toBeNull();
