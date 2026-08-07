@@ -343,18 +343,21 @@ function TerminalViewComponent({
   const [mirrorFixedHorizontalOffsetPx, setMirrorFixedHorizontalOffsetPx] =
     useState(0);
   const mirrorFixedHorizontalOffsetRef = useRef(0);
-  /** mirror-fixed 容器缩放（pinch）：范围 [minScale, 1]，minScale 使终端全宽对齐屏幕；DOM 直改，仅存 ref */
+  /** mirror-fixed 容器缩放（pinch）：范围 [minScale, 1]，minScale 使终端全宽对齐屏幕；
+   *  用 CSS `zoom`（Chromium 布局级缩放）而非 transform scale——transform scale 在 Android WebView
+   *  上会触发合成层黑屏 bug */
   const mirrorFixedScaleRef = useRef(1);
   const mirrorFixedMinScaleRef = useRef(1);
   const pinchRef = useRef<{ startSpan: number; startScale: number } | null>(null);
   const gridElRef = useRef<HTMLDivElement | null>(null);
-  /** pinch 缩放时直接改 DOM transform（不 setState，避免整个 term-grid 重渲染风暴导致黑屏/不跟手） */
+  /** pinch 缩放时直接改 DOM（不 setState，避免整个 term-grid 重渲染风暴导致黑屏/不跟手） */
   const applyPinchScale = useCallback((next: number) => {
     mirrorFixedScaleRef.current = next;
     const gridEl = gridElRef.current;
     if (gridEl) {
-      gridEl.style.transform =
-        next < 1 ? `translateX(0px) scale(${next})` : "";
+      // zoom 支持分数缩放；1 时恢复默认
+      (gridEl.style as unknown as { zoom?: string }).zoom =
+        next < 1 ? String(next) : "1";
     }
   }, []);
   const restoredHorizontalOffsetSessionRef = useRef<string | null>(null);
@@ -2244,12 +2247,17 @@ function TerminalViewComponent({
                 )}px`
               : undefined,
           transform:
-            widthMode === "mirror-fixed" &&
-            (mirrorFixedHorizontalOffsetPx > 0 ||
-              mirrorFixedScaleRef.current < 1)
-              ? `translateX(-${mirrorFixedHorizontalOffsetPx}px) scale(${mirrorFixedScaleRef.current})`
+            widthMode === "mirror-fixed" && mirrorFixedHorizontalOffsetPx > 0
+              ? `translateX(-${mirrorFixedHorizontalOffsetPx}px)`
               : undefined,
-          willChange: widthMode === "mirror-fixed" ? "transform" : undefined,
+          zoom:
+            widthMode === "mirror-fixed" && mirrorFixedScaleRef.current < 1
+              ? String(mirrorFixedScaleRef.current)
+              : undefined,
+          willChange:
+            widthMode === "mirror-fixed" && mirrorFixedHorizontalOffsetPx > 0
+              ? "transform"
+              : undefined,
         }}
       >
         {passivePreviewProjection

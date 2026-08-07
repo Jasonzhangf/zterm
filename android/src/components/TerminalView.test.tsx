@@ -374,7 +374,7 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
 
     const grid = container.querySelector('.term-grid') as HTMLElement;
     expect(grid).toBeTruthy();
-    expect(grid.style.transform).toBeFalsy(); // 初始不缩放
+    expect(grid.style.zoom).toBeFalsy(); // 初始不缩放
 
     const host = container.querySelector('.wterm') as HTMLElement;
     expect(host).toBeTruthy();
@@ -410,9 +410,7 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     });
 
     // 终端 248px / 屏幕 200px -> minScale = 0.8065；span ratio 0.6 -> scale ~0.6，clamp 到 0.8065
-    const transform = grid.style.transform;
-    expect(transform).toContain('scale(0.806');
-    expect(transform).toContain('translateX');
+    expect(grid.style.zoom).toBe('0.8064516129032258');
 
     // 双指继续缩到更小（span 40）——clamp 在 minScale
     act(() => {
@@ -424,7 +422,7 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
         changedTouches: [],
       });
     });
-    expect(grid.style.transform).toContain('scale(0.806');
+    expect(grid.style.zoom).toBe('0.8064516129032258');
 
     // 抬起结束
     act(() => {
@@ -469,6 +467,6 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
       });
     });
 
-    expect(grid.style.transform).toBeFalsy(); // 非 mirror-fixed 不缩放
+    expect(grid.style.zoom).toBeFalsy(); // 非 mirror-fixed 不缩放
   });
 });
