@@ -7,7 +7,6 @@ import {
   fireEvent,
   render,
   screen,
-  within,
   waitFor,
 } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -187,64 +186,17 @@ describe("TerminalQuickBar", () => {
     );
   }
 
-  it("closes floating quick input when clicking outside", async () => {
-    renderQuickBar();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Toggle floating quick menu" }),
-    );
-    expect(screen.getByText("快捷输入")).not.toBeNull();
 
-    fireEvent.pointerDown(document.body);
 
-    await waitFor(() => {
-      expect(screen.queryByText("快捷输入")).toBeNull();
-    });
-  });
 
-  it("opens schedule composer from current draft text", async () => {
-    const onSessionDraftChange = vi.fn();
-    const onOpenScheduleComposer = vi.fn();
 
-    renderQuickBar({
-      sessionDraft: "echo schedule me",
-      onSessionDraftChange,
-      onOpenScheduleComposer,
-    });
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Toggle floating quick menu" }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "定时" }));
-
-    await waitFor(() => {
-      expect(onOpenScheduleComposer).toHaveBeenCalledWith("echo schedule me");
-    });
-  });
-
-  it("still opens the current session schedule list even when local draft is empty", async () => {
-    const onOpenScheduleComposer = vi.fn();
-
-    renderQuickBar({
-      sessionDraft: "",
-      onOpenScheduleComposer,
-    });
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Toggle floating quick menu" }),
-    );
-    fireEvent.click(screen.getByRole("button", { name: "定时" }));
-
-    await waitFor(() => {
-      expect(onOpenScheduleComposer).toHaveBeenCalledWith("");
-    });
-  });
 
   it("persists floating bubble position after drag", async () => {
     renderQuickBar();
 
     const bubble = screen.getByRole("button", {
-      name: "Toggle floating quick menu",
+      name: "文件浏览",
     });
     fireEvent.pointerDown(bubble, {
       pointerId: 1,
@@ -342,39 +294,9 @@ describe("TerminalQuickBar", () => {
     expect(metrics.sheetHeightPx).toBe(544);
   });
 
-  it("hides shell quick rows while floating menu is open", async () => {
-    renderQuickBar();
 
-    expect(screen.getByRole("button", { name: "状态" })).not.toBeNull();
-    expect(screen.getByRole("button", { name: "文件" })).not.toBeNull();
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Toggle floating quick menu" }),
-    );
 
-    await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "状态" })).toBeNull();
-      expect(screen.queryByRole("button", { name: "文件" })).toBeNull();
-    });
-  });
-
-  it("restores shell quick rows after floating menu closes", async () => {
-    renderQuickBar();
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Toggle floating quick menu" }),
-    );
-    await waitFor(() => {
-      expect(screen.queryByRole("button", { name: "状态" })).toBeNull();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "关闭快捷输入" }));
-
-    await waitFor(() => {
-      expect(screen.getByRole("button", { name: "状态" })).not.toBeNull();
-      expect(screen.getByRole("button", { name: "文件" })).not.toBeNull();
-    });
-  });
 
   it("lifts the primary floating bubble (file browser) above keyboard inset", async () => {
     renderQuickBar({
@@ -410,7 +332,7 @@ describe("TerminalQuickBar", () => {
 
     await waitFor(() => {
       const bubble = screen.getByRole("button", {
-        name: "Toggle floating quick menu",
+        name: "文件浏览",
       });
       expect(bubble.getAttribute("style") || "").toContain("top: 64px");
     });
@@ -687,27 +609,7 @@ describe("TerminalQuickBar", () => {
     expect(onCollapsedChange).not.toHaveBeenCalled();
   });
 
-  it("reveals collapsed quickbar from an upward swipe on the bottom trigger", async () => {
-    const onCollapsedChange = vi.fn();
-    renderQuickBar({
-      collapseAvailable: true,
-      collapsed: true,
-      onCollapsedChange,
-    });
 
-    const trigger = screen.getByRole("button", { name: "展开快捷栏" });
-    fireEvent.touchStart(trigger, {
-      touches: [{ clientX: 320, clientY: 720 }],
-    });
-    fireEvent.touchMove(trigger, {
-      touches: [{ clientX: 316, clientY: 650 }],
-      cancelable: true,
-    });
-    fireEvent.touchEnd(trigger);
-
-    expect(onCollapsedChange).toHaveBeenCalledTimes(1);
-    expect(onCollapsedChange).toHaveBeenCalledWith(false);
-  });
 
   it("extends the raised reveal surface through the full lower edge", async () => {
     const onCollapsedChange = vi.fn();
@@ -803,7 +705,7 @@ describe("TerminalQuickBar", () => {
 
     expect(screen.queryByTestId("terminal-quickbar-shell-rows")).toBeNull();
     expect(
-      screen.getByRole("button", { name: "Toggle floating quick menu" }),
+      screen.getByRole("button", { name: "文件浏览" }),
     ).not.toBeNull();
     expect(screen.queryByRole("button", { name: "状态" })).toBeNull();
     expect(screen.queryByRole("button", { name: "文件" })).toBeNull();
@@ -947,54 +849,70 @@ describe("TerminalQuickBar", () => {
     expect(screen.getByTestId("quickbar-tool-row")).toBeTruthy();
   });
 
-  it("shows floating quick menu content after tapping the toggle in floating-collapsed shell mode", async () => {
-    renderQuickBar({
-      shellMode: "floating-collapsed",
+  it("renders the transcript history toggle right after the attachment button in the third row with disabled and active states", () => {
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      writable: true,
+      value: 390,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      writable: true,
+      value: 840,
+    });
+    stubVisualViewport({
+      width: 390,
+      height: 840,
+      offsetTop: 0,
+      offsetLeft: 0,
     });
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Toggle floating quick menu" }),
+    const onToggleTranscript = vi.fn();
+    const { rerender } = renderQuickBar({
+      transcriptAvailable: false,
+      onToggleTranscript,
+    });
+    const historyButton = screen.getByRole("button", { name: "历史" });
+    expect(historyButton.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(historyButton);
+    expect(onToggleTranscript).not.toHaveBeenCalled();
+
+    const toolRow = screen.getByTestId("quickbar-tool-row");
+    const labels = Array.from(toolRow.querySelectorAll("button")).map(
+      (node) => node.getAttribute("aria-label"),
     );
+    expect(labels.slice(0, 4)).toEqual(["↑滚", "↓滚", "📎", "历史"]);
 
-    await waitFor(() => {
-      expect(screen.getByText("快捷输入")).not.toBeNull();
-      expect(screen.queryByTestId("terminal-quickbar-shell-rows")).toBeNull();
-    });
-  });
-
-  it("marks collapsed and floating-menu quickbar surfaces as transparent", () => {
-    const collapsedView = renderQuickBar({
-      shellMode: "floating-collapsed",
-      collapsed: true,
-    });
-    expect(
-      collapsedView.container.querySelector(".zterm-neo-quickbar")?.getAttribute("data-quickbar-surface"),
-    ).toBe("transparent");
-    collapsedView.unmount();
-
-    const expandedView = renderQuickBar();
-    const root = expandedView.container.querySelector(".zterm-neo-quickbar");
-    expect(root?.getAttribute("data-quickbar-surface")).toBe("expanded");
-    fireEvent.click(screen.getByRole("button", { name: "Toggle floating quick menu" }));
-    expect(root?.getAttribute("data-quickbar-surface")).toBe("transparent");
-  });
-
-  it("exposes real quick and clipboard tabs in the floating menu", async () => {
-    renderQuickBar({
-      shellMode: "floating-collapsed",
-    });
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Toggle floating quick menu" }),
+    rerender(
+      <TerminalQuickBar
+        activeSessionId="session-1"
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onSendSequence={vi.fn()}
+        onSessionDraftChange={vi.fn()}
+        onSessionDraftSend={vi.fn()}
+        onQuickActionsChange={vi.fn()}
+        onShortcutActionsChange={vi.fn()}
+        onOpenScheduleComposer={vi.fn()}
+        onMeasuredHeightChange={vi.fn()}
+        shellMode="inline"
+        transcriptAvailable
+        transcriptEnabled
+        onToggleTranscript={onToggleTranscript}
+      />,
     );
-
-    expect(screen.getByRole("button", { name: "快捷" })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "剪贴板" })).toBeTruthy();
-    expect(screen.queryAllByRole("button", { name: "" })).toHaveLength(0);
-
-    fireEvent.click(screen.getByRole("button", { name: "剪贴板" }));
-    expect(screen.getByRole("button", { name: "读取系统剪贴板" })).toBeTruthy();
+    const activeButton = screen.getByRole("button", { name: "历史" });
+    expect(activeButton.getAttribute("aria-pressed")).toBe("true");
+    fireEvent.click(activeButton);
+    expect(onToggleTranscript).toHaveBeenCalledTimes(1);
   });
+
+
+
+
+
+
 
   it("routes visible tool bar actions through explicit callbacks and keeps upload/sync semantics correct", async () => {
     const onOpenFileTransfer = vi.fn();
@@ -1032,35 +950,11 @@ describe("TerminalQuickBar", () => {
     expect(screen.queryByText("快捷输入")).toBeNull();
     // The floating quick-menu bubble coexists with the file-browser entry.
     expect(
-      screen.queryByRole("button", { name: "Toggle floating quick menu" }),
+      screen.queryByRole("button", { name: "文件浏览" }),
     ).not.toBeNull();
   });
 
-  it("shows the file browser entry above the floating quick menu bubble", () => {
-    const onCollapsedChange = vi.fn();
-    const onOpenFileTransfer = vi.fn();
 
-    renderQuickBar({
-      collapseAvailable: true,
-      collapsed: true,
-      onCollapsedChange,
-      onOpenFileTransfer,
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "文件浏览" }));
-
-    expect(onOpenFileTransfer).toHaveBeenCalledWith("browser");
-    expect(onCollapsedChange).not.toHaveBeenCalled();
-    expect(screen.getByRole("button", { name: "文件浏览" })).not.toBeNull();
-    // The quick-menu bubble stays available (split/quick-input entry) even
-    // when the file-browser entry is present; collapsed label is 展开快捷栏.
-    expect(
-      screen.queryByRole("button", { name: "展开快捷栏" }),
-    ).not.toBeNull();
-    expect(
-      screen.queryByRole("button", { name: "Toggle floating quick menu" }),
-    ).toBeNull();
-  });
 
   it("keeps the file browser entry draggable without opening it", async () => {
     const onOpenFileTransfer = vi.fn();
@@ -1473,119 +1367,11 @@ describe("TerminalQuickBar", () => {
     expect(onClick).not.toHaveBeenCalled();
   });
 
-  it("reports DOM editor focus transitions for quick input textarea", async () => {
-    const onEditorDomFocusChange = vi.fn();
-    renderQuickBar({
-      onEditorDomFocusChange,
-    });
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Toggle floating quick menu" }),
-    );
 
-    const textarea = screen.getByPlaceholderText(
-      "预输入内容，按 session 持久化",
-    );
-    fireEvent.focus(textarea);
-    fireEvent.blur(textarea);
 
-    await waitFor(() => {
-      expect(onEditorDomFocusChange).toHaveBeenCalledWith(true);
-      expect(onEditorDomFocusChange).toHaveBeenLastCalledWith(false);
-    });
-  });
 
-  it("keeps local quick-input textarea value stable while parent rerenders with stale sessionDraft during active editing", async () => {
-    const onSessionDraftChange = vi.fn();
 
-    function Harness() {
-      const [sessionDraft] = React.useState("");
-      const [tick, setTick] = React.useState(0);
-      return (
-        <div>
-          <button
-            type="button"
-            onClick={() => setTick((current) => current + 1)}
-          >
-            rerender
-          </button>
-          <div data-testid="tick">{tick}</div>
-          <TerminalQuickBar
-            activeSessionId="session-1"
-            quickActions={[]}
-            shortcutActions={[]}
-            sessionDraft={sessionDraft}
-            onSendSequence={vi.fn()}
-            onSessionDraftChange={(value) => {
-              onSessionDraftChange(value);
-              // simulate parent persistence lag: do not immediately update sessionDraft prop
-            }}
-            onSessionDraftSend={vi.fn()}
-            onQuickActionsChange={vi.fn()}
-            onShortcutActionsChange={vi.fn()}
-            onOpenScheduleComposer={vi.fn()}
-            onMeasuredHeightChange={vi.fn()}
-          />
-        </div>
-      );
-    }
-
-    render(<Harness />);
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Toggle floating quick menu" }),
-    );
-    const textarea = screen.getByPlaceholderText(
-      "预输入内容，按 session 持久化",
-    ) as HTMLTextAreaElement;
-    fireEvent.focus(textarea);
-    fireEvent.change(textarea, { target: { value: "draft typing" } });
-
-    expect(textarea.value).toBe("draft typing");
-    expect(onSessionDraftChange).toHaveBeenLastCalledWith("draft typing");
-
-    fireEvent.click(screen.getByText("rerender"));
-
-    await waitFor(() => {
-      expect(screen.getByTestId("tick").textContent).toBe("1");
-      expect(
-        (
-          screen.getByPlaceholderText(
-            "预输入内容，按 session 持久化",
-          ) as HTMLTextAreaElement
-        ).value,
-      ).toBe("draft typing");
-    });
-  });
-
-  it("sends floating quick action on double tap with trailing enter", async () => {
-    const onSendSequence = vi.fn();
-    renderQuickBar({
-      quickActions: [
-        {
-          id: "qa-1",
-          label: "ls",
-          sequence: "ls -la",
-          order: 0,
-        },
-      ],
-      onSendSequence,
-    });
-
-    fireEvent.click(
-      screen.getByRole("button", { name: "Toggle floating quick menu" }),
-    );
-    const actionLabel = screen.getByText("ls");
-    const actionButton = actionLabel.closest("button");
-    expect(actionButton).not.toBeNull();
-    fireEvent.click(actionButton as HTMLButtonElement);
-    expect(onSendSequence).not.toHaveBeenCalled();
-    fireEvent.click(actionButton as HTMLButtonElement);
-
-    await waitFor(() => {
-      expect(onSendSequence).toHaveBeenCalledWith("ls -la\r");
-    });
-  });
 
   it("keeps generic remote-window controls usable while greying terminal-only actions", async () => {
     const onSendSequence = vi.fn();
@@ -1627,273 +1413,21 @@ describe("TerminalQuickBar", () => {
     expect(onSendSequence).toHaveBeenCalledWith("\x1b[A");
   });
 
-  it("uses combo preview as default shortcut label when saving ctrl combination", async () => {
-    const onShortcutActionsChange = vi.fn();
 
-    renderQuickBar({
-      onShortcutActionsChange,
-    });
 
-    fireEvent.click(screen.getAllByRole("button", { name: "+" })[0]);
-    expect(screen.getByText("快捷按键设置")).not.toBeNull();
-    expect(screen.getByText("当前滚动快捷键")).not.toBeNull();
-    expect(screen.getByText("第二行（单按键）")).not.toBeNull();
-    expect(screen.getByText("第三行（组合键）")).not.toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "+ 添加组合键" }));
-    await waitFor(() => {
-      expect(
-        screen.getByPlaceholderText("快捷键名称 / 显示名称"),
-      ).not.toBeNull();
-    });
 
-    fireEvent.click(screen.getByRole("button", { name: "Ctrl" }));
-    fireEvent.change(
-      screen.getByPlaceholderText("输入组合键里的目标字符，例如 c"),
-      {
-        target: { value: "c" },
-      },
-    );
-    fireEvent.click(screen.getByRole("button", { name: "加入" }));
-    fireEvent.click(screen.getByRole("button", { name: "添加快捷键" }));
 
-    await waitFor(() => {
-      expect(onShortcutActionsChange).toHaveBeenCalled();
-      const calls = onShortcutActionsChange.mock.calls;
-      const latest = calls[calls.length - 1]?.[0];
-      expect(Array.isArray(latest)).toBe(true);
-      expect(latest[latest.length - 1]?.label).toBe("Ctrl + C");
-      expect(latest[latest.length - 1]?.row).toBe("bottom-scroll");
-    });
-  });
 
-  it("saves shift as a one-shot modifier for the next combination key", async () => {
-    const onShortcutActionsChange = vi.fn();
 
-    renderQuickBar({
-      onShortcutActionsChange,
-    });
 
-    fireEvent.click(screen.getAllByRole("button", { name: "+" })[0]);
-    expect(screen.getByText("快捷按键设置")).not.toBeNull();
 
-    fireEvent.click(screen.getByRole("button", { name: "+ 添加组合键" }));
-    await waitFor(() => {
-      expect(
-        screen.getByPlaceholderText("快捷键名称 / 显示名称"),
-      ).not.toBeNull();
-    });
 
-    fireEvent.click(screen.getByRole("button", { name: "Shift" }));
-    fireEvent.click(
-      within(screen.getByTestId("shortcut-editor-scroll")).getByRole(
-        "button",
-        { name: "←" },
-      ),
-    );
-    fireEvent.change(
-      screen.getByPlaceholderText("输入组合键里的目标字符，例如 c"),
-      {
-        target: { value: "a" },
-      },
-    );
-    fireEvent.click(screen.getByRole("button", { name: "加入" }));
-    fireEvent.click(screen.getByRole("button", { name: "添加快捷键" }));
 
-    await waitFor(() => {
-      expect(onShortcutActionsChange).toHaveBeenCalled();
-      const calls = onShortcutActionsChange.mock.calls;
-      const latest = calls[calls.length - 1]?.[0];
-      expect(Array.isArray(latest)).toBe(true);
-      expect(latest[latest.length - 1]?.label).toBe("Shift + ← + a");
-      expect(latest[latest.length - 1]?.sequence).toBe("\u001b[1;2Da");
-      expect(latest[latest.length - 1]?.row).toBe("bottom-scroll");
-    });
-  });
 
-  it("keeps single-key row and combo row separated in shortcut manager", async () => {
-    const onShortcutActionsChange = vi.fn();
 
-    renderQuickBar({
-      onShortcutActionsChange,
-    });
 
-    fireEvent.click(screen.getAllByRole("button", { name: "+" })[0]);
 
-    fireEvent.click(screen.getByRole("button", { name: "+ 添加单按键" }));
-    await waitFor(() => {
-      expect(screen.getByText("当前编辑：第二行单按键")).not.toBeNull();
-    });
-
-    fireEvent.click(screen.getByRole("button", { name: "Return" }));
-    fireEvent.click(screen.getByRole("button", { name: "添加快捷键" }));
-
-    await waitFor(() => {
-      expect(onShortcutActionsChange).toHaveBeenCalled();
-      const calls = onShortcutActionsChange.mock.calls;
-      const latest = calls[calls.length - 1]?.[0];
-      expect(latest[latest.length - 1]?.label).toBe("Return");
-      expect(latest[latest.length - 1]?.row).toBe("top-scroll");
-    });
-  });
-
-  it("blocks saving multi-key content into first single-key row", async () => {
-    renderQuickBar();
-
-    fireEvent.click(screen.getAllByRole("button", { name: "+" })[0]);
-    fireEvent.click(screen.getByRole("button", { name: "+ 添加单按键" }));
-
-    expect(screen.queryByRole("button", { name: "Ctrl" })).toBeNull();
-    fireEvent.change(screen.getByPlaceholderText("输入单个字母/数字/符号"), {
-      target: { value: "cd" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "加入" }));
-
-    expect(screen.getByText("第二行只支持单个按键。")).not.toBeNull();
-    expect(
-      screen
-        .getByRole("button", { name: "添加快捷键" })
-        .hasAttribute("disabled"),
-    ).toBe(true);
-  });
-
-  it("keeps enter decoded as single key when editing existing shortcut", async () => {
-    renderQuickBar({
-      shortcutActions: [
-        {
-          id: "shortcut-enter",
-          label: "Enter",
-          sequence: "\r",
-          order: 0,
-          row: "top-scroll",
-        },
-      ],
-    });
-
-    fireEvent.click(screen.getAllByRole("button", { name: "+" })[0]);
-    fireEvent.click(screen.getByRole("button", { name: "编辑 Enter" }));
-
-    await waitFor(() => {
-      expect(screen.getByText("当前编辑：第二行单按键")).not.toBeNull();
-      expect(
-        (
-          screen.getByPlaceholderText(
-            "快捷键名称 / 显示名称",
-          ) as HTMLInputElement
-        ).value,
-      ).toBe("Enter");
-      expect(
-        (
-          screen.getByPlaceholderText(
-            "点击下方按钮选择单个按键",
-          ) as HTMLTextAreaElement
-        ).value,
-      ).toBe("Enter");
-    });
-  });
-
-  it("allows renaming existing shortcut from explicit edit action", async () => {
-    const onShortcutActionsChange = vi.fn();
-
-    renderQuickBar({
-      shortcutActions: [
-        {
-          id: "shortcut-copy",
-          label: "Ctrl + C",
-          sequence: "\u0003",
-          order: 0,
-          row: "bottom-scroll",
-        },
-      ],
-      onShortcutActionsChange,
-    });
-
-    fireEvent.click(screen.getAllByRole("button", { name: "+" })[0]);
-    fireEvent.click(screen.getByRole("button", { name: "编辑 Ctrl + C" }));
-
-    await waitFor(() => {
-      expect(screen.getByText("编辑快捷键")).not.toBeNull();
-      expect(
-        (
-          screen.getByPlaceholderText(
-            "快捷键名称 / 显示名称",
-          ) as HTMLInputElement
-        ).value,
-      ).toBe("Ctrl + C");
-    });
-
-    fireEvent.change(screen.getByPlaceholderText("快捷键名称 / 显示名称"), {
-      target: { value: "复制当前行" },
-    });
-    fireEvent.click(screen.getByRole("button", { name: "保存快捷键" }));
-
-    await waitFor(() => {
-      expect(onShortcutActionsChange).toHaveBeenCalled();
-      const calls = onShortcutActionsChange.mock.calls;
-      const latest = calls[calls.length - 1]?.[0];
-      expect(latest).toEqual([
-        {
-          id: "shortcut-copy",
-          label: "复制当前行",
-          sequence: "\u0003",
-          order: 0,
-          row: "bottom-scroll",
-        },
-      ]);
-    });
-  });
-
-  it("shows shortcut management list and allows delete from list page", async () => {
-    const onShortcutActionsChange = vi.fn();
-
-    renderQuickBar({
-      shortcutActions: [
-        {
-          id: "shortcut-1",
-          label: "Ctrl + C",
-          sequence: "\u0003",
-          order: 0,
-          row: "bottom-scroll",
-        },
-      ],
-      onShortcutActionsChange,
-    });
-
-    fireEvent.click(screen.getAllByRole("button", { name: "+" })[0]);
-
-    expect(screen.getByText("当前滚动快捷键")).not.toBeNull();
-    expect(
-      screen.getByRole("button", { name: "删除 Ctrl + C" }),
-    ).not.toBeNull();
-
-    fireEvent.click(screen.getByRole("button", { name: "删除 Ctrl + C" }));
-
-    await waitFor(() => {
-      expect(onShortcutActionsChange).toHaveBeenCalledWith([]);
-    });
-  });
-
-  it("renders special shortcut keys with compact symbols instead of empty previews", async () => {
-    renderQuickBar({
-      shortcutActions: [
-        {
-          id: "shortcut-tab",
-          label: "Tab",
-          sequence: "\t",
-          order: 0,
-          row: "top-scroll",
-        },
-      ],
-    });
-
-    fireEvent.click(screen.getAllByRole("button", { name: "+" })[0]);
-
-    const detailButton = screen.getByRole("button", { name: "查看 Tab 详情" });
-    expect(
-      detailButton.querySelector('[data-shortcut-keycap="Tab"]'),
-    ).not.toBeNull();
-    expect(detailButton.textContent).not.toContain("(空)");
-  });
 
   it("renders terminal base special keys with familiar icon glyphs", async () => {
     renderQuickBar({
@@ -1945,192 +1479,15 @@ describe("TerminalQuickBar", () => {
     ).toBe(true);
   });
 
-  it("renders space shortcut as a long narrow keycap visual in settings list", async () => {
-    renderQuickBar({
-      shortcutActions: [
-        {
-          id: "shortcut-space",
-          label: "Space",
-          sequence: " ",
-          order: 0,
-          row: "top-scroll",
-        },
-      ],
-    });
 
-    fireEvent.click(screen.getAllByRole("button", { name: "+" })[0]);
 
-    const detailButton = screen.getByRole("button", {
-      name: "查看 Space 详情",
-    });
-    expect(
-      detailButton.querySelector('[data-shortcut-space-visual="true"]'),
-    ).not.toBeNull();
-    expect(detailButton.textContent).toContain("Space");
-  });
 
-  it("uses a dedicated scroll container for shortcut settings sheet", async () => {
-    Object.defineProperty(window, "innerHeight", {
-      configurable: true,
-      writable: true,
-      value: 754,
-    });
-    stubVisualViewport({
-      width: 347.4285583496094,
-      height: 456.8571472167969,
-      offsetTop: 0,
-    });
 
-    renderQuickBar({
-      shortcutActions: [
-        {
-          id: "shortcut-1",
-          label: "Ctrl + C",
-          sequence: "\u0003",
-          order: 0,
-          row: "bottom-scroll",
-        },
-      ],
-    });
 
-    fireEvent.click(screen.getAllByRole("button", { name: "+" })[0]);
 
-    const scrollContainer = screen.getByTestId("shortcut-editor-scroll");
-    const sheet = scrollContainer.parentElement;
-    const overlay = sheet?.parentElement;
-    const style = scrollContainer.getAttribute("style") || "";
-    expect(style).toContain("flex: 1");
-    expect(style).toContain("min-height: 0");
-    expect(style).toContain("overflow-y: auto");
-    expect(style).toContain("overflow-x: hidden");
-    expect(style).toContain("touch-action: pan-y");
-    expect(sheet?.getAttribute("style") || "").toContain("height: 441px");
-    expect(overlay?.getAttribute("style") || "").toContain(
-      "padding-bottom: 567px",
-    );
-    expect(
-      screen.getByTestId("shortcut-editor-list").getAttribute("style") || "",
-    ).toContain("min-height: max-content");
-  });
 
-  it("lifts quick action editor above visual viewport keyboard occlusion", async () => {
-    Object.defineProperty(window, "innerHeight", {
-      configurable: true,
-      writable: true,
-      value: 754,
-    });
-    stubVisualViewport({
-      width: 347.4285583496094,
-      height: 456.8571472167969,
-      offsetTop: 0,
-    });
 
-    renderQuickBar({
-      quickActions: [
-        {
-          id: "qa-1",
-          label: "ls",
-          sequence: "ls -la",
-          order: 0,
-        },
-      ],
-    });
 
-    fireEvent.click(
-      screen.getByRole("button", { name: "Toggle floating quick menu" }),
-    );
-    fireEvent.click(screen.getByLabelText("Edit ls"));
-
-    await waitFor(() => {
-      expect(screen.getByText("快捷输入设置")).not.toBeNull();
-    });
-
-    const scrollContainer = screen.getByTestId("quick-action-editor-scroll");
-    const sheet = scrollContainer.parentElement;
-    const overlay = sheet?.parentElement;
-    expect(sheet?.getAttribute("style") || "").toContain("height: 441px");
-    expect(overlay?.getAttribute("style") || "").toContain(
-      "padding-bottom: 567px",
-    );
-  });
-
-  it("resets shortcut editor scrollTop when switching from list to form", async () => {
-    renderQuickBar({
-      shortcutActions: [
-        { id: "s1", label: "Tab", sequence: "\t", order: 0, row: "top-scroll" },
-        {
-          id: "s2",
-          label: "Enter",
-          sequence: "\r",
-          order: 1,
-          row: "top-scroll",
-        },
-        {
-          id: "s3",
-          label: "Space",
-          sequence: " ",
-          order: 2,
-          row: "top-scroll",
-        },
-        {
-          id: "s4",
-          label: "S-Enter",
-          sequence: "\n",
-          order: 0,
-          row: "bottom-scroll",
-        },
-        {
-          id: "s5",
-          label: "Esc",
-          sequence: "\u001b",
-          order: 1,
-          row: "bottom-scroll",
-        },
-        {
-          id: "s6",
-          label: "Bksp",
-          sequence: "\u007f",
-          order: 2,
-          row: "bottom-scroll",
-        },
-        {
-          id: "s7",
-          label: "Paste",
-          sequence: "\u0016",
-          order: 3,
-          row: "bottom-scroll",
-        },
-      ],
-    });
-
-    fireEvent.click(screen.getAllByRole("button", { name: "+" })[0]);
-
-    const scrollContainer = screen.getByTestId("shortcut-editor-scroll");
-    scrollContainer.scrollTop = 188;
-    fireEvent.click(screen.getByRole("button", { name: "+ 添加组合键" }));
-
-    await waitFor(() => {
-      expect(
-        screen.getByPlaceholderText("快捷键名称 / 显示名称"),
-      ).not.toBeNull();
-      expect(screen.getByTestId("shortcut-editor-scroll").scrollTop).toBe(0);
-    });
-  });
-
-  it("hides floating bubble while shortcut editor is open", async () => {
-    renderQuickBar();
-
-    expect(
-      screen.getByRole("button", { name: "Toggle floating quick menu" }),
-    ).not.toBeNull();
-    fireEvent.click(screen.getAllByRole("button", { name: "+" })[0]);
-
-    await waitFor(() => {
-      expect(
-        screen.queryByRole("button", { name: "Toggle floating quick menu" }),
-      ).toBeNull();
-    });
-  });
 
   it("starts repeat mode on long press and stops on next short tap", async () => {
     vi.useFakeTimers();

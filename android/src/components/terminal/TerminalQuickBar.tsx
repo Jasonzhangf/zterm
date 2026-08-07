@@ -121,6 +121,9 @@ interface TerminalQuickBarProps {
   shortcutSmartSort?: boolean;
   shortcutFrequencyMap?: Record<string, number>;
   onShortcutUse?: (shortcutId: string) => void;
+  transcriptEnabled?: boolean;
+  transcriptAvailable?: boolean;
+  onToggleTranscript?: () => void;
 }
 
 interface ImageUploadBatchState {
@@ -180,6 +183,9 @@ function TerminalQuickBarComponent({
   shortcutSmartSort = false,
   shortcutFrequencyMap,
   onShortcutUse,
+  transcriptEnabled = false,
+  transcriptAvailable = false,
+  onToggleTranscript,
 }: TerminalQuickBarProps) {
   const [editorOpen, setEditorOpen] = useState(false);
   const [shortcutEditorOpen, setShortcutEditorOpen] = useState(false);
@@ -579,6 +585,10 @@ function TerminalQuickBarComponent({
         });
         return;
       }
+      if (action.id === "opencode-transcript") {
+        onToggleTranscript?.();
+        return;
+      }
       if (
         action.id === "paste" ||
         (action.label === "Paste" && action.sequence === "\x16")
@@ -606,6 +616,7 @@ function TerminalQuickBarComponent({
       onToggleDebugOverlay,
       onToggleKeyboard,
       onToggleSplitLayout,
+      onToggleTranscript,
     ],
   );
 
@@ -1011,15 +1022,6 @@ function TerminalQuickBarComponent({
     () => [...topScrollActions, ...bottomScrollActions],
     [bottomScrollActions, topScrollActions],
   );
-  const topShortcutEditorEntry = useMemo(
-    () => ({ id: "shortcut-editor-top", label: "+", sequence: "" }),
-    [],
-  );
-  const bottomShortcutEditorEntry = useMemo(
-    () => ({ id: "shortcut-editor-bottom", label: "+", sequence: "" }),
-    [],
-  );
-
   const clampFloatingBubblePosition = (
     nextX: number,
     nextY: number,
@@ -1492,7 +1494,9 @@ function TerminalQuickBarComponent({
     const fixed = options?.fixed ?? false;
     const repeatable = isRepeatableAction(action);
     const repeatActive = repeatingActionId === action.id;
-    const disabled = isRemoteWindowTerminalOnlyAction(action.id);
+    const disabled =
+      isRemoteWindowTerminalOnlyAction(action.id) ||
+      (action.id === "opencode-transcript" && !transcriptAvailable);
     const actionDisplayLabel = resolveShortcutVisualLabel(action.label);
     const actionUsesSpaceBarVisual = isSpaceShortcutLabel(action.label);
     return (
@@ -1608,7 +1612,11 @@ function TerminalQuickBarComponent({
         }}
         onFocus={(event) => event.currentTarget.blur()}
         aria-label={action.label}
-        aria-pressed={repeatActive || (action.id === "tmux-copy" && copyModeActive)}
+        aria-pressed={
+          repeatActive ||
+          (action.id === "tmux-copy" && copyModeActive) ||
+          (action.id === "opencode-transcript" && transcriptEnabled)
+        }
         aria-disabled={disabled}
         style={{
           minHeight: compact ? "32px" : "34px",
@@ -1639,9 +1647,11 @@ function TerminalQuickBarComponent({
                       : action.id === "remote-screenshot" &&
                           remoteScreenshotStatus !== "idle"
                         ? "rgba(113, 164, 255, 0.18)"
-                        : fixed
-                          ? "rgba(22, 28, 41, 0.92)"
-                          : "rgba(31, 38, 53, 0.82)",
+                        : action.id === "opencode-transcript" && transcriptEnabled
+                          ? "rgba(113, 164, 255, 0.28)"
+                          : fixed
+                            ? "rgba(22, 28, 41, 0.92)"
+                            : "rgba(31, 38, 53, 0.82)",
           color: repeatActive
             ? "#bcd3ff"
             : disabled
@@ -1657,7 +1667,9 @@ function TerminalQuickBarComponent({
                       : action.id === "remote-screenshot" &&
                           remoteScreenshotStatus !== "idle"
                         ? "#8db7ff"
-                        : "#fff",
+                        : action.id === "opencode-transcript" && transcriptEnabled
+                          ? "#8db7ff"
+                          : "#fff",
           fontSize: fixed
             ? "13px"
             : action.id === "continue"
@@ -3745,229 +3757,6 @@ function TerminalQuickBarComponent({
           >
             📁
           </button>
-        <button
-          ref={floatingBubbleRef}
-          data-quickbar-allow-pointer="true"
-          type="button"
-          tabIndex={-1}
-          onFocus={(event) => event.currentTarget.blur()}
-          onPointerDown={(event) => {
-            if (event.pointerType === "touch") {
-              return;
-            }
-            event.preventDefault();
-            blurCurrentTarget(event.currentTarget);
-            event.currentTarget.setPointerCapture(event.pointerId);
-            const rect = event.currentTarget.getBoundingClientRect();
-            floatingBubbleDragRef.current = {
-              pointerId: event.pointerId,
-              active: false,
-              startX: event.clientX,
-              startY: event.clientY,
-              originX: rect.left,
-              originY: rect.top,
-              width: rect.width || FLOATING_BUBBLE_SIZE,
-              height: rect.height || FLOATING_BUBBLE_SIZE,
-            };
-          }}
-          onPointerMove={(event) => {
-            if (event.pointerType === "touch") {
-              return;
-            }
-            const drag = floatingBubbleDragRef.current;
-            if (drag.pointerId !== event.pointerId) {
-              return;
-            }
-            const deltaX = event.clientX - drag.startX;
-            const deltaY = event.clientY - drag.startY;
-            if (
-              !drag.active &&
-              Math.hypot(deltaX, deltaY) >= FLOATING_BUBBLE_DRAG_THRESHOLD_PX
-            ) {
-              drag.active = true;
-              suppressBubbleClickRef.current = true;
-            }
-            if (!drag.active) {
-              return;
-            }
-            event.preventDefault();
-            setFloatingBubblePosition(
-              clampFloatingBubblePosition(
-                drag.originX + deltaX,
-                drag.originY + deltaY,
-                drag.width,
-                drag.height,
-              ),
-            );
-          }}
-          onPointerUp={(event) => {
-            if (event.pointerType === "touch") {
-              return;
-            }
-            if (floatingBubbleDragRef.current.pointerId === event.pointerId) {
-              if (floatingBubbleDragRef.current.active) {
-                suppressBubbleClickRef.current = true;
-                window.setTimeout(() => {
-                  suppressBubbleClickRef.current = false;
-                }, 180);
-              }
-              floatingBubbleDragRef.current.active = false;
-              floatingBubbleDragRef.current.pointerId = -1;
-            }
-            event.currentTarget.releasePointerCapture(event.pointerId);
-          }}
-          onPointerCancel={(event) => {
-            if (event.pointerType === "touch") {
-              return;
-            }
-            floatingBubbleDragRef.current.active = false;
-            floatingBubbleDragRef.current.pointerId = -1;
-            try {
-              event.currentTarget.releasePointerCapture(event.pointerId);
-            } catch (error) {
-              console.warn(
-                "[TerminalQuickBar] Failed to release floating bubble pointer capture:",
-                error,
-              );
-            }
-          }}
-          onClick={() => {
-            if (suppressBubbleClickRef.current) {
-              return;
-            }
-            if (collapsed && !floatingMenuOpen) {
-              onCollapsedChange?.(false);
-              return;
-            }
-            setFloatingMenuOpen((current) => !current);
-          }}
-          onTouchStart={(event) => {
-            event.stopPropagation();
-            const touch = event.touches[0];
-            if (!touch) {
-              return;
-            }
-            const rect = event.currentTarget.getBoundingClientRect();
-            floatingBubbleTouchDragRef.current = {
-              active: false,
-              moved: false,
-              startX: touch.clientX,
-              startY: touch.clientY,
-              lastX: touch.clientX,
-              lastY: touch.clientY,
-              originX: rect.left,
-              originY: rect.top,
-              width: rect.width || FLOATING_BUBBLE_SIZE,
-              height: rect.height || FLOATING_BUBBLE_SIZE,
-            };
-          }}
-          onTouchMove={(event) => {
-            const touch = event.touches[0];
-            const drag = floatingBubbleTouchDragRef.current;
-            if (!touch) {
-              return;
-            }
-            drag.lastX = touch.clientX;
-            drag.lastY = touch.clientY;
-            const deltaX = touch.clientX - drag.startX;
-            const deltaY = touch.clientY - drag.startY;
-            if (
-              collapsed &&
-              Math.abs(deltaY) >= FLOATING_BUBBLE_DRAG_THRESHOLD_PX &&
-              Math.abs(deltaY) > Math.abs(deltaX)
-            ) {
-              event.preventDefault();
-              event.stopPropagation();
-              drag.active = true;
-              drag.moved = true;
-              suppressBubbleClickRef.current = true;
-              return;
-            }
-            if (
-              !drag.active &&
-              Math.hypot(deltaX, deltaY) >= FLOATING_BUBBLE_DRAG_THRESHOLD_PX
-            ) {
-              drag.active = true;
-              suppressBubbleClickRef.current = true;
-            }
-            if (!drag.active) {
-              return;
-            }
-            event.preventDefault();
-            event.stopPropagation();
-            drag.moved = true;
-            setFloatingBubblePosition(
-              clampFloatingBubblePosition(
-                drag.originX + deltaX,
-                drag.originY + deltaY,
-                drag.width,
-                drag.height,
-              ),
-            );
-          }}
-          onTouchEnd={() => {
-            const drag = floatingBubbleTouchDragRef.current;
-            const deltaX = drag.lastX - drag.startX;
-            const deltaY = drag.lastY - drag.startY;
-            if (
-              collapsed &&
-              Math.abs(deltaY) > Math.abs(deltaX) &&
-              deltaY <= -QUICKBAR_COLLAPSE_SWIPE_PX
-            ) {
-              onCollapsedChange?.(false);
-            }
-            if (floatingBubbleTouchDragRef.current.active) {
-              suppressBubbleClickRef.current = true;
-              window.setTimeout(() => {
-                suppressBubbleClickRef.current = false;
-              }, 180);
-            }
-            floatingBubbleTouchDragRef.current.active = false;
-            floatingBubbleTouchDragRef.current.moved = false;
-          }}
-          onTouchCancel={() => {
-            floatingBubbleTouchDragRef.current.active = false;
-            floatingBubbleTouchDragRef.current.moved = false;
-          }}
-          style={{
-            position: "fixed",
-            right: collapsed
-              ? `${FLOATING_BUBBLE_MARGIN}px`
-              : floatingBubblePosition.x === null
-                ? `${FLOATING_BUBBLE_MARGIN}px`
-                : "auto",
-            bottom: collapsed
-              ? `calc(${FLOATING_BUBBLE_MARGIN}px + env(safe-area-inset-bottom, 0px))`
-              : floatingBubblePosition.y === null
-                ? `calc(${floatingBubbleBottomPx + Math.max(0, keyboardInsetPx)}px + env(safe-area-inset-bottom, 0px))`
-                : "auto",
-            left:
-              collapsed || floatingBubblePosition.x === null
-                ? "auto"
-                : `${floatingBubblePosition.x}px`,
-            top:
-              collapsed || floatingBubblePosition.y === null
-                ? "auto"
-                : `${floatingBubblePosition.y}px`,
-            zIndex: 128,
-            width: `${FLOATING_BUBBLE_SIZE}px`,
-            height: `${FLOATING_BUBBLE_SIZE}px`,
-            borderRadius: "999px",
-            border: "1px solid rgba(255,255,255,0.12)",
-            background: floatingMenuOpen
-              ? "rgba(31,214,122,0.18)"
-              : "rgba(18, 24, 38, 0.72)",
-            color: floatingMenuOpen ? mobileTheme.colors.accent : "#fff",
-            fontSize: "20px",
-            fontWeight: 800,
-            boxShadow: "0 8px 18px rgba(0,0,0,0.24)",
-            transform: "none",
-            touchAction: "none",
-          }}
-          aria-label={collapsed ? "展开快捷栏" : "Toggle floating quick menu"}
-        >
-          {collapsed ? "⌃" : "⌘"}
-        </button>
         </>
       )}
 
@@ -4014,12 +3803,6 @@ function TerminalQuickBarComponent({
                     {mergedScrollActions.map((action) =>
                       renderBaseActionButton(action, { compact: true }),
                     )}
-                    {renderBaseActionButton(topShortcutEditorEntry, {
-                      compact: true,
-                    })}
-                    {renderBaseActionButton(bottomShortcutEditorEntry, {
-                      compact: true,
-                    })}
                   </div>
                 </div>
               </div>
@@ -4065,6 +3848,12 @@ function TerminalQuickBarComponent({
                       { id: "attachment-drawer", label: "📎", sequence: "" },
                       { compact: true },
                     )}
+                    {onToggleTranscript
+                      ? renderBaseActionButton(
+                          { id: "opencode-transcript", label: "历史", sequence: "" },
+                          { compact: true },
+                        )
+                      : null}
                     {splitToolActions.map((action) =>
                       renderBaseActionButton(action, { compact: true }),
                     )}
@@ -4111,9 +3900,6 @@ function TerminalQuickBarComponent({
                     {topScrollActions.map((action) =>
                       renderBaseActionButton(action, { compact: true }),
                     )}
-                    {renderBaseActionButton(topShortcutEditorEntry, {
-                      compact: true,
-                    })}
                   </div>
                 </div>
               </div>
@@ -4149,9 +3935,6 @@ function TerminalQuickBarComponent({
                     {bottomScrollActions.map((action) =>
                       renderBaseActionButton(action, { compact: true }),
                     )}
-                    {renderBaseActionButton(bottomShortcutEditorEntry, {
-                      compact: true,
-                    })}
                   </div>
                 </div>
               </div>
@@ -4182,6 +3965,12 @@ function TerminalQuickBarComponent({
                       { id: "attachment-drawer", label: "📎", sequence: "" },
                       { compact: true },
                     )}
+                    {onToggleTranscript
+                      ? renderBaseActionButton(
+                          { id: "opencode-transcript", label: "历史", sequence: "" },
+                          { compact: true },
+                        )
+                      : null}
                     {splitToolActions.map((action) =>
                       renderBaseActionButton(action),
                     )}
