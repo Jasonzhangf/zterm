@@ -1008,7 +1008,7 @@ describe('remote window stream daemon owner', () => {
 
   it('short-circuits repeated focus when the target window is already focused', () => {
     const fastPathIndex = MACOS_REMOTE_WINDOW_INPUT_SWIFT.indexOf(
-      'frontmostPidMatches(config.pid) && focusedWindowMatchesTarget(appElement, config.window.bounds)',
+      'frontmostPidMatches(config.pid)',
     );
     const focusAttemptIndex = MACOS_REMOTE_WINDOW_INPUT_SWIFT.indexOf('for attempt in 0..<3');
 

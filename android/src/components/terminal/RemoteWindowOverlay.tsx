@@ -186,6 +186,7 @@ export interface RemoteWindowVideoDebugSnapshot {
   playAttempts: number;
   playAccepted: number;
   playRejected: number;
+  framesReceived: number;
   lastEvent: string;
   lastError: string;
   updatedAt: number | null;
@@ -901,6 +902,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const entryLongPressTimerRef = useRef<number | null>(null);
   const videoSurfaceRef = useRef<HTMLDivElement | null>(null);
   const videoElementRef = useRef<HTMLVideoElement | null>(null);
+  const videoFrameCallbackRef = useRef<((now: number) => void) | null>(null);
   const activeStreamIdRef = useRef<string | null>(null);
   const activeCanvasStreamIdRef = useRef<string | null>(null);
   const activeFocusStreamIdRef = useRef<string | null>(null);
@@ -917,6 +919,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     playAttempts: 0,
     playAccepted: 0,
     playRejected: 0,
+    framesReceived: 0,
     lastError: '-',
   });
   const collectStreamStatsRef = useRef<(() => Promise<RemoteWindowVideoStatsSample | null>) | null>(null);
@@ -2225,6 +2228,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       playAttempts: stats.playAttempts,
       playAccepted: stats.playAccepted,
       playRejected: stats.playRejected,
+      framesReceived: stats.framesReceived,
       lastEvent,
       lastError: stats.lastError,
       updatedAt: Date.now(),
@@ -2283,6 +2287,25 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     video.controls = false;
     if (video.srcObject !== stream) {
       video.srcObject = stream;
+    }
+    // 帧接收诊断：requestVideoFrameCallback 每帧回调（WebView 支持时）
+    const rvfc = (video as HTMLVideoElement & { requestVideoFrameCallback?: (cb: (now: number, meta: unknown) => void) => number })
+      .requestVideoFrameCallback;
+    if (typeof rvfc === 'function' && !videoFrameCallbackRef.current) {
+      const onVideoFrame = () => {
+        videoPlaybackStatsRef.current.framesReceived += 1;
+        const received = videoPlaybackStatsRef.current.framesReceived;
+        if (received === 1 || received % 60 === 0) {
+          // eslint-disable-next-line no-console
+          console.log(`[remote-window] client framesReceived=${received} video=${video.videoWidth}x${video.videoHeight}`);
+          publishVideoDebugSnapshot('frame-callback');
+        }
+        if ((video as HTMLVideoElement & { requestVideoFrameCallback?: (cb: (now: number) => void) => number }).requestVideoFrameCallback) {
+          (video as HTMLVideoElement & { requestVideoFrameCallback: (cb: (now: number) => void) => number }).requestVideoFrameCallback(onVideoFrame);
+        }
+      };
+      videoFrameCallbackRef.current = onVideoFrame;
+      (video as HTMLVideoElement & { requestVideoFrameCallback: (cb: (now: number) => void) => number }).requestVideoFrameCallback(onVideoFrame);
     }
     scheduleVideoFrameReveal(video, stream, playbackEpoch);
     videoPlaybackStatsRef.current.playAttempts += 1;
@@ -2382,6 +2405,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       playAttempts: 0,
       playAccepted: 0,
       playRejected: 0,
+      framesReceived: 0,
       lastError: '-',
     };
     if (!receiverMediaStream) {
@@ -2979,6 +3003,11 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       return;
     }
     if (effect.kind === 'pinch-move') {
+      // 保护：只有真正双指在场时才应用缩放；单指滑动（残留手势/指针误判）不得改变 scale
+      if (surfacePointersRef.current.size < 2) {
+        surfacePinchStartRef.current = null;
+        return;
+      }
       const currentScale = fullscreenViewportRef.current.scale;
       const start = effect.commit || surfacePinchStartRef.current?.pointerId !== effect.pointerId
         ? { pointerId: effect.pointerId, startScale: currentScale }
@@ -4340,7 +4369,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
             <div>target: {state.phase === 'targetLocked' ? state.target.streamTargetId : '-'}</div>
             <div>receiver: {receiverMediaStream ? 'attached' : 'missing'} / played:{videoHasPlayed ? 'yes' : 'no'}</div>
             <div>frame: {receiverFrameSize ? `${receiverFrameSize.width}x${receiverFrameSize.height}` : '-'}</div>
-            <div>video: {videoDebugSnapshot ? `${videoDebugSnapshot.videoWidth}x${videoDebugSnapshot.videoHeight} ready=${videoDebugSnapshot.readyState} paused=${videoDebugSnapshot.paused ? 'yes' : 'no'}` : '-'}</div>
+            <div>video: {videoDebugSnapshot ? `${videoDebugSnapshot.videoWidth}x${videoDebugSnapshot.videoHeight} ready=${videoDebugSnapshot.readyState} paused=${videoDebugSnapshot.paused ? 'yes' : 'no'} frames=${videoDebugSnapshot.framesReceived}` : '-'}</div>
             <div>play: {videoDebugSnapshot ? `try=${videoDebugSnapshot.playAttempts} ok=${videoDebugSnapshot.playAccepted} reject=${videoDebugSnapshot.playRejected}` : '-'}</div>
             <div>event: {videoDebugSnapshot?.lastEvent || '-'}</div>
             <div>error: {videoDebugSnapshot?.lastError || (state.phase === 'targetLocked' ? state.streamErrorMessage || '-' : '-')}</div>

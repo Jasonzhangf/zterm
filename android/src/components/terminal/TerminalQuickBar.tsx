@@ -121,9 +121,6 @@ interface TerminalQuickBarProps {
   shortcutSmartSort?: boolean;
   shortcutFrequencyMap?: Record<string, number>;
   onShortcutUse?: (shortcutId: string) => void;
-  transcriptEnabled?: boolean;
-  transcriptAvailable?: boolean;
-  onToggleTranscript?: () => void;
 }
 
 interface ImageUploadBatchState {
@@ -183,9 +180,6 @@ function TerminalQuickBarComponent({
   shortcutSmartSort = false,
   shortcutFrequencyMap,
   onShortcutUse,
-  transcriptEnabled = false,
-  transcriptAvailable = false,
-  onToggleTranscript,
 }: TerminalQuickBarProps) {
   const [editorOpen, setEditorOpen] = useState(false);
   const [shortcutEditorOpen, setShortcutEditorOpen] = useState(false);
@@ -585,10 +579,6 @@ function TerminalQuickBarComponent({
         });
         return;
       }
-      if (action.id === "opencode-transcript") {
-        onToggleTranscript?.();
-        return;
-      }
       if (
         action.id === "paste" ||
         (action.label === "Paste" && action.sequence === "\x16")
@@ -616,7 +606,6 @@ function TerminalQuickBarComponent({
       onToggleDebugOverlay,
       onToggleKeyboard,
       onToggleSplitLayout,
-      onToggleTranscript,
     ],
   );
 
@@ -1494,9 +1483,7 @@ function TerminalQuickBarComponent({
     const fixed = options?.fixed ?? false;
     const repeatable = isRepeatableAction(action);
     const repeatActive = repeatingActionId === action.id;
-    const disabled =
-      isRemoteWindowTerminalOnlyAction(action.id) ||
-      (action.id === "opencode-transcript" && !transcriptAvailable);
+    const disabled = isRemoteWindowTerminalOnlyAction(action.id);
     const actionDisplayLabel = resolveShortcutVisualLabel(action.label);
     const actionUsesSpaceBarVisual = isSpaceShortcutLabel(action.label);
     return (
@@ -1612,11 +1599,7 @@ function TerminalQuickBarComponent({
         }}
         onFocus={(event) => event.currentTarget.blur()}
         aria-label={action.label}
-        aria-pressed={
-          repeatActive ||
-          (action.id === "tmux-copy" && copyModeActive) ||
-          (action.id === "opencode-transcript" && transcriptEnabled)
-        }
+        aria-pressed={repeatActive || (action.id === "tmux-copy" && copyModeActive)}
         aria-disabled={disabled}
         style={{
           minHeight: compact ? "32px" : "34px",
@@ -1647,11 +1630,9 @@ function TerminalQuickBarComponent({
                       : action.id === "remote-screenshot" &&
                           remoteScreenshotStatus !== "idle"
                         ? "rgba(113, 164, 255, 0.18)"
-                        : action.id === "opencode-transcript" && transcriptEnabled
-                          ? "rgba(113, 164, 255, 0.28)"
-                          : fixed
-                            ? "rgba(22, 28, 41, 0.92)"
-                            : "rgba(31, 38, 53, 0.82)",
+                        : fixed
+                          ? "rgba(22, 28, 41, 0.92)"
+                          : "rgba(31, 38, 53, 0.82)",
           color: repeatActive
             ? "#bcd3ff"
             : disabled
@@ -1667,9 +1648,7 @@ function TerminalQuickBarComponent({
                       : action.id === "remote-screenshot" &&
                           remoteScreenshotStatus !== "idle"
                         ? "#8db7ff"
-                        : action.id === "opencode-transcript" && transcriptEnabled
-                          ? "#8db7ff"
-                          : "#fff",
+                        : "#fff",
           fontSize: fixed
             ? "13px"
             : action.id === "continue"
@@ -3856,12 +3835,6 @@ function TerminalQuickBarComponent({
                       { id: "attachment-drawer", label: "📎", sequence: "" },
                       { compact: true },
                     )}
-                    {onToggleTranscript
-                      ? renderBaseActionButton(
-                          { id: "opencode-transcript", label: "历史", sequence: "" },
-                          { compact: true },
-                        )
-                      : null}
                     {splitToolActions.map((action) =>
                       renderBaseActionButton(action, { compact: true }),
                     )}
@@ -3973,12 +3946,6 @@ function TerminalQuickBarComponent({
                       { id: "attachment-drawer", label: "📎", sequence: "" },
                       { compact: true },
                     )}
-                    {onToggleTranscript
-                      ? renderBaseActionButton(
-                          { id: "opencode-transcript", label: "历史", sequence: "" },
-                          { compact: true },
-                        )
-                      : null}
                     {splitToolActions.map((action) =>
                       renderBaseActionButton(action),
                     )}
