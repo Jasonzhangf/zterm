@@ -349,6 +349,7 @@ function TerminalViewComponent({
   const mirrorFixedScaleRef = useRef(1);
   const mirrorFixedMinScaleRef = useRef(1);
   const pinchRef = useRef<{ startSpan: number; startScale: number } | null>(null);
+  const pinchScrollTopRef = useRef<number | null>(null);
   const gridElRef = useRef<HTMLDivElement | null>(null);
   /** pinch 缩放时直接改 DOM（不 setState，避免整个 term-grid 重渲染风暴导致黑屏/不跟手） */
   const applyPinchScale = useCallback((next: number) => {
@@ -359,6 +360,29 @@ function TerminalViewComponent({
       (gridEl.style as unknown as { zoom?: string }).zoom =
         next < 1 ? String(next) : "1";
     }
+    // zoom 是布局级：内容高度随缩放变化会让滚动容器跳动，pinch 期间锁定 scrollTop
+    if (pinchScrollTopRef.current !== null) {
+      const host = containerRef.current;
+      if (host) {
+        const maxScrollTop = Math.max(0, host.scrollHeight - host.clientHeight);
+        host.scrollTop = Math.min(pinchScrollTopRef.current, maxScrollTop);
+      }
+    }
+  }, []);
+
+  /** 计算本次 pinch 的目标 scale：clamp 到 [minScale, 1]；接近上限 1 时渐进（每 move ≤ 0.08），
+   *  避免 zoom 从缩小状态直接跳到 1 造成布局重排闪屏 */
+  const computeNextPinchScale = useCallback((ratio: number) => {
+    const current = mirrorFixedScaleRef.current;
+    const minScale = mirrorFixedMinScaleRef.current;
+    const rawNext = pinchRef.current
+      ? pinchRef.current.startScale * ratio
+      : current;
+    const clamped = Math.min(1, Math.max(minScale, rawNext));
+    if (clamped >= 1 && current < 1) {
+      return Math.min(1, current + 0.08);
+    }
+    return clamped;
   }, []);
 
   const restoredHorizontalOffsetSessionRef = useRef<string | null>(null);
@@ -1185,6 +1209,7 @@ function TerminalViewComponent({
         startSpan: spanPx,
         startScale: mirrorFixedScaleRef.current,
       };
+      pinchScrollTopRef.current = containerRef.current?.scrollTop ?? null;
       const midY = (t0.clientY + t1.clientY) / 2;
       twoFingerWheelRef.current = {
         active: true,
@@ -1226,14 +1251,7 @@ function TerminalViewComponent({
           );
           if (spanPx > 0 && pinchRef.current.startSpan > 0) {
             const ratio = spanPx / pinchRef.current.startSpan;
-            const next = Math.min(
-              1,
-              Math.max(
-                mirrorFixedMinScaleRef.current,
-                pinchRef.current.startScale * ratio,
-              ),
-            );
-            applyPinchScale(next);
+            applyPinchScale(computeNextPinchScale(ratio));
             event.preventDefault();
             event.stopPropagation();
           }
@@ -1284,14 +1302,7 @@ function TerminalViewComponent({
             pinchRef.current.startSpan > 0
               ? spanPx / pinchRef.current.startSpan
               : 1;
-          const next = Math.min(
-            1,
-            Math.max(
-              mirrorFixedMinScaleRef.current,
-              pinchRef.current.startScale * ratio,
-            ),
-          );
-          applyPinchScale(next);
+          applyPinchScale(computeNextPinchScale(ratio));
         }
         event.preventDefault();
         event.stopPropagation();
@@ -1337,6 +1348,7 @@ function TerminalViewComponent({
       if (!wheel.active) {
         wheel.debug.lastReason = "end-inactive";
         pinchRef.current = null;
+        pinchScrollTopRef.current = null;
         publishTwoFingerWheelDebug(wheel);
         return;
       }
@@ -1348,6 +1360,7 @@ function TerminalViewComponent({
       wheel.debug.lastReason = "ended";
       publishTwoFingerWheelDebug(wheel);
       pinchRef.current = null;
+      pinchScrollTopRef.current = null;
       // commit pinch 缩放结果：横向平移归零 + 按缩放后行高重算可视行数（scale 已在 DOM 上）
       if (mirrorFixedScaleRef.current < 1) {
         setMirrorFixedHorizontalOffsetPx(0);
