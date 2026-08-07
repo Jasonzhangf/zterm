@@ -934,13 +934,12 @@ describe("TerminalQuickBar", () => {
     expect(
       screen.getByTestId("terminal-quickbar-shell-rows"),
     ).toBeTruthy();
-    const scrollButtons = screen.getByTestId("quickbar-scroll-buttons");
-    const labels = Array.from(scrollButtons.querySelectorAll("button")).map(
-      (node) => node.getAttribute("aria-label"),
-    );
+    // ↑滚 / ↓滚 / 📎 merge into the unified third-row scroll track at its start.
+    const scrollTrack = screen.getByTestId("quickbar-tool-row");
+    const labels = Array.from(scrollTrack.querySelectorAll("button"))
+      .map((node) => node.getAttribute("aria-label"))
+      .slice(0, 3);
     expect(labels).toEqual(["↑滚", "↓滚", "📎"]);
-    // The scroll buttons sit at the start of the third shell row, ahead of
-    // the tool row; the first two fixed rows keep their original layout.
     expect(screen.getByRole("button", { name: "↑滚" })).not.toBeNull();
     expect(screen.getByRole("button", { name: "↓滚" })).not.toBeNull();
     expect(screen.getByTestId("quickbar-fixed-cluster-top")).toBeTruthy();
