@@ -321,3 +321,154 @@ describe('TerminalView RAF throttle', () => {
     expect(view.container.textContent).toContain('B');
   });
 });
+
+describe('TerminalView mirror-fixed pinch zoom', () => {
+  const originalClientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+  const originalResizeObserver = globalThis.ResizeObserver;
+
+  beforeEach(() => {
+    globalThis.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    ResizeObserverMock.reset();
+    // 模拟窄屏：屏幕 200px < 终端逻辑宽度 80col * 3.1px = 248px -> minScale = 200/248 = 0.8065
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+      configurable: true,
+      get() {
+        return 200;
+      },
+    });
+    HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      return {
+        x: 0, y: 0, top: 0, left: 0, right: 200, bottom: 408,
+        width: 200, height: 408,
+        toJSON() { return {}; },
+      } as DOMRect;
+    };
+  });
+
+  afterEach(() => {
+    if (originalClientWidth) {
+      Object.defineProperty(HTMLElement.prototype, 'clientWidth', originalClientWidth);
+    }
+    if (originalResizeObserver) {
+      globalThis.ResizeObserver = originalResizeObserver;
+    } else {
+      // @ts-expect-error test cleanup
+      delete globalThis.ResizeObserver;
+    }
+  });
+
+  it('shrinks the term-grid via pinch in mirror-fixed mode, clamped to full-width scale', async () => {
+    const { container } = render(
+      <div style={{ width: '200px', height: '408px' }}>
+        <TerminalView
+          sessionId="s1"
+          renderBufferSnapshot={buildRenderBufferSnapshot()}
+          active
+          live
+          widthMode="mirror-fixed"
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const grid = container.querySelector('.term-grid') as HTMLElement;
+    expect(grid).toBeTruthy();
+    expect(grid.style.transform).toBeFalsy(); // 初始不缩放
+
+    const host = container.querySelector('.wterm') as HTMLElement;
+    expect(host).toBeTruthy();
+
+    // 触发 ResizeObserver 使 viewportClientWidthPx=320（决定 minScale），flush rAF
+    act(() => {
+      ResizeObserverMock.triggerAll();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+
+    // 双指张开开始（span 100px）
+    act(() => {
+      fireEvent.touchStart(host, {
+        touches: [
+          { clientX: 150, clientY: 100, identifier: 1 },
+          { clientX: 250, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+
+    // pinch in：span 100 -> 60（距离变小 = 缩小），超出 pinchRatio 触发 abort-pinch 缩放
+    act(() => {
+      fireEvent.touchMove(host, {
+        touches: [
+          { clientX: 160, clientY: 100, identifier: 1 },
+          { clientX: 220, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+
+    // 终端 248px / 屏幕 200px -> minScale = 0.8065；span ratio 0.6 -> scale ~0.6，clamp 到 0.8065
+    const transform = grid.style.transform;
+    expect(transform).toContain('scale(0.806');
+    expect(transform).toContain('translateX');
+
+    // 双指继续缩到更小（span 40）——clamp 在 minScale
+    act(() => {
+      fireEvent.touchMove(host, {
+        touches: [
+          { clientX: 170, clientY: 100, identifier: 1 },
+          { clientX: 210, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    expect(grid.style.transform).toContain('scale(0.806');
+
+    // 抬起结束
+    act(() => {
+      fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
+    });
+  });
+
+  it('does not zoom when widthMode is not mirror-fixed', () => {
+    const { container } = render(
+      <div style={{ width: '200px', height: '408px' }}>
+        <TerminalView
+          sessionId="s1"
+          renderBufferSnapshot={buildRenderBufferSnapshot()}
+          active
+          live
+          widthMode="adaptive-phone"
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const host = container.querySelector('.wterm') as HTMLElement;
+    const grid = container.querySelector('.term-grid') as HTMLElement;
+
+    act(() => {
+      fireEvent.touchStart(host, {
+        touches: [
+          { clientX: 150, clientY: 100, identifier: 1 },
+          { clientX: 250, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    act(() => {
+      fireEvent.touchMove(host, {
+        touches: [
+          { clientX: 160, clientY: 100, identifier: 1 },
+          { clientX: 220, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+
+    expect(grid.style.transform).toBeFalsy(); // 非 mirror-fixed 不缩放
+  });
+});

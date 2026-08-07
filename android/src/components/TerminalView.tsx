@@ -343,6 +343,11 @@ function TerminalViewComponent({
   const [mirrorFixedHorizontalOffsetPx, setMirrorFixedHorizontalOffsetPx] =
     useState(0);
   const mirrorFixedHorizontalOffsetRef = useRef(0);
+  /** mirror-fixed 容器缩放（pinch）：范围 [minScale, 1]，minScale 使终端全宽对齐屏幕 */
+  const [mirrorFixedScale, setMirrorFixedScale] = useState(1);
+  const mirrorFixedScaleRef = useRef(1);
+  const mirrorFixedMinScaleRef = useRef(1);
+  const pinchRef = useRef<{ startSpan: number; startScale: number } | null>(null);
   const restoredHorizontalOffsetSessionRef = useRef<string | null>(null);
   const resizeThrottleTimerRef = useRef<number | null>(null);
   const resizeRafTokenRef = useRef<number | null>(null);
@@ -1144,6 +1149,10 @@ function TerminalViewComponent({
         return;
       }
       twoFingerWheelRef.current.debug.lastReason = "started";
+      pinchRef.current = {
+        startSpan: spanPx,
+        startScale: mirrorFixedScaleRef.current,
+      };
       const midY = (t0.clientY + t1.clientY) / 2;
       twoFingerWheelRef.current = {
         active: true,
@@ -1172,6 +1181,33 @@ function TerminalViewComponent({
       wheel.debug.lastEventAt = Date.now();
       if (!wheel.active) {
         wheel.debug.lastReason = "skip-inactive";
+        // 手势已因 pinch 中止：继续执行容器缩放（mirror-fixed 恒定宽度模式）
+        if (
+          event.touches.length === 2 &&
+          pinchRef.current &&
+          widthMode === 'mirror-fixed'
+        ) {
+          const [t0, t1] = [event.touches[0], event.touches[1]];
+          const spanPx = Math.hypot(
+            t1.clientX - t0.clientX,
+            t1.clientY - t0.clientY,
+          );
+          if (spanPx > 0 && pinchRef.current.startSpan > 0) {
+            const ratio = spanPx / pinchRef.current.startSpan;
+            const next = Math.min(
+              1,
+              Math.max(
+                mirrorFixedMinScaleRef.current,
+                pinchRef.current.startScale * ratio,
+              ),
+            );
+            mirrorFixedScaleRef.current = next;
+            setMirrorFixedScale(next);
+            setMirrorFixedHorizontalOffsetPx(0);
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }
         publishTwoFingerWheelDebug(wheel);
         return;
       }
@@ -1212,6 +1248,23 @@ function TerminalViewComponent({
       if (decision.aborted) {
         wheel.debug.abortedCount += 1;
         wheel.debug.lastReason = "aborted-pinch";
+        // 双指距离变化 = pinch：缩放 mirror-fixed 容器
+        if (widthMode === 'mirror-fixed' && pinchRef.current) {
+          const ratio =
+            pinchRef.current.startSpan > 0
+              ? spanPx / pinchRef.current.startSpan
+              : 1;
+          const next = Math.min(
+            1,
+            Math.max(
+              mirrorFixedMinScaleRef.current,
+              pinchRef.current.startScale * ratio,
+            ),
+          );
+          mirrorFixedScaleRef.current = next;
+          setMirrorFixedScale(next);
+          setMirrorFixedHorizontalOffsetPx(0);
+        }
         event.preventDefault();
         event.stopPropagation();
         publishTwoFingerWheelDebug(wheel);
@@ -1255,6 +1308,7 @@ function TerminalViewComponent({
       wheel.debug.lastEventAt = Date.now();
       if (!wheel.active) {
         wheel.debug.lastReason = "end-inactive";
+        pinchRef.current = null;
         publishTwoFingerWheelDebug(wheel);
         return;
       }
@@ -1265,6 +1319,7 @@ function TerminalViewComponent({
       }
       wheel.debug.lastReason = "ended";
       publishTwoFingerWheelDebug(wheel);
+      pinchRef.current = null;
       twoFingerWheelRef.current = {
         active: false,
         pointerIds: null,
@@ -2059,6 +2114,18 @@ function TerminalViewComponent({
     [cancelPendingFollowScrollSync],
   );
 
+  // 渲染时同步 mirror-fixed 最小缩放（终端全宽对齐屏幕宽度时的 scale）
+  if (widthMode === 'mirror-fixed') {
+    const terminalLogicalWidthPx = Math.max(
+      viewportClientWidthPx,
+      Math.round((renderBuffer.cols || 0) * resolvedCellWidthPx),
+    );
+    mirrorFixedMinScaleRef.current =
+      viewportClientWidthPx > 0 && terminalLogicalWidthPx > viewportClientWidthPx
+        ? viewportClientWidthPx / terminalLogicalWidthPx
+        : 1;
+  }
+
   return (
     <div
       ref={containerRef}
@@ -2166,8 +2233,9 @@ function TerminalViewComponent({
                 )}px`
               : undefined,
           transform:
-            widthMode === "mirror-fixed" && mirrorFixedHorizontalOffsetPx > 0
-              ? `translateX(-${mirrorFixedHorizontalOffsetPx}px)`
+            widthMode === "mirror-fixed" &&
+            (mirrorFixedHorizontalOffsetPx > 0 || mirrorFixedScale < 1)
+              ? `translateX(-${mirrorFixedHorizontalOffsetPx}px) scale(${mirrorFixedScale})`
               : undefined,
           willChange: widthMode === "mirror-fixed" ? "transform" : undefined,
         }}
