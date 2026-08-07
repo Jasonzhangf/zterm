@@ -9,7 +9,7 @@ import type {
   TerminalTransportConnection,
 } from './terminal-runtime-types';
 
-export const SESSION_IDLE_STOPPED_THRESHOLD_MS = 10_000;
+export const SESSION_IDLE_STOPPED_THRESHOLD_MS = 60_000;
 
 export function classifySessionActivities(
   mirrors: ReadonlyMap<string, SessionMirror>,

@@ -643,7 +643,7 @@ export interface SessionActivity {
   name: string;
   /** unix ms timestamp of last live screen activity, 0 means never updated */
   lastLiveActivityAt: number;
-  /** true if no activity for SESSION_IDLE_STOPPED_THRESHOLD_MS (10s) */
+  /** true if no activity for SESSION_IDLE_STOPPED_THRESHOLD_MS (60s) */
   stopped: boolean;
 }
 
