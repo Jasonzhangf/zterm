@@ -360,6 +360,7 @@ function TerminalViewComponent({
         next < 1 ? String(next) : "1";
     }
   }, []);
+
   const restoredHorizontalOffsetSessionRef = useRef<string | null>(null);
   const resizeThrottleTimerRef = useRef<number | null>(null);
   const resizeRafTokenRef = useRef<number | null>(null);
@@ -404,6 +405,25 @@ function TerminalViewComponent({
   const rowHeightPx = Math.max(
     1,
     parseInt(resolvedRowHeight, 10) || parseInt(rowHeight, 10) || 17,
+  );
+  /** 缩放结束后按有效行高（行高×zoom）重算可视行数：缩小显示更多行填满容器，恢复 1 时回到默认行数 */
+  const recomputeViewportRowsForZoom = useCallback(
+    (zoom: number) => {
+      if (widthMode !== 'mirror-fixed') return;
+      const host = containerRef.current;
+      if (!host) return;
+      const clientHeight = host.clientHeight;
+      if (clientHeight <= 0) return;
+      const effectiveRowHeight = rowHeightPx * (zoom >= 1 ? 1 : zoom);
+      const newRows = Math.max(
+        DEFAULT_ROWS,
+        Math.floor(clientHeight / effectiveRowHeight),
+      );
+      setViewportRows((current) =>
+        current === newRows ? current : newRows,
+      );
+    },
+    [widthMode, rowHeightPx],
   );
   const renderFrame = useMemo(
     () =>
@@ -1328,10 +1348,11 @@ function TerminalViewComponent({
       wheel.debug.lastReason = "ended";
       publishTwoFingerWheelDebug(wheel);
       pinchRef.current = null;
-      // commit pinch 缩放结果：横向平移归零（scale 已在 DOM 上，无需 setState 重渲染）
+      // commit pinch 缩放结果：横向平移归零 + 按缩放后行高重算可视行数（scale 已在 DOM 上）
       if (mirrorFixedScaleRef.current < 1) {
         setMirrorFixedHorizontalOffsetPx(0);
         mirrorFixedHorizontalOffsetRef.current = 0;
+        recomputeViewportRowsForZoom(mirrorFixedScaleRef.current);
       }
       twoFingerWheelRef.current = {
         active: false,
@@ -1348,7 +1369,7 @@ function TerminalViewComponent({
       };
       publishTwoFingerWheelDebug(twoFingerWheelRef.current);
     },
-    [publishTwoFingerWheelDebug],
+    [publishTwoFingerWheelDebug, recomputeViewportRowsForZoom],
   );
 
   const emitRenderDemand = useCallback(
