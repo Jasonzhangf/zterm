@@ -376,14 +376,14 @@ describe("TerminalQuickBar", () => {
     });
   });
 
-  it("lifts floating bubble above keyboard inset", async () => {
+  it("lifts the primary floating bubble (file browser) above keyboard inset", async () => {
     renderQuickBar({
       keyboardVisible: true,
       keyboardInsetPx: 240,
     });
 
     const bubble = screen.getByRole("button", {
-      name: "Toggle floating quick menu",
+      name: "文件浏览",
     });
     const style = bubble.getAttribute("style") || "";
     expect(style).toContain("bottom: calc(312px");
@@ -789,11 +789,11 @@ describe("TerminalQuickBar", () => {
       Array.from(topFixedClusterButtons).map((node) =>
         node.getAttribute("aria-label"),
       ),
-    ).toEqual(["拷贝", "↑", "键盘"]);
+    ).toEqual(["拷贝", "↑滚", "↓滚", "↑", "键盘"]);
     const topClusterStyle =
       screen.getByTestId("quickbar-fixed-cluster-top").getAttribute("style") ||
       "";
-    expect(topClusterStyle).toContain("width: 158px");
+    expect(topClusterStyle).toContain("width: 262px");
   });
 
   it("hides inline shell rows and keeps only the floating toggle when shellMode is floating-collapsed", async () => {

@@ -68,6 +68,7 @@ import {
 import { shouldAllowQuickBarShellPointerEvent } from "./terminal-quickbar-shell-guards";
 import { buildTerminalShortcutSequence } from "../../../../packages/shared/src/shortcuts/terminal-shortcut-composer";
 import { resolveTerminalOrientation } from "../../lib/terminal-viewport-metrics";
+import { encodeTerminalSgrMouseWheel } from "../../lib/terminal-mouse-wheel-sgr";
 import {
   isScreenOrientationSupported,
   ScreenOrientationPlugin,
@@ -994,6 +995,8 @@ function TerminalQuickBarComponent({
   const topFixedActions = useMemo(
     () => [
       { id: "tmux-copy", label: "拷贝", sequence: "" },
+      { id: "terminal-scroll-up", label: "↑滚", sequence: encodeTerminalSgrMouseWheel("up", 1, 1) },
+      { id: "terminal-scroll-down", label: "↓滚", sequence: encodeTerminalSgrMouseWheel("down", 1, 1) },
       { id: "arrow-up", label: "↑", sequence: "\x1b[A" },
       { id: "keyboard", label: "键盘", sequence: "" },
     ],
@@ -3603,9 +3606,8 @@ function TerminalQuickBarComponent({
 
       {!editorOpen && !shortcutEditorOpen && (
         <>
-        {onOpenFileTransfer ? (
-          <button
-            ref={floatingBubbleRef}
+        <button
+          ref={floatingBubbleRef}
             data-quickbar-allow-pointer="true"
             type="button"
             tabIndex={-1}
@@ -3770,9 +3772,9 @@ function TerminalQuickBarComponent({
                   ? `${FLOATING_BUBBLE_MARGIN}px`
                   : "auto",
               bottom: collapsed
-                ? `calc(${FLOATING_BUBBLE_MARGIN}px + env(safe-area-inset-bottom, 0px) + ${FLOATING_BUBBLE_SIZE + 8}px)`
+                ? `calc(${FLOATING_BUBBLE_MARGIN}px + env(safe-area-inset-bottom, 0px))`
                 : floatingBubblePosition.y === null
-                  ? `calc(${floatingBubbleBottomPx + Math.max(0, keyboardInsetPx)}px + env(safe-area-inset-bottom, 0px) + ${FLOATING_BUBBLE_SIZE + 8}px)`
+                  ? `calc(${floatingBubbleBottomPx + Math.max(0, keyboardInsetPx)}px + env(safe-area-inset-bottom, 0px))`
                   : "auto",
               left:
                 collapsed || floatingBubblePosition.x === null
@@ -3799,13 +3801,13 @@ function TerminalQuickBarComponent({
           >
             📁
           </button>
-        ) : null}
         {/*
           The floating quick-menu bubble must always render: it is the only
           entry point for split actions and the quick input menu on phones.
           7258482 accidentally replaced it with the file-browser button when
           onOpenFileTransfer is set, hiding the split entry in the real app.
-          The file-browser button now sits above the bubble instead.
+          The file-browser button now sits below the quick-menu bubble (the
+          file browser is the primary floating entry on phones).
         */}
         <button
           ref={floatingBubbleRef}
@@ -3999,9 +4001,9 @@ function TerminalQuickBarComponent({
                 ? `${FLOATING_BUBBLE_MARGIN}px`
                 : "auto",
             bottom: collapsed
-              ? `calc(${FLOATING_BUBBLE_MARGIN}px + env(safe-area-inset-bottom, 0px))`
+              ? `calc(${FLOATING_BUBBLE_MARGIN}px + env(safe-area-inset-bottom, 0px) + ${FLOATING_BUBBLE_SIZE + 8}px)`
               : floatingBubblePosition.y === null
-                ? `calc(${floatingBubbleBottomPx + Math.max(0, keyboardInsetPx)}px + env(safe-area-inset-bottom, 0px))`
+                ? `calc(${floatingBubbleBottomPx + Math.max(0, keyboardInsetPx)}px + env(safe-area-inset-bottom, 0px) + ${FLOATING_BUBBLE_SIZE + 8}px)`
                 : "auto",
             left:
               collapsed || floatingBubblePosition.x === null
