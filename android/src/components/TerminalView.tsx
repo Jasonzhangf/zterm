@@ -1349,6 +1349,12 @@ function TerminalViewComponent({
         wheel.debug.lastReason = "end-inactive";
         pinchRef.current = null;
         pinchScrollTopRef.current = null;
+        // pinch 中止（active=false）后抬起：同样需要 commit（行数重算），否则缩小后内容不满屏
+        if (mirrorFixedScaleRef.current < 1) {
+          setMirrorFixedHorizontalOffsetPx(0);
+          mirrorFixedHorizontalOffsetRef.current = 0;
+          recomputeViewportRowsForZoom(mirrorFixedScaleRef.current);
+        }
         publishTwoFingerWheelDebug(wheel);
         return;
       }
