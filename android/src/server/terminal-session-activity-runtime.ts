@@ -21,7 +21,11 @@ export function classifySessionActivities(
     .map((mirror) => ({
       name: mirror.sessionName,
       lastLiveActivityAt: mirror.lastLiveActivityAt,
-      stopped: now - mirror.lastLiveActivityAt >= thresholdMs,
+      // A session is "stopped" only when its mirror failed (tmux capture
+      // keeps failing, i.e. the session is no longer producing anything it
+      // can capture). An idle session whose screen simply has no new output
+      // (lastLiveActivityAt stale) is NOT stopped — it is still alive.
+      stopped: mirror.lifecycle === 'failed' && now - mirror.lastLiveActivityAt >= thresholdMs,
     }))
     .sort((left, right) => left.name.localeCompare(right.name));
 }

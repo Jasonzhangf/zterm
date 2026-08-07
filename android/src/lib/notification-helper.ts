@@ -35,6 +35,7 @@ export function nextNotificationId(): number {
 export async function scheduleNotification(options: {
   title: string;
   body: string;
+  extra?: Record<string, unknown>;
 }): Promise<void> {
   try {
     const granted = await ensureNotificationPermission();
@@ -46,6 +47,7 @@ export async function scheduleNotification(options: {
         title: options.title,
         body: options.body,
         id: nextNotificationId(),
+        ...(options.extra ? { extra: options.extra } : {}),
       }],
     });
   } catch (err) {

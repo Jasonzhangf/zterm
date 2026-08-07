@@ -58,6 +58,7 @@ export function createSessionActivityNotifier(): SessionActivityNotifier {
           void scheduleNotification({
             title: '⏹ 会话已停止',
             body: `tmux 会话 ${activity.name} 已停止输出（可能任务结束或卡住）`,
+            extra: { kind: 'session-stopped', sessionName: activity.name },
           });
         } else {
           // Already notified for this idle run — stay silent even if the

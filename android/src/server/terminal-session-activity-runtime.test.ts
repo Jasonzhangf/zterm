@@ -11,12 +11,12 @@ import type {
   TerminalTransportConnection,
 } from './terminal-runtime-types';
 
-function makeMirror(sessionName: string, lastLiveActivityAt: number): SessionMirror {
+function makeMirror(sessionName: string, lastLiveActivityAt: number, lifecycle: SessionMirror['lifecycle'] = 'ready'): SessionMirror {
   const base: SessionMirror = {
     key: sessionName,
     sessionName,
     scratchBridge: null,
-    lifecycle: 'ready',
+    lifecycle,
     cols: 80,
     rows: 24,
     consecutiveFailures: 0,
@@ -90,18 +90,29 @@ describe('classifySessionActivities', () => {
     expect(result[0]).toMatchObject({ name: 'active', stopped: false });
   });
 
-  it('reports stopped: true when idle exceeds threshold', () => {
+  it('reports stopped: true only when the mirror failed (tmux capture keeps failing)', () => {
     const mirrors = new Map<string, SessionMirror>([
-      ['stale', makeMirror('stale', now - threshold - 1)],
+      ['stale', makeMirror('stale', now - threshold - 1, 'failed')],
     ]);
     const result = classifySessionActivities(mirrors, now, threshold);
     expect(result).toHaveLength(1);
     expect(result[0]).toMatchObject({ name: 'stale', stopped: true });
   });
 
-  it('reports stopped: true when idle exactly at threshold (boundary)', () => {
+  it('does not report stopped for an idle-but-alive session (no capture failure)', () => {
+    // rcc2-like: the session is alive and its mirror is healthy, but the
+    // screen simply has no new output for a long time. Idle is NOT stopped.
     const mirrors = new Map<string, SessionMirror>([
-      ['boundary', makeMirror('boundary', now - threshold)],
+      ['idle-alive', makeMirror('idle-alive', now - threshold - 5_000, 'ready')],
+    ]);
+    const result = classifySessionActivities(mirrors, now, threshold);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ name: 'idle-alive', stopped: false });
+  });
+
+  it('reports stopped: true when failed idle exactly at threshold (boundary)', () => {
+    const mirrors = new Map<string, SessionMirror>([
+      ['boundary', makeMirror('boundary', now - threshold, 'failed')],
     ]);
     const result = classifySessionActivities(mirrors, now, threshold);
     expect(result).toHaveLength(1);
@@ -110,7 +121,7 @@ describe('classifySessionActivities', () => {
 
   it('handles stopped->active resume', () => {
     const mirrors = new Map<string, SessionMirror>([
-      ['resume', makeMirror('resume', now - 1_000)],
+      ['resume', makeMirror('resume', now - 1_000, 'failed')],
     ]);
     const staleNow = now + threshold + 5_000;
     const staleResult = classifySessionActivities(mirrors, staleNow, threshold);
@@ -124,7 +135,7 @@ describe('classifySessionActivities', () => {
     const mirrors = new Map<string, SessionMirror>([
       ['s1', makeMirror('s1', now - 1_000)],
       ['s2', makeMirror('s2', 0)],
-      ['s3', makeMirror('s3', now - threshold - 1)],
+      ['s3', makeMirror('s3', now - threshold - 1, 'failed')],
       ['s4', makeMirror('s4', now - 500)],
     ]);
     const result = classifySessionActivities(mirrors, now, threshold);

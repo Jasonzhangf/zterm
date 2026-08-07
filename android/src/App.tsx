@@ -3,7 +3,7 @@
  * 只负责页面级切换与跨页 orchestration。
  */
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
@@ -13,6 +13,7 @@ import { SessionProvider, useSession } from './contexts/SessionContext';
 import { useAppUpdate } from './hooks/useAppUpdate';
 import { useConfigExport } from './hooks/useConfigExport';
 import { useBridgeSettingsStorage } from './hooks/useBridgeSettingsStorage';
+import { buildBridgeTargetFromHost } from './lib/session-picker';
 import { useHostStorage } from './hooks/useHostStorage';
 import { useQuickActionStorage } from './hooks/useQuickActionStorage';
 import { useShortcutActionStorage } from './hooks/useShortcutActionStorage';
@@ -273,19 +274,29 @@ export function AppContent({
 
   // Notification tap: open the attachment drawer when the user taps an
   // attachment notification. The drawer lives in TerminalPage, so bridge via
-  // a window event (same pattern as SESSION_STATUS_EVENT).
+  // a window event (same pattern as SESSION_STATUS_EVENT). Tapping a
+  // session-stopped notification jumps straight into that tmux session.
+  const handleStoppedSessionNotificationRef = useRef<((sessionName: string) => void) | null>(null);
   useEffect(() => {
     if (!Capacitor.isNativePlatform()) {
       return;
     }
     let handle: { remove: () => Promise<void> } | null = null;
     let disposed = false;
-    void LocalNotifications.addListener('localNotificationActionPerformed', (data: { actionId: string; notification?: { title?: string | null } }) => {
+    void LocalNotifications.addListener('localNotificationActionPerformed', (data: { actionId: string; notification?: { title?: string | null; extra?: Record<string, unknown> | null } }) => {
       const { notification } = data;
-      const isAttachmentNotification = typeof notification?.title === 'string'
-        && notification.title.includes('附件');
+      const title = notification?.title;
+      const extra = notification?.extra as { kind?: string; sessionName?: string } | undefined;
+      const isAttachmentNotification = typeof title === 'string'
+        && title.includes('附件');
       if (isAttachmentNotification) {
         window.dispatchEvent(new CustomEvent('zterm:open-attachment-drawer'));
+        return;
+      }
+      if (extra?.kind === 'session-stopped'
+        && typeof extra.sessionName === 'string'
+        && extra.sessionName.trim()) {
+        handleStoppedSessionNotificationRef.current?.(extra.sessionName.trim());
       }
     }).then((listener) => {
       if (disposed) {
@@ -507,6 +518,18 @@ export function AppContent({
     setPageState,
     auditOpenTabsAgainstRemoteSessions,
   });
+
+  // Wire the session-stopped notification tap handler to the latest
+  // session-open actions (avoid stale closures from the mount-only listener).
+  handleStoppedSessionNotificationRef.current = (sessionName) => {
+    const recentHost = [...hosts]
+      .sort((left, right) => (right.lastConnected ?? 0) - (left.lastConnected ?? 0))
+      .find((host) => (host.lastConnected ?? 0) > 0)
+      || hosts[0];
+    if (recentHost) {
+      handleOpenSingleTmuxSession(buildBridgeTargetFromHost(recentHost), sessionName);
+    }
+  };
 
   const handleResumeHomeSession = useCallback((sessionId: string) => {
     handleSwitchSessionWithHistory(sessionId);
