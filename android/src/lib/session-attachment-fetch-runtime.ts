@@ -70,13 +70,20 @@ export function createSessionAttachmentFetchRuntime(options: {
   };
 
   const requestAsset = (attachmentId: string, asset: 'preview' | 'original'): boolean => {
-    if (!sendMuxTargetMessage || !isMuxReady()) return false;
-    return sendMuxTargetMessage(
+    if (!sendMuxTargetMessage || !isMuxReady()) {
+      // eslint-disable-next-line no-console
+      console.log('[zterm:attach-dbg]', 'requestAsset skipped', { attachmentId, asset, hasSender: !!sendMuxTargetMessage, muxReady: isMuxReady() });
+      return false;
+    }
+    const sent = sendMuxTargetMessage(
       buildTerminalMuxTargetMessage({
         type: 'attachment-asset-request',
         payload: { attachmentId, asset, deviceId },
       }),
     );
+    // eslint-disable-next-line no-console
+    console.log('[zterm:attach-dbg]', 'requestAsset', { attachmentId, asset, sent });
+    return sent;
   };
 
   const processQueue = async () => {

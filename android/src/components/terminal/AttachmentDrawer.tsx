@@ -224,13 +224,17 @@ function AttachmentDrawerComponent({
   const isEmpty = pendingItems.length === 0;
 
   const handleHistoryEntryClick = (entry: AttachmentEntry) => {
+    // eslint-disable-next-line no-console
+    console.log('[zterm:attach-dbg]', 'history click', { attachmentId: entry.attachmentId, hasPreview: !!entry.previewUrl, status: entry.status, origin: entry.origin });
     if (entry.previewUrl) {
       setPreviewEntry(entry);
       return;
     }
     if (fetchAttachmentAsset) {
       setPendingPreviewId(entry.attachmentId);
-      fetchAttachmentAsset(entry.attachmentId, 'preview');
+      const sent = fetchAttachmentAsset(entry.attachmentId, 'preview');
+      // eslint-disable-next-line no-console
+      console.log('[zterm:attach-dbg]', 'history fetch sent', { attachmentId: entry.attachmentId, sent });
     }
   };
 
