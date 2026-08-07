@@ -712,8 +712,8 @@ function AttachmentDrawerComponent({
             padding: '8px 16px',
             borderTop: `1px solid ${dividerColor}`,
             display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
+            flexDirection: 'column',
+            gap: 6,
           }}
         >
           {!isEmpty && (
@@ -722,19 +722,21 @@ function AttachmentDrawerComponent({
             </span>
           )}
           {selectionMode && (
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 11, color: secondaryTextColor }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12, color: secondaryTextColor }}>
                 {batchMessage || `已选 ${selectedIds.size} 项`}
               </span>
+              <div style={{ flex: 1 }} />
               <button
                 onClick={selectAll}
                 style={{
                   background: 'none',
-                  border: 'none',
-                  color: accentColor,
-                  fontSize: 13,
+                  border: `1px solid ${dividerColor}`,
+                  borderRadius: 18,
+                  color: textColor,
+                  fontSize: 14,
                   cursor: 'pointer',
-                  padding: '4px 6px',
+                  padding: '8px 16px',
                 }}
               >
                 全选
@@ -745,12 +747,12 @@ function AttachmentDrawerComponent({
                 style={{
                   background: accentColor,
                   border: 'none',
-                  borderRadius: 16,
+                  borderRadius: 18,
                   color: '#fff',
-                  fontSize: 13,
+                  fontSize: 14,
                   fontWeight: 600,
                   cursor: 'pointer',
-                  padding: '6px 14px',
+                  padding: '8px 18px',
                   opacity: selectedIds.size === 0 ? 0.5 : 1,
                 }}
               >
