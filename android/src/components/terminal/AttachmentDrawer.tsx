@@ -199,10 +199,16 @@ function AttachmentDrawerComponent({
     return () => window.removeEventListener('zterm:preview-attachment', handler);
   }, [getPendingAttachments, queryAttachmentHistory, fetchAttachmentAsset]);
 
-  // History: load once on demand, then auto-open the full-screen preview as
-  // soon as the re-downloaded preview becomes available.
-  const [historyLoaded, setHistoryLoaded] = useState(false);
+  // History: always visible once loaded; load automatically whenever the
+  // drawer opens so missed notifications can still be pulled up.
+  const [historyLoaded, setHistoryLoaded] = useState(true);
   const [pendingPreviewId, setPendingPreviewId] = useState<string | null>(null);
+  useEffect(() => {
+    if (open) {
+      setHistoryLoaded(true);
+      queryAttachmentHistory?.();
+    }
+  }, [open, queryAttachmentHistory]);
   useEffect(() => {
     if (!pendingPreviewId) return;
     const entry = getPendingAttachments().find((a) => a.attachmentId === pendingPreviewId);
@@ -216,11 +222,6 @@ function AttachmentDrawerComponent({
   const pendingItems = attachments.filter((a) => a.origin !== 'history');
   const historyItems = attachments.filter((a) => a.origin === 'history');
   const isEmpty = pendingItems.length === 0;
-
-  const handleLoadHistory = () => {
-    setHistoryLoaded(true);
-    queryAttachmentHistory?.();
-  };
 
   const handleHistoryEntryClick = (entry: AttachmentEntry) => {
     if (entry.previewUrl) {
@@ -515,22 +516,6 @@ function AttachmentDrawerComponent({
             justifyContent: 'space-between',
           }}
         >
-          <button
-            onClick={handleLoadHistory}
-            disabled={historyLoaded}
-            style={{
-              background: 'none',
-              border: `1px solid ${dividerColor}`,
-              borderRadius: 8,
-              color: textColor,
-              fontSize: 12,
-              padding: '6px 12px',
-              cursor: historyLoaded ? 'default' : 'pointer',
-              opacity: historyLoaded ? 0.5 : 1,
-            }}
-          >
-            {historyLoaded ? '已加载历史' : '历史文件'}
-          </button>
           {!isEmpty && (
             <span style={{ fontSize: 11, color: secondaryTextColor }}>
               附件保留 48 小时后自动删除
