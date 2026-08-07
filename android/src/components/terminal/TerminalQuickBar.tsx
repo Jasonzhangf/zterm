@@ -105,6 +105,8 @@ interface TerminalQuickBarProps {
   onEditorDomFocusChange?: (active: boolean) => void;
   onMeasuredHeightChange?: (height: number) => void;
   onOpenFileTransfer?: (mode?: "browser" | "sync") => void;
+  /** Open the attachment drawer (received/history files). */
+  onOpenAttachment?: () => void;
   onToggleDebugOverlay?: () => void;
   debugOverlayVisible?: boolean;
   onToggleAbsoluteLineNumbers?: () => void;
@@ -169,6 +171,7 @@ function TerminalQuickBarComponent({
   onEditorDomFocusChange,
   onMeasuredHeightChange,
   onOpenFileTransfer,
+  onOpenAttachment,
   onToggleDebugOverlay,
   debugOverlayVisible,
   onToggleAbsoluteLineNumbers,
@@ -548,6 +551,10 @@ function TerminalQuickBarComponent({
       }
       if (action.id === "line-numbers") {
         onToggleAbsoluteLineNumbers?.();
+        return;
+      }
+      if (action.id === "attachment-drawer") {
+        onOpenAttachment?.();
         return;
       }
       if (action.id === "screen-orientation") {
@@ -4230,6 +4237,10 @@ function TerminalQuickBarComponent({
                   )}
                   {renderBaseActionButton(
                     { id: "terminal-scroll-down", label: "↓滚", sequence: encodeTerminalSgrMouseWheel("down", 1, 1) },
+                    { compact: true },
+                  )}
+                  {renderBaseActionButton(
+                    { id: "attachment-drawer", label: "📎", sequence: "" },
                     { compact: true },
                   )}
                 </div>

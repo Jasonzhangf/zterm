@@ -938,7 +938,7 @@ describe("TerminalQuickBar", () => {
     const labels = Array.from(scrollButtons.querySelectorAll("button")).map(
       (node) => node.getAttribute("aria-label"),
     );
-    expect(labels).toEqual(["↑滚", "↓滚"]);
+    expect(labels).toEqual(["↑滚", "↓滚", "📎"]);
     // The scroll buttons sit at the start of the third shell row, ahead of
     // the tool row; the first two fixed rows keep their original layout.
     expect(screen.getByRole("button", { name: "↑滚" })).not.toBeNull();

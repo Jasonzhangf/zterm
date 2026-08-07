@@ -3459,6 +3459,7 @@ function TerminalPageComponent({
       onCycleSplitPane={cycleSecondaryPane}
       onEditorDomFocusChange={handleQuickBarEditorDomFocusChange}
       onOpenFileTransfer={handleQuickBarOpenFileTransfer}
+      onOpenAttachment={() => setAttachmentDrawerOpen(true)}
       onToggleDebugOverlay={handleQuickBarToggleDebugOverlay}
       copyModeActive={copySelection.active}
       onToggleCopyMode={handleQuickBarToggleCopyMode}
