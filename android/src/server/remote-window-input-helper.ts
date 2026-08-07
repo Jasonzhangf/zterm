@@ -8,6 +8,8 @@ import { MACOS_REMOTE_WINDOW_INPUT_SWIFT } from './remote-window-scripts';
 import { REMOTE_WINDOW_ERROR_MESSAGE_MAX_CHARS } from './remote-window-support';
 
 const REMOTE_WINDOW_INPUT_STALE_MS = 1_000;
+/** 输入事件队列上限：超过时丢弃最旧的非控制事件，防止高频 move 流积压导致输入滞后 */
+const REMOTE_WINDOW_INPUT_QUEUE_LIMIT = 24;
 const REMOTE_WINDOW_INPUT_FOCUS_TIMEOUT_MS = 3_000;
 const REMOTE_WINDOW_INPUT_FOCUS_PAIR_GRACE_MS = 25;
 const REMOTE_WINDOW_INPUT_HELPER_READY_TIMEOUT_MS = 15_000;
@@ -62,6 +64,8 @@ export type RemoteWindowInputEventRunner = (
 export interface RemoteWindowInputConfig {
   daemonReceivedAtMs: number;
   clientSentAt?: number;
+  /** daemon 侧 focus 防抖：3s 内已执行过 focus（且当前非显式 focus 事件）时跳过 swift 的 bring-to-focus */
+  skipFocus?: boolean;
   pid: number;
   appBundleId: string;
   focusPolicy: RemoteWindowStreamTargetManifest['focusPolicy'];
@@ -103,6 +107,10 @@ interface PendingRemoteWindowInputHelperWarm {
 
 export function isRemoteWindowFocusInputConfig(config: Pick<RemoteWindowInputConfig, 'event'>) {
   return config.event.kind === 'focus';
+}
+
+function isRemoteWindowControlInputConfig(config: Pick<RemoteWindowInputConfig, 'event'>) {
+  return config.event.kind === 'focus' || config.event.kind === 'window-resize';
 }
 
 function isRemoteWindowRealInputConfig(config: Pick<RemoteWindowInputConfig, 'event'>) {
@@ -545,6 +553,19 @@ export function createDefaultRemoteWindowInputHelper(options: {
         return Promise.reject(new Error('remote window input helper is disposed'));
       }
       return new Promise<void>((resolve, reject) => {
+        // 输入事件积压保护：队列超过上限时丢弃最旧的非 focus 事件（高频 move 流时避免
+        // swift 串行处理滞后导致"画面停止"感）；focus/window-resize 等控制事件不丢
+        while (
+          queue.length >= REMOTE_WINDOW_INPUT_QUEUE_LIMIT
+          && queue.some((item) => !isRemoteWindowControlInputConfig(item.config))
+        ) {
+          const droppedIndex = queue.findIndex((item) => !isRemoteWindowControlInputConfig(item.config));
+          if (droppedIndex < 0) {
+            break;
+          }
+          const dropped = queue.splice(droppedIndex, 1)[0];
+          dropped.reject(new Error('remote window input dropped: queue overflow'));
+        }
         queue.push({
           config,
           resolve,
@@ -574,12 +595,13 @@ export function createDefaultRemoteWindowInputHelper(options: {
 export function buildRemoteWindowInputConfig(
   payload: RemoteWindowInputEventPayload,
   target: RemoteWindowStreamTargetManifest,
-  options: { daemonReceivedAtMs?: number } = {},
+  options: { daemonReceivedAtMs?: number; skipFocus?: boolean } = {},
 ): RemoteWindowInputConfig {
   return {
     daemonReceivedAtMs: Number.isFinite(options.daemonReceivedAtMs)
       ? Number(options.daemonReceivedAtMs)
       : Date.now(),
+    skipFocus: options.skipFocus,
     pid: target.videoTarget.pid,
     appBundleId: target.videoTarget.appBundleId,
     focusPolicy: target.focusPolicy,

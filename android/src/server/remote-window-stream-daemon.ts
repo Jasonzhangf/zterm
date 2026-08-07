@@ -62,6 +62,8 @@ export * from './remote-window-capture';
 
 const DEFAULT_REMOTE_WINDOW_FRAME_RATE = 30;
 const DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS = 60_000;
+/** 远程窗口输入 bring-to-focus 防抖：该窗口内只每 3s 最多执行一次 focus 切换 */
+const REMOTE_WINDOW_FOCUS_DEBOUNCE_MS = 3_000;
 
 type RtcPeerConnectionCtor = typeof globalThis.RTCPeerConnection;
 type RtcSessionDescriptionCtor = typeof globalThis.RTCSessionDescription;
@@ -424,11 +426,20 @@ export function createRemoteWindowStreamDaemonRuntime(
     }
     await getRemoteWindowInputHelper().warm();
   };
-  const runRemoteWindowInputEvent = deps.runRemoteWindowInputEvent || ((payload, target, options) => (
-    getRemoteWindowInputHelper().send(buildRemoteWindowInputConfig(payload, target, {
+  const runRemoteWindowInputEvent = deps.runRemoteWindowInputEvent || ((payload, target, options) => {
+    // focus 防抖：3s 内已执行过 focus（且当前不是显式 focus 事件）时跳过 swift 的 bring-to-focus，
+    // 避免每次手势都切焦点导致系统窗口抖动
+    const nowMs = Date.now();
+    const isFocusEvent = payload.event.kind === 'focus';
+    const skipFocus = !isFocusEvent && nowMs - lastRemoteWindowFocusAtMs < REMOTE_WINDOW_FOCUS_DEBOUNCE_MS;
+    if (!skipFocus) {
+      lastRemoteWindowFocusAtMs = nowMs;
+    }
+    return getRemoteWindowInputHelper().send(buildRemoteWindowInputConfig(payload, target, {
       daemonReceivedAtMs: options.daemonReceivedAtMs,
-    }))
-  ));
+      skipFocus,
+    }));
+  });
   const now = deps.now || (() => new Date().toISOString());
   const captureSourceFactory = deps.captureSourceFactory || startScreenCaptureKitFrameSource;
   const createPeerConnection = deps.peerConnectionFactory || ((configuration: RTCConfiguration) => new RTCPeerConnection(configuration));
@@ -437,6 +448,7 @@ export function createRemoteWindowStreamDaemonRuntime(
   const createVideoSource = deps.videoSourceFactory || (() => new nonstandard.RTCVideoSource({ isScreencast: true }));
   const rgbaToI420 = deps.rgbaToI420 || nonstandard.rgbaToI420;
   const activeStreams = new Map<string, ActiveRemoteWindowStream>();
+  let lastRemoteWindowFocusAtMs = 0;
   const targetCatalogCacheTtlMs = Math.max(
     0,
     Math.floor(deps.targetCatalogCacheTtlMs ?? DEFAULT_REMOTE_WINDOW_TARGET_CATALOG_CACHE_TTL_MS),

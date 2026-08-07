@@ -3746,8 +3746,8 @@ describe('RemoteWindowOverlay', () => {
 
     fireEvent.pointerDown(surface, { pointerId: 93, pointerType: 'touch', clientX: 110, clientY: 120, button: 0, buttons: 1 });
     fireEvent.pointerDown(surface, { pointerId: 94, pointerType: 'touch', clientX: 190, clientY: 120, button: 0, buttons: 1 });
-    fireEvent.pointerMove(surface, { pointerId: 93, pointerType: 'touch', clientX: 100, clientY: 120, button: 0, buttons: 1 });
-    fireEvent.pointerMove(surface, { pointerId: 94, pointerType: 'touch', clientX: 200, clientY: 120, button: 0, buttons: 1 });
+    fireEvent.pointerMove(surface, { pointerId: 93, pointerType: 'touch', clientX: 80, clientY: 120, button: 0, buttons: 1 });
+    fireEvent.pointerMove(surface, { pointerId: 94, pointerType: 'touch', clientX: 220, clientY: 120, button: 0, buttons: 1 });
     fireEvent.pointerUp(surface, { pointerId: 93, pointerType: 'touch', clientX: 100, clientY: 120, button: 0, buttons: 0 });
     fireEvent.pointerUp(surface, { pointerId: 94, pointerType: 'touch', clientX: 200, clientY: 120, button: 0, buttons: 0 });
 

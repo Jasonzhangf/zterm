@@ -184,6 +184,7 @@ struct InputConfig: Decodable {
     let focusPolicy: String
     let window: RemoteInputWindow
     let event: RemoteInputEvent
+    let skipFocus: Bool?
 }
 
 struct Rect: Decodable {
@@ -620,7 +621,9 @@ func handleConfig(_ config: InputConfig) throws {
         try resizeTargetWindow(config)
         return
     }
-    try focusTargetWindow(config)
+    if config.skipFocus != true {
+        try focusTargetWindow(config)
+    }
 
     if config.event.kind == "focus" {
         return
