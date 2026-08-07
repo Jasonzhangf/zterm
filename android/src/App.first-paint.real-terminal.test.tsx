@@ -134,6 +134,7 @@ vi.mock('@capacitor/app', () => ({
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
     getPlatform: () => 'web',
+    isNativePlatform: () => false,
   },
   registerPlugin: () => ({
     show: vi.fn(async () => ({})),

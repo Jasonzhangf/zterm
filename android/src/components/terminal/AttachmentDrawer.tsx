@@ -10,6 +10,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Filesystem, Directory } from '@capacitor/filesystem';
+import { ensureNotificationPermission } from '../../lib/notification-helper';
 import type { AttachmentEntry } from '../../lib/session-attachment-store';
 
 export interface AttachmentDrawerProps {
@@ -112,15 +113,21 @@ function AttachmentDrawerComponent({
     const count = attachments.length;
     if (count > prevCountRef.current) {
       const newCount = count - prevCountRef.current;
-      void LocalNotifications.schedule({
-        notifications: [{
-          title: '📎 新附件',
-          body: newCount === 1
-            ? `收到来自 ${attachments[0]?.senderName || '未知'} 的文件`
-            : `收到 ${newCount} 个新附件`,
-          id: Date.now(),
-        }],
-      }).catch(() => {}); // Ignore notification permission errors
+      // Android 13+ requires runtime permission before notifications show.
+      void ensureNotificationPermission().then((granted) => {
+        if (!granted) return;
+        return LocalNotifications.schedule({
+          notifications: [{
+            title: '📎 新附件',
+            body: newCount === 1
+              ? `收到来自 ${attachments[0]?.senderName || '未知'} 的文件`
+              : `收到 ${newCount} 个新附件`,
+            id: Date.now(),
+          }],
+        }).catch((err) => {
+          console.warn('[AttachmentDrawer] schedule notification failed:', err);
+        });
+      });
     }
     prevCountRef.current = count;
   });

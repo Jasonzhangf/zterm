@@ -395,6 +395,8 @@ export function createSessionTransportOrchestrationRuntime(options: {
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
   sessionHandshakeTimeoutMs: number;
   sessionTerminalReadyTimeoutMs?: number;
+  /** Relay-assigned device id of this client (from bridge settings). */
+  clientDeviceId?: string;
   refs: {
     pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, PendingSessionTransportOpenIntent>>;
     reconnectStore: SessionReconnectStore;
@@ -783,6 +785,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
       host: bindOptions.host,
       ws: bindOptions.ws,
       debugScope: bindOptions.debugScope,
+      clientDeviceId: options.clientDeviceId,
       readTargetTerminalSocket: options.readTargetTerminalSocket,
       readRequestedTerminalGeometry: options.readRequestedTerminalGeometry,
       getOpeningTerminalChannelsForTarget: options.readOpeningTerminalChannelsForTarget,

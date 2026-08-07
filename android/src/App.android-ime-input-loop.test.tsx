@@ -173,6 +173,7 @@ vi.mock('@capacitor/app', () => ({
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
     getPlatform: () => 'android',
+    isNativePlatform: () => true,
   },
   registerPlugin: () => ({
     show: vi.fn(async () => ({})),

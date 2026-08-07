@@ -2,6 +2,8 @@ import type { BridgeSettings } from './bridge-settings';
 import type { TraversalTargetSource } from './traversal/types';
 import type { BridgeTarget } from './session-picker';
 import { createClientDaemonTraversalSocket } from './client-daemon-connection';
+import { createSessionActivityNotifier } from './session-activity-notify';
+import type { SessionActivity } from '@zterm/shared/protocol';
 import {
   buildTerminalMuxHello,
   buildTerminalMuxTargetMessage,
@@ -37,6 +39,9 @@ interface TmuxControlTransportEntry {
 
 const tmuxControlTransportPool = new Map<string, TmuxControlTransportEntry>();
 let tmuxControlIdentitySequence = 0;
+// Shared session-activity notifier for the tmux control channel (legacy,
+// non-mux wire messages also carry daemon-published session-activity facts).
+const sessionActivityNotifier = createSessionActivityNotifier();
 
 function createTmuxControlIdentity(prefix: 'client' | 'request') {
   tmuxControlIdentitySequence += 1;
@@ -201,6 +206,11 @@ function handleTmuxControlMessage(entry: TmuxControlTransportEntry, data: unknow
 
   const response = frame.payload.message;
   if (response.type === 'session-activity') {
+    // Daemon-published tmux session liveness facts (idle/stopped detection).
+    const activities = (response as { payload: { activities: SessionActivity[] } }).payload?.activities || [];
+    for (const activity of activities) {
+      sessionActivityNotifier.handleActivity(activity);
+    }
     return;
   }
 
@@ -272,7 +282,8 @@ function createTmuxControlTransportEntry(
 
   ws.onopen = () => {
     try {
-      ws.send(JSON.stringify(buildTerminalMuxHello(createTmuxControlIdentity('client'))));
+      const deviceId = traversalSettings.traversalRelay?.deviceId?.trim() || undefined;
+      ws.send(JSON.stringify(buildTerminalMuxHello(createTmuxControlIdentity('client'), deviceId)));
       entry.negotiationTimer = setTimeout(() => {
         failTmuxControlTransport(entry, new Error('Timed out while negotiating tmux mux transport'), true);
       }, TMUX_CONTROL_REQUEST_TIMEOUT_MS);

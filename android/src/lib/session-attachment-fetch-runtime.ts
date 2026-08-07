@@ -31,6 +31,9 @@ export interface SessionAttachmentFetchRuntime {
   pollPendingAttachments: () => void;
   /** Process an incoming `pending-attachments` mux target message. Returns new pending count. */
   processPendingAttachmentsResponse: (payload: PendingAttachmentsPayload) => number;
+  /** Called when `attachment-asset-data` arrives over the mux channel:
+   *  sends the `attachment-receipt` ack back to the daemon. */
+  onAssetDataReceived: (attachmentId: string, asset: 'preview' | 'original', sha256: string) => boolean;
 }
 
 const POLL_INTERVAL_MS = 60_000; // poll every 60s
@@ -38,11 +41,9 @@ const POLL_INTERVAL_MS = 60_000; // poll every 60s
 export function createSessionAttachmentFetchRuntime(options: {
   attachmentStore: SessionAttachmentStore;
   deviceId: string;
-  fetchDaemonHttpAsset: (attachmentId: string, asset: 'preview' | 'original') => Promise<{ blob: Blob; sha256: string }>;
-  acknowledgeAsset: (attachmentId: string, asset: 'preview' | 'original', sha256: string) => Promise<void>;
   now?: () => number;
 }): SessionAttachmentFetchRuntime {
-  const { attachmentStore, deviceId, fetchDaemonHttpAsset, acknowledgeAsset } = options;
+  const { attachmentStore, deviceId } = options;
 
   let sendMuxTargetMessage: ((msg: TerminalMuxClientFrame) => boolean) | null = null;
   let readMuxReady: (() => boolean) | null = null;
@@ -62,6 +63,16 @@ export function createSessionAttachmentFetchRuntime(options: {
     );
   };
 
+  const requestAsset = (attachmentId: string, asset: 'preview' | 'original'): boolean => {
+    if (!sendMuxTargetMessage || !isMuxReady()) return false;
+    return sendMuxTargetMessage(
+      buildTerminalMuxTargetMessage({
+        type: 'attachment-asset-request',
+        payload: { attachmentId, asset, deviceId },
+      }),
+    );
+  };
+
   const processQueue = async () => {
     if (isProcessingQueue || fetchQueue.length === 0) return;
     isProcessingQueue = true;
@@ -70,26 +81,20 @@ export function createSessionAttachmentFetchRuntime(options: {
       const entry = attachmentStore.get(attachmentId);
       if (!entry) continue;
 
-      // Try preview first if needed
+      // Request the preview via the mux channel first; the daemon streams the
+      // binary back as `attachment-asset-data` (works for relay routes too,
+      // where a direct HTTP fetch to the daemon is not possible).
       if (entry.status === 'pending-preview' && !entry.previewUrl) {
-        try {
-          const { blob, sha256 } = await fetchDaemonHttpAsset(attachmentId, 'preview');
-          attachmentStore.markPreviewReady(attachmentId, blob);
-          await acknowledgeAsset(attachmentId, 'preview', sha256);
-        } catch (err) {
-          attachmentStore.markError(attachmentId, err instanceof Error ? err.message : 'preview fetch failed');
+        if (!requestAsset(attachmentId, 'preview')) {
+          attachmentStore.markError(attachmentId, 'mux transport unavailable for preview');
         }
       }
 
-      // Then original
+      // Then the original
       const updated = attachmentStore.get(attachmentId);
       if (updated?.status === 'pending-original' && !updated.originalUrl) {
-        try {
-          const { blob, sha256 } = await fetchDaemonHttpAsset(attachmentId, 'original');
-          attachmentStore.markOriginalReady(attachmentId, blob);
-          await acknowledgeAsset(attachmentId, 'original', sha256);
-        } catch (err) {
-          attachmentStore.markError(attachmentId, err instanceof Error ? err.message : 'original fetch failed');
+        if (!requestAsset(attachmentId, 'original')) {
+          attachmentStore.markError(attachmentId, 'mux transport unavailable for original');
         }
       }
     }
@@ -99,7 +104,7 @@ export function createSessionAttachmentFetchRuntime(options: {
   const enqueueFetch = (attachmentId: string) => {
     if (!fetchQueue.includes(attachmentId)) {
       fetchQueue.push(attachmentId);
-      processQueue();
+      void processQueue();
     }
   };
 
@@ -135,6 +140,16 @@ export function createSessionAttachmentFetchRuntime(options: {
         }
       }
       return attachmentStore.getPendingCount();
+    },
+
+    onAssetDataReceived: (attachmentId, asset, sha256) => {
+      if (!sendMuxTargetMessage || !isMuxReady()) return false;
+      return sendMuxTargetMessage(
+        buildTerminalMuxTargetMessage({
+          type: 'attachment-receipt',
+          payload: { attachmentId, asset, sha256, deviceId },
+        }),
+      );
     },
   };
 }

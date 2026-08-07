@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
 import { cleanup, render, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
@@ -10,6 +10,16 @@ import {
   resolveConnectionIssueActionable,
   resolveConnectionIssueActionableKey,
 } from './TerminalPage';
+
+// TerminalPage reads attachment counts from SessionContext (badge/drawer).
+// These page-level tests render TerminalPage directly without the app-level
+// SessionProvider, so provide the minimal session facade the page consumes.
+vi.mock('../contexts/SessionContext', () => ({
+  useSession: () => ({
+    getPendingAttachmentCount: () => 0,
+    getPendingAttachments: () => [],
+  }),
+}));
 
 describe('TerminalNetworkBanner', () => {
   afterEach(() => {

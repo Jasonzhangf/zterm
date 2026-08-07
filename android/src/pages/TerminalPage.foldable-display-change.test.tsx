@@ -3,6 +3,16 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { TerminalPage } from "./TerminalPage";
+
+// TerminalPage reads attachment counts from SessionContext (badge/drawer).
+// These page-level tests render TerminalPage directly without the app-level
+// SessionProvider, so provide the minimal session facade the page consumes.
+vi.mock('../contexts/SessionContext', () => ({
+  useSession: () => ({
+    getPendingAttachmentCount: () => 0,
+    getPendingAttachments: () => [],
+  }),
+}));
 import type { Session } from "../lib/types";
 
 const imeListeners = new Map<string, (event?: any) => void>();

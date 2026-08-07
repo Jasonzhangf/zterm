@@ -7,6 +7,16 @@ import { Filesystem } from '@capacitor/filesystem';
 import type { RemoteWindowStreamTargetManifest, Session } from '../lib/types';
 import { TerminalPage } from './TerminalPage';
 
+// TerminalPage reads attachment counts from SessionContext (badge/drawer).
+// These page-level tests render TerminalPage directly without the app-level
+// SessionProvider, so provide the minimal session facade the page consumes.
+vi.mock('../contexts/SessionContext', () => ({
+  useSession: () => ({
+    getPendingAttachmentCount: () => 0,
+    getPendingAttachments: () => [],
+  }),
+}));
+
 vi.mock('@capacitor/core', () => ({
   Capacitor: {
     getPlatform: () => 'web',

@@ -5,6 +5,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
+import { Capacitor } from '@capacitor/core';
+import { LocalNotifications } from '@capacitor/local-notifications';
 import { parseConnectionConfigShareLink } from '@zterm/shared';
 import { TmuxSessionPickerSheet } from './components/tmux/TmuxSessionPickerSheet';
 import { SessionProvider, useSession } from './contexts/SessionContext';
@@ -268,6 +270,37 @@ export function AppContent({
       }
     };
   }, [handleImportConnectionShareLink]);
+
+  // Notification tap: open the attachment drawer when the user taps an
+  // attachment notification. The drawer lives in TerminalPage, so bridge via
+  // a window event (same pattern as SESSION_STATUS_EVENT).
+  useEffect(() => {
+    if (!Capacitor.isNativePlatform()) {
+      return;
+    }
+    let handle: { remove: () => Promise<void> } | null = null;
+    let disposed = false;
+    void LocalNotifications.addListener('localNotificationActionPerformed', (data: { actionId: string; notification?: { title?: string | null } }) => {
+      const { notification } = data;
+      const isAttachmentNotification = typeof notification?.title === 'string'
+        && notification.title.includes('附件');
+      if (isAttachmentNotification) {
+        window.dispatchEvent(new CustomEvent('zterm:open-attachment-drawer'));
+      }
+    }).then((listener) => {
+      if (disposed) {
+        void listener.remove();
+        return;
+      }
+      handle = listener;
+    });
+    return () => {
+      disposed = true;
+      if (handle) {
+        void handle.remove();
+      }
+    };
+  }, []);
 
   const {
     openTabState,

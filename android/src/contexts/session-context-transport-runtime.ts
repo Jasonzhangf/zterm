@@ -375,6 +375,9 @@ export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
   host: Host;
   ws: BridgeTransportSocket;
   debugScope: 'connect' | 'reconnect';
+  /** Relay-assigned device id of this client; lets the daemon match
+   *  pending-attachments pushes to this physical transport. */
+  clientDeviceId?: string;
   readTargetTerminalSocket: (targetKey: string) => BridgeTransportSocket | null;
   readRequestedTerminalGeometry: (
     sessionId: string,
@@ -421,7 +424,7 @@ export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
     options.sendSocketPayload(
       options.sessionId,
       options.ws,
-      JSON.stringify(buildTerminalMuxHello(options.sessionId)),
+      JSON.stringify(buildTerminalMuxHello(options.sessionId, options.clientDeviceId)),
     );
     options.runtimeDebug(`session.mux.${options.debugScope}.hello-sent`, {
       sessionId: options.sessionId,

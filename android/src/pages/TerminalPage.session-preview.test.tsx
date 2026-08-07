@@ -38,6 +38,15 @@ afterEach(() => {
   localStorage.clear();
 });
 
+// TerminalPage reads attachment counts from SessionContext (badge/drawer).
+// These page-level tests render TerminalPage directly without the app-level
+// SessionProvider, so provide the minimal session facade the page consumes.
+vi.mock('../contexts/SessionContext', () => ({
+  useSession: () => ({
+    getPendingAttachmentCount: () => 0,
+    getPendingAttachments: () => [],
+  }),
+}));
 vi.mock('@capacitor/core', () => ({
   Capacitor: { getPlatform: () => 'web' },
   registerPlugin: () => ({ addListener: vi.fn(async () => ({ remove: vi.fn() })) }),

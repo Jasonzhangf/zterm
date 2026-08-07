@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { runtimeDebug } from "../lib/runtime-debug";
 import { resolveTerminalRefreshCadence } from "../lib/mobile-config";
 import { resolveSessionRuntimeTransportCadenceInput } from "../lib/session-runtime-cadence";
@@ -23,7 +23,8 @@ import type {
   SessionProviderAssembliesSharedOptions,
   SessionProviderCoreAssembliesResult,
 } from "./session-context-provider-assembly-types";
-import type { AttachmentAssetDataPayload, PendingAttachmentsPayload } from '@zterm/shared/protocol';
+import type { AttachmentAssetDataPayload, PendingAttachmentsPayload, SessionActivity } from '@zterm/shared/protocol';
+import { createSessionActivityNotifier } from '../lib/session-activity-notify';
 
 
 
@@ -68,6 +69,11 @@ export function useSessionProviderCoreAssemblies(
     attachmentStoreRef,
     attachmentFetchRuntimeRef,
   } = options.refs;
+
+  const sessionActivityNotifierRef = useRef(createSessionActivityNotifier());
+  useEffect(() => () => {
+    sessionActivityNotifierRef.current.dispose();
+  }, []);
 
   const resolveSessionTerminalRefreshCadence = useCallback((sessionId?: string | null) => resolveTerminalRefreshCadence({
     runtimeTransport: sessionId
@@ -233,6 +239,7 @@ export function useSessionProviderCoreAssemblies(
     readTargetTransportRuntime,
     readTargetTerminalSocket,
     runtimeDebug,
+    clientDeviceId: options.bridgeSettings.traversalRelay?.deviceId?.trim() || undefined,
     sessionHandshakeTimeoutMs: SESSION_HANDSHAKE_TIMEOUT_MS,
     sessionTerminalReadyTimeoutMs: SESSION_TERMINAL_READY_TIMEOUT_MS,
     refs: {
@@ -297,11 +304,26 @@ export function useSessionProviderCoreAssemblies(
         const bytes = new Uint8Array(binaryLen);
         for (let i = 0; i < binaryLen; i++) bytes[i] = binaryStr.charCodeAt(i);
         const blob = new Blob([bytes], { type: dataPayload.mimeType });
-        
+
         if (dataPayload.asset === 'preview') {
           attachmentStoreRef.current.markPreviewReady(dataPayload.attachmentId, blob);
         } else {
           attachmentStoreRef.current.markOriginalReady(dataPayload.attachmentId, blob);
+        }
+        // Ack the received asset over the mux channel so the daemon can
+        // resolve the delivery instead of leaving it pending forever.
+        attachmentFetchRuntimeRef.current.onAssetDataReceived(
+          dataPayload.attachmentId,
+          dataPayload.asset,
+          dataPayload.sha256,
+        );
+        return true;
+      }
+      // Daemon-published tmux session liveness facts (idle/stopped detection).
+      if (payload.message.type === 'session-activity') {
+        const activities = (payload.message.payload as { activities: SessionActivity[] }).activities || [];
+        for (const activity of activities) {
+          sessionActivityNotifierRef.current.handleActivity(activity);
         }
         return true;
       }      // Handle pending-attachments response from daemon

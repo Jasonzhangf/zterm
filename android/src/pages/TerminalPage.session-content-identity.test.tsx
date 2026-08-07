@@ -7,6 +7,16 @@ import { createSessionRenderBufferStore } from '../lib/session-render-buffer-sto
 import type { Session, SessionRenderBufferSnapshot, TerminalCell } from '../lib/types';
 import { TerminalPage } from './TerminalPage';
 
+// TerminalPage reads attachment counts from SessionContext (badge/drawer).
+// These page-level tests render TerminalPage directly without the app-level
+// SessionProvider, so provide the minimal session facade the page consumes.
+vi.mock('../contexts/SessionContext', () => ({
+  useSession: () => ({
+    getPendingAttachmentCount: () => 0,
+    getPendingAttachments: () => [],
+  }),
+}));
+
 class ResizeObserverMock {
   static instances = new Set<ResizeObserverMock>();
 

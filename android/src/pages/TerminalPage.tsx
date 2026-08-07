@@ -1053,7 +1053,15 @@ function TerminalPageComponent({
   } | null>(null);
   const [sessionDrawerOpen, setSessionDrawerOpen] = useState(false);
   const [attachmentDrawerOpen, setAttachmentDrawerOpen] = useState(false);
-
+  // Open the attachment drawer when the user taps an attachment notification
+  // (AppContent dispatches zterm:open-attachment-drawer on tap).
+  useEffect(() => {
+    const onOpenAttachmentDrawer = () => setAttachmentDrawerOpen(true);
+    window.addEventListener('zterm:open-attachment-drawer', onOpenAttachmentDrawer);
+    return () => {
+      window.removeEventListener('zterm:open-attachment-drawer', onOpenAttachmentDrawer);
+    };
+  }, []);
   // Trigger remote session audit when drawer opens to prune stale entries
   useEffect(() => {
     if (sessionDrawerOpen && onAuditOpenTabsAgainstRemoteSessions) {
