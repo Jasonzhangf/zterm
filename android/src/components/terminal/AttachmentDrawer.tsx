@@ -203,12 +203,20 @@ function AttachmentDrawerComponent({
   // drawer opens so missed notifications can still be pulled up.
   const [historyLoaded, setHistoryLoaded] = useState(true);
   const [pendingPreviewId, setPendingPreviewId] = useState<string | null>(null);
+  const [lastClickDiag, setLastClickDiag] = useState<string>('');
+  const [refreshTick, setRefreshTick] = useState(0);
   useEffect(() => {
     if (open) {
       setHistoryLoaded(true);
       queryAttachmentHistory?.();
     }
   }, [open, queryAttachmentHistory]);
+  // 附件 store 是非响应式 ref：轮询触发重渲染，让 pendingPreviewId 检查与诊断面板跟随 store 变化刷新
+  useEffect(() => {
+    if (!open) return;
+    const timer = setInterval(() => setRefreshTick((t) => t + 1), 500);
+    return () => clearInterval(timer);
+  }, [open]);
   useEffect(() => {
     if (!pendingPreviewId) return;
     const entry = getPendingAttachments().find((a) => a.attachmentId === pendingPreviewId);
@@ -224,17 +232,17 @@ function AttachmentDrawerComponent({
   const isEmpty = pendingItems.length === 0;
 
   const handleHistoryEntryClick = (entry: AttachmentEntry) => {
-    // eslint-disable-next-line no-console
-    console.log('[zterm:attach-dbg]', 'history click', { attachmentId: entry.attachmentId, hasPreview: !!entry.previewUrl, status: entry.status, origin: entry.origin });
     if (entry.previewUrl) {
       setPreviewEntry(entry);
+      setLastClickDiag(`预览已就绪: ${entry.attachmentId.slice(0, 8)} (直接打开)`);
       return;
     }
     if (fetchAttachmentAsset) {
       setPendingPreviewId(entry.attachmentId);
       const sent = fetchAttachmentAsset(entry.attachmentId, 'preview');
-      // eslint-disable-next-line no-console
-      console.log('[zterm:attach-dbg]', 'history fetch sent', { attachmentId: entry.attachmentId, sent });
+      setLastClickDiag(`请求: ${entry.attachmentId.slice(0, 8)} sent=${sent ? 'true' : 'false'}`);
+    } else {
+      setLastClickDiag(`无 fetchAttachmentAsset 能力 (${entry.attachmentId.slice(0, 8)})`);
     }
   };
 
@@ -310,6 +318,20 @@ function AttachmentDrawerComponent({
           >
             ×
           </button>
+        </div>
+        {/* 诊断面板：附件链路状态（点击历史条目后的结果直接可见） */}
+        <div
+          style={{
+            padding: '6px 16px',
+            borderBottom: `1px solid ${dividerColor}`,
+            fontSize: 11,
+            color: secondaryTextColor,
+            fontFamily: 'monospace',
+            lineHeight: 1.5,
+          }}
+        >
+          <div>pending={pendingItems.length} history={historyItems.length} refresh={refreshTick}</div>
+          <div>预览={previewEntry ? '已打开' : '未打开'}{lastClickDiag ? ` | 上次点击: ${lastClickDiag}` : ''}</div>
         </div>
 
         {/* Content */}
