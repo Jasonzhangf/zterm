@@ -1,8 +1,10 @@
 package com.zterm.android;
 
 import android.Manifest;
+import android.content.ContentValues;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.provider.MediaStore;
 import android.webkit.MimeTypeMap;
 import android.net.Uri;
 import android.os.Build;
@@ -24,6 +26,7 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Comparator;
@@ -513,5 +516,65 @@ public class StoragePermissionPlugin extends Plugin {
         } catch (Exception error) {
             call.reject(error.getMessage());
         }
+    }
+
+    /**
+     * Save a base64-encoded file to the public Downloads directory (visible to the
+     * user in the system file manager / Downloads app).
+     * Android 10+ uses MediaStore.Downloads (no permission required); legacy uses
+     * the public Downloads directory (WRITE_EXTERNAL_STORAGE).
+     */
+    @PluginMethod
+    public void saveToDownloads(PluginCall call) {
+        String dataBase64 = call.getString("dataBase64");
+        String fileName = call.getString("fileName");
+        String mimeType = call.getString("mimeType", "application/octet-stream");
+        if (dataBase64 == null || fileName == null || fileName.isEmpty()) {
+            call.reject("dataBase64 and fileName are required");
+            return;
+        }
+        if (fileName.indexOf('/') >= 0 || fileName.indexOf('\\') >= 0) {
+            call.reject("fileName must not contain path separators");
+            return;
+        }
+        try {
+            byte[] data = Base64.decode(dataBase64, Base64.DEFAULT);
+            String path = saveToPublicDownloads(data, fileName, mimeType);
+            JSObject result = new JSObject();
+            result.put("path", path);
+            call.resolve(result);
+        } catch (Exception error) {
+            call.reject("save failed: " + error.getMessage());
+        }
+    }
+
+    private String saveToPublicDownloads(byte[] data, String fileName, String mimeType) throws IOException {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            ContentValues values = new ContentValues();
+            values.put(MediaStore.MediaColumns.DISPLAY_NAME, fileName);
+            values.put(MediaStore.MediaColumns.MIME_TYPE, mimeType);
+            values.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+            Uri collection = MediaStore.Downloads.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY);
+            Uri item = getContext().getContentResolver().insert(collection, values);
+            if (item == null) {
+                throw new IOException("MediaStore insert returned null");
+            }
+            try (OutputStream output = getContext().getContentResolver().openOutputStream(item)) {
+                if (output == null) {
+                    throw new IOException("MediaStore openOutputStream returned null");
+                }
+                output.write(data);
+            }
+            return item.toString();
+        }
+        File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+        if (!dir.exists() && !dir.mkdirs()) {
+            throw new IOException("Unable to create Downloads directory: " + dir.getPath());
+        }
+        File target = new File(dir, fileName);
+        try (FileOutputStream output = new FileOutputStream(target)) {
+            output.write(data);
+        }
+        return target.getAbsolutePath();
     }
 }

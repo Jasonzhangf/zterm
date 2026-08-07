@@ -27,6 +27,7 @@ interface StoragePermissionPluginApi {
   deleteFile(options: { path: string }): Promise<void>;
   openFile(options: { path: string; mimeType?: string }): Promise<void>;
   mkdir(options: { path: string; recursive?: boolean }): Promise<void>;
+  saveToDownloads(options: { dataBase64: string; fileName: string; mimeType?: string }): Promise<{ path: string }>;
 }
 
 export const StoragePermissionPlugin = registerPlugin<StoragePermissionPluginApi>('StoragePermission');

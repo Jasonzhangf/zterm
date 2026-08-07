@@ -11,7 +11,17 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { LocalNotifications } from '@capacitor/local-notifications';
 import { Filesystem, Directory } from '@capacitor/filesystem';
 import { ensureNotificationPermission, nextNotificationId } from '../../lib/notification-helper';
+import { StoragePermissionPlugin } from '../../plugins/StoragePermissionPlugin';
 import type { AttachmentEntry } from '../../lib/session-attachment-store';
+
+function blobToBase64(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(blob);
+  });
+}
 
 const zoomButtonStyle: React.CSSProperties = {
   background: 'rgba(255,255,255,0.15)',
@@ -99,6 +109,12 @@ function AttachmentDrawerComponent({
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const [previewEntry, setPreviewEntry] = useState<AttachmentEntry | null>(null);
   const [downloading, setDownloading] = useState<Set<string>>(new Set());
+  const [selectionMode, setSelectionMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchQueue, setBatchQueue] = useState<Set<string>>(new Set());
+  const [batchMessage, setBatchMessage] = useState('');
+  const batchTotalRef = useRef(0);
+  const batchDoneCountRef = useRef(0);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
@@ -117,24 +133,29 @@ function AttachmentDrawerComponent({
     touchStartRef.current = null;
   }, []);
 
+  const saveEntryToDownloads = useCallback(async (entry: AttachmentEntry) => {
+    if (!entry.originalUrl) return false;
+    const response = await fetch(entry.originalUrl);
+    const blob = await response.blob();
+    const dataBase64 = await blobToBase64(blob);
+    await StoragePermissionPlugin.saveToDownloads({
+      dataBase64,
+      fileName: entry.fileName,
+      mimeType: entry.mimeType || 'application/octet-stream',
+    });
+    return true;
+  }, []);
+
   const handleDownloadOriginal = useCallback(async (entry: AttachmentEntry) => {
     if (!entry.originalUrl || downloading.has(entry.attachmentId)) return;
     setDownloading((prev) => new Set(prev).add(entry.attachmentId));
     try {
-      const response = await fetch(entry.originalUrl);
-      const blob = await response.blob();
-      const filename = entry.fileName;
-      // Save to downloads directory
-      await Filesystem.writeFile({
-        path: filename,
-        data: blob,
-        directory: Directory.Documents,
-      });
+      await saveEntryToDownloads(entry);
       // Show notification
       await LocalNotifications.schedule({
         notifications: [{
           title: '下载完成',
-          body: `${filename} 已保存`,
+          body: `${entry.fileName} 已保存到下载目录`,
           id: nextNotificationId(),
         }],
       });
@@ -147,13 +168,85 @@ function AttachmentDrawerComponent({
         return next;
       });
     }
-  }, [downloading]);
+  }, [downloading, saveEntryToDownloads]);
 
   const handlePreviewClose = useCallback(() => {
     setPreviewEntry(null);
     setScale(1);
     setPan({ x: 0, y: 0 });
   }, []);
+
+  const toggleSelected = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const selectAll = useCallback(() => {
+    setSelectedIds(new Set(getPendingAttachments().map((a) => a.attachmentId)));
+  }, [getPendingAttachments]);
+
+  const markBatchDone = useCallback(() => {
+    batchDoneCountRef.current += 1;
+    const done = batchDoneCountRef.current;
+    if (done >= batchTotalRef.current) {
+      setBatchMessage(`已保存 ${done} 个文件到下载目录`);
+      LocalNotifications.schedule({
+        notifications: [{
+          title: '批量下载完成',
+          body: `${done} 个文件已保存到下载目录`,
+          id: nextNotificationId(),
+        }],
+      }).catch(() => {});
+      setSelectionMode(false);
+      setSelectedIds(new Set());
+    } else {
+      setBatchMessage(`下载中 ${done}/${batchTotalRef.current} ...`);
+    }
+  }, []);
+
+  const handleBatchDownload = useCallback(() => {
+    if (selectedIds.size === 0) return;
+    batchTotalRef.current = selectedIds.size;
+    batchDoneCountRef.current = 0;
+    setBatchMessage(`准备下载 ${selectedIds.size} 个文件...`);
+    for (const id of selectedIds) {
+      const entry = getPendingAttachments().find((a) => a.attachmentId === id);
+      if (!entry) continue;
+      if (entry.originalUrl) {
+        saveEntryToDownloads(entry)
+          .then((ok) => { if (ok) markBatchDone(); })
+          .catch(() => markBatchDone());
+      } else if (fetchAttachmentAsset) {
+        // 原图尚未下载：先通过 mux 拉取 original，轮询 effect 会在 originalUrl 出现后保存
+        setBatchQueue((prev) => new Set(prev).add(id));
+        fetchAttachmentAsset(id, 'original');
+      } else {
+        markBatchDone();
+      }
+    }
+  }, [selectedIds, getPendingAttachments, saveEntryToDownloads, fetchAttachmentAsset, markBatchDone]);
+
+  // 渲染时处理批量下载队列：originalUrl 出现后立即保存（store 非响应式，依赖轮询刷新驱动）
+  useEffect(() => {
+    if (batchQueue.size === 0) return;
+    for (const id of batchQueue) {
+      const entry = getPendingAttachments().find((a) => a.attachmentId === id);
+      if (entry?.originalUrl) {
+        setBatchQueue((prev) => {
+          const next = new Set(prev);
+          next.delete(id);
+          return next;
+        });
+        saveEntryToDownloads(entry)
+          .then((ok) => { if (ok) markBatchDone(); })
+          .catch(() => markBatchDone());
+      }
+    }
+  });
 
   // Notify on new attachments once their preview is ready so the notification
   // can carry the image thumbnail, source session, sender and attachmentId.
@@ -341,20 +434,54 @@ function AttachmentDrawerComponent({
           <span style={{ fontSize: 17, fontWeight: 600, color: textColor }}>
             附件 ({pendingItems.length})
           </span>
-          <button
-            onClick={onClose}
-            style={{
-              background: 'none',
-              border: 'none',
-              color: secondaryTextColor,
-              fontSize: 24,
-              cursor: 'pointer',
-              padding: '4px 8px',
-              lineHeight: 1,
-            }}
-          >
-            ×
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+            {!selectionMode ? (
+              <button
+                onClick={() => setSelectionMode(true)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: accentColor,
+                  fontSize: 14,
+                  cursor: 'pointer',
+                  padding: '4px 8px',
+                }}
+              >
+                选择
+              </button>
+            ) : (
+              <button
+                onClick={() => {
+                  setSelectionMode(false);
+                  setSelectedIds(new Set());
+                }}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: textColor,
+                  fontSize: 14,
+                  cursor: 'pointer',
+                  padding: '4px 8px',
+                }}
+              >
+                取消
+              </button>
+            )}
+            <button
+              onClick={onClose}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: secondaryTextColor,
+                fontSize: 24,
+                cursor: 'pointer',
+                padding: '4px 8px',
+                lineHeight: 1,
+              }}
+            >
+              ×
+            </button>
+          </div>
         </div>
         {/* 诊断面板：附件链路状态（点击历史条目后的结果直接可见） */}
         <div
@@ -396,10 +523,14 @@ function AttachmentDrawerComponent({
                     display: 'flex',
                     padding: '10px 16px',
                     borderBottom: `1px solid ${dividerColor}`,
-                    backgroundColor: itemBg,
+                    backgroundColor: selectedIds.has(entry.attachmentId) ? `${accentColor}26` : itemBg,
                     cursor: 'pointer',
                   }}
-                  onClick={() => setPreviewEntry(entry)}
+                  onClick={() =>
+                    selectionMode
+                      ? toggleSelected(entry.attachmentId)
+                      : setPreviewEntry(entry)
+                  }
                 >
                   {/* Preview thumbnail */}
                   <div
@@ -504,10 +635,14 @@ function AttachmentDrawerComponent({
                     display: 'flex',
                     padding: '10px 16px',
                     borderBottom: `1px solid ${dividerColor}`,
-                    backgroundColor: itemBg,
+                    backgroundColor: selectedIds.has(entry.attachmentId) ? `${accentColor}26` : itemBg,
                     cursor: 'pointer',
                   }}
-                  onClick={() => handleHistoryEntryClick(entry)}
+                  onClick={() =>
+                    selectionMode
+                      ? toggleSelected(entry.attachmentId)
+                      : handleHistoryEntryClick(entry)
+                  }
                 >
                   <div
                     style={{
@@ -585,6 +720,43 @@ function AttachmentDrawerComponent({
             <span style={{ fontSize: 11, color: secondaryTextColor }}>
               附件保留 48 小时后自动删除
             </span>
+          )}
+          {selectionMode && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 11, color: secondaryTextColor }}>
+                {batchMessage || `已选 ${selectedIds.size} 项`}
+              </span>
+              <button
+                onClick={selectAll}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: accentColor,
+                  fontSize: 13,
+                  cursor: 'pointer',
+                  padding: '4px 6px',
+                }}
+              >
+                全选
+              </button>
+              <button
+                onClick={handleBatchDownload}
+                disabled={selectedIds.size === 0 || batchMessage.startsWith('下载中')}
+                style={{
+                  background: accentColor,
+                  border: 'none',
+                  borderRadius: 16,
+                  color: '#fff',
+                  fontSize: 13,
+                  fontWeight: 600,
+                  cursor: 'pointer',
+                  padding: '6px 14px',
+                  opacity: selectedIds.size === 0 ? 0.5 : 1,
+                }}
+              >
+                下载 ({selectedIds.size})
+              </button>
+            </div>
           )}
         </div>
       </div>
