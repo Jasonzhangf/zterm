@@ -13,6 +13,18 @@ import { Filesystem, Directory } from '@capacitor/filesystem';
 import { ensureNotificationPermission, nextNotificationId } from '../../lib/notification-helper';
 import type { AttachmentEntry } from '../../lib/session-attachment-store';
 
+const zoomButtonStyle: React.CSSProperties = {
+  background: 'rgba(255,255,255,0.15)',
+  border: 'none',
+  borderRadius: 20,
+  color: '#fff',
+  fontSize: 18,
+  width: 40,
+  height: 40,
+  cursor: 'pointer',
+  lineHeight: 1,
+};
+
 export interface AttachmentDrawerProps {
   open: boolean;
   topInsetPx?: number;
@@ -139,6 +151,8 @@ function AttachmentDrawerComponent({
 
   const handlePreviewClose = useCallback(() => {
     setPreviewEntry(null);
+    setScale(1);
+    setPan({ x: 0, y: 0 });
   }, []);
 
   // Notify on new attachments once their preview is ready so the notification
@@ -205,6 +219,17 @@ function AttachmentDrawerComponent({
   const [pendingPreviewId, setPendingPreviewId] = useState<string | null>(null);
   const [lastClickDiag, setLastClickDiag] = useState<string>('');
   const [refreshTick, setRefreshTick] = useState(0);
+  const [scale, setScale] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const autoFetchingRef = useRef<Set<string>>(new Set());
+  const gestureRef = useRef<{
+    mode: 'pinch' | 'pan' | null;
+    startDist: number;
+    startScale: number;
+    startX: number;
+    startY: number;
+    startPan: { x: number; y: number };
+  } | null>(null);
   useEffect(() => {
     if (open) {
       setHistoryLoaded(true);
@@ -212,9 +237,21 @@ function AttachmentDrawerComponent({
     }
   }, [open, queryAttachmentHistory]);
   // 附件 store 是非响应式 ref：轮询触发重渲染，让 pendingPreviewId 检查与诊断面板跟随 store 变化刷新
+  // 同时自动加载无预览条目的缩略图（限流：每个 tick 最多请求 1 个，避免请求风暴）
   useEffect(() => {
     if (!open) return;
-    const timer = setInterval(() => setRefreshTick((t) => t + 1), 500);
+    const timer = setInterval(() => {
+      setRefreshTick((t) => t + 1);
+      if (fetchAttachmentAsset) {
+        const entry = getPendingAttachments().find(
+          (a) => !a.previewUrl && !autoFetchingRef.current.has(a.attachmentId),
+        );
+        if (entry) {
+          autoFetchingRef.current.add(entry.attachmentId);
+          fetchAttachmentAsset(entry.attachmentId, 'preview');
+        }
+      }
+    }, 500);
     return () => clearInterval(timer);
   }, [open]);
   useEffect(() => {
@@ -492,6 +529,8 @@ function AttachmentDrawerComponent({
                         alt={entry.fileName}
                         style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                       />
+                    ) : autoFetchingRef.current.has(entry.attachmentId) ? (
+                      <span style={{ fontSize: 20 }}>⏳</span>
                     ) : (
                       '🖼️'
                     )}
@@ -554,6 +593,49 @@ function AttachmentDrawerComponent({
       {previewEntry && (
         <div
           onClick={handlePreviewClose}
+          onTouchStart={(e) => {
+            e.stopPropagation();
+            if (e.touches.length >= 2) {
+              const d = Math.hypot(
+                e.touches[0].clientX - e.touches[1].clientX,
+                e.touches[0].clientY - e.touches[1].clientY,
+              );
+              gestureRef.current = { mode: 'pinch', startDist: d, startScale: scale, startX: 0, startY: 0, startPan: pan };
+            } else if (e.touches.length === 1) {
+              gestureRef.current = {
+                mode: 'pan',
+                startDist: 0,
+                startScale: scale,
+                startX: e.touches[0].clientX,
+                startY: e.touches[0].clientY,
+                startPan: pan,
+              };
+            }
+          }}
+          onTouchMove={(e) => {
+            e.stopPropagation();
+            const g = gestureRef.current;
+            if (!g) return;
+            if (g.mode === 'pinch' && e.touches.length >= 2) {
+              const d = Math.hypot(
+                e.touches[0].clientX - e.touches[1].clientX,
+                e.touches[0].clientY - e.touches[1].clientY,
+              );
+              if (d > 0) {
+                const next = Math.min(6, Math.max(1, g.startScale * (d / g.startDist)));
+                setScale(next);
+                setPan({ x: 0, y: 0 });
+              }
+            } else if (g.mode === 'pan' && e.touches.length === 1 && scale > 1) {
+              setPan({
+                x: g.startPan.x + (e.touches[0].clientX - g.startX),
+                y: g.startPan.y + (e.touches[0].clientY - g.startY),
+              });
+            }
+          }}
+          onTouchEnd={() => {
+            gestureRef.current = null;
+          }}
           style={{
             position: 'fixed',
             inset: 0,
@@ -562,6 +644,7 @@ function AttachmentDrawerComponent({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
+            touchAction: 'none',
           }}
         >
           <button
@@ -587,13 +670,21 @@ function AttachmentDrawerComponent({
             <img
               src={previewEntry.previewUrl}
               alt={previewEntry.fileName}
+              onDoubleClick={() => setScale((s) => (s > 1 ? 1 : 2.5))}
+              onClick={(e) => e.stopPropagation()}
+              onTouchStart={(e) => e.stopPropagation()}
+              onTouchMove={(e) => e.stopPropagation()}
+              onTouchEnd={(e) => e.stopPropagation()}
               style={{
                 maxWidth: '90vw',
                 maxHeight: '85vh',
                 objectFit: 'contain',
                 borderRadius: 8,
+                transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
+                transition: gestureRef.current ? 'none' : 'transform 0.15s ease-out',
+                touchAction: 'none',
+                userSelect: 'none',
               }}
-              onClick={(e) => e.stopPropagation()}
             />
           ) : (
             <span style={{ color: '#fff', fontSize: 16 }}>预览加载中...</span>
@@ -622,6 +713,36 @@ function AttachmentDrawerComponent({
               {downloading.has(previewEntry.attachmentId) ? '保存中...' : '保存到本地'}
             </button>
           )}
+          {/* 缩放控制（移动端 pinch 的补充入口） */}
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 90,
+              right: 16,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+            }}
+          >
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setScale((s) => Math.min(6, s + 0.5));
+              }}
+              style={zoomButtonStyle}
+            >
+              ＋
+            </button>
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                setScale((s) => Math.max(1, s - 0.5));
+              }}
+              style={zoomButtonStyle}
+            >
+              －
+            </button>
+          </div>
         </div>
       )}
     </>
