@@ -9,6 +9,7 @@
 - `android/docs/architecture.md`：模块边界、数据流、ownership
 - `android/docs/audits/2026-07-02-architecture-boundary-remediation.md`：架构边界整改表；定义功能块 owner、允许/禁止职责、移除/分离/保留决策、防复发 gate
 - `android/docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md`：terminal server / buffer manager / renderer / UI shell 唯一真源
+- `android/docs/decisions/2026-08-07-opencode-transcript-mirror-truth.md`：opencode transcript 数据导出 / daemon 只读服务 / client 历史投影边界（独立于 mirror store；数据与控制分离；不写入 mirror/sparse buffer）
 - `android/docs/dev-workflow.md`：执行顺序、验证门禁、证据要求
 - `android/docs/loops/LOOP.md`：项目 recurring loop 治理入口；当前只启用 L1 report-only 初始化，不启用自动修复
 - `android/docs/ui-slices.md`：页面级切片与文件 ownership

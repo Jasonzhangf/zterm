@@ -17,6 +17,8 @@ export interface AttachmentEntry {
   attachmentId: string;
   kind: 'image';
   senderName: string;
+  /** Optional tmux session name the sender was working in. */
+  sourceSession?: string;
   fileName: string;
   mimeType: string;
   previewUrl?: string;   // object URL after preview download
@@ -73,6 +75,7 @@ export function createSessionAttachmentStore(): SessionAttachmentStore {
             attachmentId: item.attachmentId,
             kind: item.kind,
             senderName: item.senderName,
+            sourceSession: item.sourceSession,
             fileName: item.fileName,
             mimeType: item.mimeType,
             previewSize: item.previewSize,

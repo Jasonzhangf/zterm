@@ -677,6 +677,8 @@ export interface PendingAttachmentsPayload {
     attachmentId: string;
     kind: 'image';
     senderName: string;
+    /** Optional tmux session name the sender was working in. */
+    sourceSession?: string;
     fileName: string;
     mimeType: string;
     previewSize: number;

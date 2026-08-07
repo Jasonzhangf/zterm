@@ -286,11 +286,16 @@ export function AppContent({
     void LocalNotifications.addListener('localNotificationActionPerformed', (data: { actionId: string; notification?: { title?: string | null; extra?: Record<string, unknown> | null } }) => {
       const { notification } = data;
       const title = notification?.title;
-      const extra = notification?.extra as { kind?: string; sessionName?: string } | undefined;
-      const isAttachmentNotification = typeof title === 'string'
-        && title.includes('附件');
+      const extra = notification?.extra as { kind?: string; sessionName?: string; attachmentId?: string } | undefined;
+      const isAttachmentNotification = extra?.kind === 'attachment'
+        || (typeof title === 'string' && title.includes('附件'));
       if (isAttachmentNotification) {
         window.dispatchEvent(new CustomEvent('zterm:open-attachment-drawer'));
+        if (extra?.kind === 'attachment' && typeof extra.attachmentId === 'string') {
+          window.dispatchEvent(new CustomEvent('zterm:preview-attachment', {
+            detail: { attachmentId: extra.attachmentId },
+          }));
+        }
         return;
       }
       if (extra?.kind === 'session-stopped'

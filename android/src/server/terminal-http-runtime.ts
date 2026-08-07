@@ -302,13 +302,15 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
         if (url.pathname === '/api/v1/attachments/images' && request.method === 'POST') {
           const payload = JSON.parse((await readRequestBody(request)).toString('utf8')) as {
             fileName?: string; mimeType?: string; dataBase64?: string; senderAgentId?: string; senderName?: string;
-            clientRequestId?: string; targetDeviceIds?: string[]; message?: string;
+            sourceSession?: string; clientRequestId?: string; targetDeviceIds?: string[]; message?: string;
           };
           const required = [payload.fileName, payload.mimeType, payload.dataBase64, payload.senderAgentId, payload.senderName, payload.clientRequestId];
           if (required.some((value) => typeof value !== 'string' || !value.trim()) || !Array.isArray(payload.targetDeviceIds)) throw new Error('invalid attachment create request');
           const manifest = await deps.attachmentDeliveryRuntime.enqueueImage({
             fileName: payload.fileName!, mimeType: payload.mimeType!, data: decodeAttachmentBase64(payload.dataBase64!),
-            senderAgentId: payload.senderAgentId!, senderName: payload.senderName!, clientRequestId: payload.clientRequestId!,
+            senderAgentId: payload.senderAgentId!, senderName: payload.senderName!,
+            sourceSession: typeof payload.sourceSession === 'string' ? payload.sourceSession : undefined,
+            clientRequestId: payload.clientRequestId!,
             targetDeviceIds: payload.targetDeviceIds, message: payload.message,
           });
           serveJson(response, { ok: true, attachmentId: manifest.attachmentId, status: manifest.status, manifest });

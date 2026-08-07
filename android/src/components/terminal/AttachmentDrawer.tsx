@@ -25,6 +25,35 @@ export interface AttachmentDrawerProps {
 
 const SWIPE_CLOSE_THRESHOLD_PX = 48;
 
+function buildAttachmentNotificationBody(entry: AttachmentEntry): string {
+  const source = entry.sourceSession?.trim()
+    ? `session ${entry.sourceSession.trim()} · ${entry.senderName || '未知'}`
+    : (entry.senderName || '未知');
+  return `来自 ${source}`;
+}
+
+async function writePreviewToCache(entry: AttachmentEntry): Promise<string | null> {
+  if (!entry.previewUrl) return null;
+  try {
+    const response = await fetch(entry.previewUrl);
+    const blob = await response.blob();
+    const dataUrl: string = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+    const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
+    const path = `zterm-preview-${entry.attachmentId}.png`;
+    await Filesystem.writeFile({ path, data: base64, directory: Directory.Cache });
+    const uri = await Filesystem.getUri({ path, directory: Directory.Cache });
+    return uri.uri;
+  } catch (error) {
+    console.warn('[AttachmentDrawer] failed to stage preview for notification:', error);
+    return null;
+  }
+}
+
 function formatRelativeTime(timestamp: number): string {
   const diff = Date.now() - timestamp;
   const minutes = Math.floor(diff / 60_000);
@@ -106,31 +135,51 @@ function AttachmentDrawerComponent({
     setPreviewEntry(null);
   }, []);
 
-  // Notify on new attachments
-  const prevCountRef = useRef(0);
+  // Notify on new attachments once their preview is ready so the notification
+  // can carry the image thumbnail, source session, sender and attachmentId.
+  const prevNotifiedRef = useRef<Set<string>>(new Set());
   useEffect(() => {
     const attachments = getPendingAttachments();
-    const count = attachments.length;
-    if (count > prevCountRef.current) {
-      const newCount = count - prevCountRef.current;
+    const notified = new Set(prevNotifiedRef.current);
+    for (const entry of attachments) {
+      if (notified.has(entry.attachmentId)) continue;
+      if (!entry.previewUrl) continue; // wait until the preview thumbnail is downloaded
+      notified.add(entry.attachmentId);
+      const entrySnapshot = entry;
       // Android 13+ requires runtime permission before notifications show.
-      void ensureNotificationPermission().then((granted) => {
+      void ensureNotificationPermission().then(async (granted) => {
         if (!granted) return;
+        const iconUri = await writePreviewToCache(entrySnapshot);
         return LocalNotifications.schedule({
           notifications: [{
-            title: '📎 新附件',
-            body: newCount === 1
-              ? `收到来自 ${attachments[0]?.senderName || '未知'} 的文件`
-              : `收到 ${newCount} 个新附件`,
+            title: `📎 ${entrySnapshot.fileName}`,
+            body: buildAttachmentNotificationBody(entrySnapshot),
             id: nextNotificationId(),
+            ...(iconUri ? { largeIcon: iconUri } : {}),
+            extra: { kind: 'attachment', attachmentId: entrySnapshot.attachmentId },
           }],
         }).catch((err) => {
           console.warn('[AttachmentDrawer] schedule notification failed:', err);
         });
       });
     }
-    prevCountRef.current = count;
+    prevNotifiedRef.current = notified;
   });
+
+  // Tap on an attachment notification -> open the drawer and jump straight
+  // into the full-screen preview of that image.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ attachmentId?: string }>).detail;
+      if (!detail?.attachmentId) return;
+      const entry = getPendingAttachments().find((a) => a.attachmentId === detail.attachmentId);
+      if (entry) {
+        setPreviewEntry(entry);
+      }
+    };
+    window.addEventListener('zterm:preview-attachment', handler);
+    return () => window.removeEventListener('zterm:preview-attachment', handler);
+  }, [getPendingAttachments]);
 
   const attachments = open ? getPendingAttachments() : [];
   const isEmpty = attachments.length === 0;

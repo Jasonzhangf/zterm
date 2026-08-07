@@ -25,6 +25,7 @@ const response = await fetch(endpoint, {
   headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
   body: JSON.stringify({
     fileName: basename(filePath), mimeType, dataBase64: data.toString('base64'), senderAgentId, senderName, clientRequestId, targetDeviceIds,
+    sourceSession: readOption(args, '--session', false) || undefined,
     message: readOption(args, '--message', false) || undefined,
   }),
 });

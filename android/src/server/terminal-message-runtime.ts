@@ -63,6 +63,7 @@ export interface TerminalMessageRuntimeDeps {
       attachmentId: string;
       kind: 'image';
       senderName: string;
+      sourceSession?: string;
       fileName: string;
       mimeType: string;
       preview: { size: number };
@@ -421,6 +422,7 @@ export function createTerminalMessageRuntime(
             attachmentId: m.attachmentId,
             kind: m.kind,
             senderName: m.senderName,
+            sourceSession: m.sourceSession,
             fileName: m.fileName,
             mimeType: m.mimeType,
             previewSize: m.preview.size,

@@ -26,6 +26,8 @@ export interface AttachmentManifest {
   kind: 'image';
   senderAgentId: string;
   senderName: string;
+  /** Optional tmux session name the sender was working in. */
+  sourceSession?: string;
   fileName: string;
   mimeType: string;
   original: { size: number; sha256: string };
@@ -45,6 +47,7 @@ export interface AttachmentDeliveryRuntime {
     data: Buffer;
     senderAgentId: string;
     senderName: string;
+    sourceSession?: string;
     clientRequestId: string;
     targetDeviceIds: string[];
     message?: string;
@@ -165,6 +168,7 @@ export function createAttachmentDeliveryRuntime(options: {
         const created = now();
         const manifest: AttachmentManifest = {
           schemaVersion: 1, attachmentId, kind: 'image', senderAgentId: input.senderAgentId, senderName: input.senderName,
+          sourceSession: input.sourceSession?.trim() ? input.sourceSession.trim() : undefined,
           fileName, mimeType: input.mimeType,
           original: { size: input.data.byteLength, sha256: hash(input.data) },
           preview: { fileName: 'preview.png', mimeType: 'image/png', size: preview.byteLength, sha256: hash(preview) },
