@@ -241,9 +241,16 @@ export function handleTargetMuxTransportFailureRuntime(options: {
     const replayAnchorSessionId = replaySessionIds.includes(options.anchorSessionId)
       ? options.anchorSessionId
       : replaySessionIds[0];
+    // Reconnect the anchor with backoff, not an immediate reset loop.
+    // `resetAttempt`/`immediate` used to zero the attempt counter and force a
+    // 0ms delay on EVERY failure, which bypassed computeReconnectDelay and the
+    // handshake attempt cap -> an unbounded tight reconnect loop (daemon saw
+    // 3 sockets created/closed in a cycle). Keeping the attempt counter makes
+    // the first failure reconnect right away (attempt 0 -> delay 0) and every
+    // following failure back off exponentially.
     options.scheduleReconnect(replayAnchorSessionId, options.message, true, {
-      immediate: true,
-      resetAttempt: true,
+      immediate: false,
+      resetAttempt: false,
       force: true,
     });
   }

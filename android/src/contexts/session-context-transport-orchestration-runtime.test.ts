@@ -348,8 +348,8 @@ describe('handleTargetMuxTransportFailureRuntime', () => {
     expect(writeSessionTerminalChannelState).not.toHaveBeenCalledWith('session-3', 'closed');
     expect(pendingSessionTransportOpenIntentsRef.current.has('session-2')).toBe(false);
     expect(scheduleReconnect).toHaveBeenCalledWith('session-1', 'rtc data channel error', true, {
-      immediate: true,
-      resetAttempt: true,
+      immediate: false,
+      resetAttempt: false,
       force: true,
     });
     expect(scheduleReconnect).toHaveBeenCalledTimes(1);
@@ -409,8 +409,8 @@ describe('handleTargetMuxTransportFailureRuntime', () => {
     expect(failedSocket.reportFailure).toHaveBeenCalledTimes(1);
     expect(failedSocket.close).not.toHaveBeenCalled();
     expect(scheduleReconnect).toHaveBeenCalledWith('session-1', 'terminal mux transport closed', true, {
-      immediate: true,
-      resetAttempt: true,
+      immediate: false,
+      resetAttempt: false,
       force: true,
     });
     expect(writeSessionTerminalChannelState).toHaveBeenCalledWith('session-1', 'opening');
