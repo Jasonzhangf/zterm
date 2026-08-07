@@ -960,6 +960,7 @@ function TerminalPageComponent({
   serverIdentityAliasInputs = [],
   sessionPickerDebugMode = null,
   pendingPaneAttachIntent = null,
+  onAuditOpenTabsAgainstRemoteSessions,
   onPaneAttachIntentApplied,
   onResize,
   onTerminalInput,

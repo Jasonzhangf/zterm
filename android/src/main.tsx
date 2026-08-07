@@ -3,6 +3,8 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import './index.css';
 
+const IS_DEV = typeof __APP_VERSION__ !== 'undefined' && (typeof process !== 'undefined' && (process as { env?: { NODE_ENV?: string } }).env?.NODE_ENV !== 'production');
+
 class RootErrorBoundary extends React.Component<
   { children: React.ReactNode },
   { error: Error | null; info: string | null }
@@ -13,11 +15,27 @@ class RootErrorBoundary extends React.Component<
   }
   componentDidCatch(error: Error, info: { componentStack?: string | null }) {
     // eslint-disable-next-line no-console
-    console.log('[zterm:react-error]', error?.message, error?.stack, info?.componentStack);
+    console.error('[zterm:react-error]', error?.message, error?.stack, info?.componentStack);
     this.setState({ error, info: info?.componentStack ?? null });
   }
   render() {
     if (this.state.error) {
+      // Production: keep the painted app surface; never replace it with a red
+      // error pre. The error is already logged to logcat via the console bridge
+      // and will surface through normal app recovery flows.
+      if (!IS_DEV) {
+        return (
+          <div
+            style={{
+              position: 'fixed',
+              inset: 0,
+              background: '#0b1220',
+              color: 'transparent',
+            }}
+            aria-hidden="true"
+          />
+        );
+      }
       return React.createElement(
         'pre',
         {
@@ -50,30 +68,30 @@ if (typeof window !== 'undefined') {
     // eslint-disable-next-line no-console
     console.log('[zterm:unhandledrejection]', event.reason?.message ?? event.reason, event.reason?.stack);
   });
-  
-// Bridge console.* to Android Logcat via JavaScriptInterface
-(function() {
-  var _methods = ['log', 'warn', 'error', 'info', 'debug'];
-  _methods.forEach(function(method) {
-    var orig = console[method].bind(console);
-    console[method] = function() {
-      var args = Array.prototype.slice.call(arguments);
-      var tag = args.shift() || method;
-      var msg = args.map(function(a) {
-        if (a === null) return 'null';
-        if (a === undefined) return 'undefined';
-        if (typeof a === 'object') {
-          try { return JSON.stringify(a); } catch(e) { return String(a); }
+
+  // Bridge console.* to Android Logcat via JavaScriptInterface
+  (function() {
+    var _methods = ['log', 'warn', 'error', 'info', 'debug'];
+    _methods.forEach(function(method) {
+      var orig = console[method].bind(console);
+      console[method] = function() {
+        var args = Array.prototype.slice.call(arguments);
+        var tag = args.shift() || method;
+        var msg = args.map(function(a) {
+          if (a === null) return 'null';
+          if (a === undefined) return 'undefined';
+          if (typeof a === 'object') {
+            try { return JSON.stringify(a); } catch(e) { return String(a); }
+          }
+          return String(a);
+        }).join(' ');
+        if (window.ZTermLog && window.ZTermLog.log) {
+          window.ZTermLog.log(tag, msg);
         }
-        return String(a);
-      }).join(' ');
-      if (window.ZTermLog && window.ZTermLog.log) {
-        window.ZTermLog.log(tag, msg);
-      }
-      orig.apply(console, arguments);
-    };
-  });
-})();
+        orig.apply(console, arguments);
+      };
+    });
+  })();
 
   // eslint-disable-next-line no-console
   console.log('[zterm:boot]', 'main.tsx loaded', 'window.innerWidth=', window.innerWidth);
