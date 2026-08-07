@@ -785,6 +785,7 @@ export const TERMINAL_MUX_TARGET_CLIENT_MESSAGE_TYPES: readonly TerminalMuxTarge
   'tmux-rename-session',
   'tmux-kill-session',
   'pending-attachments-query',
+  'attachment-history-query',
   'attachment-asset-request',
   'attachment-receipt',
 ] as const;
