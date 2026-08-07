@@ -2243,6 +2243,18 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     playbackEpoch: number,
     lastEvent = 'playing',
   ) => {
+    // P5 探针：reveal 入口 + guard 各项命中
+    const probeBinding = receiverPlaybackBindingRef.current;
+    // eslint-disable-next-line no-console
+    console.log(
+      `[remote-window-reveal] lastEvent=${lastEvent} ` +
+      `epoch_in=${playbackEpoch} epoch_cur=${receiverPlaybackEpochRef.current} ` +
+      `epoch_match=${receiverPlaybackEpochRef.current === playbackEpoch} ` +
+      `binding_epoch=${probeBinding?.epoch ?? '-'} binding_match=${probeBinding?.epoch === playbackEpoch} ` +
+      `binding_stream_match=${probeBinding?.stream === stream} ` +
+      `video_ref_match=${videoElementRef.current === video} ` +
+      `srcObject_match=${video.srcObject === stream}`,
+    );
     const binding = receiverPlaybackBindingRef.current;
     if (
       receiverPlaybackEpochRef.current !== playbackEpoch
@@ -2297,7 +2309,12 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         const received = videoPlaybackStatsRef.current.framesReceived;
         if (received === 1 || received % 60 === 0) {
           // eslint-disable-next-line no-console
-          console.log(`[remote-window] client framesReceived=${received} video=${video.videoWidth}x${video.videoHeight}`);
+          console.log(
+            `[remote-window] client framesReceived=${received} ` +
+            `video=${video.videoWidth}x${video.videoHeight} ` +
+            `paused=${video.paused} readyState=${video.readyState} ` +
+            `seeking=${video.seeking} currentTime=${video.currentTime.toFixed(3)}`,
+          );
           publishVideoDebugSnapshot('frame-callback');
         }
         if ((video as HTMLVideoElement & { requestVideoFrameCallback?: (cb: (now: number) => void) => number }).requestVideoFrameCallback) {
@@ -2309,6 +2326,15 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     }
     scheduleVideoFrameReveal(video, stream, playbackEpoch);
     videoPlaybackStatsRef.current.playAttempts += 1;
+    // P3 探针：requestVideoPlayback 入口
+    // eslint-disable-next-line no-console
+    console.log(
+      `[remote-window-playback] enter play_attempt=${videoPlaybackStatsRef.current.playAttempts} ` +
+      `srcObject_equal=${video.srcObject === stream} ` +
+      `paused=${video.paused} readyState=${video.readyState} ` +
+      `seeking=${video.seeking} currentTime=${video.currentTime.toFixed(3)} ` +
+      `epoch=${playbackEpoch}`,
+    );
     publishVideoDebugSnapshot('play-request');
     const playResult = typeof video.play === 'function' ? video.play() : null;
     if (playResult && typeof playResult.then === 'function') {
@@ -2413,6 +2439,16 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       return;
     }
     receiverPlaybackBindingRef.current = { epoch: playbackEpoch, stream: receiverMediaStream };
+    // P2 探针：MediaStream track.readyState 序列
+    const probeTracks = typeof receiverMediaStream.getTracks === 'function'
+      ? receiverMediaStream.getTracks()
+      : [];
+    // eslint-disable-next-line no-console
+    console.log(
+      `[remote-window-tracks] epoch=${playbackEpoch} ` +
+      `tracks=${probeTracks.length} ` +
+      `kinds=${probeTracks.map((t: MediaStreamTrack) => `${t.kind}:${t.readyState}:${t.muted ? 'muted' : 'live'}`).join(',') || 'no-tracks-api'}`,
+    );
     requestVideoPlayback(receiverMediaStream, playbackEpoch);
     const fallbackTimer = window.setInterval(() => {
       if (videoElementRef.current?.srcObject === receiverMediaStream) {
@@ -3074,6 +3110,17 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     if (state.phase !== 'targetLocked') {
       return;
     }
+    // P4 探针：pointerdown 触发状态
+    const probeVideo = videoElementRef.current;
+    // eslint-disable-next-line no-console
+    console.log(
+      `[remote-window-pointerdown] mode=${state.mode} phase=${state.phase} ` +
+      `streamId=${state.streamId || '-'} streamStarted=${state.streamStarted} ` +
+      `streamStatus=${state.streamStatus} ` +
+      `surfaceSize=${JSON.stringify(surfaceSize)} ` +
+      `receiverFrameSize=${JSON.stringify(receiverFrameSize)} ` +
+      `video=${probeVideo ? `${probeVideo.videoWidth}x${probeVideo.videoHeight} paused=${probeVideo.paused} readyState=${probeVideo.readyState} currentTime=${probeVideo.currentTime.toFixed(3)}` : 'null'}`,
+    );
     requestBoundVideoPlayback();
     if (event.pointerType === 'mouse' && event.button > 2) {
       return;
