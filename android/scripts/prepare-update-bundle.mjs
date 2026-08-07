@@ -140,6 +140,21 @@ if (rollbackToPrevious) {
 }
 writeFileSync(resolve(daemonUpdatesDir, 'latest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
 
+// 兼容旧 launchd（.wterm wrapper 运行 npm 包 daemon，其 updates 目录是 ~/.wterm/updates）：
+// 双写一份，避免升级检查 404
+const legacyDaemonUpdatesDir = resolve(homedir(), '.wterm/updates');
+if (existsSync(resolve(homedir(), '.wterm')) || existsSync(resolve(homedir(), '.wterm/bin/zterm-daemon-launchd-run'))) {
+  mkdirSync(legacyDaemonUpdatesDir, { recursive: true });
+  copyFileSync(targetApkPath, resolve(legacyDaemonUpdatesDir, targetApkName));
+  copyFileSync(targetApkPath, resolve(legacyDaemonUpdatesDir, latestAliasName));
+  copyFileSync(publishedRollbackApkPath, resolve(legacyDaemonUpdatesDir, rollbackApkName));
+  if (rollbackToPrevious) {
+    copyFileSync(resolve(outputDir, rollbackToPrevious.apkUrl), resolve(legacyDaemonUpdatesDir, rollbackToPrevious.apkUrl));
+  }
+  writeFileSync(resolve(legacyDaemonUpdatesDir, 'latest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
+  console.log(`- legacy daemon updates dir (mirrored): ${legacyDaemonUpdatesDir}`);
+}
+
 console.log('[prepare-update-bundle] ready');
 console.log(`- apk: ${targetApkPath}`);
 console.log(`- update latest alias: ${latestAliasPath}`);
