@@ -71,10 +71,11 @@ if (typeof window !== 'undefined') {
 
   // Bridge console.* to Android Logcat via JavaScriptInterface
   (function() {
-    var _methods = ['log', 'warn', 'error', 'info', 'debug'];
+    var _methods: (keyof Console)[] = ['log', 'warn', 'error', 'info', 'debug'];
+    var consoleSlots = console as unknown as Record<string, (...args: unknown[]) => void>;
     _methods.forEach(function(method) {
-      var orig = console[method].bind(console);
-      console[method] = function() {
+      var orig = consoleSlots[method].bind(console);
+      consoleSlots[method] = function() {
         var args = Array.prototype.slice.call(arguments);
         var tag = args.shift() || method;
         var msg = args.map(function(a) {
@@ -85,10 +86,11 @@ if (typeof window !== 'undefined') {
           }
           return String(a);
         }).join(' ');
-        if (window.ZTermLog && window.ZTermLog.log) {
-          window.ZTermLog.log(tag, msg);
+        var ztermLog = (window as Window & { ZTermLog?: { log: (tag: string, msg: string) => void } }).ZTermLog;
+        if (ztermLog && ztermLog.log) {
+          ztermLog.log(tag, msg);
         }
-        orig.apply(console, arguments);
+        orig.apply(console, Array.prototype.slice.call(arguments));
       };
     });
   })();

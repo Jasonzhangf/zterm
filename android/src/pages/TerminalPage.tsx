@@ -1,5 +1,6 @@
 import { memo as ReactMemo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useSession } from '../contexts/SessionContext';
+import type { OpenTabAuditReason } from '../hooks/useOpenTabLifecycleEffects';
 import { Keyboard } from '@capacitor/keyboard';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
@@ -645,7 +646,7 @@ interface TerminalPageProps {
   onOpenDrawerRemoteSession?: (target: DrawerRemoteSessionTarget, sessionName: string, options?: { activate?: boolean; navigate?: boolean }) => string | null | undefined | void;
   onCloseDrawerRemoteSession?: (target: DrawerRemoteSessionTarget, sessionName: string) => void | Promise<void>;
   onRefreshDrawerHostSessions?: (hostKey?: string) => void | Promise<void>;
-  onAuditOpenTabsAgainstRemoteSessions?: (reason: string) => void | Promise<void>;
+  onAuditOpenTabsAgainstRemoteSessions?: (reason: OpenTabAuditReason) => void | Promise<void>;
   relayDevices?: TraversalRelayDeviceSnapshot[];
   serverIdentityAliasInputs?: ServerIdentityInput[];
   sessionPickerDebugMode?: string | null;

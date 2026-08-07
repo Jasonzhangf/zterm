@@ -19,7 +19,7 @@
       #boot-splash {
         position: fixed;
         inset: 0;
-        display: flex;
+        display: none;
         align-items: center;
         justify-content: center;
         background: #0b1220;
@@ -29,6 +29,9 @@
         letter-spacing: 0.4px;
         z-index: 0;
       }
+      /* Only show the splash placeholder while React has not mounted anything
+         into #root. Once #root is non-empty the splash must be hidden, otherwise
+         the fixed full-viewport overlay permanently covers the rendered app. */
       #root:empty + #boot-splash { display: flex; }
     </style>
   </head>

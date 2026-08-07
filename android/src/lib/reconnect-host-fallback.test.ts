@@ -56,15 +56,15 @@ describe("enumerateHostCandidates", () => {
   it("appends relay candidates after the LAN ones", () => {
     const host = makeHost({
       relayEndpointCandidates: [
-        { kind: "relay", host: "relay.example.com", port: 443 },
-        { kind: "relay", host: "relay2.example.com", port: 443 },
+        { id: "relay-1", kind: "relay-rtc", host: "relay.example.com", port: 443, authRequired: false, lastSeenAt: "2026-01-01T00:00:00.000Z" },
+        { id: "relay-2", kind: "relay-rtc", host: "relay2.example.com", port: 443, authRequired: false, lastSeenAt: "2026-01-01T00:00:00.000Z" },
       ],
     });
     const candidates = enumerateHostCandidates(host);
     expect(candidates.map((c) => c.label)).toEqual([
       "bridge",
-      "relay:relay",
-      "relay:relay",
+      "relay:relay-rtc",
+      "relay:relay-rtc",
     ]);
   });
 });

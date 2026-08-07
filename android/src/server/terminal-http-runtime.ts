@@ -2,7 +2,8 @@ import { createReadStream, existsSync, readFileSync } from 'fs';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { basename, join, resolve } from 'path';
 import type { RuntimeDebugStore } from './runtime-debug-store';
-import type { TerminalTransportSubscriber, SessionMirror } from './terminal-runtime-types';
+import type { TerminalTransportSubscriber, SessionMirror, TerminalSessionTransport } from './terminal-runtime-types';
+import type { TerminalTransportServerFrame } from '@zterm/shared/protocol';
 import {
   parseRuntimeDebugPerformanceTraceRecords,
   summarizeTerminalPerformanceTrace,
@@ -31,8 +32,8 @@ export interface TerminalHttpRuntimeDeps {
   setDaemonRuntimeDebugEnabled: (enabled: boolean) => void;
   logTimePrefix: (date?: Date) => string;
   attachmentDeliveryRuntime?: AttachmentDeliveryRuntime;
-  connections: Map<string, { deviceId?: string; transport: unknown }>;
-  sendTransportMessage: (transport: unknown, message: unknown) => void;
+  connections: Map<string, { deviceId?: string; transport: TerminalSessionTransport }>;
+  sendTransportMessage: (transport: TerminalSessionTransport | null | undefined, message: TerminalTransportServerFrame) => void;
 }
 
 export interface TerminalHttpRuntime {

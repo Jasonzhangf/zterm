@@ -61,7 +61,7 @@ describe('server http route truth gates', () => {
 
   it('does not rewrite apkUrl against the request origin in /updates/latest.json', () => {
     const source = readHttpRuntimeSource();
-    const block = extractBlock(source, 'function handleHttpRequest(', 9000);
+    const block = extractBlock(source, 'function handleHttpRequest(', 12000);
 
     // Forward gate: the daemon MUST emit apkUrl exactly as written by the
     // build pipeline. Rewriting it to `${origin}/updates/<file>` pins the

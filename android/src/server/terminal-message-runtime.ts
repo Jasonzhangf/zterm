@@ -29,6 +29,7 @@ import type {
   SessionMirror,
   TerminalTransportConnection,
 } from './terminal-runtime-types';
+import type { DaemonTransportConnection } from './terminal-transport-runtime';
 import type { TerminalFileTransferRuntime } from './terminal-file-transfer-runtime';
 import {
   handleListSessionsMessageRuntime,
@@ -366,7 +367,9 @@ export function createTerminalMessageRuntime(
         }
 
     if (typeof (message as { type?: unknown }).type === 'string' && (message as { type: string }).type.startsWith('mux-')) {
-      await handleMuxFrame(connection, message);
+      // Mux frames are only ever carried by daemon transports (the daemon owns
+      // the physical mux connection), so the narrower connection type holds.
+      await handleMuxFrame(connection as DaemonTransportConnection, message);
       return;
     }
 

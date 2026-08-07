@@ -330,6 +330,7 @@ const terminalHttpRuntime = createTerminalHttpRuntime({
   logTimePrefix,
   attachmentDeliveryRuntime,
   connections,
+  sendTransportMessage,
 });
 
 const terminalMessageRuntime = createTerminalMessageRuntime({
@@ -345,7 +346,6 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
   closeSession: terminalRuntime.closeTransportSubscriber,
   terminalFileTransferRuntime,
   attachmentDeliveryRuntime,
-  connections,
   remoteWindowStreamRuntime,
   handleClientDebugLog,
   handleClientDebugSnapshot,

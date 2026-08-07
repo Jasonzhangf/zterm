@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { createTerminalPerformanceTraceStore } from '../lib/terminal-performance-trace';
 import { createRuntimeDebugStore } from './runtime-debug-store';

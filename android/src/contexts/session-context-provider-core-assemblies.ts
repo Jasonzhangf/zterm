@@ -465,11 +465,11 @@ export function useSessionProviderCoreAssemblies(
   } = sessionMessageRuntime;
   handleSocketServerMessageRef.current = handleSocketServerMessage;
   handleSocketConnectedBaselineRef.current = handleSocketConnectedBaseline;
+  finalizeSocketFailureBaselineRef.current = finalizeSocketFailureBaseline;
   // Reference attachment refs to prevent unused warnings
   // They are exposed via the ref objects and used by attachment UI components
   void attachmentStoreRef;
   void attachmentFetchRuntimeRef;
-  void finalizeSocketFailureBaseline;
 
   return useMemo(() => ({
     getSessionRenderBufferSnapshot,
