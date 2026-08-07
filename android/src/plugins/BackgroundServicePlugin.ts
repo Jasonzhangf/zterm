@@ -33,6 +33,22 @@ interface BackgroundServiceNativePlugin {
 
 const BackgroundService = registerPlugin<BackgroundServiceNativePlugin>('BackgroundService');
 
+// Native BackgroundService wakes the WebView every 30s while the app is in
+// background (WebView JS timers freeze when not visible, which would stop the
+// mux-ping heartbeat). It calls this global tick which re-arms the heartbeat
+// state and fires the configured callback.
+if (typeof window !== 'undefined') {
+  (window as unknown as { ztermBackgroundHeartbeatTick?: () => void }).ztermBackgroundHeartbeatTick = () => {
+    if (!heartbeatState.isBackgroundActive) {
+      return;
+    }
+    heartbeatState.lastHeartbeatAt = Date.now();
+    if (backgroundHeartbeatCallback) {
+      backgroundHeartbeatCallback();
+    }
+  };
+}
+
 // 后台心跳状态（单例）
 let heartbeatTimerId: ReturnType<typeof setInterval> | null = null;
 let heartbeatState: BackgroundHeartbeatState = {

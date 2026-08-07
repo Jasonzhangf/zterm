@@ -7,21 +7,67 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.os.Build;
+import android.os.Handler;
 import android.os.IBinder;
+import android.os.Looper;
 import android.os.PowerManager;
+import android.webkit.WebView;
 import androidx.core.app.NotificationCompat;
 
 /**
  * BackgroundService - Android persistent-background execution surface.
  * It keeps the process schedulable only; connection/session truth remains in
  * the client transport runtime.
+ *
+ * Background JS timers freeze when the WebView is not visible, which stops the
+ * 30s mux-ping heartbeat and lets the physical connection die. This service
+ * therefore wakes the WebView on a timer (BACKGROUND_HEARTBEAT_INTERVAL_MS)
+ * via evaluateJavascript so the JS heartbeat callback keeps firing while the
+ * app is in background.
  */
 public class BackgroundService extends Service {
     private static final String CHANNEL_ID = "wterm_background";
     private static final int NOTIFICATION_ID = 1;
+    /** Must match BACKGROUND_HEARTBEAT_INTERVAL_MS in BackgroundServicePlugin.ts. */
+    private static final long BACKGROUND_HEARTBEAT_INTERVAL_MS = 30_000L;
 
     private int sessionCount = 0;
     private PowerManager.WakeLock wakeLock;
+    private final Handler heartbeatHandler = new Handler(Looper.getMainLooper());
+    private boolean heartbeatScheduled = false;
+
+    private final Runnable heartbeatWakeRunnable = new Runnable() {
+        @Override
+        public void run() {
+            heartbeatScheduled = false;
+            final WebView webView = MainActivity.getStaticWebView();
+            if (webView != null) {
+                webView.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        webView.evaluateJavascript(
+                            "if(window.ztermBackgroundHeartbeatTick) { window.ztermBackgroundHeartbeatTick(); }",
+                            null
+                        );
+                    }
+                });
+            }
+            scheduleHeartbeatWake();
+        }
+    };
+
+    private void scheduleHeartbeatWake() {
+        if (heartbeatScheduled) {
+            return;
+        }
+        heartbeatScheduled = true;
+        heartbeatHandler.postDelayed(heartbeatWakeRunnable, BACKGROUND_HEARTBEAT_INTERVAL_MS);
+    }
+
+    private void cancelHeartbeatWake() {
+        heartbeatScheduled = false;
+        heartbeatHandler.removeCallbacks(heartbeatWakeRunnable);
+    }
 
     @Override
     public void onCreate() {
@@ -45,6 +91,7 @@ public class BackgroundService extends Service {
         Notification notification = createNotification();
         startForeground(NOTIFICATION_ID, notification);
         acquireWakeLock();
+        scheduleHeartbeatWake();
 
         return START_REDELIVER_INTENT;
     }
@@ -56,6 +103,7 @@ public class BackgroundService extends Service {
 
     @Override
     public void onDestroy() {
+        cancelHeartbeatWake();
         releaseWakeLock();
         super.onDestroy();
     }

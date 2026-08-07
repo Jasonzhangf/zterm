@@ -21,6 +21,13 @@ public class MainActivity extends BridgeActivity {
     private static final String PREFS_NAME = "zterm_webview_cache_version";
     private static final String PREF_VERSION_CODE = "versionCode";
 
+    /** Static WebView reference for BackgroundService (JS heartbeat wake-up). */
+    private static WebView staticWebView;
+
+    public static WebView getStaticWebView() {
+        return staticWebView;
+    }
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         clearWebViewAssetCacheAfterUpgrade();
@@ -32,6 +39,9 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(BackgroundServicePlugin.class);
         registerPlugin(ScreenOrientationPlugin.class);
         super.onCreate(savedInstanceState);
+        if (getBridge() != null && getBridge().getWebView() != null) {
+            staticWebView = getBridge().getWebView();
+        }
         // Inject JS-to-Logcat bridge
         if (getBridge() != null && getBridge().getWebView() != null) {
             final android.webkit.WebView wv = getBridge().getWebView();
