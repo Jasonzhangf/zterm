@@ -46,10 +46,7 @@ async def main(connection):
         frame = await window.async_get_frame()
         tabs = []
         for tab in window.tabs:
-            try:
-                await tab.async_update_layout()
-            except Exception:
-                pass
+            # 只读布局信息；不调用 async_update_layout()（会强制重排 pane，干扰用户正在使用的 iTerm2）
             root = await node_dict(tab.root) if tab.root else None
             tabs.append({
                 "tabId": tab.tab_id,
