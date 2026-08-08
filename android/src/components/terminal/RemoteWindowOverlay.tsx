@@ -77,6 +77,7 @@ import {
   resolveRemoteWindowTouchPointerUpRuntime,
   resolveRemoteWindowTouchSurfacePointRuntime,
   REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION,
+  REMOTE_WINDOW_LONG_PRESS_MS,
   type RemoteWindowTouchInputDebugEvent,
   type RemoteWindowTouchLocalEffect,
   type RemoteWindowTouchPairPointerSample,
@@ -920,6 +921,14 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     clientX: number;
     clientY: number;
   } | null>(null);
+  const longPressTimerRef = useRef<number | null>(null);
+
+  const clearLongPressTimer = useCallback(() => {
+    if (longPressTimerRef.current !== null) {
+      clearTimeout(longPressTimerRef.current);
+      longPressTimerRef.current = null;
+    }
+  }, []);
   const [networkQuality, setNetworkQuality] = useState<RemoteWindowNetworkQualityInput | null>(() => readRemoteWindowNetworkQuality());
   const [videoHasPlayed, setVideoHasPlayedState] = useState(false);
   const videoHasPlayedRef = useRef(false);
@@ -3060,6 +3069,37 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     }
   }, [applyRemoteWindowTouchLocalEffect, dispatchRemoteWindowInputEvents]);
 
+  const handleLongPressTimer = useCallback(() => {
+    longPressTimerRef.current = null;
+    const gesture = surfaceGestureRef.current;
+    if (!gesture || inputModeRef.current !== 'touch') {
+      return;
+    }
+    if (gesture.mode === 'actionPending') {
+      // 手指按住不动 ≥500ms：发右键（触控模式长按）
+      const geometry = resolveSurfaceInputGeometry();
+      if (geometry) {
+        const rightClick = buildRemoteWindowClickInputEventRuntime({
+          pointerId: gesture.pointerId,
+          clientX: gesture.lastClientX,
+          clientY: gesture.lastClientY,
+          geometry,
+          button: 'right',
+        });
+        if (rightClick) {
+          dispatchRemoteWindowInputEvents([rightClick]);
+        }
+        surfaceGestureRef.current = {
+          mode: 'actionLongPress',
+          pointerId: gesture.pointerId,
+          startClientX: gesture.startClientX,
+          startClientY: gesture.startClientY,
+          startAtMs: gesture.startAtMs,
+        };
+      }
+    }
+  }, [dispatchRemoteWindowInputEvents, resolveSurfaceInputGeometry]);
+
   const handleVideoSurfacePointerDown = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
     if (state.phase !== 'targetLocked') {
       return;
@@ -3158,6 +3198,11 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       touchMode: inputModeRef.current === 'touch',
     });
     applyRemoteWindowTouchPointerResult(result);
+    // 触控模式：按下启动长按定时器（手指不动 ≥500ms → 右键）
+    clearLongPressTimer();
+    if (inputModeRef.current === 'touch' && event.pointerType === 'touch') {
+      longPressTimerRef.current = window.setTimeout(handleLongPressTimer, REMOTE_WINDOW_LONG_PRESS_MS);
+    }
     event.preventDefault();
     event.stopPropagation();
   }, [
@@ -3288,6 +3333,10 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           scrollFraction: touchScrollFractionRef.current,
           invertGestureDirection: touchScrollInvertedRef.current,
         });
+        // 拖动已转移（滚动/拖拽）→ 取消长按
+        if (result.nextState.mode !== 'actionPending' && result.nextState.mode !== 'idle') {
+          clearLongPressTimer();
+        }
         applyRemoteWindowTouchPointerResult(result);
         if (result.consumed) {
           event.preventDefault();
@@ -3321,6 +3370,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   ]);
 
   const handleVideoSurfacePointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    clearLongPressTimer();
     if (secondPointerPendingRef.current?.pointerId === event.pointerId) {
       secondPointerPendingRef.current = null;
     }

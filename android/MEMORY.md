@@ -1525,3 +1525,8 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - **虚拟鼠标消除**：wire scroll 加 `moveCursor?: boolean`（缺省 true），触控模式单指/双指 scroll 一律 `moveCursor:false`；daemon `postScrollEvent` 加 moveCursor 参数（false 跳过 postMouseMove）。
 - **新 mode**：actionScroll（触控单指滚动）/ actionLongPress（已发右键）；`toRemoteWindowTouchGestureState` 必须包含新 mode（漏了会转 idle 导致后续 move 丢失——已修）。
 - 验证：runtime 18 + overlay 75 + shared 9 + daemon 59 全绿；type-check 0（shared 40 预存错误与本次无关）；APK 0.1.3.2484 已发布 OTA + 装机 15t-1。真机手势验证待用户。
+## 2026-08-08 真机反馈修复（2485）
+- **长按右键失效根因**：runtime 长按只在 move 事件里检查（timeMs-startAt>=500），手指按住不动没有 move → 永不触发。修复：overlay 在 pointerDown 时启动 `setTimeout(500ms)`（`handleLongPressTimer`），按下不动到期发右键 + 转 actionLongPress；move 转移（滚动/拖拽）或 up 时清理 timer。REMOTE_WINDOW_LONG_PRESS_MS 从 runtime 导出复用。
+- **滚动时光标仍移动**：daemon 侧 swift 注入改动未生效——launchd 跑的是旧 server.cjs（无 moveCursor）。重新 `daemon:prepare-release` + `zterm-daemon.sh install-service`，新 daemon（~/.zterm/daemon-runtime/server.cjs 含 moveCursor×3）已运行。
+- **待真机重测**：放大后双指手势无效（本地仲裁逻辑审查无明确 bug，需 2485+新 daemon 复测）；点击图片失焦无感知（需用户描述 app/坐标）。
+- 版本 0.1.3.2485（长按修复）已 OTA + 装机 15t-1。
