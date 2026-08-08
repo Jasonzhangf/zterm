@@ -184,10 +184,12 @@ export function selectRemoteWindowTarget(
       errorMessage: 'Selected remote window target is no longer in the catalog',
     };
   }
+  // 组合推流（background pane）：选 app 窗口时自动带同 app 全部窗口（平铺合成）
+  const compositeTarget = attachSameAppCompositeWindows(target, state.targets);
   if (state.phase === 'targetLocked') {
     return {
       ...state,
-      target,
+      target: compositeTarget,
       streamStarted: false,
       streamStatus: 'idle',
       streamId: undefined,
@@ -198,13 +200,38 @@ export function selectRemoteWindowTarget(
   return {
     phase: 'targetLocked',
     requestEpoch: state.requestEpoch,
-    target,
+    target: compositeTarget,
     targets: state.targets,
     mode: 'floating',
     streamStarted: false,
     streamStatus: 'idle',
     errors: state.errors,
   };
+}
+
+export function attachSameAppCompositeWindows(
+  target: RemoteWindowStreamTargetManifest,
+  targets: RemoteWindowStreamTargetManifest[],
+): RemoteWindowStreamTargetManifest {
+  if (target.videoTarget.kind !== 'app-window') {
+    return target;
+  }
+  const compositeWindows = targets
+    .filter((item) => (
+      item.videoTarget.kind === 'app-window'
+      && item.videoTarget.appBundleId === target.videoTarget.appBundleId
+      && item.streamTargetId !== target.streamTargetId
+    ))
+    .map((item) => ({
+      windowId: item.videoTarget.windowId,
+      title: item.videoTarget.title,
+      windowBoundsTopLeftPx: item.videoTarget.windowBoundsTopLeftPx,
+      cropRectTopLeftPx: item.videoTarget.cropRectTopLeftPx,
+    }));
+  if (compositeWindows.length === 0) {
+    return target;
+  }
+  return { ...target, compositeWindows };
 }
 
 export function beginRemoteWindowStreamSetup(

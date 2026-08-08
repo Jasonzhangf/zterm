@@ -2933,7 +2933,14 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         height: surfaceRect.height,
       },
       contentRect: content,
-      sourceRect: getRemoteWindowSourceRect(state.target),
+      sourceRect: state.target.compositeWindows?.length
+        ? {
+            x: getRemoteWindowSourceRect(state.target).x,
+            y: getRemoteWindowSourceRect(state.target).y,
+            width: displaySourceSize.width,
+            height: displaySourceSize.height,
+          }
+        : getRemoteWindowSourceRect(state.target),
     };
   }, [receiverFrameSize, state]);
 

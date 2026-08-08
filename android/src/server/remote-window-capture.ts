@@ -18,6 +18,59 @@ const REMOTE_WINDOW_CAPTURE_UPDATE_STDERR_PREFIX = 'ZTERM_REMOTE_WINDOW_CAPTURE_
 
 const REMOTE_WINDOW_CAPTURE_FRAME_MAGIC = Buffer.from('ZRW1');
 
+export interface RemoteWindowCompositeLayoutWindow {
+  windowId: string;
+  windowBounds: { x: number; y: number; width: number; height: number };
+  cropRect: { x: number; y: number; width: number; height: number };
+  offsetX: number;
+  offsetY: number;
+}
+
+export interface RemoteWindowCompositeLayout {
+  windows: RemoteWindowCompositeLayoutWindow[];
+  canvasWidth: number;
+  canvasHeight: number;
+}
+
+// 同 app 多窗口组合推流：平铺布局（单行：Σ宽 × max高）
+export function resolveRemoteWindowCompositeLayout(
+  target: RemoteWindowStreamTargetManifest,
+): RemoteWindowCompositeLayout | null {
+  const compositeWindows = target.compositeWindows ?? [];
+  if (compositeWindows.length === 0) {
+    return null;
+  }
+  const main = {
+    windowId: target.videoTarget.windowId,
+    windowBounds: target.videoTarget.windowBoundsTopLeftPx,
+    cropRect: target.videoTarget.cropRectTopLeftPx ?? target.videoTarget.windowBoundsTopLeftPx,
+  };
+  const windows = [main, ...compositeWindows.map((w) => ({
+    windowId: w.windowId,
+    windowBounds: w.windowBoundsTopLeftPx,
+    cropRect: w.cropRectTopLeftPx ?? w.windowBoundsTopLeftPx,
+  }))];
+  let offsetX = 0;
+  let canvasHeight = 0;
+  const laidOut = windows.map((w) => {
+    const win: RemoteWindowCompositeLayoutWindow = {
+      windowId: w.windowId,
+      windowBounds: w.windowBounds,
+      cropRect: w.cropRect,
+      offsetX,
+      offsetY: 0,
+    };
+    offsetX += Math.max(1, Math.round(w.cropRect.width));
+    canvasHeight = Math.max(canvasHeight, Math.round(w.cropRect.height));
+    return win;
+  });
+  return {
+    windows: laidOut,
+    canvasWidth: offsetX,
+    canvasHeight,
+  };
+}
+
 export interface RemoteWindowCaptureFrame {
   width: number;
   height: number;
@@ -123,6 +176,7 @@ export function buildResizedRemoteWindowTarget(
 
 export function buildScreenCaptureKitConfig(target: RemoteWindowStreamTargetManifest, frameRate: number) {
   const { windowBounds, cropRect } = validateStreamTargetForCapture(target);
+  const compositeLayout = resolveRemoteWindowCompositeLayout(target);
   return {
     windowId: target.videoTarget.windowId,
     appBundleId: target.videoTarget.appBundleId,
@@ -131,6 +185,15 @@ export function buildScreenCaptureKitConfig(target: RemoteWindowStreamTargetMani
     cropRect,
     frameRate: Math.max(1, Math.floor(frameRate)),
     queueDepth: 3,
+    compositeWindows: compositeLayout?.windows.slice(1).map((w) => ({
+      windowId: w.windowId,
+      windowBounds: w.windowBounds,
+      cropRect: w.cropRect,
+      offsetX: w.offsetX,
+      offsetY: w.offsetY,
+    })),
+    canvasWidth: compositeLayout?.canvasWidth,
+    canvasHeight: compositeLayout?.canvasHeight,
   };
 }
 

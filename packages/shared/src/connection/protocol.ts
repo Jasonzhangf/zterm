@@ -184,6 +184,13 @@ export interface RemoteWindowStreamTargetManifest {
     cropRectTopLeftPx?: RemoteWindowStreamRect;
     contentTopInsetPx?: number;
   };
+  // 同 app 多窗口组合推流（background pane）：主窗口之外的窗口平铺在画布中
+  compositeWindows?: Array<{
+    windowId: string;
+    title: string;
+    windowBoundsTopLeftPx: RemoteWindowStreamRect;
+    cropRectTopLeftPx?: RemoteWindowStreamRect;
+  }>;
   inputTarget: {
     kind: 'app-window' | 'iterm2-pane' | 'tmux-pane';
     itermSessionId?: string;

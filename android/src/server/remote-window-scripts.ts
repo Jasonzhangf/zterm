@@ -760,6 +760,14 @@ import CoreMedia
 import Foundation
 import ScreenCaptureKit
 
+struct CompositeWindow: Decodable {
+    let windowId: String
+    let windowBounds: Rect
+    let cropRect: Rect
+    let offsetX: Double
+    let offsetY: Double
+}
+
 struct CaptureConfig: Decodable {
     let windowId: String
     let appBundleId: String
@@ -768,6 +776,9 @@ struct CaptureConfig: Decodable {
     let cropRect: Rect
     let frameRate: Int
     let queueDepth: Int
+    let compositeWindows: [CompositeWindow]?
+    let canvasWidth: Int?
+    let canvasHeight: Int?
 }
 
 struct CaptureCommand: Decodable {
@@ -838,8 +849,58 @@ func writeCaptureUpdate(seq: Int, ok: Bool, width: Int? = nil, height: Int? = ni
     }
 }
 
+func writeFrame(rgba: Data, width: Int, height: Int) {
+    var header = Data()
+    header.append(contentsOf: [0x5A, 0x52, 0x57, 0x31])
+    appendUInt32(UInt32(width), to: &header)
+    appendUInt32(UInt32(height), to: &header)
+    appendUInt32(UInt32(rgba.count), to: &header)
+    FileHandle.standardOutput.write(header)
+    FileHandle.standardOutput.write(rgba)
+}
+
+final class CompositeCanvas {
+    let width: Int
+    let height: Int
+    private var data: Data
+    private let lock = NSLock()
+    private let offsets: [(x: Int, y: Int, width: Int, height: Int)]
+
+    init(width: Int, height: Int, offsets: [(x: Int, y: Int, width: Int, height: Int)]) {
+        self.width = width
+        self.height = height
+        self.offsets = offsets
+        self.data = Data(count: width * height * 4)
+    }
+
+    func blit(index: Int, rgba: Data, frameWidth: Int, frameHeight: Int) {
+        guard index < offsets.count else { return }
+        lock.lock()
+        defer { lock.unlock() }
+        let slot = offsets[index]
+        let copyWidth = min(slot.width, frameWidth)
+        let copyHeight = min(slot.height, frameHeight)
+        for y in 0..<copyHeight {
+            let srcRow = y * frameWidth * 4
+            let dstRow = ((slot.y + y) * width + slot.x) * 4
+            data.replaceSubrange(
+                dstRow..<(dstRow + copyWidth * 4),
+                with: rgba[srcRow..<(srcRow + copyWidth * 4)]
+            )
+        }
+        writeFrame(rgba: data, width: width, height: height)
+    }
+}
+
 final class FrameOutput: NSObject, SCStreamOutput {
     private var emitted = 0
+    private let canvas: CompositeCanvas?
+    private let canvasIndex: Int
+
+    init(canvas: CompositeCanvas? = nil, canvasIndex: Int = 0) {
+        self.canvas = canvas
+        self.canvasIndex = canvasIndex
+    }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
         guard type == .screen else {
@@ -879,13 +940,11 @@ final class FrameOutput: NSObject, SCStreamOutput {
             }
         }
 
-        var header = Data()
-        header.append(contentsOf: [0x5A, 0x52, 0x57, 0x31])
-        appendUInt32(UInt32(width), to: &header)
-        appendUInt32(UInt32(height), to: &header)
-        appendUInt32(UInt32(rgba.count), to: &header)
-        FileHandle.standardOutput.write(header)
-        FileHandle.standardOutput.write(rgba)
+        if let canvas = canvas {
+            canvas.blit(index: canvasIndex, rgba: rgba, frameWidth: width, frameHeight: height)
+        } else {
+            writeFrame(rgba: rgba, width: width, height: height)
+        }
         emitted += 1
     }
 }
@@ -906,41 +965,99 @@ do {
 }
 
 NSApplication.shared
-let output = FrameOutput()
 let sampleQueue = DispatchQueue(label: "zterm.remote-window.capture.sample")
-var activeStream: SCStream?
+var activeStreams: [SCStream] = []
+
+func findScWindow(windowId: String, appBundleId: String, windowBounds: Rect, content: SCShareableContent) -> SCWindow? {
+    let numericWindowId = UInt32(windowId)
+    return content.windows.first { candidate in
+        if let numericWindowId = numericWindowId, candidate.windowID == numericWindowId {
+            return true
+        }
+        if !appBundleId.isEmpty && candidate.owningApplication?.bundleIdentifier != appBundleId {
+            return false
+        }
+        return rectMatches(candidate.frame, windowBounds)
+    }
+}
 
 Task { @MainActor in
     do {
         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
-        let numericWindowId = UInt32(config.windowId)
-        let window = content.windows.first { candidate in
-            if let numericWindowId = numericWindowId, candidate.windowID == numericWindowId {
-                return true
+        if let compositeWindows = config.compositeWindows, !compositeWindows.isEmpty,
+           let canvasWidth = config.canvasWidth, let canvasHeight = config.canvasHeight {
+            // 组合模式：同 app 多窗口平铺合成一个画布
+            var allWindows: [(window: CompositeWindow, isMain: Bool)] = []
+            allWindows.append((window: CompositeWindow(
+                windowId: config.windowId,
+                windowBounds: config.windowBounds,
+                cropRect: config.cropRect,
+                offsetX: 0,
+                offsetY: 0
+            ), isMain: true))
+            for composite in compositeWindows {
+                allWindows.append((window: composite, isMain: false))
             }
-            if !config.appBundleId.isEmpty && candidate.owningApplication?.bundleIdentifier != config.appBundleId {
-                return false
+            var offsets: [(x: Int, y: Int, width: Int, height: Int)] = []
+            for entry in allWindows {
+                offsets.append((
+                    x: Int(entry.window.offsetX.rounded()),
+                    y: Int(entry.window.offsetY.rounded()),
+                    width: Int(entry.window.cropRect.width.rounded()),
+                    height: Int(entry.window.cropRect.height.rounded())
+                ))
             }
-            return rectMatches(candidate.frame, config.windowBounds)
-        }
-        guard let targetWindow = window else {
-            stderrLine("ScreenCaptureKit window not found for " + config.windowId)
-            exit(3)
-        }
+            let canvas = CompositeCanvas(width: canvasWidth, height: canvasHeight, offsets: offsets)
+            for (index, entry) in allWindows.enumerated() {
+                guard let targetWindow = findScWindow(
+                    windowId: entry.window.windowId,
+                    appBundleId: config.appBundleId,
+                    windowBounds: entry.window.windowBounds,
+                    content: content
+                ) else {
+                    stderrLine("ScreenCaptureKit composite window not found for " + entry.window.windowId)
+                    continue
+                }
+                let filter = SCContentFilter(desktopIndependentWindow: targetWindow)
+                let streamConfiguration = makeStreamConfiguration(
+                    windowBounds: entry.window.windowBounds,
+                    cropRect: entry.window.cropRect,
+                    frameRate: config.frameRate,
+                    queueDepth: config.queueDepth
+                )
+                let stream = SCStream(filter: filter, configuration: streamConfiguration, delegate: nil)
+                activeStreams.append(stream)
+                let output = FrameOutput(canvas: canvas, canvasIndex: index)
+                try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: sampleQueue)
+                try await stream.startCapture()
+            }
+            stderrLine("zterm remote window composite capture started: \(allWindows.count) windows")
+        } else {
+            // 单窗口模式
+            guard let targetWindow = findScWindow(
+                windowId: config.windowId,
+                appBundleId: config.appBundleId,
+                windowBounds: config.windowBounds,
+                content: content
+            ) else {
+                stderrLine("ScreenCaptureKit window not found for " + config.windowId)
+                exit(3)
+            }
 
-        let filter = SCContentFilter(desktopIndependentWindow: targetWindow)
-        let streamConfiguration = makeStreamConfiguration(
-            windowBounds: config.windowBounds,
-            cropRect: config.cropRect,
-            frameRate: config.frameRate,
-            queueDepth: config.queueDepth
-        )
+            let filter = SCContentFilter(desktopIndependentWindow: targetWindow)
+            let streamConfiguration = makeStreamConfiguration(
+                windowBounds: config.windowBounds,
+                cropRect: config.cropRect,
+                frameRate: config.frameRate,
+                queueDepth: config.queueDepth
+            )
 
-        let stream = SCStream(filter: filter, configuration: streamConfiguration, delegate: nil)
-        activeStream = stream
-        try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: sampleQueue)
-        try await stream.startCapture()
-        stderrLine("zterm remote window capture started")
+            let stream = SCStream(filter: filter, configuration: streamConfiguration, delegate: nil)
+            activeStreams.append(stream)
+            try stream.addStreamOutput(FrameOutput(), type: .screen, sampleHandlerQueue: sampleQueue)
+            try await stream.startCapture()
+            stderrLine("zterm remote window capture started")
+        }
     } catch {
         stderrLine("ScreenCaptureKit capture start failed: " + String(describing: error))
         exit(4)
@@ -964,7 +1081,7 @@ DispatchQueue.global(qos: .utility).async {
             }
             Task { @MainActor in
                 do {
-                    guard let stream = activeStream else {
+                    guard let stream = activeStreams.first else {
                         throw NSError(domain: "RemoteWindowCapture", code: 1, userInfo: [NSLocalizedDescriptionKey: "capture stream is not active"])
                     }
                     let nextConfig = makeStreamConfiguration(
