@@ -986,10 +986,37 @@ export function createRemoteWindowStreamDaemonRuntime(
           : {}),
       });
 
-      await peerConnection.setRemoteDescription(createRtcSessionDescription({
-        type: payload.offer.type,
-        sdp: payload.offer.sdp,
-      }));
+      let remoteOfferSdp = payload.offer.sdp;
+      try {
+        await peerConnection.setRemoteDescription(createRtcSessionDescription({
+          type: payload.offer.type,
+          sdp: payload.offer.sdp,
+        }));
+      } catch (offerError) {
+        // 新版 Chrome WebView offer 可能含 wrtc 不支持的 codec（H265/AV1/flexfec 等），
+        // 直接解析失败（Invalid SDP line）。降级：用本机 wrtc 生成的 offer 做模板，
+        // 只替换 client 的 o=/ice-ufrag/ice-pwd/fingerprint，保证协商字段一致。
+        const fallbackPc = createPeerConnection({ iceServers: [] });
+        try {
+          fallbackPc.addTransceiver('video', { direction: 'recvonly' });
+          const fallbackOffer = await fallbackPc.createOffer();
+          const clientLines = String(payload.offer.sdp).split('\n');
+          const getClientLine = (prefix: string) => clientLines.find((l) => l.startsWith(prefix)) || '';
+          remoteOfferSdp = fallbackOffer.sdp.split('\n').map((line) => {
+            if (line.startsWith('o=')) return getClientLine('o=') || line;
+            if (line.startsWith('a=ice-ufrag')) return getClientLine('a=ice-ufrag') || line;
+            if (line.startsWith('a=ice-pwd')) return getClientLine('a=ice-pwd') || line;
+            if (line.startsWith('a=fingerprint')) return getClientLine('a=fingerprint') || line;
+            return line;
+          }).join('\n');
+          await peerConnection.setRemoteDescription(createRtcSessionDescription({
+            type: payload.offer.type,
+            sdp: remoteOfferSdp,
+          }));
+        } finally {
+          fallbackPc.close();
+        }
+      }
 
       const captureSource = await captureSourceFactory(payload.target, {
         frameRate: streamFrameRate,
