@@ -1072,28 +1072,38 @@ func compositeFrameLoop(allWindows: [CompositeWindow], canvasWidth: Int, canvasH
 }
 
 func startSingleWindowCapture(config: CaptureConfig, content: SCShareableContent) async throws {
-    guard let targetWindow = findScWindow(
+    // 统一走 SCScreenshotManager 逐帧截图（与组合模式相同路径）：
+    // macOS 26 上 SCStream 单窗口 capture 实测卡死不出帧（只发首帧），
+    // SCScreenshotManager.captureImage 无此问题（组合模式已验证可靠）。
+    compositeStopped = false
+    let windowEntry = CompositeWindow(
         windowId: config.windowId,
-        appBundleId: config.appBundleId,
-        windowBounds: config.windowBounds,
-        content: content
-    ) else {
-        stderrLine("ScreenCaptureKit window not found for " + config.windowId)
-        exit(3)
-    }
-
-    let filter = SCContentFilter(desktopIndependentWindow: targetWindow)
-    let streamConfiguration = makeStreamConfiguration(
         windowBounds: config.windowBounds,
         cropRect: config.cropRect,
-        frameRate: config.frameRate,
-        queueDepth: config.queueDepth
+        offsetX: 0,
+        offsetY: 0
     )
-
-    let stream = SCStream(filter: filter, configuration: streamConfiguration, delegate: nil)
-    activeStreams.append(stream)
-    try stream.addStreamOutput(FrameOutput(), type: .screen, sampleHandlerQueue: sampleQueue)
-    try await stream.startCapture()
+    let singleWindowList = [windowEntry]
+    let canvasWidth = Int(config.cropRect.width.rounded())
+    let canvasHeight = Int(config.cropRect.height.rounded())
+    let timerQueue = DispatchQueue(label: "zterm.remote-window.single.timer")
+    timerQueue.asyncAfter(deadline: .now() + 0.05) {
+        while !compositeStopped {
+            let semaphore = DispatchSemaphore(value: 0)
+            Task {
+                await compositeFrameLoop(
+                    allWindows: singleWindowList,
+                    canvasWidth: canvasWidth,
+                    canvasHeight: canvasHeight,
+                    content: content
+                )
+                semaphore.signal()
+            }
+            _ = semaphore.wait(timeout: .now() + 0.8)
+            Thread.sleep(forTimeInterval: 0.05)
+        }
+    }
+    stderrLine("zterm remote window single capture started (SCScreenshotManager): \(config.windowId)")
 }
 
 Task { @MainActor in

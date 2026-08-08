@@ -198,10 +198,39 @@ export function buildScreenCaptureKitConfig(target: RemoteWindowStreamTargetMani
 }
 
 function stopChildProcess(child: RemoteWindowCaptureChildProcess) {
-  if (child.exitCode !== null || child.killed) {
-    return;
+  const pid = child.pid || 0;
+  try {
+    child.kill('SIGTERM');
+  } catch {
+    // Already exited.
   }
-  child.kill('SIGTERM');
+  if (pid > 0) {
+    try {
+      // 进程组 SIGTERM——覆盖 swift 启动的 swift-frontend 子进程
+      process.kill(-pid, 'SIGTERM');
+    } catch {
+      // Process group may already be gone.
+    }
+  }
+  // 兜底：swift 可能卡在 SCStream/合成循环不响应 SIGTERM，或主进程退出但
+  // swift-frontend 子进程残留。2 秒后无条件按进程组 SIGKILL 清干净。
+  const killTimer = setTimeout(() => {
+    try {
+      child.kill('SIGKILL');
+    } catch {
+      // Process may have exited between the checks.
+    }
+    if (pid > 0) {
+      try {
+        process.kill(-pid, 'SIGKILL');
+      } catch {
+        // Process group may already be gone.
+      }
+    }
+  }, 2000);
+  if (typeof killTimer.unref === 'function') {
+    killTimer.unref();
+  }
 }
 
 export function startScreenCaptureKitFrameSource(
@@ -221,6 +250,8 @@ export function startScreenCaptureKitFrameSource(
       ZTERM_REMOTE_WINDOW_CAPTURE_CONFIG: JSON.stringify(captureConfig),
     },
     stdio: ['pipe', 'pipe', 'pipe'],
+    // detached 独立进程组：stop 时按进程组杀，避免 swift-frontend 子进程变孤儿残留
+    detached: true,
   }) as RemoteWindowCaptureChildProcess;
   let stdoutBuffer = Buffer.alloc(0);
   let stderrBuffer = '';
