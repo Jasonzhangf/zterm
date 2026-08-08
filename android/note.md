@@ -4934,3 +4934,15 @@ Need runtime debug to confirm:
 
 ### APK
 - android/native/android/app/build/outputs/apk/debug/app-debug.apk (4.6MB)
+
+# 2026-08-08 08:30 CST 设计 v2 fix 已 commit, 等待 Jason 设备恢复
+
+- commit c30b738: 修复 useEffect[receiverMediaStream] 调用 requestVideoPlayback 之前清 videoFrameCallbackRef
+- TS 0 error, vitest 75/75 PASS
+- build:android 0.1.3.2473 (含 Rn.current=null in bundle)
+- APK 待安装 — 设备 100.65.195.25:33831 当前 connection refused
+
+## 需要确认的实验结果
+- 在新 stream 切来时, rVFC 守卫 (!videoFrameCallbackRef.current) 成立
+- 预期: framesReceived 持续上涨, currentTime 持续推进, play_attempt 不再卡 0.543
+- 验证点: epoch=3 sibling handoff 时, framesReceived 应当 > 1 (因为 rVFC 重挂到新 stream)

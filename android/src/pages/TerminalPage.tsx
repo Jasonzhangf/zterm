@@ -1044,7 +1044,6 @@ function TerminalPageComponent({
   const [quickBarHeight, setQuickBarHeight] = useState(0);
   const [quickBarCollapsed, setQuickBarCollapsed] = useState(false);
   const [quickBarEditorFocused, setQuickBarEditorFocused] = useState(false);
-  const [remoteWindowOverlayOpen, setRemoteWindowOverlayOpen] = useState(false);
   const [remoteWindowInputContext, setRemoteWindowInputContext] = useState<RemoteWindowInputContext | null>(null);
   const [remoteWindowStreamInvalidation, setRemoteWindowStreamInvalidation] = useState<{
     streamId: string;
@@ -2475,7 +2474,8 @@ function TerminalPageComponent({
   }, [clearPendingAndroidImeFocus, clearTerminalFocusRetries, isAndroid, setAndroidEditorActive, uiSessionId, updateAndroidImeVisible, updateKeyboardInset, updateTerminalKeyboardRequested]);
 
   const handleRemoteWindowOverlayOpenStateChange = useCallback((open: boolean) => {
-    setRemoteWindowOverlayOpen(open);
+    // 串流入口与文件按键一致：QuickBar 始终保留，不因 picker/串流隐藏；
+    // 这里只负责打开时收起 IME。
     if (open) {
       hideTerminalInputForRemoteWindow();
     }
@@ -2933,9 +2933,7 @@ function TerminalPageComponent({
       + layoutProfile.quickBar.touchSafeOffsetPx
       + terminalBottomChromeLiftPx,
   );
-  const terminalStageBottomPx = remoteWindowOverlayOpen
-    ? 0
-    : terminalChromeBottomPx + terminalImeLiftPx;
+  const terminalStageBottomPx = terminalChromeBottomPx + terminalImeLiftPx;
   const terminalStageTopPx = portraitSessionDrawerEnabled
     ? Math.max(0, headerTopInsetPx + 50)
     : 0;
@@ -3795,7 +3793,7 @@ function TerminalPageComponent({
           onVideoDebug={recordRemoteWindowVideoDebug}
           onRemoteWindowMessage={onRemoteWindowMessage}
         />
-        {!remoteWindowOverlayOpen && !sessionDrawerOpen ? (
+        {!sessionDrawerOpen ? (
           <TerminalQuickBarShell
             zIndex={remoteWindowInputContext ? 96 : 10}
             centered={Boolean(remoteWindowInputContext)}

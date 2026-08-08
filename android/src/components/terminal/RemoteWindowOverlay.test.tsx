@@ -3,7 +3,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RemoteWindowOverlay } from './RemoteWindowOverlay';
-import type { RemoteWindowStreamTargetManifest } from '../../lib/types';
+import type { RemoteWindowStreamTargetManifest, RemoteWindowStreamTargetsResponsePayload } from '../../lib/types';
 import { REMOTE_WINDOW_VIDEO_BITRATE_STORAGE_KEY } from '../../lib/remote-window-video-quality';
 
 const backListeners: Array<() => void> = [];
@@ -110,7 +110,7 @@ async function revealVideoThroughBoundPlayback(video: HTMLElement) {
   try {
     fireEvent.loadedData(video);
     await waitFor(() => {
-      expect(screen.queryByTestId('remote-window-video-wallpaper')).toBeNull();
+      expect(screen.getByTestId('remote-window-video-wallpaper').style.opacity).toBe('0');
     });
   } finally {
     playSpy.mockRestore();
@@ -561,7 +561,7 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
     const firstVideo = await screen.findByTestId('remote-window-video');
     await revealVideoThroughBoundPlayback(firstVideo);
-    expect(screen.queryByTestId('remote-window-video-wallpaper')).toBeNull();
+    expect(screen.getByTestId('remote-window-video-wallpaper').style.opacity).toBe('0');
 
     fireEvent.click(screen.getByTestId('remote-window-active-app-switch-button'));
 
@@ -572,14 +572,58 @@ describe('RemoteWindowOverlay', () => {
 
     await waitFor(() => {
       expect(stopStream).toHaveBeenCalledWith('session-1', expect.stringMatching(/^rw-stream-/));
-      expect(startStream).toHaveBeenCalledTimes(4);
-      expect(startStream.mock.calls[2]?.[1]).toMatchObject({ streamTargetId: 'app-2' });
-      expect(startStream.mock.calls[3]?.[1]).toMatchObject({ streamTargetId: 'app-2' });
+      expect(startStream).toHaveBeenCalledTimes(2);
+      expect(startStream.mock.calls[1]?.[1]).toMatchObject({ streamTargetId: 'app-2' });
     });
     expect(screen.queryByTestId('remote-window-active-app-switch-list')).toBeNull();
     expect(screen.getByTestId('remote-window-active-app-switch-button').textContent).toContain('Safari');
     expect(screen.getByTestId('remote-window-video-wallpaper')).toBeTruthy();
     expect((screen.getByTestId('remote-window-video') as HTMLVideoElement).style.visibility).toBe('hidden');
+  });
+
+  it('keeps the same video element when the stream id changes (no remount, srcObject swap on one element)', async () => {
+    const mediaStream = { id: 'media-stream-1' } as MediaStream;
+    const appOne = makeTarget('app-1', 'TextEdit', 'app-window');
+    const appTwo = {
+      ...makeTarget('app-2', 'Safari', 'app-window'),
+      videoTarget: {
+        ...makeTarget('app-2', 'Safari', 'app-window').videoTarget,
+        appBundleId: 'com.apple.Safari',
+        pid: 456,
+        windowId: 'window-2',
+      },
+    };
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [appOne, appTwo],
+    }));
+    const startStream = vi.fn(async (_sessionId: string, _target: RemoteWindowStreamTargetManifest, streamId: string) => ({
+      streamId,
+      mediaStream,
+    }));
+
+    render(
+      <RemoteWindowOverlay
+        activeSessionId="session-1"
+        requestTargets={requestTargets}
+        startStream={startStream}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+    fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
+    const firstVideo = await screen.findByTestId('remote-window-video');
+    await revealVideoThroughBoundPlayback(firstVideo);
+
+    // 切换到 sibling 目标：streamId 变化但 video 元素必须保持同一实例，
+    // 仅 srcObject 替换（Android WebView 对重建元素绑 WebRTC 流只渲染首帧会冻结）
+    fireEvent.click(screen.getByTestId('remote-window-active-app-switch-button'));
+    fireEvent.click(await screen.findByTestId('remote-window-active-app-switch-target-app-2'));
+
+    await waitFor(() => {
+      expect(startStream.mock.calls.length).toBeGreaterThanOrEqual(2);
+      expect(screen.getByTestId('remote-window-video')).toBe(firstVideo);
+    });
   });
 
   it('surfaces old stream cleanup failure after a committed handoff', async () => {
@@ -673,20 +717,20 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(await screen.findByTestId('remote-window-app-group-com-apple-TextEdit-123'));
     const video = await screen.findByTestId('remote-window-video');
     await revealVideoThroughBoundPlayback(video);
-    expect(screen.queryByTestId('remote-window-video-wallpaper')).toBeNull();
+    expect(screen.getByTestId('remote-window-video-wallpaper').style.opacity).toBe('0');
     const initialStopCallCount = stopStream.mock.calls.length;
 
     fireEvent.click(screen.getByTestId('remote-window-video-window-option-app-child'));
 
     await waitFor(() => {
-      expect(startStream).toHaveBeenCalledTimes(3);
+      expect(startStream).toHaveBeenCalledTimes(2);
     });
     expect(stopStream).toHaveBeenCalledTimes(initialStopCallCount);
     expect(screen.getByTestId('remote-window-video')).toBeTruthy();
     expect(screen.getByTestId('remote-window-video-window-option-app-child')).toBeTruthy();
     expect(screen.getByTestId('remote-window-stream-handoff-error').textContent).toContain('child stream failed');
     expect(screen.queryByTestId('remote-window-stream-error')).toBeNull();
-    expect(screen.queryByTestId('remote-window-video-wallpaper')).toBeNull();
+    expect(screen.getByTestId('remote-window-video-wallpaper').style.opacity).toBe('0');
     expect((screen.getByTestId('remote-window-video') as HTMLVideoElement).style.visibility).toBe('visible');
   });
 
@@ -728,7 +772,7 @@ describe('RemoteWindowOverlay', () => {
       fireEvent.click(await screen.findByTestId('remote-window-app-group-com-apple-TextEdit-123'));
       const video = await screen.findByTestId('remote-window-video');
       await waitFor(() => {
-        expect(screen.queryByTestId('remote-window-video-wallpaper')).toBeNull();
+        expect(screen.getByTestId('remote-window-video-wallpaper').style.opacity).toBe('0');
       });
       fireEvent.loadedData(video);
 
@@ -790,7 +834,7 @@ describe('RemoteWindowOverlay', () => {
 
       await waitFor(() => {
         expect(screen.getByTestId('remote-window-stream-handoff-error').textContent).toContain('child stream failed');
-        expect(screen.queryByTestId('remote-window-video-wallpaper')).toBeNull();
+        expect(screen.getByTestId('remote-window-video-wallpaper').style.opacity).toBe('0');
       });
       expect((video as HTMLVideoElement).style.visibility).toBe('visible');
       expect(playSpy).toHaveBeenCalledTimes(2);
@@ -850,10 +894,10 @@ describe('RemoteWindowOverlay', () => {
     await waitFor(() => {
       expect(screen.getByTestId('remote-window-stream-handoff-error').textContent).toContain('third stream failed');
     });
-    expect(screen.queryByTestId('remote-window-video-wallpaper')).toBeNull();
+    expect(screen.getByTestId('remote-window-video-wallpaper').style.opacity).toBe('0');
     expect((screen.getByTestId('remote-window-video') as HTMLVideoElement).style.visibility).toBe('visible');
 
-    const childStreamId = startStream.mock.calls[2]?.[2] as string;
+    const childStreamId = startStream.mock.calls[1]?.[2] as string;
     act(() => childStart.resolve({ streamId: childStreamId, mediaStream }));
   });
 
@@ -893,7 +937,7 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(screen.getByTestId('remote-window-video-window-option-app-child'));
 
     expect(screen.getByTestId('remote-window-stream-handoff-error').textContent).toContain('当前没有可用的 daemon session');
-    expect(screen.queryByTestId('remote-window-video-wallpaper')).toBeNull();
+    expect(screen.getByTestId('remote-window-video-wallpaper').style.opacity).toBe('0');
     expect((screen.getByTestId('remote-window-video') as HTMLVideoElement).style.visibility).toBe('visible');
   });
 
@@ -955,10 +999,10 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(screen.getByTestId('remote-window-video-window-option-app-third'));
 
     await waitFor(() => {
-      expect(startStream).toHaveBeenCalledTimes(4);
+      expect(startStream).toHaveBeenCalledTimes(3);
     });
-    const childStreamId = startStream.mock.calls[2]?.[2] as string;
-    const thirdStreamId = startStream.mock.calls[3]?.[2] as string;
+    const childStreamId = startStream.mock.calls[1]?.[2] as string;
+    const thirdStreamId = startStream.mock.calls[2]?.[2] as string;
     act(() => {
       childStart.resolve({ streamId: childStreamId, mediaStream });
     });
@@ -1183,10 +1227,9 @@ describe('RemoteWindowOverlay', () => {
     await waitFor(() => {
       expect(startStream).toHaveBeenCalledWith('session-1', expect.objectContaining({
         streamTargetId: 'pane-1',
-      }), expect.stringMatching(/^rw-stream-/), {
-        purpose: 'preview',
-        videoBitrate: { preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000, maxFrameRateFps: 30 },
-      });
+      }), expect.stringMatching(/^rw-stream-/), expect.objectContaining({
+        purpose: 'focus',
+      }));
     });
     await waitFor(() => {
       const video = screen.getByTestId('remote-window-video') as HTMLVideoElement;
@@ -1202,158 +1245,7 @@ describe('RemoteWindowOverlay', () => {
     });
   });
 
-  it('stops the startup preview stream after the focus stream commits', async () => {
-    const canvasStream = { id: 'canvas-stream' } as MediaStream;
-    const focusStream = { id: 'focus-stream' } as MediaStream;
-    const requestTargets = vi.fn(async () => ({
-      requestId: 'rw-1',
-      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
-    }));
-    const startStream = vi.fn(async (
-      _sessionId: string,
-      _target: RemoteWindowStreamTargetManifest,
-      streamId: string,
-      options?: { purpose?: string },
-    ) => ({
-      streamId,
-      mediaStream: options?.purpose === 'focus' ? focusStream : canvasStream,
-    }));
-    const stopStream = vi.fn();
-
-    render(
-      <RemoteWindowOverlay
-        activeSessionId="session-1"
-        requestTargets={requestTargets}
-        startStream={startStream}
-        stopStream={stopStream}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
-    fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
-
-    await waitFor(() => {
-      expect(startStream).toHaveBeenCalledTimes(2);
-    });
-    const canvasStreamId = startStream.mock.calls[0]?.[2] as string;
-    const focusStreamId = startStream.mock.calls[1]?.[2] as string;
-
-    await waitFor(() => {
-      const video = screen.getByTestId('remote-window-video') as HTMLVideoElement;
-      expect(video.srcObject).toBe(focusStream);
-      expect(stopStream).toHaveBeenCalledWith('session-1', canvasStreamId);
-    });
-    expect(stopStream).not.toHaveBeenCalledWith('session-1', focusStreamId);
-  });
-
-  it('stops the daemon focus stream and shows degraded status when focus receiver startup fails after preview starts', async () => {
-    const canvasStream = { id: 'canvas-stream' } as MediaStream;
-    const requestTargets = vi.fn(async () => ({
-      requestId: 'rw-1',
-      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
-    }));
-    const startStream = vi.fn(async (
-      _sessionId: string,
-      _target: RemoteWindowStreamTargetManifest,
-      streamId: string,
-      options?: { purpose?: string },
-    ) => {
-      if (options?.purpose === 'focus') {
-        throw new Error('focus receiver failed');
-      }
-      return {
-        streamId,
-        mediaStream: canvasStream,
-      };
-    });
-    const stopStream = vi.fn();
-
-    render(
-      <RemoteWindowOverlay
-        activeSessionId="session-1"
-        requestTargets={requestTargets}
-        startStream={startStream}
-        stopStream={stopStream}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
-    fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
-
-    await waitFor(() => {
-      expect(startStream).toHaveBeenCalledTimes(2);
-    });
-    const focusStreamId = startStream.mock.calls[1]?.[2] as string;
-
-    await waitFor(() => {
-      const video = screen.getByTestId('remote-window-video') as HTMLVideoElement;
-      expect(video.srcObject).toBe(canvasStream);
-      expect(stopStream).toHaveBeenCalledWith('session-1', focusStreamId);
-    });
-    expect(screen.getByTestId('remote-window-stream-degraded').textContent).toContain('focus receiver failed');
-  });
-
-  it('preserves focus cleanup failure when handoff falls back to preview', async () => {
-    const firstFocusStream = { id: 'first-focus-stream' } as MediaStream;
-    const secondPreviewStream = { id: 'second-preview-stream' } as MediaStream;
-    const appOne = makeTarget('app-1', 'TextEdit', 'app-window');
-    const appTwo = {
-      ...makeTarget('app-2', 'Safari', 'app-window'),
-      videoTarget: {
-        ...makeTarget('app-2', 'Safari', 'app-window').videoTarget,
-        appBundleId: 'com.apple.Safari',
-        pid: 456,
-        windowId: 'window-2',
-      },
-    };
-    const requestTargets = vi.fn(async () => ({
-      requestId: 'rw-1',
-      targets: [appOne, appTwo],
-    }));
-    const startStream = vi.fn(async (
-      _sessionId: string,
-      target: RemoteWindowStreamTargetManifest,
-      streamId: string,
-      options?: { purpose?: string },
-    ) => {
-      if (target.streamTargetId === 'app-2' && options?.purpose === 'focus') {
-        throw new Error('focus receiver failed');
-      }
-      return {
-        streamId,
-        mediaStream: options?.purpose === 'focus' ? firstFocusStream : secondPreviewStream,
-      };
-    });
-    const stopStream = vi.fn(async (_sessionId: string, streamId: string) => {
-      if (streamId.includes('focus')) {
-        throw new Error('focus stop failed');
-      }
-    });
-
-    render(
-      <RemoteWindowOverlay
-        activeSessionId="session-1"
-        requestTargets={requestTargets}
-        startStream={startStream}
-        stopStream={stopStream}
-      />,
-    );
-
-    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
-    fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
-    await screen.findByTestId('remote-window-video');
-    fireEvent.click(screen.getByTestId('remote-window-active-app-switch-button'));
-    fireEvent.click(screen.getByTestId('remote-window-active-app-switch-target-app-2'));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('remote-window-active-app-switch-button').textContent).toContain('Safari');
-      expect(screen.getByTestId('remote-window-stream-cleanup-error').textContent).toContain('focus stop failed');
-    });
-    expect(screen.queryByTestId('remote-window-stream-error')).toBeNull();
-  });
-
   it('rejects a late focus stream after the overlay has closed', async () => {
-    const canvasStream = { id: 'canvas-stream' } as MediaStream;
     const focusStream = { id: 'focus-stream' } as MediaStream;
     const focusStart = createDeferred<{ streamId: string; mediaStream: MediaStream }>();
     const requestTargets = vi.fn(async () => ({
@@ -1369,7 +1261,7 @@ describe('RemoteWindowOverlay', () => {
       if (options?.purpose === 'focus') {
         return focusStart.promise.then((result) => ({ ...result, streamId }));
       }
-      return Promise.resolve({ streamId, mediaStream: canvasStream });
+      return Promise.resolve({ streamId, mediaStream: focusStream });
     });
     const stopStream = vi.fn();
 
@@ -1384,14 +1276,13 @@ describe('RemoteWindowOverlay', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
     fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
-    await screen.findByTestId('remote-window-video');
-    const canvasStreamId = startStream.mock.calls[0]?.[2] as string;
-    const focusStreamId = startStream.mock.calls[1]?.[2] as string;
+    await waitFor(() => {
+      expect(startStream).toHaveBeenCalledTimes(1);
+    });
+    const focusStreamId = startStream.mock.calls[0]?.[2] as string;
 
     fireEvent.click(screen.getByRole('button', { name: '关闭远程窗口' }));
     await waitFor(() => {
-      expect(screen.queryByTestId('remote-window-video')).toBeNull();
-      expect(stopStream).toHaveBeenCalledWith('session-1', canvasStreamId);
       expect(stopStream).toHaveBeenCalledWith('session-1', focusStreamId);
     });
 
@@ -1517,7 +1408,7 @@ describe('RemoteWindowOverlay', () => {
       pendingPlay.resolve?.();
 
       await waitFor(() => {
-        expect(screen.queryByTestId('remote-window-video-wallpaper')).toBeNull();
+        expect(screen.getByTestId('remote-window-video-wallpaper').style.opacity).toBe('0');
       });
       expect((video as HTMLVideoElement).style.visibility).toBe('visible');
     } finally {
@@ -1571,7 +1462,7 @@ describe('RemoteWindowOverlay', () => {
       });
 
       await waitFor(() => {
-        expect(screen.queryByTestId('remote-window-video-wallpaper')).toBeNull();
+        expect(screen.getByTestId('remote-window-video-wallpaper').style.opacity).toBe('0');
       });
       expect((video as HTMLVideoElement).style.visibility).toBe('visible');
     } finally {
@@ -1662,13 +1553,13 @@ describe('RemoteWindowOverlay', () => {
       fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
       await screen.findByTestId('remote-window-video');
       await waitFor(() => {
-        expect(screen.queryByTestId('remote-window-video-wallpaper')).toBeNull();
+        expect(screen.getByTestId('remote-window-video-wallpaper').style.opacity).toBe('0');
       });
 
       fireEvent.click(screen.getByRole('button', { name: '全屏远程窗口' }));
 
       expect(screen.getByTestId('remote-window-locked-overlay').getAttribute('data-mode')).toBe('fullscreen');
-      expect(screen.queryByTestId('remote-window-video-wallpaper')).toBeNull();
+      expect(screen.getByTestId('remote-window-video-wallpaper').style.opacity).toBe('0');
     } finally {
       playSpy.mockRestore();
     }
@@ -1712,7 +1603,7 @@ describe('RemoteWindowOverlay', () => {
     expect(startStream).toHaveBeenCalledWith('session-1', expect.objectContaining({
       streamTargetId: 'app-1',
     }), expect.stringMatching(/^rw-stream-/), {
-      purpose: 'preview',
+      purpose: 'focus',
       videoBitrate: {
         preset: '2mbps',
         bitrateMbps: 2,
@@ -1758,7 +1649,7 @@ describe('RemoteWindowOverlay', () => {
 
     expect(screen.getByTestId('remote-window-bitrate-select')).toHaveProperty('value', '20mbps');
     expect(updateStreamQuality).not.toHaveBeenCalled();
-    expect(startStream).toHaveBeenCalledTimes(2);
+    expect(startStream).toHaveBeenCalledTimes(1);
   });
 
   it('downgrades active stream quality from WebRTC stats without restarting the stream', async () => {
@@ -1805,9 +1696,9 @@ describe('RemoteWindowOverlay', () => {
         }),
       }));
     }, { timeout: 3500 });
-    expect(startStream).toHaveBeenCalledTimes(2);
+    expect(startStream).toHaveBeenCalledTimes(1);
 
-    expect(startStream).toHaveBeenCalledTimes(2);
+    expect(startStream).toHaveBeenCalledTimes(1);
   });
 
   it('keeps Android fullscreen projection from upgrading the desktop-area bitrate preset', async () => {
@@ -1847,7 +1738,7 @@ describe('RemoteWindowOverlay', () => {
     expect(startStream).toHaveBeenCalledWith('session-1', expect.objectContaining({
       streamTargetId: 'app-1',
     }), expect.stringMatching(/^rw-stream-/), {
-      purpose: 'preview',
+      purpose: 'focus',
       videoBitrate: { preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000, maxFrameRateFps: 30 },
     });
 
@@ -1877,7 +1768,7 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.pointerDown(surface, { pointerId: 2, pointerType: 'touch', clientX: 200, clientY: 100, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 2, pointerType: 'touch', clientX: 270, clientY: 100, button: 0, buttons: 1 });
 
-    expect(startStream).toHaveBeenCalledTimes(2);
+    expect(startStream).toHaveBeenCalledTimes(1);
     expect(updateStreamQuality).not.toHaveBeenCalled();
   });
 
@@ -1938,7 +1829,65 @@ describe('RemoteWindowOverlay', () => {
     });
   });
 
-  it('lets the remote window floating entry move instead of opening while dragged', async () => {
+  it('lets the floating entry toggle the picker open and closed like the file button', async () => {
+    const requestTargets = vi.fn(async () => ({
+      requestId: 'rw-1',
+      targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+    }));
+
+    render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} />);
+
+    const entry = screen.getByRole('button', { name: '打开远程窗口' });
+    fireEvent.click(entry);
+
+    await waitFor(() => {
+      expect(requestTargets).toHaveBeenCalledWith('session-1');
+      expect(screen.getByTestId('remote-window-picker')).toBeTruthy();
+      // picker 打开时浮钮仍在（与文件按键一致），再点关闭
+      expect(screen.getByRole('button', { name: '打开远程窗口' })).toBeTruthy();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('remote-window-picker')).toBeNull();
+      expect(screen.getByRole('button', { name: '打开远程窗口' })).toBeTruthy();
+    });
+  });
+
+  it('closes the picker from the floating entry while enumeration is still in flight', async () => {
+    let resolveTargets: (payload: RemoteWindowStreamTargetsResponsePayload) => void = () => {};
+    const requestTargets = vi.fn(() => new Promise<RemoteWindowStreamTargetsResponsePayload>((resolve) => {
+      resolveTargets = resolve;
+    }));
+
+    render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} />);
+
+    const entry = screen.getByRole('button', { name: '打开远程窗口' });
+    fireEvent.click(entry);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('remote-window-picker-loading')).toBeTruthy();
+    });
+
+    // 枚举尚未返回时再点浮钮关闭（与文件按键一致：直接关闭）
+    fireEvent.click(screen.getByRole('button', { name: '打开远程窗口' }));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('remote-window-picker')).toBeNull();
+    });
+
+    // 迟到的枚举结果不得复活 picker
+    await act(async () => {
+      resolveTargets({
+        requestId: 'rw-1',
+        targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
+      });
+    });
+    expect(screen.queryByTestId('remote-window-picker')).toBeNull();
+  });
+
+  it('moves the floating entry when dragged with mouse like the file bubble without opening the picker', async () => {
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-1',
       targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
@@ -1966,19 +1915,19 @@ describe('RemoteWindowOverlay', () => {
       }),
     });
 
-    fireEvent.pointerDown(entry, { pointerId: 9, pointerType: 'touch', clientX: 352, clientY: 742, button: 0 });
-    fireEvent.pointerMove(entry, { pointerId: 9, pointerType: 'touch', clientX: 280, clientY: 640, button: 0 });
-    fireEvent.pointerUp(entry, { pointerId: 9, pointerType: 'touch', clientX: 280, clientY: 640, button: 0 });
+    fireEvent.pointerDown(entry, { pointerId: 9, pointerType: 'mouse', clientX: 352, clientY: 742, button: 0 });
+    fireEvent.pointerMove(entry, { pointerId: 9, pointerType: 'mouse', clientX: 280, clientY: 640, button: 0 });
+    fireEvent.pointerUp(entry, { pointerId: 9, pointerType: 'mouse', clientX: 280, clientY: 640, button: 0 });
     fireEvent.click(entry);
 
     expect(requestTargets).not.toHaveBeenCalled();
-    expect(entry.getAttribute('style') || '').toContain('transform: translate(-72px, -102px)');
+    expect(entry.getAttribute('style') || '').toContain('left: 258px; top: 618px');
     expect(screen.queryByTestId('remote-window-picker')).toBeNull();
     expect(setPointerCapture).toHaveBeenCalledWith(9);
     expect(releasePointerCapture).toHaveBeenCalledWith(9);
   });
 
-  it('keeps moving the floating entry when Android WebView delivers drag moves to window', async () => {
+  it('moves the floating entry when dragged with touch like the file bubble without opening the picker', async () => {
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-1',
       targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
@@ -2002,18 +1951,17 @@ describe('RemoteWindowOverlay', () => {
       }),
     });
 
-    fireEvent.pointerDown(entry, { pointerId: 19, pointerType: 'touch', clientX: 352, clientY: 742, button: 0 });
-    fireEvent.pointerMove(window, { pointerId: 19, pointerType: 'touch', clientX: 210, clientY: 520, button: 0 });
-    fireEvent.pointerUp(window, { pointerId: 19, pointerType: 'touch', clientX: 210, clientY: 520, button: 0 });
+    fireEvent.touchStart(entry, { touches: [{ clientX: 352, clientY: 742 }] });
+    fireEvent.touchMove(entry, { touches: [{ clientX: 280, clientY: 640 }] });
+    fireEvent.touchEnd(entry);
     fireEvent.click(entry);
 
     expect(requestTargets).not.toHaveBeenCalled();
-    expect(entry.getAttribute('style') || '').toContain('transform: translate(-142px, -222px)');
+    expect(entry.getAttribute('style') || '').toContain('left: 258px; top: 618px');
     expect(screen.queryByTestId('remote-window-picker')).toBeNull();
   });
 
-  it('lets a long press arm remote window entry dragging before the touch moves', async () => {
-    vi.useFakeTimers();
+  it('keeps the floating entry position stable across repeated drags without drift', async () => {
     const requestTargets = vi.fn(async () => ({
       requestId: 'rw-1',
       targets: [makeTarget('app-1', 'TextEdit', 'app-window')],
@@ -2022,31 +1970,35 @@ describe('RemoteWindowOverlay', () => {
     render(<RemoteWindowOverlay activeSessionId="session-1" requestTargets={requestTargets} />);
 
     const entry = screen.getByRole('button', { name: '打开远程窗口' });
+    const baseRect = { x: 330, y: 720, left: 330, top: 720, right: 374, bottom: 764, width: 44, height: 44, toJSON: () => ({}) };
     Object.defineProperty(entry, 'getBoundingClientRect', {
       configurable: true,
-      value: () => ({
-        x: 330,
-        y: 720,
-        left: 330,
-        top: 720,
-        right: 374,
-        bottom: 764,
-        width: 44,
-        height: 44,
-        toJSON: () => ({}),
-      }),
+      value: () => {
+        // 第二次拖动时元素已用 left/top 定位，rect 应反映当前位置（关键防漂移点）
+        const style = entry.getAttribute('style') || '';
+        const leftMatch = /left: (\d+)px/.exec(style);
+        const topMatch = /top: (\d+)px/.exec(style);
+        if (leftMatch && topMatch) {
+          const left = Number(leftMatch[1]);
+          const top = Number(topMatch[1]);
+          return { ...baseRect, x: left, y: top, left, top, right: left + 44, bottom: top + 44 };
+        }
+        return baseRect;
+      },
     });
 
-    fireEvent.pointerDown(entry, { pointerId: 29, pointerType: 'touch', clientX: 352, clientY: 742, button: 0 });
-    await act(async () => {
-      vi.advanceTimersByTime(300);
-    });
-    fireEvent.pointerMove(window, { pointerId: 29, pointerType: 'touch', clientX: 300, clientY: 690, button: 0 });
-    fireEvent.pointerUp(window, { pointerId: 29, pointerType: 'touch', clientX: 300, clientY: 690, button: 0 });
-    fireEvent.click(entry);
+    // 第一次拖：330,720 -> 258,618
+    fireEvent.touchStart(entry, { touches: [{ clientX: 352, clientY: 742 }] });
+    fireEvent.touchMove(entry, { touches: [{ clientX: 280, clientY: 640 }] });
+    fireEvent.touchEnd(entry);
+    expect(entry.getAttribute('style') || '').toContain('left: 258px; top: 618px');
 
+    // 第二次拖：从当前 258,618 位置继续拖 (-80,-140) -> 178,478，不得跳回原始位置
+    fireEvent.touchStart(entry, { touches: [{ clientX: 280, clientY: 640 }] });
+    fireEvent.touchMove(entry, { touches: [{ clientX: 200, clientY: 500 }] });
+    fireEvent.touchEnd(entry);
+    expect(entry.getAttribute('style') || '').toContain('left: 178px; top: 478px');
     expect(requestTargets).not.toHaveBeenCalled();
-    expect(entry.getAttribute('style') || '').toContain('transform: translate(-52px, -52px)');
     expect(screen.queryByTestId('remote-window-picker')).toBeNull();
   });
 
@@ -2775,9 +2727,9 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(screen.getByTestId('remote-window-target-app-1'));
     await screen.findByTestId('remote-window-video');
     await waitFor(() => {
-      expect(startStream).toHaveBeenCalledTimes(2);
+      expect(startStream).toHaveBeenCalledTimes(1);
     });
-    const streamId = startStream.mock.calls[1]?.[2] || '';
+    const streamId = startStream.mock.calls[0]?.[2] || '';
     expect(streamId).toEqual(expect.stringMatching(/^rw-stream-/));
 
     rerender(
@@ -3278,9 +3230,9 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.click(await screen.findByTestId('remote-window-target-app-1'));
     await screen.findByTestId('remote-window-video');
     await waitFor(() => {
-      expect(startStream).toHaveBeenCalledTimes(2);
+      expect(startStream).toHaveBeenCalledTimes(1);
     });
-    const streamId = startStream.mock.calls[1]?.[2] || '';
+    const streamId = startStream.mock.calls[0]?.[2] || '';
 
     act(() => {
       remoteWindowMessageHandler?.({

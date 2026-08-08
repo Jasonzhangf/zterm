@@ -72,6 +72,8 @@ public class MainActivity extends BridgeActivity {
             settings.setSupportZoom(false);
             settings.setBuiltInZoomControls(false);
             settings.setDisplayZoomControls(false);
+            // WebView 自身背景与终端表面一致：内容/首帧未就绪时也不露白屏
+            wv.setBackgroundColor(0xFF1E1E1E);
             // Block Android WebView native long-press so its floating selection
             // ActionMode toolbar (全选 / 剪切 / 复制 / 分享) does NOT appear.
             // JS touch events are received in real-time BEFORE this listener

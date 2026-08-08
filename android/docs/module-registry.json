@@ -1296,6 +1296,7 @@
       "status": "active",
       "owned_paths": [
         "src/components/terminal/RemoteWindowOverlay.tsx",
+        "src/components/terminal/draggable-bubble-shared.ts",
         "src/contexts/session-context-remote-window-runtime.ts",
         "src/lib/remote-window-input-mapping.ts",
         "src/lib/remote-window-message-runtime.ts",
