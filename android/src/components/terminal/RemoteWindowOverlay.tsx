@@ -325,6 +325,7 @@ const FLOATING_OVERLAY_TOOLBAR_ESTIMATE_PX = 50;
 const REMOTE_WINDOW_FULLSCREEN_MIN_SCALE = 1;
 const REMOTE_WINDOW_FULLSCREEN_MAX_SCALE = 4;
 const REMOTE_WINDOW_FULLSCREEN_PAN_TAP_THRESHOLD_PX = 8;
+const REMOTE_WINDOW_SECOND_FINGER_UPGRADE_PX = 8;
 
 const REMOTE_WINDOW_CATALOG_UI_TIMEOUT_MS = 20_000;
 const REMOTE_WINDOW_CATALOG_PROJECTION_CACHE_TTL_MS = 60_000;
@@ -333,6 +334,11 @@ const REMOTE_WINDOW_THUMBNAIL_REFRESH_INTERVAL_MS = 15_000;
 const REMOTE_WINDOW_THUMBNAIL_MAX_REQUESTS_PER_TICK = 1;
 const REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_STORAGE_KEY = 'zterm:remote-window:touch-scroll-fraction-v1';
 const REMOTE_WINDOW_TOUCH_SCROLL_INVERTED_STORAGE_KEY = 'zterm:remote-window:touch-scroll-inverted-v1';
+const REMOTE_WINDOW_INPUT_MODE_STORAGE_KEY = 'zterm:remote-window:input-mode-v1';
+const REMOTE_WINDOW_DOUBLE_TAP_MS = 300;
+const REMOTE_WINDOW_DOUBLE_TAP_SLOP_PX = 8;
+
+type RemoteWindowInputMode = 'touch' | 'mouse';
 
 const initialFullscreenViewport: FullscreenViewportState = {
   scale: 1,
@@ -699,6 +705,8 @@ function toRemoteWindowTouchGestureState(
   if (
     gesture.mode === 'actionPending'
     || gesture.mode === 'actionDrag'
+    || gesture.mode === 'actionScroll'
+    || gesture.mode === 'actionLongPress'
     || gesture.mode === 'twoFingerCandidate'
     || gesture.mode === 'twoFingerScroll'
     || gesture.mode === 'pinch'
@@ -771,6 +779,21 @@ function writeRemoteWindowTouchScrollInverted(inverted: boolean) {
     return;
   }
   window.localStorage.setItem(REMOTE_WINDOW_TOUCH_SCROLL_INVERTED_STORAGE_KEY, inverted ? 'true' : 'false');
+}
+
+function readRemoteWindowInputMode(): RemoteWindowInputMode {
+  if (typeof window === 'undefined') {
+    return 'touch';
+  }
+  const raw = window.localStorage.getItem(REMOTE_WINDOW_INPUT_MODE_STORAGE_KEY);
+  return raw === 'mouse' ? 'mouse' : 'touch';
+}
+
+function writeRemoteWindowInputMode(mode: RemoteWindowInputMode) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+  window.localStorage.setItem(REMOTE_WINDOW_INPUT_MODE_STORAGE_KEY, mode);
 }
 
 function formatTargetSubtitle(target: RemoteWindowStreamTargetManifest) {
@@ -884,6 +907,19 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const [bitratePreset, setBitratePreset] = useState<RemoteWindowVideoBitratePreset>('5mbps');
   const [touchScrollFraction, setTouchScrollFractionState] = useState<RemoteWindowTouchScrollFraction>(() => readRemoteWindowTouchScrollFraction());
   const [touchScrollInverted, setTouchScrollInvertedState] = useState(() => readRemoteWindowTouchScrollInverted());
+  const [inputMode, setInputMode] = useState<RemoteWindowInputMode>(() => readRemoteWindowInputMode());
+  const inputModeRef = useRef(inputMode);
+  const secondPointerPendingRef = useRef<{
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+    downTimeMs: number;
+  } | null>(null);
+  const lastTapRef = useRef<{
+    atMs: number;
+    clientX: number;
+    clientY: number;
+  } | null>(null);
   const [networkQuality, setNetworkQuality] = useState<RemoteWindowNetworkQualityInput | null>(() => readRemoteWindowNetworkQuality());
   const [videoHasPlayed, setVideoHasPlayedState] = useState(false);
   const videoHasPlayedRef = useRef(false);
@@ -1342,6 +1378,25 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     surfaceGestureRef.current = null;
     surfacePinchStartRef.current = null;
   }, []);
+
+  const handleDoubleTapZoom = useCallback((clientX: number, clientY: number) => {
+    const surface = readVideoSurfaceSize();
+    if (!surface) {
+      return;
+    }
+    setFullscreenViewport((current) => {
+      if (current.scale > 1.01) {
+        return { scale: 1, panX: 0, panY: 0 };
+      }
+      const scale = Math.min(REMOTE_WINDOW_FULLSCREEN_MAX_SCALE, current.scale * 2);
+      const ratio = scale / current.scale;
+      return {
+        scale,
+        panX: clientX - (clientX - current.panX) * ratio,
+        panY: clientY - (clientY - current.panY) * ratio,
+      };
+    });
+  }, [readVideoSurfaceSize, setFullscreenViewport]);
 
   const setFullscreenDisplayMode = useCallback((next: FullscreenDisplayMode) => {
     fullscreenDisplayModeRef.current = next;
@@ -1914,6 +1969,15 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const handleToggleTouchScrollDirection = useCallback(() => {
     setTouchScrollInverted((current) => !current);
   }, [setTouchScrollInverted]);
+
+  const handleToggleInputMode = useCallback(() => {
+    setInputMode((current) => {
+      const next: RemoteWindowInputMode = current === 'touch' ? 'mouse' : 'touch';
+      inputModeRef.current = next;
+      writeRemoteWindowInputMode(next);
+      return next;
+    });
+  }, []);
 
   const effectiveBitratePreset = state.phase === 'targetLocked'
     ? resolveEffectiveRemoteWindowVideoBitratePreset(bitratePreset, {
@@ -3025,6 +3089,24 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
 
     const pointers = Array.from(surfacePointersRef.current.entries());
     if (pointers.length >= 2 && event.pointerType === 'touch') {
+      const currentGesture = surfaceGestureRef.current;
+      if (currentGesture && currentGesture.mode === 'localPan') {
+        // 第一指平移画布中：第二指按下只记"待定"，独立位移 ≥8px 才升级双指手势，
+        // 防止"单指移动被识别为 pinch 缩小"误判（放大态单指 localPan 场景）
+        secondPointerPendingRef.current = {
+          pointerId: event.pointerId,
+          clientX: event.clientX,
+          clientY: event.clientY,
+          downTimeMs: event.timeStamp,
+        };
+        surfacePointersRef.current.set(event.pointerId, {
+          clientX: event.clientX,
+          clientY: event.clientY,
+        });
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       const [firstEntry, secondEntry] = pointers.slice(-2) as [
         [number, SurfacePointerPosition],
         [number, SurfacePointerPosition],
@@ -3073,6 +3155,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       zoomedProjection: event.pointerType === 'touch'
         && state.mode === 'fullscreen'
         && fullscreenViewportRef.current.scale > 1.01,
+      touchMode: inputModeRef.current === 'touch',
     });
     applyRemoteWindowTouchPointerResult(result);
     event.preventDefault();
@@ -3097,6 +3180,50 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       clientX: event.clientX,
       clientY: event.clientY,
     });
+
+    // 第二指待定升级：独立位移 ≥8px 才升级为双指手势（localPan 期间第二指轻触不抢手势）
+    const pendingSecond = secondPointerPendingRef.current;
+    if (pendingSecond && pendingSecond.pointerId === event.pointerId) {
+      const pendingDelta = Math.hypot(
+        event.clientX - pendingSecond.clientX,
+        event.clientY - pendingSecond.clientY,
+      );
+      if (pendingDelta >= REMOTE_WINDOW_SECOND_FINGER_UPGRADE_PX) {
+        const currentGesture = surfaceGestureRef.current;
+        if (currentGesture && currentGesture.mode === 'localPan') {
+          const first = surfacePointersRef.current.get(currentGesture.pointerId);
+          if (first) {
+            const pairResult = resolveRemoteWindowTouchPairPointerDownRuntime({
+              firstPointer: {
+                pointerId: currentGesture.pointerId,
+                pointerType: 'touch',
+                clientX: first.clientX,
+                clientY: first.clientY,
+                timeMs: event.timeStamp,
+              },
+              secondPointer: {
+                pointerId: pendingSecond.pointerId,
+                pointerType: 'touch',
+                clientX: event.clientX,
+                clientY: event.clientY,
+                timeMs: event.timeStamp,
+              },
+              timeMs: event.timeStamp,
+              pinchEnabled: state.mode === 'fullscreen',
+              scrollEnabled: true,
+            });
+            surfaceGestureRef.current = pairResult.nextState;
+            surfaceLocalPanStartRef.current = null;
+            secondPointerPendingRef.current = null;
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
+        }
+        secondPointerPendingRef.current = null;
+      }
+    }
+
     const gesture = surfaceGestureRef.current;
     if (!gesture) {
       return;
@@ -3157,6 +3284,9 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           state: runtimeGesture,
           pointer: pointerSampleFromReactEvent(event),
           geometry,
+          touchMode: inputModeRef.current === 'touch',
+          scrollFraction: touchScrollFractionRef.current,
+          invertGestureDirection: touchScrollInvertedRef.current,
         });
         applyRemoteWindowTouchPointerResult(result);
         if (result.consumed) {
@@ -3191,6 +3321,9 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   ]);
 
   const handleVideoSurfacePointerUp = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    if (secondPointerPendingRef.current?.pointerId === event.pointerId) {
+      secondPointerPendingRef.current = null;
+    }
     const gesture = surfaceGestureRef.current;
     if (gesture) {
       surfacePointersRef.current.set(event.pointerId, {
@@ -3214,7 +3347,46 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           geometry,
           scrollFraction: touchScrollFractionRef.current,
           invertGestureDirection: false,
+          touchMode: inputModeRef.current === 'touch',
         });
+        // 触控模式 fullscreen 双击：本地缩放（绕触点），抑制第二次 click 注入
+        const isLeftClick = result.remoteEvents.some(
+          (remoteEvent) => remoteEvent.kind === 'click' && remoteEvent.button === 'left',
+        );
+        if (
+          isLeftClick
+          && state.phase === 'targetLocked'
+          && state.mode === 'fullscreen'
+          && inputModeRef.current === 'touch'
+          && event.pointerType === 'touch'
+        ) {
+          const now = event.timeStamp;
+          const lastTap = lastTapRef.current;
+          if (
+            lastTap
+            && now - lastTap.atMs <= REMOTE_WINDOW_DOUBLE_TAP_MS
+            && Math.hypot(event.clientX - lastTap.clientX, event.clientY - lastTap.clientY) <= REMOTE_WINDOW_DOUBLE_TAP_SLOP_PX
+          ) {
+            lastTapRef.current = null;
+            const filtered: typeof result.remoteEvents = [];
+            handleDoubleTapZoom(event.clientX, event.clientY);
+            applyRemoteWindowTouchPointerResult({ ...result, remoteEvents: filtered });
+            if (result.consumed) {
+              surfacePointersRef.current.delete(event.pointerId);
+              event.preventDefault();
+              event.stopPropagation();
+              return;
+            }
+            event.preventDefault();
+            event.stopPropagation();
+            return;
+          }
+          lastTapRef.current = {
+            atMs: now,
+            clientX: event.clientX,
+            clientY: event.clientY,
+          };
+        }
         applyRemoteWindowTouchPointerResult(result);
         if (result.consumed) {
           surfacePointersRef.current.delete(event.pointerId);
@@ -4267,6 +4439,16 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
             style={touchScrollInverted ? styles.headerModeButtonActive : styles.headerModeButton}
           >
             {touchScrollInverted ? '反向' : '正向'}
+          </button>
+          <button
+            type="button"
+            data-testid="remote-window-input-mode-toggle"
+            data-no-drag="true"
+            aria-label={inputMode === 'touch' ? '切换为鼠标模式' : '切换为触控模式'}
+            onClick={handleToggleInputMode}
+            style={inputMode === 'touch' ? styles.headerModeButtonActive : styles.headerModeButton}
+          >
+            {inputMode === 'touch' ? '触控' : '鼠标'}
           </button>
           <button
             type="button"

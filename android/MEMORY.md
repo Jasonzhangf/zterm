@@ -1516,3 +1516,12 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - **"黑屏闪一下"根因**：`setReceiverMediaStream(focus)` 渲染瞬间 video 内容清空（readyState=0）而 wallpaper 遮罩在 useEffect 异步设置、滞后一帧 → 空窗露黑。修复：srcObject 切换同一批次同步隐藏 video。
 - **"冻结"根因**：用户串流静止窗口（微信，framesSent=1）→ ScreenCaptureKit 只出首帧。静止窗口冻结是正常行为；ticker（在动）daemon 发 30-87 帧。判别用 daemon stdout `framesSent` 日志。
 - **测试**：RemoteWindowOverlay.test.tsx 从 78 删 3 canvas 专属 + 改 11 个双流断言（startStream 调用次数/索引/purpose: 'preview'→'focus'），75 全绿。版本 0.1.3.2483 已发布 OTA。
+
+## 2026-08-08 remote-window 触控输入重构（双模式，2484）
+- **设计文档**：`android/docs/decisions/2026-08-08-remote-window-touch-input-rework-design.md`（APPROVED，4 决策点：默认触控模式/单指未放大=滚动/双击缩放/长按右键）
+- **双模式**：toolbar「触控/鼠标」切换（localStorage `zterm:remote-window:input-mode-v1`，默认 touch）。触控模式注入 click/scroll action 不模拟鼠标拖动；鼠标模式保留 pointer drag 语义。
+- **触控模式手势表**：单指 tap=click、单指拖动=增量 scroll（move 实时注入）、长按(>500ms)=右键、双指同向=scroll、双指反向=pinch（本地缩放）、双击=放大/恢复（fullscreen）、放大后单指=localPan、放大后双指滚动=scroll。
+- **仲裁**：双指观察期（120ms 或 1 move）→ 方向判定（isPinchIntentPair 反向投影阈值 8px，防"近平行误判 pinch"）→ scroll/pinch 锁定；单指 localPan 中第二指 down 只记 pending，独立位移 ≥8px 才升级双指（防"单指移动变 pinch 缩小"）。阈值参数化：OBSERVE_MS=120/OBSERVE_MOVES=1/PINCH_MIN_SCALE_RATIO=0.08/SCROLL_MIN_MIDPOINT_PX=8/LONG_PRESS_MS=500。
+- **虚拟鼠标消除**：wire scroll 加 `moveCursor?: boolean`（缺省 true），触控模式单指/双指 scroll 一律 `moveCursor:false`；daemon `postScrollEvent` 加 moveCursor 参数（false 跳过 postMouseMove）。
+- **新 mode**：actionScroll（触控单指滚动）/ actionLongPress（已发右键）；`toRemoteWindowTouchGestureState` 必须包含新 mode（漏了会转 idle 导致后续 move 丢失——已修）。
+- 验证：runtime 18 + overlay 75 + shared 9 + daemon 59 全绿；type-check 0（shared 40 预存错误与本次无关）；APK 0.1.3.2484 已发布 OTA + 装机 15t-1。真机手势验证待用户。

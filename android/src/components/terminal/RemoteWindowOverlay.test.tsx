@@ -2676,26 +2676,21 @@ describe('RemoteWindowOverlay', () => {
 
     fireEvent.pointerDown(surface, { pointerId: 21, pointerType: 'touch', clientX: 100, clientY: 70, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 21, pointerType: 'touch', clientX: 100, clientY: 40, button: 0, buttons: 1 });
-    expect(sendInput).not.toHaveBeenCalled();
+    await waitForActionRemoteInputCount(sendInput, 1);
     fireEvent.pointerUp(surface, { pointerId: 21, pointerType: 'touch', clientX: 100, clientY: 40, button: 0, buttons: 0 });
     await waitForActionRemoteInputCount(sendInput, 1);
     expectEveryRemoteInputIsActionOnly(sendInput);
     expect(remoteInputPayloads(sendInput).map((payload) => payload.event.kind)).toEqual([
-      'gesture',
+      'scroll',
     ]);
 
     expect(actionRemoteInputPayloads(sendInput).map((payload) => payload.event)).toEqual([
       expect.objectContaining({
-        kind: 'gesture',
-        gesture: 'swipe',
-        phase: 'end',
-        pointerId: 21,
-        startNormalizedX: 0.5,
-        startNormalizedY: 0.7,
+        kind: 'scroll',
+        unit: 'pixel',
+        deltaX: 0,
         normalizedX: 0.5,
         normalizedY: 0.4,
-        deltaX: 0,
-        deltaY: -140,
       }),
     ]);
   });
@@ -2796,23 +2791,18 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.pointerMove(surface, { pointerId: 22, pointerType: 'touch', clientX: 120, clientY: 64, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 22, pointerType: 'touch', clientX: 120, clientY: 52, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 22, pointerType: 'touch', clientX: 120, clientY: 40, button: 0, buttons: 1 });
-    expect(sendInput).not.toHaveBeenCalled();
+    await waitForActionRemoteInputCount(sendInput, 3);
     fireEvent.pointerUp(surface, { pointerId: 22, pointerType: 'touch', clientX: 120, clientY: 40, button: 0, buttons: 0 });
-    await waitForActionRemoteInputCount(sendInput, 1);
+    await waitForActionRemoteInputCount(sendInput, 3);
     expectEveryRemoteInputIsActionOnly(sendInput);
     const events = actionRemoteInputPayloads(sendInput).map((payload) => payload.event);
-    expect(events.map((event) => event.kind)).toEqual(['gesture']);
+    expect(events.every((event) => event.kind === 'scroll')).toBe(true);
     expect(events[0]).toMatchObject({
-      kind: 'gesture',
-      gesture: 'swipe',
-      phase: 'end',
-      pointerId: 22,
-      startNormalizedX: 0.64,
-      startNormalizedY: 0.8,
-      normalizedX: 0.64,
-      normalizedY: 0.4,
+      kind: 'scroll',
+      unit: 'pixel',
       deltaX: 0,
-      deltaY: -140,
+      normalizedX: 0.64,
+      normalizedY: 0.64,
     });
   });
 
@@ -2864,10 +2854,13 @@ describe('RemoteWindowOverlay', () => {
     fireEvent.pointerDown(surface, { pointerId: 23, pointerType: 'touch', clientX: 120, clientY: 80, button: 0, buttons: 1 });
     vi.advanceTimersByTime(20);
     fireEvent.pointerMove(surface, { pointerId: 23, pointerType: 'touch', clientX: 120, clientY: 40, button: 0, buttons: 1 });
+    // move 实时发 1 个 scroll（触控模式增量滚动；fake timers 下同步断言）
+    expect(sendInput).toHaveBeenCalledTimes(1);
     vi.advanceTimersByTime(1_001);
     fireEvent.pointerUp(surface, { pointerId: 23, pointerType: 'touch', clientX: 120, clientY: 40, button: 0, buttons: 0 });
 
-    expect(sendInput).not.toHaveBeenCalled();
+    // stale up 不追加任何事件（滚动已实时注入）
+    expect(sendInput).toHaveBeenCalledTimes(1);
   });
 
   it('sizes the receiver projection from daemon capture frame aspect after stream start', async () => {
@@ -2954,7 +2947,7 @@ describe('RemoteWindowOverlay', () => {
 
     fireEvent.pointerDown(surface, { pointerId: 52, pointerType: 'touch', clientX: 120, clientY: 300, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 52, pointerType: 'touch', clientX: 120, clientY: 250, button: 0, buttons: 1 });
-    expect(sendInput).not.toHaveBeenCalled();
+    await waitForActionRemoteInputCount(sendInput, 1);
     fireEvent.pointerUp(surface, { pointerId: 52, pointerType: 'touch', clientX: 120, clientY: 250, button: 0, buttons: 0 });
 
     await waitForActionRemoteInputCount(sendInput, 1);
@@ -2962,12 +2955,9 @@ describe('RemoteWindowOverlay', () => {
     expectEveryRemoteInputIsActionOnly(sendInput);
     expect(actionRemoteInputPayloads(sendInput).map((payload) => payload.event)).toEqual([
       expect.objectContaining({
-        kind: 'gesture',
-        gesture: 'swipe',
-        phase: 'end',
-        pointerId: 52,
+        kind: 'scroll',
+        unit: 'pixel',
         deltaX: 0,
-        deltaY: -140,
       }),
     ]);
     expect(Number.parseFloat(content.style.top || '0')).toBeCloseTo(topBeforeScroll, 1);
@@ -3974,19 +3964,16 @@ describe('RemoteWindowOverlay', () => {
 
     fireEvent.pointerDown(surface, { pointerId: 41, pointerType: 'touch', clientX: 120, clientY: 300, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 41, pointerType: 'touch', clientX: 120, clientY: 250, button: 0, buttons: 1 });
-    expect(sendInput).not.toHaveBeenCalled();
+    await waitForActionRemoteInputCount(sendInput, 1);
     fireEvent.pointerUp(surface, { pointerId: 41, pointerType: 'touch', clientX: 120, clientY: 250, button: 0, buttons: 0 });
 
     await waitForActionRemoteInputCount(sendInput, 1);
     expectNoRemoteInputFocus(sendInput);
     expect(actionRemoteInputPayloads(sendInput).map((payload) => payload.event)).toEqual([
       expect.objectContaining({
-        kind: 'gesture',
-        gesture: 'swipe',
-        phase: 'end',
-        pointerId: 41,
+        kind: 'scroll',
+        unit: 'pixel',
         deltaX: 0,
-        deltaY: -140,
       }),
     ]);
     expect(Number.parseFloat(content.style.top || '0')).toBeCloseTo(topBeforePan, 1);
@@ -4110,19 +4097,16 @@ describe('RemoteWindowOverlay', () => {
 
     fireEvent.pointerDown(surface, { pointerId: 51, pointerType: 'touch', clientX: 120, clientY: 300, button: 0, buttons: 1 });
     fireEvent.pointerMove(surface, { pointerId: 51, pointerType: 'touch', clientX: 120, clientY: 220, button: 0, buttons: 1 });
-    expect(sendInput).not.toHaveBeenCalled();
+    await waitForActionRemoteInputCount(sendInput, 1);
     fireEvent.pointerUp(surface, { pointerId: 51, pointerType: 'touch', clientX: 120, clientY: 220, button: 0, buttons: 0 });
 
     await waitForActionRemoteInputCount(sendInput, 1);
     expectNoRemoteInputFocus(sendInput);
     expect(actionRemoteInputPayloads(sendInput).map((payload) => payload.event)).toEqual([
       expect.objectContaining({
-        kind: 'gesture',
-        gesture: 'swipe',
-        phase: 'end',
-        pointerId: 51,
+        kind: 'scroll',
+        unit: 'pixel',
         deltaX: 0,
-        deltaY: -125,
       }),
     ]);
     expect(Number.parseFloat(content.style.top || '0')).toBeCloseTo(0, 1);

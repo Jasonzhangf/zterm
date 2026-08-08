@@ -11,6 +11,8 @@ import {
   resolveRemoteWindowTouchPointerDownRuntime,
   resolveRemoteWindowTouchPointerMoveRuntime,
   resolveRemoteWindowTouchPointerUpRuntime,
+  resolveRemoteWindowTouchPairPointerDownRuntime,
+  resolveRemoteWindowTouchPairPointerMoveRuntime,
 } from './remote-window-touch-action-runtime';
 
 function makeTarget(overrides: Partial<RemoteWindowStreamTargetManifest> = {}): RemoteWindowStreamTargetManifest {
@@ -473,5 +475,261 @@ describe('remote-window-touch-action-runtime', () => {
     });
     expect(cancel.nextState.mode).toBe('idle');
     expect(cancel.remoteEvents).toEqual([]);
+  });
+
+  describe('touch mode single-finger actions', () => {
+    it('maps a touch tap to one left click in touch mode', () => {
+      const down = resolveRemoteWindowTouchPointerDownRuntime({
+        state: createRemoteWindowTouchPointerState(),
+        pointer: pointer({ clientX: 110, clientY: 70 }),
+        geometry,
+        zoomedProjection: false,
+        touchMode: true,
+      });
+      expect(down.nextState.mode).toBe('actionPending');
+
+      const up = resolveRemoteWindowTouchPointerUpRuntime({
+        state: down.nextState,
+        pointer: pointer({ clientX: 110, clientY: 70, buttons: 0, timeMs: 1_020 }),
+        geometry,
+        touchMode: true,
+      });
+      expect(up.nextState.mode).toBe('idle');
+      expect(up.remoteEvents).toEqual([
+        expect.objectContaining({ kind: 'click', button: 'left' }),
+      ]);
+    });
+
+    it('maps a touch drag to incremental scroll actions instead of mouse drag in touch mode', () => {
+      const down = resolveRemoteWindowTouchPointerDownRuntime({
+        state: createRemoteWindowTouchPointerState(),
+        pointer: pointer({ clientX: 110, clientY: 70 }),
+        geometry,
+        zoomedProjection: false,
+        touchMode: true,
+      });
+      const moveIntoScroll = resolveRemoteWindowTouchPointerMoveRuntime({
+        state: down.nextState,
+        pointer: pointer({ clientX: 110, clientY: 90, timeMs: 1_030 }),
+        geometry,
+        touchMode: true,
+      });
+      expect(moveIntoScroll.nextState.mode).toBe('actionScroll');
+      expect(moveIntoScroll.remoteEvents.length).toBe(1);
+      expect(moveIntoScroll.remoteEvents[0].kind).toBe('scroll');
+
+      const scrollMove = resolveRemoteWindowTouchPointerMoveRuntime({
+        state: moveIntoScroll.nextState,
+        pointer: pointer({ clientX: 110, clientY: 110, timeMs: 1_050 }),
+        geometry,
+        touchMode: true,
+        scrollFraction: 1,
+      });
+      expect(scrollMove.nextState.mode).toBe('actionScroll');
+      expect(scrollMove.remoteEvents.length).toBe(1);
+      const event = scrollMove.remoteEvents[0];
+      expect(event.kind).toBe('scroll');
+      if (event.kind === 'scroll') {
+        expect(event.deltaY).not.toBe(0);
+      }
+
+      const up = resolveRemoteWindowTouchPointerUpRuntime({
+        state: scrollMove.nextState,
+        pointer: pointer({ clientX: 110, clientY: 110, buttons: 0, timeMs: 1_060 }),
+        geometry,
+        touchMode: true,
+      });
+      expect(up.nextState.mode).toBe('idle');
+      expect(up.remoteEvents).toEqual([]);
+    });
+
+    it('fires a right click on long press in touch mode', () => {
+      const down = resolveRemoteWindowTouchPointerDownRuntime({
+        state: createRemoteWindowTouchPointerState(),
+        pointer: pointer({ clientX: 110, clientY: 70 }),
+        geometry,
+        zoomedProjection: false,
+        touchMode: true,
+      });
+      const longPress = resolveRemoteWindowTouchPointerMoveRuntime({
+        state: down.nextState,
+        pointer: pointer({ clientX: 110, clientY: 70, timeMs: 1_600 }),
+        geometry,
+        touchMode: true,
+      });
+      expect(longPress.nextState.mode).toBe('actionLongPress');
+      expect(longPress.remoteEvents).toEqual([
+        expect.objectContaining({ kind: 'click', button: 'right' }),
+      ]);
+
+      const up = resolveRemoteWindowTouchPointerUpRuntime({
+        state: longPress.nextState,
+        pointer: pointer({ clientX: 110, clientY: 70, buttons: 0, timeMs: 1_620 }),
+        geometry,
+        touchMode: true,
+      });
+      expect(up.nextState.mode).toBe('idle');
+      expect(up.remoteEvents).toEqual([]);
+    });
+
+    it('keeps touch mode mouse drag path unchanged for mouse pointers', () => {
+      const down = resolveRemoteWindowTouchPointerDownRuntime({
+        state: createRemoteWindowTouchPointerState(),
+        pointer: pointer({ pointerType: 'mouse', clientX: 110, clientY: 70 }),
+        geometry,
+        zoomedProjection: false,
+        touchMode: true,
+      });
+      expect(down.nextState.mode).toBe('actionPending');
+      const drag = resolveRemoteWindowTouchPointerMoveRuntime({
+        state: down.nextState,
+        pointer: pointer({ pointerType: 'mouse', clientX: 130, clientY: 90, timeMs: 1_030 }),
+        geometry,
+        touchMode: true,
+      });
+      expect(drag.nextState.mode).toBe('actionDrag');
+    });
+  });
+
+  describe('two-finger gesture arbitration', () => {
+    function pairDown(first: { clientX: number; clientY: number }, second: { clientX: number; clientY: number }) {
+      return resolveRemoteWindowTouchPairPointerDownRuntime({
+        firstPointer: {
+          pointerId: 1,
+          pointerType: 'touch',
+          clientX: first.clientX,
+          clientY: first.clientY,
+          timeMs: 1_000,
+        },
+        secondPointer: {
+          pointerId: 2,
+          pointerType: 'touch',
+          clientX: second.clientX,
+          clientY: second.clientY,
+          timeMs: 1_000,
+        },
+        timeMs: 1_000,
+        pinchEnabled: true,
+        scrollEnabled: true,
+      });
+    }
+
+    it('keeps both fingers inside the observe window without committing', () => {
+      const candidate = pairDown({ clientX: 100, clientY: 60 }, { clientX: 120, clientY: 60 });
+      expect(candidate.nextState.mode).toBe('twoFingerCandidate');
+      const move = resolveRemoteWindowTouchPairPointerMoveRuntime({
+        state: candidate.nextState,
+        pair: {
+          first: { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: 80, timeMs: 1_050 },
+          second: { pointerId: 2, pointerType: 'touch', clientX: 120, clientY: 80, timeMs: 1_050 },
+        },
+        geometry,
+        timeMs: 1_050,
+        pinchEnabled: true,
+        scrollEnabled: true,
+      });
+      expect(move.nextState.mode).toBe('twoFingerCandidate');
+      expect(move.remoteEvents).toEqual([]);
+    });
+
+    it('commits same-direction two-finger motion to scroll after the observe window', () => {
+      const candidate = pairDown({ clientX: 100, clientY: 60 }, { clientX: 120, clientY: 60 });
+      // 观察期 2 个 move（moveCount 0→1→2）
+      const observe1 = resolveRemoteWindowTouchPairPointerMoveRuntime({
+        state: candidate.nextState,
+        pair: {
+          first: { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: 80, timeMs: 1_050 },
+          second: { pointerId: 2, pointerType: 'touch', clientX: 120, clientY: 80, timeMs: 1_050 },
+        },
+        geometry,
+        timeMs: 1_050,
+        pinchEnabled: true,
+        scrollEnabled: true,
+      });
+      const observe2 = resolveRemoteWindowTouchPairPointerMoveRuntime({
+        state: observe1.nextState,
+        pair: {
+          first: { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: 90, timeMs: 1_060 },
+          second: { pointerId: 2, pointerType: 'touch', clientX: 120, clientY: 90, timeMs: 1_060 },
+        },
+        geometry,
+        timeMs: 1_060,
+        pinchEnabled: true,
+        scrollEnabled: true,
+      });
+      // 观察期后 move：判定为 scroll
+      const move = resolveRemoteWindowTouchPairPointerMoveRuntime({
+        state: observe2.nextState,
+        pair: {
+          first: { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: 100, timeMs: 1_200 },
+          second: { pointerId: 2, pointerType: 'touch', clientX: 120, clientY: 100, timeMs: 1_200 },
+        },
+        geometry,
+        timeMs: 1_200,
+        pinchEnabled: true,
+        scrollEnabled: true,
+        scrollFraction: 1,
+      });
+      expect(move.nextState.mode).toBe('twoFingerScroll');
+      expect(move.remoteEvents.length).toBeGreaterThan(0);
+      expect(move.remoteEvents[0].kind).toBe('scroll');
+    });
+
+    it('commits opposite-direction two-finger motion to pinch after the observe window', () => {
+      const candidate = pairDown({ clientX: 100, clientY: 60 }, { clientX: 120, clientY: 60 });
+      // 观察期 2 个 move
+      const observe1 = resolveRemoteWindowTouchPairPointerMoveRuntime({
+        state: candidate.nextState,
+        pair: {
+          first: { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: 60, timeMs: 1_050 },
+          second: { pointerId: 2, pointerType: 'touch', clientX: 120, clientY: 60, timeMs: 1_050 },
+        },
+        geometry,
+        timeMs: 1_050,
+        pinchEnabled: true,
+        scrollEnabled: true,
+      });
+      const observe2 = resolveRemoteWindowTouchPairPointerMoveRuntime({
+        state: observe1.nextState,
+        pair: {
+          first: { pointerId: 1, pointerType: 'touch', clientX: 90, clientY: 60, timeMs: 1_060 },
+          second: { pointerId: 2, pointerType: 'touch', clientX: 130, clientY: 60, timeMs: 1_060 },
+        },
+        geometry,
+        timeMs: 1_060,
+        pinchEnabled: true,
+        scrollEnabled: true,
+      });
+      const move = resolveRemoteWindowTouchPairPointerMoveRuntime({
+        state: observe2.nextState,
+        pair: {
+          first: { pointerId: 1, pointerType: 'touch', clientX: 80, clientY: 60, timeMs: 1_200 },
+          second: { pointerId: 2, pointerType: 'touch', clientX: 140, clientY: 60, timeMs: 1_200 },
+        },
+        geometry,
+        timeMs: 1_200,
+        pinchEnabled: true,
+        scrollEnabled: true,
+      });
+      expect(move.nextState.mode).toBe('pinch');
+      expect(move.localEffect.kind).toBe('pinch-move');
+    });
+
+    it('does not commit a one-finger-only pinch (a stationary finger must not trigger pinch)', () => {
+      // 第一指固定不动、第二指远离：不提交 pinch（防"单指移动被识别为缩放"误判）
+      const candidate = pairDown({ clientX: 100, clientY: 60 }, { clientX: 120, clientY: 60 });
+      const move = resolveRemoteWindowTouchPairPointerMoveRuntime({
+        state: candidate.nextState,
+        pair: {
+          first: { pointerId: 1, pointerType: 'touch', clientX: 100, clientY: 60, timeMs: 1_200 },
+          second: { pointerId: 2, pointerType: 'touch', clientX: 160, clientY: 60, timeMs: 1_200 },
+        },
+        geometry,
+        timeMs: 1_200,
+        pinchEnabled: true,
+        scrollEnabled: true,
+      });
+      expect(move.nextState.mode).not.toBe('pinch');
+    });
   });
 });

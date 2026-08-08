@@ -356,6 +356,8 @@ export interface RemoteWindowInputEventPayload {
         y: number;
         normalizedX: number;
         normalizedY: number;
+        // 触控模式滚动不驱动远程鼠标光标移动（缺省 true = 保持鼠标语义）
+        moveCursor?: boolean;
       }
     | {
         kind: 'gesture';

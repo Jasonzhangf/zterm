@@ -534,10 +534,12 @@ func postClickEvent(x: Double, y: Double, button: String?, clickCount: Int?) {
     }
 }
 
-func postScrollEvent(x: Double, y: Double, deltaX: Double, deltaY: Double, unit: String?) {
+func postScrollEvent(x: Double, y: Double, deltaX: Double, deltaY: Double, unit: String?, moveCursor: Bool = true) {
     let units: CGScrollEventUnit = unit == "pixel" ? .pixel : .line
     let point = CGPoint(x: x, y: y)
-    postMouseMove(x: x, y: y)
+    if moveCursor {
+        postMouseMove(x: x, y: y)
+    }
     // Android/DOM deltas use positive values for scrolling down/right; CGEvent
     // wheel values use the opposite sign for pixel scroll injection.
     let wheel1 = Int32(max(-32767, min(32767, (-deltaY).rounded())))
@@ -655,7 +657,7 @@ func handleConfig(_ config: InputConfig) throws {
         else {
             throw inputError("remote scroll input missing delta or coordinates")
         }
-        postScrollEvent(x: x, y: y, deltaX: deltaX, deltaY: deltaY, unit: config.event.unit)
+        postScrollEvent(x: x, y: y, deltaX: deltaX, deltaY: deltaY, unit: config.event.unit, moveCursor: config.event.moveCursor ?? true)
     } else if config.event.kind == "gesture" {
         guard config.event.gesture == "swipe", config.event.phase == "end" else {
             throw inputError("remote gesture input unsupported")
