@@ -283,6 +283,9 @@ export function startScreenCaptureKitFrameSource(
       cropRect: nextConfig.cropRect,
       frameRate: nextConfig.frameRate,
       queueDepth: nextConfig.queueDepth,
+      compositeWindows: nextConfig.compositeWindows,
+      canvasWidth: nextConfig.canvasWidth,
+      canvasHeight: nextConfig.canvasHeight,
     };
     const ack = await new Promise<RemoteWindowCaptureUpdateAck>((resolve, reject) => {
       const timer = setTimeout(() => {

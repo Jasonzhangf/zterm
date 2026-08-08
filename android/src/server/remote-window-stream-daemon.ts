@@ -163,6 +163,7 @@ interface ActiveRemoteWindowStream {
   videoTrack: MediaStreamTrack;
   videoBitrate: RemoteWindowVideoBitrateConfig | null;
   captureSource: RemoteWindowCaptureFrameSource | null;
+  compositePollTimer: ReturnType<typeof setInterval> | null;
   handlers: RemoteWindowStreamDaemonHandlers;
   framesSent: number;
   pendingVideoFrame: {
@@ -653,6 +654,10 @@ export function createRemoteWindowStreamDaemonRuntime(
       return false;
     }
     entry.cleanupDone = true;
+    if (entry.compositePollTimer) {
+      clearInterval(entry.compositePollTimer);
+      entry.compositePollTimer = null;
+    }
     activeStreams.delete(entry.streamId);
     entry.pendingVideoFrame = null;
     try {
@@ -939,6 +944,7 @@ export function createRemoteWindowStreamDaemonRuntime(
         videoTrack,
         videoBitrate,
         captureSource: null,
+        compositePollTimer: null,
         handlers,
         framesSent: 0,
         pendingVideoFrame: null,
@@ -1010,6 +1016,62 @@ export function createRemoteWindowStreamDaemonRuntime(
       const inputHelperWarmError = await inputHelperWarm;
       if (inputHelperWarmError) {
         throw inputHelperWarmError;
+      }
+      // 组合模式自动增删：周期刷新同 app 窗口 catalog → 窗口增删 → 重建 capture
+      if ((payload.target.compositeWindows ?? []).length > 0) {
+        entry.compositePollTimer = setInterval(() => {
+          if (!entry || !isCurrentStream(entry)) {
+            return;
+          }
+          void (async () => {
+            const activeEntry = entry;
+            if (!activeEntry || !isCurrentStream(activeEntry)) {
+              return;
+            }
+            try {
+              const catalog = await queryMacosAppWindowCatalog();
+              const targets = buildMacosAppWindowTargets(catalog, now());
+              const sameApp = targets.filter((item) => (
+                item.videoTarget.kind === 'app-window'
+                && item.videoTarget.appBundleId === activeEntry.target.videoTarget.appBundleId
+              ));
+              const currentIds = new Set([
+                activeEntry.target.videoTarget.windowId,
+                ...(activeEntry.target.compositeWindows ?? []).map((w) => w.windowId),
+              ]);
+              const nextIds = sameApp.map((item) => item.videoTarget.windowId);
+              if (
+                nextIds.length === currentIds.size
+                && nextIds.every((id) => currentIds.has(id))
+              ) {
+                return;
+              }
+              if (!activeEntry.captureSource) {
+                return;
+              }
+              const nextTarget: RemoteWindowStreamTargetManifest = {
+                ...activeEntry.target,
+                compositeWindows: sameApp
+                  .filter((item) => item.streamTargetId !== activeEntry.target.streamTargetId)
+                  .map((item) => ({
+                    windowId: item.videoTarget.windowId,
+                    title: item.videoTarget.title,
+                    windowBoundsTopLeftPx: item.videoTarget.windowBoundsTopLeftPx,
+                    cropRectTopLeftPx: item.videoTarget.cropRectTopLeftPx,
+                  })),
+              };
+              const captureSource = activeEntry.captureSource;
+              if (!captureSource?.updateTarget) {
+                return;
+              }
+              await captureSource.updateTarget(nextTarget);
+              activeEntry.target = nextTarget;
+              activeEntry.targetId = nextTarget.streamTargetId;
+            } catch {
+              // 自动增删轮询失败不打断串流
+            }
+          })();
+        }, 3_000);
       }
 
       const answer = await peerConnection.createAnswer();
