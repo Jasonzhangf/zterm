@@ -219,6 +219,7 @@ struct RemoteInputEvent: Decodable {
     let durationMs: Double?
     let velocityX: Double?
     let velocityY: Double?
+    let moveCursor: Bool?
     let width: Double?
     let height: Double?
     let key: String?
@@ -970,6 +971,7 @@ do {
 NSApplication.shared
 let sampleQueue = DispatchQueue(label: "zterm.remote-window.capture.sample")
 var activeStreams: [SCStream] = []
+var compositeStopped = true
 
 func findScWindow(windowId: String, appBundleId: String, windowBounds: Rect, content: SCShareableContent) -> SCWindow? {
     let numericWindowId = UInt32(windowId)
@@ -997,39 +999,76 @@ func startCompositeCapture(config: CaptureConfig, compositeWindows: [CompositeWi
         offsetY: 0
     )]
     allWindows.append(contentsOf: compositeWindows)
-    var offsets: [(x: Int, y: Int, width: Int, height: Int)] = []
-    for entry in allWindows {
-        offsets.append((
-            x: Int(entry.offsetX.rounded()),
-            y: Int(entry.offsetY.rounded()),
-            width: Int(entry.cropRect.width.rounded()),
-            height: Int(entry.cropRect.height.rounded())
-        ))
+    // ScreenCaptureKit 多 SCStream 并发只出首帧（真机验证：每窗口仅 1 帧）。
+    // 组合模式改用 SCScreenshotManager.captureImage 逐窗口截图 + 平铺合成（10fps），无并发限制。
+    compositeStopped = false
+    let timerQueue = DispatchQueue(label: "zterm.remote-window.composite.timer")
+    timerQueue.asyncAfter(deadline: .now() + 0.05) {
+        while !compositeStopped {
+            let semaphore = DispatchSemaphore(value: 0)
+            Task {
+                await compositeFrameLoop(
+                    allWindows: allWindows,
+                    canvasWidth: canvasWidth,
+                    canvasHeight: canvasHeight,
+                    content: content
+                )
+                semaphore.signal()
+            }
+            _ = semaphore.wait(timeout: .now() + 0.8)
+            Thread.sleep(forTimeInterval: 0.05)
+        }
     }
-    let canvas = CompositeCanvas(width: canvasWidth, height: canvasHeight, offsets: offsets)
-    for (index, entry) in allWindows.enumerated() {
-        guard let targetWindow = findScWindow(
+    stderrLine("zterm remote window composite capture started (SCScreenshotManager): \(allWindows.count) windows")
+}
+
+func compositeFrameLoop(allWindows: [CompositeWindow], canvasWidth: Int, canvasHeight: Int, content: SCShareableContent) async {
+    // 1. 逐窗口截图（async，串行）
+    var snapshots: [(image: CGImage, slotX: Int, slotY: Int, slotW: Int, slotH: Int)] = []
+    for entry in allWindows {
+        guard let window = findScWindow(
             windowId: entry.windowId,
-            appBundleId: config.appBundleId,
+            appBundleId: "",
             windowBounds: entry.windowBounds,
             content: content
-        ) else {
-            stderrLine("ScreenCaptureKit composite window not found for " + entry.windowId)
-            continue
-        }
-        let filter = SCContentFilter(desktopIndependentWindow: targetWindow)
-        let streamConfiguration = makeStreamConfiguration(
-            windowBounds: entry.windowBounds,
-            cropRect: entry.cropRect,
-            frameRate: config.frameRate,
-            queueDepth: config.queueDepth
-        )
-        let stream = SCStream(filter: filter, configuration: streamConfiguration, delegate: nil)
-        activeStreams.append(stream)
-        let output = FrameOutput(canvas: canvas, canvasIndex: index)
-        try stream.addStreamOutput(output, type: .screen, sampleHandlerQueue: sampleQueue)
-        try await stream.startCapture()
+        ) else { continue }
+        let filter = SCContentFilter(desktopIndependentWindow: window)
+        let screenshotConfig = SCStreamConfiguration()
+        guard let image = try? await SCScreenshotManager.captureImage(
+            contentFilter: filter,
+            configuration: screenshotConfig
+        ) else { continue }
+        let imgWidth = image.width
+        let imgHeight = image.height
+        guard imgWidth > 0, imgHeight > 0 else { continue }
+        snapshots.append((
+            image: image,
+            slotX: Int(entry.offsetX.rounded()),
+            slotY: Int(entry.offsetY.rounded()),
+            slotW: min(Int(entry.cropRect.width.rounded()), imgWidth),
+            slotH: min(Int(entry.cropRect.height.rounded()), imgHeight)
+        ))
     }
+    // 2. 同步合成（无 await）；Data(count:) 零填充
+    var canvas = Data(count: canvasWidth * canvasHeight * 4)
+    for snap in snapshots {
+        let imgWidth = snap.image.width
+        let imgHeight = snap.image.height
+        guard let provider = snap.image.dataProvider, let pixelData = provider.data else { continue }
+        let bytes = pixelData as Data
+        let bpr = snap.image.bytesPerRow
+        for y in 0..<snap.slotH {
+            let srcRow = y * bpr
+            let dstRow = ((snap.slotY + y) * canvasWidth + snap.slotX) * 4
+            if dstRow + snap.slotW * 4 <= canvas.count {
+                canvas.replaceSubrange(
+                    dstRow..<(dstRow + snap.slotW * 4),
+                    with: bytes[srcRow..<(srcRow + snap.slotW * 4)]
+                )
+            }
+        }
+    }
+    writeFrame(rgba: canvas, width: canvasWidth, height: canvasHeight)
 }
 
 func startSingleWindowCapture(config: CaptureConfig, content: SCShareableContent) async throws {
@@ -1099,7 +1138,8 @@ DispatchQueue.global(qos: .utility).async {
                 do {
                     if let compositeWindows = command.compositeWindows, !compositeWindows.isEmpty,
                        let canvasWidth = command.canvasWidth, let canvasHeight = command.canvasHeight {
-                        // 组合模式更新：停旧流并按新窗口列表重建（窗口增删/布局变化）
+                        // 组合模式更新：停旧 CGWindowList 循环并按新窗口列表重建
+                        compositeStopped = true
                         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                         try await startCompositeCapture(
                             config: CaptureConfig(
