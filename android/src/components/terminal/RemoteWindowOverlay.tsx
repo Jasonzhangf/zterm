@@ -2449,6 +2449,11 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       `tracks=${probeTracks.length} ` +
       `kinds=${probeTracks.map((t: MediaStreamTrack) => `${t.kind}:${t.readyState}:${t.muted ? 'muted' : 'live'}`).join(',') || 'no-tracks-api'}`,
     );
+    // 设计 v2 fix：sibling handoff 时清除旧的 videoFrameCallbackRef，
+    // 否则 requestVideoPlayback 内的 rVFC 重挂守卫会跳过，
+    // video element 仍持有指向旧 MediaStream 的解码回调。
+    // logcat 证据：epoch 2→3 后 rVFC 未重挂，video 卡在 currentTime=0.000/0.543。
+    videoFrameCallbackRef.current = null;
     requestVideoPlayback(receiverMediaStream, playbackEpoch);
     const fallbackTimer = window.setInterval(() => {
       if (videoElementRef.current?.srcObject === receiverMediaStream) {
