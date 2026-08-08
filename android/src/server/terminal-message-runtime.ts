@@ -100,6 +100,8 @@ export interface TerminalMessageRuntime {
     payload: HostConfigMessage,
   ) => TerminalTransportSubscriber | null;
   handleMessage: (connection: TerminalTransportConnection, rawData: RawData, isBinary?: boolean) => Promise<void>;
+  /** WS/传输断开时调用：停掉该连接发起的全部 remote-window 流，避免残留占用 capture */
+  closeConnection: (connection: TerminalTransportConnection) => void;
 }
 
 export function createTerminalMessageRuntime(
@@ -124,6 +126,26 @@ export function createTerminalMessageRuntime(
   }
 
   const reliableInputAckCache = createReliableInputAckCache();
+
+  // 连接 → 该连接发起的 remote-window 流（transportId → streamId 集合）
+  const connectionRwStreams = new Map<string, Set<string>>();
+
+  function closeConnection(connection: TerminalTransportConnection) {
+    const streamIds = connectionRwStreams.get(connection.transportId);
+    if (!streamIds || streamIds.size === 0) {
+      connectionRwStreams.delete(connection.transportId);
+      return;
+    }
+    for (const streamId of [...streamIds]) {
+      void deps.remoteWindowStreamRuntime.stopStream({
+        requestId: `rw-close-${streamId}`,
+        streamId,
+      }).catch(() => {
+        // 断连清理不因单个流失败而中断
+      });
+    }
+    connectionRwStreams.delete(connection.transportId);
+  }
 
   function sendInputAck(connection: TerminalTransportConnection, payload: TerminalInputAckPayload) {
     deps.sendTransportMessage(connection.transport, {
@@ -865,6 +887,17 @@ export function createTerminalMessageRuntime(
         });
         break;
       case 'remote-window-stream-start-request':
+        {
+          const streamId = message.payload.streamId || '';
+          if (streamId) {
+            let streamIds = connectionRwStreams.get(connection.transportId);
+            if (!streamIds) {
+              streamIds = new Set<string>();
+              connectionRwStreams.set(connection.transportId, streamIds);
+            }
+            streamIds.add(streamId);
+          }
+        }
         void deps.remoteWindowStreamRuntime.startStream(message.payload, {
           sendIceCandidate: (payload) => {
             deps.sendTransportMessage(connection.transport, {
@@ -908,11 +941,22 @@ export function createTerminalMessageRuntime(
         });
         break;
       case 'remote-window-stream-stop-request':
-        void deps.remoteWindowStreamRuntime.stopStream(message.payload).then((payload) => {
-          deps.sendTransportMessage(connection.transport, 'phase' in payload
-            ? { type: 'remote-window-stream-status', payload }
-            : { type: 'remote-window-error', payload });
-        }).catch((error: unknown) => {
+        {
+          const stoppedStreamId = message.payload.streamId || '';
+          void deps.remoteWindowStreamRuntime.stopStream(message.payload).then((payload) => {
+            if (stoppedStreamId) {
+              const streamIds = connectionRwStreams.get(connection.transportId);
+              if (streamIds) {
+                streamIds.delete(stoppedStreamId);
+                if (streamIds.size === 0) {
+                  connectionRwStreams.delete(connection.transportId);
+                }
+              }
+            }
+            deps.sendTransportMessage(connection.transport, 'phase' in payload
+              ? { type: 'remote-window-stream-status', payload }
+              : { type: 'remote-window-error', payload });
+          }).catch((error: unknown) => {
           deps.sendTransportMessage(connection.transport, {
             type: 'remote-window-error',
             payload: {
@@ -923,6 +967,7 @@ export function createTerminalMessageRuntime(
             },
           });
         });
+        }
         break;
       case 'remote-window-stream-quality-request':
         void deps.remoteWindowStreamRuntime.updateStreamQuality(message.payload).then((payload) => {
@@ -995,5 +1040,6 @@ export function createTerminalMessageRuntime(
     handleSessionOpen,
     handleSessionTransportConnect,
     handleMessage,
+    closeConnection,
   };
 }

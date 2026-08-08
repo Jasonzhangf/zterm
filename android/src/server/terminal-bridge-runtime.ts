@@ -23,6 +23,8 @@ export interface TerminalBridgeRuntimeDeps {
   detachSubscriberTransportOnly: (subscriber: TerminalTransportSubscriber, reason: string, transportId?: string) => void;
   refreshAdaptiveWidthLeaseHeartbeat: (subscriber: TerminalTransportSubscriber) => void;
   handleMessage: (connection: DaemonTransportConnection, rawData: RawData, isBinary?: boolean) => Promise<void>;
+  /** 传输断开（WS close/rtc 错误/超时）时回调：停掉该连接发起的 remote-window 流 */
+  handleTransportClosed?: (connection: DaemonTransportConnection) => void;
 }
 
 export interface TerminalBridgeRuntime {
@@ -167,6 +169,7 @@ export function createTerminalBridgeRuntime(
       deps.detachSubscriberTransportOnly(subscriber, reason, connection.transportId);
     }
     connection.muxChannels?.clear();
+    deps.handleTransportClosed?.(connection);
   }
 
   const rtcBridgeServer = createRtcBridgeServer({

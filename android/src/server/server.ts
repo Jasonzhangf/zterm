@@ -453,6 +453,8 @@ const terminalBridgeRuntime = createTerminalBridgeRuntime({
   refreshAdaptiveWidthLeaseHeartbeat: terminalRuntime.refreshAdaptiveWidthLeaseHeartbeat,
   handleMessage: (connection, rawData, isBinary) =>
     terminalMessageRuntime.handleMessage(connection as DaemonTransportConnection, rawData, isBinary),
+  handleTransportClosed: (connection) =>
+    terminalMessageRuntime.closeConnection(connection as DaemonTransportConnection),
 });
 const {
   rtcBridgeServer,
