@@ -12,6 +12,7 @@ import {
   failRemoteWindowStream,
   failRemoteWindowTargetCatalog,
   initialRemoteWindowOverlayState,
+  resolveRemoteWindowCompositeWindowLayout,
   selectRemoteWindowTarget,
   shrinkRemoteWindowOverlay,
   upsertRemoteWindowCatalogTarget,
@@ -283,5 +284,54 @@ describe('remote window overlay runtime', () => {
       targets: [],
       errorMessage: 'permission missing',
     });
+  });
+});
+
+describe('remote window composite layout', () => {
+  function makeTarget(overrides: Record<string, unknown> = {}) {
+    return {
+      streamTargetId: 'app-window:1:100',
+      videoTarget: {
+        kind: 'app-window',
+        appBundleId: 'com.tencent.xinWeChat',
+        pid: 100,
+        windowId: '100',
+        title: 'WeChat',
+        windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 600 },
+        cropRectTopLeftPx: { x: 10, y: 20, width: 800, height: 600 },
+      },
+      inputTarget: { kind: 'app-window' },
+      capture: {
+        source: 'ScreenCaptureKit',
+        coordinateSpace: 'macos-top-left-px',
+        scale: 1,
+        createdAt: '2026-08-08T00:00:00.000Z',
+      },
+      ...overrides,
+    } as RemoteWindowStreamTargetManifest;
+  }
+
+  it('returns null for a single-window target', () => {
+    expect(resolveRemoteWindowCompositeWindowLayout(makeTarget())).toBeNull();
+  });
+
+  it('lays out same-app windows in a single row', () => {
+    const target = makeTarget({
+      compositeWindows: [
+        {
+          windowId: '200',
+          title: 'Preview',
+          windowBoundsTopLeftPx: { x: 900, y: 20, width: 400, height: 500 },
+          cropRectTopLeftPx: { x: 900, y: 20, width: 400, height: 500 },
+        },
+      ],
+    });
+    const layout = resolveRemoteWindowCompositeWindowLayout(target);
+    expect(layout).not.toBeNull();
+    expect(layout!.canvasWidth).toBe(1200);
+    expect(layout!.canvasHeight).toBe(600);
+    expect(layout!.windows).toHaveLength(2);
+    expect(layout!.windows[0]).toMatchObject({ windowId: '100', offsetX: 0 });
+    expect(layout!.windows[1]).toMatchObject({ windowId: '200', offsetX: 800 });
   });
 });

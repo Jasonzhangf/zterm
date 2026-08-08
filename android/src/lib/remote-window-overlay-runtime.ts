@@ -443,3 +443,58 @@ export function closeRemoteWindowOverlay(state: RemoteWindowOverlayState): Remot
     requestEpoch: state.requestEpoch + 1,
   };
 }
+
+// ---- 组合推流 UI 布局（与 daemon resolveRemoteWindowCompositeLayout 保持同算法：单行平铺）----
+
+export interface RemoteWindowCompositeWindowSlot {
+  windowId: string;
+  offsetX: number;
+  offsetY: number;
+  width: number;
+  height: number;
+}
+
+export interface RemoteWindowCompositeLayoutClient {
+  windows: RemoteWindowCompositeWindowSlot[];
+  canvasWidth: number;
+  canvasHeight: number;
+}
+
+export function resolveRemoteWindowCompositeWindowLayout(
+  target: RemoteWindowStreamTargetManifest,
+): RemoteWindowCompositeLayoutClient | null {
+  const compositeWindows = target.compositeWindows ?? [];
+  if (compositeWindows.length === 0) {
+    return null;
+  }
+  const mainCrop = target.videoTarget.cropRectTopLeftPx ?? target.videoTarget.windowBoundsTopLeftPx;
+  const entries = [
+    {
+      windowId: target.videoTarget.windowId,
+      crop: mainCrop,
+    },
+    ...compositeWindows.map((w) => ({
+      windowId: w.windowId,
+      crop: w.cropRectTopLeftPx ?? w.windowBoundsTopLeftPx,
+    })),
+  ];
+  let offsetX = 0;
+  let canvasHeight = 0;
+  const windows = entries.map((entry) => {
+    const slot: RemoteWindowCompositeWindowSlot = {
+      windowId: entry.windowId,
+      offsetX,
+      offsetY: 0,
+      width: Math.max(1, Math.round(entry.crop.width)),
+      height: Math.max(1, Math.round(entry.crop.height)),
+    };
+    offsetX += slot.width;
+    canvasHeight = Math.max(canvasHeight, slot.height);
+    return slot;
+  });
+  return {
+    windows,
+    canvasWidth: offsetX,
+    canvasHeight,
+  };
+}

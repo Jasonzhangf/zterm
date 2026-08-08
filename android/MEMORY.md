@@ -1530,3 +1530,12 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - **滚动时光标仍移动**：daemon 侧 swift 注入改动未生效——launchd 跑的是旧 server.cjs（无 moveCursor）。重新 `daemon:prepare-release` + `zterm-daemon.sh install-service`，新 daemon（~/.zterm/daemon-runtime/server.cjs 含 moveCursor×3）已运行。
 - **待真机重测**：放大后双指手势无效（本地仲裁逻辑审查无明确 bug，需 2485+新 daemon 复测）；点击图片失焦无感知（需用户描述 app/坐标）。
 - 版本 0.1.3.2485（长按修复）已 OTA + 装机 15t-1。
+
+## 2026-08-08 多窗口 UI 布局（主画面 + 总览横条 + 子队列，2490）
+- **设计文档**：docs/decisions/2026-08-08-remote-window-multi-window-ui-layout-design.md（APPROVED：焦点窗口放大 / 下方横条总览 / 选中即放大 / 仅切主画面不重构）
+- **三区 UI**：主画面 = video 裁切焦点窗口区域（focusedVideoStyle：画布×scale + margin 定位）；总览横条 = canvas drawImage 全画布；子队列 = 每窗口小 canvas（选中项 160×120 放大 + 蓝框），横向滚动（overflowX auto），新增窗口自动入队
+- **rAF 绘制**：组合模式 useEffect 每帧 drawImage video → 总览/缩略图 canvas（共享同一 WebRTC 流）
+- **输入**：resolveSurfaceInputGeometry 组合模式 sourceRect = 焦点窗口画布区域（base crop + offset），触点→窗口内比例→画布坐标→daemon 命中窗口
+- **布局算法**：resolveRemoteWindowCompositeWindowLayout（overlay-runtime，与 daemon 同算法单行平铺）；选目标 attachSameAppCompositeWindows 自动带同 app 全部窗口
+- 验证：type-check 0、overlay-runtime 13 + overlay 75 全绿、build:android PASS，APK 0.1.3.2490 已 OTA + 装机 15t-1
+- **待做**：自动增删（catalog 刷新检测新窗口 → 重开流/handoff 加入组合）

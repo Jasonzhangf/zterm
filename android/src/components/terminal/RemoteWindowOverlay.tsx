@@ -43,6 +43,7 @@ import {
   failRemoteWindowStream,
   failRemoteWindowTargetCatalog,
   initialRemoteWindowOverlayState,
+  resolveRemoteWindowCompositeWindowLayout,
   selectRemoteWindowTarget,
   shrinkRemoteWindowOverlay,
   upsertRemoteWindowCatalogTarget,
@@ -910,6 +911,16 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const [touchScrollInverted, setTouchScrollInvertedState] = useState(() => readRemoteWindowTouchScrollInverted());
   const [inputMode, setInputMode] = useState<RemoteWindowInputMode>(() => readRemoteWindowInputMode());
   const inputModeRef = useRef(inputMode);
+  const [focusedWindowId, setFocusedWindowId] = useState<string | null>(null);
+  const compositeOverviewCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const compositeThumbCanvasRefs = useRef<Map<string, HTMLCanvasElement | null>>(new Map());
+  // 组合推流（background pane）：平铺布局（与 daemon 同算法），供 rAF 绘制与三区 UI 使用
+  const compositeLayout = state.phase === 'targetLocked'
+    ? resolveRemoteWindowCompositeWindowLayout(state.target)
+    : null;
+  const focusedWindowSlot = compositeLayout
+    ? (compositeLayout.windows.find((w) => w.windowId === focusedWindowId) ?? compositeLayout.windows[0] ?? null)
+    : null;
   const secondPointerPendingRef = useRef<{
     pointerId: number;
     clientX: number;
@@ -2486,6 +2497,59 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     onOpenStateChange?.(quickBarSuppressed);
   }, [onOpenStateChange, quickBarSuppressed]);
 
+  // 组合推流：rAF 绘制总览横条 + 子窗口缩略图（共享同一 video 源，逐帧 drawImage）
+  useEffect(() => {
+    if (!compositeLayout || !receiverMediaStream) {
+      return;
+    }
+    let raf = 0;
+    const draw = () => {
+      raf = window.requestAnimationFrame(draw);
+      const video = videoElementRef.current;
+      if (!video || video.readyState < 2 || video.videoWidth <= 0) {
+        return;
+      }
+      const overview = compositeOverviewCanvasRef.current;
+      if (overview) {
+        const ctx = overview.getContext('2d');
+        if (ctx && overview.width > 0 && overview.height > 0) {
+          ctx.drawImage(
+            video,
+            0,
+            0,
+            compositeLayout.canvasWidth,
+            compositeLayout.canvasHeight,
+            0,
+            0,
+            overview.width,
+            overview.height,
+          );
+        }
+      }
+      for (const slot of compositeLayout.windows) {
+        const thumb = compositeThumbCanvasRefs.current.get(slot.windowId);
+        if (thumb && thumb.width > 0 && thumb.height > 0) {
+          const ctx = thumb.getContext('2d');
+          if (ctx) {
+            ctx.drawImage(
+              video,
+              slot.offsetX,
+              slot.offsetY,
+              slot.width,
+              slot.height,
+              0,
+              0,
+              thumb.width,
+              thumb.height,
+            );
+          }
+        }
+      }
+    };
+    raf = window.requestAnimationFrame(draw);
+    return () => window.cancelAnimationFrame(raf);
+  }, [compositeLayout, receiverMediaStream]);
+
   useEffect(() => {
     if (lastReportedBodySuppressionRef.current === bodySubscriptionSuppressed) {
       return;
@@ -2933,16 +2997,29 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         height: surfaceRect.height,
       },
       contentRect: content,
-      sourceRect: state.target.compositeWindows?.length
-        ? {
-            x: getRemoteWindowSourceRect(state.target).x,
-            y: getRemoteWindowSourceRect(state.target).y,
+      sourceRect: (() => {
+        const base = getRemoteWindowSourceRect(state.target);
+        if (compositeLayout) {
+          if (focusedWindowSlot) {
+            // 焦点窗口：主画面显示该窗口区域，触点映射到画布内该窗口坐标
+            return {
+              x: base.x + focusedWindowSlot.offsetX,
+              y: base.y + focusedWindowSlot.offsetY,
+              width: focusedWindowSlot.width,
+              height: focusedWindowSlot.height,
+            };
+          }
+          return {
+            x: base.x,
+            y: base.y,
             width: displaySourceSize.width,
             height: displaySourceSize.height,
-          }
-        : getRemoteWindowSourceRect(state.target),
+          };
+        }
+        return base;
+      })(),
     };
-  }, [receiverFrameSize, state]);
+  }, [compositeLayout, focusedWindowSlot, receiverFrameSize, state]);
 
   const resolveScrollInputEvent = useCallback((
     clientX: number,
@@ -3799,6 +3876,22 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     }
     : styles.videoContentFallback;
 
+  // 组合推流：焦点窗口（主画面裁切放大）
+  const focusedVideoStyle = compositeLayout && focusedWindowSlot && lockedSurfaceLayout
+    ? (() => {
+        const scale = Math.min(
+          Math.max(1, lockedSurfaceLayout.content.width) / Math.max(1, focusedWindowSlot.width),
+          Math.max(1, lockedSurfaceLayout.content.height) / Math.max(1, focusedWindowSlot.height),
+        );
+        return {
+          width: compositeLayout.canvasWidth * scale,
+          height: compositeLayout.canvasHeight * scale,
+          marginLeft: -focusedWindowSlot.offsetX * scale,
+          marginTop: -focusedWindowSlot.offsetY * scale,
+        };
+      })()
+    : null;
+
   const ztermVideoWallpaper = (
     <div
       data-testid="remote-window-video-wallpaper"
@@ -3844,6 +3937,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
             }}
             style={{
               ...styles.videoElement,
+              ...focusedVideoStyle,
               opacity: videoHasPlayed ? 1 : 0,
               visibility: videoHasPlayed ? 'visible' : 'hidden',
             }}
@@ -4192,6 +4286,56 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       <div data-testid="remote-window-video-content" style={videoContentStyle}>
         {lockedVideoContent}
       </div>
+      {compositeLayout ? (
+        <div data-testid="remote-window-composite-strip" data-no-drag="true" style={styles.compositeStrip}>
+          <div
+            data-testid="remote-window-composite-overview-wrap"
+            style={styles.compositeOverviewWrap}
+            onPointerDown={(event) => event.stopPropagation()}
+            onPointerMove={(event) => event.stopPropagation()}
+          >
+            <canvas
+              ref={compositeOverviewCanvasRef}
+              data-testid="remote-window-composite-overview"
+              width={340}
+              height={72}
+              style={styles.compositeOverview}
+            />
+          </div>
+          <div
+            data-testid="remote-window-composite-thumbnails"
+            style={styles.compositeThumbRow}
+            onPointerDown={(event) => event.stopPropagation()}
+            onPointerMove={(event) => event.stopPropagation()}
+          >
+            {compositeLayout.windows.map((slot) => (
+              <button
+                key={slot.windowId}
+                type="button"
+                data-testid={`remote-window-composite-thumb-${slot.windowId}`}
+                data-focused={focusedWindowSlot?.windowId === slot.windowId ? 'true' : undefined}
+                onClick={() => setFocusedWindowId(slot.windowId)}
+                style={{
+                  ...styles.compositeThumbButton,
+                  ...(focusedWindowSlot?.windowId === slot.windowId ? styles.compositeThumbButtonFocused : null),
+                }}
+              >
+                <canvas
+                  ref={(node) => {
+                    compositeThumbCanvasRefs.current.set(slot.windowId, node);
+                  }}
+                  width={slot.windowId === focusedWindowSlot?.windowId ? 160 : 96}
+                  height={slot.windowId === focusedWindowSlot?.windowId ? 120 : 72}
+                  style={styles.compositeThumbCanvas}
+                />
+                <span style={styles.compositeThumbLabel}>
+                  {slot.windowId === state.target.videoTarget.windowId ? '主' : '子'}
+                </span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
       {screenshotFeedback ? (
         <div
           data-testid="remote-window-screenshot-status"
@@ -4659,6 +4803,68 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
 });
 
 const styles: Record<string, CSSProperties> = {
+  compositeStrip: {
+    position: 'absolute',
+    left: 8,
+    right: 8,
+    bottom: 8,
+    zIndex: 60,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 6,
+    pointerEvents: 'auto',
+    borderRadius: 10,
+    background: 'rgba(10, 14, 20, 0.72)',
+    backdropFilter: 'blur(6px)',
+    padding: 8,
+  },
+  compositeOverviewWrap: {
+    overflow: 'hidden',
+    borderRadius: 6,
+  },
+  compositeOverview: {
+    display: 'block',
+    width: '100%',
+    height: 72,
+    borderRadius: 6,
+    background: '#0a0e14',
+  },
+  compositeThumbRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    gap: 8,
+    overflowX: 'auto',
+    overflowY: 'hidden',
+    WebkitOverflowScrolling: 'touch',
+    scrollbarWidth: 'thin',
+  },
+  compositeThumbButton: {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 2,
+    padding: 3,
+    border: '1px solid rgba(255,255,255,0.14)',
+    borderRadius: 8,
+    background: 'rgba(255,255,255,0.05)',
+    cursor: 'pointer',
+    flexShrink: 0,
+  },
+  compositeThumbButtonFocused: {
+    border: '2px solid #55b6ff',
+    padding: 2,
+  },
+  compositeThumbCanvas: {
+    display: 'block',
+    width: '100%',
+    borderRadius: 4,
+    background: '#0a0e14',
+  },
+  compositeThumbLabel: {
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.7)',
+    lineHeight: '12px',
+  },
   entryButton: {
     position: 'fixed',
     right: 14,
