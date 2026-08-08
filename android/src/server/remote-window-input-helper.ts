@@ -300,7 +300,7 @@ export function createDefaultRemoteWindowInputHelper(options: {
     const createProcess = options.processFactory || ((command, args, spawnOptions) => (
       spawn(command, args, spawnOptions) as RemoteWindowInputHelperChildProcess
     ));
-    const currentChild = createProcess(options.swiftBinary, ['-e', MACOS_REMOTE_WINDOW_INPUT_SWIFT], {
+    const currentChild = createProcess(options.swiftBinary, ['-swift-version', '5', '-e', MACOS_REMOTE_WINDOW_INPUT_SWIFT], {
       windowsHide: true,
       env: process.env,
     });

@@ -215,7 +215,7 @@ export function startScreenCaptureKitFrameSource(
   },
 ): Promise<RemoteWindowCaptureFrameSource> {
   let captureConfig = buildScreenCaptureKitConfig(target, options.frameRate);
-  const child = spawn(options.swiftBinary, ['-e', SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT], {
+  const child = spawn(options.swiftBinary, ['-swift-version', '5', '-e', SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT], {
     env: {
       ...process.env,
       ZTERM_REMOTE_WINDOW_CAPTURE_CONFIG: JSON.stringify(captureConfig),
