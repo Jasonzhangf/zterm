@@ -683,6 +683,11 @@ interface TerminalPageProps {
     sessionId: string,
     payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>,
   ) => void;
+  onUpdateRemoteWindowFocus?: (
+    sessionId: string,
+    streamId: string,
+    target: RemoteWindowStreamTargetManifest,
+  ) => void;
   onStopRemoteWindowStream?: (sessionId: string, streamId: string) => unknown;
   onSendRemoteWindowInput?: (
     sessionId: string,
@@ -975,6 +980,7 @@ function TerminalPageComponent({
   onRequestRemoteWindowTargets,
   onRequestRemoteWindowStreamStart,
   onUpdateRemoteWindowStreamQuality,
+  onUpdateRemoteWindowFocus,
   onStopRemoteWindowStream,
   onSendRemoteWindowInput,
   onResizeRemoteWindowTarget,
@@ -3779,6 +3785,7 @@ function TerminalPageComponent({
           requestTargets={onRequestRemoteWindowTargets}
           startStream={onRequestRemoteWindowStreamStart}
           updateStreamQuality={onUpdateRemoteWindowStreamQuality}
+          updateFocus={onUpdateRemoteWindowFocus}
           stopStream={onStopRemoteWindowStream}
           requestScreenshot={handleRequestRemoteWindowScreenshot}
           sendInput={onSendRemoteWindowInput}

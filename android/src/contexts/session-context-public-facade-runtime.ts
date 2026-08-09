@@ -351,6 +351,11 @@ export function buildSessionContextValueRuntime(options: {
     sessionId: string,
     payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>,
   ) => void;
+  updateRemoteWindowFocus: (
+    sessionId: string,
+    streamId: string,
+    target: RemoteWindowStreamTargetManifest,
+  ) => void;
   stopRemoteWindowStream: (sessionId: string, streamId: string) => Promise<boolean>;
   sendRemoteWindowInput: (
     sessionId: string,
@@ -410,6 +415,7 @@ export function buildSessionContextValueRuntime(options: {
     requestRemoteWindowTargets: options.requestRemoteWindowTargets,
     requestRemoteWindowStreamStart: options.requestRemoteWindowStreamStart,
     updateRemoteWindowStreamQuality: options.updateRemoteWindowStreamQuality,
+    updateRemoteWindowFocus: options.updateRemoteWindowFocus,
     stopRemoteWindowStream: options.stopRemoteWindowStream,
     sendRemoteWindowInput: options.sendRemoteWindowInput,
     resizeRemoteWindowTarget: options.resizeRemoteWindowTarget,

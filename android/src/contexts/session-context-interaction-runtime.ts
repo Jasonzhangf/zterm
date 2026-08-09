@@ -12,6 +12,7 @@ import {
   resizeRemoteWindowTargetRuntime,
   sendRemoteWindowInputRuntime,
   stopRemoteWindowStreamRuntime,
+  updateRemoteWindowFocusRuntime,
   updateRemoteWindowStreamQualityRuntime,
 } from './session-context-remote-window-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
@@ -63,6 +64,7 @@ interface RemoteWindowMessageRuntimeLike {
   ) => Promise<RemoteWindowStreamTargetsResponsePayload>;
   requestStreamStart: (...args: any[]) => Promise<any>;
   sendStreamQuality: (...args: any[]) => void;
+  sendStreamUpdateFocus: (...args: any[]) => void;
   sendStreamIceCandidate: (...args: any[]) => void;
   stopStream: (...args: any[]) => Promise<RemoteWindowStreamStatusPayload>;
   sendInputEvent: (...args: any[]) => void;
@@ -221,6 +223,22 @@ export function createSessionInteractionRuntime(options: {
     });
   };
 
+  const updateRemoteWindowFocus = (
+    sessionId: string,
+    streamId: string,
+    target: RemoteWindowStreamTargetManifest,
+  ) => {
+    return updateRemoteWindowFocusRuntime({
+      sessionId,
+      streamId,
+      target,
+      sessions: options.refs.stateRef.current.sessions,
+      daemonConnection,
+      remoteWindowMessageRuntime: options.refs.remoteWindowMessageRuntimeRef.current,
+      sendSocketPayload: options.sendSocketPayload,
+    });
+  };
+
   const stopRemoteWindowStream = (sessionId: string, streamId: string) => {
     return stopRemoteWindowStreamRuntime({
       sessionId,
@@ -269,6 +287,7 @@ export function createSessionInteractionRuntime(options: {
     requestRemoteScreenshot,
     requestRemoteWindowTargets,
     requestRemoteWindowStreamStart,
+    updateRemoteWindowFocus,
     updateRemoteWindowStreamQuality,
     stopRemoteWindowStream,
     sendRemoteWindowInput,

@@ -109,6 +109,11 @@ interface RemoteWindowOverlayProps {
     sessionId: string,
     payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>,
   ) => void;
+  updateFocus?: (
+    sessionId: string,
+    streamId: string,
+    target: RemoteWindowStreamTargetManifest,
+  ) => void;
   stopStream?: (sessionId: string, streamId: string) => unknown;
   requestScreenshot?: (
     sessionId: string,
@@ -138,6 +143,7 @@ interface RemoteWindowStreamStartResult {
   streamId: string;
   purpose?: RemoteWindowStreamPurpose;
   mediaStream?: MediaStream | null;
+  overviewMediaStream?: MediaStream | null;
   started?: RemoteWindowStreamStartedPayload;
   collectStats?: () => Promise<RemoteWindowVideoStatsSample | null>;
 }
@@ -856,6 +862,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   requestTargets,
   startStream,
   updateStreamQuality,
+  updateFocus,
   stopStream,
   requestScreenshot,
   sendInput,
@@ -916,6 +923,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const [videoHasPlayed, setVideoHasPlayedState] = useState(false);
   const videoHasPlayedRef = useRef(false);
   const [receiverMediaStream, setReceiverMediaStream] = useState<MediaStream | null>(null);
+  const [overviewMediaStream, setOverviewMediaStream] = useState<MediaStream | null>(null);
   const [receiverFrameSize, setReceiverFrameSize] = useState<SurfaceSize | null>(null);
   const [itermPaneTargetsExpanded, setItermPaneTargetsExpanded] = useState(false);
   const [catalogRefreshing, setCatalogRefreshing] = useState(false);
@@ -943,6 +951,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const floatingResizeRef = useRef<FloatingOverlayResize | null>(null);
   const videoSurfaceRef = useRef<HTMLDivElement | null>(null);
   const videoElementRef = useRef<HTMLVideoElement | null>(null);
+  const overviewVideoElementRef = useRef<HTMLVideoElement | null>(null);
   const videoFrameCallbackRef = useRef<((now: number) => void) | null>(null);
   const activeStreamIdRef = useRef<string | null>(null);
   const activeCanvasStreamIdRef = useRef<string | null>(null);
@@ -1722,6 +1731,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     adaptiveVideoStateRef.current = null;
     lastAppliedStreamQualityKeyRef.current = null;
     setReceiverMediaStream(null);
+    setOverviewMediaStream(null);
     setReceiverFrameSize(null);
     setWindowThumbnails({});
     collectStreamStatsRef.current = null;
@@ -1778,6 +1788,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     surfaceGestureRef.current = null;
     surfacePinchStartRef.current = null;
     setReceiverMediaStream(null);
+    setOverviewMediaStream(null);
     setReceiverFrameSize(null);
     setState((current) => failRemoteWindowStream(
       current,
@@ -2394,6 +2405,20 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     };
   }, [publishVideoDebugSnapshot, receiverMediaStream, requestVideoPlayback, updateReceiverVideoVisibility]);
 
+  useEffect(() => {
+    const overviewVideo = overviewVideoElementRef.current;
+    if (overviewVideo && overviewMediaStream) {
+      overviewVideo.autoplay = true;
+      overviewVideo.muted = true;
+      overviewVideo.defaultMuted = true;
+      overviewVideo.playsInline = true;
+      overviewVideo.controls = false;
+      if (overviewVideo.srcObject !== overviewMediaStream) {
+        overviewVideo.srcObject = overviewMediaStream;
+      }
+    }
+  }, [overviewMediaStream]);
+
   // 每秒采样 live 诊断：状态浮窗 + logcat（区分 WebRTC 收帧停止 vs video 解码冻结）
   const lockedStreamStatus = state.phase === 'targetLocked' ? state.streamStatus : null;
   const lockedStreamId = state.phase === 'targetLocked' ? state.streamId ?? null : null;
@@ -2442,7 +2467,10 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     let raf = 0;
     const draw = () => {
       raf = window.requestAnimationFrame(draw);
-      const video = videoElementRef.current;
+      // 双流：总览预览从低码率 overview video 绘制；单流回退主 video
+      const video = overviewVideoElementRef.current && overviewVideoElementRef.current.readyState >= 2
+        ? overviewVideoElementRef.current
+        : videoElementRef.current;
       if (!video || video.readyState < 2 || video.videoWidth <= 0) {
         return;
       }
@@ -2637,6 +2665,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       resetFullscreenViewport();
       setFullscreenDisplayMode(initialFullscreenDisplayMode);
       setReceiverMediaStream(null);
+      setOverviewMediaStream(null);
+    setOverviewMediaStream(null);
       setReceiverFrameSize(null);
     }
     // Every target change starts a new receiver lifecycle. Keep the browser's
@@ -2829,6 +2859,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           // 不等 useEffect 再隐藏（否则有一帧 video 空白露出来 = 黑屏闪一下）
           updateReceiverVideoVisibility(false);
           setReceiverMediaStream(committedResult.mediaStream || null);
+          setOverviewMediaStream(committedResult.overviewMediaStream || null);
           setReceiverFrameSize(resolveStartedCaptureFrameSize(committedResult.started));
           collectStreamStatsRef.current = typeof committedResult.collectStats === 'function' ? committedResult.collectStats : null;
         }
@@ -2860,6 +2891,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           return;
         }
         setReceiverMediaStream(null);
+      setOverviewMediaStream(null);
+    setOverviewMediaStream(null);
         setReceiverFrameSize(null);
         updateReceiverVideoVisibility(false);
         collectStreamStatsRef.current = null;
@@ -2950,6 +2983,24 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         const base = getRemoteWindowSourceRect(state.target);
         if (compositeLayout) {
           if (focusedWindowSlot) {
+            if (overviewMediaStream) {
+              // 双流：主画面直接显示 focus 流（窗口全分辨率），触点映射到窗口屏幕坐标
+              const compositeWindow = (state.target.compositeWindows ?? []).find(
+                (item) => item.windowId === focusedWindowSlot.windowId,
+              );
+              const windowRect = compositeWindow?.windowBoundsTopLeftPx
+                || (focusedWindowSlot.windowId === state.target.videoTarget.windowId
+                  ? state.target.videoTarget.windowBoundsTopLeftPx
+                  : null);
+              if (windowRect) {
+                return {
+                  x: windowRect.x,
+                  y: windowRect.y,
+                  width: windowRect.width,
+                  height: windowRect.height,
+                };
+              }
+            }
             // 焦点窗口：主画面显示该窗口区域，触点映射到画布内该窗口坐标
             return {
               x: base.x + focusedWindowSlot.offsetX,
@@ -2968,7 +3019,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         return base;
       })(),
     };
-  }, [compositeLayout, focusedWindowSlot, receiverFrameSize, state]);
+  }, [compositeLayout, focusedWindowSlot, overviewMediaStream, receiverFrameSize, state]);
 
   const resolveScrollInputEvent = useCallback((
     clientX: number,
@@ -3835,8 +3886,9 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     }
     : styles.videoContentFallback;
 
-  // 组合推流：焦点窗口（主画面裁切放大）
-  const focusedVideoStyle = compositeLayout && focusedWindowSlot && lockedSurfaceLayout
+  // 组合推流：焦点窗口（主画面裁切放大）。双流（有 overview）时主画面直接显示
+  // focus 流（高码率单窗口全分辨率），不做画布 CSS 裁切
+  const focusedVideoStyle = compositeLayout && focusedWindowSlot && lockedSurfaceLayout && !overviewMediaStream
     ? (() => {
         const scale = Math.min(
           Math.max(1, lockedSurfaceLayout.content.width) / Math.max(1, focusedWindowSlot.width),
@@ -3905,6 +3957,16 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
               opacity: videoHasPlayed ? 1 : 0,
               visibility: videoHasPlayed ? 'visible' : 'hidden',
             }}
+          />
+          <video
+            ref={overviewVideoElementRef}
+            data-testid="remote-window-overview-video"
+            autoPlay
+            muted
+            controls={false}
+            disablePictureInPicture
+            playsInline
+            style={{ display: 'none' }}
           />
         </>
       );
@@ -4253,20 +4315,6 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       {compositeLayout ? (
         <div data-testid="remote-window-composite-strip" data-no-drag="true" style={styles.compositeStrip}>
           <div
-            data-testid="remote-window-composite-overview-wrap"
-            style={styles.compositeOverviewWrap}
-            onPointerDown={(event) => event.stopPropagation()}
-            onPointerMove={(event) => event.stopPropagation()}
-          >
-            <canvas
-              ref={compositeOverviewCanvasRef}
-              data-testid="remote-window-composite-overview"
-              width={340}
-              height={72}
-              style={styles.compositeOverview}
-            />
-          </div>
-          <div
             data-testid="remote-window-composite-thumbnails"
             style={styles.compositeThumbRow}
             onPointerDown={(event) => event.stopPropagation()}
@@ -4278,7 +4326,17 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
                 type="button"
                 data-testid={`remote-window-composite-thumb-${slot.windowId}`}
                 data-focused={focusedWindowSlot?.windowId === slot.windowId ? 'true' : undefined}
-                onClick={() => setFocusedWindowId(slot.windowId)}
+                onClick={() => {
+                  // 双流：切子窗口 → daemon 切换高码率 focus 捕获目标（低清占位由 overview 流兜底）
+                  setFocusedWindowId(slot.windowId);
+                  const focusStreamId = activeFocusStreamIdRef.current || activeStreamIdRef.current;
+                  const focusTarget = state.targets.find(
+                    (item) => item.videoTarget.windowId === slot.windowId,
+                  );
+                  if (focusStreamId && focusTarget && updateFocus && activeSessionId) {
+                    updateFocus(activeSessionId, focusStreamId, focusTarget);
+                  }
+                }}
                 style={{
                   ...styles.compositeThumbButton,
                   ...(focusedWindowSlot?.windowId === slot.windowId ? styles.compositeThumbButtonFocused : null),
@@ -4737,7 +4795,7 @@ const styles: Record<string, CSSProperties> = {
     position: 'absolute',
     left: 8,
     right: 8,
-    bottom: 8,
+    top: 8,
     zIndex: 60,
     display: 'flex',
     flexDirection: 'column',

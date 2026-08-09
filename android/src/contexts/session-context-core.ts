@@ -254,6 +254,11 @@ export interface SessionContextValue {
     sessionId: string,
     payload: Omit<RemoteWindowStreamQualityRequestPayload, 'requestId'>,
   ) => void;
+  updateRemoteWindowFocus: (
+    sessionId: string,
+    streamId: string,
+    target: RemoteWindowStreamTargetManifest,
+  ) => void;
   stopRemoteWindowStream: (sessionId: string, streamId: string) => Promise<boolean>;
   sendRemoteWindowInput: (
     sessionId: string,

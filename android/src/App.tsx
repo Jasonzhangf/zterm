@@ -128,6 +128,7 @@ export function AppContent({
     requestRemoteWindowTargets,
     requestRemoteWindowStreamStart,
     updateRemoteWindowStreamQuality,
+    updateRemoteWindowFocus,
     stopRemoteWindowStream,
     sendRemoteWindowInput,
     resizeRemoteWindowTarget,
@@ -710,6 +711,7 @@ export function AppContent({
             onRequestRemoteWindowTargets={requestRemoteWindowTargets}
             onRequestRemoteWindowStreamStart={requestRemoteWindowStreamStart}
             onUpdateRemoteWindowStreamQuality={updateRemoteWindowStreamQuality}
+            onUpdateRemoteWindowFocus={updateRemoteWindowFocus}
             onStopRemoteWindowStream={stopRemoteWindowStream}
             onSendRemoteWindowInput={sendRemoteWindowInput}
             onResizeRemoteWindowTarget={resizeRemoteWindowTarget}

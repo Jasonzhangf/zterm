@@ -115,6 +115,7 @@ export function SessionProvider({
     requestRemoteWindowTargets,
     requestRemoteWindowStreamStart,
     updateRemoteWindowStreamQuality,
+    updateRemoteWindowFocus,
     stopRemoteWindowStream,
     sendRemoteWindowInput,
     resizeRemoteWindowTarget,
@@ -203,6 +204,7 @@ export function SessionProvider({
     requestRemoteWindowTargets,
     requestRemoteWindowStreamStart,
     updateRemoteWindowStreamQuality,
+    updateRemoteWindowFocus,
     stopRemoteWindowStream,
     sendRemoteWindowInput,
     resizeRemoteWindowTarget,
@@ -256,6 +258,7 @@ export function SessionProvider({
     requestRemoteWindowTargets,
     requestRemoteWindowStreamStart,
     updateRemoteWindowStreamQuality,
+    updateRemoteWindowFocus,
     stopRemoteWindowStream,
     sendRemoteWindowInput,
     resizeRemoteWindowTarget,
@@ -337,6 +340,9 @@ export function SessionProvider({
     ),
     updateRemoteWindowStreamQuality: (...args: Parameters<typeof updateRemoteWindowStreamQuality>) => (
       contextRuntimeRef.current.updateRemoteWindowStreamQuality(...args)
+    ),
+    updateRemoteWindowFocus: (...args: Parameters<typeof updateRemoteWindowFocus>) => (
+      contextRuntimeRef.current.updateRemoteWindowFocus(...args)
     ),
     stopRemoteWindowStream: (sessionId: string, streamId: string) => (
       contextRuntimeRef.current.stopRemoteWindowStream(sessionId, streamId)

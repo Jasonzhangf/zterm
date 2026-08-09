@@ -49,6 +49,15 @@ interface RemoteWindowStreamMessageRuntimeLike extends RemoteWindowCatalogMessag
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     },
   ) => void;
+  sendStreamUpdateFocus: (
+    sessionId: string,
+    options: {
+      ws: BridgeTransportSocket;
+      streamId: string;
+      target: RemoteWindowStreamTargetManifest;
+      sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+    },
+  ) => void;
   sendStreamIceCandidate: (
     sessionId: string,
     options: {
@@ -339,6 +348,33 @@ export function updateRemoteWindowStreamQualityRuntime(options: {
   options.remoteWindowMessageRuntime.sendStreamQuality(targetSessionId, {
     ws,
     payload: options.payload,
+    sendSocketPayload: options.sendSocketPayload,
+  });
+}
+
+export function updateRemoteWindowFocusRuntime(options: {
+  sessionId: string;
+  streamId: string;
+  target: RemoteWindowStreamTargetManifest;
+  sessions: Session[];
+  daemonConnection: ClientDaemonConnection;
+  remoteWindowMessageRuntime: RemoteWindowStreamMessageRuntimeLike;
+  sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+}) {
+  const targetSessionId = options.sessionId.trim();
+  const streamId = options.streamId.trim();
+  if (!targetSessionId || !streamId) {
+    throw new Error('Remote window stream update focus requires sessionId and streamId');
+  }
+  const ws = resolveRemoteWindowStreamTransport({
+    sessionId: targetSessionId,
+    sessions: options.sessions,
+    daemonConnection: options.daemonConnection,
+  });
+  options.remoteWindowMessageRuntime.sendStreamUpdateFocus(targetSessionId, {
+    ws,
+    streamId,
+    target: options.target,
     sendSocketPayload: options.sendSocketPayload,
   });
 }
