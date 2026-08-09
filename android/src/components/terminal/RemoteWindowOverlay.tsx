@@ -3094,6 +3094,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     if (effect.kind === 'pinch-move') {
       // 保护：只有真正双指在场时才应用缩放；单指滑动（残留手势/指针误判）不得改变 scale
       if (surfacePointersRef.current.size < 2) {
+        // eslint-disable-next-line no-console
+        console.log(`[remote-window-pinch] ABORT size<2 pointerId=${effect.pointerId}`);
         surfacePinchStartRef.current = null;
         return;
       }
@@ -3107,6 +3109,10 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         REMOTE_WINDOW_FULLSCREEN_MIN_SCALE,
         REMOTE_WINDOW_FULLSCREEN_MAX_SCALE,
       );
+      // eslint-disable-next-line no-console
+      console.log(`[remote-window-pinch] commit=${effect.commit} ratio=${effect.scaleRatio.toFixed(3)} ` +
+        `start=${start.startScale.toFixed(2)} -> ${nextScale.toFixed(2)} ` +
+        `receiverStream=${receiverMediaStream ? 'ok' : 'NULL'}`);
       const surfaceRect = videoSurfaceRef.current?.getBoundingClientRect();
       if (
         state.phase === 'targetLocked'
