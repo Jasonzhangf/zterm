@@ -3073,6 +3073,22 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       if (!start || start.pointerId !== effect.pointerId) {
         return;
       }
+      const surfaceRect = videoSurfaceRef.current?.getBoundingClientRect();
+      if (state.phase === 'targetLocked' && surfaceRect && surfaceRect.width > 0 && surfaceRect.height > 0) {
+        const displaySourceSize = resolveRemoteWindowDisplaySourceSize(state.target, receiverFrameSize, focusedWindowSlotRef.current);
+        setFullscreenViewport((current) => clampFullscreenViewport(
+          {
+            scale: current.scale,
+            panX: start.startPanX + effect.deltaX,
+            panY: start.startPanY + effect.deltaY,
+          },
+          { width: surfaceRect.width, height: surfaceRect.height },
+          displaySourceSize,
+          fullscreenDisplayModeRef.current,
+          Math.max(0, bottomInsetPx),
+        ));
+        return;
+      }
       setFullscreenViewport({
         scale: fullscreenViewportRef.current.scale,
         panX: start.startPanX + effect.deltaX,
@@ -3454,11 +3470,27 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       if (Math.hypot(deltaX, deltaY) > REMOTE_WINDOW_FULLSCREEN_PAN_TAP_THRESHOLD_PX) {
         gesture.moved = true;
       }
-      setFullscreenViewport({
-        scale: fullscreenViewportRef.current.scale,
-        panX: gesture.startPanX + deltaX,
-        panY: gesture.startPanY + deltaY,
-      });
+      const surfaceRect = videoSurfaceRef.current?.getBoundingClientRect();
+      if (surfaceRect && surfaceRect.width > 0 && surfaceRect.height > 0) {
+        const displaySourceSize = resolveRemoteWindowDisplaySourceSize(state.target, receiverFrameSize, focusedWindowSlotRef.current);
+        setFullscreenViewport((current) => clampFullscreenViewport(
+          {
+            scale: current.scale,
+            panX: gesture.startPanX + deltaX,
+            panY: gesture.startPanY + deltaY,
+          },
+          { width: surfaceRect.width, height: surfaceRect.height },
+          displaySourceSize,
+          fullscreenDisplayModeRef.current,
+          Math.max(0, bottomInsetPx),
+        ));
+      } else {
+        setFullscreenViewport({
+          scale: fullscreenViewportRef.current.scale,
+          panX: gesture.startPanX + deltaX,
+          panY: gesture.startPanY + deltaY,
+        });
+      }
       event.preventDefault();
       event.stopPropagation();
       return;
