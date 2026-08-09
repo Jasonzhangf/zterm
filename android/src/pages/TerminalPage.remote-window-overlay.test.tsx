@@ -306,7 +306,7 @@ describe('TerminalPage remote window overlay', () => {
       expect(onRequestRemoteWindowStreamStart).toHaveBeenCalledWith('s1', expect.objectContaining({
         streamTargetId: 'app-1',
       }), expect.stringMatching(/^rw-stream-/), expect.objectContaining({
-        purpose: 'preview',
+        purpose: 'focus',
         videoBitrate: { preset: '2mbps', bitrateMbps: 2, maxBitrateBps: 2_000_000, maxFrameRateFps: 30 },
       }));
       expect(screen.getByTestId('remote-window-video')).toBeTruthy();
@@ -598,7 +598,24 @@ describe('TerminalPage remote window overlay', () => {
       button: 0,
       buttons: 1,
     });
-    expect(onSendRemoteWindowInput).not.toHaveBeenCalled();
+    // 触控模式单指拖动 = 增量滚动：move 即发 scroll（转移时发首帧），up 收尾不再发事件
+    await waitFor(() => {
+      expect(remoteWindowPayloads(onSendRemoteWindowInput)).toHaveLength(1);
+    });
+    expectNoRemoteWindowInputFocus(onSendRemoteWindowInput);
+    expect(onSendRemoteWindowInput.mock.calls.map((call) => call[1].event.kind)).toEqual([
+      'scroll',
+    ]);
+    expect(remoteWindowPayloads(onSendRemoteWindowInput).map((payload) => payload.event)).toEqual([
+      expect.objectContaining({
+        kind: 'scroll',
+        unit: 'pixel',
+        normalizedX: 0.5,
+        normalizedY: 0.4,
+      }),
+    ]);
+    expect(onTerminalInput).not.toHaveBeenCalled();
+
     fireEvent.pointerUp(surface, {
       pointerId: 32,
       pointerType: 'touch',
@@ -608,32 +625,12 @@ describe('TerminalPage remote window overlay', () => {
       buttons: 0,
     });
 
-    await waitFor(() => {
-      expect(remoteWindowPayloads(onSendRemoteWindowInput)).toHaveLength(1);
-    });
-    expectNoRemoteWindowInputFocus(onSendRemoteWindowInput);
-    expect(onSendRemoteWindowInput.mock.calls.map((call) => call[1].event.kind)).toEqual([
-      'gesture',
-    ]);
-    expect(remoteWindowPayloads(onSendRemoteWindowInput).map((payload) => payload.event)).toEqual([
-      expect.objectContaining({
-        kind: 'gesture',
-        gesture: 'swipe',
-        phase: 'end',
-        pointerId: 32,
-        startNormalizedX: 0.5,
-        startNormalizedY: 0.7,
-        normalizedX: 0.5,
-        normalizedY: 0.4,
-        deltaX: 0,
-        deltaY: -140,
-      }),
-    ]);
-    expect(onTerminalInput).not.toHaveBeenCalled();
+    // up 收尾：滚动已增量注入，不再产生新事件
+    expect(remoteWindowPayloads(onSendRemoteWindowInput)).toHaveLength(1);
 
     await waitFor(() => {
-      expect(screen.getByTestId('terminal-debug-remote-window-event').textContent).toContain('overlay · SEND Y · gesture:swipe/end');
-      expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('F 0 · D 0 · M 0 · U 0 · C 1 · S 0 · K 0 · T 0 · A 1');
+      expect(screen.getByTestId('terminal-debug-remote-window-event').textContent).toContain('scroll');
+      expect(screen.getByTestId('terminal-debug-remote-window-counts').textContent).toContain('S 1');
     });
   });
 
@@ -709,9 +706,10 @@ describe('TerminalPage remote window overlay', () => {
     await screen.findByTestId('remote-window-video');
 
     await waitFor(() => {
-      expect(onRequestRemoteWindowStreamStart).toHaveBeenCalledTimes(2);
+      // 双流：单连接双 track（overview + focus），startStream 只调用一次
+      expect(onRequestRemoteWindowStreamStart).toHaveBeenCalledTimes(1);
     });
-    const streamId = onRequestRemoteWindowStreamStart.mock.calls[1]?.[2] || '';
+    const streamId = onRequestRemoteWindowStreamStart.mock.calls[0]?.[2] || '';
     expect(streamId).toEqual(expect.stringMatching(/^rw-stream-/));
 
     act(() => {
