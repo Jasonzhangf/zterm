@@ -511,7 +511,7 @@ func postMouseMove(x: Double, y: Double) {
     event?.post(tap: .cghidEventTap)
 }
 
-func postClickEvent(x: Double, y: Double, button: String?, clickCount: Int?) {
+func postClickEvent(x: Double, y: Double, button: String?, clickCount: Int?, moveCursor: Bool = true) {
     let point = CGPoint(x: x, y: y)
     postMouseMove(x: x, y: y)
     let count = max(1, min(3, clickCount ?? 1))
@@ -532,6 +532,10 @@ func postClickEvent(x: Double, y: Double, button: String?, clickCount: Int?) {
         )
         up?.post(tap: .cghidEventTap)
         usleep(18000)
+    }
+    if !moveCursor {
+        // 触控模式：点击后隐藏系统光标，避免远端串流画面残留鼠标
+        CGDisplayHideCursor(CGMainDisplayID())
     }
 }
 
@@ -633,7 +637,7 @@ func handleConfig(_ config: InputConfig) throws {
         guard let x = config.event.x, let y = config.event.y else {
             throw inputError("remote click input missing coordinates")
         }
-        postClickEvent(x: x, y: y, button: config.event.button, clickCount: config.event.clickCount)
+        postClickEvent(x: x, y: y, button: config.event.button, clickCount: config.event.clickCount, moveCursor: config.event.moveCursor ?? true)
     } else if config.event.kind == "pointer" {
         guard let phase = config.event.phase else {
             throw inputError("remote pointer input missing phase")

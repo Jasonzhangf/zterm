@@ -176,6 +176,7 @@ export interface RemoteWindowStreamTargetManifest {
   videoTarget: {
     kind: 'app-window' | 'iterm2-pane';
     appBundleId: string;
+    ownerName?: string;
     pid: number;
     windowId: string;
     title: string;
@@ -188,6 +189,7 @@ export interface RemoteWindowStreamTargetManifest {
   compositeWindows?: Array<{
     windowId: string;
     title: string;
+    ownerName?: string;
     windowBoundsTopLeftPx: RemoteWindowStreamRect;
     cropRectTopLeftPx?: RemoteWindowStreamRect;
   }>;
@@ -353,6 +355,7 @@ export interface RemoteWindowInputEventPayload {
         normalizedX: number;
         normalizedY: number;
         clickCount?: number;
+        moveCursor?: boolean;
       }
     | {
         kind: 'scroll';

@@ -3,6 +3,7 @@ import {
   applyRemoteWindowTargetCatalog,
   applyRemoteWindowTargetCatalogSnapshot,
   attachRemoteWindowStreamReceiver,
+  attachSameAppCompositeWindows,
   beginRemoteWindowStreamHandoff,
   beginRemoteWindowStreamSetup,
   beginRemoteWindowTargetEnumeration,
@@ -333,5 +334,97 @@ describe('remote window composite layout', () => {
     expect(layout!.windows).toHaveLength(2);
     expect(layout!.windows[0]).toMatchObject({ windowId: '100', offsetX: 0 });
     expect(layout!.windows[1]).toMatchObject({ windowId: '200', offsetX: 800 });
+  });
+
+  it('does not attach windows from other apps even with shared/missing bundle id', () => {
+    const wechat = makeTarget({
+      streamTargetId: 'app-window:1:100',
+      videoTarget: {
+        kind: 'app-window',
+        appBundleId: 'com.tencent.xinWeChat',
+        ownerName: '微信',
+        pid: 100,
+        windowId: '100',
+        title: 'WeChat',
+        windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 600 },
+        cropRectTopLeftPx: { x: 10, y: 20, width: 800, height: 600 },
+      },
+      inputTarget: { kind: 'app-window' },
+      capture: {
+        source: 'ScreenCaptureKit',
+        coordinateSpace: 'macos-top-left-px',
+        scale: 1,
+        createdAt: '2026-08-08T00:00:00.000Z',
+      },
+    });
+    // 小红书独立 app：即使 catalog 误报相同 bundle id，ownerName 不同也不得聚合
+    const xiaohongshu = makeTarget({
+      streamTargetId: 'app-window:2:200',
+      videoTarget: {
+        kind: 'app-window',
+        appBundleId: 'com.tencent.xinWeChat',
+        ownerName: '小红书',
+        pid: 200,
+        windowId: '200',
+        title: '小红书',
+        windowBoundsTopLeftPx: { x: 900, y: 20, width: 400, height: 500 },
+        cropRectTopLeftPx: { x: 900, y: 20, width: 400, height: 500 },
+      },
+      inputTarget: { kind: 'app-window' },
+      capture: {
+        source: 'ScreenCaptureKit',
+        coordinateSpace: 'macos-top-left-px',
+        scale: 1,
+        createdAt: '2026-08-08T00:00:00.000Z',
+      },
+    });
+    const attached = attachSameAppCompositeWindows(wechat, [wechat, xiaohongshu]);
+    expect(attached.compositeWindows ?? []).toHaveLength(0);
+  });
+
+  it('attaches same app windows when bundle id and ownerName both match', () => {
+    const wechatMain = makeTarget({
+      streamTargetId: 'app-window:1:100',
+      videoTarget: {
+        kind: 'app-window',
+        appBundleId: 'com.tencent.xinWeChat',
+        ownerName: '微信',
+        pid: 100,
+        windowId: '100',
+        title: 'WeChat',
+        windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 600 },
+        cropRectTopLeftPx: { x: 10, y: 20, width: 800, height: 600 },
+      },
+      inputTarget: { kind: 'app-window' },
+      capture: {
+        source: 'ScreenCaptureKit',
+        coordinateSpace: 'macos-top-left-px',
+        scale: 1,
+        createdAt: '2026-08-08T00:00:00.000Z',
+      },
+    });
+    const wechatPreview = makeTarget({
+      streamTargetId: 'app-window:1:200',
+      videoTarget: {
+        kind: 'app-window',
+        appBundleId: 'com.tencent.xinWeChat',
+        ownerName: '微信',
+        pid: 100,
+        windowId: '200',
+        title: 'Preview',
+        windowBoundsTopLeftPx: { x: 900, y: 20, width: 400, height: 500 },
+        cropRectTopLeftPx: { x: 900, y: 20, width: 400, height: 500 },
+      },
+      inputTarget: { kind: 'app-window' },
+      capture: {
+        source: 'ScreenCaptureKit',
+        coordinateSpace: 'macos-top-left-px',
+        scale: 1,
+        createdAt: '2026-08-08T00:00:00.000Z',
+      },
+    });
+    const attached = attachSameAppCompositeWindows(wechatMain, [wechatMain, wechatPreview]);
+    expect(attached.compositeWindows ?? []).toHaveLength(1);
+    expect(attached.compositeWindows![0]).toMatchObject({ windowId: '200', ownerName: '微信' });
   });
 });

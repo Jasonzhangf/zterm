@@ -482,6 +482,7 @@ export function buildRemoteWindowClickInputEventRuntime(options: {
     pointerId: options.pointerId,
     button: options.button ?? 'left',
     clickCount: options.clickCount ?? 1,
+    moveCursor: false,
     ...point,
   };
 }

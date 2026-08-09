@@ -222,6 +222,7 @@ export function createTerminalMuxChannelRuntime(
           const reason = `mux channel attach failed: ${
             error instanceof Error ? error.message : String(error)
           }`;
+          console.warn(`[server] ${reason} (channelId=${frame.payload.channelId} session=${frame.payload.sessionName})`);
           // 先给客户端错误诊断（客户端会显示"出错"）
           sendMuxFrame(connection, {
             type: 'mux-channel-message',

@@ -216,15 +216,35 @@ export function attachSameAppCompositeWindows(
   if (target.videoTarget.kind !== 'app-window') {
     return target;
   }
+  const targetAppBundleId = target.videoTarget.appBundleId?.trim();
+  const targetOwnerName = target.videoTarget.ownerName?.trim();
+  // 归属未知（appBundleId 为空）时禁止盲目聚合，避免把其他 app 的窗口混进组合
+  if (!targetAppBundleId) {
+    return target;
+  }
   const compositeWindows = targets
-    .filter((item) => (
-      item.videoTarget.kind === 'app-window'
-      && item.videoTarget.appBundleId === target.videoTarget.appBundleId
-      && item.streamTargetId !== target.streamTargetId
-    ))
+    .filter((item) => {
+      if (item.videoTarget.kind !== 'app-window') {
+        return false;
+      }
+      if (item.streamTargetId === target.streamTargetId) {
+        return false;
+      }
+      const itemAppBundleId = item.videoTarget.appBundleId?.trim();
+      if (!itemAppBundleId || itemAppBundleId !== targetAppBundleId) {
+        return false;
+      }
+      // 双保险：ownerName 存在时必须一致（避免不同 app 共享/缺失 bundle id 时误聚合）
+      const itemOwnerName = item.videoTarget.ownerName?.trim();
+      if (itemOwnerName && targetOwnerName && itemOwnerName !== targetOwnerName) {
+        return false;
+      }
+      return true;
+    })
     .map((item) => ({
       windowId: item.videoTarget.windowId,
       title: item.videoTarget.title,
+      ownerName: item.videoTarget.ownerName,
       windowBoundsTopLeftPx: item.videoTarget.windowBoundsTopLeftPx,
       cropRectTopLeftPx: item.videoTarget.cropRectTopLeftPx,
     }));

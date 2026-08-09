@@ -377,6 +377,7 @@ export function buildMacosAppWindowTargets(
       videoTarget: {
         kind: 'app-window',
         appBundleId: window.appBundleId,
+        ownerName: window.ownerName || undefined,
         pid: window.pid,
         windowId: window.windowId,
         title: window.title || window.ownerName || window.appBundleId || `Window ${window.windowId}`,

@@ -557,7 +557,13 @@ function resolveStartedCaptureFrameSize(started?: RemoteWindowStreamStartedPaylo
 function resolveRemoteWindowDisplaySourceSize(
   target: RemoteWindowStreamTargetManifest,
   receiverFrameSize: SurfaceSize | null,
+  focusedWindowSlot?: { width: number; height: number } | null,
 ): SurfaceSize {
+  // 组合模式：主画面显示焦点窗口（裁切放大），显示源尺寸 = 焦点窗口尺寸，
+  // 否则坐标/布局会按整个画布比例计算，与 video 实际显示不一致
+  if (focusedWindowSlot && focusedWindowSlot.width > 0 && focusedWindowSlot.height > 0) {
+    return { width: focusedWindowSlot.width, height: focusedWindowSlot.height };
+  }
   if (receiverFrameSize) {
     return receiverFrameSize;
   }
@@ -921,6 +927,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const focusedWindowSlot = compositeLayout
     ? (compositeLayout.windows.find((w) => w.windowId === focusedWindowId) ?? compositeLayout.windows[0] ?? null)
     : null;
+  const focusedWindowSlotRef = useRef(focusedWindowSlot);
+  focusedWindowSlotRef.current = focusedWindowSlot;
   const secondPointerPendingRef = useRef<{
     pointerId: number;
     clientX: number;
@@ -1374,7 +1382,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     setFullscreenViewportState((current) => {
       const raw = typeof next === 'function' ? next(current) : next;
       const displaySourceSize = state.phase === 'targetLocked'
-        ? resolveRemoteWindowDisplaySourceSize(state.target, receiverFrameSize)
+        ? resolveRemoteWindowDisplaySourceSize(state.target, receiverFrameSize, focusedWindowSlotRef.current)
         : null;
       const displayMode = state.phase === 'targetLocked' && state.mode === 'fullscreen'
         ? fullscreenDisplayModeRef.current
@@ -1518,7 +1526,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       setSurfaceSize((current) => (
         current && current.width === next.width && current.height === next.height ? current : next
       ));
-      const displaySourceSize = resolveRemoteWindowDisplaySourceSize(state.target, receiverFrameSize);
+      const displaySourceSize = resolveRemoteWindowDisplaySourceSize(state.target, receiverFrameSize, focusedWindowSlotRef.current);
       const displayMode = state.mode === 'fullscreen'
         ? fullscreenDisplayMode
         : initialFullscreenDisplayMode;
@@ -1589,7 +1597,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       return;
     }
 
-    const displaySourceSize = resolveRemoteWindowDisplaySourceSize(state.target, receiverFrameSize);
+    const displaySourceSize = resolveRemoteWindowDisplaySourceSize(state.target, receiverFrameSize, focusedWindowSlotRef.current);
     const autoKey = [
       state.target.streamTargetId,
       fullscreenDisplayMode,
@@ -2176,7 +2184,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       return;
     }
     const rect = overlay.getBoundingClientRect();
-    const displaySourceSize = resolveRemoteWindowDisplaySourceSize(state.target, receiverFrameSize);
+    const displaySourceSize = resolveRemoteWindowDisplaySourceSize(state.target, receiverFrameSize, focusedWindowSlotRef.current);
     const currentWidth = Math.max(
       FLOATING_OVERLAY_MIN_WIDTH_PX,
       Math.round(floatingOverlayWidthPxRef.current || rect.width || FLOATING_OVERLAY_MIN_WIDTH_PX),
@@ -2976,7 +2984,11 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     if (!surfaceRect || surfaceRect.width <= 0 || surfaceRect.height <= 0) {
       return null;
     }
-    const displaySourceSize = resolveRemoteWindowDisplaySourceSize(state.target, receiverFrameSize);
+    const displaySourceSize = resolveRemoteWindowDisplaySourceSize(
+      state.target,
+      receiverFrameSize,
+      compositeLayout ? focusedWindowSlot : null,
+    );
     const viewport = state.mode === 'fullscreen'
       ? fullscreenViewportRef.current
       : initialFullscreenViewport;
@@ -3109,7 +3121,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         && surfaceRect.width > 0
         && surfaceRect.height > 0
       ) {
-        const displaySourceSize = resolveRemoteWindowDisplaySourceSize(state.target, receiverFrameSize);
+        const displaySourceSize = resolveRemoteWindowDisplaySourceSize(state.target, receiverFrameSize, focusedWindowSlotRef.current);
         setFullscreenViewport((current) => resolveAnchoredFullscreenViewportScale({
           surface: { width: surfaceRect.width, height: surfaceRect.height },
           source: displaySourceSize,
@@ -3858,13 +3870,17 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
 	    if (state.phase !== 'targetLocked' || !surfaceSize) {
 	      return null;
 	    }
-	    const displaySourceSize = resolveRemoteWindowDisplaySourceSize(state.target, receiverFrameSize);
+	    const displaySourceSize = resolveRemoteWindowDisplaySourceSize(
+	      state.target,
+	      receiverFrameSize,
+	      compositeLayout ? focusedWindowSlot : null,
+	    );
 	    const viewport = state.mode === 'fullscreen' ? fullscreenViewport : initialFullscreenViewport;
 	    const displayMode = state.mode === 'fullscreen'
 	      ? fullscreenDisplayMode
 	      : initialFullscreenDisplayMode;
 	    return resolveZoomedContentRect(surfaceSize, displaySourceSize, viewport, displayMode);
-	  }, [fullscreenDisplayMode, fullscreenViewport, receiverFrameSize, state, surfaceSize]);
+	  }, [compositeLayout, focusedWindowSlot, fullscreenDisplayMode, fullscreenViewport, receiverFrameSize, state, surfaceSize]);
 
   const videoContentStyle = lockedSurfaceLayout
     ? {
@@ -3973,7 +3989,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   })() : null;
 
   const lockedDisplaySourceSize = state.phase === 'targetLocked'
-    ? resolveRemoteWindowDisplaySourceSize(state.target, receiverFrameSize)
+    ? resolveRemoteWindowDisplaySourceSize(state.target, receiverFrameSize, focusedWindowSlotRef.current)
     : null;
   const lockedAppWindowGroup = useMemo(() => {
     if (state.phase !== 'targetLocked') {
