@@ -441,7 +441,7 @@ describe('terminal message runtime explicit error truth', () => {
   });
 
   it('reports attach failure through the opened mux channel error path', async () => {
-    const { runtime } = createRuntime({
+    const { runtime, closeSession } = createRuntime({
       failAttachTmux: true,
       passThroughTransportSend: true,
     });
@@ -478,12 +478,27 @@ describe('terminal message runtime explicit error truth', () => {
         message: {
           type: 'error',
           payload: {
-            message: 'forced attach failure',
+            message: 'mux channel attach failed: forced attach failure',
             code: 'mux_channel_open_failed',
           },
         },
       },
     });
+    // phantom channel 必须原子清理：显式 closed + registry 删除 + subscriber 关闭（禁止保留未 attach channel）
+    expect(sentFrames).toContainEqual({
+      type: 'mux-channel-closed',
+      payload: {
+        channelId: 'channel-attach-failed',
+        reason: expect.stringContaining('forced attach failure'),
+        code: 'mux_channel_open_failed',
+      },
+    });
+    expect(connection.muxChannels?.has('channel-attach-failed')).toBe(false);
+    expect(closeSession).toHaveBeenCalledWith(
+      expect.objectContaining({ muxChannelId: 'channel-attach-failed' }),
+      expect.stringContaining('forced attach failure'),
+      false,
+    );
   });
 
   it('binds multiple mux channels on one connection and routes input only to the owning subscriber', async () => {

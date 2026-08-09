@@ -219,6 +219,10 @@ export function createTerminalMuxChannelRuntime(
           widthMode: frame.payload.widthMode,
           autoCommand: frame.payload.autoCommand,
         }).catch((error: unknown) => {
+          const reason = `mux channel attach failed: ${
+            error instanceof Error ? error.message : String(error)
+          }`;
+          // 先给客户端错误诊断（客户端会显示"出错"）
           sendMuxFrame(connection, {
             type: 'mux-channel-message',
             payload: {
@@ -226,10 +230,23 @@ export function createTerminalMuxChannelRuntime(
               message: {
                 type: 'error',
                 payload: {
-                  message: error instanceof Error ? error.message : 'Invalid mux channel open payload',
+                  message: reason,
                   code: 'mux_channel_open_failed',
                 },
               },
+            },
+          });
+          // 原子清理：删除 channel registry + 关闭 subscriber + 发显式 closed。
+          // 禁止保留未 attach 的 phantom channel（否则占住 target，客户端后续无法连接）。
+          connection.muxChannels?.delete(frame.payload.channelId);
+          subscriber.transport = null;
+          deps.closeSession(subscriber, reason, false);
+          sendMuxFrame(connection, {
+            type: 'mux-channel-closed',
+            payload: {
+              channelId: frame.payload.channelId,
+              reason,
+              code: 'mux_channel_open_failed',
             },
           });
         });
