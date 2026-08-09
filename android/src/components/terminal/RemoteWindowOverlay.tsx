@@ -2773,9 +2773,10 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       ].join('|');
       setState(startingState);
     }
-    // 单流模式：只开 focus 流，不启动 canvas 预览流。
-    // Android WebView 同时接收 canvas+focus 双 WebRTC 流时，focus 会被饿死只渲染首帧（真机 logcat：tracks live 但 currentTime 定住），
-    // 且 canvas→focus 的 srcObject 切换本身就有黑屏闪一下。单流从根上消除两者。
+    // 单连接双 transceiver：receiver/runtime 在 target.compositeWindows 非空时
+    // 自动在同一 peerConnection 加第二个 video transceiver（stream id='overview'），
+    // daemon 看到 composite target 会同步开 overview capture。overviewMediaStream 用于
+    // 缩略图 drawImage + 切换瞬间主画面低清占位（同连接双流不进 canvas 预览流饿死 focus 路径）。
     void startStream(targetSessionId, target, focusStreamId, {
       videoBitrate,
       purpose: 'focus',
@@ -2857,6 +2858,11 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         if (activeStreamIdRef.current === committedStreamId) {
           // 同一批次同步隐藏 video：srcObject 切换瞬间 video 内容会清空，
           // 不等 useEffect 再隐藏（否则有一帧 video 空白露出来 = 黑屏闪一下）
+          // eslint-disable-next-line no-console
+          console.log(`[remote-window-stream-start] committed=${committedStreamId} ` +
+            `focusTracks=${committedResult.mediaStream?.getTracks?.().length ?? 0} ` +
+            `overviewTracks=${committedResult.overviewMediaStream?.getTracks?.().length ?? 0} ` +
+            `compositeWindows=${target.compositeWindows?.length ?? 0}`);
           updateReceiverVideoVisibility(false);
           setReceiverMediaStream(committedResult.mediaStream || null);
           setOverviewMediaStream(committedResult.overviewMediaStream || null);
@@ -4333,8 +4339,18 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
                   const focusTarget = state.targets.find(
                     (item) => item.videoTarget.windowId === slot.windowId,
                   );
+                  // eslint-disable-next-line no-console
+                  console.log(`[remote-window-thumb-click] slot=${slot.windowId} ` +
+                    `focusStreamId=${focusStreamId ?? 'NULL'} ` +
+                    `focusTarget=${focusTarget ? 'ok' : 'NULL'} ` +
+                    `updateFocus=${typeof updateFocus}`);
                   if (focusStreamId && focusTarget && updateFocus && activeSessionId) {
+                    const focusStart = Date.now();
                     updateFocus(activeSessionId, focusStreamId, focusTarget);
+                    setTimeout(() => {
+                      // eslint-disable-next-line no-console
+                      console.log(`[remote-window-thumb-click] updateFocus dispatched (${Date.now() - focusStart}ms)`);
+                    }, 0);
                   }
                 }}
                 style={{

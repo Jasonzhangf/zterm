@@ -217,13 +217,12 @@ export function attachSameAppCompositeWindows(
     return target;
   }
   const targetAppBundleId = target.videoTarget.appBundleId?.trim();
-  const targetOwnerName = target.videoTarget.ownerName?.trim();
+  const originalTargetOwnerName = target.videoTarget.ownerName?.trim();
   // 归属未知（appBundleId 为空）时禁止盲目聚合，避免把其他 app 的窗口混进组合
   if (!targetAppBundleId) {
     return target;
   }
-  const compositeWindows = targets
-    .filter((item) => {
+  const filteredCandidates = targets.filter((item) => {
       if (item.videoTarget.kind !== 'app-window') {
         return false;
       }
@@ -234,9 +233,13 @@ export function attachSameAppCompositeWindows(
       if (!itemAppBundleId || itemAppBundleId !== targetAppBundleId) {
         return false;
       }
+      return true;
+    });
+  const compositeWindows = filteredCandidates
+    .filter((item) => {
       // 双保险：ownerName 存在时必须一致（避免不同 app 共享/缺失 bundle id 时误聚合）
       const itemOwnerName = item.videoTarget.ownerName?.trim();
-      if (itemOwnerName && targetOwnerName && itemOwnerName !== targetOwnerName) {
+      if (itemOwnerName && originalTargetOwnerName && itemOwnerName !== originalTargetOwnerName) {
         return false;
       }
       return true;
@@ -248,10 +251,28 @@ export function attachSameAppCompositeWindows(
       windowBoundsTopLeftPx: item.videoTarget.windowBoundsTopLeftPx,
       cropRectTopLeftPx: item.videoTarget.cropRectTopLeftPx,
     }));
-  if (compositeWindows.length === 0) {
+  // 双流：始终让 target 带 compositeWindows（至少含主窗口），强制 daemon 启动 overview capture，
+  // 让 client 端 overviewMediaStream 有源 → 缩略图始终可绘 + 切换瞬间主画面有低清占位。
+  // 原 target 含同 app 兄弟窗口时直接聚合；空数组但仍属合法 app-window（appBundleId 非空）
+  // 时退化为单窗口 compositeWindows，确保 daemon 启动 overview capture；
+  // 仅当跨 app 误聚合过滤场景（同 appBundleId 但 ownerName 不一致）才彻底不聚合。
+  if (compositeWindows.length > 0) {
+    return { ...target, compositeWindows };
+  }
+  if (filteredCandidates.length > compositeWindows.length) {
+    // 有候选被 ownerName 不一致过滤掉 → 真的跨 app 误报，绝不聚合（含退化）
     return target;
   }
-  return { ...target, compositeWindows };
+  return {
+    ...target,
+    compositeWindows: [{
+      windowId: target.videoTarget.windowId,
+      title: target.videoTarget.title,
+      ownerName: target.videoTarget.ownerName,
+      windowBoundsTopLeftPx: target.videoTarget.windowBoundsTopLeftPx,
+      cropRectTopLeftPx: target.videoTarget.cropRectTopLeftPx,
+    }],
+  };
 }
 
 export function beginRemoteWindowStreamSetup(
