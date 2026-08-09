@@ -19,7 +19,7 @@ export interface TraversalAttemptDiagnostic {
   endpoint: string;
   candidateId?: string;
   ok: boolean;
-  stage: 'connecting' | 'open' | 'closed' | 'error';
+  stage: 'connecting' | 'open' | 'closed' | 'error' | 'skipped';
   reason?: string;
   rttMs?: number;
   score?: number;

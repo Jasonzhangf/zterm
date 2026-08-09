@@ -614,7 +614,7 @@ export function createSessionInfraFacadeRuntime(options: {
     readSessionTransportToken,
     writeSessionTransportToken,
     probeReconnectHost: async (bridgeHost: string, bridgePort: number) => {
-      const result = await probeHostReachable(bridgeHost, bridgePort, { timeoutMs: 1500 });
+      const result = await probeHostReachable(bridgeHost, bridgePort, { protocol: 'http', timeoutMs: 1500 });
       return result.reachable;
     },
     isSessionTransportActive,

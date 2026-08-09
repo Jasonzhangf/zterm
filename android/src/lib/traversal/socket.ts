@@ -8,9 +8,10 @@ import type {
   TraversalDiagnostics,
   TraversalPlanCandidate,
   TraversalResolvedPath,
+  TraversalRouteHealthRecord,
   TraversalSelectedIcePairDiagnostic,
 } from './types';
-import { buildTraversalPlan } from './config';
+import { buildTraversalPlanCached } from './config';
 import type { TraversalSettingsSource, TraversalTargetSource } from './types';
 import { selectBestTraversalRoute } from './route-selector';
 import {
@@ -27,6 +28,7 @@ const CLOSED = 3;
 const WS_CANDIDATE_TIMEOUT_MS = 1800;
 const RTC_DIRECT_OPEN_STABILITY_MS = 1000;
 const RTC_DIRECT_CANDIDATE_TIMEOUT_MS = 5000 + RTC_DIRECT_OPEN_STABILITY_MS;
+const RTC_DIRECT_FAILURE_RETRY_TIMEOUT_MS = 3000;
 const RTC_RELAY_CANDIDATE_TIMEOUT_MS = 2500;
 const RTC_DISCONNECTED_GRACE_MS = 10000;
 const RECONNECT_BASE_DELAY_MS = 300;
@@ -66,13 +68,18 @@ type Backend = {
   }): void;
 };
 
-function resolveCandidateTimeoutMs(candidate: TraversalPlanCandidate) {
+function resolveCandidateTimeoutMs(candidate: TraversalPlanCandidate, health: TraversalRouteHealthRecord | null) {
   if (candidate.kind === 'ws') {
     return WS_CANDIDATE_TIMEOUT_MS;
   }
-  return candidate.path === 'rtc-direct'
-    ? RTC_DIRECT_CANDIDATE_TIMEOUT_MS
-    : RTC_RELAY_CANDIDATE_TIMEOUT_MS;
+  if (candidate.path === 'rtc-direct') {
+    // P1-E: contract the direct-RTC budget while a recent failure is still
+    // quarantined, keep the full budget inside the success lease.
+    return health?.status === 'failure'
+      ? RTC_DIRECT_FAILURE_RETRY_TIMEOUT_MS
+      : RTC_DIRECT_CANDIDATE_TIMEOUT_MS;
+  }
+  return RTC_RELAY_CANDIDATE_TIMEOUT_MS;
 }
 
 class WebSocketBackend implements Backend {
@@ -569,7 +576,7 @@ export class TraversalSocket implements BridgeTransportSocket {
       autoReconnect?: boolean;
     },
   ) {
-    const plan = buildTraversalPlan(target, settings, options?.overrideUrl);
+    const plan = buildTraversalPlanCached(target, settings, options?.overrideUrl);
     this.candidates = plan.candidates;
     this.traversalPathPriority = plan.candidates
       .map((candidate) => candidate.path)
@@ -611,13 +618,22 @@ export class TraversalSocket implements BridgeTransportSocket {
     return /auth|unauthorized|401|403|token/i.test(reason || '');
   }
 
-  private markAttempt(candidate: TraversalPlanCandidate, stage: TraversalAttemptDiagnostic['stage'], ok: boolean, reason?: string, rttMs?: number, score?: number) {
-    if (this.activeAttempt) {
-      this.activeAttempt.stage = stage;
-      this.activeAttempt.ok = ok;
-      this.activeAttempt.reason = reason;
-      this.activeAttempt.rttMs = rttMs ?? this.activeAttempt.rttMs;
-      this.activeAttempt.score = score ?? this.activeAttempt.score;
+  private markAttempt(
+    candidate: TraversalPlanCandidate,
+    stage: TraversalAttemptDiagnostic['stage'],
+    ok: boolean,
+    reason?: string,
+    rttMs?: number,
+    score?: number,
+    record?: TraversalAttemptDiagnostic,
+  ) {
+    const target = record ?? this.activeAttempt;
+    if (target) {
+      target.stage = stage;
+      target.ok = ok;
+      target.reason = reason;
+      target.rttMs = rttMs ?? target.rttMs;
+      target.score = score ?? target.score;
       return;
     }
     const attempt: TraversalAttemptDiagnostic = {
@@ -681,126 +697,213 @@ export class TraversalSocket implements BridgeTransportSocket {
       scope: this.routeHealthScope,
       traversalPathPriority: this.traversalPathPriority,
     });
-    const candidate = selection.selected;
-    if (!candidate) {
+    if (selection.selected === null) {
       this.finishFailure(this.diagnostics.reason || 'No traversal path succeeded');
       return;
     }
-    const selectedDiagnostic = selection.diagnostics.find((item) =>
-      item.path === candidate.path
-      && item.endpoint === candidate.endpoint
-      && item.candidateId === candidate.id);
-    this.attemptedCandidateKeys.add(this.candidateKey(candidate));
+    // Parallel batch: every selectable ws candidate races with the head of the
+    // rtc queue (rtc-direct before rtc-relay, preserving the signal-session
+    // ordering). The first onopen wins and closes the rest. Failed ws
+    // candidates retire within the batch; rtc candidates stay ordered.
+    const selectableDiagnostics = selection.diagnostics.filter((item) => item.selectable);
+    const pool = selectableDiagnostics.length > 0 ? selectableDiagnostics : selection.diagnostics;
+    const poolIds = new Set(pool.map((item) => item.candidateId));
+    const poolCandidates = remainingCandidates.filter((item) => poolIds.has(item.id));
+    const wsBatch = poolCandidates.filter((item) => item.kind === 'ws');
+    const rtcQueue = poolCandidates.filter((item) => item.kind === 'rtc');
+    const rtcHead = rtcQueue[0] ?? null;
+    const batch = rtcHead ? [...wsBatch, rtcHead] : wsBatch;
+    if (batch.length === 0) {
+      this.finishFailure(this.diagnostics.reason || 'No traversal path succeeded');
+      return;
+    }
+
+    // The whole batch is claimed up-front so concurrent callbacks and the next
+    // connectNext() (after a batch-wide failure) cannot re-select a candidate.
+    for (const item of batch) {
+      this.attemptedCandidateKeys.add(this.candidateKey(item));
+    }
 
     this.activeAttempt = null;
-    this.activeCandidate = candidate;
     this.diagnostics.resolvedPath = undefined;
     this.diagnostics.resolvedEndpoint = undefined;
     this.diagnostics.resolvedRelayTransport = undefined;
     this.diagnostics.selectedIcePair = undefined;
-    this.markAttempt(candidate, 'connecting', false, undefined, undefined, selectedDiagnostic?.score);
-    const backend: Backend = candidate.kind === 'ws'
-      ? new WebSocketBackend(candidate)
-      : new WebRtcBackend(candidate);
-    this.backend = backend;
-    const timeoutMs = resolveCandidateTimeoutMs(candidate);
-    let settled = false;
-    let advanced = false;
-    const startedAt = Date.now();
-    const timer = window.setTimeout(() => {
-      if (settled || advanced || this.closedByClient) {
+
+    const attempts: {
+      candidate: TraversalPlanCandidate;
+      record: TraversalAttemptDiagnostic;
+      backend: Backend;
+      settled: boolean;
+      advanced: boolean;
+      timer: number | null;
+      startedAt: number;
+    }[] = batch.map((item) => {
+      const diagnostic = selection.diagnostics.find((d) =>
+        d.path === item.path && d.endpoint === item.endpoint && d.candidateId === item.id);
+      const record: TraversalAttemptDiagnostic = {
+        kind: item.kind,
+        path: item.path,
+        endpoint: item.endpoint,
+        candidateId: item.id,
+        ok: false,
+        stage: 'connecting',
+        score: diagnostic?.score,
+      };
+      this.diagnostics.attempts.push(record);
+      this.activeAttempt = record;
+      return {
+        candidate: item,
+        record,
+        backend: item.kind === 'ws' ? new WebSocketBackend(item) : new WebRtcBackend(item),
+        settled: false,
+        advanced: false,
+        timer: null,
+        startedAt: 0,
+      };
+    });
+
+    let winnerSettled = false;
+
+    const failAttempt = (attempt: (typeof attempts)[number], reason: string, stage: 'closed' | 'error') => {
+      if (attempt.settled || attempt.advanced || this.closedByClient) {
         return;
       }
-      advanced = true;
-      this.diagnostics.reason = `${candidate.kind} connect timeout`;
-      this.markAttempt(candidate, 'error', false, this.diagnostics.reason);
-      this.routeHealthCache.recordFailure(this.routeHealthScope, candidate, this.diagnostics.reason);
-      try {
-        backend.close(4000, 'connect timeout');
-      } catch (error) {
-        console.warn('[TraversalSocket] Failed to close timed out backend:', error);
+      attempt.advanced = true;
+      if (attempt.timer !== null) {
+        window.clearTimeout(attempt.timer);
+        attempt.timer = null;
       }
-      this.connectNext();
-    }, timeoutMs);
+      this.diagnostics.reason = reason;
+      this.markAttempt(attempt.candidate, stage, false, reason, undefined, attempt.record.score, attempt.record);
+      this.routeHealthCache.recordFailure(this.routeHealthScope, attempt.candidate, reason, {
+        authFailure: this.isAuthFailure(reason),
+      });
+      try {
+        attempt.backend.close(4000, reason);
+      } catch (error) {
+        console.warn('[TraversalSocket] Failed to close failed backend:', error);
+      }
+      // Advance only once the whole batch is exhausted (or a winner appeared).
+      if (!winnerSettled && attempts.every((item) => item.settled || item.advanced)) {
+        this.connectNext();
+      }
+    };
 
-    backend.start({
-      onopen: () => {
-        if (settled || this.closedByClient) {
-          return;
+    const settleWinner = (attempt: (typeof attempts)[number]) => {
+      if (winnerSettled || attempt.settled || attempt.advanced || this.closedByClient) {
+        return;
+      }
+      winnerSettled = true;
+      attempt.settled = true;
+      attempt.advanced = true;
+      if (attempt.timer !== null) {
+        window.clearTimeout(attempt.timer);
+        attempt.timer = null;
+      }
+      for (const other of attempts) {
+        if (other === attempt) {
+          continue;
         }
-        settled = true;
-        advanced = true;
-        window.clearTimeout(timer);
-        this.clearReconnectTimer();
-        this.reconnectAttempt = 0;
-        const rttMs = Date.now() - startedAt;
-        this.routeHealthCache.recordSuccess(this.routeHealthScope, candidate, rttMs);
-        this.markAttempt(candidate, 'open', true, undefined, rttMs, selectedDiagnostic?.score);
-        this.diagnostics.stage = 'open';
-        this.diagnostics.reason = undefined;
-        this.diagnostics.resolvedPath = this.diagnostics.resolvedPath || candidate.path;
-        this.diagnostics.resolvedEndpoint = candidate.endpoint;
-        this.onopen?.();
-      },
-      onmessage: (event) => {
-        this.onmessage?.(event);
-      },
-      onerror: (reason) => {
-        this.diagnostics.reason = reason || `${candidate.kind} error`;
-        this.markAttempt(candidate, 'error', false, this.diagnostics.reason);
-        if (!settled) {
-          this.routeHealthCache.recordFailure(this.routeHealthScope, candidate, this.diagnostics.reason, {
-            authFailure: this.isAuthFailure(this.diagnostics.reason),
-          });
+        // Mark the loser as advanced (NOT settled): closing it must not
+        // surface as a physical disconnect to the upper layer, and its
+        // onclose handler returns silently on the advanced guard.
+        const wasAlreadyAdvanced = other.advanced;
+        other.advanced = true;
+        if (other.timer !== null) {
+          window.clearTimeout(other.timer);
+          other.timer = null;
         }
-        if (settled) {
-          this.diagnostics.stage = 'error';
-          this.onerror?.();
+        try {
+          other.backend.close(4000, 'superseded by faster candidate');
+        } catch (error) {
+          console.warn('[TraversalSocket] Failed to close superseded backend:', error);
         }
-      },
-      onclose: (event) => {
-        if (!settled && !this.closedByClient) {
-          if (advanced) {
+        // Only an attempt that was still in flight is recorded as skipped;
+        // one that already failed keeps its real failure record.
+        if (!wasAlreadyAdvanced) {
+          this.markAttempt(other.candidate, 'skipped', false, 'superseded by faster candidate', undefined, other.record.score, other.record);
+        }
+      }
+      this.activeCandidate = attempt.candidate;
+      this.backend = attempt.backend;
+      this.clearReconnectTimer();
+      this.reconnectAttempt = 0;
+      const rttMs = Date.now() - attempt.startedAt;
+      this.routeHealthCache.recordSuccess(this.routeHealthScope, attempt.candidate, rttMs);
+      this.markAttempt(attempt.candidate, 'open', true, undefined, rttMs, attempt.record.score, attempt.record);
+      this.diagnostics.stage = 'open';
+      this.diagnostics.reason = undefined;
+      this.diagnostics.resolvedPath = this.diagnostics.resolvedPath || attempt.candidate.path;
+      this.diagnostics.resolvedEndpoint = attempt.candidate.endpoint;
+      this.onopen?.();
+    };
+
+    for (const attempt of attempts) {
+      attempt.startedAt = Date.now();
+      const health = this.routeHealthCache.get(this.routeHealthScope, attempt.candidate);
+      const timeoutMs = resolveCandidateTimeoutMs(attempt.candidate, health);
+      attempt.timer = window.setTimeout(() => {
+        failAttempt(attempt, `${attempt.candidate.kind} connect timeout`, 'error');
+      }, timeoutMs);
+      attempt.backend.start({
+        onopen: () => {
+          settleWinner(attempt);
+        },
+        onmessage: (event) => {
+          this.onmessage?.(event);
+        },
+        onerror: (reason) => {
+          this.diagnostics.reason = reason || `${attempt.candidate.kind} error`;
+          this.markAttempt(attempt.candidate, 'error', false, this.diagnostics.reason, undefined, attempt.record.score, attempt.record);
+          if (!attempt.settled) {
+            this.routeHealthCache.recordFailure(this.routeHealthScope, attempt.candidate, this.diagnostics.reason, {
+              authFailure: this.isAuthFailure(this.diagnostics.reason),
+            });
+          }
+          if (attempt.settled) {
+            this.diagnostics.stage = 'error';
+            this.onerror?.();
+          }
+        },
+        onclose: (event) => {
+          if (!attempt.settled && !this.closedByClient) {
+            if (attempt.advanced) {
+              return;
+            }
+            const reason = event?.reason || `${attempt.candidate.kind} closed`;
+            failAttempt(attempt, reason, 'closed');
             return;
           }
-          advanced = true;
-          window.clearTimeout(timer);
-          this.diagnostics.reason = event?.reason || `${candidate.kind} closed`;
-          this.markAttempt(candidate, this.diagnostics.stage === 'open' ? 'closed' : 'closed', Boolean(settled), this.diagnostics.reason);
-          this.routeHealthCache.recordFailure(this.routeHealthScope, candidate, this.diagnostics.reason, {
-            authFailure: this.isAuthFailure(this.diagnostics.reason),
-          });
-          this.connectNext();
-          return;
-        }
-        if (settled && !this.closedByClient) {
-          const reason = event?.reason || `${candidate.kind} closed`;
-          this.markAttempt(candidate, 'closed', true, reason);
-          this.routeHealthCache.recordFailure(this.routeHealthScope, candidate, reason, {
-            authFailure: this.isAuthFailure(reason),
-          });
+          if (attempt.settled && !this.closedByClient) {
+            const reason = event?.reason || `${attempt.candidate.kind} closed`;
+            this.markAttempt(attempt.candidate, 'closed', true, reason, undefined, attempt.record.score, attempt.record);
+            this.routeHealthCache.recordFailure(this.routeHealthScope, attempt.candidate, reason, {
+              authFailure: this.isAuthFailure(reason),
+            });
+            this.diagnostics.stage = this.closedByClient ? 'closed' : 'error';
+            if (event?.reason) {
+              this.diagnostics.reason = event.reason;
+            }
+            this.onclose?.(event);
+            if (this.autoReconnect) {
+              this.scheduleReconnect(reason);
+            }
+            return;
+          }
           this.diagnostics.stage = this.closedByClient ? 'closed' : 'error';
           if (event?.reason) {
             this.diagnostics.reason = event.reason;
           }
           this.onclose?.(event);
-          if (this.autoReconnect) {
-            this.scheduleReconnect(reason);
-          }
-          return;
-        }
-        this.diagnostics.stage = this.closedByClient ? 'closed' : 'error';
-        if (event?.reason) {
-          this.diagnostics.reason = event.reason;
-        }
-        this.onclose?.(event);
-      },
-      onpath: (path, relayTransport, selectedIcePair) => {
-        this.diagnostics.resolvedPath = path;
-        this.diagnostics.resolvedRelayTransport = relayTransport;
-        this.diagnostics.selectedIcePair = selectedIcePair;
-      },
-    });
+        },
+        onpath: (path, relayTransport, selectedIcePair) => {
+          this.diagnostics.resolvedPath = path;
+          this.diagnostics.resolvedRelayTransport = relayTransport;
+          this.diagnostics.selectedIcePair = selectedIcePair;
+        },
+      });
+    }
   }
 
   public send(data: string | ArrayBuffer) {

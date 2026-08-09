@@ -239,6 +239,7 @@ export function handleSocketServerMessageRuntime(options: {
     case 'remote-window-stream-started':
     case 'remote-window-stream-ice-candidate':
     case 'remote-window-stream-status':
+    case 'remote-window-stream-focus-result':
     case 'remote-window-input-result':
     case 'remote-window-error':
       if (options.remoteWindowMessageRuntime && isRemoteWindowControlMessage(msg)) {
@@ -322,10 +323,9 @@ export function handleSocketConnectedBaselineRuntime(options: {
   options.setScheduleStateForSession(options.sessionId, (current) => (
     buildSessionScheduleListLoadingState(current, options.sessionName)
   ));
-  options.sendSocketPayload(options.sessionId, options.ws, JSON.stringify({
-    type: 'schedule-list',
-    payload: { sessionName: options.sessionName },
-  } satisfies ClientMessage));
+  // Head first: first-paint content must not wait behind the schedule list.
+  // schedule-list is still sent, but after the head request so the buffer
+  // head round trip starts immediately on connect (P2: lazy schedule-list).
   const connectedHeadRefreshPlan = buildConnectedHeadRefreshPlan({
     shouldLiveRefresh: true,
     hadLocalWindowBeforeConnected,
@@ -339,6 +339,10 @@ export function handleSocketConnectedBaselineRuntime(options: {
       trackProbe: false,
     });
   }
+  options.sendSocketPayload(options.sessionId, options.ws, JSON.stringify({
+    type: 'schedule-list',
+    payload: { sessionName: options.sessionName },
+  } satisfies ClientMessage));
   options.refs.lastConnectedBaselineAtRef.current.set(options.sessionId, Date.now());
   options.refs.connectedBaselineBurstGuardRef.current.add(options.sessionId);
   queueMicrotask(() => {

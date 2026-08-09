@@ -395,6 +395,7 @@ export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
     rawFrameData?: string,
   ) => void;
   applyTransportDiagnostics: (sessionId: string, socket: BridgeTransportSocket) => void;
+  startMuxHandshakeTimeout?: (sessionId: string) => void;
   startSocketHeartbeat?: (
     sessionId: string,
     ws: BridgeTransportSocket,
@@ -429,6 +430,10 @@ export function bindTargetMuxTransportSocketLifecycleRuntime(options: {
     options.runtimeDebug(`session.mux.${options.debugScope}.hello-sent`, {
       sessionId: options.sessionId,
     });
+    // Socket handshake is done (candidate selection no longer counts against
+    // the mux negotiation budget): start the mux handshake timeout now so it
+    // only covers hello -> mux-ready -> channel-open -> channel-allocated.
+    options.startMuxHandshakeTimeout?.(options.sessionId);
     if (!options.targetHeartbeatKey.trim()) {
       finalizeTargetFailure('missing terminal mux target heartbeat key', true);
       return;

@@ -6,6 +6,7 @@ import {
   connectSessionRuntime,
   createSessionRuntime,
   reconnectSessionRuntime,
+  runReconnectHostProbeAndFallback,
   scheduleReconnectRuntime,
   startReconnectAttemptRuntime,
 } from './session-context-session-runtime';
@@ -313,7 +314,7 @@ describe('scheduleReconnectRuntime', () => {
 });
 
 describe('startReconnectAttemptRuntime', () => {
-  it('transitions idle into scheduled and then connecting without carrying the timer', () => {
+  it('transitions idle into scheduled and then connecting without carrying the timer', async () => {
     vi.useFakeTimers();
     const reconnectStore = createSessionReconnectStore();
     reconnectStore.write('session-1', {
@@ -323,6 +324,7 @@ describe('startReconnectAttemptRuntime', () => {
     });
     const updateSessionSync = vi.fn();
     const queueReconnectTransportOpenIntent = vi.fn();
+    const probeReconnectHost = vi.fn(async () => true);
 
     startReconnectAttemptRuntime({
       sessionId: 'session-1',
@@ -332,6 +334,7 @@ describe('startReconnectAttemptRuntime', () => {
       updateSessionSync,
       writeSessionTransportToken: vi.fn(() => null),
       queueReconnectTransportOpenIntent,
+      probeReconnectHost,
     });
 
     expect(reconnectStore.read('session-1')).toEqual(expect.objectContaining({
@@ -340,7 +343,7 @@ describe('startReconnectAttemptRuntime', () => {
       nextDelayMs: null,
     }));
 
-    vi.advanceTimersByTime(50);
+    await vi.advanceTimersByTimeAsync(50);
 
     const runtime = reconnectStore.read('session-1');
     expect(runtime).toEqual({
@@ -388,6 +391,120 @@ describe('startReconnectAttemptRuntime', () => {
     expect(reconnectStore.read('session-1')).toEqual(expect.objectContaining({ phase: 'scheduled' }));
     expect(reconnectStore.read('session-2')).toEqual(expect.objectContaining({ phase: 'connecting' }));
     vi.useRealTimers();
+  });
+});
+
+describe('runReconnectHostProbeAndFallback', () => {
+  const fallbackHost = {
+    id: 'host-1',
+    createdAt: 1,
+    name: 'conn',
+    bridgeHost: '127.0.0.1',
+    bridgePort: 3333,
+    sessionName: 'tmux-1',
+    authType: 'password' as const,
+    tags: [],
+    pinned: false,
+  };
+
+  function makeProbeFallbackOptions(overrides: {
+    probe?: (bridgeHost: string, bridgePort: number) => Promise<boolean>;
+    attempt?: number;
+  } = {}) {
+    const queueReconnectTransportOpenIntent = vi.fn();
+    const updateSessionSync = vi.fn();
+    const writeHost = vi.fn();
+    const deleteRuntime = vi.fn();
+    return {
+      options: {
+        sessionId: 'session-1',
+        host: fallbackHost,
+        attempt: overrides.attempt ?? 0,
+        probe: overrides.probe,
+        writeHost,
+        updateSessionSync,
+        queueReconnectTransportOpenIntent,
+        refreshStore: createSessionReconnectStore(),
+        isManualClosed: () => false,
+        deleteRuntime,
+      } as Parameters<typeof runReconnectHostProbeAndFallback>[0],
+      queueReconnectTransportOpenIntent,
+      updateSessionSync,
+      writeHost,
+      deleteRuntime,
+    };
+  }
+
+  it('connects directly to the current host on the first attempt without probing', async () => {
+    const probe = vi.fn(() => Promise.resolve(true));
+    const { options, queueReconnectTransportOpenIntent, deleteRuntime } = makeProbeFallbackOptions({ probe, attempt: 0 });
+
+    await runReconnectHostProbeAndFallback(options);
+
+    expect(probe).not.toHaveBeenCalled();
+    expect(queueReconnectTransportOpenIntent).toHaveBeenCalledWith('session-1', fallbackHost);
+    expect(deleteRuntime).not.toHaveBeenCalled();
+  });
+
+  it('probes every fallback candidate in parallel and queues the first reachable one on retry', async () => {
+    let firstStarted: (() => void) | undefined;
+    const firstStartedGate = new Promise<void>((resolve) => { firstStarted = resolve; });
+    let releaseFirst: (() => void) | undefined;
+    const firstGate = new Promise<void>((resolve) => { releaseFirst = resolve; });
+    const probe = vi.fn(async (bridgeHost: string) => {
+      if (bridgeHost === '100.66.1.82') {
+        firstStarted?.();
+        await firstGate; // slow candidate: stays in flight
+        return true;
+      }
+      return false; // tailscale/ipv4 candidates are dead
+    });
+    const hostWithTailscale = {
+      ...fallbackHost,
+      bridgeHost: '127.0.0.1',
+      tailscaleHost: '100.66.1.82',
+      ipv4Host: '203.0.113.10',
+    } as typeof fallbackHost & { tailscaleHost?: string; ipv4Host?: string };
+    const { options, queueReconnectTransportOpenIntent, updateSessionSync } = makeProbeFallbackOptions({
+      probe,
+      attempt: 2,
+    });
+    options.host = hostWithTailscale;
+
+    const pending = runReconnectHostProbeAndFallback(options);
+    // The fast (dead) candidates must be probed while the slow candidate is
+    // still in flight: parallel probing, not serial.
+    await firstStartedGate;
+    expect(probe.mock.calls.length).toBeGreaterThanOrEqual(3);
+    releaseFirst?.();
+    await pending;
+
+    expect(queueReconnectTransportOpenIntent).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({ bridgeHost: '100.66.1.82' }),
+    );
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', expect.objectContaining({
+      bridgeHost: '100.66.1.82',
+      lastError: 'reconnect via tailscale',
+    }));
+  });
+
+  it('falls back to queueing the current host when every probe fails on retry', async () => {
+    const probe = vi.fn(() => Promise.resolve(false));
+    const { options, queueReconnectTransportOpenIntent, updateSessionSync, deleteRuntime } = makeProbeFallbackOptions({
+      probe,
+      attempt: 2,
+    });
+
+    await runReconnectHostProbeAndFallback(options);
+
+    // The reconnect intent is never silently dropped: the current host is
+    // queued anyway so TraversalSocket can race all candidate paths.
+    expect(queueReconnectTransportOpenIntent).toHaveBeenCalledWith('session-1', fallbackHost);
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', {
+      lastError: 'reconnect: all host candidates unreachable, retrying current host',
+    });
+    expect(deleteRuntime).not.toHaveBeenCalled();
   });
 });
 

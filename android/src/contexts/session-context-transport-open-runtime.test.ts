@@ -354,6 +354,68 @@ describe('openSessionMuxChannelByIntentRuntime', () => {
     expect(intent.onConnected).toHaveBeenCalledWith(targetSocket);
     expect(updateSessionTerminalChannelState).not.toHaveBeenCalled();
   });
+
+  it('starts the mux handshake timeout while waiting for mux-ready on an open target transport', () => {
+    const targetSocket = { readyState: WebSocket.OPEN } as any;
+    const startHandshakeTimeout = vi.fn();
+
+    openSessionMuxChannelByIntentRuntime({
+      intent: makeIntent('session-1', 'open-1'),
+      daemonConnection: makeDaemonConnection({
+        readSessionTargetSocket: () => targetSocket,
+      }),
+      readSessionTargetTerminalSocket: () => targetSocket,
+      isSessionTargetMuxReady: () => false,
+      ensureSessionTerminalChannel: vi.fn(() => ({
+        channelId: 'channel-a',
+        sessionId: 'session-1',
+        sessionName: 'tmux-1',
+        targetKey: 'target-a',
+        state: 'opening',
+        bodySubscribed: true,
+        openedAt: 1,
+        closedAt: null,
+      })),
+      updateSessionTerminalChannelState: vi.fn(),
+      readRequestedTerminalGeometry: () => null,
+      sendSocketPayload: vi.fn(),
+      startHandshakeTimeout,
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(startHandshakeTimeout).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts the mux handshake timeout when channel-open is sent over an already-ready target transport', () => {
+    const targetSocket = { readyState: WebSocket.OPEN } as any;
+    const startHandshakeTimeout = vi.fn();
+
+    openSessionMuxChannelByIntentRuntime({
+      intent: makeIntent('session-1', 'open-1'),
+      daemonConnection: makeDaemonConnection({
+        readSessionTargetSocket: () => targetSocket,
+      }),
+      readSessionTargetTerminalSocket: () => targetSocket,
+      isSessionTargetMuxReady: () => true,
+      ensureSessionTerminalChannel: vi.fn(() => ({
+        channelId: 'channel-a',
+        sessionId: 'session-1',
+        sessionName: 'tmux-1',
+        targetKey: 'target-a',
+        state: 'opening',
+        bodySubscribed: true,
+        openedAt: 1,
+        closedAt: null,
+      })),
+      updateSessionTerminalChannelState: vi.fn(),
+      readRequestedTerminalGeometry: () => null,
+      sendSocketPayload: vi.fn(),
+      startHandshakeTimeout,
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(startHandshakeTimeout).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe('handleReconnectHandshakeFailureRuntime', () => {

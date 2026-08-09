@@ -366,3 +366,56 @@ export function resolveTraversalConfigFromHost(
     } satisfies TraversalSettingsSource,
   };
 }
+
+/**
+ * Short-TTL cache for traversal plans (P2: candidate list caching).
+ *
+ * A plan only depends on (target, settings, overrideUrl) - all static per
+ * host - so rebuilding it on every TraversalSocket construction (e.g. a quick
+ * reconnect burst) is pure waste. Route health is NOT part of the plan: it is
+ * consulted per attempt by selectBestTraversalRoute, so caching the plan does
+ * not stale health semantics.
+ */
+const TRAVERSAL_PLAN_CACHE_TTL_MS = 5000;
+const TRAVERSAL_PLAN_CACHE_MAX_ENTRIES = 32;
+
+type TraversalPlanCacheEntry = {
+  plan: ReturnType<typeof buildTraversalPlan>;
+  at: number;
+};
+
+const traversalPlanCache = new Map<string, TraversalPlanCacheEntry>();
+
+function buildTraversalPlanCacheKey(
+  target: TraversalTargetSource,
+  settings: TraversalSettingsSource,
+  overrideUrl?: string,
+) {
+  return JSON.stringify([target, settings, overrideUrl ?? null]);
+}
+
+export function clearTraversalPlanCache() {
+  traversalPlanCache.clear();
+}
+
+export function buildTraversalPlanCached(
+  target: TraversalTargetSource,
+  settings: TraversalSettingsSource,
+  overrideUrl?: string,
+) {
+  const key = buildTraversalPlanCacheKey(target, settings, overrideUrl);
+  const hit = traversalPlanCache.get(key);
+  if (hit && Date.now() - hit.at < TRAVERSAL_PLAN_CACHE_TTL_MS) {
+    return hit.plan;
+  }
+  const plan = buildTraversalPlan(target, settings, overrideUrl);
+  traversalPlanCache.set(key, { plan, at: Date.now() });
+  while (traversalPlanCache.size > TRAVERSAL_PLAN_CACHE_MAX_ENTRIES) {
+    const oldest = traversalPlanCache.keys().next().value;
+    if (oldest === undefined) {
+      break;
+    }
+    traversalPlanCache.delete(oldest);
+  }
+  return plan;
+}

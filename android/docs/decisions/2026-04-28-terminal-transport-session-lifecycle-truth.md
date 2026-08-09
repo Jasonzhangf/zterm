@@ -594,3 +594,36 @@ daemon 只保留自己的 transport attach fact 与 mirror truth
 active/inactive 只影响取数，不影响它们的身份
 foreground/background/tab switch 只影响取数，不得 fresh recreate transport
 ```
+
+---
+
+## 2026-08-09 追加冻结：连接建立 / 重连效率真源
+
+以下冻结对应 review 产出（P0-A/P0-B/P1-C/P1-D/P1-E/P2），全部属于客户端连接/重连 owner（`session-context-*` / `lib/traversal`），不触碰 daemon 无客户端心智边界；daemon 侧只看到物理 transport 事实。
+
+### 8.1 handshake 超时语义拆段（P0-A）
+- **socket 建连阶段**（TraversalSocket 候选尝试）不设客户端短超时：候选失败由物理层驱动（全候选失败 → 显式 `onclose`/`onerror` 回调），禁止 4s 超时在候选链走完前砍断连接并误记失败。
+- **mux 协商段**（socket open → `mux-hello` → `mux-ready` → channel-open → `mux-channel-opened`）才设置超时（4s handshake / 10s ready）。
+- 兜底：socket 建连阶段必须保证"全候选失败必然回调"；若某平台无法保证，兜底超时必须 > 候选串行最坏时长（当前 ≈13.9s），不得用 4s 级别兜底。
+
+### 8.2 reconnect host probe 不重复握手（P0-B）
+- probe 只做可达性判定，禁止对同一 `host:port` 先建短命 ws 再建正式连接（双连）。
+- probe 默认走 daemon `/health` HTTP 探测（WebView fetch no-cors，不建短命 ws）；`ws` 协议仅显式请求时使用。
+- probe 失败的 host 本轮 fallback 立即跳过（不进入正式连接）；下一轮 reconnect 对该 host 的探测是廉价的 HTTP 请求，不构成重复握手。
+
+### 8.3 候选并行尝试（P1-C）
+- ws 候选组与 rtc 候选组允许并行 race，首个 `onopen` 即成为 settled backend，其余 backend 必须立即 close/清理。
+- 成功路径只保留一个物理 socket；并发建立但未胜出的连接必须显式 dispose，不留 phantom channel/connection。
+- 全部候选失败仍走 `finishFailure` 单一出口；health cache / diagnostics 记录语义不变（失败的都记、成功的只记胜出者）。
+
+### 8.4 rtc-direct 超时动态收缩（P1-E）
+- 允许按 route-health 动态收缩 rtc-direct 候选超时：失败隔离期（30s）内收缩（如 6s → 3s），成功 TTL 内保持完整预算（6s）。
+
+### 8.5 首次 head 提前（P2）
+- `buffer-head-request` 允许在 channel attach 确认（`mux-channel-opened`）后立即发送，不必等 `connect-ok`；`connect-ok` 是 session 级事实，head 请求只需 channel 就绪。
+
+### 8.6 traversal plan 候选缓存（P2）
+- `buildTraversalPlan` 结果允许短 TTL 缓存（如 5s），避免短时间重连重复枚举/DNS；route-health 仍驱动候选排序，缓存不得过期 health 语义。
+
+### 8.7 schedule-list 懒加载（P2）
+- `schedule-list` 与正文刷新解耦：连接到 connected 后按需拉取，不阻塞 `buffer-head` 首屏。

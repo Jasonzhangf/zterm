@@ -920,6 +920,50 @@ describe('bindTargetMuxTransportSocketLifecycleRuntime', () => {
     expect(recordTargetPong).toHaveBeenCalledWith('target:mac-studio');
   });
 
+  it('starts the mux handshake timeout after sending mux-hello on target open', () => {
+    const ws = {
+      readyState: WebSocket.OPEN,
+      onopen: null,
+      onmessage: null,
+      onerror: null,
+      onclose: null,
+      getDiagnostics: () => ({ reason: '' }),
+    } as any;
+    const sendSocketPayload = vi.fn();
+    const startMuxHandshakeTimeout = vi.fn();
+
+    bindTargetMuxTransportSocketLifecycleRuntime({
+      sessionId: 'session-anchor',
+      targetKey: 'mac-studio',
+      targetHeartbeatKey: 'target:mac-studio',
+      host: makeHost(),
+      ws,
+      debugScope: 'connect',
+      readTargetTerminalSocket: () => ws,
+      readRequestedTerminalGeometry: () => null,
+      getOpeningTerminalChannelsForTarget: () => [],
+      readPrioritySessionId: () => 'session-anchor',
+      setTargetMuxReady: vi.fn(),
+      sendSocketPayload,
+      handleTargetMuxServerFrame: vi.fn(),
+      applyTransportDiagnostics: vi.fn(),
+      startMuxHandshakeTimeout,
+      runtimeDebug: vi.fn(),
+      finalizeFailure: vi.fn(),
+    });
+
+    ws.onopen?.();
+
+    expect(JSON.parse(sendSocketPayload.mock.calls[0][2])).toEqual({
+      type: 'mux-hello',
+      payload: {
+        version: 1,
+        clientInstanceId: 'session-anchor',
+      },
+    });
+    expect(startMuxHandshakeTimeout).toHaveBeenCalledWith('session-anchor');
+  });
+
   it('accepts target probe activity after the original anchor session is removed', () => {
     const store = createSessionTransportRuntimeStore();
     const host = makeHost();

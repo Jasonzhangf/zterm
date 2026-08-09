@@ -810,6 +810,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
       recordTargetPong: (heartbeatKey) => {
         options.refs.heartbeatStore.recordPong(heartbeatKey, Date.now());
       },
+      startMuxHandshakeTimeout: startMuxHandshakeTimeoutForSession,
       runtimeDebug: options.runtimeDebug,
       finalizeFailure: (message) => {
         submitTargetSocketFailure(targetKey, bindOptions.ws, message);
@@ -872,11 +873,23 @@ export function createSessionTransportOrchestrationRuntime(options: {
     })
   );
 
-  function openSessionMuxChannelByIntent(intent: PendingSessionTransportOpenIntent) {
-    options.clearSessionHandshakeTimeout(intent.sessionId);
-    options.setSessionHandshakeTimeout(intent.sessionId, () => {
-      intent.finalizeFailure('terminal mux channel open timeout', true);
+  const startMuxHandshakeTimeoutForSession = (sessionId: string) => {
+    options.setSessionHandshakeTimeout(sessionId, () => {
+      const pending = getPendingSessionTransportOpenIntent(
+        options.refs.pendingSessionTransportOpenIntentsRef.current,
+        sessionId,
+      );
+      pending?.finalizeFailure('terminal mux channel open timeout', true);
     }, options.sessionHandshakeTimeoutMs);
+  };
+
+  function openSessionMuxChannelByIntent(intent: PendingSessionTransportOpenIntent) {
+    // The mux handshake timeout is NOT started here: it would count socket
+    // candidate attempts (up to ~13.9s serial) against a 4s budget and cut
+    // healthy-but-slow candidates. It is started from the socket onopen
+    // (mux-hello) path and from the already-open branches of the open runtime
+    // so it only covers hello -> mux-ready -> channel-open -> allocated.
+    options.clearSessionHandshakeTimeout(intent.sessionId);
     openSessionMuxChannelByIntentRuntime({
       intent,
       readSessionTargetTerminalSocket: options.readSessionTargetTerminalSocket,
@@ -889,6 +902,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
       updateSessionTerminalChannelState: options.writeSessionTerminalChannelState,
       readRequestedTerminalGeometry: options.readRequestedTerminalGeometry,
       sendSocketPayload: options.sendSocketPayload,
+      startHandshakeTimeout: () => startMuxHandshakeTimeoutForSession(intent.sessionId),
       daemonConnection,
       runtimeDebug: options.runtimeDebug,
     });

@@ -1,12 +1,16 @@
 /**
  * Lightweight reachability probe for a host candidate. We do NOT attempt the
  * full mux handshake here - the goal is just to confirm the host:port answers
- * a TCP SYN within `timeoutMs` so the reconnect path can decide whether to
- * switch to a fallback endpoint.
+ * within `timeoutMs` so the reconnect path can decide whether to switch to a
+ * fallback endpoint.
  *
- * On Android WebView, `fetch` with `mode: 'no-cors'` against http/https works
- * for reachability without triggering CORS errors. For ws:// we cannot use
- * fetch; we use a raw WebSocket connect with a short timeout.
+ * Default protocol is http: the daemon exposes GET /health, so a no-cors
+ * fetch avoids opening a short-lived WebSocket (a real WS connect would be a
+ * duplicate handshake against the same host:port that the subsequent real
+ * connection is about to perform). On Android WebView, `fetch` with
+ * `mode: 'no-cors'` against http/https works for reachability without
+ * triggering CORS errors. For ws:// we cannot use fetch; we use a raw
+ * WebSocket connect with a short timeout.
  */
 export type ProbeProtocol = 'ws' | 'http';
 
@@ -22,11 +26,11 @@ export async function probeHostReachable(
     timeoutMs?: number;
   } = {},
 ): Promise<ProbeResult> {
-  const protocol = options.protocol || 'ws';
+  const protocol = options.protocol || 'http';
   const timeoutMs = Math.max(250, Math.floor(options.timeoutMs ?? 1500));
   const started = Date.now();
   const url = protocol === 'http'
-    ? `http://${bridgeHost}:${bridgePort}/healthz`
+    ? `http://${bridgeHost}:${bridgePort}/health`
     : `ws://${bridgeHost}:${bridgePort}/`;
 
   return new Promise<ProbeResult>((resolve) => {

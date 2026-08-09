@@ -1,5 +1,6 @@
 import { getResolvedSessionName } from '../lib/connection-target';
 import { buildReconnectHostFallback } from '../lib/reconnect-host-fallback';
+import type { ReconnectHostCandidate } from '../lib/reconnect-host-fallback';
 import { probeHostReachable } from '../lib/reconnect-host-probe';
 import { buildTransportTargetKey } from '../lib/session-transport-runtime';
 import { createSessionBufferState } from '../lib/terminal-buffer';
@@ -677,40 +678,58 @@ type ReconnectHostProbeAndFallbackOptions = {
   deleteRuntime: () => void;
 };
 
-async function runReconnectHostProbeAndFallback(options: ReconnectHostProbeAndFallbackOptions) {
+export async function runReconnectHostProbeAndFallback(options: ReconnectHostProbeAndFallbackOptions) {
   const fallback = buildReconnectHostFallback(options.host);
-  if (fallback.candidates.length === 0) {
+  const candidates = fallback.candidates;
+  if (candidates.length === 0) {
     options.queueReconnectTransportOpenIntent(options.sessionId, options.host);
     return;
   }
 
+  if (options.isManualClosed()) {
+    options.deleteRuntime();
+    return;
+  }
+
   // Default probe implementation - keep tiny (1.5s) so a dead host does not
-  // delay the user-visible reconnect. The probe is skipped entirely if the
-  // host has fewer than 2 candidates (no fallback to choose).
+  // delay the user-visible reconnect.
   const probe = options.probe ?? (async (bridgeHost: string, bridgePort: number) => {
-    const result = await probeHostReachable(bridgeHost, bridgePort, { timeoutMs: 1500 });
+    const result = await probeHostReachable(bridgeHost, bridgePort, { protocol: 'http', timeoutMs: 1500 });
     return result.reachable;
   });
 
-  const candidates = fallback.candidates;
-  for (let index = 0; index < candidates.length; index += 1) {
-    const candidate = candidates[index]!;
-    if (options.isManualClosed()) {
-      options.deleteRuntime();
-      return;
-    }
-    let reachable = true;
-    if (index > 0) {
-      try {
-        reachable = await probe(candidate.bridgeHost, candidate.bridgePort);
-      } catch {
-        reachable = false;
-      }
-    }
-    if (!reachable) {
-      continue;
-    }
+  // First attempt: connect directly to the current host without probing so a
+  // healthy endpoint recovers immediately (fast path).
+  if (options.attempt === 0) {
+    options.queueReconnectTransportOpenIntent(options.sessionId, options.host);
+    return;
+  }
 
+  // Retry: the cached bridgeHost already failed, so probe every candidate
+  // endpoint in parallel and queue the first reachable one. This prevents a
+  // tight reconnect loop against a stale host while keeping the fallback
+  // latency at one probe timeout instead of N serial timeouts.
+  const probeResults = await Promise.all(
+    candidates.map(async (candidate): Promise<{ candidate: ReconnectHostCandidate; reachable: boolean }> => {
+      if (options.isManualClosed()) {
+        return { candidate, reachable: false };
+      }
+      try {
+        return { candidate, reachable: await probe(candidate.bridgeHost, candidate.bridgePort) };
+      } catch {
+        return { candidate, reachable: false };
+      }
+    }),
+  );
+
+  if (options.isManualClosed()) {
+    options.deleteRuntime();
+    return;
+  }
+
+  const reachableEntry = probeResults.find((entry) => entry.reachable);
+  if (reachableEntry) {
+    const { candidate } = reachableEntry;
     let nextHost: Host = options.host;
     if (
       candidate.bridgeHost.trim().toLowerCase() !== options.host.bridgeHost.trim().toLowerCase()
@@ -732,10 +751,13 @@ async function runReconnectHostProbeAndFallback(options: ReconnectHostProbeAndFa
     return;
   }
 
-  // All candidates unreachable. Surface this so the user can see we did try
-  // rather than silently re-queueing against a dead host.
+  // No candidate answers the probe. Keep the reconnect intent alive against
+  // the current host anyway - TraversalSocket will race all of its candidate
+  // paths - so a manual reconnect (or a host the probe cannot see) is never
+  // silently dropped. This preserves the original "index 0 always queued"
+  // contract while still preferring a reachable fallback endpoint.
   options.updateSessionSync(options.sessionId, {
-    lastError: 'reconnect: all host candidates unreachable',
+    lastError: 'reconnect: all host candidates unreachable, retrying current host',
   });
-  options.deleteRuntime();
+  options.queueReconnectTransportOpenIntent(options.sessionId, options.host);
 }

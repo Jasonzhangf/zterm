@@ -117,6 +117,7 @@ export function openSessionMuxChannelByIntentRuntime(options: {
     sessionId: string,
   ) => { cols?: number | null; rows?: number | null; widthMode?: 'adaptive-phone' | 'mirror-fixed' } | null;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+  startHandshakeTimeout?: () => void;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
 }) {
   const { sessionId, host, debugScope, finalizeFailure } = options.intent;
@@ -154,6 +155,11 @@ export function openSessionMuxChannelByIntentRuntime(options: {
   const currentTargetSocket = options.daemonConnection.readSessionTargetSocket?.(sessionId)
     || options.readSessionTargetTerminalSocket(sessionId);
   if (currentTargetSocket?.readyState === WebSocket.OPEN) {
+    // Socket is already open: the transport onopen (mux-hello) path may have
+    // already started the handshake timeout, but starting (or resetting) it
+    // here guarantees the mux negotiation window is bounded for this intent
+    // even when this intent was queued against a pre-existing socket.
+    options.startHandshakeTimeout?.();
     if (options.isSessionTargetMuxReady(sessionId)) {
       if (channel.state === 'open') {
         options.runtimeDebug(`session.mux.${debugScope}.channel-reuse`, {

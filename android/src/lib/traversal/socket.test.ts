@@ -298,25 +298,28 @@ describe('TraversalSocket reconnect', () => {
     });
     await flushMicrotasks();
 
-    expect(MockWebSocket.instances).toHaveLength(1);
-    expect(MockWebSocket.instances[0].url).toContain('100.66.1.82');
+    // ws candidates race in parallel; the Tailscale candidate is one of them.
+    expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(2);
+    expect(MockWebSocket.instances.some((ws) => ws.url.includes('100.66.1.82'))).toBe(true);
   });
 
   it('reconnects quickly after an opened traversal backend closes', async () => {
     const socket = createSocket({}, { autoReconnect: true });
     await flushMicrotasks();
 
-    expect(MockWebSocket.instances).toHaveLength(1);
+    // ws candidates race: both are attempted in the first batch.
+    expect(MockWebSocket.instances).toHaveLength(2);
     MockWebSocket.instances[0].triggerOpen();
     MockWebSocket.instances[0].triggerClose(1006, 'relay transport closed');
 
-    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(MockWebSocket.instances).toHaveLength(2);
     await vi.advanceTimersByTimeAsync(299);
-    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(MockWebSocket.instances).toHaveLength(2);
     await vi.advanceTimersByTimeAsync(1);
     await flushMicrotasks();
 
-    expect(MockWebSocket.instances).toHaveLength(2);
+    // Reconnect batch: ipv6 is quarantined (failure) so only ipv4 is selectable.
+    expect(MockWebSocket.instances).toHaveLength(3);
     expect(socket.getDiagnostics()).toMatchObject({
       stage: 'connecting',
       reason: 'relay transport closed',
@@ -327,12 +330,12 @@ describe('TraversalSocket reconnect', () => {
     const socket = createSocket();
     await flushMicrotasks();
 
-    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(MockWebSocket.instances).toHaveLength(2);
     MockWebSocket.instances[0].triggerOpen();
     socket.close(1000, 'client close');
 
     await vi.advanceTimersByTimeAsync(1000);
-    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(MockWebSocket.instances).toHaveLength(2);
     expect(socket.readyState).toBe(MockWebSocket.CLOSED);
   });
 
@@ -357,7 +360,8 @@ describe('TraversalSocket reconnect', () => {
     });
     await flushMicrotasks();
 
-    expect(MockWebSocket.instances).toHaveLength(1);
+    // Both ws candidates race in the same batch.
+    expect(MockWebSocket.instances).toHaveLength(2);
     MockWebSocket.instances[0].triggerClose(1006, 'candidate failed before open');
 
     expect(socket.getDiagnostics()).toMatchObject({
@@ -365,10 +369,11 @@ describe('TraversalSocket reconnect', () => {
       reason: 'candidate failed before open',
     });
 
+    // The batch is not exhausted: the other ws candidate keeps trying.
     await vi.advanceTimersByTimeAsync(300);
     await flushMicrotasks();
 
-    expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(2);
+    expect(MockWebSocket.instances).toHaveLength(2);
     expect(socket.getDiagnostics()).toMatchObject({
       stage: 'connecting',
       reason: 'candidate failed before open',
@@ -385,9 +390,10 @@ describe('TraversalSocket reconnect', () => {
     socket.onclose = onclose;
     await flushMicrotasks();
 
-    expect(MockWebSocket.instances).toHaveLength(1);
+    expect(MockWebSocket.instances).toHaveLength(2);
     MockWebSocket.instances[0].triggerClose(1006, 'candidate failed before open');
 
+    // The batch is not exhausted yet: the other ws candidate is still trying.
     expect(MockWebSocket.instances).toHaveLength(2);
     MockWebSocket.instances[1].triggerClose(1006, 'candidate failed before open');
 
@@ -413,22 +419,23 @@ describe('TraversalSocket reconnect', () => {
 
     await vi.advanceTimersByTimeAsync(300);
     await flushMicrotasks();
-    expect(MockWebSocket.instances).toHaveLength(2);
-    expect(MockWebSocket.instances[1].url).toContain('203.0.113.10');
+    // Reconnect batch: ipv6 is quarantined (failure) so only ipv4 is selectable.
+    expect(MockWebSocket.instances).toHaveLength(3);
+    expect(MockWebSocket.instances[2].url).toContain('203.0.113.10');
 
-    MockWebSocket.instances[1].triggerOpen();
-    MockWebSocket.instances[1].triggerClose(1006, 'second close');
+    MockWebSocket.instances[2].triggerOpen();
+    MockWebSocket.instances[2].triggerClose(1006, 'second close');
     await vi.advanceTimersByTimeAsync(299);
-    expect(MockWebSocket.instances).toHaveLength(2);
+    expect(MockWebSocket.instances).toHaveLength(3);
     await vi.advanceTimersByTimeAsync(1);
     await flushMicrotasks();
 
-    expect(MockWebSocket.instances).toHaveLength(3);
-    expect(MockWebSocket.instances[2].url).toContain('240e:1234::10');
+    // Backoff restarts after a successful open: 300ms -> next reconnect batch
+    // races the fallback pool (both candidates are now quarantined).
+    expect(MockWebSocket.instances).toHaveLength(5);
     const attempts = socket.getDiagnostics().attempts;
     expect(attempts[attempts.length - 1]).toMatchObject({
       stage: 'connecting',
-      path: 'ipv6',
     });
   });
 
@@ -1077,7 +1084,9 @@ describe('TraversalSocket reconnect', () => {
     });
     await flushMicrotasks();
 
-    expect(MockWebSocket.instances).toHaveLength(1);
+    // Every candidate is quarantined: the fallback pool probes all of them in
+    // parallel (both ws candidates race in the same batch).
+    expect(MockWebSocket.instances).toHaveLength(2);
     expect(MockWebSocket.instances[0].url).toContain('240e:1234::10');
 
     MockWebSocket.instances[0].triggerOpen();
@@ -1086,5 +1095,150 @@ describe('TraversalSocket reconnect', () => {
       resolvedPath: 'ipv6',
       resolvedEndpoint: '240e:1234::10:3333',
     });
+  });
+
+  it('starts ws candidates in parallel and settles on the fastest open, closing superseded ones', async () => {
+    const socket = new TraversalSocket({
+      bridgeHost: '203.0.113.10',
+      bridgePort: 3333,
+      authToken: 'token',
+      tailscaleHost: '100.66.1.82',
+      ipv4Host: '203.0.113.10',
+      transportMode: 'websocket',
+    }, settings, {
+      routeHealthCache: new TraversalRouteHealthCache(),
+      routeHealthScope: { accountId: 'logged-out', daemonHostId: 'daemon-1' },
+    });
+    const onopen = vi.fn();
+    socket.onopen = onopen;
+    await flushMicrotasks();
+
+    // ws candidates race instead of running serially.
+    expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(2);
+
+    // The second instance opens first and wins; the first is closed as superseded.
+    MockWebSocket.instances[1].triggerOpen();
+    await flushMicrotasks();
+
+    expect(onopen).toHaveBeenCalledTimes(1);
+    expect(socket.getDiagnostics().stage).toBe('open');
+    expect(MockWebSocket.instances[0].readyState).toBe(MockWebSocket.CLOSED);
+
+    socket.close();
+  });
+
+  it('settles exactly one winner when two candidates open in the same tick', async () => {
+    const socket = new TraversalSocket({
+      bridgeHost: '203.0.113.10',
+      bridgePort: 3333,
+      authToken: 'token',
+      tailscaleHost: '100.66.1.82',
+      ipv4Host: '203.0.113.10',
+      transportMode: 'websocket',
+    }, settings, {
+      routeHealthCache: new TraversalRouteHealthCache(),
+      routeHealthScope: { accountId: 'logged-out', daemonHostId: 'daemon-1' },
+    });
+    const onopen = vi.fn();
+    socket.onopen = onopen;
+    await flushMicrotasks();
+
+    // Both candidates open back-to-back in the same synchronous tick.
+    MockWebSocket.instances[0].triggerOpen();
+    MockWebSocket.instances[1].triggerOpen();
+    await flushMicrotasks();
+
+    // Only the first is the winner; the second must not re-fire onopen.
+    expect(onopen).toHaveBeenCalledTimes(1);
+    expect(socket.getDiagnostics().stage).toBe('open');
+    expect(socket.readyState).toBe(MockWebSocket.OPEN);
+    const openAttempts = socket.getDiagnostics().attempts.filter((item) => item.stage === 'open');
+    expect(openAttempts).toHaveLength(1);
+
+    socket.close();
+  });
+
+  it('contracts the rtc-direct candidate timeout while a recent failure is quarantined', async () => {
+    const routeHealthCache = new TraversalRouteHealthCache();
+    const scope = { accountId: 'user-1', daemonHostId: 'daemon-host-a' };
+    const relayTarget = {
+      bridgeHost: '',
+      bridgePort: 3333,
+      authToken: 'token',
+      relayHostId: 'daemon-host-a',
+      transportMode: 'webrtc' as const,
+      relayEndpointCandidates: [{
+        id: 'relay-rtc:daemon-host-a',
+        kind: 'relay-rtc' as const,
+        relayHostId: 'daemon-host-a',
+        authRequired: true,
+        lastSeenAt: '2026-07-16T00:00:00.000Z',
+      }],
+    };
+    const relaySettings = {
+      signalUrl: '',
+      turnServerUrl: '',
+      turnUsername: '',
+      turnCredential: '',
+      transportMode: 'webrtc' as const,
+      traversalRelay: {
+        relayBaseUrl: 'https://relay.example.test/relay/',
+        accessToken: 'relay-access',
+        userId: 'user-1',
+        username: 'jason',
+        deviceId: 'android-1',
+        deviceName: 'Android',
+        platform: 'android',
+        wsDevicesUrl: 'wss://relay.example.test/relay/ws/devices',
+        wsHostUrl: 'wss://relay.example.test/relay/ws/host',
+        wsClientUrl: 'wss://relay.example.test/relay/ws/client',
+        turnUrl: 'turn:relay.example.test:3478?transport=udp',
+        turnUsername: 'turn-user',
+        turnCredential: 'turn-secret',
+        updatedAt: 1,
+      },
+    };
+    const directCandidate = {
+      id: 'rtc-direct:daemon-host-a',
+      kind: 'rtc' as const,
+      path: 'rtc-direct' as const,
+      endpoint: 'rtc-direct:daemon-host-a',
+      signalUrl: 'wss://relay.example.test/relay/ws/client?token=relay-access&hostId=daemon-host-a&deviceId=android-1',
+      iceServers: [] as RTCIceServer[],
+      iceTransportPolicy: 'all' as const,
+    };
+    const relayCandidate = {
+      id: 'relay-rtc:daemon-host-a',
+      kind: 'rtc' as const,
+      path: 'rtc-relay' as const,
+      endpoint: 'relay:daemon-host-a',
+      signalUrl: 'wss://relay.example.test/relay/ws/client?token=relay-access&hostId=daemon-host-a&deviceId=android-1',
+      iceServers: [{
+        urls: 'turn:relay.example.test:3478?transport=udp',
+        username: 'turn-user',
+        credential: 'turn-secret',
+      }],
+      iceTransportPolicy: 'relay' as const,
+    };
+
+    // Both rtc candidates are quarantined as failures: the selection falls back
+    // to the full pool, and the quarantined direct candidate gets a contracted
+    // 3000ms budget (instead of 6000ms) before the whole plan is exhausted.
+    routeHealthCache.recordFailure(scope, directCandidate, 'timeout');
+    routeHealthCache.recordFailure(scope, relayCandidate, 'timeout');
+
+    const socket = new TraversalSocket(relayTarget, relaySettings, { routeHealthCache });
+    const onclose = vi.fn();
+    socket.onclose = onclose;
+    await flushMicrotasks();
+
+    // relay (2500ms budget) times out, then the contracted direct budget
+    // (3000ms) expires -> total 5500ms -> finishFailure -> onclose.
+    await vi.advanceTimersByTimeAsync(5500);
+    await flushMicrotasks();
+
+    expect(onclose).toHaveBeenCalledTimes(1);
+
+    socket.close();
   });
 });

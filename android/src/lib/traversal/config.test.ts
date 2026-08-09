@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, afterEach, vi } from 'vitest';
 import { DEFAULT_BRIDGE_SETTINGS } from '../bridge-settings';
-import { buildTraversalPlan, resolveTraversalConfigFromHost } from './config';
+import { buildTraversalPlan, buildTraversalPlanCached, clearTraversalPlanCache, resolveTraversalConfigFromHost } from './config';
 
 describe('buildTraversalPlan', () => {
   it('keeps Tailscale ahead of UDP direct and TURN Relay on a merged daemon target', () => {
@@ -714,5 +714,37 @@ describe('buildTraversalPlan', () => {
           },
         },
       )).toThrow('WebRTC relay mode requires selecting an online relay daemon device');
+  });
+});
+
+describe('buildTraversalPlanCached', () => {
+  const cachedTarget = {
+    bridgeHost: '100.66.1.82',
+    bridgePort: 3333,
+    authToken: 'token',
+    daemonHostId: 'mac-studio',
+    relayHostId: 'mac-studio',
+    transportMode: 'websocket' as const,
+  };
+
+  afterEach(() => {
+    clearTraversalPlanCache();
+    vi.useRealTimers();
+  });
+
+  it('reuses the cached plan within the TTL window', () => {
+    const first = buildTraversalPlanCached(cachedTarget, DEFAULT_BRIDGE_SETTINGS);
+    const second = buildTraversalPlanCached(cachedTarget, DEFAULT_BRIDGE_SETTINGS);
+    expect(second).toBe(first);
+  });
+
+  it('rebuilds the plan after the TTL window expires', () => {
+    vi.useFakeTimers();
+    const first = buildTraversalPlanCached(cachedTarget, DEFAULT_BRIDGE_SETTINGS);
+    vi.advanceTimersByTime(5001);
+    const rebuilt = buildTraversalPlanCached(cachedTarget, DEFAULT_BRIDGE_SETTINGS);
+    expect(rebuilt).not.toBe(first);
+    // And a fresh build is cached again for the new window.
+    expect(buildTraversalPlanCached(cachedTarget, DEFAULT_BRIDGE_SETTINGS)).toBe(rebuilt);
   });
 });

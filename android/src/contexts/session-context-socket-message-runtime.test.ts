@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createSessionHeartbeatStore } from '../lib/session-heartbeat-store';
-import { handleSocketServerMessageRuntime } from './session-context-socket-message-runtime';
+import { createSessionTailRefreshStore } from '../lib/session-tail-refresh-store';
+import { handleSocketConnectedBaselineRuntime, handleSocketServerMessageRuntime } from './session-context-socket-message-runtime';
 import { reduceSessionAction, type SessionManagerState } from './session-context-core';
 import { createSessionBufferState } from '../lib/terminal-buffer';
 import { drainRuntimeDebugEntries } from '../lib/runtime-debug';
@@ -844,6 +845,16 @@ describe('session-context-socket-message-runtime remote window messages', () => 
         },
       },
       {
+        type: 'remote-window-stream-focus-result',
+        payload: {
+          requestId: 'rw-focus-1',
+          streamId: 'stream-1',
+          revision: 1,
+          targetId: 'pane-2',
+          phase: 'accepted',
+        },
+      },
+      {
         type: 'remote-window-input-result',
         payload: {
           requestId: 'rw-input-1',
@@ -859,11 +870,12 @@ describe('session-context-socket-message-runtime remote window messages', () => 
       });
     }
 
-    expect(remoteWindowDispatch).toHaveBeenCalledTimes(4);
+    expect(remoteWindowDispatch).toHaveBeenCalledTimes(5);
     expect(remoteWindowDispatch.mock.calls.map((call) => call[0].type)).toEqual([
       'remote-window-stream-started',
       'remote-window-stream-ice-candidate',
       'remote-window-stream-status',
+      'remote-window-stream-focus-result',
       'remote-window-input-result',
     ]);
     expect(fileTransferDispatch).not.toHaveBeenCalled();
@@ -1068,4 +1080,44 @@ describe('session-context-socket-message-runtime inactive live buffer gate', () 
     expect(applyIncomingBufferSync).toHaveBeenCalledTimes(1);
   });
 
+});
+
+describe('session-context-socket-message-runtime head-first connected refresh', () => {
+  it('requests the buffer head before sending schedule-list so first paint is not blocked', () => {
+    const order: string[] = [];
+    const requestSessionBufferHead = vi.fn((_sessionId: string, _ws: unknown, _opts: unknown) => {
+      order.push('head');
+      return true;
+    });
+    const sendSocketPayload = vi.fn((_sessionId: string, _ws: unknown, _data: unknown) => {
+      order.push('schedule-list');
+    });
+
+    handleSocketConnectedBaselineRuntime({
+      sessionId: 'session-1',
+      sessionName: 'tmux-1',
+      ws: {} as any,
+      refs: {
+        stateRef: { current: { sessions: [], activeSessionId: 'session-1' } },
+        tailRefreshStore: createSessionTailRefreshStore(),
+        lastConnectedBaselineAtRef: { current: new Map() },
+        connectedBaselineBurstGuardRef: { current: new Set() },
+      },
+      readSessionBufferSnapshot: () => createSessionBufferState({
+        startIndex: 0,
+        endIndex: 0,
+        revision: 0,
+        cacheLines: 2000,
+      }),
+      applyTransportDiagnostics: vi.fn(),
+      updateSessionSync: vi.fn(),
+      setScheduleStateForSession: vi.fn(),
+      sendSocketPayload,
+      isSessionTransportActive: () => true,
+      requestSessionBufferHead,
+      incrementConnectedSync: vi.fn(),
+    });
+
+    expect(order).toEqual(['head', 'schedule-list']);
+  });
 });

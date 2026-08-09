@@ -426,8 +426,14 @@ async function openMockSessionChannels(count: number) {
 async function waitForMockSessionInstances(count: number) {
   await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(1));
   if (count > 1) {
+    // Only open sockets that are still connecting. A closed legacy socket must
+    // not be revived: its transport resource stays closed so the reconnect
+    // intent actually opens a fresh transport (async probes may delay the
+    // queue past this helper's open loop).
     for (const ws of MockWebSocket.physicalInstances) {
-      ws.triggerOpen();
+      if (ws.readyState === MockWebSocket.CONNECTING) {
+        ws.triggerOpen();
+      }
     }
     await act(async () => {
       await Promise.resolve();
@@ -443,8 +449,12 @@ async function waitForMockPhysicalInstances(count: number) {
 async function waitForAtLeastMockSessionInstances(count: number) {
   await waitFor(() => expect(MockWebSocket.instances.length).toBeGreaterThanOrEqual(1));
   if (count > 1) {
+    // Only open sockets that are still connecting; a closed legacy socket must
+    // not be revived (same rationale as waitForMockSessionInstances).
     for (const ws of MockWebSocket.physicalInstances) {
-      ws.triggerOpen();
+      if (ws.readyState === MockWebSocket.CONNECTING) {
+        ws.triggerOpen();
+      }
     }
     await act(async () => {
       await Promise.resolve();

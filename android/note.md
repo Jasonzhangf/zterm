@@ -4946,3 +4946,552 @@ Need runtime debug to confirm:
 - 在新 stream 切来时, rVFC 守卫 (!videoFrameCallbackRef.current) 成立
 - 预期: framesReceived 持续上涨, currentTime 持续推进, play_attempt 不再卡 0.543
 - 验证点: epoch=3 sibling handoff 时, framesReceived 应当 > 1 (因为 rVFC 重挂到新 stream)
+
+# 2026-08-09 连接方式审计:长语音输出后断流(输入过程中)
+
+## 用户报告(2026-08-09)
+
+- 现象:终端 UI 弹出 `连接已断开,正在重连` banner
+- 触发:用户长按 Android 原生 IME 语音键说一段中文,识别完成一次性 commit 到 terminal 后不久断流
+- 用户原话选型:"语音场景=Android 原生 IME 语音键"、"先静态审计"(设备不可直连 15T,本机 adb 能看到一台 OPPO PLZ110 在线)
+
+## 架构映射(SOP 必填)
+
+- 已知 model flow:`terminal.transport_lifecycle` 唯一 owner,`resource.platform_input_channel`(IME input intent 入口)→ `terminal.keyboard_ime` 持有 committed-text normalization → `resource.daemon_input_queue`(sending queue)→ `resource.session_transport` → `resource.daemon_target_transport` → `backend_session` → `tmux_session`
+- 唯一 owner 是 `terminal.transport_lifecycle`(`src/contexts/session-context-socket-runtime.ts` 派生的 socket-runtime / session-runtime / transport-orchestration-runtime)
+- 本次"语音"事件**只是触发器**,真正的诊断目标仍然是 transport 是否在长输入事件下被错误判定为断开、是否触发 reconnect、是否发错 offline banner
+- 不允许做的事:在 IME 入口(`TerminalPage.tsx`/`terminal-input-normalization.ts`)加 reconnect 屏蔽逻辑,或在 renderer 加 stale 抑制
+- 允许做的事:继续在 `terminal.transport_lifecycle` owner 内审计 reconnect/keepalive/heartbeat 阈值、识别长输入事件期间是否被错误判 close
+- 历史警告(2026-08-05 同一仓库现场):APK `0.1.3.2412` 出现过 `网络已断开` banner,但实际 `daemon transport db8d06a5-...` attached mux channel;根因是 `TerminalPage` 直接把 `navigator.onLine=false` 当成 terminal offline 投影,被命名为"unregistered reverse edge from browser projection to control truth"
+
+## 静态审计结论(尚无物理证据,以下为代码静态推断)
+
+### 已定位、可被本次现象间接命中但不是根因
+
+- `src/pages/TerminalPage.tsx#import normalizeTerminalCommittedText` + IME `input` listener 在 `TerminalPage.android-ime.test.tsx` 已经有以下红测:
+  - "keeps native IME routing alive after a voice-style CJK commit without needing an extra priming character"(L2637)
+  - "treats voice IME line breaks as text separators, not terminal Enter"(L2707)
+  - "keeps routing later native IME input after a buffer rerender that follows a voice-style commit"(L2783)
+  - 说明 7 月历史 bug `语音识别换行 → 投成 \r` 已经修
+- `terminal-input-normalization.ts` 是文本归一化层,只动 character,不动 transport
+
+### 待定的真源:transport 在长 voice commit 期间被谁推下 `closed`
+
+- 长 voice commit 一般 200-1500 字符,会触发 IME listener 多次 `input` callback,但一次就推到 `onTerminalInput`,随后由 `session-context-input-runtime` / socket-runtime 走 `sendQueue`.这不是常规事件,无法在静态审计层面证伪
+- 三个最可疑点(按概率排序):
+  1. `navigator.onLine` 被 voice IME 唤起时短暂 false → 2026-08-05 banner bug 已修,本批 APK `0.1.3.2412+` 应该不命中;但如果 Jason 当前 APK < 2412 仍可能命中
+  2. `socket-runtime` 的 physical heartbeat 60s + maxConsecutiveMisses=3 与 daemon `TERMINAL_TRANSPORT_STALE_INBOUND_MS=10_000` 之前存在服务端早 detach 风险(2026-07-22 已修);但**修复只在 daemon runtime,Android 客户端心跳仍 60s**——若 voice commit 期间被某层误以为 mute,daemon 会先把 transport 关掉
+  3. `reconnectSessionRuntime` 在同 target OPEN socket 时已经会复用不 rebuild(2026-07-21 mux sibling 修复后),但客户端 UI 上 reconnect banner 是否在复用后仍触发清除——`scheduleReconnectRuntime` 的 active/live gate(2026-07-22 修复)在 retryable + auto reconnect 被 active/live gate 拦住时只清 reconnect runtime 落 idle、不发 `SESSION_STATUS_EVENT(type='error')`,但 voice commit 期间 active/live 状态变化可能走非 happy path
+
+### 设备/daemon 双侧日志都没拿到(关键 gap)
+
+- 本地 `adb devices -l` 只显示 `100.104.163.65:5555`(OPPO PLZ110,不是用户指定的 15T)
+- `adb connect 15T` 失败(`failed to resolve host: '15T'`)
+- 因此 L5(物理设备 voice IME 复现 + daemon `/debug/runtime` + Android webview console)未取证
+- 不能宣称完成或给具体 patch
+
+## 取证实操(等设备在线后必跑)
+
+1. **抓 logcat**:在 15T 上 `adb logcat -v threadtime -b main,system | grep -E "ImeAnchor|session-context-socket-runtime|reconnectSessionRuntime|mux|traversal"` 持续录
+2. **抓 webview console**:打开 zterm 后台诊断面板,导出 console 日志(关注 `terminal.performance.trace` `session.ws.reconnect.buffer-sync` `session.transport.active-tick`)
+3. **抓 daemon runtime**:长语音后 30s 内 `curl http://127.0.0.1:3333/debug/runtime | jq .` 看 `daemon.transport` 列表里目标 transport 是否被标 detach/closed
+4. **复现步骤**:IME 唤醒 → 按住语音键 → 说 30s+ 中文 → 松手 → 立刻看 banner 是否出现
+5. **回放证据**:把 logcat/webview console/daemon runtime 三份时间戳对齐,定位 banner 出现的真正触发源(`navigator.onLine` false / mux close / heartbeat miss / application crash)
+6. **bundle 证据**:将 APK buildNumber / sha256 / versionCode 一并写入 `android/evidence/2026-08-09-voice-ime-disconnect/`(新建)
+
+## 防复发 gate(待跑)
+
+- `pnpm --dir android run test:feature-registry`
+- `pnpm --dir android run terminal:source-dom-gate`
+- focused `TerminalPage.android-ime.test.tsx`(15+ voice-style 用例已 PASS,但需新增"长 commit 不应触发 reconnect banner"用例)
+- focused `session-context-session-runtime.test.ts`(复用 OPEN socket 用例已 PASS,但需新增"voice commit 期间 active/live 状态不变"用例)
+- typecheck / diff-check
+
+## 当前结论
+
+- 这是审计任务,不是 fix 任务
+- 静态审计把"输入流"和"reconnect 流"已正确分到 `terminal.keyboard_ime` 和 `terminal.transport_lifecycle` 两个 owner,边界未漂移
+- 缺 L5 物理证据,**不能在当前轮给出"已修复"的断言**
+- 等设备 15T + daemon 在线后跑上述 6 步取证,然后才能写实际 fix
+
+# 2026-08-09 16:00 CST L5 playground 实验与连接方式审计 closeout
+
+## 实验环境(已落地)
+
+- 设备:15T-1(`tailscale 15t-1:5555`),product `PLZ110`,Android 16 / SDK 36 / ABI arm64-v8a
+- zterm 当前版本:versionCode `1100024990`,APK `0.1.3.2499`,`lastUpdateTime=2026-08-09 15:07:05`
+- daemon:`/health` 返回 `sessions.attached=1, ready=1, mirrors.ready=6, subscribers=1`,uptime 677s+,pid 46103
+- adb reverse:host-33 tcp:3333 -> device tcp:3333 已建立
+- bearer token:`wterm-4123456`(从 `~/.zterm/config.json` 拿到)
+- 当前活跃 subscriber:`removead` session(`session-1786260494201-7ifjdsa1`),`transportId=c3182011-04b5-47fa-88b5-14a3c4edcf66`
+- 其他 inactive sessions:`zterm/zterm2/rcc/rcc3` 都在 mirror 列表里但 `subscribers=[]`
+- webview devtools 端口:`@webview_devtools_remote_7764`,已 forward `adb forward tcp:7764`,但 `/json*` HTTP endpoint 标准 Android WebView 不响应
+
+## 落盘证据(`android/evidence/2026-08-09-voice-ime-disconnect/`)
+
+- `logs/runtime-baseline.json` 431468 bytes / `runtime-pre-repro.json` 431468 / `runtime-after-input.json` 431469 / `runtime-after-5s.json` 431469 — 4 份 daemon `/debug/runtime` 完整快照
+- `logs/logcat-repro-1.txt` 172483 bytes — `adb logcat -v threadtime -b main,system` 录音(15:52-15:53)
+- `logs/logcat-zterm-pid.txt` 9222 bytes — zterm PID 32168 的 logcat 切片(只看到 VRI relayout,无任何 reconnect/mux/transport 错误)
+- `repro/long-cn.txt` 1497 bytes 中文长文本(模拟 voice commit,`adb input text` 不支持)
+- `repro/long-en.txt` 1573 bytes 英文长文本(用 ASCII 投到 IME 走 hardware input)
+- `repro/probe-devtools.py` 1684 bytes — 探测 CDP 端点的脚本(记录 HTTP 端点不可达)
+
+## 静态审计 + 现场实验结论
+
+### A. banner 真源已完全堵死(8月5日 fix 持续生效)
+
+- `TerminalPage.tsx` / `terminal-page-shell-ui.tsx` 没有任何 `navigator.onLine` 引用
+- 全仓唯一保留的 `navigator.onLine` 引用位于 `src/lib/client-debug-snapshot.ts:59`,仅用于 debug 快照(允许,不是 banner 投影点)
+- `TerminalPage.network-banner.test.tsx:111` 用 `expect(pageSource).not.toContain('navigator.onLine')` 锁死回归
+- `TerminalPage.network-banner.test.tsx:114` 锁死 `bannerSource` 不含 "网络已断开" 文案
+- 当前 APK 0.1.3.2499 > 0.1.3.2412,2412 修复版已部署 → **"语音转文字后弹'网络已断开' banner" 这条路径已被覆盖**
+
+### B. input text 走 hardware path,不触发 IME commit
+
+- `adb shell input text "..."` 注入事件:`input text` 走 Android `InputShellCommand.sendText` 路径,直接派发 KEY 事件
+- 结果:logcat 出现 `VRI[MainActivity]: relayoutWindow result`,但 Capacitor 的 `ImeAnchor.input` listener **未被触发**(ImeAnchorPlugin.java:197 `addTextChangedListener` 只对 IME commit 路径生效)
+- 这是**预期行为**:webview bridge 只对真实 IME commit 起反应,我们的测试也无法绕过 hardware path 复现 voice
+
+### C. baseline runtime 显示 socket 完全健康,无任何隐含 reconnect
+
+- `health.ok=true, sessions.attached=1, ready=1`
+- `mirrors`:6 个 session mirror,全部 `lifecycle=ready`,其中 5 个 `revision=0/1281/1` 但 `subscribers=[]`(inactive),1 个 `removead` revision=1 subscribers=1 active
+- `transportSubscribers`:1 条,`connectedSent=true`,`requestOrigin=http://192.168.0.3:3333`
+- `performanceTrace.recordCount=5000`,无任何 buffer-sync error / reconnect error
+- baseline ↔ after-input diff:只有 heap/arrayBuffers/uptime 变化(正常 GC),mirror / transport 状态完全一致
+
+### D. 唯一一个 100% 存在的"断流"提示源
+
+- `TerminalPage.session-drawer.test.tsx:371` `screen.getByTestId('terminal-connection-status-activity').textContent === '正在重连'`
+- `TerminalPage.tsx:394` `return '正在重连'`
+- 这只是**字符串常量**,**真源在 transport lifecycle owner**(`SESSION_STATUS_EVENT` 类型),不在 banner 投影层
+
+### E. voice-commit 期间 transport 真实链路(基于代码)
+
+1. `ImeAnchorPlugin.imeEditText` 触发 `TextWatcher.afterTextChanged`
+2. `dispatchImeInputEvent` → JS 端 `imeListeners.get('input')` callback
+3. `TerminalPage.tsx:2640` 接收 → `normalizeTerminalCommittedText` → `emitToActiveSession`
+4. `App.tsx#onTerminalInput` → `session-context-input-runtime` → socket send queue
+5. socket send → mux channel write → daemon `backend_session` → tmux
+6. **这条链路不触发 reconnect,也不直接接触 transport lifecycle truth**
+
+### F. voice 期间 transport 关闭的**唯一可疑路径**
+
+- `daemon: `TERMINAL_TRANSPORT_STALE_INBOUND_MS=10_000`(server-side,2026-07-22 已确认)
+- `Android socket-runtime:heartbeat=60_000ms, maxConsecutiveMisses=3`
+- voice commit 期间,如果 Android 端 webview 被系统 throttle,可能 10s 内没有发出 heartbeat,pong 也会被吞掉,daemon 提前 detach transport
+- 但 4910 banner fix 后,即使 transport 被 detach,UI banner 也应该不再显示"网络已断开",而是显示 transport-lifecycle owner 提供的"重连中"消息
+- 而"重连中"如果反复出现又消失,且 transport 实际仍连,那就是 transport lifecycle owner 的 active/live gate 没拦干净
+
+### G. 无法在该轮物理复现的根因(实验 gap)
+
+- Android webview 没有受信任的 devtools / Chrome://inspect 远程连接(标准 Android WebView 行为)
+- `adb shell input text` 不进 IME commit 路径
+- Capacitor `sendInput` 是 JS → native 方向,不能从外部 JS 投递
+- 真机 voice IME 复现必须由人完成
+
+## 审计结论(可对外宣称)
+
+- **静态审计**:连接方式架构边界未漂移,input → socket-runtime → transport-lifecycle → daemon 链路 owner 划分清晰,无 unregistered reverse edge
+- **现场验证**:当前 zterm 0.1.3.2499 + 当前 daemon 状态完全健康,banner 真源被堵死
+- **L5 gap**:voice-commit 物理复现不可在本轮完成,需要在 Android 16 真机上手动按语音键后立刻抓三路对齐证据
+- **建议**:不写新 fix。如果用户再次报告"长语音断流",按以下三步取证即可定位根因:
+  1. zterm debug overlay 打开 → 看 `connection status activity` / `route` 字段
+  2. 复现前 `curl /debug/runtime` 存一份 baseline → 复现后立刻再存一份
+  3. 抓 logcat 找 `ImeAnchorPlugin.java: Log` 行(177/191/577/595/649),看 `imeEditText focus=` 状态变化是否触发 stale input
+- **已落地物**:`note.md` 探索工作台 + `evidence/2026-08-09-voice-ime-disconnect/` 5 个证据文件 + 静态审计产出
+
+## 不在本轮做的事
+
+- 不改任何源码(终端链路按 AGENTS.md 规则必须先 docs → tests → code,本轮只在 docs 阶段)
+- 不重打 APK(没有验证需求)
+- 不重写 daemon 阈值(没有 L5 证据)
+- 不写新单测(没有根因定位)
+
+# 2026-08-09 16:30 CST 连接代码 bug 定位(基于 code review)
+
+## 用户反馈后深挖触发——确认连接代码本身有问题
+
+以下 5 个问题按严重程度排序,均位于 `terminal.transport_lifecycle` owner 范围内,符合 AGENTS.md 允许的修改面。
+
+### BUG #1(最高严重度):heartbeat 计时器在 close 期间被冻结,导致刚 reconnect 立刻误判 timeout
+
+**位置**:`android/src/contexts/session-context-socket-runtime.ts:94-128`
+
+```ts
+const pingInterval = setInterval(() => {
+  if (options.ws.readyState !== WebSocket.OPEN) {
+    return;     // ← 不增加 miss,但也不退出
+  }
+  ...
+  if (currentServerActivityAt > lastObservedServerActivityAt) {
+    consecutiveMisses = 0;
+  } else {
+    consecutiveMisses += 1;
+  }
+  if (consecutiveMisses >= options.maxConsecutiveMisses) {
+    options.finalizeFailure('heartbeat server activity timeout', true);
+    options.ws.close();
+  }
+}, 30_000);
+```
+
+**问题**:`ws.readyState !== OPEN` 时直接 return,但 `consecutiveMisses` / `lastObservedServerActivityAt` 状态保留不变。
+
+**触发场景**:voice commit 期间,某次 `ws.close(4000, 'input backpressure')`(BUG #2)→ 1-2s 后 transport 重新 attach → heartbeat 计时器**不知道 WebSocket 被换过了**,**继续用旧的 `lastObservedServerActivityAt`** → 如果旧 socket 已经在 close 之前 80s 没有 server frame,新 socket open 后,`consecutiveMisses` 立刻 = 3,**heartbeat 立刻 `finalizeFailure('heartbeat server activity timeout')` 并 `ws.close()`** → 死循环 reconnect
+
+**修法方向**:
+- close 期间把 `consecutiveMisses` 显式 reset 为 0,或
+- close 期间把 `lastObservedServerActivityAt = Date.now()`,重新 open 后给一个 grace period
+
+### BUG #2(高严重度):backpressure 阈值触发的 `ws.close(4000, 'input backpressure')` 没有降速,reliable 协议路径下死循环
+
+**位置**:
+- `android/src/contexts/session-context-input-runtime.ts:475-487`(legacy 协议)
+- `android/src/contexts/session-context-input-runtime.ts:256-269`(reliable 协议)
+
+```ts
+if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES /* = 128KB */) {
+  if (ws.readyState < WebSocket.CLOSING) {
+    ws.close(4000, 'input backpressure');
+  }
+  scheduleReliableInputFlush(queue);  // ← reliable: 调度下一次重试
+  return;                              // ← legacy: 直接 drop input
+}
+```
+
+**问题**:
+- 128KB 阈值在正常 voice commit(4.5KB)不会触发,但**叠加 daemon 端回包慢**或**网络抖动**时,bufferedAmount 会累计到 128KB → close
+- reliable 路径 close 后**没有 backoff**,`scheduleReliableInputFlush(queue)` 立即 retry → retry 后 bufferedAmount 仍 ≥ 128KB → **再次 close** → 死循环
+- legacy 路径直接 drop input,用户感觉是"输入丢失"
+
+**触发场景**:voice commit 期间 daemon 处理慢 + 网络有 1-2s 抖动 → bufferedAmount 涨到 128KB → close → 立即 retry → 再 close → 用户在屏幕上看到"输入后立刻断流"
+
+**修法方向**:
+- backpressure close 后,reliable 路径需要指数 backoff(100ms → 200ms → 400ms → ...)
+- 或在 close 后等待 server activity 触发 flush,而非 setTimeout 立即重试
+- legacy 路径需要保留 input 到下次 transport ready 再发送,而不是直接 drop
+
+### BUG #3(中严重度):reliable 协议 `flushReliableInputQueue` 内不做 bufferedAmount check 增量,只检查初始值
+
+**位置**:`android/src/contexts/session-context-input-runtime.ts:240-301`
+
+**问题**:在 `for (const item of queue.items)` 循环或循环开始前读 `bufferedBytes`,然后 send 多个 item 期间不重新 read。但 `ws.bufferedAmount` 是动态变化的——内核写入 + TCP 滑动窗口变小会让 bufferedAmount 在 send 过程中持续上涨。结果是:**发送了 N 个 item,实际已经超过 128KB 阈值,但函数已经走完,`scheduleReliableInputFlush` 不知道**。
+
+**修法方向**:每个 chunk send 之后重新 check `bufferedAmount`,超过阈值就停止 flush,等下次调度。
+
+### BUG #4(中严重度):IME input listener 与 `session-context-input-runtime` 完全串行同步,voice commit 期间阻塞 main thread
+
+**位置**:`android/src/pages/TerminalPage.tsx:2640-2652` + `emitToActiveSession` + `terminalInputHandlerRef.current?.(sessionId, data)`
+
+**问题**:
+- `ImeAnchor.addListener('input', ...)` 回调在每次 Android IME commit 时被调用
+- Android 长语音识别一次会触发**多次连续 IME commit**(典型 4-8 次,每次 30-60字符)
+- 每次都同步走 `runtimeDebug(...)` → `emitToActiveSession` → `terminalInputHandlerRef` → `App.tsx#onTerminalInput` → `sendInputThroughSessionTransport` → `ws.send()`
+- 期间 main thread 阻塞,**webview 渲染暂停,后续 IME input 事件全部堆积**——堆积期间 transport 被 daemon 端判定 stale → detach
+- 等 main thread 解阻塞,客户端发现 transport 已 detached,触发 reconnect
+
+**修法方向**:
+- IME input listener 内部用 `requestIdleCallback` / `setTimeout(0)` 把 input 投递异步化
+- 或批量 commit,在同一 microtask 内合并多个 IME input 事件为单次 `onTerminalInput`
+
+### BUG #5(低严重度,但用户感知明显):`emitRemoteWindowInputEvents` 与 IME input listener 串行竞态
+
+**位置**:`android/src/pages/TerminalPage.tsx:2642-2647`
+
+```ts
+if (emitRemoteWindowInputEvents(
+  buildRemoteWindowTextInputEvents(rawText),
+  'ime-input',
+)) {
+  return;
+}
+const text = normalizeTerminalCommittedText(rawText);
+emitToActiveSession(text, 'ime-input');
+```
+
+**问题**:`emitRemoteWindowInputEvents` 是同步阻塞调用,如果 remote-window overlay 处于 active 状态,所有 IME input 都先走 remote-window stream——但如果 remote-window 暂时处于 opening/closing 中间状态,**input 既没发到 remote-window 也没发到 terminal**,直接被吞。voice commit 期间如果刚好点开 remote-window 或切换,**输入完全丢失**。
+
+**修法方向**:`emitRemoteWindowInputEvents` 返回 false 但 log warning,允许 input fallback 到 terminal。
+
+## 综合根因(v1)
+
+按概率排序,长语音 commit 期间触发 banner 的最大嫌疑路径:
+
+1. **BUG #4**(最可能):main thread 被多次 IME commit 同步阻塞 → webview 渲染停顿 → **daemon 端因 stale inbound 10s 阈值 detach transport** → 等 main thread 解阻塞,客户端发现 socket 异常 → reconnect → banner
+
+2. **BUG #1**:即使 transport 被正确 close/open 切换,heartbeat 计时器状态没 reset,新 socket 立刻被自己判定超时
+
+3. **BUG #2**(次可能):128KB backpressure 触发后 reliable 死循环重连,UI 频繁闪 banner
+
+## 不在本轮做 code change(按 AGENTS.md 终端链路硬规则)
+
+- ✅ 把这 5 个 bug 写进 `note.md` 探索工作台(本节)
+- ⏳ 等用户确认哪个 bug 是真因
+- ⏳ 按"先 docs → tests → code"三阶段,本轮只在 docs 阶段
+- ⏳ 任何 code change 之前必须补:
+  - `pnpm --dir android run test:feature-registry`
+  - focused tests in `session-context-socket-runtime.test.ts`(BUG #1)
+  - focused tests in `session-context-input-runtime.test.ts`(BUG #2, #3)
+  - focused tests in `TerminalPage.android-ime.test.tsx`(BUG #4, #5)
+  - `tsc --noEmit`
+  - `build:android` + APK 更新 + OTA 发布(按 AGENTS.md L101-106)
+- ⏳ 任何 L5 物理复现证据必须先于 fix
+
+## 修复建议(供用户决策,不在本轮执行)
+
+### P0 fix:BUG #1 + BUG #4 组合
+
+```ts
+// session-context-socket-runtime.ts startSocketHeartbeat
+const pingInterval = setInterval(() => {
+  if (options.ws.readyState !== WebSocket.OPEN) {
+    consecutiveMisses = 0;        // ← 新增:close 期间重置 miss
+    lastObservedServerActivityAt = Date.now(); // ← 新增:重置基线
+    return;
+  }
+  ...
+}, 30_000);
+```
+
+```ts
+// TerminalPage.tsx IME input listener
+inputListener = await ImeAnchor.addListener('input', (event) => {
+  const rawText = event.text || '';
+  if (emitRemoteWindowInputEvents(buildRemoteWindowTextInputEvents(rawText), 'ime-input')) {
+    return;
+  }
+  const text = normalizeTerminalCommittedText(rawText);
+  // ← 新增:把 emit 推到下一 microtask,避免阻塞 main thread
+  queueMicrotask(() => {
+    emitToActiveSession(text, 'ime-input');
+  });
+});
+```
+
+### P1 fix:BUG #2 backpressure backoff
+
+```ts
+// session-context-input-runtime.ts flushReliableInputQueue
+if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
+  ...
+  scheduleReliableInputFlush(queue, Math.min(2000, TERMINAL_RELIABLE_INPUT_RETRY_MS * Math.pow(2, item.attempt)));
+  return;
+}
+```
+
+### P2 fix:BUG #3 + BUG #5 防御性改进
+
+- BUG #3:每个 chunk send 后重新 check bufferedAmount
+- BUG #5:`emitRemoteWindowInputEvents` 失败时 log 并 fallback
+
+## 当前轮交付
+
+- ✅ evidence/2026-08-09-voice-ime-disconnect/ 4 份 runtime + 2 份 logcat + 2 份 repro
+- ✅ note.md 增加本节 5 个 bug 定位
+- ✅ 静态审计完成,5 个 bug 都标了位置、修法方向、严重度
+- ⏸ 不在本轮执行 code change,等用户决策
+
+## 2026-08-09 remote-window dual-stream formal implementation
+
+- Design approved: `RWDS-20260809-A`.
+- Baseline root cause evidence: macOS catalog Swift used `Any.isEmpty`; isolated `swiftc` failed until values were typed as `String`. Formal owner: `src/server/remote-window-scripts.ts`.
+- Formal changes: typed dual-stream switch module with revision/stale rejection; typed focus `accepted/ready` control result; daemon emits `ready` after the first focus frame; overview crop canvas remains visible until matching ready; composite canvas contract fixed at 1920x1080.
+- Local evidence: type-check passed; architecture/registry gates 80 tests passed; remote-window targeted stack 101 tests passed.
+- Runtime evidence: daemon release 0.1.3 prepared, globally installed and service-scoped restarted; 15t-1 installed direct debug APK. Catalog picker returned 19 targets (baseline catalog error gone). Selecting iTerm2 reached real composite start but `ScreenCaptureKit capture process exited`; UI showed explicit `视频流启动失败`, black media, no false success. This is the current unresolved first runtime divergence; do not review/claim completion until composite capture is fixed and 15t-1 observes overview frame -> crop -> focus-ready commit.
+- Build gap: canonical `build:android` stopped in prebuild at pre-existing `session-context-socket-runtime.test.ts` regression (`heartbeat server activity timeout`); direct `vite build` + `cap sync` + Gradle `assembleDebug` succeeded, but canonical OTA bundle was not published because buildNumber was not bumped.
+
+
+# 2026-08-09 16:50 CST closeout — 4 个 fix 落地
+
+## 修复内容(全部已通过红测 + 全量回归)
+
+### Fix #1 — BUG #1 heartbeat close 期间 reset
+- 文件: `android/src/contexts/session-context-socket-runtime.ts:94-100`
+- 改动: `ws.readyState !== OPEN` 时显式 reset `consecutiveMisses = 0` + `lastObservedServerActivityAt = Date.now()`
+- 红测: `long-voice-commit transport resilience (BUG #1 regression)` —— 修复前 fail,修复后 PASS
+- 顺带解决了 `build:android` prebuild 阶段 `session-context-socket-runtime.test.ts` 的 pre-existing heartbeat regression 阻塞
+
+### Fix #2 — BUG #2 可靠输入 retry 指数 backoff
+- 文件: `android/src/contexts/session-context-input-runtime.ts` 新增 `computeReliableInputRetryDelayMs`
+- 改动: attempt=1 → 0ms 立即;attempt≥2 → 500ms → 1000ms → 2000ms (cap)
+- 红测: `long-voice-commit input backpressure resilience (BUG #2/#3 regression)` —— 修复前 vitest 模型下不构成 fail, 修复后行为锁 + 与既有 ack-timeout 测试兼容
+
+### Fix #3 — BUG #3 legacy 路径 flush 期间重读 bufferedAmount
+- 文件: `android/src/contexts/session-context-input-runtime.ts:503-537` (legacy backpressure check)
+- 改动: `for (const chunk of inputChunks)` 循环每次 send 前重读 `ws.bufferedAmount`,超过 128KB 立即 close
+- 红测: `re-checks ws.bufferedAmount after each send within a flush cycle (BUG #3)` —— 修复前 fail,修复后 PASS
+
+### Fix #4 — BUG #4 IME input 长文本 microtask 异步
+- 文件: `android/src/pages/TerminalPage.tsx:2591, 2640-2693`
+- 改动:
+  - `emitToActiveSession` 新增可选 `capture` 参数,允许 microtask 使用入栈时捕获的 sessionId/splitVisible/activePaneId/quickBarEditorFocused
+  - `ImeAnchor.input` listener 内部: 短 input (≤16 chars) 走同步(保留 IME 语义);长 input (>16 chars, voice commit) 走 microtask,捕获 sessionRouting 在入栈时
+- 红测: `deferes IME input listener handler via microtask, not synchronously (BUG #4 regression)` —— 修复前 fail,修复后 PASS
+- 兼容修改: 2 个既有 IME 测试改为 `await waitFor`,因为 ≥16 字符现在走 microtask
+
+### BUG #5 — emitRemoteWindowInputEvents fallback
+- 状态: 当前实现已正确,无 fix 需要
+- 红测: `falls back to terminal input when remote-window overlay is unavailable (BUG #5 regression)` —— 锁死正向行为
+
+## 验证 gate 通过
+
+- `pnpm --dir android exec vitest run src/contexts/ src/pages/TerminalPage.android-ime.test.tsx` —— 92/92 PASS(我修改的 3 个文件)
+- `pnpm --dir android run test:feature-registry` —— 80/80 PASS
+- `pnpm --dir android exec tsc -p tsconfig.json --noEmit` —— 0 个新 TS 错误(我修改的 3 个文件)
+- 既有未修测试: session-context-activity-runtime 的 1 个 fail + TerminalPage.real-quickbar-split 的 3 个 fail + terminal-page-render-keys 的 1 个 fail —— 全部 pre-existing, git stash 验证与我的改动无关
+
+## 下一步
+
+- 重跑 `pnpm --dir android build:android` 验证 prebuild 不再被 heartbeat regression 卡住
+- 如 build 成功,按 AGENTS.md L101-106 发版流程: `patch-apk-version.py` → `prepare-update-bundle.mjs` → `verify-update-bundle.mjs`
+- 15t-1 真机按语音键复现,验证 banner 不再出现
+
+## 2026-08-09 remote-window dual-stream Mac Studio closure
+
+- 2511 真机资源误判已排除：前台曾是 `ai.pocketcode.app`，`com.zterm.android` 2511 实际已安装；切回 zterm 后页面脚本为当前 bundle。
+- 首次在线根因：Mac Studio catalog 给 sibling `app-window:25289:11290` 返回 `windowBounds.x=3108`、`cropRect.x=3137`，focus update 被唯一 capture catalog owner 拒绝为 `crop rectangle is outside its window bounds`。正式 owner 修为 `buildMacosAppWindowTargets` 使用 ScreenCaptureKit window frame；反例测试已补。
+- 第二次在线根因：单窗口 SCScreenshotManager 路径没有登记 `activeStreams`，Swift `update-config` 只检查 `activeStreams`，focus update 返回 `capture stream is not active`。正式 owner 在 `remote-window-scripts.ts` 增加单窗口 mutable capture target，并让 update-config 更新它。
+- 第三次在线根因：daemon 已返回 `focus accepted/ready`，但 client dual state 用 `windowId=11290` 与 wire `targetId=app-window:25289:11290` 比较，ready 被静默视为 stale。正式 owner 改为 pending wire target identity，overview crop 单独保存 window id。
+- 2515 真机证据：Mac Studio `100.66.1.82:3333` + 15t-1 `100.104.163.65:5555`，focus 580x385、overview 1920x1080、readyState=4、两条 track 独立；点击 sibling 后收到 `accepted`、`ready`，最终 DOM `data-dual-stream-phase=focus-committed`，无 error；布局 `secondaryPlacement=before`。
+- 构建：完整 `build:android` 被既有 FileTransferSheet 单测 1 项时序失败拦截；本次类型、Vite、Gradle、OTA verify 均独立通过。2515 已安装 15t-1，daemon 已部署并 service-scoped restart 到 Mac Studio。
+## 2026-08-09 remote-window dual-stream H2/live replay
+
+- H2 根因已确认：`RemoteWindowOverlay.handleSelectTarget` 将原始 catalog target 传给 `startStream`，state reducer 虽生成了 `attachSameAppCompositeWindows` 投影，但没有传到 daemon；因此 overview transceiver 为 0x0。正式修复在唯一 client dual-stream owner 内把 `effectiveTarget` 传入 `startStream`。
+- 本地 targeted tests 97/97、type-check、feature-registry 80/80、diff check 通过；Vite 与 Gradle debug APK 构建通过。
+- 当前 APK 已安装 15t-1；当前 daemon release 已复制到实际 endpoint Macbookair `100.86.84.63:3333` 并通过 launchd service-scoped kickstart 重启，health 显示新进程 ready。
+- 真实 TextEdit 多窗口回放证明 H2 生效：`703:67` 主窗、`703:65`、`703:3899` 两个子窗均出现，缩略图存在；但 overview composite ScreenCaptureKit process 仍在首帧前退出，focus 未提交。
+- 本机 Macstudio Swift probe 和 SSH probe 不能证明远端 daemon native 行为：前者窗口/TCC 不同，后者被 macOS TCC Code=-3801 拒绝。剩余 blocker 的唯一 native owner 尚未确认；下一轮必须在 daemon launchd GUI/TCC 上取得 exit code/signal 或等价正反证据，禁止猜测性修改 capture。
+
+## 2026-08-09 remote-window layout correction
+
+- 用户验收条件明确为固定“一大三小”：三小窗口位于主窗口上方；超过三项时小窗口 rail 横向滚动，不换行；主窗口固定在下方。
+- 根因确认：远程 overlay 复用了通用 `WindowGroupLayout` 的横屏分支，横屏时 secondary rail 被放到主窗口右侧；secondary rail 默认还允许换行。
+- 正式修改：远程 overlay 固定 `landscape=false`、`secondaryPlacement=before`，并启用 `secondaryWrap=nowrap`、`secondaryOverflowX=auto`，子项使用固定/受限宽度；通用预览调用保持原有方向策略。
+- 正向验证：`WindowGroupLayout.test.tsx` 新增 top rail 不换行/可横向滚动测试；定向布局与 composite tests 19/19 PASS；type-check、feature-registry 80/80、完整 `build:android`（prebuild、Vite、Gradle、OTA manifest checks）PASS；新 APK SHA256=`9a60ca51557a3743626cb3b4c30f1ff1141209752aee95578d84043efd5de723`，已安装 15t-1。
+- 反向边界：通用 `WindowGroupLayout` 的 landscape side-rail 测试仍保留并 PASS；当前 15t-1 重启后尚未重新进入远程窗口 overlay，因此真实 DOM 位置尚未取得，不能把“已安装”宣称为在线布局验收完成。
+
+## 2026-08-09 remote-window composite compile/TCC evidence
+
+- 15t-1 在线 DOM 证据：`remote-window-video-window-switcher` 的 `data-window-group-secondary-placement=before`、`data-window-group-primary-axis=column`、rail `flex-flow: row; overflow-x: auto`；rail rect 在主窗口 rect 上方，真实 TextEdit 三窗口均出现（`703:67/65/3899`）。
+- H3-H9 根因链已逐层验证并修复：未使用 Swift 绑定、可变 `allWindows` 并发捕获、`compositeFrameLoop`/`startCompositeCapture`/`findScWindow` 的 Sendable 声明、ScreenCaptureKit `@preconcurrency` import、未消费 `NSApplication.shared`。当前完整 script 在实际 Macbookair 执行 `swiftc -swift-version 5 -warnings-as-errors` exit 0。
+- 正式 daemon archive 已通过 SSH stdin 传输并 hash 对齐，launchd service-scoped restart 后 health 新 PID ready；未使用 broad kill。
+- H10 真机回放：正式 daemon + 15t-1 TextEdit 三窗口选择进入 ScreenCaptureKit，但返回 `code=4` 且错误链明确 `SCStreamErrorDomain Code=-3801`（macOS TCC 拒绝应用程序/窗口/显示器捕捉）；video elements=0，无 overview/focus 首帧。关闭 overlay 后 cleanup 完成。
+- 当前唯一 blocker 已从编译收敛为 Macbookair launchd daemon/capture child 的 Screen Recording/TCC 授权；必须在该主机授权改变后才能继续证明真实 overview frame -> crop -> focus accepted/ready/commit。禁止以 SSH probe、截图、空画面或旧 focus 流替代。
+- iTerm2 反向验证：15t-1 展开真实 3-pane group 并选择 pane `pty-85D944B1-68E1-45DA-A3DA-FD8E833D8797:1:4A62151F-80EA-4520-8016-88869DA02E88`，同样在首帧前返回 `SCStreamErrorDomain Code=-3801`；说明 blocker 跨 app-window 与 iTerm2/multi-window 一致，非业务 route 分支。
+
+## 2026-08-09 Mac Studio correction / authoritative replay
+
+- 用户已切换到 Mac Studio；本轮唯一真实 daemon endpoint 为 `100.66.1.82:3333`，launchd 当前 PID `51218`，release archive hash `8633cca349eaed3aac145fcbe6cc2e679521d1bff506b81d5cb52612b350882d`，health 显示 `sessions=2/ready=2`。
+- 前一轮用 Macbookair 的 TCC 结论不适用于当前目标；本轮已改为直接连接 Mac Studio，并重新在 15t-1 的真实 `com.zterm.android` 前台应用取证。
+- 真实 catalog 仍返回 6 个独立 `APP WINDOW` 条目，当前 ChatGPT 只有 1 个窗口；picker 的 app group 只有在同一 bundle 出现多个窗口时才出现。因此现场尚未具备“三小”数量，但“按 app 选择后再组窗”的产品语义与当前 catalog 展示仍不一致，需继续审计唯一 catalog/group owner。
+- ZTerm 真机选择 ChatGPT 后，20 秒后状态为 `targetLocked / error`，错误为 `ScreenCaptureKit capture did not produce a frame before timeout after 20000ms`；`receiver=missing`、`video=-`、`videos=[]`，双流未进入 accepted/ready/commit。
+- 同一现场 DOM 记录：`remote-window-composite-thumb-12995` 出现两个重复节点，主 surface 与 top rail 几何为 `surface=79,333 255x265`、`overlay=78,48 257x551`；当前状态不是可交付的“一大三小”。
+- 结论：Mac Studio 已完成正确接入，但串流仍在 native capture 首帧前超时；布局的 rail 方向修复尚未等价于 app-level 三小布局。下一轮必须分别证明 capture 首帧根因和 app-group -> composite layout 的唯一 owner，不能把旧 Macbookair 证据或 Freehand 容器证据混用。
+
+## 2026-08-09 Mac Studio dual-stream/layout follow-up
+
+- Mac Studio native H11 direct probes for both focus-only and composite overview returned `SCStreamErrorDomain Code=-3801` before the first frame, `frameBytes=0`; this remains an external Screen Recording/TCC prerequisite and is not bypassed in code.
+- Formal receiver root cause: `attachTrack` consumed the shared required-track resolver when focus arrived before overview, leaving `receiver=missing/starting` forever. The resolver now remains until `waitForRequiredTracks` sees every required track; positive focus-first ordering test passes.
+- Formal layout root cause: singleton app targets previously synthesized their own primary window as a composite child, producing duplicate thumbnails. The app-window type now enables the independent overview track without synthetic children; composite layout dedupes by window id and fits source crops into fixed 1920x1080 output dimensions.
+- Mac Studio live 15t-1 replay after APK `0.1.3.2502` and daemon runtime hash `5f5a95c7ab1e8d101eb514d1a20cf77072df7f2453845f9c0996b0a27370b13f`: ChatGPT focus video received `1315x1468`, `frames=165+`; overview video also had a separate live track. After opening a second Terminal window, catalog showed `2 个窗口`; the installed pre-fix APK rendered the top rail but its child press had no dual-switch owner.
+- Formal UI root cause then fixed: `WindowGroupLayout` secondary items lacked `onPrimaryItemChange`; remote overlay now routes a real `updateFocus` press through overview-crop state and focus revision, while test-only fixtures without `updateFocus` preserve the old handoff path. Latest source still needs a fresh build/install/live replay after this last patch.
+- Verification: current focused runtime/UI tests were type-safe; overlay suite is 75 tests with 2 stale single-stream handoff count failures (the current production entry starts independent overview+focus tracks). Daemon suite executes 59/59 tests but Vitest exits SIGSEGV during native teardown; retain as an unresolved gate, not green evidence.
+
+## 2026-08-09 无串流时也卡的性能审计(静态 + 真机取证)
+
+### 真机证据(gfxinfo,15t-1,前台 com.zterm.android)
+
+- 长窗口:1313 帧 / janky 9.90%(legacy 9.22%)/ 50th 11ms / 90th 16ms / 95th 23ms / 99th 29ms
+- **High input latency: 36 次**(输入高延迟是"卡"的直接体感来源)
+- 短窗口曾见 janky 60.87%(当时统计窗口只有 23 帧,偏低置信)
+- 设备内存压力:free 646M / swap 7.2G 已用 —— WebView GC 抖动会放大 JS 热点
+- buffer 实际规模:cols=99, rows=55, daemon bufferedLines=2786
+
+### 静态热点(每次 wire buffer-sync frame 触发一次,按严重度排序)
+
+1. **P0 `android/src/lib/session-buffer-store.ts` `cloneSessionBuffer` 全量深拷贝**
+   - `commitBuffer`/`setBuffer` 每次对全部行做 `row.map(cell => ({...cell}))`
+   - 规模:2786 行 × 99 cols ≈ **27.6 万 cell 对象展开/帧**
+   - 但 `applyBufferSyncToSessionBuffer` → `buildPatchedWindowFromCurrent` 已 immutable + 行级引用复用(`nextRows[nextOffset] = current.lines[currentOffset]`,terminal-buffer.ts L539)
+   - **深拷贝纯冗余**,还打碎了行引用,连累 render-gate 的行级复用
+   - 修法方向:改为行级复用 clone(同 render-store `cloneRenderBuffer`),或调用方保证不修改后直接去掉
+
+2. **P1 双重全量 `sessionBuffersEqual`(O(rows×cols))**
+   - `session-context-buffer-runtime.ts` L1609 一次 + store `commitBuffer` 内 L94 再一次
+   - 修法方向:`commitBuffer` 增加 `skipEqualCheck` 选项或去掉 store 内比较(调用方已比较过)
+
+3. **P1 `terminalRowRenderSignature` 每帧全量重算**
+   - `TerminalView.tsx` L523-528:`renderRowsWithSignatures` useMemo 只依赖 `[renderRows]`
+   - `renderRows`(L505-522)依赖 `[bufferLines]` —— 每次 flush `projectRenderBuffer` 产生新数组引用(即使行引用复用)
+   - 每次 flush → 所有可见行(55×99≈5500 次)模板字符串拼接 + join 全量重算
+   - 修法方向:WeakMap<row引用, signature> 缓存,行引用未变不重算
+
+4. **P2 `renderRows` 依赖 `bufferLines` 数组引用**
+   - 即使所有行引用未变,数组新引用也触发重算 + 下游全量签名
+   - 修法方向:依赖改为 `[bufferLines.length, renderBuffer.revision, startIndex, endOffset...]`
+
+### 验证过不是问题的
+
+- runtimeDebug:默认 localStorage gate 关闭,成本可忽略
+- VisibleRow 已 `memo` + renderSignature 保护
+- render-gate `projectRenderBuffer` 行级 diff(reusedRowMask)已做
+
+### 结论
+
+"无串流也卡"根因 = 每次 daemon push 帧,client 端做**冗余全量深拷贝 + 双重全量比较 + 全量签名重算**,三者叠加在内存压力大的设备上放大为 UI 线程 jank 和 input latency。修复方向都在 `session-context-buffer-runtime` / `session-buffer-store` / `TerminalView` 三个 owner 内,不越界。未改代码,等用户确认优化清单。
+
+## 2026-08-09 copy 长按选择取消修复 + 签名缓存回滚
+- 用户报:左侧长按选择中间/上面/下面后无法取消。根因:拖选完成后(start/end 已设、menu 已关)没有任何取消入口;菜单也不支持点外部关闭。
+- 修复:①TerminalView 短按(未达 420ms)在已有选择/菜单时调 onCopySelectionDismiss → handleCloseCopyMenu(EMPTY);②TerminalPageCopyMenu 加全屏 backdrop(zIndex 29)点击关闭;③StageShell/TerminalPage 透传回调。
+- **重要发现(性能专项后遗症)**:上一轮 P1b「terminalRowRenderSignature 按行引用 WeakMap 缓存」被全量测试暴露违反 bottom-stale 回归契约(行引用不变+cell 内容原地 mutate 必须重绘)。已回滚缓存,签名每帧从真实内容重算;signature 测试改为「内容敏感」正向锁。docs 5.10 已修正。
+- 全量(排除 src/server)2192 passed;剩余 7 个失败全部 git stash 验证为 pre-existing:activity-runtime、real-quickbar-split×3、render-keys、app-update-runtime、runtime-debug-sequence。
+
+## 2026-08-09 remote-window continuation
+
+- Live Mac Studio/15t-1 evidence: after a clean Terminal-group start, overview `1920x1080` and focus `580x385` both become `live`; selecting another app-window card still ends both tracks within about 1s.
+- Confirmed daemon overview catalog polling previously overwrote focus `activeEntry.target`/`targetId`; formal fix adds independent `overviewTarget` and keeps polling off focus truth. Rebuilt/deployed release `0.1.3` contains the fix.
+- Confirmed capture update command now carries `windowId`, and single screenshot loop is serial. These fixes alone did not yet produce a valid accepted/ready/commit live switch; capture-update blocker remains open.
+- Current evidence is insufficient for completion: no final live sequence, no APK rebuild/install after the latest daemon change, no codex-review PASS.
+- H14 continuation: `computer-use` and SSH endpoint `100.66.1.82` resolve to the same `Macstudio.local`. Adding the signed `ZTerm Remote Capture` bundle to the same Mac Studio Screen & System Audio Recording list with toggle `on` did not remove daemon or direct `SCStreamErrorDomain Code=-3801`. A temporary `/Applications` execution-path intervention was tested and reversed. Helper-only TCC identity is not the confirmed owner; launchd/Node responsible-process identity remains the next single hypothesis.
+
+## 2026-08-09 缩小后滚动黑屏(remote-window 双流切流卡死)修复
+- 根因:双流点缩略图/窗口 tile 切 focus 进 overview-crop-visible 后 video opacity 置 0、画面交给 crop canvas;
+  focus-result(accepted/ready)消息被吞(streamId/targetId/revision 不匹配,见 MEMORY 已知坑)即永久卡死;
+  canvas 又依赖 video.readyState>=2 才绘制 → 黑屏;handleShrink 缩回浮窗也不重置切流状态。
+- 修复(3 项,全部测试锁定):
+  1. video opacity 不再因 overviewCropVisible 置 0(canvas 是绝对定位透明层,未绘制透出 video,已绘制覆盖放大图)
+  2. overview-crop-visible 3s 超时无消息自动 reset 回 focus-committed(新增 resetRemoteWindowDualStreamSwitch)
+  3. handleShrink 强制退出切流中状态
+- 验证:RemoteWindowOverlay 71 + dual-stream-runtime 4 = 75 passed;tsc 0 错误;
+  全量 2192 passed,5 failed 经 stash 铁证 pre-existing(real-quickbar-split×3 等遗留改动导致)。
+- 真机未验证:Macbookair daemon capture 被 TCC 拒绝无帧(外部授权边界),需用户在真机复测。
+- 2026-08-09 remote-window dual-stream H11: confirmed first runtime divergence was Node `onStdout` rejecting `ScreenCaptureKit frame stream header mismatch` after focus switch; unique Swift `writeFrame` owner previously wrote header and RGBA in separate writes. Formal fix now builds one `ZRW1` packet and serializes writes with `NSLock`; daemon release was deployed/restarted on Mac Studio `100.66.1.82`, and the old log stopped at 21:16:36 with no new mismatch during the subsequent real-device replay. APK `0.1.3.2518` / versionCode `1100025180` built, OTA manifest/hash gate passed, and installed on `100.104.163.65:5555`. Remote overlay/window layout focused tests pass (`WindowGroupLayout` 4, `RemoteWindowOverlay` 74 with 4 skipped). The standalone `remote-window-stream-daemon.test.ts` reaches 60 tests but Vitest exits SIGSEGV after printing lifecycle cases; do not call full daemon gate green. Live accepted -> ready -> committed timing and app-window/iTerm2 reverse matrix remain open.
+- 2026-08-09 remote-window dual-stream H13: the fixed ScreenCaptureKit native binary is compiled from the canonical Swift source and injected through `ZTERM_DAEMON_CAPTURE_NATIVE`; Mac Studio launchd environment confirmed the path is active after scoped daemon restart. Direct execution still returns `SCStreamErrorDomain Code=-3801` before a frame. The local System Settings “录屏与系统录音” panel shows a `ZTerm` entry with its toggle off. This is the current external permission blocker, not evidence to add a fallback. Evidence: `playground/remote-window-dual-stream-20260809/H13-fixed-capture-identity.md`.
+
+## 2026-08-09 连接链路 review 修复（P0+P1+P2 全部落地，自动测试全绿）
+- 触发:连接链路 review 产出 5 类问题,用户选"全部含 P2 + 自动测试全绿并提交"。
+- 修复项(全部先红测后实现,冻结文档:decisions/2026-04-28-...-lifecycle-truth.md §8):
+  - P0-A 超时拆段:4s handshake 超时从 intent 入队移到 socket onopen(发 mux-hello 后)与
+    already-open 分支;socket 建连段由 TraversalSocket 全候选失败驱动(不再被 4s 砍断慢候选)。
+  - P0-B probe 双连消除:probeHostReachable 默认协议 ws→http(daemon `/health`,非 `/healthz`);
+    两个调用方显式 http;probe 失败 host 本轮跳过+下轮廉价重探。
+  - P1-C 候选并行:connectNext 重构为并行批次——selectable ws 全并行 + rtc 队列串行
+    (direct→relay 顺序依赖保留);首个 onopen 胜出、其余 close(只标记 advanced 不 settled,
+    避免 superseded close 误报物理断线/误记失败);失败候选保留真实 'closed'/'error' 记录。
+  - P1-D host probe 并行:runReconnectHostProbeAndFallback 导出并重构——attempt 0 直连当前 host;
+    attempt≥1 并行 probe 全部候选(Promise.all 保持顺序取首个可达);全不可达保底 queue 当前 host
+    (显式 reconnect 永不静默丢弃,原 index-0-无条件-queue 契约保留)。
+  - P1-E rtc-direct 动态超时:失败隔离期内 6s→3s(全候选兜底场景生效),成功 TTL 内保持 6s。
+  - P2:head 提前(mux 路径 channel-opened 即发,已满足无需改码)+ buildTraversalPlanCached
+    (5s TTL/32 entries,route-health 不入 plan 不 stale)+ head 先于 schedule-list 发送。
+- 验证:type-check 0 错误;feature-registry 80 + transport 56 + redline 96 + terminal regression
+  core 807+88 + 相关测试 161 + contexts/App 561 passed;唯一失败
+  (session-context-activity-runtime keepalive grace)stash 铁证 pre-existing。
+- 坑:①ESM 内部函数不走 exports,vi.spyOn 拦不到——改引用相等断言;
+  ②computeTraversalReconnectDelay 无 jitter、onopen 重置 attempt——backoff 非翻倍;
+  ③ws-refresh 测试 helper 对已关闭旧 ws triggerOpen 会"复活"transport→probe 异步延迟下
+    channel-reuse 误判——helper 只 open CONNECTING 的物理 ws;
+  ④全量 vitest run 在 rtc-bridge/remote-window-stream-daemon 原生崩溃(wRTC/canvas),须分组跑。
+- 未做:P1-E 在"失败隔离期内 direct 被 selectable 跳过"主路径不生效(兜底才用),价值低于预期;
+  P2 head 提前在 mux 路径本已满足。真机/OTA 未做(交付标准=自动测试全绿+提交)。
