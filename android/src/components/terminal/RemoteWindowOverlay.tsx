@@ -51,14 +51,12 @@ import {
   type RemoteWindowOverlayState,
 } from '../../lib/remote-window-overlay-runtime';
 import {
-  REMOTE_WINDOW_VIDEO_BITRATE_PRESETS,
   buildRemoteWindowVideoBitrateConfig,
   getRemoteWindowSourceRect,
   readRemoteWindowVideoBitratePreset,
   resolveAdaptiveRemoteWindowVideoBitratePreset,
   resolveEffectiveRemoteWindowVideoBitratePreset,
   resolveRemoteWindowVideoAdaptiveDecision,
-  writeRemoteWindowVideoBitratePreset,
   type RemoteWindowVideoAdaptiveState,
   type RemoteWindowVideoStatsSample,
   type RemoteWindowNetworkQualityInput,
@@ -738,26 +736,6 @@ function getRemoteWindowNetworkConnection(): NavigatorConnectionLike | null {
     || null);
 }
 
-function formatBitrateOption(preset: RemoteWindowVideoBitratePreset) {
-  if (preset === 'fullscreen') {
-    return '全屏 20 Mbps';
-  }
-  return `${buildRemoteWindowVideoBitrateConfig(preset).bitrateMbps} Mbps`;
-}
-
-function formatTouchScrollFractionOption(fraction: RemoteWindowTouchScrollFraction) {
-  if (fraction === 1) {
-    return '滚动 1 屏';
-  }
-  if (fraction === 0.5) {
-    return '滚动 1/2 屏';
-  }
-  if (fraction === 0.25) {
-    return '滚动 1/4 屏';
-  }
-  return '滚动 1/8 屏';
-}
-
 function readRemoteWindowTouchScrollFraction(): RemoteWindowTouchScrollFraction {
   if (typeof window === 'undefined') {
     return REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION;
@@ -767,26 +745,12 @@ function readRemoteWindowTouchScrollFraction(): RemoteWindowTouchScrollFraction 
   );
 }
 
-function writeRemoteWindowTouchScrollFraction(fraction: RemoteWindowTouchScrollFraction) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  window.localStorage.setItem(REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_STORAGE_KEY, String(fraction));
-}
-
 function readRemoteWindowTouchScrollInverted() {
   if (typeof window === 'undefined') {
     return true;
   }
   const raw = window.localStorage.getItem(REMOTE_WINDOW_TOUCH_SCROLL_INVERTED_STORAGE_KEY);
   return raw === null ? true : raw === 'true';
-}
-
-function writeRemoteWindowTouchScrollInverted(inverted: boolean) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  window.localStorage.setItem(REMOTE_WINDOW_TOUCH_SCROLL_INVERTED_STORAGE_KEY, inverted ? 'true' : 'false');
 }
 
 function readRemoteWindowInputMode(): RemoteWindowInputMode {
@@ -913,8 +877,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const [fullscreenViewport, setFullscreenViewportState] = useState<FullscreenViewportState>(initialFullscreenViewport);
   const [fullscreenDisplayMode, setFullscreenDisplayModeState] = useState<FullscreenDisplayMode>(initialFullscreenDisplayMode);
   const [bitratePreset, setBitratePreset] = useState<RemoteWindowVideoBitratePreset>('5mbps');
-  const [touchScrollFraction, setTouchScrollFractionState] = useState<RemoteWindowTouchScrollFraction>(() => readRemoteWindowTouchScrollFraction());
-  const [touchScrollInverted, setTouchScrollInvertedState] = useState(() => readRemoteWindowTouchScrollInverted());
+  const [touchScrollFraction] = useState<RemoteWindowTouchScrollFraction>(() => readRemoteWindowTouchScrollFraction());
+  const [touchScrollInverted] = useState(() => readRemoteWindowTouchScrollInverted());
   const [inputMode, setInputMode] = useState<RemoteWindowInputMode>(() => readRemoteWindowInputMode());
   const inputModeRef = useRef(inputMode);
   const [focusedWindowId, setFocusedWindowId] = useState<string | null>(null);
@@ -1429,21 +1393,6 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const setFullscreenDisplayMode = useCallback((next: FullscreenDisplayMode) => {
     fullscreenDisplayModeRef.current = next;
     setFullscreenDisplayModeState(next);
-  }, []);
-
-  const setTouchScrollFraction = useCallback((next: RemoteWindowTouchScrollFraction) => {
-    touchScrollFractionRef.current = next;
-    setTouchScrollFractionState(next);
-    writeRemoteWindowTouchScrollFraction(next);
-  }, []);
-
-  const setTouchScrollInverted = useCallback((next: boolean | ((current: boolean) => boolean)) => {
-    setTouchScrollInvertedState((current) => {
-      const resolved = typeof next === 'function' ? next(current) : next;
-      touchScrollInvertedRef.current = resolved;
-      writeRemoteWindowTouchScrollInverted(resolved);
-      return resolved;
-    });
   }, []);
 
   const setWindowThumbnails = useCallback((
@@ -1977,26 +1926,6 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     state,
     surfaceSize,
   ]);
-
-  const handleBitratePresetChange = useCallback((nextPreset: RemoteWindowVideoBitratePreset) => {
-    if (!REMOTE_WINDOW_VIDEO_BITRATE_PRESETS.includes(nextPreset)) {
-      return;
-    }
-    bitratePresetTouchedRef.current = true;
-    setBitratePreset(nextPreset);
-    if (state.phase !== 'targetLocked') {
-      return;
-    }
-    writeRemoteWindowVideoBitratePreset(state.target, nextPreset);
-  }, [state]);
-
-  const handleTouchScrollFractionChange = useCallback((value: string) => {
-    setTouchScrollFraction(resolveTouchScrollFractionPreset(value));
-  }, [setTouchScrollFraction]);
-
-  const handleToggleTouchScrollDirection = useCallback(() => {
-    setTouchScrollInverted((current) => !current);
-  }, [setTouchScrollInverted]);
 
   const handleToggleInputMode = useCallback(() => {
     setInputMode((current) => {
@@ -2539,16 +2468,24 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         if (thumb && thumb.width > 0 && thumb.height > 0) {
           const ctx = thumb.getContext('2d');
           if (ctx) {
+            ctx.clearRect(0, 0, thumb.width, thumb.height);
+            // contain：保持窗口比例完整显示（居中，多余空间留黑边），避免拉伸变形/显示不全
+            const scale = Math.min(
+              thumb.width / Math.max(1, slot.width),
+              thumb.height / Math.max(1, slot.height),
+            );
+            const drawW = slot.width * scale;
+            const drawH = slot.height * scale;
             ctx.drawImage(
               video,
               slot.offsetX,
               slot.offsetY,
               slot.width,
               slot.height,
-              0,
-              0,
-              thumb.width,
-              thumb.height,
+              (thumb.width - drawW) / 2,
+              (thumb.height - drawH) / 2,
+              drawW,
+              drawH,
             );
           }
         }
@@ -3334,6 +3271,8 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         if (currentGesture && currentGesture.mode === 'localPan') {
           const first = surfacePointersRef.current.get(currentGesture.pointerId);
           if (first) {
+            console.log('[rw-gesture] second-finger upgrade: pendingDelta='
+              + pendingDelta.toFixed(1), 'zoomScale=', fullscreenViewportRef.current.scale.toFixed(2));
             const pairResult = resolveRemoteWindowTouchPairPointerDownRuntime({
               firstPointer: {
                 pointerId: currentGesture.pointerId,
@@ -3407,6 +3346,10 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         pinchEnabled: state.mode === 'fullscreen',
         scrollEnabled: true,
       });
+      if (pairResult.nextState.mode !== runtimeGesture.mode) {
+        console.log('[rw-gesture] pair move transition:', runtimeGesture.mode, '->', pairResult.nextState.mode,
+          'remoteEvents=', pairResult.remoteEvents.map((e) => e.kind).join(','));
+      }
       surfaceGestureRef.current = pairResult.nextState;
       if (pairResult.remoteEvents.length > 0) {
         dispatchRemoteWindowInputEvents(pairResult.remoteEvents);
@@ -3899,11 +3842,16 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           Math.max(1, lockedSurfaceLayout.content.width) / Math.max(1, focusedWindowSlot.width),
           Math.max(1, lockedSurfaceLayout.content.height) / Math.max(1, focusedWindowSlot.height),
         );
+        // 绝对定位：video 元素（画布×scale）相对 content 容器偏移，让焦点窗口区域
+        // 精确对齐容器左/上边缘（grid 居中 + margin 会导致焦点窗口区域偏移造成留白）
         return {
+          position: 'absolute' as const,
+          left: -focusedWindowSlot.offsetX * scale,
+          top: -focusedWindowSlot.offsetY * scale,
           width: compositeLayout.canvasWidth * scale,
           height: compositeLayout.canvasHeight * scale,
-          marginLeft: -focusedWindowSlot.offsetX * scale,
-          marginTop: -focusedWindowSlot.offsetY * scale,
+          maxWidth: 'none',
+          maxHeight: 'none',
         };
       })()
     : null;
@@ -4623,40 +4571,6 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           </div>
         </div>
         <div data-testid="remote-window-control-strip" data-no-drag="true" style={styles.lockedControlStrip}>
-          <select
-            data-testid="remote-window-bitrate-select"
-            data-no-drag="true"
-            aria-label="远程窗口码率"
-            value={bitratePreset}
-            onChange={(event) => handleBitratePresetChange(event.currentTarget.value as RemoteWindowVideoBitratePreset)}
-            style={styles.bitrateSelect}
-          >
-            {REMOTE_WINDOW_VIDEO_BITRATE_PRESETS.map((preset) => (
-              <option key={preset} value={preset}>{formatBitrateOption(preset)}</option>
-            ))}
-          </select>
-          <select
-            data-testid="remote-window-touch-scroll-fraction-select"
-            data-no-drag="true"
-            aria-label="远程窗口滚动幅度"
-            value={String(touchScrollFraction)}
-            onChange={(event) => handleTouchScrollFractionChange(event.currentTarget.value)}
-            style={styles.touchScrollFractionSelect}
-          >
-            {REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_OPTIONS.map((fraction) => (
-              <option key={fraction} value={fraction}>{formatTouchScrollFractionOption(fraction)}</option>
-            ))}
-          </select>
-          <button
-            type="button"
-            data-testid="remote-window-touch-scroll-direction-toggle"
-            data-no-drag="true"
-            aria-label={touchScrollInverted ? '恢复远程窗口滚动方向' : '反向远程窗口滚动方向'}
-            onClick={handleToggleTouchScrollDirection}
-            style={touchScrollInverted ? styles.headerModeButtonActive : styles.headerModeButton}
-          >
-            {touchScrollInverted ? '反向' : '正向'}
-          </button>
           <button
             type="button"
             data-testid="remote-window-input-mode-toggle"

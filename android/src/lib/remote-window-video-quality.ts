@@ -5,6 +5,7 @@ import type {
 } from './types';
 
 export const REMOTE_WINDOW_VIDEO_BITRATE_STORAGE_KEY = 'zterm:remote-window-video-bitrate';
+export const REMOTE_WINDOW_VIDEO_BITRATE_GLOBAL_STORAGE_KEY = 'zterm:remote-window-video-bitrate-global';
 
 export const REMOTE_WINDOW_VIDEO_BITRATE_PRESETS: RemoteWindowVideoBitratePreset[] = [
   '2mbps',
@@ -376,7 +377,36 @@ export function readRemoteWindowVideoBitratePreset(
   const resolutionKey = resolveRemoteWindowVideoResolutionKey(target);
   return snapshot.byTarget[targetKey]
     || snapshot.byResolution[resolutionKey]
+    || readRemoteWindowVideoBitrateGlobalDefault(storage)
     || resolveDefaultRemoteWindowVideoBitratePreset(target);
+}
+
+export function readRemoteWindowVideoBitrateGlobalDefault(
+  storage: BrowserStorageLike | null | undefined = typeof window === 'undefined' ? null : window.localStorage,
+): RemoteWindowVideoBitratePreset | null {
+  if (!storage) {
+    return null;
+  }
+  try {
+    const raw = storage.getItem(REMOTE_WINDOW_VIDEO_BITRATE_GLOBAL_STORAGE_KEY);
+    return isRemoteWindowVideoBitratePreset(raw) ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeRemoteWindowVideoBitrateGlobalDefault(
+  preset: RemoteWindowVideoBitratePreset,
+  storage: BrowserStorageLike | null | undefined = typeof window === 'undefined' ? null : window.localStorage,
+) {
+  if (!isRemoteWindowVideoBitratePreset(preset)) {
+    return false;
+  }
+  if (!storage) {
+    return false;
+  }
+  storage.setItem(REMOTE_WINDOW_VIDEO_BITRATE_GLOBAL_STORAGE_KEY, preset);
+  return true;
 }
 
 export function writeRemoteWindowVideoBitratePreset(

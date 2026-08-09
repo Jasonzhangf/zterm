@@ -23,6 +23,13 @@ import { RememberedServersSection } from '../components/settings/RememberedServe
 import { RelayAccountSettingsSection } from '../components/settings/RelayAccountSettingsSection';
 import { SettingsSectionTitle, settingsInputStyle, settingsSectionStyle } from '../components/settings/SettingsSection';
 import { TerminalThemeSection } from '../components/settings/TerminalThemeSection';
+import {
+  REMOTE_WINDOW_VIDEO_BITRATE_PRESETS,
+  readRemoteWindowVideoBitrateGlobalDefault,
+  writeRemoteWindowVideoBitrateGlobalDefault,
+  buildRemoteWindowVideoBitrateConfig,
+} from '../lib/remote-window-video-quality';
+import type { RemoteWindowVideoBitratePreset } from '../lib/types';
 import { deriveRelayUpdateManifestUrl } from '../lib/app-update-relay-manifest';
 
 interface SettingsPageProps {
@@ -171,6 +178,17 @@ export function SettingsPage({
   const [draft, setDraft] = useState({ ...settings, servers: sortBridgeServers(settings.servers) });
   const [updateDraft, setUpdateDraft] = useState(updatePreferences);
   const [runtimeDebugEnabled, setRuntimeDebugEnabledState] = useState(() => isRuntimeDebugEnabled());
+  const [remoteWindowBitrate, setRemoteWindowBitrate] = useState<RemoteWindowVideoBitratePreset>(() => (
+    readRemoteWindowVideoBitrateGlobalDefault() || '5mbps'
+  ));
+  const [remoteScrollFraction, setRemoteScrollFraction] = useState<number>(() => {
+    const raw = typeof window === 'undefined' ? null : window.localStorage.getItem('zterm:remote-window:touch-scroll-fraction-v1');
+    const parsed = raw === null ? NaN : Number(raw);
+    return [0.125, 0.25, 0.5, 1].includes(parsed) ? parsed : 0.25;
+  });
+  const [remoteScrollInverted, setRemoteScrollInverted] = useState<boolean>(() => (
+    typeof window !== 'undefined' && window.localStorage.getItem('zterm:remote-window:touch-scroll-inverted-v1') === 'true'
+  ));
   const livePreviewPatchRef = useRef<Partial<Pick<BridgeSettings, 'terminalThemeId' | 'terminalShellSkin'>> | null>(null);
   const defaultServer = useMemo(() => getDefaultBridgeServer(draft), [draft]);
   const manifestCandidates = useMemo(() => buildAppUpdateManifestCandidates(draft), [draft]);
@@ -457,6 +475,71 @@ export function SettingsPage({
           >
             <span style={{ fontSize: '18px' }}>{draft.shortcutSmartSort ? '✓' : '○'}</span>
             智能排序 {draft.shortcutSmartSort ? '已开启' : '已关闭'}
+          </button>
+        </div>
+
+        <div style={settingsSectionStyle()}>
+          <SettingsSectionTitle>远程窗口</SettingsSectionTitle>
+          <div style={{ fontSize: '13px', lineHeight: 1.6, color: mobileTheme.colors.lightMuted }}>
+            串流画质与触控滚动偏好，作用于后续远程窗口会话。
+          </div>
+          <div style={{ marginTop: '12px', marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>默认码率</div>
+          <select
+            value={remoteWindowBitrate}
+            onChange={(event) => {
+              const next = event.currentTarget.value as RemoteWindowVideoBitratePreset;
+              setRemoteWindowBitrate(next);
+              writeRemoteWindowVideoBitrateGlobalDefault(next);
+            }}
+            style={settingsInputStyle()}
+          >
+            {REMOTE_WINDOW_VIDEO_BITRATE_PRESETS.map((preset) => (
+              <option key={preset} value={preset}>
+                {buildRemoteWindowVideoBitrateConfig(preset).bitrateMbps} Mbps
+              </option>
+            ))}
+          </select>
+          <div style={{ marginTop: '12px', marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>滚动幅度</div>
+          <select
+            value={String(remoteScrollFraction)}
+            onChange={(event) => {
+              const next = Number(event.currentTarget.value);
+              setRemoteScrollFraction(next);
+              if (typeof window !== 'undefined') {
+                window.localStorage.setItem('zterm:remote-window:touch-scroll-fraction-v1', String(next));
+              }
+            }}
+            style={settingsInputStyle()}
+          >
+            {[0.125, 0.25, 0.5, 1].map((fraction) => (
+              <option key={fraction} value={fraction}>
+                {fraction === 1 ? '整屏' : `${Math.round(fraction * 100)}%`}
+              </option>
+            ))}
+          </select>
+          <div style={{ marginTop: '12px', marginBottom: '8px', fontSize: '14px', fontWeight: 700 }}>滚动方向</div>
+          <button
+            type="button"
+            onClick={() => {
+              const next = !remoteScrollInverted;
+              setRemoteScrollInverted(next);
+              if (typeof window !== 'undefined') {
+                window.localStorage.setItem('zterm:remote-window:touch-scroll-inverted-v1', String(next));
+              }
+            }}
+            style={{
+              minHeight: '48px',
+              width: '100%',
+              borderRadius: '16px',
+              border: 'none',
+              backgroundColor: remoteScrollInverted ? mobileTheme.colors.shell : '#eef3f8',
+              color: remoteScrollInverted ? '#ffffff' : mobileTheme.colors.lightText,
+              fontWeight: 800,
+              fontSize: '16px',
+              cursor: 'pointer',
+            }}
+          >
+            {remoteScrollInverted ? '反向滚动（已开启）' : '正向滚动'}
           </button>
         </div>
 
