@@ -80,6 +80,8 @@ describe('SettingsPage terminal theme selection', () => {
       />,
     );
 
+    // 主题收拢为入口：先点击展开主题卡目录
+    fireEvent.click(screen.getByText(/展开 ▾/));
     expect(screen.getByText('Dracula')).toBeTruthy();
     expect(screen.getByText('ENCOM')).toBeTruthy();
     expect(screen.getByText('Homebrew')).toBeTruthy();
@@ -128,6 +130,7 @@ describe('SettingsPage terminal theme selection', () => {
       />,
     );
 
+    fireEvent.click(screen.getByText(/展开 ▾/));
     fireEvent.click(screen.getByText('Cobalt2'));
     expect(onTerminalThemeChange).toHaveBeenCalledWith('tabby-cobalt2');
   });
