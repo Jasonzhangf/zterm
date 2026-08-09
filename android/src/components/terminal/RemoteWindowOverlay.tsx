@@ -1081,6 +1081,19 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     ) {
       return false;
     }
+    const scrollCount = events.filter((e) => e.kind === 'scroll').length;
+    if (scrollCount > 0) {
+      // eslint-disable-next-line no-console
+      const video = videoElementRef.current;
+      console.log(`[remote-window-scroll] sent=${scrollCount} ` +
+        `viewport=${JSON.stringify(fullscreenViewportRef.current)} ` +
+        `receiverStream=${receiverMediaStream ? 'ok' : 'NULL'} ` +
+        `overviewStream=${overviewMediaStream ? 'ok' : 'NULL'} ` +
+        `videoHasPlayed=${videoHasPlayedRef.current} ` +
+        `videoReady=${video?.readyState ?? 'NULL'} ` +
+        `currentTime=${video?.currentTime?.toFixed(2) ?? 'NULL'} ` +
+        `surfaceRect=${videoSurfaceRef.current ? JSON.stringify(videoSurfaceRef.current.getBoundingClientRect()) : 'NULL'}`);
+    }
     return sendRemoteWindowInputEventsForTarget({
       sessionId: activeSessionId,
       streamId: currentLockedStreamId,
@@ -3128,7 +3141,11 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       // eslint-disable-next-line no-console
       console.log(`[remote-window-pinch] commit=${effect.commit} ratio=${effect.scaleRatio.toFixed(3)} ` +
         `start=${start.startScale.toFixed(2)} -> ${nextScale.toFixed(2)} ` +
-        `receiverStream=${receiverMediaStream ? 'ok' : 'NULL'}`);
+        `receiverStream=${receiverMediaStream ? 'ok' : 'NULL'} ` +
+        `overviewStream=${overviewMediaStream ? 'ok' : 'NULL'} ` +
+        `videoHasPlayed=${videoHasPlayedRef.current} ` +
+        `videoReady=${videoElementRef.current?.readyState ?? 'NULL'} ` +
+        `currentTime=${videoElementRef.current?.currentTime?.toFixed(2) ?? 'NULL'}`);
       const surfaceRect = videoSurfaceRef.current?.getBoundingClientRect();
       if (
         state.phase === 'targetLocked'
@@ -3998,8 +4015,12 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
             style={{
               ...styles.videoElement,
               ...focusedVideoStyle,
+              // 始终保持 video element 可见：避免任何同步抖动 / receiver/epoch 重置期间
+              // videoHasPlayed 被设回 false 导致整画面变黑屏（缩放后 scroll 黑屏）。
+              // opacity 由 videoHasPlayed 决定（首帧未到时 0），但 visibility 始终 visible，
+              // 让浏览器持续解码新帧不让 video element 被回收，避免下一帧显示空帧。
               opacity: videoHasPlayed ? 1 : 0,
-              visibility: videoHasPlayed ? 'visible' : 'hidden',
+              visibility: 'visible',
             }}
           />
           <video
