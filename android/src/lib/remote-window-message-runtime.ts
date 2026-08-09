@@ -306,6 +306,27 @@ export function createRemoteWindowMessageRuntime(input?: {
       });
     },
 
+    sendStreamUpdateFocus(sessionId: string, options: {
+      ws: BridgeTransportSocket;
+      streamId: string;
+      target: RemoteWindowStreamTargetManifest;
+      sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
+    }) {
+      const targetSessionId = sessionId.trim();
+      const streamId = options.streamId.trim();
+      if (!targetSessionId || !streamId) {
+        throw new Error('Remote window stream update focus requires sessionId and streamId');
+      }
+      sendClientMessage(targetSessionId, options.ws, options.sendSocketPayload, {
+        type: 'remote-window-stream-update-focus',
+        payload: {
+          requestId: `rw-focus-${now()}-${Math.random().toString(36).slice(2, 8)}`,
+          streamId,
+          target: options.target,
+        },
+      });
+    },
+
     sendStreamIceCandidate(sessionId: string, options: {
       ws: BridgeTransportSocket;
       streamId: string;

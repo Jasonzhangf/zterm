@@ -206,6 +206,7 @@ function createRuntime(options?: {
       accepted: true,
       videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
     })),
+    updateFocus: vi.fn(async () => ({ requestId: 'remote-window-focus-default', streamId: 'stream-default', ok: true as const })),
     injectInput: vi.fn(async (): Promise<RemoteWindowInputResult> => ({
       requestId: 'remote-window-input-default',
       streamId: 'stream-default',

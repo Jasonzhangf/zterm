@@ -940,6 +940,27 @@ export function createTerminalMessageRuntime(
           });
         });
         break;
+      case 'remote-window-stream-update-focus':
+        void deps.remoteWindowStreamRuntime.updateFocus(message.payload).then((payload) => {
+          if ('ok' in payload && payload.ok) {
+            return;
+          }
+          deps.sendTransportMessage(connection.transport, {
+            type: 'remote-window-error',
+            payload: payload as import('@zterm/shared/protocol').RemoteWindowStreamErrorPayload,
+          });
+        }).catch((error: unknown) => {
+          deps.sendTransportMessage(connection.transport, {
+            type: 'remote-window-error',
+            payload: {
+              requestId: message.payload.requestId || '',
+              streamId: message.payload.streamId || '',
+              code: 'remote_window_stream_update_focus_failed',
+              message: error instanceof Error ? error.message : 'remote window stream update focus failed',
+            },
+          });
+        });
+        break;
       case 'remote-window-stream-stop-request':
         {
           const stoppedStreamId = message.payload.streamId || '';

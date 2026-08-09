@@ -11,6 +11,7 @@ export interface RemoteWindowReceiverStartResult {
   streamId: string;
   purpose?: RemoteWindowStreamPurpose;
   mediaStream: MediaStream;
+  overviewMediaStream?: MediaStream;
   started: RemoteWindowStreamStartedPayload;
   collectStats?: () => Promise<RemoteWindowVideoStatsSample | null>;
 }
@@ -22,10 +23,12 @@ interface ActiveRemoteWindowReceiverStream {
   purpose?: RemoteWindowStreamPurpose;
   peerConnection: RTCPeerConnection;
   mediaStream: MediaStream;
+  overviewMediaStream: MediaStream | null;
   cleanupDone: boolean;
   trackAttached: boolean;
+  overviewTrackAttached: boolean;
   trackTimeoutId: ReturnType<typeof setTimeout> | null;
-  resolveTrack: ((mediaStream: MediaStream) => void) | null;
+  resolveTrack: ((result: { mediaStream: MediaStream; overviewMediaStream: MediaStream | null }) => void) | null;
   rejectTrack: ((error: Error) => void) | null;
   statsBaseline: {
     framesDropped: number;
@@ -126,16 +129,35 @@ export function createRemoteWindowReceiverRuntime(input?: {
         // Track cleanup must not mask the stream cleanup path.
       }
     }
+    if (entry.overviewMediaStream) {
+      for (const track of entry.overviewMediaStream.getTracks()) {
+        try {
+          track.stop();
+        } catch {
+          // Overview track cleanup must not mask the stream cleanup path.
+        }
+      }
+    }
     entry.peerConnection.close();
     return true;
   };
 
-  const waitForFirstTrack = (entry: ActiveRemoteWindowReceiverStream) => new Promise<MediaStream>((resolve, reject) => {
-    if (entry.trackAttached) {
-      resolve(entry.mediaStream);
+  const waitForRequiredTracks = (entry: ActiveRemoteWindowReceiverStream, needsOverview: boolean) => new Promise<{ mediaStream: MediaStream; overviewMediaStream: MediaStream | null }>((resolve, reject) => {
+    const tryResolve = () => {
+      if (entry.trackAttached && (!needsOverview || entry.overviewTrackAttached)) {
+        entry.resolveTrack = null;
+        entry.rejectTrack = null;
+        resolve({
+          mediaStream: entry.mediaStream,
+          overviewMediaStream: needsOverview ? entry.overviewMediaStream : null,
+        });
+      }
+    };
+    if (entry.trackAttached && (!needsOverview || entry.overviewTrackAttached)) {
+      tryResolve();
       return;
     }
-    entry.resolveTrack = resolve;
+    entry.resolveTrack = tryResolve;
     entry.rejectTrack = reject;
   });
 
@@ -161,23 +183,33 @@ export function createRemoteWindowReceiverRuntime(input?: {
       return;
     }
     const eventStream = Array.isArray(event.streams) ? event.streams[0] : undefined;
-    if (eventStream) {
-      entry.mediaStream = eventStream;
-    } else if (typeof entry.mediaStream.addTrack === 'function') {
-      const existingTracks = new Set(entry.mediaStream.getTracks());
-      if (!existingTracks.has(event.track)) {
-        entry.mediaStream.addTrack(event.track);
+    const isOverview = Boolean(eventStream && eventStream.id === 'overview');
+    if (isOverview) {
+      if (eventStream) {
+        entry.overviewMediaStream = eventStream;
+      } else if (entry.overviewMediaStream && typeof entry.overviewMediaStream.addTrack === 'function') {
+        entry.overviewMediaStream.addTrack(event.track);
       }
+      entry.overviewTrackAttached = true;
+    } else {
+      if (eventStream) {
+        entry.mediaStream = eventStream;
+      } else if (typeof entry.mediaStream.addTrack === 'function') {
+        const existingTracks = new Set(entry.mediaStream.getTracks());
+        if (!existingTracks.has(event.track)) {
+          entry.mediaStream.addTrack(event.track);
+        }
+      }
+      entry.trackAttached = true;
     }
-    entry.trackAttached = true;
     if (entry.trackTimeoutId !== null) {
       clearTimeoutFn(entry.trackTimeoutId);
       entry.trackTimeoutId = null;
     }
-    const resolveTrack = entry.resolveTrack;
+    const tryResolve = entry.resolveTrack;
     entry.resolveTrack = null;
     entry.rejectTrack = null;
-    resolveTrack?.(entry.mediaStream);
+    tryResolve?.({ mediaStream: entry.mediaStream, overviewMediaStream: entry.overviewMediaStream });
   };
 
   const assertCurrent = (entry: ActiveRemoteWindowReceiverStream) => {
@@ -204,13 +236,16 @@ export function createRemoteWindowReceiverRuntime(input?: {
       }
       const peerConnection = createPeerConnection()({ iceServers: options.iceServers ?? [] });
       const mediaStream = createMediaStream()();
+      const needsOverview = (options.target.compositeWindows ?? []).length > 0;
       const entry: ActiveRemoteWindowReceiverStream = {
         streamId,
         purpose: options.purpose,
         peerConnection,
         mediaStream,
+        overviewMediaStream: null,
         cleanupDone: false,
         trackAttached: false,
+        overviewTrackAttached: false,
         trackTimeoutId: null,
         resolveTrack: null,
         rejectTrack: null,
@@ -219,7 +254,11 @@ export function createRemoteWindowReceiverRuntime(input?: {
       activeStreams.set(streamId, entry);
 
       try {
+        // 双流：组合 target 协商两个 video transceiver（focus + overview）
         peerConnection.addTransceiver('video', { direction: 'recvonly' });
+        if (needsOverview) {
+          peerConnection.addTransceiver('video', { direction: 'recvonly' });
+        }
         peerConnection.onicecandidate = (event) => {
           if (!isCurrent(entry) || !event.candidate) {
             return;
@@ -227,7 +266,7 @@ export function createRemoteWindowReceiverRuntime(input?: {
           options.sendIceCandidate(normalizeLocalCandidate(event.candidate));
         };
         peerConnection.ontrack = (event) => attachTrack(entry, event);
-        const trackPromise = waitForFirstTrack(entry);
+        const trackPromise = waitForRequiredTracks(entry, needsOverview);
         trackPromise.catch(() => undefined);
         const offer = await peerConnection.createOffer();
         await peerConnection.setLocalDescription(offer);
@@ -245,12 +284,15 @@ export function createRemoteWindowReceiverRuntime(input?: {
         await peerConnection.setRemoteDescription(answer);
         assertCurrent(entry);
         armTrackTimeout(entry);
-        const attachedMediaStream = await trackPromise;
+        const attachedTracks = await trackPromise;
         assertCurrent(entry);
         return {
           streamId,
           ...(options.purpose ? { purpose: options.purpose } : {}),
-          mediaStream: attachedMediaStream,
+          mediaStream: attachedTracks.mediaStream,
+          ...(needsOverview && attachedTracks.overviewMediaStream
+            ? { overviewMediaStream: attachedTracks.overviewMediaStream }
+            : {}),
           started,
           collectStats: () => runtime.getStatsSample(streamId),
         };

@@ -265,6 +265,13 @@ export interface RemoteWindowStreamStartRequestPayload {
   videoBitrate?: RemoteWindowVideoBitrateConfig;
 }
 
+// 双流：切换高码率主窗口（focus）流的捕获目标；低码率总览（overview）流保持不变
+export interface RemoteWindowStreamUpdateFocusRequestPayload {
+  requestId: string;
+  streamId: string;
+  target: RemoteWindowStreamTargetManifest;
+}
+
 export interface RemoteWindowStreamStartedPayload {
   requestId: string;
   streamId: string;
@@ -550,6 +557,7 @@ export type BridgeClientMessage =
   | { type: 'remote-screenshot-request'; payload: RemoteScreenshotRequestPayload }
   | { type: 'remote-window-targets-request'; payload: RemoteWindowStreamRequestPayload }
   | { type: 'remote-window-stream-start-request'; payload: RemoteWindowStreamStartRequestPayload }
+  | { type: 'remote-window-stream-update-focus'; payload: RemoteWindowStreamUpdateFocusRequestPayload }
   | { type: 'remote-window-stream-ice-candidate'; payload: RemoteWindowStreamIceCandidatePayload }
   | { type: 'remote-window-stream-stop-request'; payload: RemoteWindowStreamStopRequestPayload }
   | { type: 'remote-window-stream-quality-request'; payload: RemoteWindowStreamQualityRequestPayload }
