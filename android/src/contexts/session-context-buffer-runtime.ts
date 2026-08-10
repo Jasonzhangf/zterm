@@ -18,6 +18,7 @@ import type {
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
+import type { SessionBufferStoreCommitOptions } from '../lib/session-buffer-store';
 import {
   buildDefaultSessionVisibleRange,
   type SessionDaemonHeadView,
@@ -607,7 +608,7 @@ export function handleBufferHeadRuntime(options: {
   readSessionTransportResource?: (sessionId: string) => { socket?: BridgeTransportSocket | null } | null;
   daemonConnection?: ClientDaemonConnection;
   readSessionBufferSnapshot: (sessionId: string) => SessionBufferState;
-  commitSessionBufferUpdate: (sessionId: string, nextBuffer: SessionBufferState) => boolean;
+  commitSessionBufferUpdate: (sessionId: string, nextBuffer: SessionBufferState, options?: SessionBufferStoreCommitOptions) => boolean;
   scheduleSessionRenderCommit: (sessionId: string) => void;
   isSessionTransportActive: (sessionId: string) => boolean;
   shouldAcceptSessionLiveBuffer?: (sessionId: string) => boolean;
@@ -1230,7 +1231,7 @@ interface ApplyIncomingBufferSyncRuntimeOptions {
   resolveSessionCacheLines: (rows?: number | null) => number;
   summarizeBufferPayload: (payload: TerminalBufferPayload) => Record<string, unknown>;
   runtimeDebug: RuntimeDebugFn;
-  commitSessionBufferUpdate: (sessionId: string, nextBuffer: SessionBufferState) => boolean;
+  commitSessionBufferUpdate: (sessionId: string, nextBuffer: SessionBufferState, options?: SessionBufferStoreCommitOptions) => boolean;
   scheduleSessionRenderCommit: (sessionId: string) => void;
   isSessionTransportActive: (sessionId: string) => boolean;
   shouldAcceptSessionLiveBuffer?: (sessionId: string) => boolean;
@@ -1618,7 +1619,7 @@ function applyResolvedBufferSyncPayloadRuntime(options: ApplyResolvedBufferSyncP
     return true;
   }
 
-  const changed = options.commitSessionBufferUpdate(options.sessionId, nextBuffer);
+  const changed = options.commitSessionBufferUpdate(options.sessionId, nextBuffer, { skipEqualCheck: true });
   if (!changed) {
     return false;
   }

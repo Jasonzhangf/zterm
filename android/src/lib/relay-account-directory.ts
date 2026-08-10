@@ -111,11 +111,87 @@ export interface RelayDirectoryMachineProjection {
   sessions: RelayDirectoryDaemon['sessions'];
 }
 
+function snapshotTruthScore(device: TraversalRelayDeviceSnapshot) {
+  return (device.daemon.connected ? 1_000_000 : 0)
+    + (device.daemon.sessions?.length || 0) * 1_000
+    + (device.daemon.endpoints?.length || 0) * 100
+    + (device.deviceName.trim() ? 10 : 0);
+}
+
+function mergeRelayDirectorySnapshotTruth(
+  primary: TraversalRelayDeviceSnapshot,
+  supplement: TraversalRelayDeviceSnapshot,
+) {
+  const endpoints = new Map((primary.daemon.endpoints || []).map((endpoint) => [endpoint.id, endpoint]));
+  for (const endpoint of supplement.daemon.endpoints || []) {
+    const current = endpoints.get(endpoint.id);
+    if (!current || endpoint.lastSeenAt > current.lastSeenAt) {
+      endpoints.set(endpoint.id, endpoint);
+    }
+  }
+  const sessions = new Map((primary.daemon.sessions || []).map((session) => [session.name, session]));
+  for (const session of supplement.daemon.sessions || []) {
+    const current = sessions.get(session.name);
+    if (!current || session.updatedAt > current.updatedAt) {
+      sessions.set(session.name, session);
+    }
+  }
+  return {
+    ...primary,
+    client: {
+      connected: primary.client.connected || supplement.client.connected,
+      lastSeenAt: primary.client.lastSeenAt > supplement.client.lastSeenAt
+        ? primary.client.lastSeenAt
+        : supplement.client.lastSeenAt,
+    },
+    updatedAt: primary.updatedAt > supplement.updatedAt ? primary.updatedAt : supplement.updatedAt,
+    daemon: {
+      ...primary.daemon,
+      connected: primary.daemon.connected || supplement.daemon.connected,
+      lastSeenAt: primary.daemon.lastSeenAt > supplement.daemon.lastSeenAt
+        ? primary.daemon.lastSeenAt
+        : supplement.daemon.lastSeenAt,
+      version: primary.daemon.version || supplement.daemon.version,
+      endpoints: [...endpoints.values()],
+      sessions: [...sessions.values()],
+    },
+  };
+}
+
+export function dedupeRelayDaemonDeviceSnapshots(
+  devices: TraversalRelayDeviceSnapshot[],
+) {
+  const byHostId = new Map<string, TraversalRelayDeviceSnapshot>();
+  const result: TraversalRelayDeviceSnapshot[] = [];
+  for (const device of devices) {
+    const hostId = device.daemon.hostId.trim();
+    if (!hostId) {
+      result.push(device);
+      continue;
+    }
+    const existing = byHostId.get(hostId);
+    if (!existing) {
+      byHostId.set(hostId, device);
+      result.push(device);
+      continue;
+    }
+    const primary = snapshotTruthScore(device) > snapshotTruthScore(existing) ? device : existing;
+    const merged = mergeRelayDirectorySnapshotTruth(primary, primary === existing ? device : existing);
+    byHostId.set(hostId, merged);
+    const index = result.indexOf(existing);
+    if (index >= 0) {
+      result[index] = merged;
+    }
+  }
+  return result;
+}
+
 export function projectRelayDirectoryMachines(directory: RelayAccountDirectory | null | undefined): RelayDirectoryMachineProjection[] {
   if (!directory) {
     return [];
   }
-  return directory.devices
+  const devices = dedupeRelayDaemonDeviceSnapshots(projectRelayDirectoryDeviceSnapshots(directory));
+  return devices
     .filter((device) => Boolean(device.daemon?.hostId))
     .map((device) => ({
       deviceId: device.deviceId,
@@ -124,10 +200,10 @@ export function projectRelayDirectoryMachines(directory: RelayAccountDirectory |
       appVersion: device.appVersion,
       daemonHostId: device.daemon!.hostId,
       daemonVersion: device.daemon!.version,
-      connected: device.daemon!.presence.connected,
-      lastSeenAt: device.daemon!.presence.lastSeenAt,
-      endpoints: device.daemon!.endpoints,
-      sessions: device.daemon!.sessions,
+      connected: device.daemon!.connected,
+      lastSeenAt: device.daemon!.lastSeenAt,
+      endpoints: device.daemon!.endpoints || [],
+      sessions: device.daemon!.sessions || [],
     }));
 }
 
@@ -137,7 +213,7 @@ export function projectRelayDirectoryDeviceSnapshots(
   if (!directory) {
     return [];
   }
-  return directory.devices.map((device) => ({
+  return dedupeRelayDaemonDeviceSnapshots(directory.devices.map((device) => ({
     deviceId: device.deviceId,
     deviceName: device.deviceName,
     platform: device.platform,
@@ -162,5 +238,5 @@ export function projectRelayDirectoryDeviceSnapshots(
           hostId: '',
           version: '',
         },
-  }));
+  })));
 }

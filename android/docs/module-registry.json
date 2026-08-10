@@ -11,7 +11,12 @@
       "responsibility": "Top-level product runtime boundary across daemon, client, shared protocol, relay, release, and observability modules.",
       "owned_resources": [],
       "consumed_resources": [],
-      "pending_resources": [],
+      "pending_resources": [
+        "resource.remote_window_canvas_raw",
+        "resource.remote_window_canvas_layout",
+        "resource.remote_window_canvas_encode",
+        "resource.remote_window_focus_stream"
+      ],
       "public_interfaces": [
         "docs/modules/project-modules.md"
       ],
@@ -631,12 +636,7 @@
         "resource.transport_target",
         "resource.tmux_session"
       ],
-      "pending_resources": [
-        "resource.remote_window_canvas_raw",
-        "resource.remote_window_canvas_layout",
-        "resource.remote_window_canvas_encode",
-        "resource.remote_window_focus_stream"
-      ],
+      "pending_resources": [],
       "public_interfaces": [
         "src/server/remote-window-stream-daemon.ts"
       ],
@@ -1877,6 +1877,48 @@
       "owned_paths": [
         "src/server/attachment-delivery-runtime.ts",
         "src/server/attachment-delivery-runtime.test.ts"
+      ]
+    },
+    {
+      "module_id": "client.remote_window_dual_stream_switch",
+      "runtime_side": "client",
+      "level": 1,
+      "parent_module_id": "client.runtime",
+      "owner_feature": "desktop.remote_window_stream",
+      "responsibility": "Own overview-to-focus remote-window switch revisions, projection commit, stale-result rejection, and explicit switch errors; never own capture or macOS geometry truth.",
+      "owned_resources": [
+        "resource.remote_window_dual_stream_switch"
+      ],
+      "consumed_resources": [
+        "resource.remote_window_overlay",
+        "resource.remote_window_stream"
+      ],
+      "pending_resources": [
+        "resource.remote_window_focus_stream"
+      ],
+      "public_interfaces": [
+        "src/lib/remote-window-dual-stream-runtime.ts"
+      ],
+      "forbidden_resources": [
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.remote_window_canvas_raw",
+        "resource.remote_window_canvas_encode"
+      ],
+      "canonical_docs": [
+        "docs/modules/project-modules.md",
+        "docs/decisions/2026-08-09-remote-window-dual-stream-design.md",
+        "docs/testing/remote-window-dual-stream-test-design.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/remote-window-dual-stream-runtime.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/lib/remote-window-dual-stream-runtime.ts",
+        "src/lib/remote-window-dual-stream-runtime.test.ts"
       ]
     }
   ]

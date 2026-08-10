@@ -17,6 +17,7 @@ import type {
   RemoteWindowStreamTargetManifest,
   RemoteWindowStreamTargetsResponsePayload,
   RemoteWindowStreamUpdateFocusRequestPayload,
+  RemoteWindowStreamFocusResultPayload,
   RemoteWindowVideoBitrateConfig,
 } from '@zterm/shared/protocol';
 import { ITERM2_CATALOG_PYTHON, MACOS_APP_WINDOW_CATALOG_SWIFT } from './remote-window-scripts';
@@ -104,6 +105,7 @@ export interface RemoteWindowStreamDaemonDeps {
   now?: () => string;
   pythonBinary?: string;
   swiftBinary?: string;
+  captureBinary?: string;
   iterm2PythonTimeoutMs?: number;
   appWindowCatalogTimeoutMs?: number;
   targetCatalogCacheTtlMs?: number;
@@ -141,7 +143,7 @@ export interface RemoteWindowStreamDaemonRuntime {
   ) => Promise<RemoteWindowStreamQualityResultPayload | RemoteWindowStreamErrorPayload>;
   updateFocus: (
     payload: RemoteWindowStreamUpdateFocusRequestPayload,
-  ) => Promise<{ requestId: string; streamId: string; ok: true } | RemoteWindowStreamErrorPayload>;
+  ) => Promise<RemoteWindowStreamFocusResultPayload | RemoteWindowStreamErrorPayload>;
   injectInput: (
     payload: RemoteWindowInputEventPayload,
   ) => Promise<RemoteWindowInputResultPayload | RemoteWindowStreamErrorPayload>;
@@ -156,6 +158,7 @@ interface RemoteWindowTargetCatalogCacheEntry {
 export interface RemoteWindowStreamDaemonHandlers {
   sendIceCandidate?: (payload: RemoteWindowStreamIceCandidatePayload) => void;
   sendStatus?: (payload: RemoteWindowStreamStatusPayload) => void;
+  sendFocusResult?: (payload: RemoteWindowStreamFocusResultPayload) => void;
 }
 
 interface ActiveRemoteWindowStream {
@@ -164,6 +167,11 @@ interface ActiveRemoteWindowStream {
   requestId: string;
   targetId: string;
   target: RemoteWindowStreamTargetManifest;
+  overviewTarget: RemoteWindowStreamTargetManifest | null;
+  // overview 画布主窗口固定为流的初始 target：focus 切换只改 entry.target，
+  // 不漂移 overview 画布（client 的 state.target 也不随 focus 切换更新，
+  // 两者必须保持对齐，否则缩略图/crop 坐标错位）。
+  overviewMainTarget: RemoteWindowStreamTargetManifest | null;
   peerConnection: RTCPeerConnection;
   // focus（高码率主窗口）流：主 track
   videoSender: RTCRtpSender | null;
@@ -180,6 +188,8 @@ interface ActiveRemoteWindowStream {
   compositePollTimer: ReturnType<typeof setInterval> | null;
   handlers: RemoteWindowStreamDaemonHandlers;
   framesSent: number;
+  focusRevision: number;
+  pendingFocusReady: RemoteWindowStreamFocusResultPayload | null;
   pendingVideoFrame: {
     frame: RemoteWindowCaptureFrame;
   } | null;
@@ -420,6 +430,7 @@ export function createRemoteWindowStreamDaemonRuntime(
   const platform = deps.platform || process.platform;
   const pythonBinary = (deps.pythonBinary || process.env.ZTERM_ITERM2_PYTHON || 'python3').trim();
   const swiftBinary = (deps.swiftBinary || process.env.ZTERM_MACOS_SWIFT || 'swift').trim();
+  const captureBinary = (deps.captureBinary || process.env.ZTERM_DAEMON_CAPTURE_NATIVE || '').trim() || undefined;
   const iterm2PythonTimeoutMs = deps.iterm2PythonTimeoutMs || DEFAULT_ITERM2_PYTHON_TIMEOUT_MS;
   const appWindowCatalogTimeoutMs = deps.appWindowCatalogTimeoutMs || DEFAULT_MACOS_APP_WINDOW_CATALOG_TIMEOUT_MS;
   const captureStartupTimeoutMs = deps.captureStartupTimeoutMs || DEFAULT_SCREEN_CAPTURE_KIT_STARTUP_TIMEOUT_MS;
@@ -758,6 +769,13 @@ export function createRemoteWindowStreamDaemonRuntime(
         frameHeight: captureFrame.height,
       });
     }
+    if (entry.pendingFocusReady) {
+      entry.handlers.sendFocusResult?.({
+        ...entry.pendingFocusReady,
+        phase: 'ready',
+      });
+      entry.pendingFocusReady = null;
+    }
   }
 
   function flushPendingRemoteWindowVideoFrame(entry: ActiveRemoteWindowStream) {
@@ -981,6 +999,8 @@ export function createRemoteWindowStreamDaemonRuntime(
         requestId: payload.requestId,
         targetId: payload.target.streamTargetId,
         target: payload.target,
+        overviewTarget: null,
+        overviewMainTarget: payload.target,
         peerConnection,
         videoSender: videoSender || null,
         videoSource,
@@ -990,6 +1010,8 @@ export function createRemoteWindowStreamDaemonRuntime(
         compositePollTimer: null,
         handlers,
         framesSent: 0,
+        focusRevision: 0,
+        pendingFocusReady: null,
         pendingVideoFrame: null,
         cleanupDone: false,
       };
@@ -1062,6 +1084,9 @@ export function createRemoteWindowStreamDaemonRuntime(
         }
       }
 
+      // Overview（低码率总览）lane 只对真正组合（多个窗口）启用。单个
+      // app-window 目标强制启动 overview 会让 Swift 回退全分辨率单窗口捕获，
+      // 造成 focus 与 overview 双份全分辨率 capture/带宽。
       const hasCompositeWindows = (payload.target.compositeWindows ?? []).length > 0;
       // focus（高码率主窗口）流：主窗口单独捕获全分辨率；组合模式时剥离 compositeWindows
       const focusTarget: RemoteWindowStreamTargetManifest = hasCompositeWindows
@@ -1071,6 +1096,7 @@ export function createRemoteWindowStreamDaemonRuntime(
         frameRate: streamFrameRate,
         startupTimeoutMs: captureStartupTimeoutMs,
         swiftBinary,
+        captureBinary,
         onFrame: (frame) => {
           if (!entry || !isCurrentStream(entry)) {
             return;
@@ -1107,6 +1133,7 @@ export function createRemoteWindowStreamDaemonRuntime(
           frameRate: overviewFrameRate,
           startupTimeoutMs: captureStartupTimeoutMs,
           swiftBinary,
+          captureBinary,
           onFrame: (frame) => {
             if (!entry || !isCurrentStream(entry)) {
               return;
@@ -1158,9 +1185,10 @@ export function createRemoteWindowStreamDaemonRuntime(
                 item.videoTarget.kind === 'app-window'
                 && item.videoTarget.appBundleId === activeEntry.target.videoTarget.appBundleId
               ));
+              const overviewTarget = activeEntry.overviewMainTarget ?? activeEntry.overviewTarget ?? activeEntry.target;
               const currentIds = new Set([
-                activeEntry.target.videoTarget.windowId,
-                ...(activeEntry.target.compositeWindows ?? []).map((w) => w.windowId),
+                overviewTarget.videoTarget.windowId,
+                ...(overviewTarget.compositeWindows ?? []).map((w) => w.windowId),
               ]);
               const nextIds = sameApp.map((item) => item.videoTarget.windowId);
               if (
@@ -1174,7 +1202,7 @@ export function createRemoteWindowStreamDaemonRuntime(
                 return;
               }
               const nextOverviewTarget: RemoteWindowStreamTargetManifest = {
-                ...activeEntry.target,
+                ...overviewTarget,
                 compositeWindows: sameApp
                   .filter((item) => item.streamTargetId !== activeEntry.target.streamTargetId)
                   .map((item) => ({
@@ -1185,8 +1213,7 @@ export function createRemoteWindowStreamDaemonRuntime(
                   })),
               };
               await overviewCapture.updateTarget(nextOverviewTarget);
-              activeEntry.target = nextOverviewTarget;
-              activeEntry.targetId = nextOverviewTarget.streamTargetId;
+              activeEntry.overviewTarget = nextOverviewTarget;
             } catch {
               // 自动增删轮询失败不打断串流
             }
@@ -1339,13 +1366,24 @@ export function createRemoteWindowStreamDaemonRuntime(
 
   async function updateFocus(
     payload: RemoteWindowStreamUpdateFocusRequestPayload,
-  ): Promise<{ requestId: string; streamId: string; ok: true } | RemoteWindowStreamErrorPayload> {
+  ): Promise<RemoteWindowStreamFocusResultPayload | RemoteWindowStreamErrorPayload> {
     if (!payload.requestId || !payload.streamId || !payload.target?.videoTarget?.windowId) {
       return buildStreamError(payload, 'remote_window_stream_update_focus_invalid', 'remote window update focus requires requestId, streamId, and target');
     }
     const entry = activeStreams.get(payload.streamId);
     if (!entry || entry.cleanupDone) {
       return buildStreamError(payload, 'remote_window_stream_missing', `remote window stream is not active: ${payload.streamId}`);
+    }
+    if (!Number.isInteger(payload.revision) || payload.revision <= entry.focusRevision) {
+      return buildStreamError(payload, 'remote_window_stream_update_focus_stale', `remote window focus revision is stale: ${payload.revision}`);
+    }
+    if (entry.pendingFocusReady) {
+      // A focus-ready for the previous revision is still pending (its first
+      // frame has not been emitted yet). Accepting another update would
+      // overwrite that pending ready and the earlier client switch would hang
+      // in focus-updating forever. Reject explicitly so the client fails the
+      // switch instead.
+      return buildStreamError(payload, 'remote_window_stream_update_focus_busy', 'remote window focus update already in flight');
     }
     const captureSource = entry.captureSource;
     if (!captureSource?.updateTarget) {
@@ -1357,6 +1395,14 @@ export function createRemoteWindowStreamDaemonRuntime(
       compositeWindows: undefined,
     };
     await captureSource.updateTarget(focusTarget);
+    entry.focusRevision = payload.revision;
+    entry.pendingFocusReady = {
+      requestId: payload.requestId,
+      streamId: payload.streamId,
+      revision: payload.revision,
+      targetId: payload.target.streamTargetId,
+      phase: 'accepted',
+    };
     // 保留组合窗口清单（overview 流用），只替换主窗口
     entry.target = {
       ...entry.target,
@@ -1366,7 +1412,9 @@ export function createRemoteWindowStreamDaemonRuntime(
     return {
       requestId: payload.requestId,
       streamId: payload.streamId,
-      ok: true,
+      revision: payload.revision,
+      targetId: payload.target.streamTargetId,
+      phase: 'accepted',
     };
   }
 

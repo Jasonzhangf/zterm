@@ -911,6 +911,12 @@ export function createTerminalMessageRuntime(
               payload,
             });
           },
+          sendFocusResult: (payload) => {
+            deps.sendTransportMessage(connection.transport, {
+              type: 'remote-window-stream-focus-result',
+              payload,
+            });
+          },
         }).then((payload) => {
           deps.sendTransportMessage(connection.transport, 'answer' in payload
             ? { type: 'remote-window-stream-started', payload }
@@ -942,13 +948,9 @@ export function createTerminalMessageRuntime(
         break;
       case 'remote-window-stream-update-focus':
         void deps.remoteWindowStreamRuntime.updateFocus(message.payload).then((payload) => {
-          if ('ok' in payload && payload.ok) {
-            return;
-          }
-          deps.sendTransportMessage(connection.transport, {
-            type: 'remote-window-error',
-            payload: payload as import('@zterm/shared/protocol').RemoteWindowStreamErrorPayload,
-          });
+          deps.sendTransportMessage(connection.transport, 'phase' in payload
+            ? { type: 'remote-window-stream-focus-result', payload }
+            : { type: 'remote-window-error', payload });
         }).catch((error: unknown) => {
           deps.sendTransportMessage(connection.transport, {
             type: 'remote-window-error',

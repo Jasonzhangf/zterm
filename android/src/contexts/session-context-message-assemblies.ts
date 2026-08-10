@@ -10,6 +10,7 @@ import type {
   TerminalCursorState,
 } from '../lib/types';
 import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
+import type { SessionBufferStoreCommitOptions } from '../lib/session-buffer-store';
 import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
@@ -41,7 +42,7 @@ interface MessageAssemblyState {
 }
 
 interface MessageAssemblyBufferStore {
-  commitBuffer: (sessionId: string, buffer: SessionBufferState) => boolean;
+  commitBuffer: (sessionId: string, buffer: SessionBufferState, options?: SessionBufferStoreCommitOptions) => boolean;
 }
 
 interface MessageAssemblyHeadStore {
@@ -208,8 +209,12 @@ export function createSessionMessageAssemblies(
   const daemonConnection = options.daemonConnection;
   const tailRefreshStoreRef = { current: options.tailRefreshStore };
 
-  const commitSessionBufferUpdate = (sessionId: string, nextBuffer: SessionBufferState) => {
-    return options.sessionBufferStoreRef.current.commitBuffer(sessionId, nextBuffer);
+  const commitSessionBufferUpdate = (
+    sessionId: string,
+    nextBuffer: SessionBufferState,
+    commitOptions?: SessionBufferStoreCommitOptions,
+  ) => {
+    return options.sessionBufferStoreRef.current.commitBuffer(sessionId, nextBuffer, commitOptions);
   };
 
   const requestSessionBufferSync = (sessionId: string, requestOptions?: SessionBufferSyncRequestOptions) => requestSessionBufferSyncRuntime({

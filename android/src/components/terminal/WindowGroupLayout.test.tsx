@@ -66,4 +66,30 @@ describe('WindowGroupLayout', () => {
     expect(root.getAttribute('data-window-group-secondary-placement')).toBe('before');
     expect(root.firstElementChild?.contains(screen.getByTestId('child-b'))).toBe(true);
   });
+
+  it('supports a non-wrapping, horizontally scrollable top rail', () => {
+    render(
+      <WindowGroupLayout
+        testId="window-group-scroll"
+        landscape={false}
+        primaryItemId="a"
+        secondaryPlacement="before"
+        secondaryWrap="nowrap"
+        secondaryItemFlex="0 0 min(30%, 160px)"
+        secondaryOverflowX="auto"
+        items={[
+          { id: 'a', node: <div data-testid="window-a">a</div> },
+          { id: 'b', node: <div data-testid="window-b">b</div> },
+          { id: 'c', node: <div data-testid="window-c">c</div> },
+          { id: 'd', node: <div data-testid="window-d">d</div> },
+        ]}
+      />,
+    );
+
+    const root = screen.getByTestId('window-group-scroll');
+    const rail = root.firstElementChild;
+    expect(rail?.getAttribute('style')).toContain('flex-wrap: nowrap');
+    expect(rail?.getAttribute('style')).toContain('overflow-x: auto');
+    expect(root.firstElementChild?.contains(screen.getByTestId('window-b'))).toBe(true);
+  });
 });

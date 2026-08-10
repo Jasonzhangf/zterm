@@ -748,7 +748,11 @@ describe("TerminalPage Android IME bridge", () => {
     fireEvent.click(screen.getByText("switch-to-s2"));
     imeListeners.get("input")?.({ text: "fast-after-switch" });
 
-    expect(onTerminalInput).toHaveBeenCalledWith("s2", "fast-after-switch");
+    // 2026-08-09 BUG #4 fix: long input (>16 chars) is now deferred into a microtask.
+    // Wait for the microtask flush before asserting routing.
+    await waitFor(() => {
+      expect(onTerminalInput).toHaveBeenCalledWith("s2", "fast-after-switch");
+    });
     expect(onTerminalInput).not.toHaveBeenCalledWith("s1", "fast-after-switch");
   });
 
@@ -2295,7 +2299,10 @@ describe("TerminalPage Android IME bridge", () => {
 
     imeListeners.get("input")?.({ text: "hello-after-switch" });
 
-    expect(onTerminalInput).toHaveBeenCalledWith("s2", "hello-after-switch");
+    // 2026-08-09 BUG #4 fix: long input (>16 chars) is now deferred into a microtask.
+    await waitFor(() => {
+      expect(onTerminalInput).toHaveBeenCalledWith("s2", "hello-after-switch");
+    });
   });
 
   it("routes hardware special keys through the active session after tab switch", async () => {
@@ -3108,6 +3115,92 @@ describe("resolveKeyboardLiftPx with stable layout viewport height override", ()
     Object.defineProperty(window, "visualViewport", {
       configurable: true,
       value: originalVisualViewport,
+    });
+  });
+
+  // 2026-08-09 BUG #4 (regression lock): IME input listener 在每个同步回调里
+  // 禁止直接同步调用 terminalInputHandlerRef.current —— 必须推到 microtask
+  // 红测：如果同步调用 onTerminalInput 超过一次，证明同步链未被拆解，
+  // 长语音 commit 期间 main thread 会阻塞 16ms+，daemon stale inbound detach
+  it("deferes IME input listener handler via microtask, not synchronously (BUG #4 regression)", async () => {
+    const session = makeSession("s1");
+    const onTerminalInput = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("input")).toBe(true);
+    });
+
+    // back-to-back IME input — long voice commit simulation
+    imeListeners.get("input")?.({ text: "今天我们要做的是关于终端连接方式的完整审计" });
+    imeListeners.get("input")?.({ text: "今天我们要做的是关于终端连接方式的完整审计" });
+    imeListeners.get("input")?.({ text: "今天我们要做的是关于终端连接方式的完整审计" });
+
+    // 红测（BUG #4）：修复后，超过 16 字符的长 IME input listener 必须把 emitToActiveSession
+    // 推到 microtask，同步栈里调用次数应该 ≤ 1。当前实现同步触发 3 次 → 测试 FAIL。
+    expect(onTerminalInput.mock.calls.length).toBeLessThanOrEqual(1);
+
+    // 等 microtask flush,确认 input 最终还是到达了 terminal
+    await waitFor(() => {
+      expect(onTerminalInput.mock.calls.length).toBeGreaterThan(0);
+    });
+  });
+
+  // 2026-08-09 BUG #5 (regression lock): emitRemoteWindowInputEvents 返回 false 时
+  // input 必须 fallback 到 terminal emitToActiveSession
+  // 当前实现已经正确（默认 mock 让 emitRemoteWindowInputEvents 返回 false），
+  // 此测试是反向锁，证明当前 fallback 路径有效；任何后续重构破坏 fallback 会立即失败
+  it("falls back to terminal input when remote-window overlay is unavailable (BUG #5 regression)", async () => {
+    const session = makeSession("s1");
+    const onTerminalInput = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={[session]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={onTerminalInput}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => {
+      expect(imeListeners.has("input")).toBe(true);
+    });
+
+    imeListeners.get("input")?.({ text: "fallback-test" });
+
+    // BUG #5 锁：input 必须到达 terminal（onTerminalInput 被调用）
+    // 这是正向锁，证明 fallback 路径有效
+    await waitFor(() => {
+      expect(onTerminalInput).toHaveBeenCalledWith("s1", expect.stringContaining("fallback-test"));
     });
   });
 });

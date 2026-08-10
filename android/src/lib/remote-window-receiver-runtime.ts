@@ -206,10 +206,9 @@ export function createRemoteWindowReceiverRuntime(input?: {
       clearTimeoutFn(entry.trackTimeoutId);
       entry.trackTimeoutId = null;
     }
-    const tryResolve = entry.resolveTrack;
-    entry.resolveTrack = null;
-    entry.rejectTrack = null;
-    tryResolve?.({ mediaStream: entry.mediaStream, overviewMediaStream: entry.overviewMediaStream });
+    // 双流必须等 required tracks 全部到达；第一条 focus track 到达时不能
+    // 消费掉仍等待 overview track 的 resolver。
+    entry.resolveTrack?.({ mediaStream: entry.mediaStream, overviewMediaStream: entry.overviewMediaStream });
   };
 
   const assertCurrent = (entry: ActiveRemoteWindowReceiverStream) => {
@@ -236,7 +235,8 @@ export function createRemoteWindowReceiverRuntime(input?: {
       }
       const peerConnection = createPeerConnection()({ iceServers: options.iceServers ?? [] });
       const mediaStream = createMediaStream()();
-      const needsOverview = (options.target.compositeWindows ?? []).length > 0;
+      const needsOverview = options.target.videoTarget.kind === 'app-window'
+        || (options.target.compositeWindows ?? []).length > 0;
       const entry: ActiveRemoteWindowReceiverStream = {
         streamId,
         purpose: options.purpose,

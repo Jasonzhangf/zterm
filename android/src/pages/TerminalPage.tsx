@@ -2588,22 +2588,33 @@ function TerminalPageComponent({
     let keyboardStateListener: { remove: () => Promise<void> } | null = null;
     let debugInputListener: { remove: () => Promise<void> } | null = null;
 
-    const emitToActiveSession = (data: string, source: 'ime-input' | 'ime-backspace' | 'ime-key' | 'debug-input') => {
-      const sessionId = activeSessionIdRef.current;
-      const quickBarEditorFocused = quickBarEditorFocusedRef.current;
+    const emitToActiveSession = (
+      data: string,
+      source: 'ime-input' | 'ime-backspace' | 'ime-key' | 'debug-input',
+      capture?: {
+        sessionId?: string | null;
+        splitVisible?: boolean;
+        activePaneId?: string | null;
+        quickBarEditorFocused?: boolean;
+      },
+    ) => {
+      const sessionId = capture?.sessionId !== undefined ? capture.sessionId : activeSessionIdRef.current;
+      const quickBarEditorFocused = capture?.quickBarEditorFocused !== undefined ? capture.quickBarEditorFocused : quickBarEditorFocusedRef.current;
+      const splitVisibleAtEmit = capture?.splitVisible !== undefined ? capture.splitVisible : splitVisibleRef.current;
+      const activePaneIdAtEmit = capture?.activePaneId !== undefined ? capture.activePaneId : activePaneIdRef.current;
       runtimeDebug(`terminal.${source}.received`, {
         sessionId,
         size: data.length,
-        splitVisible: splitVisibleRef.current,
-        activePaneId: activePaneIdRef.current,
+        splitVisible: splitVisibleAtEmit,
+        activePaneId: activePaneIdAtEmit,
         quickBarEditorFocused,
       });
       if (!sessionId) {
         runtimeDebug(`terminal.${source}.drop`, {
           why: 'missing-active-session',
           size: data.length,
-          splitVisible: splitVisibleRef.current,
-          activePaneId: activePaneIdRef.current,
+          splitVisible: splitVisibleAtEmit,
+          activePaneId: activePaneIdAtEmit,
         });
         return;
       }
@@ -2611,8 +2622,8 @@ function TerminalPageComponent({
         runtimeDebug(`terminal.${source}.drop`, {
           why: 'empty-input',
           sessionId,
-          splitVisible: splitVisibleRef.current,
-          activePaneId: activePaneIdRef.current,
+          splitVisible: splitVisibleAtEmit,
+          activePaneId: activePaneIdAtEmit,
         });
         return;
       }
@@ -2621,16 +2632,16 @@ function TerminalPageComponent({
           why: 'quick-editor-focused',
           sessionId,
           size: data.length,
-          splitVisible: splitVisibleRef.current,
-          activePaneId: activePaneIdRef.current,
+          splitVisible: splitVisibleAtEmit,
+          activePaneId: activePaneIdAtEmit,
         });
         return;
       }
       runtimeDebug(`terminal.${source}.emit`, {
         sessionId,
         size: data.length,
-        splitVisible: splitVisibleRef.current,
-        activePaneId: activePaneIdRef.current,
+        splitVisible: splitVisibleAtEmit,
+        activePaneId: activePaneIdAtEmit,
       });
       terminalInputHandlerRef.current?.(sessionId, data);
     };
@@ -2639,17 +2650,43 @@ function TerminalPageComponent({
       try {
         inputListener = await ImeAnchor.addListener('input', (event) => {
           const rawText = event.text || '';
-          if (emitRemoteWindowInputEvents(
+          const dispatched = emitRemoteWindowInputEvents(
             buildRemoteWindowTextInputEvents(rawText),
             'ime-input',
-          )) {
+          );
+          if (dispatched) {
             return;
           }
           const text = normalizeTerminalCommittedText(rawText);
-          emitToActiveSession(
-            text,
-            'ime-input',
-          );
+          if (!text) {
+            return;
+          }
+          // 2026-08-09 BUG #4 fix: short input (≤16 chars) stays synchronous to preserve
+          // existing IME semantics; long input (>16 chars, voice commit) defers into a
+          // microtask so back-to-back IME input events don't synchronously chain into
+          // ws.send() on the main thread. Synchronous chain blocks rendering and lets the
+          // daemon's stale inbound 10s timeout detach the transport.
+          if (text.length <= 16) {
+            emitToActiveSession(text, 'ime-input');
+            return;
+          }
+          // Capture session routing at event time so a mid-microtask session switch
+          // does not re-route this keystroke.
+          const sessionIdAtEmit = activeSessionIdRef.current;
+          const splitVisibleAtEmit = splitVisibleRef.current;
+          const activePaneIdAtEmit = activePaneIdRef.current;
+          const quickBarFocusedAtEmit = quickBarEditorFocusedRef.current;
+          queueMicrotask(() => {
+            if (disposed) {
+              return;
+            }
+            emitToActiveSession(text, 'ime-input', {
+              sessionId: sessionIdAtEmit,
+              splitVisible: splitVisibleAtEmit,
+              activePaneId: activePaneIdAtEmit,
+              quickBarEditorFocused: quickBarFocusedAtEmit,
+            });
+          });
         });
         if (disposed) {
           void inputListener.remove().catch((error) => {
@@ -3713,6 +3750,7 @@ function TerminalPageComponent({
           absoluteLineNumbersVisible={absoluteLineNumbersVisible}
           copySelection={copySelection}
           onLongPressRow={handleLongPressCopyRow}
+          onCopySelectionDismiss={handleCloseCopyMenu}
           sessionPreviewOpen={sessionPreviewOpen}
           sessionPreviewSessions={sessionPreviewSessions}
           sessionPreviewReplacementCandidates={sessionPreviewReplacementCandidates}

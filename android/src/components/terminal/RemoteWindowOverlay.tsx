@@ -28,9 +28,20 @@ import type {
 } from '../../lib/types';
 import type { RemoteWindowControlMessage } from '../../lib/remote-window-message-runtime';
 import {
+  acceptRemoteWindowFocusReady,
+  beginRemoteWindowDualStreamSwitch,
+  commitRemoteWindowFocusProjection,
+  failRemoteWindowDualStreamSwitch,
+  markRemoteWindowFocusUpdating,
+  resetRemoteWindowDualStreamSwitch,
+  showRemoteWindowOverviewCrop,
+  type RemoteWindowDualStreamState,
+} from '../../lib/remote-window-dual-stream-runtime';
+import {
   applyRemoteWindowInputResultTarget,
   applyRemoteWindowTargetCatalog,
   applyRemoteWindowTargetCatalogSnapshot,
+  attachSameAppCompositeWindows,
   attachRemoteWindowStreamReceiver,
   beginRemoteWindowStreamHandoff,
   beginRemoteWindowStreamSetup,
@@ -113,6 +124,7 @@ interface RemoteWindowOverlayProps {
     sessionId: string,
     streamId: string,
     target: RemoteWindowStreamTargetManifest,
+    revision?: number,
   ) => void;
   stopStream?: (sessionId: string, streamId: string) => unknown;
   requestScreenshot?: (
@@ -334,6 +346,7 @@ const REMOTE_WINDOW_FULLSCREEN_PAN_TAP_THRESHOLD_PX = 8;
 const REMOTE_WINDOW_SECOND_FINGER_UPGRADE_PX = 8;
 
 const REMOTE_WINDOW_CATALOG_UI_TIMEOUT_MS = 20_000;
+const REMOTE_WINDOW_DUAL_STREAM_SWITCH_TIMEOUT_MS = 3_000;
 const REMOTE_WINDOW_CATALOG_PROJECTION_CACHE_TTL_MS = 60_000;
 const REMOTE_WINDOW_ACTIVE_CATALOG_SYNC_INTERVAL_MS = 5_000;
 const REMOTE_WINDOW_THUMBNAIL_REFRESH_INTERVAL_MS = 15_000;
@@ -889,8 +902,32 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const [inputMode, setInputMode] = useState<RemoteWindowInputMode>(() => readRemoteWindowInputMode());
   const inputModeRef = useRef(inputMode);
   const [focusedWindowId, setFocusedWindowId] = useState<string | null>(null);
+  const [dualStreamSwitch, setDualStreamSwitch] = useState<RemoteWindowDualStreamState>({
+    phase: 'focus-committed',
+    revision: 0,
+    activeTargetId: null,
+    pendingTargetId: null,
+    focusStreamId: null,
+    overviewCropTargetId: null,
+    error: null,
+  });
   const compositeOverviewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const compositeThumbCanvasRefs = useRef<Map<string, HTMLCanvasElement | null>>(new Map());
+  // 未收到当前 revision 的 focus-result 时显式结束 crop 状态，避免无限期隐藏主视频。
+  useEffect(() => {
+    if (dualStreamSwitch.phase !== 'overview-crop-visible') {
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setDualStreamSwitch((current) => {
+        if (current.phase !== 'overview-crop-visible') {
+          return current;
+        }
+        return resetRemoteWindowDualStreamSwitch(current);
+      });
+    }, REMOTE_WINDOW_DUAL_STREAM_SWITCH_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [dualStreamSwitch.phase]);
   // 组合推流（background pane）：平铺布局（与 daemon 同算法），供 rAF 绘制与三区 UI 使用
   const compositeLayout = state.phase === 'targetLocked'
     ? resolveRemoteWindowCompositeWindowLayout(state.target)
@@ -1753,6 +1790,18 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     setFloatingOverlayWidthPx(null);
     resetFullscreenViewport();
     setFullscreenDisplayMode(initialFullscreenDisplayMode);
+    // Keep the revision across close: the daemon stream may outlive the
+    // overlay (e.g. background-close where stopStream is not authoritative),
+    // and its focusRevision is not reset. Resetting to 0 would make the next
+    // switch's revision<=daemon focusRevision and be rejected as stale.
+    setDualStreamSwitch((current) => ({
+      ...resetRemoteWindowDualStreamSwitch(current),
+      activeTargetId: null,
+      pendingTargetId: null,
+      focusStreamId: null,
+      overviewCropTargetId: null,
+      error: null,
+    }));
     setState((current) => closeRemoteWindowOverlay(current));
   }, [
     activeSessionId,
@@ -1821,8 +1870,11 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const handleShrink = useCallback(() => {
     lastDefaultFullscreenFillKeyRef.current = null;
     resetFullscreenViewport();
+    // 缩回浮窗时强制退出进行中的双流切流（overview-crop-visible 等），
+    // 防止浮窗残留「video 隐藏 + canvas 无内容」的黑屏状态。
+    setDualStreamSwitch((current) => resetRemoteWindowDualStreamSwitch(current));
     setState((current) => shrinkRemoteWindowOverlay(current));
-  }, [resetFullscreenViewport]);
+  }, [resetFullscreenViewport, setDualStreamSwitch]);
 
   const handleFullscreen = useCallback(() => {
     publishRemoteWindowInputContext();
@@ -2504,6 +2556,24 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           );
         }
       }
+      const crop = compositeOverviewCanvasRef.current;
+      if (crop && focusedWindowSlot && dualStreamSwitch.phase === 'overview-crop-visible') {
+        const ctx = crop.getContext('2d');
+        if (ctx && crop.width > 0 && crop.height > 0) {
+          ctx.clearRect(0, 0, crop.width, crop.height);
+          ctx.drawImage(
+            video,
+            focusedWindowSlot.offsetX,
+            focusedWindowSlot.offsetY,
+            focusedWindowSlot.width,
+            focusedWindowSlot.height,
+            0,
+            0,
+            crop.width,
+            crop.height,
+          );
+        }
+      }
       for (const slot of compositeLayout.windows) {
         const thumb = compositeThumbCanvasRefs.current.get(slot.windowId);
         if (thumb && thumb.width > 0 && thumb.height > 0) {
@@ -2534,7 +2604,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     };
     raf = window.requestAnimationFrame(draw);
     return () => window.cancelAnimationFrame(raf);
-  }, [compositeLayout, receiverMediaStream]);
+  }, [compositeLayout, dualStreamSwitch.phase, focusedWindowSlot, receiverMediaStream]);
 
   useEffect(() => {
     if (lastReportedBodySuppressionRef.current === bodySubscriptionSuppressed) {
@@ -2557,6 +2627,53 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       return undefined;
     }
     return onRemoteWindowMessage((msg) => {
+      if (msg.type === 'remote-window-error') {
+        // Daemon focus-update rejection (stale / invalid / unsupported) must
+        // explicitly end the in-flight switch instead of waiting for the 3s
+        // timeout; otherwise the overlay hangs in focus-updating.
+        if (msg.payload?.streamId && msg.payload.streamId !== activeStreamIdRef.current) {
+          return;
+        }
+        setDualStreamSwitch((current) => {
+          if (current.phase === 'idle' || current.phase === 'focus-committed') {
+            return current;
+          }
+          return failRemoteWindowDualStreamSwitch(
+            current,
+            msg.payload?.message || 'Remote window focus update rejected',
+          );
+        });
+        return;
+      }
+      if (msg.type === 'remote-window-stream-focus-result') {
+        if (msg.payload.streamId !== activeStreamIdRef.current) {
+          return;
+        }
+        setDualStreamSwitch((current) => {
+          const matchesCurrentSwitch = msg.payload.revision === current.revision
+            && msg.payload.targetId === current.pendingTargetId
+            && msg.payload.streamId === current.focusStreamId;
+          if (!matchesCurrentSwitch) {
+            return current;
+          }
+          if (msg.payload.phase === 'accepted') {
+            return markRemoteWindowFocusUpdating(current);
+          }
+          if (msg.payload.phase === 'error') {
+            return failRemoteWindowDualStreamSwitch(
+              current,
+              msg.payload.message || 'Remote window focus update failed',
+            );
+          }
+          if (msg.payload.phase === 'ready') {
+            return commitRemoteWindowFocusProjection(
+              acceptRemoteWindowFocusReady(current, msg.payload),
+            );
+          }
+          return current;
+        });
+        return;
+      }
       if (msg.type !== 'remote-window-input-result' || msg.payload.accepted !== true) {
         return;
       }
@@ -2658,6 +2775,10 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   }, [clearCatalogWatchdog, onBodySubscriptionSuppressedChange, onInputContextChange, onOpenStateChange]);
 
   const handleSelectTarget = useCallback((target: RemoteWindowStreamTargetManifest) => {
+    const catalogTargets = 'targets' in state ? state.targets : [];
+    const effectiveTarget = updateFocus
+      ? attachSameAppCompositeWindows(target, catalogTargets)
+      : target;
     const streamRequestEpoch = ++streamRequestEpochRef.current;
     receiverPlaybackEpochRef.current += 1;
     const previousStreamId = state.phase === 'targetLocked' && state.streamStarted ? state.streamId || null : null;
@@ -2697,7 +2818,10 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     const videoBitrate = buildRemoteWindowVideoBitrateConfig(adaptiveStartBitratePreset);
 
     if (!startStream) {
-      setState((current) => selectRemoteWindowTarget(current, target.streamTargetId));
+      setState((current) => {
+        const selected = selectRemoteWindowTarget(current, target.streamTargetId);
+        return selected.phase === 'targetLocked' ? { ...selected, target: effectiveTarget } : selected;
+      });
       return;
     }
 
@@ -2709,8 +2833,15 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     const previousCanvasStreamId = activeCanvasStreamIdRef.current;
     const previousFocusStreamId = activeFocusStreamIdRef.current;
     const canvasBitrate = buildRemoteWindowVideoBitrateConfig('2mbps');
+    const selectEffectiveTarget = (current: RemoteWindowOverlayState): RemoteWindowOverlayState => {
+      const selected = selectRemoteWindowTarget(current, target.streamTargetId);
+      if (selected.phase !== 'targetLocked') {
+        return selected;
+      }
+      return { ...selected, target: effectiveTarget };
+    };
     const startingState = (current: RemoteWindowOverlayState) => beginRemoteWindowStreamSetup(
-      selectRemoteWindowTarget(current, target.streamTargetId),
+      selectEffectiveTarget(current),
       canvasStreamId,
     );
     const stopStaleStream = (streamIdToStop: string, replacementStreamId: string) => {
@@ -2790,7 +2921,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     // 自动在同一 peerConnection 加第二个 video transceiver（stream id='overview'），
     // daemon 看到 composite target 会同步开 overview capture。overviewMediaStream 用于
     // 缩略图 drawImage + 切换瞬间主画面低清占位（同连接双流不进 canvas 预览流饿死 focus 路径）。
-    void startStream(targetSessionId, target, focusStreamId, {
+    void startStream(targetSessionId, effectiveTarget, focusStreamId, {
       videoBitrate,
       purpose: 'focus',
     })
@@ -3841,9 +3972,6 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       </button>
     );
     const renderAppTargetGroup = (group: RemoteWindowAppTargetGroup) => {
-      if (group.targets.length <= 1) {
-        return renderTargetRow(group.targets[0]);
-      }
       const groupPrimary = group.targets[0];
       const groupSafeId = safeRemoteWindowGroupId(group.groupId);
       return (
@@ -3857,7 +3985,12 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         >
           <span style={styles.targetKind}>App</span>
           <span style={styles.targetMain}>{group.title || group.appBundleId}</span>
-          <span style={styles.targetMeta}>{group.targets.length} 个窗口 · 打开后在视频内切换</span>
+          <span
+            data-testid={`remote-window-target-${groupPrimary.streamTargetId}`}
+            style={styles.targetMeta}
+          >
+            {group.targets.length} 个窗口 · 打开后在视频内切换 · {formatTargetSubtitle(groupPrimary)}
+          </span>
         </button>
       );
     };
@@ -3968,6 +4101,12 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         };
       })()
     : null;
+  const overviewCropVisible = Boolean(
+    overviewMediaStream
+    && compositeLayout
+    && focusedWindowSlot
+    && dualStreamSwitch.phase === 'overview-crop-visible',
+  );
 
   const ztermVideoWallpaper = (
     <div
@@ -3990,6 +4129,24 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       return (
         <>
           {ztermVideoWallpaper}
+          {overviewCropVisible ? (
+            <canvas
+              ref={compositeOverviewCanvasRef}
+              data-testid="remote-window-overview-crop"
+              width={1920}
+              height={1080}
+              style={{
+                ...styles.videoElement,
+                position: 'absolute',
+                inset: 0,
+                width: '100%',
+                height: '100%',
+                objectFit: 'contain',
+                zIndex: 2,
+                opacity: 1,
+              }}
+            />
+          ) : null}
           <video
             data-testid="remote-window-video"
             ref={videoElementRef}
@@ -4019,7 +4176,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
               // videoHasPlayed 被设回 false 导致整画面变黑屏（缩放后 scroll 黑屏）。
               // opacity 由 videoHasPlayed 决定（首帧未到时 0），但 visibility 始终 visible，
               // 让浏览器持续解码新帧不让 video element 被回收，避免下一帧显示空帧。
-              opacity: videoHasPlayed ? 1 : 0,
+              opacity: videoHasPlayed || dualStreamSwitch.phase === 'overview-crop-visible' ? 1 : 0,
               visibility: 'visible',
             }}
           />
@@ -4282,9 +4439,6 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
           : { maxHeight: 'min(52vh, 420px)' }),
       }
     : styles.videoPlaceholder;
-  const lockedWindowGroupLandscape = typeof window === 'undefined'
-    ? false
-    : Math.round(window.visualViewport?.width || window.innerWidth || 0) >= Math.round(window.visualViewport?.height || window.innerHeight || 0);
   const screenshotFeedback = (() => {
     switch (screenshotStatus.phase) {
       case 'capturing':
@@ -4385,7 +4539,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
             onPointerDown={(event) => event.stopPropagation()}
             onPointerMove={(event) => event.stopPropagation()}
           >
-            {compositeLayout.windows.map((slot) => (
+            {compositeLayout.windows.slice(1).map((slot) => (
               <button
                 key={slot.windowId}
                 type="button"
@@ -4398,6 +4552,15 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
                   const focusTarget = state.targets.find(
                     (item) => item.videoTarget.windowId === slot.windowId,
                   );
+                  const switchState = showRemoteWindowOverviewCrop(
+                    beginRemoteWindowDualStreamSwitch(dualStreamSwitch, focusTarget?.streamTargetId || slot.windowId),
+                    focusTarget?.streamTargetId || slot.windowId,
+                    slot.windowId,
+                  );
+                  setDualStreamSwitch({
+                    ...switchState,
+                    focusStreamId: focusStreamId,
+                  });
                   // eslint-disable-next-line no-console
                   console.log(`[remote-window-thumb-click] slot=${slot.windowId} ` +
                     `focusStreamId=${focusStreamId ?? 'NULL'} ` +
@@ -4405,7 +4568,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
                     `updateFocus=${typeof updateFocus}`);
                   if (focusStreamId && focusTarget && updateFocus && activeSessionId) {
                     const focusStart = Date.now();
-                    updateFocus(activeSessionId, focusStreamId, focusTarget);
+                    updateFocus(activeSessionId, focusStreamId, focusTarget, switchState.revision);
                     setTimeout(() => {
                       // eslint-disable-next-line no-console
                       console.log(`[remote-window-thumb-click] updateFocus dispatched (${Date.now() - focusStart}ms)`);
@@ -4489,14 +4652,37 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     }
     const items = lockedAppWindowGroup.targets.map((target) => {
       const active = target.streamTargetId === state.target.streamTargetId;
-      const rect = target.videoTarget.cropRectTopLeftPx || target.videoTarget.windowBoundsTopLeftPx;
       const title = target.videoTarget.title || target.videoTarget.windowId || target.streamTargetId;
       return {
         id: target.streamTargetId,
         testId: `remote-window-video-window-option-${target.streamTargetId}`,
         roleLabel: `切换远程窗口 ${title}`,
-        onPress: active ? undefined : () => handleSelectTarget(target),
-        node: active ? lockedVideoSurfaceNode : (() => {
+        onPress: active ? undefined : () => {
+          const focusStreamId = activeFocusStreamIdRef.current || activeStreamIdRef.current;
+          const focusTarget = target;
+          // eslint-disable-next-line no-console
+          console.log(`[remote-window-group-click] target=${target.streamTargetId} ` +
+            `window=${target.videoTarget.windowId} focusStream=${focusStreamId || '-'} ` +
+            `catalogTargets=${state.targets.length}`);
+          setFocusedWindowId(target.videoTarget.windowId);
+          const switchState = showRemoteWindowOverviewCrop(
+            beginRemoteWindowDualStreamSwitch(dualStreamSwitch, target.streamTargetId),
+            target.streamTargetId,
+            target.videoTarget.windowId,
+          );
+          setDualStreamSwitch({ ...switchState, focusStreamId });
+          if (focusStreamId && focusTarget && updateFocus && activeSessionId) {
+            updateFocus(activeSessionId, focusStreamId, focusTarget, switchState.revision);
+          } else {
+            setDualStreamSwitch((current) => failRemoteWindowDualStreamSwitch(
+              current,
+              !focusStreamId
+                ? 'Remote window focus switch requires an active focus stream'
+                : 'Remote window focus switch target is missing from the catalog',
+            ));
+          }
+        },
+      node: active ? lockedVideoSurfaceNode : (() => {
           const thumbnail = windowThumbnails[target.streamTargetId];
           return (
             <div
@@ -4539,10 +4725,6 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
                   </span>
                 )}
               </div>
-              <div style={styles.videoWindowGroupTileMeta}>
-                <span style={styles.videoWindowGroupTileTitle}>{title}</span>
-                <span style={styles.videoWindowGroupTileSize}>{Math.round(rect.width)}x{Math.round(rect.height)}</span>
-              </div>
             </div>
           );
         })(),
@@ -4557,9 +4739,12 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     return (
       <WindowGroupLayout
         items={items}
-        landscape={lockedWindowGroupLandscape}
+        landscape={false}
         primaryItemId={state.target.streamTargetId}
-        secondaryPlacement={lockedWindowGroupLandscape ? 'after' : 'before'}
+        secondaryPlacement="before"
+        secondaryWrap="nowrap"
+        secondaryItemFlex="0 0 min(30%, 160px)"
+        secondaryOverflowX="auto"
         testId="remote-window-video-window-switcher"
         style={groupStyle}
       />
@@ -4645,6 +4830,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       ref={floatingOverlayRef}
       data-testid="remote-window-locked-overlay"
       data-mode={state.mode}
+      data-dual-stream-phase={dualStreamSwitch.phase}
       data-display-mode={state.mode === 'fullscreen' ? fullscreenDisplayMode : initialFullscreenDisplayMode}
       style={state.mode === 'fullscreen'
         ? fullscreenOverlayStyle
@@ -5595,8 +5781,7 @@ const styles: Record<string, CSSProperties> = {
     height: '100%',
     minHeight: 58,
     display: 'grid',
-    gridTemplateRows: 'minmax(34px, 1fr) auto',
-    gap: 4,
+    gridTemplateRows: 'minmax(34px, 1fr)',
     padding: 4,
     borderRadius: 8,
     border: '1px solid rgba(151, 164, 186, 0.18)',
@@ -5643,30 +5828,6 @@ const styles: Record<string, CSSProperties> = {
     color: 'rgba(237,244,255,0.7)',
     fontSize: 10,
     fontWeight: 900,
-  },
-  videoWindowGroupTileMeta: {
-    minWidth: 0,
-    display: 'grid',
-    gap: 2,
-  },
-  videoWindowGroupTileTitle: {
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontSize: 10,
-    fontWeight: 900,
-    lineHeight: 1.1,
-  },
-  videoWindowGroupTileSize: {
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    color: 'rgba(237,244,255,0.58)',
-    fontSize: 9,
-    fontWeight: 800,
-    lineHeight: 1.1,
   },
   streamFeedbackToast: {
     position: 'absolute',

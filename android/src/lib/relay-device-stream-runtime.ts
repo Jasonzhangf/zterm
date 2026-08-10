@@ -1,5 +1,6 @@
 import type { TraversalRelayClientSettings } from './bridge-settings';
 import type { TraversalRelayDeviceSnapshot } from './types';
+import { dedupeRelayDaemonDeviceSnapshots } from './relay-account-directory';
 import { listOnlineTraversalRelayDaemonDevices } from './traversal-relay-devices';
 import { isTraversalRelayAuthenticationError } from './traversal-relay-client';
 
@@ -63,7 +64,7 @@ export function mergeRelayPresenceWithDirectoryTruth(
       .map((device) => [device.daemon.hostId, device]),
   );
 
-  return listOnlineTraversalRelayDaemonDevices(devices).map((device) => {
+  const mergedDevices = listOnlineTraversalRelayDaemonDevices(devices).map((device) => {
     const directoryDevice = directoryByDeviceId.get(device.deviceId)
       || directoryByHostId.get(device.daemon.hostId);
     if (!directoryDevice) {
@@ -84,6 +85,7 @@ export function mergeRelayPresenceWithDirectoryTruth(
       },
     };
   });
+  return dedupeRelayDaemonDeviceSnapshots(mergedDevices);
 }
 
 export interface RelayDeviceStreamRuntimeDeps {

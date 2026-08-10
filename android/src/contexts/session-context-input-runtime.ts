@@ -332,22 +332,48 @@ function isRetryableReliableInputNack(payload: TerminalInputAckPayload) {
   );
 }
 
+function computeReliableInputRetryDelayMs(attempt: number, baseMs = TERMINAL_RELIABLE_INPUT_RETRY_MS, capMs = 2000) {
+  // 2026-08-09 BUG #2 fix: exponential backoff for reliable input retry.
+  // 1st retry (attempt=1) is immediate (0ms) so an ack-timeout is acted on
+  // without an extra beat of latency. Subsequent retries (attempt=2,3,4,...)
+  // grow exponentially: 500ms → 1000ms → 2000ms (cap). Without this, a daemon
+  // stall keeps triggering backpressure close → retry → close loops at fixed
+  // 500ms cadence and the user sees the connection banner repeatedly.
+  const safeBase = Math.max(50, baseMs);
+  const safeCap = Math.max(safeBase, capMs);
+  const attemptClamped = Math.min(8, Math.max(0, attempt | 0));
+  if (attemptClamped <= 1) {
+    return 0;
+  }
+  const shift = attemptClamped - 2;
+  const delay = Math.min(safeCap, safeBase * (1 << shift));
+  return delay;
+}
+
 function shouldRetryReliableInputInFlight(item: ReliableInputQueueItem, resource: SessionTransportResource) {
   if (item.sentAt === null) {
-    return { retry: false, delayMs: TERMINAL_RELIABLE_INPUT_RETRY_MS, reason: null };
+    return { retry: false, delayMs: computeReliableInputRetryDelayMs(item.attempt), reason: null };
   }
   const ageMs = Math.max(0, Date.now() - item.sentAt);
   const transportChanged = item.sentTargetKey !== resource.targetKey
     || item.sentTransportSocket !== resource.socket;
   if (transportChanged) {
-    return { retry: true, delayMs: TERMINAL_RELIABLE_INPUT_RETRY_MS, reason: 'transport-generation-changed' };
+    return {
+      retry: true,
+      delayMs: computeReliableInputRetryDelayMs(item.attempt + 1),
+      reason: 'transport-generation-changed',
+    };
   }
   if (ageMs >= TERMINAL_RELIABLE_INPUT_ACK_TIMEOUT_MS) {
-    return { retry: true, delayMs: TERMINAL_RELIABLE_INPUT_RETRY_MS, reason: 'ack-timeout' };
+    return {
+      retry: true,
+      delayMs: computeReliableInputRetryDelayMs(item.attempt + 1),
+      reason: 'ack-timeout',
+    };
   }
   return {
     retry: false,
-    delayMs: TERMINAL_RELIABLE_INPUT_RETRY_MS,
+    delayMs: computeReliableInputRetryDelayMs(item.attempt),
     reason: null,
   };
 }
@@ -501,6 +527,25 @@ export function sendInputThroughSessionTransport(options: SendInputTransportOpti
       localRevision,
     );
     for (const chunk of inputChunks) {
+      // 2026-08-09 BUG #3 fix: re-check bufferedAmount after each send so that
+      // an end-of-loop flush doesn't exceed the backpressure threshold without
+      // triggering close. Without this, a long voice commit can drive buffered
+      // bytes far past 128KB before the function returns, leaving the transport
+      // wedged in a high-backpressure state.
+      const chunkBufferedBytes = Number.isFinite(ws.bufferedAmount)
+        ? Math.max(0, Math.floor(ws.bufferedAmount || 0))
+        : 0;
+      if (chunkBufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
+        options.runtimeDebug('session.input.legacy-backpressure', {
+          sessionId: targetSessionId,
+          bufferedBytes: chunkBufferedBytes,
+          thresholdBytes: TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES,
+        });
+        if (ws.readyState < WebSocket.CLOSING) {
+          ws.close(4000, 'input backpressure');
+        }
+        return;
+      }
       options.sendSocketPayload(
         targetSessionId,
         ws,

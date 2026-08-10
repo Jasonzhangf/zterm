@@ -54,6 +54,7 @@ interface RemoteWindowStreamMessageRuntimeLike extends RemoteWindowCatalogMessag
     options: {
       ws: BridgeTransportSocket;
       streamId: string;
+      revision?: number;
       target: RemoteWindowStreamTargetManifest;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     },
@@ -355,6 +356,7 @@ export function updateRemoteWindowStreamQualityRuntime(options: {
 export function updateRemoteWindowFocusRuntime(options: {
   sessionId: string;
   streamId: string;
+  revision?: number;
   target: RemoteWindowStreamTargetManifest;
   sessions: Session[];
   daemonConnection: ClientDaemonConnection;
@@ -374,6 +376,7 @@ export function updateRemoteWindowFocusRuntime(options: {
   options.remoteWindowMessageRuntime.sendStreamUpdateFocus(targetSessionId, {
     ws,
     streamId,
+    revision: options.revision ?? 1,
     target: options.target,
     sendSocketPayload: options.sendSocketPayload,
   });

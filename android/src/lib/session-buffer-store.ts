@@ -7,11 +7,20 @@ export interface SessionBufferStoreSnapshot {
   buffer: SessionBufferState;
 }
 
+export interface SessionBufferStoreCommitOptions {
+  /**
+   * 跳过 store 内第二次 sessionBuffersEqual 全量比较。
+   * 调用方（session-context-buffer-runtime）已在 commit 前比较过，
+   * 传 true 可省一次 O(rows×cols) 逐 cell 比较。
+   */
+  skipEqualCheck?: boolean;
+}
+
 export interface SessionBufferStore {
   getSnapshot: (sessionId: string) => SessionBufferStoreSnapshot;
   subscribe: (sessionId: string, listener: () => void) => () => void;
-  commitBuffer: (sessionId: string, buffer: SessionBufferState) => boolean;
-  setBuffer: (sessionId: string, buffer: SessionBufferState) => boolean;
+  commitBuffer: (sessionId: string, buffer: SessionBufferState, options?: SessionBufferStoreCommitOptions) => boolean;
+  setBuffer: (sessionId: string, buffer: SessionBufferState, options?: SessionBufferStoreCommitOptions) => boolean;
   deleteSession: (sessionId: string) => void;
 }
 
@@ -27,12 +36,43 @@ const EMPTY_SNAPSHOT: SessionBufferStoreSnapshot = {
   buffer: EMPTY_BUFFER,
 };
 
-function cloneBufferLines(lines: SessionBufferState['lines']) {
-  return lines.map((row) => row.map((cell) => ({ ...cell })));
-}
-
 function cloneGapRanges(gapRanges: SessionBufferState['gapRanges']) {
   return gapRanges.map((range) => ({ ...range }));
+}
+
+function gapRangesEqual(
+  left: SessionBufferState['gapRanges'],
+  right: SessionBufferState['gapRanges'],
+) {
+  if (left === right) {
+    return true;
+  }
+  if (left.length !== right.length) {
+    return false;
+  }
+  for (let index = 0; index < left.length; index += 1) {
+    if (
+      left[index]?.startIndex !== right[index]?.startIndex
+      || left[index]?.endIndex !== right[index]?.endIndex
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function cursorEqual(
+  left: SessionBufferState['cursor'],
+  right: SessionBufferState['cursor'],
+) {
+  if (left === right) {
+    return true;
+  }
+  return (
+    (left?.rowIndex ?? null) === (right?.rowIndex ?? null)
+    && (left?.col ?? null) === (right?.col ?? null)
+    && (left?.visible ?? null) === (right?.visible ?? null)
+  );
 }
 
 function cloneCursor(cursor: SessionBufferState['cursor']) {
@@ -46,12 +86,30 @@ function cloneCursor(cursor: SessionBufferState['cursor']) {
   };
 }
 
-function cloneSessionBuffer(buffer: SessionBufferState): SessionBufferState {
+/**
+ * 行级复用 clone：未变行（引用相同）复用 previous 引用，变化行才深拷贝。
+ * 前置契约：commit 的 buffer 必须来自 immutable 的 applyBufferSyncToSessionBuffer，
+ * 调用方 commit 后不得原地修改任何行内容。行引用不变 = 内容不变。
+ * 与 session-render-buffer-store.cloneRenderBuffer 保持一致。
+ */
+function cloneSessionBuffer(
+  buffer: SessionBufferState,
+  previous?: SessionBufferStoreSnapshot | null,
+): SessionBufferState {
   return {
     ...buffer,
-    lines: cloneBufferLines(buffer.lines),
-    gapRanges: cloneGapRanges(buffer.gapRanges),
-    cursor: cloneCursor(buffer.cursor),
+    lines: buffer.lines.map((row, index) => {
+      const previousRow = previous?.buffer.lines[index] || null;
+      return previousRow && row === previousRow
+        ? previousRow
+        : row.map((cell) => ({ ...cell }));
+    }),
+    gapRanges: previous && gapRangesEqual(buffer.gapRanges, previous.buffer.gapRanges)
+      ? previous.buffer.gapRanges
+      : cloneGapRanges(buffer.gapRanges),
+    cursor: previous && cursorEqual(buffer.cursor, previous.buffer.cursor)
+      ? previous.buffer.cursor
+      : cloneCursor(buffer.cursor),
   };
 }
 
@@ -89,27 +147,27 @@ export function createSessionBufferStore(): SessionBufferStore {
     }
   };
 
-  const commitBuffer = (sessionId: string, buffer: SessionBufferState) => {
+  const commitBuffer = (sessionId: string, buffer: SessionBufferState, options?: SessionBufferStoreCommitOptions) => {
     const previous = snapshots.get(sessionId);
-    if (previous && sessionBuffersEqual(previous.buffer, buffer)) {
+    if (!options?.skipEqualCheck && previous && sessionBuffersEqual(previous.buffer, buffer)) {
       return false;
     }
     snapshots.set(sessionId, {
       revision: (previous?.revision || 0) + 1,
-      buffer: cloneSessionBuffer(buffer),
+      buffer: cloneSessionBuffer(buffer, previous),
     });
     notify(sessionId);
     return true;
   };
 
-  const setBuffer = (sessionId: string, buffer: SessionBufferState) => {
+  const setBuffer = (sessionId: string, buffer: SessionBufferState, options?: SessionBufferStoreCommitOptions) => {
     const previous = snapshots.get(sessionId);
-    if (previous && sessionBuffersEqual(previous.buffer, buffer)) {
+    if (!options?.skipEqualCheck && previous && sessionBuffersEqual(previous.buffer, buffer)) {
       return false;
     }
     snapshots.set(sessionId, {
       revision: (previous?.revision || 0) + 1,
-      buffer: cloneSessionBuffer(buffer),
+      buffer: cloneSessionBuffer(buffer, previous),
     });
     notify(sessionId);
     return true;

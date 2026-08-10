@@ -57,6 +57,7 @@ export interface SessionReconnectStore {
   clearStaleTransportProbe: (sessionId: string) => void;
   deleteSession: (sessionId: string) => void;
   clearAll: () => void;
+  sessionIds: () => string[];
   values: () => IterableIterator<SessionReconnectRuntime>;
 }
 
@@ -206,6 +207,7 @@ export function createSessionReconnectStore(): SessionReconnectStore {
       manualClosedSessions.clear();
       staleTransportProbeAt.clear();
     },
+    sessionIds: () => [...runtimes.keys()],
     values: () => runtimes.values(),
   };
 }

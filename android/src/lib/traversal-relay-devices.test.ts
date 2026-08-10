@@ -172,4 +172,48 @@ describe('traversal-relay-devices truth', () => {
 
     expect(projected).toEqual([]);
   });
+
+  it('projects one online machine when account and directory use different device ids for one daemon host', () => {
+    const projected = projectOnlineTraversalRelayDaemonDevicesFromAccount({
+      directory: {
+        version: 1,
+        devices: [{
+          deviceId: 'old-registration',
+          deviceName: 'Old Mac Name',
+          platform: 'darwin',
+          appVersion: '0.1.3',
+          client: { connected: false, lastSeenAt: '2026-08-10T00:00:00Z' },
+          daemon: {
+            hostId: 'mac-studio',
+            version: '0.1.3',
+            presence: { connected: true, lastSeenAt: '2026-08-10T00:00:00Z' },
+            endpoints: [],
+            sessions: [],
+          },
+        }],
+        updatedAt: '2026-08-10T00:00:00Z',
+      },
+      devices: [{
+        deviceId: 'current-registration',
+        deviceName: 'Current Mac Name',
+        platform: 'darwin',
+        appVersion: '0.1.3',
+        updatedAt: '2026-08-10T00:00:01Z',
+        client: { connected: false, lastSeenAt: '2026-08-10T00:00:01Z' },
+        daemon: {
+          connected: true,
+          lastSeenAt: '2026-08-10T00:00:01Z',
+          hostId: 'mac-studio',
+          version: '0.1.3',
+          sessions: [{ name: 'shell', updatedAt: '2026-08-10T00:00:01Z' }],
+        },
+      }],
+    } as any);
+
+    expect(projected).toHaveLength(1);
+    expect(projected[0]).toMatchObject({
+      deviceId: 'current-registration',
+      daemon: { hostId: 'mac-studio', sessions: [{ name: 'shell' }] },
+    });
+  });
 });

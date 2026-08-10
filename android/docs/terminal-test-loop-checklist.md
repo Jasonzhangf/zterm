@@ -177,6 +177,11 @@ tmux oracle
 10. keyboard 弹起时 QuickBar shell rows 始终可见，不被 IME 盖住
 11. keyboard 弹起时 header 顶部 inset 不会突然变大，不会出现顶部空白被多算一遍
 12. keyboard 弹起 / reconnect / 前后台恢复后，tmux rows 不会被 Android UI 容器高度改写
+13. **长语音 commit 期间**：单次 IME `input` 回调到 `ws.send()` 的同步链不得超过一个微任务周期；同步链累计阻塞不得超过 16ms
+14. **长语音 commit 期间**：`session-context-socket-runtime.startSocketHeartbeat` 在 `ws.readyState !== OPEN` 时必须显式重置 `consecutiveMisses` 和 `lastObservedServerActivityAt`
+15. **长语音 commit 期间**：`session-context-input-runtime` backpressure close 后 reliable 协议路径必须有指数 backoff，禁止 close → 立即 retry 死循环
+16. **长语音 commit 期间**：`session-context-input-runtime` flush 期间每次 send 后必须重读 `ws.bufferedAmount`，不允许只在函数入口读一次
+17. **长语音 commit 期间**：`TerminalPage.tsx` IME `input` listener 与 `emitRemoteWindowInputEvents` 串行竞态时，remote-window overlay 中间态必须 fallback 到 terminal input 并 log warning
 
 ### Group D.1 prompt / input row parity
 
@@ -207,6 +212,7 @@ tmux oracle
 4. daemon shutdown 会统一回收 logical session / transport / mirror
 5. same target multi-session 时，一个 session 的旧 transport 卡住不会挡住兄弟 session
 6. foreground / active re-entry 复用原 session transport；若 socket 仍为 `OPEN`，只允许 request-head / ping 观测，不得因安静或 stale activity reconnect
+7. `session-context-socket-runtime.startSocketHeartbeat` 在 socket 切换 / 重新 attach 后，必须显式重置 heartbeat 内部状态（`consecutiveMisses`、`lastObservedServerActivityAt`），不得让旧 socket 的 timeout 状态污染新 socket
 
 ### Group F. APK smoke
 
@@ -304,6 +310,82 @@ tmux oracle
 2. reconnect 是不是又在走 “new ws + new logical session” 而不是 same-session retry
 3. daemon ws close 时是不是把 logical client session 直接删了
 4. 同 host 多 tab 是否被错误串进同一个重连闸门，导致 active tab 被 hidden tab 阻塞
+
+### 5.9 长语音 commit 后立即出现 “连接已断开，正在重连” banner
+
+优先查：
+
+1. `session-context-socket-runtime.startSocketHeartbeat` 在 `ws.readyState !== OPEN` 期间是否冻结了 `consecutiveMisses`（BUG #1）
+2. `session-context-input-runtime` backpressure close 后是否进入死循环 retry（BUG #2）
+3. `session-context-input-runtime` flush 期间 `bufferedAmount` 实际累积是否超出阈值但函数未感知（BUG #3）
+4. main thread 是否被同步 IME commit 链阻塞超过 16ms（BUG #4）
+5. remote-window overlay 中间态是否吞掉 IME input（BUG #5）
+
+### 5.10 无串流时 UI 也卡 / 输入延迟高（性能专项）
+
+真机判断口径：`adb shell dumpsys gfxinfo com.zterm.android` 看
+`Number High input latency` 与 janky 占比；`dumpsys meminfo` 看设备剩余内存
+（< 1G free 时 WebView GC 会放大 JS 热点）。
+
+静态热点按优先级排查（每个 wire buffer-sync frame 触发一次）：
+
+1. **P0 `session-buffer-store.commitBuffer` 必须行级复用**：禁止对全部行做
+   `row.map(cell => ({...cell}))` 全量深拷贝；未变行（`row === previousRow`）
+   必须复用引用（与 `session-render-buffer-store.cloneRenderBuffer` 一致）。
+   前置契约：commit 的 buffer 必须来自 immutable 的 `applyBufferSyncToSessionBuffer`，
+   调用方 commit 后不得原地修改任何行内容。
+2. **P1 双重 `sessionBuffersEqual` 必须去重**：`session-context-buffer-runtime`
+   在 commit 前已做全量比较，`commitBuffer({ skipEqualCheck: true })` 必须跳过
+   store 内第二次 O(rows×cols) 比较。
+3. **P1 渲染签名禁止按行引用缓存**（⚠ 曾引入后回滚）：`terminalRowRenderSignature`
+   必须每帧从真实内容重算。禁止 `WeakMap<row, signature>` 按行引用缓存——
+   bottom-stale 回归契约要求「行引用不变但 cell 内容（如 bg）原地变化」时
+   签名必须变化并触发重绘；行引用不可变假设在 mirror 原地 mutate 路径上
+   不成立，缓存会导致 vim/htop 底部状态区样式更新丢失。签名重算成本远低于
+   P0/P1a 已消除的深拷贝与双重比较。
+
+防复发 gate：性能回归测试锁定「未变行引用复用」「skipEqualCheck 行为」
+「签名内容敏感（原地 mutate 必须变签名）」，任一被打破即 FAIL。
+
+### 5.11 copy 长按选择的取消路径（左侧长按选择中间/上面/下面后无法取消）
+
+交互契约：
+
+1. copy 模式中已有选择高亮（起点或终点已设）或菜单弹出时，**在终端行上
+   短按（pointerdown→pointerup，未达长按阈值 420ms）必须取消整个选择**
+   （调 `onCopySelectionDismiss` → `handleCloseCopyMenu` → EMPTY）。
+   长按（达阈值）仍然是「弹出菜单/重新选择」，二者不冲突。
+2. `TerminalPageCopyMenu` 必须渲染全屏透明 backdrop（zIndex 低于菜单），
+   点菜单外任意位置触发 `onClose` 取消；菜单本体 `onPointerDown`
+   preventDefault+stopPropagation 防穿透。
+3. 取消后必须 `keepTerminalInputFocused()` 恢复输入焦点。
+
+防复发 gate：取消路径红测（短按取消 / backdrop 关闭 / 取消后焦点恢复）
+任一被打破即 FAIL。禁止恢复「短按无反应」或「菜单只能靠关闭按钮退出」。
+
+### 5.12 remote-window 缩小后滚动黑屏（双流切流卡死无兜底）
+
+根因：双流模式点缩略图/窗口 tile 切 focus 进入 `overview-crop-visible` 后，
+video opacity 被置 0、画面完全交给 crop canvas；而 canvas 绘制依赖
+`video.readyState >= 2` 与 focus-result 消息（accepted/ready）到达，
+runtime 状态机无任何超时兜底——消息因 streamId/targetId/revision 不匹配被吞
+（见 MEMORY：streamTargetId 与 windowId 混用）即**永久卡在 overview-crop-visible，
+video 恒 opacity 0 = 黑屏**；`handleShrink` 缩回浮窗也不重置切流状态。
+
+修复契约：
+
+1. **video 不再因 `overviewCropVisible` 置 opacity 0**：crop canvas 是
+   绝对定位透明层，未绘制时透出 video；已绘制时覆盖放大图。video 可见性
+   只由 `videoHasPlayed` 控制（2d4bdda visibility 锁可见仍保留）。
+2. **切流超时兜底**：进入 `overview-crop-visible` 后 3s 未收到
+   accepted/ready/error → `resetRemoteWindowDualStreamSwitch` 回
+   `focus-committed`（保留 activeTargetId），video 恢复显示。
+3. **`handleShrink` 重置切流状态**：缩回浮窗时强制退出
+   switch-requested/overview-crop-visible/focus-updating/focus-ready/error。
+
+防复发 gate：`remote-window-dual-stream-runtime.test.ts` 锁 reset 行为；
+`RemoteWindowOverlay.test.tsx` 锁「切流中 video opacity 保持 1（canvas 透明层）」
+「3s 超时回 focus-committed」「shrink 重置切流状态」，任一被打破即 FAIL。
 
 ---
 
@@ -453,3 +535,47 @@ tmux oracle
 - 不需要等下次刷新顺带出来
 
 只要需要这些额外动作，都算没修好。
+
+### 9.3 长语音 commit 期间 transport 异常专项口径
+
+“语音输入法一次性提交 100+ 字符”不是边角 case，必须视为 input + transport 主链的并行约束。
+
+**触发特征**：用户报告 “终端提示 连接已断开，正在重连 / Tmux session unavailable” banner，但物理 socket 实际仍连；reconnect banner 出现在长语音 commit 完成后 1-5 秒内，daemon `/debug/runtime` 显示 transport subscribers list 可能在 banner 出现时已 stale。
+
+**唯一 owner**：`terminal.transport_lifecycle`（`src/contexts/session-context-socket-runtime.ts` + `src/contexts/session-context-input-runtime.ts`）；**禁止**在 IME 入口（`TerminalPage.tsx`）做 “屏蔽 reconnect” / “fake banner” 这类补偿；**禁止** 在 renderer / buffer manager / daemon mirror owner 修正 transport 行为。
+
+**验收标准（不能有任何一条被触发）**：
+
+1. 长语音 commit 期间 main thread 单次 IME `input` 回调到 `ws.send()` 同步链不得超过一个微任务周期（不超过 1ms 同步执行 + 后续异步投递）；同步链累计阻塞不得超过 16ms（单帧）
+2. 长语音 commit 期间，`session-context-socket-runtime.startSocketHeartbeat` 计时器在 `ws.readyState !== OPEN` 时必须显式重置 `consecutiveMisses` 和 `lastObservedServerActivityAt`；不允许依赖 “reopen 后下一轮 ping 触发” 的隐式行为
+3. `session-context-input-runtime` backpressure close（`ws.close(4000, 'input backpressure')`）后，reliable 协议路径必须有指数 backoff（最小 100ms、封顶 2000ms），禁止 close → 立即 retry 死循环
+4. `session-context-input-runtime` flush 期间，每次 send 后必须重读 `ws.bufferedAmount`，不允许只在函数入口读一次
+5. `TerminalPage.tsx` IME `input` listener 与 `emitRemoteWindowInputEvents` 串行竞态时，若 remote-window overlay 处于 opening/closing 中间状态，必须 fallback 到 terminal input 并 log warning，不允许直接吞掉
+
+**对应 bugs（2026-08-09 16:30 CST code review 定位）**：
+
+- BUG #1：`session-context-socket-runtime.ts:94-128` heartbeat close 期间 miss 冻结
+- BUG #2：`session-context-input-runtime.ts:256-269` reliable backpressure 无 backoff 死循环
+- BUG #3：`session-context-input-runtime.ts:240-301` flush 期间不重读 bufferedAmount
+- BUG #4：`TerminalPage.tsx:2640-2652` IME input listener 同步阻塞 main thread
+- BUG #5：`TerminalPage.tsx:2642-2647` remote-window 与 IME input 串行竞态
+
+**必跑回归组**：
+
+- `pnpm --dir android run test:feature-registry`
+- `pnpm --dir android exec vitest run src/contexts/session-context-socket-runtime.test.ts`
+- `pnpm --dir android exec vitest run src/contexts/session-context-input-runtime.test.ts`
+- `pnpm --dir android exec vitest run src/pages/TerminalPage.android-ime.test.tsx`
+- `pnpm --dir android exec tsc -p tsconfig.json --noEmit --pretty false`
+- `pnpm --dir android run terminal:source-dom-gate`
+- L5：Android 16 真机手动按语音键说 30s 中文，复现后立刻抓 `logcat -b main,system` + `curl /debug/runtime` + zterm debug overlay 三路对齐
+
+### 9.4 现场问题映射（5.9 长语音 commit 后立即出现 banner）
+
+优先检查：
+
+1. `ws.readyState !== OPEN` 期间 heartbeat 计时器状态是否被冻结（BUG #1）
+2. backpressure close 后是否进入死循环 retry（BUG #2）
+3. flush 期间 bufferedAmount 实际累积是否超出阈值但函数未感知（BUG #3）
+4. main thread 是否被同步 IME commit 链阻塞超过 16ms（BUG #4）
+5. remote-window overlay 中间态是否吞掉 IME input（BUG #5）

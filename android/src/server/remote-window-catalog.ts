@@ -26,6 +26,7 @@ export interface MacosAppWindow {
   pid: number;
   title: string;
   frame: RemoteWindowStreamRect;
+  contentFrame?: RemoteWindowStreamRect;
   displayId?: string;
   displayBoundsTopLeftPx?: RemoteWindowStreamRect;
 }
@@ -372,6 +373,10 @@ export function buildMacosAppWindowTargets(
 ): RemoteWindowStreamTargetManifest[] {
   return catalog.windows.map((window) => {
     const windowFrame = validateRect(window.frame, `app-window:${window.windowId}`);
+    // ScreenCaptureKit 的 desktopIndependentWindow 坐标真源是窗口 frame。
+    // AX contentFrame 可能保留独立的 title-bar 偏移，不能直接作为该 capture
+    // source 的 crop rect；否则 crop 会落到 windowBounds 之外，focus update 必失败。
+    const cropRect = windowFrame;
     return {
       streamTargetId: `app-window:${window.pid}:${window.windowId}`,
       videoTarget: {
@@ -382,7 +387,7 @@ export function buildMacosAppWindowTargets(
         windowId: window.windowId,
         title: window.title || window.ownerName || window.appBundleId || `Window ${window.windowId}`,
         windowBoundsTopLeftPx: windowFrame,
-        cropRectTopLeftPx: windowFrame,
+        cropRectTopLeftPx: cropRect,
       },
       inputTarget: {
         kind: 'app-window',

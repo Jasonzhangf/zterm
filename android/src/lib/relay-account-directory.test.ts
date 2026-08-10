@@ -194,4 +194,58 @@ describe('relay account directory runtime', () => {
       },
     ]);
   });
+
+  it('deduplicates same daemon host rows and retains the row carrying session truth', () => {
+    const directory = normalizeRelayAccountDirectory({
+      ...directoryPayload,
+      devices: [
+        {
+          ...directoryPayload.devices[0],
+          deviceId: 'old-registration',
+          deviceName: 'Old Mac Name',
+          daemon: {
+            ...directoryPayload.devices[0].daemon,
+            endpoints: [],
+            sessions: [],
+          },
+        },
+        {
+          ...directoryPayload.devices[0],
+          deviceId: 'current-registration',
+          deviceName: 'Current Mac Name',
+        },
+      ],
+    });
+
+    const snapshots = projectRelayDirectoryDeviceSnapshots(directory);
+
+    expect(snapshots).toHaveLength(1);
+    expect(snapshots[0]).toMatchObject({
+      deviceId: 'current-registration',
+      deviceName: 'Current Mac Name',
+      daemon: {
+        hostId: 'daemon-host',
+        sessions: [{ name: 'main' }],
+      },
+    });
+  });
+
+  it('keeps different daemon hosts as separate machine rows', () => {
+    const directory = normalizeRelayAccountDirectory({
+      ...directoryPayload,
+      devices: [
+        directoryPayload.devices[0],
+        {
+          ...directoryPayload.devices[0],
+          deviceId: 'second-daemon',
+          daemon: {
+            ...directoryPayload.devices[0].daemon,
+            hostId: 'second-host',
+          },
+        },
+      ],
+    });
+
+    expect(projectRelayDirectoryDeviceSnapshots(directory)).toHaveLength(2);
+  });
 });

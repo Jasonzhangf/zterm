@@ -23,6 +23,7 @@ export type RemoteWindowControlMessage = Extract<
   | { type: 'remote-window-stream-started' }
   | { type: 'remote-window-stream-ice-candidate' }
   | { type: 'remote-window-stream-status' }
+  | { type: 'remote-window-stream-focus-result' }
   | { type: 'remote-window-stream-quality-result' }
   | { type: 'remote-window-input-result' }
   | { type: 'remote-window-error' }
@@ -67,6 +68,7 @@ export function isRemoteWindowControlMessage(msg: ServerMessage): msg is RemoteW
     || msg.type === 'remote-window-stream-started'
     || msg.type === 'remote-window-stream-ice-candidate'
     || msg.type === 'remote-window-stream-status'
+    || msg.type === 'remote-window-stream-focus-result'
     || msg.type === 'remote-window-stream-quality-result'
     || msg.type === 'remote-window-input-result'
     || msg.type === 'remote-window-error';
@@ -236,6 +238,7 @@ export function createRemoteWindowMessageRuntime(input?: {
     requestStreamStart(sessionId: string, options: {
       ws: BridgeTransportSocket;
       streamId: string;
+      revision?: number;
       target: RemoteWindowStreamTargetManifest;
       purpose?: RemoteWindowStreamPurpose;
       offer: RemoteWindowStreamRtcDescription;
@@ -309,6 +312,7 @@ export function createRemoteWindowMessageRuntime(input?: {
     sendStreamUpdateFocus(sessionId: string, options: {
       ws: BridgeTransportSocket;
       streamId: string;
+      revision?: number;
       target: RemoteWindowStreamTargetManifest;
       sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
     }) {
@@ -322,6 +326,7 @@ export function createRemoteWindowMessageRuntime(input?: {
         payload: {
           requestId: `rw-focus-${now()}-${Math.random().toString(36).slice(2, 8)}`,
           streamId,
+          revision: options.revision ?? 1,
           target: options.target,
         },
       });
@@ -511,6 +516,9 @@ export function createRemoteWindowMessageRuntime(input?: {
         return handled || observed;
       }
       if (msg.type === 'remote-window-stream-quality-result') {
+        return notifySubscribers(msg);
+      }
+      if (msg.type === 'remote-window-stream-focus-result') {
         return notifySubscribers(msg);
       }
       if (msg.type === 'remote-window-input-result') {

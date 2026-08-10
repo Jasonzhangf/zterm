@@ -227,10 +227,12 @@ export function createSessionInteractionRuntime(options: {
     sessionId: string,
     streamId: string,
     target: RemoteWindowStreamTargetManifest,
+    revision?: number,
   ) => {
     return updateRemoteWindowFocusRuntime({
       sessionId,
       streamId,
+      revision,
       target,
       sessions: options.refs.stateRef.current.sessions,
       daemonConnection,

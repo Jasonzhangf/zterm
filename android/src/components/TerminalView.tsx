@@ -123,6 +123,7 @@ interface TerminalViewProps {
     clientX: number,
     clientY: number,
   ) => void;
+  onCopySelectionDismiss?: () => void;
   splitVisible?: boolean;
   reserveRightEdgeSwipe?: boolean;
   projectionMode?: "terminal" | "preview-primary" | "preview-secondary";
@@ -150,7 +151,7 @@ function terminalRowToText(
   return row.map(terminalCellToText).join("").replace(/\s+$/u, "");
 }
 
-function terminalRowRenderSignature(
+export function terminalRowRenderSignature(
   row: Array<{
     char?: number;
     fg?: number;
@@ -162,6 +163,10 @@ function terminalRowRenderSignature(
   if (!Array.isArray(row)) {
     return "";
   }
+  // 注意：禁止按「行引用」缓存签名。既有回归契约（bottom-stale）要求
+  // 行引用不变但 cell 内容（如 bg）原地变化时也必须反映到签名并重绘；
+  // 行引用不可变假设在 mirror 原地 mutate 路径上不成立。签名必须每帧
+  // 从真实内容重算（成本远低于 P0 已消除的深拷贝 + 双重全量比较）。
   return row
     .map((cell) =>
       cell
@@ -282,6 +287,7 @@ function TerminalViewComponent({
   copyStartRowIndex = null,
   copyEndRowIndex = null,
   copyPreviewRowIndex = null,
+  onCopySelectionDismiss,
   onLongPressRow,
   splitVisible = false,
   reserveRightEdgeSwipe = false,
@@ -615,6 +621,28 @@ function TerminalViewComponent({
     },
     [cancelCopyLongPress],
   );
+  /**
+   * pointerup/touchend 短按取消：若本次按下未达长按阈值（timer 仍活跃）且
+   * 当前已有选择高亮或菜单弹出，则取消整个 copy selection（含菜单）。
+   * 长按（timer 已触发并清空）不取消——弹菜单/重新选择语义不变。
+   */
+  const handleCopyRowPointerUp = useCallback(() => {
+    const timerWasActive = longPressTimerRef.current !== null;
+    cancelCopyLongPress();
+    if (
+      timerWasActive &&
+      (copyStartRowIndex !== null || copyEndRowIndex !== null || copyPreviewRowIndex !== null) &&
+      onCopySelectionDismiss
+    ) {
+      onCopySelectionDismiss();
+    }
+  }, [
+    cancelCopyLongPress,
+    copyEndRowIndex,
+    copyPreviewRowIndex,
+    copyStartRowIndex,
+    onCopySelectionDismiss,
+  ]);
   const suppressNativeCopyMenu = useCallback((event: React.SyntheticEvent<HTMLElement>) => {
     if (!copyModeActive) {
       return;
@@ -2389,8 +2417,8 @@ function TerminalViewComponent({
                 onTouchMove={
                   copyModeActive ? handleCopyLongPressTouchMove : undefined
                 }
-                onPointerUp={copyModeActive ? cancelCopyLongPress : undefined}
-                onTouchEnd={copyModeActive ? cancelCopyLongPress : undefined}
+                onPointerUp={copyModeActive ? handleCopyRowPointerUp : undefined}
+                onTouchEnd={copyModeActive ? handleCopyRowPointerUp : undefined}
                 onPointerCancel={
                   copyModeActive ? cancelCopyLongPress : undefined
                 }

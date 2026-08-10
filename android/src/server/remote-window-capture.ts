@@ -24,6 +24,8 @@ export interface RemoteWindowCompositeLayoutWindow {
   cropRect: { x: number; y: number; width: number; height: number };
   offsetX: number;
   offsetY: number;
+  outputWidth: number;
+  outputHeight: number;
 }
 
 export interface RemoteWindowCompositeLayout {
@@ -32,7 +34,7 @@ export interface RemoteWindowCompositeLayout {
   canvasHeight: number;
 }
 
-// 同 app 多窗口组合推流：平铺布局（单行：Σ宽 × max高）
+// 同 app 多窗口组合推流：固定 1920x1080 总览画布，窗口按整体比例 fit 后平铺。
 export function resolveRemoteWindowCompositeLayout(
   target: RemoteWindowStreamTargetManifest,
 ): RemoteWindowCompositeLayout | null {
@@ -50,23 +52,39 @@ export function resolveRemoteWindowCompositeLayout(
     windowBounds: w.windowBoundsTopLeftPx,
     cropRect: w.cropRectTopLeftPx ?? w.windowBoundsTopLeftPx,
   }))];
+  const uniqueWindows = windows.filter((window, index) => (
+    windows.findIndex((candidate) => candidate.windowId === window.windowId) === index
+  ));
+  if (uniqueWindows.length <= 1) {
+    return null;
+  }
+  const canvasWidth = 1920;
+  const canvasHeight = 1080;
+  const totalWidth = uniqueWindows.reduce((sum, window) => sum + Math.max(1, window.cropRect.width), 0);
+  const maxHeight = uniqueWindows.reduce((max, window) => Math.max(max, Math.max(1, window.cropRect.height)), 1);
+  const scale = Math.min(1, canvasWidth / totalWidth, canvasHeight / maxHeight);
   let offsetX = 0;
-  let canvasHeight = 0;
-  const laidOut = windows.map((w) => {
+  const laidOut = uniqueWindows.map((w) => {
     const win: RemoteWindowCompositeLayoutWindow = {
       windowId: w.windowId,
       windowBounds: w.windowBounds,
       cropRect: w.cropRect,
       offsetX,
       offsetY: 0,
+      outputWidth: 0,
+      outputHeight: 0,
     };
-    offsetX += Math.max(1, Math.round(w.cropRect.width));
-    canvasHeight = Math.max(canvasHeight, Math.round(w.cropRect.height));
+    win.cropRect = {
+      ...w.cropRect,
+    };
+    win.outputWidth = Math.max(1, Math.round(w.cropRect.width * scale));
+    win.outputHeight = Math.max(1, Math.round(w.cropRect.height * scale));
+    offsetX += win.outputWidth;
     return win;
   });
   return {
     windows: laidOut,
-    canvasWidth: offsetX,
+    canvasWidth,
     canvasHeight,
   };
 }
@@ -91,6 +109,7 @@ export type RemoteWindowCaptureSourceFactory = (
     frameRate: number;
     startupTimeoutMs: number;
     swiftBinary: string;
+    captureBinary?: string;
     onFrame: (frame: RemoteWindowCaptureFrame) => void;
     onError: (error: Error) => void;
   },
@@ -191,9 +210,13 @@ export function buildScreenCaptureKitConfig(target: RemoteWindowStreamTargetMani
       cropRect: w.cropRect,
       offsetX: w.offsetX,
       offsetY: w.offsetY,
+      outputWidth: w.outputWidth,
+      outputHeight: w.outputHeight,
     })),
     canvasWidth: compositeLayout?.canvasWidth,
     canvasHeight: compositeLayout?.canvasHeight,
+    outputWidth: compositeLayout?.windows[0]?.outputWidth,
+    outputHeight: compositeLayout?.windows[0]?.outputHeight,
   };
 }
 
@@ -239,12 +262,22 @@ export function startScreenCaptureKitFrameSource(
     frameRate: number;
     startupTimeoutMs: number;
     swiftBinary: string;
+    captureBinary?: string;
     onFrame: (frame: RemoteWindowCaptureFrame) => void;
     onError: (error: Error) => void;
   },
 ): Promise<RemoteWindowCaptureFrameSource> {
   let captureConfig = buildScreenCaptureKitConfig(target, options.frameRate);
-  const child = spawn(options.swiftBinary, ['-swift-version', '5', '-e', SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT], {
+  const child = (options.captureBinary
+    ? spawn(options.captureBinary, [], {
+      env: {
+        ...process.env,
+        ZTERM_REMOTE_WINDOW_CAPTURE_CONFIG: JSON.stringify(captureConfig),
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+      detached: true,
+    })
+    : spawn(options.swiftBinary, ['-swift-version', '5', '-e', SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT], {
     env: {
       ...process.env,
       ZTERM_REMOTE_WINDOW_CAPTURE_CONFIG: JSON.stringify(captureConfig),
@@ -252,7 +285,7 @@ export function startScreenCaptureKitFrameSource(
     stdio: ['pipe', 'pipe', 'pipe'],
     // detached 独立进程组：stop 时按进程组杀，避免 swift-frontend 子进程变孤儿残留
     detached: true,
-  }) as RemoteWindowCaptureChildProcess;
+  })) as RemoteWindowCaptureChildProcess;
   let stdoutBuffer = Buffer.alloc(0);
   let stderrBuffer = '';
   let stderrLineBuffer = '';
@@ -310,6 +343,7 @@ export function startScreenCaptureKitFrameSource(
     const command = {
       kind: 'update-config',
       seq,
+      windowId: nextConfig.windowId,
       windowBounds: nextConfig.windowBounds,
       cropRect: nextConfig.cropRect,
       frameRate: nextConfig.frameRate,
@@ -317,6 +351,8 @@ export function startScreenCaptureKitFrameSource(
       compositeWindows: nextConfig.compositeWindows,
       canvasWidth: nextConfig.canvasWidth,
       canvasHeight: nextConfig.canvasHeight,
+      outputWidth: nextConfig.outputWidth,
+      outputHeight: nextConfig.outputHeight,
     };
     const ack = await new Promise<RemoteWindowCaptureUpdateAck>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -369,6 +405,7 @@ export function startScreenCaptureKitFrameSource(
   }, Math.max(1, options.startupTimeoutMs));
 
   function fail(error: Error) {
+    console.error(`[remote-window-capture] ${error.message}`);
     if (!firstFrameResolved) {
       clearTimeout(startupTimer);
       frameSource.stop();
@@ -398,7 +435,9 @@ export function startScreenCaptureKitFrameSource(
     stdoutBuffer = Buffer.concat([stdoutBuffer, chunk]);
     while (stdoutBuffer.length >= 16) {
       if (!stdoutBuffer.subarray(0, 4).equals(REMOTE_WINDOW_CAPTURE_FRAME_MAGIC)) {
-        fail(new Error('ScreenCaptureKit frame stream header mismatch'));
+        fail(new Error(
+          `ScreenCaptureKit frame stream header mismatch bytes=${stdoutBuffer.subarray(0, 16).toString('hex')}`,
+        ));
         return;
       }
       const width = stdoutBuffer.readUInt32LE(4);
@@ -475,9 +514,13 @@ export function startScreenCaptureKitFrameSource(
     if (stopped) {
       return;
     }
-    rejectPendingCaptureUpdates(new Error(`ScreenCaptureKit capture process exited code=${code ?? 'null'} signal=${signal ?? 'null'}`));
-    const detail = truncateRemoteWindowErrorMessage(stderrBuffer || `capture process exited code=${code ?? 'null'} signal=${signal ?? 'null'}`);
-    fail(new Error(`ScreenCaptureKit capture process exited: ${detail}`));
+    const exitDetail = `code=${code ?? 'null'} signal=${signal ?? 'null'}`;
+    rejectPendingCaptureUpdates(new Error(`ScreenCaptureKit capture process exited ${exitDetail}`));
+    const stderrDetail = truncateRemoteWindowErrorMessage(stderrBuffer);
+    fail(new Error(
+      `ScreenCaptureKit capture process exited ${exitDetail}`
+      + (stderrDetail ? `: ${stderrDetail}` : ''),
+    ));
   }
 
   child.stdout.on('data', onStdout);

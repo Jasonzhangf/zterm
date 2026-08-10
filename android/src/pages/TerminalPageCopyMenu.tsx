@@ -23,29 +23,43 @@ export function TerminalPageCopyMenu({
  onClose,
 }: TerminalPageCopyMenuProps) {
  return (
-   <div
-     data-testid="terminal-copy-menu"
-     className="zterm-copy-menu"
-     style={{
-       position: "fixed",
-       left: `${Math.max(10, Math.min(menu.x - 16, viewportWidth - 236))}px`,
-       top: `${Math.max(headerTopInsetPx + 10, menu.y - 58)}px`,
-       zIndex: 30,
-       display: "flex",
-       alignItems: "center",
-       gap: "8px",
-       padding: "8px",
-       borderRadius: "16px",
-       border: "1px solid var(--zterm-panel-border)",
-       background: "var(--zterm-panel-bg)",
-       boxShadow: "0 14px 32px var(--zterm-panel-shadow)",
-       backdropFilter: "blur(10px)",
-     }}
-     onPointerDown={(event) => {
-       event.preventDefault();
-       event.stopPropagation();
-     }}
-   >
+   <>
+     <div
+       data-testid="terminal-copy-menu-backdrop"
+       style={{
+         position: "fixed",
+         inset: 0,
+         zIndex: 29,
+         background: "transparent",
+       }}
+       onPointerDown={(event) => {
+         event.preventDefault();
+         onClose();
+       }}
+     />
+     <div
+       data-testid="terminal-copy-menu"
+       className="zterm-copy-menu"
+       style={{
+         position: "fixed",
+         left: `${Math.max(10, Math.min(menu.x - 16, viewportWidth - 236))}px`,
+         top: `${Math.max(headerTopInsetPx + 10, menu.y - 58)}px`,
+         zIndex: 30,
+         display: "flex",
+         alignItems: "center",
+         gap: "8px",
+         padding: "8px",
+         borderRadius: "16px",
+         border: "1px solid var(--zterm-panel-border)",
+         background: "var(--zterm-panel-bg)",
+         boxShadow: "0 14px 32px var(--zterm-panel-shadow)",
+         backdropFilter: "blur(10px)",
+       }}
+       onPointerDown={(event) => {
+         event.preventDefault();
+         event.stopPropagation();
+       }}
+     >
      <button
        type="button"
        onClick={onSetStart}
@@ -76,6 +90,7 @@ export function TerminalPageCopyMenu({
      >
        关闭
      </button>
-   </div>
+     </div>
+   </>
  );
 }

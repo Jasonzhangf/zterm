@@ -1689,6 +1689,83 @@
         "src/lib/edge-registry-truth.test.ts"
       ],
       "status": "active"
+    },
+    {
+      "edge_id": "edge.client_remote_window_overlay_to_dual_stream_switch",
+      "from_module": "client.remote_window_overlay",
+      "to_module": "client.remote_window_dual_stream_switch",
+      "resource_from": "resource.remote_window_overlay",
+      "resource_to": "resource.remote_window_dual_stream_switch",
+      "via_resources": [],
+      "relation_status": "direct",
+      "owner_feature": "desktop.remote_window_stream",
+      "allowed_callers": [
+        "src/components/terminal/RemoteWindowOverlay.tsx",
+        "src/lib/remote-window-dual-stream-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/server/**",
+        "src/pages/**"
+      ],
+      "request_chain": [
+        "RemoteWindowSwitchIn01TargetSelection",
+        "RemoteWindowSwitchIn02OverviewCrop"
+      ],
+      "response_chain": [
+        "RemoteWindowSwitchOut01FocusCommit"
+      ],
+      "error_chain": [
+        "RemoteWindowSwitchError01StaleResult",
+        "RemoteWindowSwitchError02FocusUpdate"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:RemoteWindowOverlay->RemoteWindowDualStreamSwitch"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/remote-window-dual-stream-runtime.test.ts"
+      ],
+      "status": "active"
+    },
+    {
+      "edge_id": "edge.client_dual_stream_switch_to_daemon_remote_window_stream",
+      "from_module": "client.remote_window_dual_stream_switch",
+      "to_module": "daemon.remote_window_stream",
+      "resource_from": "resource.remote_window_dual_stream_switch",
+      "resource_to": "resource.remote_window_stream",
+      "via_resources": [
+        "resource.transport_target"
+      ],
+      "relation_status": "indirect",
+      "owner_feature": "desktop.remote_window_stream",
+      "allowed_callers": [
+        "src/lib/remote-window-dual-stream-runtime.ts",
+        "src/contexts/session-context-remote-window-runtime.ts",
+        "src/lib/remote-window-message-runtime.ts"
+      ],
+      "forbidden_callers": [
+        "src/components/terminal/RemoteWindowOverlay.tsx",
+        "src/server/**"
+      ],
+      "request_chain": [
+        "RemoteWindowSwitchIn03FocusUpdate"
+      ],
+      "response_chain": [
+        "RemoteWindowSwitchOut02FocusReady"
+      ],
+      "error_chain": [
+        "RemoteWindowSwitchError03DaemonUpdate"
+      ],
+      "mainline_call_ids": [
+        "android_mainline:RemoteWindowDualStreamSwitch->RemoteWindowMessageRuntime",
+        "daemon_mainline:Control->RemoteWindowStream"
+      ],
+      "required_gates": [
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/remote-window-message-runtime.test.ts",
+        "src/server/remote-window-stream-daemon.test.ts"
+      ],
+      "status": "active"
     }
   ],
   "import_edges_description": "Module-level import allowlist derived from the real src import graph. Gate: src/lib/module-import-graph-truth.test.ts. Every cross-module import edge in code must appear here, and every entry here must exist in code (lockstep both directions). status=pending_removal marks a known violation that must trend to zero; adding new pending_removal entries requires an explicit decision doc.",
@@ -2217,7 +2294,12 @@
     "request_chain": ["AttachmentHttpIn01AuthenticatedRequest", "AttachmentIn02DeliveryOwner"],
     "response_chain": ["AttachmentOut03DurableManifestAndAssets"],
     "error_chain": ["AttachmentError01Rejected"],
-    "mainline_call_ids": ["daemon_mainline:Http->AttachmentHttpIn01AuthenticatedRequest"]
+      "mainline_call_ids": ["daemon_mainline:Http->AttachmentHttpIn01AuthenticatedRequest"]
+    },
+    {
+      "from_module": "client.remote_window_overlay",
+      "to_module": "client.remote_window_dual_stream_switch",
+      "status": "active"
   }
 ]
 }

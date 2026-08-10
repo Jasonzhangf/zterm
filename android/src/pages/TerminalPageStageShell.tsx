@@ -58,6 +58,7 @@ const TerminalStageShell = ReactMemo(
     absoluteLineNumbersVisible,
     copySelection,
     onLongPressRow,
+    onCopySelectionDismiss,
     sessionPreviewOpen = false,
     sessionPreviewSessions = [],
     sessionPreviewReplacementCandidates = [],
@@ -117,6 +118,7 @@ const TerminalStageShell = ReactMemo(
       clientX: number,
       clientY: number,
     ) => void;
+    onCopySelectionDismiss?: () => void;
     sessionPreviewOpen?: boolean;
     sessionPreviewSessions?: Session[];
     sessionPreviewReplacementCandidates?: Session[];
@@ -231,6 +233,7 @@ const TerminalStageShell = ReactMemo(
                 : null
             }
             onLongPressRow={onLongPressRow}
+            onCopySelectionDismiss={onCopySelectionDismiss}
             splitVisible={splitVisible}
             reserveRightEdgeSwipe={Boolean(onOpenSessionPreview && sessionPreviewSessions.length > 0)}
           />
@@ -257,6 +260,7 @@ const TerminalStageShell = ReactMemo(
         allowSessionDrawerSwipe,
         copySelection,
         onLongPressRow,
+        onCopySelectionDismiss,
       ],
     );
 
@@ -715,6 +719,7 @@ const TerminalStageShell = ReactMemo(
     prev.absoluteLineNumbersVisible === next.absoluteLineNumbersVisible &&
     prev.copySelection === next.copySelection &&
     prev.onLongPressRow === next.onLongPressRow &&
+    prev.onCopySelectionDismiss === next.onCopySelectionDismiss &&
     prev.sessionPreviewOpen === next.sessionPreviewOpen &&
     terminalPageRenderedSessionsUiKey(prev.sessionPreviewSessions || []) ===
       terminalPageRenderedSessionsUiKey(next.sessionPreviewSessions || []) &&

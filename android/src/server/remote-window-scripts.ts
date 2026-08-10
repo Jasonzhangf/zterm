@@ -123,6 +123,47 @@ func bestDisplay(for frame: CGRect) -> (id: CGDirectDisplayID, bounds: CGRect)? 
 let windowInfoList = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? []
 var windows: [[String: Any]] = []
 
+// 缓存每个 pid 的 AXUIElement app ref，避免重复创建
+var axAppCache: [Int32: AXUIElement] = [:]
+
+func axApp(for pid: Int32) -> AXUIElement? {
+    if let cached = axAppCache[pid] { return cached }
+    let app = AXUIElementCreateApplication(pid)
+    axAppCache[pid] = app
+    return app
+}
+
+// 用 AXUIElement 取窗口 content rect；macOS CGWindowList 给的 frame 在多数 app 含 title bar，
+// 而 ScreenCaptureKit 截 desktopIndependentWindow 返回的像素含装饰（含 title bar），
+// 导致客户端用 CGWindow frame 算 cropRect 与实际图像不贴合。
+// 对每个窗口取 AXContent = (kAXPosition, kAXSize)，作为"用户看到的窗口内容"几何。
+func axContentRect(for pid: Int32, cgWindowId: Int) -> CGRect? {
+    guard let app = axApp(for: pid) else { return nil }
+    // 优先匹配 AXTitleUIElement，否则取 kAXFocusedWindowAttribute
+    var winRef: CFTypeRef?
+    var axErr = AXUIElementCopyAttributeValue(app, kAXTitleUIElementAttribute as CFString, &winRef)
+    if axErr != .success || winRef == nil {
+        axErr = AXUIElementCopyAttributeValue(app, kAXFocusedWindowAttribute as CFString, &winRef)
+    }
+    if axErr != .success { return nil }
+    guard let winObj = winRef else { return nil }
+    let axWin = winObj as! AXUIElement
+
+    var posRef: CFTypeRef?
+    var sizeRef: CFTypeRef?
+    AXUIElementCopyAttributeValue(axWin, kAXPositionAttribute as CFString, &posRef)
+    AXUIElementCopyAttributeValue(axWin, kAXSizeAttribute as CFString, &sizeRef)
+    guard let pVal = posRef, let sVal = sizeRef else { return nil }
+
+    var p = CGPoint.zero
+    var s = CGSize.zero
+    guard
+        AXValueGetValue(pVal as! AXValue, .cgPoint, &p),
+        AXValueGetValue(sVal as! AXValue, .cgSize, &s)
+    else { return nil }
+    return CGRect(origin: p, size: s)
+}
+
 for info in windowInfoList {
     guard let layerValue = number(info[kCGWindowLayer as String]), Int(layerValue) == 0 else {
         continue
@@ -148,6 +189,7 @@ for info in windowInfoList {
     let ownerName = info[kCGWindowOwnerName as String] as? String ?? ""
     let rawTitle = info[kCGWindowName as String] as? String ?? ""
     let appBundleId = NSRunningApplication(processIdentifier: pid_t(pid))?.bundleIdentifier ?? ""
+    let windowNumber = (info[kCGWindowNumber as String] as? NSNumber)?.intValue ?? 0
     let windowId = (info[kCGWindowNumber as String] as? NSNumber)?.stringValue ?? ""
     let title = rawTitle.isEmpty ? (ownerName.isEmpty ? appBundleId : ownerName) : rawTitle
     let frameRect = CGRect(x: x, y: y, width: width, height: height)
@@ -159,6 +201,39 @@ for info in windowInfoList {
         "title": title,
         "frame": rectDict(frameRect),
     ]
+
+    // 用 AXUIElement 算 content area；失败或与 frame 完全一致时不写入（保持原 frame）
+    // macOS 坐标是 top-left origin，但 AXUIElement 返回的 y 在主屏是 top-left，在副屏是 bottom-left。
+    // 这里要求 AX 返回的位置必须在 [frame.x, frame.x+width] 范围内，否则忽略。
+    if windowNumber > 0, let content = axContentRect(for: pid_t(pid), cgWindowId: windowNumber) {
+        // AX 返回的 y 在副屏是 bottom-left，需要翻转到 top-left
+        // 主屏 frame.y 接近 AX y；副屏 frame.y 接近 display.height - (content.y + content.height)
+        let axY = content.origin.y
+        let axX = content.origin.x
+        let axW = content.size.width
+        let axH = content.size.height
+
+        // 简单判定：content.x 应在 [frame.x - 50, frame.x + frame.width + 50] 之间
+        let xOk = axX >= frameRect.minX - 50 && axX <= frameRect.maxX + 50
+        let wOk = abs(axW - frameRect.width) <= 80
+        let hOk = abs(axH - frameRect.height) <= 200 && axH > 100
+        if xOk && wOk && hOk {
+            // 算 contentRect 的 y：top-left = frame.y + (frame.height - content.height)，
+            // 前提是 AX y == frame.y（即 title bar 在窗口底部不会出现）
+            // macOS 上正常 title bar 在顶部，content y 偏移 = frame.height - content.height
+            let titleBarHeight = max(0, frameRect.height - axH)
+            // 主屏：content 起点 y_top = frame.y + titleBarHeight
+            // 副屏（macOS top-left）：同样逻辑
+            let contentTopY = frameRect.minY + titleBarHeight
+            windowEntry["contentFrame"] = [
+                "x": Int(axX.rounded()),
+                "y": Int(contentTopY.rounded()),
+                "width": Int(axW.rounded()),
+                "height": Int(axH.rounded()),
+            ]
+        }
+    }
+
     if let display = bestDisplay(for: frameRect) {
         windowEntry["displayId"] = String(display.id)
         windowEntry["displayBoundsTopLeftPx"] = rectDict(display.bounds)
@@ -763,7 +838,7 @@ import AppKit
 import CoreGraphics
 import CoreMedia
 import Foundation
-import ScreenCaptureKit
+@preconcurrency import ScreenCaptureKit
 
 struct CompositeWindow: Decodable {
     let windowId: String
@@ -771,6 +846,8 @@ struct CompositeWindow: Decodable {
     let cropRect: Rect
     let offsetX: Double
     let offsetY: Double
+    let outputWidth: Int?
+    let outputHeight: Int?
 }
 
 struct CaptureConfig: Decodable {
@@ -784,11 +861,14 @@ struct CaptureConfig: Decodable {
     let compositeWindows: [CompositeWindow]?
     let canvasWidth: Int?
     let canvasHeight: Int?
+    let outputWidth: Int?
+    let outputHeight: Int?
 }
 
 struct CaptureCommand: Decodable {
     let kind: String
     let seq: Int
+    let windowId: String
     let windowBounds: Rect
     let cropRect: Rect
     let frameRate: Int
@@ -796,6 +876,8 @@ struct CaptureCommand: Decodable {
     let compositeWindows: [CompositeWindow]?
     let canvasWidth: Int?
     let canvasHeight: Int?
+    let outputWidth: Int?
+    let outputHeight: Int?
 }
 
 struct Rect: Decodable {
@@ -857,14 +939,18 @@ func writeCaptureUpdate(seq: Int, ok: Bool, width: Int? = nil, height: Int? = ni
     }
 }
 
+let frameOutputLock = NSLock()
+
 func writeFrame(rgba: Data, width: Int, height: Int) {
-    var header = Data()
-    header.append(contentsOf: [0x5A, 0x52, 0x57, 0x31])
-    appendUInt32(UInt32(width), to: &header)
-    appendUInt32(UInt32(height), to: &header)
-    appendUInt32(UInt32(rgba.count), to: &header)
-    FileHandle.standardOutput.write(header)
-    FileHandle.standardOutput.write(rgba)
+    var packet = Data()
+    packet.append(contentsOf: [0x5A, 0x52, 0x57, 0x31])
+    appendUInt32(UInt32(width), to: &packet)
+    appendUInt32(UInt32(height), to: &packet)
+    appendUInt32(UInt32(rgba.count), to: &packet)
+    packet.append(rgba)
+    frameOutputLock.lock()
+    defer { frameOutputLock.unlock() }
+    FileHandle.standardOutput.write(packet)
 }
 
 final class CompositeCanvas {
@@ -972,12 +1058,13 @@ do {
     exit(2)
 }
 
-NSApplication.shared
+_ = NSApplication.shared
 let sampleQueue = DispatchQueue(label: "zterm.remote-window.capture.sample")
 var activeStreams: [SCStream] = []
 var compositeStopped = true
+var singleWindowCapture: CompositeWindow? = nil
 
-func findScWindow(windowId: String, appBundleId: String, windowBounds: Rect, content: SCShareableContent) -> SCWindow? {
+@Sendable func findScWindow(windowId: String, appBundleId: String, windowBounds: Rect, content: SCShareableContent) -> SCWindow? {
     let numericWindowId = UInt32(windowId)
     return content.windows.first { candidate in
         if let numericWindowId = numericWindowId, candidate.windowID == numericWindowId {
@@ -990,43 +1077,41 @@ func findScWindow(windowId: String, appBundleId: String, windowBounds: Rect, con
     }
 }
 
-func startCompositeCapture(config: CaptureConfig, compositeWindows: [CompositeWindow], canvasWidth: Int, canvasHeight: Int, content: SCShareableContent) async throws {
+@Sendable func startCompositeCapture(config: CaptureConfig, compositeWindows: [CompositeWindow], canvasWidth: Int, canvasHeight: Int, content: SCShareableContent) async throws {
     for stream in activeStreams {
         try? await stream.stopCapture()
     }
     activeStreams.removeAll()
-    var allWindows: [CompositeWindow] = [CompositeWindow(
+    let allWindows: [CompositeWindow] = [CompositeWindow(
         windowId: config.windowId,
         windowBounds: config.windowBounds,
         cropRect: config.cropRect,
         offsetX: 0,
-        offsetY: 0
-    )]
-    allWindows.append(contentsOf: compositeWindows)
+        offsetY: 0,
+        outputWidth: config.outputWidth,
+        outputHeight: config.outputHeight
+    )] + compositeWindows
     // ScreenCaptureKit 多 SCStream 并发只出首帧（真机验证：每窗口仅 1 帧）。
     // 组合模式改用 SCScreenshotManager.captureImage 逐窗口截图 + 平铺合成（10fps），无并发限制。
     compositeStopped = false
     let timerQueue = DispatchQueue(label: "zterm.remote-window.composite.timer")
     timerQueue.asyncAfter(deadline: .now() + 0.05) {
-        while !compositeStopped {
-            let semaphore = DispatchSemaphore(value: 0)
-            Task {
+        Task {
+            while !compositeStopped {
                 await compositeFrameLoop(
                     allWindows: allWindows,
                     canvasWidth: canvasWidth,
                     canvasHeight: canvasHeight,
                     content: content
                 )
-                semaphore.signal()
+                try? await Task.sleep(for: .milliseconds(50))
             }
-            _ = semaphore.wait(timeout: .now() + 0.8)
-            Thread.sleep(forTimeInterval: 0.05)
         }
     }
     stderrLine("zterm remote window composite capture started (SCScreenshotManager): \(allWindows.count) windows")
 }
 
-func compositeFrameLoop(allWindows: [CompositeWindow], canvasWidth: Int, canvasHeight: Int, content: SCShareableContent) async {
+@Sendable func compositeFrameLoop(allWindows: [CompositeWindow], canvasWidth: Int, canvasHeight: Int, content: SCShareableContent) async {
     // 1. 逐窗口截图（async，串行）
     var snapshots: [(image: CGImage, slotX: Int, slotY: Int, slotW: Int, slotH: Int)] = []
     for entry in allWindows {
@@ -1038,10 +1123,22 @@ func compositeFrameLoop(allWindows: [CompositeWindow], canvasWidth: Int, canvasH
         ) else { continue }
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let screenshotConfig = SCStreamConfiguration()
-        guard let image = try? await SCScreenshotManager.captureImage(
-            contentFilter: filter,
-            configuration: screenshotConfig
-        ) else { continue }
+        let crop = entry.cropRect
+        let sw = Int(crop.width.rounded())
+        let sh = Int(crop.height.rounded())
+        guard sw > 0 && sh > 0 else { return }
+        screenshotConfig.width = max(1, entry.outputWidth ?? sw)
+        screenshotConfig.height = max(1, entry.outputHeight ?? sh)
+        let image: CGImage
+        do {
+            image = try await SCScreenshotManager.captureImage(
+                contentFilter: filter,
+                configuration: screenshotConfig
+            )
+        } catch {
+            stderrLine("zterm remote window screenshot failed window=\(entry.windowId): \(String(describing: error))")
+            return
+        }
         let imgWidth = image.width
         let imgHeight = image.height
         guard imgWidth > 0, imgHeight > 0 else { continue }
@@ -1049,15 +1146,13 @@ func compositeFrameLoop(allWindows: [CompositeWindow], canvasWidth: Int, canvasH
             image: image,
             slotX: Int(entry.offsetX.rounded()),
             slotY: Int(entry.offsetY.rounded()),
-            slotW: min(Int(entry.cropRect.width.rounded()), imgWidth),
-            slotH: min(Int(entry.cropRect.height.rounded()), imgHeight)
+            slotW: min(entry.outputWidth ?? Int(entry.cropRect.width.rounded()), imgWidth),
+            slotH: min(entry.outputHeight ?? Int(entry.cropRect.height.rounded()), imgHeight)
         ))
     }
     // 2. 同步合成（无 await）；Data(count:) 零填充
     var canvas = Data(count: canvasWidth * canvasHeight * 4)
     for snap in snapshots {
-        let imgWidth = snap.image.width
-        let imgHeight = snap.image.height
         guard let provider = snap.image.dataProvider, let pixelData = provider.data else { continue }
         let bytes = pixelData as Data
         let bpr = snap.image.bytesPerRow
@@ -1080,31 +1175,30 @@ func startSingleWindowCapture(config: CaptureConfig, content: SCShareableContent
     // macOS 26 上 SCStream 单窗口 capture 实测卡死不出帧（只发首帧），
     // SCScreenshotManager.captureImage 无此问题（组合模式已验证可靠）。
     compositeStopped = false
-    let windowEntry = CompositeWindow(
+    singleWindowCapture = CompositeWindow(
         windowId: config.windowId,
         windowBounds: config.windowBounds,
         cropRect: config.cropRect,
         offsetX: 0,
-        offsetY: 0
+        offsetY: 0,
+        outputWidth: nil,
+        outputHeight: nil
     )
-    let singleWindowList = [windowEntry]
-    let canvasWidth = Int(config.cropRect.width.rounded())
-    let canvasHeight = Int(config.cropRect.height.rounded())
     let timerQueue = DispatchQueue(label: "zterm.remote-window.single.timer")
     timerQueue.asyncAfter(deadline: .now() + 0.05) {
-        while !compositeStopped {
-            let semaphore = DispatchSemaphore(value: 0)
-            Task {
+        Task { @MainActor in
+            while !compositeStopped {
+                guard let windowEntry = singleWindowCapture else {
+                    break
+                }
                 await compositeFrameLoop(
-                    allWindows: singleWindowList,
-                    canvasWidth: canvasWidth,
-                    canvasHeight: canvasHeight,
+                    allWindows: [windowEntry],
+                    canvasWidth: Int(windowEntry.cropRect.width.rounded()),
+                    canvasHeight: Int(windowEntry.cropRect.height.rounded()),
                     content: content
                 )
-                semaphore.signal()
+                try? await Task.sleep(for: .milliseconds(50))
             }
-            _ = semaphore.wait(timeout: .now() + 0.8)
-            Thread.sleep(forTimeInterval: 0.05)
         }
     }
     stderrLine("zterm remote window single capture started (SCScreenshotManager): \(config.windowId)")
@@ -1157,7 +1251,7 @@ DispatchQueue.global(qos: .utility).async {
                         let content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true)
                         try await startCompositeCapture(
                             config: CaptureConfig(
-                                windowId: config.windowId,
+                                windowId: command.windowId,
                                 appBundleId: config.appBundleId,
                                 title: config.title,
                                 windowBounds: config.windowBounds,
@@ -1166,7 +1260,9 @@ DispatchQueue.global(qos: .utility).async {
                                 queueDepth: config.queueDepth,
                                 compositeWindows: compositeWindows,
                                 canvasWidth: canvasWidth,
-                                canvasHeight: canvasHeight
+                                canvasHeight: canvasHeight,
+                                outputWidth: command.outputWidth,
+                                outputHeight: command.outputHeight
                             ),
                             compositeWindows: compositeWindows,
                             canvasWidth: canvasWidth,
@@ -1180,22 +1276,43 @@ DispatchQueue.global(qos: .utility).async {
                             height: canvasHeight
                         )
                     } else {
-                        guard let stream = activeStreams.first else {
+                        guard !activeStreams.isEmpty || singleWindowCapture != nil else {
                             throw NSError(domain: "RemoteWindowCapture", code: 1, userInfo: [NSLocalizedDescriptionKey: "capture stream is not active"])
                         }
-                        let nextConfig = makeStreamConfiguration(
-                            windowBounds: command.windowBounds,
-                            cropRect: command.cropRect,
-                            frameRate: command.frameRate,
-                            queueDepth: command.queueDepth
-                        )
-                        try await stream.updateConfiguration(nextConfig)
-                        writeCaptureUpdate(
-                            seq: command.seq,
-                            ok: true,
-                            width: max(1, Int(command.cropRect.width.rounded())),
-                            height: max(1, Int(command.cropRect.height.rounded()))
-                        )
+                        if activeStreams.isEmpty {
+                            singleWindowCapture = CompositeWindow(
+                                windowId: command.windowId,
+                                windowBounds: command.windowBounds,
+                                cropRect: command.cropRect,
+                                offsetX: 0,
+                                offsetY: 0,
+                                outputWidth: nil,
+                                outputHeight: nil
+                            )
+                            writeCaptureUpdate(
+                                seq: command.seq,
+                                ok: true,
+                                width: max(1, Int(command.cropRect.width.rounded())),
+                                height: max(1, Int(command.cropRect.height.rounded()))
+                            )
+                        } else {
+                            guard let stream = activeStreams.first else {
+                                throw NSError(domain: "RemoteWindowCapture", code: 1, userInfo: [NSLocalizedDescriptionKey: "capture stream is not active"])
+                            }
+                            let nextConfig = makeStreamConfiguration(
+                                windowBounds: command.windowBounds,
+                                cropRect: command.cropRect,
+                                frameRate: command.frameRate,
+                                queueDepth: command.queueDepth
+                            )
+                            try await stream.updateConfiguration(nextConfig)
+                            writeCaptureUpdate(
+                                seq: command.seq,
+                                ok: true,
+                                width: max(1, Int(command.cropRect.width.rounded())),
+                                height: max(1, Int(command.cropRect.height.rounded()))
+                            )
+                        }
                     }
                 } catch {
                     writeCaptureUpdate(seq: command.seq, ok: false, error: error.localizedDescription)

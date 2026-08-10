@@ -258,6 +258,7 @@ export interface SessionContextValue {
     sessionId: string,
     streamId: string,
     target: RemoteWindowStreamTargetManifest,
+    revision?: number,
   ) => void;
   stopRemoteWindowStream: (sessionId: string, streamId: string) => Promise<boolean>;
   sendRemoteWindowInput: (

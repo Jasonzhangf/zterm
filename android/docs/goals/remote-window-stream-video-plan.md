@@ -330,3 +330,71 @@ The goal is done only when all of the following are true:
 - Architecture docs/maps/tests are synchronized.
 - Required automated gates pass.
 - APK is built only after the real video gates pass and is reported with version and sha256.
+
+## 2026-08-09 Dual-Stream Completion Plan (RWDS-20260809-A)
+
+### Objective
+
+Finish the approved dual-stream remote-window design: a persistent low-rate overview composite stream at a fixed 1920x1080 canvas, an independent focus stream, immediate overview crop on thumbnail selection, and focus projection commit only after the matching first-frame ready control event.
+
+### Acceptance criteria
+
+1. Catalog enumeration works on the installed daemon and returns real app/window targets without Swift type errors.
+2. Composite overview capture starts, emits real frames, and remains alive while focus target updates occur.
+3. The focus stream updates by monotonically increasing revision; stale result, wrong target, wrong stream, error, and close results cannot commit.
+4. On 15t-1 the observed sequence is: overview frames -> selected overview crop -> focus accepted -> focus first-frame ready -> focus committed, with no black gap or fake success.
+5. A second thumbnail selection while the first is pending proves the earlier ready result is rejected.
+6. Real app-window and iTerm2/multi-window targets are tested where the platform permits; permission/capture limitations remain explicit errors with evidence.
+7. Architecture registries, function/mainline maps, test design, notes, installed daemon, APK, and live evidence all describe the same implementation.
+8. Final codex review runs only after all gates, installation/restart, and live verification pass.
+
+### Scope and boundaries
+
+In scope: `client.remote_window_dual_stream_switch`, shared typed focus control messages, daemon focus revision/ready owner, overview crop projection, fixed overview canvas contract, composite ScreenCaptureKit startup and frame delivery, and the remote-window-specific tests/live gates.
+
+Out of scope: terminal mirror/buffer/renderer, unrelated session heartbeat regressions, relay redesign, broad cleanup of pre-existing dirty files, and any fallback from failed composite capture to a fake or single-stream success.
+
+### Design and implementation
+
+- Client state and projection owner: `android/src/lib/remote-window-dual-stream-runtime.ts` plus `RemoteWindowOverlay.tsx`.
+- Control owner: `packages/shared/src/connection/protocol.ts`, `remote-window-message-runtime.ts`, `terminal-message-runtime.ts`.
+- Capture/media owner: `remote-window-stream-daemon.ts`, `remote-window-capture.ts`, and `remote-window-scripts.ts`.
+- Control payload must remain separate from media frames. Required fields are `requestId`, `streamId`, `revision`, `targetId`, and `phase`.
+- `ready` is emitted only after a real focus frame for the accepted revision. It is not inferred from capture-source update completion, WebRTC connection state, or UI state.
+- The current live blocker is the first divergence after catalog success: the overview composite ScreenCaptureKit process exits before producing a frame. Debug this as one hypothesis per experiment, with positive and reverse checks recorded under `playground/`.
+- Do not alter formal runtime again until the experiment identifies the unique capture owner and the fix design is recorded.
+
+### Required files and evidence
+
+- Canonical design: `android/docs/decisions/2026-08-09-remote-window-dual-stream-design.md`.
+- Test design: `android/docs/testing/remote-window-dual-stream-test-design.md`.
+- Registries/maps: `android/docs/resource-registry.json`, `module-registry.json`, `edge-registry.json`, `feature-registry.json`, `function-map.md`, `docs/wiki/mainline-call-map.json`, `docs/wiki/mainline-source.md`.
+- Experiment records and screenshots: `android/playground/` only during diagnosis; promote verified facts to `android/note.md` and `android/MEMORY.md`.
+- Preserve unrelated existing changes in `android/note.md`, `session-context-*` tests, `remote-window-catalog.ts`, and `x0.txt`–`x7.txt`.
+
+### Verification matrix
+
+| Layer | Required proof |
+| --- | --- |
+| Experiment | baseline, first divergence, one positive intervention, one reverse intervention, unique owner, candidate fix report |
+| Unit/state | crop-before-commit, matching-ready commit, stale/error/close rejection, positive and negative cases |
+| Protocol/message | typed control result reaches only the dual-stream owner; no payload metadata leakage |
+| Daemon | overview survives focus update; revision ordering; first focus frame emits ready; cleanup is exact once |
+| Architecture | type-check, feature/registry/function/mainline/import gates, diff check |
+| Build | canonical Android build when its prebuild stack is green; otherwise report the unrelated blocking test explicitly and do not weaken it |
+| Live | daemon install/restart, 15t-1 ADB loop, catalog/start/overview frame/crop/focus-ready/commit/stop, track identity and dimensions |
+| Review | `codex-review` only after installed runtime equals verified source and live gates pass |
+
+### Ordered execution
+
+1. Read current maps, design, note, and installed/runtime truth; create a fresh playground experiment record.
+2. Reproduce the overview composite process exit on 15t-1 and capture exact stderr/exit/target geometry.
+3. Test one capture hypothesis at a time; run reverse intervention; update the design report with the unique owner.
+4. After the approved fix design, implement only the capture owner change with explicit tests and no fallback.
+5. Run state/protocol/daemon/UI tests, type-check, architecture gates, and build prerequisites.
+6. Install daemon and APK as required; restart only the scoped daemon/app service; run the complete 15t-1 loop.
+7. Save compact evidence, update `note.md` and `MEMORY.md`, re-mine/search MemoryPalace, then run codex review.
+
+### Definition of done
+
+Done means the 15t-1 live trace proves overview frame availability, immediate selected crop, matching focus first-frame ready, and high-quality commit; stale/error/close paths are proven not to commit; all required gates pass; installed versions match the reviewed source; and no unresolved composite-capture blocker remains.

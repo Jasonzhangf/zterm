@@ -1,6 +1,6 @@
 # 远程窗口双流推流设计（低码率总览 + 高码率主窗口 + 即时切换）
 
-状态：待批准
+状态：已批准（design id：RWDS-20260809-A）
 日期：2026-08-09
 
 ## 现状与问题
@@ -63,8 +63,23 @@ client
 
 现有点预览切换失败问题，在双流重构中一并解决（切换流程改为显式状态机：preview → lowres-pending → highres-ready，任一步失败回退低清并提示）。
 
+## 实施锁定
+
+- `client.remote_window_dual_stream_switch` 是切换状态、revision、低清 crop 投影和高清首帧提交的唯一 client owner。
+- `daemon.remote_window_stream` 是 overview/focus capture、focus revision 校验和 ready 控制事件的唯一 daemon owner。
+- 控制事件使用 typed control message；媒体帧不携带 request/revision/debug metadata。
+- 旧的 `updateFocus -> ok:true` 无 ready 语义，正式实现中物理删除；只有匹配当前 revision、targetId、streamId 的 `focus-ready` 才允许提交高清投影。
+- 错误、过期结果、关闭和 transport 断开均显式结束当前 switch；不以旧视频或伪成功补偿控制状态。
+
+## 验收门禁
+
+- `remote-window-dual-stream-runtime.test.ts`：正向证明 crop 先可见、首帧后提交；反向证明 stale/error/close 不提交高清。
+- `remote-window-message-runtime.test.ts`：focus control message 只进入 dual-stream owner。
+- `remote-window-stream-daemon.test.ts`：revision/target 校验、ready 事件和过期结果成对验证。
+- 15t-1 真机回环：同一 `streamId` 下 overview 持续有帧，点击预览后先见 overview crop，再见 matching focus 首帧；日志记录 requestId/revision/streamId/phase。
+
 ## 风险与回退
 
 - 双流带宽：总览低码率 + 主窗口高码率，总带宽可控（低清常驻 + 高清按需）。
-- 若高码率捕获（SCStream）不可用，回退方案 A（截图合成 8fps 高码率）。
-- 若双流复杂度高，可先做单流但改进布局 + 切换状态机（低清占位用同一画布），双流作为第二阶段。
+- 高码率捕获不可用时必须返回显式 `focus-update` error；不得把 overview 当成隐式成功的高清流。
+- overview/focus 的媒体资源保持独立；不得退回单流兼容路径。

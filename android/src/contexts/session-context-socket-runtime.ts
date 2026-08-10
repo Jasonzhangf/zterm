@@ -93,6 +93,10 @@ export function startSocketHeartbeat(options: {
   let failureFinalized = false;
   const pingInterval = setInterval(() => {
     if (options.ws.readyState !== WebSocket.OPEN) {
+      // 2026-08-09 BUG #1 fix: socket not open (closing / closed / connecting) — reset heartbeat
+      // state so a future fresh socket does NOT inherit pre-close consecutive misses.
+      consecutiveMisses = 0;
+      lastObservedServerActivityAt = Date.now();
       return;
     }
 

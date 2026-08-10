@@ -53,6 +53,9 @@ export interface WindowGroupLayoutProps {
   primaryItemId?: string | null;
   onPrimaryItemChange?: (itemId: string) => void;
   secondaryPlacement?: 'before' | 'after';
+  secondaryWrap?: 'wrap' | 'nowrap';
+  secondaryItemFlex?: CSSProperties['flex'];
+  secondaryOverflowX?: CSSProperties['overflowX'];
   className?: string;
   testId?: string;
   style?: CSSProperties;
@@ -66,6 +69,9 @@ export function WindowGroupLayout({
   primaryItemId = null,
   onPrimaryItemChange,
   secondaryPlacement = 'after',
+  secondaryWrap = 'wrap',
+  secondaryItemFlex,
+  secondaryOverflowX,
   className,
   testId,
   style,
@@ -103,7 +109,8 @@ export function WindowGroupLayout({
     minHeight: 0,
     display: 'flex',
     flexDirection: plan.secondaryAxis,
-    flexWrap: plan.secondaryAxis === 'row' ? 'wrap' : 'nowrap',
+    flexWrap: plan.secondaryAxis === 'row' ? secondaryWrap : 'nowrap',
+    overflowX: secondaryOverflowX,
     gap: '8px',
     alignContent: 'stretch',
     justifyContent: 'stretch',
@@ -154,7 +161,7 @@ export function WindowGroupLayout({
           style={{
             minWidth: 0,
             minHeight: 0,
-            flex: plan.secondaryAxis === 'row' ? '1 1 0' : '0 0 auto',
+            flex: secondaryItemFlex ?? (plan.secondaryAxis === 'row' ? '1 1 0' : '0 0 auto'),
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',

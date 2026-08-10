@@ -14,6 +14,7 @@ class MockMediaTrack {
 }
 
 class MockMediaStream {
+  id = '';
   private tracks: MockMediaTrack[] = [];
 
   constructor(tracks: MockMediaTrack[] = []) {
@@ -169,7 +170,7 @@ describe('remote window receiver runtime', () => {
       startRemote,
     });
 
-    await flushMicrotasks();
+    await flushMicrotasks(20);
     const peer = MockRTCPeerConnection.instances[0]!;
     expect(peer.configuration).toMatchObject({ iceServers: [{ urls: 'stun:relay.codewhisper.cc:3478' }] });
     expect(peer.addTransceiver).toHaveBeenCalledWith('video', { direction: 'recvonly' });
@@ -183,6 +184,48 @@ describe('remote window receiver runtime', () => {
       streamId: 'stream-1',
       mediaStream,
       started: { streamId: 'stream-1', targetId: 'pane-1' },
+    });
+  });
+
+  it('negotiates an independent overview track for an app window without synthetic composite children', async () => {
+    const runtime = createRuntime();
+    const appTarget = {
+      ...makeTarget(),
+      streamTargetId: 'app-window:123:456',
+      videoTarget: {
+        ...makeTarget().videoTarget,
+        kind: 'app-window' as const,
+      },
+    } as RemoteWindowStreamTargetManifest;
+    const started = runtime.startStream({
+      streamId: 'app-stream',
+      target: appTarget,
+      sendIceCandidate: vi.fn(),
+      startRemote: vi.fn(async () => ({
+        requestId: 'rw-app-start',
+        streamId: 'app-stream',
+        targetId: 'app-window:123:456',
+        answer: { type: 'answer' as const, sdp: 'answer-app' },
+        capture: {
+          source: 'ScreenCaptureKit' as const,
+          frameWidth: 800,
+          frameHeight: 600,
+          frameRate: 30,
+          targetKind: 'app-window' as const,
+        },
+        transport: { kind: 'webrtc-video' as const },
+      })),
+    });
+    await flushMicrotasks(20);
+    const peer = MockRTCPeerConnection.instances[0]!;
+    expect(peer.addTransceiver).toHaveBeenCalledTimes(2);
+    const focusStream = peer.emitVideoTrack();
+    const overviewStream = new MockMediaStream([new MockMediaTrack()]);
+    overviewStream.id = 'overview';
+    peer.emitVideoTrack(overviewStream);
+    await expect(started).resolves.toMatchObject({
+      mediaStream: focusStream,
+      overviewMediaStream: overviewStream,
     });
   });
 

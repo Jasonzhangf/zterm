@@ -330,4 +330,80 @@ describe('session-context-socket-runtime heartbeat lifecycle', () => {
     expect(tailRefreshStore.hasPendingConnectTailRefresh(sessionId)).toBe(false);
     expect(tailRefreshStore.hasPendingResumeTailRefresh(sessionId)).toBe(false);
   });
+
+  // 2026-08-09 BUG #1: heartbeat 计时器在 ws.readyState !== OPEN 期间冻结 consecutiveMisses,
+  // 导致 socket 重新 attach 后立刻被旧 state 误判 timeout 并触发死循环 reconnect
+  // 红测预期：socket 从 CLOSING → OPEN 后，前 90s 内不能触发 finalizeFailure / ws.close
+  describe('long-voice-commit transport resilience (BUG #1 regression)', () => {
+    it('resets consecutive misses when ws flips from CLOSING back to OPEN during a long voice commit', () => {
+      vi.useFakeTimers();
+      const sessionId = 'session-voice';
+      const heartbeatStore = createSessionHeartbeatStore();
+      const sendSocketPayload = vi.fn();
+      const finalizeFailure = vi.fn();
+      const ws = { readyState: WebSocket.CLOSING, close: vi.fn() } as any;
+
+      // 1. start heartbeat while socket is still CLOSING (e.g. mid backpressure close)
+      startSocketHeartbeat({
+        sessionId, ws, finalizeFailure, heartbeatStore,
+        clientPingIntervalMs: 30_000, maxConsecutiveMisses: 3, sendSocketPayload,
+      });
+
+      // 2. simulate voice commit during close window: 80s pass but socket still CLOSING
+      vi.advanceTimersByTime(80_000);
+
+      // 3. socket recovers, voice commit completes, socket flips to OPEN
+      ws.readyState = WebSocket.OPEN;
+      heartbeatStore.recordServerActivity(sessionId, Date.now());
+
+      // 4. now advance another 80s (well within 90s grace) — finalizeFailure MUST NOT fire
+      vi.advanceTimersByTime(80_000);
+
+      expect(finalizeFailure).not.toHaveBeenCalled();
+      expect(ws.close).not.toHaveBeenCalled();
+      // ping should resume sending
+      expect(sendSocketPayload.mock.calls.length).toBeGreaterThan(0);
+    });
+
+    it('does not let pre-close consecutiveMisses leak into a fresh socket after a transport swap', () => {
+      vi.useFakeTimers();
+      const sessionId = 'session-swap';
+      const heartbeatStore = createSessionHeartbeatStore();
+      const sendSocketPayload = vi.fn();
+      const finalizeFailure = vi.fn();
+      const wsOld = { readyState: WebSocket.OPEN, close: vi.fn() } as any;
+      const wsNew = { readyState: WebSocket.OPEN, close: vi.fn() } as any;
+
+      // 1. start heartbeat on old socket; old socket accrues 2 misses
+      startSocketHeartbeat({
+        sessionId, ws: wsOld, finalizeFailure, heartbeatStore,
+        clientPingIntervalMs: 30_000, maxConsecutiveMisses: 3, sendSocketPayload,
+      });
+      vi.advanceTimersByTime(60_000);
+      expect(finalizeFailure).not.toHaveBeenCalled();
+
+      // 2. voice commit triggers ws close + transport swap; old ws is gone
+      wsOld.readyState = WebSocket.CLOSED;
+
+      // 3. caller installs new ws without re-priming heartbeat state
+      // (this is the realistic path: a new socket replaces the old one but
+      // startSocketHeartbeat might be called again with a fresh lastObservedServerActivityAt)
+      heartbeatStore.recordServerActivity(sessionId, Date.now());
+
+      // 4. swap to new ws and restart heartbeat
+      startSocketHeartbeat({
+        sessionId, ws: wsNew, finalizeFailure, heartbeatStore,
+        clientPingIntervalMs: 30_000, maxConsecutiveMisses: 3, sendSocketPayload,
+      });
+
+      // 5. advance 60s while new socket receives server activity — must NOT be flagged
+      vi.advanceTimersByTime(60_000);
+      // simulate one server activity on the new socket so heartbeat does not time out
+      heartbeatStore.recordServerActivity(sessionId, Date.now());
+      vi.advanceTimersByTime(30_000);
+
+      expect(finalizeFailure).not.toHaveBeenCalled();
+      expect(wsNew.close).not.toHaveBeenCalled();
+    });
+  });
 });

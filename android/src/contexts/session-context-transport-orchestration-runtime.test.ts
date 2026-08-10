@@ -65,6 +65,42 @@ function makeClosedChannel(sessionName = 'demo') {
 }
 
 describe('notifyTargetNetworkSignalRuntime', () => {
+  it('wakes scheduled reconnects on positive network recovery even when no socket remains', () => {
+    const wakeScheduledReconnects = vi.fn();
+    const targetNetworkProbeRuntime = createSessionTargetNetworkProbeRuntime({ probeTimeoutMs: 2_500, now: Date.now });
+
+    expect(notifyTargetNetworkSignalRuntime({
+      signal: { connected: true, connectionType: 'wifi', source: 'capacitor' },
+      targetRuntimes: [],
+      targetNetworkProbeRuntime,
+      sendTargetProbe: vi.fn(),
+      submitTargetSocketFailure: vi.fn(),
+      wakeScheduledReconnects,
+      runtimeDebug: vi.fn(),
+    })).toEqual([]);
+
+    expect(wakeScheduledReconnects).toHaveBeenCalledTimes(1);
+    targetNetworkProbeRuntime.dispose();
+  });
+
+  it('does not wake scheduled reconnects on a negative network signal', () => {
+    const wakeScheduledReconnects = vi.fn();
+    const targetNetworkProbeRuntime = createSessionTargetNetworkProbeRuntime({ probeTimeoutMs: 2_500, now: Date.now });
+
+    notifyTargetNetworkSignalRuntime({
+      signal: { connected: false, connectionType: 'none', source: 'capacitor' },
+      targetRuntimes: [],
+      targetNetworkProbeRuntime,
+      sendTargetProbe: vi.fn(),
+      submitTargetSocketFailure: vi.fn(),
+      wakeScheduledReconnects,
+      runtimeDebug: vi.fn(),
+    });
+
+    expect(wakeScheduledReconnects).not.toHaveBeenCalled();
+    targetNetworkProbeRuntime.dispose();
+  });
+
   it('probes every physical daemon target once and does not multiply by logical channels', () => {
     const targetA = makeFailedSocket(WebSocket.OPEN);
     const targetB = makeFailedSocket(WebSocket.OPEN);

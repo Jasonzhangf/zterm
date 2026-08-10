@@ -269,7 +269,19 @@ export interface RemoteWindowStreamStartRequestPayload {
 export interface RemoteWindowStreamUpdateFocusRequestPayload {
   requestId: string;
   streamId: string;
+  revision: number;
   target: RemoteWindowStreamTargetManifest;
+}
+
+export type RemoteWindowStreamFocusPhase = 'accepted' | 'ready' | 'error';
+
+export interface RemoteWindowStreamFocusResultPayload {
+  requestId: string;
+  streamId: string;
+  revision: number;
+  targetId: string;
+  phase: RemoteWindowStreamFocusPhase;
+  message?: string;
 }
 
 export interface RemoteWindowStreamStartedPayload {
@@ -634,6 +646,7 @@ export type BridgeServerControlMessage =
   | { type: 'remote-window-stream-started'; payload: RemoteWindowStreamStartedPayload }
   | { type: 'remote-window-stream-ice-candidate'; payload: RemoteWindowStreamIceCandidatePayload }
   | { type: 'remote-window-stream-status'; payload: RemoteWindowStreamStatusPayload }
+  | { type: 'remote-window-stream-focus-result'; payload: RemoteWindowStreamFocusResultPayload }
   | { type: 'remote-window-stream-quality-result'; payload: RemoteWindowStreamQualityResultPayload }
   | { type: 'remote-window-input-result'; payload: RemoteWindowInputResultPayload }
   | { type: 'input-ack'; payload: TerminalInputAckPayload }

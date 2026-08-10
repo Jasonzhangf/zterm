@@ -1109,6 +1109,20 @@ describe('remote window stream daemon owner', () => {
     });
   });
 
+  it('uses the ScreenCaptureKit window frame when AX contentFrame has a title-bar offset', () => {
+    const targets = buildMacosAppWindowTargets({
+      windows: [{
+        ...makeAppWindowCatalog().windows[0],
+        contentFrame: { x: 700, y: 168, width: 1200, height: 771 },
+      }],
+    }, '2026-07-19T00:00:00.000Z');
+
+    expect(targets[0]?.videoTarget).toMatchObject({
+      windowBoundsTopLeftPx: { x: 700, y: 139, width: 1200, height: 800 },
+      cropRectTopLeftPx: { x: 700, y: 139, width: 1200, height: 800 },
+    });
+  });
+
   it('flattens nested iTerm2 splitters before applying top-left crop math', () => {
     const panes = flattenIterm2SplitTree(makeNestedItermTree());
 
@@ -1530,6 +1544,9 @@ sleep 2
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('streamConfiguration.queueDepth = max(3, min(3, queueDepth))');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('streamConfiguration.minimumFrameInterval = CMTime(value: 1, timescale: CMTimeScale(max(1, frameRate)))');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('try await stream.updateConfiguration(nextConfig)');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('Task { @MainActor in');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('try? await Task.sleep(for: .milliseconds(50))');
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('windowId: command.windowId');
 
     expect(buildScreenCaptureKitConfig(makeAppStreamTarget(), 60)).toMatchObject({
       frameRate: 60,
@@ -3184,5 +3201,173 @@ setInterval(() => {}, 1000);
       code: 'remote_window_input_stream_missing',
     });
     expect(runRemoteWindowInputEvent).not.toHaveBeenCalled();
+  });
+});
+
+describe('remote window stream update-focus pending gate', () => {
+  it('rejects a second updateFocus while the previous focus-ready is still pending', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const target = makeStreamTarget();
+    const updateTarget = vi.fn(async () => undefined);
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async () => {
+        // No immediate frame: pendingFocusReady stays set until a frame arrives.
+        return {
+          width: 2,
+          height: 2,
+          frameRate: 30,
+          updateTarget,
+          stop: vi.fn(),
+        };
+      }),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await runtime.startStream({
+      requestId: 'rw-focus-busy-start',
+      streamId: 'stream-focus-busy',
+      target,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    const first = await runtime.updateFocus({
+      requestId: 'rw-focus-busy-1',
+      streamId: 'stream-focus-busy',
+      revision: 1,
+      target: {
+        ...target,
+        videoTarget: { ...target.videoTarget, windowId: 'window-1' },
+      },
+    });
+    expect('phase' in first && first.phase).toBe('accepted');
+
+    const second = await runtime.updateFocus({
+      requestId: 'rw-focus-busy-2',
+      streamId: 'stream-focus-busy',
+      revision: 2,
+      target: {
+        ...target,
+        videoTarget: { ...target.videoTarget, windowId: 'window-2' },
+      },
+    });
+    expect(second).toEqual({
+      requestId: 'rw-focus-busy-2',
+      streamId: 'stream-focus-busy',
+      code: 'remote_window_stream_update_focus_busy',
+      message: 'remote window focus update already in flight',
+    });
+  });
+});
+
+describe('remote window single-window overview gate', () => {
+  it('does not start an overview capture for a single app-window target (no duplicate full-res capture)', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    fakePeer.connectionState = 'new';
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const captureSourceFactory = vi.fn(async () => ({
+      width: 2,
+      height: 2,
+      frameRate: 30,
+      stop: vi.fn(),
+    }));
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory,
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const singleWindowTarget = {
+      ...makeStreamTarget(),
+      videoTarget: {
+        ...makeStreamTarget().videoTarget,
+        kind: 'app-window' as const,
+        appBundleId: 'com.google.Chrome',
+        windowId: 'app-window:487:64',
+      },
+    };
+
+    await runtime.startStream({
+      requestId: 'rw-single-overview',
+      streamId: 'stream-single-overview',
+      target: singleWindowTarget,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    // Single app-window: only the focus capture may run; no overview lane.
+    expect(captureSourceFactory).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts a low-bitrate overview capture when the target has composite windows', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    fakePeer.connectionState = 'new';
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const captureSourceFactory = vi.fn(async () => ({
+      width: 2,
+      height: 2,
+      frameRate: 30,
+      stop: vi.fn(),
+    }));
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory,
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    const compositeTarget = {
+      ...makeStreamTarget(),
+      videoTarget: {
+        ...makeStreamTarget().videoTarget,
+        kind: 'app-window' as const,
+        appBundleId: 'com.google.Chrome',
+        windowId: 'app-window:487:64',
+      },
+      compositeWindows: [
+        {
+          windowId: 'app-window:487:65',
+          title: 'Second window',
+          windowBoundsTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+          cropRectTopLeftPx: { x: 0, y: 0, width: 800, height: 600 },
+        },
+      ],
+    };
+
+    await runtime.startStream({
+      requestId: 'rw-composite-overview',
+      streamId: 'stream-composite-overview',
+      target: compositeTarget,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    // Composite target: focus + overview lanes both capture.
+    expect(captureSourceFactory).toHaveBeenCalledTimes(2);
   });
 });

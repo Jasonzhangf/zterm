@@ -1493,7 +1493,8 @@
         "emit_touch_action_intent"
       ],
       "direct_relations": [
-        "resource.remote_window_touch_action"
+        "resource.remote_window_touch_action",
+        "resource.remote_window_dual_stream_switch"
       ],
       "indirect_relations": [
         "resource.transport_target",
@@ -2368,6 +2369,51 @@
         "docs/decisions/2026-07-30-session-idle-stopped-notification.md",
         "docs/resource-map.md",
         "docs/function-map.md"
+      ]
+    },
+    {
+      "resource_id": "resource.remote_window_dual_stream_switch",
+      "status": "active",
+      "resource_type": "client_projection_control",
+      "identity": "Client-owned remote-window overview-to-focus switch revision and projection commit state",
+      "owner_feature": "desktop.remote_window_stream",
+      "truth_store": "docs/decisions/2026-08-09-remote-window-dual-stream-design.md",
+      "allowed_operations": [
+        "begin_switch",
+        "show_overview_crop",
+        "accept_focus_ready",
+        "commit_focus_projection",
+        "reject_stale_focus_result",
+        "project_switch_error",
+        "invalidate_switch"
+      ],
+      "direct_relations": [
+        "resource.remote_window_overlay",
+        "resource.remote_window_focus_stream"
+      ],
+      "indirect_relations": [
+        "resource.transport_target"
+      ],
+      "via_resources": [
+        "resource.remote_window_stream"
+      ],
+      "forbidden_direct_relations": [
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.remote_window_canvas_raw",
+        "resource.remote_window_canvas_encode"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/remote-window-dual-stream-runtime.test.ts",
+        "docs/testing/remote-window-dual-stream-test-design.md"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/decisions/2026-08-09-remote-window-dual-stream-design.md",
+        "docs/testing/remote-window-dual-stream-test-design.md"
       ]
     }
   ],

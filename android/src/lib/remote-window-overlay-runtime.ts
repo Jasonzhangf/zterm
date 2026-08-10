@@ -251,28 +251,16 @@ export function attachSameAppCompositeWindows(
       windowBoundsTopLeftPx: item.videoTarget.windowBoundsTopLeftPx,
       cropRectTopLeftPx: item.videoTarget.cropRectTopLeftPx,
     }));
-  // 双流：始终让 target 带 compositeWindows（至少含主窗口），强制 daemon 启动 overview capture，
-  // 让 client 端 overviewMediaStream 有源 → 缩略图始终可绘 + 切换瞬间主画面有低清占位。
-  // 原 target 含同 app 兄弟窗口时直接聚合；空数组但仍属合法 app-window（appBundleId 非空）
-  // 时退化为单窗口 compositeWindows，确保 daemon 启动 overview capture；
-  // 仅当跨 app 误聚合过滤场景（同 appBundleId 但 ownerName 不一致）才彻底不聚合。
+  // 双流的 overview 是否启动由 app-window target 类型决定；compositeWindows 只描述
+  // 主窗口之外的真实兄弟窗口，不能把主窗口自身塞回列表，否则客户端会绘制重复主缩略图。
   if (compositeWindows.length > 0) {
     return { ...target, compositeWindows };
   }
   if (filteredCandidates.length > compositeWindows.length) {
-    // 有候选被 ownerName 不一致过滤掉 → 真的跨 app 误报，绝不聚合（含退化）
+    // 有候选被 ownerName 不一致过滤掉 → 真的跨 app 误报，绝不聚合。
     return target;
   }
-  return {
-    ...target,
-    compositeWindows: [{
-      windowId: target.videoTarget.windowId,
-      title: target.videoTarget.title,
-      ownerName: target.videoTarget.ownerName,
-      windowBoundsTopLeftPx: target.videoTarget.windowBoundsTopLeftPx,
-      cropRectTopLeftPx: target.videoTarget.cropRectTopLeftPx,
-    }],
-  };
+  return target;
 }
 
 export function beginRemoteWindowStreamSetup(
@@ -519,23 +507,32 @@ export function resolveRemoteWindowCompositeWindowLayout(
       crop: w.cropRectTopLeftPx ?? w.windowBoundsTopLeftPx,
     })),
   ];
+  const uniqueEntries = entries.filter((entry, index) => (
+    entries.findIndex((candidate) => candidate.windowId === entry.windowId) === index
+  ));
+  if (uniqueEntries.length <= 1) {
+    return null;
+  }
+  const canvasWidth = 1920;
+  const canvasHeight = 1080;
+  const totalWidth = uniqueEntries.reduce((sum, entry) => sum + Math.max(1, entry.crop.width), 0);
+  const maxHeight = uniqueEntries.reduce((max, entry) => Math.max(max, Math.max(1, entry.crop.height)), 1);
+  const scale = Math.min(1, canvasWidth / totalWidth, canvasHeight / maxHeight);
   let offsetX = 0;
-  let canvasHeight = 0;
-  const windows = entries.map((entry) => {
+  const windows = uniqueEntries.map((entry) => {
     const slot: RemoteWindowCompositeWindowSlot = {
       windowId: entry.windowId,
       offsetX,
       offsetY: 0,
-      width: Math.max(1, Math.round(entry.crop.width)),
-      height: Math.max(1, Math.round(entry.crop.height)),
+      width: Math.max(1, Math.round(entry.crop.width * scale)),
+      height: Math.max(1, Math.round(entry.crop.height * scale)),
     };
     offsetX += slot.width;
-    canvasHeight = Math.max(canvasHeight, slot.height);
     return slot;
   });
   return {
     windows,
-    canvasWidth: offsetX,
+    canvasWidth,
     canvasHeight,
   };
 }

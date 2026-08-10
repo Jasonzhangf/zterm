@@ -9,7 +9,7 @@
  *  4. setCopySelection(menu={x,y,rowIndex}) executes
  *  5. TerminalPageCopyMenu renders with correct position
  */
-import { act, fireEvent, render, screen, renderHook } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, renderHook } from '@testing-library/react';
 import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { TerminalView } from '../TerminalView';
 import { TerminalPageCopyMenu } from '../../pages/TerminalPageCopyMenu';
@@ -33,6 +33,7 @@ beforeAll(() => {
 });
 
 afterEach(() => {
+  cleanup();
   vi.restoreAllMocks();
   vi.useRealTimers();
   ResizeObserverMock.reset();
@@ -343,5 +344,113 @@ describe('copy mode long-press e2e', () => {
 
     unmount();
     vi.useRealTimers();
+  });
+
+  // ---断点8: 已有选择高亮时,行上短按(pointerdown→pointerup 未达阈值)必须取消---
+  it('tap (short press) on a row dismisses an existing copy selection', () => {
+    vi.useFakeTimers();
+    const onLongPressRow = vi.fn();
+    const onCopySelectionDismiss = vi.fn();
+    const { container } = render(
+      <TerminalView
+        sessionId="s1"
+        active
+        copyModeActive
+        copyStartRowIndex={0}
+        copyEndRowIndex={2}
+        renderBufferSnapshot={{
+          lines: [[{ char: 65, fg: 256, bg: 256, flags: 0, width: 1 }]],
+          gapRanges: [], startIndex: 0, endIndex: 1,
+          bufferHeadStartIndex: 0, bufferTailEndIndex: 1,
+          daemonHeadRevision: 1, daemonHeadEndIndex: 1,
+          cols: 80, rows: 24, cursorKeysApp: false, cursor: null, revision: 1,
+        }}
+        onLongPressRow={onLongPressRow}
+        onCopySelectionDismiss={onCopySelectionDismiss}
+        live
+        splitVisible={false}
+        onInput={vi.fn()}
+        fontSize={14}
+      />,
+    );
+
+    const row = container.querySelector('[data-terminal-row="true"]') as HTMLElement;
+    expect(row).toBeTruthy();
+
+    act(() => {
+      fireEvent.pointerDown(row, { clientX: 100, clientY: 300 });
+    });
+    // 短按:时间未到 420ms 即抬起
+    act(() => {
+      fireEvent.pointerUp(row, { clientX: 100, clientY: 300 });
+    });
+
+    expect(onCopySelectionDismiss).toHaveBeenCalledTimes(1);
+    expect(onLongPressRow).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  // ---断点9: 长按(达阈值)弹出菜单,不触发取消;抬起也不取消---
+  it('long press still opens menu and does NOT dismiss selection on release', () => {
+    vi.useFakeTimers();
+    const onLongPressRow = vi.fn();
+    const onCopySelectionDismiss = vi.fn();
+    const { container } = render(
+      <TerminalView
+        sessionId="s1"
+        active
+        copyModeActive
+        copyStartRowIndex={0}
+        copyEndRowIndex={2}
+        renderBufferSnapshot={{
+          lines: [[{ char: 65, fg: 256, bg: 256, flags: 0, width: 1 }]],
+          gapRanges: [], startIndex: 0, endIndex: 1,
+          bufferHeadStartIndex: 0, bufferTailEndIndex: 1,
+          daemonHeadRevision: 1, daemonHeadEndIndex: 1,
+          cols: 80, rows: 24, cursorKeysApp: false, cursor: null, revision: 1,
+        }}
+        onLongPressRow={onLongPressRow}
+        onCopySelectionDismiss={onCopySelectionDismiss}
+        live
+        splitVisible={false}
+        onInput={vi.fn()}
+        fontSize={14}
+      />,
+    );
+
+    const row = container.querySelector('[data-terminal-row="true"]') as HTMLElement;
+    act(() => {
+      fireEvent.pointerDown(row, { clientX: 100, clientY: 300 });
+    });
+    act(() => { vi.advanceTimersByTime(420); });
+    expect(onLongPressRow).toHaveBeenCalledTimes(1);
+    act(() => {
+      fireEvent.pointerUp(row, { clientX: 100, clientY: 300 });
+    });
+    // 长按已触发菜单,抬起不取消
+    expect(onCopySelectionDismiss).not.toHaveBeenCalled();
+    vi.useRealTimers();
+  });
+
+  // ---断点10: 菜单 backdrop 点击外部关闭---
+  it('TerminalPageCopyMenu backdrop click calls onClose', () => {
+    const onClose = vi.fn();
+    render(
+      <TerminalPageCopyMenu
+        menu={{ x: 100, y: 300, rowIndex: 0 }}
+        viewportWidth={390}
+        headerTopInsetPx={24}
+        startRowIndex={null}
+        onSetStart={vi.fn()}
+        onSetEnd={vi.fn()}
+        onCopy={vi.fn()}
+        onClose={onClose}
+      />,
+    );
+
+    const backdrop = document.querySelector('[data-testid="terminal-copy-menu-backdrop"]') as HTMLElement;
+    expect(backdrop).toBeTruthy();
+    fireEvent.pointerDown(backdrop);
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 });

@@ -108,6 +108,8 @@ flowchart TD
   RemoteWindowOverlay --> WindowGroupLayout["src/components/terminal/WindowGroupLayout.tsx#WindowGroupLayout"]
   RemoteWindowOverlay --> RemoteScreenshotRuntime["src/lib/remote-screenshot-runtime.ts#createRemoteScreenshotRuntime"]
   RemoteWindowOverlay --> RemoteWindowMessageRuntime["src/lib/remote-window-message-runtime.ts#createRemoteWindowMessageRuntime"]
+  RemoteWindowOverlay --> RemoteWindowDualStreamSwitch["src/lib/remote-window-dual-stream-runtime.ts#beginRemoteWindowDualStreamSwitch"]
+  RemoteWindowDualStreamSwitch --> RemoteWindowMessageRuntime
   RemoteWindowOverlay --> RemoteWindowOverlayRuntime["src/lib/remote-window-overlay-runtime.ts#beginRemoteWindowStreamHandoff"]
   RemoteWindowOverlay --> RemoteWindowStreamQualityRuntime["src/contexts/session-context-remote-window-runtime.ts#updateRemoteWindowStreamQualityRuntime"]
   RemoteWindowOverlay --> RemoteWindowTouchAction["src/lib/remote-window-touch-action-runtime.ts#dispatchRemoteWindowTouchInputActionRuntime"]

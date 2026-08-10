@@ -346,9 +346,15 @@ export function notifyTargetNetworkSignalRuntime(options: {
     socket: BridgeTransportSocket,
     message: string,
   ) => void;
+  wakeScheduledReconnects?: () => void;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
 }) {
   const outcomes: TargetNetworkProbeOutcome[] = [];
+  const shouldWakeReconnects = options.signal.source === 'foreground-resume'
+    || options.signal.connected === true;
+  if (shouldWakeReconnects) {
+    options.wakeScheduledReconnects?.();
+  }
   for (const targetRuntime of options.targetRuntimes) {
     const socket = targetRuntime.terminalTransport;
     if (!socket) {
@@ -865,6 +871,23 @@ export function createSessionTransportOrchestrationRuntime(options: {
       signal,
       targetRuntimes: options.readTargetTransportRuntimes(),
       targetNetworkProbeRuntime: options.refs.targetNetworkProbeRuntime,
+      wakeScheduledReconnects: () => {
+        for (const sessionId of options.refs.reconnectStore.sessionIds()) {
+          const reconnectRuntime = options.refs.reconnectStore.read(sessionId);
+          if (reconnectRuntime?.phase !== 'scheduled') {
+            continue;
+          }
+          scheduleReconnect(sessionId, 'network recovered', true, {
+            immediate: true,
+            force: true,
+          });
+          options.runtimeDebug('session.reconnect.network-recovery-wake', {
+            sessionId,
+            source: signal.source,
+            attempt: reconnectRuntime.attempt,
+          });
+        }
+      },
       sendTargetProbe: (_targetKey, probeSocket, sentAt) => {
         probeSocket.send(JSON.stringify(buildTerminalMuxPing(sentAt)));
       },

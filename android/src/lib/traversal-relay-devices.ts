@@ -1,6 +1,9 @@
 import type { TraversalRelayDeviceSnapshot } from './types';
 import { readTraversalRelayAccountState, type TraversalRelayAccountState } from './traversal-relay-client';
-import { projectRelayDirectoryDeviceSnapshots } from './relay-account-directory';
+import {
+  dedupeRelayDaemonDeviceSnapshots,
+  projectRelayDirectoryDeviceSnapshots,
+} from './relay-account-directory';
 
 export function countConnectedTraversalRelayDevices(devices: TraversalRelayDeviceSnapshot[]) {
   return devices.filter((device) => device.daemon.connected || device.client.connected).length;
@@ -23,7 +26,7 @@ export function projectOnlineTraversalRelayDaemonDevicesFromAccount(
   const directoryDevices = projectRelayDirectoryDeviceSnapshots(account.directory);
   const accountDevices = account.devices || [];
   if (directoryDevices.length === 0) {
-    return listOnlineTraversalRelayDaemonDevices(accountDevices);
+    return listOnlineTraversalRelayDaemonDevices(dedupeRelayDaemonDeviceSnapshots(accountDevices));
   }
 
   // `/api/auth/me` and the live directory stream carry the same control-plane
@@ -51,7 +54,7 @@ export function projectOnlineTraversalRelayDaemonDevicesFromAccount(
       merged[index] = accountDevice;
     }
   }
-  return listOnlineTraversalRelayDaemonDevices(merged);
+  return listOnlineTraversalRelayDaemonDevices(dedupeRelayDaemonDeviceSnapshots(merged));
 }
 
 export function readOnlineTraversalRelayDaemonDevices() {

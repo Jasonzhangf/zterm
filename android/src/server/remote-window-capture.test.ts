@@ -46,11 +46,35 @@ describe('remote-window composite pane layout', () => {
     });
     const layout = resolveRemoteWindowCompositeLayout(target);
     expect(layout).not.toBeNull();
-    expect(layout!.canvasWidth).toBe(1200);
-    expect(layout!.canvasHeight).toBe(600);
+    expect(layout!.canvasWidth).toBe(1920);
+    expect(layout!.canvasHeight).toBe(1080);
     expect(layout!.windows).toHaveLength(2);
     expect(layout!.windows[0]).toMatchObject({ windowId: '100', offsetX: 0, offsetY: 0 });
     expect(layout!.windows[1]).toMatchObject({ windowId: '200', offsetX: 800, offsetY: 0 });
+  });
+
+  it('deduplicates the primary entry and fits oversized rows into the 1080P canvas', () => {
+    const target = makeTarget({
+      compositeWindows: [
+        {
+          windowId: '100',
+          title: 'Synthetic primary',
+          windowBoundsTopLeftPx: { x: 10, y: 20, width: 800, height: 600 },
+          cropRectTopLeftPx: { x: 10, y: 20, width: 800, height: 600 },
+        },
+        ...['200', '300', '400'].map((windowId) => ({
+          windowId,
+          title: windowId,
+          windowBoundsTopLeftPx: { x: 0, y: 0, width: 1000, height: 1000 },
+          cropRectTopLeftPx: { x: 0, y: 0, width: 1000, height: 1000 },
+        })),
+      ],
+    });
+    const layout = resolveRemoteWindowCompositeLayout(target);
+    expect(layout!.windows.map((window) => window.windowId)).toEqual(['100', '200', '300', '400']);
+    const last = layout!.windows[layout!.windows.length - 1]!;
+    expect(last.offsetX + last.outputWidth).toBeLessThanOrEqual(layout!.canvasWidth);
+    expect(last.outputHeight).toBeLessThanOrEqual(layout!.canvasHeight);
   });
 
   it('builds a capture config carrying composite windows and canvas size', () => {
@@ -65,8 +89,8 @@ describe('remote-window composite pane layout', () => {
       ],
     });
     const config = buildScreenCaptureKitConfig(target, 30);
-    expect(config.canvasWidth).toBe(1200);
-    expect(config.canvasHeight).toBe(600);
+    expect(config.canvasWidth).toBe(1920);
+    expect(config.canvasHeight).toBe(1080);
     expect(config.compositeWindows).toHaveLength(1);
     expect(config.compositeWindows![0]).toMatchObject({ windowId: '200', offsetX: 800, offsetY: 0 });
   });

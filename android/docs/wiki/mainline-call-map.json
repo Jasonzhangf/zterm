@@ -255,6 +255,10 @@
           "label": "src/lib/remote-window-message-runtime.ts#createRemoteWindowMessageRuntime"
         },
         {
+          "id": "RemoteWindowDualStreamSwitch",
+          "label": "src/lib/remote-window-dual-stream-runtime.ts#beginRemoteWindowDualStreamSwitch + acceptRemoteWindowFocusReady + commitRemoteWindowFocusProjection"
+        },
+        {
           "id": "RemoteWindowOverlayRuntime",
           "label": "src/lib/remote-window-overlay-runtime.ts#beginRemoteWindowStreamHandoff"
         },
@@ -978,7 +982,7 @@
           "to": "RemoteWindowOverlay",
           "owner_feature": "desktop.remote_window_stream",
           "semantic_input": "active session id plus remote-window catalog/start/stop/input/screenshot callbacks",
-          "semantic_output": "picker, stream setup, floating/fullscreen video overlay, collapsed same-app picker rows plus in-video primary-plus-children sibling window switcher inside the same locked video container, portrait child rail above primary video and landscape child rail beside it, TerminalPage-measured QuickBar plus IME bottom chrome avoidance, source-aspect pre-start and daemon-frame-aspect post-start projection, floating resize, fullscreen button, screenshot button, aspect-fit drawing plus default remote target window-resize fill request on fullscreen entry, IME bottom-inset fullscreen padding plus auto lift, Back/minimize projection, zoom/pan projection without minimap and without shrink below fit where local single-finger pan is only enabled after fullscreen zoom, unzoomed remote tap, release-time drag gesture, target-locked two-finger scroll, and wheel input context, separate QuickBar/body suppression state, active remote-window input context, and close intent",
+          "semantic_output": "picker, stream setup, floating/fullscreen video overlay, collapsed same-app picker rows plus in-video primary-plus-children sibling window switcher inside the same locked video container, three-child top rail above primary video with horizontal scrolling for additional children, TerminalPage-measured QuickBar plus IME bottom chrome avoidance, source-aspect pre-start and daemon-frame-aspect post-start projection, floating resize, fullscreen button, screenshot button, aspect-fit drawing plus default remote target window-resize fill request on fullscreen entry, IME bottom-inset fullscreen padding plus auto lift, Back/minimize projection, zoom/pan projection without minimap and without shrink below fit where local single-finger pan is only enabled after fullscreen zoom, unzoomed remote tap, release-time drag gesture, target-locked two-finger scroll, and wheel input context, separate QuickBar/body suppression state, active remote-window input context, and close intent",
           "status": "anchored",
           "edge_id": "android_mainline:TerminalPage->RemoteWindowOverlay",
           "resource_from": "resource.ui_projection",
@@ -991,7 +995,7 @@
           "to": "WindowGroupLayout",
           "owner_feature": "desktop.remote_window_stream",
           "semantic_input": "same-app remote-window target group and active target id",
-          "semantic_output": "active video-layer primary-plus-children layout with portrait top rail or landscape side rail inside the locked remote-window container",
+          "semantic_output": "active video-layer primary-plus-children layout with three-child top rail above the primary and horizontal scrolling for additional children inside the locked remote-window container",
           "status": "anchored",
           "edge_id": "android_mainline:RemoteWindowOverlay->WindowGroupLayout",
           "resource_from": "resource.remote_window_overlay",
@@ -1028,6 +1032,32 @@
           "via_resources": [
             "resource.active_session"
           ],
+          "relation_status": "via"
+        },
+        {
+          "from": "RemoteWindowOverlay",
+          "to": "RemoteWindowDualStreamSwitch",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "selected overview thumbnail and current dual-stream revision",
+          "semantic_output": "overview crop projection followed by revision-bound focus update and first-frame commit",
+          "status": "anchored",
+          "edge_id": "android_mainline:RemoteWindowOverlay->RemoteWindowDualStreamSwitch",
+          "resource_from": "resource.remote_window_overlay",
+          "resource_to": "resource.remote_window_dual_stream_switch",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "RemoteWindowDualStreamSwitch",
+          "to": "RemoteWindowMessageRuntime",
+          "owner_feature": "desktop.remote_window_stream",
+          "semantic_input": "revision-bound focus update intent",
+          "semantic_output": "typed remote-window-stream-update-focus control message",
+          "status": "anchored",
+          "edge_id": "android_mainline:RemoteWindowDualStreamSwitch->RemoteWindowMessageRuntime",
+          "resource_from": "resource.remote_window_dual_stream_switch",
+          "resource_to": "resource.session_transport",
+          "via_resources": ["resource.active_session"],
           "relation_status": "via"
         },
         {

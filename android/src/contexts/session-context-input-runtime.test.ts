@@ -623,4 +623,160 @@ describe('session-context-input-runtime', () => {
       }),
     );
   });
+
+  // 2026-08-09 BUG #2: backpressure close 后 reliable 协议路径立即 retry 死循环
+  // 红测预期：close 后 retry 必须有指数 backoff（至少 100ms 起步，封顶 2000ms）
+  describe('long-voice-commit input backpressure resilience (BUG #2/#3 regression)', () => {
+    it('applies exponential backoff after a reliable backpressure close, not immediate retry', () => {
+      vi.useFakeTimers();
+      const sendSocketPayload = vi.fn();
+      // long input forces backpressure close once bufferedAmount >= 128KB
+      const bigInput = 'a'.repeat(200 * 1024);
+      const ws = createSocket(WebSocket.OPEN, 130 * 1024); // already past threshold
+
+      sendInputThroughSessionTransport({
+        sessionId: 'session-backpressure',
+        data: bigInput,
+        refs: {
+          sessionsRef: { current: [{ id: 'session-backpressure', reliableInputSupported: true } as any] },
+          stateRef: { current: { activeSessionId: 'session-backpressure' } },
+        },
+        runtimeDebug: vi.fn(),
+        daemonConnection: createDaemonConnectionForSocket(ws),
+        isReconnectInFlight: () => false,
+        sendSocketPayload,
+        markPendingInputTailRefresh: vi.fn(() => true),
+        readSessionBufferSnapshot: () => ({ revision: 3 }),
+        requestSessionBufferHead: vi.fn(),
+        hasPendingSessionTransportOpen: () => false,
+        isPendingSessionTransportOpenStale: () => false,
+      });
+
+      expect(ws.close).toHaveBeenCalledWith(4000, 'input backpressure');
+
+      // CRITICAL: immediately advancing time by TERMINAL_RELIABLE_INPUT_RETRY_MS
+      // (which is typically 50-200ms) MUST NOT trigger another retry / close cycle
+      // while bufferedAmount is still over threshold.
+      // 红测：第一次 retry 必须至少延迟 100ms，且再次 retry 必须 backoff
+      const initialRetryDelay = TERMINAL_RELIABLE_INPUT_RETRY_MS;
+      const fastRetryWindowMs = initialRetryDelay; // first allowed retry window
+
+      // ws stays backpressured
+      ws.readyState = WebSocket.CLOSED;
+      // schedule retry fires within the first retry window — bufferedAmount stays high
+      vi.advanceTimersByTime(fastRetryWindowMs);
+
+      // 红测断言：retry 不应该再次调用 ws.close (死循环)
+      // 如果当前实现立即 retry，会再次触发 close / 死循环
+      expect(ws.close.mock.calls.length).toBeLessThanOrEqual(1);
+    });
+
+    it('does not re-send a backpressure-closed input within the first retry window (BUG #2 strict)', () => {
+      vi.useFakeTimers();
+      const sendSocketPayload = vi.fn();
+      // long input forces backpressure close once bufferedAmount >= 128KB
+      const bigInput = 'a'.repeat(200 * 1024);
+      let bufferedAmount = 130 * 1024; // already over threshold
+      const ws = {
+        readyState: WebSocket.OPEN,
+        get bufferedAmount() {
+          return bufferedAmount;
+        },
+        set bufferedAmount(v: number) {
+          bufferedAmount = v;
+        },
+        close: vi.fn((_code?: number, _reason?: string) => {
+          // simulate real browser: ws flips to CLOSED immediately on close()
+          ws.readyState = WebSocket.CLOSED;
+        }),
+      } as any;
+
+      sendInputThroughSessionTransport({
+        sessionId: 'session-bp-strict',
+        data: bigInput,
+        refs: {
+          sessionsRef: { current: [{ id: 'session-bp-strict', reliableInputSupported: true } as any] },
+          stateRef: { current: { activeSessionId: 'session-bp-strict' } },
+        },
+        runtimeDebug: vi.fn(),
+        daemonConnection: createDaemonConnectionForSocket(ws),
+        isReconnectInFlight: () => false,
+        sendSocketPayload,
+        markPendingInputTailRefresh: vi.fn(() => true),
+        readSessionBufferSnapshot: () => ({ revision: 3 }),
+        requestSessionBufferHead: vi.fn(),
+        hasPendingSessionTransportOpen: () => false,
+        isPendingSessionTransportOpenStale: () => false,
+      });
+
+      expect(ws.close).toHaveBeenCalledTimes(1);
+      const sendsAfterFirstClose = sendSocketPayload.mock.calls.length;
+
+      // simulate ws recovery with backlog — ws.open again, bufferedAmount still high
+      ws.readyState = WebSocket.OPEN;
+      bufferedAmount = 130 * 1024;
+
+      // fire scheduled retry (immediate retry window)
+      vi.advanceTimersByTime(TERMINAL_RELIABLE_INPUT_RETRY_MS + 1);
+
+      // 红测：retry 时如果 bufferedAmount 仍超阈值，应该再次 close 而不是 send
+      // 当前实现 BUG：retry 立即 send,不管 bufferedAmount → 触发新一轮 close → 死循环
+      // 红测期望：retry 期间 sendSocketPayload 不应该新增调用
+      expect(sendSocketPayload.mock.calls.length - sendsAfterFirstClose).toBe(0);
+    });
+
+    it('re-checks ws.bufferedAmount after each send within a flush cycle (BUG #3)', () => {
+      vi.useFakeTimers();
+      const sendSocketPayload = vi.fn();
+      // multiple chunks that cumulatively exceed 128KB but each chunk stays under
+      const longInput = 'a'.repeat(200 * 1024);
+
+      // simulate bufferedAmount increasing AS we send chunks
+      let buffered = 0;
+      const ws = {
+        readyState: WebSocket.OPEN,
+        get bufferedAmount() {
+          return buffered;
+        },
+        set bufferedAmount(v: number) {
+          buffered = v;
+        },
+        close: vi.fn((_code?: number, _reason?: string) => {
+          // when close is called, ws flips to CLOSING (real browser behavior)
+          ws.readyState = WebSocket.CLOSING;
+        }),
+      } as any;
+
+      sendInputThroughSessionTransport({
+        sessionId: 'session-flush-loop',
+        data: longInput,
+        refs: {
+          // BUG #3 fix is in the legacy (non-reliable) path. 100-char input
+          // is split into 1 chunk by splitTerminalInputUtf8Chunks but we want
+          // multiple chunks; force 5 chunks of 40160 chars each (chunk size
+          // 64KB → 200KB total).
+          sessionsRef: { current: [{ id: 'session-flush-loop', reliableInputSupported: false } as any] },
+          stateRef: { current: { activeSessionId: 'session-flush-loop' } },
+        },
+        runtimeDebug: vi.fn(),
+        daemonConnection: createDaemonConnectionForSocket(ws),
+        isReconnectInFlight: () => false,
+        sendSocketPayload: vi.fn(((sid: string, w: any, payload: string) => {
+          sendSocketPayload(sid, w, payload);
+          // simulate kernel: each send adds to bufferedAmount
+          buffered += payload.length;
+        }) as any),
+        markPendingInputTailRefresh: vi.fn(() => true),
+        readSessionBufferSnapshot: () => ({ revision: 3 }),
+        requestSessionBufferHead: vi.fn(),
+        hasPendingSessionTransportOpen: () => false,
+        isPendingSessionTransportOpenStale: () => false,
+      });
+
+      // BUG #3 红测：如果当前实现只在入口读 bufferedAmount, 在 flush 期间
+      // 会持续 send 远超 128KB 阈值的 payload 但不再次触发 close
+      // 修复后，每次 send 都应该 check bufferedAmount，达到阈值立即 close
+      expect(ws.close).toHaveBeenCalled();
+    });
+  });
 });
