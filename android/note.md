@@ -5495,3 +5495,12 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
   ④全量 vitest run 在 rtc-bridge/remote-window-stream-daemon 原生崩溃(wRTC/canvas),须分组跑。
 - 未做:P1-E 在"失败隔离期内 direct 被 selectable 跳过"主路径不生效(兜底才用),价值低于预期;
   P2 head 提前在 mux 路径本已满足。真机/OTA 未做(交付标准=自动测试全绿+提交)。
+
+## 2026-08-10 relay duplicate machine + network reconnect investigation
+
+- 抽屉重复实例基线：`projectRelayDirectoryDeviceSnapshots()` 逐条投影 directory device；`projectOnlineTraversalRelayDaemonDevicesFromAccount()` 仅按 `deviceId` 合并；picker 以 `deviceId:hostId` 渲染。因此同一 `daemon.hostId`、不同 `deviceId` 的“旧空 session + 当前有 session”会同时出现。机器唯一身份应是 `daemon.hostId`，需在 relay directory projection owner 去重并合并 endpoint/session truth。
+- 自动重连基线：平台 `online`/Capacitor signal 进入 `notifyTargetNetworkSignalRuntime()`，但该函数只处理仍有 `terminalTransport` 的 target；物理断连后 session 没有 terminal socket，已排队的 reconnect runtime 不会被唤醒。手动 reconnect 使用 `immediate/resetAttempt/force`，所以可立即恢复。正式修复应在 `terminal.transport_lifecycle` network-signal owner 唤醒已有 reconnect runtime，不能新增第二套连接路径。
+- 实验记录：`playground/relay-dedupe-20260810/H1-same-host-rows.md`、`playground/reconnect-signal-20260810/H1-network-recovery-wait.md`。
+- 验证：relay/directory/device-stream 24 tests、network/reconnect 52 tests、transport lifecycle 61 tests、type-check 均通过；Vite production build、Capacitor sync、Gradle `assembleDebug` 通过，APK `0.1.3.2527` 已安装到 `100.104.163.65:5555`。完整 `build:android` 仍被既有 3 个 cold-start 测试阻断，未运行 OTA 发布链。
+- 2026-08-10 OTA correction: `pnpm build` 的 bump 原先位于 prebuild 之后，prebuild 失败会复用旧 buildNumber；发布脚本现先执行 `bump-build-version.mjs`，普通 `build` 不再重复 bump。已生成并验证 `0.1.3.2528` / `1100025280`，写入 update-dist、release-dist、`~/.zterm/updates`、`~/.wterm/updates`，15t-1 安装成功。
+- 2026-08-10 OTA 双通道修复：`0.1.3.2528` 已通过本机 `127.0.0.1:3333`、Tailscale `100.66.1.82:3333`、公网 Relay `https://relay.codewhisper.cc:18443/relay/` 的 manifest/APK GET/HEAD；`build-android-debug.sh` 现在在本机 bundle verify 后默认 scp 发布 Relay，并校验公网 manifest versionCode 与 APK HEAD。

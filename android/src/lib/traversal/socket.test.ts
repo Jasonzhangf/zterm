@@ -1158,6 +1158,43 @@ describe('TraversalSocket reconnect', () => {
     socket.close();
   });
 
+  it('does not pollute health or records when a superseded candidate errors late', async () => {
+    const routeHealthCache = new TraversalRouteHealthCache();
+    const scope = { accountId: 'logged-out', daemonHostId: 'daemon-1' };
+    const socket = new TraversalSocket({
+      bridgeHost: '203.0.113.10',
+      bridgePort: 3333,
+      authToken: 'token',
+      tailscaleHost: '100.66.1.82',
+      ipv4Host: '203.0.113.10',
+      transportMode: 'websocket',
+    }, settings, {
+      routeHealthCache,
+      routeHealthScope: scope,
+    });
+    const onopen = vi.fn();
+    socket.onopen = onopen;
+    await flushMicrotasks();
+
+    // The first candidate opens and wins; the other is closed as superseded.
+    MockWebSocket.instances[0].triggerOpen();
+    await flushMicrotasks();
+    expect(onopen).toHaveBeenCalledTimes(1);
+
+    // The superseded candidate errors afterwards: it must not be recorded as a
+    // failure (it was never the active attempt) nor overwrite its skipped mark.
+    MockWebSocket.instances[1].triggerError();
+    await flushMicrotasks();
+
+    const supersededAttempt = socket.getDiagnostics().attempts.find((item) => item.stage === 'skipped');
+    expect(supersededAttempt).toBeDefined();
+    expect(supersededAttempt?.reason).toBe('superseded by faster candidate');
+    expect(socket.getDiagnostics().stage).toBe('open');
+    expect(socket.readyState).toBe(MockWebSocket.OPEN);
+
+    socket.close();
+  });
+
   it('contracts the rtc-direct candidate timeout while a recent failure is quarantined', async () => {
     const routeHealthCache = new TraversalRouteHealthCache();
     const scope = { accountId: 'user-1', daemonHostId: 'daemon-host-a' };
