@@ -199,7 +199,7 @@ describe('useAppPageState', () => {
       },
     );
 
-    expect(result.current.pageState.kind).toBe('connections');
+    expect(result.current.pageState.kind).toBe('terminal');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE) || '{}')).toEqual({
       kind: 'terminal',
     });

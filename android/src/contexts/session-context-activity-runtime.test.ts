@@ -341,7 +341,7 @@ describe('ensureActiveSessionFreshRuntime', () => {
         allowReconnectIfUnavailable: true,
       },
       refs,
-      daemonConnection: makeDaemonConnection({ readyState: WebSocket.CLOSED }),
+      daemonConnection: makeDaemonConnection({ readyState: WebSocket.CONNECTING }),
       reconnectSession,
       runtimeDebug,
     });

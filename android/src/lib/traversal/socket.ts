@@ -854,6 +854,9 @@ export class TraversalSocket implements BridgeTransportSocket {
           this.onmessage?.(event);
         },
         onerror: (reason) => {
+          if (attempt.advanced && !attempt.settled) {
+            return;
+          }
           this.diagnostics.reason = reason || `${attempt.candidate.kind} error`;
           this.markAttempt(attempt.candidate, 'error', false, this.diagnostics.reason, undefined, attempt.record.score, attempt.record);
           if (!attempt.settled) {

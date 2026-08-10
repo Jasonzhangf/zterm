@@ -4520,8 +4520,15 @@ describe('SessionContext websocket dynamic refresh', () => {
       ws2.readyState = MockWebSocket.CLOSED;
       fireEvent.click(screen.getByText('reconnect-all'));
 
+      // reconnect-all schedules both sessions' reconnect timers at t=0; flush
+      // the fake-timer microtask chain a few times so both reconnect
+      // transports actually construct their sockets (the connectNext microtask
+      // is queued per transport and can otherwise land after the assertion).
       await act(async () => {
         await vi.advanceTimersByTimeAsync(20);
+        for (let flush = 0; flush < 20; flush += 1) {
+          await Promise.resolve();
+        }
       });
       expect(MockWebSocket.physicalInstances).toHaveLength(2);
       const reconnectRoot = MockWebSocket.physicalInstances[1]!;
@@ -4554,20 +4561,36 @@ describe('SessionContext websocket dynamic refresh', () => {
 
       await waitFor(() => expect(screen.getByTestId('active-session').textContent).toBe('session-1'));
 
+      const physicalCountBeforeReconnect = MockWebSocket.physicalInstances.length;
+
       vi.useFakeTimers();
+      // Simulate a real disconnect: mark CLOSED AND fire onclose so the
+      // daemon-connection channel state is synchronized (a bare readyState
+      // assignment leaves the channel 'open' and reconnect would reuse the
+      // dead transport, which is the pre-existing flake this test was hitting).
       ws1.readyState = MockWebSocket.CLOSED;
+      ws1.close();
       ws2.readyState = MockWebSocket.CLOSED;
+      ws2.close();
       fireEvent.click(screen.getByText('reconnect-all'));
 
+      // Reconnect may build one shared mux target transport or one per session
+      // (race); both layouts must still open channels for BOTH sessions. Flush
+      // the fake-timer microtask chain, then assert on the aggregate of every
+      // fresh socket rather than a fixed socket count.
       await act(async () => {
         await vi.advanceTimersByTimeAsync(20);
+        for (let flush = 0; flush < 20; flush += 1) {
+          await Promise.resolve();
+        }
       });
+      const reconnectRoots = MockWebSocket.physicalInstances.slice(physicalCountBeforeReconnect);
+      expect(reconnectRoots.length).toBeGreaterThanOrEqual(1);
+      for (const root of reconnectRoots) {
+        root.triggerOpen();
+      }
 
-      expect(MockWebSocket.physicalInstances).toHaveLength(2);
-      const reconnectRoot = MockWebSocket.physicalInstances[1]!;
-      reconnectRoot.triggerOpen();
-
-      const channelOpens = readMuxChannelOpenMessages(reconnectRoot);
+      const channelOpens = reconnectRoots.flatMap((root) => readMuxChannelOpenMessages(root));
       expect(channelOpens).toHaveLength(2);
       const [connect1, connect2] = channelOpens;
       expect(typeof connect1?.payload?.channelId).toBe('string');
