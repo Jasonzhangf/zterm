@@ -38,6 +38,14 @@ interface TmuxControlTransportEntry {
 }
 
 const tmuxControlTransportPool = new Map<string, TmuxControlTransportEntry>();
+// Short-TTL cache for list-sessions results. Opening the session drawer
+// triggers audit + refresh list requests on the same targets; without this
+// cache every open re-issues a network round trip per target (and each target
+// with no reusable session transport pays a fresh traversal connect). The TTL
+// is short so create/rename/kill operations become visible quickly; mutations
+// also invalidate the cache entry explicitly.
+const TMUX_SESSION_LIST_CACHE_TTL_MS = 3000;
+const tmuxSessionListCache = new Map<string, { sessionNames: string[]; at: number }>();
 let tmuxControlIdentitySequence = 0;
 // Shared session-activity notifier for the tmux control channel (legacy,
 // non-mux wire messages also carry daemon-published session-activity facts).
@@ -351,7 +359,19 @@ export function fetchTmuxSessions(
   traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode' | 'traversalRelay'>,
   overrideUrl?: string,
 ) {
-  return sendTmuxRequest(target, traversalSettings, { type: 'list-sessions' }, overrideUrl);
+  const cacheKey = buildTmuxControlTransportKey(target, traversalSettings, overrideUrl);
+  const cached = tmuxSessionListCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < TMUX_SESSION_LIST_CACHE_TTL_MS) {
+    return Promise.resolve([...cached.sessionNames]);
+  }
+  return sendTmuxRequest(target, traversalSettings, { type: 'list-sessions' }, overrideUrl).then((sessionNames) => {
+    tmuxSessionListCache.set(cacheKey, { sessionNames, at: Date.now() });
+    return sessionNames;
+  });
+}
+
+function invalidateTmuxSessionListCache(target: BridgeTarget, traversalSettings: TmuxSessionTraversalSettings, overrideUrl?: string) {
+  tmuxSessionListCache.delete(buildTmuxControlTransportKey(target, traversalSettings, overrideUrl));
 }
 
 export function createTmuxSession(
@@ -364,7 +384,14 @@ export function createTmuxSession(
   const cwd = typeof options === 'string' ? undefined : options?.cwd?.trim();
   const payload: { sessionName: string; cwd?: string } = { sessionName };
   if (cwd) payload.cwd = cwd;
-  return sendTmuxRequest(target, traversalSettings, { type: 'tmux-create-session', payload }, overrideUrl);
+  const result = sendTmuxRequest(
+    target,
+    traversalSettings,
+    { type: 'tmux-create-session', payload },
+    overrideUrl,
+  );
+  invalidateTmuxSessionListCache(target, traversalSettings, overrideUrl);
+  return result;
 }
 
 export function renameTmuxSession(
@@ -374,12 +401,14 @@ export function renameTmuxSession(
   nextSessionName: string,
   overrideUrl?: string,
 ) {
-  return sendTmuxRequest(
+  const result = sendTmuxRequest(
     target,
     traversalSettings,
     { type: 'tmux-rename-session', payload: { sessionName, nextSessionName } },
     overrideUrl,
   );
+  invalidateTmuxSessionListCache(target, traversalSettings, overrideUrl);
+  return result;
 }
 
 export function killTmuxSession(
@@ -388,7 +417,9 @@ export function killTmuxSession(
   sessionName: string,
   overrideUrl?: string,
 ) {
-  return sendTmuxRequest(target, traversalSettings, { type: 'tmux-kill-session', payload: { sessionName } }, overrideUrl);
+  const result = sendTmuxRequest(target, traversalSettings, { type: 'tmux-kill-session', payload: { sessionName } }, overrideUrl);
+  invalidateTmuxSessionListCache(target, traversalSettings, overrideUrl);
+  return result;
 }
 
 export function resetTmuxSessionTransportPoolForTests() {
@@ -396,4 +427,5 @@ export function resetTmuxSessionTransportPoolForTests() {
     failTmuxControlTransport(entry, new Error('Reset tmux control transport pool'), true);
   }
   tmuxControlTransportPool.clear();
+  tmuxSessionListCache.clear();
 }

@@ -264,14 +264,13 @@ describe('tmux-sessions transport contract', () => {
     socket.triggerSessions(['first']);
     await expect(first).resolves.toEqual(['first']);
 
+    // A second list-sessions on the same target within the short-TTL cache
+    // window is served from cache: the open transport is reused (no new
+    // socket) AND no duplicate list-sessions request is sent.
     const second = fetchTmuxSessions(target, bridgeSettings);
     expect(traversalHarness.MockTraversalSocket.instances).toHaveLength(1);
-    expect(JSON.parse(socket.sent[2]!)).toMatchObject({
-      type: 'mux-target-message',
-      payload: { message: { type: 'list-sessions' } },
-    });
-    socket.triggerSessions(['second']);
-    await expect(second).resolves.toEqual(['second']);
+    expect(socket.sent.filter((item) => item.includes('list-sessions'))).toHaveLength(1);
+    await expect(second).resolves.toEqual(['first']);
     expect(socket.closeCalls).toBe(0);
   });
 
@@ -429,5 +428,72 @@ describe('tmux-sessions transport contract', () => {
 
     await expect(promise).rejects.toThrow('Unexpected duplicate tmux mux-ready');
     expect(socket.closeCalls).toBe(1);
+  });
+});
+
+describe('tmux-sessions list cache', () => {
+  beforeEach(() => {
+    traversalHarness.MockTraversalSocket.reset();
+  });
+
+  it('serves repeated list-sessions from a short-TTL cache without re-sending the request', async () => {
+    const { fetchTmuxSessions } = await loadTmuxSessionsModule();
+    const first = fetchTmuxSessions(target, bridgeSettings);
+    const socket = traversalHarness.MockTraversalSocket.latest();
+    socket.triggerOpen();
+    socket.triggerMuxReady();
+    socket.triggerSessions(['main', 'logs']);
+    await expect(first).resolves.toEqual(['main', 'logs']);
+
+    const second = fetchTmuxSessions(target, bridgeSettings);
+    await expect(second).resolves.toEqual(['main', 'logs']);
+
+    const listRequests = socket.sent.filter((item) => item.includes('list-sessions'));
+    expect(listRequests).toHaveLength(1);
+  });
+
+  it('re-requests list-sessions after the short-TTL cache expires', async () => {
+    vi.useFakeTimers();
+    try {
+      const { fetchTmuxSessions } = await loadTmuxSessionsModule();
+      const first = fetchTmuxSessions(target, bridgeSettings);
+      const socket = traversalHarness.MockTraversalSocket.latest();
+      socket.triggerOpen();
+      socket.triggerMuxReady();
+      socket.triggerSessions(['main']);
+      await expect(first).resolves.toEqual(['main']);
+
+      await vi.advanceTimersByTimeAsync(3001);
+      const second = fetchTmuxSessions(target, bridgeSettings);
+      const secondSocket = traversalHarness.MockTraversalSocket.latest();
+      expect(secondSocket).toBe(socket);
+      // The TTL expired, so the request is re-issued on the reused transport.
+      expect(socket.sent.filter((item) => item.includes('list-sessions'))).toHaveLength(2);
+      socket.triggerSessions(['main', 'logs']);
+      await expect(second).resolves.toEqual(['main', 'logs']);
+      expect(socket.sent.filter((item) => item.includes('list-sessions'))).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('invalidates the list cache after a create-session mutation succeeds', async () => {
+    const { createTmuxSession, fetchTmuxSessions } = await loadTmuxSessionsModule();
+    const first = fetchTmuxSessions(target, bridgeSettings);
+    const socket = traversalHarness.MockTraversalSocket.latest();
+    socket.triggerOpen();
+    socket.triggerMuxReady();
+    socket.triggerSessions(['main']);
+    await expect(first).resolves.toEqual(['main']);
+    expect(socket.sent.filter((item) => item.includes('list-sessions'))).toHaveLength(1);
+
+    const create = createTmuxSession(target, bridgeSettings, 'new-tab');
+    socket.triggerSessions(['main', 'new-tab']);
+    await expect(create).resolves.toEqual(['main', 'new-tab']);
+
+    const afterCreate = fetchTmuxSessions(target, bridgeSettings);
+    expect(socket.sent.filter((item) => item.includes('list-sessions'))).toHaveLength(2);
+    socket.triggerSessions(['main', 'new-tab']);
+    await expect(afterCreate).resolves.toEqual(['main', 'new-tab']);
   });
 });
