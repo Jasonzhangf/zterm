@@ -34,6 +34,8 @@ function makeMirror(sessionName: string, lastLiveActivityAt: number, lifecycle: 
     flushPromise: null,
     liveSyncTimer: null,
     subscribers: new Set(),
+    quietFlushStreak: 0,
+    lastFlushHadContentChanges: false,
   };
   return base;
 }

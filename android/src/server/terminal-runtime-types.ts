@@ -111,6 +111,11 @@ export interface SessionMirror {
   lastCanonicalizeDurationMs?: number;
   flushInFlight: boolean;
   flushPromise: Promise<boolean> | null;
+  // Quiet-capture backoff: consecutive flushes with no content change push the
+  // next live-sync capture out (33ms active -> up to 500ms), so an idle
+  // terminal stops paying a full 1305-line tmux capture every 33ms.
+  quietFlushStreak: number;
+  lastFlushHadContentChanges: boolean;
   pendingStableCaptureSnapshot?: {
     rows: number;
     cols: number;

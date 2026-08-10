@@ -178,6 +178,8 @@ describe('terminal runtime detached transport cleanup', () => {
       liveSyncTimer: null,
       consecutiveFailures: 0,
       subscribers: new Set([session.id]),
+      quietFlushStreak: 0,
+      lastFlushHadContentChanges: false,
     };
 
     mirrors.set(mirror.key, mirror);
@@ -227,6 +229,8 @@ describe('terminal runtime detached transport cleanup', () => {
       liveSyncTimer: null,
       consecutiveFailures: 0,
       subscribers: new Set([session.id]),
+      quietFlushStreak: 0,
+      lastFlushHadContentChanges: false,
     };
 
     mirrors.set(mirror.key, mirror);
@@ -273,6 +277,8 @@ describe('terminal runtime detached transport cleanup', () => {
       liveSyncTimer: null,
       consecutiveFailures: 0,
       subscribers: new Set([session.id]),
+      quietFlushStreak: 0,
+      lastFlushHadContentChanges: false,
     };
 
     mirrors.set(mirror.key, mirror);

@@ -56,6 +56,8 @@ function createReadyMirror(): SessionMirror {
     liveSyncTimer: null,
     consecutiveFailures: 0,
     subscribers: new Set(),
+      quietFlushStreak: 0,
+      lastFlushHadContentChanges: false,
     scratchBridge: null,
   };
 }

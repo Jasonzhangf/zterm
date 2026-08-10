@@ -49,6 +49,8 @@ function makeReadyMirror(): SessionMirror {
     flushPromise: null,
     liveSyncTimer: null,
     subscribers: new Set(['session-1']),
+      quietFlushStreak: 0,
+      lastFlushHadContentChanges: false,
   };
 }
 

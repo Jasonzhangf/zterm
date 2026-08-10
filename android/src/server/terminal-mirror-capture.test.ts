@@ -47,6 +47,8 @@ function makeReadyMirror(overrides?: Partial<SessionMirror>): SessionMirror {
     pendingStableCaptureSnapshot: null,
     liveSyncTimer: null,
     consecutiveFailures: 0,
+    quietFlushStreak: 0,
+    lastFlushHadContentChanges: false,
     subscribers: new Set(),
     ...overrides,
   };
@@ -249,6 +251,8 @@ describe('terminal mirror capture runtime', () => {
       liveSyncTimer: null,
       consecutiveFailures: 0,
       subscribers: new Set(),
+      quietFlushStreak: 0,
+      lastFlushHadContentChanges: false,
     };
     const readSnapshot = vi.fn().mockResolvedValue(stableSnapshot);
 

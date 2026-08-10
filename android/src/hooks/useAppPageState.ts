@@ -49,6 +49,13 @@ function hasPersistedOpenTabRestoreCandidate(): boolean {
   }
 
   try {
+    // Legacy persistence (ACTIVE_SESSION / SAVED_TAB_LISTS) is cleared on
+    // cold start by open-tab-persistence; it must NOT count as a terminal
+    // restore candidate, otherwise the first paint would jump into a terminal
+    // shell that is about to be cleaned back to connections.
+    if (localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)) {
+      return false;
+    }
     const rawTabs = localStorage.getItem(STORAGE_KEYS.OPEN_TABS);
     if (!rawTabs) {
       return false;
@@ -116,15 +123,22 @@ export function useAppPageState(options: UseAppPageStateOptions): AppPageStateRe
   } = options;
 
   const initialActiveSessionOwnsTerminal = sessions.some((session) => session.id === runtimeActiveSessionId);
-  const [pageState, setPageState] = useState<AppPageState>(() => (
-    readPersistedPageState({ allowTerminal: initialActiveSessionOwnsTerminal })
-  ));
-  const restoredRouteHandledRef = useRef(false);
   const pendingTerminalRestoreIntentRef = useRef(
     !initialActiveSessionOwnsTerminal
     && hasPersistedTerminalRouteIntent()
     && hasPersistedOpenTabRestoreCandidate(),
   );
+  const [pageState, setPageState] = useState<AppPageState>(() => {
+    // Pending terminal restore: open the terminal shell on the very first
+    // paint so the first frame is the dark terminal surface, not the light
+    // Connections page (which flashed as a white screen until the runtime
+    // session hydrated and the restore effect switched pages).
+    if (pendingTerminalRestoreIntentRef.current) {
+      return openTerminalPage();
+    }
+    return readPersistedPageState({ allowTerminal: initialActiveSessionOwnsTerminal });
+  });
+  const restoredRouteHandledRef = useRef(false);
   const pageStateRef = useRef(pageState);
 
   useEffect(() => {
@@ -182,9 +196,12 @@ export function useAppPageState(options: UseAppPageStateOptions): AppPageStateRe
   useEffect(() => {
     if (
       pendingTerminalRestoreIntentRef.current
-      && pageState.kind === 'connections'
+      && pageState.kind === 'terminal'
       && hasPersistedOpenTabRestoreCandidate()
     ) {
+      // Pending terminal restore: the first paint is already the dark
+      // terminal shell; keep the persisted intent (do not rewrite ACTIVE_PAGE
+      // or clear the pending flag) until the runtime session hydrates.
       return;
     }
     pendingTerminalRestoreIntentRef.current = false;

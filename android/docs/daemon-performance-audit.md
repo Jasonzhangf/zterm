@@ -249,3 +249,26 @@ if (movingBetweenMirrors) {
 - `mirror.subscribers` 的 `Set<string>` 确保 subscriber 唯一性，无重复广播
 - `buffer-sync` 的 per-subscriber backpressure skip 已有（但 head 广播缺）
 - `createTransportBoundSession` / `bindConnectionToSession` 设计简洁：transport = session identity，不需要独立 session id 空间
+
+---
+
+## 2026-08-10 静止 capture 退避（设备端耗电审计）
+
+### 问题
+- 真机（15t-1）系统 Load 13.4 过载；daemon 日志 rcc3 `tmux capture sync` 每 ~33ms 一次全量 capture 1305 行（`MIRROR_LIVE_SYNC_ACTIVE_MS=33`），最近 200 条全为 `matched=0 authoritative-replace`。
+- 根因：`scheduleMirrorLiveSync` 在 capture 完成后**无条件** 33ms 重调度（`syncMirrorCanonicalBuffer.finally` 里 `scheduleMirrorLiveSync(mirror, MIRROR_LIVE_SYNC_ACTIVE_MS)`）——只要有 body-subscribed client，**静止界面（Visionix/reasonix TUI 静止时 0 变化）也每 33ms 全量 capture**：`capture-pane -S -1305`（tmux 子进程）+ 1305 行解析 + canonicalize + 全量 diff。这就是"shell 刷新（daemon mirror capture）拉着 UI 刷新跑"的持续 CPU 源头。
+- 传输层实际已增量（`findChangedIndexedRanges` 只推变化行；rcc3 变化集中在 visible 底部几十行）——问题只在**无变化时的 capture 轮询频率**。
+
+### 修复
+- `syncMirrorCanonicalBuffer` 记录 `mirror.lastFlushHadContentChanges`（changedRanges>0 或 forceRevision 才为 true；cursor-only 不算）。
+- capture 完成后退避：无内容变化 → 120 → 240 → 480 → 500ms cap（`QUIET_CAPTURE_MAX_DELAY_MS`）；有变化 → 回 33ms active；外部写入最迟 ~0.5s 被发现。
+- `terminal-performance-scheduler` 新增 `quiet` lane：`requestedDelayMs > activeDelayMs` 时原样尊重（不被 `min(requestedDelayMs, activeDelayMs)` 压回 33ms）。
+- input 路径的 `schedule(0)` 不受影响（仍立即 capture）。
+
+### 验证
+- `terminal-mirror-runtime.test.ts` + `terminal-performance-scheduler.test.ts` 44 passed（新增 2 红测：静止退避序列 / 变化回 active）。
+- server 相关 8 文件 131 passed；type-check clean；feature-registry 80 / redline 96。
+
+### 收益
+- 静止终端：capture 频率 33ms → 500ms（~97% 减少），消除每帧 1305 行全量 capture 的持续 CPU；daemon 侧 CPU 与设备端收包/apply 同步下降。
+- 活跃终端：33ms 不变，无感知延迟。

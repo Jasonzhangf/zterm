@@ -1,4 +1,4 @@
-export type TerminalLiveSyncLane = 'fast' | 'normal' | 'slow' | 'overloaded';
+export type TerminalLiveSyncLane = 'fast' | 'normal' | 'slow' | 'overloaded' | 'quiet';
 
 export interface TerminalLiveSyncSchedulerInput {
   requestedDelayMs?: number;
@@ -46,6 +46,12 @@ export function resolveTerminalLiveSyncDelay(
     // re-triggering mid-capture with a minimum 16ms floor. Removing the 8ms floor
     // here restores the contract for attach/input paths that call schedule(0).
     return { delayMs: 0, lane: 'fast', reason: 'explicit-immediate' };
+  }
+  if (requestedDelayMs > activeDelayMs) {
+    // Idle-terminal quiet-capture backoff (the only caller that requests a
+    // delay above the active cadence): honor it verbatim so the min-with-
+    // activeDelayMs cap cannot collapse the backoff to 33ms.
+    return { delayMs: requestedDelayMs, lane: 'quiet', reason: 'quiet-backoff' };
   }
   const subscriberCount = Math.max(0, Math.floor(input.subscriberCount || 0));
   if (subscriberCount <= 0) {

@@ -115,6 +115,8 @@ function createReadyMirror(): SessionMirror {
     liveSyncTimer: null,
     consecutiveFailures: 0,
     subscribers: new Set(),
+      quietFlushStreak: 0,
+      lastFlushHadContentChanges: false,
   };
 }
 
@@ -206,7 +208,13 @@ function createRuntime(options?: {
       accepted: true,
       videoBitrate: { preset: '5mbps', bitrateMbps: 5, maxBitrateBps: 5_000_000 },
     })),
-    updateFocus: vi.fn(async () => ({ requestId: 'remote-window-focus-default', streamId: 'stream-default', ok: true as const })),
+    updateFocus: vi.fn(async () => ({
+      requestId: 'remote-window-focus-default',
+      streamId: 'stream-default',
+      revision: 1,
+      targetId: 'target-default',
+      phase: 'accepted' as const,
+    })),
     injectInput: vi.fn(async (): Promise<RemoteWindowInputResult> => ({
       requestId: 'remote-window-input-default',
       streamId: 'stream-default',
@@ -797,6 +805,8 @@ describe('terminal message runtime explicit error truth', () => {
       liveSyncTimer: null,
       consecutiveFailures: 0,
       subscribers: new Set(),
+      quietFlushStreak: 0,
+      lastFlushHadContentChanges: false,
     };
     const { runtime, sessions, sendMessage } = createRuntime({ mirror });
     const session = createSession();
@@ -884,6 +894,8 @@ describe('terminal message runtime explicit error truth', () => {
       liveSyncTimer: null,
       consecutiveFailures: 0,
       subscribers: new Set(),
+      quietFlushStreak: 0,
+      lastFlushHadContentChanges: false,
     };
     const { runtime, sessions, refreshMirrorHeadForSession, sendBufferHeadToSession } = createRuntime({ mirror });
     const session = createSession();
@@ -922,6 +934,8 @@ describe('terminal message runtime explicit error truth', () => {
       liveSyncTimer: null,
       consecutiveFailures: 0,
       subscribers: new Set(),
+      quietFlushStreak: 0,
+      lastFlushHadContentChanges: false,
     };
     const { runtime, sessions, sendBufferHeadToSession } = createRuntime({ mirror });
     const session = createSession();

@@ -134,6 +134,10 @@ export interface TerminalMirrorRuntime {
 
 const MIRROR_LIVE_SYNC_ACTIVE_MS = 33;
 const MIRROR_LIVE_SYNC_IDLE_MS = 120;
+// Cap for quiet-capture backoff (120 -> 240 -> 480 -> 500ms). External tmux
+// writes are detected within this window while an idle terminal stops paying
+// a full 1305-line capture at 30fps.
+const QUIET_CAPTURE_MAX_DELAY_MS = 500;
 const ADAPTIVE_WIDTH_LEASE_TTL_MS = 65000;
 const SUBSCRIBER_PENDING_RANGE_LIMIT = 64;
 const SUBSCRIBER_PENDING_SPAN_LINE_LIMIT = TERMINAL_BUFFER_SYNC_FRAME_MAX_SPAN_LINES;
@@ -533,6 +537,8 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       lastCanonicalizeDurationMs: 0,
       flushInFlight: false,
       flushPromise: null,
+      quietFlushStreak: 0,
+      lastFlushHadContentChanges: false,
       pendingStableCaptureSnapshot: null,
       pendingPerformanceTraceCapture: null,
       adaptiveWidthBaselineGeometry: null,
@@ -841,6 +847,11 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         const cursorChanged = !deps.mirrorCursorEqual(previousCursor, mirror.cursor);
         const cursorKeysAppChanged = previousCursorKeysApp !== mirror.cursorKeysApp;
         const hasLiveActivity = forceRevision || changedRanges.length > 0 || cursorChanged || cursorKeysAppChanged;
+        // Content-change truth drives the quiet-capture backoff. Cursor-only
+        // changes (head broadcasts) do NOT keep the capture loop hot: an idle
+        // terminal must not pay a full tmux capture every 33ms just to confirm
+        // the same 1305 lines.
+        mirror.lastFlushHadContentChanges = forceRevision || changedRanges.length > 0;
         if (hasLiveActivity) {
           mirror.revision += 1;
           mirror.lastLiveActivityAt = Date.now();
@@ -964,6 +975,21 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     return capturePromise;
   }
 
+  function resolvePostFlushSyncDelayMs(mirror: SessionMirror) {
+    if (mirror.lastFlushHadContentChanges) {
+      mirror.quietFlushStreak = 0;
+      return MIRROR_LIVE_SYNC_ACTIVE_MS;
+    }
+    mirror.quietFlushStreak += 1;
+    // Quiet backoff: 120ms -> 240ms -> 480ms -> capped 500ms. An idle terminal
+    // still gets re-polled (external tmux writes are detected within ~0.5s)
+    // but stops burning a full-buffer tmux capture at 30fps.
+    return Math.min(
+      QUIET_CAPTURE_MAX_DELAY_MS,
+      MIRROR_LIVE_SYNC_IDLE_MS * 2 ** Math.max(0, Math.min(mirror.quietFlushStreak - 1, 3)),
+    );
+  }
+
   function scheduleMirrorLiveSync(mirror: SessionMirror, delayMs = MIRROR_LIVE_SYNC_ACTIVE_MS) {
     if (mirror.lifecycle !== 'ready') {
       return;
@@ -987,7 +1013,8 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         ) {
           return;
         }
-        scheduleMirrorLiveSync(mirror, MIRROR_LIVE_SYNC_ACTIVE_MS);
+        const postFlushDelay = resolvePostFlushSyncDelayMs(mirror);
+        scheduleMirrorLiveSync(mirror, postFlushDelay);
       });
     }, Math.max(0, effectiveDelay));
   }

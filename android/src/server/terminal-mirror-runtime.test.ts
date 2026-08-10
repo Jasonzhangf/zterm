@@ -36,6 +36,7 @@ function createRuntime(overrides: {
   captureMirrorAuthoritativeBufferFromTmux?: (mirror: SessionMirror) => Promise<boolean>;
   normalizeTerminalCols?: (cols?: number) => number;
   normalizeTerminalRows?: (rows?: number) => number;
+  mirrorBufferChanged?: (mirror: SessionMirror, previousStartIndex: number, previousLines: TerminalCell[][]) => Array<{ startIndex: number; endIndex: number }>;
 } = {}) {
   const sessions = new Map<string, TerminalSession>();
   const mirrors = new Map<string, SessionMirror>();
@@ -85,7 +86,7 @@ function createRuntime(overrides: {
     })),
     assertTmuxSessionExists,
     captureMirrorAuthoritativeBufferFromTmux,
-    mirrorBufferChanged: () => [],
+    mirrorBufferChanged: overrides.mirrorBufferChanged || (() => []),
     mirrorCursorEqual: () => true,
     writeToLiveMirror: () => true,
     enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
@@ -454,7 +455,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     }
   });
 
-  it('keeps subscribed mirror capture on active cadence after initial forced revision ages out without new live activity', async () => {
+  it('backs off quiet mirror capture after consecutive no-change flushes while still polling an idle terminal', async () => {
     vi.useFakeTimers();
     try {
       const {
@@ -476,14 +477,63 @@ describe('terminal mirror runtime lifecycle truth', () => {
       expect(mirror?.lifecycle).toBe('ready');
       expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
 
-      await vi.advanceTimersByTimeAsync(16);
+      // First post-attach sync (no content change) lands after the 33ms
+      // active window, then the loop must back off: 120 -> 240 -> 480 -> cap.
+      await vi.advanceTimersByTimeAsync(33);
       expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(2);
 
-      await vi.advanceTimersByTimeAsync(1600);
-      const callsBeforeIdleWindow = captureMirrorAuthoritativeBufferFromTmux.mock.calls.length;
+      // 120ms window: one quiet poll (streak=2 -> 240ms next).
+      await vi.advanceTimersByTimeAsync(120);
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(3);
 
+      // 240ms window: one quiet poll (streak=3 -> 480ms next).
+      await vi.advanceTimersByTimeAsync(240);
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(4);
+
+      // Cap reached: 500ms windows keep polling at ~2fps, never 33ms.
+      const callsBeforeCapWindow = captureMirrorAuthoritativeBufferFromTmux.mock.calls.length;
+      await vi.advanceTimersByTimeAsync(500);
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(callsBeforeCapWindow + 1);
+      await vi.advanceTimersByTimeAsync(500);
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(callsBeforeCapWindow + 2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('returns to the active 33ms cadence as soon as a flush reports content changes', async () => {
+    vi.useFakeTimers();
+    try {
+      let changed = false;
+      const {
+        runtime,
+        sessions,
+        captureMirrorAuthoritativeBufferFromTmux,
+      } = createRuntime({
+        mirrorBufferChanged: () => (changed ? [{ startIndex: 10, endIndex: 11 }] : []),
+      });
+      const session = createSession();
+      sessions.set(session.id, session);
+
+      await runtime.attachTmux(session, {
+        sessionName: 'demo',
+        cols: 120,
+        rows: 40,
+      });
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(1);
+
+      // One quiet flush (backoff starts), then content changes: the flush
+      // that observes the change returns to the active 33ms cadence.
+      await vi.advanceTimersByTimeAsync(120);
+      expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(2);
+      changed = true;
+      await vi.advanceTimersByTimeAsync(120);
+      expect(captureMirrorAuthoritativeBufferFromTmux.mock.calls.length).toBeGreaterThan(2);
+      // Back to active cadence: a 33ms window must trigger a flush (a quiet
+      // backoff would not fire within 33ms).
+      const afterChange = captureMirrorAuthoritativeBufferFromTmux.mock.calls.length;
       await vi.advanceTimersByTimeAsync(33);
-      expect(captureMirrorAuthoritativeBufferFromTmux.mock.calls.length).toBeGreaterThan(callsBeforeIdleWindow);
+      expect(captureMirrorAuthoritativeBufferFromTmux.mock.calls.length).toBeGreaterThan(afterChange);
     } finally {
       vi.useRealTimers();
     }
@@ -527,7 +577,9 @@ describe('terminal mirror runtime lifecycle truth', () => {
       expect(secondSession.mirrorKey).toBe('demo');
       expect(secondSession.transport?.connectedSent).toBe(true);
 
-      await vi.advanceTimersByTimeAsync(16);
+      // The reuse sync produced no content change, so the recurring loop
+      // backs off to the quiet cadence (120ms) instead of 33ms.
+      await vi.advanceTimersByTimeAsync(120);
       expect(captureMirrorAuthoritativeBufferFromTmux).toHaveBeenCalledTimes(3);
     } finally {
       vi.useRealTimers();
@@ -1220,6 +1272,8 @@ describe('terminal mirror runtime lifecycle truth', () => {
       liveSyncTimer: null,
       consecutiveFailures: 0,
       subscribers: new Set([session.id]),
+      quietFlushStreak: 0,
+      lastFlushHadContentChanges: false,
     };
     session.mirrorKey = mirror.key;
     const mirrors = new Map<string, SessionMirror>([[mirror.key, mirror]]);
