@@ -10,6 +10,9 @@ import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import type { SessionReconnectRuntime, SessionReconnectStore } from '../lib/session-reconnect-store';
 import type { BufferFrameAssemblyResourceState } from './session-buffer-frame-assembly';
+// 连续自动重连失败上限：达到后停止自动重试并显式报错（避免网络黑洞下
+// 无限循环耗电 + 用户无法感知），active-reentry / resume 仍可手动恢复。
+const MAX_RECONNECT_ATTEMPTS = 12;
 import {
   buildSessionConnectionFields,
   buildSessionErrorUpdates,
@@ -587,6 +590,22 @@ export function scheduleReconnectRuntime(options: {
     options.sessionId,
     buildSessionReconnectingFailureUpdates(options.message, reconnectRuntime.attempt),
   );
+  // 连续失败上限：attempt 已在 startReconnectAttempt 后递增写回，达到上限
+  // 停止自动重试并显式报错（网络黑洞下不再无限循环耗电），active-reentry /
+  // resume / 手动重连仍会重新尝试。
+  if (reconnectRuntime.attempt >= MAX_RECONNECT_ATTEMPTS) {
+    options.refs.reconnectStore.deleteRuntime(options.sessionId);
+    options.updateSessionSync(
+      options.sessionId,
+      buildSessionErrorUpdates('reconnect: max attempts reached', { includeWsNull: true }),
+    );
+    options.emitSessionStatus(
+      options.sessionId,
+      'error',
+      '自动重连失败次数过多，请手动重连',
+    );
+    return;
+  }
   options.startReconnectAttempt(options.sessionId);
 }
 
@@ -659,7 +678,10 @@ export function startReconnectAttemptRuntime(options: {
     });
   }, delay) as unknown as number;
   options.refs.reconnectStore.schedule(options.sessionId, {
-    attempt: reconnectRuntime.attempt,
+    // 递增 attempt：每次失败后写回，让 backoff（computeReconnectDelay）真正
+    // 生效（300→600→1200→…cap）。此前 attempt 从不递增，失败循环每次都
+    // 从 0 开始 300ms 高频重试——网络黑洞下无限快速循环（耗电 + 永远连不上）。
+    attempt: reconnectRuntime.attempt + 1,
     nextDelayMs: null,
     timer,
   });

@@ -339,7 +339,7 @@ describe('startReconnectAttemptRuntime', () => {
 
     expect(reconnectStore.read('session-1')).toEqual(expect.objectContaining({
       phase: 'scheduled',
-      attempt: 2,
+      attempt: 3,
       nextDelayMs: null,
     }));
 
@@ -348,7 +348,7 @@ describe('startReconnectAttemptRuntime', () => {
     const runtime = reconnectStore.read('session-1');
     expect(runtime).toEqual({
       phase: 'connecting',
-      attempt: 2,
+      attempt: 3,
       nextDelayMs: null,
     });
     if (runtime?.phase === 'connecting') {
@@ -1409,4 +1409,44 @@ describe('session transport reuse runtime gates', () => {
     });
   });
 
+});
+
+describe('scheduleReconnectRuntime max attempts', () => {
+  it('stops automatic retries after MAX_RECONNECT_ATTEMPTS consecutive failures instead of looping forever', async () => {
+    vi.useFakeTimers();
+    try {
+      const reconnectStore = createSessionReconnectStore();
+      reconnectStore.write('session-1', {
+        phase: 'idle',
+        attempt: 12, // >= MAX_RECONNECT_ATTEMPTS
+        nextDelayMs: null,
+      });
+      const updateSessionSync = vi.fn();
+      const emitSessionStatus = vi.fn();
+      const startReconnectAttempt = vi.fn();
+
+      scheduleReconnectRuntime({
+        sessionId: 'session-1',
+        message: 'transport down',
+        retryable: true,
+        refs: {
+          reconnectStore,
+          stateRef: { current: { sessions: [], activeSessionId: 'session-1' } },
+        },
+        readSessionTransportHost: () => host,
+        shouldAutoReconnectSessionFn: () => true,
+        updateSessionSync,
+        emitSessionStatus,
+        startReconnectAttempt,
+      });
+
+      // Attempt budget exhausted: reconnect runtime is removed, no new
+      // attempt is scheduled, and the user sees an explicit error.
+      expect(reconnectStore.read('session-1')).toBeNull();
+      expect(startReconnectAttempt).not.toHaveBeenCalled();
+      expect(emitSessionStatus).toHaveBeenCalledWith('session-1', 'error', '自动重连失败次数过多，请手动重连');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

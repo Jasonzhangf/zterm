@@ -1279,3 +1279,70 @@ describe('TraversalSocket reconnect', () => {
     socket.close();
   });
 });
+
+describe('tailscale candidate timeout', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    MockWebSocket.reset();
+    MockRTCPeerConnection.reset();
+    vi.stubGlobal('window', {
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout,
+    });
+    vi.stubGlobal('WebSocket', MockWebSocket);
+    vi.stubGlobal('RTCPeerConnection', MockRTCPeerConnection);
+  });
+
+  it('fails a tailscale candidate at the contracted 900ms budget instead of the generic 1800ms ws budget', async () => {
+    const socket = new TraversalSocket({
+      bridgeHost: '203.0.113.10',
+      bridgePort: 3333,
+      authToken: 'token',
+      tailscaleHost: '100.66.1.82',
+      ipv4Host: '203.0.113.10',
+      transportMode: 'websocket',
+    }, settings, {
+      routeHealthCache: new TraversalRouteHealthCache(),
+      routeHealthScope: { accountId: 'logged-out', daemonHostId: 'daemon-1' },
+    });
+    const onclose = vi.fn();
+    socket.onclose = onclose;
+    await flushMicrotasks();
+
+    // Both ws candidates stay unresponsive (CONNECTING); the tailscale one
+    // must time out first at ~900ms and advance to the next batch.
+    await vi.advanceTimersByTimeAsync(900);
+    await flushMicrotasks();
+    expect(socket.getDiagnostics().attempts.some((item) => item.path === 'tailscale' && item.stage === 'error')).toBe(true);
+    // The ipv4 candidate is still within its 1800ms budget.
+    expect(socket.getDiagnostics().attempts.some((item) => item.path === 'ipv4' && item.stage === 'error')).toBe(false);
+
+    socket.close();
+  });
+
+  it('still opens a healthy tailscale candidate within the contracted budget', async () => {
+    const socket = new TraversalSocket({
+      bridgeHost: '203.0.113.10',
+      bridgePort: 3333,
+      authToken: 'token',
+      tailscaleHost: '100.66.1.82',
+      ipv4Host: '203.0.113.10',
+      transportMode: 'websocket',
+    }, settings, {
+      routeHealthCache: new TraversalRouteHealthCache(),
+      routeHealthScope: { accountId: 'logged-out', daemonHostId: 'daemon-1' },
+    });
+    const onopen = vi.fn();
+    socket.onopen = onopen;
+    await flushMicrotasks();
+
+    const tailscaleWs = MockWebSocket.instances.find((ws) => ws.url.includes('100.66.1.82'));
+    expect(tailscaleWs).toBeDefined();
+    tailscaleWs?.triggerOpen();
+    await flushMicrotasks();
+
+    expect(onopen).toHaveBeenCalledTimes(1);
+    expect(socket.getDiagnostics().stage).toBe('open');
+    socket.close();
+  });
+});

@@ -5504,3 +5504,19 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
 - 验证：relay/directory/device-stream 24 tests、network/reconnect 52 tests、transport lifecycle 61 tests、type-check 均通过；Vite production build、Capacitor sync、Gradle `assembleDebug` 通过，APK `0.1.3.2527` 已安装到 `100.104.163.65:5555`。完整 `build:android` 仍被既有 3 个 cold-start 测试阻断，未运行 OTA 发布链。
 - 2026-08-10 OTA correction: `pnpm build` 的 bump 原先位于 prebuild 之后，prebuild 失败会复用旧 buildNumber；发布脚本现先执行 `bump-build-version.mjs`，普通 `build` 不再重复 bump。已生成并验证 `0.1.3.2528` / `1100025280`，写入 update-dist、release-dist、`~/.zterm/updates`、`~/.wterm/updates`，15t-1 安装成功。
 - 2026-08-10 OTA 双通道修复：`0.1.3.2528` 已通过本机 `127.0.0.1:3333`、Tailscale `100.66.1.82:3333`、公网 Relay `https://relay.codewhisper.cc:18443/relay/` 的 manifest/APK GET/HEAD；`build-android-debug.sh` 现在在本机 bundle verify 后默认 scp 发布 Relay，并校验公网 manifest versionCode 与 APK HEAD。
+
+## 2026-08-10 无 tailscale 场景切换慢 + 永远连不上修复
+- 证据:tailscale 不可达（CGNAT 黑洞 DROP）时 TCP connect 挂满 5s+ 不返回
+  （node 实测 ws://100.99.99.99:3333 5s 截断仍无结果），socket.ts 1800ms
+  timer 兜底 → 每次切换/重连重建都等 tailscale 候选超时。
+- 修复 1（tailscale 快速失败）:socket.ts 候选超时——tailscale 候选
+  1800→900ms（正常 tailscale 延迟 <100ms 不受影响），无 tailscale 时
+  切换/重连重建快一半。
+- 修复 2（永远连不上根因）:reconnectStore.attempt 从未递增写回——每次
+  失败循环从 attempt 0 重新开始 → backoff（300→600→…cap）永不生效 →
+  网络黑洞下每 300ms 高频重试（耗电 + 永远连不上）。修复:startReconnect
+  Attempt 后 attempt+1 写回 schedule；scheduleReconnectRuntime 加
+  MAX_RECONNECT_ATTEMPTS=12 上限，达到后删除 runtime + 显式报错
+  （active-reentry/resume/手动重连仍可恢复）。
+- 验证:socket 29（2 新红测）/session-runtime 30（1 新红测 + 317 适配）/
+  type-check clean/feature-registry 80/redline 96/transport 9。

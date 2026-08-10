@@ -26,6 +26,11 @@ const CLOSING = 2;
 const CLOSED = 3;
 
 const WS_CANDIDATE_TIMEOUT_MS = 1800;
+// Tailscale candidates get a contracted budget: without a tailscale network
+// the CGNAT IP is a blackhole (TCP connect hangs past the kernel timeout), so
+// every reconnect/switch would otherwise stall the full 1800ms per attempt.
+// A healthy tailscale link answers well under this (sub-100ms).
+const TAILSCALE_CANDIDATE_TIMEOUT_MS = 900;
 const RTC_DIRECT_OPEN_STABILITY_MS = 1000;
 const RTC_DIRECT_CANDIDATE_TIMEOUT_MS = 5000 + RTC_DIRECT_OPEN_STABILITY_MS;
 const RTC_DIRECT_FAILURE_RETRY_TIMEOUT_MS = 3000;
@@ -70,6 +75,9 @@ type Backend = {
 
 function resolveCandidateTimeoutMs(candidate: TraversalPlanCandidate, health: TraversalRouteHealthRecord | null) {
   if (candidate.kind === 'ws') {
+    if (candidate.path === 'tailscale') {
+      return TAILSCALE_CANDIDATE_TIMEOUT_MS;
+    }
     return WS_CANDIDATE_TIMEOUT_MS;
   }
   if (candidate.path === 'rtc-direct') {
