@@ -1,4 +1,5 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type TouchEvent } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type ReactNode, type TouchEvent } from "react";
+import { createPortal } from "react-dom";
 import { Capacitor } from "@capacitor/core";
 import { Keyboard } from "@capacitor/keyboard";
 import { mobileTheme } from "../../lib/mobile-ui";
@@ -131,10 +132,27 @@ interface ImageUploadBatchState {
 
 const QUICKBAR_HORIZONTAL_PAN_LOCK_PX = 8;
 const QUICKBAR_COLLAPSE_SWIPE_PX = 48;
+const TOP_SHORTCUT_EDITOR_ENTRY: { id: string; label: string; sequence: string } = {
+  id: "shortcut-editor-top",
+  label: "+",
+  sequence: "",
+};
+const BOTTOM_SHORTCUT_EDITOR_ENTRY: { id: string; label: string; sequence: string } = {
+  id: "shortcut-editor-bottom",
+  label: "+",
+  sequence: "",
+};
 const QUICKBAR_COLLAPSED_BOTTOM_GESTURE_GUARD_PX =
   FLOATING_BUBBLE_SIZE + FLOATING_BUBBLE_MARGIN * 2;
 const QUICKBAR_COLLAPSED_REVEAL_SURFACE_HEIGHT_PX =
   QUICKBAR_COLLAPSED_BOTTOM_GESTURE_GUARD_PX * 2;
+
+function ViewportOverlayPortal({ children }: { children: ReactNode }) {
+  if (typeof document === "undefined") {
+    return <>{children}</>;
+  }
+  return createPortal(children, document.body);
+}
 
 function TerminalQuickBarComponent({
   activeSessionId,
@@ -297,6 +315,7 @@ function TerminalQuickBarComponent({
   const rootRef = useRef<HTMLDivElement | null>(null);
   const floatingPanelRef = useRef<HTMLDivElement | null>(null);
   const floatingBubbleRef = useRef<HTMLButtonElement | null>(null);
+  const shortcutEditorOverlayRef = useRef<HTMLDivElement | null>(null);
   const shortcutEditorScrollRef = useRef<HTMLDivElement | null>(null);
   const domEditorFocusTimerRef = useRef<number | null>(null);
   const quickInputTextareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -1390,6 +1409,7 @@ function TerminalQuickBarComponent({
   };
 
   const closeShortcutEditor = () => {
+    onEditorDomFocusChange?.(false);
     setShortcutEditorOpen(false);
     setShortcutEditorMode("list");
     resetShortcutForm();
@@ -1477,7 +1497,7 @@ function TerminalQuickBarComponent({
 
   const renderBaseActionButton = (
     action: { id: string; label: string; sequence: string },
-    options?: { fixed?: boolean; compact?: boolean },
+    options?: { fixed?: boolean; compact?: boolean; ariaLabel?: string },
   ) => {
     const compact = options?.compact ?? false;
     const fixed = options?.fixed ?? false;
@@ -1598,7 +1618,7 @@ function TerminalQuickBarComponent({
           triggerActionSequence(action);
         }}
         onFocus={(event) => event.currentTarget.blur()}
-        aria-label={action.label}
+        aria-label={options?.ariaLabel ?? action.label}
         aria-pressed={repeatActive || (action.id === "tmux-copy" && copyModeActive)}
         aria-disabled={disabled}
         style={{
@@ -1976,7 +1996,8 @@ function TerminalQuickBarComponent({
           domEditorFocusTimerRef.current = null;
           const activeElement = document.activeElement;
           const stillFocused =
-            rootRef.current?.contains(activeElement) &&
+            (rootRef.current?.contains(activeElement) ||
+              shortcutEditorOverlayRef.current?.contains(activeElement)) &&
             (activeElement instanceof HTMLInputElement ||
               activeElement instanceof HTMLTextAreaElement) &&
             !(
@@ -2373,34 +2394,37 @@ function TerminalQuickBarComponent({
       )}
 
       {shortcutEditorOpen && (
-        <div
-          data-quickbar-allow-pointer="true"
-          style={{
-            position: "fixed",
-            inset: 0,
-            zIndex: 121,
-            backgroundColor: "rgba(8, 10, 18, 0.78)",
-            backdropFilter: "blur(10px)",
-            display: "flex",
-            alignItems: "flex-end",
-            paddingBottom: overlayBottomInsetStyle,
-          }}
-        >
+        <ViewportOverlayPortal>
           <div
+            ref={shortcutEditorOverlayRef}
+            data-quickbar-allow-pointer="true"
+            data-testid="shortcut-editor-overlay"
             style={{
-              width: "100%",
-              height: overlaySheetHeightStyle,
-              maxHeight: overlaySheetHeightStyle,
-              borderRadius: "26px 26px 0 0",
-              backgroundColor: "#f7f8fb",
-              color: mobileTheme.colors.lightText,
-              boxShadow: "0 -20px 50px rgba(0,0,0,0.28)",
+              position: "fixed",
+              inset: 0,
+              zIndex: 240,
+              backgroundColor: "rgba(8, 10, 18, 0.78)",
+              backdropFilter: "blur(10px)",
               display: "flex",
-              flexDirection: "column",
-              minHeight: 0,
-              overflow: "hidden",
+              alignItems: "flex-end",
+              paddingBottom: overlayBottomInsetStyle,
             }}
           >
+            <div
+              style={{
+                width: "100%",
+                height: overlaySheetHeightStyle,
+                maxHeight: overlaySheetHeightStyle,
+                borderRadius: "26px 26px 0 0",
+                backgroundColor: "#f7f8fb",
+                color: mobileTheme.colors.lightText,
+                boxShadow: "0 -20px 50px rgba(0,0,0,0.28)",
+                display: "flex",
+                flexDirection: "column",
+                minHeight: 0,
+                overflow: "hidden",
+              }}
+            >
             <div
               style={{
                 padding: "10px 18px 12px",
@@ -3046,8 +3070,9 @@ function TerminalQuickBarComponent({
                 </div>
               )}
             </div>
+            </div>
           </div>
-        </div>
+        </ViewportOverlayPortal>
       )}
 
       {floatingMenuOpen && !editorOpen && (
@@ -3790,6 +3815,14 @@ function TerminalQuickBarComponent({
                     {mergedScrollActions.map((action) =>
                       renderBaseActionButton(action, { compact: true }),
                     )}
+                    {renderBaseActionButton(TOP_SHORTCUT_EDITOR_ENTRY, {
+                      compact: true,
+                      ariaLabel: "编辑第一行快捷按钮",
+                    })}
+                    {renderBaseActionButton(BOTTOM_SHORTCUT_EDITOR_ENTRY, {
+                      compact: true,
+                      ariaLabel: "编辑第二行快捷按钮",
+                    })}
                   </div>
                 </div>
               </div>
@@ -3881,6 +3914,10 @@ function TerminalQuickBarComponent({
                     {topScrollActions.map((action) =>
                       renderBaseActionButton(action, { compact: true }),
                     )}
+                    {renderBaseActionButton(TOP_SHORTCUT_EDITOR_ENTRY, {
+                      compact: true,
+                      ariaLabel: "编辑第一行快捷按钮",
+                    })}
                   </div>
                 </div>
               </div>
@@ -3916,6 +3953,10 @@ function TerminalQuickBarComponent({
                     {bottomScrollActions.map((action) =>
                       renderBaseActionButton(action, { compact: true }),
                     )}
+                    {renderBaseActionButton(BOTTOM_SHORTCUT_EDITOR_ENTRY, {
+                      compact: true,
+                      ariaLabel: "编辑第二行快捷按钮",
+                    })}
                   </div>
                 </div>
               </div>

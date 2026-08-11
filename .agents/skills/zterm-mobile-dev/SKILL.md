@@ -224,6 +224,8 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - runtime 远程排障接口应收敛到 daemon HTTP：client 侧 runtime debug 只负责上送有界日志队列，daemon 侧统一缓存并通过 `/debug/runtime`、`/debug/runtime/logs` 暴露现场快照；接口复用 daemon auth token，便于服务器端直接拉取现场证据
 - Node/daemon 侧若要复用 `packages/shared`，只允许 import **叶子模块**（如 `schedule/next-fire.ts`、`connection/types.ts`）；禁止从 `@zterm/shared` 根入口取模块，因为根入口会连带 React/CSS，直接把 daemon 运行时打崩
 - 悬浮球快捷菜单的语义是“文本 snippet 注入”；方向键 / Esc / Tab / Backspace 属于常驻快捷栏，不要和自定义 snippet 共用同一概念模型
+- QuickBar 自定义快捷按钮编辑入口属于两条快捷行各自的 UI projection：竖屏第一、第二行末尾各保留一个 `+`，横屏合并行同时保留两个；不得压成第三工具行里的单个通用入口。两个入口只复用现有编辑器 owner，不发送 terminal sequence。
+- QuickBar 全屏快捷键编辑器必须投影到 page root/body 的顶层 overlay，不得困在 `TerminalQuickBarShell` 的 stacking context 内；顶部连接/网络速率栏必须被 dim layer 和编辑 sheet 完整覆盖。真机用速率栏中心点的 `elementsFromPoint()` 验证 overlay 排在 status strip 前；禁止隐藏速率 UI 或移动两行 `+` 入口作为补偿。
 - session 级“定时发送”入口不要挂在 tab strip / header 这种易被理解成全局 tab 动作的位置；Android 侧优先放在当前 session 的 quick input/composer 入口里
 - 悬浮球若持久化的是绝对拖拽坐标，mount / viewport resize 时必须自动 re-clamp 到可视区；不能只在拖动瞬间 clamp，否则旋转/尺寸变化后用户会丢入口
 - 悬浮菜单打开时可以隐藏底部 shell rows，但关闭后必须立刻恢复；keyboard 弹起时只上抬 shell rows，本体悬浮球/面板不要跟着复用同一 transform
@@ -1446,6 +1448,14 @@ debug overlay 现在显示 MU（菜单位置）和 CE（结束行），长按后
 - Anti-pattern: changing only shell/container CSS when the visible white area is `TerminalView` renderer background, darkening cell text without lowering the renderer background brightness, or inventing unrelated light palette values.
 - Required gate: `test:terminal:shell-theme` must assert the real renderer scroller background, default foreground, collapsed QuickBar transparency, file/quick-input panel tokens, and run from prebuild plus CI.
 - Marker: `github primer neutral light terminal engraved quickbar labels`
+
+## Android foreground white flash from stopped task snapshot
+- Trigger: app returns from background and briefly flashes a full light/white screen before the terminal surface reattaches; the white frame may show a different app surface or a stale terminal screenshot.
+- First inspect the Android task snapshot owner, not WebView/React: after HOME, run `adb shell dumpsys window windows | rg -C 1 'topApp=.*com.zterm.android|mIsRealSnapshot'`. A stopped Activity with `mIsRealSnapshot=true` and a light `mSnapshotColor` is the first divergence; the system may compose that screenshot as `SnapshotStartingWindow` before the live Activity surface attaches.
+- Unique fix owner: `client.app_shell` / `MainActivity.java` + `styles.xml`. On API 33+, call `setRecentsScreenshotEnabled(false)` before `super.onCreate`, give the runtime theme an opaque `android:windowBackground` / `android:colorBackground`, and bind launch theme `postSplashScreenTheme` to that runtime theme.
+- Required proof: baseline real snapshot, positive `mIsRealSnapshot=false` dark replacement, reverse reinstall restoring the real snapshot, then at least three formal HOME -> foreground rounds with `shouldAppSnapshot=false` and screenshots free of light frames.
+- Anti-pattern: `FLAG_SECURE`, JS lifecycle compensation, changing WebView/renderer/transport/daemon truth, or relying on splash resources alone.
+- Marker: `android foreground white flash real task snapshot recents screenshot disabled opaque theme no flag secure`
 
 ## Drawer daemon identity canonicalization
 - Trigger: one physical daemon appears twice, with an old `daemonHostId` selected by default while the current Relay daemon is online.

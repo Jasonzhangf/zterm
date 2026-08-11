@@ -158,6 +158,94 @@ describe("TerminalQuickBar", () => {
     }
   });
 
+  it("keeps one shortcut editor entry in each portrait shortcut row", () => {
+    const onSendSequence = vi.fn();
+    Object.defineProperty(window, "innerWidth", {
+      configurable: true,
+      writable: true,
+      value: 390,
+    });
+    Object.defineProperty(window, "innerHeight", {
+      configurable: true,
+      writable: true,
+      value: 840,
+    });
+    stubVisualViewport({ width: 390, height: 840 });
+    renderQuickBar({ onSendSequence });
+
+    const firstEntry = screen.getByRole("button", {
+      name: "编辑第一行快捷按钮",
+    });
+    const secondEntry = screen.getByRole("button", {
+      name: "编辑第二行快捷按钮",
+    });
+    const rows = screen
+      .getByTestId("terminal-quickbar-shell-rows")
+      .querySelectorAll('[data-quickbar-shell-row="true"]');
+
+    expect(rows).toHaveLength(3);
+    expect(rows[0]?.contains(firstEntry)).toBe(true);
+    expect(rows[1]?.contains(secondEntry)).toBe(true);
+    expect(rows[2]?.contains(firstEntry)).toBe(false);
+    expect(rows[2]?.contains(secondEntry)).toBe(false);
+
+    fireEvent.click(firstEntry);
+    expect(screen.getByTestId("shortcut-editor-list")).toBeTruthy();
+    expect(onSendSequence).not.toHaveBeenCalled();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "关闭快捷键设置" }),
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "编辑第二行快捷按钮" }),
+    );
+    expect(screen.getByTestId("shortcut-editor-list")).toBeTruthy();
+    expect(onSendSequence).not.toHaveBeenCalled();
+  });
+
+  it("projects the shortcut editor overlay above the surrounding terminal chrome", () => {
+    renderQuickBar();
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "编辑第一行快捷按钮" }),
+    );
+
+    expect(
+      screen.getByTestId("shortcut-editor-overlay").style.zIndex,
+    ).toBe("240");
+    expect(
+      screen.getByTestId("shortcut-editor-overlay").parentElement,
+    ).toBe(document.body);
+  });
+
+  it("keeps editor DOM focus active across controls inside the shortcut editor portal", async () => {
+    const onEditorDomFocusChange = vi.fn();
+    renderQuickBar({ onEditorDomFocusChange });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "编辑第一行快捷按钮" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "+ 添加单按键" }));
+
+    const labelInput = screen.getByPlaceholderText("快捷键名称 / 显示名称");
+    const sequenceInput = screen.getByPlaceholderText("输入单个字母/数字/符号");
+
+    labelInput.focus();
+    expect(onEditorDomFocusChange).toHaveBeenLastCalledWith(true);
+
+    sequenceInput.focus();
+    await waitFor(() => {
+      expect(onEditorDomFocusChange).toHaveBeenLastCalledWith(true);
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "关闭快捷键设置" }),
+    );
+    await waitFor(() => {
+      expect(onEditorDomFocusChange).toHaveBeenLastCalledWith(false);
+    });
+  });
+
   afterEach(() => {
     cleanup();
     vi.unstubAllGlobals();

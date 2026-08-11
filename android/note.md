@@ -5520,3 +5520,35 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
   （active-reentry/resume/手动重连仍可恢复）。
 - 验证:socket 29（2 新红测）/session-runtime 30（1 新红测 + 317 适配）/
   type-check clean/feature-registry 80/redline 96/transport 9。
+
+## 2026-08-11 Android 前台恢复白色任务面诊断
+
+- 目标：定位 HOME 后恢复 `MainActivity` 时的白色视觉冲击；诊断期正式产品代码只读，实验只写 `playground/foreground-white-flash-20260811/`。
+- 基线：commit `2564c474039e57ad2f5339ce554c78948853d11c`；真机 `100.104.163.65:5555` 安装 `0.1.3.2541` / `1100025410`。
+- 流程与 owner：Android task manager / launcher transition -> `AppTheme.NoActionBarLaunch` -> Capacitor `BridgeActivity` -> WebView -> React UI。唯一功能 owner 为 `mainline_source.android` / `client.app_shell`，资源边为 `resource.platform_terminal_surface -> resource.ui_projection`；不涉及 terminal transport、buffer 或 renderer truth。
+- 首次偏离：后台态 `MainActivity` 无 surface；恢复时 zterm surface 重新附着前，连续截图先显示系统转场，再显示白色 Freehand task surface，最后恢复 zterm。OCR 命中 `Freehand`、`Workspace ready`、`Connecting to workspace`。证据：`android/evidence/foreground-white-flash-20260811/noanim/fg-noanim-seq-03.png` 到 `fg-noanim-seq-10.png`。
+- 排除：CDP lifecycle probe 中 `#root` 始终挂载且有 child，terminal body text 与 `zterm:active-page={"kind":"terminal"}` 均未清空；当前现象不是 React 页面卸载或 terminal body 丢失。
+- 已证伪旧结论：已安装 APK 包含 `51127e9` 的深色 splash、`windowSplashScreenBackground`、WebView 深色背景和 `colorMode` configChanges，但白色任务面仍可复现；仅修 splash/WebView 背景不足以解决 warm resume 转场。
+- 活跃 H1：`Theme.SplashScreen` 未声明 `postSplashScreenTheme`，且正常 `AppTheme.NoActionBar` 没有明确深色 `windowBackground`，导致系统 task transition identity 未稳定切到深色运行主题。确认信号：实验 APK 的 HOME -> foreground 连续截图不再出现 Freehand 白色任务面；证伪信号：相同入口仍出现亮帧。
+- 正向实验：只在 playground Gradle overlay 中给 launch theme 增加 `postSplashScreenTheme=@style/AppTheme.NoActionBar`，并给运行主题增加深色 `windowBackground`。反向实验：恢复基线 APK 后相同入口再次出现亮帧。两者齐备后才能确认根因并输出 Fix Design Report。
+- 架构缺口：`feature-registry.json` 的 `mainline_source.android.allowed_paths` 与 `module-registry.json` 的 `client.app_shell.owned_paths` 尚未覆盖 `native/android/app/src/main/res/values/styles.xml` / `MainActivity.java`。正式修复前必须先补 owner 路径与 gate，不能把现有 registry 当作已允许 theme 修改。
+- H1 实验状态：debug resource overlay 构建成功并安装，APK 仍是 `0.1.3.2541` / `1100025410`，sha256 `5da740d56bf66bbb448554b1f4477a69a17a95434d62ae23bfff72c3f00efe23`。随后已恢复 OTA 基线 `android/update-dist/zterm-0.1.3.2541.apk`。
+- H1 结果不成立：正向样本 `h1-positive-terminal/` 与恢复基线后的 `h1-reverse-baseline/` 都没有抓到原始 Freehand 帧；两组亮度相同是当前 terminal shell 自身浅色背景，不能当作白闪消失。由于基线在同入口未复现，缺少有效反向干预，不能确认 theme 是根因，不能进入正式修复。
+- 追加系统证据：当前 SurfaceFlinger 明确保留 `starting_reveal` animation leash；zterm 与 Freehand 都存在独立 ActivityRecord，Freehand 已 `mHasSurface=false`，而原始亮帧仍能显示完整 Freehand UI，符合 task snapshot/transition surface 而非 live React/WebView surface。下一假设应聚焦 Oplus task snapshot/transition owner，并先恢复稳定可复现条件。
+- 检索 marker：`foreground-task-transition-freehand-snapshot-h1-not-confirmed`。
+- 2026-08-11 22:24 CST 新基线：已安装正式 `0.1.3.2547` / `1100025470`。进入真实 terminal 后 HOME，`dumpsys window` 的 zterm task 2605 显示 `mIsRealSnapshot=true`、`mSnapshotColor=fff7f8fb`，即系统保存的是 zterm 浅色 terminal task snapshot；这比早先的 foreign-task 帧更接近稳定首次偏离。Android 36 `Activity#setRecentsScreenshotEnabled(false)` 文档明确：关闭后系统不应把 Activity screenshot 用作 recents representation，Activity 不运行时可改用 theme window background。
+- H2 单假设：真实浅色 zterm task snapshot 是 warm foreground 的亮帧 owner。正向实验只在 `playground/foreground-white-flash-20260811/H2-recents-screenshot-disabled/` 注入 API 33+ `setRecentsScreenshotEnabled(false)` 和深色 theme background；确认信号是 zterm task 不再保存/呈现 real light snapshot 且恢复亮帧消失，证伪信号是仍为 real light snapshot 或亮帧不变。正式产品代码继续只读。
+- H2 因果闭环完成。基线正式 2547：HOME 后 `mIsRealSnapshot=true`、`mSnapshotColor=ffffffff`；正向 playground 2549：`mIsRealSnapshot=false`、黑色 snapshot bundle `{mode=1,color=-16777216}`；反向重装正式 2547：再次 `mIsRealSnapshot=true`、`mSnapshotColor=ffffffff`。首次偏离是 `MainActivity` stopped 时的 Android task snapshot capture policy，发生在 Capacitor/WebView/React resume 之前。`FD-20260811-ANDROID-FOREGROUND-FLASH-01` 已获 Jason 批准；正式修复限制在 `client.app_shell` 的 `MainActivity.java` + theme resources，先补 registry/gate。
+- 正式修复与真机闭环完成。`MainActivity.onCreate` 在 `super.onCreate` 前对 API 33+ 调 `setRecentsScreenshotEnabled(false)`；`AppTheme.NoActionBar` 改为 opaque 深色 `windowBackground`/`colorBackground`，launch theme 显式绑定 `postSplashScreenTheme`；未加 `FLAG_SECURE`、未做 JS 生命周期补偿。正式 APK `0.1.3.2550` / `1100025500`，sha256 `75f04412514fc0ab0853a05f787bbe7060a3bee761479a8e5d36ecee0a6b8c11`。三通道 manifest/APK 对齐，真机 `100.104.163.65:5555` 三次 HOME -> foreground：`mIsRealSnapshot=false`、`mSnapshotBundle={mode=1,color=-16777216}`、`shouldAppSnapshot=false`，截图无白帧。证据 `android/evidence/foreground-white-flash-20260811/formal-2550-run-*`。
+
+## 2026-08-11 QuickBar 双行自定义入口纠正
+
+- Jason 明确纠正：自定义快捷按钮入口不是工具行的单个通用 `+`，而是第一行、第二行末尾各一个 `+`。
+- 历史真源 `13978ca^` 证明原始 ID 分别为 `shortcut-editor-top` / `shortcut-editor-bottom`；两者都复用现有 `openShortcutEditor` owner。
+- 正式改动：竖屏分别投影到第一、第二快捷行；横屏合并快捷行保留两个入口；第三工具行不放该入口。单测锁定行归属、两个入口均可打开编辑器、且不发送 terminal sequence。
+
+## 2026-08-11 QuickBar 编辑器与传输速率遮挡修复
+
+- 根因：快捷键编辑器虽然是 `position: fixed; z-index: 121`，但仍挂在 `TerminalQuickBarShell(z-index: 10)` 的 stacking context 内；顶部连接/速率栏是相邻 `z-index: 15`，因此速率栏实际压在全屏编辑器之上。
+- 唯一 owner：`terminal.quickbar` / `TerminalQuickBar.tsx`。正式修复把现有编辑器 overlay portal 到 `document.body` 并设为 `z-index: 240`；不隐藏传输速率、不移动两行自定义入口、不修改 transport/renderer/daemon。
+- 真机 `0.1.3.2554` CDP：overlay parent 为 body；顶部速率栏采样点 `elementsFromPoint` 中 overlay 首项 index=0、status 首项 index=6，证明编辑器完整覆盖速率栏。Portal 内输入焦点同时纳入 QuickBar editor-focus owner，控件间切换保持 active，关闭时显式清为 false。
