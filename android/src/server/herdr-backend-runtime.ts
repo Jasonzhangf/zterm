@@ -31,6 +31,25 @@ function waitForHerdrReadinessWindow(milliseconds: number) {
   Atomics.wait(signal, 0, 0, milliseconds);
 }
 
+function waitForHerdrProcessExit(process: ChildProcessWithoutNullStreams, timeoutMs: number) {
+  if (!process.pid) return process.killed;
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    try {
+      globalThis.process.kill(process.pid, 0);
+    } catch {
+      return true;
+    }
+    waitForHerdrReadinessWindow(25);
+  }
+  try {
+    globalThis.process.kill(process.pid, 0);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 function parseWorkspaceCreate(raw: string): { terminalId: string; paneId: string; cwd: string; viewportRows: number } {
   const response = JSON.parse(raw) as {
     result?: { root_pane?: { terminal_id?: string; pane_id?: string; cwd?: string; scroll?: { viewport_rows?: number } } };
@@ -286,7 +305,8 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
     }
     if (session.serverProcess) {
       try {
-        serverProcessStopped = session.serverProcess.killed || session.serverProcess.kill('SIGTERM');
+        if (!session.serverProcess.killed) session.serverProcess.kill('SIGTERM');
+        serverProcessStopped = waitForHerdrProcessExit(session.serverProcess, 500);
       } catch (error) {
         closeError ||= error;
       }
