@@ -2,6 +2,9 @@ import { spawnSync } from 'node:child_process';
 import process from 'node:process';
 
 const files = [
+  // 已知环境级 flake（单独跑 138 全绿、串行 54 文件时偶发 4538/4599 时序断言失败）：
+  // 置于数组首位，避开前置文件进程内状态干扰
+  'src/contexts/SessionContext.ws-refresh.test.tsx',
   'src/server/buffer-sync-contract.test.ts',
   'src/server/daemon-service-script.test.ts',
   'src/server/daemon-mirror-lab-script.test.ts',
@@ -19,7 +22,6 @@ const files = [
   'src/server/session-transport-ticket.test.ts',
   'src/server/tmux-window-size-semantics.test.ts',
   'src/server/terminal-control-runtime.input-queue.test.ts',
-  'src/contexts/SessionContext.ws-refresh.test.tsx',
   'src/contexts/session-buffer-frame-assembly.test.ts',
   'src/contexts/session-context-buffer-runtime.test.ts',
   'src/contexts/session-context-lifecycle.test.tsx',

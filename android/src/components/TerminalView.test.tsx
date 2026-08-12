@@ -436,6 +436,289 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     });
   });
 
+  it('keeps pure visual zoom (layout unchanged) and promotes the zoom layer to GPU compositing on pinch', async () => {
+    const { container } = render(
+      <div style={{ width: '200px', height: '408px' }}>
+        <TerminalView
+          sessionId="s1"
+          renderBufferSnapshot={buildRenderBufferSnapshot()}
+          active
+          live
+          widthMode="mirror-fixed"
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const grid = container.querySelector('.term-grid') as HTMLElement;
+    const host = container.querySelector('.wterm') as HTMLElement;
+    const fontBefore = host.style.getPropertyValue('--term-font-size');
+    const rowHeightBefore = host.style.getPropertyValue('--term-row-height');
+
+    act(() => {
+      ResizeObserverMock.triggerAll();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+
+    // 双指缩小到 clamp minScale（0.8065）
+    act(() => {
+      fireEvent.touchStart(host, {
+        touches: [
+          { clientX: 150, clientY: 100, identifier: 1 },
+          { clientX: 250, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    act(() => {
+      fireEvent.touchMove(host, {
+        touches: [
+          { clientX: 160, clientY: 100, identifier: 1 },
+          { clientX: 220, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    // pinch 中：纯视觉 zoom（布局不变）+ GPU 合成层（滚动不黑屏）
+    expect(grid.style.zoom).toBe('0.8064516129032258');
+    expect(grid.style.willChange).toBe('transform');
+    // 布局（字号/行高）完全不变
+    expect(host.style.getPropertyValue('--term-font-size')).toBe(fontBefore);
+    expect(host.style.getPropertyValue('--term-row-height')).toBe(rowHeightBefore);
+
+    // 抬起结束：zoom 保持缩小（不固化、不改布局），合成层保持
+    act(() => {
+      fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
+    });
+    expect(grid.style.zoom).toBe('0.8064516129032258');
+    expect(grid.style.willChange).toBe('transform');
+    expect(host.style.getPropertyValue('--term-font-size')).toBe(fontBefore);
+    expect(host.style.getPropertyValue('--term-row-height')).toBe(rowHeightBefore);
+  });
+
+  it('pans zoomed content vertically via translateY instead of native scroll (no black screen)', async () => {
+    const { container, rerender } = render(
+      <div style={{ width: '200px', height: '408px' }}>
+        <TerminalView
+          sessionId="s1"
+          renderBufferSnapshot={buildRenderBufferSnapshot()}
+          active
+          live
+          widthMode="mirror-fixed"
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const grid = container.querySelector('.term-grid') as HTMLElement;
+    const host = container.querySelector('.wterm') as HTMLElement;
+
+    act(() => {
+      ResizeObserverMock.triggerAll();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+
+    // 双指缩小到 minScale（0.8065）→ 缩放态
+    act(() => {
+      fireEvent.touchStart(host, {
+        touches: [
+          { clientX: 150, clientY: 100, identifier: 1 },
+          { clientX: 250, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    act(() => {
+      fireEvent.touchMove(host, {
+        touches: [
+          { clientX: 160, clientY: 100, identifier: 1 },
+          { clientX: 220, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    act(() => {
+      fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
+    });
+
+    expect(grid.style.zoom).toBe('0.8064516129032258');
+    expect(host.style.touchAction).toBe('none'); // 缩放态禁原生滚动
+
+    // React 渲染覆盖防线：任何渲染（如 recomputeViewportRowsForZoom 的 setState）
+    // 不得把缩放态 touch-action 从 none 改回 pan-y（否则 WebView 恢复原生滚动消费
+    // 单指触摸 → zoom 位图滚动黑屏）
+    const terminalProps = {
+      sessionId: 's1',
+      renderBufferSnapshot: buildRenderBufferSnapshot(),
+      active: true,
+      live: true,
+      widthMode: 'mirror-fixed' as const,
+      onInput: vi.fn(),
+      fontSize: 5,
+    };
+    rerender(
+      <div style={{ width: '200px', height: '408px' }}>
+        <TerminalView {...terminalProps} />
+      </div>,
+    );
+    expect(host.style.touchAction).toBe('none');
+    expect(grid.style.zoom).toBe('0.8064516129032258');
+
+    // jsdom 无布局：mock 滚动尺寸使 maxVertical > 0
+    Object.defineProperty(host, 'scrollHeight', { value: 1000, configurable: true });
+    Object.defineProperty(host, 'clientHeight', { value: 400, configurable: true });
+
+    // 单指向上拖动 50px（看下面内容）→ translateY 合成层平移（不触发原生 scrollTop）
+    act(() => {
+      fireEvent.touchStart(host, {
+        touches: [{ clientX: 100, clientY: 100, identifier: 1 }],
+        changedTouches: [],
+      });
+    });
+    act(() => {
+      fireEvent.touchMove(host, {
+        touches: [{ clientX: 100, clientY: 50, identifier: 1 }],
+        changedTouches: [],
+      });
+    });
+    expect(grid.style.transform).toContain('translateY(-50px)');
+    expect(host.scrollTop).toBe(0); // 原生滚动未被使用
+  });
+
+  it('keeps scrollTop frozen during zoom (no black screen) and pans vertically in both directions', async () => {
+    const { container } = render(
+      <div style={{ width: '200px', height: '408px' }}>
+        <TerminalView
+          sessionId="s1"
+          renderBufferSnapshot={buildRenderBufferSnapshot()}
+          active
+          live
+          widthMode="mirror-fixed"
+          onInput={vi.fn()}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const grid = container.querySelector('.term-grid') as HTMLElement;
+    const host = container.querySelector('.wterm') as HTMLElement;
+
+    act(() => {
+      ResizeObserverMock.triggerAll();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+
+    // jsdom 无布局：mock 滚动尺寸（maxScrollTop = 1000-400 = 600）
+    Object.defineProperty(host, 'scrollHeight', { value: 1000, configurable: true });
+    Object.defineProperty(host, 'clientHeight', { value: 400, configurable: true });
+
+    // 非缩放态：原生滚动到 500px
+    act(() => {
+      host.scrollTop = 500;
+    });
+
+    // 双指缩小到 minScale（0.8065）→ 进入缩放态
+    act(() => {
+      fireEvent.touchStart(host, {
+        touches: [
+          { clientX: 150, clientY: 100, identifier: 1 },
+          { clientX: 250, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    act(() => {
+      fireEvent.touchMove(host, {
+        touches: [
+          { clientX: 160, clientY: 100, identifier: 1 },
+          { clientX: 220, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    act(() => {
+      fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
+    });
+
+    // 缩放态 scrollTop 清零（黑屏根因 = 缩放态 scrollTop≠0）+ 初始 v 补偿 pinch 前位置
+    // v0 = -round(500 × 0.8065) = -403 → translateY(403px)
+    expect(host.scrollTop).toBe(0);
+    expect(grid.style.transform).toContain('translateY(403px)');
+
+    // 单指拖动（mirror-fixed 缩放态纵向平移）
+    const pan = (fromY: number, toY: number) => {
+      act(() => {
+        fireEvent.touchStart(host, {
+          touches: [{ clientX: 100, clientY: fromY, identifier: 1 }],
+          changedTouches: [],
+        });
+      });
+      act(() => {
+        fireEvent.touchMove(host, {
+          touches: [{ clientX: 100, clientY: toY, identifier: 1 }],
+          changedTouches: [],
+        });
+      });
+      act(() => {
+        fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }] });
+      });
+    };
+    // 向下拖内容（回看上面）→ v 更负 → translateY 更大（内容下移）
+    pan(50, 150);
+    expect(grid.style.transform).toContain('translateY(503px)');
+    // 向上拖内容（看下面）→ v 增大 → translateY 减小（双向，v 相对 v0 可正可负）
+    pan(250, 50);
+    expect(grid.style.transform).toContain('translateY(303px)');
+    // 缩放态 scrollTop 始终为 0
+    expect(host.scrollTop).toBe(0);
+
+    // 放大回 1（步进式，computeNextPinchScale 每次 +0.08 防跳变）：多次 move 到 1
+    act(() => {
+      fireEvent.touchStart(host, {
+        touches: [
+          { clientX: 160, clientY: 100, identifier: 1 },
+          { clientX: 220, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    for (const [x1, x2] of [
+      [200, 300],
+      [220, 320],
+      [240, 340],
+      [260, 360],
+    ]) {
+      act(() => {
+        fireEvent.touchMove(host, {
+          touches: [
+            { clientX: x1, clientY: 100, identifier: 1 },
+            { clientX: x2, clientY: 100, identifier: 2 },
+          ],
+          changedTouches: [],
+        });
+      });
+    }
+    act(() => {
+      fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
+    });
+    expect(grid.style.zoom).toBe('1');
+    expect(grid.style.transform).not.toContain('translateY');
+    // 等待 setTimeout 0 的延迟还原（follow sync flush 后执行）；
+    // v=-303, v0=-403 → 还原 500 + (-303+403) = 600 → clamp 到 maxScrollTop 600
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    expect(host.scrollTop).toBe(600);
+  });
+
   it('does not zoom when widthMode is not mirror-fixed', () => {
     const { container } = render(
       <div style={{ width: '200px', height: '408px' }}>
