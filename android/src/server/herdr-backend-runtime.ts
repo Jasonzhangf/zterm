@@ -286,8 +286,7 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
     }
     if (session.serverProcess) {
       try {
-        if (!session.serverProcess.killed) session.serverProcess.kill('SIGTERM');
-        serverProcessStopped = true;
+        serverProcessStopped = session.serverProcess.killed || session.serverProcess.kill('SIGTERM');
       } catch (error) {
         closeError ||= error;
       }
