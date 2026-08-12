@@ -69,6 +69,7 @@ export interface WezTermBackendRuntime {
   readSnapshot: (sessionName: string) => Promise<WezTermMirrorSnapshot>;
   writeInput: (sessionName: string, input: Buffer | string) => void;
   resizeSession?: (sessionName: string, geometry: { cols: number; rows: number }) => void;
+  supportsSessionRename?: boolean;
   renameSession?: (sessionName: string, nextSessionName: string) => string;
   closeSession: (sessionName: string) => void;
   readCurrentPath: (sessionName: string) => string;

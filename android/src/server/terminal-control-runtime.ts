@@ -623,6 +623,9 @@ export function createTerminalControlRuntime(
 
   function renameTmuxSession(currentName?: string, nextName?: string) {
     if (deps.wezTermBackend) {
+      if (deps.wezTermBackend.supportsSessionRename === false) {
+        throw new Error('selected terminal backend does not support session rename');
+      }
       if (deps.wezTermBackend.renameSession) {
         return deps.wezTermBackend.renameSession(
           deps.sanitizeSessionName(currentName),

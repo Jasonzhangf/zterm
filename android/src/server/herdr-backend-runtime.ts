@@ -274,24 +274,25 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
     session.adapterBundle.adapter.resize(geometry);
   }
 
-  function renameSession(sessionName: string, nextSessionName: string): never {
-    void sessionName;
-    void nextSessionName;
-    throw new Error('Herdr named session rename is unsupported by the official CLI');
-  }
-
   function closeSession(sessionName: string) {
     const session = resolve(sessionName);
-    if (session.adapterBundle) session.adapterBundle.adapter.release();
-    session.adapterBundle?.transport.dispose();
-    if (!session.adapterBundle) {
-      try {
-        cli(session.herdrSessionName, ['server', 'stop']);
-      } catch {
-        // Explicit close cleanup; the backend has already been removed.
+    let closeError: unknown = null;
+    try {
+      if (session.adapterBundle) session.adapterBundle.adapter.release();
+      session.adapterBundle?.transport.dispose();
+      if (session.serverProcess && !session.serverProcess.killed) {
+        session.serverProcess.kill('SIGTERM');
       }
+    } catch (error) {
+      closeError = error;
+    }
+    try {
+      cli(session.herdrSessionName, ['server', 'stop']);
+    } catch (error) {
+      closeError ||= error;
     }
     sessions.delete(sessionName);
+    if (closeError) throw closeError;
   }
 
   return {
@@ -300,7 +301,7 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
     readSnapshot,
     writeInput,
     resizeSession,
-    renameSession,
+    supportsSessionRename: false,
     closeSession,
     readCurrentPath: (sessionName) => resolve(sessionName).cwd,
   };
