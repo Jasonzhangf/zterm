@@ -296,28 +296,40 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
   function closeSession(sessionName: string) {
     const session = resolve(sessionName);
     let closeError: unknown = null;
-    let serverProcessStopped = false;
     try {
       if (session.adapterBundle) session.adapterBundle.adapter.release();
       session.adapterBundle?.transport.dispose();
     } catch (error) {
       closeError = error;
     }
+    let cliStopSucceeded = false;
+    let cliStopError: unknown = null;
+    try {
+      cli(session.herdrSessionName, ['server', 'stop']);
+      cliStopSucceeded = true;
+    } catch (error) {
+      cliStopError = error;
+    }
+    let serverProcessStopped = !session.serverProcess;
     if (session.serverProcess) {
       try {
-        if (!session.serverProcess.killed) session.serverProcess.kill('SIGTERM');
-        serverProcessStopped = waitForHerdrProcessExit(session.serverProcess, 500);
+        serverProcessStopped = waitForHerdrProcessExit(session.serverProcess, 100);
+        if (!serverProcessStopped) {
+          session.serverProcess.kill('SIGTERM');
+          serverProcessStopped = waitForHerdrProcessExit(session.serverProcess, 500);
+        }
+        if (!serverProcessStopped) {
+          session.serverProcess.kill('SIGKILL');
+          serverProcessStopped = waitForHerdrProcessExit(session.serverProcess, 500);
+          if (!serverProcessStopped) {
+            throw new Error(`Herdr server process ${session.serverProcess.pid || 'unknown'} did not exit after SIGKILL`);
+          }
+        }
       } catch (error) {
         closeError ||= error;
       }
     }
-    if (!serverProcessStopped) {
-      try {
-        cli(session.herdrSessionName, ['server', 'stop']);
-      } catch (error) {
-        closeError ||= error;
-      }
-    }
+    if (!cliStopSucceeded && (!session.serverProcess || !serverProcessStopped)) closeError ||= cliStopError;
     sessions.delete(sessionName);
     if (closeError) throw closeError;
   }
