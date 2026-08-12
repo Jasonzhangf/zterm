@@ -277,19 +277,27 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
   function closeSession(sessionName: string) {
     const session = resolve(sessionName);
     let closeError: unknown = null;
+    let serverProcessStopped = false;
     try {
       if (session.adapterBundle) session.adapterBundle.adapter.release();
       session.adapterBundle?.transport.dispose();
-      if (session.serverProcess && !session.serverProcess.killed) {
-        session.serverProcess.kill('SIGTERM');
-      }
     } catch (error) {
       closeError = error;
     }
-    try {
-      cli(session.herdrSessionName, ['server', 'stop']);
-    } catch (error) {
-      closeError ||= error;
+    if (session.serverProcess) {
+      try {
+        if (!session.serverProcess.killed) session.serverProcess.kill('SIGTERM');
+        serverProcessStopped = true;
+      } catch (error) {
+        closeError ||= error;
+      }
+    }
+    if (!serverProcessStopped) {
+      try {
+        cli(session.herdrSessionName, ['server', 'stop']);
+      } catch (error) {
+        closeError ||= error;
+      }
     }
     sessions.delete(sessionName);
     if (closeError) throw closeError;
