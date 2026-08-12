@@ -26,7 +26,7 @@ export interface WezTermMirrorSnapshot {
   bufferLines: TerminalCell[][];
   cols: number;
   rows: number;
-  cursorKeysApp: false;
+  cursorKeysApp: boolean;
   cursor: {
     rowIndex: number;
     col: number;
@@ -43,7 +43,7 @@ export interface WezTermInputContract {
 
 export interface WezTermBackendSession {
   sessionName: string;
-  paneId: number;
+  paneId: number | string;
   workspace: string;
   title: string;
   cwd: string;
@@ -68,8 +68,17 @@ export interface WezTermBackendRuntime {
   createSession: (input?: { sessionName?: string; cwd?: string; command?: string[] }) => WezTermBackendSession;
   readSnapshot: (sessionName: string) => Promise<WezTermMirrorSnapshot>;
   writeInput: (sessionName: string, input: Buffer | string) => void;
+  resizeSession?: (sessionName: string, geometry: { cols: number; rows: number }) => void;
+  renameSession?: (sessionName: string, nextSessionName: string) => string;
   closeSession: (sessionName: string) => void;
   readCurrentPath: (sessionName: string) => string;
+}
+
+function requireWezTermPaneId(value: number | string) {
+  if (typeof value !== 'number' || !Number.isInteger(value)) {
+    throw new Error(`wezterm pane id is not numeric: ${value}`);
+  }
+  return value;
 }
 
 export function createWezTermCommandRunner(executable: string): WezTermCommandRunner {
@@ -455,7 +464,7 @@ export function createWezTermBackendRuntime(options: WezTermBackendRuntimeOption
     if (!matched) {
       throw new Error(`wezterm session not found: ${normalizedSessionName}`);
     }
-    sessionPaneIds.set(normalizedSessionName, matched.paneId);
+    sessionPaneIds.set(normalizedSessionName, requireWezTermPaneId(matched.paneId));
     return matched;
   }
 
@@ -483,7 +492,7 @@ export function createWezTermBackendRuntime(options: WezTermBackendRuntimeOption
       previousStartIndex: 0,
       previousLineCount: 0,
     };
-    const text = options.runner.run(buildWezTermGetTextArgs({ paneId: session.paneId }));
+    const text = options.runner.run(buildWezTermGetTextArgs({ paneId: requireWezTermPaneId(session.paneId) }));
     const snapshot = await buildWezTermMirrorSnapshot({
       pane,
       revision: state.revision + 1,
@@ -502,12 +511,12 @@ export function createWezTermBackendRuntime(options: WezTermBackendRuntimeOption
 
   function writeInput(sessionName: string, input: Buffer | string) {
     const session = resolveSession(sessionName);
-    options.runner.runWithInput(buildWezTermSendTextArgs(session.paneId), input);
+    options.runner.runWithInput(buildWezTermSendTextArgs(requireWezTermPaneId(session.paneId)), input);
   }
 
   function closeSession(sessionName: string) {
     const session = resolveSession(sessionName);
-    options.runner.run(buildWezTermKillPaneArgs(session.paneId));
+    options.runner.run(buildWezTermKillPaneArgs(requireWezTermPaneId(session.paneId)));
     const paneStillExists = listPaneRecords().some((pane) => pane.paneId === session.paneId);
     if (paneStillExists) {
       throw new Error(`wezterm pane cleanup failed: ${session.sessionName} pane ${session.paneId} still listed`);

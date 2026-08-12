@@ -1,4 +1,4 @@
-export type TerminalBackendKind = 'tmux' | 'wezterm';
+export type TerminalBackendKind = 'tmux' | 'wezterm' | 'herdr';
 
 export interface ResolveTerminalBackendKindOptions {
   platform?: NodeJS.Platform;
@@ -8,7 +8,7 @@ export interface ResolveTerminalBackendKindOptions {
 export function resolveTerminalBackendKind(options: ResolveTerminalBackendKindOptions = {}): TerminalBackendKind {
   const env = options.env || process.env;
   const explicit = (env.ZTERM_TERMINAL_BACKEND || '').trim().toLowerCase();
-  if (explicit === 'tmux' || explicit === 'wezterm') {
+  if (explicit === 'tmux' || explicit === 'wezterm' || explicit === 'herdr') {
     return explicit;
   }
   if (explicit) {
@@ -23,4 +23,9 @@ export function resolveWezTermExecutable(env: Record<string, string | undefined>
     return explicit;
   }
   return 'wezterm.exe';
+}
+
+export function resolveHerdrExecutable(env: Record<string, string | undefined> = process.env) {
+  const explicit = (env.ZTERM_HERDR_EXE || '').trim();
+  return explicit || 'herdr';
 }

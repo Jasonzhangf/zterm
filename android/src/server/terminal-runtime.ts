@@ -57,7 +57,7 @@ export interface TerminalRuntime {
   attachTmux: (subscriber: TerminalTransportSubscriber, payload: TerminalAttachPayload) => Promise<void>;
   handleAdaptiveResize: (
     subscriber: TerminalTransportSubscriber,
-    payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' },
+    payload: { cols?: number; rows?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' },
   ) => { ok: true } | { ok: false; code: 'session_not_ready' | 'adaptive_width_cols_invalid'; message: string };
   restorePersistedAdaptiveWidthBaselines: (sessionNames: string[]) => number;
   refreshAdaptiveWidthLeaseHeartbeat: (subscriber: TerminalTransportSubscriber) => void;
@@ -94,6 +94,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
       mirrorKey: null,
       bodySubscribed: true,
       adaptiveWidthCols: null,
+      adaptiveWidthRows: null,
       adaptiveWidthHeartbeatAt: 0,
       pendingPasteImage: null,
       pendingAttachFile: null,

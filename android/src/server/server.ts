@@ -52,7 +52,8 @@ import {
   createWezTermBackendRuntime,
   createWezTermCommandRunner,
 } from './wezterm-backend';
-import { resolveTerminalBackendKind, resolveWezTermExecutable } from './terminal-backend-selection';
+import { createHerdrBackendRuntime } from './herdr-backend-runtime';
+import { resolveTerminalBackendKind, resolveHerdrExecutable, resolveWezTermExecutable } from './terminal-backend-selection';
 import {
   createTerminalTransportRuntime,
   type DaemonTransportConnection,
@@ -78,12 +79,17 @@ const HOST = DAEMON_CONFIG.host || DEFAULT_DAEMON_HOST;
 
 const TERMINAL_BACKEND_KIND = resolveTerminalBackendKind();
 const TMUX_BINARY = TERMINAL_BACKEND_KIND === 'tmux' ? resolveTmuxBinary() : '';
-const WEZTERM_BACKEND = TERMINAL_BACKEND_KIND === 'wezterm'
+const TERMINAL_BACKEND_RUNTIME = TERMINAL_BACKEND_KIND === 'wezterm'
   ? createWezTermBackendRuntime({
       runner: createWezTermCommandRunner(resolveWezTermExecutable()),
-      maxMirrorLines: DAEMON_CONFIG.terminalCacheLines,
-    })
-  : null;
+    maxMirrorLines: DAEMON_CONFIG.terminalCacheLines,
+  })
+  : TERMINAL_BACKEND_KIND === 'herdr'
+    ? createHerdrBackendRuntime({
+        executable: resolveHerdrExecutable(),
+        maxMirrorLines: DAEMON_CONFIG.terminalCacheLines,
+      })
+    : null;
 const DEFAULT_SESSION_NAME = process.env.ZTERM_DEFAULT_SESSION || 'zterm';
 const DAEMON_SESSION_NAME = DAEMON_CONFIG.sessionName || buildDaemonSessionName(PORT);
 const HIDDEN_TMUX_SESSIONS = new Set([DAEMON_SESSION_NAME, DEFAULT_DAEMON_SESSION_NAME, 'zterm-daemon-keepalive']);
@@ -157,7 +163,8 @@ const terminalMirrorCapture = createTerminalMirrorCaptureRuntime({
   runTmuxAsync: (args) => terminalControlRuntime.runTmuxAsync(args),
   buildExactTmuxPaneTarget: (sessionName) => terminalControlRuntime.buildExactTmuxPaneTarget(sessionName),
   logTimePrefix,
-  wezTermBackend: WEZTERM_BACKEND,
+  wezTermBackend: TERMINAL_BACKEND_RUNTIME,
+  terminalBackendKind: TERMINAL_BACKEND_KIND,
 });
 const terminalRuntime = createTerminalRuntime({
   defaultSessionName: DEFAULT_SESSION_NAME,
@@ -178,10 +185,17 @@ const terminalRuntime = createTerminalRuntime({
   normalizeTerminalRows,
   resolveAttachGeometry,
   readTmuxPaneMetrics: (sessionName) => terminalMirrorCapture.readTmuxPaneMetrics(sessionName),
+  resizeBackendSession: TERMINAL_BACKEND_KIND === 'tmux'
+    ? undefined
+    : TERMINAL_BACKEND_RUNTIME?.resizeSession
+    ? (sessionName, geometry) => {
+      TERMINAL_BACKEND_RUNTIME.resizeSession?.(sessionName, geometry);
+    }
+    : undefined,
   assertTmuxSessionExists: (sessionName) => {
-    if (WEZTERM_BACKEND) {
-      if (!WEZTERM_BACKEND.listSessions().some((session) => session.sessionName === sessionName)) {
-        throw new Error(`wezterm session not found: ${sessionName}`);
+    if (TERMINAL_BACKEND_RUNTIME) {
+      if (!TERMINAL_BACKEND_RUNTIME.listSessions().some((session) => session.sessionName === sessionName)) {
+        throw new Error(`${TERMINAL_BACKEND_KIND} session not found: ${sessionName}`);
       }
       return;
     }
@@ -255,7 +269,7 @@ terminalControlRuntime = createTerminalControlRuntime({
   getMirrorKey,
   sanitizeSessionName,
   daemonRuntimeDebug,
-  wezTermBackend: WEZTERM_BACKEND,
+  wezTermBackend: TERMINAL_BACKEND_RUNTIME,
 });
 const {
   runTmux,

@@ -61,6 +61,7 @@ export interface TerminalMirrorRuntimeDeps {
     previousSessionGeometry: TerminalGeometry;
   }) => TerminalGeometry;
   readTmuxPaneMetrics: (sessionName: string) => TmuxPaneMetrics;
+  resizeBackendSession?: (sessionName: string, geometry: TerminalGeometry) => void;
   assertTmuxSessionExists: (sessionName: string) => void;
   captureMirrorAuthoritativeBufferFromTmux: (mirror: SessionMirror) => Promise<boolean>;
   mirrorBufferChanged: (
@@ -123,7 +124,7 @@ export interface TerminalMirrorRuntime {
   attachTmux: (session: TerminalSession, payload: TerminalAttachPayload) => Promise<void>;
   handleAdaptiveResize: (
     session: TerminalSession,
-    payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' },
+    payload: { cols?: number; rows?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' },
   ) => { ok: true } | { ok: false; code: 'session_not_ready' | 'adaptive_width_cols_invalid'; message: string };
   restorePersistedAdaptiveWidthBaselines: (sessionNames: string[]) => number;
   refreshAdaptiveWidthLeaseHeartbeat: (session: TerminalSession) => void;
@@ -543,6 +544,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       pendingPerformanceTraceCapture: null,
       adaptiveWidthBaselineGeometry: null,
       adaptiveWidthAppliedCols: null,
+      adaptiveWidthAppliedRows: null,
       adaptiveWidthLeaseTimer: null,
       liveSyncTimer: null,
       consecutiveFailures: 0,
@@ -623,6 +625,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     }
     mirror.adaptiveWidthBaselineGeometry = null;
     mirror.adaptiveWidthAppliedCols = null;
+    mirror.adaptiveWidthAppliedRows = null;
     stopMirrorLiveSync(mirror);
     mirrors.delete(mirror.key);
   }
@@ -1020,7 +1023,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
   }
 
   function resolveActiveAdaptiveWidthLeases(mirror: SessionMirror, now = Date.now()) {
-    const leases: Array<{ subscriberId: string; cols: number; expiresAt: number }> = [];
+    const leases: Array<{ subscriberId: string; cols: number; rows: number; expiresAt: number }> = [];
     for (const subscriberId of mirror.subscribers) {
       const subscriber = sessions.get(subscriberId);
       if (!subscriber || !subscriber.transport || subscriber.transport.readyState !== 1) {
@@ -1036,6 +1039,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       leases.push({
         subscriberId,
         cols: deps.normalizeTerminalCols(subscriber.adaptiveWidthCols),
+        rows: deps.normalizeTerminalRows(subscriber.adaptiveWidthRows || mirror.rows),
         expiresAt,
       });
     }
@@ -1090,7 +1094,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     }
   }
 
-  function applyAdaptiveTmuxWidth(mirror: SessionMirror, targetCols: number, reason: string) {
+  function applyAdaptiveTmuxWidth(mirror: SessionMirror, targetCols: number, targetRows: number, reason: string) {
     const cols = deps.normalizeTerminalCols(targetCols);
     if (!mirror.adaptiveWidthBaselineGeometry) {
       mirror.adaptiveWidthBaselineGeometry =
@@ -1099,11 +1103,19 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
           rows: deps.normalizeTerminalRows(mirror.baselineRows || mirror.rows),
         };
     }
-    if (mirror.adaptiveWidthAppliedCols === cols) {
+    if (mirror.adaptiveWidthAppliedCols === cols && mirror.adaptiveWidthAppliedRows === targetRows) {
       return;
     }
-    deps.runTmux(['resize-window', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), '-x', String(cols)]);
+    if (deps.resizeBackendSession) {
+      deps.resizeBackendSession(mirror.sessionName, {
+        cols,
+        rows: targetRows,
+      });
+    } else {
+      deps.runTmux(['resize-window', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), '-x', String(cols)]);
+    }
     mirror.adaptiveWidthAppliedCols = cols;
+    mirror.adaptiveWidthAppliedRows = targetRows;
     console.log(`[${deps.logTimePrefix()}] adaptive width applied`, {
       sessionName: mirror.sessionName,
       cols,
@@ -1114,9 +1126,18 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
   function releaseAdaptiveTmuxWidth(mirror: SessionMirror, reason: string) {
     const baseline = mirror.adaptiveWidthBaselineGeometry;
     if (baseline) {
-      deps.runTmux(['resize-window', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), '-x', String(deps.normalizeTerminalCols(baseline.cols))]);
+      if (deps.resizeBackendSession) {
+        deps.resizeBackendSession(mirror.sessionName, {
+          cols: deps.normalizeTerminalCols(baseline.cols),
+          rows: deps.normalizeTerminalRows(baseline.rows),
+        });
+      } else {
+        deps.runTmux(['resize-window', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), '-x', String(deps.normalizeTerminalCols(baseline.cols))]);
+      }
     }
-    deps.runTmux(['set-window-option', '-u', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), 'window-size']);
+    if (!deps.resizeBackendSession) {
+      deps.runTmux(['set-window-option', '-u', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), 'window-size']);
+    }
     console.log(`[${deps.logTimePrefix()}] adaptive width released`, {
       sessionName: mirror.sessionName,
       restoredCols: baseline?.cols ?? null,
@@ -1145,9 +1166,12 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     }
 
     const targetCols = leases[0].cols;
-    if (mirror.adaptiveWidthAppliedCols !== targetCols) {
+    if (
+      mirror.adaptiveWidthAppliedCols !== targetCols
+      || mirror.adaptiveWidthAppliedRows !== leases[0].rows
+    ) {
       if (mirror.lifecycle === 'ready') {
-        applyAdaptiveTmuxWidth(mirror, targetCols, reason);
+        applyAdaptiveTmuxWidth(mirror, targetCols, leases[0].rows, reason);
         scheduleMirrorLiveSync(mirror, 0);
       }
     }
@@ -1157,7 +1181,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
   function updateAdaptiveWidthLease(
     session: TerminalSession,
     mirror: SessionMirror,
-    payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' },
+    payload: { cols?: number; rows?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' },
     reason: string,
   ): { ok: true } | { ok: false; code: 'adaptive_width_cols_invalid'; message: string } {
     if (payload.widthMode !== 'adaptive-phone') {
@@ -1174,6 +1198,9 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     }
     const cols = deps.normalizeTerminalCols(payload.cols);
     session.adaptiveWidthCols = cols;
+    session.adaptiveWidthRows = typeof payload.rows === 'number' && Number.isFinite(payload.rows)
+      ? deps.normalizeTerminalRows(payload.rows)
+      : deps.normalizeTerminalRows(mirror.rows);
     session.adaptiveWidthHeartbeatAt = Date.now();
     reconcileAdaptiveWidthLeases(mirror, reason);
     return { ok: true };
@@ -1370,7 +1397,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
 
   function handleAdaptiveResize(
     session: TerminalSession,
-    payload: { cols?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' },
+    payload: { cols?: number; rows?: number; widthMode?: 'adaptive-phone' | 'mirror-fixed' },
   ): { ok: true } | { ok: false; code: 'session_not_ready' | 'adaptive_width_cols_invalid'; message: string } {
     const mirror = deps.getSessionMirror(session);
     if (!mirror) {
@@ -1404,6 +1431,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     const mirror = deps.getSessionMirror(session);
     const hadLease = Boolean(session.adaptiveWidthCols);
     session.adaptiveWidthCols = null;
+    session.adaptiveWidthRows = null;
     session.adaptiveWidthHeartbeatAt = 0;
     if (!mirror || !hadLease) {
       return;

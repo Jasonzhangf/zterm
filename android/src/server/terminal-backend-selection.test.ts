@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   resolveTerminalBackendKind,
+  resolveHerdrExecutable,
   resolveWezTermExecutable,
 } from './terminal-backend-selection';
 
@@ -17,6 +18,7 @@ describe('terminal backend selection', () => {
   it('honors explicit backend selection and rejects unknown values', () => {
     expect(resolveTerminalBackendKind({ platform: 'darwin', env: { ZTERM_TERMINAL_BACKEND: 'wezterm' } })).toBe('wezterm');
     expect(resolveTerminalBackendKind({ platform: 'win32', env: { ZTERM_TERMINAL_BACKEND: 'tmux' } })).toBe('tmux');
+    expect(resolveTerminalBackendKind({ platform: 'darwin', env: { ZTERM_TERMINAL_BACKEND: 'herdr' } })).toBe('herdr');
     expect(() => resolveTerminalBackendKind({ env: { ZTERM_TERMINAL_BACKEND: 'screen' } })).toThrow(
       'unsupported ZTERM_TERMINAL_BACKEND: screen',
     );
@@ -25,5 +27,11 @@ describe('terminal backend selection', () => {
   it('uses an explicit wezterm executable path when configured', () => {
     expect(resolveWezTermExecutable({})).toBe('wezterm.exe');
     expect(resolveWezTermExecutable({ ZTERM_WEZTERM_EXE: 'D:/tools/wezterm.exe' })).toBe('D:/tools/wezterm.exe');
+  });
+
+  it('uses the official Herdr executable without selecting it implicitly', () => {
+    expect(resolveHerdrExecutable({})).toBe('herdr');
+    expect(resolveHerdrExecutable({ ZTERM_HERDR_EXE: '/opt/herdr/bin/herdr' })).toBe('/opt/herdr/bin/herdr');
+    expect(resolveTerminalBackendKind({ platform: 'darwin', env: {} })).toBe('tmux');
   });
 });

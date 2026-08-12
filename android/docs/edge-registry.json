@@ -1782,6 +1782,11 @@
     },
     {
       "from_module": "client.app_shell",
+      "to_module": "client.daemon_connection",
+      "status": "active"
+    },
+    {
+      "from_module": "client.app_shell",
       "to_module": "client.file_browser",
       "status": "active"
     },

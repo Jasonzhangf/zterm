@@ -618,6 +618,9 @@ export function createTerminalMessageRuntime(
             cols: typeof message.payload?.cols === 'number' && Number.isFinite(message.payload.cols)
               ? message.payload.cols
               : undefined,
+            rows: typeof message.payload?.rows === 'number' && Number.isFinite(message.payload.rows)
+              ? message.payload.rows
+              : undefined,
             widthMode: message.payload?.widthMode === 'adaptive-phone' ? 'adaptive-phone' : 'mirror-fixed',
           });
           if (resizeResult && !resizeResult.ok) {

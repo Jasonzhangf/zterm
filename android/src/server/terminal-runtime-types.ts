@@ -78,6 +78,7 @@ export interface TerminalTransportSubscriber {
   mirrorKey: string | null;
   bodySubscribed?: boolean;
   adaptiveWidthCols?: number | null;
+  adaptiveWidthRows?: number | null;
   adaptiveWidthHeartbeatAt?: number;
   pendingPasteImage: PendingBinaryTransfer<PasteImageStartPayload> | null;
   pendingAttachFile: PendingBinaryTransfer<AttachFileStartPayload> | null;
@@ -141,6 +142,7 @@ export interface SessionMirror {
     rows: number;
   } | null;
   adaptiveWidthAppliedCols?: number | null;
+  adaptiveWidthAppliedRows?: number | null;
   adaptiveWidthLeaseTimer?: ReturnType<typeof setTimeout> | null;
   liveSyncTimer: ReturnType<typeof setTimeout> | null;
   subscribers: Set<string>;

@@ -763,7 +763,8 @@
       ],
       "indirect_relations": [
         "resource.tmux_session",
-        "resource.wezterm_pane"
+        "resource.wezterm_pane",
+        "resource.herdr_terminal_session"
       ],
       "via_resources": [
         "resource.backend_session"
@@ -796,14 +797,16 @@
       ],
       "direct_relations": [
         "resource.tmux_session",
-        "resource.wezterm_pane"
+        "resource.wezterm_pane",
+        "resource.herdr_terminal_session"
       ],
       "indirect_relations": [
         "resource.mirror_store"
       ],
       "via_resources": [
         "resource.tmux_session",
-        "resource.wezterm_pane"
+        "resource.wezterm_pane",
+        "resource.herdr_terminal_session"
       ],
       "forbidden_direct_relations": [
         "resource.open_tab",
@@ -883,6 +886,52 @@
       "canonical_docs": [
         "docs/resource-map.md",
         "docs/function-map.md"
+      ]
+    },
+    {
+      "resource_id": "resource.herdr_terminal_session",
+      "resource_type": "daemon_backend_truth",
+      "identity": "Official Herdr single terminal-session source identity and attachment-local frame stream",
+      "owner_feature": "daemon.herdr_backend",
+      "truth_store": "Herdr terminal session observe/control attachment and zterm-side canonicalizer",
+      "allowed_operations": [
+        "observe_single_terminal_surface",
+        "control_input",
+        "control_resize",
+        "release_attachment",
+        "reconnect_attachment",
+        "canonicalize_frame_bytes"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [
+        "resource.mirror_store"
+      ],
+      "via_resources": [
+        "resource.terminal_backend",
+        "resource.backend_session"
+      ],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.mirror_store"
+      ],
+      "required_gates": [
+        "src/server/herdr-frame-canonicalizer.test.ts",
+        "src/server/terminal-backend-selection.test.ts",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/goals/herdr-adapter-integration-plan.md",
+        "docs/resource-map.md",
+        "docs/function-map.md"
+      ],
+      "capability_gaps": [
+        "absolute range is attachment-local and comes only from the canonicalizer-owned VT scrollback buffer",
+        "Herdr terminal_id and pane_id are physical attachment identity only; the daemon backend-session workspace projection is the fixed synthetic herdr-single-session label and never carries Herdr layout identity",
+        "absolute cursor is unavailable while the host viewport is scrolled away from the canonicalizer bottom; adapter must expose an explicit cursor capability gap",
+        "official Herdr named-session rename is unsupported and must fail explicitly"
       ]
     },
     {

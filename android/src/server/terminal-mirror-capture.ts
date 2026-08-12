@@ -30,6 +30,7 @@ export interface TerminalMirrorCaptureDeps {
   buildExactTmuxPaneTarget: (sessionName: string) => string;
   logTimePrefix: () => string;
   wezTermBackend?: WezTermBackendRuntime | null;
+  terminalBackendKind?: 'tmux' | 'wezterm' | 'herdr';
 }
 
 export interface TerminalMirrorCaptureRuntime {
@@ -280,7 +281,10 @@ export function createTerminalMirrorCaptureRuntime(
       }
       return {
         paneId: String(session.paneId),
-        tmuxAvailableLineCountHint: session.rows + session.cols,
+        // Herdr does not expose a tmux history-size equivalent. Its absolute
+        // range must come from the canonical snapshot, never from a derived
+        // geometry value.
+        tmuxAvailableLineCountHint: deps.terminalBackendKind === 'herdr' ? 0 : session.rows + session.cols,
         paneRows: session.rows,
         paneCols: session.cols,
         alternateOn: false,

@@ -105,7 +105,8 @@
         "src/lib/session-attachment-fetch-runtime.ts",
         "src/lib/notification-helper.ts",
         "src/lib/session-activity-notify.ts",
-        "src/components/terminal/AttachmentDrawer.tsx"
+        "src/components/terminal/AttachmentDrawer.tsx",
+        "src/components/terminal/RenameDialog.tsx"
       ]
     },
     {
@@ -337,12 +338,13 @@
       "level": 1,
       "parent_module_id": "daemon.runtime",
       "owner_feature": "daemon.runtime_entry",
-      "responsibility": "Own backend session identity for tmux and WezTerm sources.",
+      "responsibility": "Own backend session identity for tmux, WezTerm, and official Herdr single-terminal sources.",
       "owned_resources": [
         "resource.terminal_backend",
         "resource.backend_session",
         "resource.tmux_session",
-        "resource.wezterm_pane"
+        "resource.wezterm_pane",
+        "resource.herdr_terminal_session"
       ],
       "consumed_resources": [
         "resource.daemon_process"
@@ -370,7 +372,17 @@
       "owned_paths": [
         "src/server/terminal-backend-selection.ts",
         "src/server/terminal-control-runtime.ts",
-        "src/server/wezterm-backend.ts"
+        "src/server/herdr-backend.ts",
+        "src/server/herdr-backend.test.ts",
+        "src/server/herdr-backend-runtime.ts",
+        "src/server/herdr-backend-runtime.test.ts",
+        "src/server/herdr-side-channel-truth.test.ts",
+        "src/server/herdr-process-transport.ts",
+        "src/server/herdr-process-transport.test.ts",
+        "src/server/server.herdr-selection-truth.test.ts",
+        "src/server/wezterm-backend.ts",
+        "src/server/herdr-frame-canonicalizer.ts",
+        "src/server/herdr-frame-canonicalizer.test.ts"
       ]
     },
     {
@@ -684,6 +696,7 @@
       ],
       "pending_resources": [],
       "public_interfaces": [
+        "native/android/app/src/main/java/com/zterm/android/MainActivity.java",
         "src/App.tsx",
         "src/pages/TerminalPage.tsx",
         "src/pages/ConnectionsPage.tsx"
@@ -702,16 +715,22 @@
       "required_gates": [
         "src/lib/module-registry-truth.test.ts",
         "src/lib/function-wiki-truth.test.ts",
+        "src/lib/android-task-transition-truth.test.ts",
         "src/lib/terminal-shell-skin.test.ts",
-        "src/hooks/useAppPageState.test.tsx"
+        "src/hooks/useAppPageState.test.tsx",
+        "src/lib/android-screen-orientation-truth.test.ts"
       ],
       "status": "active",
       "owned_paths": [
+        "native/android/app/src/main/java/com/zterm/android/MainActivity.java",
+        "native/android/app/src/main/res/values/styles.xml",
         "src/App.tsx",
         "src/components/terminal/SessionScheduleSheet.tsx",
         "src/components/terminal/TerminalHeader.tsx",
         "src/components/terminal/pane-android-adapter.ts",
         "src/hooks/useAppPageState.ts",
+        "src/hooks/useAttachmentNotifications.ts",
+        "src/hooks/useScreenOrientationLock.ts",
         "src/hooks/useTerminalShellActions.ts",
         "src/hooks/useTerminalWorkspace.ts",
         "src/lib/session-group-viewport.ts",
@@ -817,6 +836,7 @@
         "src/lib/home-connection-projection.ts",
         "src/lib/relay-account-directory.ts",
         "src/lib/relay-device-stream-runtime.ts",
+        "src/lib/relay-host-recent-connection.ts",
         "src/lib/traversal-relay-client.ts",
         "src/lib/traversal-relay-devices.ts",
         "src/lib/traversal-relay-diagnostics.ts",
@@ -849,7 +869,8 @@
       "public_interfaces": [
         "src/lib/session-transport-runtime.ts",
         "src/contexts/session-context-transport-open-runtime.ts",
-        "src/lib/traversal/socket.ts"
+        "src/lib/traversal/socket.ts",
+        "src/lib/network-identity.ts"
       ],
       "forbidden_resources": [
         "resource.tmux_session",
@@ -866,6 +887,7 @@
       "required_gates": [
         "src/lib/module-registry-truth.test.ts",
         "src/lib/session-transport-runtime.test.ts",
+        "src/lib/android-network-identity-truth.test.ts",
         "src/contexts/session-context-transport-runtime.test.ts",
         "src/contexts/session-context-transport-orchestration-runtime.test.ts"
       ],
@@ -884,10 +906,12 @@
         "src/hooks/useWebSocket.ts",
         "src/lib/client-control-plane-transport.ts",
         "src/lib/client-daemon-connection.ts",
+        "src/lib/network-identity.ts",
         "src/lib/session-heartbeat-store.ts",
         "src/lib/session-reconnect-store.ts",
         "src/lib/session-transport-runtime.ts",
-        "src/lib/traversal/"
+        "src/lib/traversal/",
+        "src/plugins/NetworkIdentityPlugin.ts"
       ]
     },
     {
@@ -1154,6 +1178,7 @@
         "src/components/terminal/terminal-quickbar-helpers.tsx",
         "src/components/terminal/terminal-quickbar-shell-guards.ts",
         "src/hooks/useQuickActionStorage.ts",
+        "src/hooks/useShortcutActionStorage.test.tsx",
         "src/hooks/useShortcutActionStorage.ts",
         "src/hooks/useShortcutFrequencyStorage.ts",
         "src/lib/key-sequence.ts",
@@ -1440,7 +1465,8 @@
       "owned_paths": [
         "packages/shared/src/connection/protocol.ts",
         "packages/shared/src/connection/types.ts",
-        "packages/shared/src/connection/terminal-buffer.ts"
+        "packages/shared/src/connection/terminal-buffer.ts",
+        "packages/shared/src/connection/tmux-session-name.ts"
       ]
     },
     {
@@ -1511,9 +1537,10 @@
         "src/lib/terminal-buffer-replay.ts",
         "src/lib/terminal-buffer.ts",
         "src/lib/terminal-performance-trace.ts",
+        "src/lib/terminal-shortcut-actions.ts",
         "src/lib/types.ts"
       ],
-      "owned_paths_note": "android/src/lib entries are re-export shells over @zterm/shared plus client-local extensions (SessionBufferState layered type); wire truth lives in packages/shared."
+      "owned_paths_note": "android/src/lib entries include re-export shells over @zterm/shared, client-local layered types, and the stable TerminalShortcutAction preset contract consumed by types.ts; terminal wire truth lives in packages/shared."
     },
     {
       "module_id": "shared.connection_types",

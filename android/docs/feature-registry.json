@@ -40,12 +40,17 @@
       "domain": "terminal-ui",
       "owners": [
         "src/components/terminal/TerminalQuickBar.tsx",
+        "src/hooks/useShortcutActionStorage.ts",
+        "src/lib/terminal-shortcut-actions.ts",
         "packages/shared/src/shortcuts/terminal-shortcut-composer.ts"
       ],
       "allowed_paths": [
         "src/components/terminal/TerminalQuickBar.tsx",
         "src/components/terminal/TerminalQuickBar.test.tsx",
         "src/components/terminal/terminal-quickbar-helpers.tsx",
+        "src/hooks/useShortcutActionStorage.ts",
+        "src/hooks/useShortcutActionStorage.test.tsx",
+        "src/lib/terminal-shortcut-actions.ts",
         "src/pages/TerminalPage.tsx",
         "src/pages/TerminalPageQuickBarAssembly.tsx",
         "src/pages/useTerminalPageOverlays.ts",
@@ -60,12 +65,14 @@
       ],
       "required_gates": [
         "src/components/terminal/TerminalQuickBar.test.tsx",
+        "src/hooks/useShortcutActionStorage.test.tsx",
         "../packages/shared/src/shortcuts/terminal-shortcut-composer.test.ts",
         "src/pages/TerminalPage.real-quickbar-split.test.tsx",
         "src/hooks/useTerminalWorkspace.test.tsx"
       ],
       "truth_sources": [
         "docs/ui-slices.md",
+        "docs/testing/terminal-quickbar-shortcut-order-test-design.md",
         "docs/decisions/0001-cross-platform-layout-profile.md"
       ]
     },
@@ -1316,11 +1323,16 @@
       "feature_id": "mainline_source.android",
       "owners": [
         "native/android/app/src/main/AndroidManifest.xml",
+        "native/android/app/src/main/java/com/zterm/android/MainActivity.java",
+        "native/android/app/src/main/res/values/styles.xml",
         "src/lib/terminal-shell-skin.ts",
-        "src/hooks/useAppPageState.ts"
+        "src/hooks/useAppPageState.ts",
+        "src/components/terminal/RenameDialog.tsx"
       ],
       "allowed_paths": [
         "native/android/app/src/main/AndroidManifest.xml",
+        "native/android/app/src/main/java/com/zterm/android/MainActivity.java",
+        "native/android/app/src/main/res/values/styles.xml",
         "native/android/app/src/main/assets/",
         "src/index.css",
         "src/lib/terminal-shell-skin.ts",
@@ -1336,6 +1348,8 @@
         "src/pages/terminal-page-shell-ui.tsx",
         "src/components/terminal/FileTransferSheet.tsx",
         "src/components/terminal/FileTransferSheet.test.tsx",
+        "src/components/terminal/RenameDialog.tsx",
+        "src/components/terminal/RenameDialog.test.tsx",
         "src/components/terminal/TerminalHeader.tsx",
         "src/components/terminal/TerminalQuickBar.tsx",
         "src/components/terminal/TerminalQuickBar.test.tsx",
@@ -1351,8 +1365,10 @@
       "required_gates": [
         "src/lib/feature-registry-truth.test.ts",
         "src/lib/function-wiki-truth.test.ts",
+        "src/lib/android-task-transition-truth.test.ts",
         "src/lib/terminal-shell-skin.test.ts",
-        "src/hooks/useAppPageState.test.tsx"
+        "src/hooks/useAppPageState.test.tsx",
+        "src/components/terminal/RenameDialog.test.tsx"
       ],
       "truth_sources": [
         "docs/wiki/mainline-source.md",
@@ -1624,6 +1640,82 @@
       "truth_sources": [
         "docs/decisions/2026-07-30-session-idle-stopped-notification.md",
         "docs/goals/session-idle-detection-plan.md"
+      ]
+    },
+    {
+      "feature_id": "daemon.herdr_backend",
+      "title": "Official Herdr single-session terminal adapter contract",
+      "domain": "daemon-herdr",
+      "owners": [
+        "src/server/herdr-frame-canonicalizer.ts",
+        "src/server/herdr-backend-runtime.ts",
+        "src/server/terminal-backend-selection.ts"
+      ],
+      "allowed_paths": [
+        "src/server/herdr-frame-canonicalizer.ts",
+        "src/server/herdr-frame-canonicalizer.test.ts",
+        "src/server/herdr-backend.ts",
+        "src/server/herdr-backend.test.ts",
+        "src/server/herdr-backend-runtime.ts",
+        "src/server/herdr-backend-runtime.test.ts",
+        "src/server/wezterm-backend.ts",
+        "src/server/herdr-side-channel-truth.test.ts",
+        "src/server/herdr-process-transport.ts",
+        "src/server/herdr-process-transport.test.ts",
+        "src/server/server.herdr-selection-truth.test.ts",
+        "src/server/terminal-backend-selection.ts",
+        "src/server/terminal-backend-selection.test.ts",
+        "src/server/terminal-control-runtime.ts",
+        "src/server/terminal-message-control-runtime.ts",
+        "src/server/terminal-message-runtime.ts",
+        "src/server/terminal-mirror-runtime.ts",
+        "src/server/terminal-runtime.ts",
+        "src/server/terminal-mirror-capture.ts",
+        "src/server/server.ts",
+        "docs/goals/herdr-adapter-integration-plan.md",
+        "docs/resource-registry.json",
+        "docs/resource-map.md",
+        "docs/module-registry.json",
+        "docs/edge-registry.json",
+        "docs/function-map.md",
+        "docs/feature-gates.md",
+        "docs/feature-registry.json",
+        "docs/wiki/mainline-call-map.json",
+        "docs/wiki/mainline-source.md",
+        "docs/testing/herdr-adapter-test-design.md",
+        "MEMORY.md",
+        "note.md"
+      ],
+      "forbidden_paths": [
+        "src/components/",
+        "src/pages/",
+        "src/contexts/",
+        "packages/shared/src/connection/protocol.ts",
+        "../wterm/"
+      ],
+      "required_gates": [
+        "src/server/herdr-frame-canonicalizer.test.ts",
+        "src/server/herdr-backend-runtime.test.ts",
+        "src/server/herdr-process-transport.test.ts",
+        "src/server/herdr-side-channel-truth.test.ts",
+        "src/server/terminal-backend-selection.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/function-map-resource-truth.test.ts",
+        "src/lib/mainline-resource-call-map.test.ts"
+      ],
+      "truth_sources": [
+        "docs/goals/herdr-adapter-integration-plan.md",
+        "docs/resource-registry.json",
+        "docs/module-registry.json",
+        "docs/function-map.md",
+        "docs/wiki/mainline-call-map.json"
+      ],
+      "status": "pending",
+      "capability_gaps": [
+        "absolute range is projected only from canonicalizer-owned VT scrollback; host-scroll metrics may gate viewport-relative cursor capability but never define absolute identities",
+        "official Herdr named-session rename is unsupported and must fail explicitly",
+        "Windows ConPTY and agent side-channel gates remain pending"
       ]
     },
     {

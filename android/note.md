@@ -5552,3 +5552,290 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
 - 根因：快捷键编辑器虽然是 `position: fixed; z-index: 121`，但仍挂在 `TerminalQuickBarShell(z-index: 10)` 的 stacking context 内；顶部连接/速率栏是相邻 `z-index: 15`，因此速率栏实际压在全屏编辑器之上。
 - 唯一 owner：`terminal.quickbar` / `TerminalQuickBar.tsx`。正式修复把现有编辑器 overlay portal 到 `document.body` 并设为 `z-index: 240`；不隐藏传输速率、不移动两行自定义入口、不修改 transport/renderer/daemon。
 - 真机 `0.1.3.2554` CDP：overlay parent 为 body；顶部速率栏采样点 `elementsFromPoint` 中 overlay 首项 index=0、status 首项 index=6，证明编辑器完整覆盖速率栏。Portal 内输入焦点同时纳入 QuickBar editor-focus owner，控件间切换保持 active，关闭时显式清为 false。
+
+## 2026-08-12 Android test safety incident learning
+
+- Trigger: a real-device test used `adb uninstall com.zterm.android`, then manually changed an isolated worktree `.build-meta.json` to bypass an installed-version constraint.
+- Anti-pattern: destructive app-data cleanup without export/backup evidence; treating a build/version obstacle as permission to mutate the version source; publishing an unapproved stable OTA artifact.
+- Future rule: preserve app data with `adb install -r` or in-app OTA; require Jason authorization plus a verified `zterm-config.json`/backup before any uninstall or clear-data operation; allocate versions only through `bump-build-version.mjs`; never publish Relay stable assets without explicit authorization.
+- Evidence: device reports `0.1.3.2581` with fresh WebView storage; main repo truth remains `.build-meta.json=2580`; focused fixed-canvas tests and gates are being rerun in the isolated worktree.
+
+## 2026-08-12 QuickBar 内置按键排序诊断
+
+- `terminal.quickbar` 的首次偏离在快捷键存储真源：`useShortcutActionStorage` 只保存自定义项，内置项不进入 `TerminalShortcutAction[]`；编辑器因此看不到内置项。
+- 可见投影 `buildVisibleShortcutRowActions` 再按固定 `SHORTCUT_PRESETS` 先行注入内置项，即使传入 `Enter, Esc` 的持久化顺序，输出仍从 `Esc, Bksp` 开始。正向组合顺序模型保留 `Enter, Esc`，反向恢复当前 builder 即重新固定。
+- 唯一修复方向：在 QuickBar persistence owner 将稳定 ID 的内置项物化进同一有序列表，legacy custom-only 数据只补缺失内置项；UI 统一排序，内置项仅允许移动，不开放编辑/删除。设计 `FD-20260812-QUICKBAR-BUILTIN-ORDER-01` 待 Jason 批准。
+
+## 2026-08-12 Android background connection service lifecycle slice
+
+- 首次偏离：`BackgroundService` 已存在但只负责 partial WakeLock / WebView heartbeat；`useOpenTabLifecycleEffects` 在 foreground resume 立即 stop service，导致 service 生命周期仍跟随 UI 可见性，不能作为 retained connection 的独立 lifecycle owner。
+- 正式切片：service 按 retained session count 启动/更新，前后台切换不停止；最后一个 retained session 关闭才停止。`SessionContext` 继续保持唯一 transport/message owner，页面只消费 projection。
+- 红测/验证：`useOpenTabLifecycleEffects.test.tsx` 先红后绿；定向 transport/lifecycle/power tests `172 passed`；type-check clean；完整 `build:android` 被既有 `TerminalView.test.tsx` pinch transform 失败阻断（`811` tests，`1` pre-existing failure），未形成 APK/OTA/真机证据。
+- 未完成：native `BackgroundService` 尚未真正拥有 WebSocket/mux socket；当前仍通过 WebView JS heartbeat 维持已有 transport。不能宣称“native service 已接管连接管理”完成，下一切片需先补 native service ↔ protocol transport owner 的 resource/edge registry 与真实后台断链/保活回环。
+
+## 2026-08-12 reconnect preflight audit fix
+
+- `runReconnectHostProbeAndFallback` now probes every candidate before queueing a reconnect intent, including attempt 0. When all candidates are unreachable it records explicit retry state and schedules normal backoff instead of sending a known-dead host into `TraversalSocket`.
+- A single target mux probe timeout remains diagnostic-only per `terminal.transport_lifecycle.target_transport.network_probe`; physical OPEN transport retirement remains owned by heartbeat consecutive misses, synchronous send failure, terminal socket state, or explicit network-generation owner policy.
+- Scoped reconnect/target tests: 118 passed. APK `0.1.3.2574` bundle/manifest/public Relay SHA passed; online ADB dropped before 2574 install. Marker: `reconnect preflight all candidates no known-dead socket probe timeout diagnostic-only`.
+
+## 2026-08-12 固定 Canvas 单流 + 语义输入 + RTC 错误归口
+
+- 完成 design id `FD-20260812-REMOTE-WINDOW-FIXED-CANVAS-SINGLE-STREAM-01`：
+  - daemon 端 `1920x1080` 固定 canvas，一 capture/一 WebRTC sender/一 video track/一 receiver，
+    focus 切换只更新 `layoutGeneration` 不重建连接；删除旧 `RemoteWindowDualStreamSwitch`/
+    `resource.remote_window_focus_stream` 等所有 dual-stream 资源/边/测试。
+  - client 端新增 `remote-window-semantic-input-runtime.ts`：boundary/continuous/control 三类
+    semantic event，`sequence` 单调递增，continuous 走 latest-wins 合并（按 stream/target/kind），
+    boundary 前 flush pending continuous，control 用 `input-state-snapshot` 校准，
+    所有事件带 `layoutGeneration` 给 daemon 反算。
+- receiver-runtime 加 `onConnectionFailure` 回调：peer/ICE `connectionStateChange` 归类为
+  `network/transport/ice/peer`；通过 `zterm-remote-window-connection-failure` DOM CustomEvent
+  透传到 overlay，overlay 的 `recordRemoteWindowConnectionFailure` 把分类前缀写到
+  `streamErrorMessage`，再不发「rtc connect timeout」原句给用户。
+- registry/function/mainline/test-design 全部同步删 dual-stream、加 semantic-input：
+  - `feature-registry.json`/`module-registry.json`/`resource-registry.json`/edges/wiki 切换 owner；
+  - `RemoteWindowCanvasLayout.canvas.width` 改成 number（允许测试用实际值），type-check 0 error。
+- 定向测试全绿：`RemoteWindowOverlay.test.tsx` 60 + 4 skipped、`TerminalPage.remote-window-overlay.test.tsx` 7、
+  `remote-window-receiver-runtime.test.ts` 12（含 4 个 connection failure 分类）、
+  `remote-window-semantic-input-runtime.test.ts` 17、`remote-window-overlay-runtime.test.ts` 18、
+  feature-registry gate 80/80、type-check 0 error。
+- 主仓库两个误改测试已精确反转（`RemoteWindowOverlay.test.tsx`、`remote-window-receiver-runtime.test.ts`），
+  无 checkout/reset。
+- 剩余：worktree 内 daemon release/install/service-scoped restart + ADB 真机 15t-1 验证
+  （固定 canvas 不重建连接 + semantic input 链路 + RTC 错误分类显示），
+  再走 codex-review 门禁。
+# 2026-08-12 Herdr compatibility-source experiment
+
+- Jason要求：增加playground实验；每次测试写不同note；实验结束二次评估。
+- 实验目录：`playground/herdr-compat-source-20260812/`；正式代码、registry、协议、backend均未修改；现有工作树其他dirty改动全部保留。
+- H0接口实验：clone官方`herdrdev/herdr`成功，审计revision `5600197f00e871764465d4e3d9ba5e6aa6fd9547`。确认Herdr是独立Rust runtime，拥有PTY/pane/server/client；公开`terminal session observe/control`适合作为外部source adapter。Apache-2.0；Windows通过ConPTY，当前beta。
+- H1 observer实验：设计了ANSI frame -> 隔离terminal state -> zterm canonical mirror的正反测试；本轮没有真实adapter/parser，未宣称live兼容。禁止把raw ANSI追加成mirror行，禁止partial frame推进revision。
+- H2 controller实验：设计了input/resize ownership、second-controller、release/reconnect、失败不推进mirror geometry的正反测试；依赖H1隔离adapter，未宣称live input/resize通过。
+- 二次评估：结论保持“Herdr作为兼容源可行，整体fork/替换daemon不合适”。下一批准门：新增resource/module/edge/function/mainline映射；完成playground真实observer/controller replay；再跑zterm daemon mirror close-loop；Windows单独跑ConPTY beta gate。没有这些证据，不进入正式代码。
+
+# 2026-08-12 Herdr first-stage audit
+
+- 审计报告：`playground/herdr-compat-source-20260812/first-stage-audit-report.md`。
+- 审计结论：ARCHITECTURALLY FEASIBLE, NOT IMPLEMENTATION-READY；Herdr继续作为外部terminal source测试，不整体clone、不替换zterm daemon、不伪造tmux session。
+- 源码证据补强：`src/cli.rs`存在observe/control命令；`src/client/mod.rs`存在`terminal.frame`、`terminal.input`、`terminal.resize`、`terminal.scroll`、`terminal.release`解析和输出；API边界成立。
+- zterm边界：现有`daemon.terminal_backend -> mirror_store -> transport/buffer/renderer`可承接，但Herdr resource尚未注册；生产前必须补resource/module/edge/function/mainline，禁止复用`resource.tmux_session`。
+- 关键未证：ANSI frame到canonical mirror、scrollback/absolute range、重复frame revision、malformed frame、controller input/resize/release/takeover均无live replay，H1/H2仍pending。
+- Windows：源码有Windows/ConPTY/CI/打包；官方状态仍beta，native `herdr --remote`和direct terminal attach不支持；zterm只能将其作为显式beta backend能力。
+- 构建审计：在`/tmp/herdr-audit.Q5Vl0p`执行`cargo check --locked`；Rust依赖和编译推进后，build.rs因缺少`zig`构建vendored `libghostty-vt`失败。此项是环境阻塞，不得报告为源码compile pass。
+- 阶段门禁：仓库/版本/API/边界审计通过；live observer/controller、zterm mirror close-loop、Windows ConPTY gate、registry设计均未通过；不批准正式实现。
+
+# 2026-08-12 官方安装双backend决策
+
+- Jason决策：不修改/不fork Herdr官方版本；官方安装版原样运行，同时让zterm保留tmux并增加Herdr source支持。
+- 官方安装：`curl -fsSL https://herdr.dev/install.sh | sh`成功；`/Users/fanzhang/.local/bin/herdr`，版本`0.8.0`，sha256 `d53a9f93fccfdfcc55632927bf51002f5add0aa7990bcdf508ffbd84ac658178`。
+- 官方运行态：专用session `zterm-herdr-compat-20260812`启动过；启动产生server/client进程并拉取agent manifests；本轮已按明确PID关闭，`herdr status --json`确认server `not_running`，无Herdr遗留进程。
+- zterm现状：`terminal-backend-selection.ts`只支持`tmux|wezterm`；`server.ts`、`terminal-control-runtime.ts`、`terminal-mirror-capture.ts`把非tmux路径绑定为WezTerm runtime，尚无Herdr adapter。仅安装官方Herdr不能产生zterm双backend能力。
+- 实施决策：改zterm自有backend adapter，不改Herdr；新增`herdr`为显式backend kind，tmux仍为macOS/Linux默认，Windows现有WezTerm默认保持；Herdr observer/controller控制线进入daemon backend owner，canonical mirror仍唯一由zterm mirror writer发布。
+- 当前阻塞：正式实现前需补Herdr resource/module/edge/function/mainline映射，并在playground用官方0.8.0完成observer frame、controller input/resize、生命周期正反replay；未完成前不得称zterm已支持Herdr。
+
+# 2026-08-12 Herdr tmux-parity and agent-value audit
+
+- 审计目录：`playground/herdr-capability-audit-20260812/`。
+- A线结论：官方Herdr不能从安装/API存在直接宣称100%覆盖现有tmux能力。必须由zterm adapter补齐canonical rows/cells/cursor、absolute buffer range、gap repair、revision、source identity、schedule、image transfer、adaptive/mirror-fixed等契约，并通过现有tmux黑盒等价套件。
+- A线硬缺口：Herdr公开`terminal.frame`是ANSI stream，不等于zterm canonical mirror；workspace/pane close不等于tmux session kill；Herdr没有zterm schedule执行契约；图片桥接与zterm clipboard/Ctrl+V链路也不是同一契约。
+- B线Codex：官方支持；`herdr integration install codex`提供session identity，恢复命令`codex resume <id>`，但生命周期仍是screen-manifest authority，不是Codex hook全生命周期真源。
+- B线OpenCode：官方支持；`herdr integration install opencode`，支持session identity与lifecycle plugin，active plugin可提供working/idle/blocked；恢复命令`opencode --session <id>`。
+- B线Reasonix：未找到官方Herdr integration或native restore定义；可作为普通pane运行并获得Herdr持久化/布局，状态识别最多依赖manifest；要获得语义lifecycle需custom socket integration。
+- 总结：Herdr增量价值在agent fleet协调、状态聚合、wait/prompt、restore，不在替代zterm mirror。tmux保留为100% parity reference；Herdr只有通过同一黑盒契约后才能标记parity-complete。Codex/OpenCode值得接入，Reasonix先按普通pane评估。
+
+# 2026-08-12 Herdr adapter experiment round 1
+
+- 实验目录：`playground/herdr-adapter-experiment-20260812/`；只改 playground 与本 note，未改 daemon runtime。
+- 官方 `herdr 0.8.0` server protocol `19` 可启动；命名 session 启动 API server 后没有自动 pane，直接 `pane split` 返回显式 `pane_not_found`。实验随后显式创建 workspace/tab，再创建 pane，验证 Herdr lifecycle 不是 tmux `new-session` 的同形 API。
+- Herdr snapshot 确认 pane identity（如 `w1:p3`）、terminal id、layout rect、`revision`、scroll metadata、workspace/tab 归属；这些可作为 adapter control metadata，但不能直接当 zterm mirror revision/absolute range。
+- 本轮 Herdr read 使用 `pane read --format ansi`，实验记录了 command 参数在 CLI JSON 边界上的失败（`SyntaxError`），因此 Herdr output parity、input byte parity、resize rows/cols、absolute range 均保持 `gap`，没有把 partial evidence 晋级为 PASS。
+- tmux oracle 的 create/run/read 与 pane geometry 通过；Herdr 的 list/create/lifecycle 通过部分前置，但 read/input/resize/revision contract 尚未通过。正式 adapter 暂不接入 daemon；下一轮先修正 CLI invocation/证据采集，再做 ANSI frame -> canonical mirror 正反 replay。
+
+# 2026-08-12 Herdr zterm-feature scope correction
+
+- Jason明确：不使用 Herdr 的 pane split/tab/workspace UI 能力；本项目只需要把一个 Herdr terminal surface 映射为 zterm 的一个 backend session。
+- 实验范围已收窄为 zterm 真正使用的 feature：session list/create/close/rename、单 session output/mirror、input、resize、reconnect、multi-client mirror truth、schedule、file/image chain，以及 Codex/OpenCode/Reasonix 的 agent side-channel。
+- 第二次单 session 实验只创建一个初始 terminal surface；没有调用 `pane split`，没有把 Herdr layout/tab/workspace 当作 zterm contract。Herdr server 仍要求显式初始化一个 workspace/container 才会出现初始 terminal surface，这只是官方启动前置，不进入 zterm 业务模型。
+- 实验仍发现 `pane run` 的 CLI 参数 JSON 边界问题，故 Herdr output/input/resize/revision 继续保持 `gap`，不进入正式 adapter。后续应直接针对单 session API/协议做 capture，而不是继续探索 Herdr UI 布局。
+
+# 2026-08-12 Herdr single-session contract experiment round 2
+
+- 实验纠正：`pane read` 成功时 stdout 是裸 terminal text/ANSI，不是 JSON envelope；控制命令 JSON 与 terminal payload 必须物理分离。修正后，单 session `pane read --source recent --format ansi` 能读到 `HERDR_MARKER`，ANSI read 标记 PASS。
+- 实验纠正：`pane send-text` 是 literal，不自动提交；zterm 的 `appendEnter` 必须显式映射为后续 `pane send-keys ... Enter`。修正后的 input marker 回读纳入同一实验，作为正向 input gate。
+- Herdr CLI `pane resize` 是 split ratio/layout 操作；只有一个 terminal surface 时返回 `changed:false`，不改变/不报告 zterm 所需 PTY cols/rows。不能拿它替代 zterm resize；Herdr source 中存在 `terminal.resize` 会话协议（含 cols/rows/cell size），下一步必须走该协议而非 pane CLI。
+- 当前结论：单 session output read 已通过最小 ANSI marker；input 正向 replay 已实现但完整错误/重连门禁待补；PTY geometry、absolute range/cursor、Herdr revision 到 zterm mirror revision 仍未通过。正式 adapter 继续不接入 daemon。
+
+# 2026-08-12 Herdr terminal session protocol experiment round 3
+
+- 实验转向官方 `terminal session observe/control`，不再使用 pane layout resize。`observe` 实际输出 `terminal.frame`：base64 ANSI bytes、`seq`、`full`、`width`、`height`。
+- 真实 resize 证据：controller/observer 初始 `80x24`；发送 `terminal.resize { cols: 100, rows: 30, cell_width_px: 8, cell_height_px: 16 }` 后收到 frame `width=100,height=30`。因此 Herdr terminal session protocol 可以承接 zterm PTY geometry，`pane resize` 不可以。
+- controller release 后 observer 收到 `terminal.closed reason=detached`，证明协议有显式 close/release 事件。
+- 本轮 terminal.input harness 的 JSON quoting 错误导致 control stdin 报 `invalid json command`，不能把该轮标为 input PASS；上一轮 CLI `send-text + send-keys Enter` 的单 session input replay 仍单独为 PASS。
+- adapter 候选路径锁定为 `terminal session observe/control -> decode terminal.frame -> validate seq/full/geometry -> zterm canonicalizer -> mirror_store`。`terminal.frame.seq` 暂时只能当 Herdr transport sequence，不能直接冒充 zterm mirror revision/absolute range。
+
+# 2026-08-12 Herdr terminal protocol replay round 4
+
+- 新增可重复 TypeScript runner：`playground/herdr-adapter-experiment-20260812/terminal-session-protocol-run.ts`，控制消息由 `JSON.stringify` 生成，避免 shell quoting 误报；证据：`terminal-session-protocol-evidence.json`。
+- 单 terminal session observer/controller 实验通过：initial `terminal.frame seq=1 full=true width=80 height=24`；随后收到 `seq=2 full=false`；resize 后收到 `seq=1 full=true width=100 height=30`；controller release 后收到 `terminal.closed reason=detached`；同一 `terminal_id` 重新 observer 成功收到 `seq=1 full=true`。
+- 关键结论：Herdr `terminal.frame.seq` 在 resize/reconnect 后重置，是 attachment-local render sequence，不是全局 mirror revision。adapter 必须在 accepted canonical commit 后自己生成 zterm mirror revision；禁止直接复制 Herdr seq。
+- 本轮 terminal.input marker 未在收集窗口内观察到，故 protocol input 保持 GAP；pane CLI 的 literal text + Enter 回读 PASS 不替代 terminal session control input gate。需要单独拉长 observer/controller 生命周期并验证 input ack/output marker。
+
+# 2026-08-12 Herdr terminal protocol input/delta analysis round 5
+
+- 可重复 runner 证据显示 `PROTO_INPUT_MARKER` 已进入 terminal frame 的输入回显，但在原 CR 提交字节下未观察到命令输出 marker；因此 terminal.input 写入已观察，提交/执行仍 GAP。本轮改用 LF 作为独立提交字节并延长等待，继续验证。
+- Herdr `render_stream.rs` 明确：TerminalAnsi client 使用 per-client `BlitEncoder`，`full=false` 是相对该 client 前一帧 baseline 的 ANSI patch；不是独立 snapshot。Herdr adapter 必须为每个 terminal stream 保留 baseline，并在 stream/reconnect/resize/full frame 边界重置；不能把 delta 直接当 zterm mirror patch，也不能跨 attachment 复用。
+
+# 2026-08-12 Herdr terminal protocol input/delta analysis round 6
+
+- 修正了两处实验采集器错误：frame payload 字段是 `bytes` 而不是 `data`；本轮使用项目声明的 `pnpm --dir android exec tsx`，不把执行器路径错误计入协议结论。
+- controller 独占单 session，发送 `terminal.input` text `echo PROTO_INPUT_MARKER`，随后发送 base64 `CR`；解码 `terminal.frame.bytes` 后观察到 marker，`inputMarkerObserved=true`，故 terminal session protocol 的基本 shell input/replay gate PASS。
+- 同轮保持正向证据：初始 `80x24`、resize 后 `100x30`、release 得到 `terminal.closed(detached)`、同 terminal identity reconnect 得到新的 `full=true seq=1`。
+- 反向/边界仍未通过：TUI 控制序列、bracketed paste、second-controller takeover、multi-client observer mirror 一致性、scrollback absolute range/cursor、image/file chain、schedule。Herdr frame 仍是 ANSI bytes，`full=false` 仍需 stateful parser 才能构成 zterm canonical mirror。
+
+# 2026-08-12 Herdr ANSI canonicalizer experiment round 1
+
+- 新增 playground-only `ansi-canonicalizer.ts` 与 `ansi-canonicalizer.test.ts`，验证 zterm cell contract 的最小状态模型：`char/fg/bg/flags/width`、rows/cols、cursor。
+- 正向 gate：full frame 后 delta 写入保持既有行内容；resize 后保留可见状态并限制 geometry/cursor；三项均 PASS。
+- 反向 gate：malformed/control bytes 不应推进 canonical truth；PASS。
+- 明确限制：该实验 parser 只用于验证状态边界，尚未实现真实 VT/ANSI 语义（光标移动、擦除、滚动、SGR、Unicode 宽度、scrollback）。不能把该 parser 接入 daemon，也不能据此宣称 Herdr mirror parity。
+- 下一正式实验：采用已有可靠 VT parser 或单独验证完整 VT state machine，直接重放 Herdr `terminal.frame.bytes` 的 full/delta 序列，并与 tmux oracle 做 rows/cells/cursor/revision 等价审计。
+
+# 2026-08-12 Herdr frame canonicalizer experiment round 2
+
+- 先检查现有 owner，确认 zterm 已有唯一 terminal VT 核心 `@jsonstudio/wtermmod-core` `WasmBridge`，支持 `writeRaw/resize/getCell/getCursor/getScrollbackCount/cursorKeysApp/usingAltScreen`；因此删除“另写简化 ANSI parser 作为正式路径”的方向，playground 改为复用该核心验证。
+- 新增 `herdr-frame-canonicalizer.ts`：验证 Herdr frame `bytes` base64 解码、frame geometry、stream-local seq 连续性、full/delta baseline、zterm-owned revision、cursor/cells/scrollback/alternate-screen 投影。
+- 真实 Herdr evidence replay 通过：现有 `terminal-session-protocol-evidence.json` 的 initial/resized/reconnect frames 可被 WasmBridge 重放；`80x24 -> 100x30`、reconnect 后 revision 从 1 重新开始均通过。
+- VT 语义 fixture 通过：cursor movement、SGR red、CJK/emoji width、alternate-screen round trip。
+- 反向 gate 通过：duplicate、missing seq、geometry mismatch 的 delta 均显式拒绝，不推进 canonical truth。
+- 仍不能宣称 parity：Herdr frame 没有 zterm absolute line index/available range；scrollback absolute mapping、multi-client observer truth、file/image/schedule、正式 daemon adapter 尚未验证。
+
+# 2026-08-12 Herdr canonicalizer/parity verification round 3
+
+- 架构复核确认正式承载面：`resource.terminal_backend -> resource.backend_session -> resource.mirror_store`；现有 `daemon.terminal_backend` 与 `daemon.mirror_store` 已有 owner，但 registry 当前只声明 tmux/WezTerm，Herdr 尚未成为 active backend。正式 adapter 不能绕过这条边，也不能直接复用 `resource.tmux_session`。
+- 确认 zterm 已有唯一 VT 真源 `@jsonstudio/wtermmod-core` `WasmBridge`，因此 Herdr frame canonicalizer 复用 `writeRaw/getCell/getCursor/getScrollbackCount/usingAltScreen`，不维护第二套简化 parser。
+- Herdr 真实 frame replay：`realHerdrReplay=pass`、`vtSemanticCoverage=pass`、`reverseSequenceGates=pass`；覆盖 full/delta、resize、reconnect、cursor movement、SGR、CJK/emoji width、alternate screen、duplicate/missing/geometry-mismatch reject。
+- tmux parity oracle：`terminal-backend-selection + mirror-line-canonicalizer + terminal-mirror-capture + terminal-mirror-runtime + server.mirror-capture-truth` 共 63 tests PASS；真实 `daemon:mirror:close-loop` 的 codex-live/top-live/vim-live/initial-sync/local-input/long-input/external-input/restart-recover/schedule 与 replay strict audit 全部 PASS。
+- 二次阶段判断：Herdr terminal session 的 input/resize/release/reconnect/ANSI VT 重放已具备 adapter 基础，但 zterm 的 absolute scrollback/range/cursor truth 仍不能从公开 `terminal.frame` 直接证明；正式 adapter 仍不接入，需先做 capability decision：Herdr source 若不能提供稳定 absolute range，只能显式标记 backend capability gap，不能伪造 tmux parity。
+
+# 2026-08-12 Herdr scroll capability experiment round 4
+
+- 通过官方 terminal session control 发送 `terminal.scroll { direction: "up", lines: 1, source: "wheel" }`。
+- 在受控窗口内没有观察到带新 sequence 的 `terminal.frame`；因此只记录 command sent，不把 scroll 标为 PASS。
+- 这进一步确认 Herdr `terminal.frame` 当前不能证明 zterm 所需 absolute scrollback/range。重复或相同 seq 的 full frame 也不能推进 zterm revision；adapter 必须按 attachment sequence/内容去重并显式拒绝无法连续重放的 delta。
+- 正式 adapter 进入条件新增：必须拿到稳定 scrollback positive replay，或在 capability contract 中明确 Herdr backend 不支持 absolute scrollback，并由上层显式暴露 gap；禁止伪造 tmux 的 absolute indexes。
+# 2026-08-12 Herdr official backend integration gate audit
+
+- 按 `docs/goals/herdr-adapter-integration-plan.md` 读取 architecture、resource/module/function/mainline/verification map；当前正式 backend owner 只声明 `tmux` 与 `WezTerm`，没有 active Herdr resource/edge/feature binding。正式代码不能直接复用 `resource.tmux_session`，也不能把 Herdr workspace/pane/layout truth写入 daemon。
+- 真实 Herdr 0.8.0 replay 已通过：`playground/herdr-adapter-experiment-20260812/herdr-frame-canonicalizer.test.ts` 输出 `realHerdrReplay=pass`、`vtSemanticCoverage=pass`、`reverseSequenceGates=pass`；覆盖真实 full/delta bytes、cursor movement、SGR、CJK/emoji width、alternate screen、duplicate/missing/geometry mismatch reject。
+- 真实 terminal session protocol runner 已观察 initial full frame、delta frame、resize 后 geometry/full frame、release `terminal.closed(detached)`、同 terminal identity reconnect、input marker；`terminal.frame.seq` 在 resize/reconnect 重置，只能是 attachment-local metadata。
+- 硬阻塞：`terminal.frame` 没有 zterm 所需 absolute scrollback/range；受控 `terminal.scroll` command 未在观察窗口产生可验证新 frame。当前不能推导 `bufferStartIndex/endIndex`、cursor absolute row 或 parity revision；禁止正式 adapter 伪造或把 Herdr seq 复制为 zterm revision。
+- 未闭环能力：官方 Herdr multi-client observer/controller mirror 一致性、duplicate/reorder/missing frame 在线行为、正式 daemon mirror close-loop、Codex/OpenCode/Reasonix side-channel 审计、Windows ConPTY 真实 gate。现有实验结论只允许 adapter design/playground evidence，不允许宣称 backend complete。
+- 唯一安全下一步：先取得官方 Herdr 稳定 absolute range/scrollback/cursor contract（或明确产品层接受 `absolute-range=unsupported` 的 beta capability contract），再补 active resource/module/edge/function/mainline/verification entries；在此之前不写正式 runtime backend。
+# 2026-08-12 Herdr formal adapter owner round 2
+
+- `daemon.herdr_backend` 已加入 resource/module/feature/function/verification binding，状态保持 `pending`；owner 仅在 daemon backend surface，不进入 client/UI/shared payload，不存 Herdr workspace/layout truth。
+- 新增正式 `herdr-frame-canonicalizer.ts`：唯一复用 `@jsonstudio/wtermmod-core` WasmBridge，full/delta exact sequence、geometry、malformed bytes reject；zterm revision 独立递增，reconnect 只 reset attachment baseline；Herdr viewport cursor保留 `localCursor`，mirror `cursor` 与 `absoluteRange` 保持 null，显式 gap `absolute-range-unavailable`。
+- 新增 typed `herdr-backend.ts` 与官方 CLI JSONL `herdr-process-transport.ts`：input/resize/release/reconnect 只走 typed control message；source frame/closed/error 走 typed source side-channel；多 adapter 实例各自持有 baseline，不共享状态。
+- playground canonicalizer 已改为导入正式 owner，真实 Herdr frame replay 仍输出 `realHerdrReplay=pass`、`vtSemanticCoverage=pass`、`reverseSequenceGates=pass`；formal adapter 14 tests、tsc、registry/module/function/mainline gates 全绿。
+- 现有 daemon server 尚未接入 Herdr process runtime；`ZTERM_TERMINAL_BACKEND=herdr` 当前明确 fail-fast，禁止误落 tmux。下一修改点是抽象 daemon backend runtime 的通用 capture/input/lifecycle interface，并在 Herdr absolute-range capability 未满足时显式拒绝 mirror attach，不得伪造范围。
+
+# 2026-08-12 Herdr schema/range gate round 3
+
+- 读取官方 `herdr api schema --json` 与 CLI help：`terminal.frame` 只暴露 attachment-local `seq/full/width/height/bytes`；schema 未发现 terminal frame 的 absolute line index、available range 或 absolute cursor row。
+- 官方 pane scroll 信息只提供 `offset_from_bottom/max_offset_from_bottom/viewport_rows`，不能推出稳定的 zterm `bufferStartIndex/endIndex`，也不能把 viewport cursor 转换成 absolute row。
+- 因此 Herdr adapter 保持 `absoluteRange=null` 与 `cursor=null`，只导出 WasmBridge canonical rows/local cursor；daemon 选择 Herdr 时仍 fail-fast，不能绕过 mirror contract 或把本地序号伪造成 absolute range。
+- 进一步读取官方 Herdr `src/server/render_stream.rs` 与 `src/protocol/wire.rs`：`ClientRenderState::TerminalAnsi` 只保存 per-client `BlitEncoder + seq`；实际 `TerminalFrame` wire 只有 `seq/width/height/full/bytes`。`FrameData` semantic 模式虽有 cells/cursor，但不是 `terminal session` bytes 协议，且同样没有 absolute line identity。该源码证据锁定 range 缺口属于官方 source contract。
+- 正式 canonicalizer 反向门禁修正：首帧 `full=false`、同 geometry duplicate full、geometry 变化但非 `full=true,seq=1` 均拒绝且不推进 zterm revision；15 个 Herdr 定向测试与 tsc 通过。
+- 长输出真实 scroll probe：生成 80 行后 `pane get.scroll` 在底部为 `{max_offset_from_bottom:61, offset_from_bottom:0, viewport_rows:24}`；发送 `terminal.scroll up 1` 后收到 1 个新 frame，metrics 变为 `{max_offset_from_bottom:54, offset_from_bottom:1, viewport_rows:30}`（resize 同轮从 24 行改为 30 行）。这证明 scroll command/frame 路径可用，但 `max_offset + viewport_rows` 随 viewport geometry 变化为 85→84，仍是 host viewport 指标，不是稳定 absolute line identity；不能直接写入 zterm `bufferStartIndex`。
+- 多客户端真实 replay：controller 与独立 read-only observer 同时订阅同一 terminal；在相同 80x24、底部 viewport，两个独立 canonicalizer 的 rows digest 相等（`atBottomCellsEqual=true`），两边各自 seq 从 1 开始且 frame count 可不同；resize/scroll 后 observer 保持自身 80x24 viewport，controller 变为 100x30，不能比较为同一可见窗口。正式 adapter 必须按 attachment 独立维护 baseline，不把 observer viewport 状态写入 daemon truth。
+- 正式 canonicalizer 增加条件 range contract：frame 携带 geometry-matching 的 `maxOffsetFromBottom/offsetFromBottom/viewportRows` 时，以 `max+offset+viewportRows` 建立 host-scroll-derived available end；跨 frame 不能回退，bottom 时才把 local cursor 转为 absolute row；无 metrics 或 regression 保持 explicit gap/error，失败不推进 revision。新增正反测试后 Herdr 定向总数 59 PASS。
+
+# 2026-08-12 Herdr runtime wiring round 5
+
+- 官方输入源码确认 `ClientMessage::Input { data: Vec<u8> }`；Herdr terminal session JSONL 实际同时接受 `terminal.input.text` 与 base64 `terminal.input.bytes`。正式 typed adapter 增加 `inputText`，真实 formal process probe 已通过 input marker、resize、release/closed，证据 `formal-process-transport-evidence.json`。
+- `pane get` 与 frame stream 存在 geometry 竞态；transport 不再丢弃 frame 或伪造 seq gap，metrics 不匹配时保留原 frame，由 canonicalizer 输出 `absolute-range-unavailable` capability gap。
+- daemon 已接入 `herdr-backend-runtime.ts`，server 在 `ZTERM_TERMINAL_BACKEND=herdr` 下启动并 `/health` 返回 `ok:true`；当前仍未完成 Android session 黑盒 mirror close-loop、side-channel 审计与 Windows ConPTY gate，不能宣称整体完成或 Windows 支持。
+
+# 2026-08-12 Herdr runtime wiring round 6
+
+- 真实 daemon close-loop：Herdr backend create/initial buffer-sync/input/resize/release/reconnect/close 全链路通过；restart 后依靠官方 session/pane discovery 恢复同一命名 server，验证 detached server 与 zterm revision truth 分离。
+- 代码修正：server glue 改为 `TERMINAL_BACKEND_RUNTIME`；Herdr 的 mirror capture 不使用 `rows + cols` 作为 tmux history/absolute-range 提示；rename 明确 unsupported。
+- Windows 远程检查：WezTerm direct snapshot/input 通过；daemon protocol smoke 在 targeted cleanup 阶段只收到 `error`，health 显示实际 session 已清零。ConPTY 与 Windows daemon close-list gate 仍 gap，不能标记 Windows PASS。
+
+# 2026-08-12 Herdr completion audit round 7
+
+- `herdr integration status` 显示 Codex/OpenCode 均未安装；Reasonix 没有官方 Herdr integration surface。静态 terminal payload side-channel gate PASS，但外部 operational agent audit 仍是未配置/未证明。
+- Windows smoke 已输出完整错误：远端 daemon 仍是旧 WezTerm→tmux close 路径；health 清零不等于 close-list control 收口，Windows 继续 beta/gap。
+- Codex review 对混合未提交工作树返回 ambiguous verdict，并只给出其他 Android 并行改动的 P2；不能当作本 Herdr patch 的 PASS。
+- reconnect range 修复后的 17 个 Herdr 定向测试、tsc、Vite 通过；本轮完整 build 被无关 `FileTransferSheet` native stat `EIO` 测试失败阻断，保留为全局 build gap。
+- 单独重跑 native-stat 测试后通过；完整 `pnpm run build` 再跑全绿，确认上一轮是非稳定时序失败，不再作为当前 build gap。
+
+# 2026-08-12 Herdr completion audit round 8
+
+- 修复 review P1：source `terminal.closed` 后 adapter release 幂等；named-session restart discovery 多 pane 无 identity 显式失败，不再静默选 `panes[0]`。
+- 20 个 Herdr 定向测试、tsc、diff check、完整 `pnpm run build` 全绿；release/install runtime SHA256 对齐。安装脚本的 Screen Recording preflight 仍因现有 TCC 状态退出，未执行 TCC reset。
+- 隔离 `39091` 以安装后的同一 `server.cjs` 显式选择 Herdr，真实 close-loop 输出：`80x24 rev1`、input `rev3`、resize `100x30 rev4`、reconnect `rev4`、close 后 session list 空。之前 launchd 默认端口的 resize timeout 证据归因于命中了 tmux，不计入 Herdr 失败。
+- 二次评估结论不变：tmux 是 parity oracle；Herdr 只提供单 session surface；Codex/OpenCode/Reasonix operational integration 未配置/未证明；Windows ConPTY/close-list gate 为 beta/gap，不能宣称 Windows 通过。
+
+# 2026-08-12 Herdr review P1 remediation round 9
+
+- review 发现 fixed-mode resize 越过 geometry owner；正式修复为 mirror-fixed 不 resize backend，adaptive-phone 才由 adaptive lease owner 调 backend-specific resize。
+- Herdr/WezTerm adaptive apply/release 已与 tmux resize 分流；最新安装 runtime 真实 Herdr close-loop 通过 `rev1 -> input rev3 -> resize 100x30 rev4 -> reconnect rev4 -> close removed`。
+- Herdr named-session 创建阶段增加 scroll capability/初始 rows 前置检查；缺失能力显式清理失败，不发布伪造 absolute range。
+
+# 2026-08-12 Herdr absolute-range boundary round 10
+
+- Review 结论确认 host scroll offsets 不能证明 zterm absolute line identity；已删除 Herdr offset 到 absolute range/cursor 的伪造映射，保留显式 `absolute-range-unavailable` gap。
+- adaptive lease 增加 applied rows 比较，修复同 cols 仅 rows 变化时跳过 backend resize。
+- 当前实现不能宣称 Herdr 100% tmux parity；transport close-loop 通过，但 absolute range/visible-history repair 仍是官方 Herdr 能力缺口。
+
+# 2026-08-12 Herdr canonical scrollback round 11
+
+- 发现 `@jsonstudio/wtermmod-core` 自带 VT scrollback API；正式 canonicalizer 改为从 bridge scrollback + visible grid 生成 attachment-local absolute range，host pane offsets 仅用于判断 viewport-relative cursor capability。
+- 新增 10th canonicalizer test 覆盖滚屏后 scrollback rows、absolute range 和 canonical buffer 投影；formal backend/mirror/transport 定向 55 tests 与 tsc 通过。
+- 完整 build/release/install/restart/real Herdr close-loop 通过：rev1→rev3→resize rev4→reconnect rev5→close removal；Windows 仍 beta/gap，agent external integrations 仍未配置/未证明。
+
+# 2026-08-12 Herdr final gate reassessment round 12
+
+- 重新执行 Windows 真实远端 WezTerm snapshot/input smoke：通过；daemon protocol smoke 仍在 targeted cleanup 等待 `sessions` close-list 时超时，health 最终显示 `sessions.total=0`，因此 Windows ConPTY/daemon gate 仍只能标 beta/gap。
+- 最新正式 Herdr 定向门禁 `herdr-frame-canonicalizer`、backend、process transport、side-channel、selection、transport lifecycle 共 6 files / 42 tests，`tsc --noEmit` 与 `git diff --check` 全绿；安装 launchd runtime health 仍为 `ok:true`。
+- parity 审计矩阵已修正：canonicalizer-owned VT scrollback absolute range 不再被记录为“尚未实现”，但完整 tmux black-box rows/cells/cursor/geometry/revision parity、range repair、Windows close-list、Codex/OpenCode/Reasonix operational audit 仍未通过，功能 registry 保持 `status: pending`。
+- 最新 Codex review 仍因混合工作树中与 Herdr 无关的 Android P1/P2 findings 失败；Herdr 专项未出现 review finding，但没有语义 `PASS`，不能作为交付门禁通过。
+- 新增并运行同样本 parity probe：同一 ANSI/VT 样本分别进入 tmux 与官方 Herdr，tmux `capture-pane -e` 先按 row-snapshot 语义恢复 CRLF，再复用正式 canonicalizer；rows、wide-cell shape、geometry、cursor 全部相等，revision 保持独立 namespace。证据：`playground/herdr-adapter-experiment-20260812/tmux-herdr-canonical-parity-evidence.json`。
+- parity 样本已扩展为 SGR、CJK/emoji width、erase-to-end-of-line、scroll、alternate-screen enter/leave、OSC title、kitty graphics；tmux/Herdr 全部 canonical rows、cell shape、80x24 geometry、cursor 对齐，probe exit 0。tmux 快照末尾 sentinel row 与 LF 语义均在实验 owner 内显式归一化。
+- 使用当前 `/Users/fanzhang/.zterm/daemon-runtime/server.cjs`、隔离端口 `39094`、显式 Herdr backend 重跑 daemon close-loop：initial rev1、input rev3、adaptive resize rev4 `100x30`、reconnect rev5、close removal true；本轮安装 runtime 与源码行为保持一致。
+- 正式 canonicalizer test owner 新增综合 VT fixture 与 wrap delta 反向边界，测试数 10→12；SGR/erase/scrollback/alternate-screen/OSC/kitty/wide-cell/cursor 语义不再只由 playground 覆盖。
+- 完整 `pnpm run build` 本轮全绿：prebuild 83 tests、Gradle、terminal contract 814 tests、common flows 91 tests、relay smoke/account/workspace gates、type-check、Vite；最新 oauth Codex review 仍 fail，但唯一 finding 是无关 `RemoteWindowOverlay` 删除样式的 P1 与 attachment notification race P2，Herdr 专项无 finding。
+- 新增 `herdr-backend-runtime.test.ts`，锁住 canonical snapshot 到通用 `WezTermMirrorSnapshot` 的 range/cursor/geometry/zterm revision 投影，以及缺失 absolute range 时显式拒绝；Herdr runtime/registry 专项 25 tests 通过。随后全局 tsc 被当前并行 `TerminalView.tsx` 未定义 ref/setter 错误阻断，不能把本轮新 runtime helper 宣称已安装；不修改无关 UI 文件。
+# 2026-08-12 current-worktree performance audit
+
+- Read-only audit against current dirty worktree; no product code changed. Worktree has 141 changed/untracked paths and tracked diff is +3568/-1043, so findings are against current source, not attributable to one commit.
+- Focused performance gates passed: 6 files / 46 tests; type-check; feature/resource/module/edge/import gates 83 tests; inactive-body real daemon probe passed with 100% inactive body reduction, no transport recreation, final revision preserved.
+- Live daemon evidence: RSS about 305 MB, 12 ready mirrors. `/debug/runtime` trace reached bounded 5000 records, but all 808 summarized samples had null capture-to-render, send-to-rx, and rx-to-render; client debug entries were 0. End-to-end latency SLA is therefore not currently measurable online.
+- Confirmed hotspots: mirror capture performs async tmux metrics + cursor + full `capture-pane` + canonicalization each active flush and authoritative-replaces the cached window; live trace samples reached 3000 lines and 822004 bytes. Client render path compares/clones rows in `session-render-gate` and then compares/clones again in `session-render-buffer-store`, creating repeated O(lines*cells) work and allocations.
+
+# 2026-08-12 performance repair continuation
+
+- MemoryPalace search confirmed the performance plan order: production metadata-only trace first, then only implement renderer optimization after current-version trace crosses the documented threshold. No payload trimming, live-tail fallback, or second mirror truth is allowed.
+- Render owner change remains limited to `session-render-gate.ts` -> `session-render-buffer-store.ts`: the gate performs row equality/reuse and owns the immutable projected snapshot; the store accepts `immutableProjection` only for that handoff, skips the second full-window equality/deep clone, and keeps normal callers cloned. Existing positive/negative tests cover both paths and post-publish source mutation isolation.
+- Trace owner change remains limited to `packages/shared/src/terminal/performance-trace.ts`: bounded metadata ring eviction is O(1), with snapshot ordering and payload-key rejection preserved. Dedicated trace/HTTP tests pass 8/8.
+- Verification completed in this continuation: focused performance suite 54/54, trace/HTTP suite 8/8, Android TypeScript no-emit pass, `git diff --check` pass, feature/registry gate 83/83, and real `daemon:mirror:close-loop` pass for codex-live, top-live, vim-live, initial-sync, input, long-input, external-input, daemon-restart, and schedule cases. Replay strict audit reported no source/client mismatches.
+- Authenticated live daemon snapshot after the close-loop showed `ok=true`, installed daemon PID `1762`, 12 ready mirrors, 0 active subscribers after test cleanup, 1790 bounded trace records, 0 client debug entries, and 0 completed capture-to-render/send-to-rx/rx-to-render samples. Therefore online end-to-end latency remains unmeasurable; this is an observability gap, not evidence for a further capture algorithm patch.
+- No further daemon capture change is justified by the current evidence. The authoritative terminal payload remains complete and the renderer optimization is the only confirmed runtime cost reduction in this continuation.
+2026-08-12 Herdr runtime projection close-loop final evidence: the explicitly installed `ZTERM_TERMINAL_BACKEND=herdr` daemon runtime was started on port 39095 and replayed `playground/herdr-adapter-experiment-20260812/daemon-herdr-close-loop.ts`. Evidence records connected=true, inputRevision=3, resizeRevision=4 with geometry 100x30, reconnected=true, reconnectRevision=5, and closeRemovedSession=true. The generated release runtime and `/Users/fanzhang/.zterm/daemon-runtime/server.cjs` have identical SHA-256 `9d38c0ce0c7eb3d89ca59c33eb2f4bb59745924b`. Herdr-specific tests remain 25/25 passing; registry/resource/map tests are 43/43 passing; `git diff --check` is clean. The full Android typecheck remains blocked by unrelated pre-existing dirty `android/src/components/TerminalView.tsx` undefined refs/setters; no UI file was changed for this task. The macOS install-service command still exits at the existing Screen Recording preflight (`could not create image from display`), without any TCC reset. Windows remains explicitly beta/gap because the remote daemon close-list cleanup timeout gate is not green.
+2026-08-12 Herdr projection correction: the shared `WezTermMirrorSnapshot` contract now exposes `cursorKeysApp: boolean` instead of a false-only type, and `mapHerdrCanonicalSnapshot` preserves the canonicalizer's parsed cursor-key mode. The projection fixture now asserts true propagation; Herdr/runtime/registry gates pass 69/69 and `tsc --noEmit` passes. A full `pnpm run build` reached the terminal contract suite but failed two unrelated dirty-worktree `SessionContext.ws-refresh.test.tsx` reconnect timing assertions (812 passed, 2 failed); no reconnect/UI source was changed. Release preparation and install copy completed; release and installed runtime SHA-256 match `0b858d4e87ff3f41d1cde8618e3fea87daf24226`. launchd restarted and health returned ok=true. Explicit installed Herdr close-loop on port 39096 passed connected, input rev3, resize rev4 100x30, reconnect rev5, closeRemovedSession=true. Install-service still exits only at existing Screen Recording preflight.
+2026-08-12 Herdr build recheck: the previously failing `SessionContext.ws-refresh.test.tsx` suite passed standalone 138/138 on rerun, confirming the two failures during the first full build were timing-flaky unrelated worktree assertions. A second complete `pnpm run build` passed: feature gates 83, terminal shell/theme 181 plus shared 6, file-transfer 82, Gradle 134 tasks, transport lifecycle 62, terminal contracts 814, common flows 91, relay smoke/account gates 38+runtime smoke, workspace panes 48, TypeScript, and Vite production build. The new Herdr projection remains covered by the earlier 69 targeted/map tests and tsc. Codex review task `20260812T185122Z-review-69429-dh9pz8` returned FAIL solely for unrelated `RemoteWindowOverlay` composite styles and `useAttachmentNotifications` in-flight polling; Herdr files had no findings. No unrelated files were modified.
+2026-08-12 Herdr single-surface boundary correction: formal runtime no longer projects `pane_id` prefix into shared backend `workspace`. It now uses exported synthetic label `herdr-single-session`; Herdr `terminal_id/pane_id` remain physical attachment identity only. Resource/function docs and registry updated. Targeted boundary/runtime gates 67/67, TypeScript, diff check, and full `pnpm run build` pass. Release/install copy hash `045e05de960f5710dd73cd4da9c0a9015a5d60c9` matches installed runtime. Launchd health is ok; explicit installed Herdr close-loop on port 39097 passes connected, input rev3, resize rev4 100x30, reconnect rev5, closeRemovedSession=true. Install-service still exits at existing Screen Recording preflight.
+2026-08-12 tmux parity review remediation: Codex review identified `server.ts` always passing a truthy `resizeBackendSession` wrapper even when tmux backend is selected, causing adaptive tmux resize/release to no-op. Fixed dependency wiring to pass the callback only when selected backend exposes `resizeSession`; tmux path now remains the unique `resize-window` owner, while Herdr/WezTerm use backend resize. Targeted mirror/transport/detached/session and Herdr/registry gates pass 113/113; full build passes. Release/install hash `76c30d2e4e8c07d5ed36e52f10b792c8d4b1ab3c` matches installed runtime. Launchd wrapper syntax now validates and daemon health recovers; explicit installed Herdr close-loop on port 39098 passes input rev3, resize rev4 100x30, reconnect rev5, close removal.
+2026-08-12 final review after tmux remediation: task `20260812T191015Z-review-2993-mtkh7x` returned FAIL for unrelated parallel changes: Android `NetworkIdentityPlugin` missing `ACCESS_NETWORK_STATE` manifest permission (P1) and attachment notification polling race (P2); selected broader run also hit unrelated RemoteWindowOverlay failures/segfault. Herdr and tmux findings absent. Do not modify unrelated files. Herdr runtime remains build/release/installed close-loop green.
+2026-08-12 side-channel/Windows re-audit: `herdr integration status` explicitly reports Codex and OpenCode not installed; no Reasonix official Herdr integration surface is present. Static Herdr payload/control isolation test remains green. A Windows smoke invocation without the remote daemon auth token timed out before session ticket, so it is not valid new evidence; retain prior real Windows result: direct WezTerm snapshot/input passed, daemon targeted cleanup close-list gate failed, status beta/gap.
+2026-08-12 evidence hygiene: playground Herdr canonicalizer evidence and README still described formal adapter/daemon integration as unimplemented. Updated them to distinguish playground ownership from formal runtime, record current explicit Windows beta/gap and external agent integration gaps, and classify file/image/schedule as out-of-scope terminal-surface contracts. JSON parse, Herdr/registry 37-test subset, and diff check pass.
+2026-08-12 Herdr explicit-discovery error boundary: `herdr-backend-runtime.resolve()` previously swallowed official `session list` / `pane list` discovery errors and converted them to generic `session not found`, violating the no-fallback and explicit-failure contract. The unique Herdr runtime owner now preserves the external discovery error; six Herdr files / 27 focused tests, TypeScript, and diff check pass.
+2026-08-12 Herdr runtime reinstallation after discovery fix: full `pnpm run build` passed all registry/UI/transport/terminal/relay/workspace gates, Gradle, type-check, and Vite. Correct scripts were `pnpm --dir android run daemon:prepare-release` and `pnpm --dir android run daemon:install-service`; service health is running with `active_count=1`, and release/installed `server.cjs` SHA256 is `064d09ea7a572bb2014cb46c1cae5118f160d938e1331b65a4c4abffa4773eb4`. Explicit installed Herdr daemon on port 39099 passed input revision 2, adaptive resize revision 3 at 100x30, reconnect revision 4, and close removal true; isolated daemon was stopped explicitly after the probe.
+2026-08-12 Herdr mirror-window audit: formal projection previously published the entire canonicalizer scrollback, unlike the bounded WezTerm/tmux mirror cache. Added `maxMirrorLines` to the Herdr runtime, wired it from `DAEMON_CONFIG.terminalCacheLines`, and trimmed only at the single Herdr-to-mirror edge while preserving absolute `bufferStartIndex` and cursor/revision truth. Projection/capture/Herdr gates now pass 39 tests; full build passed. Reinstalled runtime hash is `44f8e2b8399743070c63f49a8c501453d4feee7ae2192398d509bc4ca416f719`; installed explicit Herdr close-loop on port 39100 passed input rev3, resize rev4 `100x30`, reconnect rev5, and close removal.
+2026-08-12 final review after Herdr mirror-window fix: task `20260812T193157Z-review-2993-um44u0` remains FAIL only on unrelated parallel owners: Android network-state manifest permission P1, floating RemoteWindowOverlay fill geometry P1, and attachment notification in-flight race P2. No Herdr finding; review is not a semantic PASS.
+2026-08-12 post-window parity replay: after the bounded Herdr mirror projection change, the same tmux/official-Herdr ANSI sample still passes rows, geometry, wide-cell shape, and cursor equality; tmux and Herdr canonical revisions remain separate namespaces.
+2026-08-12 Herdr projection invariant hardening: `mapHerdrCanonicalSnapshot()` now rejects malformed absolute ranges whose body length does not match `[startIndex,endIndex)`, and rejects bounded projections that would drop the canonical absolute cursor. Herdr focused gates pass 30 tests, TypeScript, and diff check; full build, release/install, hash match `c015049a0bd0e867794ee14541e9773bbfab958375eea77459854c73ccb7261e`, and installed close-loop on port 39101 pass.
+2026-08-12 final review after Herdr invariant hardening: task `20260812T193958Z-review-2993-51hjmk` is FAIL on four unrelated parallel worktree findings: RemoteWindowOverlay fullscreen crop P1, removed composite styles P1, Android network permission P1, and attachment notification in-flight race P2. No Herdr finding; no semantic PASS.
+2026-08-12 final review after runtime reinstallation: Codex review task `20260812T192420Z-review-2993-b5jnk0` is FAIL on three unrelated parallel worktree findings: `RemoteWindowOverlay.tsx` fill-mode crop/input geometry P1, Android network-state manifest permission P1, and `useAttachmentNotifications.ts` in-flight race P2. No Herdr finding; do not modify those parallel owners without authorization and do not treat the review as PASS.
