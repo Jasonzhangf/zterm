@@ -326,7 +326,7 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
           }
         }
       } catch (error) {
-        closeError ||= error;
+        if (!waitForHerdrProcessExit(session.serverProcess, 100)) closeError ||= error;
       }
     }
     if (!cliStopSucceeded && (!session.serverProcess || !serverProcessStopped)) closeError ||= cliStopError;
