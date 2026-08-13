@@ -266,6 +266,21 @@ export function useSessionContextLifecycle(options: {
       ? Number(options.foregroundResumeEpoch)
       : null,
   );
+  const cleanupSocketRef = useRef(options.cleanupSocket);
+  const cleanupControlSocketRef = useRef(options.cleanupControlSocket);
+  const clearSessionHandshakeTimeoutRef = useRef(options.clearSessionHandshakeTimeout);
+
+  useEffect(() => {
+    cleanupSocketRef.current = options.cleanupSocket;
+  }, [options.cleanupSocket]);
+
+  useEffect(() => {
+    cleanupControlSocketRef.current = options.cleanupControlSocket;
+  }, [options.cleanupControlSocket]);
+
+  useEffect(() => {
+    clearSessionHandshakeTimeoutRef.current = options.clearSessionHandshakeTimeout;
+  }, [options.clearSessionHandshakeTimeout]);
 
   useEffect(() => {
     const nextForegroundActive = options.appForegroundActive !== false;
@@ -549,13 +564,13 @@ export function useSessionContextLifecycle(options: {
     );
     options.refs.heartbeatStore.clearAllPingIntervals();
     for (const sessionId of options.refs.handshakeTimeoutsRef.current.keys()) {
-      options.clearSessionHandshakeTimeout(sessionId);
+      clearSessionHandshakeTimeoutRef.current(sessionId);
     }
     options.refs.reconnectStore.clearAllReconnectRuntimes();
     for (const session of options.refs.stateRef.current.sessions) {
       options.refs.reconnectStore.markManualClosed(session.id);
-      options.cleanupSocket(session.id, true);
-      options.cleanupControlSocket(session.id, true);
+      cleanupSocketRef.current(session.id, true);
+      cleanupControlSocketRef.current(session.id, true);
     }
-  }, [options.cleanupControlSocket, options.cleanupSocket, options.clearSessionHandshakeTimeout]);
+  }, []);
 }
