@@ -8,6 +8,7 @@ import {
   buildTerminalViewportDemand,
   buildTerminalViewportDemandWithRepair,
   buildTerminalViewportDemandKey,
+  resolveTerminalRenderDemandFromScroll,
   clearTerminalRecentViewportLayoutChange,
   computeFollowRealignAfterBufferShift,
   flushTerminalFollowScrollSync,
@@ -85,23 +86,50 @@ describe('shared terminal renderer pure helpers', () => {
     expect(buildTerminalViewportDemandKey(demand)).toBe('reading:132:12');
   });
 
-  it('builds viewport demand with visible repair ranges from renderer-owned gap truth', () => {
-    const demand = buildTerminalViewportDemandWithRepair({
-      nextMode: 'reading',
-      nextRenderBottomIndex: 170,
-      viewportRows: 24,
+  it('uses the scaled renderer viewport rows for scroll demand and visible gap repair', () => {
+    const viewportRows = 24;
+    const zoomedRenderViewportRows = 48;
+    const frame = buildTerminalRenderFrame({
+      bufferStartIndex: 100,
+      effectiveBufferEndIndex: 220,
+      bufferLinesLength: 120,
+      viewportRows: zoomedRenderViewportRows,
+      scrollViewportRows: viewportRows,
+      rowHeightPx: 17,
+      renderBottomIndex: 172,
+      followDemandAnchorEndIndex: 220,
+      readingMode: true,
+      overscanRows: 4,
+    });
+    const demand = resolveTerminalRenderDemandFromScroll({
+      nextScrollTop: 408,
+      maxScrollTop: frame.maxScrollTop,
+      rowHeightPx: 17,
+      dataRowCount: frame.dataRowCount,
+      viewportRows: zoomedRenderViewportRows,
+      effectiveBufferEndIndex: 220,
+      minimumRenderBottomIndex: frame.minimumRenderBottomIndex,
+      bufferTailAnchorEndIndex: 220,
+      bufferStartIndex: 100,
+      followVisualBottomIndex: frame.followVisualBottomIndex,
+      observedScrollTop: 408,
+      isAtBottom: false,
+      resolveScrollTopForRenderBottomIndex: () => 0,
+    });
+    const repaired = buildTerminalViewportDemandWithRepair({
+      nextMode: demand.nextMode,
+      nextRenderBottomIndex: demand.nextRenderBottomIndex,
+      viewportRows: zoomedRenderViewportRows,
       bufferStartIndex: 100,
       bufferEndIndex: 220,
-      gapRanges: [{ startIndex: 150, endIndex: 155 }],
+      gapRanges: [{ startIndex: 140, endIndex: 180 }],
       followDemandAnchorEndIndex: 220,
     });
 
-    expect(demand).toEqual({
-      mode: 'reading',
-      viewportEndIndex: 170,
-      viewportRows: 24,
-      missingRanges: [{ startIndex: 150, endIndex: 155 }],
-    });
+    expect(frame.maxScrollTop).toBe((120 - viewportRows) * 17);
+    expect(demand.nextRenderBottomIndex).toBe(172);
+    expect(repaired.viewportRows).toBe(zoomedRenderViewportRows);
+    expect(repaired.missingRanges).toEqual([{ startIndex: 140, endIndex: 172 }]);
   });
 
   it('queues follow scroll sync as pure pending timer state', () => {
