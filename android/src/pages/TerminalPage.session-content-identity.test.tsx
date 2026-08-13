@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createSessionBufferState } from '../lib/terminal-buffer';
 import { createSessionRenderBufferStore } from '../lib/session-render-buffer-store';
@@ -473,5 +473,106 @@ describe('TerminalPage session content identity', () => {
 
     await waitFor(() => expect(readRenderedRows(view.container)).toContain('BETA_PORTRAIT_BODY'));
     expect(readRenderedRows(view.container)).not.toContain('ALPHA_PORTRAIT_BODY');
+  });
+
+  it('keeps buffer row indices continuous and the renderer window unchanged when UI-shell pinch scales the page terminal', async () => {
+    mockViewportWidth = 200;
+    mockViewportHeight = 408;
+    const renderStore = createSessionRenderBufferStore();
+    const alpha = makeSession('session-alpha', 'tmux-alpha');
+    const rows = Array.from({ length: 40 }, (_, i) => `ROW_${String(i).padStart(3, '0')}_BODY`);
+    renderStore.setBuffer(alpha.id, makeRenderSnapshot(rows, 1));
+
+    const view = render(
+      <TerminalPage
+        sessions={[alpha]}
+        activeSession={alpha}
+        sessionBufferStore={renderStore}
+        terminalWidthMode="mirror-fixed"
+        getSessionDebugMetrics={() => ({
+          uplinkBps: 0,
+          downlinkBps: 0,
+          renderHz: 0,
+          pullHz: 0,
+          transportBufferedBytes: 0,
+          transportBackpressured: false,
+          lastRenderCommitAt: 0,
+          bufferPullActive: false,
+          status: 'waiting',
+          active: true,
+          updatedAt: 1,
+        })}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    await waitFor(() => expect(readRenderedRows(view.container)).toContain('ROW_039_BODY'));
+
+    const host = view.container.querySelector('.wterm') as HTMLElement;
+    const grid = view.container.querySelector('.term-grid') as HTMLElement;
+    const scaleLayer = view.container.querySelector('.term-render-scale-layer') as HTMLElement;
+    expect(host).toBeTruthy();
+    expect(grid).toBeTruthy();
+    expect(scaleLayer).toBeTruthy();
+
+    const rowIndices = () =>
+      Array.from(view.container.querySelectorAll('[data-terminal-row="true"]'))
+        .map((node) => Number(node.getAttribute('data-terminal-index')));
+
+    const assertContinuous = (indices: number[]) => {
+      expect(indices.length).toBeGreaterThan(0);
+      for (let i = 1; i < indices.length; i += 1) {
+        expect(indices[i] - indices[i - 1]).toBe(1);
+      }
+    };
+
+    const before = rowIndices();
+    assertContinuous(before);
+    const scrollTopBefore = host.scrollTop;
+
+    // pinch in（span 100 -> 60）：UI shell 只写视觉层 transform
+    act(() => {
+      fireEvent.touchStart(host, {
+        touches: [
+          { clientX: 150, clientY: 200, identifier: 1 },
+          { clientX: 250, clientY: 200, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    act(() => {
+      fireEvent.touchMove(host, {
+        touches: [
+          { clientX: 160, clientY: 200, identifier: 1 },
+          { clientX: 220, clientY: 200, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    act(() => {
+      fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
+    });
+
+    // fontSize=14 默认 + 80 列 → 内容宽 694px > 容器宽，pinch 后视觉 scale < 1 且
+    // renderer 窗口（行号区间 / scrollTop / grid transform）完全不变。
+    const scaleAfter = scaleLayer.style.transform;
+    expect(scaleAfter).toMatch(/^scale\(0\./);
+    expect(grid.style.transform).not.toContain('translateY');    expect(grid.style.zoom).toBeFalsy();
+    expect(host.scrollTop).toBe(scrollTopBefore);
+
+    const after = rowIndices();
+    assertContinuous(after);
+    expect(after).toEqual(before);
   });
 });
