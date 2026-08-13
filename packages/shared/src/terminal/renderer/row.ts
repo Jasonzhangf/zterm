@@ -98,10 +98,6 @@ export function buildTerminalRenderFrame(options: {
   effectiveBufferEndIndex: number;
   bufferLinesLength: number;
   viewportRows: number;
-  /** 原生滚动容器（.wterm）的可视行数：scrollHeight/clientHeight 由 DOM 布局决定，
-   *  视觉 scale（transform）不改布局，原生 maxScrollTop 必须用 DOM 的可视行数算。
-   *  缺省时退化为 viewportRows（不缩放场景完全兼容）。 */
-  scrollViewportRows?: number;
   rowHeightPx: number;
   renderBottomIndex: number;
   followDemandAnchorEndIndex: number;
@@ -124,16 +120,12 @@ export function buildTerminalRenderFrame(options: {
     minimumRenderBottomIndex,
     Math.min(maximumRenderBottomIndex, Math.floor(options.renderBottomIndex || followVisualBottomIndex)),
   );
-  const scrollViewportRows = Math.max(
-    1,
-    Math.floor(options.scrollViewportRows ?? options.viewportRows),
-  );
   const totalRows = Math.max(
     options.bufferLinesLength,
     options.effectiveBufferEndIndex - options.bufferStartIndex,
-    scrollViewportRows,
+    options.viewportRows,
   );
-  const maxScrollTop = Math.max(0, (totalRows - scrollViewportRows) * options.rowHeightPx);
+  const maxScrollTop = Math.max(0, (totalRows - options.viewportRows) * options.rowHeightPx);
   const effectiveRenderBottomIndex = options.readingMode ? clampedRenderBottomIndex : followVisualBottomIndex;
   const visibleWindowStartIndex = Math.max(options.bufferStartIndex, effectiveRenderBottomIndex - options.viewportRows);
   const visibleWindowEndIndex = Math.min(
@@ -188,8 +180,6 @@ export function buildTerminalRenderGeometryRevision(options: {
   effectiveBufferEndIndex: number;
   followVisualBottomIndex: number;
   viewportRows: number;
-  /** 原生滚动坐标系的可视行数，与视觉 renderer 行数分离。 */
-  scrollViewportRows?: number;
   rowHeightPx: number;
   renderRowsLength: number;
   termGridPaddingTopPx: number;
@@ -201,7 +191,6 @@ export function buildTerminalRenderGeometryRevision(options: {
     options.effectiveBufferEndIndex,
     options.followVisualBottomIndex,
     options.viewportRows,
-    options.scrollViewportRows ?? options.viewportRows,
     options.rowHeightPx,
     options.renderRowsLength,
     options.termGridPaddingTopPx,
@@ -213,20 +202,14 @@ export function resolveScrollTopForRenderBottomIndex(options: {
   nextRenderBottomIndex: number;
   totalRows: number;
   viewportRows: number;
-  /** 原生 scrollTop 坐标系中的单屏行数；视觉缩放时不同于 viewportRows。 */
-  scrollViewportRows?: number;
   bufferStartIndex: number;
   rowHeightPx: number;
   maxScrollTop: number;
 }) {
-  const scrollViewportRows = Math.max(
-    1,
-    Math.floor(options.scrollViewportRows ?? options.viewportRows),
-  );
   const topOffset = Math.max(
     0,
     Math.min(
-      options.totalRows - scrollViewportRows,
+      options.totalRows - options.viewportRows,
       Math.max(0, Math.floor(options.nextRenderBottomIndex) - options.bufferStartIndex - options.viewportRows),
     ),
   );
