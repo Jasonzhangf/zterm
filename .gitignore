@@ -6,6 +6,7 @@
 .local-index/
 .mempalace/
 .reasonix/
+.review-*/
 node_modules/
 dist/
 .turbo/
@@ -14,6 +15,8 @@ coverage/
 test-results/
 playwright-report/
 tmp/
+playground/
+android/playground/
 /tmux
 project-architecture-analysis.html
 docs/file_*.png

@@ -6052,3 +6052,19 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
 - Review task `20260814T064201Z-review-24143-1lb193` (oauth, uncommitted) returned `verdict: fail` with a single P1: session-list cache key omits `target.terminalBackend`.
 - Analysis: the finding is a false positive under the locked daemon-owned unified catalog contract. Every client `list-sessions` call sends `{ type: 'list-sessions' }` without a backend payload; the daemon returns the union (`listTerminalSessions()`) for backend-opaque requests, so tmux and Herdr targets receive identical responses and the cache key omission cannot produce a wrong catalog. Implementing "preserve it in the request payload" would regress to client-side backend management, explicitly rejected in MEMORY.md.
 - Committed the full accumulated WIP batch as one commit per Jason's instruction.
+
+# 2026-08-14 Android WebView renderer restart diagnosis
+
+- Flow classification remains `terminal.transport_lifecycle`, but the first divergence moved above socket lifecycle: the zterm-bound WebView sandbox process exited while the app process remained alive, then all same-document WebSockets closed abnormally and the new JS runtime rebuilt persisted sessions through `missing-socket`.
+- Historical correlated evidence: WebView sandbox PID `31685` `EXIT_SELF` at `12:12:23.669`; daemon transport detach at `12:12:24.209`. App main process has no matching spontaneous exit. Package-update renderer exits are excluded.
+- Current baseline: APK `0.1.3.2644`; app PID `1762`; zterm-bound renderer PID `10618`; CDP target `E68508E2A6B3F4954F88688256CA3B4E`; `performance.timeOrigin=1786685560186.3`; Activity resumed; native service remains foreground with `START_REDELIVER_INTENT`.
+- Active single hypothesis H3: `BackgroundService` invokes `WebView.evaluateJavascript()` every 30 seconds whenever retained sessions exist, including while foregrounded. The JS callback returns early in foreground, but the native renderer call still occurs. Correlation is not causality.
+- Diagnosis contract and positive/reverse intervention design are recorded under `playground/webview-document-restart-20260814/`. Formal runtime/tests/config remain read-only. No experimental APK has been built, installed, or published.
+
+# 2026-08-14 tmux/Herdr mirror + stale row/refresh convergence diagnosis
+
+- Jason asked for a structural audit of daemon tmux/Herdr mirror management, the white-font vertical stripe symptom, intermittent missing rows, and permanent stale rows.
+- Full diagnosis contract is under `playground/terminal-buffer-render-20260814/README.md`.
+- Confirmed shared failure owner: `terminal.buffer_render` / `resource.client_sparse_buffer -> resource.renderer_window`. The current `VisibleNonGapRepairRequestState` is one state per session with a 5s same-window cooldown; a dropped/lost repair can therefore stay unverified until another sparse update after cooldown, and may never converge if no further tail patch arrives.
+- White stripe remains renderer-side measurement suspicion: `measureTerminalViewport()` uses `getBoundingClientRect()` on single W/你 probes and takes `max(latinWidth, cjk/2)`, which can inflate `resolvedCellWidthPx` and create subpixel seams between fixed-width inline-block cells. Needs a real WebView computed-style/glyph-advance fixture before any change.
+- No product code was changed. Formal fix requires Jason approval of the design id before implementation.
