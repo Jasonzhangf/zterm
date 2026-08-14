@@ -92,12 +92,6 @@ function TerminalSessionDrawerComponent({
   onClearPreviewSelection,
   terminalShellSkin = 'light',
 }: TerminalSessionDrawerProps) {
-  // TEMP-DEBUG: 抽屉重建溯源（定位后移除）——统计组件重渲染次数
-  const debugRenderCountRef = useRef(0);
-  debugRenderCountRef.current += 1;
-  if (debugRenderCountRef.current === 1 || debugRenderCountRef.current % 10 === 0) {
-    console.log(`[DrawerDebug] render #${debugRenderCountRef.current} open=${open} sessions=${sessions.length} title0=${sessions[0]?.title ?? '-'} status0=${sessions[0]?.status ?? '-'}`);
-  }
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const suppressNextClickRef = useRef(false);
@@ -1197,7 +1191,7 @@ function terminalSessionDrawerPropsEqual(
   for (let i = 0; i < sessionCount; i += 1) {
     const p = prev.sessions[i]!;
     const n = next.sessions[i]!;
-    if (p.id !== n.id) mismatchFields.push(`sessions[${i}].id`);
+    if ((p.stableKey ?? p.id) !== (n.stableKey ?? n.id)) mismatchFields.push(`sessions[${i}].stableKey`);
     if ((p.title ?? '') !== (n.title ?? '')) mismatchFields.push(`sessions[${i}].title`);
     if ((p.subtitle ?? '') !== (n.subtitle ?? '')) mismatchFields.push(`sessions[${i}].subtitle`);
     if ((p.paneLabel ?? '') !== (n.paneLabel ?? '')) mismatchFields.push(`sessions[${i}].paneLabel`);
@@ -1220,9 +1214,6 @@ function terminalSessionDrawerPropsEqual(
   const prevSelected = prev.previewSelectedSessionIds ?? [];
   const nextSelected = next.previewSelectedSessionIds ?? [];
   if (prevSelected.length !== nextSelected.length) mismatchFields.push('previewSelected.length');
-  if (mismatchFields.length > 0) {
-    console.log(`[DrawerCompare] mismatch: ${mismatchFields.join(',')}`);
-  }
   return mismatchFields.length === 0;
 }
 

@@ -101,19 +101,20 @@ function makeRelayDevice(overrides: Partial<{
   const deviceId = overrides.deviceId || 'device-mac-studio';
   const hostId = overrides.hostId || 'mac-studio';
   const endpointHost = overrides.endpointHost || '100.66.1.82';
+  const now = new Date().toISOString();
   return {
     deviceId,
     deviceName: overrides.deviceName || 'Mac Studio',
     platform: 'darwin',
     appVersion: 'test',
-    updatedAt: '2026-07-17T00:00:00.000Z',
+    updatedAt: now,
     client: {
       connected: true,
-      lastSeenAt: '2026-07-17T00:00:00.000Z',
+      lastSeenAt: now,
     },
     daemon: {
       connected: overrides.daemonConnected ?? true,
-      lastSeenAt: '2026-07-17T00:00:00.000Z',
+      lastSeenAt: now,
       hostId,
       version: 'test',
       endpoints: [
@@ -123,21 +124,21 @@ function makeRelayDevice(overrides: Partial<{
           host: endpointHost,
           port: 3333,
           authRequired: true,
-          lastSeenAt: '2026-07-17T00:00:00.000Z',
+          lastSeenAt: now,
         }]),
         {
           id: `relay-rtc:${hostId}`,
           kind: 'relay-rtc' as const,
           relayHostId: hostId,
           authRequired: true,
-          lastSeenAt: '2026-07-17T00:00:00.000Z',
+          lastSeenAt: now,
         },
       ],
       sessions: (overrides.sessions || []).map((name) => ({
         name,
         cwd: '/Users/jason',
         title: name,
-        updatedAt: '2026-07-17T00:00:00.000Z',
+        updatedAt: now,
       })),
     },
   };
@@ -256,6 +257,48 @@ describe('TerminalPage portrait session drawer', () => {
     expect(onSwitchSession).toHaveBeenCalledWith(targetSessionId);
   });
 
+  it('keeps a visible portrait entry point and a visible drawer surface', () => {
+    const session = makeSession('s1');
+    render(
+      <TerminalPage
+        sessions={[session]}
+        sessionGroups={[{
+          id: 'host-s1',
+          name: 'Host S1',
+          bridgeHost: session.bridgeHost,
+          bridgePort: session.bridgePort,
+          sessionNames: [session.sessionName],
+          lastOpenedAt: 1,
+        }]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const openButton = screen.getByTestId('terminal-portrait-session-drawer-button');
+    expect(openButton).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer').getAttribute('aria-hidden')).toBe('true');
+    fireEvent.click(openButton);
+    const drawer = screen.getByTestId('terminal-session-drawer');
+    expect(drawer.getAttribute('aria-hidden')).toBe('false');
+    expect(screen.getByTestId('terminal-session-drawer-header')).toBeTruthy();
+    expect(screen.getByTestId('terminal-session-drawer-select-s1')).toBeTruthy();
+
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-close'));
+    expect(drawer.getAttribute('aria-hidden')).toBe('true');
+  });
+
   it('exposes Settings and upgrade entry from the portrait terminal shell', () => {
     const sessions = [makeSession('s1')];
     const onOpenSettings = vi.fn();
@@ -326,6 +369,74 @@ describe('TerminalPage portrait session drawer', () => {
     expect(screen.queryByTestId('terminal-connection-status-bandwidth')).toBeNull();
     expect(screen.getByTestId('terminal-connection-status-uplink').textContent).toBe('↑ 1.0 KB/s');
     expect(screen.getByTestId('terminal-connection-status-downlink').textContent).toBe('↓ 2.0 KB/s');
+  });
+
+  it('renames the remote tmux session when the portrait status title is clicked without opening the route menu', async () => {
+    const sessions = [makeSession('s1')];
+    const onRenameRemoteSession = vi.fn(async () => undefined);
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onRenameRemoteSession={onRenameRemoteSession}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('terminal-connection-status-session'));
+    fireEvent.change(screen.getByRole('textbox', { name: '新的 tmux session 名称' }), {
+      target: { value: 'renamed-session' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '确认重命名' }));
+
+    expect(onRenameRemoteSession).toHaveBeenCalledWith('s1', 'renamed-session');
+    expect(screen.queryByTestId('terminal-connection-route-menu')).toBeNull();
+  });
+
+  it('surfaces a remote tmux rename failure without changing the visible title', async () => {
+    const sessions = [makeSession('s1')];
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onRenameRemoteSession={vi.fn(async () => { throw new Error('rename failed'); })}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('terminal-connection-status-session'));
+    fireEvent.change(screen.getByRole('textbox', { name: '新的 tmux session 名称' }), {
+      target: { value: 'renamed-session' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '确认重命名' }));
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('rename failed'));
+    expect(screen.getByTestId('terminal-connection-status-session').textContent).toBe('tmux-s1');
   });
 
   it('shows standard reconnect progress in the portrait status strip without an error overlay', () => {
@@ -796,8 +907,12 @@ describe('TerminalPage portrait session drawer', () => {
     });
     fireEvent.touchEnd(swipeSurface!, { changedTouches: [{ clientX: 236, clientY: 206 }] });
 
-    expect((await screen.findByTestId('terminal-session-drawer-host-mac-studio')).textContent).toContain('1');
-    expect(screen.queryByTestId('terminal-session-drawer-host-100.66.1.82:3333')).toBeNull();
+    await waitFor(() => {
+      expect(screen.getByTestId('terminal-session-drawer-host-mac-studio').textContent).toContain('1');
+    }, { timeout: 3000 });
+    await waitFor(() => {
+      expect(screen.queryByTestId('terminal-session-drawer-host-100.66.1.82:3333')).toBeNull();
+    }, { timeout: 3000 });
     expect(screen.getByTestId('terminal-session-drawer-row-direct-rcc')).toBeTruthy();
   });
 
@@ -1638,6 +1753,74 @@ describe('TerminalPage portrait session drawer', () => {
         sessionNames: ['tmux-s1', 'remote-beta'],
       }),
       'remote-beta',
+    );
+  });
+
+  it('renders and opens an independently projected Herdr catalog row beside tmux rows', async () => {
+    const sessions = [makeSession('s1')];
+    sessions[0]!.daemonHostId = 'daemon-a';
+    const onOpenDrawerRemoteSession = vi.fn();
+
+    render(
+      <TerminalPage
+        sessions={sessions}
+        sessionGroups={[
+          {
+            id: 'daemon:daemon-a',
+            name: 'Daemon A',
+            bridgeHost: '100.127.23.27',
+            bridgePort: 3333,
+            daemonHostId: 'daemon-a',
+            terminalBackend: 'tmux',
+            sessionNames: ['shared'],
+            lastOpenedAt: 1,
+          },
+          {
+            id: 'daemon:daemon-a::backend:herdr',
+            name: 'Daemon A Herdr',
+            bridgeHost: '100.127.23.27',
+            bridgePort: 3333,
+            daemonHostId: 'daemon-a',
+            terminalBackend: 'herdr',
+            sessionNames: ['shared'],
+            lastOpenedAt: 2,
+          },
+        ]}
+        activeSession={sessions[0]}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenDrawerRemoteSession={onOpenDrawerRemoteSession}
+        onRefreshDrawerHostSessions={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const drawer = screen.getByTestId('terminal-session-drawer');
+    const edgeSurface = document.querySelector('[data-testid^="terminal-swipe-surface-"][data-swipe-enabled="true"]') as HTMLElement;
+    fireEvent.touchStart(edgeSurface, { touches: [{ clientX: 4, clientY: 206 }] });
+    fireEvent.touchMove(edgeSurface, {
+      touches: [{ clientX: 236, clientY: 206 }],
+      cancelable: true,
+    });
+    fireEvent.touchEnd(edgeSurface, { changedTouches: [{ clientX: 236, clientY: 206 }] });
+
+    expect(drawer.getAttribute('aria-hidden')).toBe('false');
+    expect(screen.getByTestId('terminal-session-drawer-select-remote:daemon:daemon-a::session:shared')).toBeTruthy();
+    const row = await screen.findByTestId('terminal-session-drawer-select-remote:daemon:daemon-a::backend:herdr::session:shared');
+    fireEvent.click(row);
+
+    expect(onOpenDrawerRemoteSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        terminalBackend: 'herdr',
+        daemonHostId: 'daemon-a',
+      }),
+      'shared',
     );
   });
 
