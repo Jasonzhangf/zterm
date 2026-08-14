@@ -17,6 +17,21 @@ import {
   type RemoteWindowVideoDebugSnapshot,
 } from '../components/terminal/RemoteWindowOverlay';
 import { TerminalHeader } from '../components/terminal/TerminalHeader';
+import { TerminalConnectionStatusStrip } from './TerminalConnectionStatusStrip';
+import {
+  normalizeDrawerStatus,
+  resolveSessionInputEpoch,
+  resolveTerminalSessionGroupActiveSessionProjection,
+  resolveTerminalSessionGroupSlotIds,
+  terminalPageActiveRuntimeStatusKey,
+  terminalPageHeaderSessionUiKey,
+  terminalPageHeaderSessionsUiKey,
+  terminalPageRelayDevicesUiKey,
+  terminalPageServerIdentityAliasInputsUiKey,
+  terminalSessionGroupSlotIdsEqual,
+  toTerminalTabChromeItem,
+} from './terminal-page-helpers';
+import { resolveEffectiveConnectionStatus } from './terminal-page-status-helpers';
 import { TerminalSessionDrawer, type TerminalSessionDrawerHost, type TerminalSessionDrawerItem } from '../components/terminal/TerminalSessionDrawer';
 import { TabManagerSheet } from '../components/terminal/TabManagerSheet';
 import { TerminalQuickBar } from '../components/terminal/TerminalQuickBar';
@@ -27,7 +42,6 @@ import {
 import { TerminalPageCopyMenu } from './TerminalPageCopyMenu';
 import { TerminalDebugOverlay, type RemoteWindowInputDebugSnapshot } from './TerminalPageDebugOverlay';
 import { TerminalNetworkBanner, TerminalQuickBarShell } from './terminal-page-shell-ui';
-import { formatDebugRate, resolveDebugStatus } from './terminal-page-debug-helpers';
 import { useTerminalPageCopyRuntime } from './useTerminalPageCopyRuntime';
 import { getBrowserStorage } from '../lib/browser-storage';
 import type { TerminalShellSkin } from '../lib/bridge-settings';
@@ -36,7 +50,6 @@ import {
   resolveNextTerminalShellBoundaryDelayMs,
   resolveTerminalRendererThemeForSkin,
 } from '../lib/terminal-shell-skin';
-import { isPrivateLanIpv4Host, parseEndpointHost } from '../lib/network-target';
 import {
   buildServerIdentityAliasMap,
   resolveServerIdentity,
@@ -144,6 +157,7 @@ type DrawerRemoteSessionTarget = {
   relayEndpointCandidates?: SessionGroupHistory['relayEndpointCandidates'];
   transportMode?: Host['transportMode'];
   sessionNames: string[];
+  terminalBackend?: 'tmux' | 'herdr';
 };
 
 type RemoteWindowInputDebugSource =
@@ -368,255 +382,8 @@ function logAsyncCleanupFailure(scope: string, error: unknown) {
   console.warn(`[TerminalPage] ${scope} failed:`, error);
 }
 
-const connectionRouteOptionStyle = {
-  minHeight: '34px',
-  borderRadius: '10px',
-  border: '1px solid var(--zterm-panel-border)',
-  background: 'var(--zterm-panel-surface)',
-  color: 'var(--zterm-panel-text)',
-  fontSize: '12px',
-  fontWeight: 850,
-  textAlign: 'left',
-  padding: '0 10px',
-} as const;
 
-function resolveConnectionActivityLabel(
-  session: Session,
-  status: SessionDebugOverlayMetrics['status'],
-) {
-  if (
-    session.lastError === 'waiting for confirmed control directory'
-    || session.lastError === 'control directory confirmation timeout'
-  ) {
-    return '正在同步控制通道';
-  }
-  if (status === 'reconnecting') {
-    return '正在重连';
-  }
-  if (status === 'connecting') {
-    return '正在连接';
-  }
-  return null;
-}
 
-function hasLiveSessionTraffic(metrics: SessionDebugOverlayMetrics | null | undefined) {
-  if (!metrics?.active) {
-    return false;
-  }
-  return (metrics.uplinkBps || 0) > 0 || (metrics.downlinkBps || 0) > 0;
-}
-
-function resolveEffectiveConnectionStatus(
-  session: Session,
-  metrics: SessionDebugOverlayMetrics | null | undefined,
-) {
-  const status = resolveDebugStatus(session, metrics || undefined);
-  if ((status === 'reconnecting' || status === 'connecting') && hasLiveSessionTraffic(metrics)) {
-    return 'waiting';
-  }
-  return status;
-}
-
-const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatusStrip({
-  session,
-  getSessionDebugMetrics,
-  topInsetPx,
-  onForceRelaySession,
-  onUseAutoSession,
-  onUseWebSocketSession,
-}: {
-  session: Session | null;
-  getSessionDebugMetrics?: (sessionId: string) => SessionDebugOverlayMetrics | null;
-  topInsetPx: number;
-  onForceRelaySession?: (id: string) => void;
-  onUseAutoSession?: (id: string) => void;
-  onUseWebSocketSession?: (id: string) => void;
-}) {
-  const [tick, setTick] = useState(0);
-  const [routeMenuOpen, setRouteMenuOpen] = useState(false);
-
-  useEffect(() => {
-    if (!session) {
-      return;
-    }
-    const timer = window.setInterval(() => {
-      setTick((value) => value + 1);
-    }, 500);
-    return () => window.clearInterval(timer);
-  }, [session]);
-
-  void tick;
-
-  if (!session) {
-    return null;
-  }
-
-  const metrics = getSessionDebugMetrics ? getSessionDebugMetrics(session.id) : null;
-  const uplinkBps = metrics?.uplinkBps || 0;
-  const downlinkBps = metrics?.downlinkBps || 0;
-  const routeLabel = formatConnectionRouteLabel(session);
-  const status = resolveEffectiveConnectionStatus(session, metrics);
-  const activityLabel = resolveConnectionActivityLabel(session, status);
-  const statusTone = status === 'error' || status === 'closed'
-    ? '#ff8a8a'
-    : activityLabel
-      ? '#ffd27a'
-      : 'var(--zterm-panel-muted)';
-  const visibleRouteLabel = activityLabel || routeLabel;
-
-  return (
-    <div
-      data-testid="terminal-connection-status-strip"
-      className="zterm-connection-status-strip"
-      aria-label={`连接状态 ${visibleRouteLabel} session ${session.sessionName} 上行 ${formatDebugRate(uplinkBps)} 下行 ${formatDebugRate(downlinkBps)}`}
-      role="button"
-      tabIndex={0}
-      onClick={() => setRouteMenuOpen((current) => !current)}
-      style={{
-        position: 'absolute',
-        top: `${Math.max(8, topInsetPx + 8)}px`,
-        left: '56px',
-        right: '84px',
-        zIndex: 15,
-        height: '34px',
-        minWidth: 0,
-        borderRadius: '12px',
-        border: '1px solid transparent',
-        background: 'transparent',
-        color: 'var(--zterm-panel-text)',
-        boxShadow: 'none',
-        display: 'flex',
-        alignItems: 'center',
-        gap: '7px',
-        padding: '0 9px',
-        overflow: 'visible',
-        pointerEvents: 'auto',
-        fontVariantNumeric: 'tabular-nums',
-        whiteSpace: 'nowrap',
-        cursor: 'pointer',
-      }}
-    >
-      <span
-        data-testid="terminal-connection-status-route"
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '4px',
-          minWidth: 0,
-          flex: '0 1 auto',
-          color: statusTone,
-          fontSize: '11px',
-          fontWeight: 900,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-        }}
-      >
-        <span
-          aria-hidden="true"
-          style={{
-            width: '6px',
-            height: '6px',
-            borderRadius: '999px',
-            background: statusTone,
-            boxShadow: 'none',
-            flex: '0 0 auto',
-          }}
-        />
-        <span
-          data-testid={activityLabel ? 'terminal-connection-status-activity' : undefined}
-          style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}
-        >
-          {visibleRouteLabel}
-        </span>
-      </span>
-      <span
-        data-testid="terminal-connection-status-session"
-        style={{
-          flex: '1 1 auto',
-          minWidth: 0,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          color: 'var(--zterm-panel-text)',
-          fontSize: '11px',
-          fontWeight: 800,
-        }}
-      >
-        {session.sessionName}
-      </span>
-      <span
-        data-testid="terminal-connection-status-rates"
-        style={{
-          flex: '0 0 auto',
-          display: 'grid',
-          gridTemplateRows: 'repeat(2, minmax(0, 1fr))',
-          alignItems: 'center',
-          color: 'var(--zterm-panel-muted)',
-          fontSize: '9px',
-          fontWeight: 750,
-          lineHeight: 1.05,
-        }}
-      >
-        <span data-testid="terminal-connection-status-uplink">↑ {formatDebugRate(uplinkBps)}</span>
-        <span data-testid="terminal-connection-status-downlink">↓ {formatDebugRate(downlinkBps)}</span>
-      </span>
-      {routeMenuOpen ? (
-        <div
-          data-testid="terminal-connection-route-menu"
-          className="zterm-connection-route-menu"
-          style={{
-            position: 'absolute',
-            left: 0,
-            top: '40px',
-            width: '210px',
-            zIndex: 30,
-            display: 'grid',
-            gap: '6px',
-            padding: '8px',
-            borderRadius: '12px',
-            border: '1px solid var(--zterm-panel-border)',
-            background: 'var(--zterm-panel-bg)',
-            boxShadow: '0 18px 42px var(--zterm-panel-shadow)',
-          }}
-          onClick={(event) => event.stopPropagation()}
-        >
-          <button
-            type="button"
-            data-testid="terminal-route-option-auto"
-            onClick={() => {
-              setRouteMenuOpen(false);
-              onUseAutoSession?.(session.id);
-            }}
-            style={connectionRouteOptionStyle}
-          >
-            自动选择
-          </button>
-          <button
-            type="button"
-            data-testid="terminal-route-option-websocket"
-            onClick={() => {
-              setRouteMenuOpen(false);
-              onUseWebSocketSession?.(session.id);
-            }}
-            style={connectionRouteOptionStyle}
-          >
-            直连 / Tailscale
-          </button>
-          <button
-            type="button"
-            data-testid="terminal-route-option-webrtc"
-            onClick={() => {
-              setRouteMenuOpen(false);
-              onForceRelaySession?.(session.id);
-            }}
-            style={connectionRouteOptionStyle}
-          >
-            WebRTC / Relay
-          </button>
-        </div>
-      ) : null}
-    </div>
-  );
-});
 
 export {
   resolveTerminalBottomChromeLiftPx,
@@ -642,8 +409,9 @@ interface TerminalPageProps {
   onUseAutoSession?: (id: string) => void;
   onUseWebSocketSession?: (id: string) => void;
   onOpenConnections: () => void;
-  onOpenQuickTabPicker: (paneId?: string, hostKey?: string, createOptions?: { sessionName?: string; cwd?: string }) => void;
+  onOpenQuickTabPicker: (paneId?: string, hostKey?: string, createOptions?: { sessionName?: string; cwd?: string; terminalBackend?: 'tmux' | 'herdr' }) => void;
   onOpenDrawerRemoteSession?: (target: DrawerRemoteSessionTarget, sessionName: string, options?: { activate?: boolean; navigate?: boolean }) => string | null | undefined | void;
+  onRenameRemoteSession?: (sessionId: string, nextSessionName: string) => void | Promise<void>;
   onCloseDrawerRemoteSession?: (target: DrawerRemoteSessionTarget, sessionName: string) => void | Promise<void>;
   onRefreshDrawerHostSessions?: (hostKey?: string) => void | Promise<void>;
   onAuditOpenTabsAgainstRemoteSessions?: (reason: OpenTabAuditReason) => void | Promise<void>;
@@ -733,213 +501,7 @@ interface ScheduleComposerTarget {
   seedText: string;
 }
 
-interface TerminalTabChromeItem {
-  id: string;
-  bridgeHost: string;
-  bridgePort: number;
-  sessionName: string;
-  customName?: string;
-  resolvedPath?: Session['resolvedPath'];
-  resolvedRelayTransport?: Session['resolvedRelayTransport'];
-}
 
-function normalizeDrawerStatus(state: Session['state'] | undefined): TerminalSessionDrawerItem['status'] {
-  switch (state) {
-    case 'connected':
-      return 'connected';
-    case 'connecting':
-    case 'reconnecting':
-      return 'connecting';
-    case 'disconnected':
-      return 'disconnected';
-    case 'closed':
-      return 'closed';
-    case 'error':
-      return 'error';
-    default:
-      return 'idle';
-  }
-}
-
-function terminalPageHeaderSessionUiKey(session: Session | null | undefined) {
-  if (!session) {
-    return '';
-  }
-  return [
-    session.id,
-    session.bridgeHost,
-    String(session.bridgePort),
-    session.sessionName,
-    session.customName || '',
-    session.resolvedPath || '',
-    session.resolvedRelayTransport || '',
-    session.selectedIcePair?.local?.candidateType || '',
-    session.selectedIcePair?.local?.address || '',
-    String(session.selectedIcePair?.local?.port || ''),
-    session.selectedIcePair?.remote?.candidateType || '',
-    session.selectedIcePair?.remote?.address || '',
-    String(session.selectedIcePair?.remote?.port || ''),
-  ].join('::');
-}
-
-function terminalPageHeaderSessionsUiKey(sessions: Session[]) {
-  return sessions.map((session) => terminalPageHeaderSessionUiKey(session)).join('||');
-}
-
-function terminalPageActiveRuntimeStatusKey(session: Session | null | undefined) {
-  if (!session) {
-    return '';
-  }
-  return [
-    session.id,
-    session.state,
-    session.lastError || '',
-  ].join('::');
-}
-
-function terminalPageRelayDevicesUiKey(relayDevices: readonly TraversalRelayDeviceSnapshot[] | undefined) {
-  return (relayDevices || []).map((device) => [
-    device.deviceId,
-    device.deviceName,
-    device.daemon.hostId,
-    device.daemon.connected ? '1' : '0',
-    (device.daemon.endpoints || []).map((endpoint) => [
-      endpoint.id,
-      endpoint.kind,
-      endpoint.host || '',
-      endpoint.wsUrl || '',
-      endpoint.relayHostId || '',
-      String(endpoint.port || ''),
-    ].join('~')).join(','),
-    (device.daemon.sessions || []).map((session) => [
-      session.name || '',
-      session.updatedAt || '',
-    ].join('~')).join(','),
-  ].join('|')).join('||');
-}
-
-function terminalPageServerIdentityAliasInputsUiKey(inputs: readonly ServerIdentityInput[] | undefined) {
-  return (inputs || []).map((input) => [
-    input.bridgeHost || '',
-    String(input.bridgePort || ''),
-    input.daemonHostId || '',
-    input.connectionName || '',
-  ].join('|')).join('||');
-}
-
-function resolveSessionInputEpoch(
-  inputResetEpochBySession: Record<string, number> | undefined,
-  sessionId: string | null | undefined,
-) {
-  if (!sessionId) {
-    return -1;
-  }
-  return inputResetEpochBySession?.[sessionId] || 0;
-}
-
-function toTerminalTabChromeItem(session: Session): TerminalTabChromeItem {
-  return {
-    id: session.id,
-    bridgeHost: session.bridgeHost,
-    bridgePort: session.bridgePort,
-    sessionName: session.sessionName,
-    customName: session.customName,
-    resolvedPath: session.resolvedPath,
-    resolvedRelayTransport: session.resolvedRelayTransport,
-  };
-}
-
-function resolveTerminalSessionGroupSlotIds(options: {
-  slots: TerminalSessionGroupSlotIds;
-  sessions: Session[];
-  centerSessionId: string | null;
-}): TerminalSessionGroupSlotIds {
-  const sessionIds = new Set(options.sessions.map((session) => session.id));
-  const center = (
-    options.slots.center && sessionIds.has(options.slots.center)
-      ? options.slots.center
-      : options.centerSessionId && sessionIds.has(options.centerSessionId)
-        ? options.centerSessionId
-        : null
-  );
-  const top = (
-    options.slots.top && sessionIds.has(options.slots.top) && options.slots.top !== center
-      ? options.slots.top
-      : null
-  );
-  const bottom = (
-    options.slots.bottom &&
-      sessionIds.has(options.slots.bottom) &&
-      options.slots.bottom !== center &&
-      options.slots.bottom !== top
-      ? options.slots.bottom
-      : null
-  );
-
-  return { top, center, bottom };
-}
-
-function terminalSessionGroupSlotIdsEqual(
-  left: TerminalSessionGroupSlotIds,
-  right: TerminalSessionGroupSlotIds,
-) {
-  return left.top === right.top && left.center === right.center && left.bottom === right.bottom;
-}
-
-function resolveTerminalSessionGroupActiveSessionProjection(options: {
-  slots: TerminalSessionGroupSlotIds;
-  sessions: Session[];
-  activeSessionId: string | null;
-}): { slots: TerminalSessionGroupSlotIds; focusSlot: TerminalSessionGroupSlotName } | null {
-  if (!options.activeSessionId) {
-    return null;
-  }
-  const sessionIds = new Set(options.sessions.map((session) => session.id));
-  if (!sessionIds.has(options.activeSessionId)) {
-    return null;
-  }
-  const normalizedSlots = resolveTerminalSessionGroupSlotIds({
-    slots: options.slots,
-    sessions: options.sessions,
-    centerSessionId: options.activeSessionId,
-  });
-  if (normalizedSlots.top === options.activeSessionId) {
-    return { slots: normalizedSlots, focusSlot: 'top' };
-  }
-  if (normalizedSlots.center === options.activeSessionId) {
-    return { slots: normalizedSlots, focusSlot: 'center' };
-  }
-  if (normalizedSlots.bottom === options.activeSessionId) {
-    return { slots: normalizedSlots, focusSlot: 'bottom' };
-  }
-  return {
-    slots: resolveTerminalSessionGroupSlotIds({
-      slots: resolveTerminalSessionGroupSlotReplacement(normalizedSlots, options.activeSessionId, 'center'),
-      sessions: options.sessions,
-      centerSessionId: options.activeSessionId,
-    }),
-    focusSlot: 'center',
-  };
-}
-
-function formatConnectionRouteLabel(session: Session) {
-  switch (session.resolvedPath) {
-    case 'rtc-direct':
-      return 'UDP';
-    case 'tailscale':
-      return 'Tailscale';
-    case 'ipv6':
-      return 'IPv6';
-    case 'ipv4': {
-      const endpointHost = parseEndpointHost(session.resolvedEndpoint || session.bridgeHost);
-      return isPrivateLanIpv4Host(endpointHost) ? '局域网' : 'IPv4';
-    }
-    case 'rtc-relay':
-      return session.resolvedRelayTransport === 'turn' ? 'Relay/TURN' : 'Relay';
-    default:
-      return session.state === 'connected' ? '连接中' : '未连接';
-  }
-}
 
 function TerminalPageComponent({
   appForegroundActive = true,
@@ -953,6 +515,7 @@ function TerminalPageComponent({
   onSwitchSession,
   onMoveSession,
   onRenameSession,
+  onRenameRemoteSession,
   onCloseSession,
   onForceRelaySession,
   onUseAutoSession,
@@ -1067,9 +630,20 @@ function TerminalPageComponent({
       window.removeEventListener('zterm:open-attachment-drawer', onOpenAttachmentDrawer);
     };
   }, []);
-  // Trigger remote session audit when drawer opens to prune stale entries
+  // Trigger remote session audit when drawer opens to prune stale entries.
+  // 只在 drawer 从关闭→打开的变化沿触发一次（ref guard），避免 audit 引发的
+  // sessions 更新 + onAuditOpenTabsAgainstRemoteSessions 引用变化形成重渲染循环。
+  const drawerOpenAuditFiredRef = useRef(false);
   useEffect(() => {
-    if (sessionDrawerOpen && onAuditOpenTabsAgainstRemoteSessions) {
+    if (!sessionDrawerOpen) {
+      drawerOpenAuditFiredRef.current = false;
+      return;
+    }
+    if (drawerOpenAuditFiredRef.current) {
+      return;
+    }
+    drawerOpenAuditFiredRef.current = true;
+    if (onAuditOpenTabsAgainstRemoteSessions) {
       void onAuditOpenTabsAgainstRemoteSessions('drawer-open');
     }
   }, [sessionDrawerOpen, onAuditOpenTabsAgainstRemoteSessions]);
@@ -1479,11 +1053,13 @@ function TerminalPageComponent({
     },
     visible: sessionGroupViewportProjection.visible,
   }), [sessionGroupViewportProjection, sessions]);
-  const renderedPaneSessions = splitVisible
-    ? visiblePaneEntries
-        .map((entry) => entry.session)
-        .filter((session): session is Session => Boolean(session))
-    : (interactiveSession ? [interactiveSession] : []);
+  const renderedPaneSessions = useMemo(() => (
+    splitVisible
+      ? visiblePaneEntries
+          .map((entry) => entry.session)
+          .filter((session): session is Session => Boolean(session))
+      : (interactiveSession ? [interactiveSession] : [])
+  ), [interactiveSession, splitVisible, visiblePaneEntries]);
   const sessionPreviewSessions = useMemo(
     () => resolveSessionPreviewTargets(sessionPreviewSelection, sessions),
     [sessionPreviewSelection, sessions],
@@ -1611,6 +1187,7 @@ function TerminalPageComponent({
           bridgeHost: session.bridgeHost,
           bridgePort: session.bridgePort,
           sessionName: session.sessionName,
+          terminalBackend: session.terminalBackend,
         }),
         session,
       );
@@ -1623,6 +1200,7 @@ function TerminalPageComponent({
             bridgeHost: session.bridgeHost,
             bridgePort: session.bridgePort,
             sessionName: session.sessionName,
+            terminalBackend: session.terminalBackend,
           }),
           session,
         );
@@ -1642,6 +1220,8 @@ function TerminalPageComponent({
     const items: TerminalSessionDrawerItem[] = [];
     for (const group of sessionGroups) {
       const missing = new Set(group.missingSessionNames || []);
+      const groupBackend = group.terminalBackend || 'tmux';
+      const backendSuffix = groupBackend === 'herdr' ? '::backend:herdr' : '';
       const explicitDaemonHostId = group.daemonHostId?.trim() || '';
       const serverIdentity = resolveDrawerIdentity(group);
       const resolvedDaemonHostId = relayDeviceByDaemonHostId.has(serverIdentity.key)
@@ -1661,9 +1241,10 @@ function TerminalPageComponent({
           bridgeHost: group.bridgeHost,
           bridgePort: group.bridgePort,
           sessionName,
+          terminalBackend: groupBackend,
         });
         const liveSession = liveSessionByReuseKey.get(reuseKey) || null;
-        const id = liveSession?.id || `remote:${ownerKey}::session:${sessionName}`;
+        const id = liveSession?.id || `remote:${ownerKey}${backendSuffix}::session:${sessionName}`;
         const relayDevice = resolvedDaemonHostId ? relayDeviceByDaemonHostId.get(resolvedDaemonHostId) || null : null;
         const relayRtcCandidates = getRelayRtcEndpointCandidates(relayDevice?.daemon.endpoints || []);
         const useRelayRouteTarget = Boolean(relayDevice && relayRtcCandidates.length > 0);
@@ -1686,8 +1267,9 @@ function TerminalPageComponent({
           ...(relayEndpointCandidates?.length ? { relayEndpointCandidates } : {}),
           ...(useRelayRouteTarget ? { transportMode: 'auto' as const } : {}),
           sessionNames: group.sessionNames,
+          ...(groupBackend === 'herdr' ? { terminalBackend: 'herdr' as const } : {}),
         };
-        const canonicalSessionRowKey = `${serverIdentity.key}::session:${sessionName}`;
+        const canonicalSessionRowKey = `${serverIdentity.key}${backendSuffix}::session:${sessionName}`;
         const existingRowId = rowIdByCanonicalSessionKey.get(canonicalSessionRowKey);
         if (existingRowId) {
           const existingCloseTarget = closeTargets.get(existingRowId);
@@ -3424,7 +3006,7 @@ function TerminalPageComponent({
     onCloseSession(sessionId, 'terminal-session-drawer-close-button');
   }, [drawerRemoteSessions.closeTargets, onCloseDrawerRemoteSession, onCloseSession]);
 
-  const handleOpenQuickTabPickerForPane = useCallback((paneId?: string, hostKey?: string, createOptions?: { sessionName?: string; cwd?: string }) => {
+  const handleOpenQuickTabPickerForPane = useCallback((paneId?: string, hostKey?: string, createOptions?: { sessionName?: string; cwd?: string; terminalBackend?: 'tmux' | 'herdr' }) => {
     if (paneId) {
       activatePaneAndSession(paneId);
     }
@@ -3437,7 +3019,7 @@ function TerminalPageComponent({
     onOpenQuickTabPicker(paneId, hostKey, createOptions);
   }, [activatePaneAndSession, onOpenQuickTabPicker]);
 
-  const handleOpenQuickTabPickerFromDrawer = useCallback((hostKey?: string, createOptions?: { sessionName?: string; cwd?: string }) => {
+  const handleOpenQuickTabPickerFromDrawer = useCallback((hostKey?: string, createOptions?: { sessionName?: string; cwd?: string; terminalBackend?: 'tmux' | 'herdr' }) => {
     setSessionDrawerDebug((current) => ({
       ...current,
       lastEvent: 'page:drawer-callback',
@@ -3624,7 +3206,8 @@ function TerminalPageComponent({
       >
         {portraitSessionDrawerEnabled ? (
           <>
-            {!sessionDrawerOpen ? <>
+            {!sessionDrawerOpen ? (
+              <>
               <TerminalConnectionStatusStrip
               session={uiSession}
               getSessionDebugMetrics={getSessionDebugMetrics}
@@ -3632,6 +3215,7 @@ function TerminalPageComponent({
               onForceRelaySession={onForceRelaySession}
               onUseAutoSession={onUseAutoSession}
               onUseWebSocketSession={onUseWebSocketSession}
+              onRenameRemoteSession={onRenameRemoteSession}
             />
             <button
               type="button"
@@ -3690,7 +3274,35 @@ function TerminalPageComponent({
                 <span>设置</span>
               </button>
               ) : null}
-            </> : null}
+              </>
+            ) : null}
+            <button
+              type="button"
+              aria-label="打开 session 抽屉"
+              data-testid="terminal-portrait-session-drawer-button"
+              onClick={() => setSessionDrawerOpen(true)}
+              style={{
+                position: 'absolute',
+                top: `${Math.max(8, headerTopInsetPx + 8)}px`,
+                left: '52px',
+                zIndex: 151,
+                height: '34px',
+                padding: '0 10px',
+                borderRadius: '12px',
+                border: '1px solid var(--zterm-panel-border)',
+                background: 'var(--zterm-panel-surface)',
+                color: 'var(--zterm-panel-text)',
+                fontSize: '12px',
+                fontWeight: 850,
+                lineHeight: 1,
+                boxShadow: '0 8px 18px rgba(0,0,0,0.18)',
+                backdropFilter: 'blur(8px)',
+                pointerEvents: sessionDrawerOpen ? 'none' : 'auto',
+                opacity: sessionDrawerOpen ? 0 : 1,
+              }}
+            >
+              Sessions
+            </button>
             <TerminalSessionDrawer
               open={sessionDrawerOpen}
               topInsetPx={headerTopInsetPx}

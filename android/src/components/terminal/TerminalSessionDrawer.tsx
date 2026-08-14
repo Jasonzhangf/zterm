@@ -1,4 +1,15 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
+
+import {
+  DRAWER_WIDTH,
+  DRAWER_MAX_WIDTH,
+  SWIPE_CLOSE_THRESHOLD_PX,
+  SWIPE_CLOSE_VERTICAL_TOLERANCE_PX,
+  UNSCOPED_HOST_GROUP_KEY,
+  UNSCOPED_HOST_GROUP_LABEL,
+  resolveStatusTone,
+  resolveSessionGroupSlotTone,
+} from './terminal-session-drawer-helpers';
 import { getServerIdentityTone } from '../../lib/server-identity';
 
 export type TerminalSessionGroupSlotName = 'top' | 'center' | 'bottom';
@@ -43,7 +54,7 @@ export interface TerminalSessionDrawerProps {
   onCloseSession: (sessionId: string) => void;
   onAssignSessionGroupSlot?: (sessionId: string, slot: TerminalSessionGroupSlotName) => void;
   sessionGroupLayoutAxis?: TerminalSessionGroupLayoutAxis;
-  onOpenQuickTabPicker: (hostKey?: string, createOptions?: { sessionName?: string; cwd?: string }) => void;
+  onOpenQuickTabPicker: (hostKey?: string, createOptions?: { sessionName?: string; cwd?: string; terminalBackend?: 'tmux' | 'herdr' }) => void;
   onRefreshHostSessions?: (hostKey?: string) => void;
   onDebugAddEvent?: (eventName: string) => void;
   previewSelectionMode?: boolean;
@@ -53,61 +64,6 @@ export interface TerminalSessionDrawerProps {
   onTogglePreviewSession?: (sessionId: string) => void;
   onClearPreviewSelection?: () => void;
   terminalShellSkin?: 'light' | 'blue' | 'black';
-}
-
-const DRAWER_WIDTH = '48vw';
-const DRAWER_MAX_WIDTH = '187px';
-const SWIPE_CLOSE_THRESHOLD_PX = 48;
-const SWIPE_CLOSE_VERTICAL_TOLERANCE_PX = 44;
-const UNSCOPED_HOST_GROUP_KEY = '__unscoped__';
-const UNSCOPED_HOST_GROUP_LABEL = '未绑定主机';
-
-function resolveStatusTone(status: TerminalSessionDrawerItem['status']) {
-  switch (status) {
-    case 'connected':
-      return '#44e2a0';
-    case 'connecting':
-      return '#f5b659';
-    case 'disconnected':
-    case 'closed':
-    case 'error':
-      return '#ff727d';
-    default:
-      return 'var(--zterm-panel-muted)';
-  }
-}
-
-function resolveSessionGroupSlotTone(
-  slot: TerminalSessionGroupSlotName | null | undefined,
-  axis: TerminalSessionGroupLayoutAxis = 'vertical',
-) {
-  const beforeLabel = axis === 'horizontal' ? '左侧' : '上方';
-  const afterLabel = axis === 'horizontal' ? '右侧' : '下方';
-  switch (slot) {
-    case 'top':
-      return {
-        label: beforeLabel,
-        color: '#8bd5ff',
-        background: 'rgba(139, 213, 255, 0.14)',
-        border: 'rgba(139, 213, 255, 0.70)',
-      };
-    case 'center':
-      return {
-        label: '中间',
-        color: '#44e2a0',
-        background: 'rgba(68, 226, 160, 0.14)',
-        border: 'rgba(68, 226, 160, 0.72)',
-      };
-    case 'bottom':
-      return {
-        label: afterLabel,
-        color: '#f5b659',
-        background: 'rgba(245, 182, 89, 0.14)',
-        border: 'rgba(245, 182, 89, 0.72)',
-      };
-    default:
-      return null;
-  }
 }
 
 function TerminalSessionDrawerComponent({
@@ -147,6 +103,7 @@ function TerminalSessionDrawerComponent({
     hostKey?: string;
     sessionName: string;
     cwd: string;
+    terminalBackend: 'tmux' | 'herdr';
   } | null>(null);
 
   const buildDefaultSessionName = () => {
@@ -286,9 +243,14 @@ function TerminalSessionDrawerComponent({
     if (!open || !onRefreshHostSessions || !refreshHostKey) {
       return;
     }
-    void Promise.resolve(onRefreshHostSessions(refreshHostKey)).catch((error) => {
-      console.error('[TerminalSessionDrawer] Failed to refresh host sessions:', error);
-    });
+    // 打开动画（180ms）期间不触发刷新：避免"动画 + 列表重建"叠加成打开瞬间的
+    // 高频 DOM 重排（真机实测打开前 0.6s ~470 次 mutation = 用户感知的狂闪）。
+    const timer = window.setTimeout(() => {
+      void Promise.resolve(onRefreshHostSessions(refreshHostKey)).catch((error) => {
+        console.error('[TerminalSessionDrawer] Failed to refresh host sessions:', error);
+      });
+    }, 320);
+    return () => window.clearTimeout(timer);
   }, [onRefreshHostSessions, open, refreshHostKey]);
 
   const openNewSessionDialog = () => {
@@ -296,6 +258,7 @@ function TerminalSessionDrawerComponent({
       hostKey: currentHostGroup?.hostKey,
       sessionName: buildDefaultSessionName(),
       cwd: '~/',
+      terminalBackend: 'tmux',
     });
   };
 
@@ -305,7 +268,7 @@ function TerminalSessionDrawerComponent({
     if (!newSessionDraft || !sessionName) {
       return;
     }
-    onOpenQuickTabPicker(newSessionDraft.hostKey, { sessionName, cwd });
+    onOpenQuickTabPicker(newSessionDraft.hostKey, { sessionName, cwd, terminalBackend: newSessionDraft.terminalBackend });
     setNewSessionDraft(null);
   };
 
@@ -408,6 +371,26 @@ function TerminalSessionDrawerComponent({
                 {previewSelectedSessionIds.length}/6
               </span>
             ) : null}
+            <button
+              type="button"
+              aria-label="关闭 session 抽屉"
+              data-testid="terminal-session-drawer-close"
+              onClick={onClose}
+              style={{
+                width: '28px',
+                height: '28px',
+                padding: 0,
+                borderRadius: '8px',
+                border: '1px solid var(--zterm-panel-border)',
+                background: 'var(--zterm-panel-surface)',
+                color: 'var(--zterm-panel-text)',
+                fontSize: '16px',
+                lineHeight: 1,
+                fontWeight: 800,
+              }}
+            >
+              ×
+            </button>
             {onPreviewSelectionModeChange ? (
               <button
                 type="button"
@@ -1005,6 +988,36 @@ function TerminalSessionDrawerComponent({
                 }}
               />
             </label>
+            <div
+              aria-label="新 session backend"
+              style={{ display: 'flex', gap: '6px' }}
+            >
+              {(['tmux', 'herdr'] as const).map((backend) => (
+                <button
+                  key={backend}
+                  type="button"
+                  aria-pressed={newSessionDraft.terminalBackend === backend}
+                  onClick={() => setNewSessionDraft((current) => (
+                    current ? { ...current, terminalBackend: backend } : current
+                  ))}
+                  style={{
+                    flex: 1,
+                    height: '34px',
+                    borderRadius: '10px',
+                    border: '1px solid var(--zterm-panel-border)',
+                    background: newSessionDraft.terminalBackend === backend
+                      ? 'var(--zterm-panel-active)'
+                      : 'var(--zterm-panel-surface)',
+                    color: newSessionDraft.terminalBackend === backend
+                      ? 'var(--zterm-panel-accent)'
+                      : 'var(--zterm-panel-muted)',
+                    fontWeight: 850,
+                  }}
+                >
+                  {backend === 'tmux' ? 'tmux' : 'Herdr'}
+                </button>
+              ))}
+            </div>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button
                 type="button"
