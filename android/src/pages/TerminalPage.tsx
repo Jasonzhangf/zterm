@@ -3030,13 +3030,25 @@ function TerminalPageComponent({
     handleOpenQuickTabPickerForPane(splitVisible ? workspace.activePaneId : undefined, hostKey, createOptions);
   }, [handleOpenQuickTabPickerForPane, splitVisible, workspace.activePaneId]);
 
+  // 抽屉调试事件节流：cap:start/cap:end 每次 touch 都会触发，直接 setState 会让
+  // TerminalPage 全树 re-render（真机实测 swipe 一次列表 DOM 重建 2 轮 = 用户感知的
+  // 抽屉狂闪）。只在上一次事件不同时才记录，且 DebugOverlay 关闭时不记录。
+  const lastDrawerDebugEventRef = useRef<string | null>(null);
   const handleSessionDrawerDebugAddEvent = useCallback((eventName: string) => {
+    if (!debugOverlayVisible) {
+      lastDrawerDebugEventRef.current = eventName;
+      return;
+    }
+    if (lastDrawerDebugEventRef.current === eventName) {
+      return;
+    }
+    lastDrawerDebugEventRef.current = eventName;
     setSessionDrawerDebug((current) => ({
       ...current,
       lastEvent: eventName,
       eventSeq: current.eventSeq + 1,
     }));
-  }, []);
+  }, [debugOverlayVisible]);
 
   const handleOpenTabManager = useCallback((paneId?: string) => {
     setTabManagerScopePaneId(paneId || null);
