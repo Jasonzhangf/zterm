@@ -347,8 +347,10 @@ function TerminalSessionDrawerComponent({
           flexDirection: 'column',
           background: 'var(--zterm-panel-bg)',
           borderRight: '1px solid var(--zterm-panel-border)',
-          boxShadow: open ? '10px 0 28px var(--zterm-panel-shadow)' : 'none',
-          backdropFilter: 'blur(16px)',
+          // Android WebView 对 backdrop-filter 支持差：抽屉背景已是不透明色，
+          // 每次底层 terminal 内容更新都会触发模糊层重算 → 用户感知的抽屉闪烁。
+          // 移除 backdropFilter 与动态 boxShadow（消除合成层伪影）。
+          boxShadow: 'none',
           pointerEvents: open ? 'auto' : 'none',
         }}
       >
