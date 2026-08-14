@@ -1307,7 +1307,10 @@ function TerminalPageComponent({
         }
         items.push({
           id,
-          stableKey: `catalog:${ownerKey}${backendSuffix}::session:${sessionName}`,
+          // stableKey 必须不受 relay 身份归并抖动影响（daemonHostId 在 alias 间
+          // 振荡会让 ownerKey/identity key 亚秒级变化 → React key 变 → 整列表重建）。
+          // 用物理端点（bridgeHost:bridgePort）+ sessionName 作为纯稳定键。
+          stableKey: `catalog:${group.bridgeHost}:${group.bridgePort}::session:${sessionName}`,
           title: liveSession?.customName || liveSession?.title || sessionName,
           subtitle: `${serverIdentity.label} · ${sessionName}`,
           status: liveSession ? normalizeDrawerStatus(liveSession.state) : 'idle',
