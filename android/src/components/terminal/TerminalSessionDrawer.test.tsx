@@ -945,4 +945,44 @@ describe('TerminalSessionDrawer', () => {
       expect((after[i] as HTMLElement).dataset.marker).toBe(`M${i}`);
     }
   });
+
+  it('does not use backdrop-filter or open-dependent boxShadow on the drawer surface (Android WebView compositing flicker)', () => {
+    const { rerender } = render(
+      <TerminalSessionDrawer
+        open={false}
+        topInsetPx={0}
+        bottomInsetPx={0}
+        sessions={sessions.map((s) => ({ ...s }))}
+        hosts={[{ hostKey: 'h1', hostLabel: 'Host 1' }]}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+    const aside = screen.getByTestId('terminal-session-drawer');
+    const closedStyle = aside.style as unknown as Record<string, string>;
+    expect(closedStyle.backdropFilter ?? '').toBe('');
+    expect(closedStyle.backdropFilter).not.toContain('blur');
+    expect(closedStyle.boxShadow ?? '').toBe('none');
+
+    // 打开后：backdropFilter 仍不允许出现；boxShadow 不得随 open 切换
+    rerender(
+      <TerminalSessionDrawer
+        open
+        topInsetPx={0}
+        bottomInsetPx={0}
+        sessions={sessions.map((s) => ({ ...s }))}
+        hosts={[{ hostKey: 'h1', hostLabel: 'Host 1' }]}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+    const openStyle = aside.style as unknown as Record<string, string>;
+    expect(openStyle.backdropFilter ?? '').toBe('');
+    expect(openStyle.backdropFilter).not.toContain('blur');
+    expect(openStyle.boxShadow ?? '').toBe('none');
+  });
 });
