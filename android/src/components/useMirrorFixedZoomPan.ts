@@ -1,4 +1,5 @@
 import { useCallback, useRef, type TouchEvent } from 'react';
+import { TERMINAL_DRAWER_EDGE_SWIPE_START_PX } from '@zterm/shared';
 
 /**
  * UI shell 层手势+缩放 hook（只属于 gesture / visual scale）。
@@ -13,11 +14,17 @@ export interface MirrorFixedZoomPanOptions {
   widthMode: 'mirror-fixed' | 'adaptive-phone' | string;
   copyModeActive: boolean;
   reserveRightEdgeSwipe?: boolean;
+  /** 右缘保留区宽度 px（tab-swipe / preview 手势 owner） */
+  rightEdgeReservePx?: number;
   /** 当前 sessionId（用于持久化横向平移） */
   sessionId?: string | null;
   /** 读当前横向平移 offset（renderer/旧 handler 的真实源） */
   readHorizontalOffset?: () => number;
   onHorizontalOffsetChange?: (offsetPx: number) => void;
+  /** 单指纵向滚动意图（原 markUserScrollIntent 语义：触摸滚动期间防 follow 抢回） */
+  onVerticalScrollIntent?: () => void;
+  /** 单指横向 pan 结束：持久化当前 offset */
+  onHorizontalOffsetCommit?: (offsetPx: number) => void;
 }
 
 export interface MirrorFixedZoomPan {
@@ -99,7 +106,6 @@ export function useMirrorFixedZoomPan(options: MirrorFixedZoomPanOptions): Mirro
           startScale: scaleRef.current,
         };
         panRef.current.active = false;
-        event.stopPropagation();
         return;
       }
       if (touches.length === 1) {
@@ -107,17 +113,26 @@ export function useMirrorFixedZoomPan(options: MirrorFixedZoomPanOptions): Mirro
         pinchRef.current = null;
         const startX = touches[0].clientX;
         const viewportWidth = window.visualViewport?.width || window.innerWidth || 0;
+        const startOffsetPx = options.readHorizontalOffset?.() ?? 0;
         const reservedRightEdge =
           Boolean(options.reserveRightEdgeSwipe) &&
           viewportWidth > 0 &&
-          startX >= viewportWidth - 24;
+          startX >= viewportWidth - (options.rightEdgeReservePx ?? 24);
+        // 左/右缘把手势让给 drawer / tab-swipe owner（本 hook 不抢）
+        const reservedLeftEdge =
+          startX <= TERMINAL_DRAWER_EDGE_SWIPE_START_PX && startOffsetPx === 0;
+        const active = !reservedRightEdge && !reservedLeftEdge;
         panRef.current = {
-          active: !reservedRightEdge,
+          active,
           axis: null,
           startX,
           startY: touches[0].clientY,
-          startOffsetPx: options.readHorizontalOffset?.() ?? 0,
+          startOffsetPx,
         };
+        // 内容已横移或在中部按下：本 hook 接管横向手势，阻止父级 drawer 收到该触摸
+        if (active && (startOffsetPx > 0 || startX > TERMINAL_DRAWER_EDGE_SWIPE_START_PX)) {
+          event.stopPropagation();
+        }
         return;
       }
       panRef.current.active = false;
@@ -157,7 +172,8 @@ export function useMirrorFixedZoomPan(options: MirrorFixedZoomPanOptions): Mirro
           pan.axis = Math.abs(deltaX) > Math.abs(deltaY) ? 'horizontal' : 'vertical';
         }
         if (pan.axis !== 'horizontal') {
-          // 纵向：交给原生滚动，UI shell 不接管
+          // 纵向：交给原生滚动，仅标记用户滚动意图（防 follow 抢回）
+          options.onVerticalScrollIntent?.();
           return;
         }
         const nextOffset = Math.max(0, pan.startOffsetPx - deltaX);
@@ -166,14 +182,18 @@ export function useMirrorFixedZoomPan(options: MirrorFixedZoomPanOptions): Mirro
         }
         // 只有内容确实在横向平移时才拦截（offset 归零后不再 reserve，
         // 让事件冒泡给 TerminalTabSwipeSurface 处理 drawer swipe）
-        if (pan.startOffsetPx > 0 || nextOffset !== pan.startOffsetPx) {
+        if (
+          pan.startOffsetPx > 0 ||
+          pan.startX > TERMINAL_DRAWER_EDGE_SWIPE_START_PX ||
+          nextOffset !== pan.startOffsetPx
+        ) {
           event.preventDefault();
           event.stopPropagation();
         }
         return;
       }
     },
-    [applyScale, options.onHorizontalOffsetChange, options.widthMode],
+    [applyScale, options.onHorizontalOffsetChange, options.onVerticalScrollIntent, options.widthMode],
   );
 
   const onTouchEnd = useCallback(
@@ -183,11 +203,18 @@ export function useMirrorFixedZoomPan(options: MirrorFixedZoomPanOptions): Mirro
         // 仍是两指，忽略
         return;
       }
+      const consumedHorizontal = panRef.current.axis === 'horizontal';
+      if (consumedHorizontal) {
+        options.onHorizontalOffsetCommit?.(options.readHorizontalOffset?.() ?? 0);
+        // 横向 pan 手势的 touchEnd 也阻止冒泡（与 touchstart/move 一致，
+        // 避免父级 drawer 收到已由本 hook 消费的手势）
+        event.stopPropagation();
+      }
       pinchRef.current = null;
       panRef.current.active = false;
       twoFingerRef.current.active = false;
     },
-    [],
+    [options.onHorizontalOffsetCommit, options.readHorizontalOffset],
   );
 
   return {

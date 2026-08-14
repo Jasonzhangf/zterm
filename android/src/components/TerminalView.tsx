@@ -18,7 +18,6 @@ import {
   // renderer pure functions
   DEFAULT_ROWS,
   OVERSCAN_ROWS,
-  TERMINAL_DRAWER_EDGE_SWIPE_START_PX,
   TERMINAL_FONT_STACK,
   measureTerminalViewport,
   buildTerminalRenderRows,
@@ -209,7 +208,6 @@ const EMPTY_RENDER_BUFFER: SessionRenderBufferSnapshot = {
 
 const MIRROR_FIXED_HORIZONTAL_OFFSET_STORAGE_KEY =
   "zterm:terminal:mirror-fixed-horizontal-offsets";
-const HORIZONTAL_PAN_LOCK_PX = 8;
 
 function clampHorizontalOffset(offsetPx: number, maxOffsetPx: number) {
   if (!Number.isFinite(offsetPx)) {
@@ -319,10 +317,12 @@ function TerminalViewComponent({
     Math.floor(renderBuffer.bufferTailEndIndex || effectiveBufferEndIndex),
   );
   const followDemandAnchorEndIndex = bufferTailAnchorEndIndex;
+  const mirrorFixedVerticalScrollIntentRef = useRef<() => void>(() => {});
   const mirrorFixedZoomPan = useMirrorFixedZoomPan({
     widthMode,
     copyModeActive,
     reserveRightEdgeSwipe,
+    rightEdgeReservePx: SESSION_PREVIEW_RIGHT_EDGE_PX,
     sessionId,
     readHorizontalOffset: () => mirrorFixedHorizontalOffsetRef.current,
     onHorizontalOffsetChange: (offsetPx) => {
@@ -330,6 +330,14 @@ function TerminalViewComponent({
       setMirrorFixedHorizontalOffsetPx((current) =>
         current === offsetPx ? current : offsetPx,
       );
+    },
+    onVerticalScrollIntent: () => {
+      mirrorFixedVerticalScrollIntentRef.current();
+    },
+    onHorizontalOffsetCommit: (offsetPx) => {
+      if (sessionId) {
+        writeStoredHorizontalOffset(sessionId, offsetPx);
+      }
     },
   });
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -344,23 +352,7 @@ function TerminalViewComponent({
   const followScrollSyncTimerRef = useRef<number | null>(null);
   const recentViewportLayoutChangeTimerRef = useRef<number | null>(null);
   const followScrollStateRef = useRef(createTerminalFollowScrollState());
-  const horizontalPanRef = useRef<{
-    active: boolean;
-    axis: "horizontal" | "vertical" | null;
-    startX: number;
-    startY: number;
-    startOffsetPx: number;
-    consumedHorizontal: boolean;
-    consumedVertical: boolean;
-  }>({
-    active: false,
-    axis: null,
-    startX: 0,
-    startY: 0,
-    startOffsetPx: 0,
-    consumedHorizontal: false,
-    consumedVertical: false,
-  });
+
   const [mirrorFixedHorizontalOffsetPx, setMirrorFixedHorizontalOffsetPx] =
     useState(0);
   const mirrorFixedHorizontalOffsetRef = useRef(0);
@@ -1062,112 +1054,6 @@ function TerminalViewComponent({
     widthMode,
   ]);
 
-  const handleMirrorFixedTouchStart = useCallback(
-    (event: TouchEvent<HTMLDivElement>) => {
-      if (
-        widthMode !== "mirror-fixed" ||
-        copyModeActive ||
-        event.touches.length !== 1
-      ) {
-        horizontalPanRef.current.active = false;
-        return;
-      }
-      const startX = event.touches[0].clientX;
-      const startOffsetPx = mirrorFixedHorizontalOffsetRef.current;
-      const viewportWidth = window.visualViewport?.width || window.innerWidth || 0;
-      const reservedRightEdge = reserveRightEdgeSwipe
-        && viewportWidth > 0
-        && startX >= viewportWidth - SESSION_PREVIEW_RIGHT_EDGE_PX;
-      horizontalPanRef.current = {
-        active: !reservedRightEdge,
-        axis: null,
-        startX,
-        startY: event.touches[0].clientY,
-        startOffsetPx,
-        consumedHorizontal: false,
-        consumedVertical: false,
-      };
-      if (reservedRightEdge) return;
-      if (
-        startOffsetPx > 0 ||
-        startX > TERMINAL_DRAWER_EDGE_SWIPE_START_PX
-      ) {
-        event.stopPropagation();
-      }
-    },
-    [copyModeActive, reserveRightEdgeSwipe, widthMode],
-  );
-
-  const markUserScrollIntentRuntime = useCallback(
-    (durationMs: number) => {
-      applyFollowScrollTransition(markTerminalUserScrollIntent(
-        followScrollStateRef.current,
-        Date.now(),
-        durationMs,
-      ));
-    },
-    [applyFollowScrollTransition],
-  );
-
-  const handleMirrorFixedTouchMove = useCallback(
-    (event: TouchEvent<HTMLDivElement>) => {
-      const pan = horizontalPanRef.current;
-      if (!pan.active || widthMode !== "mirror-fixed" || event.touches.length !== 1) {
-        if (event.touches.length === 1) {
-          markUserScrollIntentRuntime(300);
-        }
-        return;
-      }
-      const deltaX = event.touches[0].clientX - pan.startX;
-      const deltaY = event.touches[0].clientY - pan.startY;
-      if (!pan.axis) {
-        if (
-          Math.abs(deltaX) < HORIZONTAL_PAN_LOCK_PX &&
-          Math.abs(deltaY) < HORIZONTAL_PAN_LOCK_PX
-        ) {
-          markUserScrollIntentRuntime(300);
-          return;
-        }
-        pan.axis = Math.abs(deltaX) > Math.abs(deltaY) ? "horizontal" : "vertical";
-      }
-      if (pan.axis !== "horizontal") {
-        // 纵向手势永远交给原生 scrollTop（UI shell 不接管纵向滚动，视觉缩放不改 buffer 几何）
-        markUserScrollIntentRuntime(300);
-        return;
-      }
-      const nextOffset = commitMirrorFixedHorizontalOffset(pan.startOffsetPx - deltaX);
-      const shouldReserveForRenderer =
-        pan.startOffsetPx > 0 ||
-        pan.startX > TERMINAL_DRAWER_EDGE_SWIPE_START_PX ||
-        nextOffset !== pan.startOffsetPx;
-      if (shouldReserveForRenderer) {
-        pan.consumedHorizontal = true;
-        event.preventDefault();
-        event.stopPropagation();
-      }
-    },
-    [commitMirrorFixedHorizontalOffset, markUserScrollIntentRuntime, widthMode],
-  );
-
-  const commitMirrorFixedTouchEnd = useCallback((event?: TouchEvent<HTMLDivElement>) => {
-    const pan = horizontalPanRef.current;
-    horizontalPanRef.current = {
-      active: false,
-      axis: null,
-      startX: 0,
-      startY: 0,
-      startOffsetPx: 0,
-      consumedHorizontal: false,
-      consumedVertical: false,
-    };
-    if (pan.consumedHorizontal) {
-      event?.stopPropagation();
-    }
-    if (widthMode === "mirror-fixed" && sessionId && pan.axis === "horizontal") {
-      writeStoredHorizontalOffset(sessionId, mirrorFixedHorizontalOffsetRef.current);
-    }
-  }, [sessionId, widthMode]);
-
   // Two-finger vertical drag is converted into SGR mouse wheel events so TUIs
   // (OpenCode / Codex) can scroll their internal history buffer. This bypasses
   // tmux alternate-screen limitations that prevent capture-pane from
@@ -1574,6 +1460,18 @@ function TerminalViewComponent({
     resolveScrollTopForRenderBottomIndex,
   ]);
   flushPendingFollowScrollSyncRef.current = flushPendingFollowScrollSync;
+
+  const markUserScrollIntentRuntime = useCallback(
+    (durationMs: number) => {
+      applyFollowScrollTransition(markTerminalUserScrollIntent(
+        followScrollStateRef.current,
+        Date.now(),
+        durationMs,
+      ));
+    },
+    [applyFollowScrollTransition],
+  );
+  mirrorFixedVerticalScrollIntentRef.current = () => markUserScrollIntentRuntime(300);
 
   const syncFollowScrollToAnchor = useCallback(() => {
     if (!refreshActive || isTerminalFollowScrollReading(followScrollStateRef.current)) {
@@ -2234,7 +2132,7 @@ function TerminalViewComponent({
           handleTwoFingerWheelTouchMove(event);
           return;
         }
-        handleMirrorFixedTouchMove(event);
+        // 单指手势（横向 pan / 纵向滚动意图 / pinch）只由 UI shell hook 处理
         mirrorFixedZoomPan.onTouchMove(event);
       }}
       onTouchStart={(event) => {
@@ -2243,17 +2141,14 @@ function TerminalViewComponent({
           handleTwoFingerWheelTouchStart(event);
           return;
         }
-        handleMirrorFixedTouchStart(event);
       }}
       onTouchEnd={(event) => {
         mirrorFixedZoomPan.onTouchEnd(event);
         commitTwoFingerWheelTouchEnd(event);
-        commitMirrorFixedTouchEnd(event);
       }}
       onTouchCancel={(event) => {
         mirrorFixedZoomPan.onTouchEnd(event);
         commitTwoFingerWheelTouchEnd(event);
-        commitMirrorFixedTouchEnd(event);
       }}
       onWheel={() => {
         markUserScrollIntentRuntime(250);
