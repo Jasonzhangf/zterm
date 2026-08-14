@@ -1244,6 +1244,8 @@ function TerminalPageComponent({
           terminalBackend: groupBackend,
         });
         const liveSession = liveSessionByReuseKey.get(reuseKey) || null;
+        // 业务 id 保持原语义（本地已打开 → local id，未打开 → remote key）；
+        // React key 稳定性改由 stableKey 承担，避免亚秒级连接状态抖动触发整列表重建。
         const id = liveSession?.id || `remote:${ownerKey}${backendSuffix}::session:${sessionName}`;
         const relayDevice = resolvedDaemonHostId ? relayDeviceByDaemonHostId.get(resolvedDaemonHostId) || null : null;
         const relayRtcCandidates = getRelayRtcEndpointCandidates(relayDevice?.daemon.endpoints || []);
@@ -1305,6 +1307,7 @@ function TerminalPageComponent({
         }
         items.push({
           id,
+          stableKey: `catalog:${ownerKey}${backendSuffix}::session:${sessionName}`,
           title: liveSession?.customName || liveSession?.title || sessionName,
           subtitle: `${serverIdentity.label} · ${sessionName}`,
           status: liveSession ? normalizeDrawerStatus(liveSession.state) : 'idle',
@@ -2705,8 +2708,11 @@ function TerminalPageComponent({
     handleSwitchSessionFromChrome(sessionId);
   }, [activateSessionInViewportSlot, handleSwitchSessionFromChrome]);
 
+  const drawerRemoteSessionsRef = useRef(drawerRemoteSessions);
+  drawerRemoteSessionsRef.current = drawerRemoteSessions;
+
   const handleSelectSessionFromDrawer = useCallback((sessionId: string) => {
-    const remoteTarget = drawerRemoteSessions.targets.get(sessionId);
+    const remoteTarget = drawerRemoteSessionsRef.current.targets.get(sessionId);
     if (remoteTarget) {
       const openedSessionId = onOpenDrawerRemoteSession?.(remoteTarget.target, remoteTarget.sessionName);
       if (typeof openedSessionId === 'string' && openedSessionId.trim()) {
@@ -2719,7 +2725,6 @@ function TerminalPageComponent({
     setSessionDrawerOpen(false);
   }, [
     activateSessionInViewportSlot,
-    drawerRemoteSessions.targets,
     handleActivateOpenSessionInViewport,
     onOpenDrawerRemoteSession,
   ]);
@@ -3050,6 +3055,19 @@ function TerminalPageComponent({
     }));
   }, [debugOverlayVisible]);
 
+  const handleCloseSessionDrawer = useCallback(() => {
+    setSessionDrawerOpen(false);
+  }, []);
+
+  const handleClearDrawerPreviewSelection = useCallback(() => {
+    persistSessionPreviewSelection({ version: 1, orderedTargets: [] });
+  }, [persistSessionPreviewSelection]);
+
+  const drawerPreviewSelectedSessionIds = useMemo(
+    () => sessionPreviewSessions.map((session) => session.id),
+    [sessionPreviewSessions],
+  );
+
   const handleOpenTabManager = useCallback((paneId?: string) => {
     setTabManagerScopePaneId(paneId || null);
     if (paneId) {
@@ -3321,7 +3339,7 @@ function TerminalPageComponent({
               bottomInsetPx={keyboardInset}
               sessions={drawerSessions}
               hosts={drawerHosts}
-              onClose={() => setSessionDrawerOpen(false)}
+              onClose={handleCloseSessionDrawer}
               onSelectSession={handleSelectSessionFromDrawer}
               onCloseSession={handleCloseSessionFromDrawer}
               onAssignSessionGroupSlot={handleAssignSessionGroupSlot}
@@ -3330,11 +3348,11 @@ function TerminalPageComponent({
               onRefreshHostSessions={onRefreshDrawerHostSessions}
               onDebugAddEvent={handleSessionDrawerDebugAddEvent}
               previewSelectionMode={sessionPreviewSelectionMode}
-              previewSelectedSessionIds={sessionPreviewSessions.map((session) => session.id)}
+              previewSelectedSessionIds={drawerPreviewSelectedSessionIds}
               previewSelectionError={sessionPreviewError}
               onPreviewSelectionModeChange={handleSessionPreviewSelectionModeChange}
               onTogglePreviewSession={handleToggleSessionPreviewSelection}
-              onClearPreviewSelection={() => persistSessionPreviewSelection({ version: 1, orderedTargets: [] })}
+              onClearPreviewSelection={handleClearDrawerPreviewSelection}
               terminalShellSkin={effectiveTerminalShellSkin}
             />
           </>

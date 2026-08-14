@@ -13,6 +13,7 @@ describe('TerminalSessionDrawer', () => {
   const sessions = [
     {
       id: 's1',
+      stableKey: 'stable-s1',
       title: 'demo',
       subtitle: '100.127.23.27:3333 · demo',
       status: 'connected' as const,
@@ -21,6 +22,7 @@ describe('TerminalSessionDrawer', () => {
     },
     {
       id: 's2',
+      stableKey: 'stable-s2',
       title: 'android',
       subtitle: '100.66.1.82:3333 · android',
       status: 'connecting' as const,
@@ -513,6 +515,7 @@ describe('TerminalSessionDrawer', () => {
     const sessionsWithHosts = [
       {
         id: 's1',
+      stableKey: `stable-s1`,
         title: 'demo',
         subtitle: '100.127.23.27:3333 · demo',
         status: 'connected' as const,
@@ -523,6 +526,7 @@ describe('TerminalSessionDrawer', () => {
       },
       {
         id: 's2',
+      stableKey: `stable-s2`,
         title: 'android',
         subtitle: '100.66.1.82:3333 · android',
         status: 'connecting' as const,
@@ -533,6 +537,7 @@ describe('TerminalSessionDrawer', () => {
       },
       {
         id: 's3',
+      stableKey: `stable-s3`,
         title: 'macbook',
         subtitle: '100.66.1.82:3333 · macbook',
         status: 'connected' as const,
@@ -594,6 +599,7 @@ describe('TerminalSessionDrawer', () => {
         sessions={[
           {
             id: 's1',
+      stableKey: `stable-s1`,
             title: 'demo',
             subtitle: 'Mac Studio · demo',
             status: 'connected',
@@ -644,6 +650,7 @@ describe('TerminalSessionDrawer', () => {
         sessions={[
           {
             id: 'stale-active',
+      stableKey: `stable-stale-active`,
             title: 'freehand',
             subtitle: 'daemon-Macstudio-old · freehand',
             status: 'connecting',
@@ -653,6 +660,7 @@ describe('TerminalSessionDrawer', () => {
           },
           {
             id: 'healthy-rcc',
+      stableKey: `stable-healthy-rcc`,
             title: 'rcc',
             subtitle: 'Mac Studio · rcc',
             status: 'connected',
@@ -676,6 +684,7 @@ describe('TerminalSessionDrawer', () => {
     const singleHostSessions = [
       {
         id: 's1',
+      stableKey: `stable-s1`,
         title: 'demo',
         subtitle: '100.127.23.27:3333 · demo',
         status: 'connected' as const,
@@ -685,6 +694,7 @@ describe('TerminalSessionDrawer', () => {
       },
       {
         id: 's2',
+      stableKey: `stable-s2`,
         title: 'android',
         subtitle: '100.127.23.27:3333 · android',
         status: 'connecting' as const,
@@ -714,9 +724,12 @@ describe('TerminalSessionDrawer', () => {
   it('preserves caller-provided order (opened before unopened)', () => {
     // 排序由 TerminalPage 负责；drawer 只保持传入顺序
     const orderedSessions = [
-      { id: 'o-bravo', title: 'bravo', subtitle: 'host · bravo', status: 'connected' as const, paneLabel: 'P1', active: true, hostKey: 'host:3333' },
-      { id: 'u-alpha', title: 'alpha', subtitle: 'host · alpha', status: 'idle' as const, hostKey: 'host:3333' },
-      { id: 'u-zeta', title: 'zeta', subtitle: 'host · zeta', status: 'idle' as const, hostKey: 'host:3333' },
+      { id: 'o-bravo',
+      stableKey: `stable-o-bravo`, title: 'bravo', subtitle: 'host · bravo', status: 'connected' as const, paneLabel: 'P1', active: true, hostKey: 'host:3333' },
+      { id: 'u-alpha',
+      stableKey: `stable-u-alpha`, title: 'alpha', subtitle: 'host · alpha', status: 'idle' as const, hostKey: 'host:3333' },
+      { id: 'u-zeta',
+      stableKey: `stable-u-zeta`, title: 'zeta', subtitle: 'host · zeta', status: 'idle' as const, hostKey: 'host:3333' },
     ];
     render(
       <TerminalSessionDrawer
@@ -743,6 +756,7 @@ describe('TerminalSessionDrawer', () => {
         sessions={[
           {
             id: 'ghost',
+      stableKey: `stable-ghost`,
             title: 'ghost',
             subtitle: '100.127.23.27:3333 · ghost',
             status: 'connected',

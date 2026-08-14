@@ -16,6 +16,11 @@ export type TerminalSessionGroupLayoutAxis = 'vertical' | 'horizontal';
 
 export interface TerminalSessionDrawerItem {
   id: string;
+  /**
+   * 稳定渲染键：React key 只用它，绝不随 liveSession 连接状态（id 的 local/remote
+   * 切换）变化——否则亚秒级状态抖动会触发整列表 DOM 重建（抽屉狂闪）。
+   */
+  stableKey: string;
   title: string;
   subtitle: string;
   status: 'connected' | 'connecting' | 'disconnected' | 'closed' | 'error' | 'idle';
@@ -87,6 +92,12 @@ function TerminalSessionDrawerComponent({
   onClearPreviewSelection,
   terminalShellSkin = 'light',
 }: TerminalSessionDrawerProps) {
+  // TEMP-DEBUG: 抽屉重建溯源（定位后移除）——统计组件重渲染次数
+  const debugRenderCountRef = useRef(0);
+  debugRenderCountRef.current += 1;
+  if (debugRenderCountRef.current === 1 || debugRenderCountRef.current % 10 === 0) {
+    console.log(`[DrawerDebug] render #${debugRenderCountRef.current} open=${open} sessions=${sessions.length} title0=${sessions[0]?.title ?? '-'} status0=${sessions[0]?.status ?? '-'}`);
+  }
   const touchStartRef = useRef<{ x: number; y: number } | null>(null);
   const longPressTimerRef = useRef<number | null>(null);
   const suppressNextClickRef = useRef(false);
@@ -516,7 +527,7 @@ function TerminalSessionDrawerComponent({
             const slotTone = resolveSessionGroupSlotTone(session.sessionGroupSlot, sessionGroupLayoutAxis);
             return (
             <div
-              key={session.id}
+              key={session.stableKey}
               data-active={session.active ? 'true' : 'false'}
               data-testid={`terminal-session-drawer-row-${session.id}`}
               onContextMenu={(event) => {
@@ -1158,94 +1169,61 @@ function TerminalSessionDrawerComponent({
   );
 }
 
-/**
- * 抽屉列表重建防护（真机实测：TerminalPage 每次 re-render——例如 debug 事件、
- * tick、键盘 inset 变化——都会传新的 sessions/hosts 数组引用，浅比较 memo 因此
- * 整列表重建 DOM（swipe 一次可观察到 4 个 item 全部 remove+add），用户感知为
- * "抽屉狂闪"。这里按**内容签名**比较列表类 props，引用变化但内容不变时不重建。
- */
-function terminalSessionDrawerItemSignature(item: TerminalSessionDrawerItem) {
-  return [
-    item.id,
-    item.title ?? '',
-    item.subtitle ?? '',
-    // status 是亚秒级抖动的会话状态（真机实测某 session state 每 ~500ms 在
-    // connected/idle 间翻转）。把它排除在 memo 签名之外：状态抖动只影响行内
-    // 小圆点/文本，不该驱动整列表 DOM 重建（用户感知的抽屉狂闪）。
-    // 行内 status 会在其它签名字段变化时顺带刷新；长期真实状态变化会随
-    // title/subtitle/active 等字段一起更新。
-    item.paneLabel ?? '',
-    item.hostKey ?? '',
-    item.hostLabel ?? '',
-    item.sessionGroupSlot ?? '',
-    item.remoteMissing ? '1' : '0',
-    item.active ? '1' : '0',
-  ].join('|');
-}
-
 function terminalSessionDrawerPropsEqual(
   prev: TerminalSessionDrawerProps,
   next: TerminalSessionDrawerProps,
 ) {
-  if (
-    prev.open !== next.open ||
-    prev.topInsetPx !== next.topInsetPx ||
-    prev.bottomInsetPx !== next.bottomInsetPx ||
-    prev.previewSelectionMode !== next.previewSelectionMode ||
-    prev.sessionGroupLayoutAxis !== next.sessionGroupLayoutAxis ||
-    prev.terminalShellSkin !== next.terminalShellSkin ||
-    prev.previewSelectionError !== next.previewSelectionError ||
-    prev.onClose !== next.onClose ||
-    prev.onSelectSession !== next.onSelectSession ||
-    prev.onCloseSession !== next.onCloseSession ||
-    prev.onAssignSessionGroupSlot !== next.onAssignSessionGroupSlot ||
-    prev.onOpenQuickTabPicker !== next.onOpenQuickTabPicker ||
-    prev.onRefreshHostSessions !== next.onRefreshHostSessions ||
-    prev.onDebugAddEvent !== next.onDebugAddEvent ||
-    prev.onPreviewSelectionModeChange !== next.onPreviewSelectionModeChange ||
-    prev.onTogglePreviewSession !== next.onTogglePreviewSession ||
-    prev.onClearPreviewSelection !== next.onClearPreviewSelection
-  ) {
-    return false;
-  }
-  if (prev.sessions.length !== next.sessions.length) {
-    return false;
-  }
-  for (let i = 0; i < prev.sessions.length; i += 1) {
-    if (
-      terminalSessionDrawerItemSignature(prev.sessions[i]!) !==
-      terminalSessionDrawerItemSignature(next.sessions[i]!)
-    ) {
-      return false;
-    }
+  // TEMP-DEBUG: 记录比较失败的具体字段（定位后移除）
+  const mismatchFields: string[] = [];
+  if (prev.open !== next.open) mismatchFields.push('open');
+  if (prev.topInsetPx !== next.topInsetPx) mismatchFields.push('topInsetPx');
+  if (prev.bottomInsetPx !== next.bottomInsetPx) mismatchFields.push('bottomInsetPx');
+  if (prev.previewSelectionMode !== next.previewSelectionMode) mismatchFields.push('previewSelectionMode');
+  if (prev.sessionGroupLayoutAxis !== next.sessionGroupLayoutAxis) mismatchFields.push('sessionGroupLayoutAxis');
+  if (prev.terminalShellSkin !== next.terminalShellSkin) mismatchFields.push('terminalShellSkin');
+  if (prev.previewSelectionError !== next.previewSelectionError) mismatchFields.push('previewSelectionError');
+  if (prev.onClose !== next.onClose) mismatchFields.push('onClose');
+  if (prev.onSelectSession !== next.onSelectSession) mismatchFields.push('onSelectSession');
+  if (prev.onCloseSession !== next.onCloseSession) mismatchFields.push('onCloseSession');
+  if (prev.onAssignSessionGroupSlot !== next.onAssignSessionGroupSlot) mismatchFields.push('onAssignSessionGroupSlot');
+  if (prev.onOpenQuickTabPicker !== next.onOpenQuickTabPicker) mismatchFields.push('onOpenQuickTabPicker');
+  if (prev.onRefreshHostSessions !== next.onRefreshHostSessions) mismatchFields.push('onRefreshHostSessions');
+  if (prev.onDebugAddEvent !== next.onDebugAddEvent) mismatchFields.push('onDebugAddEvent');
+  if (prev.onPreviewSelectionModeChange !== next.onPreviewSelectionModeChange) mismatchFields.push('onPreviewSelectionModeChange');
+  if (prev.onTogglePreviewSession !== next.onTogglePreviewSession) mismatchFields.push('onTogglePreviewSession');
+  if (prev.onClearPreviewSelection !== next.onClearPreviewSelection) mismatchFields.push('onClearPreviewSelection');
+  if (prev.sessions.length !== next.sessions.length) mismatchFields.push('sessions.length');
+  const sessionCount = Math.min(prev.sessions.length, next.sessions.length);
+  for (let i = 0; i < sessionCount; i += 1) {
+    const p = prev.sessions[i]!;
+    const n = next.sessions[i]!;
+    if (p.id !== n.id) mismatchFields.push(`sessions[${i}].id`);
+    if ((p.title ?? '') !== (n.title ?? '')) mismatchFields.push(`sessions[${i}].title`);
+    if ((p.subtitle ?? '') !== (n.subtitle ?? '')) mismatchFields.push(`sessions[${i}].subtitle`);
+    if ((p.paneLabel ?? '') !== (n.paneLabel ?? '')) mismatchFields.push(`sessions[${i}].paneLabel`);
+    if ((p.hostKey ?? '') !== (n.hostKey ?? '')) mismatchFields.push(`sessions[${i}].hostKey`);
+    if ((p.hostLabel ?? '') !== (n.hostLabel ?? '')) mismatchFields.push(`sessions[${i}].hostLabel`);
+    if ((p.sessionGroupSlot ?? '') !== (n.sessionGroupSlot ?? '')) mismatchFields.push(`sessions[${i}].sessionGroupSlot`);
+    if (Boolean(p.remoteMissing) !== Boolean(n.remoteMissing)) mismatchFields.push(`sessions[${i}].remoteMissing`);
+    if (Boolean(p.active) !== Boolean(n.active)) mismatchFields.push(`sessions[${i}].active`);
   }
   const prevHosts = prev.hosts ?? [];
   const nextHosts = next.hosts ?? [];
-  if (prevHosts.length !== nextHosts.length) {
-    return false;
-  }
-  for (let i = 0; i < prevHosts.length; i += 1) {
+  if (prevHosts.length !== nextHosts.length) mismatchFields.push('hosts.length');
+  const hostCount = Math.min(prevHosts.length, nextHosts.length);
+  for (let i = 0; i < hostCount; i += 1) {
     const a = prevHosts[i]!;
     const b = nextHosts[i]!;
-    if (
-      a.hostKey !== b.hostKey ||
-      a.hostLabel !== b.hostLabel ||
-      a.connected !== b.connected
-    ) {
-      return false;
-    }
+    if (a.hostKey !== b.hostKey) mismatchFields.push(`hosts[${i}].hostKey`);
+    if (a.hostLabel !== b.hostLabel) mismatchFields.push(`hosts[${i}].hostLabel`);
   }
   const prevSelected = prev.previewSelectedSessionIds ?? [];
   const nextSelected = next.previewSelectedSessionIds ?? [];
-  if (prevSelected.length !== nextSelected.length) {
-    return false;
+  if (prevSelected.length !== nextSelected.length) mismatchFields.push('previewSelected.length');
+  if (mismatchFields.length > 0) {
+    console.log(`[DrawerCompare] mismatch: ${mismatchFields.join(',')}`);
   }
-  for (let i = 0; i < prevSelected.length; i += 1) {
-    if (prevSelected[i] !== nextSelected[i]) {
-      return false;
-    }
-  }
-  return true;
+  return mismatchFields.length === 0;
 }
 
 export const TerminalSessionDrawer = memo(
