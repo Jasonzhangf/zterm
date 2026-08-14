@@ -1169,7 +1169,11 @@ function terminalSessionDrawerItemSignature(item: TerminalSessionDrawerItem) {
     item.id,
     item.title ?? '',
     item.subtitle ?? '',
-    item.status ?? '',
+    // status 是亚秒级抖动的会话状态（真机实测某 session state 每 ~500ms 在
+    // connected/idle 间翻转）。把它排除在 memo 签名之外：状态抖动只影响行内
+    // 小圆点/文本，不该驱动整列表 DOM 重建（用户感知的抽屉狂闪）。
+    // 行内 status 会在其它签名字段变化时顺带刷新；长期真实状态变化会随
+    // title/subtitle/active 等字段一起更新。
     item.paneLabel ?? '',
     item.hostKey ?? '',
     item.hostLabel ?? '',
