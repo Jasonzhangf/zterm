@@ -376,7 +376,33 @@ describe('TerminalSessionDrawer', () => {
     expect(onOpenQuickTabPicker).toHaveBeenCalledWith(undefined, {
       sessionName: 'work-api',
       cwd: '~/code/api',
+      terminalBackend: 'tmux',
     });
+  });
+
+  it('passes Herdr backend from the real drawer new-session form', () => {
+    const onOpenQuickTabPicker = vi.fn();
+
+    render(
+      <TerminalSessionDrawer
+        open
+        sessions={sessions}
+        onClose={vi.fn()}
+        onSelectSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenQuickTabPicker={onOpenQuickTabPicker}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('terminal-session-drawer-add'));
+    fireEvent.change(screen.getByLabelText('新 session 名称'), { target: { value: 'hd-codex' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Herdr' }));
+    fireEvent.click(screen.getByText('创建'));
+
+    expect(onOpenQuickTabPicker).toHaveBeenCalledWith(undefined, expect.objectContaining({
+      sessionName: 'hd-codex',
+      terminalBackend: 'herdr',
+    }));
   });
 
   it('does not invent a host identity when caller omits hostKey', () => {
@@ -401,6 +427,7 @@ describe('TerminalSessionDrawer', () => {
     expect(onOpenQuickTabPicker).toHaveBeenCalledWith(undefined, {
       sessionName: 'unscoped-work',
       cwd: '~/code/unscoped',
+      terminalBackend: 'tmux',
     });
     expect(onOpenQuickTabPicker).not.toHaveBeenCalledWith('default', expect.anything());
   });
@@ -602,6 +629,7 @@ describe('TerminalSessionDrawer', () => {
     expect(onOpenQuickTabPicker).toHaveBeenCalledWith('daemon-b', {
       sessionName: 'work-api',
       cwd: '~/code/api',
+      terminalBackend: 'tmux',
     });
   });
 
@@ -866,5 +894,41 @@ describe('TerminalSessionDrawer', () => {
 
     expect(screen.getByTestId('terminal-session-drawer-slot-menu-top').textContent).toContain('放到左侧');
     expect(screen.getByTestId('terminal-session-drawer-slot-menu-bottom').textContent).toContain('放到右侧');
+  });
+
+  it('does not rebuild drawer list DOM when identical session content arrives with new array references', () => {
+    const base = {
+      open: true,
+      topInsetPx: 0,
+      bottomInsetPx: 0,
+      sessions: sessions.map((s) => ({ ...s })),
+      hosts: [{ hostKey: 'h1', hostLabel: 'Host 1' }],
+      onClose: vi.fn(),
+      onSelectSession: vi.fn(),
+      onCloseSession: vi.fn(),
+      onOpenQuickTabPicker: vi.fn(),
+      onDebugAddEvent: vi.fn(),
+    };
+    const { rerender } = render(<TerminalSessionDrawer {...base} />);
+    const list = screen.getByTestId('terminal-session-drawer-list');
+    const rows = Array.from(list.children);
+    rows.forEach((row, index) => {
+      (row as HTMLElement).dataset.marker = `M${index}`;
+    });
+
+    // 相同内容、全新引用（模拟 TerminalPage re-render 导致的 drawerSessions 重算）
+    rerender(
+      <TerminalSessionDrawer
+        {...base}
+        sessions={sessions.map((s) => ({ ...s }))}
+        hosts={[{ hostKey: 'h1', hostLabel: 'Host 1' }]}
+      />,
+    );
+
+    const after = Array.from(list.children);
+    expect(after.length).toBe(rows.length);
+    for (let i = 0; i < after.length; i += 1) {
+      expect((after[i] as HTMLElement).dataset.marker).toBe(`M${i}`);
+    }
   });
 });
