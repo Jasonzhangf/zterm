@@ -170,8 +170,8 @@ describe('server transport/session lifecycle truth gates', () => {
     const reconcileLeaseBlock = extractBlock(mirrorRuntimeSource, 'function reconcileAdaptiveWidthLeases', 2200);
     expect(reconcileLeaseBlock).not.toContain('mirror.cols = targetCols');
     expect(reconcileLeaseBlock).not.toContain('writeMirrorBaselineGeometry(mirror, {');
-    const applyAdaptiveBlock = extractBlock(mirrorRuntimeSource, 'function applyAdaptiveTmuxWidth', 1800);
-    const releaseAdaptiveBlock = extractBlock(mirrorRuntimeSource, 'function releaseAdaptiveTmuxWidth', 1800);
+    const applyAdaptiveBlock = extractBlock(mirrorRuntimeSource, 'function applyAdaptiveTmuxWidth', 2400);
+    const releaseAdaptiveBlock = extractBlock(mirrorRuntimeSource, 'function releaseAdaptiveTmuxWidth', 2400);
     expect(applyAdaptiveBlock).toContain("deps.runTmux(['resize-window'");
     expect(releaseAdaptiveBlock).toContain("deps.runTmux(['resize-window'");
     expect(releaseAdaptiveBlock).toContain("'window-size'");
@@ -302,11 +302,11 @@ describe('server transport/session lifecycle truth gates', () => {
     const startMirrorBlock = extractBlock(mirrorRuntimeSource, 'async function startMirror(', 1200);
     const createBlock = extractBlock(controlRuntimeSource, "case 'tmux-create-session':", 420);
 
-    expect(source).toContain('assertTmuxSessionExists: (sessionName) => {');
+    expect(source).toContain('assertTmuxSessionExists: (sessionName, backend) => {');
     expect(source).toContain("'has-session', '-t', terminalControlRuntime.buildExactTmuxSessionTarget(sessionName)");
     expect(source).not.toContain("runTmux(['new-session', '-d', '-s', sessionName");
-    expect(startMirrorBlock).toContain('deps.assertTmuxSessionExists(mirror.sessionName);');
+    expect(startMirrorBlock).toContain('deps.assertTmuxSessionExists(mirror.sessionName, mirror.backend);');
     expect(startMirrorBlock).not.toContain('new-session');
-    expect(createBlock).toContain('deps.createDetachedTmuxSession(message.payload.sessionName, message.payload.cwd');
+    expect(createBlock).toContain('deps.createDetachedTmuxSession(message.payload.sessionName, message.payload.cwd, backend');
   });
 });

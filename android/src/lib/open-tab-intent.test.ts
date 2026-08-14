@@ -14,6 +14,7 @@ import {
   moveOpenTabIntentSession,
   normalizeOpenTabIntentState,
   renameOpenTabIntentSession,
+  renameRemoteOpenTabIntentSession,
   resolveRestoredOpenTabIntentState,
   resolveRequestedOpenTabActiveSessionId,
   upsertOpenTabIntentSession,
@@ -261,6 +262,46 @@ describe('open-tab intent truth', () => {
     expect(moved.tabs[0]?.sessionId).toBe('s2');
     expect(moved.tabs[0]?.customName).toBe('renamed');
     expect(activated.activeSessionId).toBe('s1');
+  });
+
+  it('migrates remote tmux identity without overwriting a local custom tab name', () => {
+    const opened = normalizeOpenTabIntentState([{
+      sessionId: 's1',
+      hostId: 'host-s1',
+      connectionName: 'conn-s1',
+      bridgeHost: '127.0.0.1',
+      bridgePort: 3333,
+      sessionName: 'old-tmux',
+      customName: 'My Local Tab',
+      createdAt: 1,
+    }], 's1');
+
+    const renamed = renameRemoteOpenTabIntentSession(opened, 's1', 'renamed-tmux');
+
+    expect(renamed.tabs[0]).toMatchObject({
+      sessionName: 'renamed-tmux',
+      customName: 'My Local Tab',
+    });
+  });
+
+  it('keeps generated open-tab display names in sync across consecutive remote renames', () => {
+    const opened = normalizeOpenTabIntentState([{
+      sessionId: 's1',
+      hostId: 'host-s1',
+      connectionName: 'conn-s1',
+      bridgeHost: '127.0.0.1',
+      bridgePort: 3333,
+      sessionName: 'first-tmux',
+      customName: 'first-tmux',
+      createdAt: 1,
+    }], 's1');
+
+    const renamed = renameRemoteOpenTabIntentSession(opened, 's1', 'second-tmux');
+
+    expect(renamed.tabs[0]).toMatchObject({
+      sessionName: 'second-tmux',
+      customName: 'second-tmux',
+    });
   });
 
   it('upserts a new distinct session id without deleting an existing semantic peer', () => {

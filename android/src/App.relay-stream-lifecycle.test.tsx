@@ -457,29 +457,29 @@ describe('App relay device stream reconnect lifecycle', () => {
       options.onDirectory?.({
         schemaVersion: 1,
         user: { id: 'u1', username: 'jason' },
-        updatedAt: '2026-07-21T00:00:00.000Z',
+        updatedAt: new Date().toISOString(),
         devices: [{
           deviceId: 'daemon-device-1',
           deviceName: 'mac-studio',
           platform: 'darwin',
           appVersion: '0.1.3',
-          client: { connected: false, lastSeenAt: '2026-07-21T00:00:00.000Z' },
+          client: { connected: false, lastSeenAt: new Date().toISOString() },
           daemon: {
             hostId: 'mac-studio',
             version: '0.1.3',
-            presence: { connected: true, lastSeenAt: '2026-07-21T00:00:00.000Z' },
+            presence: { connected: true, lastSeenAt: new Date().toISOString() },
             endpoints: [{
               id: 'relay-rtc:mac-studio',
               kind: 'relay-rtc',
               relayHostId: 'mac-studio',
               authRequired: true,
-              lastSeenAt: '2026-07-21T00:00:00.000Z',
+              lastSeenAt: new Date().toISOString(),
             }],
             sessions: [{
               name: 'zterm',
-              updatedAt: '2026-07-21T00:00:00.000Z',
+              updatedAt: new Date().toISOString(),
             }],
-            lastPublishedAt: '2026-07-21T00:00:00.000Z',
+            lastPublishedAt: new Date().toISOString(),
           },
         }],
       });
@@ -500,11 +500,11 @@ describe('App relay device stream reconnect lifecycle', () => {
         deviceName: 'mac-studio',
         platform: 'darwin',
         appVersion: '0.1.3',
-        updatedAt: '2026-07-21T00:00:01.000Z',
-        client: { connected: false, lastSeenAt: '2026-07-21T00:00:01.000Z' },
+        updatedAt: new Date().toISOString(),
+        client: { connected: false, lastSeenAt: new Date().toISOString() },
         daemon: {
           connected: true,
-          lastSeenAt: '2026-07-21T00:00:01.000Z',
+          lastSeenAt: new Date().toISOString(),
           hostId: 'mac-studio',
           version: '0.1.3',
         },
@@ -516,7 +516,6 @@ describe('App relay device stream reconnect lifecycle', () => {
       expect(latest).toHaveLength(1);
       expect(latest[0]).toEqual(expect.objectContaining({
         deviceId: 'daemon-device-1',
-        updatedAt: '2026-07-21T00:00:01.000Z',
       }));
       expect(latest[0].daemon).toEqual(expect.objectContaining({
         hostId: 'mac-studio',

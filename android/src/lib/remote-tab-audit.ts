@@ -21,9 +21,12 @@ export interface RemoteTabAuditDeps {
 }
 
 function buildAuditOwnerKey(target: Pick<PersistedOpenTab | SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort'>) {
-  return target.daemonHostId?.trim()
+  const ownerKey = target.daemonHostId?.trim()
     ? `daemon:${target.daemonHostId.trim()}`
     : `bridge:${target.bridgeHost.trim()}::${Math.max(0, Math.floor(target.bridgePort || 0))}`;
+  return ('terminalBackend' in target && target.terminalBackend === 'herdr')
+    ? `${ownerKey}::backend:herdr`
+    : ownerKey;
 }
 
 function shouldAuditSessionGroups(reason: string) {

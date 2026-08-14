@@ -43,49 +43,6 @@ function readPersistedPageState(options?: { allowTerminal?: boolean }): AppPageS
   return openConnectionsPage();
 }
 
-function hasPersistedOpenTabRestoreCandidate(): boolean {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-
-  try {
-    // Legacy persistence (ACTIVE_SESSION / SAVED_TAB_LISTS) is cleared on
-    // cold start by open-tab-persistence; it must NOT count as a terminal
-    // restore candidate, otherwise the first paint would jump into a terminal
-    // shell that is about to be cleaned back to connections.
-    if (localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)) {
-      return false;
-    }
-    const rawTabs = localStorage.getItem(STORAGE_KEYS.OPEN_TABS);
-    if (!rawTabs) {
-      return false;
-    }
-    const parsedTabs = JSON.parse(rawTabs) as unknown;
-    return Array.isArray(parsedTabs) && parsedTabs.length > 0;
-  } catch (error) {
-    console.error('[App] Failed to inspect persisted open-tab restore truth:', error);
-    return false;
-  }
-}
-
-function hasPersistedTerminalRouteIntent(): boolean {
-  if (typeof window === 'undefined') {
-    return false;
-  }
-
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE);
-    if (!raw) {
-      return false;
-    }
-    const parsed = JSON.parse(raw) as Partial<AppPageState> | null;
-    return Boolean(parsed && typeof parsed === 'object' && parsed.kind === 'terminal');
-  } catch (error) {
-    console.error('[App] Failed to inspect persisted terminal route intent:', error);
-    return false;
-  }
-}
-
 interface UseAppPageStateOptions {
   hosts: Host[];
   sessions: Session[];
@@ -123,19 +80,7 @@ export function useAppPageState(options: UseAppPageStateOptions): AppPageStateRe
   } = options;
 
   const initialActiveSessionOwnsTerminal = sessions.some((session) => session.id === runtimeActiveSessionId);
-  const pendingTerminalRestoreIntentRef = useRef(
-    !initialActiveSessionOwnsTerminal
-    && hasPersistedTerminalRouteIntent()
-    && hasPersistedOpenTabRestoreCandidate(),
-  );
   const [pageState, setPageState] = useState<AppPageState>(() => {
-    // Pending terminal restore: open the terminal shell on the very first
-    // paint so the first frame is the dark terminal surface, not the light
-    // Connections page (which flashed as a white screen until the runtime
-    // session hydrated and the restore effect switched pages).
-    if (pendingTerminalRestoreIntentRef.current) {
-      return openTerminalPage();
-    }
     return readPersistedPageState({ allowTerminal: initialActiveSessionOwnsTerminal });
   });
   const restoredRouteHandledRef = useRef(false);
@@ -194,17 +139,6 @@ export function useAppPageState(options: UseAppPageStateOptions): AppPageStateRe
   }, [activeSession?.id, ensureTerminalPageVisible, runtimeActiveSessionId, sessions]);
 
   useEffect(() => {
-    if (
-      pendingTerminalRestoreIntentRef.current
-      && pageState.kind === 'terminal'
-      && hasPersistedOpenTabRestoreCandidate()
-    ) {
-      // Pending terminal restore: the first paint is already the dark
-      // terminal shell; keep the persisted intent (do not rewrite ACTIVE_PAGE
-      // or clear the pending flag) until the runtime session hydrates.
-      return;
-    }
-    pendingTerminalRestoreIntentRef.current = false;
     try {
       localStorage.setItem(
         STORAGE_KEYS.ACTIVE_PAGE,

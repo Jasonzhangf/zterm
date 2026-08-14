@@ -6,7 +6,6 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type WheelEvent as ReactWheelEvent,
@@ -14,7 +13,6 @@ import {
 import { App as CapacitorApp } from '@capacitor/app';
 import ztermRemoteWindowLogoUrl from '../../../../assets/logo_engraved.png';
 import { useSharedDraggableDrag, SHARED_DRAG_SUPPRESS_CLICK_MS } from './draggable-bubble-shared';
-import { mobileTheme } from '../../lib/mobile-ui';
 import type {
   RemoteWindowStreamErrorPayload,
   RemoteWindowInputEventPayload,
@@ -74,10 +72,8 @@ import {
 } from '../../lib/remote-window-video-quality';
 import {
   buildRemoteWindowClickInputEventRuntime,
-
   createRemoteWindowTouchPointerState,
   dispatchRemoteWindowTouchInputActionsRuntime,
-  isRemoteWindowInputSupportedTarget,
   resolveRemoteWindowTouchPairPointerDownRuntime,
   resolveRemoteWindowTouchPairPointerMoveRuntime,
   resolveRemoteWindowTouchPairPointerUpRuntime,
@@ -86,18 +82,83 @@ import {
   resolveRemoteWindowTouchPointerMoveRuntime,
   resolveRemoteWindowTouchPointerUpRuntime,
   resolveRemoteWindowTouchSurfacePointRuntime,
-  REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION,
   REMOTE_WINDOW_LONG_PRESS_MS,
   type RemoteWindowTouchInputDebugEvent,
   type RemoteWindowTouchLocalEffect,
   type RemoteWindowTouchPairPointerSample,
-
-  type RemoteWindowTouchPointerSample,
   type RemoteWindowTouchPointerState,
   type RemoteWindowTouchSurfaceGeometry,
 } from '../../lib/remote-window-touch-action-runtime';
 import { WindowGroupLayout } from './WindowGroupLayout';
+import {
+  FLOATING_ENTRY_TOP_MARGIN_PX,
+  FLOATING_ENTRY_VIEWPORT_MARGIN_PX,
+  FLOATING_OVERLAY_MAX_WIDTH_PX,
+  FLOATING_OVERLAY_MIN_WIDTH_PX,
+  FLOATING_OVERLAY_TOOLBAR_ESTIMATE_PX,
+  FLOATING_OVERLAY_TOP_SAFE_MARGIN_PX,
+  FLOATING_OVERLAY_VIEWPORT_MARGIN_PX,
+  REMOTE_WINDOW_ACTIVE_CATALOG_SYNC_INTERVAL_MS,
+  REMOTE_WINDOW_CATALOG_PROJECTION_CACHE_TTL_MS,
+  REMOTE_WINDOW_CATALOG_UI_TIMEOUT_MS,
+  REMOTE_WINDOW_DOUBLE_TAP_MS,
+  REMOTE_WINDOW_DOUBLE_TAP_SLOP_PX,
+  REMOTE_WINDOW_DUAL_STREAM_SWITCH_TIMEOUT_MS,
+  REMOTE_WINDOW_FLOATING_BOTTOM_BASE_PX,
+  REMOTE_WINDOW_FULLSCREEN_MAX_SCALE,
+  REMOTE_WINDOW_FULLSCREEN_MIN_SCALE,
+  REMOTE_WINDOW_FULLSCREEN_PAN_TAP_THRESHOLD_PX,
+  REMOTE_WINDOW_SECOND_FINGER_UPGRADE_PX,
+  REMOTE_WINDOW_THUMBNAIL_MAX_REQUESTS_PER_TICK,
+  REMOTE_WINDOW_THUMBNAIL_REFRESH_INTERVAL_MS,
+  type FloatingResizeAnchor,
+  type RemoteWindowInputMode,
+} from './remote-window-overlay-constants';
+import {
+  readRemoteWindowInputMode,
+  readRemoteWindowTouchScrollFraction,
+  readRemoteWindowTouchScrollInverted,
+  readStoredEntryPosition,
+  writeRemoteWindowInputMode,
+  writeStoredEntryPosition,
+  type FloatingEntryPosition,
+  type RemoteWindowTouchScrollFraction,
+} from './remote-window-overlay-storage';
 
+import {
+  SurfaceSize,
+  FullscreenViewportState,
+  FullscreenDisplayMode,
+  SurfacePointerPosition,
+  SurfacePointerGesture,
+  FloatingOverlayResize,
+  FloatingOverlayOffset,
+  initialFullscreenViewport,
+  initialFullscreenDisplayMode,
+  cloneRemoteWindowCatalogPayload,
+  clampFloatingOffset,
+  clampNumber,
+  clampFullscreenViewport,
+  resolveZoomedContentRect,
+  resolveAnchoredFullscreenViewportScale,
+  resolveFloatingOverlaySizing,
+  resolveStartedCaptureFrameSize,
+  resolveRemoteWindowDisplaySourceSize,
+  resolveRemoteWindowFullscreenFillReferenceSize,
+  formatTargetKind,
+  isRemoteWindowInputSupported,
+  readRemoteWindowNetworkQuality,
+  pointerSampleFromReactEvent,
+  toOverlayTouchGesture,
+  toRemoteWindowTouchGestureState,
+  getRemoteWindowNetworkConnection,
+  formatTargetSubtitle,
+  RemoteWindowAppTargetGroup,
+  getRemoteWindowAppGroupId,
+  buildRemoteWindowAppTargetGroups,
+  safeRemoteWindowGroupId,
+} from './remote-window-overlay-helpers';
+import { styles } from './remote-window-overlay-styles';
 interface RemoteWindowOverlayProps {
   activeSessionId?: string | null;
   appForegroundActive?: boolean;
@@ -224,36 +285,6 @@ export interface RemoteWindowLiveDiagnostics {
   streamId: string | null;
 }
 
-interface FloatingOverlayOffset {
-  x: number;
-  y: number;
-}
-
-interface FloatingEntryPosition {
-  x: number | null;
-  y: number | null;
-}
-
-function readStoredEntryPosition(): FloatingEntryPosition {
-  if (typeof window === 'undefined') {
-    return { x: null, y: null };
-  }
-  try {
-    const raw = localStorage.getItem(REMOTE_WINDOW_ENTRY_POSITION_STORAGE_KEY);
-    if (!raw) {
-      return { x: null, y: null };
-    }
-    const parsed = JSON.parse(raw) as Partial<{ x: number; y: number }>;
-    return {
-      x: typeof parsed.x === 'number' && Number.isFinite(parsed.x) ? parsed.x : null,
-      y: typeof parsed.y === 'number' && Number.isFinite(parsed.y) ? parsed.y : null,
-    };
-  } catch (error) {
-    console.warn('[RemoteWindowOverlay] Failed to read stored entry position:', error);
-    return { x: null, y: null };
-  }
-}
-
 interface RemoteWindowCatalogProjectionSnapshot {
   sessionId: string;
   payload: RemoteWindowStreamTargetsResponsePayload;
@@ -267,590 +298,6 @@ interface RemoteWindowViewportDebugSnapshot {
   surface: string;
   overlay: string;
   updatedAt: number;
-}
-
-interface SurfaceSize {
-  width: number;
-  height: number;
-}
-
-interface SurfaceRect {
-  left: number;
-  top: number;
-  width: number;
-  height: number;
-}
-
-interface FullscreenViewportState {
-  scale: number;
-  panX: number;
-  panY: number;
-}
-
-type FullscreenDisplayMode = 'fit' | 'fill';
-
-const REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_OPTIONS = [0.125, 0.25, 0.5, 1] as const;
-type RemoteWindowTouchScrollFraction = (typeof REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_OPTIONS)[number];
-
-type NavigatorConnectionLike = EventTarget & {
-  effectiveType?: string;
-  downlink?: number;
-  rtt?: number;
-  saveData?: boolean;
-};
-
-interface SurfacePointerPosition {
-  clientX: number;
-  clientY: number;
-}
-
-type SurfacePointerGesture =
-  | RemoteWindowTouchPointerState
-  | {
-      mode: 'pan';
-      pointerId: number;
-      startClientX: number;
-      startClientY: number;
-      startPanX: number;
-      startPanY: number;
-      moved: boolean;
-    };
-
-interface FloatingOverlayResize {
-  pointerId: number;
-  startClientX: number;
-  startClientY: number;
-  startWidth: number;
-  startOffset: FloatingOverlayOffset;
-  minWidth: number;
-  maxWidth: number;
-  aspectRatio: number;
-  anchor: FloatingResizeAnchor;
-  captureElement: HTMLDivElement | null;
-}
-
-type FloatingResizeAnchor = 'left-bottom' | 'right-bottom';
-
-const FLOATING_OVERLAY_VIEWPORT_MARGIN_PX = 8;
-const FLOATING_OVERLAY_TOP_SAFE_MARGIN_PX = 48;
-const REMOTE_WINDOW_FLOATING_BOTTOM_BASE_PX = 118;
-const FLOATING_ENTRY_VIEWPORT_MARGIN_PX = 10;
-const FLOATING_ENTRY_TOP_MARGIN_PX = 28;
-const REMOTE_WINDOW_ENTRY_POSITION_STORAGE_KEY = 'zterm:remote-window:entry-position-v1';
-const FLOATING_OVERLAY_MIN_WIDTH_PX = 168;
-const FLOATING_OVERLAY_MAX_WIDTH_PX = 560;
-const FLOATING_OVERLAY_TOOLBAR_ESTIMATE_PX = 50;
-const REMOTE_WINDOW_FULLSCREEN_MIN_SCALE = 1;
-const REMOTE_WINDOW_FULLSCREEN_MAX_SCALE = 4;
-const REMOTE_WINDOW_FULLSCREEN_PAN_TAP_THRESHOLD_PX = 8;
-const REMOTE_WINDOW_SECOND_FINGER_UPGRADE_PX = 8;
-
-const REMOTE_WINDOW_CATALOG_UI_TIMEOUT_MS = 20_000;
-const REMOTE_WINDOW_DUAL_STREAM_SWITCH_TIMEOUT_MS = 3_000;
-const REMOTE_WINDOW_CATALOG_PROJECTION_CACHE_TTL_MS = 60_000;
-const REMOTE_WINDOW_ACTIVE_CATALOG_SYNC_INTERVAL_MS = 5_000;
-const REMOTE_WINDOW_THUMBNAIL_REFRESH_INTERVAL_MS = 15_000;
-const REMOTE_WINDOW_THUMBNAIL_MAX_REQUESTS_PER_TICK = 1;
-const REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_STORAGE_KEY = 'zterm:remote-window:touch-scroll-fraction-v1';
-const REMOTE_WINDOW_TOUCH_SCROLL_INVERTED_STORAGE_KEY = 'zterm:remote-window:touch-scroll-inverted-v1';
-const REMOTE_WINDOW_INPUT_MODE_STORAGE_KEY = 'zterm:remote-window:input-mode-v1';
-const REMOTE_WINDOW_DOUBLE_TAP_MS = 300;
-const REMOTE_WINDOW_DOUBLE_TAP_SLOP_PX = 8;
-
-type RemoteWindowInputMode = 'touch' | 'mouse';
-
-const initialFullscreenViewport: FullscreenViewportState = {
-  scale: 1,
-  panX: 0,
-  panY: 0,
-};
-
-const initialFullscreenDisplayMode: FullscreenDisplayMode = 'fill';
-
-function cloneRemoteWindowCatalogPayload(
-  payload: RemoteWindowStreamTargetsResponsePayload,
-): RemoteWindowStreamTargetsResponsePayload {
-  return {
-    requestId: payload.requestId,
-    targets: Array.isArray(payload.targets) ? payload.targets.slice() : [],
-    errors: Array.isArray(payload.errors) ? payload.errors.slice() : undefined,
-  };
-}
-
-function clampFloatingOffset(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function clampNumber(value: number, min: number, max: number) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function resolveAspectRect(
-  surface: SurfaceSize,
-  source: { width: number; height: number },
-  displayMode: FullscreenDisplayMode,
-): SurfaceRect {
-  const surfaceWidth = Math.max(1, surface.width);
-  const surfaceHeight = Math.max(1, surface.height);
-  const sourceWidth = Math.max(1, source.width);
-  const sourceHeight = Math.max(1, source.height);
-  void displayMode;
-  const scale = Math.min(surfaceWidth / sourceWidth, surfaceHeight / sourceHeight);
-  const width = sourceWidth * scale;
-  const height = sourceHeight * scale;
-  return {
-    left: (surfaceWidth - width) / 2,
-    top: (surfaceHeight - height) / 2,
-    width,
-    height,
-  };
-}
-
-function resolveFullscreenViewportRect(
-  surface: SurfaceSize,
-  source: { width: number; height: number },
-  displayMode: FullscreenDisplayMode,
-): SurfaceRect {
-  void displayMode;
-  return resolveAspectRect(surface, source, 'fit');
-}
-
-function clampFullscreenViewport(
-  viewport: FullscreenViewportState,
-  surface: SurfaceSize | null,
-  source: { width: number; height: number } | null,
-  displayMode: FullscreenDisplayMode = initialFullscreenDisplayMode,
-  keyboardPanAllowancePx = 0,
-): FullscreenViewportState {
-  const scale = clampNumber(
-    Number.isFinite(viewport.scale) ? viewport.scale : 1,
-    REMOTE_WINDOW_FULLSCREEN_MIN_SCALE,
-    REMOTE_WINDOW_FULLSCREEN_MAX_SCALE,
-  );
-  if (!surface || !source) {
-    return { scale, panX: 0, panY: 0 };
-  }
-  const base = resolveAspectRect(surface, source, displayMode);
-  const allowKeyboardPan = keyboardPanAllowancePx > 0;
-  const viewportRect = allowKeyboardPan
-    ? {
-        left: 0,
-        top: 0,
-        width: Math.max(1, surface.width),
-        height: Math.max(1, surface.height),
-      }
-    : resolveFullscreenViewportRect(surface, source, displayMode);
-  const scaledWidth = base.width * scale;
-  const scaledHeight = base.height * scale;
-  const maxPanX = Math.max(0, Math.abs(scaledWidth - viewportRect.width) / 2);
-  const maxPanY = Math.max(0, Math.abs(scaledHeight - viewportRect.height) / 2)
-    + Math.max(0, keyboardPanAllowancePx);
-  return {
-    scale,
-    panX: clampNumber(viewport.panX, -maxPanX, maxPanX),
-    panY: clampNumber(viewport.panY, -maxPanY, maxPanY),
-  };
-}
-
-function resolveZoomedContentRect(
-  surface: SurfaceSize,
-  source: { width: number; height: number },
-  viewport: FullscreenViewportState,
-  displayMode: FullscreenDisplayMode = initialFullscreenDisplayMode,
-): { viewport: SurfaceRect; content: SurfaceRect } {
-  const base = resolveAspectRect(surface, source, displayMode);
-  const viewportRect = resolveFullscreenViewportRect(surface, source, displayMode);
-  const scale = Math.max(1, viewport.scale);
-  const width = base.width * scale;
-  const height = base.height * scale;
-  return {
-    viewport: viewportRect,
-    content: {
-      left: base.left + (base.width - width) / 2 + viewport.panX,
-      top: base.top + (base.height - height) / 2 + viewport.panY,
-      width,
-      height,
-    },
-  };
-}
-
-function resolveAnchoredFullscreenViewportScale(options: {
-  surface: SurfaceSize;
-  source: { width: number; height: number };
-  current: FullscreenViewportState;
-  nextScale: number;
-  anchorClientX: number;
-  anchorClientY: number;
-  surfaceLeft: number;
-  surfaceTop: number;
-  displayMode: FullscreenDisplayMode;
-  keyboardPanAllowancePx: number;
-}): FullscreenViewportState {
-  const currentRect = resolveZoomedContentRect(
-    options.surface,
-    options.source,
-    options.current,
-    options.displayMode,
-  ).content;
-  const anchorX = options.anchorClientX - options.surfaceLeft;
-  const anchorY = options.anchorClientY - options.surfaceTop;
-  const normalizedAnchorX = currentRect.width > 0
-    ? clampNumber((anchorX - currentRect.left) / currentRect.width, 0, 1)
-    : 0.5;
-  const normalizedAnchorY = currentRect.height > 0
-    ? clampNumber((anchorY - currentRect.top) / currentRect.height, 0, 1)
-    : 0.5;
-  const base = resolveAspectRect(options.surface, options.source, options.displayMode);
-  const nextWidth = base.width * options.nextScale;
-  const nextHeight = base.height * options.nextScale;
-  const nextLeft = anchorX - normalizedAnchorX * nextWidth;
-  const nextTop = anchorY - normalizedAnchorY * nextHeight;
-  return clampFullscreenViewport(
-    {
-      scale: options.nextScale,
-      panX: nextLeft - (base.left + (base.width - nextWidth) / 2),
-      panY: nextTop - (base.top + (base.height - nextHeight) / 2),
-    },
-    options.surface,
-    options.source,
-    options.displayMode,
-    options.keyboardPanAllowancePx,
-  );
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-function resolveTouchScrollFractionPreset(value: unknown): RemoteWindowTouchScrollFraction {
-  const parsed = typeof value === 'number' ? value : Number(value);
-  const matched = REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_OPTIONS.find((option) => option === parsed);
-  return matched ?? REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION;
-}
-
-function resolveFloatingOverlaySizing(source: { width: number; height: number }): Pick<CSSProperties, 'width' | 'maxWidth'> {
-  const aspectRatio = Math.max(0.2, Math.min(5, source.width / Math.max(1, source.height)));
-  if (aspectRatio < 0.85) {
-    const maxWidthPx = Math.round(clampNumber(aspectRatio * 420, 220, 320));
-    return { width: '64vw', maxWidth: `${maxWidthPx}px` };
-  }
-  if (aspectRatio > 1.55) {
-    return { width: '84vw', maxWidth: '420px' };
-  }
-  return { width: '74vw', maxWidth: '360px' };
-}
-
-function resolveStartedCaptureFrameSize(started?: RemoteWindowStreamStartedPayload | null): SurfaceSize | null {
-  const width = started?.capture?.frameWidth;
-  const height = started?.capture?.frameHeight;
-  if (
-    typeof width !== 'number'
-    || typeof height !== 'number'
-    || !Number.isFinite(width)
-    || !Number.isFinite(height)
-    || width <= 0
-    || height <= 0
-  ) {
-    return null;
-  }
-  return {
-    width,
-    height,
-  };
-}
-
-function resolveRemoteWindowDisplaySourceSize(
-  target: RemoteWindowStreamTargetManifest,
-  receiverFrameSize: SurfaceSize | null,
-  focusedWindowSlot?: { width: number; height: number } | null,
-): SurfaceSize {
-  // 组合模式：主画面显示焦点窗口（裁切放大），显示源尺寸 = 焦点窗口尺寸，
-  // 否则坐标/布局会按整个画布比例计算，与 video 实际显示不一致
-  if (focusedWindowSlot && focusedWindowSlot.width > 0 && focusedWindowSlot.height > 0) {
-    return { width: focusedWindowSlot.width, height: focusedWindowSlot.height };
-  }
-  if (receiverFrameSize) {
-    return receiverFrameSize;
-  }
-  const sourceRect = getRemoteWindowSourceRect(target);
-  return {
-    width: sourceRect.width,
-    height: sourceRect.height,
-  };
-}
-
-function parseCssPx(value: string | null | undefined) {
-  const match = String(value || '').match(/-?\d+(?:\.\d+)?/u);
-  const parsed = match ? Number.parseFloat(match[0]) : Number.NaN;
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function resolveRemoteWindowFullscreenFillReferenceSize(options: {
-  overlay: HTMLElement | null;
-  toolbar: HTMLElement | null;
-  surface: HTMLElement | null;
-  fallbackSurfaceSize: SurfaceSize | null;
-}): SurfaceSize | null {
-  const overlayRect = options.overlay?.getBoundingClientRect();
-  if (overlayRect && overlayRect.width > 0 && overlayRect.height > 0) {
-    const computed = typeof window !== 'undefined' && typeof window.getComputedStyle === 'function'
-      ? window.getComputedStyle(options.overlay as HTMLElement)
-      : null;
-    const toolbarRect = options.toolbar?.getBoundingClientRect();
-    const toolbarHeight = toolbarRect && toolbarRect.height > 0 ? toolbarRect.height : 0;
-    const width = overlayRect.width
-      - parseCssPx(computed?.paddingLeft)
-      - parseCssPx(computed?.paddingRight);
-    const height = overlayRect.height
-      - parseCssPx(computed?.paddingTop)
-      - parseCssPx(computed?.paddingBottom)
-      - toolbarHeight;
-    if (width > 0 && height > 0) {
-      return { width, height };
-    }
-  }
-
-  const surfaceRect = options.surface?.getBoundingClientRect();
-  if (surfaceRect && surfaceRect.width > 0 && surfaceRect.height > 0) {
-    return { width: surfaceRect.width, height: surfaceRect.height };
-  }
-
-  return options.fallbackSurfaceSize;
-}
-
-function formatTargetKind(target: RemoteWindowStreamTargetManifest) {
-  return target.videoTarget.kind === 'iterm2-pane' ? 'iTerm2 Pane' : 'App Window';
-}
-
-function formatInputRoute(target: RemoteWindowStreamTargetManifest) {
-  switch (target.inputRoute) {
-    case 'tmux-input':
-      return 'tmux';
-    case 'iterm2-api':
-      return 'iTerm2 API';
-    case 'os-event':
-      return 'OS event';
-  }
-}
-
-function isRemoteWindowInputSupported(target: RemoteWindowStreamTargetManifest) {
-  return isRemoteWindowInputSupportedTarget(target);
-}
-
-function readRemoteWindowNetworkQuality(): RemoteWindowNetworkQualityInput | null {
-  const connection = typeof navigator === 'undefined'
-    ? null
-    : ((navigator as Navigator & {
-        connection?: NavigatorConnectionLike;
-        mozConnection?: NavigatorConnectionLike;
-        webkitConnection?: NavigatorConnectionLike;
-      }).connection
-      || (navigator as Navigator & { mozConnection?: NavigatorConnectionLike }).mozConnection
-      || (navigator as Navigator & { webkitConnection?: NavigatorConnectionLike }).webkitConnection
-      || null);
-  if (!connection) {
-    return null;
-  }
-  return {
-    effectiveType: connection.effectiveType || null,
-    downlinkMbps: typeof connection.downlink === 'number' ? connection.downlink : null,
-    rttMs: typeof connection.rtt === 'number' ? connection.rtt : null,
-    saveData: Boolean(connection.saveData),
-  };
-}
-
-function pointerSampleFromReactEvent(
-  event: ReactPointerEvent<HTMLDivElement>,
-): RemoteWindowTouchPointerSample {
-  return {
-    pointerId: event.pointerId,
-    pointerType: event.pointerType || 'mouse',
-    clientX: event.clientX,
-    clientY: event.clientY,
-    button: event.button,
-    buttons: event.buttons,
-    timeMs: Date.now(),
-  };
-}
-
-function toOverlayTouchGesture(
-  gesture: RemoteWindowTouchPointerState,
-  currentViewport: FullscreenViewportState,
-  localPanStart: { pointerId: number; startPanX: number; startPanY: number } | null,
-): SurfacePointerGesture | null {
-  if (gesture.mode === 'idle') {
-    return null;
-  }
-  if (gesture.mode === 'localPan') {
-    const start = localPanStart || {
-      pointerId: gesture.pointerId,
-      startPanX: currentViewport.panX,
-      startPanY: currentViewport.panY,
-    };
-    return {
-      mode: 'pan',
-      pointerId: gesture.pointerId,
-      startClientX: gesture.startClientX,
-      startClientY: gesture.startClientY,
-      startPanX: start.startPanX,
-      startPanY: start.startPanY,
-      moved: gesture.moved,
-    };
-  }
-  return gesture;
-}
-
-function toRemoteWindowTouchGestureState(
-  gesture: SurfacePointerGesture | null,
-): RemoteWindowTouchPointerState {
-  if (!gesture) {
-    return createRemoteWindowTouchPointerState();
-  }
-  if (gesture.mode === 'pan') {
-    return {
-      mode: 'localPan',
-      pointerId: gesture.pointerId,
-      startClientX: gesture.startClientX,
-      startClientY: gesture.startClientY,
-      moved: gesture.moved,
-    };
-  }
-  if (
-    gesture.mode === 'actionPending'
-    || gesture.mode === 'actionDrag'
-    || gesture.mode === 'actionScroll'
-    || gesture.mode === 'actionLongPress'
-    || gesture.mode === 'twoFingerCandidate'
-    || gesture.mode === 'twoFingerScroll'
-    || gesture.mode === 'pinch'
-  ) {
-    return gesture;
-  }
-  return createRemoteWindowTouchPointerState();
-}
-
-function getRemoteWindowNetworkConnection(): NavigatorConnectionLike | null {
-  if (typeof navigator === 'undefined') {
-    return null;
-  }
-  return ((navigator as Navigator & {
-    connection?: NavigatorConnectionLike;
-    mozConnection?: NavigatorConnectionLike;
-    webkitConnection?: NavigatorConnectionLike;
-  }).connection
-    || (navigator as Navigator & { mozConnection?: NavigatorConnectionLike }).mozConnection
-    || (navigator as Navigator & { webkitConnection?: NavigatorConnectionLike }).webkitConnection
-    || null);
-}
-
-function readRemoteWindowTouchScrollFraction(): RemoteWindowTouchScrollFraction {
-  if (typeof window === 'undefined') {
-    return REMOTE_WINDOW_TOUCH_SCROLL_DEFAULT_FRACTION;
-  }
-  return resolveTouchScrollFractionPreset(
-    window.localStorage.getItem(REMOTE_WINDOW_TOUCH_SCROLL_FRACTION_STORAGE_KEY),
-  );
-}
-
-function readRemoteWindowTouchScrollInverted() {
-  if (typeof window === 'undefined') {
-    return true;
-  }
-  const raw = window.localStorage.getItem(REMOTE_WINDOW_TOUCH_SCROLL_INVERTED_STORAGE_KEY);
-  return raw === null ? true : raw === 'true';
-}
-
-function readRemoteWindowInputMode(): RemoteWindowInputMode {
-  if (typeof window === 'undefined') {
-    return 'touch';
-  }
-  const raw = window.localStorage.getItem(REMOTE_WINDOW_INPUT_MODE_STORAGE_KEY);
-  return raw === 'mouse' ? 'mouse' : 'touch';
-}
-
-function writeRemoteWindowInputMode(mode: RemoteWindowInputMode) {
-  if (typeof window === 'undefined') {
-    return;
-  }
-  window.localStorage.setItem(REMOTE_WINDOW_INPUT_MODE_STORAGE_KEY, mode);
-}
-
-function formatTargetSubtitle(target: RemoteWindowStreamTargetManifest) {
-  const tmux = target.inputTarget.tmuxSession
-    ? `tmux ${target.inputTarget.tmuxSession}${target.inputTarget.tmuxPaneId ? ` ${target.inputTarget.tmuxPaneId}` : ''}`
-    : '';
-  const geometry = target.videoTarget.cropRectTopLeftPx || target.videoTarget.windowBoundsTopLeftPx;
-  const route = formatInputRoute(target);
-  const inputMode = isRemoteWindowInputSupported(target) ? '可操作' : '只读';
-  return [tmux, `${geometry.width}x${geometry.height}`, route, inputMode].filter(Boolean).join(' · ');
-}
-
-interface RemoteWindowAppTargetGroup {
-  groupId: string;
-  appBundleId: string;
-  pid: number;
-  title: string;
-  targets: RemoteWindowStreamTargetManifest[];
-}
-
-function remoteWindowTargetArea(target: RemoteWindowStreamTargetManifest) {
-  const rect = target.videoTarget.cropRectTopLeftPx || target.videoTarget.windowBoundsTopLeftPx;
-  return Math.max(0, rect.width) * Math.max(0, rect.height);
-}
-
-function getRemoteWindowAppGroupId(target: RemoteWindowStreamTargetManifest) {
-  if (target.videoTarget.kind !== 'app-window') {
-    return null;
-  }
-  const appBundleId = target.videoTarget.appBundleId || 'unknown-app';
-  const pid = target.videoTarget.pid || 0;
-  return `${appBundleId}:${pid}`;
-}
-
-function buildRemoteWindowAppTargetGroups(
-  targets: RemoteWindowStreamTargetManifest[],
-): RemoteWindowAppTargetGroup[] {
-  const groups = new Map<string, RemoteWindowAppTargetGroup>();
-  for (const target of targets) {
-    const groupId = getRemoteWindowAppGroupId(target);
-    if (!groupId) {
-      continue;
-    }
-    const appBundleId = target.videoTarget.appBundleId || 'unknown-app';
-    const pid = target.videoTarget.pid || 0;
-    const existing = groups.get(groupId);
-    if (existing) {
-      existing.targets.push(target);
-      continue;
-    }
-    groups.set(groupId, {
-      groupId,
-      appBundleId,
-      pid,
-      title: target.videoTarget.title || appBundleId,
-      targets: [target],
-    });
-  }
-  return Array.from(groups.values()).map((group) => ({
-    ...group,
-    targets: group.targets.slice().sort((left, right) => remoteWindowTargetArea(right) - remoteWindowTargetArea(left)),
-  }));
-}
-
-function safeRemoteWindowGroupId(groupId: string) {
-  return groupId.replace(/[^a-zA-Z0-9_-]+/g, '-');
 }
 
 function renderErrors(errors: RemoteWindowStreamErrorPayload[]) {
@@ -1164,11 +611,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
   const setEntryOffset = useCallback((next: FloatingEntryPosition) => {
     entryOffsetRef.current = next;
     setEntryOffsetState(next);
-    try {
-      localStorage.setItem(REMOTE_WINDOW_ENTRY_POSITION_STORAGE_KEY, JSON.stringify(next));
-    } catch (error) {
-      console.warn('[RemoteWindowOverlay] Failed to store entry position:', error);
-    }
+    writeStoredEntryPosition(next);
   }, []);
 
   // 浮层手柄拖拽：与文件 bubble / 浮钮同一套共享拖拽逻辑（pointer+touch 双套）
@@ -1409,7 +852,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
         : null;
       const displayMode = state.phase === 'targetLocked' && state.mode === 'fullscreen'
         ? fullscreenDisplayModeRef.current
-        : initialFullscreenDisplayMode;
+        : 'fit';
       const clamped = clampFullscreenViewport(
         raw,
         measuredSurfaceSize,
@@ -1537,7 +980,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       const displaySourceSize = resolveRemoteWindowDisplaySourceSize(state.target, receiverFrameSize, focusedWindowSlotRef.current);
       const displayMode = state.mode === 'fullscreen'
         ? fullscreenDisplayMode
-        : initialFullscreenDisplayMode;
+        : 'fit';
       setFullscreenViewportState((current) => {
         const clamped = clampFullscreenViewport(current, next, displaySourceSize, displayMode, bottomInsetPx);
         fullscreenViewportRef.current = clamped;
@@ -3114,7 +2557,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
       : initialFullscreenViewport;
     const displayMode = state.mode === 'fullscreen'
       ? fullscreenDisplayModeRef.current
-      : initialFullscreenDisplayMode;
+      : 'fit';
     const { content } = resolveZoomedContentRect(
       { width: surfaceRect.width, height: surfaceRect.height },
       displaySourceSize,
@@ -4066,7 +3509,7 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
 	    const viewport = state.mode === 'fullscreen' ? fullscreenViewport : initialFullscreenViewport;
 	    const displayMode = state.mode === 'fullscreen'
 	      ? fullscreenDisplayMode
-	      : initialFullscreenDisplayMode;
+	      : 'fit';
 	    return resolveZoomedContentRect(surfaceSize, displaySourceSize, viewport, displayMode);
 	  }, [compositeLayout, focusedWindowSlot, fullscreenDisplayMode, fullscreenViewport, receiverFrameSize, state, surfaceSize]);
 
@@ -5050,799 +4493,3 @@ export const RemoteWindowOverlay = memo(function RemoteWindowOverlay({
     </>
   );
 });
-
-const styles: Record<string, CSSProperties> = {
-  compositeStrip: {
-    position: 'absolute',
-    left: 8,
-    right: 8,
-    top: 8,
-    zIndex: 60,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 6,
-    pointerEvents: 'auto',
-    borderRadius: 10,
-    background: 'rgba(10, 14, 20, 0.72)',
-    backdropFilter: 'blur(6px)',
-    padding: 8,
-  },
-  compositeOverviewWrap: {
-    overflow: 'hidden',
-    borderRadius: 6,
-  },
-  compositeOverview: {
-    display: 'block',
-    width: '100%',
-    height: 72,
-    borderRadius: 6,
-    background: '#0a0e14',
-  },
-  compositeThumbRow: {
-    display: 'flex',
-    flexDirection: 'row',
-    gap: 8,
-    overflowX: 'auto',
-    overflowY: 'hidden',
-    WebkitOverflowScrolling: 'touch',
-    scrollbarWidth: 'thin',
-  },
-  compositeThumbButton: {
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    gap: 2,
-    padding: 3,
-    border: '1px solid rgba(255,255,255,0.14)',
-    borderRadius: 8,
-    background: 'rgba(255,255,255,0.05)',
-    cursor: 'pointer',
-    flexShrink: 0,
-  },
-  compositeThumbButtonFocused: {
-    border: '2px solid #55b6ff',
-    padding: 2,
-  },
-  compositeThumbCanvas: {
-    display: 'block',
-    width: '100%',
-    borderRadius: 4,
-    background: '#0a0e14',
-  },
-  compositeThumbLabel: {
-    fontSize: 10,
-    color: 'rgba(255,255,255,0.7)',
-    lineHeight: '12px',
-  },
-  entryButton: {
-    position: 'fixed',
-    right: 14,
-    zIndex: 44,
-    width: 44,
-    height: 44,
-    borderRadius: 14,
-    border: '1px solid rgba(255,255,255,0.12)',
-    background: 'rgba(15, 23, 38, 0.9)',
-    color: mobileTheme.colors.accent,
-    fontWeight: 900,
-    fontSize: 16,
-    boxShadow: '0 12px 24px rgba(0,0,0,0.28)',
-    backdropFilter: 'blur(10px)',
-    touchAction: 'none',
-    userSelect: 'none',
-    WebkitUserSelect: 'none',
-    cursor: 'grab',
-  },
-  pickerPanel: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    top: 'calc(env(safe-area-inset-top, 0px) + 58px)',
-    maxHeight: 'min(70vh, 560px)',
-    zIndex: 31,
-    display: 'flex',
-    flexDirection: 'column',
-    overflow: 'hidden',
-    borderRadius: 16,
-    border: '1px solid rgba(151, 164, 186, 0.22)',
-    background: 'rgba(13, 19, 31, 0.96)',
-    color: '#edf4ff',
-    boxShadow: '0 24px 60px rgba(0,0,0,0.42)',
-    backdropFilter: 'blur(14px)',
-  },
-  panelHeader: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    gap: 10,
-    padding: '14px 14px 10px',
-    borderBottom: '1px solid rgba(151, 164, 186, 0.16)',
-  },
-  panelTitle: {
-    fontSize: 15,
-    fontWeight: 900,
-    letterSpacing: 0,
-  },
-  panelSubtitle: {
-    marginTop: 3,
-    fontSize: 12,
-    color: 'rgba(237,244,255,0.62)',
-  },
-  panelActions: {
-    display: 'flex',
-    gap: 8,
-    alignItems: 'flex-start',
-  },
-  headerButton: {
-    minHeight: 32,
-    padding: '0 12px',
-    borderRadius: 10,
-    border: '1px solid rgba(151, 164, 186, 0.18)',
-    background: 'rgba(36, 48, 72, 0.84)',
-    color: '#edf4ff',
-    fontWeight: 850,
-  },
-  headerIconButton: {
-    flex: '0 0 auto',
-    width: 32,
-    height: 32,
-    borderRadius: 10,
-    border: '1px solid rgba(151, 164, 186, 0.18)',
-    background: 'rgba(36, 48, 72, 0.84)',
-    color: '#edf4ff',
-    fontWeight: 900,
-  },
-  headerIconButtonBusy: {
-    opacity: 0.78,
-    background: 'rgba(31, 214, 122, 0.18)',
-    border: '1px solid rgba(31, 214, 122, 0.42)',
-  },
-  headerModeButton: {
-    flex: '0 0 auto',
-    minWidth: 46,
-    height: 32,
-    padding: '0 8px',
-    borderRadius: 10,
-    border: '1px solid rgba(151, 164, 186, 0.18)',
-    background: 'rgba(36, 48, 72, 0.84)',
-    color: '#edf4ff',
-    fontSize: 12,
-    fontWeight: 900,
-  },
-  headerModeButtonActive: {
-    flex: '0 0 auto',
-    minWidth: 46,
-    height: 32,
-    padding: '0 8px',
-    borderRadius: 10,
-    border: '1px solid rgba(31, 214, 122, 0.42)',
-    background: 'rgba(31, 214, 122, 0.18)',
-    color: '#edf4ff',
-    fontSize: 12,
-    fontWeight: 900,
-  },
-  bitrateSelect: {
-    flex: '0 0 auto',
-    height: 32,
-    maxWidth: 108,
-    borderRadius: 10,
-    border: '1px solid rgba(151, 164, 186, 0.18)',
-    background: 'rgba(36, 48, 72, 0.84)',
-    color: '#edf4ff',
-    fontSize: 12,
-    fontWeight: 850,
-    outline: 'none',
-  },
-  touchScrollFractionSelect: {
-    flex: '0 0 auto',
-    height: 32,
-    maxWidth: 92,
-    borderRadius: 10,
-    border: '1px solid rgba(151, 164, 186, 0.18)',
-    background: 'rgba(36, 48, 72, 0.84)',
-    color: '#edf4ff',
-    fontSize: 12,
-    fontWeight: 850,
-    outline: 'none',
-  },
-  screenshotToast: {
-    position: 'absolute',
-    left: '50%',
-    top: 12,
-    zIndex: 5,
-    display: 'flex',
-    alignItems: 'center',
-    gap: 10,
-    width: 'max-content',
-    maxWidth: 'calc(100% - 24px)',
-    minHeight: 38,
-    padding: '8px 12px',
-    borderRadius: 12,
-    color: '#edf4ff',
-    background: 'rgba(6, 12, 22, 0.9)',
-    border: '1px solid rgba(151, 164, 186, 0.2)',
-    boxShadow: '0 14px 36px rgba(0,0,0,0.38)',
-    backdropFilter: 'blur(12px)',
-    pointerEvents: 'none',
-    animation: 'zterm-remote-window-shot-pop 160ms ease-out both',
-  },
-  screenshotToastProgress: {
-    border: '1px solid rgba(31, 214, 122, 0.32)',
-  },
-  screenshotToastSuccess: {
-    border: '1px solid rgba(31, 214, 122, 0.44)',
-    animation: 'zterm-remote-window-shot-pop 160ms ease-out both, zterm-remote-window-shot-pulse 1.1s ease-out 1',
-  },
-  screenshotToastError: {
-    border: '1px solid rgba(255, 104, 124, 0.46)',
-  },
-  screenshotSpinner: {
-    flex: '0 0 auto',
-    width: 18,
-    height: 18,
-    borderRadius: 999,
-    border: '2px solid rgba(237,244,255,0.22)',
-    borderTopColor: mobileTheme.colors.accent,
-    animation: 'zterm-remote-window-shot-spin 0.78s linear infinite',
-  },
-  screenshotResultIcon: {
-    flex: '0 0 auto',
-    width: 24,
-    height: 24,
-    borderRadius: 999,
-    display: 'grid',
-    placeItems: 'center',
-    background: 'rgba(31, 214, 122, 0.16)',
-    color: mobileTheme.colors.accent,
-    fontSize: 10,
-    fontWeight: 950,
-    lineHeight: 1,
-  },
-  screenshotResultIconError: {
-    background: 'rgba(255, 104, 124, 0.16)',
-    color: '#ff7a8d',
-  },
-  screenshotToastText: {
-    minWidth: 0,
-    display: 'flex',
-    flexDirection: 'column',
-    gap: 2,
-  },
-  screenshotToastTitle: {
-    fontSize: 12,
-    fontWeight: 900,
-    lineHeight: 1.15,
-    whiteSpace: 'nowrap',
-  },
-  screenshotToastDetail: {
-    maxWidth: 'min(240px, 62vw)',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    color: 'rgba(237,244,255,0.68)',
-    fontSize: 10,
-    fontWeight: 750,
-    lineHeight: 1.2,
-  },
-  errorBox: {
-    margin: '10px 12px 0',
-    padding: '9px 10px',
-    borderRadius: 10,
-    background: 'rgba(109, 24, 33, 0.82)',
-    color: '#ffd7dc',
-    fontSize: 12,
-    lineHeight: 1.4,
-  },
-  errorStrip: {
-    margin: '10px 12px 0',
-    padding: '8px 10px',
-    borderRadius: 10,
-    background: 'rgba(97, 63, 13, 0.72)',
-    color: '#ffe2a8',
-    fontSize: 12,
-    lineHeight: 1.4,
-  },
-  targetList: {
-    flex: '0 1 auto',
-    minHeight: 0,
-    maxHeight: 'calc(min(70vh, 560px) - 72px)',
-    padding: 10,
-    overflowY: 'auto',
-    display: 'grid',
-    gap: 8,
-  },
-  targetRow: {
-    display: 'grid',
-    gridTemplateColumns: '86px minmax(0, 1fr)',
-    gap: '4px 10px',
-    padding: '10px 11px',
-    textAlign: 'left',
-    borderRadius: 12,
-    border: '1px solid rgba(151, 164, 186, 0.14)',
-    background: 'rgba(27, 37, 56, 0.88)',
-    color: '#edf4ff',
-  },
-  targetGroupRow: {
-    display: 'grid',
-    gridTemplateColumns: '86px minmax(0, 1fr)',
-    gap: '4px 10px',
-    padding: '10px 11px',
-    textAlign: 'left',
-    borderRadius: 12,
-    border: '1px solid rgba(151, 164, 186, 0.18)',
-    background: 'rgba(20, 31, 49, 0.92)',
-    color: '#edf4ff',
-  },
-  targetKind: {
-    color: mobileTheme.colors.accent,
-    fontSize: 11,
-    fontWeight: 900,
-    textTransform: 'uppercase',
-    letterSpacing: 0,
-  },
-  targetMain: {
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontSize: 13,
-    fontWeight: 850,
-  },
-  targetMeta: {
-    gridColumn: '2 / 3',
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    color: 'rgba(237,244,255,0.62)',
-    fontSize: 11,
-  },
-  emptyState: {
-    minHeight: 44,
-    display: 'grid',
-    placeItems: 'center',
-    color: 'rgba(237,244,255,0.62)',
-    fontSize: 13,
-  },
-  floatingOverlay: {
-    position: 'absolute',
-    right: 12,
-    bottom: REMOTE_WINDOW_FLOATING_BOTTOM_BASE_PX,
-    zIndex: 32,
-    width: 'min(78vw, 360px)',
-    maxHeight: 'calc(100dvh - 164px - env(safe-area-inset-top, 0px))',
-    display: 'flex',
-    flexDirection: 'column',
-    borderRadius: 16,
-    overflow: 'hidden',
-    border: '1px solid rgba(151, 164, 186, 0.22)',
-    background: '#050910',
-    color: '#edf4ff',
-    boxShadow: '0 24px 60px rgba(0,0,0,0.46)',
-  },
-  floatingResizeHandleLeft: {
-    position: 'absolute',
-    left: 0,
-    bottom: 0,
-    width: 38,
-    height: 38,
-    zIndex: 2,
-    cursor: 'nesw-resize',
-    touchAction: 'none',
-    background: 'radial-gradient(circle at bottom left, rgba(31,214,122,0.36), rgba(31,214,122,0) 68%)',
-  },
-  floatingResizeHandleRight: {
-    position: 'absolute',
-    right: 0,
-    bottom: 0,
-    width: 38,
-    height: 38,
-    zIndex: 2,
-    cursor: 'nwse-resize',
-    touchAction: 'none',
-    background: 'radial-gradient(circle at bottom right, rgba(31,214,122,0.36), rgba(31,214,122,0) 68%)',
-  },
-  fullscreenOverlay: {
-    position: 'fixed',
-    inset: 0,
-    width: '100%',
-    height: '100%',
-    minHeight: '100%',
-    zIndex: 90,
-    display: 'flex',
-    flexDirection: 'column',
-    boxSizing: 'border-box',
-    paddingTop: 'calc(44px + env(safe-area-inset-top, 0px))',
-    paddingLeft: 'max(8px, env(safe-area-inset-left, 0px))',
-    paddingRight: 'max(8px, env(safe-area-inset-right, 0px))',
-    background: '#02050a',
-    color: '#edf4ff',
-    contain: 'layout paint',
-    isolation: 'isolate',
-  },
-  lockedToolbar: {
-    minHeight: 42,
-    display: 'flex',
-    flexDirection: 'column',
-    background: 'rgba(13, 19, 31, 0.94)',
-    borderBottom: '1px solid rgba(151, 164, 186, 0.14)',
-  },
-  lockedTopBar: {
-    minHeight: 42,
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    gap: 8,
-    padding: '7px 8px',
-  },
-  lockedPrimaryActions: {
-    flex: '0 0 auto',
-    display: 'flex',
-    gap: 6,
-  },
-  lockedControlStrip: {
-    minWidth: 0,
-    display: 'flex',
-    gap: 6,
-    alignItems: 'center',
-    overflowX: 'auto',
-    overflowY: 'hidden',
-    padding: '0 8px 7px',
-    WebkitOverflowScrolling: 'touch',
-    scrollbarWidth: 'none',
-    touchAction: 'pan-x',
-  },
-  lockedTitle: {
-    minWidth: 0,
-    flex: '1 1 auto',
-    display: 'flex',
-    gap: 8,
-    alignItems: 'center',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontSize: 12,
-    fontWeight: 850,
-  },
-  activeAppSwitch: {
-    position: 'relative',
-    minWidth: 0,
-    flex: '1 1 auto',
-  },
-  activeAppSwitchButton: {
-    width: '100%',
-    minWidth: 0,
-    display: 'block',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    padding: '3px 2px',
-    border: 0,
-    background: 'transparent',
-    color: '#edf4ff',
-    textAlign: 'left',
-    fontSize: 12,
-    fontWeight: 850,
-  },
-  appSwitchPopover: {
-    position: 'absolute',
-    top: 'calc(100% + 8px)',
-    left: 0,
-    width: 'min(78vw, 340px)',
-    maxHeight: 'min(52vh, 420px)',
-    overflowY: 'auto',
-    display: 'grid',
-    gap: 8,
-    padding: 8,
-    borderRadius: 12,
-    border: '1px solid rgba(151, 164, 186, 0.22)',
-    background: 'rgba(8, 13, 23, 0.98)',
-    boxShadow: '0 18px 46px rgba(0,0,0,0.52)',
-    zIndex: 4,
-  },
-  appSwitchGroup: {
-    display: 'grid',
-    gap: 5,
-  },
-  appSwitchGroupTitle: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 8,
-    padding: '2px 4px',
-    color: 'rgba(237,244,255,0.68)',
-    fontSize: 10,
-    fontWeight: 900,
-    textTransform: 'uppercase',
-    letterSpacing: 0,
-  },
-  appSwitchGroupCount: {
-    flex: '0 0 auto',
-    minWidth: 18,
-    padding: '1px 5px',
-    borderRadius: 8,
-    background: 'rgba(151, 164, 186, 0.14)',
-    color: mobileTheme.colors.accent,
-    textAlign: 'center',
-  },
-  appSwitchTargetRow: {
-    minWidth: 0,
-    display: 'grid',
-    gap: 2,
-    padding: '8px 9px',
-    borderRadius: 9,
-    border: '1px solid rgba(151, 164, 186, 0.14)',
-    background: 'rgba(22, 32, 50, 0.92)',
-    color: '#edf4ff',
-    textAlign: 'left',
-  },
-  appSwitchTargetRowActive: {
-    minWidth: 0,
-    display: 'grid',
-    gap: 2,
-    padding: '8px 9px',
-    borderRadius: 9,
-    border: `1px solid ${mobileTheme.colors.accent}`,
-    background: 'rgba(31, 214, 122, 0.12)',
-    color: '#edf4ff',
-    textAlign: 'left',
-  },
-  appSwitchTargetTitle: {
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontSize: 12,
-    fontWeight: 900,
-  },
-  appSwitchTargetMeta: {
-    minWidth: 0,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    color: 'rgba(237,244,255,0.58)',
-    fontSize: 10,
-    fontWeight: 750,
-  },
-  appSwitchTargetClose: {
-    justifySelf: 'end',
-    marginTop: -18,
-    padding: '1px 6px',
-    borderRadius: 6,
-    color: '#ff9a9a',
-    background: 'rgba(255, 92, 92, 0.12)',
-    fontSize: 12,
-    fontWeight: 900,
-    cursor: 'pointer',
-  },
-  targetClose: {
-    position: 'absolute',
-    right: 10,
-    top: 10,
-    padding: '1px 6px',
-    borderRadius: 6,
-    color: '#ff9a9a',
-    background: 'rgba(255, 92, 92, 0.12)',
-    fontSize: 12,
-    fontWeight: 900,
-    cursor: 'pointer',
-  },
-  streamStatusPanel: {
-    display: 'grid',
-    gap: 3,
-    maxHeight: 220,
-    overflowY: 'auto',
-    padding: '8px 10px',
-    borderTop: '1px solid rgba(151, 164, 186, 0.2)',
-    background: 'rgba(5, 9, 15, 0.96)',
-    color: 'rgba(237,244,255,0.78)',
-    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-    fontSize: 10,
-    lineHeight: 1.35,
-    whiteSpace: 'pre-wrap',
-    wordBreak: 'break-word',
-  },
-  appSwitchError: {
-    padding: '7px 8px',
-    borderRadius: 8,
-    background: 'rgba(97, 63, 13, 0.72)',
-    color: '#ffe2a8',
-    fontSize: 11,
-    lineHeight: 1.35,
-  },
-  appSwitchEmpty: {
-    padding: 10,
-    color: 'rgba(237,244,255,0.58)',
-    fontSize: 11,
-    textAlign: 'center',
-  },
-  inputModeBadge: {
-    flex: '0 0 auto',
-    padding: '2px 6px',
-    borderRadius: 8,
-    border: '1px solid rgba(151, 164, 186, 0.18)',
-    color: 'rgba(237,244,255,0.68)',
-    fontSize: 11,
-    fontWeight: 850,
-  },
-  lockedActions: {
-    display: 'flex',
-    gap: 6,
-  },
-  videoPlaceholder: {
-    flex: 1,
-    minHeight: 0,
-    position: 'relative',
-    overflow: 'hidden',
-    background: '#0a101b',
-    contain: 'paint',
-    outline: 'none',
-    touchAction: 'none',
-  },
-  videoContentFrame: {
-    position: 'absolute',
-    display: 'grid',
-    placeItems: 'center',
-    overflow: 'hidden',
-    background: '#0a101b',
-    pointerEvents: 'none',
-  },
-  videoContentFallback: {
-    position: 'absolute',
-    inset: 0,
-    display: 'grid',
-    placeItems: 'center',
-    overflow: 'hidden',
-    background: '#0a101b',
-    pointerEvents: 'none',
-  },
-  videoFrame: {
-    position: 'relative',
-    width: '100%',
-    height: '100%',
-    display: 'grid',
-    placeItems: 'center',
-    alignContent: 'center',
-    gap: 8,
-    border: '1px solid rgba(151, 164, 186, 0.12)',
-    background: '#0a101b',
-    contain: 'paint',
-    overflow: 'hidden',
-  },
-  videoElement: {
-    width: '100%',
-    height: '100%',
-    display: 'block',
-    objectFit: 'contain',
-    background: 'transparent',
-    pointerEvents: 'none',
-    position: 'relative',
-    zIndex: 1,
-    transition: 'opacity 120ms ease-out',
-  },
-  videoError: {
-    borderColor: 'rgba(248, 113, 113, 0.34)',
-    background: '#170d14',
-  },
-  videoStatus: {
-    position: 'relative',
-    zIndex: 1,
-    fontSize: 14,
-    fontWeight: 900,
-    color: '#edf4ff',
-  },
-  videoMeta: {
-    position: 'relative',
-    zIndex: 1,
-    maxWidth: '90%',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    fontSize: 11,
-    color: 'rgba(237,244,255,0.62)',
-  },
-  videoWallpaper: {
-    position: 'absolute',
-    inset: 0,
-    zIndex: 2,
-    display: 'grid',
-    placeItems: 'center',
-    background: '#0a101b',
-    boxShadow: 'inset 0 0 0 1px rgba(237,244,255,0.04), inset 0 18px 48px rgba(255,255,255,0.035), inset 0 -36px 80px rgba(0,0,0,0.38)',
-    pointerEvents: 'none',
-    isolation: 'isolate',
-  },
-  videoWallpaperLogo: {
-    width: 'min(42%, 156px)',
-    maxHeight: '42%',
-    objectFit: 'contain',
-    opacity: 0.62,
-  },
-  videoWindowGroupFloating: {
-    flex: '0 0 auto',
-    minWidth: 0,
-    minHeight: 0,
-    padding: 8,
-    background: '#0a101b',
-    overflow: 'hidden',
-    boxSizing: 'border-box',
-  },
-  videoWindowGroupFullscreen: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 0,
-    padding: 8,
-    background: '#0a101b',
-    overflow: 'hidden',
-    boxSizing: 'border-box',
-  },
-  videoWindowGroupTile: {
-    position: 'relative',
-    width: '100%',
-    height: '100%',
-    minHeight: 58,
-    display: 'grid',
-    gridTemplateRows: 'minmax(34px, 1fr)',
-    padding: 4,
-    borderRadius: 8,
-    border: '1px solid rgba(151, 164, 186, 0.18)',
-    background: 'rgba(20, 31, 49, 0.88)',
-    color: '#edf4ff',
-    boxSizing: 'border-box',
-  },
-  videoWindowGroupCloseButton: {
-    position: 'absolute',
-    top: 6,
-    right: 6,
-    zIndex: 2,
-    width: 24,
-    height: 24,
-    borderRadius: 8,
-    border: '1px solid rgba(151, 164, 186, 0.28)',
-    background: 'rgba(5, 9, 16, 0.78)',
-    color: '#edf4ff',
-    fontSize: 12,
-    fontWeight: 950,
-    lineHeight: 1,
-  },
-  videoWindowGroupThumb: {
-    minWidth: 0,
-    minHeight: 34,
-    display: 'grid',
-    placeItems: 'center',
-    overflow: 'hidden',
-    borderRadius: 7,
-    background: '#050910',
-    boxShadow: 'inset 0 0 0 1px rgba(237,244,255,0.08)',
-  },
-  videoWindowGroupThumbImage: {
-    width: '100%',
-    height: '100%',
-    objectFit: 'cover',
-    display: 'block',
-  },
-  videoWindowGroupThumbTitle: {
-    maxWidth: '86%',
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-    color: 'rgba(237,244,255,0.7)',
-    fontSize: 10,
-    fontWeight: 900,
-  },
-  streamFeedbackToast: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    bottom: 12,
-    zIndex: 5,
-    display: 'grid',
-    gap: 2,
-    padding: '8px 10px',
-    borderRadius: 12,
-    border: '1px solid rgba(255, 198, 92, 0.42)',
-    background: 'rgba(48, 31, 9, 0.9)',
-    color: '#ffe2a8',
-    boxShadow: '0 14px 36px rgba(0,0,0,0.36)',
-    pointerEvents: 'none',
-  },
-};

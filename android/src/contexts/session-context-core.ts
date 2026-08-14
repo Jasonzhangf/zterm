@@ -1,4 +1,6 @@
 import type { BridgeSettings } from '../lib/bridge-settings';
+import type { NetworkIdentityRuntime } from '../lib/network-identity';
+import type { MutableRefObject } from 'react';
 import type {
   ClientMessage,
   Host,
@@ -219,6 +221,8 @@ export interface SessionContextValue {
   setActiveBodySubscriptionSuppressed: (suppressed: boolean) => void;
   moveSession: (id: string, toIndex: number) => void;
   renameSession: (id: string, name: string) => void;
+  /** 远端 tmux rename-session 成功后的客户端身份迁移（同时改 sessionName/customName/title）。 */
+  renameRemoteSession: (id: string, name: string) => void;
   reconnectSession: (id: string) => void;
   reconnectAllSessions: () => void;
   /** Record when the app entered background for each session (resume grace decision). */
@@ -290,6 +294,7 @@ export interface SessionContextValue {
   onFileTransferMessage: (handler: (msg: any) => void) => () => void;
   onRemoteWindowMessage: (handler: (msg: RemoteWindowControlMessage) => void) => () => void;
   sendMessageRaw: (sessionId: string, msg: unknown) => void;
+  sendTargetHeartbeat: () => number;
   /** Get count of attachments awaiting download. */
   getPendingAttachmentCount: () => number;
   /** Get pending attachments sorted newest first. */
@@ -307,6 +312,18 @@ export interface SessionProviderProps {
   bridgeSettings?: BridgeSettings;
   appForegroundActive?: boolean;
   foregroundResumeEpoch?: number;
+  /**
+   * Mutable bridge to the freshest home projection (device list) held by the
+   * AppContent layer; reconnect reads the current value to refresh stale direct
+   * endpoints after a network change (see mergeHostWithLatestProjection).
+   */
+  latestSessionHostsRef?: MutableRefObject<Host[] | undefined>;
+  /**
+   * Client network-generation owner. When present, transport/facade layers
+   * stamp route-health isolation with the current generation so a WiFi/cellular/
+   * VPN/IP change invalidates prior route truth and reconnects on fresh paths.
+   */
+  networkIdentity?: NetworkIdentityRuntime;
 }
 
 export interface CreateSessionOptions {

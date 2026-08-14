@@ -18,6 +18,7 @@ In scope：
 
 - 官方 Herdr 安装版作为外部 source。
 - zterm daemon 与 Herdr 之间的显式 backend adapter。
+- 新 session 创建入口必须先弹出 `tmux | Herdr` 选择；选择结果作为 typed backend identity 贯穿创建、attach、mirror、input、resize、close、reconnect。
 - 单 terminal surface 的 observe/control 协议。
 - ANSI/VT 状态重放、canonical cell projection、mirror revision、resize、reconnect、生命周期。
 
@@ -75,10 +76,11 @@ Out of scope：
 1. 补齐 resource registry、module registry、function map、mainline call map、verification map。
 2. 用真实 Herdr frame bytes 完成可靠 VT parser/canonicalizer playground，建立 tmux oracle 对比。
 3. 完成 full/delta、gap、duplicate、reorder、resize、reconnect 正反 gate。
-4. 设计并实现唯一 Herdr adapter，接入统一 daemon backend owner。
-5. 完成定向测试、构建、安装/重启、daemon close-loop 与真实 Herdr 样本验证。
-6. 完成 Codex/OpenCode/Reasonix side-channel 审计与 Windows ConPTY gate。
-7. 二次评估：确认 parity、能力增量、剩余 gap；只有全部 required gate 通过后才标记可交付。
+4. 完成新 session backend picker 正反 gate：tmux 仍走原有路径，Herdr 选择不会静默回到 tmux。
+5. 设计并实现唯一 Herdr adapter，接入统一 daemon backend owner。
+6. 完成定向测试、构建、安装/重启、daemon close-loop 与真实 Herdr 样本验证。
+7. 完成 Codex/OpenCode/Reasonix side-channel 审计与 Windows ConPTY gate。
+8. 二次评估：确认 parity、能力增量、剩余 gap；只有全部 required gate 通过后才标记可交付。
 
 ## 完成定义（DoD）
 

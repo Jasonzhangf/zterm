@@ -120,20 +120,40 @@ export function RelayAccountSettingsSection({
             </div>
           ) : null}
 
-          <label style={{ display: 'grid', gap: '7px', fontSize: '13px', fontWeight: 700 }}>
-            Account
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '88px minmax(0, 1fr)',
+              alignItems: 'center',
+              gap: '12px',
+            }}
+          >
+            <label htmlFor="relay-account" style={{ fontSize: '13px', fontWeight: 700 }}>
+              Account
+            </label>
             <input
+              id="relay-account"
               aria-label="Relay account"
               autoComplete="username"
               value={username}
               onChange={(event) => setUsername(event.target.value)}
               disabled={busy}
-              style={settingsInputStyle()}
+              style={{ ...settingsInputStyle(), minWidth: 0 }}
             />
-          </label>
-          <label style={{ display: 'grid', gap: '7px', fontSize: '13px', fontWeight: 700 }}>
-            Password
+          </div>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: '88px minmax(0, 1fr)',
+              alignItems: 'center',
+              gap: '12px',
+            }}
+          >
+            <label htmlFor="relay-password" style={{ fontSize: '13px', fontWeight: 700 }}>
+              Password
+            </label>
             <input
+              id="relay-password"
               aria-label="Relay password"
               type="password"
               autoComplete="current-password"
@@ -141,16 +161,17 @@ export function RelayAccountSettingsSection({
               value={password}
               onChange={(event) => setPassword(event.target.value)}
               disabled={busy}
-              style={settingsInputStyle()}
+              style={{ ...settingsInputStyle(), minWidth: 0 }}
             />
-          </label>
+          </div>
 
-          <div style={{ display: 'flex', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'stretch', gap: '10px' }}>
             <button
               type="submit"
               disabled={busy || !username.trim() || !password}
               style={{
                 minHeight: '48px',
+                minWidth: 0,
                 flex: 1,
                 border: 'none',
                 borderRadius: '7px',

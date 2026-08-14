@@ -42,15 +42,13 @@ public class BackgroundService extends Service {
             heartbeatScheduled = false;
             final WebView webView = MainActivity.getStaticWebView();
             if (webView != null) {
-                webView.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        webView.evaluateJavascript(
-                            "if(window.ztermBackgroundHeartbeatTick) { window.ztermBackgroundHeartbeatTick(); }",
-                            null
-                        );
-                    }
-                });
+                // This runnable already runs on the main looper. Calling
+                // evaluateJavascript directly avoids queueing the wake-up
+                // behind WebView's paused-view callback queue.
+                webView.evaluateJavascript(
+                    "if(window.ztermBackgroundHeartbeatTick) { window.ztermBackgroundHeartbeatTick(); }",
+                    null
+                );
             }
             scheduleHeartbeatWake();
         }
@@ -81,6 +79,14 @@ public class BackgroundService extends Service {
             sessionCount = intent.getIntExtra("sessionCount", 0);
         }
 
+        // Must call startForeground unconditionally: any service started via
+        // startForegroundService() that does not call startForeground() within
+        // the platform timeout is force-killed with
+        // ForegroundServiceDidNotStartInTimeException, even when the service
+        // intends to stop itself immediately.
+        Notification notification = createNotification();
+        startForeground(NOTIFICATION_ID, notification);
+
         if (sessionCount <= 0) {
             releaseWakeLock();
             stopForeground(true);
@@ -88,8 +94,6 @@ public class BackgroundService extends Service {
             return START_NOT_STICKY;
         }
         
-        Notification notification = createNotification();
-        startForeground(NOTIFICATION_ID, notification);
         acquireWakeLock();
         scheduleHeartbeatWake();
 

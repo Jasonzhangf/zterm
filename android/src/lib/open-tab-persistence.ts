@@ -1,4 +1,4 @@
-import { findReusableManagedSession } from '../contexts/session-reconnect-helpers';
+import { findReusableManagedSession } from './session-reconnect-helpers';
 import {
   buildSessionSemanticOwnerKey,
   buildSessionSemanticReuseKey,
@@ -30,10 +30,13 @@ export function readPersistedActiveSessionIdState(): PersistedActiveSessionIdSta
   }
 
   try {
-    clearLegacyOpenTabPersistence();
-    return { status: 'empty', activeSessionId: null };
+    const raw = localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION);
+    const activeSessionId = typeof raw === 'string' && raw.trim() ? raw.trim() : null;
+    return activeSessionId
+      ? { status: 'available', activeSessionId }
+      : { status: 'empty', activeSessionId: null };
   } catch (error) {
-    console.error('[open-tab-persistence] Failed to clear legacy active session:', error);
+    console.error('[open-tab-persistence] Failed to restore active session:', error);
     return { status: 'failed', activeSessionId: null, error };
   }
 }
@@ -45,10 +48,15 @@ export function persistActiveSessionId(activeSessionId: string | null): PersistO
   }
 
   try {
-    clearLegacyOpenTabPersistence();
+    const normalized = typeof activeSessionId === 'string' ? activeSessionId.trim() : '';
+    if (normalized) {
+      localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, normalized);
+      return { ok: true };
+    }
+    localStorage.removeItem(STORAGE_KEYS.ACTIVE_SESSION);
     return { ok: true };
   } catch (error) {
-    console.error('[open-tab-persistence] Failed to clear legacy active session:', error);
+    console.error('[open-tab-persistence] Failed to persist active session:', error);
     return { ok: false, error };
   }
 }
@@ -81,6 +89,7 @@ export function normalizePersistedOpenTab(input: unknown): PersistedOpenTab | nu
         : 3333,
     daemonHostId: daemonHostId || undefined,
     sessionName,
+    terminalBackend: candidate.terminalBackend === 'herdr' ? 'herdr' : 'tmux',
     authToken: typeof candidate.authToken === 'string' ? candidate.authToken : undefined,
     autoCommand: typeof candidate.autoCommand === 'string' ? candidate.autoCommand : undefined,
     customName: typeof candidate.customName === 'string' && candidate.customName.trim()
@@ -93,45 +102,49 @@ export function normalizePersistedOpenTab(input: unknown): PersistedOpenTab | nu
   };
 }
 
-export function buildPersistedOpenTabReuseKey(tab: Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'sessionName'>) {
+export function buildPersistedOpenTabReuseKey(tab: Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'terminalBackend'>) {
   return buildSessionSemanticReuseKey({
     daemonHostId: tab.daemonHostId,
     bridgeHost: tab.bridgeHost,
     bridgePort: tab.bridgePort,
     sessionName: tab.sessionName,
+    terminalBackend: tab.terminalBackend,
   });
 }
 
-export function buildPersistedOpenTabReuseKeyVariants(tab: Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'sessionName'>) {
+export function buildPersistedOpenTabReuseKeyVariants(tab: Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'terminalBackend'>) {
   return buildSessionSemanticReuseKeyVariants({
     daemonHostId: tab.daemonHostId,
     bridgeHost: tab.bridgeHost,
     bridgePort: tab.bridgePort,
     sessionName: tab.sessionName,
+    terminalBackend: tab.terminalBackend,
   });
 }
 
 export function buildPersistedOpenTabReuseKeyFromSession(session: Pick<
   Session,
-  'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'sessionName'
+  'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'terminalBackend'
 >) {
   return buildPersistedOpenTabReuseKey({
     daemonHostId: session.daemonHostId,
     bridgeHost: session.bridgeHost,
     bridgePort: session.bridgePort,
     sessionName: session.sessionName,
+    terminalBackend: session.terminalBackend,
   });
 }
 
 export function buildPersistedOpenTabReuseKeyVariantsFromSession(session: Pick<
   Session,
-  'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'sessionName'
+  'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'terminalBackend'
 >) {
   return buildPersistedOpenTabReuseKeyVariants({
     daemonHostId: session.daemonHostId,
     bridgeHost: session.bridgeHost,
     bridgePort: session.bridgePort,
     sessionName: session.sessionName,
+    terminalBackend: session.terminalBackend,
   });
 }
 
@@ -163,14 +176,32 @@ export function readPersistedOpenTabsState(): PersistedOpenTabsState {
   }
 
   try {
-    clearLegacyOpenTabPersistence();
+    const raw = localStorage.getItem(STORAGE_KEYS.OPEN_TABS);
+    if (!raw) {
+      return {
+        status: 'empty',
+        tabs: [] as PersistedOpenTab[],
+        hasStoredValue: false,
+      };
+    }
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      return {
+        status: 'invalid',
+        tabs: [] as PersistedOpenTab[],
+        hasStoredValue: true,
+        error: new Error('Persisted OPEN_TABS value is not an array'),
+      };
+    }
     return {
-      status: 'empty',
-      tabs: [] as PersistedOpenTab[],
-      hasStoredValue: false,
+      status: 'available',
+      tabs: parsed
+        .map(normalizePersistedOpenTab)
+        .filter((item): item is PersistedOpenTab => item !== null),
+      hasStoredValue: true,
     };
   } catch (error) {
-    console.error('[open-tab-persistence] Failed to clear legacy open tabs:', error);
+    console.error('[open-tab-persistence] Failed to restore open tabs:', error);
     return {
       status: 'failed',
       tabs: [] as PersistedOpenTab[],
@@ -182,7 +213,7 @@ export function readPersistedOpenTabsState(): PersistedOpenTabsState {
 
 export function buildPersistedOpenTabFromSession(session: Pick<
   Session,
-  'id' | 'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'sessionName' | 'authToken' | 'autoCommand' | 'customName' | 'createdAt'
+  'id' | 'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'sessionName' | 'terminalBackend' | 'authToken' | 'autoCommand' | 'customName' | 'createdAt'
 >): PersistedOpenTab {
   return {
     sessionId: session.id,
@@ -192,6 +223,7 @@ export function buildPersistedOpenTabFromSession(session: Pick<
     bridgePort: session.bridgePort,
     daemonHostId: session.daemonHostId,
     sessionName: session.sessionName,
+    terminalBackend: session.terminalBackend || 'tmux',
     authToken: session.authToken,
     autoCommand: session.autoCommand,
     customName: session.customName,
@@ -201,7 +233,7 @@ export function buildPersistedOpenTabFromSession(session: Pick<
 
 export function buildPersistedOpenTabFromHostSession(options: {
   sessionId: string;
-  host: Pick<Host, 'id' | 'name' | 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'relayHostId' | 'sessionName' | 'authToken' | 'autoCommand'>;
+  host: Pick<Host, 'id' | 'name' | 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'relayHostId' | 'sessionName' | 'terminalBackend' | 'authToken' | 'autoCommand'>;
   customName?: string;
   createdAt: number;
 }) {
@@ -213,6 +245,7 @@ export function buildPersistedOpenTabFromHostSession(options: {
     bridgePort: options.host.bridgePort,
     daemonHostId: options.host.daemonHostId || options.host.relayHostId,
     sessionName: options.host.sessionName,
+    terminalBackend: options.host.terminalBackend || 'tmux',
     authToken: options.host.authToken,
     autoCommand: options.host.autoCommand,
     customName: options.customName?.trim() || undefined,
@@ -221,53 +254,44 @@ export function buildPersistedOpenTabFromHostSession(options: {
 }
 
 export function persistOpenTabsState(tabs: PersistedOpenTab[], activeSessionId: string | null): PersistOpenTabsStateResult {
-  void tabs;
-  void activeSessionId;
   if (typeof window === 'undefined') {
     return { ok: true };
   }
 
   try {
-    clearLegacyOpenTabPersistence();
+    if (tabs.length === 0) {
+      localStorage.removeItem(STORAGE_KEYS.OPEN_TABS);
+      return persistActiveSessionId(null);
+    }
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify(tabs));
+    const activeSessionResult = persistActiveSessionId(activeSessionId);
+    if (!activeSessionResult.ok) {
+      return activeSessionResult;
+    }
     return { ok: true };
   } catch (error) {
-    console.error('[open-tab-persistence] Failed to clear legacy open tabs:', error);
+    console.error('[open-tab-persistence] Failed to persist open tabs:', error);
     return { ok: false, error };
   }
 }
 
 const CLOSED_TAB_REUSE_KEYS_STORAGE_KEY = 'zterm:closed-tab-reuse-keys';
 
-export function readPersistedClosedTabReuseKeys(): Set<string> {
+export function clearLegacyTabListAndTombstoneStorage(): PersistOpenTabsStateResult {
   if (typeof window === 'undefined') {
-    return new Set();
+    return { ok: true };
   }
-  try {
-    localStorage.removeItem(CLOSED_TAB_REUSE_KEYS_STORAGE_KEY);
-    return new Set();
-  } catch (error) {
-    console.error('[open-tab-persistence] Failed to clear closed tab reuse keys:', error);
-    return new Set();
-  }
-}
 
-export function persistClosedTabReuseKeys(keys: Set<string>) {
-  void keys;
-  if (typeof window === 'undefined') {
-    return;
-  }
   try {
+    localStorage.removeItem(STORAGE_KEYS.OPEN_TABS);
+    localStorage.removeItem(STORAGE_KEYS.ACTIVE_SESSION);
+    localStorage.removeItem(STORAGE_KEYS.SAVED_TAB_LISTS);
     localStorage.removeItem(CLOSED_TAB_REUSE_KEYS_STORAGE_KEY);
+    return { ok: true };
   } catch (error) {
-    console.error('[open-tab-persistence] Failed to clear closed tab reuse keys:', error);
+    console.error('[open-tab-persistence] Failed to migrate legacy tab-list storage:', error);
+    return { ok: false, error };
   }
-}
-
-function clearLegacyOpenTabPersistence() {
-  localStorage.removeItem(STORAGE_KEYS.OPEN_TABS);
-  localStorage.removeItem(STORAGE_KEYS.ACTIVE_SESSION);
-  localStorage.removeItem(STORAGE_KEYS.SAVED_TAB_LISTS);
-  localStorage.removeItem(CLOSED_TAB_REUSE_KEYS_STORAGE_KEY);
 }
 
 function pickPreferredPersistedHost(left: Host, right: Host) {
@@ -294,7 +318,7 @@ function resolveUniqueEndpointSessionHost(hosts: Host[]) {
 
 export function clearClosedTabReuseKeysForOwner(
   keys: Set<string>,
-  target: Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'sessionName'>,
+  target: Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'sessionName' | 'terminalBackend'>,
 ) {
   const variants = buildPersistedOpenTabReuseKeyVariants(target);
   let deletedAny = false;
@@ -368,6 +392,7 @@ export function resolveHostForPersistedOpenTab(options: {
       bridgePort: existingHost.bridgePort || tab.bridgePort,
       daemonHostId: existingHost.daemonHostId || tab.daemonHostId || existingHost.relayHostId,
       sessionName: existingHost.sessionName || tab.sessionName,
+      terminalBackend: existingHost.terminalBackend || tab.terminalBackend || 'tmux',
       authToken: existingHost.authToken || tab.authToken,
       autoCommand: existingHost.autoCommand || tab.autoCommand,
     };
@@ -382,6 +407,7 @@ export function resolveHostForPersistedOpenTab(options: {
     daemonHostId: tab.daemonHostId,
     relayHostId: tab.daemonHostId,
     sessionName: tab.sessionName,
+    terminalBackend: tab.terminalBackend || 'tmux',
     authToken: tab.authToken,
     autoCommand: tab.autoCommand,
     authType: 'password' as const,

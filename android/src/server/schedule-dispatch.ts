@@ -7,8 +7,9 @@ export interface ScheduleDispatchResult {
 }
 
 export interface ScheduleDispatchContext {
-  writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean) => boolean;
-  writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean) => void;
+  writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean, backend?: 'tmux' | 'herdr') => boolean;
+  writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean, backend?: 'tmux' | 'herdr') => void;
+  isHerdrSession?: (sessionName: string, backend?: 'tmux' | 'herdr') => boolean;
 }
 
 function appendEnter(payload: string, enabled: boolean) {
@@ -20,6 +21,7 @@ export function dispatchScheduledJob(
   job: ScheduleJob,
 ): ScheduleDispatchResult {
   const sessionName = job.targetSessionName.trim();
+  const backend = job.terminalBackend || 'tmux';
   if (!sessionName) {
     return {
       ok: false,
@@ -28,13 +30,31 @@ export function dispatchScheduledJob(
     };
   }
 
+  if (backend === 'herdr' && context.isHerdrSession?.(sessionName, backend)) {
+    return {
+      ok: false,
+      message: 'Herdr single-session backend does not support schedule commands',
+      disable: true,
+    };
+  }
+
   const payload = appendEnter(job.payload.text, job.payload.appendEnter);
-  if (context.writeToLiveMirror(sessionName, payload, false)) {
+  if (context.writeToLiveMirror(
+    sessionName,
+    payload,
+    false,
+    backend === 'herdr' ? backend : undefined,
+  )) {
     return { ok: true };
   }
 
   try {
-    context.writeToTmuxSession(sessionName, job.payload.text, job.payload.appendEnter);
+    context.writeToTmuxSession(
+      sessionName,
+      job.payload.text,
+      job.payload.appendEnter,
+      backend === 'herdr' ? backend : undefined,
+    );
     return { ok: true };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

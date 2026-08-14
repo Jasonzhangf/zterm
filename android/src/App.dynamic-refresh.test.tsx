@@ -1143,8 +1143,8 @@ describe('App dynamic refresh matrix', () => {
     expect('onOpenServerGroups' in props).toBe(false);
     expect('onSaveServerGroupSelection' in props).toBe(false);
     expect('onLoadSavedTabList' in props).toBe(false);
-    expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).toBeNull();
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).not.toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s1');
 
     act(() => {
       props.onResumeSession('s2');
@@ -1826,7 +1826,7 @@ describe('App dynamic refresh matrix', () => {
     expect(alertSpy).toHaveBeenCalledWith('Imported connection: Imported Mac，1 个文本快捷指令，1 个终端快捷键');
   });
 
-  it('clears legacy persisted tab keys on cold launch instead of restoring them', async () => {
+  it('does not restore current-process tab keys on cold launch', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'legacy-a',
@@ -1874,8 +1874,8 @@ describe('App dynamic refresh matrix', () => {
 
     await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s1,s2'));
     expect(screen.getByTestId('terminal-revision').textContent).toBe('1');
-    expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).toBeNull();
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).not.toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s1');
     expect(localStorage.getItem(STORAGE_KEYS.SAVED_TAB_LISTS)).toBeNull();
   });
 
@@ -1897,8 +1897,8 @@ describe('App dynamic refresh matrix', () => {
     fireEvent.click(screen.getByTestId('switch-second-tab'));
 
     expect(sessionHarness.switchSession).toHaveBeenCalledWith('s2', { refreshSource: 'explicit-resume' });
-    expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).toBeNull();
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).not.toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
   });
 
   it('reorders current-process tabs without saving tab keys', async () => {
@@ -1919,8 +1919,8 @@ describe('App dynamic refresh matrix', () => {
     fireEvent.click(screen.getByTestId('move-second-tab-first'));
 
     await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s2,s1'));
-    expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).toBeNull();
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).not.toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s1');
   });
 
   it('closes current-process tabs without saving tab keys or saved lists', async () => {
@@ -1942,8 +1942,8 @@ describe('App dynamic refresh matrix', () => {
 
     await waitFor(() => expect(screen.getByTestId('terminal-session-ids').textContent).toBe('s2'));
     expect(sessionHarness.closeSession).toHaveBeenCalledWith('s1');
-    expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).toBeNull();
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).not.toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
     expect(localStorage.getItem(STORAGE_KEYS.SAVED_TAB_LISTS)).toBeNull();
   });
 
@@ -1982,7 +1982,7 @@ describe('App dynamic refresh matrix', () => {
     );
 
     await waitFor(() => expect(screen.getByTestId('terminal-revision').textContent).toBe('2'));
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
     await waitFor(() => expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE) || '{}')).toEqual({
       kind: 'terminal',
     }));
@@ -1992,7 +1992,7 @@ describe('App dynamic refresh matrix', () => {
     });
 
     expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE) || '{}')).toEqual({
       kind: 'terminal',
     });
@@ -2014,7 +2014,7 @@ describe('App dynamic refresh matrix', () => {
     });
 
     expect(sessionHarness.resumeActiveSessionTransport).not.toHaveBeenCalled();
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE) || '{}')).toEqual({
       kind: 'terminal',
     });

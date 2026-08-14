@@ -101,6 +101,53 @@ describe('notifyTargetNetworkSignalRuntime', () => {
     targetNetworkProbeRuntime.dispose();
   });
 
+  it('retires every stale physical target immediately when the client network generation changes', () => {
+    const targetA = makeFailedSocket(WebSocket.OPEN);
+    const targetB = makeFailedSocket(WebSocket.CONNECTING);
+    const targetNetworkProbeRuntime = createSessionTargetNetworkProbeRuntime({ probeTimeoutMs: 2_500, now: Date.now });
+    const sendTargetProbe = vi.fn();
+    const submitTargetSocketFailure = vi.fn();
+    const wakeScheduledReconnects = vi.fn();
+
+    expect(notifyTargetNetworkSignalRuntime({
+      signal: {
+        connected: true,
+        connectionType: 'cellular',
+        source: 'capacitor',
+        networkGeneration: 2,
+        fingerprintChanged: true,
+      },
+      targetRuntimes: [
+        { key: 'daemon-a', sessionIds: ['session-a1'], terminalTransport: targetA },
+        { key: 'daemon-b', sessionIds: ['session-b1'], terminalTransport: targetB },
+      ],
+      targetNetworkProbeRuntime,
+      sendTargetProbe,
+      submitTargetSocketFailure,
+      wakeScheduledReconnects,
+      runtimeDebug: vi.fn(),
+    })).toEqual([
+      { targetKey: 'daemon-a', result: 'generation-changed' },
+      { targetKey: 'daemon-b', result: 'generation-changed' },
+    ]);
+
+    expect(wakeScheduledReconnects).toHaveBeenCalledTimes(1);
+    expect(sendTargetProbe).not.toHaveBeenCalled();
+    expect(submitTargetSocketFailure).toHaveBeenNthCalledWith(
+      1,
+      'daemon-a',
+      targetA,
+      'client network generation changed to 2',
+    );
+    expect(submitTargetSocketFailure).toHaveBeenNthCalledWith(
+      2,
+      'daemon-b',
+      targetB,
+      'client network generation changed to 2',
+    );
+    targetNetworkProbeRuntime.dispose();
+  });
+
   it('probes every physical daemon target once and does not multiply by logical channels', () => {
     const targetA = makeFailedSocket(WebSocket.OPEN);
     const targetB = makeFailedSocket(WebSocket.OPEN);
@@ -618,7 +665,7 @@ describe('resolveMuxChannelClosedWithControlStatusRuntime', () => {
     expect(scheduleReconnect).not.toHaveBeenCalled();
   });
 
-  it('routes an active channel to target failure owner when target control status is unavailable', async () => {
+  it('keeps the shared target transport when one active channel cannot query control status', async () => {
     const scheduleReconnect = vi.fn();
     const routeTargetControlUnavailable = vi.fn();
     const updateSessionSync = vi.fn();
@@ -641,16 +688,13 @@ describe('resolveMuxChannelClosedWithControlStatusRuntime', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(routeTargetControlUnavailable).toHaveBeenCalledWith(
-      'session-1',
-      'control status unavailable after data channel closed: data channel closed',
-    );
-    expect(scheduleReconnect).not.toHaveBeenCalled();
+    expect(routeTargetControlUnavailable).not.toHaveBeenCalled();
+    expect(scheduleReconnect).toHaveBeenCalledWith('session-1', 'data channel closed', true);
     expect(updateSessionSync).not.toHaveBeenCalled();
     expect(emitSessionStatus).not.toHaveBeenCalled();
   });
 
-  it('routes an active channel to target failure owner when target control status request fails', async () => {
+  it('keeps the shared target transport when one active channel control request fails', async () => {
     const scheduleReconnect = vi.fn();
     const routeTargetControlUnavailable = vi.fn();
     const updateSessionSync = vi.fn();
@@ -675,11 +719,8 @@ describe('resolveMuxChannelClosedWithControlStatusRuntime', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 0));
 
-    expect(routeTargetControlUnavailable).toHaveBeenCalledWith(
-      'session-1',
-      'control status failed after data channel closed: control timeout',
-    );
-    expect(scheduleReconnect).not.toHaveBeenCalled();
+    expect(routeTargetControlUnavailable).not.toHaveBeenCalled();
+    expect(scheduleReconnect).toHaveBeenCalledWith('session-1', 'data channel closed', true);
     expect(updateSessionSync).not.toHaveBeenCalled();
     expect(emitSessionStatus).not.toHaveBeenCalled();
   });

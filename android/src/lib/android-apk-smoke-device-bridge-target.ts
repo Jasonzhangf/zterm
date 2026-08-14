@@ -380,10 +380,10 @@ export function extractApkSmokeBridgeDebugTargetFromStorageDump(rawDump: string)
     .filter(Boolean);
   const activeSessionId = extractActiveSessionId(lines);
   const jsonValues = collectJsonValues(lines);
-  const explicitEmptyOpenTabsTruth = hasExplicitEmptyOpenTabsTruth(lines);
   const bridgeSettingsTarget = pickFromBridgeSettings(jsonValues)
     || pickFromFragmentedBridgeSettings(lines)
     || null;
+  const explicitEmptyOpenTabsTruth = hasExplicitEmptyOpenTabsTruth(lines);
   const openTabTarget = explicitEmptyOpenTabsTruth
     ? null
     : (
@@ -402,9 +402,85 @@ export function extractApkSmokeBridgeDebugTargetFromStorageDump(rawDump: string)
     }
     return openTabTarget
       || bridgeSettingsTarget
-    || pickFromHosts(jsonValues)
+      || pickFromHosts(jsonValues)
       || null;
   })();
+  return {
+    activeSessionId: activeSessionId || null,
+    parsedJsonCount: jsonValues.length,
+    target,
+  };
+}
+
+function parseStorageJsonValues(snapshot: Record<string, unknown>) {
+  const values: unknown[] = [];
+  for (const rawValue of Object.values(snapshot)) {
+    if (typeof rawValue !== 'string' || !rawValue.trim()) {
+      continue;
+    }
+    try {
+      values.push(JSON.parse(rawValue) as unknown);
+    } catch {
+      continue;
+    }
+  }
+  return values;
+}
+
+function resolveStorageActiveSessionId(snapshot: Record<string, unknown>) {
+  const explicit = asString(snapshot['zterm:active-session']);
+  if (explicit) {
+    return explicit;
+  }
+
+  const rawLayout = snapshot['zterm:terminal-layout'];
+  if (typeof rawLayout !== 'string' || !rawLayout.trim()) {
+    return '';
+  }
+  let layout: Record<string, unknown>;
+  try {
+    layout = asRecord(JSON.parse(rawLayout)) || {};
+  } catch {
+    return '';
+  }
+  const panes = Array.isArray(layout.panes) ? layout.panes : [];
+  const activePane = panes.find((pane) => {
+    const record = asRecord(pane);
+    return asString(record?.id) === asString(layout.activePaneId);
+  });
+  const tabs = Array.isArray(asRecord(activePane)?.tabs) ? asRecord(activePane)?.tabs as unknown[] : [];
+  const activeTabId = asString(asRecord(activePane)?.activeTabId);
+  const activeTab = tabs.find((tab) => asString(asRecord(tab)?.id) === activeTabId);
+  return asString(asRecord(activeTab)?.sessionId);
+}
+
+export function extractApkSmokeBridgeDebugTargetFromLocalStorageSnapshot(
+  snapshot: Record<string, unknown>,
+): {
+  activeSessionId: string | null;
+  parsedJsonCount: number;
+  target: ApkSmokeBridgeDebugTarget | null;
+} {
+  const activeSessionId = resolveStorageActiveSessionId(snapshot);
+  const jsonValues = parseStorageJsonValues(snapshot);
+  const openTabsValue = snapshot['zterm:open-tabs'];
+  let openTabs: unknown[] = [];
+  if (typeof openTabsValue === 'string' && openTabsValue.trim()) {
+    try {
+      const parsed = JSON.parse(openTabsValue);
+      openTabs = Array.isArray(parsed) ? parsed : [];
+    } catch {
+      openTabs = [];
+    }
+  }
+  const hasOpenTabs = openTabs.length > 0;
+  const target = hasOpenTabs
+    ? (
+        activeSessionId
+          ? pickFromOpenTabs([openTabs.filter((entry) => asString(asRecord(entry)?.sessionId) === activeSessionId)], activeSessionId)
+          : null
+      )
+    : pickFromBridgeSettings(jsonValues);
   return {
     activeSessionId: activeSessionId || null,
     parsedJsonCount: jsonValues.length,

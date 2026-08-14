@@ -1,6 +1,13 @@
-import { describe, expect, it } from 'vitest';
-import { HERDR_SINGLE_SESSION_WORKSPACE, mapHerdrCanonicalSnapshot } from './herdr-backend-runtime';
+import { describe, expect, it, vi } from 'vitest';
+import { createHerdrBackendRuntime, mapHerdrCanonicalSnapshot } from './herdr-backend-runtime';
 import type { HerdrCanonicalSnapshot } from './herdr-frame-canonicalizer';
+
+const childProcessMocks = vi.hoisted(() => ({
+  execFileSync: vi.fn(),
+  spawn: vi.fn(),
+}));
+
+vi.mock('node:child_process', () => childProcessMocks);
 
 function snapshot(overrides: Partial<HerdrCanonicalSnapshot> = {}): HerdrCanonicalSnapshot {
   return {
@@ -31,9 +38,45 @@ function snapshot(overrides: Partial<HerdrCanonicalSnapshot> = {}): HerdrCanonic
 }
 
 describe('Herdr backend runtime mirror projection', () => {
-  it('uses a synthetic single-surface workspace label instead of Herdr layout identity', () => {
-    expect(HERDR_SINGLE_SESSION_WORKSPACE).toBe('herdr-single-session');
-    expect(HERDR_SINGLE_SESSION_WORKSPACE).not.toContain(':');
+  it('enumerates every running official Herdr session without a zterm name filter', () => {
+    childProcessMocks.execFileSync.mockImplementation((_executable: string, args: string[]) => {
+      if (args.join(' ') === 'session list --json') {
+        return JSON.stringify({ sessions: [
+          { name: 'hd-codex', running: true },
+          { name: 'manual-project', running: true },
+          { name: 'stopped-project', running: false },
+        ] });
+      }
+      if (args[args.length - 2] === 'pane' && args[args.length - 1] === 'list') {
+        return JSON.stringify({ result: { panes: [{ terminal_id: 'terminal-1', pane_id: 'pane-1' }] } });
+      }
+      throw new Error(`unexpected Herdr command: ${args.join(' ')}`);
+    });
+
+    const runtime = createHerdrBackendRuntime({ executable: 'herdr' });
+
+    expect(runtime.listSessions().map((session) => session.sessionName)).toEqual([
+      'hd-codex',
+      'manual-project',
+    ]);
+  });
+
+  it('removes externally stopped sessions on the next authoritative enumeration', () => {
+    let listed = [{ name: 'manual-project', running: true }];
+    childProcessMocks.execFileSync.mockImplementation((_executable: string, args: string[]) => {
+      if (args.join(' ') === 'session list --json') return JSON.stringify({ sessions: listed });
+      if (args[args.length - 2] === 'pane' && args[args.length - 1] === 'list') {
+        return JSON.stringify({ result: { panes: [{ terminal_id: 'terminal-1', pane_id: 'pane-1' }] } });
+      }
+      throw new Error(`unexpected Herdr command: ${args.join(' ')}`);
+    });
+
+    const runtime = createHerdrBackendRuntime({ executable: 'herdr' });
+    const sessions = runtime.listSessions();
+    expect(sessions.map((session) => session.sessionName)).toEqual(['manual-project']);
+    expect(sessions[0]).not.toHaveProperty('workspace');
+    listed = [];
+    expect(runtime.listSessions()).toEqual([]);
   });
 
   it('projects canonical rows, range owner, cursor, geometry, and zterm revision without remapping seq', () => {

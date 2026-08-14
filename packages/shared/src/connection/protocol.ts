@@ -486,6 +486,7 @@ export interface HostConfigMessage {
    */
   sessionTransportToken?: string;
   sessionName: string;
+  backend?: TerminalBackendKind;
   cols?: number;
   rows?: number;
   widthMode?: TerminalWidthMode;
@@ -553,15 +554,15 @@ export type BridgeClientMessage =
   | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
   | { type: 'debug-log'; payload: { entries: Array<RuntimeDebugLogEntry> } }
   | { type: 'debug-snapshot'; payload: { snapshot: unknown } }
-  | { type: 'list-sessions' }
+  | { type: 'list-sessions'; payload?: { terminalBackend?: TerminalBackendKind } }
   | { type: 'schedule-list'; payload: { sessionName: string } }
   | { type: 'schedule-upsert'; payload: { job: ScheduleJobDraft } }
   | { type: 'schedule-delete'; payload: { jobId: string } }
   | { type: 'schedule-toggle'; payload: { jobId: string; enabled: boolean } }
   | { type: 'schedule-run-now'; payload: { jobId: string } }
-  | { type: 'tmux-create-session'; payload: { sessionName: string; cwd?: string } }
-  | { type: 'tmux-rename-session'; payload: { sessionName: string; nextSessionName: string } }
-  | { type: 'tmux-kill-session'; payload: { sessionName: string } }
+  | { type: 'tmux-create-session'; payload: { sessionName: string; cwd?: string; terminalBackend?: TerminalBackendKind } }
+  | { type: 'tmux-rename-session'; payload: { sessionName: string; nextSessionName: string; terminalBackend?: TerminalBackendKind } }
+  | { type: 'tmux-kill-session'; payload: { sessionName: string; terminalBackend?: TerminalBackendKind } }
   | { type: 'input'; payload: string | TerminalReliableInputPayload }
   | { type: 'paste-image-start'; payload: PasteImageStartPayload }
   | { type: 'paste-image'; payload: PasteImagePayload }
@@ -754,6 +755,8 @@ export type TerminalMuxTargetClientMessageType =
   | 'attachment-asset-request'
   | 'attachment-receipt';
 
+export type TerminalBackendKind = 'tmux' | 'herdr';
+
 export type TerminalMuxLegacyClientMessageType =
   | 'session-open'
   | 'connect'
@@ -795,7 +798,7 @@ export type TerminalMuxChannelServerMessage = BridgeServerMessage;
 export type TerminalMuxClientFrame =
   | { type: 'mux-hello'; payload: { version: typeof TERMINAL_MUX_PROTOCOL_VERSION; clientInstanceId: string; deviceId?: string } }
   | { type: 'mux-target-message'; payload: { requestId?: string; message: TerminalMuxTargetClientMessage } }
-  | { type: 'mux-channel-open'; payload: { channelId: string; sessionName: string; cols?: number; rows?: number; widthMode?: TerminalWidthMode; autoCommand?: string; bodySubscribed?: boolean } }
+  | { type: 'mux-channel-open'; payload: { channelId: string; sessionName: string; backend?: TerminalBackendKind; cols?: number; rows?: number; widthMode?: TerminalWidthMode; autoCommand?: string; bodySubscribed?: boolean } }
   | { type: 'mux-channel-message'; payload: { channelId: string; message: TerminalMuxChannelClientMessage } }
   | { type: 'mux-channel-binary'; payload: { channelId: string; dataBase64: string } }
   | { type: 'mux-channel-close'; payload: { channelId: string; reason?: string } }

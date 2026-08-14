@@ -72,6 +72,7 @@ export function handleSocketServerMessageRuntime(options: {
     onClosed: (reason?: string) => void;
   };
   msg: ServerMessage;
+  recordRelayHostConnection?: (daemonHostId: string) => void;
   refs: {
     stateRef: MutableRefObject<{ sessions: Session[]; activeSessionId: string | null }>;
     scheduleStatesRef: MutableRefObject<Record<string, SessionScheduleState>>;
@@ -103,6 +104,7 @@ export function handleSocketServerMessageRuntime(options: {
   fileTransferMessageRuntime: FileTransferDispatcher;
   remoteWindowMessageRuntime?: RemoteWindowMessageDispatcher;
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
+  handleAttachmentError?: (message: string, code?: string) => void;
 }) {
   const { params, msg } = options;
   const currentSession = options.refs.stateRef.current.sessions.find((item) => item.id === params.sessionId) || null;
@@ -116,6 +118,9 @@ export function handleSocketServerMessageRuntime(options: {
 
   switch (msg.type) {
     case 'connected':
+      if (msg.payload.daemonHostId) {
+        options.recordRelayHostConnection?.(msg.payload.daemonHostId);
+      }
       options.updateSessionSync(params.sessionId, buildSessionConnectedUpdates({
         daemonHostId: msg.payload.daemonHostId,
         reliableInputSupported: msg.payload.capabilities?.reliableInput?.version === 1,
@@ -250,6 +255,15 @@ export function handleSocketServerMessageRuntime(options: {
       handleTerminalInputAck(params.sessionId, msg.payload);
       break;
     case 'error':
+      if (msg.payload.code === 'attachment_read_failed') {
+        options.handleAttachmentError?.(msg.payload.message, msg.payload.code);
+        options.runtimeDebug(`session.ws.${params.debugScope}.attachment-read-failed`, {
+          sessionId: params.sessionId,
+          code: msg.payload.code,
+          message: msg.payload.message,
+        });
+        break;
+      }
       if (isRetryableTerminalAttachCode(msg.payload.code)) {
         options.runtimeDebug(`session.ws.${params.debugScope}.remote-session-unavailable`, {
           sessionId: params.sessionId,

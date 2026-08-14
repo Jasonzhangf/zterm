@@ -6,12 +6,13 @@ import {
 } from './terminal-message-control-runtime';
 import type { TerminalSession, TerminalTransportConnection } from './terminal-runtime-types';
 
-function makeSession(): TerminalSession {
+function makeSession(backend: 'tmux' | 'herdr' = 'tmux'): TerminalSession {
   return {
     id: 'server-session-1',
     sessionName: 'tmux-1',
     mirrorKey: 'tmux-1',
     transport: null,
+    backend,
   } as TerminalSession;
 }
 
@@ -93,10 +94,45 @@ describe('terminal-message-control-runtime schedule errors', () => {
       });
     });
   });
+
+  it('rejects every schedule operation explicitly for the Herdr single-session backend', () => {
+    const session = makeSession('herdr');
+    const deps = makeDeps();
+
+    handleScheduleMessageRuntime(deps, session, {
+      type: 'schedule-upsert',
+      payload: { job: { targetSessionName: 'herdr-1', payload: { text: 'echo no', appendEnter: true }, rule: { kind: 'interval', intervalMs: 1000, startAt: new Date().toISOString() } } },
+    }, null);
+
+    expect(deps.scheduleEngine.upsert).not.toHaveBeenCalled();
+    expect(deps.sendMessage).toHaveBeenCalledWith(session, expect.objectContaining({
+      type: 'schedule-error',
+      payload: expect.objectContaining({ code: 'herdr_schedule_unsupported', operation: 'upsert' }),
+    }));
+  });
 });
 
 describe('terminal-message-control-runtime tmux kill truth', () => {
   const connection = { transport: null } as unknown as TerminalTransportConnection;
+
+  it('republishes the selected backend catalog after creating a Herdr session', () => {
+    const deps = makeDeps({
+      listTerminalSessions: vi.fn(() => ['tmux-default']),
+      listTmuxSessions: vi.fn((backend) => backend === 'herdr' ? ['hd-codex'] : ['tmux-default']),
+    });
+
+    handleTmuxControlMessageRuntime(deps, connection, {
+      type: 'tmux-create-session',
+      payload: { sessionName: 'hd-codex', terminalBackend: 'herdr' },
+    });
+
+    expect(deps.listTmuxSessions).toHaveBeenCalledWith('herdr');
+    expect(deps.listTerminalSessions).not.toHaveBeenCalled();
+    expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, {
+      type: 'sessions',
+      payload: { sessions: ['hd-codex'] },
+    });
+  });
 
   it('treats an already absent tmux session as idempotently closed and republishes the current list', () => {
     const deps = makeDeps({
@@ -111,7 +147,7 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
       payload: { sessionName: 'stale' },
     });
 
-    expect(deps.scheduleEngine.markSessionMissing).toHaveBeenCalledWith('stale', 'session already absent');
+    expect(deps.scheduleEngine.markSessionMissing).toHaveBeenCalledWith('stale', 'session already absent', 'tmux');
     expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, {
       type: 'sessions',
       payload: { sessions: ['live'] },
@@ -137,6 +173,26 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
         message: 'Failed to kill tmux session: permission denied',
         code: 'tmux_kill_failed',
       },
+    });
+  });
+
+  it('republishes the selected Herdr catalog when an already absent Herdr session is killed', () => {
+    const deps = makeDeps({
+      closeDetachedTerminalSession: vi.fn(() => {
+        throw new Error('herdr session not found: stale');
+      }),
+      listTmuxSessions: vi.fn((backend) => backend === 'herdr' ? ['herdr-live'] : ['tmux-live']),
+    });
+
+    handleTmuxControlMessageRuntime(deps, connection, {
+      type: 'tmux-kill-session',
+      payload: { sessionName: 'stale', terminalBackend: 'herdr' },
+    });
+
+    expect(deps.listTmuxSessions).toHaveBeenCalledWith('herdr');
+    expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, {
+      type: 'sessions',
+      payload: { sessions: ['herdr-live'] },
     });
   });
 });

@@ -9,6 +9,7 @@ import {
   buildSessionConnectPayload,
   buildSessionResizePayload,
 } from './session-context-transport-wire-runtime';
+import { buildSessionMuxChannelOpenFrame } from './session-context-transport-runtime';
 import {
   createSessionTransportRuntimeStore,
   getTargetTerminalTransport,
@@ -95,6 +96,30 @@ describe('adaptive width wire guard', () => {
       widthMode: 'adaptive-phone',
       cols: 56,
       rows: undefined,
+    });
+  });
+});
+
+describe('terminal backend mux identity', () => {
+  it('forwards the selected Herdr backend on channel open', () => {
+    expect(buildSessionMuxChannelOpenFrame({
+      channel: {
+        channelId: 'herdr-channel',
+        sessionName: 'herdr-session',
+        bodySubscribed: true,
+      },
+      sessionName: 'herdr-session',
+      host: {
+        terminalBackend: 'herdr',
+      },
+    })).toMatchObject({
+      type: 'mux-channel-open',
+      payload: {
+        channelId: 'herdr-channel',
+        sessionName: 'herdr-session',
+        backend: 'herdr',
+        bodySubscribed: true,
+      },
     });
   });
 });

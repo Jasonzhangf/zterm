@@ -4,7 +4,7 @@ import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionDebugOverlayMetrics, SessionScheduleState, SessionState } from '../lib/types';
 import type { SessionManagerState } from './session-context-core';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
-import { getPrimarySessionPullState, hasActiveSessionPullState } from './session-pull-state-helpers';
+import { getPrimarySessionPullState, hasActiveSessionPullState } from '../lib/session-pull-state-helpers';
 
 
 /** Transport health signals for cadence decisions */

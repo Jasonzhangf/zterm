@@ -190,7 +190,7 @@ describe('TerminalPage real quickbar split integration', () => {
     vi.unstubAllGlobals();
   });
 
-  it('opens split from the real floating quickbar menu when viewport satisfies the split gate', async () => {
+  it('opens split from the real inline quickbar row when viewport satisfies the split gate', async () => {
     setViewport(800, 844);
     const sessions = [makeSession('s1'), makeSession('s2')];
 
@@ -213,7 +213,6 @@ describe('TerminalPage real quickbar split integration', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle floating quick menu' }));
     fireEvent.click(screen.getByRole('button', { name: '2 分屏' }));
 
     await waitFor(() => {
@@ -244,8 +243,6 @@ describe('TerminalPage real quickbar split integration', () => {
       />,
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle floating quick menu' }));
-
     expect(screen.getByRole('button', { name: '3 分屏' })).not.toBeNull();
     expect(screen.getByRole('button', { name: '4 分屏' })).not.toBeNull();
   });
@@ -272,8 +269,6 @@ describe('TerminalPage real quickbar split integration', () => {
         sessionDraft=""
       />,
     );
-
-    fireEvent.click(screen.getByRole('button', { name: 'Toggle floating quick menu' }));
 
     expect(screen.queryByRole('button', { name: '2 分屏' })).toBeNull();
   });

@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   buildRelayDirectoryUpdateEnvelope,
+  createRelayHostDirectoryPublishLoop,
   publishRelayDirectoryUpdate,
 } from './relay-client';
 
@@ -14,6 +15,10 @@ function createOpenSocket() {
     },
   };
 }
+
+afterEach(() => {
+  vi.useRealTimers();
+});
 
 describe('traversal relay daemon directory publisher', () => {
   it('builds a directory-update with gateway endpoint candidates and tmux sessions', () => {
@@ -120,5 +125,105 @@ describe('traversal relay daemon directory publisher', () => {
       type: 'relay-error',
       reason: 'directory-update failed: network endpoint discovery failed',
     });
+  });
+});
+
+describe('relay host directory publish loop', () => {
+  function makeSocket() {
+    return {
+      readyState: 1,
+      ping: () => {},
+      terminate: () => {},
+    };
+  }
+
+  it('publishes on every interval while the socket is open', () => {
+    vi.useFakeTimers();
+    const socket = makeSocket();
+    let publishCount = 0;
+    const loop = createRelayHostDirectoryPublishLoop({
+      socket,
+      publish: () => {
+        publishCount += 1;
+        return true;
+      },
+      intervalMs: 1000,
+      pongTimeoutMs: 3000,
+    });
+    loop.start();
+    vi.advanceTimersByTime(3500);
+    loop.stop();
+    expect(publishCount).toBe(3);
+  });
+
+  it('terminates a half-open socket after pong timeout and stops publishing', () => {
+    vi.useFakeTimers();
+    const socket = makeSocket();
+    const terminate = vi.spyOn(socket, 'terminate');
+    let publishCount = 0;
+    const loop = createRelayHostDirectoryPublishLoop({
+      socket,
+      publish: () => {
+        publishCount += 1;
+        return true;
+      },
+      intervalMs: 1000,
+      pongTimeoutMs: 3000,
+    });
+    loop.start();
+    vi.advanceTimersByTime(1000); // t1: now-lastPongAt=1000 < 3000 -> ping + publish
+    vi.advanceTimersByTime(1000); // t2: 2000 < 3000 -> ping + publish
+    vi.advanceTimersByTime(1000); // t3: 3000 边界未超 -> ping + publish
+    expect(publishCount).toBe(3);
+    vi.advanceTimersByTime(1000); // t4: 4000 > 3000 => timeout -> terminate
+    expect(terminate).toHaveBeenCalledTimes(1);
+    expect(publishCount).toBe(3);
+    // 超时后循环不再 publish
+    vi.advanceTimersByTime(3000);
+    expect(publishCount).toBe(3);
+    loop.stop();
+  });
+
+  it('keeps publishing when pongs keep the connection fresh', () => {
+    vi.useFakeTimers();
+    const socket = makeSocket();
+    let publishCount = 0;
+    const loop = createRelayHostDirectoryPublishLoop({
+      socket,
+      publish: () => {
+        publishCount += 1;
+        return true;
+      },
+      intervalMs: 1000,
+      pongTimeoutMs: 3000,
+    });
+    loop.start();
+    // 每次 publish 前模拟收到 pong（服务端正常回 pong）
+    for (let i = 0; i < 5; i += 1) {
+      vi.advanceTimersByTime(1000);
+      loop.markPong();
+    }
+    expect(publishCount).toBe(5);
+    loop.stop();
+  });
+
+  it('skips publishing while the socket is not open', () => {
+    vi.useFakeTimers();
+    const socket = makeSocket();
+    socket.readyState = 0;
+    let publishCount = 0;
+    const loop = createRelayHostDirectoryPublishLoop({
+      socket,
+      publish: () => {
+        publishCount += 1;
+        return true;
+      },
+      intervalMs: 1000,
+      pongTimeoutMs: 3000,
+    });
+    loop.start();
+    vi.advanceTimersByTime(3000);
+    expect(publishCount).toBe(0);
+    loop.stop();
   });
 });

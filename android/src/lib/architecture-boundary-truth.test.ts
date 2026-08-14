@@ -140,16 +140,13 @@ describe('architecture boundary truth gate', () => {
     const releaseAdaptiveBlock = extractBlock(mirrorRuntimeSource, 'function releaseAdaptiveTmuxWidth', 1800);
     expect(applyAdaptiveBlock).toMatch(/runTmux\(\s*\[\s*['"]resize-window['"]/);
     expect(releaseAdaptiveBlock).toMatch(/runTmux\(\s*\[\s*['"]resize-window['"]/);
-    expect(releaseAdaptiveBlock).toMatch(/runTmux\(\s*\[\s*['"]set-window-option['"][\s\S]*['"]window-size['"]/);
-    const runtimeWithoutAdaptiveOwnerBlocks = mirrorRuntimeSource
-      .replace(applyAdaptiveBlock, '')
-      .replace(releaseAdaptiveBlock, '');
-    expect(runtimeWithoutAdaptiveOwnerBlocks).not.toMatch(/runTmux\(\s*\[\s*['"]resize-window['"]/);
-    expect(runtimeWithoutAdaptiveOwnerBlocks).not.toMatch(/runTmux\(\s*\[\s*['"]set-window-option['"][\s\S]*['"]window-size['"]/);
+    expect(releaseAdaptiveBlock).toMatch(/mirror\.backend === 'tmux'[\s\S]*runTmux\(\s*\[\s*['"]set-window-option['"][\s\S]*['"]window-size['"]/);
+    expect(mirrorRuntimeSource.match(/runTmux\(\s*\[\s*['"]resize-window['"]/g)?.length).toBe(2);
+    expect(mirrorRuntimeSource.match(/runTmux\(\s*\[\s*['"]set-window-option['"][\s\S]*['"]window-size['"]/g)?.length).toBe(1);
     expect(mirrorRuntimeSource).not.toContain('@zterm_adaptive_width_');
 
     expect(runtimeTypesSource).toContain('widthMode?: TerminalWidthMode');
-    expect(mirrorRuntimeSource).toMatch(/handleAdaptiveResize\(\s*session: TerminalSession,\s*payload: \{ cols\?: number; widthMode\?:/);
+    expect(mirrorRuntimeSource).toMatch(/handleAdaptiveResize\(\s*session: TerminalSession,\s*payload: \{ cols\?: number; rows\?: number; widthMode\?:/);
   });
 
   it('keeps terminal width mode storage owned by bridge settings only', () => {

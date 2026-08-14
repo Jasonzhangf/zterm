@@ -94,7 +94,7 @@ describe('open-tab / history / connections truth gates', () => {
     expect(restoreRuntimeSource).not.toContain("source: 'saved-tab-import-revive'");
 
     expect(sessionOpenActionsSource).toContain('clearClosedTabReuseKeysForOwner(');
-    expect(sessionOpenActionsSource).toContain('persistClosedTabReuseKeys(');
+    expect(sessionOpenActionsSource).not.toContain('persistClosedTabReuseKeys(');
     expect(openTabOpenPolicySource).toContain("'explicit-open': {");
     expect(openTabOpenPolicySource).toContain("'cold-restore': {");
     expect(openTabOpenPolicySource).not.toContain('saved-tab-import');

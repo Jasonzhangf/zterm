@@ -6,12 +6,11 @@ import type { Session } from './types';
 import {
   buildPersistedOpenTabFromHostSession,
   clearClosedTabReuseKeysForOwner,
+  clearLegacyTabListAndTombstoneStorage,
   findReusableOpenTabSession,
   persistOpenTabsState,
-  persistClosedTabReuseKeys,
   readPersistedActiveSessionId,
   readPersistedActiveSessionIdState,
-  readPersistedClosedTabReuseKeys,
   readPersistedOpenTabsState,
   resolveHostForPersistedOpenTab,
 } from './open-tab-persistence';
@@ -55,7 +54,7 @@ describe('open-tab persistence truth', () => {
     });
   });
 
-  it('clears legacy persisted tabs instead of restoring them on cold start', () => {
+  it('reads legacy current-tab storage for migration inspection, not as a runtime restore claim', () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'old',
@@ -82,15 +81,107 @@ describe('open-tab persistence truth', () => {
     localStorage.setItem(STORAGE_KEYS.SAVED_TAB_LISTS, JSON.stringify([{ id: 'saved' }]));
 
     const state = readPersistedOpenTabsState();
-    expect(state.status).toBe('empty');
-    expect(state.hasStoredValue).toBe(false);
-    expect(state.tabs).toEqual([]);
+    expect(state.status).toBe('available');
+    expect(state.hasStoredValue).toBe(true);
+    expect(state.tabs.map((tab) => tab.sessionId)).toEqual(['old', 'new']);
+    expect(readPersistedActiveSessionId()).toBe('new');
+    expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).not.toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).not.toBeNull();
+  });
+
+  it('reads persisted current-tab storage without mutating it until the migration owner runs', () => {
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'session-a',
+        hostId: 'host-a',
+        connectionName: 'Conn A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'zterm',
+        authToken: 'token-a',
+        createdAt: 1,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'session-a');
+    localStorage.setItem(STORAGE_KEYS.SAVED_TAB_LISTS, JSON.stringify([{ id: 'saved-list-a' }]));
+
+    const tabsState = readPersistedOpenTabsState();
+    const activeState = readPersistedActiveSessionIdState();
+
+    expect(tabsState.status).toBe('available');
+    expect(tabsState.hasStoredValue).toBe(true);
+    expect(tabsState.tabs.map((tab) => tab.sessionId)).toEqual(['session-a']);
+    expect(activeState.status).toBe('available');
+    expect(activeState.activeSessionId).toBe('session-a');
+    expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).not.toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).not.toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.SAVED_TAB_LISTS)).not.toBeNull();
+  });
+
+  it('persists the current open-tab truth and keeps it readable instead of deleting it', () => {
+    const result = persistOpenTabsState([
+      {
+        sessionId: 's1',
+        hostId: 'host-1',
+        connectionName: 'Conn 1',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'tmux-1',
+        authToken: 'token-1',
+        createdAt: 1,
+      },
+    ], 's1');
+
+    expect(result).toEqual({ ok: true });
+    const state = readPersistedOpenTabsState();
+    expect(state.status).toBe('available');
+    expect(state.hasStoredValue).toBe(true);
+    expect(state.tabs.map((tab) => tab.sessionId)).toEqual(['s1']);
+    expect(readPersistedActiveSessionId()).toBe('s1');
+  });
+
+  it('removes current and legacy tab-list storage while preserving no stale state', () => {
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
+      {
+        sessionId: 'session-a',
+        hostId: 'host-a',
+        connectionName: 'Conn A',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'zterm',
+        createdAt: 1,
+      },
+    ]));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 'session-a');
+    localStorage.setItem(STORAGE_KEYS.SAVED_TAB_LISTS, JSON.stringify([{ id: 'saved-list-a' }]));
+    localStorage.setItem('zterm:closed-tab-reuse-keys', '["daemon:a:main"]');
+
+    const result = clearLegacyTabListAndTombstoneStorage();
+
+    expect(result).toEqual({ ok: true });
     expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).toBeNull();
     expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBeNull();
     expect(localStorage.getItem(STORAGE_KEYS.SAVED_TAB_LISTS)).toBeNull();
+    expect(localStorage.getItem('zterm:closed-tab-reuse-keys')).toBeNull();
   });
 
-  it('does not persist runtime tabs or active id', () => {
+  it('reports legacy migration storage failures as explicit failed result without hiding them', () => {
+    Object.defineProperty(window, 'localStorage', {
+      configurable: true,
+      value: {
+        removeItem: () => {
+          throw new Error('migration remove blocked');
+        },
+      },
+    });
+
+    const result = clearLegacyTabListAndTombstoneStorage();
+
+    expect(result.ok).toBe(false);
+    expect(result.ok === false && result.error).toBeInstanceOf(Error);
+  });
+
+  it('persists runtime tabs and active id for the next startup restore', () => {
     const result = persistOpenTabsState([
       {
         sessionId: 's1',
@@ -105,29 +196,29 @@ describe('open-tab persistence truth', () => {
     ], 'missing-active');
 
     expect(result).toEqual({ ok: true });
-    expect(readPersistedOpenTabsState().tabs).toEqual([]);
-    expect(readPersistedActiveSessionId()).toBeNull();
-    expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).toBeNull();
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBeNull();
+    expect(readPersistedOpenTabsState().tabs.map((tab) => tab.sessionId)).toEqual(['s1']);
+    expect(readPersistedActiveSessionId()).toBe('missing-active');
+    expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).not.toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).not.toBeNull();
   });
 
-  it('removes invalid legacy persisted open-tab storage without treating it as truth', () => {
+  it('reports invalid persisted open-tab storage without treating it as truth', () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify({ tabs: [] }));
 
     const state = readPersistedOpenTabsState();
 
-    expect(state.status).toBe('empty');
-    expect(state.hasStoredValue).toBe(false);
+    expect(state.status).toBe('invalid');
+    expect(state.hasStoredValue).toBe(true);
     expect(state.tabs).toEqual([]);
-    expect(localStorage.getItem(STORAGE_KEYS.OPEN_TABS)).toBeNull();
+    expect('error' in state && state.error).toBeTruthy();
   });
 
-  it('reports legacy open-tab cleanup failures as explicit failed state', () => {
+  it('reports open-tab read failures as explicit failed state', () => {
     Object.defineProperty(window, 'localStorage', {
       configurable: true,
       value: {
-        removeItem: () => {
-          throw new Error('storage remove blocked');
+        getItem: () => {
+          throw new Error('storage read blocked');
         },
       },
     });
@@ -140,12 +231,12 @@ describe('open-tab persistence truth', () => {
     expect('error' in state && state.error).toBeInstanceOf(Error);
   });
 
-  it('reports legacy active-session cleanup failures as explicit failed state', () => {
+  it('reports active-session read failures as explicit failed state', () => {
     Object.defineProperty(window, 'localStorage', {
       configurable: true,
       value: {
-        removeItem: () => {
-          throw new Error('active remove blocked');
+        getItem: () => {
+          throw new Error('active read blocked');
         },
       },
     });
@@ -157,12 +248,12 @@ describe('open-tab persistence truth', () => {
     expect('error' in state && state.error).toBeInstanceOf(Error);
   });
 
-  it('reports open-tab cleanup failures as explicit failure result', () => {
+  it('reports open-tab write failures as explicit failure result', () => {
     Object.defineProperty(window, 'localStorage', {
       configurable: true,
       value: {
-        removeItem: () => {
-          throw new Error('storage remove blocked');
+        setItem: () => {
+          throw new Error('storage write blocked');
         },
       },
     });
@@ -472,20 +563,6 @@ describe('open-tab persistence truth', () => {
       autoCommand: 'pwd',
       customName: 'Keep Me',
     }));
-  });
-
-  it('clears legacy closed-tab reuse keys without restoring them', () => {
-    localStorage.setItem('zterm:closed-tab-reuse-keys', '{bad-json');
-
-    expect(Array.from(readPersistedClosedTabReuseKeys())).toEqual([]);
-    expect(localStorage.getItem('zterm:closed-tab-reuse-keys')).toBeNull();
-  });
-
-  it('keeps closed-tab reuse keys in memory only and does not persist them', () => {
-    persistClosedTabReuseKeys(new Set(['daemon:a:main', 'daemon:b:logs']));
-
-    expect(localStorage.getItem('zterm:closed-tab-reuse-keys')).toBeNull();
-    expect(Array.from(readPersistedClosedTabReuseKeys())).toEqual([]);
   });
 
   it('clears all semantic closed-tab tombstone variants for a reopened owner through one helper', () => {

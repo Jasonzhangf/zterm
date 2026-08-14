@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type MutableRefObject, type SetStateAction } from 'react';
 import {
   persistOpenTabsState,
-  readPersistedActiveSessionId,
-  readPersistedOpenTabsState,
-  readPersistedClosedTabReuseKeys,
-  persistClosedTabReuseKeys,
+  clearLegacyTabListAndTombstoneStorage,
   resolveHostForPersistedOpenTab,
 } from '../lib/open-tab-persistence';
 import {
@@ -28,6 +25,7 @@ import { useOpenTabSessionActions } from './useOpenTabSessionActions';
 import { auditOpenTabsAgainstRemoteSessions as auditOpenTabsAgainstRemoteSessionsLib } from '../lib/remote-tab-audit';
 import type { TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
 import type { SessionTargetNetworkSignal } from '../contexts/session-context-target-network-probe-runtime';
+import type { NetworkIdentityRuntime } from '../lib/network-identity';
 
 function buildSessionStructureSignature(
   sessions: Array<Pick<
@@ -87,6 +85,10 @@ interface UseOpenTabRuntimeOptions {
   pruneSessionGroupSelectionToRemoteTruth: (target: { bridgeHost: string; bridgePort: number; daemonHostId?: string }, remoteSessionNames: string[]) => void;
   onForegroundActiveChange?: (active: boolean) => void;
   onForegroundResume?: (reason: 'visibilitychange' | 'resume' | 'appStateChange') => void;
+  /** Client network-generation owner; lifecycle hook stamps status events with
+   *  the current generation so the transport owner can retire stale sockets
+   *  immediately when WiFi/cellular/VPN/IP changes. */
+  networkIdentity?: NetworkIdentityRuntime;
   /** SessionProvider facade: records background entry time into the session context's own ref. */
   recordBackgroundEnteredAt?: (sessionIds: string[], at: number) => void;
   /** 后台心跳发送函数 */
@@ -158,16 +160,25 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     onForegroundResume,
     sendBackgroundHeartbeat,
   } = options;
+  const networkIdentity = options.networkIdentity;
 
-  const persistedOpenTabsBootstrapRef = useRef(readPersistedOpenTabsState());
+  const persistedOpenTabsBootstrapRef = useRef({ tabs: [] as PersistedOpenTab[], hasStoredValue: false });
+  useEffect(() => {
+    const result = clearLegacyTabListAndTombstoneStorage();
+    if (!result.ok) {
+      runtimeDebug('open-tabs.persistence.legacy-migration-failed', {
+        error: result.error instanceof Error ? result.error.message : String(result.error),
+      });
+    }
+  }, []);
   const [openTabState, setOpenTabState] = useState(() => normalizeOpenTabIntentState(
     persistedOpenTabsBootstrapRef.current.tabs,
-    readPersistedActiveSessionId(),
+    null,
   ));
   const openTabStateRef = useRef(openTabState);
   const hasPersistedOpenTabsTruthRef = useRef(persistedOpenTabsBootstrapRef.current.hasStoredValue);
   const closedOpenTabSessionIdsRef = useRef(new Set<string>());
-  const closedOpenTabReuseKeysRef = useRef(readPersistedClosedTabReuseKeys());
+  const closedOpenTabReuseKeysRef = useRef(new Set<string>());
   const pendingMaterializedOpenTabSessionIdsRef = useRef(new Set<string>());
   const restoredTabsHandledRef = useRef(false);
   const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
@@ -357,7 +368,6 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
       closeResult.closedReuseKeyVariants.forEach((key) => {
         closedOpenTabReuseKeysRef.current.add(key);
       });
-      persistClosedTabReuseKeys(closedOpenTabReuseKeysRef.current);
     }
     const nextOpenTabState = closeResult.nextState;
 
@@ -433,23 +443,6 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     });
   }, [auditOpenTabsAgainstRemoteSessions, sessions]);
 
-  const initialRemoteSessionAuditDoneRef = useRef(false);
-  useEffect(() => {
-    if (initialRemoteSessionAuditDoneRef.current) {
-      return;
-    }
-    if (openTabState.tabs.length > 0 || sessions.length > 0) {
-      return;
-    }
-    if (sessionGroups.length === 0) {
-      return;
-    }
-    initialRemoteSessionAuditDoneRef.current = true;
-    void auditOpenTabsAgainstRemoteSessions('connect').catch((error) => {
-      console.error('[App] Failed to audit remote session truth on cold-start session-group restore:', error);
-    });
-  }, [auditOpenTabsAgainstRemoteSessions, openTabState.tabs.length, sessionGroups, sessions.length]);
-
   useEffect(() => {
     ensureTerminalPageVisibleRef.current = ensureTerminalPageVisible;
   }, [ensureTerminalPageVisible]);
@@ -513,6 +506,7 @@ export function useOpenTabRuntime(options: UseOpenTabRuntimeOptions): OpenTabRun
     notifyTargetNetworkSignal,
     bumpFollowResetEpoch,
     lastBackgroundEnteredAtRef,
+    networkIdentity,
   });
 
   const {

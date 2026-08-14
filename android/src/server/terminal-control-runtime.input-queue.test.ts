@@ -105,8 +105,42 @@ function createWezTermRuntime() {
     getMirrorKey: (sessionName) => sessionName,
     sanitizeSessionName: (input) => input?.trim() || 'demo',
     wezTermBackend,
+    defaultBackend: 'wezterm',
   });
   return { runtime, mirrors, wezTermBackend };
+}
+
+function createHerdrOnlyRuntime() {
+  const mirrors = new Map<string, SessionMirror>([
+    ['demo', createReadyMirror()],
+  ]);
+  const herdrBackend: WezTermBackendRuntime = {
+    listSessions: vi.fn(() => [{ sessionName: 'herdr-demo', paneId: 1, workspace: 'herdr-single-session', title: 'herdr', cwd: '/tmp', cols: 80, rows: 24 }]),
+    createSession: vi.fn(({ sessionName } = {}) => ({
+      sessionName: sessionName || 'herdr-demo',
+      paneId: 2,
+      workspace: 'herdr-single-session',
+      title: 'herdr',
+      cwd: '/tmp',
+      cols: 80,
+      rows: 24,
+    })),
+    readSnapshot: vi.fn(),
+    writeInput: vi.fn(),
+    closeSession: vi.fn(),
+    readCurrentPath: vi.fn(() => '/tmp'),
+  };
+  const runtime = createTerminalControlRuntime({
+    tmuxBinary: 'tmux',
+    defaultSessionName: 'demo',
+    defaultBackend: 'herdr',
+    hiddenTmuxSessions: new Set(),
+    mirrors,
+    getMirrorKey: (sessionName) => sessionName,
+    sanitizeSessionName: (input) => input?.trim() || 'demo',
+    backendRuntimes: { herdr: herdrBackend },
+  });
+  return { runtime, herdrBackend };
 }
 
 async function runSpawnMockImmediately() {
@@ -387,6 +421,7 @@ describe('terminal control runtime input queue', () => {
     const { runtime, wezTermBackend } = createWezTermRuntime();
 
     expect(runtime.listTmuxSessions()).toEqual(['demo']);
+    expect(runtime.listTerminalSessions()).toEqual(['demo']);
     expect(runtime.createDetachedTmuxSession('new-demo', 'D:/src')).toBe('new-demo');
     runtime.writeToTmuxSession('demo', 'echo OK', true);
     expect(await runtime.enqueueLiveMirrorInput('demo', 'abc', false, () => true)).toBe(true);
@@ -401,6 +436,35 @@ describe('terminal control runtime input queue', () => {
     expect(spawnSyncMock).not.toHaveBeenCalled();
   });
 
+  it('returns a unified catalog while keeping backend-specific calls available', () => {
+    const { runtime } = createHerdrOnlyRuntime();
+
+    expect(runtime.listTerminalSessions()).toEqual(['herdr-demo']);
+    expect(runtime.listTmuxSessions('herdr')).toEqual(['herdr-demo']);
+  });
+
+  it('lists and resolves Herdr sessions without probing tmux on a Herdr-only daemon', () => {
+    const { runtime, herdrBackend } = createHerdrOnlyRuntime();
+
+    expect(runtime.listTerminalSessions()).toEqual(['herdr-demo']);
+    expect(runtime.resolveTerminalSessionBackend('herdr-demo')).toBe('herdr');
+    expect(herdrBackend.listSessions).toHaveBeenCalledTimes(2);
+    expect(spawnSyncMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps a Herdr-only catalog isolated from tmux even when a tmux probe would have returned names', () => {
+    spawnSyncMock.mockReturnValue({ status: 0, stdout: 'tmux-demo\nshared\n', stderr: '' });
+    const { runtime, herdrBackend } = createHerdrOnlyRuntime();
+    herdrBackend.listSessions = vi.fn(() => [
+      { sessionName: 'herdr-demo', paneId: 1, workspace: 'herdr-single-session', title: 'herdr', cwd: '/tmp', cols: 80, rows: 24 },
+      { sessionName: 'shared', paneId: 2, workspace: 'herdr-single-session', title: 'herdr', cwd: '/tmp', cols: 80, rows: 24 },
+    ]);
+    expect(runtime.listTmuxSessions('herdr')).toContain('herdr-demo');
+    expect(runtime.listTerminalSessions()).toEqual(['herdr-demo', 'shared']);
+    expect(runtime.resolveTerminalSessionBackend('shared')).toBe('herdr');
+    expect(spawnSyncMock).not.toHaveBeenCalled();
+  });
+
   it('routes close through tmux only when tmux is the selected backend', () => {
     const { runtime } = createRuntime();
 
@@ -412,13 +476,10 @@ describe('terminal control runtime input queue', () => {
     ]);
   });
 
-  it('throws explicit errors for tmux-only operations in wezterm mode', async () => {
+  it('keeps tmux control available while explicit external backend operations stay typed', async () => {
     const { runtime } = createWezTermRuntime();
 
-    expect(() => runtime.runTmux(['list-sessions'])).toThrow('wezterm backend does not support tmux command: list-sessions');
-    await expect(runtime.runTmuxAsync(['display-message'])).rejects.toThrow(
-      'wezterm backend does not support tmux command: display-message',
-    );
-    expect(() => runtime.renameTmuxSession('a', 'b')).toThrow('wezterm backend does not support tmux rename-session');
+    expect(() => runtime.runTmux(['list-sessions'])).not.toThrow();
+    expect(() => runtime.renameTmuxSession('a', 'b', 'wezterm')).toThrow('wezterm backend does not support session rename');
   });
 });

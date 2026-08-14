@@ -29,7 +29,7 @@
  * No React dependency (same pattern as session-heartbeat-store.ts).
  */
 
-import type { SessionPullPurpose } from '../contexts/session-pull-state-helpers';
+import type { SessionPullPurpose } from './session-pull-state-helpers';
 
 export interface PendingInputTailRefreshState {
   requestedAt: number;

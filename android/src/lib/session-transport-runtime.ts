@@ -554,6 +554,20 @@ export function ensureSessionTerminalChannel(
   return channel;
 }
 
+export function updateSessionTerminalChannelName(
+  store: SessionTransportRuntimeStore,
+  sessionId: string,
+  sessionName: string,
+) {
+  const channel = getSessionTerminalChannel(store, sessionId);
+  const normalizedSessionName = sessionName.trim();
+  if (!channel || !normalizedSessionName) {
+    return channel;
+  }
+  channel.sessionName = normalizedSessionName;
+  return channel;
+}
+
 export function updateSessionTerminalChannelState(
   store: SessionTransportRuntimeStore,
   sessionId: string,

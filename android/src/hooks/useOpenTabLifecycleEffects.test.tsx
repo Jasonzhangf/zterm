@@ -4,6 +4,7 @@ import { useRef } from 'react';
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createForegroundRefreshRuntime } from '../lib/app-foreground-refresh';
+import { createNetworkIdentityRuntime } from '../lib/network-identity';
 import {
   BACKGROUND_HANDOFF_WAKE_LOCK_MS,
   useOpenTabLifecycleEffects,
@@ -58,6 +59,7 @@ const capacitorNetworkHarness = vi.hoisted(() => {
         }),
       };
     }),
+    getStatus: vi.fn(async () => ({ connected: true, connectionType: 'wifi' })),
     emit(eventName: string, payload: any) {
       (listenersByEventName[eventName] || []).forEach((listener) => listener(payload));
     },
@@ -69,12 +71,14 @@ const capacitorNetworkHarness = vi.hoisted(() => {
         listenersByEventName[eventName] = [];
       });
       this.addListener.mockClear();
+      this.getStatus.mockClear();
     },
   };
 });
 vi.mock('@capacitor/network', () => ({
   Network: {
     addListener: capacitorNetworkHarness.addListener,
+    getStatus: capacitorNetworkHarness.getStatus,
   },
 }));
 
@@ -144,10 +148,23 @@ afterEach(() => {
   backgroundServiceHarness.startBackgroundService.mockClear();
   backgroundServiceHarness.stopBackgroundService.mockClear();
   backgroundServiceHarness.updateSessionCount.mockClear();
+  backgroundServiceHarness.setBackgroundHeartbeatCallback.mockClear();
   vi.useRealTimers();
 });
 
 describe('useOpenTabLifecycleEffects', () => {
+  it('starts retained-session service while foreground without enabling background heartbeat', () => {
+    render(<LifecycleHarness
+      onForegroundResume={vi.fn()}
+      auditOpenTabsAgainstRemoteSessions={vi.fn(async () => undefined)}
+    />);
+
+    expect(backgroundServiceHarness.startBackgroundService).toHaveBeenCalledTimes(1);
+    expect(backgroundServiceHarness.startBackgroundService).toHaveBeenCalledWith(1);
+    expect(backgroundServiceHarness.setBackgroundHeartbeatCallback).not.toHaveBeenCalled();
+    expect(backgroundServiceHarness.stopBackgroundService).not.toHaveBeenCalled();
+  });
+
   it('projects inactive immediately and starts persistent native protection while a session remains open', async () => {
     expect(BACKGROUND_HANDOFF_WAKE_LOCK_MS).toBe(5 * 60 * 1000);
     const onForegroundActiveChange = vi.fn();
@@ -165,7 +182,36 @@ describe('useOpenTabLifecycleEffects', () => {
 
     capacitorAppHarness.emit('appStateChange', { isActive: true });
     expect(onForegroundActiveChange).toHaveBeenCalledWith(true);
-    expect(backgroundServiceHarness.stopBackgroundService).toHaveBeenCalledTimes(1);
+    expect(backgroundServiceHarness.stopBackgroundService).not.toHaveBeenCalled();
+  });
+
+  it('keeps the service alive across foreground/background transitions', () => {
+    render(<LifecycleHarness
+      onForegroundResume={vi.fn()}
+      auditOpenTabsAgainstRemoteSessions={vi.fn(async () => undefined)}
+    />);
+
+    capacitorAppHarness.emit('appStateChange', { isActive: false });
+    capacitorAppHarness.emit('appStateChange', { isActive: true });
+    capacitorAppHarness.emit('appStateChange', { isActive: false });
+
+    expect(backgroundServiceHarness.startBackgroundService).toHaveBeenCalledTimes(1);
+    expect(backgroundServiceHarness.stopBackgroundService).not.toHaveBeenCalled();
+  });
+
+  it('keeps the service lifecycle separate from the background heartbeat callback', () => {
+    render(<LifecycleHarness
+      onForegroundResume={vi.fn()}
+      auditOpenTabsAgainstRemoteSessions={vi.fn(async () => undefined)}
+    />);
+
+    capacitorAppHarness.emit('appStateChange', { isActive: false });
+    expect(backgroundServiceHarness.setBackgroundHeartbeatCallback).toHaveBeenLastCalledWith(expect.any(Function));
+    expect(backgroundServiceHarness.stopBackgroundService).not.toHaveBeenCalled();
+
+    capacitorAppHarness.emit('appStateChange', { isActive: true });
+    expect(backgroundServiceHarness.setBackgroundHeartbeatCallback).toHaveBeenLastCalledWith(null);
+    expect(backgroundServiceHarness.stopBackgroundService).not.toHaveBeenCalled();
   });
 
   it('does not start native background execution when no retained session exists', async () => {
@@ -204,7 +250,7 @@ describe('useOpenTabLifecycleEffects', () => {
     />);
 
     expect(backgroundServiceHarness.stopBackgroundService).toHaveBeenCalledTimes(1);
-    expect(backgroundServiceHarness.updateSessionCount).not.toHaveBeenCalled();
+    expect(backgroundServiceHarness.updateSessionCount).toHaveBeenCalledWith(1);
   });
 
   it('keeps one Capacitor appStateChange listener across callback-only rerenders', async () => {
@@ -405,4 +451,110 @@ describe('useOpenTabLifecycleEffects', () => {
     expect(auditOpenTabs).not.toHaveBeenCalled();
   });
 
+  it('stamps capacitor network changes with generation and retires stale transports across generations', async () => {
+    const notifyTargetNetworkSignal = vi.fn();
+    const networkIdentity = createNetworkIdentityRuntime();
+
+    const HarnessWithNetworkIdentity = () => {
+      const sessionsRef = useRef<Session[]>([baseSession]);
+      const openTabStateRef = useRef({ tabs: [{ sessionId: 's1' }], activeSessionId: 's1' });
+      const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
+
+      useOpenTabLifecycleEffects({
+        sessionsRef,
+        openTabStateRef,
+        foregroundRefreshRuntimeRef,
+        retainedSessionCount: 1,
+        onForegroundResume: vi.fn(),
+        auditOpenTabsAgainstRemoteSessions: vi.fn(async () => undefined),
+        notifyTargetNetworkSignal,
+        bumpFollowResetEpoch: vi.fn(),
+        networkIdentity,
+      });
+      return <div>mounted</div>;
+    };
+
+    render(<HarnessWithNetworkIdentity />);
+
+    capacitorNetworkHarness.emit('networkStatusChange', { connected: true, connectionType: 'wifi' });
+    expect(notifyTargetNetworkSignal).toHaveBeenLastCalledWith({
+      connected: true,
+      connectionType: 'wifi',
+      source: 'capacitor',
+      networkGeneration: 1,
+      fingerprintChanged: true,
+    });
+
+    capacitorNetworkHarness.emit('networkStatusChange', { connected: true, connectionType: 'cellular' });
+    expect(notifyTargetNetworkSignal).toHaveBeenLastCalledWith({
+      connected: true,
+      connectionType: 'cellular',
+      source: 'capacitor',
+      networkGeneration: 2,
+      fingerprintChanged: true,
+    });
+
+    // Same-generation event does not re-advance the generation.
+    capacitorNetworkHarness.emit('networkStatusChange', { connected: true, connectionType: 'cellular' });
+    expect(notifyTargetNetworkSignal).toHaveBeenLastCalledWith({
+      connected: true,
+      connectionType: 'cellular',
+      source: 'capacitor',
+      networkGeneration: 2,
+      fingerprintChanged: false,
+    });
+  });
+
+  it('recovers a backgrounded network change on foreground resume with a cross-generation signal', async () => {
+    const notifyTargetNetworkSignal = vi.fn();
+    const networkIdentity = createNetworkIdentityRuntime();
+    capacitorNetworkHarness.getStatus.mockResolvedValue({ connected: true, connectionType: 'cellular' });
+
+    const HarnessWithNetworkIdentity = () => {
+      const sessionsRef = useRef<Session[]>([baseSession]);
+      const openTabStateRef = useRef({ tabs: [{ sessionId: 's1' }], activeSessionId: 's1' });
+      const foregroundRefreshRuntimeRef = useRef(createForegroundRefreshRuntime());
+
+      useOpenTabLifecycleEffects({
+        sessionsRef,
+        openTabStateRef,
+        foregroundRefreshRuntimeRef,
+        retainedSessionCount: 1,
+        onForegroundResume: vi.fn(),
+        auditOpenTabsAgainstRemoteSessions: vi.fn(async () => undefined),
+        notifyTargetNetworkSignal,
+        bumpFollowResetEpoch: vi.fn(),
+        networkIdentity,
+      });
+      return <div>mounted</div>;
+    };
+
+    render(<HarnessWithNetworkIdentity />);
+    capacitorNetworkHarness.emit('networkStatusChange', { connected: true, connectionType: 'wifi' });
+
+    // Background: hide the document so the cellular event is dropped while hidden.
+    const originalVisibility = document.visibilityState;
+    Object.defineProperty(document, 'visibilityState', { value: 'hidden', configurable: true });
+    capacitorAppHarness.emit('appStateChange', { isActive: false });
+    capacitorNetworkHarness.emit('networkStatusChange', { connected: true, connectionType: 'cellular' });
+
+    // Foreground: immediate same-generation signal first, then resample discovers
+    // the backgrounded cellular switch and emits the cross-generation signal.
+    Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+    capacitorAppHarness.emit('appStateChange', { isActive: true });
+    await vi.waitFor(() => {
+      expect(notifyTargetNetworkSignal).toHaveBeenCalledWith({
+        source: 'foreground-resume',
+        networkGeneration: 2,
+        fingerprintChanged: true,
+      });
+    });
+    Object.defineProperty(document, 'visibilityState', { value: originalVisibility, configurable: true });
+
+    expect(notifyTargetNetworkSignal).toHaveBeenCalledWith({
+      source: 'foreground-resume',
+      networkGeneration: 1,
+      fingerprintChanged: false,
+    });
+  });
 });

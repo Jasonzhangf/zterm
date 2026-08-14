@@ -12,7 +12,8 @@
     <style name="AppTheme.NoActionBar" parent="Theme.AppCompat.DayNight.NoActionBar">
         <item name="windowActionBar">false</item>
         <item name="windowNoTitle">true</item>
-        <item name="android:background">@null</item>
+        <item name="android:windowBackground">#FF1E1E1E</item>
+        <item name="android:colorBackground">#FF1E1E1E</item>
     </style>
 
 
@@ -21,5 +22,6 @@
              避免后台切前台 / 冷启动时白色 windowBackground 造成白屏闪烁 -->
         <item name="android:background">@drawable/splash</item>
         <item name="windowSplashScreenBackground">#FF1E1E1E</item>
+        <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
     </style>
 </resources>

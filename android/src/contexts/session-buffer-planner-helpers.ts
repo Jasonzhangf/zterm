@@ -3,7 +3,7 @@ import type {
   SessionBufferState,
   TerminalGapRange,
 } from '../lib/types';
-import type { SessionPullPurpose } from './session-pull-state-helpers';
+import type { SessionPullPurpose } from '../lib/session-pull-state-helpers';
 import { collectIntersectingGapRanges, resolveRequestedBufferWindow as sharedResolveRequestedBufferWindow } from '@zterm/shared/terminal/gap-utils';
 import { resolveHeadAvailableBounds as sharedResolveHeadAvailableBounds, hasImpossibleLocalWindow as sharedHasImpossibleLocalWindow, resolveAuthoritativeAvailableEndIndex as sharedResolveAuthoritativeAvailableEndIndex, hasLocalWindow as sharedHasLocalWindow } from '@zterm/shared/terminal/buffer-head-state';
 import { resolveTailTargetEndIndex as sharedResolveTailTargetEndIndex } from '@zterm/shared/terminal/visible-range';

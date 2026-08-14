@@ -30,7 +30,7 @@ import {
   scoreReusableManagedSession,
   shouldAutoReconnectSession,
   shouldOpenManagedSessionTransport,
-} from './session-reconnect-helpers';
+} from '../lib/session-reconnect-helpers';
 import {
   buildDefaultSessionVisibleRange,
   normalizeSessionVisibleRangeState,
@@ -46,7 +46,7 @@ import {
   doesSessionPullStateCoverRequest,
   doesSessionPullStateMatchExactLocalSnapshot,
   settleSessionPullStatesWithBufferSync,
-} from './session-pull-state-helpers';
+} from '../lib/session-pull-state-helpers';
 import { buildBufferSyncRepairSignature } from '@zterm/shared/terminal/pull-state-planner';
 
 type TestSession = Session & {
@@ -527,7 +527,9 @@ describe('session sync helper session connection config truth', () => {
       connectionName: 'conn-1',
       bridgeHost: '100.127.23.27',
       bridgePort: 3333,
+      daemonHostId: undefined,
       sessionName: 'tmux-resolved',
+      terminalBackend: 'tmux',
       authToken: 'token-1',
       autoCommand: 'top',
     });
@@ -786,25 +788,10 @@ describe('session sync helper session connection config truth', () => {
   it('builds reconnect handshake failure plan without embedding side effects', () => {
     expect(buildReconnectHandshakeFailurePlan({
       retryable: false,
-      currentAttempt: 2,
     })).toEqual({ action: 'terminal-error' });
     expect(buildReconnectHandshakeFailurePlan({
       retryable: true,
-      currentAttempt: 2,
-    })).toEqual({ action: 'retry-reconnect', nextAttempt: 3 });
-    expect(buildReconnectHandshakeFailurePlan({
-      retryable: true,
-      currentAttempt: 5,
-    })).toEqual({ action: 'retry-reconnect', nextAttempt: 6 });
-    // Cap reached: stop the endless retry loop instead of retrying forever.
-    expect(buildReconnectHandshakeFailurePlan({
-      retryable: true,
-      currentAttempt: 6,
-    })).toEqual({ action: 'terminal-error' });
-    expect(buildReconnectHandshakeFailurePlan({
-      retryable: true,
-      currentAttempt: 7,
-    })).toEqual({ action: 'terminal-error' });
+    })).toEqual({ action: 'retry-reconnect' });
   });
 });
 

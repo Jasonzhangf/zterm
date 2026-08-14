@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   filterApkSmokeRuntimeSnapshot,
+  resolveApkSmokeDaemonSessionId,
   resolveApkSmokeSnapshotActiveSessionId,
   resolveApkSmokeSnapshotDaemonSessionId,
   resolveApkSmokeSnapshotTmuxSessionName,
@@ -36,6 +37,32 @@ const snapshot = {
 };
 
 describe('android apk smoke runtime freshness', () => {
+  it('maps the client session to the exact daemon mux subscriber session', () => {
+    const daemonSessionId = resolveApkSmokeDaemonSessionId({
+      transportSubscribers: [
+        {
+          id: 'transport-a:channel:other',
+          muxChannelId: 'channel:other',
+        },
+        {
+          id: 'transport-b:channel:fresh-app-session',
+          muxChannelId: 'channel:fresh-app-session',
+        },
+      ],
+    }, 'fresh-app-session');
+
+    expect(daemonSessionId).toBe('transport-b:channel:fresh-app-session');
+  });
+
+  it('does not select an unrelated daemon subscriber when the client channel is absent', () => {
+    expect(resolveApkSmokeDaemonSessionId({
+      transportSubscribers: [{
+        id: 'transport-a:channel:other',
+        muxChannelId: 'channel:other',
+      }],
+    }, 'missing-client-session')).toBeNull();
+  });
+
   it('ignores stale daemon snapshots from older app launches when selecting the current smoke candidate', () => {
     const record = selectFreshApkSmokeSnapshotRecord(snapshot, '2026-05-14T03:00:00.000Z');
     expect(record?.sessionId).toBe('fresh-transport');

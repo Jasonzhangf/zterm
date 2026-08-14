@@ -386,7 +386,7 @@ describe('App first paint regression with real TerminalPage/TerminalView', () =>
     ResizeObserverMock.reset();
   });
 
-  it('cold start clears legacy tabs without opening a session WebSocket', async () => {
+  it('cold start drops current-process tab keys without opening a session WebSocket while page focus is stale', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'session-1',

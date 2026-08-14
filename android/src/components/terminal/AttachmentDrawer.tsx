@@ -8,20 +8,20 @@
  */
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
+
+import {
+  blobToBase64,
+  clampPanForScale,
+  formatRelativeTime,
+  formatFileSize,
+  MAX_ZOOM,
+  MIN_ZOOM,
+} from './attachment-drawer-helpers';
 import { LocalNotifications } from '@capacitor/local-notifications';
-import { Filesystem, Directory } from '@capacitor/filesystem';
-import { ensureNotificationPermission, nextNotificationId } from '../../lib/notification-helper';
+import { nextNotificationId } from '../../lib/notification-helper';
 import { StoragePermissionPlugin } from '../../plugins/StoragePermissionPlugin';
 import type { AttachmentEntry } from '../../lib/session-attachment-store';
 
-function blobToBase64(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result || '').split(',')[1] || '');
-    reader.onerror = () => reject(reader.error);
-    reader.readAsDataURL(blob);
-  });
-}
 
 const zoomButtonStyle: React.CSSProperties = {
   background: 'rgba(255,255,255,0.15)',
@@ -51,49 +51,70 @@ export interface AttachmentDrawerProps {
 
 const SWIPE_CLOSE_THRESHOLD_PX = 48;
 
-function buildAttachmentNotificationBody(entry: AttachmentEntry): string {
-  const source = entry.sourceSession?.trim()
-    ? `session ${entry.sourceSession.trim()} · ${entry.senderName || '未知'}`
-    : (entry.senderName || '未知');
-  return `来自 ${source}`;
-}
+/**
+ * 把 pan 限制在“图片放大后仍与视口有重叠”的范围内，避免把图片完全
+ * 拖出视口后只看到黑色 overlay 背景。scale <= 1 时图片应居中，pan 归零。
+ */
 
-async function writePreviewToCache(entry: AttachmentEntry): Promise<string | null> {
-  if (!entry.previewUrl) return null;
-  try {
-    const response = await fetch(entry.previewUrl);
-    const blob = await response.blob();
-    const dataUrl: string = await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(String(reader.result || ''));
-      reader.onerror = () => reject(reader.error);
-      reader.readAsDataURL(blob);
-    });
-    const base64 = dataUrl.includes(',') ? dataUrl.split(',')[1] : dataUrl;
-    const path = `zterm-preview-${entry.attachmentId}.png`;
-    await Filesystem.writeFile({ path, data: base64, directory: Directory.Cache });
-    const uri = await Filesystem.getUri({ path, directory: Directory.Cache });
-    return uri.uri;
-  } catch (error) {
-    console.warn('[AttachmentDrawer] failed to stage preview for notification:', error);
-    return null;
-  }
-}
 
-function formatRelativeTime(timestamp: number): string {
-  const diff = Date.now() - timestamp;
-  const minutes = Math.floor(diff / 60_000);
-  if (minutes < 1) return '刚刚';
-  if (minutes < 60) return `${minutes}分钟前`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}小时前`;
-  return `${Math.floor(hours / 24)}天前`;
-}
 
-function formatFileSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes}B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)}KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)}MB`;
+/**
+ * 预览图缩放容器。
+ *
+ * 实现方式：纯布局缩放（width/height/left/top 按 scale 计算），img 用
+ * object-fit: contain 填满容器。刻意**不使用 transform: scale**——
+ * Android WebView 对"大图 transform scale 从 N>1 缩小到 1"存在光栅化
+ * 自旋死循环（实测：缩小瞬间 renderer 进程 utime 每秒暴涨 ~2.8s CPU，
+ * 屏幕黑屏，CDP/compositor 全部无响应；transform 终态无论 scale(1) 还是
+ * none 都会触发）。布局缩放走常规重采样路径，不经过 transform 合成层。
+ */
+function PreviewScaler({
+  scale,
+  pan,
+  onDoubleClick,
+  src,
+  fileName,
+}: {
+  scale: number;
+  pan: { x: number; y: number };
+  onDoubleClick: () => void;
+  src: string;
+  fileName: string;
+}) {
+  const viewportW = typeof window !== 'undefined' ? window.innerWidth : 360;
+  const viewportH = typeof window !== 'undefined' ? window.innerHeight : 640;
+  const baseW = 0.9 * viewportW;
+  const baseH = 0.85 * viewportH;
+  const wrapperW = baseW * scale;
+  const wrapperH = baseH * scale;
+  return (
+    <div
+      data-testid="attachment-preview-scaler"
+      style={{
+        position: 'absolute',
+        left: (viewportW - wrapperW) / 2 + pan.x,
+        top: (viewportH - wrapperH) / 2 + pan.y,
+        width: wrapperW,
+        height: wrapperH,
+        touchAction: 'none',
+      }}
+    >
+      <img
+        src={src}
+        alt={fileName}
+        data-testid="attachment-preview-image"
+        onDoubleClick={onDoubleClick}
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%',
+          height: '100%',
+          objectFit: 'contain',
+          touchAction: 'none',
+          userSelect: 'none',
+        }}
+      />
+    </div>
+  );
 }
 
 function AttachmentDrawerComponent({
@@ -113,8 +134,42 @@ function AttachmentDrawerComponent({
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [batchQueue, setBatchQueue] = useState<Set<string>>(new Set());
   const [batchMessage, setBatchMessage] = useState('');
+  const [receiveFeedback, setReceiveFeedback] = useState<{
+    attachmentId: string;
+    message: string;
+    kind: 'error' | 'pending';
+  } | null>(null);
   const batchTotalRef = useRef(0);
   const batchDoneCountRef = useRef(0);
+
+  const applyZoom = useCallback((nextScaleRaw: number) => {
+    const nextScale = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, nextScaleRaw));
+    setScale(nextScale);
+    // 缩小到 1（任何路径：按钮、双击、pinch）必须把图片拉回中心，否则
+    // 残留的 pan 偏移会让图片停留在视口外，只剩黑色 overlay 背景（黑屏）。
+    if (nextScale <= MIN_ZOOM) {
+      setPan({ x: 0, y: 0 });
+    } else {
+      setPan((current) => clampPanForScale(current, nextScale));
+    }
+  }, []);
+
+  // 重新打开预览时重置缩放/位移，避免上次预览的状态泄漏导致黑屏。
+  const previousPreviewRef = useRef<AttachmentEntry | null>(null);
+  useEffect(() => {
+    if (previewEntry && previousPreviewRef.current === null) {
+      setScale(1);
+      setPan({ x: 0, y: 0 });
+    }
+    previousPreviewRef.current = previewEntry;
+  }, [previewEntry]);
+
+  const handlePreviewClose = useCallback(() => {
+    setPreviewEntry(null);
+    setScale(1);
+    setPan({ x: 0, y: 0 });
+    setPendingPreviewId(null);
+  }, []);
 
   const handleTouchStart = useCallback((e: React.TouchEvent) => {
     touchStartRef.current = { x: e.touches[0].clientX, y: e.touches[0].clientY };
@@ -169,12 +224,6 @@ function AttachmentDrawerComponent({
       });
     }
   }, [downloading, saveEntryToDownloads]);
-
-  const handlePreviewClose = useCallback(() => {
-    setPreviewEntry(null);
-    setScale(1);
-    setPan({ x: 0, y: 0 });
-  }, []);
 
   const toggleSelected = useCallback((id: string) => {
     setSelectedIds((prev) => {
@@ -246,38 +295,6 @@ function AttachmentDrawerComponent({
           .catch(() => markBatchDone());
       }
     }
-  });
-
-  // Notify on new attachments once their preview is ready so the notification
-  // can carry the image thumbnail, source session, sender and attachmentId.
-  const prevNotifiedRef = useRef<Set<string>>(new Set());
-  useEffect(() => {
-    const attachments = getPendingAttachments();
-    const notified = new Set(prevNotifiedRef.current);
-    for (const entry of attachments) {
-      if (entry.origin === 'history') continue; // never notify for past deliveries
-      if (notified.has(entry.attachmentId)) continue;
-      if (!entry.previewUrl) continue; // wait until the preview thumbnail is downloaded
-      notified.add(entry.attachmentId);
-      const entrySnapshot = entry;
-      // Android 13+ requires runtime permission before notifications show.
-      void ensureNotificationPermission().then(async (granted) => {
-        if (!granted) return;
-        const iconUri = await writePreviewToCache(entrySnapshot);
-        return LocalNotifications.schedule({
-          notifications: [{
-            title: `📎 ${entrySnapshot.fileName}`,
-            body: buildAttachmentNotificationBody(entrySnapshot),
-            id: nextNotificationId(),
-            ...(iconUri ? { largeIcon: iconUri } : {}),
-            extra: { kind: 'attachment', attachmentId: entrySnapshot.attachmentId },
-          }],
-        }).catch((err) => {
-          console.warn('[AttachmentDrawer] schedule notification failed:', err);
-        });
-      });
-    }
-    prevNotifiedRef.current = notified;
   });
 
   // Tap on an attachment notification -> open the drawer and jump straight
@@ -526,11 +543,18 @@ function AttachmentDrawerComponent({
                     backgroundColor: selectedIds.has(entry.attachmentId) ? `${accentColor}26` : itemBg,
                     cursor: 'pointer',
                   }}
-                  onClick={() =>
-                    selectionMode
-                      ? toggleSelected(entry.attachmentId)
-                      : setPreviewEntry(entry)
-                  }
+                  onClick={() => {
+                    if (selectionMode) {
+                      toggleSelected(entry.attachmentId);
+                      return;
+                    }
+                    if (entry.previewUrl) {
+                      setPreviewEntry(entry);
+                      return;
+                    }
+                    autoFetchingRef.current.delete(entry.attachmentId);
+                    handleHistoryEntryClick(entry);
+                  }}
                 >
                   {/* Preview thumbnail */}
                   <div
@@ -582,6 +606,19 @@ function AttachmentDrawerComponent({
                   </div>
 
                   {/* Download button */}
+                  {entry.status === 'error' && (
+                    <div
+                      style={{
+                        fontSize: 11,
+                        color: '#cf222e',
+                        alignSelf: 'center',
+                        maxWidth: 120,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {entry.error || '接收失败'}
+                    </div>
+                  )}
                   {entry.status === 'complete' && entry.originalUrl && (
                     <button
                       onClick={(e) => {
@@ -690,16 +727,75 @@ function AttachmentDrawerComponent({
                       {entry.previewUrl ? '点击预览' : '点击重新下载'}
                     </div>
                   </div>
-                  <div
-                    style={{
-                      fontSize: 11,
-                      color: entry.acknowledgedPreview ? '#2da44e' : secondaryTextColor,
-                      alignSelf: 'center',
-                      flexShrink: 0,
-                    }}
-                  >
-                    {entry.acknowledgedPreview ? '已接收' : '未接收'}
-                  </div>
+                  {entry.status === 'error' ? (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: '#cf222e',
+                        alignSelf: 'center',
+                        maxWidth: 110,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {entry.error || '接收失败'}
+                    </span>
+                  ) : entry.acknowledgedOriginal || Boolean(entry.originalUrl) ? (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: '#2da44e',
+                        alignSelf: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      已接收
+                    </span>
+                  ) : receiveFeedback && receiveFeedback.attachmentId === entry.attachmentId ? (
+                    <span
+                      style={{
+                        fontSize: 11,
+                        color: receiveFeedback.kind === 'error' ? '#cf222e' : accentColor,
+                        alignSelf: 'center',
+                        maxWidth: 110,
+                        flexShrink: 0,
+                      }}
+                    >
+                      {receiveFeedback.message}
+                    </span>
+                  ) : (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!fetchAttachmentAsset?.(entry.attachmentId, 'original')) {
+                          setReceiveFeedback({
+                            attachmentId: entry.attachmentId,
+                            message: '暂时无法接收原图，请检查连接后重试',
+                            kind: 'error',
+                          });
+                        } else {
+                          setReceiveFeedback({
+                            attachmentId: entry.attachmentId,
+                            message: '接收中…',
+                            kind: 'pending',
+                          });
+                        }
+                      }}
+                      style={{
+                        background: accentColor,
+                        border: 'none',
+                        borderRadius: 6,
+                        color: '#fff',
+                        fontSize: 12,
+                        fontWeight: 500,
+                        padding: '4px 10px',
+                        cursor: 'pointer',
+                        alignSelf: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      接收原图
+                    </button>
+                  )}
                 </div>
               ))}
             </div>
@@ -795,16 +891,14 @@ function AttachmentDrawerComponent({
                 e.touches[0].clientX - e.touches[1].clientX,
                 e.touches[0].clientY - e.touches[1].clientY,
               );
-              if (d > 0) {
-                const next = Math.min(6, Math.max(1, g.startScale * (d / g.startDist)));
-                setScale(next);
-                setPan({ x: 0, y: 0 });
+              if (d > 0 && g.startDist > 0) {
+                applyZoom(g.startScale * (d / g.startDist));
               }
-            } else if (g.mode === 'pan' && e.touches.length === 1 && scale > 1) {
-              setPan({
+            } else if (g.mode === 'pan' && e.touches.length === 1 && g.startScale > MIN_ZOOM) {
+              setPan(clampPanForScale({
                 x: g.startPan.x + (e.touches[0].clientX - g.startX),
                 y: g.startPan.y + (e.touches[0].clientY - g.startY),
-              });
+              }, g.startScale));
             }
           }}
           onTouchEnd={() => {
@@ -822,6 +916,7 @@ function AttachmentDrawerComponent({
           }}
         >
           <button
+            data-testid="attachment-preview-close"
             onClick={handlePreviewClose}
             style={{
               position: 'absolute',
@@ -841,24 +936,12 @@ function AttachmentDrawerComponent({
             ×
           </button>
           {previewEntry.previewUrl ? (
-            <img
+            <PreviewScaler
+              scale={scale}
+              pan={pan}
+              onDoubleClick={() => applyZoom(scale > MIN_ZOOM ? MIN_ZOOM : 2.5)}
               src={previewEntry.previewUrl}
-              alt={previewEntry.fileName}
-              onDoubleClick={() => setScale((s) => (s > 1 ? 1 : 2.5))}
-              onClick={(e) => e.stopPropagation()}
-              onTouchStart={(e) => e.stopPropagation()}
-              onTouchMove={(e) => e.stopPropagation()}
-              onTouchEnd={(e) => e.stopPropagation()}
-              style={{
-                maxWidth: '90vw',
-                maxHeight: '85vh',
-                objectFit: 'contain',
-                borderRadius: 8,
-                transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
-                transition: gestureRef.current ? 'none' : 'transform 0.15s ease-out',
-                touchAction: 'none',
-                userSelect: 'none',
-              }}
+              fileName={previewEntry.fileName}
             />
           ) : (
             <span style={{ color: '#fff', fontSize: 16 }}>预览加载中...</span>
@@ -901,7 +984,7 @@ function AttachmentDrawerComponent({
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                setScale((s) => Math.min(6, s + 0.5));
+                applyZoom(scale + 0.5);
               }}
               style={zoomButtonStyle}
             >
@@ -910,7 +993,7 @@ function AttachmentDrawerComponent({
             <button
               onClick={(e) => {
                 e.stopPropagation();
-                setScale((s) => Math.max(1, s - 0.5));
+                applyZoom(scale - 0.5);
               }}
               style={zoomButtonStyle}
             >

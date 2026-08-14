@@ -21,10 +21,15 @@ public class BackgroundServicePlugin extends Plugin {
 
         Intent serviceIntent = new Intent(getContext(), BackgroundService.class);
         serviceIntent.putExtra("sessionCount", sessionCount);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            getContext().startForegroundService(serviceIntent);
-        } else {
-            getContext().startService(serviceIntent);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                getContext().startForegroundService(serviceIntent);
+            } else {
+                getContext().startService(serviceIntent);
+            }
+        } catch (RuntimeException error) {
+            call.reject("Background service start rejected by Android", error);
+            return;
         }
         call.resolve(result(true));
     }
@@ -46,10 +51,15 @@ public class BackgroundServicePlugin extends Plugin {
 
         Intent serviceIntent = new Intent(getContext(), BackgroundService.class);
         serviceIntent.putExtra("sessionCount", sessionCount);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            getContext().startForegroundService(serviceIntent);
-        } else {
-            getContext().startService(serviceIntent);
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                getContext().startForegroundService(serviceIntent);
+            } else {
+                getContext().startService(serviceIntent);
+            }
+        } catch (RuntimeException error) {
+            call.reject("Background service update rejected by Android", error);
+            return;
         }
         call.resolve(result(true));
     }

@@ -10,36 +10,43 @@ import {
 import type { SessionMirror } from './terminal-runtime-types';
 import type { WezTermBackendRuntime } from './wezterm-backend';
 
+export type TerminalControlBackendKind = 'tmux' | 'herdr' | 'wezterm';
+
 export interface TerminalControlRuntimeDeps {
   tmuxBinary: string;
   defaultSessionName: string;
   hiddenTmuxSessions: Set<string>;
   mirrors: Map<string, SessionMirror>;
   tmuxSocketDir?: string;
-  getMirrorKey: (sessionName: string) => string;
+  getMirrorKey: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
   sanitizeSessionName: (input?: string) => string;
   daemonRuntimeDebug?: (scope: string, payload?: unknown) => void;
   wezTermBackend?: WezTermBackendRuntime | null;
+  backendRuntimes?: Partial<Record<'herdr' | 'wezterm', WezTermBackendRuntime>>;
+  defaultBackend?: TerminalControlBackendKind;
 }
 
 export interface TerminalControlRuntime {
   runTmux: (args: string[]) => { ok: true; stdout: string };
   runTmuxAsync: (args: string[]) => Promise<{ ok: true; stdout: string }>;
   runCommand: (command: string, args: string[]) => ReturnType<typeof spawnSync>;
-  writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean) => void;
+  writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean, backend?: TerminalControlBackendKind) => void;
   ensureTmuxServerRunning: () => void;
-  writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean) => boolean;
+  writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean, backend?: TerminalControlBackendKind) => boolean;
   enqueueLiveMirrorInput: (
     sessionName: string,
     payload: string,
     appendEnter: boolean,
     shouldWrite?: () => boolean,
+    backend?: TerminalControlBackendKind,
   ) => Promise<boolean>;
-  disposeLiveMirrorInputBatch: (sessionName: string, reason: string) => number;
-  listTmuxSessions: () => string[];
-  createDetachedTmuxSession: (input?: string, cwd?: string) => string;
-  closeDetachedTerminalSession: (sessionName: string) => void;
-  renameTmuxSession: (currentName?: string, nextName?: string) => string;
+  disposeLiveMirrorInputBatch: (sessionName: string, reason: string, backend?: TerminalControlBackendKind) => number;
+  listTmuxSessions: (backend?: TerminalControlBackendKind) => string[];
+  listTerminalSessions: () => string[];
+  resolveTerminalSessionBackend: (sessionName: string) => Exclude<TerminalControlBackendKind, 'wezterm'>;
+  createDetachedTmuxSession: (input?: string, cwd?: string, backend?: TerminalControlBackendKind) => string;
+  closeDetachedTerminalSession: (sessionName: string, backend?: TerminalControlBackendKind) => void;
+  renameTmuxSession: (currentName?: string, nextName?: string, backend?: TerminalControlBackendKind) => string;
   buildExactTmuxSessionTarget: (sessionName: string) => string;
   buildExactTmuxPaneTarget: (sessionName: string) => string;
 }
@@ -71,6 +78,17 @@ export function createTerminalControlRuntime(
     appendEnter: boolean;
     items: LiveMirrorInputItem[];
   };
+  function resolveExternalBackend(kind = deps.defaultBackend || (deps.wezTermBackend ? 'wezterm' : 'tmux')) {
+    const effectiveKind = kind === 'tmux' && deps.defaultBackend === 'wezterm' ? 'wezterm' : kind;
+    if (effectiveKind === 'tmux') {
+      return null;
+    }
+    const backend = deps.backendRuntimes?.[effectiveKind] || (effectiveKind === 'wezterm' ? deps.wezTermBackend : null);
+    if (!backend) {
+      throw new Error(`${effectiveKind} backend is not available`);
+    }
+    return backend;
+  }
   const liveMirrorInputBatches = new Map<string, {
     items: LiveMirrorInputItem[];
     scheduled: boolean;
@@ -111,9 +129,6 @@ export function createTerminalControlRuntime(
   }
 
   function runTmux(args: string[]) {
-    if (deps.wezTermBackend) {
-      throw new Error(`wezterm backend does not support tmux command: ${args.join(' ')}`);
-    }
     const result = spawnSync(deps.tmuxBinary, args, {
       encoding: 'utf-8',
       cwd: process.env.HOME || homedir(),
@@ -154,9 +169,6 @@ export function createTerminalControlRuntime(
   }
 
   function runTmuxAsync(args: string[]) {
-    if (deps.wezTermBackend) {
-      return Promise.reject(new Error(`wezterm backend does not support tmux command: ${args.join(' ')}`));
-    }
     return new Promise<{ ok: true; stdout: string }>((resolve, reject) => {
       const child = spawn(deps.tmuxBinary, args, {
         cwd: process.env.HOME || homedir(),
@@ -234,9 +246,6 @@ export function createTerminalControlRuntime(
   // versa. Using a private socket would hide user sessions and break the
   // "all sessions visible" requirement.
   function ensureTmuxServerRunning() {
-    if (deps.wezTermBackend) {
-      return;
-    }
     const keepalive = 'zterm-daemon-keepalive';
     // If server is already running (user's or ours), just ensure keepalive exists
     try {
@@ -258,18 +267,19 @@ export function createTerminalControlRuntime(
     }
   }
 
-  function writeToTmuxSession(sessionName: string, payload: string, appendEnter: boolean) {
-    if (deps.wezTermBackend) {
+  function writeToTmuxSession(sessionName: string, payload: string, appendEnter: boolean, backendKind?: TerminalControlBackendKind) {
+    const externalBackend = resolveExternalBackend(backendKind);
+    if (externalBackend) {
       const chunks = splitTerminalInputUtf8Chunks(payload, TERMINAL_INPUT_CHUNK_BYTES);
       if (chunks.length <= 1) {
-        deps.wezTermBackend.writeInput(sessionName, `${chunks[0] || ''}${appendEnter ? '\r' : ''}`);
+        externalBackend.writeInput(sessionName, `${chunks[0] || ''}${appendEnter ? '\r' : ''}`);
         return;
       }
       for (const chunk of chunks) {
-        deps.wezTermBackend.writeInput(sessionName, chunk);
+        externalBackend.writeInput(sessionName, chunk);
       }
       if (appendEnter) {
-        deps.wezTermBackend.writeInput(sessionName, '\r');
+        externalBackend.writeInput(sessionName, '\r');
       }
       return;
     }
@@ -280,22 +290,23 @@ export function createTerminalControlRuntime(
     }
   }
 
-  function writeToLiveMirror(sessionName: string, payload: string, appendEnter: boolean) {
-    const mirror = deps.mirrors.get(deps.getMirrorKey(sessionName));
+  function writeToLiveMirror(sessionName: string, payload: string, appendEnter: boolean, backendKind?: TerminalControlBackendKind) {
+    const mirror = deps.mirrors.get(deps.getMirrorKey(sessionName, backendKind === 'herdr' ? 'herdr' : 'tmux'));
     if (!mirror || mirror.lifecycle !== 'ready') {
       return false;
     }
-    if (deps.wezTermBackend) {
+    const externalBackend = resolveExternalBackend(backendKind);
+    if (externalBackend) {
       const chunks = splitTerminalInputUtf8Chunks(payload, TERMINAL_INPUT_CHUNK_BYTES);
       if (chunks.length <= 1) {
-        deps.wezTermBackend.writeInput(sessionName, `${chunks[0] || ''}${appendEnter ? '\r' : ''}`);
+        externalBackend.writeInput(sessionName, `${chunks[0] || ''}${appendEnter ? '\r' : ''}`);
         return true;
       }
       for (const chunk of chunks) {
-        deps.wezTermBackend.writeInput(sessionName, chunk);
+        externalBackend.writeInput(sessionName, chunk);
       }
       if (appendEnter) {
-        deps.wezTermBackend.writeInput(sessionName, '\r');
+        externalBackend.writeInput(sessionName, '\r');
       }
       return true;
     }
@@ -308,7 +319,7 @@ export function createTerminalControlRuntime(
   }
 
   function buildLiveMirrorInputGroups(items: LiveMirrorInputItem[]): LiveMirrorInputGroup[] {
-    const maxGroupBytes = deps.wezTermBackend
+    const maxGroupBytes = resolveExternalBackend(deps.defaultBackend || (deps.wezTermBackend ? 'wezterm' : 'tmux'))
       ? TERMINAL_INPUT_CHUNK_BYTES
       : TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES;
     const groups: LiveMirrorInputGroup[] = [];
@@ -442,7 +453,8 @@ export function createTerminalControlRuntime(
     const isGroupWritable = (group: LiveMirrorInputGroup) =>
       group.items.every((item) => !item.shouldWrite || item.shouldWrite());
 
-    if (deps.wezTermBackend) {
+    const externalBackend = resolveExternalBackend(mirror.backend);
+    if (externalBackend) {
       try {
         for (const group of groups) {
           if (!isGroupWritable(group)) {
@@ -450,14 +462,14 @@ export function createTerminalControlRuntime(
             continue;
           }
           if (group.payload) {
-            deps.wezTermBackend.writeInput(mirror.sessionName, group.payload);
+            externalBackend.writeInput(mirror.sessionName, group.payload);
           }
           if (group.appendEnter) {
             if (!isGroupWritable(group)) {
               settleGroup(group, false);
               continue;
             }
-            deps.wezTermBackend.writeInput(mirror.sessionName, '\r');
+            externalBackend.writeInput(mirror.sessionName, '\r');
           }
           settleGroup(group, true);
         }
@@ -527,8 +539,9 @@ export function createTerminalControlRuntime(
     payload: string,
     appendEnter: boolean,
     shouldWrite?: () => boolean,
+    backendKind?: TerminalControlBackendKind,
   ) {
-    const mirrorKey = deps.getMirrorKey(sessionName);
+    const mirrorKey = deps.getMirrorKey(sessionName, backendKind === 'herdr' ? 'herdr' : 'tmux');
     let pending = liveMirrorInputBatches.get(mirrorKey);
     if (!pending) {
       pending = {
@@ -556,8 +569,8 @@ export function createTerminalControlRuntime(
   // already flushing are not touched; their promise resolution is driven by
   // the in-flight tmux spawn.
   // Returns the number of items evicted for telemetry.
-  function disposeLiveMirrorInputBatch(sessionName: string, reason: string) {
-    const mirrorKey = deps.getMirrorKey(sessionName);
+  function disposeLiveMirrorInputBatch(sessionName: string, reason: string, backendKind?: TerminalControlBackendKind) {
+    const mirrorKey = deps.getMirrorKey(sessionName, backendKind === 'herdr' ? 'herdr' : 'tmux');
     const pending = liveMirrorInputBatches.get(mirrorKey);
     if (!pending) {
       return 0;
@@ -588,9 +601,10 @@ export function createTerminalControlRuntime(
     return evicted;
   }
 
-  function listTmuxSessions() {
-    if (deps.wezTermBackend) {
-      return deps.wezTermBackend.listSessions().map((session) => session.sessionName);
+  function listTmuxSessions(backendKind?: TerminalControlBackendKind) {
+    const externalBackend = resolveExternalBackend(backendKind);
+    if (externalBackend) {
+      return externalBackend.listSessions().map((session) => session.sessionName);
     }
     const result = runTmux(['list-sessions', '-F', '#S']);
     return result.stdout
@@ -599,9 +613,48 @@ export function createTerminalControlRuntime(
       .filter((line) => Boolean(line) && !deps.hiddenTmuxSessions.has(line));
   }
 
-  function createDetachedTmuxSession(input?: string, cwd?: string) {
-    if (deps.wezTermBackend) {
-      return deps.wezTermBackend.createSession({ sessionName: input, cwd }).sessionName;
+  function listTerminalSessions() {
+    const sessions = new Set<string>();
+    if (deps.defaultBackend !== 'herdr') {
+      for (const sessionName of listTmuxSessions('tmux')) {
+        sessions.add(sessionName);
+      }
+    }
+    if (deps.backendRuntimes?.herdr || deps.defaultBackend === 'herdr') {
+      for (const sessionName of listTmuxSessions('herdr')) {
+        sessions.add(sessionName);
+      }
+    }
+    return [...sessions].sort((left, right) => left.localeCompare(right));
+  }
+
+  function resolveTerminalSessionBackend(sessionName: string): Exclude<TerminalControlBackendKind, 'wezterm'> {
+    const normalized = deps.sanitizeSessionName(sessionName);
+    if (deps.defaultBackend === 'wezterm') {
+      if (!listTmuxSessions('tmux').includes(normalized)) {
+        throw new Error(`wezterm session not found: ${normalized}`);
+      }
+      return 'tmux';
+    }
+    const matches: Array<Exclude<TerminalControlBackendKind, 'wezterm'>> = [];
+    if (deps.defaultBackend !== 'herdr' && listTmuxSessions('tmux').includes(normalized)) {
+      matches.push('tmux');
+    }
+    if (deps.backendRuntimes?.herdr || deps.defaultBackend === 'herdr') {
+      if (listTmuxSessions('herdr').includes(normalized)) matches.push('herdr');
+    }
+    if (matches.length !== 1) {
+      throw new Error(matches.length === 0
+        ? `terminal session not found: ${normalized}`
+        : `terminal session backend is ambiguous: ${normalized}`);
+    }
+    return matches[0]!;
+  }
+
+  function createDetachedTmuxSession(input?: string, cwd?: string, backendKind?: TerminalControlBackendKind) {
+    const externalBackend = resolveExternalBackend(backendKind);
+    if (externalBackend) {
+      return externalBackend.createSession({ sessionName: input, cwd }).sessionName;
     }
     const sessionName = deps.sanitizeSessionName(input || deps.defaultSessionName);
     const args = ['new-session', '-d', '-s', sessionName];
@@ -612,27 +665,29 @@ export function createTerminalControlRuntime(
     return sessionName;
   }
 
-  function closeDetachedTerminalSession(input: string) {
+  function closeDetachedTerminalSession(input: string, backendKind?: TerminalControlBackendKind) {
     const sessionName = deps.sanitizeSessionName(input);
-    if (deps.wezTermBackend) {
-      deps.wezTermBackend.closeSession(sessionName);
+    const externalBackend = resolveExternalBackend(backendKind);
+    if (externalBackend) {
+      externalBackend.closeSession(sessionName);
       return;
     }
     runTmux(['kill-session', '-t', buildExactTmuxSessionTarget(sessionName)]);
   }
 
-  function renameTmuxSession(currentName?: string, nextName?: string) {
-    if (deps.wezTermBackend) {
-      if (deps.wezTermBackend.supportsSessionRename === false) {
+  function renameTmuxSession(currentName?: string, nextName?: string, backendKind?: TerminalControlBackendKind) {
+    const externalBackend = resolveExternalBackend(backendKind);
+    if (externalBackend) {
+      if (externalBackend.supportsSessionRename === false) {
         throw new Error('selected terminal backend does not support session rename');
       }
-      if (deps.wezTermBackend.renameSession) {
-        return deps.wezTermBackend.renameSession(
+      if (externalBackend.renameSession) {
+        return externalBackend.renameSession(
           deps.sanitizeSessionName(currentName),
           deps.sanitizeSessionName(nextName),
         );
       }
-      throw new Error('wezterm backend does not support tmux rename-session');
+      throw new Error(`${backendKind || 'external'} backend does not support session rename`);
     }
     const sessionName = deps.sanitizeSessionName(currentName);
     const nextSessionName = deps.sanitizeSessionName(nextName);
@@ -650,6 +705,8 @@ export function createTerminalControlRuntime(
     enqueueLiveMirrorInput,
     disposeLiveMirrorInputBatch,
     listTmuxSessions,
+    listTerminalSessions,
+    resolveTerminalSessionBackend,
     createDetachedTmuxSession,
     closeDetachedTerminalSession,
     renameTmuxSession,

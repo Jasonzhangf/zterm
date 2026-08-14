@@ -44,8 +44,8 @@ describe('server schedule runtime truth gates', () => {
 
     expect(stateBlock).toContain("type: 'schedule-state'");
     expect(eventBlock).toContain("type: 'schedule-event'");
-    expect(engineBlock).toContain('onStateChange: (sessionName) =>');
-    expect(engineBlock).toContain('broadcastScheduleState(sessionName)');
+    expect(engineBlock).toContain('onStateChange: (sessionName, _jobs, terminalBackend = \'tmux\') =>');
+    expect(engineBlock).toContain('broadcastScheduleState(sessionName, terminalBackend)');
     expect(engineBlock).toContain('onEvent: (event) =>');
     expect(engineBlock).toContain('broadcastScheduleEvent(event)');
   });

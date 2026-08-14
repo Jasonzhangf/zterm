@@ -3,10 +3,10 @@ import { Capacitor, registerPlugin } from '@capacitor/core';
 /**
  * BackgroundServicePlugin - 前端与 Android 后台服务的接口
  *
- * 后台心跳维持机制：
- * - 进入后台时启动 BackgroundService (Android 原生保活)
- * - Web 层维护一个轻量心跳定时器，每30秒发送 ping
- * - 心跳状态记录，供恢复时判断连接是否仍然有效
+ * 生命周期分工：
+ * - retained session > 0 时由 app lifecycle owner 保持 Android service 常驻
+ * - 只有进入后台时才启用 Web 层 30 秒 control heartbeat callback
+ * - service 与 heartbeat callback 独立停止；前台恢复不停止 service
  */
 
 // 后台心跳间隔：30秒
@@ -59,10 +59,17 @@ let heartbeatState: BackgroundHeartbeatState = {
 let backgroundHeartbeatCallback: (() => void) | null = null;
 
 /**
- * 设置后台心跳回调 - 在后台时定期调用
+ * 设置后台心跳回调。回调为空表示前台，不代表停止 native service。
  */
 export function setBackgroundHeartbeatCallback(callback: (() => void) | null): void {
   backgroundHeartbeatCallback = callback;
+  if (callback) {
+    if (heartbeatState.sessionCount > 0) {
+      startBackgroundHeartbeatTimer(heartbeatState.sessionCount);
+    }
+    return;
+  }
+  stopBackgroundHeartbeatTimer();
 }
 
 /**
@@ -123,27 +130,21 @@ function stopBackgroundHeartbeatTimer(): void {
 }
 
 /**
- * 启动后台服务
- * 同时启动 Android 原生服务和 Web 层心跳定时器
+ * 启动 Android 原生 service。不会隐式启用后台 heartbeat。
  */
 export function startBackgroundService(sessionCount: number = 0): void {
   if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
-    if (sessionCount > 0) {
-      startBackgroundHeartbeatTimer(sessionCount);
-    }
+    heartbeatState.sessionCount = sessionCount;
     return;
   }
   void BackgroundService.start({ sessionCount }).catch((error) => {
     console.warn('[BackgroundService] start failed:', error);
   });
-  if (sessionCount > 0) {
-    startBackgroundHeartbeatTimer(sessionCount);
-  }
+  heartbeatState.sessionCount = sessionCount;
 }
 
 /**
- * 停止后台服务
- * 同时停止 Android 原生服务和 Web 层心跳定时器
+ * 停止 Android 原生 service，并清理独立的后台 heartbeat timer。
  */
 export function stopBackgroundService(): void {
   if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
@@ -157,8 +158,8 @@ export function stopBackgroundService(): void {
 }
 
 /**
- * 更新 Session 数量
- * 同时更新 Android 通知和 Web 层心跳状态
+ * 更新 retained session 数量。后台 heartbeat 是否运行由
+ * setBackgroundHeartbeatCallback() 独立决定。
  */
 export function updateSessionCount(count: number): void {
   if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'android') {
@@ -174,6 +175,8 @@ export function updateSessionCount(count: number): void {
   heartbeatState.sessionCount = count;
   if (count <= 0) {
     stopBackgroundHeartbeatTimer();
+  } else if (backgroundHeartbeatCallback) {
+    startBackgroundHeartbeatTimer(count);
   }
 }
 

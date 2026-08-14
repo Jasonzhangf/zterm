@@ -1,5 +1,6 @@
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { mobileTheme } from '../../lib/mobile-ui';
+import { RenameDialog } from './RenameDialog';
 
 const DRAG_HANDLE_LONG_PRESS_MS = 360;
 
@@ -86,6 +87,7 @@ function TabManagerSheetComponent({
     targetIndex: number;
     offsetY: number;
   } | null>(null);
+  const [renameTarget, setRenameTarget] = useState<TabManagerSessionItem | null>(null);
   const dragStateRef = useRef<typeof dragState>(null);
   const lastPointerCloseIntentRef = useRef<{ sessionId: string; at: number } | null>(null);
 
@@ -124,11 +126,7 @@ function TabManagerSheetComponent({
   };
 
   const requestRename = (session: TabManagerSessionItem) => {
-    const next = window.prompt('Rename tab', session.customName || session.sessionName)?.trim();
-    if (!next) {
-      return;
-    }
-    onRenameSession(session.id, next);
+    setRenameTarget(session);
   };
 
   const getTargetIndex = (clientY: number, draggedSessionId: string) => {
@@ -293,6 +291,8 @@ function TabManagerSheetComponent({
                     </div>
                   </button>
                   <button
+                    type="button"
+                    aria-label={`重命名 ${session.customName || session.sessionName}`}
                     onClick={() => requestRename(session)}
                     style={{
                       width: '36px',
@@ -420,6 +420,20 @@ function TabManagerSheetComponent({
         </div>
 
       </div>
+      <RenameDialog
+        open={renameTarget !== null}
+        title="重命名标签页"
+        inputLabel="新的标签页名称"
+        initialValue={renameTarget?.customName || renameTarget?.sessionName || ''}
+        onCancel={() => setRenameTarget(null)}
+        onSubmit={(nextName) => {
+          const target = renameTarget;
+          setRenameTarget(null);
+          if (target) {
+            onRenameSession(target.id, nextName);
+          }
+        }}
+      />
     </div>
   );
 }

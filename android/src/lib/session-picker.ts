@@ -19,6 +19,7 @@ export interface BridgeTarget {
   transportMode?: 'auto' | 'websocket' | 'webrtc';
   relayEndpointCandidates?: RelayEndpointCandidate[];
   relayTmuxSessions?: RelayTmuxSessionSnapshot[];
+  terminalBackend?: 'tmux' | 'herdr';
 }
 
 export type HostDraft = Omit<Host, 'id' | 'createdAt'>;
@@ -51,6 +52,7 @@ export function normalizeBridgeTarget(target?: Partial<BridgeTarget> | null): Br
     ipv4Host: target?.ipv4Host?.trim() || '',
     signalUrl: target?.signalUrl?.trim() || '',
     transportMode: target?.transportMode || 'auto',
+    terminalBackend: target?.terminalBackend || 'tmux',
     relayEndpointCandidates: target?.relayEndpointCandidates || [],
     relayTmuxSessions: target?.relayTmuxSessions || [],
   };
@@ -78,6 +80,7 @@ export function buildBridgeTargetFromHost(host: Host): BridgeTarget {
     ipv4Host: host.ipv4Host || (preferredDirectEndpoint?.kind === 'ipv4' || preferredDirectEndpoint?.kind === 'lan' ? directoryBridgeHost : ''),
     signalUrl: host.signalUrl,
     transportMode: host.transportMode,
+    terminalBackend: host.terminalBackend,
     relayEndpointCandidates,
   });
 }
@@ -222,6 +225,7 @@ export function sortHostsForPicker(hosts: Host[], target?: Partial<BridgeTarget>
 }
 
 export function findMatchingHost(hosts: Host[], target: BridgeTarget, sessionName: string) {
+  const targetBackend = target.terminalBackend || 'tmux';
   const targetReuseKey = buildHostSemanticReuseKey({
     daemonHostId: target.daemonHostId || target.relayHostId,
     relayHostId: target.relayHostId,
@@ -230,7 +234,10 @@ export function findMatchingHost(hosts: Host[], target: BridgeTarget, sessionNam
     sessionName,
   });
   return hosts.find(
-    (host) => buildHostSemanticReuseKey(host) === targetReuseKey,
+    (host) => (
+      (host.terminalBackend || 'tmux') === targetBackend
+      && buildHostSemanticReuseKey(host) === targetReuseKey
+    ),
   );
 }
 
@@ -253,6 +260,7 @@ export function buildDraftFromTmuxSession(
       bridgeHost: normalizedTarget.bridgeHost || existing.bridgeHost,
       bridgePort: normalizedTarget.bridgePort || existing.bridgePort,
       sessionName: sessionName.trim() || existing.sessionName,
+      terminalBackend: normalizedTarget.terminalBackend || existing.terminalBackend || 'tmux',
       authToken: normalizedTarget.authToken || existing.authToken || '',
       daemonHostId,
       relayHostId: normalizedTarget.relayHostId || normalizedTarget.daemonHostId || existing.relayHostId || existing.daemonHostId || '',
@@ -290,6 +298,7 @@ export function buildDraftFromTmuxSession(
     ipv4Host: target.ipv4Host || '',
     signalUrl: target.signalUrl || '',
     transportMode: target.transportMode || 'auto',
+    terminalBackend: target.terminalBackend || 'tmux',
     relayEndpointCandidates: target.relayEndpointCandidates || [],
     authType: 'password',
     password: undefined,
@@ -316,6 +325,7 @@ export function buildCleanDraft(target: BridgeTarget): HostDraft {
     ipv4Host: target.ipv4Host || '',
     signalUrl: target.signalUrl || '',
     transportMode: target.transportMode || 'auto',
+    terminalBackend: target.terminalBackend || 'tmux',
     relayEndpointCandidates: target.relayEndpointCandidates || [],
     authType: 'password',
     password: undefined,

@@ -428,7 +428,7 @@ describe('handleReconnectHandshakeFailureRuntime', () => {
     });
     const updateSessionSync = vi.fn();
     const emitSessionStatus = vi.fn();
-    const startReconnectAttempt = vi.fn();
+    const scheduleReconnect = vi.fn();
 
     handleReconnectHandshakeFailureRuntime({
       sessionId: 'session-1',
@@ -438,21 +438,26 @@ describe('handleReconnectHandshakeFailureRuntime', () => {
       clearSupersededSockets: vi.fn(),
       updateSessionSync,
       emitSessionStatus,
-      startReconnectAttempt,
+      scheduleReconnect,
     });
 
     expect(reconnectStore.read('session-1')).toEqual(expect.objectContaining({
       phase: 'idle',
-      attempt: 2,
+      attempt: 1,
     }));
     expect(updateSessionSync).toHaveBeenCalledWith('session-1', {
       state: 'reconnecting',
       lastError: 'control socket closed before attach',
-      reconnectAttempt: 2,
+      reconnectAttempt: 1,
       ws: null,
     });
     expect(emitSessionStatus).not.toHaveBeenCalled();
-    expect(startReconnectAttempt).toHaveBeenCalledWith('session-1');
+    expect(scheduleReconnect).toHaveBeenCalledWith(
+      'session-1',
+      'control socket closed before attach',
+      true,
+      { immediate: true, resetAttempt: false, force: true },
+    );
   });
 
   it('projects terminal error only for nonretryable reconnect handshake failures', () => {
@@ -464,7 +469,7 @@ describe('handleReconnectHandshakeFailureRuntime', () => {
     });
     const updateSessionSync = vi.fn();
     const emitSessionStatus = vi.fn();
-    const startReconnectAttempt = vi.fn();
+    const scheduleReconnect = vi.fn();
 
     handleReconnectHandshakeFailureRuntime({
       sessionId: 'session-1',
@@ -474,7 +479,7 @@ describe('handleReconnectHandshakeFailureRuntime', () => {
       clearSupersededSockets: vi.fn(),
       updateSessionSync,
       emitSessionStatus,
-      startReconnectAttempt,
+      scheduleReconnect,
     });
 
     expect(reconnectStore.read('session-1')).toBeNull();
@@ -483,7 +488,7 @@ describe('handleReconnectHandshakeFailureRuntime', () => {
       lastError: 'auth rejected',
     });
     expect(emitSessionStatus).toHaveBeenCalledWith('session-1', 'error', 'auth rejected');
-    expect(startReconnectAttempt).not.toHaveBeenCalled();
+    expect(scheduleReconnect).not.toHaveBeenCalled();
   });
 
   it('stops retryable reconnect without terminal error projection after the session becomes inactive', () => {
@@ -495,7 +500,7 @@ describe('handleReconnectHandshakeFailureRuntime', () => {
     });
     const updateSessionSync = vi.fn();
     const emitSessionStatus = vi.fn();
-    const startReconnectAttempt = vi.fn();
+    const scheduleReconnect = vi.fn();
 
     handleReconnectHandshakeFailureRuntime({
       sessionId: 'session-1',
@@ -506,7 +511,7 @@ describe('handleReconnectHandshakeFailureRuntime', () => {
       updateSessionSync,
       emitSessionStatus,
       shouldContinueRetryableReconnect: () => false,
-      startReconnectAttempt,
+      scheduleReconnect,
     });
 
     expect(reconnectStore.read('session-1')).toBeNull();
@@ -517,6 +522,6 @@ describe('handleReconnectHandshakeFailureRuntime', () => {
       ws: null,
     });
     expect(emitSessionStatus).not.toHaveBeenCalled();
-    expect(startReconnectAttempt).not.toHaveBeenCalled();
+    expect(scheduleReconnect).not.toHaveBeenCalled();
   });
 });

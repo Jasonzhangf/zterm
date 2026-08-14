@@ -193,6 +193,7 @@ describe('applySessionActionRuntime', () => {
     const plan = buildTraversalPlan(target, settings, options?.overrideUrl);
     expect(plan.candidates.map((candidate) => candidate.path)).toEqual([
       'tailscale',
+      'tailscale',
       'rtc-direct',
       'rtc-relay',
     ]);
@@ -200,6 +201,11 @@ describe('applySessionActionRuntime', () => {
       kind: 'ws',
       path: 'tailscale',
       endpoint: '100.66.1.83:3333',
+    });
+    expect(plan.candidates[1]).toMatchObject({
+      kind: 'ws',
+      path: 'tailscale',
+      endpoint: '100.66.1.82:3333',
     });
   });
 
@@ -442,5 +448,58 @@ describe('applyTransportDiagnosticsRuntime', () => {
       lastConnectStage: 'connecting',
       lastError: 'waiting for confirmed control directory',
     }));
+  });
+});
+
+describe('buildTraversalSocketForHostRuntime direct fallback after network change', () => {
+  it('keeps successfully-connected direct endpoints as fallback candidates when the control directory entry is stale', () => {
+    const host = buildHost({
+      daemonHostId: 'mac-studio',
+      transportMode: 'auto',
+      // 成功连接过的直连 IP（网络切换后 daemon 侧 IP 未变，仍可达）
+      bridgeHost: '192.168.1.50',
+      tailscaleHost: '100.66.1.50',
+      ipv4Host: '192.168.1.50',
+      authToken: 'token-a',
+    });
+    // 目录 entry 存在（daemon 注册过 relay），但 endpoints 是切换前的旧值
+    defaultClientControlDirectoryRuntime.replaceFromDevices([{
+      deviceId: 'mac-studio',
+      deviceName: 'Mac Studio',
+      platform: 'darwin',
+      appVersion: '0.1.3',
+      updatedAt: '2026-07-18T00:00:00.000Z',
+      client: { connected: false, lastSeenAt: '' },
+      daemon: {
+        connected: true,
+        lastSeenAt: '2026-07-18T00:00:00.000Z',
+        hostId: 'mac-studio',
+        version: '0.1.3',
+        endpoints: [{
+          id: 'direct:tailscale:mac-studio:old',
+          kind: 'tailscale' as const,
+          host: '100.66.1.82',
+          port: 3333,
+          authRequired: true,
+          lastSeenAt: '2026-07-18T00:00:00.000Z',
+        }],
+        sessions: [],
+      },
+    }], buildRelayBridgeSettings().traversalRelay);
+
+    const socket = buildTraversalSocketForHostRuntime({
+      host,
+      bridgeSettings: buildRelayBridgeSettings(),
+      transportRole: 'session',
+    });
+    expect(socket.readyState).toBe(WebSocket.CONNECTING);
+    const [target, settings, options] = readTraversalSocketConstructorCall();
+    const plan = buildTraversalPlan(target, settings, options?.overrideUrl);
+
+    // 修复后：候选应保留成功连接过的直连 IP 作为兜底，目录 stale 时仍可直连恢复
+    expect(plan.candidates.map((candidate) => candidate.path)).toContain('tailscale');
+    expect(plan.candidates.some((candidate) => (
+      candidate.path === 'tailscale' && candidate.endpoint.includes('100.66.1.50')
+    ))).toBe(true);
   });
 });

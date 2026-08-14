@@ -75,6 +75,7 @@ export interface TerminalTransportSubscriber {
   muxChannelId?: string | null;
   muxParentTransportId?: string | null;
   sessionName: string;
+  backend?: 'tmux' | 'herdr';
   mirrorKey: string | null;
   bodySubscribed?: boolean;
   adaptiveWidthCols?: number | null;
@@ -90,6 +91,7 @@ export type TerminalSession = TerminalTransportSubscriber;
 export interface SessionMirror {
   key: string;
   sessionName: string;
+  backend?: 'tmux' | 'herdr';
   scratchBridge: WasmBridge | null;
   lifecycle: 'idle' | 'booting' | 'ready' | 'failed' | 'destroyed';
   cols: number;
@@ -157,6 +159,7 @@ export type TerminalWidthMode = 'adaptive-phone' | 'mirror-fixed';
 
 export interface TerminalAttachPayload {
   sessionName: string;
+  backend?: 'tmux' | 'herdr';
   cols?: number;
   rows?: number;
   autoCommand?: string;

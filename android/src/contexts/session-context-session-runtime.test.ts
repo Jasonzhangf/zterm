@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createSessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import { createSessionReconnectStore } from '../lib/session-reconnect-store';
+import { mergeHostWithLatestProjection } from '../lib/home-connection-projection';
 import {
   closeSessionRuntime,
   connectSessionRuntime,
   createSessionRuntime,
   reconnectSessionRuntime,
+  renameRemoteSessionRuntime,
   runReconnectHostProbeAndFallback,
   scheduleReconnectRuntime,
   startReconnectAttemptRuntime,
@@ -361,6 +363,61 @@ describe('startReconnectAttemptRuntime', () => {
     vi.useRealTimers();
   });
 
+  it('uses the freshest direct endpoints for reconnect candidates when the cached host direct fields are stale after a network change', async () => {
+    vi.useFakeTimers();
+    const reconnectStore = createSessionReconnectStore();
+    reconnectStore.write('session-1', {
+      phase: 'idle',
+      attempt: 2,
+      nextDelayMs: 50,
+    });
+    // Cached host keeps the pre-switch direct endpoints. The device list has
+    // already refreshed with the new Tailscale IP, but reconnect only sees the
+    // cached host today.
+    const staleCachedHost = {
+      ...host,
+      id: 'relay-device:dev-1:daemon-1',
+      bridgeHost: '127.0.0.1',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-1',
+      relayHostId: 'daemon-1',
+      tailscaleHost: '100.66.1.82',
+      ipv4Host: '203.0.113.10',
+      sessionName: 'tmux-1',
+    };
+    const freshestProjectedHost = {
+      ...staleCachedHost,
+      tailscaleHost: '100.99.2.1',
+    };
+    const queueReconnectTransportOpenIntent = vi.fn();
+    // Only the new post-switch Tailscale IP answers the probe.
+    const probeReconnectHost = vi.fn(async (bridgeHost: string) => bridgeHost === '100.99.2.1');
+
+    startReconnectAttemptRuntime({
+      sessionId: 'session-1',
+      refs: { reconnectStore },
+      readSessionTransportHost: () => staleCachedHost,
+      computeReconnectDelay: vi.fn(() => 1000),
+      updateSessionSync: vi.fn(),
+      writeSessionTransportToken: vi.fn(() => null),
+      queueReconnectTransportOpenIntent,
+      probeReconnectHost,
+      // Mirrors the session provider wiring: the freshest home projection
+      // (device list) refreshes the cached host right before probing.
+      refreshHostForReconnect: (cachedHost) => (
+        mergeHostWithLatestProjection(cachedHost, [freshestProjectedHost])
+      ),
+    });
+    await vi.advanceTimersByTimeAsync(50);
+
+    // Regression guard: reconnect candidates must include the freshest direct
+    // endpoints so a switched network can still reach the daemon without a
+    // full app restart.
+    const probed = probeReconnectHost.mock.calls.map((call) => call[0]);
+    expect(probed).toContain('100.99.2.1');
+    vi.useRealTimers();
+  });
+
   it('does not queue a duplicate reconnect while phase is scheduled or connecting', () => {
     vi.useFakeTimers();
     const reconnectStore = createSessionReconnectStore();
@@ -410,6 +467,11 @@ describe('runReconnectHostProbeAndFallback', () => {
   function makeProbeFallbackOptions(overrides: {
     probe?: (bridgeHost: string, bridgePort: number) => Promise<boolean>;
     attempt?: number;
+    scheduleReconnectRetry?: () => void;
+    recordReconnectHostProbe?: (result: {
+      sessionId: string;
+      candidates: Array<{ bridgeHost: string; bridgePort: number; reachable: boolean }>;
+    }) => void;
   } = {}) {
     const queueReconnectTransportOpenIntent = vi.fn();
     const updateSessionSync = vi.fn();
@@ -427,6 +489,8 @@ describe('runReconnectHostProbeAndFallback', () => {
         refreshStore: createSessionReconnectStore(),
         isManualClosed: () => false,
         deleteRuntime,
+        scheduleReconnectRetry: overrides.scheduleReconnectRetry || vi.fn(),
+        recordReconnectHostProbe: overrides.recordReconnectHostProbe,
       } as Parameters<typeof runReconnectHostProbeAndFallback>[0],
       queueReconnectTransportOpenIntent,
       updateSessionSync,
@@ -435,13 +499,13 @@ describe('runReconnectHostProbeAndFallback', () => {
     };
   }
 
-  it('connects directly to the current host on the first attempt without probing', async () => {
+  it('records the current host probe without gating the first reconnect attempt', async () => {
     const probe = vi.fn(() => Promise.resolve(true));
     const { options, queueReconnectTransportOpenIntent, deleteRuntime } = makeProbeFallbackOptions({ probe, attempt: 0 });
 
     await runReconnectHostProbeAndFallback(options);
 
-    expect(probe).not.toHaveBeenCalled();
+    expect(probe).toHaveBeenCalledWith('127.0.0.1', 3333);
     expect(queueReconnectTransportOpenIntent).toHaveBeenCalledWith('session-1', fallbackHost);
     expect(deleteRuntime).not.toHaveBeenCalled();
   });
@@ -469,6 +533,8 @@ describe('runReconnectHostProbeAndFallback', () => {
       probe,
       attempt: 2,
     });
+    const recordReconnectHostProbe = vi.fn();
+    options.recordReconnectHostProbe = recordReconnectHostProbe;
     options.host = hostWithTailscale;
 
     const pending = runReconnectHostProbeAndFallback(options);
@@ -478,33 +544,54 @@ describe('runReconnectHostProbeAndFallback', () => {
     expect(probe.mock.calls.length).toBeGreaterThanOrEqual(3);
     releaseFirst?.();
     await pending;
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-    expect(queueReconnectTransportOpenIntent).toHaveBeenCalledWith(
-      'session-1',
-      expect.objectContaining({ bridgeHost: '100.66.1.82' }),
-    );
-    expect(updateSessionSync).toHaveBeenCalledWith('session-1', expect.objectContaining({
-      bridgeHost: '100.66.1.82',
-      lastError: 'reconnect via tailscale',
+    expect(queueReconnectTransportOpenIntent).toHaveBeenCalledWith('session-1', hostWithTailscale);
+    expect(updateSessionSync).not.toHaveBeenCalled();
+    expect(recordReconnectHostProbe).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: 'session-1',
+      candidates: expect.arrayContaining([
+        { bridgeHost: '100.66.1.82', bridgePort: 3333, reachable: true },
+      ]),
     }));
   });
 
-  it('falls back to queueing the current host when every probe fails on retry', async () => {
+  it('opens the real transport immediately even when every HTTP probe fails', async () => {
     const probe = vi.fn(() => Promise.resolve(false));
+    const recordReconnectHostProbe = vi.fn();
     const { options, queueReconnectTransportOpenIntent, updateSessionSync, deleteRuntime } = makeProbeFallbackOptions({
       probe,
       attempt: 2,
+      recordReconnectHostProbe,
     });
 
     await runReconnectHostProbeAndFallback(options);
+    await new Promise<void>((resolve) => setTimeout(resolve, 0));
 
-    // The reconnect intent is never silently dropped: the current host is
-    // queued anyway so TraversalSocket can race all candidate paths.
     expect(queueReconnectTransportOpenIntent).toHaveBeenCalledWith('session-1', fallbackHost);
-    expect(updateSessionSync).toHaveBeenCalledWith('session-1', {
-      lastError: 'reconnect: all host candidates unreachable, retrying current host',
+    expect(updateSessionSync).not.toHaveBeenCalled();
+    expect(recordReconnectHostProbe).toHaveBeenCalledWith({
+      sessionId: 'session-1',
+      candidates: [
+        { bridgeHost: '127.0.0.1', bridgePort: 3333, reachable: false },
+      ],
     });
     expect(deleteRuntime).not.toHaveBeenCalled();
+  });
+
+  it('does not wait for the HTTP probe before queueing the real transport open', async () => {
+    let releaseProbe: (() => void) | undefined;
+    const probe = vi.fn(() => new Promise<boolean>((resolve) => {
+      releaseProbe = () => resolve(false);
+    }));
+    const { options, queueReconnectTransportOpenIntent } = makeProbeFallbackOptions({ probe });
+
+    const pending = runReconnectHostProbeAndFallback(options);
+    await Promise.resolve();
+
+    expect(queueReconnectTransportOpenIntent).toHaveBeenCalledWith('session-1', fallbackHost);
+    releaseProbe?.();
+    await pending;
   });
 });
 
@@ -619,6 +706,73 @@ describe('active truth ownership gates', () => {
         bridgePort: 3333,
         sessionName: 'tmux-1',
       }),
+    );
+  });
+
+  it('updates the backend when reusing a session id for a different terminal backend', () => {
+    const updateSessionSync = vi.fn();
+    const existingSession: Session = {
+      id: 'session-existing',
+      hostId: 'host-1',
+      connectionName: 'conn',
+      bridgeHost: '127.0.0.1',
+      bridgePort: 3333,
+      daemonHostId: undefined,
+      sessionName: 'shared',
+      terminalBackend: 'tmux',
+      authToken: undefined,
+      autoCommand: undefined,
+      title: 'shared',
+      ws: null,
+      state: 'closed',
+      hasUnread: false,
+      customName: undefined,
+      reconnectAttempt: 0,
+      createdAt: 1,
+    };
+
+    const sessionId = createSessionRuntime({
+      host: {
+        id: 'host-1',
+        createdAt: 1,
+        name: 'conn',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'shared',
+        terminalBackend: 'herdr',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+      },
+      createOptions: {
+        connect: false,
+        sessionId: 'session-existing',
+      },
+      refs: {
+        stateRef: {
+          current: {
+            sessions: [existingSession],
+            activeSessionId: 'session-existing',
+          },
+        },
+        pendingSessionTransportOpenIntentsRef: { current: new Map() },
+        sessionBufferStoreRef: { current: { commitBuffer: vi.fn(), setBuffer: vi.fn() } },
+        sessionHeadStoreRef: { current: { setHead: vi.fn() } },
+      },
+      runtimeDebug: vi.fn(),
+      resolveSessionCacheLines: vi.fn(() => 1000),
+      createSessionSync: vi.fn(),
+      updateSessionSync,
+      writeSessionTransportHost: vi.fn(),
+      daemonConnection: makeDaemonConnection({ socket: null }),
+      connectSession: vi.fn(),
+      defaultViewport: { cols: 80, rows: 24 },
+    });
+
+    expect(sessionId).toBe('session-existing');
+    expect(updateSessionSync).toHaveBeenCalledWith(
+      'session-existing',
+      expect.objectContaining({ terminalBackend: 'herdr' }),
     );
   });
 
@@ -1315,6 +1469,61 @@ describe('session transport reuse runtime gates', () => {
     });
   });
 
+  it('reconnectSessionRuntime preserves the automatic retry budget during lifecycle recovery', () => {
+    const clearReconnectForSession = vi.fn();
+    const scheduleReconnect = vi.fn();
+    const reconnectStore = createSessionReconnectStore();
+    reconnectStore.write('session-1', {
+      phase: 'idle',
+      attempt: 11,
+      nextDelayMs: 1200,
+    });
+
+    reconnectSessionRuntime({
+      sessionId: 'session-1',
+      reconnectOptions: { preserveAttempt: true },
+      refs: {
+        stateRef: {
+          current: {
+            sessions: [{
+              id: 'session-1',
+              hostId: 'host-1',
+              connectionName: 'conn',
+              bridgeHost: '127.0.0.1',
+              bridgePort: 3333,
+              sessionName: 'tmux-1',
+              authToken: undefined,
+              autoCommand: undefined,
+              createdAt: 1,
+            } as Session],
+            activeSessionId: 'session-1',
+          },
+        },
+        reconnectStore,
+      },
+      clearReconnectForSession,
+      readSessionTransportHost: () => host,
+      readSessionTargetKey: () => targetKey,
+      readSessionTargetRuntime: () => ({ sessionIds: ['session-1'] }),
+      daemonConnection: makeDaemonConnection({ socket: { readyState: WebSocket.CLOSED } as any }),
+      hasPendingSessionTransportOpen: () => false,
+      isPendingSessionTransportOpenStale: () => false,
+      runtimeDebug: vi.fn(),
+      cleanupSocket: vi.fn(),
+      writeSessionTransportHost: vi.fn(),
+      updateSessionSync: vi.fn(),
+      scheduleReconnect,
+    } as any);
+
+    expect(clearReconnectForSession).not.toHaveBeenCalled();
+    expect(reconnectStore.read('session-1')?.attempt).toBe(11);
+    expect(scheduleReconnect).toHaveBeenCalledWith('session-1', 'automatic reconnect', true, {
+      immediate: true,
+      resetAttempt: false,
+      force: true,
+    });
+  });
+
   it('reconnectSessionRuntime still rebuilds a closed same-target socket', () => {
     const cleanupSocket = vi.fn();
     const scheduleReconnect = vi.fn();
@@ -1448,5 +1657,85 @@ describe('scheduleReconnectRuntime max attempts', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('renameRemoteSessionRuntime', () => {
+  it('migrates the remote tmux identity without overwriting a local custom tab name', () => {
+    const updateSessionSync = vi.fn();
+    renameRemoteSessionRuntime({
+      sessionId: 'session-1',
+      name: 'renamed-tmux',
+      sessions: [{
+        id: 'session-1',
+        hostId: 'host-1',
+        connectionName: 'conn',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'old-tmux',
+        title: 'old title',
+        customName: 'My Local Tab',
+        ws: null,
+        state: 'connected',
+        hasUnread: false,
+        createdAt: 1,
+      }],
+      updateSessionSync,
+    });
+
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', {
+      sessionName: 'renamed-tmux',
+      customName: 'My Local Tab',
+      title: 'My Local Tab',
+    });
+  });
+
+  it('keeps generated display names in sync across consecutive remote renames and refreshes the reconnect host', () => {
+    const updateSessionSync = vi.fn();
+    const writeSessionTransportHost = vi.fn();
+    const writeSessionTerminalChannelName = vi.fn();
+    renameRemoteSessionRuntime({
+      sessionId: 'session-1',
+      name: 'second-tmux',
+      sessions: [{
+        id: 'session-1',
+        hostId: 'host-1',
+        connectionName: 'conn',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'first-tmux',
+        title: 'first-tmux',
+        customName: 'first-tmux',
+        ws: null,
+        state: 'connected',
+        hasUnread: false,
+        createdAt: 1,
+      }],
+      updateSessionSync,
+      readSessionTransportHost: () => ({
+        id: 'host-1',
+        createdAt: 1,
+        name: 'conn',
+        bridgeHost: '127.0.0.1',
+        bridgePort: 3333,
+        sessionName: 'first-tmux',
+        authType: 'password',
+        tags: [],
+        pinned: false,
+      }),
+      writeSessionTransportHost,
+      writeSessionTerminalChannelName,
+    });
+
+    expect(updateSessionSync).toHaveBeenCalledWith('session-1', {
+      sessionName: 'second-tmux',
+      customName: 'second-tmux',
+      title: 'second-tmux',
+    });
+    expect(writeSessionTransportHost).toHaveBeenCalledWith(
+      'session-1',
+      expect.objectContaining({ sessionName: 'second-tmux' }),
+    );
+    expect(writeSessionTerminalChannelName).toHaveBeenCalledWith('session-1', 'second-tmux');
   });
 });

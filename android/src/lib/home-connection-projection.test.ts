@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   hasRelayRtcCandidate,
+  mergeHostWithLatestProjection,
   projectHomeSavedConnections,
 } from './home-connection-projection';
 import { DEFAULT_BRIDGE_SETTINGS, type BridgeSettings } from './bridge-settings';
@@ -33,19 +34,20 @@ function makeSavedHost(overrides: Partial<Host> = {}): Host {
 }
 
 function makeRelayDevice(): TraversalRelayDeviceSnapshot {
+  const now = new Date().toISOString();
   return {
     deviceId: 'device-mac',
     deviceName: 'Mac Studio Relay',
     platform: 'darwin',
     appVersion: '0.1.3',
-    updatedAt: '2026-07-16T10:00:00.000Z',
+    updatedAt: now,
     client: {
       connected: false,
-      lastSeenAt: '2026-07-16T10:00:00.000Z',
+      lastSeenAt: now,
     },
     daemon: {
       connected: true,
-      lastSeenAt: '2026-07-16T10:00:00.000Z',
+      lastSeenAt: now,
       hostId: 'mac-studio',
       version: '0.1.3',
       endpoints: [
@@ -56,7 +58,7 @@ function makeRelayDevice(): TraversalRelayDeviceSnapshot {
           port: 3333,
           authToken: 'daemon-token',
           authRequired: true,
-          lastSeenAt: '2026-07-16T10:00:00.000Z',
+          lastSeenAt: now,
         },
         {
           id: 'relay-rtc:mac-studio',
@@ -64,7 +66,7 @@ function makeRelayDevice(): TraversalRelayDeviceSnapshot {
           relayHostId: 'mac-studio',
           authToken: 'daemon-token',
           authRequired: true,
-          lastSeenAt: '2026-07-16T10:00:00.000Z',
+          lastSeenAt: now,
         },
       ],
       sessions: [],
@@ -283,7 +285,6 @@ describe('home connection projection relay route visibility', () => {
     expect(directCandidates).toHaveLength(1);
     expect(directCandidates[0]).toEqual(expect.objectContaining({
       authToken: 'daemon-token',
-      lastSeenAt: '2026-07-16T10:00:00.000Z',
     }));
   });
 
@@ -360,5 +361,65 @@ describe('home connection projection relay route visibility', () => {
     expect(daemonRows[0].relayEndpointCandidates).toEqual(expect.arrayContaining([
       expect.objectContaining({ kind: 'relay-rtc', relayHostId: 'mac-studio' }),
     ]));
+  });
+});
+
+describe('mergeHostWithLatestProjection', () => {
+  it('refreshes stale direct endpoints from the freshest projection for the same daemon', () => {
+    const staleHost = {
+      ...makeSavedHost({
+        id: 'relay-device:dev-1:mac-studio',
+        bridgeHost: '192.168.1.50',
+      }),
+      tailscaleHost: '100.66.1.82',
+      ipv4Host: '203.0.113.10',
+    } as Host;
+    const freshestHost = {
+      ...makeSavedHost({
+        id: 'relay-device:dev-1:mac-studio',
+        bridgeHost: '192.168.1.99',
+      }),
+      tailscaleHost: '100.99.2.1',
+      ipv4Host: '198.51.100.7',
+    } as Host;
+
+    const merged = mergeHostWithLatestProjection(staleHost, [freshestHost]);
+
+    expect(merged.tailscaleHost).toBe('100.99.2.1');
+    expect(merged.ipv4Host).toBe('198.51.100.7');
+    expect(merged.bridgeHost).toBe('192.168.1.99');
+  });
+
+  it('keeps the cached direct bridge host when the freshest entry is relay-only (empty bridgeHost)', () => {
+    const staleHost = {
+      ...makeSavedHost({
+        id: 'relay-device:dev-1:mac-studio',
+        bridgeHost: '192.168.1.50',
+      }),
+      tailscaleHost: '100.66.1.82',
+    } as Host;
+    const relayOnlyFresh = {
+      ...makeSavedHost({
+        id: 'relay-device:dev-1:mac-studio',
+        bridgeHost: '',
+      }),
+      relayEndpointCandidates: [{ kind: 'relay-rtc', relayHostId: 'mac-studio', endpoint: 'x' } as never],
+    } as Host;
+
+    const merged = mergeHostWithLatestProjection(staleHost, [relayOnlyFresh]);
+
+    expect(merged.bridgeHost).toBe('192.168.1.50');
+    expect(merged.tailscaleHost).toBe('100.66.1.82');
+  });
+
+  it('returns the host unchanged when no fresher entry matches daemon or id', () => {
+    const staleHost = {
+      ...makeSavedHost({ id: 'saved-mac', daemonHostId: 'mac-studio' }),
+    } as Host;
+    const otherDaemon = {
+      ...makeSavedHost({ id: 'other', daemonHostId: 'other-studio', bridgeHost: '10.0.0.9' }),
+    } as Host;
+
+    expect(mergeHostWithLatestProjection(staleHost, [otherDaemon])).toBe(staleHost);
   });
 });

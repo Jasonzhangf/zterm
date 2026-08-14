@@ -56,6 +56,39 @@ describe('open-tab restore truth', () => {
     expect(fetchTmuxSessionsMock).toHaveBeenCalledTimes(1);
   });
 
+  it('preserves Herdr backend identity during persisted-tab restore discovery', async () => {
+    fetchTmuxSessionsMock.mockResolvedValueOnce(['herdr-tab']);
+
+    const { filterRestorableOpenTabsByRemoteTmuxSessions } = await import('./open-tab-restore');
+
+    await filterRestorableOpenTabsByRemoteTmuxSessions({
+      tabs: [{
+        sessionId: 'herdr-tab-id',
+        hostId: 'host-herdr',
+        connectionName: 'Herdr host',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        sessionName: 'herdr-tab',
+        terminalBackend: 'herdr',
+        authToken: 'token-herdr',
+        createdAt: 1,
+      }],
+      bridgeSettings: {
+        signalUrl: '',
+        turnServerUrl: '',
+        turnUsername: '',
+        turnCredential: '',
+        transportMode: 'auto',
+        traversalRelay: undefined,
+      },
+    });
+
+    expect(fetchTmuxSessionsMock).toHaveBeenCalledWith(
+      expect.objectContaining({ terminalBackend: 'herdr' }),
+      expect.any(Object),
+    );
+  });
+
   it('groups tabs by bridge target so the same target is only listed once', async () => {
     fetchTmuxSessionsMock
       .mockResolvedValueOnce(['alpha'])

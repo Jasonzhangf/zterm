@@ -11,6 +11,19 @@ import {
 } from '@zterm/shared/relay-directory';
 import { TraversalRelayClientDebugStore } from './client-debug-store';
 import { TraversalRelayStore, type TraversalRelayPublicUser } from './store';
+import {
+  asString,
+  clientPeerLeaseKey,
+  deviceKey,
+  extractAccessToken,
+  hostKey,
+  readJsonBody,
+  sendDeviceEnvelope,
+  sendHostEnvelope,
+  serveHtml,
+  serveJson,
+  writeCorsHeaders,
+} from './server-helpers';
 
 interface SignalMessage {
   type: 'rtc-init' | 'rtc-offer' | 'rtc-answer' | 'rtc-candidate' | 'rtc-close' | 'rtc-error';
@@ -45,11 +58,6 @@ interface DevicePresenceInputEnvelope {
   };
 }
 
-interface DevicePresenceOutputEnvelope {
-  type: 'devices-snapshot' | 'device-updated' | 'directory-snapshot' | 'control-pong' | 'relay-error' | 'client-debug-request';
-  payload?: Record<string, unknown>;
-  reason?: string;
-}
 
 interface RelayHostConnection {
   socket: WebSocket;
@@ -83,9 +91,6 @@ interface DeviceStreamConnection {
   appVersion: string;
 }
 
-function asString(value: unknown) {
-  return typeof value === 'string' ? value.trim() : '';
-}
 
 function resolvePort() {
   const raw = asString(process.env.ZTERM_TRAVERSAL_PORT || process.env.PORT || '19090');
@@ -158,75 +163,6 @@ function buildWebSocketBaseUrl(request: IncomingMessage) {
   return `${wsOrigin}${BASE_PATH}/`;
 }
 
-function writeCorsHeaders(response: ServerResponse) {
-  response.setHeader('Access-Control-Allow-Origin', '*');
-  response.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  response.setHeader('Access-Control-Allow-Methods', 'GET,HEAD,POST,OPTIONS');
-}
-
-function serveJson(
-  response: ServerResponse,
-  payload: unknown,
-  statusCode = 200,
-  options: { omitBody?: boolean } = {},
-) {
-  response.statusCode = statusCode;
-  response.setHeader('Content-Type', 'application/json; charset=utf-8');
-  response.end(options.omitBody ? undefined : JSON.stringify(payload));
-}
-
-function serveHtml(response: ServerResponse, html: string, statusCode = 200) {
-  response.statusCode = statusCode;
-  response.setHeader('Content-Type', 'text/html; charset=utf-8');
-  response.end(html);
-}
-
-async function readJsonBody<T>(request: IncomingMessage): Promise<T> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of request) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  const raw = Buffer.concat(chunks).toString('utf-8');
-  return raw.trim() ? JSON.parse(raw) as T : {} as T;
-}
-
-function extractAccessToken(request: IncomingMessage, url: URL) {
-  const authHeader = asString(request.headers.authorization);
-  if (authHeader.toLowerCase().startsWith('bearer ')) {
-    return authHeader.slice(7).trim();
-  }
-  return asString(url.searchParams.get('token') || url.searchParams.get('accessToken'));
-}
-
-function sendHostEnvelope(socket: WebSocket, envelope: RelayHostEnvelope) {
-  if (socket.readyState !== WebSocket.OPEN) {
-    return;
-  }
-  socket.send(JSON.stringify(envelope));
-}
-
-function sendDeviceEnvelope(socket: WebSocket, envelope: DevicePresenceOutputEnvelope) {
-  if (socket.readyState !== WebSocket.OPEN) {
-    return;
-  }
-  socket.send(JSON.stringify(envelope));
-}
-
-function hostKey(userId: string, hostId: string) {
-  return `${userId}:${hostId}`;
-}
-
-function deviceKey(userId: string, deviceId: string) {
-  return `${userId}:${deviceId}`;
-}
-
-function clientPeerLeaseKey(userId: string, hostId: string, deviceId: string) {
-  const normalizedDeviceId = asString(deviceId);
-  if (!normalizedDeviceId) {
-    return null;
-  }
-  return `${userId}:${hostId}:${normalizedDeviceId}`;
-}
 
 function buildAuthPage(mode: 'login' | 'register') {
   const pageTitle = mode === 'login' ? 'ZTerm Relay Login' : 'ZTerm Relay Register';

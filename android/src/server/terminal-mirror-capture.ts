@@ -31,13 +31,14 @@ export interface TerminalMirrorCaptureDeps {
   logTimePrefix: () => string;
   wezTermBackend?: WezTermBackendRuntime | null;
   terminalBackendKind?: 'tmux' | 'wezterm' | 'herdr';
+  backendRuntimes?: Partial<Record<'herdr' | 'wezterm', WezTermBackendRuntime>>;
 }
 
 export interface TerminalMirrorCaptureRuntime {
   readTmuxStatusLineCount: () => number;
   resolveRequestedTmuxRows: (contentRows: number) => number;
-  readTmuxPaneMetrics: (sessionName: string) => TmuxPaneMetrics;
-  readTmuxPaneCurrentPath: (sessionName: string) => string;
+  readTmuxPaneMetrics: (sessionName: string, backend?: 'tmux' | 'herdr') => TmuxPaneMetrics;
+  readTmuxPaneCurrentPath: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
   captureMirrorAuthoritativeBufferFromTmux: (mirror: SessionMirror) => Promise<boolean>;
 }
 
@@ -254,6 +255,15 @@ export function resolveAuthoritativeMirrorCaptureWindow(options: {
 export function createTerminalMirrorCaptureRuntime(
   deps: TerminalMirrorCaptureDeps,
 ): TerminalMirrorCaptureRuntime {
+  function resolveExternalBackend(backend?: 'tmux' | 'herdr') {
+    const requestedKind = backend || deps.terminalBackendKind || 'tmux';
+    const kind = requestedKind === 'tmux' && deps.terminalBackendKind === 'wezterm' ? 'wezterm' : requestedKind;
+    if (kind === 'tmux') {
+      return null;
+    }
+    return deps.backendRuntimes?.[kind] || (kind === deps.terminalBackendKind ? deps.wezTermBackend : null) || null;
+  }
+
   function readTmuxStatusLineCount() {
     try {
       const result = deps.runTmux(['display-message', '-p', '#{?status,1,0}']);
@@ -273,9 +283,10 @@ export function createTerminalMirrorCaptureRuntime(
     return safeContentRows + readTmuxStatusLineCount();
   }
 
-  function readTmuxPaneMetrics(sessionName: string): TmuxPaneMetrics {
-    if (deps.wezTermBackend) {
-      const session = deps.wezTermBackend.listSessions().find((entry) => entry.sessionName === sessionName);
+  function readTmuxPaneMetrics(sessionName: string, backend?: 'tmux' | 'herdr'): TmuxPaneMetrics {
+    const externalBackend = resolveExternalBackend(backend);
+    if (externalBackend) {
+      const session = externalBackend.listSessions().find((entry) => entry.sessionName === sessionName);
       if (!session) {
         throw new Error(`wezterm session not found: ${sessionName}`);
       }
@@ -284,7 +295,7 @@ export function createTerminalMirrorCaptureRuntime(
         // Herdr does not expose a tmux history-size equivalent. Its absolute
         // range must come from the canonical snapshot, never from a derived
         // geometry value.
-        tmuxAvailableLineCountHint: deps.terminalBackendKind === 'herdr' ? 0 : session.rows + session.cols,
+        tmuxAvailableLineCountHint: backend === 'herdr' ? 0 : session.rows + session.cols,
         paneRows: session.rows,
         paneCols: session.cols,
         alternateOn: false,
@@ -319,9 +330,10 @@ export function createTerminalMirrorCaptureRuntime(
     };
   }
 
-  function readTmuxPaneCurrentPath(sessionName: string) {
-    if (deps.wezTermBackend) {
-      return deps.wezTermBackend.readCurrentPath(sessionName);
+  function readTmuxPaneCurrentPath(sessionName: string, backend?: 'tmux' | 'herdr') {
+    const externalBackend = resolveExternalBackend(backend);
+    if (externalBackend) {
+      return externalBackend.readCurrentPath(sessionName);
     }
     const result = deps.runTmux([
       'display-message', '-p', '-t', deps.buildExactTmuxPaneTarget(sessionName), '#{pane_current_path}',
@@ -480,8 +492,9 @@ export function createTerminalMirrorCaptureRuntime(
   }
 
   async function captureMirrorAuthoritativeBufferFromTmux(mirror: SessionMirror) {
-    if (deps.wezTermBackend) {
-      const snapshot = await deps.wezTermBackend.readSnapshot(mirror.sessionName);
+    const externalBackend = resolveExternalBackend(mirror.backend);
+    if (externalBackend) {
+      const snapshot = await externalBackend.readSnapshot(mirror.sessionName);
       applyMirrorCaptureSnapshot(mirror, {
         rows: snapshot.rows,
         cols: snapshot.cols,

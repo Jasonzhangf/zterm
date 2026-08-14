@@ -64,7 +64,7 @@ export interface TransportOpenLiveFailureEffectPlan {
 
 export type ReconnectHandshakeFailurePlan =
   | { action: 'terminal-error' }
-  | { action: 'retry-reconnect'; nextAttempt: number };
+  | { action: 'retry-reconnect' };
 
 export function buildSessionTransportReusePlan(
   options: SessionTransportReusePlanOptions,
@@ -238,29 +238,17 @@ export function buildTransportOpenLiveFailureEffectPlan(
   };
 }
 
-export const MAX_RECONNECT_HANDSHAKE_ATTEMPTS = 6;
-
 export function buildReconnectHandshakeFailurePlan(options: {
   retryable: boolean;
-  currentAttempt: number;
 }): ReconnectHandshakeFailurePlan {
-  if (!options.retryable) {
-    return { action: 'terminal-error' };
-  }
-  if (options.currentAttempt >= MAX_RECONNECT_HANDSHAKE_ATTEMPTS) {
-    // Reached the attempt cap: stop the endless 30s retry loop and surface
-    // the error to the UI instead of silently retrying forever.
-    return { action: 'terminal-error' };
-  }
-  return {
-    action: 'retry-reconnect',
-    nextAttempt: options.currentAttempt + 1,
-  };
+  return options.retryable
+    ? { action: 'retry-reconnect' }
+    : { action: 'terminal-error' };
 }
 
 export type SessionConnectionFields = Pick<
   Session,
-  'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'sessionName' | 'authToken' | 'autoCommand'
+  'hostId' | 'connectionName' | 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'sessionName' | 'terminalBackend' | 'authToken' | 'autoCommand'
 >;
 
 export interface SessionTransportPrimeState {
@@ -277,6 +265,7 @@ export function buildSessionConnectionFields(host: Host, resolvedSessionName: st
     bridgePort: host.bridgePort,
     daemonHostId: host.daemonHostId || host.relayHostId,
     sessionName: resolvedSessionName,
+    terminalBackend: host.terminalBackend || 'tmux',
     authToken: host.authToken,
     autoCommand: host.autoCommand,
   };

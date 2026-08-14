@@ -47,15 +47,20 @@ describe('server control runtime truth gates', () => {
 
   it('keeps wezterm attach assertion backend-aware instead of falling through tmux has-session', () => {
     const source = readServerSource();
-    const assertBlock = extractBlock(source, 'assertTmuxSessionExists: (sessionName) => {', 700);
+    const assertBlock = extractBlock(source, 'assertTmuxSessionExists: (sessionName, backend) => {', 700);
 
-    expect(assertBlock).toContain('if (WEZTERM_BACKEND)');
-    expect(assertBlock).toContain('WEZTERM_BACKEND.listSessions()');
-    const exactHasSession = "terminalControlRuntime.buildExactTmuxSessionTarget(sessionName)";
-    expect(assertBlock).toContain(exactHasSession);
-    expect(assertBlock.indexOf('WEZTERM_BACKEND.listSessions()')).toBeLessThan(
-      assertBlock.indexOf(exactHasSession),
-    );
+    expect(assertBlock).toContain("if (backend === 'herdr')");
+    expect(assertBlock).toContain('HERDR_BACKEND_RUNTIME.listSessions()');
+    expect(assertBlock).toContain("TERMINAL_BACKEND_RUNTIMES.wezterm?.listSessions()");
+  });
+
+  it('keeps tmux adaptive resize on the tmux owner instead of the backend adapter hook', () => {
+    const source = readServerSource();
+    const resizeBlock = extractBlock(source, 'resizeBackendSession:', 900);
+
+    expect(resizeBlock).toContain("(backend || 'tmux') === 'tmux'");
+    expect(resizeBlock).toContain('HERDR_BACKEND_RUNTIME');
+    expect(resizeBlock).toContain('externalBackend?.resizeSession');
   });
 
   it('keeps tmux/shell control implementations inside dedicated control runtime', () => {

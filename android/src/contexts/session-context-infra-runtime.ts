@@ -8,6 +8,7 @@ import {
   mergeHostWithClientControlDirectory,
 } from '../lib/client-control-directory-runtime';
 import { ClientControlPlaneTransport } from '../lib/client-control-plane-transport';
+import type { NetworkIdentityRuntime } from '../lib/network-identity';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
@@ -41,7 +42,7 @@ import {
 } from './session-context-transport-runtime';
 import type { SessionAction, SessionManagerState } from './session-context-core';
 import { hasSessionLocalWindow } from './session-buffer-planner-helpers';
-import type { SessionPullPurpose } from './session-pull-state-helpers';
+import type { SessionPullPurpose } from '../lib/session-pull-state-helpers';
 import { hasPendingSessionTransportOpenIntent, isPendingSessionTransportOpenIntentStale } from './session-context-open-intent-store';
 
 export { CLIENT_TRANSPORT_HEARTBEAT_INTERVAL_MS, CLIENT_TRANSPORT_HEARTBEAT_MAX_MISSES };
@@ -389,25 +390,19 @@ export function buildTraversalSocketForHostRuntime(options: {
   bridgeSettings: BridgeSettings;
   wsUrl?: string;
   transportRole?: 'control' | 'session';
+  /** Client network-generation owner; its generation isolates route health
+   *  across WiFi/cellular/VPN/IP changes. */
+  networkIdentity?: NetworkIdentityRuntime;
 }) {
   const openConfirmedTransport = () => {
-    const resolvedDaemonHostId = options.host.daemonHostId?.trim() || options.host.relayHostId?.trim() || '';
-    const controlDirectoryEntry = resolvedDaemonHostId
-      ? defaultClientControlDirectoryRuntime.read(resolvedDaemonHostId)
-      : null;
     const resolvedHost = mergeHostWithClientControlDirectory(
       options.host,
       defaultClientControlDirectoryRuntime,
     );
-    const transportHost = controlDirectoryEntry
-      ? {
-        ...resolvedHost,
-        bridgeHost: '',
-        tailscaleHost: undefined,
-        ipv4Host: undefined,
-        ipv6Host: undefined,
-      }
-      : resolvedHost;
+    // 保留成功连接过的直连字段作为兜底候选：目录 endpoints 优先（带最新 authToken），
+    // host 直连 IP 兜底——网络切换后 daemon 侧 IP 未变时，旧直连 IP 仍可恢复连接，
+    // 不因目录 entry 存在而丢弃（buildTraversalPlan 按 endpoint 去重，目录候选先打）。
+    const transportHost = resolvedHost;
     const confirmedRelaySettings = defaultClientControlDirectoryRuntime.readRelaySettings();
     const traversal = resolveTraversalConfigFromHost(transportHost, confirmedRelaySettings
       ? { ...options.bridgeSettings, traversalRelay: confirmedRelaySettings }
@@ -427,6 +422,11 @@ export function buildTraversalSocketForHostRuntime(options: {
     return createClientDaemonTraversalSocket(traversal.target, traversal.settings, {
       overrideUrl,
       autoReconnect: false,
+      routeHealthScope: {
+        accountId: options.bridgeSettings.traversalRelay?.userId,
+        daemonHostId: transportHost.daemonHostId?.trim() || transportHost.relayHostId?.trim(),
+        networkGeneration: options.networkIdentity?.readGeneration(),
+      },
     });
   };
 

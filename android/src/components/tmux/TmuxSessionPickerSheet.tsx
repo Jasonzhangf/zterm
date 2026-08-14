@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import QRCode from 'qrcode';
-import jsQR from 'jsqr';
 import { buildConnectionConfigShareLink } from '@zterm/shared';
 import {
   type BridgeServerPreset,
@@ -11,11 +10,19 @@ import { RelayDevicePicker } from '../connection-form/RelayDevicePicker';
 import { useTraversalRelayDaemonDevices } from '../../hooks/useTraversalRelayDaemonDevices';
 import { DEFAULT_BRIDGE_PORT } from '../../lib/mobile-config';
 import { mobileTheme } from '../../lib/mobile-ui';
+import { RenameDialog } from '../terminal/RenameDialog';
 import { formatTargetBadge, isLikelyTailscaleHost } from '../../lib/network-target';
 import { normalizeBridgeTarget, resolveRelayDeviceBridgeTarget } from '../../lib/session-picker';
 import { normalizeRemoteTmuxSessionNames } from '../../lib/tmux-session-list';
 import { type BridgeTarget, createTmuxSession, fetchTmuxSessions, killTmuxSession, renameTmuxSession } from '../../lib/tmux-sessions';
 import type { ConfigShareQuickAction, ConfigShareShortcutAction, Host } from '../../lib/types';
+import {
+  formatRefreshAge,
+  formatRefreshClock,
+  getTargetRelayHostId,
+  hasRelayRtcEndpointCandidate,
+  decodeQrImageFile,
+} from './tmux-session-picker-helpers';
 import {
   buildTmuxSessionPickerRows,
   findOpenTabsMissingFromRemote,
@@ -71,77 +78,6 @@ function SectionTitle({ title, subtitle }: { title: string; subtitle?: string })
   );
 }
 
-function formatRefreshAge(ts?: number | null) {
-  if (!ts) {
-    return '未刷新';
-  }
-  const seconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
-  if (seconds < 2) return '刚刚';
-  if (seconds < 60) return `${seconds}s ago`;
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}m ago`;
-}
-
-function formatRefreshClock(ts?: number | null) {
-  if (!ts) {
-    return '--:--:--';
-  }
-  return new Date(ts).toLocaleTimeString('zh-CN', { hour12: false });
-}
-
-function getTargetRelayHostId(target: Pick<BridgeTarget, 'relayHostId' | 'daemonHostId'>) {
-  return target.relayHostId?.trim() || target.daemonHostId?.trim() || '';
-}
-
-function hasRelayRtcEndpointCandidate(target: Pick<BridgeTarget, 'relayEndpointCandidates'>) {
-  return (target.relayEndpointCandidates || []).some((candidate) => (
-    candidate.kind === 'relay-rtc'
-    && candidate.relayHostId?.trim()
-  ));
-}
-
-function readFileAsDataUrl(file: File) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : '');
-    reader.onerror = () => reject(reader.error || new Error('读取二维码图片失败'));
-    reader.readAsDataURL(file);
-  });
-}
-
-function loadImage(src: string) {
-  return new Promise<HTMLImageElement>((resolve, reject) => {
-    const image = new Image();
-    image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error('二维码图片无法解码'));
-    image.src = src;
-  });
-}
-
-async function decodeQrImageFile(file: File) {
-  const dataUrl = await readFileAsDataUrl(file);
-  const image = await loadImage(dataUrl);
-  const canvas = document.createElement('canvas');
-  const width = image.naturalWidth || image.width;
-  const height = image.naturalHeight || image.height;
-  if (!width || !height) {
-    throw new Error('二维码图片尺寸无效');
-  }
-  canvas.width = width;
-  canvas.height = height;
-  const context = canvas.getContext('2d');
-  if (!context) {
-    throw new Error('当前 WebView 不支持二维码图片解析');
-  }
-  context.drawImage(image, 0, 0, width, height);
-  const imageData = context.getImageData(0, 0, width, height);
-  const qr = jsQR(imageData.data, imageData.width, imageData.height);
-  if (!qr?.data) {
-    throw new Error('没有在图片中识别到 zterm 配置二维码');
-  }
-  return qr.data;
-}
-
 export function TmuxSessionPickerSheet({
   mode,
   open,
@@ -171,7 +107,19 @@ export function TmuxSessionPickerSheet({
   const [discoveryState, setDiscoveryState] = useState<DiscoveryState>('idle');
   const [errorMessage, setErrorMessage] = useState('');
   const [newSessionName, setNewSessionName] = useState('');
+  const [newSessionBackend, setNewSessionBackend] = useState<'tmux' | 'herdr'>(
+    initialTarget?.terminalBackend === 'herdr' ? 'herdr' : 'tmux',
+  );
+  const [backendChoiceOpen, setBackendChoiceOpen] = useState(false);
   const [busyAction, setBusyAction] = useState<string | null>(null);
+  const [renameTarget, setRenameTarget] = useState<{
+    kind: 'remote';
+    sessionName: string;
+  } | {
+    kind: 'openTab';
+    sessionId: string;
+    currentName: string;
+  } | null>(null);
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
   const [clockTick, setClockTick] = useState(0);
   const [connectionImportInput, setConnectionImportInput] = useState('');
@@ -196,6 +144,9 @@ export function TmuxSessionPickerSheet({
     setSelectedTarget(normalizeBridgeTarget(initialTarget));
     setSelectedSessions(initialSelectedSessions);
     setNewSessionName('');
+    setNewSessionBackend(initialTarget?.terminalBackend === 'herdr' ? 'herdr' : 'tmux');
+    setBackendChoiceOpen(false);
+    setRenameTarget(null);
     setAvailableSessions([]);
     setDiscoveryState('idle');
     setErrorMessage('');
@@ -402,9 +353,10 @@ export function TmuxSessionPickerSheet({
   };
 
   const handleRefreshNow = async () => {
-    const bridgeHost = selectedTarget.bridgeHost.trim();
-    const authToken = selectedTarget.authToken?.trim() || '';
-    const relayHostId = getTargetRelayHostId(selectedTarget);
+    const discoveryTarget = { ...selectedTarget, terminalBackend: undefined };
+    const bridgeHost = discoveryTarget.bridgeHost.trim();
+    const authToken = discoveryTarget.authToken?.trim() || '';
+    const relayHostId = getTargetRelayHostId(discoveryTarget);
     const canUseRelayTransport = relayEnabled && Boolean(relayHostId) && hasRelayRtcEndpointCandidate(selectedTarget);
     if (!bridgeHost && !canUseRelayTransport) {
       setAvailableSessions([]);
@@ -427,18 +379,18 @@ export function TmuxSessionPickerSheet({
     setDiscoveryState('loading');
     setErrorMessage('');
     try {
-      const sessions = normalizeRemoteTmuxSessionNames(await fetchTmuxSessions(selectedTarget, bridgeSettings));
+      const sessions = normalizeRemoteTmuxSessionNames(await fetchTmuxSessions(discoveryTarget, bridgeSettings));
       const missingOpenTabs = findOpenTabsMissingFromRemote({
         availableSessions: sessions,
         openTabs,
-        target: selectedTarget,
+        target: discoveryTarget,
       });
       setAvailableSessions(sessions);
       setSelectedSessions((current) => {
         const nextRows = buildTmuxSessionPickerRows({
           availableSessions: sessions,
           openTabs,
-          target: selectedTarget,
+          target: discoveryTarget,
           includeOpenTabs: showOpenTabState,
         });
         return filterActionableTmuxSelections(current, nextRows, showOpenTabState);
@@ -449,7 +401,7 @@ export function TmuxSessionPickerSheet({
       missingOpenTabs.forEach((tab) => {
         onCloseOpenTab?.(tab.id, 'session-picker-remote-missing');
       });
-      onRemoteSessionsRefreshed?.(selectedTarget, sessions);
+      onRemoteSessionsRefreshed?.(discoveryTarget, sessions);
     } catch (error) {
       setAvailableSessions([]);
       setSelectedSessions([]);
@@ -480,7 +432,7 @@ export function TmuxSessionPickerSheet({
     selectedTarget.relayTmuxSessions,
   ]);
 
-  const handleCreateSession = async () => {
+  const handleCreateSession = async (backend = newSessionBackend) => {
     const sessionName = newSessionName.trim();
     if (!selectedTarget.bridgeHost.trim() && !selectedTargetCanUseRelayTransport) {
       alert('先输入 Tailscale IP 或选择服务器');
@@ -493,8 +445,13 @@ export function TmuxSessionPickerSheet({
 
     setBusyAction(`create:${sessionName}`);
     try {
-      await createTmuxSession(selectedTarget, bridgeSettings, sessionName);
+      const creationTarget = { ...selectedTarget, terminalBackend: backend };
+      await createTmuxSession(creationTarget, bridgeSettings, sessionName);
       setNewSessionName('');
+      if (backend === 'herdr') {
+        onOpenTmuxSession({ ...creationTarget, terminalBackend: undefined }, sessionName);
+        return;
+      }
       await handleRefreshNow();
     } catch (error) {
       alert(error instanceof Error ? error.message : String(error));
@@ -503,22 +460,8 @@ export function TmuxSessionPickerSheet({
     }
   };
 
-  const handleRenameSession = async (sessionName: string) => {
-    const nextSessionName = window.prompt('Rename tmux session', sessionName)?.trim();
-    if (!nextSessionName || nextSessionName === sessionName) {
-      return;
-    }
-
-    setBusyAction(`rename:${sessionName}`);
-    try {
-      await renameTmuxSession(selectedTarget, bridgeSettings, sessionName, nextSessionName);
-      setSelectedSessions((current) => current.map((item) => (item === sessionName ? nextSessionName : item)));
-      await handleRefreshNow();
-    } catch (error) {
-      alert(error instanceof Error ? error.message : String(error));
-    } finally {
-      setBusyAction(null);
-    }
+  const handleRenameSession = (sessionName: string) => {
+    setRenameTarget({ kind: 'remote', sessionName });
   };
 
   const handleKillSession = async (sessionName: string) => {
@@ -546,11 +489,43 @@ export function TmuxSessionPickerSheet({
   };
 
   const handleRenameOpenTab = (sessionId: string, currentName: string) => {
-    const nextName = window.prompt('Rename tab', currentName)?.trim();
-    if (!nextName || nextName === currentName) {
+    setRenameTarget({ kind: 'openTab', sessionId, currentName });
+  };
+
+  const submitRename = (nextName: string) => {
+    const target = renameTarget;
+    setRenameTarget(null);
+    if (!target) {
       return;
     }
-    onRenameOpenTab?.(sessionId, nextName);
+    const normalizedName = nextName.trim();
+    if (!normalizedName) {
+      return;
+    }
+    if (target.kind === 'openTab') {
+      if (normalizedName === target.currentName) {
+        return;
+      }
+      onRenameOpenTab?.(target.sessionId, normalizedName);
+      return;
+    }
+    if (normalizedName === target.sessionName) {
+      return;
+    }
+
+    const previousSessionName = target.sessionName;
+    setBusyAction(`rename:${previousSessionName}`);
+    void (async () => {
+      try {
+        await renameTmuxSession(selectedTarget, bridgeSettings, previousSessionName, normalizedName);
+        setSelectedSessions((current) => current.map((item) => (item === previousSessionName ? normalizedName : item)));
+        await handleRefreshNow();
+      } catch (error) {
+        alert(error instanceof Error ? error.message : String(error));
+      } finally {
+        setBusyAction(null);
+      }
+    })();
   };
 
   if (!open) {
@@ -944,6 +919,30 @@ export function TmuxSessionPickerSheet({
             }}
           />
           <div style={{ display: 'flex', gap: '10px' }}>
+            <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }} aria-label="new session backend">
+              {(['tmux', 'herdr'] as const).map((backend) => (
+                <button
+                  key={backend}
+                  type="button"
+                  aria-pressed={newSessionBackend === backend}
+                  onClick={() => {
+                    setNewSessionBackend(backend);
+                    setSelectedTarget((current) => ({ ...current, terminalBackend: backend }));
+                  }}
+                  style={{
+                    minHeight: '42px',
+                    borderRadius: '14px',
+                    border: `1px solid ${newSessionBackend === backend ? mobileTheme.colors.accent : mobileTheme.colors.lightBorder}`,
+                    backgroundColor: newSessionBackend === backend ? mobileTheme.colors.accentSoft : '#ffffff',
+                    color: mobileTheme.colors.lightText,
+                    fontWeight: 800,
+                    padding: '0 10px',
+                  }}
+                >
+                  {backend === 'tmux' ? 'tmux' : 'Herdr'}
+                </button>
+              ))}
+            </div>
             <input
               type="number"
               value={selectedTarget.bridgePort}
@@ -1252,6 +1251,8 @@ export function TmuxSessionPickerSheet({
                 ) : null}
                 {missingRemote ? null : (
                 <button
+                  type="button"
+                  aria-label={row.openTab ? `重命名标签页 ${row.displayName}` : `重命名 tmux session ${sessionName}`}
                   onClick={() => {
                     if (row.openTab) {
                       handleRenameOpenTab(row.openTab.id, row.displayName);
@@ -1339,7 +1340,7 @@ export function TmuxSessionPickerSheet({
               }}
             />
             <button
-              onClick={handleCreateSession}
+              onClick={() => setBackendChoiceOpen(true)}
               disabled={busyAction !== null}
               style={{
                 minWidth: '88px',
@@ -1390,6 +1391,52 @@ export function TmuxSessionPickerSheet({
           </div>
         )}
       </div>
+      {backendChoiceOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="选择新 session backend"
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 30,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '24px',
+            backgroundColor: 'rgba(15, 23, 42, 0.42)',
+          }}
+        >
+          <div style={{ width: 'min(420px, 100%)', borderRadius: '24px', padding: '20px', backgroundColor: '#ffffff', boxShadow: mobileTheme.shadow.soft }}>
+            <SectionTitle title="选择新 session backend" subtitle="只创建单一 terminal surface；Herdr 不映射 pane、tab 或 workspace。" />
+            <div style={{ display: 'grid', gap: '10px', marginTop: '16px' }}>
+              {(['tmux', 'herdr'] as const).map((backend) => (
+                <button
+                  key={backend}
+                  type="button"
+                  onClick={() => {
+                    setNewSessionBackend(backend);
+                    setBackendChoiceOpen(false);
+                    void handleCreateSession(backend);
+                  }}
+                  style={{ border: 'none', borderRadius: '16px', padding: '14px', backgroundColor: backend === 'herdr' ? mobileTheme.colors.accentSoft : mobileTheme.colors.shell, color: backend === 'herdr' ? mobileTheme.colors.lightText : '#ffffff', fontWeight: 800, textAlign: 'left' }}
+                >
+                  {backend === 'tmux' ? 'tmux — existing tmux backend' : 'Herdr — official single-session backend'}
+                </button>
+              ))}
+              <button type="button" onClick={() => setBackendChoiceOpen(false)} style={{ border: `1px solid ${mobileTheme.colors.lightBorder}`, borderRadius: '16px', padding: '12px', backgroundColor: '#ffffff', color: mobileTheme.colors.lightText }}>取消</button>
+            </div>
+          </div>
+        </div>
+      )}
+      <RenameDialog
+        open={renameTarget !== null}
+        title={renameTarget?.kind === 'remote' ? '重命名 tmux session' : '重命名标签页'}
+        inputLabel={renameTarget?.kind === 'remote' ? '新的 tmux session 名称' : '新的标签页名称'}
+        initialValue={renameTarget?.kind === 'remote' ? renameTarget.sessionName : renameTarget?.currentName || ''}
+        onCancel={() => setRenameTarget(null)}
+        onSubmit={submitRename}
+      />
     </div>
   );
 }

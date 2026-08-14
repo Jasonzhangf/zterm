@@ -13,6 +13,7 @@ import {
   recordBackgroundHeartbeat,
 } from '../plugins/BackgroundServicePlugin';
 import type { Session } from '../lib/types';
+import type { NetworkIdentityRuntime } from '../lib/network-identity';
 import type { SessionTargetNetworkSignal } from '../contexts/session-context-target-network-probe-runtime';
 
 export type OpenTabAuditReason =
@@ -50,6 +51,10 @@ interface UseOpenTabLifecycleEffectsOptions {
     signal: SessionTargetNetworkSignal,
   ) => void;
   bumpFollowResetEpoch: () => void;
+  /** Client network-generation owner. When present, platform network events and
+   *  foreground resume are stamped with generation/fingerprint changes so the
+   *  transport owner can retire stale physical transports immediately. */
+  networkIdentity?: NetworkIdentityRuntime;
   /** 后台心跳发送接口 */
   sendBackgroundHeartbeat?: () => void;
 }
@@ -112,6 +117,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     auditOpenTabsAgainstRemoteSessions,
     notifyTargetNetworkSignal,
     bumpFollowResetEpoch,
+    networkIdentity,
   } = options;
 
   const callbacksRef = useRef({
@@ -120,6 +126,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     auditOpenTabsAgainstRemoteSessions,
     notifyTargetNetworkSignal,
     bumpFollowResetEpoch,
+    networkIdentity,
   });
   callbacksRef.current = {
     onForegroundActiveChange,
@@ -127,14 +134,60 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     auditOpenTabsAgainstRemoteSessions,
     notifyTargetNetworkSignal,
     bumpFollowResetEpoch,
+    networkIdentity,
   };
   const nativeBackgroundServiceRunningRef = useRef(false);
-  // sessionsRefForHeartbeatRef kept for potential future use
+  // Foreground-resume path: re-read the platform status + local interfaces so a
+  // network change that happened while hidden (and whose event was dropped) is
+  // recovered as a generation change. The immediate same-generation signal is
+  // sent first so the existing conservative probe still runs; if the resample
+  // observes a real fingerprint change, a follow-up cross-generation signal
+  // retires every stale physical transport right away.
+  const refreshNetworkIdentityForForeground = useCallback(async () => {
+    const runtime = callbacksRef.current.networkIdentity;
+    if (!runtime) {
+      return;
+    }
+    let connected = true;
+    let connectionType = 'unknown';
+    try {
+      const status = await Network.getStatus();
+      connected = status.connected;
+      connectionType = status.connectionType;
+    } catch {
+      // Web/unit environments may not expose getStatus(); fall back to the
+      // cached fingerprint and let resample still compare interface truth.
+    }
+    let sample;
+    try {
+      sample = await runtime.resampleWithStatus({ connected, connectionType });
+    } catch (error) {
+      console.warn('[App] Failed to resample network identity on foreground resume:', error);
+      return;
+    }
+    if (sample.fingerprintChanged) {
+      callbacksRef.current.notifyTargetNetworkSignal({
+        source: 'foreground-resume',
+        networkGeneration: sample.generation,
+        fingerprintChanged: true,
+      });
+      runtimeDebug('app.network.identity.generation-changed', {
+        source: 'foreground-resume',
+        networkGeneration: sample.generation,
+      });
+    }
+  }, []);
   const maybeProjectForegroundResume = useCallback((reason: ForegroundResumeSignalReason) => {
     const now = Date.now();
+    const runtime = callbacksRef.current.networkIdentity;
     callbacksRef.current.notifyTargetNetworkSignal({
       source: 'foreground-resume',
+      ...(runtime ? {
+        networkGeneration: runtime.readGeneration(),
+        fingerprintChanged: false,
+      } : {}),
     });
+    void refreshNetworkIdentityForForeground();
     const hasSessions = sessionsRef.current.length > 0;
     const hasActiveSession = Boolean(openTabStateRef.current.activeSessionId);
     const wasHiddenForDecision = (
@@ -168,7 +221,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     void callbacksRef.current.auditOpenTabsAgainstRemoteSessions(reason).catch((error) => {
       console.error('[App] Failed to audit remote session truth on foreground resume:', error);
     });
-  }, [foregroundRefreshRuntimeRef, openTabStateRef, sessionsRef]);
+  }, [foregroundRefreshRuntimeRef, openTabStateRef, sessionsRef, refreshNetworkIdentityForForeground]);
 
   useEffect(() => {
     let foregroundProjectionActive = true;
@@ -206,26 +259,26 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
         }
         return;
       }
+      if (nativeBackgroundServiceRunningRef.current) {
+        updateSessionCount(sessionCount);
+        return;
+      }
       nativeBackgroundServiceRunningRef.current = true;
       startBackgroundService(sessionCount);
-
-      // 设置后台心跳回调
-      setBackgroundHeartbeatCallback(sendBackgroundHeartbeat);
 
       runtimeDebug('app.background.service.start', {
         sessionCount,
         handoffWakeLockMs: BACKGROUND_HANDOFF_WAKE_LOCK_MS,
+        lifecycleOwner: 'retained-session-count',
       });
     };
 
-    const stopNativeBackgroundService = () => {
-      if (!nativeBackgroundServiceRunningRef.current) {
-        return;
-      }
-      nativeBackgroundServiceRunningRef.current = false;
+    const enableBackgroundHeartbeat = () => {
+      setBackgroundHeartbeatCallback(sendBackgroundHeartbeat);
+    };
+
+    const disableBackgroundHeartbeat = () => {
       setBackgroundHeartbeatCallback(null);
-      stopBackgroundService();
-      runtimeDebug('app.background.service.stop', {});
     };
 
     const markHidden = () => {
@@ -248,6 +301,7 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
         }
       }
       startNativeBackgroundService();
+      enableBackgroundHeartbeat();
     };
 
     const onVisibilityChange = () => {
@@ -261,15 +315,15 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
       }
 
       if (document.visibilityState === 'visible' && foregroundRefreshRuntimeRef.current.wasHidden) {
-        stopNativeBackgroundService();
         projectForegroundActive(true);
+        disableBackgroundHeartbeat();
         maybeProjectForegroundResume('visibilitychange');
       }
     };
 
     const onDocumentResume = () => {
-      stopNativeBackgroundService();
       projectForegroundActive(true);
+      disableBackgroundHeartbeat();
       runtimeDebug('app.document.resume', {});
       maybeProjectForegroundResume('resume');
     };
@@ -280,10 +334,15 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
         return;
       }
       runtimeDebug('app.network.online', {});
+      const runtime = callbacksRef.current.networkIdentity;
+      const sample = runtime
+        ? runtime.ingestNetworkStatus({ connected: true, connectionType: 'unknown' })
+        : null;
       callbacksRef.current.notifyTargetNetworkSignal({
         connected: true,
         connectionType: 'unknown',
         source: 'window-online',
+        ...(sample ? { networkGeneration: sample.generation, fingerprintChanged: sample.fingerprintChanged } : {}),
       });
     };
 
@@ -299,10 +358,15 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
         });
         return;
       }
+      const runtime = callbacksRef.current.networkIdentity;
+      const sample = runtime
+        ? runtime.ingestNetworkStatus({ connected: status.connected, connectionType: status.connectionType })
+        : null;
       callbacksRef.current.notifyTargetNetworkSignal({
         connected: status.connected,
         connectionType: status.connectionType,
         source: 'capacitor',
+        ...(sample ? { networkGeneration: sample.generation, fingerprintChanged: sample.fingerprintChanged } : {}),
       });
     });
 
@@ -315,8 +379,8 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
         markHidden();
         return;
       }
-      stopNativeBackgroundService();
       projectForegroundActive(true);
+      disableBackgroundHeartbeat();
       maybeProjectForegroundResume('appStateChange');
     });
 
@@ -326,7 +390,6 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     window.addEventListener('online', onNetworkOnline);
 
     return () => {
-      stopNativeBackgroundService();
       void Promise.resolve(appStateListenerHandle)
         .then((listener) => listener?.remove?.())
         .catch((error) => {
@@ -348,22 +411,39 @@ export function useOpenTabLifecycleEffects(options: UseOpenTabLifecycleEffectsOp
     openTabStateRef,
   ]);
 
-  useEffect(() => {
+  useEffect(() => () => {
     if (!nativeBackgroundServiceRunningRef.current) {
       return;
     }
+    nativeBackgroundServiceRunningRef.current = false;
+    setBackgroundHeartbeatCallback(null);
+    stopBackgroundService();
+    runtimeDebug('app.background.service.stop.lifecycle-dispose', {});
+  }, []);
+
+  useEffect(() => {
     if (retainedSessionCount <= 0) {
-      nativeBackgroundServiceRunningRef.current = false;
-      setBackgroundHeartbeatCallback(null);
-      stopBackgroundService();
-      runtimeDebug('app.background.service.stop.empty', {});
+      if (nativeBackgroundServiceRunningRef.current) {
+        nativeBackgroundServiceRunningRef.current = false;
+        setBackgroundHeartbeatCallback(null);
+        stopBackgroundService();
+        runtimeDebug('app.background.service.stop.empty', {});
+      }
+      return;
+    }
+    if (!nativeBackgroundServiceRunningRef.current) {
+      nativeBackgroundServiceRunningRef.current = true;
+      startBackgroundService(retainedSessionCount);
+      runtimeDebug('app.background.service.start.retained', {
+        sessionCount: retainedSessionCount,
+      });
       return;
     }
     updateSessionCount(retainedSessionCount);
     runtimeDebug('app.background.service.update', {
       sessionCount: retainedSessionCount,
     });
-  }, [retainedSessionCount]);
+  }, [retainedSessionCount, options.sendBackgroundHeartbeat]);
 
   useEffect(() => {
     if (typeof window === 'undefined') {

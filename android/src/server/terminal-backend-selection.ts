@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process';
+
 export type TerminalBackendKind = 'tmux' | 'wezterm' | 'herdr';
 
 export interface ResolveTerminalBackendKindOptions {
@@ -28,4 +30,12 @@ export function resolveWezTermExecutable(env: Record<string, string | undefined>
 export function resolveHerdrExecutable(env: Record<string, string | undefined> = process.env) {
   const explicit = (env.ZTERM_HERDR_EXE || '').trim();
   return explicit || 'herdr';
+}
+
+export function isHerdrExecutableAvailable(executable = resolveHerdrExecutable()) {
+  const probe = spawnSync(executable, ['--help'], {
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  return probe.error == null && (probe.status === 0 || probe.status === 1);
 }

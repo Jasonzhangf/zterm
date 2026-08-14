@@ -42,6 +42,7 @@ function createOptions(overrides: Partial<any> = {}) {
   const ensureTerminalPageVisible = vi.fn();
   const closeSession = vi.fn();
   const switchSession = vi.fn();
+  const renameRemoteSession = vi.fn();
   const setPageState = vi.fn();
   const auditOpenTabsAgainstRemoteSessions = vi.fn(async () => undefined);
   const manageTmuxSessionsOnOpenTransport = overrides.manageTmuxSessionsOnOpenTransport || vi.fn(async () => null);
@@ -103,6 +104,7 @@ function createOptions(overrides: Partial<any> = {}) {
     ensureTerminalPageVisible,
     applyOpenTabState,
     manageTmuxSessionsOnOpenTransport,
+    renameRemoteSession,
     setPageState,
     auditOpenTabsAgainstRemoteSessions,
   };
@@ -125,6 +127,7 @@ function createOptions(overrides: Partial<any> = {}) {
       ensureTerminalPageVisible,
       closeSession,
       switchSession,
+      renameRemoteSession,
       applyOpenTabState,
       setPageState,
       auditOpenTabsAgainstRemoteSessions,
@@ -246,6 +249,33 @@ describe('useSessionOpenActions explicit-open truth', () => {
     expect(harness.spies.ensureTerminalPageVisible).not.toHaveBeenCalled();
   });
 
+  it('preserves the Herdr backend when materializing a drawer catalog session', () => {
+    const harness = createOptions();
+    harness.spies.createSession.mockReturnValue('runtime:daemon-a:shared-herdr');
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    act(() => {
+      result.current.handleOpenGroupSession({
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        relayHostId: 'daemon-a',
+        terminalBackend: 'herdr',
+        authToken: 'token-a',
+      }, 'shared', { activate: false, navigate: false });
+    });
+
+    expect(harness.spies.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({
+        daemonHostId: 'daemon-a',
+        terminalBackend: 'herdr',
+        sessionName: 'shared',
+        tags: ['herdr', 'shared'],
+      }),
+      expect.objectContaining({ activate: false }),
+    );
+  });
+
   it('preserves drawer route-aware target truth when materializing a remote group session', () => {
     const relayEndpointCandidates = [{
       id: 'relay-rtc:daemon-a',
@@ -299,7 +329,6 @@ describe('useSessionOpenActions explicit-open truth', () => {
       bridgePort: 3333,
       sessionName: 'shared',
     });
-    localStorage.setItem('zterm:closed-tab-reuse-keys', JSON.stringify([reuseKey]));
     const harness = createOptions();
     harness.refs.closedOpenTabReuseKeysRef.current = new Set([reuseKey]);
     harness.spies.createSession.mockReturnValue(runtimeSessionId);
@@ -317,7 +346,6 @@ describe('useSessionOpenActions explicit-open truth', () => {
     });
 
     expect(harness.refs.closedOpenTabReuseKeysRef.current.has(reuseKey)).toBe(false);
-    expect(localStorage.getItem('zterm:closed-tab-reuse-keys')).toBeNull();
   });
 
   it('clears all semantic reuse-key variants without saving tab state', () => {
@@ -335,7 +363,6 @@ describe('useSessionOpenActions explicit-open truth', () => {
       bridgePort: 3333,
       sessionName: 'shared',
     });
-    localStorage.setItem('zterm:closed-tab-reuse-keys', JSON.stringify(reuseKeyVariants));
     const harness = createOptions();
     harness.refs.closedOpenTabReuseKeysRef.current = new Set(reuseKeyVariants);
     harness.spies.createSession.mockReturnValue(runtimeSessionId);
@@ -353,7 +380,6 @@ describe('useSessionOpenActions explicit-open truth', () => {
     });
 
     expect(Array.from(harness.refs.closedOpenTabReuseKeysRef.current)).toEqual([]);
-    expect(localStorage.getItem('zterm:closed-tab-reuse-keys')).toBeNull();
   });
 
   it('uses active runtime session auth truth as the preferred quick-tab picker target', () => {
@@ -1310,6 +1336,57 @@ describe('useSessionOpenActions explicit-open truth', () => {
     expect(harness.spies.switchSession).not.toHaveBeenCalled();
   });
 
+  it('refreshes both tmux and Herdr catalogs so running Herdr sessions enter the drawer history', async () => {
+    const auditOpenTabsAgainstRemoteSessions = vi.fn(async () => undefined);
+    const harness = createOptions();
+    fetchTmuxSessionsMock
+      .mockResolvedValueOnce(['tmux-main'])
+      .mockResolvedValueOnce(['hd-codex']);
+    const { result } = renderHook(() => useSessionOpenActions({
+      ...(harness.options as any),
+      auditOpenTabsAgainstRemoteSessions,
+    }));
+
+    await act(async () => {
+      await result.current.handleRefreshDrawerHostSessions('daemon-a');
+    });
+
+    expect(fetchTmuxSessionsMock).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ terminalBackend: 'tmux' }),
+      expect.any(Object),
+    );
+    expect(fetchTmuxSessionsMock).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ terminalBackend: 'herdr' }),
+      expect.any(Object),
+    );
+    expect(harness.spies.setSessionGroupSelection).toHaveBeenCalledWith(expect.objectContaining({
+      terminalBackend: 'herdr',
+      sessionNames: ['hd-codex'],
+    }));
+  });
+
+  it('does not let an unavailable optional Herdr catalog block tmux refresh', async () => {
+    const auditOpenTabsAgainstRemoteSessions = vi.fn(async () => undefined);
+    const harness = createOptions();
+    fetchTmuxSessionsMock
+      .mockResolvedValueOnce(['tmux-main'])
+      .mockRejectedValueOnce(new Error('Herdr backend unavailable'));
+    const { result } = renderHook(() => useSessionOpenActions({
+      ...(harness.options as any),
+      auditOpenTabsAgainstRemoteSessions,
+    }));
+
+    await act(async () => {
+      await result.current.handleRefreshDrawerHostSessions('daemon-a');
+    });
+
+    expect(harness.spies.setSessionGroupSelection).toHaveBeenCalledWith(expect.objectContaining({
+      sessionNames: ['tmux-main'],
+    }));
+  });
+
   it('refreshes drawer host sessions through an existing open mux target transport when available', async () => {
     const manageTmuxSessionsOnOpenTransport = vi.fn(async () => ['beta', 'alpha', 'beta']);
     const harness = createOptions({
@@ -1475,16 +1552,16 @@ describe('useSessionOpenActions explicit-open truth', () => {
         deviceName: 'Machine A',
         platform: 'win32',
         appVersion: '0.1.3',
-        updatedAt: '2026-06-30T04:00:00.000Z',
-        client: { connected: false, lastSeenAt: '2026-06-30T04:00:00.000Z' },
+        updatedAt: new Date().toISOString(),
+        client: { connected: false, lastSeenAt: new Date().toISOString() },
         daemon: {
           connected: true,
-          lastSeenAt: '2026-06-30T04:00:00.000Z',
+          lastSeenAt: new Date().toISOString(),
           hostId: 'daemon-a',
           version: '0.1.3',
           endpoints: [
-            { id: 'direct:tailscale:daemon-a', kind: 'tailscale', host: '100.75.122.121', port: 3333, authRequired: true, lastSeenAt: '2026-06-30T04:00:00.000Z' },
-            { id: 'relay-a', kind: 'relay-rtc', relayHostId: 'daemon-a', authRequired: true, lastSeenAt: '2026-06-30T04:00:00.000Z' },
+            { id: 'direct:tailscale:daemon-a', kind: 'tailscale', host: '100.75.122.121', port: 3333, authRequired: true, lastSeenAt: new Date().toISOString() },
+            { id: 'relay-a', kind: 'relay-rtc', relayHostId: 'daemon-a', authRequired: true, lastSeenAt: new Date().toISOString() },
           ],
           sessions: [],
         },
@@ -1684,5 +1761,97 @@ describe('useSessionOpenActions explicit-open truth', () => {
     expect('handleLoadSavedTabList' in result.current).toBe(false);
     expect(harness.refs.closedOpenTabReuseKeysRef.current.has(reuseKey)).toBe(true);
     expect(harness.refs.openTabStateRef.current.tabs).toEqual([]);
+  });
+});
+
+describe('useSessionOpenActions remote tmux rename', () => {
+  it('renames the remote tmux session through the open mux transport and migrates local identity only after success', async () => {
+    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => ['renamed']);
+    const harness = createOptions({
+      manageTmuxSessionsOnOpenTransport,
+      runtimeActiveSessionId: 'active-zterm',
+      sessions: [{
+        id: 'active-zterm',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'old-name',
+        state: 'connected',
+        createdAt: 10,
+      }],
+    });
+    harness.refs.openTabStateRef.current = normalizeOpenTabIntentState([{
+      sessionId: 'active-zterm',
+      hostId: 'host-a',
+      connectionName: 'Daemon A',
+      bridgeHost: '100.127.23.27',
+      bridgePort: 3333,
+      daemonHostId: 'daemon-a',
+      sessionName: 'old-name',
+      createdAt: 10,
+    }], 'active-zterm');
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    await act(async () => {
+      await result.current.handleRenameRemoteSession('active-zterm', '  new session  ');
+    });
+
+    expect(manageTmuxSessionsOnOpenTransport).toHaveBeenCalledWith(
+      'active-zterm',
+      { type: 'tmux-rename-session', payload: { sessionName: 'old-name', nextSessionName: 'new-session', terminalBackend: 'tmux' } },
+    );
+    expect(harness.spies.renameRemoteSession).toHaveBeenCalledWith('active-zterm', 'new-session');
+    expect(harness.refs.openTabStateRef.current.tabs.find((tab) => tab.sessionId === 'active-zterm')?.sessionName).toBe('new-session');
+    expect(harness.spies.setSessionGroupSelection).toHaveBeenCalled();
+  });
+
+  it('does not migrate local identity when the remote rename fails', async () => {
+    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => {
+      throw new Error('rename failed');
+    });
+    const harness = createOptions({
+      manageTmuxSessionsOnOpenTransport,
+      runtimeActiveSessionId: 'active-zterm',
+      sessions: [{
+        id: 'active-zterm',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'old-name',
+        state: 'connected',
+        createdAt: 10,
+      }],
+    });
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    await expect(result.current.handleRenameRemoteSession('active-zterm', 'new-name')).rejects.toThrow('rename failed');
+    expect(harness.spies.renameRemoteSession).not.toHaveBeenCalled();
+    expect(harness.refs.openTabStateRef.current.tabs).toHaveLength(0);
+  });
+
+  it('is a no-op for empty or unchanged names', async () => {
+    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => ['old-name']);
+    const harness = createOptions({
+      manageTmuxSessionsOnOpenTransport,
+      runtimeActiveSessionId: 'active-zterm',
+      sessions: [{
+        id: 'active-zterm',
+        bridgeHost: '100.127.23.27',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-a',
+        sessionName: 'old-name',
+        state: 'connected',
+        createdAt: 10,
+      }],
+    });
+    const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
+
+    await act(async () => {
+      await result.current.handleRenameRemoteSession('active-zterm', '   ');
+      await result.current.handleRenameRemoteSession('active-zterm', 'old-name');
+    });
+
+    expect(manageTmuxSessionsOnOpenTransport).not.toHaveBeenCalled();
+    expect(harness.spies.renameRemoteSession).not.toHaveBeenCalled();
   });
 });

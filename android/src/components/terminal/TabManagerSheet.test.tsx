@@ -132,6 +132,31 @@ describe('TabManagerSheet', () => {
     expect(onCloseSession).toHaveBeenCalledWith('s1', 'tab-manager-close-button');
   });
 
+  it('renames a tab through the app-owned dialog', () => {
+    const onRenameSession = vi.fn();
+    render(
+      <TabManagerSheet
+        open
+        sessions={[toTabManagerSession(buildSession('s1', 'tab-1'))]}
+        activeSessionId="s1"
+        onClose={vi.fn()}
+        onSwitchSession={vi.fn()}
+        onRenameSession={onRenameSession}
+        onCloseSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: '重命名 tab-1' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '新的标签页名称' }), {
+      target: { value: 'renamed-tab' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '确认重命名' }));
+
+    expect(onRenameSession).toHaveBeenCalledWith('s1', 'renamed-tab');
+  });
+
   it('shows Relay TURN when a session route resolves through TURN', () => {
     const session = buildSession('s1', 'tab-1');
     session.resolvedPath = 'rtc-relay';

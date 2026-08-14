@@ -168,8 +168,9 @@ describe('useAppPageState', () => {
     });
   });
 
-  it('preserves a pending terminal route while persisted tabs hydrate into a runtime session', async () => {
+  it('clears a stale terminal route instead of hydrating persisted tabs on cold start', async () => {
     localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 's1');
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([{
       sessionId: 's1',
       hostId: 'host-s1',
@@ -199,20 +200,46 @@ describe('useAppPageState', () => {
       },
     );
 
-    expect(result.current.pageState.kind).toBe('terminal');
+    expect(result.current.pageState.kind).toBe('connections');
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE) || '{}')).toEqual({
-      kind: 'terminal',
+      kind: 'connections',
     });
 
     rerender({ sessions: [sessionS1], runtimeActiveSessionId: 's1' });
 
     await waitFor(() => {
-      expect(result.current.pageState.kind).toBe('terminal');
-      expect(ensureTerminalPageVisible).toHaveBeenCalledTimes(1);
+      expect(result.current.pageState.kind).toBe('connections');
     });
     expect(JSON.parse(localStorage.getItem(STORAGE_KEYS.ACTIVE_PAGE) || '{}')).toEqual({
-      kind: 'terminal',
+      kind: 'connections',
     });
+    expect(ensureTerminalPageVisible).not.toHaveBeenCalled();
+  });
+
+  it('does not treat the persisted active session as cold-start restore truth', () => {
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_PAGE, JSON.stringify({ kind: 'terminal' }));
+    localStorage.setItem(STORAGE_KEYS.ACTIVE_SESSION, 's1');
+    localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([{
+      sessionId: 's1',
+      hostId: 'host-s1',
+      connectionName: 'Mac Studio',
+      bridgeHost: '100.66.1.82',
+      bridgePort: 3333,
+      sessionName: 'freehand',
+      createdAt: 1,
+    }]));
+
+    const { result } = renderHook(() => useAppPageState({
+      hosts: [],
+      sessions: [],
+      runtimeActiveSessionId: null,
+      addHost: vi.fn(),
+      updateHost: vi.fn(),
+      deleteHost: vi.fn(),
+      ensureTerminalPageVisible: vi.fn(),
+    }));
+
+    expect(result.current.pageState.kind).toBe('connections');
   });
 
   it('syncs saved hosts to the server preset owner before returning to connections', () => {

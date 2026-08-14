@@ -643,6 +643,7 @@ cat > "$DIRECT_RUNNER" <<EOF
 set -euo pipefail
 cd "${HOME}"
 chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
+export PATH="${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 exec env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" ZTERM_DAEMON_CAPTURE_NATIVE="${REMOTE_WINDOW_CAPTURE_APP_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}"
 EOF
   chmod +x "$DIRECT_RUNNER"
@@ -696,13 +697,24 @@ if [[ "\${RECENT_LAUNCHES:-0}" -ge 5 ]]; then
 fi
 
 cd "${HOME}"
+export PATH="${HOME}/.local/bin:/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin"
 chmod +x ${STAGED_NODE_PTY_HELPER_GLOB} 2>/dev/null || true
 child_pid=""
-cleanup_child() {
-  if [[ -n "\${child_pid}" ]] && kill -0 "\${child_pid}" >/dev/null 2>&1; then
-    kill "\${child_pid}" >/dev/null 2>&1 || true
-    wait "\${child_pid}" >/dev/null 2>&1 || true
+terminate_child() {
+  [[ -n "\${child_pid}" ]] || return 0
+  kill -0 "\${child_pid}" >/dev/null 2>&1 || return 0
+  kill -TERM "\${child_pid}" >/dev/null 2>&1 || true
+  for _ in 1 2 3 4 5; do
+    kill -0 "\${child_pid}" >/dev/null 2>&1 || break
+    sleep 1
+  done
+  if kill -0 "\${child_pid}" >/dev/null 2>&1; then
+    kill -KILL "\${child_pid}" >/dev/null 2>&1 || true
   fi
+  wait "\${child_pid}" >/dev/null 2>&1 || true
+}
+cleanup_child() {
+  terminate_child
 }
 trap cleanup_child TERM INT
 env -u TMUX -u TMUX_PANE ZTERM_ITERM2_PYTHON="${ITERM2_PYTHON_BIN}" ZTERM_DAEMON_NATIVE="${NATIVE_DAEMON_BIN}" ZTERM_DAEMON_CAPTURE_NATIVE="${REMOTE_WINDOW_CAPTURE_APP_BIN}" "${NODE_BIN}" "${STAGED_DAEMON_ENTRY}" &
@@ -724,8 +736,7 @@ while kill -0 "\${child_pid}" >/dev/null 2>&1; do
       echo "[\$(date -u +%Y-%m-%dT%H:%M:%SZ)] launchd watchdog: missed health check \${missed_health_checks}/3 for child \${child_pid}" >> "${LOG_DIR}/launchd-stderr.log"
       if [[ "\${missed_health_checks}" -ge 3 ]]; then
         echo "[\$(date -u +%Y-%m-%dT%H:%M:%SZ)] launchd watchdog: restarting unhealthy child \${child_pid}" >> "${LOG_DIR}/launchd-stderr.log"
-        kill "\${child_pid}" >/dev/null 2>&1 || true
-        wait "\${child_pid}" >/dev/null 2>&1 || true
+        terminate_child
         exit 1
       fi
     fi

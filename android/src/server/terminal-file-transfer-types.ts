@@ -44,7 +44,7 @@ export interface TerminalFileTransferRuntimeDeps {
   scheduleMirrorLiveSync: (mirror: SessionMirror, delayMs?: number) => void;
   writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean) => void;
   writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean) => boolean;
-  readTmuxPaneCurrentPath: (sessionName: string) => string;
+  readTmuxPaneCurrentPath: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
   runCommand: (command: string, args: string[]) => void;
   pasteImageToRemoteWindow?: (
     session: TerminalSession,

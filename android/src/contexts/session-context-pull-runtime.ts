@@ -8,7 +8,7 @@ import {
   settleSessionPullStatesWithBufferSync,
   type SessionPullPurpose,
   type SessionPullStates,
-} from './session-pull-state-helpers';
+} from '../lib/session-pull-state-helpers';
 import {
   clearPendingBufferSyncFrameAssembly,
   type BufferFrameAssemblyResourceState,

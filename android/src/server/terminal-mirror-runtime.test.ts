@@ -36,6 +36,7 @@ function createRuntime(overrides: {
   captureMirrorAuthoritativeBufferFromTmux?: (mirror: SessionMirror) => Promise<boolean>;
   normalizeTerminalCols?: (cols?: number) => number;
   normalizeTerminalRows?: (rows?: number) => number;
+  getMirrorKey?: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
   mirrorBufferChanged?: (mirror: SessionMirror, previousStartIndex: number, previousLines: TerminalCell[][]) => Array<{ startIndex: number; endIndex: number }>;
 } = {}) {
   const sessions = new Map<string, TerminalSession>();
@@ -72,7 +73,7 @@ function createRuntime(overrides: {
     buildChangedRangesBufferSyncPayload: (mirror, changedRanges) => buildChangedRangesBufferSyncPayload(mirror, changedRanges),
     sanitizeSessionName: (input?: string) => input?.trim() || 'demo',
     buildExactTmuxSessionTarget: (sessionName) => `=${sessionName}`,
-    getMirrorKey: (sessionName: string) => sessionName,
+    getMirrorKey: overrides.getMirrorKey || ((sessionName: string) => sessionName),
     normalizeTerminalCols: overrides.normalizeTerminalCols || ((cols?: number) => cols || 120),
     normalizeTerminalRows: overrides.normalizeTerminalRows || ((rows?: number) => rows || 40),
     resolveAttachGeometry: ({ requestedGeometry, currentMirrorGeometry, existingTmuxGeometry, previousSessionGeometry }) =>
@@ -85,6 +86,7 @@ function createRuntime(overrides: {
       alternateOn: false,
     })),
     assertTmuxSessionExists,
+    resolveTerminalSessionBackend: () => 'tmux',
     captureMirrorAuthoritativeBufferFromTmux,
     mirrorBufferChanged: overrides.mirrorBufferChanged || (() => []),
     mirrorCursorEqual: () => true,
@@ -129,6 +131,23 @@ function expectOnlyAdaptiveWidthTmuxMutation(runTmux: { mock: { calls: unknown[]
 }
 
 describe('terminal mirror runtime lifecycle truth', () => {
+  it('keeps same-named tmux and Herdr mirrors independent', async () => {
+    const key = (sessionName: string, backend: 'tmux' | 'herdr' = 'tmux') => `${backend}:${sessionName}`;
+    const { runtime, sessions, mirrors } = createRuntime({ getMirrorKey: key });
+    const tmuxSession = createSession('tmux-session');
+    const herdrSession = createSession('herdr-session');
+    sessions.set(tmuxSession.id, tmuxSession);
+    sessions.set(herdrSession.id, herdrSession);
+
+    await runtime.attachTmux(tmuxSession, { sessionName: 'same-name', backend: 'tmux', cols: 120, rows: 40 });
+    await runtime.attachTmux(herdrSession, { sessionName: 'same-name', backend: 'herdr', cols: 120, rows: 40 });
+
+    expect(tmuxSession.mirrorKey).toBe('tmux:same-name');
+    expect(herdrSession.mirrorKey).toBe('herdr:same-name');
+    expect(mirrors.get('tmux:same-name')?.backend).toBe('tmux');
+    expect(mirrors.get('herdr:same-name')?.backend).toBe('herdr');
+  });
+
   it('creates new mirrors as idle so attach can boot them exactly once', async () => {
     const { runtime, mirrors } = createRuntime();
     const mirror = runtime.createMirror('demo');
@@ -384,6 +403,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
         alternateOn: false,
       }),
       assertTmuxSessionExists: vi.fn(),
+      resolveTerminalSessionBackend: () => 'tmux',
       captureMirrorAuthoritativeBufferFromTmux: vi.fn(async () => {
         throw new Error('tmux returned invalid pane metrics for demo-zterm: pane is dead');
       }),

@@ -305,7 +305,7 @@ describe('App first paint regression', () => {
     globalThis.WebSocket = originalWebSocket;
   });
 
-  it('cold start clears legacy tab storage and returns stale terminal route to connections', async () => {
+  it('cold start drops current-process tab keys while routing stale page focus to connections', async () => {
     localStorage.setItem(STORAGE_KEYS.OPEN_TABS, JSON.stringify([
       {
         sessionId: 'session-1',

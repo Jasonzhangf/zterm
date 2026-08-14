@@ -92,6 +92,66 @@ describe('useSessionHistoryStorage daemon-first truth', () => {
     ]);
   });
 
+  it('keeps tmux and Herdr groups separate for the same daemon and endpoint', () => {
+    const { result } = renderHook(() => useSessionHistoryStorage());
+
+    act(() => {
+      result.current.setSessionGroupSelection({
+        name: 'Daemon A tmux',
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-host-a',
+        terminalBackend: 'tmux',
+        sessionNames: ['shared'],
+      });
+      result.current.setSessionGroupSelection({
+        name: 'Daemon A Herdr',
+        bridgeHost: '100.64.0.10',
+        bridgePort: 3333,
+        daemonHostId: 'daemon-host-a',
+        terminalBackend: 'herdr',
+        sessionNames: ['shared'],
+      });
+    });
+
+    expect(result.current.sessionGroups).toHaveLength(2);
+    expect(result.current.sessionGroups).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        terminalBackend: 'tmux',
+        sessionNames: ['shared'],
+      }),
+      expect.objectContaining({
+        terminalBackend: 'herdr',
+        sessionNames: ['shared'],
+      }),
+    ]));
+
+    act(() => {
+      result.current.pruneSessionGroupSelectionToRemoteTruth(
+        {
+          bridgeHost: '100.64.0.10',
+          bridgePort: 3333,
+          daemonHostId: 'daemon-host-a',
+          terminalBackend: 'herdr',
+        },
+        [],
+      );
+    });
+
+    expect(result.current.sessionGroups).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        terminalBackend: 'tmux',
+        sessionNames: ['shared'],
+        missingSessionNames: [],
+      }),
+      expect.objectContaining({
+        terminalBackend: 'herdr',
+        sessionNames: ['shared'],
+        missingSessionNames: ['shared'],
+      }),
+    ]));
+  });
+
   it('collapses old bridge-only group and later daemon-owned group for the same endpoint into one server truth', () => {
     const { result } = renderHook(() => useSessionHistoryStorage());
 

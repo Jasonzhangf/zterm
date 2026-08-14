@@ -354,6 +354,24 @@ describe('TraversalSocket reconnect', () => {
     expect(MockWebSocket.instances[0].sent.map((item) => JSON.parse(String(item)).type)).not.toContain('rtc-close');
   });
 
+  it('disposes an RTC candidate that is still connecting when the traversal socket closes', async () => {
+    const socket = createRelayRtcSocket();
+    await flushMicrotasks();
+
+    expect(MockWebSocket.instances).toHaveLength(1);
+    MockWebSocket.instances[0].triggerOpen();
+    await flushMicrotasks();
+    expect(MockRTCPeerConnection.instances).toHaveLength(1);
+    expect(MockRTCPeerConnection.instances[0].connectionState).toBe('new');
+
+    socket.close(4000, 'client network generation changed');
+
+    expect(MockRTCPeerConnection.instances[0].connectionState).toBe('closed');
+    expect(MockRTCPeerConnection.instances[0].channel.readyState).toBe('closed');
+    expect(MockWebSocket.instances[0].readyState).toBe(MockWebSocket.CLOSED);
+    expect(socket.readyState).toBe(MockWebSocket.CLOSED);
+  });
+
   it('retries after all traversal candidates are exhausted before open', async () => {
     const socket = createSocket({
       traversalPathPriority: ['ipv4'],
@@ -1280,7 +1298,7 @@ describe('TraversalSocket reconnect', () => {
   });
 });
 
-describe('tailscale candidate timeout', () => {
+describe('tailscale candidate dynamic verification', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     MockWebSocket.reset();
@@ -1293,7 +1311,7 @@ describe('tailscale candidate timeout', () => {
     vi.stubGlobal('RTCPeerConnection', MockRTCPeerConnection);
   });
 
-  it('fails a tailscale candidate at the contracted 900ms budget instead of the generic 1800ms ws budget', async () => {
+  it('keeps a connecting tailscale candidate alive through the generic websocket deadline', async () => {
     const socket = new TraversalSocket({
       bridgeHost: '203.0.113.10',
       bridgePort: 3333,
@@ -1309,18 +1327,18 @@ describe('tailscale candidate timeout', () => {
     socket.onclose = onclose;
     await flushMicrotasks();
 
-    // Both ws candidates stay unresponsive (CONNECTING); the tailscale one
-    // must time out first at ~900ms and advance to the next batch.
+    // A Tailscale IP is not admitted from cached health. The real authenticated
+    // candidate attempt remains the dynamic reachability check.
     await vi.advanceTimersByTimeAsync(900);
     await flushMicrotasks();
-    expect(socket.getDiagnostics().attempts.some((item) => item.path === 'tailscale' && item.stage === 'error')).toBe(true);
-    // The ipv4 candidate is still within its 1800ms budget.
+    expect(socket.getDiagnostics().attempts.some((item) => item.path === 'tailscale' && item.stage === 'error')).toBe(false);
+    // The generic WebSocket deadline has not elapsed yet.
     expect(socket.getDiagnostics().attempts.some((item) => item.path === 'ipv4' && item.stage === 'error')).toBe(false);
 
     socket.close();
   });
 
-  it('still opens a healthy tailscale candidate within the contracted budget', async () => {
+  it('accepts a healthy tailscale candidate after 900ms and before the generic deadline', async () => {
     const socket = new TraversalSocket({
       bridgeHost: '203.0.113.10',
       bridgePort: 3333,
@@ -1338,11 +1356,39 @@ describe('tailscale candidate timeout', () => {
 
     const tailscaleWs = MockWebSocket.instances.find((ws) => ws.url.includes('100.66.1.82'));
     expect(tailscaleWs).toBeDefined();
+    await vi.advanceTimersByTimeAsync(901);
+    await flushMicrotasks();
+    expect(socket.getDiagnostics().attempts.some((item) => item.path === 'tailscale' && item.stage === 'error')).toBe(false);
     tailscaleWs?.triggerOpen();
     await flushMicrotasks();
 
     expect(onopen).toHaveBeenCalledTimes(1);
     expect(socket.getDiagnostics().stage).toBe('open');
+    socket.close();
+  });
+
+  it('fails an unreachable tailscale candidate at the generic websocket deadline', async () => {
+    const socket = new TraversalSocket({
+      bridgeHost: '203.0.113.10',
+      bridgePort: 3333,
+      authToken: 'token',
+      tailscaleHost: '100.66.1.82',
+      ipv4Host: '203.0.113.10',
+      transportMode: 'websocket',
+    }, settings, {
+      routeHealthCache: new TraversalRouteHealthCache(),
+      routeHealthScope: { accountId: 'logged-out', daemonHostId: 'daemon-1' },
+    });
+    const onclose = vi.fn();
+    socket.onclose = onclose;
+    await flushMicrotasks();
+
+    await vi.advanceTimersByTimeAsync(1800);
+    await flushMicrotasks();
+
+    expect(socket.getDiagnostics().attempts.filter((item) => item.stage === 'error')).toHaveLength(2);
+    expect(socket.getDiagnostics().attempts.some((item) => item.path === 'tailscale' && item.stage === 'error')).toBe(true);
+    expect(onclose).toHaveBeenCalledTimes(1);
     socket.close();
   });
 });

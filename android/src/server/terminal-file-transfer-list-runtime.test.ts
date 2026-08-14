@@ -8,7 +8,7 @@ import type { ServerMessage } from '../lib/types';
 import type { TerminalSession } from './terminal-runtime-types';
 import type { RemoteScreenshotCaptureOptions } from './terminal-file-transfer-types';
 
-function makeSession(): TerminalSession {
+function makeSession(overrides?: Partial<Pick<TerminalSession, 'backend'>>): TerminalSession {
   return {
     id: 'session-1',
     transportId: 'transport-1',
@@ -17,6 +17,7 @@ function makeSession(): TerminalSession {
     mirrorKey: 'mirror-1',
     pendingPasteImage: null,
     pendingAttachFile: null,
+    ...overrides,
   };
 }
 
@@ -302,5 +303,43 @@ describe('terminal-file-transfer-list-runtime remote screenshot target capture',
         error: 'remote window screenshot requires a numeric macOS window id',
       },
     });
+  });
+
+  it('rejects all file-transfer operations explicitly for a Herdr terminal surface', async () => {
+    const sentMessages: ServerMessage[] = [];
+    tempDir = mkdtempSync(join(tmpdir(), 'zterm-herdr-file-transfer-'));
+    const writeToTmuxSession = vi.fn();
+    const runtime = createTerminalFileTransferRuntime({
+      uploadDir: tempDir,
+      downloadsDir: tempDir,
+      wtermHomeDir: tempDir,
+      platform: 'darwin',
+      sendMessage: (_session, message) => sentMessages.push(message),
+      getSessionMirror: vi.fn(() => null),
+      scheduleMirrorLiveSync: vi.fn(),
+      writeToTmuxSession,
+      writeToLiveMirror: vi.fn(() => false),
+      readTmuxPaneCurrentPath: vi.fn(() => tempDir!),
+      runCommand: vi.fn(),
+      captureRemoteScreenshot: vi.fn(async ({ outputPath }) => ({ outputPath })),
+      logTimePrefix: () => '2026-07-22 00:00:00',
+    });
+    createdRuntimes.push(runtime);
+
+    const session = makeSession({ backend: 'herdr' });
+    runtime.handleFileListRequest(session, {
+      requestId: 'herdr-list', path: tempDir, showHidden: true,
+    });
+    await runtime.handleRemoteScreenshotRequest(session, { requestId: 'herdr-shot' });
+    runtime.handlePasteImage(session, {
+      name: 'proof.png', mimeType: 'image/png', dataBase64: 'cHJvb2Y=',
+    });
+
+    expect(writeToTmuxSession).not.toHaveBeenCalled();
+    expect(sentMessages).toHaveLength(3);
+    expect(sentMessages.every((message) => (
+      message.type === 'error'
+      && message.payload.code === 'herdr_file_transfer_unsupported'
+    ))).toBe(true);
   });
 });

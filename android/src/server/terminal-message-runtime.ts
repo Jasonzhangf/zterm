@@ -429,7 +429,7 @@ export function createTerminalMessageRuntime(
         }
         break;
       case 'list-sessions':
-        handleListSessionsMessageRuntime(deps.controlRuntimeDeps, connection);
+        handleListSessionsMessageRuntime(deps.controlRuntimeDeps, connection, message);
         break;
       case 'pending-attachments-query': {
         const { deviceId } = (message as { payload: { deviceId: string } }).payload || {};

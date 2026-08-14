@@ -1,5 +1,30 @@
 # 2026-07-29 remote-window sibling switch / screenshot / fullscreen gesture diagnosis
 
+# 2026-08-13 foreground resume transport close H2
+
+- Jason approved `FD-20260813-FOREGROUND-CLEANUP-01`; formal fix is now applied in `src/contexts/session-context-lifecycle.ts`.
+- Lifecycle cleanup is provider-disposal-only: callback refs track the latest cleanup functions, while the physical socket/control cleanup effect has an empty dependency list. Relay/control settings refresh can rebuild callback identities without closing a healthy target transport.
+- Regression gate: `session-context-lifecycle.test.tsx` proves callback refresh keeps an `OPEN` socket open and provider unmount still invokes the latest cleanup functions. The H2 playground positive/reverse intervention remains causal evidence.
+
+- H1 network identity baseline 修复后，真实 round-trip 仍复现。`foreground-same-network-round-1` 的首偏离不是 network generation：seq 455 target `OPEN`，seq 467 收到 `mux-pong`，期间无 `app.network.identity.generation-changed`；seq 468 才出现 `session.mux.target-transport-failed`。
+- 真实事件在 seq 461/462 显示 Relay device stream 先因 `app relay runtime disposed` 旧 generation cleanup，再启动新 generation；terminal target 随后关闭。`relay.device-stream.close.stale` 不是 terminal socket 的 owner，但证明了前台/后台期间 React runtime generation 正在重建。
+- 静态调用链确认：`AppContent.handleForegroundResumeAfterControlRefresh` -> `refreshControlDirectory` -> Relay settings `setBridgeSettings`；`SessionProvider` 的 `bridgeSettings` 变化重建 transport/lifecycle callback；`session-context-lifecycle.ts` 的最后 cleanup effect 依赖 `cleanupSocket` / `cleanupControlSocket`，依赖变化时 cleanup 会调用 `cleanupSocket(session.id, true)`，因此普通 settings refresh 会关闭健康 target socket。
+- H2 单假设 playground：`playground/foreground-resume-reconnect-20260813/H2-background-transport-close/`。正向干预是将依赖变化与 provider disposal 分离，保持 OPEN socket；反向恢复 cleanup 后复现 close。Fix Design ID：`FD-20260813-FOREGROUND-CLEANUP-01`，已获 Jason 批准并已落正式代码。
+
+# 2026-08-12 startup reconnect HTTP preflight fix
+
+- Root cause confirmed in `playground/reconnect-startup-20260812/H1-http-preflight-block`: reconnect used HTTP `/health` reachability as admission control. When all HTTP probes failed, it scheduled another probe and never queued the real mux/WebSocket/WebRTC open.
+- Formal owner: `terminal.transport_lifecycle`, `session-context-session-runtime.ts`. The typed transport owner now queues the current reconnect open immediately; HTTP probes run asynchronously as metadata-only diagnostics. They do not select a route, rewrite host truth, schedule a second retry, or suppress mux open.
+- Red/green evidence: `runReconnectHostProbeAndFallback` tests cover all-probes-false immediate open and a still-pending HTTP probe not delaying open; focused reconnect/infrastructure/orchestration/probe suite is 69/69 PASS; `tsc --noEmit` PASS.
+
+# 2026-08-12 Android Tailscale WebSocket false timeout diagnosis
+
+- User path: installed Android `0.1.3.2587` cold launch, explicitly open Macbookair `100.86.84.63:3333`; native alert reports `ws connect timeout`.
+- First divergence: `TraversalSocket` uses a Tailscale-only 900ms candidate deadline introduced by `2564c474`. On the current Android WebView over DERP, healthy authenticated WebSocket opens take 729-977ms, so the timer can beat `onopen`.
+- Causal proof from the same installed WebView and endpoint: 900ms observation budget produced 2/12 false timeouts; 1800ms produced 12/12 opens in 772-976ms. Device ping had 0% loss with 29.5-825ms RTT; Mac-side `/health` was HTTP 200.
+- Root cause is the invalid sub-100ms Tailscale latency assumption, not route-health admission, daemon, mux, auth, tmux, buffer, or renderer. Route health only persisted the downstream false timeout.
+- Fix design: `FD-20260812-TAILSCALE-WS-BUDGET-01`. Unique owner is `src/lib/traversal/socket.ts`; delete the Tailscale-specific contraction and reuse the generic WebSocket deadline. Formal code remains unchanged pending Jason approval.
+
 - Symptom from live screenshot/user report: remote-window overlay can show `截图失败`; after tapping a secondary/sibling remote window, the active connection/video loses usability; fullscreen pinch-to-zoom is misclassified as scroll; remote scroll feels choppy.
 - SOP/model flow: known `desktop.remote_window_stream` plus screenshot subflow `terminal.remote_screenshot`. Resource path is `resource.remote_window_overlay -> resource.remote_window_touch_action -> resource.remote_window_stream`; screenshot path is `resource.remote_window_overlay -> resource.remote_screenshot`. Forbidden: terminal buffer/render, daemon tmux mirror, route fallback, or transport reconnect compensation.
 - MemoryPalace search gap: `scripts/mempalace-mine-zterm.sh search "remote-window sibling screenshot pinch scroll"` failed because `/Users/fanzhang/.local/pipx/venvs/mempalace/bin/python` is missing. Diagnosis therefore used project docs/registry/note/source directly and does not claim MP coverage.
@@ -5823,6 +5848,16 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
 - Verification completed in this continuation: focused performance suite 54/54, trace/HTTP suite 8/8, Android TypeScript no-emit pass, `git diff --check` pass, feature/registry gate 83/83, and real `daemon:mirror:close-loop` pass for codex-live, top-live, vim-live, initial-sync, input, long-input, external-input, daemon-restart, and schedule cases. Replay strict audit reported no source/client mismatches.
 - Authenticated live daemon snapshot after the close-loop showed `ok=true`, installed daemon PID `1762`, 12 ready mirrors, 0 active subscribers after test cleanup, 1790 bounded trace records, 0 client debug entries, and 0 completed capture-to-render/send-to-rx/rx-to-render samples. Therefore online end-to-end latency remains unmeasurable; this is an observability gap, not evidence for a further capture algorithm patch.
 - No further daemon capture change is justified by the current evidence. The authoritative terminal payload remains complete and the renderer optimization is the only confirmed runtime cost reduction in this continuation.
+
+# 2026-08-13 Tailscale dynamic route live verification
+
+- Installed APK `0.1.3.2589` (`versionCode=1100025890`) on ADB device `100.104.163.65:5555` with `adb install -r`; `dataDir` and `firstInstallTime` remained unchanged.
+- WebView CDP was used to inspect the actual DOM and click the saved `Open Macbookair` button. Blind coordinate tapping was not used as connection evidence.
+- Two explicit Tailscale connection rounds reached a real terminal body. Route projection reported `resolvedPath=tailscale`, `resolvedEndpoint=100.86.84.63:3333`, `lastConnectStage=open`, `lastError=null`; daemon runtime reported `terminalChannelState=open` and one attached subscriber.
+- Input replay through the visible QuickBar reached the remote tmux shell and produced the visible shell error/body change, proving the connected WebSocket was carrying terminal input and mirror updates.
+- Cold-launch replay after force-stop hit a transient CDP transport reset while the WebView page was still being recreated; this is harness timing evidence, not a product connection failure. The subsequent explicit CDP open and two live rounds were successful.
+- Evidence directory: `android/evidence/2026-08-13-tailscale-reconnect/`.
+- Remaining live gap: this run did not force a Tailscale address change or intentionally make the current IP unreachable. Dynamic per-generation candidate verification is covered by the socket/route tests and the live authenticated WebSocket attempt; network-change failure/recovery remains a manual scenario.
 2026-08-12 Herdr runtime projection close-loop final evidence: the explicitly installed `ZTERM_TERMINAL_BACKEND=herdr` daemon runtime was started on port 39095 and replayed `playground/herdr-adapter-experiment-20260812/daemon-herdr-close-loop.ts`. Evidence records connected=true, inputRevision=3, resizeRevision=4 with geometry 100x30, reconnected=true, reconnectRevision=5, and closeRemovedSession=true. The generated release runtime and `/Users/fanzhang/.zterm/daemon-runtime/server.cjs` have identical SHA-256 `9d38c0ce0c7eb3d89ca59c33eb2f4bb59745924b`. Herdr-specific tests remain 25/25 passing; registry/resource/map tests are 43/43 passing; `git diff --check` is clean. The full Android typecheck remains blocked by unrelated pre-existing dirty `android/src/components/TerminalView.tsx` undefined refs/setters; no UI file was changed for this task. The macOS install-service command still exits at the existing Screen Recording preflight (`could not create image from display`), without any TCC reset. Windows remains explicitly beta/gap because the remote daemon close-list cleanup timeout gate is not green.
 2026-08-12 Herdr projection correction: the shared `WezTermMirrorSnapshot` contract now exposes `cursorKeysApp: boolean` instead of a false-only type, and `mapHerdrCanonicalSnapshot` preserves the canonicalizer's parsed cursor-key mode. The projection fixture now asserts true propagation; Herdr/runtime/registry gates pass 69/69 and `tsc --noEmit` passes. A full `pnpm run build` reached the terminal contract suite but failed two unrelated dirty-worktree `SessionContext.ws-refresh.test.tsx` reconnect timing assertions (812 passed, 2 failed); no reconnect/UI source was changed. Release preparation and install copy completed; release and installed runtime SHA-256 match `0b858d4e87ff3f41d1cde8618e3fea87daf24226`. launchd restarted and health returned ok=true. Explicit installed Herdr close-loop on port 39096 passed connected, input rev3, resize rev4 100x30, reconnect rev5, closeRemovedSession=true. Install-service still exits only at existing Screen Recording preflight.
 2026-08-12 Herdr build recheck: the previously failing `SessionContext.ws-refresh.test.tsx` suite passed standalone 138/138 on rerun, confirming the two failures during the first full build were timing-flaky unrelated worktree assertions. A second complete `pnpm run build` passed: feature gates 83, terminal shell/theme 181 plus shared 6, file-transfer 82, Gradle 134 tasks, transport lifecycle 62, terminal contracts 814, common flows 91, relay smoke/account gates 38+runtime smoke, workspace panes 48, TypeScript, and Vite production build. The new Herdr projection remains covered by the earlier 69 targeted/map tests and tsc. Codex review task `20260812T185122Z-review-69429-dh9pz8` returned FAIL solely for unrelated `RemoteWindowOverlay` composite styles and `useAttachmentNotifications` in-flight polling; Herdr files had no findings. No unrelated files were modified.
@@ -5839,3 +5874,181 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
 2026-08-12 Herdr projection invariant hardening: `mapHerdrCanonicalSnapshot()` now rejects malformed absolute ranges whose body length does not match `[startIndex,endIndex)`, and rejects bounded projections that would drop the canonical absolute cursor. Herdr focused gates pass 30 tests, TypeScript, and diff check; full build, release/install, hash match `c015049a0bd0e867794ee14541e9773bbfab958375eea77459854c73ccb7261e`, and installed close-loop on port 39101 pass.
 2026-08-12 final review after Herdr invariant hardening: task `20260812T193958Z-review-2993-51hjmk` is FAIL on four unrelated parallel worktree findings: RemoteWindowOverlay fullscreen crop P1, removed composite styles P1, Android network permission P1, and attachment notification in-flight race P2. No Herdr finding; no semantic PASS.
 2026-08-12 final review after runtime reinstallation: Codex review task `20260812T192420Z-review-2993-b5jnk0` is FAIL on three unrelated parallel worktree findings: `RemoteWindowOverlay.tsx` fill-mode crop/input geometry P1, Android network-state manifest permission P1, and `useAttachmentNotifications.ts` in-flight race P2. No Herdr finding; do not modify those parallel owners without authorization and do not treat the review as PASS.
+# 2026-08-12 Tailscale dynamic route verification design update
+
+- Jason 追加要求：Tailscale IP 必须动态验证是否可通，不能信任缓存。
+- 确认动态验证信号只能是真实带 token WebSocket candidate attempt：WebView 无法 ICMP；HTTP /health 不等于 WS 可达；另开 probe WS 会重复物理握手、违反单 transport owner。
+- 正式改动收口为：删除 TAILSCALE_CANDIDATE_TIMEOUT_MS=900 特殊分支，全部 ws candidate 统一 1800ms；candidate attempt 本身即动态验证；networkGeneration + candidate id 隔离健康；fresh host projection 提供最新 IP；30s cooldown 后自动重探。
+- 新 design：FD-20260812-TAILSCALE-DYNAMIC-ROUTE-02（supersedes -01），待 Jason 批准后实施。
+
+# 2026-08-13 Herdr per-session picker / installed validation
+
+- Jason 要求 new session 先选择 `tmux` 或 `Herdr`。已在 `TmuxSessionPickerSheet` 加 modal；Herdr 选择发送 `terminalBackend: 'herdr'` 并直接打开新 session。
+- Backend identity 已接入 typed shared protocol、target/session/persistence、mux/channel、mirror/subscriber、control list cache；tmux 与 Herdr 不共享 list cache。
+- 首次 launchd Herdr 真实验证因 PATH 缺少 `~/.local/bin` 失败，根因由 `launchd-stderr.log` 的 `spawn herdr ENOENT` 确认。修正 daemon runner 的显式 PATH 后重建、重装、重启并重跑通过。
+- 当前安装 runtime 的 Herdr close-loop：create/list、initial sync、input、resize、release、reconnect、targeted close 全通过；revision `1,3,4,5`，geometry `100x30`，close removal true。tmux mirror close-loop 9 cases + replay/strict audit 全通过；同样本 tmux/Herdr canonical parity 全通过。
+- 剩余：Codex review 必须重新取得语义 PASS；Windows ConPTY/cleanup 仍 beta/gap；Codex/OpenCode/Reasonix 外部 Herdr operational integration 仍未证明。
+
+# 2026-08-13 final review remediation / Herdr revalidation
+
+- 为解除项目级 review 阻塞，按唯一 owner 修复了 Android `ACCESS_NETWORK_STATE` manifest permission、RemoteWindowOverlay 仍被 JSX 引用的 composite styles，以及 attachment notification polling 的 in-flight dedup；新增重复调度反测。相关定向测试 77 passed / 4 skipped，typecheck 与 diff check 通过。
+- 修复后完整 `pnpm run build` 通过；全局 daemon 重新安装、重启、status 通过。已安装 runtime 重跑 Herdr per-session close-loop：connected、input revision 3、resize revision 4 / 100x30、reconnect revision 5、close removal true；同样本 tmux/Herdr canonical parity rows/cells/geometry/cursor 相等且 revision namespace 独立；tmux mirror close-loop 9 cases、replay、strict audit 全通过。
+
+# 2026-08-13 backend-boundary review remediation
+
+- Review 暴露的 backend 边界已修复并锁测：persisted Herdr tab restore 保留 backend 到 owner grouping、可复用 mux list request 和 direct list request；tmux/Herdr list cache 通过独立 transport/cache 测试；Herdr file-transfer 明确返回 `herdr_file_transfer_unsupported`，不会调用 tmux 写入或路径 owner。
+- backend-boundary 定向测试 94 passed，feature/resource/module/mainline gate 83 passed，typecheck 与 diff check 通过；修复后的源码已再次 build、global install、daemon restart，并以安装 runtime 重跑 Herdr close-loop、tmux mirror close-loop 和 canonical parity。
+
+# 2026-08-13 final backend write propagation
+
+# 2026-08-13 side-channel and runtime audit continuation
+
+- 直接核对 Mac 运行态：`herdr 0.8.0` 位于 `/Users/fanzhang/.local/bin/herdr`；`zterm-daemon` launchd 服务运行于 `0.0.0.0:3333`，auth=config，active_count=1。`herdr session list --json` 能返回官方命名 session，并只由正式 Herdr runtime 按 `zterm-herdr-` 前缀过滤映射。
+- `herdr integration status` 当前明确显示 Codex、OpenCode integration 未安装；Reasonix 无已确认的官方 Herdr integration surface。Herdr terminal payload 静态 side-channel gate 通过，但外部 operational integration 不能据此宣称通过。
+- 新 final Codex review task `20260813T022547Z-review-31802-dimb8w` 已按 MCP 重新启动，前一轮 review 因误取消/无 accepted verdict 不能作为 PASS；本轮仍在运行。
+
+- Final review 的唯一 P1 已修复：`server.ts` terminal runtime wiring 现在把 selected backend 透传到 `writeToLiveMirror`、`enqueueLiveMirrorInput`、`writeToTmuxSession`，因此 Herdr input 与 delayed auto-command 不会再默认进入 tmux；新增 source-boundary assertion。
+- 修复后 typecheck、148 定向 tests、完整 build、global install/restart、安装 runtime Herdr close-loop（input rev3、resize rev4、reconnect rev5、close removal）、tmux mirror 9-case replay/strict audit、tmux/Herdr parity 全部通过。最后一次 review 待取得 PASS。
+
+# 2026-08-13 final runtime revalidation
+
+- Pinch zoom 的 layout layer 现在在 scale<1 时按 `100/scale%` 扩大布局盒子，保持视觉缩放与原生 scrollTop 的同一坐标系；通知 attachment 的 permission/staging/schedule 终止错误进入 terminal failed 集合，避免每轮 polling 无限重试。相关 15 tests 与 type-check 通过。
+- 完整 `pnpm run build` 通过：feature/architecture/resource/module/mainline gates 83/83，终端/UI/传输/relay/workspace gates 全绿，terminal suite 814，Gradle 与 Vite build 全绿。安装脚本重新生成并安装 0.1.3 runtime，launchd 健康返回 `ok=true`、`active_count=1`、port 3333。
+- 安装版本真实 close-loop 通过：Herdr connected、revision 1，input revision 3，resize revision 4 geometry 100x30，reconnect revision 5，closeRemovedSession=true；tmux mirror close-loop 的 codex/top/vim、input、restart、schedule 以及 replay strict audit 全部 PASS。
+- 仍需在上述证据后运行新的 Codex MCP review；Windows ConPTY/daemon cleanup 继续明确 beta/gap，Codex/OpenCode/Reasonix 外部 Herdr operational integration 继续明确未配置/未证明。
+# 2026-08-13 foreground resume reconnect H1
+
+- 现象分类：`terminal.transport_lifecycle`；用户报告网络未变化，Android 从后台回前台后主动重连。
+- 架构判定：`BackgroundService.java` 只持有 process-level partial WakeLock，并由 JS heartbeat callback 支持低频 `mux-ping`；没有 WebSocket/RTC/route/reconnect owner，禁止在 service 层修。
+- 唯一高风险首偏离：`AppContent` 初始调用 `networkIdentity.resample()`，该路径先建立 `connectionType=unknown` 的 interface-only fingerprint；前台恢复再用 `Network.getStatus() -> wifi` 调 `resampleWithStatus()`，即使 `wlan0 + address` 未变，也会产生 `fingerprintChanged=true`。`notifyTargetNetworkSignalRuntime` 随后调用唯一 target failure owner 淘汰 physical transport。
+- 单假设实验：`playground/foreground-resume-reconnect-20260813/H1-network-identity-experiment.ts` 修复前复现 `afterStatusGeneration=2/changed=true`，修复后 `generation=1/changed=false`；status-first 同网络 resume 也保持 generation 1。
+- 正式修改：`android/src/lib/network-identity.ts` 只在网络身份 owner 内完成 provisional `unknown` status 或空 interface baseline；不推进 generation。真实 connection type/interface/address 变化仍走 `compareAndAdvance`。
+- 正反测试：`network-identity.test.ts` 覆盖同网络 provisional baseline、unknown online 不覆盖已知状态、interface enrichment 不换代；原有 interface/VPN/connection type change 反测保留。定向 transport/lifecycle tests 61/61，tsc 通过，feature-registry 83/83。
+- 待完成：构建、安装、真实设备后台/前台同网络 round-trip、运行时 transport identity/generation 证据、最终 Codex review。
+
+# 2026-08-13 retained-session service lifecycle closeout
+
+- Scope: `terminal.transport_lifecycle`; native `BackgroundService` remains process-execution support.
+- Formal owner: `useOpenTabLifecycleEffects.ts` owns retained-session-count service start/update/stop and provider disposal; `BackgroundServicePlugin.ts` owns the separate JS heartbeat timer; native `BackgroundService.java` owns notification, one partial WakeLock, and bounded WebView wake-up only.
+- Causal fix: foreground/background handlers no longer stop the service on every foreground return or mix service lifetime with the heartbeat callback. The current path starts service while retained sessions exist, enables callback only while hidden, disables callback on foreground return, and stops service only at zero retained sessions or disposal.
+- Verification: TypeScript clean; feature registry 83/83; transport/network lifecycle 55 Android + 9 shared; lifecycle/power suite 176/176; Vite and Gradle build clean; APK `0.1.3.2617`, `versionCode=1100026170`, SHA-256 `adeed5740848376008defb8572f7ba6377cac9ed497094d566cb94d25cb0f872`.
+- Live gap: `adb devices` returned no online devices, so install, notification/service state, `PARTIAL_WAKE_LOCK`, background control heartbeat, and same-generation foreground resume remain unverified.
+
+# 2026-08-13 real-device input verifier convergence
+
+- The latest packaged smoke reached the correct daemon mux subscriber and passed `buffer-head -> buffer-sync -> buffer apply -> renderer commit`, but `adb shell input text` produced no `session.input.send`.
+- Root cause is verifier action, not terminal transport: Android uses the native `ImeAnchor` input owner with `TerminalView.allowDomFocus=false`; a center-screen tap does not guarantee that owner is active.
+- Verifier change scope is `daemon.cli_node / observability.debug_channel`: inspect the current WebView through CDP, activate the real QuickBar keyboard action, then send device text only after native IME visibility is confirmed. No product transport or business payload changes.
+# 2026-08-13 Herdr drawer visibility correction
+
+- Jason corrected the symptom: the Herdr session is not visible in the terminal drawer at all, so it cannot be opened. The previous close-session diagnosis was out of scope.
+- Current source trace: `TerminalSessionDrawer` refreshes only the selected host key; `useSessionOpenActions.handleRefreshDrawerHostSessions()` resolves that host and lists the default `tmux` backend. `TerminalPage.drawerRemoteSessions` renders only persisted `sessionGroups`, so a running Herdr session absent from history has no drawer row.
+- First-divergence hypothesis: drawer refresh has no backend-aware Herdr catalog target and no projection path from the returned live catalog into `sessionGroups`. Confirm by a red test with an empty history group and a live Herdr catalog containing `hd-codex`.
+- Planned owner boundary: session-open owner performs the live catalog request and history projection; `TerminalPage`/`TerminalSessionDrawer` remain UI projection and intent emitters. Herdr backend runtime is not changed.
+
+
+# 2026-08-13 架构四项检查（违规与架构审计）
+
+方法：先读 architecture.md / 2026-07-02-boundary-remediation / 04-23-head-buffer-render-truth / ui-slices，再跑机器门禁，再人工分层扫描。
+机器门禁：`test:feature-registry` 83/83 全绿（含 module-import-graph / architecture-boundary / edge-registry）。
+
+## 结论摘要（详见对话报告）
+
+- 控制面/数据面：合格。wire 层 BridgeBufferMessage(buffer-sync) vs BridgeServerControlMessage(buffer-head+control) 分离；mux target/channel frame 分离；client control-plane transport 独立；buffer-head 只更 metadata，正文 repaint 唯一入口 session-render-gate（setBuffer 全仓唯一调用点）。
+- 巨型文件：不合格。生产文件 >1000 行 22 个；>4000 行组件 3 个（RemoteWindowOverlay 5853 / TerminalQuickBar 4156 / TerminalPage 4067）；TerminalView 2447；测试文件 >1500 行 14 个（SessionContext.ws-refresh.test.tsx 7877）。
+- 数据流层次：基本合格，4 处向上耦合 smell（模块门禁因同模块内而漏网）：
+  1. lib/open-tab-persistence.ts -> contexts/session-reconnect-helpers.ts（持久化层依赖 contexts）
+  2. lib/session-tail-refresh-store.ts -> contexts/session-pull-state-helpers.ts（type-only）
+  3. hooks/useShortcutActionStorage.ts -> components/terminal/terminal-quickbar-helpers.tsx（逻辑依赖 UI .tsx 文件；该文件还混纯逻辑+JSX 渲染 helper）
+  4. lib/app-update-runtime.ts -> plugins/AppUpdatePlugin.ts（轻）
+- UI/数据分离：4 个组件直写 localStorage（TerminalView / TerminalQuickBar / RemoteWindowOverlay 5 个 key / FileTransferSheet），绕过 src/lib/browser-storage.ts 抽象。
+- 渲染底层/控件、操作/渲染：b447689 拆分未完成。TerminalView（renderer）仍持有：两指滚轮->SGR 输入编码（操作）、横向 pan handler、pinch shim ref、DOM input textarea、横向 offset localStorage 持久化；useMirrorFixedZoomPan（app_shell）仍通过 readHorizontalOffset 读 renderer 的 offset 真源。与 2026-08-13-terminal-render-layer-decoupling.md 第 6 节"再删旧逻辑"未闭合一致。
+- buffer/渲染：合格。buffer manager 零 follow/reading/renderBottomIndex 符号；renderer 只读 projection。
+
+# 2026-08-13 架构拆分执行（goal-436b962c）
+
+## Round 1 完成
+- P0 完成：TerminalView 2447->1635 行；手势状态机（两指滚轮/横向pan/pinch）与横向offset真源收拢到 useMirrorFixedZoomPan（client.app_shell）；新增 src/lib/terminal-mirror-fixed-pan-storage.ts；红测：layer-truth 静态扫描 + hook 行为 + storage 单测 + TerminalView wheel 行为锁。50/50 + 83/83 gate + type-check 全绿。
+- P1a 完成：RemoteWindowOverlay 5853->5795 行；拆出 remote-window-overlay-constants.ts / remote-window-overlay-storage.ts（5 个 storage key 移出组件，localStorage 直写归零）+ 5 个单测；74/74 overlay 套件绿。
+- P1b 完成：TerminalPage 4012->3756 行；拆出 TerminalConnectionStatusStrip.tsx（266 行）+ terminal-page-status-helpers.ts + 5 个 strip 子模块单测；页面 179/179 相关套件绿。
+
+## ⚠️ 事故记录（必须周知 Jason）：
+- 误用 `git checkout -- android/src/pages/TerminalPage.tsx` 覆盖了工作树未提交 WIP（含 RenameDialog 集成 + Herdr catalog 投影，约 +55~+600 行，未入 git 对象库，无法恢复）。
+- 已重建：HEAD 基线 + 从会话内捕获的 WIP strip 全文 + 测试期望推导的 herdr 投影（buildSessionSemanticReuseKey 带 terminalBackend、目标条件 spread）。重建后 46/46 drawer + 12/12 session-preview + 全套件绿，说明保真。
+- 教训：恢复文件必须先查 `git status` 列位置（首列 M = staged，checkout 会覆盖工作树）；本 repo 大量未提交 WIP。
+
+## Round 2 计划
+- P1c: terminal-quickbar-helpers.tsx 拆分（纯逻辑/存储下沉 lib，修 P2#3 + P3 剪贴板/浮钮存储）
+- P2: 修正 lib->contexts 两处（session-reconnect-helpers / session-pull-state-helpers 下沉 lib）
+- P3: FileTransferSheet localStorage 收敛
+- 收尾: 全量 gate + MEMORY 提炼
+
+# 2026-08-13 Round 2 完成（goal-436b962c）
+
+- P1c 完成：terminal-quickbar-helpers.tsx 590->72 行；拆出 src/lib/terminal-quickbar-logic.ts（543 行纯逻辑）+ terminal-quickbar-storage.ts（剪贴板历史/浮钮位置存储）；TerminalQuickBar.tsx localStorage 直写归零；useShortcutActionStorage 改从 lib 导入（P2#3 修复）；新增 11 个单测；58/58 quickbar 套件绿。
+- P2 完成：session-reconnect-helpers.ts / session-pull-state-helpers.ts 从 contexts/ 下沉到 lib/（import 更新 + module-registry owned_paths + feature-registry truth_sources 路径同步）；216/216 受影响套件绿。lib->plugins 耦合（app-update-runtime->AppUpdatePlugin）判定可接受保留。
+- P3 完成：FileTransferSheet localStorage 直写归零（拆出 src/lib/file-transfer-local-edit-copy-storage.ts + 3 单测）；组件层 localStorage 直写已全部收敛。
+- 最终验证：type-check 全绿；feature-registry 83/83（修了 feature-registry.json 两处旧路径）；子模块测试 90/90。
+- 遗留（后续轮次）：P1d 剩余大文件拆分（TerminalPage 3756 / RemoteWindowOverlay 5795 / TerminalQuickBar 4156 单组件 / daemon 大文件）。
+
+# 2026-08-13 Round 3 完成（goal-436b962c）
+
+- P1d 进展：
+  - RemoteWindowOverlay.tsx 5793->4490 行（-1300）：拆出 remote-window-overlay-helpers.ts（546 行纯函数/类型：几何/坐标/网络质量/target 分组）+ remote-window-overlay-styles.ts（806 行样式表）；5 个子模块单测；74/74 套件绿。
+  - TerminalPage.tsx 3781->3608 行（-173）：拆出 terminal-page-helpers.ts（193 行：drawer 状态归一/ui key/session 分组投影）+ 5 个子模块单测；75/75 套件绿。
+- 最终验证：type-check 全绿；feature-registry 83/83；广回归 318 passed/4 skipped。
+- 遗留：TerminalQuickBar 单组件 ~4000 行、daemon 大文件（terminal-mirror-runtime 1503 / terminal-message-runtime 1072 / remote-window-stream-daemon 1487 / remote-window-scripts 1360 / traversal-relay/server 1437）、useSessionOpenActions 1246、FileTransferSheet 2030、TmuxSessionPickerSheet 1505 等。
+
+# 2026-08-13 Round 4 完成（goal-436b962c）
+
+- P1d 进展：
+  - useSessionOpenActions.ts 1286->1199 行：拆出 src/lib/session-open-helpers.ts（103 行：target 匹配/可复用 session/session group 解析）+ 4 单测；44/44 绿。
+  - terminal-mirror-runtime.ts 1503->1410 行：拆出 src/server/terminal-buffer-sync-wire.ts（112 行：wire line index/buffer-sync 消息/大帧分片）+ 4 单测；45/45 绿。
+  - FileTransferSheet.tsx 2077->1923 行：拆出 src/lib/file-transfer-sheet-helpers.ts（180 行：格式化/路径/mime/排序）+ file-transfer-sheet-constants.ts（路径/容量常量）+ 7 单测；56/56 绿。
+- 最终验证：type-check 全绿；feature-registry 83/83；round-4 回归 8 文件全过（263 测试）。
+- 遗留：TerminalQuickBar 单组件 ~4000 行、traversal-relay/server 1437、remote-window-stream-daemon 1487、terminal-message-runtime 1072、remote-window-scripts 1360、TmuxSessionPickerSheet 1505、TerminalSessionDrawer 1182、AttachmentDrawer 1036、App.tsx 1006 等。
+
+# 2026-08-13 Round 5 完成（goal-436b962c）
+
+- P1d 进展：
+  - TmuxSessionPickerSheet.tsx 1508->1446 行：拆出 tmux-session-picker-helpers.ts（刷新时间/relay target/二维码解码）+ 4 单测；18/18 绿。
+  - traversal-relay/server.ts 1437->1378 行：拆出 server-helpers.ts（字符串/HTTP/JSON/socket envelope/key 纯函数）+ 4 单测；relay 套件 9/9 绿（更新了 source-scan 断言指向 server.ts+helpers）。
+- 最终验证：type-check 全绿；feature-registry 83/83；round-5 回归 8 文件全过（131 测试）。
+- 遗留：TerminalQuickBar 单组件 ~4000 行、remote-window-stream-daemon 1487、terminal-message-runtime 1072、remote-window-scripts 1360、TerminalSessionDrawer 1182、AttachmentDrawer 1036、App.tsx 1006、TerminalPage 3608/RemoteWindowOverlay 4490 的单组件主体。
+
+# 2026-08-13 Round 6 完成（goal-436b962c）
+
+- P1d 进展：
+  - AttachmentDrawer.tsx 1036->1010 行：拆出 attachment-drawer-helpers.ts（blob->base64/pan clamp/时间/大小格式化 + MIN/MAX_ZOOM 常量）+ 3 单测；13/13 绿。
+  - TerminalSessionDrawer.tsx 1202->1158 行：拆出 terminal-session-drawer-helpers.ts（状态/分组色调 + 布局常量）+ 3 单测；34/34 绿。
+  - remote-window-stream-daemon.ts 1487->1366 行：拆出 remote-window-stream-daemon-helpers.ts（catalog 克隆/RTC 归一/码率校验/RGBA->I420 + RtcVideoFrame 类型）+ 5 单测；64/64 绿（进程退出 SIGSEGV 为原生 wrtc teardown，与本次无关）。
+- 注册了 2 条新跨模块 import 边（session_drawer_preview->app_shell、remote_window_stream->shared.terminal_types）。
+- 最终验证：type-check 全绿；feature-registry 83/83；round-6 回归 52/52。
+- 遗留：TerminalQuickBar 单组件 ~4000 行、terminal-message-runtime 1072、remote-window-scripts 1360、App.tsx 1006、TerminalPage 3608/RemoteWindowOverlay 4490 单组件主体。
+
+# 2026-08-14 review audit and mux backend-forwarding fix
+
+- MCP review task `20260814T051024Z-review-98797-hcy4lp` reported two findings. The persisted-tab finding conflicts with the active architecture contract: current-process `OPEN_TABS` and `ACTIVE_SESSION` are intentionally removed on cold launch, so that behavior was not changed. The valid Herdr finding was that mux channel-open accepted but dropped the selected backend.
+- `buildSessionMuxChannelOpenFrame()` now forwards `host.terminalBackend` as the typed mux `backend` field. The focused transport regression passes and Herdr attach intent now reaches the daemon adapter.
+- The architecture/module gate also exposed two existing remote-window catalog script files as unowned; both are now registered under `daemon.remote_window_stream`, and the full Android build passes.
+- After rebuild, local OTA verification, daemon reinstall/restart, APK reinstall (`0.1.3.2644`), and app restart, the authenticated real Herdr close-loop passed again: manual `hd-codex` enumerated; input revision 3; resize revision 4 at 100x30; reconnect revision 5; temporary session close removal true.
+# 2026-08-14 session drawer visibility correction
+
+- Jason clarified the defect is drawer entry/content invisible or unopenable, not failure to close.
+- Real-device CDP after installing APK `0.1.3.2618` proved the portrait viewport is `347x754` CSS px and the stable `Sessions` entry is visible at `{x:52,y:47,width:72.4,height:34}` with `pointerEvents:auto`.
+- Before opening, the drawer is mounted with `aria-hidden=true` and translated left. Clicking the entry produces `aria-hidden=false`, drawer rect `{x:0,y:0,width:166.8,height:754.3}`, visible header, and visible session row. The close button returns `aria-hidden=true`.
+- Root cause for the reported UX was the previous interaction contract relying on an edge swipe to expose the drawer; the current owner fix adds a stable portrait entry in `TerminalPage` and keeps the drawer overlay/header/row mounted and inspectable. No transport/service change is needed for this UI defect.
+- Verification: drawer/page focused tests `78/78`; feature registry `83/83`; typecheck, Vite build, Capacitor sync, Gradle debug APK, `adb install -r`, foreground launch, and live CDP open/close evidence all passed. APK `0.1.3.2618`, versionCode `1100026180`, SHA-256 `cf8655ea0a40287cd19581eff0369c7126a879a9ef760ae1e048d625fd75edd3`.
+# 2026-08-14 Herdr adapter follow-up: capability gate and live 2644 revalidation
+
+- Fixed the real Herdr-only discovery failure in `src/server/terminal-control-runtime.ts`: when `defaultBackend === 'herdr'`, catalog enumeration and exact-name resolution no longer invoke tmux. The negative gate proves no tmux spawn occurs in a Herdr-only runtime.
+- Added Herdr executable capability gating in `src/server/server.ts` so a normal tmux daemon does not register an unavailable optional Herdr executable and fail ordinary session listing. Missing Herdr is explicit on Herdr operations; it is not converted into tmux success.
+- Preserved the adapter-resolved `terminalBackend: 'herdr'` on picker open intent. The client does not filter the unified catalog or select a backend for normal discovery; the daemon remains the backend resolver.
+- Rebuilt/installed/restarted APK 0.1.3.2644 and the daemon. Online Herdr close-loop passed again: `hd-codex` was present in the unified catalog; input revision 3, resize revision 4 at 100x30, reconnect revision 5, and temporary-session close removal all passed.
+- Codex review still reports backend-filtered discovery/cache as P1. This is a contract conflict with Jason's explicit requirement that the client remain backend-opaque and not filter the unified daemon catalog; do not implement that reviewer suggestion. WezTerm remains a separate explicit capability gap.
+
+# 2026-08-14 accumulated-WIP review round (commit gate)
+
+- Review task `20260814T064201Z-review-24143-1lb193` (oauth, uncommitted) returned `verdict: fail` with a single P1: session-list cache key omits `target.terminalBackend`.
+- Analysis: the finding is a false positive under the locked daemon-owned unified catalog contract. Every client `list-sessions` call sends `{ type: 'list-sessions' }` without a backend payload; the daemon returns the union (`listTerminalSessions()`) for backend-opaque requests, so tmux and Herdr targets receive identical responses and the cache key omission cannot produce a wrong catalog. Implementing "preserve it in the request payload" would regress to client-side backend management, explicitly rejected in MEMORY.md.
+- Committed the full accumulated WIP batch as one commit per Jason's instruction.

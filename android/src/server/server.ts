@@ -53,7 +53,12 @@ import {
   createWezTermCommandRunner,
 } from './wezterm-backend';
 import { createHerdrBackendRuntime } from './herdr-backend-runtime';
-import { resolveTerminalBackendKind, resolveHerdrExecutable, resolveWezTermExecutable } from './terminal-backend-selection';
+import {
+  isHerdrExecutableAvailable,
+  resolveTerminalBackendKind,
+  resolveHerdrExecutable,
+  resolveWezTermExecutable,
+} from './terminal-backend-selection';
 import {
   createTerminalTransportRuntime,
   type DaemonTransportConnection,
@@ -78,7 +83,7 @@ const PORT = DAEMON_CONFIG.port || DEFAULT_BRIDGE_PORT;
 const HOST = DAEMON_CONFIG.host || DEFAULT_DAEMON_HOST;
 
 const TERMINAL_BACKEND_KIND = resolveTerminalBackendKind();
-const TMUX_BINARY = TERMINAL_BACKEND_KIND === 'tmux' ? resolveTmuxBinary() : '';
+const TMUX_BINARY = resolveTmuxBinary();
 const TERMINAL_BACKEND_RUNTIME = TERMINAL_BACKEND_KIND === 'wezterm'
   ? createWezTermBackendRuntime({
       runner: createWezTermCommandRunner(resolveWezTermExecutable()),
@@ -90,6 +95,18 @@ const TERMINAL_BACKEND_RUNTIME = TERMINAL_BACKEND_KIND === 'wezterm'
         maxMirrorLines: DAEMON_CONFIG.terminalCacheLines,
       })
     : null;
+const HERDR_BACKEND_RUNTIME = TERMINAL_BACKEND_RUNTIME && TERMINAL_BACKEND_KIND === 'herdr'
+  ? TERMINAL_BACKEND_RUNTIME
+  : isHerdrExecutableAvailable()
+    ? createHerdrBackendRuntime({
+        executable: resolveHerdrExecutable(),
+        maxMirrorLines: DAEMON_CONFIG.terminalCacheLines,
+      })
+    : null;
+const TERMINAL_BACKEND_RUNTIMES = {
+  ...(HERDR_BACKEND_RUNTIME ? { herdr: HERDR_BACKEND_RUNTIME } : {}),
+  ...(TERMINAL_BACKEND_KIND === 'wezterm' && TERMINAL_BACKEND_RUNTIME ? { wezterm: TERMINAL_BACKEND_RUNTIME } : {}),
+};
 const DEFAULT_SESSION_NAME = process.env.ZTERM_DEFAULT_SESSION || 'zterm';
 const DAEMON_SESSION_NAME = DAEMON_CONFIG.sessionName || buildDaemonSessionName(PORT);
 const HIDDEN_TMUX_SESSIONS = new Set([DAEMON_SESSION_NAME, DEFAULT_DAEMON_SESSION_NAME, 'zterm-daemon-keepalive']);
@@ -165,6 +182,7 @@ const terminalMirrorCapture = createTerminalMirrorCaptureRuntime({
   logTimePrefix,
   wezTermBackend: TERMINAL_BACKEND_RUNTIME,
   terminalBackendKind: TERMINAL_BACKEND_KIND,
+  backendRuntimes: TERMINAL_BACKEND_RUNTIMES,
 });
 const terminalRuntime = createTerminalRuntime({
   defaultSessionName: DEFAULT_SESSION_NAME,
@@ -184,18 +202,33 @@ const terminalRuntime = createTerminalRuntime({
   normalizeTerminalCols,
   normalizeTerminalRows,
   resolveAttachGeometry,
-  readTmuxPaneMetrics: (sessionName) => terminalMirrorCapture.readTmuxPaneMetrics(sessionName),
-  resizeBackendSession: TERMINAL_BACKEND_KIND === 'tmux'
-    ? undefined
-    : TERMINAL_BACKEND_RUNTIME?.resizeSession
-    ? (sessionName, geometry) => {
-      TERMINAL_BACKEND_RUNTIME.resizeSession?.(sessionName, geometry);
+  readTmuxPaneMetrics: (sessionName, backend) => terminalMirrorCapture.readTmuxPaneMetrics(sessionName, backend),
+  resizeBackendSession: (sessionName, geometry, backend) => {
+    if ((backend || 'tmux') === 'tmux' && TERMINAL_BACKEND_KIND !== 'wezterm') {
+      terminalControlRuntime.runTmux([
+        'resize-window', '-t', terminalControlRuntime.buildExactTmuxSessionTarget(sessionName), '-x', String(geometry.cols),
+      ]);
+      return;
     }
-    : undefined,
-  assertTmuxSessionExists: (sessionName) => {
-    if (TERMINAL_BACKEND_RUNTIME) {
-      if (!TERMINAL_BACKEND_RUNTIME.listSessions().some((session) => session.sessionName === sessionName)) {
-        throw new Error(`${TERMINAL_BACKEND_KIND} session not found: ${sessionName}`);
+    const externalBackend = backend === 'herdr' ? HERDR_BACKEND_RUNTIME : TERMINAL_BACKEND_RUNTIMES.wezterm;
+    if (!externalBackend?.resizeSession) {
+      throw new Error(`${backend || 'unknown'} backend does not support resize`);
+    }
+    externalBackend.resizeSession(sessionName, geometry);
+  },
+  assertTmuxSessionExists: (sessionName, backend) => {
+    if (backend === 'herdr') {
+      if (!HERDR_BACKEND_RUNTIME) {
+        throw new Error('herdr backend is not available on this daemon');
+      }
+      if (!HERDR_BACKEND_RUNTIME.listSessions().some((session) => session.sessionName === sessionName)) {
+        throw new Error(`herdr session not found: ${sessionName}`);
+      }
+      return;
+    }
+    if (TERMINAL_BACKEND_KIND === 'wezterm') {
+      if (!TERMINAL_BACKEND_RUNTIMES.wezterm?.listSessions().some((session) => session.sessionName === sessionName)) {
+        throw new Error(`wezterm session not found: ${sessionName}`);
       }
       return;
     }
@@ -203,6 +236,7 @@ const terminalRuntime = createTerminalRuntime({
       'has-session', '-t', terminalControlRuntime.buildExactTmuxSessionTarget(sessionName),
     ]);
   },
+  resolveTerminalSessionBackend: (sessionName) => terminalControlRuntime.resolveTerminalSessionBackend(sessionName),
   captureMirrorAuthoritativeBufferFromTmux: terminalMirrorCapture.captureMirrorAuthoritativeBufferFromTmux,
   mirrorBufferChanged: (mirror, previousStartIndex, previousLines) => findChangedIndexedRanges({
     previousStartIndex,
@@ -211,14 +245,14 @@ const terminalRuntime = createTerminalRuntime({
     nextLines: mirror.bufferLines,
   }),
   mirrorCursorEqual,
-  writeToLiveMirror: (sessionName, payload, appendEnter) =>
-    terminalControlRuntime.writeToLiveMirror(sessionName, payload, appendEnter),
-  enqueueLiveMirrorInput: (sessionName, payload, appendEnter, shouldWrite) =>
-    terminalControlRuntime.enqueueLiveMirrorInput(sessionName, payload, appendEnter, shouldWrite),
-  disposeLiveMirrorInputBatch: (sessionName, reason) =>
-    terminalControlRuntime.disposeLiveMirrorInputBatch(sessionName, reason),
-  writeToTmuxSession: (sessionName, payload, appendEnter) =>
-    terminalControlRuntime.writeToTmuxSession(sessionName, payload, appendEnter),
+  writeToLiveMirror: (sessionName, payload, appendEnter, backend) =>
+    terminalControlRuntime.writeToLiveMirror(sessionName, payload, appendEnter, backend),
+  enqueueLiveMirrorInput: (sessionName, payload, appendEnter, shouldWrite, backend) =>
+    terminalControlRuntime.enqueueLiveMirrorInput(sessionName, payload, appendEnter, shouldWrite, backend),
+  disposeLiveMirrorInputBatch: (sessionName, reason, backend) =>
+    terminalControlRuntime.disposeLiveMirrorInputBatch(sessionName, reason, backend),
+  writeToTmuxSession: (sessionName, payload, appendEnter, backend) =>
+    terminalControlRuntime.writeToTmuxSession(sessionName, payload, appendEnter, backend),
   autoCommandDelayMs: AUTO_COMMAND_DELAY_MS,
   waitMs: (delayMs) => new Promise((resolve) => setTimeout(resolve, delayMs)),
   runTmux: (args) => terminalControlRuntime.runTmux(args),
@@ -238,7 +272,7 @@ const terminalFileTransferRuntime = createTerminalFileTransferRuntime({
     terminalControlRuntime.writeToTmuxSession(sessionName, payload, appendEnter),
   writeToLiveMirror: (sessionName, payload, appendEnter) =>
     terminalControlRuntime.writeToLiveMirror(sessionName, payload, appendEnter),
-  readTmuxPaneCurrentPath: (sessionName) => terminalMirrorCapture.readTmuxPaneCurrentPath(sessionName),
+  readTmuxPaneCurrentPath: (sessionName, backend) => terminalMirrorCapture.readTmuxPaneCurrentPath(sessionName, backend),
   runCommand: (command, args) => {
     terminalControlRuntime.runCommand(command, args);
   },
@@ -270,12 +304,16 @@ terminalControlRuntime = createTerminalControlRuntime({
   sanitizeSessionName,
   daemonRuntimeDebug,
   wezTermBackend: TERMINAL_BACKEND_RUNTIME,
+  backendRuntimes: TERMINAL_BACKEND_RUNTIMES,
+  defaultBackend: TERMINAL_BACKEND_KIND,
 });
 const {
   runTmux,
   writeToTmuxSession,
   writeToLiveMirror,
   listTmuxSessions,
+  listTerminalSessions,
+  resolveTerminalSessionBackend,
   createDetachedTmuxSession,
   closeDetachedTerminalSession,
   renameTmuxSession,
@@ -286,9 +324,12 @@ remoteWindowStreamRuntime = createRemoteWindowStreamDaemonRuntime({
   runTmux,
 });
 
-// Ensure tmux server is running with standardized socket path
-terminalControlRuntime.ensureTmuxServerRunning();
-terminalRuntime.restorePersistedAdaptiveWidthBaselines(listTmuxSessions());
+// Tmux is an optional external backend. Do not initialize or query it when
+// the daemon is explicitly serving Herdr/WezTerm only.
+if (TERMINAL_BACKEND_KIND === 'tmux') {
+  terminalControlRuntime.ensureTmuxServerRunning();
+  terminalRuntime.restorePersistedAdaptiveWidthBaselines(listTmuxSessions());
+}
 const terminalTransportRuntime = createTerminalTransportRuntime({
   sessions,
   connections,
@@ -316,6 +357,19 @@ terminalScheduleRuntime = createTerminalScheduleRuntime({
       {
         writeToLiveMirror,
         writeToTmuxSession,
+        isHerdrSession: (sessionName, backend = 'tmux') => {
+          if (backend !== 'herdr') {
+            return false;
+          }
+          const registered = Array.from(sessions.values()).some((session) =>
+            session.sessionName === sessionName && session.backend === 'herdr')
+            || Array.from(mirrors.values()).some((mirror) =>
+              mirror.sessionName === sessionName && mirror.backend === 'herdr');
+          if (registered) return true;
+          if (TERMINAL_BACKEND_KIND !== 'herdr') return false;
+          if (!HERDR_BACKEND_RUNTIME) return false;
+          return HERDR_BACKEND_RUNTIME.listSessions().some((session) => session.sessionName === sessionName);
+        },
       },
       job,
     ),
@@ -374,6 +428,8 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
     sendMessage,
     sendScheduleStateToSession,
     listTmuxSessions,
+    listTerminalSessions,
+    resolveTerminalSessionBackend,
     createDetachedTmuxSession,
     closeDetachedTerminalSession,
     renameTmuxSession,

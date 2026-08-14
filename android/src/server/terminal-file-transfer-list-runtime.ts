@@ -342,7 +342,7 @@ export function createTerminalFileTransferListRuntime(
     try {
       const resolvedPath = resolveFileTransferListPath(
         requestedPath,
-        () => deps.readTmuxPaneCurrentPath(session.sessionName),
+        () => deps.readTmuxPaneCurrentPath(session.sessionName, session.backend),
       );
       const cacheEntry = getDirectoryCache(resolvedPath);
 
@@ -369,7 +369,7 @@ export function createTerminalFileTransferListRuntime(
     try {
       const resolvedPath = resolveFileTransferListPath(
         requestedPath,
-        () => deps.readTmuxPaneCurrentPath(session.sessionName),
+        () => deps.readTmuxPaneCurrentPath(session.sessionName, session.backend),
       );
       const directoryName = requestedName.trim();
       if (!directoryName) {

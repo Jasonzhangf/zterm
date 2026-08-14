@@ -29,7 +29,7 @@ export interface TerminalRuntime {
   mirrors: () => Map<string, SessionMirror>;
   getTransportSubscriber: (subscriberId: string) => TerminalTransportSubscriber | null;
   getMirrorByKey: (mirrorKey: string) => SessionMirror | null;
-  createMirror: (sessionName: string) => SessionMirror;
+  createMirror: (sessionName: string, backend?: 'tmux' | 'herdr') => SessionMirror;
   getSubscriberMirror: (subscriber: TerminalTransportSubscriber) => SessionMirror | null;
   createTransportSubscriber: (connection: TerminalTransportConnection) => TerminalTransportSubscriber;
   createMuxChannelSubscriber: (
@@ -47,7 +47,7 @@ export interface TerminalRuntime {
     reason: string,
     options?: { closeTransportSubscribers?: boolean; notifyClientClose?: boolean; releaseCode?: string },
   ) => void;
-  disposeLiveMirrorInputBatch: (sessionName: string, reason: string) => number;
+  disposeLiveMirrorInputBatch: (sessionName: string, reason: string, backend?: 'tmux' | 'herdr') => number;
   ensureSessionReady: (subscriber: TerminalTransportSubscriber, mirror: SessionMirror) => void;
   sendBufferHeadToSession: (subscriber: TerminalTransportSubscriber, mirror: SessionMirror) => void;
   refreshMirrorHeadForSession: (subscriber: TerminalTransportSubscriber, mirror: SessionMirror) => Promise<boolean>;
@@ -91,6 +91,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
       muxChannelId: null,
       muxParentTransportId: null,
       sessionName: deps.defaultSessionName,
+      backend: 'tmux',
       mirrorKey: null,
       bodySubscribed: true,
       adaptiveWidthCols: null,
@@ -174,6 +175,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
       muxChannelId: normalizedChannelId,
       muxParentTransportId: connection.transportId,
       sessionName: deps.defaultSessionName,
+      backend: 'tmux',
       mirrorKey: null,
       bodySubscribed: true,
       adaptiveWidthCols: null,
@@ -256,7 +258,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
       // mirror must NOT survive into a future attach. We deliberately drop
       // the in-queue items here; in-flight tmux spawn (if any) resolves
       // naturally because shouldWrite() will return false on the next check.
-      deps.disposeLiveMirrorInputBatch(mirror.sessionName, `detach:${reason}`);
+      deps.disposeLiveMirrorInputBatch(mirror.sessionName, `detach:${reason}`, mirror.backend);
       // R10: do not force a 0-delay capture after detach. If peers are still
       // attached, their own live sync loop will catch the new mirror state.
       // Forcing immediate capture here caused tmux to thrash on every
@@ -280,7 +282,7 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
       const detachResult = detachMirrorSubscriber(mirror.subscribers, subscriber.id);
       mirror.subscribers = detachResult.nextSubscribers;
       // R3: drop the input queue for this mirror before the session is gone.
-      deps.disposeLiveMirrorInputBatch(mirror.sessionName, `close:${reason}`);
+      deps.disposeLiveMirrorInputBatch(mirror.sessionName, `close:${reason}`, mirror.backend);
       // R10: do not force a 0-delay capture after close. If peers are still
       // attached, their own live sync loop will catch the new mirror state.
       if (mirror.subscribers.size > 0) {
@@ -332,8 +334,8 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     detachSubscriberTransportOnly,
     closeTransportSubscriber,
     destroyMirror: mirrorRuntime.destroyMirror,
-    disposeLiveMirrorInputBatch: (sessionName, reason) =>
-      mirrorRuntime.disposeLiveMirrorInputBatch(sessionName, reason),
+    disposeLiveMirrorInputBatch: (sessionName, reason, backend) =>
+      mirrorRuntime.disposeLiveMirrorInputBatch(sessionName, reason, backend),
     ensureSessionReady: mirrorRuntime.ensureSessionReady,
     sendBufferHeadToSession: mirrorRuntime.sendBufferHeadToSession,
     refreshMirrorHeadForSession: mirrorRuntime.refreshMirrorHeadForSession,

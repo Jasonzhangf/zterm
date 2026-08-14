@@ -119,6 +119,16 @@ function buildTmuxControlTransportKey(
   });
 }
 
+function buildTmuxSessionListCacheKey(
+  target: BridgeTarget,
+  traversalSettings: TmuxSessionTraversalSettings,
+  overrideUrl?: string,
+) {
+  return JSON.stringify({
+    transport: buildTmuxControlTransportKey(target, traversalSettings, overrideUrl),
+  });
+}
+
 function isUsableTmuxControlTransport(ws: ReturnType<typeof createClientDaemonTraversalSocket>) {
   return ws.readyState === TRANSPORT_OPEN || ws.readyState === TRANSPORT_CONNECTING;
 }
@@ -359,19 +369,20 @@ export function fetchTmuxSessions(
   traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode' | 'traversalRelay'>,
   overrideUrl?: string,
 ) {
-  const cacheKey = buildTmuxControlTransportKey(target, traversalSettings, overrideUrl);
+  const cacheKey = buildTmuxSessionListCacheKey(target, traversalSettings, overrideUrl);
   const cached = tmuxSessionListCache.get(cacheKey);
   if (cached && Date.now() - cached.at < TMUX_SESSION_LIST_CACHE_TTL_MS) {
     return Promise.resolve([...cached.sessionNames]);
   }
-  return sendTmuxRequest(target, traversalSettings, { type: 'list-sessions' }, overrideUrl).then((sessionNames) => {
+  const message: TerminalMuxTargetClientMessage = { type: 'list-sessions' };
+  return sendTmuxRequest(target, traversalSettings, message, overrideUrl).then((sessionNames) => {
     tmuxSessionListCache.set(cacheKey, { sessionNames, at: Date.now() });
     return sessionNames;
   });
 }
 
 function invalidateTmuxSessionListCache(target: BridgeTarget, traversalSettings: TmuxSessionTraversalSettings, overrideUrl?: string) {
-  tmuxSessionListCache.delete(buildTmuxControlTransportKey(target, traversalSettings, overrideUrl));
+  tmuxSessionListCache.delete(buildTmuxSessionListCacheKey(target, traversalSettings, overrideUrl));
 }
 
 export function createTmuxSession(
@@ -382,8 +393,11 @@ export function createTmuxSession(
 ) {
   const overrideUrl = typeof options === 'string' ? options : options?.overrideUrl;
   const cwd = typeof options === 'string' ? undefined : options?.cwd?.trim();
-  const payload: { sessionName: string; cwd?: string } = { sessionName };
+  const payload: { sessionName: string; cwd?: string; terminalBackend?: 'tmux' | 'herdr' } = {
+    sessionName,
+  };
   if (cwd) payload.cwd = cwd;
+  if (target.terminalBackend === 'herdr') payload.terminalBackend = 'herdr';
   const result = sendTmuxRequest(
     target,
     traversalSettings,
@@ -401,10 +415,14 @@ export function renameTmuxSession(
   nextSessionName: string,
   overrideUrl?: string,
 ) {
+  const payload: { sessionName: string; nextSessionName: string } = {
+    sessionName,
+    nextSessionName,
+  };
   const result = sendTmuxRequest(
     target,
     traversalSettings,
-    { type: 'tmux-rename-session', payload: { sessionName, nextSessionName } },
+    { type: 'tmux-rename-session', payload },
     overrideUrl,
   );
   invalidateTmuxSessionListCache(target, traversalSettings, overrideUrl);
@@ -417,7 +435,11 @@ export function killTmuxSession(
   sessionName: string,
   overrideUrl?: string,
 ) {
-  const result = sendTmuxRequest(target, traversalSettings, { type: 'tmux-kill-session', payload: { sessionName } }, overrideUrl);
+  const payload: { sessionName: string } = { sessionName };
+  const result = sendTmuxRequest(target, traversalSettings, {
+    type: 'tmux-kill-session',
+    payload,
+  }, overrideUrl);
   invalidateTmuxSessionListCache(target, traversalSettings, overrideUrl);
   return result;
 }

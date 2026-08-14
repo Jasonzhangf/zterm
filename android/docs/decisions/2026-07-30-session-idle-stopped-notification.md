@@ -178,7 +178,7 @@ New edges:
 
 1. **No mirror for a tmux session** — sessions that have no mirror (never attached) are not included in `sessionActivity`; they still appear in `sessions` as plain names.
 2. **Activity resumes after stopped** — when `lastLiveActivityAt` moves forward, `stopped` becomes `false`. The app handles the transition.
-3. **Multiple mirrors same session** — not possible; mirror key is unique per tmux session name.
+3. **Multiple mirrors same backend/session** — not possible; mirror key is unique per backend-qualified session identity (`<backend>:<sessionName>`). Tmux and Herdr sessions with the same user-visible name remain independent mirrors.
 4. **No subscriber** — idle classification still runs; it is daemon-side liveness only.
 5. **Heartbeat fails** — the heartbeat loop already has error handling; idle broadcast failure is silent.
 

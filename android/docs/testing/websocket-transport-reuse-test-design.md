@@ -9,6 +9,11 @@ Lock the Android client transport rule that a same-target usable daemon-target p
 
 Next architecture step: replace per-session physical body sockets with one daemon-target physical transport plus per-session logical channels. Relay/WebRTC recovery must be target-scoped and client-device-scoped too: a valid 30-minute idle-timeout Relay peer lease may resume a physical daemon-target route for the same phone, but missing device identity is rejected, leases cannot be shared across phones, and leases cannot preserve or infer terminal channel/session/tmux/UI truth.
 
+Startup reconnect admission rule:
+- `HTTP /health` candidate probes are diagnostic-only.
+- The selected WebSocket/WebRTC transport owner must be queued immediately.
+- A missing, unauthenticated, CORS-blocked, or route-inapplicable HTTP health response must not suppress mux open.
+
 ## Architecture Boundary
 
 Owner:
@@ -115,6 +120,11 @@ Negative:
 - Negative: replacing a scheduled reconnect clears the old timer; deleting a session or clearing all runtimes clears every scheduled timer before dropping state.
 - Negative: `phase='connecting'` cannot carry a timer field; start-reconnect must not queue another timer or another target open while the runtime is already `scheduled` or `connecting`.
 - Negative: manual close suppresses retryable reconnect and must not project a terminal error, emit a closed/error status, or start a reconnect attempt.
+
+`runReconnectHostProbeAndFallback()`:
+- Positive: all HTTP candidate probes false still queue exactly one typed transport open for the current host.
+- Positive: a pending HTTP probe does not delay the typed transport open.
+- Negative: the diagnostic probe may record metadata, but must not rewrite host selection, schedule a second reconnect, or project a successful route.
 
 `connectSessionRuntime()`:
 - Given same target and `OPEN` socket, it must not call `cleanupSocket` or `queueConnectTransportOpenIntent`.

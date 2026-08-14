@@ -12,7 +12,7 @@ export interface SessionRenderBufferStore {
   setBuffer: (
     sessionId: string,
     buffer: SessionRenderBufferSnapshot,
-    options?: { allowRevisionRegression?: boolean },
+    options?: { allowRevisionRegression?: boolean; immutableProjection?: boolean },
   ) => boolean;
   deleteSession: (sessionId: string) => void;
 }
@@ -205,7 +205,7 @@ export function createSessionRenderBufferStore(
   const setBuffer = (
     sessionId: string,
     buffer: SessionRenderBufferSnapshot,
-    setOptions?: { allowRevisionRegression?: boolean },
+    setOptions?: { allowRevisionRegression?: boolean; immutableProjection?: boolean },
   ) => {
     const previous = snapshots.get(sessionId);
     if (
@@ -226,12 +226,14 @@ export function createSessionRenderBufferStore(
       });
       return false;
     }
-    if (previous && renderBuffersEqual(previous.buffer, buffer)) {
+    if (previous && !setOptions?.immutableProjection && renderBuffersEqual(previous.buffer, buffer)) {
       return false;
     }
     snapshots.set(sessionId, {
       revision: (previous?.revision || 0) + 1,
-      buffer: cloneRenderBuffer(buffer, previous?.buffer || null),
+      buffer: setOptions?.immutableProjection
+        ? { ...buffer }
+        : cloneRenderBuffer(buffer, previous?.buffer || null),
     });
     notify(sessionId);
     return true;

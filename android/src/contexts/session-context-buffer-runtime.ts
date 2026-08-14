@@ -36,7 +36,7 @@ import {
   doesSessionPullStateMatchExactLocalSnapshot,
   type SessionPullPurpose,
   type SessionPullStates,
-} from './session-pull-state-helpers';
+} from '../lib/session-pull-state-helpers';
 import { normalizeTerminalCursorState } from './session-wire-helpers';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import { buildBufferSyncRepairSignature } from '@zterm/shared/terminal/pull-state-planner';

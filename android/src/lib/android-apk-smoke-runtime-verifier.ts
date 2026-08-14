@@ -10,6 +10,7 @@ export interface ApkSmokeDebugSnapshotRecord {
 export interface ApkSmokeRuntimeSnapshot {
   clientDebugSnapshots?: ApkSmokeDebugSnapshotRecord[];
   clientSessions?: Array<Record<string, unknown>>;
+  transportSubscribers?: Array<Record<string, unknown>>;
 }
 
 export interface ApkSmokeRuntimeLogs {
@@ -22,6 +23,11 @@ export interface ApkSmokeTerminalRuntimeVerdict {
   failedChecks: string[];
   checks: Record<string, boolean>;
   details: Record<string, unknown>;
+}
+
+export function isApkSmokeClientInputSendScope(scope: string) {
+  return scope === 'session.input.send'
+    || scope === 'session.input.reliable-send';
 }
 
 function asRecord(value: unknown) {

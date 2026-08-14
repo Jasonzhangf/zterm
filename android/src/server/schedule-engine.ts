@@ -20,7 +20,7 @@ export interface ScheduleEngineOptions {
   initialJobs?: ScheduleJob[];
   saveJobs: (jobs: ScheduleJob[]) => void;
   executeJob: (job: ScheduleJob) => Promise<ScheduleExecutionResult> | ScheduleExecutionResult;
-  onStateChange?: (sessionName: string, jobs: ScheduleJob[]) => void;
+  onStateChange?: (sessionName: string, jobs: ScheduleJob[], backend?: 'tmux' | 'herdr') => void;
   onEvent?: (event: ScheduleEventPayload) => void;
   now?: () => Date;
 }
@@ -71,9 +71,9 @@ export class ScheduleEngine {
     }
   }
 
-  listBySession(sessionName: string) {
+  listBySession(sessionName: string, backend: 'tmux' | 'herdr' = 'tmux') {
     return Array.from(this.jobs.values())
-      .filter((job) => job.targetSessionName === sessionName)
+      .filter((job) => job.targetSessionName === sessionName && (job.terminalBackend || 'tmux') === backend)
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt));
   }
 
@@ -83,11 +83,12 @@ export class ScheduleEngine {
     const normalized = normalizeScheduleDraft(draft, { now, existing });
     const nextJob: ScheduleJob = {
       ...normalized,
+      terminalBackend: draft.terminalBackend || existing?.terminalBackend || 'tmux',
       id: normalized.id || existing?.id || uuidv4(),
     };
     this.jobs.set(nextJob.id, nextJob);
     this.persistAndReschedule();
-    this.emitState(nextJob.targetSessionName);
+    this.emitState(nextJob.targetSessionName, nextJob.terminalBackend || 'tmux');
     this.emitEvent({
       sessionName: nextJob.targetSessionName,
       jobId: nextJob.id,
@@ -105,7 +106,7 @@ export class ScheduleEngine {
     }
     this.jobs.delete(jobId);
     this.persistAndReschedule();
-    this.emitState(existing.targetSessionName);
+    this.emitState(existing.targetSessionName, existing.terminalBackend || 'tmux');
     this.emitEvent({
       sessionName: existing.targetSessionName,
       jobId,
@@ -130,7 +131,7 @@ export class ScheduleEngine {
     };
     this.jobs.set(jobId, nextJob);
     this.persistAndReschedule();
-    this.emitState(nextJob.targetSessionName);
+    this.emitState(nextJob.targetSessionName, nextJob.terminalBackend || 'tmux');
     this.emitEvent({
       sessionName: nextJob.targetSessionName,
       jobId,
@@ -151,14 +152,14 @@ export class ScheduleEngine {
     return executed;
   }
 
-  renameSession(previousSessionName: string, nextSessionName: string) {
+  renameSession(previousSessionName: string, nextSessionName: string, backend: 'tmux' | 'herdr' = 'tmux') {
     if (!previousSessionName || previousSessionName === nextSessionName) {
       return;
     }
     const now = this.now().toISOString();
     let touched = false;
     for (const [jobId, job] of this.jobs.entries()) {
-      if (job.targetSessionName !== previousSessionName) {
+      if (job.targetSessionName !== previousSessionName || (job.terminalBackend || 'tmux') !== backend) {
         continue;
       }
       touched = true;
@@ -173,15 +174,15 @@ export class ScheduleEngine {
       return;
     }
     this.persistAndReschedule();
-    this.emitState(previousSessionName);
-    this.emitState(nextSessionName);
+    this.emitState(previousSessionName, backend);
+    this.emitState(nextSessionName, backend);
   }
 
-  markSessionMissing(sessionName: string, message = 'session not found') {
+  markSessionMissing(sessionName: string, message = 'session not found', backend: 'tmux' | 'herdr' = 'tmux') {
     const now = this.now().toISOString();
     let touched = false;
     for (const [jobId, job] of this.jobs.entries()) {
-      if (job.targetSessionName !== sessionName) {
+      if (job.targetSessionName !== sessionName || (job.terminalBackend || 'tmux') !== backend) {
         continue;
       }
       touched = true;
@@ -195,6 +196,7 @@ export class ScheduleEngine {
       });
       this.emitEvent({
         sessionName,
+        terminalBackend: backend,
         jobId,
         type: 'error',
         at: now,
@@ -205,11 +207,11 @@ export class ScheduleEngine {
       return;
     }
     this.persistAndReschedule();
-    this.emitState(sessionName);
+    this.emitState(sessionName, backend);
   }
 
-  private emitState(sessionName: string) {
-    this.onStateChange?.(sessionName, this.listBySession(sessionName));
+  private emitState(sessionName: string, backend: 'tmux' | 'herdr' = 'tmux') {
+    this.onStateChange?.(sessionName, this.listBySession(sessionName, backend), backend);
   }
 
   private emitEvent(event: ScheduleEventPayload) {
@@ -288,7 +290,7 @@ export class ScheduleEngine {
         nextFireAt: undefined,
       };
       this.jobs.delete(job.id);
-      this.emitState(currentBeforeExecute.targetSessionName);
+      this.emitState(currentBeforeExecute.targetSessionName, currentBeforeExecute.terminalBackend || 'tmux');
       this.emitEvent({
         sessionName: stoppedJob.targetSessionName,
         jobId: stoppedJob.id,
@@ -308,7 +310,7 @@ export class ScheduleEngine {
           nextFireAt: undefined,
         };
         this.jobs.delete(job.id);
-        this.emitState(currentBeforeExecute.targetSessionName);
+        this.emitState(currentBeforeExecute.targetSessionName, currentBeforeExecute.terminalBackend || 'tmux');
         this.emitEvent({
           sessionName: stoppedJob.targetSessionName,
           jobId: stoppedJob.id,
@@ -360,7 +362,7 @@ export class ScheduleEngine {
     } else {
       this.jobs.set(job.id, nextJob);
     }
-    this.emitState(nextJob.targetSessionName);
+    this.emitState(nextJob.targetSessionName, nextJob.terminalBackend || 'tmux');
     this.emitEvent({
       sessionName: nextJob.targetSessionName,
       jobId: nextJob.id,

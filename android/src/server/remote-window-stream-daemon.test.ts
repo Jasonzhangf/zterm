@@ -1547,6 +1547,13 @@ sleep 2
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('Task { @MainActor in');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('try? await Task.sleep(for: .milliseconds(50))');
     expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('windowId: command.windowId');
+    // 防回归：组合与单窗口两个主循环都必须校验 captureLoopGeneration，
+    // 否则旧循环会在 startSingleWindowCapture/startCompositeCapture 复位
+    // compositeStopped=false 后复活，用旧 content 快照持续发黑帧。
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT.match(/while !compositeStopped && generation == captureLoopGeneration/g)).toHaveLength(2);
+    // 防回归：单窗口 update-config 必须重枚举 SCShareableContent 并验证目标窗口存在，
+    // 否则启动后新出现的窗口 miss 时 ACK ok:true（假阳性）并输出全黑帧。
+    expect(SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT).toContain('target window not found in fresh shareable content');
 
     expect(buildScreenCaptureKitConfig(makeAppStreamTarget(), 60)).toMatchObject({
       frameRate: 60,
@@ -3267,6 +3274,52 @@ describe('remote window stream update-focus pending gate', () => {
       code: 'remote_window_stream_update_focus_busy',
       message: 'remote window focus update already in flight',
     });
+  });
+
+  it('propagates capture updateTarget rejection so the router can emit update_focus_failed', async () => {
+    const fakePeer = new FakeRemoteWindowPeerConnection();
+    const fakeTrack = makeFakeMediaStreamTrack();
+    const target = makeStreamTarget();
+    const updateTarget = vi.fn(async () => {
+      throw new Error('target window not found in fresh shareable content');
+    });
+    const runtime = createRemoteWindowStreamDaemonRuntime({
+      platform: 'darwin',
+      captureSourceFactory: vi.fn(async () => ({
+        width: 2,
+        height: 2,
+        frameRate: 30,
+        updateTarget,
+        stop: vi.fn(),
+      })),
+      peerConnectionFactory: vi.fn(() => fakePeer as unknown as RTCPeerConnection),
+      rtcSessionDescriptionFactory: vi.fn((description) => description as RTCSessionDescription),
+      videoSourceFactory: vi.fn(() => ({
+        createTrack: vi.fn(() => fakeTrack),
+        onFrame: vi.fn(),
+      } as any)),
+      rgbaToI420: vi.fn((_rgba, i420) => {
+        i420.data.fill(9);
+      }),
+      runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
+    });
+
+    await runtime.startStream({
+      requestId: 'rw-focus-reject-start',
+      streamId: 'stream-focus-reject',
+      target,
+      offer: { type: 'offer', sdp: 'android-offer-sdp' },
+    });
+
+    await expect(runtime.updateFocus({
+      requestId: 'rw-focus-reject',
+      streamId: 'stream-focus-reject',
+      revision: 1,
+      target: {
+        ...target,
+        videoTarget: { ...target.videoTarget, windowId: 'window-ghost' },
+      },
+    })).rejects.toThrow('target window not found in fresh shareable content');
   });
 });
 

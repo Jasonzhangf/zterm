@@ -24,21 +24,27 @@ export interface TerminalMessageControlRuntimeDeps {
   issueSessionTransportToken: () => string;
   consumeSessionTransportToken: (token: string) => boolean;
   scheduleEngine: {
-    listBySession: (sessionName: string) => ScheduleJob[];
+    listBySession: (sessionName: string, backend?: 'tmux' | 'herdr') => ScheduleJob[];
     upsert: (job: ScheduleJobDraft) => void;
     delete: (jobId: string) => ScheduleJob | null;
     toggle: (jobId: string, enabled: boolean) => ScheduleJob | null;
     runNow: (jobId: string) => Promise<unknown>;
-    renameSession: (currentName: string, nextName: string) => void;
-    markSessionMissing: (sessionName: string, reason: string) => void;
+    renameSession: (currentName: string, nextName: string, backend?: 'tmux' | 'herdr') => void;
+    markSessionMissing: (sessionName: string, reason: string, backend?: 'tmux' | 'herdr') => void;
   };
   sendTransportMessage: (transport: TerminalSessionTransport | null | undefined, message: TerminalTransportServerFrame) => void;
   sendMessage: (session: TerminalTransportSubscriber, message: ServerMessage) => void;
-  sendScheduleStateToSession: (session: TerminalTransportSubscriber, sessionName?: string) => void;
-  listTmuxSessions: () => string[];
-  createDetachedTmuxSession: (sessionName?: string, cwd?: string) => string;
-  closeDetachedTerminalSession: (sessionName: string) => void;
-  renameTmuxSession: (currentName?: string, nextName?: string) => string;
+  sendScheduleStateToSession: (
+    session: TerminalTransportSubscriber,
+    sessionName?: string,
+    backend?: 'tmux' | 'herdr',
+  ) => void;
+  listTmuxSessions: (backend?: 'tmux' | 'herdr') => string[];
+  listTerminalSessions?: () => string[];
+  resolveTerminalSessionBackend?: (sessionName: string) => 'tmux' | 'herdr';
+  createDetachedTmuxSession: (sessionName?: string, cwd?: string, backend?: 'tmux' | 'herdr') => string;
+  closeDetachedTerminalSession: (sessionName: string, backend?: 'tmux' | 'herdr') => void;
+  renameTmuxSession: (currentName?: string, nextName?: string, backend?: 'tmux' | 'herdr') => string;
   runTmux: (args: string[]) => { ok: true; stdout: string };
   sanitizeSessionName: (input?: string) => string;
   createTransportSubscriber: (connection: TerminalTransportConnection) => TerminalTransportSubscriber;
@@ -50,7 +56,7 @@ export interface TerminalMessageControlRuntimeDeps {
     connection: TerminalTransportConnection,
     subscriber: TerminalTransportSubscriber,
   ) => TerminalTransportSubscriber;
-  getMirrorKey: (sessionName: string) => string;
+  getMirrorKey: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
   attachTmux: (session: TerminalTransportSubscriber, payload: TerminalAttachPayload) => Promise<void>;
   handleAdaptiveResize?: (
     session: TerminalTransportSubscriber,
@@ -115,15 +121,25 @@ export function handleSessionTransportConnectRuntime(
     `[server] transport-attach-ok transport=${connection.transportId} openRequestId=${payload.openRequestId || 'n/a'} session=${deps.sanitizeSessionName(payload.sessionName)}`,
   );
   const subscriber = deps.createTransportSubscriber(connection);
+  subscriber.backend = payload.backend || deps.resolveTerminalSessionBackend?.(payload.sessionName);
+  if (!subscriber.backend) {
+    throw new Error(`terminal session backend resolver unavailable for ${payload.sessionName}`);
+  }
   return deps.bindConnectionToSubscriber(connection, subscriber);
 }
 
 export function handleListSessionsMessageRuntime(
   deps: TerminalMessageControlRuntimeDeps,
   connection: TerminalTransportConnection,
+  message: { type: 'list-sessions'; payload?: { terminalBackend?: 'tmux' | 'herdr' } } = { type: 'list-sessions' },
 ) {
   try {
-    deps.sendTransportMessage(connection.transport, { type: 'sessions', payload: { sessions: deps.listTmuxSessions() } });
+    const sessions = message.payload?.terminalBackend
+      ? deps.listTmuxSessions(message.payload.terminalBackend)
+      : deps.listTerminalSessions
+        ? deps.listTerminalSessions()
+        : deps.listTmuxSessions();
+    deps.sendTransportMessage(connection.transport, { type: 'sessions', payload: { sessions } });
     publishSessionActivitiesRuntime({
       connection,
       mirrors: deps.mirrors,
@@ -180,9 +196,35 @@ export function handleScheduleMessageRuntime(
     return;
   }
 
+  if (session.backend === 'herdr') {
+    sendScheduleError(session, {
+      operation: message.type === 'schedule-list'
+        ? 'list'
+        : message.type === 'schedule-upsert'
+          ? 'upsert'
+          : message.type === 'schedule-delete'
+            ? 'delete'
+            : message.type === 'schedule-toggle'
+              ? 'toggle'
+              : 'run-now',
+      jobId: message.type === 'schedule-upsert'
+        ? message.payload.job.id
+        : message.type === 'schedule-delete' || message.type === 'schedule-toggle' || message.type === 'schedule-run-now'
+          ? message.payload.jobId
+          : undefined,
+      code: 'herdr_schedule_unsupported',
+      message: 'Herdr single-session backend does not support schedule commands',
+    });
+    return;
+  }
+
   switch (message.type) {
     case 'schedule-list':
-      deps.sendScheduleStateToSession(session, deps.sanitizeSessionName(message.payload.sessionName || session.sessionName));
+      deps.sendScheduleStateToSession(
+        session,
+        deps.sanitizeSessionName(message.payload.sessionName || session.sessionName),
+        session.backend || 'tmux',
+      );
       return;
     case 'schedule-upsert':
       try {
@@ -196,6 +238,7 @@ export function handleScheduleMessageRuntime(
             existing: message.payload.job.id
               ? deps.scheduleEngine.listBySession(
                 deps.sanitizeSessionName(message.payload.job.targetSessionName || session.sessionName),
+                session.backend || 'tmux',
               ).find((job) => job.id === message.payload.job.id) || null
               : null,
           },
@@ -210,6 +253,7 @@ export function handleScheduleMessageRuntime(
         }
         deps.scheduleEngine.upsert({
           ...message.payload.job,
+          terminalBackend: session.backend || 'tmux',
           targetSessionName: normalized.targetSessionName,
         });
       } catch (error) {
@@ -270,15 +314,19 @@ export function handleTmuxControlMessageRuntime(
   deps: TerminalMessageControlRuntimeDeps,
   connection: TerminalTransportConnection,
   message:
-    | { type: 'tmux-create-session'; payload: { sessionName: string; cwd?: string } }
-    | { type: 'tmux-rename-session'; payload: { sessionName: string; nextSessionName: string } }
-    | { type: 'tmux-kill-session'; payload: { sessionName: string } },
+    | { type: 'tmux-create-session'; payload: { sessionName: string; cwd?: string; terminalBackend?: 'tmux' | 'herdr' } }
+    | { type: 'tmux-rename-session'; payload: { sessionName: string; nextSessionName: string; terminalBackend?: 'tmux' | 'herdr' } }
+    | { type: 'tmux-kill-session'; payload: { sessionName: string; terminalBackend?: 'tmux' | 'herdr' } },
 ) {
   switch (message.type) {
-    case 'tmux-create-session':
+      case 'tmux-create-session':
       try {
-        deps.createDetachedTmuxSession(message.payload.sessionName, message.payload.cwd);
-        deps.sendTransportMessage(connection.transport, { type: 'sessions', payload: { sessions: deps.listTmuxSessions() } });
+        const backend = message.payload.terminalBackend || 'tmux';
+        deps.createDetachedTmuxSession(message.payload.sessionName, message.payload.cwd, backend);
+        deps.sendTransportMessage(connection.transport, {
+          type: 'sessions',
+          payload: { sessions: deps.listTerminalSessions ? deps.listTerminalSessions() : deps.listTmuxSessions(backend) },
+        });
       } catch (error) {
         const err = error instanceof Error ? error.message : String(error);
         deps.sendTransportMessage(connection.transport, {
@@ -290,15 +338,20 @@ export function handleTmuxControlMessageRuntime(
     case 'tmux-rename-session':
       try {
         const currentName = deps.sanitizeSessionName(message.payload.sessionName);
-        const nextName = deps.renameTmuxSession(message.payload.sessionName, message.payload.nextSessionName);
-        const currentKey = deps.getMirrorKey(currentName);
-        const nextKey = deps.getMirrorKey(nextName);
-        deps.scheduleEngine.renameSession(currentName, nextName);
+        const backend = message.payload.terminalBackend
+          || deps.resolveTerminalSessionBackend?.(message.payload.sessionName);
+        if (!backend) {
+          throw new Error(`terminal session backend resolver unavailable for ${message.payload.sessionName}`);
+        }
+        const nextName = deps.renameTmuxSession(message.payload.sessionName, message.payload.nextSessionName, backend);
+        const currentKey = deps.getMirrorKey(currentName, backend);
+        const nextKey = deps.getMirrorKey(nextName, backend);
+        deps.scheduleEngine.renameSession(currentName, nextName, backend);
         const mirror = deps.mirrors.get(currentKey);
         if (mirror && currentKey !== nextKey) {
           deps.mirrors.delete(currentKey);
           mirror.key = nextKey;
-          mirror.sessionName = nextKey;
+          mirror.sessionName = nextName;
           deps.mirrors.set(nextKey, mirror);
           for (const sessionId of mirror.subscribers) {
             const subscriber = deps.sessions.get(sessionId);
@@ -306,11 +359,14 @@ export function handleTmuxControlMessageRuntime(
               continue;
             }
             subscriber.mirrorKey = nextKey;
-            subscriber.sessionName = nextKey;
-            deps.sendMessage(subscriber, { type: 'title', payload: nextKey });
+            subscriber.sessionName = nextName;
+            deps.sendMessage(subscriber, { type: 'title', payload: nextName });
           }
         }
-        deps.sendTransportMessage(connection.transport, { type: 'sessions', payload: { sessions: deps.listTmuxSessions() } });
+        deps.sendTransportMessage(connection.transport, {
+          type: 'sessions',
+          payload: { sessions: deps.listTerminalSessions ? deps.listTerminalSessions() : deps.listTmuxSessions(backend) },
+        });
       } catch (error) {
         const err = error instanceof Error ? error.message : String(error);
         deps.sendTransportMessage(connection.transport, {
@@ -322,31 +378,51 @@ export function handleTmuxControlMessageRuntime(
     case 'tmux-kill-session':
       try {
         const sessionName = deps.sanitizeSessionName(message.payload.sessionName);
-        deps.closeDetachedTerminalSession(sessionName);
-        deps.scheduleEngine.markSessionMissing(sessionName, 'session killed');
-        const mirror = deps.mirrors.get(deps.getMirrorKey(sessionName));
+        const killBackend = message.payload.terminalBackend
+          || deps.resolveTerminalSessionBackend?.(sessionName);
+        if (!killBackend) {
+          throw new Error(`terminal session backend resolver unavailable for ${sessionName}`);
+        }
+        deps.closeDetachedTerminalSession(sessionName, killBackend);
+        deps.scheduleEngine.markSessionMissing(sessionName, 'session killed', killBackend);
+        const mirror = deps.mirrors.get(deps.getMirrorKey(sessionName, killBackend));
         if (mirror) {
           deps.destroyMirror(mirror, 'tmux session killed', {
             closeTransportSubscribers: false,
             releaseCode: 'tmux_session_killed',
           });
         }
-        deps.sendTransportMessage(connection.transport, { type: 'sessions', payload: { sessions: deps.listTmuxSessions() } });
+        deps.sendTransportMessage(connection.transport, {
+          type: 'sessions',
+          payload: { sessions: deps.listTerminalSessions ? deps.listTerminalSessions() : deps.listTmuxSessions(killBackend) },
+        });
       } catch (error) {
         const err = error instanceof Error ? error.message : String(error);
         if (/can't find session|no server running|session not found/i.test(err)) {
           const sessionName = deps.sanitizeSessionName(message.payload.sessionName);
+          const killBackend = message.payload.terminalBackend
+            || deps.resolveTerminalSessionBackend?.(sessionName);
+          if (!killBackend) {
+            deps.sendTransportMessage(connection.transport, {
+              type: 'error',
+              payload: { message: err, code: 'tmux_kill_failed' },
+            });
+            return;
+          }
           // Killing an already absent session is an idempotent terminal state.
           // Publish the current daemon list so drawer projections remove stale rows.
-          deps.scheduleEngine.markSessionMissing(sessionName, 'session already absent');
-          const mirror = deps.mirrors.get(deps.getMirrorKey(sessionName));
+          deps.scheduleEngine.markSessionMissing(sessionName, 'session already absent', killBackend);
+          const mirror = deps.mirrors.get(deps.getMirrorKey(sessionName, killBackend));
           if (mirror) {
             deps.destroyMirror(mirror, 'tmux session already absent', {
               closeTransportSubscribers: false,
               releaseCode: 'tmux_session_killed',
             });
           }
-          deps.sendTransportMessage(connection.transport, { type: 'sessions', payload: { sessions: deps.listTmuxSessions() } });
+          deps.sendTransportMessage(connection.transport, {
+            type: 'sessions',
+            payload: { sessions: deps.listTerminalSessions ? deps.listTerminalSessions() : deps.listTmuxSessions(killBackend) },
+          });
           return;
         }
         deps.sendTransportMessage(connection.transport, {

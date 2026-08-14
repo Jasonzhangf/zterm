@@ -1661,3 +1661,181 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 2026-08-12 post-window parity replay: after the bounded Herdr mirror projection change, the same tmux/official-Herdr ANSI sample still passes rows, geometry, wide-cell shape, and cursor equality; tmux and Herdr canonical revisions remain separate namespaces.
 2026-08-12 Herdr projection invariant hardening: `mapHerdrCanonicalSnapshot()` now rejects malformed absolute ranges whose body length does not match `[startIndex,endIndex)`, and rejects bounded projections that would drop the canonical absolute cursor. Herdr focused gates pass 30 tests, TypeScript, and diff check; full build, release/install, hash match `c015049a0bd0e867794ee14541e9773bbfab958375eea77459854c73ccb7261e`, and installed close-loop on port 39101 pass.
 2026-08-12 final review after Herdr invariant hardening: task `20260812T193958Z-review-2993-51hjmk` is FAIL on four unrelated parallel worktree findings: RemoteWindowOverlay fullscreen crop P1, removed composite styles P1, Android network permission P1, and attachment notification in-flight race P2. No Herdr finding; no semantic PASS.
+
+# 2026-08-13 Herdr per-session backend picker and installed runtime gate
+
+- New-session creation now opens an explicit `tmux | Herdr` modal. The selected `terminalBackend` is carried through target create, session-open/connect, mux channel, session state/persistence, mirror/subscriber identity, input, resize, close, reconnect, and backend-specific list cache; no silent tmux fallback is used.
+- Added the Herdr list-session control payload and included backend in the management transport cache key, so tmux and Herdr catalogs cannot share a stale list response.
+- The formal Herdr adapter remains the only VT/mirror truth owner. `Herdr seq` stays attachment-local; zterm revisions remain daemon-generated. Herdr uses the synthetic `herdr-single-session` workspace label and never projects Herdr pane/workspace layout into daemon truth.
+- Current focused picker/transport/message/registry gate: 98 tests green; Herdr runtime/canonicalizer/process/side-channel/selection gate: 35 tests green; feature-registry gate: 83 tests green; full `pnpm run build` green; release prepared, installed globally, and launchd restarted with health ready.
+- Installed daemon real Herdr close-loop passed on port 3333 with the selected backend in every control/attach message: connected, initial revision 1, input revision 3, adaptive resize `100x30` revision 4, reconnect revision 5, and targeted close removal true. The first attempt exposed launchd's missing `~/.local/bin` PATH; the daemon launch runner now exports the explicit user-bin/tool PATH, and the rerun passed.
+- Installed tmux daemon mirror close-loop passed all 9 cases and replay/strict audit; same ANSI/VT parity sample through tmux and official Herdr passed rows, CJK/emoji wide cells, geometry, cursor, SGR, erase, scroll, alternate screen, OSC, kitty graphics, and independent revision namespaces.
+- Windows ConPTY/daemon cleanup remains beta/gap because the real remote close-list gate is not green. Codex/OpenCode/Reasonix external Herdr operational integrations remain unconfigured/unproven; the static payload/control isolation gate passes. Herdr feature registry remains `status: pending` until those required gaps and final review are resolved.
+
+# 2026-08-13 final review remediation / installed revalidation
+
+- 最终 review 前的三条项目级阻塞已按唯一 owner 修复：Android manifest 声明 `ACCESS_NETWORK_STATE`；RemoteWindowOverlay 恢复 composite strip/thumb style 定义并保持既有 fullscreen fit contract；attachment notification 增加 per-attachment in-flight 集合，permission/staging/schedule 完成或失败后收口，新增并发轮询反测。
+- 修复后 typecheck、feature/resource/module/mainline gates、定向 Herdr/picker 65 tests、review-fix 77 tests、完整 `pnpm run build` 均通过；全局 daemon 重新安装/重启后 Herdr close-loop 与 tmux mirror close-loop、同样本 canonical parity 均通过。Windows 仍 beta/gap，外部 Codex/OpenCode/Reasonix operational integration 仍未证明。
+
+# 2026-08-13 backend-boundary review remediation
+
+- Codex review 暴露的三条 Herdr 边界已处理：session-list cache 由 backend-aware transport key 与跨 backend 红测锁定；persisted Herdr tab restore 在 owner grouping、reusable mux request、direct `fetchTmuxSessions` request 中保留 `terminalBackend`; file-transfer 对 Herdr 单 terminal surface 显式返回 `herdr_file_transfer_unsupported`，禁止落入 tmux path/write owner。
+- 修复后 feature/resource/module/mainline gates 83/83、Herdr/backend/picker/restore/audit/file-transfer 定向 94 tests、typecheck、完整 build、global install/restart、installed Herdr close-loop、tmux mirror close-loop、tmux/Herdr parity 均通过。Windows 仍 beta/gap；Codex/OpenCode/Reasonix operational integration 未配置/未证明；需重新取得最终 review PASS。
+
+# 2026-08-13 final backend write propagation
+
+# 2026-08-13 side-channel and runtime audit continuation
+
+- Mac live checks confirm official `herdr 0.8.0` at `/Users/fanzhang/.local/bin/herdr`; installed zterm launchd daemon is running on `0.0.0.0:3333` with configured auth. `herdr session list --json` is the external enumeration source; formal runtime filters only its `zterm-herdr-` namespace and does not import Herdr layout truth.
+- `herdr integration status` currently reports Codex and OpenCode integrations not installed; no confirmed official Reasonix Herdr integration surface exists. Static terminal payload/control isolation passes; external operational integration remains an explicit unproven gap.
+- Final Codex review must have an accepted MCP verdict. The previous review attempt was accidentally cancelled/no-verdict and is not evidence; replacement task `20260813T022547Z-review-31802-dimb8w` is running.
+
+- 最终 review 暴露的唯一 P1 已修复并锁定：server terminal runtime wiring 将 selected backend 透传到 live mirror write、queued input 和 auto-command write；Herdr 的 normal input/delayed command 不再因默认参数误路由到 tmux。
+- 修复后 typecheck、148 targeted tests、full build、global install/restart、installed Herdr close-loop、tmux mirror close-loop/replay/strict audit、same-sample canonical parity 均通过。Windows ConPTY/daemon cleanup 仍 beta/gap；Codex/OpenCode/Reasonix operational integration 仍未配置/未证明；等待最终 Codex review PASS。
+
+2026-08-13 final runtime revalidation: `TerminalView` mirror-fixed pinch zoom now expands the visual layer layout box to `100/scale%`, preserving the native scroll coordinate system; attachment notification permission/staging/scheduling terminal failures are recorded and not retried on every poll. Targeted tests 15/15 and type-check pass. Full `pnpm run build` passes all registry, UI, transport, terminal, relay, workspace, Gradle, and Vite gates (terminal suite 814). Reinstalled daemon 0.1.3 and restarted launchd; `/health` is `ok=true`, `active_count=1`, port 3333. Installed official Herdr close-loop passes connected, input revision 3, resize revision 4 at 100x30, reconnect revision 5, and close removal; tmux mirror close-loop/replay strict audit passes. Final Codex review still required; Windows remains explicit beta/gap and external Codex/OpenCode/Reasonix Herdr integrations remain unproven.
+
+# 2026-08-13 Tailscale WebSocket candidate verification
+
+- Tailscale direct candidates must use the authenticated WebSocket attempt as the dynamic IP reachability check. The old 900ms Tailscale-only deadline was invalid for Android WebView over DERP; the shared 1800ms WebSocket budget is the unique owner policy.
+- Live evidence on installed `0.1.3.2589` confirms two explicit `Macbookair` opens reached `resolvedPath=tailscale`, endpoint `100.86.84.63:3333`, `lastConnectStage=open`, mux channel `open`, real terminal body, and input echo. Evidence: `android/evidence/2026-08-13-tailscale-reconnect/`.
+- Do not add an HTTP/ICMP admission probe or a second WebSocket probe. A failed candidate must remain an explicit route failure; the next physical generation uses the latest host projection and the existing transient cooldown.
+# 2026-08-13 Herdr picker enumeration backend propagation
+
+- Mac official Herdr enumeration was healthy (`hd-codex` running), but Android's session picker refreshed with the default `selectedTarget` and omitted `terminalBackend`, so the daemon correctly returned the tmux catalog. The unique fix is in `TmuxSessionPickerSheet.handleRefreshNow`: derive `discoveryTarget` with the selected `newSessionBackend`, use it for `fetchTmuxSessions`, missing-tab audit, row projection, and refresh callback; backend changes retrigger auto-refresh. Picker tests and typecheck pass.
+- Release `0.1.3.2601` was built, OTA manifest verified, Relay public APK SHA matched local, and both online devices installed it with `adb install -r`. Device package versionCode is `1100026010`.
+
+# 2026-08-13 Herdr picker loopback gate
+
+- Installed daemon `0.1.3` on `127.0.0.1:3333` passed authenticated official Herdr enumeration: `herdr session list --json` reported running `hd-codex`, and the real Android `fetchTmuxSessions()` path with `terminalBackend: 'herdr'` returned `hd-codex` plus the active Herdr catalog entry.
+- The same installed daemon accepted `session-open`/`connect` with `backend: 'herdr'` for `hd-codex` and emitted a valid `buffer-sync`: zterm revision `3`, absolute range `[0,20)`, geometry `80x24`, cursor `{rowIndex:15,col:2}`, and canonical `lines` payload. This is a completed Mac daemon-to-client transport/mirror loopback; real-device testing is not required to diagnose the local chain until the APK/UI path is compared against this evidence.
+- Picker UI gate remains green: `TmuxSessionPickerSheet.test.tsx` passed 13/13, including Herdr selector refresh asserting `terminalBackend: 'herdr'` and rendering `hd-codex`. APK `0.1.3.2602` contains the backend selector and `terminalBackend` bundle symbols.
+
+# 2026-08-13 real picker UI loopback for 2603
+
+- Added `TmuxSessionPickerSheet.loopback.test.tsx`: only unrelated QR/relay UI dependencies are mocked; the picker, `fetchTmuxSessions`, traversal WebSocket, installed daemon `127.0.0.1:3333`, and official Herdr catalog are real. The test clicks the rendered `Herdr` selector and asserts the rendered `hd-codex` row.
+- The real UI loopback passed 1/1; combined picker tests passed 14/14. The authenticated daemon health was `ok:true`, official `herdr session list --json` reported running `hd-codex`, and APK `0.1.3.2603` SHA-256 is `058c50804edf4751dacbf358e556efa8c5cb2579aba5b476c5d30ed70c435bef` with 64 `terminalBackend` bundle occurrences.
+- This proves the source client UI + real transport + installed daemon + official Herdr enumeration chain. If a device on 2603 still shows no session, the remaining boundary is device-side loaded APK/target routing or UI state, not the Mac Herdr session or the zterm source picker request.
+
+# 2026-08-13 2604 device crash root cause and 2607 validation
+
+- The connected device with `0.1.3.2604` was not reaching the picker: its `com.zterm.android` process crashed at boot with Android `ForegroundServiceStartNotAllowedException` from `BackgroundServicePlugin.start()`. No Herdr list request could have been emitted from that process.
+- The unique Android background-service owner now catches service-start/update `RuntimeException` and rejects the Capacitor call explicitly, preserving the foreground terminal UI when Android denies background execution. Added a regression assertion in `android-power-policy.test.ts`.
+- Full build gates passed through registry (83), terminal (816), common flows (92), relay/account (38), workspace (39), Gradle, type-check, and Vite. Relay publish wrapper failed only after all artifacts were generated during its final external publish step; update manifest/APK hashes were already verified.
+- Generated `0.1.3.2607` APK SHA-256 `911b4290e2967386839de572116654dcee46588fc721e899399a240c87a245eb`; installed on two online devices, both report versionCode `1100026070`, `MainActivity` resumed, and boot log contains `evaluateJavascript bridge OK` with no foreground-service crash. The device that had 2604 went offline before installation and needs reconnection before it can be upgraded.
+# 2026-08-13 foreground resume transport lifecycle
+
+- Foreground resume refreshes Relay/control settings and may recreate SessionContext callback identities. The lifecycle provider-disposal cleanup must not depend on `cleanupSocket`, `cleanupControlSocket`, or handshake-clear callback identity; keep latest callbacks in refs and run physical cleanup only on actual provider unmount.
+- Root cause evidence: H2 `FD-20260813-FOREGROUND-CLEANUP-01` playground baseline closes an `OPEN` socket on dependency cleanup; positive intervention keeps it open; reverse intervention reproduces the close. Formal regression proves callback refresh preserves `OPEN` and unmount uses the latest cleanup callbacks.
+
+# 2026-08-13 Herdr all-running-session enumeration correction
+
+- Jason clarified the required contract: Herdr enumeration must match tmux. Any user-created official Herdr session that is `running=true` must be visible; no `zterm-herdr-` namespace filter or reserved prefix is allowed.
+- Root cause was the unique `herdr-backend-runtime.listSessions()` owner filtering `entry.name.startsWith(prefix)` and stripping that prefix; `createSession`/`discoverSession` also re-added the prefix. This hid manual names such as `hd-codex`.
+- Formal fix removes prefix semantics entirely. Running session names are passed verbatim to `discoverSession`, `--session`, and the client list payload. Herdr workspace/layout remains synthetic and single-surface only.
+- After daemon release/install/restart, live Mac enumeration through the authenticated bridge returned `hd-codex` and another running manually named Herdr session, proving no prefix filter. The official CLI simultaneously reported `hd-codex` running.
+- APK `0.1.3.2611` built with `tsc`, Vite, Capacitor sync, and Gradle assembleDebug; SHA-256 `a602c9e826fcca0a8444b4d7d5e3cb8ffeb49aca5bfd66c79d6fc640e8c54899`. Installed with `adb install -r` to online 15t; package reports versionCode `1100026110`, dataDir unchanged, and no boot crash in the post-install log window.
+- Added a formal mock regression for arbitrary running names (`hd-codex`, `manual-project`) and stopped names; Herdr backend-runtime focused suite is 7/7 and TypeScript remains green.
+- Re-ran the real playground parity probe after the all-name fix. Same ANSI/VT sample (cursor movement, erase, scroll, SGR, CJK/emoji width, alternate screen, OSC, kitty graphics) produced `rowsEqual=true`, `geometryEqual=true`, `sampleCellShapeEqual=true`, and `cursorEqual=true`; tmux revision `1` and Herdr zterm revision `2` remain separate from Herdr attachment seq `2`.
+- Re-ran the real installed daemon loopback against the manually-created `hd-codex` without closing it: connected, initial revision `1`, input revision `3`, resize revision `4` at `100x30`, reconnect revision `4`, `closeRemovedSession=false` by explicit skip-close. Release runtime and installed `/Users/fanzhang/.zterm/daemon-runtime/server.cjs` both hash `0a2d59cb030b0d3ac70d62bf75f700224cf563a9f1190022fc8ce36ef97f849b`.
+
+# 2026-08-13 2609 Herdr picker route repair and online device evidence
+
+- 15t 的真实失败根因已由 logcat + UI 路径确认：`TerminalSessionDrawer` 新 session 原先没有 backend 选择，`useSessionOpenActions.handleOpenQuickTabPicker` 对已知 host 直接走 tmux create，完全绕过 `TmuxSessionPickerSheet`；因此不会产生 Herdr list 请求。
+- 正式修复：Drawer 增加 `tmux | Herdr` 选择；Herdr 选择通过 typed `terminalBackend` 传到 quick-tab picker；已知 host 的 Herdr 路由显式打开 picker 并保持 Herdr backend，列表请求不再复用 tmux cache。tmux 默认路径保持不变。
+- 定向 gate：Drawer、picker、open-actions、真实 daemon + 官方 Herdr loopback 共 83/83；`tsc --noEmit` 和 Vite production build 通过。
+- Android full prebuild 在 APK 之前被两条既有 `TerminalPage.android-ime.test.tsx` 几何断言阻断（expected stage bottom 484/320，actual 184/0）；未修改该无关 owner。绕过失败 prebuild 后，Vite、Capacitor sync、Gradle `assembleDebug` 通过并产出 `0.1.3.2609`。
+- APK `android/native/android/app/build/outputs/apk/debug/app-debug.apk` SHA-256 `c9fd37bde0e8d31ccd5a7d98a5f4b53fe697c9dae744062af7fc809810c28f13`；使用 `adb install -r` 安装到在线 15t，数据目录保持 `/data/user/0/com.zterm.android`，`versionCode=1100026090`、`versionName=0.1.3.2609`。
+- 15t 在线 logcat 安装后无 `FATAL EXCEPTION`/`AndroidRuntime`；真实 Mac Studio terminal WS 保持 ready，mirror `latestRevision=2`、`localRevision=2`、target `100.86.84.63:3333`、`targetSessionCount=2`。Herdr catalog 的正式 loopback 证明来自同一 picker 对真实 daemon/官方 Herdr `hd-codex` 的 1/1 测试。Relay 发布未执行，Windows/Codex/OpenCode/Reasonix 仍按既有 gap 标记。
+- 2026-08-13 review 暴露并已修正一个 backend 边界问题：schedule dispatch 原先只按 sessionName 调用默认 tmux 写入 owner，若同名 Herdr session 存在会误投递。正式 schedule owner 现在在任何写入前查询官方 Herdr running session，Herdr 目标显式返回 `Herdr single-session backend does not support schedule commands` 且 disable，不进入 live-mirror 或 tmux 写入路径；正反测试通过（定向 schedule/Herdr 20/20）。daemon release/install/restart 后 runtime hash `7579377e4fe124b00f848584065d6ad478ae9e2d41a8263d5df86d6eb0d0d710` 与 installed runtime 一致，认证 bridge 与官方 CLI 均返回 `hd-codex`。
+- 当前全局 TypeScript 阻断仍来自并行 dirty `src/components/TerminalView.tsx:402` 的 `rowHeightPx` 先用后声明；本次 Herdr/schedule owner 未修改该文件。review 同时报告的 Android `NetworkIdentityPlugin` transport priority P2 属于并行 Android 网络 owner，未越界修改；Herdr feature registry 仍保持 pending，Windows ConPTY/cleanup 与 Codex/OpenCode/Reasonix operational integration 仍是明确 gap。
+
+# 2026-08-13 Herdr detached-schedule and cache reconciliation
+
+- Final Herdr owner fixes: `listSessions()` now reconciles its cache against the authoritative official `herdr session list --json` running set, removing sessions stopped externally; schedule dispatch checks the registered daemon truth and then the official running list before any write, so an unattached same-named Herdr session cannot fall through to tmux.
+- Focused positive/negative gates passed 20/20, including external-stop eviction and Herdr schedule rejection before live-mirror/tmux writes.
+- Release runtime and installed `/Users/fanzhang/.zterm/daemon-runtime/server.cjs` both hash `9b656681ae0908ab0fab726792645d3394d0122cd003793cfc9748ff620a027e`; launchd service was reloaded after an old daemon-only crash-loop guard was cleared, authenticated health passed, and official Herdr CLI plus bridge enumeration both returned `hd-codex` and `zterm-herdr-herdr-close-loop-1786557179480`.
+- Review task `20260813T-current-herdr-final-fix3` was still pending at handoff; do not treat pending as PASS. Remaining non-Herdr/global gaps remain unchanged: NetworkIdentityPlugin P2 in parallel owner, feature registry pending, Windows ConPTY gate, and operational Codex/OpenCode/Reasonix integration evidence.
+
+# 2026-08-13 Android retained-session service lifecycle
+
+- `BackgroundService` lifecycle is owned by the retained-session count, not Activity visibility: start when retained sessions become non-zero, update the native notification when the count changes, and stop only when the final retained session closes or the lifecycle owner is disposed.
+- Background heartbeat callback is a separate client control-plane concern: background entry enables the callback, foreground return disables only the callback, and neither path stops or recreates the native service or physical transport.
+- Native service owns only foreground notification, one non-reference-counted `PARTIAL_WAKE_LOCK`, and bounded WebView wake-up support. It does not own WebSocket, mux channel, RTC, route, reconnect, body subscription, or UI state.
+- Verification: lifecycle/power, transport, feature registry, TypeScript, Vite, and Gradle gates are green. APK `0.1.3.2617`, `versionCode=1100026170`, SHA-256 `adeed5740848376008defb8572f7ba6377cac9ed497094d566cb94d25cb0f872`.
+- Remaining evidence gap: no online ADB device was present for install, `dumpsys` service/WakeLock checks, background/foreground round-trip, and unchanged physical transport generation.
+
+# 2026-08-13 backend-qualified mirror identity and APK 2616
+
+- Review found and formalized the backend coexistence invariant: daemon mirror identity is now `<backend>:<sessionName>`, so same-named tmux and Herdr sessions can attach concurrently without sharing mirror rows, revisions, subscribers, or input batches. Rename keeps the plain backend session name in `sessionName` and uses the qualified value only for map identity/`mirrorKey`.
+- Positive regression: `terminal-core-support.test.ts` and `terminal-mirror-runtime.test.ts` prove `tmux:same-name` and `herdr:same-name` are independent. Focused server set passed 72/72 and TypeScript passed.
+- Installed daemon after the final rename fix: release and `/Users/fanzhang/.zterm/daemon-runtime/server.cjs` SHA-256 both `022e319d012d520f18f6a936532e62932375909f75cdb84bd384bab863ecab67`; authenticated health passed with 3 ready mirrors. Official Herdr CLI and bridge still returned the same unfiltered running names (`hd-codex`, `zterm-herdr-herdr-close-loop-1786557179480`).
+- APK build 2616 completed the feature-registry gate 83/83, shell/theme 183/183, file-transfer 82/82, transport 53/53, terminal contract/common-flow stages, Gradle build, and produced/installed normal `0.1.3.2616` on online 15t. APK SHA-256 `95a8fbb0e2ae168f5949346538dcab97d84a7d58557bdb8796675502e3f74f`; local OTA manifest points to build 2616 with the same hash. Post-install logcat had no fatal Android crash.
+- Review task `20260813T-current-herdr-final-fix5` failed only on unrelated Android cold-start persisted-tab restoration (`open-tab-persistence.ts`, P1). Do not modify that parallel owner as part of Herdr work. Windows ConPTY, Codex/OpenCode/Reasonix operational integrations, Herdr registry status, and the unrelated notification/network/cold-start findings remain explicit gaps; overall goal is not complete.
+
+## 2026-08-13 架构拆分经验（goal-436b962c Round 1-2）
+
+- `git checkout -- <path>` 会从 index（staged）恢复，可能覆盖工作树未提交 WIP：恢复前先查 `git status` 列位置（首列 M = staged）。本 repo 大量未提交 WIP（RenameDialog 集成、Herdr catalog 投影等）。已发生一次 TerminalPage.tsx WIP 覆盖事故，靠会话内捕获文本 + 测试期望重建（46/46 + 12/12 套件验证保真）。
+- 切片式重构必须带边界断言：indexOf 返回 -1 时 slice(0, -1) 会截断整个文件；每步删除前验证区域内容标记，并严格检查顺序关系。
+- 模块 gate 要求：src/ 下新文件必须注册 module-registry owned_paths；移动文件要同步 module-registry + feature-registry truth_sources；export * 重导出 + 显式 import 并存保持兼容。
+- 程序化块提取不可靠（[ 与多行泛型块被单行分支误判）；复杂文件用手工搬迁 + 测试验证。
+- P0 分层模式：renderer 不持手势状态机/直写存储；手势/缩放归 UI shell hook；存储归 lib storage owner；正文 repaint 唯一入口 render gate。
+# 2026-08-14 session drawer visibility
+
+- Drawer bug reports must distinguish “cannot close” from “cannot see/open”. For portrait Android, `TerminalPage` owns the stable visible `Sessions` entry; `TerminalSessionDrawer` owns the mounted overlay, header, rows, and close intent.
+- Live device proof for APK `0.1.3.2618`: CSS viewport `347x754`; entry rect `{x:52,y:47,width:72.4,height:34}`, visible and clickable; click yields drawer rect `{x:0,y:0,width:166.8,height:754.3}`, `aria-hidden=false`, visible header/row; close returns `aria-hidden=true`.
+- Regression rule: page test must assert entry exists before opening, drawer hidden before click, drawer header and row visible after click, and close returns hidden.
+
+# 2026-08-14 daemon-owned unified tmux/Herdr catalog
+
+- Root cause of “manual Herdr session not visible” was client-side backend partitioning after daemon enumeration: the picker/list/open path sent or retained `terminalBackend`, so the client did not consume one daemon-owned catalog.
+- Formal invariant: normal client list, open, mux-channel-open, rename, and kill requests are backend-opaque. `terminal-control-runtime` unions tmux plus configured running Herdr names; exact-name backend resolution happens in the daemon adapter layer. Zero matches and same-name matches fail explicitly; no tmux default fallback.
+- New-session tmux/Herdr selection is creation-only adapter intent. It is not copied into client session truth; the created session is reopened by name through the unified catalog.
+- Verification: focused terminal control, message, mirror, session helper, and picker suites passed after the change; dedicated playground record is `playground/herdr-adapter-experiment-20260812/unified-catalog-root-cause-20260813.md`.
+- Online/build evidence: release and installed daemon runtime SHA-256 `393bd7f35f7928d87542a982efd7317435275b21325647902af2330f9cd646a3`; authenticated raw WS list returned one union containing tmux names plus `hd-codex` and `zterm-herdr-herdr-close-loop-1786557179480`. APK `0.1.3.2638` SHA-256 `81a60f2270428abe32173911ceeb903930f6b736aa4fe4d80aa8a3ff99bfad4b` installed on `100.104.163.65:5555`, package reports versionCode `1100026380`, and post-launch logcat showed no fatal Android crash. Relay publish step still failed after local OTA manifest verification.
+- Installed daemon real-session close-loop re-run against manually maintained `hd-codex` passed: connected, initial zterm revision `1`, input revision `2`, resize revision `3` at `100x30`, reconnect revision `4`, and explicit skip-close preserved the user session. This is daemon/Herdr output-input-resize-reconnect evidence; close deletion remains tested separately because the session is user-owned.
+- Windows audit remains an explicit beta/gap: `pnpm --dir win run type-check` is currently blocked by unrelated `packages/shared/src/workspace/split-tree-workspace.ts:245` unused `@ts-expect-error`; no real Windows ConPTY + official Herdr gate passed, so Windows support is not claimed.
+
+# 2026-08-14 Herdr unified-catalog delivery review
+
+- Independent MCP Codex review task `20260814T-current-herdr-unified-catalog` completed with `verdict: fail`, not PASS. Findings were outside the Herdr owner: P1 cold-start persisted-tab restoration in `android/src/lib/open-tab-persistence.ts:33-37` and P2 repeated failed attachment-notification attempts in `android/src/hooks/useAttachmentNotifications.ts:61-85`. These parallel-owner changes were not modified during Herdr delivery.
+- Review evidence: `/Volumes/extension/code/zterm/.agent-collab/review/20260814T-current-herdr-unified-catalog/review.final.md`. Overall Herdr goal therefore remains incomplete under the repository delivery gate despite Herdr-specific tests, build/install, daemon enumeration, and real-session close-loop passing.
+
+# 2026-08-14 delivery-gate review conflict after APK 2643
+
+- APK `0.1.3.2643` was rebuilt, locally OTA-verified, installed on `100.104.163.65:5555`, force-stopped/restarted, and the installed package reported `versionCode=1100026430`; real `hd-codex` daemon close-loop passed with zterm revisions `5 -> 6 -> 7 -> 8`, resize `100x30`, and reconnect.
+- Review task `20260814T-herdr-delivery-gate-2643` still returned `verdict: fail`. Its P1 asks to restore current tabs on cold launch, contradicting the active architecture contract in `android/docs/architecture.md:166-188`, which requires deleting and not restoring `OPEN_TABS`/`ACTIVE_SESSION`. Its P2 asks to retry failed attachment notifications, conflicting with the current explicit terminal-failure behavior and test design. Do not weaken the architecture truth merely to satisfy this review; the review scope is the whole dirty worktree and is not a Herdr-specific PASS.
+- The Herdr feature remains pending until a review can be run against a scoped clean change set or the architecture decision is explicitly changed and its gates updated.
+
+# 2026-08-14 Herdr workspace-state isolation and APK 2644
+
+- Formal Herdr managed sessions no longer populate the shared `workspace` field. The adapter retains only the official attachment-local `terminalId`/`paneId` needed to observe/control the single root surface; no synthetic Herdr workspace/layout identity enters daemon session truth. `herdr-backend-runtime.test.ts` asserts returned Herdr sessions have no `workspace` property.
+- TypeScript, Herdr backend/canonicalizer/process transport, terminal control/mirror, and side-channel gates passed after the isolation change. The installed daemon was rebuilt/reinstalled; health passed and the real `hd-codex` close-loop again passed with revisions `1 -> 2 -> 3 -> 4` and resize `100x30`.
+- APK `0.1.3.2644` was built, local OTA manifest verified, installed on `100.104.163.65:5555`, and restarted. Package versionCode `1100026440`; APK SHA-256 `48454382d771206ba8dbf35af6dcf7d10844a8fd8a8da986eb9b101940e133a2`. The live daemon session ticket advertised the same app version `0.1.3.2644`.
+
+# 2026-08-14 review scope conflict: unified backend-opaque catalog
+
+- Review task `20260814T-herdr-workspace-isolation-2644` returned `verdict: fail` with four P1 findings. Two findings demand restoring backend-scoped list/mutation responses; that contradicts the user-approved Herdr contract: normal client list/open/mux/rename/kill are backend-opaque, manual Herdr sessions are unfiltered, and daemon adapter exact-name resolution owns backend selection. Do not reintroduce client-side tmux/Herdr partitioning or silent backend selection to satisfy this review.
+- The same review also reported unrelated dirty-worktree failures in `TerminalView.layer-truth.test.ts`, `session-transport-open-helpers.ts`, and other parallel owners. They are not evidence against the Herdr adapter and must not be fixed by weakening the unified catalog contract.
+- Review evidence: `/Volumes/extension/code/zterm/.agent-collab/review/20260814T-herdr-workspace-isolation-2644/review.final.md`. Overall goal remains active because the review gate is not a scoped clean Herdr review and Windows/agent operational gates remain explicit gaps.
+# 2026-08-14 Herdr adapter capability gate and online revalidation
+
+- Herdr-only daemon discovery is now isolated from tmux: `defaultBackend: 'herdr'` skips tmux catalog/resolution probes, with a negative test asserting `spawnSync` is untouched.
+- Normal tmux daemon startup only registers Herdr when the executable capability probe succeeds (or Herdr is the configured backend); an unavailable optional Herdr executable cannot break ordinary tmux list/open flows.
+- Herdr picker open intent preserves the adapter-resolved `terminalBackend: 'herdr'`; ordinary client discovery remains unified and backend-opaque, with no backend filter or separate client-side catalog ownership.
+- APK 0.1.3.2644 and the daemon were rebuilt, installed, and restarted after this change. Real close-loop evidence again enumerated manual `hd-codex`, delivered input, resized to 100x30, reconnected, and removed the temporary Herdr session.
+- Reviewer suggestion to send backend in every session-list request and split cache keys conflicts with the locked product contract (daemon-owned unified catalog; client does not filter by tmux/Herdr). Keep the conflict explicit until the review scope is corrected; never regress to client backend management.
+
+# 2026-08-14 review audit: mux backend forwarding and cold-launch contract
+
+- Review task `20260814T051024Z-review-fix-persistence-2644-r2` reported two P1 findings. The cold-launch persistence finding is intentionally rejected because `android/docs/architecture.md` freezes current tabs as current-process-only truth and requires removing `OPEN_TABS`/`ACTIVE_SESSION` on startup. The existing cold-launch tests and implementation remain aligned with that contract.
+- The valid Herdr finding was fixed in `android/src/contexts/session-context-transport-runtime.ts`: `buildSessionMuxChannelOpenFrame()` now forwards `host.terminalBackend` into the shared typed mux `backend` field. This preserves the adapter creation/open intent through the physical mux channel without making the client a backend owner.
+- Module import gate found `remote-window-app-window-catalog-script.ts` and `remote-window-iterm2-catalog-script.ts` unowned; both are now explicitly owned by `daemon.remote_window_stream`.
+- Focused transport, persistence, first-paint, and runtime tests pass after the correction. Full Android build, OTA manifest verification, daemon rebuild/reinstall/restart, APK reinstall/restart, and authenticated real Herdr close-loop were rerun: `hd-codex` enumerated; input revision 2; resize revision 3 at 100x30; reconnect revision 4; temporary-session close removal true. Review task `20260814T-review-herdr-mux-forwarding-2644` remains in progress; no PASS claim is made yet.
+
+# 2026-08-14 accumulated-WIP review round: session-list cache key P1
+
+- Review task `20260814T064201Z-review-24143-1lb193` (oauth, uncommitted) returned `verdict: fail` with a single P1: `buildTmuxSessionListCacheKey` in `src/lib/tmux-sessions.ts:127-129` omits `target.terminalBackend`, so the reviewer claims a tmux listing cached in the 3s TTL can be returned for a Herdr listing.
+- The finding is a false positive under the locked daemon-owned unified catalog contract (documented 2026-08-14): all client `list-sessions` call sites send `{ type: 'list-sessions' }` without a backend payload; the daemon's `handleListSessionsMessageRuntime` returns the unified union (`listTerminalSessions()`) for backend-opaque requests, and `TmuxSessionPickerSheet.handleRefreshNow` intentionally strips `terminalBackend` to `undefined` for discovery. Tmux and Herdr targets therefore receive the identical union response; the cache key omission cannot produce a wrong or missing catalog.
+- Implementing "preserve it in the request payload" would make the daemon return backend-scoped lists and regress to client-side backend management — exactly what MEMORY.md records Jason rejected in earlier rounds ("never regress to client backend management"). Kept the conflict explicit; no code weakened to satisfy the review.
+- Verification before commit: `git diff --check` PASS, `tsc --noEmit` PASS, `pnpm --dir android run test:feature-registry` 83/83 PASS, full `pnpm run prebuild` gate stack PASS, `pnpm run build` (Vite) PASS. The full working tree was committed as the accumulated WIP batch.

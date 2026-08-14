@@ -276,7 +276,10 @@ describe('zterm daemon service script truth gates', () => {
     expect(launchBody).toContain('waiting for startup health');
     expect(launchBody).toContain('while kill -0 "\\${child_pid}"');
     expect(launchBody).toContain('missed_health_checks');
-    expect(launchBody).toContain('kill "\\${child_pid}"');
+    expect(launchBody).toContain('terminate_child()');
+    expect(launchBody).toContain('kill -TERM "\\${child_pid}"');
+    expect(launchBody).toContain('kill -KILL "\\${child_pid}"');
+    expect(launchBody).toContain('exit 1');
     expect(launchBody).not.toContain('pkill');
     expect(launchBody).not.toContain('killall');
     expect(launchBody).not.toContain('xargs kill');
@@ -286,7 +289,10 @@ describe('zterm daemon service script truth gates', () => {
     expect(releaseLaunchBody).toContain('waiting for startup health');
     expect(releaseLaunchBody).toContain('while kill -0 "\\${child_pid}"');
     expect(releaseLaunchBody).toContain('missed_health_checks');
-    expect(releaseLaunchBody).toContain('kill "\\${child_pid}"');
+    expect(releaseLaunchBody).toContain('terminate_child()');
+    expect(releaseLaunchBody).toContain('kill -TERM "\\${child_pid}"');
+    expect(releaseLaunchBody).toContain('kill -KILL "\\${child_pid}"');
+    expect(releaseLaunchBody).toContain('exit 1');
     expect(releaseLaunchBody).not.toContain('pkill');
     expect(releaseLaunchBody).not.toContain('killall');
     expect(releaseLaunchBody).not.toContain('xargs kill');

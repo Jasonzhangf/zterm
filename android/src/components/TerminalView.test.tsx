@@ -851,3 +851,136 @@ describe('TerminalView mirror-fixed pinch zoom', () => {
     }
   });
 });
+
+describe('TerminalView two-finger wheel -> SGR adapter (renderer projection boundary)', () => {
+  beforeEach(() => {
+    globalThis.ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver;
+    ResizeObserverMock.reset();
+    Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+      configurable: true,
+      get() {
+        return 200;
+      },
+    });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', {
+      configurable: true,
+      get() {
+        return 408;
+      },
+    });
+    HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      return {
+        x: 0, y: 0, top: 0, left: 0, right: 200, bottom: 408,
+        width: 200, height: 408,
+        toJSON() { return {}; },
+      } as DOMRect;
+    };
+  });
+
+  afterEach(() => {
+    // @ts-expect-error test cleanup
+    delete globalThis.ResizeObserver;
+  });
+
+  it('routes vertical two-finger wheel steps into onInput as SGR mouse-wheel sequences', async () => {
+    const onInput = vi.fn();
+    const { container } = render(
+      <div style={{ width: '200px', height: '408px' }}>
+        <TerminalView
+          sessionId='s1'
+          renderBufferSnapshot={buildRenderBufferSnapshot()}
+          active
+          live
+          widthMode='mirror-fixed'
+          onInput={onInput}
+          fontSize={5}
+        />
+      </div>,
+    );
+    const host = container.querySelector('.wterm') as HTMLElement;
+    expect(host).toBeTruthy();
+    act(() => {
+      ResizeObserverMock.triggerAll();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+
+    // 双指 100px 跨度开始，垂直下移 30px（> stepPx 24 -> 1 notch）
+    act(() => {
+      fireEvent.touchStart(host, {
+        touches: [
+          { clientX: 150, clientY: 100, identifier: 1 },
+          { clientX: 250, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    act(() => {
+      fireEvent.touchMove(host, {
+        touches: [
+          { clientX: 150, clientY: 130, identifier: 1 },
+          { clientX: 250, clientY: 130, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    act(() => {
+      fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
+    });
+
+    // wheel down -> SGR button 65；格式 ESC[<65;col;rowM
+    expect(onInput).toHaveBeenCalled();
+    const sequence = onInput.mock.calls[0][1] as string;
+    expect(sequence).toMatch(/^\x1b\[<65;/);
+    expect(sequence).toMatch(/;\d+;\d+M$/);
+    expect(onInput.mock.calls[0][0]).toBe('s1');
+  });
+
+  it('keeps the pinch path pure visual: no SGR emitted when the gesture is a pinch', async () => {
+    const onInput = vi.fn();
+    const { container } = render(
+      <div style={{ width: '200px', height: '408px' }}>
+        <TerminalView
+          sessionId='s1'
+          renderBufferSnapshot={buildRenderBufferSnapshot()}
+          active
+          live
+          widthMode='mirror-fixed'
+          onInput={onInput}
+          fontSize={5}
+        />
+      </div>,
+    );
+    const host = container.querySelector('.wterm') as HTMLElement;
+    act(() => {
+      ResizeObserverMock.triggerAll();
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+    act(() => {
+      fireEvent.touchStart(host, {
+        touches: [
+          { clientX: 150, clientY: 100, identifier: 1 },
+          { clientX: 250, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    // span 100 -> 60：pinch（abort），不产生 wheel 输入
+    act(() => {
+      fireEvent.touchMove(host, {
+        touches: [
+          { clientX: 160, clientY: 100, identifier: 1 },
+          { clientX: 220, clientY: 100, identifier: 2 },
+        ],
+        changedTouches: [],
+      });
+    });
+    act(() => {
+      fireEvent.touchEnd(host, { changedTouches: [{ identifier: 1 }, { identifier: 2 }] });
+    });
+    expect(onInput).not.toHaveBeenCalled();
+  });
+});

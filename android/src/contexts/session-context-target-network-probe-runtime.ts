@@ -5,21 +5,30 @@ export type SessionTargetNetworkProbeResult =
   | 'deduped'
   | 'still-connecting'
   | 'terminal-socket'
-  | 'send-failed';
+  | 'send-failed'
+  | 'generation-changed';
 
 export type SessionTargetNetworkSignal =
   | {
     source: 'capacitor';
     connected: boolean;
     connectionType: string;
+    /** Client network generation; present only when the platform signal is stamped by the network identity owner. */
+    networkGeneration?: number;
+    /** True when this very signal carries a network fingerprint change. */
+    fingerprintChanged?: boolean;
   }
   | {
     source: 'window-online';
     connected: true;
     connectionType: 'unknown';
+    networkGeneration?: number;
+    fingerprintChanged?: boolean;
   }
   | {
     source: 'foreground-resume';
+    networkGeneration?: number;
+    fingerprintChanged?: boolean;
   };
 
 export interface TargetNetworkProbeError01GenerationTimeout {

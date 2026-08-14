@@ -1,8 +1,8 @@
 package com.zterm.android;
 
 import android.content.Context;
-import android.content.Intent;
 import android.content.SharedPreferences;
+import android.content.pm.ActivityInfo;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.os.Build;
@@ -30,6 +30,12 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            setRecentsScreenshotEnabled(false);
+        }
+        // 默认固定竖屏锁定：不管手机处于什么姿势都不做横竖屏自动切换；
+        // 方向切换只由客户端角落转换按钮（ScreenOrientationPlugin.setOrientation）触发
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
         clearWebViewAssetCacheAfterUpgrade();
         registerPlugin(ImeAnchorPlugin.class);
         registerPlugin(AppUpdatePlugin.class);
@@ -38,6 +44,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(StoragePermissionPlugin.class);
         registerPlugin(BackgroundServicePlugin.class);
         registerPlugin(ScreenOrientationPlugin.class);
+        registerPlugin(NetworkIdentityPlugin.class);
         super.onCreate(savedInstanceState);
         if (getBridge() != null && getBridge().getWebView() != null) {
             staticWebView = getBridge().getWebView();
@@ -72,6 +79,14 @@ public class MainActivity extends BridgeActivity {
             settings.setSupportZoom(false);
             settings.setBuiltInZoomControls(false);
             settings.setDisplayZoomControls(false);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                // Keep the renderer schedulable while BackgroundService wakes
+                // this WebView to send the existing client-owned mux heartbeat.
+                wv.setRendererPriorityPolicy(
+                    WebView.RENDERER_PRIORITY_IMPORTANT,
+                    true
+                );
+            }
             // WebView 自身背景与终端表面一致：内容/首帧未就绪时也不露白屏
             wv.setBackgroundColor(0xFF1E1E1E);
             // Block Android WebView native long-press so its floating selection
@@ -158,19 +173,4 @@ public class MainActivity extends BridgeActivity {
         super.onDestroy();
     }
 
-    public void startBackgroundService(int sessionCount) {
-        Intent serviceIntent = new Intent(this, BackgroundService.class);
-        serviceIntent.putExtra("sessionCount", sessionCount);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent);
-        } else {
-            startService(serviceIntent);
-        }
-    }
-
-    public void stopBackgroundService() {
-        Intent serviceIntent = new Intent(this, BackgroundService.class);
-        stopService(serviceIntent);
-    }
 }
-

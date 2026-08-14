@@ -407,6 +407,18 @@ describe('terminal message runtime explicit error truth', () => {
     expect(sentFrames.every((frame) => frame.type.startsWith('mux-'))).toBe(true);
   });
 
+  it('preserves the selected backend through mux attach', async () => {
+    const { runtime, sessions } = createRuntime({ passThroughTransportSend: true });
+    const connection = createConnection(null);
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-hello', payload: { version: 1, clientInstanceId: 'android-client-backend' },
+    })));
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'mux-channel-open', payload: { channelId: 'herdr-channel', sessionName: 'alpha', backend: 'herdr' },
+    })));
+    expect([...sessions.values()].find((session) => session.muxChannelId === 'herdr-channel')?.backend).toBe('herdr');
+  });
+
   it('rolls back mux channel open when target control publication fails', async () => {
     const { runtime, sessions, closeSession } = createRuntime({
       failSessionActivityPublish: true,
@@ -1011,6 +1023,7 @@ describe('terminal message runtime explicit error truth', () => {
     expect(closeSession).not.toHaveBeenCalled();
     expect(handleAdaptiveResize).toHaveBeenCalledWith(session, {
       cols: 72,
+      rows: 24,
       widthMode: 'adaptive-phone',
     });
   });

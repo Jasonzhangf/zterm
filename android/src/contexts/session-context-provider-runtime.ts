@@ -17,7 +17,7 @@ import { runtimeDebug } from '../lib/runtime-debug';
 import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
 import type { SessionTmuxTargetRequestStore } from './session-context-tmux-management-runtime';
 import type { SessionVisibleRangeState } from './session-visible-range-helpers';
-import type { SessionPullStates } from './session-pull-state-helpers';
+import type { SessionPullStates } from '../lib/session-pull-state-helpers';
 import type { RevisionResetExpectation } from './session-context-core';
 import type { BufferFrameAssemblyResourceState } from './session-context-buffer-runtime';
 import type {

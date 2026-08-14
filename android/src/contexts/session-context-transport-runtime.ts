@@ -28,6 +28,7 @@ import {
   setSessionRequestedTerminalGeometry,
   setSessionTargetControlTransport,
   setSessionTransportSocket,
+  updateSessionTerminalChannelName,
   updateSessionTerminalChannelState,
   upsertSessionTransportRuntime,
   type SessionTransportRuntimeStore,
@@ -82,6 +83,7 @@ export interface SessionContextTransportAccessors {
   writeTargetTerminalSocket: (targetKey: string, socket: BridgeTransportSocket | null) => ReturnType<typeof setTargetTerminalTransport>;
   writeTargetTerminalMuxReady: (targetKey: string, ready: boolean) => ReturnType<typeof setTargetTerminalMuxReady>;
   ensureSessionTerminalChannel: (sessionId: string, options?: Parameters<typeof ensureSessionTerminalChannel>[2]) => ReturnType<typeof ensureSessionTerminalChannel>;
+  writeSessionTerminalChannelName: (sessionId: string, sessionName: string) => ReturnType<typeof updateSessionTerminalChannelName>;
   writeSessionTerminalChannelState: (sessionId: string, state: Parameters<typeof updateSessionTerminalChannelState>[2]) => ReturnType<typeof updateSessionTerminalChannelState>;
   writeSessionRequestedTerminalGeometry: (
     sessionId: string,
@@ -111,7 +113,7 @@ function resolveIncomingMessageTypeFast(data: string): string | null {
 export function buildSessionMuxChannelOpenFrame(options: {
   channel: Pick<SessionTerminalChannelRuntime, 'channelId' | 'sessionName' | 'bodySubscribed'>;
   sessionName?: string;
-  host?: Pick<Host, 'autoCommand'>;
+  host?: Pick<Host, 'autoCommand' | 'terminalBackend'>;
   geometry?: { cols?: number | null; rows?: number | null; widthMode?: 'adaptive-phone' | 'mirror-fixed' } | null;
 }) {
   const geometry = options.geometry || null;
@@ -121,6 +123,7 @@ export function buildSessionMuxChannelOpenFrame(options: {
     ...(Number.isFinite(geometry?.cols) ? { cols: Math.max(1, Math.floor(geometry?.cols || 0)) } : {}),
     ...(Number.isFinite(geometry?.rows) ? { rows: Math.max(1, Math.floor(geometry?.rows || 0)) } : {}),
     ...(geometry?.widthMode ? { widthMode: geometry.widthMode } : {}),
+    ...(options.host?.terminalBackend ? { backend: options.host.terminalBackend } : {}),
     ...(typeof options.host?.autoCommand === 'string' && options.host.autoCommand.trim() ? { autoCommand: options.host.autoCommand.trim() } : {}),
     bodySubscribed: options.channel.bodySubscribed,
   });
@@ -131,7 +134,7 @@ export function sendSessionMuxChannelOpenRuntime(options: {
   ws: BridgeTransportSocket;
   channel: Pick<SessionTerminalChannelRuntime, 'channelId' | 'sessionName' | 'bodySubscribed'>;
   sessionName?: string;
-  host?: Pick<Host, 'autoCommand'>;
+  host?: Pick<Host, 'autoCommand' | 'terminalBackend'>;
   geometry?: { cols?: number | null; rows?: number | null; widthMode?: 'adaptive-phone' | 'mirror-fixed' } | null;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
 }) {
@@ -187,6 +190,7 @@ export function createSessionContextTransportAccessors(
     writeTargetTerminalSocket: (targetKey, socket) => setTargetTerminalTransport(storeRef.current, targetKey, socket),
     writeTargetTerminalMuxReady: (targetKey, ready) => setTargetTerminalMuxReady(storeRef.current, targetKey, ready),
     ensureSessionTerminalChannel: (sessionId, options) => ensureSessionTerminalChannel(storeRef.current, sessionId, options),
+    writeSessionTerminalChannelName: (sessionId, sessionName) => updateSessionTerminalChannelName(storeRef.current, sessionId, sessionName),
     writeSessionTerminalChannelState: (sessionId, state) => updateSessionTerminalChannelState(storeRef.current, sessionId, state),
     writeSessionRequestedTerminalGeometry: (sessionId, geometry) => setSessionRequestedTerminalGeometry(storeRef.current, sessionId, geometry),
     moveSessionTransportSocketAside: (sessionId) => moveSessionTransportSocketToSuperseded(storeRef.current, sessionId),

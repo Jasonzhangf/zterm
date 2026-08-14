@@ -41,6 +41,65 @@ interface RelayDirectoryPublisherSocket {
   send: (payload: string) => void;
 }
 
+/**
+ * daemon 与 relay 之间无应用层心跳，Mac 睡眠/网络切换后 WS 可能半开：
+ * 服务端目录里 connected 标记残留（客户端会把它当在线，导致死实例长期显示）。
+ * 解法：daemon 定期 publish directory-update 维持服务端 lastSeenAt 新鲜，
+ * 并用 ping/pong 检测半开连接——超时未收到 pong 则 terminate 触发重连，
+ * 服务端对断开连接会在短时间内标 disconnected，客户端按新鲜度过滤即可消除死实例。
+ */
+export const DIRECTORY_PUBLISH_INTERVAL_MS = 60_000;
+
+export interface RelayHostDirectoryPublishLoopOptions {
+  socket: { readyState: number; ping: () => void; terminate: () => void };
+  publish: () => boolean;
+  intervalMs?: number;
+  pongTimeoutMs?: number;
+  now?: () => number;
+  warn?: (message: string) => void;
+}
+
+export function createRelayHostDirectoryPublishLoop(options: RelayHostDirectoryPublishLoopOptions) {
+  const intervalMs = options.intervalMs ?? DIRECTORY_PUBLISH_INTERVAL_MS;
+  const pongTimeoutMs = options.pongTimeoutMs ?? DIRECTORY_PUBLISH_INTERVAL_MS * 2;
+  let lastPongAt = options.now ? options.now() : Date.now();
+  let timer: ReturnType<typeof setInterval> | null = null;
+
+  return {
+    markPong() {
+      lastPongAt = options.now ? options.now() : Date.now();
+    },
+    start() {
+      if (timer) {
+        return;
+      }
+      timer = setInterval(() => {
+        if (options.socket.readyState !== 1) {
+          return;
+        }
+        const now = options.now ? options.now() : Date.now();
+        if (now - lastPongAt > pongTimeoutMs) {
+          options.warn?.(
+            `[${new Date().toISOString()}] traversal relay host pong timeout (${pongTimeoutMs}ms); terminating half-open socket`,
+          );
+          options.socket.terminate();
+          return;
+        }
+        options.socket.ping();
+        options.publish();
+      }, intervalMs);
+      timer.unref?.();
+    },
+    stop() {
+      if (!timer) {
+        return;
+      }
+      clearInterval(timer);
+      timer = null;
+    },
+  };
+}
+
 function asString(value: unknown) {
   return typeof value === 'string' ? value.trim() : '';
 }
@@ -158,6 +217,7 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
   const config = options.config;
   let socket: WebSocket | null = null;
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let publishLoop: ReturnType<typeof createRelayHostDirectoryPublishLoop> | null = null;
   let disposed = false;
 
   function clearReconnectTimer() {
@@ -204,9 +264,31 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
       }
       const nextSocket = new WebSocket(wsUrl);
       socket = nextSocket;
+      publishLoop?.stop();
+      publishLoop = createRelayHostDirectoryPublishLoop({
+        socket: nextSocket,
+        publish: () => {
+          const publishResult = publishRelayDirectoryUpdate({
+            socket: nextSocket,
+            listEndpointCandidates: options.listEndpointCandidates,
+            listTmuxSessions: options.listTmuxSessions,
+            now: options.now || (() => new Date().toISOString()),
+          });
+          if (!publishResult.ok) {
+            console.warn(`[${new Date().toISOString()}] traversal relay directory publish failed: ${publishResult.reason}`);
+          }
+          return publishResult.ok;
+        },
+        warn: (message) => console.warn(message),
+      });
 
       nextSocket.on('open', () => {
+        publishLoop?.markPong();
         console.log(`[${new Date().toISOString()}] traversal relay host online: ${config.hostId} -> ${wsUrl.origin}`);
+      });
+
+      nextSocket.on('pong', () => {
+        publishLoop?.markPong();
       });
 
       nextSocket.on('message', async (rawData) => {
@@ -227,6 +309,7 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
             } else {
               console.warn(`[${new Date().toISOString()}] traversal relay directory publish failed: ${publishResult.reason}`);
             }
+            publishLoop?.start();
             return;
           }
           if (envelope.type === 'relay-peer-close' && envelope.peerId) {
@@ -258,6 +341,8 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
         if (socket === nextSocket) {
           socket = null;
         }
+        publishLoop?.stop();
+        publishLoop = null;
         const reason = Buffer.isBuffer(reasonBuffer) ? reasonBuffer.toString('utf-8') : String(reasonBuffer || '');
         console.warn(`[${new Date().toISOString()}] traversal relay host websocket closed (${code} ${reason})`);
         scheduleReconnect(2000);
@@ -283,6 +368,8 @@ export function createTraversalRelayHostClient(options: CreateTraversalRelayHost
     dispose() {
       disposed = true;
       clearReconnectTimer();
+      publishLoop?.stop();
+      publishLoop = null;
       if (socket && socket.readyState < WebSocket.CLOSING) {
         socket.close(1000, 'relay host client disposed');
       }

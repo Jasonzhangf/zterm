@@ -15,6 +15,7 @@ import {
   reconnectAllSessionsRuntime,
   reconnectSessionRuntime,
   renameSessionRuntime,
+  renameRemoteSessionRuntime,
 } from './session-context-session-runtime';
 import {
   ensureActiveSessionFreshRuntime,
@@ -86,6 +87,7 @@ interface SessionLifecycleRuntimeOptions {
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
   cleanupControlSocket: (sessionId: string, shouldClose?: boolean) => void;
   writeSessionTransportHost: (sessionId: string, host: Host) => unknown;
+  writeSessionTerminalChannelName: (sessionId: string, sessionName: string) => unknown;
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
   daemonConnection: ClientDaemonConnection;
   readSessionTransportHost: (sessionId: string) => Host | null;
@@ -203,6 +205,18 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
     });
   };
 
+  const renameRemoteSession = (sessionId: string, name: string) => {
+    renameRemoteSessionRuntime({
+      sessionId,
+      name,
+      sessions: options.refs.stateRef.current.sessions,
+      updateSessionSync: options.updateSessionSync,
+      readSessionTransportHost: options.readSessionTransportHost,
+      writeSessionTransportHost: options.writeSessionTransportHost,
+      writeSessionTerminalChannelName: options.writeSessionTerminalChannelName,
+    });
+  };
+
   const reconnectSession = (sessionId: string, reconnectOptions?: ReconnectSessionRuntimeOptions) => {
     reconnectSessionRuntime({
       sessionId,
@@ -287,7 +301,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
       resetSessionTransportPullBookkeeping: options.resetSessionTransportPullBookkeeping,
       requestSessionBufferHead: options.requestSessionBufferHead,
       resolveTerminalRefreshCadence: options.resolveTerminalRefreshCadence,
-      reconnectSession,
+      reconnectSession: (sessionId) => reconnectSession(sessionId, { preserveAttempt: true }),
       reopenSessionTerminalChannel,
     });
   };
@@ -298,6 +312,7 @@ export function createSessionLifecycleRuntime(options: SessionLifecycleRuntimeOp
     closeSession,
     moveSession,
     renameSession,
+    renameRemoteSession,
     reconnectSession,
     reconnectAllSessions,
     ensureActiveSessionFresh,

@@ -31,7 +31,7 @@ import {
   handleSocketConnectedBaselineRuntime,
   handleSocketServerMessageRuntime,
 } from './session-context-socket-message-runtime';
-import type { SessionPullPurpose, SessionPullStates } from './session-pull-state-helpers';
+import type { SessionPullPurpose, SessionPullStates } from '../lib/session-pull-state-helpers';
 import type { SessionVisibleRangeState, SessionDaemonHeadView } from './session-visible-range-helpers';
 import type { RemoteWindowMessageRuntime } from '../lib/remote-window-message-runtime';
 import type { FileTransferMessageRuntime } from '../lib/file-transfer-message-runtime';
@@ -139,6 +139,8 @@ export interface SessionMessageAssembliesOptions {
   cleanupSocket: (sessionId: string, shouldClose?: boolean) => void;
   applyTransportDiagnostics: (sessionId: string, socket: BridgeTransportSocket) => void;
   incrementConnectedSync: () => void;
+  recordRelayHostConnection?: (daemonHostId: string) => void;
+  handleAttachmentError?: (message: string, code?: string) => void;
 }
 
 export interface SessionSocketPayloadOptions {
@@ -348,6 +350,8 @@ export function createSessionMessageAssemblies(
       fileTransferMessageRuntime: options.fileTransferMessageRuntimeRef.current,
       remoteWindowMessageRuntime: options.remoteWindowMessageRuntimeRef.current,
       updateSessionSync: options.updateSessionSync,
+      recordRelayHostConnection: options.recordRelayHostConnection,
+      handleAttachmentError: options.handleAttachmentError,
     });
   };
 

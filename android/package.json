@@ -56,7 +56,7 @@
     "release:github": "bash ./scripts/publish-github-release.sh",
     "deps:ensure": "bash ./scripts/ensure-pnpm-install.sh",
     "deps:check-wterm-published": "node ./scripts/check-wterm-runtime-published.mjs",
-    "test:feature-registry": "pnpm exec vitest run src/lib/feature-registry-truth.test.ts src/lib/function-wiki-truth.test.ts src/lib/architecture-boundary-truth.test.ts src/lib/loop-governance-truth.test.ts src/lib/resource-registry-truth.test.ts src/lib/module-registry-truth.test.ts src/lib/edge-registry-truth.test.ts src/lib/module-import-graph-truth.test.ts src/lib/function-map-resource-truth.test.ts src/lib/mainline-resource-call-map.test.ts",
+    "test:feature-registry": "pnpm exec vitest run src/lib/feature-registry-truth.test.ts src/lib/function-wiki-truth.test.ts src/lib/architecture-boundary-truth.test.ts src/lib/loop-governance-truth.test.ts src/lib/resource-registry-truth.test.ts src/lib/module-registry-truth.test.ts src/lib/edge-registry-truth.test.ts src/lib/module-import-graph-truth.test.ts src/lib/function-map-resource-truth.test.ts src/lib/mainline-resource-call-map.test.ts src/lib/android-task-transition-truth.test.ts",
     "test:file-transfer:throughput": "bash ./scripts/run-file-transfer-throughput-gate.sh",
     "test:relay:account-directory": "pnpm exec vitest run src/lib/traversal-relay-client.test.ts src/lib/relay-account-directory.test.ts src/lib/relay-device-stream-runtime.test.ts",
     "test:workspace:panes": "pnpm exec vitest run src/components/terminal/TerminalHeader.test.tsx src/pages/TerminalPageStageShell.pane-stage.test.tsx src/lib/home-connection-projection.test.ts && pnpm --dir ../packages/shared exec vitest run src/react/pane-profile.test.ts"

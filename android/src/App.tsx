@@ -4,6 +4,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { MutableRefObject } from 'react';
 import { App as CapacitorApp } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
 import { LocalNotifications } from '@capacitor/local-notifications';
@@ -11,6 +12,7 @@ import { parseConnectionConfigShareLink } from '@zterm/shared';
 import { TmuxSessionPickerSheet } from './components/tmux/TmuxSessionPickerSheet';
 import { SessionProvider, useSession } from './contexts/SessionContext';
 import { useAppUpdate } from './hooks/useAppUpdate';
+import { useScreenOrientationLock } from './hooks/useScreenOrientationLock';
 import { useConfigExport } from './hooks/useConfigExport';
 import { useBridgeSettingsStorage } from './hooks/useBridgeSettingsStorage';
 import { buildBridgeTargetFromHost } from './lib/session-picker';
@@ -36,8 +38,12 @@ import { ConnectionPropertiesPage } from './pages/ConnectionPropertiesPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { TerminalPage } from './pages/TerminalPage';
 import { projectHomeSavedConnections } from './lib/home-connection-projection';
-import type { TerminalWidthMode } from './lib/types';
+import type { Host, TerminalWidthMode } from './lib/types';
 import { useBackgroundLiveSessionHandoff } from './hooks/useOpenTabLifecycleEffects';
+import { useAttachmentNotifications } from './hooks/useAttachmentNotifications';
+import { createNetworkIdentityRuntime } from './lib/network-identity';
+import { readNativeNetworkIdentitySnapshot } from './plugins/NetworkIdentityPlugin';
+import type { NetworkIdentityRuntime } from './lib/network-identity';
 
 interface AppContentProps {
   bridgeSettings: ReturnType<typeof useBridgeSettingsStorage>['settings'];
@@ -45,6 +51,8 @@ interface AppContentProps {
   appForegroundActive?: boolean;
   onForegroundActiveChange?: (active: boolean) => void;
   onForegroundResume?: (reason: 'visibilitychange' | 'resume' | 'appStateChange') => void;
+  latestSessionHostsRef?: MutableRefObject<Host[] | undefined>;
+  networkIdentity?: NetworkIdentityRuntime;
 }
 
 
@@ -54,8 +62,18 @@ export function AppContent({
   appForegroundActive = true,
   onForegroundActiveChange,
   onForegroundResume,
+  latestSessionHostsRef,
+  networkIdentity,
 }: AppContentProps) {
   const [pendingPaneAttachIntent, setPendingPaneAttachIntent] = useState<{ sessionIds: string[]; paneId: string; nonce: number } | null>(null);
+  useEffect(() => {
+    if (!networkIdentity) {
+      return;
+    }
+    void networkIdentity.resample().catch((error) => {
+      console.warn('[App] initial network identity resample failed:', error);
+    });
+  }, [networkIdentity]);
   const { relayDevices, refreshControlDirectory } = useRelayDeviceStream({
     bridgeSettings,
     setBridgeSettings,
@@ -115,6 +133,7 @@ export function AppContent({
     switchSession,
     moveSession,
     renameSession,
+    renameRemoteSession,
     reconnectSession,
     setLiveSessionIds,
     setActiveBodySubscriptionSuppressed,
@@ -133,6 +152,7 @@ export function AppContent({
     sendRemoteWindowInput,
     resizeRemoteWindowTarget,
     sendMessageRaw,
+    sendTargetHeartbeat,
     manageTmuxSessionsOnOpenTransport,
     onFileTransferMessage,
     onRemoteWindowMessage,
@@ -144,8 +164,11 @@ export function AppContent({
     runScheduleJobNow,
     getSessionScheduleState,
     getSessionRenderBufferStore,
+    getPendingAttachments,
     recordBackgroundEnteredAt,
   } = useSession();
+  useAttachmentNotifications({ getPendingAttachments });
+  const screenOrientationLock = useScreenOrientationLock();
   void sendMessageRaw;
   void onFileTransferMessage;
   const { hosts, isLoaded: hostsLoaded, addHost, upsertHost, updateHost, deleteHost } = useHostStorage();
@@ -153,6 +176,12 @@ export function AppContent({
     () => projectHomeSavedConnections(hosts, bridgeSettings, relayDevices),
     [bridgeSettings, hosts, relayDevices],
   );
+  // Publish the freshest projection to the session reconnect layer so a
+  // network change that rotated the daemon's direct endpoints can refresh the
+  // cached host before probing (see mergeHostWithLatestProjection).
+  if (latestSessionHostsRef) {
+    latestSessionHostsRef.current = homeSavedConnections;
+  }
   const { quickActions, setQuickActions } = useQuickActionStorage();
   const { shortcutActions, setShortcutActions } = useShortcutActionStorage();
   const shortcutFrequencyStorage = useShortcutFrequencyStorage();
@@ -356,13 +385,8 @@ export function AppContent({
     onForegroundActiveChange,
     onForegroundResume: handleForegroundResumeAfterControlRefresh,
     recordBackgroundEnteredAt,
-    sendBackgroundHeartbeat: () => {
-      for (const session of sessions) {
-        if (session.state !== 'closed') {
-          sendMessageRaw(session.id, { type: 'ping' });
-        }
-      }
-    },
+    networkIdentity,
+    sendBackgroundHeartbeat: sendTargetHeartbeat,
   });
 
   const markRuntimeSessionEntered = useCallback((sessionId: string) => {
@@ -478,6 +502,7 @@ export function AppContent({
     handleOpenSingleTmuxSession,
     handleOpenMultipleTmuxSessions,
     handleOpenGroupSession,
+    handleRenameRemoteSession,
     handleCloseGroupSession,
     handleSaveServerGroupSelection,
     handleSelectCleanSession,
@@ -500,6 +525,7 @@ export function AppContent({
     createSession,
     closeSession,
     switchSession,
+    renameRemoteSession,
     manageTmuxSessionsOnOpenTransport,
     runtimeActiveSessionId: state.activeSessionId,
     runtimeRefs,
@@ -679,6 +705,7 @@ export function AppContent({
             onOpenConnections={handleOpenConnectionsPageWithAudit}
             onOpenQuickTabPicker={handleOpenQuickTabPicker}
             onOpenDrawerRemoteSession={handleOpenGroupSession}
+            onRenameRemoteSession={handleRenameRemoteSession}
             onCloseDrawerRemoteSession={handleCloseGroupSession}
             onRefreshDrawerHostSessions={handleRefreshDrawerHostSessions}
             onAuditOpenTabsAgainstRemoteSessions={auditOpenTabsAgainstRemoteSessions}
@@ -744,6 +771,43 @@ export function AppContent({
           />
         )}
       </div>
+
+      {/* 屏幕方向转换按钮（视频播放器式）：默认锁定方向不随手机姿势自动切换；
+          物理姿态与锁定方向不一致时在此角落弹出小按钮，点击锁定姿态方向。
+          垂直居中右侧——不覆盖顶部/底部浮动标签（quickbar 固定簇等） */}
+      {screenOrientationLock.showSwitchButton &&
+        screenOrientationLock.pendingTarget && (
+          <button
+            type="button"
+            data-testid="screen-orientation-switch-button"
+            aria-label={`切换到${screenOrientationLock.pendingTarget === 'landscape' ? '横屏' : '竖屏'}`}
+            onClick={() => {
+              screenOrientationLock.requestOrientationSwitch();
+            }}
+            style={{
+              position: 'fixed',
+              right: 14,
+              top: '50%',
+              transform: 'translateY(-50%)',
+              width: 40,
+              height: 40,
+              borderRadius: 20,
+              border: 'none',
+              backgroundColor: 'rgba(18, 20, 24, 0.72)',
+              color: '#ffffff',
+              fontSize: 18,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              boxShadow: '0 2px 10px rgba(0, 0, 0, 0.35)',
+              zIndex: 2147483000,
+              cursor: 'pointer',
+              padding: 0,
+            }}
+          >
+            ↻
+          </button>
+        )}
 
       <TmuxSessionPickerSheet
         mode={pickerMode === 'quick-tab' ? 'quick-tab' : pickerMode === 'edit-group' ? 'edit-group' : 'new-connection'}
@@ -913,6 +977,10 @@ export default function App() {
   const handleForegroundResume = useCallback(() => {
     setForegroundResumeEpoch((current) => current + 1);
   }, []);
+  const latestSessionHostsRef = useRef<Host[] | undefined>(undefined);
+  const networkIdentityRuntime = useMemo(() => createNetworkIdentityRuntime({
+    sampleInterfaces: readNativeNetworkIdentitySnapshot,
+  }), []);
 
   return (
     <SessionProvider
@@ -920,6 +988,8 @@ export default function App() {
       bridgeSettings={bridgeSettings}
       appForegroundActive={appForegroundActive}
       foregroundResumeEpoch={foregroundResumeEpoch}
+      latestSessionHostsRef={latestSessionHostsRef}
+      networkIdentity={networkIdentityRuntime}
     >
       <AppContent
         bridgeSettings={bridgeSettings}
@@ -927,6 +997,8 @@ export default function App() {
         appForegroundActive={appForegroundActive}
         onForegroundActiveChange={setAppForegroundActive}
         onForegroundResume={handleForegroundResume}
+        latestSessionHostsRef={latestSessionHostsRef}
+        networkIdentity={networkIdentityRuntime}
       />
     </SessionProvider>
   );

@@ -179,6 +179,7 @@ export function createTerminalMuxChannelRuntime(
         }
         const subscriber = deps.createMuxChannelSubscriber(connection, frame.payload.channelId);
         subscriber.sessionName = deps.sanitizeSessionName(frame.payload.sessionName);
+        subscriber.backend = frame.payload.backend;
         subscriber.bodySubscribed = frame.payload.bodySubscribed !== false;
         try {
           handleMuxChannelOpenedMessageRuntime(
@@ -214,6 +215,7 @@ export function createTerminalMuxChannelRuntime(
         });
         void deps.attachTmux(subscriber, {
           sessionName: frame.payload.sessionName,
+          backend: frame.payload.backend,
           cols: frame.payload.cols,
           rows: frame.payload.rows,
           widthMode: frame.payload.widthMode,

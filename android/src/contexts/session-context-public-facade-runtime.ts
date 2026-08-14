@@ -18,7 +18,7 @@ import type {
   TerminalViewportState,
   TerminalVisibleRange,
 } from '../lib/types';
-import type { TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
+import { buildTerminalMuxPing, type TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
 import type { SessionBufferStore } from '../lib/session-buffer-store';
 import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
 import type { SessionHeadStore } from '../lib/session-head-store';
@@ -53,6 +53,7 @@ import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionBufferHeadState } from './session-buffer-planner-helpers';
 import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import type { SessionTargetNetworkSignal } from './session-context-target-network-probe-runtime';
+import type { TargetTransportRuntime } from '../lib/session-transport-runtime';
 
 export function createSessionPublicFacadeRuntime(options: {
   stateRef: { current: SessionManagerState };
@@ -61,6 +62,7 @@ export function createSessionPublicFacadeRuntime(options: {
   sessionHeadStoreRef: { current: { getLiveHead: (sessionId: string) => SessionBufferHeadState | null } };
   readSessionTransportResource: (sessionId: string) => SessionTransportResource;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
+  readTargetTransportRuntimes: () => TargetTransportRuntime[];
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   daemonConnection: ClientDaemonConnection;
   tmuxTargetRequestsRef: { current: SessionTmuxTargetRequestStore };
@@ -283,6 +285,24 @@ export function createSessionPublicFacadeRuntime(options: {
     });
   };
 
+  const sendTargetHeartbeat = () => {
+    let sentCount = 0;
+    for (const targetRuntime of options.readTargetTransportRuntimes()) {
+      const ws = targetRuntime.terminalTransport;
+      const anchorSessionId = targetRuntime.sessionIds[0] || null;
+      if (!ws || ws.readyState !== WebSocket.OPEN || !targetRuntime.terminalMuxReady || !anchorSessionId) {
+        continue;
+      }
+      options.sendSocketPayload(
+        anchorSessionId,
+        ws,
+        JSON.stringify(buildTerminalMuxPing(Date.now())),
+      );
+      sentCount += 1;
+    }
+    return sentCount;
+  };
+
   return {
     sendMessage,
     requestScheduleList,
@@ -302,6 +322,7 @@ export function createSessionPublicFacadeRuntime(options: {
     getSessionDebugMetrics,
     manageTmuxSessionsOnOpenTransport,
     sendMessageRaw,
+    sendTargetHeartbeat,
   };
 }
 
@@ -314,6 +335,7 @@ export function buildSessionContextValueRuntime(options: {
   switchSession: (id: string) => void;
   moveSession: (id: string, toIndex: number) => void;
   renameSession: (id: string, name: string) => void;
+  renameRemoteSession: (id: string, name: string) => void;
   reconnectSession: (id: string) => void;
   reconnectAllSessions: () => void;
   recordBackgroundEnteredAt: (sessionIds: string[], at: number) => void;
@@ -386,6 +408,7 @@ export function buildSessionContextValueRuntime(options: {
   onFileTransferMessage: (handler: (msg: any) => void) => () => void;
   onRemoteWindowMessage: (handler: (msg: RemoteWindowControlMessage) => void) => () => void;
   sendMessageRaw: (sessionId: string, msg: unknown) => void;
+  sendTargetHeartbeat: () => number;
   getPendingAttachmentCount: () => number;
   getPendingAttachments: () => ReturnType<SessionAttachmentStore['getAll']>;
   queryAttachmentHistory: () => void;
@@ -400,6 +423,7 @@ export function buildSessionContextValueRuntime(options: {
     switchSession: options.switchSession,
     moveSession: options.moveSession,
     renameSession: options.renameSession,
+    renameRemoteSession: options.renameRemoteSession,
     reconnectSession: options.reconnectSession,
     reconnectAllSessions: options.reconnectAllSessions,
     recordBackgroundEnteredAt: options.recordBackgroundEnteredAt,
@@ -437,6 +461,7 @@ export function buildSessionContextValueRuntime(options: {
     onFileTransferMessage: options.onFileTransferMessage,
     onRemoteWindowMessage: options.onRemoteWindowMessage,
     sendMessageRaw: options.sendMessageRaw,
+    sendTargetHeartbeat: options.sendTargetHeartbeat,
     getPendingAttachmentCount: options.getPendingAttachmentCount,
     getPendingAttachments: options.getPendingAttachments,
     queryAttachmentHistory: options.queryAttachmentHistory,

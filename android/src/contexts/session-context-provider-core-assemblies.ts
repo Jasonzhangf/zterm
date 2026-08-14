@@ -7,6 +7,9 @@ import {
   createSessionInfraFacadeRuntime,
 } from "./session-context-infra-facade-runtime";
 import {
+  mergeHostWithLatestProjection,
+} from "../lib/home-connection-projection";
+import {
   createSessionTransportOrchestrationRuntime,
 } from "./session-context-transport-orchestration-runtime";
 import {
@@ -25,6 +28,7 @@ import type {
 } from "./session-context-provider-assembly-types";
 import type { AttachmentAssetDataPayload, AttachmentHistoryPayload, PendingAttachmentsPayload, SessionActivity } from '@zterm/shared/protocol';
 import { createSessionActivityNotifier } from '../lib/session-activity-notify';
+import { rememberRelayHostConnection } from '../lib/relay-host-recent-connection';
 
 
 
@@ -112,7 +116,8 @@ export function useSessionProviderCoreAssemblies(
     wsUrl: options.wsUrl,
     staleActivityMs: ACTIVE_TRANSPORT_STALE_ACTIVITY_MS,
     runtimeDebug,
-  }), [options.bridgeSettings, options.dispatch, options.scheduleStatesRef, options.setScheduleStates, options.stateRef, options.terminalCacheLines, options.wsUrl]);
+    networkIdentity: options.networkIdentity,
+  }), [options.bridgeSettings, options.dispatch, options.scheduleStatesRef, options.setScheduleStates, options.stateRef, options.terminalCacheLines, options.wsUrl, options.networkIdentity]);
 
   const {
     readTargetTransportRuntimes,
@@ -151,6 +156,7 @@ export function useSessionProviderCoreAssemblies(
     writeTargetTerminalSocket,
     writeTargetTerminalMuxReady,
     ensureSessionTerminalChannel,
+    writeSessionTerminalChannelName,
     writeSessionTerminalChannelState,
     writeSessionRequestedTerminalGeometry,
     moveSessionTransportSocketAside,
@@ -258,6 +264,9 @@ export function useSessionProviderCoreAssemblies(
     clientDeviceId: options.bridgeSettings.traversalRelay?.deviceId?.trim() || undefined,
     sessionHandshakeTimeoutMs: SESSION_HANDSHAKE_TIMEOUT_MS,
     sessionTerminalReadyTimeoutMs: SESSION_TERMINAL_READY_TIMEOUT_MS,
+    refreshHostForReconnect: options.latestSessionHostsRef
+      ? (host) => mergeHostWithLatestProjection(host, options.latestSessionHostsRef?.current || [])
+      : undefined,
     refs: {
       pendingSessionTransportOpenIntentsRef,
       tmuxTargetRequestsRef,
@@ -460,6 +469,14 @@ export function useSessionProviderCoreAssemblies(
     cleanupSocket,
     applyTransportDiagnostics,
     incrementConnectedSync,
+    recordRelayHostConnection: (daemonHostId) => rememberRelayHostConnection(daemonHostId),
+    handleAttachmentError: (message) => {
+      for (const entry of attachmentStoreRef.current.getAll()) {
+        if (entry.status === 'pending-preview' || entry.status === 'pending-original') {
+          attachmentStoreRef.current.markError(entry.attachmentId, message);
+        }
+      }
+    },
   }), [
     applyTransportDiagnostics,
     cleanupSocket,
@@ -468,6 +485,7 @@ export function useSessionProviderCoreAssemblies(
     daemonConnection,
     fileTransferMessageRuntimeRef,
     remoteWindowMessageRuntimeRef,
+    attachmentStoreRef,
     incrementConnectedSync,
     isSessionTransportActive,
     lastConnectedBaselineAtRef,
@@ -522,6 +540,7 @@ export function useSessionProviderCoreAssemblies(
     flushRuntimeDebugLogs,
     clearReconnectForSession,
     writeSessionTransportHost,
+    writeSessionTerminalChannelName,
     writeSessionTransportToken,
     scheduleReconnect,
     readSessionBufferSnapshot,
@@ -611,6 +630,7 @@ export function useSessionProviderCoreAssemblies(
     setSessionTitleSync,
     updateSessionSync,
     writeSessionTransportHost,
+    writeSessionTerminalChannelName,
     writeSessionTransportToken,
     daemonConnection,
   ]);

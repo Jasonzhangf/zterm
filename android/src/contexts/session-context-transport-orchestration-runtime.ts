@@ -61,7 +61,7 @@ import {
 } from './session-buffer-planner-helpers';
 import {
   shouldAutoReconnectSession,
-} from './session-reconnect-helpers';
+} from '../lib/session-reconnect-helpers';
 import {
   scheduleReconnectRuntime,
   startReconnectAttemptRuntime,
@@ -86,7 +86,7 @@ export function resolveMuxChannelClosedWithControlStatusRuntime(options: {
   reason: string;
   shouldReconnectNow: boolean;
   queryTargetSessions: () => Promise<string[] | null>;
-  routeTargetControlUnavailable: (sessionId: string, message: string) => void;
+  routeTargetControlUnavailable?: (sessionId: string, message: string) => void;
   readSessionTerminalChannel: (sessionId: string) => {
     channelId: string;
     state: 'opening' | 'open' | 'closing' | 'closed';
@@ -122,9 +122,8 @@ export function resolveMuxChannelClosedWithControlStatusRuntime(options: {
       }
 
       if (sessionNames === null) {
-        const message = `control status unavailable after data channel closed: ${options.reason}`;
         if (options.shouldReconnectNow) {
-          options.routeTargetControlUnavailable(options.sessionId, message);
+          options.scheduleReconnect(options.sessionId, options.reason, true);
         }
         options.runtimeDebug('session.mux.channel-closed.control-status.unavailable', {
           sessionId: options.sessionId,
@@ -158,15 +157,13 @@ export function resolveMuxChannelClosedWithControlStatusRuntime(options: {
       if (!readCurrentClosedChannel()) {
         return;
       }
-      const message = `control status failed after data channel closed: ${
-        error instanceof Error ? error.message : String(error)
-      }`;
+      const message = error instanceof Error ? error.message : String(error);
       options.runtimeDebug('session.mux.channel-closed.control-status.failed', {
         sessionId: options.sessionId,
         error: message,
       });
       if (options.shouldReconnectNow) {
-        options.routeTargetControlUnavailable(options.sessionId, message);
+        options.scheduleReconnect(options.sessionId, options.reason, true);
       }
     });
 }
@@ -355,6 +352,31 @@ export function notifyTargetNetworkSignalRuntime(options: {
   if (shouldWakeReconnects) {
     options.wakeScheduledReconnects?.();
   }
+
+  // A client network-generation change invalidates every physical transport
+  // assumption built on the previous local network (WiFi/cellular/VPN/IP set).
+  // Retire each exact socket immediately through the single target failure
+  // owner instead of waiting for a bounded probe that is only meaningful
+  // within one generation. Same-generation signals keep the conservative
+  // probe path below.
+  if (options.signal.fingerprintChanged === true) {
+    const message = `client network generation changed to ${options.signal.networkGeneration ?? 'unknown'}`;
+    for (const targetRuntime of options.targetRuntimes) {
+      const socket = targetRuntime.terminalTransport;
+      if (!socket) {
+        continue;
+      }
+      options.submitTargetSocketFailure(targetRuntime.key, socket, message);
+      outcomes.push({ targetKey: targetRuntime.key, result: 'generation-changed' });
+      options.runtimeDebug('session.mux.target-network-generation-changed', {
+        targetKey: targetRuntime.key,
+        source: options.signal.source,
+        networkGeneration: options.signal.networkGeneration,
+      });
+    }
+    return outcomes;
+  }
+
   for (const targetRuntime of options.targetRuntimes) {
     const socket = targetRuntime.terminalTransport;
     if (!socket) {
@@ -493,6 +515,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
   writeTargetTerminalMuxReady: (targetKey: string, ready: boolean) => unknown;
   writeSessionTransportSocket: (sessionId: string, socket: BridgeTransportSocket | null) => unknown;
   probeReconnectHost?: (bridgeHost: string, bridgePort: number) => Promise<boolean>;
+  refreshHostForReconnect?: (host: Host) => Host;
   ensureSessionTerminalChannel: (sessionId: string, options?: { channelId?: string; now?: number; bodySubscribed?: boolean }) => {
     channelId: string;
     sessionId: string;
@@ -734,10 +757,6 @@ export function createSessionTransportOrchestrationRuntime(options: {
               sendSocketPayload: options.sendSocketPayload,
               runtimeDebug: options.runtimeDebug,
             }),
-            routeTargetControlUnavailable: (_failedSessionId, message) => {
-              const targetKey = options.readSessionTargetKey(sessionId) || '';
-              submitTargetSocketFailure(targetKey, ws, message);
-            },
             readSessionTerminalChannel: options.readSessionTerminalChannel,
             scheduleReconnect,
             updateSessionSync: options.updateSessionSync,
@@ -944,6 +963,13 @@ export function createSessionTransportOrchestrationRuntime(options: {
       writeSessionTransportHost: options.writeSessionTransportHost,
       queueReconnectTransportOpenIntent,
       probeReconnectHost: options.probeReconnectHost,
+      recordReconnectHostProbe: (result) => {
+        options.runtimeDebug('session.reconnect.http-probe', {
+          sessionId: result.sessionId,
+          candidates: result.candidates,
+        });
+      },
+      refreshHostForReconnect: options.refreshHostForReconnect,
     });
   };
 
@@ -1059,7 +1085,7 @@ export function createSessionTransportOrchestrationRuntime(options: {
         activeSessionId: options.stateRef.current.activeSessionId,
         liveSessionIds: options.stateRef.current.liveSessionIds,
       }),
-      startReconnectAttempt,
+      scheduleReconnect,
     });
   };
 

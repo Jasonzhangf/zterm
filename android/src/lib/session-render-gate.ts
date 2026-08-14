@@ -276,9 +276,12 @@ export function createSessionRenderGate(options: {
             nextEndIndex: projected.endIndex,
           });
         }
-        const changed = renderStore.setBuffer(sessionId, projected, {
-          allowRevisionRegression,
-        });
+        const changed = projected === previousProjected
+          ? false
+          : renderStore.setBuffer(sessionId, projected, {
+              allowRevisionRegression,
+              immutableProjection: true,
+            });
         if (changed) {
           runtimeDebugPrechecked('terminal.performance.trace', {
             sessionId,

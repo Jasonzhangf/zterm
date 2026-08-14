@@ -46,6 +46,24 @@ export function resolveApkSmokeSnapshotTmuxSessionName(record: ApkSmokeDebugSnap
   return asString(record?.tmuxSessionName) || null;
 }
 
+export function resolveApkSmokeDaemonSessionId(
+  snapshot: ApkSmokeRuntimeSnapshot,
+  clientSessionId: string | null | undefined,
+) {
+  const normalizedClientSessionId = asString(clientSessionId);
+  if (!normalizedClientSessionId) {
+    return null;
+  }
+  const expectedChannelId = `channel:${normalizedClientSessionId}`;
+  const subscribers = Array.isArray(snapshot.transportSubscribers)
+    ? snapshot.transportSubscribers
+    : [];
+  const subscriber = subscribers.find((candidate) => (
+    asString(candidate.muxChannelId) === expectedChannelId
+  ));
+  return asString(subscriber?.id) || null;
+}
+
 export function filterApkSmokeRuntimeSnapshot(
   snapshot: ApkSmokeRuntimeSnapshot,
   minimumUpdatedAt: string,

@@ -15,6 +15,7 @@ export interface Host {
   bridgePort: number;
   daemonHostId?: string;
   sessionName: string;
+  terminalBackend?: 'tmux' | 'herdr';
   authToken?: string;
   relayHostId?: string;
   relayDeviceId?: string;

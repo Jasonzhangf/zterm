@@ -1,5 +1,36 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { createFileTransferSessionRuntime } from "../../lib/file-transfer-session-runtime";
+
+import {
+  DEFAULT_LOCAL_DOWNLOAD_DIR,
+  LOCAL_MARKDOWN_PREVIEW_MAX_BYTES,
+  REMOTE_TEXT_EDIT_MAX_BYTES,
+} from "../../lib/file-transfer-sheet-constants";
+
+import {
+  formatBytes,
+  truncateName,
+  isMarkdownFileName,
+  isTextPreviewFileName,
+  encodeBytesToBase64,
+  resolveTextMimeType,
+  joinRemoteCopyIdentity,
+  buildRemoteLocalEditCopyPath,
+  buildLocalPreviewEditCopyPath,
+  buildLocalEditSnapshotPath,
+  decodeBase64Bytes,
+  normalizeLocalDisplayPath,
+  joinLocalDisplayPath,
+  fileUriMatchesPath,
+  getParentLocalDisplayPath,
+  compareFileEntries,
+  isNativePathNotFound,
+} from "../../lib/file-transfer-sheet-helpers";
+
+import {
+  readLocalEditCopyState,
+  writeLocalEditCopyState,
+} from "../../lib/file-transfer-local-edit-copy-storage";
 import {
   sendBoundedFileUploadChunks,
   writeFileTransferChunkBatches,
@@ -17,13 +48,6 @@ import type {
 } from "../../lib/types";
 
 const FILE_CHUNK_SIZE = FILE_TRANSFER_WIRE_CHUNK_BYTES; // must match daemon wire chunk
-const LOCAL_MARKDOWN_PREVIEW_MAX_BYTES = 512 * 1024;
-const REMOTE_TEXT_EDIT_MAX_BYTES = 512 * 1024;
-const EXTERNAL_STORAGE_ROOT = "/storage/emulated/0";
-const DEFAULT_LOCAL_DOWNLOAD_DIR = `${EXTERNAL_STORAGE_ROOT}/Download/zterm`;
-const BROWSER_LOCAL_EDIT_DIR = `${DEFAULT_LOCAL_DOWNLOAD_DIR}/remote-browser`;
-const LOCAL_EDIT_COPY_NAME_MAX_CHARS = 80;
-const LOCAL_EDIT_COPY_STATE_PREFIX = "zterm:file-browser-edit-copy:v1";
 const SHEET_TEXT = "var(--zterm-panel-text)";
 const SHEET_MUTED = "var(--zterm-panel-muted)";
 const SHEET_BORDER = "var(--zterm-panel-border)";
@@ -57,173 +81,9 @@ type PreviewSource =
   | { kind: "remote"; sourceIdentity: string; truncated: false }
   | { kind: "local"; sourcePath: string; sourceIdentity: string; truncated: boolean };
 
-type LocalEditCopyState = {
-  state: "unsynced" | "synced";
-  sourceIdentity: string;
-  path: string;
-  fileName: string;
-  size: number;
-  modified: number;
-};
 
 type FileSortField = "name" | "modified";
 type FileSortDirection = "asc" | "desc";
-type SortableFileEntry = Pick<
-  LocalFileEntry,
-  "name" | "type" | "modified"
->;
-
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-function truncateName(name: string, max: number): string {
-  if (name.length <= max) return name;
-  return name.slice(0, max - 2) + "…";
-}
-
-function isMarkdownFileName(name: string) {
-  return /\.(md|markdown|mdown|mkdn)$/i.test(name.trim());
-}
-
-function isTextPreviewFileName(name: string) {
-  const trimmed = name.trim();
-  const lower = trimmed.toLowerCase();
-  if (
-    lower === "dockerfile" ||
-    lower === "makefile" ||
-    lower === "rakefile" ||
-    lower === ".gitignore" ||
-    lower === ".env"
-  ) {
-    return true;
-  }
-  return /\.(md|markdown|mdown|mkdn|txt|log|json|jsonl|ya?ml|toml|ini|env|sh|bash|zsh|fish|ts|tsx|js|jsx|mjs|cjs|css|scss|html|xml|rs|go|py|rb|java|kt|swift|c|cc|cpp|h|hpp|sql)$/i.test(
-    trimmed,
-  );
-}
-
-function encodeBytesToBase64(bytes: Uint8Array) {
-  let binary = "";
-  for (let index = 0; index < bytes.length; index += 1) {
-    binary += String.fromCharCode(bytes[index]);
-  }
-  return btoa(binary);
-}
-
-function resolveTextMimeType(name: string) {
-  if (isMarkdownFileName(name)) {
-    return "text/markdown";
-  }
-  if (/\.jsonl?$/i.test(name)) {
-    return "application/json";
-  }
-  if (/\.(ts|tsx|js|jsx|mjs|cjs|css|scss|html|xml|rs|go|py|rb|java|kt|swift|c|cc|cpp|h|hpp|sql|sh|bash|zsh|fish)$/i.test(name)) {
-    return "text/plain";
-  }
-  return "text/plain";
-}
-
-function buildBoundedLocalCopyIdentity(value: string) {
-  const source = value || "cwd";
-  let hashA = 0x811c9dc5;
-  let hashB = 0x9e3779b9;
-  for (let index = 0; index < source.length; index += 1) {
-    const code = source.charCodeAt(index);
-    hashA = Math.imul(hashA ^ code, 0x01000193) >>> 0;
-    hashB = Math.imul((hashB + code) >>> 0, 0x85ebca6b) >>> 0;
-    hashB = (hashB ^ (hashB >>> 13)) >>> 0;
-  }
-  return [
-    source.length.toString(36),
-    hashA.toString(36).padStart(7, "0"),
-    hashB.toString(36).padStart(7, "0"),
-  ].join("-");
-}
-
-function sanitizeLocalCopyFileName(fileName: string) {
-  const safeName = fileName.trim().replace(/[\/\\\0:]/g, "_") || "file";
-  if (safeName.length <= LOCAL_EDIT_COPY_NAME_MAX_CHARS) {
-    return safeName;
-  }
-  const dotIndex = safeName.lastIndexOf(".");
-  const extension =
-    dotIndex > 0 && safeName.length - dotIndex <= 24 ? safeName.slice(dotIndex) : "";
-  const baseLimit = LOCAL_EDIT_COPY_NAME_MAX_CHARS - extension.length - 2;
-  return `${safeName.slice(0, Math.max(16, baseLimit))}--${extension}`;
-}
-
-function joinRemoteCopyIdentity(
-  daemonFileScopeId: string,
-  remotePath: string,
-  fileName: string,
-) {
-  const base = remotePath.trim();
-  const remoteFilePath = !base || base === "/"
-    ? `/${fileName}`
-    : `${base.replace(/\/+$/g, "")}/${fileName}`;
-  const scope = daemonFileScopeId.trim();
-  return scope ? `target:${scope}\npath:${remoteFilePath}` : remoteFilePath;
-}
-
-function buildRemoteLocalEditCopyPath(sourceIdentity: string, fileName: string) {
-  return `${BROWSER_LOCAL_EDIT_DIR}/remote/${buildBoundedLocalCopyIdentity(sourceIdentity)}/${sanitizeLocalCopyFileName(fileName)}`;
-}
-
-function buildLocalPreviewEditCopyPath(sourcePath: string, fileName: string) {
-  return `${BROWSER_LOCAL_EDIT_DIR}/local/${buildBoundedLocalCopyIdentity(sourcePath)}/${sanitizeLocalCopyFileName(fileName)}`;
-}
-
-function buildLocalEditSnapshotPath(localCopyPath: string) {
-  return `${localCopyPath}.zterm-upload-snapshot`;
-}
-
-function buildLocalEditCopyStateKey(kind: PreviewSource["kind"], sourceIdentity: string) {
-  return `${LOCAL_EDIT_COPY_STATE_PREFIX}:${kind}:${buildBoundedLocalCopyIdentity(sourceIdentity)}`;
-}
-
-function readLocalEditCopyState(
-  kind: PreviewSource["kind"],
-  sourceIdentity: string,
-  targetPath: string,
-): LocalEditCopyState | null {
-  try {
-    const raw = window.localStorage.getItem(
-      buildLocalEditCopyStateKey(kind, sourceIdentity),
-    );
-    if (!raw) {
-      return null;
-    }
-    const parsed = JSON.parse(raw) as Partial<LocalEditCopyState>;
-    if (
-      (parsed.state === "unsynced" || parsed.state === "synced") &&
-      parsed.sourceIdentity === sourceIdentity &&
-      parsed.path === targetPath &&
-      typeof parsed.fileName === "string" &&
-      typeof parsed.size === "number" &&
-      typeof parsed.modified === "number"
-    ) {
-      return parsed as LocalEditCopyState;
-    }
-  } catch {
-    return null;
-  }
-  return null;
-}
-
-function writeLocalEditCopyState(
-  kind: PreviewSource["kind"],
-  sourceIdentity: string,
-  state: Omit<LocalEditCopyState, "sourceIdentity">,
-) {
-  window.localStorage.setItem(
-    buildLocalEditCopyStateKey(kind, sourceIdentity),
-    JSON.stringify({ ...state, sourceIdentity }),
-  );
-}
-
 function renderMarkdownPreview(text: string) {
   return text.split("\n").map((line, index) => {
     const heading = /^(#{1,6})\s+(.*)$/.exec(line);
@@ -255,105 +115,6 @@ function renderMarkdownPreview(text: string) {
     }
     return <div key={index}>{line}</div>;
   });
-}
-
-function decodeBase64Bytes(data: string) {
-  const binary = atob(data);
-  const bytes = new Uint8Array(binary.length);
-  for (let index = 0; index < binary.length; index += 1) {
-    bytes[index] = binary.charCodeAt(index);
-  }
-  return bytes;
-}
-
-function normalizeLocalDisplayPath(path: string) {
-  const trimmed = path.trim();
-  if (!trimmed || trimmed === "/") {
-    return EXTERNAL_STORAGE_ROOT;
-  }
-  if (trimmed === EXTERNAL_STORAGE_ROOT) {
-    return EXTERNAL_STORAGE_ROOT;
-  }
-  if (trimmed.startsWith(`${EXTERNAL_STORAGE_ROOT}/`)) {
-    return trimmed.replace(/\/+$/, "");
-  }
-  if (trimmed.startsWith("/")) {
-    return `${EXTERNAL_STORAGE_ROOT}/${trimmed.replace(/^\/+/, "")}`.replace(
-      /\/+$/,
-      "",
-    );
-  }
-  return `${EXTERNAL_STORAGE_ROOT}/${trimmed}`.replace(/\/+$/, "");
-}
-
-function joinLocalDisplayPath(parentPath: string, childName: string) {
-  const normalizedParent = normalizeLocalDisplayPath(parentPath);
-  if (normalizedParent === EXTERNAL_STORAGE_ROOT) {
-    return `${EXTERNAL_STORAGE_ROOT}/${childName}`;
-  }
-  return `${normalizedParent}/${childName}`;
-}
-
-function isNativePathNotFound(error: unknown) {
-  const message = error instanceof Error ? error.message : String(error);
-  return /does not exist|not found|enoent/i.test(message);
-}
-
-function fileUriMatchesPath(uri: string | undefined, targetPath: string) {
-  if (!uri) {
-    return true;
-  }
-  try {
-    const parsed = new URL(uri);
-    return parsed.protocol === "file:" && decodeURIComponent(parsed.pathname) === targetPath;
-  } catch {
-    return uri === `file://${targetPath}`;
-  }
-}
-
-async function resolveExistingLocalEditCopy(targetPath: string) {
-  try {
-    const stat = await StoragePermissionPlugin.stat({ path: targetPath });
-    if (!fileUriMatchesPath(stat.uri, targetPath)) {
-      return { exists: false as const };
-    }
-    if (stat.type !== "file") {
-      throw new Error("local edit copy path exists but is not the expected file");
-    }
-    return { exists: true as const, stat };
-  } catch (error) {
-    if (isNativePathNotFound(error)) {
-      return { exists: false as const };
-    }
-    throw error;
-  }
-}
-
-function getParentLocalDisplayPath(path: string) {
-  const normalized = normalizeLocalDisplayPath(path);
-  if (normalized === EXTERNAL_STORAGE_ROOT) {
-    return EXTERNAL_STORAGE_ROOT;
-  }
-  const parent = normalized.slice(0, normalized.lastIndexOf("/"));
-  return parent.length >= EXTERNAL_STORAGE_ROOT.length
-    ? parent
-    : EXTERNAL_STORAGE_ROOT;
-}
-
-function compareFileEntries(
-  a: SortableFileEntry,
-  b: SortableFileEntry,
-  sortField: FileSortField,
-  sortDirection: FileSortDirection,
-) {
-  if (a.type !== b.type) {
-    return a.type === "directory" ? -1 : 1;
-  }
-  const value =
-    sortField === "modified"
-      ? a.modified - b.modified || a.name.localeCompare(b.name)
-      : a.name.localeCompare(b.name);
-  return sortDirection === "asc" ? value : -value;
 }
 
 function resolvePrimaryTransferLabel(
@@ -460,6 +221,27 @@ const sortControlStyle = {
   gap: "6px",
   flexShrink: 0,
 };
+
+
+
+async function resolveExistingLocalEditCopy(targetPath: string) {
+  try {
+    const stat = await StoragePermissionPlugin.stat({ path: targetPath });
+    if (!fileUriMatchesPath(stat.uri, targetPath)) {
+      return { exists: false as const };
+    }
+    if (stat.type !== "file") {
+      throw new Error("local edit copy path exists but is not the expected file");
+    }
+    return { exists: true as const, stat };
+  } catch (error) {
+    if (isNativePathNotFound(error)) {
+      return { exists: false as const };
+    }
+    throw error;
+  }
+}
+
 
 export function FileTransferSheet({
   open,

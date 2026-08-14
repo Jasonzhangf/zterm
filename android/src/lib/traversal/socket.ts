@@ -26,11 +26,6 @@ const CLOSING = 2;
 const CLOSED = 3;
 
 const WS_CANDIDATE_TIMEOUT_MS = 1800;
-// Tailscale candidates get a contracted budget: without a tailscale network
-// the CGNAT IP is a blackhole (TCP connect hangs past the kernel timeout), so
-// every reconnect/switch would otherwise stall the full 1800ms per attempt.
-// A healthy tailscale link answers well under this (sub-100ms).
-const TAILSCALE_CANDIDATE_TIMEOUT_MS = 900;
 const RTC_DIRECT_OPEN_STABILITY_MS = 1000;
 const RTC_DIRECT_CANDIDATE_TIMEOUT_MS = 5000 + RTC_DIRECT_OPEN_STABILITY_MS;
 const RTC_DIRECT_FAILURE_RETRY_TIMEOUT_MS = 3000;
@@ -75,9 +70,6 @@ type Backend = {
 
 function resolveCandidateTimeoutMs(candidate: TraversalPlanCandidate, health: TraversalRouteHealthRecord | null) {
   if (candidate.kind === 'ws') {
-    if (candidate.path === 'tailscale') {
-      return TAILSCALE_CANDIDATE_TIMEOUT_MS;
-    }
     return WS_CANDIDATE_TIMEOUT_MS;
   }
   if (candidate.path === 'rtc-direct') {
@@ -574,6 +566,8 @@ export class TraversalSocket implements BridgeTransportSocket {
 
   private readonly autoReconnect: boolean;
 
+  private cancelActiveBatch: ((code?: number, reason?: string) => void) | null = null;
+
   public constructor(
     target: TraversalTargetSource,
     settings: TraversalSettingsSource,
@@ -773,6 +767,28 @@ export class TraversalSocket implements BridgeTransportSocket {
 
     let winnerSettled = false;
 
+    const releaseActiveBatch = () => {
+      if (this.cancelActiveBatch === cancelBatch) {
+        this.cancelActiveBatch = null;
+      }
+    };
+    const cancelBatch = (code?: number, reason?: string) => {
+      releaseActiveBatch();
+      for (const attempt of attempts) {
+        attempt.advanced = true;
+        if (attempt.timer !== null) {
+          window.clearTimeout(attempt.timer);
+          attempt.timer = null;
+        }
+        try {
+          attempt.backend.close(code, reason);
+        } catch (error) {
+          console.warn('[TraversalSocket] Failed to close cancelled backend:', error);
+        }
+      }
+    };
+    this.cancelActiveBatch = cancelBatch;
+
     const failAttempt = (attempt: (typeof attempts)[number], reason: string, stage: 'closed' | 'error') => {
       if (attempt.settled || attempt.advanced || this.closedByClient) {
         return;
@@ -794,6 +810,7 @@ export class TraversalSocket implements BridgeTransportSocket {
       }
       // Advance only once the whole batch is exhausted (or a winner appeared).
       if (!winnerSettled && attempts.every((item) => item.settled || item.advanced)) {
+        releaseActiveBatch();
         this.connectNext();
       }
     };
@@ -805,6 +822,7 @@ export class TraversalSocket implements BridgeTransportSocket {
       winnerSettled = true;
       attempt.settled = true;
       attempt.advanced = true;
+      releaseActiveBatch();
       if (attempt.timer !== null) {
         window.clearTimeout(attempt.timer);
         attempt.timer = null;
@@ -878,6 +896,9 @@ export class TraversalSocket implements BridgeTransportSocket {
           }
         },
         onclose: (event) => {
+          if (attempt.advanced && !attempt.settled) {
+            return;
+          }
           if (!attempt.settled && !this.closedByClient) {
             if (attempt.advanced) {
               return;
@@ -928,6 +949,7 @@ export class TraversalSocket implements BridgeTransportSocket {
     this.closedByClient = true;
     this.clearReconnectTimer();
     this.diagnostics.stage = 'closed';
+    this.cancelActiveBatch?.(code, reason);
     this.backend?.close(code, reason);
   }
 

@@ -6,6 +6,8 @@ import type {
 export interface TraversalRouteHealthScope {
   accountId?: string;
   daemonHostId?: string;
+  /** Client network generation. Explicit values isolate route truth across WiFi/cellular/VPN/IP changes. */
+  networkGeneration?: number;
 }
 
 export interface TraversalRouteHealthCacheOptions {
@@ -56,11 +58,18 @@ export function buildTraversalRouteHealthKey(
   scope: TraversalRouteHealthScope,
   candidate: Pick<TraversalPlanCandidate, 'id' | 'path' | 'endpoint'>,
 ) {
-  return [
+  const parts = [
     sanitizeKeyPart(scope.accountId),
     sanitizeKeyPart(scope.daemonHostId),
     sanitizeKeyPart(candidate.id || `${candidate.path}:${candidate.endpoint}`),
-  ].join('::');
+  ];
+  // Keep legacy three-part keys for callers that have not opted into network
+  // identity yet. Explicit generations form isolated route-health buckets so
+  // a route that succeeded on WiFi cannot bias a cellular/Tailscale reconnect.
+  if (scope.networkGeneration !== undefined) {
+    parts.push(`g${Math.max(0, Math.floor(scope.networkGeneration))}`);
+  }
+  return parts.join('::');
 }
 
 export class TraversalRouteHealthCache {

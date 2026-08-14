@@ -10,14 +10,11 @@ import {
 import { encodeTerminalSgrMouseWheel } from "../../lib/terminal-mouse-wheel-sgr";
 import type { QuickAction, TerminalShortcutAction } from "../../lib/types";
 import {
-  CLIPBOARD_HISTORY_STORAGE_KEY,
   FIXED_BUTTON_MIN_WIDTH,
   FIXED_CLUSTER_PADDING_X,
   FLOATING_BUBBLE_DRAG_THRESHOLD_PX,
   FLOATING_BUBBLE_MARGIN,
-  FLOATING_BUBBLE_POSITION_STORAGE_KEY,
   FLOATING_BUBBLE_SIZE,
-  FLOATING_BUBBLE_TOP_GUARD_PX,
   QUICK_BAR_FIXED_COLUMNS,
   QUICK_BAR_ROW_GAP,
   QUICK_BAR_SIDE_PADDING,
@@ -28,27 +25,28 @@ import {
   SHORTCUT_ROW_META,
   SHORTCUT_ROW_ORDER,
   blurCurrentTarget,
-  bubbleViewportRectWithInset,
   buildVisibleShortcutRowActions,
   compactOverlayIconButton,
   compactOverlayTextButton,
   createDraftActionId,
   createShortcutActionId,
+  clampFloatingBubblePosition,
   dedupeClipboardHistory,
   floatingPillButton,
   formatSnippetPreview,
   isSingleShortcutToken,
   isSpaceShortcutLabel,
+  isBuiltInShortcutAction,
   lightEditorInputStyle,
   moveItem,
   moveShortcutActionWithinRow,
-  normalizeClipboardHistory,
   normalizeDraftActions,
   normalizeSequenceForImmediateSend,
   normalizeShortcutActions,
   overlayIconButton,
   overlayTextButton,
   readStoredBubblePosition,
+  readStoredClipboardHistory,
   renderShortcutVisualNode,
   resolveOverlayViewportMetrics,
   resolvePresetShortcutTokens,
@@ -59,6 +57,8 @@ import {
   sortShortcutActions,
   toDraftActions,
   validateShortcutTokensForRow,
+  writeStoredBubblePosition,
+  writeStoredClipboardHistory,
   type DraftQuickAction,
   type DraftShortcutAction,
   type FloatingPanelTab,
@@ -715,12 +715,7 @@ function TerminalQuickBarComponent({
   const persistClipboardHistory = (nextItems: string[]) => {
     const normalized = dedupeClipboardHistory(nextItems);
     setClipboardHistory(normalized);
-    if (typeof window !== "undefined") {
-      localStorage.setItem(
-        CLIPBOARD_HISTORY_STORAGE_KEY,
-        JSON.stringify(normalized),
-      );
-    }
+    writeStoredClipboardHistory(normalized);
   };
 
   const cleanupEmptyDraftActions = (actions: DraftQuickAction[]) =>
@@ -1030,27 +1025,6 @@ function TerminalQuickBarComponent({
     () => [...topScrollActions, ...bottomScrollActions],
     [bottomScrollActions, topScrollActions],
   );
-  const clampFloatingBubblePosition = (
-    nextX: number,
-    nextY: number,
-    width: number,
-    height: number,
-  ) => {
-    const viewport = bubbleViewportRectWithInset(keyboardInsetPx);
-    const maxX = Math.max(
-      FLOATING_BUBBLE_MARGIN,
-      viewport.width - width - FLOATING_BUBBLE_MARGIN,
-    );
-    const maxY = Math.max(
-      FLOATING_BUBBLE_MARGIN,
-      viewport.height - height - FLOATING_BUBBLE_MARGIN,
-    );
-    const minY = Math.min(FLOATING_BUBBLE_TOP_GUARD_PX, maxY);
-    return {
-      x: Math.min(Math.max(FLOATING_BUBBLE_MARGIN, nextX), maxX),
-      y: Math.min(Math.max(minY, nextY), maxY),
-    };
-  };
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -1072,6 +1046,7 @@ function TerminalQuickBarComponent({
           current.y,
           bubbleWidth,
           bubbleHeight,
+          keyboardInsetPx,
         );
         if (clamped.x === current.x && clamped.y === current.y) {
           return current;
@@ -1141,18 +1116,7 @@ function TerminalQuickBarComponent({
       return;
     }
 
-    try {
-      const stored = localStorage.getItem(CLIPBOARD_HISTORY_STORAGE_KEY);
-      if (!stored) {
-        return;
-      }
-      setClipboardHistory(normalizeClipboardHistory(JSON.parse(stored)));
-    } catch (error) {
-      console.error(
-        "[TerminalQuickBar] Failed to load clipboard history:",
-        error,
-      );
-    }
+    setClipboardHistory(readStoredClipboardHistory());
   }, []);
 
   useEffect(() => {
@@ -1160,24 +1124,7 @@ function TerminalQuickBarComponent({
       return;
     }
 
-    try {
-      if (
-        floatingBubblePosition.x === null ||
-        floatingBubblePosition.y === null
-      ) {
-        localStorage.removeItem(FLOATING_BUBBLE_POSITION_STORAGE_KEY);
-        return;
-      }
-      localStorage.setItem(
-        FLOATING_BUBBLE_POSITION_STORAGE_KEY,
-        JSON.stringify(floatingBubblePosition),
-      );
-    } catch (error) {
-      console.error(
-        "[TerminalQuickBar] Failed to persist floating bubble position:",
-        error,
-      );
-    }
+    writeStoredBubblePosition(floatingBubblePosition);
   }, [floatingBubblePosition]);
 
   useEffect(() => {
@@ -1382,6 +1329,9 @@ function TerminalQuickBarComponent({
   };
 
   const openShortcutForm = (row: ShortcutRow, action?: DraftShortcutAction) => {
+    if (action && isBuiltInShortcutAction(action.id)) {
+      return;
+    }
     setDraftShortcutActions(sortShortcutActions(shortcutActions));
     setFloatingMenuOpen(false);
     setShortcutEditorTab("keyboard");
@@ -1445,6 +1395,9 @@ function TerminalQuickBarComponent({
   };
 
   const saveShortcutForm = () => {
+    if (editingShortcutId && isBuiltInShortcutAction(editingShortcutId)) {
+      return;
+    }
     const nextSequence = draftShortcutBuild.sequence;
     if (!nextSequence || draftShortcutEffectiveError) {
       return;
@@ -2628,8 +2581,16 @@ function TerminalQuickBarComponent({
                                 }}
                               >
                                 <button
-                                  onClick={() => openShortcutForm(row, action)}
-                                  aria-label={`查看 ${action.label || "未命名快捷键"} 详情`}
+                                  onClick={
+                                    isBuiltInShortcutAction(action.id)
+                                      ? undefined
+                                      : () => openShortcutForm(row, action)
+                                  }
+                                  aria-label={
+                                    isBuiltInShortcutAction(action.id)
+                                      ? action.label
+                                      : `查看 ${action.label || "未命名快捷键"} 详情`
+                                  }
                                   style={{
                                     flex: 1,
                                     minWidth: 0,
@@ -2637,7 +2598,9 @@ function TerminalQuickBarComponent({
                                     background: "transparent",
                                     padding: 0,
                                     textAlign: "left",
-                                    cursor: "pointer",
+                                    cursor: isBuiltInShortcutAction(action.id)
+                                      ? "default"
+                                      : "pointer",
                                   }}
                                 >
                                   <div
@@ -2686,18 +2649,20 @@ function TerminalQuickBarComponent({
                                     flexShrink: 0,
                                   }}
                                 >
-                                  <button
-                                    onClick={() =>
-                                      openShortcutForm(row, action)
-                                    }
-                                    style={compactOverlayTextButton(
-                                      "rgba(22, 119, 255, 0.12)",
-                                      "#1677ff",
-                                    )}
-                                    aria-label={`编辑 ${action.label || "未命名快捷键"}`}
-                                  >
-                                    编辑
-                                  </button>
+                                  {!isBuiltInShortcutAction(action.id) ? (
+                                    <button
+                                      onClick={() =>
+                                        openShortcutForm(row, action)
+                                      }
+                                      style={compactOverlayTextButton(
+                                        "rgba(22, 119, 255, 0.12)",
+                                        "#1677ff",
+                                      )}
+                                      aria-label={`编辑 ${action.label || "未命名快捷键"}`}
+                                    >
+                                      编辑
+                                    </button>
+                                  ) : null}
                                   <button
                                     onClick={() =>
                                       persistShortcutActions(
@@ -2736,22 +2701,24 @@ function TerminalQuickBarComponent({
                                   >
                                     ↓
                                   </button>
-                                  <button
-                                    onClick={() =>
-                                      persistShortcutActions(
-                                        draftShortcutActions.filter(
-                                          (item) => item.id !== action.id,
-                                        ),
-                                      )
-                                    }
-                                    style={compactOverlayTextButton(
-                                      "rgba(255, 124, 146, 0.12)",
-                                      mobileTheme.colors.danger,
-                                    )}
-                                    aria-label={`删除 ${action.label}`}
-                                  >
-                                    删除
-                                  </button>
+                                  {!isBuiltInShortcutAction(action.id) ? (
+                                    <button
+                                      onClick={() =>
+                                        persistShortcutActions(
+                                          draftShortcutActions.filter(
+                                            (item) => item.id !== action.id,
+                                          ),
+                                        )
+                                      }
+                                      style={compactOverlayTextButton(
+                                        "rgba(255, 124, 146, 0.12)",
+                                        mobileTheme.colors.danger,
+                                      )}
+                                      aria-label={`删除 ${action.label}`}
+                                    >
+                                      删除
+                                    </button>
+                                  ) : null}
                                 </div>
                               </div>
                             );
@@ -3625,6 +3592,7 @@ function TerminalQuickBarComponent({
                 drag.originY + deltaY,
                 drag.width,
                 drag.height,
+                keyboardInsetPx,
               ),
             );
           }}
@@ -3715,6 +3683,7 @@ function TerminalQuickBarComponent({
                 drag.originY + deltaY,
                 drag.width,
                 drag.height,
+                keyboardInsetPx,
               ),
             );
           }}

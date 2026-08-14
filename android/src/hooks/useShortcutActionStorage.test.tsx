@@ -38,23 +38,61 @@ describe('useShortcutActionStorage', () => {
     vi.unstubAllGlobals();
   });
 
-  it('does not seed built-in shortcut presets into persisted shortcut truth', () => {
+  it('seeds built-in shortcut presets into the ordered shortcut truth', () => {
     const { result } = renderHook(() => useShortcutActionStorage());
 
-    expect(result.current.shortcutActions).toEqual([]);
+    expect(result.current.shortcutActions.map(({ id, label, row, order }) => ({
+      id,
+      label,
+      row,
+      order,
+    }))).toEqual([
+      { id: 'preset-top-scroll-esc', label: 'Esc', row: 'top-scroll', order: 0 },
+      { id: 'preset-top-scroll-bksp', label: 'Bksp', row: 'top-scroll', order: 1 },
+      { id: 'preset-top-scroll-tab', label: 'Tab', row: 'top-scroll', order: 2 },
+      { id: 'preset-top-scroll-enter', label: 'Enter', row: 'top-scroll', order: 3 },
+      { id: 'preset-top-scroll-space', label: 'Space', row: 'top-scroll', order: 4 },
+      { id: 'preset-bottom-scroll-continue', label: '继续', row: 'bottom-scroll', order: 0 },
+      { id: 'preset-bottom-scroll-paste', label: 'Paste', row: 'bottom-scroll', order: 1 },
+      { id: 'preset-bottom-scroll-shift-tab', label: 'S-Tab', row: 'bottom-scroll', order: 2 },
+      { id: 'preset-bottom-scroll-shift-enter', label: 'S-Enter', row: 'bottom-scroll', order: 3 },
+    ]);
   });
 
-  it('normalizes stored custom shortcuts without re-adding built-in presets', async () => {
+  it('merges missing built-ins into legacy custom-only storage without dropping custom actions', async () => {
     localStorage.setItem(STORAGE_KEYS.SHORTCUT_ACTIONS, JSON.stringify([
-      { id: 'custom-paste', label: 'Paste', sequence: '\\x16', order: 9, row: 'bottom-scroll' },
+      { id: 'custom-copy', label: 'Ctrl+C', sequence: '\x03', order: 9, row: 'bottom-scroll' },
     ]));
 
     const { result } = renderHook(() => useShortcutActionStorage());
 
     await act(async () => undefined);
 
-    expect(result.current.shortcutActions).toEqual([
-      { id: 'custom-paste', label: 'Paste', sequence: '\\x16', order: 0, row: 'bottom-scroll' },
+    expect(result.current.shortcutActions.filter((action) => action.row === 'bottom-scroll').map((action) => action.label)).toEqual([
+      'Ctrl+C',
+      '继续',
+      'Paste',
+      'S-Tab',
+      'S-Enter',
+    ]);
+  });
+
+  it('preserves persisted built-in order across storage reload', async () => {
+    localStorage.setItem(STORAGE_KEYS.SHORTCUT_ACTIONS, JSON.stringify([
+      { id: 'preset-top-scroll-enter', label: 'Enter', sequence: '\r', order: 0, row: 'top-scroll' },
+      { id: 'preset-top-scroll-esc', label: 'Esc', sequence: '\x1b', order: 1, row: 'top-scroll' },
+    ]));
+
+    const { result } = renderHook(() => useShortcutActionStorage());
+
+    await act(async () => undefined);
+
+    expect(result.current.shortcutActions.filter((action) => action.row === 'top-scroll').map((action) => action.label)).toEqual([
+      'Enter',
+      'Esc',
+      'Bksp',
+      'Tab',
+      'Space',
     ]);
   });
 });

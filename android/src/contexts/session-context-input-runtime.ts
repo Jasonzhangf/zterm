@@ -487,7 +487,7 @@ export function sendInputThroughSessionTransport(options: SendInputTransportOpti
     ) {
       options.scheduleReconnect?.(targetSessionId, 'input transport unavailable', true, {
         immediate: true,
-        resetAttempt: true,
+        resetAttempt: false,
         force: true,
       });
     }
@@ -598,7 +598,7 @@ export function sendInputThroughSessionTransport(options: SendInputTransportOpti
   if (isActiveTarget && !reconnectInFlight) {
     options.scheduleReconnect?.(targetSessionId, 'input transport unavailable', true, {
       immediate: true,
-      resetAttempt: true,
+      resetAttempt: false,
       force: true,
     });
   }

@@ -5,6 +5,11 @@ description: "terminal buffer / render / daemon mirror 真源与门禁"
 
 # terminal-buffer-truth
 
+## Performance repair boundary
+
+- `resource.renderer_window` may hand an explicitly immutable projected snapshot to `resource.client_sparse_buffer`'s render-store projection edge only after renderer-side equality/reuse checks complete. This removes duplicate full-window comparison/copy work; it does not change wire payload, buffer truth, visible-range ownership, or daemon behavior.
+- Performance trace storage is a bounded debug side channel. Eviction must remain metadata-only and O(1) per record; trace optimization must never trim terminal business payload or alter runtime truth.
+
 ## 适用场景
 - terminal buffer / render / scroll / input 延迟问题
 - 出现“初次连接慢、输入不刷新、reading 拉不动、回到底部不 follow、带宽异常”

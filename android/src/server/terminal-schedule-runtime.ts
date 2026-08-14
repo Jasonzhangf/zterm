@@ -24,38 +24,46 @@ export interface TerminalScheduleRuntime {
 export function createTerminalScheduleRuntime(
   deps: TerminalScheduleRuntimeDeps,
 ): TerminalScheduleRuntime {
-  function buildScheduleStatePayload(sessionName: string): ScheduleStatePayload {
+  function buildScheduleStatePayload(sessionName: string, terminalBackend: 'tmux' | 'herdr'): ScheduleStatePayload {
     return {
       sessionName,
-      jobs: scheduleEngine.listBySession(sessionName),
+      terminalBackend,
+      jobs: scheduleEngine.listBySession(sessionName, terminalBackend),
     };
   }
 
-  function sendScheduleStateToSession(session: TerminalSession, sessionName = session.sessionName) {
+  function sendScheduleStateToSession(
+    session: TerminalSession,
+    sessionName = session.sessionName,
+    terminalBackend = session.backend || 'tmux',
+  ) {
     if (!sessionName) {
       return;
     }
     deps.sendMessage(session, {
       type: 'schedule-state',
-      payload: buildScheduleStatePayload(sessionName),
+      payload: buildScheduleStatePayload(sessionName, terminalBackend),
     });
   }
 
-  function broadcastScheduleState(sessionName: string) {
+  function broadcastScheduleState(sessionName: string, terminalBackend: 'tmux' | 'herdr') {
     if (!sessionName) {
       return;
     }
     for (const session of deps.sessions.values()) {
-      if (session.sessionName !== sessionName) {
+      if (session.sessionName !== sessionName || (session.backend || 'tmux') !== terminalBackend) {
         continue;
       }
-      sendScheduleStateToSession(session, sessionName);
+      sendScheduleStateToSession(session, sessionName, terminalBackend);
     }
   }
 
   function broadcastScheduleEvent(event: ScheduleEventPayload) {
     for (const session of deps.sessions.values()) {
-      if (session.sessionName !== event.sessionName) {
+      if (
+        session.sessionName !== event.sessionName
+        || (session.backend || 'tmux') !== (event.terminalBackend || 'tmux')
+      ) {
         continue;
       }
       deps.sendMessage(session, {
@@ -69,8 +77,8 @@ export function createTerminalScheduleRuntime(
     initialJobs: deps.initialJobs,
     saveJobs: deps.saveJobs,
     executeJob: deps.executeJob,
-    onStateChange: (sessionName) => {
-      broadcastScheduleState(sessionName);
+    onStateChange: (sessionName, _jobs, terminalBackend = 'tmux') => {
+      broadcastScheduleState(sessionName, terminalBackend);
     },
     onEvent: (event) => {
       broadcastScheduleEvent(event);

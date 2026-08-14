@@ -44,13 +44,14 @@ describe('server terminal core support truth gates', () => {
     expect(source).not.toContain('function normalizeBufferSyncRequestPayload(');
   });
 
-  it('keeps terminal helper implementations inside dedicated support module', () => {
+  it('keeps terminal helpers inside dedicated support and delegates tmux name normalization to the shared contract', () => {
     const source = readCoreSupportSource();
     const sanitizeBlock = extractBlock(source, 'function sanitizeSessionName(');
     const bufferRequestBlock = extractBlock(source, 'function normalizeBufferSyncRequestPayload(');
     const cursorBlock = extractBlock(source, 'function mirrorCursorEqual(');
 
-    expect(sanitizeBlock).toContain("replace(/[^a-zA-Z0-9:_-]/g, '-')");
+    expect(source).toContain("import { sanitizeTmuxSessionName } from '@zterm/shared/tmux-session-name';");
+    expect(sanitizeBlock).toContain("sanitizeTmuxSessionName(input || '', deps.defaultSessionName)");
     expect(bufferRequestBlock).toContain('buffer-sync-request missing request window');
     expect(bufferRequestBlock).toContain('requestEndIndex: Math.max(requestStartIndex, requestEndIndex)');
     expect(cursorBlock).toContain('left.rowIndex === right.rowIndex');

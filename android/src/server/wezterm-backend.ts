@@ -44,7 +44,7 @@ export interface WezTermInputContract {
 export interface WezTermBackendSession {
   sessionName: string;
   paneId: number | string;
-  workspace: string;
+  workspace?: string;
   title: string;
   cwd: string;
   cols: number;

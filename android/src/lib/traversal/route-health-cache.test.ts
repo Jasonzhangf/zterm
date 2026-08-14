@@ -30,6 +30,28 @@ describe('TraversalRouteHealthCache', () => {
     )).toBe('account-a::daemon-a::relay-rtc:daemon-a');
   });
 
+  it('isolates route health by client network generation when explicitly provided', () => {
+    expect(buildTraversalRouteHealthKey(
+      { accountId: 'account-a', daemonHostId: 'daemon-a', networkGeneration: 7 },
+      candidate,
+    )).toBe('account-a::daemon-a::relay-rtc:daemon-a::g7');
+
+    const cache = new TraversalRouteHealthCache({ now: () => 1000 });
+    cache.recordSuccess(
+      { accountId: 'account-a', daemonHostId: 'daemon-a', networkGeneration: 7 },
+      candidate,
+      25,
+    );
+    expect(cache.get(
+      { accountId: 'account-a', daemonHostId: 'daemon-a', networkGeneration: 7 },
+      candidate,
+    )).toMatchObject({ status: 'success', rttMs: 25 });
+    expect(cache.get(
+      { accountId: 'account-a', daemonHostId: 'daemon-a', networkGeneration: 8 },
+      candidate,
+    )).toBeNull();
+  });
+
   it('stores success and expires stale entries by TTL', () => {
     let now = 1000;
     const cache = new TraversalRouteHealthCache({ ttlMs: 100, now: () => now });

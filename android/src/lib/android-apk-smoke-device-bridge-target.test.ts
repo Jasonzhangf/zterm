@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { extractApkSmokeBridgeDebugTargetFromStorageDump } from './android-apk-smoke-device-bridge-target';
+import {
+  extractApkSmokeBridgeDebugTargetFromLocalStorageSnapshot,
+  extractApkSmokeBridgeDebugTargetFromStorageDump,
+} from './android-apk-smoke-device-bridge-target';
 
 describe('android apk smoke device bridge target parser', () => {
   it('prefers the active open tab target from localStorage dump truth', () => {
@@ -142,6 +145,85 @@ describe('android apk smoke device bridge target parser', () => {
     }));
     expect(parsed.target).not.toEqual(expect.objectContaining({
       sessionId: 'session-1778544465921-yq0l9dr6',
+    }));
+  });
+
+  it('uses the active terminal-layout tab when localStorage has multiple open tabs', () => {
+    const parsed = extractApkSmokeBridgeDebugTargetFromLocalStorageSnapshot({
+      'zterm:open-tabs': JSON.stringify([
+        {
+          sessionId: 'session-1',
+          bridgeHost: '100.66.1.81',
+          bridgePort: 3333,
+          authToken: 'token-a',
+        },
+        {
+          sessionId: 'session-2',
+          bridgeHost: '100.66.1.82',
+          bridgePort: 4444,
+          authToken: 'token-b',
+        },
+      ]),
+      'zterm:terminal-layout': JSON.stringify({
+        panes: [{
+          id: 'pane-1',
+          tabs: [
+            { id: 'tab-1', sessionId: 'session-1' },
+            { id: 'tab-2', sessionId: 'session-2' },
+          ],
+          activeTabId: 'tab-2',
+        }],
+        activePaneId: 'pane-1',
+      }),
+    });
+
+    expect(parsed.activeSessionId).toBe('session-2');
+    expect(parsed.target).toEqual(expect.objectContaining({
+      source: 'active-open-tab',
+      bridgeHost: '100.66.1.82',
+      bridgePort: 4444,
+      authToken: 'token-b',
+      sessionId: 'session-2',
+    }));
+  });
+
+  it('fails explicitly when current layout points to no open tab', () => {
+    const parsed = extractApkSmokeBridgeDebugTargetFromLocalStorageSnapshot({
+      'zterm:open-tabs': JSON.stringify([{
+        sessionId: 'session-stale',
+        bridgeHost: '100.66.1.81',
+        bridgePort: 3333,
+        authToken: 'stale-token',
+      }]),
+      'zterm:terminal-layout': JSON.stringify({
+        panes: [{
+          id: 'pane-1',
+          tabs: [{ id: 'tab-1', sessionId: 'session-current' }],
+          activeTabId: 'tab-1',
+        }],
+        activePaneId: 'pane-1',
+      }),
+    });
+
+    expect(parsed.activeSessionId).toBe('session-current');
+    expect(parsed.target).toBeNull();
+  });
+
+  it('uses bridge settings only when the current open-tab value is empty', () => {
+    const parsed = extractApkSmokeBridgeDebugTargetFromLocalStorageSnapshot({
+      'zterm:open-tabs': '[]',
+      'zterm:bridge-settings': JSON.stringify({
+        targetHost: '100.86.84.63',
+        targetPort: 3333,
+        targetAuthToken: 'settings-token',
+      }),
+    });
+
+    expect(parsed.target).toEqual(expect.objectContaining({
+      source: 'bridge-settings-target',
+      bridgeHost: '100.86.84.63',
+      bridgePort: 3333,
+      authToken: 'settings-token',
     }));
   });
 

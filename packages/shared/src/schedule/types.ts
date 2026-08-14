@@ -32,6 +32,7 @@ export interface ScheduleExecutionPolicy {
 export interface ScheduleJob {
   id: string;
   targetSessionName: string;
+  terminalBackend?: 'tmux' | 'herdr';
   label: string;
   enabled: boolean;
   payload: SchedulePayload;
@@ -48,6 +49,7 @@ export interface ScheduleJob {
 export interface ScheduleJobDraft {
   id?: string;
   targetSessionName: string;
+  terminalBackend?: 'tmux' | 'herdr';
   label?: string;
   enabled?: boolean;
   payload: SchedulePayload;
@@ -57,11 +59,13 @@ export interface ScheduleJobDraft {
 
 export interface ScheduleStatePayload {
   sessionName: string;
+  terminalBackend?: 'tmux' | 'herdr';
   jobs: ScheduleJob[];
 }
 
 export interface ScheduleEventPayload {
   sessionName: string;
+  terminalBackend?: 'tmux' | 'herdr';
   jobId: string;
   type: 'triggered' | 'updated' | 'deleted' | 'error';
   at: string;

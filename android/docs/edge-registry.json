@@ -1977,6 +1977,11 @@
     },
     {
       "from_module": "client.renderer_window",
+      "to_module": "client.app_shell",
+      "status": "active"
+    },
+    {
+      "from_module": "client.renderer_window",
       "to_module": "client.input_runtime",
       "status": "active"
     },
@@ -2285,26 +2290,49 @@
       "to_module": "client.reliable_input",
       "status": "active"
     },
-  {
-    "from_module": "client.daemon_connection",
-    "to_module": "client.connection_home",
-    "status": "active"
-  },
-  {
-    "from_module": "daemon.runtime_entry",
-    "to_module": "daemon.attachment_delivery",
-    "status": "active",
-    "allowed_callers": ["src/server/server.ts"],
-    "allowed_callees": ["src/server/attachment-delivery-runtime.ts"],
-    "request_chain": ["AttachmentHttpIn01AuthenticatedRequest", "AttachmentIn02DeliveryOwner"],
-    "response_chain": ["AttachmentOut03DurableManifestAndAssets"],
-    "error_chain": ["AttachmentError01Rejected"],
-      "mainline_call_ids": ["daemon_mainline:Http->AttachmentHttpIn01AuthenticatedRequest"]
+    {
+      "from_module": "client.daemon_connection",
+      "to_module": "client.connection_home",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.runtime_entry",
+      "to_module": "daemon.attachment_delivery",
+      "status": "active",
+      "allowed_callers": [
+        "src/server/server.ts"
+      ],
+      "allowed_callees": [
+        "src/server/attachment-delivery-runtime.ts"
+      ],
+      "request_chain": [
+        "AttachmentHttpIn01AuthenticatedRequest",
+        "AttachmentIn02DeliveryOwner"
+      ],
+      "response_chain": [
+        "AttachmentOut03DurableManifestAndAssets"
+      ],
+      "error_chain": [
+        "AttachmentError01Rejected"
+      ],
+      "mainline_call_ids": [
+        "daemon_mainline:Http->AttachmentHttpIn01AuthenticatedRequest"
+      ]
     },
     {
       "from_module": "client.remote_window_overlay",
       "to_module": "client.remote_window_dual_stream_switch",
       "status": "active"
-  }
-]
+    },
+    {
+      "from_module": "client.session_drawer_preview",
+      "to_module": "client.app_shell",
+      "status": "active"
+    },
+    {
+      "from_module": "daemon.remote_window_stream",
+      "to_module": "shared.terminal_types",
+      "status": "active"
+    }
+  ]
 }

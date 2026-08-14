@@ -8,6 +8,7 @@ function makeJob(overrides: Partial<ScheduleJob> = {}): ScheduleJob {
   return {
     id: overrides.id || 'job-1',
     targetSessionName: overrides.targetSessionName || 'main',
+    terminalBackend: overrides.terminalBackend,
     label: overrides.label || 'test',
     enabled: overrides.enabled ?? true,
     payload: overrides.payload || { text: 'echo hi', appendEnter: true },
@@ -398,6 +399,29 @@ describe('ScheduleEngine', () => {
 
     const aliveJobs = engine.listBySession('alive');
     expect(aliveJobs[0].enabled).toBe(true);
+
+    engine.dispose();
+  });
+
+  it('keeps same-named tmux and Herdr jobs independent during rename and missing-session handling', () => {
+    const engine = new ScheduleEngine({
+      initialJobs: [
+        makeJob({ id: 'tmux-job', targetSessionName: 'same-name', terminalBackend: 'tmux' }),
+        makeJob({ id: 'herdr-job', targetSessionName: 'same-name', terminalBackend: 'herdr' }),
+      ],
+      saveJobs: () => {},
+      executeJob: () => ({ ok: true }),
+    });
+
+    engine.renameSession('same-name', 'renamed', 'herdr');
+
+    expect(engine.listBySession('same-name', 'tmux').map((job) => job.id)).toEqual(['tmux-job']);
+    expect(engine.listBySession('renamed', 'herdr').map((job) => job.id)).toEqual(['herdr-job']);
+
+    engine.markSessionMissing('same-name', 'tmux session killed', 'tmux');
+
+    expect(engine.listBySession('same-name', 'tmux')[0].enabled).toBe(false);
+    expect(engine.listBySession('renamed', 'herdr')[0].enabled).toBe(true);
 
     engine.dispose();
   });

@@ -6,10 +6,10 @@ import type { OpenTabRuntimeRefs } from './useOpenTabRuntime';
 import { runtimeDebug } from '../lib/runtime-debug';
 import {
   clearClosedTabReuseKeysForOwner,
-  persistClosedTabReuseKeys,
 } from '../lib/open-tab-persistence';
 import {
   upsertOpenTabIntentSession,
+  renameRemoteOpenTabIntentSession,
 } from '../lib/open-tab-intent';
 import {
   buildCleanDraft,
@@ -24,8 +24,8 @@ import {
   type HostDraft,
 } from '../lib/session-picker';
 import { openConnectionPropertiesPage, type AppPageState } from '../lib/page-state';
-import { DEFAULT_BRIDGE_PORT } from '../lib/mobile-config';
 import { normalizeRemoteTmuxSessionNames } from '../lib/tmux-session-list';
+import { sanitizeTmuxSessionName } from '@zterm/shared/tmux-session-name';
 import {
   createTmuxSession,
   fetchTmuxSessions,
@@ -35,7 +35,11 @@ import {
 import type { Host, PersistedOpenTab, Session, SessionGroupHistory, TraversalRelayDeviceSnapshot } from '../lib/types';
 import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
 import type { TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
-import { sessionSemanticOwnersMatch } from '../lib/session-semantic-identity';
+import {
+  buildGeneratedSessionName,
+  resolveReusableOpenSessionForTarget,
+  resolveSessionGroupForTarget,
+} from '../lib/session-open-helpers';
 import { listOnlineTraversalRelayDaemonDevices } from '../lib/traversal-relay-devices';
 
 type PickerMode = 'new-connection' | 'quick-tab' | 'edit-group' | null;
@@ -43,6 +47,7 @@ type PickerMode = 'new-connection' | 'quick-tab' | 'edit-group' | null;
 interface QuickTabCreateOptions {
   sessionName?: string;
   cwd?: string;
+  terminalBackend?: 'tmux' | 'herdr';
 }
 
 interface SessionOpenGroupTarget {
@@ -50,6 +55,7 @@ interface SessionOpenGroupTarget {
   bridgePort: number;
   daemonHostId?: string;
   relayHostId?: string;
+  terminalBackend?: 'tmux' | 'herdr';
   authToken?: string;
   relayEndpointCandidates?: RelayEndpointCandidate[];
   transportMode?: Host['transportMode'];
@@ -68,6 +74,7 @@ interface UseSessionOpenActionsOptions {
     bridgeHost: string;
     bridgePort: number;
     daemonHostId?: string;
+    terminalBackend?: 'tmux' | 'herdr';
     authToken?: string;
     relayEndpointCandidates?: RelayEndpointCandidate[];
     sessionNames: string[];
@@ -78,6 +85,7 @@ interface UseSessionOpenActionsOptions {
     bridgeHost: string;
     bridgePort: number;
     daemonHostId?: string;
+    terminalBackend?: 'tmux' | 'herdr';
     authToken?: string;
     relayEndpointCandidates?: RelayEndpointCandidate[];
   }, sessionName: string) => void;
@@ -93,6 +101,7 @@ interface UseSessionOpenActionsOptions {
   ) => string;
   closeSession: (sessionId: string) => void;
   switchSession: (sessionId: string) => void;
+  renameRemoteSession: (sessionId: string, name: string) => void;
   manageTmuxSessionsOnOpenTransport?: (
     sessionId: string,
     message: TerminalMuxTargetClientMessage,
@@ -109,87 +118,6 @@ interface UseSessionOpenActionsOptions {
   auditOpenTabsAgainstRemoteSessions: (reason: OpenTabAuditReason) => Promise<void>;
 }
 
-function buildGeneratedSessionName() {
-  const stamp = new Date()
-    .toISOString()
-    .replace(/[-:]/g, '')
-    .replace(/\..+$/, '')
-    .replace('T', '-');
-  return `zterm-${stamp}`;
-}
-
-function normalizeEndpointKey(host?: string | null, port?: number | null) {
-  const normalizedHost = host?.trim();
-  if (!normalizedHost) {
-    return '';
-  }
-  return `${normalizedHost}:${port || DEFAULT_BRIDGE_PORT}`;
-}
-
-function normalizeDaemonKey(input: Pick<BridgeTarget, 'daemonHostId' | 'relayHostId'> | Pick<Session, 'daemonHostId'>) {
-  return ('relayHostId' in input ? input.relayHostId?.trim() : '')
-    || input.daemonHostId?.trim()
-    || '';
-}
-
-function sessionMatchesOpenTarget(session: Session, target: BridgeTarget, sessionName: string) {
-  if (session.state === 'closed') {
-    return false;
-  }
-  if (sessionName && session.sessionName.trim() !== sessionName) {
-    return false;
-  }
-  const targetDaemonKey = normalizeDaemonKey(target);
-  const sessionDaemonKey = normalizeDaemonKey(session);
-  if (targetDaemonKey && sessionDaemonKey && targetDaemonKey === sessionDaemonKey) {
-    return true;
-  }
-  const targetEndpointKey = normalizeEndpointKey(target.bridgeHost, target.bridgePort);
-  const sessionEndpointKey = normalizeEndpointKey(session.bridgeHost, session.bridgePort);
-  return Boolean(targetEndpointKey && sessionEndpointKey && targetEndpointKey === sessionEndpointKey);
-}
-
-function resolveReusableOpenSessionForTarget(
-  sessions: Session[],
-  target: BridgeTarget,
-  sessionName: string,
-  prioritySessionIds: Array<string | null | undefined>,
-) {
-  const matches = sessions.filter((session) => sessionMatchesOpenTarget(session, target, sessionName));
-  if (matches.length === 0) {
-    return null;
-  }
-  for (const prioritySessionId of prioritySessionIds) {
-    const normalizedPrioritySessionId = prioritySessionId?.trim();
-    if (!normalizedPrioritySessionId) {
-      continue;
-    }
-    const matched = matches.find((session) => session.id === normalizedPrioritySessionId);
-    if (matched) {
-      return matched;
-    }
-  }
-  return [...matches].sort((left, right) => {
-    const stateScore = (session: Session) => (session.state === 'connected' ? 2 : session.state === 'connecting' ? 1 : 0);
-    const scoreDelta = stateScore(right) - stateScore(left);
-    if (scoreDelta !== 0) {
-      return scoreDelta;
-    }
-    return (right.createdAt || 0) - (left.createdAt || 0);
-  })[0] || null;
-}
-
-function resolveSessionGroupForTarget(
-  sessionGroups: SessionGroupHistory[],
-  target: Pick<BridgeTarget, 'bridgeHost' | 'bridgePort' | 'daemonHostId' | 'relayHostId'>,
-) {
-  return sessionGroups.find((group) => sessionSemanticOwnersMatch(group, {
-    bridgeHost: target.bridgeHost,
-    bridgePort: target.bridgePort,
-    daemonHostId: target.daemonHostId || target.relayHostId,
-  })) || null;
-}
-
 export interface SessionOpenActionsResult {
   pickerMode: PickerMode;
   pickerTarget: BridgeTarget | null;
@@ -201,6 +129,7 @@ export interface SessionOpenActionsResult {
   handleOpenSingleTmuxSession: (target: BridgeTarget, sessionName: string) => void;
   handleOpenMultipleTmuxSessions: (target: BridgeTarget, sessionNames: string[]) => void;
   handleOpenGroupSession: (group: SessionOpenGroupTarget, sessionName: string, options?: { activate?: boolean; navigate?: boolean }) => string;
+  handleRenameRemoteSession: (sessionId: string, nextSessionName: string) => Promise<void>;
   handleCloseGroupSession: (group: SessionOpenGroupTarget & { name?: string; sessionNames?: string[] }, sessionName: string) => Promise<void>;
   handleOpenServerGroups: (groups: Array<{
     name: string;
@@ -252,6 +181,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     createSession,
     closeSession,
     switchSession,
+    renameRemoteSession,
     manageTmuxSessionsOnOpenTransport,
     runtimeActiveSessionId,
     runtimeRefs,
@@ -333,9 +263,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       bridgePort: sessionHost.bridgePort,
       sessionName: sessionHost.sessionName,
     });
-    if (deletedAnyReuseKey) {
-      persistClosedTabReuseKeys(closedOpenTabReuseKeysRef.current);
-    }
+    void deletedAnyReuseKey;
     const openedTab: PersistedOpenTab = {
       sessionId,
       hostId: sessionHost.id,
@@ -344,6 +272,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       bridgePort: sessionHost.bridgePort,
       daemonHostId: sessionHost.daemonHostId || sessionHost.relayHostId,
       sessionName: sessionHost.sessionName,
+      terminalBackend: sessionHost.terminalBackend || 'tmux',
       authToken: sessionHost.authToken,
       autoCommand: sessionHost.autoCommand,
       createdAt: Date.now(),
@@ -365,6 +294,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         bridgeHost: sessionHost.bridgeHost,
         bridgePort: sessionHost.bridgePort,
         daemonHostId: sessionHost.daemonHostId || sessionHost.relayHostId,
+        terminalBackend: sessionHost.terminalBackend || 'tmux',
         authToken: sessionHost.authToken,
         relayEndpointCandidates: sessionHost.relayEndpointCandidates || [],
       }, sessionHost.sessionName);
@@ -456,6 +386,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
   }, [bridgeSettings.servers, handleQuickConnectDraft, hosts]);
 
   const handleOpenGroupSession = useCallback((group: SessionOpenGroupTarget, sessionName: string, options?: { activate?: boolean; navigate?: boolean }) => {
+    const terminalBackend = group.terminalBackend || 'tmux';
     return handleQuickConnectDraft(
       {
         name: `${group.bridgeHost} · ${sessionName}`,
@@ -463,6 +394,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         bridgePort: group.bridgePort,
         daemonHostId: group.daemonHostId,
         relayHostId: group.relayHostId || group.daemonHostId,
+        terminalBackend,
         sessionName,
         authToken: group.authToken || '',
         relayEndpointCandidates: group.relayEndpointCandidates || [],
@@ -471,7 +403,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         password: undefined,
         privateKey: undefined,
         autoCommand: '',
-        tags: ['tmux', sessionName],
+        tags: [terminalBackend, sessionName],
         pinned: false,
         lastConnected: Date.now(),
       },
@@ -507,6 +439,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     bridgeHost: string;
     bridgePort: number;
     daemonHostId?: string;
+    terminalBackend?: 'tmux' | 'herdr';
     authToken?: string;
     relayEndpointCandidates?: RelayEndpointCandidate[];
   }, sessionNames: string[]) => {
@@ -515,6 +448,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       bridgeHost: group.bridgeHost,
       bridgePort: group.bridgePort,
       daemonHostId: group.daemonHostId,
+      terminalBackend: group.terminalBackend,
       authToken: group.authToken,
       ...(group.relayEndpointCandidates?.length
         ? { relayEndpointCandidates: group.relayEndpointCandidates }
@@ -536,6 +470,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     bridgeHost: string;
     bridgePort: number;
     daemonHostId?: string;
+    terminalBackend?: 'tmux' | 'herdr';
     relayHostId?: string;
     authToken?: string;
     relayEndpointCandidates?: RelayEndpointCandidate[];
@@ -560,6 +495,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
             bridgePort: group.bridgePort,
             daemonHostId: group.daemonHostId,
             relayHostId: group.relayHostId || group.daemonHostId,
+            terminalBackend: group.terminalBackend,
             authToken: group.authToken,
             relayEndpointCandidates: group.relayEndpointCandidates || [],
             transportMode: group.transportMode,
@@ -595,6 +531,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         bridgeHost: target.bridgeHost,
         bridgePort: target.bridgePort,
         daemonHostId: target.daemonHostId || target.relayHostId,
+        ...(target.terminalBackend === 'herdr' ? { terminalBackend: 'herdr' as const } : {}),
         authToken: target.authToken,
         ...(target.relayEndpointCandidates?.length
           ? { relayEndpointCandidates: target.relayEndpointCandidates }
@@ -606,6 +543,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       bridgeHost: target.bridgeHost,
       bridgePort: target.bridgePort,
       daemonHostId: target.daemonHostId || target.relayHostId,
+      ...(target.terminalBackend === 'herdr' ? { terminalBackend: 'herdr' as const } : {}),
     }, normalizedSessionNames);
     void auditOpenTabsAgainstRemoteSessions('session-picker-refresh').catch((error) => {
       console.error('[App] Failed to audit remote session truth after session picker refresh:', error);
@@ -617,14 +555,16 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     message: TerminalMuxTargetClientMessage,
     fallbackOptions?: { includeEmptyCreateOptions?: boolean },
   ) => {
+    const routedMessage: TerminalMuxTargetClientMessage = message;
     const reusableSession = resolveReusableOpenSessionForTarget(
       sessionsRef.current,
       target,
       '',
       [terminalActiveSessionIdRef.current, runtimeActiveSessionId],
+      false,
     );
     if (reusableSession && manageTmuxSessionsOnOpenTransport) {
-      const result = await manageTmuxSessionsOnOpenTransport(reusableSession.id, message);
+      const result = await manageTmuxSessionsOnOpenTransport(reusableSession.id, routedMessage);
       if (result === null) {
         throw new Error('Existing terminal transport is unavailable for tmux management');
       }
@@ -632,25 +572,25 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     }
 
     const settings = bridgeSettingsRef.current;
-    switch (message.type) {
+    switch (routedMessage.type) {
       case 'list-sessions':
         return fetchTmuxSessions(target, settings);
       case 'tmux-create-session':
-        if (message.payload.cwd) {
-          return createTmuxSession(target, settings, message.payload.sessionName, { cwd: message.payload.cwd });
+        if (routedMessage.payload.cwd) {
+          return createTmuxSession(target, settings, routedMessage.payload.sessionName, { cwd: routedMessage.payload.cwd });
         }
         return fallbackOptions?.includeEmptyCreateOptions
-          ? createTmuxSession(target, settings, message.payload.sessionName, undefined)
-          : createTmuxSession(target, settings, message.payload.sessionName);
+          ? createTmuxSession(target, settings, routedMessage.payload.sessionName, undefined)
+          : createTmuxSession(target, settings, routedMessage.payload.sessionName);
       case 'tmux-rename-session':
         return renameTmuxSession(
           target,
           settings,
-          message.payload.sessionName,
-          message.payload.nextSessionName,
+          routedMessage.payload.sessionName,
+          routedMessage.payload.nextSessionName,
         );
       case 'tmux-kill-session':
-        return killTmuxSession(target, settings, message.payload.sessionName);
+        return killTmuxSession(target, settings, routedMessage.payload.sessionName);
       default:
         return Promise.resolve([]);
     }
@@ -660,6 +600,62 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     runtimeActiveSessionId,
     sessionsRef,
     terminalActiveSessionIdRef,
+  ]);
+
+  const handleRenameRemoteSession = useCallback(async (
+    sessionId: string,
+    nextSessionName: string,
+  ) => {
+    const session = sessionsRef.current.find((candidate) => candidate.id === sessionId);
+    if (!session) {
+      throw new Error('Terminal session is unavailable');
+    }
+    const currentSessionName = session.sessionName.trim();
+    const requestedNextSessionName = nextSessionName.trim();
+    if (!requestedNextSessionName) {
+      return;
+    }
+    const normalizedNextSessionName = sanitizeTmuxSessionName(requestedNextSessionName);
+    if (normalizedNextSessionName === currentSessionName) {
+      return;
+    }
+
+    const target = normalizeBridgeTarget({
+      bridgeHost: session.bridgeHost,
+      bridgePort: session.bridgePort,
+      daemonHostId: session.daemonHostId,
+      relayHostId: session.daemonHostId,
+      authToken: session.authToken,
+      terminalBackend: session.terminalBackend || 'tmux',
+    });
+    if (!manageTmuxSessionsOnOpenTransport) {
+      throw new Error('Existing terminal transport is unavailable for tmux management');
+    }
+    const sessionNames = await manageTmuxSessionsOnOpenTransport(sessionId, {
+      type: 'tmux-rename-session',
+      payload: {
+        sessionName: currentSessionName,
+        nextSessionName: normalizedNextSessionName,
+      },
+    });
+    if (sessionNames === null) {
+      throw new Error('Existing terminal transport is unavailable for tmux management');
+    }
+
+    renameRemoteSession(sessionId, normalizedNextSessionName);
+    applyOpenTabState(renameRemoteOpenTabIntentSession(
+      openTabStateRef.current,
+      sessionId,
+      normalizedNextSessionName,
+    ));
+    handleRemoteSessionsRefreshed(target, sessionNames ?? []);
+  }, [
+    applyOpenTabState,
+    handleRemoteSessionsRefreshed,
+    manageTmuxSessionsOnOpenTransport,
+    openTabStateRef,
+    renameRemoteSession,
+    sessionsRef,
   ]);
 
   const handleCloseGroupSession = useCallback(async (
@@ -672,12 +668,15 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       daemonHostId: group.daemonHostId,
       relayHostId: group.relayHostId || group.daemonHostId,
       authToken: group.authToken,
+      ...(group.terminalBackend === 'herdr' ? { terminalBackend: 'herdr' as const } : {}),
       relayEndpointCandidates: group.relayEndpointCandidates || [],
       transportMode: group.transportMode,
     });
     const sessionNames = await manageTmuxSessionsForTarget(target, {
       type: 'tmux-kill-session',
-      payload: { sessionName },
+      payload: {
+        sessionName,
+      },
     });
     handleRemoteSessionsRefreshed(target, sessionNames ?? []);
   }, [handleRemoteSessionsRefreshed, manageTmuxSessionsForTarget]);
@@ -741,9 +740,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         bridgePort: routeHost.bridgePort,
         sessionName: routeHost.sessionName,
       });
-      if (deletedAnyReuseKey) {
-        persistClosedTabReuseKeys(closedOpenTabReuseKeysRef.current);
-      }
+      void deletedAnyReuseKey;
       const nextOpenTabState = upsertOpenTabIntentSession(
         openTabStateRef.current,
         {
@@ -754,6 +751,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
           bridgePort: routeHost.bridgePort,
           daemonHostId: routeHost.daemonHostId || routeHost.relayHostId,
           sessionName: routeHost.sessionName,
+          terminalBackend: routeHost.terminalBackend || 'tmux',
           authToken: routeHost.authToken,
           autoCommand: routeHost.autoCommand,
           customName: reusableSession.customName,
@@ -772,6 +770,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
         bridgeHost: target.bridgeHost,
         bridgePort: target.bridgePort,
         daemonHostId: target.daemonHostId || target.relayHostId,
+        terminalBackend: target.terminalBackend || 'tmux',
         authToken: target.authToken,
         relayEndpointCandidates: target.relayEndpointCandidates || [],
       }, reusableSession.sessionName);
@@ -876,6 +875,19 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
           || resolveRelayDeviceBridgeTarget(bridgeSettings.servers, matchedDevice),
       );
     }
+    const matchedHost = hosts
+      .filter((host) => (
+        host.id.trim() === normalizedHostKey
+        || host.name.trim() === normalizedHostKey
+        || host.daemonHostId?.trim() === normalizedHostKey
+        || host.relayHostId?.trim() === normalizedHostKey
+        || host.bridgeHost.trim() === normalizedHostKey
+        || `${host.bridgeHost.trim()}:${host.bridgePort}` === normalizedHostKey
+      ))
+      .sort((left, right) => Math.max(right.lastConnected || 0, right.createdAt) - Math.max(left.lastConnected || 0, left.createdAt))[0];
+    if (matchedHost) {
+      return buildBridgeTargetFromHost(matchedHost);
+    }
     const matchedPreset = bridgeSettings.servers.find((server) => (
       server.id.trim() === normalizedHostKey
       || server.name.trim() === normalizedHostKey
@@ -908,7 +920,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       });
     }
     return null;
-  }, [bridgeSettings.servers, enrichTargetFromSavedHosts, relayDevices, sessionsRef]);
+  }, [bridgeSettings.servers, enrichTargetFromSavedHosts, hosts, relayDevices, sessionsRef]);
 
   const buildBlankSessionName = useCallback(() => {
     return buildGeneratedSessionName();
@@ -917,6 +929,13 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
   const handleOpenQuickTabPicker = useCallback((paneId?: string, hostKey?: string, createOptions?: QuickTabCreateOptions) => {
     const target = resolveTargetByHostKey(hostKey);
     if (target) {
+      if (createOptions?.terminalBackend === 'herdr') {
+        openSessionPicker('quick-tab', {
+          target: { ...target, terminalBackend: 'herdr' },
+          paneId: paneId || null,
+        });
+        return;
+      }
       const sessionName = createOptions?.sessionName?.trim() || buildBlankSessionName();
       const cwd = createOptions?.cwd?.trim();
       void (async () => {
@@ -962,9 +981,14 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     if (!target) {
       return;
     }
-    const sessionNames = await manageTmuxSessionsForTarget(target, { type: 'list-sessions' });
-    handleRemoteSessionsRefreshed(target, sessionNames ?? []);
-  }, [handleRemoteSessionsRefreshed, manageTmuxSessionsForTarget, resolveTargetByHostKey]);
+    const discoveryTarget = normalizeBridgeTarget({ ...target, terminalBackend: undefined });
+    const sessionNames = await manageTmuxSessionsForTarget(discoveryTarget, { type: 'list-sessions' });
+    handleRemoteSessionsRefreshed(discoveryTarget, sessionNames ?? []);
+  }, [
+    handleRemoteSessionsRefreshed,
+    manageTmuxSessionsForTarget,
+    resolveTargetByHostKey,
+  ]);
 
   const resolveCanonicalRelayHostId = useCallback((tab: PersistedOpenTab) => {
     const currentBridgeSettings = bridgeSettingsRef.current;
@@ -1134,6 +1158,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     handleOpenSingleTmuxSession,
     handleOpenMultipleTmuxSessions,
     handleOpenGroupSession,
+    handleRenameRemoteSession,
     handleCloseGroupSession,
     handleOpenServerGroups,
     handleEditServerGroup,

@@ -3,15 +3,15 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { extractApkSmokeBridgeDebugTargetFromStorageDump } from '../src/lib/android-apk-smoke-device-bridge-target';
-import { buildApkSmokeLevelDbListArgs, parseApkSmokeLevelDbFileList } from '../src/lib/android-apk-smoke-leveldb-files';
+import { WebSocket } from 'ws';
+import { extractApkSmokeBridgeDebugTargetFromLocalStorageSnapshot } from '../src/lib/android-apk-smoke-device-bridge-target';
 import {
   filterApkSmokeRuntimeSnapshot,
+  resolveApkSmokeDaemonSessionId,
   resolveApkSmokeSnapshotActiveSessionId,
   selectFreshApkSmokeSnapshotRecord,
 } from '../src/lib/android-apk-smoke-runtime-freshness';
-import { extractApkSmokePrintableAsciiLines } from '../src/lib/android-apk-smoke-printable-dump';
-import { resolveApkSmokeWebViewLevelDbDirFromRunAsListing } from '../src/lib/android-apk-smoke-webview-leveldb-path';
+import { isApkSmokeClientInputSendScope } from '../src/lib/android-apk-smoke-runtime-verifier';
 import { detectRuntimeSequenceAnomalies, parseRuntimeSequenceEntries } from '../src/lib/runtime-debug-sequence';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -27,6 +27,11 @@ const RUNTIME_DEBUG_REASON = 'terminal-real-device-evidence';
 const INPUT_SAMPLE = 'rtkprobe';
 const POLL_TIMEOUT_MS = 12_000;
 const POLL_INTERVAL_MS = 1_000;
+const WEBVIEW_DEVTOOLS_FORWARD_PORT = 19222;
+const WEBVIEW_CDP_RETRY_COUNT = 8;
+const WEBVIEW_CDP_RETRY_DELAY_MS = 300;
+const RUNTIME_FETCH_RETRY_COUNT = 4;
+const RUNTIME_FETCH_RETRY_DELAY_MS = 500;
 
 type Command = 'build' | 'skip-build';
 
@@ -224,49 +229,291 @@ function captureWindowDump(serial: string) {
   return adbText(serial, ['shell', 'dumpsys', 'window', 'windows']);
 }
 
-function resolveDisplayCenter(serial: string) {
-  const dump = adbText(serial, ['shell', 'wm', 'size']);
-  const match = dump.match(/Physical size:\s*(\d+)x(\d+)/);
-  const width = match ? Number.parseInt(match[1], 10) : 1080;
-  const height = match ? Number.parseInt(match[2], 10) : 2400;
+function resolveWebViewDevtoolsSocket(serial: string) {
+  const unixSockets = adbText(serial, ['shell', 'cat', '/proc/net/unix']);
+  const match = unixSockets.match(/@webview_devtools_remote_\d+/u);
+  return match?.[0] || '';
+}
+
+async function fetchWebViewDevtoolsPages() {
+  try {
+    const response = await fetch(`http://127.0.0.1:${WEBVIEW_DEVTOOLS_FORWARD_PORT}/json/list`);
+    if (!response.ok) {
+      const body = await response.text();
+      throw new Error(`HTTP ${response.status}: ${body}`);
+    }
+    return await response.json() as Array<{ type?: string; webSocketDebuggerUrl?: string }>;
+  } catch (error) {
+    throw new Error(`CDP target discovery fetch failed: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function evaluateWebViewExpressionOnce(serial: string, expression: string) {
+  const socketName = resolveWebViewDevtoolsSocket(serial);
+  if (!socketName) {
+    fail('could not find the running Android WebView DevTools socket');
+  }
+  adbText(serial, ['forward', `tcp:${WEBVIEW_DEVTOOLS_FORWARD_PORT}`, `localabstract:${socketName.slice(1)}`]);
+  const pages = await fetchWebViewDevtoolsPages();
+  const page = pages.find((candidate) => candidate.type === 'page' && candidate.webSocketDebuggerUrl);
+  const webSocketDebuggerUrl = page?.webSocketDebuggerUrl;
+  if (!webSocketDebuggerUrl) {
+    fail('running Android WebView has no debuggable page target');
+  }
+
+  return await new Promise<unknown>((resolveResult, reject) => {
+    const socket = new WebSocket(webSocketDebuggerUrl);
+    const requestId = 1;
+    const timeout = setTimeout(() => {
+      socket.close();
+      reject(new Error('timed out evaluating the current Android WebView through CDP'));
+    }, 5_000);
+    socket.once('error', (error) => {
+      clearTimeout(timeout);
+      reject(error);
+    });
+    socket.on('message', (raw) => {
+      let message: {
+        id?: number;
+        error?: unknown;
+        result?: { result?: { value?: unknown } };
+      };
+      try {
+        message = JSON.parse(String(raw)) as typeof message;
+      } catch (error) {
+        clearTimeout(timeout);
+        socket.close();
+        reject(new Error(`CDP returned malformed message: ${error instanceof Error ? error.message : String(error)}`));
+        return;
+      }
+      if (message.id !== requestId) {
+        return;
+      }
+      clearTimeout(timeout);
+      if (message.error) {
+        socket.close();
+        reject(new Error(`CDP Runtime.evaluate failed: ${JSON.stringify(message.error)}`));
+        return;
+      }
+      const value = message.result?.result?.value;
+      if (value === undefined) {
+        socket.close();
+        reject(new Error('CDP Runtime.evaluate returned no value'));
+        return;
+      }
+      socket.close();
+      resolveResult(value);
+    });
+    socket.once('open', () => {
+      socket.send(JSON.stringify({
+        id: requestId,
+        method: 'Runtime.evaluate',
+        params: {
+          expression,
+          returnByValue: true,
+        },
+      }));
+    });
+  });
+}
+
+async function evaluateWebViewExpression(serial: string, expression: string) {
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= WEBVIEW_CDP_RETRY_COUNT; attempt += 1) {
+    try {
+      return await evaluateWebViewExpressionOnce(serial, expression);
+    } catch (error) {
+      lastError = error;
+      if (attempt < WEBVIEW_CDP_RETRY_COUNT) {
+        sleep(WEBVIEW_CDP_RETRY_DELAY_MS);
+      }
+    }
+  }
+  throw new Error(
+    `CDP Runtime.evaluate failed after ${WEBVIEW_CDP_RETRY_COUNT} target rediscovery attempts: `
+      + `${lastError instanceof Error ? lastError.message : String(lastError)}`,
+  );
+}
+
+async function readWebViewLocalStorageSnapshot(serial: string) {
+  const snapshotValue = await evaluateWebViewExpression(
+    serial,
+    'Object.fromEntries(Object.keys(localStorage).map((key) => [key, localStorage.getItem(key)]))',
+  );
+  let snapshot: Record<string, unknown>;
+  if (!snapshotValue || typeof snapshotValue !== 'object' || Array.isArray(snapshotValue)) {
+    fail('CDP Runtime.evaluate returned no localStorage snapshot');
+  }
+  snapshot = snapshotValue as Record<string, unknown>;
+  return { snapshot };
+}
+
+async function inspectWebViewTerminalFocus(serial: string) {
+  const value = await evaluateWebViewExpression(
+    serial,
+    `(() => {
+      const quickBar = document.querySelector('[data-testid="terminal-quickbar-shell"]');
+      const keyboardButton = document.querySelector('button[aria-label="键盘"]');
+      const activeElement = document.activeElement;
+      return {
+        keyboardButton: Boolean(keyboardButton),
+        keyboardVisible: quickBar?.getAttribute('data-keyboard-visible') === 'true',
+        activeElement: activeElement?.tagName || '',
+        activeElementTerminalSessionId: activeElement?.getAttribute?.('data-terminal-input-session-id') || '',
+      };
+    })()`,
+  );
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    fail('could not inspect terminal focus state through the current Android WebView');
+  }
+  return value as Record<string, unknown>;
+}
+
+function inspectNativeTerminalIme(serial: string) {
+  const dump = captureInputMethodDump(serial);
+  const servedView = dump
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find((line) => line.startsWith('mServedView=') && /ImeAnchor(?:EditText|Plugin)/u.test(line))
+    ?.slice('mServedView='.length)
+    .trim() || '';
   return {
-    width,
-    height,
-    centerX: Math.floor(width / 2),
-    centerY: Math.floor(height / 2),
+    shown: /mInputShown=true/m.test(dump),
+    servedImeAnchor: /mServedView=.*ImeAnchor(?:EditText|Plugin)/m.test(dump),
+    servedView,
   };
 }
 
-function safeShellSingleQuote(value: string) {
-  return `'${value.replace(/'/g, `'"'"'`)}'`;
+async function clickWebViewKeyboardButton(serial: string) {
+  const value = await evaluateWebViewExpression(
+    serial,
+    `(() => {
+      const button = document.querySelector('button[aria-label="键盘"]');
+      if (!(button instanceof HTMLButtonElement)) {
+        return { clicked: false, keyboardButton: false };
+      }
+      const rect = button.getBoundingClientRect();
+      return {
+        clicked: true,
+        keyboardButton: true,
+        centerX: rect.left + rect.width / 2,
+        centerY: rect.top + rect.height / 2,
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+      };
+    })()`,
+  );
+  if (!value || typeof value !== 'object' || Array.isArray(value) || (value as Record<string, unknown>).clicked !== true) {
+    fail('current Android WebView has no clickable terminal keyboard button');
+  }
+  const centerX = Number((value as Record<string, unknown>).centerX);
+  const centerY = Number((value as Record<string, unknown>).centerY);
+  const viewportWidth = Number((value as Record<string, unknown>).viewportWidth);
+  const viewportHeight = Number((value as Record<string, unknown>).viewportHeight);
+  if (
+    !Number.isFinite(centerX)
+    || !Number.isFinite(centerY)
+    || !Number.isFinite(viewportWidth)
+    || !Number.isFinite(viewportHeight)
+    || viewportWidth <= 0
+    || viewportHeight <= 0
+  ) {
+    fail(`terminal keyboard button has invalid bounds: ${JSON.stringify(value)}`);
+  }
+  const displaySize = adbText(serial, ['shell', 'wm', 'size']).match(/Physical size:\s*(\d+)x(\d+)/);
+  const displayWidth = displaySize ? Number.parseInt(displaySize[1]!, 10) : viewportWidth;
+  const displayHeight = displaySize ? Number.parseInt(displaySize[2]!, 10) : viewportHeight;
+  adbText(serial, [
+    'shell',
+    'input',
+    'tap',
+    String(Math.round((centerX / viewportWidth) * displayWidth)),
+    String(Math.round((centerY / viewportHeight) * displayHeight)),
+  ]);
+  return true;
 }
 
-function readWebViewStorageDump(serial: string) {
-  const levelDbDirListing = adbText(serial, [
-    'exec-out',
-    'run-as',
-    APP_ID,
-    'sh',
-    '-lc',
-    'pwd; ls -la; find . -maxdepth 4 \\( -iname "*leveldb" -o -iname "*Local Storage" -o -iname "*app_webview" \\) 2>/dev/null | sed -n "1,200p"',
-  ]);
-  const levelDbDir = resolveApkSmokeWebViewLevelDbDirFromRunAsListing(levelDbDirListing);
-  if (!levelDbDir) {
-    fail(`could not discover Android WebView localStorage leveldb path\n${levelDbDirListing}`);
+async function ensureWebViewTerminalPage(serial: string, sessionName?: string) {
+  let resumeRequested = false;
+  const deadline = Date.now() + 12_000;
+  while (Date.now() <= deadline) {
+    try {
+      const value = await evaluateWebViewExpression(
+        serial,
+        `(() => {
+          const terminal = document.querySelector('[data-testid="terminal-quickbar-shell"]');
+          if (terminal) {
+            return { terminalPage: true, resumed: false, button: '' };
+          }
+          const buttons = Array.from(document.querySelectorAll('button[aria-label]'));
+          const button = buttons.find((candidate) => (
+            candidate.getAttribute('aria-label')?.startsWith('Resume ')
+          ));
+          if (!(button instanceof HTMLButtonElement)) {
+            return { terminalPage: false, resumed: false, button: '' };
+          }
+          button.click();
+          return { terminalPage: false, resumed: true, button: button.getAttribute('aria-label') || '' };
+        })()`,
+      );
+      if (!value || typeof value !== 'object' || Array.isArray(value)) {
+        fail('could not inspect the current Android WebView page before terminal resume');
+      }
+      const state = value as Record<string, unknown>;
+      if (state.terminalPage === true) {
+        return;
+      }
+      if (state.resumed === true) {
+        resumeRequested = true;
+      } else if (!resumeRequested) {
+        fail(`current Android WebView is not Terminal and has no Resume button for ${sessionName || 'the active session'}`);
+      }
+    } catch (error) {
+      if (!resumeRequested) {
+        throw error;
+      }
+    }
+    sleep(250);
   }
-  const filesOutput = adbText(serial, buildApkSmokeLevelDbListArgs(APP_ID, levelDbDir));
-  const files = parseApkSmokeLevelDbFileList(filesOutput);
-  if (files.length === 0) {
-    fail(`no WebView localStorage files found under ${levelDbDir}`);
+  fail('Resume button did not open the Terminal page before the bounded verifier deadline');
+}
+
+async function ensureWebViewTerminalImeFocus(serial: string) {
+  const initialState = await inspectWebViewTerminalFocus(serial);
+  if (initialState.keyboardVisible === true) {
+    await clickWebViewKeyboardButton(serial);
+    const hideDeadline = Date.now() + 5_000;
+    while (Date.now() <= hideDeadline) {
+      sleep(250);
+      const state = await inspectWebViewTerminalFocus(serial);
+      if (state.keyboardVisible !== true) {
+        break;
+      }
+    }
   }
 
-  const dumpLines: string[] = [];
-  for (const file of files) {
-    const raw = adb(serial, ['exec-out', 'run-as', APP_ID, 'sh', '-lc', `cat ${safeShellSingleQuote(`${levelDbDir}/${file}`)}`], 'buffer') as Buffer;
-    dumpLines.push(`__FILE__ ${file}`);
-    dumpLines.push(...extractApkSmokePrintableAsciiLines(raw));
+  await clickWebViewKeyboardButton(serial);
+  const showDeadline = Date.now() + 8_000;
+  let finalState = await inspectWebViewTerminalFocus(serial);
+  let nativeState = inspectNativeTerminalIme(serial);
+  while (Date.now() <= showDeadline) {
+    nativeState = inspectNativeTerminalIme(serial);
+    if (nativeState.shown && nativeState.servedImeAnchor) {
+      break;
+    }
+    sleep(250);
+    finalState = await inspectWebViewTerminalFocus(serial);
   }
-  return dumpLines.join('\n');
+  if (!nativeState.shown || !nativeState.servedImeAnchor) {
+    fail(`terminal keyboard button did not establish native IME focus: ${JSON.stringify({ dom: finalState, native: nativeState })}`);
+  }
+  return {
+    ...finalState,
+    nativeImeShown: nativeState.shown,
+    nativeImeServedView: nativeState.servedImeAnchor,
+    nativeImeServedViewText: nativeState.servedView,
+    keyboardButtonTapped: true,
+  };
 }
 
 function addToken(url: URL, token?: string) {
@@ -276,16 +523,30 @@ function addToken(url: URL, token?: string) {
 }
 
 async function fetchJson(url: URL) {
-  const response = await fetch(url);
-  const text = await response.text();
-  if (!response.ok) {
-    fail(`request failed (${response.status}) ${url.pathname}: ${text}`);
+  let lastError: unknown = null;
+  for (let attempt = 1; attempt <= RUNTIME_FETCH_RETRY_COUNT; attempt += 1) {
+    try {
+      const response = await fetch(url);
+      const text = await response.text();
+      if (!response.ok) {
+        fail(`request failed (${response.status}) ${url.href}: ${text}`);
+      }
+      try {
+        return JSON.parse(text);
+      } catch (error) {
+        fail(`invalid json from ${url.href}: ${error instanceof Error ? error.message : String(error)}\n${text}`);
+      }
+    } catch (error) {
+      lastError = error;
+      if (attempt < RUNTIME_FETCH_RETRY_COUNT) {
+        sleep(RUNTIME_FETCH_RETRY_DELAY_MS);
+      }
+    }
   }
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    fail(`invalid json from ${url.pathname}: ${error instanceof Error ? error.message : String(error)}\n${text}`);
-  }
+  throw new Error(
+    `runtime evidence request failed after ${RUNTIME_FETCH_RETRY_COUNT} attempts (${url.href}): `
+      + `${lastError instanceof Error ? lastError.message : String(lastError)}`,
+  );
 }
 
 function filterRuntimeSnapshotForDevice(snapshot: Record<string, unknown>, deviceModel: string) {
@@ -307,27 +568,34 @@ async function collectRuntime(remote: { bridgeHost: string; bridgePort: number; 
   const baseUrl = new URL(`http://${remote.bridgeHost}:${remote.bridgePort}`);
   const healthUrl = new URL('/health', baseUrl);
   addToken(healthUrl, remote.authToken);
+  const initialSnapshotUrl = new URL('/debug/runtime', baseUrl);
+  addToken(initialSnapshotUrl, remote.authToken);
   const controlUrl = new URL('/debug/runtime/control', baseUrl);
   addToken(controlUrl, remote.authToken);
   controlUrl.searchParams.set('enabled', '1');
   controlUrl.searchParams.set('reason', RUNTIME_DEBUG_REASON);
+  const initialSnapshot = await fetchJson(initialSnapshotUrl) as Record<string, unknown>;
+  const daemonSessionId = remote.sessionId
+    ? resolveApkSmokeDaemonSessionId(initialSnapshot, remote.sessionId)
+    : null;
+  if (remote.sessionId && !daemonSessionId) {
+    fail(`daemon subscriber for client session ${remote.sessionId} was not found in the current transport snapshot`);
+  }
   if (remote.sessionId?.trim()) {
-    controlUrl.searchParams.set('sessionId', remote.sessionId.trim());
+    controlUrl.searchParams.set('sessionId', daemonSessionId!);
   }
 
   const health = await fetchJson(healthUrl);
   const control = await fetchJson(controlUrl);
-  const snapshotUrl = new URL('/debug/runtime', baseUrl);
-  addToken(snapshotUrl, remote.authToken);
-  const snapshot = await fetchJson(snapshotUrl);
+  const snapshot = await fetchJson(initialSnapshotUrl);
   const logsUrl = new URL('/debug/runtime/logs', baseUrl);
   addToken(logsUrl, remote.authToken);
   logsUrl.searchParams.set('limit', '400');
-  if (remote.sessionId?.trim()) {
-    logsUrl.searchParams.set('sessionId', remote.sessionId.trim());
+  if (daemonSessionId) {
+    logsUrl.searchParams.set('sessionId', daemonSessionId);
   }
   const logs = await fetchJson(logsUrl);
-  return { health, control, snapshot, logs };
+  return { health, control, snapshot, logs, daemonSessionId };
 }
 
 function safeParseRuntimePayload(payload: unknown) {
@@ -425,7 +693,7 @@ function extractInputEvidence(logs: unknown, sessionId: string | null, minimumTi
     daemonFiltered,
     anomalies,
     checks: {
-      clientInputSend: filtered.some((entry) => entry.scope === 'session.input.send'),
+      clientInputSend: filtered.some((entry) => isApkSmokeClientInputSendScope(entry.scope)),
       daemonInputReceive: daemonFiltered.some((entry) => entry.scope === 'input-receive'),
       daemonInputWrite: daemonFiltered.some((entry) => entry.scope === 'input-write'),
       bufferHead: filtered.some((entry) => entry.scope === 'session.buffer.head'),
@@ -489,16 +757,83 @@ async function main() {
   ensureInteractiveDevice(serial);
   adbText(serial, ['shell', 'cmd', 'statusbar', 'collapse']);
   const activityDump = waitForForeground(serial, 10_000);
-  const center = resolveDisplayCenter(serial);
-
   const launchPng = capturePng(serial);
   const beforeImeUi = captureUiDump(serial);
   const beforeImeInputMethod = captureInputMethodDump(serial);
   const beforeImeWindow = captureWindowDump(serial);
   assertAppSurfaceVisible(beforeImeUi, beforeImeWindow, 'before-ime');
 
-  adbText(serial, ['shell', 'input', 'tap', String(center.centerX), String(center.centerY)]);
-  sleep(1200);
+  const webViewStorage = await readWebViewLocalStorageSnapshot(serial);
+  const storageTarget = extractApkSmokeBridgeDebugTargetFromLocalStorageSnapshot(webViewStorage.snapshot);
+  if (!storageTarget.target) {
+    fail(`could not resolve active bridge target from current Android WebView localStorage truth (activeSessionId=${storageTarget.activeSessionId || 'null'})`);
+  }
+
+  let runtimeClientSessionId = storageTarget.target.sessionId || null;
+  let baselineRuntime = await collectRuntime({
+    ...storageTarget.target,
+    sessionId: runtimeClientSessionId,
+  });
+  const startupReadyDeadline = Date.now() + POLL_TIMEOUT_MS;
+  while (Date.now() <= startupReadyDeadline) {
+    baselineRuntime.snapshot = filterRuntimeSnapshotForDevice(
+      filterApkSmokeRuntimeSnapshot(baselineRuntime.snapshot, smokeStartedAt) as Record<string, unknown>,
+      deviceModel,
+    );
+    const currentSnapshotSessionId = resolveApkSmokeSnapshotActiveSessionId(
+      selectFreshApkSmokeSnapshotRecord(baselineRuntime.snapshot, smokeStartedAt),
+    );
+    if (currentSnapshotSessionId && currentSnapshotSessionId !== runtimeClientSessionId) {
+      runtimeClientSessionId = currentSnapshotSessionId;
+      baselineRuntime = await collectRuntime({
+        ...storageTarget.target,
+        sessionId: runtimeClientSessionId,
+      });
+      continue;
+    }
+    const currentDaemonSessionId = resolveApkSmokeDaemonSessionId(
+      baselineRuntime.snapshot,
+      runtimeClientSessionId,
+    );
+    const currentRecord = selectFreshApkSmokeSnapshotRecord(baselineRuntime.snapshot, smokeStartedAt);
+    const currentSnapshot = currentRecord?.snapshot as Record<string, unknown> | undefined;
+    const currentTerminalPage = (
+      currentSnapshot
+      && typeof currentSnapshot === 'object'
+      && typeof currentSnapshot.sources === 'object'
+      && currentSnapshot.sources
+      && typeof (currentSnapshot.sources as Record<string, unknown>)['terminal-page'] === 'object'
+    )
+      ? (currentSnapshot.sources as Record<string, unknown>)['terminal-page'] as Record<string, unknown>
+      : null;
+    if (
+      currentDaemonSessionId
+      && currentTerminalPage?.activeSessionState === 'connected'
+      && currentTerminalPage.activeSessionId === runtimeClientSessionId
+    ) {
+      break;
+    }
+    sleep(POLL_INTERVAL_MS);
+    baselineRuntime = await collectRuntime({
+      ...storageTarget.target,
+      sessionId: runtimeClientSessionId,
+    });
+  }
+  baselineRuntime.snapshot = filterRuntimeSnapshotForDevice(
+    filterApkSmokeRuntimeSnapshot(baselineRuntime.snapshot, smokeStartedAt) as Record<string, unknown>,
+    deviceModel,
+  );
+  const snapshotSessionId = resolveApkSmokeSnapshotActiveSessionId(
+    selectFreshApkSmokeSnapshotRecord(baselineRuntime.snapshot, smokeStartedAt),
+  );
+  const evidenceSessionId = runtimeClientSessionId || snapshotSessionId || null;
+  if (!evidenceSessionId) {
+    fail('current active client session was not resolved after startup stabilization');
+  }
+
+  await ensureWebViewTerminalPage(serial, storageTarget.target.sessionName);
+  const terminalFocusState = await ensureWebViewTerminalImeFocus(serial);
+  sleep(500);
   const afterImePng = capturePng(serial);
   const afterImeUi = captureUiDump(serial);
   const afterImeInputMethod = captureInputMethodDump(serial);
@@ -509,28 +844,16 @@ async function main() {
   sleep(400);
   adbText(serial, ['shell', 'input', 'keyevent', '66']);
 
-  const storageDump = readWebViewStorageDump(serial);
-  const storageTarget = extractApkSmokeBridgeDebugTargetFromStorageDump(storageDump);
-  if (!storageTarget.target) {
-    fail('could not resolve bridge target from Android WebView localStorage truth');
-  }
-
-  const baselineRuntime = await collectRuntime(storageTarget.target);
-  baselineRuntime.snapshot = filterRuntimeSnapshotForDevice(
-    filterApkSmokeRuntimeSnapshot(baselineRuntime.snapshot, smokeStartedAt) as Record<string, unknown>,
-    deviceModel,
-  );
-  const snapshotSessionId = resolveApkSmokeSnapshotActiveSessionId(
-    selectFreshApkSmokeSnapshotRecord(baselineRuntime.snapshot, smokeStartedAt),
-  );
-  const evidenceSessionId = storageTarget.target.sessionId || snapshotSessionId || null;
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   let finalRuntime = baselineRuntime;
   let finalActiveSessionId = evidenceSessionId;
   let finalEvidence = extractInputEvidence(baselineRuntime.logs, evidenceSessionId, smokeStartedAt);
 
   while (Date.now() <= deadline) {
-    finalRuntime = await collectRuntime(storageTarget.target);
+    finalRuntime = await collectRuntime({
+      ...storageTarget.target,
+      sessionId: runtimeClientSessionId,
+    });
     finalRuntime.snapshot = filterRuntimeSnapshotForDevice(
       filterApkSmokeRuntimeSnapshot(finalRuntime.snapshot, smokeStartedAt) as Record<string, unknown>,
       deviceModel,
@@ -538,7 +861,11 @@ async function main() {
     const currentSnapshotSessionId = resolveApkSmokeSnapshotActiveSessionId(
       selectFreshApkSmokeSnapshotRecord(finalRuntime.snapshot, smokeStartedAt),
     );
-    finalActiveSessionId = storageTarget.target.sessionId || currentSnapshotSessionId || evidenceSessionId;
+    if (currentSnapshotSessionId && currentSnapshotSessionId !== runtimeClientSessionId) {
+      runtimeClientSessionId = currentSnapshotSessionId;
+      continue;
+    }
+    finalActiveSessionId = runtimeClientSessionId || currentSnapshotSessionId || evidenceSessionId;
     finalEvidence = extractInputEvidence(finalRuntime.logs, finalActiveSessionId, smokeStartedAt);
     if (
       finalActiveSessionId
@@ -571,7 +898,8 @@ async function main() {
   writeFileSync(resolve(evidenceDir, 'after-ime-input-method.txt'), `${afterImeInputMethod}\n`);
   writeFileSync(resolve(evidenceDir, 'before-ime-window.txt'), `${beforeImeWindow}\n`);
   writeFileSync(resolve(evidenceDir, 'after-ime-window.txt'), `${afterImeWindow}\n`);
-  writeFileSync(resolve(evidenceDir, 'webview-local-storage-dump.txt'), `${storageDump}\n`);
+  writeFileSync(resolve(evidenceDir, 'terminal-focus-state.json'), `${JSON.stringify(terminalFocusState, null, 2)}\n`);
+  writeFileSync(resolve(evidenceDir, 'webview-local-storage.json'), `${JSON.stringify(webViewStorage, null, 2)}\n`);
   writeFileSync(resolve(evidenceDir, 'webview-bridge-target.json'), `${JSON.stringify(storageTarget, null, 2)}\n`);
   writeFileSync(resolve(evidenceDir, 'runtime-health.json'), `${JSON.stringify(finalRuntime.health, null, 2)}\n`);
   writeFileSync(resolve(evidenceDir, 'runtime-debug-control.json'), `${JSON.stringify(finalRuntime.control, null, 2)}\n`);
@@ -579,9 +907,9 @@ async function main() {
   writeFileSync(resolve(evidenceDir, 'runtime-logs.json'), `${JSON.stringify(finalRuntime.logs, null, 2)}\n`);
   writeFileSync(resolve(evidenceDir, 'timeline.txt'), `${timeline}\n`);
 
-  finalActiveSessionId = storageTarget.target.sessionId || resolveApkSmokeSnapshotActiveSessionId(
+  finalActiveSessionId = runtimeClientSessionId || resolveApkSmokeSnapshotActiveSessionId(
     selectFreshApkSmokeSnapshotRecord(finalRuntime.snapshot, smokeStartedAt),
-  ) || null;
+  ) || evidenceSessionId;
   const summary = {
     ok: Boolean(finalActiveSessionId)
       && finalEvidence.checks.clientInputSend
@@ -593,6 +921,7 @@ async function main() {
     serial,
     apkPath,
     activeSessionId: finalActiveSessionId,
+    daemonSessionId: finalRuntime.daemonSessionId || null,
     smokeStartedAt,
     deviceModel,
     bridgeHost: storageTarget.target.bridgeHost,

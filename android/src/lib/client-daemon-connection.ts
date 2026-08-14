@@ -4,10 +4,14 @@ import type { Host } from './types';
 import type { SessionTransportResource } from './session-transport-runtime';
 import { TraversalSocket } from './traversal/socket';
 import type { BridgeTransportSocket, TraversalTargetSource } from './traversal/types';
+import type { TraversalRouteHealthScope } from './traversal/route-health-cache';
 
 export interface ClientDaemonConnectionSocketFactoryOptions {
   overrideUrl?: string;
   autoReconnect?: boolean;
+  /** Route-health isolation scope. Passing the client network generation here
+   *  keeps WiFi/cellular/Tailscale route truth in separate buckets. */
+  routeHealthScope?: TraversalRouteHealthScope;
 }
 
 export function createClientDaemonTraversalSocket(
@@ -18,6 +22,7 @@ export function createClientDaemonTraversalSocket(
   return new TraversalSocket(target, settings, {
     overrideUrl: options.overrideUrl,
     autoReconnect: options.autoReconnect === true,
+    routeHealthScope: options.routeHealthScope,
   });
 }
 

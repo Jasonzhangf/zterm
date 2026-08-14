@@ -20,6 +20,8 @@ describe('Android background power policy', () => {
     expect(source).toContain('PowerManager.PARTIAL_WAKE_LOCK');
     expect(source).toContain('setReferenceCounted(false)');
     expect(source).toContain('wakeLock.acquire()');
+    expect(source).toContain('scheduleHeartbeatWake()');
+    expect(source).not.toContain('webView.post(new Runnable()');
     expect(source).not.toContain('BACKGROUND_HANDOFF_WAKE_LOCK_MS');
     expect(source).not.toContain('backgroundHandoffHandler');
     expect(source).not.toContain('backgroundHandoffTimeoutRunnable');
@@ -38,9 +40,12 @@ describe('Android background power policy', () => {
     const source = readFileSync(resolve(androidRoot, 'java/com/zterm/android/MainActivity.java'), 'utf8');
 
     expect(source).not.toContain('startBackgroundService(0);');
-    expect(source).toContain('startService(serviceIntent);');
+    expect(source).not.toContain('public void startBackgroundService');
+    expect(source).not.toContain('public void stopBackgroundService');
     expect(source).not.toContain('pauseTimers()');
     expect(source).not.toContain('getBridge().getWebView().onPause()');
+    expect(source).toContain('setRendererPriorityPolicy');
+    expect(source).toContain('RENDERER_PRIORITY_IMPORTANT');
   });
 
   it('leaves foreground service shutdown to the JavaScript lifecycle owner', () => {
@@ -60,5 +65,13 @@ describe('Android background power policy', () => {
     expect(plugin).toContain('if (sessionCount <= 0)');
     expect(plugin).toContain('stopService()');
     expect(plugin).toContain('startForegroundService(serviceIntent)');
+  });
+
+  it('keeps Android foreground-service rejection out of the foreground terminal process', () => {
+    const plugin = readFileSync(resolve(androidRoot, 'java/com/zterm/android/BackgroundServicePlugin.java'), 'utf8');
+
+    expect(plugin).toContain('catch (RuntimeException error)');
+    expect(plugin).toContain('call.reject("Background service start rejected by Android", error)');
+    expect(plugin).toContain('call.reject("Background service update rejected by Android", error)');
   });
 });

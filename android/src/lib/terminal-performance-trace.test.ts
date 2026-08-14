@@ -6,6 +6,26 @@ import {
 } from './terminal-performance-trace';
 
 describe('terminal performance trace', () => {
+  it('evicts bounded records without shifting the retained array on every append', () => {
+    const store = createTerminalPerformanceTraceStore({ limit: 2 });
+    const originalShift = Array.prototype.shift;
+    let shiftCount = 0;
+    Array.prototype.shift = function trackedShift<T>(this: T[]) {
+      shiftCount += 1;
+      return originalShift.call(this);
+    };
+    try {
+      store.record({ sessionId: 'pane-1', stage: 'send-done', at: 1 });
+      store.record({ sessionId: 'pane-1', stage: 'send-done', at: 2 });
+      store.record({ sessionId: 'pane-1', stage: 'send-done', at: 3 });
+
+      expect(store.snapshot().map((record) => record.at)).toEqual([2, 3]);
+      expect(shiftCount).toBe(0);
+    } finally {
+      Array.prototype.shift = originalShift;
+    }
+  });
+
   it('builds per-session capture-to-render latency summary for multi-pane traces', () => {
     const store = createTerminalPerformanceTraceStore({ limit: 20 });
     store.record({ sessionId: 'pane-1', stage: 'capture-start', at: 0 });

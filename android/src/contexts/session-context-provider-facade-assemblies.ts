@@ -88,6 +88,7 @@ export function useSessionProviderFacadeAssemblies(
     cleanupSocket: core.cleanupSocket,
     cleanupControlSocket: core.cleanupControlSocket,
     writeSessionTransportHost: core.writeSessionTransportHost,
+    writeSessionTerminalChannelName: core.writeSessionTerminalChannelName,
     writeSessionTransportToken: core.writeSessionTransportToken,
     daemonConnection: core.daemonConnection,
     readSessionTransportHost: core.readSessionTransportHost,
@@ -129,6 +130,7 @@ export function useSessionProviderFacadeAssemblies(
     closeSession,
     moveSession,
     renameSession,
+    renameRemoteSession,
     reconnectSession,
     reconnectAllSessions,
     ensureActiveSessionFresh,
@@ -162,6 +164,7 @@ export function useSessionProviderFacadeAssemblies(
     sessionHeadStoreRef: options.refs.sessionHeadStoreRef,
     readSessionTransportResource: core.readSessionTransportResource,
     readSessionTransportSocket: core.readSessionTransportSocket,
+    readTargetTransportRuntimes: core.readTargetTransportRuntimes,
     daemonConnection: core.daemonConnection,
     sendSocketPayload: core.sendSocketPayload,
     tmuxTargetRequestsRef,
@@ -206,6 +209,7 @@ export function useSessionProviderFacadeAssemblies(
     getSessionDebugMetrics,
     manageTmuxSessionsOnOpenTransport,
     sendMessageRaw,
+    sendTargetHeartbeat,
   } = sessionPublicFacadeRuntime;
 
   const sessionInteractionRuntime = useMemo(() => createSessionInteractionRuntime({
@@ -290,6 +294,7 @@ export function useSessionProviderFacadeAssemblies(
     switchSession,
     moveSession,
     renameSession,
+    renameRemoteSession,
     reconnectSession,
     reconnectAllSessions,
     setLiveSessionIds,
@@ -321,6 +326,7 @@ export function useSessionProviderFacadeAssemblies(
     getSessionDebugMetrics,
     manageTmuxSessionsOnOpenTransport,
     sendMessageRaw,
+    sendTargetHeartbeat,
   }), [
     closeSession,
     createSession,
@@ -335,6 +341,7 @@ export function useSessionProviderFacadeAssemblies(
     reconnectAllSessions,
     reconnectSession,
     renameSession,
+    renameRemoteSession,
     requestRemoteScreenshot,
     requestRemoteWindowTargets,
     requestRemoteWindowStreamStart,
@@ -350,6 +357,7 @@ export function useSessionProviderFacadeAssemblies(
     resizeRemoteWindowTarget,
     sendMessage,
     sendMessageRaw,
+    sendTargetHeartbeat,
     setLiveSessionIds,
     setActiveBodySubscriptionSuppressed,
     stopRemoteWindowStream,

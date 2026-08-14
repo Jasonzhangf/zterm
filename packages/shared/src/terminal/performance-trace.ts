@@ -62,11 +62,12 @@ function assertMetadataOnly(record: Record<string, unknown>) {
 export function createTerminalPerformanceTraceStore(options?: { limit?: number }) {
   const limit = Math.max(1, Math.floor(options?.limit || 500));
   const records: TerminalPerformanceTraceRecord[] = [];
+  let head = 0;
 
   return {
     record(record: TerminalPerformanceTraceRecord) {
       assertMetadataOnly(record as unknown as Record<string, unknown>);
-      records.push({
+      const nextRecord = {
         sessionId: record.sessionId,
         traceId: record.traceId,
         mirrorRevision: Number.isFinite(record.mirrorRevision) ? Math.max(0, Math.floor(record.mirrorRevision || 0)) : undefined,
@@ -76,16 +77,26 @@ export function createTerminalPerformanceTraceStore(options?: { limit?: number }
         bytes: Number.isFinite(record.bytes) ? Math.max(0, Math.floor(record.bytes || 0)) : undefined,
         lineCount: Number.isFinite(record.lineCount) ? Math.max(0, Math.floor(record.lineCount || 0)) : undefined,
         transportKind: record.transportKind,
-      });
-      while (records.length > limit) {
-        records.shift();
+      };
+      if (records.length < limit) {
+        records.push(nextRecord);
+        return;
       }
+      records[head] = nextRecord;
+      head = (head + 1) % limit;
     },
     snapshot() {
-      return records.map((record) => ({ ...record }));
+      if (records.length < limit || head === 0) {
+        return records.map((record) => ({ ...record }));
+      }
+      return records
+        .slice(head)
+        .concat(records.slice(0, head))
+        .map((record) => ({ ...record }));
     },
     clear() {
       records.splice(0, records.length);
+      head = 0;
     },
   };
 }

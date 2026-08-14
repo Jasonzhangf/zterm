@@ -25,6 +25,7 @@ import type {
   WorkspaceTab,
 } from '@zterm/shared';
 import { DEFAULT_BRIDGE_PORT } from './mobile-config';
+import { createDefaultShortcutActions } from './terminal-shortcut-actions';
 
 export { DEFAULT_BRIDGE_PORT } from './mobile-config';
 import type { Host, TerminalCell, TerminalIndexedLine } from '@zterm/shared/types';
@@ -196,6 +197,7 @@ export interface Session {
   bridgePort: number;        // 当前连接的 bridge port
   daemonHostId?: string;     // daemon 稳定身份；同一 tmux daemon 不因 transport path 改变
   sessionName: string;       // 当前 attach 的 tmux session
+  terminalBackend?: 'tmux' | 'herdr';
   authToken?: string;
   autoCommand?: string;
   title: string;             // 动态标题（来自 tmux / 远端 terminal）
@@ -344,6 +346,7 @@ export interface SessionGroupHistory {
   bridgeHost: string;
   bridgePort: number;
   daemonHostId?: string;
+  terminalBackend?: 'tmux' | 'herdr';
   authToken?: string;
   relayEndpointCandidates?: RelayEndpointCandidate[];
   sessionNames: string[];
@@ -360,6 +363,7 @@ export interface PersistedOpenTab {
   bridgePort: number;
   daemonHostId?: string;
   sessionName: string;
+  terminalBackend?: 'tmux' | 'herdr';
   authToken?: string;
   autoCommand?: string;
   customName?: string;
@@ -443,7 +447,7 @@ export { STORAGE_KEYS } from '@zterm/shared/types';
 
 export const DEFAULT_QUICK_ACTIONS: QuickAction[] = [];
 
-export const DEFAULT_SHORTCUT_ACTIONS: TerminalShortcutAction[] = [];
+export const DEFAULT_SHORTCUT_ACTIONS: TerminalShortcutAction[] = createDefaultShortcutActions();
 
 export const DEFAULT_WEBDAV_CONFIG: WebDAVConfig = {
   url: '',

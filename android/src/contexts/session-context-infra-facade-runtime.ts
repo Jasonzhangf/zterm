@@ -14,9 +14,10 @@ import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store'
 import type { BufferFrameAssemblyResourceState } from './session-buffer-frame-assembly';
 import { probeHostReachable } from '../lib/reconnect-host-probe';
 import type { Host, Session, SessionBufferState, SessionRenderBufferSnapshot, SessionScheduleState, TerminalBufferPayload } from '../lib/types';
+import type { NetworkIdentityRuntime } from '../lib/network-identity';
 import type { RecordSessionTxOptions } from './session-context-pull-runtime';
 import type { RevisionResetExpectation, SessionAction, SessionManagerState } from './session-context-core';
-import type { SessionPullPurpose } from './session-pull-state-helpers';
+import type { SessionPullPurpose } from '../lib/session-pull-state-helpers';
 import {
   buildTerminalMuxChannelBinary,
   buildTerminalMuxChannelMessage,
@@ -193,6 +194,8 @@ export function createSessionInfraFacadeRuntime(options: {
   wsUrl?: string;
   staleActivityMs: number;
   runtimeDebug: (event: string, payload?: Record<string, unknown>) => void;
+  /** Client network-generation owner; generation stamps route-health isolation. */
+  networkIdentity?: NetworkIdentityRuntime;
 }) {
   const applySessionAction = (action: SessionAction) => {
     applySessionActionRuntime({
@@ -503,6 +506,7 @@ export function createSessionInfraFacadeRuntime(options: {
       bridgeSettings: options.bridgeSettings,
       wsUrl: options.wsUrl,
       transportRole,
+      networkIdentity: options.networkIdentity,
     });
   };
 
@@ -512,6 +516,7 @@ export function createSessionInfraFacadeRuntime(options: {
       bridgeSettings: options.bridgeSettings,
       wsUrl: options.wsUrl,
       transportRole: 'session',
+      networkIdentity: options.networkIdentity,
     });
   };
 

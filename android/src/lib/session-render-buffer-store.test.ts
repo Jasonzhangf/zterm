@@ -82,6 +82,15 @@ describe('session-render-buffer-store', () => {
     expect(stored.cursor).toBeNull();
   });
 
+  it('accepts an explicitly immutable projection without cloning it again', () => {
+    const store = createSessionRenderBufferStore();
+    const snapshot = makeSnapshot([[makeCell('a')]], 1);
+
+    expect(store.setBuffer('s1', snapshot, { immutableProjection: true })).toBe(true);
+    expect(store.getSnapshot('s1').buffer.lines).toBe(snapshot.lines);
+    expect(store.getSnapshot('s1').buffer.lines[0]).toBe(snapshot.lines[0]);
+  });
+
   it('rejects a lower-revision render snapshot instead of publishing older rows over newer rows', () => {
     const runtimeDebug = vi.fn();
     const store = createSessionRenderBufferStore({ runtimeDebug });

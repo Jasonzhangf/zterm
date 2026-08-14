@@ -101,6 +101,10 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
   afterEach(() => {
     cleanup();
     vi.clearAllMocks();
+    tmuxSessionsMock.fetchTmuxSessions.mockReset();
+    tmuxSessionsMock.createTmuxSession.mockReset();
+    tmuxSessionsMock.killTmuxSession.mockReset();
+    tmuxSessionsMock.renameTmuxSession.mockReset();
   });
 
   it('auto-refreshes edit-group sessions for the concrete selected server target', async () => {
@@ -150,6 +154,64 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
     );
   });
 
+  it('refreshes the Herdr catalog for a Herdr target', async () => {
+    tmuxSessionsMock.fetchTmuxSessions.mockResolvedValueOnce(['hd-codex']);
+    const onOpenTmuxSession = vi.fn();
+
+    render(
+      <TmuxSessionPickerSheet
+        mode="quick-tab"
+        open
+        servers={[]}
+        bridgeSettings={{ ...bridgeSettings, traversalRelay: undefined }}
+        initialTarget={{ bridgeHost: '100.64.0.10', bridgePort: 3333, authToken: 'token-a', terminalBackend: 'herdr' }}
+        onClose={vi.fn()}
+        onOpenTmuxSession={onOpenTmuxSession}
+        onOpenMultipleTmuxSessions={vi.fn()}
+        onSelectCleanSession={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(tmuxSessionsMock.fetchTmuxSessions).toHaveBeenLastCalledWith(
+        expect.objectContaining({ terminalBackend: undefined }),
+        expect.objectContaining({ transportMode: 'auto' }),
+      );
+    });
+    expect(await screen.findByText('hd-codex')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    expect(onOpenTmuxSession).toHaveBeenCalledWith(
+      expect.objectContaining({ terminalBackend: 'herdr' }),
+      'hd-codex',
+    );
+  });
+
+  it('starts in Herdr mode when the drawer passes a Herdr target', async () => {
+    tmuxSessionsMock.fetchTmuxSessions.mockResolvedValueOnce(['hd-codex']);
+
+    render(
+      <TmuxSessionPickerSheet
+        mode="quick-tab"
+        open
+        servers={[]}
+        bridgeSettings={{ ...bridgeSettings, traversalRelay: undefined }}
+        initialTarget={{ bridgeHost: '100.64.0.10', bridgePort: 3333, authToken: 'token-a', terminalBackend: 'herdr' }}
+        onClose={vi.fn()}
+        onOpenTmuxSession={vi.fn()}
+        onOpenMultipleTmuxSessions={vi.fn()}
+        onSelectCleanSession={vi.fn()}
+      />,
+    );
+
+    await waitFor(() => {
+      expect(tmuxSessionsMock.fetchTmuxSessions).toHaveBeenLastCalledWith(
+        expect.objectContaining({ terminalBackend: undefined }),
+        expect.objectContaining({ transportMode: 'auto' }),
+      );
+    });
+    expect(await screen.findByText('hd-codex')).toBeTruthy();
+  });
+
   it('refreshes a direct Tailscale target even when Relay account devices are present', async () => {
     tmuxSessionsMock.fetchTmuxSessions.mockResolvedValueOnce(['zterm', 'server']);
     const onRemoteSessionsRefreshed = vi.fn();
@@ -191,6 +253,79 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
       expect.objectContaining({ bridgeHost: '100.66.1.82', relayHostId: '' }),
       ['server', 'zterm'],
     );
+  });
+
+  it('renames a remote tmux session through the app-owned dialog', async () => {
+    tmuxSessionsMock.fetchTmuxSessions.mockResolvedValue(['zterm']);
+    tmuxSessionsMock.renameTmuxSession.mockResolvedValueOnce(['renamed']);
+
+    render(
+      <TmuxSessionPickerSheet
+        mode="quick-tab"
+        open
+        servers={[]}
+        bridgeSettings={bridgeSettings}
+        initialTarget={{ bridgeHost: '100.66.1.82', bridgePort: 3333, authToken: 'token-direct' }}
+        onClose={vi.fn()}
+        onOpenTmuxSession={vi.fn()}
+        onOpenMultipleTmuxSessions={vi.fn()}
+        onSelectCleanSession={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Connect'));
+    await screen.findByText('zterm');
+    fireEvent.click(screen.getByRole('button', { name: '重命名 tmux session zterm' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '新的 tmux session 名称' }), {
+      target: { value: 'renamed' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '确认重命名' }));
+
+    await waitFor(() => {
+      expect(tmuxSessionsMock.renameTmuxSession).toHaveBeenCalledWith(
+        expect.objectContaining({ bridgeHost: '100.66.1.82', bridgePort: 3333 }),
+        bridgeSettings,
+        'zterm',
+        'renamed',
+      );
+    });
+  });
+
+  it('renames an open tab through the app-owned dialog', async () => {
+    tmuxSessionsMock.fetchTmuxSessions.mockResolvedValue(['zterm']);
+    const onRenameOpenTab = vi.fn();
+
+    render(
+      <TmuxSessionPickerSheet
+        mode="quick-tab"
+        open
+        servers={[]}
+        bridgeSettings={bridgeSettings}
+        openTabs={[{
+          id: 'tab-1',
+          sessionName: 'zterm',
+          customName: 'Local tab',
+          bridgeHost: '100.66.1.82',
+          bridgePort: 3333,
+        }]}
+        initialTarget={{ bridgeHost: '100.66.1.82', bridgePort: 3333, authToken: 'token-direct' }}
+        onClose={vi.fn()}
+        onRenameOpenTab={onRenameOpenTab}
+        onOpenTmuxSession={vi.fn()}
+        onOpenMultipleTmuxSessions={vi.fn()}
+        onSelectCleanSession={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Connect'));
+    await screen.findByText('Local tab');
+    fireEvent.click(screen.getByRole('button', { name: '重命名标签页 Local tab' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '新的标签页名称' }), {
+      target: { value: 'Renamed tab' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '确认重命名' }));
+
+    expect(onRenameOpenTab).toHaveBeenCalledWith('tab-1', 'Renamed tab');
   });
 
   it('refreshes an explicit Relay-only target through rtc candidates without requiring bridgeHost', async () => {
@@ -277,6 +412,44 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
       }),
       'main',
     );
+  });
+
+  it('opens a backend choice before creating a new session and routes Herdr explicitly', async () => {
+    tmuxSessionsMock.createTmuxSession.mockResolvedValueOnce([]);
+    const onOpenTmuxSession = vi.fn();
+
+    render(
+      <TmuxSessionPickerSheet
+        mode="quick-tab"
+        open
+        servers={[]}
+        bridgeSettings={{ ...bridgeSettings, traversalRelay: undefined }}
+        initialTarget={{ bridgeHost: '100.64.0.10', bridgePort: 3333, authToken: 'token-a' }}
+        onClose={vi.fn()}
+        onOpenTmuxSession={onOpenTmuxSession}
+        onOpenMultipleTmuxSessions={vi.fn()}
+        onSelectCleanSession={vi.fn()}
+      />,
+    );
+
+    fireEvent.change(screen.getByPlaceholderText('new-session'), { target: { value: 'herdr-demo' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+
+    expect(screen.getByRole('dialog', { name: '选择新 session backend' })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /tmux — existing tmux backend/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Herdr — official single-session backend/ }));
+
+    await waitFor(() => {
+      expect(tmuxSessionsMock.createTmuxSession).toHaveBeenCalledWith(
+        expect.objectContaining({ terminalBackend: 'herdr' }),
+        expect.objectContaining({ traversalRelay: undefined }),
+        'herdr-demo',
+      );
+      expect(onOpenTmuxSession).toHaveBeenCalledWith(
+        expect.objectContaining({ terminalBackend: undefined }),
+        'herdr-demo',
+      );
+    });
   });
 
   it('refreshes live sessions after selecting a Relay daemon instead of treating directory sessions as final truth', async () => {

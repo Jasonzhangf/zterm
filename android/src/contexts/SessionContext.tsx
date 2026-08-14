@@ -40,6 +40,8 @@ export function SessionProvider({
   bridgeSettings = DEFAULT_BRIDGE_SETTINGS,
   appForegroundActive,
   foregroundResumeEpoch,
+  latestSessionHostsRef,
+  networkIdentity,
 }: SessionProviderProps) {
   const [state, dispatch] = useReducer(sessionReducer, initialSessionManagerState);
   const stateRef = useRef(state);
@@ -100,6 +102,7 @@ export function SessionProvider({
     switchSession,
     moveSession,
     renameSession,
+    renameRemoteSession,
     reconnectSession,
     reconnectAllSessions,
     setLiveSessionIds,
@@ -131,9 +134,12 @@ export function SessionProvider({
     getSession,
     getSessionDebugMetrics,
     sendMessageRaw,
+    sendTargetHeartbeat,
   } = useSessionProviderAssemblies({
     appForegroundActive,
     foregroundResumeEpoch,
+    latestSessionHostsRef,
+    networkIdentity,
     state,
     stateRef,
     dispatch,
@@ -189,6 +195,7 @@ export function SessionProvider({
     switchSession,
     moveSession,
     renameSession,
+    renameRemoteSession,
     reconnectSession,
     reconnectAllSessions,
     setLiveSessionIds,
@@ -226,6 +233,7 @@ export function SessionProvider({
       remoteWindowMessageRuntimeRef.current.subscribe(handler)
     ),
     sendMessageRaw,
+    sendTargetHeartbeat,
     getPendingAttachmentCount: () => attachmentStoreRef.current.getPendingCount(),
     getPendingAttachments: () => attachmentStoreRef.current.getAll(),
     queryAttachmentHistory: () => {
@@ -243,6 +251,7 @@ export function SessionProvider({
     switchSession,
     moveSession,
     renameSession,
+    renameRemoteSession,
     reconnectSession,
     reconnectAllSessions,
     setLiveSessionIds,
@@ -280,6 +289,7 @@ export function SessionProvider({
       remoteWindowMessageRuntimeRef.current.subscribe(handler)
     ),
     sendMessageRaw,
+    sendTargetHeartbeat,
     getPendingAttachmentCount: () => attachmentStoreRef.current.getPendingCount(),
     getPendingAttachments: () => attachmentStoreRef.current.getAll(),
     queryAttachmentHistory: () => {
@@ -299,6 +309,7 @@ export function SessionProvider({
     ),
     moveSession: (id: string, toIndex: number) => contextRuntimeRef.current.moveSession(id, toIndex),
     renameSession: (id: string, name: string) => contextRuntimeRef.current.renameSession(id, name),
+    renameRemoteSession: (id: string, name: string) => contextRuntimeRef.current.renameRemoteSession(id, name),
     reconnectSession: (id: string) => contextRuntimeRef.current.reconnectSession(id),
     reconnectAllSessions: () => contextRuntimeRef.current.reconnectAllSessions(),
     recordBackgroundEnteredAt: (sessionIds: string[], at: number) => {
@@ -392,6 +403,7 @@ export function SessionProvider({
       return remoteWindowMessageRuntimeRef.current.subscribe(handler);
     },
     sendMessageRaw: (sessionId: string, msg: unknown) => contextRuntimeRef.current.sendMessageRaw(sessionId, msg),
+    sendTargetHeartbeat: () => contextRuntimeRef.current.sendTargetHeartbeat(),
   }), [fileTransferMessageRuntimeRef, remoteWindowMessageRuntimeRef]);
 
   const value: SessionContextValue = buildSessionContextValueRuntime({

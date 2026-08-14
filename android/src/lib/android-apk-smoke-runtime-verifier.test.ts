@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { evaluateApkSmokeTerminalRuntime, type ApkSmokeRuntimeLogs, type ApkSmokeRuntimeSnapshot } from './android-apk-smoke-runtime-verifier';
+import {
+  evaluateApkSmokeTerminalRuntime,
+  isApkSmokeClientInputSendScope,
+  type ApkSmokeRuntimeLogs,
+  type ApkSmokeRuntimeSnapshot,
+} from './android-apk-smoke-runtime-verifier';
 
 function buildHealthySnapshot(): ApkSmokeRuntimeSnapshot {
   return {
@@ -91,6 +96,12 @@ function buildHealthyLogs(): ApkSmokeRuntimeLogs {
 }
 
 describe('android apk smoke runtime verifier', () => {
+  it('accepts the current reliable input send event as the client transport send fact', () => {
+    expect(isApkSmokeClientInputSendScope('session.input.reliable-send')).toBe(true);
+    expect(isApkSmokeClientInputSendScope('session.input.send')).toBe(true);
+    expect(isApkSmokeClientInputSendScope('session.input.reliable-ack')).toBe(false);
+  });
+
   it('fails when app launched but no active client runtime snapshot reached daemon', () => {
     const verdict = evaluateApkSmokeTerminalRuntime(
       {

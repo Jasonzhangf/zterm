@@ -215,6 +215,40 @@ describe('tmux-sessions transport contract', () => {
     expect(createSocket.closeCalls).toBe(0);
   });
 
+  it('keeps rename and kill control requests backend-opaque', async () => {
+    const { renameTmuxSession, killTmuxSession } = await loadTmuxSessionsModule();
+    const herdrTarget = { ...target, terminalBackend: 'herdr' as const };
+
+    const renamePromise = renameTmuxSession(herdrTarget, bridgeSettings, 'old', 'new');
+    const socket = traversalHarness.MockTraversalSocket.latest();
+    socket.triggerOpen();
+    socket.triggerMuxReady();
+    expect(JSON.parse(socket.sent[1]!)).toMatchObject({
+      type: 'mux-target-message',
+      payload: {
+        message: {
+          type: 'tmux-rename-session',
+          payload: { sessionName: 'old', nextSessionName: 'new' },
+        },
+      },
+    });
+    socket.triggerSessions(['new']);
+    await expect(renamePromise).resolves.toEqual(['new']);
+
+    const killPromise = killTmuxSession(herdrTarget, bridgeSettings, 'new');
+    expect(JSON.parse(socket.sent[2]!)).toMatchObject({
+      type: 'mux-target-message',
+      payload: {
+        message: {
+          type: 'tmux-kill-session',
+          payload: { sessionName: 'new' },
+        },
+      },
+    });
+    socket.triggerSessions([]);
+    await expect(killPromise).resolves.toEqual([]);
+  });
+
   it('surfaces daemon-side tmux management errors explicitly', async () => {
     const { fetchTmuxSessions } = await loadTmuxSessionsModule();
     const promise = fetchTmuxSessions(target, bridgeSettings);
@@ -450,6 +484,19 @@ describe('tmux-sessions list cache', () => {
 
     const listRequests = socket.sent.filter((item) => item.includes('list-sessions'));
     expect(listRequests).toHaveLength(1);
+  });
+
+  it('uses one daemon-owned list catalog across tmux and Herdr targets', async () => {
+    const { fetchTmuxSessions } = await loadTmuxSessionsModule();
+    const tmuxRequest = fetchTmuxSessions(target, bridgeSettings);
+    const tmuxSocket = traversalHarness.MockTraversalSocket.latest();
+    tmuxSocket.triggerOpen();
+    tmuxSocket.triggerMuxReady();
+    tmuxSocket.triggerSessions(['tmux-only']);
+    await expect(tmuxRequest).resolves.toEqual(['tmux-only']);
+
+    const unifiedRequest = fetchTmuxSessions({ ...target, terminalBackend: 'herdr' }, bridgeSettings);
+    await expect(unifiedRequest).resolves.toEqual(['tmux-only']);
   });
 
   it('re-requests list-sessions after the short-TTL cache expires', async () => {

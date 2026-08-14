@@ -175,6 +175,41 @@ function buildHomeConnectionFromRelayDevice(
   };
 }
 
+export function mergeHostWithLatestProjection(
+  host: Host,
+  latestHosts: Host[],
+): Host {
+  if (!latestHosts || latestHosts.length === 0) {
+    return host;
+  }
+  const daemonHostId = host.daemonHostId?.trim() || host.relayHostId?.trim() || '';
+  const match = (
+    daemonHostId
+      ? latestHosts.find((candidate) => {
+        const candidateDaemonHostId = candidate.daemonHostId?.trim() || candidate.relayHostId?.trim() || '';
+        return candidateDaemonHostId && candidateDaemonHostId === daemonHostId;
+      })
+      : undefined
+  ) || latestHosts.find((candidate) => candidate.id === host.id);
+  if (!match) {
+    return host;
+  }
+  return {
+    ...host,
+    // The freshest direct endpoints win, but a relay-only entry (empty
+    // bridgeHost) must not blank out a working direct bridge host.
+    bridgeHost: match.bridgeHost?.trim() || host.bridgeHost,
+    bridgePort: match.bridgePort || host.bridgePort,
+    tailscaleHost: match.tailscaleHost?.trim() || host.tailscaleHost,
+    ipv4Host: match.ipv4Host?.trim() || host.ipv4Host,
+    ipv6Host: match.ipv6Host?.trim() || host.ipv6Host,
+    signalUrl: match.signalUrl?.trim() || host.signalUrl,
+    relayEndpointCandidates: match.relayEndpointCandidates?.length
+      ? match.relayEndpointCandidates
+      : host.relayEndpointCandidates,
+  };
+}
+
 export function projectHomeSavedConnections(
   hosts: Host[],
   bridgeSettings: BridgeSettings,

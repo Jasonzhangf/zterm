@@ -23,12 +23,25 @@ function mergeRelayEndpointCandidates(
   return [...byId.values()];
 }
 
-function toServerGroupKey(entry: Pick<SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort'>) {
-  return buildSessionSemanticOwnerKey({
+function toServerGroupKey(entry: Pick<SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'terminalBackend'>) {
+  const ownerKey = buildSessionSemanticOwnerKey({
     daemonHostId: entry.daemonHostId,
     bridgeHost: entry.bridgeHost,
     bridgePort: entry.bridgePort,
   });
+  return entry.terminalBackend === 'herdr'
+    ? `${ownerKey}::backend:herdr`
+    : ownerKey;
+}
+
+function sessionGroupOwnersMatch(
+  left: Pick<SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'terminalBackend'>,
+  right: Pick<SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'terminalBackend'>,
+) {
+  return (
+    (left.terminalBackend || 'tmux') === (right.terminalBackend || 'tmux')
+    && sessionSemanticOwnersMatch(left, right)
+  );
 }
 
 function normalizeGroupEntry(input: unknown): SessionGroupHistory | null {
@@ -41,6 +54,7 @@ function normalizeGroupEntry(input: unknown): SessionGroupHistory | null {
   const daemonHostId = typeof candidate.daemonHostId === 'string' && candidate.daemonHostId.trim()
     ? candidate.daemonHostId.trim()
     : undefined;
+  const terminalBackend = candidate.terminalBackend === 'herdr' ? 'herdr' : 'tmux';
   const sessionNames = Array.isArray(candidate.sessionNames)
     ? candidate.sessionNames.map((item) => (typeof item === 'string' ? item.trim() : '')).filter(Boolean)
     : [];
@@ -77,11 +91,13 @@ function normalizeGroupEntry(input: unknown): SessionGroupHistory | null {
           daemonHostId,
           bridgeHost,
           bridgePort,
+          terminalBackend,
         }),
     name: typeof candidate.name === 'string' && candidate.name.trim() ? candidate.name : `${daemonHostId || bridgeHost} · ${sortedSessionNames.length} sessions`,
     bridgeHost,
     bridgePort,
     daemonHostId,
+    terminalBackend,
     authToken: typeof candidate.authToken === 'string' ? candidate.authToken : undefined,
     ...(relayEndpointCandidates.length > 0 ? { relayEndpointCandidates } : {}),
     sessionNames: sortedSessionNames,
@@ -110,7 +126,7 @@ function collapseServerGroups(entries: SessionGroupHistory[]) {
   const collapsed: SessionGroupHistory[] = [];
 
   for (const entry of ordered) {
-    const existingIndex = collapsed.findIndex((item) => sessionSemanticOwnersMatch(item, entry));
+    const existingIndex = collapsed.findIndex((item) => sessionGroupOwnersMatch(item, entry));
     if (existingIndex >= 0) {
       const mergedRelayEndpointCandidates = mergeRelayEndpointCandidates(
         collapsed[existingIndex]?.relayEndpointCandidates,
@@ -161,14 +177,14 @@ export function useSessionHistoryStorage() {
   const setSessionGroupSelection = useCallback((group: Omit<SessionGroupHistory, 'id' | 'lastOpenedAt'>) => {
     setSessionGroups((current) => {
       const existing = current.find(
-        (item) => sessionSemanticOwnersMatch(item, group),
+        (item) => sessionGroupOwnersMatch(item, group),
       );
       const existingLastOpenedSessionName = existing?.lastOpenedSessionName?.trim() || '';
       const groupSessionNameSet = new Set(
         group.sessionNames.map((item) => item.trim()).filter(Boolean),
       );
       const filtered = current.filter(
-        (item) => !sessionSemanticOwnersMatch(item, group),
+        (item) => !sessionGroupOwnersMatch(item, group),
       );
 
       const normalized = normalizeGroupEntry({
@@ -187,10 +203,10 @@ export function useSessionHistoryStorage() {
     });
   }, []);
 
-  const deleteSessionGroup = useCallback((target: Pick<SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort'>) => {
+  const deleteSessionGroup = useCallback((target: Pick<SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'terminalBackend'>) => {
     setSessionGroups((current) => {
       const next = current.filter(
-        (item) => !sessionSemanticOwnersMatch(item, target),
+        (item) => !sessionGroupOwnersMatch(item, target),
       );
       saveJson(STORAGE_KEYS.SESSION_GROUPS, next);
       return next;
@@ -202,6 +218,7 @@ export function useSessionHistoryStorage() {
     bridgeHost: string;
     bridgePort: number;
     daemonHostId?: string;
+    terminalBackend?: 'tmux' | 'herdr';
     authToken?: string;
     relayEndpointCandidates?: RelayEndpointCandidate[];
   }, sessionName: string) => {
@@ -211,14 +228,15 @@ export function useSessionHistoryStorage() {
     }
 
     setSessionGroups((current) => {
-      const existing = current.find((item) => sessionSemanticOwnersMatch(item, target));
-      const filtered = current.filter((item) => !sessionSemanticOwnersMatch(item, target));
+      const existing = current.find((item) => sessionGroupOwnersMatch(item, target));
+      const filtered = current.filter((item) => !sessionGroupOwnersMatch(item, target));
       const normalized = normalizeGroupEntry({
         ...(existing || {}),
         name: target.name?.trim() || existing?.name || target.daemonHostId || target.bridgeHost || normalizedSessionName,
         bridgeHost: target.bridgeHost,
         bridgePort: target.bridgePort,
         daemonHostId: target.daemonHostId,
+        terminalBackend: target.terminalBackend,
         authToken: target.authToken ?? existing?.authToken,
         relayEndpointCandidates: mergeRelayEndpointCandidates(
           existing?.relayEndpointCandidates,
@@ -237,14 +255,14 @@ export function useSessionHistoryStorage() {
   }, []);
 
   const pruneSessionGroupSelectionToRemoteTruth = useCallback((
-    target: Pick<SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort'>,
+    target: Pick<SessionGroupHistory, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'terminalBackend'>,
     remoteSessionNames: string[],
   ) => {
     const normalizedRemoteSessionNames = new Set(normalizeRemoteTmuxSessionNames(remoteSessionNames));
     setSessionGroups((current) => {
       let changed = false;
       const next = current.flatMap((item) => {
-        if (!sessionSemanticOwnersMatch(item, target)) {
+        if (!sessionGroupOwnersMatch(item, target)) {
           return [item];
         }
         const nextMissingSessionNames = item.sessionNames.filter((sessionName) => !normalizedRemoteSessionNames.has(sessionName));

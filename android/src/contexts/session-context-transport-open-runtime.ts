@@ -331,14 +331,18 @@ export function handleReconnectHandshakeFailureRuntime(options: {
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
   emitSessionStatus: (sessionId: string, type: 'closed' | 'error', message?: string) => void;
   shouldContinueRetryableReconnect?: (sessionId: string) => boolean;
-  startReconnectAttempt: (sessionId: string) => void;
+  scheduleReconnect: (
+    sessionId: string,
+    message: string,
+    retryable: boolean,
+    reconnectOptions: { immediate: boolean; resetAttempt: boolean; force: boolean },
+  ) => void;
 }) {
   const currentReconnectRuntime = options.reconnectStore.read(options.sessionId);
   options.reconnectStore.clearTimer(options.sessionId);
   options.clearSupersededSockets(options.sessionId, true);
   const reconnectHandshakeFailurePlan = buildReconnectHandshakeFailurePlan({
     retryable: options.retryable,
-    currentAttempt: currentReconnectRuntime?.attempt || 0,
   });
   if (reconnectHandshakeFailurePlan.action === 'terminal-error') {
     options.reconnectStore.deleteRuntime(options.sessionId);
@@ -353,7 +357,7 @@ export function handleReconnectHandshakeFailureRuntime(options: {
   }
   const idleRuntime = {
     ...options.reconnectStore.createRuntime(),
-    attempt: reconnectHandshakeFailurePlan.nextAttempt,
+    attempt: currentReconnectRuntime?.attempt || 0,
     phase: 'idle' as const,
     nextDelayMs: null,
   };
@@ -362,7 +366,11 @@ export function handleReconnectHandshakeFailureRuntime(options: {
     buildSessionReconnectingFailureUpdates(options.message, idleRuntime.attempt),
   );
   options.reconnectStore.write(options.sessionId, idleRuntime);
-  options.startReconnectAttempt(options.sessionId);
+  options.scheduleReconnect(options.sessionId, options.message, true, {
+    immediate: true,
+    resetAttempt: false,
+    force: true,
+  });
 }
 
 export function buildReconnectTransportOpenIntentOptionsRuntime(options: {

@@ -106,6 +106,7 @@ describe('useOpenTabRuntime explicit resume gating', () => {
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
   });
 
   it('does not double-resume a target that already has a connecting runtime shell', () => {
@@ -141,7 +142,7 @@ describe('useOpenTabRuntime explicit resume gating', () => {
     expect(switchSession).toHaveBeenCalledTimes(1);
     expect(switchSession).toHaveBeenCalledWith('s2', { refreshSource: 'explicit-resume' });
     expect(resumeActiveSessionTransport).not.toHaveBeenCalled();
-    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBeNull();
+    expect(localStorage.getItem(STORAGE_KEYS.ACTIVE_SESSION)).toBe('s2');
   });
 
   it('keeps explicit resume for a disconnected target that needs transport reopen', () => {
@@ -226,5 +227,80 @@ describe('useOpenTabRuntime explicit resume gating', () => {
     }));
     expect((deps as any).sessionsRef.current.map((session: any) => session.id)).toEqual(['s1']);
     expect((deps as any).prioritySessionIdsRef.current).toEqual([null, 's1']);
+  });
+
+  it('does not audit historical session groups during cold launch with no open tabs', async () => {
+    const auditMock = vi.mocked(auditOpenTabsAgainstRemoteSessionsMock);
+    auditMock.mockClear();
+    localStorage.clear();
+
+    renderHook(() => useOpenTabRuntime({
+      bridgeSettings: { servers: [] } as any,
+      hosts: [],
+      hostsLoaded: true,
+      restoreSwitchReason: 'restore-sync',
+      sessions: [],
+      sessionGroups: [{
+        id: 'history-1',
+        name: 'historical',
+        bridgeHost: '100.75.122.121',
+        bridgePort: 3333,
+        daemonHostId: 'windows-office',
+        authToken: 'token-history',
+        sessionNames: ['zterm'],
+        lastOpenedAt: Date.now(),
+        missingSessionNames: [],
+      }],
+      runtimeActiveSessionId: null,
+      createSession: vi.fn(() => 'session-created'),
+      closeSession: vi.fn(),
+      switchSession: vi.fn(),
+      moveSession: vi.fn(),
+      renameSession: vi.fn(),
+      reconnectSession: vi.fn(),
+      resumeActiveSessionTransport: vi.fn(() => true),
+      notifyTargetNetworkSignal: vi.fn(),
+      clearSessionDraft: vi.fn(),
+      ensureTerminalPageVisible: vi.fn(),
+      setPageState: vi.fn(),
+      pruneSessionGroupSelectionToRemoteTruth: vi.fn(),
+    }));
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(auditMock).not.toHaveBeenCalled();
+  });
+
+  it('runs legacy storage cleanup once across rerenders', () => {
+    localStorage.setItem(STORAGE_KEYS.SAVED_TAB_LISTS, 'legacy');
+    localStorage.setItem('zterm:closed-tab-reuse-keys', 'legacy');
+    const removeItem = vi.spyOn(Storage.prototype, 'removeItem');
+    const options = {
+      bridgeSettings: { servers: [] } as any,
+      hosts: [],
+      hostsLoaded: true,
+      restoreSwitchReason: 'restore-sync' as const,
+      sessions: [] as any[],
+      sessionGroups: [],
+      runtimeActiveSessionId: null,
+      createSession: vi.fn(() => 'session-created'),
+      closeSession: vi.fn(),
+      switchSession: vi.fn(),
+      moveSession: vi.fn(),
+      renameSession: vi.fn(),
+      reconnectSession: vi.fn(),
+      resumeActiveSessionTransport: vi.fn(() => true),
+      notifyTargetNetworkSignal: vi.fn(),
+      clearSessionDraft: vi.fn(),
+      ensureTerminalPageVisible: vi.fn(),
+      setPageState: vi.fn(),
+      pruneSessionGroupSelectionToRemoteTruth: vi.fn(),
+    };
+
+    const { rerender } = renderHook(() => useOpenTabRuntime(options));
+    expect(removeItem).toHaveBeenCalledTimes(6);
+
+    rerender();
+
+    expect(removeItem).toHaveBeenCalledTimes(6);
   });
 });

@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { PaneTabs, resolvePaneProfile, type PaneTabDescriptor } from '@zterm/shared';
 import { getServerColorTone } from '../../lib/server-color';
 import { resolveTerminalOrientation } from '../../lib/terminal-viewport-metrics';
+import { RenameDialog } from './RenameDialog';
 
 const DOUBLE_TAP_MS = 280;
 
@@ -102,6 +103,7 @@ function TerminalHeaderComponent({
   const paneMenuRef = useRef<HTMLDivElement | null>(null);
   const tabTapRef = useRef<{ sessionId: string; timestamp: number } | null>(null);
   const [paneMenuState, setPaneMenuState] = useState<PaneMenuState | null>(null);
+  const [renameTarget, setRenameTarget] = useState<TerminalHeaderSessionItem | null>(null);
   const landscape = typeof window !== 'undefined' ? resolveTerminalOrientation() === 'landscape' : false;
   const paneProfile = resolvePaneProfile({ platform: 'phone', splitVisible, topInsetPx, landscape });
 
@@ -144,10 +146,7 @@ function TerminalHeaderComponent({
     if (!onRenameSession) {
       return;
     }
-    const next = window.prompt('Rename tab', session.customName || session.sessionName);
-    if (next !== null) {
-      onRenameSession(session.id, next);
-    }
+    setRenameTarget(session);
   };
 
   const handleTabTap = (session: TerminalHeaderSessionItem, paneId: string) => {
@@ -377,6 +376,20 @@ function TerminalHeaderComponent({
           );
         });
       })}
+      <RenameDialog
+        open={renameTarget !== null}
+        title="重命名标签页"
+        inputLabel="新的标签页名称"
+        initialValue={renameTarget?.customName || renameTarget?.sessionName || ''}
+        onCancel={() => setRenameTarget(null)}
+        onSubmit={(nextName) => {
+          const target = renameTarget;
+          setRenameTarget(null);
+          if (target) {
+            onRenameSession?.(target.id, nextName);
+          }
+        }}
+      />
     </div>
   );
 }

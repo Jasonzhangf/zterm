@@ -239,3 +239,9 @@ Negative:
 - Hot-tail structural fingerprint and authoritative range-patch tests do not exist yet.
 - `scripts/weak-network-byte-proxy.ts` and `scripts/terminal-performance-probe.ts` must replace the existing log-only weak-network scripts as the real byte-shaping and protocol-measurement gate. Completion requires byte-equivalence tests plus current daemon good/narrow/stall/disconnect evidence.
 - Current daemon logs predate final worktree code and cannot satisfy L2-L5 acceptance.
+# 2026-08-12 performance repair gates
+
+- `renderer_window` projection may pass an explicitly immutable projected snapshot to the render store after the gate has already performed equality/reuse checks. The store must not rescan the same rows/cells on that path.
+- Positive: a changed projected snapshot publishes once and preserves row identity for reused rows.
+- Negative: a stale/lower revision remains rejected; a mutable caller snapshot remains cloned/isolated unless the explicit immutable handoff option is used.
+- `resource.debug_channel` performance trace storage must use bounded O(1) append/eviction behavior. Positive: newest records survive at the limit; negative: old records are evicted and metadata-only validation remains enforced.

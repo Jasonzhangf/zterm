@@ -203,6 +203,90 @@ describe("TerminalQuickBar", () => {
     expect(onSendSequence).not.toHaveBeenCalled();
   });
 
+  it("lists built-in shortcuts and persists their row order with custom shortcuts", () => {
+    const onShortcutActionsChange = vi.fn();
+    renderQuickBar({
+      shortcutActions: [
+        { id: "preset-top-scroll-esc", label: "Esc", sequence: "\x1b", row: "top-scroll", order: 0 },
+        { id: "preset-top-scroll-bksp", label: "Bksp", sequence: "\x7f", row: "top-scroll", order: 1 },
+        { id: "custom-a", label: "A", sequence: "a", row: "top-scroll", order: 2 },
+      ],
+      onShortcutActionsChange,
+    });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "编辑第一行快捷按钮" }),
+    );
+
+    expect(screen.getByRole("button", { name: "上移 Esc" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "下移 Esc" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "查看 Esc 详情" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "编辑 Esc" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "删除 Esc" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "上移 A" }));
+
+    const persisted = onShortcutActionsChange.mock.calls[onShortcutActionsChange.mock.calls.length - 1]?.[0];
+    const topRow = persisted
+      .filter((action: { row: string }) => action.row === "top-scroll")
+      .map((action: { label: string }) => action.label);
+    expect(topRow.slice(0, 3)).toEqual(["Esc", "A", "Bksp"]);
+    expect(topRow).toEqual(["Esc", "A", "Bksp", "Tab", "Enter", "Space"]);
+  });
+
+  it("keeps bottom-row built-ins in their declared row after persisting an edit", () => {
+    const onShortcutActionsChange = vi.fn();
+    renderQuickBar({ onShortcutActionsChange });
+
+    fireEvent.click(
+      screen.getByRole("button", { name: "编辑第一行快捷按钮" }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "+ 添加单按键" }));
+    fireEvent.change(screen.getByPlaceholderText("输入单个字母/数字/符号"), {
+      target: { value: "a" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "加入" }));
+    fireEvent.click(screen.getByRole("button", { name: "添加快捷键" }));
+
+    const persisted = onShortcutActionsChange.mock.calls[onShortcutActionsChange.mock.calls.length - 1]?.[0];
+    const bottomRow = persisted
+      .filter((action: { row: string }) => action.row === "bottom-scroll")
+      .map((action: { label: string }) => action.label);
+    expect(bottomRow).toEqual(["继续", "Paste", "S-Tab", "S-Enter"]);
+  });
+
+  it("renders built-ins in their persisted order instead of preset order", () => {
+    renderQuickBar({
+      shortcutActions: [
+        { id: "preset-top-scroll-enter", label: "Enter", sequence: "\r", row: "top-scroll", order: 0 },
+        { id: "preset-top-scroll-esc", label: "Esc", sequence: "\x1b", row: "top-scroll", order: 1 },
+      ],
+    });
+
+    const firstShortcutTrack = screen
+      .getByTestId("terminal-quickbar-shell-rows")
+      .querySelectorAll<HTMLElement>('[data-quickbar-scroll-track="true"]')[0];
+    const labels = Array.from(
+      firstShortcutTrack.querySelectorAll<HTMLButtonElement>("button"),
+    ).map((button) => button.getAttribute("aria-label"));
+
+    expect(labels.slice(0, 2)).toEqual(["Enter", "Esc"]);
+  });
+
+  it("renders duplicate sequences only once across custom actions and rows", () => {
+    renderQuickBar({
+      shortcutActions: [
+        { id: "custom-paste-top", label: "Paste Top", sequence: "\x16", row: "top-scroll", order: 0 },
+        { id: "custom-paste-copy", label: "Paste Copy", sequence: "\x16", row: "top-scroll", order: 1 },
+        { id: "preset-bottom-scroll-paste", label: "Paste", sequence: "\x16", row: "bottom-scroll", order: 0 },
+      ],
+    });
+
+    expect(screen.getAllByRole("button", { name: "Paste Top" })).toHaveLength(1);
+    expect(screen.queryByRole("button", { name: "Paste Copy" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Paste" })).toBeNull();
+  });
+
   it("projects the shortcut editor overlay above the surrounding terminal chrome", () => {
     renderQuickBar();
 

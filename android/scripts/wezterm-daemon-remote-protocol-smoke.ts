@@ -57,7 +57,9 @@ class MessageInbox {
         reject,
         timer: setTimeout(() => {
           this.waiters.delete(waiter);
-          const bufferedTypes = this.messages.map((message) => message.type).join(',') || 'none';
+          const bufferedTypes = this.messages
+            .map((message) => message.type === 'error' ? `${message.type}:${message.payload.message}` : message.type)
+            .join(',') || 'none';
           reject(new Error(`timed out waiting for daemon websocket message: ${label}; buffered=${bufferedTypes}`));
         }, timeoutMs),
       };

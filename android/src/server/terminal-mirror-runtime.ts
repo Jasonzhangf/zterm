@@ -5,7 +5,6 @@ import type {
   BridgeServerMessage as ServerMessage,
 } from '@zterm/shared/protocol';
 import type {
-  TerminalBufferPayload,
   TerminalCell,
   TerminalCursorState,
 } from '@zterm/shared/types';
@@ -19,6 +18,10 @@ import { sliceIndexedLines } from './canonical-buffer';
 import { detachMirrorSubscriber, releaseMirrorSubscribers } from './mirror-lifecycle';
 import { resolveTerminalLiveSyncDelay } from './terminal-performance-scheduler';
 import { readTerminalTransportBackpressureSnapshot } from './terminal-transport-runtime';
+import {
+  buildBufferSyncMessageText,
+  splitBufferSyncPayloadMessages,
+} from './terminal-buffer-sync-wire';
 import type {
   TerminalSession,
   SessionMirror,
@@ -51,7 +54,7 @@ export interface TerminalMirrorRuntimeDeps {
     changedRanges: Array<{ startIndex: number; endIndex: number }>,
   ) => Extract<ServerMessage, { type: 'buffer-sync' }>['payload'] | null;
   sanitizeSessionName: (input?: string) => string;
-  getMirrorKey: (sessionName: string) => string;
+  getMirrorKey: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
   normalizeTerminalCols: (cols: number | undefined) => number;
   normalizeTerminalRows: (rows: number | undefined) => number;
   resolveAttachGeometry: (options: {
@@ -60,9 +63,10 @@ export interface TerminalMirrorRuntimeDeps {
     existingTmuxGeometry: TerminalGeometry | null;
     previousSessionGeometry: TerminalGeometry;
   }) => TerminalGeometry;
-  readTmuxPaneMetrics: (sessionName: string) => TmuxPaneMetrics;
-  resizeBackendSession?: (sessionName: string, geometry: TerminalGeometry) => void;
-  assertTmuxSessionExists: (sessionName: string) => void;
+  readTmuxPaneMetrics: (sessionName: string, backend?: 'tmux' | 'herdr') => TmuxPaneMetrics;
+  resizeBackendSession?: (sessionName: string, geometry: TerminalGeometry, backend?: 'tmux' | 'herdr') => void;
+  assertTmuxSessionExists: (sessionName: string, backend?: 'tmux' | 'herdr') => void;
+  resolveTerminalSessionBackend?: (sessionName: string) => 'tmux' | 'herdr';
   captureMirrorAuthoritativeBufferFromTmux: (mirror: SessionMirror) => Promise<boolean>;
   mirrorBufferChanged: (
     mirror: SessionMirror,
@@ -73,15 +77,16 @@ export interface TerminalMirrorRuntimeDeps {
     left: TerminalCursorState | null | undefined,
     right: TerminalCursorState | null | undefined,
   ) => boolean;
-  writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean) => boolean;
+  writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean, backend?: 'tmux' | 'herdr') => boolean;
   enqueueLiveMirrorInput: (
     sessionName: string,
     payload: string,
     appendEnter: boolean,
     shouldWrite?: () => boolean,
+    backend?: 'tmux' | 'herdr',
   ) => Promise<boolean>;
-  disposeLiveMirrorInputBatch: (sessionName: string, reason: string) => number;
-  writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean) => void;
+  disposeLiveMirrorInputBatch: (sessionName: string, reason: string, backend?: 'tmux' | 'herdr') => number;
+  writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean, backend?: 'tmux' | 'herdr') => void;
   autoCommandDelayMs: number;
   waitMs: (delayMs: number) => Promise<void>;
   logTimePrefix: () => string;
@@ -130,7 +135,7 @@ export interface TerminalMirrorRuntime {
   refreshAdaptiveWidthLeaseHeartbeat: (session: TerminalSession) => void;
   releaseAdaptiveWidthLease: (session: TerminalSession, reason: string) => void;
   handleInput: (session: TerminalSession, data: string, shouldWrite?: () => boolean) => Promise<boolean>;
-  disposeLiveMirrorInputBatch: (sessionName: string, reason: string) => number;
+  disposeLiveMirrorInputBatch: (sessionName: string, reason: string, backend?: 'tmux' | 'herdr') => number;
 }
 
 const MIRROR_LIVE_SYNC_ACTIVE_MS = 33;
@@ -144,103 +149,6 @@ const SUBSCRIBER_PENDING_RANGE_LIMIT = 64;
 const SUBSCRIBER_PENDING_SPAN_LINE_LIMIT = TERMINAL_BUFFER_SYNC_FRAME_MAX_SPAN_LINES;
 const SUBSCRIBER_PENDING_AGE_LIMIT_MS = 15_000;
 const SUBSCRIBER_BUFFER_SYNC_MAX_BYTES = TERMINAL_BUFFER_SYNC_MESSAGE_MAX_BYTES;
-
-function getWireLineAbsoluteIndex(line: TerminalBufferPayload['lines'][number]) {
-  if (!line) {
-    return null;
-  }
-  if ('i' in line && Number.isFinite(line.i)) {
-    return Math.max(0, Math.floor(line.i));
-  }
-  if ('index' in line && Number.isFinite(line.index)) {
-    return Math.max(0, Math.floor(line.index));
-  }
-  return null;
-}
-
-function buildBufferSyncMessageText(payload: TerminalBufferPayload) {
-  return JSON.stringify({ type: 'buffer-sync', payload });
-}
-
-function splitBufferSyncPayloadMessages(payload: TerminalBufferPayload, maxBytes: number) {
-  const lines = Array.isArray(payload.lines) ? payload.lines : [];
-  const fullText = buildBufferSyncMessageText(payload);
-  if (Buffer.byteLength(fullText, 'utf8') <= maxBytes || lines.length <= 1) {
-    return [{ payload, text: fullText }];
-  }
-
-  const messages: Array<{ payload: TerminalBufferPayload; text: string }> = [];
-  let chunkLines: TerminalBufferPayload['lines'] = [];
-  let chunkStartIndex: number | null = null;
-  let chunkEndIndex: number | null = null;
-  const frameStartIndex = Math.max(0, Math.floor(payload.startIndex || 0));
-  const frameEndIndex = Math.max(frameStartIndex, Math.floor(payload.endIndex || frameStartIndex));
-  const buildChunkPayload = (
-    startIndex: number,
-    endIndex: number,
-    nextLines: TerminalBufferPayload['lines'],
-    chunkIndex: number,
-    chunkCount: number,
-  ): TerminalBufferPayload => ({
-    ...payload,
-    startIndex,
-    endIndex,
-    frameStartIndex,
-    frameEndIndex,
-    frameChunkIndex: chunkIndex,
-    frameChunkCount: chunkCount,
-    lines: nextLines,
-  });
-
-  const flushChunk = () => {
-    if (chunkLines.length === 0 || chunkStartIndex === null || chunkEndIndex === null) {
-      return;
-    }
-    const chunkPayload = buildChunkPayload(chunkStartIndex, chunkEndIndex, chunkLines, messages.length, 9999);
-    messages.push({ payload: chunkPayload, text: buildBufferSyncMessageText(chunkPayload) });
-    chunkLines = [];
-    chunkStartIndex = null;
-    chunkEndIndex = null;
-  };
-
-  for (const line of lines) {
-    const lineIndex = getWireLineAbsoluteIndex(line);
-    if (lineIndex === null) {
-      continue;
-    }
-    const candidateStartIndex: number = chunkStartIndex === null ? lineIndex : chunkStartIndex;
-    const candidateEndIndex: number = Math.max(chunkEndIndex === null ? lineIndex + 1 : chunkEndIndex, lineIndex + 1);
-    const candidateLines: TerminalBufferPayload['lines'] = [...chunkLines, line];
-    const candidatePayload = buildChunkPayload(candidateStartIndex, candidateEndIndex, candidateLines, messages.length, 9999);
-    const candidateText = buildBufferSyncMessageText(candidatePayload);
-    if (chunkLines.length > 0 && Buffer.byteLength(candidateText, 'utf8') > maxBytes) {
-      flushChunk();
-      chunkStartIndex = lineIndex;
-      chunkEndIndex = lineIndex + 1;
-      chunkLines = [line];
-      continue;
-    }
-    chunkStartIndex = candidateStartIndex;
-    chunkEndIndex = candidateEndIndex;
-    chunkLines = candidateLines;
-  }
-  flushChunk();
-
-  if (messages.length <= 1) {
-    return messages.length > 0 ? messages : [{ payload, text: fullText }];
-  }
-
-  return messages.map((message, index) => {
-    const chunkPayload = buildChunkPayload(
-      message.payload.startIndex,
-      message.payload.endIndex,
-      message.payload.lines,
-      index,
-      messages.length,
-    );
-    return { payload: chunkPayload, text: buildBufferSyncMessageText(chunkPayload) };
-  });
-}
 
 export function resolvePerSubscriberTransportSnapshot(
   sessions: Map<string, TerminalSession>,
@@ -514,10 +422,11 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     return count;
   }
 
-  function createMirror(sessionName: string): SessionMirror {
+  function createMirror(sessionName: string, backend: 'tmux' | 'herdr' = 'tmux'): SessionMirror {
     const mirror: SessionMirror = {
-      key: sessionName,
+      key: deps.getMirrorKey(sessionName, backend),
       sessionName,
+      backend,
       scratchBridge: null,
       lifecycle: 'idle',
       cols: deps.defaultViewport.cols,
@@ -550,7 +459,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       consecutiveFailures: 0,
       subscribers: new Set(),
     };
-    mirrors.set(sessionName, mirror);
+    mirrors.set(mirror.key, mirror);
     return mirror;
   }
 
@@ -587,7 +496,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     // R3: drop any pending input items for the dying mirror before subscribers
     // are released or the mirror record is removed. Items already in flight
     // resolve through their own tmux spawn; queued items must NOT survive.
-    deps.disposeLiveMirrorInputBatch(mirror.sessionName, `destroy:${reason}`);
+    deps.disposeLiveMirrorInputBatch(mirror.sessionName, `destroy:${reason}`, mirror.backend);
 
     mirror.lifecycle = 'destroyed';
 
@@ -1077,9 +986,9 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirror.adaptiveWidthBaselineGeometry = null;
   }
 
-  function readCurrentTmuxGeometry(sessionName: string): TerminalGeometry | null {
+  function readCurrentTmuxGeometry(sessionName: string, backend: 'tmux' | 'herdr' = 'tmux'): TerminalGeometry | null {
     try {
-      const metrics = deps.readTmuxPaneMetrics(sessionName);
+      const metrics = deps.readTmuxPaneMetrics(sessionName, backend);
       return {
         cols: deps.normalizeTerminalCols(metrics.paneCols),
         rows: deps.normalizeTerminalRows(metrics.paneRows),
@@ -1098,7 +1007,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     const cols = deps.normalizeTerminalCols(targetCols);
     if (!mirror.adaptiveWidthBaselineGeometry) {
       mirror.adaptiveWidthBaselineGeometry =
-        readCurrentTmuxGeometry(mirror.sessionName) || {
+        readCurrentTmuxGeometry(mirror.sessionName, mirror.backend) || {
           cols: deps.normalizeTerminalCols(mirror.baselineCols || mirror.cols),
           rows: deps.normalizeTerminalRows(mirror.baselineRows || mirror.rows),
         };
@@ -1110,7 +1019,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       deps.resizeBackendSession(mirror.sessionName, {
         cols,
         rows: targetRows,
-      });
+      }, mirror.backend);
     } else {
       deps.runTmux(['resize-window', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), '-x', String(cols)]);
     }
@@ -1130,12 +1039,12 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
         deps.resizeBackendSession(mirror.sessionName, {
           cols: deps.normalizeTerminalCols(baseline.cols),
           rows: deps.normalizeTerminalRows(baseline.rows),
-        });
+        }, mirror.backend);
       } else {
         deps.runTmux(['resize-window', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), '-x', String(deps.normalizeTerminalCols(baseline.cols))]);
       }
     }
-    if (!deps.resizeBackendSession) {
+    if (mirror.backend === 'tmux') {
       deps.runTmux(['set-window-option', '-u', '-t', deps.buildExactTmuxSessionTarget(mirror.sessionName), 'window-size']);
     }
     console.log(`[${deps.logTimePrefix()}] adaptive width released`, {
@@ -1222,7 +1131,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     mirror.lifecycle = 'booting';
 
     try {
-      deps.assertTmuxSessionExists(mirror.sessionName);
+      deps.assertTmuxSessionExists(mirror.sessionName, mirror.backend);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       mirror.lifecycle = 'failed';
@@ -1300,7 +1209,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       const command = options.autoCommand.endsWith('\r') ? options.autoCommand.slice(0, -1) : options.autoCommand;
       setTimeout(() => {
         if (mirror.lifecycle === 'ready') {
-          deps.writeToTmuxSession(mirror.sessionName, command, true);
+          deps.writeToTmuxSession(mirror.sessionName, command, true, mirror.backend);
           scheduleMirrorLiveSync(mirror, 0);
         }
       }, deps.autoCommandDelayMs);
@@ -1309,13 +1218,26 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
 
   async function attachTmux(session: TerminalSession, payload: TerminalAttachPayload) {
     const nextSessionName = deps.sanitizeSessionName(payload.sessionName);
-    const nextMirrorKey = deps.getMirrorKey(nextSessionName);
+    const requestedBackend = payload.backend
+      || session.backend
+      || deps.resolveTerminalSessionBackend?.(nextSessionName);
+    if (!requestedBackend) {
+      throw new Error(`terminal session backend resolver unavailable for ${nextSessionName}`);
+    }
+    if (session.backend && session.backend !== requestedBackend) {
+      throw new Error(`session backend changed after channel allocation: ${session.backend} -> ${requestedBackend}`);
+    }
+    session.backend = requestedBackend;
+    const nextMirrorKey = deps.getMirrorKey(nextSessionName, requestedBackend);
     const existingMirror = mirrors.get(nextMirrorKey) || null;
+    if (existingMirror && existingMirror.backend !== requestedBackend) {
+      throw new Error(`session name ${nextSessionName} is already owned by ${existingMirror.backend}`);
+    }
     const existingTmuxGeometry = existingMirror
       ? null
       : (() => {
         try {
-          const metrics = deps.readTmuxPaneMetrics(nextSessionName);
+          const metrics = deps.readTmuxPaneMetrics(nextSessionName, requestedBackend);
           return {
             cols: metrics.paneCols,
             rows: metrics.paneRows,
@@ -1370,7 +1292,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
 
     let mirror = existingMirror;
     if (!mirror) {
-      mirror = createMirror(nextSessionName);
+      mirror = createMirror(nextSessionName, session.backend);
     }
     mirror.subscribers.add(session.id);
     if (payload.widthMode === 'adaptive-phone') {
@@ -1455,7 +1377,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     }
     if (mirror.lifecycle === 'ready') {
       mirror.consecutiveFailures = 0;
-      const wrote = await deps.enqueueLiveMirrorInput(mirror.sessionName, data, false, shouldWrite);
+      const wrote = await deps.enqueueLiveMirrorInput(mirror.sessionName, data, false, shouldWrite, mirror.backend);
       if (wrote) {
         mirror.lastLiveActivityAt = Date.now();
         scheduleMirrorLiveSync(mirror, 0);
@@ -1482,7 +1404,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     refreshAdaptiveWidthLeaseHeartbeat,
     releaseAdaptiveWidthLease,
     handleInput,
-    disposeLiveMirrorInputBatch: (sessionName, reason) =>
-      deps.disposeLiveMirrorInputBatch(sessionName, `destroy:${reason}`),
+    disposeLiveMirrorInputBatch: (sessionName, reason, backend) =>
+      deps.disposeLiveMirrorInputBatch(sessionName, `destroy:${reason}`, backend),
   };
 }

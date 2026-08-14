@@ -2,13 +2,14 @@ import { buildBridgeUrlFromTarget } from './bridge-url';
 
 interface TmuxRequest {
   type: 'list-sessions' | 'tmux-create-session' | 'tmux-rename-session' | 'tmux-kill-session';
-  payload?: Record<string, string>;
+  payload?: Record<string, string> & { terminalBackend?: 'tmux' | 'herdr' };
 }
 
 export interface BridgeTarget {
   bridgeHost: string;
   bridgePort: number;
   authToken?: string;
+  terminalBackend?: 'tmux' | 'herdr';
 }
 
 function sendTmuxRequest(target: BridgeTarget, message: TmuxRequest, overrideUrl?: string) {
@@ -63,11 +64,18 @@ function sendTmuxRequest(target: BridgeTarget, message: TmuxRequest, overrideUrl
 }
 
 export function fetchTmuxSessions(target: BridgeTarget, overrideUrl?: string) {
-  return sendTmuxRequest(target, { type: 'list-sessions' }, overrideUrl);
+  const terminalBackend = target.terminalBackend || 'tmux';
+  return sendTmuxRequest(target, {
+    type: 'list-sessions',
+    ...(terminalBackend === 'tmux' ? {} : { payload: { terminalBackend } }),
+  }, overrideUrl);
 }
 
 export function createTmuxSession(target: BridgeTarget, sessionName: string, overrideUrl?: string) {
-  return sendTmuxRequest(target, { type: 'tmux-create-session', payload: { sessionName } }, overrideUrl);
+  return sendTmuxRequest(target, {
+    type: 'tmux-create-session',
+    payload: { sessionName, terminalBackend: target.terminalBackend || 'tmux' },
+  }, overrideUrl);
 }
 
 export function renameTmuxSession(
@@ -76,13 +84,20 @@ export function renameTmuxSession(
   nextSessionName: string,
   overrideUrl?: string,
 ) {
+  const payload: { sessionName: string; nextSessionName: string; terminalBackend?: 'tmux' | 'herdr' } = {
+    sessionName,
+    nextSessionName,
+  };
+  if (target.terminalBackend === 'herdr') payload.terminalBackend = 'herdr';
   return sendTmuxRequest(
     target,
-    { type: 'tmux-rename-session', payload: { sessionName, nextSessionName } },
+    { type: 'tmux-rename-session', payload },
     overrideUrl,
   );
 }
 
 export function killTmuxSession(target: BridgeTarget, sessionName: string, overrideUrl?: string) {
-  return sendTmuxRequest(target, { type: 'tmux-kill-session', payload: { sessionName } }, overrideUrl);
+  const payload: { sessionName: string; terminalBackend?: 'tmux' | 'herdr' } = { sessionName };
+  if (target.terminalBackend === 'herdr') payload.terminalBackend = 'herdr';
+  return sendTmuxRequest(target, { type: 'tmux-kill-session', payload }, overrideUrl);
 }

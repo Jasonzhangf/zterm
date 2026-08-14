@@ -7,13 +7,8 @@ import type { HerdrCanonicalSnapshot } from './herdr-frame-canonicalizer';
 
 export interface HerdrBackendRuntimeOptions {
   executable: string;
-  workspacePrefix?: string;
   maxMirrorLines?: number;
 }
-
-// The shared backend-session shape still has a workspace field for tmux/WezTerm
-// compatibility. Herdr layout identity must never cross that boundary.
-export const HERDR_SINGLE_SESSION_WORKSPACE = 'herdr-single-session';
 
 interface ManagedHerdrSession extends WezTermBackendSession {
   herdrSessionName: string;
@@ -32,6 +27,11 @@ function waitForHerdrReadinessWindow(milliseconds: number) {
 }
 
 function waitForHerdrProcessExit(process: ChildProcessWithoutNullStreams, timeoutMs: number) {
+  // ChildProcess#killed records that the requested signal was delivered. Herdr
+  // server processes can remain as an unreaped zombie while the daemon is
+  // synchronously closing a detached child, so polling kill(pid, 0) alone can
+  // report a false non-exit after an explicit SIGTERM/SIGKILL.
+  if (process.killed || process.exitCode !== null) return true;
   if (!process.pid) return process.killed;
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -113,7 +113,10 @@ export function mapHerdrCanonicalSnapshot(
 }
 
 export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): WezTermBackendRuntime {
-  const prefix = options.workspacePrefix || 'zterm-herdr-';
+  // Herdr is an external compatibility source, like tmux. Every running
+  // official Herdr named session is discoverable verbatim; zterm must not
+  // reserve or filter a name prefix. Herdr layout/workspace state still never
+  // enters zterm truth.
   const maxMirrorLines = Math.max(1, Math.floor(options.maxMirrorLines || 1000));
   const sessions = new Map<string, ManagedHerdrSession>();
 
@@ -147,7 +150,7 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
     const sessionName = (input?.sessionName || 'cmd').trim();
     if (!sessionName) throw new Error('Herdr sessionName is required');
     if (sessions.has(sessionName)) throw new Error(`Herdr session already exists: ${sessionName}`);
-    const herdrSessionName = `${prefix}${sessionName}`;
+    const herdrSessionName = sessionName;
     const serverProcess = startServer(herdrSessionName);
     let root;
     try {
@@ -168,7 +171,6 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
     const managed: ManagedHerdrSession = {
       sessionName,
       paneId: root.paneId,
-      workspace: HERDR_SINGLE_SESSION_WORKSPACE,
       title: sessionName,
       cwd: root.cwd,
       cols: 80,
@@ -192,17 +194,23 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     const response = JSON.parse(raw) as { sessions?: Array<{ name?: string; running?: boolean }> };
+    const runningNames = new Set<string>();
     for (const entry of response.sessions || []) {
-      if (!entry.running || typeof entry.name !== 'string' || !entry.name.startsWith(prefix)) continue;
-      const sessionName = entry.name.slice(prefix.length);
-      if (!sessionName || sessions.has(sessionName)) continue;
+      if (!entry.running || typeof entry.name !== 'string') continue;
+      const sessionName = entry.name;
+      if (!sessionName) continue;
+      runningNames.add(sessionName);
+      if (sessions.has(sessionName)) continue;
       discoverSession(sessionName);
+    }
+    for (const sessionName of sessions.keys()) {
+      if (!runningNames.has(sessionName)) sessions.delete(sessionName);
     }
     return Array.from(sessions.values());
   }
 
   function discoverSession(sessionName: string) {
-    const herdrSessionName = `${prefix}${sessionName}`;
+    const herdrSessionName = sessionName;
     const resolved = resolveHerdrTerminalFromNamedSession({
       executable: options.executable,
       sessionName: herdrSessionName,
@@ -210,7 +218,6 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
     const managed: ManagedHerdrSession = {
       sessionName,
       paneId: resolved.paneId,
-      workspace: HERDR_SINGLE_SESSION_WORKSPACE,
       title: sessionName,
       cwd: process.cwd(),
       cols: 80,

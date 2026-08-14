@@ -2,6 +2,7 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  listOnlineTraversalRelayDaemonDevices,
   projectOnlineTraversalRelayDaemonDevicesFromAccount,
   readOnlineTraversalRelayDaemonDevices,
 } from './traversal-relay-devices';
@@ -44,7 +45,7 @@ describe('traversal-relay-devices truth', () => {
             client: { connected: true, lastSeenAt: '2026-05-06T00:00:00Z' },
             daemon: {
               connected: true,
-              lastSeenAt: '2026-05-06T00:00:00Z',
+              lastSeenAt: new Date().toISOString(),
               hostId: 'daemon-host-claw',
               version: '1.2.3',
             },
@@ -113,7 +114,7 @@ describe('traversal-relay-devices truth', () => {
       client: { connected: false, lastSeenAt: '2026-08-01T00:00:00Z' },
       daemon: {
         connected: true,
-        lastSeenAt: '2026-08-01T00:00:00Z',
+        lastSeenAt: new Date().toISOString(),
         hostId: 'mac-studio',
         version: '0.1.3',
       },
@@ -202,10 +203,10 @@ describe('traversal-relay-devices truth', () => {
         client: { connected: false, lastSeenAt: '2026-08-10T00:00:01Z' },
         daemon: {
           connected: true,
-          lastSeenAt: '2026-08-10T00:00:01Z',
+          lastSeenAt: new Date().toISOString(),
           hostId: 'mac-studio',
           version: '0.1.3',
-          sessions: [{ name: 'shell', updatedAt: '2026-08-10T00:00:01Z' }],
+          sessions: [{ name: 'shell', updatedAt: new Date().toISOString() }],
         },
       }],
     } as any);
@@ -216,4 +217,85 @@ describe('traversal-relay-devices truth', () => {
       daemon: { hostId: 'mac-studio', sessions: [{ name: 'shell' }] },
     });
   });
+});
+
+  it('filters a stale connected daemon (half-open relay residue) while keeping a fresh one', () => {
+    // 半开残留：旧 wterm 0.1.0 实例 connected=true 但 lastSeenAt 已是 10 小时前
+    const stale = {
+      deviceId: 'Macstudio.local-daemon',
+      deviceName: 'Macstudio.local',
+      platform: 'darwin',
+      appVersion: '0.1.0',
+      updatedAt: '2026-08-10T04:32:36.126Z',
+      client: { connected: false, lastSeenAt: '2026-08-10T04:32:36.126Z' },
+      daemon: {
+        connected: true,
+        lastSeenAt: '2026-08-10T04:32:36.126Z',
+        hostId: 'c5f61277-c563-47e7-a82f-a63141b577a5',
+        version: '0.1.0',
+      },
+    };
+    const fresh = {
+      deviceId: 'mac-studio',
+      deviceName: 'Mac Studio',
+      platform: 'darwin',
+      appVersion: '0.1.3',
+      updatedAt: new Date().toISOString(),
+      client: { connected: false, lastSeenAt: new Date().toISOString() },
+      daemon: {
+        connected: true,
+        lastSeenAt: new Date().toISOString(),
+        hostId: 'mac-studio',
+        version: '0.1.3',
+      },
+    };
+    const projected = projectOnlineTraversalRelayDaemonDevicesFromAccount({
+      directory: null,
+      devices: [stale, fresh],
+    } as any);
+
+    expect(projected.map((device) => device.deviceId)).toEqual(['mac-studio']);
+  });
+
+it('keeps a stale connected daemon that this client recently connected to (daemon not yet upgraded to periodic publish)', () => {
+  // 未升级 daemon：lastSeenAt 停在启动时刻（陈旧），但本客户端 1 分钟前刚连通过该 daemon
+  const staleButRecentlyConnected = {
+    deviceId: 'mac-studio',
+    deviceName: 'Mac Studio',
+    platform: 'darwin',
+    appVersion: '0.1.3',
+    updatedAt: '2026-08-10T04:32:36.126Z',
+    client: { connected: false, lastSeenAt: '2026-08-10T04:32:36.126Z' },
+    daemon: {
+      connected: true,
+      lastSeenAt: '2026-08-10T04:32:36.126Z',
+      hostId: 'mac-studio',
+      version: '0.1.3',
+    },
+  };
+  const now = Date.now();
+  const recentConnections = new Map<string, number>([['mac-studio', now - 60_000]]);
+  const online = listOnlineTraversalRelayDaemonDevices([staleButRecentlyConnected], now, recentConnections);
+  expect(online.map((device) => device.deviceId)).toEqual(['mac-studio']);
+});
+
+it('still filters a stale connected daemon the client never connected to', () => {
+  const staleNeverConnected = {
+    deviceId: 'Macstudio.local-daemon',
+    deviceName: 'Macstudio.local',
+    platform: 'darwin',
+    appVersion: '0.1.0',
+    updatedAt: '2026-08-10T04:32:36.126Z',
+    client: { connected: false, lastSeenAt: '2026-08-10T04:32:36.126Z' },
+    daemon: {
+      connected: true,
+      lastSeenAt: '2026-08-10T04:32:36.126Z',
+      hostId: 'c5f61277-c563-47e7-a82f-a63141b577a5',
+      version: '0.1.0',
+    },
+  };
+  const now = Date.now();
+  const recentConnections = new Map<string, number>();
+  const online = listOnlineTraversalRelayDaemonDevices([staleNeverConnected], now, recentConnections);
+  expect(online).toHaveLength(0);
 });

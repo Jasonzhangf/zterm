@@ -9,6 +9,10 @@ feature and outside daemon truth.
 
 ## Required evidence
 
+- The new-session picker renders exactly the explicit `tmux` and `Herdr` choices; selecting Herdr sends `terminalBackend: 'herdr'` only as a creation-time adapter intent, then opens the created session by name through the daemon-owned unified catalog.
+- Normal session-list, persisted-tab restore, mux-channel-open, rename, and kill requests are backend-opaque. The daemon unions tmux and configured running Herdr names and resolves the adapter by exact name; zero matches and same-name ambiguity fail explicitly.
+- File-transfer operations are outside the Herdr single terminal-surface contract. They must return the explicit `herdr_file_transfer_unsupported` error and must never call a tmux write/path owner for a Herdr session.
+
 - Full frame initializes the stateful VT baseline.
 - `full=false` delta requires the same attachment geometry and exact next
   attachment-local sequence.

@@ -6,6 +6,7 @@ function makeJob(overrides: Partial<ScheduleJob> = {}): ScheduleJob {
   return {
     id: overrides.id || 'job-1',
     targetSessionName: overrides.targetSessionName || 'main',
+    terminalBackend: overrides.terminalBackend,
     label: overrides.label || 'daily status',
     enabled: overrides.enabled ?? true,
     payload: overrides.payload || { text: 'status', appendEnter: true },
@@ -33,7 +34,7 @@ describe('schedule-dispatch', () => {
     );
 
     expect(result).toEqual({ ok: true });
-    expect(writeToLiveMirror).toHaveBeenCalledWith('main', 'uptime\r', false);
+    expect(writeToLiveMirror).toHaveBeenCalledWith('main', 'uptime\r', false, undefined);
     expect(writeToTmuxSession).not.toHaveBeenCalled();
   });
 
@@ -47,7 +48,7 @@ describe('schedule-dispatch', () => {
     );
 
     expect(result).toEqual({ ok: true });
-    expect(writeToTmuxSession).toHaveBeenCalledWith('main', 'echo ok', false);
+    expect(writeToTmuxSession).toHaveBeenCalledWith('main', 'echo ok', false, undefined);
   });
 
   it('explicitly disables invalid jobs that do not have a target session', () => {
@@ -60,6 +61,54 @@ describe('schedule-dispatch', () => {
     );
 
     expect(result).toEqual({ ok: false, message: 'missing target session', disable: true });
+  });
+
+  it('rejects Herdr targets before either write path so a same-name tmux session cannot receive the command', () => {
+    const writeToLiveMirror = vi.fn(() => true);
+    const writeToTmuxSession = vi.fn();
+
+    const result = dispatchScheduledJob(
+      { writeToLiveMirror, writeToTmuxSession, isHerdrSession: () => true },
+      makeJob({ targetSessionName: 'hd-codex', terminalBackend: 'herdr' }),
+    );
+
+    expect(result).toEqual({
+      ok: false,
+      message: 'Herdr single-session backend does not support schedule commands',
+      disable: true,
+    });
+    expect(writeToLiveMirror).not.toHaveBeenCalled();
+    expect(writeToTmuxSession).not.toHaveBeenCalled();
+  });
+
+  it('keeps a same-named tmux job on the tmux write path', () => {
+    const writeToLiveMirror = vi.fn(() => false);
+    const writeToTmuxSession = vi.fn();
+    const isHerdrSession = vi.fn(() => true);
+
+    const result = dispatchScheduledJob(
+      { writeToLiveMirror, writeToTmuxSession, isHerdrSession },
+      makeJob({ targetSessionName: 'same-name', terminalBackend: 'tmux' }),
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(isHerdrSession).not.toHaveBeenCalled();
+    expect(writeToTmuxSession).toHaveBeenCalledWith('same-name', 'status', true, undefined);
+  });
+
+  it('keeps ordinary tmux jobs independent from Herdr catalog availability', () => {
+    const writeToLiveMirror = vi.fn(() => false);
+    const writeToTmuxSession = vi.fn();
+    const isHerdrSession = vi.fn(() => false);
+
+    const result = dispatchScheduledJob(
+      { writeToLiveMirror, writeToTmuxSession, isHerdrSession },
+      makeJob({ targetSessionName: 'tmux-main' }),
+    );
+
+    expect(result).toEqual({ ok: true });
+    expect(isHerdrSession).not.toHaveBeenCalled();
+    expect(writeToTmuxSession).toHaveBeenCalledWith('tmux-main', 'status', true, undefined);
   });
 
   it('surfaces tmux errors and only disables jobs for terminal-not-found classes of failure', () => {

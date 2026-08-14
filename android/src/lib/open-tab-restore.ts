@@ -33,6 +33,7 @@ interface RemoteSessionOwnerTarget {
   bridgeHost: string;
   bridgePort: number;
   authToken?: string;
+  terminalBackend?: 'tmux' | 'herdr';
 }
 
 interface ManagedRemoteSessionTarget {
@@ -42,6 +43,18 @@ interface ManagedRemoteSessionTarget {
   bridgeHost: string;
   bridgePort: number;
   createdAt?: number;
+  terminalBackend?: 'tmux' | 'herdr';
+}
+
+function normalizeTerminalBackend(value: 'tmux' | 'herdr' | undefined) {
+  return value === 'herdr' ? 'herdr' : 'tmux';
+}
+
+export function buildRemoteSessionOwnerKey(target: Pick<RemoteSessionOwnerTarget, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'terminalBackend'>) {
+  const ownerKey = buildSessionSemanticOwnerKey(target);
+  return normalizeTerminalBackend(target.terminalBackend) === 'herdr'
+    ? `${ownerKey}::backend:herdr`
+    : ownerKey;
 }
 
 function resolveReusableManagedRemoteSessionForTarget(
@@ -52,6 +65,7 @@ function resolveReusableManagedRemoteSessionForTarget(
   const matches = sessions.filter((session) => (
     session.state !== 'closed'
     && sessionSemanticOwnersMatch(session, target)
+    && normalizeTerminalBackend(session.terminalBackend) === normalizeTerminalBackend(target.terminalBackend)
   ));
   if (matches.length === 0) {
     return null;
@@ -117,6 +131,7 @@ function resolveCanonicalRemoteSessionOwnerHost(
   const endpointMatches = hosts.filter((host) => (
     host.bridgeHost.trim() === target.bridgeHost.trim()
     && host.bridgePort === target.bridgePort
+    && normalizeTerminalBackend((host as Pick<Host, 'terminalBackend'>).terminalBackend) === normalizeTerminalBackend(target.terminalBackend)
   ));
   const targetOwnerId = target.daemonHostId?.trim() || '';
   if (targetOwnerId) {
@@ -144,17 +159,18 @@ function resolveCanonicalRemoteSessionOwnerHost(
 }
 
 export function resolveRemoteSessionOwnerTargets(options: {
-  targets: Array<Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'authToken'>>;
-  hosts?: Array<Pick<Host, 'daemonHostId' | 'relayHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'pinned' | 'lastConnected' | 'createdAt'>>;
+  targets: Array<Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'terminalBackend'>>;
+  hosts?: Array<Pick<Host, 'daemonHostId' | 'relayHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'terminalBackend' | 'pinned' | 'lastConnected' | 'createdAt'>>;
 }) {
   const resolvedTargetsByOwner = new Map<string, RemoteSessionOwnerTarget>();
   const preferredHostsByOwner = new Map<string, Pick<Host, 'daemonHostId' | 'relayHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'pinned' | 'lastConnected' | 'createdAt'>>();
 
   for (const host of options.hosts || []) {
-    const ownerKey = buildSessionSemanticOwnerKey({
+    const ownerKey = buildRemoteSessionOwnerKey({
       daemonHostId: host.daemonHostId || host.relayHostId,
       bridgeHost: host.bridgeHost,
       bridgePort: host.bridgePort,
+      terminalBackend: host.terminalBackend,
     });
     const current = preferredHostsByOwner.get(ownerKey) || null;
     preferredHostsByOwner.set(ownerKey, pickPreferredOwnerHost(current as Host | null, host as Host));
@@ -167,11 +183,13 @@ export function resolveRemoteSessionOwnerTargets(options: {
       bridgeHost: canonicalHost.bridgeHost,
       bridgePort: canonicalHost.bridgePort,
       authToken: canonicalHost.authToken || target.authToken,
+      terminalBackend: target.terminalBackend,
     } : target;
-    const ownerKey = buildSessionSemanticOwnerKey({
+    const ownerKey = buildRemoteSessionOwnerKey({
       daemonHostId: ownerTarget.daemonHostId,
       bridgeHost: ownerTarget.bridgeHost,
       bridgePort: ownerTarget.bridgePort,
+      terminalBackend: ownerTarget.terminalBackend,
     });
     if (resolvedTargetsByOwner.has(ownerKey)) {
       continue;
@@ -183,6 +201,7 @@ export function resolveRemoteSessionOwnerTargets(options: {
         bridgeHost: preferredHost.bridgeHost,
         bridgePort: preferredHost.bridgePort,
         authToken: preferredHost.authToken || ownerTarget.authToken,
+        terminalBackend: ownerTarget.terminalBackend,
       });
       continue;
     }
@@ -191,6 +210,7 @@ export function resolveRemoteSessionOwnerTargets(options: {
       bridgeHost: ownerTarget.bridgeHost,
       bridgePort: ownerTarget.bridgePort,
       authToken: ownerTarget.authToken,
+      terminalBackend: ownerTarget.terminalBackend,
     });
   }
 
@@ -198,10 +218,10 @@ export function resolveRemoteSessionOwnerTargets(options: {
 }
 
 export async function fetchRemoteTmuxSessionNamesByOwner(options: {
-  targets: Array<Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'authToken'>>;
+  targets: Array<Pick<PersistedOpenTab, 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'terminalBackend'>>;
   bridgeSettings: TraversalSettings;
-  hosts?: Array<Pick<Host, 'daemonHostId' | 'relayHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'pinned' | 'lastConnected' | 'createdAt'>>;
-  openSessions?: Array<Pick<Session, 'id' | 'state' | 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'createdAt'>>;
+  hosts?: Array<Pick<Host, 'daemonHostId' | 'relayHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'terminalBackend' | 'pinned' | 'lastConnected' | 'createdAt'>>;
+  openSessions?: Array<Pick<Session, 'id' | 'state' | 'daemonHostId' | 'bridgeHost' | 'bridgePort' | 'terminalBackend' | 'createdAt'>>;
   prioritySessionIds?: Array<string | null | undefined>;
   manageTmuxSessionsOnOpenTransport?: (
     sessionId: string,
@@ -216,10 +236,11 @@ export async function fetchRemoteTmuxSessionNamesByOwner(options: {
   });
 
   const fetchResults = await Promise.all(resolvedTargets.map(async (target) => {
-    const targetKey = buildSessionSemanticOwnerKey({
+    const targetKey = buildRemoteSessionOwnerKey({
       daemonHostId: target.daemonHostId,
       bridgeHost: target.bridgeHost,
       bridgePort: target.bridgePort,
+      terminalBackend: target.terminalBackend,
     });
     const reusableSession = options.manageTmuxSessionsOnOpenTransport && options.openSessions
       ? resolveReusableManagedRemoteSessionForTarget(
@@ -251,6 +272,7 @@ export async function fetchRemoteTmuxSessionNamesByOwner(options: {
           daemonHostId: target.daemonHostId,
           authToken: target.authToken,
           relayHostId: target.daemonHostId,
+          terminalBackend: target.terminalBackend,
         },
         traversalSettings,
       ), OPEN_TAB_REMOTE_RESTORE_TIMEOUT_MS, `fetchTmuxSessions:${targetKey}`));
@@ -275,10 +297,11 @@ export async function fetchRemoteTmuxSessionNamesByOwner(options: {
   // Mark failed targets to distinguish "confirmed empty" from "fetch failed"
   // Empty string array signals "fetch failed / unknown" - audit must NOT use this to close tabs
   for (const resolvedTarget of resolvedTargets) {
-    const targetKey = buildSessionSemanticOwnerKey({
+    const targetKey = buildRemoteSessionOwnerKey({
       daemonHostId: resolvedTarget.daemonHostId,
       bridgeHost: resolvedTarget.bridgeHost,
       bridgePort: resolvedTarget.bridgePort,
+      terminalBackend: resolvedTarget.terminalBackend,
     });
     if (!fetchedOwnerKeys.has(targetKey) && !sessionNamesByTarget.has(targetKey)) {
       sessionNamesByTarget.set(targetKey, []);
@@ -319,7 +342,7 @@ export function filterRestorableOpenTabsByRemoteSessionNames(options: {
 export async function filterRestorableOpenTabsByRemoteTmuxSessions(options: {
   tabs: PersistedOpenTab[];
   bridgeSettings: TraversalSettings;
-  hosts?: Array<Pick<Host, 'daemonHostId' | 'relayHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'pinned' | 'lastConnected' | 'createdAt'>>;
+  hosts?: Array<Pick<Host, 'daemonHostId' | 'relayHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'terminalBackend' | 'pinned' | 'lastConnected' | 'createdAt'>>;
 }): Promise<RestoreTabAvailabilityResult> {
   if (options.tabs.length === 0) {
     return {
@@ -344,7 +367,7 @@ export async function resolveRemoteRestorableOpenTabState(options: {
   tabs: PersistedOpenTab[];
   activeSessionId: string | null;
   bridgeSettings: TraversalSettings;
-  hosts?: Array<Pick<Host, 'daemonHostId' | 'relayHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'pinned' | 'lastConnected' | 'createdAt'>>;
+  hosts?: Array<Pick<Host, 'daemonHostId' | 'relayHostId' | 'bridgeHost' | 'bridgePort' | 'authToken' | 'terminalBackend' | 'pinned' | 'lastConnected' | 'createdAt'>>;
 }): Promise<RemoteRestorableOpenTabState> {
   const availability = await filterRestorableOpenTabsByRemoteTmuxSessions({
     tabs: options.tabs,

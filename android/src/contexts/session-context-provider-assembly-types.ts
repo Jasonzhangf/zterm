@@ -9,6 +9,7 @@ import type { SessionBufferStore } from '../lib/session-buffer-store';
 import type { SessionDebugMetricsStore } from '../lib/session-debug-metrics-store';
 import type { SessionHeadStore } from '../lib/session-head-store';
 import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
+import type { NetworkIdentityRuntime } from '../lib/network-identity';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
 import type { SessionRenderGate } from '../lib/session-render-gate';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
@@ -47,7 +48,7 @@ import type {
   SessionTargetNetworkProbeRuntime,
   SessionTargetNetworkSignal,
 } from './session-context-target-network-probe-runtime';
-import type { SessionPullStates } from './session-pull-state-helpers';
+import type { SessionPullStates } from '../lib/session-pull-state-helpers';
 import type { SessionAttachmentStore } from '../lib/session-attachment-store';
 import type { SessionAttachmentFetchRuntime } from '../lib/session-attachment-fetch-runtime';
 import type { PendingSessionTransportOpenIntent } from './session-transport-open-helpers';
@@ -122,7 +123,18 @@ export interface SessionProviderAssembliesSharedOptions {
   bridgeSettings: BridgeSettings;
   terminalCacheLines: number;
   wsUrl?: string;
+  /**
+   * Mutable bridge to the freshest home projection (device list) used to
+   * refresh stale direct endpoints (tailscale / ipv4 / bridge IP) before a
+   * reconnect probe after a network change. Optional; when absent reconnect
+   * keeps using the cached host truth.
+   */
+  latestSessionHostsRef?: MutableRefObject<Host[] | undefined>;
   refs: SessionProviderRuntimeRefs;
+  /** Client network-generation owner; generation isolates route health across
+   *  WiFi/cellular/VPN/IP changes. Optional; when absent route health keeps
+   *  the legacy single bucket. */
+  networkIdentity?: NetworkIdentityRuntime;
 }
 
 export interface SessionProviderCoreAssembliesResult {
@@ -133,6 +145,7 @@ export interface SessionProviderCoreAssembliesResult {
   flushRuntimeDebugLogs: () => void;
   clearReconnectForSession: (sessionId: string) => void;
   writeSessionTransportHost: (sessionId: string, host: Host) => SessionTransportRuntime | null | undefined | unknown;
+  writeSessionTerminalChannelName: (sessionId: string, sessionName: string) => SessionTerminalChannelRuntime | null | undefined;
   writeSessionTransportToken: (sessionId: string, token: string | null) => string | null;
   scheduleReconnect: (
     sessionId: string,

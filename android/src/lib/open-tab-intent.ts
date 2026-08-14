@@ -117,6 +117,7 @@ export function materializeOpenTabRuntimeSessions(
     bridgePort: tab.bridgePort,
     daemonHostId: tab.daemonHostId,
     sessionName: tab.sessionName,
+    terminalBackend: tab.terminalBackend || 'tmux',
     authToken: tab.authToken,
     autoCommand: tab.autoCommand,
     title: tab.customName?.trim() || tab.sessionName,
@@ -319,6 +320,30 @@ export function renameOpenTabIntentSession(
         ? {
             ...tab,
             customName: normalizedName || undefined,
+          }
+        : tab
+    )),
+    currentState.activeSessionId,
+  );
+}
+
+// 远端 tmux rename-session 成功后的 open-tab 身份迁移：tmux session 名真源已变，
+// sessionName（reuse key / reconnect 身份）必须同步为 nextName；已有本地 customName 保持独立。
+export function renameRemoteOpenTabIntentSession(
+  currentState: OpenTabIntentState,
+  sessionId: string,
+  nextName: string,
+): OpenTabIntentState {
+  const normalizedName = nextName.trim();
+  return normalizeOpenTabIntentState(
+    currentState.tabs.map((tab) => (
+      tab.sessionId === sessionId
+        ? {
+            ...tab,
+            sessionName: normalizedName || tab.sessionName,
+            customName: tab.customName && tab.customName !== tab.sessionName
+              ? tab.customName
+              : normalizedName || undefined,
           }
         : tab
     )),

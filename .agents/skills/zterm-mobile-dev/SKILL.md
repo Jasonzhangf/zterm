@@ -60,6 +60,11 @@ description: "zterm Android 客户端开发工作流 - 基于 Capacitor + @jsons
 - 每次 Android 功能修复 / bug 修复 / renderer / daemon-client 协议 / UI 行为改动，只要需要 Jason 复测或会影响真机行为，完成前必须构建可升级 APK 包。
 - 例外：`desktop.remote_window_stream` 的视频主链尚未完成时，不为中间态 catalog / overlay shell / debug 诊断改动反复构建 APK；先完成真实远程视频（ScreenCaptureKit/WebRTC frame stream 可见）并通过对应 gates，再构建 APK 给 Jason 测。除非 Jason 明确要求止血包或升级恢复包，否则不要在远程视频完成前编包。
 - 默认命令：`pnpm --dir android run build:android`。
+- 设备数据保护是 Android 测试的硬门禁：安装新 APK 前必须保留当前应用数据，使用 `adb install -r` 或应用内 OTA；禁止用 `adb uninstall`、`adb shell pm clear`、删除应用数据目录或任何等价操作来解决版本覆盖/降级/测试问题。只有 Jason 明确授权且已完成配置导出或可验证备份后，才允许执行不可逆的数据清理。
+- 每次真机测试前，先确认配置恢复路径：优先使用应用内“导出配置”生成的 `zterm-config.json`，并保存导出文件路径、时间和 SHA-256；没有导出/备份证据就不能卸载、清数据或覆盖测试设备。测试只需要新数据时，使用独立设备、独立 Android 用户或 Jason 明确批准的隔离测试环境。
+- 覆盖安装后必须核对 `package:dataDir`、`firstInstallTime`/`lastUpdateTime` 和关键配置仍可读取；若配置缺失，立即停止后续安装/发布动作并报告，不得静默重置、重新初始化或把空配置当作成功。
+- `.build-meta.json` 是持久化版本真源，禁止手工编辑、跳号、回退或为了绕过 Android 版本检查抬高 `buildNumber`。版本分配只能由 `scripts/bump-build-version.mjs` 完成；构建前后记录 `buildNumber`、APK 内 `versionName/versionCode`、manifest 和 SHA-256，发现不一致必须停止。
+- OTA 发布是不可逆的外部状态变更：构建、bundle verify、三通道 GET/HEAD/hash 校验只能证明产物正确，不等于获得发布授权。没有 Jason 的明确发布授权，不得执行 Relay `scp`、覆盖 `latest.json`、发布 stable channel 或重启生产服务。
 - 构建结果必须进入升级通道：`android/update-dist/latest.json`、`android/update-dist/zterm-<version>.apk`、`android/update-dist/zterm-latest-debug.apk`、`~/.zterm/updates/latest.json`、`~/.zterm/updates/zterm-<version>.apk` sha/version 对齐。
 - Android 交付闭环必须同时覆盖 **Tailscale daemon update route** 和 **public Relay update route**：构建后不仅要有本地文件，还必须验证 `http://127.0.0.1:3333/updates/latest.json`、`http://$(tailscale ip -4):3333/updates/latest.json`、`https://relay.codewhisper.cc:18443/relay/updates/latest.json` 都返回新版本；三个通道的 APK 下载 sha256 必须等于 manifest `sha256`。如果 127/Tailscale `/health` 或 `/updates/latest.json` 超时，先做 service-scoped `zterm-daemon restart` 后重测，禁止只说文件已复制。
 - 汇报时必须给出 `versionName`、`versionCode`、APK 路径和 sha256；不能只说测试通过。

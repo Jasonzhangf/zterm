@@ -235,7 +235,7 @@ describe('relay device stream runtime', () => {
     const directory = [makeDevice({
       daemon: {
         connected: true,
-        lastSeenAt: '2026-07-27T00:00:00.000Z',
+        lastSeenAt: new Date().toISOString(),
         hostId: 'mac-studio',
         version: '0.1.3',
         endpoints: [{
@@ -243,16 +243,16 @@ describe('relay device stream runtime', () => {
           kind: 'relay-rtc',
           relayHostId: 'mac-studio',
           authRequired: true,
-          lastSeenAt: '2026-07-27T00:00:00.000Z',
+          lastSeenAt: new Date().toISOString(),
         }],
-        sessions: [{ name: 'zterm', updatedAt: '2026-07-27T00:00:00.000Z' }],
+        sessions: [{ name: 'zterm', updatedAt: new Date().toISOString() }],
       },
     })];
     const presence = [makeDevice({
-      updatedAt: '2026-07-27T00:00:01.000Z',
+      updatedAt: new Date().toISOString(),
       daemon: {
         connected: true,
-        lastSeenAt: '2026-07-27T00:00:01.000Z',
+        lastSeenAt: new Date().toISOString(),
         hostId: 'mac-studio',
         version: '0.1.3',
       },

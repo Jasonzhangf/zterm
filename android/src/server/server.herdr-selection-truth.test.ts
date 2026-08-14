@@ -8,5 +8,8 @@ describe('Herdr daemon selection boundary', () => {
     expect(source).toContain("TERMINAL_BACKEND_KIND === 'herdr'");
     expect(source).toContain('createHerdrBackendRuntime');
     expect(source).toContain("TERMINAL_BACKEND_KIND === 'herdr'");
+    expect(source).toContain('terminalControlRuntime.writeToLiveMirror(sessionName, payload, appendEnter, backend)');
+    expect(source).toContain('terminalControlRuntime.enqueueLiveMirrorInput(sessionName, payload, appendEnter, shouldWrite, backend)');
+    expect(source).toContain('terminalControlRuntime.writeToTmuxSession(sessionName, payload, appendEnter, backend)');
   });
 });

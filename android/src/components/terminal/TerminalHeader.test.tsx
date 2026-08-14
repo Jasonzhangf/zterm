@@ -171,6 +171,34 @@ describe('TerminalHeader', () => {
     expect(onSwitchSession).not.toHaveBeenCalled();
   });
 
+  it('renames the active tab through the app-owned dialog', () => {
+    const session = makeSession();
+    const onRenameSession = vi.fn();
+    const { container } = render(
+      <TerminalHeader
+        sessions={[toHeaderSession(session)]}
+        activeSession={toHeaderSession(session)}
+        topInsetPx={0}
+        onBack={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenTabManager={vi.fn()}
+        onSwitchSession={vi.fn()}
+        onRenameSession={onRenameSession}
+        onCloseSession={vi.fn()}
+      />,
+    );
+
+    const tab = container.querySelector('[data-tab-id="session-1"]') as HTMLElement;
+    fireEvent.click(tab);
+    fireEvent.click(tab);
+    fireEvent.change(screen.getByRole('textbox', { name: '新的标签页名称' }), {
+      target: { value: 'renamed-tab' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '确认重命名' }));
+
+    expect(onRenameSession).toHaveBeenCalledWith('session-1', 'renamed-tab');
+  });
+
   it('toggles relay mode from the active path badge without adding header width', () => {
     const session = makeSession();
     session.resolvedPath = 'tailscale';

@@ -29,7 +29,7 @@ import {
   orderSessionsForReconnect,
   shouldAutoReconnectSession,
   shouldOpenManagedSessionTransport,
-} from './session-reconnect-helpers';
+} from '../lib/session-reconnect-helpers';
 import {
   deletePendingSessionTransportOpenIntent,
   hasPendingSessionTransportOpenIntent,
@@ -56,7 +56,9 @@ interface CreateSessionOptions {
   sessionId?: string;
 }
 
-export type ReconnectSessionRuntimeOptions = Record<string, never>;
+export interface ReconnectSessionRuntimeOptions {
+  preserveAttempt?: boolean;
+}
 
 function readEffectiveSessionTransportReadyState(options: {
   sessionId: string;
@@ -200,6 +202,7 @@ export function createSessionRuntime(options: {
       || options.host.bridgePort !== existingSession.bridgePort
       || (options.host.daemonHostId || options.host.relayHostId || undefined) !== existingSession.daemonHostId
       || resolvedSessionName !== existingSession.sessionName
+      || (options.host.terminalBackend || 'tmux') !== (existingSession.terminalBackend || 'tmux')
       || options.host.authToken !== existingSession.authToken
       || options.host.autoCommand !== existingSession.autoCommand
       || (options.createOptions?.customName?.trim() && (
@@ -253,6 +256,7 @@ export function createSessionRuntime(options: {
     bridgePort: options.host.bridgePort,
     daemonHostId: options.host.daemonHostId || options.host.relayHostId,
     sessionName: resolvedSessionName,
+    terminalBackend: options.host.terminalBackend || 'tmux',
     authToken: options.host.authToken,
     autoCommand: options.host.autoCommand,
     title: options.createOptions?.customName?.trim() || resolvedSessionName,
@@ -393,6 +397,40 @@ export function renameSessionRuntime(options: {
   });
 }
 
+// 远端 tmux rename-session 成功后的客户端身份迁移：tmux session 名字真源已变，
+// 必须同步 sessionName（reconnect/drawer/tab 复用都以它为键），并同步 customName/title。
+export function renameRemoteSessionRuntime(options: {
+  sessionId: string;
+  name: string;
+  sessions: Session[];
+  updateSessionSync: (id: string, updates: Partial<Session>) => void;
+  readSessionTransportHost?: (sessionId: string) => Host | null;
+  writeSessionTransportHost?: (sessionId: string, host: Host) => unknown;
+  writeSessionTerminalChannelName?: (sessionId: string, sessionName: string) => unknown;
+}) {
+  const trimmed = options.name.trim();
+  const current = options.sessions.find((session) => session.id === options.sessionId);
+  if (!current) {
+    return;
+  }
+  const previousSessionName = current.sessionName;
+  const nextName = trimmed || previousSessionName;
+  const localCustomName = current.customName?.trim();
+  options.updateSessionSync(options.sessionId, {
+    sessionName: nextName,
+    customName: localCustomName && localCustomName !== previousSessionName ? localCustomName : nextName,
+    title: localCustomName && localCustomName !== previousSessionName ? localCustomName : nextName,
+  });
+  const transportHost = options.readSessionTransportHost?.(options.sessionId);
+  if (transportHost && options.writeSessionTransportHost) {
+    options.writeSessionTransportHost(options.sessionId, {
+      ...transportHost,
+      sessionName: nextName,
+    });
+  }
+  options.writeSessionTerminalChannelName?.(options.sessionId, nextName);
+}
+
 export function reconnectSessionRuntime(options: {
   sessionId: string;
   reconnectOptions?: ReconnectSessionRuntimeOptions;
@@ -420,7 +458,10 @@ export function reconnectSessionRuntime(options: {
     options?: { immediate?: boolean; resetAttempt?: boolean; force?: boolean },
   ) => void;
 }) {
-  options.clearReconnectForSession(options.sessionId);
+  const preserveAttempt = options.reconnectOptions?.preserveAttempt === true;
+  if (!preserveAttempt) {
+    options.clearReconnectForSession(options.sessionId);
+  }
   const current = options.refs.stateRef.current.sessions.find((session) => session.id === options.sessionId);
   const knownHost = options.readSessionTransportHost(options.sessionId);
   const targetKey = options.readSessionTargetKey(options.sessionId);
@@ -436,6 +477,7 @@ export function reconnectSessionRuntime(options: {
     bridgeHost: current!.bridgeHost,
     bridgePort: current!.bridgePort,
     sessionName: current!.sessionName,
+    terminalBackend: current!.terminalBackend || 'tmux',
     authToken: current!.authToken,
     authType: 'password',
     tags: [],
@@ -503,11 +545,16 @@ export function reconnectSessionRuntime(options: {
   options.refs.reconnectStore.clearManualClosed(options.sessionId);
   options.writeSessionTransportHost(options.sessionId, primeState.transportHost);
   options.updateSessionSync(options.sessionId, primeState.sessionUpdates);
-  options.scheduleReconnect(options.sessionId, 'manual reconnect', true, {
-    immediate: true,
-    resetAttempt: true,
-    force: true,
-  });
+  options.scheduleReconnect(
+    options.sessionId,
+    preserveAttempt ? 'automatic reconnect' : 'manual reconnect',
+    true,
+    {
+      immediate: true,
+      resetAttempt: !preserveAttempt,
+      force: true,
+    },
+  );
 }
 
 export function reconnectAllSessionsRuntime(options: {
@@ -621,6 +668,22 @@ export function startReconnectAttemptRuntime(options: {
   writeSessionTransportHost?: (sessionId: string, host: Host) => void;
   queueReconnectTransportOpenIntent: (sessionId: string, host: Host) => void;
   probeReconnectHost?: (bridgeHost: string, bridgePort: number) => Promise<boolean>;
+  recordReconnectHostProbe?: (result: {
+    sessionId: string;
+    candidates: Array<{
+      bridgeHost: string;
+      bridgePort: number;
+      reachable: boolean;
+    }>;
+  }) => void;
+  /**
+   * Optional refresh applied to the cached host right before probing, so a
+   * network change that rotated the daemon's direct endpoints (tailscale /
+   * ipv4 / bridge IP) does not keep retrying the stale pre-switch addresses
+   * forever. Defaults to identity; the session provider wires this to the
+   * freshest home projection (device list) for relay-directory hosts.
+   */
+  refreshHostForReconnect?: (host: Host) => Host;
 }) {
   if (options.refs.reconnectStore.isManualClosed(options.sessionId)) {
     options.refs.reconnectStore.deleteRuntime(options.sessionId);
@@ -653,25 +716,27 @@ export function startReconnectAttemptRuntime(options: {
       options.refs.reconnectStore.deleteRuntime(options.sessionId);
       return;
     }
+    const refreshedHost = options.refreshHostForReconnect
+      ? options.refreshHostForReconnect(liveHost)
+      : liveHost;
 
     options.updateSessionSync(
       options.sessionId,
       buildSessionReconnectAttemptProgressUpdates(liveRuntime.attempt + 1),
     );
     options.writeSessionTransportToken(options.sessionId, null);
-    // Probe the current host before opening the reconnect intent. If the
-    // cached bridgeHost is unreachable (e.g. switched networks, daemon moved
-    // IP) we fall through to the next candidate endpoint in priority order
-    // before queueing the open intent. This prevents a tight reconnect loop
-    // against a stale host.
+    // Queue the typed transport open immediately. Any HTTP candidate probe
+    // below is diagnostic-only and cannot block WebSocket/WebRTC route
+    // selection.
     void runReconnectHostProbeAndFallback({
       sessionId: options.sessionId,
-      host: liveHost,
+      host: refreshedHost,
       attempt: liveRuntime.attempt + 1,
       probe: options.probeReconnectHost,
       writeHost: options.writeSessionTransportHost,
       updateSessionSync: options.updateSessionSync,
       queueReconnectTransportOpenIntent: options.queueReconnectTransportOpenIntent,
+      recordReconnectHostProbe: options.recordReconnectHostProbe,
       refreshStore: options.refs.reconnectStore,
       isManualClosed: () => options.refs.reconnectStore.isManualClosed(options.sessionId),
       deleteRuntime: () => options.refs.reconnectStore.deleteRuntime(options.sessionId),
@@ -695,6 +760,14 @@ type ReconnectHostProbeAndFallbackOptions = {
   writeHost?: (sessionId: string, host: Host) => void;
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
   queueReconnectTransportOpenIntent: (sessionId: string, host: Host) => void;
+  recordReconnectHostProbe?: (result: {
+    sessionId: string;
+    candidates: Array<{
+      bridgeHost: string;
+      bridgePort: number;
+      reachable: boolean;
+    }>;
+  }) => void;
   refreshStore: SessionReconnectStore;
   isManualClosed: () => boolean;
   deleteRuntime: () => void;
@@ -713,25 +786,19 @@ export async function runReconnectHostProbeAndFallback(options: ReconnectHostPro
     return;
   }
 
-  // Default probe implementation - keep tiny (1.5s) so a dead host does not
-  // delay the user-visible reconnect.
+  // The real transport owns route selection and reports the actual failure.
+  // HTTP /health is diagnostic-only: it is not equivalent to WebSocket/WebRTC
+  // reachability and must never suppress the typed transport open.
+  options.queueReconnectTransportOpenIntent(options.sessionId, options.host);
+
+  // Keep the auxiliary probe bounded and out of the critical path. It can
+  // explain route symptoms, but it cannot decide whether the transport opens.
   const probe = options.probe ?? (async (bridgeHost: string, bridgePort: number) => {
     const result = await probeHostReachable(bridgeHost, bridgePort, { protocol: 'http', timeoutMs: 1500 });
     return result.reachable;
   });
 
-  // First attempt: connect directly to the current host without probing so a
-  // healthy endpoint recovers immediately (fast path).
-  if (options.attempt === 0) {
-    options.queueReconnectTransportOpenIntent(options.sessionId, options.host);
-    return;
-  }
-
-  // Retry: the cached bridgeHost already failed, so probe every candidate
-  // endpoint in parallel and queue the first reachable one. This prevents a
-  // tight reconnect loop against a stale host while keeping the fallback
-  // latency at one probe timeout instead of N serial timeouts.
-  const probeResults = await Promise.all(
+  void Promise.all(
     candidates.map(async (candidate): Promise<{ candidate: ReconnectHostCandidate; reachable: boolean }> => {
       if (options.isManualClosed()) {
         return { candidate, reachable: false };
@@ -742,44 +809,17 @@ export async function runReconnectHostProbeAndFallback(options: ReconnectHostPro
         return { candidate, reachable: false };
       }
     }),
-  );
-
-  if (options.isManualClosed()) {
-    options.deleteRuntime();
-    return;
-  }
-
-  const reachableEntry = probeResults.find((entry) => entry.reachable);
-  if (reachableEntry) {
-    const { candidate } = reachableEntry;
-    let nextHost: Host = options.host;
-    if (
-      candidate.bridgeHost.trim().toLowerCase() !== options.host.bridgeHost.trim().toLowerCase()
-      || candidate.bridgePort !== options.host.bridgePort
-    ) {
-      nextHost = {
-        ...options.host,
-        bridgeHost: candidate.bridgeHost,
-        bridgePort: candidate.bridgePort,
-      };
-      options.writeHost?.(options.sessionId, nextHost);
-      options.updateSessionSync(options.sessionId, {
-        bridgeHost: candidate.bridgeHost,
-        bridgePort: candidate.bridgePort,
-        lastError: `reconnect via ${candidate.label}`,
-      });
+  ).then((probeResults) => {
+    if (options.isManualClosed()) {
+      return;
     }
-    options.queueReconnectTransportOpenIntent(options.sessionId, nextHost);
-    return;
-  }
-
-  // No candidate answers the probe. Keep the reconnect intent alive against
-  // the current host anyway - TraversalSocket will race all of its candidate
-  // paths - so a manual reconnect (or a host the probe cannot see) is never
-  // silently dropped. This preserves the original "index 0 always queued"
-  // contract while still preferring a reachable fallback endpoint.
-  options.updateSessionSync(options.sessionId, {
-    lastError: 'reconnect: all host candidates unreachable, retrying current host',
+    options.recordReconnectHostProbe?.({
+      sessionId: options.sessionId,
+      candidates: probeResults.map(({ candidate, reachable }) => ({
+        bridgeHost: candidate.bridgeHost,
+        bridgePort: candidate.bridgePort,
+        reachable,
+      })),
+    });
   });
-  options.queueReconnectTransportOpenIntent(options.sessionId, options.host);
 }

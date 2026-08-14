@@ -3,7 +3,9 @@ import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 
 function readServerSource() {
-  return readFileSync(join(process.cwd(), 'src/traversal-relay/server.ts'), 'utf8');
+  const main = readFileSync(join(process.cwd(), 'src/traversal-relay/server.ts'), 'utf8');
+  const helpers = readFileSync(join(process.cwd(), 'src/traversal-relay/server-helpers.ts'), 'utf8');
+  return `${main}\n${helpers}`;
 }
 
 function readRtcBridgeSource() {

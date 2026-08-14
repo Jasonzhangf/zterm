@@ -385,6 +385,100 @@ describe('session-context-lifecycle', () => {
     expect(ensureActiveSessionFresh).toHaveBeenCalledTimes(1);
   });
 
+  it('does not close an open transport when lifecycle callback identities refresh, but cleans up on unmount', async () => {
+    vi.useFakeTimers();
+    const socket: { readyState: number } = { readyState: WebSocket.OPEN };
+    const cleanupSocket = vi.fn(() => {
+      socket.readyState = WebSocket.CLOSED;
+    });
+    const cleanupControlSocket = vi.fn();
+    const clearSessionHandshakeTimeout = vi.fn();
+    const ensureActiveSessionFresh = vi.fn(() => true);
+    const state = {
+      sessions: [{ id: 's1', state: 'connected' } as any],
+      activeSessionId: 's1',
+      liveSessionIds: [],
+    } as any;
+    const refs = {
+      foregroundActiveRef: { current: true },
+      stateRef: { current: state },
+      scheduleStatesRef: { current: {} },
+      sessionDebugMetricsStoreRef: { current: { refresh: () => ({}) } },
+      transportRuntimeStoreRef: { current: { targets: new Map(), sessions: new Map() } },
+      sessionPullStateRef: { current: new Map() },
+      lastActivatedSessionIdRef: { current: 's1' },
+      lastActiveReentryAtRef: { current: new Map() },
+      lastConnectedBaselineAtRef: { current: new Map() },
+      heartbeatStore: createSessionHeartbeatStore(),
+      remoteScreenshotRuntimeRef: { current: { dispose: () => undefined } },
+      remoteWindowMessageRuntimeRef: { current: { dispose: () => undefined } },
+      handshakeTimeoutsRef: { current: new Map() },
+      reconnectStore: createSessionReconnectStore(),
+    };
+
+    function Harness({
+      cleanupSocketFn,
+      cleanupControlSocketFn,
+      clearSessionHandshakeTimeoutFn,
+    }: {
+      cleanupSocketFn: (sessionId: string, shouldClose?: boolean) => void;
+      cleanupControlSocketFn: (sessionId: string, shouldClose?: boolean) => void;
+      clearSessionHandshakeTimeoutFn: (sessionId: string) => void;
+    }) {
+      useSessionContextLifecycle({
+        appForegroundActive: true,
+        state,
+        scheduleStates: {},
+        refs,
+        flushRuntimeDebugLogs: () => undefined,
+        clientRuntimeDebugFlushIntervalMs: 10_000,
+        ensureActiveSessionFresh,
+        resolveActiveHeadRefreshTickMs: () => 10_000,
+        resolveHeadStalePingMs: () => 10_000,
+        clearSessionHandshakeTimeout: clearSessionHandshakeTimeoutFn,
+        cleanupSocket: cleanupSocketFn,
+        cleanupControlSocket: cleanupControlSocketFn,
+      });
+      return null;
+    }
+
+    const view = render(
+      <Harness
+        cleanupSocketFn={cleanupSocket}
+        cleanupControlSocketFn={cleanupControlSocket}
+        clearSessionHandshakeTimeoutFn={clearSessionHandshakeTimeout}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    const refreshedCleanupSocket = vi.fn();
+    const refreshedCleanupControlSocket = vi.fn();
+    const refreshedClearSessionHandshakeTimeout = vi.fn();
+    view.rerender(
+      <Harness
+        cleanupSocketFn={refreshedCleanupSocket}
+        cleanupControlSocketFn={refreshedCleanupControlSocket}
+        clearSessionHandshakeTimeoutFn={refreshedClearSessionHandshakeTimeout}
+      />,
+    );
+    await act(async () => {
+      await Promise.resolve();
+    });
+
+    expect(socket.readyState).toBe(WebSocket.OPEN);
+    expect(cleanupSocket).not.toHaveBeenCalled();
+    expect(cleanupControlSocket).not.toHaveBeenCalled();
+    expect(refreshedCleanupSocket).not.toHaveBeenCalled();
+
+    view.unmount();
+
+    expect(refreshedCleanupSocket).toHaveBeenCalledWith('s1', true);
+    expect(refreshedCleanupControlSocket).toHaveBeenCalledWith('s1', true);
+    expect(refreshedClearSessionHandshakeTimeout).not.toHaveBeenCalled();
+  });
+
   it('marks resume-tail when the active session changes through lifecycle reentry', async () => {
     vi.useFakeTimers();
     const ensureActiveSessionFresh = vi.fn(() => true);
