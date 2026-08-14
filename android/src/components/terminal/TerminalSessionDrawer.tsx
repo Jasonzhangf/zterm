@@ -1167,7 +1167,6 @@ function terminalSessionDrawerPropsEqual(
   prev: TerminalSessionDrawerProps,
   next: TerminalSessionDrawerProps,
 ) {
-  // TEMP-DEBUG: 记录比较失败的具体字段（定位后移除）
   const mismatchFields: string[] = [];
   if (prev.open !== next.open) mismatchFields.push('open');
   if (prev.topInsetPx !== next.topInsetPx) mismatchFields.push('topInsetPx');
