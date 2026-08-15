@@ -26,6 +26,7 @@ describe('server debug runtime truth gates', () => {
     expect(source).toContain('logTimePrefix,');
     expect(source).toContain('daemonRuntimeDebug,');
     expect(source).toContain('setDaemonRuntimeDebugEnabled,');
+    expect(source).toContain('setDaemonRuntimeDebugLease,');
     expect(source).toContain('summarizePayload,');
     expect(source).toContain('handleClientDebugLog,');
     expect(source).toContain('} = terminalDebugRuntime;');

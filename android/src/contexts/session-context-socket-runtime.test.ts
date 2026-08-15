@@ -343,7 +343,7 @@ describe('session-context-socket-runtime heartbeat lifecycle', () => {
       const finalizeFailure = vi.fn();
       const ws = { readyState: WebSocket.CLOSING, close: vi.fn() } as any;
 
-      // 1. start heartbeat while socket is still CLOSING (e.g. mid backpressure close)
+      // 1. start heartbeat while socket is still CLOSING (e.g. mid lifecycle close)
       startSocketHeartbeat({
         sessionId, ws, finalizeFailure, heartbeatStore,
         clientPingIntervalMs: 30_000, maxConsecutiveMisses: 3, sendSocketPayload,

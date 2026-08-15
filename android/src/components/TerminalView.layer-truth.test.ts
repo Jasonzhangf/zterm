@@ -1,7 +1,8 @@
 /**
  * Layer-separation truth gate (red test):
  * TerminalView (renderer) must NOT hold gesture state machines, pinch shims,
- * or persistence. useMirrorFixedZoomPan (UI shell, client.app_shell) is the
+ * or persistence. useMirrorFixedZoomPan (DOM renderer visual gesture layer,
+ * client.dom_renderer) is the
  * single owner of wheel/pan/pinch gesture state and the horizontal offset truth.
  *
  * Gate doc: docs/audits/2026-08-13-terminal-render-layer-decoupling.md §8.3
@@ -51,7 +52,7 @@ describe('TerminalView renderer / UI shell layer separation', () => {
     ).toEqual([]);
   });
 
-  it('keeps renderer truth out of the UI shell gesture hook (useMirrorFixedZoomPan.ts)', () => {
+  it('keeps renderer truth out of the visual gesture hook (useMirrorFixedZoomPan.ts)', () => {
     const source = readSource('src/components/useMirrorFixedZoomPan.ts');
     const leaks = SHELL_FORBIDDEN.filter((symbol) => source.includes(symbol));
     expect(leaks,
@@ -59,7 +60,7 @@ describe('TerminalView renderer / UI shell layer separation', () => {
     ).toEqual([]);
   });
 
-  it('makes the UI shell hook the single gesture owner (wheel + offset truth)', () => {
+  it('makes the visual gesture hook the single gesture owner (wheel + offset truth)', () => {
     const source = readSource('src/components/useMirrorFixedZoomPan.ts');
     expect(source).toContain('decideTwoFingerWheel');
     expect(source).toContain('onWheelStep');

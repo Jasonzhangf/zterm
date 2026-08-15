@@ -77,7 +77,8 @@ describe('server daemon runtime truth gates', () => {
 
     expect(source).not.toMatch(/activeSessionId|activeTab|foreground|background/);
     expect(source).not.toMatch(/follow|reading|visibleRange|viewport|paneLayout/);
-    expect(source).toContain('transportBufferedBytes');
+    expect(source).not.toContain('transportBufferedBytes');
+    expect(source).not.toContain('transportBackpressureCount');
     expect(source).toContain('lastCaptureDurationMs');
   });
 

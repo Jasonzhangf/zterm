@@ -6,7 +6,7 @@ import { buildTerminalMuxPing } from '@zterm/shared/protocol';
 import {
   clearPendingBufferSyncFrameAssembly,
   type BufferFrameAssemblyResourceState,
-} from './session-buffer-frame-assembly';
+} from '../lib/buffer-frame-assembly/session-buffer-frame-assembly';
 
 interface MutableRefObject<T> {
   current: T;

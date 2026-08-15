@@ -1,0 +1,34 @@
+{
+  "binary_ref": "project-sdk",
+  "bundle_digest": "sha256:1fecd4fc44263ea270d47f096cf40ed1706b659880f808e2d2dcf24b87001b86",
+  "bundle_manifest_digest": "sha256:3786ee502e23be59e4583249b80950d422f0c0212feef70554bb84fb62465301",
+  "bundle_resources": {
+    "contracts": [
+      "contracts/sdk-bundle.manifest.json",
+      "contracts/project.schema.json",
+      "contracts/transitions/zone-transition.manifest.json",
+      "contracts/lifecycle-state-machines.manifest.json",
+      "contracts/records/record-graph.contract.json",
+      "contracts/records/evidence-record.schema.json",
+      "contracts/records/review-record.schema.json",
+      "contracts/records/promotion-record.schema.json",
+      "contracts/records/freeze-record.schema.json",
+      "contracts/records/regression-report.schema.json"
+    ],
+    "docs": [
+      "docs/design/appsdk-project-integration.md",
+      "docs/architecture/appsdk-governance-architecture.md"
+    ],
+    "rules": [
+      "skills/appsdk-project-governance/SKILL.md"
+    ],
+    "skills": [
+      "skills/appsdk-project-governance/SKILL.md"
+    ]
+  },
+  "compiler_digest": "sha256:3685149eab60ed887737e1ff0c9a6ddbbd0add32424d40595e27296ebf7b8686",
+  "contract_schema": 1,
+  "digest": "sha256:3685149eab60ed887737e1ff0c9a6ddbbd0add32424d40595e27296ebf7b8686",
+  "sdk": "appsdk",
+  "version": "0.1.2"
+}

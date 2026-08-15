@@ -47,4 +47,20 @@ describe('RenameDialog', () => {
     expect(onSubmit).not.toHaveBeenCalled();
     expect(onCancel).toHaveBeenCalledTimes(1);
   });
+
+  it('renders an explicit inline error when provided', () => {
+    render(
+      <RenameDialog
+        open
+        title="重命名 session"
+        inputLabel="新的 session 名称"
+        initialValue="main"
+        errorMessage="rename failed"
+        onCancel={vi.fn()}
+        onSubmit={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByTestId('rename-dialog-error').textContent).toContain('rename failed');
+  });
 });

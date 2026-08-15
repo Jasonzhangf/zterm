@@ -19,7 +19,7 @@ daemon buffer-sync body payload
 
 Mainline call ids:
 
-- `android_mainline:TerminalPage->TerminalView`
+- `android_mainline:StageShell->TerminalView`
 - `android_mainline:TerminalView->Renderer`
 - `android_mainline:Renderer->RenderGate`
 - `android_mainline:SocketMessage->BufferWireNormalize`
@@ -63,6 +63,9 @@ Owner feature: `terminal.buffer_render`.
   - bottom row changing while the viewport stays in follow mode,
   - head-only metadata interleaved with body updates without repainting stale body text.
   - source row changed or cleared once, the client missed that non-gap body row, then a later same-tail sparse patch arrives; output DOM must converge to source only through an authoritative visible-window repaint.
+  - the first visible repair dispatch is lost or its response is incomplete; a later same-tail sparse patch must remain in a retryable ledger state and converge after a complete authoritative visible-window response, instead of being suppressed by a stale 5s cooldown.
+  - a complete visible-window response clears the exact `visibleRange + tailEndIndex + targetRevision` ledger once, and unchanged visible rows do not emit repeated repair requests.
+  - a fulfilled repair is only historical truth: a later sparse revision advance over the same visible window must create a new repair demand instead of being permanently suppressed by the old fulfilled entry.
   - lower-revision late payloads and same-revision late payload conflicts against non-gap rows must be explicit drops, not silent overwrites or UI clears.
   - oversized source frames split into multiple wire messages, with middle and tail markers in different chunks; DOM stays on the previous complete source frame until assembly completes, then changes once to the new complete source frame with no old marker flashback.
   - incomplete or invalid chunk sets never appear in DOM and do not hide the visible-range gap/repair demand behind a globally advanced revision.
@@ -99,7 +102,14 @@ Frame error-truth settlement is commit-gated:
 
 ## Rust Migration Register
 
-`terminal.buffer_render.frame_assembly.rust` is `planned`; the current active owner remains `src/contexts/session-buffer-frame-assembly.ts#assembleBufferSyncFrameChunk`. The target is `crates/zterm-terminal-core/src/buffer_frame_assembly.rs`. Activation requires TS/Rust parity, all white-box positive/negative cases above, source-to-DOM atomicity, bridge wiring, and physical removal of the TS policy owner. A planned entry is not active architecture truth.
+`terminal.buffer_render.frame_assembly.rust` is `planned`; the current active owner remains `src/lib/buffer-frame-assembly/session-buffer-frame-assembly.ts#assembleBufferSyncFrameChunk`. The target is `crates/zterm-terminal-core/src/buffer_frame_assembly.rs`. Activation requires TS/Rust parity, all white-box positive/negative cases above, source-to-DOM atomicity, bridge wiring, and physical removal of the TS policy owner. A planned entry is not active architecture truth.
+
+`terminal.buffer_render.source_adapter.rust` is `planned`; the current active
+owner remains `src/server/terminal-source-adapter.ts` plus the tmux/Herdr/
+WezTerm adapter implementations. The target is a Rust source-adapter contract
+with TS bridge, source-neutral snapshot serialization, adapter parity tests,
+and physical removal of the TS adapter contract. A planned entry is not active
+architecture truth.
 
 ## 2026-07-13 Performance Lifecycle Extension
 
@@ -120,7 +130,8 @@ tmux authoritative capture
 Mainline call ids:
 
 - `daemon_mainline:Mirror->Capture`
-- `daemon_mainline:Mirror->TransportSend`
+- `daemon_mainline:Mirror->BufferPublisher`
+- `daemon_mainline:BufferPublisher->TransportSend`
 - `daemon_mainline:Capture->PerformanceTrace`
 - `daemon_mainline:Mirror->PerformanceTrace`
 - `daemon_mainline:TransportSend->PerformanceTrace`

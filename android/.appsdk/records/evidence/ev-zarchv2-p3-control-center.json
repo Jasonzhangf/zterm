@@ -1,0 +1,24 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "EVID-20260815-ZARCHV2-P3-CONTROL-CENTER-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-phase3",
+  "kind": "gate",
+  "source_commit": "9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c",
+  "scope": {
+    "module_id": "zterm-runtime-v2",
+    "feature_id": "client_control_center",
+    "entrypoint": "pnpm --dir android run test:runtime-architecture-v2"
+  },
+  "producer": {
+    "adapter": "appsdk",
+    "identity": "codex-zterm-v2-phase3-20260815T032200Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "ControlCenter tests prove unique owner routing, capability denial before owner execution, idempotency replay, explicit deadline errors, and bounded audit entries; the Phase 3 suite passed 30/30 across 8 files.",
+  "created_at": "2026-08-15T03:22:00Z",
+  "expires_at": "2026-11-13T03:22:00Z",
+  "input_hashes": ["sha256:d8b926d09b21973e38226325ec045e10b64e1d26737b94bb33b99fbd7faa7c3b"],
+  "scope_hash": "sha256:d8b926d09b21973e38226325ec045e10b64e1d26737b94bb33b99fbd7faa7c3b"
+}

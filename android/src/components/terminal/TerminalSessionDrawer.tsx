@@ -39,6 +39,7 @@ export interface TerminalSessionDrawerItem {
    * 未传入时回退到 hostKey；不允许 drawer 内部自行拼装。
    */
   hostLabel?: string;
+  terminalBackend?: 'tmux' | 'herdr';
 }
 
 export interface TerminalSessionDrawerHost {
@@ -1198,6 +1199,7 @@ function terminalSessionDrawerPropsEqual(
     if ((p.paneLabel ?? '') !== (n.paneLabel ?? '')) mismatchFields.push(`sessions[${i}].paneLabel`);
     if ((p.hostKey ?? '') !== (n.hostKey ?? '')) mismatchFields.push(`sessions[${i}].hostKey`);
     if ((p.hostLabel ?? '') !== (n.hostLabel ?? '')) mismatchFields.push(`sessions[${i}].hostLabel`);
+    if ((p.terminalBackend ?? '') !== (n.terminalBackend ?? '')) mismatchFields.push(`sessions[${i}].terminalBackend`);
     if ((p.sessionGroupSlot ?? '') !== (n.sessionGroupSlot ?? '')) mismatchFields.push(`sessions[${i}].sessionGroupSlot`);
     if (Boolean(p.remoteMissing) !== Boolean(n.remoteMissing)) mismatchFields.push(`sessions[${i}].remoteMissing`);
     if (Boolean(p.active) !== Boolean(n.active)) mismatchFields.push(`sessions[${i}].active`);

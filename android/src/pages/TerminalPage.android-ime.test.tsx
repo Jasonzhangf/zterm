@@ -8,20 +8,28 @@ import {
   screen,
   waitFor,
 } from "@testing-library/react";
-import { useState } from "react";
+import { useState, type ComponentProps } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { STORAGE_KEYS, type RemoteWindowStreamTargetManifest, type Session } from "../lib/types";
 import {
-  TerminalPage,
+  TerminalPage as TerminalPageBase,
   resolveKeyboardLiftPx,
   resolveLayoutViewportHeight,
   resolveTerminalHeaderTopInsetPx,
 } from "./TerminalPage";
 import { ImeAnchor } from "../plugins/ImeAnchorPlugin";
+import { RemoteWindowOverlay } from "../components/terminal/RemoteWindowOverlay";
+import type { RemoteWindowUiProps } from "../lib/plugin-remote-window/remote-window-contract";
+import type { TerminalQuickBarProps } from "../components/terminal/TerminalQuickBar";
+import { renderTerminalShellUi } from "../lib/plugin-host/terminal-shell-ui-plugin";
+import { resetClientDebugSnapshotForTests } from "../lib/client-debug-snapshot";
 
 const imeListeners = new Map<string, (event: any) => void>();
 const debugInputListeners = new Map<string, (event: any) => void>();
 const keyboardListeners = new Map<string, (event: any) => void>();
+const renderRemoteWindow = (props: RemoteWindowUiProps) => (
+  <RemoteWindowOverlay {...props} />
+);
 const { nativeClipboardWriteText } = vi.hoisted(() => ({
   nativeClipboardWriteText: vi.fn(async () => undefined),
 }));
@@ -117,48 +125,38 @@ vi.mock("../components/terminal/TabManagerSheet", () => ({
   TabManagerSheet: () => null,
 }));
 
-vi.mock("../components/terminal/TerminalQuickBar", () => ({
-TerminalQuickBar: ({
-  onEditorDomFocusChange,
-  onToggleKeyboard,
-  onToggleCopyMode,
-  onMeasuredHeightChange,
-  keyboardVisible,
-  keyboardInsetPx,
-  sessionDraft,
-  copyModeActive,
-}: {
-  onEditorDomFocusChange?: (active: boolean) => void;
-  onToggleKeyboard?: () => void;
-  onToggleCopyMode?: () => void;
-  onMeasuredHeightChange?: (height: number) => void;
-  keyboardVisible?: boolean;
-  keyboardInsetPx?: number;
-  sessionDraft?: string;
-  copyModeActive?: boolean;
-}) => (
+const renderQuickBar = (props: TerminalQuickBarProps) => (
   <div
     data-testid="terminal-quickbar"
-    data-keyboard-visible={keyboardVisible ? "true" : "false"}
-    data-keyboard-inset={String(keyboardInsetPx || 0)}
-    data-session-draft={sessionDraft || ""}
-    data-copy-mode-active={copyModeActive ? "true" : "false"}
+    data-keyboard-visible={props.keyboardVisible ? "true" : "false"}
+    data-keyboard-inset={String(props.keyboardInsetPx || 0)}
+    data-session-draft={props.sessionDraft || ""}
+    data-copy-mode-active={props.copyModeActive ? "true" : "false"}
   >
-      <button onClick={() => onEditorDomFocusChange?.(true)}>
+      <button onClick={() => props.onEditorDomFocusChange?.(true)}>
         focus-quick-editor
       </button>
-      <button onClick={() => onEditorDomFocusChange?.(false)}>
+      <button onClick={() => props.onEditorDomFocusChange?.(false)}>
         blur-quick-editor
       </button>
-      <button onClick={() => onMeasuredHeightChange?.(184)}>
+      <button onClick={() => props.onMeasuredHeightChange?.(184)}>
         measure-quickbar
       </button>
-      <button onClick={() => onToggleKeyboard?.()}>toggle-keyboard</button>
-      <button onClick={() => onToggleCopyMode?.()}>toggle-copy-mode</button>
-      <div data-testid="terminal-quickbar-draft">{sessionDraft || ""}</div>
+      <button onClick={() => props.onToggleKeyboard?.()}>toggle-keyboard</button>
+      <button onClick={() => props.onToggleCopyMode?.()}>toggle-copy-mode</button>
+      <div data-testid="terminal-quickbar-draft">{props.sessionDraft || ""}</div>
     </div>
-  ),
-}));
+);
+
+function TerminalPage(props: ComponentProps<typeof TerminalPageBase>) {
+  return (
+    <TerminalPageBase
+      {...props}
+      renderQuickBar={props.renderQuickBar || renderQuickBar}
+      renderTerminalShell={props.renderTerminalShell || renderTerminalShellUi}
+    />
+  );
+}
 
 vi.mock("../components/TerminalView", () => ({
   TerminalView: ({
@@ -313,45 +311,48 @@ async function flushAndroidImeFocusTimer() {
   });
 }
 
-describe("TerminalPage Android IME bridge", () => {
-  beforeEach(() => {
-    vi.mocked(ImeAnchor.show).mockClear();
-    vi.mocked(ImeAnchor.hide).mockClear();
-    vi.mocked(ImeAnchor.getState).mockClear();
-    vi.mocked(ImeAnchor.getState).mockResolvedValue({ keyboardVisible: false, keyboardHeight: 0 });
-    imeListeners.clear();
-    keyboardListeners.clear();
-    nativeClipboardWriteText.mockClear();
-    const storageBacking = new Map<string, string>();
-    vi.stubGlobal("localStorage", {
-      get length() {
-        return storageBacking.size;
-      },
-      clear() {
-        storageBacking.clear();
-      },
-      getItem(key: string) {
-        return storageBacking.has(key) ? storageBacking.get(key)! : null;
-      },
-      key(index: number) {
-        return Array.from(storageBacking.keys())[index] ?? null;
-      },
-      removeItem(key: string) {
-        storageBacking.delete(key);
-      },
-      setItem(key: string, value: string) {
-        storageBacking.set(key, String(value));
-      },
-    } as Storage);
-  });
+beforeEach(() => {
+  resetClientDebugSnapshotForTests();
+  vi.mocked(ImeAnchor.show).mockClear();
+  vi.mocked(ImeAnchor.hide).mockClear();
+  vi.mocked(ImeAnchor.getState).mockClear();
+  vi.mocked(ImeAnchor.getState).mockResolvedValue({ keyboardVisible: false, keyboardHeight: 0 });
+  imeListeners.clear();
+  keyboardListeners.clear();
+  nativeClipboardWriteText.mockClear();
+  const storageBacking = new Map<string, string>();
+  vi.stubGlobal("localStorage", {
+    get length() {
+      return storageBacking.size;
+    },
+    clear() {
+      storageBacking.clear();
+    },
+    getItem(key: string) {
+      return storageBacking.has(key) ? storageBacking.get(key)! : null;
+    },
+    key(index: number) {
+      return Array.from(storageBacking.keys())[index] ?? null;
+    },
+    removeItem(key: string) {
+      storageBacking.delete(key);
+    },
+    setItem(key: string, value: string) {
+      storageBacking.set(key, String(value));
+    },
+  } as Storage);
+});
 
-  afterEach(() => {
-    cleanup();
-    vi.unstubAllGlobals();
-    imeListeners.clear();
-    debugInputListeners.clear();
-    keyboardListeners.clear();
-  });
+afterEach(() => {
+  cleanup();
+  resetClientDebugSnapshotForTests();
+  vi.unstubAllGlobals();
+  imeListeners.clear();
+  debugInputListeners.clear();
+  keyboardListeners.clear();
+});
+
+describe("TerminalPage Android IME bridge", () => {
 
   it("does not proactively show Android IME on terminal page mount", async () => {
     const session = makeSession("s1");
@@ -434,6 +435,7 @@ describe("TerminalPage Android IME bridge", () => {
         onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
         onRequestRemoteWindowStreamStart={onRequestRemoteWindowStreamStart}
         onSendRemoteWindowInput={onSendRemoteWindowInput}
+        renderRemoteWindow={renderRemoteWindow}
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
@@ -1372,7 +1374,7 @@ describe("TerminalPage Android IME bridge", () => {
         />,
       );
 
-      expect(screen.getByTestId("terminal-stage-shell").getAttribute("style") || "").toContain("top: 66px;");
+      expect(screen.getByTestId("terminal-stage-shell").getAttribute("style") || "").toContain("top: 108px;");
     } finally {
       Object.defineProperty(window, "innerWidth", { configurable: true, value: originalInnerWidth });
       Object.defineProperty(window, "innerHeight", { configurable: true, value: originalInnerHeight });

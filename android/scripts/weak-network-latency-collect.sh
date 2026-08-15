@@ -6,7 +6,7 @@ mkdir -p "$OUT_DIR"
 python3 - <<'PY'
 import requests,time,json,math,datetime,os
 B=os.environ.get('BASE_URL','http://100.66.1.82:3333')
-requests.get(f'{B}/debug/runtime/control?enabled=1',timeout=5)
+requests.post(f'{B}/debug/runtime/control',json={'enabled':True},timeout=5)
 rows=[]
 for i in range(120):
   h=requests.get(f'{B}/health',timeout=5).json()

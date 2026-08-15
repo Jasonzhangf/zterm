@@ -12,7 +12,6 @@ describe('terminal debug runtime daemon metadata truth', () => {
       maxClientDebugLogPayloadChars: 900,
       clientRuntimeDebugStore,
       daemonRuntimeDebugStore,
-      sessions: new Map(),
     });
 
     runtime.daemonRuntimeDebug('input-write', {
@@ -47,7 +46,6 @@ describe('terminal debug runtime daemon metadata truth', () => {
       maxClientDebugLogPayloadChars: 900,
       clientRuntimeDebugStore: createRuntimeDebugStore(),
       daemonRuntimeDebugStore,
-      sessions: new Map(),
     });
 
     runtime.daemonRuntimeDebug('input-drop', { sessionId: 'session-1', reason: 'before-enable' });
@@ -67,7 +65,6 @@ describe('terminal debug runtime daemon metadata truth', () => {
       maxClientDebugLogPayloadChars: 900,
       clientRuntimeDebugStore: createRuntimeDebugStore(),
       daemonRuntimeDebugStore: createRuntimeDebugStore(),
-      sessions: new Map(),
     });
 
     runtime.daemonRuntimeDebug('input-receive', {
@@ -89,7 +86,6 @@ describe('terminal debug runtime daemon metadata truth', () => {
       maxClientDebugLogPayloadChars: 900,
       clientRuntimeDebugStore: createRuntimeDebugStore(),
       daemonRuntimeDebugStore,
-      sessions: new Map(),
     });
 
     runtime.daemonRuntimeDebug('send', {
@@ -110,5 +106,57 @@ describe('terminal debug runtime daemon metadata truth', () => {
     expect(entries[0]?.payload).toContain('"payloadSummary":{"revision":7,"lineCount":1}');
     expect(entries[0]?.payload).not.toContain('secret-terminal-row');
     expect(entries[0]?.payload).not.toContain('"lines"');
+  });
+
+  it('defaults daemon debug control to deny and expires an explicit lease', () => {
+    const daemonRuntimeDebugStore = createRuntimeDebugStore();
+    const runtime = createTerminalDebugRuntime({
+      daemonRuntimeDebugEnabled: false,
+      maxClientDebugBatchLogEntries: 8,
+      maxClientDebugLogPayloadChars: 900,
+      clientRuntimeDebugStore: createRuntimeDebugStore(),
+      daemonRuntimeDebugStore,
+    });
+
+    runtime.setDaemonRuntimeDebugLease(true, 50);
+    vi.useFakeTimers();
+    try {
+      runtime.daemonRuntimeDebug('input-drop', { sessionId: 'session-1', reason: 'inside-lease' });
+      vi.advanceTimersByTime(51);
+      runtime.daemonRuntimeDebug('input-drop', { sessionId: 'session-1', reason: 'after-lease' });
+    } finally {
+      vi.useRealTimers();
+    }
+
+    const entries = daemonRuntimeDebugStore.listEntries({ scopeIncludes: 'input-drop' });
+    expect(entries).toHaveLength(1);
+    expect(entries[0]?.payload).toContain('inside-lease');
+  });
+
+  it('exposes bounded typed debug events and permission summary through the runtime', () => {
+    const runtime = createTerminalDebugRuntime({
+      daemonRuntimeDebugEnabled: true,
+      maxClientDebugBatchLogEntries: 8,
+      maxClientDebugLogPayloadChars: 900,
+      clientRuntimeDebugStore: createRuntimeDebugStore(),
+      daemonRuntimeDebugStore: createRuntimeDebugStore(),
+    });
+
+    runtime.daemonRuntimeDebug('input-write', {
+      transportId: 'transport-1',
+      sessionId: 'session-1',
+      bytes: 4,
+    });
+
+    expect(runtime.getDebugPermissionSummary()).toMatchObject({
+      capability: 'debug:control',
+    });
+    expect(runtime.listDebugEvents()).toHaveLength(1);
+    expect(runtime.listDebugEvents()[0]).toMatchObject({
+      nodeId: 'daemon.runtime.debug',
+      kind: 'daemon.input-write',
+      sensitivity: 'internal',
+    });
+    expect(runtime.getDebugDropCount()).toBe(0);
   });
 });

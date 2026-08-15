@@ -132,6 +132,7 @@ describe('mainline resource call map gate', () => {
       'ClientFileTransferDownloadErrorIn01StaleRequest',
       'ClientFileTransferDownloadErrorIn02NativeWriteFailure',
       'ClientFileTransferDownloadErrorIn03SizeMismatch',
+      'DaemonFileTransferMessageIn01Owner',
       'DaemonFileTransferUploadErrorOut01ChunkRejected',
       'DaemonFileTransferUploadErrorOut02CompletionRejected',
     ];
@@ -139,6 +140,8 @@ describe('mainline resource call map gate', () => {
       'android_mainline:ClientFileTransferUploadOut01SheetIntent->ClientFileTransferUploadOut02BoundedWindow',
       'android_mainline:ClientFileTransferUploadOut02BoundedWindow->ClientFileTransferUploadOut03ChunkDispatch',
       'android_mainline:ClientFileTransferUploadOut03ChunkDispatch->ClientFileTransferUploadOut04MuxSend',
+      'daemon_mainline:Message->DaemonFileTransferMessageIn01Owner',
+      'daemon_mainline:DaemonFileTransferMessageIn01Owner->DaemonFileTransferUploadIn02RuntimeFacade',
       'daemon_mainline:DaemonFileTransferUploadIn01MessageDispatch->DaemonFileTransferUploadIn02RuntimeFacade',
       'daemon_mainline:DaemonFileTransferUploadIn02RuntimeFacade->DaemonFileTransferUploadIn03CumulativeAckOwner',
       'daemon_mainline:DaemonFileTransferUploadIn02RuntimeFacade->DaemonFileTransferUploadEndIn04ExactCompletionOwner',

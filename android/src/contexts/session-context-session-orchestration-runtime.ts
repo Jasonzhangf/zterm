@@ -5,7 +5,7 @@ import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
-import type { BufferFrameAssemblyResourceState } from './session-buffer-frame-assembly';
+import type { BufferFrameAssemblyResourceState } from '../lib/buffer-frame-assembly/session-buffer-frame-assembly';
 import type { CreateSessionOptions } from './session-context-core';
 import {
   closeSessionRuntime,

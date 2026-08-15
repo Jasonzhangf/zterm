@@ -63,6 +63,81 @@ jobs:
       - name: Feature registry and architecture truth gates
         run: pnpm --dir android run test:feature-registry
 
+      - name: Shared foundation contract ownership gate
+        run: pnpm --dir android run test:shared-contract-ownership
+
+      - name: Runtime architecture v2 foundation gate
+        run: pnpm --dir android run test:runtime-architecture-v2
+
+      - name: Plugin host production gate
+        run: pnpm --dir android run test:plugin-host
+
+      - name: Debug console UI production gate
+        run: pnpm --dir android run test:debug-console-ui
+
+      - name: Session drawer UI production gate
+        run: pnpm --dir android run test:session-drawer-ui
+
+      - name: File browser UI production gate
+        run: pnpm --dir android run test:file-browser-ui
+
+      - name: Settings update UI production gate
+        run: pnpm --dir android run test:settings-update-ui
+
+      - name: Remote window UI production gate
+        run: pnpm --dir android run test:remote-window-ui
+
+      - name: Quickbar UI production gate
+        run: pnpm --dir android run test:quickbar-ui
+
+      - name: Terminal shell UI production gate
+        run: pnpm --dir android run test:terminal-shell-ui
+
+      - name: Composition root production gate
+        run: pnpm --dir android run test:composition-root
+
+      - name: Control center production gate
+        run: pnpm --dir android run test:control-center
+
+      - name: Daemon control center production gate
+        run: pnpm --dir android run test:daemon-control-center
+
+      - name: Daemon buffer publisher production gate
+        run: pnpm --dir android run test:daemon-buffer-publisher
+
+      - name: Daemon session catalog production gate
+        run: pnpm --dir android run test:daemon-session-catalog
+
+      - name: Attachment message delivery production gate
+        run: pnpm --dir android run test:attachment-message-delivery
+
+      - name: File transfer message route production gate
+        run: pnpm --dir android run test:file-transfer-message-route
+
+      - name: Daemon source adapter ownership gate
+        run: pnpm --dir android run test:source-adapter-ownership
+
+      - name: Daemon mirror writer ownership gate
+        run: pnpm --dir android run test:mirror-writer-ownership
+
+      - name: Client input normalizer ownership gate
+        run: pnpm --dir android run test:input-normalizer
+
+      - name: Client reliable input ownership gate
+        run: pnpm --dir android run test:reliable-input-ownership
+
+      - name: Daemon input queue production gate
+        run: pnpm --dir android run test:daemon-input-queue
+
+      - name: Terminal channel mux production gate
+        run: pnpm --dir android run test:terminal-channel-mux
+
+      - name: Session input runtime production gate
+        run: pnpm --dir android run test:session-input-runtime
+
+      - name: Debug observability production gate
+        run: pnpm --dir android run test:debug-observability
+
       - name: Terminal shell theme gate
         run: pnpm --dir android run test:terminal:shell-theme
 

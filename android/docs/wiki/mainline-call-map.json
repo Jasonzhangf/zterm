@@ -6,7 +6,7 @@
       "lifecycle_id": "android_mainline",
       "title": "Android Mainline",
       "entrypoint": "Native",
-      "return_path": "SocketMessage -> BufferWireNormalize -> BufferSyncIngress -> BufferFrameAssembly -> BufferSparseApply -> RenderGate -> TerminalView",
+      "return_path": "SocketMessage -> BufferWireNormalize -> BufferSyncIngress -> BufferFrameAssembly -> BufferSparseApply -> RenderGate -> TerminalView -> StageShell -> TerminalPage",
       "owner_feature": "mainline_source.android",
       "canonical_docs": [
         "docs/wiki/mainline-source.md",
@@ -38,12 +38,128 @@
           "id": "Main",
           "label": "src/main.tsx"
         },
-        {
-          "id": "App",
-          "label": "src/App.tsx"
-        },
-        {
-          "id": "RelayControlRuntime",
+      {
+        "id": "App",
+        "label": "src/App.tsx"
+      },
+      {
+        "id": "PluginHost",
+        "label": "src/lib/plugin-host/plugin-host-runtime.ts#createPluginHost"
+      },
+      {
+        "id": "CompositionRoot",
+        "label": "src/lib/composition-root/client-composition-root.ts#ClientCompositionRoot"
+      },
+      {
+        "id": "ControlCenter",
+        "label": "src/lib/control-center/client-control-center.ts#ClientControlCenter"
+      },
+      {
+        "id": "PluginHostControlNode",
+        "label": "src/lib/plugin-host/plugin-host-control-node.ts#PluginHostControlNode"
+      },
+      {
+        "id": "CapabilityRegistry",
+        "label": "packages/shared/src/terminal/plugin-capability-registry.ts#PluginCapabilityRegistry"
+      },
+      {
+        "id": "UiSlotRegistry",
+        "label": "packages/shared/src/terminal/plugin-ui-slot-registry.ts#PluginUiSlotRegistry"
+      },
+      {
+        "id": "DebugConsoleContract",
+        "label": "src/lib/plugin-debug-console/debug-console-contract.ts#TerminalDebugOverlayProps"
+      },
+      {
+        "id": "DebugConsoleUiPlugin",
+        "label": "src/lib/plugin-host/debug-console-ui-plugin.tsx#DebugConsoleUiPlugin"
+      },
+      {
+        "id": "TerminalDebugOverlay",
+        "label": "src/pages/TerminalPageDebugOverlay.tsx#TerminalDebugOverlay"
+      },
+      {
+        "id": "SessionDrawerContract",
+        "label": "src/lib/plugin-session-drawer/session-drawer-contract.ts#TerminalSessionDrawerSlot"
+      },
+      {
+        "id": "SessionDrawerUiPlugin",
+        "label": "src/lib/plugin-host/session-drawer-ui-plugin.tsx#SessionDrawerUiPlugin"
+      },
+      {
+        "id": "TerminalSessionDrawer",
+        "label": "src/components/terminal/TerminalSessionDrawer.tsx#TerminalSessionDrawer"
+      },
+      {
+        "id": "FileBrowserContract",
+        "label": "src/lib/plugin-file-browser/file-browser-contract.ts#TerminalFileBrowserSlot"
+      },
+      {
+        "id": "FileBrowserUiPlugin",
+        "label": "src/lib/plugin-host/file-browser-ui-plugin.tsx#FileBrowserUiPlugin"
+      },
+      {
+        "id": "FileTransferSheetPluginRender",
+        "label": "src/components/terminal/FileTransferSheet.tsx#FileTransferSheet"
+      },
+      {
+        "id": "SettingsUpdateContract",
+        "label": "src/lib/plugin-settings-update/settings-update-contract.ts#SettingsUpdateUiSlot"
+      },
+      {
+        "id": "SettingsUpdateUiPlugin",
+        "label": "src/lib/plugin-host/settings-update-ui-plugin.tsx#SettingsUpdateUiPlugin"
+      },
+      {
+        "id": "AppUpdateSectionPluginRender",
+        "label": "src/components/settings/AppUpdateSection.tsx#AppUpdateSection"
+      },
+      {
+        "id": "RemoteWindowContract",
+        "label": "src/lib/plugin-remote-window/remote-window-contract.ts#TerminalRemoteWindowSlot"
+      },
+      {
+        "id": "RemoteWindowUiPlugin",
+        "label": "src/lib/plugin-host/remote-window-ui-plugin.tsx#RemoteWindowUiPlugin"
+      },
+      {
+        "id": "RemoteWindowOverlayPluginRender",
+        "label": "src/components/terminal/RemoteWindowOverlay.tsx#RemoteWindowOverlay"
+      },
+      {
+        "id": "QuickBarContract",
+        "label": "src/lib/plugin-quickbar/quickbar-contract.ts#TerminalQuickBarSlot"
+      },
+      {
+        "id": "QuickBarUiPlugin",
+        "label": "src/lib/plugin-host/quickbar-ui-plugin.tsx#QuickBarUiPlugin"
+      },
+      {
+        "id": "TerminalShellContract",
+        "label": "src/lib/plugin-terminal-shell/terminal-shell-contract.ts#TerminalShellUiSlot"
+      },
+      {
+        "id": "TerminalShellUiPlugin",
+        "label": "src/lib/plugin-host/terminal-shell-ui-plugin.tsx#TerminalShellUiPlugin"
+      },
+      {
+        "id": "TerminalQuickBarPluginRender",
+        "label": "src/components/terminal/TerminalQuickBar.tsx#TerminalQuickBar"
+      },
+      {
+        "id": "SettingsPage",
+        "label": "src/pages/SettingsPage.tsx#SettingsPage"
+      },
+      {
+        "id": "NetworkIdentityCapability",
+        "label": "src/lib/plugin-host/network-identity-capability-plugin.ts#NetworkIdentityCapabilityPlugin"
+      },
+      {
+        "id": "NetworkIdentityRuntime",
+        "label": "src/lib/network-identity.ts#createNetworkIdentityRuntime"
+      },
+      {
+        "id": "RelayControlRuntime",
           "label": "src/hooks/useRelayDeviceStream.ts#useRelayDeviceStream"
         },
         {
@@ -65,6 +181,22 @@
         {
           "id": "SessionContext",
           "label": "src/contexts/SessionContext.tsx"
+        },
+        {
+          "id": "RuntimeDebugHttpExporter",
+          "label": "src/lib/runtime-debug-http-exporter.ts#flushRuntimeDebugLogs"
+        },
+        {
+          "id": "SharedNodeContract",
+          "label": "packages/shared/src/terminal/node-contract.ts#FoundationNode/DataNode/ControlNode"
+        },
+        {
+          "id": "SharedDebugContract",
+          "label": "packages/shared/src/terminal/debug-contract.ts#DebugHub/DebugRegistry/SnapshotCoordinator/BoundedDebugEventStore/DebugPermissionService"
+        },
+        {
+          "id": "ClientDebugSnapshotRegistry",
+          "label": "src/lib/client-debug-snapshot.ts#registerClientDebugSnapshotSource/collectClientDebugSnapshot"
         },
         {
           "id": "SessionLifecycle",
@@ -112,11 +244,11 @@
         },
         {
           "id": "BufferWireNormalize",
-          "label": "src/contexts/session-wire-helpers.ts#normalizeIncomingBufferPayload"
+          "label": "src/lib/wire-ingress/buffer-wire-normalize.ts#normalizeIncomingBufferPayload"
         },
         {
           "id": "BufferFrameAssembly",
-          "label": "src/contexts/session-buffer-frame-assembly.ts#assembleBufferSyncFrameChunk"
+          "label": "src/lib/buffer-frame-assembly/session-buffer-frame-assembly.ts#assembleBufferSyncFrameChunk"
         },
         {
           "id": "BufferHeadFrameExpiry",
@@ -152,11 +284,31 @@
         },
         {
           "id": "TerminalView",
-          "label": "src/components/TerminalView.tsx"
+          "label": "src/components/TerminalView.tsx + src/components/terminal/VisibleRow.tsx + src/components/terminal/TerminalPreviewRow.tsx + src/components/useMirrorFixedZoomPan.ts + packages/shared/src/terminal/cell-render.ts + packages/shared/src/terminal/theme.ts"
         },
         {
-          "id": "QuickBar",
-          "label": "src/components/terminal/TerminalQuickBar.tsx"
+          "id": "InputNormalizerIn01CommittedText",
+          "label": "src/lib/terminal-input-normalization.ts#normalizeTerminalCommittedText"
+        },
+        {
+          "id": "InputNormalizerOut02NormalizedText",
+          "label": "src/lib/terminal-input-normalization.ts#normalizeTerminalCommittedText normalized output"
+        },
+        {
+          "id": "TerminalInputDispatch",
+          "label": "src/contexts/session-context-input-runtime.ts#sendInputThroughSessionTransport"
+        },
+        {
+          "id": "ClientReliableInputQueue",
+          "label": "src/lib/reliable-input/reliable-input-queue.ts#enqueueReliableInputChunks"
+        },
+        {
+          "id": "ClientReliableInputAck",
+          "label": "src/lib/reliable-input/reliable-input-queue.ts#handleTerminalInputAck"
+        },
+        {
+          "id": "ChannelSend",
+          "label": "src/contexts/session-context-transport-wire-runtime.ts#mux channel send"
         },
         {
           "id": "ClientFileTransferUploadOut01SheetIntent",
@@ -276,7 +428,7 @@
         },
         {
           "id": "StageShell",
-          "label": "src/pages/TerminalPageStageShell.tsx"
+          "label": "src/pages/TerminalPageStageShell.tsx + src/pages/terminal-page-shell-ui.tsx + src/pages/useTerminalPageShellActionsRuntime.ts + src/pages/useTerminalPageCopyRuntime.ts + src/pages/terminal-copy-selection.ts + src/pages/terminal-page-status-helpers.ts + src/pages/terminal-page-debug-helpers.ts + src/pages/terminal-page-render-keys.ts + src/pages/terminal-page-quickbar-adapters.ts + src/pages/terminal-keyboard-lift.ts + src/pages/TerminalPageQuickBarAssembly.tsx + src/pages/TerminalPageCopyMenu.tsx + src/pages/TerminalConnectionStatusStrip.tsx + src/lib/terminal-shell-skin.ts"
         },
         {
           "id": "TerminalHeader",
@@ -388,7 +540,7 @@
         },
         {
           "id": "ChannelRuntime",
-          "label": "src/lib/session-transport-runtime.ts#ensureSessionTerminalChannel"
+          "label": "src/lib/terminal-channel-mux-runtime.ts#ensureSessionTerminalChannel"
         },
         {
           "id": "ChannelMessageSend",
@@ -543,6 +695,557 @@
           "resource_to": "resource.session_transport",
           "via_resources": [],
           "relation_status": "direct"
+        },
+        {
+          "from": "App",
+          "to": "PluginHost",
+          "owner_feature": "client.plugin_host",
+          "semantic_input": "app composition creates and wires the plugin host through the control center",
+          "semantic_output": "plugin host with declared capabilities installed",
+          "status": "anchored",
+          "edge_id": "android_mainline:App->PluginHost",
+          "resource_from": "resource.platform_terminal_surface",
+          "resource_to": "resource.client_plugin_host",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "App",
+          "to": "DebugConsoleContract",
+          "owner_feature": "client.debug_console",
+          "semantic_input": "app shell reads the typed debug console UI slot render contract",
+          "semantic_output": "debug console render callback available to the terminal page",
+          "status": "anchored",
+          "edge_id": "android_mainline:App->DebugConsoleContract",
+          "resource_from": "resource.platform_terminal_surface",
+          "resource_to": "resource.debug_console_ui_contract",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "App",
+          "to": "SessionDrawerContract",
+          "owner_feature": "client.session_drawer_ui",
+          "semantic_input": "app shell reads the typed session drawer UI slot render contract",
+          "semantic_output": "session drawer render callback available to the terminal page",
+          "status": "anchored",
+          "edge_id": "android_mainline:App->SessionDrawerContract",
+          "resource_from": "resource.platform_terminal_surface",
+          "resource_to": "resource.session_drawer_ui_contract",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "App",
+          "to": "FileBrowserContract",
+          "owner_feature": "client.file_browser_ui",
+          "semantic_input": "app shell reads the typed file browser UI slot render contract",
+          "semantic_output": "file browser render callback available to the terminal page",
+          "status": "anchored",
+          "edge_id": "android_mainline:App->FileBrowserContract",
+          "resource_from": "resource.platform_terminal_surface",
+          "resource_to": "resource.file_browser_ui_contract",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "App",
+          "to": "SettingsUpdateContract",
+          "owner_feature": "client.settings_update_ui",
+          "semantic_input": "app shell reads the typed settings update UI slot render contract",
+          "semantic_output": "settings update render callback available to SettingsPage",
+          "status": "anchored",
+          "edge_id": "android_mainline:App->SettingsUpdateContract",
+          "resource_from": "resource.platform_terminal_surface",
+          "resource_to": "resource.settings_update_ui_contract",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "App",
+          "to": "RemoteWindowContract",
+          "owner_feature": "client.remote_window_ui",
+          "semantic_input": "app shell reads the typed remote window UI slot render contract",
+          "semantic_output": "remote window render callback available to TerminalPage",
+          "status": "anchored",
+          "edge_id": "android_mainline:App->RemoteWindowContract",
+          "resource_from": "resource.platform_terminal_surface",
+          "resource_to": "resource.remote_window_ui_contract",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "App",
+          "to": "QuickBarContract",
+          "owner_feature": "client.quickbar_ui",
+          "semantic_input": "app shell reads the typed quickbar UI slot render contract",
+          "semantic_output": "quickbar render callback available to TerminalPage",
+          "status": "anchored",
+          "edge_id": "android_mainline:App->QuickBarContract",
+          "resource_from": "resource.platform_terminal_surface",
+          "resource_to": "resource.quickbar_ui_contract",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "App",
+          "to": "TerminalShellContract",
+          "owner_feature": "client.terminal_shell_ui",
+          "semantic_input": "app shell reads the typed terminal shell UI slot render contract",
+          "semantic_output": "terminal shell render callback available to TerminalPage",
+          "status": "anchored",
+          "edge_id": "android_mainline:App->TerminalShellContract",
+          "resource_from": "resource.platform_terminal_surface",
+          "resource_to": "resource.terminal_shell_ui_contract",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "App",
+          "to": "ControlCenter",
+          "owner_feature": "client.control_center",
+          "semantic_input": "app-unmount control intent and declared plugin-host dispose capability",
+          "semantic_output": "capability-gated command routed through the client control center",
+          "status": "anchored",
+          "edge_id": "android_mainline:App->ControlCenter",
+          "resource_from": "resource.platform_terminal_surface",
+          "resource_to": "resource.client_control_center",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "ControlCenter",
+          "to": "PluginHostControlNode",
+          "owner_feature": "client.control_center",
+          "semantic_input": "plugin-host.dispose command and required capability",
+          "semantic_output": "owning plugin host control node executes exactly once",
+          "status": "anchored",
+          "edge_id": "android_mainline:ControlCenter->PluginHostControlNode",
+          "resource_from": "resource.client_control_center",
+          "resource_to": "resource.client_plugin_host",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "PluginHostControlNode",
+          "to": "PluginHost",
+          "owner_feature": "client.plugin_host",
+          "semantic_input": "validated plugin-host.dispose params",
+          "semantic_output": "plugin host disposeAll completes and returns a typed control result",
+          "status": "anchored",
+          "edge_id": "android_mainline:PluginHostControlNode->PluginHost",
+          "resource_from": "resource.client_control_center",
+          "resource_to": "resource.client_plugin_host",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "App",
+          "to": "CompositionRoot",
+          "owner_feature": "client.composition_root",
+          "semantic_input": "App entry binds the declared plugin-host and control-center runtime ports",
+          "semantic_output": "composition root validates declared ports and resolves the plugin host and control center",
+          "status": "anchored",
+          "edge_id": "android_mainline:App->CompositionRoot",
+          "resource_from": "resource.platform_terminal_surface",
+          "resource_to": "resource.client_composition_root",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "CompositionRoot",
+          "to": "PluginHost",
+          "owner_feature": "client.composition_root",
+          "semantic_input": "declared plugin-host port value",
+          "semantic_output": "bound plugin host available only through the composition root",
+          "status": "anchored",
+          "edge_id": "android_mainline:CompositionRoot->PluginHost",
+          "resource_from": "resource.client_composition_root",
+          "resource_to": "resource.client_plugin_host",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "PluginHost",
+          "to": "CapabilityRegistry",
+          "owner_feature": "client.plugin_host",
+          "semantic_input": "declared plugin capability dependency resolution",
+          "semantic_output": "bound unique capability providers",
+          "status": "anchored",
+          "edge_id": "android_mainline:PluginHost->CapabilityRegistry",
+          "resource_from": "resource.client_plugin_host",
+          "resource_to": "resource.plugin_capability_registry",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "PluginHost",
+          "to": "UiSlotRegistry",
+          "owner_feature": "client.plugin_host",
+          "semantic_input": "typed UI slot provider registration and resolution",
+          "semantic_output": "unique plugin UI slot bindings",
+          "status": "anchored",
+          "edge_id": "android_mainline:PluginHost->UiSlotRegistry",
+          "resource_from": "resource.client_plugin_host",
+          "resource_to": "resource.plugin_ui_slot_registry",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "PluginHost",
+          "to": "DebugConsoleUiPlugin",
+          "owner_feature": "client.plugin_host",
+          "semantic_input": "debug console plugin start",
+          "semantic_output": "terminal.debug-console UI slot provided through the typed slot registry",
+          "status": "anchored",
+          "edge_id": "android_mainline:PluginHost->DebugConsoleUiPlugin",
+          "resource_from": "resource.client_plugin_host",
+          "resource_to": "resource.client_plugin_host",
+          "via_resources": [
+            "resource.plugin_ui_slot_registry"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "DebugConsoleUiPlugin",
+          "to": "DebugConsoleContract",
+          "owner_feature": "client.debug_console",
+          "semantic_input": "debug console plugin declares the typed terminal debug overlay contract",
+          "semantic_output": "debug overlay props and slot id available to the host",
+          "status": "anchored",
+          "edge_id": "android_mainline:DebugConsoleUiPlugin->DebugConsoleContract",
+          "resource_from": "resource.client_plugin_host",
+          "resource_to": "resource.debug_console_ui_contract",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "DebugConsoleUiPlugin",
+          "to": "TerminalDebugOverlay",
+          "owner_feature": "client.debug_console",
+          "semantic_input": "terminal debug overlay slot render",
+          "semantic_output": "debug overlay component rendered with typed debug session projection",
+          "status": "anchored",
+          "edge_id": "android_mainline:DebugConsoleUiPlugin->TerminalDebugOverlay",
+          "resource_from": "resource.debug_console_ui_contract",
+          "resource_to": "resource.debug_console_ui_contract",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "PluginHost",
+          "to": "SessionDrawerUiPlugin",
+          "owner_feature": "client.plugin_host",
+          "semantic_input": "session drawer plugin start",
+          "semantic_output": "terminal.session-drawer UI slot provided through the typed slot registry",
+          "status": "anchored",
+          "edge_id": "android_mainline:PluginHost->SessionDrawerUiPlugin",
+          "resource_from": "resource.client_plugin_host",
+          "resource_to": "resource.client_plugin_host",
+          "via_resources": [
+            "resource.plugin_ui_slot_registry"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "SessionDrawerUiPlugin",
+          "to": "SessionDrawerContract",
+          "owner_feature": "client.session_drawer_ui",
+          "semantic_input": "session drawer plugin declares the typed terminal drawer contract",
+          "semantic_output": "session drawer props and slot id available to the host",
+          "status": "anchored",
+          "edge_id": "android_mainline:SessionDrawerUiPlugin->SessionDrawerContract",
+          "resource_from": "resource.client_plugin_host",
+          "resource_to": "resource.session_drawer_ui_contract",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "SessionDrawerUiPlugin",
+          "to": "TerminalSessionDrawer",
+          "owner_feature": "client.session_drawer_ui",
+          "semantic_input": "terminal session drawer slot render",
+          "semantic_output": "TerminalSessionDrawer component rendered with typed session drawer projection",
+          "status": "anchored",
+          "edge_id": "android_mainline:SessionDrawerUiPlugin->TerminalSessionDrawer",
+          "resource_from": "resource.session_drawer_ui_contract",
+          "resource_to": "resource.session_drawer_ui_contract",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "PluginHost",
+          "to": "FileBrowserUiPlugin",
+          "owner_feature": "client.plugin_host",
+          "semantic_input": "file browser plugin start",
+          "semantic_output": "terminal.file-browser UI slot provided through the typed slot registry",
+          "status": "anchored",
+          "edge_id": "android_mainline:PluginHost->FileBrowserUiPlugin",
+          "resource_from": "resource.client_plugin_host",
+          "resource_to": "resource.client_plugin_host",
+          "via_resources": [
+            "resource.plugin_ui_slot_registry"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "PluginHost",
+          "to": "SettingsUpdateUiPlugin",
+          "owner_feature": "client.plugin_host",
+          "semantic_input": "settings update plugin start",
+          "semantic_output": "settings.update UI slot provided through the typed slot registry",
+          "status": "anchored",
+          "edge_id": "android_mainline:PluginHost->SettingsUpdateUiPlugin",
+          "resource_from": "resource.client_plugin_host",
+          "resource_to": "resource.client_plugin_host",
+          "via_resources": [
+            "resource.plugin_ui_slot_registry"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "PluginHost",
+          "to": "RemoteWindowUiPlugin",
+          "owner_feature": "client.plugin_host",
+          "semantic_input": "remote window plugin start",
+          "semantic_output": "terminal.remote-window UI slot provided through the typed slot registry",
+          "status": "anchored",
+          "edge_id": "android_mainline:PluginHost->RemoteWindowUiPlugin",
+          "resource_from": "resource.client_plugin_host",
+          "resource_to": "resource.client_plugin_host",
+          "via_resources": [
+            "resource.plugin_ui_slot_registry"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "FileBrowserUiPlugin",
+          "to": "FileBrowserContract",
+          "owner_feature": "client.file_browser_ui",
+          "semantic_input": "file browser plugin declares the typed terminal file browser contract",
+          "semantic_output": "file browser props and slot id available to the host",
+          "status": "anchored",
+          "edge_id": "android_mainline:FileBrowserUiPlugin->FileBrowserContract",
+          "resource_from": "resource.client_plugin_host",
+          "resource_to": "resource.file_browser_ui_contract",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "FileBrowserUiPlugin",
+          "to": "FileTransferSheetPluginRender",
+          "owner_feature": "client.file_browser_ui",
+          "semantic_input": "terminal file transfer sheet slot render",
+          "semantic_output": "FileTransferSheet component rendered with typed file browser projection",
+          "status": "anchored",
+          "edge_id": "android_mainline:FileBrowserUiPlugin->FileTransferSheetPluginRender",
+          "resource_from": "resource.file_browser_ui_contract",
+          "resource_to": "resource.file_browser_ui_contract",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "SettingsUpdateUiPlugin",
+          "to": "SettingsUpdateContract",
+          "owner_feature": "client.settings_update_ui",
+          "semantic_input": "settings update plugin declares the typed settings update contract",
+          "semantic_output": "settings update props and slot id available to the host",
+          "status": "anchored",
+          "edge_id": "android_mainline:SettingsUpdateUiPlugin->SettingsUpdateContract",
+          "resource_from": "resource.client_plugin_host",
+          "resource_to": "resource.settings_update_ui_contract",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "SettingsUpdateUiPlugin",
+          "to": "AppUpdateSectionPluginRender",
+          "owner_feature": "client.settings_update_ui",
+          "semantic_input": "settings update section slot render",
+          "semantic_output": "AppUpdateSection component rendered with typed settings update projection",
+          "status": "anchored",
+          "edge_id": "android_mainline:SettingsUpdateUiPlugin->AppUpdateSectionPluginRender",
+          "resource_from": "resource.settings_update_ui_contract",
+          "resource_to": "resource.settings_update_ui_contract",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "RemoteWindowUiPlugin",
+          "to": "RemoteWindowContract",
+          "owner_feature": "client.remote_window_ui",
+          "semantic_input": "remote window plugin declares the typed terminal remote window contract",
+          "semantic_output": "remote window props and slot id available to the host",
+          "status": "anchored",
+          "edge_id": "android_mainline:RemoteWindowUiPlugin->RemoteWindowContract",
+          "resource_from": "resource.client_plugin_host",
+          "resource_to": "resource.remote_window_ui_contract",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "RemoteWindowUiPlugin",
+          "to": "RemoteWindowOverlayPluginRender",
+          "owner_feature": "client.remote_window_ui",
+          "semantic_input": "remote window overlay slot render",
+          "semantic_output": "RemoteWindowOverlay component rendered with typed remote window projection",
+          "status": "anchored",
+          "edge_id": "android_mainline:RemoteWindowUiPlugin->RemoteWindowOverlayPluginRender",
+          "resource_from": "resource.remote_window_ui_contract",
+          "resource_to": "resource.remote_window_ui_contract",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "RemoteWindowContract",
+          "to": "RemoteWindowOverlay",
+          "owner_feature": "client.remote_window_ui",
+          "semantic_input": "typed remote window contract binds the overlay projection props",
+          "semantic_output": "remote window slot renderer receives only the typed overlay props",
+          "status": "anchored",
+          "edge_id": "android_mainline:RemoteWindowContract->RemoteWindowOverlay",
+          "resource_from": "resource.remote_window_ui_contract",
+          "resource_to": "resource.remote_window_overlay",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "PluginHost",
+          "to": "QuickBarUiPlugin",
+          "owner_feature": "client.plugin_host",
+          "semantic_input": "quickbar plugin start",
+          "semantic_output": "terminal.quickbar UI slot provided through the typed slot registry",
+          "status": "anchored",
+          "edge_id": "android_mainline:PluginHost->QuickBarUiPlugin",
+          "resource_from": "resource.client_plugin_host",
+          "resource_to": "resource.client_plugin_host",
+          "via_resources": [
+            "resource.plugin_ui_slot_registry"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "PluginHost",
+          "to": "TerminalShellUiPlugin",
+          "owner_feature": "client.terminal_shell_ui",
+          "semantic_input": "terminal shell plugin start",
+          "semantic_output": "terminal.shell UI slot provided through the typed slot registry",
+          "status": "anchored",
+          "edge_id": "android_mainline:PluginHost->TerminalShellUiPlugin",
+          "resource_from": "resource.client_plugin_host",
+          "resource_to": "resource.client_plugin_host",
+          "via_resources": [
+            "resource.plugin_ui_slot_registry"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "QuickBarUiPlugin",
+          "to": "QuickBarContract",
+          "owner_feature": "client.quickbar_ui",
+          "semantic_input": "quickbar plugin declares the typed terminal quickbar contract",
+          "semantic_output": "quickbar props and slot id available to the host",
+          "status": "anchored",
+          "edge_id": "android_mainline:QuickBarUiPlugin->QuickBarContract",
+          "resource_from": "resource.client_plugin_host",
+          "resource_to": "resource.quickbar_ui_contract",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "QuickBarUiPlugin",
+          "to": "TerminalQuickBarPluginRender",
+          "owner_feature": "client.quickbar_ui",
+          "semantic_input": "terminal quickbar slot render",
+          "semantic_output": "TerminalQuickBar component rendered with typed quickbar projection",
+          "status": "anchored",
+          "edge_id": "android_mainline:QuickBarUiPlugin->TerminalQuickBarPluginRender",
+          "resource_from": "resource.quickbar_ui_contract",
+          "resource_to": "resource.quickbar_ui_contract",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "QuickBarContract",
+          "to": "TerminalQuickBarPluginRender",
+          "owner_feature": "client.quickbar_ui",
+          "semantic_input": "typed quickbar contract binds the TerminalQuickBar projection props",
+          "semantic_output": "quickbar slot renderer receives only the typed quickbar props",
+          "status": "anchored",
+          "edge_id": "android_mainline:QuickBarContract->TerminalQuickBarPluginRender",
+          "resource_from": "resource.quickbar_ui_contract",
+          "resource_to": "resource.platform_input_channel",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "TerminalShellUiPlugin",
+          "to": "TerminalShellContract",
+          "owner_feature": "client.terminal_shell_ui",
+          "semantic_input": "terminal shell plugin declares the typed terminal shell contract",
+          "semantic_output": "terminal shell props and slot id available to the host",
+          "status": "anchored",
+          "edge_id": "android_mainline:TerminalShellUiPlugin->TerminalShellContract",
+          "resource_from": "resource.client_plugin_host",
+          "resource_to": "resource.terminal_shell_ui_contract",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "TerminalShellUiPlugin",
+          "to": "StageShell",
+          "owner_feature": "client.terminal_shell_ui",
+          "semantic_input": "terminal shell plugin renders status/stage/copy/quickbar-shell/network-banner projections",
+          "semantic_output": "TerminalConnectionStatusStrip, TerminalPageCopyMenu, TerminalPageStageShell, TerminalQuickBarShell, and TerminalNetworkBanner rendered through the typed terminal shell slot",
+          "status": "anchored",
+          "edge_id": "android_mainline:TerminalShellUiPlugin->StageShell",
+          "resource_from": "resource.terminal_shell_ui_contract",
+          "resource_to": "resource.ui_projection",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "TerminalShellContract",
+          "to": "StageShell",
+          "owner_feature": "client.terminal_shell_ui",
+          "semantic_input": "typed terminal shell contract binds the shell projection props",
+          "semantic_output": "terminal shell slot renderer receives only the typed shell projection",
+          "status": "anchored",
+          "edge_id": "android_mainline:TerminalShellContract->StageShell",
+          "resource_from": "resource.terminal_shell_ui_contract",
+          "resource_to": "resource.ui_projection",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "PluginHost",
+          "to": "NetworkIdentityCapability",
+          "owner_feature": "client.plugin_host",
+          "semantic_input": "network identity plugin start",
+          "semantic_output": "network:sample-interfaces capability provided through the declared registry",
+          "status": "anchored",
+          "edge_id": "android_mainline:PluginHost->NetworkIdentityCapability",
+          "resource_from": "resource.client_plugin_host",
+          "resource_to": "resource.client_plugin_host",
+          "via_resources": [
+            "resource.plugin_capability_registry"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "NetworkIdentityCapability",
+          "to": "NetworkIdentityRuntime",
+          "owner_feature": "client.plugin_host",
+          "semantic_input": "capability-scoped native interface sampler",
+          "semantic_output": "network identity fingerprint sampling through the network identity runtime",
+          "status": "anchored",
+          "edge_id": "android_mainline:NetworkIdentityCapability->NetworkIdentityRuntime",
+          "resource_from": "resource.client_plugin_host",
+          "resource_to": "resource.platform_network_signal",
+          "via_resources": [
+            "resource.plugin_capability_registry"
+          ],
+          "relation_status": "via"
         },
         {
           "from": "SessionContext",
@@ -730,6 +1433,60 @@
           "relation_status": "via"
         },
         {
+          "from": "SessionContext",
+          "to": "TerminalInputDispatch",
+          "owner_feature": "terminal.daemon_input",
+          "semantic_input": "session input send intent from SessionContext facade",
+          "semantic_output": "transport-input dispatch through the client reliable input bridge",
+          "status": "anchored",
+          "edge_id": "android_mainline:SessionContext->TerminalInputDispatch",
+          "resource_from": "resource.active_session",
+          "resource_to": "resource.client_reliable_input_queue",
+          "via_resources": [
+            "resource.session_transport"
+          ],
+          "relation_status": "via"
+        },
+        {
+          "from": "TerminalInputDispatch",
+          "to": "ClientReliableInputQueue",
+          "owner_feature": "terminal.daemon_input",
+          "semantic_input": "normalized committed terminal text plus target session id",
+          "semantic_output": "ordered reliable input chunks queued with seq identity and one-in-flight ACK/retry control",
+          "status": "anchored",
+          "edge_id": "android_mainline:TerminalInputDispatch->ClientReliableInputQueue",
+          "resource_from": "resource.platform_input_channel",
+          "resource_to": "resource.client_reliable_input_queue",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "ClientReliableInputQueue",
+          "to": "ChannelSend",
+          "owner_feature": "terminal.daemon_input",
+          "semantic_input": "one eligible reliable input frame",
+          "semantic_output": "serialized terminal input frame sent through the existing mux channel send path",
+          "status": "anchored",
+          "edge_id": "android_mainline:ClientReliableInputQueue->ChannelSend",
+          "resource_from": "resource.client_reliable_input_queue",
+          "resource_to": "resource.session_transport",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "SocketMessage",
+          "to": "ClientReliableInputAck",
+          "owner_feature": "terminal.daemon_input",
+          "semantic_input": "daemon reliable input ack/nack message",
+          "semantic_output": "matching queue item removed or retained for same-seq retry without writing control metadata into terminal payload",
+          "status": "anchored",
+          "edge_id": "android_mainline:SocketMessage->ClientReliableInputAck",
+          "resource_from": "resource.session_transport",
+          "resource_to": "resource.client_reliable_input_queue",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
           "from": "SocketMessage",
           "to": "BufferWireNormalize",
           "owner_feature": "terminal.buffer_render",
@@ -838,6 +1595,71 @@
           "resource_to": "resource.debug_channel",
           "via_resources": [],
           "relation_status": "observer"
+        },
+        {
+          "from": "SessionContext",
+          "to": "RuntimeDebugHttpExporter",
+          "owner_feature": "daemon.cli_node",
+          "semantic_input": "bounded client runtime debug metadata and target bridge settings",
+          "semantic_output": "bounded HTTP observability export to /debug/runtime/logs and /debug/runtime/snapshot",
+          "status": "anchored",
+          "edge_id": "android_mainline:SessionContext->RuntimeDebugHttpExporter",
+          "resource_from": "resource.observability_channel",
+          "resource_to": "resource.observability_channel",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "SharedNodeContract",
+          "to": "SharedDebugContract",
+          "owner_feature": "shared.debug_contract",
+          "semantic_input": "shared debug contract consumes runtime node identity, lifecycle, and subscription contracts",
+          "semantic_output": "typed debug events, snapshots, filters, and permissions remain bound to foundation node contracts",
+          "status": "anchored",
+          "edge_id": "android_mainline:SharedNodeContract->SharedDebugContract",
+          "resource_from": "resource.runtime_node_registry",
+          "resource_to": "resource.debug_snapshot_registry",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "SharedNodeContract",
+          "to": "ClientDebugSnapshotRegistry",
+          "owner_feature": "client.observability",
+          "semantic_input": "client debug snapshot registry binds node identity and lifecycle metadata to local debug snapshots",
+          "semantic_output": "client runtime debug node identity and lifecycle projection available to the client debug hub",
+          "status": "anchored",
+          "edge_id": "android_mainline:SharedNodeContract->ClientDebugSnapshotRegistry",
+          "resource_from": "resource.runtime_node_registry",
+          "resource_to": "resource.client_debug_hub",
+          "via_resources": ["resource.debug_snapshot_registry"],
+          "relation_status": "via"
+        },
+        {
+          "from": "SharedDebugContract",
+          "to": "ClientDebugSnapshotRegistry",
+          "owner_feature": "client.observability",
+          "semantic_input": "client debug snapshot registry consumes shared debug producer registration, snapshots, and permission contracts",
+          "semantic_output": "bounded client debug snapshot sources and event permission contracts",
+          "status": "anchored",
+          "edge_id": "android_mainline:SharedDebugContract->ClientDebugSnapshotRegistry",
+          "resource_from": "resource.debug_snapshot_registry",
+          "resource_to": "resource.client_debug_hub",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "ClientDebugSnapshotRegistry",
+          "to": "RuntimeDebugHttpExporter",
+          "owner_feature": "client.observability",
+          "semantic_input": "bounded client debug snapshot registry metadata",
+          "semantic_output": "bounded HTTP observability export to /debug/runtime/logs and /debug/runtime/snapshot",
+          "status": "anchored",
+          "edge_id": "android_mainline:ClientDebugSnapshotRegistry->RuntimeDebugHttpExporter",
+          "resource_from": "resource.client_debug_hub",
+          "resource_to": "resource.observability_channel",
+          "via_resources": [],
+          "relation_status": "direct"
         },
         {
           "from": "BufferSparseApply",
@@ -949,33 +1771,31 @@
         },
         {
           "from": "TerminalPage",
-          "to": "TerminalView",
-          "owner_feature": "terminal.buffer_render",
-          "semantic_input": "active terminal session projection",
-          "semantic_output": "terminal renderer props",
+          "to": "SessionContext",
+          "owner_feature": "terminal.keyboard_ime",
+          "semantic_input": "terminal page quickbar/IME action callbacks to the SessionContext-backed input facade",
+          "semantic_output": "quickbar/IME action routing stays outside the quickbar UI contract and passes through session transport callbacks",
           "status": "anchored",
-          "edge_id": "android_mainline:TerminalPage->TerminalView",
+          "edge_id": "android_mainline:TerminalPage->SessionContext",
           "resource_from": "resource.ui_projection",
-          "resource_to": "resource.renderer_window",
+          "resource_to": "resource.session_transport",
           "via_resources": [
-            "resource.client_sparse_buffer"
+            "resource.active_session"
           ],
           "relation_status": "via"
         },
         {
           "from": "TerminalPage",
-          "to": "QuickBar",
-          "owner_feature": "terminal.quickbar",
-          "semantic_input": "terminal shell actions",
-          "semantic_output": "quickbar controls",
+          "to": "InputNormalizerIn01CommittedText",
+          "owner_feature": "client.input_normalizer",
+          "semantic_input": "committed terminal text from page-level IME/quickbar/remote-window text input paths",
+          "semantic_output": "pure committed-text normalization request",
           "status": "anchored",
-          "edge_id": "android_mainline:TerminalPage->QuickBar",
-          "resource_from": "resource.ui_projection",
-          "resource_to": "resource.platform_input_channel",
-          "via_resources": [
-            "resource.active_session"
-          ],
-          "relation_status": "via"
+          "edge_id": "android_mainline:TerminalPage->InputNormalizerIn01CommittedText",
+          "resource_from": "resource.platform_terminal_surface",
+          "resource_to": "resource.client_input_normalizer",
+          "via_resources": [],
+          "relation_status": "observer"
         },
         {
           "from": "TerminalPage",
@@ -987,6 +1807,19 @@
           "edge_id": "android_mainline:TerminalPage->RemoteWindowOverlay",
           "resource_from": "resource.ui_projection",
           "resource_to": "resource.remote_window_overlay",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "TerminalPage",
+          "to": "TerminalDebugOverlay",
+          "owner_feature": "client.debug_console",
+          "semantic_input": "terminal page renders the plugin-provided debug console overlay slot",
+          "semantic_output": "debug overlay projected from the typed terminal debug session projection",
+          "status": "anchored",
+          "edge_id": "android_mainline:TerminalPage->TerminalDebugOverlay",
+          "resource_from": "resource.platform_terminal_surface",
+          "resource_to": "resource.debug_console_ui_contract",
           "via_resources": [],
           "relation_status": "direct"
         },
@@ -1177,16 +2010,31 @@
         },
         {
           "from": "TerminalPage",
-          "to": "StageShell",
-          "owner_feature": "terminal.workspace_panes",
-          "semantic_input": "pane layout state, active session-group slot projection, empty-pane slot identity, and scoped picker callback",
-          "semantic_output": "stage slots whose live terminal body source matches the active session projection, plus empty numbered panes that emit scoped session-picker intent",
+          "to": "TerminalShellContract",
+          "owner_feature": "client.terminal_shell_ui",
+          "semantic_input": "typed terminal shell UI slot render callback and terminal page status/stage/copy/quickbar-shell/network-banner projection",
+          "semantic_output": "plugin-provided terminal shell projection receives terminal page shell props",
           "status": "anchored",
-          "edge_id": "android_mainline:TerminalPage->StageShell",
+          "edge_id": "android_mainline:TerminalPage->TerminalShellContract",
           "resource_from": "resource.platform_terminal_surface",
-          "resource_to": "resource.ui_projection",
+          "resource_to": "resource.terminal_shell_ui_contract",
           "via_resources": [],
           "relation_status": "direct"
+        },
+        {
+          "from": "StageShell",
+          "to": "TerminalView",
+          "owner_feature": "terminal.buffer_render",
+          "semantic_input": "stage shell passes immutable renderer snapshot and terminal body demand",
+          "semantic_output": "DOM renderer props and visible rows",
+          "status": "anchored",
+          "edge_id": "android_mainline:StageShell->TerminalView",
+          "resource_from": "resource.ui_projection",
+          "resource_to": "resource.renderer_window",
+          "via_resources": [
+            "resource.client_sparse_buffer"
+          ],
+          "relation_status": "via"
         },
         {
           "from": "TerminalPage",
@@ -1242,18 +2090,68 @@
         },
         {
           "from": "TerminalPage",
-          "to": "SessionDrawer",
-          "owner_feature": "terminal.session_drawer",
-          "semantic_input": "sessions, session groups including stale persisted daemon ids, saved/Home endpoint-to-daemon aliases, online Relay directory endpoint aliases, and Relay session catalogs used only as row truth",
-          "semantic_output": "canonical daemon host rail plus drawer rows with local/remote session counts",
+          "to": "SessionDrawerContract",
+          "owner_feature": "client.session_drawer_ui",
+          "semantic_input": "typed session drawer UI slot render callback and terminal page session projection",
+          "semantic_output": "plugin-provided TerminalSessionDrawer projection receives terminal page drawer props",
           "status": "anchored",
-          "edge_id": "android_mainline:TerminalPage->SessionDrawer",
-          "resource_from": "resource.ui_projection",
-          "resource_to": "resource.active_session",
-          "via_resources": [
-            "resource.open_tab"
-          ],
-          "relation_status": "via"
+          "edge_id": "android_mainline:TerminalPage->SessionDrawerContract",
+          "resource_from": "resource.platform_terminal_surface",
+          "resource_to": "resource.session_drawer_ui_contract",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "TerminalPage",
+          "to": "FileBrowserContract",
+          "owner_feature": "client.file_browser_ui",
+          "semantic_input": "typed file browser UI slot render callback and terminal page file transfer sheet projection",
+          "semantic_output": "plugin-provided FileTransferSheet projection receives terminal page file browser props",
+          "status": "anchored",
+          "edge_id": "android_mainline:TerminalPage->FileBrowserContract",
+          "resource_from": "resource.platform_terminal_surface",
+          "resource_to": "resource.file_browser_ui_contract",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "TerminalPage",
+          "to": "RemoteWindowContract",
+          "owner_feature": "client.remote_window_ui",
+          "semantic_input": "typed remote window UI slot render callback and terminal page overlay projection",
+          "semantic_output": "plugin-provided RemoteWindowOverlay projection receives terminal page overlay props",
+          "status": "anchored",
+          "edge_id": "android_mainline:TerminalPage->RemoteWindowContract",
+          "resource_from": "resource.platform_terminal_surface",
+          "resource_to": "resource.remote_window_ui_contract",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "TerminalPage",
+          "to": "QuickBarContract",
+          "owner_feature": "client.quickbar_ui",
+          "semantic_input": "typed quickbar UI slot render callback and terminal page quickbar projection",
+          "semantic_output": "plugin-provided TerminalQuickBar projection receives terminal page quickbar props",
+          "status": "anchored",
+          "edge_id": "android_mainline:TerminalPage->QuickBarContract",
+          "resource_from": "resource.platform_terminal_surface",
+          "resource_to": "resource.quickbar_ui_contract",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "SettingsPage",
+          "to": "SettingsUpdateContract",
+          "owner_feature": "client.settings_update_ui",
+          "semantic_input": "typed settings update UI slot render callback and settings page update projection",
+          "semantic_output": "plugin-provided AppUpdateSection projection receives settings page update props",
+          "status": "anchored",
+          "edge_id": "android_mainline:SettingsPage->SettingsUpdateContract",
+          "resource_from": "resource.platform_terminal_surface",
+          "resource_to": "resource.settings_update_ui_contract",
+          "via_resources": [],
+          "relation_status": "direct"
         },
         {
           "from": "SessionDrawer",
@@ -1284,6 +2182,32 @@
             "resource.mirror_store"
           ],
           "relation_status": "via"
+        },
+        {
+          "from": "TerminalView",
+          "to": "InputNormalizerIn01CommittedText",
+          "owner_feature": "client.input_normalizer",
+          "semantic_input": "committed terminal text from DOM renderer input adapter",
+          "semantic_output": "pure committed-text normalization request",
+          "status": "anchored",
+          "edge_id": "android_mainline:TerminalView->InputNormalizerIn01CommittedText",
+          "resource_from": "resource.renderer_window",
+          "resource_to": "resource.client_input_normalizer",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "InputNormalizerIn01CommittedText",
+          "to": "InputNormalizerOut02NormalizedText",
+          "owner_feature": "client.input_normalizer",
+          "semantic_input": "raw committed text",
+          "semantic_output": "terminal-safe normalized text preserving CJK/emoji/non-ascii symbols",
+          "status": "anchored",
+          "edge_id": "android_mainline:InputNormalizerIn01CommittedText->InputNormalizerOut02NormalizedText",
+          "resource_from": "resource.client_input_normalizer",
+          "resource_to": "resource.client_input_normalizer",
+          "via_resources": [],
+          "relation_status": "observer"
         },
         {
           "from": "Renderer",
@@ -2436,7 +3360,7 @@
       "lifecycle_id": "daemon_mainline",
       "title": "Daemon Mainline",
       "entrypoint": "CLI",
-      "return_path": "Capture -> Mirror -> TransportSend",
+      "return_path": "Capture -> Mirror -> BufferPublisher -> TransportSend",
       "owner_feature": "mainline_source.daemon",
       "canonical_docs": [
         "docs/wiki/mainline-source.md",
@@ -2446,7 +3370,9 @@
       ],
       "verification_gates": [
         "src/server/server.daemon-runtime-truth.test.ts",
-        "src/lib/function-wiki-truth.test.ts"
+        "src/lib/function-wiki-truth.test.ts",
+        "src/server/daemon-session-catalog-runtime.test.ts",
+        "src/server/daemon-session-catalog-ownership.test.ts"
       ],
       "nodes": [
         {
@@ -2474,12 +3400,40 @@
           "label": "src/server/terminal-message-runtime.ts"
         },
         {
+          "id": "ControlGateway",
+          "label": "src/server/daemon-control-gateway-runtime.ts"
+        },
+        {
+          "id": "ControlCenter",
+          "label": "src/server/daemon-control-center-runtime.ts"
+        },
+        {
+          "id": "SessionCatalog",
+          "label": "src/server/daemon-session-catalog-runtime.ts"
+        },
+        {
+          "id": "InputQueue",
+          "label": "src/server/daemon-input-queue-runtime.ts#createDaemonInputQueueRuntime"
+        },
+        {
+          "id": "ReliableInputAck",
+          "label": "src/server/terminal-reliable-input-ack.ts#createReliableInputAckCache"
+        },
+        {
+          "id": "Backend",
+          "label": "src/server/terminal-control-runtime.ts#writeBackendInputGroup"
+        },
+        {
           "id": "Mirror",
           "label": "src/server/terminal-mirror-runtime.ts"
         },
         {
           "id": "Capture",
-          "label": "src/server/terminal-mirror-capture.ts"
+          "label": "src/server/terminal-mirror-capture.ts (daemon.mirror_writer)"
+        },
+        {
+          "id": "BufferPublisher",
+          "label": "src/server/daemon-buffer-publisher-runtime.ts#createDaemonBufferPublisherRuntime"
         },
         {
           "id": "Control",
@@ -2495,7 +3449,11 @@
         },
         {
           "id": "DaemonFileTransferUploadIn01MessageDispatch",
-          "label": "src/server/terminal-message-runtime.ts#createTerminalMessageRuntime"
+          "label": "src/server/terminal-file-transfer-message-runtime.ts#createTerminalFileTransferMessageRuntime"
+        },
+        {
+          "id": "DaemonFileTransferMessageIn01Owner",
+          "label": "src/server/terminal-file-transfer-message-runtime.ts#createTerminalFileTransferMessageRuntime"
         },
         {
           "id": "DaemonFileTransferUploadIn02RuntimeFacade",
@@ -2562,6 +3520,10 @@
           "label": "src/server/terminal-http-runtime.ts#createTerminalHttpRuntime"
         },
         {
+          "id": "AttachmentMessageIn01Owner",
+          "label": "src/server/terminal-attachment-message-runtime.ts#createTerminalAttachmentMessageRuntime"
+        },
+        {
           "id": "AttachmentIn02DeliveryOwner",
           "label": "src/server/attachment-delivery-runtime.ts#createAttachmentDeliveryRuntime"
         },
@@ -2570,8 +3532,36 @@
           "label": "~/.zterm/attachments/outbox/<attachmentId>"
         },
         {
-          "id": "Debug",
-          "label": "src/server/terminal-debug-runtime.ts"
+          "id": "SharedNodeContract",
+          "label": "packages/shared/src/terminal/node-contract.ts#FoundationNode/DataNode/ControlNode"
+        },
+        {
+          "id": "SharedDebugContract",
+          "label": "packages/shared/src/terminal/debug-contract.ts#DebugHub/DebugRegistry/SnapshotCoordinator/BoundedDebugEventStore/DebugPermissionService"
+        },
+        {
+          "id": "DaemonDebugHub",
+          "label": "src/server/runtime-debug-store.ts#RuntimeDebugStore + src/server/terminal-debug-runtime.ts#createTerminalDebugRuntime"
+        },
+        {
+          "id": "DebugObservabilityIn01LogIngest",
+          "label": "src/server/terminal-http-runtime.ts#/debug/runtime/logs"
+        },
+        {
+          "id": "DebugObservabilityIn02SnapshotIngest",
+          "label": "src/server/terminal-http-runtime.ts#/debug/runtime/snapshot"
+        },
+        {
+          "id": "DebugObservabilityIn03ControlLease",
+          "label": "src/server/terminal-http-runtime.ts#/debug/runtime/control"
+        },
+        {
+          "id": "DebugObservabilityOut01Accepted",
+          "label": "src/server/terminal-http-runtime.ts#serveJson"
+        },
+        {
+          "id": "DebugObservabilityError01Rejected",
+          "label": "src/server/terminal-http-runtime.ts#serveJson"
         },
         {
           "id": "Transport",
@@ -2610,16 +3600,8 @@
           "label": "src/server/terminal-runtime.ts#createMuxChannelSubscriber"
         },
         {
-          "id": "SendScheduler",
-          "label": "src/server/terminal-transport-runtime.ts#sendMessage/sendText accounting"
-        },
-        {
           "id": "RelayPeerLease",
           "label": "src/traversal-relay/server.ts#clientPeerLeaseKey/resumeIdleClientPeer"
-        },
-        {
-          "id": "IdleSessionListIn01ControlTrigger",
-          "label": "src/server/terminal-message-control-runtime.ts#handleListSessionsMessageRuntime"
         },
         {
           "id": "IdleSessionMuxOpenIn01ControlTrigger",
@@ -2800,25 +3782,38 @@
         {
           "from": "Mirror",
           "to": "Capture",
-          "owner_feature": "terminal.buffer_render",
-          "semantic_input": "tmux capture request",
-          "semantic_output": "canonical mirror snapshot with tmux physical soft-wrap SGR continuation preserved",
+          "owner_feature": "daemon.mirror_writer",
+          "semantic_input": "unified backend adapter readback request",
+          "semantic_output": "canonical mirror snapshot with source-neutral absolute rows, geometry, and cursor",
           "status": "anchored",
           "edge_id": "daemon_mainline:Mirror->Capture",
           "resource_from": "resource.mirror_store",
-          "resource_to": "resource.tmux_session",
+          "resource_to": "resource.terminal_backend",
           "via_resources": [],
           "relation_status": "direct"
         },
         {
           "from": "Mirror",
-          "to": "TransportSend",
-          "owner_feature": "terminal.transport_lifecycle",
+          "to": "BufferPublisher",
+          "owner_feature": "terminal.buffer_render",
           "semantic_input": "committed mirror revision and authoritative changed span",
+          "semantic_output": "per-subscriber bounded pending-latest and merged absolute ranges queued by the buffer publisher",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:Mirror->BufferPublisher",
+          "resource_from": "resource.mirror_store",
+          "resource_to": "resource.daemon_buffer_publisher",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "BufferPublisher",
+          "to": "TransportSend",
+          "owner_feature": "terminal.buffer_render",
+          "semantic_input": "per-subscriber merged absolute ranges after backpressure/drain release",
           "semantic_output": "one or more contiguous pre-serialized subscriber body frames covering the complete authoritative changed span",
           "status": "anchored",
-          "edge_id": "daemon_mainline:Mirror->TransportSend",
-          "resource_from": "resource.mirror_store",
+          "edge_id": "daemon_mainline:BufferPublisher->TransportSend",
+          "resource_from": "resource.daemon_buffer_publisher",
           "resource_to": "resource.transport_subscriber",
           "via_resources": [],
           "relation_status": "direct"
@@ -2866,14 +3861,157 @@
           "from": "Message",
           "to": "Control",
           "owner_feature": "terminal.daemon_input",
-          "semantic_input": "control/input message",
+          "semantic_input": "control message",
           "semantic_output": "control dispatch",
           "status": "anchored",
           "edge_id": "daemon_mainline:Message->Control",
+          "resource_from": "resource.daemon_connection_gateway",
+          "resource_to": "resource.backend_session",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "Message",
+          "to": "ControlGateway",
+          "owner_feature": "daemon.control_center",
+          "semantic_input": "schedule and tmux control wire messages",
+          "semantic_output": "typed daemon control gateway dispatch",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:Message->ControlGateway",
+          "resource_from": "resource.transport_subscriber",
+          "resource_to": "resource.daemon_control_gateway",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "ControlGateway",
+          "to": "ControlCenter",
+          "owner_feature": "daemon.control_center",
+          "semantic_input": "typed daemon control command and subject",
+          "semantic_output": "capability-gated owner execution and audit",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:ControlGateway->ControlCenter",
+          "resource_from": "resource.daemon_control_gateway",
+          "resource_to": "resource.daemon_control_center",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "ControlGateway",
+          "to": "SessionCatalog",
+          "owner_feature": "daemon.session_catalog",
+          "semantic_input": "list-sessions control request",
+          "semantic_output": "backend-qualified sessions payload and list-time idle facts",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:ControlGateway->SessionCatalog",
+          "resource_from": "resource.daemon_control_gateway",
+          "resource_to": "resource.daemon_session_catalog",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "Control",
+          "to": "SessionCatalog",
+          "owner_feature": "daemon.session_catalog",
+          "semantic_input": "control-runtime catalog republish request",
+          "semantic_output": "fresh backend session catalog payload",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:Control->SessionCatalog",
+          "resource_from": "resource.backend_session",
+          "resource_to": "resource.daemon_session_catalog",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "ControlCenter",
+          "to": "Control",
+          "owner_feature": "daemon.control_center",
+          "semantic_input": "schedule/tmux owner command",
+          "semantic_output": "existing control owner dispatch preserving wire semantics",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:ControlCenter->Control",
+          "resource_from": "resource.daemon_control_center",
+          "resource_to": "resource.backend_session",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "ControlCenter",
+          "to": "Schedule",
+          "owner_feature": "daemon.control_center",
+          "semantic_input": "schedule control command",
+          "semantic_output": "schedule owner state transition",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:ControlCenter->Schedule",
+          "resource_from": "resource.daemon_control_center",
+          "resource_to": "resource.schedule_job",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "ControlCenter",
+          "to": "Tmux",
+          "owner_feature": "daemon.control_center",
+          "semantic_input": "tmux control command",
+          "semantic_output": "backend tmux side effect",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:ControlCenter->Tmux",
+          "resource_from": "resource.daemon_control_center",
+          "resource_to": "resource.backend_session",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "Message",
+          "to": "InputQueue",
+          "owner_feature": "terminal.daemon_input",
+          "semantic_input": "validated input or plain-text frame",
+          "semantic_output": "daemon input receive/ack/dedupe/queue dispatch",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:Message->InputQueue",
+          "resource_from": "resource.transport_subscriber",
+          "resource_to": "resource.daemon_input_queue",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "InputQueue",
+          "to": "Backend",
+          "owner_feature": "terminal.daemon_input",
+          "semantic_input": "ordered queued input groups",
+          "semantic_output": "backend session write",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:InputQueue->Backend",
           "resource_from": "resource.daemon_input_queue",
           "resource_to": "resource.backend_session",
           "via_resources": [],
           "relation_status": "direct"
+        },
+        {
+          "from": "Backend",
+          "to": "Tmux",
+          "owner_feature": "terminal.daemon_input",
+          "semantic_input": "ordered backend input group",
+          "semantic_output": "tmux literal write side effect",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:Backend->Tmux",
+          "resource_from": "resource.backend_session",
+          "resource_to": "resource.tmux_session",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "InputQueue",
+          "to": "ReliableInputAck",
+          "owner_feature": "terminal.daemon_input",
+          "semantic_input": "accepted reliable input seq",
+          "semantic_output": "bounded seq dedupe cache state",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:InputQueue->ReliableInputAck",
+          "resource_from": "resource.daemon_input_queue",
+          "resource_to": "resource.daemon_input_queue",
+          "via_resources": [],
+          "relation_status": "observer"
         },
         {
           "from": "Control",
@@ -2900,6 +4038,32 @@
           "resource_to": "resource.backend_session",
           "via_resources": [],
           "relation_status": "direct"
+        },
+        {
+          "from": "Message",
+          "to": "DaemonFileTransferMessageIn01Owner",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "paste/attach/list/download/screenshot/upload transport message or raw binary chunk for an attached subscriber",
+          "semantic_output": "daemon.file_transfer message-route owner dispatch preserving session-required and legacy wire semantics",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:Message->DaemonFileTransferMessageIn01Owner",
+          "resource_from": "resource.file_transfer",
+          "resource_to": "resource.file_transfer",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "DaemonFileTransferMessageIn01Owner",
+          "to": "DaemonFileTransferUploadIn02RuntimeFacade",
+          "owner_feature": "daemon.file_transfer",
+          "semantic_input": "validated file-transfer message dispatch",
+          "semantic_output": "exact daemon file-transfer handler invocation",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:DaemonFileTransferMessageIn01Owner->DaemonFileTransferUploadIn02RuntimeFacade",
+          "resource_from": "resource.file_transfer",
+          "resource_to": "resource.file_transfer",
+          "via_resources": [],
+          "relation_status": "observer"
         },
         {
           "from": "DaemonFileTransferUploadIn01MessageDispatch",
@@ -3040,9 +4204,126 @@
           "status": "anchored",
           "edge_id": "daemon_mainline:Server->Http",
           "resource_from": "resource.daemon_process",
-          "resource_to": "resource.debug_channel",
+          "resource_to": "resource.observability_channel",
           "via_resources": [],
           "relation_status": "direct"
+        },
+        {
+          "from": "Http",
+          "to": "DebugObservabilityIn01LogIngest",
+          "owner_feature": "daemon.cli_node",
+          "semantic_input": "authenticated POST /debug/runtime/logs observability metadata",
+          "semantic_output": "validated bounded client debug log ingestion",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:Http->DebugObservabilityIn01LogIngest",
+          "resource_from": "resource.daemon_process",
+          "resource_to": "resource.observability_channel",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "Http",
+          "to": "DebugObservabilityIn02SnapshotIngest",
+          "owner_feature": "daemon.cli_node",
+          "semantic_input": "authenticated POST /debug/runtime/snapshot observability metadata",
+          "semantic_output": "validated bounded client debug snapshot ingestion",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:Http->DebugObservabilityIn02SnapshotIngest",
+          "resource_from": "resource.daemon_process",
+          "resource_to": "resource.observability_channel",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "Http",
+          "to": "DebugObservabilityIn03ControlLease",
+          "owner_feature": "daemon.cli_node",
+          "semantic_input": "authenticated POST /debug/runtime/control expiring debug lease",
+          "semantic_output": "default-deny expiring debug enable/disable control",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:Http->DebugObservabilityIn03ControlLease",
+          "resource_from": "resource.daemon_process",
+          "resource_to": "resource.observability_channel",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "DebugObservabilityIn01LogIngest",
+          "to": "DebugObservabilityOut01Accepted",
+          "owner_feature": "daemon.cli_node",
+          "semantic_input": "accepted bounded client debug log batch",
+          "semantic_output": "typed accepted observability response",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:DebugObservabilityIn01LogIngest->DebugObservabilityOut01Accepted",
+          "resource_from": "resource.observability_channel",
+          "resource_to": "resource.observability_channel",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "DebugObservabilityIn01LogIngest",
+          "to": "DebugObservabilityError01Rejected",
+          "owner_feature": "daemon.cli_node",
+          "semantic_input": "invalid or unauthorized observability log request",
+          "semantic_output": "explicit rejected observability response",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:DebugObservabilityIn01LogIngest->DebugObservabilityError01Rejected",
+          "resource_from": "resource.observability_channel",
+          "resource_to": "resource.observability_channel",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "DebugObservabilityIn02SnapshotIngest",
+          "to": "DebugObservabilityOut01Accepted",
+          "owner_feature": "daemon.cli_node",
+          "semantic_input": "accepted bounded client debug snapshot",
+          "semantic_output": "typed accepted observability response",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:DebugObservabilityIn02SnapshotIngest->DebugObservabilityOut01Accepted",
+          "resource_from": "resource.observability_channel",
+          "resource_to": "resource.observability_channel",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "DebugObservabilityIn02SnapshotIngest",
+          "to": "DebugObservabilityError01Rejected",
+          "owner_feature": "daemon.cli_node",
+          "semantic_input": "invalid or unauthorized observability snapshot request",
+          "semantic_output": "explicit rejected observability response",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:DebugObservabilityIn02SnapshotIngest->DebugObservabilityError01Rejected",
+          "resource_from": "resource.observability_channel",
+          "resource_to": "resource.observability_channel",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "DebugObservabilityIn03ControlLease",
+          "to": "DebugObservabilityOut01Accepted",
+          "owner_feature": "daemon.cli_node",
+          "semantic_input": "accepted expiring debug lease",
+          "semantic_output": "typed accepted debug control response",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:DebugObservabilityIn03ControlLease->DebugObservabilityOut01Accepted",
+          "resource_from": "resource.observability_channel",
+          "resource_to": "resource.observability_channel",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "DebugObservabilityIn03ControlLease",
+          "to": "DebugObservabilityError01Rejected",
+          "owner_feature": "daemon.cli_node",
+          "semantic_input": "unauthorized or non-POST debug control request",
+          "semantic_output": "explicit rejected debug control response",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:DebugObservabilityIn03ControlLease->DebugObservabilityError01Rejected",
+          "resource_from": "resource.observability_channel",
+          "resource_to": "resource.observability_channel",
+          "via_resources": [],
+          "relation_status": "observer"
         },
         {
           "from": "Http",
@@ -3056,6 +4337,32 @@
           "resource_to": "resource.attachment_delivery",
           "via_resources": ["resource.daemon_process"],
           "relation_status": "via"
+        },
+        {
+          "from": "Message",
+          "to": "AttachmentMessageIn01Owner",
+          "owner_feature": "daemon.attachment_delivery",
+          "semantic_input": "pending/history/asset/receipt transport message",
+          "semantic_output": "attachment delivery owner command",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:Message->AttachmentMessageIn01Owner",
+          "resource_from": "resource.attachment_delivery",
+          "resource_to": "resource.attachment_delivery",
+          "via_resources": [],
+          "relation_status": "observer"
+        },
+        {
+          "from": "AttachmentMessageIn01Owner",
+          "to": "AttachmentIn02DeliveryOwner",
+          "owner_feature": "daemon.attachment_delivery",
+          "semantic_input": "validated attachment query/asset/receipt identity",
+          "semantic_output": "one serialized attachment store operation",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:AttachmentMessageIn01Owner->AttachmentIn02DeliveryOwner",
+          "resource_from": "resource.attachment_delivery",
+          "resource_to": "resource.attachment_delivery",
+          "via_resources": [],
+          "relation_status": "observer"
         },
         {
           "from": "AttachmentHttpIn01AuthenticatedRequest",
@@ -3085,14 +4392,53 @@
         },
         {
           "from": "Server",
-          "to": "Debug",
+          "to": "DaemonDebugHub",
           "owner_feature": "daemon.runtime_entry",
           "semantic_input": "debug event",
           "semantic_output": "debug projection",
           "status": "anchored",
-          "edge_id": "daemon_mainline:Server->Debug",
+          "edge_id": "daemon_mainline:Server->DaemonDebugHub",
           "resource_from": "resource.daemon_process",
           "resource_to": "resource.debug_channel",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "SharedNodeContract",
+          "to": "SharedDebugContract",
+          "owner_feature": "shared.debug_contract",
+          "semantic_input": "shared debug contract consumes runtime node identity, lifecycle, and subscription contracts",
+          "semantic_output": "typed debug events, snapshots, filters, and permissions remain bound to foundation node contracts",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:SharedNodeContract->SharedDebugContract",
+          "resource_from": "resource.runtime_node_registry",
+          "resource_to": "resource.debug_snapshot_registry",
+          "via_resources": [],
+          "relation_status": "direct"
+        },
+        {
+          "from": "SharedNodeContract",
+          "to": "DaemonDebugHub",
+          "owner_feature": "daemon.observability",
+          "semantic_input": "daemon debug stores bind node identity and lifecycle metadata to local debug snapshots",
+          "semantic_output": "daemon runtime debug node identity and lifecycle projection available to the daemon debug hub",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:SharedNodeContract->DaemonDebugHub",
+          "resource_from": "resource.runtime_node_registry",
+          "resource_to": "resource.daemon_debug_hub",
+          "via_resources": ["resource.debug_snapshot_registry"],
+          "relation_status": "via"
+        },
+        {
+          "from": "SharedDebugContract",
+          "to": "DaemonDebugHub",
+          "owner_feature": "daemon.observability",
+          "semantic_input": "daemon debug hub consumes shared debug producer registration, bounded events, snapshots, and permission contracts",
+          "semantic_output": "bounded daemon debug event/snapshot/permission truth",
+          "status": "anchored",
+          "edge_id": "daemon_mainline:SharedDebugContract->DaemonDebugHub",
+          "resource_from": "resource.debug_snapshot_registry",
+          "resource_to": "resource.daemon_debug_hub",
           "via_resources": [],
           "relation_status": "direct"
         },
@@ -3177,34 +4523,6 @@
           "via_resources": [],
           "relation_status": "direct",
           "edge_id": "daemon_mainline:Message->ChannelRegistry"
-        },
-        {
-          "from": "Mirror",
-          "to": "SendScheduler",
-          "owner_feature": "terminal.transport_lifecycle",
-          "semantic_input": "mirror revision for one or more body-subscribed channels",
-          "semantic_output": "priority-lane mux send work with pending-latest body coalescing per channel",
-          "status": "anchored",
-          "resource_from": "resource.mirror_store",
-          "resource_to": "resource.transport_subscriber",
-          "via_resources": [],
-          "relation_status": "direct",
-          "edge_id": "daemon_mainline:Mirror->SendScheduler"
-        },
-        {
-          "from": "SendScheduler",
-          "to": "TransportSend",
-          "owner_feature": "terminal.transport_lifecycle",
-          "semantic_input": "prioritized mux frame work item",
-          "semantic_output": "single physical transport send operation",
-          "status": "anchored",
-          "resource_from": "resource.transport_subscriber",
-          "resource_to": "resource.daemon_target_transport",
-          "via_resources": [
-            "resource.terminal_channel"
-          ],
-          "relation_status": "via",
-          "edge_id": "daemon_mainline:SendScheduler->TransportSend"
         },
         {
           "from": "Relay",
@@ -3352,19 +4670,6 @@
           "relation_status": "direct"
         },
         {
-          "from": "Message",
-          "to": "IdleSessionListIn01ControlTrigger",
-          "owner_feature": "daemon.session_idle_detection",
-          "semantic_input": "list-sessions target control request",
-          "semantic_output": "list-time idle fact publication trigger",
-          "status": "anchored",
-          "edge_id": "daemon_mainline:Message->IdleSessionListIn01ControlTrigger",
-          "resource_from": "resource.mirror_store",
-          "resource_to": "resource.session_idle_facts",
-          "via_resources": [],
-          "relation_status": "direct"
-        },
-        {
           "from": "MuxHandshake",
           "to": "IdleSessionMuxOpenIn01ControlTrigger",
           "owner_feature": "daemon.session_idle_detection",
@@ -3378,17 +4683,17 @@
           "relation_status": "direct"
         },
         {
-          "from": "IdleSessionListIn01ControlTrigger",
+          "from": "SessionCatalog",
           "to": "IdleSessionPublishIn01Request",
-          "owner_feature": "daemon.session_idle_detection",
+          "owner_feature": "daemon.session_catalog",
           "semantic_input": "list-time publish intent",
           "semantic_output": "target control publisher invocation",
           "status": "anchored",
-          "edge_id": "daemon_mainline:IdleSessionListIn01ControlTrigger->IdleSessionPublishIn01Request",
-          "resource_from": "resource.session_idle_facts",
+          "edge_id": "daemon_mainline:SessionCatalog->IdleSessionPublishIn01Request",
+          "resource_from": "resource.daemon_session_catalog",
           "resource_to": "resource.session_idle_facts",
           "via_resources": [],
-          "relation_status": "observer"
+          "relation_status": "direct"
         },
         {
           "from": "IdleSessionMuxOpenIn01ControlTrigger",

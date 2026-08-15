@@ -1,0 +1,45 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "EVID-20260815-ZARCHV2-P4-PROD-WIRE-INGRESS-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-phase4-production",
+  "kind": "gate",
+  "source_commit": "9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c",
+  "scope": {
+    "module_id": "client.wire_ingress",
+    "feature_id": "terminal.buffer_render",
+    "entrypoint": "pnpm --dir android run test:terminal:frame-assembly"
+  },
+  "producer": {
+    "adapter": "appsdk",
+    "identity": "codex-zterm-v2-phase4-wire-ingress-20260815T064817Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "Client wire ingress normalization is now physically owned by active module client.wire_ingress under src/lib/wire-ingress; normalizeIncomingBufferPayload and normalizeTerminalCursorState moved out of session-wire-helpers.ts, while the outbound host-config builder remains owned by client.daemon_connection. Module/edge/resource/feature/function/wiki/mainline/AppSDK maps and the v2 test design were updated in lockstep, and the stale frame-assembly gate wiring now runs the new test. Verified test:terminal:frame-assembly 104/104, test:feature-registry 84/84, test:terminal:contracts 826/826 in 55 files, tsc --noEmit PASS, git diff --check PASS, daemon:mirror:close-loop all 9 cases plus replay and strict audit PASS, and appsdk verify android ok:true at draft. Phase 4 slice remains production_pending_review because review/promotion is not recorded.",
+  "created_at": "2026-08-15T06:48:17Z",
+  "expires_at": "2026-11-15T06:48:17Z",
+  "input_hashes": [
+    "sha256:cf1b61e0f5410954956c7d041d34c47fc09c7e8a87093f062173affdffaf4796",
+    "sha256:cb1289ce723418b0ad59edc26d4f7de5d0954defc9c222a923d52088e7fb28a0",
+    "sha256:6d38040cdcc97f6d116e2b2f6875517b8e78564846577e43e5f1da7916acdf55",
+    "sha256:9dfbb2112dbb1a858b025badd8b56af36fe041d2c271434425599e31df2e632e",
+    "sha256:57edabe16dddb4223f56a53928f7f1bc9ff0b16792f3ea7c883a1b5e123a021d",
+    "sha256:043852405abe03f956566f2dd31cf9c506f7234390f5484a70231ea389568174",
+    "sha256:eaf51d9c590884e0107e42ad54d9a1abeb19de1000a29984d2ce8c2a6821c307",
+    "sha256:ae8cf236a3cb510f1e9ea22f527c7e38164fd6c6063cfbc4805bc16e9546fc61",
+    "sha256:cf617c9ea5519d0be317db083e0191e7b9fff04ed3ee2009635445a778055bc9",
+    "sha256:07d53321e5f585c1b5845abe5e9eea55edaec83ff36261aacd24721835600669",
+    "sha256:ff6a3aac2eec2e29bd28fd120ca87eb1ecc2f085fe64923de102605f524f37eb",
+    "sha256:cf7427abde6cbebcd4a84861f46c1e9356fcb3e1d838c6db8d7e2b164b0d87fc",
+    "sha256:95232aa8a8a4eb51079b4a9b156a817c77c507bcfd95d4a7d59995838bb003b3",
+    "sha256:73185f1cd24be16788f6adc2b18ab7f6a7831a6160f18f5a3a45a9114cf24b67",
+    "sha256:113ef13ad3f0fda624f4435243c5dbaae9c185f1325bc29fba9d23d0ab93f91e",
+    "sha256:1e95220637ec859439b3cfe7ee44c62cd8e4bea6d2c68e2633726820d91ed4f2",
+    "sha256:0ff1b3cd58af9a8d1f8de63b637c31cfd50fc6f14f956cf355739bc62c4aeb21",
+    "sha256:46b0afce3f147a55bda5e54ef92e242783243f6ca1d34b3fcb0515b29b455ada",
+    "sha256:6ef73ceb848ef8846f07b184c8f5ca6da7d1267dff4231c005364da5a0aef92e",
+    "sha256:0b69180f9c5eb509c722f1bb0b038d8fc1154d62b9e4d3ef9d76d517d2b0c77b"
+  ],
+  "scope_hash": "sha256:cf1b61e0f5410954956c7d041d34c47fc09c7e8a87093f062173affdffaf4796"
+}

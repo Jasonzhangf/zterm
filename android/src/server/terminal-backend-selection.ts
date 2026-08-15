@@ -1,6 +1,10 @@
 import { spawnSync } from 'node:child_process';
+import {
+  assertSupportedTerminalSourceKind,
+  type TerminalSourceKind,
+} from './terminal-source-adapter';
 
-export type TerminalBackendKind = 'tmux' | 'wezterm' | 'herdr';
+export type TerminalBackendKind = TerminalSourceKind;
 
 export interface ResolveTerminalBackendKindOptions {
   platform?: NodeJS.Platform;
@@ -10,12 +14,7 @@ export interface ResolveTerminalBackendKindOptions {
 export function resolveTerminalBackendKind(options: ResolveTerminalBackendKindOptions = {}): TerminalBackendKind {
   const env = options.env || process.env;
   const explicit = (env.ZTERM_TERMINAL_BACKEND || '').trim().toLowerCase();
-  if (explicit === 'tmux' || explicit === 'wezterm' || explicit === 'herdr') {
-    return explicit;
-  }
-  if (explicit) {
-    throw new Error(`unsupported ZTERM_TERMINAL_BACKEND: ${explicit}`);
-  }
+  if (explicit) return assertSupportedTerminalSourceKind(explicit);
   return (options.platform || process.platform) === 'win32' ? 'wezterm' : 'tmux';
 }
 

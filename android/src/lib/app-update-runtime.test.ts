@@ -408,7 +408,7 @@ describe('app-update-runtime', () => {
     runtime.restorePreferences();
     rollbackToBackup.mockResolvedValue(undefined);
 
-    const rolledBack = await runtime.rollbackToPreviousVersion();
+    const rolledBack = await runtime.rollbackToLocalBackup();
 
     expect(rolledBack).toBe(true);
     expect(rollbackToBackup).toHaveBeenCalledWith({

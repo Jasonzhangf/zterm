@@ -1,0 +1,52 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "EVID-20260815-ZARCHV2-P3-PROD-CONTROL-CENTER-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-phase3-production",
+  "kind": "gate",
+  "source_commit": "9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c",
+  "scope": {
+    "module_id": "client.control_center",
+    "feature_id": "client.control_center",
+    "entrypoint": "pnpm --dir android run test:control-center"
+  },
+  "producer": {
+    "adapter": "appsdk",
+    "identity": "codex-zterm-v2-phase3-control-center-20260815T085206Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "Phase 3 production control center slice: shared.control_contract owns packages/shared/src/terminal/control-contract.ts; client.control_center owns src/lib/control-center/client-control-center.ts; client.plugin_host owns src/lib/plugin-host/plugin-host-control-node.ts; App.tsx binds plugin-host and control-center through ClientCompositionRoot, registers PluginHostControlNode with capability plugin-host:dispose, and routes app-unmount disposal through ClientControlCenter instead of calling PluginHost.disposeAll directly. Docs/registries/wiki/AppSDK maps, plan, test design, architecture truth, resource registry, package prebuild, and CI are updated in lockstep. Verified test:control-center 13/13, test:composition-root 6/6, test:plugin-host 11/11, test:runtime-architecture-v2 30/30, test:feature-registry 84/84 in 11 files, tsc --noEmit PASS, full pnpm run build PASS including prebuild gates, Gradle, terminal contracts 826/826, and Vite, appsdk verify android ok:true draft, and git diff --check PASS. Worktree is uncommitted at HEAD 9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c. No ReviewRecord/PASS exists because codex-review MCP remains unavailable; this slice is production_pending_review and v2 overall is not complete.",
+  "created_at": "2026-08-15T08:52:06Z",
+  "expires_at": "2026-11-13T08:52:06Z",
+  "input_hashes": [
+    "sha256:5bc1f3451df470f992e81d2ce99cc577b934138844ac4debc55818a4b69470d4",
+    "sha256:8dded3b04a168c3290d414038f6c3e7420937016089499188a2f4762145e0475",
+    "sha256:0d47804bc45c37ddfee9c3bf256aa0c366c5ab2734c50648020dc2c647242309",
+    "sha256:8c11acb1d2ca5e4ee615a789b912adb9c4ab9cfa713592828de6f2c79469804c",
+    "sha256:b9752a8ff24e50927db3a413b6d949ae08eb0b33a216004da00681849854df43",
+    "sha256:299c656ff27572d4880ef1e39f58f45d88b8fc0f1c03809fb587459992889a90",
+    "sha256:a44a78e2cb30af409c0a28836e631c16c5c910289451e5d2497cc68de4956811",
+    "sha256:c9cd46b57713ed90c1365b87c4708fa36bb941b8312402bd088f77d9019081ff",
+    "sha256:3dc065e915ffa7c88505c178df8bf8c041c9ffb27dd8e57e5bf3d0b75136d59d",
+    "sha256:8cf7f96357a46a8fd7576aea9b886800549ce9d1e4bb7cf311723f6fbd915bd4",
+    "sha256:0dd9a9a7fcfdb1f7a5da8e3a1476a9150bd06787f699d49df1264fcdfe621e86",
+    "sha256:bbe3abcc147187605426d9ec8ab4696dc754824239c88b583a97ecd5f2524a7e",
+    "sha256:5404abd90aa446088a2c22b46f3dfc20da692c4ae35dd5854e870fe9d84b5da3",
+    "sha256:fb75e15d69cdf0749cb752a96bbbaa8b49afba0eff34f88f0c4125e5ed76bf77",
+    "sha256:d501e81e6e3a862c208fe81e24132c2fa61808bab3d6521bfa555d7ad9d0e2c7",
+    "sha256:c3e9365a3e860a42c042be94af7562ed953d05f15f21f68102274c15a525baf8",
+    "sha256:828173a70a0be041ec0fcf5a2d5408d1dee41fbbf87e54a04cb50dcbf8dc3174",
+    "sha256:bf3578ddd722d7f52b54fd6ad798d9fdc79706f7db8c03638d7cf7e77ee21a6b",
+    "sha256:21a9328ae614d3cdb28ea2e02745a6429953e7b765616c71cd58948401598410",
+    "sha256:47dbea7b67d6b76ade51fa7d3253e137c9001213b1f553dc4ea74bb07603c691",
+    "sha256:cd5cae966593bd177a0e29877b9c2ad42bcc387acdd4c2ea639929f35b4d9a9a",
+    "sha256:76a3f1a3a81b0f2a43d354468a1e79b4d73651b81e244d04e5b3a909f4856569",
+    "sha256:b69b7c4446bb9daa204e6595e96dd12f1a36e47c0059353b154c5480ed468225",
+    "sha256:5fb353044e7693805caa0474f50fa685d7f3993cc4ab8929ab8c18fff3d4987b",
+    "sha256:4137edeeafb1a5a7696e0583167691771a91de119caf8fd012f86dc16a8e2891",
+    "sha256:6214fc14cf30d42abaaa6b5491f4e3b0e6d5cd3b834af74f316a355ceaeed2a1",
+    "sha256:f796a9c37fa7e061d767e9d326e0a8594d5a20a1af2175c55f0b0d19b33cb1b0"
+  ],
+  "scope_hash": "sha256:5bc1f3451df470f992e81d2ce99cc577b934138844ac4debc55818a4b69470d4"
+}

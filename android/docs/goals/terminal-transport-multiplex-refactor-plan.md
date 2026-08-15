@@ -226,7 +226,7 @@ Channel-bound messages:
 - file transfer messages
 - screenshot messages
 - remote-window request/status/control messages when invoked from a terminal context
-- debug-log/debug-snapshot with channel metadata only
+- runtime debug observability uses the dedicated HTTP side channel; debug-log/debug-snapshot are rejected by terminal mux classification
 
 Target-level messages:
 - `list-sessions`

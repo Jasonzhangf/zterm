@@ -10,6 +10,7 @@ import type { OpenTabRuntimeSwitchReason } from '../lib/open-tab-runtime-switch'
 const resolveRemoteRestorableOpenTabStateMock = vi.fn();
 const createTmuxSessionMock = vi.fn();
 const fetchTmuxSessionsMock = vi.fn();
+const fetchTmuxSessionCatalogMock = vi.fn();
 const killTmuxSessionMock = vi.fn();
 
 vi.mock('../lib/open-tab-restore', () => ({
@@ -19,6 +20,7 @@ vi.mock('../lib/open-tab-restore', () => ({
 vi.mock('../lib/tmux-sessions', () => ({
   createTmuxSession: (...args: unknown[]) => createTmuxSessionMock(...args),
   fetchTmuxSessions: (...args: unknown[]) => fetchTmuxSessionsMock(...args),
+  fetchTmuxSessionCatalog: (...args: unknown[]) => fetchTmuxSessionCatalogMock(...args),
   killTmuxSession: (...args: unknown[]) => killTmuxSessionMock(...args),
 }));
 
@@ -46,6 +48,7 @@ function createOptions(overrides: Partial<any> = {}) {
   const setPageState = vi.fn();
   const auditOpenTabsAgainstRemoteSessions = vi.fn(async () => undefined);
   const manageTmuxSessionsOnOpenTransport = overrides.manageTmuxSessionsOnOpenTransport || vi.fn(async () => null);
+  const queryTerminalSessionCatalogOnOpenTransport = overrides.queryTerminalSessionCatalogOnOpenTransport || vi.fn(async () => null);
   const applyOpenTabState = vi.fn((nextState: { tabs: any[]; activeSessionId: string | null }, persistOptions?: { preserveActiveSessionId?: string | null; switchRuntime?: OpenTabRuntimeSwitchReason }) => {
     const normalized = normalizeOpenTabIntentState(
       nextState.tabs,
@@ -104,6 +107,7 @@ function createOptions(overrides: Partial<any> = {}) {
     ensureTerminalPageVisible,
     applyOpenTabState,
     manageTmuxSessionsOnOpenTransport,
+    queryTerminalSessionCatalogOnOpenTransport,
     renameRemoteSession,
     setPageState,
     auditOpenTabsAgainstRemoteSessions,
@@ -132,6 +136,7 @@ function createOptions(overrides: Partial<any> = {}) {
       setPageState,
       auditOpenTabsAgainstRemoteSessions,
       manageTmuxSessionsOnOpenTransport,
+      queryTerminalSessionCatalogOnOpenTransport,
     },
   };
 }
@@ -160,6 +165,8 @@ describe('useSessionOpenActions explicit-open truth', () => {
     createTmuxSessionMock.mockResolvedValue([]);
     fetchTmuxSessionsMock.mockReset();
     fetchTmuxSessionsMock.mockResolvedValue([]);
+    fetchTmuxSessionCatalogMock.mockReset();
+    fetchTmuxSessionCatalogMock.mockResolvedValue({ sessionNames: [], sessionCatalog: [] });
     killTmuxSessionMock.mockReset();
     killTmuxSessionMock.mockResolvedValue([]);
     resolveRemoteRestorableOpenTabStateMock.mockReset();
@@ -1293,7 +1300,13 @@ describe('useSessionOpenActions explicit-open truth', () => {
         createdAt: 2,
       },
     ], 'active-zterm');
-    fetchTmuxSessionsMock.mockResolvedValueOnce(['beta', 'alpha', 'beta']);
+    fetchTmuxSessionCatalogMock.mockResolvedValueOnce({
+      sessionNames: ['beta', 'alpha', 'beta'],
+      sessionCatalog: [
+        { name: 'alpha', backend: 'tmux' },
+        { name: 'beta', backend: 'tmux' },
+      ],
+    });
     const { result } = renderHook(() => useSessionOpenActions({
       ...(harness.options as any),
       auditOpenTabsAgainstRemoteSessions,
@@ -1303,7 +1316,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
       await result.current.handleRefreshDrawerHostSessions('daemon-a');
     });
 
-    expect(fetchTmuxSessionsMock).toHaveBeenCalledWith(
+    expect(fetchTmuxSessionCatalogMock).toHaveBeenCalledWith(
       expect.objectContaining({
         bridgeHost: '100.127.23.27',
         bridgePort: 3333,
@@ -1318,6 +1331,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
       bridgeHost: '100.127.23.27',
       bridgePort: 3333,
       daemonHostId: 'daemon-a',
+      terminalBackend: 'tmux',
       authToken: 'token-a',
       sessionNames: ['alpha', 'beta'],
     });
@@ -1326,6 +1340,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
         bridgeHost: '100.127.23.27',
         bridgePort: 3333,
         daemonHostId: 'daemon-a',
+        terminalBackend: 'tmux',
       },
       ['alpha', 'beta'],
     );
@@ -1336,12 +1351,16 @@ describe('useSessionOpenActions explicit-open truth', () => {
     expect(harness.spies.switchSession).not.toHaveBeenCalled();
   });
 
-  it('refreshes both tmux and Herdr catalogs so running Herdr sessions enter the drawer history', async () => {
+  it('refreshes the unified daemon catalog so running Herdr sessions enter the drawer history', async () => {
     const auditOpenTabsAgainstRemoteSessions = vi.fn(async () => undefined);
     const harness = createOptions();
-    fetchTmuxSessionsMock
-      .mockResolvedValueOnce(['tmux-main'])
-      .mockResolvedValueOnce(['hd-codex']);
+    fetchTmuxSessionCatalogMock.mockResolvedValueOnce({
+      sessionNames: ['zterm', 'hd-codex'],
+      sessionCatalog: [
+        { name: 'zterm', backend: 'tmux' },
+        { name: 'hd-codex', backend: 'herdr' },
+      ],
+    });
     const { result } = renderHook(() => useSessionOpenActions({
       ...(harness.options as any),
       auditOpenTabsAgainstRemoteSessions,
@@ -1351,28 +1370,36 @@ describe('useSessionOpenActions explicit-open truth', () => {
       await result.current.handleRefreshDrawerHostSessions('daemon-a');
     });
 
-    expect(fetchTmuxSessionsMock).toHaveBeenNthCalledWith(
-      1,
-      expect.objectContaining({ terminalBackend: 'tmux' }),
+    expect(fetchTmuxSessionCatalogMock).toHaveBeenCalledTimes(1);
+    expect(fetchTmuxSessionCatalogMock).toHaveBeenCalledWith(
+      expect.objectContaining({ daemonHostId: 'daemon-a' }),
       expect.any(Object),
     );
-    expect(fetchTmuxSessionsMock).toHaveBeenNthCalledWith(
-      2,
-      expect.objectContaining({ terminalBackend: 'herdr' }),
-      expect.any(Object),
-    );
+    expect(harness.spies.setSessionGroupSelection).toHaveBeenCalledWith(expect.objectContaining({
+      terminalBackend: 'tmux',
+      sessionNames: ['zterm'],
+    }));
     expect(harness.spies.setSessionGroupSelection).toHaveBeenCalledWith(expect.objectContaining({
       terminalBackend: 'herdr',
       sessionNames: ['hd-codex'],
     }));
+    expect(harness.spies.pruneSessionGroupSelectionToRemoteTruth).toHaveBeenCalledWith(
+      expect.objectContaining({ terminalBackend: 'tmux' }),
+      ['zterm'],
+    );
+    expect(harness.spies.pruneSessionGroupSelectionToRemoteTruth).toHaveBeenCalledWith(
+      expect.objectContaining({ terminalBackend: 'herdr' }),
+      ['hd-codex'],
+    );
   });
 
-  it('does not let an unavailable optional Herdr catalog block tmux refresh', async () => {
+  it('keeps tmux projection when the unified catalog has no Herdr sessions', async () => {
     const auditOpenTabsAgainstRemoteSessions = vi.fn(async () => undefined);
     const harness = createOptions();
-    fetchTmuxSessionsMock
-      .mockResolvedValueOnce(['tmux-main'])
-      .mockRejectedValueOnce(new Error('Herdr backend unavailable'));
+    fetchTmuxSessionCatalogMock.mockResolvedValueOnce({
+      sessionNames: ['tmux-main'],
+      sessionCatalog: [{ name: 'tmux-main', backend: 'tmux' }],
+    });
     const { result } = renderHook(() => useSessionOpenActions({
       ...(harness.options as any),
       auditOpenTabsAgainstRemoteSessions,
@@ -1383,15 +1410,22 @@ describe('useSessionOpenActions explicit-open truth', () => {
     });
 
     expect(harness.spies.setSessionGroupSelection).toHaveBeenCalledWith(expect.objectContaining({
+      terminalBackend: 'tmux',
       sessionNames: ['tmux-main'],
     }));
   });
 
   it('refreshes drawer host sessions through an existing open mux target transport when available', async () => {
-    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => ['beta', 'alpha', 'beta']);
+    const queryTerminalSessionCatalogOnOpenTransport = vi.fn(async () => ({
+      sessionNames: ['alpha', 'beta'],
+      sessionCatalog: [
+        { name: 'alpha', backend: 'tmux' },
+        { name: 'beta', backend: 'tmux' },
+      ],
+    }));
     const harness = createOptions({
       runtimeActiveSessionId: 'active-zterm',
-      manageTmuxSessionsOnOpenTransport,
+      queryTerminalSessionCatalogOnOpenTransport,
       sessions: [{
         id: 'active-zterm',
         bridgeHost: '100.127.23.27',
@@ -1408,26 +1442,29 @@ describe('useSessionOpenActions explicit-open truth', () => {
       await result.current.handleRefreshDrawerHostSessions('daemon-a');
     });
 
-    expect(manageTmuxSessionsOnOpenTransport).toHaveBeenCalledWith(
+    expect(queryTerminalSessionCatalogOnOpenTransport).toHaveBeenCalledWith(
       'active-zterm',
       { type: 'list-sessions' },
     );
+    expect(harness.spies.manageTmuxSessionsOnOpenTransport).not.toHaveBeenCalled();
+    expect(fetchTmuxSessionCatalogMock).not.toHaveBeenCalled();
     expect(fetchTmuxSessionsMock).not.toHaveBeenCalled();
     expect(harness.spies.setSessionGroupSelection).toHaveBeenCalledWith(
       expect.objectContaining({
         daemonHostId: 'daemon-a',
+        terminalBackend: 'tmux',
         sessionNames: ['alpha', 'beta'],
       }),
     );
   });
 
   it('does not fallback to a second tmux management socket when existing mux target management fails', async () => {
-    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => {
+    const queryTerminalSessionCatalogOnOpenTransport = vi.fn(async () => {
       throw new Error('mux target request timeout');
     });
     const harness = createOptions({
       runtimeActiveSessionId: 'active-zterm',
-      manageTmuxSessionsOnOpenTransport,
+      queryTerminalSessionCatalogOnOpenTransport,
       sessions: [{
         id: 'active-zterm',
         bridgeHost: '100.127.23.27',
@@ -1441,6 +1478,7 @@ describe('useSessionOpenActions explicit-open truth', () => {
     const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
 
     await expect(result.current.handleRefreshDrawerHostSessions('daemon-a')).rejects.toThrow('mux target request timeout');
+    expect(fetchTmuxSessionCatalogMock).not.toHaveBeenCalled();
     expect(fetchTmuxSessionsMock).not.toHaveBeenCalled();
   });
 
@@ -1450,7 +1488,10 @@ describe('useSessionOpenActions explicit-open truth', () => {
       manageTmuxSessionsOnOpenTransport,
       sessions: [],
     });
-    fetchTmuxSessionsMock.mockResolvedValueOnce(['alpha']);
+    fetchTmuxSessionCatalogMock.mockResolvedValueOnce({
+      sessionNames: ['alpha'],
+      sessionCatalog: [{ name: 'alpha', backend: 'tmux' }],
+    });
     const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
 
     await act(async () => {
@@ -1458,17 +1499,17 @@ describe('useSessionOpenActions explicit-open truth', () => {
     });
 
     expect(manageTmuxSessionsOnOpenTransport).not.toHaveBeenCalled();
-    expect(fetchTmuxSessionsMock).toHaveBeenCalledWith(
+    expect(fetchTmuxSessionCatalogMock).toHaveBeenCalledWith(
       expect.objectContaining({ daemonHostId: 'daemon-a' }),
       expect.any(Object),
     );
   });
 
   it('does not open a legacy tmux management socket when a matching session has no ready mux transport', async () => {
-    const manageTmuxSessionsOnOpenTransport = vi.fn(async () => null);
+    const queryTerminalSessionCatalogOnOpenTransport = vi.fn(async () => null);
     const harness = createOptions({
       runtimeActiveSessionId: 'active-zterm',
-      manageTmuxSessionsOnOpenTransport,
+      queryTerminalSessionCatalogOnOpenTransport,
       sessions: [{
         id: 'active-zterm',
         bridgeHost: '100.127.23.27',
@@ -1482,12 +1523,13 @@ describe('useSessionOpenActions explicit-open truth', () => {
     const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
 
     await expect(result.current.handleRefreshDrawerHostSessions('daemon-a'))
-      .rejects.toThrow('Existing terminal transport is unavailable for tmux management');
+      .rejects.toThrow('Existing terminal transport is unavailable for session catalog refresh');
 
-    expect(manageTmuxSessionsOnOpenTransport).toHaveBeenCalledWith(
+    expect(queryTerminalSessionCatalogOnOpenTransport).toHaveBeenCalledWith(
       'active-zterm',
       { type: 'list-sessions' },
     );
+    expect(fetchTmuxSessionCatalogMock).not.toHaveBeenCalled();
     expect(fetchTmuxSessionsMock).not.toHaveBeenCalled();
   });
 
@@ -1567,14 +1609,17 @@ describe('useSessionOpenActions explicit-open truth', () => {
         },
       }],
     });
-    fetchTmuxSessionsMock.mockResolvedValueOnce(['alpha']);
+    fetchTmuxSessionCatalogMock.mockResolvedValueOnce({
+      sessionNames: ['alpha'],
+      sessionCatalog: [{ name: 'alpha', backend: 'tmux' }],
+    });
     const { result } = renderHook(() => useSessionOpenActions(harness.options as any));
 
     await act(async () => {
       await result.current.handleRefreshDrawerHostSessions('daemon-a');
     });
 
-    expect(fetchTmuxSessionsMock).toHaveBeenCalledWith(
+    expect(fetchTmuxSessionCatalogMock).toHaveBeenCalledWith(
       expect.objectContaining({
         bridgeHost: '100.75.122.121',
         bridgePort: 3333,
@@ -1798,7 +1843,7 @@ describe('useSessionOpenActions remote tmux rename', () => {
 
     expect(manageTmuxSessionsOnOpenTransport).toHaveBeenCalledWith(
       'active-zterm',
-      { type: 'tmux-rename-session', payload: { sessionName: 'old-name', nextSessionName: 'new-session', terminalBackend: 'tmux' } },
+      { type: 'tmux-rename-session', payload: { sessionName: 'old-name', nextSessionName: 'new-session' } },
     );
     expect(harness.spies.renameRemoteSession).toHaveBeenCalledWith('active-zterm', 'new-session');
     expect(harness.refs.openTabStateRef.current.tabs.find((tab) => tab.sessionId === 'active-zterm')?.sessionName).toBe('new-session');

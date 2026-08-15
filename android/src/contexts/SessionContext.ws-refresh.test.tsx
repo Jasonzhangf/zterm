@@ -7284,6 +7284,12 @@ describe('SessionContext websocket dynamic refresh', () => {
     });
     expect(sentMessages.some((item) => item.type === 'binary')).toBe(true);
     expect(MockWebSocket.instances).toHaveLength(1);
+
+    ws.triggerMessage({
+      type: 'image-pasted',
+      payload: { name: 'proof.png', mimeType: 'image/png', bytes: 4 },
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
   it('streams remote screenshot chunks into preview payload and reports progress phases', async () => {

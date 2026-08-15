@@ -168,6 +168,7 @@ describe('resource registry truth gate', () => {
       'resource.tmux_session',
       'resource.wezterm_pane',
       'resource.mirror_store',
+      'resource.daemon_buffer_publisher',
       'resource.daemon_input_queue',
       'resource.client_buffer_frame_assembly',
       'resource.client_sparse_buffer',

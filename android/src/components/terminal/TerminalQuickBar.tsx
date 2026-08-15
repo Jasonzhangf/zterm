@@ -71,7 +71,7 @@ import { shouldAllowQuickBarShellPointerEvent } from "./terminal-quickbar-shell-
 import { buildTerminalShortcutSequence } from "../../../../packages/shared/src/shortcuts/terminal-shortcut-composer";
 import { resolveTerminalOrientation } from "../../lib/terminal-viewport-metrics";
 
-interface TerminalQuickBarProps {
+export interface TerminalQuickBarProps {
   activeSessionId?: string | null;
   quickActions: QuickAction[];
   shortcutActions: TerminalShortcutAction[];
@@ -588,13 +588,13 @@ function TerminalQuickBarComponent({
       }
       if (action.id === "remote-screenshot") {
         if (!activeSessionId) {
-          alert("当前没有可用的目标 session");
+          showToast("当前没有可用的目标 session");
           return;
         }
         void Promise.resolve(
           onRequestRemoteScreenshot?.(activeSessionId),
         ).catch((error) => {
-          alert(error instanceof Error ? error.message : "远程截图失败");
+          showToast(error instanceof Error ? `远程截图失败：${error.message}` : "远程截图失败");
         });
         return;
       }
@@ -620,6 +620,7 @@ function TerminalQuickBarComponent({
       onSendSequence,
       onShortcutUse,
       onSetSplitCount,
+      showToast,
       onToggleAbsoluteLineNumbers,
       onToggleCopyMode,
       onToggleDebugOverlay,
@@ -2037,13 +2038,13 @@ function TerminalQuickBarComponent({
           }
           const targetSessionId = activeSessionId || null;
           if (!targetSessionId) {
-            alert("当前没有可用的目标 session");
+            showToast("当前没有可用的目标 session");
             return;
           }
           try {
             await onFileAttach?.(targetSessionId, file);
           } catch (error) {
-            alert(error instanceof Error ? error.message : "传文件失败");
+            showToast(error instanceof Error ? `传文件失败：${error.message}` : "传文件失败");
           }
         }}
       />

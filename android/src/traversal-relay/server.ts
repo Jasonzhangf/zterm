@@ -1283,9 +1283,13 @@ function registerDeviceStream(ws: WebSocket, request: IncomingMessage, url: URL)
         return;
       }
       if (message.type === 'client-debug-log') {
-        const relayDeviceId = asString(message.payload?.deviceId) || connection.deviceId;
+        const payloadDeviceId = asString(message.payload?.deviceId);
+        const relayDeviceId = connection.deviceId;
         if (!relayDeviceId) {
           throw new Error('deviceId is required for client-debug-log');
+        }
+        if (payloadDeviceId && payloadDeviceId !== relayDeviceId) {
+          throw new Error('deviceId mismatch for client-debug-log');
         }
         clientDebugStore.appendLogs(
           user.id,
@@ -1295,9 +1299,13 @@ function registerDeviceStream(ws: WebSocket, request: IncomingMessage, url: URL)
         return;
       }
       if (message.type === 'client-debug-snapshot') {
-        const relayDeviceId = asString(message.payload?.deviceId) || connection.deviceId;
+        const payloadDeviceId = asString(message.payload?.deviceId);
+        const relayDeviceId = connection.deviceId;
         if (!relayDeviceId) {
           throw new Error('deviceId is required for client-debug-snapshot');
+        }
+        if (payloadDeviceId && payloadDeviceId !== relayDeviceId) {
+          throw new Error('deviceId mismatch for client-debug-snapshot');
         }
         clientDebugStore.setSnapshot(user.id, relayDeviceId, {
           requestId: asString(message.payload?.requestId),

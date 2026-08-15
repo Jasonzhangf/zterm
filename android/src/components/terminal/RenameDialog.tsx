@@ -6,6 +6,7 @@ export interface RenameDialogProps {
   initialValue: string;
   confirmLabel?: string;
   inputLabel?: string;
+  errorMessage?: string | null;
   onCancel: () => void;
   onSubmit: (nextValue: string) => void;
 }
@@ -16,6 +17,7 @@ export function RenameDialog({
   initialValue,
   confirmLabel = '确认重命名',
   inputLabel = '新的名称',
+  errorMessage = null,
   onCancel,
   onSubmit,
 }: RenameDialogProps) {
@@ -117,6 +119,20 @@ export function RenameDialog({
             outline: 'none',
           }}
         />
+        {errorMessage ? (
+          <div
+            role="alert"
+            data-testid="rename-dialog-error"
+            style={{
+              marginTop: '10px',
+              color: '#ff8a8a',
+              fontSize: '12px',
+              lineHeight: 1.45,
+            }}
+          >
+            {errorMessage}
+          </div>
+        ) : null}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' }}>
           <button
             type="button"

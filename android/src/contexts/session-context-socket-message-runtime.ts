@@ -5,7 +5,7 @@ import {
   buildSessionScheduleListLoadingState,
 } from './session-transport-open-helpers';
 import { hasSessionLocalWindow } from './session-buffer-planner-helpers';
-import { normalizeIncomingBufferPayload, normalizeTerminalCursorState } from './session-wire-helpers';
+import { normalizeIncomingBufferPayload, normalizeTerminalCursorState } from '../lib/wire-ingress/buffer-wire-normalize';
 import { runtimeDebugPrechecked, setRuntimeDebugEnabled } from '../lib/runtime-debug';
 import { isFileTransferMessage } from '../lib/file-transfer-message-runtime';
 import { isRemoteWindowControlMessage, type RemoteWindowControlMessage } from '../lib/remote-window-message-runtime';
@@ -25,6 +25,7 @@ import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import { deletePendingSessionTransportOpenIntent } from './session-context-open-intent-store';
+import type { ImagePasteWaiterRuntime } from './session-context-transfer-runtime';
 
 interface MutableRefObject<T> {
   current: T;
@@ -58,6 +59,17 @@ function isTerminalSessionMissingCode(code?: string) {
 
 function isRetryableTerminalAttachCode(code?: string) {
   return code === 'tmux_session_unavailable';
+}
+
+function isSessionBusinessErrorCode(code?: string) {
+  return (
+    code === 'paste_image_failed'
+    || code === 'herdr_file_transfer_unsupported'
+    || code === 'paste_image_no_pending'
+    || code === 'session_not_ready'
+    || code === 'session_required'
+    || code === 'attachment_read_failed'
+  );
 }
 
 export function handleSocketServerMessageRuntime(options: {
@@ -103,6 +115,7 @@ export function handleSocketServerMessageRuntime(options: {
   setSessionTitleSync: (id: string, title: string) => void;
   fileTransferMessageRuntime: FileTransferDispatcher;
   remoteWindowMessageRuntime?: RemoteWindowMessageDispatcher;
+  imagePasteWaiterRuntime?: ImagePasteWaiterRuntime;
   updateSessionSync: (id: string, updates: Partial<Session>) => void;
   handleAttachmentError?: (message: string, code?: string) => void;
 }) {
@@ -225,6 +238,8 @@ export function handleSocketServerMessageRuntime(options: {
       options.setSessionTitleSync(params.sessionId, msg.payload);
       break;
     case 'image-pasted':
+      options.imagePasteWaiterRuntime?.resolve(params.sessionId);
+      break;
     case 'file-attached':
       break;
     case 'file-list-response':
@@ -255,6 +270,22 @@ export function handleSocketServerMessageRuntime(options: {
       handleTerminalInputAck(params.sessionId, msg.payload);
       break;
     case 'error':
+      if (
+        msg.payload.code === 'paste_image_failed'
+        || msg.payload.code === 'herdr_file_transfer_unsupported'
+        || msg.payload.code === 'session_not_ready'
+        || msg.payload.code === 'session_required'
+        || msg.payload.code === 'paste_image_no_pending'
+      ) {
+        if (options.imagePasteWaiterRuntime?.reject(params.sessionId, msg.payload.message)) {
+          options.runtimeDebug(`session.ws.${params.debugScope}.image-paste-failed`, {
+            sessionId: params.sessionId,
+            code: msg.payload.code,
+            message: msg.payload.message,
+          });
+          break;
+        }
+      }
       if (msg.payload.code === 'attachment_read_failed') {
         options.handleAttachmentError?.(msg.payload.message, msg.payload.code);
         options.runtimeDebug(`session.ws.${params.debugScope}.attachment-read-failed`, {
@@ -288,9 +319,18 @@ export function handleSocketServerMessageRuntime(options: {
         params.onClosed(msg.payload.message || msg.payload.code);
         break;
       }
+      if (isSessionBusinessErrorCode(msg.payload.code)) {
+        options.runtimeDebug(`session.ws.${params.debugScope}.business-error`, {
+          sessionId: params.sessionId,
+          code: msg.payload.code,
+          message: msg.payload.message,
+        });
+        break;
+      }
       params.onFailure(msg.payload.message, msg.payload.code !== 'unauthorized');
       break;
     case 'closed':
+      options.imagePasteWaiterRuntime?.reject(params.sessionId, msg.payload.reason || 'socket closed');
       params.onFailure(msg.payload.reason || 'socket closed', true);
       break;
     case 'sessions':

@@ -1,4 +1,4 @@
-import { memo as ReactMemo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo as ReactMemo, useCallback, useEffect, useMemo, useRef, useState, type ComponentProps } from "react";
 import { PaneStage, type PaneSlotDefinition } from "@zterm/shared";
 import { TerminalView } from "../components/TerminalView";
 import type { SessionRenderBufferStore } from "../lib/session-render-buffer-store";
@@ -743,4 +743,5 @@ const TerminalStageShell = ReactMemo(
     prev.onOpenPaneSessionPicker === next.onOpenPaneSessionPicker,
 );
 
+export type TerminalStageShellProps = ComponentProps<typeof TerminalStageShell>;
 export { TerminalStageShell };

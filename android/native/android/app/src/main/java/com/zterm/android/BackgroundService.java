@@ -23,7 +23,8 @@ import androidx.core.app.NotificationCompat;
  * 30s mux-ping heartbeat and lets the physical connection die. This service
  * therefore wakes the WebView on a timer (BACKGROUND_HEARTBEAT_INTERVAL_MS)
  * via evaluateJavascript so the JS heartbeat callback keeps firing while the
- * app is in background.
+ * app is in background. Foreground rounds skip the native wake because their
+ * JS timers are already running.
  */
 public class BackgroundService extends Service {
     private static final String CHANNEL_ID = "wterm_background";
@@ -41,10 +42,11 @@ public class BackgroundService extends Service {
         public void run() {
             heartbeatScheduled = false;
             final WebView webView = MainActivity.getStaticWebView();
-            if (webView != null) {
+            if (webView != null && !MainActivity.isActivityInForeground()) {
                 // This runnable already runs on the main looper. Calling
                 // evaluateJavascript directly avoids queueing the wake-up
-                // behind WebView's paused-view callback queue.
+                // behind WebView's paused-view callback queue. Foreground JS
+                // timers are already running, so skip the extra native call.
                 webView.evaluateJavascript(
                     "if(window.ztermBackgroundHeartbeatTick) { window.ztermBackgroundHeartbeatTick(); }",
                     null

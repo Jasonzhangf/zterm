@@ -238,8 +238,8 @@ function addToken(url: URL, token: string | undefined) {
   }
 }
 
-async function fetchJson(url: URL) {
-  const response = await fetch(url);
+async function fetchJson(url: URL, init?: RequestInit) {
+  const response = await fetch(url, init);
   const text = await response.text();
   if (!response.ok) {
     throw new Error(`request failed (${response.status}) ${url.pathname}: ${text}`);
@@ -257,11 +257,6 @@ async function collectTerminalRuntimeEvidence(target: BridgeDebugTarget, evidenc
   addToken(healthUrl, target.authToken);
   const controlUrl = new URL('/debug/runtime/control', baseUrl);
   addToken(controlUrl, target.authToken);
-  controlUrl.searchParams.set('enabled', '1');
-  controlUrl.searchParams.set('reason', APK_SMOKE_RUNTIME_DEBUG_REASON);
-  if (target.sessionId?.trim()) {
-    controlUrl.searchParams.set('sessionId', target.sessionId.trim());
-  }
 
   const artifacts: RuntimeCaptureArtifacts = {
     storageDump: '',
@@ -272,7 +267,15 @@ async function collectTerminalRuntimeEvidence(target: BridgeDebugTarget, evidenc
     },
   };
   artifacts.health = await fetchJson(healthUrl);
-  artifacts.control = await fetchJson(controlUrl);
+  artifacts.control = await fetchJson(controlUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      enabled: true,
+      reason: APK_SMOKE_RUNTIME_DEBUG_REASON,
+      sessionId: target.sessionId?.trim() || undefined,
+    }),
+  });
 
   const deadline = Date.now() + APK_SMOKE_RUNTIME_POLL_TIMEOUT_MS;
   let lastVerdict = null as ReturnType<typeof evaluateApkSmokeTerminalRuntime> | null;

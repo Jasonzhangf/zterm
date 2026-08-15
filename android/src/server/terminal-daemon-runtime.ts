@@ -43,6 +43,8 @@ export interface TerminalDaemonRuntimeDeps {
   logTimePrefix: () => string;
   shutdownTerminalSessions: (sessions: Map<string, TerminalSession>, reason: string) => void;
   detachSubscriberTransportOnly: (subscriber: TerminalSession, reason: string, transportId?: string) => void;
+  listMuxChannelSubscriberIds: (connection: DaemonTransportConnection) => string[];
+  releaseAllMuxChannelSubscribers: (connection: DaemonTransportConnection) => string[];
   destroyMirror: (mirror: SessionMirror, reason: string, options?: DestroyMirrorOptions) => void;
   disposeScheduleRuntime: () => void;
   startRelayHostClient: () => void;
@@ -125,7 +127,7 @@ export function createTerminalDaemonRuntime(
         if (connection.boundSubscriberId) {
           boundSubscriberIds.add(connection.boundSubscriberId);
         }
-        for (const subscriberId of connection.muxChannels?.values() || []) {
+        for (const subscriberId of deps.listMuxChannelSubscriberIds(connection)) {
           boundSubscriberIds.add(subscriberId);
         }
 
@@ -144,7 +146,7 @@ export function createTerminalDaemonRuntime(
               }
               deps.detachSubscriberTransportOnly(subscriber, reason, connection.transportId);
             }
-            connection.muxChannels?.clear();
+            deps.releaseAllMuxChannelSubscribers(connection);
             try {
               connection.closeTransport(reason);
             } catch (error) {
@@ -294,7 +296,7 @@ export function createTerminalDaemonRuntime(
     console.log(`  - rtc signal: ws://${deps.host}:${deps.port}/signal${deps.requiredAuthToken ? '?token=<auth>' : ''}`);
     console.log(`  - runtime debug snapshot: http://${deps.host}:${deps.port}/debug/runtime${deps.requiredAuthToken ? '?token=<auth>' : ''}`);
     console.log(`  - runtime debug logs: http://${deps.host}:${deps.port}/debug/runtime/logs${deps.requiredAuthToken ? '?token=<auth>&limit=200' : '?limit=200'}`);
-    console.log(`  - runtime debug control: http://${deps.host}:${deps.port}/debug/runtime/control${deps.requiredAuthToken ? '?token=<auth>&enabled=1' : '?enabled=1'}`);
+    console.log(`  - runtime debug control: POST http://${deps.host}:${deps.port}/debug/runtime/control${deps.requiredAuthToken ? '?token=<auth>' : ''} {"enabled":true,"ttlMs":600000}`);
     console.log(`  - updates manifest: http://${deps.host}:${deps.port}/updates/latest.json`);
     console.log(`  - updates dir: ${deps.updatesDir}`);
     console.log(`  - tmux binary: ${deps.tmuxBinary}`);

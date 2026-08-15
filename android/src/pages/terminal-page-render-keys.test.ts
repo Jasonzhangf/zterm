@@ -25,7 +25,7 @@ const session = {
 describe("terminal-page-render-keys", () => {
   it("builds rendered key with host+connection fields", () => {
     expect(terminalPageRenderedSessionUiKey(session)).toBe(
-      "s1::h1::conn::127.0.0.1::8765::main::Main::/tmp::turn",
+      "s1::h1::conn::127.0.0.1::8765::main::Main::/tmp::turn::::::::::::",
     );
   });
 

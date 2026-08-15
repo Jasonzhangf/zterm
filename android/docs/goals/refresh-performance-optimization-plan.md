@@ -12,11 +12,11 @@
 - **红测**：`multi-pane-refresh.test.ts` 新增 passive-fast-lane 场景，4 分屏被动 pane 在 good transport 下帧率达标
 - **验证**：`pnpm run type-check` clean；关联测试全绿；APK 推入 `~/.wterm/updates/`
 
-### P2 - Mirror Scheduler Per-Subscriber Cadence
-- **文件**：`android/src/server/terminal-mirror-runtime.ts` `resolveMirrorLiveSyncDelay`
+### P2 - Mirror Scheduler Per-Subscriber Cadence（已完成）
+- **文件**：`android/src/server/terminal-mirror-runtime.ts` `resolveMirrorLiveSyncDelay`；`android/src/server/terminal-performance-scheduler.ts`
 - **根因**：`Math.max(transportBufferedBytes/backpressure)` 取所有 subscriber 的最差值，一个慢 client 拖全 mirror
-- **修复**：subscriber 的 buffered/backpressure 改为 per-subscriber 独立记录；mirror 自身的 `flushInFlight`/`consecutiveFailures` 仍共享
-- **红测**：新增 `terminal-mirror-runtime-per-subscriber-cadence.test.ts`
+- **修复**：mirror scheduler 不再消费 subscriber backpressure；per-subscriber buffered/backpressure 由 `daemon.buffer_publisher` 独立 pending/flush 处理；mirror 自身的 `flushInFlight`/`consecutiveFailures` 仍共享
+- **红测**：`src/server/daemon-buffer-publisher-runtime.test.ts`；`src/server/terminal-mirror-runtime.backpressure.test.ts`
 - **验证**：同上
 
 ### P3 - Tab Switch No-Probe

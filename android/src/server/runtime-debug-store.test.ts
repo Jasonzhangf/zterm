@@ -116,8 +116,59 @@ describe('runtime debug store', () => {
       requestOrigin: 'http://device-a',
       snapshot: { ime: { inset: 240 } },
     });
+    expect(store.getSnapshot('s1')).toMatchObject({
+      schemaVersion: 1,
+      generation: 1,
+      sequence: 1,
+      sensitivity: 'internal',
+    });
+    expect(store.getSnapshot('s1')?.snapshotId).toContain('daemon.runtime.debug:s1');
     expect(store.listSnapshots().map((item) => item.sessionId).sort()).toEqual(['s1', 's2']);
     expect(store.getSummary().snapshotCount).toBe(2);
+  });
+
+  it('versions repeated snapshots for the same session', () => {
+    const store = createRuntimeDebugStore();
+    store.setSnapshot(
+      {
+        sessionId: 's1',
+        tmuxSessionName: 'alpha',
+      },
+      { revision: 1 },
+    );
+    const second = store.getSnapshot('s1');
+    store.setSnapshot(
+      {
+        sessionId: 's1',
+        tmuxSessionName: 'alpha',
+      },
+      { revision: 2 },
+    );
+    const third = store.getSnapshot('s1');
+
+    expect(second?.sequence).toBe(1);
+    expect(third?.sequence).toBe(2);
+    expect(second?.snapshotId).not.toBe(third?.snapshotId);
+    expect(third?.snapshot).toEqual({ revision: 2 });
+  });
+
+  it('reports bounded history drops', () => {
+    const store = createRuntimeDebugStore({ maxEntries: 2 });
+    store.appendBatch(
+      {
+        sessionId: 's1',
+        tmuxSessionName: 'alpha',
+      },
+      [
+        { seq: 1, ts: '2026-04-23T10:00:00.000Z', scope: 'a' },
+        { seq: 2, ts: '2026-04-23T10:00:01.000Z', scope: 'b' },
+        { seq: 3, ts: '2026-04-23T10:00:02.000Z', scope: 'c' },
+      ],
+    );
+
+    expect(store.getSummary().totalEntries).toBe(2);
+    expect(store.getSummary().droppedEntries).toBe(1);
+    expect(store.getDroppedEntryCount()).toBe(1);
   });
 
   it('clamps debug route limit to a safe range', () => {

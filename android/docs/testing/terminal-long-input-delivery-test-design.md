@@ -11,9 +11,9 @@ Long terminal input must preserve exact source text across the platform input ch
 | layer | owner feature | owner path | resource edge |
 | --- | --- | --- | --- |
 | Android native IME commit | `terminal.keyboard_ime` | `android/native/android/app/src/main/java/com/zterm/android/ImeAnchorInputLogic.java` | `resource.platform_input_channel -> resource.session_transport` |
-| Android reliable input queue | `terminal.daemon_input` | `android/src/contexts/session-context-input-runtime.ts` | `resource.platform_input_channel -> resource.client_reliable_input_queue -> resource.session_transport` |
+| Android reliable input queue | `terminal.daemon_input` | `android/src/lib/reliable-input/reliable-input-queue.ts` (+ thin bridge in `android/src/contexts/session-context-input-runtime.ts`) | `resource.platform_input_channel -> resource.client_reliable_input_queue -> resource.session_transport` |
 | daemon input receive/drop | `terminal.daemon_input` | `android/src/server/terminal-message-runtime.ts` | `resource.transport_subscriber -> resource.daemon_input_queue` |
-| daemon backend write queue | `terminal.daemon_input` | `android/src/server/terminal-control-runtime.ts` | `resource.daemon_input_queue -> resource.backend_session -> resource.tmux_session` |
+| daemon backend write queue | `terminal.daemon_input` | `android/src/server/daemon-input-queue-runtime.ts` + `terminal-control-runtime.ts#writeBackendInputGroup` | `resource.daemon_input_queue -> resource.backend_session -> resource.tmux_session` |
 
 Mainline call IDs:
 
@@ -21,6 +21,10 @@ Mainline call IDs:
 - `android_mainline:ClientReliableInputQueue->ChannelSend`
 - `android_mainline:SocketMessage->ClientReliableInputAck`
 - `daemon_mainline:Runtime->Message`
+- `daemon_mainline:Message->InputQueue`
+- `daemon_mainline:InputQueue->ReliableInputAck`
+- `daemon_mainline:InputQueue->Backend`
+- `daemon_mainline:Backend->Tmux`
 - `daemon_mainline:Message->Control`
 - `daemon_mainline:Control->Tmux`
 
@@ -42,7 +46,7 @@ Forbidden paths:
 - Android client transport:
   - long input becomes multiple `{ type: 'input', payload: string }` frames.
   - every frame is under the daemon frame budget.
-  - backpressured transport still sends zero chunks and closes explicitly.
+  - backpressured transport still sends zero chunks, keeps reliable retries on backoff, and never lets the input owner close/replace the socket.
   - one sequence remains pending until a matching ACK, then is removed exactly once.
   - the owner does not retry before the 5-second ACK timeout.
   - ACK timeout or physical transport replacement retries the same sequence instead of allocating a duplicate.
@@ -50,11 +54,14 @@ Forbidden paths:
 - daemon message runtime:
   - payload exactly at the frame max is accepted.
   - payload over the frame max returns `input_too_large` and never calls `handleInput`.
-- daemon control runtime:
+  - `input` and plain-text frames reach the queue owner; control frames do not enter the input queue.
+- daemon input queue runtime:
   - small same-microtask input still coalesces.
   - coalesced burst groups split before exceeding the 256-byte tmux literal-write budget.
   - one oversized item resolves only after all of its tmux chunks finish.
   - input queued while an earlier tmux write is in flight is drained in order.
+- daemon control runtime:
+  - `writeBackendInputGroup` remains the exact backend input write primitive consumed by the queue owner.
 
 ## Black-Box Gates
 

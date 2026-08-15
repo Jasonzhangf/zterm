@@ -87,17 +87,22 @@ describe('architecture boundary truth gate', () => {
     }
   });
 
-  it('keeps TerminalPage status/debug chrome as imported projections instead of inline duplicate owners', () => {
+  it('keeps TerminalPage shell/debug chrome on typed plugin projections instead of inline duplicate owners', () => {
     const terminalPageSource = stripComments(read('src/pages/TerminalPage.tsx'));
     const shellUiSource = stripComments(read('src/pages/terminal-page-shell-ui.tsx'));
     const debugOverlaySource = stripComments(read('src/pages/TerminalPageDebugOverlay.tsx'));
 
-    expect(terminalPageSource).toContain("from './terminal-page-shell-ui'");
-    expect(terminalPageSource).toContain("from './TerminalPageDebugOverlay'");
+    expect(terminalPageSource).toContain(
+      "from '../lib/plugin-terminal-shell/terminal-shell-contract'",
+    );
+    expect(terminalPageSource).toContain('renderTerminalShell');
+    expect(terminalPageSource).not.toContain("from './terminal-page-shell-ui'");
+    expect(terminalPageSource).toContain("from '../lib/plugin-debug-console/debug-console-contract'");
     expect(terminalPageSource).not.toMatch(/\bconst\s+TerminalQuickBarShell\s*=/);
     expect(terminalPageSource).not.toMatch(/\bfunction\s+TerminalQuickBarShell\b/);
     expect(terminalPageSource).not.toMatch(/\bexport\s+const\s+TerminalNetworkBanner\s*=/);
     expect(terminalPageSource).not.toMatch(/\bconst\s+TerminalNetworkBanner\s*=/);
+    expect(terminalPageSource).not.toContain("from './TerminalPageDebugOverlay'");
     expect(terminalPageSource).not.toMatch(/\bconst\s+TerminalDebugOverlay\s*=/);
     expect(terminalPageSource).not.toMatch(/\bfunction\s+TerminalDebugOverlay\b/);
 
@@ -169,6 +174,7 @@ describe('architecture boundary truth gate', () => {
 
   it('keeps session websocket reconnect decisions centralized in the transport lifecycle owner', () => {
     const inputRuntimeSource = stripComments(read('src/contexts/session-context-input-runtime.ts'));
+    const reliableInputQueueSource = stripComments(read('src/lib/reliable-input/reliable-input-queue.ts'));
     const activityRuntimeSource = stripComments(read('src/contexts/session-context-activity-runtime.ts'));
     const sessionRuntimeSource = stripComments(read('src/contexts/session-context-session-runtime.ts'));
     const transportPlannerSource = stripComments(read('src/contexts/session-transport-open-helpers.ts'));
@@ -182,6 +188,8 @@ describe('architecture boundary truth gate', () => {
     expect(inputRuntimeSource).not.toContain('probeOrReconnect');
     expect(inputRuntimeSource).not.toContain('shouldReconnectQueuedActiveInput');
     expect(inputRuntimeSource).not.toMatch(/cleanupSocket\s*\(/);
+    expect(inputRuntimeSource).not.toMatch(/ws\.close|close\(4000/);
+    expect(reliableInputQueueSource).not.toMatch(/ws\.close|close\(4000/);
 
     expect(activityRuntimeSource).not.toContain('probeOrReconnect');
     expect(activityRuntimeSource).not.toContain('forceReplaceTransport');
@@ -220,5 +228,44 @@ describe('architecture boundary truth gate', () => {
     expect(callMap).not.toContain('stale probe timeout');
     expect(callMap).toContain('same-socket head request');
     expect(callMap).toContain('explicit unavailable reconnect intent');
+  });
+
+  it('keeps control and debug planes out of business request/response payload contracts', () => {
+    const controlContract = read('../packages/shared/src/terminal/control-contract.ts');
+    const debugContract = read('../packages/shared/src/terminal/debug-contract.ts');
+    const protocolSource = read('../packages/shared/src/connection/protocol.ts');
+    const bufferSyncContract = read('src/server/buffer-sync-contract.ts');
+    const businessBodyFields = [
+      'terminalRow',
+      'bufferLines',
+      'payloadText',
+      'terminalText',
+      'mirrorRows',
+      'fileChunk',
+      'mediaFrame',
+      'sessionPayload',
+      'sparseRows',
+      'terminalBody',
+    ];
+    const controlDebugFields = [
+      'commandId',
+      'correlationId',
+      'debugEvent',
+      'debugSnapshot',
+      'dropCount',
+      'controlPlaneBrand',
+    ];
+
+    for (const field of businessBodyFields) {
+      expect(controlContract, `control contract must not carry ${field}`).not.toContain(field);
+      expect(debugContract, `debug contract must not carry ${field}`).not.toContain(field);
+    }
+    for (const field of controlDebugFields) {
+      expect(protocolSource, `business protocol must not carry ${field}`).not.toContain(field);
+      expect(bufferSyncContract, `buffer-sync payload must not carry ${field}`).not.toContain(field);
+    }
+
+    expect(controlContract).toContain('readonly params: T');
+    expect(debugContract).toContain('readonly payload: Readonly<S>');
   });
 });

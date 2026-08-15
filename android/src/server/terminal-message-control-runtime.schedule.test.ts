@@ -40,8 +40,8 @@ function makeDeps(overrides?: Partial<TerminalMessageControlRuntimeDeps>): Termi
     renameTmuxSession: vi.fn(() => 'tmux-2'),
     runTmux: vi.fn(() => ({ ok: true, stdout: '' })),
     sanitizeSessionName: (input?: string) => (input || '').trim(),
+    resolveTerminalSessionBackend: vi.fn(() => 'tmux'),
     createTransportSubscriber: vi.fn(() => makeSession()),
-    createMuxChannelSubscriber: vi.fn(() => makeSession()),
     bindConnectionToSubscriber: vi.fn((_connection, session) => session),
     getMirrorKey: (sessionName: string) => sessionName,
     attachTmux: vi.fn(),
@@ -117,8 +117,11 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
 
   it('republishes the selected backend catalog after creating a Herdr session', () => {
     const deps = makeDeps({
-      listTerminalSessions: vi.fn(() => ['tmux-default']),
-      listTmuxSessions: vi.fn((backend) => backend === 'herdr' ? ['hd-codex'] : ['tmux-default']),
+      listTerminalSessionCatalog: vi.fn(() => [
+        { name: 'tmux-default', backend: 'tmux' },
+        { name: 'hd-codex', backend: 'herdr' },
+      ]),
+      createDetachedTmuxSession: vi.fn(),
     });
 
     handleTmuxControlMessageRuntime(deps, connection, {
@@ -126,11 +129,16 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
       payload: { sessionName: 'hd-codex', terminalBackend: 'herdr' },
     });
 
-    expect(deps.listTmuxSessions).toHaveBeenCalledWith('herdr');
-    expect(deps.listTerminalSessions).not.toHaveBeenCalled();
+    expect(deps.createDetachedTmuxSession).toHaveBeenCalledWith('hd-codex', undefined, 'herdr');
     expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, {
       type: 'sessions',
-      payload: { sessions: ['hd-codex'] },
+      payload: {
+        sessions: ['tmux-default', 'hd-codex'],
+        sessionCatalog: [
+          { name: 'tmux-default', backend: 'tmux' },
+          { name: 'hd-codex', backend: 'herdr' },
+        ],
+      },
     });
   });
 
@@ -139,7 +147,9 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
       closeDetachedTerminalSession: vi.fn(() => {
         throw new Error("can't find session: stale");
       }),
-      listTmuxSessions: vi.fn(() => ['live']),
+      listTerminalSessionCatalog: vi.fn(() => [
+        { name: 'live', backend: 'tmux' },
+      ]),
     });
 
     handleTmuxControlMessageRuntime(deps, connection, {
@@ -150,7 +160,10 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
     expect(deps.scheduleEngine.markSessionMissing).toHaveBeenCalledWith('stale', 'session already absent', 'tmux');
     expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, {
       type: 'sessions',
-      payload: { sessions: ['live'] },
+      payload: {
+        sessions: ['live'],
+        sessionCatalog: [{ name: 'live', backend: 'tmux' }],
+      },
     });
     expect(deps.sendTransportMessage).not.toHaveBeenCalledWith(null, expect.objectContaining({ type: 'error' }));
   });
@@ -160,6 +173,7 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
       closeDetachedTerminalSession: vi.fn(() => {
         throw new Error('permission denied');
       }),
+      resolveTerminalSessionBackend: vi.fn(() => 'tmux'),
     });
 
     handleTmuxControlMessageRuntime(deps, connection, {
@@ -181,7 +195,10 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
       closeDetachedTerminalSession: vi.fn(() => {
         throw new Error('herdr session not found: stale');
       }),
-      listTmuxSessions: vi.fn((backend) => backend === 'herdr' ? ['herdr-live'] : ['tmux-live']),
+      listTerminalSessionCatalog: vi.fn(() => [
+        { name: 'tmux-live', backend: 'tmux' },
+        { name: 'herdr-live', backend: 'herdr' },
+      ]),
     });
 
     handleTmuxControlMessageRuntime(deps, connection, {
@@ -189,10 +206,16 @@ describe('terminal-message-control-runtime tmux kill truth', () => {
       payload: { sessionName: 'stale', terminalBackend: 'herdr' },
     });
 
-    expect(deps.listTmuxSessions).toHaveBeenCalledWith('herdr');
+    expect(deps.closeDetachedTerminalSession).toHaveBeenCalledWith('stale', 'herdr');
     expect(deps.sendTransportMessage).toHaveBeenCalledWith(null, {
       type: 'sessions',
-      payload: { sessions: ['herdr-live'] },
+      payload: {
+        sessions: ['tmux-live', 'herdr-live'],
+        sessionCatalog: [
+          { name: 'tmux-live', backend: 'tmux' },
+          { name: 'herdr-live', backend: 'herdr' },
+        ],
+      },
     });
   });
 });

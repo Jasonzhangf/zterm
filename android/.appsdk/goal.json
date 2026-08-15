@@ -1,0 +1,33 @@
+{
+  "goal_id": "zterm-runtime-architecture-v2",
+  "raw_request": "Preserve current behavior while redesigning ZTerm client and daemon ownership, separating data/control/debug/error planes, adding debuggable foundation nodes, and pluginizing the client with a Cordis-compatible host boundary.",
+  "understood_objective": "Deliver ZTERM-ARCH-V2-DESIGN-001 through AppSDK-governed slices so client and daemon modules have unique physical ownership, typed adjacent message chains, independent debug/control centers, debuggable foundation nodes, and capability-scoped client plugins without changing product or business payload semantics.",
+  "acceptance_criteria": [
+    "Client and daemon production source has exact module ownership and an acyclic registered dependency graph.",
+    "Data, control, debug, and error planes use physically separate typed contracts and channels.",
+    "Foundation nodes expose deterministic lifecycle, bounded debug subscription, and versioned immutable snapshots.",
+    "Buffer frame assembly, sparse buffer, render window, DOM renderer, UI shell, connection, terminal channel, input, daemon mirror, and daemon input queue are independent owners.",
+    "Client features consume declared capabilities through one plugin host; Cordis, if selected, is isolated behind an adapter and excluded from hot paths.",
+    "SessionContext, server composition, and message routing no longer own cross-domain business state.",
+    "Current terminal, session, input, file, schedule, and remote-window behavior and business payload semantics remain unchanged.",
+    "Every implementation slice passes AppSDK evidence, review, compile, promotion, Active, Protected, regression, and freeze gates."
+  ],
+  "non_goals": [
+    "No product or UI redesign.",
+    "No fallback, dual production route, dual compiler, or second SDK.",
+    "No Mac, Windows, or wterm runtime refactor.",
+    "No Cordis/global event bus in terminal frame, mirror, buffer, renderer, transport, input, file-chunk, or media-frame hot paths."
+  ],
+  "assumptions": [
+    "The AppSDK project root remains android because it contains the current Android client and embedded daemon mainline.",
+    "packages/shared changes are limited to registered typed contracts required by Android client/daemon edges.",
+    "Target-state modules remain design or pending until owned paths, source bindings, and required gates exist.",
+    "Implementation starts only in playground/experiments/zterm-runtime-architecture-v2."
+  ],
+  "ambiguities": [],
+  "questions": [],
+  "status": "confirmed",
+  "confirmed_by": "Jason",
+  "confirmed_at": "2026-08-15T00:45:30Z",
+  "created_at": "2026-08-15T00:45:30Z"
+}

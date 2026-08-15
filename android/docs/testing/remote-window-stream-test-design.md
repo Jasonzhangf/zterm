@@ -146,7 +146,7 @@ Current executable gates:
    - `no-focus-steal + iterm2-api` and `no-focus-steal + tmux-input` may pass only for declared terminal-specific targets.
 
 9. Catalog bandwidth isolation
-   - With runtime debug disabled, queued `terminal.performance.trace` metadata must not be flushed as `debug-log` frames over the session WebSocket.
+   - With runtime debug disabled, queued `terminal.performance.trace` metadata must not be exported to the daemon through the session WebSocket; runtime debug export uses the dedicated HTTP observability channel.
    - Enabling runtime debug is temporary and expires, so a stale client setting cannot keep uploading diagnostics before remote-window video starts.
 
 10. Stream protocol and lifecycle

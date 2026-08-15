@@ -39,6 +39,7 @@ export interface HerdrCanonicalSnapshot {
   scrollbackCount: number;
   absoluteRange: HerdrAbsoluteRange | null;
   capabilityGaps: readonly string[];
+  scrollMetrics: HerdrScrollMetrics | null;
 }
 
 function validateFrame(frame: HerdrTerminalFrame) {
@@ -186,6 +187,7 @@ export class HerdrFrameCanonicalizer {
       scrollbackCount,
       absoluteRange,
       capabilityGaps,
+      scrollMetrics: scrollMetrics ?? null,
     };
   }
 }

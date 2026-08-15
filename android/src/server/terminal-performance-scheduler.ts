@@ -8,8 +8,6 @@ export interface TerminalLiveSyncSchedulerInput {
   lastLiveActivityAt: number;
   consecutiveFailures: number;
   subscriberCount: number;
-  transportBufferedBytes: number;
-  transportBackpressureCount: number;
   lastCaptureDurationMs: number;
   lastCanonicalizeDurationMs: number;
   flushInFlight: boolean;
@@ -25,7 +23,6 @@ const FAST_LANE_DELAY_MS = 16;
 // R9: zero-delay requested schedules still cap here so tmux capture can't be
 // pulled into a tight CPU-bound loop by repeated explicit-immediate requests.
 const FAST_LANE_MIN_DELAY_MS = 8;
-const BACKPRESSURE_BUFFERED_BYTES = 128 * 1024;
 const OVERLOADED_CAPTURE_MS = 120;
 const SLOW_CAPTURE_MS = 64;
 function finiteMs(value: number | undefined, fallback: number) {
@@ -89,16 +86,6 @@ export function resolveTerminalLiveSyncDelay(
     };
   }
 
-  const bufferedBytes = Math.max(0, Math.floor(input.transportBufferedBytes || 0));
-  const backpressureCount = Math.max(0, Math.floor(input.transportBackpressureCount || 0));
-  if (bufferedBytes >= BACKPRESSURE_BUFFERED_BYTES || backpressureCount > 0) {
-    return {
-      delayMs: Math.max(idleDelayMs, activeDelayMs * (backpressureCount + 2)),
-      lane: 'slow',
-      reason: 'transport-backpressure',
-    };
-  }
-
   if (captureCostMs >= SLOW_CAPTURE_MS) {
     return {
       delayMs: Math.max(activeDelayMs, Math.ceil(captureCostMs)),
@@ -107,11 +94,11 @@ export function resolveTerminalLiveSyncDelay(
     };
   }
 
-  if (requestedDelayMs <= activeDelayMs && bufferedBytes === 0) {
+  if (requestedDelayMs <= activeDelayMs) {
     return {
       delayMs: Math.min(activeDelayMs, FAST_LANE_DELAY_MS),
       lane: 'fast',
-      reason: 'subscribed-good-transport-low-capture-cost',
+      reason: 'subscribed-low-capture-cost',
     };
   }
 

@@ -24,6 +24,98 @@ interface RuntimeDebugFn {
 
 const TRANSFER_BINARY_CHUNK_BYTES = 16 * 1024;
 
+export interface ImagePasteWaiterRuntime {
+  wait: (sessionId: string, timeoutMs?: number) => Promise<void>;
+  resolve: (sessionId: string) => boolean;
+  reject: (sessionId: string, message: string) => boolean;
+  dispose: () => void;
+}
+
+interface PendingImagePaste {
+  resolve: () => void;
+  reject: (error: Error) => void;
+  timer: ReturnType<typeof setTimeout>;
+}
+
+export function createImagePasteWaiterRuntime(): ImagePasteWaiterRuntime {
+  const pendingBySession = new Map<string, PendingImagePaste>();
+  const epochBySession = new Map<string, number>();
+
+  function rejectPending(sessionId: string, message: string) {
+    const pending = pendingBySession.get(sessionId);
+    if (!pending) {
+      return false;
+    }
+    clearTimeout(pending.timer);
+    pending.reject(new Error(message));
+    pendingBySession.delete(sessionId);
+    return true;
+  }
+
+  return {
+    wait(sessionId, timeoutMs = 30_000) {
+      const epoch = (epochBySession.get(sessionId) || 0) + 1;
+      epochBySession.set(sessionId, epoch);
+      rejectPending(sessionId, 'superseded by a newer image paste');
+
+      const pendingPromise = new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          const pending = pendingBySession.get(sessionId);
+          if (pending?.timer !== timer) {
+            return;
+          }
+          pendingBySession.delete(sessionId);
+          reject(new Error(`image paste result timeout after ${timeoutMs}ms`));
+        }, timeoutMs);
+        pendingBySession.set(sessionId, {
+          resolve: () => {
+            const pending = pendingBySession.get(sessionId);
+            if (pending?.timer !== timer) {
+              return;
+            }
+            clearTimeout(timer);
+            pendingBySession.delete(sessionId);
+            resolve();
+          },
+          reject: (error) => {
+            const pending = pendingBySession.get(sessionId);
+            if (pending?.timer !== timer) {
+              return;
+            }
+            clearTimeout(timer);
+            pendingBySession.delete(sessionId);
+            reject(error);
+          },
+          timer,
+        });
+      });
+      // The rejection still reaches awaiting callers; this branch only prevents
+      // an abandoned in-flight paste from surfacing as an unhandled rejection
+      // when the provider unmounts before the caller observes it.
+      pendingPromise.catch(() => {});
+      return pendingPromise;
+    },
+    resolve(sessionId) {
+      const pending = pendingBySession.get(sessionId);
+      if (!pending) {
+        return false;
+      }
+      clearTimeout(pending.timer);
+      pending.resolve();
+      pendingBySession.delete(sessionId);
+      return true;
+    },
+    reject: rejectPending,
+    dispose() {
+      for (const sessionId of Array.from(pendingBySession.keys())) {
+        rejectPending(sessionId, 'image paste runtime disposed');
+      }
+      pendingBySession.clear();
+      epochBySession.clear();
+    },
+  };
+}
+
 function sendBinaryTransferPayload(
   sessionId: string,
   ws: BridgeTransportSocket,
@@ -120,6 +212,8 @@ export async function sendImagePasteRuntime(options: {
   sessionId: string;
   file: File;
   pasteTarget?: PasteImageStartPayload['pasteTarget'];
+  imagePasteWaiterRuntime: ImagePasteWaiterRuntime;
+  imagePasteResultTimeoutMs?: number;
   ensureSessionReadyForPaste: (sessionId: string, timeoutMs?: number) => Promise<BridgeTransportSocket>;
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
 }) {
@@ -144,6 +238,10 @@ export async function sendImagePasteRuntime(options: {
     payload,
   } satisfies ClientMessage));
   sendBinaryTransferPayload(targetSessionId, ws, fileBuffer, options.sendSocketPayload);
+  await options.imagePasteWaiterRuntime.wait(
+    targetSessionId,
+    options.imagePasteResultTimeoutMs,
+  );
 }
 
 export async function sendFileAttachRuntime(options: {

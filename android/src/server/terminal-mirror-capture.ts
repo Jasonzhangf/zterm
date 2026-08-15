@@ -21,7 +21,10 @@ import {
 } from './canonical-buffer';
 import { canonicalizeCapturedMirrorLines } from './mirror-line-canonicalizer';
 import type { SessionMirror, TmuxCursorState, TmuxPaneMetrics } from './terminal-runtime-types';
-import type { WezTermBackendRuntime } from './wezterm-backend';
+import type {
+  TerminalSourceAdapter,
+  TerminalSourceMirrorSnapshot,
+} from './terminal-source-adapter';
 
 export interface TerminalMirrorCaptureDeps {
   resolveMirrorCacheLines: (rows: number) => number;
@@ -29,9 +32,9 @@ export interface TerminalMirrorCaptureDeps {
   runTmuxAsync: (args: string[]) => Promise<{ ok: true; stdout: string }>;
   buildExactTmuxPaneTarget: (sessionName: string) => string;
   logTimePrefix: () => string;
-  wezTermBackend?: WezTermBackendRuntime | null;
+  wezTermBackend?: TerminalSourceAdapter | null;
   terminalBackendKind?: 'tmux' | 'wezterm' | 'herdr';
-  backendRuntimes?: Partial<Record<'herdr' | 'wezterm', WezTermBackendRuntime>>;
+  backendRuntimes?: Partial<Record<'herdr' | 'wezterm', TerminalSourceAdapter>>;
 }
 
 export interface TerminalMirrorCaptureRuntime {
@@ -186,6 +189,33 @@ function applyMirrorCaptureSnapshot(
   mirror.cursor = snapshot.cursor;
 }
 
+function applyTerminalSourceMirrorSnapshot(
+  mirror: SessionMirror,
+  snapshot: TerminalSourceMirrorSnapshot,
+) {
+  const lineCount = snapshot.bufferLines.length;
+  const rows = Math.max(1, Math.floor(snapshot.rows || 1));
+  const bufferStartIndex = Math.max(0, Math.floor(snapshot.bufferStartIndex || 0));
+  applyMirrorCaptureSnapshot(mirror, {
+    rows: snapshot.rows,
+    cols: snapshot.cols,
+    cursorKeysApp: snapshot.cursorKeysApp,
+    lastScrollbackCount: snapshot.lastScrollbackCount ?? Math.max(0, lineCount - rows),
+    bufferStartIndex,
+    bufferLines: snapshot.bufferLines,
+    cursor: snapshot.cursor,
+    capturedLineCount: snapshot.capturedLineCount ?? lineCount,
+    canonicalLineCount: snapshot.canonicalLineCount ?? lineCount,
+    totalAvailableLines: snapshot.totalAvailableLines ?? bufferStartIndex + lineCount,
+    visibleTopIndex: snapshot.visibleTopIndex ?? Math.max(bufferStartIndex, bufferStartIndex + lineCount - rows),
+    captureDurationMs: snapshot.captureDurationMs ?? 0,
+    canonicalizeDurationMs: snapshot.canonicalizeDurationMs ?? 0,
+    captureStartedAt: 0,
+    captureDoneAt: 0,
+    canonicalizeDoneAt: 0,
+  });
+}
+
 export async function resolveStableMirrorCaptureSnapshot(options: {
   readSnapshot: () => Promise<ResolvedMirrorCaptureSnapshot>;
   currentMirror?: SessionMirror | null;
@@ -261,7 +291,15 @@ export function createTerminalMirrorCaptureRuntime(
     if (kind === 'tmux') {
       return null;
     }
-    return deps.backendRuntimes?.[kind] || (kind === deps.terminalBackendKind ? deps.wezTermBackend : null) || null;
+    const external = deps.backendRuntimes?.[kind]
+      || (kind === deps.terminalBackendKind ? deps.wezTermBackend : null)
+      || null;
+    if (!external) {
+      throw new Error(
+        `terminal backend ${kind} requested for mirror capture but unavailable; refusing to fall back to tmux`,
+      );
+    }
+    return external;
   }
 
   function readTmuxStatusLineCount() {
@@ -491,55 +529,64 @@ export function createTerminalMirrorCaptureRuntime(
     };
   }
 
+  function createTmuxMirrorSourceAdapter(mirror: SessionMirror): TerminalSourceAdapter {
+    return {
+      kind: 'tmux',
+      listSessions: () => [],
+      createSession: () => {
+        throw new Error('tmux session creation is owned by terminal-control-runtime, not mirror capture');
+      },
+      readSnapshot: async () => ({
+        ...(await captureTmuxMirrorSnapshot(mirror)),
+        revision: mirror.revision,
+      }),
+      writeInput: () => {
+        throw new Error('tmux input is owned by terminal-control-runtime, not mirror capture');
+      },
+      closeSession: () => {
+        throw new Error('tmux close is owned by terminal-control-runtime, not mirror capture');
+      },
+      readCurrentPath: () => {
+        throw new Error('tmux current path is owned by terminal-control-runtime, not mirror capture');
+      },
+    };
+  }
+
   async function captureMirrorAuthoritativeBufferFromTmux(mirror: SessionMirror) {
-    const externalBackend = resolveExternalBackend(mirror.backend);
-    if (externalBackend) {
-      const snapshot = await externalBackend.readSnapshot(mirror.sessionName);
-      applyMirrorCaptureSnapshot(mirror, {
-        rows: snapshot.rows,
-        cols: snapshot.cols,
-        cursorKeysApp: snapshot.cursorKeysApp,
-        lastScrollbackCount: Math.max(0, snapshot.bufferLines.length - snapshot.rows),
-        bufferStartIndex: snapshot.bufferStartIndex,
-        bufferLines: snapshot.bufferLines,
-        cursor: snapshot.cursor,
-        capturedLineCount: snapshot.bufferLines.length,
-        canonicalLineCount: snapshot.bufferLines.length,
-        totalAvailableLines: snapshot.bufferStartIndex + snapshot.bufferLines.length,
-        visibleTopIndex: Math.max(snapshot.bufferStartIndex, snapshot.bufferStartIndex + snapshot.bufferLines.length - snapshot.rows),
-        captureDurationMs: 0,
-        canonicalizeDurationMs: 0,
-        captureStartedAt: Date.now(),
-        captureDoneAt: Date.now(),
-        canonicalizeDoneAt: Date.now(),
+    const adapter = resolveExternalBackend(mirror.backend) || createTmuxMirrorSourceAdapter(mirror);
+    if (adapter.kind === 'tmux') {
+      const stableCapture = await resolveStableMirrorCaptureSnapshot({
+        readSnapshot: () => captureTmuxMirrorSnapshot(mirror),
+        currentMirror: mirror,
       });
-      mirror.lastCaptureDurationMs = 0;
-      mirror.lastCanonicalizeDurationMs = 0;
+      const snapshot: TerminalSourceMirrorSnapshot = {
+        ...stableCapture.snapshot,
+        revision: mirror.revision,
+      };
+      applyTerminalSourceMirrorSnapshot(mirror, snapshot);
+      mirror.lastCaptureDurationMs = snapshot.captureDurationMs ?? 0;
+      mirror.lastCanonicalizeDurationMs = snapshot.canonicalizeDurationMs ?? 0;
       mirror.pendingStableCaptureSnapshot = null;
-      mirror.pendingPerformanceTraceCapture = null;
+      mirror.pendingPerformanceTraceCapture = snapshot.captureStartedAt
+        ? {
+            captureStartedAt: snapshot.captureStartedAt,
+            captureDoneAt: snapshot.captureDoneAt ?? snapshot.captureStartedAt,
+            canonicalizeDoneAt: snapshot.canonicalizeDoneAt ?? snapshot.captureDoneAt ?? snapshot.captureStartedAt,
+            capturedLineCount: snapshot.capturedLineCount ?? snapshot.bufferLines.length,
+            canonicalLineCount: snapshot.canonicalLineCount ?? snapshot.bufferLines.length,
+          }
+        : null;
+      console.log(
+        `[${deps.logTimePrefix()}] [mirror:${mirror.sessionName}] tmux capture sync captured=${snapshot.capturedLineCount ?? snapshot.bufferLines.length} canonical=${snapshot.canonicalLineCount ?? snapshot.bufferLines.length} continuity=authoritative-replace matched=0 total=${snapshot.totalAvailableLines ?? snapshot.bufferStartIndex + snapshot.bufferLines.length} rows=${snapshot.rows} cols=${snapshot.cols} buffer=${mirror.bufferStartIndex}-${getMirrorAvailableEndIndex(mirror)} visible=${snapshot.visibleTopIndex ?? Math.max(snapshot.bufferStartIndex, snapshot.bufferStartIndex + snapshot.bufferLines.length - snapshot.rows)}-${getMirrorAvailableEndIndex(mirror)} stabilizeAttempts=${stableCapture.attempts} stabilizeMode=${stableCapture.stabilizedAgainst}`,
+      );
       return true;
     }
-    const stableCapture = await resolveStableMirrorCaptureSnapshot({
-      readSnapshot: () => captureTmuxMirrorSnapshot(mirror),
-      currentMirror: mirror,
-    });
-    const snapshot = stableCapture.snapshot;
-    applyMirrorCaptureSnapshot(mirror, snapshot);
-    mirror.lastCaptureDurationMs = snapshot.captureDurationMs;
-    mirror.lastCanonicalizeDurationMs = snapshot.canonicalizeDurationMs;
+    const snapshot = await adapter.readSnapshot(mirror.sessionName);
+    applyTerminalSourceMirrorSnapshot(mirror, snapshot);
+    mirror.lastCaptureDurationMs = snapshot.captureDurationMs ?? 0;
+    mirror.lastCanonicalizeDurationMs = snapshot.canonicalizeDurationMs ?? 0;
     mirror.pendingStableCaptureSnapshot = null;
-    mirror.pendingPerformanceTraceCapture = {
-      captureStartedAt: snapshot.captureStartedAt ?? Date.now(),
-      captureDoneAt: snapshot.captureDoneAt ?? Date.now(),
-      canonicalizeDoneAt: snapshot.canonicalizeDoneAt ?? Date.now(),
-      capturedLineCount: snapshot.capturedLineCount,
-      canonicalLineCount: snapshot.canonicalLineCount,
-    };
-
-    console.log(
-      `[${deps.logTimePrefix()}] [mirror:${mirror.sessionName}] tmux capture sync captured=${snapshot.capturedLineCount} canonical=${snapshot.canonicalLineCount} continuity=authoritative-replace matched=0 total=${snapshot.totalAvailableLines} rows=${snapshot.rows} cols=${snapshot.cols} buffer=${mirror.bufferStartIndex}-${getMirrorAvailableEndIndex(mirror)} visible=${snapshot.visibleTopIndex}-${getMirrorAvailableEndIndex(mirror)} stabilizeAttempts=${stableCapture.attempts} stabilizeMode=${stableCapture.stabilizedAgainst}`,
-    );
-
+    mirror.pendingPerformanceTraceCapture = null;
     return true;
   }
 

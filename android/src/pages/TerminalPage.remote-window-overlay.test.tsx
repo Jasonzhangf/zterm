@@ -2,10 +2,58 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import type { ComponentProps } from 'react';
 import { Keyboard } from '@capacitor/keyboard';
 import { Filesystem } from '@capacitor/filesystem';
+import type { TerminalDebugOverlayProps } from '../lib/plugin-debug-console/debug-console-contract';
 import type { RemoteWindowStreamTargetManifest, Session } from '../lib/types';
-import { TerminalPage } from './TerminalPage';
+import type { TerminalQuickBarProps } from '../components/terminal/TerminalQuickBar';
+import { TerminalPage as TerminalPageBase } from './TerminalPage';
+import { renderTerminalShellUi } from '../lib/plugin-host/terminal-shell-ui-plugin';
+
+function TerminalPage(props: ComponentProps<typeof TerminalPageBase>) {
+  return (
+    <TerminalPageBase
+      {...props}
+      renderTerminalShell={props.renderTerminalShell || renderTerminalShellUi}
+    />
+  );
+}
+import { TerminalDebugOverlay } from './TerminalPageDebugOverlay';
+import { RemoteWindowOverlay } from '../components/terminal/RemoteWindowOverlay';
+import type { RemoteWindowUiProps } from '../lib/plugin-remote-window/remote-window-contract';
+
+const renderDebugConsole = (props: TerminalDebugOverlayProps) => (
+  <TerminalDebugOverlay {...props} />
+);
+const renderRemoteWindow = (props: RemoteWindowUiProps) => (
+  <RemoteWindowOverlay {...props} />
+);
+const renderQuickBar = (props: TerminalQuickBarProps) => (
+  <div
+    data-testid="terminal-quickbar"
+    data-remote-window-input-active={props.remoteWindowInputActive ? 'true' : 'false'}
+    ref={(element) => {
+      if (element) {
+        props.onMeasuredHeightChange?.(112);
+      }
+    }}
+  >
+    <button type="button" onClick={() => props.onSendSequence?.('\x1b[A')}>quickbar-arrow-up</button>
+    <button type="button" onClick={() => props.onSessionDraftSend?.('继续执行\r')}>quickbar-send-draft</button>
+    <button
+      type="button"
+      onClick={() => props.activeSessionId && props.onImagePaste?.(
+        props.activeSessionId,
+        new File(['image'], 'proof.png', { type: 'image/png' }),
+      )}
+    >
+      quickbar-image
+    </button>
+    <button type="button" onClick={() => props.onToggleKeyboard?.()}>quickbar-keyboard</button>
+    <button type="button" onClick={() => props.onToggleDebugOverlay?.()}>状态</button>
+  </div>
+);
 
 // TerminalPage reads attachment counts from SessionContext (badge/drawer).
 // These page-level tests render TerminalPage directly without the app-level
@@ -82,54 +130,6 @@ vi.mock('../components/terminal/RemoteScreenshotSheet', () => ({
 
 vi.mock('../components/TerminalView', () => ({
   TerminalView: ({ sessionId }: { sessionId: string }) => <div data-testid={`terminal-view-${sessionId}`} />,
-}));
-
-vi.mock('../components/terminal/TerminalQuickBar', () => ({
-  TerminalQuickBar: ({
-    activeSessionId,
-    onSendSequence,
-    onSessionDraftSend,
-    onImagePaste,
-    onToggleKeyboard,
-    onToggleDebugOverlay,
-    remoteWindowInputActive,
-    onMeasuredHeightChange,
-  }: {
-    activeSessionId?: string | null;
-    onSendSequence?: (sequence: string) => void;
-    onSessionDraftSend?: (value: string) => void;
-    onImagePaste?: (sessionId: string, file: File) => void;
-    onToggleKeyboard?: () => void;
-    onToggleDebugOverlay?: () => void;
-    remoteWindowInputActive?: boolean;
-    onMeasuredHeightChange?: (height: number) => void;
-  }) => {
-    return (
-      <div
-        data-testid="terminal-quickbar"
-        data-remote-window-input-active={remoteWindowInputActive ? 'true' : 'false'}
-        ref={(element) => {
-          if (element) {
-            onMeasuredHeightChange?.(112);
-          }
-        }}
-      >
-        <button type="button" onClick={() => onSendSequence?.('\x1b[A')}>quickbar-arrow-up</button>
-        <button type="button" onClick={() => onSessionDraftSend?.('继续执行\r')}>quickbar-send-draft</button>
-        <button
-          type="button"
-          onClick={() => activeSessionId && onImagePaste?.(
-            activeSessionId,
-            new File(['image'], 'proof.png', { type: 'image/png' }),
-          )}
-        >
-          quickbar-image
-        </button>
-        <button type="button" onClick={() => onToggleKeyboard?.()}>quickbar-keyboard</button>
-        <button type="button" onClick={() => onToggleDebugOverlay?.()}>状态</button>
-      </div>
-    );
-  },
 }));
 
 function makeSession(id: string): Session {
@@ -276,6 +276,9 @@ describe('TerminalPage remote window overlay', () => {
         onImagePaste={onImagePaste}
         onQuickActionInput={onQuickActionInput}
         onSessionDraftSend={onSessionDraftSend}
+        renderDebugConsole={renderDebugConsole}
+        renderRemoteWindow={renderRemoteWindow}
+        renderQuickBar={renderQuickBar}
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
@@ -466,6 +469,9 @@ describe('TerminalPage remote window overlay', () => {
         onResize={vi.fn()}
         onTerminalInput={onTerminalInput}
         onTerminalViewportChange={vi.fn()}
+        renderDebugConsole={renderDebugConsole}
+        renderRemoteWindow={renderRemoteWindow}
+        renderQuickBar={renderQuickBar}
         onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
         onRequestRemoteWindowStreamStart={onRequestRemoteWindowStreamStart}
         onSendRemoteWindowInput={onSendRemoteWindowInput}
@@ -690,6 +696,9 @@ describe('TerminalPage remote window overlay', () => {
         onResize={vi.fn()}
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
+        renderDebugConsole={renderDebugConsole}
+        renderRemoteWindow={renderRemoteWindow}
+        renderQuickBar={renderQuickBar}
         onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
         onRequestRemoteWindowStreamStart={onRequestRemoteWindowStreamStart}
         onSendRemoteWindowInput={onSendRemoteWindowInput}
@@ -779,6 +788,9 @@ describe('TerminalPage remote window overlay', () => {
         onResize={vi.fn()}
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
+        renderDebugConsole={renderDebugConsole}
+        renderRemoteWindow={renderRemoteWindow}
+        renderQuickBar={renderQuickBar}
         onActiveBodySubscriptionSuppressedChange={onActiveBodySubscriptionSuppressedChange}
         onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
         onRequestRemoteWindowStreamStart={onRequestRemoteWindowStreamStart}
@@ -860,6 +872,9 @@ describe('TerminalPage remote window overlay', () => {
         onResize={vi.fn()}
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
+        renderDebugConsole={renderDebugConsole}
+        renderRemoteWindow={renderRemoteWindow}
+        renderQuickBar={renderQuickBar}
         onRequestRemoteScreenshot={onRequestRemoteScreenshot}
         onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
         onRequestRemoteWindowStreamStart={onRequestRemoteWindowStreamStart}
@@ -939,6 +954,9 @@ describe('TerminalPage remote window overlay', () => {
         onResize={vi.fn()}
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
+        renderDebugConsole={renderDebugConsole}
+        renderRemoteWindow={renderRemoteWindow}
+        renderQuickBar={renderQuickBar}
         onRequestRemoteScreenshot={onRequestRemoteScreenshot}
         onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
         quickActions={[]}
@@ -1011,6 +1029,9 @@ describe('TerminalPage remote window overlay', () => {
         onResize={vi.fn()}
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
+        renderDebugConsole={renderDebugConsole}
+        renderRemoteWindow={renderRemoteWindow}
+        renderQuickBar={renderQuickBar}
         onRequestRemoteWindowTargets={onRequestRemoteWindowTargets}
         onRequestRemoteWindowStreamStart={onRequestRemoteWindowStreamStart}
         onSendRemoteWindowInput={onSendRemoteWindowInput}

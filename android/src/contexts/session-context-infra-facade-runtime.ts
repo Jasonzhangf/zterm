@@ -1,17 +1,22 @@
-import { flushRuntimeDebugLogsToSessionTransport } from '../lib/runtime-debug-flush';
+import {
+  flushRuntimeDebugLogs as flushRuntimeDebugLogsViaHttp,
+  type DebugObservabilityTarget,
+} from '../lib/runtime-debug-http-exporter';
 import { createClientDaemonConnection } from '../lib/client-daemon-connection';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import {
-  getSessionTargetTerminalTransport,
   getSessionTerminalChannel,
   setSessionChannelBodySubscribed,
+} from '../lib/terminal-channel-mux-runtime';
+import {
+  getSessionTargetTerminalTransport,
   type SessionTransportRuntimeStore,
 } from '../lib/session-transport-runtime';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
-import type { BufferFrameAssemblyResourceState } from './session-buffer-frame-assembly';
+import type { BufferFrameAssemblyResourceState } from '../lib/buffer-frame-assembly/session-buffer-frame-assembly';
 import { probeHostReachable } from '../lib/reconnect-host-probe';
 import type { Host, Session, SessionBufferState, SessionRenderBufferSnapshot, SessionScheduleState, TerminalBufferPayload } from '../lib/types';
 import type { NetworkIdentityRuntime } from '../lib/network-identity';
@@ -97,7 +102,7 @@ function requireTerminalMuxChannel(
   store: SessionTransportRuntimeStore,
   sessionId: string,
 ) {
-  const channel = getSessionTerminalChannel(store, sessionId);
+  const channel = getSessionTerminalChannel(store.terminalChannels, sessionId);
   if (!channel || (channel.state !== 'opening' && channel.state !== 'open')) {
     throw new Error(`terminal mux channel is not open for session ${sessionId}`);
   }
@@ -155,6 +160,9 @@ export function wrapSessionPayloadForTargetMuxRuntime(options: {
   const lane = classifyTerminalMuxClientMessage(message);
   if (lane === 'legacy') {
     throw new Error(`legacy terminal message ${message.type} cannot be sent on mux target transport`);
+  }
+  if (lane === 'observability') {
+    throw new Error(`debug observability message ${message.type} cannot use the terminal mux channel`);
   }
   if (lane === 'target') {
     return JSON.stringify(buildTerminalMuxTargetMessage(message as Parameters<typeof buildTerminalMuxTargetMessage>[0]));
@@ -293,7 +301,7 @@ export function createSessionInfraFacadeRuntime(options: {
     for (const session of options.stateRef.current.sessions) {
       const channel = transportAccessors.readSessionTerminalChannel(session.id);
       const subscribed = liveSessionIds.has(session.id);
-      setSessionChannelBodySubscribed(options.transportRuntimeStoreRef.current, session.id, subscribed);
+      setSessionChannelBodySubscribed(options.transportRuntimeStoreRef.current.terminalChannels, session.id, subscribed);
       const ws = channel
         ? (
           channel.state === 'open'
@@ -530,11 +538,13 @@ export function createSessionInfraFacadeRuntime(options: {
   };
 
   const flushRuntimeDebugLogs = () => {
-    flushRuntimeDebugLogsToSessionTransport({
-      activeSessionId: options.stateRef.current.activeSessionId,
-      daemonConnection,
-      readSessionTransportSocket: transportAccessors.readSessionTransportSocket,
-      sendSocketPayload,
+    const target: DebugObservabilityTarget = {
+      targetHost: options.bridgeSettings.targetHost,
+      targetPort: options.bridgeSettings.targetPort,
+      targetAuthToken: options.bridgeSettings.targetAuthToken,
+    };
+    flushRuntimeDebugLogsViaHttp({
+      target,
     });
   };
 

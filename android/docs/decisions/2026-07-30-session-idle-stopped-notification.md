@@ -51,7 +51,9 @@ Jason wants a daemon-side "stopped/stale tmux session" detector and to surface t
 
 `packages/shared/src/connection/protocol.ts`:
   - `TerminalMuxTargetServerMessageType` gains `session-activity`
-  - `sessions` payload remains `{ sessions: string[] }` — unchanged for backward compatibility
+  - `sessions` payload remains `{ sessions: string[] }` and now also carries optional
+    `sessionCatalog: Array<{ name, backend }>` as daemon-owned backend truth; old daemon
+    responses without the optional field stay backward compatible
 
 ---
 

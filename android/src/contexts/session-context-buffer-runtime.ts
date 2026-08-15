@@ -37,7 +37,7 @@ import {
   type SessionPullPurpose,
   type SessionPullStates,
 } from '../lib/session-pull-state-helpers';
-import { normalizeTerminalCursorState } from './session-wire-helpers';
+import { normalizeTerminalCursorState } from '../lib/wire-ingress/buffer-wire-normalize';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
 import { buildBufferSyncRepairSignature } from '@zterm/shared/terminal/pull-state-planner';
 import {
@@ -51,7 +51,7 @@ import {
   type BufferFrameAssemblyResult,
   type BufferFrameAssemblyResourceState,
   type BufferSyncIn03SparseApplyInput,
-} from './session-buffer-frame-assembly';
+} from '../lib/buffer-frame-assembly/session-buffer-frame-assembly';
 
 interface MutableRefObject<T> {
   current: T;
@@ -90,7 +90,7 @@ interface RevisionResetExpectation {
   seenAt: number;
 }
 
-export type { BufferFrameAssemblyResourceState } from './session-buffer-frame-assembly';
+export type { BufferFrameAssemblyResourceState } from '../lib/buffer-frame-assembly/session-buffer-frame-assembly';
 
 const REPAIRABLE_BUFFER_FRAME_ERRORS = new Set<BufferFrameAssemblyError>([
   'invalid-frame-metadata',
@@ -543,7 +543,7 @@ function resolveVisibleNonGapRepairRequestAfterSparseAdvance(options: {
   return null;
 }
 
-const VISIBLE_NON_GAP_REPAIR_COOLDOWN_MS = 5000;
+const VISIBLE_NON_GAP_REPAIR_STALE_MS = 2000;
 
 function shouldSuppressRecentVisibleNonGapRepair(options: {
   sessionId: string;
@@ -553,26 +553,97 @@ function shouldSuppressRecentVisibleNonGapRepair(options: {
   tailRefreshStore: SessionTailRefreshStore;
   now?: number;
 }) {
-  const previous = options.tailRefreshStore.readVisibleNonGapRepairRequest(options.sessionId);
+  const previous = options.tailRefreshStore
+    .listVisibleNonGapRepairs(options.sessionId)
+    .filter((entry) => (
+      Math.max(0, Math.floor(entry.requestStartIndex || 0)) === Math.max(0, Math.floor(options.requestStartIndex || 0))
+      && Math.max(0, Math.floor(entry.requestEndIndex || entry.requestStartIndex || 0)) === Math.max(0, Math.floor(options.requestEndIndex || options.requestStartIndex || 0))
+      && Math.max(0, Math.floor(entry.tailEndIndex || 0)) === Math.max(0, Math.floor(options.tailEndIndex || 0))
+    ))
+    .sort((left, right) => right.requestedAt - left.requestedAt)[0] || null;
   if (!previous) {
     return false;
   }
-  const previousStart = Math.max(0, Math.floor(previous.requestStartIndex || 0));
-  const previousEnd = Math.max(previousStart, Math.floor(previous.requestEndIndex || previousStart));
-  const nextStart = Math.max(0, Math.floor(options.requestStartIndex || 0));
-  const nextEnd = Math.max(nextStart, Math.floor(options.requestEndIndex || nextStart));
-  const sameWindow = previousStart === nextStart && previousEnd === nextEnd;
-  if (!sameWindow) {
+  if (previous.status === 'fulfilled' || previous.status === 'superseded') {
     return false;
   }
-  const previousTailEndIndex = Math.max(0, Math.floor(previous.tailEndIndex || 0));
-  const nextTailEndIndex = Math.max(0, Math.floor(options.tailEndIndex || 0));
-  if (previousTailEndIndex !== nextTailEndIndex) {
+  if (previous.status === 'pending') {
+    return false;
+  }
+  if (previous.status !== 'dispatched') {
     return false;
   }
   const now = options.now ?? Date.now();
-  const ageMs = now - Math.max(0, Math.floor(previous.requestedAt || 0));
-  return ageMs >= 0 && ageMs < VISIBLE_NON_GAP_REPAIR_COOLDOWN_MS;
+  const ageMs = now - Math.max(0, Math.floor(previous.lastDispatchAt || 0));
+  return ageMs >= 0 && ageMs < VISIBLE_NON_GAP_REPAIR_STALE_MS;
+}
+
+function fulfillVisibleNonGapRepairLedgerIfAuthoritative(options: {
+  sessionId: string;
+  payload: TerminalBufferPayload;
+  nextBuffer: SessionBufferState;
+  tailRefreshStore: SessionTailRefreshStore;
+  visibleRange: TerminalVisibleRange | null;
+}) {
+  const payloadRevision = Math.max(0, Math.floor(options.payload.revision || 0));
+  const coveredLineIndexes = new Set<number>();
+  for (const line of options.payload.lines || []) {
+    const index = getWireLineIndex(line);
+    if (index !== null) {
+      coveredLineIndexes.add(index);
+    }
+  }
+  for (const entry of options.tailRefreshStore.listVisibleNonGapRepairs(options.sessionId)) {
+    if (entry.status === 'fulfilled') {
+      continue;
+    }
+    if (payloadRevision < Math.max(0, Math.floor(entry.targetRevision || 0))) {
+      continue;
+    }
+    if (Math.max(0, Math.floor(entry.tailEndIndex || 0)) !== Math.max(0, Math.floor(options.nextBuffer.bufferTailEndIndex || 0))) {
+      continue;
+    }
+    let fullyCovered = true;
+    for (let index = entry.requestStartIndex; index < entry.requestEndIndex; index += 1) {
+      if (!coveredLineIndexes.has(index)) {
+        fullyCovered = false;
+        break;
+      }
+    }
+    if (!fullyCovered) continue;
+    options.tailRefreshStore.markVisibleNonGapRepairFulfilled(options.sessionId, {
+      requestStartIndex: entry.requestStartIndex,
+      requestEndIndex: entry.requestEndIndex,
+      tailEndIndex: entry.tailEndIndex,
+      targetRevision: entry.targetRevision,
+    });
+  }
+
+  if (!options.visibleRange) {
+    return;
+  }
+  const visibleStartIndex = Math.max(0, Math.floor(options.visibleRange.startIndex || 0));
+  const visibleEndIndex = Math.max(visibleStartIndex, Math.floor(options.visibleRange.endIndex || visibleStartIndex));
+  if (visibleEndIndex > visibleStartIndex) {
+    let visibleWindowCovered = true;
+    for (let index = visibleStartIndex; index < visibleEndIndex; index += 1) {
+      if (!coveredLineIndexes.has(index)) {
+        visibleWindowCovered = false;
+        break;
+      }
+    }
+    if (visibleWindowCovered) {
+      options.tailRefreshStore.markVisibleNonGapRepairFulfilled(options.sessionId, {
+        requestStartIndex: visibleStartIndex,
+        requestEndIndex: visibleEndIndex,
+        tailEndIndex: Math.max(
+          0,
+          Math.floor(options.nextBuffer.bufferTailEndIndex || options.nextBuffer.endIndex || 0),
+        ),
+        targetRevision: payloadRevision,
+      });
+    }
+  }
 }
 
 export function handleBufferHeadRuntime(options: {
@@ -1607,7 +1678,37 @@ function applyResolvedBufferSyncPayloadRuntime(options: ApplyResolvedBufferSyncP
     options.refs.tailRefreshStoreRef.current.clearPendingResumeTailRefresh(options.sessionId);
   }
 
+  const payloadRevision = Math.max(0, Math.floor(options.payload.revision || 0));
+  const payloadAvailableEndIndex = Number.isFinite(options.payload.availableEndIndex)
+    ? Math.max(0, Math.floor(options.payload.availableEndIndex || 0))
+    : 0;
+  const nextHead: SessionDaemonHeadView = {
+    daemonHeadRevision: Math.max(
+      liveHead?.revision ?? 0,
+      payloadRevision,
+      Math.max(0, Math.floor(nextBuffer.revision || 0)),
+    ),
+    daemonHeadEndIndex: Math.max(
+      liveHead?.latestEndIndex ?? 0,
+      payloadAvailableEndIndex,
+      Math.max(0, Math.floor(nextBuffer.bufferTailEndIndex || nextBuffer.endIndex || 0)),
+    ),
+  };
+  const visibleRange = resolvePostApplyVisibleRange({
+    head: nextHead,
+    previousBuffer: localBuffer,
+    nextBuffer,
+    visibleRange: options.refs.sessionVisibleRangeRef.current.get(options.sessionId) || null,
+  });
+
   if (sessionBuffersEqual(localBuffer, nextBuffer)) {
+    fulfillVisibleNonGapRepairLedgerIfAuthoritative({
+      sessionId: options.sessionId,
+      payload: options.payload,
+      nextBuffer,
+      tailRefreshStore: options.refs.tailRefreshStoreRef.current,
+      visibleRange,
+    });
     options.runtimeDebug('session.buffer.apply.noop', {
       sessionId: options.sessionId,
       activeSessionId: options.refs.stateRef.current.activeSessionId,
@@ -1649,27 +1750,12 @@ function applyResolvedBufferSyncPayloadRuntime(options: ApplyResolvedBufferSyncP
   });
   options.scheduleSessionRenderCommit(options.sessionId);
 
-  const payloadRevision = Math.max(0, Math.floor(options.payload.revision || 0));
-  const payloadAvailableEndIndex = Number.isFinite(options.payload.availableEndIndex)
-    ? Math.max(0, Math.floor(options.payload.availableEndIndex || 0))
-    : 0;
-  const nextHead: SessionDaemonHeadView = {
-    daemonHeadRevision: Math.max(
-      liveHead?.revision ?? 0,
-      payloadRevision,
-      Math.max(0, Math.floor(nextBuffer.revision || 0)),
-    ),
-    daemonHeadEndIndex: Math.max(
-      liveHead?.latestEndIndex ?? 0,
-      payloadAvailableEndIndex,
-      Math.max(0, Math.floor(nextBuffer.bufferTailEndIndex || nextBuffer.endIndex || 0)),
-    ),
-  };
-  const visibleRange = resolvePostApplyVisibleRange({
-    head: nextHead,
-    previousBuffer: localBuffer,
+  fulfillVisibleNonGapRepairLedgerIfAuthoritative({
+    sessionId: options.sessionId,
+    payload: options.payload,
     nextBuffer,
-    visibleRange: options.refs.sessionVisibleRangeRef.current.get(options.sessionId) || null,
+    tailRefreshStore: options.refs.tailRefreshStoreRef.current,
+    visibleRange,
   });
 
   if (shouldCatchUpFollowTailAfterBufferApply(nextHead, nextBuffer, visibleRange, {
@@ -1720,7 +1806,7 @@ function applyResolvedBufferSyncPayloadRuntime(options: ApplyResolvedBufferSyncP
         requestStartIndex: repairRange.startIndex,
         requestEndIndex: repairRange.endIndex,
         tailEndIndex: nextBuffer.bufferTailEndIndex,
-        cooldownMs: VISIBLE_NON_GAP_REPAIR_COOLDOWN_MS,
+        staleMs: VISIBLE_NON_GAP_REPAIR_STALE_MS,
       });
       return true;
     }
@@ -1745,14 +1831,19 @@ function applyResolvedBufferSyncPayloadRuntime(options: ApplyResolvedBufferSyncP
       },
       requestMissingRangesOverride: [repairRange],
     });
+    const ledgerKey = {
+      requestStartIndex: repairRange.startIndex,
+      requestEndIndex: repairRange.endIndex,
+      tailEndIndex: nextBuffer.bufferTailEndIndex,
+      targetRevision: nextBuffer.revision,
+    };
     if (requested) {
       options.refs.tailRefreshStoreRef.current.recordVisibleNonGapRepairRequest(options.sessionId, {
         requestedAt: Date.now(),
-        requestStartIndex: repairRange.startIndex,
-        requestEndIndex: repairRange.endIndex,
-        tailEndIndex: nextBuffer.bufferTailEndIndex,
-        targetRevision: nextBuffer.revision,
+        ...ledgerKey,
       });
+    } else if (!options.refs.tailRefreshStoreRef.current.readVisibleNonGapRepair(options.sessionId, ledgerKey)) {
+      options.refs.tailRefreshStoreRef.current.markVisibleNonGapRepairPending(options.sessionId, ledgerKey);
     }
     return true;
   }

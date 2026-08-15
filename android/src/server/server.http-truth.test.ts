@@ -25,6 +25,8 @@ describe('server http route truth gates', () => {
     expect(source).toContain('terminalHttpRuntime.handleHttpRequest(request, response)');
     expect(source).toContain('daemonRuntimeDebugStore,');
     expect(source).toContain('setDaemonRuntimeDebugEnabled,');
+    expect(source).toContain('setDaemonRuntimeDebugLease,');
+    expect(source).toContain('debugPermissionService: daemonDebugPermissionService,');
     expect(source).toContain(
       'buildConnectedPayload: (sessionId, requestOrigin) => terminalHttpRuntime.buildConnectedPayload(sessionId, requestOrigin)',
     );
@@ -51,17 +53,18 @@ describe('server http route truth gates', () => {
     expect(block).toContain("url.pathname === '/health'");
     expect(block).toContain("url.pathname === '/debug/runtime'");
     expect(block).toContain("url.pathname === '/debug/runtime/logs'");
+    expect(block).toContain("url.pathname === '/debug/runtime/snapshot'");
     expect(block).toContain("url.pathname === '/debug/runtime/control'");
     expect(block).toContain('daemonEntries');
     expect(block).toContain('daemonReturned');
-    expect(block).toContain('deps.setDaemonRuntimeDebugEnabled(enabled)');
+    expect(block).toContain('deps.setDaemonRuntimeDebugLease(enabled, ttlMs)');
     expect(block).toContain("url.pathname === '/updates/latest.json'");
     expect(block).toContain("url.pathname.startsWith('/updates/')");
   });
 
   it('does not rewrite apkUrl against the request origin in /updates/latest.json', () => {
     const source = readHttpRuntimeSource();
-    const block = extractBlock(source, 'function handleHttpRequest(', 12000);
+    const block = extractBlock(source, 'function handleHttpRequest(', source.length);
 
     // Forward gate: the daemon MUST emit apkUrl exactly as written by the
     // build pipeline. Rewriting it to `${origin}/updates/<file>` pins the

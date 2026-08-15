@@ -140,8 +140,11 @@ function createHarness(options?: {
     ),
     mirrorCursorEqual: () => true,
     writeToLiveMirror: () => true,
-    enqueueLiveMirrorInput: async () => true,
-    disposeLiveMirrorInputBatch: () => 0,
+    daemonInputQueue: {
+      handleInputMessage: async () => {},
+      enqueueLiveMirrorInput: async () => true,
+      disposeLiveMirrorInputBatch: () => 0,
+    },
     writeToTmuxSession: vi.fn(),
     autoCommandDelayMs: 0,
     waitMs: async () => {},

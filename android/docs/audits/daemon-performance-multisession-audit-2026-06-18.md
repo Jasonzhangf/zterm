@@ -56,7 +56,8 @@ liveSyncTimer 触发 (33ms active / 120ms idle)
 -> broadcastChangedRangesBufferSyncToSubscribers(mirror, changedRanges)
 -> buildChangedRangesBufferSyncPayload(mirror, changedRanges)
 -> for (sessionId of mirror.subscribers)
--> resolveMirrorLiveSyncDelayForSubscriber(mirror, sessionId, ...) // per-sub
+-> daemon.buffer_publisher queueSubscriberPendingBufferSync + flushPendingSubscriberBufferSync
+   // per-subscriber backpressure/publication decision
 -> sendMessage(session, buffer-sync)
 ```
 

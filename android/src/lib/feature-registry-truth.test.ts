@@ -34,10 +34,14 @@ const requiredFeatureIds = [
   'terminal.transport_lifecycle',
   'terminal.daemon_input',
   'terminal.buffer_render',
+  'daemon.mirror_writer',
   'terminal.workspace_panes',
   'terminal.session_group_layout',
   'terminal.interaction_runtime',
   'terminal.shell_actions',
+  'client.composition_root',
+  'client.control_center',
+  'client.plugin_host',
   'connections.history_projection',
   'daemon.file_transfer',
 ] as const;
@@ -169,9 +173,9 @@ describe('feature registry truth gate', () => {
     const bufferFeature = registry.features.find((feature) => feature.feature_id === 'terminal.buffer_render');
     const bufferContractOwners = [
       'packages/shared/src/connection/types.ts',
-      'src/contexts/session-wire-helpers.ts',
-      'src/contexts/session-buffer-frame-assembly-state.ts',
-      'src/contexts/session-buffer-frame-assembly.ts',
+      'src/lib/wire-ingress/buffer-wire-normalize.ts',
+      'src/lib/buffer-frame-assembly/session-buffer-frame-assembly-state.ts',
+      'src/lib/buffer-frame-assembly/session-buffer-frame-assembly.ts',
       'src/contexts/session-context-buffer-runtime.ts',
       'src/lib/session-render-gate.ts',
     ];

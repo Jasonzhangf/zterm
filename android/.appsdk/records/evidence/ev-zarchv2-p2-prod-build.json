@@ -1,0 +1,29 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "EVID-20260815-ZARCHV2-P2-PROD-BUILD-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-phase2-production",
+  "kind": "build",
+  "source_commit": "9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c",
+  "scope": {
+    "module_id": "zterm-runtime-v2",
+    "feature_id": "build",
+    "entrypoint": "pnpm --dir android run build"
+  },
+  "producer": {
+    "adapter": "appsdk",
+    "identity": "codex-zterm-v2-phase2-production-20260815T042600Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "Full prebuild (feature registry 83/83, debug observability 70/70 across Android/shared, runtime v2 30/30, shell theme, throughput, transport network, terminal contracts 831/831, common flows 98/98, relay smoke, account directory, workspace panes), type-check, and Vite production build passed. Worktree is uncommitted at HEAD 9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c.",
+  "created_at": "2026-08-15T04:26:00Z",
+  "expires_at": "2026-11-15T04:26:00Z",
+  "input_hashes": [
+    "sha256:38439044173ce7cd9de9b94c19960e805768cf006cc6f69eb406b6be07f1b472",
+    "sha256:bd77d72203cd30bbaf2e957ede7e453f51b34488325859de5c25b75010bcb179",
+    "sha256:08b07163d86d3c3d2fe687e8f2e7bd9bdd8b342831afa994a25641c2c3c06ed3"
+  ],
+  "artifact_hash": "sha256:08b07163d86d3c3d2fe687e8f2e7bd9bdd8b342831afa994a25641c2c3c06ed3",
+  "scope_hash": "sha256:38439044173ce7cd9de9b94c19960e805768cf006cc6f69eb406b6be07f1b472"
+}

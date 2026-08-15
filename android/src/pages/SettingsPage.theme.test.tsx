@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SettingsPage } from './SettingsPage';
+import { AppUpdateSection } from '../components/settings/AppUpdateSection';
 import type { BridgeSettings } from '../lib/bridge-settings';
 import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
 import { RUNTIME_DEBUG_STORAGE_KEY } from '../lib/runtime-debug';
@@ -77,6 +78,7 @@ describe('SettingsPage terminal theme selection', () => {
         onResetUpdateIgnorePolicy={vi.fn()}
         onTerminalThemeChange={vi.fn()}
         onBack={vi.fn()}
+        renderSettingsUpdate={(props) => <AppUpdateSection {...props} />}
       />,
     );
 
@@ -418,6 +420,7 @@ describe('SettingsPage terminal theme selection', () => {
         onResetUpdateIgnorePolicy={vi.fn()}
         onTerminalThemeChange={vi.fn()}
         onBack={vi.fn()}
+        renderSettingsUpdate={(props) => <AppUpdateSection {...props} />}
       />,
     );
 

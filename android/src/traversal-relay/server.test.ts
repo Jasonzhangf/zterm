@@ -60,6 +60,14 @@ describe('traversal relay server directory contract', () => {
     expect(deviceSource).not.toContain("type: 'pong'");
   });
 
+  it('binds relay client debug logs and snapshots to the authenticated connection device', () => {
+    const source = readServerSource();
+
+    expect(source).toContain('const relayDeviceId = connection.deviceId;');
+    expect(source).toContain('deviceId mismatch for client-debug-log');
+    expect(source).toContain('deviceId mismatch for client-debug-snapshot');
+  });
+
   it('lets authenticated daemon hosts publish directory updates without crossing signaling ownership', () => {
     const source = readServerSource();
 

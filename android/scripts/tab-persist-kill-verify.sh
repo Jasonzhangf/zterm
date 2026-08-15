@@ -10,7 +10,7 @@ OUT_DIR="android/evidence/daemon-mirror/${TS}-tab-persist-kill-verify"
 mkdir -p "$OUT_DIR"
 
 echo "[1/7] capture before runtime logs"
-/usr/bin/curl -s "$DAEMON_URL/debug/runtime/control?enabled=1" > "$OUT_DIR/runtime-control-before.json" || true
+/usr/bin/curl -s -X POST -H 'Content-Type: application/json' -d '{"enabled":true}' "$DAEMON_URL/debug/runtime/control" > "$OUT_DIR/runtime-control-before.json" || true
 /usr/bin/curl -s "$DAEMON_URL/debug/runtime/logs?limit=3000" > "$OUT_DIR/runtime-before.json" || true
 
 echo "[2/7] force-stop app"

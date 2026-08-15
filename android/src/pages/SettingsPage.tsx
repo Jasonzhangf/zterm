@@ -18,7 +18,10 @@ import {
   TERMINAL_SESSION_GROUP_LAYOUT_OPTIONS,
   normalizeTerminalSessionGroupLayoutMode,
 } from '../lib/terminal-layout-profile';
-import { AppUpdateSection, type AppUpdateManifestCandidate } from '../components/settings/AppUpdateSection';
+import type {
+  AppUpdateManifestCandidate,
+  SettingsUpdateUiSlot,
+} from '../lib/plugin-settings-update/settings-update-contract';
 import { RememberedServersSection } from '../components/settings/RememberedServersSection';
 import { RelayAccountSettingsSection } from '../components/settings/RelayAccountSettingsSection';
 import { SettingsSectionTitle, settingsInputStyle, settingsSectionStyle } from '../components/settings/SettingsSection';
@@ -60,6 +63,7 @@ interface SettingsPageProps {
   configImporting?: boolean;
   onTerminalThemeChange?: (themeId: BridgeSettings['terminalThemeId']) => void;
   onTerminalShellSkinChange?: (skin: BridgeSettings['terminalShellSkin']) => void;
+  renderSettingsUpdate?: SettingsUpdateUiSlot['render'];
   onBack: () => void;
 }
 
@@ -173,6 +177,7 @@ export function SettingsPage({
   configImporting = false,
   onTerminalThemeChange,
   onTerminalShellSkinChange,
+  renderSettingsUpdate,
   onBack,
 }: SettingsPageProps) {
   const [draft, setDraft] = useState({ ...settings, servers: sortBridgeServers(settings.servers) });
@@ -289,32 +294,32 @@ export function SettingsPage({
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', padding: '18px 18px 32px' }}>
-        <AppUpdateSection
-          currentVersionName={currentVersionName}
-          currentVersionCode={currentVersionCode}
-          updateDraft={updateDraft}
-          latestManifest={latestManifest}
-          updateChecking={updateChecking}
-          updateInstalling={updateInstalling}
-          updateError={updateError}
-          hasNewVersion={hasNewVersion}
-          hasUpdateIgnorePolicy={hasUpdateIgnorePolicy}
-          suggestedManifestUrl={suggestedManifestUrl}
-          manifestCandidates={manifestCandidates}
-          onUpdateDraftChange={(updater) => setUpdateDraft((current) => updater(current))}
-          onCheckForUpdate={() => onCheckForUpdate(updateDraft)}
-          onInstallUpdate={onInstallUpdate}
-          onResetUpdateIgnorePolicy={onResetUpdateIgnorePolicy}
-          onExportConfig={onExportConfig}
-          onImportConfig={onImportConfig}
-          configExporting={configExporting}
-          configImporting={configImporting}
-          rollbackBackup={rollbackBackup}
-          isRollingBack={isRollingBack}
-          onRollback={onRollback}
-          rollbackToPreviousEntry={rollbackToPreviousEntry}
-          onRollbackToPrevious={onRollbackToPrevious}
-        />
+        {renderSettingsUpdate ? renderSettingsUpdate({
+          currentVersionName,
+          currentVersionCode,
+          updateDraft,
+          latestManifest,
+          updateChecking,
+          updateInstalling,
+          updateError,
+          hasNewVersion,
+          hasUpdateIgnorePolicy,
+          suggestedManifestUrl,
+          manifestCandidates,
+          onUpdateDraftChange: (updater) => setUpdateDraft((current) => updater(current)),
+          onCheckForUpdate: () => onCheckForUpdate(updateDraft),
+          onInstallUpdate,
+          onResetUpdateIgnorePolicy,
+          onExportConfig,
+          onImportConfig,
+          configExporting,
+          configImporting,
+          rollbackBackup,
+          isRollingBack,
+          onRollback,
+          rollbackToPreviousEntry,
+          onRollbackToPrevious,
+        }) : null}
 
         <RememberedServersSection
           settings={draft}

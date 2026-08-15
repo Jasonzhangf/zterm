@@ -18,7 +18,11 @@ import type {
   TerminalViewportState,
   TerminalVisibleRange,
 } from '../lib/types';
-import { buildTerminalMuxPing, type TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
+import {
+  buildTerminalMuxPing,
+  type TerminalMuxTargetClientMessage,
+  type TerminalSessionCatalog,
+} from '@zterm/shared/protocol';
 import type { SessionBufferStore } from '../lib/session-buffer-store';
 import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
 import type { SessionHeadStore } from '../lib/session-head-store';
@@ -28,6 +32,7 @@ import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-recei
 import type { RemoteWindowControlMessage } from '../lib/remote-window-message-runtime';
 import {
   manageTmuxSessionsOnOpenTransportRuntime,
+  queryTerminalSessionCatalogOnOpenTransportRuntime,
   type SessionTmuxTargetRequestStore,
 } from './session-context-tmux-management-runtime';
 import type {
@@ -129,6 +134,19 @@ export function createSessionPublicFacadeRuntime(options: {
     sessionId: string,
     message: TerminalMuxTargetClientMessage,
   ) => manageTmuxSessionsOnOpenTransportRuntime({
+    sessionId,
+    message,
+    pendingRequestsRef: options.tmuxTargetRequestsRef,
+    readSessionTransportResource: options.readSessionTransportResource,
+    daemonConnection,
+    sendSocketPayload: options.sendSocketPayload,
+    runtimeDebug: options.runtimeDebug,
+  });
+
+  const queryTerminalSessionCatalogOnOpenTransport = (
+    sessionId: string,
+    message: TerminalMuxTargetClientMessage,
+  ) => queryTerminalSessionCatalogOnOpenTransportRuntime({
     sessionId,
     message,
     pendingRequestsRef: options.tmuxTargetRequestsRef,
@@ -321,6 +339,7 @@ export function createSessionPublicFacadeRuntime(options: {
     getSessionScheduleState,
     getSessionDebugMetrics,
     manageTmuxSessionsOnOpenTransport,
+    queryTerminalSessionCatalogOnOpenTransport,
     sendMessageRaw,
     sendTargetHeartbeat,
   };
@@ -394,6 +413,10 @@ export function buildSessionContextValueRuntime(options: {
     sessionId: string,
     message: TerminalMuxTargetClientMessage,
   ) => Promise<string[] | null>;
+  queryTerminalSessionCatalogOnOpenTransport: (
+    sessionId: string,
+    message: TerminalMuxTargetClientMessage,
+  ) => Promise<TerminalSessionCatalog | null>;
   upsertScheduleJob: (sessionId: string, job: ScheduleJobDraft) => void;
   deleteScheduleJob: (sessionId: string, jobId: string) => void;
   toggleScheduleJob: (sessionId: string, jobId: string, enabled: boolean) => void;
@@ -447,6 +470,7 @@ export function buildSessionContextValueRuntime(options: {
     updateSessionViewport: options.updateSessionViewport,
     requestScheduleList: options.requestScheduleList,
     manageTmuxSessionsOnOpenTransport: options.manageTmuxSessionsOnOpenTransport,
+    queryTerminalSessionCatalogOnOpenTransport: options.queryTerminalSessionCatalogOnOpenTransport,
     upsertScheduleJob: options.upsertScheduleJob,
     deleteScheduleJob: options.deleteScheduleJob,
     toggleScheduleJob: options.toggleScheduleJob,

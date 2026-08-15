@@ -1,0 +1,24 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "EVID-20260815-ZARCHV2-P2-PROD-DEBUG-LEASE-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-phase2-production",
+  "kind": "gate",
+  "source_commit": "9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c",
+  "scope": {
+    "module_id": "zterm-runtime-v2",
+    "feature_id": "debug_permission_lease",
+    "entrypoint": "pnpm --dir android run test:debug-observability"
+  },
+  "producer": {
+    "adapter": "appsdk",
+    "identity": "codex-zterm-v2-phase2-production-20260815T042600Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "/debug/runtime/control is POST-only, auth-gated, default-deny, and backed by an expiring daemon debug lease; terminal-debug-runtime tests cover lease expiry and enabled/disabled daemon metadata behavior. Worktree is uncommitted at HEAD 9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c.",
+  "created_at": "2026-08-15T04:26:00Z",
+  "expires_at": "2026-11-15T04:26:00Z",
+  "input_hashes": ["sha256:fd2a92bf7ebcffd2f8b899258dfa930c99fde32b3c7b31026f8c9a2cfd466e69"],
+  "scope_hash": "sha256:fd2a92bf7ebcffd2f8b899258dfa930c99fde32b3c7b31026f8c9a2cfd466e69"
+}

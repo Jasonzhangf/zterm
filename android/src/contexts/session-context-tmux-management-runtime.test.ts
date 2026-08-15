@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   manageTmuxSessionsOnOpenTransportRuntime,
+  queryTerminalSessionCatalogOnOpenTransportRuntime,
   settleSessionTmuxTargetRequestRuntime,
   type SessionTmuxTargetRequestStore,
 } from './session-context-tmux-management-runtime';
@@ -23,7 +24,6 @@ function createResource(readyState = 1, terminalMuxReady = true): SessionTranspo
       terminalTransport: socket as any,
       terminalMuxReady,
       sessionIds: ['session-1'],
-      channels: new Map(),
     },
     targetKey: 'target-1',
     host: null,
@@ -178,5 +178,76 @@ describe('session tmux target management runtime', () => {
     await timeoutExpectation;
     expect(harness.pendingRequestsRef.current.size).toBe(0);
     expect(harness.sendSocketPayload).toHaveBeenCalledTimes(1);
+  });
+
+  it('queries the daemon-owned session catalog on the existing mux target transport', async () => {
+    const resource = createResource();
+    const pendingRequestsRef = {
+      current: new Map() as SessionTmuxTargetRequestStore,
+    };
+    const sendSocketPayload = vi.fn();
+    const request = queryTerminalSessionCatalogOnOpenTransportRuntime({
+      sessionId: 'session-1',
+      message: { type: 'list-sessions' },
+      pendingRequestsRef,
+      readSessionTransportResource: () => resource,
+      sendSocketPayload,
+      timeoutMs: 50,
+    });
+    const wireFrame = JSON.parse(sendSocketPayload.mock.calls[0][2] as string);
+
+    settleSessionTmuxTargetRequestRuntime({
+      pendingRequestsRef,
+      requestId: wireFrame.payload.requestId,
+      message: {
+        type: 'sessions',
+        payload: {
+          sessions: ['zterm', 'hd-codex'],
+          sessionCatalog: [
+            { name: 'zterm', backend: 'tmux' },
+            { name: 'hd-codex', backend: 'herdr' },
+          ],
+        },
+      },
+    });
+
+    await expect(request).resolves.toEqual({
+      sessionNames: ['zterm', 'hd-codex'],
+      sessionCatalog: [
+        { name: 'zterm', backend: 'tmux' },
+        { name: 'hd-codex', backend: 'herdr' },
+      ],
+    });
+  });
+
+  it('rejects a malformed catalog instead of silently dropping backend truth', async () => {
+    const resource = createResource();
+    const pendingRequestsRef = {
+      current: new Map() as SessionTmuxTargetRequestStore,
+    };
+    const sendSocketPayload = vi.fn();
+    const request = queryTerminalSessionCatalogOnOpenTransportRuntime({
+      sessionId: 'session-1',
+      message: { type: 'list-sessions' },
+      pendingRequestsRef,
+      readSessionTransportResource: () => resource,
+      sendSocketPayload,
+      timeoutMs: 50,
+    });
+    const wireFrame = JSON.parse(sendSocketPayload.mock.calls[0][2] as string);
+
+    settleSessionTmuxTargetRequestRuntime({
+      pendingRequestsRef,
+      requestId: wireFrame.payload.requestId,
+      message: {
+        type: 'sessions',
+        payload: {
+          sessions: ['zterm'],
+          sessionCatalog: [{ name: 'zterm', backend: 'invalid' }] as any,
+        },
+      },
+    });
+
+    await expect(request).rejects.toThrow('Malformed tmux target session catalog');
   });
 });

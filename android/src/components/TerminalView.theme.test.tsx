@@ -415,6 +415,39 @@ describe('TerminalView terminal themes', () => {
     expect(cells[6]?.style.background).toBe(hexToRgbString('#6a9955'));
   });
 
+  it('keeps ANSI red/green foregrounds in passive secondary preview rows', () => {
+    const row = [[
+      { char: '+'.codePointAt(0) || 43, fg: 2, bg: 256, flags: 0, width: 1 },
+      { char: '-'.codePointAt(0) || 45, fg: 1, bg: 256, flags: 0, width: 1 },
+    ]];
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId="theme-preview-secondary"
+          initialBufferLines={row}
+          bufferStartIndex={0}
+          bufferEndIndex={1}
+          bufferTailEndIndex={1}
+          live={false}
+          projectionMode="preview-secondary"
+          fontSize={3}
+          rowHeight="4px"
+          themeId="classic-dark"
+        />
+      </div>,
+    );
+
+    const previewRow = view.container.querySelector('[data-terminal-preview-row="true"]') as HTMLElement;
+    const cells = Array.from(previewRow.querySelectorAll(':scope > span > span')) as HTMLSpanElement[];
+
+    expect(previewRow).toBeTruthy();
+    expect(cells).toHaveLength(2);
+    expect(cells[0]?.style.color).toBe(hexToRgbString('#6a9955'));
+    expect(cells[1]?.style.color).toBe(hexToRgbString('#f44747'));
+    expect(cells[0]?.dataset.terminalCursor).toBeUndefined();
+  });
+
   it('renders block and shade glyphs as colored fills instead of gray text glyphs', () => {
     const row = [[
       { char: 0x2588, fg: 2, bg: 256, flags: 0, width: 1 },

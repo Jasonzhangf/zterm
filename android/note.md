@@ -1,5 +1,23 @@
 # 2026-07-29 remote-window sibling switch / screenshot / fullscreen gesture diagnosis
 
+# 2026-08-14 Phase 3 production client.terminal_channel_mux cutover
+
+- Phase 3 first production slice: `client.terminal_channel_mux` now owns `src/lib/terminal-channel-mux-runtime.ts` (`TerminalChannelMuxStore`). `SessionTransportRuntimeStore.terminalChannels` embeds the store; `TargetTransportRuntime` no longer owns `channels`.
+- Callers were migrated without behavior change: session transport store, transport accessors, transport-open types, infra facade body subscription, provider assembly types, and lifecycle tests.
+- Registry/docs bound: module-registry `owned_paths`, edge-registry `import_edges` (`client.daemon_connection -> client.terminal_channel_mux`, `client.session_runtime -> client.terminal_channel_mux`), resource truth stores, function map, wiki call map/source, feature registry, test designs, AppSDK maps.
+- Verification: dedicated channel-store tests 7/7; targeted transport/session/lifecycle 161/161; `test:feature-registry` 83/83; `test:debug-observability` 61/61; `tsc --noEmit` PASS; full `pnpm run build` PASS; AppSDK `appsdk verify android` ok:true.
+- Remaining: no ReviewRecord/PASS (codex-review MCP unavailable); later slices still needed for `daemon.input_queue`, production composition/control owners, Phases 4-8. Do not claim complete or promote.
+
+# 2026-08-14 same-account all-daemon visibility diagnosis
+
+- Jason requires every client logged into the same Relay account to see every daemon identity in that account.
+- Known flow: `relay.account_directory -> relay.directory_ui`. Relay server directory retains daemon identity when disconnected; client projection currently calls `projectOnlineTraversalRelayDaemonDevicesFromAccount()` and filters by `connected + freshness + this-client recent connection`.
+- First-divergence hypothesis H1: local recent-connection truth makes daemon visibility client-specific. Online/freshness is connectability truth, not account-directory membership truth.
+- Formal runtime/tests remain read-only. Experiment contract: `playground/relay-account-all-daemons-20260814/README.md`. Design ID `FD-20260814-ACCOUNT-DAEMON-VISIBILITY-01` is not yet approved.
+- Causal experiment confirmed H1: current online projection gives client A `daemon-a,daemon-b` and client B only `daemon-a` from the same directory when local recent maps differ; direct account-membership projection gives both clients the same two daemon ids. Playground 2/2 PASS.
+- Fix design `FD-20260814-ACCOUNT-DAEMON-VISIBILITY-01` is now `WAITING_FOR_JASON_APPROVAL`; formal code remains unchanged.
+- After Jason approved `FD-20260814-ACCOUNT-DAEMON-VISIBILITY-01`, implementation preflight found its allowed paths omitted drawer/picker consumers required to preserve "visible but not connectable" semantics. Marked `SCOPE_INVALIDATED` before product edits. Replacement `FD-20260814-ACCOUNT-DAEMON-VISIBILITY-02` keeps the same owner/first divergence and adds only Home/drawer/picker projection consumers plus focused tests; status `WAITING_FOR_JASON_APPROVAL`.
+
 # 2026-08-13 foreground resume transport close H2
 
 - Jason approved `FD-20260813-FOREGROUND-CLEANUP-01`; formal fix is now applied in `src/contexts/session-context-lifecycle.ts`.
@@ -6068,3 +6086,934 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
 - Confirmed shared failure owner: `terminal.buffer_render` / `resource.client_sparse_buffer -> resource.renderer_window`. The current `VisibleNonGapRepairRequestState` is one state per session with a 5s same-window cooldown; a dropped/lost repair can therefore stay unverified until another sparse update after cooldown, and may never converge if no further tail patch arrives.
 - White stripe remains renderer-side measurement suspicion: `measureTerminalViewport()` uses `getBoundingClientRect()` on single W/你 probes and takes `max(latinWidth, cjk/2)`, which can inflate `resolvedCellWidthPx` and create subpixel seams between fixed-width inline-block cells. Needs a real WebView computed-style/glyph-advance fixture before any change.
 - No product code was changed. Formal fix requires Jason approval of the design id before implementation.
+
+# 2026-08-14 renderer priority + source adapter/ledger delivery continuation
+
+- Jason: "马上进行修复" and "所有本地的未提交代码都要进行 review 以后提交".
+- Current uncommitted scope: renderer priority/background wake fix + terminal source adapter + visible repair ledger batch + scripts registry fixes.
+- Discovered incomplete ledger wiring: store had ledger API but session-context-buffer-runtime still used single-entry 5s cooldown; wired exact ledger with 2s stale re-dispatch, full visible-window fulfill, failed dispatch pending.
+- Module gate caught new terminal-source-adapter.ts unowned; registered under daemon.terminal_backend + feature-registry allowed_paths + function-map rows; import edge daemon.mirror_store->daemon.terminal_backend already declared and now matches code.
+- Daemon prepare-release was blocked by extractor still reading remote-window-scripts.ts after screen-capture source split; updated prepare-global-daemon-release.sh and zterm-daemon.sh to canonical remote-window-screen-capture-script.ts.
+- Verification: focused ledger/buffer tests 69/69; feature-registry 83/83; tsc; full pnpm build; daemon prepare-release; gradle assembleDebug; APK installed (versionCode 1100026440, SHA ff9ee3aba37b5f062b787bfc8095850d77e3adc34d86ae7af677221ad3a8cb85); daemon runtime restarted; daemon-mirror-close-loop 9/9; device renderer PID/timeOrigin stable across HOME->foreground; oom BTOP not CACC.
+- Next: MCP codex review then commit full uncommitted scope if PASS.
+
+# 2026-08-14 background longer stay / app switch reconnect continuation
+
+- Jason reports the installed APK still reconnects after a longer background stay and after repeated switches to/from other apps.
+- Device truth at 22:14 before the fixed APK: app `27384` stayed alive with foreground `BackgroundService`, but zterm-bound WebView renderer `31006` was `CACC / cur=CACC` after backgrounding. `dumpsys activity exit-info` showed repeated non-upgrade `OTHER KILLS BY SYSTEM / ISOLATED NOT NEEDED` and `EXIT_SELF` renderer exits.
+- Installed package at that time was `0.1.3.1000`, so the approved `FD-20260814-RENDERER_PRIORITY_BACKGROUND_WAKE-01` native changes were not in the running build.
+- Clean-fix worktree `/private/tmp/zterm-background-fix-20260814` from `9c52d5d` applies `waivedWhenNotVisible=false` for `RENDERER_PRIORITY_IMPORTANT`, foreground-skip native wake, and power-policy tests.
+- Verification after `adb install -r`: same app PID `30481` and renderer PID `28816` survived 4 minutes in background and 14 round trips to Weibo; renderer remained `FGS`/`BTOP` (`cur=1`) instead of CACC; `BackgroundService` remained `isForeground=true`; terminal body and CDP page stayed live.
+- APK `0.1.3.1000` versionCode `1100010000`, SHA `7927d7acc6cf1c6f0e8e81da3036713829b707cb55d25bf82cd2d9857b052bf5`.
+- Remaining live gap: Jason's screenshot still shows an old/stuck reconnect screen; after this installed build, the same device no longer reproduced renderer death during the tested background/switch sequence.
+
+# 2026-08-14 live 2646 closeout
+
+- Device was actually running old `0.1.3.1000` before this turn. `adb install -r` of the 2646 APK bumped `zterm_webview_cache_version.xml` to `1100026460`, and CDP resources changed from `index-B_1ppoX_.js` to the APK asset `index-KEP-jfNa.js`; no app-data/localStorage clear was needed.
+- Live 2646 evidence: drawer shows two same-name `hd-codex` rows, Herdr row has `(herdr)` suffix and backend-aware testid; opening Herdr `hd-codex` reaches `connected`; rename failure keeps `rename-dialog` open with inline `selected terminal backend does not support session rename`; real image file through the QuickBar input reaches the toast `图片发送失败：binary file transfer is not supported by the Herdr single-session terminal surface`.
+- Full gates rerun: focused 288/288, typecheck, prebuild all stages exit 0, Vite build exit 0, daemon health `ok=true` on 127.0.0.1:3333 and 100.66.1.82:3333 with update manifest 0.1.3.2646, daemon mirror close-loop 9/9 plus strict replay all passed.
+- Remaining: MCP `codex-review` tools are not exposed in this session; no PASS can be claimed. White-font vertical stripe remains a renderer measurement issue (`measureTerminalViewport` inflates cell width from max W/你 probe) and is not closed without a dedicated WebView glyph/advance fixture and approved renderer fix.
+
+# 2026-08-14 herdr catalog side-channel + portrait top layout 2647
+
+- Jason: “herdr 的 session 还有没搜到的” root cause was client grouping from plain names; daemon already unions tmux+Herdr but the client cannot know backend. Fix keeps `list-sessions` backend-opaque and adds `sessionCatalog: [{name, backend}]` to the `sessions` response side-channel.
+- Verified installed daemon pid 92975 over authenticated WS: 14 entries include `{zterm,herdr}`, `{zterm,tmux}`, `{hd-codex,herdr}`.
+- Portrait layout moved status strip to second row (`topInset+50`) and stage below it (`topInset+92`). Real-device 2647 rects: Sessions `{x:52,y:47,w:72,h:34}`, status `{x:94,y:89,w:169,h:34}`, stage `{x:0,y:131}`; no overlap.
+- Real-device drawer: herdr group `daemon:mac-studio::backend:herdr` contains `hd-codex,zterm`; tmux group contains `zterm`; clicking herdr `zterm` opens `zterm (herdr)` connected (status aria + tabs).
+- Build/install: APK `0.1.3.2647` versionCode `1100026470` SHA-256 `6a6f4b14701a6920ac1a46a674e6554520d40cc128b63bdb425e7a730836bf60` installed on `100.104.163.65:5555`; daemon reinstalled/restarted. OTA Relay publish intentionally not run without release authorization.
+# 2026-08-14 Herdr standard geometry root-cause design
+
+- Baseline evidence: installed Herdr 0.8.0 manual clients read host geometry,
+  while headless startup/restore uses a legacy `80x24` base; old zterm controller
+  logs also show `cols=80 rows=24`.
+- First divergence: Herdr has no single config-owned resolver shared by manual,
+  headless, restore, and `terminal session` controller entry points.
+- Formal owner: Herdr `TerminalConfig`; local standard config is
+  `[terminal] minimum_cols=80, minimum_rows=80`. zterm may only read the official
+  pane layout rect and pass source geometry to Herdr, with no duplicate floor.
+- Fix design: `/Volumes/extension/code/herdr-worktrees/zterm-standard-geometry/.local/prd/standard-terminal-geometry-fix-design.md`, design id
+  `HERDR-GEOMETRY-20260814-01`.
+- Draft experiment code exists only in the isolated Herdr worktree plus current
+  zterm WIP. Under the debug approval gate, no custom binary install, standard
+  config write, active-session restart, or production runtime change is allowed
+  until Jason explicitly approves this design id.
+
+# 2026-08-14 Herdr color render diagnosis
+
+- Jason reports Herdr `(+N -N)` red/green deltas render gray.
+- Evidence: canonicalizer keeps fg=1/2; live `hd-codex` daemon wire keeps
+  fg=1/2; `terminalCellStyle()` maps them to `#f44747` / `#6a9955`.
+- First divergence: `TerminalView.tsx` passive `preview-secondary` branch
+  flattens rows with `terminalRowToText()` and sets `color: theme.foreground`,
+  dropping per-cell fg. Primary preview and main terminal keep colors.
+- Playground DOM gate 2/2 PASS: secondary preview gray, primary preview
+  red/green.
+- Fix design `FD-20260814-HERDR-PREVIEW-COLOR-01` is
+  `WAITING_FOR_JASON_APPROVAL`; no product code changed.
+
+# 2026-08-14 Herdr history short root cause + design
+
+- Jason: Herdr session 只能看几屏历史。正式 runtime 保持只读，证据全部在
+  `playground/herdr-history-short-20260814/`。
+- 根因：当前 Herdr mirror 只发布 `HerdrFrameCanonicalizer` 的
+  `bufferLines`。Herdr `terminal.frame` 是渲染差异帧，长输出后
+  `bridge.getScrollbackCount()` 仍为 0，`absoluteRange` 只有 24 行。
+- 官方 `pane read --source recent --lines N` 是稳定 tail history：
+  400 行返回 402 行；5000 行时 `--lines 4000/6000/10000` 都返回最近
+  1000 行；追加 4 行后窗口滑动 4 行且旧行保持。
+- 官方源码确认 lines 硬上限 1000、默认 80：
+  `src/app/api_helpers.rs#read_terminal_snapshot`。
+- `pane read recent --format ansi --raw` 经
+  `canonicalizeCapturedMirrorLines` 后尾部与 canonicalizer visible tail
+  完全一致。
+- 设计：Herdr adapter 用官方 `pane read recent` 作为 mirror history source，
+  frame canonicalizer 只保留 cursor/geometry/keys/alt-screen metadata；
+  daemon-owned `sourceEndIndex` 只单调增长，`availableStartIndex` 不伪造。
+  上限 1000 是 Herdr 0.8.0 外部 contract gap，不做本地拼接/fallback。
+- Fix Design Report:
+  `android/docs/debug/2026-08-14-herdr-history-short-fix-design.md`，
+  design id `FD-20260814-HERDR-HISTORY-SHORT-01`，
+  `WAITING_FOR_JASON_APPROVAL`。
+
+# 2026-08-14 AppSDK ZTerm runtime architecture v2 initialization
+
+- Global AppSDK truth: `/Users/fanzhang/.local/bin/appsdk`, `appsdk 0.1.0 (rust)`; project-local `.appsdk/sdk.bin` was not executed or referenced by the lock workflow.
+- Idempotent `appsdk init . --project-root android` and global-binary `pin-lock` completed on `codex/appsdk-migration`; existing dirty worktree was preserved.
+- AppSDK template identity was replaced with project `zterm-runtime-architecture-v2`; goal `ZTERM-ARCH-V2-DESIGN-001` is confirmed and lifecycle remains `draft`.
+- Canonical design: `docs/design/2026-08-14-zterm-runtime-architecture-v2.md`; execution plan: `docs/goals/zterm-runtime-architecture-v2-plan.md`.
+- AppSDK maps now distinguish active governance entries from design/pending runtime node, control, debug, observability, and plugin resources/functions/gates. No runtime source, Active, Protected, or Generated artifact changed.
+- Verification: JSON parse PASS, `appsdk verify android` PASS with project id `zterm-runtime-architecture-v2`, targeted `git diff --check` PASS.
+
+# 2026-08-15 ZTerm v2 Phase 1 foundation evidence
+
+- Playground contracts and 18 tests are complete; the runtime architecture v2 gate is wired into `android/package.json` prebuild and `.github/workflows/ci.yml`.
+- Fresh gates: `test:runtime-architecture-v2` 18/18, `test:feature-registry` 83/83, tsc noEmit PASS, full `pnpm run build` (prebuild + relay smoke + Vite) PASS, `appsdk verify android` PASS.
+- AppSDK EvidenceRecords created under `.appsdk/records/evidence/`: positive/negative contracts, debug bounds/schema, plugin gates, typecheck, ownership, build, and appsdk verify.
+- ReviewRecord not yet created: codex-review MCP is not available in this session; Phase 1 must not be claimed as reviewed or promoted.
+- Next: continue Phase 2 debug side-channel after ReviewRecord PASS, or at minimum keep production runtime untouched.
+
+# 2026-08-15 ZTerm v2 Phase 2 debug side-channel Playground
+
+- Added `debug-side-channel.ts` and paired tests to the same Playground module: default-deny `DebugPermissionService`, typed metadata-only `ObservabilityChannel`, and `DebugExporter`.
+- Phase 2 tests prove business frames and polluted bodies are rejected, overflow/subscriber failures are counted, debug export failure cannot change a data result, and debug grants expire/revoke.
+- Bound new target functions/gates in AppSDK maps and added Phase 2 test design. No production source, protocol, Active, Protected, or Generated artifact changed.
+- Evidence: `test:runtime-architecture-v2` 22/22, `test:feature-registry` 83/83, tsc noEmit PASS, full `pnpm run build` PASS, `appsdk verify android` PASS.
+- Added Phase 2 AppSDK EvidenceRecords for debug export isolation, permission default-deny, and build.
+- ReviewRecord still blocked by unavailable codex-review MCP; Phase 2 remains Playground-only until Phase 1/2 review can pass.
+- Memory closure note: `scripts/mempalace-mine-zterm.sh` copied the new sources into the safe corpus but aborted on a pre-existing `~/.mempalace/palace/chroma.sqlite3` FTS5 corruption. Repo gates are green; MemPalace search/index rebuild remains a separate machine-repair gap.
+
+# 2026-08-15 ZTerm v2 Phase 3 control/composition Playground
+
+- Added `control-center.ts` and `composition-root.ts` plus paired tests to the
+  same Playground module. `ControlCenter` provides unique owner routing,
+  capability gating, idempotency, explicit deadline errors, and bounded audit
+  entries. `ClientCompositionRoot` binds declared runtime ports only, rejects
+  duplicate providers, and fails before use for unbound/undeclared or missing
+  required ports.
+- AppSDK maps mark `client_control_center`, `daemon_control_center`, and
+  `client_composition_root` as target-state entries; no production runtime,
+  protocol, Active, Protected, or Generated artifact changed.
+- Fresh gates after Phase 3: `test:runtime-architecture-v2` 30/30 (8 files),
+  `test:feature-registry` 83/83, full `pnpm run build` (prebuild + relay smoke +
+  type-check + Vite) PASS, `/Users/fanzhang/.local/bin/appsdk verify android`
+  ok:true at draft.
+- Phase 3 EvidenceRecords added for control center, composition root, typecheck,
+  build, and appsdk verify. ReviewRecord remains blocked by unavailable
+  codex-review MCP; Phase 3 stays Playground-only.
+- MemPalace repair finished: 231,973 drawers extracted and re-filed, FTS5
+  rebuilt, SQLite VACUUMed, and both `PRAGMA quick_check` and `integrity_check`
+  returned ok. `scripts/mempalace-mine-zterm.sh` then re-mined the zterm wing
+  (1078 files, 1759 drawers filed) and both "debug side channel ZTerm v2" and
+  "ControlCenter client composition root capability ports" searches return the
+  new v2 plan/note/test-design sources.
+
+# 2026-08-15 ZTerm v2 Phase 2 production debug HTTP cutover
+
+- Production slice removes `debug-log`/`debug-snapshot` from terminal mux
+  classification and deletes `runtime-debug-flush.ts`; client runtime debug now
+  exports bounded logs/snapshots to `/debug/runtime/logs` and
+  `/debug/runtime/snapshot` through `runtime-debug-http-exporter.ts`, with no
+  active session or transport socket dependency.
+- `/debug/runtime/control` is POST-only, auth-gated, default-deny, and backed by
+  `setDaemonRuntimeDebugLease` expiry. AppSDK maps remain
+  `design`/`production_pending_review` because the v2 module is not promoted;
+  production docs/registries, package `test:debug-observability`, prebuild, and
+  CI wiring were updated.
+- Verification: `test:debug-observability` Android 61/61 + shared 9/9 PASS,
+  `test:feature-registry` 83/83 PASS, `tsc --noEmit` PASS, full `pnpm run build`
+  PASS (prebuild + terminal contracts 831/831 + common flows 98/98 + relay smoke
+  + type-check + Vite), `/Users/fanzhang/.local/bin/appsdk verify android`
+  ok:true draft.
+- Full `pnpm test -- --run` is not all green: pre-existing
+  `src/lib/app-update-runtime.test.ts` rollback test fails alone and the full
+  parallel suite also hits a `@roamhq/wrtc` native V8 worker crash; both are
+  outside this debug slice and remain reported as regression gaps.
+- Added four production AppSDK EvidenceRecords for debug isolation, lease/auth,
+  registry/map gate, and build. ReviewRecord still blocked by unavailable
+  codex-review MCP; Phase 2 production cutover must not be claimed promoted.
+
+# 2026-08-15 Phase 2 stale-wording audit
+
+- Remaining `client-debug-log`/`client-debug-snapshot` in traversal relay are
+  relay-side typed debug messages over `/ws/devices`; they are not terminal mux
+  frames and do not ride the terminal business payload. Kept outside this
+  cutover, no source change.
+- `power-consumption-cpu-waste-audit-2026-06-19.md` is historical and still
+  describes the old 5s session debug flush; left as historical evidence rather
+  than rewriting the audit.
+- `appsdk verify android` after this audit:
+  `{"ok":true,"project_id":"zterm-runtime-architecture-v2","stage":"draft"}`.
+
+# 2026-08-15 daemon.input_queue production slice runtime blocker
+
+- Production worktree red: `daemon:mirror:close-loop` passed `codex-live`, then
+  daemon crashed on first probe detach because `terminal-runtime.ts:261` called
+  `deps.daemonInputQueue.disposeLiveMirrorInputBatch` on `undefined`.
+- Root cause is `server.ts` composition order: `createTerminalRuntime` receives
+  `daemonInputQueueRuntime` before `createDaemonInputQueueRuntime` assigns it;
+  object deps copy `undefined`, not a later binding. This is not a mirror
+  truth/input queue semantic bug.
+- Fix `FD-20260815-DAEMON-INPUT-QUEUE-WIRING-01` is now `IMPLEMENTED` in
+  production `src/server/server.ts` with a late-bound forwarding proxy and an
+  ownership ordering test in `server.herdr-selection-truth.test.ts`.
+- Isolated worktree `android/tmp/worktrees/android` applies a late-bound
+  forwarding proxy in `server.ts`; `daemon:mirror:close-loop` passed all 9 lab
+  cases + replay + strict audit, and `tsc --noEmit` passed.
+- Production worktree rerun after the formal patch: `daemon:mirror:close-loop`
+  passed all 9 lab cases + replay + strict audit; targeted server suite
+  121/121 in 8 files; `test:feature-registry` 83/83; `tsc --noEmit` PASS;
+  `git diff --check` PASS; `/Users/fanzhang/.local/bin/appsdk verify android`
+  ok:true draft.
+- Added `EVID-20260815-ZARCHV2-P5-PROD-INPUT-QUEUE-001` under
+  `.appsdk/records/evidence/`.
+- Remaining known unrelated regression: full build still has a
+  parallel-order-dependent `FileTransferSheet.test.tsx` failure; solo run
+  passed 49/49.
+- No ReviewRecord exists; codex-review MCP remains unavailable. Do not claim
+  reviewed, promoted, or complete.
+
+# 2026-08-15 module DAG physical ownership baseline
+
+- Added `module_dag` to the AppSDK verification map and the v2 test design, with
+  `src/lib/module-import-graph-truth.test.ts` now checking the real
+  cross-module import graph for cycles in addition to lockstep edges.
+- Client cycle removal: session transport orchestration/open, socket frame
+  demux, and message dispatch moved from `client.daemon_connection` to
+  `client.session_runtime`; `session-context-open-intent-store.ts` moved to
+  `client.daemon_connection`; session picker and tmux catalog helpers moved to
+  `client.connection_home`; pure input/viewport helpers and app version moved to
+  `client.runtime`; preview gesture and mirror-fixed zoom moved to
+  `client.renderer_window`; shared pane layout re-exports moved to
+  `shared.pane_layout`.
+- Verification: `test:feature-registry` 84/84 (11 files) with the DAG gate
+  green, `tsc --noEmit` PASS, `git diff --check` PASS, and
+  `/Users/fanzhang/.local/bin/appsdk verify android` ok:true draft.
+- Added `EVID-20260815-ZARCHV2-P4-MODULE-DAG-001`.
+- No source behavior changed; this was registry/edge/docs ownership only. No
+  ReviewRecord exists; codex-review MCP remains unavailable.
+
+# 2026-08-15 Phase 4 client.buffer_frame_assembly production slice
+
+- Moved client frame assembly source/tests from `src/contexts/` to
+  `src/lib/buffer-frame-assembly/` and registered active module
+  `client.buffer_frame_assembly` as the physical owner of
+  `resource.client_buffer_frame_assembly`; `client.buffer_store` now owns only
+  sparse buffer/planner/runtime files.
+- Updated module/edge/resource/feature/function/wiki/mainline/AppSDK maps and
+  v2 test design in lockstep. Import edges now route
+  `client.buffer_store -> client.buffer_frame_assembly` and
+  `client.session_runtime -> client.buffer_frame_assembly`.
+- Fixed stale wiring after the move: `test:terminal:frame-assembly` and
+  `scripts/run-terminal-contracts.mjs` now point at
+  `src/lib/buffer-frame-assembly/session-buffer-frame-assembly.test.ts`.
+- Verification: `test:terminal:frame-assembly` 101/101,
+  `test:feature-registry` 84/84, `test:terminal:contracts` 823/823 in 54 files,
+  `git diff --check` PASS,
+  `daemon:mirror:close-loop` all 9 lab cases + replay + strict audit PASS,
+  AppSDK verify android ok:true draft. Evidence
+  `EVID-20260815-ZARCHV2-P4-PROD-BUFFER-FRAME-ASSEMBLY-001` added.
+- No ReviewRecord exists; codex-review MCP remains unavailable. This slice is
+  production_pending_review only and v2 overall is not complete.
+
+# 2026-08-15 Phase 4 client.wire_ingress production slice
+
+- `normalizeIncomingBufferPayload` and `normalizeTerminalCursorState` moved from
+  `src/contexts/session-wire-helpers.ts` to
+  `src/lib/wire-ingress/buffer-wire-normalize.ts`; outbound
+  `buildHostConfigMessage` stays in `session-wire-helpers.ts` under
+  `client.daemon_connection`.
+- Registered active module `client.wire_ingress` with owned paths, declared
+  edges `client.buffer_store -> client.wire_ingress`,
+  `client.session_runtime -> client.wire_ingress`, and
+  `client.wire_ingress -> shared.terminal_types`, and updated
+  module/edge/feature/resource/function/wiki/mainline/AppSDK maps plus the v2
+  test design.
+- Updated gate wiring in `package.json` and `scripts/run-terminal-contracts.mjs`
+  to run the new normalization tests.
+- Verified: `test:terminal:frame-assembly` 104/104,
+  `test:feature-registry` 84/84, `test:terminal:contracts` 826/826 in 55
+  files, `tsc --noEmit` PASS, `git diff --check` PASS,
+  `daemon:mirror:close-loop` all 9 cases plus replay and strict audit PASS,
+  AppSDK verify android ok:true draft.
+- Evidence `EVID-20260815-ZARCHV2-P4-PROD-WIRE-INGRESS-001` added. No
+  ReviewRecord/PASS exists because codex-review MCP remains unavailable; this
+  slice is production_pending_review and v2 overall is not complete.
+
+# 2026-08-15 Phase 4 client.sparse_buffer + renderer_window ownership slice
+
+- Active module `client.sparse_buffer` now owns
+  `resource.client_sparse_buffer` through `src/lib/session-buffer-store.ts`;
+  `client.buffer_store` retains only planner/pull/repair/head/tail refresh
+  orchestration and consumes sparse truth without owning it.
+- Active module `client.renderer_window` now owns
+  `src/lib/session-render-buffer-store.ts` and the render gate as immutable
+  render projection owner; sparse body truth and visible-window truth remain
+  separate resources.
+- Updated module/edge/resource/feature/function/wiki/mainline/AppSDK maps,
+  project modules, resource map, v2 test design, and
+  `module-registry-truth.test.ts` required modules in lockstep.
+- Verified: `test:feature-registry` 84/84,
+  `test:terminal:frame-assembly` 104/104,
+  `test:terminal:contracts` 826/826 in 55 files, `tsc --noEmit` PASS, full
+  `pnpm run build` PASS, `daemon:mirror:close-loop` all 9 cases plus replay
+  and strict audit PASS, `git diff --check` PASS, and AppSDK verify ok:true.
+- Evidence `EVID-20260815-ZARCHV2-P4-PROD-SPARSE-RENDER-OWNER-001` added. No
+  ReviewRecord/PASS exists because codex-review MCP remains unavailable; this
+  slice is production_pending_review and v2 overall is not complete.
+
+# 2026-08-15 Phase 4 client.dom_renderer + client.terminal_shell ownership slice
+
+- Active module `client.dom_renderer` now owns the immutable render snapshot to
+  DOM projection surface: `TerminalView.tsx`, `terminal/VisibleRow.tsx`,
+  `terminal/TerminalPreviewRow.tsx`, `useMirrorFixedZoomPan.ts`, shared
+  `cell-render.ts`, and `theme.ts`; `client.renderer_window` no longer owns DOM
+  projection files.
+- Active module `client.terminal_shell` now owns `TerminalPageStageShell.tsx`,
+  shell skin, status/quickbar/copy/keyboard-lift shell files, and the shell UI
+  primitives; `client.app_shell` no longer owns `terminal-shell-skin.ts`.
+- Mainline source-to-DOM truth is `TerminalPage -> StageShell -> TerminalView
+  -> Renderer -> RenderGate`; `android_mainline:StageShell->TerminalView` is
+  the new edge and old direct `TerminalPage->TerminalView` references were
+  removed from current docs/test designs.
+- Updated module/edge/resource/feature/function/wiki/mainline/AppSDK maps,
+  project modules, resource map, architecture, audit remediation, render truth
+  decision, terminal-buffer-truth skill, and v2 test design in lockstep;
+  `docs:function-wiki` regenerated the wiki HTML.
+- Verification: `test:feature-registry` 84/84 in 11 files,
+  `tsc --noEmit` PASS, `test:terminal:frame-assembly` 104/104,
+  `test:terminal:contracts` 826/826 in 55 files,
+  `daemon:mirror:close-loop` all 9 cases plus replay and strict audit PASS,
+  full `pnpm run build` PASS, AppSDK verify android ok:true draft,
+  and `git diff --check` PASS.
+- Evidence `EVID-20260815-ZARCHV2-P4-PROD-DOM-TERMINAL-SHELL-OWNER-001` added.
+  No ReviewRecord/PASS exists because codex-review MCP remains unavailable;
+  this slice is production_pending_review and v2 overall is not complete.
+
+# 2026-08-15 Phase 6 production plugin host first slice
+
+- Added production `client.plugin_host` under `src/lib/plugin-host/` and
+  `shared.plugin_contract` under `packages/shared/src/terminal/plugin-*`.
+  App composes one host-level `network:native-snapshot` capability and consumes
+  only plugin-provided `network:sample-interfaces` for `NetworkIdentityRuntime`.
+- Added `plugin-host-ownership.test.ts`: host cannot import
+  SessionContext/traversal/session stores/server truth; only App.tsx and the
+  plugin host directory may import host/shared plugin contracts.
+- Wired `test:plugin-host` into prebuild and CI; AppSDK maps now mark
+  `client_plugin_lifecycle`, `resource.client_plugin_host`, and
+  `resource.plugin_capability_registry` as production_pending_review with real
+  binding paths.
+- Verified test:plugin-host 11/11, feature registry 84/84, runtime-architecture-v2
+  30/30, tsc PASS, full build PASS, appsdk verify draft ok:true, diff check PASS.
+  Evidence `EVID-20260815-ZARCHV2-P6-PROD-PLUGIN-HOST-001` added. No review PASS.
+
+# 2026-08-15 Phase 3 production composition root slice
+
+- Added production `client.composition_root` under `src/lib/composition-root/`.
+  `ClientCompositionRoot` owns typed bind/resolve/require/has semantics and
+  rejects duplicate, unbound, and missing ports; App.tsx is the only production
+  consumer and now binds `plugin-host`, requires it before use, and resolves
+  `PluginHost` through the composition root instead of constructing it inline.
+- Added contract tests for bind/resolve/require and a static
+  `client-composition-root-ownership.test.ts` red gate. The red gate forbids
+  composition-root imports of SessionContext/traversal/session stores/server
+  and forbids non-App/non-composition-root production imports; it also verifies
+  App uses the `plugin-host` port id and the typed `PluginHost` resolution path.
+- Updated module/edge/resource/feature/function/wiki/mainline/AppSDK maps,
+  architecture, resource map, project modules, v2 plan, v2 test design, and
+  gate wiring in package prebuild plus CI. AppSDK maps now mark
+  `resource.client_composition_root` and `client_composition_root` as
+  `production_pending_review` with real binding paths and required gates.
+- Verified: `test:composition-root` 6/6, `test:feature-registry` 84/84 in 11
+  files, `test:runtime-architecture-v2` 30/30, `tsc --noEmit` PASS, full
+  `pnpm run build` PASS including prebuild gates and Vite, AppSDK
+  verify android ok:true draft, and `git diff --check` PASS.
+- Evidence `EVID-20260815-ZARCHV2-P3-PROD-COMPOSITION-ROOT-001` added. No
+  ReviewRecord/PASS exists because codex-review MCP remains unavailable; this
+  slice is production_pending_review and v2 overall is not complete.
+
+# 2026-08-15 Phase 3 production control center slice
+
+- Added production `shared.control_contract` under
+  `packages/shared/src/terminal/control-contract.ts`, production
+  `client.control_center` under `src/lib/control-center/client-control-center.ts`,
+  and `PluginHostControlNode` under `src/lib/plugin-host/`.
+- App.tsx now binds both `plugin-host` and `control-center` through
+  `ClientCompositionRoot`, registers `plugin-host.dispose` with
+  `PluginHostControlNode` under capability `plugin-host:dispose`, and routes
+  app-unmount disposal through `ClientControlCenter` with an idempotency key.
+  Direct `pluginHost.disposeAll` is removed from App.
+- Added contract/audit/ownership tests for the control center and control node;
+  wired `test:control-center` into package prebuild and CI. Resource registry
+  now declares `resource.platform_terminal_surface ->
+  resource.client_control_center`.
+- Verified: `test:control-center` 13/13, `test:composition-root` 6/6,
+  `test:plugin-host` 11/11, `test:runtime-architecture-v2` 30/30,
+  `test:feature-registry` 84/84, tsc PASS, full `pnpm run build` PASS
+  including prebuild, Gradle, terminal contracts 826/826, and Vite, AppSDK
+  verify android ok:true draft, and `git diff --check` PASS.
+- Evidence `EVID-20260815-ZARCHV2-P3-PROD-CONTROL-CENTER-001` added. No
+  ReviewRecord/PASS exists because codex-review MCP remains unavailable; this
+  slice is production_pending_review and v2 overall is not complete.
+
+# 2026-08-15 Phase 5 daemon.channel_mux ownership slice
+
+- Active module `daemon.channel_mux` now owns
+  `resource.daemon_channel_mux` through
+  `src/server/terminal-channel-mux-runtime.ts`: mux channel transport/envelope
+  creation, registry ensure/release/list/clear, and subscriber registration.
+  `terminal-runtime.ts`, bridge/daemon cleanup, mux-channel-runtime attach/
+  close, and server composition now all go through owner APIs; direct
+  `connection.muxChannels` mutation outside the owner is gated.
+- Updated module/resource/edge/feature/function/wiki/mainline/AppSDK maps,
+  project modules, resource map, and `module-registry-truth.test.ts` in
+  lockstep. Added registry init, per-channel/all-channel release tests and
+  static mux registry mutation gates.
+- Re-verified `test:feature-registry` 84/84, targeted daemon/mux/transport
+  suite 86/86 in 6 files, `tsc --noEmit` PASS, `git diff --check` PASS,
+  `daemon:mirror:close-loop` all 9 cases plus replay and strict audit PASS;
+  AppSDK verify android ok:true draft, and `git diff --check` PASS; prior full
+  `test:terminal:contracts` and `pnpm run build` PASS in this worktree.
+- Evidence `EVID-20260815-ZARCHV2-P5-PROD-DAEMON-CHANNEL-MUX-001` added. No
+  ReviewRecord/PASS exists because codex-review MCP remains unavailable; this
+  slice is production_pending_review and v2 overall is not complete.
+
+# 2026-08-15 Phase 5 daemon control gateway/control center production slice
+
+- Added `src/server/daemon-control-center-runtime.ts` (typed DaemonControlCenter:
+  unique owner per command type, capability gate, deadline, idempotency,
+  correlation/subject validation, bounded audit) and
+  `src/server/daemon-control-gateway-runtime.ts` (schedule/tmux control through
+  center, session-open/connect/list-sessions delegation).
+- `terminal-message-runtime.ts` now creates one gateway and routes
+  schedule/tmux/session-open/connect/list-sessions through it; existing
+  `terminal-message-control-runtime.ts` handlers remain unchanged so wire
+  responses/errors are preserved. Updated the transport lifecycle static gate to
+  require gateway-owned handler delegation instead of direct message-runtime
+  imports.
+- Added `daemon-control-center-runtime.test.ts` and
+  `daemon-control-center-ownership.test.ts` red gates; wired
+  `test:daemon-control-center` into prebuild/CI. Updated module/edge/resource/
+  feature/function/wiki/mainline/AppSDK maps and architecture docs in lockstep.
+- Verified: `test:daemon-control-center` 10/10, `test:feature-registry` 84/84,
+  `test:terminal:regression:core` 827/827 plus 98/98 user flows and relay
+  smoke, `tsc --noEmit` PASS, full `pnpm run build` PASS, `daemon:mirror:close-loop`
+  all 9 cases plus replay and strict audit PASS, `docs:function-wiki`
+  regenerated, AppSDK verify android ok:true draft, `git diff --check` PASS.
+- Evidence `EVID-20260815-ZARCHV2-P5-PROD-DAEMON-CONTROL-CENTER-001` added.
+  Review/promotion is not recorded because codex-review MCP remains unavailable;
+  this slice is production_pending_review and v2 overall is not complete.
+
+- After evidence was added, `appsdk verify android` first returned
+  `SDK_RESOURCES_BUNDLE_MISMATCH`; running the pinned CLI
+  `appsdk init /Volumes/extension/code/zterm --project-root android`
+  regenerated `.appsdk/sdk-resources.json` from the bundle, after which
+  `appsdk verify android` passed with `{"ok":true,...}`. No SDK resource file
+  was hand-edited.
+
+# 2026-08-15 Phase 5 daemon buffer publisher ownership slice
+
+- Active `daemon.buffer_publisher` now owns
+  `src/server/daemon-buffer-publisher-runtime.ts`: per-subscriber
+  pending-latest, range merge/collapse, backpressure hysteresis, head
+  broadcast cache, oversized same-revision frame split, explicit live-tail
+  seed, and flush statuses. `terminal-mirror-runtime.ts` delegates
+  broadcast/flush/head publication to the publisher and no longer owns
+  bounded pending-latest state.
+- Updated wiki mainline/module/daemon docs, edge registry, function map,
+  module registry, resource registry/map, feature registry, v2 plan/test
+  design, and AppSDK resource/function/verification maps in lockstep.
+  Regenerated wiki HTML with `docs:function-wiki`.
+- Verified: `test:daemon-buffer-publisher` 6/6, `test:feature-registry`
+  84/84 in 11 files, registry/mainline/edge/resource truth tests PASS,
+  `tsc --noEmit` PASS, `type-check` PASS, `daemon:mirror:close-loop` all 9
+  cases plus replay and strict audit PASS, full `pnpm run build` PASS,
+  AppSDK verify android ok:true draft, and `git diff --check` PASS.
+- Evidence `EVID-20260815-ZARCHV2-P5-PROD-DAEMON-BUFFER-PUBLISHER-001`
+  added. No ReviewRecord/PASS exists because codex-review MCP remains
+  unavailable; this slice is production_pending_review and v2 overall is not
+  complete.
+
+# 2026-08-15 Phase 5 daemon session catalog ownership slice
+
+- Active `daemon.session_catalog` now owns
+  `src/server/daemon-session-catalog-runtime.ts`:
+  `buildSessionsCatalogPayload` and `handleListSessionsMessageRuntime`.
+  `daemon.control_gateway` delegates list-sessions handling to this owner;
+  `daemon.schedule_runtime` imports only the payload builder.
+- Updated module/resource/edge/feature/function/wiki/mainline/AppSDK maps,
+  architecture, plan, test design, feature gates, and package prebuild/CI in
+  lockstep. Mainline nodes/edges now route
+  `ControlGateway/Control -> SessionCatalog -> IdleSessionPublishIn01Request`.
+- Verified: `test:daemon-session-catalog` 8/8,
+  `test:feature-registry` 84/84 in 11 files, `tsc --noEmit` PASS,
+  `daemon:mirror:close-loop` all 9 cases plus replay and strict audit PASS,
+  full `pnpm run build` PASS, `docs:function-wiki` regenerated,
+  AppSDK verify android ok:true draft, and `git diff --check` PASS.
+- Evidence
+  `EVID-20260815-ZARCHV2-P5-PROD-DAEMON-SESSION-CATALOG-001` added.
+  Review/promotion is not recorded because codex-review MCP remains
+  unavailable; this slice is production_pending_review and v2 overall is not
+  complete.
+
+# 2026-08-15 Phase 7 debug console UI first slice
+
+- `client.debug_console` now owns the typed debug console UI contract,
+  plugin slot renderer, and `TerminalPageDebugOverlay`; `shared.plugin_contract`
+  owns the typed UI slot registry. App reads `terminal.debug-console` only after
+  `PluginHost.startAll` resolves, then passes the slot render callback into
+  `TerminalPage`.
+- Full build first failed because `startAll` is sequential and App rendered
+  before the debug-console plugin start had run, so `readUiSlot` threw. App now
+  renders without the optional slot until activation completes and rerenders
+  once the plugin host publishes it; App first-paint/dynamic-refresh tests cover
+  this path.
+- Added `client.debug_console` module/feature/resource/edges, AppSDK
+  verification gate, `test:debug-console-ui`, prebuild/CI wiring, wiki/mainline
+  docs, and evidence
+  `EVID-20260815-ZARCHV2-P7-PROD-DEBUG-CONSOLE-UI-001`.
+- Verified `test:plugin-host` 14/14, `test:debug-console-ui` 35/35,
+  `test:feature-registry` 84/84, App first-paint/dynamic-refresh 40/40,
+  tsc PASS, full `pnpm run build` PASS including terminal contracts 833/833,
+  docs wiki regenerated, AppSDK verify android ok:true draft, and
+  `git diff --check` PASS. UI-only slice does not require daemon install or
+  restart; status is `production_pending_review`.
+
+# 2026-08-15 Phase 7 session drawer UI second slice
+
+- `client.session_drawer_ui` now owns the typed session drawer UI slot contract
+  in `src/lib/plugin-session-drawer/session-drawer-contract.ts`;
+  `SessionDrawerUiPlugin` provides `terminal.session-drawer` through the plugin
+  host UI slot registry and renders `TerminalSessionDrawer`. App reads the slot
+  callback only after `PluginHost.startAll` resolves, and TerminalPage renders
+  the drawer only through `renderSessionDrawer`; no direct
+  `TerminalSessionDrawer` import/render path remains in TerminalPage.
+- Added `client.session_drawer_ui` module/feature/resource/edges, mainline
+  nodes/edges, AppSDK verification gate, `test:session-drawer-ui`,
+  prebuild/CI wiring, plan/test-design progress, and evidence
+  `EVID-20260815-ZARCHV2-P7-PROD-SESSION-DRAWER-UI-001`.
+- Verified `test:session-drawer-ui` 125/125, `test:debug-console-ui` 36/36,
+  `test:plugin-host` 15/15, `test:feature-registry` 84/84, tsc PASS, full
+  `pnpm run build` PASS including prebuild gates, terminal contracts 834/834,
+  Gradle, Vite, docs wiki regenerated, AppSDK verify android ok:true draft,
+  and `git diff --check` PASS. UI-only slice requires no daemon install or
+  restart; status is `production_pending_review`.
+
+# 2026-08-15 Phase 7 file browser UI third slice audit
+
+- Current `client.file_browser` is active and owns FileTransferSheet,
+  RemoteScreenshotSheet, transfer-sheet helpers, session transfer runtime,
+  and file-transfer lib runtimes. It already owns `resource.client_file_browser`
+  and consumes `resource.file_transfer`, `resource.target_mux_request`,
+  `resource.client_native_file_store`, and `resource.ui_projection`.
+- The remaining Phase 7 old edge is `TerminalPage.tsx:11` direct
+  `FileTransferSheet` import plus `TerminalPage.tsx:3570` direct render.
+  QuickBar still invokes `handleQuickBarOpenFileTransfer` in TerminalPage; that
+  open/mode projection can remain in the page shell while the sheet render is
+  supplied only through a typed plugin slot callback.
+- Planned cutover mirrors debug console/session drawer: add
+  `src/lib/plugin-file-browser/file-browser-contract.ts`,
+  `src/lib/plugin-host/file-browser-ui-plugin.tsx`, install/read the slot in
+  App after `PluginHost.startAll`, pass `renderFileBrowser` through AppContent
+  into TerminalPage, and remove the direct FileTransferSheet import/render path.
+- Must update module/resource/edge/feature/function/wiki/mainline/AppSDK maps,
+  feature gates, test design, prebuild/CI, and add paired UI/plugin tests.
+  Review/promotion remains unavailable.
+
+# 2026-08-15 Phase 7 file browser UI third slice completed
+
+- `client.file_browser_ui` now owns the typed file browser UI slot contract in
+  `src/lib/plugin-file-browser/file-browser-contract.ts`;
+  `FileBrowserUiPlugin` provides `terminal.file-browser` through the plugin host
+  UI slot registry and renders `FileTransferSheet`. App reads the slot callback
+  only after `PluginHost.startAll` resolves; TerminalPage renders the file
+  browser only through `renderFileBrowser`, with no direct `FileTransferSheet`
+  import/render path.
+- Added module/feature/resource/edges, mainline nodes/edges, AppSDK
+  verification gate, `test:file-browser-ui`, prebuild/CI wiring,
+  plan/test-design progress, and evidence
+  `EVID-20260815-ZARCHV2-P7-PROD-FILE-BROWSER-UI-001`.
+- Verified `test:file-browser-ui` 66/66, `test:plugin-host` 16/16,
+  `test:session-drawer-ui` 127/127, `test:debug-console-ui` 37/37,
+  `test:feature-registry` 84/84, tsc PASS, full `pnpm run build` PASS
+  including prebuild gates, Gradle, terminal contracts 835/835, Vite,
+  docs:function-wiki regenerated, AppSDK verify android ok:true draft, and
+  `git diff --check` PASS. UI-only slice requires no daemon install/restart;
+  status is `production_pending_review`.
+
+# 2026-08-15 Phase 7 settings update UI fourth slice completed
+
+- `client.settings_update_ui` now owns the typed settings update UI slot
+  contract in `src/lib/plugin-settings-update/settings-update-contract.ts`;
+  `SettingsUpdateUiPlugin` provides `settings.update` through the plugin host
+  UI slot registry and renders `AppUpdateSection`. App reads the slot callback
+  only after `PluginHost.startAll` resolves; SettingsPage renders the update
+  section only through `renderSettingsUpdate`, with no direct
+  `AppUpdateSection` import/render path in SettingsPage.
+- Added module/feature/resource/edges, mainline nodes/edges, AppSDK
+  verification gate, `test:settings-update-ui`, prebuild/CI wiring,
+  plan/test-design progress, and evidence
+  `EVID-20260815-ZARCHV2-P7-PROD-SETTINGS-UPDATE-UI-001`.
+- Existing SettingsPage relay/theme tests now inject the plugin-provided
+  `AppUpdateSection` renderer so page behavior assertions still cover the real
+  update projection.
+- Verified `test:settings-update-ui` 57/57, targeted SettingsPage/AppUpdateSection/
+  plugin-host/App dynamic refresh 71/71, `test:feature-registry` 84/84, tsc
+  PASS, full `pnpm run build` PASS including prebuild gates, Gradle, terminal
+  contracts, Vite, docs:function-wiki regenerated, AppSDK verify android
+  ok:true draft, and `git diff --check` PASS. UI-only slice requires no daemon
+  install/restart; status is `production_pending_review`.
+
+# 2026-08-15 Phase 7 remote window UI fifth slice completed
+
+- `client.remote_window_ui` now owns the typed remote window UI slot contract
+  in `src/lib/plugin-remote-window/remote-window-contract.ts`;
+  `RemoteWindowUiPlugin` provides `terminal.remote-window` through the plugin
+  host UI slot registry and renders `RemoteWindowOverlay`. App reads the slot
+  callback only after `PluginHost.startAll` resolves; TerminalPage renders the
+  remote window overlay only through `renderRemoteWindow`, with no direct
+  `RemoteWindowOverlay` import/render path.
+- Added module/feature/resource/edges, mainline nodes/edges, AppSDK
+  verification gate, `test:remote-window-ui`, prebuild/CI wiring,
+  plan/test-design progress, and evidence
+  `EVID-20260815-ZARCHV2-P7-PROD-REMOTE-WINDOW-UI-001`.
+- Verified `test:remote-window-ui` 121/121, `test:feature-registry` 84/84,
+  tsc PASS, full `pnpm run build` PASS including prebuild gates, Gradle,
+  terminal contracts 837/837, Vite, docs:function-wiki regenerated, AppSDK
+  verify android ok:true draft, and `git diff --check` PASS. UI-only slice
+  requires no daemon install/restart; status is `production_pending_review`.
+
+# 2026-08-15 Phase 7 quickbar UI sixth slice completed
+
+- `client.quickbar_ui` now owns the typed quickbar UI slot contract in
+  `src/lib/plugin-quickbar/quickbar-contract.ts`; `QuickBarUiPlugin` provides
+  `terminal.quickbar` through the plugin host UI slot registry and renders
+  `TerminalQuickBar`. App reads the slot callback only after
+  `PluginHost.startAll` resolves; TerminalPage renders the quickbar only
+  through `renderQuickBar`, with no direct `TerminalQuickBar` import/render
+  path in TerminalPage.
+- Added module/feature/resource/edges, mainline nodes/edges, AppSDK
+  verification gate, `test:quickbar-ui`, prebuild/CI wiring,
+  plan/test-design progress, and evidence
+  `EVID-20260815-ZARCHV2-P7-PROD-QUICKBAR-UI-001`.
+- TerminalPage tests that previously mocked `TerminalQuickBar` now inject the
+  typed `renderQuickBar` callback so IME, debug overlay, remote-window, split,
+  screenshot, session drawer/preview, foldable, schedule, multi-pane, and
+  render-isolation coverage still exercises the plugin slot boundary.
+- Verified `test:quickbar-ui` 72/72, `test:feature-registry` 84/84,
+  `test:debug-console-ui` 40/40, `test:session-drawer-ui` 133/133,
+  `test:remote-window-ui` 123/123, targeted foldable/schedule/multi-pane/
+  remote-screenshot 20/20, tsc PASS, full `pnpm run build` PASS including
+  prebuild gates, Gradle, terminal contracts 838/838, Vite,
+  docs:function-wiki regenerated, AppSDK verify android ok:true draft, and
+  `git diff --check` PASS. UI-only slice requires no daemon install/restart;
+  status is `production_pending_review`.
+
+# 2026-08-15 Phase 7 terminal shell UI seventh slice completed
+
+- `client.terminal_shell_ui` now owns the typed terminal shell UI slot
+  contract in `src/lib/plugin-terminal-shell/terminal-shell-contract.ts`;
+  `TerminalShellUiPlugin` provides `terminal.shell` through the plugin host UI
+  slot registry and renders `TerminalNetworkBanner`,
+  `TerminalConnectionStatusStrip`, `TerminalPageCopyMenu`,
+  `TerminalPageStageShell`, and `TerminalQuickBarShell`. App reads the slot
+  callback only after `PluginHost.startAll` resolves; TerminalPage renders the
+  terminal shell only through `renderTerminalShell`, with no direct
+  `TerminalConnectionStatusStrip`, `TerminalPageCopyMenu`,
+  `TerminalPageStageShell`, `terminal-page-shell-ui`, `TerminalQuickBarShell`,
+  or `TerminalNetworkBanner` import/render path.
+- Added module/feature/resource/edges, mainline nodes/edges, AppSDK
+  verification gate, `test:terminal-shell-ui`, prebuild/CI wiring,
+  plan/test-design progress, and evidence
+  `EVID-20260815-ZARCHV2-P7-PROD-TERMINAL-SHELL-UI-001`.
+- TerminalPage page tests inject `renderTerminalShellForTest` so render
+  isolation, plugin host runtime, App dynamic refresh, and existing page
+  behavior coverage still exercises the typed slot boundary.
+- Verified `test:terminal-shell-ui` 74/74, `test:feature-registry` 84/84,
+  tsc PASS, docs:function-wiki PASS, full `pnpm run build` PASS including
+  prebuild gates, Gradle, terminal regression core 839/839, Vite, AppSDK
+  verify android ok:true draft, and `git diff --check` PASS. UI-only slice
+  requires no daemon install/restart; status is `production_pending_review`.
+
+# 2026-08-15 Phase 7 terminal shell UI seventh slice resumed verification
+
+- Kept two existing unit-test hygiene fixes: `app-update-runtime.test.ts`
+  now calls `rollbackToLocalBackup` in the local-backup rollback test, and
+  `rtc-bridge.test.ts` gives the early-candidate reorder WebRTC test a
+  15s per-test timeout. Targeted rerun: app-update 11/11, rtc-bridge 3/3.
+- Resumed gates after those edits: `test:terminal-shell-ui` 74/74,
+  `test:feature-registry` 84/84, `tsc --noEmit` PASS, `type-check` PASS,
+  `docs:function-wiki` PASS, full `pnpm run build` PASS including prebuild
+  gates, Gradle, terminal regression core 839/839, Vite, AppSDK verify
+  android ok:true draft, `git diff --check` PASS, and targeted
+  `TerminalPage.real-quickbar-split.test.tsx` 4/4 PASS.
+- Full suite with `--pool=forks`: 3504/3512 tests passed; 8 remaining
+  failures are unrelated pre-existing items: TerminalView.layer-truth 4
+  (renderer/UI-shell gesture cleanup), terminal-page-render-keys 1 (stale
+  expected key suffix), runtime-debug-sequence 1 (missing evidence fixture),
+  SessionScheduleSheet 2 (local timezone expectations).
+- DSH/codex-review remains unavailable; no PASS was manufactured. Status
+  stays `production_pending_review`; Phase 7/v2 is not complete.
+
+# 2026-08-15 Phase 5 daemon file transfer message route slice
+
+- `daemon.file_transfer` now owns
+  `src/server/terminal-file-transfer-message-runtime.ts` for
+  `paste-image-start`, `attach-file-start`, `paste-image`,
+  `file-list-request`, `file-create-directory-request`,
+  `file-download-request`, `remote-screenshot-request`,
+  `file-upload-start/chunk/end`, and raw binary chunks.
+  `terminal-message-runtime.ts` routes only these types to the owner and no
+  longer imports/invokes the file-transfer facade or mutates
+  `session.pendingPasteImage` / `session.pendingAttachFile`.
+- Registry/docs/AppSDK maps, test design, design, prebuild, CI, mainline call
+  map, and mainline-resource-call-map lockstep updated.
+- Verified `test:file-transfer-message-route` 72/72,
+  `test:feature-registry` 84/84, type-check and tsc PASS,
+  `docs:function-wiki` regenerated, full `pnpm run build` PASS including
+  prebuild gates, `daemon:mirror:close-loop` all 9 cases plus replay and
+  strict audit PASS, AppSDK verify android ok:true draft, and
+  `git diff --check` PASS.
+- Evidence
+  `EVID-20260815-ZARCHV2-P5-PROD-FILE-TRANSFER-MESSAGE-ROUTE-001` added.
+  DSH/codex-review remains unavailable; no PASS was manufactured. Status stays
+  `production_pending_review`; Phase 5/v2 is not complete.
+
+# 2026-08-15 Phase 5 daemon source adapter contract slice
+
+- `daemon.source_adapter` now owns the shared terminal source adapter contract
+  in `src/server/terminal-source-adapter.ts`: tmux/Herdr/WezTerm kind
+  normalization, source session/snapshot shape, and the adapter boundary
+  consumed by backend and mirror capture readback owners. `daemon.terminal_backend`
+  and `terminal.buffer_render` no longer list the contract as their owned path.
+- Added dedicated kind-normalization tests
+  (`src/server/terminal-source-adapter.test.ts`), real module/edge/feature/
+  function/wiki/AppSDK ownership, design/test-design/plan/module/feature-gate
+  docs, prebuild, and CI wiring. Removed stale
+  `daemon.mirror_store -> daemon.terminal_backend` import edge after the
+  shared contract moved to the source adapter owner.
+- Verified `test:source-adapter-ownership` 4/4,
+  `test:feature-registry` 84/84 in 11 files, type-check and tsc PASS,
+  `docs:function-wiki` regenerated, full `pnpm run build` PASS including
+  prebuild gates, `daemon:mirror:close-loop` all 9 cases plus replay and
+  strict audit PASS, AppSDK verify android ok:true draft, and
+  `git diff --check` PASS.
+- Evidence
+  `EVID-20260815-ZARCHV2-P5-PROD-SOURCE-ADAPTER-001` added.
+  DSH/codex-review remains unavailable; no PASS was manufactured. Status stays
+  `production_pending_review`; Phase 5/v2 is not complete.
+
+# 2026-08-15 Phase 5 daemon attachment message delivery slice
+
+- `daemon.attachment_delivery` now owns
+  `src/server/terminal-attachment-message-runtime.ts` for
+  `pending-attachments-query`, `attachment-history-query`,
+  `attachment-asset-request`, and `attachment-receipt` wire projection.
+  `terminal-message-runtime.ts` routes only these four types to the owner and
+  no longer contains attachment delivery business state.
+- Registry/docs/AppSDK maps, test design, plan, design, prebuild, and CI are
+  updated. `daemon.transport_subscriber -> daemon.attachment_delivery` is the
+  real import edge because `terminal-message-runtime.ts` belongs to
+  `daemon.transport_subscriber`.
+- Verified `test:attachment-message-delivery` 49/49,
+  `test:feature-registry` 84/84 in 11 files, type-check and tsc PASS,
+  `docs:function-wiki` regenerated, full `pnpm run build` PASS including
+  prebuild gates, `daemon:mirror:close-loop` all 9 cases plus replay and
+  strict audit PASS, AppSDK verify android ok:true draft, and
+  `git diff --check` PASS.
+- Evidence
+  `EVID-20260815-ZARCHV2-P5-PROD-ATTACHMENT-MESSAGE-DELIVERY-001` added.
+  DSH/codex-review remains unavailable; no PASS was manufactured. Status stays
+  `production_pending_review`; Phase 5/v2 is not complete.
+
+# 2026-08-15 Phase 7 terminal shell UI seventh slice resumed verification (dom_renderer fix)
+
+- Fixed the remaining Phase 7 full-suite regressions introduced by the
+  TerminalView layer split: `useMirrorFixedZoomPan.ts` and
+  `terminal-mirror-fixed-pan-storage.ts` are both registered under
+  `client.dom_renderer`, matching the v2 plan, so the import graph has no
+  app-shell edge or cycle. `TerminalView` keeps only the SGR coordinate
+  adapter; wheel/pinch/pan/storage/debug state stays in the hook/storage
+  module.
+- Test-only fixes kept green: `TerminalView.layer-truth` 5/5, `TerminalView`
+  14/14, `TerminalView.dynamic-refresh` 77/77, `TerminalPage.session-content-identity`
+  3/3, `TerminalPage.real-quickbar-split` 4/4, `terminal-page-render-keys` 5/5,
+  `runtime-debug-sequence` 2/2, `SessionScheduleSheet` 18/18.
+- Resumed gates: `test:feature-registry` 84/84, `tsc --noEmit` PASS,
+  `type-check` PASS, `docs:function-wiki` PASS, full `pnpm run build` PASS
+  including prebuild gates, Gradle, terminal contracts, terminal regression
+  core 839/839, Vite, AppSDK verify android `ok:true draft`, and
+  `git diff --check` PASS.
+- Full `vitest --pool=forks` is not a CI gate and remains flaky on two
+  unrelated async UI tests (`RemoteWindowOverlay` IME gesture timing,
+  `FileTransferSheet` EIO timing); both files pass in isolation and their
+  required grouped gate `test:terminal:shell-theme` passes 187/187.
+- DSH/codex-review remains unavailable; no PASS was manufactured. Status
+  stays `production_pending_review`; Phase 7/v2 is not complete.
+
+# 2026-08-15 Phase 4 client.input_normalizer production slice
+
+- `client.input_normalizer` now owns `src/lib/terminal-input-normalization.ts`
+  exclusively; `client.runtime` no longer lists the normalizer path.
+- Added `src/lib/input-normalizer-ownership.test.ts` and wired
+  `test:input-normalizer` into prebuild/CI.
+- Registered module/resource/edge/feature/function/wiki/AppSDK maps, mainline
+  InputNormalizer nodes/edges, design/plan/test-design/module/resource docs.
+- Verified `test:input-normalizer` 8/8, `test:feature-registry` 84/84,
+  type-check/tsc, `docs:function-wiki`, full build with prebuild gates,
+  `daemon:mirror:close-loop` 9/9 plus replay and strict audit, AppSDK verify
+  android ok:true draft, and `git diff --check`.
+- Evidence
+  `EVID-20260815-ZARCHV2-P4-PROD-INPUT-NORMALIZER-001` added.
+  DSH/codex-review remains unavailable; no PASS was manufactured. Status stays
+  `production_pending_review`; Phase 4/v2 is not complete.
+
+# 2026-08-15 Phase 4 client.reliable_input production slice
+
+- `client.reliable_input` now owns
+  `src/lib/reliable-input/reliable-input-queue.ts` for reliable terminal
+  input seq, one-in-flight frame, ACK application, bounded ACK-timeout retry,
+  physical-transport replacement retry, and head refresh.
+  `session-context-input-runtime.ts` is a thin bridge only and no longer owns
+  the queue/ACK/retry truth.
+- Added `src/lib/reliable-input/reliable-input-queue.test.ts` (8/8) and
+  `src/lib/reliable-input/reliable-input-ownership.test.ts` (4/4), and wired
+  `test:reliable-input-ownership` into prebuild/CI.
+- Registered module/resource/edge/feature/function/wiki/AppSDK maps and
+  mainline `TerminalInputDispatch -> ClientReliableInputQueue -> ChannelSend`
+  and `SocketMessage -> ClientReliableInputAck` nodes/edges.
+- Verified `test:reliable-input-ownership` 12/12,
+  `session-context-input-runtime` 23/23, `test:feature-registry` 84/84,
+  type-check/tsc, `docs:function-wiki`, full build with prebuild gates,
+  `daemon:mirror:close-loop` 9/9 plus replay and strict audit, AppSDK verify
+  android ok:true draft, and `git diff --check`.
+- Evidence
+  `EVID-20260815-ZARCHV2-P4-PROD-RELIABLE-INPUT-001` added.
+  DSH/codex-review remains unavailable; no PASS was manufactured. Status stays
+  `production_pending_review`; Phase 4/v2 is not complete.
+
+# 2026-08-15 Phase 5 daemon.mirror_writer production slice
+
+- `daemon.mirror_writer` now owns validated source capture, canonicalization,
+  and authoritative snapshot commit writes in
+  `src/server/terminal-mirror-capture.ts`; `daemon.mirror_store` keeps
+  canonical mirror truth, revision, and runtime scheduling but no longer lists
+  capture as its owned path. `daemon.buffer_publisher` owns subscriber
+  publication.
+- Added `src/server/terminal-mirror-writer-ownership.test.ts` (4/4) and wired
+  `test:mirror-writer-ownership` into prebuild/CI. The real import graph is
+  `daemon.runtime_entry -> daemon.mirror_writer` and
+  `daemon.mirror_writer -> daemon.source_adapter/daemon.runtime`; stale
+  `daemon.mirror_store -> daemon.mirror_writer` was removed because
+  `terminal-mirror-runtime.ts` receives capture through dependency injection.
+- Registered module/resource/edge/feature/function/wiki/AppSDK maps, mainline
+  MirrorWriter nodes/edges, design/plan/test-design/module docs.
+- Verified `test:mirror-writer-ownership` 4/4, `test:feature-registry` 84/84,
+  type-check/tsc, `docs:function-wiki`, full build with prebuild gates,
+  `daemon:mirror:close-loop` 9/9 plus replay and strict audit, AppSDK verify
+  android ok:true draft, and `git diff --check`.
+- Evidence
+  `EVID-20260815-ZARCHV2-P5-PROD-MIRROR-WRITER-001` added.
+  DSH/codex-review remains unavailable; no PASS was manufactured. Status stays
+  `production_pending_review`; Phase 5/v2 is not complete.
+
+# 2026-08-15 Phase 1 production foundation node/debug contract slice
+
+- Continued `ZTERM-ARCH-V2-DESIGN-001`: shared node/debug contracts,
+  client.debug_console snapshot hub, daemon.observability runtime store/HTTP
+  exporter, DebugPermissionService injection, and lockstep
+  feature/module/resource/edge/function/wiki/mainline/design/plan/test-design/
+  AppSDK maps were completed in prior work on this run.
+- Fixed real test isolation regression from fail-fast DebugRegistry:
+  `TerminalPage.android-ime.test.tsx` only had reset/cleanup hooks inside the
+  first describe, so later BUG #4/#5 tests outside that describe left
+  `terminal-page` registered. Moved both hooks to file scope; production
+  duplicate-source fail-fast and unmount cleanup are unchanged.
+- Full `pnpm --dir android run build` PASS including prebuild gates,
+  `daemon:mirror:close-loop` all 9 cases plus replay/strict audit PASS,
+  `/Users/fanzhang/.local/bin/appsdk verify android` ok:true draft, and
+  `git diff --check` PASS.
+- Evidence
+  `EVID-20260815-ZARCHV2-PROD-FOUNDATION-NODE-DEBUG-001` added.
+  No commit made. DSH/codex-review remains unavailable; no PASS was
+  manufactured. Status stays `production_pending_review`; v2 is not complete.
+
+# 2026-08-15 DSH fix loop closeout for ZTERM-ARCH-V2-DESIGN-001
+
+- Fixed all 7 P1s from `zarchv2-current-dsh-r1`:
+  protocol mux observability predicate no longer throws; unavailable external
+  backend rejects without tmux fallback; shared v2 import edges registered;
+  runtime-architecture-v2 gate runs tracked production tests in CI/prebuild;
+  lifecycle contracts have a committed validation gate; same-revision repair
+  has a positive regression test; Android background WakeLock truth in
+  `terminal-buffer-truth` aligns with bounded foreground-service policy.
+- Added `android/.gitignore` entry for `.appsdk/` so the local AppSDK evidence
+  bundle cannot be committed by a plain `git add .`.
+- DSH review `zarchv2-current-dsh-r2` final contains literal `VERDICT: PASS`.
+  Remaining P2s include reliable-input `ws.close(4000)` routing,
+  `debug-control` on the session dispatcher, input-write bypass,
+  oversized-tail seeding, dead-cadence export, and renderer-window owner gap.
+- AppSDK lifecycle is still `draft`; no PromotionRecord, Active artifact,
+  Protected archive, RegressionReport, or FreezeRecord. ZTERM-ARCH-V2-DESIGN-001
+  is not complete.
+
+# 2026-08-15 ZTERM-ARCH-V2-DESIGN-001 DSH r4 fix loop + r5
+
+- r4 findings all fixed: three gate wiring jobs, mirror-scoped input dispose,
+  control-gateway explicit handler_failed, mux control-error single close frame,
+  herdr growth boundary, frameKey metadata signature, dead visible repair API
+  removal, pending repair clamp, module promotion_status overclaim.
+- Full `pnpm run build` PASS after updating
+  `session-context-buffer-runtime.test.ts` frameKey expectation to new
+  metadata signature (`11:100:104:1234:2:null:100:104:80:24:false:null:null:null`).
+- Prebuild gates PASS: feature registry 92/92, daemon control center 12/12,
+  daemon input queue 10/10, channel mux 7/7, session input 23/23,
+  terminal regression core 841/841, relay smoke + account directory,
+  workspace panes, Vite build.
+- Focused r4 fix tests PASS 129/129. type-check PASS. git diff --check PASS.
+- `appsdk verify android` ok:true draft (not promoted).
+- DSH `zarchv2-current-dsh-r5` started 2026-08-15 23:10Z; awaiting verdict.
+
+# 2026-08-15 DSH r5 FAIL -> debug HTTP P1 fix -> r6
+
+- r5 final: `VERDICT: FAIL`; single confirmed P1: debug HTTP mutation endpoints
+  defaulted open on `0.0.0.0:3333` without token, and `debug:control`
+  lease/default-deny was never enforced at an HTTP decision point.
+- Fix: `createTerminalHttpRuntime` now accepts `DebugPermissionService`;
+  `ensureDebugAuthorized` rejects all debug routes with 401 when daemon host is
+  non-loopback and no token is configured; `/debug/runtime/control` is POST-only,
+  requires active `debug:control`, and otherwise returns 403 without calling
+  lease/broadcast. Server shares one service between debug and HTTP runtimes.
+- Tests: default no-grant 403, expired lease 403, authenticated no-grant 403,
+  non-loopback no-token 401, GET control 405, plus observability POST routes.
+- Verification: focused HTTP/debug 14/14, `test:debug-observability`
+  Android 69/69 + shared protocol 10/10, `test:feature-registry` 92/92,
+  type-check PASS, full `pnpm run build` PASS, `daemon:mirror:close-loop`
+  9/9 + replay + strict audit PASS, `git diff --check` PASS, AppSDK verify
+  ok:true draft.
+- Started DSH `zarchv2-current-dsh-r6` 2026-08-15; awaiting verdict.
+- DSH `zarchv2-current-dsh-r6` final contains literal `VERDICT: PASS`, no
+  P0/P1. P2s: Herdr scroll-metrics throttle may lag source-end advance ~100ms,
+  full-suite native WebRTC/ScreenCaptureKit aborts are environmental and not
+  diff regressions, debug read/subscribe capabilities are reserved but not yet
+  independently gated. AppSDK still `draft`; v2 remains incomplete until
+  promotion/device/OTA evidence.

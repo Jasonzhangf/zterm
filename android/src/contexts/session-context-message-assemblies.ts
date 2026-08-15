@@ -35,6 +35,7 @@ import type { SessionPullPurpose, SessionPullStates } from '../lib/session-pull-
 import type { SessionVisibleRangeState, SessionDaemonHeadView } from './session-visible-range-helpers';
 import type { RemoteWindowMessageRuntime } from '../lib/remote-window-message-runtime';
 import type { FileTransferMessageRuntime } from '../lib/file-transfer-message-runtime';
+import type { ImagePasteWaiterRuntime } from './session-context-transfer-runtime';
 
 interface MessageAssemblyState {
   sessions: Session[];
@@ -115,6 +116,7 @@ export interface SessionMessageAssembliesOptions {
   pendingSessionTransportOpenIntentsRef: MutableRefObject<Map<string, PendingSessionTransportOpenIntent>>;
   fileTransferMessageRuntimeRef: MutableRefObject<MessageAssemblyFileTransferRuntime>;
   remoteWindowMessageRuntimeRef: MutableRefObject<MessageAssemblyRemoteWindowRuntime>;
+  imagePasteWaiterRuntimeRef: MutableRefObject<ImagePasteWaiterRuntime>;
   readSessionTransportSocket: (sessionId: string) => BridgeTransportSocket | null;
   readSessionTransportResource?: (sessionId: string) => SessionTransportResource;
   daemonConnection: ClientDaemonConnection;
@@ -349,6 +351,7 @@ export function createSessionMessageAssemblies(
       setSessionTitleSync: options.setSessionTitleSync,
       fileTransferMessageRuntime: options.fileTransferMessageRuntimeRef.current,
       remoteWindowMessageRuntime: options.remoteWindowMessageRuntimeRef.current,
+      imagePasteWaiterRuntime: options.imagePasteWaiterRuntimeRef.current,
       updateSessionSync: options.updateSessionSync,
       recordRelayHostConnection: options.recordRelayHostConnection,
       handleAttachmentError: options.handleAttachmentError,

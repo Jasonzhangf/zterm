@@ -1,10 +1,11 @@
 /**
- * Storage owner (client.app_shell) for the mirror-fixed horizontal pan offset.
+ * Storage owner (client.dom_renderer) for the mirror-fixed horizontal pan offset.
  *
- * 层级：UI shell（useMirrorFixedZoomPan）持有 offset 真源并经由本模块持久化；
+ * 层级：DOM renderer 视觉手势层（useMirrorFixedZoomPan）持有 offset 真源并经由本模块持久化；
  * renderer 只读视觉应用（grid translateX）。禁止其他组件直写 localStorage。
  *
  * Gate doc: docs/audits/2026-08-13-terminal-render-layer-decoupling.md §8.3
+ * v2 owner: client.dom_renderer
  */
 
 export const MIRROR_FIXED_HORIZONTAL_OFFSET_STORAGE_KEY =

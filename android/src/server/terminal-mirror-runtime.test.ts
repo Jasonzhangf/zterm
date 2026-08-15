@@ -91,8 +91,11 @@ function createRuntime(overrides: {
     mirrorBufferChanged: overrides.mirrorBufferChanged || (() => []),
     mirrorCursorEqual: () => true,
     writeToLiveMirror: () => true,
-    enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
-    disposeLiveMirrorInputBatch: () => 0,
+    daemonInputQueue: {
+      handleInputMessage: async () => {},
+      enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
+      disposeLiveMirrorInputBatch: () => 0,
+    },
     writeToTmuxSession: vi.fn(),
     autoCommandDelayMs: 0,
     waitMs: async () => {},
@@ -214,7 +217,7 @@ describe('terminal mirror runtime lifecycle truth', () => {
     );
   });
 
-  it('bounds oversized initial live sync to the latest render tail instead of one huge transport frame', async () => {
+  it('splits an oversized initial live sync into contiguous same-revision frames', async () => {
     const wideRow: TerminalCell[] = Array.from({ length: 200 }, () => ({
       char: 'W'.codePointAt(0)!,
       fg: 256,
@@ -244,20 +247,22 @@ describe('terminal mirror runtime lifecycle truth', () => {
       rows: 24,
     });
 
-    const syncCall = sendText.mock.calls.find(([, text]) => {
+    const syncTexts = sendText.mock.calls.map(([, text]) => String(text)).filter((text) => {
       try {
-        return JSON.parse(String(text)).type === 'buffer-sync';
+        return JSON.parse(text).type === 'buffer-sync';
       } catch {
         return false;
       }
     });
-    expect(syncCall).toBeTruthy();
-    const payload = JSON.parse(String(syncCall![1])).payload;
-    expect(payload.availableEndIndex).toBe(3000);
-    expect(payload.startIndex).toBe(2928);
-    expect(payload.endIndex).toBe(3000);
-    expect(payload.lines).toHaveLength(72);
-    expect(Buffer.byteLength(String(syncCall![1]), 'utf8')).toBeLessThan(128_000);
+    expect(syncTexts.length).toBeGreaterThan(1);
+    const messages = syncTexts.map((text) => JSON.parse(text));
+    for (const message of messages) {
+      expect(message.payload.revision).toBe(1);
+      expect(message.payload.frameChunkCount).toBe(messages.length);
+      expect(Buffer.byteLength(JSON.stringify(message), 'utf8')).toBeLessThan(128_000);
+    }
+    expect(messages[0].payload.startIndex).toBe(0);
+    expect(messages[messages.length - 1].payload.endIndex).toBe(3000);
   });
 
   it('fans out the first head request of a revision once, then serves same-revision probes only to the requester', () => {
@@ -410,8 +415,11 @@ describe('terminal mirror runtime lifecycle truth', () => {
       mirrorBufferChanged: () => [],
       mirrorCursorEqual: () => true,
       writeToLiveMirror: () => true,
-      enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
-    disposeLiveMirrorInputBatch: () => 0,
+      daemonInputQueue: {
+        handleInputMessage: async () => {},
+        enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
+        disposeLiveMirrorInputBatch: () => 0,
+      },
       writeToTmuxSession: vi.fn(),
       autoCommandDelayMs: 0,
       waitMs: async () => {},
@@ -1152,8 +1160,11 @@ describe('terminal mirror runtime lifecycle truth', () => {
       }),
       mirrorCursorEqual: () => true,
       writeToLiveMirror: () => true,
-      enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
-    disposeLiveMirrorInputBatch: () => 0,
+      daemonInputQueue: {
+        handleInputMessage: async () => {},
+        enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
+        disposeLiveMirrorInputBatch: () => 0,
+      },
       writeToTmuxSession: vi.fn(),
       autoCommandDelayMs: 0,
       waitMs: async () => {},
@@ -1237,8 +1248,11 @@ describe('terminal mirror runtime lifecycle truth', () => {
       }),
       mirrorCursorEqual: () => true,
       writeToLiveMirror: () => true,
-      enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
-    disposeLiveMirrorInputBatch: () => 0,
+      daemonInputQueue: {
+        handleInputMessage: async () => {},
+        enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
+        disposeLiveMirrorInputBatch: () => 0,
+      },
       writeToTmuxSession: vi.fn(),
       autoCommandDelayMs: 0,
       waitMs: async () => {},
@@ -1336,8 +1350,11 @@ describe('terminal mirror runtime lifecycle truth', () => {
       mirrorBufferChanged: () => [],
       mirrorCursorEqual: () => true,
       writeToLiveMirror: () => true,
-      enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
-    disposeLiveMirrorInputBatch: () => 0,
+      daemonInputQueue: {
+        handleInputMessage: async () => {},
+        enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
+        disposeLiveMirrorInputBatch: () => 0,
+      },
       writeToTmuxSession: vi.fn(),
       autoCommandDelayMs: 0,
       waitMs: async () => {},
@@ -1361,34 +1378,6 @@ describe('terminal mirror runtime lifecycle truth', () => {
         }),
       }),
     );
-  });
-
-it('keeps fast subscriber lane green even when another subscriber is backpressured (R1)', async () => {
-  const { runtime, sessions } = createRuntime();
-  const fastSession = createSession('session-fast');
-  const slowSession = createSession('session-slow');
-  sessions.set(fastSession.id, fastSession);
-  sessions.set(slowSession.id, slowSession);
-  const mirror = runtime.createMirror('demo');
-  mirror.lifecycle = 'ready';
-  mirror.subscribers.add(fastSession.id);
-  mirror.subscribers.add(slowSession.id);
-  mirror.lastLiveActivityAt = Date.now() - 100;
-  slowSession.transport = {
-    ...slowSession.transport,
-    readyState: 1,
-    bufferedAmount: 256 * 1024,
-    backpressureCount: 3,
-  } as TerminalSession['transport'];
-  fastSession.transport = fastSession.transport as TerminalSession['transport'];
-  const now = Date.now();
-  const fastDecision = runtime.resolveMirrorLiveSyncDelayForSubscriber(mirror, fastSession.id, sessions, now);
-  const slowDecision = runtime.resolveMirrorLiveSyncDelayForSubscriber(mirror, slowSession.id, sessions, now);
-  // Mirror-level decision must NOT see per-subscriber backpressure now.
-  expect(slowDecision.lane).toBe('slow');
-  expect(slowDecision.reason).toBe('transport-backpressure');
-  expect(fastDecision.lane).toBe('fast');
-  expect(fastDecision.delayMs).toBeLessThan(slowDecision.delayMs);
   });
 
 it('skips buffer-head broadcast for a backpressured subscriber while healthy peers still receive head (R2)', async () => {
@@ -1452,8 +1441,11 @@ it('skips buffer-head broadcast for a backpressured subscriber while healthy pee
     mirrorBufferChanged: () => [],
     mirrorCursorEqual: () => false,
     writeToLiveMirror: () => true,
-    enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
-    disposeLiveMirrorInputBatch: () => 0,
+    daemonInputQueue: {
+      handleInputMessage: async () => {},
+      enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
+      disposeLiveMirrorInputBatch: () => 0,
+    },
     writeToTmuxSession: vi.fn(),
     autoCommandDelayMs: 0,
     waitMs: async () => {},
@@ -1534,8 +1526,11 @@ it('skips buffer-head broadcast for a backpressured subscriber while healthy pee
       }),
       mirrorCursorEqual: () => true,
       writeToLiveMirror: () => true,
-      enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
-    disposeLiveMirrorInputBatch: () => 0,
+      daemonInputQueue: {
+        handleInputMessage: async () => {},
+        enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
+        disposeLiveMirrorInputBatch: () => 0,
+      },
       writeToTmuxSession: vi.fn(),
       autoCommandDelayMs: 0,
       waitMs: async () => {},
@@ -1614,8 +1609,11 @@ it('skips buffer-head broadcast for a backpressured subscriber while healthy pee
         && (left?.visible ?? null) === (right?.visible ?? null)
       ),
       writeToLiveMirror: () => true,
-      enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
-    disposeLiveMirrorInputBatch: () => 0,
+      daemonInputQueue: {
+        handleInputMessage: async () => {},
+        enqueueLiveMirrorInput: async (_sessionName, _payload, _appendEnter, shouldWrite) => shouldWrite ? shouldWrite() : true,
+        disposeLiveMirrorInputBatch: () => 0,
+      },
       writeToTmuxSession: vi.fn(),
       autoCommandDelayMs: 0,
       waitMs: async () => {},

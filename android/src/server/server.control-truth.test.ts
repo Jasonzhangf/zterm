@@ -10,6 +10,10 @@ function readControlRuntimeSource() {
   return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-control-runtime.ts'), 'utf8');
 }
 
+function readDaemonInputQueueRuntimeSource() {
+  return readFileSync(join(process.cwd(), 'src', 'server', 'daemon-input-queue-runtime.ts'), 'utf8');
+}
+
 function extractBlock(source: string, anchor: string, length = 2200) {
   const start = source.indexOf(anchor);
   expect(start).toBeGreaterThanOrEqual(0);
@@ -68,7 +72,7 @@ describe('server control runtime truth gates', () => {
     const runBlock = extractBlock(source, 'function runTmux(');
     const tmuxLiteralChunkBlock = extractBlock(source, 'function writeTmuxLiteralChunksSync(');
     const mirrorWriteBlock = extractBlock(source, 'function writeToLiveMirror(');
-    const enqueueWriteBlock = extractBlock(source, 'function enqueueLiveMirrorInput(');
+    const backendWriteBlock = extractBlock(source, 'async function writeBackendInputGroup(');
     const sessionsBlock = extractBlock(source, 'function listTmuxSessions(');
 
     expect(runBlock).toContain("spawnSync(deps.tmuxBinary, args");
@@ -83,12 +87,27 @@ describe('server control runtime truth gates', () => {
     expect(tmuxLiteralChunkBlock).toContain("runTmux(['send-keys', '-t', target, '-l', '--', chunks[index]!])");
     expect(mirrorWriteBlock).toContain('writeTmuxLiteralChunksSync(payload, target)');
     expect(mirrorWriteBlock).not.toContain("runTmux(['send-keys', '-t', sessionName, '-l', '--', payload])");
-    expect(source).toContain('const liveMirrorInputBatches = new Map<string, {');
-    expect(source).toContain('function buildLiveMirrorInputGroups(');
-    expect(source).toContain('TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES');
-    expect(enqueueWriteBlock).toContain('schedulePendingLiveMirrorInput(mirrorKey)');
-    expect(enqueueWriteBlock).not.toContain("await runTmuxAsync(['send-keys', '-t', sessionName, '-l', '--', payload])");
+    expect(backendWriteBlock).toContain('await runTmuxAsync([\'send-keys\', \'-t\', target, \'-l\', \'--\', payload])');
+    expect(source).not.toContain('const liveMirrorInputBatches = new Map<string, {');
+    expect(source).not.toContain('function buildLiveMirrorInputGroups(');
+    expect(source).not.toContain('function enqueueLiveMirrorInput(');
+    expect(source).not.toContain('function disposeLiveMirrorInputBatch(');
     expect(sessionsBlock).toContain("runTmux(['list-sessions', '-F', '#S'])");
     expect(sessionsBlock).toContain('!deps.hiddenTmuxSessions.has(line)');
+  });
+
+  it('keeps daemon input receive/ack/dedupe/queue ownership in the dedicated input queue runtime', () => {
+    const source = readDaemonInputQueueRuntimeSource();
+    const queueBlock = extractBlock(source, 'const liveMirrorInputBatches = new Map<string, {');
+    const enqueueWriteBlock = extractBlock(source, 'function enqueueLiveMirrorInput(');
+    const backendWriteBlock = extractBlock(source, 'async function handleTransportInput(');
+
+    expect(source).toContain('function normalizeReliableInputPayload(');
+    expect(source).toContain('function sendInputAck(');
+    expect(source).toContain('const reliableInputAckCache = createReliableInputAckCache();');
+    expect(queueBlock).toContain('function buildLiveMirrorInputGroups(');
+    expect(enqueueWriteBlock).toContain('schedulePendingLiveMirrorInput(mirrorKey)');
+    expect(enqueueWriteBlock).not.toContain("await runTmuxAsync(['send-keys', '-t', sessionName, '-l', '--', payload])");
+    expect(backendWriteBlock).toContain("await deps.handleInput(inputSession, data");
   });
 });

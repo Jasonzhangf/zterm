@@ -2,7 +2,7 @@
 import { render, screen } from '@testing-library/react';
 import type { MutableRefObject } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { createSessionViewportModeStore } from '../lib/session-viewport-mode-store';
+import { toTerminalDebugSessionProjection } from '../lib/plugin-debug-console/debug-console-contract';
 import type { Session } from '../lib/types';
 import { TerminalDebugOverlay } from './TerminalPageDebugOverlay';
 
@@ -43,8 +43,6 @@ function makeSession(): Session {
 describe('TerminalDebugOverlay', () => {
   it('renders only the compact switch-troubleshooting fields', () => {
     const session = makeSession();
-    const sessionViewportModeStore = createSessionViewportModeStore();
-    sessionViewportModeStore.setMode(session.id, 'reading');
 
     const debugOverlayDragRef = {
       current: {
@@ -65,9 +63,24 @@ describe('TerminalDebugOverlay', () => {
     render(
       <TerminalDebugOverlay
         visible
-        session={session}
-        visiblePaneSessions={[session]}
-        sessionViewportModeStore={sessionViewportModeStore}
+        session={toTerminalDebugSessionProjection(session)}
+        visiblePaneCount={1}
+        viewportMode="reading"
+        wheelDebug={{
+          active: true,
+          lockedDirection: 'up',
+          initialSpanPx: 12,
+          accumulatedDeltaPx: 24,
+          lastSentDirection: 'up',
+          lastSentAt: Date.now(),
+          startCalls: 1,
+          moveCalls: 2,
+          endCalls: 1,
+          abortedCount: 0,
+          sentCount: 1,
+          lastReason: 'vertical-lock',
+          lastEventAt: Date.now(),
+        }}
         getSessionDebugMetrics={() => ({
           uplinkBps: 1024,
           downlinkBps: 2048,

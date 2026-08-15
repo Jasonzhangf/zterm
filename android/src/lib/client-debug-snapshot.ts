@@ -1,6 +1,39 @@
+import {
+  DebugRegistry,
+  SnapshotCoordinator,
+  deepFreeze,
+  type DebugProducer,
+  type DebugSensitivity,
+} from '@zterm/shared/terminal/debug-contract';
+import type { NodeIdentity, NodeLifecycleState } from '@zterm/shared/terminal/node-contract';
+
 export type ClientDebugSnapshotProducer = () => unknown;
 
-const snapshotSources = new Map<string, ClientDebugSnapshotProducer>();
+const clientDebugIdentity: NodeIdentity = {
+  nodeId: 'client.runtime.debug',
+  moduleId: 'observability.debug_channel',
+  featureId: 'client.debug_console',
+  resources: [
+    'resource.runtime_node_registry',
+    'resource.debug_snapshot_registry',
+    'resource.observability_channel',
+  ],
+};
+
+const snapshotRegistry = new DebugRegistry();
+let snapshotCoordinator = new SnapshotCoordinator(snapshotRegistry);
+const clientDebugProducer: DebugProducer = {
+  identity: clientDebugIdentity,
+  debugSnapshot: () => collectClientDebugSnapshotPayload(),
+};
+
+snapshotRegistry.register(clientDebugProducer);
+
+export function resetClientDebugSnapshotForTests() {
+  snapshotRegistry.clear();
+  snapshotRegistry.register(clientDebugProducer);
+  snapshotCoordinator = new SnapshotCoordinator(snapshotRegistry);
+}
 
 function readVisualViewport() {
   if (typeof window === 'undefined' || !window.visualViewport) {
@@ -32,20 +65,25 @@ function readWindowMetrics() {
 }
 
 export function registerClientDebugSnapshotSource(sourceId: string, producer: ClientDebugSnapshotProducer) {
-  snapshotSources.set(sourceId, producer);
+  snapshotRegistry.register({
+    identity: {
+      ...clientDebugIdentity,
+      nodeId: sourceId,
+    },
+    debugSnapshot: () => producer(),
+  });
   return () => {
-    const current = snapshotSources.get(sourceId);
-    if (current === producer) {
-      snapshotSources.delete(sourceId);
-    }
+    snapshotRegistry.unregister(sourceId);
   };
 }
 
-export function collectClientDebugSnapshot(extra?: Record<string, unknown>) {
+function collectClientDebugSnapshotPayload() {
   const sources: Record<string, unknown> = {};
-  for (const [sourceId, producer] of snapshotSources.entries()) {
+  for (const producer of snapshotRegistry.listProducers()) {
+    const sourceId = producer.identity.nodeId;
+    if (sourceId === clientDebugIdentity.nodeId) continue;
     try {
-      sources[sourceId] = producer();
+      sources[sourceId] = producer.debugSnapshot({});
     } catch (error) {
       sources[sourceId] = {
         error: error instanceof Error ? error.message : String(error),
@@ -54,12 +92,37 @@ export function collectClientDebugSnapshot(extra?: Record<string, unknown>) {
   }
 
   return {
+    sources,
     generatedAt: new Date().toISOString(),
     documentHidden: typeof document === 'undefined' ? null : Boolean(document.hidden),
     online: typeof navigator === 'undefined' ? null : Boolean(navigator.onLine),
     userAgent: typeof navigator === 'undefined' ? '' : navigator.userAgent,
     window: readWindowMetrics(),
-    sources,
-    extra: extra || null,
   };
+}
+
+export function collectClientDebugSnapshot(
+  extra?: Record<string, unknown>,
+  lifecycle: NodeLifecycleState = 'running',
+  sensitivity: DebugSensitivity = 'internal',
+) {
+  const envelope = snapshotCoordinator.capture(
+    clientDebugProducer,
+    lifecycle,
+    {},
+    sensitivity,
+  );
+  const payload = envelope.payload as ReturnType<typeof collectClientDebugSnapshotPayload> & {
+    extra?: Record<string, unknown> | null;
+  };
+  return deepFreeze({
+    ...envelope,
+    generatedAt: payload.generatedAt,
+    documentHidden: payload.documentHidden,
+    online: payload.online,
+    userAgent: payload.userAgent,
+    window: payload.window,
+    sources: payload.sources,
+    extra: extra ? { ...extra } : null,
+  });
 }

@@ -34,6 +34,18 @@ export interface RuntimeDebugLogEntry {
   payload?: string;
 }
 
+export interface DebugObservabilityLogRequest {
+  entries: RuntimeDebugLogEntry[];
+}
+
+export interface DebugObservabilitySnapshotRequest {
+  snapshot: unknown;
+}
+
+export type DebugObservabilityClientRequest =
+  | { kind: 'logs'; payload: DebugObservabilityLogRequest }
+  | { kind: 'snapshot'; payload: DebugObservabilitySnapshotRequest };
+
 export interface FileCreateDirectoryRequestPayload {
   requestId: string;
   path: string;
@@ -552,8 +564,6 @@ export type BridgeClientMessage =
   | { type: 'body-subscription'; payload: { version: 1; subscribed: boolean } }
   | { type: 'buffer-head-request' }
   | { type: 'buffer-sync-request'; payload: BufferSyncRequestPayload }
-  | { type: 'debug-log'; payload: { entries: Array<RuntimeDebugLogEntry> } }
-  | { type: 'debug-snapshot'; payload: { snapshot: unknown } }
   | { type: 'list-sessions'; payload?: { terminalBackend?: TerminalBackendKind } }
   | { type: 'schedule-list'; payload: { sessionName: string } }
   | { type: 'schedule-upsert'; payload: { job: ScheduleJobDraft } }
@@ -632,7 +642,7 @@ export type BridgeServerControlMessage =
       };
     }
   | { type: 'buffer-head'; payload: BufferHeadPayload }
-  | { type: 'sessions'; payload: { sessions: string[] } }
+  | { type: 'sessions'; payload: { sessions: string[]; sessionCatalog?: TerminalSessionCatalogEntry[] } }
   | { type: 'session-activity'; payload: { activities: SessionActivity[] } }
   | { type: 'schedule-state'; payload: ScheduleStatePayload }
   | { type: 'schedule-event'; payload: ScheduleEventPayload }
@@ -681,6 +691,16 @@ export interface SessionActivity {
   lastLiveActivityAt: number;
   /** true if no activity for SESSION_IDLE_STOPPED_THRESHOLD_MS (60s) */
   stopped: boolean;
+}
+
+export interface TerminalSessionCatalogEntry {
+  name: string;
+  backend: TerminalBackendKind;
+}
+
+export interface TerminalSessionCatalog {
+  sessionNames: string[];
+  sessionCatalog: TerminalSessionCatalogEntry[];
 }
 
 export const TERMINAL_MUX_PROTOCOL_VERSION = 1 as const;
@@ -835,6 +855,7 @@ export const TERMINAL_MUX_LEGACY_CLIENT_MESSAGE_TYPES: readonly TerminalMuxLegac
 
 const TERMINAL_MUX_TARGET_CLIENT_MESSAGE_SET = new Set<string>(TERMINAL_MUX_TARGET_CLIENT_MESSAGE_TYPES);
 const TERMINAL_MUX_LEGACY_CLIENT_MESSAGE_SET = new Set<string>(TERMINAL_MUX_LEGACY_CLIENT_MESSAGE_TYPES);
+const TERMINAL_MUX_DEBUG_CLIENT_MESSAGE_SET = new Set<string>(['debug-log', 'debug-snapshot']);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -856,7 +877,14 @@ export function isTerminalMuxLegacyClientMessageType(type: string): type is Term
   return TERMINAL_MUX_LEGACY_CLIENT_MESSAGE_SET.has(type);
 }
 
+export function isTerminalMuxDebugClientMessageType(type: string) {
+  return TERMINAL_MUX_DEBUG_CLIENT_MESSAGE_SET.has(type);
+}
+
 export function classifyTerminalMuxClientMessage(message: Pick<BridgeClientMessage, 'type'>) {
+  if (isTerminalMuxDebugClientMessageType(message.type)) {
+    return 'observability' as const;
+  }
   if (isTerminalMuxTargetClientMessageType(message.type)) {
     return 'target' as const;
   }

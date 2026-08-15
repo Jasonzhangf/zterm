@@ -8,28 +8,17 @@ import type {
   TerminalCell,
   TerminalCursorState,
 } from '@zterm/shared/types';
-import {
-  TERMINAL_BUFFER_SYNC_FRAME_MAX_SPAN_LINES,
-  TERMINAL_BUFFER_SYNC_MESSAGE_MAX_BYTES,
-} from '@zterm/shared/types';
 import { summarizeIndexedLinesForDebug } from '@zterm/shared/terminal-buffer';
-import { buildLiveTailBufferSyncPayload } from './buffer-sync-contract';
 import { sliceIndexedLines } from './canonical-buffer';
+import { createDaemonBufferPublisherRuntime } from './daemon-buffer-publisher-runtime';
 import { detachMirrorSubscriber, releaseMirrorSubscribers } from './mirror-lifecycle';
 import { resolveTerminalLiveSyncDelay } from './terminal-performance-scheduler';
-import { readTerminalTransportBackpressureSnapshot } from './terminal-transport-runtime';
-import {
-  buildBufferSyncMessageText,
-  splitBufferSyncPayloadMessages,
-} from './terminal-buffer-sync-wire';
+import type { DaemonInputQueueRuntime } from './daemon-input-queue-runtime';
 import type {
   TerminalSession,
   SessionMirror,
   TerminalAttachPayload,
-  TerminalAbsoluteRange,
   TerminalGeometry,
-  TerminalSubscriberBufferSyncResyncReason,
-  TerminalSubscriberBufferSyncState,
   TmuxPaneMetrics,
 } from './terminal-runtime-types';
 
@@ -78,14 +67,7 @@ export interface TerminalMirrorRuntimeDeps {
     right: TerminalCursorState | null | undefined,
   ) => boolean;
   writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean, backend?: 'tmux' | 'herdr') => boolean;
-  enqueueLiveMirrorInput: (
-    sessionName: string,
-    payload: string,
-    appendEnter: boolean,
-    shouldWrite?: () => boolean,
-    backend?: 'tmux' | 'herdr',
-  ) => Promise<boolean>;
-  disposeLiveMirrorInputBatch: (sessionName: string, reason: string, backend?: 'tmux' | 'herdr') => number;
+  daemonInputQueue: DaemonInputQueueRuntime;
   writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean, backend?: 'tmux' | 'herdr') => void;
   autoCommandDelayMs: number;
   waitMs: (delayMs: number) => Promise<void>;
@@ -118,13 +100,6 @@ export interface TerminalMirrorRuntime {
   refreshMirrorHeadForSession: (session: TerminalSession, mirror: SessionMirror) => Promise<boolean>;
   syncMirrorCanonicalBuffer: (mirror: SessionMirror, options?: { forceRevision?: boolean }) => Promise<boolean>;
   scheduleMirrorLiveSync: (mirror: SessionMirror, delayMs?: number) => void;
-  resolveMirrorLiveSyncDelayForSubscriber: (
-    mirror: SessionMirror,
-    sessionId: string,
-    sessions: Map<string, TerminalSession>,
-    now: number,
-    requestedDelayMs?: number,
-  ) => { delayMs: number; lane: string; reason: string };
   startMirror: (mirror: SessionMirror, options?: { cols?: number; rows?: number; autoCommand?: string }) => Promise<void>;
   attachTmux: (session: TerminalSession, payload: TerminalAttachPayload) => Promise<void>;
   handleAdaptiveResize: (
@@ -145,230 +120,10 @@ const MIRROR_LIVE_SYNC_IDLE_MS = 120;
 // a full 1305-line capture at 30fps.
 const QUIET_CAPTURE_MAX_DELAY_MS = 500;
 const ADAPTIVE_WIDTH_LEASE_TTL_MS = 65000;
-const SUBSCRIBER_PENDING_RANGE_LIMIT = 64;
-const SUBSCRIBER_PENDING_SPAN_LINE_LIMIT = TERMINAL_BUFFER_SYNC_FRAME_MAX_SPAN_LINES;
-const SUBSCRIBER_PENDING_AGE_LIMIT_MS = 15_000;
-const SUBSCRIBER_BUFFER_SYNC_MAX_BYTES = TERMINAL_BUFFER_SYNC_MESSAGE_MAX_BYTES;
-
-export function resolvePerSubscriberTransportSnapshot(
-  sessions: Map<string, TerminalSession>,
-  sessionId: string,
-) {
-  const session = sessions.get(sessionId);
-  return readTerminalTransportBackpressureSnapshot(session?.transport);
-}
-
-export function resolveMirrorLiveSyncDelayForSubscriber(
-  mirror: SessionMirror,
-  sessionId: string,
-  sessions: Map<string, TerminalSession>,
-  now: number,
-  requestedDelayMs?: number,
-) {
-  const snapshot = resolvePerSubscriberTransportSnapshot(sessions, sessionId);
-  return resolveTerminalLiveSyncDelay({
-    requestedDelayMs,
-    activeDelayMs: MIRROR_LIVE_SYNC_ACTIVE_MS,
-    idleDelayMs: MIRROR_LIVE_SYNC_IDLE_MS,
-    now,
-    lastLiveActivityAt: mirror.lastLiveActivityAt || 0,
-    consecutiveFailures: mirror.consecutiveFailures,
-    subscriberCount: snapshot?.ready ? 1 : 0,
-    transportBufferedBytes: snapshot?.bufferedBytes || 0,
-    transportBackpressureCount: snapshot?.backpressureCount || 0,
-    lastCaptureDurationMs: mirror.lastCaptureDurationMs || 0,
-    lastCanonicalizeDurationMs: mirror.lastCanonicalizeDurationMs || 0,
-    flushInFlight: mirror.flushInFlight,
-  });
-}
 
 export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): TerminalMirrorRuntime {
   const sessions = deps.sessions;
   const mirrors = deps.mirrors;
-  const mirrorHeadBroadcastCache = new WeakMap<SessionMirror, { revision: number }>();
-
-  function createSubscriberBufferSyncState(): TerminalSubscriberBufferSyncState {
-    return {
-      lastSentRevision: 0,
-      pendingLatestRevision: null,
-      pendingChangedAbsoluteRanges: [],
-      pendingSince: 0,
-      pendingTransportId: null,
-      highWaterActive: false,
-      highWaterEnteredAt: 0,
-      resyncRequired: false,
-      resyncReason: null,
-      pendingAllowOversizedTailSeed: false,
-    };
-  }
-
-  function ensureSubscriberBufferSyncState(session: TerminalSession) {
-    if (!session.bufferSyncState) {
-      session.bufferSyncState = createSubscriberBufferSyncState();
-    }
-    return session.bufferSyncState;
-  }
-
-  function normalizeAbsoluteRanges(ranges: TerminalAbsoluteRange[]) {
-    return ranges
-      .map((range) => ({
-        startIndex: Math.max(0, Math.floor(range.startIndex || 0)),
-        endIndex: Math.max(0, Math.floor(range.endIndex || 0)),
-      }))
-      .filter((range) => range.endIndex > range.startIndex)
-      .sort((left, right) => left.startIndex - right.startIndex || left.endIndex - right.endIndex);
-  }
-
-  function mergeAbsoluteRanges(ranges: TerminalAbsoluteRange[]) {
-    const normalized = normalizeAbsoluteRanges(ranges);
-    const merged: TerminalAbsoluteRange[] = [];
-    for (const range of normalized) {
-      const previous = merged[merged.length - 1];
-      if (previous && range.startIndex <= previous.endIndex) {
-        previous.endIndex = Math.max(previous.endIndex, range.endIndex);
-        continue;
-      }
-      merged.push({ ...range });
-    }
-    return merged;
-  }
-
-  function collapseRangesToSpan(ranges: TerminalAbsoluteRange[]) {
-    const normalized = normalizeAbsoluteRanges(ranges);
-    if (normalized.length === 0) {
-      return [];
-    }
-    return [{
-      startIndex: normalized[0]!.startIndex,
-      endIndex: normalized[normalized.length - 1]!.endIndex,
-    }];
-  }
-
-  function pendingSpanLineCount(ranges: TerminalAbsoluteRange[]) {
-    const normalized = normalizeAbsoluteRanges(ranges);
-    if (normalized.length === 0) {
-      return 0;
-    }
-    return normalized[normalized.length - 1]!.endIndex - normalized[0]!.startIndex;
-  }
-
-  function markSubscriberBufferSyncResyncRequired(
-    state: TerminalSubscriberBufferSyncState,
-    reason: TerminalSubscriberBufferSyncResyncReason,
-    collapseToSpan: boolean,
-  ) {
-    state.resyncRequired = true;
-    state.resyncReason = reason;
-    if (collapseToSpan) {
-      state.pendingChangedAbsoluteRanges = collapseRangesToSpan(state.pendingChangedAbsoluteRanges);
-    }
-  }
-
-  function validateSubscriberPendingBounds(state: TerminalSubscriberBufferSyncState, now = Date.now()) {
-    if (state.pendingChangedAbsoluteRanges.length > SUBSCRIBER_PENDING_RANGE_LIMIT) {
-      markSubscriberBufferSyncResyncRequired(state, 'range-count', true);
-      return;
-    }
-    if (pendingSpanLineCount(state.pendingChangedAbsoluteRanges) > SUBSCRIBER_PENDING_SPAN_LINE_LIMIT) {
-      markSubscriberBufferSyncResyncRequired(state, 'span-lines', true);
-      return;
-    }
-    if (
-      state.pendingSince > 0
-      && now - state.pendingSince > SUBSCRIBER_PENDING_AGE_LIMIT_MS
-    ) {
-      markSubscriberBufferSyncResyncRequired(state, 'age', false);
-    }
-  }
-
-  function queueSubscriberPendingBufferSync(
-    session: TerminalSession,
-    mirror: SessionMirror,
-    changedRanges: TerminalAbsoluteRange[],
-    now = Date.now(),
-    options?: { allowOversizedTailSeed?: boolean },
-  ) {
-    const state = ensureSubscriberBufferSyncState(session);
-    const hadPendingRanges = state.pendingChangedAbsoluteRanges.length > 0;
-    const nextRanges = mergeAbsoluteRanges([
-      ...state.pendingChangedAbsoluteRanges,
-      ...changedRanges,
-    ]);
-    if (nextRanges.length === 0) {
-      return state;
-    }
-    state.pendingChangedAbsoluteRanges = nextRanges;
-    state.pendingLatestRevision = mirror.revision;
-    if (!state.pendingSince) {
-      state.pendingSince = now;
-    }
-    state.pendingAllowOversizedTailSeed = Boolean(options?.allowOversizedTailSeed) && !hadPendingRanges;
-    state.pendingTransportId = session.transportId;
-    const snapshot = readTerminalTransportBackpressureSnapshot(session.transport);
-    if (snapshot?.backpressure) {
-      state.highWaterActive = true;
-      if (!state.highWaterEnteredAt) {
-        state.highWaterEnteredAt = now;
-      }
-    }
-    if (state.pendingChangedAbsoluteRanges.length > SUBSCRIBER_PENDING_RANGE_LIMIT) {
-      state.pendingChangedAbsoluteRanges = [{
-        startIndex: Math.max(0, Math.floor(mirror.bufferStartIndex || 0)),
-        endIndex: Math.max(
-          Math.max(0, Math.floor(mirror.bufferStartIndex || 0)),
-          Math.floor((mirror.bufferStartIndex || 0) + mirror.bufferLines.length),
-        ),
-      }];
-      markSubscriberBufferSyncResyncRequired(state, 'range-count', false);
-      state.pendingAllowOversizedTailSeed = false;
-      return state;
-    }
-    if (pendingSpanLineCount(state.pendingChangedAbsoluteRanges) > SUBSCRIBER_PENDING_SPAN_LINE_LIMIT) {
-      state.pendingChangedAbsoluteRanges = [{
-        startIndex: Math.max(0, Math.floor(mirror.bufferStartIndex || 0)),
-        endIndex: Math.max(
-          Math.max(0, Math.floor(mirror.bufferStartIndex || 0)),
-          Math.floor((mirror.bufferStartIndex || 0) + mirror.bufferLines.length),
-        ),
-      }];
-      markSubscriberBufferSyncResyncRequired(state, 'span-lines', false);
-      state.pendingAllowOversizedTailSeed = false;
-      return state;
-    }
-    validateSubscriberPendingBounds(state, now);
-    return state;
-  }
-
-  function shouldHoldPendingForBackpressure(state: TerminalSubscriberBufferSyncState, session: TerminalSession) {
-    const snapshot = readTerminalTransportBackpressureSnapshot(session.transport);
-    if (!snapshot?.ready) {
-      return true;
-    }
-    if (snapshot.backpressure) {
-      state.highWaterActive = true;
-      if (!state.highWaterEnteredAt) {
-        state.highWaterEnteredAt = Date.now();
-      }
-      return true;
-    }
-    if (state.highWaterActive && !snapshot.lowWaterDrained) {
-      return true;
-    }
-    return false;
-  }
-
-  function clearSubscriberPendingBufferSync(state: TerminalSubscriberBufferSyncState, sentRevision: number) {
-    state.lastSentRevision = sentRevision;
-    state.pendingLatestRevision = null;
-    state.pendingChangedAbsoluteRanges = [];
-    state.pendingSince = 0;
-    state.pendingTransportId = null;
-    state.highWaterActive = false;
-    state.highWaterEnteredAt = 0;
-    state.resyncRequired = false;
-    state.resyncReason = null;
-    state.pendingAllowOversizedTailSeed = false;
-  }
 
   function isTmuxSessionUnavailableError(error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
@@ -399,8 +154,6 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
       subscriberCount: countReadyBodySubscribedSubscribers(mirror),
       // Backpressure is handled per-subscriber in broadcastChangedRangesBufferSyncToSubscribers.
       // Mirror-level capture cadence must not be dragged down by a single slow subscriber.
-      transportBufferedBytes: 0,
-      transportBackpressureCount: 0,
       lastCaptureDurationMs: mirror.lastCaptureDurationMs || 0,
       lastCanonicalizeDurationMs: mirror.lastCanonicalizeDurationMs || 0,
       flushInFlight: mirror.flushInFlight,
@@ -496,7 +249,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     // R3: drop any pending input items for the dying mirror before subscribers
     // are released or the mirror record is removed. Items already in flight
     // resolve through their own tmux spawn; queued items must NOT survive.
-    deps.disposeLiveMirrorInputBatch(mirror.sessionName, `destroy:${reason}`, mirror.backend);
+      deps.daemonInputQueue.disposeLiveMirrorInputBatch(mirror.sessionName, `destroy:${reason}`, mirror.backend);
 
     mirror.lifecycle = 'destroyed';
 
@@ -553,6 +306,15 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     deps.sendScheduleStateToSession(session, mirror.sessionName);
     deps.sendMessage(session, { type: 'title', payload: mirror.sessionName });
   }
+  const bufferPublisher = createDaemonBufferPublisherRuntime({
+    sessions,
+    sendMessage: deps.sendMessage,
+    sendText: deps.sendText,
+    recordPerformanceTrace: deps.recordPerformanceTrace,
+    buildBufferHeadPayload: deps.buildBufferHeadPayload,
+    buildChangedRangesBufferSyncPayload: deps.buildChangedRangesBufferSyncPayload,
+    ensureSessionReady,
+  });
   function announceMirrorSubscribersReady(mirror: SessionMirror) {
     for (const sessionId of mirror.subscribers) {
       const session = sessions.get(sessionId);
@@ -563,157 +325,6 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     }
   }
 
-  function broadcastBufferHeadToSubscribers(mirror: SessionMirror) {
-    const now = Date.now();
-    mirror.lastHeadBroadcastAt = now;
-    mirrorHeadBroadcastCache.set(mirror, { revision: mirror.revision });
-    for (const sessionId of mirror.subscribers) {
-      const session = sessions.get(sessionId);
-      if (!session || !session.transport || session.transport.readyState !== 1) {
-        continue;
-      }
-      const snapshot = readTerminalTransportBackpressureSnapshot(session.transport);
-      if (snapshot && snapshot.backpressure) {
-        continue;
-      }
-      ensureSessionReady(session, mirror);
-      deps.sendMessage(session, {
-        type: 'buffer-head',
-        payload: deps.buildBufferHeadPayload(session.id, mirror),
-      });
-    }
-  }
-
-  function broadcastChangedRangesBufferSyncToSubscribers(
-    mirror: SessionMirror,
-    changedRanges: Array<{ startIndex: number; endIndex: number }>,
-    options?: { allowOversizedTailSeed?: boolean },
-  ) {
-    const normalizedRanges = normalizeAbsoluteRanges(changedRanges);
-    if (normalizedRanges.length === 0) {
-      return;
-    }
-    const now = Date.now();
-    for (const sessionId of mirror.subscribers) {
-      const session = sessions.get(sessionId);
-      if (!session) {
-        continue;
-      }
-      if (session.bodySubscribed === false) {
-        continue;
-      }
-      queueSubscriberPendingBufferSync(session, mirror, normalizedRanges, now, options);
-      flushPendingSubscriberBufferSync(mirror, sessionId);
-    }
-  }
-
-  function flushPendingSubscriberBufferSync(
-    mirror: SessionMirror,
-    sessionId: string,
-  ): 'sent'
-    | 'no-pending'
-    | 'missing-subscriber'
-    | 'transport-not-open'
-    | 'backpressured'
-    | 'send-error'
-    | 'stale-transport' {
-    const session = sessions.get(sessionId);
-    if (!session) {
-      return 'missing-subscriber';
-    }
-    const state = ensureSubscriberBufferSyncState(session);
-    if (state.pendingLatestRevision === null || state.pendingChangedAbsoluteRanges.length === 0) {
-      return 'no-pending';
-    }
-    if (state.pendingTransportId && state.pendingTransportId !== session.transportId) {
-      markSubscriberBufferSyncResyncRequired(state, 'transport-generation', false);
-      return 'stale-transport';
-    }
-    validateSubscriberPendingBounds(state);
-    if (!session.transport || session.transport.readyState !== 1) {
-      return 'transport-not-open';
-    }
-    if (shouldHoldPendingForBackpressure(state, session)) {
-      return 'backpressured';
-    }
-    const payload = deps.buildChangedRangesBufferSyncPayload(
-      mirror,
-      state.pendingChangedAbsoluteRanges,
-    );
-    if (!payload) {
-      clearSubscriberPendingBufferSync(state, Math.max(state.lastSentRevision, state.pendingLatestRevision));
-      return 'no-pending';
-    }
-    let messages = splitBufferSyncPayloadMessages(payload, SUBSCRIBER_BUFFER_SYNC_MAX_BYTES);
-    if (
-      messages.length > 1
-      && state.pendingAllowOversizedTailSeed
-    ) {
-      const tailPayload = buildLiveTailBufferSyncPayload(mirror, { viewportRows: mirror.rows });
-      messages = [{ payload: tailPayload, text: buildBufferSyncMessageText(tailPayload) }];
-    }
-    const traceId = `${session.id}:${Math.max(0, Math.floor(payload.revision || 0))}`;
-    const traceBase = {
-      sessionId: session.id,
-      traceId,
-      mirrorRevision: Math.max(0, Math.floor(payload.revision || 0)),
-      subscriberId: session.id,
-      transportKind: session.transport.kind,
-    };
-    try {
-      ensureSessionReady(session, mirror);
-      for (const message of messages) {
-        deps.recordPerformanceTrace?.({
-          ...traceBase,
-          stage: 'send-start',
-          at: Date.now(),
-          bytes: Buffer.byteLength(message.text, 'utf8'),
-          lineCount: Array.isArray(message.payload.lines) ? message.payload.lines.length : 0,
-        });
-        deps.sendText(session.transport, message.text);
-        deps.recordPerformanceTrace?.({
-          ...traceBase,
-          stage: 'send-done',
-          at: Date.now(),
-          bytes: Buffer.byteLength(message.text, 'utf8'),
-          lineCount: Array.isArray(message.payload.lines) ? message.payload.lines.length : 0,
-        });
-      }
-    } catch {
-      return 'send-error';
-    }
-    clearSubscriberPendingBufferSync(state, payload.revision);
-    return 'sent';
-  }
-
-  function flushPendingBufferSyncToSubscribers(mirror: SessionMirror) {
-    for (const sessionId of mirror.subscribers) {
-      const session = sessions.get(sessionId);
-      if (session?.bodySubscribed === false) {
-        continue;
-      }
-      flushPendingSubscriberBufferSync(mirror, sessionId);
-    }
-  }
-
-  function sendBufferHeadToSession(session: TerminalSession, mirror: SessionMirror) {
-    if (!session.transport || session.transport.readyState !== 1) {
-      return;
-    }
-    const cached = mirrorHeadBroadcastCache.get(mirror);
-    if (cached?.revision !== mirror.revision) {
-      // R1+R2: the first head probe for a fresh revision fans out once to all
-      // subscribers so N subs do not each trigger their own full head path.
-      // Later probes on the same revision can reply only to the requester.
-      broadcastBufferHeadToSubscribers(mirror);
-      return;
-    }
-    deps.sendMessage(session, {
-      type: 'buffer-head',
-      payload: deps.buildBufferHeadPayload(session.id, mirror),
-    });
-  }
-
   async function refreshMirrorHeadForSession(session: TerminalSession, mirror: SessionMirror) {
     if (mirror.lifecycle !== 'ready') {
       return false;
@@ -722,7 +333,7 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     if (!captured) {
       return false;
     }
-    sendBufferHeadToSession(session, mirror);
+    bufferPublisher.sendBufferHeadToSession(session, mirror);
     return true;
   }
 
@@ -835,19 +446,18 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
           });
         }
         if (changedRanges.length > 0 || forceRevision) {
-          broadcastChangedRangesBufferSyncToSubscribers(
+          bufferPublisher.broadcastChangedRangesBufferSyncToSubscribers(
             mirror,
             forceRevision
               ? [{ startIndex: mirror.bufferStartIndex, endIndex: mirror.bufferStartIndex + mirror.bufferLines.length }]
               : changedRanges,
-            { allowOversizedTailSeed: forceRevision && changedRanges.length === 0 },
           );
           return true;
         }
         if (cursorChanged || cursorKeysAppChanged) {
-          broadcastBufferHeadToSubscribers(mirror);
+          bufferPublisher.broadcastBufferHeadToSubscribers(mirror);
         }
-        flushPendingBufferSyncToSubscribers(mirror);
+        bufferPublisher.flushPendingBufferSyncToSubscribers(mirror);
         return true;
       })
       .catch((error) => {
@@ -1377,7 +987,13 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     }
     if (mirror.lifecycle === 'ready') {
       mirror.consecutiveFailures = 0;
-      const wrote = await deps.enqueueLiveMirrorInput(mirror.sessionName, data, false, shouldWrite, mirror.backend);
+      const wrote = await deps.daemonInputQueue.enqueueLiveMirrorInput(
+        mirror.sessionName,
+        data,
+        false,
+        shouldWrite,
+        mirror.backend,
+      );
       if (wrote) {
         mirror.lastLiveActivityAt = Date.now();
         scheduleMirrorLiveSync(mirror, 0);
@@ -1391,12 +1007,11 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     createMirror,
     destroyMirror,
     ensureSessionReady,
-    sendBufferHeadToSession,
-    flushPendingSubscriberBufferSync,
+    sendBufferHeadToSession: bufferPublisher.sendBufferHeadToSession,
+    flushPendingSubscriberBufferSync: bufferPublisher.flushPendingSubscriberBufferSync,
     refreshMirrorHeadForSession,
     syncMirrorCanonicalBuffer,
     scheduleMirrorLiveSync,
-    resolveMirrorLiveSyncDelayForSubscriber,
     startMirror,
     attachTmux,
     handleAdaptiveResize,
@@ -1405,6 +1020,6 @@ export function createTerminalMirrorRuntime(deps: TerminalMirrorRuntimeDeps): Te
     releaseAdaptiveWidthLease,
     handleInput,
     disposeLiveMirrorInputBatch: (sessionName, reason, backend) =>
-      deps.disposeLiveMirrorInputBatch(sessionName, `destroy:${reason}`, backend),
+      deps.daemonInputQueue.disposeLiveMirrorInputBatch(sessionName, `destroy:${reason}`, backend),
   };
 }

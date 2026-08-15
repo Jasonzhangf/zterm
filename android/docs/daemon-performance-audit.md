@@ -12,7 +12,7 @@
 tmux session(s)
     ↓ capture / canonicalize
 daemon mirror (per tmux session, Map<mirrorKey, SessionMirror>)
-    ↓ per-subscriber cadence decision
+    ↓ daemon.buffer_publisher per-subscriber backpressure/publication decision
 buffer-sync / buffer-head broadcast
     ↓ sendMessage(session, msg)
 session transport (per ws/rtc transport, Map<transportId, DaemonTransportConnection>)
@@ -37,7 +37,7 @@ writeInputIfCurrent(connection, data)
 **现状**:
 - `MIRROR_LIVE_SYNC_ACTIVE_MS = 33ms`, `MIRROR_LIVE_SYNC_IDLE_MS = 120ms`
 - 每个 mirror 持有一个 `liveSyncTimer` (`setTimeout`)，mirror 数 N → N 个独立 timer
-- `resolveMirrorLiveSyncDelay` 对整个 mirror 聚合所有 subscriber 的 backpressure (`Math.max`)
+- 2026-08-15 前，`resolveMirrorLiveSyncDelay` 对整个 mirror 聚合所有 subscriber 的 backpressure (`Math.max`)；当前已移除 mirror-level backpressure 输入，capture cadence 只由 subscriber 数、失败/backoff 与 capture cost 决定
 - `broadcastChangedRangesBufferSyncToSubscribers` 对所有 subscriber **同步串行**发 JSON
 
 **风险**:
@@ -47,11 +47,11 @@ writeInputIfCurrent(connection, data)
 - `broadcastChangedRangesBufferSyncToSubscribers` 同步遍历 `mirror.subscribers`，若 subscriber 数多且网络慢，broadcast 可能阻塞后续 capture cycle
 
 **已存在的正确设计**:
-- `broadcastChangedRangesBufferSyncToSubscribers` 里用 `resolveMirrorLiveSyncDelayForSubscriber` 做 per-subscriber lane 判断
+- `daemon.buffer_publisher` 的 `broadcastChangedRangesBufferSyncToSubscribers` / `flushPendingSubscriberBufferSync` 用 `readTerminalTransportBackpressureSnapshot` + per-subscriber pending state 做 backpressure 判断
 - backpressure subscriber 被 skip（`continue`）不阻塞其他 subscriber 收到 diff
 - `scheduleMirrorLiveSync` 确实对每个 mirror 独立，这是正确的（每个 tmux session 一个 capture cadence）
 
-**未解决的核心矛盾**: mirror-level `transportBackpressureCount` 的 `Math.max` 聚合会导致慢 subscriber 把 mirror-level 刷新降下来（因为 `capture cost * 1.25` 的 overload lane），但 buffer-sync 发送对 backpressure subscriber 已被正确 skip。**实际上风险比预期小**，但 mirror-level overload lane 仍可能被一个极慢 subscriber 触发。
+**当前边界**: mirror-level capture cadence 不再读取 subscriber backpressure；慢 subscriber 只会在 `daemon.buffer_publisher` 的 per-subscriber pending/flush 层被 hold，不降低 healthy subscriber 的 mirror cadence。
 
 ### 2.2 Buffer-Sync 广播 — 同步 JSON Serialize Per Subscriber
 
@@ -86,10 +86,10 @@ for (const sessionId of mirror.subscribers) {
 ### 2.4 Per-Subscriber Lane Skip — Head 广播不受保护
 
 **现状**:
-- `broadcastBufferHeadToSubscribers`（光标/keysApp 变化）**没有** `resolveMirrorLiveSyncDelayForSubscriber` 判断，所有 subscriber 同步收到 head
-- `broadcastChangedRangesBufferSyncToSubscribers` 有 backpressure skip 保护
+- `broadcastBufferHeadToSubscribers`（光标/keysApp 变化）在 `daemon.buffer_publisher` 内对 backpressure subscriber skip；已修复为 per-subscriber 保护
+- `broadcastChangedRangesBufferSyncToSubscribers` 由 `daemon.buffer_publisher` pending/flush 做 backpressure skip 保护
 
-**风险**: head 广播不受 subscriber backpressure 保护。若某 subscriber 网络极慢（bufferedAmount > 128KB），它的慢速会拖累 `sendMessage` 的 `JSON.stringify + sendText` 同步调用，进而影响其他 subscriber 的 head 收包。**低频但存在**。
+**风险（已修复）**: 若某 subscriber 网络极慢（bufferedAmount > 128KB），head 广播会因 backpressure 被 `daemon.buffer_publisher` skip，不再拖累其他 subscriber 的 head 收包。
 
 ---
 
@@ -190,7 +190,8 @@ const wrote = await deps.handleInput(inputSession, data, () => {
 **修法**:
 ```typescript
 // resolveMirrorLiveSyncDelay 中的 backpressure 判断改为：
-// 若 transportBackpressureCount > 0，检查是否 ALL subscribers 都在 backpressure
+// mirror-level scheduler 不再消费 subscriber backpressure；
+// per-subscriber backpressure 只在 daemon.buffer_publisher pending/flush 层处理
 // 若只有部分，在 overload lane 之前加一个 "partial" 判断，保持 fast/normal
 ```
 

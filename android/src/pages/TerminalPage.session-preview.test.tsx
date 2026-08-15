@@ -1,10 +1,33 @@
 // @vitest-environment jsdom
 
-import { useState } from 'react';
+import { useState, type ComponentType } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SESSION_PREVIEW_SELECTION_STORAGE_KEY } from '../lib/session-preview-selection';
 import type { Session } from '../lib/types';
+import type { ComponentProps } from 'react';
+import type { TerminalQuickBarProps } from '../components/terminal/TerminalQuickBar';
+import { TerminalSessionDrawer } from '../components/terminal/TerminalSessionDrawer';
+import { TerminalPage as TerminalPageComponent } from './TerminalPage';
+import { renderTerminalShellUi } from '../lib/plugin-host/terminal-shell-ui-plugin';
+
+function withTerminalShell(Page: ComponentType<ComponentProps<typeof TerminalPageComponent>>) {
+  return (props: ComponentProps<typeof Page>) => (
+    <Page
+      {...props}
+      renderTerminalShell={props.renderTerminalShell || renderTerminalShellUi}
+    />
+  );
+}
+
+function withSessionDrawer(Page: typeof TerminalPageComponent) {
+  return (props: ComponentProps<typeof Page>) => (
+    <Page
+      {...props}
+      renderSessionDrawer={(drawerProps) => <TerminalSessionDrawer {...drawerProps} />}
+    />
+  );
+}
 
 class ResizeObserverMock { observe(){} unobserve(){} disconnect(){} }
 beforeAll(() => {
@@ -98,25 +121,20 @@ vi.mock('../components/terminal/RemoteScreenshotSheet', () => ({
   RemoteScreenshotSheet: () => null,
 }));
 
-vi.mock('../components/terminal/TerminalQuickBar', () => ({
-  TerminalQuickBar: (props: {
-    activeSessionId?: string | null;
-    onSendSequence?: (sequence: string) => void;
-  }) => (
-    <div
-      data-testid="terminal-quickbar"
-      data-active-session-id={props.activeSessionId || ''}
+const renderQuickBar = (props: TerminalQuickBarProps) => (
+  <div
+    data-testid="terminal-quickbar"
+    data-active-session-id={props.activeSessionId || ''}
+  >
+    <button
+      type="button"
+      data-testid="terminal-quickbar-send"
+      onClick={() => props.onSendSequence?.('PING')}
     >
-      <button
-        type="button"
-        data-testid="terminal-quickbar-send"
-        onClick={() => props.onSendSequence?.('PING')}
-      >
-        send
-      </button>
-    </div>
-  ),
-}));
+      send
+    </button>
+  </div>
+);
 
 vi.mock('../components/TerminalView', () => ({
   TerminalView: ({ sessionId }: { sessionId: string }) => <div data-testid={`terminal-view-${sessionId}`} />,
@@ -259,7 +277,8 @@ describe('TerminalPage session preview integration', () => {
       );
     }
 
-    const { TerminalPage } = await import('./TerminalPage');
+    const { TerminalPage: TerminalPageBase } = await import('./TerminalPage');
+    const TerminalPage = withTerminalShell(TerminalPageBase);
     render(<Harness />);
 
     const stage = screen.getByTestId('terminal-stage-shell');
@@ -295,7 +314,8 @@ describe('TerminalPage session preview integration', () => {
     const onQuickActionInput = vi.fn();
     const onSwitchSession = vi.fn();
     const stableNoop = vi.fn();
-    const { TerminalPage } = await import('./TerminalPage');
+    const { TerminalPage: TerminalPageBase } = await import('./TerminalPage');
+    const TerminalPage = withTerminalShell(TerminalPageBase);
 
     render(
       <TerminalPage
@@ -312,6 +332,7 @@ describe('TerminalPage session preview integration', () => {
         shortcutActions={[]}
         sessionDraft=""
         onQuickActionInput={onQuickActionInput}
+        renderQuickBar={renderQuickBar}
       />,
     );
 
@@ -345,7 +366,8 @@ describe('TerminalPage session preview integration', () => {
     }));
     const onLiveSessionIdsChange = vi.fn();
     const stableNoop = vi.fn();
-    const { TerminalPage } = await import('./TerminalPage');
+    const { TerminalPage: TerminalPageBase } = await import('./TerminalPage');
+    const TerminalPage = withTerminalShell(TerminalPageBase);
 
     const renderPage = (appForegroundActive: boolean) => (
       <TerminalPage
@@ -404,7 +426,8 @@ describe('TerminalPage session preview integration', () => {
     openedSession.title = 'remote beta tab';
     const onOpenDrawerRemoteSession = vi.fn((_target: unknown, _sessionName: string, _options?: { activate?: boolean; navigate?: boolean }) => 'remote-opened');
     const stableNoop = vi.fn();
-    const { TerminalPage } = await import('./TerminalPage');
+    const { TerminalPage: TerminalPageBase } = await import('./TerminalPage');
+    const TerminalPage = withTerminalShell(withSessionDrawer(TerminalPageBase));
 
     function Harness() {
       const [sessions, setSessions] = useState<Session[]>([currentSession]);
@@ -482,7 +505,8 @@ describe('TerminalPage session preview integration', () => {
     currentSession.sessionName = 'tmux-s1';
     const onOpenDrawerRemoteSession = vi.fn((_target: unknown, _sessionName: string, _options?: { activate?: boolean; navigate?: boolean }) => undefined);
     const stableNoop = vi.fn();
-    const { TerminalPage } = await import('./TerminalPage');
+    const { TerminalPage: TerminalPageBase } = await import('./TerminalPage');
+    const TerminalPage = withTerminalShell(withSessionDrawer(TerminalPageBase));
 
     render(
       <TerminalPage
@@ -539,7 +563,8 @@ describe('TerminalPage session preview integration', () => {
     }));
     const onSwitchSession = vi.fn();
     const stableNoop = vi.fn();
-    const { TerminalPage } = await import('./TerminalPage');
+    const { TerminalPage: TerminalPageBase } = await import('./TerminalPage');
+    const TerminalPage = withTerminalShell(TerminalPageBase);
     render(
       <TerminalPage
         sessions={previewSessions}
@@ -588,7 +613,8 @@ describe('TerminalPage session preview integration', () => {
     }));
     const onCloseSession = vi.fn();
     const stableNoop = vi.fn();
-    const { TerminalPage } = await import('./TerminalPage');
+    const { TerminalPage: TerminalPageBase } = await import('./TerminalPage');
+    const TerminalPage = withTerminalShell(TerminalPageBase);
     render(
       <TerminalPage
         sessions={previewSessions}
@@ -635,7 +661,8 @@ describe('TerminalPage session preview integration', () => {
       })),
     }));
     const stableNoop = vi.fn();
-    const { TerminalPage } = await import('./TerminalPage');
+    const { TerminalPage: TerminalPageBase } = await import('./TerminalPage');
+    const TerminalPage = withTerminalShell(TerminalPageBase);
     render(
       <TerminalPage
         sessions={previewSessions}
@@ -718,7 +745,8 @@ describe('TerminalPage session preview integration', () => {
       );
     }
 
-    const { TerminalPage } = await import('./TerminalPage');
+    const { TerminalPage: TerminalPageBase } = await import('./TerminalPage');
+    const TerminalPage = withTerminalShell(TerminalPageBase);
     render(<Harness />);
     expect(appListenerMock.backButton).toBeNull();
     const stage = screen.getByTestId('terminal-stage-shell');

@@ -91,8 +91,8 @@ function addToken(url: URL, token: string) {
   }
 }
 
-async function fetchJson(url: URL) {
-  const response = await fetch(url);
+async function fetchJson(url: URL, init?: RequestInit) {
+  const response = await fetch(url, init);
   const text = await response.text();
   if (!response.ok) {
     fail(`request failed (${response.status}): ${text}`);
@@ -129,15 +129,25 @@ async function main() {
       }
       break;
     case 'enable':
-    case 'disable':
+    case 'disable': {
       url = new URL('/debug/runtime/control', baseUrl);
       addToken(url, options.token);
-      url.searchParams.set('enabled', options.command === 'enable' ? '1' : '0');
-      url.searchParams.set('reason', options.reason || 'runtime-debug-remote');
-      if (options.sessionId) {
-        url.searchParams.set('sessionId', options.sessionId);
-      }
-      break;
+      const payload = await fetchJson(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled: options.command === 'enable',
+          reason: options.reason || 'runtime-debug-remote',
+          sessionId: options.sessionId,
+        }),
+      });
+      process.stdout.write(
+        options.pretty
+          ? `${JSON.stringify(payload, null, 2)}\n`
+          : `${JSON.stringify(payload)}\n`,
+      );
+      return;
+    }
   }
 
   const payload = await fetchJson(url);

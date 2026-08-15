@@ -1,15 +1,32 @@
-import { readFileSync } from 'fs';
-import { join } from 'path';
 import { describe, expect, it } from 'vitest';
 import { detectRuntimeSequenceAnomalies, parseRuntimeSequenceEntries } from './runtime-debug-sequence';
 
 describe('runtime debug sequence analyzer', () => {
   it('flags when later head/request entries still report stale local truth after a newer buffer-sync was observed', () => {
-    const raw = JSON.parse(
-      readFileSync(join(process.cwd(), 'evidence', 'runtime-audit', '2026-04-26', 'logs-after-apk.json'), 'utf8'),
-    ) as { entries: Array<{ seq?: number; ts?: string; scope?: string; payload?: string | null }> };
-
-    const events = parseRuntimeSequenceEntries(raw.entries);
+    const events = parseRuntimeSequenceEntries([
+      {
+        seq: 1,
+        ts: '2026-04-27T00:00:00.000Z',
+        scope: 'session.ws.connect.buffer-sync',
+        payload: JSON.stringify({
+          sessionId: 's1',
+          payload: {
+            revision: 45,
+            endIndex: 57788,
+          },
+        }),
+      },
+      {
+        seq: 2,
+        ts: '2026-04-27T00:00:00.010Z',
+        scope: 'session.buffer.head',
+        payload: JSON.stringify({
+          sessionId: 's1',
+          localRevision: 22,
+          localEndIndex: 57783,
+        }),
+      },
+    ]);
     const anomalies = detectRuntimeSequenceAnomalies(events);
 
     expect(anomalies.length).toBeGreaterThan(0);

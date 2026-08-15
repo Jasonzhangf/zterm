@@ -555,11 +555,12 @@ describe('session-context-input-runtime', () => {
     );
   });
 
-  it('does not enqueue input into a backpressured open transport and does not call reconnect directly', () => {
+  it('does not enqueue input into a backpressured open transport or close/replace it from the input owner', () => {
     const runtimeDebug = vi.fn();
     const sendSocketPayload = vi.fn();
     const requestSessionBufferHead = vi.fn();
     const markPendingInputTailRefresh = vi.fn();
+    const scheduleReconnect = vi.fn();
     const ws = createSocket(WebSocket.OPEN, 256_000);
 
     sendInput({
@@ -569,12 +570,14 @@ describe('session-context-input-runtime', () => {
       sendSocketPayload,
       markPendingInputTailRefresh,
       requestSessionBufferHead,
+      scheduleReconnect,
     });
 
     expect(sendSocketPayload).not.toHaveBeenCalled();
     expect(markPendingInputTailRefresh).not.toHaveBeenCalled();
     expect(requestSessionBufferHead).not.toHaveBeenCalled();
-    expect(ws.close).toHaveBeenCalledWith(4000, 'input backpressure');
+    expect(ws.close).not.toHaveBeenCalled();
+    expect(scheduleReconnect).not.toHaveBeenCalled();
     expect(runtimeDebug).toHaveBeenCalledWith(
       'session.input.drop.backpressured-transport',
       expect.objectContaining({ sessionId: 'session-2', bufferedBytes: 256_000 }),
@@ -624,13 +627,12 @@ describe('session-context-input-runtime', () => {
     );
   });
 
-  // 2026-08-09 BUG #2: backpressure close 后 reliable 协议路径立即 retry 死循环
-  // 红测预期：close 后 retry 必须有指数 backoff（至少 100ms 起步，封顶 2000ms）
+  // 2026-08-09 BUG #2 regression: input owner must not close the socket, and
+  // reliable retries must stay bounded while the transport remains backpressured.
   describe('long-voice-commit input backpressure resilience (BUG #2/#3 regression)', () => {
-    it('applies exponential backoff after a reliable backpressure close, not immediate retry', () => {
+    it('keeps reliable input on backoff while the transport stays backpressured, without closing it', () => {
       vi.useFakeTimers();
       const sendSocketPayload = vi.fn();
-      // long input forces backpressure close once bufferedAmount >= 128KB
       const bigInput = 'a'.repeat(200 * 1024);
       const ws = createSocket(WebSocket.OPEN, 130 * 1024); // already past threshold
 
@@ -652,29 +654,23 @@ describe('session-context-input-runtime', () => {
         isPendingSessionTransportOpenStale: () => false,
       });
 
-      expect(ws.close).toHaveBeenCalledWith(4000, 'input backpressure');
+      expect(ws.close).not.toHaveBeenCalled();
+      expect(sendSocketPayload).not.toHaveBeenCalled();
 
-      // CRITICAL: immediately advancing time by TERMINAL_RELIABLE_INPUT_RETRY_MS
-      // (which is typically 50-200ms) MUST NOT trigger another retry / close cycle
-      // while bufferedAmount is still over threshold.
-      // 红测：第一次 retry 必须至少延迟 100ms，且再次 retry 必须 backoff
+      // CRITICAL: retry within the normal window must not send or close while
+      // bufferedAmount is still over threshold.
       const initialRetryDelay = TERMINAL_RELIABLE_INPUT_RETRY_MS;
       const fastRetryWindowMs = initialRetryDelay; // first allowed retry window
 
-      // ws stays backpressured
-      ws.readyState = WebSocket.CLOSED;
-      // schedule retry fires within the first retry window — bufferedAmount stays high
       vi.advanceTimersByTime(fastRetryWindowMs);
 
-      // 红测断言：retry 不应该再次调用 ws.close (死循环)
-      // 如果当前实现立即 retry，会再次触发 close / 死循环
-      expect(ws.close.mock.calls.length).toBeLessThanOrEqual(1);
+      expect(sendSocketPayload).not.toHaveBeenCalled();
+      expect(ws.close).not.toHaveBeenCalled();
     });
 
-    it('does not re-send a backpressure-closed input within the first retry window (BUG #2 strict)', () => {
+    it('does not re-send while bufferedAmount stays above threshold (BUG #2 strict)', () => {
       vi.useFakeTimers();
       const sendSocketPayload = vi.fn();
-      // long input forces backpressure close once bufferedAmount >= 128KB
       const bigInput = 'a'.repeat(200 * 1024);
       let bufferedAmount = 130 * 1024; // already over threshold
       const ws = {
@@ -685,10 +681,7 @@ describe('session-context-input-runtime', () => {
         set bufferedAmount(v: number) {
           bufferedAmount = v;
         },
-        close: vi.fn((_code?: number, _reason?: string) => {
-          // simulate real browser: ws flips to CLOSED immediately on close()
-          ws.readyState = WebSocket.CLOSED;
-        }),
+        close: vi.fn(),
       } as any;
 
       sendInputThroughSessionTransport({
@@ -709,25 +702,20 @@ describe('session-context-input-runtime', () => {
         isPendingSessionTransportOpenStale: () => false,
       });
 
-      expect(ws.close).toHaveBeenCalledTimes(1);
-      const sendsAfterFirstClose = sendSocketPayload.mock.calls.length;
-
-      // simulate ws recovery with backlog — ws.open again, bufferedAmount still high
-      ws.readyState = WebSocket.OPEN;
-      bufferedAmount = 130 * 1024;
+      expect(ws.close).not.toHaveBeenCalled();
+      expect(sendSocketPayload).not.toHaveBeenCalled();
 
       // fire scheduled retry (immediate retry window)
       vi.advanceTimersByTime(TERMINAL_RELIABLE_INPUT_RETRY_MS + 1);
 
-      // 红测：retry 时如果 bufferedAmount 仍超阈值，应该再次 close 而不是 send
-      // 当前实现 BUG：retry 立即 send,不管 bufferedAmount → 触发新一轮 close → 死循环
-      // 红测期望：retry 期间 sendSocketPayload 不应该新增调用
-      expect(sendSocketPayload.mock.calls.length - sendsAfterFirstClose).toBe(0);
+      expect(sendSocketPayload).not.toHaveBeenCalled();
+      expect(ws.close).not.toHaveBeenCalled();
     });
 
     it('re-checks ws.bufferedAmount after each send within a flush cycle (BUG #3)', () => {
       vi.useFakeTimers();
       const sendSocketPayload = vi.fn();
+      const runtimeDebug = vi.fn();
       // multiple chunks that cumulatively exceed 128KB but each chunk stays under
       const longInput = 'a'.repeat(200 * 1024);
 
@@ -741,10 +729,7 @@ describe('session-context-input-runtime', () => {
         set bufferedAmount(v: number) {
           buffered = v;
         },
-        close: vi.fn((_code?: number, _reason?: string) => {
-          // when close is called, ws flips to CLOSING (real browser behavior)
-          ws.readyState = WebSocket.CLOSING;
-        }),
+        close: vi.fn(),
       } as any;
 
       sendInputThroughSessionTransport({
@@ -758,7 +743,7 @@ describe('session-context-input-runtime', () => {
           sessionsRef: { current: [{ id: 'session-flush-loop', reliableInputSupported: false } as any] },
           stateRef: { current: { activeSessionId: 'session-flush-loop' } },
         },
-        runtimeDebug: vi.fn(),
+        runtimeDebug,
         daemonConnection: createDaemonConnectionForSocket(ws),
         isReconnectInFlight: () => false,
         sendSocketPayload: vi.fn(((sid: string, w: any, payload: string) => {
@@ -773,10 +758,14 @@ describe('session-context-input-runtime', () => {
         isPendingSessionTransportOpenStale: () => false,
       });
 
-      // BUG #3 红测：如果当前实现只在入口读 bufferedAmount, 在 flush 期间
-      // 会持续 send 远超 128KB 阈值的 payload 但不再次触发 close
-      // 修复后，每次 send 都应该 check bufferedAmount，达到阈值立即 close
-      expect(ws.close).toHaveBeenCalled();
+      // BUG #3 regression: the flush loop must stop before exhausting all
+      // chunks once bufferedAmount reaches the threshold.
+      expect(ws.close).not.toHaveBeenCalled();
+      expect(sendSocketPayload.mock.calls.length).toBeLessThan(5);
+      expect(runtimeDebug).toHaveBeenCalledWith(
+        'session.input.legacy-backpressure',
+        expect.objectContaining({ sessionId: 'session-flush-loop' }),
+      );
     });
   });
 });

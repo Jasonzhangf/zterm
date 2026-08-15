@@ -100,7 +100,7 @@ describe('function wiki truth gate', () => {
     );
     expect(decision).toContain('`status`: `planned`');
     expect(decision).toContain(
-      '`current_owner`: `android/src/contexts/session-buffer-frame-assembly.ts#assembleBufferSyncFrameChunk`',
+      '`current_owner`: `android/src/lib/buffer-frame-assembly/session-buffer-frame-assembly.ts#assembleBufferSyncFrameChunk`',
     );
     expect(decision).toContain(
       '`planned_target`: `crates/zterm-terminal-core/src/buffer_frame_assembly.rs`',

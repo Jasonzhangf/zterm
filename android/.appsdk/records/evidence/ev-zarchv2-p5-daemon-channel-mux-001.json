@@ -1,0 +1,49 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "EVID-20260815-ZARCHV2-P5-PROD-DAEMON-CHANNEL-MUX-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-phase5-production",
+  "kind": "gate",
+  "source_commit": "9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c",
+  "scope": {
+    "module_id": "daemon.channel_mux",
+    "feature_id": "terminal.transport_lifecycle",
+    "entrypoint": "pnpm exec vitest run src/server/server.transport-lifecycle-truth.test.ts src/server/terminal-message-runtime.test.ts src/server/terminal-runtime.detached-session.test.ts src/server/terminal-bridge-runtime.test.ts src/server/terminal-daemon-runtime.test.ts src/server/terminal-message-control-runtime.schedule.test.ts; pnpm run daemon:mirror:close-loop"
+  },
+  "producer": {
+    "adapter": "appsdk",
+    "identity": "codex-zterm-v2-phase5-daemon-channel-mux-20260815T092900Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "Daemon mux channel registry/subscriber lifecycle is now physically owned by active module daemon.channel_mux under src/server/terminal-channel-mux-runtime.ts; bridge/daemon cleanup, mux-channel-runtime attach/close, and server composition all go through owner APIs, while terminal-runtime no longer owns channel transport/envelope creation. Targeted suite 86/86 in 6 files, test:feature-registry 84/84, tsc --noEmit PASS, git diff --check PASS, daemon:mirror:close-loop all 9 cases plus replay and strict audit PASS, appsdk verify android ok:true draft; prior full test:terminal:contracts and pnpm run build PASS in this worktree. Phase 5 slice remains production_pending_review because review/promotion is not recorded.",
+  "created_at": "2026-08-15T09:29:27Z",
+  "expires_at": "2026-11-15T09:29:27Z",
+  "input_hashes": [
+    "sha256:32b7541d772f35668e3189e48e4422c51002434d1a6295822748e50b9f2ae76e",
+    "sha256:3ae06eb8630462cf7ea3866a1ed3d2bbf0f4db11e83f81365499397b73bec9c2",
+    "sha256:ef50711711d96951ab9aaffdc54af2575908d84b1d6de08cdde4d078640b8eb1",
+    "sha256:52c16b8ed654bbb6a90fc1f8440d67c099a6c5edc3103c029b5d191afea35a1a",
+    "sha256:41254943fcf91bf4000aa0174d7481c4b855fe9dcd88ce2083093d65b2ab6b92",
+    "sha256:3b70e5f432032220325ee71dce11c8b82800a5448b4b74341edf418ceb77dbe3",
+    "sha256:5ad3e2ff620d35c4cb0785d745542a85b4af8b2689ff3d058f90a851d64dadb4",
+    "sha256:c941182adbb2243d1279807e97f516136c30d99fbb6c9f34baa31ec6c0f479f6",
+    "sha256:53452af9b3ee1b3497e7dc75d32df0e9d05c62e191371deaa884cb9ce87f121f",
+    "sha256:91da3e1fc361e1d6eecfdfb26fcba772b999d2e054bd0d208dfb797e3725de94",
+    "sha256:b0d287d97045c6876dcf95571efded9e64c5a00f360509dfb0c0584da1e94610",
+    "sha256:9c67ac7b854cd7ade1c9f01e816bbb1449c09076d4050bf8c0c5bd4aae4fbd86",
+    "sha256:a1b5cdc57e80d28f8403a6878e9517992b29d3f89c6a7eace4be4e78ef814434",
+    "sha256:5c8d9146676c5db60da676f6c2895ce83fbd879230aad031466891bbe6b4eb11",
+    "sha256:dd655d08e514be1048fcf2d557634d4e9c7832b8d6ecd96934188ecbede9372e",
+    "sha256:de7125eb848d9b34bcde85ecb2583fbc2f7afde348cb17e1290cb63e1a2e4d4d",
+    "sha256:6f7de3a6c70d91129f7f6c695366d15d54f0d5d2c60a00efc216a2713b282b75",
+    "sha256:4760ec76962d6160e2e2fa5b60bb5fd3ad2804d5adfb65c0e13a87d1203a3e54",
+    "sha256:a2a8dc4dd984e20b95e5915c10419ef58cbbe786db4fc590cbdd86078edac5ad",
+    "sha256:122af9e4fe199dcfd2235af25ea0b2c5d4a6efe6f0aa19623d3e8d4129fb2e68",
+    "sha256:7786e271d5e43278a3681096a98457cfd1b980c14390293f8eb0b10bdee0bf47",
+    "sha256:28c1b9c87020a259e0658664dd5c175efa86acbf7a9f018483c0c45bb32b1d4f",
+    "sha256:b2c4c68476ba9b463e523d793580e753d41248097e03d8884824f82d77233b63",
+    "sha256:00cd7b0c850773fb80a0361f4c3260348aa1dc83dc208d278f38dff0d5b62652"
+  ],
+  "scope_hash": "sha256:32b7541d772f35668e3189e48e4422c51002434d1a6295822748e50b9f2ae76e"
+}

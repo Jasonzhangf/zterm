@@ -2,12 +2,12 @@ import { describe, expect, it } from 'vitest';
 import type { Host } from '../lib/types';
 import {
   createSessionTransportRuntimeStore,
-  ensureSessionTerminalChannel,
   setSessionTargetTerminalMuxReady,
   setSessionTransportSocket,
   setTargetTerminalTransport,
   upsertSessionTransportRuntime,
 } from '../lib/session-transport-runtime';
+import { ensureSessionTerminalChannel } from '../lib/terminal-channel-mux-runtime';
 import {
   resolvePassiveTickTransportHealth,
   resolvePassiveVisibleRefreshTickMs,
@@ -147,7 +147,7 @@ describe('P1 passive visible pane fast lane', () => {
       const targetKey = store.sessions.get('s1')!.targetKey;
       setSessionTransportSocket(store, 's1', makeSocket(42 * 1024) as any);
       setTargetTerminalTransport(store, targetKey, makeSocket(256 * 1024) as any);
-      ensureSessionTerminalChannel(store, 's1', { channelId: 'channel-a' });
+      ensureSessionTerminalChannel(store.terminalChannels, 's1', { channelId: 'channel-a' });
       setSessionTargetTerminalMuxReady(store, 's1', true);
 
       const health = resolvePassiveTickTransportHealth(

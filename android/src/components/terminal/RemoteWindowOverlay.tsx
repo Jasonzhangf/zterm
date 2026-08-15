@@ -159,7 +159,7 @@ import {
   safeRemoteWindowGroupId,
 } from './remote-window-overlay-helpers';
 import { styles } from './remote-window-overlay-styles';
-interface RemoteWindowOverlayProps {
+export interface RemoteWindowOverlayProps {
   activeSessionId?: string | null;
   appForegroundActive?: boolean;
   streamInvalidation?: {

@@ -13,6 +13,7 @@ import {
   buildTerminalMuxTargetMessage,
   buildTerminalMuxUnwrappedSessionMessageError,
   classifyTerminalMuxClientMessage,
+  isTerminalMuxDebugClientMessageType,
   isTerminalMuxClientFrame,
   isTerminalMuxServerFrame,
   validateTerminalMuxChannelEnvelope,
@@ -84,11 +85,30 @@ describe('terminal mux protocol contract', () => {
     expect(classifyTerminalMuxClientMessage({ type: 'list-sessions' })).toBe('target');
     expect(classifyTerminalMuxClientMessage({ type: 'tmux-kill-session' })).toBe('target');
     expect(classifyTerminalMuxClientMessage({ type: 'input' })).toBe('channel');
-    expect(classifyTerminalMuxClientMessage({ type: 'debug-log' })).toBe('channel');
-    expect(classifyTerminalMuxClientMessage({ type: 'debug-snapshot' })).toBe('channel');
+    expect(isTerminalMuxDebugClientMessageType('debug-log')).toBe(true);
+    expect(isTerminalMuxDebugClientMessageType('debug-snapshot')).toBe(true);
+    expect(classifyTerminalMuxClientMessage({ type: 'debug-log' } as never)).toBe('observability');
+    expect(classifyTerminalMuxClientMessage({ type: 'debug-snapshot' } as never)).toBe('observability');
     expect(classifyTerminalMuxClientMessage({ type: 'remote-window-input' })).toBe('channel');
     expect(classifyTerminalMuxClientMessage({ type: 'session-open' })).toBe('legacy');
     expect(classifyTerminalMuxClientMessage({ type: 'connect' })).toBe('legacy');
+  });
+
+  it('rejects debug observability messages from the mux channel without throwing from the frame predicate', () => {
+    expect(isTerminalMuxClientFrame({
+      type: 'mux-channel-message',
+      payload: {
+        channelId: 'channel-a',
+        message: { type: 'debug-log' },
+      },
+    })).toBe(false);
+    expect(isTerminalMuxClientFrame({
+      type: 'mux-channel-message',
+      payload: {
+        channelId: 'channel-a',
+        message: { type: 'debug-snapshot' },
+      },
+    })).toBe(false);
   });
 
   it('wraps session-bound payloads in channel envelopes and rejects target payloads there', () => {

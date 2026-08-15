@@ -2,8 +2,12 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ComponentProps } from 'react';
 import { STORAGE_KEYS, type Session, TerminalResizeHandler, TerminalViewportChangeHandler } from '../lib/types';
-import { TerminalPage } from './TerminalPage';
+import type { TerminalQuickBarProps } from '../components/terminal/TerminalQuickBar';
+import { TerminalPage as TerminalPageBase } from './TerminalPage';
+import { TerminalSessionDrawer } from '../components/terminal/TerminalSessionDrawer';
+import { renderTerminalShellUi } from '../lib/plugin-host/terminal-shell-ui-plugin';
 
 // TerminalPage reads attachment counts from SessionContext (badge/drawer).
 // These page-level tests render TerminalPage directly without the app-level
@@ -55,47 +59,23 @@ vi.mock('../components/terminal/TabManagerSheet', () => ({
   TabManagerSheet: () => null,
 }));
 
-vi.mock('../components/terminal/TerminalQuickBar', () => ({
-  TerminalQuickBar: ({
-    activeSessionId,
-    sessionDraft,
-    onSendSequence,
-    onSessionDraftChange,
-    onSessionDraftSend,
-    splitAvailable,
-    splitVisible,
-    onToggleSplitLayout,
-    onCycleSplitPane,
-    onMeasuredHeightChange,
-  }: {
-    activeSessionId?: string;
-    sessionDraft?: string;
-    onSendSequence?: (sequence: string) => void;
-    onSessionDraftChange?: (value: string) => void;
-    onSessionDraftSend?: (value: string) => void;
-    splitAvailable?: boolean;
-    splitVisible?: boolean;
-    onToggleSplitLayout?: () => void;
-    onCycleSplitPane?: () => void;
-    onMeasuredHeightChange?: (height: number) => void;
-  }) => (
-    <div
-      data-testid="terminal-quickbar"
-      data-active-session-id={activeSessionId || ''}
-      data-session-draft={sessionDraft || ''}
-      data-split-available={splitAvailable ? 'true' : 'false'}
-      data-split-visible={splitVisible ? 'true' : 'false'}
-    >
-      <button type="button" onClick={() => onSendSequence?.('quick-seq')}>send-quick</button>
-      <button type="button" onClick={() => onSessionDraftChange?.('draft-next')}>change-draft</button>
-      <button type="button" onClick={() => onSessionDraftSend?.('draft-send')}>send-draft</button>
-      <button type="button" onClick={() => onToggleSplitLayout?.()}>toggle-split</button>
-      <button type="button" onClick={() => onCycleSplitPane?.()}>cycle-split</button>
-        <button type="button" onClick={() => onMeasuredHeightChange?.(180)}>measure-quickbar</button>
-        <button type="button" onClick={() => onMeasuredHeightChange?.(0)}>collapse-quickbar</button>
-    </div>
-  ),
-}));
+const renderQuickBar = (props: TerminalQuickBarProps) => (
+  <div
+    data-testid="terminal-quickbar"
+    data-active-session-id={props.activeSessionId || ''}
+    data-session-draft={props.sessionDraft || ''}
+    data-split-available={props.splitAvailable ? 'true' : 'false'}
+    data-split-visible={props.splitVisible ? 'true' : 'false'}
+  >
+    <button type="button" onClick={() => props.onSendSequence?.('quick-seq')}>send-quick</button>
+    <button type="button" onClick={() => props.onSessionDraftChange?.('draft-next')}>change-draft</button>
+    <button type="button" onClick={() => props.onSessionDraftSend?.('draft-send')}>send-draft</button>
+    <button type="button" onClick={() => props.onToggleSplitLayout?.()}>toggle-split</button>
+    <button type="button" onClick={() => props.onCycleSplitPane?.()}>cycle-split</button>
+    <button type="button" onClick={() => props.onMeasuredHeightChange?.(180)}>measure-quickbar</button>
+    <button type="button" onClick={() => props.onMeasuredHeightChange?.(0)}>collapse-quickbar</button>
+  </div>
+);
 
 vi.mock('../components/TerminalView', () => ({
   TerminalView: ({
@@ -144,6 +124,17 @@ vi.mock('../components/TerminalView', () => ({
     </div>
   ),
 }));
+
+function TerminalPage(props: ComponentProps<typeof TerminalPageBase>) {
+  return (
+    <TerminalPageBase
+      {...props}
+      renderQuickBar={renderQuickBar}
+      renderTerminalShell={renderTerminalShellUi}
+      renderSessionDrawer={(drawerProps) => <TerminalSessionDrawer {...drawerProps} />}
+    />
+  );
+}
 
 function makeSession(id: string): Session {
   return {

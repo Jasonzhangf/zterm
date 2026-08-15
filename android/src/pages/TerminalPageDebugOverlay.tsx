@@ -1,47 +1,14 @@
 import { memo as ReactMemo, useEffect, useState } from "react";
-import { useSessionViewportModeSnapshot, type SessionViewportModeStore } from "../lib/session-viewport-mode-store";
-import type { Session, SessionDebugOverlayMetrics } from "../lib/types";
 import { formatDebugHz, formatDebugRate, resolveDebugStatus } from "./terminal-page-debug-helpers";
-import {
-  getTwoFingerWheelDebugSnapshot,
-  type TwoFingerWheelDebugSnapshot,
-} from "../lib/two-finger-wheel-debug-store";
-
-export type RemoteWindowInputDebugSnapshot = {
-  contextActive: boolean;
-  contextLabel: string;
-  sessionId: string;
-  streamId: string;
-  targetId: string;
-  inputRoute: string;
-  focusPolicy: string;
-  lastSource: string;
-  lastEvent: string;
-  lastSent: boolean | null;
-  lastAt: number | null;
-  lastPoint: string;
-  lastResult: string;
-  lastResultAt: number | null;
-  counts: {
-    focus: number;
-    pointerDown: number;
-    pointerMove: number;
-    pointerUp: number;
-    click: number;
-    scroll: number;
-    key: number;
-    text: number;
-    accepted: number;
-    error: number;
-  };
-  video: string;
-};
+import type { TerminalDebugOverlayProps } from "../lib/plugin-debug-console/debug-console-contract";
+import type { Session } from "../lib/types";
 
 const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   visible,
   session,
-  visiblePaneSessions,
-  sessionViewportModeStore,
+  visiblePaneCount,
+  viewportMode,
+  wheelDebug,
   getSessionDebugMetrics,
   debugOverlayPos,
   debugOverlayDragRef,
@@ -72,62 +39,8 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   copySelection,
   sessionDrawerDebug,
   getRemoteWindowInputDebug,
-}: {
-  visible: boolean;
-  session: Session | null;
-  visiblePaneSessions?: Session[];
-  sessionViewportModeStore: SessionViewportModeStore;
-  getSessionDebugMetrics?: (
-    sessionId: string,
-  ) => SessionDebugOverlayMetrics | null;
-  debugOverlayPos: { x: number; y: number };
-  debugOverlayDragRef: React.MutableRefObject<{
-    startX: number;
-    startY: number;
-    startPosX: number;
-    startPosY: number;
-    dragging: boolean;
-  }>;
-  onClose: () => void;
-  onMove: (next: { x: number; y: number }) => void;
-  keyboardInset?: number;
-  shellHeight?: number;
-  rawShellHeight?: number;
-  visualViewportHeight?: number;
-  visualViewportWidth?: number;
-  visualViewportOffsetTop?: number;
-  currentLayoutViewportHeight?: number;
-  terminalKeyboardRequested?: boolean;
-  keyboardViewportAlreadyResized?: boolean;
-  containerHeightPx?: number;
-  viewportRows?: number;
-  copyModeActive?: boolean;
-  copyStartRowIndex?: number | null;
-  effectiveKeyboardLiftPx?: number;
-  terminalImeLiftPx?: number;
-  quickBarShellKeyboardLiftPx?: number;
-  quickBarHeight?: number;
-  terminalChromeBottomPx?: number;
-  layoutMode?: string;
-  landscape?: boolean;
-  splitVisible?: boolean;
-  quickBarCollapsed?: boolean;
-  copySelection?: { active: boolean; sessionId: string | null; startRowIndex: number | null; endRowIndex: number | null; menu: { x: number; y: number; rowIndex: number } | null } | undefined;
-  sessionDrawerDebug?: {
-    open: boolean;
-    lastEvent: string;
-    eventSeq: number;
-    callbackSeq: number;
-    pageCallbackSeq: number;
-    pickerMode: string | null;
-  };
-  getRemoteWindowInputDebug?: () => RemoteWindowInputDebugSnapshot;
-}) {
+}: TerminalDebugOverlayProps) {
   const [tick, setTick] = useState(0);
-  const viewportModeSnapshot = useSessionViewportModeSnapshot(
-    sessionViewportModeStore,
-    session?.id || null,
-  );
 
   useEffect(() => {
     if (!visible || !session) {
@@ -149,7 +62,6 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
     ? getSessionDebugMetrics(session.id) || undefined
     : undefined;
   const status = resolveDebugStatus(session, metrics);
-  const viewportMode = viewportModeSnapshot.mode;
   const sessionLabel = session.customName?.trim() || session.title || session.sessionName;
   const routeLabel = [
     session.resolvedPath || '-',
@@ -158,7 +70,6 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
   ].filter(Boolean).join(' / ');
   const icePairLabel = formatIcePairLabel(session.selectedIcePair);
   const remoteWindowInputDebug = getRemoteWindowInputDebug?.();
-  const wheelDebug: TwoFingerWheelDebugSnapshot = getTwoFingerWheelDebugSnapshot();
   const overlayStyle: React.CSSProperties = {
     position: "absolute",
     top: debugOverlayPos.y >= 0 ? `${debugOverlayPos.y}px` : "10px",
@@ -326,7 +237,7 @@ const TerminalDebugOverlay = ReactMemo(function TerminalDebugOverlay({
             <span data-testid="terminal-debug-remote-window-video">{remoteWindowInputDebug.video}</span>
           </>
         ) : null}
-        <span>窗格</span><span>x{visiblePaneSessions && visiblePaneSessions.length > 0 ? visiblePaneSessions.length : 1}</span>
+        <span>窗格</span><span>x{visiblePaneCount && visiblePaneCount > 0 ? visiblePaneCount : 1}</span>
         <span>刷新</span><span>{formatDebugHz(metrics?.renderHz || 0)} / {formatDebugHz(metrics?.pullHz || 0)}</span>
         <span>流量</span>
         <span>

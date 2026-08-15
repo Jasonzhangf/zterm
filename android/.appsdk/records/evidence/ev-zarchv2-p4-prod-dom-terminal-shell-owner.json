@@ -1,0 +1,43 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "EVID-20260815-ZARCHV2-P4-PROD-DOM-TERMINAL-SHELL-OWNER-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-phase4-production",
+  "kind": "gate",
+  "source_commit": "9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c",
+  "scope": {
+    "module_id": "client.dom_renderer",
+    "module_ids": [
+      "client.dom_renderer",
+      "client.terminal_shell"
+    ],
+    "feature_id": "terminal.buffer_render",
+    "entrypoint": "pnpm --dir android run test:feature-registry"
+  },
+  "producer": {
+    "adapter": "appsdk",
+    "identity": "codex-zterm-v2-phase4-dom-terminal-shell-owner-20260815T073626Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "Phase 4 DOM renderer and terminal shell ownership slice: active module client.dom_renderer owns TerminalView, VisibleRow, TerminalPreviewRow, useMirrorFixedZoomPan, cell-render.ts, and theme.ts; active module client.terminal_shell owns TerminalPageStageShell, shell skin, status/quickbar/copy/keyboard-lift shell files. client.renderer_window no longer owns DOM projection files and client.app_shell no longer owns terminal-shell-skin.ts. Mainline source-to-DOM truth is TerminalPage -> StageShell -> TerminalView -> Renderer -> RenderGate. Module/edge/resource/feature/function/wiki/mainline/AppSDK maps, project modules, resource map, v2 test design, architecture docs, audit remediation, render truth decision, and terminal-buffer-truth skill were updated in lockstep; docs:function-wiki regenerated the wiki HTML. Verified test:feature-registry 84/84 in 11 files, tsc --noEmit PASS, test:terminal:frame-assembly 104/104, test:terminal:contracts 826/826 in 55 files, daemon:mirror:close-loop all 9 cases plus replay and strict audit PASS, full pnpm run build PASS (prebuild gates, Gradle unit test, type-check, Vite), appsdk verify android ok:true draft, and git diff --check PASS. Worktree is uncommitted at HEAD 9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c. No ReviewRecord/PASS exists because codex-review MCP remains unavailable; this slice is production_pending_review and v2 overall is not complete.",
+  "created_at": "2026-08-15T07:36:26Z",
+  "expires_at": "2026-11-13T07:36:26Z",
+  "input_hashes": [
+    "sha256:8bda4d7dacf76c1c15644331c51c6a9a3c913f91bbaa92784943293071140ecb",
+    "sha256:2efe29b4293a5c542305c7611da706136e16645f667cbb4813f732ff304b4bc0",
+    "sha256:b1feda9db40f2f6a2494b4cc3cee59b15e1ed18d6ced233ef187f4b645074fa0",
+    "sha256:1a2e95c9290aa81c9d4cc179b65540f3f31ab5a93aa70b1e5270e1a208846234",
+    "sha256:e4a0676d0eeb64aeac14f0ef95af27514c333b60be7eaccf91d0e09f254e6c42",
+    "sha256:d20c73c047dca803d984f91725373715216168264cd917d0c05706ee90f27aac",
+    "sha256:edaff372b22b91955d7f3875db74e7332cdd5322f9348a2f82582e9c375aacad",
+    "sha256:5ef66828ad6309fd80aab98a8c39fa03ebba1965d91dfe80876f72410c0be376",
+    "sha256:a260c156963651ebd89af3515693b86a58f46f2659bebdcb129717256b18d80a",
+    "sha256:4572ce2fbd67f5f4f536de91bcdd33fbd53e8a34e14ff4e8b9e11a8b7d81cefc",
+    "sha256:1cb21317a828f3db6f70a680980266a08b62f63f5582d4d7b4df9ffab4ea4262",
+    "sha256:812d9add51a597343724e027559d0f6bc3cb8fae980913d1d60b9ba3a9fd5a1d",
+    "sha256:ffbe0d4927df5581d98d9dc5765fb4bf48230baf8349e37b5dc0cff8e4073608",
+    "sha256:9ee3f982f09b7fd4f3306a93f3fff2eae3f92c7e4741cbcaa32fbdf983c5cf34"
+  ],
+  "scope_hash": "sha256:8bda4d7dacf76c1c15644331c51c6a9a3c913f91bbaa92784943293071140ecb"
+}

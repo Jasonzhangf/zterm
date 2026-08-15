@@ -21,6 +21,7 @@ type ModuleRegistryEntry = {
 
 type ModuleRegistry = {
   schema_version: number;
+  promotion_status: 'pending_review' | 'promoted';
   modules: ModuleRegistryEntry[];
 };
 
@@ -128,6 +129,15 @@ describe('module registry truth gate', () => {
     }
   });
 
+  it('keeps machine promotion status explicit and aligned with human review', () => {
+    const registry = JSON.parse(read('docs/module-registry.json')) as ModuleRegistry;
+    const moduleReview = read('docs/modules/project-modules.md');
+
+    expect(['pending_review', 'promoted']).toContain(registry.promotion_status);
+    expect(moduleReview).toContain('promotion_status');
+    expect(moduleReview).toContain('pending_review');
+  });
+
   it('keeps module resource references bound to active truth and design resources pending', () => {
     const registry = JSON.parse(read('docs/module-registry.json')) as ModuleRegistry;
     const resourceRegistry = JSON.parse(read('docs/resource-registry.json')) as {
@@ -167,6 +177,20 @@ describe('module registry truth gate', () => {
     expect(testDesign).toMatch(/pending_resources` in `docs\/module-registry\.json`/);
   });
 
+  it('keeps active shared type modules described as active in the human review surface', () => {
+    const registry = JSON.parse(read('docs/module-registry.json')) as ModuleRegistry;
+    const moduleReview = read('docs/modules/project-modules.md');
+
+    for (const moduleId of ['shared.terminal_types', 'shared.connection_types']) {
+      const module = registry.modules.find((candidate) => candidate.module_id === moduleId);
+      expect(module, moduleId).toBeTruthy();
+      expect(module?.status, moduleId).toBe('active');
+      expect(moduleReview).toContain(`\`${moduleId}\``);
+    }
+    expect(moduleReview).toContain('are active modules');
+    expect(moduleReview).not.toContain('status stays `design` until that migration lands');
+  });
+
   it('keeps concrete resources owned by at most one module', () => {
     const registry = JSON.parse(read('docs/module-registry.json')) as ModuleRegistry;
     const ownersByResource = new Map<string, string>();
@@ -188,7 +212,10 @@ describe('module registry truth gate', () => {
       'daemon.runtime_entry',
       'daemon.connection_gateway',
       'daemon.terminal_backend',
+      'daemon.mirror_writer',
       'daemon.mirror_store',
+      'daemon.buffer_publisher',
+      'daemon.channel_mux',
       'daemon.transport_subscriber',
       'daemon.input_queue',
       'daemon.remote_window_stream',
@@ -197,8 +224,15 @@ describe('module registry truth gate', () => {
       'client.daemon_connection',
       'client.session_runtime',
       'client.terminal_channel_mux',
+      'client.wire_ingress',
+      'client.sparse_buffer',
       'client.buffer_store',
+      'client.buffer_frame_assembly',
       'client.renderer_window',
+      'client.dom_renderer',
+      'client.terminal_shell',
+      'client.composition_root',
+      'client.control_center',
       'client.input_runtime',
       'client.session_drawer_preview',
       'client.remote_window_overlay',
@@ -206,6 +240,8 @@ describe('module registry truth gate', () => {
       'shared.resource_contract',
       'shared.terminal_types',
       'shared.connection_types',
+      'shared.plugin_contract',
+      'shared.control_contract',
       'shared.pane_layout',
       'shared.test_contracts',
       'relay.account_directory',
@@ -248,7 +284,6 @@ describe('module registry truth gate', () => {
       join(root, 'src/contexts/session-context-transport-open-runtime.ts'),
       join(root, 'src/contexts/session-context-transport-orchestration-runtime.ts'),
       join(root, 'src/contexts/session-context-transport-runtime.ts'),
-      join(root, 'src/lib/runtime-debug-flush.ts'),
     ]);
 
     for (const filePath of collectSourceFiles('src')) {

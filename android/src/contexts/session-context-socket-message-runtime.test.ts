@@ -6,6 +6,19 @@ import { reduceSessionAction, type SessionManagerState } from './session-context
 import { createSessionBufferState } from '../lib/terminal-buffer';
 import { drainRuntimeDebugEntries } from '../lib/runtime-debug';
 import type { Host, Session, SessionScheduleState, ServerMessage } from '../lib/types';
+import type { ImagePasteWaiterRuntime } from './session-context-transfer-runtime';
+
+function makeImagePasteWaiterMock(overrides?: {
+  resolve?: ImagePasteWaiterRuntime['resolve'];
+  reject?: ImagePasteWaiterRuntime['reject'];
+}): ImagePasteWaiterRuntime {
+  return {
+    wait: vi.fn(async () => undefined) as unknown as ImagePasteWaiterRuntime['wait'],
+    resolve: overrides?.resolve || (vi.fn(() => true) as unknown as ImagePasteWaiterRuntime['resolve']),
+    reject: overrides?.reject || (vi.fn(() => true) as unknown as ImagePasteWaiterRuntime['reject']),
+    dispose: vi.fn() as unknown as ImagePasteWaiterRuntime['dispose'],
+  };
+}
 
 function makeHost(): Host {
   return {
@@ -1119,5 +1132,171 @@ describe('session-context-socket-message-runtime head-first connected refresh', 
     });
 
     expect(order).toEqual(['head', 'schedule-list']);
+  });
+});
+
+describe('session-context-socket-message-runtime image paste result routing', () => {
+  function makeBaseOptions(overrides: {
+    waiter?: ImagePasteWaiterRuntime;
+    onFailure?: ReturnType<typeof vi.fn>;
+    onClosed?: ReturnType<typeof vi.fn>;
+  } = {}) {
+    const onFailure = overrides.onFailure || vi.fn();
+    const onClosed = overrides.onClosed || vi.fn();
+    const waiter = overrides.waiter || makeImagePasteWaiterMock();
+    return {
+      params: {
+        sessionId: 'session-1',
+        host: makeHost(),
+        ws: {} as any,
+        debugScope: 'connect' as const,
+        onConnected: vi.fn(),
+        onFailure,
+        onClosed,
+      },
+      refs: {
+        stateRef: { current: { sessions: [makeSession()], activeSessionId: 'session-1' } },
+        scheduleStatesRef: { current: { 'session-1': makeScheduleState() } },
+        lastHeadRequestAtRef: { current: new Map() },
+        heartbeatStore: createSessionHeartbeatStore(),
+      },
+      settleSessionPullState: vi.fn(),
+      runtimeDebug: vi.fn(),
+      isSessionTransportActive: vi.fn(() => true),
+      shouldAcceptSessionLiveBuffer: vi.fn(() => true),
+      summarizeBufferPayload: vi.fn(() => ({})),
+      applyIncomingBufferSync: vi.fn(),
+      handleBufferHead: vi.fn(),
+      setScheduleStateForSession: vi.fn(),
+      setSessionTitleSync: vi.fn(),
+      fileTransferMessageRuntime: { dispatch: vi.fn() },
+      imagePasteWaiterRuntime: waiter,
+      updateSessionSync: vi.fn(),
+    };
+  }
+
+  it('resolves the pending image paste waiter on image-pasted', () => {
+    const waiter = makeImagePasteWaiterMock({
+      resolve: vi.fn(() => true),
+      reject: vi.fn(),
+    });
+    const onFailure = vi.fn();
+    handleSocketServerMessageRuntime({
+      ...makeBaseOptions({ waiter, onFailure }),
+      msg: {
+        type: 'image-pasted',
+        payload: { name: 'proof.png', mimeType: 'image/png', bytes: 4 },
+      },
+    });
+
+    expect(waiter.resolve).toHaveBeenCalledWith('session-1');
+    expect(onFailure).not.toHaveBeenCalled();
+  });
+
+  it('rejects the pending image paste waiter on paste_image_failed without treating it as transport failure', () => {
+    const waiter = makeImagePasteWaiterMock({
+      resolve: vi.fn(),
+      reject: vi.fn(() => true),
+    });
+    const onFailure = vi.fn();
+    handleSocketServerMessageRuntime({
+      ...makeBaseOptions({ waiter, onFailure }),
+      msg: {
+        type: 'error',
+        payload: {
+          message: 'Failed to paste image: sips failed',
+          code: 'paste_image_failed',
+        },
+      },
+    });
+
+    expect(waiter.reject).toHaveBeenCalledWith('session-1', 'Failed to paste image: sips failed');
+    expect(onFailure).not.toHaveBeenCalled();
+  });
+
+  it('rejects the pending image paste waiter when Herdr reports file transfer unsupported', () => {
+    const waiter = makeImagePasteWaiterMock({
+      resolve: vi.fn(),
+      reject: vi.fn(() => true),
+    });
+    const onFailure = vi.fn();
+    handleSocketServerMessageRuntime({
+      ...makeBaseOptions({ waiter, onFailure }),
+      msg: {
+        type: 'error',
+        payload: {
+          message: 'paste image is not supported by the Herdr single-session terminal surface',
+          code: 'herdr_file_transfer_unsupported',
+        },
+      },
+    });
+
+    expect(waiter.reject).toHaveBeenCalledWith(
+      'session-1',
+      'paste image is not supported by the Herdr single-session terminal surface',
+    );
+    expect(onFailure).not.toHaveBeenCalled();
+  });
+
+  it('keeps generic errors on the transport failure path when no image waiter rejects them', () => {
+    const waiter = makeImagePasteWaiterMock({
+      resolve: vi.fn(),
+      reject: vi.fn(() => false),
+    });
+    const onFailure = vi.fn();
+    handleSocketServerMessageRuntime({
+      ...makeBaseOptions({ waiter, onFailure }),
+      msg: {
+        type: 'error',
+        payload: {
+          message: 'unrelated transport error',
+          code: 'transport_broken',
+        },
+      },
+    });
+
+    expect(waiter.reject).not.toHaveBeenCalled();
+    expect(onFailure).toHaveBeenCalledWith('unrelated transport error', true);
+  });
+
+  it('keeps paste business errors session-level when no image waiter is active', () => {
+    const waiter = makeImagePasteWaiterMock({
+      resolve: vi.fn(),
+      reject: vi.fn(() => false),
+    });
+    const onFailure = vi.fn();
+    const onClosed = vi.fn();
+    handleSocketServerMessageRuntime({
+      ...makeBaseOptions({ waiter, onFailure, onClosed }),
+      msg: {
+        type: 'error',
+        payload: {
+          message: 'Failed to paste image: sips failed',
+          code: 'paste_image_failed',
+        },
+      },
+    });
+
+    expect(waiter.reject).toHaveBeenCalledWith('session-1', 'Failed to paste image: sips failed');
+    expect(onFailure).not.toHaveBeenCalled();
+    expect(onClosed).not.toHaveBeenCalled();
+  });
+
+  it('keeps command-level session errors session-level instead of closing or reconnecting transport', () => {
+    const onFailure = vi.fn();
+    const onClosed = vi.fn();
+    handleSocketServerMessageRuntime({
+      ...makeBaseOptions({ onFailure, onClosed }),
+      msg: {
+        type: 'error',
+        payload: {
+          message: 'buffer-head-request requires a ready mirror',
+          code: 'session_not_ready',
+        },
+      },
+    });
+
+    expect(onFailure).not.toHaveBeenCalled();
+    expect(onClosed).not.toHaveBeenCalled();
   });
 });

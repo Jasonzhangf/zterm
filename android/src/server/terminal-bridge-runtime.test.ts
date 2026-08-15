@@ -66,6 +66,12 @@ function createRuntime(handleMessage: (connection: DaemonTransportConnection, ra
     createTransportConnection: () => connection,
     detachSubscriberTransportOnly,
     refreshAdaptiveWidthLeaseHeartbeat,
+    listMuxChannelSubscriberIds: (target) => Array.from(target.muxChannels?.values() || []),
+    releaseAllMuxChannelSubscribers: (target) => {
+      const subscriberIds = Array.from(target.muxChannels?.values() || []);
+      target.muxChannels?.clear();
+      return subscriberIds;
+    },
     handleMessage,
   });
   return {

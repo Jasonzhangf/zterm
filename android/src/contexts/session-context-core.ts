@@ -25,7 +25,7 @@ import type {
   TerminalVisibleRange,
 } from '../lib/types';
 import type { SessionTargetNetworkSignal } from './session-context-target-network-probe-runtime';
-import type { TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
+import type { TerminalMuxTargetClientMessage, TerminalSessionCatalog } from '@zterm/shared/protocol';
 import type { SessionRenderBufferSnapshot } from '../lib/types';
 import type { SessionBufferStore } from '../lib/session-buffer-store';
 import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
@@ -280,6 +280,10 @@ export interface SessionContextValue {
     sessionId: string,
     message: TerminalMuxTargetClientMessage,
   ) => Promise<string[] | null>;
+  queryTerminalSessionCatalogOnOpenTransport: (
+    sessionId: string,
+    message: TerminalMuxTargetClientMessage,
+  ) => Promise<TerminalSessionCatalog | null>;
   upsertScheduleJob: (sessionId: string, job: ScheduleJobDraft) => void;
   deleteScheduleJob: (sessionId: string, jobId: string) => void;
   toggleScheduleJob: (sessionId: string, jobId: string, enabled: boolean) => void;

@@ -1,8 +1,11 @@
 // @vitest-environment jsdom
 import { cleanup, render } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ComponentProps } from 'react';
 import type { Session, SessionDebugOverlayMetrics } from '../lib/types';
-import { TerminalPage } from './TerminalPage';
+import type { TerminalQuickBarProps } from '../components/terminal/TerminalQuickBar';
+import { TerminalPage as TerminalPageBase } from './TerminalPage';
+import { renderTerminalShellUi } from '../lib/plugin-host/terminal-shell-ui-plugin';
 
 // TerminalPage reads attachment counts from SessionContext (badge/drawer).
 // These page-level tests render TerminalPage directly without the app-level
@@ -62,11 +65,24 @@ vi.mock('../plugins/ImeAnchorPlugin', () => ({
 }));
 
 vi.mock('../components/terminal/TerminalHeader', () => ({ TerminalHeader: () => <div data-testid="terminal-header"/> }));
-vi.mock('../components/terminal/TerminalQuickBar', () => ({ TerminalQuickBar: () => <div data-testid="terminal-quickbar"/> }));
 vi.mock('../components/terminal/TabManagerSheet', () => ({ TabManagerSheet: () => null }));
 vi.mock('../components/terminal/SessionScheduleSheet', () => ({ SessionScheduleSheet: () => null }));
 vi.mock('../components/terminal/FileTransferSheet', () => ({ FileTransferSheet: () => null }));
 vi.mock('../components/terminal/RemoteScreenshotSheet', () => ({ RemoteScreenshotSheet: () => null }));
+
+const renderQuickBar = (_props: TerminalQuickBarProps) => (
+  <div data-testid="terminal-quickbar" />
+);
+
+function TerminalPage(props: ComponentProps<typeof TerminalPageBase>) {
+  return (
+    <TerminalPageBase
+      {...props}
+      renderQuickBar={props.renderQuickBar || renderQuickBar}
+      renderTerminalShell={props.renderTerminalShell || renderTerminalShellUi}
+    />
+  );
+}
 
 // Track TerminalView renders to verify decoupling
 const terminalViewCalls: {sessionId: string; active: boolean; live: boolean}[] = [];

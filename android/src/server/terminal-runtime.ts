@@ -1,8 +1,4 @@
 import { WebSocket } from 'ws';
-import { buildTerminalMuxServerChannelMessage } from '@zterm/shared/protocol';
-import type {
-  BridgeServerMessage as ServerMessage,
-} from '@zterm/shared/protocol';
 import { detachMirrorSubscriber } from './mirror-lifecycle';
 import { createTerminalMirrorRuntime, type TerminalMirrorRuntimeDeps } from './terminal-mirror-runtime';
 import type {
@@ -10,7 +6,6 @@ import type {
   SessionMirror,
   TerminalAttachPayload,
   TerminalTransportConnection,
-  TerminalSessionTransport,
 } from './terminal-runtime-types';
 
 // Single deps truth: mirror runtime owns the field list; this runtime only adds
@@ -32,10 +27,6 @@ export interface TerminalRuntime {
   createMirror: (sessionName: string, backend?: 'tmux' | 'herdr') => SessionMirror;
   getSubscriberMirror: (subscriber: TerminalTransportSubscriber) => SessionMirror | null;
   createTransportSubscriber: (connection: TerminalTransportConnection) => TerminalTransportSubscriber;
-  createMuxChannelSubscriber: (
-    connection: TerminalTransportConnection,
-    channelId: string,
-  ) => TerminalTransportSubscriber;
   bindConnectionToSubscriber: (
     connection: TerminalTransportConnection,
     subscriber: TerminalTransportSubscriber,
@@ -106,93 +97,6 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     return subscriber;
   }
 
-  function createMuxChannelTransport(
-    connection: TerminalTransportConnection,
-    channelId: string,
-  ): TerminalSessionTransport {
-    return {
-      kind: connection.transport.kind,
-      requestOrigin: connection.requestOrigin,
-      connectedSent: false,
-      get readyState() {
-        return connection.transport.readyState;
-      },
-      get bufferedAmount() {
-        return Math.max(0, Math.floor(connection.transport.bufferedAmount || 0));
-      },
-      sendText(text: string) {
-        let message: ServerMessage;
-        try {
-          message = JSON.parse(text) as ServerMessage;
-        } catch {
-          deps.sendText(connection.transport, JSON.stringify({
-            type: 'mux-error',
-            payload: {
-              code: 'mux_protocol_invalid',
-              message: 'mux channel send requires a JSON server message',
-              channelId,
-            },
-          }));
-          return;
-        }
-        deps.sendText(
-          connection.transport,
-          JSON.stringify(buildTerminalMuxServerChannelMessage(channelId, message)),
-        );
-      },
-      close() {
-        deps.sendText(connection.transport, JSON.stringify({
-          type: 'mux-channel-closed',
-          payload: {
-            channelId,
-            reason: 'server closed channel transport',
-          },
-        }));
-      },
-    };
-  }
-
-  function createMuxChannelSubscriber(
-    connection: TerminalTransportConnection,
-    channelId: string,
-  ): TerminalTransportSubscriber {
-    const normalizedChannelId = channelId.trim();
-    const subscriberId = `${connection.transportId}:${normalizedChannelId}`;
-    const subscriber: TerminalTransportSubscriber = {
-      id: subscriberId,
-      transportId: connection.transportId,
-      transport: createMuxChannelTransport(connection, normalizedChannelId),
-      closeTransport: (reason: string) => {
-        deps.sendText(connection.transport, JSON.stringify({
-          type: 'mux-channel-closed',
-          payload: {
-            channelId: normalizedChannelId,
-            reason,
-          },
-        }));
-      },
-      connectedSent: false,
-      muxChannelId: normalizedChannelId,
-      muxParentTransportId: connection.transportId,
-      sessionName: deps.defaultSessionName,
-      backend: 'tmux',
-      mirrorKey: null,
-      bodySubscribed: true,
-      adaptiveWidthCols: null,
-      adaptiveWidthHeartbeatAt: 0,
-      pendingPasteImage: null,
-      pendingAttachFile: null,
-    };
-    sessions.set(subscriber.id, subscriber);
-    connection.role = 'session';
-    connection.boundSubscriberId = null;
-    if (!connection.muxChannels) {
-      connection.muxChannels = new Map();
-    }
-    connection.muxChannels.set(normalizedChannelId, subscriber.id);
-    return subscriber;
-  }
-
   function getTransportSubscriber(subscriberId: string) {
     return sessions.get(subscriberId) || null;
   }
@@ -254,11 +158,10 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
       mirrorRuntime.releaseAdaptiveWidthLease(subscriber, `detach:${reason}`);
       const detachResult = detachMirrorSubscriber(mirror.subscribers, subscriber.id);
       mirror.subscribers = detachResult.nextSubscribers;
-      // R3: this transport is going away, so any pending input items for its
-      // mirror must NOT survive into a future attach. We deliberately drop
-      // the in-queue items here; in-flight tmux spawn (if any) resolves
-      // naturally because shouldWrite() will return false on the next check.
-      deps.disposeLiveMirrorInputBatch(mirror.sessionName, `detach:${reason}`, mirror.backend);
+      // The input batch is mirror-scoped and may contain queued writes from
+      // parallel subscribers. This transport going away must not evict their
+      // items; stale items are filtered by their shouldWrite() guard during
+      // flush, and mirror destroy is the owner that evicts the whole batch.
       // R10: do not force a 0-delay capture after detach. If peers are still
       // attached, their own live sync loop will catch the new mirror state.
       // Forcing immediate capture here caused tmux to thrash on every
@@ -281,8 +184,9 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
       mirrorRuntime.releaseAdaptiveWidthLease(subscriber, `close:${reason}`);
       const detachResult = detachMirrorSubscriber(mirror.subscribers, subscriber.id);
       mirror.subscribers = detachResult.nextSubscribers;
-      // R3: drop the input queue for this mirror before the session is gone.
-      deps.disposeLiveMirrorInputBatch(mirror.sessionName, `close:${reason}`, mirror.backend);
+      // See detachSubscriberTransportOnly: mirror-scoped input must survive a
+      // single subscriber close while peers remain. destroyMirror owns the
+      // actual batch eviction when the mirror truth goes away.
       // R10: do not force a 0-delay capture after close. If peers are still
       // attached, their own live sync loop will catch the new mirror state.
       if (mirror.subscribers.size > 0) {
@@ -329,7 +233,6 @@ export function createTerminalRuntime(deps: TerminalRuntimeDeps): TerminalRuntim
     createMirror: mirrorRuntime.createMirror,
     getSubscriberMirror,
     createTransportSubscriber,
-    createMuxChannelSubscriber,
     bindConnectionToSubscriber,
     detachSubscriberTransportOnly,
     closeTransportSubscriber,

@@ -2,14 +2,21 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ComponentProps } from 'react';
 import type { Session } from '../lib/types';
+import type { TerminalQuickBarProps } from '../components/terminal/TerminalQuickBar';
 import { resolveSessionGroupBoundaryProjection } from '../lib/session-group-viewport';
 import {
-  TerminalPage,
+  TerminalPage as TerminalPageBase,
   resolveTerminalSessionGroupSlotReplacement,
   resolveTerminalSessionGroupViewportSlots,
   resolveTerminalSessionGroupViewportProjection,
 } from './TerminalPage';
+import { renderTerminalShellUi } from '../lib/plugin-host/terminal-shell-ui-plugin';
+import {
+  TerminalSessionDrawer,
+  type TerminalSessionDrawerProps,
+} from '../components/terminal/TerminalSessionDrawer';
 
 // TerminalPage reads attachment counts from SessionContext (badge/drawer).
 // These page-level tests render TerminalPage directly without the app-level
@@ -63,15 +70,26 @@ vi.mock('../components/terminal/RemoteScreenshotSheet', () => ({
   RemoteScreenshotSheet: () => null,
 }));
 
-vi.mock('../components/terminal/TerminalQuickBar', () => ({
-  TerminalQuickBar: () => <div data-testid="terminal-quickbar" />,
-}));
+const renderQuickBar = (_props: TerminalQuickBarProps) => (
+  <div data-testid="terminal-quickbar" />
+);
 
 vi.mock('../components/TerminalView', () => ({
   TerminalView: ({ sessionId }: { sessionId: string }) => (
     <div data-testid={`terminal-view-${sessionId}`}>terminal:{sessionId}</div>
   ),
 }));
+
+function TerminalPage(props: ComponentProps<typeof TerminalPageBase>) {
+  return (
+    <TerminalPageBase
+      {...props}
+      renderQuickBar={renderQuickBar}
+      renderTerminalShell={renderTerminalShellUi}
+      renderSessionDrawer={(drawerProps) => <TerminalSessionDrawer {...drawerProps} />}
+    />
+  );
+}
 
 function makeSession(id: string): Session {
   return {
@@ -257,6 +275,74 @@ describe('TerminalPage portrait session drawer', () => {
     expect(onSwitchSession).toHaveBeenCalledWith(targetSessionId);
   });
 
+  it('renders only the plugin-provided session drawer slot render callback', () => {
+    const session = makeSession('s1');
+    session.daemonHostId = 'daemon-a';
+    const renderDrawer = vi.fn((props: TerminalSessionDrawerProps) => (
+      <div
+        data-testid="plugin-session-drawer-slot"
+        data-open={props.open ? 'true' : 'false'}
+      />
+    ));
+
+    render(
+      <TerminalPageBase
+        sessions={[session]}
+        sessionGroups={[]}
+        activeSession={session}
+        renderTerminalShell={renderTerminalShellUi}
+        renderSessionDrawer={renderDrawer}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    expect(screen.queryByTestId('terminal-session-drawer')).toBeNull();
+    expect(renderDrawer).toHaveBeenCalled();
+    expect(screen.getByTestId('plugin-session-drawer-slot')).toBeTruthy();
+  });
+
+  it('keeps the portrait top controls and terminal stage on separate rows', () => {
+    const session = makeSession('s1');
+    session.daemonHostId = 'daemon-a';
+    render(
+      <TerminalPage
+        sessions={[session]}
+        sessionGroups={[]}
+        activeSession={session}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onOpenSettings={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+      />,
+    );
+
+    const status = screen.getByTestId('terminal-connection-status-strip');
+    const sessionsButton = screen.getByTestId('terminal-portrait-session-drawer-button');
+    const stage = screen.getByTestId('terminal-stage-shell');
+    expect(Number.parseInt(status.style.top, 10)).toBeGreaterThan(Number.parseInt(sessionsButton.style.top, 10));
+    expect(Number.parseInt(stage.style.top, 10)).toBeGreaterThan(Number.parseInt(status.style.top, 10) + 34);
+  });
+
   it('keeps a visible portrait entry point and a visible drawer surface', () => {
     const session = makeSession('s1');
     render(
@@ -396,7 +482,7 @@ describe('TerminalPage portrait session drawer', () => {
     );
 
     fireEvent.click(screen.getByTestId('terminal-connection-status-session'));
-    fireEvent.change(screen.getByRole('textbox', { name: '新的 tmux session 名称' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: '新的 session 名称' }), {
       target: { value: 'renamed-session' },
     });
     fireEvent.click(screen.getByRole('button', { name: '确认重命名' }));
@@ -430,13 +516,15 @@ describe('TerminalPage portrait session drawer', () => {
     );
 
     fireEvent.click(screen.getByTestId('terminal-connection-status-session'));
-    fireEvent.change(screen.getByRole('textbox', { name: '新的 tmux session 名称' }), {
+    fireEvent.change(screen.getByRole('textbox', { name: '新的 session 名称' }), {
       target: { value: 'renamed-session' },
     });
     fireEvent.click(screen.getByRole('button', { name: '确认重命名' }));
 
-    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('rename failed'));
+    await waitFor(() => expect(screen.getByTestId('rename-dialog-error').textContent).toContain('rename failed'));
     expect(screen.getByTestId('terminal-connection-status-session').textContent).toBe('tmux-s1');
+    expect(screen.getByTestId('rename-dialog-input')).toBeTruthy();
+    expect(alertSpy).not.toHaveBeenCalled();
   });
 
   it('shows standard reconnect progress in the portrait status strip without an error overlay', () => {

@@ -40,6 +40,8 @@ export {
 } from './workspace/terminal-layout-profile';
 
 export * from './terminal/renderer/index';
+export * from './terminal/node-contract';
+export * from './terminal/debug-contract';
 export * from './terminal/input-chunking';
 export * from './interaction/operation';
 export * from './interaction/event';

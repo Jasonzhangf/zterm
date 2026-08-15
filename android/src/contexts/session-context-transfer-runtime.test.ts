@@ -2,6 +2,7 @@
 
 import { describe, expect, it, vi } from 'vitest';
 import {
+  createImagePasteWaiterRuntime,
   ensureSessionReadyForPasteRuntime,
   sendFileAttachRuntime,
   sendImagePasteRuntime,
@@ -36,10 +37,17 @@ describe('session-context-transfer-runtime', () => {
   it('chunks image paste binary payloads so RTC relay does not send one oversized datachannel frame', async () => {
     const ws = { readyState: WebSocket.OPEN } as any;
     const sendSocketPayload = vi.fn();
+    const imagePasteWaiterRuntime = {
+      wait: vi.fn(async () => undefined),
+      resolve: vi.fn(),
+      reject: vi.fn(),
+      dispose: vi.fn(),
+    } as any;
 
     await sendImagePasteRuntime({
       sessionId: 'session-1',
       file: makeFile('proof.png', 70000),
+      imagePasteWaiterRuntime,
       ensureSessionReadyForPaste: vi.fn(async () => ws),
       sendSocketPayload,
     });
@@ -65,6 +73,12 @@ describe('session-context-transfer-runtime', () => {
   it('serializes remote-window paste target without terminal Ctrl+V sequence', async () => {
     const ws = { readyState: WebSocket.OPEN } as any;
     const sendSocketPayload = vi.fn();
+    const imagePasteWaiterRuntime = {
+      wait: vi.fn(async () => undefined),
+      resolve: vi.fn(),
+      reject: vi.fn(),
+      dispose: vi.fn(),
+    } as any;
 
     await sendImagePasteRuntime({
       sessionId: 'session-1',
@@ -74,6 +88,7 @@ describe('session-context-transfer-runtime', () => {
         streamId: 'stream-1',
         targetId: 'target-1',
       },
+      imagePasteWaiterRuntime,
       ensureSessionReadyForPaste: vi.fn(async () => ws),
       sendSocketPayload,
     });
@@ -93,6 +108,84 @@ describe('session-context-transfer-runtime', () => {
       },
     });
     expect(startFrame.payload.pasteSequence).toBeUndefined();
+  });
+
+  it('rejects when the daemon reports a paste failure instead of resolving after wire send', async () => {
+    const ws = { readyState: WebSocket.OPEN } as any;
+    const sendSocketPayload = vi.fn();
+    let rejectImagePaste!: (error: Error) => void;
+    const imagePasteResult = new Promise<void>((_resolve, reject) => {
+      rejectImagePaste = reject;
+    });
+    const imagePasteWaiterRuntime = {
+      wait: vi.fn(() => imagePasteResult),
+      resolve: vi.fn(),
+      reject: vi.fn(),
+      dispose: vi.fn(),
+    } as any;
+
+    const pending = sendImagePasteRuntime({
+      sessionId: 'session-1',
+      file: makeFile('proof.png', 4),
+      imagePasteWaiterRuntime,
+      ensureSessionReadyForPaste: vi.fn(async () => ws),
+      sendSocketPayload,
+    });
+    rejectImagePaste(new Error('Failed to paste image: sips failed'));
+
+    await expect(pending).rejects.toThrow('Failed to paste image: sips failed');
+  });
+
+  it('rejects when the Herdr backend explicitly rejects file transfer', async () => {
+    const ws = { readyState: WebSocket.OPEN } as any;
+    const sendSocketPayload = vi.fn();
+    let rejectImagePaste!: (error: Error) => void;
+    const imagePasteResult = new Promise<void>((_resolve, reject) => {
+      rejectImagePaste = reject;
+    });
+    const imagePasteWaiterRuntime = {
+      wait: vi.fn(() => imagePasteResult),
+      resolve: vi.fn(),
+      reject: vi.fn(),
+      dispose: vi.fn(),
+    } as any;
+
+    const pending = sendImagePasteRuntime({
+      sessionId: 'session-1',
+      file: makeFile('proof.png', 4),
+      imagePasteWaiterRuntime,
+      ensureSessionReadyForPaste: vi.fn(async () => ws),
+      sendSocketPayload,
+    });
+    rejectImagePaste(new Error('paste image is not supported by the Herdr single-session terminal surface'));
+
+    await expect(pending).rejects.toThrow('Herdr single-session');
+  });
+
+  it('rejects with an explicit timeout when the daemon never returns image-pasted', async () => {
+    const ws = { readyState: WebSocket.OPEN } as any;
+    const sendSocketPayload = vi.fn();
+    const imagePasteWaiterRuntime = createImagePasteWaiterRuntime();
+
+    await expect(sendImagePasteRuntime({
+      sessionId: 'session-1',
+      file: makeFile('proof.png', 4),
+      imagePasteWaiterRuntime,
+      imagePasteResultTimeoutMs: 5,
+      ensureSessionReadyForPaste: vi.fn(async () => ws),
+      sendSocketPayload,
+    })).rejects.toThrow('image paste result timeout');
+  });
+
+  it('waiter store resolves and rejects only the currently pending image paste', async () => {
+    const imagePasteWaiterRuntime = createImagePasteWaiterRuntime();
+    const pending = imagePasteWaiterRuntime.wait('session-1', 1000);
+    setTimeout(() => imagePasteWaiterRuntime.resolve('session-1'), 0);
+    await pending;
+
+    const rejected = imagePasteWaiterRuntime.wait('session-1', 1000);
+    setTimeout(() => imagePasteWaiterRuntime.reject('session-1', 'daemon rejected'), 0);
+    await expect(rejected).rejects.toThrow('daemon rejected');
   });
 
   it('chunks file attach binary payloads through the same transfer path', async () => {

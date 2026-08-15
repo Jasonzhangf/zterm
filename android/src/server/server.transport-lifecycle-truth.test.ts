@@ -10,6 +10,10 @@ function readMessageRuntimeSource() {
   return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-message-runtime.ts'), 'utf8');
 }
 
+function readDaemonControlGatewayRuntimeSource() {
+  return readFileSync(join(process.cwd(), 'src', 'server', 'daemon-control-gateway-runtime.ts'), 'utf8');
+}
+
 function readMessageControlRuntimeSource() {
   return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-message-control-runtime.ts'), 'utf8');
 }
@@ -48,14 +52,17 @@ describe('server transport/session lifecycle truth gates', () => {
   it('keeps control transport separate from session transport attach flow', () => {
     const serverSource = readServerSource();
     const messageRuntimeSource = readMessageRuntimeSource();
+    const controlGatewaySource = readDaemonControlGatewayRuntimeSource();
     const controlRuntimeSource = readMessageControlRuntimeSource();
     const attachTokenRuntimeSource = readAttachTokenRuntimeSource();
     expect(serverSource).toContain('createTerminalMessageRuntime');
     expect(serverSource).toContain('createTerminalAttachTokenRuntime');
     expect(messageRuntimeSource).toContain("case 'session-open'");
     expect(messageRuntimeSource).not.toContain('takeSessionTransportTicket');
-    expect(messageRuntimeSource).toContain('handleSessionOpenMessageRuntime');
-    expect(messageRuntimeSource).toContain('handleSessionTransportConnectRuntime');
+    expect(messageRuntimeSource).toContain('controlGateway.handleSessionOpen');
+    expect(messageRuntimeSource).toContain('controlGateway.handleSessionTransportConnect');
+    expect(controlGatewaySource).toContain('handleSessionOpenMessageRuntime');
+    expect(controlGatewaySource).toContain('handleSessionTransportConnectRuntime');
     expect(controlRuntimeSource).toContain("type: 'session-ticket'");
     expect(attachTokenRuntimeSource).toContain('issueSessionTransportToken()');
     expect(attachTokenRuntimeSource).toContain('function consumeSessionTransportToken(token: string)');
@@ -108,10 +115,10 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(errorBlock).toContain("detachConnectionSubscribers(connection, `websocket error: ${error.message}`)");
     expect(errorBlock).not.toContain("closeTransportSubscriber(session, `websocket error: ${error.message}`, false)");
     expect(detachBlock).toContain('connection.boundSubscriberId');
-    expect(detachBlock).toContain('connection.muxChannels?.values()');
+    expect(detachBlock).toContain('deps.listMuxChannelSubscriberIds(connection)');
     expect(detachBlock).toContain('if (!subscriber)');
     expect(detachBlock).toContain('deps.detachSubscriberTransportOnly(subscriber, reason, connection.transportId)');
-    expect(detachBlock).toContain('connection.muxChannels?.clear()');
+    expect(detachBlock).toContain('deps.releaseAllMuxChannelSubscribers(connection)');
   });
 
   it('detaches bound rtc transports instead of closing logical sessions on rtc close/error', () => {
@@ -122,6 +129,26 @@ describe('server transport/session lifecycle truth gates', () => {
     expect(rtcCloseBlock).not.toContain('closeTransportSubscriber(session, reason, false)');
     expect(rtcErrorBlock).toContain('detachConnectionSubscribers(connection, `rtc error: ${message}`)');
     expect(rtcErrorBlock).not.toContain('closeTransportSubscriber(session, `rtc error: ${message}`, false)');
+  });
+
+  it('keeps daemon mux channel registry mutation in the channel mux owner', () => {
+    const channelMuxSource = readFileSync(join(process.cwd(), 'src', 'server', 'terminal-channel-mux-runtime.ts'), 'utf8');
+    const bridgeSource = readBridgeRuntimeSource();
+    const daemonRuntimeSource = readDaemonRuntimeSource();
+    const muxChannelRuntimeSource = readFileSync(join(process.cwd(), 'src', 'server', 'terminal-mux-channel-runtime.ts'), 'utf8');
+
+    expect(channelMuxSource).toContain('function ensureMuxChannels');
+    expect(channelMuxSource).toContain('ensureMuxChannels(connection).set(normalizedChannelId, subscriber.id)');
+    expect(channelMuxSource).toContain('function releaseAllMuxChannelSubscribers');
+    expect(bridgeSource).toContain('deps.listMuxChannelSubscriberIds(connection)');
+    expect(bridgeSource).toContain('deps.releaseAllMuxChannelSubscribers(connection)');
+    expect(bridgeSource).not.toContain('connection.muxChannels?.clear()');
+    expect(daemonRuntimeSource).toContain('deps.listMuxChannelSubscriberIds(connection)');
+    expect(daemonRuntimeSource).toContain('deps.releaseAllMuxChannelSubscribers(connection)');
+    expect(daemonRuntimeSource).not.toContain('connection.muxChannels?.clear()');
+    expect(muxChannelRuntimeSource).not.toContain('connection.muxChannels = new Map()');
+    expect(muxChannelRuntimeSource).not.toContain('connection.muxChannels?.delete');
+    expect(muxChannelRuntimeSource).not.toContain('connection.muxChannels.delete');
   });
 
   it('detaches stale bound daemon transports without destroying mirror or tmux session truth', () => {
@@ -259,10 +286,10 @@ describe('server transport/session lifecycle truth gates', () => {
   it('never falls back to raw terminal input when image-upload binary arrives without pending paste state', () => {
     const serverSource = readServerSource();
     const messageRuntimeSource = readMessageRuntimeSource();
-    const binaryBlock = extractBlock(messageRuntimeSource, 'deps.terminalFileTransferRuntime.handleBinaryPayload(session, binaryBuffer)', 180);
+    const binaryBlock = extractBlock(messageRuntimeSource, 'deps.fileTransferMessageRuntime.handleBinaryPayload(session, binaryBuffer)', 180);
 
     expect(serverSource).toContain('createTerminalFileTransferRuntime');
-    expect(binaryBlock).toContain('deps.terminalFileTransferRuntime.handleBinaryPayload(session, binaryBuffer)');
+    expect(binaryBlock).toContain('deps.fileTransferMessageRuntime.handleBinaryPayload(session, binaryBuffer)');
   });
 
   it('uses dedicated debug runtime local-time log helpers instead of raw UTC toISOString timestamps', () => {

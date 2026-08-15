@@ -1,0 +1,46 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "EVID-20260815-ZARCHV2-P5-PROD-ATTACHMENT-MESSAGE-DELIVERY-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-phase5-production",
+  "kind": "gate",
+  "source_commit": "9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c",
+  "scope": {
+    "module_id": "daemon.attachment_delivery",
+    "feature_id": "daemon.attachment_delivery",
+    "entrypoint": "pnpm --dir android run test:attachment-message-delivery"
+  },
+  "producer": {
+    "adapter": "appsdk",
+    "identity": "codex-zterm-v2-phase5-attachment-message-delivery-20260815T175953Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "daemon.attachment_delivery now owns pending/history/asset/receipt transport-message projection in src/server/terminal-attachment-message-runtime.ts; terminal-message-runtime.ts routes only those four types and retains no attachment delivery business state. Module/resource/edge/feature/function/wiki/mainline/AppSDK maps, test design, plan, design, prebuild, and CI were updated in lockstep. Verified test:attachment-message-delivery 49/49, test:feature-registry 84/84 in 11 files, type-check and tsc PASS, docs:function-wiki regenerated, full pnpm run build PASS including prebuild gates, daemon:mirror:close-loop all 9 cases plus replay and strict audit PASS, appsdk verify android ok:true draft, and git diff --check PASS. No ReviewRecord/PASS exists because DSH/codex-review remains unavailable; this slice is production_pending_review and the architecture-v2 goal is not complete.",
+  "created_at": "2026-08-15T17:59:53Z",
+  "expires_at": "2026-11-15T17:59:53Z",
+  "input_hashes": [
+    "sha256:4ac98ce0e78c4f904fb03f5730c15843ee1a44e9127b2abbf9cd8ce86cfc56a9",
+    "sha256:79bd9cf7c2bf7668a2e70635cc75dedee02640a56e0af0edc91a0bc5ecd0e9d7",
+    "sha256:ed3c7f2c099ad2f65dc09e71948cdf10095f8103275454ede596ce238d4cc0f0",
+    "sha256:04b853ac0f18131875996e9b03f6891cd77e467cd3102df473abd63c7dcb4763",
+    "sha256:64f76435c8bdff21ee9a7b032fdb2e8424e72e8a7f99f3a45549e70b20bd102c",
+    "sha256:29e6b3678a0c8528d267fcde12298aa126cafc18b94164a4c7b07745929e1d25",
+    "sha256:f69e68a2aa46392ea26d1ddc72ddf4b9faa7b3749bbd47bf6956726faa1bcb7b",
+    "sha256:78e685dfcc4c4616ee2f7ebd89b4695410cb0c60c8082f9ee6a13ff5148f8921",
+    "sha256:a664b2903b73f7cf79e2e67d7b05382b616e7391ddffe97b611c48c8cd3166c4",
+    "sha256:acdc54421779caab1273c1085104dd4fad413f6f7259592ad5b10ddae9d7f15c",
+    "sha256:8e9ae50637785ab3322239964a21b1118c4330e73190629c83881ca4356f2ec7",
+    "sha256:dc2d8c45fd9973a8b9bca240a71b922fdbca717d75938b588cb8c12f87ed3ffb",
+    "sha256:1bfc8e9e7c4ed4bcdd88c7f0adb0a3a96aed17b74d89d9693596d6dcd014cebe",
+    "sha256:f43037a8a0b6c72b34ea53069dd5aac8472a3376955a7df283f2e3d43faf0555",
+    "sha256:901fe5f7e56e78853916ed8e10041236cf1d410eb27b36341a0c2a4d5482b798",
+    "sha256:66ca6b63575c5b9d88c99114d07c4a351213fde9ac61d97dd3aafbf0779d3f46",
+    "sha256:5264665860ac500fb778767fe114b13d655bdccca58a1ecfce30b059d2629cb3",
+    "sha256:f5b5d58a12cb699b1b18d3192a3a073c6d38542e04795ff4d1bd78f75675747e",
+    "sha256:a1389bfcc35784b3ab7c726adbb55d85c89fdd38bb4166a9d96e679edd2c1a31",
+    "sha256:866b07fcf63c3677fa745bf21468bf944ea3898108bdaa2cbed9d05431f28e6c",
+    "sha256:b387eef3eb89ecaacc35dba51473587ad82982a5619b5a3c2d063bf73d165d29"
+  ],
+  "scope_hash": "sha256:4ac98ce0e78c4f904fb03f5730c15843ee1a44e9127b2abbf9cd8ce86cfc56a9"
+}

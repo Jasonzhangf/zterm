@@ -1,0 +1,42 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "EVID-20260815-ZARCHV2-P5-PROD-DAEMON-CONTROL-CENTER-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-phase5-production",
+  "kind": "gate",
+  "source_commit": "9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c",
+  "scope": {
+    "module_id": "daemon.control_gateway",
+    "feature_id": "daemon.control_center",
+    "entrypoint": "pnpm --dir android run daemon:mirror:close-loop"
+  },
+  "producer": {
+    "adapter": "appsdk",
+    "identity": "codex-zterm-v2-phase5-daemon-control-center-20260815T111200Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "Production daemon.control_gateway and daemon.control_center now route schedule and tmux control through a typed DaemonControlCenter with unique command owners, capability gate, deadline, idempotency, correlation/subject validation, and bounded audit. daemon:mirror:close-loop passed all 9 lab cases plus replay and strict audit; test:daemon-control-center 10/10, test:feature-registry 84/84, terminal regression core 827/827 plus 98/98 user flows and relay smoke, tsc --noEmit PASS, full pnpm run build PASS, appsdk verify ok:true, git diff --check PASS. Phase 5 remains production_pending_review because codex-review MCP review/promotion is not recorded.",
+  "created_at": "2026-08-15T11:12:00Z",
+  "expires_at": "2026-11-15T11:12:00Z",
+  "input_hashes": [
+    "sha256:9177be28899b7e0bbb472dbc7b1f0d73889e7eea6dda6dbec66a53b29f5c4ce5",
+    "sha256:014763b9691f36566657beedfae28919915093436676e425fbf7640bebf8ba42",
+    "sha256:b370caec690314c372a754057f097bba5f36ac62fe6677df3af0fe20b5c374fd",
+    "sha256:c8beae128e976e4534c8c842fae358cd1eacaa68b80b4e9011d11a3a15d51122",
+    "sha256:be32d61b5d5e7f741d4d5c193f9ecf3551eb6a01faab8560b27c96f06e5d60ba",
+    "sha256:c8e8837f2cda73b62ae769904690809672212d2ca9ce5a9a727eb7c406737767",
+    "sha256:216501845523c6dfc9fc6b9123c7ec66eab584bfb750638bcf38f4f2abe196a9",
+    "sha256:cb005fa32a75ad62b8aaa4629777e7bc028327dff4ed9461c32e6d8c8fc24a33",
+    "sha256:8472ef52ea06d7c474b411c5018bbe16cefe26bbe020680b2e1ad0ad674d4786",
+    "sha256:8cceb7f5fee9c641dd995065f7830dff1cdc967a7ec2f673e86f0eabbb97e32a",
+    "sha256:22ae6e0ae1b597b0852abded1f359780255cab85001273be6806eaeed0996021",
+    "sha256:1fd9df2b555836b96de56a86a8da68a6edad660cd0ef6e071ed12c194f3a06ae",
+    "sha256:5e22d37e24d5410d4548770ed88a5114bc9858c99affdb7be3d33e4892e08fcb",
+    "sha256:f47e07c2d434b910369b3b5b953400db29dcc0019150efc952c5a1bc5a675b06",
+    "sha256:9687f703e762abb141bab26b22b259f0b3e6e5623126a40e034e43aecab95588",
+    "sha256:15583f70f850ed472dedd07fa9ddd65f1f88b91b13d890c39c7225ef562a700d",
+    "sha256:8add0738ec243627af53a94494ccb16ed4369b0f18105e1b0e02c783e9e80af7"
+  ],
+  "scope_hash": "sha256:3737aa537f38f05995aea93874e1bb6ae1d5b28547503b7fcc9a7a93f036a71b"
+}

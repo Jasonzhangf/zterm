@@ -6,10 +6,10 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import {
   NETWORK_BANNER_GRACE_MS,
-  TerminalNetworkBanner,
   resolveConnectionIssueActionable,
   resolveConnectionIssueActionableKey,
 } from './TerminalPage';
+import { TerminalNetworkBanner } from './terminal-page-shell-ui';
 
 // TerminalPage reads attachment counts from SessionContext (badge/drawer).
 // These page-level tests render TerminalPage directly without the app-level

@@ -1,0 +1,33 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "EVID-20260815-ZARCHV2-P5-PROD-INPUT-QUEUE-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-phase5-production",
+  "kind": "gate",
+  "source_commit": "9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c",
+  "scope": {
+    "module_id": "zterm-runtime-v2",
+    "feature_id": "daemon_input_queue",
+    "entrypoint": "pnpm --dir android run daemon:mirror:close-loop"
+  },
+  "producer": {
+    "adapter": "appsdk",
+    "identity": "codex-zterm-v2-phase5-input-queue-20260815T060500Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "Production daemon.input_queue wiring now uses a late-bound forwarding proxy in server.ts. daemon:mirror:close-loop passed all 9 lab cases plus replay and strict audit; targeted server suite passed 121/121 in 8 files, test:feature-registry 83/83, tsc --noEmit PASS, git diff --check PASS, and appsdk verify ok:true. Phase 5 remains production_pending_review because review/promotion is not recorded.",
+  "created_at": "2026-08-15T06:05:00Z",
+  "expires_at": "2026-11-15T06:05:00Z",
+  "input_hashes": [
+    "sha256:c2f7b4da42e7365480ce0947f66d14cedaf9bc646ee045cb8bbf5d348a88f481",
+    "sha256:b33d9aa48a16e76fbe80e779360d0ea8cc2f26c0429c726849772e5edcfaa46b",
+    "sha256:7b309217dc3da0787792e6f94a70d971cdc0534b3745eca93b0f418ab9984040",
+    "sha256:62e1e064e5e7efbb685db5665e7bc027e0f1b587cc6a23a45a7186c8d6c9f5b1",
+    "sha256:d93f5cf7e7141807f3f2f4c7afb4086cec1637f3f549d6f7b73bdbf6d1d68768",
+    "sha256:a832979d6f06cb04d949b8c5014bb759ecda2faf126f809aba62b9f49510cd70",
+    "sha256:df0d3a6ecd206169db5c80edf725d571dcdfcde6ec7e72623036379115ec4022",
+    "sha256:00d8d25c33cdcd103940b1622b8c9e6f25f1b43291348f86b4004170e329e52a"
+  ],
+  "scope_hash": "sha256:e155d0d609ce71e64b8b10869685f2336fdc762ecfabcdba119e759d1998a8d9"
+}

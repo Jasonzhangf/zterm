@@ -43,7 +43,7 @@
   },
   "mainline_call_ids": [
     "android_mainline:App->TerminalPage",
-    "daemon_mainline:Server->Debug",
+    "daemon_mainline:Server->DaemonDebugHub",
     "cli_mainline:DevCLI->Shell"
   ],
   "verification_gates": [

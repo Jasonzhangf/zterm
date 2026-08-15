@@ -22,7 +22,8 @@ Owner:
 - `src/contexts/session-context-transport-open-runtime.ts`
 - `src/contexts/session-context-activity-runtime.ts`
 - `src/lib/tmux-sessions.ts` for target-scoped tmux management control transports
-- `src/lib/session-transport-runtime.ts` for daemon-target transport and channel runtime truth
+- `src/lib/session-transport-runtime.ts` for daemon-target transport runtime truth
+- `src/lib/terminal-channel-mux-runtime.ts` for terminal channel mux truth (`TerminalChannelMuxStore`)
 - `packages/shared/src/connection/protocol.ts` for mux frame contracts
 - `src/server/terminal-daemon-runtime.ts` for daemon-side physical transport liveness
 - `src/server/terminal-runtime.ts` / `src/server/terminal-mirror-runtime.ts` for subscriber detach and adaptive width lease release
@@ -187,6 +188,8 @@ Protocol:
 - Negative: unknown channel, duplicate open, channel id mismatch, and target-message carrying session-bound payload all produce explicit mux errors and do not mutate buffer/input/file/schedule state.
 
 Android target runtime:
+- Positive: `TerminalChannelMuxStore` is the single client channel-truth owner for open/close/name/body-subscription state and target-scoped demux.
+- Positive: removing one channel leaves sibling channels and the daemon-target binding intact; the empty target is pruned only after the final session binding is cleared.
 - Positive: opening ten sessions for one route-aware daemon target constructs one physical target transport and ten terminal channel entries.
 - Positive: switching sessions and foreground resume while the physical target transport is `OPEN` sends channel body-subscription/head/ping only, not a new WebSocket/RTC connection.
 - Negative: a closed physical target transport cannot be treated as reusable because channel state still exists; the unique reconnect owner must rebuild or resume the target transport first.

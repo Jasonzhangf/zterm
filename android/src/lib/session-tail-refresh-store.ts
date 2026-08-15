@@ -55,6 +55,20 @@ export interface VisibleNonGapRepairRequestState {
   targetRevision: number;
 }
 
+export type VisibleNonGapRepairStatus = 'pending' | 'dispatched' | 'fulfilled' | 'superseded';
+
+export interface VisibleNonGapRepairLedgerState extends VisibleNonGapRepairRequestState {
+  status: VisibleNonGapRepairStatus;
+  lastDispatchAt: number;
+}
+
+export interface VisibleNonGapRepairLedgerKey {
+  requestStartIndex: number;
+  requestEndIndex: number;
+  tailEndIndex: number;
+  targetRevision: number;
+}
+
 export interface SessionTailRefreshStore {
   /**
    * Mark that local input was sent and a tail refresh is expected.
@@ -93,11 +107,26 @@ export interface SessionTailRefreshStore {
   hasSyncRequest: (sessionId: string, purpose: SessionPullPurpose) => boolean;
   /** Drop the recorded buffer-sync request for (sessionId, purpose). */
   clearSyncRequest: (sessionId: string, purpose: SessionPullPurpose) => void;
-  /** Record the last defensive visible-window repair request for sparse non-gap refresh. */
+  /** Record a dispatched defensive visible-window repair request for sparse non-gap refresh. */
   recordVisibleNonGapRepairRequest: (sessionId: string, state: VisibleNonGapRepairRequestState) => void;
-  /** Last defensive visible-window repair request, or null when none is held. */
-  readVisibleNonGapRepairRequest: (sessionId: string) => VisibleNonGapRepairRequestState | null;
-  /** Drop defensive visible-window repair guard state for this session. */
+  /** Read the exact visible repair ledger entry, or null when absent. */
+  readVisibleNonGapRepair: (
+    sessionId: string,
+    key: VisibleNonGapRepairLedgerKey,
+  ) => VisibleNonGapRepairLedgerState | null;
+  /** List all visible repair ledger entries for this session. */
+  listVisibleNonGapRepairs: (sessionId: string) => VisibleNonGapRepairLedgerState[];
+  /** Move an exact ledger entry back to pending when the request could not enter the wire. */
+  markVisibleNonGapRepairPending: (sessionId: string, key: VisibleNonGapRepairLedgerKey) => void;
+  /** Mark an exact ledger entry fulfilled after a complete visible-window authoritative response. */
+  markVisibleNonGapRepairFulfilled: (
+    sessionId: string,
+    key: VisibleNonGapRepairLedgerKey,
+    fulfilledAt?: number,
+  ) => void;
+  /** Compatibility read for the last recorded visible repair request. */
+  readVisibleNonGapRepairRequest: (sessionId: string) => VisibleNonGapRepairLedgerState | null;
+  /** Drop all defensive visible-window repair ledger state for this session. */
   clearVisibleNonGapRepairRequest: (sessionId: string) => void;
   /**
    * Session-close teardown: drop the three pending marks. Intentionally leaves
@@ -115,7 +144,76 @@ export function createSessionTailRefreshStore(): SessionTailRefreshStore {
   const pendingConnectTailRefresh = new Set<string>();
   const pendingResumeTailRefresh = new Set<string>();
   const syncRequests = new Map<string, SessionSyncRequestDebounceState>();
-  const visibleNonGapRepairRequests = new Map<string, VisibleNonGapRepairRequestState>();
+  const visibleNonGapRepairRequests = new Map<string, VisibleNonGapRepairLedgerState>();
+
+  const visibleNonGapRepairKey = (sessionId: string, key: VisibleNonGapRepairLedgerKey) => {
+    const requestStartIndex = Math.max(0, Math.floor(key.requestStartIndex || 0));
+    const requestEndIndex = Math.max(requestStartIndex, Math.floor(key.requestEndIndex || requestStartIndex));
+    const tailEndIndex = Math.max(0, Math.floor(key.tailEndIndex || 0));
+    const targetRevision = Math.max(0, Math.floor(key.targetRevision || 0));
+    return `${sessionId}:${requestStartIndex}:${requestEndIndex}:${tailEndIndex}:${targetRevision}`;
+  };
+
+  const normalizeVisibleNonGapRepairState = (
+    state: VisibleNonGapRepairRequestState,
+  ): VisibleNonGapRepairLedgerState => {
+    const requestStartIndex = Math.max(0, Math.floor(state.requestStartIndex || 0));
+    const requestEndIndex = Math.max(requestStartIndex, Math.floor(state.requestEndIndex || requestStartIndex));
+    const tailEndIndex = Math.max(0, Math.floor(state.tailEndIndex || 0));
+    const targetRevision = Math.max(0, Math.floor(state.targetRevision || 0));
+    const requestedAt = Math.max(0, Math.floor(state.requestedAt || 0));
+    return {
+      requestedAt,
+      requestStartIndex,
+      requestEndIndex,
+      tailEndIndex,
+      targetRevision,
+      status: 'dispatched',
+      lastDispatchAt: requestedAt,
+    };
+  };
+
+  const supersedeVisibleNonGapRepairKeys = (sessionId: string, key: string) => {
+    for (const [entryKey, entry] of visibleNonGapRepairRequests.entries()) {
+      if (entryKey === key || !entryKey.startsWith(`${sessionId}:`)) continue;
+      if (entry.status !== 'fulfilled' && entry.status !== 'superseded') {
+        visibleNonGapRepairRequests.set(entryKey, { ...entry, status: 'superseded' });
+      }
+    }
+  };
+
+  const evictVisibleNonGapRepairLedger = (sessionId: string) => {
+    const entries = Array.from(visibleNonGapRepairRequests.entries())
+      .filter(([key]) => key.startsWith(`${sessionId}:`));
+    if (entries.length <= 64) return;
+
+    const excess = entries.length - 64;
+    const byRequestedAt = (
+      left: [string, VisibleNonGapRepairLedgerState],
+      right: [string, VisibleNonGapRepairLedgerState],
+    ) => left[1].requestedAt - right[1].requestedAt;
+    const terminalEntries = entries
+      .filter(([, entry]) => entry.status === 'fulfilled' || entry.status === 'superseded')
+      .sort(byRequestedAt);
+    const removable = terminalEntries.slice(0, excess);
+    const removedCount = removable.length;
+    if (removedCount < excess) {
+      const activeEntries = entries
+        .filter(([, entry]) => entry.status !== 'fulfilled' && entry.status !== 'superseded')
+        .sort(byRequestedAt);
+      removable.push(...activeEntries.slice(0, excess - removedCount));
+    }
+    for (const [key] of removable) {
+      visibleNonGapRepairRequests.delete(key);
+    }
+  };
+
+  const listVisibleNonGapRepairsForSession = (sessionId: string) => {
+    const prefix = `${sessionId}:`;
+    return Array.from(visibleNonGapRepairRequests.entries())
+      .filter(([key]) => key.startsWith(prefix))
+      .map(([, entry]) => entry);
+  };
 
   const clearPendingTailRefreshMarks = (sessionId: string) => {
     pendingInputTailRefresh.delete(sessionId);
@@ -161,23 +259,74 @@ export function createSessionTailRefreshStore(): SessionTailRefreshStore {
       syncRequests.delete(syncRequestKey(sessionId, purpose));
     },
     recordVisibleNonGapRepairRequest: (sessionId, state) => {
-      const requestStartIndex = Math.max(0, Math.floor(state.requestStartIndex || 0));
-      const requestEndIndex = Math.max(requestStartIndex, Math.floor(state.requestEndIndex || requestStartIndex));
-      visibleNonGapRepairRequests.set(sessionId, {
-        requestedAt: Math.max(0, Math.floor(state.requestedAt || 0)),
-        requestStartIndex,
-        requestEndIndex,
-        tailEndIndex: Math.max(0, Math.floor(state.tailEndIndex || 0)),
-        targetRevision: Math.max(0, Math.floor(state.targetRevision || 0)),
+      const next = normalizeVisibleNonGapRepairState(state);
+      const key = visibleNonGapRepairKey(sessionId, next);
+      visibleNonGapRepairRequests.set(key, {
+        ...next,
+        status: 'dispatched',
+        lastDispatchAt: next.requestedAt,
       });
+      supersedeVisibleNonGapRepairKeys(sessionId, key);
+      evictVisibleNonGapRepairLedger(sessionId);
     },
-    readVisibleNonGapRepairRequest: (sessionId) => visibleNonGapRepairRequests.get(sessionId) || null,
+    readVisibleNonGapRepair: (sessionId, key) =>
+      visibleNonGapRepairRequests.get(visibleNonGapRepairKey(sessionId, key)) || null,
+    listVisibleNonGapRepairs: (sessionId) =>
+      listVisibleNonGapRepairsForSession(sessionId),
+    markVisibleNonGapRepairPending: (sessionId, key) => {
+      const entryKey = visibleNonGapRepairKey(sessionId, key);
+      const previous = visibleNonGapRepairRequests.get(entryKey);
+      visibleNonGapRepairRequests.set(entryKey, {
+        requestedAt: previous?.requestedAt ?? Date.now(),
+        requestStartIndex: Math.max(0, Math.floor(key.requestStartIndex || 0)),
+        requestEndIndex: Math.max(
+          Math.max(0, Math.floor(key.requestStartIndex || 0)),
+          Math.floor(key.requestEndIndex || key.requestStartIndex || 0),
+        ),
+        tailEndIndex: Math.max(0, Math.floor(key.tailEndIndex || 0)),
+        targetRevision: Math.max(0, Math.floor(key.targetRevision || 0)),
+        status: 'pending',
+        lastDispatchAt: previous?.lastDispatchAt || 0,
+      });
+      supersedeVisibleNonGapRepairKeys(sessionId, entryKey);
+      evictVisibleNonGapRepairLedger(sessionId);
+    },
+    markVisibleNonGapRepairFulfilled: (sessionId, key, fulfilledAt) => {
+      const entryKey = visibleNonGapRepairKey(sessionId, key);
+      const previous = visibleNonGapRepairRequests.get(entryKey);
+      const now = Math.max(0, Math.floor(fulfilledAt ?? Date.now()));
+      visibleNonGapRepairRequests.set(entryKey, {
+        requestedAt: previous?.requestedAt ?? now,
+        requestStartIndex: Math.max(0, Math.floor(key.requestStartIndex || 0)),
+        requestEndIndex: Math.max(
+          Math.max(0, Math.floor(key.requestStartIndex || 0)),
+          Math.floor(key.requestEndIndex || key.requestStartIndex || 0),
+        ),
+        tailEndIndex: Math.max(0, Math.floor(key.tailEndIndex || 0)),
+        targetRevision: Math.max(0, Math.floor(key.targetRevision || 0)),
+        status: 'fulfilled',
+        lastDispatchAt: previous?.lastDispatchAt || 0,
+      });
+      evictVisibleNonGapRepairLedger(sessionId);
+    },
+    readVisibleNonGapRepairRequest: (sessionId) => {
+      const matching = listVisibleNonGapRepairsForSession(sessionId).sort((left, right) => left.requestedAt - right.requestedAt);
+      return matching[matching.length - 1] || null;
+    },
     clearVisibleNonGapRepairRequest: (sessionId) => {
-      visibleNonGapRepairRequests.delete(sessionId);
+      for (const key of visibleNonGapRepairRequests.keys()) {
+        if (key.startsWith(`${sessionId}:`)) {
+          visibleNonGapRepairRequests.delete(key);
+        }
+      }
     },
     deleteSession: (sessionId) => {
       clearPendingTailRefreshMarks(sessionId);
-      visibleNonGapRepairRequests.delete(sessionId);
+      for (const key of visibleNonGapRepairRequests.keys()) {
+        if (key.startsWith(`${sessionId}:`)) {
+          visibleNonGapRepairRequests.delete(key);
+        }
+      }
     },
   };
 }

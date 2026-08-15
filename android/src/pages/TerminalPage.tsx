@@ -8,16 +8,9 @@ import { Directory, Filesystem } from '@capacitor/filesystem';
 import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';
 import { createSessionViewportModeStore } from '../lib/session-viewport-mode-store';
 import { SessionScheduleSheet } from '../components/terminal/SessionScheduleSheet';
-import { FileTransferSheet } from '../components/terminal/FileTransferSheet';
 import { AttachmentDrawer } from '../components/terminal/AttachmentDrawer';
 import { RemoteScreenshotSheet } from '../components/terminal/RemoteScreenshotSheet';
-import {
-  RemoteWindowOverlay,
-  type RemoteWindowInputContext,
-  type RemoteWindowVideoDebugSnapshot,
-} from '../components/terminal/RemoteWindowOverlay';
 import { TerminalHeader } from '../components/terminal/TerminalHeader';
-import { TerminalConnectionStatusStrip } from './TerminalConnectionStatusStrip';
 import {
   normalizeDrawerStatus,
   resolveSessionInputEpoch,
@@ -31,17 +24,36 @@ import {
   terminalSessionGroupSlotIdsEqual,
   toTerminalTabChromeItem,
 } from './terminal-page-helpers';
-import { resolveEffectiveConnectionStatus } from './terminal-page-status-helpers';
-import { TerminalSessionDrawer, type TerminalSessionDrawerHost, type TerminalSessionDrawerItem } from '../components/terminal/TerminalSessionDrawer';
+import {
+  formatTerminalBackendSuffix,
+  resolveEffectiveConnectionStatus,
+  TERMINAL_PORTRAIT_STAGE_TOP_OFFSET_PX,
+} from './terminal-page-status-helpers';
+import type { TerminalSessionDrawerHost, TerminalSessionDrawerItem } from '../components/terminal/TerminalSessionDrawer';
+import type { TerminalSessionDrawerSlot } from '../lib/plugin-session-drawer/session-drawer-contract';
+import type { TerminalFileBrowserSlot } from '../lib/plugin-file-browser/file-browser-contract';
+import type {
+  RemoteWindowInputContext,
+  RemoteWindowVideoDebugSnapshot,
+  TerminalRemoteWindowSlot,
+} from '../lib/plugin-remote-window/remote-window-contract';
 import { TabManagerSheet } from '../components/terminal/TabManagerSheet';
-import { TerminalQuickBar } from '../components/terminal/TerminalQuickBar';
+import type { TerminalQuickBarSlot } from '../lib/plugin-quickbar/quickbar-contract';
+import type {
+  TerminalShellUiSlot,
+} from '../lib/plugin-terminal-shell/terminal-shell-contract';
 import {
   resolveTerminalCtrlChord,
   resolveTerminalKeyboardInput,
 } from '@zterm/shared/terminal/renderer';
-import { TerminalPageCopyMenu } from './TerminalPageCopyMenu';
-import { TerminalDebugOverlay, type RemoteWindowInputDebugSnapshot } from './TerminalPageDebugOverlay';
-import { TerminalNetworkBanner, TerminalQuickBarShell } from './terminal-page-shell-ui';
+import { useSessionViewportModeSnapshot } from '../lib/session-viewport-mode-store';
+import { getTwoFingerWheelDebugSnapshot } from '../lib/two-finger-wheel-debug-store';
+import {
+  toTerminalDebugSessionProjection,
+  type RemoteWindowInputDebugSnapshot,
+  type TerminalDebugOverlayProps,
+  type TerminalDebugOverlaySlot,
+} from '../lib/plugin-debug-console/debug-console-contract';
 import { useTerminalPageCopyRuntime } from './useTerminalPageCopyRuntime';
 import { getBrowserStorage } from '../lib/browser-storage';
 import type { TerminalShellSkin } from '../lib/bridge-settings';
@@ -92,7 +104,6 @@ import {
   type TerminalSessionGroupSlotIds,
   type TerminalSessionGroupSlotName,
 } from '../lib/session-group-viewport';
-import { TerminalStageShell } from './TerminalPageStageShell';
 import {
   appendSessionPreviewTarget,
   moveSessionPreviewTarget,
@@ -144,8 +155,6 @@ import {
 } from '../lib/types';
 import type { RemoteWindowReceiverStartResult } from '../lib/remote-window-receiver-runtime';
 import type { RemoteWindowControlMessage } from '../lib/remote-window-message-runtime';
-
-export { TerminalNetworkBanner } from './terminal-page-shell-ui';
 
 type DrawerRemoteSessionTarget = {
   name: string;
@@ -408,6 +417,12 @@ interface TerminalPageProps {
   onForceRelaySession?: (id: string) => void;
   onUseAutoSession?: (id: string) => void;
   onUseWebSocketSession?: (id: string) => void;
+  renderDebugConsole?: TerminalDebugOverlaySlot['render'];
+  renderSessionDrawer?: TerminalSessionDrawerSlot['render'];
+  renderFileBrowser?: TerminalFileBrowserSlot['render'];
+  renderRemoteWindow?: TerminalRemoteWindowSlot['render'];
+  renderQuickBar?: TerminalQuickBarSlot['render'];
+  renderTerminalShell?: TerminalShellUiSlot['render'];
   onOpenConnections: () => void;
   onOpenQuickTabPicker: (paneId?: string, hostKey?: string, createOptions?: { sessionName?: string; cwd?: string; terminalBackend?: 'tmux' | 'herdr' }) => void;
   onOpenDrawerRemoteSession?: (target: DrawerRemoteSessionTarget, sessionName: string, options?: { activate?: boolean; navigate?: boolean }) => string | null | undefined | void;
@@ -520,6 +535,12 @@ function TerminalPageComponent({
   onForceRelaySession,
   onUseAutoSession,
   onUseWebSocketSession,
+  renderDebugConsole,
+  renderSessionDrawer,
+  renderFileBrowser,
+  renderRemoteWindow,
+  renderQuickBar,
+  renderTerminalShell,
   onOpenConnections,
   onOpenQuickTabPicker,
   onOpenDrawerRemoteSession,
@@ -998,6 +1019,10 @@ function TerminalPageComponent({
     handleQuickBarToggleCopyMode,
   } = copyRuntime;
   const uiSessionId = uiSession?.id || null;
+  const viewportModeSnapshot = useSessionViewportModeSnapshot(
+    sessionViewportModeStoreRef.current,
+    uiSessionId,
+  );
   useLayoutEffect(() => {
     if (sessionPreviewOpen) {
       return;
@@ -1310,15 +1335,16 @@ function TerminalPageComponent({
           // stableKey 必须不受 relay 身份归并抖动影响（daemonHostId 在 alias 间
           // 振荡会让 ownerKey/identity key 亚秒级变化 → React key 变 → 整列表重建）。
           // 用物理端点（bridgeHost:bridgePort）+ sessionName 作为纯稳定键。
-          stableKey: `catalog:${group.bridgeHost}:${group.bridgePort}::session:${sessionName}`,
+          stableKey: `catalog:${group.bridgeHost}:${group.bridgePort}${backendSuffix}::session:${sessionName}`,
           title: liveSession?.customName || liveSession?.title || sessionName,
-          subtitle: `${serverIdentity.label} · ${sessionName}`,
           status: liveSession ? normalizeDrawerStatus(liveSession.state) : 'idle',
           paneLabel: undefined,
           sessionGroupSlot: null,
           active: false,
           hostKey: serverIdentity.key,
           hostLabel: serverIdentity.label,
+          terminalBackend: groupBackend,
+          subtitle: `${serverIdentity.label} · ${sessionName}${formatTerminalBackendSuffix(groupBackend)}`,
         });
       }
     }
@@ -1360,12 +1386,13 @@ function TerminalPageComponent({
       return {
         ...item,
         title: liveSession.customName || liveSession.title || liveSession.sessionName,
-        subtitle: `${item.hostLabel || item.hostKey || 'unknown server'} · ${liveSession.sessionName}`,
+        subtitle: `${item.hostLabel || item.hostKey || 'unknown server'} · ${liveSession.sessionName}${formatTerminalBackendSuffix(liveSession.terminalBackend || item.terminalBackend)}`,
         status: normalizeDrawerStatus(liveSession.state),
         remoteMissing: resolveSessionRemoteMissing(liveSession, sessionGroups),
         paneLabel: undefined,
         sessionGroupSlot: resolveSessionGroupSlot(liveSession.id),
         active: activeSessionIds.has(liveSession.id),
+        terminalBackend: liveSession.terminalBackend || item.terminalBackend,
       };
     });
 
@@ -2566,7 +2593,7 @@ function TerminalPageComponent({
   );
   const terminalStageBottomPx = terminalChromeBottomPx + terminalImeLiftPx;
   const terminalStageTopPx = portraitSessionDrawerEnabled
-    ? Math.max(0, headerTopInsetPx + 50)
+    ? Math.max(0, headerTopInsetPx + TERMINAL_PORTRAIT_STAGE_TOP_OFFSET_PX)
     : 0;
   const visualViewportDebugWidth = typeof window !== 'undefined'
     ? Math.round(window.visualViewport?.width || 0)
@@ -3084,53 +3111,56 @@ function TerminalPageComponent({
     onTerminalViewportChange?.(sessionId, viewState);
   }, [onTerminalViewportChange]);
 
-  const quickBarNode = useMemo(() => (
-    <TerminalQuickBar
-      activeSessionId={terminalActionSessionId}
-      quickActions={quickActions}
-      shortcutActions={shortcutActions}
-      onMeasuredHeightChange={handleQuickBarMeasuredHeightChange}
-      onSendSequence={handleQuickBarSendSequence}
-      onImagePaste={handleQuickBarImagePaste}
-      onFileAttach={onFileAttach}
-      keyboardVisible={terminalImeActive && effectiveKeyboardLiftPx > 0}
-      keyboardInsetPx={quickBarShellKeyboardLiftPx}
-      onToggleKeyboard={handleToggleKeyboard}
-      onQuickActionsChange={onQuickActionsChange}
-      onShortcutActionsChange={onShortcutActionsChange}
-      sessionDraft={activeDraft}
-      onSessionDraftChange={handleQuickBarSessionDraftChange}
-      onSessionDraftSend={handleQuickBarSessionDraftSend}
-      onOpenScheduleComposer={handleQuickBarOpenScheduleComposer}
-      splitAvailable={splitAvailable}
-      splitVisible={splitVisible}
-      shellMode={layoutProfile.quickBar.shellMode}
-      collapseAvailable
-      collapsed={quickBarCollapsed}
-      onCollapsedChange={setQuickBarCollapsed}
-      currentSplitCount={workspacePanes.length}
-      splitCountOptions={splitCountOptions}
-      onSetSplitCount={handleSetSplitCount}
-      onToggleSplitLayout={toggleSplitLayout}
-      onCycleSplitPane={cycleSecondaryPane}
-      onEditorDomFocusChange={handleQuickBarEditorDomFocusChange}
-      onOpenFileTransfer={handleQuickBarOpenFileTransfer}
-      onOpenAttachment={() => setAttachmentDrawerOpen(true)}
-      onToggleDebugOverlay={handleQuickBarToggleDebugOverlay}
-      copyModeActive={copySelection.active}
-      onToggleCopyMode={handleQuickBarToggleCopyMode}
-      copyDebugLabel={`IME KB:${keyboardInset} L:${effectiveKeyboardLiftPx} ST:${terminalStageBottomPx} VV:${visualViewportDebugWidth}x${visualViewportDebugHeight} SH:${shellHeight} R:${keyboardViewportAlreadyResized ? 'Y' : 'N'}`}
-      onToggleAbsoluteLineNumbers={handleQuickBarToggleAbsoluteLineNumbers}
-      onRequestRemoteScreenshot={handleQuickBarRequestRemoteScreenshot}
-      debugOverlayVisible={debugOverlayVisible}
-      absoluteLineNumbersVisible={absoluteLineNumbersVisible}
-      remoteScreenshotStatus={resolveRemoteScreenshotQuickBarStatus(remoteScreenshotPreview)}
-      remoteWindowInputActive={Boolean(remoteWindowInputContext)}
-      shortcutSmartSort={shortcutSmartSort}
-      shortcutFrequencyMap={shortcutFrequencyMap}
-      onShortcutUse={onShortcutUse}
-    />
-  ), [
+  const quickBarNode = useMemo(() => {
+    if (!renderQuickBar) {
+      return null;
+    }
+    return renderQuickBar({
+      activeSessionId: terminalActionSessionId,
+      quickActions,
+      shortcutActions,
+      onMeasuredHeightChange: handleQuickBarMeasuredHeightChange,
+      onSendSequence: handleQuickBarSendSequence,
+      onImagePaste: handleQuickBarImagePaste,
+      onFileAttach,
+      keyboardVisible: terminalImeActive && effectiveKeyboardLiftPx > 0,
+      keyboardInsetPx: quickBarShellKeyboardLiftPx,
+      onToggleKeyboard: handleToggleKeyboard,
+      onQuickActionsChange,
+      onShortcutActionsChange,
+      sessionDraft: activeDraft,
+      onSessionDraftChange: handleQuickBarSessionDraftChange,
+      onSessionDraftSend: handleQuickBarSessionDraftSend,
+      onOpenScheduleComposer: handleQuickBarOpenScheduleComposer,
+      splitAvailable,
+      splitVisible,
+      shellMode: layoutProfile.quickBar.shellMode,
+      collapseAvailable: true,
+      collapsed: quickBarCollapsed,
+      onCollapsedChange: setQuickBarCollapsed,
+      currentSplitCount: workspacePanes.length,
+      splitCountOptions,
+      onSetSplitCount: handleSetSplitCount,
+      onToggleSplitLayout: toggleSplitLayout,
+      onCycleSplitPane: cycleSecondaryPane,
+      onEditorDomFocusChange: handleQuickBarEditorDomFocusChange,
+      onOpenFileTransfer: handleQuickBarOpenFileTransfer,
+      onOpenAttachment: () => setAttachmentDrawerOpen(true),
+      onToggleDebugOverlay: handleQuickBarToggleDebugOverlay,
+      copyModeActive: copySelection.active,
+      onToggleCopyMode: handleQuickBarToggleCopyMode,
+      copyDebugLabel: `IME KB:${keyboardInset} L:${effectiveKeyboardLiftPx} ST:${terminalStageBottomPx} VV:${visualViewportDebugWidth}x${visualViewportDebugHeight} SH:${shellHeight} R:${keyboardViewportAlreadyResized ? 'Y' : 'N'}`,
+      onToggleAbsoluteLineNumbers: handleQuickBarToggleAbsoluteLineNumbers,
+      onRequestRemoteScreenshot: handleQuickBarRequestRemoteScreenshot,
+      debugOverlayVisible,
+      absoluteLineNumbersVisible,
+      remoteScreenshotStatus: resolveRemoteScreenshotQuickBarStatus(remoteScreenshotPreview),
+      remoteWindowInputActive: Boolean(remoteWindowInputContext),
+      shortcutSmartSort,
+      shortcutFrequencyMap,
+      onShortcutUse,
+    });
+  }, [
     absoluteLineNumbersVisible,
     activeDraft,
     terminalActionSessionId,
@@ -3184,7 +3214,51 @@ function TerminalPageComponent({
     layoutProfile.stage.rowBottomPadding,
     copySelection.active,
     handleQuickBarToggleCopyMode,
+    renderQuickBar,
   ]);
+
+  const debugOverlayProps: TerminalDebugOverlayProps = {
+    visible: debugOverlayVisible,
+    session: toTerminalDebugSessionProjection(interactiveSession),
+    visiblePaneCount: renderedPaneSessions.length,
+    viewportMode: viewportModeSnapshot.mode,
+    wheelDebug: getTwoFingerWheelDebugSnapshot(),
+    getSessionDebugMetrics,
+    debugOverlayPos,
+    debugOverlayDragRef,
+    onClose: () => setDebugOverlayVisible(false),
+    onMove: setDebugOverlayPos,
+    keyboardInset,
+    shellHeight,
+    rawShellHeight,
+    visualViewportHeight: visualViewportDebugHeight,
+    visualViewportWidth: visualViewportDebugWidth,
+    visualViewportOffsetTop: visualViewportDebugOffsetTop,
+    currentLayoutViewportHeight: currentLayoutViewportDebugHeight,
+    terminalKeyboardRequested,
+    keyboardViewportAlreadyResized,
+    containerHeightPx: undefined,
+    viewportRows: undefined,
+    effectiveKeyboardLiftPx,
+    terminalImeLiftPx,
+    quickBarShellKeyboardLiftPx,
+    quickBarHeight,
+    terminalChromeBottomPx: terminalStageBottomPx,
+    layoutMode: layoutProfile.mode,
+    landscape,
+    splitVisible,
+    quickBarCollapsed,
+    copySelection,
+    sessionDrawerDebug: {
+      open: sessionDrawerOpen,
+      lastEvent: sessionDrawerDebug.lastEvent,
+      eventSeq: sessionDrawerDebug.eventSeq,
+      callbackSeq: sessionDrawerDebug.callbackSeq,
+      pageCallbackSeq: sessionDrawerDebug.pageCallbackSeq,
+      pickerMode: sessionPickerDebugMode,
+    },
+    getRemoteWindowInputDebug,
+  };
 
   return (
     <div
@@ -3224,279 +3298,237 @@ function TerminalPageComponent({
           />
         </div>
       ) : null}
-      <TerminalNetworkBanner
-        connectionIssueVisible={connectionIssueVisible}
-        activeSessionState={uiSession?.state}
-        activeSessionLastError={uiSession?.lastError}
-      />
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          position: 'relative',
-          overflow: 'hidden',
-        }}
-      >
-        {portraitSessionDrawerEnabled ? (
-          <>
-            {!sessionDrawerOpen ? (
-              <>
-              <TerminalConnectionStatusStrip
-              session={uiSession}
-              getSessionDebugMetrics={getSessionDebugMetrics}
-              topInsetPx={headerTopInsetPx}
-              onForceRelaySession={onForceRelaySession}
-              onUseAutoSession={onUseAutoSession}
-              onUseWebSocketSession={onUseWebSocketSession}
-              onRenameRemoteSession={onRenameRemoteSession}
-            />
-            <button
-              type="button"
-              aria-label="返回连接列表"
-              data-testid="terminal-portrait-back-button"
-              onClick={onOpenConnections}
-              style={{
-                position: 'absolute',
-                top: `${Math.max(8, headerTopInsetPx + 8)}px`,
-                left: '10px',
-                zIndex: 15,
-                width: '34px',
-                height: '34px',
-                borderRadius: '12px',
-                border: '1px solid var(--zterm-panel-border)',
-                background: 'var(--zterm-panel-surface)',
-                color: 'var(--zterm-panel-text)',
-                fontSize: '18px',
-                lineHeight: 1,
-                boxShadow: '0 8px 18px rgba(0,0,0,0.18)',
-                backdropFilter: 'blur(8px)',
-              }}
-            >
-              ←
-            </button>
-              {onOpenSettings ? (
+      {renderTerminalShell ? renderTerminalShell({
+        networkBanner: {
+          connectionIssueVisible,
+          activeSessionState: uiSession?.state,
+          activeSessionLastError: uiSession?.lastError,
+        },
+        topProjection: {
+          statusStrip: portraitSessionDrawerEnabled && !sessionDrawerOpen
+            ? {
+                session: uiSession,
+                getSessionDebugMetrics,
+                topInsetPx: headerTopInsetPx,
+                onForceRelaySession,
+                onUseAutoSession,
+                onUseWebSocketSession,
+                onRenameRemoteSession,
+              }
+            : null,
+          controls: portraitSessionDrawerEnabled ? (
+            <>
+              {!sessionDrawerOpen ? (
+                <>
+                  <button
+                    type="button"
+                    aria-label="返回连接列表"
+                    data-testid="terminal-portrait-back-button"
+                    onClick={onOpenConnections}
+                    style={{
+                      position: 'absolute',
+                      top: `${Math.max(8, headerTopInsetPx + 8)}px`,
+                      left: '10px',
+                      zIndex: 15,
+                      width: '34px',
+                      height: '34px',
+                      borderRadius: '12px',
+                      border: '1px solid var(--zterm-panel-border)',
+                      background: 'var(--zterm-panel-surface)',
+                      color: 'var(--zterm-panel-text)',
+                      fontSize: '18px',
+                      lineHeight: 1,
+                      boxShadow: '0 8px 18px rgba(0,0,0,0.18)',
+                      backdropFilter: 'blur(8px)',
+                    }}
+                  >
+                    ←
+                  </button>
+                  {onOpenSettings ? (
+                    <button
+                      type="button"
+                      aria-label="设置和升级"
+                      data-testid="terminal-portrait-settings-button"
+                      onClick={onOpenSettings}
+                      style={{
+                        position: 'absolute',
+                        top: `${Math.max(8, headerTopInsetPx + 8)}px`,
+                        right: '10px',
+                        zIndex: 15,
+                        minWidth: '64px',
+                        height: '34px',
+                        padding: '0 10px',
+                        borderRadius: '12px',
+                        border: '1px solid var(--zterm-panel-border)',
+                        background: 'var(--zterm-panel-surface)',
+                        color: 'var(--zterm-panel-text)',
+                        fontSize: '13px',
+                        fontWeight: 850,
+                        lineHeight: 1,
+                        boxShadow: '0 8px 18px rgba(0,0,0,0.18)',
+                        backdropFilter: 'blur(8px)',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '5px',
+                      }}
+                    >
+                      <span aria-hidden="true" style={{ fontSize: '15px', lineHeight: 1 }}>⚙</span>
+                      <span>设置</span>
+                    </button>
+                  ) : null}
+                </>
+              ) : null}
               <button
                 type="button"
-                aria-label="设置和升级"
-                data-testid="terminal-portrait-settings-button"
-                onClick={onOpenSettings}
+                aria-label="打开 session 抽屉"
+                data-testid="terminal-portrait-session-drawer-button"
+                onClick={() => setSessionDrawerOpen(true)}
                 style={{
                   position: 'absolute',
                   top: `${Math.max(8, headerTopInsetPx + 8)}px`,
-                  right: '10px',
-                  zIndex: 15,
-                  minWidth: '64px',
+                  left: '52px',
+                  zIndex: 151,
                   height: '34px',
                   padding: '0 10px',
                   borderRadius: '12px',
                   border: '1px solid var(--zterm-panel-border)',
                   background: 'var(--zterm-panel-surface)',
                   color: 'var(--zterm-panel-text)',
-                  fontSize: '13px',
+                  fontSize: '12px',
                   fontWeight: 850,
                   lineHeight: 1,
                   boxShadow: '0 8px 18px rgba(0,0,0,0.18)',
                   backdropFilter: 'blur(8px)',
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '5px',
+                  pointerEvents: sessionDrawerOpen ? 'none' : 'auto',
+                  opacity: sessionDrawerOpen ? 0 : 1,
                 }}
               >
-                <span aria-hidden="true" style={{ fontSize: '15px', lineHeight: 1 }}>⚙</span>
-                <span>设置</span>
+                Sessions
               </button>
-              ) : null}
-              </>
-            ) : null}
-            <button
-              type="button"
-              aria-label="打开 session 抽屉"
-              data-testid="terminal-portrait-session-drawer-button"
-              onClick={() => setSessionDrawerOpen(true)}
-              style={{
-                position: 'absolute',
-                top: `${Math.max(8, headerTopInsetPx + 8)}px`,
-                left: '52px',
-                zIndex: 151,
-                height: '34px',
-                padding: '0 10px',
-                borderRadius: '12px',
-                border: '1px solid var(--zterm-panel-border)',
-                background: 'var(--zterm-panel-surface)',
-                color: 'var(--zterm-panel-text)',
-                fontSize: '12px',
-                fontWeight: 850,
-                lineHeight: 1,
-                boxShadow: '0 8px 18px rgba(0,0,0,0.18)',
-                backdropFilter: 'blur(8px)',
-                pointerEvents: sessionDrawerOpen ? 'none' : 'auto',
-                opacity: sessionDrawerOpen ? 0 : 1,
-              }}
-            >
-              Sessions
-            </button>
-            <TerminalSessionDrawer
-              open={sessionDrawerOpen}
-              topInsetPx={headerTopInsetPx}
-              bottomInsetPx={keyboardInset}
-              sessions={drawerSessions}
-              hosts={drawerHosts}
-              onClose={handleCloseSessionDrawer}
-              onSelectSession={handleSelectSessionFromDrawer}
-              onCloseSession={handleCloseSessionFromDrawer}
-              onAssignSessionGroupSlot={handleAssignSessionGroupSlot}
-              sessionGroupLayoutAxis={sessionGroupLayoutAxis}
-              onOpenQuickTabPicker={handleOpenQuickTabPickerFromDrawer}
-              onRefreshHostSessions={onRefreshDrawerHostSessions}
-              onDebugAddEvent={handleSessionDrawerDebugAddEvent}
-              previewSelectionMode={sessionPreviewSelectionMode}
-              previewSelectedSessionIds={drawerPreviewSelectedSessionIds}
-              previewSelectionError={sessionPreviewError}
-              onPreviewSelectionModeChange={handleSessionPreviewSelectionModeChange}
-              onTogglePreviewSession={handleToggleSessionPreviewSelection}
-              onClearPreviewSelection={handleClearDrawerPreviewSelection}
-              terminalShellSkin={effectiveTerminalShellSkin}
-            />
-          </>
-        ) : null}
-    <TerminalStageShell
-      interactiveSession={interactiveSession}
-      sessionBufferStore={sessionBufferStore}
-      renderedPaneSessions={renderedPaneSessions}
-      sessionGroupViewport={sessionGroupViewportSlotSessions}
-      sessionGroupLayoutAxis={sessionGroupLayoutAxis}
-      visiblePaneEntries={visiblePaneEntries}
-          splitVisible={splitVisible}
-          activePaneId={workspace.activePaneId}
-          terminalChromeTopPx={terminalStageTopPx}
-          terminalChromeBottomPx={terminalStageBottomPx}
-          inputResetEpochBySession={inputResetEpochBySession}
-          followResetEpoch={followResetEpoch}
-          inputIntentFollowResetEpoch={inputIntentFollowResetEpoch}
-          terminalKeyboardRequested={terminalKeyboardRequested}
-          isAndroid={isAndroid}
-          onResize={onResize}
-          onTerminalInput={onTerminalInput}
-          onTerminalWidthModeChange={onTerminalWidthModeChange}
-          handleTerminalViewportChange={handleTerminalViewportChange}
-          handleSwipeTab={handleSwipeTab}
-          handleActiveTerminalActivateInput={handleActiveTerminalActivateInput}
-          onActivatePane={activatePaneAndSession}
-          onOpenPaneSessionPicker={handleOpenQuickTabPickerForPane}
-          onActivateSession={handleActivateSessionGroupSlot}
-          onTerminalFocusOwnerActivate={handleTerminalFocusOwnerActivate}
-          focusNonce={focusNonce}
-            terminalFontSize={terminalFontSize}
-            terminalThemeId={effectiveTerminalThemeId}
-            terminalShellSkin={effectiveTerminalShellSkin}
-            terminalWidthMode={terminalWidthMode}
-          allowSessionDrawerSwipe={portraitSessionDrawerEnabled}
-          absoluteLineNumbersVisible={absoluteLineNumbersVisible}
-          copySelection={copySelection}
-          onLongPressRow={handleLongPressCopyRow}
-          onCopySelectionDismiss={handleCloseCopyMenu}
-          sessionPreviewOpen={sessionPreviewOpen}
-          sessionPreviewSessions={sessionPreviewSessions}
-          sessionPreviewReplacementCandidates={sessionPreviewReplacementCandidates}
-          onOpenSessionPreview={handleOpenSessionPreview}
-          onCloseSessionPreview={handleCancelSessionPreview}
-          onActivatePreviewSession={handleActivateSessionFromPreview}
-          onAddPreviewSession={handleAddSessionPreview}
-          onRemovePreviewSession={handleRemoveSessionFromPreview}
-          onMovePreviewSession={handleMoveSessionPreview}
-          onReplacePreviewSession={handleReplaceSessionPreview}
-          onPreviewPrimarySessionChange={handleSessionPreviewPrimarySessionChange}
-        />
-        {copySelection.menu && !sessionDrawerOpen ? (
-          <TerminalPageCopyMenu
-            menu={copySelection.menu}
-            viewportWidth={viewportWidth}
-            headerTopInsetPx={headerTopInsetPx}
-            startRowIndex={copySelection.startRowIndex}
-            onSetStart={handleCopySelectionStart}
-            onSetEnd={handleCopySelectionEnd}
-            onCopy={handleCopySelectedText}
-            onClose={handleCloseCopyMenu}
-          />
-        ) : null}
-        {!sessionDrawerOpen ? <TerminalDebugOverlay
-      visible={debugOverlayVisible}
-      session={interactiveSession}
-      visiblePaneSessions={renderedPaneSessions}
-      sessionViewportModeStore={sessionViewportModeStoreRef.current}
-      copySelection={copySelection}
-      getSessionDebugMetrics={getSessionDebugMetrics}
-      debugOverlayPos={debugOverlayPos}
-      debugOverlayDragRef={debugOverlayDragRef}
-          onClose={() => setDebugOverlayVisible(false)}
-          onMove={setDebugOverlayPos}
-          keyboardInset={keyboardInset}
-          shellHeight={shellHeight}
-          rawShellHeight={rawShellHeight}
-          visualViewportHeight={visualViewportDebugHeight}
-          visualViewportWidth={visualViewportDebugWidth}
-          visualViewportOffsetTop={visualViewportDebugOffsetTop}
-          currentLayoutViewportHeight={currentLayoutViewportDebugHeight}
-          terminalKeyboardRequested={terminalKeyboardRequested}
-          keyboardViewportAlreadyResized={keyboardViewportAlreadyResized}
-          containerHeightPx={undefined}
-          viewportRows={undefined}
-          effectiveKeyboardLiftPx={effectiveKeyboardLiftPx}
-          terminalImeLiftPx={terminalImeLiftPx}
-          quickBarShellKeyboardLiftPx={quickBarShellKeyboardLiftPx}
-          quickBarHeight={quickBarHeight}
-          terminalChromeBottomPx={terminalStageBottomPx}
-          layoutMode={layoutProfile.mode}
-          landscape={landscape}
-          splitVisible={splitVisible}
-          quickBarCollapsed={quickBarCollapsed}
-          sessionDrawerDebug={{
-            open: sessionDrawerOpen,
-            lastEvent: sessionDrawerDebug.lastEvent,
-            eventSeq: sessionDrawerDebug.eventSeq,
-            callbackSeq: sessionDrawerDebug.callbackSeq,
-            pageCallbackSeq: sessionDrawerDebug.pageCallbackSeq,
-            pickerMode: sessionPickerDebugMode,
-          }}
-          getRemoteWindowInputDebug={getRemoteWindowInputDebug}
-        /> : null}
-        <RemoteWindowOverlay
-          activeSessionId={uiSessionId}
-          appForegroundActive={appForegroundActive}
-          streamInvalidation={remoteWindowStreamInvalidation}
-          requestTargets={onRequestRemoteWindowTargets}
-          startStream={onRequestRemoteWindowStreamStart}
-          updateStreamQuality={onUpdateRemoteWindowStreamQuality}
-          updateFocus={onUpdateRemoteWindowFocus}
-          stopStream={onStopRemoteWindowStream}
-          requestScreenshot={handleRequestRemoteWindowScreenshot}
-          sendInput={onSendRemoteWindowInput}
-          resizeTargetWindow={onResizeRemoteWindowTarget}
-          onInputDebug={recordRemoteWindowInputDebug}
-          bottomInsetPx={terminalChromeBottomPx + terminalImeLiftPx}
-          bottomChromeInsetPx={terminalChromeBottomPx}
-          onOpenStateChange={handleRemoteWindowOverlayOpenStateChange}
-          onBodySubscriptionSuppressedChange={handleRemoteWindowBodySubscriptionSuppressedChange}
-          onInputContextChange={handleRemoteWindowInputContextChange}
-          onRequestKeyboard={handleRemoteWindowRequestKeyboard}
-          onVideoDebug={recordRemoteWindowVideoDebug}
-          onRemoteWindowMessage={onRemoteWindowMessage}
-        />
-        {!sessionDrawerOpen ? (
-          <TerminalQuickBarShell
-            zIndex={remoteWindowInputContext ? 96 : 10}
-            centered={Boolean(remoteWindowInputContext)}
-            bottomPx={
-              quickBarShellKeyboardLiftPx
-              + layoutProfile.quickBar.touchSafeOffsetPx
-              + terminalBottomChromeLiftPx
+              {renderSessionDrawer ? renderSessionDrawer({
+                open: sessionDrawerOpen,
+                topInsetPx: headerTopInsetPx,
+                bottomInsetPx: keyboardInset,
+                sessions: drawerSessions,
+                hosts: drawerHosts,
+                onClose: handleCloseSessionDrawer,
+                onSelectSession: handleSelectSessionFromDrawer,
+                onCloseSession: handleCloseSessionFromDrawer,
+                onAssignSessionGroupSlot: handleAssignSessionGroupSlot,
+                sessionGroupLayoutAxis,
+                onOpenQuickTabPicker: handleOpenQuickTabPickerFromDrawer,
+                onRefreshHostSessions: onRefreshDrawerHostSessions,
+                onDebugAddEvent: handleSessionDrawerDebugAddEvent,
+                previewSelectionMode: sessionPreviewSelectionMode,
+                previewSelectedSessionIds: drawerPreviewSelectedSessionIds,
+                previewSelectionError: sessionPreviewError,
+                onPreviewSelectionModeChange: handleSessionPreviewSelectionModeChange,
+                onTogglePreviewSession: handleToggleSessionPreviewSelection,
+                onClearPreviewSelection: handleClearDrawerPreviewSelection,
+                terminalShellSkin: effectiveTerminalShellSkin,
+              }) : null}
+            </>
+          ) : null,
+        },
+        stage: {
+          interactiveSession,
+          sessionBufferStore,
+          renderedPaneSessions,
+          sessionGroupViewport: sessionGroupViewportSlotSessions,
+          sessionGroupLayoutAxis,
+          visiblePaneEntries,
+          splitVisible,
+          activePaneId: workspace.activePaneId,
+          terminalChromeTopPx: terminalStageTopPx,
+          terminalChromeBottomPx: terminalStageBottomPx,
+          inputResetEpochBySession,
+          followResetEpoch,
+          inputIntentFollowResetEpoch,
+          terminalKeyboardRequested,
+          isAndroid,
+          onResize,
+          onTerminalInput,
+          onTerminalWidthModeChange,
+          handleTerminalViewportChange,
+          handleSwipeTab,
+          handleActiveTerminalActivateInput,
+          onActivatePane: activatePaneAndSession,
+          onOpenPaneSessionPicker: handleOpenQuickTabPickerForPane,
+          onActivateSession: handleActivateSessionGroupSlot,
+          onTerminalFocusOwnerActivate: handleTerminalFocusOwnerActivate,
+          focusNonce,
+          terminalFontSize,
+          terminalThemeId: effectiveTerminalThemeId,
+          terminalShellSkin: effectiveTerminalShellSkin,
+          terminalWidthMode,
+          allowSessionDrawerSwipe: portraitSessionDrawerEnabled,
+          absoluteLineNumbersVisible,
+          copySelection,
+          onLongPressRow: handleLongPressCopyRow,
+          onCopySelectionDismiss: handleCloseCopyMenu,
+          sessionPreviewOpen,
+          sessionPreviewSessions,
+          sessionPreviewReplacementCandidates,
+          onOpenSessionPreview: handleOpenSessionPreview,
+          onCloseSessionPreview: handleCancelSessionPreview,
+          onActivatePreviewSession: handleActivateSessionFromPreview,
+          onAddPreviewSession: handleAddSessionPreview,
+          onRemovePreviewSession: handleRemoveSessionFromPreview,
+          onMovePreviewSession: handleMoveSessionPreview,
+          onReplacePreviewSession: handleReplaceSessionPreview,
+          onPreviewPrimarySessionChange: handleSessionPreviewPrimarySessionChange,
+        },
+        copyMenu: copySelection.menu && !sessionDrawerOpen
+          ? {
+              menu: copySelection.menu,
+              viewportWidth,
+              headerTopInsetPx,
+              startRowIndex: copySelection.startRowIndex,
+              onSetStart: handleCopySelectionStart,
+              onSetEnd: handleCopySelectionEnd,
+              onCopy: handleCopySelectedText,
+              onClose: handleCloseCopyMenu,
             }
-          >
-            {quickBarNode}
-          </TerminalQuickBarShell>
-        ) : null}
-      </div>
+          : null,
+        bottomProjection: (
+          <>
+            {!sessionDrawerOpen && renderDebugConsole ? renderDebugConsole(debugOverlayProps) : null}
+            {renderRemoteWindow ? renderRemoteWindow({
+              activeSessionId: uiSessionId,
+              appForegroundActive,
+              streamInvalidation: remoteWindowStreamInvalidation,
+              requestTargets: onRequestRemoteWindowTargets,
+              startStream: onRequestRemoteWindowStreamStart,
+              updateStreamQuality: onUpdateRemoteWindowStreamQuality,
+              updateFocus: onUpdateRemoteWindowFocus,
+              stopStream: onStopRemoteWindowStream,
+              requestScreenshot: handleRequestRemoteWindowScreenshot,
+              sendInput: onSendRemoteWindowInput,
+              resizeTargetWindow: onResizeRemoteWindowTarget,
+              onInputDebug: recordRemoteWindowInputDebug,
+              bottomInsetPx: terminalChromeBottomPx + terminalImeLiftPx,
+              bottomChromeInsetPx: terminalChromeBottomPx,
+              onOpenStateChange: handleRemoteWindowOverlayOpenStateChange,
+              onBodySubscriptionSuppressedChange: handleRemoteWindowBodySubscriptionSuppressedChange,
+              onInputContextChange: handleRemoteWindowInputContextChange,
+              onRequestKeyboard: handleRemoteWindowRequestKeyboard,
+              onVideoDebug: recordRemoteWindowVideoDebug,
+              onRemoteWindowMessage,
+            }) : null}
+          </>
+        ),
+        quickBarShell: {
+          visible: !sessionDrawerOpen && Boolean(quickBarNode),
+          bottomPx:
+            quickBarShellKeyboardLiftPx
+            + layoutProfile.quickBar.touchSafeOffsetPx
+            + terminalBottomChromeLiftPx,
+          zIndex: remoteWindowInputContext ? 96 : 10,
+          centered: Boolean(remoteWindowInputContext),
+          children: quickBarNode || null,
+        },
+      }) : null}
       <TabManagerSheet
         open={tabManagerOpen}
         sessions={
@@ -3541,22 +3573,18 @@ function TerminalPageComponent({
           onRunNow={(jobId) => onRunScheduleJobNow?.(scheduleComposerTarget.sessionId, jobId)}
         />
       ) : null}
-      {terminalActionSession && onSendMessage && onFileTransferMessage ? (
-        <FileTransferSheet
-          open={fileTransferOpen}
-          remoteCwd=""
-          mode={fileTransferMode}
-          daemonFileScopeId={
-            terminalActionSession.daemonHostId
-              ? `daemon:${terminalActionSession.daemonHostId}`
-              : `endpoint:${terminalActionSession.bridgeHost}:${terminalActionSession.bridgePort}`
-          }
-          terminalShellSkin={effectiveTerminalShellSkin}
-          onClose={() => setFileTransferOpen(false)}
-          sendJson={sendFileTransferMessage}
-          onFileTransferMessage={onFileTransferMessage}
-        />
-      ) : null}
+      {terminalActionSession && onSendMessage && onFileTransferMessage && renderFileBrowser ? renderFileBrowser({
+        open: fileTransferOpen,
+        remoteCwd: '',
+        mode: fileTransferMode,
+        daemonFileScopeId: terminalActionSession.daemonHostId
+          ? `daemon:${terminalActionSession.daemonHostId}`
+          : `endpoint:${terminalActionSession.bridgeHost}:${terminalActionSession.bridgePort}`,
+        terminalShellSkin: effectiveTerminalShellSkin,
+        onClose: () => setFileTransferOpen(false),
+        sendJson: sendFileTransferMessage,
+        onFileTransferMessage,
+      }) : null}
       <AttachmentDrawer
         open={attachmentDrawerOpen}
         topInsetPx={headerTopInsetPx}
@@ -3620,6 +3648,7 @@ function terminalPagePropsEqual(
     && prev.onRequestRemoteWindowTargets === next.onRequestRemoteWindowTargets
     && prev.onRequestRemoteWindowStreamStart === next.onRequestRemoteWindowStreamStart
     && prev.onUpdateRemoteWindowStreamQuality === next.onUpdateRemoteWindowStreamQuality
+    && prev.onUpdateRemoteWindowFocus === next.onUpdateRemoteWindowFocus
     && prev.onStopRemoteWindowStream === next.onStopRemoteWindowStream
     && prev.onSendRemoteWindowInput === next.onSendRemoteWindowInput
     && prev.onResizeRemoteWindowTarget === next.onResizeRemoteWindowTarget
@@ -3647,6 +3676,12 @@ function terminalPagePropsEqual(
     && prev.onTerminalWidthModeChange === next.onTerminalWidthModeChange
     && prev.onSendMessage === next.onSendMessage
     && prev.onFileTransferMessage === next.onFileTransferMessage
+    && prev.renderDebugConsole === next.renderDebugConsole
+    && prev.renderSessionDrawer === next.renderSessionDrawer
+    && prev.renderFileBrowser === next.renderFileBrowser
+    && prev.renderRemoteWindow === next.renderRemoteWindow
+    && prev.renderQuickBar === next.renderQuickBar
+    && prev.renderTerminalShell === next.renderTerminalShell
     && prev.shortcutSmartSort === next.shortcutSmartSort
     && prev.shortcutFrequencyMap === next.shortcutFrequencyMap
     && prev.onShortcutUse === next.onShortcutUse

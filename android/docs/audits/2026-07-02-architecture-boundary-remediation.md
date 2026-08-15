@@ -43,12 +43,14 @@ Owner:
 - `src/server/terminal-bridge-runtime.ts`
 - `src/server/terminal-message-runtime.ts`
 - `src/server/terminal-mirror-runtime.ts`
+- `src/server/daemon-buffer-publisher-runtime.ts`
 
 Allowed:
 - tmux canonical buffer truth
 - transport/session facts owned by daemon
 - input receive/write queue
 - mirror snapshot and live sync
+- per-subscriber buffer-sync publication state, backpressure, head fanout, and frame split
 
 Forbidden:
 - client viewport policy outside the single adaptive width lease owner
@@ -58,26 +60,95 @@ Forbidden:
 
 Boundary rule:
 - daemon may read client intent for one request, but must not keep client policy as long-lived mirror/session truth. `adaptive-phone` wire fields may only become physical transport subscriber lease metadata `{ cols, heartbeatAt }`; only `terminal-mirror-runtime.ts` adaptive lease owner may aggregate the narrowest active cols and request tmux `resize-window -x`. It must not self-write mirror geometry/content, write `@zterm_adaptive_width_*`, or let `mirror-fixed`/foreground/background/viewport become daemon truth.
+- `daemon.buffer_publisher` owns subscriber publication only. It must not capture source, commit mirror truth, or read client gap/viewport/follow policy.
+
+### 2a. Daemon Control Block
+
+Owner:
+- `src/server/daemon-control-gateway-runtime.ts`
+- `src/server/daemon-control-center-runtime.ts`
+- `src/server/terminal-message-control-runtime.ts` (schedule/tmux owner adapters)
+
+Allowed:
+- authenticated typed control ingress
+- capability/deadline/idempotency/correlation/unique routing/audit
+- schedule and tmux control owner execution
+
+Forbidden:
+- mirror/transport/file/remote-window/renderer ownership
+- control metadata or debug state inside business request/response payload
+- duplicate schedule/tmux routing paths in `terminal-message-runtime.ts`
+- business truth or terminal/file/media bodies inside control commands
+
+Boundary rule:
+- `daemon.control_gateway` routes legacy wire control intents to `daemon.control_center`; the control center is only a router and policy boundary, never a god object or data owner.
+
+### 2b. Daemon Session Catalog Block
+
+Owner:
+- `src/server/daemon-session-catalog-runtime.ts`
+
+Allowed:
+- backend session enumeration and backend-qualified `sessionCatalog` rows
+- `list-sessions` control dispatch with legacy `sessions` payload
+- list-time `session-activity` fact publication through the idle facts owner
+
+Forbidden:
+- client active/session, open-tab, foreground, viewport, renderer, or UI truth
+- mirror store, transport subscriber, buffer, or renderer ownership
+- a second list-sessions/catalog construction implementation in
+  `terminal-message-runtime.ts` or `terminal-message-control-runtime.ts`
+
+Boundary rule:
+- `daemon.control_gateway` delegates `list-sessions` to
+  `daemon.session_catalog`; `daemon.schedule_runtime` consumes only the shared
+  `buildSessionsCatalogPayload` boundary for republish. The catalog owner is a
+  backend truth projection, not a client session state machine.
 
 ### 3. Client Rendering And Buffer Block
 
 Owner:
 - `src/contexts/session-context-buffer-runtime.ts`
-- `src/components/TerminalView.tsx`
+- `src/lib/session-buffer-store.ts`
 - `src/lib/session-render-gate.ts`
+- `src/lib/session-render-buffer-store.ts`
+- `src/components/TerminalView.tsx`
+- `src/components/terminal/VisibleRow.tsx`
+- `src/components/terminal/TerminalPreviewRow.tsx`
+- `src/components/useMirrorFixedZoomPan.ts`
+- `packages/shared/src/terminal/cell-render.ts`
+- `packages/shared/src/terminal/theme.ts`
+- `src/pages/TerminalPageStageShell.tsx`
+- `src/pages/terminal-page-shell-ui.tsx`
+- `src/pages/terminal-page-status-helpers.ts`
+- `src/pages/useTerminalPageShellActionsRuntime.ts`
+- `src/pages/useTerminalPageCopyRuntime.ts`
+- `src/pages/terminal-copy-selection.ts`
+- `src/pages/terminal-page-render-keys.ts`
+- `src/pages/terminal-page-quickbar-adapters.ts`
+- `src/pages/terminal-keyboard-lift.ts`
+- `src/pages/TerminalPageQuickBarAssembly.tsx`
+- `src/pages/TerminalPageCopyMenu.tsx`
+- `src/pages/TerminalConnectionStatusStrip.tsx`
+- `src/lib/terminal-shell-skin.ts`
 
 Allowed:
 - visible range repair
 - local sparse buffer merge
-- renderer follow/reading state
+- renderer window follow/reading/renderBottomIndex and immutable snapshot
+- DOM renderer snapshot-to-DOM projection
+- terminal shell stage/status/quickbar/copy/keyboard-lift projection
 
 Forbidden:
 - transport pull from renderer directly
+- sparse/render truth in terminal shell
+- DOM renderer request policy or follow/reading state
 - daemon truth mutation
 - fallback sync that hides missing buffer truth
 
 Boundary rule:
 - only buffer-sync apply may repaint body.
+- `client.sparse_buffer` owns absolute-row truth; `client.renderer_window` owns visible-window truth; `client.dom_renderer` owns immutable render snapshot to DOM; `client.terminal_shell` owns shell projection and user intent only.
 
 ### 4. UI Projection Block
 

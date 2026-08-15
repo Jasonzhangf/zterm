@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ComponentProps } from 'react';
 import { SettingsPage } from './SettingsPage';
+import { AppUpdateSection } from '../components/settings/AppUpdateSection';
 import type { BridgeSettings, TraversalRelayClientSettings } from '../lib/bridge-settings';
 import { DEFAULT_TERMINAL_CACHE_LINES } from '../lib/mobile-config';
 
@@ -88,6 +89,7 @@ function renderSettings(overrides: Partial<ComponentProps<typeof SettingsPage>> 
       onResetUpdateIgnorePolicy={vi.fn()}
       onTerminalThemeChange={vi.fn()}
       onBack={vi.fn()}
+      renderSettingsUpdate={(props) => <AppUpdateSection {...props} />}
       {...overrides}
     />,
   );

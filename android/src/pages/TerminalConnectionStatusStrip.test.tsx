@@ -39,6 +39,16 @@ describe('TerminalConnectionStatusStrip', () => {
     expect(screen.getByTestId('terminal-connection-status-session').textContent).toBe('shared');
   });
 
+  it('renders on the second portrait top row so Sessions and status cannot overlap', () => {
+    render(
+      <TerminalConnectionStatusStrip
+        session={makeSession()}
+        topInsetPx={0}
+      />,
+    );
+    expect(screen.getByTestId('terminal-connection-status-strip').style.top).toBe('50px');
+  });
+
   it('renders nothing without a session', () => {
     const { container } = render(
       <TerminalConnectionStatusStrip session={null} topInsetPx={0} />,
@@ -94,7 +104,10 @@ describe('TerminalConnectionStatusStrip', () => {
     const input = await screen.findByTestId('rename-dialog-input');
     fireEvent.change(input, { target: { value: 'renamed' } });
     fireEvent.click(screen.getByRole('button', { name: '确认重命名' }));
-    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('rename failed'));
+    await waitFor(() => expect(screen.getByTestId('rename-dialog-error').textContent).toContain('rename failed'));
+    expect(screen.getByTestId('terminal-connection-status-session').textContent).toBe('shared');
+    expect(screen.getByTestId('rename-dialog-input')).toBeTruthy();
+    expect(alertSpy).not.toHaveBeenCalled();
     alertSpy.mockRestore();
   });
 });

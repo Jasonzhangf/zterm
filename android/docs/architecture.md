@@ -41,7 +41,12 @@
   - foreground / background / tab switch 不得成为客户端 fresh recreate transport 的理由
 - Schedule/Automation：per-session 定时任务定义、下次触发时间计算、启停与结果状态
 - File Transfer：`client.file_browser` 只拥有文件浏览投影、请求和有界流控；`client.runtime` 的 native storage plugin 只拥有本地文件字节；`daemon.file_transfer` 只拥有远端文件状态和累计 ACK。文件同步必须走现有 target mux/physical transport，不得新建 session 或 WebSocket。
-- 上述三个名称是 `module_id`，其资源唯一 owner 由 `docs/module-registry.json#owned_resources` 机器锁定：`resource.client_file_browser -> client.file_browser`、`resource.client_native_file_store -> client.runtime`、`resource.file_transfer -> daemon.file_transfer`。跨端产品能力沿用 `feature_id=daemon.file_transfer`，但该 feature id 不是资源的 daemon-side module owner；不得据此把客户端文件字节或 UI 投影下放到 daemon。
+- File Transfer UI：`client.file_browser` 同时拥有 `resource.file_browser_ui_contract`，`terminal.file-browser` UI slot 由 `FileBrowserUiPlugin` 经 plugin host 提供；App/TerminalPage 只读取 typed slot render callback，TerminalPage 不再直接 import/render `FileTransferSheet`。file transfer 的 wire/send 与 open/mode shell intent 仍由 TerminalPage 的既有 owner 传入 callback props。
+- Settings Update UI：`client.settings_update` 同时拥有 `resource.settings_update_ui_contract`，`settings.update` UI slot 由 `SettingsUpdateUiPlugin` 经 plugin host 提供；App/SettingsPage 只读取 typed slot render callback，SettingsPage 不再直接 import/render `AppUpdateSection`。settings/config/update 的 hook 与 runtime 仍由既有 owner 传入 callback props。
+- Remote Window UI：`client.remote_window_ui` 拥有 `resource.remote_window_ui_contract`，`terminal.remote-window` UI slot 由 `RemoteWindowUiPlugin` 经 plugin host 提供；App/TerminalPage 只读取 typed slot render callback，TerminalPage 不再直接 import/render `RemoteWindowOverlay`。remote-window 的 catalog/stream/quality/touch/session callback 仍由 TerminalPage 的既有 owner 传入 callback props。
+- Quickbar UI：`client.quickbar_ui` 拥有 `resource.quickbar_ui_contract`，`terminal.quickbar` UI slot 由 `QuickBarUiPlugin` 经 plugin host 提供；App/TerminalPage 只读取 typed slot render callback，TerminalPage 不再直接 import/render `TerminalQuickBar`。quickbar 的 action/IME 输入仍由 TerminalPage 的既有 owner 经 `platform_input_channel` 传入 callback props，TerminalQuickBar 组件仍由 `client.input_runtime` 拥有其输入契约表面。
+- Terminal Shell UI：`client.terminal_shell_ui` 拥有 `resource.terminal_shell_ui_contract`，`terminal.shell` UI slot 由 `TerminalShellUiPlugin` 经 plugin host 提供；App/TerminalPage 只读取 typed slot render callback，TerminalPage 不再直接 import/render `TerminalConnectionStatusStrip`、`TerminalPageCopyMenu`、`TerminalPageStageShell`、`terminal-page-shell-ui`、`TerminalQuickBarShell` 或 `TerminalNetworkBanner`。status/stage/copy/quickbar-shell 的 shell projection props 仍由 TerminalPage 的既有 owner 传入 callback props，terminal shell 组件仍由 `client.terminal_shell` 拥有其实现表面。
+- 上述 UI 插件名称是 `module_id`，其资源唯一 owner 由 `docs/module-registry.json#owned_resources` 机器锁定：`resource.client_file_browser -> client.file_browser`、`resource.client_native_file_store -> client.runtime`、`resource.file_transfer -> daemon.file_transfer`、`resource.remote_window_ui_contract -> client.remote_window_ui`、`resource.quickbar_ui_contract -> client.quickbar_ui`、`resource.terminal_shell_ui_contract -> client.terminal_shell_ui`。跨端产品能力沿用 `feature_id=daemon.file_transfer`，但该 feature id 不是资源的 daemon-side module owner；不得据此把客户端文件字节或 UI 投影下放到 daemon。
 - File Transfer 不变量：
   - `contracts/file-transfer-throughput.json` 是上传窗口和 native 批量上限的唯一机器真源；TypeScript 直接导入，Android Gradle 绑定为 `BuildConfig`，禁止 TS/Java 各自维护数字常量
   - wire chunk 固定 16 KiB，不以增大单帧突破 RTC DataChannel 上限
@@ -71,10 +76,19 @@
 - `mirror-fixed` 下左右滑切 tab 仍由 shell interaction owner 负责；当前 mobile 端若没有独立 horizontal pan 手势链占用，swipe 必须保持可用，不得出现无交互出口的禁用态
 - Android Shell：Capacitor、通知、后台服务
 - Server：本地 Mac/PC 上的 tmux → WebSocket 桥接；只维护 tmux canonical buffer / mirror / transport connection / daemon 自身文件与调度真源，不持有任何客户端状态机
-- Server live mirror cadence 只允许由 daemon 物理事实决定：健康 subscriber 存在时保持 active capture cadence；无 subscriber、失败/backoff、transport backpressure、capture cost 过高才允许降速。daemon 不读取 client active/visible/follow 状态，也不得用“最近无内容变化”把 ready mirror 降到 idle。
+- Herdr source adapter 是唯一显式 history/live 分层例外：官方 `pane read recent` 的 tail history 与 canonical frame 的 live visible tail 只在 adapter 内合并成一个 `TerminalSourceMirrorSnapshot`；`daemon.mirror_writer` 通过 `daemon.source_adapter` 消费单一 adapter readback，禁止再拆第二语义或把 1000 行 history 放进 33ms capture loop
+- Daemon Mirror Writer：`daemon.mirror_writer` 是 validated source capture 与 authoritative mirror snapshot commit write 的唯一 owner，位于 `src/server/terminal-mirror-capture.ts`；`daemon.mirror_store` 继续唯一持有 canonical mirror truth、revision 与 runtime scheduling，不得存在第二个 snapshot writer 或让 store 重新实现 capture/commit
+- Server live mirror cadence 只允许由 daemon 物理事实决定：健康 subscriber 存在时保持 active capture cadence；无 subscriber、失败/backoff、capture cost 过高才允许降速。transport backpressure 只由 `daemon.buffer_publisher` 做 per-subscriber pending/flush 处理，不得拖低 mirror capture cadence。daemon 不读取 client active/visible/follow 状态，也不得用“最近无内容变化”把 ready mirror 降到 idle。
 - Server daemon 启动入口：`scripts/zterm-daemon.sh`
 - Screenshot Helper：运行在 macOS GUI session 的独立截图执行主体；只接受 daemon 本机 IPC 请求，不承载 tmux/session 真相
 - Remote Window Stream：daemon/native side owns app/window catalog, iTerm2 pane coordinate truth, ScreenCaptureKit capture, WebRTC sender lifecycle, and remote input injection policy. Android floating/fullscreen overlay only projects picker/stream UI and emits explicit intents.
+- Client Plugin Host：`client.plugin_host` 是唯一生产插件生命周期 owner，只通过 declared capabilities 向插件注入能力；`shared.plugin_contract` 只持有 manifest/capability registry 契约。App 是唯一生产组合消费点；UI/page/hook/plugin 层不得直接 import host 或共享 plugin contract，插件也不得访问 raw socket/store/backend/UI truth。Phase 6 边界与目标态见 `docs/design/2026-08-14-zterm-runtime-architecture-v2.md`。
+- Client UI Plugin Slots：`terminal.debug-console`、`terminal.session-drawer`、`terminal.file-browser`、`settings.update`、`terminal.remote-window` 都通过 typed UI slot registry 提供；App 在 `PluginHost.startAll` 完成后读取 slot callback，TerminalPage/SettingsPage 只按 typed contract 消费 plugin-provided render，不直接 import 对应 sheet/overlay/drawer/update/remote-window 组件。
+- Client Composition Root：`client.composition_root` 只拥有 declared runtime ports 的 bind/resolve/validate；App 通过它组合 `plugin-host` 等已声明端口，重复、未绑定、缺失端口在使用前显式失败。它不得拥有 transport/session/buffer/renderer/plugin 实现或业务 truth。
+- Client Control Center：`client.control_center` 是客户端控制命令的唯一 routing/policy 边界，负责 capability/authorization、deadline、idempotency、correlation、唯一 command owner 与有界 audit；`shared.control_contract` 只持有 branded command/result/correlation/deadline/audit 契约。App 的 plugin-host dispose 必须经 control center 路由到 `PluginHostControlNode`，不得由 App 直接调用 `disposeAll`。control center 不持有 transport/session/buffer/renderer/plugin 业务 truth，也不接受 terminal/file/media body。
+- Daemon Control：`daemon.control_gateway` 持有认证后的 typed control ingress 与 daemon command owner 注册；`daemon.control_center` 负责 capability/deadline/idempotency/correlation/唯一 routing 与有界 audit。schedule/tmux control 必须经 gateway -> control center -> 唯一 owner，`terminal-message-runtime.ts` 不得保留第二套 schedule/tmux 控制实现。控制层不持有 mirror/transport/file/media body，也不得把控制元数据写入业务 payload。
+- Daemon Buffer Publisher：`daemon.buffer_publisher` 是 mirror 到 physical transport subscriber 的唯一正文发布边界，拥有 per-subscriber pending-latest、range merge/collapse、backpressure hysteresis、head broadcast cache、oversized contiguous same-revision frame split、trace stages 与显式 flush status；`daemon.mirror_writer` 负责 snapshot commit writes，`daemon.mirror_store` 负责 revision 与 runtime scheduling，发布只消费当前 mirror truth，不拥有 subscriber 发布状态。
+- Daemon Session Catalog：`daemon.session_catalog` 是 backend session catalog 与 `list-sessions` control dispatch 的唯一 owner，通过 `src/server/daemon-session-catalog-runtime.ts` 构造 backend-qualified `sessionCatalog` rows，发布 legacy `sessions` payload 与 list-time `session-activity` facts。`daemon.control_gateway` 只能委托该 owner；`daemon.schedule_runtime` 只消费共享 catalog builder 做 republish，不拥有 catalog truth。daemon 不得让 catalog 持有 client active/session、mirror、transport subscriber、renderer 或 UI truth。
 
 ## 跨尺寸布局真源
 
@@ -407,11 +421,20 @@ daemon server
         ├─ 决定补 diff / 直接跳到当前 visible window / visible gap repair
         └─ 维护本地 1000 行 sparse sliding buffer + line/range patch
                 ↓
-      renderer
+      client sparse buffer
+        └─ absolute-row immutable truth / gap ranges / visible-range repair plan
+                ↓
+      renderer window
         ├─ follow / reading
         ├─ renderBottomIndex
         ├─ visible range
-        └─ render window
+        └─ immutable render snapshot
+                ↓
+      DOM renderer
+        └─ TerminalView / VisibleRow / TerminalPreviewRow / mirror-fixed zoom-pan / cell render / theme
+                ↓
+      terminal shell
+        └─ stage shell / status / quickbar assembly / copy menu / keyboard lift
                 ↓
       UI shell
         └─ 容器位置 / 裁切 / IME 抬升
@@ -419,7 +442,7 @@ daemon server
 
 规则：
 
-- daemon 是 tmux mirror；normal/follow 正文刷新由 daemon mirror truth commit 后主动 broadcast `buffer-sync` 驱动；reading/gap repair 才由 client 发 `buffer-sync-request` 拉取；daemon 不做客户端策略
+- daemon 是 tmux mirror；normal/follow 正文刷新由 daemon mirror truth commit 后经 `daemon.buffer_publisher` 主动 broadcast `buffer-sync` 驱动；reading/gap repair 才由 client 发 `buffer-sync-request` 拉取；daemon 不做客户端策略
 - `buffer-head` 只允许更新 head metadata / cursor metadata / pull planner 输入；不允许作为正文 repaint 触发源
 - client render gate 只允许 `buffer-sync apply -> schedule render commit`
 - daemon 不得碰：
@@ -440,6 +463,10 @@ daemon server
 - renderer 不修改 buffer，不参与 transport 规划，不直接 request daemon
 - 用户上滚进入 reading；重新进入 / 下滚到底 / 输入退出 reading 回 follow
 - renderer 遇到 gap 先画空白占位；buffer manager 补齐后只推对应行/区间 patch，renderer 自己决定局部刷新
+- `client.renderer_window` 是 renderer window 唯一 owner；`client.dom_renderer` 只把 immutable render snapshot 投影成 DOM；`client.terminal_shell` 只投影 shell 与用户 intent
+- `client.dom_renderer` 不得请求 transport、修改 sparse truth 或自行决定 follow/reading/renderBottomIndex；`client.terminal_shell` 不得持有 sparse/render 真源
+- `client.input_normalizer` 是 committed-text normalization 唯一 owner，只做纯文本转换（CJK/emoji/符号保留、全角标点/全角空格、IME 换行），不得持有或导入 session transport、daemon target transport、backend session、tmux、mirror 真源
+- `client.reliable_input` 是 reliable terminal input queue 唯一 owner，物理真源在 `src/lib/reliable-input/reliable-input-queue.ts`；`session-context-input-runtime.ts` 只保留薄桥发送/转义入口，不得重新持有 seq/ACK/retry/queue 真源
 - UI shell 只移动容器；IME 不得进入 buffer / render 真相链
 
 ## Connection / Session 真源

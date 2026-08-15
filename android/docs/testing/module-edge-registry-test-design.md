@@ -15,7 +15,7 @@ resource registry -> module registry -> edge registry -> function map -> mainlin
 | lifecycle | positive path | negative path |
 | --- | --- | --- |
 | Daemon target connection | `client.session_runtime -> client.daemon_connection -> client.terminal_channel_mux -> daemon.transport_subscriber` | UI, drawer, picker, remote-window catalog, or file transfer opens a separate socket. |
-| Terminal body render | `daemon.mirror_store -> daemon.transport_subscriber -> client.buffer_store -> client.renderer_window -> client.app_shell` | Renderer reads tmux/mirror directly, buffer store clears/rebuilds UI truth, or transport writes client sparse buffer without channel demux. |
+| Terminal body render | `daemon.mirror_store -> daemon.transport_subscriber -> client.buffer_frame_assembly -> client.sparse_buffer -> client.renderer_window -> client.app_shell` | Renderer reads tmux/mirror directly, buffer store duplicates sparse body truth, or transport writes client sparse buffer without channel demux. |
 | Remote-window control | `client.app_shell -> client.remote_window_overlay -> remote_window_touch_action -> daemon.remote_window_stream` | Overlay claims input success without action dispatch evidence, or daemon stream uses terminal mirror rows as video/control truth. |
 | Relay resume | `relay.peer_lease -> transport_target -> daemon_target_transport` | Relay stores terminal channel, subscriber, tmux, mirror, active tab, foreground, viewport, or UI truth. |
 | Release/start | `release_update_artifact -> daemon_runtime_artifact -> daemon_process` | Runtime executes authoring source or release artifact starts daemon process directly. |
@@ -56,6 +56,7 @@ resource registry -> module registry -> edge registry -> function map -> mainlin
   - session switch opens/resumes only terminal channels, not a new physical socket.
   - drawer/session-picker/remote-window catalog use the same daemon connection interface.
 - Buffer/render gate:
+  - `daemon.mirror_writer` owns validated capture and authoritative snapshot commit writes; `daemon.mirror_store` owns canonical mirror revision and runtime scheduling and does not re-own capture.
   - mirror patch reaches sparse buffer only through channel/subscriber path.
   - renderer visible range remains the only visible-window truth.
   - body repaint never comes from head metadata alone.

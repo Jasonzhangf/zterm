@@ -19,9 +19,12 @@ ImeAnchor native explicit show policy
 Mainline call ids:
 
 - `android_mainline:App->TerminalPage`
-- `android_mainline:TerminalPage->QuickBar`
+- `android_mainline:TerminalPage->SessionContext`
+- `android_mainline:TerminalPage->InputNormalizerIn01CommittedText`
+- `android_mainline:TerminalView->InputNormalizerIn01CommittedText`
+- `android_mainline:InputNormalizerIn01CommittedText->InputNormalizerOut02NormalizedText`
 - `android_mainline:TerminalPage->StageShell`
-- `android_mainline:TerminalPage->TerminalView`
+- `android_mainline:StageShell->TerminalView`
 
 Owner feature: `terminal.keyboard_ime`.
 

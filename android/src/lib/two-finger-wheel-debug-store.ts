@@ -1,24 +1,12 @@
+import type { TwoFingerWheelDebugSnapshot } from './types';
+
 /**
  * Process-wide singleton snapshot of the two-finger mouse wheel gesture state
  * inside TerminalView. The debug overlay reads from this store to surface what
  * the gesture layer actually did, so the user can confirm whether a touch
  * gesture was detected, filtered, or aborted.
  */
-export type TwoFingerWheelDebugSnapshot = {
-  active: boolean;
-  lockedDirection: "up" | "down" | null;
-  initialSpanPx: number;
-  accumulatedDeltaPx: number;
-  lastSentDirection: "up" | "down" | null;
-  lastSentAt: number | null;
-  startCalls: number;
-  moveCalls: number;
-  endCalls: number;
-  abortedCount: number;
-  sentCount: number;
-  lastReason: string;
-  lastEventAt: number;
-};
+export type { TwoFingerWheelDebugSnapshot };
 
 const EMPTY_SNAPSHOT: TwoFingerWheelDebugSnapshot = {
   active: false,

@@ -33,6 +33,30 @@ export interface HerdrProcessSessionAdapter {
   transport: HerdrProcessTransport;
 }
 
+export const HERDR_SCROLL_METRICS_THROTTLE_MS = 100;
+
+export function shouldRefreshHerdrScrollMetrics(
+  now: number,
+  lastReadAt: number,
+  frameHeight: number,
+  lastMetrics: HerdrScrollMetrics | null,
+) {
+  return !lastMetrics
+    || lastMetrics.viewportRows !== frameHeight
+    || now - lastReadAt >= HERDR_SCROLL_METRICS_THROTTLE_MS;
+}
+
+export function shouldPublishHerdrScrollMetrics(
+  now: number,
+  lastReadAt: number,
+  frameHeight: number,
+  lastMetrics: HerdrScrollMetrics | null,
+) {
+  return now === lastReadAt
+    && lastMetrics !== null
+    && lastMetrics.viewportRows === frameHeight;
+}
+
 function waitForHerdrReadinessWindow(milliseconds: number) {
   const signal = new Int32Array(new SharedArrayBuffer(4));
   Atomics.wait(signal, 0, 0, milliseconds);
@@ -123,6 +147,43 @@ export function parseHerdrScrollMetrics(raw: string): HerdrScrollMetrics {
   };
 }
 
+export function parseHerdrPaneGeometry(raw: string, paneId: string, sessionName: string) {
+  const response = JSON.parse(raw) as {
+    result?: {
+      snapshot?: {
+        layouts?: Array<{
+          panes?: Array<{
+            pane_id?: string;
+            rect?: { width?: unknown; height?: unknown };
+          }>;
+        }>;
+      };
+    };
+  };
+  const candidates = (response.result?.snapshot?.layouts || []).flatMap((layout) =>
+    (layout.panes || [])
+      .filter((pane) => pane.pane_id === paneId)
+      .map((pane) => pane.rect),
+  );
+  if (candidates.length !== 1) {
+    throw new Error(
+      `Herdr named session ${sessionName} does not have one unambiguous layout rect for pane ${paneId} (${candidates.length} matches)`,
+    );
+  }
+  const rect = candidates[0]!;
+  const isPositiveInteger = (value: unknown): value is number =>
+    Number.isInteger(value) && (value as number) > 0;
+  if (!isPositiveInteger(rect?.width) || !isPositiveInteger(rect?.height)) {
+    throw new Error(
+      `Herdr named session ${sessionName} has an invalid layout rect for pane ${paneId}: ${raw}`,
+    );
+  }
+  return {
+    cols: rect.width,
+    rows: rect.height,
+  };
+}
+
 function resolvePaneIdFromList(raw: string, terminalId: string) {
   const response = JSON.parse(raw) as {
     result?: { panes?: Array<{ pane_id?: string; terminal_id?: string }> };
@@ -178,6 +239,37 @@ export function startHerdrProcessTransport(
   if (attachScrollMetrics && !paneId) {
     paneId = resolvePaneIdFromList(runCli(['pane', 'list']), terminalId);
   }
+  let lastScrollMetrics: HerdrScrollMetrics | null = null;
+  let lastScrollMetricsReadAt = 0;
+
+  const attachScrollMetricsToFrame = (
+    message: Extract<HerdrSourceMessage, { type: 'terminal.frame' }>,
+  ) => {
+    const now = Date.now();
+    const shouldRead = shouldRefreshHerdrScrollMetrics(
+      now,
+      lastScrollMetricsReadAt,
+      message.height,
+      lastScrollMetrics,
+    );
+    if (shouldRead) {
+      try {
+        lastScrollMetrics = parseHerdrScrollMetrics(runCli(['pane', 'get', paneId]));
+        lastScrollMetricsReadAt = now;
+      } catch {
+        // A metrics read cannot invalidate or drop a frame: doing so would
+        // manufacture a transport sequence gap. The frame remains valid;
+        // host metrics only affect viewport-relative cursor capability.
+        lastScrollMetrics = null;
+        lastScrollMetricsReadAt = now;
+      }
+    }
+    if (shouldPublishHerdrScrollMetrics(now, lastScrollMetricsReadAt, message.height, lastScrollMetrics)) {
+      const scroll = lastScrollMetrics;
+      if (scroll) return { ...message, scroll };
+    }
+    return message;
+  };
 
   const controller = spawn(executable, [
     ...argsPrefix,
@@ -202,22 +294,7 @@ export function startHerdrProcessTransport(
       try {
         const message = JSON.parse(line) as HerdrSourceMessage;
         if (message.type === 'terminal.frame' && attachScrollMetrics) {
-          try {
-            const scroll = parseHerdrScrollMetrics(runCli(['pane', 'get', paneId]));
-            if (scroll.viewportRows === message.height) {
-              onMessage({ ...message, scroll });
-            } else {
-              // pane.get and terminal.frame are independent streams. Preserve
-              // the authoritative frame; the canonicalizer owns absolute rows
-              // from its VT scrollback state.
-              onMessage(message);
-            }
-          } catch (error) {
-            // A metrics read cannot invalidate or drop a frame: doing so would
-            // manufacture a transport sequence gap. The frame remains valid;
-            // host metrics only affect viewport-relative cursor capability.
-            onMessage(message);
-          }
+          onMessage(attachScrollMetricsToFrame(message));
         } else {
           onMessage(message);
         }

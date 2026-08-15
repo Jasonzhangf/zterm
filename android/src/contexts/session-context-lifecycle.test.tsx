@@ -14,6 +14,7 @@ import {
 } from './session-context-lifecycle';
 import { createSessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import { createSessionReconnectStore } from '../lib/session-reconnect-store';
+import { createTerminalChannelMuxStore } from '../lib/terminal-channel-mux-runtime';
 
 describe('session-context-lifecycle', () => {
   afterEach(() => {
@@ -264,7 +265,13 @@ describe('session-context-lifecycle', () => {
           },
           scheduleStatesRef: { current: {} },
           sessionDebugMetricsStoreRef: { current: { refresh: () => ({}) } },
-          transportRuntimeStoreRef: { current: { targets: new Map(), sessions: new Map() } },
+          transportRuntimeStoreRef: {
+            current: {
+              targets: new Map(),
+              sessions: new Map(),
+              terminalChannels: createTerminalChannelMuxStore(),
+            },
+          },
           sessionPullStateRef: { current: new Map() },
           lastActivatedSessionIdRef: { current: 's1' },
           lastActiveReentryAtRef: { current: new Map() },
@@ -337,7 +344,13 @@ describe('session-context-lifecycle', () => {
           },
           scheduleStatesRef: { current: {} },
           sessionDebugMetricsStoreRef: { current: { refresh: () => ({}) } },
-          transportRuntimeStoreRef: { current: { targets: new Map(), sessions: new Map() } },
+          transportRuntimeStoreRef: {
+            current: {
+              targets: new Map(),
+              sessions: new Map(),
+              terminalChannels: createTerminalChannelMuxStore(),
+            },
+          },
           sessionPullStateRef: { current: new Map() },
           lastActivatedSessionIdRef: { current: 's1' },
           lastActiveReentryAtRef: { current: new Map() },
@@ -404,7 +417,13 @@ describe('session-context-lifecycle', () => {
       stateRef: { current: state },
       scheduleStatesRef: { current: {} },
       sessionDebugMetricsStoreRef: { current: { refresh: () => ({}) } },
-      transportRuntimeStoreRef: { current: { targets: new Map(), sessions: new Map() } },
+      transportRuntimeStoreRef: {
+        current: {
+          targets: new Map(),
+          sessions: new Map(),
+          terminalChannels: createTerminalChannelMuxStore(),
+        },
+      },
       sessionPullStateRef: { current: new Map() },
       lastActivatedSessionIdRef: { current: 's1' },
       lastActiveReentryAtRef: { current: new Map() },
@@ -493,7 +512,13 @@ describe('session-context-lifecycle', () => {
       },
       scheduleStatesRef: { current: {} },
       sessionDebugMetricsStoreRef: { current: { refresh: () => ({}) } },
-      transportRuntimeStoreRef: { current: { targets: new Map(), sessions: new Map() } },
+      transportRuntimeStoreRef: {
+        current: {
+          targets: new Map(),
+          sessions: new Map(),
+          terminalChannels: createTerminalChannelMuxStore(),
+        },
+      },
       sessionPullStateRef: { current: new Map() },
       lastActivatedSessionIdRef: { current: 's1' },
       lastActiveReentryAtRef: { current: new Map() },
@@ -572,7 +597,13 @@ describe('session-context-lifecycle', () => {
           },
           scheduleStatesRef: { current: {} },
           sessionDebugMetricsStoreRef: { current: { refresh: () => ({}) } },
-          transportRuntimeStoreRef: { current: { targets: new Map(), sessions: new Map() } },
+          transportRuntimeStoreRef: {
+            current: {
+              targets: new Map(),
+              sessions: new Map(),
+              terminalChannels: createTerminalChannelMuxStore(),
+            },
+          },
           sessionPullStateRef: { current: new Map() },
           lastActivatedSessionIdRef: { current: 's1' },
           lastActiveReentryAtRef: { current: new Map() },

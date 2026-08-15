@@ -28,6 +28,7 @@ import type {
 import type { RemoteWindowTargetCatalogCacheStore } from './session-context-remote-window-runtime';
 import { createSessionAttachmentStore } from '../lib/session-attachment-store';
 import { createSessionAttachmentFetchRuntime } from '../lib/session-attachment-fetch-runtime';
+import { createImagePasteWaiterRuntime } from './session-context-transfer-runtime';
 import { buildDefaultDeviceId } from '../lib/traversal-relay-client';
 import type { SessionAttachmentStore } from '../lib/session-attachment-store';
 import type { SessionAttachmentFetchRuntime } from '../lib/session-attachment-fetch-runtime';
@@ -107,6 +108,7 @@ export function useSessionProviderRuntime(options: {
       console.error(`[SessionContext] fileTransfer listener error (${phase}):`, error);
     },
   }));
+  const imagePasteWaiterRuntimeRef = useRef(createImagePasteWaiterRuntime());
   const foregroundActiveRef = useRef(options.appForegroundActive !== false);
   const handleSocketConnectedBaselineRef = useRef<HandleSocketConnectedBaselineFn | null>(null);
   const finalizeSocketFailureBaselineRef = useRef<FinalizeSocketFailureBaselineFn | null>(null);
@@ -125,6 +127,7 @@ export function useSessionProviderRuntime(options: {
 
   useEffect(() => () => {
     targetNetworkProbeRuntimeRef.current.dispose();
+    imagePasteWaiterRuntimeRef.current.dispose();
   }, []);
 
   return {
@@ -160,6 +163,7 @@ export function useSessionProviderRuntime(options: {
       remoteWindowMessageRuntimeRef,
       remoteWindowReceiverRuntimeRef,
       fileTransferMessageRuntimeRef,
+      imagePasteWaiterRuntimeRef,
       foregroundActiveRef,
       handleSocketConnectedBaselineRef,
       finalizeSocketFailureBaselineRef,

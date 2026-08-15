@@ -3,14 +3,14 @@ import { describe, expect, it, vi } from 'vitest';
 import { TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES } from '@zterm/shared/terminal/input-chunking';
 import type { TerminalTransportServerFrame } from '@zterm/shared/protocol';
 import { createTerminalMessageRuntime } from './terminal-message-runtime';
-import type { TerminalMessageRuntimeDeps } from './terminal-message-runtime';
+import { createDaemonInputQueueRuntime } from './daemon-input-queue-runtime';
 import type {
   TerminalSession,
   TerminalSessionTransport,
   SessionMirror,
   TerminalTransportConnection,
 } from './terminal-runtime-types';
-import type { TerminalFileTransferRuntime } from './terminal-file-transfer-runtime';
+import type { TerminalFileTransferMessageRuntime } from './terminal-file-transfer-message-runtime';
 import type { RemoteWindowStreamDaemonRuntime } from './remote-window-stream-daemon';
 
 function createTransport(): TerminalSessionTransport {
@@ -120,16 +120,9 @@ function createReadyMirror(): SessionMirror {
   };
 }
 
-function createFileTransferRuntimeStub(): TerminalFileTransferRuntime {
+function createFileTransferMessageRuntimeStub(): TerminalFileTransferMessageRuntime {
   return {
-    handlePasteImage: vi.fn(),
-    handleFileListRequest: vi.fn(),
-    handleFileCreateDirectoryRequest: vi.fn(),
-    handleFileDownloadRequest: vi.fn(),
-    handleRemoteScreenshotRequest: vi.fn(async () => {}),
-    handleFileUploadStart: vi.fn(),
-    handleFileUploadChunk: vi.fn(),
-    handleFileUploadEnd: vi.fn(),
+    handleMessage: vi.fn(async () => {}),
     handleBinaryPayload: vi.fn(),
   };
 }
@@ -152,6 +145,7 @@ function createRuntime(options?: {
       type RemoteWindowQualityResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['updateStreamQuality']>>;
       type RemoteWindowInputResult = Awaited<ReturnType<RemoteWindowStreamDaemonRuntime['injectInput']>>;
   const sessions = new Map<string, TerminalSession>();
+  const mirrors = new Map<string, SessionMirror>();
   const sendTransportMessage = vi.fn((transport: TerminalSessionTransport | null | undefined, message: TerminalTransportServerFrame) => {
     if (
       options?.failSessionActivityPublish
@@ -168,13 +162,22 @@ function createRuntime(options?: {
   const sendBufferHeadToSession = vi.fn();
   const scheduleMirrorLiveSync = vi.fn();
   const refreshMirrorHeadForSession = vi.fn(async () => true);
-  const handleInput = vi.fn(async () => true) as unknown as ReturnType<typeof vi.fn> & TerminalMessageRuntimeDeps['handleInput'];
+  const handleInput = vi.fn(async (_session: TerminalSession, _data: string, _shouldWrite?: () => boolean) => true);
   const closeSession = vi.fn();
-  const handleClientDebugLog = vi.fn();
-  const handleClientDebugSnapshot = vi.fn();
   const handleAdaptiveResize = vi.fn();
   const daemonRuntimeDebug = vi.fn();
-  const terminalFileTransferRuntime = createFileTransferRuntimeStub();
+  const daemonInputQueue = createDaemonInputQueueRuntime({
+    sessions,
+    mirrors,
+    getMirrorKey: (sessionName: string) => sessionName,
+    sendTransportMessage,
+    sendMessage,
+    handleInput,
+    writeBackendInputGroup: vi.fn(async () => {}),
+    resolveBackendInputMaxChunkBytes: () => TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES,
+    daemonRuntimeDebug,
+  });
+  const fileTransferMessageRuntime = createFileTransferMessageRuntimeStub();
   const listRemoteWindowTargets = vi.fn(async (): Promise<RemoteWindowListTargetsResult> => ({
       requestId: 'remote-window-default',
       targets: [],
@@ -224,10 +227,8 @@ function createRuntime(options?: {
     dispose: vi.fn(),
   };
 
-  const attachmentDeliveryRuntime = {
-    listForDevice: vi.fn(async () => []),
-    readAsset: vi.fn(async () => ({ manifest: { attachmentId: 'test', kind: 'image' as const, mimeType: 'image/png', preview: { sha256: 'a', size: 1 }, original: { sha256: 'b', size: 2 } }, data: Buffer.from('') })),
-    acknowledge: vi.fn(async () => {}),
+  const attachmentMessageRuntime = {
+    handleMessage: vi.fn(async () => {}),
   };
 
   const createMuxChannelSubscriber = vi.fn((connection: TerminalTransportConnection, channelId: string) => {
@@ -244,6 +245,18 @@ function createRuntime(options?: {
     sessions.set(subscriber.id, subscriber);
     return subscriber;
   });
+  const channelMuxRuntime = {
+    createMuxChannelSubscriber,
+    ensureMuxChannels: (connection: TerminalTransportConnection) => {
+      if (!connection.muxChannels) {
+        connection.muxChannels = new Map();
+      }
+      return connection.muxChannels;
+    },
+    releaseMuxChannelSubscriber: (connection: TerminalTransportConnection, channelId: string) => {
+      connection.muxChannels?.delete(channelId);
+    },
+  };
 
   const runtime = createTerminalMessageRuntime({
     sessions,
@@ -254,17 +267,15 @@ function createRuntime(options?: {
     sendBufferHeadToSession,
     scheduleMirrorLiveSync,
     refreshMirrorHeadForSession,
-    handleInput,
+    daemonInputQueue,
     closeSession,
-    terminalFileTransferRuntime,
-    attachmentDeliveryRuntime,
+    fileTransferMessageRuntime,
+    attachmentMessageRuntime,
     remoteWindowStreamRuntime,
-    handleClientDebugLog,
-    handleClientDebugSnapshot,
-    daemonRuntimeDebug,
+    channelMuxRuntime,
     controlRuntimeDeps: {
       sessions,
-      mirrors: new Map<string, SessionMirror>(),
+      mirrors,
       issueSessionTransportToken: vi.fn(() => 'token'),
       consumeSessionTransportToken: vi.fn(() => true),
       scheduleEngine: {
@@ -286,7 +297,6 @@ function createRuntime(options?: {
       runTmux: vi.fn(() => ({ ok: true as const, stdout: '' })),
       sanitizeSessionName: vi.fn((input?: string) => input?.trim() || 'demo'),
       createTransportSubscriber: vi.fn(),
-      createMuxChannelSubscriber,
       bindConnectionToSubscriber: vi.fn(),
       getMirrorKey: vi.fn((sessionName: string) => sessionName),
       attachTmux: vi.fn(async () => {
@@ -307,19 +317,63 @@ function createRuntime(options?: {
     sendBufferHeadToSession,
     scheduleMirrorLiveSync,
     refreshMirrorHeadForSession,
-    handleClientDebugLog,
-    handleClientDebugSnapshot,
     handleInput,
     closeSession,
     handleAdaptiveResize,
     daemonRuntimeDebug,
-    terminalFileTransferRuntime,
+    fileTransferMessageRuntime,
+    attachmentMessageRuntime,
     remoteWindowStreamRuntime,
     createMuxChannelSubscriber,
+    daemonInputQueue,
   };
 }
 
 describe('terminal message runtime explicit error truth', () => {
+  it('routes attachment messages to the attachment delivery owner runtime', async () => {
+    const { runtime, attachmentMessageRuntime } = createRuntime();
+    const connection = createConnection(null);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'pending-attachments-query',
+      payload: { deviceId: 'phone-a' },
+    })));
+
+    expect(attachmentMessageRuntime.handleMessage).toHaveBeenCalledWith(
+      connection,
+      expect.objectContaining({
+        type: 'pending-attachments-query',
+        payload: { deviceId: 'phone-a' },
+      }),
+    );
+  });
+
+  it('routes file transfer transport messages to the daemon file transfer owner runtime', async () => {
+    const { runtime, sessions, fileTransferMessageRuntime } = createRuntime();
+    const session = createSession();
+    const connection = createConnection(session.id);
+    bindSessionToConnection(session, connection);
+    sessions.set(session.id, session);
+
+    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
+      type: 'file-list-request',
+      payload: {
+        requestId: 'list-router-1',
+        path: '/tmp',
+        showHidden: false,
+      },
+    })));
+
+    expect(fileTransferMessageRuntime.handleMessage).toHaveBeenCalledWith(
+      session,
+      connection,
+      expect.objectContaining({
+        type: 'file-list-request',
+        payload: expect.objectContaining({ requestId: 'list-router-1' }),
+      }),
+    );
+  });
+
   it('negotiates mux readiness and wraps target replies on the same physical transport', async () => {
     const { runtime } = createRuntime({ passThroughTransportSend: true });
     const connection = createConnection(null);
@@ -351,7 +405,7 @@ describe('terminal message runtime explicit error truth', () => {
         requestId: 'list-1',
         message: {
           type: 'sessions',
-          payload: { sessions: [] },
+          payload: { sessions: [], sessionCatalog: [] },
         },
       },
     });
@@ -461,7 +515,7 @@ describe('terminal message runtime explicit error truth', () => {
     });
   });
 
-  it('reports attach failure through the opened mux channel error path', async () => {
+  it('reports attach failure only through the mux-channel-closed control error path', async () => {
     const { runtime, closeSession } = createRuntime({
       failAttachTmux: true,
       passThroughTransportSend: true,
@@ -492,19 +546,15 @@ describe('terminal message runtime explicit error truth', () => {
         channelId: 'channel-attach-failed',
       }),
     }));
-    expect(sentFrames).toContainEqual({
+    expect(sentFrames).not.toContainEqual(expect.objectContaining({
       type: 'mux-channel-message',
       payload: {
         channelId: 'channel-attach-failed',
         message: {
           type: 'error',
-          payload: {
-            message: 'mux channel attach failed: forced attach failure',
-            code: 'mux_channel_open_failed',
-          },
         },
       },
-    });
+    }));
     // phantom channel 必须原子清理：显式 closed + registry 删除 + subscriber 关闭（禁止保留未 attach channel）
     expect(sentFrames).toContainEqual({
       type: 'mux-channel-closed',
@@ -596,7 +646,7 @@ describe('terminal message runtime explicit error truth', () => {
   });
 
   it('routes mux binary chunks only to the owning channel subscriber', async () => {
-    const { runtime, sessions, terminalFileTransferRuntime } = createRuntime();
+    const { runtime, sessions, fileTransferMessageRuntime } = createRuntime();
     const connection = createConnection(null);
 
     await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
@@ -631,19 +681,19 @@ describe('terminal message runtime explicit error truth', () => {
 
     const subscriberA = sessions.get('transport-1:channel-a');
     const subscriberB = sessions.get('transport-1:channel-b');
-    expect(terminalFileTransferRuntime.handleBinaryPayload).toHaveBeenCalledTimes(1);
-    expect(terminalFileTransferRuntime.handleBinaryPayload).toHaveBeenCalledWith(
+    expect(fileTransferMessageRuntime.handleBinaryPayload).toHaveBeenCalledTimes(1);
+    expect(fileTransferMessageRuntime.handleBinaryPayload).toHaveBeenCalledWith(
       subscriberB,
       Buffer.from('image-chunk'),
     );
-    expect(terminalFileTransferRuntime.handleBinaryPayload).not.toHaveBeenCalledWith(
+    expect(fileTransferMessageRuntime.handleBinaryPayload).not.toHaveBeenCalledWith(
       subscriberA,
       expect.anything(),
     );
   });
 
   it('rejects mux binary chunks for unknown channels before file-transfer truth', async () => {
-    const { runtime, sendTransportMessage, terminalFileTransferRuntime } = createRuntime();
+    const { runtime, sendTransportMessage, fileTransferMessageRuntime } = createRuntime();
     const connection = createConnection(null);
 
     await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
@@ -661,7 +711,7 @@ describe('terminal message runtime explicit error truth', () => {
       },
     })));
 
-    expect(terminalFileTransferRuntime.handleBinaryPayload).not.toHaveBeenCalled();
+    expect(fileTransferMessageRuntime.handleBinaryPayload).not.toHaveBeenCalled();
     expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
       type: 'mux-error',
       payload: expect.objectContaining({
@@ -974,32 +1024,6 @@ describe('terminal message runtime explicit error truth', () => {
       2,
       session,
       mirror,
-    );
-  });
-
-  it('routes debug-snapshot frames to the dedicated client debug snapshot handler', async () => {
-    const { runtime, sessions, handleClientDebugSnapshot } = createRuntime();
-    const session = createSession();
-    sessions.set(session.id, session);
-    const connection = createConnection(session.id);
-
-    await runtime.handleMessage(connection, Buffer.from(JSON.stringify({
-      type: 'debug-snapshot',
-      payload: {
-        snapshot: {
-          source: 'session-transport-runtime-debug',
-          keyboardInset: 320,
-        },
-      },
-    })));
-
-    expect(handleClientDebugSnapshot).toHaveBeenCalledWith(
-      session,
-      expect.objectContaining({
-        snapshot: expect.objectContaining({
-          keyboardInset: 320,
-        }),
-      }),
     );
   });
 
@@ -1395,7 +1419,7 @@ describe('terminal message runtime explicit error truth', () => {
   });
 
   it('surfaces remote window catalog errors explicitly without screenshot or terminal render fallback', async () => {
-    const { runtime, sendTransportMessage, remoteWindowStreamRuntime, terminalFileTransferRuntime } = createRuntime();
+    const { runtime, sendTransportMessage, remoteWindowStreamRuntime, fileTransferMessageRuntime } = createRuntime();
     const connection = createConnection(null);
     const payload = {
       requestId: 'rw-2',
@@ -1410,7 +1434,7 @@ describe('terminal message runtime explicit error truth', () => {
     })));
     await flushAsyncHandlers();
 
-    expect(terminalFileTransferRuntime.handleRemoteScreenshotRequest).not.toHaveBeenCalled();
+    expect(fileTransferMessageRuntime.handleMessage).not.toHaveBeenCalled();
     expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
       type: 'remote-window-error',
       payload,
@@ -1418,7 +1442,7 @@ describe('terminal message runtime explicit error truth', () => {
   });
 
   it('routes remote window stream start and daemon candidates through the same control transport', async () => {
-    const { runtime, sendTransportMessage, remoteWindowStreamRuntime, terminalFileTransferRuntime } = createRuntime();
+    const { runtime, sendTransportMessage, remoteWindowStreamRuntime, fileTransferMessageRuntime } = createRuntime();
     const connection = createConnection(null);
     const startedPayload = {
       requestId: 'rw-start-1',
@@ -1467,7 +1491,7 @@ describe('terminal message runtime explicit error truth', () => {
         sendStatus: expect.any(Function),
       }),
     );
-    expect(terminalFileTransferRuntime.handleRemoteScreenshotRequest).not.toHaveBeenCalled();
+    expect(fileTransferMessageRuntime.handleMessage).not.toHaveBeenCalled();
     expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
       type: 'remote-window-stream-ice-candidate',
       payload: {
@@ -1680,7 +1704,7 @@ describe('terminal message runtime explicit error truth', () => {
   });
 
   it('surfaces stream start errors explicitly without converting them into catalog or screenshot success', async () => {
-    const { runtime, sendTransportMessage, remoteWindowStreamRuntime, terminalFileTransferRuntime } = createRuntime();
+    const { runtime, sendTransportMessage, remoteWindowStreamRuntime, fileTransferMessageRuntime } = createRuntime();
     const connection = createConnection(null);
     const errorPayload = {
       requestId: 'rw-start-fail',
@@ -1701,7 +1725,7 @@ describe('terminal message runtime explicit error truth', () => {
     })));
     await flushAsyncHandlers();
 
-    expect(terminalFileTransferRuntime.handleRemoteScreenshotRequest).not.toHaveBeenCalled();
+    expect(fileTransferMessageRuntime.handleMessage).not.toHaveBeenCalled();
     expect(remoteWindowStreamRuntime.listTargets).not.toHaveBeenCalled();
     expect(sendTransportMessage).toHaveBeenCalledWith(connection.transport, {
       type: 'remote-window-error',

@@ -179,7 +179,7 @@ tmux oracle
 12. keyboard 弹起 / reconnect / 前后台恢复后，tmux rows 不会被 Android UI 容器高度改写
 13. **长语音 commit 期间**：单次 IME `input` 回调到 `ws.send()` 的同步链不得超过一个微任务周期；同步链累计阻塞不得超过 16ms
 14. **长语音 commit 期间**：`session-context-socket-runtime.startSocketHeartbeat` 在 `ws.readyState !== OPEN` 时必须显式重置 `consecutiveMisses` 和 `lastObservedServerActivityAt`
-15. **长语音 commit 期间**：`session-context-input-runtime` backpressure close 后 reliable 协议路径必须有指数 backoff，禁止 close → 立即 retry 死循环
+15. **长语音 commit 期间**：`session-context-input-runtime` backpressure 必须显式 drop/debug，不得由 input owner 直接 `ws.close`；reliable 路径保持 backoff，transport 恢复交给 `terminal.transport_lifecycle`
 16. **长语音 commit 期间**：`session-context-input-runtime` flush 期间每次 send 后必须重读 `ws.bufferedAmount`，不允许只在函数入口读一次
 17. **长语音 commit 期间**：`TerminalPage.tsx` IME `input` listener 与 `emitRemoteWindowInputEvents` 串行竞态时，remote-window overlay 中间态必须 fallback 到 terminal input 并 log warning
 
@@ -316,7 +316,7 @@ tmux oracle
 优先查：
 
 1. `session-context-socket-runtime.startSocketHeartbeat` 在 `ws.readyState !== OPEN` 期间是否冻结了 `consecutiveMisses`（BUG #1）
-2. `session-context-input-runtime` backpressure close 后是否进入死循环 retry（BUG #2）
+2. `session-context-input-runtime` 在 backpressure 时是否由 input owner 直接 close 或进入死循环 retry（BUG #2）
 3. `session-context-input-runtime` flush 期间 `bufferedAmount` 实际累积是否超出阈值但函数未感知（BUG #3）
 4. main thread 是否被同步 IME commit 链阻塞超过 16ms（BUG #4）
 5. remote-window overlay 中间态是否吞掉 IME input（BUG #5）
@@ -548,14 +548,14 @@ video 恒 opacity 0 = 黑屏**；`handleShrink` 缩回浮窗也不重置切流�
 
 1. 长语音 commit 期间 main thread 单次 IME `input` 回调到 `ws.send()` 同步链不得超过一个微任务周期（不超过 1ms 同步执行 + 后续异步投递）；同步链累计阻塞不得超过 16ms（单帧）
 2. 长语音 commit 期间，`session-context-socket-runtime.startSocketHeartbeat` 计时器在 `ws.readyState !== OPEN` 时必须显式重置 `consecutiveMisses` 和 `lastObservedServerActivityAt`；不允许依赖 “reopen 后下一轮 ping 触发” 的隐式行为
-3. `session-context-input-runtime` backpressure close（`ws.close(4000, 'input backpressure')`）后，reliable 协议路径必须有指数 backoff（最小 100ms、封顶 2000ms），禁止 close → 立即 retry 死循环
+3. `session-context-input-runtime` 在 backpressure 时必须显式 drop/debug，不得由 input owner 直接 `ws.close`；reliable 路径保持 backoff（最小 100ms、封顶 2000ms），transport 恢复交给 `terminal.transport_lifecycle`
 4. `session-context-input-runtime` flush 期间，每次 send 后必须重读 `ws.bufferedAmount`，不允许只在函数入口读一次
 5. `TerminalPage.tsx` IME `input` listener 与 `emitRemoteWindowInputEvents` 串行竞态时，若 remote-window overlay 处于 opening/closing 中间状态，必须 fallback 到 terminal input 并 log warning，不允许直接吞掉
 
 **对应 bugs（2026-08-09 16:30 CST code review 定位）**：
 
 - BUG #1：`session-context-socket-runtime.ts:94-128` heartbeat close 期间 miss 冻结
-- BUG #2：`session-context-input-runtime.ts:256-269` reliable backpressure 无 backoff 死循环
+- BUG #2：`session-context-input-runtime.ts:256-269` input owner 直接 close + reliable backpressure 无 backoff 死循环
 - BUG #3：`session-context-input-runtime.ts:240-301` flush 期间不重读 bufferedAmount
 - BUG #4：`TerminalPage.tsx:2640-2652` IME input listener 同步阻塞 main thread
 - BUG #5：`TerminalPage.tsx:2642-2647` remote-window 与 IME input 串行竞态
@@ -575,7 +575,7 @@ video 恒 opacity 0 = 黑屏**；`handleShrink` 缩回浮窗也不重置切流�
 优先检查：
 
 1. `ws.readyState !== OPEN` 期间 heartbeat 计时器状态是否被冻结（BUG #1）
-2. backpressure close 后是否进入死循环 retry（BUG #2）
+2. backpressure 时是否仍由 input owner 直接 close / 进入死循环 retry（BUG #2）
 3. flush 期间 bufferedAmount 实际累积是否超出阈值但函数未感知（BUG #3）
 4. main thread 是否被同步 IME commit 链阻塞超过 16ms（BUG #4）
 5. remote-window overlay 中间态是否吞掉 IME input（BUG #5）

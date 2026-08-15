@@ -1839,3 +1839,638 @@ Tags: #mempalace #source-only-search #generated-artifacts #zterm
 - The finding is a false positive under the locked daemon-owned unified catalog contract (documented 2026-08-14): all client `list-sessions` call sites send `{ type: 'list-sessions' }` without a backend payload; the daemon's `handleListSessionsMessageRuntime` returns the unified union (`listTerminalSessions()`) for backend-opaque requests, and `TmuxSessionPickerSheet.handleRefreshNow` intentionally strips `terminalBackend` to `undefined` for discovery. Tmux and Herdr targets therefore receive the identical union response; the cache key omission cannot produce a wrong or missing catalog.
 - Implementing "preserve it in the request payload" would make the daemon return backend-scoped lists and regress to client-side backend management — exactly what MEMORY.md records Jason rejected in earlier rounds ("never regress to client backend management"). Kept the conflict explicit; no code weakened to satisfy the review.
 - Verification before commit: `git diff --check` PASS, `tsc --noEmit` PASS, `pnpm --dir android run test:feature-registry` 83/83 PASS, full `pnpm run prebuild` gate stack PASS, `pnpm run build` (Vite) PASS. The full working tree was committed as the accumulated WIP batch.
+
+# 2026-08-14 renderer priority fix + source adapter/visible repair ledger
+
+- Android WebView renderer death was the first divergence before socket `1006`: old `setRendererPriorityPolicy(IMPORTANT, true)` let the renderer become CACC/900 when not visible. `MainActivity` now keeps IMPORTANT with `waivedWhenNotVisible=false` and tracks platform `activityInForeground`; `BackgroundService` skips native `evaluateJavascript()` while foregrounded and keeps the 30s background wake.
+- Visible repair state must stay per-session in the exact ledger (`sessionId + visibleRange + tailEndIndex + targetRevision`); a 5s single-entry cooldown can permanently suppress a lost repair. The runtime now re-dispatches a dispatched ledger entry after 2s stale, keeps failed dispatch pending, and fulfills only after an authoritative payload fully covers the visible window/tail.
+- Source adapters are one shared `TerminalSourceAdapter` contract under `daemon.terminal_backend`; mirror store consumes `readSnapshot()` only. New source files must be registered in module-registry owned_paths before `test:feature-registry` passes; a declared import edge without the target file being owned shows up as a stale edge.
+- Remote-window Swift extraction source must follow the canonical split: `remote-window-screen-capture-script.ts` is the `SCREEN_CAPTURE_KIT_FRAME_SOURCE_SWIFT` owner; `prepare-global-daemon-release.sh` and `zterm-daemon.sh` now point there, not `remote-window-scripts.ts`.
+- Evidence: local debug APK still reports `0.1.3.2644`/1100026440 because no version bump was made; its SHA-256 is `ff9ee3aba37b5f062b787bfc8095850d77e3adc34d86ae7af677221ad3a8cb85`; installed on `100.104.163.65:5555`; renderer PID 13746 stayed stable and `performance.timeOrigin=1786707330545.4` unchanged across HOME->foreground; renderer oom `BTOP` not cached; daemon mirror close-loop 9/9.
+
+# 2026-08-14 live 2646 delivery verification
+
+- Stale WebView bundle on device was caused by an old installed package (`0.1.3.1000`, asset `index-B_1ppoX_.js`), not by an uncacheable same-version reload. Installing 2646 and relaunching bumped `zterm_webview_cache_version.xml` to `1100026460`; native `MainActivity.clearWebViewAssetCacheAfterUpgrade()` cleared WebView HTTP cache, and CDP then loaded `index-KEP-jfNa.js` with the same SHA-256 as `dist`.
+- Live 2646 verified: same-name tmux/Herdr drawer rows are separate and Herdr is suffixed `(herdr)`; Herdr open reaches `connected`; rename failure stays in the dialog with inline error; QuickBar image failure toast is a real fixed-position DOM node after the image-paste waiter rejects with `binary file transfer is not supported by the Herdr single-session terminal surface`.
+- Full 2646 gate rerun: focused 288/288, typecheck, prebuild exit 0, Vite build exit 0, daemon mirror close-loop 9/9 + strict replay, daemon health/update manifest on local and Tailscale endpoints.
+- White-font vertical stripe is still an open renderer-measurement item; no product renderer change was made without a real WebView glyph/advance fixture.
+- MCP codex-review could not be started because review MCP tools were not exposed in the session; delivery must not claim PASS until a scoped review exists.
+
+# 2026-08-14 daemon sessionCatalog side-channel + portrait top layout 2647
+
+- Herdr discovery completeness requires the daemon to publish backend-qualified `sessionCatalog` beside the plain `sessions` array; plain string names cannot let the client split same-name tmux/Herdr groups. The daemon remains the only backend owner and `list-sessions` remains backend-opaque; `sessionCatalog` is a typed side-channel, not a backend selection request.
+- Client refresh must prefer the open-transport catalog query when available, fall back to direct fetch, reject malformed catalogs, and rebuild/prune drawer groups per backend key. Do not merge same-name tmux/Herdr rows.
+- Portrait safe-area layout: first row is back/Sessions/settings at `topInset+8`, second row is connection status at `topInset+50`, terminal stage starts at `topInset+92`; the constants live in `terminal-page-status-helpers.ts`.
+- APK `0.1.3.2647` versionCode `1100026470` SHA-256 `6a6f4b14701a6920ac1a46a674e6554520d40cc128b63bdb425e7a730836bf60` installed on `100.104.163.65:5555`; live CDP proves herdr `zterm` and tmux `zterm` rows both exist and herdr `zterm` connects as `(herdr)`. OTA Relay publish still requires explicit release authorization.
+
+# 2026-08-15 ZTerm v2 Playground Phases 1-3
+
+- `ZTERM-ARCH-V2-DESIGN-001` remains in AppSDK draft with production runtime untouched. Playground contracts now cover Foundation/Data/Control/Debug/Plugin (Phase 1), metadata-only observability side channel with default-deny grants (Phase 2), and control center plus client composition root (Phase 3).
+- Phase 3 gates passed after the composition/control addition: `test:runtime-architecture-v2` 30/30 across 8 files, `test:feature-registry` 83/83, full `pnpm run build` (prebuild + relay smoke + type-check + Vite) PASS, and `/Users/fanzhang/.local/bin/appsdk verify android` ok:true at draft.
+- `ControlCenter` owns routing, capability, deadline, idempotency, correlation, and audit only; `ClientCompositionRoot` binds declared runtime ports only and rejects duplicate/unbound/undeclared providers. Maps keep these resources/functions as `design`/`pending` until physical production cutover.
+- Codex review MCP is not available in this session, so no ReviewRecord or PASS exists. Phase 3 remains Playground-only and must not be promoted until the scoped review and production cutover gates pass.
+
+# 2026-08-15 MemPalace palace repair
+
+- The zterm mine failed on a malformed FTS5 inverted index in `~/.mempalace/palace/chroma.sqlite3`; `mempalace repair --yes` rebuilt all 231,973 drawers, recreated the FTS5 index, VACUUMed SQLite, and both `PRAGMA quick_check` and `integrity_check` returned ok.
+- After repair, `scripts/mempalace-mine-zterm.sh` re-mined the safe zterm corpus (1078 files, 1759 drawers filed), and searches for "debug side channel ZTerm v2" and "ControlCenter client composition root capability ports" return the new plan/note/test-design sources. The write-index-search loop is closed.
+
+# 2026-08-15 ZTerm v2 Phase 2 production debug HTTP cutover supersedes Playground-only
+
+- Production runtime is no longer untouched for the debug slice: terminal mux
+  rejects `debug-log`/`debug-snapshot`, `runtime-debug-flush.ts` is deleted, and
+  client runtime debug exports through `runtime-debug-http-exporter.ts` to
+  daemon `/debug/runtime/logs` and `/debug/runtime/snapshot` without active
+  session or transport socket dependency.
+- `/debug/runtime/control` is POST-only, auth-gated, default-deny, and expiring
+  through `setDaemonRuntimeDebugLease`; startup `ZTERM_DAEMON_DEBUG_LOG` remains
+  an operator-only env flag and does not grant remote control.
+- AppSDK `resource.observability_channel` and debug export/lease functions stay
+  `design`/`production_pending_review` because the v2 module has not been
+  promoted; production source paths and `test:debug-observability` are recorded
+  in the maps and wired into prebuild/CI.
+- Verified: debug observability gate Android 61/61 + shared 9/9, feature
+  registry 83/83, tsc noEmit, full `pnpm run build` with prebuild/terminal
+  contracts 831/831/common flows 98/98/relay smoke/Vite, and AppSDK draft
+  verify. Full `pnpm test -- --run` still has a pre-existing
+  `app-update-runtime` rollback failure and a native wrtc worker crash outside
+  this slice.
+- No ReviewRecord/PASS exists because codex-review MCP remains unavailable.
+  Phase 2 production cutover must not be claimed promoted until scoped review
+  and later lifecycle gates pass.
+
+# 2026-08-15 ZTerm v2 Phase 3 client.terminal_channel_mux production ownership slice
+
+- Phase 3 first production ownership slice is in source: `client.terminal_channel_mux` owns `src/lib/terminal-channel-mux-runtime.ts` (`TerminalChannelMuxStore`); `SessionTransportRuntimeStore.terminalChannels` embeds the store and `TargetTransportRuntime` no longer owns `channels`.
+- Registry/docs/AppSDK maps now bind the real module paths, resource truth stores, import edges (`client.daemon_connection -> client.terminal_channel_mux`, `client.session_runtime -> client.terminal_channel_mux`), function/mainline/wiki surfaces, feature registry, and test design.
+- Verified: dedicated channel-store tests 7/7, targeted transport/session/lifecycle 161/161, feature registry 83/83, debug observability 61/61, tsc noEmit, full `pnpm run build`, and AppSDK draft verify ok:true.
+- No ReviewRecord/PASS exists because codex-review MCP remains unavailable; do not claim promoted or complete. Later slices remain for `daemon.input_queue`, production composition/control owners, and Phases 4-8.
+
+# 2026-08-15 module DAG baseline for client ownership
+
+- The real cross-module import graph is now acyclic. Client ownership was corrected by moving session transport orchestration/open, socket frame demux, and message dispatch to `client.session_runtime`; moving `session-context-open-intent-store.ts` to `client.daemon_connection`; moving session picker and tmux catalog helpers to `client.connection_home`; moving app version and pure input/viewport helpers to `client.runtime`; moving preview gesture and mirror-fixed zoom to `client.renderer_window`; and moving shared pane layout re-exports to `shared.pane_layout`.
+- `module_dag` is active in AppSDK verification and the v2 test design; `module-import-graph-truth.test.ts` now proves real imports are both edge-lockstep and acyclic.
+- Verified: `test:feature-registry` 84/84, `tsc --noEmit` PASS, `git diff --check` PASS, AppSDK draft verify ok:true. Evidence `EVID-20260815-ZARCHV2-P4-MODULE-DAG-001` added.
+- This is registry/docs ownership work, not a behavior change. Review/promotion remains unavailable, so do not claim v2 complete.
+
+# 2026-08-15 Phase 4 client buffer frame assembly ownership slice
+
+- `resource.client_buffer_frame_assembly` now has a real physical owner: active module `client.buffer_frame_assembly` owns `src/lib/buffer-frame-assembly/session-buffer-frame-assembly.ts` and `session-buffer-frame-assembly-state.ts`; the old `src/contexts/session-buffer-frame-assembly*` files are deleted. `client.buffer_store` no longer owns frame assembly paths.
+- Registry/docs/AppSDK maps bind the new module, resource, edges, function/mainline/wiki surfaces, feature registry, and v2 test design. The test wiring was corrected after the move: `test:terminal:frame-assembly` and `scripts/run-terminal-contracts.mjs` now run the new test path.
+- Verified: `test:terminal:frame-assembly` 101/101, `test:feature-registry` 84/84, `test:terminal:contracts` 823/823 in 54 files, `git diff --check` PASS, `daemon:mirror:close-loop` all 9 lab cases plus replay and strict audit PASS, AppSDK draft verify ok:true. Evidence `EVID-20260815-ZARCHV2-P4-PROD-BUFFER-FRAME-ASSEMBLY-001` added.
+- No ReviewRecord/PASS exists because codex-review MCP remains unavailable; the slice is production_pending_review and v2 overall is not complete. Remaining production slices still include client wire ingress/sparse/render/UI, daemon control/source/mirror/transport/mux, composition root, and Phases 6-8.
+
+# 2026-08-15 Phase 4 client wire ingress ownership slice
+
+- Pure client wire ingress normalization now has a physical owner: active module `client.wire_ingress` owns `src/lib/wire-ingress/buffer-wire-normalize.ts`; `normalizeIncomingBufferPayload` and `normalizeTerminalCursorState` no longer live in `session-wire-helpers.ts`, which remains the outbound host-config builder under `client.daemon_connection`.
+- Registry/docs/AppSDK maps bind the new module, owned paths, edges (`client.buffer_store -> client.wire_ingress`, `client.session_runtime -> client.wire_ingress`, `client.wire_ingress -> shared.terminal_types`), function/mainline/wiki surfaces, feature registry, and v2 test design. Gate wiring now runs the new normalization test.
+- Verified: `test:terminal:frame-assembly` 104/104, `test:feature-registry` 84/84, `test:terminal:contracts` 826/826 in 55 files, `tsc --noEmit` PASS, `git diff --check` PASS, `daemon:mirror:close-loop` all 9 cases plus replay and strict audit PASS, AppSDK draft verify ok:true. Evidence `EVID-20260815-ZARCHV2-P4-PROD-WIRE-INGRESS-001` added.
+- No ReviewRecord/PASS exists because codex-review MCP remains unavailable; the slice is production_pending_review and v2 overall is not complete. Remaining production slices still include client sparse buffer/render window/DOM renderer/terminal shell, production composition root/control center, daemon control/source/mirror/transport/mux, and Phases 6-8.
+
+# 2026-08-15 Phase 4 client sparse buffer and renderer window ownership slice
+
+- `resource.client_sparse_buffer` now has a real physical owner: active module
+  `client.sparse_buffer` owns `src/lib/session-buffer-store.ts`
+  (`createSessionBufferStore`/`useSessionBufferSnapshot`). `client.buffer_store`
+  no longer owns the sparse body store; it owns planner/pull/repair/head/tail
+  orchestration only.
+- `client.renderer_window` owns `src/lib/session-render-buffer-store.ts` with
+  the render gate as immutable render projection owner. Sparse body truth and
+  visible-window truth are separate resources and cannot become one state
+  object.
+- Registry/docs/AppSDK maps bind the new module, resource, edges, function/
+  mainline/wiki surfaces, feature registry, and v2 test design. AppSDK gates
+  `sparse_buffer_ownership` and `renderer_projection_ownership` are active.
+- Verified: `test:feature-registry` 84/84,
+  `test:terminal:frame-assembly` 104/104,
+  `test:terminal:contracts` 826/826 in 55 files, `tsc --noEmit` PASS, full
+  `pnpm run build` PASS, `daemon:mirror:close-loop` all 9 cases plus replay
+  and strict audit PASS, `git diff --check` PASS, AppSDK draft verify ok:true.
+  Evidence `EVID-20260815-ZARCHV2-P4-PROD-SPARSE-RENDER-OWNER-001` added.
+- No ReviewRecord/PASS exists because codex-review MCP remains unavailable; the
+  slice is production_pending_review and v2 overall is not complete. Remaining
+  production slices still include DOM renderer/terminal shell, composition
+  root/control center, daemon control/source/mirror/transport/mux, and
+  Phases 6-8.
+
+# 2026-08-15 Phase 4 client.dom_renderer and client.terminal_shell ownership slice
+
+- `client.dom_renderer` and `client.terminal_shell` now have real active
+  `owned_paths`. DOM renderer owns `TerminalView`, `VisibleRow`,
+  `TerminalPreviewRow`, `useMirrorFixedZoomPan`, shared `cell-render.ts`, and
+  `theme.ts`; terminal shell owns `TerminalPageStageShell` plus shell skin,
+  status/quickbar/copy/keyboard-lift shell files. `client.renderer_window` no
+  longer owns DOM projection files and `client.app_shell` no longer owns
+  `terminal-shell-skin.ts`.
+- Mainline source-to-DOM truth is `TerminalPage -> StageShell -> TerminalView
+  -> Renderer -> RenderGate`; docs, wiki, test designs, and edge registry now
+  use `android_mainline:StageShell->TerminalView` instead of a direct
+  `TerminalPage->TerminalView` edge. `docs:function-wiki` regenerated the wiki
+  HTML in lockstep.
+- Verified: `test:feature-registry` 84/84 in 11 files,
+  `tsc --noEmit` PASS, `test:terminal:frame-assembly` 104/104,
+  `test:terminal:contracts` 826/826 in 55 files,
+  `daemon:mirror:close-loop` all 9 cases plus replay and strict audit PASS,
+  full `pnpm run build` PASS, AppSDK verify android ok:true draft,
+  and `git diff --check` PASS.
+- Evidence `EVID-20260815-ZARCHV2-P4-PROD-DOM-TERMINAL-SHELL-OWNER-001` added.
+  No ReviewRecord/PASS exists because codex-review MCP remains unavailable;
+  the slice is production_pending_review and v2 overall is not complete.
+
+# 2026-08-15 Phase 6 production plugin host first slice
+
+- `client.plugin_host` now has a real production owner surface:
+  `src/lib/plugin-host/` owns the runtime and the first capability plugin, while
+  `shared.plugin_contract` owns `packages/shared/src/terminal/plugin-contract.ts`
+  and `plugin-capability-registry.ts`. `src/App.tsx` is the only non-host
+  production consumer and composes host-level `network:native-snapshot`; the
+  `network-identity` plugin receives only that declared capability and exposes
+  `network:sample-interfaces` to `NetworkIdentityRuntime`.
+- Added a static `plugin-host-ownership.test.ts` red gate that forbids host
+  imports of SessionContext/traversal/session stores/server truth and forbids
+  UI/page/hook/plugin layers from importing host/shared plugin contracts.
+  `test:plugin-host` is wired into Android prebuild and CI, and AppSDK maps now
+  bind the plugin lifecycle/resources as `production_pending_review` with real
+  paths.
+- Verified: `test:plugin-host` 11/11, `test:feature-registry` 84/84 in 11
+  files, `test:runtime-architecture-v2` 30/30, `tsc --noEmit` PASS, full
+  `pnpm run build` PASS, `docs:function-wiki` regenerated, AppSDK
+  verify android ok:true draft, and `git diff --check` PASS. Evidence
+  `EVID-20260815-ZARCHV2-P6-PROD-PLUGIN-HOST-001` added. Review/promotion is
+  not recorded because codex-review MCP remains unavailable; Phase 6/7 UI
+  plugin migration is not complete.
+
+# 2026-08-15 Phase 3 production composition root slice
+
+- `client.composition_root` now has a real production owner surface:
+  `src/lib/composition-root/client-composition-root.ts` owns typed
+  bind/resolve/require/has semantics, and `src/App.tsx` is the only production
+  consumer. App composes `plugin-host` through the root, requires it before
+  use, and resolves `PluginHost` from the registry.
+- Added `client-composition-root-ownership.test.ts` as a static red gate:
+  composition root must not import SessionContext/traversal/session
+  stores/server, and only App.tsx plus the composition-root directory may
+  import the composition root. `test:composition-root` is wired into Android
+  prebuild and CI, and AppSDK maps bind `resource.client_composition_root` and
+  `client_composition_root` as `production_pending_review` with real paths.
+- Verified: `test:composition-root` 6/6, `test:feature-registry` 84/84 in 11
+  files, `test:runtime-architecture-v2` 30/30, `tsc --noEmit` PASS, full
+  `pnpm run build` PASS, AppSDK verify android ok:true draft, and
+  `git diff --check` PASS. Evidence
+  `EVID-20260815-ZARCHV2-P3-PROD-COMPOSITION-ROOT-001` added. Review/promotion
+  is not recorded because codex-review MCP remains unavailable; this slice is
+  production_pending_review and v2 overall is not complete.
+
+# 2026-08-15 Phase 3 production control center slice
+
+- `client.control_center` and `shared.control_contract` now have real
+  production surfaces: `src/lib/control-center/client-control-center.ts` owns
+  unique command routing, capability gating, deadline, idempotency, correlation,
+  and bounded audit; `packages/shared/src/terminal/control-contract.ts` owns
+  branded control contracts. `PluginHostControlNode` lives under
+  `src/lib/plugin-host/` and adapts `PluginHost.disposeAll` for control routing.
+- App composition binds `plugin-host` and `control-center` through
+  `ClientCompositionRoot`, registers `plugin-host.dispose` under
+  `plugin-host:dispose`, and unmount disposal executes through
+  `ClientControlCenter` with idempotency `plugin-host.dispose:app-unmount`;
+  direct `pluginHost.disposeAll` is no longer allowed in App.
+- Static `client-control-center-ownership.test.ts` forbids control-center
+  imports of SessionContext/traversal/session stores/plugin host
+  implementation/server truth, and allows only App plus the control-center
+  directory to import `ClientControlCenter`. `test:control-center` is wired
+  into Android prebuild and CI; resource registry declares
+  `resource.platform_terminal_surface -> resource.client_control_center`.
+- Verified `test:control-center` 13/13, `test:composition-root` 6/6,
+  `test:plugin-host` 11/11, `test:runtime-architecture-v2` 30/30,
+  `test:feature-registry` 84/84, tsc PASS, full `pnpm run build` PASS, AppSDK
+  verify android ok:true draft, and `git diff --check` PASS. Evidence
+  `EVID-20260815-ZARCHV2-P3-PROD-CONTROL-CENTER-001` added. Review/promotion
+  is not recorded because codex-review MCP remains unavailable; this slice is
+  production_pending_review and v2 overall is not complete.
+
+# 2026-08-15 Phase 5 daemon.channel_mux ownership slice
+
+- `resource.daemon_channel_mux` now has a real physical owner: active module
+  `daemon.channel_mux` owns `src/server/terminal-channel-mux-runtime.ts`.
+  That runtime is the only place that creates mux channel transport/envelope
+  objects and mutates `connection.muxChannels`; `terminal-runtime.ts` no
+  longer owns `createMuxChannelSubscriber`, and bridge/daemon cleanup uses
+  `listMuxChannelSubscriberIds` / `releaseAllMuxChannelSubscribers` owner APIs.
+- `terminal-message-runtime.ts` receives only the channel-mux owner subset
+  (`createMuxChannelSubscriber` / `ensureMuxChannels` /
+  `releaseMuxChannelSubscriber`); mux attach atomic failure still removes the
+  channel registry entry, closes the subscriber, and emits explicit
+  `mux-channel-closed` before refusing attach.
+- Registry/docs/AppSDK maps bind the new module, resource, import edges,
+  function, verification gate, feature paths, and module registry test.
+  Re-verified targeted daemon/mux/transport suite 86/86, feature registry
+  84/84, tsc PASS, diff check PASS, daemon:mirror:close-loop all 9 cases plus
+  replay and strict audit PASS, appsdk verify android ok:true draft; full
+  contracts/build had already passed.
+- Evidence `EVID-20260815-ZARCHV2-P5-PROD-DAEMON-CHANNEL-MUX-001` added.
+  Review/promotion is not recorded because codex-review MCP remains
+  unavailable; this slice is production_pending_review and v2 overall is not
+  complete.
+
+# 2026-08-15 Phase 5 daemon control gateway/control center production slice
+
+- `daemon.control_gateway` and `daemon.control_center` now have real active
+  production owners: `src/server/daemon-control-gateway-runtime.ts` adapts
+  schedule and tmux commands through `src/server/daemon-control-center-runtime.ts`,
+  which enforces unique command owners, capability, deadline, idempotency,
+  correlation/subject validation, and bounded audit. Session open/connect/list
+  also route through the gateway while keeping the existing
+  `terminal-message-control-runtime.ts` handler surface and wire semantics.
+- `terminal-message-runtime.ts` no longer imports schedule/tmux handlers
+  directly; `server.transport-lifecycle-truth.test.ts` was updated to require
+  gateway-owned handler delegation. The static ownership red gate forbids
+  control-center imports of mirror/transport/file/server/runtime state and
+  limits gateway imports to the control center, control handlers, and runtime
+  types.
+- Verified: `test:daemon-control-center` 10/10, `test:feature-registry` 84/84,
+  terminal regression core 827/827 plus 98/98 user flows and relay smoke,
+  `tsc --noEmit` PASS, full `pnpm run build` PASS,
+  `daemon:mirror:close-loop` all 9 cases plus replay and strict audit PASS,
+  `docs:function-wiki` regenerated, AppSDK verify android ok:true draft,
+  `git diff --check` PASS. Evidence
+  `EVID-20260815-ZARCHV2-P5-PROD-DAEMON-CONTROL-CENTER-001` added.
+  Review/promotion is not recorded because codex-review MCP remains unavailable;
+  this slice is production_pending_review and v2 overall is not complete.
+
+# 2026-08-15 Phase 5 daemon buffer publisher production slice
+
+- `daemon.buffer_publisher` now has a real physical owner:
+  `src/server/daemon-buffer-publisher-runtime.ts` owns bounded per-subscriber
+  pending-latest publication state, range merge/collapse, backpressure
+  hysteresis, head broadcast cache, oversized same-revision frame split,
+  contiguous same-revision split for every oversized body span including
+  fresh attach, and flush statuses.
+  `src/server/terminal-mirror-runtime.ts` delegates buffer-head and
+  buffer-sync publication to this owner; `daemon.transport_subscriber` owns
+  only physical send/backpressure/accounting and must not own bounded
+  pending-latest publication.
+- The only unsolicited live body broadcast path is
+  `resource.mirror_store -> resource.daemon_buffer_publisher ->
+  resource.transport_subscriber`. Mainline call-map IDs are
+  `daemon_mainline:Mirror->BufferPublisher` and
+  `daemon_mainline:BufferPublisher->TransportSend`.
+- Verified `test:daemon-buffer-publisher` 6/6, `test:feature-registry`
+  84/84, registry/mainline/edge/resource truth tests, tsc/type-check,
+  `daemon:mirror:close-loop` 9/9 plus replay/strict audit, full build,
+  wiki regeneration, AppSDK verify draft ok:true, and `git diff --check`.
+  Evidence `EVID-20260815-ZARCHV2-P5-PROD-DAEMON-BUFFER-PUBLISHER-001`
+  added. Review/promotion is not recorded because codex-review MCP remains
+  unavailable; this slice is production_pending_review and v2 overall is not
+  complete.
+
+# 2026-08-15 Phase 5 daemon session catalog production slice
+
+- `daemon.session_catalog` now has a real physical owner:
+  `src/server/daemon-session-catalog-runtime.ts` owns
+  `buildSessionsCatalogPayload` and `handleListSessionsMessageRuntime`.
+  `daemon.control_gateway` delegates list-sessions handling to the catalog
+  owner; `daemon.schedule_runtime` consumes only the payload builder. The
+  catalog owner imports idle-facts publisher/runtime types; it must not own
+  active session, mirror store, or transport subscriber truth.
+- Mainline call-map IDs are
+  `daemon_mainline:ControlGateway->SessionCatalog`,
+  `daemon_mainline:Control->SessionCatalog`, and
+  `daemon_mainline:SessionCatalog->IdleSessionPublishIn01Request`.
+- Verified `test:daemon-session-catalog` 8/8, `test:feature-registry`
+  84/84, registry/edge/mainline/resource truth tests, tsc,
+  `daemon:mirror:close-loop` 9/9 plus replay/strict audit, full build,
+  wiki regeneration, AppSDK verify draft ok:true, and `git diff --check`.
+  Evidence `EVID-20260815-ZARCHV2-P5-PROD-DAEMON-SESSION-CATALOG-001`
+  added. Review/promotion is not recorded because codex-review MCP remains
+  unavailable; this slice is production_pending_review and v2 overall is not
+  complete.
+
+# 2026-08-15 Phase 7 debug console UI first slice
+
+- `client.debug_console` is the active production owner of the typed debug
+  console UI contract and debug overlay renderer; `shared.plugin_contract` owns
+  the unique UI slot registry, and the plugin host owns deterministic
+  start/stop/dispose plus slot publication.
+- App must not call `PluginHost.readUiSlot` before `startAll` has reached the
+  slot provider. `startAll` is sequential, so an async host start can leave a
+  later plugin unregistered on the first render. Gate optional UI slot reads on
+  host activation completion and keep App first-paint regression coverage in
+  the build path.
+- Verified `test:debug-console-ui` 35/35, `test:plugin-host` 14/14,
+  `test:feature-registry` 84/84, full build PASS including terminal contracts
+  833/833, tsc, docs wiki, AppSDK verify android draft ok:true, and
+  `git diff --check`. Evidence
+  `EVID-20260815-ZARCHV2-P7-PROD-DEBUG-CONSOLE-UI-001` added.
+  Review/promotion is not recorded because codex-review MCP remains
+  unavailable; this slice is `production_pending_review` and Phase 7 is not
+  complete.
+
+# 2026-08-15 Phase 7 session drawer UI second slice
+
+- `client.session_drawer_ui` is the active production owner of the typed
+  session drawer UI slot contract and the plugin-provided drawer projection;
+  `SessionDrawerUiPlugin` publishes `terminal.session-drawer` through the UI
+  slot registry, App reads it only after `PluginHost.startAll` resolves, and
+  TerminalPage renders only the `renderSessionDrawer` callback. This removes the
+  direct TerminalPage import/render edge for `TerminalSessionDrawer`.
+- Verified `test:session-drawer-ui` 125/125, `test:debug-console-ui` 36/36,
+  `test:plugin-host` 15/15, `test:feature-registry` 84/84, tsc, full build
+  PASS including prebuild gates, terminal contracts 834/834, Gradle, Vite,
+  docs wiki regeneration, AppSDK verify android draft ok:true, and
+  `git diff --check`. Evidence
+  `EVID-20260815-ZARCHV2-P7-PROD-SESSION-DRAWER-UI-001` added.
+  Review/promotion is not recorded because codex-review MCP remains
+  unavailable; this slice is `production_pending_review` and Phase 7 is not
+  complete.
+
+# 2026-08-15 Phase 7 file browser UI third slice
+
+- `client.file_browser_ui` is the active production owner of the typed file
+  browser UI slot contract and the plugin-provided FileTransferSheet projection;
+  `FileBrowserUiPlugin` publishes `terminal.file-browser` through the UI slot
+  registry, App reads it only after `PluginHost.startAll` resolves, and
+  TerminalPage renders only the `renderFileBrowser` callback. This removes the
+  direct TerminalPage import/render edge for `FileTransferSheet`.
+- Verified `test:file-browser-ui` 66/66, `test:plugin-host` 16/16,
+  `test:session-drawer-ui` 127/127, `test:debug-console-ui` 37/37,
+  `test:feature-registry` 84/84, tsc, full build PASS including prebuild
+  gates, terminal contracts 835/835, Gradle, Vite, docs wiki regeneration,
+  AppSDK verify android draft ok:true, and `git diff --check`. Evidence
+  `EVID-20260815-ZARCHV2-P7-PROD-FILE-BROWSER-UI-001` added.
+  Review/promotion is not recorded because codex-review MCP remains
+  unavailable; this slice is `production_pending_review` and Phase 7 is not
+  complete.
+
+# 2026-08-15 Phase 7 settings update UI fourth slice
+
+- `client.settings_update_ui` is the active production owner of the typed
+  settings update UI slot contract and the plugin-provided AppUpdateSection
+  projection; `SettingsUpdateUiPlugin` publishes `settings.update` through the
+  UI slot registry, App reads it only after `PluginHost.startAll` resolves, and
+  SettingsPage renders only the `renderSettingsUpdate` callback. This removes
+  the direct SettingsPage import/render edge for `AppUpdateSection`.
+- SettingsPage tests that assert update projection behavior must inject the
+  plugin-provided `AppUpdateSection` renderer; `SettingsPage.plugin-render.test`
+  separately locks the slot callback contract and no-slot fallback.
+- Verified `test:settings-update-ui` 57/57, targeted SettingsPage/AppUpdateSection/
+  plugin-host/App dynamic refresh 71/71, `test:feature-registry` 84/84, tsc,
+  full build PASS including prebuild gates, Gradle, terminal contracts, Vite,
+  docs wiki regeneration, AppSDK verify android draft ok:true, and
+  `git diff --check`. Evidence
+  `EVID-20260815-ZARCHV2-P7-PROD-SETTINGS-UPDATE-UI-001` added.
+  Review/promotion is not recorded because DSH/codex-review remains
+  unavailable; this slice is `production_pending_review` and Phase 7 is not
+  complete.
+
+# 2026-08-15 Phase 7 remote window UI fifth slice
+
+- `client.remote_window_ui` is the active production owner of the typed remote
+  window UI slot contract and the plugin-provided RemoteWindowOverlay
+  projection; `RemoteWindowUiPlugin` publishes `terminal.remote-window` through
+  the UI slot registry, App reads it only after `PluginHost.startAll` resolves,
+  and TerminalPage renders only the `renderRemoteWindow` callback. This removes
+  the direct TerminalPage import/render edge for `RemoteWindowOverlay`.
+- TerminalPage tests that assert remote-window projection behavior must inject
+  the plugin-provided remote window renderer; IME tests also pass
+  `renderRemoteWindow` when they cover remote-window keyboard input.
+- Verified `test:remote-window-ui` 121/121, `test:feature-registry` 84/84,
+  tsc, full build PASS including prebuild gates, terminal contracts 837/837,
+  Gradle, Vite, docs wiki regeneration, AppSDK verify android draft ok:true,
+  and `git diff --check`. Evidence
+  `EVID-20260815-ZARCHV2-P7-PROD-REMOTE-WINDOW-UI-001` added.
+  Review/promotion is not recorded because DSH/codex-review remains
+  unavailable; this slice is `production_pending_review` and Phase 7 is not
+  complete.
+
+# 2026-08-15 Phase 7 quickbar UI sixth slice
+
+- `client.quickbar_ui` is the active production owner of the typed quickbar UI
+  slot contract and the plugin-provided TerminalQuickBar projection;
+  `QuickBarUiPlugin` publishes `terminal.quickbar` through the UI slot
+  registry, App reads it only after `PluginHost.startAll` resolves, and
+  TerminalPage renders only the `renderQuickBar` callback. This removes the
+  direct TerminalPage import/render edge for `TerminalQuickBar`.
+- TerminalPage tests that assert quickbar projection behavior must inject the
+  plugin-provided quickbar renderer; render isolation and IME tests pass
+  `renderQuickBar` when they cover quickbar/input behavior.
+- Verified `test:quickbar-ui` 72/72, `test:feature-registry` 84/84,
+  `test:debug-console-ui` 40/40, `test:session-drawer-ui` 133/133,
+  `test:remote-window-ui` 123/123, targeted foldable/schedule/multi-pane/
+  remote-screenshot 20/20, tsc, full build PASS including prebuild gates,
+  terminal contracts 838/838, Gradle, Vite, docs wiki regeneration, AppSDK
+  verify android draft ok:true, and `git diff --check`. Evidence
+  `EVID-20260815-ZARCHV2-P7-PROD-QUICKBAR-UI-001` added.
+  Review/promotion is not recorded because DSH/codex-review remains
+  unavailable; this slice is `production_pending_review` and Phase 7 is not
+  complete.
+
+# 2026-08-15 Phase 7 terminal shell UI seventh slice
+
+- `client.terminal_shell_ui` is the active production owner of the typed
+  terminal shell UI slot contract and the plugin-provided status/stage/copy/
+  quickbar-shell/network-banner projection; `TerminalShellUiPlugin` publishes
+  `terminal.shell` through the UI slot registry, App reads it only after
+  `PluginHost.startAll` resolves, and TerminalPage renders only the
+  `renderTerminalShell` callback. This removes the direct TerminalPage
+  import/render edge for `TerminalConnectionStatusStrip`,
+  `TerminalPageCopyMenu`, `TerminalPageStageShell`, `terminal-page-shell-ui`,
+  `TerminalQuickBarShell`, and `TerminalNetworkBanner`.
+- TerminalPage tests that assert shell projection behavior must inject the
+  plugin-provided terminal shell renderer from
+  `src/lib/plugin-host/terminal-shell-ui-plugin.tsx`; there is no separate
+  test-provider render fork, so page boundary tests exercise the same
+  `renderTerminalShellUi` function that `TerminalShellUiPlugin` publishes.
+- Verified `test:terminal-shell-ui` 74/74, `test:feature-registry` 84/84,
+  tsc, full build PASS including prebuild gates, terminal regression core
+  839/839, Gradle, Vite, docs wiki regeneration, AppSDK verify android draft
+  ok:true, and `git diff --check`. Evidence
+  `EVID-20260815-ZARCHV2-P7-PROD-TERMINAL-SHELL-UI-001` added.
+  Review/promotion is not recorded because DSH/codex-review remains
+  unavailable; this slice is `production_pending_review` and Phase 7 is not
+  complete.
+
+# 2026-08-15 Phase 5 daemon attachment message delivery
+
+- `daemon.attachment_delivery` owns
+  `src/server/terminal-attachment-message-runtime.ts` for
+  `pending-attachments-query`, `attachment-history-query`,
+  `attachment-asset-request`, and `attachment-receipt` wire projection.
+  `terminal-message-runtime.ts` is the physical receiving router only for
+  these four types; it must not retain attachment delivery business state or
+  reimplement query/read/receipt logic.
+- The real module import edge is
+  `daemon.transport_subscriber -> daemon.attachment_delivery` because
+  `terminal-message-runtime.ts` belongs to `daemon.transport_subscriber`, not
+  `daemon.connection_gateway`.
+- Verified `test:attachment-message-delivery` 49/49,
+  `test:feature-registry` 84/84, type-check/tsc, docs wiki regeneration, full
+  build, `daemon:mirror:close-loop` all 9 cases with replay and strict audit,
+  AppSDK verify android ok:true draft, and `git diff --check`. Evidence
+  `EVID-20260815-ZARCHV2-P5-PROD-ATTACHMENT-MESSAGE-DELIVERY-001` added.
+  Review/promotion is not recorded because DSH/codex-review remains
+  unavailable; this slice is `production_pending_review` and Phase 5/v2 is
+  not complete.
+
+# 2026-08-15 Phase 5 daemon file transfer message route
+
+- `daemon.file_transfer` owns
+  `src/server/terminal-file-transfer-message-runtime.ts` for all
+  file-transfer transport-message projections and raw binary chunks:
+  `paste-image-start`, `attach-file-start`, `paste-image`,
+  `file-list-request`, `file-create-directory-request`,
+  `file-download-request`, `remote-screenshot-request`, and
+  `file-upload-start/chunk/end`.
+- `terminal-message-runtime.ts` is the physical receiving router only for
+  these types; it must not import/invoke the file-transfer facade directly or
+  own `session.pendingPasteImage` / `session.pendingAttachFile` projection.
+  The message route owner projects pending start state and delegates exact
+  file/screenshot handling to the existing `TerminalFileTransferRuntime`
+  facade, preserving `session_required` and legacy wire semantics.
+- The real module import edges are
+  `daemon.transport_subscriber -> daemon.file_transfer` (router -> message
+  route owner) and `daemon.file_transfer -> daemon.runtime` (message route
+  owner -> terminal runtime types).
+- Verified `test:file-transfer-message-route` 72/72,
+  `test:feature-registry` 84/84, type-check/tsc, docs wiki regeneration, full
+  build, `daemon:mirror:close-loop` all 9 cases with replay and strict audit,
+  AppSDK verify android ok:true draft, and `git diff --check`. Evidence
+  `EVID-20260815-ZARCHV2-P5-PROD-FILE-TRANSFER-MESSAGE-ROUTE-001` added.
+  Review/promotion is not recorded because DSH/codex-review remains
+  unavailable; this slice is `production_pending_review` and Phase 5/v2 is
+  not complete.
+
+# 2026-08-15 daemon.source_adapter contract owner verified
+
+- `daemon.source_adapter` is the active physical owner of the shared terminal
+  source adapter contract in `src/server/terminal-source-adapter.ts`; backend
+  and mirror capture readback consumers import it without re-owning kind
+  normalization, source session shape, or readback snapshot shape.
+- The owner never holds mirror revision, backend session truth, renderer, or
+  client UI truth. Blank/unsupported source kinds fail explicitly as
+  `<empty>`/unsupported kind; supported kinds normalize case/whitespace.
+- Verified source-adapter tests 4/4, feature-registry 84/84, tsc/type-check,
+  docs wiki regeneration, full build with prebuild gates, daemon mirror
+  close-loop 9/9 with replay and strict audit, AppSDK verify ok:true draft,
+  and `git diff --check`. Evidence
+  `EVID-20260815-ZARCHV2-P5-PROD-SOURCE-ADAPTER-001`; review remains pending
+  because DSH/codex-review is unavailable.
+
+# 2026-08-15 client.input_normalizer production owner verified
+
+- `client.input_normalizer` is the exclusive production owner of
+  `src/lib/terminal-input-normalization.ts`; `client.runtime` no longer lists
+  that path. TerminalPage and TerminalView import the pure normalizer through
+  the registered `client.app_shell -> client.input_normalizer` and
+  `client.dom_renderer -> client.input_normalizer` edges.
+- The normalizer preserves CJK/emoji/special symbols, converts terminal
+  full-width punctuation/ideographic space to half-width, and converts IME
+  line breaks to text separators instead of terminal Enter. It must never
+  import or own session transport, daemon target transport, backend session,
+  tmux, or mirror truth.
+- Verified input-normalizer tests 8/8, feature-registry 84/84, tsc/type-check,
+  docs wiki regeneration, full build with prebuild gates, daemon mirror
+  close-loop 9/9 with replay and strict audit, AppSDK verify ok:true draft,
+  and `git diff --check`. Evidence
+  `EVID-20260815-ZARCHV2-P4-PROD-INPUT-NORMALIZER-001`; review remains pending
+  because DSH/codex-review is unavailable.
+
+# 2026-08-15 client.reliable_input production owner verified
+
+- `client.reliable_input` is the exclusive production owner of
+  `src/lib/reliable-input/reliable-input-queue.ts`; it owns reliable terminal
+  input seq, one in-flight frame, ACK application, bounded ACK-timeout retry,
+  physical-transport replacement retry, and head refresh.
+  `session-context-input-runtime.ts` remains a thin bridge and re-export shell
+  for `sendInputThroughSessionTransport` and
+  `ensureSessionReadyForTransfer`; it must not re-own queue/ACK/retry truth.
+- Retry/control state must stay inside `resource.client_reliable_input_queue`;
+  it never writes retry control fields into terminal input payloads. The
+  daemon side keeps its own `daemon.input_queue` ownership and seq/ack dedupe
+  in `src/server/terminal-reliable-input-ack.ts`.
+- Verified reliable-input ownership 12/12, session-context-input-runtime
+  23/23, feature-registry 84/84, tsc/type-check, docs wiki regeneration, full
+  build with prebuild gates, daemon mirror close-loop 9/9 with replay and
+  strict audit, AppSDK verify ok:true draft, and `git diff --check`. Evidence
+  `EVID-20260815-ZARCHV2-P4-PROD-RELIABLE-INPUT-001`; review remains pending
+  because DSH/codex-review is unavailable.
+
+# 2026-08-15 daemon.mirror_writer production owner verified
+
+- `daemon.mirror_writer` is the active physical owner of validated source
+  capture, canonicalization, and authoritative snapshot commit writes in
+  `src/server/terminal-mirror-capture.ts`; it consumes the shared
+  `daemon.source_adapter` readback contract and never owns mirror revision or
+  client truth.
+- `daemon.mirror_store` owns canonical mirror truth, revision, and runtime
+  scheduling only; it no longer lists capture as an owned path.
+  `terminal-mirror-runtime.ts` receives the capture function through
+  `daemon.runtime_entry` dependency injection, so there is no
+  `daemon.mirror_store -> daemon.mirror_writer` import edge. Capture remains
+  the only owner that writes authoritative `mirror.rows` /
+  `mirror.bufferLines` snapshots; revision advances only in the store.
+- Verified mirror-writer ownership 4/4, feature-registry 84/84, tsc/type-check,
+  docs wiki regeneration, full build with prebuild gates, daemon mirror
+  close-loop 9/9 with replay and strict audit, AppSDK verify ok:true draft,
+  and `git diff --check`. Evidence
+  `EVID-20260815-ZARCHV2-P5-PROD-MIRROR-WRITER-001`; review remains pending
+  because DSH/codex-review is unavailable.
+
+# 2026-08-15 shared node/debug production foundation verified
+
+- `shared.node_contract` and `shared.debug_contract` are active shared owners
+  for node lifecycle/identity and debug registry/coordinator/event/permission
+  contracts in `packages/shared/src/terminal/`; `@zterm/shared` exports them.
+  `client.debug_console` owns the client snapshot hub
+  (`src/lib/client-debug-snapshot.ts`) and `daemon.observability` owns
+  `src/server/runtime-debug-store.ts`,
+  `src/server/terminal-debug-runtime.ts`, and
+  `src/server/runtime-debug-http-exporter.ts`.
+- DebugRegistry duplicate registration is intentionally fail-fast. Test files
+  that render real TerminalPage/App and import the real snapshot hub must keep
+  `resetClientDebugSnapshotForTests`/cleanup at file scope, not inside one
+  describe; scoped hooks leak producers into later describes and surface as
+  `duplicate debug producer: terminal-page`.
+- Verified shared-contract-ownership 5/5, debug-observability 64/64 + shared
+  9/9, runtime-architecture-v2 30/30 + shared 10/10, feature-registry 84/84,
+  full build with prebuild gates, daemon mirror close-loop 9/9 with replay and
+  strict audit, AppSDK verify ok:true draft, and `git diff --check`. Evidence
+  `EVID-20260815-ZARCHV2-PROD-FOUNDATION-NODE-DEBUG-001`; review remains
+  pending because DSH/codex-review is unavailable.
+
+# 2026-08-15 DSH PASS for v2 fix loop
+
+- `zarchv2-current-dsh-r2` returned literal `VERDICT: PASS` after all seven
+  P1 findings from `zarchv2-current-dsh-r1` were remediated and full prebuild,
+  typecheck, Vite build, AppSDK verify, and `git diff --check` passed.
+- The review still lists actionable P2/P3 items, and AppSDK lifecycle is still
+  `draft`; DSH PASS is not AppSDK promotion and does not mean
+  ZTERM-ARCH-V2-DESIGN-001 is complete.
+- Android native background policy truth is bounded foreground-service
+  `PARTIAL_WAKE_LOCK` with `WAKE_LOCK`, no battery-optimization bypass, and
+  no socket/session/route ownership; `android-power-policy.test.ts` locks it.
+
+# 2026-08-15 DSH r6 PASS after debug HTTP P1 remediation
+
+- DSH `zarchv2-current-dsh-r5` failed on one confirmed P1: debug HTTP mutation
+  endpoints were open by default on `0.0.0.0:3333` when no token was set, and
+  `debug:control` default-deny/expiring lease was not enforced at an HTTP
+  decision point.
+- Production fix: `createTerminalHttpRuntime` now receives one shared
+  `DebugPermissionService` through `daemonDebugPermissionService`; all debug
+  routes return 401 on non-loopback hosts without a token; `/debug/runtime/control`
+  is POST-only and returns 403 unless an active `debug:control` grant exists,
+  so lease/broadcast mutation cannot fire without a grant. The shared service is
+  also injected into `terminal-debug-runtime`, so the existing expiring lease is
+  the same decision point used by HTTP.
+- Verified: focused HTTP/debug 14/14, debug-observability Android 69/69 +
+  shared protocol 10/10, feature-registry 92/92, type-check, full `pnpm run build`
+  with prebuild gates, daemon mirror close-loop 9/9 + replay + strict audit,
+  `git diff --check`, AppSDK verify ok:true draft.
+- `zarchv2-current-dsh-r6` final is literal `VERDICT: PASS`, no P0/P1. Known
+  P2s: Herdr scroll-metrics throttle can lag authoritative source-end advance
+  up to ~100ms during sustained output; full-suite native WebRTC/
+  ScreenCaptureKit aborts are environmental and pass isolated; debug
+  read/subscribe capabilities are reserved but not independently `can()`-gated.
+- AppSDK lifecycle remains `draft`; ZTERM-ARCH-V2-DESIGN-001 is not complete
+  until promotion, Active/Protected archive, regression/freeze records, and
+  device/OTA evidence are produced.

@@ -610,6 +610,11 @@ vi.mock('./pages/TerminalPage', () => ({
     followResetEpoch,
     sessionBufferStore,
     serverIdentityAliasInputs = [],
+    renderSessionDrawer,
+    renderFileBrowser,
+    renderRemoteWindow,
+    renderQuickBar,
+    renderTerminalShell,
   }: {
     activeSession: { id: string; buffer?: { revision?: number } } | null;
     sessions: Array<{ id: string }>;
@@ -624,6 +629,11 @@ vi.mock('./pages/TerminalPage', () => ({
     followResetEpoch?: number;
     sessionBufferStore?: { getSnapshot: (sessionId: string) => { buffer?: { marker?: string; revision?: number } } };
     serverIdentityAliasInputs?: Array<{ bridgeHost?: string; bridgePort?: number; daemonHostId?: string; name?: string }>;
+    renderSessionDrawer?: () => React.ReactNode;
+    renderFileBrowser?: () => React.ReactNode;
+    renderRemoteWindow?: () => React.ReactNode;
+    renderQuickBar?: () => React.ReactNode;
+    renderTerminalShell?: () => React.ReactNode;
   }) => {
     const activeRevision = activeSession?.buffer?.revision ?? -1;
     const activeStoreSnapshot = activeSession ? sessionBufferStore?.getSnapshot(activeSession.id)?.buffer : null;
@@ -643,6 +653,11 @@ vi.mock('./pages/TerminalPage', () => ({
         <div data-testid="terminal-session-ids">{sessions.map((session) => session.id).join(',')}</div>
         <div data-testid="terminal-input-reset-epoch">{activeSession ? (inputResetEpochBySession?.[activeSession.id] || 0) : -1}</div>
         <div data-testid="terminal-follow-reset-epoch">{String(followResetEpoch ?? -1)}</div>
+        <div data-testid="terminal-session-drawer-slot">{renderSessionDrawer ? 'ready' : 'waiting'}</div>
+        <div data-testid="terminal-file-browser-slot">{renderFileBrowser ? 'ready' : 'waiting'}</div>
+        <div data-testid="terminal-remote-window-slot">{renderRemoteWindow ? 'ready' : 'waiting'}</div>
+        <div data-testid="terminal-quickbar-slot">{renderQuickBar ? 'ready' : 'waiting'}</div>
+        <div data-testid="terminal-shell-slot">{renderTerminalShell ? 'ready' : 'waiting'}</div>
         <button
           type="button"
           data-testid="close-active-tab"
@@ -833,6 +848,114 @@ describe('App dynamic refresh matrix', () => {
     expect(appSurface.style.position).toBe('fixed');
     expect(appSurface.style.inset).toBe('0px');
     expect(appSurface.style.height).toBe('');
+  });
+
+  it('forwards the plugin-provided session drawer slot render to TerminalPage', async () => {
+    const renderSessionDrawer = vi.fn(() => (
+      <div data-testid="session-drawer-slot-ready" />
+    ));
+
+    render(
+      <AppContent
+        bridgeSettings={{ servers: [] } as any}
+        setBridgeSettings={vi.fn()}
+        renderSessionDrawer={renderSessionDrawer}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-session-drawer-slot').textContent).toBe('ready'));
+    expect(renderSessionDrawer).not.toHaveBeenCalled();
+  });
+
+  it('forwards the plugin-provided file browser slot render to TerminalPage', async () => {
+    const renderFileBrowser = vi.fn(() => (
+      <div data-testid="file-browser-slot-ready" />
+    ));
+
+    render(
+      <AppContent
+        bridgeSettings={{ servers: [] } as any}
+        setBridgeSettings={vi.fn()}
+        renderFileBrowser={renderFileBrowser}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-file-browser-slot').textContent).toBe('ready'));
+    expect(renderFileBrowser).not.toHaveBeenCalled();
+  });
+
+  it('forwards the plugin-provided remote window slot render to TerminalPage', async () => {
+    const renderRemoteWindow = vi.fn(() => (
+      <div data-testid="remote-window-slot-ready" />
+    ));
+
+    render(
+      <AppContent
+        bridgeSettings={{ servers: [] } as any}
+        setBridgeSettings={vi.fn()}
+        renderRemoteWindow={renderRemoteWindow}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-remote-window-slot').textContent).toBe('ready'));
+    expect(renderRemoteWindow).not.toHaveBeenCalled();
+  });
+
+  it('forwards the plugin-provided quickbar slot render to TerminalPage', async () => {
+    const renderQuickBar = vi.fn(() => (
+      <div data-testid="quickbar-slot-ready" />
+    ));
+
+    render(
+      <AppContent
+        bridgeSettings={{ servers: [] } as any}
+        setBridgeSettings={vi.fn()}
+        renderQuickBar={renderQuickBar}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-quickbar-slot').textContent).toBe('ready'));
+    expect(renderQuickBar).not.toHaveBeenCalled();
+  });
+
+  it('forwards the plugin-provided terminal shell slot render to TerminalPage', async () => {
+    const renderTerminalShell = vi.fn(() => (
+      <div data-testid="terminal-shell-slot-ready" />
+    ));
+
+    render(
+      <AppContent
+        bridgeSettings={{ servers: [] } as any}
+        setBridgeSettings={vi.fn()}
+        renderTerminalShell={renderTerminalShell}
+      />,
+    );
+
+    await waitFor(() => expect(screen.getByTestId('terminal-shell-slot').textContent).toBe('ready'));
+    expect(renderTerminalShell).not.toHaveBeenCalled();
+  });
+
+  it('forwards the plugin-provided settings update slot render to SettingsPage', async () => {
+    const renderSettingsUpdate = vi.fn(() => (
+      <div data-testid="settings-update-slot-ready" />
+    ));
+
+    render(
+      <AppContent
+        bridgeSettings={{ servers: [] } as any}
+        setBridgeSettings={vi.fn()}
+        renderSettingsUpdate={renderSettingsUpdate}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId('open-connections'));
+    await waitFor(() => expect(connectionsPageHarness.readProps()).toBeTruthy());
+    act(() => {
+      connectionsPageHarness.readProps()?.onOpenSettings?.();
+    });
+    await waitFor(() => expect(settingsPageHarness.readProps()).toBeTruthy());
+    expect(settingsPageHarness.readProps().renderSettingsUpdate).toBe(renderSettingsUpdate);
+    expect(renderSettingsUpdate).not.toHaveBeenCalled();
   });
 
   it('keeps terminal rendering in sync across sequential active-session buffer updates', async () => {

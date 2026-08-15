@@ -1,10 +1,22 @@
 // @vitest-environment jsdom
 
 import { memo } from 'react';
+import type { ComponentProps } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { TerminalQuickBarProps } from '../components/terminal/TerminalQuickBar';
 import { STORAGE_KEYS, type Session } from '../lib/types';
-import { TerminalPage } from './TerminalPage';
+import { TerminalPage as TerminalPageBase } from './TerminalPage';
+import { renderTerminalShellUi } from '../lib/plugin-host/terminal-shell-ui-plugin';
+
+function TerminalPage(props: ComponentProps<typeof TerminalPageBase>) {
+  return (
+    <TerminalPageBase
+      {...props}
+      renderTerminalShell={props.renderTerminalShell || renderTerminalShellUi}
+    />
+  );
+}
 
 // TerminalPage reads attachment counts from SessionContext (badge/drawer).
 // These page-level tests render TerminalPage directly without the app-level
@@ -78,48 +90,36 @@ vi.mock('../components/terminal/RemoteScreenshotSheet', () => ({
   RemoteScreenshotSheet: () => null,
 }));
 
-vi.mock('../components/terminal/TerminalQuickBar', () => ({
-  TerminalQuickBar: memo(({
-    onOpenFileTransfer,
-    onMeasuredHeightChange,
-    onToggleAbsoluteLineNumbers,
-    ...rest
-  }: {
-    onOpenFileTransfer?: () => void;
-    onMeasuredHeightChange?: (height: number) => void;
-    onToggleAbsoluteLineNumbers?: () => void;
-    [key: string]: unknown;
-  }) => {
-    quickBarRenderCounter.count += 1;
-    const currentProps = {
-      onOpenFileTransfer,
-      onMeasuredHeightChange,
-      onToggleAbsoluteLineNumbers,
-      ...rest,
-    } as Record<string, unknown>;
-    quickBarChangedKeys = previousQuickBarProps
-      ? Object.keys(currentProps).filter((key) => previousQuickBarProps?.[key] !== currentProps[key])
-      : Object.keys(currentProps);
-    previousQuickBarProps = currentProps;
-    return (
-      <div
-        data-testid="terminal-quickbar"
-        data-render-count={quickBarRenderCounter.count}
-        data-changed-keys={quickBarChangedKeys.join(',')}
-      >
-        <button type="button" onClick={() => onOpenFileTransfer?.()}>
-          open-file-transfer
-        </button>
-        <button type="button" onClick={() => onMeasuredHeightChange?.(222)}>
-          measure-quickbar
-        </button>
-        <button type="button" onClick={() => onToggleAbsoluteLineNumbers?.()}>
-          toggle-line-numbers
-        </button>
-      </div>
-    );
-  }),
-}));
+function quickBarSlotRender(props: TerminalQuickBarProps) {
+  quickBarRenderCounter.count += 1;
+  const currentProps = {
+    onOpenFileTransfer: props.onOpenFileTransfer,
+    onMeasuredHeightChange: props.onMeasuredHeightChange,
+    onToggleAbsoluteLineNumbers: props.onToggleAbsoluteLineNumbers,
+    ...props,
+  } as Record<string, unknown>;
+  quickBarChangedKeys = previousQuickBarProps
+    ? Object.keys(currentProps).filter((key) => previousQuickBarProps?.[key] !== currentProps[key])
+    : Object.keys(currentProps);
+  previousQuickBarProps = currentProps;
+  return (
+    <div
+      data-testid="terminal-quickbar"
+      data-render-count={quickBarRenderCounter.count}
+      data-changed-keys={quickBarChangedKeys.join(',')}
+    >
+      <button type="button" onClick={() => props.onOpenFileTransfer?.()}>
+        open-file-transfer
+      </button>
+      <button type="button" onClick={() => props.onMeasuredHeightChange?.(222)}>
+        measure-quickbar
+      </button>
+      <button type="button" onClick={() => props.onToggleAbsoluteLineNumbers?.()}>
+        toggle-line-numbers
+      </button>
+    </div>
+  );
+}
 
 vi.mock('../components/TerminalView', () => ({
   TerminalView: memo(({
@@ -194,6 +194,7 @@ function renderTerminalPage(sessions: Session[], activeSession: Session | null) 
     quickActions: [],
     shortcutActions: [],
     sessionDraft: '',
+    renderQuickBar: quickBarSlotRender,
   };
   return render(
     <TerminalPage
@@ -259,6 +260,74 @@ describe('TerminalPage render isolation', () => {
 
     expect(readRenderCount('terminal-view-s1')).toBe(terminalRenderCountBefore);
     expect(readRenderCount('terminal-quickbar')).toBe(quickBarRenderCountBefore);
+  });
+
+  it('renders the file browser only through the plugin slot callback', () => {
+    const session1 = makeSession('s1');
+    const renderFileBrowser = vi.fn((props: { open: boolean; mode?: string }) => (
+      <div
+        data-testid="plugin-file-browser-slot"
+        data-open={String(props.open)}
+        data-mode={props.mode || ''}
+      />
+    ));
+    render(
+      <TerminalPage
+        sessions={[session1]}
+        activeSession={session1}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onSendMessage={vi.fn()}
+        onFileTransferMessage={vi.fn()}
+        renderFileBrowser={renderFileBrowser}
+        renderQuickBar={quickBarSlotRender}
+      />,
+    );
+
+    expect(renderFileBrowser).toHaveBeenCalled();
+    expect(screen.getByTestId('plugin-file-browser-slot').getAttribute('data-open')).toBe('false');
+
+    fireEvent.click(screen.getByText('open-file-transfer'));
+
+    expect(screen.getByTestId('plugin-file-browser-slot').getAttribute('data-open')).toBe('true');
+  });
+
+  it('renders no file browser when the plugin slot callback is absent', () => {
+    const session1 = makeSession('s1');
+    render(
+      <TerminalPage
+        sessions={[session1]}
+        activeSession={session1}
+        onSwitchSession={vi.fn()}
+        onMoveSession={vi.fn()}
+        onRenameSession={vi.fn()}
+        onCloseSession={vi.fn()}
+        onOpenConnections={vi.fn()}
+        onOpenQuickTabPicker={vi.fn()}
+        onResize={vi.fn()}
+        onTerminalInput={vi.fn()}
+        onTerminalViewportChange={vi.fn()}
+        quickActions={[]}
+        shortcutActions={[]}
+        sessionDraft=""
+        onSendMessage={vi.fn()}
+        onFileTransferMessage={vi.fn()}
+        renderQuickBar={quickBarSlotRender}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('open-file-transfer'));
+    expect(screen.queryByTestId('plugin-file-browser-slot')).toBeNull();
   });
 
   it('does not rerender TerminalView or QuickBar when only quick bar measured height changes', () => {
@@ -349,6 +418,7 @@ describe('TerminalPage render isolation', () => {
       quickActions: [],
       shortcutActions: [],
       sessionDraft: '',
+      renderQuickBar: quickBarSlotRender,
     };
 
     const view = render(
@@ -417,6 +487,7 @@ describe('TerminalPage render isolation', () => {
       quickActions: [],
       shortcutActions: [],
       sessionDraft: '',
+      renderQuickBar: quickBarSlotRender,
     };
     const view = render(
       <TerminalPage
@@ -465,6 +536,7 @@ describe('TerminalPage render isolation', () => {
       quickActions: [],
       shortcutActions: [],
       sessionDraft: '',
+      renderQuickBar: quickBarSlotRender,
     };
     const view = render(
       <TerminalPage
@@ -515,6 +587,7 @@ describe('TerminalPage render isolation', () => {
       quickActions: [],
       shortcutActions: [],
       sessionDraft: '',
+      renderQuickBar: quickBarSlotRender,
     };
     const view = render(
       <TerminalPage
@@ -566,6 +639,7 @@ describe('TerminalPage render isolation', () => {
       quickActions: [],
       shortcutActions: [],
       sessionDraft: '',
+      renderQuickBar: quickBarSlotRender,
     };
     const view = render(
       <TerminalPage
@@ -625,6 +699,7 @@ describe('TerminalPage render isolation', () => {
       quickActions: [],
       shortcutActions: [],
       sessionDraft: '',
+      renderQuickBar: quickBarSlotRender,
     };
     const view = render(
       <TerminalPage

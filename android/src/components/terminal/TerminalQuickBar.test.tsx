@@ -1275,6 +1275,33 @@ describe("TerminalQuickBar", () => {
     expect(screen.getByText("已发送 9 张图片")).toBeTruthy();
   });
 
+  it("shows image send failure as a QuickBar toast instead of a native alert", async () => {
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => undefined);
+    const onImagePaste = vi.fn(async () => {
+      throw new Error("sips failed");
+    });
+    renderQuickBar({ onImagePaste });
+
+    const imageInput = Array.from(
+      document.querySelectorAll<HTMLInputElement>('input[type="file"]'),
+    ).find((input) => input.accept === "image/*");
+    expect(imageInput).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.change(imageInput!, {
+        target: {
+          files: [new File(["image"], "photo.png", { type: "image/png" })],
+        },
+      });
+      await Promise.resolve();
+    });
+
+    await waitFor(() => expect(screen.getByText("图片发送失败：sips failed")).toBeTruthy());
+    expect(screen.queryByTestId("terminal-quickbar-image-upload-progress")).toBeNull();
+    expect(alertSpy).not.toHaveBeenCalled();
+    alertSpy.mockRestore();
+  });
+
   it("keeps native image and file picker clicks synchronous before keyboard hide resolves", async () => {
     vi.useFakeTimers();
     vi.mocked(Capacitor.isNativePlatform).mockReturnValue(true);

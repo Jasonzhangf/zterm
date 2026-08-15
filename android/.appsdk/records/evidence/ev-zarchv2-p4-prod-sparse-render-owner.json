@@ -1,0 +1,44 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "EVID-20260815-ZARCHV2-P4-PROD-SPARSE-RENDER-OWNER-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-phase4-production",
+  "kind": "gate",
+  "source_commit": "9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c",
+  "scope": {
+    "module_id": "client.sparse_buffer",
+    "feature_id": "terminal.buffer_render",
+    "entrypoint": "pnpm --dir android run build"
+  },
+  "producer": {
+    "adapter": "appsdk",
+    "identity": "codex-zterm-v2-phase4-sparse-render-owner-20260815T070754Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "Phase 4 sparse buffer and render projection ownership slice: active module client.sparse_buffer owns resource.client_sparse_buffer through src/lib/session-buffer-store.ts; client.buffer_store no longer owns the sparse body store. Active module client.renderer_window owns src/lib/session-render-buffer-store.ts with the render gate as immutable render projection owner. Module/edge/resource/feature/function/wiki/mainline/AppSDK maps, project modules, resource map, v2 test design, and module-registry-truth required list were updated in lockstep. Verified test:feature-registry 84/84, test:terminal:frame-assembly 104/104, test:terminal:contracts 826/826 in 55 files, tsc --noEmit PASS, full pnpm run build PASS (prebuild, relay smoke, common flows, workspace panes, type-check, Vite), daemon:mirror:close-loop all 9 cases plus replay and strict audit PASS, git diff --check PASS, and appsdk verify android ok:true at draft. Worktree is uncommitted at HEAD 9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c. No ReviewRecord/PASS exists because codex-review MCP remains unavailable; this slice is production_pending_review and v2 overall is not complete.",
+  "created_at": "2026-08-15T07:07:54Z",
+  "expires_at": "2026-11-13T07:07:54Z",
+  "input_hashes": [
+    "sha256:095b84d669c12504a3b07e624aafc3bcda3b989d4d874b8f94c08bfdb048b3f1",
+    "sha256:72fdc565241b3027b2f9b4d1e6452e438708c023d6748573e0c99f232dabd59c",
+    "sha256:473d3b51ac1b85c6dca0409319d30b46e0961167397488dcaebe7cb6d384037b",
+    "sha256:5b32f18c6a98b04d97824430cf44f8596907a270d10e2fe6d7f88294648fa806",
+    "sha256:417a578f0d4cf4400df1215cc0b7da154d02704f2af0b22432f961d21f1e18a6",
+    "sha256:7654ede299601f78bc5f6af38daedeec43b018e509141048fee5962f63b49ba3",
+    "sha256:d016b67f4485a67d33201ca15a6c414c380f6823d40cc9b68d24fd901b61f8d5",
+    "sha256:1a2d347a22bdc96ff42b643d4496ccf9606fdeaaed2493e58593b03b2aeecacd",
+    "sha256:319d0802c3a43b1f779025819eb9838ab1faf77dae91819fa4b1466d4abe3688",
+    "sha256:ff6a3aac2eec2e29bd28fd120ca87eb1ecc2f085fe64923de102605f524f37eb",
+    "sha256:0c26dfd2a1f860ad122b114914a068688b53af2f867624ebf0e9276757091e38",
+    "sha256:34bc92b58e5859ccbee9ba5dcd7cee2cf048d877988541a1c36dceb8abdef503",
+    "sha256:7d9d07063cf5153f0cc19ce3232848470583c59e00e39ad2a3c0415e021c170d",
+    "sha256:f3b1b55959244753a2eaf0a2316010f345c4ab18d41edb2b8695f0a03f2ec515",
+    "sha256:1ffb84750fd76f02b296d1ca314d2d1512975ea55555b5c11a4cd5a9d176ad1b",
+    "sha256:21985583679a99daf1e0fd4d2140a2e9d4f5a23f84882567459ca4bf2a0962d6",
+    "sha256:98c82ebbf76e393681bcab136f0ba16c5444507f493dd1cd6172816ab99ad265",
+    "sha256:85994fb1e13e3bd4d7b8606879121e4ca91c6603555da8e65afb3460030500a2"
+  ],
+  "artifact_hash": "sha256:85994fb1e13e3bd4d7b8606879121e4ca91c6603555da8e65afb3460030500a2",
+  "scope_hash": "sha256:095b84d669c12504a3b07e624aafc3bcda3b989d4d874b8f94c08bfdb048b3f1"
+}

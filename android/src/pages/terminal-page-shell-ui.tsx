@@ -1,4 +1,4 @@
-import { memo as ReactMemo, type ReactNode } from "react";
+import { memo as ReactMemo, type ComponentProps, type ReactNode } from "react";
 import type { Session } from "../lib/types";
 
 export function copyMenuButtonStyle(disabled = false, subtle = false) {
@@ -116,4 +116,6 @@ const TerminalNetworkBanner = ReactMemo(function TerminalNetworkBanner({
   );
 });
 
+export type TerminalQuickBarShellProps = ComponentProps<typeof TerminalQuickBarShell>;
+export type TerminalNetworkBannerProps = ComponentProps<typeof TerminalNetworkBanner>;
 export { TerminalQuickBarShell, TerminalNetworkBanner };

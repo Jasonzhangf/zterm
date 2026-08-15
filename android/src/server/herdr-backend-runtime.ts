@@ -1,24 +1,108 @@
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { TerminalCell } from '@zterm/shared/types';
-import { trimCanonicalBufferWindow } from './canonical-buffer';
-import type { WezTermBackendRuntime, WezTermBackendSession, WezTermMirrorSnapshot } from './wezterm-backend';
-import { parseHerdrScrollMetrics, resolveHerdrTerminalFromNamedSession, startHerdrProcessSessionAdapter, type HerdrProcessSessionAdapter } from './herdr-process-transport';
-import type { HerdrCanonicalSnapshot } from './herdr-frame-canonicalizer';
+import { normalizeCapturedLineBlock } from './canonical-buffer';
+import { canonicalizeCapturedMirrorLines } from './mirror-line-canonicalizer';
+import type {
+  TerminalSourceAdapter,
+  TerminalSourceMirrorSnapshot,
+  TerminalSourceSession,
+} from './terminal-source-adapter';
+import {
+  parseHerdrScrollMetrics,
+  parseHerdrPaneGeometry,
+  resolveHerdrTerminalFromNamedSession,
+  startHerdrProcessSessionAdapter,
+  type HerdrProcessSessionAdapter,
+} from './herdr-process-transport';
+import type {
+  HerdrCanonicalSnapshot,
+  HerdrScrollMetrics,
+} from './herdr-frame-canonicalizer';
 
 export interface HerdrBackendRuntimeOptions {
   executable: string;
   maxMirrorLines?: number;
+  onLiveActivity?: (sessionName: string) => void;
 }
 
-interface ManagedHerdrSession extends WezTermBackendSession {
+export interface HerdrHistorySnapshot {
+  bufferLines: TerminalCell[][];
+  sourceEndIndex: number;
+  cols: number;
+  rows: number;
+  refreshedAt: number;
+}
+
+interface ManagedHerdrSession extends TerminalSourceSession {
   herdrSessionName: string;
   terminalId: string;
   herdrPaneId: string;
   adapterBundle: HerdrProcessSessionAdapter | null;
   adapterPromise: Promise<HerdrProcessSessionAdapter> | null;
   latestSnapshot: HerdrCanonicalSnapshot | null;
+  historySnapshot: HerdrHistorySnapshot | null;
+  historyRefreshPromise: Promise<void> | null;
+  historyRefreshTimer: ReturnType<typeof setTimeout> | null;
+  historyRefreshRequested: boolean;
+  lastScrollMetrics: HerdrScrollMetrics | null;
+  lastScrollMetricsAt: number;
+  hostScrollState: boolean | null;
   failure: Error | null;
   serverProcess: ChildProcessWithoutNullStreams | null;
+}
+
+const HERDR_HISTORY_REFRESH_MS = 1000;
+const HERDR_HISTORY_LIMIT = 1000;
+const HERDR_HISTORY_READ_MAX_ATTEMPTS = 3;
+
+export function advanceHerdrHistoryLiveTailWindow(
+  history: HerdrHistorySnapshot,
+  live: HerdrCanonicalSnapshot,
+  options: {
+    overlayMetrics?: HerdrScrollMetrics | null;
+    canAdvanceSourceEnd?: boolean;
+  } = {},
+): { bufferLines: TerminalCell[][]; sourceEndIndex: number; canOverlay: boolean } {
+  const metrics = live.scrollMetrics ?? options.overlayMetrics ?? null;
+  const canAdvanceSourceEnd = Boolean(live.scrollMetrics && options.canAdvanceSourceEnd !== false);
+  const canOverlay = metrics?.offsetFromBottom === 0
+    && history.cols === live.cols
+    && history.rows === live.rows;
+  if (!canOverlay) {
+    return {
+      bufferLines: history.bufferLines,
+      sourceEndIndex: history.sourceEndIndex,
+      canOverlay: false,
+    };
+  }
+  const liveRows = live.bufferLines.slice(-live.rows);
+  const sourceEndIndex = canAdvanceSourceEnd
+    ? Math.max(history.sourceEndIndex, metrics!.maxOffsetFromBottom + metrics!.viewportRows)
+    : history.sourceEndIndex;
+  const growth = sourceEndIndex - history.sourceEndIndex;
+  if (
+    liveRows.length !== live.rows
+    || history.bufferLines.length < live.rows
+    || growth > live.rows
+    || growth >= history.bufferLines.length
+  ) {
+    return {
+      bufferLines: history.bufferLines,
+      sourceEndIndex: history.sourceEndIndex,
+      canOverlay: false,
+    };
+  }
+  return {
+    bufferLines: [
+      ...history.bufferLines.slice(
+        growth,
+        growth + history.bufferLines.length - live.rows,
+      ),
+      ...liveRows,
+    ],
+    sourceEndIndex,
+    canOverlay: true,
+  };
 }
 
 function waitForHerdrReadinessWindow(milliseconds: number) {
@@ -50,9 +134,9 @@ function waitForHerdrProcessExit(process: ChildProcessWithoutNullStreams, timeou
   }
 }
 
-function parseWorkspaceCreate(raw: string): { terminalId: string; paneId: string; cwd: string; viewportRows: number } {
+function parseWorkspaceCreate(raw: string): { terminalId: string; paneId: string; cwd: string } {
   const response = JSON.parse(raw) as {
-    result?: { root_pane?: { terminal_id?: string; pane_id?: string; cwd?: string; scroll?: { viewport_rows?: number } } };
+    result?: { root_pane?: { terminal_id?: string; pane_id?: string; cwd?: string } };
   };
   const rootPane = response.result?.root_pane;
   if (!rootPane?.terminal_id || !rootPane.pane_id || !rootPane.cwd) {
@@ -62,57 +146,10 @@ function parseWorkspaceCreate(raw: string): { terminalId: string; paneId: string
     terminalId: rootPane.terminal_id,
     paneId: rootPane.pane_id,
     cwd: rootPane.cwd,
-    viewportRows: rootPane.scroll?.viewport_rows || 24,
   };
 }
 
-export function mapHerdrCanonicalSnapshot(
-  snapshot: HerdrCanonicalSnapshot,
-  maxMirrorLines?: number,
-): WezTermMirrorSnapshot {
-  const absoluteRange = snapshot.absoluteRange;
-  if (!absoluteRange) {
-    throw new Error('Herdr absolute range unavailable; refusing to publish a fabricated mirror range');
-  }
-  if (
-    !Number.isInteger(absoluteRange.startIndex)
-    || !Number.isInteger(absoluteRange.endIndex)
-    || !Number.isInteger(absoluteRange.availableStartIndex)
-    || !Number.isInteger(absoluteRange.availableEndIndex)
-    || absoluteRange.startIndex < 0
-    || absoluteRange.endIndex < absoluteRange.startIndex
-    || absoluteRange.availableStartIndex > absoluteRange.startIndex
-    || absoluteRange.availableEndIndex < absoluteRange.endIndex
-    || absoluteRange.endIndex - absoluteRange.startIndex !== snapshot.bufferLines.length
-  ) {
-    throw new Error('Herdr canonical absolute range does not cover the canonical buffer body');
-  }
-  const trimmed = trimCanonicalBufferWindow(
-    absoluteRange.startIndex,
-    snapshot.bufferLines as TerminalCell[][],
-    maxMirrorLines === undefined ? snapshot.bufferLines.length : maxMirrorLines,
-  );
-  if (
-    snapshot.cursor
-    && (
-      snapshot.cursor.rowIndex < trimmed.startIndex
-      || snapshot.cursor.rowIndex >= trimmed.startIndex + trimmed.lines.length
-    )
-  ) {
-    throw new Error('Herdr canonical cursor falls outside the bounded mirror window');
-  }
-  return {
-    revision: snapshot.ztermRevision,
-    bufferStartIndex: trimmed.startIndex,
-    bufferLines: trimmed.lines,
-    cols: snapshot.cols,
-    rows: snapshot.rows,
-    cursorKeysApp: snapshot.cursorKeysApp,
-    cursor: snapshot.cursor,
-  };
-}
-
-export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): WezTermBackendRuntime {
+export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): TerminalSourceAdapter {
   // Herdr is an external compatibility source, like tmux. Every running
   // official Herdr named session is discoverable verbatim; zterm must not
   // reserve or filter a name prefix. Herdr layout/workspace state still never
@@ -125,6 +162,252 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'pipe'],
     });
+  }
+
+  function readHerdrScrollMetrics(session: ManagedHerdrSession) {
+    try {
+      const metrics = parseHerdrScrollMetrics(
+        cli(session.herdrSessionName, ['pane', 'get', session.herdrPaneId]),
+      );
+      session.lastScrollMetrics = metrics;
+      session.lastScrollMetricsAt = Date.now();
+      return metrics;
+    } catch (error) {
+      console.warn(
+        `[herdr] pane scroll metrics read failed for ${session.sessionName}: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+      return null;
+    }
+  }
+
+  function scheduleHerdrHistoryRefresh(session: ManagedHerdrSession, immediate = false) {
+    if (!immediate && session.historyRefreshTimer) {
+      return;
+    }
+    if (session.historyRefreshTimer) {
+      clearTimeout(session.historyRefreshTimer);
+      session.historyRefreshTimer = null;
+    }
+    if (immediate) {
+      if (session.historyRefreshPromise) {
+        session.historyRefreshRequested = true;
+        return;
+      }
+      void refreshHerdrHistory(session).catch((error) => {
+        console.error(
+          `[herdr] immediate history refresh failed for ${session.sessionName}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+      return;
+    }
+    session.historyRefreshTimer = setTimeout(() => {
+      session.historyRefreshTimer = null;
+      if (session.historyRefreshPromise) {
+        session.historyRefreshRequested = true;
+        return;
+      }
+      void refreshHerdrHistory(session).catch((error) => {
+        console.error(
+          `[herdr] scheduled history refresh failed for ${session.sessionName}: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      });
+    }, HERDR_HISTORY_REFRESH_MS);
+    session.historyRefreshTimer.unref?.();
+  }
+
+  async function refreshHerdrHistory(session: ManagedHerdrSession) {
+    if (session.historyRefreshPromise) {
+      return session.historyRefreshPromise;
+    }
+    const promise = (async () => {
+      const lineLimit = Math.min(maxMirrorLines, HERDR_HISTORY_LIMIT);
+      for (let attempt = 0; attempt < HERDR_HISTORY_READ_MAX_ATTEMPTS; attempt += 1) {
+        const readSnapshot = session.latestSnapshot;
+        if (!readSnapshot) {
+          throw new Error(`Herdr session ${session.sessionName} produced no canonical frame before history read`);
+        }
+        const raw = cli(session.herdrSessionName, [
+          'pane',
+          'read',
+          session.herdrPaneId,
+          '--source',
+          'recent',
+          '--lines',
+          String(lineLimit),
+          '--format',
+          'ansi',
+          '--raw',
+        ]);
+        if (!raw) {
+          throw new Error(`Herdr pane read returned empty recent history for ${session.sessionName}`);
+        }
+        const capturedLines = normalizeCapturedLineBlock(raw);
+        if (capturedLines.length === 0) {
+          throw new Error(`Herdr pane read returned no recent history rows for ${session.sessionName}`);
+        }
+        const canonicalLines = await canonicalizeCapturedMirrorLines(
+          capturedLines,
+          readSnapshot.cols || session.cols,
+        );
+        if (canonicalLines.length === 0) {
+          throw new Error(`Herdr pane read canonicalization returned no rows for ${session.sessionName}`);
+        }
+        const currentSnapshot = session.latestSnapshot;
+        if (!currentSnapshot) {
+          throw new Error(`Herdr session ${session.sessionName} lost its canonical frame during history read`);
+        }
+        const geometryChanged = (
+          currentSnapshot.cols !== readSnapshot.cols
+          || currentSnapshot.rows !== readSnapshot.rows
+        );
+        if (geometryChanged) {
+          if (attempt < HERDR_HISTORY_READ_MAX_ATTEMPTS - 1) {
+            continue;
+          }
+          throw new Error(
+            `Herdr geometry changed during history read for ${session.sessionName}; refusing stale history`,
+          );
+        }
+        const metrics = readHerdrScrollMetrics(session);
+        if (!metrics) {
+          throw new Error(
+            `Herdr pane scroll metrics unavailable for ${session.sessionName}; refusing to publish history at a stale absolute index`,
+          );
+        }
+        const previousEnd = session.historySnapshot?.sourceEndIndex || 0;
+        const sourceEndIndex = Math.max(
+          previousEnd,
+          canonicalLines.length,
+          metrics.maxOffsetFromBottom + metrics.viewportRows,
+        );
+        session.historySnapshot = {
+          bufferLines: canonicalLines,
+          sourceEndIndex,
+          cols: currentSnapshot.cols,
+          rows: currentSnapshot.rows,
+          refreshedAt: Date.now(),
+        };
+        options.onLiveActivity?.(session.sessionName);
+        return;
+      }
+      throw new Error(`Herdr history refresh did not stabilize for ${session.sessionName}`);
+    })().finally(() => {
+      if (session.historyRefreshPromise === promise) {
+        session.historyRefreshPromise = null;
+      }
+      if (session.historyRefreshRequested) {
+        session.historyRefreshRequested = false;
+        scheduleHerdrHistoryRefresh(session, true);
+      }
+    });
+    session.historyRefreshPromise = promise;
+    void promise.then(() => undefined, () => undefined);
+    return promise;
+  }
+
+  async function ensureHerdrHistorySnapshot(session: ManagedHerdrSession) {
+    if (!session.historySnapshot) {
+      if (!session.historyRefreshPromise) {
+        scheduleHerdrHistoryRefresh(session, true);
+      }
+      await session.historyRefreshPromise;
+      if (!session.historySnapshot) {
+        throw new Error(`Herdr history snapshot unavailable for ${session.sessionName}`);
+      }
+      return session.historySnapshot;
+    }
+    if (Date.now() - session.historySnapshot.refreshedAt >= HERDR_HISTORY_REFRESH_MS) {
+      scheduleHerdrHistoryRefresh(session, false);
+    }
+    return session.historySnapshot;
+  }
+
+  function buildMergedHerdrMirrorSnapshot(
+    session: ManagedHerdrSession,
+    history: HerdrHistorySnapshot,
+  ): TerminalSourceMirrorSnapshot {
+    const live = session.latestSnapshot;
+    if (!live) {
+      throw new Error(`Herdr session ${session.sessionName} produced no canonical frame`);
+    }
+    if (history.cols !== live.cols || history.rows !== live.rows) {
+      throw new Error(
+        `Herdr live geometry changed for ${session.sessionName}; refusing stale mirror publish`,
+      );
+    }
+    const merged = advanceHerdrHistoryLiveTailWindow(history, live, {
+      overlayMetrics: session.lastScrollMetrics,
+      canAdvanceSourceEnd: Boolean(live.scrollMetrics),
+    });
+    let bufferLines = merged.bufferLines;
+    let cursor: TerminalSourceMirrorSnapshot['cursor'] = null;
+    if (merged.canOverlay) {
+      history.bufferLines = merged.bufferLines;
+      history.sourceEndIndex = merged.sourceEndIndex;
+      cursor = live.localCursor
+        ? {
+            rowIndex: merged.sourceEndIndex - live.rows + live.localCursor.row,
+            col: live.localCursor.col,
+            visible: live.localCursor.visible,
+          }
+        : null;
+    }
+    const bufferStartIndex = Math.max(0, merged.sourceEndIndex - bufferLines.length);
+    const availableEndIndex = merged.sourceEndIndex;
+    return {
+      revision: live.ztermRevision,
+      bufferStartIndex,
+      bufferLines,
+      cols: live.cols,
+      rows: live.rows,
+      cursorKeysApp: live.cursorKeysApp,
+      cursor,
+      lastScrollbackCount: Math.max(0, bufferLines.length - live.rows),
+      availableStartIndex: bufferStartIndex,
+      availableEndIndex,
+      totalAvailableLines: availableEndIndex,
+      visibleTopIndex: Math.max(bufferStartIndex, availableEndIndex - live.rows),
+      capturedLineCount: bufferLines.length,
+      canonicalLineCount: bufferLines.length,
+      captureDurationMs: 0,
+      canonicalizeDurationMs: 0,
+      captureStartedAt: Date.now(),
+      captureDoneAt: Date.now(),
+      canonicalizeDoneAt: Date.now(),
+      source: 'herdr',
+      capabilityGaps: ['herdr-history-limit-1000'],
+    };
+  }
+
+  function handleHerdrCanonicalFrame(session: ManagedHerdrSession, snapshot: HerdrCanonicalSnapshot) {
+    session.latestSnapshot = snapshot;
+    session.cols = snapshot.cols;
+    session.rows = snapshot.rows;
+    if (snapshot.scrollMetrics) {
+      session.lastScrollMetrics = snapshot.scrollMetrics;
+      session.lastScrollMetricsAt = Date.now();
+    }
+    const confirmedHostScrolled = snapshot.scrollMetrics
+      ? snapshot.scrollMetrics.offsetFromBottom !== 0
+      : session.hostScrollState === true;
+    const hostScrollChanged = session.hostScrollState !== null
+      && session.hostScrollState !== confirmedHostScrolled;
+    const history = session.historySnapshot;
+    const geometryChanged = Boolean(
+      history
+      && (history.cols !== snapshot.cols || history.rows !== snapshot.rows),
+    );
+    if (history && (hostScrollChanged || geometryChanged)) {
+      scheduleHerdrHistoryRefresh(session, true);
+    }
+    session.hostScrollState = confirmedHostScrolled;
+    options.onLiveActivity?.(session.sessionName);
   }
 
   function startServer(sessionName: string) {
@@ -152,13 +435,19 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
     if (sessions.has(sessionName)) throw new Error(`Herdr session already exists: ${sessionName}`);
     const herdrSessionName = sessionName;
     const serverProcess = startServer(herdrSessionName);
-    let root;
+    let root: ReturnType<typeof parseWorkspaceCreate>;
+    let geometry: { cols: number; rows: number };
     try {
       root = parseWorkspaceCreate(cli(herdrSessionName, [
-        'workspace', 'create', '--cwd', input?.cwd || process.cwd(), '--no-focus',
+        'workspace', 'create',
+        '--cwd', input?.cwd || process.cwd(),
+        '--no-focus',
       ]));
-      const initialScroll = parseHerdrScrollMetrics(cli(herdrSessionName, ['pane', 'get', root.paneId]));
-      root = { ...root, viewportRows: initialScroll.viewportRows };
+      geometry = parseHerdrPaneGeometry(
+        cli(herdrSessionName, ['api', 'snapshot']),
+        root.paneId,
+        herdrSessionName,
+      );
     } catch (error) {
       if (!serverProcess.killed) serverProcess.kill('SIGTERM');
       try {
@@ -173,14 +462,21 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
       paneId: root.paneId,
       title: sessionName,
       cwd: root.cwd,
-      cols: 80,
-      rows: root.viewportRows,
+      cols: geometry.cols,
+      rows: geometry.rows,
       herdrSessionName,
       terminalId: root.terminalId,
       herdrPaneId: root.paneId,
       adapterBundle: null,
       adapterPromise: null,
       latestSnapshot: null,
+      historySnapshot: null,
+      historyRefreshPromise: null,
+      historyRefreshTimer: null,
+      historyRefreshRequested: false,
+      lastScrollMetrics: null,
+      lastScrollMetricsAt: 0,
+      hostScrollState: null,
       failure: null,
       serverProcess,
     };
@@ -215,19 +511,31 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
       executable: options.executable,
       sessionName: herdrSessionName,
     });
+    const geometry = parseHerdrPaneGeometry(
+      cli(herdrSessionName, ['api', 'snapshot']),
+      resolved.paneId,
+      herdrSessionName,
+    );
     const managed: ManagedHerdrSession = {
       sessionName,
       paneId: resolved.paneId,
       title: sessionName,
       cwd: process.cwd(),
-      cols: 80,
-      rows: 24,
+      cols: geometry.cols,
+      rows: geometry.rows,
       herdrSessionName,
       terminalId: resolved.terminalId,
       herdrPaneId: resolved.paneId,
       adapterBundle: null,
       adapterPromise: null,
       latestSnapshot: null,
+      historySnapshot: null,
+      historyRefreshPromise: null,
+      historyRefreshTimer: null,
+      historyRefreshRequested: false,
+      lastScrollMetrics: null,
+      lastScrollMetricsAt: 0,
+      hostScrollState: null,
       failure: null,
       serverProcess: null,
     };
@@ -256,11 +564,7 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
         cols: session.cols,
         rows: session.rows,
       }, {
-        onCanonicalFrame: (snapshot) => {
-          session.latestSnapshot = snapshot;
-          session.cols = snapshot.cols;
-          session.rows = snapshot.rows;
-        },
+        onCanonicalFrame: (snapshot) => handleHerdrCanonicalFrame(session, snapshot),
         onClosed: (reason) => { session.failure = new Error(`Herdr session ${session.sessionName} closed: ${reason}`); },
         onError: (error) => {
           session.failure = error;
@@ -278,10 +582,14 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
     await ensureAdapter(session);
     for (let attempt = 0; attempt < 30; attempt += 1) {
       if (session.failure) throw session.failure;
-      if (session.latestSnapshot) return mapHerdrCanonicalSnapshot(session.latestSnapshot, maxMirrorLines);
+      if (session.latestSnapshot) break;
       await new Promise((resolveWait) => setTimeout(resolveWait, 50));
     }
-    throw new Error(`Herdr session ${session.sessionName} produced no canonical frame`);
+    if (!session.latestSnapshot) {
+      throw new Error(`Herdr session ${session.sessionName} produced no canonical frame`);
+    }
+    const history = await ensureHerdrHistorySnapshot(session);
+    return buildMergedHerdrMirrorSnapshot(session, history);
   }
 
   function writeInput(sessionName: string, input: Buffer | string) {
@@ -302,6 +610,11 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
 
   function closeSession(sessionName: string) {
     const session = resolve(sessionName);
+    if (session.historyRefreshTimer) {
+      clearTimeout(session.historyRefreshTimer);
+      session.historyRefreshTimer = null;
+    }
+    session.historyRefreshPromise = null;
     let closeError: unknown = null;
     try {
       if (session.adapterBundle) session.adapterBundle.adapter.release();
@@ -346,6 +659,7 @@ export function createHerdrBackendRuntime(options: HerdrBackendRuntimeOptions): 
   }
 
   return {
+    kind: 'herdr',
     listSessions,
     createSession,
     readSnapshot,

@@ -522,11 +522,11 @@ function addToken(url: URL, token?: string) {
   }
 }
 
-async function fetchJson(url: URL) {
+async function fetchJson(url: URL, init?: RequestInit) {
   let lastError: unknown = null;
   for (let attempt = 1; attempt <= RUNTIME_FETCH_RETRY_COUNT; attempt += 1) {
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, init);
       const text = await response.text();
       if (!response.ok) {
         fail(`request failed (${response.status}) ${url.href}: ${text}`);
@@ -572,8 +572,6 @@ async function collectRuntime(remote: { bridgeHost: string; bridgePort: number; 
   addToken(initialSnapshotUrl, remote.authToken);
   const controlUrl = new URL('/debug/runtime/control', baseUrl);
   addToken(controlUrl, remote.authToken);
-  controlUrl.searchParams.set('enabled', '1');
-  controlUrl.searchParams.set('reason', RUNTIME_DEBUG_REASON);
   const initialSnapshot = await fetchJson(initialSnapshotUrl) as Record<string, unknown>;
   const daemonSessionId = remote.sessionId
     ? resolveApkSmokeDaemonSessionId(initialSnapshot, remote.sessionId)
@@ -581,12 +579,16 @@ async function collectRuntime(remote: { bridgeHost: string; bridgePort: number; 
   if (remote.sessionId && !daemonSessionId) {
     fail(`daemon subscriber for client session ${remote.sessionId} was not found in the current transport snapshot`);
   }
-  if (remote.sessionId?.trim()) {
-    controlUrl.searchParams.set('sessionId', daemonSessionId!);
-  }
-
   const health = await fetchJson(healthUrl);
-  const control = await fetchJson(controlUrl);
+  const control = await fetchJson(controlUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      enabled: true,
+      reason: RUNTIME_DEBUG_REASON,
+      sessionId: daemonSessionId || remote.sessionId || undefined,
+    }),
+  });
   const snapshot = await fetchJson(initialSnapshotUrl);
   const logsUrl = new URL('/debug/runtime/logs', baseUrl);
   addToken(logsUrl, remote.authToken);

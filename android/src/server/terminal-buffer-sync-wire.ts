@@ -1,5 +1,5 @@
 /**
- * buffer-sync wire 分片纯函数子模块（daemon.mirror_store）。
+ * buffer-sync wire 分片纯函数子模块（daemon.buffer_publisher）。
  * 从 terminal-mirror-runtime.ts 拆出：wire line index 解析 / buffer-sync 消息构建 / 大帧分片。
  */
 import type { TerminalBufferPayload } from '@zterm/shared/types';
@@ -101,5 +101,4 @@ export function splitBufferSyncPayloadMessages(payload: TerminalBufferPayload, m
     return { payload: chunkPayload, text: buildBufferSyncMessageText(chunkPayload) };
   });
 }
-
 

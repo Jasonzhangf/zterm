@@ -275,8 +275,8 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
 
     fireEvent.click(screen.getByText('Connect'));
     await screen.findByText('zterm');
-    fireEvent.click(screen.getByRole('button', { name: '重命名 tmux session zterm' }));
-    fireEvent.change(screen.getByRole('textbox', { name: '新的 tmux session 名称' }), {
+    fireEvent.click(screen.getByRole('button', { name: '重命名 session zterm' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '新的 session 名称' }), {
       target: { value: 'renamed' },
     });
     fireEvent.click(screen.getByRole('button', { name: '确认重命名' }));
@@ -289,6 +289,39 @@ describe('TmuxSessionPickerSheet relay directory projection', () => {
         'renamed',
       );
     });
+  });
+
+  it('keeps the rename dialog open and renders the failure inline when remote rename fails', async () => {
+    tmuxSessionsMock.fetchTmuxSessions.mockResolvedValue(['zterm']);
+    tmuxSessionsMock.renameTmuxSession.mockRejectedValueOnce(new Error('rename failed'));
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => undefined);
+
+    render(
+      <TmuxSessionPickerSheet
+        mode="quick-tab"
+        open
+        servers={[]}
+        bridgeSettings={bridgeSettings}
+        initialTarget={{ bridgeHost: '100.66.1.82', bridgePort: 3333, authToken: 'token-direct' }}
+        onClose={vi.fn()}
+        onOpenTmuxSession={vi.fn()}
+        onOpenMultipleTmuxSessions={vi.fn()}
+        onSelectCleanSession={vi.fn()}
+      />,
+    );
+
+    fireEvent.click(screen.getByText('Connect'));
+    await screen.findByText('zterm');
+    fireEvent.click(screen.getByRole('button', { name: '重命名 session zterm' }));
+    fireEvent.change(screen.getByRole('textbox', { name: '新的 session 名称' }), {
+      target: { value: 'renamed' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: '确认重命名' }));
+
+    await waitFor(() => expect(screen.getByTestId('rename-dialog-error').textContent).toContain('rename failed'));
+    expect(screen.getByRole('textbox', { name: '新的 session 名称' })).toBeTruthy();
+    expect(alertSpy).not.toHaveBeenCalled();
+    alertSpy.mockRestore();
   });
 
   it('renames an open tab through the app-owned dialog', async () => {

@@ -20,7 +20,7 @@ function formatDebugHz(value: number): string {
 }
 
 function resolveDebugStatus(
-  session: Session | null,
+  session: Pick<Session, 'state'> | null,
   metrics?: SessionDebugOverlayMetrics,
 ): SessionDebugOverlayMetrics["status"] {
   if (metrics?.status) {

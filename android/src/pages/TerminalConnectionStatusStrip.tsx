@@ -2,14 +2,16 @@
  * TerminalConnectionStatusStrip 子组件（client.app_shell，从 TerminalPage.tsx 拆出）。
  * 只消费 Session 投影与回调；不持有 session 生命周期 / 传输真相。
  */
-import { memo as ReactMemo, useEffect, useState } from 'react';
+import { memo as ReactMemo, useEffect, useState, type ComponentProps } from 'react';
 import { RenameDialog } from '../components/terminal/RenameDialog';
 import { formatDebugRate } from './terminal-page-debug-helpers';
 import type { Session, SessionDebugOverlayMetrics } from '../lib/types';
 import {
   formatConnectionRouteLabel,
+  formatTerminalBackendSuffix,
   resolveConnectionActivityLabel,
   resolveEffectiveConnectionStatus,
+  TERMINAL_PORTRAIT_STATUS_STRIP_TOP_OFFSET_PX,
 } from './terminal-page-status-helpers';
 
 const connectionRouteOptionStyle = {
@@ -44,6 +46,7 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
   const [tick, setTick] = useState(0);
   const [routeMenuOpen, setRouteMenuOpen] = useState(false);
   const [renameDialogOpen, setRenameDialogOpen] = useState(false);
+  const [renameErrorMessage, setRenameErrorMessage] = useState<string | null>(null);
 
   useEffect(() => {
     if (!session) {
@@ -79,13 +82,13 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
       <div
       data-testid='terminal-connection-status-strip'
       className='zterm-connection-status-strip'
-      aria-label={`连接状态 ${visibleRouteLabel} session ${session.sessionName} 上行 ${formatDebugRate(uplinkBps)} 下行 ${formatDebugRate(downlinkBps)}`}
+      aria-label={`连接状态 ${visibleRouteLabel} session ${session.sessionName}${formatTerminalBackendSuffix(session.terminalBackend)} 上行 ${formatDebugRate(uplinkBps)} 下行 ${formatDebugRate(downlinkBps)}`}
       role='button'
       tabIndex={0}
       onClick={() => setRouteMenuOpen((current) => !current)}
       style={{
         position: 'absolute',
-        top: `${Math.max(8, topInsetPx + 8)}px`,
+        top: `${Math.max(TERMINAL_PORTRAIT_STATUS_STRIP_TOP_OFFSET_PX, topInsetPx + TERMINAL_PORTRAIT_STATUS_STRIP_TOP_OFFSET_PX)}px`,
         left: '94px',
         right: '84px',
         zIndex: 15,
@@ -143,13 +146,14 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
       <button
         type="button"
         data-testid='terminal-connection-status-session'
-        aria-label={`重命名 session ${session.sessionName}`}
+        aria-label={`重命名 session ${session.sessionName}${formatTerminalBackendSuffix(session.terminalBackend)}`}
         onClick={(event) => {
           event.stopPropagation();
           setRouteMenuOpen(false);
           if (!onRenameRemoteSession) {
             return;
           }
+          setRenameErrorMessage(null);
           setRenameDialogOpen(true);
         }}
         style={{
@@ -168,7 +172,7 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
           cursor: onRenameRemoteSession ? 'text' : 'default',
         }}
       >
-        {session.sessionName}
+        {session.sessionName}{formatTerminalBackendSuffix(session.terminalBackend)}
       </button>
       <span
         data-testid='terminal-connection-status-rates'
@@ -244,22 +248,33 @@ const TerminalConnectionStatusStrip = ReactMemo(function TerminalConnectionStatu
       </div>
       <RenameDialog
         open={renameDialogOpen}
-        title="重命名 tmux session"
-        inputLabel="新的 tmux session 名称"
+        title="重命名 session"
+        inputLabel="新的 session 名称"
         initialValue={session.sessionName}
-        onCancel={() => setRenameDialogOpen(false)}
-        onSubmit={(nextSessionName) => {
+        errorMessage={renameErrorMessage}
+        onCancel={() => {
           setRenameDialogOpen(false);
+          setRenameErrorMessage(null);
+        }}
+        onSubmit={(nextSessionName) => {
           if (!onRenameRemoteSession) {
+            setRenameErrorMessage('当前会话不支持远程重命名');
             return;
           }
-          void Promise.resolve(onRenameRemoteSession(session.id, nextSessionName)).catch((error) => {
-            window.alert?.(error instanceof Error ? error.message : String(error));
-          });
+          setRenameErrorMessage(null);
+          void Promise.resolve(onRenameRemoteSession(session.id, nextSessionName))
+            .then(() => {
+              setRenameDialogOpen(false);
+              setRenameErrorMessage(null);
+            })
+            .catch((error) => {
+              setRenameErrorMessage(error instanceof Error ? error.message : String(error));
+            });
         }}
       />
     </>
   );
 });
 
+export type TerminalConnectionStatusStripProps = ComponentProps<typeof TerminalConnectionStatusStrip>;
 export { TerminalConnectionStatusStrip };

@@ -1,7 +1,7 @@
 import { getResolvedSessionName } from '../lib/connection-target';
 import type { ClientDaemonConnection } from '../lib/client-daemon-connection';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
-import type { SessionTerminalChannelRuntime, SessionTerminalChannelState } from '../lib/session-transport-runtime';
+import type { SessionTerminalChannelRuntime, SessionTerminalChannelState } from '../lib/terminal-channel-mux-runtime';
 import type { Host, Session, SessionScheduleState } from '../lib/types';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import { sendSessionMuxChannelOpenRuntime } from './session-context-transport-runtime';

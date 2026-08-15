@@ -2,10 +2,21 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ComponentProps } from 'react';
 import { createSessionBufferState } from '../lib/terminal-buffer';
 import { createSessionRenderBufferStore } from '../lib/session-render-buffer-store';
 import type { Session, SessionRenderBufferSnapshot, TerminalCell } from '../lib/types';
-import { TerminalPage } from './TerminalPage';
+import { TerminalPage as TerminalPageBase } from './TerminalPage';
+import { renderTerminalShellUi } from '../lib/plugin-host/terminal-shell-ui-plugin';
+
+function TerminalPage(props: ComponentProps<typeof TerminalPageBase>) {
+  return (
+    <TerminalPageBase
+      {...props}
+      renderTerminalShell={props.renderTerminalShell || renderTerminalShellUi}
+    />
+  );
+}
 
 // TerminalPage reads attachment counts from SessionContext (badge/drawer).
 // These page-level tests render TerminalPage directly without the app-level

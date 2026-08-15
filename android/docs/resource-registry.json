@@ -79,6 +79,7 @@
       "direct_relations": [
         "resource.terminal_backend",
         "resource.debug_channel",
+        "resource.observability_channel",
         "resource.daemon_connection_gateway"
       ],
       "indirect_relations": [],
@@ -169,6 +170,894 @@
         "docs/resource-map.md",
         "docs/wiki/mainline-source.md",
         "docs/goals/daemon-client-transport-performance-plan.md"
+      ]
+    },
+    {
+      "resource_id": "resource.observability_channel",
+      "resource_type": "debug_side_channel",
+      "identity": "Dedicated target-level HTTP observability channel for bounded client log/snapshot ingestion and expiring debug control; independent of terminal mux, session transport, renderer, and mirror writer",
+      "owner_feature": "daemon.cli_node",
+      "truth_store": "src/lib/runtime-debug-http-exporter.ts and src/server/terminal-http-runtime.ts /debug/runtime/logs, /debug/runtime/snapshot, /debug/runtime/control",
+      "allowed_operations": [
+        "ingest_observability_logs",
+        "ingest_observability_snapshot",
+        "read_debug_snapshot",
+        "grant_bounded_debug_lease",
+        "diagnose"
+      ],
+      "direct_relations": [
+        "resource.daemon_process"
+      ],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.session_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/mainline-resource-call-map.test.ts",
+        "src/lib/runtime-debug-http-exporter.test.ts",
+        "src/server/terminal-debug-runtime.test.ts",
+        "src/server/terminal-http-runtime.debug-observability.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/wiki/mainline-source.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md"
+      ]
+    },
+    {
+      "resource_id": "resource.runtime_node_registry",
+      "status": "active",
+      "resource_type": "control_resource",
+      "identity": "Registered shared runtime node identities and lifecycle/disposal contract",
+      "owner_feature": "shared.node_contract",
+      "truth_store": "packages/shared/src/terminal/node-contract.ts",
+      "allowed_operations": [
+        "register",
+        "start",
+        "stop",
+        "dispose",
+        "read"
+      ],
+      "direct_relations": [
+        "resource.debug_snapshot_registry"
+      ],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.session_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane",
+        "resource.file_transfer",
+        "resource.remote_window_stream",
+        "resource.client_native_file_store"
+      ],
+      "required_gates": [
+        "src/lib/shared-contract-ownership.test.ts",
+        "packages/shared/src/terminal/node-contract.test.ts",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/modules/project-modules.md",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md"
+      ]
+    },
+    {
+      "resource_id": "resource.debug_snapshot_registry",
+      "status": "active",
+      "resource_type": "debug_side_channel",
+      "identity": "Registered shared debug snapshot producers and versioned sequence truth",
+      "owner_feature": "shared.debug_contract",
+      "truth_store": "packages/shared/src/terminal/debug-contract.ts",
+      "allowed_operations": [
+        "register",
+        "snapshot",
+        "read"
+      ],
+      "direct_relations": [
+        "resource.client_debug_hub",
+        "resource.daemon_debug_hub"
+      ],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.session_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane",
+        "resource.file_transfer",
+        "resource.remote_window_stream",
+        "resource.client_native_file_store"
+      ],
+      "required_gates": [
+        "src/lib/shared-contract-ownership.test.ts",
+        "packages/shared/src/terminal/debug-contract.test.ts",
+        "src/lib/client-debug-snapshot.test.ts",
+        "src/server/runtime-debug-store.test.ts",
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/modules/project-modules.md",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md"
+      ]
+    },
+    {
+      "resource_id": "resource.client_debug_hub",
+      "status": "active",
+      "resource_type": "debug_side_channel",
+      "identity": "Client bounded debug event hub and snapshot producer registry",
+      "owner_feature": "client.observability",
+      "truth_store": "src/lib/client-debug-snapshot.ts and src/lib/runtime-debug-http-exporter.ts",
+      "allowed_operations": [
+        "register",
+        "snapshot",
+        "subscribe",
+        "export"
+      ],
+      "direct_relations": [
+        "resource.observability_channel"
+      ],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.session_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/client-debug-snapshot.test.ts",
+        "src/lib/runtime-debug-http-exporter.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/modules/project-modules.md",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md"
+      ]
+    },
+    {
+      "resource_id": "resource.daemon_debug_hub",
+      "status": "active",
+      "resource_type": "debug_side_channel",
+      "identity": "Daemon bounded debug event hub, snapshot producer registry, and expiring debug permission truth",
+      "owner_feature": "daemon.observability",
+      "truth_store": "src/server/runtime-debug-store.ts and src/server/terminal-debug-runtime.ts",
+      "allowed_operations": [
+        "register",
+        "snapshot",
+        "subscribe",
+        "export"
+      ],
+      "direct_relations": [
+        "resource.observability_channel"
+      ],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.session_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/server/runtime-debug-store.test.ts",
+        "src/server/terminal-debug-runtime.test.ts",
+        "src/server/server.debug-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/modules/project-modules.md",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md"
+      ]
+    },
+    {
+      "resource_id": "resource.client_input_normalizer",
+      "resource_type": "client_data_resource",
+      "identity": "Android committed-text normalization owner that preserves CJK/emoji/special symbols and converts terminal-oriented full-width punctuation, ideographic space, and IME line breaks into terminal-safe half-width text separators.",
+      "owner_feature": "client.input_normalizer",
+      "truth_store": "src/lib/terminal-input-normalization.ts",
+      "allowed_operations": [
+        "normalize_committed_text",
+        "preserve_cjk_emoji_symbols",
+        "normalize_full_width_punctuation",
+        "normalize_ime_line_breaks"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.mirror_store"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/input-normalizer-ownership.test.ts",
+        "src/lib/terminal-input-normalization.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md"
+      ]
+    },
+    {
+      "resource_id": "resource.client_plugin_host",
+      "resource_type": "client_control_resource",
+      "identity": "Client plugin manifests, lifecycle, declared capability bindings, and app-owned plugin host instance",
+      "owner_feature": "client.plugin_host",
+      "truth_store": "src/lib/plugin-host/plugin-host-runtime.ts",
+      "allowed_operations": [
+        "install",
+        "validate",
+        "start",
+        "stop",
+        "dispose"
+      ],
+  "direct_relations": [
+    "resource.plugin_capability_registry",
+    "resource.plugin_ui_slot_registry",
+    "resource.debug_console_ui_contract",
+    "resource.session_drawer_ui_contract",
+    "resource.file_browser_ui_contract",
+    "resource.settings_update_ui_contract",
+    "resource.remote_window_ui_contract",
+    "resource.quickbar_ui_contract",
+    "resource.terminal_shell_ui_contract"
+  ],
+      "indirect_relations": [
+        "resource.platform_network_signal"
+      ],
+      "via_resources": [
+        "resource.plugin_capability_registry"
+      ],
+      "forbidden_direct_relations": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "required_gates": [
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/resource-map.md"
+      ]
+    },
+    {
+      "resource_id": "resource.plugin_capability_registry",
+      "resource_type": "client_control_resource",
+      "identity": "Declared plugin capabilities and permission registry with unique providers and removable lifecycle",
+      "owner_feature": "client.plugin_host",
+      "truth_store": "packages/shared/src/terminal/plugin-capability-registry.ts",
+      "allowed_operations": [
+        "register",
+        "resolve",
+        "validate",
+        "read",
+        "remove"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "required_gates": [
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/resource-map.md"
+      ]
+    },
+    {
+      "resource_id": "resource.plugin_ui_slot_registry",
+      "resource_type": "client_control_resource",
+      "identity": "Typed plugin UI slot registry with unique providers, bounded registration, resolution, presence, and removal",
+      "owner_feature": "client.plugin_host",
+      "truth_store": "packages/shared/src/terminal/plugin-ui-slot-registry.ts",
+      "allowed_operations": [
+        "register",
+        "resolve",
+        "has",
+        "remove"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "required_gates": [
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/resource-map.md"
+      ]
+    },
+    {
+      "resource_id": "resource.debug_console_ui_contract",
+      "resource_type": "projection_resource",
+      "identity": "Typed debug console UI slot contract and terminal debug session projection rendered by the client debug console overlay",
+      "owner_feature": "client.debug_console",
+      "truth_store": "src/lib/plugin-debug-console/debug-console-contract.ts",
+      "allowed_operations": [
+        "define_slot_contract",
+        "project_debug_session",
+        "render_debug_overlay"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "required_gates": [
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/pages/TerminalPageDebugOverlay.test.tsx",
+        "src/pages/TerminalPage.render-scope.test.tsx",
+        "src/pages/TerminalPage.remote-window-overlay.test.tsx",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/resource-map.md"
+      ]
+    },
+    {
+      "resource_id": "resource.session_drawer_ui_contract",
+      "resource_type": "projection_resource",
+      "identity": "Typed session drawer UI slot contract rendered through the plugin-provided TerminalSessionDrawer projection",
+      "owner_feature": "client.session_drawer_ui",
+      "truth_store": "src/lib/plugin-session-drawer/session-drawer-contract.ts",
+      "allowed_operations": [
+        "define_slot_contract",
+        "render_session_drawer"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "required_gates": [
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/pages/TerminalPage.session-drawer.test.tsx",
+        "src/pages/TerminalPage.session-preview.test.tsx",
+        "src/pages/TerminalPage.tab-isolation.test.tsx",
+        "src/App.dynamic-refresh.test.tsx",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/resource-map.md"
+      ]
+    },
+    {
+      "resource_id": "resource.file_browser_ui_contract",
+      "resource_type": "projection_resource",
+      "identity": "Typed file browser UI slot contract rendered through the plugin-provided FileTransferSheet projection",
+      "owner_feature": "client.file_browser_ui",
+      "truth_store": "src/lib/plugin-file-browser/file-browser-contract.ts",
+      "allowed_operations": [
+        "define_slot_contract",
+        "render_file_browser"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "required_gates": [
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/plugin-file-browser/file-browser-ui-ownership.test.ts",
+        "src/pages/TerminalPage.render-isolation.test.tsx",
+        "src/App.dynamic-refresh.test.tsx",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/resource-map.md"
+      ]
+    },
+    {
+      "resource_id": "resource.settings_update_ui_contract",
+      "resource_type": "projection_resource",
+      "identity": "Typed settings update UI slot contract rendered through the plugin-provided AppUpdateSection projection",
+      "owner_feature": "client.settings_update_ui",
+      "truth_store": "src/lib/plugin-settings-update/settings-update-contract.ts",
+      "allowed_operations": [
+        "define_slot_contract",
+        "render_settings_update"
+      ],
+      "direct_relations": [],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "required_gates": [
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/plugin-settings-update/settings-update-ui-ownership.test.ts",
+        "src/pages/SettingsPage.plugin-render.test.tsx",
+        "src/App.dynamic-refresh.test.tsx",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/resource-map.md"
+      ]
+    },
+    {
+      "resource_id": "resource.remote_window_ui_contract",
+      "resource_type": "projection_resource",
+      "identity": "Typed remote window UI slot contract rendered through the plugin-provided RemoteWindowOverlay projection",
+      "owner_feature": "client.remote_window_ui",
+      "truth_store": "src/lib/plugin-remote-window/remote-window-contract.ts",
+      "allowed_operations": [
+        "define_slot_contract",
+        "render_remote_window"
+      ],
+      "direct_relations": [
+        "resource.remote_window_overlay"
+      ],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "required_gates": [
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/plugin-remote-window/remote-window-ui-ownership.test.ts",
+        "src/pages/TerminalPage.remote-window-overlay.test.tsx",
+        "src/pages/TerminalPage.android-ime.test.tsx",
+        "src/App.dynamic-refresh.test.tsx",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/resource-map.md"
+      ]
+    },
+    {
+      "resource_id": "resource.quickbar_ui_contract",
+      "resource_type": "projection_resource",
+      "identity": "Typed quickbar UI slot contract rendered through the plugin-provided TerminalQuickBar projection",
+      "owner_feature": "client.quickbar_ui",
+      "truth_store": "src/lib/plugin-quickbar/quickbar-contract.ts",
+      "allowed_operations": [
+        "define_slot_contract",
+        "render_quickbar"
+      ],
+      "direct_relations": [
+        "resource.platform_input_channel"
+      ],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "required_gates": [
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/plugin-quickbar/quickbar-ui-ownership.test.ts",
+        "src/pages/TerminalPage.render-isolation.test.tsx",
+        "src/App.dynamic-refresh.test.tsx",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/resource-map.md"
+      ]
+    },
+    {
+      "resource_id": "resource.terminal_shell_ui_contract",
+      "resource_type": "projection_resource",
+      "identity": "Typed terminal shell UI slot contract rendered through the plugin-provided terminal shell projection",
+      "owner_feature": "client.terminal_shell_ui",
+      "truth_store": "src/lib/plugin-terminal-shell/terminal-shell-contract.ts",
+      "allowed_operations": [
+        "define_slot_contract",
+        "render_terminal_shell"
+      ],
+      "direct_relations": [
+        "resource.ui_projection"
+      ],
+      "indirect_relations": [],
+      "via_resources": [],
+      "forbidden_direct_relations": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "required_gates": [
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/plugin-terminal-shell/terminal-shell-ui-ownership.test.ts",
+        "src/pages/TerminalPage.render-isolation.test.tsx",
+        "src/App.dynamic-refresh.test.tsx",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/resource-map.md"
+      ]
+    },
+    {
+      "resource_id": "resource.client_composition_root",
+      "resource_type": "client_control_resource",
+      "identity": "Declared client runtime ports and composition wiring with duplicate/unbound/missing port validation",
+      "owner_feature": "client.composition_root",
+      "truth_store": "src/lib/composition-root/client-composition-root.ts",
+      "allowed_operations": [
+        "bind",
+        "resolve",
+        "validate",
+        "read"
+      ],
+      "direct_relations": [
+        "resource.client_plugin_host"
+      ],
+      "indirect_relations": [
+        "resource.plugin_capability_registry"
+      ],
+      "via_resources": [
+        "resource.client_plugin_host"
+      ],
+      "forbidden_direct_relations": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "required_gates": [
+        "src/lib/composition-root/client-composition-root.test.ts",
+        "src/lib/composition-root/client-composition-root-ownership.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/resource-map.md"
+      ]
+    },
+    {
+      "resource_id": "resource.client_control_center",
+      "resource_type": "client_control_resource",
+      "identity": "Client control command routing, capability authorization, deadline, idempotency, correlation, and bounded audit ledger",
+      "owner_feature": "client.control_center",
+      "truth_store": "src/lib/control-center/client-control-center.ts",
+      "allowed_operations": [
+        "authorize",
+        "route",
+        "execute",
+        "audit",
+        "read_audit"
+      ],
+      "direct_relations": [
+        "resource.client_plugin_host"
+      ],
+      "indirect_relations": [
+        "resource.plugin_capability_registry"
+      ],
+      "via_resources": [
+        "resource.client_plugin_host"
+      ],
+      "forbidden_direct_relations": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane",
+        "resource.file_transfer",
+        "resource.remote_window_stream",
+        "resource.client_native_file_store"
+      ],
+      "required_gates": [
+        "src/lib/control-center/client-control-center.test.ts",
+        "src/lib/control-center/client-control-center-ownership.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/resource-map.md"
+      ]
+    },
+    {
+      "resource_id": "resource.daemon_control_gateway",
+      "resource_type": "daemon_control_resource",
+      "identity": "Authenticated typed control ingress for legacy wire control commands and daemon command owner registration",
+      "owner_feature": "daemon.control_center",
+      "truth_store": "src/server/daemon-control-gateway-runtime.ts",
+      "allowed_operations": [
+        "accept_control_ingress",
+        "register_owner",
+        "route_control",
+        "read_audit"
+      ],
+      "direct_relations": [
+        "resource.daemon_control_center",
+        "resource.daemon_session_catalog",
+        "resource.schedule_job",
+        "resource.backend_session"
+      ],
+      "indirect_relations": [
+        "resource.tmux_session"
+      ],
+      "via_resources": [
+        "resource.backend_session"
+      ],
+      "forbidden_direct_relations": [
+        "resource.mirror_store",
+        "resource.transport_subscriber",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/server/daemon-control-center-runtime.test.ts",
+        "src/server/daemon-control-center-ownership.test.ts",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/resource-map.md"
+      ]
+    },
+    {
+      "resource_id": "resource.daemon_control_center",
+      "resource_type": "daemon_control_resource",
+      "identity": "Daemon control command routing, capability authorization, deadline, idempotency, correlation, and bounded audit ledger",
+      "owner_feature": "daemon.control_center",
+      "truth_store": "src/server/daemon-control-center-runtime.ts",
+      "allowed_operations": [
+        "authorize",
+        "route",
+        "execute",
+        "audit",
+        "read_audit"
+      ],
+      "direct_relations": [
+        "resource.schedule_job",
+        "resource.backend_session"
+      ],
+      "indirect_relations": [
+        "resource.tmux_session"
+      ],
+      "via_resources": [
+        "resource.backend_session"
+      ],
+      "forbidden_direct_relations": [
+        "resource.mirror_store",
+        "resource.transport_subscriber",
+        "resource.file_transfer",
+        "resource.remote_window_stream",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/server/daemon-control-center-runtime.test.ts",
+        "src/server/daemon-control-center-ownership.test.ts",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/resource-map.md"
       ]
     },
     {
@@ -453,7 +1342,7 @@
       "resource_type": "platform_client_truth",
       "identity": "Transport-local logical channel for one terminal session over a daemon-target transport",
       "owner_feature": "terminal.transport_lifecycle",
-      "truth_store": "SessionContext channel runtime and daemon terminal channel registry",
+      "truth_store": "src/lib/terminal-channel-mux-runtime.ts TerminalChannelMuxStore embedded in SessionTransportRuntimeStore.terminalChannels; daemon channel registry ownership is declared under resource.daemon_channel_mux",
       "allowed_operations": [
         "open_channel",
         "close_channel",
@@ -496,6 +1385,48 @@
         "docs/resource-map.md",
         "docs/function-map.md",
         "docs/goals/terminal-transport-multiplex-refactor-plan.md"
+      ]
+    },
+    {
+      "resource_id": "resource.daemon_channel_mux",
+      "resource_type": "daemon_backend_truth",
+      "identity": "Daemon physical transport channel registry and channel subscriber registration/release ownership",
+      "owner_feature": "terminal.transport_lifecycle",
+      "truth_store": "src/server/terminal-channel-mux-runtime.ts",
+      "allowed_operations": [
+        "ensure_channel_registry",
+        "open_channel",
+        "bind_subscriber",
+        "list_channels",
+        "release_channel",
+        "release_all_channels"
+      ],
+      "direct_relations": [
+        "resource.terminal_channel",
+        "resource.transport_subscriber"
+      ],
+      "indirect_relations": [
+        "resource.mirror_store"
+      ],
+      "via_resources": [
+        "resource.transport_subscriber",
+        "resource.mirror_store"
+      ],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/server/terminal-runtime.detached-session.test.ts",
+        "src/server/server.transport-lifecycle-truth.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/function-map.md",
+        "docs/modules/project-modules.md"
       ]
     },
     {
@@ -626,9 +1557,19 @@
         "route_user_intent",
         "host_platform_controls"
       ],
-      "direct_relations": [
-        "resource.ui_projection"
-      ],
+  "direct_relations": [
+    "resource.ui_projection",
+    "resource.client_plugin_host",
+    "resource.client_composition_root",
+    "resource.client_control_center",
+    "resource.debug_console_ui_contract",
+    "resource.session_drawer_ui_contract",
+    "resource.file_browser_ui_contract",
+    "resource.settings_update_ui_contract",
+    "resource.remote_window_ui_contract",
+    "resource.quickbar_ui_contract",
+    "resource.terminal_shell_ui_contract"
+  ],
       "indirect_relations": [
         "resource.session_transport",
         "resource.backend_session"
@@ -669,6 +1610,7 @@
         "send_to_current_transport"
       ],
       "direct_relations": [
+        "resource.client_reliable_input_queue",
         "resource.session_transport"
       ],
       "indirect_relations": [
@@ -702,7 +1644,7 @@
       "resource_type": "platform_client_truth",
       "identity": "Per-session reliable terminal input seq, in-flight ACK, and retry-generation queue",
       "owner_feature": "terminal.daemon_input",
-      "truth_store": "src/contexts/session-context-input-runtime.ts",
+      "truth_store": "src/lib/reliable-input/reliable-input-queue.ts",
       "allowed_operations": [
         "enqueue_input_seq",
         "publish_one_in_flight_seq",
@@ -738,6 +1680,8 @@
       "required_gates": [
         "src/lib/resource-registry-truth.test.ts",
         "src/contexts/session-context-input-runtime.test.ts",
+        "src/lib/reliable-input/reliable-input-ownership.test.ts",
+        "src/lib/reliable-input/reliable-input-queue.test.ts",
         "src/server/terminal-message-runtime.test.ts"
       ],
       "canonical_docs": [
@@ -759,6 +1703,7 @@
       ],
       "direct_relations": [
         "resource.backend_session",
+        "resource.mirror_store",
         "resource.transport_subscriber"
       ],
       "indirect_relations": [
@@ -798,7 +1743,8 @@
       "direct_relations": [
         "resource.tmux_session",
         "resource.wezterm_pane",
-        "resource.herdr_terminal_session"
+        "resource.herdr_terminal_session",
+        "resource.daemon_session_catalog"
       ],
       "indirect_relations": [
         "resource.mirror_store"
@@ -891,16 +1837,18 @@
     {
       "resource_id": "resource.herdr_terminal_session",
       "resource_type": "daemon_backend_truth",
-      "identity": "Official Herdr single terminal-session source identity and attachment-local frame stream",
+      "identity": "Official Herdr single terminal-session source identity, attachment-local frame stream, and adapter-owned recent-tail history",
       "owner_feature": "daemon.herdr_backend",
-      "truth_store": "Herdr terminal session observe/control attachment and zterm-side canonicalizer",
+      "truth_store": "Herdr terminal session observe/control attachment, zterm-side canonicalizer, and daemon-owned recent-tail history snapshot",
       "allowed_operations": [
         "observe_single_terminal_surface",
         "control_input",
         "control_resize",
         "release_attachment",
         "reconnect_attachment",
-        "canonicalize_frame_bytes"
+        "canonicalize_frame_bytes",
+        "read_recent_tail_history",
+        "merge_live_tail"
       ],
       "direct_relations": [],
       "indirect_relations": [
@@ -928,7 +1876,8 @@
         "docs/function-map.md"
       ],
       "capability_gaps": [
-        "absolute range is attachment-local and comes only from the canonicalizer-owned VT scrollback buffer",
+        "history range is adapter-owned from official `pane read recent` tail plus `pane get.scroll` total-row hint; the canonicalizer remains the live frame/cursor owner",
+        "official Herdr 0.8.0 caps recent history at 1000 lines; zterm publishes `herdr-history-limit-1000` and does not fabricate earlier rows",
         "Herdr terminal_id and pane_id are physical attachment identity only; the daemon backend-session workspace projection is the fixed synthetic herdr-single-session label and never carries Herdr layout identity",
         "absolute cursor is unavailable while the host viewport is scrolled away from the canonicalizer bottom; adapter must expose an explicit cursor capability gap",
         "official Herdr named-session rename is unsupported and must fail explicitly"
@@ -939,7 +1888,7 @@
       "resource_type": "daemon_backend_truth",
       "identity": "Daemon canonical terminal mirror rows, cols, buffer, cursor, and absolute indexes",
       "owner_feature": "terminal.buffer_render",
-      "truth_store": "src/server/terminal-mirror-runtime.ts",
+      "truth_store": "src/server/terminal-mirror-runtime.ts; src/server/terminal-mirror-capture.ts (daemon.mirror_writer snapshot commit writes)",
       "allowed_operations": [
         "commit_backend_capture",
         "commit_authoritative_range_patch",
@@ -950,9 +1899,8 @@
         "push_sync"
       ],
       "direct_relations": [
-        "resource.tmux_session",
-        "resource.wezterm_pane",
-        "resource.transport_subscriber",
+        "resource.terminal_backend",
+        "resource.daemon_buffer_publisher",
         "resource.client_buffer_frame_assembly",
         "resource.session_idle_facts"
       ],
@@ -971,12 +1919,98 @@
       "required_gates": [
         "src/lib/resource-registry-truth.test.ts",
         "src/server/terminal-mirror-runtime.test.ts",
-        "src/server/server.mirror-capture-truth.test.ts"
+        "src/server/server.mirror-capture-truth.test.ts",
+        "src/server/terminal-mirror-writer-ownership.test.ts"
       ],
       "canonical_docs": [
         "docs/resource-map.md",
         "docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md"
       ]
+    },
+    {
+      "resource_id": "resource.daemon_buffer_publisher",
+      "resource_type": "daemon_backend_truth",
+      "identity": "Daemon per-subscriber buffer-sync publication state and physical transport send path",
+      "owner_feature": "terminal.buffer_render",
+      "truth_store": "src/server/daemon-buffer-publisher-runtime.ts",
+      "allowed_operations": [
+        "queue_pending",
+        "merge_ranges",
+        "hold_backpressure",
+        "flush_pending",
+        "broadcast_head",
+        "split_frame",
+        "send_tail_seed"
+      ],
+      "direct_relations": [
+        "resource.mirror_store",
+        "resource.transport_subscriber"
+      ],
+      "indirect_relations": [
+        "resource.client_buffer_frame_assembly"
+      ],
+      "via_resources": [
+        "resource.transport_subscriber"
+      ],
+      "forbidden_direct_relations": [
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/server/daemon-buffer-publisher-runtime.test.ts",
+        "src/server/terminal-mirror-runtime.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/resource-map.md",
+        "docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md"
+      ]
+    },
+    {
+      "resource_id": "resource.daemon_session_catalog",
+      "resource_type": "daemon_backend_truth",
+      "identity": "Daemon backend session catalog projection from backend session enumeration and backend-qualified session rows",
+      "owner_feature": "daemon.session_catalog",
+      "truth_store": "src/server/daemon-session-catalog-runtime.ts",
+      "allowed_operations": [
+        "list_backend_sessions",
+        "build_catalog",
+        "publish_catalog",
+        "publish_list_idle_facts"
+      ],
+      "direct_relations": [
+        "resource.backend_session",
+        "resource.session_idle_facts"
+      ],
+      "indirect_relations": [
+        "resource.tmux_session",
+        "resource.herdr_terminal_session"
+      ],
+      "via_resources": [
+        "resource.backend_session"
+      ],
+      "forbidden_direct_relations": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.mirror_store",
+        "resource.transport_subscriber",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "required_gates": [
+        "src/lib/resource-registry-truth.test.ts",
+        "src/server/daemon-session-catalog-runtime.test.ts",
+        "src/server/daemon-session-catalog-ownership.test.ts"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/resource-map.md",
+        "docs/architecture.md",
+        "docs/feature-gates.md"
+      ],
+      "status": "active"
     },
     {
       "resource_id": "resource.transport_subscriber",
@@ -992,11 +2026,12 @@
         "send_snapshot",
         "track_channel_health",
         "track_send_accounting",
-        "coalesce_pending_latest",
-        "flush_pending_latest"
+        "read_backpressure"
       ],
       "direct_relations": [
-        "resource.mirror_store"
+        "resource.mirror_store",
+        "resource.daemon_input_queue",
+        "resource.daemon_control_gateway"
       ],
       "indirect_relations": [
         "resource.backend_session"
@@ -1027,7 +2062,7 @@
       "resource_type": "daemon_backend_truth",
       "identity": "Daemon input receive/write queue",
       "owner_feature": "terminal.daemon_input",
-      "truth_store": "src/server/terminal-message-runtime.ts",
+      "truth_store": "src/server/daemon-input-queue-runtime.ts",
       "allowed_operations": [
         "enqueue_input",
         "validate_input",
@@ -1049,6 +2084,7 @@
       ],
       "required_gates": [
         "src/lib/resource-registry-truth.test.ts",
+        "src/server/daemon-input-queue-runtime.test.ts",
         "src/server/terminal-message-runtime.test.ts"
       ],
       "canonical_docs": [
@@ -1402,7 +2438,8 @@
       ],
       "required_gates": [
         "src/lib/resource-registry-truth.test.ts",
-        "src/contexts/session-buffer-frame-assembly.test.ts",
+        "src/lib/buffer-frame-assembly/session-buffer-frame-assembly.test.ts",
+        "src/lib/session-buffer-store.test.ts",
         "src/contexts/session-context-buffer-runtime.test.ts"
       ],
       "canonical_docs": [
@@ -1415,7 +2452,7 @@
       "resource_type": "client_buffer_render_truth",
       "identity": "Client local sparse buffer and visible-range gap repair truth",
       "owner_feature": "terminal.buffer_render",
-      "truth_store": "src/contexts/session-context-buffer-runtime.ts",
+      "truth_store": "src/lib/session-buffer-store.ts",
       "allowed_operations": [
         "apply_buffer_sync",
         "apply_revisioned_ranges",
@@ -1438,7 +2475,8 @@
       ],
       "required_gates": [
         "src/lib/resource-registry-truth.test.ts",
-        "src/contexts/session-buffer-frame-assembly.test.ts",
+        "src/lib/buffer-frame-assembly/session-buffer-frame-assembly.test.ts",
+        "src/lib/session-buffer-store.test.ts",
         "src/contexts/session-context-buffer-runtime.test.ts"
       ],
       "canonical_docs": [
@@ -1474,6 +2512,7 @@
       "required_gates": [
         "src/lib/resource-registry-truth.test.ts",
         "src/lib/session-render-gate.test.ts",
+        "src/lib/session-render-buffer-store.test.ts",
         "packages/shared/src/terminal/renderer.test.ts"
       ],
       "canonical_docs": [
@@ -1714,7 +2753,8 @@
         "close_physical_peer"
       ],
       "direct_relations": [
-        "resource.daemon_target_transport"
+        "resource.daemon_target_transport",
+        "resource.backend_session"
       ],
       "indirect_relations": [
         "resource.terminal_channel",
@@ -1909,7 +2949,7 @@
       "resource_type": "platform_client_truth",
       "identity": "Per terminal-channel body push subscription intent and daemon subscriber body eligibility fact",
       "owner_feature": "terminal.transport_lifecycle",
-      "truth_store": "src/lib/session-transport-runtime.ts and src/server/terminal-runtime.ts",
+      "truth_store": "src/lib/terminal-channel-mux-runtime.ts channel bodySubscribed state, src/contexts/session-context-infra-facade-runtime.ts reconciliation, and src/server/terminal-channel-mux-runtime.ts",
       "allowed_operations": [
         "enable_body_subscription",
         "disable_body_subscription",
@@ -2675,6 +3715,21 @@
       "from": "resource.daemon_process",
       "to": "resource.active_session",
       "reason": "Daemon must not store client active/session/foreground state."
+    },
+    {
+      "from": "resource.daemon_session_catalog",
+      "to": "resource.active_session",
+      "reason": "Session catalog is a backend truth projection and must not become client active-session truth."
+    },
+    {
+      "from": "resource.daemon_session_catalog",
+      "to": "resource.mirror_store",
+      "reason": "Session catalog cannot observe or rewrite mirror content while publishing session activity."
+    },
+    {
+      "from": "resource.daemon_session_catalog",
+      "to": "resource.transport_subscriber",
+      "reason": "Session catalog must publish through the control/session idle facts owner, not bind physical body subscribers."
     },
     {
       "from": "resource.debug_channel",

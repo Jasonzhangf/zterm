@@ -44,7 +44,10 @@ tmux truth
 
 ## 4. 目标拆分
 
-### 4.1 UI shell：`useMirrorFixedZoomPan`（新 hook，只属于手势/缩放）
+### 4.1 视觉手势层：`useMirrorFixedZoomPan`（新 hook，只属于手势/缩放）
+
+> v2 归属修订：这里说的“UI shell”是 `TerminalView` 之上的视觉手势层，v2
+> Phase 4 将它收进 `client.dom_renderer`；它不是 `client.app_shell` 页面 shell。
 
 - 输入：容器 ref、宽度模式、copyMode、reserveRightEdgeSwipe。
 - 输出：手势处理器（onTouchStart/Move/End）与一个只读视觉参数 `visualScale`。
@@ -104,12 +107,12 @@ tmux truth
 
 | 职责 | 唯一 owner | 位置 | 允许 | 禁止 |
 |---|---|---|---|---|
-| 两指滚轮手势状态机（wheel vs pinch 仲裁） | UI shell | `src/components/useMirrorFixedZoomPan.ts`（client.app_shell） | 用 `decideTwoFingerWheel` 纯函数、持有手势 ref 状态 | 读/写 renderer 行号、scrollTop、viewportRows |
+| 两指滚轮手势状态机（wheel vs pinch 仲裁） | DOM renderer 视觉手势层 | `src/components/useMirrorFixedZoomPan.ts`（client.dom_renderer） | 用 `decideTwoFingerWheel` 纯函数、持有手势 ref 状态 | 读/写 renderer 行号、scrollTop、viewportRows |
 | 两指滚轮→SGR 坐标映射 | renderer 投影适配 | `TerminalView` 内 `onWheelStep` adapter | 用 renderer cell metrics（cellWidthPx/rowHeightPx/rect）把 client 坐标映射为 col/row，调 `encodeTerminalSgrMouseWheel` 后经既有 `onInput` 边界发送 | 持有手势状态机、累积 delta、做 wheel/pinch 判定 |
-| mirror-fixed 横向 pan 状态机 | UI shell | `useMirrorFixedZoomPan` | 手势识别 + `event.preventDefault/stopPropagation` 语义（drawer 边缘热区） | 修改 buffer/行号/scrollTop |
-| 横向 offset 真源 | UI shell | `useMirrorFixedZoomPan`（state）+ `src/lib/terminal-mirror-fixed-pan-storage.ts`（持久化，client.app_shell） | 唯一持有 offset 值；clamp 由 renderer 传入的 `maxHorizontalOffsetPx`；变更写 storage | renderer/其他组件直写 localStorage |
-| pinch 视觉缩放 | UI shell | `useMirrorFixedZoomPan`（scaleLayerRef transform） | 只写 `.term-render-scale-layer` transform | CSS zoom、改布局几何、写 viewportRows |
-| 缩放/平移后的视觉应用 | UI shell 视觉层 | `.term-render-scale-layer` + `.term-grid` translateX（值来自 hook 返回） | 纯视觉 transform | 改变 buffer 几何/scrollTop 坐标系 |
+| mirror-fixed 横向 pan 状态机 | DOM renderer 视觉手势层 | `useMirrorFixedZoomPan` | 手势识别 + `event.preventDefault/stopPropagation` 语义（drawer 边缘热区） | 修改 buffer/行号/scrollTop |
+| 横向 offset 真源 | DOM renderer 视觉手势层 | `useMirrorFixedZoomPan`（state）+ `src/lib/terminal-mirror-fixed-pan-storage.ts`（持久化，client.dom_renderer） | 唯一持有 offset 值；clamp 由 renderer 传入的 `maxHorizontalOffsetPx`；变更写 storage | renderer/其他组件直写 localStorage |
+| pinch 视觉缩放 | DOM renderer 视觉手势层 | `useMirrorFixedZoomPan`（scaleLayerRef transform） | 只写 `.term-render-scale-layer` transform | CSS zoom、改布局几何、写 viewportRows |
+| 缩放/平移后的视觉应用 | DOM renderer 视觉层 | `.term-render-scale-layer` + `.term-grid` translateX（值来自 hook 返回） | 纯视觉 transform | 改变 buffer 几何/scrollTop 坐标系 |
 
 ## 8.2 数据流（拆分后）
 
@@ -140,8 +143,8 @@ touch events (wterm container)
 - `TerminalView` 对外导出面不变：`TerminalView`（memo 组件）+ `terminalRowRenderSignature`。
 - `useMirrorFixedZoomPan` 选项调整：新增 `minScale / maxHorizontalOffsetPx / drawerEdgeSwipeStartPx / rightEdgeReservePx / onWheelStep`，
   移除 `readHorizontalOffset / onHorizontalOffsetChange / applyVisualScale`（offset 真源内聚到 hook），`visualScale / horizontalOffsetPx` 只读返回。
-- 模块归属：新文件 `src/lib/terminal-mirror-fixed-pan-storage.ts` 注册到 `client.app_shell`（module-registry owned_paths）。
-  hook 新增依赖 `two-finger-wheel-decision / two-finger-wheel-debug-store`（client.renderer_window）走既有声明边 `client.app_shell -> client.renderer_window`。
+- 模块归属：`src/components/useMirrorFixedZoomPan.ts` 与 `src/lib/terminal-mirror-fixed-pan-storage.ts` 注册到 `client.dom_renderer`（module-registry owned_paths）。
+  hook 新增依赖 `two-finger-wheel-decision / two-finger-wheel-debug-store`（client.renderer_window）走既有声明边 `client.dom_renderer -> client.renderer_window`。
 
 ## 8.5 必跑 gate
 

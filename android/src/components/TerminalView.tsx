@@ -42,6 +42,7 @@ import {
   consumeFollowResetSignal,
   consumeViewportRefreshSignal,
   createTerminalDomInputController,
+  TERMINAL_DRAWER_EDGE_SWIPE_START_PX,
 } from "@zterm/shared";
 import {
   cancelTerminalFollowScrollRuntime,
@@ -69,14 +70,6 @@ import {
 import { normalizeTerminalCommittedText } from "../lib/terminal-input-normalization";
 import { encodeTerminalSgrMouseWheel } from "../lib/terminal-mouse-wheel-sgr";
 import {
-  setTwoFingerWheelDebugSnapshot,
-  type TwoFingerWheelDebugSnapshot,
-} from "../lib/two-finger-wheel-debug-store";
-import {
-  decideTwoFingerWheel,
-  DEFAULT_TWO_FINGER_WHEEL_CONFIG,
-} from "../lib/two-finger-wheel-decision";
-import {
   COPY_LONG_PRESS_DELAY_MS,
   hasCopyLongPressMovedTooFar,
 } from "./terminal/terminal-copy-gesture";
@@ -90,7 +83,11 @@ import type {
 import { SESSION_PREVIEW_RIGHT_EDGE_PX } from "../lib/session-preview-gesture";
 
 import { VisibleRow } from "./terminal/VisibleRow";
-import { useMirrorFixedZoomPan } from "./useMirrorFixedZoomPan";
+import { TerminalPreviewRow } from "./terminal/TerminalPreviewRow";
+import {
+  useMirrorFixedZoomPan,
+  type MirrorFixedWheelStep,
+} from "./useMirrorFixedZoomPan";
 
 interface TerminalViewProps {
   sessionId: string | null;
@@ -206,61 +203,6 @@ const EMPTY_RENDER_BUFFER: SessionRenderBufferSnapshot = {
   revision: 0,
 };
 
-const MIRROR_FIXED_HORIZONTAL_OFFSET_STORAGE_KEY =
-  "zterm:terminal:mirror-fixed-horizontal-offsets";
-
-function clampHorizontalOffset(offsetPx: number, maxOffsetPx: number) {
-  if (!Number.isFinite(offsetPx)) {
-    return 0;
-  }
-  return Math.max(0, Math.min(maxOffsetPx, Math.round(offsetPx)));
-}
-
-function readStoredHorizontalOffset(sessionId: string | null) {
-  if (!sessionId || typeof localStorage === "undefined") {
-    return 0;
-  }
-  try {
-    const parsed = JSON.parse(
-      localStorage.getItem(MIRROR_FIXED_HORIZONTAL_OFFSET_STORAGE_KEY) || "{}",
-    );
-    const value =
-      parsed && typeof parsed === "object"
-        ? Number((parsed as Record<string, unknown>)[sessionId])
-        : 0;
-    return Number.isFinite(value) ? Math.max(0, Math.round(value)) : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function writeStoredHorizontalOffset(sessionId: string | null, offsetPx: number) {
-  if (!sessionId || typeof localStorage === "undefined") {
-    return;
-  }
-  try {
-    const parsed = JSON.parse(
-      localStorage.getItem(MIRROR_FIXED_HORIZONTAL_OFFSET_STORAGE_KEY) || "{}",
-    );
-    const next =
-      parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? { ...(parsed as Record<string, unknown>) }
-        : {};
-    next[sessionId] = clampHorizontalOffset(offsetPx, Number.MAX_SAFE_INTEGER);
-    localStorage.setItem(
-      MIRROR_FIXED_HORIZONTAL_OFFSET_STORAGE_KEY,
-      JSON.stringify(next),
-    );
-  } catch {
-    localStorage.setItem(
-      MIRROR_FIXED_HORIZONTAL_OFFSET_STORAGE_KEY,
-      JSON.stringify({
-        [sessionId]: clampHorizontalOffset(offsetPx, Number.MAX_SAFE_INTEGER),
-      }),
-    );
-  }
-}
-
 function TerminalViewComponent({
   sessionId,
   sessionBufferStore = null,
@@ -318,28 +260,6 @@ function TerminalViewComponent({
   );
   const followDemandAnchorEndIndex = bufferTailAnchorEndIndex;
   const mirrorFixedVerticalScrollIntentRef = useRef<() => void>(() => {});
-  const mirrorFixedZoomPan = useMirrorFixedZoomPan({
-    widthMode,
-    copyModeActive,
-    reserveRightEdgeSwipe,
-    rightEdgeReservePx: SESSION_PREVIEW_RIGHT_EDGE_PX,
-    sessionId,
-    readHorizontalOffset: () => mirrorFixedHorizontalOffsetRef.current,
-    onHorizontalOffsetChange: (offsetPx) => {
-      mirrorFixedHorizontalOffsetRef.current = offsetPx;
-      setMirrorFixedHorizontalOffsetPx((current) =>
-        current === offsetPx ? current : offsetPx,
-      );
-    },
-    onVerticalScrollIntent: () => {
-      mirrorFixedVerticalScrollIntentRef.current();
-    },
-    onHorizontalOffsetCommit: (offsetPx) => {
-      if (sessionId) {
-        writeStoredHorizontalOffset(sessionId, offsetPx);
-      }
-    },
-  });
   const containerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const lastViewportRef = useRef<{ cols: number; rows: number } | null>(null);
@@ -352,41 +272,6 @@ function TerminalViewComponent({
   const followScrollSyncTimerRef = useRef<number | null>(null);
   const recentViewportLayoutChangeTimerRef = useRef<number | null>(null);
   const followScrollStateRef = useRef(createTerminalFollowScrollState());
-
-  const [mirrorFixedHorizontalOffsetPx, setMirrorFixedHorizontalOffsetPx] =
-    useState(0);
-  const mirrorFixedHorizontalOffsetRef = useRef(0);
-  /** pinch 前 scrollTop 快照（缩放态清零后用 v 平移补偿，还原时写回） */
-  /** mirror-fixed 视觉缩放只属于 UI shell（useMirrorFixedZoomPan）：只写
-   *  .term-render-scale-layer 的 transform: scale，不改变 buffer 几何、行号映射、
-   *  scrollTop 或 touchAction。此处只保留一个 mirrorFixedScaleRef 给旧手势调用点
-   *  （两指 wheel 方向判定）做只读同步，不再写 gridEl.style.zoom / touchAction。 */
-  const mirrorFixedScaleRef = useRef(1);
-  const mirrorFixedMinScaleRef = useRef(1);
-  const pinchRef = useRef<{ startSpan: number; startScale: number } | null>(null);
-  const gridElRef = useRef<HTMLDivElement | null>(null);
-  /** 旧两指手势调用点转发：视觉层 transform 由 hook 独占写入 */
-  const applyPinchScale = useCallback((next: number) => {
-    mirrorFixedScaleRef.current = next;
-    mirrorFixedZoomPan.applyVisualScale(next);
-  }, [mirrorFixedZoomPan]);
-
-  /** 计算本次 pinch 的目标 scale：clamp 到 [minScale, 1]；接近上限 1 时渐进（每 move ≤ 0.08），
-   *  避免 zoom 从缩小状态直接跳到 1 造成布局重排闪屏 */
-  const computeNextPinchScale = useCallback((ratio: number) => {
-    const current = mirrorFixedScaleRef.current;
-    const minScale = mirrorFixedMinScaleRef.current;
-    const rawNext = pinchRef.current
-      ? pinchRef.current.startScale * ratio
-      : current;
-    const clamped = Math.min(1, Math.max(minScale, rawNext));
-    if (clamped >= 1 && current < 1) {
-      return Math.min(1, current + 0.08);
-    }
-    return clamped;
-  }, []);
-
-  const restoredHorizontalOffsetSessionRef = useRef<string | null>(null);
   const resizeThrottleTimerRef = useRef<number | null>(null);
   const resizeRafTokenRef = useRef<number | null>(null);
   const syncScrollHostToRenderBottomRef = useRef<
@@ -431,6 +316,22 @@ function TerminalViewComponent({
     1,
     parseInt(resolvedRowHeight, 10) || parseInt(rowHeight, 10) || 17,
   );
+  const maxMirrorFixedHorizontalOffsetPx = Math.max(
+    0,
+    Math.round((renderBuffer.cols || 0) * resolvedCellWidthPx - viewportClientWidthPx),
+  );
+  const mirrorFixedMinScale = (() => {
+    if (widthMode !== "mirror-fixed") {
+      return 1;
+    }
+    const terminalLogicalWidthPx = Math.max(
+      viewportClientWidthPx,
+      Math.round((renderBuffer.cols || 0) * resolvedCellWidthPx),
+    );
+    return viewportClientWidthPx > 0 && terminalLogicalWidthPx > viewportClientWidthPx
+      ? viewportClientWidthPx / terminalLogicalWidthPx
+      : 1;
+  })();
   // 滚动↔行号映射只用原始 rowHeightPx：视觉 scale（transform）不改布局，
   // 原生 scrollTop 坐标系与排版坐标系一致，禁止按缩放后行高另算映射（会分叉）。
   const renderFrame = useMemo(
@@ -683,49 +584,38 @@ function TerminalViewComponent({
   focusTerminalRef.current = focusTerminal;
   cursorKeysAppRef.current = renderBuffer.cursorKeysApp;
 
-  // Two-finger drag tracks vertical motion to emit SGR mouse wheel events so
-  // TUI apps (e.g. OpenCode) can scroll their internal history without us
-  // touching tmux copy-mode.
-  const twoFingerWheelRef = useRef<{
-    active: boolean;
-    pointerIds: [number, number] | null;
-    lastClientY: number;
-    lastSpanPx: number;
-    initialSpanPx: number;
-    accumulatedDeltaPx: number;
-    accumulatedPinchDeltaPx: number;
-    lastSentDirection: "up" | "down" | null;
-    lastSentTickAt: number;
-    lockedDirection: "up" | "down" | null;
-    debug: {
-      startCalls: number;
-      moveCalls: number;
-      endCalls: number;
-      abortedCount: number;
-      sentCount: number;
-      lastReason: string;
-      lastEventAt: number;
-    };
-  }>({
-    active: false,
-    pointerIds: null,
-    lastClientY: 0,
-    lastSpanPx: 0,
-    initialSpanPx: 0,
-    accumulatedDeltaPx: 0,
-    accumulatedPinchDeltaPx: 0,
-    lastSentDirection: null,
-    lastSentTickAt: 0,
-    lockedDirection: null,
-    debug: {
-      startCalls: 0,
-      moveCalls: 0,
-      endCalls: 0,
-      abortedCount: 0,
-      sentCount: 0,
-      lastReason: "init",
-      lastEventAt: 0,
+  const onWheelStep = useCallback((step: MirrorFixedWheelStep) => {
+    const host = containerRef.current;
+    if (!host || !sessionIdRef.current) {
+      return;
+    }
+    const rect = host.getBoundingClientRect();
+    const col = Math.max(
+      1,
+      Math.floor((step.clientX - rect.left) / Math.max(1, resolvedCellWidthPx)) + 1,
+    );
+    const row = Math.max(
+      1,
+      Math.floor((step.clientY - rect.top) / Math.max(1, rowHeightPx)) + 1,
+    );
+    const sequence = encodeTerminalSgrMouseWheel(step.direction, col, row);
+    onInputRef.current?.(sessionIdRef.current, sequence);
+  }, [resolvedCellWidthPx, rowHeightPx]);
+
+  const mirrorFixedZoomPan = useMirrorFixedZoomPan({
+    widthMode,
+    copyModeActive,
+    previewProjection,
+    reserveRightEdgeSwipe,
+    rightEdgeReservePx: SESSION_PREVIEW_RIGHT_EDGE_PX,
+    drawerEdgeSwipeStartPx: TERMINAL_DRAWER_EDGE_SWIPE_START_PX,
+    sessionId,
+    minScale: mirrorFixedMinScale,
+    maxHorizontalOffsetPx: maxMirrorFixedHorizontalOffsetPx,
+    onVerticalScrollIntent: () => {
+      mirrorFixedVerticalScrollIntentRef.current();
     },
+    onWheelStep,
   });
 
   const resolveScrollTopForRenderBottomIndex = useCallback(
@@ -991,304 +881,6 @@ function TerminalViewComponent({
     viewportClientHeightPx,
     viewportRows,
   ]);
-
-  const maxMirrorFixedHorizontalOffsetPx = Math.max(
-    0,
-    Math.round((renderBuffer.cols || 0) * resolvedCellWidthPx - viewportClientWidthPx),
-  );
-
-  const commitMirrorFixedHorizontalOffset = useCallback(
-    (nextOffsetPx: number) => {
-      const clamped = clampHorizontalOffset(
-        nextOffsetPx,
-        maxMirrorFixedHorizontalOffsetPx,
-      );
-      mirrorFixedHorizontalOffsetRef.current = clamped;
-      setMirrorFixedHorizontalOffsetPx((current) =>
-        current === clamped ? current : clamped,
-      );
-      return clamped;
-    },
-    [maxMirrorFixedHorizontalOffsetPx],
-  );
-
-  useEffect(() => {
-    if (widthMode !== "mirror-fixed" || !sessionId) {
-      restoredHorizontalOffsetSessionRef.current = null;
-      mirrorFixedHorizontalOffsetRef.current = 0;
-      setMirrorFixedHorizontalOffsetPx(0);
-      return;
-    }
-    if (viewportClientWidthPx <= 0) {
-      return;
-    }
-    if (restoredHorizontalOffsetSessionRef.current === sessionId) {
-      return;
-    }
-    restoredHorizontalOffsetSessionRef.current = sessionId;
-    commitMirrorFixedHorizontalOffset(readStoredHorizontalOffset(sessionId));
-  }, [commitMirrorFixedHorizontalOffset, sessionId, viewportClientWidthPx, widthMode]);
-
-  useEffect(() => {
-    if (widthMode !== "mirror-fixed" || !sessionId) {
-      return;
-    }
-    if (viewportClientWidthPx <= 0) {
-      return;
-    }
-    setMirrorFixedHorizontalOffsetPx((current) => {
-      const clamped = clampHorizontalOffset(
-        current,
-        maxMirrorFixedHorizontalOffsetPx,
-      );
-      mirrorFixedHorizontalOffsetRef.current = clamped;
-      if (clamped !== current) {
-        writeStoredHorizontalOffset(sessionId, clamped);
-      }
-      return current === clamped ? current : clamped;
-    });
-  }, [
-    maxMirrorFixedHorizontalOffsetPx,
-    sessionId,
-    viewportClientWidthPx,
-    widthMode,
-  ]);
-
-  // Two-finger vertical drag is converted into SGR mouse wheel events so TUIs
-  // (OpenCode / Codex) can scroll their internal history buffer. This bypasses
-  // tmux alternate-screen limitations that prevent capture-pane from
-  // preserving scrollback for full-screen TUIs.
-  // Configuration is centralized in the pure decision helper so it can be
-  // unit-tested without DOM. See two-finger-wheel-decision.ts.
-  const TWO_FINGER_WHEEL_CONFIG = DEFAULT_TWO_FINGER_WHEEL_CONFIG;
-
-  const publishTwoFingerWheelDebug = useCallback(
-    (state: typeof twoFingerWheelRef.current) => {
-      const snap: TwoFingerWheelDebugSnapshot = {
-        active: state.active,
-        lockedDirection: state.lockedDirection,
-        initialSpanPx: Math.round(state.initialSpanPx),
-        accumulatedDeltaPx: Math.round(state.accumulatedDeltaPx),
-        lastSentDirection: state.lastSentDirection,
-        lastSentAt: state.lastSentTickAt || null,
-        startCalls: state.debug.startCalls,
-        moveCalls: state.debug.moveCalls,
-        endCalls: state.debug.endCalls,
-        abortedCount: state.debug.abortedCount,
-        sentCount: state.debug.sentCount,
-        lastReason: state.debug.lastReason,
-        lastEventAt: state.debug.lastEventAt,
-      };
-      setTwoFingerWheelDebugSnapshot(snap);
-    },
-    [],
-  );
-
-  const handleTwoFingerWheelTouchStart = useCallback(
-    (event: TouchEvent<HTMLDivElement>) => {
-      if (event.touches.length !== 2) {
-        return;
-      }
-      twoFingerWheelRef.current.debug.startCalls += 1;
-      twoFingerWheelRef.current.debug.lastEventAt = Date.now();
-      if (previewProjection) {
-        twoFingerWheelRef.current.debug.lastReason = "skip-preview-projection";
-        return;
-      }
-      if (copyModeActive) {
-        twoFingerWheelRef.current.debug.lastReason = "skip-copy-mode";
-        return;
-      }
-      const [t0, t1] = [event.touches[0], event.touches[1]];
-      const spanPx = Math.hypot(
-        t1.clientX - t0.clientX,
-        t1.clientY - t0.clientY,
-      );
-      if (spanPx < TWO_FINGER_WHEEL_CONFIG.minInitialSpanPx) {
-        twoFingerWheelRef.current.debug.lastReason = "skip-min-span";
-        return;
-      }
-      twoFingerWheelRef.current.debug.lastReason = "started";
-      pinchRef.current = {
-        startSpan: spanPx,
-        startScale: mirrorFixedScaleRef.current,
-      };
-      const midY = (t0.clientY + t1.clientY) / 2;
-      twoFingerWheelRef.current = {
-        active: true,
-        pointerIds: [t0.identifier, t1.identifier],
-        lastClientY: midY,
-        lastSpanPx: spanPx,
-        initialSpanPx: spanPx,
-        accumulatedDeltaPx: 0,
-        accumulatedPinchDeltaPx: 0,
-        lastSentDirection: null,
-        lastSentTickAt: 0,
-        lockedDirection: null,
-        debug: { ...twoFingerWheelRef.current.debug, startCalls: twoFingerWheelRef.current.debug.startCalls },
-      };
-      publishTwoFingerWheelDebug(twoFingerWheelRef.current);
-      // Reserve the gesture so mirror-fixed panning does not also act on it.
-      event.preventDefault();
-    },
-    [previewProjection, copyModeActive, publishTwoFingerWheelDebug],
-  );
-
-  const handleTwoFingerWheelTouchMove = useCallback(
-    (event: TouchEvent<HTMLDivElement>) => {
-      const wheel = twoFingerWheelRef.current;
-      wheel.debug.moveCalls += 1;
-      wheel.debug.lastEventAt = Date.now();
-      if (!wheel.active) {
-        wheel.debug.lastReason = "skip-inactive";
-        // 手势已因 pinch 中止：继续执行容器缩放（mirror-fixed 恒定宽度模式）
-        if (
-          event.touches.length === 2 &&
-          pinchRef.current &&
-          widthMode === 'mirror-fixed'
-        ) {
-          const [t0, t1] = [event.touches[0], event.touches[1]];
-          const spanPx = Math.hypot(
-            t1.clientX - t0.clientX,
-            t1.clientY - t0.clientY,
-          );
-          if (spanPx > 0 && pinchRef.current.startSpan > 0) {
-            const ratio = spanPx / pinchRef.current.startSpan;
-            applyPinchScale(computeNextPinchScale(ratio));
-            event.preventDefault();
-            event.stopPropagation();
-          }
-        }
-        publishTwoFingerWheelDebug(wheel);
-        return;
-      }
-      if (event.touches.length !== 2) {
-        wheel.debug.lastReason = "skip-not-two-fingers";
-        publishTwoFingerWheelDebug(wheel);
-        return;
-      }
-      const [t0, t1] = [event.touches[0], event.touches[1]];
-      const midY = (t0.clientY + t1.clientY) / 2;
-      const spanPx = Math.hypot(
-        t1.clientX - t0.clientX,
-        t1.clientY - t0.clientY,
-      );
-      const midYDelta = midY - wheel.lastClientY;
-      wheel.lastClientY = midY;
-      wheel.lastSpanPx = spanPx;
-
-      const decision = decideTwoFingerWheel(
-        {
-          active: wheel.active,
-          initialSpanPx: wheel.initialSpanPx,
-          accumulatedDeltaPx: wheel.accumulatedDeltaPx,
-          lockedDirection: wheel.lockedDirection,
-        },
-        { midYDeltaPx: midYDelta, liveSpanPx: spanPx },
-        TWO_FINGER_WHEEL_CONFIG,
-      );
-
-      wheel.active = decision.next.active;
-      wheel.initialSpanPx = decision.next.initialSpanPx;
-      wheel.accumulatedDeltaPx = decision.next.accumulatedDeltaPx;
-      wheel.lockedDirection = decision.next.lockedDirection;
-      wheel.accumulatedPinchDeltaPx += Math.abs(
-        spanPx - wheel.lastSpanPx,
-      );
-
-      if (decision.aborted) {
-        wheel.debug.abortedCount += 1;
-        wheel.debug.lastReason = "aborted-pinch";
-        // 双指距离变化 = pinch：缩放 mirror-fixed 容器
-        if (widthMode === 'mirror-fixed' && pinchRef.current) {
-          const ratio =
-            pinchRef.current.startSpan > 0
-              ? spanPx / pinchRef.current.startSpan
-              : 1;
-          applyPinchScale(computeNextPinchScale(ratio));
-        }
-        event.preventDefault();
-        event.stopPropagation();
-        publishTwoFingerWheelDebug(wheel);
-        return;
-      }
-      if (decision.direction === null || decision.steps < 1) {
-        wheel.debug.lastReason = "no-step";
-        publishTwoFingerWheelDebug(wheel);
-        return;
-      }
-      const host = containerRef.current;
-      if (!host || !sessionIdRef.current) {
-        return;
-      }
-      const rect = host.getBoundingClientRect();
-      const col = Math.max(
-        1,
-        Math.floor(((t0.clientX + t1.clientX) / 2 - rect.left) / Math.max(1, resolvedCellWidthPx)) + 1,
-      );
-      const row = Math.max(
-        1,
-        Math.floor((midY - rect.top) / Math.max(1, rowHeightPx)) + 1,
-      );
-      wheel.lastSentDirection = decision.direction;
-      wheel.lastSentTickAt = Date.now();
-      wheel.debug.sentCount += decision.steps;
-      wheel.debug.lastReason = `sent-${decision.direction}-x${decision.steps}`;
-      const sequence = encodeTerminalSgrMouseWheel(decision.direction, col, row);
-      onInputRef.current?.(sessionIdRef.current, sequence);
-      event.preventDefault();
-      event.stopPropagation();
-      publishTwoFingerWheelDebug(wheel);
-    },
-    [resolvedCellWidthPx, rowHeightPx],
-  );
-
-  const commitTwoFingerWheelTouchEnd = useCallback(
-    (event: TouchEvent<HTMLDivElement>) => {
-      const wheel = twoFingerWheelRef.current;
-      wheel.debug.endCalls += 1;
-      wheel.debug.lastEventAt = Date.now();
-      if (!wheel.active) {
-        wheel.debug.lastReason = "end-inactive";
-        pinchRef.current = null;
-        // pinch 中止（active=false）后抬起：横向平移归零（纵向一直由原生 scrollTop 承担）
-        if (mirrorFixedScaleRef.current < 1) {
-          setMirrorFixedHorizontalOffsetPx(0);
-          mirrorFixedHorizontalOffsetRef.current = 0;
-        }
-        publishTwoFingerWheelDebug(wheel);
-        return;
-      }
-      // Any touch change other than 2 active fingers ends the gesture.
-      if (event.touches.length === 2) {
-        publishTwoFingerWheelDebug(wheel);
-        return;
-      }
-      wheel.debug.lastReason = "ended";
-      publishTwoFingerWheelDebug(wheel);
-      pinchRef.current = null;
-      // commit pinch 缩放结果：横向平移归零（纵向一直由原生 scrollTop 承担）
-      if (mirrorFixedScaleRef.current < 1) {
-        setMirrorFixedHorizontalOffsetPx(0);
-        mirrorFixedHorizontalOffsetRef.current = 0;
-      }
-      twoFingerWheelRef.current = {
-        active: false,
-        pointerIds: null,
-        lastClientY: 0,
-        lastSpanPx: 0,
-        initialSpanPx: 0,
-        accumulatedDeltaPx: 0,
-        accumulatedPinchDeltaPx: 0,
-        lastSentDirection: null,
-        lastSentTickAt: 0,
-        lockedDirection: null,
-        debug: { ...twoFingerWheelRef.current.debug, endCalls: twoFingerWheelRef.current.debug.endCalls },
-      };
-      publishTwoFingerWheelDebug(twoFingerWheelRef.current);
-    },
-    [publishTwoFingerWheelDebug],
-  );
 
   const emitRenderDemand = useCallback(
     (
@@ -2078,18 +1670,6 @@ function TerminalViewComponent({
     [cancelPendingFollowScrollSync],
   );
 
-  // 渲染时同步 mirror-fixed 最小缩放（终端全宽对齐屏幕宽度时的 scale）
-  if (widthMode === 'mirror-fixed') {
-    const terminalLogicalWidthPx = Math.max(
-      viewportClientWidthPx,
-      Math.round((renderBuffer.cols || 0) * resolvedCellWidthPx),
-    );
-    mirrorFixedMinScaleRef.current =
-      viewportClientWidthPx > 0 && terminalLogicalWidthPx > viewportClientWidthPx
-        ? viewportClientWidthPx / terminalLogicalWidthPx
-        : 1;
-  }
-
   return (
     <div
       ref={containerRef}
@@ -2127,29 +1707,10 @@ function TerminalViewComponent({
         }
         applyScrollState(host.scrollTop, host);
       }}
-      onTouchMove={(event) => {
-        if (event.touches.length === 2) {
-          handleTwoFingerWheelTouchMove(event);
-          return;
-        }
-        // 单指手势（横向 pan / 纵向滚动意图 / pinch）只由 UI shell hook 处理
-        mirrorFixedZoomPan.onTouchMove(event);
-      }}
-      onTouchStart={(event) => {
-        mirrorFixedZoomPan.onTouchStart(event);
-        if (event.touches.length === 2) {
-          handleTwoFingerWheelTouchStart(event);
-          return;
-        }
-      }}
-      onTouchEnd={(event) => {
-        mirrorFixedZoomPan.onTouchEnd(event);
-        commitTwoFingerWheelTouchEnd(event);
-      }}
-      onTouchCancel={(event) => {
-        mirrorFixedZoomPan.onTouchEnd(event);
-        commitTwoFingerWheelTouchEnd(event);
-      }}
+      onTouchMove={mirrorFixedZoomPan.onTouchMove}
+      onTouchStart={mirrorFixedZoomPan.onTouchStart}
+      onTouchEnd={mirrorFixedZoomPan.onTouchEnd}
+      onTouchCancel={mirrorFixedZoomPan.onTouchEnd}
       onWheel={() => {
         markUserScrollIntentRuntime(250);
       }}
@@ -2185,57 +1746,47 @@ function TerminalViewComponent({
       <div className="term-render-scale-layer" ref={mirrorFixedZoomPan.scaleLayerRef}>
         <div
           className="term-grid"
-          ref={gridElRef}
-        data-cursor-source="cursor-metadata"
-        data-horizontal-offset-px={
-          widthMode === "mirror-fixed"
-            ? String(mirrorFixedHorizontalOffsetPx)
-            : undefined
-        }
-        onContextMenu={suppressNativeCopyMenu}
-        style={{
-          paddingTop: `${termGridPaddingTopPx}px`,
-          paddingBottom: `${termGridPaddingBottomPx}px`,
-          minWidth:
+          data-cursor-source="cursor-metadata"
+          data-horizontal-offset-px={
             widthMode === "mirror-fixed"
-              ? `${Math.max(
-                  viewportClientWidthPx,
-                  Math.round((renderBuffer.cols || 0) * resolvedCellWidthPx),
-                )}px`
-              : undefined,
-          transform:
-            widthMode === "mirror-fixed" && mirrorFixedHorizontalOffsetPx > 0
-              ? `translateX(-${mirrorFixedHorizontalOffsetPx}px)`
-              : undefined,
-          willChange:
-            widthMode === "mirror-fixed" && mirrorFixedHorizontalOffsetPx > 0
-              ? "transform"
-              : undefined,
-        }}
+              ? String(mirrorFixedZoomPan.horizontalOffsetPx)
+              : undefined
+          }
+          onContextMenu={suppressNativeCopyMenu}
+          style={{
+            paddingTop: `${termGridPaddingTopPx}px`,
+            paddingBottom: `${termGridPaddingBottomPx}px`,
+            minWidth:
+              widthMode === "mirror-fixed"
+                ? `${Math.max(
+                    viewportClientWidthPx,
+                    Math.round((renderBuffer.cols || 0) * resolvedCellWidthPx),
+                  )}px`
+                : undefined,
+            transform:
+              widthMode === "mirror-fixed" && mirrorFixedZoomPan.horizontalOffsetPx > 0
+                ? `translateX(-${mirrorFixedZoomPan.horizontalOffsetPx}px)`
+                : undefined,
+            willChange:
+              widthMode === "mirror-fixed" && mirrorFixedZoomPan.horizontalOffsetPx > 0
+                ? "transform"
+                : undefined,
+          }}
       >
         {passivePreviewProjection
           ? renderRowsWithSignatures.map(({ absoluteIndex, row, isGap }) => {
               const plainText = terminalRowToText(row);
               return (
-                <div
+                <TerminalPreviewRow
                   key={`preview-row-${absoluteIndex}`}
-                  data-terminal-row="true"
-                  data-terminal-preview-row="true"
-                  data-terminal-gap={isGap ? "true" : undefined}
-                  data-terminal-index={absoluteIndex}
-                  data-terminal-row-text={plainText}
-                  style={{
-                    height: resolvedRowHeight || rowHeight,
-                    minHeight: resolvedRowHeight || rowHeight,
-                    lineHeight: resolvedRowHeight || rowHeight,
-                    color: theme.foreground,
-                    whiteSpace: "pre",
-                    overflow: "hidden",
-                    textOverflow: "clip",
-                  }}
-                >
-                  {plainText || "\u00a0"}
-                </div>
+                  absoluteIndex={absoluteIndex}
+                  row={row}
+                  isGap={isGap}
+                  rowHeight={resolvedRowHeight || rowHeight}
+                  cellWidthPx={resolvedCellWidthPx}
+                  theme={theme}
+                  plainText={plainText}
+                />
               );
             })
           : renderRowsWithSignatures.map(({ absoluteIndex, row, isGap, renderSignature }, rowIndex) =>

@@ -90,6 +90,12 @@ function createRuntimeHarness() {
     disposeRelayHostClient: vi.fn(),
     disposeRtcBridgeServer: vi.fn(),
     detachSubscriberTransportOnly,
+    listMuxChannelSubscriberIds: (target) => Array.from(target.muxChannels?.values() || []),
+    releaseAllMuxChannelSubscribers: (target) => {
+      const subscriberIds = Array.from(target.muxChannels?.values() || []);
+      target.muxChannels?.clear();
+      return subscriberIds;
+    },
     sendTransportMessage,
   } as Parameters<typeof createTerminalDaemonRuntime>[0]);
 

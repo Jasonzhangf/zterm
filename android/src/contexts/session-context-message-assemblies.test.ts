@@ -7,6 +7,7 @@ import { createSessionTailRefreshStore } from '../lib/session-tail-refresh-store
 import { createSessionBufferState } from '../lib/terminal-buffer';
 import type { Session } from '../lib/types';
 import { createSessionMessageAssemblies } from './session-context-message-assemblies';
+import { createImagePasteWaiterRuntime } from './session-context-transfer-runtime';
 
 function makeSession(sessionId: string): Session {
   return {
@@ -69,6 +70,7 @@ describe('session-context-message-assemblies cadence', () => {
         bufferFrameAssemblyRef: { current: new Map() },
         pendingSessionTransportOpenIntentsRef: { current: new Map() },
         fileTransferMessageRuntimeRef: { current: { dispatch: vi.fn() } },
+        imagePasteWaiterRuntimeRef: { current: createImagePasteWaiterRuntime() },
         remoteWindowMessageRuntimeRef: { current: { dispatch: vi.fn() } },
         readSessionTransportSocket: () => ws,
         daemonConnection: {

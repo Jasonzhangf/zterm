@@ -1,5 +1,14 @@
 import type { Host } from './types';
 import type { BridgeTransportSocket } from './traversal/types';
+import {
+  bindTerminalChannelSession,
+  clearTerminalChannelSession,
+  createTerminalChannelMuxStore,
+  getSessionTerminalChannel,
+  removeSessionTerminalChannel,
+  type SessionTerminalChannelRuntime,
+  type TerminalChannelMuxStore,
+} from './terminal-channel-mux-runtime';
 
 type TransportTargetKeyHost = Pick<Host, 'bridgeHost' | 'bridgePort' | 'authToken'> & Partial<Pick<
   Host,
@@ -45,19 +54,6 @@ export interface SessionTransportResource {
   channel: SessionTerminalChannelRuntime | null;
 }
 
-export type SessionTerminalChannelState = 'opening' | 'open' | 'closing' | 'closed';
-
-export interface SessionTerminalChannelRuntime {
-  channelId: string;
-  sessionId: string;
-  sessionName: string;
-  targetKey: string;
-  state: SessionTerminalChannelState;
-  bodySubscribed: boolean;
-  openedAt: number;
-  closedAt: number | null;
-}
-
 export interface TargetTransportRuntime {
   key: string;
   daemonTargetId: string;
@@ -70,12 +66,12 @@ export interface TargetTransportRuntime {
   terminalTransport: BridgeTransportSocket | null;
   terminalMuxReady: boolean;
   sessionIds: string[];
-  channels: Map<string, SessionTerminalChannelRuntime>;
 }
 
 export interface SessionTransportRuntimeStore {
   targets: Map<string, TargetTransportRuntime>;
   sessions: Map<string, SessionTransportRuntime>;
+  terminalChannels: TerminalChannelMuxStore;
 }
 
 function maybeDeleteEmptyTargetRuntime(
@@ -90,11 +86,12 @@ function maybeDeleteEmptyTargetRuntime(
     targetRuntime.sessionIds.length > 0
     || targetRuntime.controlTransport
     || targetRuntime.terminalTransport
-    || targetRuntime.channels.size > 0
+    || (store.terminalChannels.targets.get(targetKey)?.channels.size ?? 0) > 0
   ) {
     return;
   }
   store.targets.delete(targetKey);
+  store.terminalChannels.targets.delete(targetKey);
 }
 
 function normalizeAuthToken(authToken: string | undefined) {
@@ -187,6 +184,7 @@ export function createSessionTransportRuntimeStore(): SessionTransportRuntimeSto
   return {
     targets: new Map(),
     sessions: new Map(),
+    terminalChannels: createTerminalChannelMuxStore(),
   };
 }
 
@@ -219,27 +217,9 @@ export function ensureTargetTransportRuntime(
     terminalTransport: null,
     terminalMuxReady: false,
     sessionIds: [],
-    channels: new Map(),
   };
   store.targets.set(key, created);
   return created;
-}
-
-function removeSessionTerminalChannelFromRuntime(
-  store: SessionTransportRuntimeStore,
-  runtime: SessionTransportRuntime,
-) {
-  const channelId = runtime.channelId;
-  if (!channelId) {
-    return null;
-  }
-  const targetRuntime = store.targets.get(runtime.targetKey) || null;
-  const removed = targetRuntime?.channels.get(channelId) || null;
-  if (targetRuntime) {
-    targetRuntime.channels.delete(channelId);
-  }
-  runtime.channelId = null;
-  return removed;
 }
 
 export function getTargetTransportRuntime(
@@ -283,7 +263,7 @@ export function upsertSessionTransportRuntime(
 
   if (current && targetChanged) {
     const previousTarget = store.targets.get(current.targetKey) || null;
-    removeSessionTerminalChannelFromRuntime(store, current);
+    removeSessionTerminalChannel(store.terminalChannels, sessionId);
     if (previousTarget) {
       previousTarget.sessionIds = previousTarget.sessionIds.filter((id) => id !== sessionId);
       maybeDeleteEmptyTargetRuntime(store, previousTarget.key);
@@ -303,6 +283,13 @@ export function upsertSessionTransportRuntime(
     requestedTerminalGeometry: current?.requestedTerminalGeometry || null,
   };
   store.sessions.set(sessionId, nextRuntime);
+  const channelBinding = bindTerminalChannelSession(
+    store.terminalChannels,
+    sessionId,
+    nextTarget.key,
+    normalizedHost.sessionName,
+  );
+  nextRuntime.channelId = channelBinding.channelId;
   if (!nextTarget.sessionIds.includes(sessionId)) {
     nextTarget.sessionIds = [...nextTarget.sessionIds, sessionId];
   }
@@ -342,9 +329,7 @@ export function getSessionTransportResource(
 ): SessionTransportResource {
   const runtime = getSessionTransportRuntime(store, sessionId);
   const targetRuntime = runtime ? getSessionTargetTransportRuntime(store, sessionId) : null;
-  const channel = runtime?.channelId && targetRuntime
-    ? targetRuntime.channels.get(runtime.channelId) || null
-    : null;
+  const channel = runtime ? getSessionTerminalChannel(store.terminalChannels, sessionId) : null;
   const terminalSocket = targetRuntime?.terminalTransport || null;
   const hasMuxChannel = Boolean(runtime?.channelId || channel);
   const socket = hasMuxChannel
@@ -463,150 +448,6 @@ export function setTargetTerminalMuxReady(
   }
   targetRuntime.terminalMuxReady = Boolean(ready);
   return targetRuntime;
-}
-
-export function getSessionTerminalChannel(
-  store: SessionTransportRuntimeStore,
-  sessionId: string,
-) {
-  const runtime = store.sessions.get(sessionId) || null;
-  if (!runtime?.channelId) {
-    return null;
-  }
-  return store.targets.get(runtime.targetKey)?.channels.get(runtime.channelId) || null;
-}
-
-export function getSessionIdForTerminalChannel(
-  store: SessionTransportRuntimeStore,
-  targetKey: string,
-  channelId: string,
-) {
-  const normalizedChannelId = normalizeKeyText(channelId);
-  if (!normalizedChannelId) {
-    return null;
-  }
-  return store.targets.get(targetKey)?.channels.get(normalizedChannelId)?.sessionId || null;
-}
-
-export function getOpeningSessionTerminalChannelsForTarget(
-  store: SessionTransportRuntimeStore,
-  targetKey: string,
-  prioritySessionId?: string | null,
-) {
-  const targetRuntime = store.targets.get(targetKey) || null;
-  if (!targetRuntime) {
-    return [];
-  }
-  const openingChannels = Array.from(targetRuntime.channels.values()).filter((channel) => channel.state === 'opening');
-  const normalizedPrioritySessionId = normalizeKeyText(prioritySessionId);
-  if (!normalizedPrioritySessionId) {
-    return openingChannels;
-  }
-  return openingChannels.sort((left, right) => {
-    if (left.sessionId === normalizedPrioritySessionId) {
-      return -1;
-    }
-    if (right.sessionId === normalizedPrioritySessionId) {
-      return 1;
-    }
-    return 0;
-  });
-}
-
-export function ensureSessionTerminalChannel(
-  store: SessionTransportRuntimeStore,
-  sessionId: string,
-  options: {
-    channelId?: string;
-    now?: number;
-    bodySubscribed?: boolean;
-  } = {},
-) {
-  const runtime = store.sessions.get(sessionId) || null;
-  if (!runtime) {
-    return null;
-  }
-  const targetRuntime = store.targets.get(runtime.targetKey) || null;
-  if (!targetRuntime) {
-    return null;
-  }
-  const existing = getSessionTerminalChannel(store, sessionId);
-  if (existing) {
-    return existing;
-  }
-  const channelId = normalizeKeyText(options.channelId) || `channel:${sessionId}`;
-  const sameId = targetRuntime.channels.get(channelId) || null;
-  if (sameId && sameId.sessionId !== sessionId) {
-    throw new Error(`terminal channel ${channelId} is already bound to ${sameId.sessionId}`);
-  }
-  const channel: SessionTerminalChannelRuntime = {
-    channelId,
-    sessionId,
-    sessionName: runtime.host.sessionName,
-    targetKey: runtime.targetKey,
-    state: 'opening',
-    bodySubscribed: typeof options.bodySubscribed === 'boolean' ? options.bodySubscribed : true,
-    openedAt: Number.isFinite(options.now) ? Math.max(0, Math.floor(options.now || 0)) : Date.now(),
-    closedAt: null,
-  };
-  runtime.channelId = channelId;
-  targetRuntime.channels.set(channelId, channel);
-  return channel;
-}
-
-export function updateSessionTerminalChannelName(
-  store: SessionTransportRuntimeStore,
-  sessionId: string,
-  sessionName: string,
-) {
-  const channel = getSessionTerminalChannel(store, sessionId);
-  const normalizedSessionName = sessionName.trim();
-  if (!channel || !normalizedSessionName) {
-    return channel;
-  }
-  channel.sessionName = normalizedSessionName;
-  return channel;
-}
-
-export function updateSessionTerminalChannelState(
-  store: SessionTransportRuntimeStore,
-  sessionId: string,
-  state: SessionTerminalChannelState,
-  now = Date.now(),
-) {
-  const channel = getSessionTerminalChannel(store, sessionId);
-  if (!channel) {
-    return null;
-  }
-  channel.state = state;
-  if (state === 'closed') {
-    channel.closedAt = Math.max(0, Math.floor(now || 0));
-  }
-  return channel;
-}
-
-export function setSessionChannelBodySubscribed(
-  store: SessionTransportRuntimeStore,
-  sessionId: string,
-  bodySubscribed: boolean,
-) {
-  const channel = getSessionTerminalChannel(store, sessionId);
-  if (!channel) {
-    return null;
-  }
-  channel.bodySubscribed = bodySubscribed;
-  return channel;
-}
-
-export function removeSessionTerminalChannel(
-  store: SessionTransportRuntimeStore,
-  sessionId: string,
-) {
-  const runtime = store.sessions.get(sessionId) || null;
-  if (!runtime) {
-    return null;
-  }
-  return removeSessionTerminalChannelFromRuntime(store, runtime);
 }
 
 export function getSessionRequestedTerminalGeometry(
@@ -730,7 +571,8 @@ export function removeSessionTransportRuntime(
   if (!runtime) {
     return null;
   }
-  removeSessionTerminalChannelFromRuntime(store, runtime);
+  removeSessionTerminalChannel(store.terminalChannels, sessionId);
+  clearTerminalChannelSession(store.terminalChannels, sessionId);
   store.sessions.delete(sessionId);
   const target = store.targets.get(runtime.targetKey) || null;
   if (target) {

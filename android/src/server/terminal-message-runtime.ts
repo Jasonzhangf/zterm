@@ -5,19 +5,10 @@ import {
   classifyTerminalMuxClientMessage,
 } from '@zterm/shared/protocol';
 import { buildRequestedRangeBufferPayload } from './buffer-sync-contract';
-import { TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES } from '@zterm/shared/terminal/input-chunking';
-// R13: hard cap on a single input frame. Anything larger must be chunked by
-// the client and resent as smaller `input` frames.
-const MAX_INPUT_PAYLOAD_BYTES = TERMINAL_INPUT_DAEMON_FRAME_MAX_BYTES;
 import type {
   BridgeClientMessage as ClientMessage,
   BridgeServerMessage as ServerMessage,
-  AttachmentHistoryPayload,
   HostConfigMessage,
-  PendingAttachmentsPayload,
-  RuntimeDebugLogEntry,
-  TerminalInputAckPayload,
-  TerminalReliableInputPayload,
   TerminalTransportServerFrame,
 } from '@zterm/shared/protocol';
 import type {
@@ -31,18 +22,41 @@ import type {
   TerminalTransportConnection,
 } from './terminal-runtime-types';
 import type { DaemonTransportConnection } from './terminal-transport-runtime';
-import type { TerminalFileTransferRuntime } from './terminal-file-transfer-runtime';
 import {
-  handleListSessionsMessageRuntime,
-  handleScheduleMessageRuntime,
-  handleSessionOpenMessageRuntime,
-  handleSessionTransportConnectRuntime,
-  handleTmuxControlMessageRuntime,
-} from './terminal-message-control-runtime';
-import type { TerminalMessageControlRuntimeDeps } from './terminal-message-control-runtime';
+  createDaemonControlGateway,
+  type DaemonControlGatewayDeps,
+  type DaemonControlGatewayRuntime,
+} from './daemon-control-gateway-runtime';
 import type { RemoteWindowStreamDaemonRuntime } from './remote-window-stream-daemon';
-import { createReliableInputAckCache } from './terminal-reliable-input-ack';
+import type { DaemonInputQueueRuntime } from './daemon-input-queue-runtime';
 import { createTerminalMuxChannelRuntime } from './terminal-mux-channel-runtime';
+import type {
+  TerminalAttachmentClientMessage,
+  TerminalAttachmentMessageRuntime,
+} from './terminal-attachment-message-runtime';
+import type {
+  TerminalFileTransferClientMessage,
+  TerminalFileTransferMessageRuntime,
+} from './terminal-file-transfer-message-runtime';
+
+const TERMINAL_FILE_TRANSFER_MESSAGE_TYPES = new Set<TerminalFileTransferClientMessage['type']>([
+  'paste-image-start',
+  'paste-image',
+  'attach-file-start',
+  'remote-screenshot-request',
+  'file-list-request',
+  'file-create-directory-request',
+  'file-download-request',
+  'file-upload-start',
+  'file-upload-chunk',
+  'file-upload-end',
+]);
+
+function isTerminalFileTransferMessageType(
+  value: string,
+): value is TerminalFileTransferClientMessage['type'] {
+  return TERMINAL_FILE_TRANSFER_MESSAGE_TYPES.has(value as TerminalFileTransferClientMessage['type']);
+}
 
 export interface TerminalMessageRuntimeDeps {
   sessions: Map<string, TerminalTransportSubscriber>;
@@ -56,41 +70,23 @@ export interface TerminalMessageRuntimeDeps {
   sendBufferHeadToSession: (session: TerminalSession, mirror: SessionMirror) => void;
   scheduleMirrorLiveSync: (mirror: SessionMirror, delayMs?: number) => void;
   refreshMirrorHeadForSession: (session: TerminalSession, mirror: SessionMirror) => Promise<boolean>;
-  handleInput: (session: TerminalSession, data: string, shouldWrite?: () => boolean) => Promise<boolean>;
+  daemonInputQueue: DaemonInputQueueRuntime;
   closeSession: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
-  terminalFileTransferRuntime: TerminalFileTransferRuntime;
-  attachmentDeliveryRuntime: {
-    listForDevice: (deviceId: string, asset?: 'preview' | 'original', includeAcknowledged?: boolean) => Promise<Array<{
-      attachmentId: string;
-      kind: 'image';
-      senderName: string;
-      sourceSession?: string;
-      fileName: string;
-      mimeType: string;
-      preview: { size: number };
-      original: { size: number };
-      message?: string;
-      createdAt: string;
-      expiresAt: string;
-      deliveries: Array<{ targetDeviceId: string; previewStatus: string; originalStatus: string }>;
-    }>>;
-    readAsset: (attachmentId: string, asset: 'preview' | 'original', deviceId: string) => Promise<{
-      manifest: {
-        attachmentId: string;
-        kind: 'image';
-        mimeType: string;
-        preview: { sha256: string; size: number };
-        original: { sha256: string; size: number };
-      };
-      data: Buffer;
-    }>;
-    acknowledge: (attachmentId: string, deviceId: string, asset: 'preview' | 'original', sha256: string) => Promise<unknown>;
-  };
+  fileTransferMessageRuntime: TerminalFileTransferMessageRuntime;
+  attachmentMessageRuntime: TerminalAttachmentMessageRuntime;
   remoteWindowStreamRuntime: RemoteWindowStreamDaemonRuntime;
-  handleClientDebugLog: (session: TerminalSession, payload: { entries: RuntimeDebugLogEntry[] }) => void;
-  handleClientDebugSnapshot: (session: TerminalSession, payload: { snapshot?: unknown }) => void;
-  controlRuntimeDeps: TerminalMessageControlRuntimeDeps;
-  daemonRuntimeDebug?: (scope: string, payload?: unknown) => void;
+  controlRuntimeDeps: DaemonControlGatewayDeps;
+  channelMuxRuntime: {
+    createMuxChannelSubscriber: (
+      connection: TerminalTransportConnection,
+      channelId: string,
+    ) => TerminalTransportSubscriber;
+    ensureMuxChannels: (connection: TerminalTransportConnection) => Map<string, string>;
+    releaseMuxChannelSubscriber: (
+      connection: TerminalTransportConnection,
+      channelId: string,
+    ) => void;
+  };
 }
 
 export interface TerminalMessageRuntime {
@@ -107,25 +103,9 @@ export interface TerminalMessageRuntime {
 export function createTerminalMessageRuntime(
   deps: TerminalMessageRuntimeDeps,
 ): TerminalMessageRuntime {
-  function debugInput(scope: 'receive' | 'drop' | 'write', payload: Record<string, unknown>) {
-    deps.daemonRuntimeDebug?.(`input-${scope}`, payload);
-  }
-
-  function resolveCurrentSessionForInput(connection: TerminalTransportConnection): TerminalSession | null {
-    if (!connection.boundSubscriberId) {
-      return null;
-    }
-    const current = deps.sessions.get(connection.boundSubscriberId) || null;
-    if (!current) {
-      return null;
-    }
-    if (current.transportId !== connection.transportId || current.transport !== connection.transport) {
-      return null;
-    }
-    return current;
-  }
-
-  const reliableInputAckCache = createReliableInputAckCache();
+  const controlGateway: DaemonControlGatewayRuntime = createDaemonControlGateway(
+    deps.controlRuntimeDeps,
+  );
 
   // 连接 → 该连接发起的 remote-window 流（transportId → streamId 集合）
   const connectionRwStreams = new Map<string, Set<string>>();
@@ -147,19 +127,13 @@ export function createTerminalMessageRuntime(
     connectionRwStreams.delete(connection.transportId);
   }
 
-  function sendInputAck(connection: TerminalTransportConnection, payload: TerminalInputAckPayload) {
-    deps.sendTransportMessage(connection.transport, {
-      type: 'input-ack',
-      payload,
-    });
-  }
-
   const muxRuntime = createTerminalMuxChannelRuntime({
     sessions: deps.sessions,
     mirrors: deps.controlRuntimeDeps.mirrors,
     sendTransportMessage: deps.sendTransportMessage,
-    createMuxChannelSubscriber: (connection, channelId) =>
-      deps.controlRuntimeDeps.createMuxChannelSubscriber(connection, channelId),
+    createMuxChannelSubscriber: deps.channelMuxRuntime.createMuxChannelSubscriber,
+    ensureMuxChannels: deps.channelMuxRuntime.ensureMuxChannels,
+    releaseMuxChannelSubscriber: deps.channelMuxRuntime.releaseMuxChannelSubscriber,
     sanitizeSessionName: (input) => deps.controlRuntimeDeps.sanitizeSessionName(input),
     attachTmux: (subscriber, payload) => deps.controlRuntimeDeps.attachTmux(subscriber, payload),
     closeSession: deps.closeSession,
@@ -167,166 +141,6 @@ export function createTerminalMessageRuntime(
   });
   const handleMuxFrame = muxRuntime.handleMuxFrame;
   const sendMuxFrame = muxRuntime.sendMuxFrame;
-
-  function normalizeReliableInputPayload(payload: unknown): TerminalReliableInputPayload | null {
-    if (!payload || typeof payload !== 'object') {
-      return null;
-    }
-    const candidate = payload as Partial<TerminalReliableInputPayload>;
-    if (
-      candidate.version !== 1
-      || typeof candidate.seq !== 'string'
-      || candidate.seq.trim().length === 0
-      || typeof candidate.data !== 'string'
-      || typeof candidate.sentAt !== 'number'
-      || !Number.isFinite(candidate.sentAt)
-      || typeof candidate.attempt !== 'number'
-      || !Number.isFinite(candidate.attempt)
-    ) {
-      return null;
-    }
-    return {
-      version: 1,
-      seq: candidate.seq,
-      data: candidate.data,
-      sentAt: candidate.sentAt,
-      attempt: Math.max(0, Math.floor(candidate.attempt)),
-    };
-  }
-
-  function readReliableInputSeq(payload: unknown) {
-    if (!payload || typeof payload !== 'object') {
-      return '';
-    }
-    const seq = (payload as { seq?: unknown }).seq;
-    return typeof seq === 'string' ? seq.trim() : '';
-  }
-
-  function reportInputDrop(
-    connection: TerminalTransportConnection,
-    reason: 'session_required' | 'input_stale_transport',
-    bytes: number,
-    ackSeq?: string,
-  ) {
-    debugInput('drop', {
-      transportId: connection.transportId,
-      sessionId: connection.boundSubscriberId,
-      reason,
-      bytes,
-      queueDepth: 0,
-    });
-    if (ackSeq) {
-      sendInputAck(connection, {
-        version: 1,
-        seq: ackSeq,
-        accepted: false,
-        bytes,
-        error: reason,
-      });
-    }
-    deps.sendTransportMessage(connection.transport, {
-      type: 'error',
-      payload: reason === 'input_stale_transport'
-        ? { message: 'input requires the current attached session transport', code: 'input_stale_transport' }
-        : { message: 'input requires an attached session transport', code: 'session_required' },
-    });
-  }
-
-  async function writeInputIfCurrent(connection: TerminalTransportConnection, data: string, ackSeq?: string) {
-    const bytes = Buffer.byteLength(data, 'utf8');
-    // R13: reject oversized input payloads before they reach the tmux write
-    // path. tmux's send-keys has a hard limit (~1MB) and a multi-MB paste can
-    // stall the entire capture loop. The client should chunk on its side.
-    if (bytes > MAX_INPUT_PAYLOAD_BYTES) {
-      debugInput('drop', {
-        transportId: connection.transportId,
-        sessionId: connection.boundSubscriberId,
-        reason: 'input_too_large',
-        bytes,
-        queueDepth: 0,
-        max: MAX_INPUT_PAYLOAD_BYTES,
-      });
-      deps.sendTransportMessage(connection.transport, {
-        type: 'error',
-        payload: {
-          message: `input payload exceeds ${MAX_INPUT_PAYLOAD_BYTES} bytes; client must chunk`,
-          code: 'input_too_large',
-        },
-      });
-      if (ackSeq) {
-        sendInputAck(connection, {
-          version: 1,
-          seq: ackSeq,
-          accepted: false,
-          bytes,
-          error: 'input_too_large',
-        });
-      }
-      return;
-    }
-    debugInput('receive', {
-      transportId: connection.transportId,
-      sessionId: connection.boundSubscriberId,
-      bytes,
-      queueDepth: 0,
-    });
-    const inputSession = resolveCurrentSessionForInput(connection);
-    if (!inputSession) {
-      reportInputDrop(
-        connection,
-        connection.boundSubscriberId && deps.sessions.has(connection.boundSubscriberId) ? 'input_stale_transport' : 'session_required',
-        bytes,
-        ackSeq,
-      );
-      return;
-    }
-    if (ackSeq) {
-      const existingAck = reliableInputAckCache.read(inputSession.id, ackSeq);
-      if (existingAck) {
-        sendInputAck(connection, {
-          version: 1,
-          seq: ackSeq,
-          accepted: true,
-          bytes: existingAck.bytes,
-        });
-        debugInput('write', {
-          transportId: connection.transportId,
-          sessionId: inputSession.id,
-          sessionName: inputSession.sessionName,
-          bytes: existingAck.bytes,
-          duplicateSeq: ackSeq,
-          queueDepth: 0,
-        });
-        return;
-      }
-    }
-    const startedAt = Date.now();
-    const wrote = await deps.handleInput(inputSession, data, () => {
-      const current = resolveCurrentSessionForInput(connection);
-      return current?.id === inputSession.id;
-    });
-    if (!wrote) {
-      reportInputDrop(connection, 'input_stale_transport', bytes, ackSeq);
-      return;
-    }
-    if (ackSeq) {
-      reliableInputAckCache.remember(inputSession.id, ackSeq, bytes);
-      sendInputAck(connection, {
-        version: 1,
-        seq: ackSeq,
-        accepted: true,
-        bytes,
-      });
-    }
-    debugInput('write', {
-      transportId: connection.transportId,
-      sessionId: inputSession.id,
-      sessionName: inputSession.sessionName,
-      bytes,
-      durationMs: Date.now() - startedAt,
-      queueDepth: 0,
-    });
-  }
 
   function sendSessionNotReadyError(
     session: TerminalSession,
@@ -342,11 +156,11 @@ export function createTerminalMessageRuntime(
   }
 
   function handleSessionOpen(connection: TerminalTransportConnection, payload: HostConfigMessage) {
-    return handleSessionOpenMessageRuntime(deps.controlRuntimeDeps, connection, payload);
+    return controlGateway.handleSessionOpen(connection, payload);
   }
 
   function handleSessionTransportConnect(connection: TerminalTransportConnection, payload: HostConfigMessage) {
-    return handleSessionTransportConnectRuntime(deps.controlRuntimeDeps, connection, payload);
+    return controlGateway.handleSessionTransportConnect(connection, payload);
   }
 
   async function handleMessage(connection: TerminalTransportConnection, rawData: RawData, isBinary = false) {
@@ -364,7 +178,7 @@ export function createTerminalMessageRuntime(
         : Array.isArray(rawData)
           ? Buffer.concat(rawData)
           : Buffer.from(rawData as ArrayBuffer);
-      deps.terminalFileTransferRuntime.handleBinaryPayload(session, binaryBuffer);
+      deps.fileTransferMessageRuntime.handleBinaryPayload(session, binaryBuffer);
       return;
     }
 
@@ -387,9 +201,9 @@ export function createTerminalMessageRuntime(
         });
         return;
       }
-          await writeInputIfCurrent(connection, text);
-          return;
-        }
+      await deps.daemonInputQueue.handleInputMessage(connection, text);
+      return;
+    }
 
     if (typeof (message as { type?: unknown }).type === 'string' && (message as { type: string }).type.startsWith('mux-')) {
       // Mux frames are only ever carried by daemon transports (the daemon owns
@@ -411,6 +225,22 @@ export function createTerminalMessageRuntime(
         ));
         return;
       }
+      if (typeof messageType === 'string' && classifyTerminalMuxClientMessage(message) === 'observability') {
+        sendMuxFrame(connection, buildTerminalMuxError(
+          'mux_protocol_invalid',
+          `debug observability message ${messageType} cannot use the terminal mux channel`,
+        ));
+        return;
+      }
+    }
+
+    if (isTerminalFileTransferMessageType(message.type)) {
+      await deps.fileTransferMessageRuntime.handleMessage(
+        session,
+        connection,
+        message as TerminalFileTransferClientMessage,
+      );
+      return;
     }
 
     switch (message.type) {
@@ -429,157 +259,56 @@ export function createTerminalMessageRuntime(
         }
         break;
       case 'list-sessions':
-        handleListSessionsMessageRuntime(deps.controlRuntimeDeps, connection, message);
+        controlGateway.handleListSessions(connection, message);
         break;
-      case 'pending-attachments-query': {
-        const { deviceId } = (message as { payload: { deviceId: string } }).payload || {};
-        if (!deviceId) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'pending-attachments-query requires deviceId', code: 'invalid_payload' },
-          });
-          break;
-        }
-        try {
-          const manifests = await deps.attachmentDeliveryRuntime.listForDevice(deviceId);
-          const pending: PendingAttachmentsPayload['pending'] = manifests.map((m) => ({
-            attachmentId: m.attachmentId,
-            kind: m.kind,
-            senderName: m.senderName,
-            sourceSession: m.sourceSession,
-            fileName: m.fileName,
-            mimeType: m.mimeType,
-            previewSize: m.preview.size,
-            originalSize: m.original.size,
-            message: m.message,
-            createdAt: m.createdAt,
-            expiresAt: m.expiresAt,
-          }));
-          deps.sendTransportMessage(connection.transport, {
-            type: 'pending-attachments',
-            payload: { schemaVersion: 1, pending },
-          });
-          // eslint-disable-next-line no-console
-          console.log(`[zterm:attach] pending-query device=${deviceId} -> ${pending.length} pending`);
-        } catch (err) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: err instanceof Error ? err.message : 'attachment query failed', code: 'attachment_query_failed' },
-          });
-        }
+      case 'pending-attachments-query':
+      case 'attachment-history-query':
+      case 'attachment-asset-request':
+      case 'attachment-receipt':
+        await deps.attachmentMessageRuntime.handleMessage(
+          connection,
+          message as TerminalAttachmentClientMessage,
+        );
         break;
-      }
-      case 'attachment-history-query': {
-        const { deviceId } = (message as { payload: { deviceId: string } }).payload || {};
-        if (!deviceId) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'attachment-history-query requires deviceId', code: 'invalid_payload' },
-          });
-          break;
-        }
-        try {
-          const manifests = await deps.attachmentDeliveryRuntime.listForDevice(deviceId, 'preview', true);
-          const items: AttachmentHistoryPayload['items'] = manifests.map((m) => {
-            const delivery = m.deliveries.find((item) => item.targetDeviceId === deviceId);
-            return {
-              attachmentId: m.attachmentId,
-              kind: m.kind,
-              senderName: m.senderName,
-              sourceSession: m.sourceSession,
-              fileName: m.fileName,
-              mimeType: m.mimeType,
-              previewSize: m.preview.size,
-              originalSize: m.original.size,
-              message: m.message,
-              createdAt: m.createdAt,
-              expiresAt: m.expiresAt,
-              previewStatus: delivery?.previewStatus === 'acknowledged' ? 'acknowledged' : 'pending',
-              originalStatus: delivery?.originalStatus === 'acknowledged' ? 'acknowledged' : 'pending',
-            };
-          });
-          deps.sendTransportMessage(connection.transport, {
-            type: 'attachment-history',
-            payload: { schemaVersion: 1, items },
-          });
-        } catch (err) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: err instanceof Error ? err.message : 'attachment history query failed', code: 'attachment_history_failed' },
-          });
-        }
-        break;
-      }
-      case 'attachment-asset-request': {
-        const { attachmentId, asset, deviceId } = (message as { payload: { attachmentId: string; asset: 'preview' | 'original'; deviceId: string } }).payload || {};
-        if (!attachmentId || !asset || !deviceId) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'attachment-asset-request requires attachmentId, asset, and deviceId', code: 'invalid_payload' },
-          });
-          break;
-        }
-        try {
-          const { manifest, data } = await deps.attachmentDeliveryRuntime.readAsset(attachmentId, asset, deviceId);
-          // Send asset data via mux target message
-          const base64 = data.toString('base64');
-          deps.sendTransportMessage(connection.transport, {
-            type: 'attachment-asset-data',
-            payload: {
-              attachmentId: manifest.attachmentId,
-              deviceId,
-              asset,
-              dataBase64: base64,
-              sha256: manifest[asset].sha256,
-              mimeType: manifest.mimeType,
-            },
-          });
-          // eslint-disable-next-line no-console
-          console.log(`[zterm:attach] asset-request attachment=${attachmentId} asset=${asset} device=${deviceId} bytes=${data.byteLength} -> delivered`);
-        } catch (err) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: err instanceof Error ? err.message : 'attachment read failed', code: 'attachment_read_failed' },
-          });
-        }
-        break;
-      }
-      case 'attachment-receipt': {
-        const { attachmentId, asset, sha256, deviceId } = (message as { payload: { attachmentId: string; asset: 'preview' | 'original'; sha256: string; deviceId: string } }).payload || {};
-        if (!attachmentId || !asset || !sha256 || !deviceId) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'attachment-receipt requires attachmentId, asset, sha256, and deviceId', code: 'invalid_payload' },
-          });
-          break;
-        }
-        try {
-          await deps.attachmentDeliveryRuntime.acknowledge(attachmentId, deviceId, asset, sha256);
-          // eslint-disable-next-line no-console
-          console.log(`[zterm:attach] receipt attachment=${attachmentId} asset=${asset} device=${deviceId} sha256=${sha256.slice(0, 8)} -> ack`);
-          // No response needed - receipt is acknowledged
-        } catch (err) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: err instanceof Error ? err.message : 'attachment acknowledge failed', code: 'attachment_acknowledge_failed' },
-          });
-        }
-        break;
-      }
       case 'schedule-list':
-        handleScheduleMessageRuntime(deps.controlRuntimeDeps, session, message, connection.transport);
+        await controlGateway.handleScheduleControl(
+          session,
+          message,
+          connection.transport,
+          connection.transportId,
+        );
         break;
       case 'schedule-upsert':
-        handleScheduleMessageRuntime(deps.controlRuntimeDeps, session, message, connection.transport);
+        await controlGateway.handleScheduleControl(
+          session,
+          message,
+          connection.transport,
+          connection.transportId,
+        );
         break;
       case 'schedule-delete':
-        handleScheduleMessageRuntime(deps.controlRuntimeDeps, session, message, connection.transport);
+        await controlGateway.handleScheduleControl(
+          session,
+          message,
+          connection.transport,
+          connection.transportId,
+        );
         break;
       case 'schedule-toggle':
-        handleScheduleMessageRuntime(deps.controlRuntimeDeps, session, message, connection.transport);
+        await controlGateway.handleScheduleControl(
+          session,
+          message,
+          connection.transport,
+          connection.transportId,
+        );
         break;
       case 'schedule-run-now':
-        handleScheduleMessageRuntime(deps.controlRuntimeDeps, session, message, connection.transport);
+        await controlGateway.handleScheduleControl(
+          session,
+          message,
+          connection.transport,
+          connection.transportId,
+        );
         break;
       case 'connect':
         try {
@@ -690,34 +419,6 @@ export function createTerminalMessageRuntime(
         deps.sendBufferHeadToSession(session, mirror);
         break;
       }
-      case 'paste-image-start':
-        if (!session) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'paste-image-start requires an attached session transport', code: 'session_required' },
-          });
-          break;
-        }
-        session.pendingPasteImage = {
-          payload: message.payload,
-          receivedBytes: 0,
-          chunks: [],
-        };
-        break;
-      case 'attach-file-start':
-        if (!session) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'attach-file-start requires an attached session transport', code: 'session_required' },
-          });
-          break;
-        }
-        session.pendingAttachFile = {
-          payload: message.payload,
-          receivedBytes: 0,
-          chunks: [],
-        };
-        break;
       case 'buffer-sync-request': {
         if (!session) {
           deps.sendTransportMessage(connection.transport, {
@@ -748,80 +449,17 @@ export function createTerminalMessageRuntime(
         deps.sendMessage(session, { type: 'buffer-sync', payload });
         break;
       }
-      case 'debug-log':
-        if (!session) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'debug-log requires an attached session transport', code: 'session_required' },
-          });
-          break;
-        }
-        deps.handleClientDebugLog(session, message.payload);
-        break;
-      case 'debug-snapshot':
-        if (!session) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'debug-snapshot requires an attached session transport', code: 'session_required' },
-          });
-          break;
-        }
-        deps.handleClientDebugSnapshot(session, message.payload);
-        break;
       case 'tmux-create-session':
-        handleTmuxControlMessageRuntime(deps.controlRuntimeDeps, connection, message);
+        await controlGateway.handleTmuxControl(connection, message);
         break;
       case 'tmux-rename-session':
-        handleTmuxControlMessageRuntime(deps.controlRuntimeDeps, connection, message);
+        await controlGateway.handleTmuxControl(connection, message);
         break;
       case 'tmux-kill-session':
-        handleTmuxControlMessageRuntime(deps.controlRuntimeDeps, connection, message);
+        await controlGateway.handleTmuxControl(connection, message);
         break;
       case 'input':
-        if (typeof message.payload === 'string') {
-          await writeInputIfCurrent(connection, message.payload);
-          break;
-        }
-        {
-          const reliablePayload = normalizeReliableInputPayload(message.payload);
-          if (reliablePayload) {
-            await writeInputIfCurrent(connection, reliablePayload.data, reliablePayload.seq);
-            break;
-          }
-        }
-        {
-          const invalidSeq = readReliableInputSeq(message.payload);
-          if (invalidSeq) {
-            sendInputAck(connection, {
-              version: 1,
-              seq: invalidSeq,
-              accepted: false,
-              bytes: 0,
-              error: 'input_invalid',
-            });
-          }
-        }
-        if (!session) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'input requires an attached session transport', code: 'session_required' },
-          });
-          break;
-        }
-        deps.sendMessage(session, {
-          type: 'error',
-          payload: { message: 'invalid input payload', code: 'input_invalid' },
-        });
-        break;
-      case 'paste-image':
-        if (!session) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'paste-image requires an attached session transport', code: 'session_required' },
-          });
-          break;
-        }
-        deps.terminalFileTransferRuntime.handlePasteImage(session, message.payload);
+        await deps.daemonInputQueue.handleInputMessage(connection, message.payload);
         break;
       case 'ping':
         deps.sendTransportMessage(connection.transport, { type: 'pong' });
@@ -832,46 +470,6 @@ export function createTerminalMessageRuntime(
           break;
         }
         deps.closeSession(session, 'client requested close', false);
-        break;
-      case 'file-list-request':
-        if (!session) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'file-list-request requires an attached session transport', code: 'session_required' },
-          });
-          break;
-        }
-        deps.terminalFileTransferRuntime.handleFileListRequest(session, message.payload);
-        break;
-      case 'file-create-directory-request':
-        if (!session) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'file-create-directory-request requires an attached session transport', code: 'session_required' },
-          });
-          break;
-        }
-        deps.terminalFileTransferRuntime.handleFileCreateDirectoryRequest(session, message.payload);
-        break;
-      case 'file-download-request':
-        if (!session) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'file-download-request requires an attached session transport', code: 'session_required' },
-          });
-          break;
-        }
-        deps.terminalFileTransferRuntime.handleFileDownloadRequest(session, message.payload);
-        break;
-      case 'remote-screenshot-request':
-        if (!session) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'remote-screenshot-request requires an attached session transport', code: 'session_required' },
-          });
-          break;
-        }
-        void deps.terminalFileTransferRuntime.handleRemoteScreenshotRequest(session, message.payload);
         break;
       case 'remote-window-targets-request':
         void deps.remoteWindowStreamRuntime.listTargets(message.payload).then((payload) => {
@@ -1028,36 +626,6 @@ export function createTerminalMessageRuntime(
             },
           });
         });
-        break;
-      case 'file-upload-start':
-        if (!session) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'file-upload-start requires an attached session transport', code: 'session_required' },
-          });
-          break;
-        }
-        deps.terminalFileTransferRuntime.handleFileUploadStart(session, message.payload);
-        break;
-      case 'file-upload-chunk':
-        if (!session) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'file-upload-chunk requires an attached session transport', code: 'session_required' },
-          });
-          break;
-        }
-        deps.terminalFileTransferRuntime.handleFileUploadChunk(session, message.payload);
-        break;
-      case 'file-upload-end':
-        if (!session) {
-          deps.sendTransportMessage(connection.transport, {
-            type: 'error',
-            payload: { message: 'file-upload-end requires an attached session transport', code: 'session_required' },
-          });
-          break;
-        }
-        deps.terminalFileTransferRuntime.handleFileUploadEnd(session, message.payload);
         break;
     }
   }

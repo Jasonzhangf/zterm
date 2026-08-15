@@ -44,6 +44,55 @@ import { useAttachmentNotifications } from './hooks/useAttachmentNotifications';
 import { createNetworkIdentityRuntime } from './lib/network-identity';
 import { readNativeNetworkIdentitySnapshot } from './plugins/NetworkIdentityPlugin';
 import type { NetworkIdentityRuntime } from './lib/network-identity';
+import { createPluginHost } from './lib/plugin-host/plugin-host-runtime';
+import { NetworkIdentityCapabilityPlugin } from './lib/plugin-host/network-identity-capability-plugin';
+import { DebugConsoleUiPlugin } from './lib/plugin-host/debug-console-ui-plugin';
+import { SessionDrawerUiPlugin } from './lib/plugin-host/session-drawer-ui-plugin';
+import { FileBrowserUiPlugin } from './lib/plugin-host/file-browser-ui-plugin';
+import { SettingsUpdateUiPlugin } from './lib/plugin-host/settings-update-ui-plugin';
+import { RemoteWindowUiPlugin } from './lib/plugin-host/remote-window-ui-plugin';
+import { QuickBarUiPlugin } from './lib/plugin-host/quickbar-ui-plugin';
+import { TerminalShellUiPlugin } from './lib/plugin-host/terminal-shell-ui-plugin';
+import type { PluginHost } from './lib/plugin-host/plugin-host-runtime';
+import { ClientCompositionRoot } from './lib/composition-root/client-composition-root';
+import { createControlCommand } from '@zterm/shared/terminal/control-contract';
+import { ClientControlCenter } from './lib/control-center/client-control-center';
+import { PluginHostControlNode } from './lib/plugin-host/plugin-host-control-node';
+import {
+  DEBUG_CONSOLE_UI_SLOT_ID,
+  type TerminalDebugOverlayProps,
+  type TerminalDebugOverlaySlot,
+} from './lib/plugin-debug-console/debug-console-contract';
+import {
+  SESSION_DRAWER_UI_SLOT_ID,
+  type SessionDrawerUiProps,
+  type TerminalSessionDrawerSlot,
+} from './lib/plugin-session-drawer/session-drawer-contract';
+import {
+  FILE_BROWSER_UI_SLOT_ID,
+  type FileBrowserUiProps,
+  type TerminalFileBrowserSlot,
+} from './lib/plugin-file-browser/file-browser-contract';
+import {
+  SETTINGS_UPDATE_UI_SLOT_ID,
+  type SettingsUpdateUiProps,
+  type SettingsUpdateUiSlot,
+} from './lib/plugin-settings-update/settings-update-contract';
+import {
+  REMOTE_WINDOW_UI_SLOT_ID,
+  type RemoteWindowUiProps,
+  type TerminalRemoteWindowSlot,
+} from './lib/plugin-remote-window/remote-window-contract';
+import {
+  QUICKBAR_UI_SLOT_ID,
+  type QuickBarUiProps,
+  type TerminalQuickBarSlot,
+} from './lib/plugin-quickbar/quickbar-contract';
+import {
+  TERMINAL_SHELL_UI_SLOT_ID,
+  type TerminalShellUiProps,
+  type TerminalShellUiSlot,
+} from './lib/plugin-terminal-shell/terminal-shell-contract';
 
 interface AppContentProps {
   bridgeSettings: ReturnType<typeof useBridgeSettingsStorage>['settings'];
@@ -53,6 +102,13 @@ interface AppContentProps {
   onForegroundResume?: (reason: 'visibilitychange' | 'resume' | 'appStateChange') => void;
   latestSessionHostsRef?: MutableRefObject<Host[] | undefined>;
   networkIdentity?: NetworkIdentityRuntime;
+  renderDebugConsole?: TerminalDebugOverlaySlot['render'];
+  renderSessionDrawer?: TerminalSessionDrawerSlot['render'];
+  renderFileBrowser?: TerminalFileBrowserSlot['render'];
+  renderSettingsUpdate?: SettingsUpdateUiSlot['render'];
+  renderRemoteWindow?: TerminalRemoteWindowSlot['render'];
+  renderQuickBar?: TerminalQuickBarSlot['render'];
+  renderTerminalShell?: TerminalShellUiSlot['render'];
 }
 
 
@@ -64,6 +120,13 @@ export function AppContent({
   onForegroundResume,
   latestSessionHostsRef,
   networkIdentity,
+  renderDebugConsole,
+  renderSessionDrawer,
+  renderFileBrowser,
+  renderSettingsUpdate,
+  renderRemoteWindow,
+  renderQuickBar,
+  renderTerminalShell,
 }: AppContentProps) {
   const [pendingPaneAttachIntent, setPendingPaneAttachIntent] = useState<{ sessionIds: string[]; paneId: string; nonce: number } | null>(null);
   useEffect(() => {
@@ -154,6 +217,7 @@ export function AppContent({
     sendMessageRaw,
     sendTargetHeartbeat,
     manageTmuxSessionsOnOpenTransport,
+    queryTerminalSessionCatalogOnOpenTransport,
     onFileTransferMessage,
     onRemoteWindowMessage,
     updateSessionViewport,
@@ -527,6 +591,7 @@ export function AppContent({
     switchSession,
     renameRemoteSession,
     manageTmuxSessionsOnOpenTransport,
+    queryTerminalSessionCatalogOnOpenTransport,
     runtimeActiveSessionId: state.activeSessionId,
     runtimeRefs,
     ensureTerminalPageVisible,
@@ -683,6 +748,7 @@ export function AppContent({
                 terminalShellSkin: skin,
               }));
             }}
+            renderSettingsUpdate={renderSettingsUpdate}
             onBack={handleOpenConnectionsPageWithAudit}
           />
         )}
@@ -747,6 +813,12 @@ export function AppContent({
             onQuickActionInput={handleQuickActionInput}
             onQuickActionsChange={setQuickActions}
             onShortcutActionsChange={setShortcutActions}
+            renderDebugConsole={renderDebugConsole}
+            renderSessionDrawer={renderSessionDrawer}
+            renderFileBrowser={renderFileBrowser}
+            renderRemoteWindow={renderRemoteWindow}
+            renderQuickBar={renderQuickBar}
+            renderTerminalShell={renderTerminalShell}
             sessionDraft={terminalActiveSession ? (sessionDrafts[terminalActiveSession.id] || '') : ''}
             sessionDrafts={sessionDrafts}
             onSessionDraftChange={handleSessionDraftChange}
@@ -978,9 +1050,110 @@ export default function App() {
     setForegroundResumeEpoch((current) => current + 1);
   }, []);
   const latestSessionHostsRef = useRef<Host[] | undefined>(undefined);
+  const pluginHostRef = useRef<PluginHost | null>(null);
+  const controlCenterRef = useRef<ClientControlCenter | null>(null);
+  const pluginStartRequestedRef = useRef(false);
+  const [pluginRuntimeReady, setPluginRuntimeReady] = useState(false);
+  const [pluginRuntimeError, setPluginRuntimeError] = useState<Error | null>(null);
+  if (
+    !pluginHostRef.current
+    || pluginHostRef.current.isDisposed()
+    || !controlCenterRef.current
+  ) {
+    const runtimeRoot = new ClientCompositionRoot();
+    const nextPluginHost = createAppPluginHost();
+    const nextControlCenter = new ClientControlCenter();
+    runtimeRoot.bind({ portId: 'plugin-host', value: nextPluginHost });
+    runtimeRoot.bind({ portId: 'control-center', value: nextControlCenter });
+    runtimeRoot.require(['plugin-host', 'control-center']);
+    const pluginHost = runtimeRoot.resolve<PluginHost>('plugin-host');
+    const controlCenter = runtimeRoot.resolve<ClientControlCenter>('control-center');
+    controlCenter.register(
+      'plugin-host.dispose',
+      new PluginHostControlNode(pluginHost),
+      'plugin-host:dispose',
+    );
+    pluginHostRef.current = pluginHost;
+    controlCenterRef.current = controlCenter;
+  }
+  const pluginHost = pluginHostRef.current;
+  const controlCenter = controlCenterRef.current;
+  useEffect(() => () => {
+    if (!controlCenter) {
+      return;
+    }
+    void controlCenter.execute({
+      command: createControlCommand(
+        'plugin-host.dispose',
+        'app-unmount-1',
+        'app-unmount',
+        { reason: 'app-unmount' },
+      ),
+      subject: 'app-shell',
+      capabilities: ['plugin-host:dispose'],
+      idempotencyKey: 'plugin-host.dispose:app-unmount',
+    }).then((result) => {
+      if (!result.ok) {
+        console.error('[zterm:control-center] plugin-host dispose failed', result.error);
+      }
+    }).catch((error) => {
+      console.error('[zterm:control-center] plugin-host dispose failed', error);
+    });
+  }, [controlCenter]);
+  useEffect(() => {
+    if (pluginStartRequestedRef.current) {
+      return;
+    }
+    pluginStartRequestedRef.current = true;
+    void pluginHost.startAll().then(() => {
+      setPluginRuntimeReady(true);
+    }).catch((error: unknown) => {
+      setPluginRuntimeError(error instanceof Error ? error : new Error(String(error)));
+    });
+  }, [pluginHost]);
   const networkIdentityRuntime = useMemo(() => createNetworkIdentityRuntime({
-    sampleInterfaces: readNativeNetworkIdentitySnapshot,
-  }), []);
+    sampleInterfaces: pluginRuntimeReady
+      ? pluginHost.readCapability<typeof readNativeNetworkIdentitySnapshot>('network:sample-interfaces')
+      : undefined,
+  }), [pluginHost, pluginRuntimeReady]);
+  const debugConsoleRender = pluginRuntimeReady
+    ? pluginHost
+      .readUiSlot<TerminalDebugOverlayProps>(DEBUG_CONSOLE_UI_SLOT_ID)
+      .render
+    : undefined;
+  const sessionDrawerRender = pluginRuntimeReady
+    ? pluginHost
+      .readUiSlot<SessionDrawerUiProps>(SESSION_DRAWER_UI_SLOT_ID)
+      .render
+    : undefined;
+  const fileBrowserRender = pluginRuntimeReady
+    ? pluginHost
+      .readUiSlot<FileBrowserUiProps>(FILE_BROWSER_UI_SLOT_ID)
+      .render
+    : undefined;
+  const settingsUpdateRender = pluginRuntimeReady
+    ? pluginHost
+      .readUiSlot<SettingsUpdateUiProps>(SETTINGS_UPDATE_UI_SLOT_ID)
+      .render
+    : undefined;
+  const remoteWindowRender = pluginRuntimeReady
+    ? pluginHost
+      .readUiSlot<RemoteWindowUiProps>(REMOTE_WINDOW_UI_SLOT_ID)
+      .render
+    : undefined;
+  const quickBarRender = pluginRuntimeReady
+    ? pluginHost
+      .readUiSlot<QuickBarUiProps>(QUICKBAR_UI_SLOT_ID)
+      .render
+    : undefined;
+  const terminalShellRender = pluginRuntimeReady
+    ? pluginHost
+      .readUiSlot<TerminalShellUiProps>(TERMINAL_SHELL_UI_SLOT_ID)
+      .render
+    : undefined;
+  if (pluginRuntimeError) {
+    throw pluginRuntimeError;
+  }
 
   return (
     <SessionProvider
@@ -999,7 +1172,99 @@ export default function App() {
         onForegroundResume={handleForegroundResume}
         latestSessionHostsRef={latestSessionHostsRef}
         networkIdentity={networkIdentityRuntime}
+        renderDebugConsole={debugConsoleRender}
+        renderSessionDrawer={sessionDrawerRender}
+        renderFileBrowser={fileBrowserRender}
+        renderSettingsUpdate={settingsUpdateRender}
+        renderRemoteWindow={remoteWindowRender}
+        renderQuickBar={quickBarRender}
+        renderTerminalShell={terminalShellRender}
       />
     </SessionProvider>
   );
+}
+
+function createAppPluginHost(): PluginHost {
+  const host = createPluginHost();
+  host.provideCapability('network:native-snapshot', readNativeNetworkIdentitySnapshot);
+  host.install(
+    {
+      pluginId: 'network-identity',
+      version: '1.0.0',
+      requires: ['network:native-snapshot'],
+      provides: ['network:sample-interfaces'],
+    },
+    { create: () => new NetworkIdentityCapabilityPlugin() },
+  );
+  host.install(
+    {
+      pluginId: 'debug-console',
+      version: '1.0.0',
+      requires: [],
+      provides: [],
+      providesUiSlots: [DEBUG_CONSOLE_UI_SLOT_ID],
+    },
+    { create: () => new DebugConsoleUiPlugin() },
+  );
+  host.install(
+    {
+      pluginId: 'session-drawer',
+      version: '1.0.0',
+      requires: [],
+      provides: [],
+      providesUiSlots: [SESSION_DRAWER_UI_SLOT_ID],
+    },
+    { create: () => new SessionDrawerUiPlugin() },
+  );
+  host.install(
+    {
+      pluginId: 'file-browser',
+      version: '1.0.0',
+      requires: [],
+      provides: [],
+      providesUiSlots: [FILE_BROWSER_UI_SLOT_ID],
+    },
+    { create: () => new FileBrowserUiPlugin() },
+  );
+  host.install(
+    {
+      pluginId: 'settings-update',
+      version: '1.0.0',
+      requires: [],
+      provides: [],
+      providesUiSlots: [SETTINGS_UPDATE_UI_SLOT_ID],
+    },
+    { create: () => new SettingsUpdateUiPlugin() },
+  );
+  host.install(
+    {
+      pluginId: 'remote-window',
+      version: '1.0.0',
+      requires: [],
+      provides: [],
+      providesUiSlots: [REMOTE_WINDOW_UI_SLOT_ID],
+    },
+    { create: () => new RemoteWindowUiPlugin() },
+  );
+  host.install(
+    {
+      pluginId: 'quickbar',
+      version: '1.0.0',
+      requires: [],
+      provides: [],
+      providesUiSlots: [QUICKBAR_UI_SLOT_ID],
+    },
+    { create: () => new QuickBarUiPlugin() },
+  );
+  host.install(
+    {
+      pluginId: 'terminal-shell',
+      version: '1.0.0',
+      requires: [],
+      provides: [],
+      providesUiSlots: [TERMINAL_SHELL_UI_SLOT_ID],
+    },
+    { create: () => new TerminalShellUiPlugin() },
+  );
+  return host;
 }

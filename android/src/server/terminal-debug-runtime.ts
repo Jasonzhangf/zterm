@@ -2,8 +2,14 @@ import type {
   BridgeServerMessage as ServerMessage,
   RuntimeDebugLogEntry,
 } from '@zterm/shared/protocol';
-import type { RuntimeDebugStore } from './runtime-debug-store';
-import type { TerminalSession } from './terminal-runtime-types';
+import {
+  DebugHub,
+  DebugPermissionService,
+  type DebugPermissionCapability,
+} from '@zterm/shared/terminal/debug-contract';
+import type { RuntimeDebugSourceMeta, RuntimeDebugStore } from './runtime-debug-store';
+
+const NON_EXPIRING_DEBUG_CONTROL_LEASE_MS = Number.MAX_SAFE_INTEGER;
 
 export interface TerminalDebugRuntimeDeps {
   daemonRuntimeDebugEnabled: boolean;
@@ -11,16 +17,23 @@ export interface TerminalDebugRuntimeDeps {
   maxClientDebugLogPayloadChars: number;
   clientRuntimeDebugStore: RuntimeDebugStore;
   daemonRuntimeDebugStore: RuntimeDebugStore;
-  sessions: Map<string, TerminalSession>;
+  debugPermissionService?: DebugPermissionService;
 }
 
 export interface TerminalDebugRuntime {
   logTimePrefix: (date?: Date) => string;
   daemonRuntimeDebug: (scope: string, payload?: unknown) => void;
   setDaemonRuntimeDebugEnabled: (enabled: boolean) => void;
+  setDaemonRuntimeDebugLease: (enabled: boolean, leaseMs: number) => void;
+  getDebugPermissionSummary: () => {
+    capability: DebugPermissionCapability | null;
+    expiresAt: number;
+  };
+  listDebugEvents: () => ReturnType<DebugHub<unknown>['listEvents']>;
+  getDebugDropCount: () => number;
   summarizePayload: (message: ServerMessage) => Record<string, unknown> | null;
-  handleClientDebugLog: (session: TerminalSession, payload: { entries: RuntimeDebugLogEntry[] }) => void;
-  handleClientDebugSnapshot: (session: TerminalSession, payload: { snapshot?: unknown }) => void;
+  handleClientDebugLog: (source: RuntimeDebugSourceMeta, payload: { entries: RuntimeDebugLogEntry[] }) => void;
+  handleClientDebugSnapshot: (source: RuntimeDebugSourceMeta, payload: { snapshot?: unknown }) => void;
 }
 
 export function createTerminalDebugRuntime(
@@ -28,6 +41,16 @@ export function createTerminalDebugRuntime(
 ): TerminalDebugRuntime {
   let daemonRuntimeDebugEnabled = deps.daemonRuntimeDebugEnabled;
   let daemonRuntimeDebugSeq = 0;
+  let daemonRuntimeDebugLeaseExpiresAt = 0;
+  const debugPermissionService = deps.debugPermissionService ?? new DebugPermissionService();
+  if (daemonRuntimeDebugEnabled) {
+    debugPermissionService.grant('debug:control', NON_EXPIRING_DEBUG_CONTROL_LEASE_MS);
+  }
+  const debugHub = new DebugHub<unknown>({
+    maxSubscribers: 16,
+    maxEvents: 200,
+  });
+  const debugNodeId = 'daemon.runtime.debug';
 
   function formatLocalLogTimestamp(date = new Date()) {
     const year = date.getFullYear();
@@ -50,6 +73,36 @@ export function createTerminalDebugRuntime(
 
   function setDaemonRuntimeDebugEnabled(enabled: boolean) {
     daemonRuntimeDebugEnabled = enabled;
+    daemonRuntimeDebugLeaseExpiresAt = 0;
+    if (enabled) {
+      debugPermissionService.grant('debug:control', NON_EXPIRING_DEBUG_CONTROL_LEASE_MS);
+    } else {
+      debugPermissionService.revoke();
+    }
+  }
+
+  function setDaemonRuntimeDebugLease(enabled: boolean, leaseMs: number) {
+    daemonRuntimeDebugEnabled = enabled;
+    daemonRuntimeDebugLeaseExpiresAt = enabled
+      ? Date.now() + Math.max(1, Math.floor(Number.isFinite(leaseMs) ? leaseMs : 0))
+      : 0;
+    if (enabled) {
+      debugPermissionService.grant('debug:control', leaseMs);
+    } else {
+      debugPermissionService.revoke();
+    }
+  }
+
+  function isDaemonRuntimeDebugEnabled() {
+    if (!daemonRuntimeDebugEnabled) {
+      return false;
+    }
+    if (daemonRuntimeDebugLeaseExpiresAt > 0 && Date.now() > daemonRuntimeDebugLeaseExpiresAt) {
+      daemonRuntimeDebugEnabled = false;
+      daemonRuntimeDebugLeaseExpiresAt = 0;
+      return false;
+    }
+    return true;
   }
 
   function sanitizeDaemonDebugPayload(payload: unknown) {
@@ -85,7 +138,7 @@ export function createTerminalDebugRuntime(
   }
 
   function daemonRuntimeDebug(scope: string, payload?: unknown) {
-    if (!daemonRuntimeDebugEnabled) {
+    if (!isDaemonRuntimeDebugEnabled()) {
       return;
     }
 
@@ -100,6 +153,17 @@ export function createTerminalDebugRuntime(
     const payloadText = Object.keys(sanitizedPayload).length > 0
       ? stringifyDaemonDebugPayload(sanitizedPayload)
       : '';
+    const debugEvent = debugHub.nextEvent(
+      debugNodeId,
+      `daemon.${scope}`,
+      'internal',
+      {
+        scope,
+        payloadText,
+        sessionId: sanitizedPayload.sessionId ?? null,
+      },
+    );
+    debugHub.publish(debugEvent);
 
     deps.daemonRuntimeDebugStore.appendBatch(
       {
@@ -143,43 +207,35 @@ export function createTerminalDebugRuntime(
       }));
   }
 
-  function handleClientDebugLog(session: TerminalSession, payload: { entries: RuntimeDebugLogEntry[] }) {
+  function handleClientDebugLog(source: RuntimeDebugSourceMeta, payload: { entries: RuntimeDebugLogEntry[] }) {
     const entries = normalizeClientDebugEntries(Array.isArray(payload.entries) ? payload.entries : []);
     if (entries.length === 0) {
       return;
     }
 
     deps.clientRuntimeDebugStore.appendBatch(
-      {
-        sessionId: session.id,
-        tmuxSessionName: session.sessionName || 'unknown',
-        requestOrigin: session.transport?.requestOrigin,
-      },
+      source,
       entries,
     );
 
     console.log(
-      `[${logTimePrefix()}] [client-debug] session=${session.id} tmux=${session.sessionName || 'unknown'} entries=${entries.length}`,
+      `[${logTimePrefix()}] [client-debug] session=${source.sessionId} tmux=${source.tmuxSessionName || 'unknown'} entries=${entries.length}`,
     );
     for (const entry of entries) {
       console.log(
-        `[${logTimePrefix()}] [client-debug:${entry.scope}] seq=${entry.seq} ts=${entry.ts} session=${session.id} ${entry.payload}`,
+        `[${logTimePrefix()}] [client-debug:${entry.scope}] seq=${entry.seq} ts=${entry.ts} session=${source.sessionId} ${entry.payload}`,
       );
     }
   }
 
-  function handleClientDebugSnapshot(session: TerminalSession, payload: { snapshot?: unknown }) {
+  function handleClientDebugSnapshot(source: RuntimeDebugSourceMeta, payload: { snapshot?: unknown }) {
     deps.clientRuntimeDebugStore.setSnapshot(
-      {
-        sessionId: session.id,
-        tmuxSessionName: session.sessionName || 'unknown',
-        requestOrigin: session.transport?.requestOrigin,
-      },
+      source,
       payload.snapshot ?? null,
     );
 
     console.log(
-      `[${logTimePrefix()}] [client-debug-snapshot] session=${session.id} tmux=${session.sessionName || 'unknown'}`,
+      `[${logTimePrefix()}] [client-debug-snapshot] session=${source.sessionId} tmux=${source.tmuxSessionName || 'unknown'}`,
     );
   }
 
@@ -207,8 +263,12 @@ export function createTerminalDebugRuntime(
     logTimePrefix,
     daemonRuntimeDebug,
     setDaemonRuntimeDebugEnabled,
+    setDaemonRuntimeDebugLease,
     summarizePayload,
     handleClientDebugLog,
     handleClientDebugSnapshot,
+    getDebugPermissionSummary: () => debugPermissionService.getGrantSummary(),
+    listDebugEvents: () => debugHub.listEvents(),
+    getDebugDropCount: () => debugHub.getDropCount(),
   };
 }

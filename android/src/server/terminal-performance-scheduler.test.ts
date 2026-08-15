@@ -15,8 +15,6 @@ function input(overrides: Partial<TerminalLiveSyncSchedulerInput> = {}): Termina
     lastLiveActivityAt: 990,
     consecutiveFailures: 0,
     subscriberCount: 1,
-    transportBufferedBytes: 0,
-    transportBackpressureCount: 0,
     lastCaptureDurationMs: 8,
     lastCanonicalizeDurationMs: 4,
     flushInFlight: false,
@@ -25,7 +23,7 @@ function input(overrides: Partial<TerminalLiveSyncSchedulerInput> = {}): Termina
 }
 
 describe('terminal live performance scheduler', () => {
-  it('uses fast lane for good transport with low capture cost and empty send queue', () => {
+  it('uses fast lane for low capture cost with at least one subscribed transport', () => {
     expect(resolveTerminalLiveSyncDelay(input()).lane).toBe('fast');
     expect(resolveTerminalLiveSyncDelay(input()).delayMs).toBe(16);
   });
@@ -36,25 +34,13 @@ describe('terminal live performance scheduler', () => {
       now: 10_000,
       lastLiveActivityAt: 1_000,
       subscriberCount: 1,
-      transportBufferedBytes: 0,
-      transportBackpressureCount: 0,
       lastCaptureDurationMs: 8,
       lastCanonicalizeDurationMs: 4,
     }));
 
     expect(result.lane).toBe('fast');
     expect(result.delayMs).toBe(16);
-    expect(result.reason).toBe('subscribed-good-transport-low-capture-cost');
-  });
-
-  it('slows down when transport buffered bytes show backpressure', () => {
-    const result = resolveTerminalLiveSyncDelay(input({
-      transportBufferedBytes: 512 * 1024,
-      transportBackpressureCount: 2,
-    }));
-
-    expect(result.lane).toBe('slow');
-    expect(result.delayMs).toBeGreaterThanOrEqual(120);
+    expect(result.reason).toBe('subscribed-low-capture-cost');
   });
 
   it('backs off over-budget capture without starving other mirrors forever', () => {
@@ -92,8 +78,6 @@ describe('R9 fast lane bounds', () => {
       lastLiveActivityAt: Date.now(),
       consecutiveFailures: 0,
       subscriberCount: 1,
-      transportBufferedBytes: 0,
-      transportBackpressureCount: 0,
       lastCaptureDurationMs: 0,
       lastCanonicalizeDurationMs: 0,
       flushInFlight: true,
@@ -111,8 +95,6 @@ describe('R9 fast lane bounds', () => {
       lastLiveActivityAt: 0,
       consecutiveFailures: 0,
       subscriberCount: 1,
-      transportBufferedBytes: 0,
-      transportBackpressureCount: 0,
       lastCaptureDurationMs: 0,
       lastCanonicalizeDurationMs: 0,
       flushInFlight: false,

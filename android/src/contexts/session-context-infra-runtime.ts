@@ -12,7 +12,7 @@ import type { NetworkIdentityRuntime } from '../lib/network-identity';
 import type { BridgeTransportSocket } from '../lib/traversal/types';
 import type { SessionHeartbeatStore } from '../lib/session-heartbeat-store';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
-import type { BufferFrameAssemblyResourceState } from './session-buffer-frame-assembly';
+import type { BufferFrameAssemblyResourceState } from '../lib/buffer-frame-assembly/session-buffer-frame-assembly';
 import type { Host, Session, SessionBufferState, SessionScheduleState } from '../lib/types';
 import type { SessionRenderBufferSnapshot } from '../lib/types';
 import type { SessionRenderBufferStore } from '../lib/session-render-buffer-store';

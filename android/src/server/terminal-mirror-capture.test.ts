@@ -338,6 +338,26 @@ describe('terminal mirror capture runtime', () => {
     expect(result.snapshot).toEqual(snapshots[1]);
   });
 
+  it('fails explicitly when an external backend is requested but unavailable instead of falling back to tmux', async () => {
+    const runtime = createTerminalMirrorCaptureRuntime({
+      resolveMirrorCacheLines: (rows) => rows,
+      buildExactTmuxPaneTarget: (sessionName) => `=${sessionName}:0.0`,
+      runTmux: () => {
+        throw new Error('tmux must not be used for an unavailable herdr backend');
+      },
+      runTmuxAsync: async () => {
+        throw new Error('tmux must not be used for an unavailable herdr backend');
+      },
+      logTimePrefix: () => '2026-08-15 00:00:00',
+      terminalBackendKind: 'herdr',
+      backendRuntimes: {},
+    });
+
+    await expect(runtime.captureMirrorAuthoritativeBufferFromTmux(makeReadyMirror({
+      backend: 'herdr',
+    }))).rejects.toThrow('terminal backend herdr requested for mirror capture but unavailable; refusing to fall back to tmux');
+  });
+
   it('keeps the mirror tail anchor monotonic when alternate-screen capture reports only the visible pane', async () => {
     let captureIndex = 0;
     const runTmux = vi.fn((args: string[]) => {

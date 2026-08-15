@@ -134,6 +134,8 @@ describe('session tail refresh store', () => {
       requestEndIndex: 20,
       tailEndIndex: 30,
       targetRevision: 7,
+      status: 'dispatched',
+      lastDispatchAt: 100,
     });
     expect(store.readVisibleNonGapRepairRequest('s2')).toBeNull();
 
@@ -156,5 +158,79 @@ describe('session tail refresh store', () => {
 
     expect(store.hasPendingResumeTailRefresh('s1')).toBe(false);
     expect(store.readVisibleNonGapRepairRequest('s1')).toBeNull();
+  });
+
+  it('keeps a dispatched visible repair retryable until a full response fulfills the exact ledger', () => {
+    const store = createSessionTailRefreshStore();
+    const key = {
+      requestStartIndex: 10,
+      requestEndIndex: 20,
+      tailEndIndex: 30,
+      targetRevision: 7,
+    };
+
+    store.recordVisibleNonGapRepairRequest('s1', {
+      requestedAt: 100,
+      ...key,
+    });
+
+    expect(store.readVisibleNonGapRepairRequest('s1')).toEqual(expect.objectContaining({
+      status: 'dispatched',
+      ...key,
+    }));
+
+    store.markVisibleNonGapRepairPending('s1', key);
+    expect(store.readVisibleNonGapRepair('s1', key)?.status).toBe('pending');
+
+    store.markVisibleNonGapRepairFulfilled('s1', key);
+    expect(store.readVisibleNonGapRepair('s1', key)?.status).toBe('fulfilled');
+    expect(store.readVisibleNonGapRepairRequest('s1')?.status).toBe('fulfilled');
+  });
+
+  it('clamps a pending visible repair end index to the start index', () => {
+    const store = createSessionTailRefreshStore();
+    const key = {
+      requestStartIndex: 10,
+      requestEndIndex: 4,
+      tailEndIndex: 30,
+      targetRevision: 7,
+    };
+
+    store.markVisibleNonGapRepairPending('s1', key);
+
+    expect(store.readVisibleNonGapRepair('s1', key)).toMatchObject({
+      requestStartIndex: 10,
+      requestEndIndex: 10,
+      status: 'pending',
+    });
+  });
+
+  it('supersedes an older visible repair key when the visible/target demand moves', () => {
+    const store = createSessionTailRefreshStore();
+    const oldKey = {
+      requestStartIndex: 10,
+      requestEndIndex: 20,
+      tailEndIndex: 30,
+      targetRevision: 7,
+    };
+    const nextKey = {
+      requestStartIndex: 12,
+      requestEndIndex: 22,
+      tailEndIndex: 30,
+      targetRevision: 8,
+    };
+
+    store.recordVisibleNonGapRepairRequest('s1', {
+      requestedAt: 100,
+      ...oldKey,
+    });
+    store.recordVisibleNonGapRepairRequest('s1', {
+      requestedAt: 200,
+      ...nextKey,
+    });
+
+    expect(store.readVisibleNonGapRepair('s1', oldKey)?.status).toBe('superseded');
+    expect(store.readVisibleNonGapRepair('s1', nextKey)?.status).toBe('dispatched');
+    expect(store.listVisibleNonGapRepairs('s1').length).toBe(2);
   });
 });

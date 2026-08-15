@@ -29,9 +29,11 @@ import { sanitizeTmuxSessionName } from '@zterm/shared/tmux-session-name';
 import {
   createTmuxSession,
   fetchTmuxSessions,
+  fetchTmuxSessionCatalog,
   killTmuxSession,
   renameTmuxSession,
 } from '../lib/tmux-sessions';
+import type { TerminalSessionCatalog } from '@zterm/shared/protocol';
 import type { Host, PersistedOpenTab, Session, SessionGroupHistory, TraversalRelayDeviceSnapshot } from '../lib/types';
 import type { RelayEndpointCandidate } from '@zterm/shared/relay-directory';
 import type { TerminalMuxTargetClientMessage } from '@zterm/shared/protocol';
@@ -68,7 +70,12 @@ interface UseSessionOpenActionsOptions {
   sessionGroups?: SessionGroupHistory[];
   relayDevices?: TraversalRelayDeviceSnapshot[];
   deleteSessionGroup: (group: { bridgeHost: string; bridgePort: number; daemonHostId?: string }) => void;
-  pruneSessionGroupSelectionToRemoteTruth: (target: { bridgeHost: string; bridgePort: number; daemonHostId?: string }, remoteSessionNames: string[]) => void;
+  pruneSessionGroupSelectionToRemoteTruth: (target: {
+    bridgeHost: string;
+    bridgePort: number;
+    daemonHostId?: string;
+    terminalBackend?: 'tmux' | 'herdr';
+  }, remoteSessionNames: string[]) => void;
   setSessionGroupSelection: (group: {
     name: string;
     bridgeHost: string;
@@ -106,6 +113,10 @@ interface UseSessionOpenActionsOptions {
     sessionId: string,
     message: TerminalMuxTargetClientMessage,
   ) => Promise<string[] | null>;
+  queryTerminalSessionCatalogOnOpenTransport?: (
+    sessionId: string,
+    message: TerminalMuxTargetClientMessage,
+  ) => Promise<TerminalSessionCatalog | null>;
   runtimeActiveSessionId: string | null;
   runtimeRefs: OpenTabRuntimeRefs;
   ensureTerminalPageVisible: () => void;
@@ -159,7 +170,7 @@ export interface SessionOpenActionsResult {
     daemonHostId?: string;
   }) => void;
   handleSelectCleanSession: (target: BridgeTarget) => void;
-  handleRemoteSessionsRefreshed: (target: BridgeTarget, sessionNames: string[]) => void;
+  handleRemoteSessionsRefreshed: (target: BridgeTarget, sessionNames: string[], catalog?: TerminalSessionCatalog) => void;
   handleRefreshDrawerHostSessions: (hostKey?: string) => Promise<void>;
   handleForceRelaySession: (sessionId: string) => void;
   handleUseAutoSession: (sessionId: string) => void;
@@ -183,6 +194,7 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     switchSession,
     renameRemoteSession,
     manageTmuxSessionsOnOpenTransport,
+    queryTerminalSessionCatalogOnOpenTransport,
     runtimeActiveSessionId,
     runtimeRefs,
     ensureTerminalPageVisible,
@@ -523,28 +535,65 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
     }
   }, [bridgeSettings.servers, ensureTerminalPageVisible, hosts, onSessionsOpenedInPane, openDraftAsSession, pickerScopePaneId]);
 
-  const handleRemoteSessionsRefreshed = useCallback((target: BridgeTarget, sessionNames: string[]) => {
+  const handleRemoteSessionsRefreshed = useCallback((
+    target: BridgeTarget,
+    sessionNames: string[],
+    catalog?: TerminalSessionCatalog,
+  ) => {
     const normalizedSessionNames = normalizeRemoteTmuxSessionNames(sessionNames);
-    if (normalizedSessionNames.length > 0) {
-      setSessionGroupSelection({
-        name: target.daemonHostId || target.relayHostId || target.bridgeHost,
+    const baseGroup = {
+      name: target.daemonHostId || target.relayHostId || target.bridgeHost,
+      bridgeHost: target.bridgeHost,
+      bridgePort: target.bridgePort,
+      daemonHostId: target.daemonHostId || target.relayHostId,
+      authToken: target.authToken,
+      ...(target.relayEndpointCandidates?.length
+        ? { relayEndpointCandidates: target.relayEndpointCandidates }
+        : {}),
+    };
+    if (catalog?.sessionCatalog.length) {
+      const entriesByBackend = new Map<'tmux' | 'herdr', TerminalSessionCatalog['sessionCatalog']>();
+      for (const entry of catalog.sessionCatalog) {
+        if (entry.backend !== 'tmux' && entry.backend !== 'herdr') {
+          continue;
+        }
+        const entries = entriesByBackend.get(entry.backend) || [];
+        entries.push(entry);
+        entriesByBackend.set(entry.backend, entries);
+      }
+      for (const backend of ['tmux', 'herdr'] as const) {
+        const backendNames = normalizeRemoteTmuxSessionNames(
+          (entriesByBackend.get(backend) || []).map((entry) => entry.name),
+        );
+        if (backendNames.length > 0) {
+          setSessionGroupSelection({
+            ...baseGroup,
+            terminalBackend: backend,
+            sessionNames: backendNames,
+          });
+        }
+        pruneSessionGroupSelectionToRemoteTruth({
+          bridgeHost: target.bridgeHost,
+          bridgePort: target.bridgePort,
+          daemonHostId: target.daemonHostId || target.relayHostId,
+          terminalBackend: backend,
+        }, backendNames);
+      }
+    } else {
+      if (normalizedSessionNames.length > 0) {
+        setSessionGroupSelection({
+          ...baseGroup,
+          ...(target.terminalBackend === 'herdr' ? { terminalBackend: 'herdr' as const } : {}),
+          sessionNames: normalizedSessionNames,
+        });
+      }
+      pruneSessionGroupSelectionToRemoteTruth({
         bridgeHost: target.bridgeHost,
         bridgePort: target.bridgePort,
         daemonHostId: target.daemonHostId || target.relayHostId,
         ...(target.terminalBackend === 'herdr' ? { terminalBackend: 'herdr' as const } : {}),
-        authToken: target.authToken,
-        ...(target.relayEndpointCandidates?.length
-          ? { relayEndpointCandidates: target.relayEndpointCandidates }
-          : {}),
-        sessionNames: normalizedSessionNames,
-      });
+      }, normalizedSessionNames);
     }
-    pruneSessionGroupSelectionToRemoteTruth({
-      bridgeHost: target.bridgeHost,
-      bridgePort: target.bridgePort,
-      daemonHostId: target.daemonHostId || target.relayHostId,
-      ...(target.terminalBackend === 'herdr' ? { terminalBackend: 'herdr' as const } : {}),
-    }, normalizedSessionNames);
     void auditOpenTabsAgainstRemoteSessions('session-picker-refresh').catch((error) => {
       console.error('[App] Failed to audit remote session truth after session picker refresh:', error);
     });
@@ -597,6 +646,30 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
   }, [
     bridgeSettingsRef,
     manageTmuxSessionsOnOpenTransport,
+    runtimeActiveSessionId,
+    sessionsRef,
+    terminalActiveSessionIdRef,
+  ]);
+
+  const queryRemoteSessionCatalogForTarget = useCallback(async (target: BridgeTarget) => {
+    const reusableSession = resolveReusableOpenSessionForTarget(
+      sessionsRef.current,
+      target,
+      '',
+      [terminalActiveSessionIdRef.current, runtimeActiveSessionId],
+      false,
+    );
+    if (reusableSession && queryTerminalSessionCatalogOnOpenTransport) {
+      const catalog = await queryTerminalSessionCatalogOnOpenTransport(reusableSession.id, { type: 'list-sessions' });
+      if (catalog === null) {
+        throw new Error('Existing terminal transport is unavailable for session catalog refresh');
+      }
+      return catalog;
+    }
+    return fetchTmuxSessionCatalog(target, bridgeSettingsRef.current);
+  }, [
+    bridgeSettingsRef,
+    queryTerminalSessionCatalogOnOpenTransport,
     runtimeActiveSessionId,
     sessionsRef,
     terminalActiveSessionIdRef,
@@ -982,11 +1055,11 @@ export function useSessionOpenActions(options: UseSessionOpenActionsOptions): Se
       return;
     }
     const discoveryTarget = normalizeBridgeTarget({ ...target, terminalBackend: undefined });
-    const sessionNames = await manageTmuxSessionsForTarget(discoveryTarget, { type: 'list-sessions' });
-    handleRemoteSessionsRefreshed(discoveryTarget, sessionNames ?? []);
+    const catalog = await queryRemoteSessionCatalogForTarget(discoveryTarget);
+    handleRemoteSessionsRefreshed(discoveryTarget, catalog?.sessionNames ?? [], catalog ?? undefined);
   }, [
     handleRemoteSessionsRefreshed,
-    manageTmuxSessionsForTarget,
+    queryRemoteSessionCatalogForTarget,
     resolveTargetByHostKey,
   ]);
 

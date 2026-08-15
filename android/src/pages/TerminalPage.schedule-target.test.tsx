@@ -3,7 +3,10 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ScheduleJobDraft, Session, SessionScheduleState } from '../lib/types';
-import { TerminalPage } from './TerminalPage';
+import type { ComponentProps } from 'react';
+import type { TerminalQuickBarProps } from '../components/terminal/TerminalQuickBar';
+import { TerminalPage as TerminalPageBase } from './TerminalPage';
+import { renderTerminalShellUi } from '../lib/plugin-host/terminal-shell-ui-plugin';
 
 // TerminalPage reads attachment counts from SessionContext (badge/drawer).
 // These page-level tests render TerminalPage directly without the app-level
@@ -65,17 +68,21 @@ vi.mock('../components/TerminalView', () => ({
   ),
 }));
 
-vi.mock('../components/terminal/TerminalQuickBar', () => ({
-  TerminalQuickBar: ({
-    onOpenScheduleComposer,
-  }: {
-    onOpenScheduleComposer?: (text: string) => void;
-  }) => (
-    <button type="button" onClick={() => onOpenScheduleComposer?.('echo from a')}>
-      open-schedule
-    </button>
-  ),
-}));
+const renderQuickBar = (props: TerminalQuickBarProps) => (
+  <button type="button" onClick={() => props.onOpenScheduleComposer?.('echo from a')}>
+    open-schedule
+  </button>
+);
+
+function TerminalPage(props: ComponentProps<typeof TerminalPageBase>) {
+  return (
+    <TerminalPageBase
+      {...props}
+      renderQuickBar={props.renderQuickBar || renderQuickBar}
+      renderTerminalShell={props.renderTerminalShell || renderTerminalShellUi}
+    />
+  );
+}
 
 vi.mock('../components/terminal/SessionScheduleSheet', () => ({
   SessionScheduleSheet: ({

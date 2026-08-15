@@ -1,19 +1,23 @@
 import type { Host, HostConfigMessage, ServerMessage } from '../lib/types';
-import type { SessionTerminalChannelRuntime } from '../lib/session-transport-runtime';
+import type { SessionTerminalChannelRuntime } from '../lib/terminal-channel-mux-runtime';
 import {
-  clearSessionSupersededSockets,
   ensureSessionTerminalChannel,
   getOpeningSessionTerminalChannelsForTarget,
+  getSessionIdForTerminalChannel,
+  getSessionTerminalChannel,
+  updateSessionTerminalChannelName,
+  updateSessionTerminalChannelState,
+} from '../lib/terminal-channel-mux-runtime';
+import {
+  clearSessionSupersededSockets,
   listTargetTransportRuntimes,
   getTargetTransportRuntime,
   getTargetTerminalTransport,
-  getSessionIdForTerminalChannel,
   getSessionRequestedTerminalGeometry,
   getSessionTargetControlTransport,
   getSessionTargetTerminalMuxReady,
   getSessionTargetTerminalTransport,
   getSessionTargetTransportRuntime,
-  getSessionTerminalChannel,
   getSessionTransportHost,
   getSessionTransportResource,
   getSessionTransportRuntime,
@@ -28,8 +32,6 @@ import {
   setSessionRequestedTerminalGeometry,
   setSessionTargetControlTransport,
   setSessionTransportSocket,
-  updateSessionTerminalChannelName,
-  updateSessionTerminalChannelState,
   upsertSessionTransportRuntime,
   type SessionTransportRuntimeStore,
 } from '../lib/session-transport-runtime';
@@ -166,20 +168,20 @@ export function createSessionContextTransportAccessors(
     readSessionTargetControlSocket: (sessionId) => getSessionTargetControlTransport(storeRef.current, sessionId),
     readSessionTargetTerminalSocket: (sessionId) => getSessionTargetTerminalTransport(storeRef.current, sessionId),
     readSessionTargetTerminalMuxReady: (sessionId) => getSessionTargetTerminalMuxReady(storeRef.current, sessionId),
-    readSessionTerminalChannel: (sessionId) => getSessionTerminalChannel(storeRef.current, sessionId),
+    readSessionTerminalChannel: (sessionId) => getSessionTerminalChannel(storeRef.current.terminalChannels, sessionId),
     readSessionIdForTerminalChannel: (anchorSessionId, channelId) => {
       const targetKey = getSessionTransportTargetKey(storeRef.current, anchorSessionId);
-      return targetKey ? getSessionIdForTerminalChannel(storeRef.current, targetKey, channelId) : null;
+      return targetKey ? getSessionIdForTerminalChannel(storeRef.current.terminalChannels, targetKey, channelId) : null;
     },
     readTargetSessionIdForTerminalChannel: (targetKey, channelId) => (
-      getSessionIdForTerminalChannel(storeRef.current, targetKey, channelId)
+      getSessionIdForTerminalChannel(storeRef.current.terminalChannels, targetKey, channelId)
     ),
     readOpeningSessionTerminalChannelsForTarget: (anchorSessionId) => {
       const targetKey = getSessionTransportTargetKey(storeRef.current, anchorSessionId);
-      return targetKey ? getOpeningSessionTerminalChannelsForTarget(storeRef.current, targetKey, anchorSessionId) : [];
+      return targetKey ? getOpeningSessionTerminalChannelsForTarget(storeRef.current.terminalChannels, targetKey, anchorSessionId) : [];
     },
     readOpeningTerminalChannelsForTarget: (targetKey, prioritySessionId) => (
-      getOpeningSessionTerminalChannelsForTarget(storeRef.current, targetKey, prioritySessionId)
+      getOpeningSessionTerminalChannelsForTarget(storeRef.current.terminalChannels, targetKey, prioritySessionId)
     ),
     readSessionRequestedTerminalGeometry: (sessionId) => getSessionRequestedTerminalGeometry(storeRef.current, sessionId),
     writeSessionTransportHost: (sessionId, host) => upsertSessionTransportRuntime(storeRef.current, sessionId, host),
@@ -189,9 +191,9 @@ export function createSessionContextTransportAccessors(
     writeSessionTargetTerminalMuxReady: (sessionId, ready) => setSessionTargetTerminalMuxReady(storeRef.current, sessionId, ready),
     writeTargetTerminalSocket: (targetKey, socket) => setTargetTerminalTransport(storeRef.current, targetKey, socket),
     writeTargetTerminalMuxReady: (targetKey, ready) => setTargetTerminalMuxReady(storeRef.current, targetKey, ready),
-    ensureSessionTerminalChannel: (sessionId, options) => ensureSessionTerminalChannel(storeRef.current, sessionId, options),
-    writeSessionTerminalChannelName: (sessionId, sessionName) => updateSessionTerminalChannelName(storeRef.current, sessionId, sessionName),
-    writeSessionTerminalChannelState: (sessionId, state) => updateSessionTerminalChannelState(storeRef.current, sessionId, state),
+    ensureSessionTerminalChannel: (sessionId, options) => ensureSessionTerminalChannel(storeRef.current.terminalChannels, sessionId, options),
+    writeSessionTerminalChannelName: (sessionId, sessionName) => updateSessionTerminalChannelName(storeRef.current.terminalChannels, sessionId, sessionName),
+    writeSessionTerminalChannelState: (sessionId, state) => updateSessionTerminalChannelState(storeRef.current.terminalChannels, sessionId, state),
     writeSessionRequestedTerminalGeometry: (sessionId, geometry) => setSessionRequestedTerminalGeometry(storeRef.current, sessionId, geometry),
     moveSessionTransportSocketAside: (sessionId) => moveSessionTransportSocketToSuperseded(storeRef.current, sessionId),
     clearSessionTransportRuntime: (sessionId) => removeSessionTransportRuntime(storeRef.current, sessionId),

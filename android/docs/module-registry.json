@@ -1,5 +1,6 @@
 {
   "schema_version": 1,
+  "promotion_status": "pending_review",
   "description": "Project-level module registry. Resources stay the truth-store owner; modules group those resources into daemon, client, shared, relay, release, and observability ownership boundaries before function-map or runtime refactor.",
   "modules": [
     {
@@ -60,7 +61,13 @@
         "src/lib/edge-registry-truth.test.ts"
       ],
       "status": "active",
-      "owned_paths": []
+      "owned_paths": [
+        "src/server/buffer-sync-contract.ts",
+        "src/server/canonical-buffer.ts",
+        "src/server/daemon-config.ts",
+        "src/server/mirror-line-canonicalizer.ts",
+        "src/server/terminal-runtime-types.ts"
+      ]
     },
     {
       "module_id": "client.runtime",
@@ -97,6 +104,7 @@
       "owned_paths": [
         "src/components/terminal/WindowGroupLayout.tsx",
         "src/lib/app-foreground-refresh.ts",
+        "src/lib/app-version.ts",
         "src/lib/browser-storage.ts",
         "src/lib/mobile-ui.ts",
         "src/lib/page-state.ts",
@@ -107,7 +115,48 @@
         "src/lib/session-activity-notify.ts",
         "src/components/terminal/AttachmentDrawer.tsx",
         "src/components/terminal/RenameDialog.tsx",
-        "src/components/terminal/attachment-drawer-helpers.ts"
+        "src/components/terminal/attachment-drawer-helpers.ts",
+        "src/components/terminal/terminal-copy-gesture.ts",
+        "src/lib/terminal-mouse-wheel-sgr.ts",
+        "src/lib/terminal-viewport-metrics.ts"
+      ]
+    },
+    {
+      "module_id": "client.input_normalizer",
+      "runtime_side": "client",
+      "level": 1,
+      "parent_module_id": "client.runtime",
+      "owner_feature": "client.input_normalizer",
+      "responsibility": "Own Android IME/hardware/paste/quick-action committed-text normalization before terminal or remote-window input intent.",
+      "owned_resources": [
+        "resource.client_input_normalizer"
+      ],
+      "consumed_resources": [],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/lib/terminal-input-normalization.ts"
+      ],
+      "forbidden_resources": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.mirror_store"
+      ],
+      "canonical_docs": [
+        "docs/modules/project-modules.md",
+        "docs/resource-map.md",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/input-normalizer-ownership.test.ts",
+        "src/lib/terminal-input-normalization.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/lib/terminal-input-normalization.ts"
       ]
     },
     {
@@ -138,6 +187,195 @@
       ],
       "status": "active",
       "owned_paths": []
+    },
+    {
+      "module_id": "shared.plugin_contract",
+      "runtime_side": "shared",
+      "level": 1,
+      "parent_module_id": "shared.contract",
+      "owner_feature": "client.plugin_host",
+      "responsibility": "Own framework-neutral plugin manifests, capability ports, lifecycle contracts, unique capability registry, and typed UI slot registry consumed by the client plugin host.",
+      "owned_resources": [
+        "resource.plugin_capability_registry",
+        "resource.plugin_ui_slot_registry"
+      ],
+      "consumed_resources": [],
+      "pending_resources": [],
+      "public_interfaces": [
+        "packages/shared/src/terminal/plugin-contract.ts",
+        "packages/shared/src/terminal/plugin-capability-registry.ts",
+        "packages/shared/src/terminal/plugin-ui-slot.ts",
+        "packages/shared/src/terminal/plugin-ui-slot-registry.ts"
+      ],
+      "forbidden_resources": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/modules/project-modules.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "packages/shared/src/terminal/plugin-contract.ts",
+        "packages/shared/src/terminal/plugin-capability-registry.ts",
+        "packages/shared/src/terminal/plugin-ui-slot.ts",
+        "packages/shared/src/terminal/plugin-ui-slot-registry.ts"
+      ]
+    },
+    {
+      "module_id": "shared.control_contract",
+      "runtime_side": "shared",
+      "level": 1,
+      "parent_module_id": "shared.contract",
+      "owner_feature": "client.control_center",
+      "responsibility": "Own branded control command, result, correlation, deadline, idempotency, and audit contracts without terminal/file/media body truth.",
+      "owned_resources": [],
+      "consumed_resources": [],
+      "pending_resources": [],
+      "public_interfaces": [
+        "packages/shared/src/terminal/control-contract.ts"
+      ],
+      "forbidden_resources": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane",
+        "resource.file_transfer",
+        "resource.remote_window_stream",
+        "resource.client_native_file_store"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/modules/project-modules.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/control-center/client-control-center.test.ts",
+        "src/lib/control-center/client-control-center-ownership.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "packages/shared/src/terminal/control-contract.ts"
+      ]
+    },
+    {
+      "module_id": "shared.node_contract",
+      "runtime_side": "shared",
+      "level": 1,
+      "parent_module_id": "shared.contract",
+      "owner_feature": "shared.node_contract",
+      "responsibility": "Own runtime node identity, lifecycle, disposal, subscription, and adjacent typed node contracts without business state or routing policy.",
+      "owned_resources": [
+        "resource.runtime_node_registry"
+      ],
+      "consumed_resources": [],
+      "pending_resources": [],
+      "public_interfaces": [
+        "packages/shared/src/terminal/node-contract.ts"
+      ],
+      "forbidden_resources": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane",
+        "resource.file_transfer",
+        "resource.remote_window_stream",
+        "resource.client_native_file_store"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/modules/project-modules.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/shared-contract-ownership.test.ts",
+        "packages/shared/src/terminal/node-contract.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "packages/shared/src/terminal/node-contract.ts"
+      ]
+    },
+    {
+      "module_id": "shared.debug_contract",
+      "runtime_side": "shared",
+      "level": 1,
+      "parent_module_id": "shared.contract",
+      "owner_feature": "shared.debug_contract",
+      "responsibility": "Own typed debug snapshots, events, filters, sensitivity classes, bounded stores, and expiring debug permission contracts without business mutations.",
+      "owned_resources": [
+        "resource.debug_snapshot_registry"
+      ],
+      "consumed_resources": [],
+      "pending_resources": [],
+      "public_interfaces": [
+        "packages/shared/src/terminal/debug-contract.ts"
+      ],
+      "forbidden_resources": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane",
+        "resource.file_transfer",
+        "resource.remote_window_stream",
+        "resource.client_native_file_store"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/modules/project-modules.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/shared-contract-ownership.test.ts",
+        "packages/shared/src/terminal/debug-contract.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "packages/shared/src/terminal/debug-contract.ts"
+      ]
     },
     {
       "module_id": "relay.runtime",
@@ -248,7 +486,8 @@
         "resource.daemon_runtime_artifact",
         "resource.daemon_connection_gateway",
         "resource.terminal_backend",
-        "resource.debug_channel"
+        "resource.debug_channel",
+        "resource.observability_channel"
       ],
       "pending_resources": [],
       "public_interfaces": [
@@ -272,13 +511,11 @@
       ],
       "status": "active",
       "owned_paths": [
-        "src/server/daemon-config.ts",
         "src/server/launch-agent-plist.ts",
         "src/server/server.ts",
         "src/server/terminal-core-support.ts",
         "src/server/terminal-daemon-runtime.ts",
-        "src/server/terminal-http-runtime.ts",
-        "src/server/terminal-runtime-types.ts"
+        "src/server/terminal-http-runtime.ts"
       ]
     },
     {
@@ -296,6 +533,7 @@
         "resource.daemon_target_transport",
         "resource.terminal_channel",
         "resource.transport_subscriber",
+        "resource.backend_session",
         "resource.relay_peer_lease",
         "resource.relay_control_connection",
         "resource.relay_account_directory"
@@ -304,8 +542,7 @@
       "public_interfaces": [
         "src/server/daemon-connection-endpoint-runtime.ts",
         "src/server/relay-client.ts",
-        "src/server/terminal-bridge-runtime.ts",
-        "src/server/rtc-bridge.ts"
+        "src/server/terminal-bridge-runtime.ts"
       ],
       "forbidden_resources": [
         "resource.open_tab",
@@ -329,8 +566,88 @@
       "owned_paths": [
         "src/server/daemon-connection-endpoint-runtime.ts",
         "src/server/relay-client.ts",
-        "src/server/rtc-bridge.ts",
         "src/server/terminal-bridge-runtime.ts"
+      ]
+    },
+    {
+      "module_id": "daemon.source_adapter",
+      "runtime_side": "daemon",
+      "level": 1,
+      "parent_module_id": "daemon.runtime",
+      "owner_feature": "daemon.source_adapter",
+      "responsibility": "Own the terminal source adapter contract shared by tmux, Herdr, and WezTerm backends and by mirror capture readback normalization.",
+      "owned_resources": [],
+      "consumed_resources": [],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/server/terminal-source-adapter.ts"
+      ],
+      "forbidden_resources": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.mirror_store",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "canonical_docs": [
+        "docs/modules/project-modules.md",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/function-map.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/terminal-source-adapter.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/server/terminal-source-adapter.ts",
+        "src/server/terminal-source-adapter.test.ts"
+      ]
+    },
+    {
+      "module_id": "daemon.mirror_writer",
+      "runtime_side": "daemon",
+      "level": 1,
+      "parent_module_id": "daemon.runtime",
+      "owner_feature": "daemon.mirror_writer",
+      "responsibility": "Own validated terminal source snapshot capture, source-neutral canonicalization, and authoritative mirror snapshot commit writes; it never owns mirror revision truth, per-subscriber publication, backend session truth, or client policy.",
+      "owned_resources": [],
+      "consumed_resources": [
+        "resource.terminal_backend"
+      ],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/server/terminal-mirror-capture.ts"
+      ],
+      "forbidden_resources": [
+        "resource.active_session",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "canonical_docs": [
+        "docs/modules/project-modules.md",
+        "docs/resource-map.md",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/terminal-mirror-capture.test.ts",
+        "src/server/terminal-mirror-capture-continuity.test.ts",
+        "src/server/server.mirror-capture-truth.test.ts",
+        "src/server/terminal-mirror-writer-ownership.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/server/terminal-mirror-capture.ts",
+        "src/server/terminal-mirror-capture.test.ts",
+        "src/server/terminal-mirror-capture-continuity.test.ts",
+        "src/server/server.mirror-capture-truth.test.ts",
+        "src/server/terminal-mirror-writer-ownership.test.ts"
       ]
     },
     {
@@ -392,19 +709,18 @@
       "level": 1,
       "parent_module_id": "daemon.runtime",
       "owner_feature": "terminal.buffer_render",
-      "responsibility": "Own daemon canonical terminal rows, cols, cursor, revision, absolute index, capture, and reconciliation.",
+      "responsibility": "Own daemon canonical terminal rows, cols, cursor, revision, absolute index, and runtime capture scheduling; snapshot commit writes belong to daemon.mirror_writer.",
       "owned_resources": [
         "resource.mirror_store"
       ],
       "consumed_resources": [
-        "resource.tmux_session",
-        "resource.wezterm_pane",
-        "resource.transport_subscriber"
+        "resource.terminal_backend",
+        "resource.transport_subscriber",
+        "resource.daemon_buffer_publisher"
       ],
       "pending_resources": [],
       "public_interfaces": [
-        "src/server/terminal-mirror-runtime.ts",
-        "src/server/terminal-mirror-capture.ts"
+        "src/server/terminal-mirror-runtime.ts"
       ],
       "forbidden_resources": [
         "resource.active_session",
@@ -418,20 +734,233 @@
       ],
       "required_gates": [
         "src/lib/module-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/server/daemon-buffer-publisher-runtime.test.ts",
+        "src/server/terminal-mirror-runtime.test.ts",
+        "src/server/terminal-mirror-writer-ownership.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/server/mirror-geometry.ts",
+        "src/server/mirror-lifecycle.ts",
+        "src/server/terminal-mirror-runtime.ts",
+        "src/server/terminal-performance-scheduler.ts",
+        "src/server/terminal-runtime.ts"
+      ]
+    },
+    {
+      "module_id": "daemon.buffer_publisher",
+      "runtime_side": "daemon",
+      "level": 1,
+      "parent_module_id": "daemon.runtime",
+      "owner_feature": "terminal.buffer_render",
+      "responsibility": "Own per-subscriber buffer-sync pending state, range merge/collapse, backpressure hysteresis, head broadcast cache, oversized contiguous same-revision frame split, trace stages, and explicit flush statuses from daemon mirror truth to physical transport subscribers.",
+      "owned_resources": [
+        "resource.daemon_buffer_publisher"
+      ],
+      "consumed_resources": [
+        "resource.mirror_store",
+        "resource.transport_subscriber"
+      ],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/server/daemon-buffer-publisher-runtime.ts"
+      ],
+      "forbidden_resources": [
+        "resource.active_session",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "canonical_docs": [
+        "docs/modules/project-modules.md",
+        "docs/resource-map.md",
+        "docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/server/daemon-buffer-publisher-runtime.test.ts",
         "src/server/terminal-mirror-runtime.test.ts"
       ],
       "status": "active",
       "owned_paths": [
-        "src/server/buffer-sync-contract.ts",
-        "src/server/canonical-buffer.ts",
-        "src/server/mirror-geometry.ts",
-        "src/server/mirror-lifecycle.ts",
-        "src/server/mirror-line-canonicalizer.ts",
-        "src/server/terminal-mirror-capture.ts",
-        "src/server/terminal-mirror-runtime.ts",
-        "src/server/terminal-performance-scheduler.ts",
-        "src/server/terminal-runtime.ts",
+        "src/server/daemon-buffer-publisher-runtime.ts",
         "src/server/terminal-buffer-sync-wire.ts"
+      ]
+    },
+    {
+      "module_id": "daemon.channel_mux",
+      "runtime_side": "daemon",
+      "level": 1,
+      "parent_module_id": "daemon.runtime",
+      "owner_feature": "terminal.transport_lifecycle",
+      "responsibility": "Own daemon channel transport envelope creation, channel subscriber registration, connection channel registry mutations, and explicit per-channel/all-channel release.",
+      "owned_resources": [
+        "resource.daemon_channel_mux"
+      ],
+      "consumed_resources": [
+        "resource.terminal_channel",
+        "resource.transport_subscriber"
+      ],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/server/terminal-channel-mux-runtime.ts"
+      ],
+      "forbidden_resources": [
+        "resource.mirror_store",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "canonical_docs": [
+        "docs/modules/project-modules.md",
+        "docs/resource-map.md",
+        "docs/function-map.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/server/terminal-runtime.detached-session.test.ts",
+        "src/server/server.transport-lifecycle-truth.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/server/terminal-channel-mux-runtime.ts"
+      ]
+    },
+    {
+      "module_id": "daemon.control_gateway",
+      "runtime_side": "daemon",
+      "level": 1,
+      "parent_module_id": "daemon.runtime",
+      "owner_feature": "daemon.control_center",
+      "responsibility": "Own authenticated typed control ingress from terminal message dispatch and typed daemon command owner registration; it routes schedule and tmux control intents to the daemon control center without owning business truth or data bodies.",
+      "owned_resources": [
+        "resource.daemon_control_gateway"
+      ],
+      "consumed_resources": [
+        "resource.daemon_control_center",
+        "resource.daemon_session_catalog",
+        "resource.schedule_job",
+        "resource.backend_session"
+      ],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/server/daemon-control-gateway-runtime.ts"
+      ],
+      "forbidden_resources": [
+        "resource.mirror_store",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/modules/project-modules.md",
+        "docs/resource-map.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/server/daemon-control-center-runtime.test.ts",
+        "src/server/daemon-control-center-ownership.test.ts",
+        "src/server/terminal-message-runtime.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/server/daemon-control-gateway-runtime.ts"
+      ]
+    },
+    {
+      "module_id": "daemon.session_catalog",
+      "runtime_side": "daemon",
+      "level": 1,
+      "parent_module_id": "daemon.runtime",
+      "owner_feature": "daemon.session_catalog",
+      "responsibility": "Own backend session catalog construction and list-sessions control dispatch, including backend-qualified session rows, without owning client active/session state.",
+      "owned_resources": [
+        "resource.daemon_session_catalog"
+      ],
+      "consumed_resources": [
+        "resource.backend_session",
+        "resource.session_idle_facts"
+      ],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/server/daemon-session-catalog-runtime.ts"
+      ],
+      "forbidden_resources": [
+        "resource.open_tab",
+        "resource.active_session",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/modules/project-modules.md",
+        "docs/resource-map.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/server/daemon-session-catalog-runtime.test.ts",
+        "src/server/daemon-session-catalog-ownership.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/server/daemon-session-catalog-runtime.ts"
+      ]
+    },
+    {
+      "module_id": "daemon.control_center",
+      "runtime_side": "daemon",
+      "level": 1,
+      "parent_module_id": "daemon.runtime",
+      "owner_feature": "daemon.control_center",
+      "responsibility": "Own daemon control command capability gating, deadline, idempotency, correlation, unique routing, and bounded audit without owning business decisions or terminal/file/media bodies.",
+      "owned_resources": [
+        "resource.daemon_control_center"
+      ],
+      "consumed_resources": [
+        "resource.schedule_job",
+        "resource.backend_session"
+      ],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/server/daemon-control-center-runtime.ts"
+      ],
+      "forbidden_resources": [
+        "resource.mirror_store",
+        "resource.transport_subscriber",
+        "resource.file_transfer",
+        "resource.remote_window_stream",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/modules/project-modules.md",
+        "docs/resource-map.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/server/daemon-control-center-runtime.test.ts",
+        "src/server/daemon-control-center-ownership.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/server/daemon-control-center-runtime.ts"
       ]
     },
     {
@@ -440,16 +969,18 @@
       "level": 1,
       "parent_module_id": "daemon.runtime",
       "owner_feature": "terminal.transport_lifecycle",
-      "responsibility": "Own daemon physical body subscription eligibility, send accounting, backpressure, and bounded pending-latest state per terminal channel.",
+      "responsibility": "Own daemon physical body subscription eligibility, send accounting, and transport backpressure snapshots per terminal channel; bounded pending-latest publication state belongs to daemon.buffer_publisher.",
       "owned_resources": [
         "resource.transport_subscriber"
       ],
       "consumed_resources": [
         "resource.terminal_channel",
-        "resource.mirror_store"
+        "resource.mirror_store",
+        "resource.daemon_input_queue"
       ],
       "pending_resources": [],
       "public_interfaces": [
+        "src/server/rtc-bridge.ts",
         "src/server/terminal-transport-runtime.ts"
       ],
       "forbidden_resources": [
@@ -469,10 +1000,10 @@
       ],
       "status": "active",
       "owned_paths": [
+        "src/server/rtc-bridge.ts",
         "src/server/terminal-attach-token-runtime.ts",
         "src/server/terminal-message-runtime.ts",
         "src/server/terminal-mux-channel-runtime.ts",
-        "src/server/terminal-reliable-input-ack.ts",
         "src/server/terminal-transport-runtime.ts"
       ]
     },
@@ -492,8 +1023,7 @@
       ],
       "pending_resources": [],
       "public_interfaces": [
-        "src/server/terminal-message-runtime.ts",
-        "src/server/terminal-control-runtime.ts"
+        "src/server/daemon-input-queue-runtime.ts"
       ],
       "forbidden_resources": [
         "resource.renderer_window",
@@ -506,11 +1036,15 @@
       ],
       "required_gates": [
         "src/lib/module-registry-truth.test.ts",
+        "src/server/daemon-input-queue-runtime.test.ts",
         "src/server/terminal-message-runtime.test.ts",
         "src/server/terminal-control-runtime.input-queue.test.ts"
       ],
       "status": "active",
-      "owned_paths": []
+      "owned_paths": [
+        "src/server/daemon-input-queue-runtime.ts",
+        "src/server/terminal-reliable-input-ack.ts"
+      ]
     },
     {
       "module_id": "daemon.schedule_runtime",
@@ -631,6 +1165,7 @@
         "src/server/remote-screenshot.ts",
         "src/server/terminal-file-transfer-binary-runtime.ts",
         "src/server/terminal-file-transfer-list-runtime.ts",
+        "src/server/terminal-file-transfer-message-runtime.ts",
         "src/server/terminal-file-transfer-runtime.ts",
         "src/server/terminal-file-transfer-types.ts"
       ]
@@ -699,7 +1234,8 @@
       ],
       "consumed_resources": [
         "resource.renderer_window",
-        "resource.active_session"
+        "resource.active_session",
+        "resource.client_plugin_host"
       ],
       "pending_resources": [],
       "public_interfaces": [
@@ -734,21 +1270,274 @@
         "src/App.tsx",
         "src/components/terminal/SessionScheduleSheet.tsx",
         "src/components/terminal/TerminalHeader.tsx",
-        "src/components/useMirrorFixedZoomPan.ts",
-        "src/lib/terminal-mirror-fixed-pan-storage.ts",
         "src/components/terminal/pane-android-adapter.ts",
         "src/hooks/useAppPageState.ts",
         "src/hooks/useAttachmentNotifications.ts",
         "src/hooks/useScreenOrientationLock.ts",
         "src/hooks/useTerminalShellActions.ts",
         "src/hooks/useTerminalWorkspace.ts",
-        "src/lib/session-group-viewport.ts",
-        "src/lib/terminal-layout-profile.ts",
-        "src/lib/terminal-shell-skin.ts",
         "src/lib/workspace-persistence.ts",
         "src/index.css",
         "src/main.tsx",
         "src/pages/"
+      ]
+    },
+    {
+      "module_id": "client.plugin_host",
+      "runtime_side": "client",
+      "level": 1,
+      "parent_module_id": "client.runtime",
+      "owner_feature": "client.plugin_host",
+      "responsibility": "Own the client plugin host lifecycle, declared capability injection, plugin-provided capability registration, typed UI slot registry consumption, and deterministic start/stop/dispose.",
+      "owned_resources": [
+        "resource.client_plugin_host"
+      ],
+      "consumed_resources": [
+        "resource.plugin_capability_registry",
+        "resource.plugin_ui_slot_registry"
+      ],
+      "pending_resources": [],
+  "public_interfaces": [
+    "src/lib/plugin-host/plugin-host-runtime.ts",
+    "src/lib/plugin-host/network-identity-capability-plugin.ts",
+    "src/lib/plugin-host/plugin-host-control-node.ts"
+      ],
+      "forbidden_resources": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/modules/project-modules.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+    "src/lib/module-import-graph-truth.test.ts",
+    "src/lib/plugin-host/plugin-host-runtime.test.ts",
+    "src/lib/plugin-host/plugin-host-control-node.test.ts"
+  ],
+      "status": "active",
+      "owned_paths": [
+        "src/lib/plugin-host/"
+      ]
+    },
+    {
+      "module_id": "client.debug_console",
+      "runtime_side": "client",
+      "level": 1,
+      "parent_module_id": "client.runtime",
+      "owner_feature": "client.debug_console",
+      "responsibility": "Own the typed debug console UI contract, terminal debug session projection, and TerminalPage debug overlay slot renderer consumed through the plugin host UI slot registry.",
+      "owned_resources": [
+        "resource.debug_console_ui_contract"
+      ],
+      "consumed_resources": [
+        "resource.shared_terminal_types"
+      ],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/lib/plugin-debug-console/debug-console-contract.ts",
+        "src/pages/TerminalPageDebugOverlay.tsx"
+      ],
+      "forbidden_resources": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/modules/project-modules.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/pages/TerminalPageDebugOverlay.test.tsx",
+        "src/pages/TerminalPage.render-scope.test.tsx",
+        "src/pages/TerminalPage.remote-window-overlay.test.tsx"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/lib/plugin-debug-console/",
+        "src/pages/TerminalPageDebugOverlay.tsx"
+      ]
+    },
+    {
+      "module_id": "client.session_drawer_ui",
+      "runtime_side": "client",
+      "level": 1,
+      "parent_module_id": "client.runtime",
+      "owner_feature": "client.session_drawer_ui",
+      "responsibility": "Own the typed session drawer UI slot contract consumed through the plugin host UI slot registry; it never owns drawer preview selection, preview mode, renderer, transport, or backend projection truth.",
+      "owned_resources": [
+        "resource.session_drawer_ui_contract"
+      ],
+      "consumed_resources": [],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/lib/plugin-session-drawer/session-drawer-contract.ts"
+      ],
+      "forbidden_resources": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/modules/project-modules.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/pages/TerminalPage.session-drawer.test.tsx",
+        "src/pages/TerminalPage.session-preview.test.tsx",
+        "src/pages/TerminalPage.tab-isolation.test.tsx"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/lib/plugin-session-drawer/"
+      ]
+    },
+    {
+      "module_id": "client.composition_root",
+      "runtime_side": "client",
+      "level": 1,
+      "parent_module_id": "client.runtime",
+      "owner_feature": "client.composition_root",
+      "responsibility": "Own declared client runtime port binding, validation, and resolution used by App composition; it never owns transport, session, buffer, renderer, plugin implementation, or business truth.",
+      "owned_resources": [
+        "resource.client_composition_root"
+      ],
+      "consumed_resources": [
+        "resource.client_plugin_host"
+      ],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/lib/composition-root/client-composition-root.ts"
+      ],
+      "forbidden_resources": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/modules/project-modules.md",
+        "docs/resource-map.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/composition-root/client-composition-root.test.ts",
+        "src/lib/composition-root/client-composition-root-ownership.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/lib/composition-root/"
+      ]
+    },
+    {
+      "module_id": "client.control_center",
+      "runtime_side": "client",
+      "level": 1,
+      "parent_module_id": "client.runtime",
+      "owner_feature": "client.control_center",
+      "responsibility": "Own client control command authorization, capability gating, deadline, idempotency, correlation, unique routing, and bounded audit; it never owns business truth or data bodies.",
+      "owned_resources": [
+        "resource.client_control_center"
+      ],
+      "consumed_resources": [
+        "resource.client_plugin_host"
+      ],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/lib/control-center/client-control-center.ts"
+      ],
+      "forbidden_resources": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_buffer_frame_assembly",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane",
+        "resource.file_transfer",
+        "resource.remote_window_stream",
+        "resource.client_native_file_store"
+      ],
+      "canonical_docs": [
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/modules/project-modules.md",
+        "docs/resource-map.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/control-center/client-control-center.test.ts",
+        "src/lib/control-center/client-control-center-ownership.test.ts",
+        "src/lib/plugin-host/plugin-host-control-node.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/lib/control-center/"
       ]
     },
     {
@@ -764,7 +1553,9 @@
       ],
       "pending_resources": [],
       "public_interfaces": [
-        "packages/shared/src/react/pane-profile.ts"
+        "packages/shared/src/react/pane-profile.ts",
+        "src/lib/session-group-viewport.ts",
+        "src/lib/terminal-layout-profile.ts"
       ],
       "forbidden_resources": [
         "resource.tmux_session",
@@ -782,7 +1573,9 @@
       ],
       "status": "active",
       "owned_paths": [
-        "packages/shared/src/react/pane-profile.ts"
+        "packages/shared/src/react/pane-profile.ts",
+        "src/lib/session-group-viewport.ts",
+        "src/lib/terminal-layout-profile.ts"
       ]
     },
     {
@@ -801,7 +1594,8 @@
         "resource.relay_control_connection",
         "resource.ui_projection",
         "resource.relay_account_directory",
-        "resource.route_policy"
+        "resource.route_policy",
+        "resource.daemon_target_transport"
       ],
       "pending_resources": [],
       "public_interfaces": [
@@ -846,6 +1640,9 @@
         "src/lib/relay-account-directory.ts",
         "src/lib/relay-device-stream-runtime.ts",
         "src/lib/relay-host-recent-connection.ts",
+        "src/lib/session-picker.ts",
+        "src/lib/tmux-session-list.ts",
+        "src/lib/tmux-sessions.ts",
         "src/lib/traversal-relay-client.ts",
         "src/lib/traversal-relay-devices.ts",
         "src/lib/traversal-relay-diagnostics.ts",
@@ -859,7 +1656,7 @@
       "level": 1,
       "parent_module_id": "client.runtime",
       "owner_feature": "terminal.transport_lifecycle",
-      "responsibility": "Own one client physical connection per daemon target, route health, open intent, and transport reuse. Application features use this interface instead of opening sockets.",
+      "responsibility": "Own one client physical connection per daemon target, route health, open intent, and transport reuse. Application features use this interface instead of opening sockets; per-session channel identity is consumed from client.terminal_channel_mux.",
       "owned_resources": [
         "resource.session_transport",
         "resource.daemon_target_transport",
@@ -877,7 +1674,7 @@
       "pending_resources": [],
       "public_interfaces": [
         "src/lib/session-transport-runtime.ts",
-        "src/contexts/session-context-transport-open-runtime.ts",
+        "src/contexts/session-context-open-intent-store.ts",
         "src/lib/traversal/socket.ts",
         "src/lib/network-identity.ts"
       ],
@@ -902,18 +1699,14 @@
       ],
       "status": "active",
       "owned_paths": [
-        "src/contexts/session-context-socket-message-runtime.ts",
-        "src/contexts/session-context-socket-runtime.ts",
+        "src/contexts/session-context-open-intent-store.ts",
         "src/contexts/session-context-target-network-probe-runtime.ts",
         "src/contexts/session-context-transport-lifecycle-runtime.ts",
-        "src/contexts/session-context-transport-open-runtime.ts",
-        "src/contexts/session-context-transport-orchestration-runtime.ts",
         "src/contexts/session-context-transport-runtime.ts",
         "src/contexts/session-context-transport-wire-runtime.ts",
         "src/contexts/session-transport-open-helpers.ts",
         "src/contexts/session-wire-helpers.ts",
         "src/hooks/useWebSocket.ts",
-        "src/lib/client-control-plane-transport.ts",
         "src/lib/client-daemon-connection.ts",
         "src/lib/network-identity.ts",
         "src/lib/session-heartbeat-store.ts",
@@ -939,8 +1732,11 @@
       ],
       "pending_resources": [],
       "public_interfaces": [
+        "src/contexts/SessionContext.tsx",
         "src/hooks/useOpenTabRuntime.ts",
-        "src/lib/open-tab-intent.ts"
+        "src/lib/open-tab-intent.ts",
+        "src/contexts/session-context-transport-open-runtime.ts",
+        "src/contexts/session-context-transport-orchestration-runtime.ts"
       ],
       "forbidden_resources": [
         "resource.tmux_session",
@@ -967,7 +1763,6 @@
         "src/contexts/session-context-interaction-runtime.ts",
         "src/contexts/session-context-lifecycle.ts",
         "src/contexts/session-context-message-assemblies.ts",
-        "src/contexts/session-context-open-intent-store.ts",
         "src/contexts/session-context-provider-assemblies.ts",
         "src/contexts/session-context-provider-assembly-types.ts",
         "src/contexts/session-context-provider-core-assemblies.ts",
@@ -975,9 +1770,14 @@
         "src/contexts/session-context-provider-runtime.ts",
         "src/contexts/session-context-public-facade-runtime.ts",
         "src/contexts/session-context-public-runtime.ts",
+        "src/contexts/session-context-socket-message-runtime.ts",
+        "src/contexts/session-context-socket-runtime.ts",
         "src/contexts/session-context-session-orchestration-runtime.ts",
         "src/contexts/session-context-session-runtime.ts",
         "src/contexts/session-context-tmux-management-runtime.ts",
+        "src/contexts/session-context-transport-open-runtime.ts",
+        "src/contexts/session-context-transport-orchestration-runtime.ts",
+        "src/lib/client-control-plane-transport.ts",
         "src/lib/session-reconnect-helpers.ts",
         "src/hooks/useOpenTabLifecycleEffects.ts",
         "src/hooks/useOpenTabRestoreRuntimeSync.ts",
@@ -992,11 +1792,8 @@
         "src/lib/open-tab-restore.ts",
         "src/lib/open-tab-runtime-switch.ts",
         "src/lib/remote-tab-audit.ts",
-        "src/lib/session-picker.ts",
         "src/lib/session-runtime-cadence.ts",
         "src/lib/session-semantic-identity.ts",
-        "src/lib/tmux-session-list.ts",
-        "src/lib/tmux-sessions.ts",
         "src/lib/reconnect-host-fallback.ts",
         "src/lib/reconnect-host-probe.ts",
         "src/lib/session-open-helpers.ts"
@@ -1008,7 +1805,7 @@
       "level": 1,
       "parent_module_id": "client.runtime",
       "owner_feature": "terminal.transport_lifecycle",
-      "responsibility": "Own per-session terminal-channel identity over the daemon-target physical transport.",
+      "responsibility": "Own per-session terminal-channel identity over the daemon-target physical transport, including channel open/close state, target-scoped demux, and body-subscription intent.",
       "owned_resources": [
         "resource.terminal_channel",
         "resource.terminal_body_subscription"
@@ -1020,7 +1817,7 @@
       ],
       "pending_resources": [],
       "public_interfaces": [
-        "src/lib/session-transport-runtime.ts",
+        "src/lib/terminal-channel-mux-runtime.ts",
         "packages/shared/src/connection/protocol.ts"
       ],
       "forbidden_resources": [
@@ -1035,10 +1832,129 @@
       ],
       "required_gates": [
         "src/lib/module-registry-truth.test.ts",
-        "src/lib/session-transport-runtime.test.ts"
+        "src/lib/session-transport-runtime.test.ts",
+        "src/lib/terminal-channel-mux-runtime.test.ts"
       ],
       "status": "active",
-      "owned_paths": []
+      "owned_paths": [
+        "src/lib/terminal-channel-mux-runtime.ts"
+      ]
+    },
+    {
+      "module_id": "client.buffer_frame_assembly",
+      "runtime_side": "client",
+      "level": 1,
+      "parent_module_id": "client.runtime",
+      "owner_feature": "terminal.buffer_render",
+      "responsibility": "Own bounded authoritative frame assembly, explicit frame rejection truth, exact repair range, and one dispatched repair per retained revision.",
+      "owned_resources": [
+        "resource.client_buffer_frame_assembly"
+      ],
+      "consumed_resources": [
+        "resource.mirror_store",
+        "resource.client_sparse_buffer"
+      ],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/lib/buffer-frame-assembly/session-buffer-frame-assembly.ts"
+      ],
+      "forbidden_resources": [
+        "resource.tmux_session",
+        "resource.wezterm_pane",
+        "resource.backend_session",
+        "resource.transport_subscriber",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "canonical_docs": [
+        "docs/modules/project-modules.md",
+        "docs/resource-map.md",
+        "docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/buffer-frame-assembly/session-buffer-frame-assembly.test.ts",
+        "src/contexts/session-context-buffer-runtime.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/lib/buffer-frame-assembly/session-buffer-frame-assembly-state.ts",
+        "src/lib/buffer-frame-assembly/session-buffer-frame-assembly.ts"
+      ]
+    },
+    {
+      "module_id": "client.wire_ingress",
+      "runtime_side": "client",
+      "level": 1,
+      "parent_module_id": "client.runtime",
+      "owner_feature": "terminal.buffer_render",
+      "responsibility": "Own validated client wire ingress normalization and frame identity decoding before frame assembly.",
+      "owned_resources": [],
+      "consumed_resources": [
+        "resource.shared_terminal_types"
+      ],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/lib/wire-ingress/buffer-wire-normalize.ts"
+      ],
+      "forbidden_resources": [
+        "resource.transport_subscriber",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "canonical_docs": [
+        "docs/modules/project-modules.md",
+        "docs/resource-map.md",
+        "docs/function-map.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/wire-ingress/buffer-wire-normalize.test.ts",
+        "src/contexts/session-context-buffer-runtime.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/lib/wire-ingress/buffer-wire-normalize.ts"
+      ]
+    },
+    {
+      "module_id": "client.sparse_buffer",
+      "runtime_side": "client",
+      "level": 1,
+      "parent_module_id": "client.runtime",
+      "owner_feature": "terminal.buffer_render",
+      "responsibility": "Own absolute-row local terminal truth and committed immutable sparse snapshots; no follow/reading/render bottom.",
+      "owned_resources": [
+        "resource.client_sparse_buffer"
+      ],
+      "consumed_resources": [
+        "resource.shared_terminal_types"
+      ],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/lib/session-buffer-store.ts"
+      ],
+      "forbidden_resources": [
+        "resource.tmux_session",
+        "resource.transport_subscriber",
+        "resource.renderer_window",
+        "resource.ui_projection"
+      ],
+      "canonical_docs": [
+        "docs/modules/project-modules.md",
+        "docs/resource-map.md",
+        "docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/session-buffer-store.test.ts",
+        "src/contexts/session-context-buffer-runtime.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/lib/session-buffer-store.ts"
+      ]
     },
     {
       "module_id": "client.buffer_store",
@@ -1046,20 +1962,16 @@
       "level": 1,
       "parent_module_id": "client.runtime",
       "owner_feature": "terminal.buffer_render",
-      "responsibility": "Own bounded authoritative frame assembly, local sparse buffer apply by absolute row, and visible-range gap repair planning.",
-      "owned_resources": [
-        "resource.client_buffer_frame_assembly",
-        "resource.client_sparse_buffer"
-      ],
+      "responsibility": "Own client buffer orchestration: planner/pull/repair runtime and head/tail refresh truth; consumes sparse body truth without owning it.",
+      "owned_resources": [],
       "consumed_resources": [
         "resource.mirror_store",
+        "resource.client_sparse_buffer",
         "resource.renderer_window"
       ],
       "pending_resources": [],
       "public_interfaces": [
-        "src/contexts/session-buffer-frame-assembly.ts",
-        "src/contexts/session-context-buffer-runtime.ts",
-        "src/lib/session-render-buffer-store.ts"
+        "src/contexts/session-context-buffer-runtime.ts"
       ],
       "forbidden_resources": [
         "resource.tmux_session",
@@ -1073,22 +1985,17 @@
       ],
       "required_gates": [
         "src/lib/module-registry-truth.test.ts",
-        "src/contexts/session-buffer-frame-assembly.test.ts",
         "src/contexts/session-context-buffer-runtime.test.ts",
         "src/components/TerminalView.dynamic-refresh.test.tsx"
       ],
       "status": "active",
       "owned_paths": [
-        "src/contexts/session-buffer-frame-assembly-state.ts",
-        "src/contexts/session-buffer-frame-assembly.ts",
         "src/contexts/session-buffer-planner-helpers.ts",
         "src/contexts/session-context-buffer-runtime.ts",
         "src/contexts/session-context-pull-runtime.ts",
         "src/lib/session-pull-state-helpers.ts",
         "src/contexts/session-visible-range-helpers.ts",
-        "src/lib/session-buffer-store.ts",
         "src/lib/session-head-store.ts",
-        "src/lib/session-render-buffer-store.ts",
         "src/lib/session-tail-refresh-store.ts"
       ]
     },
@@ -1098,7 +2005,7 @@
       "level": 1,
       "parent_module_id": "client.runtime",
       "owner_feature": "terminal.buffer_render",
-      "responsibility": "Own renderer visible range, follow/reading/renderBottomIndex, next-RAF commit, fixed-width crop, and DOM projection handoff.",
+      "responsibility": "Own renderer visible range, follow/reading/renderBottomIndex, immutable render snapshot projection, next-RAF commit, and fixed-width crop; DOM projection handoff belongs to client.dom_renderer.",
       "owned_resources": [
         "resource.renderer_window"
       ],
@@ -1108,8 +2015,8 @@
       ],
       "pending_resources": [],
       "public_interfaces": [
-        "src/components/TerminalView.tsx",
-        "src/lib/session-render-gate.ts"
+        "src/lib/session-render-gate.ts",
+        "src/lib/session-render-buffer-store.ts"
       ],
       "forbidden_resources": [
         "resource.tmux_session",
@@ -1124,6 +2031,57 @@
       "required_gates": [
         "src/lib/module-registry-truth.test.ts",
         "src/lib/terminal-follow-scroll-runtime.test.ts",
+        "src/lib/session-render-buffer-store.test.ts",
+        "src/components/TerminalView.dynamic-refresh.test.tsx"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/lib/default-terminal-viewport.ts",
+        "src/lib/session-render-gate.ts",
+        "src/lib/session-render-buffer-store.ts",
+        "src/lib/session-preview-gesture.ts",
+        "src/lib/session-viewport-mode-store.ts",
+        "src/lib/terminal-follow-scroll-runtime.ts",
+        "src/lib/terminal-follow-scroll-runtime.test.ts",
+        "src/lib/terminal-width-mode-manager.ts",
+        "src/lib/terminal-mouse-wheel-sgr.test.ts",
+        "src/lib/two-finger-wheel-decision.ts",
+        "src/lib/two-finger-wheel-decision.test.ts",
+        "src/lib/two-finger-wheel-debug-store.ts"
+      ]
+    },
+    {
+      "module_id": "client.dom_renderer",
+      "runtime_side": "client",
+      "level": 2,
+      "parent_module_id": "client.renderer_window",
+      "owner_feature": "terminal.buffer_render",
+      "responsibility": "Own immutable render snapshot to DOM projection: TerminalView, visible/preview row nodes, visual scale layer, and shared cell render helpers; never owns follow/reading/renderBottomIndex or request policy.",
+      "owned_resources": [],
+      "consumed_resources": [
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.shared_terminal_types"
+      ],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/components/TerminalView.tsx",
+        "packages/shared/src/terminal/cell-render.ts"
+      ],
+      "forbidden_resources": [
+        "resource.tmux_session",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer"
+      ],
+      "canonical_docs": [
+        "docs/modules/project-modules.md",
+        "docs/architecture.md",
+        "docs/decisions/2026-04-23-terminal-head-buffer-render-truth.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
         "src/components/TerminalView.dynamic-refresh.test.tsx"
       ],
       "status": "active",
@@ -1133,18 +2091,64 @@
         "packages/shared/src/terminal/theme.ts",
         "src/components/TerminalView.tsx",
         "src/components/terminal/VisibleRow.tsx",
-        "src/lib/default-terminal-viewport.ts",
-        "src/lib/session-render-gate.ts",
-        "src/lib/session-viewport-mode-store.ts",
-        "src/lib/terminal-follow-scroll-runtime.ts",
-        "src/lib/terminal-follow-scroll-runtime.test.ts",
-        "src/lib/terminal-viewport-metrics.ts",
-        "src/lib/terminal-width-mode-manager.ts",
-        "src/lib/terminal-mouse-wheel-sgr.ts",
-        "src/lib/terminal-mouse-wheel-sgr.test.ts",
-        "src/lib/two-finger-wheel-decision.ts",
-        "src/lib/two-finger-wheel-decision.test.ts",
-        "src/lib/two-finger-wheel-debug-store.ts"
+        "src/components/terminal/TerminalPreviewRow.tsx",
+        "src/components/useMirrorFixedZoomPan.ts",
+        "src/lib/terminal-mirror-fixed-pan-storage.ts"
+      ]
+    },
+    {
+      "module_id": "client.terminal_shell",
+      "runtime_side": "client",
+      "level": 2,
+      "parent_module_id": "client.app_shell",
+      "owner_feature": "mainline_source.android",
+      "responsibility": "Own Android terminal stage shell, shell skin, stage status projection, shell action routing, keyboard lift, and terminal shell UI primitives; it consumes renderer/DOM projections and emits user intent only.",
+      "owned_resources": [],
+      "consumed_resources": [
+        "resource.platform_terminal_surface",
+        "resource.ui_projection",
+        "resource.renderer_window",
+        "resource.active_session"
+      ],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/pages/TerminalPageStageShell.tsx",
+        "src/lib/terminal-shell-skin.ts"
+      ],
+      "forbidden_resources": [
+        "resource.tmux_session",
+        "resource.mirror_store",
+        "resource.daemon_input_queue",
+        "resource.client_sparse_buffer"
+      ],
+      "canonical_docs": [
+        "docs/modules/project-modules.md",
+        "docs/architecture.md",
+        "docs/testing/terminal-shell-theme-test-design.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/terminal-shell-skin.test.ts",
+        "src/pages/TerminalPageStageShell.pane-stage.test.tsx",
+        "src/pages/useTerminalPageShellActionsRuntime.test.tsx"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/pages/TerminalPageStageShell.tsx",
+        "src/pages/terminal-page-shell-ui.tsx",
+        "src/pages/useTerminalPageShellActionsRuntime.ts",
+        "src/pages/useTerminalPageCopyRuntime.ts",
+        "src/pages/terminal-copy-selection.ts",
+        "src/pages/terminal-page-quickbar-adapters.ts",
+        "src/pages/TerminalConnectionStatusStrip.tsx",
+        "src/pages/terminal-page-status-helpers.ts",
+        "src/pages/terminal-page-render-keys.ts",
+        "src/pages/terminal-page-debug-helpers.ts",
+        "src/pages/terminal-keyboard-lift.ts",
+        "src/pages/TerminalPageQuickBarAssembly.tsx",
+        "src/pages/TerminalPageCopyMenu.tsx",
+        "src/lib/terminal-shell-skin.ts"
       ]
     },
     {
@@ -1184,7 +2188,6 @@
       "status": "active",
       "owned_paths": [
         "src/components/terminal/TerminalQuickBar.tsx",
-        "src/components/terminal/terminal-copy-gesture.ts",
         "src/components/terminal/terminal-quickbar-helpers.tsx",
         "src/components/terminal/terminal-quickbar-shell-guards.ts",
         "src/hooks/useQuickActionStorage.ts",
@@ -1192,7 +2195,6 @@
         "src/hooks/useShortcutActionStorage.ts",
         "src/hooks/useShortcutFrequencyStorage.ts",
         "src/lib/key-sequence.ts",
-        "src/lib/terminal-input-normalization.ts",
         "src/plugins/ScreenOrientationPlugin.ts",
         "src/lib/terminal-quickbar-logic.ts",
         "src/lib/terminal-quickbar-storage.ts"
@@ -1215,7 +2217,8 @@
       ],
       "pending_resources": [],
       "public_interfaces": [
-        "src/contexts/session-context-input-runtime.ts"
+        "src/contexts/session-context-input-runtime.ts",
+        "src/lib/reliable-input/reliable-input-queue.ts"
       ],
       "forbidden_resources": [
         "resource.tmux_session",
@@ -1230,11 +2233,14 @@
       ],
       "required_gates": [
         "src/lib/module-registry-truth.test.ts",
-        "src/contexts/session-context-input-runtime.test.ts"
+        "src/contexts/session-context-input-runtime.test.ts",
+        "src/lib/reliable-input/reliable-input-ownership.test.ts",
+        "src/lib/reliable-input/reliable-input-queue.test.ts"
       ],
       "status": "active",
       "owned_paths": [
-        "src/contexts/session-context-input-runtime.ts"
+        "src/contexts/session-context-input-runtime.ts",
+        "src/lib/reliable-input/reliable-input-queue.ts"
       ]
     },
     {
@@ -1281,7 +2287,6 @@
         "src/components/terminal/TerminalPreviewGrid.tsx",
         "src/components/terminal/TerminalSessionDrawer.tsx",
         "src/components/terminal/TerminalTabSwipeSurface.tsx",
-        "src/lib/session-preview-gesture.ts",
         "src/lib/session-preview-selection.ts",
         "src/lib/terminal-drawer-remote-missing.ts",
         "src/lib/terminal-tab-swipe-gesture.ts",
@@ -1354,9 +2359,10 @@
       "level": 1,
       "parent_module_id": "client.runtime",
       "owner_feature": "daemon.file_transfer",
-      "responsibility": "Client file browsing, preview, selection, upload/download projection, and file-transfer intent boundary.",
+      "responsibility": "Client file browsing, preview, selection, upload/download projection, file-transfer intent boundary, and the typed file browser UI slot contract rendered only through the plugin host.",
       "owned_resources": [
-        "resource.client_file_browser"
+        "resource.client_file_browser",
+        "resource.file_browser_ui_contract"
       ],
       "consumed_resources": [
         "resource.file_transfer",
@@ -1368,7 +2374,8 @@
       "public_interfaces": [
         "src/components/terminal/FileTransferSheet.tsx",
         "src/lib/file-transfer-session-runtime.ts",
-        "src/lib/file-transfer-message-runtime.ts"
+        "src/lib/file-transfer-message-runtime.ts",
+        "src/lib/plugin-file-browser/file-browser-contract.ts"
       ],
       "forbidden_resources": [
         "resource.tmux_session",
@@ -1377,14 +2384,23 @@
       "canonical_docs": [
         "docs/modules/project-modules.md",
         "docs/function-map.md",
-        "docs/testing/file-transfer-test-design.md"
+        "docs/testing/file-transfer-test-design.md",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/architecture.md",
+        "docs/feature-gates.md"
       ],
       "required_gates": [
         "src/lib/module-registry-truth.test.ts",
         "scripts/run-file-transfer-throughput-gate.sh",
         "src/lib/file-transfer-throughput-contract.test.ts",
         "src/server/server.file-transfer-truth.test.ts",
-        "src/components/terminal/FileTransferSheet.test.tsx"
+        "src/components/terminal/FileTransferSheet.test.tsx",
+        "src/lib/plugin-file-browser/file-browser-ui-ownership.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/pages/TerminalPage.render-isolation.test.tsx",
+        "src/App.dynamic-refresh.test.tsx"
       ],
       "status": "active",
       "owned_paths": [
@@ -1399,7 +2415,8 @@
         "src/lib/remote-screenshot-runtime.ts",
         "src/lib/file-transfer-local-edit-copy-storage.ts",
         "src/lib/file-transfer-sheet-helpers.ts",
-        "src/lib/file-transfer-sheet-constants.ts"
+        "src/lib/file-transfer-sheet-constants.ts",
+        "src/lib/plugin-file-browser/"
       ]
     },
     {
@@ -1408,9 +2425,10 @@
       "level": 1,
       "parent_module_id": "client.runtime",
       "owner_feature": "settings.config_transfer",
-      "responsibility": "Settings projection for server profiles, config transfer, app update route candidates, and release/update install intent.",
+      "responsibility": "Settings projection for server profiles, config transfer, app update route candidates, release/update install intent, and the typed settings update UI slot contract rendered only through the plugin host.",
       "owned_resources": [
-        "resource.client_settings_update"
+        "resource.client_settings_update",
+        "resource.settings_update_ui_contract"
       ],
       "consumed_resources": [
         "resource.release_update_artifact",
@@ -1421,7 +2439,8 @@
       "public_interfaces": [
         "src/pages/SettingsPage.tsx",
         "src/hooks/useAppUpdate.ts",
-        "src/lib/app-update-runtime.ts"
+        "src/lib/app-update-runtime.ts",
+        "src/lib/plugin-settings-update/settings-update-contract.ts"
       ],
       "forbidden_resources": [
         "resource.open_tab",
@@ -1430,13 +2449,20 @@
       ],
       "canonical_docs": [
         "docs/modules/project-modules.md",
-        "docs/testing/config-transfer-test-design.md"
+        "docs/testing/config-transfer-test-design.md",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md"
       ],
       "required_gates": [
         "src/lib/module-registry-truth.test.ts",
-        "src/hooks/useAppUpdate.test.tsx"
+        "src/hooks/useAppUpdate.test.tsx",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/plugin-settings-update/settings-update-ui-ownership.test.ts",
+        "src/pages/SettingsPage.plugin-render.test.tsx",
+        "src/App.dynamic-refresh.test.tsx"
       ],
-      "status": "design",
+      "status": "active",
       "owned_paths": [
         "src/components/settings/",
         "src/hooks/useAppUpdate.ts",
@@ -1444,8 +2470,165 @@
         "src/lib/app-update-relay-manifest.ts",
         "src/lib/app-update-runtime.ts",
         "src/lib/app-update.ts",
-        "src/lib/app-version.ts",
-        "src/lib/config-export.ts"
+        "src/lib/config-export.ts",
+        "src/lib/plugin-settings-update/"
+      ]
+    },
+    {
+      "module_id": "client.remote_window_ui",
+      "runtime_side": "client",
+      "level": 1,
+      "parent_module_id": "client.runtime",
+      "owner_feature": "client.remote_window_ui",
+      "responsibility": "Own the typed remote window UI slot contract consumed through the plugin host UI slot registry; it never owns remote-window transport, media, capture, touch dispatch, or overlay projection truth.",
+      "owned_resources": [
+        "resource.remote_window_ui_contract"
+      ],
+      "consumed_resources": [
+        "resource.remote_window_overlay"
+      ],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/lib/plugin-remote-window/remote-window-contract.ts"
+      ],
+      "forbidden_resources": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane",
+        "resource.remote_window_stream"
+      ],
+      "canonical_docs": [
+        "docs/modules/project-modules.md",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/feature-gates.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/plugin-remote-window/remote-window-ui-ownership.test.ts",
+        "src/pages/TerminalPage.remote-window-overlay.test.tsx",
+        "src/pages/TerminalPage.android-ime.test.tsx",
+        "src/App.dynamic-refresh.test.tsx"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/lib/plugin-remote-window/"
+      ]
+    },
+    {
+      "module_id": "client.quickbar_ui",
+      "runtime_side": "client",
+      "level": 1,
+      "parent_module_id": "client.runtime",
+      "owner_feature": "client.quickbar_ui",
+      "responsibility": "Own the typed quickbar UI slot contract consumed through the plugin host UI slot registry; it never owns input normalization, transport, session, mirror, sparse, renderer, or UI projection truth.",
+      "owned_resources": [
+        "resource.quickbar_ui_contract"
+      ],
+      "consumed_resources": [
+        "resource.platform_input_channel"
+      ],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/lib/plugin-quickbar/quickbar-contract.ts"
+      ],
+      "forbidden_resources": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.ui_projection",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "canonical_docs": [
+        "docs/modules/project-modules.md",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/feature-gates.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/plugin-quickbar/quickbar-ui-ownership.test.ts",
+        "src/pages/TerminalPage.render-isolation.test.tsx",
+        "src/App.dynamic-refresh.test.tsx"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/lib/plugin-quickbar/"
+      ]
+    },
+    {
+      "module_id": "client.terminal_shell_ui",
+      "runtime_side": "client",
+      "level": 1,
+      "parent_module_id": "client.runtime",
+      "owner_feature": "client.terminal_shell_ui",
+      "responsibility": "Own the typed terminal shell UI slot contract consumed through the plugin host UI slot registry; it never owns transport, session, mirror, sparse, renderer, terminal body, or input normalization truth.",
+      "owned_resources": [
+        "resource.terminal_shell_ui_contract"
+      ],
+      "consumed_resources": [
+        "resource.ui_projection"
+      ],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/lib/plugin-terminal-shell/terminal-shell-contract.ts"
+      ],
+      "forbidden_resources": [
+        "resource.session_transport",
+        "resource.daemon_target_transport",
+        "resource.terminal_channel",
+        "resource.transport_subscriber",
+        "resource.mirror_store",
+        "resource.client_sparse_buffer",
+        "resource.renderer_window",
+        "resource.backend_session",
+        "resource.tmux_session",
+        "resource.wezterm_pane"
+      ],
+      "canonical_docs": [
+        "docs/modules/project-modules.md",
+        "docs/design/2026-08-14-zterm-runtime-architecture-v2.md",
+        "docs/goals/zterm-runtime-architecture-v2-plan.md",
+        "docs/testing/zterm-runtime-architecture-v2-test-design.md",
+        "docs/feature-gates.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/module-import-graph-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts",
+        "src/lib/edge-registry-truth.test.ts",
+        "src/lib/plugin-host/plugin-host-runtime.test.ts",
+        "src/lib/plugin-terminal-shell/terminal-shell-ui-ownership.test.ts",
+        "src/pages/TerminalPage.render-isolation.test.tsx",
+        "src/App.dynamic-refresh.test.tsx"
+      ],
+      "status": "active",
+      "owned_paths": [
+        "src/lib/plugin-terminal-shell/"
       ]
     },
     {
@@ -1843,15 +3026,21 @@
       "owner_feature": "daemon.cli_node",
       "responsibility": "Own metadata-only diagnostics, runtime debug snapshots, trace summaries, and local evidence readers.",
       "owned_resources": [
-        "resource.debug_channel"
+        "resource.debug_channel",
+        "resource.observability_channel"
       ],
       "consumed_resources": [
-        "resource.daemon_process"
+        "resource.daemon_process",
+        "resource.runtime_node_registry",
+        "resource.debug_snapshot_registry",
+        "resource.client_debug_hub",
+        "resource.daemon_debug_hub"
       ],
       "pending_resources": [],
       "public_interfaces": [
         "src/server/terminal-debug-runtime.ts",
-        "src/lib/terminal-performance-trace.ts"
+        "src/lib/terminal-performance-trace.ts",
+        "src/lib/runtime-debug-http-exporter.ts"
       ],
       "forbidden_resources": [
         "resource.open_tab",
@@ -1867,7 +3056,10 @@
       ],
       "required_gates": [
         "src/lib/module-registry-truth.test.ts",
-        "src/lib/terminal-performance-trace.test.ts"
+        "src/lib/terminal-performance-trace.test.ts",
+        "src/lib/runtime-debug-http-exporter.test.ts",
+        "src/server/terminal-debug-runtime.test.ts",
+        "src/server/terminal-http-runtime.debug-observability.test.ts"
       ],
       "status": "active",
       "owned_paths": [
@@ -1879,7 +3071,7 @@
         "src/lib/android-apk-smoke-runtime-verifier.ts",
         "src/lib/android-apk-smoke-webview-leveldb-path.ts",
         "src/lib/client-debug-snapshot.ts",
-        "src/lib/runtime-debug-flush.ts",
+        "src/lib/runtime-debug-http-exporter.ts",
         "src/lib/runtime-debug-sequence.ts",
         "src/lib/runtime-debug.ts",
         "src/lib/session-debug-metrics-store.ts",
@@ -1893,7 +3085,7 @@
       "level": 1,
       "parent_module_id": "daemon.runtime",
       "owner_feature": "daemon.attachment_delivery",
-      "responsibility": "Own durable image attachment files, preview/original integrity, per-device delivery receipts, API enqueue/read, and 48-hour expiry cleanup.",
+      "responsibility": "Own durable image attachment files, preview/original integrity, per-device delivery receipts, API enqueue/read, transport-message query/asset/receipt projection, and 48-hour expiry cleanup.",
       "owned_resources": [
         "resource.attachment_store",
         "resource.attachment_delivery"
@@ -1904,6 +3096,7 @@
       "pending_resources": [],
       "public_interfaces": [
         "src/server/attachment-delivery-runtime.ts",
+        "src/server/terminal-attachment-message-runtime.ts",
         "src/server/terminal-http-runtime.ts"
       ],
       "forbidden_resources": [
@@ -1918,12 +3111,15 @@
       ],
       "required_gates": [
         "src/server/attachment-delivery-runtime.test.ts",
+        "src/server/terminal-attachment-message-runtime.test.ts",
         "src/lib/module-import-graph-truth.test.ts"
       ],
       "status": "active",
       "owned_paths": [
         "src/server/attachment-delivery-runtime.ts",
-        "src/server/attachment-delivery-runtime.test.ts"
+        "src/server/attachment-delivery-runtime.test.ts",
+        "src/server/terminal-attachment-message-runtime.ts",
+        "src/server/terminal-attachment-message-runtime.test.ts"
       ]
     },
     {

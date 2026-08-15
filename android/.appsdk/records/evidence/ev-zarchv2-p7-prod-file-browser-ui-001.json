@@ -1,0 +1,53 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "EVID-20260815-ZARCHV2-P7-PROD-FILE-BROWSER-UI-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-phase7-production",
+  "kind": "gate",
+  "source_commit": "9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c",
+  "scope": {
+    "module_id": "client.file_browser_ui",
+    "feature_id": "client.file_browser_ui",
+    "entrypoint": "pnpm --dir android run test:file-browser-ui"
+  },
+  "producer": {
+    "adapter": "codex",
+    "identity": "codex-zterm-v2-phase7-file-browser-ui-20260815T143900Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "Phase 7 third production UI slice: client.file_browser_ui owns src/lib/plugin-file-browser/file-browser-contract.ts and the plugin-provided FileTransferSheet projection through src/lib/plugin-host/file-browser-ui-plugin.tsx; App reads terminal.file-browser only after PluginHost.startAll resolves and TerminalPage renders the file browser only through the typed slot callback. Module/resource/edge/feature/function/wiki/mainline/AppSDK maps, plan, test design, feature gates, prebuild, and CI are updated in lockstep. Verified test:feature-registry 84/84, test:file-browser-ui 66/66, test:plugin-host 16/16, test:session-drawer-ui 127/127, test:debug-console-ui 37/37, tsc --noEmit PASS, full pnpm run build PASS including prebuild gates, Gradle, terminal contracts 835/835, Vite, docs:function-wiki regenerated, appsdk verify android ok:true draft, and git diff --check PASS. UI-only slice requires no daemon install/restart. Worktree is uncommitted at HEAD 9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c. No ReviewRecord/PASS exists because codex-review MCP remains unavailable; this slice is production_pending_review and Phase 7 is not complete.",
+  "created_at": "2026-08-15T14:39:00Z",
+  "expires_at": "2026-11-13T14:39:00Z",
+  "input_hashes": [
+    "sha256:52d02941f96511cf17defe39ca022d86d832378a53864568c8e469e1c6d382f3",
+    "sha256:9780ee051981fe2785c6491a42d2abe292e22545d14c970f23edb81ebb5150ce",
+    "sha256:efed504d49bcd8a171471c9cb8c72899ff85e2b088a44e060dd71b58a8b9b105",
+    "sha256:cb05375387d501800f11e3766a2cf70ecaca4e5cf7426bbd02e15425e717f901",
+    "sha256:bd69415a8ba6dd83e057c4ed32c55e07f649488fc1f9db085c414ed72227711b",
+    "sha256:a30c1706611a1dee6767efdd51b9443a51d2356959a0b82dc2957090d250e676",
+    "sha256:676770f5ae8437b46b4623c2680c4231605b08394292a57b5c6b0d54ff09eb40",
+    "sha256:d6f9c45b4b87c09e4280de880655ffd868ae39160b16017ed941f4609383a840",
+    "sha256:327eb280b8b2cba778589b74c975d496cdf99f86735644a73d7eca144d0cd6e3",
+    "sha256:0510e0696a6295761c6550b1e4bc14a377b02944bf5965fb5dcaa9d56ad9eaa6",
+    "sha256:aa6916bb93967127c1f83c4af701503f2309ba3b3935f8251373802c56406494",
+    "sha256:3cfb542cad66c10a83125320bda1b7403a278a61599e7b10087517f8eceb6858",
+    "sha256:c289ed9bd69828792f35aeef09f47903b7ff435447a9ff3bfc047782d3bee491",
+    "sha256:56afbcd181ef82147a3f87328e10c381fcb7f35835bb9422af6b8d37550858b0",
+    "sha256:cf9c0e950875fbee54e68c62c284f9294d8a5e23476e222759a3219cfeb49fa9",
+    "sha256:36903610e559fac0203650c0f549cfa1d7a5dae66208a90e8bd2983c686822d1",
+    "sha256:79ed137635e53ec194f2ffec73967db5c159d305bd817b9ec34f62d1da766bc6",
+    "sha256:e58f76f8d520a27208d440d384b7eb82ec93eff4135e27b9c1b62c60beb38c34",
+    "sha256:281f075d7f866d9bf097acd2c3d15e60e2b6de32537dc4708d840184734ee371",
+    "sha256:5316438e9279dd5261df7557b9794bd83f4ce02f8e7d39b7935325ac6ddce4d6",
+    "sha256:a4ccb93e9f2e256be6e3fab889101e310c0030001de9b0a630880bb2570626ca",
+    "sha256:0d2c1154f4b3d916c5bf6e966618bf822820e230f8bef6d99bad92c2bf2f0b37",
+    "sha256:b6ded0d1f81a7941b5715846d262f1a22d3fa98d3ec60525bdf7d48c7720e1db",
+    "sha256:6de0ba5394398aa0154bad7bf68e7eefbea4e8c9ea42f4434949e928d9982045",
+    "sha256:4133541cd2090fbfce87ad497b41678e47b14e42752dd87663bb5e92c39c6091",
+    "sha256:130ed447aaeb90c9651b690d9562f2b878d140066abae0ef2a5fbad84af2f90d",
+    "sha256:960198129c2254088530ecc8cea7ff627554d17d11481bf725bd4ad66ec16256",
+    "sha256:81c03b77298d9b7e96a329501d17c675aedc4e6ad2cfcac2207caac82627fc9a"
+  ],
+  "scope_hash": "sha256:52d02941f96511cf17defe39ca022d86d832378a53864568c8e469e1c6d382f3"
+}

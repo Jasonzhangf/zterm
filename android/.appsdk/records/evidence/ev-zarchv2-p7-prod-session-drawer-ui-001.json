@@ -1,0 +1,52 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "EVID-20260815-ZARCHV2-P7-PROD-SESSION-DRAWER-UI-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-phase7-production",
+  "kind": "gate",
+  "source_commit": "9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c",
+  "scope": {
+    "module_id": "client.session_drawer_ui",
+    "feature_id": "client.session_drawer_ui",
+    "entrypoint": "pnpm --dir android run test:session-drawer-ui"
+  },
+  "producer": {
+    "adapter": "codex",
+    "identity": "codex-zterm-v2-phase7-session-drawer-ui-20260815T140540Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "Phase 7 second production slice: client.session_drawer_ui owns src/lib/plugin-session-drawer/session-drawer-contract.ts and the plugin-provided drawer render through src/lib/plugin-host/session-drawer-ui-plugin.tsx; App reads terminal.session-drawer only after PluginHost.startAll resolves and TerminalPage renders drawer only through the typed slot callback. Module/resource/edge/feature/function/wiki/mainline/AppSDK maps, plan, test design, feature gates, prebuild, and CI are updated in lockstep. Verified test:feature-registry 84/84, test:session-drawer-ui 125/125, test:debug-console-ui 36/36, test:plugin-host 15/15, tsc --noEmit PASS, full pnpm run build PASS including prebuild gates, Gradle, terminal contracts 834/834, Vite, docs:function-wiki regenerated, appsdk verify android ok:true draft, and git diff --check PASS. UI-only slice requires no daemon install/restart. Worktree is uncommitted at HEAD 9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c. No ReviewRecord/PASS exists because codex-review MCP remains unavailable; this slice is production_pending_review and Phase 7 is not complete.",
+  "created_at": "2026-08-15T14:05:40Z",
+  "expires_at": "2026-11-13T14:05:40Z",
+  "input_hashes": [
+    "sha256:9449242fca17a3cbb24067ff6f823de806aeecf07d3dfa157d52c1727d23de86",
+    "sha256:920d03bd633f99462b9fdf9e4e5606fae6c4d6b082b3257e1d8ffd262425c5b8",
+    "sha256:04164936f055fd28c2d5adc0ef4f8b4c41da3e0c51a0e6e1697e5b51272fb316",
+    "sha256:c3b540c532690e024283c0e6fb9add7f14c8acefa6ab83b660b641da1283c7b9",
+    "sha256:65b0b8a05bd5b3d4e8df13f7df8d9f25a7f438d5618a8f2f488c9dd0d6d02d93",
+    "sha256:528ed33b96d1f0d093a3470b990c2c45e1b62cc451f8eda12b3d1c5d164d60c3",
+    "sha256:e90fe2653353058cbebcc48d5d2230a6c751f2e0fa38f9ba32b0372f689f2cb8",
+    "sha256:c5784692d3c199d94a8622d974f4d1e39fb10d9aba31220a1855cc31a3396b3e",
+    "sha256:529b9b26751b7000f2cbb891a69d8916d03861fc3b1e2836a7c781f9e5ec1199",
+    "sha256:b9e821798731c1a560955db87113fd87f30b255a2b4d45e75f3aeb325ef7a7a5",
+    "sha256:04acc8aaec511f879690de4ceca6419697cbeacb60943fc6a308d7b54a0abc14",
+    "sha256:1bfc43beec4420312da1c87c3039d5582ec073c779100d2a1e8d76a330a117ea",
+    "sha256:0880a93771361e9b43ffe7c217a1dcfe280beb21096fe3f2afba27480a887db7",
+    "sha256:c71c254806d76ea1d8eae9f5e9eb3ec9bdfd3c08e2a9723255bcc9023b6f1c97",
+    "sha256:9ffb6d2037fd9f383bdc190187e27db0a9905449cd433f0b4939a309869812d9",
+    "sha256:59c1679b53f684396dce96ea70c9f242882a2ae9df9b84cbca461d240a6426a6",
+    "sha256:f54df0ccf7af72494103dda13d7be026348d4da0d05351e2b432c80e783e15bf",
+    "sha256:a0aeee0357dbc5900cb8fc796ac8bc9d471505aaa77816e7cdcb1f5dfb62d14d",
+    "sha256:e38053451f1e8afedbd5ca2030d58a12ddd2e9a2549a15868f798f1ef5ae465c",
+    "sha256:d106ea92c02b854e4c1abe902be87ddc58dd5d4f6b74425e285ba78f787f45ac",
+    "sha256:28302c68e76c52aacc54cc0d747becbd63501053d102a291a237693cfe0c031f",
+    "sha256:b1cd0cd06fd1e4bf48162d0cfbca2a86c41241adc3f90fae0cb2e30af255cb26",
+    "sha256:b513515494c898dbd76535eb523e5323d77502c7fb2b1afebabdf0fa4d908cf4",
+    "sha256:bc86df6b1f75916edececb10d50069e8c26266a7b6c9d327c5aae853dffb3736",
+    "sha256:5a84bb9fa089d3b2ca64316e208d4e7e6e32d005323b7361d3f3b55d4cc9b780",
+    "sha256:138a92fb97ea4f453edafaceb0462f7240f9bf1f5a7022937eceef62a10b71b6",
+    "sha256:55008bf515e3178a93ee1db7b78dd751d0c661fabedc3d300adc58ad9cba8de4"
+  ],
+  "scope_hash": "sha256:9449242fca17a3cbb24067ff6f823de806aeecf07d3dfa157d52c1727d23de86"
+}

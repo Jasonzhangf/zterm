@@ -61,6 +61,19 @@ const traversalHarness = vi.hoisted(() => {
       });
     }
 
+    triggerSessionsWithCatalog(
+      sessions: string[],
+      sessionCatalog: Array<{ name: string; backend: 'tmux' | 'herdr' }>,
+      requestId = this.latestRequestId(),
+    ) {
+      this.onmessage?.({
+        data: JSON.stringify(buildTerminalMuxServerTargetMessage({
+          type: 'sessions',
+          payload: { sessions, sessionCatalog },
+        }, requestId)),
+      });
+    }
+
     triggerSessionActivity(requestId = this.latestRequestId()) {
       this.onmessage?.({
         data: JSON.stringify({
@@ -166,6 +179,34 @@ describe('tmux-sessions transport contract', () => {
     socket.triggerSessions(['main', 'logs']);
     await expect(promise).resolves.toEqual(['main', 'logs']);
     expect(socket.closeCalls).toBe(0);
+  });
+
+  it('returns daemon-owned backend truth through fetchTmuxSessionCatalog and shares the list cache', async () => {
+    const { fetchTmuxSessionCatalog, fetchTmuxSessions } = await loadTmuxSessionsModule();
+    const promise = fetchTmuxSessionCatalog(target, bridgeSettings);
+    const socket = traversalHarness.MockTraversalSocket.latest();
+
+    socket.triggerOpen();
+    socket.triggerMuxReady();
+    socket.triggerSessionsWithCatalog(
+      ['zterm', 'hd-codex'],
+      [
+        { name: 'zterm', backend: 'tmux' },
+        { name: 'hd-codex', backend: 'herdr' },
+      ],
+    );
+
+    await expect(promise).resolves.toEqual({
+      sessionNames: ['zterm', 'hd-codex'],
+      sessionCatalog: [
+        { name: 'zterm', backend: 'tmux' },
+        { name: 'hd-codex', backend: 'herdr' },
+      ],
+    });
+
+    const cachedNames = fetchTmuxSessions(target, bridgeSettings);
+    await expect(cachedNames).resolves.toEqual(['zterm', 'hd-codex']);
+    expect(socket.sent.filter((item) => item.includes('list-sessions'))).toHaveLength(1);
   });
 
   it('sends create / rename / kill tmux operations with the exact request payloads', async () => {

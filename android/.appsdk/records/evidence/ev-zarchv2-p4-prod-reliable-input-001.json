@@ -1,0 +1,48 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "EVID-20260815-ZARCHV2-P4-PROD-RELIABLE-INPUT-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-phase4-production",
+  "kind": "gate",
+  "source_commit": "9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c",
+  "scope": {
+    "module_id": "client.reliable_input",
+    "feature_id": "terminal.daemon_input",
+    "entrypoint": "pnpm --dir android run test:reliable-input-ownership"
+  },
+  "producer": {
+    "adapter": "appsdk",
+    "identity": "codex-zterm-v2-phase4-reliable-input-20260815T193600Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "client.reliable_input now exclusively owns src/lib/reliable-input/reliable-input-queue.ts for reliable terminal input seq, one-in-flight frame, ACK application, bounded ACK-timeout retry, physical-transport replacement retry, and head refresh; session-context-input-runtime.ts is a thin bridge only. Module/resource/edge/feature/function/wiki/AppSDK maps, mainline TerminalInputDispatch -> ClientReliableInputQueue -> ChannelSend and SocketMessage -> ClientReliableInputAck nodes/edges, design/plan/test-design/module/resource docs, prebuild, and CI were updated in lockstep. Verified test:reliable-input-ownership 12/12, session-context-input-runtime 23/23, test:feature-registry 84/84 in 11 files, type-check and tsc PASS, docs:function-wiki regenerated, full pnpm run build PASS including prebuild gates, daemon:mirror:close-loop all 9 cases plus replay and strict audit PASS, appsdk verify android ok:true draft, and git diff --check PASS. No ReviewRecord/PASS exists because DSH/codex-review remains unavailable; this slice is production_pending_review and the architecture-v2 goal is not complete.",
+  "created_at": "2026-08-15T19:36:30Z",
+  "expires_at": "2026-11-15T19:36:30Z",
+  "input_hashes": [
+    "sha256:ddf6d4c3dba12579290f537be6a0466beae48966883def23fa04879d3cfca387",
+    "sha256:3400df3ffeb38a823c1424015800ca06168cb7d9206ff42a2bff8af63f07422c",
+    "sha256:ed42472a4a63b1f58e2e46232ea943b37bf6d03f36a60c3ea2ef004bac7cd916",
+    "sha256:cc391aa3c1b783a7bd241150104fb41810b6c69cf6ace2800c8fa355cb9f1c25",
+    "sha256:86e9980b5697b327102a9f698e5fbaa7a601d2c01968a3ada8a193b58ada6f5d",
+    "sha256:65bb1c510d599a536b134c214450ebac7f48acb94dadeb5b83e20ad4e4dedbb3",
+    "sha256:1643f9ca700e4b38cca1e00989d36f06e1adf52e0df12005c1e2422e513f1504",
+    "sha256:a0867677ab6dd51a0e03061231ec1d802a7a87ea1751d153d6e1a5ab6431871a",
+    "sha256:a0ff881a729061a2dfeed42c49105228c74111504c1c53275d0cb8cab7a20004",
+    "sha256:75be64d017174671b5d9f767fee1b007d8d41800c3883520bbbc4e543ff396f0",
+    "sha256:931e508df14c0a88db1d9148a7129490d43cd3298858cbb032c704519dc0f003",
+    "sha256:3e4d1112e51a2fe4173530c7ae27ab1af9a62321b2e383d4c9cf2c04c6a77d3a",
+    "sha256:84b8042b63b075a83e166394e3feaa1ebec188aa8dbf4db373823e6b2cc78b05",
+    "sha256:4cbe30a623ee64773ff88885b2faef533e66cad8aa4ee70c03edf6998e620b08",
+    "sha256:7ef0df9884d0bfd3d675215d2d1a377b928db7e9c37af5acf6a38a7be2646a19",
+    "sha256:f9c10ec3ee09901a6f928f86492a6b1954800a14a77d7bb63a1d02cc0119d27c",
+    "sha256:4ae0af523819cddfff75f5d0084035a310f695d47c7994d49226d8a8aaa1ae80",
+    "sha256:a2e091f9c2dcfd700bba88b750cbb0c79f9b51af06b16960a9e1909bf6d3e541",
+    "sha256:5590b0cc0b627f03bd65605dce4eebcfc8fceb62d139b06a54b24f31d705f63d",
+    "sha256:1117041d4e9cf765eba7d066066f4d277e64663935d37d1293b81250e67e82f4",
+    "sha256:b91cbadc422887326cf71f6f43156b9df597f952da54a18b8030f914b9e531f6",
+    "sha256:d70974739a30dceec1da611acc969a866e1e9a10092d6ad191379c8b12a9d90f",
+    "sha256:c85463a01ac325d8d22a52fb3547cadd9103417cd9aa2c4e2813937ab001ed33"
+  ],
+  "scope_hash": "sha256:ddf6d4c3dba12579290f537be6a0466beae48966883def23fa04879d3cfca387"
+}

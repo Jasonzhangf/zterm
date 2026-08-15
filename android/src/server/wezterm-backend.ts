@@ -1,9 +1,24 @@
-import type {
-  TerminalCell,
-} from '@zterm/shared/types';
 import { spawnSync } from 'child_process';
 import { normalizeCapturedLineBlock, trimCanonicalBufferWindow } from './canonical-buffer';
 import { canonicalizeCapturedMirrorLines } from './mirror-line-canonicalizer';
+import type {
+  TerminalSourceAdapter,
+  TerminalSourceMirrorSnapshot,
+  TerminalSourceSession,
+} from './terminal-source-adapter';
+
+export type {
+  TerminalSourceAdapter,
+  TerminalSourceMirrorSnapshot,
+  TerminalSourceSession,
+} from './terminal-source-adapter';
+export type {
+  TerminalSourceKind,
+} from './terminal-source-adapter';
+
+export type WezTermBackendRuntime = TerminalSourceAdapter;
+export type WezTermMirrorSnapshot = TerminalSourceMirrorSnapshot;
+export type WezTermBackendSession = TerminalSourceSession;
 
 export interface WezTermPaneRecord {
   winId: number;
@@ -20,35 +35,11 @@ export interface WezTermPaneRecord {
   topRow?: number;
 }
 
-export interface WezTermMirrorSnapshot {
-  revision: number;
-  bufferStartIndex: number;
-  bufferLines: TerminalCell[][];
-  cols: number;
-  rows: number;
-  cursorKeysApp: boolean;
-  cursor: {
-    rowIndex: number;
-    col: number;
-    visible: boolean;
-  } | null;
-}
-
 export interface WezTermInputContract {
   verified: true;
   mode: 'send-text-no-paste-stdin';
   args: string[];
   limitations: string[];
-}
-
-export interface WezTermBackendSession {
-  sessionName: string;
-  paneId: number | string;
-  workspace?: string;
-  title: string;
-  cwd: string;
-  cols: number;
-  rows: number;
 }
 
 export interface WezTermCommandRunner {
@@ -61,18 +52,6 @@ export interface WezTermBackendRuntimeOptions {
   workspacePrefix?: string;
   defaultCommand?: string[];
   maxMirrorLines?: number;
-}
-
-export interface WezTermBackendRuntime {
-  listSessions: () => WezTermBackendSession[];
-  createSession: (input?: { sessionName?: string; cwd?: string; command?: string[] }) => WezTermBackendSession;
-  readSnapshot: (sessionName: string) => Promise<WezTermMirrorSnapshot>;
-  writeInput: (sessionName: string, input: Buffer | string) => void;
-  resizeSession?: (sessionName: string, geometry: { cols: number; rows: number }) => void;
-  supportsSessionRename?: boolean;
-  renameSession?: (sessionName: string, nextSessionName: string) => string;
-  closeSession: (sessionName: string) => void;
-  readCurrentPath: (sessionName: string) => string;
 }
 
 function requireWezTermPaneId(value: number | string) {
@@ -531,6 +510,7 @@ export function createWezTermBackendRuntime(options: WezTermBackendRuntimeOption
   }
 
   return {
+    kind: 'wezterm',
     listSessions,
     createSession,
     readSnapshot,

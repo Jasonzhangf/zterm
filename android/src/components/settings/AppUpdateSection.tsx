@@ -19,7 +19,7 @@ function formatManifestCandidateButtonLabel(label: string) {
   return label === '当前 daemon 地址' ? '使用当前 daemon 地址' : `使用 ${label}`;
 }
 
-interface AppUpdateSectionProps {
+export interface AppUpdateSectionProps {
   currentVersionName: string;
   currentVersionCode: number;
   updateDraft: AppUpdatePreferences;

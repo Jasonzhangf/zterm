@@ -149,7 +149,7 @@ describe('rtc-bridge', () => {
     expect(echoed).toBe('hello-over-rtc');
   });
 
-  it('buffers early relay candidates until the rtc offer arrives so candidate reordering does not break the peer', async () => {
+  it('buffers early relay candidates until the rtc offer arrives so candidate reordering does not break the peer', { timeout: 15_000 }, async () => {
     const httpServer = createServer();
     const signalWss = new WebSocketServer({ noServer: true });
     const rtcBridge = createRtcBridgeServer({

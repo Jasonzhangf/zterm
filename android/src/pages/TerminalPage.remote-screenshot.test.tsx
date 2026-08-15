@@ -2,9 +2,21 @@
 
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ComponentProps } from 'react';
 import { Directory, Filesystem } from '@capacitor/filesystem';
 import type { RemoteScreenshotCapture, Session } from '../lib/types';
-import { TerminalPage } from './TerminalPage';
+import type { TerminalQuickBarProps } from '../components/terminal/TerminalQuickBar';
+import { TerminalPage as TerminalPageBase } from './TerminalPage';
+import { renderTerminalShellUi } from '../lib/plugin-host/terminal-shell-ui-plugin';
+
+function TerminalPage(props: ComponentProps<typeof TerminalPageBase>) {
+  return (
+    <TerminalPageBase
+      {...props}
+      renderTerminalShell={props.renderTerminalShell || renderTerminalShellUi}
+    />
+  );
+}
 
 // TerminalPage reads attachment counts from SessionContext (badge/drawer).
 // These page-level tests render TerminalPage directly without the app-level
@@ -73,21 +85,13 @@ vi.mock('../components/TerminalView', () => ({
   TerminalView: ({ sessionId }: { sessionId: string }) => <div data-testid={`terminal-view-${sessionId}`} />,
 }));
 
-vi.mock('../components/terminal/TerminalQuickBar', () => ({
-  TerminalQuickBar: ({
-    onRequestRemoteScreenshot,
-    remoteScreenshotStatus,
-  }: {
-    onRequestRemoteScreenshot?: () => void;
-    remoteScreenshotStatus?: string;
-  }) => (
-    <div data-testid="terminal-quickbar" data-remote-screenshot-status={remoteScreenshotStatus || 'idle'}>
-      <button type="button" onClick={() => onRequestRemoteScreenshot?.()}>
-        request-remote-screenshot
-      </button>
-    </div>
-  ),
-}));
+const renderQuickBar = (props: TerminalQuickBarProps) => (
+  <div data-testid="terminal-quickbar" data-remote-screenshot-status={props.remoteScreenshotStatus || 'idle'}>
+    <button type="button" onClick={() => props.activeSessionId && props.onRequestRemoteScreenshot?.(props.activeSessionId)}>
+      request-remote-screenshot
+    </button>
+  </div>
+);
 
 function makeSession(id: string): Session {
   return {
@@ -148,6 +152,7 @@ describe('TerminalPage remote screenshot preview', () => {
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
         onRequestRemoteScreenshot={onRequestRemoteScreenshot}
+        renderQuickBar={renderQuickBar}
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
@@ -191,6 +196,7 @@ describe('TerminalPage remote screenshot preview', () => {
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
         onRequestRemoteScreenshot={onRequestRemoteScreenshot}
+        renderQuickBar={renderQuickBar}
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
@@ -253,6 +259,7 @@ describe('TerminalPage remote screenshot preview', () => {
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
         onRequestRemoteScreenshot={onRequestRemoteScreenshot}
+        renderQuickBar={renderQuickBar}
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
@@ -304,6 +311,7 @@ describe('TerminalPage remote screenshot preview', () => {
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
         onRequestRemoteScreenshot={onRequestRemoteScreenshot}
+        renderQuickBar={renderQuickBar}
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
@@ -362,6 +370,7 @@ describe('TerminalPage remote screenshot preview', () => {
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
         onRequestRemoteScreenshot={onRequestRemoteScreenshot}
+        renderQuickBar={renderQuickBar}
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
@@ -407,6 +416,7 @@ describe('TerminalPage remote screenshot preview', () => {
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
         onRequestRemoteScreenshot={onRequestRemoteScreenshot}
+        renderQuickBar={renderQuickBar}
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""

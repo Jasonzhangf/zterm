@@ -5,12 +5,8 @@ import {
   buildTransportTargetKey,
   clearSessionSupersededSockets,
   createSessionTransportRuntimeStore,
-  ensureSessionTerminalChannel,
-  getOpeningSessionTerminalChannelsForTarget,
-  getSessionIdForTerminalChannel,
   getSessionTargetTerminalTransport,
   getSessionTargetTerminalMuxReady,
-  getSessionTerminalChannel,
   getSessionTargetControlTransport,
   getSessionTargetTransportRuntime,
   getSessionTransportTargetKey,
@@ -24,16 +20,23 @@ import {
   getSessionTransportSocket,
   moveSessionTransportSocketToSuperseded,
   removeSessionTransportRuntime,
-  removeSessionTerminalChannel,
-  setSessionChannelBodySubscribed,
   setSessionTargetTerminalMuxReady,
   setSessionTargetControlTransport,
   setTargetControlTransport,
   setTargetTerminalTransport,
   setSessionTransportSocket,
-  updateSessionTerminalChannelState,
   upsertSessionTransportRuntime,
 } from './session-transport-runtime';
+import {
+  ensureSessionTerminalChannel,
+  getOpeningSessionTerminalChannelsForTarget,
+  getSessionIdForTerminalChannel,
+  getSessionTerminalChannel,
+  getTerminalChannelsForTarget,
+  removeSessionTerminalChannel,
+  setSessionChannelBodySubscribed,
+  updateSessionTerminalChannelState,
+} from './terminal-channel-mux-runtime';
 
 function makeHost(overrides?: Partial<Host>): Host {
   return {
@@ -383,8 +386,8 @@ describe('session transport runtime store', () => {
     const targetSocket = makeSocket('target-terminal');
     setTargetTerminalTransport(store, targetKey, targetSocket as any);
 
-    const channelA = ensureSessionTerminalChannel(store, 'session-1', { channelId: 'channel-a', now: 10 });
-    const channelB = ensureSessionTerminalChannel(store, 'session-2', { channelId: 'channel-b', now: 20 });
+    const channelA = ensureSessionTerminalChannel(store.terminalChannels, 'session-1', { channelId: 'channel-a', now: 10 });
+    const channelB = ensureSessionTerminalChannel(store.terminalChannels, 'session-2', { channelId: 'channel-b', now: 20 });
 
     expect(getTargetTerminalTransport(store, targetKey)).toBe(targetSocket);
     expect(getSessionTargetTerminalTransport(store, 'session-1')).toBe(targetSocket);
@@ -405,7 +408,7 @@ describe('session transport runtime store', () => {
       bodySubscribed: true,
       openedAt: 20,
     });
-    expect(getTargetTransportRuntime(store, targetKey)?.channels.size).toBe(2);
+    expect(getTerminalChannelsForTarget(store.terminalChannels, targetKey).length).toBe(2);
   });
 
   it('exposes an open mux target transport as the effective session resource without changing legacy active socket truth', () => {
@@ -415,7 +418,7 @@ describe('session transport runtime store', () => {
     const targetSocket = makeSocket('target-terminal');
 
     setTargetTerminalTransport(store, targetKey, targetSocket as any);
-    ensureSessionTerminalChannel(store, 'session-1', { channelId: 'channel-a' });
+    ensureSessionTerminalChannel(store.terminalChannels, 'session-1', { channelId: 'channel-a' });
 
     expect(getSessionTransportResource(store, 'session-1').socket).toBeNull();
     expect(getSessionTransportSocket(store, 'session-1')).toBeNull();
@@ -438,7 +441,7 @@ describe('session transport runtime store', () => {
 
     setSessionTransportSocket(store, 'session-1', legacySessionSocket as any);
     setTargetTerminalTransport(store, targetKey, targetSocket as any);
-    ensureSessionTerminalChannel(store, 'session-1', { channelId: 'channel-a' });
+    ensureSessionTerminalChannel(store.terminalChannels, 'session-1', { channelId: 'channel-a' });
     setSessionTargetTerminalMuxReady(store, 'session-1', true);
 
     const resource = getSessionTransportResource(store, 'session-1');
@@ -457,7 +460,7 @@ describe('session transport runtime store', () => {
 
     setSessionTransportSocket(store, 'session-1', legacySessionSocket as any);
     setTargetTerminalTransport(store, targetKey, targetSocket as any);
-    ensureSessionTerminalChannel(store, 'session-1', { channelId: 'channel-a' });
+    ensureSessionTerminalChannel(store.terminalChannels, 'session-1', { channelId: 'channel-a' });
     setSessionTargetTerminalMuxReady(store, 'session-1', false);
 
     const resource = getSessionTransportResource(store, 'session-1');
@@ -471,26 +474,26 @@ describe('session transport runtime store', () => {
     const store = createSessionTransportRuntimeStore();
     upsertSessionTransportRuntime(store, 'session-1', makeHost({ sessionName: 'alpha' }));
     upsertSessionTransportRuntime(store, 'session-2', makeHost({ id: 'host-2', sessionName: 'beta' }));
-    ensureSessionTerminalChannel(store, 'session-1', { channelId: 'channel-a' });
-    ensureSessionTerminalChannel(store, 'session-2', { channelId: 'channel-b' });
+    ensureSessionTerminalChannel(store.terminalChannels, 'session-1', { channelId: 'channel-a' });
+    ensureSessionTerminalChannel(store.terminalChannels, 'session-2', { channelId: 'channel-b' });
 
-    updateSessionTerminalChannelState(store, 'session-1', 'open');
-    setSessionChannelBodySubscribed(store, 'session-1', false);
+    updateSessionTerminalChannelState(store.terminalChannels, 'session-1', 'open');
+    setSessionChannelBodySubscribed(store.terminalChannels, 'session-1', false);
 
-    expect(getSessionTerminalChannel(store, 'session-1')).toMatchObject({
+    expect(getSessionTerminalChannel(store.terminalChannels, 'session-1')).toMatchObject({
       channelId: 'channel-a',
       state: 'open',
       bodySubscribed: false,
     });
-    expect(getSessionTerminalChannel(store, 'session-2')).toMatchObject({
+    expect(getSessionTerminalChannel(store.terminalChannels, 'session-2')).toMatchObject({
       channelId: 'channel-b',
       state: 'opening',
       bodySubscribed: true,
     });
     const targetKey = getSessionTransportRuntime(store, 'session-1')!.targetKey;
-    expect(getSessionIdForTerminalChannel(store, targetKey, 'channel-a')).toBe('session-1');
-    expect(getSessionIdForTerminalChannel(store, targetKey, 'channel-b')).toBe('session-2');
-    expect(getOpeningSessionTerminalChannelsForTarget(store, targetKey).map((channel) => channel.channelId)).toEqual(['channel-b']);
+    expect(getSessionIdForTerminalChannel(store.terminalChannels, targetKey, 'channel-a')).toBe('session-1');
+    expect(getSessionIdForTerminalChannel(store.terminalChannels, targetKey, 'channel-b')).toBe('session-2');
+    expect(getOpeningSessionTerminalChannelsForTarget(store.terminalChannels, targetKey).map((channel) => channel.channelId)).toEqual(['channel-b']);
   });
 
   it('can prioritize the anchor session when reading opening channels for a shared mux target', () => {
@@ -499,10 +502,10 @@ describe('session transport runtime store', () => {
     upsertSessionTransportRuntime(store, 'session-1', host);
     upsertSessionTransportRuntime(store, 'session-2', host);
     const targetKey = getSessionTransportRuntime(store, 'session-1')!.targetKey;
-    ensureSessionTerminalChannel(store, 'session-1', { channelId: 'channel-a' });
-    ensureSessionTerminalChannel(store, 'session-2', { channelId: 'channel-b' });
+    ensureSessionTerminalChannel(store.terminalChannels, 'session-1', { channelId: 'channel-a' });
+    ensureSessionTerminalChannel(store.terminalChannels, 'session-2', { channelId: 'channel-b' });
 
-    expect(getOpeningSessionTerminalChannelsForTarget(store, targetKey, 'session-2').map((channel) => channel.channelId)).toEqual([
+    expect(getOpeningSessionTerminalChannelsForTarget(store.terminalChannels, targetKey, 'session-2').map((channel) => channel.channelId)).toEqual([
       'channel-b',
       'channel-a',
     ]);
@@ -515,15 +518,15 @@ describe('session transport runtime store', () => {
     const targetKey = getSessionTransportRuntime(store, 'session-1')!.targetKey;
     const targetSocket = makeSocket('target-terminal');
     setTargetTerminalTransport(store, targetKey, targetSocket as any);
-    ensureSessionTerminalChannel(store, 'session-1', { channelId: 'channel-a' });
-    ensureSessionTerminalChannel(store, 'session-2', { channelId: 'channel-b' });
+    ensureSessionTerminalChannel(store.terminalChannels, 'session-1', { channelId: 'channel-a' });
+    ensureSessionTerminalChannel(store.terminalChannels, 'session-2', { channelId: 'channel-b' });
 
-    const removed = removeSessionTerminalChannel(store, 'session-1');
+    const removed = removeSessionTerminalChannel(store.terminalChannels, 'session-1');
 
     expect(removed?.channelId).toBe('channel-a');
-    expect(getSessionTerminalChannel(store, 'session-1')).toBeNull();
-    expect(getSessionTerminalChannel(store, 'session-2')?.channelId).toBe('channel-b');
-    expect(getTargetTransportRuntime(store, targetKey)?.channels.size).toBe(1);
+    expect(getSessionTerminalChannel(store.terminalChannels, 'session-1')).toBeNull();
+    expect(getSessionTerminalChannel(store.terminalChannels, 'session-2')?.channelId).toBe('channel-b');
+    expect(getTerminalChannelsForTarget(store.terminalChannels, targetKey).length).toBe(1);
     expect(getTargetTerminalTransport(store, targetKey)).toBe(targetSocket);
   });
 
@@ -541,15 +544,15 @@ describe('session transport runtime store', () => {
     const oldTargetKey = getSessionTransportRuntime(store, 'session-1')!.targetKey;
     const oldTargetSocket = makeSocket('old-target-terminal');
     setTargetTerminalTransport(store, oldTargetKey, oldTargetSocket as any);
-    ensureSessionTerminalChannel(store, 'session-1', { channelId: 'old-channel' });
+    ensureSessionTerminalChannel(store.terminalChannels, 'session-1', { channelId: 'old-channel' });
 
     upsertSessionTransportRuntime(store, 'session-1', newHost);
 
     const newTargetKey = getSessionTransportRuntime(store, 'session-1')!.targetKey;
     expect(newTargetKey).toBe(oldTargetKey);
-    expect(getTargetTransportRuntime(store, oldTargetKey)?.channels.size).toBe(1);
+    expect(getTerminalChannelsForTarget(store.terminalChannels, oldTargetKey).length).toBe(1);
     expect(getTargetTerminalTransport(store, oldTargetKey)).toBe(oldTargetSocket);
-    expect(getSessionTerminalChannel(store, 'session-1')?.channelId).toBe('old-channel');
+    expect(getSessionTerminalChannel(store.terminalChannels, 'session-1')?.channelId).toBe('old-channel');
     expect(getTargetTransportRuntime(store, newTargetKey)?.sessionIds).toEqual(['session-1']);
   });
 

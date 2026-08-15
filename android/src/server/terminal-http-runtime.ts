@@ -1,17 +1,20 @@
 import { createReadStream, existsSync, readFileSync } from 'fs';
 import type { IncomingMessage, ServerResponse } from 'http';
 import { basename, join, resolve } from 'path';
-import type { RuntimeDebugStore } from './runtime-debug-store';
+import type { RuntimeDebugSourceMeta, RuntimeDebugStore } from './runtime-debug-store';
 import type { TerminalTransportSubscriber, SessionMirror, TerminalSessionTransport } from './terminal-runtime-types';
-import type { TerminalTransportServerFrame } from '@zterm/shared/protocol';
+import type { RuntimeDebugLogEntry, TerminalTransportServerFrame } from '@zterm/shared/protocol';
 import {
   parseRuntimeDebugPerformanceTraceRecords,
   summarizeTerminalPerformanceTrace,
   type createTerminalPerformanceTraceStore,
 } from '@zterm/shared/terminal/performance-trace';
+import { DebugPermissionService } from '@zterm/shared/terminal/debug-contract';
 import { validateAttachmentId, type AttachmentDeliveryRuntime, type AttachmentAsset } from './attachment-delivery-runtime';
 
 const ATTACHMENT_HTTP_BODY_MAX_BYTES = 44 * 1024 * 1024;
+const DEBUG_HTTP_BODY_MAX_BYTES = 512 * 1024;
+const DEBUG_CONTROL_DEFAULT_LEASE_MS = 10 * 60 * 1000;
 
 export interface TerminalHttpRuntimeDeps {
   host: string;
@@ -30,6 +33,10 @@ export interface TerminalHttpRuntimeDeps {
   resolveDebugRouteLimit: (input: string | null | undefined) => number;
   broadcastRuntimeDebugControl: (enabled: boolean, reason: string, sessionId?: string) => void;
   setDaemonRuntimeDebugEnabled: (enabled: boolean) => void;
+  setDaemonRuntimeDebugLease: (enabled: boolean, leaseMs: number) => void;
+  debugPermissionService?: DebugPermissionService;
+  handleClientDebugLog: (source: RuntimeDebugSourceMeta, payload: { entries: Array<{ seq: number; ts: string; scope: string; payload?: string }> }) => void;
+  handleClientDebugSnapshot: (source: RuntimeDebugSourceMeta, payload: { snapshot?: unknown }) => void;
   logTimePrefix: (date?: Date) => string;
   attachmentDeliveryRuntime?: AttachmentDeliveryRuntime;
   connections: Map<string, { deviceId?: string; transport: TerminalSessionTransport }>;
@@ -51,6 +58,13 @@ export interface TerminalHttpRuntime {
 }
 
 export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): TerminalHttpRuntime {
+  const debugPermissionService = deps.debugPermissionService ?? new DebugPermissionService();
+
+  function isLoopbackHost(host: string) {
+    const normalized = host.toLowerCase().replace(/^\[|\]$/g, '');
+    return normalized === 'localhost' || normalized === '127.0.0.1' || normalized === '::1';
+  }
+
   function readLatestUpdateManifest() {
     const manifestPath = join(deps.updatesDir, 'latest.json');
     if (!existsSync(manifestPath)) {
@@ -172,6 +186,10 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
   }
 
   function ensureDebugAuthorized(request: IncomingMessage, response: ServerResponse, url: URL) {
+    if (!deps.requiredAuthToken && !isLoopbackHost(deps.host)) {
+      serveJson(response, { message: 'debug access requires daemon token' }, 401);
+      return false;
+    }
     if (!deps.requiredAuthToken) {
       return true;
     }
@@ -205,6 +223,35 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
         chunks.push(data);
       });
       request.on('end', () => resolve(Buffer.concat(chunks)));
+      request.on('error', reject);
+    });
+  }
+
+  function readDebugJsonBody(request: IncomingMessage) {
+    return new Promise<unknown>((resolve, reject) => {
+      const chunks: Buffer[] = [];
+      let receivedBytes = 0;
+      request.on('data', (chunk: Buffer | string) => {
+        const data = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk);
+        receivedBytes += data.byteLength;
+        if (receivedBytes > DEBUG_HTTP_BODY_MAX_BYTES) {
+          reject(new Error('debug observability request body exceeds limit'));
+          return;
+        }
+        chunks.push(data);
+      });
+      request.on('end', () => {
+        const text = Buffer.concat(chunks).toString('utf8');
+        if (!text.trim()) {
+          reject(new Error('debug observability request body is required'));
+          return;
+        }
+        try {
+          resolve(JSON.parse(text));
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error('invalid debug observability JSON'));
+        }
+      });
       request.on('error', reject);
     });
   }
@@ -281,6 +328,41 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
         lastFlushCompletedAt: mirror.lastFlushCompletedAt,
         flushInFlight: mirror.flushInFlight,
       })),
+    };
+  }
+
+  function normalizeDebugObservabilityPayload(body: unknown, request: IncomingMessage): {
+    source: RuntimeDebugSourceMeta;
+    entries: RuntimeDebugLogEntry[] | null;
+    snapshot: unknown;
+    hasSnapshot: boolean;
+  } | null {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return null;
+    }
+    const candidate = body as Record<string, unknown>;
+    const payload = typeof candidate.kind === 'string' && candidate.payload
+      ? candidate.payload as Record<string, unknown>
+      : candidate;
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      return null;
+    }
+    const entries = Array.isArray(payload.entries)
+      ? payload.entries.filter((entry): entry is RuntimeDebugLogEntry => (
+          Boolean(entry)
+          && typeof entry === 'object'
+          && typeof (entry as { scope?: unknown }).scope === 'string'
+        ))
+      : null;
+    return {
+      source: {
+        sessionId: 'client-runtime',
+        tmuxSessionName: 'client',
+        requestOrigin: resolveRequestOrigin(request),
+      },
+      entries,
+      snapshot: payload.snapshot,
+      hasSnapshot: Object.prototype.hasOwnProperty.call(payload, 'snapshot'),
     };
   }
 
@@ -403,12 +485,40 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
       if (!ensureDebugAuthorized(request, response, url)) {
         return;
       }
+      if (request.method !== 'GET') {
+        serveJson(response, { message: 'method not allowed' }, 405);
+        return;
+      }
       serveJson(response, buildDebugRuntimeSnapshot(request));
       return;
     }
 
     if (url.pathname === '/debug/runtime/logs') {
       if (!ensureDebugAuthorized(request, response, url)) {
+        return;
+      }
+      if (request.method === 'POST') {
+        try {
+          const body = await readDebugJsonBody(request);
+          const ingest = normalizeDebugObservabilityPayload(body, request);
+          if (!ingest || !ingest.entries) {
+            serveJson(response, { message: 'debug observability log entries are required' }, 400);
+            return;
+          }
+          deps.handleClientDebugLog(ingest.source, { entries: ingest.entries });
+          serveJson(response, {
+            ok: true,
+            sessionId: ingest.source.sessionId,
+            tmuxSessionName: ingest.source.tmuxSessionName,
+            returned: ingest.entries.length,
+          });
+        } catch (error) {
+          serveJson(response, { message: error instanceof Error ? error.message : String(error) }, 400);
+        }
+        return;
+      }
+      if (request.method !== 'GET') {
+        serveJson(response, { message: 'method not allowed' }, 405);
         return;
       }
       const limit = deps.resolveDebugRouteLimit(url.searchParams.get('limit'));
@@ -444,26 +554,70 @@ export function createTerminalHttpRuntime(deps: TerminalHttpRuntimeDeps): Termin
       return;
     }
 
+    if (url.pathname === '/debug/runtime/snapshot') {
+      if (!ensureDebugAuthorized(request, response, url)) {
+        return;
+      }
+      if (request.method !== 'POST') {
+        serveJson(response, { message: 'method not allowed' }, 405);
+        return;
+      }
+      try {
+        const body = await readDebugJsonBody(request);
+        const ingest = normalizeDebugObservabilityPayload(body, request);
+        if (!ingest || !ingest.hasSnapshot) {
+          serveJson(response, { message: 'debug observability snapshot is required' }, 400);
+          return;
+        }
+        deps.handleClientDebugSnapshot(ingest.source, { snapshot: ingest.snapshot });
+        serveJson(response, {
+          ok: true,
+          sessionId: ingest.source.sessionId,
+          tmuxSessionName: ingest.source.tmuxSessionName,
+        });
+      } catch (error) {
+        serveJson(response, { message: error instanceof Error ? error.message : String(error) }, 400);
+      }
+      return;
+    }
+
     if (url.pathname === '/debug/runtime/control') {
       if (!ensureDebugAuthorized(request, response, url)) {
         return;
       }
-      const enabledRaw = (url.searchParams.get('enabled') || '').trim().toLowerCase();
-      const enabled = enabledRaw === '1' || enabledRaw === 'true' || enabledRaw === 'on';
-      const sessionId = url.searchParams.get('sessionId')?.trim() || '';
-      const reason = url.searchParams.get('reason')?.trim() || 'remote-http-control';
-      deps.setDaemonRuntimeDebugEnabled(enabled);
-      deps.broadcastRuntimeDebugControl(enabled, reason, sessionId || undefined);
-      serveJson(response, {
-        ok: true,
-        enabled,
-        daemonDebugEnabled: enabled,
-        reason,
-        sessionId: sessionId || null,
-        targetedSessions: sessionId
-          ? Array.from(deps.sessions.values()).filter((session) => session.id === sessionId).map((session) => session.id)
-          : Array.from(deps.sessions.values()).map((session) => session.id),
-      });
+      if (request.method !== 'POST') {
+        serveJson(response, { message: 'debug control mutation requires POST' }, 405);
+        return;
+      }
+      if (!debugPermissionService.can('debug:control')) {
+        serveJson(response, { message: 'debug control lease not granted or expired' }, 403);
+        return;
+      }
+      try {
+        const body = await readDebugJsonBody(request);
+        const raw = body && typeof body === 'object' ? body as Record<string, unknown> : {};
+        const enabled = raw.enabled === true || raw.enabled === '1' || raw.enabled === 'true' || raw.enabled === 'on';
+        const parsedTtlMs = Number(raw.ttlMs);
+        const ttlMs = Number.isFinite(parsedTtlMs) && parsedTtlMs > 0 ? parsedTtlMs : DEBUG_CONTROL_DEFAULT_LEASE_MS;
+        const sessionId = typeof raw.sessionId === 'string' ? raw.sessionId.trim() : '';
+        const reason = typeof raw.reason === 'string' && raw.reason.trim() ? raw.reason.trim() : 'remote-http-control';
+        deps.setDaemonRuntimeDebugLease(enabled, ttlMs);
+        deps.broadcastRuntimeDebugControl(enabled, reason, sessionId || undefined);
+        serveJson(response, {
+          ok: true,
+          enabled,
+          daemonDebugEnabled: enabled,
+          leaseMs: enabled ? ttlMs : null,
+          expiresAt: enabled ? new Date(Date.now() + ttlMs).toISOString() : null,
+          reason,
+          sessionId: sessionId || null,
+          targetedSessions: sessionId
+            ? Array.from(deps.sessions.values()).filter((session) => session.id === sessionId).map((session) => session.id)
+            : Array.from(deps.sessions.values()).map((session) => session.id),
+        });
+      } catch (error) {
+        serveJson(response, { message: error instanceof Error ? error.message : String(error) }, 400);
+      }
       return;
     }
 

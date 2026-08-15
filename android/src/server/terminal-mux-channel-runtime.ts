@@ -35,6 +35,11 @@ export interface TerminalMuxChannelRuntimeDeps {
     connection: TerminalTransportConnection,
     channelId: string,
   ) => TerminalTransportSubscriber;
+  ensureMuxChannels: (connection: TerminalTransportConnection) => Map<string, string>;
+  releaseMuxChannelSubscriber: (
+    connection: TerminalTransportConnection,
+    channelId: string,
+  ) => void;
   sanitizeSessionName: (input?: string) => string;
   attachTmux: (subscriber: TerminalTransportSubscriber, payload: TerminalAttachPayload) => Promise<void>;
   closeSession: (session: TerminalSession, reason: string, notifyClient?: boolean) => void;
@@ -141,9 +146,7 @@ export function createTerminalMuxChannelRuntime(
         connection.muxVersion = frame.payload.version;
         connection.muxClientInstanceId = frame.payload.clientInstanceId;
         connection.deviceId = frame.payload.deviceId;
-        if (!connection.muxChannels) {
-          connection.muxChannels = new Map();
-        }
+        deps.ensureMuxChannels(connection);
         sendMuxFrame(connection, buildTerminalMuxReady({
           capabilities: buildTerminalMuxCapabilities({
             reliableInput: { version: 1 },
@@ -166,10 +169,8 @@ export function createTerminalMuxChannelRuntime(
           ));
           return;
         }
-        if (!connection.muxChannels) {
-          connection.muxChannels = new Map();
-        }
-        if (connection.muxChannels.has(frame.payload.channelId)) {
+        const channels = deps.ensureMuxChannels(connection);
+        if (channels.has(frame.payload.channelId)) {
           sendMuxFrame(connection, buildTerminalMuxError(
             'mux_duplicate_channel',
             `mux channel ${frame.payload.channelId} is already open`,
@@ -190,7 +191,7 @@ export function createTerminalMuxChannelRuntime(
           const reason = `session activity control publish failed: ${
             error instanceof Error ? error.message : String(error)
           }`;
-          connection.muxChannels.delete(frame.payload.channelId);
+          deps.releaseMuxChannelSubscriber(connection, frame.payload.channelId);
           subscriber.transport = null;
           deps.closeSession(subscriber, reason, false);
           sendMuxFrame(connection, {
@@ -225,23 +226,10 @@ export function createTerminalMuxChannelRuntime(
             error instanceof Error ? error.message : String(error)
           }`;
           console.warn(`[server] ${reason} (channelId=${frame.payload.channelId} session=${frame.payload.sessionName})`);
-          // 先给客户端错误诊断（客户端会显示"出错"）
-          sendMuxFrame(connection, {
-            type: 'mux-channel-message',
-            payload: {
-              channelId: frame.payload.channelId,
-              message: {
-                type: 'error',
-                payload: {
-                  message: reason,
-                  code: 'mux_channel_open_failed',
-                },
-              },
-            },
-          });
           // 原子清理：删除 channel registry + 关闭 subscriber + 发显式 closed。
           // 禁止保留未 attach 的 phantom channel（否则占住 target，客户端后续无法连接）。
-          connection.muxChannels?.delete(frame.payload.channelId);
+          // attach 失败只走控制线 mux-channel-closed，不让业务 channel 错误污染控制线。
+          deps.releaseMuxChannelSubscriber(connection, frame.payload.channelId);
           subscriber.transport = null;
           deps.closeSession(subscriber, reason, false);
           sendMuxFrame(connection, {
@@ -312,7 +300,7 @@ export function createTerminalMuxChannelRuntime(
         }
         const subscriber = resolveMuxChannelSubscriber(connection, envelope.channelId);
         if (subscriber) {
-          connection.muxChannels?.delete(envelope.channelId);
+          deps.releaseMuxChannelSubscriber(connection, envelope.channelId);
           deps.closeSession(subscriber, frame.payload.reason || 'client requested channel close', false);
         }
         return;

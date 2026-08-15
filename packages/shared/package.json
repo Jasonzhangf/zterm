@@ -25,7 +25,14 @@
     "./terminal/gap-repair-planner": "./src/terminal/gap-repair-planner.ts",
     "./terminal/pull-state-planner": "./src/terminal/pull-state-planner.ts",
     "./terminal/buffer-sync-request-planner": "./src/terminal/buffer-sync-request-planner.ts",
-    "./terminal/performance-trace": "./src/terminal/performance-trace.ts"
+    "./terminal/performance-trace": "./src/terminal/performance-trace.ts",
+    "./terminal/plugin-contract": "./src/terminal/plugin-contract.ts",
+    "./terminal/plugin-capability-registry": "./src/terminal/plugin-capability-registry.ts",
+    "./terminal/plugin-ui-slot": "./src/terminal/plugin-ui-slot.ts",
+    "./terminal/plugin-ui-slot-registry": "./src/terminal/plugin-ui-slot-registry.ts",
+    "./terminal/control-contract": "./src/terminal/control-contract.ts",
+    "./terminal/node-contract": "./src/terminal/node-contract.ts",
+    "./terminal/debug-contract": "./src/terminal/debug-contract.ts"
   },
   "peerDependencies": {
     "react": "^19.0.0"

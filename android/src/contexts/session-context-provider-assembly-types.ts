@@ -13,8 +13,9 @@ import type { NetworkIdentityRuntime } from '../lib/network-identity';
 import type { SessionReconnectStore } from '../lib/session-reconnect-store';
 import type { SessionRenderGate } from '../lib/session-render-gate';
 import type { SessionTailRefreshStore } from '../lib/session-tail-refresh-store';
+import type { ImagePasteWaiterRuntime } from './session-context-transfer-runtime';
+import type { SessionTerminalChannelRuntime } from '../lib/terminal-channel-mux-runtime';
 import type {
-  SessionTerminalChannelRuntime,
   SessionTransportResource,
   SessionTransportRuntime,
   SessionTransportRuntimeStore,
@@ -103,6 +104,7 @@ export interface SessionProviderRuntimeRefs {
   remoteWindowMessageRuntimeRef: MutableRefObject<RemoteWindowMessageRuntime>;
   remoteWindowReceiverRuntimeRef: MutableRefObject<RemoteWindowReceiverRuntime>;
   fileTransferMessageRuntimeRef: MutableRefObject<FileTransferMessageRuntime>;
+  imagePasteWaiterRuntimeRef: MutableRefObject<ImagePasteWaiterRuntime>;
   foregroundActiveRef: MutableRefObject<boolean>;
   handleSocketConnectedBaselineRef: MutableRefObject<HandleSocketConnectedBaselineFn | null>;
   finalizeSocketFailureBaselineRef: MutableRefObject<FinalizeSocketFailureBaselineFn | null>;

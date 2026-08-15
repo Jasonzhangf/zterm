@@ -3,7 +3,11 @@ import type { TraversalTargetSource } from './traversal/types';
 import type { BridgeTarget } from './session-picker';
 import { createClientDaemonTraversalSocket } from './client-daemon-connection';
 import { createSessionActivityNotifier } from './session-activity-notify';
-import type { SessionActivity } from '@zterm/shared/protocol';
+import type {
+  SessionActivity,
+  TerminalSessionCatalog,
+  TerminalSessionCatalogEntry,
+} from '@zterm/shared/protocol';
 import {
   buildTerminalMuxHello,
   buildTerminalMuxTargetMessage,
@@ -22,7 +26,7 @@ type TmuxSessionTraversalSettings = Pick<BridgeSettings, 'signalUrl' | 'turnServ
 interface PendingTmuxRequest {
   message: TerminalMuxTargetClientMessage;
   requestId: string;
-  resolve: (sessions: string[]) => void;
+  resolve: (sessions: string[], sessionCatalog?: TerminalSessionCatalogEntry[]) => void;
   reject: (error: Error) => void;
   timer: ReturnType<typeof setTimeout> | null;
 }
@@ -45,7 +49,11 @@ const tmuxControlTransportPool = new Map<string, TmuxControlTransportEntry>();
 // is short so create/rename/kill operations become visible quickly; mutations
 // also invalidate the cache entry explicitly.
 const TMUX_SESSION_LIST_CACHE_TTL_MS = 3000;
-const tmuxSessionListCache = new Map<string, { sessionNames: string[]; at: number }>();
+const tmuxSessionListCache = new Map<string, {
+  sessionNames: string[];
+  sessionCatalog?: TerminalSessionCatalogEntry[];
+  at: number;
+}>();
 let tmuxControlIdentitySequence = 0;
 // Shared session-activity notifier for the tmux control channel (legacy,
 // non-mux wire messages also carry daemon-published session-activity facts).
@@ -244,7 +252,7 @@ function handleTmuxControlMessage(entry: TmuxControlTransportEntry, data: unknow
 
   if (response.type === 'sessions') {
     finishActiveTmuxControlRequest(entry, (request) => {
-      request.resolve(response.payload.sessions || []);
+      request.resolve(response.payload.sessions || [], response.payload.sessionCatalog);
     });
     return;
   }
@@ -364,7 +372,39 @@ function sendTmuxRequest(
   });
 }
 
+function sendTmuxCatalogRequest(
+  target: BridgeTarget,
+  traversalSettings: TmuxSessionTraversalSettings,
+  message: TerminalMuxTargetClientMessage,
+  overrideUrl?: string,
+) {
+  return new Promise<TerminalSessionCatalog>((resolve, reject) => {
+    const entry = getTmuxControlTransportEntry(target, traversalSettings, overrideUrl);
+    entry.queue.push({
+      message,
+      requestId: createTmuxControlIdentity('request'),
+      resolve: (sessions, sessionCatalog) => {
+        resolve({
+          sessionNames: sessions,
+          sessionCatalog: sessionCatalog || [],
+        });
+      },
+      reject,
+      timer: null,
+    });
+    drainTmuxControlTransport(entry);
+  });
+}
+
 export function fetchTmuxSessions(
+  target: BridgeTarget,
+  traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode' | 'traversalRelay'>,
+  overrideUrl?: string,
+) {
+  return fetchTmuxSessionCatalog(target, traversalSettings, overrideUrl).then((catalog) => catalog.sessionNames);
+}
+
+export function fetchTmuxSessionCatalog(
   target: BridgeTarget,
   traversalSettings: Pick<BridgeSettings, 'signalUrl' | 'turnServerUrl' | 'turnUsername' | 'turnCredential' | 'transportMode' | 'traversalRelay'>,
   overrideUrl?: string,
@@ -372,12 +412,19 @@ export function fetchTmuxSessions(
   const cacheKey = buildTmuxSessionListCacheKey(target, traversalSettings, overrideUrl);
   const cached = tmuxSessionListCache.get(cacheKey);
   if (cached && Date.now() - cached.at < TMUX_SESSION_LIST_CACHE_TTL_MS) {
-    return Promise.resolve([...cached.sessionNames]);
+    return Promise.resolve({
+      sessionNames: [...cached.sessionNames],
+      sessionCatalog: [...(cached.sessionCatalog || [])],
+    });
   }
   const message: TerminalMuxTargetClientMessage = { type: 'list-sessions' };
-  return sendTmuxRequest(target, traversalSettings, message, overrideUrl).then((sessionNames) => {
-    tmuxSessionListCache.set(cacheKey, { sessionNames, at: Date.now() });
-    return sessionNames;
+  return sendTmuxCatalogRequest(target, traversalSettings, message, overrideUrl).then((catalog) => {
+    tmuxSessionListCache.set(cacheKey, {
+      sessionNames: catalog.sessionNames,
+      sessionCatalog: catalog.sessionCatalog,
+      at: Date.now(),
+    });
+    return catalog;
   });
 }
 

@@ -14,7 +14,7 @@
 - Preview geometry is a pure projection through the shared `WindowGroupLayout` module: portrait uses a child rail above a large primary pane, landscape uses a child rail beside a large primary pane, every selected Session remains in its own preview container, child tap/click from the title or body only promotes the primary preview, and primary title/body click is the only activation path into the full terminal shell.
 - Visual order badges must not be rendered inside tile titlebars; order can remain as data/ARIA/test metadata, but it must not consume the title layout.
 - Secondary child previews use compact local terminal typography for glanceability and disable WebView text autosizing so the requested thumbnail scale is preserved. This is renderer projection only: no resize, width-mode, viewport callback, tmux geometry, or daemon mirror change is allowed.
-- The primary preview keeps the normal live follow renderer with full ANSI cell/cursor DOM. Secondary previews remain real-time projections of their own buffer-store snapshots but use a passive flattened text-row tail projection: they do not create per-cell/cursor DOM, run interactive follow/scroll realignment, input focus, textarea, or unthrottled resize loops. Promotion transfers the single primary full renderer role to the selected child.
+- The primary preview keeps the normal live follow renderer with full ANSI cell/cursor DOM. Secondary previews remain real-time projections of their own buffer-store snapshots but use a passive theme-colored row projection: they reuse the shared row/cell style resolver, coalesce adjacent equal-style cells into runs, and do not create cursor DOM, run interactive follow/scroll realignment, input focus, textarea, or unthrottled resize loops. Promotion transfers the single primary full renderer role to the selected child.
 - A selected secondary preview has no interactive renderer viewport. When its accepted live `buffer-head` advances, the buffer owner must request one terminal-height tail window from the exact session channel; non-live sessions without a viewport must not trigger that body pull.
 - Tile close removes only that preview selection; the underlying open Session remains untouched. The final removal cancels preview and restores its entry projection.
 - Preview bodies accept local vertical scroll and horizontal fixed-width crop while remaining input/resize/viewport inert.
@@ -38,7 +38,8 @@
 - Secondary previews use smaller local font/row-height than the primary preview while remaining `mirror-fixed` and callback-inert.
 - Exactly one preview tile uses primary live rendering; all secondary tiles use passive tail projection while still reflecting later buffer-store publications.
 - A live secondary preview without a renderer visible range receives a bounded tail bootstrap after head advancement; the equivalent non-live session remains body-pull silent.
-- Six-window source-to-DOM proof must remain below the deterministic preview DOM node budget; this locks out restoration of full per-cell DOM in every child.
+- Six-window source-to-DOM proof must remain below the deterministic preview DOM node budget. Secondary previews use one row node plus style-run spans, not one span per cell; block/shade glyphs keep distinct runs because their background depends on the exact glyph.
+- Passive secondary preview rows must preserve ANSI fg/bg/flags through the shared `terminalCellStyle()` resolver and must not fall back to plain theme-foreground text or a second color parser.
 
 ## White-Box Negative
 

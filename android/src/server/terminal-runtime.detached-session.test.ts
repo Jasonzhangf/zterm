@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createTerminalRuntime } from './terminal-runtime';
+import { createTerminalChannelMuxRuntime } from './terminal-channel-mux-runtime';
 import type { TerminalSession, SessionMirror, TerminalTransportConnection } from './terminal-runtime-types';
 
 function createTransportConnection(id: string): TerminalTransportConnection {
@@ -25,6 +26,13 @@ function createDeps() {
   const mirrors = new Map<string, SessionMirror>();
   const runTmux = vi.fn(() => ({ ok: true as const, stdout: '' }));
   const sendText = vi.fn();
+  const daemonInputQueue = {
+    handleInputMessage: vi.fn(async () => {}),
+    enqueueLiveMirrorInput: vi.fn(async (_sessionName: string, _payload: string, _appendEnter: boolean, shouldWrite?: () => boolean) => (
+      shouldWrite ? shouldWrite() : true
+    )),
+    disposeLiveMirrorInputBatch: vi.fn(() => 0),
+  };
   let paneMetrics = {
     paneId: '%1',
     tmuxAvailableLineCountHint: 0,
@@ -86,10 +94,7 @@ function createDeps() {
       mirrorBufferChanged: vi.fn(() => []),
       mirrorCursorEqual: vi.fn(() => true),
       writeToLiveMirror: vi.fn(() => true),
-      enqueueLiveMirrorInput: vi.fn(async (_sessionName, _payload, _appendEnter, shouldWrite?: () => boolean) => (
-        shouldWrite ? shouldWrite() : true
-      )),
-      disposeLiveMirrorInputBatch: vi.fn(() => 0),
+      daemonInputQueue,
       writeToTmuxSession: vi.fn(),
       autoCommandDelayMs: 0,
       waitMs: async () => {},
@@ -97,17 +102,23 @@ function createDeps() {
       daemonRuntimeDebug: vi.fn(),
       logTimePrefix: () => '2026-05-03 00:00:00',
     }),
+    channelMuxRuntime: createTerminalChannelMuxRuntime({
+      sessions,
+      sendText,
+      defaultSessionName: 'default',
+    }),
+    daemonInputQueue,
     sendText,
   };
 }
 
 describe('terminal runtime detached transport cleanup', () => {
   it('creates mux channel subscribers without rebinding the physical connection to a single subscriber', () => {
-    const { runtime, sessions } = createDeps();
+    const { channelMuxRuntime, sessions } = createDeps();
     const connection = createTransportConnection('transport-1');
 
-    const first = runtime.createMuxChannelSubscriber(connection, 'channel-a');
-    const second = runtime.createMuxChannelSubscriber(connection, 'channel-b');
+    const first = channelMuxRuntime.createMuxChannelSubscriber(connection, 'channel-a');
+    const second = channelMuxRuntime.createMuxChannelSubscriber(connection, 'channel-b');
 
     expect(connection.boundSubscriberId).toBeNull();
     expect(connection.muxChannels?.get('channel-a')).toBe(first.id);
@@ -121,9 +132,9 @@ describe('terminal runtime detached transport cleanup', () => {
   });
 
   it('wraps mux channel subscriber outbound messages in a channel envelope over the physical transport', () => {
-    const { runtime, sendText } = createDeps();
+    const { channelMuxRuntime, sendText } = createDeps();
     const connection = createTransportConnection('transport-1');
-    const session = runtime.createMuxChannelSubscriber(connection, 'channel-a');
+    const session = channelMuxRuntime.createMuxChannelSubscriber(connection, 'channel-a');
 
     session.transport?.sendText(JSON.stringify({
       type: 'title',
@@ -151,8 +162,30 @@ describe('terminal runtime detached transport cleanup', () => {
     });
   });
 
+  it('owns channel registry initialization and per-channel/all-channel release', () => {
+    const { channelMuxRuntime, sessions } = createDeps();
+    const connection = createTransportConnection('transport-1');
+
+    expect(connection.muxChannels).toBeUndefined();
+    channelMuxRuntime.ensureMuxChannels(connection);
+    expect(connection.muxChannels).toBeInstanceOf(Map);
+
+    const first = channelMuxRuntime.createMuxChannelSubscriber(connection, 'channel-a');
+    const second = channelMuxRuntime.createMuxChannelSubscriber(connection, 'channel-b');
+    expect(channelMuxRuntime.listMuxChannelSubscriberIds(connection)).toEqual([first.id, second.id]);
+
+    expect(channelMuxRuntime.releaseMuxChannelSubscriber(connection, 'channel-a')).toBe(true);
+    expect(connection.muxChannels?.has('channel-a')).toBe(false);
+    expect(channelMuxRuntime.releaseMuxChannelSubscriber(connection, 'missing')).toBe(false);
+
+    const released = channelMuxRuntime.releaseAllMuxChannelSubscribers(connection);
+    expect(released).toEqual([second.id]);
+    expect(connection.muxChannels?.size).toBe(0);
+    expect(sessions.size).toBe(2);
+  });
+
   it('removes detached transport-bound sessions from runtime maps and mirror subscribers', () => {
-    const { runtime, sessions, mirrors } = createDeps();
+    const { runtime, sessions, mirrors, daemonInputQueue } = createDeps();
     const connection = createTransportConnection('transport-1');
     const session = runtime.createTransportSubscriber(connection);
     const mirror: SessionMirror = {
@@ -195,6 +228,7 @@ describe('terminal runtime detached transport cleanup', () => {
     expect(session.transport).toBeNull();
     expect(session.mirrorKey).toBeNull();
     expect(mirror.subscribers.has(session.id)).toBe(false);
+    expect(daemonInputQueue.disposeLiveMirrorInputBatch).not.toHaveBeenCalled();
   });
 
   it('detaches subscribers without mutating tmux width policy', () => {
@@ -260,6 +294,7 @@ describe('terminal runtime detached transport cleanup', () => {
       rows: 24,
       baselineCols: 55,
       baselineRows: 24,
+      backend: 'tmux',
       adaptiveWidthBaselineGeometry: { cols: 120, rows: 40 },
       adaptiveWidthAppliedCols: 55,
       cursorKeysApp: false,

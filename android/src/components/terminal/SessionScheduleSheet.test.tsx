@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ScheduleJob, SessionScheduleState } from '../../lib/types';
+import { formatScheduleDateTime } from '../../../../packages/shared/src/schedule/next-fire';
 import { SessionScheduleSheet } from './SessionScheduleSheet';
 
 afterEach(() => {
@@ -147,7 +148,7 @@ describe('SessionScheduleSheet', () => {
 
     const savedJob = onSave.mock.calls[0][0];
     expect(savedJob.execution.maxRuns).toBe(0);
-    expect(savedJob.execution.endAt).toBe('2026-04-28T00:30:00.000Z');
+    expect(savedJob.execution.endAt).toBe(new Date('2026-04-28T08:30').toISOString());
   });
 
   it('does not submit when text is empty', () => {
@@ -260,8 +261,10 @@ describe('SessionScheduleSheet', () => {
       },
     });
     renderSheet({ scheduleState: createState([job]) });
+    const expectedSummary =
+      `已执行 4 次 / 无限次 · 截止：${formatScheduleDateTime('2026-04-28T08:30:00.000Z')}`;
     expect(
-      screen.getByText((_, element) => element?.textContent === '已执行 4 次 / 无限次 · 截止：04/28 16:30'),
+      screen.getByText((_, element) => element?.textContent === expectedSummary),
     ).toBeTruthy();
   });
 

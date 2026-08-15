@@ -1,0 +1,39 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "EVID-20260815-ZARCHV2-P7-PROD-QUICKBAR-UI-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-phase7-production",
+  "kind": "gate",
+  "source_commit": "9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c",
+  "scope": {
+    "module_id": "client.quickbar_ui",
+    "feature_id": "client.quickbar_ui",
+    "entrypoint": "pnpm --dir android run test:quickbar-ui"
+  },
+  "producer": {
+    "adapter": "codex",
+    "identity": "codex-zterm-v2-phase7-quickbar-ui-20260815T160737Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "Phase 7 sixth production UI slice: client.quickbar_ui owns src/lib/plugin-quickbar/quickbar-contract.ts and the plugin-provided TerminalQuickBar projection through src/lib/plugin-host/quickbar-ui-plugin.tsx; App reads terminal.quickbar only after PluginHost.startAll resolves and TerminalPage renders the quickbar only through the typed slot callback with no direct TerminalQuickBar import/render path. Page-level tests that previously mocked TerminalQuickBar were updated to inject the typed renderQuickBar callback so their IME, debug overlay, split, remote-window, screenshot, session, and schedule coverage still exercises the new slot boundary. Verified test:quickbar-ui 72/72, test:feature-registry 84/84, test:debug-console-ui 40/40, test:session-drawer-ui 133/133, test:remote-window-ui 123/123, targeted foldable/schedule/multi-pane/remote-screenshot 20/20, tsc --noEmit PASS, appsdk verify android ok:true draft, full pnpm run build PASS including prebuild gates, Gradle, terminal regression core 838/838, Vite, docs:function-wiki PASS, and git diff --check PASS. UI-only slice requires no daemon install/restart. Worktree is uncommitted at HEAD 9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c. No ReviewRecord/PASS exists because DSH/codex-review remains unavailable; this slice is production_pending_review and Phase 7 is not complete.",
+  "created_at": "2026-08-15T16:07:37Z",
+  "expires_at": "2026-11-13T16:07:37Z",
+  "input_hashes": [
+    "sha256:bb56a0cc45bbc91d8052392234f59a91eb53f33a6355205f94ca846102206c13",
+    "sha256:903497be3939fa791e07b62fee099a69bd0b2207e74c5d8960d52856b0277e1d",
+    "sha256:25da73214dd300bc317c96b8d572dfa4eea3c7993aaed00eb62f9be079295216",
+    "sha256:bdec77b19303674bd630e801357c23eca72db5df6e2dcd64ef393ed6891b1268",
+    "sha256:89876fd1046183795f04a6487720bf6fad700a355c85537f89ccbab8f50b7754",
+    "sha256:57e7702d3cea5eeee18288c93ffa383c721e7818cf57f7c76509d641a2209d7c",
+    "sha256:8e2b51daa9fa4af270960d7827aaba08276e466d0e005d0d9a0bd4d64b04f78d",
+    "sha256:bdd61d082dc5ec54cf608ffe75a09b7e7c0548033f8bb0a0eb08d0ae34bf5ece",
+    "sha256:61570a60a9f7c3c657e39533704d08eaea0a288ba07e4998627d8823abd063ec",
+    "sha256:844e8a36576a1f0ecf45f7e2cbaa98e8bed3bf18f64a4c3f5f432b869e8b3a1b",
+    "sha256:93237d212cf1976b9213c862d6a8f20e0d4fd39ea0c86f01d727826b6558cd6a",
+    "sha256:4aad37456f9400274e577ce2c385b1877aed880953b852ac97c0380d7d6da99d",
+    "sha256:e2dad3cf7969c10eb7373681f56ee54c57bd41845f8b6c109fd87a46457c584f",
+    "sha256:f10cbe303efbd735fc0a496c21495a81997f6c3432e6ab0a15816bf9a7adc0a1"
+  ],
+  "scope_hash": "sha256:bb56a0cc45bbc91d8052392234f59a91eb53f33a6355205f94ca846102206c13"
+}

@@ -4,13 +4,23 @@ import {
   TERMINAL_INPUT_CHUNK_BYTES,
   TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES,
   TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS,
-  getTerminalInputUtf8ByteLength,
   splitTerminalInputUtf8Chunks,
 } from '@zterm/shared/terminal/input-chunking';
 import type { SessionMirror } from './terminal-runtime-types';
-import type { WezTermBackendRuntime } from './wezterm-backend';
+import type {
+  TerminalSourceAdapter,
+  TerminalSourceKind,
+} from './terminal-source-adapter';
 
-export type TerminalControlBackendKind = 'tmux' | 'herdr' | 'wezterm';
+const DEFAULT_MANUAL_TERMINAL_COLS = 80;
+const DEFAULT_MANUAL_TERMINAL_ROWS = 80;
+
+export type TerminalControlBackendKind = TerminalSourceKind;
+
+export interface TerminalSessionCatalogEntry {
+  name: string;
+  backend: 'tmux' | 'herdr';
+}
 
 export interface TerminalControlRuntimeDeps {
   tmuxBinary: string;
@@ -21,8 +31,8 @@ export interface TerminalControlRuntimeDeps {
   getMirrorKey: (sessionName: string, backend?: 'tmux' | 'herdr') => string;
   sanitizeSessionName: (input?: string) => string;
   daemonRuntimeDebug?: (scope: string, payload?: unknown) => void;
-  wezTermBackend?: WezTermBackendRuntime | null;
-  backendRuntimes?: Partial<Record<'herdr' | 'wezterm', WezTermBackendRuntime>>;
+  wezTermBackend?: TerminalSourceAdapter | null;
+  backendRuntimes?: Partial<Record<'herdr' | 'wezterm', TerminalSourceAdapter>>;
   defaultBackend?: TerminalControlBackendKind;
 }
 
@@ -33,16 +43,16 @@ export interface TerminalControlRuntime {
   writeToTmuxSession: (sessionName: string, payload: string, appendEnter: boolean, backend?: TerminalControlBackendKind) => void;
   ensureTmuxServerRunning: () => void;
   writeToLiveMirror: (sessionName: string, payload: string, appendEnter: boolean, backend?: TerminalControlBackendKind) => boolean;
-  enqueueLiveMirrorInput: (
+  writeBackendInputGroup: (
     sessionName: string,
     payload: string,
     appendEnter: boolean,
-    shouldWrite?: () => boolean,
     backend?: TerminalControlBackendKind,
-  ) => Promise<boolean>;
-  disposeLiveMirrorInputBatch: (sessionName: string, reason: string, backend?: TerminalControlBackendKind) => number;
+  ) => Promise<void>;
+  resolveBackendInputMaxChunkBytes: () => number;
   listTmuxSessions: (backend?: TerminalControlBackendKind) => string[];
   listTerminalSessions: () => string[];
+  listTerminalSessionCatalog: () => TerminalSessionCatalogEntry[];
   resolveTerminalSessionBackend: (sessionName: string) => Exclude<TerminalControlBackendKind, 'wezterm'>;
   createDetachedTmuxSession: (input?: string, cwd?: string, backend?: TerminalControlBackendKind) => string;
   closeDetachedTerminalSession: (sessionName: string, backend?: TerminalControlBackendKind) => void;
@@ -66,18 +76,6 @@ export function buildExactTmuxPaneTarget(sessionName: string) {
 export function createTerminalControlRuntime(
   deps: TerminalControlRuntimeDeps,
 ): TerminalControlRuntime {
-  type LiveMirrorInputItem = {
-    payload: string;
-    appendEnter: boolean;
-    shouldWrite?: () => boolean;
-    resolve: (value: boolean) => void;
-    reject: (reason?: unknown) => void;
-  };
-  type LiveMirrorInputGroup = {
-    payload: string;
-    appendEnter: boolean;
-    items: LiveMirrorInputItem[];
-  };
   function resolveExternalBackend(kind = deps.defaultBackend || (deps.wezTermBackend ? 'wezterm' : 'tmux')) {
     const effectiveKind = kind === 'tmux' && deps.defaultBackend === 'wezterm' ? 'wezterm' : kind;
     if (effectiveKind === 'tmux') {
@@ -89,14 +87,6 @@ export function createTerminalControlRuntime(
     }
     return backend;
   }
-  const liveMirrorInputBatches = new Map<string, {
-    items: LiveMirrorInputItem[];
-    scheduled: boolean;
-    flushing: boolean;
-
-  }>();
-
-
 
   function cleanEnv(): Record<string, string> {
     const env: Record<string, string> = {};
@@ -219,15 +209,6 @@ export function createTerminalControlRuntime(
     );
   }
 
-  function sleepTmuxWriteSettleAsync() {
-    if (TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS <= 0) {
-      return Promise.resolve();
-    }
-    return new Promise<void>((resolve) => {
-      setTimeout(resolve, TERMINAL_INPUT_TMUX_WRITE_SETTLE_MS);
-    });
-  }
-
   function writeTmuxLiteralChunksSync(payload: string, target: string) {
     const chunks = splitTerminalInputUtf8Chunks(
       payload,
@@ -318,287 +299,35 @@ export function createTerminalControlRuntime(
     return true;
   }
 
-  function buildLiveMirrorInputGroups(items: LiveMirrorInputItem[]): LiveMirrorInputGroup[] {
-    const maxGroupBytes = resolveExternalBackend(deps.defaultBackend || (deps.wezTermBackend ? 'wezterm' : 'tmux'))
-      ? TERMINAL_INPUT_CHUNK_BYTES
-      : TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES;
-    const groups: LiveMirrorInputGroup[] = [];
-    let groupPayload = '';
-    let groupBytes = 0;
-    const groupItems = new Set<LiveMirrorInputItem>();
-    const flushGroup = (appendEnter: boolean) => {
-      if (!groupPayload && groupItems.size === 0 && !appendEnter) {
-        return;
-      }
-      groups.push({
-        payload: groupPayload,
-        appendEnter,
-        items: Array.from(groupItems),
-      });
-      groupPayload = '';
-      groupBytes = 0;
-      groupItems.clear();
-    };
-
-    for (const item of items) {
-      const chunks = splitTerminalInputUtf8Chunks(item.payload, maxGroupBytes);
-      if (chunks.length === 0) {
-        groupItems.add(item);
-        if (item.appendEnter) {
-          flushGroup(true);
-        }
-        continue;
-      }
-      for (let index = 0; index < chunks.length; index += 1) {
-        const chunk = chunks[index]!;
-        const chunkBytes = getTerminalInputUtf8ByteLength(chunk);
-        if (groupBytes > 0 && groupBytes + chunkBytes > maxGroupBytes) {
-          flushGroup(false);
-        }
-        groupPayload += chunk;
-        groupBytes += chunkBytes;
-        groupItems.add(item);
-        if (item.appendEnter && index === chunks.length - 1) {
-          flushGroup(true);
-        }
-      }
-    }
-
-    flushGroup(false);
-    return groups;
-  }
-
-  function createLiveMirrorInputGroupSettler(
-    writableItems: LiveMirrorInputItem[],
-    groups: LiveMirrorInputGroup[],
-  ) {
-    const unresolved = new Set(writableItems);
-    const failedItems = new Set<LiveMirrorInputItem>();
-    const pendingGroupCounts = new Map<LiveMirrorInputItem, number>();
-    for (const group of groups) {
-      for (const item of group.items) {
-        pendingGroupCounts.set(item, (pendingGroupCounts.get(item) || 0) + 1);
-      }
-    }
-    const settleGroup = (group: LiveMirrorInputGroup, value: boolean) => {
-      for (const item of group.items) {
-        if (!unresolved.has(item)) {
-          continue;
-        }
-        if (!value) {
-          failedItems.add(item);
-        }
-        const nextCount = (pendingGroupCounts.get(item) || 1) - 1;
-        if (nextCount > 0) {
-          pendingGroupCounts.set(item, nextCount);
-          continue;
-        }
-        pendingGroupCounts.delete(item);
-        unresolved.delete(item);
-        item.resolve(!failedItems.has(item));
-      }
-    };
-    return {
-      unresolved,
-      settleGroup,
-    };
-  }
-
-  async function flushPendingLiveMirrorInput(mirrorKey: string) {
-    const pending = liveMirrorInputBatches.get(mirrorKey);
-    if (!pending) {
-      return;
-    }
-    if (pending.flushing) {
-      return;
-    }
-    pending.scheduled = false;
-    pending.flushing = true;
-    const items = pending.items.splice(0);
-    const mirror = deps.mirrors.get(mirrorKey);
-    if (!mirror || mirror.lifecycle !== 'ready') {
-      for (const item of items) {
-        item.resolve(false);
-      }
-      pending.flushing = false;
-      if (pending.items.length === 0) {
-        liveMirrorInputBatches.delete(mirrorKey);
-      } else {
-        schedulePendingLiveMirrorInput(mirrorKey);
-      }
-      return;
-    }
-
-    const writableItems: typeof items = [];
-    for (const item of items) {
-      if (item.shouldWrite && !item.shouldWrite()) {
-        item.resolve(false);
-        continue;
-      }
-      writableItems.push(item);
-    }
-
-    if (writableItems.length === 0) {
-      pending.flushing = false;
-      if (pending.items.length === 0) {
-        liveMirrorInputBatches.delete(mirrorKey);
-      } else {
-        schedulePendingLiveMirrorInput(mirrorKey);
-      }
-      return;
-    }
-
-    const groups = buildLiveMirrorInputGroups(writableItems);
-    const { unresolved, settleGroup } = createLiveMirrorInputGroupSettler(writableItems, groups);
-    const isGroupWritable = (group: LiveMirrorInputGroup) =>
-      group.items.every((item) => !item.shouldWrite || item.shouldWrite());
-
-    const externalBackend = resolveExternalBackend(mirror.backend);
-    if (externalBackend) {
-      try {
-        for (const group of groups) {
-          if (!isGroupWritable(group)) {
-            settleGroup(group, false);
-            continue;
-          }
-          if (group.payload) {
-            externalBackend.writeInput(mirror.sessionName, group.payload);
-          }
-          if (group.appendEnter) {
-            if (!isGroupWritable(group)) {
-              settleGroup(group, false);
-              continue;
-            }
-            externalBackend.writeInput(mirror.sessionName, '\r');
-          }
-          settleGroup(group, true);
-        }
-      } catch (error) {
-        for (const item of unresolved) {
-          item.reject(error);
-        }
-      } finally {
-        pending.flushing = false;
-        if (pending.items.length === 0) {
-          liveMirrorInputBatches.delete(mirrorKey);
-        } else {
-          schedulePendingLiveMirrorInput(mirrorKey);
-        }
-      }
-      return;
-    }
-
-    try {
-      const target = buildExactTmuxPaneTarget(mirror.sessionName);
-      for (let groupIndex = 0; groupIndex < groups.length; groupIndex += 1) {
-        const group = groups[groupIndex]!;
-        if (!isGroupWritable(group)) {
-          settleGroup(group, false);
-          continue;
-        }
-        if (group.payload) {
-          await runTmuxAsync(['send-keys', '-t', target, '-l', '--', group.payload]);
-        }
-        if (group.appendEnter) {
-          if (!isGroupWritable(group)) {
-            settleGroup(group, false);
-            continue;
-          }
-          await runTmuxAsync(['send-keys', '-t', target, 'Enter']);
-        }
-        settleGroup(group, true);
-        if (groupIndex < groups.length - 1) {
-          await sleepTmuxWriteSettleAsync();
-        }
-      }
-    } catch (error) {
-      for (const item of unresolved) {
-        item.reject(error);
-      }
-    } finally {
-      pending.flushing = false;
-      if (pending.items.length === 0) {
-        liveMirrorInputBatches.delete(mirrorKey);
-      } else {
-        schedulePendingLiveMirrorInput(mirrorKey);
-      }
-    }
-  }
-
-  function schedulePendingLiveMirrorInput(mirrorKey: string) {
-    const pending = liveMirrorInputBatches.get(mirrorKey);
-    if (!pending || pending.scheduled || pending.flushing) {
-      return;
-    }
-    pending.scheduled = true;
-    queueMicrotask(() => flushPendingLiveMirrorInput(mirrorKey));
-  }
-
-  function enqueueLiveMirrorInput(
+  async function writeBackendInputGroup(
     sessionName: string,
     payload: string,
     appendEnter: boolean,
-    shouldWrite?: () => boolean,
     backendKind?: TerminalControlBackendKind,
   ) {
-    const mirrorKey = deps.getMirrorKey(sessionName, backendKind === 'herdr' ? 'herdr' : 'tmux');
-    let pending = liveMirrorInputBatches.get(mirrorKey);
-    if (!pending) {
-      pending = {
-        items: [],
-        scheduled: false,
-        flushing: false,
-      };
-      liveMirrorInputBatches.set(mirrorKey, pending);
+    const externalBackend = resolveExternalBackend(backendKind);
+    if (externalBackend) {
+      if (payload) {
+        externalBackend.writeInput(sessionName, payload);
+      }
+      if (appendEnter) {
+        externalBackend.writeInput(sessionName, '\r');
+      }
+      return;
     }
-    const result = new Promise<boolean>((resolve, reject) => {
-      pending?.items.push({
-        payload,
-        appendEnter,
-        shouldWrite,
-        resolve,
-        reject,
-      });
-    });
-    schedulePendingLiveMirrorInput(mirrorKey);
-    return result;
+    const target = buildExactTmuxPaneTarget(sessionName);
+    if (payload) {
+      await runTmuxAsync(['send-keys', '-t', target, '-l', '--', payload]);
+    }
+    if (appendEnter) {
+      await runTmuxAsync(['send-keys', '-t', target, 'Enter']);
+    }
   }
 
-  // R3 closeout: caller MUST invoke this on transport close / mirror destroy /
-  // session detach to evict any pending input items for that mirror. Items
-  // already flushing are not touched; their promise resolution is driven by
-  // the in-flight tmux spawn.
-  // Returns the number of items evicted for telemetry.
-  function disposeLiveMirrorInputBatch(sessionName: string, reason: string, backendKind?: TerminalControlBackendKind) {
-    const mirrorKey = deps.getMirrorKey(sessionName, backendKind === 'herdr' ? 'herdr' : 'tmux');
-    const pending = liveMirrorInputBatches.get(mirrorKey);
-    if (!pending) {
-      return 0;
-    }
-    let evicted = 0;
-    if (!pending.flushing) {
-      const items = pending.items.splice(0);
-      for (const item of items) {
-        item.resolve(false);
-        evicted += 1;
-      }
-      liveMirrorInputBatches.delete(mirrorKey);
-    } else {
-      // flushing=true: in-flight tmux spawn cannot be cancelled; drain the
-      // items buffer so any further enqueue starts clean. The in-flight spawn
-      // resolves naturally; new enqueue creates a fresh batch entry.
-      const remaining = pending.items.splice(0);
-      for (const item of remaining) {
-        item.resolve(false);
-        evicted += 1;
-      }
-    }
-    deps.daemonRuntimeDebug?.('input-dispose', {
-      mirrorKey,
-      reason,
-      evicted,
-    });
-    return evicted;
+  function resolveBackendInputMaxChunkBytes() {
+    return resolveExternalBackend(deps.defaultBackend || (deps.wezTermBackend ? 'wezterm' : 'tmux'))
+      ? TERMINAL_INPUT_CHUNK_BYTES
+      : TERMINAL_INPUT_TMUX_WRITE_CHUNK_BYTES;
   }
 
   function listTmuxSessions(backendKind?: TerminalControlBackendKind) {
@@ -613,19 +342,26 @@ export function createTerminalControlRuntime(
       .filter((line) => Boolean(line) && !deps.hiddenTmuxSessions.has(line));
   }
 
-  function listTerminalSessions() {
-    const sessions = new Set<string>();
+  function listTerminalSessionCatalog() {
+    const entries: TerminalSessionCatalogEntry[] = [];
     if (deps.defaultBackend !== 'herdr') {
       for (const sessionName of listTmuxSessions('tmux')) {
-        sessions.add(sessionName);
+        entries.push({ name: sessionName, backend: 'tmux' });
       }
     }
     if (deps.backendRuntimes?.herdr || deps.defaultBackend === 'herdr') {
       for (const sessionName of listTmuxSessions('herdr')) {
-        sessions.add(sessionName);
+        entries.push({ name: sessionName, backend: 'herdr' });
       }
     }
-    return [...sessions].sort((left, right) => left.localeCompare(right));
+    return entries.sort((left, right) => {
+      const nameOrder = left.name.localeCompare(right.name);
+      return nameOrder || left.backend.localeCompare(right.backend);
+    });
+  }
+
+  function listTerminalSessions() {
+    return [...new Set(listTerminalSessionCatalog().map((entry) => entry.name))].sort((left, right) => left.localeCompare(right));
   }
 
   function resolveTerminalSessionBackend(sessionName: string): Exclude<TerminalControlBackendKind, 'wezterm'> {
@@ -657,7 +393,11 @@ export function createTerminalControlRuntime(
       return externalBackend.createSession({ sessionName: input, cwd }).sessionName;
     }
     const sessionName = deps.sanitizeSessionName(input || deps.defaultSessionName);
-    const args = ['new-session', '-d', '-s', sessionName];
+    const args = [
+      'new-session', '-d', '-s', sessionName,
+      '-x', String(DEFAULT_MANUAL_TERMINAL_COLS),
+      '-y', String(DEFAULT_MANUAL_TERMINAL_ROWS),
+    ];
     if (cwd) {
       args.push('-c', cwd);
     }
@@ -702,10 +442,11 @@ export function createTerminalControlRuntime(
     runCommand,
     writeToTmuxSession,
     writeToLiveMirror,
-    enqueueLiveMirrorInput,
-    disposeLiveMirrorInputBatch,
+    writeBackendInputGroup,
+    resolveBackendInputMaxChunkBytes,
     listTmuxSessions,
     listTerminalSessions,
+    listTerminalSessionCatalog,
     resolveTerminalSessionBackend,
     createDetachedTmuxSession,
     closeDetachedTerminalSession,

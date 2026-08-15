@@ -1,11 +1,29 @@
 // @vitest-environment jsdom
 
 import { useEffect } from 'react';
+import type { ComponentProps } from 'react';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Session, SessionGroupHistory } from '../lib/types';
 import { STORAGE_KEYS } from '../lib/types';
-import { TerminalPage } from './TerminalPage';
+import type { TerminalQuickBarProps } from '../components/terminal/TerminalQuickBar';
+import type { TerminalDebugOverlayProps } from '../lib/plugin-debug-console/debug-console-contract';
+import { TerminalPage as TerminalPageBase } from './TerminalPage';
+import { TerminalDebugOverlay } from './TerminalPageDebugOverlay';
+import { renderTerminalShellUi } from '../lib/plugin-host/terminal-shell-ui-plugin';
+
+function TerminalPage(props: ComponentProps<typeof TerminalPageBase>) {
+  return (
+    <TerminalPageBase
+      {...props}
+      renderTerminalShell={props.renderTerminalShell || renderTerminalShellUi}
+    />
+  );
+}
+
+const renderDebugConsole = (props: TerminalDebugOverlayProps) => (
+  <TerminalDebugOverlay {...props} />
+);
 
 const debugSnapshotState = vi.hoisted(() => ({
   registrations: new Map<string, number>(),
@@ -113,24 +131,16 @@ vi.mock('../components/terminal/SessionScheduleSheet', () => ({
   SessionScheduleSheet: () => null,
 }));
 
-vi.mock('../components/terminal/TerminalQuickBar', () => ({
-  TerminalQuickBar: ({
-    onToggleDebugOverlay,
-    onToggleAbsoluteLineNumbers,
-  }: {
-    onToggleDebugOverlay?: () => void;
-    onToggleAbsoluteLineNumbers?: () => void;
-  }) => (
-    <div data-testid="terminal-quickbar">
-      <button type="button" onClick={() => onToggleDebugOverlay?.()}>
-        状态
-      </button>
-      <button type="button" onClick={() => onToggleAbsoluteLineNumbers?.()}>
-        行号
-      </button>
-    </div>
-  ),
-}));
+const renderQuickBar = (props: TerminalQuickBarProps) => (
+  <div data-testid="terminal-quickbar">
+    <button type="button" onClick={() => props.onToggleDebugOverlay?.()}>
+      状态
+    </button>
+    <button type="button" onClick={() => props.onToggleAbsoluteLineNumbers?.()}>
+      行号
+    </button>
+  </div>
+);
 
 vi.mock('../components/TerminalView', () => ({
   TerminalView: ({
@@ -233,6 +243,8 @@ function renderTerminalPage(
       onResize={vi.fn()}
       onTerminalInput={vi.fn()}
       onTerminalViewportChange={vi.fn()}
+      renderDebugConsole={renderDebugConsole}
+      renderQuickBar={renderQuickBar}
       quickActions={[]}
       shortcutActions={[]}
       sessionDraft=""
@@ -300,6 +312,8 @@ describe('TerminalPage renderer scope', () => {
         onResize={vi.fn()}
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
+        renderDebugConsole={renderDebugConsole}
+        renderQuickBar={renderQuickBar}
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
@@ -413,6 +427,8 @@ describe('TerminalPage renderer scope', () => {
         onResize={vi.fn()}
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
+        renderDebugConsole={renderDebugConsole}
+        renderQuickBar={renderQuickBar}
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
@@ -468,6 +484,8 @@ describe('TerminalPage renderer scope', () => {
         onResize={vi.fn()}
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
+        renderDebugConsole={renderDebugConsole}
+        renderQuickBar={renderQuickBar}
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""
@@ -531,6 +549,8 @@ describe('TerminalPage renderer scope', () => {
         onResize={vi.fn()}
         onTerminalInput={vi.fn()}
         onTerminalViewportChange={vi.fn()}
+        renderDebugConsole={renderDebugConsole}
+        renderQuickBar={renderQuickBar}
         quickActions={[]}
         shortcutActions={[]}
         sessionDraft=""

@@ -4,7 +4,7 @@
 
 > 补充：transport 生命周期已单独冻结在  
 > `docs/decisions/2026-04-28-terminal-transport-session-lifecycle-truth.md`。  
-> 本文档只负责 `daemon mirror / buffer manager / renderer / UI shell` 四层内容真相。
+> 本文档只负责 `daemon mirror / buffer manager / sparse buffer / renderer window / DOM renderer / terminal shell / UI shell` 内容真相。
 
 ## 决策
 
@@ -14,7 +14,10 @@ terminal 链路固定为四层独立模型：
 tmux truth
   -> daemon server
   -> client buffer manager
-  -> renderer
+  -> client sparse buffer
+  -> renderer window
+  -> DOM renderer
+  -> terminal shell
   -> UI shell
 ```
 
@@ -22,8 +25,10 @@ tmux truth
 
 1. **server 独立**：只 mirror tmux truth，只回答 head 和 range
 2. **buffer manager 独立**：只管和 daemon 同步 + 本地 sparse buffer / gap repair，不管渲染状态
-3. **renderer 独立**：只管 render window / visible range，不管 buffer 拉取
-4. **UI shell 独立**：只管容器位置与裁切，不管内容真相
+3. **renderer window 独立**：只管 render window / visible range / immutable snapshot，不管 buffer 拉取
+4. **DOM renderer 独立**：只把 immutable render snapshot 投影成 DOM，不拥有 follow/reading/renderBottomIndex
+5. **terminal shell 独立**：只管 stage shell / status / quickbar / copy / keyboard lift，不拥有内容真相
+6. **UI shell 独立**：只管容器位置与裁切，不管内容真相
 5. **不允许 fallback / snapshot / planner / 第二语义**
 
 ---
@@ -66,6 +71,7 @@ renderer visible range gap
 - `buffer-head-request` 不再承担正常正文 live 刷新主链
 - `buffer-head-request` 只允许用于 `resume / reconnect / stale probe / health check`
 - daemon broadcast `buffer-sync` 时只允许基于 **mirror 当前真相** 广播，不得查看客户端 `active / follow / reading / visible range`
+- daemon 正文发布的 per-subscriber pending/backpressure/head cache/frame split 状态由 `daemon.buffer_publisher` 唯一 owner 管理；`terminal-mirror-runtime.ts` 只调用 publisher 接口，不得在 mirror 层重放订阅队列语义
 - `buffer-sync-request` 继续只服务 reading repair / explicit gap pull
 - 正常 push 与 reading pull 必须互不干扰；reading 不得反向驱动 daemon live capture 策略
 
@@ -315,12 +321,12 @@ buffer manager 是客户端唯一 buffer worker。
 
 - `migration_id`: `terminal.buffer_render.frame_assembly.rust`
 - `status`: `planned`
-- `current_owner`: `android/src/contexts/session-buffer-frame-assembly.ts#assembleBufferSyncFrameChunk`
+- `current_owner`: `android/src/lib/buffer-frame-assembly/session-buffer-frame-assembly.ts#assembleBufferSyncFrameChunk`
 - `planned_target`: `crates/zterm-terminal-core/src/buffer_frame_assembly.rs`
 - `planned_rust_semantics`: frame identity validation, bounded chunk assembly, exact absolute-row coverage, stale/interleave rejection, and one complete-frame output
 - `post_migration_ts_boundary`: WebSocket payload IO, per-session resource wiring, sparse-buffer commit, and renderer scheduling only
 - `activation`: create the Rust crate and target path, pass TS/Rust parity plus source-to-DOM atomicity gates, wire the bridge, change this entry to active, then physically remove the TS policy owner
-- `gate`: `android/src/lib/function-wiki-truth.test.ts` and `android/src/contexts/session-buffer-frame-assembly.test.ts`
+- `gate`: `android/src/lib/function-wiki-truth.test.ts` and `android/src/lib/buffer-frame-assembly/session-buffer-frame-assembly.test.ts`
 
 This is a target-state plan, not current runtime truth. Until every activation condition passes, the TypeScript symbol above remains the only frame-assembly owner.
 
@@ -411,9 +417,9 @@ reconnect 语义也固定：
 
 ---
 
-## 3. renderer
+## 3. renderer window / DOM renderer / terminal shell
 
-renderer 只消费本地内容池，不驱动 transport。
+renderer window 只消费本地内容池，不驱动 transport。
 
 ### 3.1 renderer 真相
 
@@ -437,6 +443,16 @@ renderWindow = [renderTopIndex, renderBottomIndex)
 
 并且 renderer 必须把这个 visible range 声明给 buffer manager；
 buffer manager 不得自行反推 renderer 当前窗口。
+
+### 3.1.1 DOM renderer projection
+
+- `client.dom_renderer` 只把 `resource.renderer_window` 的 immutable snapshot 投影成 `TerminalView` / `VisibleRow` / `TerminalPreviewRow` / mirror-fixed zoom-pan / cell render / theme DOM。
+- 它不持有 `follow / reading / renderBottomIndex / visible range / request policy`，不得修改 sparse truth 或请求 transport。
+
+### 3.1.2 terminal shell projection
+
+- `client.terminal_shell` 拥有 stage shell、shell skin、status、quickbar assembly、copy menu、keyboard lift。
+- 它消费 renderer/DOM projection 并发出用户 intent；不拥有 sparse/render truth，不直接访问 daemon/backend。
 
 ### 3.2 follow
 

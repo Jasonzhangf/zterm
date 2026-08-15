@@ -55,7 +55,7 @@ const SHEET_SURFACE = "var(--zterm-panel-surface)";
 const SHEET_ACCENT = "var(--zterm-panel-accent)";
 const SHEET_DANGER = "var(--zterm-panel-danger)";
 
-interface FileTransferSheetProps {
+export interface FileTransferSheetProps {
   open: boolean;
   remoteCwd: string;
   onClose: () => void;

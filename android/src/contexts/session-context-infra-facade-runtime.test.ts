@@ -1,12 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   createSessionTransportRuntimeStore,
-  ensureSessionTerminalChannel,
   getSessionTransportRuntime,
   setSessionTargetTerminalMuxReady,
   setTargetTerminalTransport,
   upsertSessionTransportRuntime,
 } from '../lib/session-transport-runtime';
+import { ensureSessionTerminalChannel } from '../lib/terminal-channel-mux-runtime';
 import type { Host } from '../lib/types';
 import { wrapSessionPayloadForTargetMuxRuntime } from './session-context-infra-facade-runtime';
 
@@ -45,7 +45,7 @@ function createMuxStore() {
   const targetKey = getSessionTransportRuntime(store, 'session-1')!.targetKey;
   const targetSocket = makeSocket('target-terminal');
   setTargetTerminalTransport(store, targetKey, targetSocket as any);
-  ensureSessionTerminalChannel(store, 'session-1', { channelId: 'channel-a' });
+  ensureSessionTerminalChannel(store.terminalChannels, 'session-1', { channelId: 'channel-a' });
   setSessionTargetTerminalMuxReady(store, 'session-1', true);
   return { store, targetSocket };
 }

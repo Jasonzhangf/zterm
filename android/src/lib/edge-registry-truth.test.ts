@@ -198,6 +198,8 @@ describe('edge registry truth gate', () => {
       'edge.client.daemon_target_transport_to_terminal_channel',
       'edge.daemon.terminal_channel_to_subscriber',
       'edge.daemon.mirror_store_to_client_buffer_frame_assembly',
+      'edge.daemon.mirror_store_to_buffer_publisher',
+      'edge.daemon.buffer_publisher_to_transport_subscriber',
       'edge.client_buffer_frame_assembly_to_client_sparse_buffer',
       'edge.client_sparse_buffer_to_renderer',
       'edge.client_touch_action_to_daemon_remote_window_stream',
@@ -318,5 +320,61 @@ describe('edge registry truth gate', () => {
     expect(sparseApplyEdge?.mainline_call_ids).toContain(
       'android_mainline:BufferFrameAssembly->BufferSparseApply',
     );
+  });
+
+  it('keeps the terminal data plane composed only of direct adjacent data edges', () => {
+    const registry = JSON.parse(read('docs/edge-registry.json')) as EdgeRegistry;
+    const adjacentDataEdges = [
+      {
+        edgeId: 'edge.daemon.mirror_store_to_buffer_publisher',
+        fromModule: 'daemon.mirror_store',
+        toModule: 'daemon.buffer_publisher',
+        requestChain: ['MirrorOut01ChangedSpan', 'PublisherIn01QueueChangedSpan'],
+      },
+      {
+        edgeId: 'edge.daemon.buffer_publisher_to_transport_subscriber',
+        fromModule: 'daemon.buffer_publisher',
+        toModule: 'daemon.transport_subscriber',
+        requestChain: ['PublisherIn02FlushPending', 'TransportOut01SubscriberBodyFrame'],
+      },
+      {
+        edgeId: 'edge.daemon.mirror_store_to_client_buffer_frame_assembly',
+        fromModule: 'daemon.mirror_store',
+        toModule: 'client.buffer_frame_assembly',
+        requestChain: ['BufferSyncIn01MirrorPatch', 'BufferSyncIn02FrameAssembly'],
+      },
+      {
+        edgeId: 'edge.client_buffer_frame_assembly_to_client_sparse_buffer',
+        fromModule: 'client.buffer_frame_assembly',
+        toModule: 'client.sparse_buffer',
+        requestChain: ['BufferSyncIn02FrameAssembly', 'BufferSyncIn03SparseApply'],
+      },
+      {
+        edgeId: 'edge.client_sparse_buffer_to_renderer',
+        fromModule: 'client.sparse_buffer',
+        toModule: 'client.renderer_window',
+        requestChain: ['RenderIn01SparseRows', 'RenderIn02VisibleCommit'],
+      },
+      {
+        edgeId: 'edge.client_renderer_to_ui_projection',
+        fromModule: 'client.dom_renderer',
+        toModule: 'client.terminal_shell',
+        requestChain: ['UiProjectionIn01RendererSnapshot', 'UiProjectionIn02TerminalSurface'],
+      },
+    ];
+
+    for (const expected of adjacentDataEdges) {
+      const edge = registry.edges.find((candidate) => candidate.edge_id === expected.edgeId);
+      expect(edge, expected.edgeId).toBeTruthy();
+      expect(edge?.status, `${expected.edgeId}:status`).toBe('active');
+      expect(edge?.relation_status, `${expected.edgeId}:relation`).toBe('direct');
+      expect(edge?.from_module, `${expected.edgeId}:from`).toBe(expected.fromModule);
+      expect(edge?.to_module, `${expected.edgeId}:to`).toBe(expected.toModule);
+      expect(edge?.request_chain, `${expected.edgeId}:request_chain`).toEqual(
+        expected.requestChain,
+      );
+      expect(edge?.mainline_call_ids, `${expected.edgeId}:mainline_call_ids`).not.toEqual([]);
+      expect(edge?.error_chain, `${expected.edgeId}:error_chain`).not.toEqual([]);
+    }
   });
 });

@@ -59,11 +59,21 @@ description: "terminal buffer / render / daemon mirror 真源与门禁"
 tmux truth
   -> daemon server
   -> client buffer manager
-  -> renderer
+  -> client sparse buffer
+  -> renderer window
+  -> DOM renderer
+  -> terminal shell
   -> UI shell
 ```
 
 四层只允许单向依赖，禁止越层漂移。
+
+### 物理 owner 分层
+
+- `client.renderer_window` 只拥有 follow / reading / renderBottomIndex / visible range / immutable render snapshot / next-RAF commit。
+- `client.dom_renderer` 拥有 `TerminalView` / `VisibleRow` / `TerminalPreviewRow` / mirror-fixed zoom-pan / shared cell render / terminal theme 的 DOM 投影，禁止请求 transport、修改 sparse truth 或自己决定 follow/reading/renderBottomIndex。
+- `client.terminal_shell` 拥有 stage shell、shell skin、status、quickbar assembly、copy menu、keyboard lift，只能消费 renderer/DOM projection 并发出 shell intent。
+- 禁止 `client.renderer_window` 直接承担 DOM 投影，也禁止 `client.terminal_shell` 持有 sparse/render 真源。
 
 ## 测试闭环阶梯：证明范围必须逐层匹配
 
@@ -175,9 +185,13 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
 - daemon 内部也必须 **读写解耦**
   - 写侧：`tmux -> mirror store`
   - 读侧：`mirror store -> head/range reply`
-- mirror 写侧也不得再拆第二语义：
-  - 不允许 `history capture + visible capture + concat`
-  - 只允许 **single-capture -> canonicalize -> mirror store**
+- mirror 写侧默认不得再拆第二语义：
+  - tmux / WezTerm 禁止 `history capture + visible capture + concat`，只允许
+    **single-capture -> canonicalize -> mirror store**
+  - Herdr 是唯一显式例外：官方 `pane read --source recent --lines N` 是
+    adapter 的 history tail truth，canonical frame 的可见 tail 是 live
+    overlay。两者只能在 Herdr adapter 内合并成一个 mirror snapshot；mirror
+    store 层不得再拆第二语义，不得把 1000 行 history 放进 33ms capture loop。
   - 若 tmux 正在中间刷新，writer 必须执行 **结构稳定才发布**：只有连续两次 canonical snapshot 的 absolute window / geometry 稳定，或已与当前 mirror 完整一致，才允许写 mirror；发布内容取第二次最新 snapshot。禁止要求动态 TUI 内容逐字完全一致，否则 `top/htop/vim` 持续变化会多次重采样并进入 failure backoff，表现为刷新很慢。
   - 不允许基于 **内容 overlap / repeated text** 推断新的 absolute anchor
   - mirror absolute window 只能来自 tmux authoritative available window；内容相似性最多用于 debug，不得进入写侧真相
@@ -190,13 +204,13 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
   - `mirror body changed -> push buffer-sync diff`
   - diff 只允许基于 daemon mirror 前后版本计算
   - **不得**基于客户端状态算 diff
-- daemon live 性能调度只允许消费 daemon 自己的物理事实：
+- daemon mirror capture 调度只允许消费 daemon 自己的物理事实：
   - mirror capture/canonicalize duration
-  - transport kind / readyState / buffered bytes / send error
-  - subscriber transport count
+  - ready body-subscribed subscriber transport count
   - daemon failure/backoff fact
   - 禁止消费 `active tab / foreground / follow / reading / visible range / viewport / pane layout`
-- 有健康 subscriber 的 ready mirror 必须保持 active capture cadence；不得因为最近 1.5s 没观察到 body change 就退到 idle cadence。idle 只属于无 subscriber、失败/backoff、transport backpressure 或 capture cost 过高等 daemon 物理事实；否则 TUI/status bar 的下一次原地更新会被 polling 先天限速。
+  - transport buffered bytes / send error 只由 `daemon.buffer_publisher` 的 per-subscriber pending/flush 消费，不得拖低 mirror capture cadence
+- 有健康 subscriber 的 ready mirror 必须保持 active capture cadence；不得因为最近 1.5s 没观察到 body change 就退到 idle cadence。idle 只属于无 subscriber、失败/backoff 或 capture cost 过高等 daemon 物理事实；transport backpressure 由 `daemon.buffer_publisher` per-subscriber 处理，不得降低 mirror capture cadence；否则 TUI/status bar 的下一次原地更新会被 polling 先天限速。
 - daemon 不得长期保存 UI / renderer width policy；`adaptive-phone` 只能进入唯一 adaptive width lease owner：
   - `adaptive-phone` connect/resize 注册当前 physical transport subscriber 的 `{ cols, heartbeatAt }`。
   - 同一 tmux mirror 多个 adaptive lease 必须按 active holders 聚合最窄 `cols`，并只在 `applyAdaptiveTmuxWidth()` 内请求 `tmux resize-window -x <cols>` 让 tmux 自己重排。
@@ -217,6 +231,7 @@ tmux -> daemon mirror writer -> daemon mirror store -> read api -> client
   - changed span 序列化后超过单消息预算时，必须按 absolute row 连续切成同 revision 多个 `buffer-sync`，覆盖原 span 的每一行；禁止裁成 live tail，否则超过一屏的大刷新会静默丢掉 source rows；
   - high/low water 必须迟滞；send error/non-open/旧 generation 不得清 pending 或推进 sent revision；
   - 一个 slow subscriber 不得降低 healthy subscriber cadence；输出停止并 drain 后必须到达 daemon latest revision。
+  - 以上 subscriber 发布状态唯一 owner 是 `daemon.buffer_publisher`（`src/server/daemon-buffer-publisher-runtime.ts`）；`terminal-mirror-runtime.ts` 只调用 publisher 的 broadcast/flush 接口，不得重放 pending/backpressure/head cache/frame split 语义。
 - mirror capture 允许的性能优化只有同一 writer 内的 authoritative hot-range patch：
   - range 至少覆盖完整 mutable pane，absolute anchor 只来自 tmux `pane identity/history_size/rows/cols/alternate/captured count`；
   - 已确认旧 history 只能作为同一 mirror store 内的 retained prefix；
@@ -752,6 +767,7 @@ tmux truth
 - 若 renderer/client gate 过了但真机仍出现 **TUI/input 旧行漏刷或上移**，下一步必须测 daemon capture 主入口而不是只测 helper：`captureMirrorAuthoritativeBufferFromTmux()` 必须实际调用稳定化主线，覆盖 transient half-frame 不发布；同一 mirror 的 `totalAvailableLines` 必须以当前 mirror end 为单调下界，避免 alternate-screen 短可见窗口把 absolute tail 拉回 pane height。
 - 若现场表现为“**临时错误/短暂不可用导致 tab 自动关闭**”，必须先补 session lifecycle 红测再修：`tmux_session_unavailable` / 网络短断 / handshake 临时失败只能进入 retryable error/reconnect，禁止发 `SESSION_STATUS_EVENT(type='closed')`，也禁止触发 open-tab prune；只有明确 terminal close 语义才允许进入 tab close 链。
 - 若现场要排 Android IME 抬高 / 安装升级 timeout，debug 观测链也必须服从唯一真源：只允许 `client snapshot source -> collectClientDebugSnapshot -> active session WS debug-snapshot -> daemon store` 这一条链；禁止再开第二条 relay/debug transport 或散落页面内临时上报。
+- `DebugRegistry` duplicate registration 是 fail-fast；测试文件只要 import 真实 `client-debug-snapshot` 并 render 真实 `TerminalPage/App`，`resetClientDebugSnapshotForTests` 与 `cleanup` 就必须放 file scope。把 hooks 放在某个 describe 内会让后续 describe 残留 producer，报 `duplicate debug producer: terminal-page`，此时先修测试隔离，不能把生产 fail-fast 改成静默替换。
 - explicit terminal input 不能只依赖 lifecycle/heartbeat 去发现远端回显；input payload 必须同步发出，首个未完成 `pendingInputTailRefresh` 的 `buffer-head` 请求必须放到 coalesced microtask，后续 burst input 在 pending 清除前合并，禁止每键强制刷 head 或把 head 请求绑回 key event stack。
 - Android 物理键盘不能依赖 DOM textarea focus 路径；native `ImeAnchor key` 必须直接走 shared terminal keyboard resolver 并写入 active session。plain letter 留给 editable/IME 文本路径，Ctrl/Alt 组合键和方向/Esc 等特殊键走硬件 key path；红测必须让 `allowDomFocus=false` 时 `Ctrl+C` 仍到达 terminal input。
 - Android IME 改变 shell geometry 时，IME 只能影响外层容器 / quickbar 位置，不能进入 TerminalView 内容 viewport 计算链；页面层必须冻结 terminal content geometry，禁止用 IME 高度生成 renderer layout refresh / viewport demand，也禁止触发 upstream `onResize` 改 tmux rows。
@@ -766,7 +782,7 @@ tmux truth
 - 若现场表现为“抽屉切 session 先显示连接失败、再点一次又能连上”，先审 `terminal.transport_lifecycle` 的 retryable reconnect projection：retryable handshake/control attach failure 和 `scheduleReconnectRuntime()` 的 retryable reconnect start 都只能保持 `reconnecting` 并继续 retry，禁止 `emitSessionStatus(..., 'error')` 投给 UI。只有 nonretryable/auth rejected、auto reconnect explicitly blocked、或显式 retry exhausted 才能投 terminal error；不要在 drawer/UI 加二次过滤。
 - 前台恢复 / 自动重连的 `reconnectAttempt` 是标准流程内部计数，不是用户可见故障事实。只要状态仍是 `reconnecting`，顶部只能显示中性进度（如 `正在重连` / `正在同步控制通道`），不得因 attempt 次数、probe timeout、RTC data channel closed 等中间失败显示错误浮窗。只有 offline、typed terminal `error`、auth/nonretryable failure 才能进入错误 banner。
 - drawer/tab switch 是显式用户 resume intent，必须一路传到 `SessionContext.switchSession(..., { refreshSource:'explicit-resume' })`。只在 open-tab 层标 `switchRuntime:'explicit-resume'` 不够；如果 provider facade 固定转成 `active-reentry`，同一次用户选择会被拆成两套资源语义。内部 lifecycle active change 才默认 `active-reentry`。
-- terminal input 只允许消费当前 `SessionTransportResource.socket` 并同步写入；它不是 reconnect/open-intent owner。禁止在 input runtime 里调用 `reconnectSession`、`probeOrReconnectStaleSessionTransport`、`shouldReconnectQueuedActiveInput` 或 stale pending-open 补偿。缺 transport / pending-open / backpressure 必须显式 drop/debug，恢复交给 `terminal.transport_lifecycle`。
+- terminal input 只允许消费当前 `SessionTransportResource.socket` 并同步写入；它不是 reconnect/open-intent owner。禁止在 input runtime 里调用 `reconnectSession`、`probeOrReconnectStaleSessionTransport`、`shouldReconnectQueuedActiveInput` 或 stale pending-open 补偿，也禁止 input owner 直接 `ws.close()` / 替换物理 transport。缺 transport / pending-open / backpressure 必须显式 drop/debug，transport close/replace/reconnect 恢复唯一 owner 是 `terminal.transport_lifecycle`。
 - active `buffer-head` 若早于 renderer visible range 到达，buffer owner 必须按 daemon head bounds 直接 bootstrap 当前 tail 的 `buffer-sync` body；默认拉多屏 tail 并受 `availableStartIndex/latestEndIndex` 约束，避免最后一屏为空白时把健康 session 误渲成黑屏。非 active / 无 visible demand 不拉正文。禁止把 renderer layout 当首包前置条件，也禁止用 hidden cache window 冒充 visible fetch window。
 - `buffer-head` 只能更新 head/cursor metadata；不得触发正文 render commit。正文 repaint 只来自 `buffer-sync apply`，否则会把旧 body 重新投影成短暂闪屏。
 - `buffer-head` 也不得提前清理 pending body request 权威。若 `tail-refresh` / `reading-repair` 的 `buffer-sync-request` 已发出，head 先到、同 revision body 后到是合法顺序；`lastSyncRequestAtRef` 只能由 body apply/drop 路径消费。否则后到 fresh body 会被误判成 unsolicited same-revision stale overwrite，表现为输入框/可见旧行不刷新。
@@ -789,10 +805,11 @@ tmux truth
 - 多终端快捷预览只能是 UI projection：数据链必须保持 `tmux -> daemon mirror -> client sparse buffer -> immutable render store -> shared TerminalView -> preview DOM`。
 - 禁止 preview 自建 ANSI/cell/cursor parser、截图/文本 cache、transport/reconnect、resize、viewport writeback、width-mode write、tmux geometry write 或 buffer reset。
 - Preview tile 必须把 `TerminalView` 作为 read-only shared renderer 使用：`active=false`、`live=true`、无 input/resize/viewport callbacks、`allowDomFocus=false`、`mirror-fixed`。
+- Secondary preview 的每行必须是同一 passive row 投影：复用共享 `terminalCellStyle()`/row view-model，按相同 style run 聚合成少量 span，保留 ANSI fg/bg/flags；禁止退回纯文本 `theme.foreground` 或另写第二套 color parser。
 - Preview selection 持久化时必须存完整 open-session identity，并在恢复时至少匹配 `sessionId + bridgeHost + bridgePort + sessionName`，有 `daemonHostId` 时也必须匹配；stale target 是失效选择，不是隐式 open/reconnect intent。
 - Preview 打开才允许把 selected ids 临时加入 body subscription live set；关闭/后台必须回到 baseline。黑盒 gate 必须自动比较 tmux source、daemon/client sparse truth、render store 和 preview DOM，并验证 subscriber lifecycle。
 - App foreground truth 是唯一的 preview/body-demand 输入；后台态必须把 preview 选中集拉回 baseline，不能继续维持额外 body subscription、视频解码或轮询。任何 offscreen 重媒体流都必须由同一个 foreground gate 停掉，禁止再长出第二套后台 timer/observer 补偿。
-- Android 原生后台服务只能是通知面；禁止 `PARTIAL_WAKE_LOCK`、`WAKE_LOCK` 权限、忽略电池优化权限，禁止用 native service 替 transport owner 做后台保活。
+- Android 原生后台服务只允许作为平台执行支持：Activity 停止且 retained sessions 存在时，可持有通知面与一个进程级 `PARTIAL_WAKE_LOCK`（保留 `WAKE_LOCK` 权限）供现有 control-plane / target-transport owner 做低频心跳；必须保持 bounded lifecycle，`sessionCount <= 0` / stop 即 release 并 `stopForeground(true)` / `stopSelf()`。它禁止拥有 socket、route、session truth，禁止请求忽略电池优化权限，禁止替 transport owner 开/建连接、做 body/video 订阅或后台保活。
 - Preview tile activation 必须走唯一 page owner：先把目标 session 投进当前 focused session-group slot，再发 active-session switch。只切 active session 不改 viewport projection，会让输入/live 到新 session、真实 shell 仍显示旧 center session；preview 关闭后旧 center 不再 live，表现为“preview 刷新但进入 shell 不刷新”。
 - Source-to-shell 黑盒 gate 必须覆盖 preview grid -> real `TerminalStageShell` 替换后继续刷新：选中 session 新 marker 出现在真实 shell DOM，旧 session marker 被排除，物理 socket 不重建，subscribers 恢复 baseline。
 - Preview tile 长按替换只改 ordered selection：420ms 长按必须有移动阈值，触发或移动后都要抑制 synthetic click；菜单只列当前 open 且未选中的 session，替换保持原 slot 顺序。禁止借替换触发 active switch、socket open owner、buffer reset 或 renderer 写入。
@@ -810,6 +827,94 @@ tmux truth
 - `wezterm cli --prefer-mux send-text --pane-id <id> --no-paste` 只允许通过 stdin 写真实 terminal input，禁止把用户输入塞进 shell args；已验证 Enter / Backspace / arrow escape / raw TUI / Codex TUI text entry。
 - WezTerm backend 是显式 backend selection，不是 tmux fallback；Windows 默认 `wezterm`，非 Windows 默认 `tmux`，未知 backend 必须显式报错。
 - 已知限制：ETX/Ctrl+C 可送到 raw-mode/TUI，但不能当作 Windows console control event 中断 `cmd.exe` 子进程；不要宣称完整键盘等价。
+
+## 2026-08-14 Terminal Source Adapter Boundary
+
+- daemon mirror 只消费统一 `TerminalSourceAdapter.readSnapshot()` 产出的
+  `TerminalSourceMirrorSnapshot`；mirror 主链禁止散点执行 tmux/Herdr/WezTerm
+  source 命令，source 差异全部收口到 adapter。
+- adapter snapshot 必须携带 daemon-owned absolute range / geometry / cursor
+  metadata；absolute range 只能来自 adapter/source-side canonicalizer，禁止用
+  内容 overlap / repeated text 推断 anchor。
+- 未知/不支持 source 必须显式失败；禁止把 unknown source 默认落到 tmux。
+- adapter 只承载 daemon source 侧事实，禁止把 client viewport/follow/reading/
+  active tab/foreground 带进 daemon 或 adapter。
+- adapter snapshot 的 `revision` 只是 source-side 信息字段；zterm
+  `mirror.revision` 由 `daemon.mirror_store` 的 runtime scheduling owner 唯一
+  推进，禁止让 source revision 直接变成 zterm revision broadcast，也禁止
+  `daemon.mirror_writer` 推进 revision。
+- validated source capture 与 authoritative mirror snapshot commit write 由
+  `daemon.mirror_writer` 唯一执行；`resource.mirror_store` 仍是 canonical
+  mirror truth / revision / runtime scheduling 的唯一 owner。adapter 只是把
+  source readback 归一成 mirror snapshot，不新增第二真源或第二 writer。
+
+## 2026-08-14 Herdr History + Live Latency Boundary
+
+- Herdr history truth 是官方 `pane read <pane_id> --source recent --lines
+  <min(terminalCacheLines,1000)> --format ansi --raw` 的 adapter-owned tail
+  snapshot；canonical frame 仍只提供 live visible rows / cursor / geometry /
+  cursorKeysApp / alternateScreen。
+- `pane get.scroll` 的 `maxOffsetFromBottom + viewportRows` 只作为 source
+  total-row hint 推进 daemon-owned tail window；禁止把它当成 absolute line
+  identity，禁止用内容 overlap 推断 index。
+- per-session `sourceEndIndex` 只单调增长，`bufferStartIndex` 必须等于
+  `sourceEndIndex - bufferLines.length`，`availableStartIndex` 同
+  `bufferStartIndex`；Herdr 0.8.0 只能提供最近 1000 行，禁止本地拼接或
+  滚动遍历伪造更早历史。
+- host 在底部且 frame geometry 与 history geometry 匹配时，才允许用 live
+  visible rows 替换 merged buffer 尾部；host scrolled 时不得 overlay，cursor
+  必须显式 null，并立即触发下一次 history 刷新。
+- history 刷新必须低频（默认 1000ms；attach / host scroll / geometry change
+  立即），`pane read` 1000 行禁止进入 33ms loop；live frame 到达通过
+  `onLiveActivity` 唤醒 mirror live sync，无 body subscriber 时由现有
+  `scheduleMirrorLiveSync` 停止，不产生空转。
+- `pane read` 失败或返回空必须显式失败，禁止 frame-only 24 行兜底；官方
+  1000 行上限写入显式 capability gap `herdr-history-limit-1000`。
+- `pane get` scroll metrics 从每帧同步读取改为低频节流（默认 100ms），
+  metrics 读取失败不得丢弃 frame。
+
+## 2026-08-14 Visible Repair Ledger
+
+- visible non-gap repair 必须按
+  `sessionId + visibleRange + tailEndIndex + targetRevision` 维护 per-session
+  ledger：`pending -> dispatched -> fulfilled`，`dispatched` 超时未收到完整
+  visible-window authoritative response 可再次 dispatch，但不能无限放大。
+- repair 未实际写入 wire 时保持 `pending`；send-fail/no-socket 不清 ledger。
+- 只有覆盖完整 visible range 的 body apply、显式 session cleanup、或
+  authoritative revision epoch reset 才允许清除/fulfill。
+- 禁止用全局 `gapRanges` 或 `localRevision == daemonHeadRevision` 代替行级
+  freshness；sparse 后续 revision 不得掩盖旧 non-gap visible 行。
+- fulfilled / superseded 是历史账目，不得抑制新的 repair demand；只有 active
+  `pending` / `dispatched` 且未超过 stale timeout 才在重发窗口内抑制，否则后续
+  sparse demand 必须创建新 ledger entry 继续收敛。
+- 完整 authoritative body apply 只精确 fulfill 仍 active 的 ledger entry：按
+  entry 自身 `targetRevision` 标记 fulfilled，不创建以 response revision 为
+  key 的合成 entry；`payloadRevision >= entry.targetRevision` 且 payload
+  连续覆盖 entry 的 request range 才满足。
+- 红测必须覆盖：repair 丢失后仍收敛、repair 响应不完整仍 pending、
+  full response 只 clear 一次、unchanged visible rows 不 spam、fulfilled 后
+  新 sparse demand 不被旧账目永久压住。
+
+## 2026-08-14 Daemon Input Queue Boundary
+
+- `daemon.input_queue` 唯一 owner 是
+  `src/server/daemon-input-queue-runtime.ts`；receive validation、byte cap、
+  stale/session-required retryable nack、seq dedupe、enqueue/dispose、
+  backend write ordering 都在该文件加
+  `src/server/terminal-reliable-input-ack.ts`。
+- `terminal-message-runtime.ts` 只把 `input` 和 plain-text 帧转给 queue
+  owner；`terminal-control-runtime.ts` 只向 queue 暴露
+  `writeBackendInputGroup` / chunk budget，不再持有 queue internals。
+- queue 是唯一 daemon 输入写后端路径；mirror runtime 的 live input 也走同一
+  enqueue/dispose owner。禁止其他 handler 直接写 tmux/backend input。
+- 必须保持：payload 仍 string-only；stale/session-required 保留 retryable
+  nack；invalid/oversize 非 retryable；duplicate seq 不得重复写；coalescing/
+  顺序/chunk sizing/append-enter 边界不变；detach/close/destroy 必须 dispose
+  queued input。
+- 红测：`daemon-input-queue-runtime.test.ts`、
+  `terminal-message-runtime.test.ts`、
+  `terminal-control-runtime.input-queue.test.ts`、mirror/backpressure/
+  detached-session 回归。
 
 ## 9. Android copy-mode gate
 - WebView copy-mode 长按有两层 native gate：`setOnLongClickListener(v -> true)` 只管系统 ActionMode / 工具栏，`setLongClickable(false)` 才会停掉原生 haptic / selection 拦截，让 JS `onTouchStart` 的长按计时器真正启动。

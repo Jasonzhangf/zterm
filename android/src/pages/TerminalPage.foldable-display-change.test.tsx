@@ -2,7 +2,10 @@
 
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { TerminalPage } from "./TerminalPage";
+import type { ComponentProps } from "react";
+import { TerminalPage as TerminalPageBase } from "./TerminalPage";
+import type { TerminalQuickBarProps } from "../components/terminal/TerminalQuickBar";
+import { renderTerminalShellUi } from "../lib/plugin-host/terminal-shell-ui-plugin";
 
 // TerminalPage reads attachment counts from SessionContext (badge/drawer).
 // These page-level tests render TerminalPage directly without the app-level
@@ -56,19 +59,17 @@ vi.mock("../plugins/DeviceClipboardPlugin", () => ({ DeviceClipboardPlugin: { re
 vi.mock("../plugins/StoragePermissionPlugin", () => ({ StoragePermissionPlugin: { check: vi.fn(async () => ({ granted: true, mode: "manage-external-storage" })), request: vi.fn(async () => ({ granted: true, mode: "manage-external-storage" })) } }));
 vi.mock("../components/terminal/TerminalHeader", () => ({ TerminalHeader: () => <div data-testid="terminal-header" /> }));
 vi.mock("../components/terminal/TabManagerSheet", () => ({ TabManagerSheet: () => null }));
-vi.mock("../components/terminal/TerminalQuickBar", () => ({
-  TerminalQuickBar: ({ onToggleKeyboard, keyboardVisible, collapseAvailable, collapsed, onCollapsedChange }: any) => (
-    <div
-      data-testid="terminal-quickbar"
-      data-keyboard-visible={keyboardVisible ? "true" : "false"}
-      data-collapse-available={collapseAvailable ? "true" : "false"}
-      data-collapsed={collapsed ? "true" : "false"}
-    >
-      <button onClick={() => onToggleKeyboard?.()}>toggle-keyboard</button>
-      <button onClick={() => onCollapsedChange?.(true)}>collapse-quickbar</button>
-    </div>
-  ),
-}));
+const renderQuickBar = (props: TerminalQuickBarProps) => (
+  <div
+    data-testid="terminal-quickbar"
+    data-keyboard-visible={props.keyboardVisible ? "true" : "false"}
+    data-collapse-available={props.collapseAvailable ? "true" : "false"}
+    data-collapsed={props.collapsed ? "true" : "false"}
+  >
+    <button onClick={() => props.onToggleKeyboard?.()}>toggle-keyboard</button>
+    <button onClick={() => props.onCollapsedChange?.(true)}>collapse-quickbar</button>
+  </div>
+);
 vi.mock("../components/TerminalView", () => ({
   TerminalView: ({ sessionId }: { sessionId: string }) => (
     <div data-testid={"terminal-view-" + sessionId}>
@@ -85,6 +86,16 @@ vi.mock("../pages/TerminalPageDebugOverlay", () => ({ TerminalDebugOverlay: () =
 
 function makeProps(session: Session) {
   return { sessions: [session], activeSession: session, onSwitchSession: vi.fn(), onMoveSession: vi.fn(), onRenameSession: vi.fn(), onCloseSession: vi.fn(), onOpenConnections: vi.fn(), onOpenQuickTabPicker: vi.fn(), onResize: vi.fn(), onTerminalInput: vi.fn(), onTerminalViewportChange: vi.fn(), quickActions: [], shortcutActions: [], sessionDraft: "" };
+}
+
+function TerminalPage(props: ComponentProps<typeof TerminalPageBase>) {
+  return (
+    <TerminalPageBase
+      {...props}
+      renderQuickBar={props.renderQuickBar || renderQuickBar}
+      renderTerminalShell={props.renderTerminalShell || renderTerminalShellUi}
+    />
+  );
 }
 
 const wait = (ms: number) => act(async () => { await new Promise((r) => setTimeout(r, ms)); });

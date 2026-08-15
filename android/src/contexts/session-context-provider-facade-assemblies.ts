@@ -1,5 +1,5 @@
 import { useMemo } from 'react';
-import { CLIENT_RUNTIME_DEBUG_FLUSH_INTERVAL_MS } from '../lib/runtime-debug-flush';
+import { CLIENT_RUNTIME_DEBUG_FLUSH_INTERVAL_MS } from '../lib/runtime-debug-http-exporter';
 import { runtimeDebug } from '../lib/runtime-debug';
 import {
   createSessionLifecycleRuntime,
@@ -208,6 +208,7 @@ export function useSessionProviderFacadeAssemblies(
     getSessionScheduleState,
     getSessionDebugMetrics,
     manageTmuxSessionsOnOpenTransport,
+    queryTerminalSessionCatalogOnOpenTransport,
     sendMessageRaw,
     sendTargetHeartbeat,
   } = sessionPublicFacadeRuntime;
@@ -215,6 +216,7 @@ export function useSessionProviderFacadeAssemblies(
   const sessionInteractionRuntime = useMemo(() => createSessionInteractionRuntime({
     refs: {
       stateRef: options.stateRef,
+      imagePasteWaiterRuntimeRef: options.refs.imagePasteWaiterRuntimeRef,
       remoteScreenshotRuntimeRef,
       remoteWindowMessageRuntimeRef,
       remoteWindowReceiverRuntimeRef,
@@ -235,6 +237,7 @@ export function useSessionProviderFacadeAssemblies(
     core,
     core.daemonConnection,
     options.bridgeSettings,
+    options.refs.imagePasteWaiterRuntimeRef,
     options.stateRef,
     remoteScreenshotRuntimeRef,
     remoteWindowMessageRuntimeRef,
@@ -325,6 +328,7 @@ export function useSessionProviderFacadeAssemblies(
     getSession,
     getSessionDebugMetrics,
     manageTmuxSessionsOnOpenTransport,
+    queryTerminalSessionCatalogOnOpenTransport,
     sendMessageRaw,
     sendTargetHeartbeat,
   }), [
@@ -336,6 +340,7 @@ export function useSessionProviderFacadeAssemblies(
     getSessionDebugMetrics,
     getSessionScheduleState,
     manageTmuxSessionsOnOpenTransport,
+    queryTerminalSessionCatalogOnOpenTransport,
     moveSession,
     options.scheduleStates,
     reconnectAllSessions,

@@ -1,5 +1,7 @@
 import {
   buildTerminalMuxTargetMessage,
+  type TerminalSessionCatalog,
+  type TerminalSessionCatalogEntry,
   type TerminalMuxTargetClientMessage,
   type TerminalMuxTargetServerMessage,
 } from '@zterm/shared/protocol';
@@ -15,7 +17,7 @@ export interface PendingSessionTmuxTargetRequest {
   requestId: string;
   messageType: TerminalMuxTargetClientMessage['type'];
   timer: ReturnType<typeof setTimeout> | null;
-  resolve: (sessions: string[]) => void;
+  resolve: (sessions: string[], sessionCatalog?: TerminalSessionCatalogEntry[]) => void;
   reject: (error: Error) => void;
 }
 
@@ -27,6 +29,15 @@ function normalizeSessionNames(input: unknown) {
 
 function isSessionNameList(input: unknown): input is string[] {
   return Array.isArray(input) && input.every((item) => typeof item === 'string');
+}
+
+function isSessionCatalog(input: unknown): input is TerminalSessionCatalogEntry[] {
+  return Array.isArray(input) && input.every((entry) => (
+    !!entry
+    && typeof entry === 'object'
+    && typeof (entry as TerminalSessionCatalogEntry).name === 'string'
+    && ((entry as TerminalSessionCatalogEntry).backend === 'tmux' || (entry as TerminalSessionCatalogEntry).backend === 'herdr')
+  ));
 }
 
 function createTmuxTargetRequestId(sessionId: string, messageType: string) {
@@ -68,7 +79,17 @@ export function settleSessionTmuxTargetRequestRuntime(options: {
       });
       return true;
     }
-    request.resolve(normalizeSessionNames(options.message.payload.sessions));
+    const rawCatalog = options.message.payload.sessionCatalog;
+    if (rawCatalog !== undefined && !isSessionCatalog(rawCatalog)) {
+      request.reject(new Error('Malformed tmux target session catalog'));
+      options.runtimeDebug?.('session.tmux-target.malformed-catalog', {
+        sessionId: request.sessionId,
+        requestId,
+        requestType: request.messageType,
+      });
+      return true;
+    }
+    request.resolve(normalizeSessionNames(options.message.payload.sessions), rawCatalog);
     return true;
   }
   if (options.message.type === 'error') {
@@ -86,7 +107,7 @@ export function settleSessionTmuxTargetRequestRuntime(options: {
   return true;
 }
 
-export function manageTmuxSessionsOnOpenTransportRuntime(options: {
+interface OpenTransportRequestOptions {
   sessionId: string;
   message: TerminalMuxTargetClientMessage;
   pendingRequestsRef: { current: SessionTmuxTargetRequestStore };
@@ -95,7 +116,12 @@ export function manageTmuxSessionsOnOpenTransportRuntime(options: {
   sendSocketPayload: (sessionId: string, ws: BridgeTransportSocket, data: string | ArrayBuffer) => void;
   timeoutMs?: number;
   runtimeDebug?: (event: string, payload?: Record<string, unknown>) => void;
-}): Promise<string[] | null> {
+}
+
+function createOpenTransportRequestRuntime<T>(
+  options: OpenTransportRequestOptions,
+  resolveResult: (sessions: string[], sessionCatalog?: TerminalSessionCatalogEntry[]) => T,
+): Promise<T | null> {
   const resource = options.daemonConnection
     ? options.daemonConnection.readSessionResource(options.sessionId)
     : options.readSessionTransportResource(options.sessionId);
@@ -111,7 +137,7 @@ export function manageTmuxSessionsOnOpenTransportRuntime(options: {
       requestId,
       messageType: options.message.type,
       timer: null,
-      resolve,
+      resolve: (sessions, sessionCatalog) => resolve(resolveResult(sessions, sessionCatalog)),
       reject,
     };
     const timeoutMs = Math.max(1, Math.floor(options.timeoutMs || SESSION_TMUX_TARGET_REQUEST_TIMEOUT_MS));
@@ -147,4 +173,19 @@ export function manageTmuxSessionsOnOpenTransportRuntime(options: {
       request.reject(error instanceof Error ? error : new Error('Failed to send tmux target request'));
     }
   });
+}
+
+export function manageTmuxSessionsOnOpenTransportRuntime(
+  options: OpenTransportRequestOptions,
+): Promise<string[] | null> {
+  return createOpenTransportRequestRuntime(options, (sessions) => sessions);
+}
+
+export function queryTerminalSessionCatalogOnOpenTransportRuntime(
+  options: OpenTransportRequestOptions,
+): Promise<TerminalSessionCatalog | null> {
+  return createOpenTransportRequestRuntime(options, (sessions, sessionCatalog) => ({
+    sessionNames: sessions,
+    sessionCatalog: sessionCatalog || [],
+  }));
 }

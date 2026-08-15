@@ -1,9 +1,11 @@
 import { normalizeScheduleDraft } from '../../../packages/shared/src/schedule/next-fire.ts';
 import { publishSessionActivitiesRuntime } from './terminal-session-activity-runtime';
+import { buildSessionsCatalogPayload } from './daemon-session-catalog-runtime';
 import type { ScheduleJob } from '../../../packages/shared/src/schedule/types.ts';
 import type {
   BridgeServerMessage as ServerMessage,
   HostConfigMessage,
+  TerminalSessionCatalogEntry,
   TerminalTransportServerFrame,
 } from '@zterm/shared/protocol';
 import type {
@@ -41,6 +43,7 @@ export interface TerminalMessageControlRuntimeDeps {
   ) => void;
   listTmuxSessions: (backend?: 'tmux' | 'herdr') => string[];
   listTerminalSessions?: () => string[];
+  listTerminalSessionCatalog?: () => TerminalSessionCatalogEntry[];
   resolveTerminalSessionBackend?: (sessionName: string) => 'tmux' | 'herdr';
   createDetachedTmuxSession: (sessionName?: string, cwd?: string, backend?: 'tmux' | 'herdr') => string;
   closeDetachedTerminalSession: (sessionName: string, backend?: 'tmux' | 'herdr') => void;
@@ -48,10 +51,6 @@ export interface TerminalMessageControlRuntimeDeps {
   runTmux: (args: string[]) => { ok: true; stdout: string };
   sanitizeSessionName: (input?: string) => string;
   createTransportSubscriber: (connection: TerminalTransportConnection) => TerminalTransportSubscriber;
-  createMuxChannelSubscriber: (
-    connection: TerminalTransportConnection,
-    channelId: string,
-  ) => TerminalTransportSubscriber;
   bindConnectionToSubscriber: (
     connection: TerminalTransportConnection,
     subscriber: TerminalTransportSubscriber,
@@ -68,6 +67,10 @@ export interface TerminalMessageControlRuntimeDeps {
     options?: { closeTransportSubscribers?: boolean; notifyClientClose?: boolean; releaseCode?: string },
   ) => void;
 }
+
+export type DaemonControlHandlerResult =
+  | { readonly ok: true }
+  | { readonly ok: false; readonly code: string; readonly message: string };
 
 export function handleSessionOpenMessageRuntime(
   deps: TerminalMessageControlRuntimeDeps,
@@ -128,34 +131,7 @@ export function handleSessionTransportConnectRuntime(
   return deps.bindConnectionToSubscriber(connection, subscriber);
 }
 
-export function handleListSessionsMessageRuntime(
-  deps: TerminalMessageControlRuntimeDeps,
-  connection: TerminalTransportConnection,
-  message: { type: 'list-sessions'; payload?: { terminalBackend?: 'tmux' | 'herdr' } } = { type: 'list-sessions' },
-) {
-  try {
-    const sessions = message.payload?.terminalBackend
-      ? deps.listTmuxSessions(message.payload.terminalBackend)
-      : deps.listTerminalSessions
-        ? deps.listTerminalSessions()
-        : deps.listTmuxSessions();
-    deps.sendTransportMessage(connection.transport, { type: 'sessions', payload: { sessions } });
-    publishSessionActivitiesRuntime({
-      connection,
-      mirrors: deps.mirrors,
-      now: Date.now(),
-      sendTransportMessage: deps.sendTransportMessage,
-    });
-  } catch (error) {
-    const err = error instanceof Error ? error.message : String(error);
-    deps.sendTransportMessage(connection.transport, {
-      type: 'error',
-      payload: { message: `Failed to list tmux sessions: ${err}`, code: 'list_sessions_failed' },
-    });
-  }
-}
-
-export function handleScheduleMessageRuntime(
+export async function handleScheduleMessageRuntime(
   deps: TerminalMessageControlRuntimeDeps,
   session: TerminalSession | null,
   message:
@@ -165,7 +141,7 @@ export function handleScheduleMessageRuntime(
     | { type: 'schedule-toggle'; payload: { jobId: string; enabled: boolean } }
     | { type: 'schedule-run-now'; payload: { jobId: string } },
   transport: TerminalSessionTransport | null | undefined,
-) {
+): Promise<DaemonControlHandlerResult> {
   function sendScheduleError(
     targetSession: TerminalSession,
     payload: {
@@ -193,7 +169,7 @@ export function handleScheduleMessageRuntime(
       type: 'error',
       payload: { message: `${message.type} requires an attached session transport`, code: 'session_required' },
     });
-    return;
+    return { ok: false, code: 'session_required', message: `${message.type} requires an attached session transport` };
   }
 
   if (session.backend === 'herdr') {
@@ -215,7 +191,11 @@ export function handleScheduleMessageRuntime(
       code: 'herdr_schedule_unsupported',
       message: 'Herdr single-session backend does not support schedule commands',
     });
-    return;
+    return {
+      ok: false,
+      code: 'herdr_schedule_unsupported',
+      message: 'Herdr single-session backend does not support schedule commands',
+    };
   }
 
   switch (message.type) {
@@ -225,7 +205,7 @@ export function handleScheduleMessageRuntime(
         deps.sanitizeSessionName(message.payload.sessionName || session.sessionName),
         session.backend || 'tmux',
       );
-      return;
+      return { ok: true };
     case 'schedule-upsert':
       try {
         const normalized = normalizeScheduleDraft(
@@ -249,13 +229,18 @@ export function handleScheduleMessageRuntime(
             code: 'schedule_invalid_target',
             message: 'Missing target session',
           });
-          return;
+          return {
+            ok: false,
+            code: 'schedule_invalid_target',
+            message: 'Missing target session',
+          };
         }
         deps.scheduleEngine.upsert({
           ...message.payload.job,
           terminalBackend: session.backend || 'tmux',
           targetSessionName: normalized.targetSessionName,
         });
+        return { ok: true };
       } catch (error) {
         const err = error instanceof Error ? error.message : String(error);
         sendScheduleError(session, {
@@ -265,8 +250,12 @@ export function handleScheduleMessageRuntime(
           message: `Failed to save schedule: ${err}`,
           sessionName: message.payload.job.targetSessionName,
         });
+        return {
+          ok: false,
+          code: 'schedule_upsert_failed',
+          message: `Failed to save schedule: ${err}`,
+        };
       }
-      return;
     case 'schedule-delete':
       if (!deps.scheduleEngine.delete(message.payload.jobId)) {
         sendScheduleError(session, {
@@ -275,8 +264,13 @@ export function handleScheduleMessageRuntime(
           code: 'schedule_job_not_found',
           message: 'Schedule job no longer exists',
         });
+        return {
+          ok: false,
+          code: 'schedule_job_not_found',
+          message: 'Schedule job no longer exists',
+        };
       }
-      return;
+      return { ok: true };
     case 'schedule-toggle':
       if (!deps.scheduleEngine.toggle(message.payload.jobId, Boolean(message.payload.enabled))) {
         sendScheduleError(session, {
@@ -285,10 +279,16 @@ export function handleScheduleMessageRuntime(
           code: 'schedule_job_not_found',
           message: 'Schedule job no longer exists',
         });
+        return {
+          ok: false,
+          code: 'schedule_job_not_found',
+          message: 'Schedule job no longer exists',
+        };
       }
-      return;
+      return { ok: true };
     case 'schedule-run-now':
-      void deps.scheduleEngine.runNow(message.payload.jobId).then((job) => {
+      try {
+        const job = await deps.scheduleEngine.runNow(message.payload.jobId);
         if (!job) {
           sendScheduleError(session, {
             operation: 'run-now',
@@ -296,8 +296,14 @@ export function handleScheduleMessageRuntime(
             code: 'schedule_job_not_found',
             message: 'Schedule job no longer exists',
           });
+          return {
+            ok: false,
+            code: 'schedule_job_not_found',
+            message: 'Schedule job no longer exists',
+          };
         }
-      }).catch((error) => {
+        return { ok: true };
+      } catch (error) {
         const err = error instanceof Error ? error.message : String(error);
         sendScheduleError(session, {
           operation: 'run-now',
@@ -305,8 +311,12 @@ export function handleScheduleMessageRuntime(
           code: 'schedule_run_now_failed',
           message: `Failed to run schedule: ${err}`,
         });
-      });
-      return;
+        return {
+          ok: false,
+          code: 'schedule_run_now_failed',
+          message: `Failed to run schedule: ${err}`,
+        };
+      }
   }
 }
 
@@ -317,7 +327,7 @@ export function handleTmuxControlMessageRuntime(
     | { type: 'tmux-create-session'; payload: { sessionName: string; cwd?: string; terminalBackend?: 'tmux' | 'herdr' } }
     | { type: 'tmux-rename-session'; payload: { sessionName: string; nextSessionName: string; terminalBackend?: 'tmux' | 'herdr' } }
     | { type: 'tmux-kill-session'; payload: { sessionName: string; terminalBackend?: 'tmux' | 'herdr' } },
-) {
+): DaemonControlHandlerResult {
   switch (message.type) {
       case 'tmux-create-session':
       try {
@@ -325,16 +335,21 @@ export function handleTmuxControlMessageRuntime(
         deps.createDetachedTmuxSession(message.payload.sessionName, message.payload.cwd, backend);
         deps.sendTransportMessage(connection.transport, {
           type: 'sessions',
-          payload: { sessions: deps.listTerminalSessions ? deps.listTerminalSessions() : deps.listTmuxSessions(backend) },
+          payload: buildSessionsCatalogPayload(deps),
         });
+        return { ok: true };
       } catch (error) {
         const err = error instanceof Error ? error.message : String(error);
         deps.sendTransportMessage(connection.transport, {
           type: 'error',
           payload: { message: `Failed to create tmux session: ${err}`, code: 'tmux_create_failed' },
         });
+        return {
+          ok: false,
+          code: 'tmux_create_failed',
+          message: `Failed to create tmux session: ${err}`,
+        };
       }
-      return;
     case 'tmux-rename-session':
       try {
         const currentName = deps.sanitizeSessionName(message.payload.sessionName);
@@ -365,16 +380,21 @@ export function handleTmuxControlMessageRuntime(
         }
         deps.sendTransportMessage(connection.transport, {
           type: 'sessions',
-          payload: { sessions: deps.listTerminalSessions ? deps.listTerminalSessions() : deps.listTmuxSessions(backend) },
+          payload: buildSessionsCatalogPayload(deps),
         });
+        return { ok: true };
       } catch (error) {
         const err = error instanceof Error ? error.message : String(error);
         deps.sendTransportMessage(connection.transport, {
           type: 'error',
           payload: { message: `Failed to rename tmux session: ${err}`, code: 'tmux_rename_failed' },
         });
+        return {
+          ok: false,
+          code: 'tmux_rename_failed',
+          message: `Failed to rename tmux session: ${err}`,
+        };
       }
-      return;
     case 'tmux-kill-session':
       try {
         const sessionName = deps.sanitizeSessionName(message.payload.sessionName);
@@ -394,8 +414,9 @@ export function handleTmuxControlMessageRuntime(
         }
         deps.sendTransportMessage(connection.transport, {
           type: 'sessions',
-          payload: { sessions: deps.listTerminalSessions ? deps.listTerminalSessions() : deps.listTmuxSessions(killBackend) },
+          payload: buildSessionsCatalogPayload(deps),
         });
+        return { ok: true };
       } catch (error) {
         const err = error instanceof Error ? error.message : String(error);
         if (/can't find session|no server running|session not found/i.test(err)) {
@@ -407,7 +428,11 @@ export function handleTmuxControlMessageRuntime(
               type: 'error',
               payload: { message: err, code: 'tmux_kill_failed' },
             });
-            return;
+            return {
+              ok: false,
+              code: 'tmux_kill_failed',
+              message: err,
+            };
           }
           // Killing an already absent session is an idempotent terminal state.
           // Publish the current daemon list so drawer projections remove stale rows.
@@ -421,16 +446,20 @@ export function handleTmuxControlMessageRuntime(
           }
           deps.sendTransportMessage(connection.transport, {
             type: 'sessions',
-            payload: { sessions: deps.listTerminalSessions ? deps.listTerminalSessions() : deps.listTmuxSessions(killBackend) },
+            payload: buildSessionsCatalogPayload(deps),
           });
-          return;
+          return { ok: true };
         }
         deps.sendTransportMessage(connection.transport, {
           type: 'error',
           payload: { message: `Failed to kill tmux session: ${err}`, code: 'tmux_kill_failed' },
         });
+        return {
+          ok: false,
+          code: 'tmux_kill_failed',
+          message: `Failed to kill tmux session: ${err}`,
+        };
       }
-      return;
   }
 }
 export function handleMuxChannelOpenedMessageRuntime(

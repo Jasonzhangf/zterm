@@ -121,7 +121,7 @@
 | P | 计划要求 | 实现文件 | 红测文件 | 验证结果 |
 |---|---|---|---|---|
 | P1 | resolvePassiveVisibleRefreshTickMs 接入 transport health，好网返回 16-33ms | session-context-lifecycle.ts:76 | session-context-lifecycle.passive-fast-lane.test.ts | ✅ PASS (5 cases) |
-| P2 | per-subscriber cadence，shared mirror flush/consecutiveFailures | terminal-mirror-runtime.ts | terminal-mirror-runtime.per-subscriber-cadence.test.ts | ✅ PASS (4 cases) |
+| P2 | per-subscriber backpressure 下沉 daemon.buffer_publisher，mirror capture cadence 不再读取 subscriber backpressure | terminal-mirror-runtime.ts; terminal-performance-scheduler.ts | daemon-buffer-publisher-runtime.test.ts; terminal-mirror-runtime.backpressure.test.ts | ✅ PASS |
 | P3 | active-reentry skip probe when lastServerActivityAt < 2×headStalePingMs | session-context-activity-runtime.ts | session-context-activity-runtime.tab-switch-no-probe.test.ts | ✅ PASS (5 cases) |
 | P4 | RAF coalescing layer，所有 dirty session 同一 RAF tick flush | session-render-gate.ts:281-330 | session-render-gate.test.ts + multi-pane-refresh.test.ts | ✅ PASS (40 total) |
 | P5 | post-apply catchup trimming：gap repair 只在 visible range 内，tail-refresh 只在 head revision 跳变时发 | session-context-buffer-runtime.ts:783,806 | buffer-sync tests 全绿 | ✅ PASS |

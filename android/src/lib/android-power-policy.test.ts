@@ -21,6 +21,7 @@ describe('Android background power policy', () => {
     expect(source).toContain('setReferenceCounted(false)');
     expect(source).toContain('wakeLock.acquire()');
     expect(source).toContain('scheduleHeartbeatWake()');
+    expect(source).toContain('!MainActivity.isActivityInForeground()');
     expect(source).not.toContain('webView.post(new Runnable()');
     expect(source).not.toContain('BACKGROUND_HANDOFF_WAKE_LOCK_MS');
     expect(source).not.toContain('backgroundHandoffHandler');
@@ -46,6 +47,8 @@ describe('Android background power policy', () => {
     expect(source).not.toContain('getBridge().getWebView().onPause()');
     expect(source).toContain('setRendererPriorityPolicy');
     expect(source).toContain('RENDERER_PRIORITY_IMPORTANT');
+    expect(source).toContain('RENDERER_PRIORITY_IMPORTANT,\n                    false');
+    expect(source).toContain('isActivityInForeground()');
   });
 
   it('leaves foreground service shutdown to the JavaScript lifecycle owner', () => {

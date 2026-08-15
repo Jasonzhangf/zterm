@@ -30,6 +30,7 @@ import { DEFAULT_TERMINAL_SESSION_VIEWPORT, resolveAttachGeometry } from './mirr
 import { createTerminalMirrorCaptureRuntime } from './terminal-mirror-capture';
 import { dispatchScheduledJob } from './schedule-dispatch';
 import { createRuntimeDebugStore, resolveDebugRouteLimit } from './runtime-debug-store';
+import { DebugPermissionService } from '@zterm/shared/terminal/debug-contract';
 import { loadScheduleStore, saveScheduleStore } from './schedule-store';
 import {
   createTerminalRuntime,
@@ -37,7 +38,11 @@ import {
   type SessionMirror,
 } from './terminal-runtime';
 import { createTerminalFileTransferRuntime } from './terminal-file-transfer-runtime';
+import { createTerminalFileTransferMessageRuntime } from './terminal-file-transfer-message-runtime';
 import { createTerminalMessageRuntime } from './terminal-message-runtime';
+import { createTerminalAttachmentMessageRuntime } from './terminal-attachment-message-runtime';
+import { createTerminalChannelMuxRuntime } from './terminal-channel-mux-runtime';
+import { createDaemonInputQueueRuntime } from './daemon-input-queue-runtime';
 import { createTerminalHttpRuntime } from './terminal-http-runtime';
 import { createAttachmentDeliveryRuntime } from './attachment-delivery-runtime';
 import {
@@ -84,24 +89,24 @@ const HOST = DAEMON_CONFIG.host || DEFAULT_DAEMON_HOST;
 
 const TERMINAL_BACKEND_KIND = resolveTerminalBackendKind();
 const TMUX_BINARY = resolveTmuxBinary();
+let wakeHerdrMirror: (sessionName: string) => void = () => undefined;
+const createConfiguredHerdrBackendRuntime = () => createHerdrBackendRuntime({
+  executable: resolveHerdrExecutable(),
+  maxMirrorLines: DAEMON_CONFIG.terminalCacheLines,
+  onLiveActivity: (sessionName) => wakeHerdrMirror(sessionName),
+});
 const TERMINAL_BACKEND_RUNTIME = TERMINAL_BACKEND_KIND === 'wezterm'
   ? createWezTermBackendRuntime({
       runner: createWezTermCommandRunner(resolveWezTermExecutable()),
     maxMirrorLines: DAEMON_CONFIG.terminalCacheLines,
   })
   : TERMINAL_BACKEND_KIND === 'herdr'
-    ? createHerdrBackendRuntime({
-        executable: resolveHerdrExecutable(),
-        maxMirrorLines: DAEMON_CONFIG.terminalCacheLines,
-      })
+    ? createConfiguredHerdrBackendRuntime()
     : null;
 const HERDR_BACKEND_RUNTIME = TERMINAL_BACKEND_RUNTIME && TERMINAL_BACKEND_KIND === 'herdr'
   ? TERMINAL_BACKEND_RUNTIME
   : isHerdrExecutableAvailable()
-    ? createHerdrBackendRuntime({
-        executable: resolveHerdrExecutable(),
-        maxMirrorLines: DAEMON_CONFIG.terminalCacheLines,
-      })
+    ? createConfiguredHerdrBackendRuntime()
     : null;
 const TERMINAL_BACKEND_RUNTIMES = {
   ...(HERDR_BACKEND_RUNTIME ? { herdr: HERDR_BACKEND_RUNTIME } : {}),
@@ -127,6 +132,7 @@ const STARTUP_PORT_CONFLICT_EXIT_CODE = 78;
 const DAEMON_RUNTIME_DEBUG = process.env.ZTERM_DAEMON_DEBUG_LOG === '1';
 const MAX_CLIENT_DEBUG_BATCH_LOG_ENTRIES = 8;
 const MAX_CLIENT_DEBUG_LOG_PAYLOAD_CHARS = 900;
+const daemonDebugPermissionService = new DebugPermissionService();
 const MEMORY_GUARD_INTERVAL_MS = 30_000;
 const MEMORY_GUARD_MAX_RSS_BYTES = 2.5 * 1024 * 1024 * 1024;
 const MEMORY_GUARD_MAX_HEAP_USED_BYTES = 1.5 * 1024 * 1024 * 1024;
@@ -142,6 +148,21 @@ const attachmentDeliveryRuntime = createAttachmentDeliveryRuntime({ rootDir: ATT
 const terminalAttachTokenRuntime = createTerminalAttachTokenRuntime();
 let terminalScheduleRuntime: TerminalScheduleRuntime;
 let terminalControlRuntime: TerminalControlRuntime;
+let daemonInputQueueRuntime!: ReturnType<typeof createDaemonInputQueueRuntime>;
+const daemonInputQueueRuntimeProxy: ReturnType<typeof createDaemonInputQueueRuntime> = {
+  handleInputMessage: (connection, payload) =>
+    daemonInputQueueRuntime.handleInputMessage(connection, payload),
+  enqueueLiveMirrorInput: (sessionName, payload, appendEnter, shouldWrite, backendKind) =>
+    daemonInputQueueRuntime.enqueueLiveMirrorInput(
+      sessionName,
+      payload,
+      appendEnter,
+      shouldWrite,
+      backendKind,
+    ),
+  disposeLiveMirrorInputBatch: (sessionName, reason, backendKind) =>
+    daemonInputQueueRuntime.disposeLiveMirrorInputBatch(sessionName, reason, backendKind),
+};
 let terminalTransportRuntimeSendMessage: (session: TerminalTransportSubscriber, message: ServerMessage) => void;
 let remoteWindowStreamRuntime: ReturnType<typeof createRemoteWindowStreamDaemonRuntime>;
 let remoteWindowPasteRequestSeq = 0;
@@ -151,7 +172,7 @@ const terminalDebugRuntime = createTerminalDebugRuntime({
   maxClientDebugLogPayloadChars: MAX_CLIENT_DEBUG_LOG_PAYLOAD_CHARS,
   clientRuntimeDebugStore,
   daemonRuntimeDebugStore,
-  sessions,
+  debugPermissionService: daemonDebugPermissionService,
 });
 const terminalCoreSupport = createTerminalCoreSupport({
   defaultSessionName: DEFAULT_SESSION_NAME,
@@ -161,6 +182,7 @@ const {
   logTimePrefix,
   daemonRuntimeDebug,
   setDaemonRuntimeDebugEnabled,
+  setDaemonRuntimeDebugLease,
   summarizePayload,
   handleClientDebugLog,
   handleClientDebugSnapshot,
@@ -247,10 +269,7 @@ const terminalRuntime = createTerminalRuntime({
   mirrorCursorEqual,
   writeToLiveMirror: (sessionName, payload, appendEnter, backend) =>
     terminalControlRuntime.writeToLiveMirror(sessionName, payload, appendEnter, backend),
-  enqueueLiveMirrorInput: (sessionName, payload, appendEnter, shouldWrite, backend) =>
-    terminalControlRuntime.enqueueLiveMirrorInput(sessionName, payload, appendEnter, shouldWrite, backend),
-  disposeLiveMirrorInputBatch: (sessionName, reason, backend) =>
-    terminalControlRuntime.disposeLiveMirrorInputBatch(sessionName, reason, backend),
+  daemonInputQueue: daemonInputQueueRuntimeProxy,
   writeToTmuxSession: (sessionName, payload, appendEnter, backend) =>
     terminalControlRuntime.writeToTmuxSession(sessionName, payload, appendEnter, backend),
   autoCommandDelayMs: AUTO_COMMAND_DELAY_MS,
@@ -260,6 +279,12 @@ const terminalRuntime = createTerminalRuntime({
   daemonRuntimeDebug,
   logTimePrefix,
 });
+wakeHerdrMirror = (sessionName) => {
+  const mirror = mirrors.get(getMirrorKey(sessionName, 'herdr'));
+  if (mirror) {
+    terminalRuntime.scheduleMirrorLiveSync(mirror, 0);
+  }
+};
 const terminalFileTransferRuntime = createTerminalFileTransferRuntime({
   uploadDir: UPLOAD_DIR,
   downloadsDir: DOWNLOADS_DIR,
@@ -313,6 +338,7 @@ const {
   writeToLiveMirror,
   listTmuxSessions,
   listTerminalSessions,
+  listTerminalSessionCatalog,
   resolveTerminalSessionBackend,
   createDetachedTmuxSession,
   closeDetachedTerminalSession,
@@ -340,12 +366,39 @@ const terminalTransportRuntime = createTerminalTransportRuntime({
 const {
   createWebSocketSessionTransport,
   createRtcSessionTransport,
+  sendText,
   sendTransportMessage,
   sendMessage,
   broadcastRuntimeDebugControl,
   createTransportConnection,
 } = terminalTransportRuntime;
 terminalTransportRuntimeSendMessage = sendMessage;
+const attachmentMessageRuntime = createTerminalAttachmentMessageRuntime({
+  attachmentDeliveryRuntime,
+  sendTransportMessage,
+});
+const fileTransferMessageRuntime = createTerminalFileTransferMessageRuntime({
+  fileTransferRuntime: terminalFileTransferRuntime,
+  sendTransportMessage,
+});
+const terminalChannelMuxRuntime = createTerminalChannelMuxRuntime({
+  sessions,
+  sendText,
+  defaultSessionName: DEFAULT_SESSION_NAME,
+});
+
+daemonInputQueueRuntime = createDaemonInputQueueRuntime({
+  sessions,
+  mirrors,
+  getMirrorKey,
+  sendTransportMessage,
+  sendMessage,
+  handleInput: (session, data, shouldWrite) => terminalRuntime.handleInput(session, data, shouldWrite),
+  writeBackendInputGroup: (sessionName, payload, appendEnter, backendKind) =>
+    terminalControlRuntime.writeBackendInputGroup(sessionName, payload, appendEnter, backendKind),
+  resolveBackendInputMaxChunkBytes: () => terminalControlRuntime.resolveBackendInputMaxChunkBytes(),
+  daemonRuntimeDebug,
+});
 
 terminalScheduleRuntime = createTerminalScheduleRuntime({
   initialJobs: scheduleStore.jobs,
@@ -395,6 +448,10 @@ const terminalHttpRuntime = createTerminalHttpRuntime({
   resolveDebugRouteLimit,
   broadcastRuntimeDebugControl,
   setDaemonRuntimeDebugEnabled,
+  setDaemonRuntimeDebugLease,
+  debugPermissionService: daemonDebugPermissionService,
+  handleClientDebugLog,
+  handleClientDebugSnapshot,
   logTimePrefix,
   attachmentDeliveryRuntime,
   connections,
@@ -410,14 +467,12 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
   sendBufferHeadToSession: terminalRuntime.sendBufferHeadToSession,
   scheduleMirrorLiveSync: terminalRuntime.scheduleMirrorLiveSync,
   refreshMirrorHeadForSession: terminalRuntime.refreshMirrorHeadForSession,
-  handleInput: terminalRuntime.handleInput,
+  daemonInputQueue: daemonInputQueueRuntime,
   closeSession: terminalRuntime.closeTransportSubscriber,
-  terminalFileTransferRuntime,
-  attachmentDeliveryRuntime,
+  fileTransferMessageRuntime,
+  attachmentMessageRuntime,
   remoteWindowStreamRuntime,
-  handleClientDebugLog,
-  handleClientDebugSnapshot,
-  daemonRuntimeDebug,
+  channelMuxRuntime: terminalChannelMuxRuntime,
   controlRuntimeDeps: {
     sessions,
     mirrors,
@@ -429,6 +484,7 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
     sendScheduleStateToSession,
     listTmuxSessions,
     listTerminalSessions,
+    listTerminalSessionCatalog,
     resolveTerminalSessionBackend,
     createDetachedTmuxSession,
     closeDetachedTerminalSession,
@@ -437,8 +493,6 @@ const terminalMessageRuntime = createTerminalMessageRuntime({
     sanitizeSessionName,
     createTransportSubscriber: (connection) =>
       terminalRuntime.createTransportSubscriber(connection as DaemonTransportConnection),
-    createMuxChannelSubscriber: (connection, channelId) =>
-      terminalRuntime.createMuxChannelSubscriber(connection as DaemonTransportConnection, channelId),
     bindConnectionToSubscriber: (connection, subscriber) =>
       terminalRuntime.bindConnectionToSubscriber(connection as DaemonTransportConnection, subscriber),
     getMirrorKey,
@@ -491,6 +545,8 @@ const terminalDaemonRuntime = createTerminalDaemonRuntime({
     sessionsMap.clear();
   },
   detachSubscriberTransportOnly: terminalRuntime.detachSubscriberTransportOnly,
+  listMuxChannelSubscriberIds: terminalChannelMuxRuntime.listMuxChannelSubscriberIds,
+  releaseAllMuxChannelSubscribers: terminalChannelMuxRuntime.releaseAllMuxChannelSubscribers,
   destroyMirror: terminalRuntime.destroyMirror,
   disposeScheduleRuntime: () => terminalScheduleRuntime.dispose(),
   startRelayHostClient: () => relayHostClient.start(),
@@ -520,6 +576,8 @@ const terminalBridgeRuntime = createTerminalBridgeRuntime({
   createRtcSessionTransport,
   createTransportConnection,
   detachSubscriberTransportOnly: terminalRuntime.detachSubscriberTransportOnly,
+  listMuxChannelSubscriberIds: terminalChannelMuxRuntime.listMuxChannelSubscriberIds,
+  releaseAllMuxChannelSubscribers: terminalChannelMuxRuntime.releaseAllMuxChannelSubscribers,
   refreshAdaptiveWidthLeaseHeartbeat: terminalRuntime.refreshAdaptiveWidthLeaseHeartbeat,
   handleMessage: (connection, rawData, isBinary) =>
     terminalMessageRuntime.handleMessage(connection as DaemonTransportConnection, rawData, isBinary),

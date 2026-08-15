@@ -38,6 +38,11 @@ feature and outside daemon truth.
   transport and must never enter tmux or WezTerm through an implicit fallback.
 - Named-session discovery after daemon restart must use the official Herdr
   session list and pane list; an in-memory map is insufficient.
+- Initial terminal geometry is source-owned and must not be reset to 24 rows:
+  Herdr's standard `[terminal] minimum_cols/minimum_rows` configuration owns the
+  floor for manual clients, headless workspace creation/restore, and terminal
+  session controllers. zterm reads the selected pane's authoritative layout
+  rectangle and passes it to Herdr without duplicating that policy.
 - Official Herdr named-session rename is an explicit capability gap and must
   fail rather than mutate only zterm memory.
 - The canonicalizer may retain full VT-owned scrollback, but the single
@@ -72,3 +77,49 @@ fields. This is a static owner-boundary audit, not evidence that external
 agent integrations have been exercised; that separate operational audit and
 the Windows ConPTY/cleanup gate remain pending. This feature must remain
 `status: pending` until those gates pass.
+
+## 2026-08-14 Unified adapter contract
+
+`daemon.herdr_backend` now exposes the same `TerminalSourceAdapter` contract as
+tmux/WezTerm mirror readback. Required gates:
+
+- Herdr `readSnapshot()` returns a `TerminalSourceMirrorSnapshot` whose
+  history window is built from the official `pane read --source recent
+  --lines min(terminalCacheLines,1000) --format ansi --raw` snapshot, not from
+  the canonicalizer's render-diff frame-only rows.
+- `sourceEndIndex` is daemon-owned and monotonic; `bufferStartIndex` equals
+  `sourceEndIndex - bufferLines.length` and `availableStartIndex` equals
+  `bufferStartIndex`. `herdr-history-limit-1000` is always published as an
+  explicit capability gap.
+- The canonical live visible tail is overlaid only when the host is at the
+  bottom and geometry matches; host-scrolled output keeps history rows and
+  exposes `cursor: null`.
+- `pane read` failure or empty output rejects `readSnapshot()` explicitly and
+  never falls back to frame-only 24-row truth.
+- Canonical frames call `onLiveActivity` so server wiring can
+  `scheduleMirrorLiveSync(mirror, 0)` without waiting for quiet-capture
+  backoff; no body subscriber means no timer.
+- Live tail growth advances `sourceEndIndex` only when the authoritative total
+  growth fits the visible frame; larger growth suppresses the overlay instead
+  of publishing a gapped buffer. Cached scroll metrics never advance
+  `sourceEndIndex`; a daemon-confirmed bottom state may authorize in-place
+  live-row overlay for intervening frames between fresh `pane get` reads.
+- Every history refresh requires a fresh `pane get` total. A refresh whose
+  fresh metrics read fails must reject and leave the existing bounded history
+  window unchanged; cached metrics never advance `sourceEndIndex` for a new
+  `pane read`.
+- The history read rechecks the latest canonical frame geometry after
+  canonicalization awaits. A geometry change retries against the latest
+  geometry; an unstable read is rejected instead of publishing stale-width
+  rows under newer `cols`/`rows`.
+- Immediate history refresh fires only on a confirmed host scroll/geometry
+  transition. Repeated metrics-bearing frames while the host stays scrolled
+  retain the normal 1000ms history cadence and must not start one full
+  `pane read` per sample.
+- The same source fixture replayed through tmux/Herdr/WezTerm adapter must
+  produce the same mirror snapshot semantic fields (`bufferStartIndex`,
+  `bufferLines`, `cols`, `rows`, `cursor`, `cursorKeysApp`).
+- `ZTERM_TERMINAL_BACKEND=herdr` still selects Herdr explicitly; an unknown
+  backend must fail instead of defaulting to tmux.
+- Mirror runtime consumes only `readSnapshot()`; no mirror-store path may call
+  tmux or WezTerm CLI directly for a Herdr-backed session.

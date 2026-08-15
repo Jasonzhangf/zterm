@@ -1,0 +1,42 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "EVID-20260815-ZARCHV2-P6-PROD-PLUGIN-HOST-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-phase6-production",
+  "kind": "gate",
+  "source_commit": "9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c",
+  "scope": {
+    "module_id": "client.plugin_host",
+    "feature_id": "client.plugin_host",
+    "entrypoint": "pnpm --dir android run test:plugin-host"
+  },
+  "producer": {
+    "adapter": "appsdk",
+    "identity": "codex-zterm-v2-phase6-plugin-host-20260815T080530Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "Phase 6 first production plugin host slice: client.plugin_host owns src/lib/plugin-host/ and shared.plugin_contract owns packages/shared/src/terminal/plugin-*; App.tsx composes host-level network:native-snapshot, installs network-identity, and consumes only network:sample-interfaces. Docs/registries/wiki/AppSDK maps, plan, test design, and architecture truth are updated in lockstep; plugin capability/lifecycle/ownership tests plus a static hot-path exclusion red test are wired into prebuild and CI. Verified test:plugin-host 11/11, test:feature-registry 84/84 in 11 files, test:runtime-architecture-v2 30/30, tsc --noEmit PASS, full pnpm run build PASS including prebuild gates and Vite, docs:function-wiki regenerated, appsdk verify android ok:true draft, and git diff --check PASS. Worktree is uncommitted at HEAD 9c52d5dda9e03d7a9c010ee64944b7cd06a3b90c. No ReviewRecord/PASS exists because codex-review MCP remains unavailable; this slice is production_pending_review and Phase 6/7 are not complete.",
+  "created_at": "2026-08-15T08:05:30Z",
+  "expires_at": "2026-11-13T08:05:30Z",
+  "input_hashes": [
+    "sha256:e869f42efb6ee1a1d9f251e306d8a16db4d59610890b8b4ee2e755178bbe5b97",
+    "sha256:96d523a7d6ffa81b35dd5c16318a5dc879b713e684400ac604b5418303de8da9",
+    "sha256:527458285448568a933269bb1f2ff8b1404902edd19ec9f4667d5a2dc91e399f",
+    "sha256:e0cb7c72a78ffa3998c2fdd6f1c1ecb58b86d10bca7ba305af5f985ccb39e163",
+    "sha256:86d8138d4f0a60790bdf81726627ceeeb14cbccfc00456a8010b55133b779191",
+    "sha256:018affa1ff2cc2d8c73683482cc826cf767a603d8fe05c34d9c8dbf3cfba7e4a",
+    "sha256:de419528a571b2b29446ad752d81ea445edc4db283dcd5843bada119ca571cc2",
+    "sha256:cc711fdef52b0af3c3b5068fbf14046dbd735d61ed7a5a53acf6f96eaf15176f",
+    "sha256:67a995535c96c28695bf9ac7742f671ee6f656f6c90a2f84a9f9124c1e65d41b",
+    "sha256:630c948b7a10c041bbffa24729a3c6fdf7c97ace71fa255e72a38079b6a433c1",
+    "sha256:de61af6ba1157c381eea961ca7f1a17afc5df7a6adeeaec9bcb824ebd1757a77",
+    "sha256:90b377628a1845ab4fdeb192a3eb01e5ec374dab959c7c2c3ff3203fe95518b2",
+    "sha256:a2cda1c14a3fb4e84002c60a4bd377d8c1c205bca680a1e34ad1b025584a6789",
+    "sha256:8f19f15f24a39525d765ccd7b3cb692c7584636ad57273634bb9b9efe84a2a6b",
+    "sha256:acdd868f680d5a33729b710f92efcc2ee0c318012acc562e12f0c471a1893662",
+    "sha256:dbf5f2e071e05dd0b2fb07620d9a87547d680dc3ff802154051b565c6b057017",
+    "sha256:7258ed58e319c46b6130caffb29b325dd19b1d084f2390b2fa1ef7fc75f95cd8"
+  ],
+  "scope_hash": "sha256:e869f42efb6ee1a1d9f251e306d8a16db4d59610890b8b4ee2e755178bbe5b97"
+}

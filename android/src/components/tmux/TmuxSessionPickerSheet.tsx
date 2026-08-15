@@ -106,6 +106,7 @@ export function TmuxSessionPickerSheet({
   const [selectedSessions, setSelectedSessions] = useState<string[]>([]);
   const [discoveryState, setDiscoveryState] = useState<DiscoveryState>('idle');
   const [errorMessage, setErrorMessage] = useState('');
+  const [actionErrorMessage, setActionErrorMessage] = useState('');
   const [newSessionName, setNewSessionName] = useState('');
   const [newSessionBackend, setNewSessionBackend] = useState<'tmux' | 'herdr'>(
     initialTarget?.terminalBackend === 'herdr' ? 'herdr' : 'tmux',
@@ -120,6 +121,7 @@ export function TmuxSessionPickerSheet({
     sessionId: string;
     currentName: string;
   } | null>(null);
+  const [renameErrorMessage, setRenameErrorMessage] = useState('');
   const [lastRefreshedAt, setLastRefreshedAt] = useState<number | null>(null);
   const [clockTick, setClockTick] = useState(0);
   const [connectionImportInput, setConnectionImportInput] = useState('');
@@ -147,9 +149,12 @@ export function TmuxSessionPickerSheet({
     setNewSessionBackend(initialTarget?.terminalBackend === 'herdr' ? 'herdr' : 'tmux');
     setBackendChoiceOpen(false);
     setRenameTarget(null);
+    setRenameErrorMessage('');
+    setActionErrorMessage('');
     setAvailableSessions([]);
     setDiscoveryState('idle');
     setErrorMessage('');
+    setActionErrorMessage('');
     setLastRefreshedAt(null);
     setConnectionImportInput('');
     setConnectionImportStatus('');
@@ -378,6 +383,7 @@ export function TmuxSessionPickerSheet({
 
     setDiscoveryState('loading');
     setErrorMessage('');
+    setActionErrorMessage('');
     try {
       const sessions = normalizeRemoteTmuxSessionNames(await fetchTmuxSessions(discoveryTarget, bridgeSettings));
       const missingOpenTabs = findOpenTabsMissingFromRemote({
@@ -435,32 +441,35 @@ export function TmuxSessionPickerSheet({
   const handleCreateSession = async (backend = newSessionBackend) => {
     const sessionName = newSessionName.trim();
     if (!selectedTarget.bridgeHost.trim() && !selectedTargetCanUseRelayTransport) {
-      alert('先输入 Tailscale IP 或选择服务器');
+      setActionErrorMessage('先输入 Tailscale IP 或选择服务器');
       return;
     }
     if (!sessionName) {
-      alert('请输入新的 tmux session 名称');
+      setActionErrorMessage('请输入新的 session 名称');
       return;
     }
 
     setBusyAction(`create:${sessionName}`);
+    setActionErrorMessage('');
     try {
       const creationTarget = { ...selectedTarget, terminalBackend: backend };
       await createTmuxSession(creationTarget, bridgeSettings, sessionName);
       setNewSessionName('');
+      setActionErrorMessage('');
       if (backend === 'herdr') {
         onOpenTmuxSession({ ...creationTarget, terminalBackend: undefined }, sessionName);
         return;
       }
       await handleRefreshNow();
     } catch (error) {
-      alert(error instanceof Error ? error.message : String(error));
+      setActionErrorMessage(error instanceof Error ? error.message : String(error));
     } finally {
       setBusyAction(null);
     }
   };
 
   const handleRenameSession = (sessionName: string) => {
+    setRenameErrorMessage('');
     setRenameTarget({ kind: 'remote', sessionName });
   };
 
@@ -471,12 +480,14 @@ export function TmuxSessionPickerSheet({
     }
 
     setBusyAction(`kill:${sessionName}`);
+    setActionErrorMessage('');
     try {
       await killTmuxSession(selectedTarget, bridgeSettings, sessionName);
       setSelectedSessions((current) => current.filter((item) => item !== sessionName));
+      setActionErrorMessage('');
       await handleRefreshNow();
     } catch (error) {
-      alert(error instanceof Error ? error.message : String(error));
+      setActionErrorMessage(error instanceof Error ? error.message : String(error));
     } finally {
       setBusyAction(null);
     }
@@ -489,12 +500,12 @@ export function TmuxSessionPickerSheet({
   };
 
   const handleRenameOpenTab = (sessionId: string, currentName: string) => {
+    setRenameErrorMessage('');
     setRenameTarget({ kind: 'openTab', sessionId, currentName });
   };
 
   const submitRename = (nextName: string) => {
     const target = renameTarget;
-    setRenameTarget(null);
     if (!target) {
       return;
     }
@@ -503,6 +514,8 @@ export function TmuxSessionPickerSheet({
       return;
     }
     if (target.kind === 'openTab') {
+      setRenameTarget(null);
+      setRenameErrorMessage('');
       if (normalizedName === target.currentName) {
         return;
       }
@@ -515,13 +528,16 @@ export function TmuxSessionPickerSheet({
 
     const previousSessionName = target.sessionName;
     setBusyAction(`rename:${previousSessionName}`);
+    setRenameErrorMessage('');
     void (async () => {
       try {
         await renameTmuxSession(selectedTarget, bridgeSettings, previousSessionName, normalizedName);
         setSelectedSessions((current) => current.map((item) => (item === previousSessionName ? normalizedName : item)));
+        setRenameTarget(null);
+        setRenameErrorMessage('');
         await handleRefreshNow();
       } catch (error) {
-        alert(error instanceof Error ? error.message : String(error));
+        setRenameErrorMessage(error instanceof Error ? error.message : String(error));
       } finally {
         setBusyAction(null);
       }
@@ -1118,6 +1134,23 @@ export function TmuxSessionPickerSheet({
           }
         />}
 
+        {actionErrorMessage ? (
+          <div
+            role="alert"
+            data-testid="session-picker-action-error"
+            style={{
+              padding: '10px 14px',
+              borderRadius: '12px',
+              backgroundColor: 'rgba(255, 124, 146, 0.12)',
+              color: mobileTheme.colors.danger,
+              fontSize: '12px',
+              lineHeight: 1.5,
+            }}
+          >
+            {actionErrorMessage}
+          </div>
+        ) : null}
+
         <div
           style={{
             borderRadius: '22px',
@@ -1252,7 +1285,7 @@ export function TmuxSessionPickerSheet({
                 {missingRemote ? null : (
                 <button
                   type="button"
-                  aria-label={row.openTab ? `重命名标签页 ${row.displayName}` : `重命名 tmux session ${sessionName}`}
+                  aria-label={row.openTab ? `重命名标签页 ${row.displayName}` : `重命名 session ${sessionName}`}
                   onClick={() => {
                     if (row.openTab) {
                       handleRenameOpenTab(row.openTab.id, row.displayName);
@@ -1431,10 +1464,14 @@ export function TmuxSessionPickerSheet({
       )}
       <RenameDialog
         open={renameTarget !== null}
-        title={renameTarget?.kind === 'remote' ? '重命名 tmux session' : '重命名标签页'}
-        inputLabel={renameTarget?.kind === 'remote' ? '新的 tmux session 名称' : '新的标签页名称'}
+        title={renameTarget?.kind === 'remote' ? '重命名 session' : '重命名标签页'}
+        inputLabel={renameTarget?.kind === 'remote' ? '新的 session 名称' : '新的标签页名称'}
         initialValue={renameTarget?.kind === 'remote' ? renameTarget.sessionName : renameTarget?.currentName || ''}
-        onCancel={() => setRenameTarget(null)}
+        errorMessage={renameErrorMessage || null}
+        onCancel={() => {
+          setRenameTarget(null);
+          setRenameErrorMessage('');
+        }}
         onSubmit={submitRename}
       />
     </div>

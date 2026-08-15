@@ -1,4 +1,5 @@
 import {
+  type ImagePasteWaiterRuntime,
   ensureSessionReadyForPasteRuntime,
   requestRemoteScreenshotRuntime,
   sendFileAttachRuntime,
@@ -78,6 +79,7 @@ interface RemoteWindowReceiverRuntimeLike {
 export function createSessionInteractionRuntime(options: {
   refs: {
     stateRef: StateRefLike;
+    imagePasteWaiterRuntimeRef: { current: ImagePasteWaiterRuntime };
     remoteScreenshotRuntimeRef: { current: RemoteScreenshotRuntimeLike };
     remoteWindowTargetCatalogCacheRef?: { current: RemoteWindowTargetCatalogCacheStore };
     remoteWindowMessageRuntimeRef: { current: RemoteWindowMessageRuntimeLike };
@@ -102,6 +104,7 @@ export function createSessionInteractionRuntime(options: {
   ) => void;
 }) {
   const daemonConnection = options.daemonConnection;
+  const imagePasteWaiterRuntime = options.refs.imagePasteWaiterRuntimeRef.current;
 
   const sendInput = (sessionId: string, data: string) => {
     sendInputRuntime({
@@ -144,6 +147,8 @@ export function createSessionInteractionRuntime(options: {
       sessionId,
       file,
       pasteTarget: pasteOptions?.pasteTarget,
+      imagePasteWaiterRuntime,
+      imagePasteResultTimeoutMs: 30_000,
       ensureSessionReadyForPaste,
       sendSocketPayload: options.sendSocketPayload,
     });

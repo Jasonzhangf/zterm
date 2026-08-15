@@ -10,6 +10,10 @@ function readMessageRuntimeSource() {
   return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-message-runtime.ts'), 'utf8');
 }
 
+function readFileTransferMessageRuntimeSource() {
+  return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-file-transfer-message-runtime.ts'), 'utf8');
+}
+
 function readFileTransferListRuntimeSource() {
   return readFileSync(join(process.cwd(), 'src', 'server', 'terminal-file-transfer-list-runtime.ts'), 'utf8');
 }
@@ -28,18 +32,26 @@ describe('server file-transfer truth gates', () => {
   it('keeps server glue delegating file/screenshot handlers to dedicated runtime', () => {
     const serverSource = readServerSource();
     const messageRuntimeSource = readMessageRuntimeSource();
+    const fileTransferMessageRuntimeSource = readFileTransferMessageRuntimeSource();
 
     expect(serverSource).toContain('createTerminalFileTransferRuntime');
     expect(serverSource).toContain('const terminalFileTransferRuntime = createTerminalFileTransferRuntime({');
-    expect(messageRuntimeSource).toContain('terminalFileTransferRuntime.handleBinaryPayload(session, binaryBuffer)');
-    expect(messageRuntimeSource).toContain('terminalFileTransferRuntime.handlePasteImage(session, message.payload)');
-    expect(messageRuntimeSource).toContain('terminalFileTransferRuntime.handleFileListRequest(session, message.payload)');
-    expect(messageRuntimeSource).toContain('terminalFileTransferRuntime.handleFileCreateDirectoryRequest(session, message.payload)');
-    expect(messageRuntimeSource).toContain('terminalFileTransferRuntime.handleFileDownloadRequest(session, message.payload)');
-    expect(messageRuntimeSource).toContain('terminalFileTransferRuntime.handleRemoteScreenshotRequest(session, message.payload)');
-    expect(messageRuntimeSource).toContain('terminalFileTransferRuntime.handleFileUploadStart(session, message.payload)');
-    expect(messageRuntimeSource).toContain('terminalFileTransferRuntime.handleFileUploadChunk(session, message.payload)');
-    expect(messageRuntimeSource).toContain('terminalFileTransferRuntime.handleFileUploadEnd(session, message.payload)');
+    expect(serverSource).toContain('createTerminalFileTransferMessageRuntime');
+    expect(messageRuntimeSource).toContain('fileTransferMessageRuntime.handleBinaryPayload(session, binaryBuffer)');
+    expect(messageRuntimeSource).toContain('deps.fileTransferMessageRuntime.handleMessage(');
+    expect(messageRuntimeSource).not.toContain('terminalFileTransferRuntime.');
+    expect(messageRuntimeSource).not.toContain('session.pendingPasteImage =');
+    expect(messageRuntimeSource).not.toContain('session.pendingAttachFile =');
+    expect(fileTransferMessageRuntimeSource).toContain('deps.fileTransferRuntime.handlePasteImage(session, message.payload');
+    expect(fileTransferMessageRuntimeSource).toContain('deps.fileTransferRuntime.handleFileListRequest(session, message.payload');
+    expect(fileTransferMessageRuntimeSource).toContain('deps.fileTransferRuntime.handleFileCreateDirectoryRequest(');
+    expect(fileTransferMessageRuntimeSource).toContain('deps.fileTransferRuntime.handleFileDownloadRequest(session, message.payload');
+    expect(fileTransferMessageRuntimeSource).toContain('deps.fileTransferRuntime.handleRemoteScreenshotRequest(');
+    expect(fileTransferMessageRuntimeSource).toContain('deps.fileTransferRuntime.handleFileUploadStart(session, message.payload');
+    expect(fileTransferMessageRuntimeSource).toContain('deps.fileTransferRuntime.handleFileUploadChunk(session, message.payload');
+    expect(fileTransferMessageRuntimeSource).toContain('deps.fileTransferRuntime.handleFileUploadEnd(session, message.payload');
+    expect(fileTransferMessageRuntimeSource).toContain('session.pendingPasteImage = {');
+    expect(fileTransferMessageRuntimeSource).toContain('session.pendingAttachFile = {');
   });
 
   it('does not keep file-transfer implementations in server.ts', () => {

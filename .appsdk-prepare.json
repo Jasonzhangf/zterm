@@ -1,0 +1,83 @@
+{
+  "schema_version": 1,
+  "preparation_id": "zterm-runtime-architecture-v2-appsdk-migration",
+  "status": "confirmed",
+  "objective": "Preserve ZTerm runtime behavior while restructuring the Android client and embedded daemon into AppSDK-governed modules with typed data, control, debug, and plugin boundaries.",
+  "change_kind": "project_refactor",
+  "project_root": "android",
+  "legacy_roots": [
+    "android/src/**",
+    "android/native/android/**",
+    "android/scripts/**",
+    "android/docs/**",
+    "packages/shared/**"
+  ],
+  "new_roots": [
+    "android/playground/**",
+    "android/active/lib/**",
+    "android/protected/**",
+    "android/generated/**",
+    "android/.appsdk/**",
+    "android/.appsdk-control/**"
+  ],
+  "protected_roots": [
+    "android/protected/source/**",
+    "android/protected/contracts/**",
+    "android/protected/history/**"
+  ],
+  "runtime_forbidden_roots": [
+    "android/playground/**",
+    "android/generated/**",
+    "android/protected/source/**"
+  ],
+  "boundary": {
+    "allowed_paths": [
+      "android/.appsdk/**",
+      "android/.appsdk-control/**",
+      "android/playground/**",
+      "android/active/lib/**",
+      "android/protected/**",
+      "android/generated/**",
+      "android/docs/**",
+      "packages/shared/**"
+    ],
+    "forbidden_paths": [
+      "../wterm/**",
+      "mac/**",
+      "win/**"
+    ],
+    "payload_control_separation": "confirmed: AppSDK lifecycle, routing, review, promotion, freeze, and SDK lock facts are control resources only; ZTerm request and response payloads cannot carry or reconstruct them."
+  },
+  "acceptance_criteria": [
+    "Project uses only global AppSDK 0.1.0.",
+    "sdk.lock pins the AppSDK binary and bundle.",
+    "AppSDK installs project docs, rules, skills, maps, and contracts.",
+    "Active exposes only immutable library artifacts.",
+    "Generated artifacts are produced only by AppSDK/compiler.",
+    "Protected source is Git-auditable and recoverable.",
+    "No project-local sdk.bin becomes an execution entry point.",
+    "ZTerm Android client behavior and request/response payload semantics remain unchanged.",
+    "Client and daemon module ownership follows android/docs/resource-registry.json, module-registry.json, edge-registry.json, function-map.md, and mainline-call-map.json.",
+    "Data, control, debug, and error messages use physically separated typed contracts and registered adjacent edges.",
+    "Runtime foundation nodes expose bounded debug subscriptions and versioned snapshots without leaking debug state into business payloads.",
+    "The client is composed through a capability-scoped plugin host while terminal frame, buffer, renderer, input, and daemon hot paths remain direct typed nodes."
+  ],
+  "non_goals": [
+    "Do not modify business pipeline semantics.",
+    "Do not modify request or response payload semantics.",
+    "Do not introduce fallback.",
+    "Do not introduce a second compiler.",
+    "Do not maintain two SDKs.",
+    "Do not refactor Mac, Windows, or wterm runtime in this migration.",
+    "Do not use Cordis as the terminal frame, buffer apply, mirror capture, transport, or input hot-path event bus."
+  ],
+  "assumptions": [
+    "The AppSDK project root remains android/ because it contains both the current Android client and embedded daemon mainline.",
+    "packages/shared/** is admitted only for shared typed contracts required by the registered Android/daemon edges.",
+    "Existing runtime source remains read-only until the AppSDK goal, maps, gates, and a Playground slice identify a unique owner and promotion unit."
+  ],
+  "questions": [],
+  "confirmed_by": "Jason",
+  "confirmed_at": "2026-08-15T00:45:30Z",
+  "created_at": "2026-08-15T00:23:23Z"
+}

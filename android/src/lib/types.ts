@@ -253,6 +253,22 @@ export interface SessionDebugOverlayMetrics {
   updatedAt: number;
 }
 
+export type TwoFingerWheelDebugSnapshot = {
+  active: boolean;
+  lockedDirection: "up" | "down" | null;
+  initialSpanPx: number;
+  accumulatedDeltaPx: number;
+  lastSentDirection: "up" | "down" | null;
+  lastSentAt: number | null;
+  startCalls: number;
+  moveCalls: number;
+  endCalls: number;
+  abortedCount: number;
+  sentCount: number;
+  lastReason: string;
+  lastEventAt: number;
+};
+
 /**
  * Compact wire format for a single line.
  * Replaces TerminalIndexedLine on the wire to cut payload size ~95%.

@@ -64,3 +64,10 @@ export function formatConnectionRouteLabel(session: Session) {
       return session.state === 'connected' ? '连接中' : '未连接';
   }
 }
+
+export function formatTerminalBackendSuffix(backend?: Session['terminalBackend']) {
+  return backend === 'herdr' ? ' (herdr)' : '';
+}
+
+export const TERMINAL_PORTRAIT_STATUS_STRIP_TOP_OFFSET_PX = 50;
+export const TERMINAL_PORTRAIT_STAGE_TOP_OFFSET_PX = 92;

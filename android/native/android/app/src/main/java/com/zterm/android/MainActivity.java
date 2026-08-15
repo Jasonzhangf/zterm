@@ -23,9 +23,14 @@ public class MainActivity extends BridgeActivity {
 
     /** Static WebView reference for BackgroundService (JS heartbeat wake-up). */
     private static WebView staticWebView;
+    private static volatile boolean activityInForeground;
 
     public static WebView getStaticWebView() {
         return staticWebView;
+    }
+
+    public static boolean isActivityInForeground() {
+        return activityInForeground;
     }
 
     @Override
@@ -80,11 +85,14 @@ public class MainActivity extends BridgeActivity {
             settings.setBuiltInZoomControls(false);
             settings.setDisplayZoomControls(false);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                // Keep the renderer schedulable while BackgroundService wakes
-                // this WebView to send the existing client-owned mux heartbeat.
+                // Do not waive renderer priority when the Activity is not
+                // visible. Android/WebView repeatedly cached and collected this
+                // renderer, which killed every same-document WebSocket and
+                // forced a real reconnect even though the app process stayed
+                // alive.
                 wv.setRendererPriorityPolicy(
                     WebView.RENDERER_PRIORITY_IMPORTANT,
-                    true
+                    false
                 );
             }
             // WebView 自身背景与终端表面一致：内容/首帧未就绪时也不露白屏
@@ -150,12 +158,14 @@ public class MainActivity extends BridgeActivity {
     @Override
     public void onStop() {
         super.onStop();
+        activityInForeground = false;
         Log.i(TAG, "onStop()");
     }
 
     @Override
     public void onStart() {
         super.onStart();
+        activityInForeground = true;
         Log.i(TAG, "onStart()");
     }
 

@@ -40,6 +40,16 @@ function read(relativePath: string) {
   return readFileSync(join(root, relativePath), 'utf8');
 }
 
+const SHARED_V2_SOURCE_FILES = [
+  'packages/shared/src/terminal/control-contract.ts',
+  'packages/shared/src/terminal/node-contract.ts',
+  'packages/shared/src/terminal/debug-contract.ts',
+  'packages/shared/src/terminal/plugin-contract.ts',
+  'packages/shared/src/terminal/plugin-capability-registry.ts',
+  'packages/shared/src/terminal/plugin-ui-slot.ts',
+  'packages/shared/src/terminal/plugin-ui-slot-registry.ts',
+] as const;
+
 function listSourceFiles(): string[] {
   const result: string[] = [];
   const visit = (dir: string) => {
@@ -60,6 +70,11 @@ function listSourceFiles(): string[] {
   const sharedPaneProfile = '../packages/shared/src/react/pane-profile.ts';
   if (existsSync(join(root, sharedPaneProfile))) {
     result.push('packages/shared/src/react/pane-profile.ts');
+  }
+  for (const sharedFile of SHARED_V2_SOURCE_FILES) {
+    if (existsSync(join(root, '..', sharedFile))) {
+      result.push(sharedFile);
+    }
   }
   return result.sort();
 }
@@ -99,15 +114,51 @@ function resolveImport(fromFile: string, spec: string, owned: Set<string>): stri
     target = normalize(join(dirname(fromFile), spec)).replace(/\\/g, '/');
   } else if (spec.startsWith('@/')) {
     target = `src/${spec.slice(2)}`;
+  } else if (spec.startsWith('@zterm/shared/')) {
+    target = `packages/shared/src/${spec.slice('@zterm/shared/'.length)}`;
   } else {
     return null;
   }
-  if (target.includes('packages/')) return null;
   for (const suffix of ['.ts', '.tsx', '/index.ts', '/index.tsx', '']) {
     const candidate = `${target}${suffix}`;
     if (owned.has(candidate)) return candidate;
   }
   return null;
+}
+
+function buildActualModuleGraph() {
+  const moduleRegistry = JSON.parse(read('docs/module-registry.json')) as ModuleRegistry;
+  const files = listSourceFiles();
+  const ownerIndex = buildOwnerIndex(moduleRegistry);
+  const owner = new Map<string, string>();
+  for (const file of files) {
+    const owners = ownersOf(file, ownerIndex);
+    if (owners.length === 1) owner.set(file, owners[0]);
+  }
+  const ownedFiles = new Set(owner.keys());
+  const actualEdges = new Map<string, string[]>();
+
+  for (const file of files) {
+    const fromModule = owner.get(file);
+    if (!fromModule) continue;
+    const source = file.startsWith('packages/')
+      ? readFileSync(join(root, '..', file), 'utf8')
+      : read(file);
+    for (const match of source.matchAll(IMPORT_PATTERN)) {
+      const spec = match[1] ?? match[2] ?? match[3];
+      if (!spec) continue;
+      const resolved = resolveImport(file, spec, ownedFiles);
+      if (!resolved) continue;
+      const toModule = owner.get(resolved);
+      if (!toModule || toModule === fromModule) continue;
+      const key = `${fromModule}->${toModule}`;
+      const samples = actualEdges.get(key) ?? [];
+      if (samples.length < 5) samples.push(`${file} -> ${resolved}`);
+      actualEdges.set(key, samples);
+    }
+  }
+
+  return { actualEdges, owner };
 }
 
 describe('module import graph truth gate', () => {
@@ -150,33 +201,7 @@ describe('module import graph truth gate', () => {
       declared.set(`${entry.from_module}->${entry.to_module}`, entry);
     }
 
-    const owner = new Map<string, string>();
-    for (const file of files) {
-      const owners = ownersOf(file, ownerIndex);
-      if (owners.length === 1) owner.set(file, owners[0]);
-    }
-    const ownedFiles = new Set(owner.keys());
-
-    const actualEdges = new Map<string, string[]>();
-    for (const file of files) {
-      const fromModule = owner.get(file);
-      if (!fromModule) continue;
-      const source = file.startsWith('packages/')
-        ? readFileSync(join(root, '..', file), 'utf8')
-        : read(file);
-      for (const match of source.matchAll(IMPORT_PATTERN)) {
-        const spec = match[1] ?? match[2] ?? match[3];
-        if (!spec) continue;
-        const resolved = resolveImport(file, spec, ownedFiles);
-        if (!resolved) continue;
-        const toModule = owner.get(resolved);
-        if (!toModule || toModule === fromModule) continue;
-        const key = `${fromModule}->${toModule}`;
-        const samples = actualEdges.get(key) ?? [];
-        if (samples.length < 5) samples.push(`${file} -> ${resolved}`);
-        actualEdges.set(key, samples);
-      }
-    }
+    const { actualEdges } = buildActualModuleGraph();
 
     const undeclared: string[] = [];
     for (const [key, samples] of actualEdges) {
@@ -198,6 +223,51 @@ describe('module import graph truth gate', () => {
       stale,
       `import_edges entries with no matching import left in code (remove them):\n${stale.join('\n')}`,
     ).toEqual([]);
+  });
+
+  it('keeps the real cross-module import graph acyclic', () => {
+    const { actualEdges } = buildActualModuleGraph();
+    const adjacency = new Map<string, string[]>();
+    const indegree = new Map<string, number>();
+    const nodes = new Set<string>();
+
+    for (const key of actualEdges.keys()) {
+      const separator = key.indexOf('->');
+      const from = key.slice(0, separator);
+      const to = key.slice(separator + 2);
+      nodes.add(from);
+      nodes.add(to);
+      const targets = adjacency.get(from) ?? [];
+      targets.push(to);
+      adjacency.set(from, targets);
+      indegree.set(to, (indegree.get(to) ?? 0) + 1);
+    }
+    for (const node of nodes) {
+      if (!indegree.has(node)) indegree.set(node, 0);
+    }
+
+    const queue: string[] = [];
+    for (const [node, degree] of indegree) {
+      if (degree === 0) queue.push(node);
+    }
+    let processed = 0;
+    let head = 0;
+    while (head < queue.length) {
+      const node = queue[head++];
+      processed += 1;
+      for (const target of adjacency.get(node) ?? []) {
+        const next = (indegree.get(target) ?? 1) - 1;
+        indegree.set(target, next);
+        if (next === 0) queue.push(target);
+      }
+    }
+
+    const cyclic = [...indegree.entries()]
+      .filter(([, degree]) => degree > 0)
+      .map(([node]) => node)
+      .sort();
+    expect(cyclic, `cross-module import cycle detected:\n${cyclic.join('\n')}`).toEqual([]);
+    expect(processed).toBe(nodes.size);
   });
 
   it('keeps pending_removal import edges bounded and annotated', () => {
