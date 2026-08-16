@@ -27,7 +27,9 @@ import {
   buildTerminalViewportDemandWithRepair,
   buildTerminalViewportDemandKey,
   alignTerminalRenderBottomToFollow,
+  resolveTerminalFollowAnchorEndIndex,
   computeFollowRealignAfterBufferShift,
+  computeTerminalReadingRealignAfterBufferShift,
   reconcileTerminalViewportAfterBufferShift,
   buildTerminalMeasuredViewportState,
   hasTerminalViewportLayoutChanged,
@@ -258,7 +260,6 @@ function TerminalViewComponent({
     renderBuffer.startIndex,
     Math.floor(renderBuffer.bufferTailEndIndex || effectiveBufferEndIndex),
   );
-  const followDemandAnchorEndIndex = bufferTailAnchorEndIndex;
   const mirrorFixedVerticalScrollIntentRef = useRef<() => void>(() => {});
   const containerRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
@@ -311,6 +312,15 @@ function TerminalViewComponent({
     effectiveBufferEndIndex,
   );
   const [readingMode, setReadingMode] = useState(false);
+  const followDemandAnchorEndIndex = resolveTerminalFollowAnchorEndIndex({
+    bufferStartIndex: renderBuffer.startIndex,
+    bufferLines,
+    effectiveBufferEndIndex,
+    bufferTailEndIndex: bufferTailAnchorEndIndex,
+    cursorRowIndex: renderBuffer.cursor?.rowIndex,
+    cursorVisible: renderBuffer.cursor?.visible,
+    viewportRows,
+  });
 
   const rowHeightPx = Math.max(
     1,
@@ -1392,6 +1402,13 @@ function TerminalViewComponent({
   useLayoutEffect(() => {
     const didFlush = flushPendingFollowScrollSync();
     const host = containerRef.current;
+    const readingRealignAfterBufferShift = computeTerminalReadingRealignAfterBufferShift({
+      refreshActive,
+      readingMode: isTerminalFollowScrollReading(followScrollStateRef.current),
+      previousPaddingTopPx: previousTermGridPaddingTopPxRef.current,
+      nextPaddingTopPx: termGridPaddingTopPx,
+      viewportClientHeightPx: viewportClientHeightPx || host?.clientHeight || 0,
+    });
     const followRealignAfterBufferShift = computeFollowRealignAfterBufferShift({
       refreshActive,
       readingMode: isTerminalFollowScrollReading(followScrollStateRef.current),
@@ -1401,6 +1418,11 @@ function TerminalViewComponent({
       maxScrollTop,
     });
     previousTermGridPaddingTopPxRef.current = termGridPaddingTopPx;
+    if (readingRealignAfterBufferShift.needsReadingRealign && host) {
+      host.scrollTop = resolveScrollTopForRenderBottomIndex(effectiveRenderBottomIndex);
+      applyScrollState(host.scrollTop, host);
+      return;
+    }
     if (followRealignAfterBufferShift.needsImmediateRealign) {
       applyFollowScrollTransition(
         commitProgrammaticTerminalScrollRuntime(
@@ -1436,7 +1458,9 @@ function TerminalViewComponent({
       });
     }
   }, [
+    applyScrollState,
     effectiveBufferEndIndex,
+    effectiveRenderBottomIndex,
     applyFollowScrollTransition,
     followVisualBottomIndex,
     flushPendingFollowScrollSync,
@@ -1445,6 +1469,7 @@ function TerminalViewComponent({
     renderBuffer.revision,
     renderBuffer.startIndex,
     rowHeightPx,
+    resolveScrollTopForRenderBottomIndex,
     termGridPaddingTopPx,
     viewportClientHeightPx,
     viewportRows,

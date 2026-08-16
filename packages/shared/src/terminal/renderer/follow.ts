@@ -318,3 +318,37 @@ export function computeFollowRealignAfterBufferShift(options: {
     paddingDeltaPx,
   };
 }
+
+export function computeTerminalReadingRealignAfterBufferShift(options: {
+  refreshActive: boolean;
+  readingMode: boolean;
+  previousPaddingTopPx: number | null;
+  nextPaddingTopPx: number;
+  viewportClientHeightPx: number;
+}) {
+  const previousPaddingTopPx = typeof options.previousPaddingTopPx === 'number'
+    && Number.isFinite(options.previousPaddingTopPx)
+    ? Math.max(0, options.previousPaddingTopPx)
+    : null;
+  const nextPaddingTopPx = Number.isFinite(options.nextPaddingTopPx)
+    ? Math.max(0, options.nextPaddingTopPx)
+    : 0;
+  const viewportClientHeightPx = Number.isFinite(options.viewportClientHeightPx)
+    ? Math.max(0, options.viewportClientHeightPx)
+    : 0;
+  const paddingDeltaPx = previousPaddingTopPx === null
+    ? 0
+    : Math.abs(nextPaddingTopPx - previousPaddingTopPx);
+  const needsReadingRealign = Boolean(
+    options.refreshActive
+    && options.readingMode
+    && previousPaddingTopPx !== null
+    && viewportClientHeightPx > 0
+    && paddingDeltaPx > viewportClientHeightPx
+  );
+
+  return {
+    needsReadingRealign,
+    paddingDeltaPx,
+  };
+}

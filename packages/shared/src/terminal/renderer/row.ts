@@ -63,6 +63,68 @@ export function hasDiscontinuousNeighbor(
   return brokenBefore || brokenAfter;
 }
 
+function isTerminalBlankRow(row: TerminalCell[] | null | undefined) {
+  if (!Array.isArray(row) || row.length === 0) {
+    return true;
+  }
+  for (const cell of row) {
+    if (!cell) {
+      continue;
+    }
+    const codePoint = cell.char;
+    if (typeof codePoint !== 'number' || Number.isNaN(codePoint) || codePoint <= 32) {
+      continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+export function resolveTerminalFollowAnchorEndIndex(options: {
+  bufferStartIndex: number;
+  bufferLines: TerminalCell[][];
+  effectiveBufferEndIndex: number;
+  bufferTailEndIndex: number;
+  cursorRowIndex: number | null | undefined;
+  cursorVisible: boolean | null | undefined;
+  viewportRows: number;
+}) {
+  const tailEndIndex = Math.max(
+    options.bufferStartIndex,
+    Math.floor(options.bufferTailEndIndex || options.effectiveBufferEndIndex || 0),
+  );
+  const cursorRowIndex = Number.isFinite(options.cursorRowIndex)
+    ? Math.max(options.bufferStartIndex, Math.floor(options.cursorRowIndex ?? -1))
+    : -1;
+  const cursorVisible = options.cursorVisible !== false;
+  const viewportRows = Math.max(1, Math.floor(options.viewportRows || 1));
+  const tailStartIndex = Math.max(options.bufferStartIndex, tailEndIndex - viewportRows);
+  const cursorOutsideTailWindow = cursorVisible
+    && cursorRowIndex >= options.bufferStartIndex
+    && cursorRowIndex + 1 < tailStartIndex;
+
+  if (!cursorOutsideTailWindow) {
+    return tailEndIndex;
+  }
+
+  let tailWindowHasContent = false;
+  for (let index = tailStartIndex; index < tailEndIndex; index += 1) {
+    const offset = index - options.bufferStartIndex;
+    if (offset < 0 || offset >= options.bufferLines.length) {
+      continue;
+    }
+    if (!isTerminalBlankRow(options.bufferLines[offset])) {
+      tailWindowHasContent = true;
+      break;
+    }
+  }
+  if (tailWindowHasContent) {
+    return tailEndIndex;
+  }
+
+  return Math.max(options.bufferStartIndex, Math.min(tailEndIndex, cursorRowIndex + 1));
+}
+
 export function buildTerminalRenderRows(options: {
   bufferLines: TerminalCell[][];
   gapRanges?: TerminalGapRange[];

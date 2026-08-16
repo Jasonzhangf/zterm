@@ -16,6 +16,8 @@ import {
   queueTerminalFollowScrollSync,
   resolveTerminalResizeCommitPlan,
   resolveTerminalWidthModeSignal,
+  resolveTerminalFollowAnchorEndIndex,
+  computeTerminalReadingRealignAfterBufferShift,
   hasTerminalViewportLayoutChanged,
   detectDoubleWidthChar,
   hasDiscontinuousNeighbor,
@@ -66,6 +68,50 @@ describe('shared terminal renderer pure helpers', () => {
     expect(frame.visibleWindowEndIndex).toBe(140);
     expect(frame.renderStartOffset).toBe(26);
     expect(frame.renderEndOffset).toBe(40);
+  });
+
+  it('anchors follow to the visible cursor when the buffer tail is a blank lower pane', () => {
+    const bufferLines = [
+      [{ char: 112, fg: 256, bg: 256, flags: 0, width: 1 }],
+      [],
+      [],
+    ];
+    expect(resolveTerminalFollowAnchorEndIndex({
+      bufferStartIndex: 1,
+      bufferLines,
+      effectiveBufferEndIndex: 81,
+      bufferTailEndIndex: 81,
+      cursorRowIndex: 1,
+      cursorVisible: true,
+      viewportRows: 35,
+    })).toBe(2);
+  });
+
+  it('keeps tail follow when cursor is already near the buffer tail', () => {
+    expect(resolveTerminalFollowAnchorEndIndex({
+      bufferStartIndex: 1,
+      bufferLines: [[], [], []],
+      effectiveBufferEndIndex: 81,
+      bufferTailEndIndex: 81,
+      cursorRowIndex: 79,
+      cursorVisible: true,
+      viewportRows: 35,
+    })).toBe(81);
+  });
+
+  it('keeps tail follow when the tail window has real content below the cursor', () => {
+    const bufferLines = Array.from({ length: 40 }, (_, index) => [
+      { char: 65 + (index % 26), fg: 256, bg: 256, flags: 0, width: 1 },
+    ]);
+    expect(resolveTerminalFollowAnchorEndIndex({
+      bufferStartIndex: 1,
+      bufferLines,
+      effectiveBufferEndIndex: 41,
+      bufferTailEndIndex: 41,
+      cursorRowIndex: 10,
+      cursorVisible: true,
+      viewportRows: 35,
+    })).toBe(41);
   });
 
   it('builds viewport demand and stable key from pure renderer inputs', () => {
@@ -249,6 +295,32 @@ describe('shared terminal renderer pure helpers', () => {
       needsImmediateRealign: true,
       targetScrollTop: 15502,
       paddingDeltaPx: 15338,
+    });
+  });
+
+  it('detects large reading padding shifts that would leave the rendered rows out of the viewport', () => {
+    expect(computeTerminalReadingRealignAfterBufferShift({
+      refreshActive: true,
+      readingMode: true,
+      previousPaddingTopPx: 1564,
+      nextPaddingTopPx: 0,
+      viewportClientHeightPx: 408,
+    })).toEqual({
+      needsReadingRealign: true,
+      paddingDeltaPx: 1564,
+    });
+  });
+
+  it('keeps reading scroll untouched for small padding shifts that can still preserve visible rows', () => {
+    expect(computeTerminalReadingRealignAfterBufferShift({
+      refreshActive: true,
+      readingMode: true,
+      previousPaddingTopPx: 68,
+      nextPaddingTopPx: 0,
+      viewportClientHeightPx: 408,
+    })).toEqual({
+      needsReadingRealign: false,
+      paddingDeltaPx: 68,
     });
   });
 

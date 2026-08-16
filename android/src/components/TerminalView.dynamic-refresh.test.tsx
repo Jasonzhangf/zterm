@@ -502,6 +502,48 @@ describe('TerminalView minimal mirror render', () => {
     expect(termGrid.style.paddingTop).not.toBe('0px');
   });
 
+  it('shows the prompt window on first frame when a tall pane has a blank lower tail', async () => {
+    mockClientHeight = 595;
+    const onViewportChange = vi.fn();
+    const lines = ['prompt-$', ...Array.from({ length: 80 }, () => '')];
+    const session = makeSession({
+      revision: 1,
+      lines,
+      bufferTailEndIndex: 81,
+    });
+
+    const view = render(
+      <div style={{ width: '640px', height: '595px' }}>
+        <TerminalView
+          sessionId={session.id}
+          renderBufferSnapshot={toRenderBufferSnapshot({
+            initialBufferLines: session.buffer.lines,
+            bufferStartIndex: session.buffer.startIndex,
+            bufferEndIndex: session.buffer.endIndex,
+            bufferHeadStartIndex: session.buffer.bufferHeadStartIndex,
+            bufferTailEndIndex: session.buffer.bufferTailEndIndex,
+            bufferGapRanges: session.buffer.gapRanges,
+            cursorKeysApp: session.buffer.cursorKeysApp,
+            cursor: { rowIndex: 1, col: 8, visible: true },
+            revision: session.buffer.revision,
+          })}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          onViewportChange={onViewportChange}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => expect(readRenderedRows(view.container)).toContain('prompt-$'));
+    await waitFor(() => {
+      const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
+      expect(lastCall?.mode).toBe('follow');
+      expect(lastCall?.viewportEndIndex).toBe(2);
+    });
+  });
+
   it('forwards textarea input upstream but does not locally mutate rendered mirror rows', async () => {
     const onInput = vi.fn();
     const session = makeSession({
@@ -2866,6 +2908,99 @@ describe('TerminalView minimal mirror render', () => {
       const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
       expect(lastCall?.mode).toBe('reading');
       expect(lastCall?.viewportRows).toBe(18);
+    });
+  });
+
+  it('realigns reading scroll after a large buffer shift so the old viewport does not sit in blank padding', async () => {
+    const onViewportChange = vi.fn();
+    const session = makeSession({
+      revision: 1,
+      lines: buildRows(120),
+      bufferTailEndIndex: 120,
+    });
+
+    const view = render(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={session.id}
+          renderBufferSnapshot={toRenderBufferSnapshot({
+            initialBufferLines: session.buffer.lines,
+            bufferStartIndex: session.buffer.startIndex,
+            bufferEndIndex: session.buffer.endIndex,
+            bufferTailEndIndex: session.buffer.bufferTailEndIndex,
+            bufferGapRanges: session.buffer.gapRanges,
+            revision: session.buffer.revision,
+          })}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          onViewportChange={onViewportChange}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    const scroller = view.container.querySelector('.wterm') as HTMLDivElement;
+    let currentScrollTop = 0;
+    Object.defineProperty(scroller, 'scrollTop', {
+      configurable: true,
+      get() {
+        return currentScrollTop;
+      },
+      set(value: number) {
+        currentScrollTop = value;
+      },
+    });
+    Object.defineProperty(scroller, 'scrollHeight', {
+      configurable: true,
+      get() {
+        return 2040;
+      },
+    });
+
+    scroller.scrollTop = 1632;
+    fireEvent.scroll(scroller);
+    scroller.scrollTop = 816;
+    fireEvent.scroll(scroller);
+
+    await waitFor(() => {
+      const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
+      expect(lastCall?.mode).toBe('reading');
+    });
+
+    const shifted = makeSession({
+      revision: 2,
+      lines: buildRows(120, 'shifted'),
+      startIndex: 100000,
+      bufferTailEndIndex: 100120,
+    });
+
+    view.rerender(
+      <div style={{ width: '640px', height: '408px' }}>
+        <TerminalView
+          sessionId={shifted.id}
+          renderBufferSnapshot={toRenderBufferSnapshot({
+            initialBufferLines: shifted.buffer.lines,
+            bufferStartIndex: shifted.buffer.startIndex,
+            bufferEndIndex: shifted.buffer.endIndex,
+            bufferTailEndIndex: shifted.buffer.bufferTailEndIndex,
+            bufferGapRanges: shifted.buffer.gapRanges,
+            revision: shifted.buffer.revision,
+          })}
+          active
+          onResize={vi.fn()}
+          onInput={vi.fn()}
+          onViewportChange={onViewportChange}
+          fontSize={5}
+        />
+      </div>,
+    );
+
+    await waitFor(() => {
+      expect(currentScrollTop).toBe(0);
+      const lastCall = onViewportChange.mock.calls[onViewportChange.mock.calls.length - 1]?.[1];
+      expect(lastCall?.mode).toBe('reading');
+      expect(readRenderedRows(view.container)).toContain('shifted-001');
     });
   });
 
