@@ -2821,7 +2821,8 @@
         "src/lib/edge-registry-truth.test.ts",
         "src/lib/module-import-graph-truth.test.ts",
         "src/lib/resource-registry-truth.test.ts",
-        "src/lib/feature-registry-truth.test.ts"
+        "src/lib/feature-registry-truth.test.ts",
+        "src/vitest.setup.ts"
       ]
     },
     {

@@ -164,15 +164,22 @@ describe('session-render-buffer-store perf', () => {
     );
     const snapshot = makeSnapshot(lines, 1);
 
-    // Warm up: first clone populates internal caches / lazy paths.
+    // Warm up before measuring so JIT and lazy paths do not turn a stable
+    // 80k-cell clone into a cold-start flake under a loaded dev machine.
     store.setBuffer('s1', snapshot);
+    const warmupIterations = 20;
+    for (let i = 0; i < warmupIterations; i += 1) {
+      snapshot.lines[0]![0]!.char = (((snapshot.lines[0]![0]!.char || 32) + 1) % 95) + 32;
+      snapshot.revision = i + 2;
+      store.setBuffer('s1', snapshot);
+    }
 
-    const iterations = 5;
+    const iterations = 50;
     const start = performance.now();
     for (let i = 0; i < iterations; i += 1) {
       // Mutate source so structural short-circuit cannot fire.
       snapshot.lines[0]![0]!.char = (((snapshot.lines[0]![0]!.char || 32) + 1) % 95) + 32;
-      snapshot.revision = i + 2;
+      snapshot.revision = i + warmupIterations + 2;
       store.setBuffer('s1', snapshot);
     }
     const elapsed = performance.now() - start;
