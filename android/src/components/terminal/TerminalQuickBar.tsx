@@ -79,6 +79,8 @@ export interface TerminalQuickBarProps {
   onImagePaste?: (sessionId: string, file: File) => Promise<void> | void;
   onFileAttach?: (sessionId: string, file: File) => Promise<void> | void;
   fileTransferSupported?: boolean;
+  imagePasteSupported?: boolean;
+  remoteScreenshotSupported?: boolean;
   onRequestRemoteScreenshot?: (sessionId: string) => Promise<unknown> | void;
   keyboardVisible?: boolean;
   keyboardInsetPx?: number;
@@ -164,6 +166,8 @@ function TerminalQuickBarComponent({
   onImagePaste,
   onFileAttach,
   fileTransferSupported = true,
+  imagePasteSupported = true,
+  remoteScreenshotSupported = true,
   onRequestRemoteScreenshot,
   onToggleKeyboard,
   onQuickActionsChange,
@@ -589,7 +593,7 @@ function TerminalQuickBarComponent({
         return;
       }
       if (action.id === "remote-screenshot") {
-        if (!fileTransferSupported) {
+        if (!remoteScreenshotSupported) {
           return;
         }
         if (!activeSessionId) {
@@ -619,7 +623,7 @@ function TerminalQuickBarComponent({
     },
     [
       activeSessionId,
-      fileTransferSupported,
+      remoteScreenshotSupported,
       isRemoteWindowTerminalOnlyAction,
       onCollapsedChange,
       onRequestRemoteScreenshot,
@@ -942,22 +946,27 @@ function TerminalQuickBarComponent({
         id: "file-picker-button",
         label: "文件",
         onClick: handleFilePickerButtonClick,
+        supported: fileTransferSupported,
       },
       {
         id: "image-picker-button",
         label: "图片",
         onClick: handleImagePickerButtonClick,
+        supported: imagePasteSupported,
       },
       {
         id: "sync-sheet-button",
         label: "同步",
         onClick: handleSyncSheetButtonClick,
+        supported: fileTransferSupported,
       },
     ],
     [
       handleFilePickerButtonClick,
       handleImagePickerButtonClick,
       handleSyncSheetButtonClick,
+      fileTransferSupported,
+      imagePasteSupported,
     ],
   );
 
@@ -1465,7 +1474,7 @@ function TerminalQuickBarComponent({
     const repeatActive = repeatingActionId === action.id;
     const disabled =
       isRemoteWindowTerminalOnlyAction(action.id)
-      || (!fileTransferSupported && action.id === "remote-screenshot");
+      || (!remoteScreenshotSupported && action.id === "remote-screenshot");
     const actionDisplayLabel = resolveShortcutVisualLabel(action.label);
     const actionUsesSpaceBarVisual = isSpaceShortcutLabel(action.label);
     return (
@@ -1664,12 +1673,12 @@ function TerminalQuickBarComponent({
   };
 
   const renderTransferToolButton = (
-    action: { id: string; label: string; onClick: () => void },
+    action: { id: string; label: string; onClick: () => void; supported?: boolean },
     options?: { compact?: boolean },
   ) => {
     const compact = options?.compact ?? false;
     const actionDisplayLabel = resolveShortcutVisualLabel(action.label);
-    const disabled = !fileTransferSupported;
+    const disabled = action.supported === false;
     return (
       <button
         key={action.id}
@@ -2010,7 +2019,7 @@ function TerminalQuickBarComponent({
       <input
         ref={imageInputRef}
         type="file"
-        disabled={!fileTransferSupported}
+        disabled={!imagePasteSupported}
         accept="image/*"
         multiple
         tabIndex={-1}

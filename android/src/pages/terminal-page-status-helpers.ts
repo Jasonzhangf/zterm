@@ -69,5 +69,23 @@ export function formatTerminalBackendSuffix(backend?: Session['terminalBackend']
   return backend === 'herdr' ? ' (herdr)' : '';
 }
 
+export interface TerminalQuickBarCapabilityProjection {
+  fileTransferSupported: boolean;
+  imagePasteSupported: boolean;
+  remoteScreenshotSupported: boolean;
+}
+
+export function resolveTerminalQuickBarCapabilityProjection(
+  backend: Session['terminalBackend'] | undefined,
+  remoteWindowInputActive: boolean,
+): TerminalQuickBarCapabilityProjection {
+  const nonHerdr = backend !== 'herdr';
+  return {
+    fileTransferSupported: nonHerdr,
+    imagePasteSupported: nonHerdr || remoteWindowInputActive,
+    remoteScreenshotSupported: nonHerdr,
+  };
+}
+
 export const TERMINAL_PORTRAIT_STATUS_STRIP_TOP_OFFSET_PX = 8;
 export const TERMINAL_PORTRAIT_STAGE_TOP_OFFSET_PX = 50;

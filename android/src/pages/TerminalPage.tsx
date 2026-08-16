@@ -27,6 +27,7 @@ import {
 import {
   formatTerminalBackendSuffix,
   resolveEffectiveConnectionStatus,
+  resolveTerminalQuickBarCapabilityProjection,
   TERMINAL_PORTRAIT_STAGE_TOP_OFFSET_PX,
 } from './terminal-page-status-helpers';
 import type { TerminalSessionDrawerHost, TerminalSessionDrawerItem } from '../components/terminal/TerminalSessionDrawer';
@@ -3115,6 +3116,10 @@ function TerminalPageComponent({
     if (!renderQuickBar) {
       return null;
     }
+    const quickBarCapabilityProjection = resolveTerminalQuickBarCapabilityProjection(
+      terminalActionSession?.terminalBackend,
+      Boolean(remoteWindowInputContext),
+    );
     return renderQuickBar({
       activeSessionId: terminalActionSessionId,
       quickActions,
@@ -3123,9 +3128,9 @@ function TerminalPageComponent({
       onSendSequence: handleQuickBarSendSequence,
       onImagePaste: handleQuickBarImagePaste,
       onFileAttach,
-      fileTransferSupported:
-        Boolean(remoteWindowInputContext)
-        || terminalActionSession?.terminalBackend !== 'herdr',
+      fileTransferSupported: quickBarCapabilityProjection.fileTransferSupported,
+      imagePasteSupported: quickBarCapabilityProjection.imagePasteSupported,
+      remoteScreenshotSupported: quickBarCapabilityProjection.remoteScreenshotSupported,
       keyboardVisible: terminalImeActive && effectiveKeyboardLiftPx > 0,
       keyboardInsetPx: quickBarShellKeyboardLiftPx,
       onToggleKeyboard: handleToggleKeyboard,

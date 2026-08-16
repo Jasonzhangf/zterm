@@ -1430,6 +1430,8 @@ describe("TerminalQuickBar", () => {
 
     renderQuickBar({
       fileTransferSupported: false,
+      imagePasteSupported: false,
+      remoteScreenshotSupported: false,
       onImagePaste,
       onFileAttach,
       onOpenFileTransfer,
@@ -1450,6 +1452,51 @@ describe("TerminalQuickBar", () => {
     expect(onFileAttach).not.toHaveBeenCalled();
     expect(onOpenFileTransfer).not.toHaveBeenCalled();
     expect(onRequestRemoteScreenshot).not.toHaveBeenCalled();
+  });
+
+  it("keeps image paste enabled when only the Herdr remote-window target supports it", async () => {
+    const onImagePaste = vi.fn();
+    const onFileAttach = vi.fn();
+    const onOpenFileTransfer = vi.fn();
+    const onRequestRemoteScreenshot = vi.fn();
+
+    renderQuickBar({
+      fileTransferSupported: false,
+      imagePasteSupported: true,
+      remoteScreenshotSupported: false,
+      onImagePaste,
+      onFileAttach,
+      onOpenFileTransfer,
+      onRequestRemoteScreenshot,
+    });
+
+    const imageButton = screen.getByRole<HTMLButtonElement>("button", { name: "图片" });
+    const fileButton = screen.getByRole<HTMLButtonElement>("button", { name: "文件" });
+    const syncButton = screen.getByRole<HTMLButtonElement>("button", { name: "同步" });
+    const screenshotButton = screen.getByRole<HTMLButtonElement>("button", { name: "截图" });
+    const browserButton = screen.getByRole<HTMLButtonElement>("button", { name: "文件浏览" });
+
+    expect(imageButton.disabled).toBe(false);
+    expect(fileButton.disabled).toBe(true);
+    expect(syncButton.disabled).toBe(true);
+    expect(screenshotButton.disabled).toBe(true);
+    expect(browserButton.disabled).toBe(true);
+
+    const fileInputs = Array.from(
+      document.querySelectorAll<HTMLInputElement>('input[type="file"]'),
+    );
+    expect(fileInputs).toHaveLength(2);
+    expect(fileInputs[0]!.disabled).toBe(false);
+    expect(fileInputs[1]!.disabled).toBe(true);
+
+    fireEvent.change(fileInputs[0]!, {
+      target: {
+        files: [new File(['image'], 'proof.png', { type: 'image/png' })],
+      },
+    });
+    await waitFor(() => {
+      expect(onImagePaste).toHaveBeenCalledWith('session-1', expect.any(File));
+    });
   });
 
   it("shows screenshot transfer state on the visible third-row toolbar while keeping keyboard in the old fixed spot", async () => {

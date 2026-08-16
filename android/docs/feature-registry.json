@@ -57,6 +57,8 @@
         "src/hooks/useShortcutActionStorage.test.tsx",
         "src/lib/terminal-shortcut-actions.ts",
         "src/pages/TerminalPage.tsx",
+        "src/pages/terminal-page-status-helpers.ts",
+        "src/pages/terminal-page-status-helpers.test.ts",
         "src/pages/TerminalPage.render-isolation.test.tsx",
         "src/App.tsx",
         "src/App.dynamic-refresh.test.tsx",
@@ -73,6 +75,7 @@
       ],
       "required_gates": [
         "src/components/terminal/TerminalQuickBar.test.tsx",
+        "src/pages/terminal-page-status-helpers.test.ts",
         "src/lib/plugin-quickbar/quickbar-ui-ownership.test.ts",
         "src/lib/plugin-host/plugin-host-runtime.test.ts",
         "src/pages/TerminalPage.render-isolation.test.tsx",
@@ -778,6 +781,7 @@
         "src/pages/TerminalPageStageShell.tsx",
         "src/pages/terminal-page-shell-ui.tsx",
         "src/pages/terminal-page-status-helpers.ts",
+        "src/pages/terminal-page-status-helpers.test.ts",
         "src/pages/TerminalConnectionStatusStrip.tsx",
         "src/pages/TerminalPageQuickBarAssembly.tsx",
         "src/pages/terminal-page-debug-helpers.ts",
@@ -797,7 +801,8 @@
         "src/components/TerminalView.tsx"
       ],
       "required_gates": [
-        "src/pages/useTerminalPageShellActionsRuntime.test.tsx"
+        "src/pages/useTerminalPageShellActionsRuntime.test.tsx",
+        "src/pages/terminal-page-status-helpers.test.ts"
       ],
       "truth_sources": [
         "docs/architecture.md",
@@ -1875,7 +1880,9 @@
         "official Herdr 0.8.0 caps recent history at 1000 lines; zterm publishes `herdr-history-limit-1000` and does not fabricate earlier rows",
         "host-scroll metrics may gate viewport-relative cursor capability but never define absolute identities",
         "official Herdr named-session rename is unsupported and must fail explicitly",
-        "Windows ConPTY and agent side-channel gates remain pending"
+        "Windows ConPTY and agent side-channel gates remain pending",
+        "Herdr file transfer, file listing, directory creation, file download, file upload, paste-image fallback, and remote screenshot are unsupported; the daemon rejects each with `herdr_file_transfer_unsupported` and never writes tmux",
+        "client quickbar capability projection must keep `fileTransferSupported` and `remoteScreenshotSupported` false for Herdr and enable `imagePasteSupported` only when an active remote-window input context can route the paste to a remote-window paste target"
       ]
     },
     {
@@ -2411,6 +2418,8 @@
     "src/pages/TerminalPage.render-isolation.test.tsx",
     "src/App.tsx",
     "src/pages/TerminalPage.tsx",
+    "src/pages/terminal-page-status-helpers.ts",
+    "src/pages/terminal-page-status-helpers.test.ts",
     "src/App.dynamic-refresh.test.tsx",
     "src/components/terminal/TerminalQuickBar.tsx",
     "src/components/terminal/TerminalQuickBar.test.tsx",
@@ -2447,6 +2456,7 @@
   "required_gates": [
     "src/lib/plugin-host/plugin-host-runtime.test.ts",
     "src/lib/plugin-quickbar/quickbar-ui-ownership.test.ts",
+    "src/pages/terminal-page-status-helpers.test.ts",
     "src/pages/TerminalPage.render-isolation.test.tsx",
     "src/App.dynamic-refresh.test.tsx",
     "src/lib/module-import-graph-truth.test.ts",

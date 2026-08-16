@@ -1880,7 +1880,9 @@
         "official Herdr 0.8.0 caps recent history at 1000 lines; zterm publishes `herdr-history-limit-1000` and does not fabricate earlier rows",
         "Herdr terminal_id and pane_id are physical attachment identity only; the daemon backend-session workspace projection is the fixed synthetic herdr-single-session label and never carries Herdr layout identity",
         "absolute cursor is unavailable while the host viewport is scrolled away from the canonicalizer bottom; adapter must expose an explicit cursor capability gap",
-        "official Herdr named-session rename is unsupported and must fail explicitly"
+        "official Herdr named-session rename is unsupported and must fail explicitly",
+        "file transfer, file listing, directory creation, file download, file upload, paste-image fallback, and remote screenshot are unsupported; daemon rejects each with `herdr_file_transfer_unsupported` and never writes tmux",
+        "client quickbar projection keeps file transfer and remote screenshot disabled for Herdr and enables image paste only while an active remote-window input context can route to a remote-window paste target"
       ]
     },
     {
