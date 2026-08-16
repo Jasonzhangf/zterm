@@ -1,0 +1,29 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "evid-20260816-zarchv2-activev4-changed-suites-001",
+  "issue_id": "zterm-runtime-architecture-v2",
+  "experiment_id": "zterm-runtime-architecture-v2-active-v4",
+  "phase": "fix_candidate",
+  "kind": "positive_test",
+  "source_commit": "3015dee5d4eb8a41d9fbb88942f46c2872af7a19",
+  "artifact_hash": "sha256:7f0ab5b674121a7db9a1a9e18cd5ab8c9cea146a24118c12b2a32befcd0ccd32",
+  "scope": {
+    "module_id": "zterm-runtime-v2",
+    "feature_id": "zterm_runtime_architecture_v2_appsdk_013_active_v4_final_gates",
+    "entrypoint": "pnpm exec vitest run src/lib/session-render-buffer-store.test.ts src/components/terminal/FileTransferSheet.test.tsx src/hooks/useOpenTabRuntime.test.tsx --reporter=dot"
+  },
+  "producer": {
+    "adapter": "vitest",
+    "identity": "codex-zterm-v2-appsdk013-activev4-changed-suites-20260816T200500Z"
+  },
+  "result": "pass",
+  "confidence": 1,
+  "confidence_rationale": "Changed suites pass on the recorded source commit: session-render-buffer-store 9/9, FileTransferSheet 49/49, useOpenTabRuntime 5/5 (3 files / 63 tests). This records the suites intentionally excluded from the focused 297-test regression report.",
+  "created_at": "2026-08-16T20:05:00Z",
+  "expires_at": "2026-11-14T00:00:00Z",
+  "input_hashes": [
+    "sha256:7f0ab5b674121a7db9a1a9e18cd5ab8c9cea146a24118c12b2a32befcd0ccd32",
+    "git:3015dee5d4eb8a41d9fbb88942f46c2872af7a19"
+  ],
+  "scope_hash": "sha256:7f5313d58dc0f2c9e39ada71e3055e2aa5ffb8f365453c28b4e9f32453449690"
+}

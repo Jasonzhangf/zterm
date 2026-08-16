@@ -39,7 +39,8 @@
   "verification_evidence_ids": [
     "evid-20260816-zarchv2-activev4-verify-001",
     "evid-20260816-zarchv2-activev4-positive-001",
-    "evid-20260816-zarchv2-activev4-negative-001"
+    "evid-20260816-zarchv2-activev4-negative-001",
+    "evid-20260816-zarchv2-activev4-changed-suites-001"
   ],
   "created_at": "2026-08-16T19:54:30Z"
 }
