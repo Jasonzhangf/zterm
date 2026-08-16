@@ -7036,6 +7036,20 @@ if (bufferedBytes >= TERMINAL_INPUT_BACKPRESSURE_BUFFERED_BYTES) {
 - Remaining: DSH/codex review for active-v2, AppSDK v2 promotion/freeze,
   real-device L5/OTA, and playground cleanup execution.
 
+# 2026-08-16 DSH r7 FAIL -> docs frozen-state fix
+
+- DSH `zarchv2-activev2-dsh-r1` returned `VERDICT: FAIL` with one P1:
+  `docs/modules/project-modules.md` said `active-v2` is frozen while
+  `.appsdk/project.json` has `stage: source_implemented`.
+- Fixed the sentence to say `active-v1` is frozen and `active-v2` awaits
+  fresh review/promotion. P2 noted active-v2 maps were marked active before
+  the separate evidence commit; that evidence is now committed at `21dc2df`.
+- AppSDK compile for active-v2 passed: artifact
+  `sha256:8e196de9008bdd40bbea9cd42b95e49a602e53a8e20cb94071f4fb093b55ff38`,
+  public API
+  `sha256:d5f1af7b40ce4d7527a467fedcaadf0b916c2adc15aaf33398f39d3b7acfa084`,
+  module regression 297/297.
+
 - Committed final governance records and AppSDK project contract:
   `c10000a` (`chore(android): finalize AppSDK v2 governance records before
   freeze`).
