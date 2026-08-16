@@ -63,14 +63,23 @@ function cloneRenderCursor(cursor: SessionRenderBufferSnapshot['cursor']) {
 function cloneRenderBuffer(
   buffer: SessionRenderBufferSnapshot,
   previous?: SessionRenderBufferSnapshot | null,
+  previousSourceRows?: Map<TerminalCell[], TerminalCell[]> | null,
+  nextSourceRows?: Map<TerminalCell[], TerminalCell[]>,
 ): SessionRenderBufferSnapshot {
+  // Buffer rows are immutable by reference: a changed row must be a new array,
+  // so an unchanged source row can reuse its previous deep clone safely.
   return {
     ...buffer,
     lines: buffer.lines.map((row, index) => {
-      const previousRow = previous?.lines[index] || null;
-      return previousRow && row === previousRow
-        ? previousRow
-        : row.map((cell) => ({ ...cell }));
+      const reusedClone = previousSourceRows?.get(row)
+        || (previous && row === previous.lines[index] ? row : null);
+      if (reusedClone) {
+        nextSourceRows?.set(row, reusedClone);
+        return reusedClone;
+      }
+      const clonedRow = row.map((cell) => ({ ...cell }));
+      nextSourceRows?.set(row, clonedRow);
+      return clonedRow;
     }),
     gapRanges: previous && gapRangesEqual(buffer.gapRanges, previous.gapRanges)
       ? previous.gapRanges
@@ -171,6 +180,7 @@ export function createSessionRenderBufferStore(
 ): SessionRenderBufferStore {
   const snapshots = new Map<string, SessionRenderStoreSnapshot>();
   const listeners = new Map<string, Set<() => void>>();
+  const sourceRowClonesBySession = new Map<string, Map<TerminalCell[], TerminalCell[]>>();
 
   const getSnapshot = (sessionId: string): SessionRenderStoreSnapshot => {
     return snapshots.get(sessionId) || EMPTY_SNAPSHOT;
@@ -229,18 +239,37 @@ export function createSessionRenderBufferStore(
     if (previous && !setOptions?.immutableProjection && renderBuffersEqual(previous.buffer, buffer)) {
       return false;
     }
-    snapshots.set(sessionId, {
-      revision: (previous?.revision || 0) + 1,
-      buffer: setOptions?.immutableProjection
-        ? { ...buffer }
-        : cloneRenderBuffer(buffer, previous?.buffer || null),
-    });
+    const previousSourceRows = sourceRowClonesBySession.get(sessionId) || null;
+    const nextSourceRows = new Map<TerminalCell[], TerminalCell[]>();
+    let nextSnapshot: SessionRenderStoreSnapshot;
+    if (setOptions?.immutableProjection) {
+      for (const row of buffer.lines) {
+        nextSourceRows.set(row, row);
+      }
+      nextSnapshot = {
+        revision: (previous?.revision || 0) + 1,
+        buffer: { ...buffer },
+      };
+    } else {
+      nextSnapshot = {
+        revision: (previous?.revision || 0) + 1,
+        buffer: cloneRenderBuffer(
+          buffer,
+          previous?.buffer || null,
+          previousSourceRows,
+          nextSourceRows,
+        ),
+      };
+    }
+    snapshots.set(sessionId, nextSnapshot);
+    sourceRowClonesBySession.set(sessionId, nextSourceRows);
     notify(sessionId);
     return true;
   };
 
   const deleteSession = (sessionId: string) => {
     snapshots.delete(sessionId);
+    sourceRowClonesBySession.delete(sessionId);
     notify(sessionId);
     listeners.delete(sessionId);
   };

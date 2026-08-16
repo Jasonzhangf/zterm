@@ -61,3 +61,39 @@ Design ID: `FD-20260816-APPSDK013-FINAL-GATE-01`
 4. Full `pnpm run prebuild` and `pnpm run build`.
 5. Final DSH source review after lifecycle records are updated.
 6. Do not publish OTA or merge to main without separate Jason approval.
+
+## DSH final review round 2 (2026-08-16)
+
+Symptom: `zarchv2-activev4-final-9f653d8-20260816T173500Z` returns
+`VERDICT: FAIL` with reproducible P0/P1 findings on the candidate that claimed
+all gates green.
+
+First divergence:
+
+- `vi.spyOn(window.localStorage, 'setItem')` does not install an own method on
+  the jsdom Storage instance, so the quota-exceeded test still reaches
+  `StoragePermissionPlugin.openFile`.
+- `src/vitest.setup.ts` was assigned to `shared.test_contracts`, which owns
+  registry-truth gates, not generic test environment bootstrap.
+- `Storage.prototype.removeItem` in `useOpenTabRuntime.test.tsx` remains the
+  same fragile pattern that can no-op on the target Node/jsdom runtime.
+- `session-render-buffer-store.test.ts` measures a full 80k-cell clone on a
+  loaded machine; the hard 16ms guard flakes even with warmup.
+
+Formal fix scope:
+
+- `src/vitest.setup.ts`: always install a deterministic in-memory
+  `window.localStorage` so tests spy the exact Storage instance under test.
+- `src/hooks/useOpenTabRuntime.test.tsx`: spy `window.localStorage.removeItem`
+  instead of `Storage.prototype.removeItem`.
+- `docs/module-registry.json`, `docs/resource-registry.json`, and
+  `docs/modules/project-modules.md`: add `shared.test_environment` /
+  `resource.shared_test_environment` as the genuine test-environment owner.
+- `src/lib/session-render-buffer-store.ts`: keep a per-session source-row
+  clone cache. Unchanged rows (same row array reference) reuse their previous
+  deep clone; changed rows arrive as new row arrays and are cloned once.
+- `src/lib/session-render-buffer-store.test.ts`: measure realistic incremental
+  publishes with changed rows replaced by new row references, and add a red
+  test proving unchanged source rows are not read or cloned again.
+
+The 16ms hard threshold is unchanged.

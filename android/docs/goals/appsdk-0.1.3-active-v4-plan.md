@@ -227,3 +227,16 @@ Out of Scope：
 - `android/vitest.config.ts` 是否纳入 active-v4 candidate 尚未定案；若纳入，
   source diff 不再是纯 governance/gate 记录，必须重新走 final review。
 - `freeze/publish/merge/OTA/playground cleanup` 均等待 Jason 授权。
+
+## 11. 2026-08-16 DSH final round 2 基线
+
+- main HEAD：`15df591f6cbc4adb02ab420b1a9d3d7ee88cc3c8`，仍是 0.1.2 +
+  active-v2。
+- claim worktree：
+  `playground/appsdk-active-v4-20260816T135755Z-Macstudio.local-63423-9d5e57bc0333`，
+  HEAD `9f653d85aa582f0e6fa5c64b80366034c863ef45`，仅追加 lifecycle records。
+- DSH final `zarchv2-activev4-final-9f653d8-20260816T173500Z`：
+  `VERDICT: FAIL`，P0/P1 见
+  `docs/debug/2026-08-16-appsdk013-final-gate-fix-design.md` round 2。
+- 本计划后续 candidate 必须先修复上述 findings，再重跑完整 gate 与 DSH final；
+  发布/合并类动作仍等 Jason 授权。

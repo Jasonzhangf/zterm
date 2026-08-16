@@ -2821,7 +2821,39 @@
         "src/lib/edge-registry-truth.test.ts",
         "src/lib/module-import-graph-truth.test.ts",
         "src/lib/resource-registry-truth.test.ts",
-        "src/lib/feature-registry-truth.test.ts",
+        "src/lib/feature-registry-truth.test.ts"
+      ]
+    },
+    {
+      "module_id": "shared.test_environment",
+      "runtime_side": "shared",
+      "level": 1,
+      "parent_module_id": "shared.contract",
+      "owner_feature": "mainline_source.android",
+      "responsibility": "Deterministic Vitest/jsdom environment bootstrap for client tests, including an in-memory browser Storage instance.",
+      "owned_resources": [
+        "resource.shared_test_environment"
+      ],
+      "consumed_resources": [],
+      "pending_resources": [],
+      "public_interfaces": [
+        "src/vitest.setup.ts"
+      ],
+      "forbidden_resources": [
+        "resource.tmux_session",
+        "resource.mirror_store",
+        "resource.ui_projection"
+      ],
+      "canonical_docs": [
+        "docs/modules/project-modules.md",
+        "docs/resource-map.md"
+      ],
+      "required_gates": [
+        "src/lib/module-registry-truth.test.ts",
+        "src/lib/resource-registry-truth.test.ts"
+      ],
+      "status": "active",
+      "owned_paths": [
         "src/vitest.setup.ts"
       ]
     },

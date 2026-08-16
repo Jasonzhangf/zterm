@@ -66,6 +66,35 @@ describe('session-render-buffer-store', () => {
     expect(store.getSnapshot('s1').buffer).not.toBe(second);
   });
 
+  it('reuses unchanged source rows by reference without reading their cells again', () => {
+    const store = createSessionRenderBufferStore();
+    let charReads = 0;
+    const expensiveCell = {} as TerminalCell;
+    Object.defineProperties(expensiveCell, {
+      char: {
+        get() {
+          charReads += 1;
+          return 'b'.codePointAt(0) || 32;
+        },
+        enumerable: true,
+      },
+      fg: { value: 256, enumerable: true },
+      bg: { value: 256, enumerable: true },
+      flags: { value: 0, enumerable: true },
+      width: { value: 1, enumerable: true },
+    });
+
+    const unchangedRow = [expensiveCell];
+    const first = makeSnapshot([[makeCell('a')], unchangedRow], 1);
+    expect(store.setBuffer('s1', first)).toBe(true);
+
+    charReads = 0;
+    const second = makeSnapshot([[makeCell('c')], unchangedRow], 2);
+    expect(store.setBuffer('s1', second)).toBe(true);
+    expect(charReads).toBe(0);
+    expect(store.getSnapshot('s1').buffer.lines[1]).not.toBe(second.lines[1]);
+  });
+
   it('keeps an immutable render snapshot after publish even if the source snapshot mutates later', () => {
     const store = createSessionRenderBufferStore();
     const snapshot = makeSnapshot([[makeCell('a')], [makeCell('b')]], 1);
@@ -149,7 +178,7 @@ describe('session-render-buffer-store', () => {
 });
 
 describe('session-render-buffer-store perf', () => {
-  it('cloneRenderBuffer cost stays bounded for a realistic 1000x80 buffer', () => {
+  it('incremental render publish cost stays bounded for a realistic 1000x80 buffer', () => {
     const store = createSessionRenderBufferStore();
     const cols = 80;
     const rows = 1000;
@@ -165,11 +194,20 @@ describe('session-render-buffer-store perf', () => {
     const snapshot = makeSnapshot(lines, 1);
 
     // Warm up before measuring so JIT and lazy paths do not turn a stable
-    // 80k-cell clone into a cold-start flake under a loaded dev machine.
+    // publish into a cold-start flake under a loaded dev machine. Rows are
+    // replaced on change because row reference identity is the buffer contract;
+    // unchanged rows must be reused without cloning their 80 cells.
     store.setBuffer('s1', snapshot);
     const warmupIterations = 20;
     for (let i = 0; i < warmupIterations; i += 1) {
-      snapshot.lines[0]![0]!.char = (((snapshot.lines[0]![0]!.char || 32) + 1) % 95) + 32;
+      snapshot.lines[0] = snapshot.lines[0]!.map((cell, col) => (
+        col === 0
+          ? {
+              ...cell,
+              char: (((cell.char || 32) + 1) % 95) + 32,
+            }
+          : cell
+      ));
       snapshot.revision = i + 2;
       store.setBuffer('s1', snapshot);
     }
@@ -177,20 +215,26 @@ describe('session-render-buffer-store perf', () => {
     const iterations = 50;
     const start = performance.now();
     for (let i = 0; i < iterations; i += 1) {
-      // Mutate source so structural short-circuit cannot fire.
-      snapshot.lines[0]![0]!.char = (((snapshot.lines[0]![0]!.char || 32) + 1) % 95) + 32;
+      snapshot.lines[0] = snapshot.lines[0]!.map((cell, col) => (
+        col === 0
+          ? {
+              ...cell,
+              char: (((cell.char || 32) + 1) % 95) + 32,
+            }
+          : cell
+      ));
       snapshot.revision = i + warmupIterations + 2;
       store.setBuffer('s1', snapshot);
     }
     const elapsed = performance.now() - start;
     const perPublish = elapsed / iterations;
-    // CI baseline observed: ~1.9ms per publish (M-series dev box, Node 26, vitest 1.6).
-    // 1000x80 = 80,000 cells shallow-cloned per publish on the daemon buffer-patch path.
+    // CI baseline observed: well under 1ms per incremental publish after row
+    // reference reuse (M-series dev box, Node 26, vitest 1.6).
     // Hard guard at 16ms (one 60Hz frame) — a single publish must NOT eat a full frame
     // because this runs on every daemon push and would compound across many sessions.
     // Real-device numbers should be measured via a true device Profiler run; the
-    // CI guard catches catastrophic regressions (e.g. switching to a deep clone or
-    // introducing an O(n) rewrite that we forget to revisit).
+    // CI guard catches catastrophic regressions (e.g. losing source-row reuse and
+    // cloning every row on every incremental push).
     expect(perPublish).toBeLessThan(16);
   });
 });
